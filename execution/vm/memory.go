@@ -44,17 +44,6 @@ func NewMemory() *Memory {
 	return m
 }
 
-// Free returns the memory to the pool.
-func (m *Memory) free() {
-	// To reduce peak allocation, return only smaller memory instances to the pool.
-	const maxBufferSize = 16 << 10
-	if cap(m.store) <= maxBufferSize {
-		m.store = m.store[:0]
-		m.lastGasCost = 0
-		memoryPool.Put(m)
-	}
-}
-
 // Set sets offset + size to value
 func (m *Memory) Set(offset, size uint64, value []byte) {
 	// It's possible the offset is greater than 0 and size equals 0. This is because
@@ -107,10 +96,13 @@ func (m *Memory) Set32(offset uint64, val *uint256.Int) {
 	val.PutUint256(m.store[offset:])
 }
 
-// zeroes - pre-allocated zeroes for Resize()
-var zeroes = make([]byte, 4*4096)
+// memoryPageSize is a growth quantum, not an OS page: 4 KiB is where evmone and
+// revm start a frame.
+const memoryPageSize = 4 * 1024
 
-// Resize resizes the memory to size
+// Resize resizes the memory to size. Capacity doubles, falling back to a whole
+// memoryPageSize multiple when doubling is not enough; plain append walks a
+// ~1.25x ladder instead and pays an allocation per step.
 func (m *Memory) Resize(size uint64) {
 	currLen := uint64(len(m.store))
 	if size <= currLen {
@@ -124,13 +116,13 @@ func (m *Memory) Resize(size uint64) {
 		return
 	}
 
-	grow := size - currLen
-	if grow <= uint64(len(zeroes)) {
-		m.store = append(m.store, zeroes[:grow]...)
-		return
-	}
+	store := make([]byte, size, max(uint64(cap(m.store))*2, alignUpToPage(size)))
+	copy(store, m.store)
+	m.store = store
+}
 
-	m.store = append(m.store, make([]byte, grow)...)
+func alignUpToPage(n uint64) uint64 {
+	return (n + memoryPageSize - 1) &^ uint64(memoryPageSize-1)
 }
 
 func (m *Memory) reset() {
@@ -158,6 +150,20 @@ func (m *Memory) GetPtr(offset, size uint64) []byte {
 
 	// memory is always resized before being accessed, no need to check bounds
 	return m.store[offset : offset+size]
+}
+
+// allocated32 reports whether the 32 bytes at off are already allocated, so
+// accessing them costs no expansion gas.
+func (m *Memory) allocated32(off *uint256.Int) bool {
+	return off.IsUint64() && off.Uint64() < uint64(len(m.store)) && uint64(len(m.store))-off.Uint64() >= 32
+}
+
+// allocatedCopy reports whether a copy of length bytes between dst and src
+// stays in allocated memory, so it costs no expansion gas.
+func (m *Memory) allocatedCopy(dst, src, length *uint256.Int) bool {
+	n := uint64(len(m.store))
+	return dst[1]|dst[2]|dst[3]|src[1]|src[2]|src[3]|length[1]|length[2]|length[3] == 0 &&
+		length[0] <= n && max(dst[0], src[0]) <= n-length[0]
 }
 
 // Len returns the length of the backing slice

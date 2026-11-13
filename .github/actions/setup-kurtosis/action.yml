@@ -1,0 +1,16 @@
+name: Setup Kurtosis
+description: Install a pinned Kurtosis CLI and start its engine
+
+inputs:
+  version:
+    description: Kurtosis CLI version to install
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install Kurtosis CLI and start engine
+      shell: bash
+      env:
+        KURTOSIS_VERSION: ${{ inputs.version }}
+      run: bash "$GITHUB_ACTION_PATH/setup.sh"

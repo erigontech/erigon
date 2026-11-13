@@ -56,8 +56,8 @@ func (f *BasePathFile) ReadDir(n int) ([]fs.DirEntry, error) {
 	return readDirFile{f.File}.ReadDir(n)
 }
 
-func NewBasePathFs(source afero.Fs, path string) afero.Fs {
-	return &BasePathFs{source: source, path: path}
+func NewBasePathFs(source afero.Fs, basePath string) afero.Fs {
+	return &BasePathFs{source: source, path: basePath}
 }
 
 // on a file outside the base path it returns the given file name and an error,

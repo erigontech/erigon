@@ -44,7 +44,7 @@ func (m *AggregateRegistrationMessage) Marshal() []byte {
 	b := make([]byte, 0, expectedLength)
 	b = append(b, m.Version)
 	b = binary.BigEndian.AppendUint64(b, m.ChainId)
-	b = append(b, m.ValidatorRegistryAddress.Bytes()...)
+	b = append(b, m.ValidatorRegistryAddress[:]...)
 	b = binary.BigEndian.AppendUint64(b, m.ValidatorIndex)
 	b = binary.BigEndian.AppendUint32(b, m.Count)
 	b = binary.BigEndian.AppendUint32(b, m.Nonce)
@@ -83,9 +83,9 @@ func (m *AggregateRegistrationMessage) ValidatorIndices() []int64 {
 	if m.Version == LegacyValidatorRegistrationMessageVersion {
 		return []int64{int64(m.ValidatorIndex)}
 	}
-	indices := make([]int64, 0)
-	for i := 0; i < int(m.Count); i++ {
-		indices = append(indices, int64(m.ValidatorIndex)+int64(i))
+	indices := make([]int64, m.Count)
+	for i := range indices {
+		indices[i] = int64(m.ValidatorIndex) + int64(i)
 	}
 	return indices
 }
@@ -105,7 +105,7 @@ func (m *LegacyRegistrationMessage) Marshal() []byte {
 	b := make([]byte, 0, expectedLength)
 	b = append(b, m.Version)
 	b = binary.BigEndian.AppendUint64(b, m.ChainId)
-	b = append(b, m.ValidatorRegistryAddress.Bytes()...)
+	b = append(b, m.ValidatorRegistryAddress[:]...)
 	b = binary.BigEndian.AppendUint64(b, m.ValidatorIndex)
 	b = binary.BigEndian.AppendUint64(b, m.Nonce)
 	if m.IsRegistration {

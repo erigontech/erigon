@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
@@ -37,11 +36,9 @@ import (
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
-	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type blobSidecarService struct {
@@ -50,14 +47,9 @@ type blobSidecarService struct {
 	syncedDataManager *synced_data.SyncedDataManager
 	ethClock          eth_clock.EthereumClock
 	emitters          *beaconevents.EventEmitter
+	expectedProposer  func(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error)
 
-	blobSidecarsScheduledForLaterExecution sync.Map
-	test                                   bool
-}
-
-type blobSidecarJob struct {
-	blobSidecar  *cltypes.BlobSidecar
-	creationTime time.Time
+	test bool
 }
 
 // NewBlobSidecarService creates a new blob sidecar service
@@ -77,8 +69,8 @@ func NewBlobSidecarService(
 		test:              test,
 		ethClock:          ethClock,
 		emitters:          emitters,
+		expectedProposer:  newExpectedProposers(ctx, beaconCfg, forkchoiceStore, syncedDataManager).get,
 	}
-	// go b.loop(ctx)
 	return b
 }
 
@@ -96,7 +88,7 @@ func (b *blobSidecarService) IsMyGossipMessage(name string) bool {
 
 func (b *blobSidecarService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.BlobSidecar, error) {
 	obj := &cltypes.BlobSidecar{}
-	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -105,7 +97,7 @@ func (b *blobSidecarService) DecodeGossipMessage(_ peer.ID, data []byte, version
 // ProcessMessage processes a blob sidecar message
 func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint64, msg *cltypes.BlobSidecar) error {
 	if b.test {
-		return b.verifyAndStoreBlobSidecar(msg)
+		return b.verifyAndStoreBlobSidecar(ctx, msg, 0)
 	}
 
 	sidecarVersion := b.beaconCfg.GetCurrentStateVersion(msg.SignedBlockHeader.Header.Slot / b.beaconCfg.SlotsPerEpoch)
@@ -143,50 +135,55 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 
 	parentHeader, has := b.forkchoiceStore.GetHeader(msg.SignedBlockHeader.Header.ParentRoot)
 	if !has {
-		b.scheduleBlobSidecarForLaterExecution(msg)
 		return ErrIgnore
 	}
 	if msg.SignedBlockHeader.Header.Slot <= parentHeader.Slot {
 		return ErrInvalidSidecarSlot
 	}
 
-	if err := b.verifyAndStoreBlobSidecar(msg); err != nil {
+	if err := b.verifyAndStoreBlobSidecar(ctx, msg, parentHeader.Slot); err != nil {
 		return err
 	}
 	b.emitters.Operation().SendBlobSidecar(msg)
 	return nil
 }
 
-func (b *blobSidecarService) verifyAndStoreBlobSidecar(msg *cltypes.BlobSidecar) error {
+func (b *blobSidecarService) verifyAndStoreBlobSidecar(ctx context.Context, msg *cltypes.BlobSidecar, parentSlot uint64) error {
 	kzgCtx := kzg.Ctx()
 
 	if !b.test && !cltypes.VerifyCommitmentInclusionProof(msg.KzgCommitment, msg.CommitmentInclusionProof, msg.Index,
-		clparams.DenebVersion, msg.SignedBlockHeader.Header.BodyRoot) {
+		msg.SignedBlockHeader.Header.BodyRoot) {
 		return ErrCommitmentsInclusionProofFailed
 	}
 
 	start := time.Now()
 	if err := kzgCtx.VerifyBlobKZGProof((*goethkzg.Blob)(&msg.Blob), goethkzg.KZGCommitment(msg.KzgCommitment), goethkzg.KZGProof(msg.KzgProof)); err != nil {
-		return fmt.Errorf("blob KZG proof verification failed: %v", err)
+		return fmt.Errorf("blob KZG proof verification failed: %w", err)
 	}
 
 	if !b.test {
 		if err := b.verifySidecarsSignature(msg.SignedBlockHeader); err != nil {
 			return err
 		}
+		// Verify proofs and the signature first so unavailable proposer state
+		// cannot turn an invalid sidecar into IGNORE.
+		header := msg.SignedBlockHeader.Header
+		expectedProposer, err := b.expectedProposer(ctx, header.ParentRoot, parentSlot, header.Slot)
+		if err != nil {
+			return err
+		}
+		if header.ProposerIndex != expectedProposer {
+			return fmt.Errorf("blob sidecar proposer index %d does not match expected proposer %d", header.ProposerIndex, expectedProposer)
+		}
 	}
 	monitor.ObserveBlobVerificationTime(start)
-	// operation is not thread safe from here.
 	return b.forkchoiceStore.AddPreverifiedBlobSidecar(msg)
 }
 
 func (b *blobSidecarService) verifySidecarsSignature(header *cltypes.SignedBeaconBlockHeader) error {
-	parentHeader, ok := b.forkchoiceStore.GetHeader(header.Header.ParentRoot)
-	if !ok {
+	if _, ok := b.forkchoiceStore.GetHeader(header.Header.ParentRoot); !ok {
 		return errors.New("parent header not found")
 	}
-	currentVersion := b.beaconCfg.GetCurrentStateVersion(parentHeader.Slot / b.beaconCfg.SlotsPerEpoch)
-	forkVersion := b.beaconCfg.GetForkVersionByVersion(currentVersion)
 
 	var (
 		domain []byte
@@ -195,7 +192,7 @@ func (b *blobSidecarService) verifySidecarsSignature(header *cltypes.SignedBeaco
 	)
 	// Load head state
 	if err := b.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		domain, err = fork.ComputeDomain(b.beaconCfg.DomainBeaconProposer[:], utils.Uint32ToBytes4(forkVersion), headState.GenesisValidatorsRoot())
+		domain, err = fork.ComputeDomainAtEpoch(b.beaconCfg, b.beaconCfg.DomainBeaconProposer, header.Header.Slot/b.beaconCfg.SlotsPerEpoch, headState.GenesisValidatorsRoot())
 		if err != nil {
 			return err
 		}
@@ -214,64 +211,12 @@ func (b *blobSidecarService) verifySidecarsSignature(header *cltypes.SignedBeaco
 		return err
 	}
 
-	if ok, err = bls.Verify(header.Signature[:], sigRoot[:], pk[:]); err != nil {
+	ok, err := bls.Verify(header.Signature[:], sigRoot[:], pk[:])
+	if err != nil {
 		return err
 	}
 	if !ok {
 		return errors.New("blob signature validation: signature not valid")
 	}
 	return nil
-}
-
-func (b *blobSidecarService) scheduleBlobSidecarForLaterExecution(blobSidecar *cltypes.BlobSidecar) {
-	blobSidecarJob := &blobSidecarJob{
-		blobSidecar:  blobSidecar,
-		creationTime: time.Now(),
-	}
-	blobSidecarHash, err := blobSidecar.HashSSZ()
-	if err != nil {
-		return
-	}
-	b.blobSidecarsScheduledForLaterExecution.Store(blobSidecarHash, blobSidecarJob)
-}
-
-// loop is the main loop of the block service
-func (b *blobSidecarService) loop(ctx context.Context) {
-	ticker := time.NewTicker(blobJobsIntervalTick)
-	defer ticker.Stop()
-	if b.test {
-		return
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-
-		b.blobSidecarsScheduledForLaterExecution.Range(func(key, value any) bool {
-			job := value.(*blobSidecarJob)
-			// check if it has expired
-			if time.Since(job.creationTime) > blobJobExpiry {
-				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
-				return true
-			}
-			blockRoot, err := job.blobSidecar.SignedBlockHeader.Header.HashSSZ()
-			if err != nil {
-				log.Debug("blob sidecar verification failed", "err", err)
-				return true
-			}
-			if _, has := b.forkchoiceStore.GetHeader(blockRoot); has {
-				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
-				return true
-			}
-			if err := b.verifyAndStoreBlobSidecar(job.blobSidecar); err != nil {
-				log.Trace("blob sidecar verification failed", "err", err,
-					"slot", job.blobSidecar.SignedBlockHeader.Header.Slot)
-				return true
-			}
-			b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
-			return true
-		})
-	}
 }

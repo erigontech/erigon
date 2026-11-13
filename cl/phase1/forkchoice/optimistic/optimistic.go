@@ -22,8 +22,8 @@ import (
 )
 
 type OptimisticStore interface {
-	AddOptimisticCandidate(block *cltypes.BeaconBlock) error
-	ValidateBlock(block *cltypes.BeaconBlock) error
-	InvalidateBlock(block *cltypes.BeaconBlock) error
+	AddOptimisticCandidate(blockRoot common.Hash, block *cltypes.BeaconBlock) error
+	ValidateBlock(blockRoot common.Hash, block *cltypes.BeaconBlock) error
+	InvalidateBlock(blockRoot common.Hash, block *cltypes.BeaconBlock) error
 	IsOptimistic(root common.Hash) bool
 }

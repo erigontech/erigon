@@ -17,6 +17,7 @@
 package rpctest
 
 import (
+	"errors"
 	"fmt"
 )
 
@@ -25,25 +26,25 @@ import (
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//			    false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//			    false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
 //	                 recordFileName stores all eth_call returned wite success
 //	                 errorFileName stores information when erigon and geth doesn't return same data
-func BenchEthGetBlockByHash(erigonURL, gethURL string, needCompare, latest bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
+func BenchEthGetBlockByHash(erigonURL, gethURL string, needCompare bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) (err error) {
 	setRoutes(erigonURL, gethURL)
 
 	rec, errs, cleanup, err := openWriters(recordFileName, errorFileName)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+	defer func() { err = errors.Join(err, cleanup()) }()
 
 	var resultsCh chan CallResult = nil
-	var nBlocks = 0
+	nBlocks := 0
 
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_getBlockByHash"}, resultsCh)
+		go writePattern(true, []string{"eth_getBlockByHash"}, resultsCh)
 	}
 	reqGen := &RequestGenerator{}
 
@@ -58,8 +59,7 @@ func BenchEthGetBlockByHash(erigonURL, gethURL string, needCompare, latest bool,
 		}
 
 		nBlocks++
-		var request string
-		request = reqGen.getBlockByHash(b.Result.Hash, true)
+		request := reqGen.getBlockByHash(b.Result.Hash, true)
 		errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, b.Result.Hash)
 
 		if err := requestAndCompare(request, "eth_getBlockByHash", errCtx, reqGen, needCompare, rec, errs, resultsCh,

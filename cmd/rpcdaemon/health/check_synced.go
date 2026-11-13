@@ -23,9 +23,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-var (
-	errNotSynced = errors.New("not synced")
-)
+var errNotSynced = errors.New("not synced")
 
 func checkSynced(ethAPI EthAPI, r *http.Request) error {
 	i, err := ethAPI.Syncing(r.Context())

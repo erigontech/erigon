@@ -1,0 +1,1195 @@
+// Tests for the parallel-exec robustness scaffolding added in the
+// "stagedsync: stop apply loop exiting on rootResults close +
+// completeness checks" commit. These guard against regressions of the
+// silent-failure class of bugs that previously let invalid blocks
+// become canonical (validator never fired) and cost days of debugging.
+//
+// See agentspecs/parallel-exec-robustness-plan.md for the design
+// rationale and failure mode taxonomy.
+
+package stagedsync
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	commonerrors "github.com/erigontech/erigon/common/errors"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
+)
+
+// TestChangesetWindowStart covers the pure helper that decides where the
+// changeset window of a batch begins. Evaluating the window once at
+// startBlockNum (instead of per block) would leave any batch longer than
+// MaxReorgDepth without changesets, making the node unable to reorg
+// afterwards.
+func TestChangesetWindowStart(t *testing.T) {
+	cases := []struct {
+		name                     string
+		alwaysGenerateChangesets bool
+		maxReorgDepth            uint64
+		frozenBlocks             uint64
+		startBlockNum            uint64
+		maxBlockNum              uint64
+		want                     uint64
+	}{
+		{
+			name:          "big batch: window covers the last maxReorgDepth blocks",
+			maxReorgDepth: 96,
+			startBlockNum: 1,
+			maxBlockNum:   1000,
+			want:          904,
+		},
+		{
+			name:          "small batch: whole batch in window",
+			maxReorgDepth: 96,
+			startBlockNum: 950,
+			maxBlockNum:   1000,
+			want:          950,
+		},
+		{
+			name:          "batch end below maxReorgDepth: window from batch start",
+			maxReorgDepth: 96,
+			startBlockNum: 1,
+			maxBlockNum:   96,
+			want:          1,
+		},
+		{
+			name:                     "alwaysGenerateChangesets overrides depth and frozen gates",
+			alwaysGenerateChangesets: true,
+			maxReorgDepth:            96,
+			frozenBlocks:             2000,
+			startBlockNum:            1,
+			maxBlockNum:              1000,
+			want:                     1,
+		},
+		{
+			name:          "frozen blocks push the window up",
+			maxReorgDepth: 96,
+			frozenBlocks:  950,
+			startBlockNum: 1,
+			maxBlockNum:   1000,
+			want:          950,
+		},
+		{
+			name:          "fully frozen batch has no window",
+			maxReorgDepth: 96,
+			frozenBlocks:  2000,
+			startBlockNum: 1,
+			maxBlockNum:   1000,
+			want:          math.MaxUint64,
+		},
+		{
+			name:          "long catch-up batch keeps a shallow reorg below its tip unwindable",
+			maxReorgDepth: 96,
+			startBlockNum: 5138,
+			maxBlockNum:   6137,
+			want:          6041,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := changesetWindowStart(tc.alwaysGenerateChangesets, tc.maxReorgDepth, tc.frozenBlocks, tc.startBlockNum, tc.maxBlockNum)
+			if got != tc.want {
+				t.Fatalf("changesetWindowStart got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestApplyLoopMissingBlocks covers the pure completeness-check helper.
+// Every entry asserts a single invariant — see the comment on each case.
+func TestApplyLoopMissingBlocks(t *testing.T) {
+	mkSet := func(ns ...uint64) map[uint64]struct{} {
+		s := make(map[uint64]struct{}, len(ns))
+		for _, n := range ns {
+			s[n] = struct{}{}
+		}
+		return s
+	}
+
+	tests := []struct {
+		name           string
+		txResultBlocks map[uint64]struct{}
+		appliedBlocks  map[uint64]struct{}
+		wantMissing    []uint64
+	}{
+		{
+			// Happy path: every block whose tx-results arrived also had a
+			// blockResult.
+			name:           "all applied",
+			txResultBlocks: mkSet(0, 1),
+			appliedBlocks:  mkSet(0, 1),
+			wantMissing:    nil,
+		},
+		{
+			// The exact bug the original guard caught: block 1 had tx-results
+			// arrive but the trailing blockResult was dropped by the
+			// rootResults-close race. Validator never fired — must flag.
+			name:           "tx-results without blockResult — the rootResults race",
+			txResultBlocks: mkSet(0, 1),
+			appliedBlocks:  mkSet(0),
+			wantMissing:    []uint64{1},
+		},
+		{
+			// Partial batch (size-limit hit): exec stopped at block N
+			// before reaching maxBlockNum. txResultBlocks and appliedBlocks
+			// agree on [0..N]; nothing past N appeared on the apply side
+			// because exec returned before scheduling N+1. The follow-up
+			// stage-loop iteration picks up at N+1 — must NOT flag here.
+			name:           "partial batch — size-limit hit, no spurious flag for unreached blocks",
+			txResultBlocks: mkSet(0, 1, 2),
+			appliedBlocks:  mkSet(0, 1, 2),
+			wantMissing:    nil,
+		},
+		{
+			// Multiple genuine silent failures — all should be reported.
+			name:           "multiple missing blocks",
+			txResultBlocks: mkSet(0, 1, 2, 3),
+			appliedBlocks:  mkSet(0, 2),
+			wantMissing:    []uint64{1, 3},
+		},
+		{
+			// Empty inputs — degenerate but legal.
+			name:           "empty",
+			txResultBlocks: mkSet(),
+			appliedBlocks:  mkSet(),
+			wantMissing:    nil,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := applyLoopMissingBlocks(tc.txResultBlocks, tc.appliedBlocks)
+			if !sameSet(got, tc.wantMissing) {
+				t.Fatalf("applyLoopMissingBlocks() = %v, want (set-equal) %v", got, tc.wantMissing)
+			}
+		})
+	}
+}
+
+// TestExecLoopExitCheck covers the exec-loop exit invariant:
+// pe.blockExecutors must be empty at every clean exit, otherwise an
+// orphaned (queued-but-never-scheduled) block silently sits there
+// forever and the apply loop never sees its blockResult.
+func TestExecLoopExitCheck(t *testing.T) {
+	t.Run("empty map returns nil", func(t *testing.T) {
+		pe := &parallelExecutor{}
+		pe.blockExecutors = map[uint64]*blockExecutor{}
+		if err := pe.execLoopExitCheck(context.Background(), "test"); err != nil {
+			t.Fatalf("execLoopExitCheck on empty map should return nil, got: %v", err)
+		}
+	})
+
+	t.Run("non-empty map returns ErrInvalidBlock with block nums", func(t *testing.T) {
+		pe := &parallelExecutor{}
+		pe.blockExecutors = map[uint64]*blockExecutor{
+			3: {},
+			7: {},
+		}
+		err := pe.execLoopExitCheck(context.Background(), "test-reason")
+		if err == nil {
+			t.Fatalf("execLoopExitCheck on non-empty map should return error, got nil")
+		}
+		if !errors.Is(err, rules.ErrInvalidBlock) {
+			t.Fatalf("expected wrapped ErrInvalidBlock, got: %v", err)
+		}
+		// Both block nums must appear in the error so the operator can
+		// see exactly which blocks were left orphaned.
+		for _, want := range []string{"3", "7", "test-reason"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error message missing %q: %s", want, err.Error())
+			}
+		}
+	})
+
+	t.Run("nil map returns nil (defensive)", func(t *testing.T) {
+		pe := &parallelExecutor{}
+		// pe.blockExecutors is nil
+		if err := pe.execLoopExitCheck(context.Background(), "test"); err != nil {
+			t.Fatalf("execLoopExitCheck on nil map should return nil, got: %v", err)
+		}
+	})
+}
+
+// TestBlockValidatorWaitNil verifies the per-block validator is
+// safe to Wait on when nil (the case where the apply loop's if-condition
+// declined to construct one). Defends against NPE regression if someone
+// changes the if-block to drop the nil-guard in Wait.
+func TestBlockValidatorWaitNil(t *testing.T) {
+	var bv *blockValidator
+	if err := bv.Wait(); err != nil {
+		t.Fatalf("nil blockValidator.Wait() should return nil, got: %v", err)
+	}
+}
+
+// pe.wait must block for the exec-loop group and surface its verdict. The caller
+// cancels the executor before waiting, so returning early (the old ctx.Done escape
+// that returned nil) dropped a real execLoop error, hiding invalid blocks and
+// leaving the robustness sweeps green.
+func TestParallelExecutorWaitHarvestsExecLoopError(t *testing.T) {
+	pe := &parallelExecutor{}
+	g, _ := commonerrors.NewGroup(context.Background())
+	release := make(chan struct{})
+	sentinel := errors.New("exec loop failure")
+	g.Go(func() error {
+		<-release
+		return sentinel
+	})
+	pe.execLoopGroup = g
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		close(release)
+	}()
+
+	require.ErrorIs(t, pe.wait(), sentinel,
+		"wait must block for the exec-loop group and surface its verdict, not drop it")
+}
+
+// A sibling's cancellation recorded first must not hide another member's real error.
+func TestParallelExecutorWaitKeepsRealErrorBehindCancel(t *testing.T) {
+	pe := &parallelExecutor{}
+	g, ctx := commonerrors.NewGroup(context.Background())
+	sentinel := errors.New("apply loop failure")
+	g.Go(func() error { return context.Canceled })
+	g.Go(func() error {
+		<-ctx.Done()
+		return sentinel
+	})
+	pe.execLoopGroup = g
+	require.ErrorIs(t, pe.wait(), sentinel)
+}
+
+// TestBlockValidatorWaitMultipleTimes verifies Wait can be called
+// repeatedly on the same blockValidator without blocking after the
+// goroutine completes. The current implementation re-stuffs the
+// channel after each read; this regression test ensures that property
+// holds if the implementation changes.
+func TestBlockValidatorWaitMultipleTimes(t *testing.T) {
+	bv := &blockValidator{done: make(chan error, 1)}
+	bv.done <- nil // simulate goroutine completion
+
+	for i := range 3 {
+		done := make(chan error, 1)
+		go func() {
+			done <- bv.Wait()
+		}()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Wait() #%d returned unexpected error: %v", i+1, err)
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Fatalf("Wait() #%d hung — channel not re-stuffed", i+1)
+		}
+	}
+}
+
+// TestBlockValidatorWaitErrorWrapping verifies the validation error
+// is wrapped with rules.ErrInvalidBlock so that errors.Is callers
+// (notably InsertChain → block_test_util) classify it correctly.
+func TestBlockValidatorWaitErrorWrapping(t *testing.T) {
+	innerErr := errors.New("blob gas mismatch")
+	bv := &blockValidator{done: make(chan error, 1)}
+	bv.done <- innerErr
+
+	got := bv.Wait()
+	if got == nil {
+		t.Fatal("expected non-nil error")
+	}
+	if !errors.Is(got, rules.ErrInvalidBlock) {
+		t.Errorf("expected wrapped rules.ErrInvalidBlock, got: %v", got)
+	}
+	if !strings.Contains(got.Error(), "blob gas mismatch") {
+		t.Errorf("expected inner error preserved in message, got: %v", got)
+	}
+}
+
+// TestApplyLoopRootResultsCloseDoesNotRace simulates the exact race
+// the silent-failure fix protects against: rootResults closes BEFORE
+// applyResults drains. The pre-fix apply loop returned nil
+// immediately on rootResults close, dropping queued applyResults on
+// the floor. The post-fix apply loop must keep draining applyResults.
+//
+// We exercise the actual select-arm pattern with a tiny in-test
+// reproduction (channel orchestration only — no parallelExecutor
+// dependencies) to lock the race fix in.
+func TestApplyLoopRootResultsCloseDoesNotRace(t *testing.T) {
+	type marker struct{ kind string }
+
+	rootResults := make(chan struct{})
+	applyResults := make(chan marker)
+	rootClosedAck := make(chan struct{})
+
+	// Producer goroutine: deterministically forces rootResults to close
+	// while the apply loop is mid-flight. Sends 2 markers, closes
+	// rootResults (then waits for the consumer to observe the close), then
+	// sends the trailing marker — the one the pre-fix code would drop.
+	go func() {
+		applyResults <- marker{"early-tx"}
+		applyResults <- marker{"early-block"}
+		close(rootResults)
+		<-rootClosedAck // ensure consumer has processed the !ok branch
+		applyResults <- marker{"trailing-block"}
+		close(applyResults)
+	}()
+
+	// The apply-loop select pattern under test: same shape as
+	// exec3_parallel.go's apply loop. The post-fix behavior is to
+	// disable rootResults' arm on close (set to nil) and continue.
+	var (
+		seen             []string
+		rootResultsClose chan struct{} = rootResults
+		closed           bool
+		ctx, cancel      = context.WithTimeout(context.Background(), 2*time.Second)
+	)
+	defer cancel()
+
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("apply loop hung instead of draining; saw=%v closed=%v", seen, closed)
+		case ar, ok := <-applyResults:
+			if !ok {
+				// Channel closed — loop exits cleanly. All messages drained.
+				goto done
+			}
+			seen = append(seen, ar.kind)
+		case _, ok := <-rootResultsClose:
+			if !ok {
+				// Disable this arm to prevent busy-spin on the closed channel.
+				// This is the post-fix behavior we lock in.
+				rootResultsClose = nil
+				closed = true
+				close(rootClosedAck)
+				continue
+			}
+		}
+	}
+
+done:
+	if !closed {
+		t.Fatal("rootResults case never fired with !ok — test scaffolding bug")
+	}
+	want := []string{"early-tx", "early-block", "trailing-block"}
+	if len(seen) != len(want) {
+		t.Fatalf("apply loop dropped messages on rootResults close: seen=%v want=%v", seen, want)
+	}
+	for i, w := range want {
+		if seen[i] != w {
+			t.Fatalf("apply loop saw wrong order: seen=%v want=%v", seen, want)
+		}
+	}
+}
+
+// TestApplyLoopDoesNotHangAfterRootResultsClose: complementary to
+// the above — verifies that disabling the rootResults arm doesn't
+// leave the apply loop stuck. Specifically, after rootResults is
+// closed and disabled, the loop must still exit promptly when
+// applyResults closes.
+func TestApplyLoopDoesNotHangAfterRootResultsClose(t *testing.T) {
+	rootResults := make(chan struct{})
+	applyResults := make(chan struct{}, 1)
+
+	close(rootResults) // closed before loop starts
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var rr chan struct{} = rootResults
+		for {
+			select {
+			case _, ok := <-applyResults:
+				if !ok {
+					return
+				}
+			case _, ok := <-rr:
+				if !ok {
+					rr = nil
+					continue
+				}
+			}
+		}
+	}()
+
+	// Apply-side: signal close after a brief delay.
+	close(applyResults)
+
+	select {
+	case <-done:
+		// passed
+	case <-time.After(2 * time.Second):
+		t.Fatal("apply loop hung after rootResults close + applyResults close")
+	}
+}
+
+// After a non-clean apply-loop exit, the exec loop is blocked publishing into
+// commitResults while the calculator, its consumer, is blocked on a full
+// rootResults. Only a concurrent drain of applyResults and rootResults releases both.
+func TestApplyLoopDrainsBlockedProducerOnNonCleanExit(t *testing.T) {
+	applyResults := make(chan applyResult, 4)
+	commitResults := make(chan applyResult, 1)
+	rootResults := make(chan commitmentResult, 1)
+	consumers := newResultStream()
+	consumers.register("applyResults", applyResults)
+	consumers.register("commitResults", commitResults)
+
+	execDone, calcDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(execDone)
+		for i := range 16 {
+			_ = consumers.publish(context.Background(), i, true)
+		}
+		consumers.close()
+	}()
+	go func() {
+		defer close(calcDone)
+		for range commitResults {
+			rootResults <- commitmentResult{}
+		}
+		close(rootResults)
+	}()
+
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		drainToClose(applyResults, rootResults)
+	}()
+	for name, done := range map[string]chan struct{}{"exec loop": execDone, "calculator": calcDone, "drain": drained} {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s stranded: drainToClose did not empty both channels to close", name)
+		}
+	}
+}
+
+func TestApplyLoopDrainToCloseWithoutCalculator(t *testing.T) {
+	applyResults := make(chan applyResult, 1)
+	applyResults <- 0
+	close(applyResults)
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		drainToClose(applyResults, nil)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(5 * time.Second):
+		t.Fatal("drainToClose blocked on a nil rootResults")
+	}
+}
+
+// TestExecLoopExitCheckConcurrentReads verifies execLoopExitCheck is
+// safe to call concurrently with map mutations under the lock — guards
+// against future regression if someone removes the RLock.
+func TestExecLoopExitCheckConcurrentReads(t *testing.T) {
+	pe := &parallelExecutor{}
+	pe.blockExecutors = map[uint64]*blockExecutor{}
+
+	var stop atomic.Bool
+	var wg sync.WaitGroup
+
+	wg.Go(func() {
+		for !stop.Load() {
+			pe.Lock()
+			pe.blockExecutors[42] = &blockExecutor{}
+			pe.Unlock()
+			pe.Lock()
+			delete(pe.blockExecutors, 42)
+			pe.Unlock()
+		}
+	})
+
+	wg.Go(func() {
+		for !stop.Load() {
+			_ = pe.execLoopExitCheck(context.Background(), "concurrent")
+		}
+	})
+
+	time.Sleep(50 * time.Millisecond)
+	stop.Store(true)
+	wg.Wait()
+	// Test passes iff no race detector fires AND no deadlock.
+}
+
+// TestApplyLoopPartialBatchReturnsErrLoopExhausted exercises the
+// apply-loop exit decision tree end-to-end with channel orchestration:
+// when applyResults closes after the exec loop hit its size-limit
+// (lastBlockResult < maxBlockNum, no missing blocks), the apply loop
+// must return ErrLoopExhausted so the stage loop resumes from the next
+// block. The previous bug spuriously flagged maxBlockNum as missing
+// because it wasn't applied — turning every legitimate partial batch
+// into an InvalidBlock error. This test locks in the corrected
+// behavior: completeness check sees no missing → exhausted → stage
+// loop continues — no re-execution.
+//
+// IMPORTANT: this test models the apply-loop's exit-branch decision
+// rather than driving the production apply loop end-to-end (which would
+// require full parallel-executor + workers + calculator setup). The
+// `run` closure is a hand-coded mirror of the production sequence in
+// exec3_parallel.go around line 355: applyLoopMissingBlocks → reachedMaxBlock
+// check → ErrLoopExhausted. If those production lines change, this
+// closure must be updated in lock-step or the test will pass vacuously.
+func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
+	// Simulate the apply loop's exit-branch decision sequence.
+	// (We cannot run the full apply loop in a unit test — requires the
+	// parallel executor + workers + commitment calculator. Instead this
+	// test covers the same decision tree that exec3_parallel.go runs
+	// after the applyResults channel closes.)
+	type result struct {
+		err         error
+		isExhausted bool
+		isInvalid   bool
+		isOK        bool
+	}
+
+	run := func(txResultBlocks, appliedBlocks map[uint64]struct{}, sc *stopCause, lastBlockResult, maxBlockNum, startBlockNum uint64) result {
+		// The decision tree (mirroring exec3_parallel.go's applyResults-close
+		// branch in execErr's anonymous func — keep these branches in sync with
+		// the production sequence): missing check → stopCause kind → maxBlock
+		// fallback → ErrLoopExhausted.
+		if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
+			return result{
+				err:       errors.New("invalid block: missing blocks"),
+				isInvalid: true,
+			}
+		}
+		if sc != nil {
+			switch sc.kind {
+			case stopReachedMax:
+				return result{isOK: true}
+			case stopMoreWork:
+				return result{err: &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult, Reason: "block batch is full"}, isExhausted: true}
+			}
+		}
+		if lastBlockResult >= maxBlockNum {
+			return result{isOK: true}
+		}
+		return result{
+			err:         &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult, Reason: "block batch is full"},
+			isExhausted: true,
+		}
+	}
+
+	mkSet := func(ns ...uint64) map[uint64]struct{} {
+		s := make(map[uint64]struct{}, len(ns))
+		for _, n := range ns {
+			s[n] = struct{}{}
+		}
+		return s
+	}
+
+	t.Run("partial batch, size-limit hit — exhausted (the regression case)", func(t *testing.T) {
+		got := run(mkSet(1, 2, 3, 4, 5), mkSet(1, 2, 3, 4, 5), &stopCause{kind: stopMoreWork}, 5, 200, 1)
+		if !got.isExhausted {
+			t.Fatalf("expected ErrLoopExhausted, got: %+v", got)
+		}
+		if !errors.Is(got.err, &ErrLoopExhausted{}) {
+			t.Errorf("err must wrap *ErrLoopExhausted, got: %v", got.err)
+		}
+	})
+
+	t.Run("full batch, max reached — clean nil", func(t *testing.T) {
+		got := run(mkSet(1, 2, 3), mkSet(1, 2, 3), &stopCause{kind: stopReachedMax}, 3, 3, 1)
+		if !got.isOK {
+			t.Fatalf("expected clean nil, got: %+v", got)
+		}
+	})
+
+	t.Run("genuine silent failure mid-batch — InvalidBlock", func(t *testing.T) {
+		// Block 3 had tx-results but no blockResult. Real bug — must surface.
+		got := run(mkSet(1, 2, 3), mkSet(1, 2), nil, 2, 5, 1)
+		if !got.isInvalid {
+			t.Fatalf("expected InvalidBlock error, got: %+v", got)
+		}
+	})
+
+	t.Run("partial batch with single block — exhausted", func(t *testing.T) {
+		got := run(mkSet(1), mkSet(1), &stopCause{kind: stopMoreWork}, 1, 200, 1)
+		if !got.isExhausted {
+			t.Fatalf("expected ErrLoopExhausted, got: %+v", got)
+		}
+	})
+}
+
+// TestApplyLoopChannelCloseOrder exercises the production
+// closeApplyChannels helper to pin the documented close-order
+// invariant: commitResults BEFORE applyResults. The calculator drains
+// commitResults and signals the apply loop via rootResults; if
+// applyResults closes first, the apply loop can race with the
+// calculator's final commitment write.
+//
+// The test creates a parallelExecutor with mock channels, calls the
+// production helper, and asserts the order via close-detection on each
+// channel. Reordering the closes inside closeApplyChannels — or
+// dropping the helper and inlining a wrong order back into execLoop —
+// surfaces here.
+func TestApplyLoopChannelCloseOrder(t *testing.T) {
+	commit := make(chan applyResult)
+	apply := make(chan applyResult)
+	pe := &parallelExecutor{consumers: newResultStream()}
+	pe.consumers.register("applyResults", apply)
+	pe.consumers.register("commitResults", commit)
+
+	// closeApplyChannels' return value records the close sequence
+	// inline as each close() succeeds — no goroutine wakeup races.
+	order := pe.closeApplyChannels()
+	if len(order) != 2 {
+		t.Fatalf("closeApplyChannels must close 2 channels, got order=%v", order)
+	}
+	if order[0] != "commitResults" || order[1] != "applyResults" {
+		t.Fatalf("close order must be [commitResults, applyResults]; got %v", order)
+	}
+
+	// Sanity: both channels are actually closed (read returns ok=false).
+	if _, ok := <-commit; ok {
+		t.Error("commit channel not actually closed")
+	}
+	if _, ok := <-apply; ok {
+		t.Error("apply channel not actually closed")
+	}
+}
+
+// TestExecLoopShouldExitPriority exercises the production
+// execLoopShouldExit helper directly. Each case pins one branch's
+// precedence; reordering the production helper or dropping a branch
+// makes the corresponding case fail. This replaces the earlier
+// model-based decision-tree test that could drift from production.
+//
+// Production background: executeBlocks marks the final dispatched
+// block with Exhausted when the per-cycle block limit is reached, then
+// exits — without closing pe.execRequests, without cancelling ctx. If
+// execLoopShouldExit doesn't honor that signal the exec loop parks on
+// its main select forever waiting for work the dispatcher will never
+// produce. Symptom in production: chiado
+// `EXEC3_PARALLEL=true ... --sync.loop.block.limit=10_000` parallel
+// exec from block 0 silently hangs at the first step boundary
+// (block 150662 in chiado's case) — a hang masking the wrong-trie-root
+// failure that issue erigon#20711 reported as the visible symptom.
+func TestExecLoopShouldExitPriority(t *testing.T) {
+	const (
+		batchLimit   = uint64(1 << 30)
+		smallSizeEst = uint64(1024) // < batchLimit
+		bigSizeEst   = uint64(1<<30) + 1
+	)
+
+	exhaustedSignal := &ErrLoopExhausted{From: 1, To: 5, Reason: "test"}
+
+	cases := []struct {
+		name           string
+		blockNum       uint64
+		exhausted      *ErrLoopExhausted
+		sizeEst        uint64
+		maxBlockNum    uint64
+		stopAfterBlock uint64
+		want           execLoopExitDecision
+	}{
+		{
+			// No exit condition met — keep processing.
+			name: "continue", blockNum: 5, sizeEst: smallSizeEst, maxBlockNum: 99,
+			want: execLoopContinue,
+		},
+		{
+			// Size limit alone — fires regardless of other state.
+			name:     "size limit fires before maxBlockNum",
+			blockNum: 5, sizeEst: bigSizeEst, maxBlockNum: 99,
+			want: execLoopExitSizeLimit,
+		},
+		{
+			// maxBlockNum alone — flag for clean batch end.
+			name:     "maxBlockNum reached",
+			blockNum: 99, sizeEst: smallSizeEst, maxBlockNum: 99,
+			want: execLoopExitMaxReached,
+		},
+		{
+			// Final dispatched block carries Exhausted — partial batch.
+			name:     "Exhausted on partial batch",
+			blockNum: 5, exhausted: exhaustedSignal, sizeEst: smallSizeEst, maxBlockNum: 99,
+			want: execLoopExitExhausted,
+		},
+		{
+			// dbg.StopAfterBlock crossed — debug halt.
+			name:     "stopAfterBlock crossed",
+			blockNum: 7, sizeEst: smallSizeEst, maxBlockNum: 99, stopAfterBlock: 5,
+			want: execLoopExitStopAfter,
+		},
+		{
+			// stopAfterBlock=0 means disabled — must NOT fire.
+			name:     "stopAfterBlock=0 disabled",
+			blockNum: 7, sizeEst: smallSizeEst, maxBlockNum: 99, stopAfterBlock: 0,
+			want: execLoopContinue,
+		},
+		// Precedence: when MULTIPLE conditions overlap, only the
+		// highest-priority one wins. Reordering the helper would flip
+		// these cases.
+		{
+			// Final block of a cycle that ALSO reaches maxBlockNum.
+			// maxBlockNum must win (clean nil return) — Exhausted
+			// would mis-flag the batch as "more work pending".
+			name:     "precedence: maxBlockNum beats Exhausted",
+			blockNum: 99, exhausted: exhaustedSignal, sizeEst: smallSizeEst, maxBlockNum: 99,
+			want: execLoopExitMaxReached,
+		},
+		{
+			// Size limit at the same block that also reached max.
+			// Size limit wins — most urgent (sd.mem is over budget).
+			name:     "precedence: sizeLimit beats maxBlockNum",
+			blockNum: 99, sizeEst: bigSizeEst, maxBlockNum: 99,
+			want: execLoopExitSizeLimit,
+		},
+		{
+			// Exhausted set together with stopAfterBlock crossed.
+			// Exhausted wins — production stops the partial batch
+			// rather than masking it with the debug halt.
+			name:     "precedence: Exhausted beats stopAfterBlock",
+			blockNum: 7, exhausted: exhaustedSignal, sizeEst: smallSizeEst,
+			maxBlockNum: 99, stopAfterBlock: 5,
+			want: execLoopExitExhausted,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			br := &blockResult{BlockNum: tc.blockNum, Exhausted: tc.exhausted}
+			got := execLoopShouldExit(br, tc.sizeEst, batchLimit, tc.maxBlockNum, tc.stopAfterBlock)
+			if got != tc.want {
+				t.Fatalf("execLoopShouldExit got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestApplyLoopCloseIsClean pins the no-stop-cause apply-loop close
+// classification. The load-bearing case is the empty loop
+// (txResultCount==0, lastBlockNum==0): under background commit the async
+// commit can advance execution progress to the validation target before a
+// single-block fork-validation step runs, so the exec loop executes nothing
+// and produces no blockResult. Treating that as pending work returns a
+// spurious ErrLoopExhausted, which the stage loop reports as
+// "state step has more work".
+func TestApplyLoopCloseIsClean(t *testing.T) {
+	cases := []struct {
+		name         string
+		lastBlockNum uint64
+		maxBlockNum  uint64
+		txResults    int
+		want         bool
+	}{
+		{name: "fully applied", lastBlockNum: 5, maxBlockNum: 5, txResults: 3, want: true},
+		{name: "past target", lastBlockNum: 6, maxBlockNum: 5, txResults: 3, want: true},
+		{name: "partial batch is not clean", lastBlockNum: 3, maxBlockNum: 5, txResults: 2, want: false},
+		{name: "empty loop, nothing executed", lastBlockNum: 0, maxBlockNum: 21, txResults: 0, want: true},
+		{name: "tx-results without blockResult is not clean", lastBlockNum: 0, maxBlockNum: 21, txResults: 4, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := applyLoopCloseIsClean(tc.lastBlockNum, tc.maxBlockNum, tc.txResults)
+			if got != tc.want {
+				t.Fatalf("applyLoopCloseIsClean(%d,%d,%d) = %v, want %v", tc.lastBlockNum, tc.maxBlockNum, tc.txResults, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestShouldMarkExhaustedAtBlock exercises the production
+// shouldMarkExhaustedAtBlock helper directly. The helper is the gate
+// that decides whether executeBlocks stamps a dispatched block with
+// Exhausted; misjudging this either causes the exec loop to park
+// forever (Exhausted not set when it should be) or trims a batch
+// short (set when it shouldn't be).
+//
+// The "only-set-on-final-block" structural property — that
+// executeBlocks runs `if exhausted != nil { break }` immediately
+// after stamping, so no later block is dispatched in the same cycle —
+// is enforced by the explicit `break` at exec3.go's call site rather
+// than by the helper itself; that's a single line of code that can be
+// reasoned about by inspection. This test focuses on the helper's
+// own decision matrix.
+func TestShouldMarkExhaustedAtBlock(t *testing.T) {
+	cases := []struct {
+		name                                             string
+		initialCycle                                     bool
+		lastExecutedStep, lastFrozenStep                 kv.Step
+		discardCommitment                                bool
+		blockLimit, blockNum, startBlockNum, maxBlockNum uint64
+		want                                             bool
+	}{
+		{
+			// Later cycle, blockLimit reached mid-batch — must mark.
+			name:          "later cycle, limit reached",
+			blockLimit:    10,
+			blockNum:      100,
+			startBlockNum: 91, // span = 10 == limit
+			maxBlockNum:   200,
+			want:          true,
+		},
+		{
+			// Later cycle, but landed exactly on maxBlockNum — must NOT
+			// mark (the goal block triggers reachedMaxBlock instead).
+			name:          "later cycle, hit maxBlockNum exactly",
+			blockLimit:    10,
+			blockNum:      100,
+			startBlockNum: 91,
+			maxBlockNum:   100,
+			want:          false,
+		},
+		{
+			// blockLimit == 0 means "no per-cycle limit" — must NOT mark
+			// regardless of how far we've progressed.
+			name:          "blockLimit=0 disabled",
+			blockLimit:    0,
+			blockNum:      100,
+			startBlockNum: 1,
+			maxBlockNum:   200,
+			want:          false,
+		},
+		{
+			// Later cycle, span < limit — keep going.
+			name:          "later cycle, span below limit",
+			blockLimit:    10,
+			blockNum:      95,
+			startBlockNum: 91, // span = 5 < 10
+			maxBlockNum:   200,
+			want:          false,
+		},
+		{
+			// Initial cycle, no frozen progress yet — gate closed.
+			name:             "initial cycle, no step progress",
+			initialCycle:     true,
+			lastExecutedStep: 0,
+			lastFrozenStep:   0,
+			blockLimit:       10,
+			blockNum:         100,
+			startBlockNum:    91,
+			maxBlockNum:      200,
+			want:             false,
+		},
+		{
+			// Initial cycle, lastExecutedStep > lastFrozenStep AND not
+			// DiscardCommitment — gate open, limit reached.
+			name:             "initial cycle, step progressed, limit reached",
+			initialCycle:     true,
+			lastExecutedStep: 5,
+			lastFrozenStep:   3,
+			blockLimit:       10,
+			blockNum:         100,
+			startBlockNum:    91,
+			maxBlockNum:      200,
+			want:             true,
+		},
+		{
+			// Initial cycle, step progressed but DiscardCommitment is
+			// on — gate stays closed (a partial-batch flush would lose
+			// the in-memory commitment).
+			name:              "initial cycle, DiscardCommitment masks step progress",
+			initialCycle:      true,
+			lastExecutedStep:  5,
+			lastFrozenStep:    3,
+			discardCommitment: true,
+			blockLimit:        10,
+			blockNum:          100,
+			startBlockNum:     91,
+			maxBlockNum:       200,
+			want:              false,
+		},
+		{
+			// Initial cycle, lastExecutedStep == lastFrozenStep — no
+			// new committable step yet, gate closed.
+			name:             "initial cycle, step not advanced past frozen",
+			initialCycle:     true,
+			lastExecutedStep: 3,
+			lastFrozenStep:   3,
+			blockLimit:       10,
+			blockNum:         100,
+			startBlockNum:    91,
+			maxBlockNum:      200,
+			want:             false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shouldMarkExhaustedAtBlock(
+				tc.initialCycle, tc.lastExecutedStep, tc.lastFrozenStep,
+				tc.discardCommitment,
+				tc.blockLimit, tc.blockNum, tc.startBlockNum, tc.maxBlockNum,
+			)
+			if got != tc.want {
+				t.Fatalf("shouldMarkExhaustedAtBlock got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// sameSet compares two slices ignoring order. Used because
+// applyLoopMissingBlocks iterates a map; order is non-deterministic.
+func sameSet(a, b []uint64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[uint64]int, len(a))
+	for _, v := range a {
+		seen[v]++
+	}
+	for _, v := range b {
+		seen[v]--
+		if seen[v] < 0 {
+			return false
+		}
+	}
+	for _, c := range seen {
+		if c != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// TestApplyLoopFlush_InvalidTxWritesAreEstimate pins the versionMap invariant
+// that an invalidated tx's writes flush as Estimate, not Done.
+//
+// Repro recipe from gnosis block 18,483,405:
+//
+//  1. tx[3] inc=0 executed, EVM did NOT revert, and emitted 28 storage writes
+//     (one of them: contract 0x18b2b767… slot 0x08 = `aabS…0b886…5981`).
+//  2. Validation returned VersionInvalid (some read no longer matched the
+//     versionMap).
+//  3. The writes were nonetheless flushed with complete=true, so they were
+//     stored as flag=Done.
+//  4. tx[16] subsequently read slot 8, got `aabS…` via MapRead, recorded
+//     readVersion=tx[3]:inc0. Version-only validation passed.
+//  5. Downstream gas-mismatch ~80K blocks later from the phantom-derived state
+//     cascading through the tx queue.
+//
+// The dep-order validation path flushes each tx with complete = its own
+// validity (FlushVersionedWrites(writeSet, valid, ...)), so an invalidated tx
+// flushes with complete=false. This test asserts the downstream effect: a tx
+// that later reads the slot must see MVReadResultDependency (the validator
+// treats this as VersionInvalid and forces re-execution), not MVReadResultDone.
+func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x18b2b7673c6d661923e9460d592699617828b293"))
+	slot := accounts.InternKey(common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000008"))
+
+	vm := state.NewVersionMap(nil)
+
+	const invalidTxIdx = 3
+	const invalidTxInc = 0
+	phantomVal := *uint256.NewInt(0xaabb)
+
+	invalidTxWrites := newWS().
+		stor(addr, slot, state.Version{TxIndex: invalidTxIdx, Incarnation: invalidTxInc}, phantomVal).
+		build()
+
+	// The dep-order path flushes an invalidated tx with complete = its validity,
+	// i.e. false (writes stored as Estimate, not Done).
+	const complete = false
+	vm.FlushVersionedWrites(invalidTxWrites, complete)
+
+	// Downstream tx=16 reads the slot — this is the read that committed
+	// phantom state in the bug.
+	const downstreamTxIdx = 16
+	_, res, _ := vm.ReadStorage(addr, slot, downstreamTxIdx)
+
+	// MVReadResultDependency: the validator will treat any read of this cell
+	// as VersionInvalid, forcing the reader to re-execute. This is correct
+	// OCC behavior when an invalidated tx is awaiting retry.
+	require.Equal(t, state.MVReadResultDependency, res.Status(),
+		"invalid tx's writes must be flushed as Estimate so downstream reads "+
+			"return MVReadResultDependency. Pre-fix, this returned "+
+			"MVReadResultDone and downstream txs committed phantom state "+
+			"(gnosis block 18,483,405 repro).")
+
+	// Sanity: the entry IS recorded against tx[3] in versionMap (Estimate, not
+	// absent), so downstream readers' OCC dependency tracking still works.
+	require.Equal(t, invalidTxIdx, res.DepIdx(),
+		"phantom write is recorded as Estimate, not deleted — downstream "+
+			"OCC must still see it as a dependency")
+}
+
+// Pins the close-branch precedence: the deferred failure must surface ahead of
+// the missing-blocks completeness error, otherwise a deliberate cancel masks
+// ErrWrongTrieRoot behind a generic ErrInvalidBlock. The closure mirrors the
+// production order — keep them in lock-step.
+func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
+	closeBranch := func(deferredRootErr error, txResultBlocks, appliedBlocks map[uint64]struct{}) error {
+		if deferredRootErr != nil {
+			return deferredRootErr
+		}
+		if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
+			return fmt.Errorf("%w: %d missing blockResult(s) %v", rules.ErrInvalidBlock, len(missing), missing)
+		}
+		return nil
+	}
+
+	mkSet := func(ns ...uint64) map[uint64]struct{} {
+		s := make(map[uint64]struct{}, len(ns))
+		for _, n := range ns {
+			s[n] = struct{}{}
+		}
+		return s
+	}
+
+	t.Run("deferred root + missing block — root error wins", func(t *testing.T) {
+		rootErr := fmt.Errorf("%w, block=5", ErrWrongTrieRoot)
+		err := closeBranch(rootErr, mkSet(5, 6), mkSet(5))
+		require.ErrorIs(t, err, ErrWrongTrieRoot, "deferred root error must surface ahead of missing-block noise")
+		require.Equal(t, rootErr.Error(), err.Error(), "exact rootErr message must be returned — not the missing-block wrapper")
+	})
+
+	t.Run("missing block only — invalid-block error stands", func(t *testing.T) {
+		err := closeBranch(nil, mkSet(5, 6), mkSet(5))
+		require.ErrorIs(t, err, rules.ErrInvalidBlock)
+		require.NotErrorIs(t, err, ErrWrongTrieRoot)
+		require.Contains(t, err.Error(), "missing blockResult")
+	})
+
+	t.Run("deferred root + no missing block — root error surfaces", func(t *testing.T) {
+		rootErr := fmt.Errorf("%w, block=5", ErrWrongTrieRoot)
+		err := closeBranch(rootErr, mkSet(5), mkSet(5))
+		require.ErrorIs(t, err, ErrWrongTrieRoot)
+	})
+
+	t.Run("clean exit — nil", func(t *testing.T) {
+		require.NoError(t, closeBranch(nil, mkSet(5), mkSet(5)))
+	})
+}
+
+// TestExecLoopExitCheckDeliberateStop verifies that a deliberate stopCause OR any
+// context cancellation (shutdown, parent/CL cancel) exempts the pending-block
+// completeness check — both are operational, not a block verdict. Only an
+// uncancelled exit with blocks still pending is a genuine silent miss that must
+// surface as ErrInvalidBlock.
+func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
+	t.Run("pending blocks but stopCause returns nil", func(t *testing.T) {
+		pe := &parallelExecutor{}
+		pe.blockExecutors = map[uint64]*blockExecutor{3: {}, 7: {}}
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(&stopCause{block: 7, kind: stopBadBlock, err: errors.New("wrong root")})
+		if err := pe.execLoopExitCheck(ctx, "post-cancel-drain"); err != nil {
+			t.Fatalf("stopCause must suppress pending-block error, got: %v", err)
+		}
+	})
+
+	t.Run("pending blocks without deliberate-stop still errors", func(t *testing.T) {
+		pe := &parallelExecutor{}
+		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
+		err := pe.execLoopExitCheck(context.Background(), "silent-miss")
+		require.ErrorIs(t, err, rules.ErrInvalidBlock, "must still flag silent miss when not deliberately stopped")
+	})
+
+	t.Run("cancelled context (shutdown) is operational, not a silent miss", func(t *testing.T) {
+		pe := &parallelExecutor{}
+		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(errors.New("shutdown"))
+		err := pe.execLoopExitCheck(ctx, "shutdown-cancel")
+		require.NoError(t, err, "a cancelled context (shutdown, parent/CL cancel) explains the exit; pending blocks are then not a silent miss and must not be reported as invalid")
+	})
+}
+
+// A recorded failure is either an authoritative verdict or a symptom of a
+// concurrent operational abort. A generic commit wrong-root (!exec) can be
+// manufactured by an operational failure that left state incomplete, so it must
+// yield to an in-flight operational stop (surface the retryable operational
+// error, do not mark a bad block). An authoritative exec verdict never yields.
+func TestDeferVerdictToOperational(t *testing.T) {
+	op := &stopCause{block: 5, kind: stopOperational, err: errors.New("worker crashed")}
+
+	require.True(t, deferVerdictToOperational(false, op),
+		"a commit wrong-root must yield to a concurrent operational abort")
+	require.False(t, deferVerdictToOperational(true, op),
+		"an authoritative exec verdict wins over a concurrent operational abort")
+	require.False(t, deferVerdictToOperational(false, nil),
+		"a commit wrong-root with no operational abort is a genuine verdict")
+	require.False(t, deferVerdictToOperational(false, &stopCause{block: 5, kind: stopBadBlock}),
+		"a bad-block stop is not operational")
+	require.False(t, deferVerdictToOperational(false, &stopCause{block: 5, kind: stopReachedMax}),
+		"a clean batch end is not operational")
+}
+
+// TestStopCausePropagation pins the mechanism the unified shutdown rests on: a
+// stopCause published on a context is readable via stopCauseOf, survives a child
+// context (as coordCtx does through errgroup.WithContext), and is distinguished
+// from an unrelated cancel cause.
+func TestStopCausePropagation(t *testing.T) {
+	t.Run("round-trips through a child context", func(t *testing.T) {
+		parent, cancel := context.WithCancelCause(context.Background())
+		child, childCancel := context.WithCancel(parent)
+		defer childCancel()
+		cancel(&stopCause{block: 42, kind: stopReachedMax})
+
+		sc, ok := stopCauseOf(child)
+		require.True(t, ok, "stopCause must be visible through the child context")
+		require.Equal(t, uint64(42), sc.block)
+		require.Equal(t, stopReachedMax, sc.kind)
+	})
+
+	t.Run("no cause before cancel", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		defer cancel(nil)
+		_, ok := stopCauseOf(ctx)
+		require.False(t, ok, "an un-cancelled context carries no stopCause")
+	})
+
+	t.Run("unrelated cause is not a stopCause", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(errors.New("shutdown"))
+		_, ok := stopCauseOf(ctx)
+		require.False(t, ok, "a plain cancel cause must not read as a stopCause")
+	})
+}
+
+// custom_trace commits on the same commitment trie the rest of the process selects.
+func TestCustomTraceSharedDomainsUseTheSelectedTrie(t *testing.T) {
+	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
+	for _, parallel := range []bool{false, true} {
+		t.Run(fmt.Sprintf("parallel=%v", parallel), func(t *testing.T) {
+			statecfg.ExperimentalParallelCommitment = parallel
+
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			tx, err := db.BeginTemporalRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+
+			doms, err := newCustomTraceSharedDomains(t.Context(), db, tx, log.New())
+			require.NoError(t, err)
+			defer doms.Close()
+
+			require.Equal(t, execctx.PickTrieVariant(), doms.GetCommitmentCtx().Trie().Variant())
+		})
+	}
+}
+
+// A send on a closed result channel is a channel-ownership bug: it must panic
+// loudly instead of being classified as routine cancellation, which the group
+// join would filter into silent result loss.
+func TestSendResultOnClosedChannelPanics(t *testing.T) {
+	applyResults := make(chan applyResult, 1)
+	close(applyResults)
+	consumers := newResultStream()
+	consumers.register("applyResults", applyResults)
+	be := &blockExecutor{consumers: consumers}
+	require.Panics(t, func() {
+		_ = be.sendResult(context.Background(), &blockResult{}, true)
+	})
+}

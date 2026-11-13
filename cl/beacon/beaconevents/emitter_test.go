@@ -19,6 +19,10 @@ package beaconevents
 import (
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon/common"
+	ethevent "github.com/erigontech/erigon/common/event"
+	"github.com/stretchr/testify/require"
 )
 
 func TestEmitterSet(t *testing.T) {
@@ -37,4 +41,85 @@ func TestEmitterSet(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	emitter.Operation().SendAttestation(&AttestationData{})
 	<-done
+}
+
+func TestPayloadAttributesSubscriberTracking(t *testing.T) {
+	emitter := NewEventEmitter()
+	require.False(t, emitter.HasPayloadAttributesSubscribers())
+
+	releaseFirst := emitter.TrackPayloadAttributesSubscriber()
+	releaseSecond := emitter.TrackPayloadAttributesSubscriber()
+	require.True(t, emitter.HasPayloadAttributesSubscribers())
+
+	releaseFirst()
+	require.True(t, emitter.HasPayloadAttributesSubscribers())
+
+	releaseSecond()
+	require.False(t, emitter.HasPayloadAttributesSubscribers())
+}
+
+func TestNotifyDataColumnStoredDoesNotBlockWhenFull(t *testing.T) {
+	emitter := NewEventEmitter()
+	for range dataColumnStoredBufferSize {
+		emitter.NotifyDataColumnStored(common.Hash{1})
+	}
+
+	done := make(chan struct{})
+	go func() {
+		emitter.NotifyDataColumnStored(common.Hash{2})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("notification blocked on a full buffer")
+	}
+}
+
+func TestNotifyDataColumnStoredIsNilSafe(t *testing.T) {
+	var emitter *EventEmitter
+	require.Nil(t, emitter.DataColumnStored())
+	emitter.NotifyDataColumnStored(common.Hash{1})
+}
+
+// head and head_v2 report a dropped event only on their own feeds, to subscribers of that topic. The state feed, which
+// carries every topic, drops them silently: its subscribers may not have asked for them.
+func TestHeadEventsReportAFullSubscriberOnlyOnTheirOwnFeed(t *testing.T) {
+	for name, tc := range map[string]struct {
+		subscribe func(*stateFeed, chan *EventStream) ethevent.Subscription
+		send      func(*stateFeed) int
+	}{
+		"head": {
+			subscribe: (*stateFeed).SubscribeHead,
+			send:      func(f *stateFeed) int { return f.TrySendHead(&HeadData{}) },
+		},
+		"head_v2": {
+			subscribe: (*stateFeed).SubscribeHeadV2,
+			send:      func(f *stateFeed) int { return f.SendHeadV2(&HeadV2Data{}) },
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newStateFeed()
+			topic := make(chan *EventStream)
+			topicSub := tc.subscribe(f, topic)
+			defer topicSub.Unsubscribe()
+			all := make(chan *EventStream)
+			allSub := f.Subscribe(all)
+			defer allSub.Unsubscribe()
+
+			require.Zero(t, tc.send(f))
+			select {
+			case err := <-topicSub.Err():
+				require.ErrorIs(t, err, ethevent.ErrSubscriberLagged)
+			default:
+				t.Fatal("head event dropped without telling its subscriber")
+			}
+			select {
+			case err := <-allSub.Err():
+				t.Fatalf("state feed subscriber told about a head event it may not want: %v", err)
+			default:
+			}
+		})
+	}
 }

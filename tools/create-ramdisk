@@ -31,9 +31,15 @@ case "$(uname -s)" in
     # Install ImDisk (virtual disk driver) via Chocolatey, then create and
     # format the RAM disk. Use cmd to run format so that the /fs flag is not
     # mangled by MSYS path conversion.
+    #
+    # Chocolatey's exit code is unreliable on transient NuGet feed failures
+    # (e.g. community.chocolatey.org 504s): it prints "Chocolatey installed
+    # 0/0 packages" but can still exit 0, so the retry never triggers.
+    # Verify the imdisk binary is actually callable before accepting success.
     installed=false
     for i in 1 2 3; do
-      if choco install imdisk -y --no-progress >&2; then
+      choco install imdisk -y --no-progress >&2 || true
+      if command -v imdisk >/dev/null 2>&1; then
         installed=true
         break
       fi

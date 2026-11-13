@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -32,39 +33,10 @@ import (
 var be = binary.BigEndian
 
 func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionEnabled bool) (v []byte, compressionBufOut []byte) {
-	var err error
-	var page []byte
-	compressionBuf, page, err = compress.DecodeZstdIfNeed(compressionBuf[:0], compressedPage, compressionEnabled)
-	if err != nil {
-		panic(err)
-	}
-
-	cnt := int(page[0])
-	if cnt == 0 {
-		return nil, compressionBuf
-	}
-	meta, data := page[1:1+cnt*4*2], page[1+cnt*4*2:]
-	kLens, vLens := meta[:cnt*4], meta[cnt*4:]
-	var kOffset, vOffset uint32
-	for i := 0; i < cnt*4; i += 4 {
-		vOffset += be.Uint32(kLens[i:])
-	}
-	keys := data[:vOffset]
-	vals := data[vOffset:]
-	vOffset = 0
-
-	for i := 0; i < cnt*4; i += 4 {
-		kLen, vLen := be.Uint32(kLens[i:]), be.Uint32(vLens[i:])
-		foundKey := keys[kOffset : kOffset+kLen]
-		if bytes.Equal(key, foundKey) {
-			return vals[vOffset : vOffset+vLen], compressionBuf
-		} else {
-			_ = data
-		}
-		kOffset += kLen
-		vOffset += vLen
-	}
-	return nil, compressionBuf
+	p := Page{compressionBuf: compressionBuf}
+	p.Reset(compressedPage, compressionEnabled)
+	v, _ = p.Get(key)
+	return v, p.compressionBuf
 }
 
 type Page struct {
@@ -73,12 +45,6 @@ type Page struct {
 	kOffset, vOffset   uint32
 
 	compressionBuf []byte
-}
-
-func FromBytes(buf []byte, compressionEnabled bool) *Page {
-	r := &Page{}
-	r.Reset(buf, compressionEnabled)
-	return r
 }
 
 func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
@@ -98,6 +64,33 @@ func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
 	}
 	return
 }
+
+// clear rewinds the page without dropping compressionBuf, which the next page
+// decodes into. limit=0 keeps HasNext false until a page is actually read.
+func (r *Page) clear() {
+	r.i, r.limit = 0, 0
+	r.kOffset, r.vOffset = 0, 0
+	r.kLens, r.vLens, r.data = nil, nil, nil
+}
+
+// Get returns the value stored under k on this page. It scans from the start of the page and leaves the
+// iteration cursor alone, so a page kept across seeks stays usable for both.
+func (r *Page) Get(k []byte) ([]byte, bool) {
+	var kOffset, vOffset uint32
+	for i := 0; i < r.limit*4; i += 4 {
+		vOffset += be.Uint32(r.kLens[i:])
+	}
+	for i := 0; i < r.limit*4; i += 4 {
+		kLen, vLen := be.Uint32(r.kLens[i:]), be.Uint32(r.vLens[i:])
+		if bytes.Equal(k, r.data[kOffset:kOffset+kLen]) {
+			return r.data[vOffset : vOffset+vLen], true
+		}
+		kOffset += kLen
+		vOffset += vLen
+	}
+	return nil, false
+}
+
 func (r *Page) HasNext() bool { return r.limit > r.i }
 func (r *Page) Next() (k, v []byte) {
 	kLen := be.Uint32(r.kLens[r.i*4:])
@@ -116,7 +109,7 @@ func WordsAmount2PagesAmount(wordsAmount int, pageSize int) (pagesAmount int) {
 		return 0
 	}
 	if pageSize > 0 {
-		pagesAmount = (wordsAmount-1)/pageSize + 1 //amount of pages
+		pagesAmount = (wordsAmount-1)/pageSize + 1 // amount of pages
 	}
 	return pagesAmount
 }
@@ -136,7 +129,7 @@ type pageResult struct {
 }
 
 type PagedReader struct {
-	file         ReaderI
+	file         *Reader
 	isCompressed bool
 	pageSize     int
 	page         *Page
@@ -144,7 +137,7 @@ type PagedReader struct {
 	currentPageOffset, nextPageOffset uint64
 }
 
-func NewPagedReader(r ReaderI, pageSize int, snappy bool) *PagedReader {
+func NewPagedReader(r *Reader, pageSize int, snappy bool) *PagedReader {
 	if pageSize == 0 {
 		pageSize = 1
 	}
@@ -156,14 +149,15 @@ func (g *PagedReader) Reset(offset uint64) {
 		g.file.Reset(offset)
 		return
 	}
-	if g.currentPageOffset == offset { // don't reset internal state in this case: likely user just iterating over all values
+	hasPage := g.page.limit > 0
+	if g.currentPageOffset == offset && hasPage { // don't reset internal state in this case: likely user just iterating over all values
 		return
 	}
 
 	g.file.Reset(offset)
 	g.currentPageOffset = offset
 	g.nextPageOffset = offset
-	g.page = &Page{} // TODO: optimize
+	g.page.clear()
 	if g.file.HasNext() {
 		g.NextPage()
 	}
@@ -178,9 +172,9 @@ func (g *PagedReader) Reset(offset uint64) {
 //		for {
 //			var keys [][]byte
 //			fst, _ := g.page.First()
-//			fst = common.Copy(fst)
+//			fst = bytes.Clone(fst)
 //			lst, _ := g.page.Last()
-//			lst = common.Copy(lst)
+//			lst = bytes.Clone(lst)
 //			fmt.Printf("page: %d, offset=%d, keys: %d %x-%x\n", i, g.currentPageOffset, len(keys), fst, lst)
 //			i++
 //			if !g.HasNextPage() {
@@ -199,6 +193,21 @@ func (g *PagedReader) Count() int          { return g.file.Count() }
 func (g *PagedReader) Size() int           { return g.file.Size() }
 func (g *PagedReader) PageSize() int       { return g.pageSize }
 func (g *PagedReader) HasNextOnPage() bool { return g.pageSize > 1 && g.page.HasNext() }
+
+// GetFromPage returns the value for k at the offset the reader was last Reset to. A file written without
+// pages holds one value per offset, so k is not used there. A missing value is nil; an error means the offset
+// is not a page start, because a written page always holds at least one pair.
+func (g *PagedReader) GetFromPage(k []byte) ([]byte, error) {
+	if g.pageSize <= 1 {
+		v, _ := g.file.Next(nil)
+		return v, nil
+	}
+	if g.page.limit == 0 {
+		return nil, fmt.Errorf("%s: no page at offset %d", g.FileName(), g.currentPageOffset)
+	}
+	v, _ := g.page.Get(k)
+	return v, nil
+}
 func (g *PagedReader) HasNextPage() bool   { return g.file.HasNext() }
 func (g *PagedReader) HasNext() bool       { return g.HasNextOnPage() || g.HasNextPage() }
 func (g *PagedReader) GetMetadata() []byte { return g.file.GetMetadata() }
@@ -240,6 +249,7 @@ func (g *PagedReader) Next2(buf []byte) (k, v, bufOut []byte, pageOffset uint64)
 	k, v = g.page.Next()
 	return k, v, buf, g.currentPageOffset
 }
+
 func (g *PagedReader) Skip() (uint64, int) {
 	v, offset := g.Next(nil)
 	return offset, len(v)
@@ -276,7 +286,6 @@ type PagedWriter struct {
 	keys, vals         []byte
 	kLengths, vLengths []uint32
 
-	pageBuf            []byte // reusable buffer for bytesUncompressedTo in sync path
 	compressionBuf     []byte
 	compressionEnabled bool
 
@@ -304,15 +313,17 @@ func (c *PagedWriter) initWorkers() {
 	c.pendingResults = make(map[int]*pageResult, queueDepth)
 	c.eg, c.egCtx = errgroup.WithContext(c.ctx)
 
-	var workerWg sync.WaitGroup
-	workerWg.Add(c.numWorkers)
+	workerEg, workerCtx := errgroup.WithContext(c.egCtx)
 	for range c.numWorkers {
-		c.eg.Go(func() error {
-			defer workerWg.Done()
-			return c.compressionWorker(c.egCtx)
+		workerEg.Go(func() error {
+			return c.compressionWorker(workerCtx)
 		})
 	}
-	go func() { workerWg.Wait(); close(c.resultCh) }()
+	c.eg.Go(func() error {
+		err := workerEg.Wait()
+		close(c.resultCh)
+		return err
+	})
 	c.eg.Go(c.reducer)
 }
 
@@ -388,6 +399,7 @@ func (c *PagedWriter) PagesCompressed() int     { return c.pagesCompressed }
 func (c *PagedWriter) Close() {
 	c.parent.Close()
 }
+
 func (c *PagedWriter) Compress() error {
 	// Flush any remaining unwritten page data
 	if err := c.Flush(); err != nil {
@@ -482,6 +494,7 @@ func (c *PagedWriter) resetPage() {
 	c.kLengths, c.vLengths = c.kLengths[:0], c.vLengths[:0]
 	c.keys, c.vals = c.keys[:0], c.vals[:0]
 }
+
 func (c *PagedWriter) Flush() error {
 	if c.pageSize <= 1 {
 		return nil
@@ -525,9 +538,9 @@ func (c *PagedWriter) bytesUncompressed() (wholePage []byte, notEmpty bool) {
 func pageHeaderTo(buf []byte, kLengths, vLengths []uint32, capacityHint int) []byte {
 	headerSize := 1 + len(kLengths)*2*4
 	if capacityHint > headerSize {
-		buf = growslice(buf, capacityHint)[:headerSize]
+		buf = slices.Grow(buf[:0], capacityHint)[:headerSize]
 	} else {
-		buf = growslice(buf, headerSize)
+		buf = slices.Grow(buf[:0], headerSize)[:headerSize]
 	}
 	buf[0] = uint8(len(kLengths))
 	lensBuf := buf[1:]
@@ -543,7 +556,7 @@ func pageHeaderTo(buf []byte, kLengths, vLengths []uint32, capacityHint int) []b
 }
 
 func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
-	//TODO: alignment,compress+alignment
+	// TODO: alignment,compress+alignment
 	return c.bytesUncompressed()
 }
 
@@ -559,15 +572,6 @@ func (c *PagedWriter) SetMetadata(metadata []byte) {
 
 type disableFsycn interface {
 	DisableFsync()
-}
-
-// growslice ensures b has the wanted length by either expanding it to its capacity
-// or allocating a new slice if b has insufficient capacity.
-func growslice(b []byte, wantLength int) []byte {
-	if cap(b) >= wantLength {
-		return b[:wantLength]
-	}
-	return make([]byte, wantLength, max(wantLength, 2*cap(b)))
 }
 
 // Global pools for page work items and results - optimized for GC

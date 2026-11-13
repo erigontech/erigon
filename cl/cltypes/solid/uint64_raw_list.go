@@ -19,12 +19,13 @@ package solid
 import (
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -62,6 +63,7 @@ func (arr *RawUint64List) Get(index int) uint64 {
 }
 
 func (arr *RawUint64List) Set(index int, v uint64) {
+	arr.cachedHash = common.Hash{}
 	arr.u[index] = v
 }
 
@@ -101,6 +103,12 @@ func (arr *RawUint64List) EncodeSSZ(buf []byte) (dst []byte, err error) {
 }
 
 func (arr *RawUint64List) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf)%8 != 0 {
+		return fmt.Errorf("invalid uint64 list byte length: %d", len(buf))
+	}
+	if len(buf)/8 > arr.c {
+		return fmt.Errorf("uint64 list length exceeds limit: %d > %d", len(buf)/8, arr.c)
+	}
 	arr.cachedHash = common.Hash{}
 	arr.u = make([]uint64, len(buf)/8)
 	for i := range arr.u {
@@ -134,6 +142,9 @@ func (arr *RawUint64List) hashBufLength() int {
 }
 
 func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
+	if len(arr.u) > arr.c {
+		return [32]byte{}, fmt.Errorf("uint64 list length exceeds limit: %d > %d", len(arr.u), arr.c)
+	}
 	if arr.cachedHash != (common.Hash{}) {
 		return arr.cachedHash, nil
 	}
@@ -144,11 +155,12 @@ func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
 
 	lnRoot := merkle_tree.Uint64Root(uint64(len(arr.u)))
 	if len(arr.u) == 0 {
-		arr.cachedHash = utils.Sha256(merkle_tree.ZeroHashes[depth][:], lnRoot[:])
+		arr.cachedHash = crypto.Sha256(merkle_tree.ZeroHashes[depth][:], lnRoot[:])
 		return arr.cachedHash, nil
 	}
 
 	arr.hahsBuffer = arr.hahsBuffer[:arr.hashBufLength()]
+	clear(arr.hahsBuffer)
 	for i, v := range arr.u {
 		binary.LittleEndian.PutUint64(arr.hahsBuffer[i*8:], v)
 	}
@@ -166,8 +178,12 @@ func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
 		elements = elements[:outputLen]
 	}
 
-	arr.cachedHash = utils.Sha256(elements[:32], lnRoot[:])
+	arr.cachedHash = crypto.Sha256(elements[:32], lnRoot[:])
 	return arr.cachedHash, nil
+}
+
+func (arr *RawUint64List) HashSSZProgressive() ([32]byte, error) {
+	return merkle_tree.ProgressiveBasicListRoot(arr.Bytes(), uint64(len(arr.u)))
 }
 
 func (arr *RawUint64List) Pop() uint64 {

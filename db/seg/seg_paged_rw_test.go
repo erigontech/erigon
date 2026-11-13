@@ -17,29 +17,30 @@
 package seg
 
 import (
-	"context"
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"hash/crc32"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression bool) *Decompressor {
 	t.Helper()
-	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	logger, require := log.New(), require.New(t)
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed1")
 	cfg := DefaultCfg.WithValuesOnCompressedPage(pageSize)
 	cfg.MinPatternScore = 1
 	cfg.Workers = 1
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(err)
 	defer c.Close()
 
@@ -58,12 +59,12 @@ func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression b
 }
 
 func TestPagedReader(t *testing.T) {
-	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 
 	require := require.New(t)
 	d := prepareLoremDictOnPagedWriter(t, 2, false)
 	defer d.Close()
-	g1 := NewPagedReader(d.MakeGetter(), 2, false)
+	g1 := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, false)
 	var buf []byte
 	_, _, buf, o1 := g1.Next2(buf[:0])
 	require.Zero(o1)
@@ -72,7 +73,7 @@ func TestPagedReader(t *testing.T) {
 	_, _, buf, o1 = g1.Next2(buf[:0])
 	require.NotZero(o1)
 
-	g := NewPagedReader(d.MakeGetter(), 2, false)
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, false)
 	i := 0
 	for g.HasNext() {
 		w := loremStrings[i]
@@ -103,7 +104,7 @@ type multyBytesWriter struct {
 }
 
 func (w *multyBytesWriter) Write(p []byte) (n int, err error) {
-	w.buffer = append(w.buffer, common.Copy(p))
+	w.buffer = append(w.buffer, bytes.Clone(p))
 	return len(p), nil
 }
 func (w *multyBytesWriter) Bytes() [][]byte                { return w.buffer }
@@ -150,13 +151,13 @@ func TestPage(t *testing.T) {
 }
 
 func TestPagedReaderWithCompression(t *testing.T) {
-	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 
 	require := require.New(t)
 	d := prepareLoremDictOnPagedWriter(t, 2, true) // Enable page-level compression
 	defer d.Close()
 
-	g := NewPagedReader(d.MakeGetter(), 2, true) // Read with compression enabled
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, true) // Read with compression enabled
 	var buf []byte
 	i := 0
 	for g.HasNext() {
@@ -179,11 +180,20 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 
 	// Add test data
 	testData := []struct{ k, v string }{
-		{"k1", "v1"}, {"k2", "v2"}, {"k3", "v3"},
-		{"k4", "v4"}, {"k5", "v5"}, {"k6", "v6"},
-		{"k7", "v7"}, {"k8", "v8"}, {"k9", "v9"},
-		{"k10", "v10"}, {"k11", "v11"}, {"k12", "v12"},
-		{"k13", "longer_value_here"}, {"k14", "another_longer_value"},
+		{"k1", "v1"},
+		{"k2", "v2"},
+		{"k3", "v3"},
+		{"k4", "v4"},
+		{"k5", "v5"},
+		{"k6", "v6"},
+		{"k7", "v7"},
+		{"k8", "v8"},
+		{"k9", "v9"},
+		{"k10", "v10"},
+		{"k11", "v11"},
+		{"k12", "v12"},
+		{"k13", "longer_value_here"},
+		{"k14", "another_longer_value"},
 		{"k15", ""}, // empty value
 		{"key_with_spaces", "value with spaces"},
 		{"unicode_key_αβγ", "unicode_value_δεζ"},
@@ -296,9 +306,15 @@ func TestPageLayoutConsistency(t *testing.T) {
 	pw := NewPagedWriter(t.Context(), mock, false, 1)
 
 	testPairs := []struct{ k, v string }{
-		{"alpha", "one"}, {"beta", "two"}, {"gamma", "three"},
-		{"delta", "four"}, {"epsilon", "five"}, {"zeta", "six"},
-		{"eta", "seven"}, {"theta", "eight"}, {"iota", "nine"},
+		{"alpha", "one"},
+		{"beta", "two"},
+		{"gamma", "three"},
+		{"delta", "four"},
+		{"epsilon", "five"},
+		{"zeta", "six"},
+		{"eta", "seven"},
+		{"theta", "eight"},
+		{"iota", "nine"},
 	}
 	for _, kv := range testPairs {
 		require.NoError(t, pw.Add([]byte(kv.k), []byte(kv.v)))
@@ -377,9 +393,14 @@ func TestPagedReaderSortedKeyOrder(t *testing.T) {
 
 	// Keys written in strictly increasing lexicographic order.
 	sortedPairs := []struct{ k, v string }{
-		{"a", "v1"}, {"b", "v2"}, {"c", "v3"},
-		{"d", "v4"}, {"e", "v5"}, {"f", "v6"},
-		{"g", "v7"}, {"h", "v8"},
+		{"a", "v1"},
+		{"b", "v2"},
+		{"c", "v3"},
+		{"d", "v4"},
+		{"e", "v5"},
+		{"f", "v6"},
+		{"g", "v7"},
+		{"h", "v8"},
 	}
 
 	tmpDir := t.TempDir()
@@ -403,7 +424,7 @@ func TestPagedReaderSortedKeyOrder(t *testing.T) {
 	require.NoError(err)
 	defer d.Close()
 
-	g := NewPagedReader(d.MakeGetter(), 3, false)
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 3, false)
 	var buf []byte
 	var prevKey []byte
 	i := 0
@@ -420,54 +441,314 @@ func TestPagedReaderSortedKeyOrder(t *testing.T) {
 	require.Equal(len(sortedPairs), i, "should have read all %d pairs", len(sortedPairs))
 }
 
-func BenchmarkPagedWriterAdd(b *testing.B) {
-	const pageSize = 16
-	key := make([]byte, 20)
-	val := make([]byte, 100)
-	for i := range key {
-		key[i] = byte(i)
+// prepareKVUncompressedKeysCompressedVals creates a file with sorted KV pairs:
+// uncompressed keys (like domain keys) and compressed values.
+func prepareKVUncompressedKeysCompressedVals(t *testing.T, keyLen int, numPairs int) (*Decompressor, [][]byte, [][]byte) {
+	t.Helper()
+	logger := log.New()
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "kv_uncomp_keys")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+
+	require.GreaterOrEqual(t, keyLen, 8, "keyLen must be >= 8 for binary.BigEndian.PutUint64")
+
+	type kvPair struct {
+		key []byte
+		val []byte
 	}
-	for i := range val {
-		val[i] = byte(i)
+	pairs := make([]kvPair, numPairs)
+	for i := range pairs {
+		k := make([]byte, keyLen)
+		binary.BigEndian.PutUint64(k[keyLen-8:], uint64(i*37+1))
+		k[0] = byte(i >> 8)
+		k[1] = byte(i)
+		// values have common patterns to trigger compression
+		v := make([]byte, 50+i%30)
+		copy(v, "common_prefix_value_")
+		binary.BigEndian.PutUint64(v[20:], uint64(i))
+		pairs[i] = kvPair{key: k, val: v}
+	}
+	slices.SortFunc(pairs, func(a, b kvPair) int {
+		return bytes.Compare(a.key, b.key)
+	})
+
+	keys := make([][]byte, numPairs)
+	vals := make([][]byte, numPairs)
+	for i, p := range pairs {
+		keys[i] = p.key
+		vals[i] = p.val
+		require.NoError(t, c.AddUncompressedWord(p.key)) // key: uncompressed
+		require.NoError(t, c.AddWord(p.val))             // value: compressed
+	}
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	t.Cleanup(d.Close)
+	return d, keys, vals
+}
+
+// TestReaderMatchCmpUncompressedKeys tests Reader.MatchCmp with CompressVals (uncompressed keys).
+// This simulates domain file lookups (accounts, code, storage).
+func TestReaderMatchCmpUncompressedKeys(t *testing.T) {
+	d, keys, vals := prepareKVUncompressedKeysCompressedVals(t, 20, 200)
+
+	g := NewReader(d.MakeGetter(), CompressVals)
+
+	// Sanity check: read all pairs with Next first
+	g.Reset(0)
+	for i := 0; g.HasNext(); i++ {
+		k, _ := g.Next(nil)
+		require.Equal(t, keys[i], k, "sanity pair %d: key mismatch (Next)", i)
+		v, _ := g.Next(nil)
+		require.Equal(t, vals[i], v, "sanity pair %d: val mismatch (Next)", i)
 	}
 
-	cases := []struct {
-		name       string
-		compress   bool
-		numWorkers int
-	}{
-		{"noCompression", false, 1},
-		{"compression_sync", true, 1},
-		{"compression_workers2", true, 2},
-		{"compression_workers4", true, 4},
+	g.Reset(0)
+	// Test 1: sequential exact matches — MatchCmp should advance past key, Next reads value
+	for i, k := range keys {
+		require.True(t, g.HasNext(), "pair %d", i)
+		cmp := g.MatchCmp(k)
+		require.Equal(t, 0, cmp, "pair %d: expected match for key %x", i, k)
+		v, _ := g.Next(nil)
+		require.Equal(t, vals[i], v, "pair %d: wrong value", i)
 	}
-	for _, tc := range cases {
-		b.Run(tc.name, func(b *testing.B) {
-			buf := &multyBytesWriter{pageSize: pageSize}
-			w := NewPagedWriter(b.Context(), buf, tc.compress, tc.numWorkers)
-			b.ResetTimer()
-			for b.Loop() {
-				w.Add(key, val) //nolint:errcheck
-			}
-			w.Flush() //nolint:errcheck
-		})
+
+	// Test 2: random access — Reset + MatchCmp then read value
+	g.Reset(0)
+	for g.HasNext() {
+		pos := g.Getter.dataP
+		key, _ := g.Next(nil)
+		val, _ := g.Next(nil)
+
+		// re-read same pair with MatchCmp
+		g.Reset(pos)
+		cmp := g.MatchCmp(key)
+		require.Equal(t, 0, cmp, "expected match for key %x at offset %d", key, pos)
+		v2, _ := g.Next(nil)
+		require.Equal(t, val, v2, "value mismatch after MatchCmp for key %x", key)
+	}
+
+	// Test 3: MatchCmp with wrong key resets position
+	g.Reset(0)
+	wrongKey := make([]byte, 20)
+	wrongKey[0] = 0xFF
+	cmp := g.MatchCmp(wrongKey)
+	require.NotEqual(t, 0, cmp, "should not match wrong key")
+	firstKey, _ := g.Next(nil)
+	require.Equal(t, keys[0], firstKey, "position should be reset after MatchCmp mismatch")
+
+	// Test 4: verify MatchCmp result matches bytes.Compare for every key against neighbors
+	g.Reset(0)
+	for i := range keys {
+		pos := g.Getter.dataP
+		cmp := g.MatchCmp(keys[i])
+		require.Equal(t, 0, cmp, "pair %d should match", i)
+		g.Skip() // skip value
+
+		if i > 0 {
+			g.Reset(pos)
+			cmp = g.MatchCmp(keys[i-1])
+			expectedCmp := bytes.Compare(keys[i-1], keys[i])
+			require.Equal(t, expectedCmp, cmp, "pair %d: MatchCmp(keys[%d]) wrong", i, i-1)
+			g.Reset(pos)
+			g.Skip() // skip key
+			g.Skip() // skip value
+		}
 	}
 }
 
-func BenchmarkName(b *testing.B) {
-	buf := &multyBytesWriter{pageSize: 16}
-	w := NewPagedWriter(b.Context(), buf, false, 1)
-	for i := 0; i < 16; i++ {
-		w.Add([]byte{byte(i)}, []byte{10 + byte(i)})
+// TestReaderBinarySearch tests Reader.BinarySearch with CompressVals (uncompressed keys).
+func TestReaderBinarySearch(t *testing.T) {
+	numPairs := 500
+	d, keys, _ := prepareKVUncompressedKeysCompressedVals(t, 20, numPairs)
+
+	g := NewReader(d.MakeGetter(), CompressVals)
+
+	// Build offset table
+	offsets := make([]uint64, 0, numPairs)
+	g.Reset(0)
+	for g.HasNext() {
+		offsets = append(offsets, g.Getter.dataP)
+		g.Skip() // skip key
+		g.Skip() // skip value
 	}
-	bts := buf.Bytes()[0]
+	require.Equal(t, numPairs, len(offsets))
 
-	k := []byte{15}
+	getOffset := func(i uint64) uint64 { return offsets[i] }
 
-	b.Run("1", func(b *testing.B) {
-		for b.Loop() {
-			GetFromPage(k, bts, nil, false)
+	// Test 1: find every existing key
+	for i, k := range keys {
+		foundOffset, ordinal, ok := g.BinarySearch(k, numPairs, getOffset)
+		require.True(t, ok, "key %d not found: %x", i, k)
+		require.Equal(t, offsets[i], foundOffset, "key %d: wrong offset", i)
+		require.Equal(t, uint64(i), ordinal, "key %d: wrong ordinal", i)
+	}
+
+	// Test 2: key smaller than all — should find first
+	smallKey := make([]byte, 20)
+	foundOffset, _, ok := g.BinarySearch(smallKey, numPairs, getOffset)
+	if ok {
+		require.Equal(t, offsets[0], foundOffset, "small key should find first entry")
+	}
+
+	// Test 3: key larger than all — should not find
+	bigKey := make([]byte, 20)
+	for i := range bigKey {
+		bigKey[i] = 0xFF
+	}
+	_, _, ok = g.BinarySearch(bigKey, numPairs, getOffset)
+	require.False(t, ok, "big key should not be found")
+
+	// Test 4: MatchPrefix/MatchCmp on last key with prefix beyond it
+	lastKey := keys[len(keys)-1]
+	lastOffset := offsets[len(offsets)-1]
+
+	// exact prefix of last key should match
+	g.Reset(lastOffset)
+	require.True(t, g.MatchPrefix(lastKey[:10]), "prefix of last key should match")
+
+	// prefix larger than last key (appended 0xFF) should not match
+	beyondKey := make([]byte, len(lastKey)+1)
+	copy(beyondKey, lastKey)
+	beyondKey[len(lastKey)] = 0xFF
+	g.Reset(lastOffset)
+	require.False(t, g.MatchPrefix(beyondKey), "prefix beyond last key should not match")
+
+	// MatchCmp with key larger than last key
+	g.Reset(lastOffset)
+	cmpResult := g.MatchCmp(beyondKey)
+	require.Equal(t, 1, cmpResult, "key beyond last should be > last key")
+
+	// MatchCmp with exact last key should match
+	g.Reset(lastOffset)
+	cmpResult = g.MatchCmp(lastKey)
+	require.Equal(t, 0, cmpResult, "exact last key should match")
+}
+
+// PagedReader.Reset seeks to a page boundary and re-decodes from there. Nothing else covers the
+// seek: every production caller builds a fresh reader per lookup, so this path is only ever
+// entered on a cold page.
+func TestPagedReaderResetSeeksToPage(t *testing.T) {
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "")
+	require := require.New(t)
+	const pageSize = 2
+	d := prepareLoremDictOnPagedWriter(t, pageSize, true)
+	defer d.Close()
+
+	// record where each entry lives, and what it should read back as
+	type entry struct {
+		k, v      string
+		pageStart uint64
+	}
+	var entries []entry
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), pageSize, true)
+	for i := 0; g.HasNext(); i++ {
+		k, v, _, offset := g.Next2(nil)
+		entries = append(entries, entry{string(k), string(v), offset})
+	}
+	require.Len(entries, len(loremStrings))
+
+	// seeking to an entry's own page must replay that page from its first entry
+	for i, want := range entries {
+		if i == 0 || entries[i-1].pageStart == want.pageStart {
+			continue // not the first entry of its page
 		}
-	})
+		g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), pageSize, true)
+		g.Reset(want.pageStart)
+		require.True(g.HasNext(), "seek to offset %d left the reader empty", want.pageStart)
+		k, v, _, offset := g.Next2(nil)
+		require.Equal(want.k, string(k), "seek to %d landed on the wrong key", want.pageStart)
+		require.Equal(want.v, string(v))
+		require.Equal(want.pageStart, offset)
 
+		// and the rest of the file must follow in order
+		for j := i + 1; j < len(entries) && g.HasNext(); j++ {
+			k, v, _, _ := g.Next2(nil)
+			require.Equal(entries[j].k, string(k), "entry %d after seeking to %d", j, want.pageStart)
+			require.Equal(entries[j].v, string(v))
+		}
+	}
+}
+
+// Reset to the offset the reader already sits on must not rewind it: callers seek to the same
+// page repeatedly while walking a sorted key range, and re-reading consumed entries would
+// duplicate them.
+func TestPagedReaderResetToCurrentPageKeepsPosition(t *testing.T) {
+	require := require.New(t)
+	const pageSize = 4
+	d := prepareLoremDictOnPagedWriter(t, pageSize, true)
+	defer d.Close()
+
+	ref := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), pageSize, true)
+	k0, v0, _, pageStart := ref.Next2(nil)
+	first := string(k0) + "|" + string(v0)
+	k1, v1, _, _ := ref.Next2(nil)
+	second := string(k1) + "|" + string(v1)
+	require.NotEqual(first, second)
+
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), pageSize, true)
+	_, _, _, offset := g.Next2(nil)
+	require.Equal(pageStart, offset)
+
+	g.Reset(pageStart)
+	require.True(g.HasNext(), "re-seeking the current page emptied the reader")
+	k, v, _, _ := g.Next2(nil)
+	require.Equal(second, string(k)+"|"+string(v),
+		"re-seeking the current page rewound it, so the caller re-reads a consumed entry")
+}
+
+// A fresh reader sits at offset 0, which must not be mistaken for "page 0 is already loaded".
+func TestPagedReaderResetLoadsFirstPage(t *testing.T) {
+	require := require.New(t)
+	d := prepareLoremDictOnPagedWriter(t, 2, false)
+	defer d.Close()
+
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, false)
+	g.Reset(0)
+	require.True(g.HasNextOnPage(), "Reset must leave the page of that offset loaded")
+}
+
+// Get must not depend on where iteration left the page cursor: a reader keeps its page across seeks to the
+// same offset, so lookups and iteration share one decoded page.
+func TestPageGetIsCursorIndependent(t *testing.T) {
+	sampling := 2
+	buf, require := &multyBytesWriter{pageSize: sampling}, require.New(t)
+	w := NewPagedWriter(t.Context(), buf, false, 1)
+	for i := range sampling {
+		require.NoError(w.Add([]byte(fmt.Sprintf("k %d", i)), []byte(fmt.Sprintf("v %d", i))))
+	}
+	require.NoError(w.Flush())
+
+	p := &Page{}
+	p.Reset(buf.Bytes()[0], false)
+	p.Next()
+
+	v, ok := p.Get([]byte("k 0"))
+	require.True(ok)
+	require.Equal("v 0", string(v))
+	v, ok = p.Get([]byte("k 1"))
+	require.True(ok)
+	require.Equal("v 1", string(v))
+	_, ok = p.Get([]byte("k 9"))
+	require.False(ok)
+	require.True(p.HasNext(), "Get left the iteration cursor alone")
+}
+
+// A fresh reader starts at offset 0, which must not be mistaken for "page 0 is already loaded".
+func TestPagedReaderGetOnFirstPage(t *testing.T) {
+	require := require.New(t)
+	d := prepareLoremDictOnPagedWriter(t, 2, false)
+	defer d.Close()
+
+	g := NewPagedReader(NewReader(d.MakeGetter(), CompressKeys|CompressVals), 2, false)
+	g.Reset(0)
+	v, err := g.GetFromPage([]byte("key 0"))
+	require.NoError(err)
+	require.Equal("lorem 0", string(v))
 }

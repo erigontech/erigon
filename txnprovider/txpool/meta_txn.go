@@ -16,10 +16,26 @@
 
 package txpool
 
-import "github.com/holiman/uint256"
+import (
+	"math"
+
+	"github.com/holiman/uint256"
+)
+
+// blobFeeCap returns min(capSoFar, the txn's blob fee cap), or capSoFar for a txn without blobs.
+func blobFeeCap(slot *TxnSlot, capSoFar uint64) uint64 {
+	if !slot.HasBlobs() {
+		return capSoFar
+	}
+	if c := slot.GetBlobFeeCap(); c.LtUint64(capSoFar) {
+		return c.Uint64()
+	}
+	return capSoFar
+}
 
 func newMetaTxn(slot *TxnSlot, isLocal bool, timestamp uint64) *metaTxn {
-	mt := &metaTxn{TxnSlot: slot, worstIndex: -1, bestIndex: -1, timestamp: timestamp}
+	mt := &metaTxn{TxnSlot: slot, keyedNonce: slot.hasKeyedNonce(), worstIndex: -1, bestIndex: -1, timestamp: timestamp}
+	mt.minBlobFeeCap = math.MaxUint64 // set in onSenderStateChange
 	if isLocal {
 		mt.subPool = IsLocal
 	}
@@ -30,14 +46,18 @@ func newMetaTxn(slot *TxnSlot, isLocal bool, timestamp uint64) *metaTxn {
 type metaTxn struct {
 	TxnSlot                   *TxnSlot
 	minFeeCap                 uint256.Int
+	minBlobFeeCap             uint64 // lowest blob fee cap up to this txn in its sender's nonce chain; set in onSenderStateChange
 	nonceDistance             uint64 // how far their nonces are from the state's nonce for the sender
 	cumulativeBalanceDistance uint64 // how far their cumulativeRequiredBalance are from the state's balance for the sender
 	minTip                    uint64
+	followsRemote             bool // a lower-nonce txn of the same sender is remote
 	bestIndex                 int
 	worstIndex                int
 	timestamp                 uint64 // when it was added to pool
 	subPool                   SubPoolMarker
 	currentSubPool            SubPoolType
+	announced                 bool // has entered pending once; a later return is not announced
+	keyedNonce                bool
 	minedBlockNum             uint64
 }
 
@@ -69,6 +89,12 @@ func (mt *metaTxn) better(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	}
 	if than.minFeeCap.Cmp(&pendingBaseFee) >= 0 {
 		thanSubPool |= EnoughFeeCapBlock
+	}
+	if mt.followsRemote {
+		subPool &^= IsLocal
+	}
+	if than.followsRemote {
+		thanSubPool &^= IsLocal
 	}
 	if subPool != thanSubPool {
 		return subPool > thanSubPool
@@ -120,8 +146,10 @@ func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	}
 
 	switch mt.currentSubPool {
-	case PendingSubPool:
-		if mt.minFeeCap != than.minFeeCap {
+	case 0, PendingSubPool:
+		// Parked frames have no sub-pool. Keep pending fee ordering while their
+		// eligibility markers qualify, even though they cannot be selected yet.
+		if (mt.currentSubPool == PendingSubPool || subPool >= BaseFeePoolBits+EnoughFeeCapBlock) && mt.minFeeCap != than.minFeeCap {
 			return mt.minFeeCap.Cmp(&than.minFeeCap) < 0
 		}
 		if mt.nonceDistance != than.nonceDistance {
@@ -141,9 +169,15 @@ func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 	return mt.timestamp > than.timestamp
 }
 
+// SortByNonceLess separates keyed sequences from account nonces. One keyed domain
+// in this index is enough because pool policy allows only one frame transaction
+// per sender; sender admission requires matching nonce keys for replacements.
 func SortByNonceLess(a, b *metaTxn) bool {
 	if a.TxnSlot.SenderID != b.TxnSlot.SenderID {
 		return a.TxnSlot.SenderID < b.TxnSlot.SenderID
+	}
+	if a.keyedNonce != b.keyedNonce {
+		return !a.keyedNonce
 	}
 	return a.TxnSlot.Nonce < b.TxnSlot.Nonce
 }

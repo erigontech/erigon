@@ -20,10 +20,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"os"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/state"
@@ -40,8 +42,10 @@ type testResult struct {
 	Name  string       `json:"name"`
 	Pass  bool         `json:"pass"`
 	Root  *common.Hash `json:"stateRoot,omitempty"`
-	Error string       `json:"error,omitempty"`
+	Fork  string       `json:"fork,omitempty"`
+	Error string       `json:"error"`
 	State *state.Dump  `json:"state,omitempty"`
+	Stats *execStats   `json:"benchStats,omitempty"`
 }
 
 func (r testResult) String() string {
@@ -55,18 +59,30 @@ func (r testResult) String() string {
 	var extra string
 	if !r.Pass {
 		extra = fmt.Sprintf(", err=%v", r.Error)
+		if r.Fork != "" {
+			extra += fmt.Sprintf(", fork=%s", r.Fork)
+		}
 	}
 
 	out := fmt.Sprintf("%s %s%s", status, r.Name, extra)
 	if r.State != nil {
-		state, _ := json.MarshalIndent(r.State, "", "  ")
-		out += "\n" + string(state)
+		if state, err := json.MarshalIndent(r.State, "", "  "); err == nil {
+			out += "\n" + string(state)
+		}
 	}
 	return out
 }
 
 // report prints the after-test summary.
-func report(ctx *cli.Context, results []testResult) {
+func report(ctx *cli.Command, results []testResult) {
+	if ctx.Bool(JSONOutputFlag.Name) {
+		// Write directly to stdout via encoder to avoid the intermediate
+		// MarshalIndent -> string -> Println allocation chain.
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(results) //nolint:errcheck,errchkjson
+		return
+	}
 	pass := 0
 	for _, r := range results {
 		if r.Pass {
@@ -74,10 +90,12 @@ func report(ctx *cli.Context, results []testResult) {
 		}
 	}
 
+	// Use buffered writer to reduce syscalls when printing many results
+	w := bufio.NewWriter(os.Stdout)
 	for _, r := range results {
-		fmt.Println(r)
+		fmt.Fprintln(w, r)
 	}
-
-	fmt.Println("--")
-	fmt.Printf("%d tests passed, %d tests failed.\n", pass, len(results)-pass)
+	fmt.Fprintln(w, "--")
+	fmt.Fprintf(w, "%d tests passed, %d tests failed.\n", pass, len(results)-pass)
+	w.Flush()
 }

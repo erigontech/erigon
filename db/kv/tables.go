@@ -18,7 +18,7 @@ package kv
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -29,20 +29,24 @@ import (
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
 // 6.0 - BlockTransaction table now has system-txs before and after block (records are absent if block has no system-tx, but sequence increasing)
 // 6.1 - Canonical/NonCanonical/BadBlock transitions now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
-var DBSchemaVersion = typesproto.VersionReply{Major: 7, Minor: 0, Patch: 0}
+// 7.1 - standalone InvertedIndex values tables store chunks of txNums per dup
+var DBSchemaVersion = typesproto.VersionReply{Major: 7, Minor: 1, Patch: 0}
 
 const ChangeSets3 = "ChangeSets3"
 
 const (
 
-	//HashedAccounts
+	// HashedAccounts
 	// key - address hash
 	// value - account encoded for storage
 	// Contains Storage:
-	//key - address hash + incarnation + storage key hash
-	//value - storage value(common.hash)
+	// key - address hash + incarnation + storage key hash
+	// value - storage value(common.hash)
 	HashedAccountsDeprecated = "HashedAccount"
 	HashedStorageDeprecated  = "HashedStorage"
+
+	// CodeCacheDeprecated held decompressed contract code keyed by code hash.
+	CodeCacheDeprecated = "CodeCache"
 )
 
 const (
@@ -89,9 +93,6 @@ const (
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
 
-	CliqueSeparate     = "CliqueSeparate"
-	CliqueLastSnapshot = "CliqueLastSnapshot"
-
 	// Node database tables (see nodedb.go)
 
 	// NodeRecords stores P2P node records (ENR)
@@ -119,23 +120,6 @@ const (
 
 	Epoch        = "DevEpoch"        // block_num_u64+block_hash->transition_proof
 	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
-
-	// BOR
-	BorTxLookup                = "BlockBorTransactionLookup"  // transaction_hash -> block_num_u64
-	BorEvents                  = "BorEvents"                  // event_id -> event_payload
-	BorEventNums               = "BorEventNums"               // block_num -> event_id (last event_id in that block)
-	BorEventProcessedBlocks    = "BorEventProcessedBlocks"    // block_num -> block_time, tracks processed blocks in the bridge, used for unwinds and restarts, gets pruned
-	BorEventTimes              = "BorEventTimes"              // timestamp -> event_id
-	BorSpans                   = "BorSpans"                   // span_id -> span (in JSON encoding)
-	BorSpansIndex              = "BorSpansIndex"              // span.StartBlockNumber -> span.Id
-	BorMilestones              = "BorMilestones"              // milestone_id -> milestone (in JSON encoding)
-	BorMilestoneEnds           = "BorMilestoneEnds"           // start block_num -> milestone_id (first block of milestone)
-	BorCheckpoints             = "BorCheckpoints"             // checkpoint_id -> checkpoint (in JSON encoding)
-	BorCheckpointEnds          = "BorCheckpointEnds"          // start block_num -> checkpoint_id (first block of checkpoint)
-	BorProducerSelections      = "BorProducerSelections"      // span_id -> span selection with accumulated proposer priorities (in JSON encoding)
-	BorProducerSelectionsIndex = "BorProducerSelectionsIndex" // span.StartBlockNumber -> span.Id
-	BorWitnesses               = "BorWitnesses"               // block_num_u64 + block_hash -> witness
-	BorWitnessSizes            = "BorWitnessSizes"            // block_num_u64 + block_hash -> witness size (uint64)
 
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
@@ -196,6 +180,8 @@ const (
 
 	// [slot + block root] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
+	// [slot + block root] => [execution payload envelope signature]
+	ExecutionPayloadEnvelopeSignatures = "ExecutionPayloadEnvelopeSignature"
 
 	EffectiveBalancesDump = "EffectiveBalancesDump"
 	BalancesDump          = "BalancesDump"
@@ -263,9 +249,24 @@ const (
 	PendingConsolidations         = "PendingConsolidations"         // slot => queue_diffs
 	// End Electra
 
-	StatesProcessingProgress = "StatesProcessingProgress"
+	// GLOAS (EIP-7732)
+	BuildersDump                      = "BuildersDump"                   // slot => dump
+	Builders                          = "Builders"                       // slot => per-index builders diff
+	BuilderPendingWithdrawalsDump     = "BuilderPendingWithdrawalsDump"  // slot => dump
+	BuilderPendingWithdrawals         = "BuilderPendingWithdrawals"      // slot => queue_diffs
+	PayloadExpectedWithdrawalsDump    = "PayloadExpectedWithdrawalsDump" // slot => dump
+	PayloadExpectedWithdrawals        = "PayloadExpectedWithdrawals"     // slot => queue_diffs
+	ExecutionPayloadAvailabilityTable = "ExecutionPayloadAvailability"   // slot => bitvector SSZ
+	BuilderPendingPaymentsTable       = "BuilderPendingPayments"         // slot => vector SSZ
+	PtcWindowTable                    = "PtcWindow"                      // legacy table; no longer written
+	LatestExecutionPayloadBidTable    = "LatestExecutionPayloadBid"      // slot => compressed SSZ
+	PtcWindowEpochTable               = "PtcWindowEpoch"                 // epoch-start slot => compressed ptc window SSZ
+	// End GLOAS
 
-	//Diagnostics tables
+	StatesProcessingProgress = "StatesProcessingProgress"
+	StatesPruneProgress      = "StatesPruneProgress" // table name => slot
+
+	// Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
 	DiagSyncStages = "DiagSyncStages"
 )
@@ -275,9 +276,11 @@ var (
 	// ExperimentalGetProofsLayout is used to keep track whether we store indices to facilitate eth_getProof
 	CommitmentLayoutFlagKey = []byte("CommitmentLayouFlag")
 
-	PruneTypeOlder = []byte("older")
-	PruneHistory   = []byte("pruneHistory")
-	PruneBlocks    = []byte("pruneBlocks")
+	PruneTypeOlder         = []byte("older")
+	PruneHistory           = []byte("pruneHistory")
+	PruneBlocks            = []byte("pruneBlocks")
+	PruneCommitmentHistory = []byte("pruneCommitmentHistory")
+	PruneReceipts          = []byte("pruneReceipts")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 	GenesisKey         = []byte("genesis")
@@ -290,6 +293,8 @@ var (
 
 	StatesProcessingKey          = []byte("StatesProcessing")
 	MinimumPrunableStepDomainKey = []byte("MinimumPrunableStepDomainKey")
+
+	CaplinBlobsArchiveFromSlotKey = []byte("caplinBlobsArchiveFromSlot")
 )
 
 // Vals
@@ -302,8 +307,6 @@ var (
 // This list will be sorted in `init` method.
 // ChaindataTablesCfg - can be used to find index in sorted version of ChaindataTables list by name
 var ChaindataTables = []string{
-	E2AccountsHistory,
-	E2StorageHistory,
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
@@ -312,7 +315,6 @@ var ChaindataTables = []string{
 	ConfigTable,
 	DatabaseInfo,
 	SyncStageProgress,
-	PlainState,
 	ChangeSets3,
 	Senders,
 	HeadBlockKey,
@@ -326,21 +328,6 @@ var ChaindataTables = []string{
 	HeaderTD,
 	Epoch,
 	PendingEpoch,
-	BorTxLookup,
-	BorEvents,
-	BorEventNums,
-	BorEventProcessedBlocks,
-	BorEventTimes,
-	BorSpans,
-	BorSpansIndex,
-	BorMilestones,
-	BorMilestoneEnds,
-	BorCheckpoints,
-	BorCheckpointEnds,
-	BorProducerSelections,
-	BorProducerSelectionsIndex,
-	BorWitnesses,
-	BorWitnessSizes,
 	TblAccountVals,
 	TblAccountHistoryKeys,
 	TblAccountHistoryVals,
@@ -388,6 +375,7 @@ var ChaindataTables = []string{
 
 	// Beacon stuff
 	BeaconBlocks,
+	ExecutionPayloadEnvelopeSignatures,
 	CanonicalBlockRoots,
 	BlockRootToSlot,
 	BlockRootToStateRoot,
@@ -416,6 +404,7 @@ var ChaindataTables = []string{
 	RandaoMixes,
 	Proposers,
 	StatesProcessingProgress,
+	StatesPruneProgress,
 	InactivityScores,
 	NextSyncCommittee,
 	CurrentSyncCommittee,
@@ -430,10 +419,18 @@ var ChaindataTables = []string{
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,
-	AccountChangeSetDeprecated,
-	StorageChangeSetDeprecated,
-	HashedAccountsDeprecated,
-	HashedStorageDeprecated,
+	// GLOAS (EIP-7732)
+	BuildersDump,
+	Builders,
+	BuilderPendingWithdrawalsDump,
+	BuilderPendingWithdrawals,
+	PayloadExpectedWithdrawalsDump,
+	PayloadExpectedWithdrawals,
+	ExecutionPayloadAvailabilityTable,
+	BuilderPendingPaymentsTable,
+	PtcWindowTable,
+	LatestExecutionPayloadBidTable,
+	PtcWindowEpochTable,
 }
 
 const (
@@ -449,25 +446,39 @@ var TxPoolTables = []string{
 	PoolInfo,
 	SenderLastActivity,
 }
+
 var SentryTables = []string{
 	Inodes,
 	NodeRecords,
 }
-var ConsensusTables = append([]string{
-	CliqueSeparate,
-	CliqueLastSnapshot,
-},
-	ChaindataTables..., //TODO: move bor tables from chaintables to `ConsensusTables`
+
+var (
+	ConsensusTables  = ChaindataTables
+	DownloaderTables = []string{
+		BittorrentCompletion,
+		BittorrentInfo,
+	}
 )
-var HeimdallTables = ChaindataTables
-var PolygonBridgeTables = ChaindataTables
-var DownloaderTables = []string{
-	BittorrentCompletion,
-	BittorrentInfo,
-}
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
-var ChaindataDeprecatedTables = []string{}
+var ChaindataDeprecatedTables = []string{
+	// Pre-E3 plain / hashed state, changeset, and history-index tables.
+	// PlainState / HashedStorage / StorageChangeSet baked the per-account
+	// incarnation counter into the storage key; the rest are dead E2-era
+	// indices. The E3 execution path stores state in kv.AccountsDomain /
+	// kv.StorageDomain / kv.CommitmentDomain, which are incarnation-free.
+	// The `drop_legacy_e2_tables` migration drops these buckets on
+	// databases that still carry them; listing them here marks them as
+	// deprecated so the live schema never recreates them on fresh DBs.
+	PlainState,
+	HashedAccountsDeprecated,
+	HashedStorageDeprecated,
+	AccountChangeSetDeprecated,
+	StorageChangeSetDeprecated,
+	E2AccountsHistory,
+	E2StorageHistory,
+	CodeCacheDeprecated, // dropped by the drop_code_cache_table migration
+}
 
 // Diagnostics tables
 var DiagnosticsTables = []string{
@@ -477,11 +488,15 @@ var DiagnosticsTables = []string{
 
 type CmpFunc func(k1, k2, v1, v2 []byte) int
 
-type TableCfg map[string]TableCfgItem
-type Bucket string
+type (
+	TableCfg map[string]TableCfgItem
+	Bucket   string
+)
 
-type DBI uint32
-type TableFlags uint
+type (
+	DBI        uint32
+	TableFlags uint
+)
 
 const (
 	Default    TableFlags = 0x00
@@ -499,8 +514,14 @@ type TableCfgItem struct {
 }
 
 var ChaindataTablesCfg = TableCfg{
-	HashedStorageDeprecated: {Flags: DupSort},
-	PlainState:              {Flags: DupSort},
+	// E2-era tables (deprecated; see ChaindataDeprecatedTables). The
+	// DupSort flag is preserved here so that opening an existing E2
+	// database for migration uses the right bucket flags before the
+	// drop_legacy_e2_tables migration drops them.
+	PlainState:                 {Flags: DupSort},
+	HashedStorageDeprecated:    {Flags: DupSort},
+	AccountChangeSetDeprecated: {Flags: DupSort},
+	StorageChangeSetDeprecated: {Flags: DupSort},
 
 	TblAccountVals:        {Flags: DupSort},
 	TblAccountHistoryKeys: {Flags: DupSort},
@@ -544,36 +565,18 @@ var AuRaTablesCfg = TableCfg{
 	PendingEpoch: {},
 }
 
-var BorTablesCfg = TableCfg{
-	BorTxLookup:                {Flags: DupSort},
-	BorEvents:                  {Flags: DupSort},
-	BorEventNums:               {Flags: DupSort},
-	BorEventProcessedBlocks:    {Flags: DupSort},
-	BorEventTimes:              {Flags: DupSort},
-	BorSpans:                   {Flags: DupSort},
-	BorSpansIndex:              {Flags: DupSort},
-	BorProducerSelectionsIndex: {Flags: DupSort},
-	BorCheckpoints:             {Flags: DupSort},
-	BorCheckpointEnds:          {Flags: DupSort},
-	BorMilestones:              {Flags: DupSort},
-	BorMilestoneEnds:           {Flags: DupSort},
-	BorProducerSelections:      {Flags: DupSort},
-	BorWitnesses:               {Flags: DupSort},
-	BorWitnessSizes:            {Flags: DupSort},
-}
-
-var TxpoolTablesCfg = TableCfg{}
-var SentryTablesCfg = TableCfg{}
-var ConsensusTablesCfg = TableCfg{}
-var DownloaderTablesCfg = TableCfg{}
-var DiagnosticsTablesCfg = TableCfg{}
-var HeimdallTablesCfg = TableCfg{}
-var PolygonBridgeTablesCfg = TableCfg{}
-var MigrationsTablesCfg = TableCfg{Migrations: {}}
+var (
+	TxpoolTablesCfg      = TableCfg{}
+	SentryTablesCfg      = TableCfg{}
+	ConsensusTablesCfg   = TableCfg{}
+	DownloaderTablesCfg  = TableCfg{}
+	DiagnosticsTablesCfg = TableCfg{}
+	MigrationsTablesCfg  = TableCfg{Migrations: {}}
+)
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: //TODO: move caplindb tables to own table config
+	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: // TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
 	case dbcfg.MigrationsDB:
 		return MigrationsTablesCfg
@@ -585,20 +588,15 @@ func TablesCfgByLabel(label Label) TableCfg {
 		return DownloaderTablesCfg
 	case dbcfg.DiagnosticsDB:
 		return DiagnosticsTablesCfg
-	case dbcfg.HeimdallDB:
-		return HeimdallTablesCfg
-	case dbcfg.PolygonBridgeDB:
-		return PolygonBridgeTablesCfg
 	case dbcfg.ConsensusDB:
 		return ConsensusTablesCfg
 	default:
 		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
 }
+
 func sortBuckets() {
-	sort.SliceStable(ChaindataTables, func(i, j int) bool {
-		return strings.Compare(ChaindataTables[i], ChaindataTables[j]) < 0
-	})
+	slices.Sort(ChaindataTables)
 }
 
 func init() {
@@ -659,19 +657,6 @@ func reinit() {
 			DiagnosticsTablesCfg[name] = TableCfgItem{}
 		}
 	}
-
-	for _, name := range HeimdallTables {
-		_, ok := HeimdallTablesCfg[name]
-		if !ok {
-			HeimdallTablesCfg[name] = TableCfgItem{}
-		}
-	}
-	for _, name := range PolygonBridgeTables {
-		_, ok := PolygonBridgeTablesCfg[name]
-		if !ok {
-			PolygonBridgeTablesCfg[name] = TableCfgItem{}
-		}
-	}
 }
 
 // Temporal
@@ -700,6 +685,8 @@ const (
 	LogAddrIdx    InvertedIdx = 7
 	TracesFromIdx InvertedIdx = 8
 	TracesToIdx   InvertedIdx = 9
+
+	StandaloneIdxLen = 4 // Count of standalone IIs registered via RegisterII (LogTopicIdx..TracesToIdx). Update this when adding a new standalone II.
 )
 
 func (idx InvertedIdx) String() string {
@@ -810,13 +797,6 @@ func String2Domain(in string) (Domain, error) {
 	}
 }
 
-func String2Forkable(in string) (ForkableId, error) {
-	switch in {
-	default:
-		return ForkableId(MaxUint16), fmt.Errorf("unknown forkable name: %s", in)
-	}
-}
-
 const MaxUint16 uint16 = 1<<16 - 1
 
 // --- Deprecated
@@ -877,8 +857,6 @@ const (
 	   	AccountChangeSet has record: bigEndian(N) + A -> X
 	   	PlainState has record: A -> Y
 
-	   See also: docs/programmers_guide/db_walkthrough.MD#table-history-of-accounts
-
 	   As you can see if block N changes much accounts - then all records have repetitive prefix `bigEndian(N)`.
 	   MDBX can store such prefixes only once - by DupSort feature (see `docs/programmers_guide/dupsort.md`).
 	   Both buckets are DupSort-ed and have physical format:
@@ -920,8 +898,6 @@ const (
 	   It allows:
 	     - server task 1. by 1 db operation db.seekInFiles(A+bigEndian(X))
 	     - server task 2. by 1 db operation db.Get(A+0xFF)
-
-	   see also: docs/programmers_guide/db_walkthrough.MD#table-change-sets
 
 	   AccountsHistory:
 

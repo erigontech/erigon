@@ -169,14 +169,14 @@ func roundup(size, blocksize int) int {
 }
 
 // deriveKeys creates the encryption and MAC keys using concatKDF.
-func deriveKeys(hash hash.Hash, z, s1 []byte, keyLen int) (Ke, Km []byte) {
-	K := concatKDF(hash, z, s1, 2*keyLen)
-	Ke = K[:keyLen]
-	Km = K[keyLen:]
+func deriveKeys(hash hash.Hash, z, s1 []byte, keyLen int) (ke, km []byte) {
+	k := concatKDF(hash, z, s1, 2*keyLen)
+	ke = k[:keyLen]
+	km = k[keyLen:]
 	hash.Reset()
-	hash.Write(Km)
-	Km = hash.Sum(Km[:0])
-	return Ke, Km
+	hash.Write(km)
+	km = hash.Sum(km[:0])
+	return ke, km
 }
 
 // messageTag computes the MAC of a message (called the tag) as per
@@ -255,8 +255,12 @@ func Encrypt(rand io.Reader, pub *PublicKey, m, s1, s2 []byte) (ct []byte, err e
 	Ke, Km := deriveKeys(hash, z, s1, params.KeyLen)
 
 	em, err := symEncrypt(rand, params, Ke, m)
-	if err != nil || len(em) <= params.BlockSize {
+	if err != nil {
 		return nil, err
+	}
+
+	if len(em) <= params.BlockSize {
+		return nil, ErrInvalidMessage
 	}
 
 	d := messageTag(params.Hash, Km, em, s2)

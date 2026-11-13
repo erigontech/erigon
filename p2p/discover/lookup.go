@@ -239,7 +239,7 @@ func (it *lookupIterator) lookupFailed(tab *Table, timeout time.Duration) {
 	}
 
 	// Wait for the table to fill.
-	tab.waitForNodes(tout, 1)
+	_ = tab.waitForNodes(tout, 1)
 }
 
 // slowdown applies a delay between creating lookups. This exists to prevent hot-spinning
@@ -253,7 +253,7 @@ func (it *lookupIterator) slowdown() {
 	if diff > minInterval {
 		return
 	}
-	wait := time.NewTimer(diff)
+	wait := time.NewTimer(minInterval - diff)
 	defer wait.Stop()
 	select {
 	case <-wait.C:

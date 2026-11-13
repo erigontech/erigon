@@ -59,7 +59,7 @@ func TestGenerateChain(t *testing.T) {
 
 	// Ensure that key1 has some funds in the genesis block.
 	gspec := &types.Genesis{
-		Config:     &chain.Config{HomesteadBlock: new(uint64), ChainID: big.NewInt(1)},
+		Config:     &chain.Config{HomesteadBlock: new(uint64), ChainID: uint256.NewInt(1)},
 		Difficulty: uint256.NewInt(0),
 		Alloc:      types.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
@@ -69,7 +69,7 @@ func TestGenerateChain(t *testing.T) {
 	// each block and adds different features to gen based on the
 	// block index.
 	signer := types.LatestSignerForChainID(nil)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, gen *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(5, func(i int, gen *blockgen.BlockGen) {
 		switch i {
 		case 0:
 			// In block 1, addr1 sends addr2 some ether.
@@ -112,6 +112,7 @@ func TestGenerateChain(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
+	defer st.Close()
 
 	if m.Current(tx).NumberU64() != 5 {
 		t.Errorf("wrong block number: %d", m.Current(tx).Number())
@@ -144,49 +145,54 @@ func TestGenerateChain(t *testing.T) {
 		hashPacket = append(hashPacket, block.Hash())
 	}
 
-	b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
-		RequestId:         1,
-		GetReceiptsPacket: hashPacket,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+	var receipts eth.ReceiptsRLPPacket
+	for requestID := uint64(1); len(receipts) < len(hashPacket); requestID++ {
+		pendingHashes := hashPacket[len(receipts):]
+		b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
+			RequestId:         requestID,
+			GetReceiptsPacket: pendingHashes,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-	}
 
-	m.ReceiveWg.Wait()
+		m.ReceiveWg.Add(1)
+		for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_GET_RECEIPTS_66, Data: b, PeerId: m.PeerId}) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 
-	msg, err := m.SentMessage(0)
-	if err != nil {
-		t.Fatal(err)
-	}
+		m.ReceiveWg.Wait()
 
-	if sentryproto.MessageId_RECEIPTS_66 != msg.Id {
-		t.Errorf("receipt id %d do not match the expected id %d", msg.Id, sentryproto.MessageId_RECEIPTS_66)
+		msg, err := m.SentMessage(int(requestID - 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if msg.Id != sentryproto.MessageId_RECEIPTS_66 {
+			t.Fatalf("receipt id %d does not match the expected id %d", msg.Id, sentryproto.MessageId_RECEIPTS_66)
+		}
+
+		var resp eth.ReceiptsRLPPacket66
+		if err = rlp.DecodeBytes(msg.GetData(), &resp); err != nil {
+			t.Fatalf("failed to decode receipts response: %v", err)
+		}
+		if resp.RequestId != requestID {
+			t.Fatalf("wrong request id: got %d, want %d", resp.RequestId, requestID)
+		}
+		if received := len(resp.ReceiptsRLPPacket); received == 0 || received > len(pendingHashes) {
+			t.Fatalf("expected 1 to %d receipt entries, got %d", len(pendingHashes), received)
+		}
+		receipts = append(receipts, resp.ReceiptsRLPPacket...)
 	}
 
 	// Decode the response and verify receipt counts per block (structure test).
 	// Block 1 has 1 tx, block 2 has 2 txs, blocks 3-5 have no txs with receipts.
-	var resp eth.ReceiptsRLPPacket66
-	if err = rlp.DecodeBytes(msg.GetData(), &resp); err != nil {
-		t.Fatalf("failed to decode receipts response: %v", err)
-	}
-	if resp.RequestId != 1 {
-		t.Errorf("wrong request id: got %d, want 1", resp.RequestId)
-	}
-	if len(resp.ReceiptsRLPPacket) != 5 {
-		t.Fatalf("expected 5 receipt entries, got %d", len(resp.ReceiptsRLPPacket))
-	}
 	var block1Receipts, block2Receipts types.Receipts
-	if err = rlp.DecodeBytes(resp.ReceiptsRLPPacket[0], &block1Receipts); err != nil {
+	if err = rlp.DecodeBytes(receipts[0], &block1Receipts); err != nil {
 		t.Fatalf("failed to decode block 1 receipts: %v", err)
 	}
-	if err = rlp.DecodeBytes(resp.ReceiptsRLPPacket[1], &block2Receipts); err != nil {
+	if err = rlp.DecodeBytes(receipts[1], &block2Receipts); err != nil {
 		t.Fatalf("failed to decode block 2 receipts: %v", err)
 	}
 	if len(block1Receipts) != 1 {
@@ -201,5 +207,23 @@ func TestGenerateChain(t *testing.T) {
 	if len(block2Receipts) > 1 && block2Receipts[1].CumulativeGasUsed != 42000 {
 		t.Errorf("block 2 receipt 2 cumulative gas: got %d, want 42000", block2Receipts[1].CumulativeGasUsed)
 	}
+}
 
+func TestGenerateChainAttachesBlockAccessList(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges}))
+
+	chainPack, err := m.GenerateChain(1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	block := chainPack.TopBlock
+	bal := block.BlockAccessList()
+	if bal == nil {
+		t.Fatal("generated block does not carry its block access list")
+	}
+	if got, want := bal.Hash(), block.BlockAccessListHash(); want == nil || got != *want {
+		t.Fatalf("block access list hash mismatch: got %s, want %v", got, want)
+	}
 }

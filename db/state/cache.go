@@ -11,12 +11,14 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-func u32noHash(u uint32) uint32        { return u }            //nolint
-func u64noHash(u uint64) uint32        { return uint32(u) }    //nolint
-func u128noHash(u u128) uint32         { return uint32(u.hi) } //nolint
-func u192noHash(u u192) uint32         { return uint32(u.hi) } //nolint
-type u128 struct{ hi, lo uint64 }      //nolint
-type u192 struct{ hi, lo, ext uint64 } //nolint
+func u32noHash(u uint32) uint32 { return u }            //nolint
+func u64noHash(u uint64) uint32 { return uint32(u) }    //nolint
+func u128noHash(u u128) uint32  { return uint32(u.hi) } //nolint
+func u192noHash(u u192) uint32  { return uint32(u.hi) } //nolint
+type (
+	u128 struct{ hi, lo uint64 }      //nolint
+	u192 struct{ hi, lo, ext uint64 } //nolint
+)
 
 type DomainGetFromFileCache struct {
 	*freelru.LRU[uint64, domainGetFromFileCacheItem]
@@ -53,17 +55,19 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 		return
 	}
 	m := c.Metrics()
-	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
+	if m.Hits > 0 {
+		log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
+	}
 }
 
-func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
+func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
 	d := &domainVisible{
 		name:  name,
 		files: files,
 	}
 	limit := domainGetFromFileCacheLimit
 	if name == kv.CodeDomain {
-		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
+		limit /= 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
 	}
 	if limit == 0 {
 		domainGetFromFileCacheEnabled = false
@@ -78,6 +82,7 @@ func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
 	}
 	return v.caches.Get().(*DomainGetFromFileCache)
 }
+
 func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
 	if c == nil {
 		return
@@ -100,6 +105,11 @@ type IISeekInFilesCache struct {
 }
 type iiSeekInFilesCacheItem struct {
 	requested, found uint64
+	lo               uint64 // second half of the key hash: the LRU key alone can collide
+	// position of `found` in .ef file fileIdx, which addresses the .vi accessor.
+	// A file index is stable because each cache pool serves one visible file list.
+	keyOrdinal, rank uint64
+	fileIdx          int
 }
 
 func NewIISeekInFilesCache() *IISeekInFilesCache {
@@ -121,7 +131,7 @@ func (c *IISeekInFilesCache) LogStats(fileBaseName string) {
 	log.Warn("[dbg] II_LRU", "a", fileBaseName, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)), "hit", c.hit, "collisions", m.Collisions, "evictions", m.Evictions, "inserts", m.Inserts, "removals", m.Removals, "limit", iiGetFromFileCacheLimit)
 }
 
-func newIIVisible(name string, files []visibleFile) *iiVisible {
+func newIIVisible(name string, files visibleFiles) *iiVisible {
 	if iiGetFromFileCacheLimit == 0 {
 		iiGetFromFileCacheEnabled = false
 	}
@@ -132,9 +142,11 @@ func newIIVisible(name string, files []visibleFile) *iiVisible {
 	}
 	return ii
 }
+
 func (v *iiVisible) newSeekInFilesCache() *IISeekInFilesCache {
 	return v.caches.Get().(*IISeekInFilesCache)
 }
+
 func (v *iiVisible) returnSeekInFilesCache(c *IISeekInFilesCache) {
 	if c == nil {
 		return

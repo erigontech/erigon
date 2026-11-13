@@ -17,7 +17,6 @@
 package test
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
 	"testing"
@@ -27,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -74,11 +72,11 @@ func newKeyGenerator(rnd *rndGen, nHot, nCold int) *keyGenerator {
 	}
 	for i := range g.hotAddrs {
 		g.hotAddrs[i] = make([]byte, length.Addr)
-		rnd.Read(g.hotAddrs[i])
+		_, _ = rnd.Read(g.hotAddrs[i])
 	}
 	for i := range g.coldAddrs {
 		g.coldAddrs[i] = make([]byte, length.Addr)
-		rnd.Read(g.coldAddrs[i])
+		_, _ = rnd.Read(g.coldAddrs[i])
 	}
 	return g
 }
@@ -167,13 +165,12 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 	stepSize := uint64(cfg.txsPerBlock * cfg.blocksPerStep)
 	db, agg := testDbAndAggregatorBench(b, stepSize)
 
-	ctx := context.Background()
+	ctx := b.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(b, err)
+	domains := newSharedDomainsBench(b, db, rwTx)
 	defer domains.Close()
 
 	rnd := newRnd(42)
@@ -200,7 +197,7 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 				storageKeys := cfg.keysPerTx * 4 / 5
 				accountKeys := cfg.keysPerTx - storageKeys
 
-				for k := 0; k < storageKeys; k++ {
+				for range storageKeys {
 					sKey := keyGen.nextStorageKey()
 					val := make([]byte, 32)
 					binary.BigEndian.PutUint64(val[24:], txNum)
@@ -208,7 +205,7 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 					require.NoError(b, err)
 				}
 
-				for k := 0; k < accountKeys; k++ {
+				for range accountKeys {
 					aKey, aVal := keyGen.nextAccountKey(txNum)
 					err := domains.DomainPut(kv.AccountsDomain, rwTx, aKey, aVal, txNum, nil)
 					require.NoError(b, err)
@@ -235,7 +232,7 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 		if step > 3 {
 			collateStart := time.Now()
 			buildTo := txNum - 2*stepSize
-			err = agg.BuildFiles(buildTo)
+			err = agg.BuildFiles(db, buildTo, unboundedFinalityCtx)
 			require.NoError(b, err)
 			timings.collate += time.Since(collateStart)
 		}
@@ -334,13 +331,12 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 
 	b.Run("Execute_Only", func(b *testing.B) {
 		db, _ := testDbAndAggregatorBench(b, stepSize)
-		ctx := context.Background()
+		ctx := b.Context()
 		rwTx, err := db.BeginTemporalRw(ctx)
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(b, err)
+		domains := newSharedDomainsBench(b, db, rwTx)
 		defer domains.Close()
 
 		rnd := newRnd(42)
@@ -367,13 +363,12 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 
 	b.Run("Commit_Only", func(b *testing.B) {
 		db, _ := testDbAndAggregatorBench(b, stepSize)
-		ctx := context.Background()
+		ctx := b.Context()
 		rwTx, err := db.BeginTemporalRw(ctx)
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(b, err)
+		domains := newSharedDomainsBench(b, db, rwTx)
 		defer domains.Close()
 
 		rnd := newRnd(42)
@@ -404,7 +399,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 
 	b.Run("Flush_Only", func(b *testing.B) {
 		db, _ := testDbAndAggregatorBench(b, stepSize)
-		ctx := context.Background()
+		ctx := b.Context()
 
 		rnd := newRnd(42)
 		keyGen := newKeyGenerator(rnd, cfg.hotAccounts, cfg.coldAccounts)
@@ -414,8 +409,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(b, err)
+		domains := newSharedDomainsBench(b, db, rwTx)
 		defer domains.Close()
 
 		txNum := initAccounts(b, domains, rwTx, keyGen)
@@ -442,13 +436,12 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 	b.Run("Collate_Only", func(b *testing.B) {
 		// Build up enough data in MDBX, then benchmark only the BuildFiles call.
 		db, agg := testDbAndAggregatorBench(b, stepSize)
-		ctx := context.Background()
+		ctx := b.Context()
 		rwTx, err := db.BeginTemporalRw(ctx)
 		require.NoError(b, err)
 		defer rwTx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(b, err)
+		domains := newSharedDomainsBench(b, db, rwTx)
 		defer domains.Close()
 
 		rnd := newRnd(42)
@@ -462,7 +455,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 
 		// Write 10 steps of data to MDBX without building files
 		targetSteps := 10
-		for step := 0; step < targetSteps; step++ {
+		for range targetSteps {
 			for blk := 0; blk < cfg.blocksPerStep; blk++ {
 				for tx := 0; tx < cfg.txsPerBlock; tx++ {
 					txNum++
@@ -485,7 +478,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 		for b.Loop() {
-			err := agg.BuildFiles(txNum - 2*stepSize)
+			err := agg.BuildFiles(db, txNum-2*stepSize, unboundedFinalityCtx)
 			require.NoError(b, err)
 		}
 	})
@@ -509,7 +502,7 @@ func BenchmarkReadAfterLifecycle(b *testing.B) {
 
 	_, db, _ := runLifecycle(b, cfg)
 
-	ctx := context.Background()
+	ctx := b.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)
 	defer rwTx.Rollback()
@@ -537,7 +530,7 @@ func BenchmarkReadAfterLifecycle(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			for _, key := range storageKeys {
-				_, _, err := rwTx.GetLatest(kv.StorageDomain, key)
+				_, _, err := rwTx.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
 				require.NoError(b, err)
 			}
 		}
@@ -547,7 +540,7 @@ func BenchmarkReadAfterLifecycle(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			for _, key := range accountKeys {
-				_, _, err := rwTx.GetLatest(kv.AccountsDomain, key)
+				_, _, err := rwTx.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
 				require.NoError(b, err)
 			}
 		}

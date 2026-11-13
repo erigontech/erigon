@@ -20,8 +20,6 @@
 package tracing
 
 import (
-	"math/big"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -36,6 +34,7 @@ import (
 type OpContext interface {
 	MemoryData() []byte
 	StackData() []uint256.Int
+	Gas() mdgas.MdGas
 	Caller() accounts.Address
 	Address() accounts.Address
 	CallValue() uint256.Int
@@ -49,9 +48,11 @@ type IntraBlockState interface {
 	GetBalance(accounts.Address) (uint256.Int, error)
 	GetNonce(accounts.Address) (uint64, error)
 	GetCode(accounts.Address) ([]byte, error)
+	GetCodeHash(accounts.Address) (accounts.CodeHash, error)
 	GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error)
 	Exist(accounts.Address) (bool, error)
-	GetRefund() mdgas.MdGas
+	HasSelfdestructed(accounts.Address) (bool, error)
+	GetRefund() uint64
 }
 
 // VMContext provides the context for the EVM execution.
@@ -65,6 +66,12 @@ type VMContext struct {
 	ChainConfig     *chain.Config
 	IntraBlockState IntraBlockState
 
+	// Rules is the resolved rule set the EVM ran under. Tracers classify
+	// precompiles from it rather than rebuilding one, so a chain whose forks or
+	// precompile set are resolved per-chain cannot dispatch in the EVM and stay
+	// invisible to the tracer.
+	Rules *chain.Rules
+
 	TxHash common.Hash
 }
 
@@ -72,7 +79,7 @@ type VMContext struct {
 // It contains the block as well as consensus related information.
 type BlockEvent struct {
 	Block     *types.Block
-	TD        *big.Int
+	TD        *uint256.Int
 	Finalized *types.Header
 	Safe      *types.Header
 }
@@ -90,8 +97,14 @@ type (
 	// TxEndHook is called after the execution of a transaction ends.
 	TxEndHook = func(receipt *types.Receipt, err error)
 
+	// TxEndHookV2 takes precedence over TxEndHook.
+	TxEndHookV2 = func(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error)
+
 	// EnterHook is invoked when the processing of a message starts.
 	EnterHook = func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte)
+
+	// EnterHookV2 reports both gas balances and takes precedence over EnterHook.
+	EnterHookV2 = func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte)
 
 	// ExitHook is invoked when the processing of a message ends.
 	// `revert` is true when there was an error during the execution.
@@ -101,14 +114,26 @@ type (
 	// be indicated by `reverted == false` and `err == ErrCodeStoreOutOfGas`.
 	ExitHook = func(depth int, output []byte, gasUsed uint64, err error, reverted bool)
 
+	// ExitHookV2 reports multidimensional gas usage and takes precedence over ExitHook.
+	ExitHookV2 = func(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool)
+
 	// OpcodeHook is invoked just prior to the execution of an opcode.
 	OpcodeHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, rData []byte, depth int, err error)
+
+	// OpcodeHookV2 reports execution and state gas and takes precedence over OpcodeHook.
+	OpcodeHookV2 = func(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, rData []byte, depth int, err error)
 
 	// FaultHook is invoked when an error occurs during the execution of an opcode.
 	FaultHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, depth int, err error)
 
-	// GasChangeHook is invoked when the gas changes.
+	// FaultHookV2 reports execution and state gas and takes precedence over FaultHook.
+	FaultHookV2 = func(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, depth int, err error)
+
+	// GasChangeHook reports changes to the execution gas balance.
 	GasChangeHook = func(old, new uint64, reason GasChangeReason)
+
+	// GasChangeHookV2 takes precedence over GasChangeHook when both are registered.
+	GasChangeHookV2 = func(old, new mdgas.MdGas, reason GasChangeReason)
 
 	/*
 		- Chain events -
@@ -127,9 +152,7 @@ type (
 	// GenesisBlockHook is called when the genesis block is being processed.
 	GenesisBlockHook = func(genesis *types.Block, alloc types.GenesisAlloc)
 
-	// OnSystemCallStartHook is called when a system call is about to be executed. Today,
-	// this hook is invoked when the EIP-4788 system call is about to be executed to set the
-	// beacon block root.
+	// OnSystemCallStartHook is called before a system call.
 	//
 	// After this hook, the EVM call tracing will happened as usual so you will receive a `OnEnter/OnExit`
 	// as well as state hooks between this hook and the `OnSystemCallEndHook`.
@@ -138,9 +161,11 @@ type (
 	// will not be invoked.
 	OnSystemCallStartHook = func()
 
-	// OnSystemCallEndHook is called when a system call has finished executing. Today,
-	// this hook is invoked when the EIP-4788 system call is about to be executed to set the
-	// beacon block root.
+	// OnSystemCallStartHookV2 is called when a system call is about to be executed. Refer
+	// to `OnSystemCallStartHook` for more information.
+	OnSystemCallStartHookV2 = func(vm *VMContext)
+
+	// OnSystemCallEndHook is called after a system call finishes.
 	OnSystemCallEndHook = func()
 
 	/*
@@ -153,8 +178,14 @@ type (
 	// NonceChangeHook is called when the nonce of an account changes.
 	NonceChangeHook = func(addr accounts.Address, prev, new uint64)
 
+	// NonceChangeHookV2 is called when the nonce of an account changes.
+	NonceChangeHookV2 = func(addr accounts.Address, prev, new uint64, reason NonceChangeReason)
+
 	// CodeChangeHook is called when the code of an account changes.
 	CodeChangeHook = func(addr accounts.Address, prevCodeHash accounts.CodeHash, prevCode []byte, codeHash accounts.CodeHash, code []byte)
+
+	// CodeChangeHookV2 is called when the code of an account changes.
+	CodeChangeHookV2 = func(addr accounts.Address, prevCodeHash accounts.CodeHash, prevCode []byte, codeHash accounts.CodeHash, code []byte, reason CodeChangeReason)
 
 	// StorageChangeHook is called when the storage of an account changes.
 	StorageChangeHook = func(addr accounts.Address, slot accounts.StorageKey, prev, new uint256.Int)
@@ -165,27 +196,139 @@ type (
 
 type Hooks struct {
 	// VM events
-	OnTxStart   TxStartHook
-	OnTxEnd     TxEndHook
-	OnEnter     EnterHook
-	OnExit      ExitHook
-	OnOpcode    OpcodeHook
-	OnFault     FaultHook
-	OnGasChange GasChangeHook
+	OnTxStart     TxStartHook
+	OnTxEnd       TxEndHook
+	OnTxEndV2     TxEndHookV2
+	OnEnter       EnterHook
+	OnEnterV2     EnterHookV2
+	OnExit        ExitHook
+	OnExitV2      ExitHookV2
+	OnOpcode      OpcodeHook
+	OnOpcodeV2    OpcodeHookV2
+	OnFault       FaultHook
+	OnFaultV2     FaultHookV2
+	OnGasChange   GasChangeHook
+	OnGasChangeV2 GasChangeHookV2
+	OnOpcodeMask  *OpcodeMask
 	// Chain events
-	OnBlockchainInit  BlockchainInitHook
-	OnBlockStart      BlockStartHook
-	OnBlockEnd        BlockEndHook
-	OnGenesisBlock    GenesisBlockHook
-	OnSystemCallStart OnSystemCallStartHook
-	OnSystemCallEnd   OnSystemCallEndHook
+	OnBlockchainInit    BlockchainInitHook
+	OnBlockStart        BlockStartHook
+	OnBlockEnd          BlockEndHook
+	OnGenesisBlock      GenesisBlockHook
+	OnSystemCallStart   OnSystemCallStartHook
+	OnSystemCallStartV2 OnSystemCallStartHookV2
+	OnSystemCallEnd     OnSystemCallEndHook
 	// State events
 	OnBalanceChange BalanceChangeHook
 	OnNonceChange   NonceChangeHook
+	OnNonceChangeV2 NonceChangeHookV2
 	OnCodeChange    CodeChangeHook
+	OnCodeChangeV2  CodeChangeHookV2
 	OnStorageChange StorageChangeHook
 	OnLog           LogHook
 	Flush           func(tx types.Transaction)
+}
+
+func (h *Hooks) HasTxEndHook() bool {
+	return h != nil && (h.OnTxEndV2 != nil || h.OnTxEnd != nil)
+}
+
+func (h *Hooks) EmitTxEnd(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
+	if h == nil {
+		return
+	}
+	if h.OnTxEndV2 != nil {
+		h.OnTxEndV2(receipt, txnGasUsage, err)
+	} else if h.OnTxEnd != nil {
+		h.OnTxEnd(receipt, err)
+	}
+}
+
+func (h *Hooks) HasEnterHook() bool {
+	return h != nil && (h.OnEnterV2 != nil || h.OnEnter != nil)
+}
+
+func (h *Hooks) EmitEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
+	if h == nil {
+		return
+	}
+	if h.OnEnterV2 != nil {
+		h.OnEnterV2(depth, typ, from, to, precompile, input, gas, value, code)
+	} else if h.OnEnter != nil {
+		h.OnEnter(depth, typ, from, to, precompile, input, gas.Execution, value, code)
+	}
+}
+
+func (h *Hooks) HasExitHook() bool {
+	return h != nil && (h.OnExitV2 != nil || h.OnExit != nil)
+}
+
+func (h *Hooks) EmitExit(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
+	if h == nil {
+		return
+	}
+	if h.OnExitV2 != nil {
+		h.OnExitV2(depth, output, gasUsed, err, reverted)
+	} else if h.OnExit != nil {
+		h.OnExit(depth, output, gasUsed.Execution, err, reverted)
+	}
+}
+
+func (h *Hooks) HasOpcodeHook() bool {
+	return h != nil && (h.OnOpcodeV2 != nil || h.OnOpcode != nil)
+}
+
+func (h *Hooks) EmitOpcode(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, rData []byte, depth int, err error) {
+	if h == nil {
+		return
+	}
+	if h.OnOpcodeV2 != nil {
+		h.OnOpcodeV2(pc, op, gas, cost, scope, rData, depth, err)
+	} else if h.OnOpcode != nil {
+		h.OnOpcode(pc, op, gas.Execution, cost.Execution, scope, rData, depth, err)
+	}
+}
+
+func (h *Hooks) HasFaultHook() bool {
+	return h != nil && (h.OnFaultV2 != nil || h.OnFault != nil)
+}
+
+func (h *Hooks) EmitFault(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, depth int, err error) {
+	if h == nil {
+		return
+	}
+	if h.OnFaultV2 != nil {
+		h.OnFaultV2(pc, op, gas, cost, scope, depth, err)
+	} else if h.OnFault != nil {
+		h.OnFault(pc, op, gas.Execution, cost.Execution, scope, depth, err)
+	}
+}
+
+func (h *Hooks) HasGasChangeHook() bool {
+	return h != nil && (h.OnGasChangeV2 != nil || h.OnGasChange != nil)
+}
+
+// EmitGasChange prefers V2; the legacy hook receives only execution gas.
+func (h *Hooks) EmitGasChange(old, new mdgas.MdGas, reason GasChangeReason) {
+	if h == nil || reason == GasChangeIgnored {
+		return
+	}
+	if h.OnGasChangeV2 != nil {
+		h.OnGasChangeV2(old, new, reason)
+	} else if h.OnGasChange != nil {
+		h.OnGasChange(old.Execution, new.Execution, reason)
+	}
+}
+
+func (h *Hooks) EmitSystemCallStart(vmctx *VMContext) {
+	if h == nil {
+		return
+	}
+	if h.OnSystemCallStartV2 != nil && vmctx != nil {
+		h.OnSystemCallStartV2(vmctx)
+	} else if h.OnSystemCallStart != nil {
+		h.OnSystemCallStart()
+	}
 }
 
 // BalanceChangeReason is used to indicate the reason for a balance change, useful
@@ -237,6 +380,9 @@ const (
 	// account within the same txn (captured at end of tx).
 	// Note it doesn't account for a self-destruct which appoints itself as recipient.
 	BalanceDecreaseSelfdestructBurn BalanceChangeReason = 14
+	// BalanceChangeRevert is emitted when the balance is reverted back to a previous value due to call failure.
+	// It is only emitted when the tracer has opted in to use the journaling wrapper (WrapWithJournal).
+	BalanceChangeRevert BalanceChangeReason = 15
 )
 
 // GasChangeReason is used to indicate the reason for a gas change, useful
@@ -280,9 +426,9 @@ const (
 	// executed completed. This value is always positive as we are giving gas back to the you, the left over gas of the child.
 	// If there was no gas left to be refunded, no such even will be emitted.
 	GasChangeCallLeftOverRefunded GasChangeReason = 7
-	// GasChangeCallContractCreation is the amount of gas that will be burned for a CREATE.
+	// GasChangeCallContractCreation is gas forwarded to a CREATE child.
 	GasChangeCallContractCreation GasChangeReason = 8
-	// GasChangeContractCreation is the amount of gas that will be burned for a CREATE2.
+	// GasChangeCallContractCreation2 is gas forwarded to a CREATE2 child.
 	GasChangeCallContractCreation2 GasChangeReason = 9
 	// GasChangeCallCodeStorage is the amount of gas that will be charged for code storage.
 	GasChangeCallCodeStorage GasChangeReason = 10
@@ -297,8 +443,108 @@ const (
 	GasChangeCallFailedExecution GasChangeReason = 14
 	// GasChangeDelegatedDesignation is the amount of gas that will be charged for resolution of delegated designation.
 	GasChangeDelegatedDesignation GasChangeReason = 15
+	// GasChangeCallStateGasReturned is EIP-8037 state gas moving out of the reservoir back into gas_left, after a
+	// child frame refilled a slot this frame had spilled gas_left to allocate. This value is always positive. It is
+	// not GasChangeCallLeftOverRefunded: no gas crosses a frame boundary, it changes dimension within one frame.
+	GasChangeCallStateGasReturned GasChangeReason = 16
+	// GasChangeRefundRevertedState is state gas restored on frame rollback.
+	GasChangeRefundRevertedState GasChangeReason = 17
+	// GasChangeCallGasForwarded is gas forwarded to a child call.
+	GasChangeCallGasForwarded GasChangeReason = 18
+	// state gas charged for account creation before the transaction's first frame.
+	GasChangeRuntimeNewAccount GasChangeReason = 19
+	// GasChangeTxAuthorization is gas charged for processing an EIP-7702 authorization.
+	GasChangeTxAuthorization GasChangeReason = 20
+	// GasChangeRefundAccountCreation is state gas refunded for cancelled account creation.
+	GasChangeRefundAccountCreation GasChangeReason = 21
+	// gas charged to reach the transaction calldata floor.
+	GasChangeTxDataFloor GasChangeReason = 22
 
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.
 	GasChangeIgnored GasChangeReason = 0xFF
 )
+
+// NonceChangeReason is used to indicate the reason for a nonce change.
+type NonceChangeReason byte
+
+//go:generate go run golang.org/x/tools/cmd/stringer -type=NonceChangeReason -trimprefix NonceChange -output gen_nonce_change_reason_stringer.go
+
+const (
+	NonceChangeUnspecified NonceChangeReason = 0
+
+	// NonceChangeGenesis is the nonce allocated to accounts at genesis.
+	NonceChangeGenesis NonceChangeReason = 1
+
+	// NonceChangeEoACall is the nonce change due to an EoA call.
+	NonceChangeEoACall NonceChangeReason = 2
+
+	// NonceChangeContractCreator is the nonce change of an account creating a contract.
+	NonceChangeContractCreator NonceChangeReason = 3
+
+	// NonceChangeNewContract is the nonce change of a newly created contract.
+	NonceChangeNewContract NonceChangeReason = 4
+
+	// NonceChangeAuthorization is the nonce change due to an EIP-7702 authorization.
+	NonceChangeAuthorization NonceChangeReason = 5
+
+	// NonceChangeRevert is emitted when the nonce is reverted back to a previous value due to call failure.
+	// It is only emitted when the tracer has opted in to use the journaling wrapper (WrapWithJournal).
+	NonceChangeRevert NonceChangeReason = 6
+
+	// NonceChangeSelfdestruct is emitted when the nonce is reset to zero due to a self-destruct.
+	// Spelling (lowercase "d") matches geth; CodeChangeSelfDestruct uses capital "D" — same
+	// inconsistency carried for parity.
+	NonceChangeSelfdestruct NonceChangeReason = 7
+)
+
+// CodeChangeReason is used to indicate the reason for a code change.
+type CodeChangeReason byte
+
+//go:generate go run golang.org/x/tools/cmd/stringer -type=CodeChangeReason -trimprefix=CodeChange -output gen_code_change_reason_stringer.go
+
+const (
+	CodeChangeUnspecified CodeChangeReason = 0
+
+	// CodeChangeContractCreation is when a new contract is deployed via CREATE/CREATE2 operations.
+	CodeChangeContractCreation CodeChangeReason = 1
+
+	// CodeChangeGenesis is when contract code is set during blockchain genesis or initial setup.
+	CodeChangeGenesis CodeChangeReason = 2
+
+	// CodeChangeAuthorization is when code is set via EIP-7702 Set Code Authorization.
+	CodeChangeAuthorization CodeChangeReason = 3
+
+	// CodeChangeAuthorizationClear is when EIP-7702 delegation is cleared by setting to zero address.
+	CodeChangeAuthorizationClear CodeChangeReason = 4
+
+	// CodeChangeSelfDestruct is when contract code is cleared due to self-destruct.
+	CodeChangeSelfDestruct CodeChangeReason = 5
+
+	// CodeChangeRevert is emitted when the code is reverted back to a previous value due to call failure.
+	// It is only emitted when the tracer has opted in to use the journaling wrapper (WrapWithJournal).
+	CodeChangeRevert CodeChangeReason = 6
+)
+
+// OpcodeMask is the set of opcodes a tracer asks to see, one bit per opcode so the
+// whole set is 32 bytes and the interpreter's test stays inside one cache line.
+// The words are unexported so a mask shared by several tracers cannot be narrowed
+// through one of them.
+type OpcodeMask struct{ words [4]uint64 }
+
+// NewOpcodeMask returns a mask holding exactly ops.
+func NewOpcodeMask(ops ...byte) *OpcodeMask {
+	var m OpcodeMask
+	for _, op := range ops {
+		m.words[op>>6] |= 1 << (op & 63)
+	}
+	return &m
+}
+
+// wants reports whether op is in the mask. A nil mask wants everything.
+func (m *OpcodeMask) wants(op byte) bool {
+	return m == nil || m.words[op>>6]&(1<<(op&63)) != 0
+}
+
+// WantsOpcode reports whether the hooks ask to see op.
+func (h *Hooks) WantsOpcode(op byte) bool { return h.OnOpcodeMask.wants(op) }

@@ -17,11 +17,13 @@
 package merkle_tree
 
 import (
+	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/common"
 	"github.com/prysmaticlabs/gohashtree"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 var globalHasher *merkleHasher
@@ -31,11 +33,11 @@ const initialBufferSize = 0 // it is whatever
 // merkleHasher is used internally to provide shared buffer internally to the merkle_tree package.
 type merkleHasher struct {
 	// internalBuffer is the shared buffer we use for each operation
-	internalBuffer           [][32]byte
-	internalBufferForSSZList [][32]byte
+	internalBuffer [][32]byte
+	// packBuffer is scratch reused by transactionsListRoot to pack each transaction
+	packBuffer [][32]byte
 	// mu is the lock to ensure thread safety
-	mu  sync.Mutex
-	mu2 sync.Mutex // lock onto ssz list buffer
+	mu sync.Mutex
 }
 
 func newMerkleHasher() *merkleHasher {
@@ -46,6 +48,14 @@ func newMerkleHasher() *merkleHasher {
 
 // merkleizeTrieLeaves returns intermediate roots of given leaves.
 func (m *merkleHasher) merkleizeTrieLeavesFlat(leaves []byte, out []byte, limit uint64) (err error) {
+	chunks := uint64(len(leaves)+31) / 32
+	if chunks > limit {
+		return fmt.Errorf("merkleize: %d chunks exceed limit %d", chunks, limit)
+	}
+	if chunks == 0 {
+		copy(out, ZeroHashes[GetDepth(limit)][:])
+		return nil
+	}
 	return m.merkleizeTrieLeavesFlatWithStart(leaves, out, limit, 0)
 }
 
@@ -75,20 +85,9 @@ func (m *merkleHasher) getBuffer(size int) [][32]byte {
 	return m.internalBuffer[:size]
 }
 
-// getBuffer provides buffer of given size.
-func (m *merkleHasher) getBufferForSSZList(size int) [][32]byte {
-	if size > len(m.internalBufferForSSZList) {
-		m.internalBufferForSSZList = make([][32]byte, size*2)
-	}
-	return m.internalBufferForSSZList[:size]
-}
-
 func (m *merkleHasher) getBufferFromFlat(xs []byte) [][32]byte {
-	buf := m.getBuffer(len(xs) / 32)
-	for i := 0; i < len(xs)/32; i = i + 1 {
-		copy(buf[i][:], xs[i*32:(i+1)*32])
-	}
-	return buf
+	n := (len(xs) + 31) / 32
+	return packBitsInto(m.getBuffer(n+1), xs)
 }
 
 func (m *merkleHasher) transactionsListRoot(transactions [][]byte) ([32]byte, error) {
@@ -99,14 +98,14 @@ func (m *merkleHasher) transactionsListRoot(transactions [][]byte) ([32]byte, er
 	leaves := m.getBuffer(len(transactions))
 	for i, transaction := range transactions {
 		transactionLength := uint64(len(transaction))
-		packedTransactions := packBits(transaction) // Pack transactions
-		transactionsBaseRoot, err := MerkleizeVector(packedTransactions, 33554432)
+		m.packBuffer = packBitsInto(m.packBuffer, transaction)
+		transactionsBaseRoot, err := MerkleizeVector(m.packBuffer, 33554432)
 		if err != nil {
 			return [32]byte{}, err
 		}
 
 		lengthRoot := Uint64Root(transactionLength)
-		leaves[i] = utils.Sha256(transactionsBaseRoot[:], lengthRoot[:])
+		leaves[i] = crypto.Sha256(transactionsBaseRoot[:], lengthRoot[:])
 	}
 	transactionsBaseRoot, err := MerkleizeVector(leaves, 1048576)
 	if err != nil {
@@ -115,5 +114,5 @@ func (m *merkleHasher) transactionsListRoot(transactions [][]byte) ([32]byte, er
 
 	countRoot := Uint64Root(txCount)
 
-	return utils.Sha256(transactionsBaseRoot[:], countRoot[:]), nil
+	return crypto.Sha256(transactionsBaseRoot[:], countRoot[:]), nil
 }

@@ -38,8 +38,15 @@ func NewSelectorModel(includeDomains, includeExts, excludeDomains, excludeExts [
 	exts = append(exts, extCfgMap[domainType]...)
 	exts = append(exts, extCfgMap[idxType]...)
 
+	sel := initialSelection(domains, res, includeDomains, includeExts, excludeDomains, excludeExts)
+	return &SelectorModel{domains: domains, exts: exts, selected: sel, domainTypesMap: res}
+}
+
+// initialSelection returns the domains and extensions to pre-select. Each
+// include filter acts as a whitelist when non-empty; otherwise the matching
+// exclude filter acts as a blacklist.
+func initialSelection(domains []string, domainTypes map[string]string, includeDomains, includeExts, excludeDomains, excludeExts []string) map[string]struct{} {
 	sel := map[string]struct{}{}
-	// determine domains to show
 	for _, d := range domains {
 		if len(includeDomains) > 0 {
 			if slices.Contains(includeDomains, d) {
@@ -49,19 +56,21 @@ func NewSelectorModel(includeDomains, includeExts, excludeDomains, excludeExts [
 			sel[d] = struct{}{}
 		}
 	}
-	// determine exts to show
-	for selected := range sel {
-		for _, e := range extCfgMap[res[selected]] {
-			if slices.Contains(includeExts, e) {
-				sel[e] = struct{}{}
-				continue
-			}
-			if !slices.Contains(excludeExts, e) {
+	for _, d := range domains {
+		if _, ok := sel[d]; !ok {
+			continue
+		}
+		for _, e := range extCfgMap[domainTypes[d]] {
+			if len(includeExts) > 0 {
+				if slices.Contains(includeExts, e) {
+					sel[e] = struct{}{}
+				}
+			} else if !slices.Contains(excludeExts, e) {
 				sel[e] = struct{}{}
 			}
 		}
 	}
-	return &SelectorModel{domains: domains, exts: exts, selected: sel, domainTypesMap: res}
+	return sel
 }
 
 func (m *SelectorModel) Init() tea.Cmd { return nil }
@@ -142,10 +151,7 @@ func (m *SelectorModel) availableListHeight() int {
 	if m.height == 0 {
 		return 999
 	}
-	avail := m.height - 7
-	if avail < 1 {
-		avail = 1
-	}
+	avail := max(m.height-7, 1)
 	return avail
 }
 
@@ -157,10 +163,7 @@ func (m *SelectorModel) clampViewOffset() {
 	if m.cursorRow >= m.viewOffset+avail {
 		m.viewOffset = m.cursorRow - avail + 1
 	}
-	maxOffset := m.columnLength() - avail
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
+	maxOffset := max(m.columnLength()-avail, 0)
 	if m.viewOffset > maxOffset {
 		m.viewOffset = maxOffset
 	}
@@ -177,10 +180,7 @@ func (m *SelectorModel) View() tea.View {
 	avail := m.availableListHeight()
 	maxRows := max(len(m.domains), len(m.exts))
 	start := m.viewOffset
-	end := start + avail
-	if end > maxRows {
-		end = maxRows
-	}
+	end := min(start+avail, maxRows)
 
 	for i := start; i < end; i++ {
 		left := "   "

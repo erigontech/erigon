@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"testing"
@@ -24,7 +25,10 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var hashParseTests = []struct {
@@ -55,10 +59,14 @@ var hashEncodeTests = []struct {
 	hashCount   int
 	expectedErr bool
 }{
-	{payloadStr: "e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
-		hashesStr: "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328", hashCount: 1, expectedErr: false},
-	{hashesStr: fmt.Sprintf("%x", toHashes(1, 2, 3)),
-		payloadStr: "f863a00100000000000000000000000000000000000000000000000000000000000000a00200000000000000000000000000000000000000000000000000000000000000a00300000000000000000000000000000000000000000000000000000000000000", hashCount: 3, expectedErr: false},
+	{
+		payloadStr: "e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
+		hashesStr:  "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328", hashCount: 1, expectedErr: false,
+	},
+	{
+		hashesStr:  fmt.Sprintf("%x", toHashes(1, 2, 3)),
+		payloadStr: "f863a00100000000000000000000000000000000000000000000000000000000000000a00200000000000000000000000000000000000000000000000000000000000000a00300000000000000000000000000000000000000000000000000000000000000", hashCount: 3, expectedErr: false,
+	},
 }
 
 func TestEncodeHash(t *testing.T) {
@@ -79,8 +87,10 @@ var gpt66EncodeTests = []struct {
 	requestID   uint64
 	expectedErr bool
 }{
-	{payloadStr: "e68306f854e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
-		hashesStr: "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328", hashCount: 1, requestID: 456788, expectedErr: false},
+	{
+		payloadStr: "e68306f854e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
+		hashesStr:  "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328", hashCount: 1, requestID: 456788, expectedErr: false,
+	},
 }
 
 // TestEncodeGPT66 tests the encoding of GetPoolTransactions66 packet
@@ -195,6 +205,118 @@ var tpEncodeTests = []struct {
 	},
 }
 
+// TestEIP7702BatchPoisoning is a regression test for
+// https://github.com/ethereum-bounty/erigon/issues/7. A single EIP-7702
+// SetCode transaction carrying one auth tuple with an unrecoverable signature
+// must not cause sibling transactions in the same Transactions / PooledTransactions
+// devp2p packet to be dropped, nor invalidate the SetCode transaction itself.
+// Per the EIP, "if any step fails for a tuple, processing continues to the
+// next one" — invalid auth tuples are skipped at execution time and the
+// enclosing transaction remains valid (the sender still pays for every tuple).
+func TestEIP7702BatchPoisoning(t *testing.T) {
+	chainID := uint256.NewInt(1)
+	signer := types.LatestSignerForChainID(chainID)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	to := common.Address{0x42}
+
+	mkDynFee := func(nonce uint64) types.Transaction {
+		unsigned := &types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				Nonce:    nonce,
+				GasLimit: 21000,
+				To:       &to,
+			},
+			ChainID: *chainID,
+			TipCap:  *uint256.NewInt(1_000_000),
+			FeeCap:  *uint256.NewInt(1_000_000),
+		}
+		signed, signErr := types.SignTx(unsigned, *signer, key)
+		require.NoError(t, signErr)
+		return signed
+	}
+
+	// SetCode tx with one auth tuple whose signature is unrecoverable (R=S=0).
+	// The sender's signature on the transaction itself is still valid.
+	setCodeUnsigned := &types.SetCodeTransaction{
+		DynamicFeeTransaction: types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				Nonce:    1,
+				GasLimit: 100_000,
+				To:       &to,
+			},
+			ChainID: *chainID,
+			TipCap:  *uint256.NewInt(1_000_000),
+			FeeCap:  *uint256.NewInt(1_000_000),
+		},
+		Authorizations: []types.Authorization{{
+			ChainID: *chainID,
+			Address: common.Address{0x99},
+			Nonce:   0,
+			YParity: 0,
+			// R and S left zero — RecoverSigner rejects the tuple.
+		}},
+	}
+	setCode, err := types.SignTx(setCodeUnsigned, *signer, key)
+	require.NoError(t, err)
+
+	// Three-tx batch: sibling, poisoned SetCode, sibling.
+	txns := []types.Transaction{mkDynFee(0), setCode, mkDynFee(2)}
+	txnsRlp := make([][]byte, len(txns))
+	for i, txn := range txns {
+		buf := bytes.NewBuffer(nil)
+		require.NoError(t, txn.MarshalBinary(buf))
+		txnsRlp[i] = buf.Bytes()
+	}
+
+	cases := []struct {
+		name   string
+		encode func() []byte
+		parse  func(payload []byte, slots *TxnSlots) error
+	}{
+		{
+			name:   "Transactions",
+			encode: func() []byte { return EncodeTransactions(txnsRlp, nil) },
+			parse: func(payload []byte, slots *TxnSlots) error {
+				ctx := NewTxnParseContext(*chainID)
+				_, parseErr := ParseTransactions(payload, 0, ctx, slots, nil)
+				return parseErr
+			},
+		},
+		{
+			name:   "PooledTransactions66",
+			encode: func() []byte { return EncodePooledTransactions66(txnsRlp, 1, nil) },
+			parse: func(payload []byte, slots *TxnSlots) error {
+				ctx := NewTxnParseContext(*chainID)
+				_, _, parseErr := ParsePooledTransactions66(payload, 0, ctx, slots, nil)
+				return parseErr
+			},
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			r := require.New(t)
+			slots := &TxnSlots{}
+			r.NoError(tt.parse(tt.encode(), slots))
+			// All three txns survive — no batch poisoning.
+			r.Len(slots.Txns, 3)
+
+			// Siblings parsed normally.
+			r.Equal(byte(DynamicFeeTxnType), slots.Txns[0].TxType())
+			r.Equal(byte(DynamicFeeTxnType), slots.Txns[2].TxType())
+
+			// Invalid authorization signatures must not reject the transaction or its
+			// siblings. Preserve the full list because EIP-7702 charges intrinsic gas
+			// for every tuple; recovery is deferred until pool admission.
+			setCodeSlot := slots.Txns[1]
+			r.Equal(byte(SetCodeTxnType), setCodeSlot.TxType())
+			r.Len(setCodeSlot.Txn.GetAuthorizations(), 1)
+			r.Empty(setCodeSlot.AuthAndNonces)
+		})
+	}
+}
+
 func TestTransactionsPacket(t *testing.T) {
 	for i, tt := range tpEncodeTests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
@@ -229,5 +351,85 @@ func TestTransactionsPacket(t *testing.T) {
 			require.Equal(0, slots.Senders.Len())
 			require.Empty(slots.IsLocal)
 		})
+	}
+}
+
+func TestTransactionPacketCountLimit(t *testing.T) {
+	legacy := hexutil.MustDecodeHex("c98080808080801b0101")
+	txns := make([][]byte, maxTransactionsPerPacket+1)
+	for i := range txns {
+		txns[i] = legacy
+		if i%2 != 0 {
+			txns[i] = tpEncodeTests[0].txns[0]
+		}
+	}
+	tests := []struct {
+		name        string
+		count       int
+		known       bool
+		invalidTail bool
+	}{
+		{name: "empty"},
+		{name: "at limit", count: maxTransactionsPerPacket},
+		{name: "at limit known", count: maxTransactionsPerPacket, known: true},
+		{name: "over limit", count: maxTransactionsPerPacket + 1},
+		{name: "over limit known", count: maxTransactionsPerPacket + 1, known: true},
+		{name: "invalid past limit", count: maxTransactionsPerPacket + 1, invalidTail: true},
+	}
+	for _, pooled := range []bool{false, true} {
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("pooled=%t/%s", pooled, tt.name), func(t *testing.T) {
+				ctx := NewTxnParseContext(*uint256.NewInt(5)).ChainIDRequired()
+				decoded, checked := 0, 0
+				ctx.ValidateRLP(func(txn []byte) error {
+					decoded++
+					return ValidateSerializedTxn(txn)
+				})
+				validateHash := func([]byte) error {
+					checked++
+					if tt.known {
+						return ErrRejected
+					}
+					return nil
+				}
+				var slots TxnSlots
+				var payload []byte
+				var pos int
+				var err error
+				if pooled {
+					payload = EncodePooledTransactions66(txns[:tt.count], 1, nil)
+					if tt.invalidTail {
+						payload[len(payload)-len(legacy)] = 0xff
+					}
+					var requestID uint64
+					requestID, pos, err = ParsePooledTransactions66(payload, 0, ctx, &slots, validateHash)
+					require.Equal(t, uint64(1), requestID)
+				} else {
+					payload = EncodeTransactions(txns[:tt.count], nil)
+					if tt.invalidTail {
+						payload[len(payload)-len(legacy)] = 0xff
+					}
+					pos, err = ParseTransactions(payload, 0, ctx, &slots, validateHash)
+				}
+				if tt.count > maxTransactionsPerPacket {
+					require.ErrorIs(t, err, ErrParseTxn)
+					require.ErrorContains(t, err, "too many transactions")
+					require.Zero(t, decoded)
+					require.Zero(t, checked)
+					require.Equal(t, TxnSlots{}, slots)
+					return
+				}
+				require.NoError(t, err)
+				require.Equal(t, len(payload), pos)
+				require.Equal(t, tt.count, decoded)
+				require.Equal(t, tt.count, checked)
+				expected := tt.count
+				if tt.known {
+					expected = 0
+				}
+				require.Len(t, slots.Txns, expected)
+				require.NoError(t, slots.Valid())
+			})
+		}
 	}
 }

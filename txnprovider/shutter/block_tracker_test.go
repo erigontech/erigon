@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -67,4 +68,71 @@ func TestBlockTracker(t *testing.T) {
 	defer waitCtxCancel2()
 	err = bt.Wait(waitCtx2, 15)
 	require.NoError(t, err)
+}
+
+// settlingContext lets every other goroutine in the bubble block or exit before it reports done.
+type settlingContext struct{ context.Context }
+
+func (c settlingContext) Done() <-chan struct{} {
+	synctest.Wait()
+	return c.Context.Done()
+}
+
+func TestBlockTrackerWaitReportsCancellationForAnUnseenBlock(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		bt := shutter.NewBlockTracker(testlog.Logger(t, log.LvlTrace), nil, nil)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		for range 100 {
+			require.ErrorIs(t, bt.Wait(settlingContext{ctx}, 15), context.Canceled)
+		}
+	})
+}
+
+func TestBlockTrackerWaitReportsCancellationAfterTheTrackerStops(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	logger := testlog.Logger(t, log.LvlTrace)
+	bl := shutter.NewBlockListener(logger, nil)
+	bt := shutter.NewBlockTracker(logger, bl, func(ctx context.Context) (*uint64, error) { return nil, ctx.Err() })
+	require.ErrorIs(t, bt.Run(ctx), context.Canceled)
+
+	waitCtx, cancelWait := context.WithCancel(t.Context())
+	cancelWait()
+	require.ErrorIs(t, bt.Wait(waitCtx, 15), context.Canceled)
+}
+
+// cancelledAfterCheckContext is cancelled by its first Err call, which still reports it as live, so the
+// cancellation lands between the waiter's check and its Cond.Wait.
+type cancelledAfterCheckContext struct {
+	context.Context
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+func (c *cancelledAfterCheckContext) Err() error {
+	first := false
+	c.once.Do(func() { first = true })
+	if !first {
+		return c.Context.Err()
+	}
+	c.cancel()
+	time.Sleep(10 * time.Millisecond)
+	return nil
+}
+
+func TestBlockTrackerWaitReturnsWhenCancelledRightAfterItsWaiterChecks(t *testing.T) {
+	t.Parallel()
+	bt := shutter.NewBlockTracker(testlog.Logger(t, log.LvlTrace), nil, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	returned := make(chan error, 1)
+	go func() { returned <- bt.Wait(&cancelledAfterCheckContext{Context: ctx, cancel: cancel}, 15) }()
+	select {
+	case err := <-returned:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Wait missed a cancellation")
+	}
 }

@@ -17,17 +17,16 @@
 package kv
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
-	"maps"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -40,12 +39,15 @@ type RwWrapper struct {
 func (w RwWrapper) Update(ctx context.Context, f func(tx RwTx) error) error {
 	return errors.New("Update not implemented")
 }
+
 func (w RwWrapper) UpdateNosync(ctx context.Context, f func(tx RwTx) error) error {
 	return errors.New("UpdateNosync not implemented")
 }
+
 func (w RwWrapper) BeginRw(ctx context.Context) (RwTx, error) {
 	return nil, errors.New("BeginRw not implemented")
 }
+
 func (w RwWrapper) BeginRwNosync(ctx context.Context) (RwTx, error) {
 	return nil, errors.New("BeginRwNosync not implemented")
 }
@@ -92,7 +94,7 @@ func BigChunks(db RoDB, table string, from []byte, walker func(tx Tx, k, v []byt
 				stop = true
 			}
 
-			from = common.Copy(k) // next transaction will start from this key
+			from = bytes.Clone(k) // next transaction will start from this key
 
 			return nil
 		}); err != nil {
@@ -143,7 +145,8 @@ func GetBool(tx Getter, bucket string, k []byte) (enabled bool, err error) {
 	return bytes2bool(vBytes), nil
 }
 
-func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string, from []byte, amount uint32) (clean func()) {
+// ReadAheadDeprecated is the legacy amount-bounded prefetcher (NewReadAhead is the windowed one).
+func ReadAheadDeprecated(ctx context.Context, db RoDB, progress *atomic.Bool, table string, from []byte, amount uint32) (clean func()) {
 	if db == nil {
 		return func() {}
 	}
@@ -156,9 +159,7 @@ func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string
 		cancel()
 		wg.Wait()
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer progress.Store(false)
 		_ = db.View(ctx, func(tx Tx) error {
 			c, err := tx.Cursor(table)
@@ -167,13 +168,13 @@ func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string
 			}
 			defer c.Close()
 
+			var sink byte
+			defer func() { warmupSink.Add(uint64(sink)) }()
 			for k, v, err := c.Seek(from); k != nil && amount > 0; k, v, err = c.Next() {
 				if err != nil {
 					return err
 				}
-				if len(v) > 0 {
-					_, _ = v[0], v[len(v)-1]
-				}
+				sink = touchValue(sink, v)
 				amount--
 				select {
 				case <-ctx.Done():
@@ -183,7 +184,7 @@ func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string
 			}
 			return nil
 		})
-	}()
+	})
 	return clean
 }
 
@@ -220,8 +221,8 @@ func LastKey(tx Tx, table string) ([]byte, error) {
 func NextSubtree(in []byte) ([]byte, bool) {
 	r := make([]byte, len(in))
 	copy(r, in)
-	for i := len(r) - 1; i >= 0; i-- {
-		if r[i] != 255 {
+	for i, v := range slices.Backward(r) {
+		if v != 255 {
 			r[i]++
 			return r, true
 		}
@@ -229,19 +230,6 @@ func NextSubtree(in []byte) ([]byte, bool) {
 		r = r[:i] // make it shorter, because in tries after 11ff goes 12, but not 1200
 	}
 	return nil, false
-}
-
-func IncrementKey(tx RwTx, table string, k []byte) error {
-	v, err := tx.GetOne(table, k)
-	if err != nil {
-		return err
-	}
-	var version uint64
-	if len(v) == 8 {
-		version = binary.BigEndian.Uint64(v)
-	}
-	version++
-	return tx.Put(table, k, hexutil.EncodeTs(version))
 }
 
 type DomainEntryDiff struct {
@@ -256,10 +244,6 @@ type DomainDiff struct {
 	prevValsSlice []DomainEntryDiff
 
 	currentStepBuf, keyBuf []byte
-}
-
-func (d *DomainDiff) Copy() *DomainDiff {
-	return &DomainDiff{prevValues: maps.Clone(d.prevValues)}
 }
 
 func (d *DomainDiff) Len() int {
@@ -288,7 +272,7 @@ func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte) {
 		if prevValue == nil {
 			d.prevValues[valsKeySCopy] = []byte{} // no previous value (new key)
 		} else {
-			d.prevValues[valsKeySCopy] = common.Copy(prevValue)
+			d.prevValues[valsKeySCopy] = bytes.Clone(prevValue)
 		}
 		d.prevValsSlice = nil
 	}
@@ -305,8 +289,16 @@ func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
 		d.prevValsSlice[i].Value = v
 		i++
 	}
-	sort.Slice(d.prevValsSlice, func(i, j int) bool {
-		return d.prevValsSlice[i].Key < d.prevValsSlice[j].Key
+	slices.SortFunc(d.prevValsSlice, func(a, b DomainEntryDiff) int {
+		return cmp.Compare(a.Key, b.Key)
 	})
 	return d.prevValsSlice
+}
+
+// RollbackUnless rolls tx back unless *ok is true. Defer it right after opening
+// a tx that is returned to the caller, so an early return or panic cannot leak it.
+func RollbackUnless(ok *bool, tx Tx) {
+	if !*ok {
+		tx.Rollback()
+	}
 }

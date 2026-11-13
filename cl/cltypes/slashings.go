@@ -62,13 +62,39 @@ func (a *AttesterSlashing) SetVersion(v clparams.StateVersion) {
 	a.Attestation_2.SetVersion(v)
 }
 
+// SetVersionWithConfig sets the version on both indexed attestations with preset-aware limits.
+func (a *AttesterSlashing) SetVersionWithConfig(v clparams.StateVersion, cfg *clparams.BeaconChainConfig) {
+	a.Attestation_1.SetVersionWithConfig(v, cfg)
+	a.Attestation_2.SetVersionWithConfig(v, cfg)
+}
+
 func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, a.Attestation_1, a.Attestation_2)
 }
 
 func (a *AttesterSlashing) DecodeSSZ(buf []byte, version int) error {
-	a.Attestation_1 = NewIndexedAttestation(clparams.StateVersion(version))
-	a.Attestation_2 = NewIndexedAttestation(clparams.StateVersion(version))
+	return a.DecodeSSZWithConfig(buf, version, nil)
+}
+
+func (a *AttesterSlashing) DecodeSSZStrict(buf []byte, version int) error {
+	return a.DecodeSSZStrictWithConfig(buf, version, nil)
+}
+
+// DecodeSSZWithConfig decodes an AttesterSlashing with preset-aware limits.
+func (a *AttesterSlashing) DecodeSSZWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig) error {
+	return a.decodeSSZWithConfig(buf, version, cfg, false)
+}
+
+func (a *AttesterSlashing) DecodeSSZStrictWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig) error {
+	return a.decodeSSZWithConfig(buf, version, cfg, true)
+}
+
+func (a *AttesterSlashing) decodeSSZWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig, strict bool) error {
+	a.Attestation_1 = NewIndexedAttestationWithConfig(clparams.StateVersion(version), cfg)
+	a.Attestation_2 = NewIndexedAttestationWithConfig(clparams.StateVersion(version), cfg)
+	if strict {
+		return ssz2.UnmarshalSSZStrict(buf, version, a.Attestation_1, a.Attestation_2)
+	}
 	return ssz2.UnmarshalSSZ(buf, version, a.Attestation_1, a.Attestation_2)
 }
 
@@ -78,4 +104,16 @@ func (a *AttesterSlashing) EncodingSizeSSZ() int {
 
 func (a *AttesterSlashing) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.Attestation_1, a.Attestation_2)
+}
+
+func (a *AttesterSlashing) HashSSZProgressive() ([32]byte, error) {
+	first, err := a.Attestation_1.HashSSZProgressive()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	second, err := a.Attestation_2.HashSSZProgressive()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.HashTreeRoot(first[:], second[:])
 }

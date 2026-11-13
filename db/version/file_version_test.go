@@ -2,10 +2,11 @@ package version
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -32,20 +33,20 @@ func TestParseVersion(t *testing.T) {
 			false,
 		},
 		{
-			"v1.0-008800-008900-bormilestones.seg",
-			args{v: "v1.0-008800-008900-bormilestones.seg"},
+			"v1.0-008800-008900-accessors.seg",
+			args{v: "v1.0-008800-008900-accessors.seg"},
 			V1_0,
 			false,
 		},
 		{
-			"v1-008800-008900-bormilestones.seg",
-			args{v: "v1-008800-008900-bormilestones.seg"},
+			"v1-008800-008900-accessors.seg",
+			args{v: "v1-008800-008900-accessors.seg"},
 			V1_0,
 			false,
 		},
 		{
-			"v2.0-008800-008900-bormilestones.seg",
-			args{v: "v2.0-008800-008900-bormilestones.seg"},
+			"v2.0-008800-008900-accessors.seg",
+			args{v: "v2.0-008800-008900-accessors.seg"},
 			V2_0,
 			false,
 		},
@@ -177,6 +178,79 @@ func TestFindFilesWithVersionsByPattern_InvalidPattern(t *testing.T) {
 	}
 	if ok {
 		t.Fatalf("expected ok == false on error, got true")
+	}
+}
+
+func TestFindFilesWithVersionsByPattern_GlobMetaInDir(t *testing.T) {
+	names := []string{"dd[1]", "dd["}
+	if runtime.GOOS != "windows" {
+		names = append(names, "dd?", "dd*", `dd\x`)
+	}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "ddZ"), 0o755); err != nil {
+		t.Fatalf("failed to create sibling dir: %v", err)
+	}
+	if err := touch(filepath.Join(root, "ddZ", "v2.0-accounts.0-64.ef")); err != nil {
+		t.Fatalf("failed to create sibling file: %v", err)
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			dir := filepath.Join(root, name)
+			if err := os.Mkdir(dir, 0o755); err != nil {
+				t.Fatalf("failed to create dir: %v", err)
+			}
+			file := filepath.Join(dir, "v1.0-accounts.0-64.ef")
+			if err := touch(file); err != nil {
+				t.Fatalf("failed to create file: %v", err)
+			}
+			path, _, ok, err := FindFilesWithVersionsByPattern(filepath.Join(dir, "*-accounts.0-64.ef"))
+			if err != nil || !ok || path != file {
+				t.Fatalf("expected %q, got %q ok=%v err=%v", file, path, ok, err)
+			}
+		})
+	}
+}
+
+func TestGroupByMaskedName(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{
+		"v1.0-accounts.0-64.kv",
+		"v1.1-accounts.0-64.kv", // same logical file, different version
+		"v1.0-storage.0-64.kv",
+		"v1.0-accounts.0-64.kv.tmp", // .tmp leftover, must be skipped
+		"salt-blocks.txt",           // unversioned, must be skipped
+	} {
+		if err := touch(filepath.Join(dir, name)); err != nil {
+			t.Fatalf("failed to create %q: %v", name, err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(dir, "history"), 0o755); err != nil {
+		t.Fatalf("failed to create subdir: %v", err)
+	}
+
+	groups, err := GroupByMaskedName(filepath.Join(dir, "*"))
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 masked groups, got %d: %v", len(groups), groups)
+	}
+	if got := groups["*-accounts.0-64.kv"]; len(got) != 2 {
+		t.Fatalf("expected 2 versions of accounts, got %d: %v", len(got), got)
+	}
+	if got := groups["*-storage.0-64.kv"]; len(got) != 1 {
+		t.Fatalf("expected 1 version of storage, got %d: %v", len(got), got)
+	}
+}
+
+func TestGroupByMaskedName_MissingDir(t *testing.T) {
+	groups, err := GroupByMaskedName(filepath.Join(t.TempDir(), "does-not-exist", "*"))
+	if err != nil {
+		t.Fatalf("expected no error for missing dir, got %v", err)
+	}
+	if len(groups) != 0 {
+		t.Fatalf("expected empty result, got %v", groups)
 	}
 }
 
@@ -414,19 +488,70 @@ func TestMatchVersionedFile_DifferentSegAndIdxNames(t *testing.T) {
 	}
 }
 
-func BenchmarkMatchVersionedFile(b *testing.B) {
-	// Simulate a large directory with thousands of snapshot files (realistic scenario)
-	dirEntries := make([]string, 0, 2000)
-	for i := 0; i < 500; i++ {
-		dirEntries = append(dirEntries,
-			fmt.Sprintf("v1.0-accounts.%d-%d.kv", i, i+1),
-			fmt.Sprintf("v1.0-storage.%d-%d.kv", i, i+1),
-			fmt.Sprintf("v1.0-accounts.%d-%d.kvi", i, i+1),
-			fmt.Sprintf("v1.0-storage.%d-%d.kvi", i, i+1),
-		)
-	}
+func TestMustSupport(t *testing.T) {
+	supported := Versions{Current: V1_2, MinSupported: V1_1}
 
-	for b.Loop() {
-		_, _, _, _ = MatchVersionedFile("*-accounts.0-1.kvi", dirEntries, "/tmp")
-	}
+	t.Run("in-range does not panic", func(t *testing.T) {
+		for _, ver := range []Version{V1_1, V1_2} {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Errorf("unexpected panic for ver=%s: %v", ver, r)
+					}
+				}()
+				supported.MustSupport(ver, "test.kv")
+			}()
+		}
+	})
+
+	t.Run("too low panics with reset instructions", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("expected panic for too-low version")
+			}
+			msg, ok := r.(string)
+			if !ok {
+				t.Fatalf("expected string panic, got %T", r)
+			}
+			if !strings.Contains(msg, "too old") || !strings.Contains(msg, "snapshots reset") {
+				t.Errorf("panic message missing remediation hint: %q", msg)
+			}
+			if !strings.Contains(msg, "test.kv") {
+				t.Errorf("panic message missing filename: %q", msg)
+			}
+		}()
+		supported.MustSupport(V1_0, "test.kv")
+	})
+
+	t.Run("too high panics with upgrade instructions", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("expected panic for too-high version")
+			}
+			msg, ok := r.(string)
+			if !ok {
+				t.Fatalf("expected string panic, got %T", r)
+			}
+			if !strings.Contains(msg, "newer than") || !strings.Contains(msg, "upgrade Erigon") || !strings.Contains(msg, "snapshots reset") {
+				t.Errorf("panic message missing remediation hint: %q", msg)
+			}
+			if !strings.Contains(msg, "test.kv") {
+				t.Errorf("panic message missing filename: %q", msg)
+			}
+		}()
+		supported.MustSupport(V2_0, "test.kv")
+	})
+
+	t.Run("higher minor within same major does not panic", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("unexpected panic for higher minor within same major: %v", r)
+			}
+		}()
+		// v1.5 > Current v1.2 but shares the major: a minor bump is a
+		// content-only, backward-readable change and must be supported.
+		supported.MustSupport(Version{Major: 1, Minor: 5}, "test.kv")
+	})
 }

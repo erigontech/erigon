@@ -19,14 +19,15 @@ package fork_graph
 import (
 	"errors"
 	"fmt"
+	"io/fs"
+	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 
-	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -37,16 +38,27 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
-const dumpSlotFrequency = 4
+const (
+	dumpSlotFrequency = 4
+	pruneBatchSize    = 256
+)
 
 type syncCommittees struct {
 	currentSyncCommittee *solid.SyncCommittee
 	nextSyncCommittee    *solid.SyncCommittee
 }
 
+type validatedChildren struct {
+	slots   map[common.Hash]uint64
+	maxSlot uint64
+}
+
 var ErrStateNotFound = errors.New("state not found")
+
+var nextEpochStateOutcomes = metrics.GetOrCreateCounterVec("caplin_next_epoch_state_outcomes_total", []string{"outcome"})
 
 type ChainSegmentInsertionResult uint
 
@@ -57,6 +69,8 @@ const (
 	BelowAnchor    ChainSegmentInsertionResult = 3
 	LogisticError  ChainSegmentInsertionResult = 4
 	PreValidated   ChainSegmentInsertionResult = 5
+	Started        ChainSegmentInsertionResult = 6
+	ReplayRequired ChainSegmentInsertionResult = 7
 )
 
 func (r ChainSegmentInsertionResult) String() string {
@@ -73,6 +87,10 @@ func (r ChainSegmentInsertionResult) String() string {
 		return "error occurred"
 	case PreValidated:
 		return "already validated"
+	case Started:
+		return "segment started"
+	case ReplayRequired:
+		return "parent state needs a replay"
 	default:
 		return fmt.Sprintf("%d <unknown>", r)
 	}
@@ -89,15 +107,32 @@ func convertHashSliceToHashList(in [][32]byte) solid.HashVectorSSZ {
 // ForkGraph is our graph for ETH 2.0 consensus forkchoice. Each node is a (block root, changes) pair and
 // each edge is the path described as (prevBlockRoot, currBlockRoot). if we want to go forward we use blocks.
 type forkGraphDisk struct {
-	// Alternate beacon states
-	fs        afero.Fs
-	blocks    sync.Map // set of blocks (block root -> block)
-	headers   sync.Map // set of headers
-	badBlocks sync.Map // blocks that are invalid and that leads to automatic fail of extension.
+	lifecycleMu       sync.RWMutex
+	addPruneMu        sync.Mutex
+	pruneMu           sync.Mutex
+	pruneBoundaryHook func()
+	pruneBatchHook    func()
+	pruneChildrenHook func()
 
-	// current state data
+	// Alternate beacon states
+	fs      afero.Fs
+	blocks  sync.Map // set of blocks (block root -> block)
+	headers sync.Map // set of headers
+	// badBlocks maps an invalid block root to the slot it was seen at, so Prune
+	// can drop it: an invalid block is deleted from blocks before its root is
+	// recorded here, so the block-keyed pruning below never reaches it. Roots
+	// marked with no header to take a slot from are stored as slotUnknown.
+	badBlocks           sync.Map // common.Hash -> uint64 slot
+	unavailablePayloads sync.Map
+	acceptedPayloads    sync.Map
+	childrenMu          sync.RWMutex
+	children            map[common.Hash]*validatedChildren
+
 	currentState          *state.CachingBeaconState
 	currentStateBlockRoot common.Hash // block root of the last processed block (avoids BlockRoot() zeroed-StateRoot issue)
+	nextEpochParentRoot   common.Hash
+	nextEpochState        *state.CachingBeaconState
+	highestTransitionSlot uint64
 
 	// for each block root we also keep track of te equivalent current justified and finalized checkpoints for faster head retrieval.
 	currentJustifiedCheckpoints sync.Map
@@ -116,61 +151,147 @@ type forkGraphDisk struct {
 	genesisTime uint64
 	// highest block seen
 	anchorSlot           uint64
+	anchorRoot           common.Hash
 	lowestAvailableBlock atomic.Uint64
 
 	newestLightClientUpdate atomic.Value
+	// newestLightClientFinalityUpdate is the newest recorded update that has finality (is_finality_update).
+	newestLightClientFinalityUpdate atomic.Pointer[cltypes.LightClientUpdate]
 	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
 	lightClientUpdates sync.Map // period -> lightclientupdate
+	// lightClientUpdateCandidates holds the updates of blocks that are not finalized yet, by period and signature block
+	// root. Finalization moves the canonical ones into lightClientUpdates.
+	lightClientUpdateCandidates   map[uint64]map[common.Hash]*cltypes.LightClientUpdate
+	lightClientUpdateCandidatesMu sync.RWMutex
+	// lightClientFinalized is the block the last KeepFinalizedLightClientUpdates settled, guarded by
+	// lightClientUpdateCandidatesMu: a head whose chain does not hold it serves no candidates.
+	lightClientFinalized     common.Hash
+	lightClientFinalizedSlot uint64
 
-	// reusable buffers
-	sszBuffer       []byte
-	sszSnappyWriter *snappy.Writer
-	sszSnappyReader *snappy.Reader
+	// Envelope state is tracked in memory by beacon block root.
+	// Corrupt files in invalidEnvelopes can be replaced; rejectedEnvelopes blocks redelivery until pruning.
+	envelopeExists    sync.Map // common.Hash -> struct{}
+	envelopeMissing   sync.Map // common.Hash -> struct{}
+	invalidEnvelopes  sync.Map // common.Hash -> struct{}
+	rejectedEnvelopes sync.Map // common.Hash -> struct{}
+
+	// stateDumpLock guards the reusable state buffer and the key of the last state dump
+	stateDumpLock  sync.Mutex
+	sszBuffer      []byte
+	lastDumpedRoot common.Hash
+	lastDumpedSlot uint64
+
+	// envelopeMu guards the reusable envelope buffer
+	envelopeMu        sync.Mutex
+	envelopeSSZBuffer []byte
 
 	rcfg       beacon_router_configuration.RouterConfiguration
-	emitter    *beaconevents.EventEmitter
 	syncedData synced_data.SyncedData
-
-	stateDumpLock sync.Mutex
 }
 
-// Initialize fork graph with a new state
-func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration, emitter *beaconevents.EventEmitter) ForkGraph {
+// Initialize fork graph with a new state.
+func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration) (ForkGraph, error) {
 	farthestExtendingPath := make(map[common.Hash]bool)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	anchorHeader := anchorState.LatestBlockHeader()
-	if anchorHeader.Root, err = anchorState.HashSSZ(); err != nil {
-		panic(err)
+	if anchorState.Version() >= clparams.GloasVersion && anchorState.Slot() > 0 {
+		stateHash := anchorState.PeekPreviousStateRoot()
+		if stateHash == (common.Hash{}) {
+			if anchorHeader.Slot == anchorState.Slot() && anchorHeader.Root != (common.Hash{}) {
+				stateHash = anchorHeader.Root
+			} else {
+				stateHash, err = anchorState.HashSSZ()
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		if anchorHeader.Root == (common.Hash{}) {
+			anchorHeader.Root = stateHash
+		}
+		anchorState.SetPreviousStateRoot(stateHash)
+	} else {
+		if anchorHeader.Root, err = anchorState.HashSSZ(); err != nil {
+			return nil, err
+		}
+		anchorState.SetPreviousStateRoot(anchorHeader.Root)
 	}
 
 	farthestExtendingPath[anchorRoot] = true
+	anchorState, err = anchorState.Copy()
+	if err != nil {
+		return nil, err
+	}
 
 	f := &forkGraphDisk{
 		fs: aferoFs,
 		// current state data
-		currentState: anchorState,
+		currentState:          anchorState,
+		currentStateBlockRoot: anchorRoot,
 		// configuration
 		beaconCfg:   anchorState.BeaconConfig(),
 		genesisTime: anchorState.GenesisTime(),
 		anchorSlot:  anchorState.Slot(),
+		anchorRoot:  anchorRoot,
 		rcfg:        rcfg,
-		emitter:     emitter,
 		syncedData:  syncedData,
+		children:    make(map[common.Hash]*validatedChildren),
 	}
 	f.lowestAvailableBlock.Store(anchorState.Slot())
 	f.headers.Store(common.Hash(anchorRoot), &anchorHeader)
 	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
-
-	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
+	if err := f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true); err != nil {
+		return nil, err
+	}
 	// preallocate buffer
-	return f
+	return f, nil
 }
 
 func (f *forkGraphDisk) AnchorSlot() uint64 {
 	return f.anchorSlot
+}
+
+func (f *forkGraphDisk) AnchorRoot() common.Hash {
+	return f.anchorRoot
+}
+
+func (f *forkGraphDisk) SetNextEpochState(parentRoot common.Hash, state *state.CachingBeaconState) {
+	f.addPruneMu.Lock()
+	defer f.addPruneMu.Unlock()
+	if f.highestTransitionSlot >= state.Slot() {
+		recordNextEpochStateOutcome("late", state.Slot())
+		return
+	}
+	f.nextEpochParentRoot = parentRoot
+	f.nextEpochState = state
+}
+
+func recordNextEpochStateOutcome(outcome string, slot uint64) {
+	nextEpochStateOutcomes.WithLabelValues(outcome).Inc()
+	log.Debug("Precomputed epoch state", "outcome", outcome, "slot", slot)
+}
+
+func (f *forkGraphDisk) takeNextEpochStateLocked(block *cltypes.BeaconBlock, parentSlot uint64, fullValidation bool) *state.CachingBeaconState {
+	if f.nextEpochState == nil || block.Slot < f.nextEpochState.Slot() {
+		if block.Slot/f.beaconCfg.SlotsPerEpoch > parentSlot/f.beaconCfg.SlotsPerEpoch {
+			recordNextEpochStateOutcome("no_entry", block.Slot)
+		}
+		return nil
+	}
+	precomputed := f.nextEpochState
+	f.nextEpochState = nil
+	if !fullValidation {
+		recordNextEpochStateOutcome("no_full_validation", block.Slot)
+		return nil
+	}
+	if f.nextEpochParentRoot != block.ParentRoot {
+		recordNextEpochStateOutcome("parent_mismatch", block.Slot)
+		return nil
+	}
+	return precomputed
 }
 
 func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot common.Hash) bool {
@@ -180,146 +301,16 @@ func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot common.Hash) bool {
 	return blockRoot == f.currentStateBlockRoot
 }
 
-// Add a new node and edge to the graph
-func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
-	block := signedBlock.Block
-	blockRoot, err := block.HashSSZ()
-	if err != nil {
-		return nil, LogisticError, err
+func isBelowPrunedBoundary(slot, lowestAvailable uint64) bool {
+	return lowestAvailable > 0 && slot < lowestAvailable-1
+}
+
+func lastFullyPrunedEpoch(pruneSlot, slotsPerEpoch uint64) (uint64, bool) {
+	completedEpochs := pruneSlot / slotsPerEpoch
+	if completedEpochs == 0 {
+		return 0, false
 	}
-
-	if _, ok := f.GetHeader(common.Hash(blockRoot)); ok {
-		return nil, PreValidated, nil
-	}
-	// Blocks below anchors are invalid.
-	if block.Slot <= f.anchorSlot {
-		log.Debug("block below anchor slot", "slot", block.Slot, "hash", common.Hash(blockRoot))
-		f.badBlocks.Store(common.Hash(blockRoot), struct{}{})
-		return nil, BelowAnchor, nil
-	}
-
-	isBlockRootTheCurrentState := f.isBlockRootTheCurrentState(blockRoot)
-	var newState *state.CachingBeaconState
-	if isBlockRootTheCurrentState {
-		newState = f.currentState
-	} else {
-		newState, err = f.getState(block.ParentRoot, false, true)
-		if err != nil {
-			return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot: %x", err, block.ParentRoot)
-		}
-	}
-
-	if newState == nil {
-		log.Debug("AddChainSegment: missing segment", "block", common.Hash(blockRoot), "slot", block.Slot, "parentRoot", block.ParentRoot)
-		return nil, MissingSegment, nil
-	}
-	finalizedBlock, hasFinalized := f.getBlock(newState.FinalizedCheckpoint().Root)
-	parentBlock, hasParentBlock := f.getBlock(block.ParentRoot)
-
-	// Before processing the state: update the newest lightclient update.
-	if block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation && hasFinalized && f.rcfg.Beacon && !isBlockRootTheCurrentState {
-		nextSyncCommitteeBranch, err := newState.NextSyncCommitteeBranch()
-		if err != nil {
-			return nil, LogisticError, err
-		}
-		finalityBranch, err := newState.FinalityRootBranch()
-		if err != nil {
-			return nil, LogisticError, err
-		}
-		lcUpdate, err := lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
-			newState.NextSyncCommittee(), newState.FinalizedCheckpoint(), convertHashSliceToHashList(nextSyncCommitteeBranch), convertHashSliceToHashList(finalityBranch))
-		if err != nil {
-			log.Debug("Could not create light client update", "err", err)
-		} else {
-			f.newestLightClientUpdate.Store(lcUpdate)
-			period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
-			_, hasPeriod := f.lightClientUpdates.Load(period)
-			if !hasPeriod {
-				log.Info("Adding light client update", "period", period)
-				f.lightClientUpdates.Store(period, lcUpdate)
-			}
-			// light client events
-			f.emitter.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
-				Version: block.Version().String(),
-				Data: cltypes.LightClientFinalityUpdate{
-					AttestedHeader:  lcUpdate.AttestedHeader,
-					FinalizedHeader: lcUpdate.FinalizedHeader,
-					FinalityBranch:  lcUpdate.FinalityBranch,
-					SyncAggregate:   lcUpdate.SyncAggregate,
-					SignatureSlot:   lcUpdate.SignatureSlot,
-				},
-			})
-			f.emitter.State().SendLightClientOptimisticUpdate(&beaconevents.LightClientOptimisticUpdateData{
-				Version: block.Version().String(),
-				Data: cltypes.LightClientOptimisticUpdate{
-					AttestedHeader: lcUpdate.AttestedHeader,
-					SyncAggregate:  lcUpdate.SyncAggregate,
-					SignatureSlot:  lcUpdate.SignatureSlot,
-				},
-			})
-		}
-	}
-
-	blockRewardsCollector := &eth2.BlockRewardsCollector{}
-
-	if !isBlockRootTheCurrentState {
-		// Execute the state
-		if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
-			// Add block to list of invalid blocks
-			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
-			f.badBlocks.Store(common.Hash(blockRoot), struct{}{})
-			f.currentState = nil
-			f.currentStateBlockRoot = common.Hash{}
-			return nil, InvalidBlock, invalidBlockErr
-		}
-		f.blockRewards.Store(common.Hash(blockRoot), blockRewardsCollector)
-	}
-
-	f.currentState = newState
-	f.currentStateBlockRoot = common.Hash(blockRoot)
-
-	// update diff storages.
-	if f.rcfg.Beacon || f.rcfg.Validator || f.rcfg.Lighthouse {
-		if block.Version() != clparams.Phase0Version {
-			epoch := state.Epoch(newState)
-			f.currentIndicies.add(epoch, newState.RawCurrentEpochParticipation())
-			f.previousIndicies.add(epoch, newState.RawPreviousEpochParticipation())
-		}
-
-		period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
-		f.syncCommittees.Store(period, syncCommittees{
-			currentSyncCommittee: newState.CurrentSyncCommittee().Copy(),
-			nextSyncCommittee:    newState.NextSyncCommittee().Copy(),
-		})
-
-		if block.Version() >= clparams.AltairVersion {
-			lightclientBootstrap, err := lightclient_utils.CreateLightClientBootstrap(newState, signedBlock)
-			if err != nil {
-				return nil, LogisticError, err
-			}
-			f.lightclientBootstraps.Store(common.Hash(blockRoot), lightclientBootstrap)
-		}
-	}
-
-	f.blocks.Store(common.Hash(blockRoot), signedBlock)
-	bodyRoot, err := signedBlock.Block.Body.HashSSZ()
-	if err != nil {
-		return nil, LogisticError, err
-	}
-
-	f.headers.Store(common.Hash(blockRoot), &cltypes.BeaconBlockHeader{
-		Slot:          block.Slot,
-		ProposerIndex: block.ProposerIndex,
-		ParentRoot:    block.ParentRoot,
-		Root:          block.StateRoot,
-		BodyRoot:      bodyRoot,
-	})
-
-	// Lastly add checkpoints to caches as well.
-	f.currentJustifiedCheckpoints.Store(common.Hash(blockRoot), newState.CurrentJustifiedCheckpoint())
-	f.finalizedCheckpoints.Store(common.Hash(blockRoot), newState.FinalizedCheckpoint())
-
-	return newState, Success, nil
+	return completedEpochs - 1, true
 }
 
 func (f *forkGraphDisk) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool) {
@@ -327,19 +318,102 @@ func (f *forkGraphDisk) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHe
 	if !has {
 		return nil, false
 	}
-	return obj.(*cltypes.BeaconBlockHeader), true
+	header := obj.(*cltypes.BeaconBlockHeader)
+	if blockRoot != f.anchorRoot && isBelowPrunedBoundary(header.Slot, f.lowestAvailableBlock.Load()) {
+		return nil, false
+	}
+	return header, true
 }
 
-func (f *forkGraphDisk) getBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+func (f *forkGraphDisk) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	obj, has := f.blocks.Load(blockRoot)
 	if !has {
 		return nil, false
 	}
 
-	return obj.(*cltypes.SignedBeaconBlock), true
+	block := obj.(*cltypes.SignedBeaconBlock)
+	if isBelowPrunedBoundary(block.Block.Slot, f.lowestAvailableBlock.Load()) {
+		return nil, false
+	}
+	return block, true
 }
-func (f *forkGraphDisk) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-	return f.getState(blockRoot, alwaysCopy, false)
+
+func (f *forkGraphDisk) HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool {
+	f.childrenMu.RLock()
+	defer f.childrenMu.RUnlock()
+	children := f.children[blockRoot]
+	return children != nil && !isBelowPrunedBoundary(children.maxSlot, f.lowestAvailableBlock.Load()) && children.maxSlot >= slot
+}
+
+func (f *forkGraphDisk) HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool {
+	if isBelowPrunedBoundary(slot, f.lowestAvailableBlock.Load()) {
+		return false
+	}
+	found := false
+	f.headers.Range(func(key, value any) bool {
+		root, ok := key.(common.Hash)
+		if !ok || root == exceptRoot {
+			return true
+		}
+		header, ok := value.(*cltypes.BeaconBlockHeader)
+		if ok && header != nil && header.Slot == slot && header.ProposerIndex == proposerIndex {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func (f *forkGraphDisk) addValidatedChild(parentRoot, childRoot common.Hash, slot uint64) {
+	f.childrenMu.Lock()
+	defer f.childrenMu.Unlock()
+	if f.children == nil {
+		f.children = make(map[common.Hash]*validatedChildren)
+	}
+	if f.children[parentRoot] == nil {
+		f.children[parentRoot] = &validatedChildren{slots: make(map[common.Hash]uint64)}
+	}
+	children := f.children[parentRoot]
+	children.slots[childRoot] = slot
+	if slot > children.maxSlot {
+		children.maxSlot = slot
+	}
+}
+
+func (f *forkGraphDisk) removeValidatedChildren(rootsByParent map[common.Hash][]common.Hash) {
+	f.childrenMu.Lock()
+	defer f.childrenMu.Unlock()
+	for parentRoot, roots := range rootsByParent {
+		children := f.children[parentRoot]
+		if children == nil {
+			continue
+		}
+		for _, root := range roots {
+			delete(children.slots, root)
+		}
+		if len(children.slots) == 0 {
+			delete(f.children, parentRoot)
+			continue
+		}
+		children.maxSlot = 0
+		for _, slot := range children.slots {
+			if slot > children.maxSlot {
+				children.maxSlot = slot
+			}
+		}
+	}
+}
+
+func (f *forkGraphDisk) CurrentStateLocked(blockRoot common.Hash) *state.CachingBeaconState {
+	if f.currentState == nil || f.currentStateBlockRoot != blockRoot {
+		return nil
+	}
+	return f.currentState
+}
+
+func (f *forkGraphDisk) ReplayState(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	return f.replayState(blockRoot, false)
 }
 
 func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *state.CachingBeaconState) (out *state.CachingBeaconState, ok bool, err error) {
@@ -347,14 +421,13 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 		return
 	}
 	if f.syncedData.HeadRoot() == blockRoot {
-		err = f.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-			headBlockRoot, err := headState.BlockRoot()
-			if err != nil {
-				return err
-			}
-			if headBlockRoot != blockRoot {
+		err = f.syncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
+			if headRoot != blockRoot {
 				return nil
 			}
+			// HeadRoot() already matched blockRoot, so we trust the stored root
+			// rather than recomputing BlockRoot() which can return incorrect results
+			// when the state's incremental hashing cache has been dirtied.
 			ok = true
 			var err2 error
 
@@ -369,7 +442,9 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 		if errors.Is(err, synced_data.ErrNotSynced) {
 			err = nil
 		}
-		return
+		if ok || err != nil {
+			return
+		}
 	}
 
 	// check if the state is in the cache
@@ -402,15 +477,14 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 	return
 }
 
-func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChainSegment bool) (*state.CachingBeaconState, error) {
-	if f.currentState != nil && !alwaysCopy {
-		if f.currentStateBlockRoot == blockRoot {
-			return f.currentState, nil
-		}
-	}
-	if addChainSegment && !alwaysCopy {
+func (f *forkGraphDisk) replayState(blockRoot common.Hash, addChainSegment bool) (*state.CachingBeaconState, error) {
+	if addChainSegment {
 		if state, ok, err := f.useCachedStateIfPossible(blockRoot, f.currentState); ok {
 			return state, err
+		}
+	} else {
+		if _, ok := f.GetHeader(blockRoot); !ok {
+			return nil, nil
 		}
 	}
 
@@ -421,17 +495,23 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 	var copyReferencedState *state.CachingBeaconState
 	var err error
 
-	// try and find the point of recconnection
+	// try and find the point of reconnection
 	for copyReferencedState == nil {
-		block, isSegmentPresent := f.getBlock(currentIteratorRoot)
+		block, isSegmentPresent := f.GetBlock(currentIteratorRoot)
 		if !isSegmentPresent {
 			// check if it is in the header
+			// The anchor state is dumped at startup whatever its slot.
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
-			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
+			if ok && (bHeader.Slot%dumpSlotFrequency == 0 || currentIteratorRoot == f.anchorRoot) {
 				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 				if err != nil {
-					log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
-					copyReferencedState = nil
+					if currentIteratorRoot == f.anchorRoot {
+						// Once currentState has moved on, this file is the only copy of the anchor state.
+						log.Warn("Could not read the anchor state file", "root", currentIteratorRoot, "err", err)
+					} else {
+						log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
+					}
+					return nil, nil
 				}
 				continue
 			}
@@ -447,15 +527,20 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 				break
 			}
 		}
+
+		// [Modified in Gloas:EIP7732 defer-payload] No need to track parent envelopes
+		// during replay. TransitionState calls ProcessParentExecutionPayload internally,
+		// which handles the previous slot's execution effects using data already in the
+		// block body (ParentExecutionRequests) and state (LatestExecutionPayloadBid).
 		blocksInTheWay = append(blocksInTheWay, block)
 		currentIteratorRoot = block.Block.ParentRoot
 	}
 
 	// Traverse the blocks from top to bottom.
-	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
-		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], nil, false); err != nil {
+	for _, b := range slices.Backward(blocksInTheWay) {
+		if err := transition.TransitionState(copyReferencedState, b, nil, false); err != nil {
 			if addChainSegment {
-				f.currentState = nil // reset the state if it fails here.
+				f.currentState = nil
 				f.currentStateBlockRoot = common.Hash{}
 			}
 			return nil, err
@@ -481,7 +566,72 @@ func (f *forkGraphDisk) GetFinalizedCheckpoint(blockRoot common.Hash) (solid.Che
 }
 
 func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot common.Hash) {
-	f.badBlocks.Store(blockRoot, struct{}{})
+	slot := uint64(slotUnknown)
+	if header, ok := f.GetHeader(blockRoot); ok {
+		slot = header.Slot
+	}
+	f.badBlocks.Store(blockRoot, slot)
+}
+
+func (f *forkGraphDisk) IsBlockInvalid(blockRoot common.Hash) bool {
+	_, invalid := f.badBlocks.Load(blockRoot)
+	return invalid
+}
+
+func (f *forkGraphDisk) MarkPayloadUnavailable(blockRoot common.Hash) {
+	f.unavailablePayloads.Store(blockRoot, struct{}{})
+}
+
+func (f *forkGraphDisk) MarkPayloadAvailable(blockRoot common.Hash) {
+	f.unavailablePayloads.Delete(blockRoot)
+}
+
+func (f *forkGraphDisk) IsPayloadUnavailable(blockRoot common.Hash) bool {
+	_, unavailable := f.unavailablePayloads.Load(blockRoot)
+	return unavailable
+}
+
+func (f *forkGraphDisk) MarkPayloadAccepted(blockRoot common.Hash, verified bool) {
+	f.acceptedPayloads.Store(blockRoot, verified)
+}
+
+func (f *forkGraphDisk) ClearPayloadAccepted(blockRoot common.Hash) {
+	f.acceptedPayloads.Delete(blockRoot)
+}
+
+func (f *forkGraphDisk) PayloadAccepted(blockRoot common.Hash) (bool, bool) {
+	verified, ok := f.acceptedPayloads.Load(blockRoot)
+	if !ok {
+		return false, false
+	}
+	return verified.(bool), true
+}
+
+func (f *forkGraphDisk) retainedBlock(blockRoot common.Hash) bool {
+	header, ok := f.headers.Load(blockRoot)
+	if !ok {
+		return false
+	}
+	if blockRoot == f.anchorRoot {
+		return true
+	}
+	return !isBelowPrunedBoundary(header.(*cltypes.BeaconBlockHeader).Slot, f.lowestAvailableBlock.Load())
+}
+
+func (f *forkGraphDisk) IsBlockRetained(blockRoot common.Hash) bool {
+	f.lifecycleMu.RLock()
+	defer f.lifecycleMu.RUnlock()
+	return f.retainedBlock(blockRoot)
+}
+
+func (f *forkGraphDisk) WithRetainedBlock(blockRoot common.Hash, fn func(func(common.Hash) bool)) bool {
+	f.lifecycleMu.RLock()
+	defer f.lifecycleMu.RUnlock()
+	if !f.retainedBlock(blockRoot) {
+		return false
+	}
+	fn(f.retainedBlock)
+	return true
 }
 
 func (f *forkGraphDisk) hasBeaconState(blockRoot common.Hash) bool {
@@ -489,8 +639,20 @@ func (f *forkGraphDisk) hasBeaconState(blockRoot common.Hash) bool {
 	return err == nil && exists
 }
 
+// slotUnknown marks a bad block with no header to take a slot from, so no prune
+// drops it; MarkHeaderAsInvalid records the header's slot when there is one.
+const slotUnknown = math.MaxUint64
+
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
-	oldRoots := make([]common.Hash, 0, f.beaconCfg.SlotsPerEpoch)
+	f.pruneMu.Lock()
+	defer f.pruneMu.Unlock()
+
+	f.badBlocks.Range(func(key, value any) bool {
+		if value.(uint64) < pruneSlot {
+			f.badBlocks.Delete(key)
+		}
+		return true
+	})
 	highestStoredBeaconStateSlot := uint64(0)
 	f.blocks.Range(func(key, value any) bool {
 		hash := key.(common.Hash)
@@ -498,31 +660,85 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		if f.hasBeaconState(hash) && highestStoredBeaconStateSlot < signedBlock.Block.Slot {
 			highestStoredBeaconStateSlot = signedBlock.Block.Slot
 		}
-		if signedBlock.Block.Slot >= pruneSlot {
-			return true
-		}
-
-		oldRoots = append(oldRoots, hash)
 		return true
 	})
 	if pruneSlot >= highestStoredBeaconStateSlot {
 		return
 	}
 
-	// prune the indicies for the epoch
-	f.currentIndicies.prune(pruneSlot / f.beaconCfg.SlotsPerEpoch)
-	f.previousIndicies.prune(pruneSlot / f.beaconCfg.SlotsPerEpoch)
+	f.addPruneMu.Lock()
+	f.lifecycleMu.Lock()
+	// Prune runs without the fork choice lock, so concurrent (or stale queued)
+	// calls may arrive out of order: only ever raise the marker.
+	for {
+		lowest := f.lowestAvailableBlock.Load()
+		if pruneSlot+1 <= lowest || f.lowestAvailableBlock.CompareAndSwap(lowest, pruneSlot+1) {
+			break
+		}
+	}
+	f.lifecycleMu.Unlock()
+	if lastPrunedEpoch, ok := lastFullyPrunedEpoch(pruneSlot, f.beaconCfg.SlotsPerEpoch); ok {
+		currentIndexKeys := f.currentIndicies.keysThrough(lastPrunedEpoch)
+		previousIndexKeys := f.previousIndicies.keysThrough(lastPrunedEpoch)
+		f.currentIndicies.deleteKeys(currentIndexKeys)
+		f.previousIndicies.deleteKeys(previousIndexKeys)
+	}
+	f.addPruneMu.Unlock()
+	if f.pruneBoundaryHook != nil {
+		f.pruneBoundaryHook()
+	}
 
-	f.lowestAvailableBlock.Store(pruneSlot + 1)
+	oldRoots := make([]common.Hash, 0, f.beaconCfg.SlotsPerEpoch)
+	validatedRootsByParent := make(map[common.Hash][]common.Hash)
+	f.blocks.Range(func(key, value any) bool {
+		if value.(*cltypes.SignedBeaconBlock).Block.Slot < pruneSlot {
+			root := key.(common.Hash)
+			oldRoots = append(oldRoots, root)
+			if header, ok := f.headers.Load(root); ok {
+				h := header.(*cltypes.BeaconBlockHeader)
+				validatedRootsByParent[h.ParentRoot] = append(validatedRootsByParent[h.ParentRoot], root)
+			}
+		}
+		return true
+	})
+	for start := 0; start < len(oldRoots); start += pruneBatchSize {
+		end := min(start+pruneBatchSize, len(oldRoots))
+		f.lifecycleMu.Lock()
+		for _, root := range oldRoots[start:end] {
+			f.blocks.Delete(root)
+			f.lightclientBootstraps.Delete(root)
+			f.currentJustifiedCheckpoints.Delete(root)
+			f.finalizedCheckpoints.Delete(root)
+			f.headers.Delete(root)
+			f.blockRewards.Delete(root)
+			f.envelopeExists.Delete(root)
+			f.envelopeMissing.Delete(root)
+			f.invalidEnvelopes.Delete(root)
+			f.rejectedEnvelopes.Delete(root)
+			f.unavailablePayloads.Delete(root)
+			f.acceptedPayloads.Delete(root)
+			f.badBlocks.Delete(root)
+		}
+		f.lifecycleMu.Unlock()
+		if f.pruneBatchHook != nil {
+			f.pruneBatchHook()
+		}
+	}
+	if f.pruneChildrenHook != nil {
+		f.pruneChildrenHook()
+	}
+	f.removeValidatedChildren(validatedRootsByParent)
+
 	for _, root := range oldRoots {
-		f.badBlocks.Delete(root)
-		f.blocks.Delete(root)
-		f.lightclientBootstraps.Delete(root)
-		f.currentJustifiedCheckpoints.Delete(root)
-		f.finalizedCheckpoints.Delete(root)
-		f.headers.Delete(root)
-		f.blockRewards.Delete(root)
-		f.fs.Remove(getBeaconStateFilename(root))
+		if removeErr := f.fs.Remove(getBeaconStateFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			log.Debug("failed to remove pruned beacon state file", "root", root, "err", removeErr)
+		}
+		if removeErr := f.fs.Remove(getEnvelopeFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("remove envelope for root %x: %w", root, removeErr))
+		}
+		if removeErr := f.fs.Remove(getEnvelopeTempFilename(root)); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("remove envelope temp for root %x: %w", root, removeErr))
+		}
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return
@@ -557,6 +773,10 @@ func (f *forkGraphDisk) GetLightClientBootstrap(blockRoot common.Hash) (*cltypes
 	return obj.(*cltypes.LightClientBootstrap), true
 }
 
+func (f *forkGraphDisk) NewestLightClientFinalityUpdate() *cltypes.LightClientUpdate {
+	return f.newestLightClientFinalityUpdate.Load()
+}
+
 func (f *forkGraphDisk) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 	if f.newestLightClientUpdate.Load() == nil {
 		return nil
@@ -564,34 +784,136 @@ func (f *forkGraphDisk) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 	return f.newestLightClientUpdate.Load().(*cltypes.LightClientUpdate)
 }
 
-func (f *forkGraphDisk) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
-	obj, has := f.lightClientUpdates.Load(period)
-	if !has {
-		return nil, false
+// recordLightClientUpdateLocked takes the update of a block whose transition succeeded as the newest update, and as a
+// candidate of its period if it is signed in the period of its attested header. The caller holds addPruneMu.
+func (f *forkGraphDisk) recordLightClientUpdateLocked(signatureBlock common.Hash, update *cltypes.LightClientUpdate) {
+	f.newestLightClientUpdate.Store(update)
+	if lightclient_utils.IsFinalityUpdate(update) {
+		f.newestLightClientFinalityUpdate.Store(update)
 	}
-	return obj.(*cltypes.LightClientUpdate), true
+	if f.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot) != f.beaconCfg.SyncCommitteePeriod(update.SignatureSlot) {
+		return
+	}
+	f.lightClientUpdateCandidatesMu.Lock()
+	defer f.lightClientUpdateCandidatesMu.Unlock()
+	if f.lightClientUpdateCandidates == nil {
+		f.lightClientUpdateCandidates = make(map[uint64]map[common.Hash]*cltypes.LightClientUpdate)
+	}
+	period := f.beaconCfg.SyncCommitteePeriod(update.SignatureSlot)
+	if f.lightClientUpdateCandidates[period] == nil {
+		f.lightClientUpdateCandidates[period] = make(map[common.Hash]*cltypes.LightClientUpdate)
+	}
+	f.lightClientUpdateCandidates[period][signatureBlock] = update
 }
 
-func (f *forkGraphDisk) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
-	st, err := f.GetState(blockRoot, true)
-	if err != nil {
-		return nil, err
+// KeepFinalizedLightClientUpdates moves the candidates whose signature block is on the finalized block's chain into
+// the period store, and drops the other candidates at or below the finalized slot: they can no longer be canonical.
+func (f *forkGraphDisk) KeepFinalizedLightClientUpdates(finalized common.Hash) {
+	f.addPruneMu.Lock()
+	defer f.addPruneMu.Unlock()
+	f.lightClientUpdateCandidatesMu.Lock()
+	defer f.lightClientUpdateCandidatesMu.Unlock()
+	header, ok := f.GetHeader(finalized)
+	if !ok {
+		return
 	}
-	if st == nil {
-		return nil, ErrStateNotFound
+	finalizedSlot, lowest := header.Slot, header.Slot
+	f.lightClientFinalized, f.lightClientFinalizedSlot = finalized, finalizedSlot
+	for _, candidates := range f.lightClientUpdateCandidates {
+		lowest = min(lowest, lowestSignatureSlot(candidates))
 	}
-	return st.Balances(), nil
+	for root := finalized; ok && header.Slot >= lowest; header, ok = f.GetHeader(root) {
+		if update, isCandidate := f.lightClientUpdateCandidates[f.beaconCfg.SyncCommitteePeriod(header.Slot)][root]; isCandidate {
+			f.storeLightClientUpdate(update)
+		}
+		root = header.ParentRoot
+	}
+	for period, candidates := range f.lightClientUpdateCandidates {
+		for root, update := range candidates {
+			if update.SignatureSlot <= finalizedSlot {
+				delete(candidates, root)
+			}
+		}
+		if len(candidates) == 0 {
+			delete(f.lightClientUpdateCandidates, period)
+		}
+	}
 }
 
-func (f *forkGraphDisk) GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
-	st, err := f.GetState(blockRoot, true)
-	if err != nil {
-		return nil, err
+func lowestSignatureSlot(candidates map[common.Hash]*cltypes.LightClientUpdate) uint64 {
+	lowest := uint64(math.MaxUint64)
+	for _, update := range candidates {
+		lowest = min(lowest, update.SignatureSlot)
 	}
-	if st == nil {
-		return nil, ErrStateNotFound
+	return lowest
+}
+
+// storeLightClientUpdate keeps the best update of its attested header's sync committee period.
+func (f *forkGraphDisk) storeLightClientUpdate(update *cltypes.LightClientUpdate) {
+	period := f.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot)
+	if best, ok := f.lightClientUpdates.Load(period); ok && !lightclient_utils.IsBetterUpdate(f.beaconCfg, update, best.(*cltypes.LightClientUpdate)) {
+		return
 	}
-	return st.InactivityScores(), nil
+	f.lightClientUpdates.Store(period, update)
+}
+
+// GetLightClientUpdates returns the best update of each sync committee period in [startPeriod, endPeriod), nil for a
+// period without one: the update finalization settled, or a better candidate whose signature block is on head's chain.
+// A zero head, or a head whose chain does not hold the last finalized block, gives the settled updates only, even when
+// that chain holds a better candidate. One walk down head's chain serves every period of the range.
+func (f *forkGraphDisk) GetLightClientUpdates(startPeriod, endPeriod uint64, head common.Hash) []*cltypes.LightClientUpdate {
+	if endPeriod <= startPeriod {
+		return nil
+	}
+	// Finalization moves candidates into the period store under the write lock, so both are read in one state.
+	f.lightClientUpdateCandidatesMu.RLock()
+	defer f.lightClientUpdateCandidatesMu.RUnlock()
+	updates := make([]*cltypes.LightClientUpdate, endPeriod-startPeriod)
+	for i := range updates {
+		if obj, ok := f.lightClientUpdates.Load(startPeriod + uint64(i)); ok {
+			updates[i] = obj.(*cltypes.LightClientUpdate)
+		}
+	}
+	lowest := uint64(math.MaxUint64)
+	for period, candidates := range f.lightClientUpdateCandidates {
+		if period >= startPeriod && period < endPeriod {
+			lowest = min(lowest, lowestSignatureSlot(candidates))
+		}
+	}
+	if lowest == math.MaxUint64 {
+		return updates
+	}
+	found := make([]*cltypes.LightClientUpdate, len(updates))
+	onFinalizedChain := f.lightClientFinalized == (common.Hash{})
+	for {
+		// The finalized root is recognised before its header is read: pruning can hide that header.
+		if !onFinalizedChain && head == f.lightClientFinalized {
+			onFinalizedChain = true
+		}
+		header, ok := f.GetHeader(head)
+		if !ok || (onFinalizedChain && header.Slot < lowest) {
+			break
+		}
+		if !onFinalizedChain && header.Slot <= f.lightClientFinalizedSlot {
+			return updates // past the finalized slot on another branch
+		}
+		period := f.beaconCfg.SyncCommitteePeriod(header.Slot)
+		if update, isCandidate := f.lightClientUpdateCandidates[period][head]; isCandidate && period >= startPeriod && period < endPeriod {
+			if best := found[period-startPeriod]; best == nil || lightclient_utils.IsBetterUpdate(f.beaconCfg, update, best) {
+				found[period-startPeriod] = update
+			}
+		}
+		head = header.ParentRoot
+	}
+	if !onFinalizedChain {
+		return updates
+	}
+	for i, update := range found {
+		if update != nil && (updates[i] == nil || lightclient_utils.IsBetterUpdate(f.beaconCfg, update, updates[i])) {
+			updates[i] = update
+		}
+	}
+	return updates
 }
 
 func (f *forkGraphDisk) GetPreviousParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error) {
@@ -609,7 +931,8 @@ func (f *forkGraphDisk) GetPreviousParticipationIndicies(epoch uint64) (*solid.P
 		return nil, nil
 	}
 	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
-	return out, out.DecodeSSZ(b, 0)
+	err := out.DecodeSSZ(b, 0)
+	return out, err
 }
 
 func (f *forkGraphDisk) GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error) {
@@ -627,16 +950,6 @@ func (f *forkGraphDisk) GetCurrentParticipationIndicies(epoch uint64) (*solid.Pa
 		return nil, nil
 	}
 	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
-	return out, out.DecodeSSZ(b, 0)
-}
-
-func (f *forkGraphDisk) GetValidatorSet(blockRoot common.Hash) (*solid.ValidatorSet, error) {
-	st, err := f.GetState(blockRoot, true)
-	if err != nil {
-		return nil, err
-	}
-	if st == nil {
-		return nil, ErrStateNotFound
-	}
-	return st.ValidatorSet(), nil
+	err := out.DecodeSSZ(b, 0)
+	return out, err
 }

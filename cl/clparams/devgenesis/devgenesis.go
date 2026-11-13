@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 
@@ -34,7 +35,7 @@ func DeriveKey(seed string, index uint64) (*bls.PrivateKey, error) {
 // DeriveKeys derives N deterministic BLS keypairs from a seed.
 func DeriveKeys(seed string, count int) ([]*bls.PrivateKey, error) {
 	keys := make([]*bls.PrivateKey, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		var err error
 		keys[i], err = DeriveKey(seed, uint64(i))
 		if err != nil {
@@ -45,8 +46,8 @@ func DeriveKeys(seed string, count int) ([]*bls.PrivateKey, error) {
 }
 
 // DeriveSignerKey derives a deterministic secp256k1 private key from the seed.
-// This is the EL transaction signing key — the corresponding address is pre-funded
-// in the dev genesis. Not for production.
+// This is the EL transaction signing key. The caller is responsible for funding
+// the corresponding address in the genesis alloc. Not for production.
 func DeriveSignerKey(seed string) (*ecdsa.PrivateKey, common.Address, error) {
 	h := sha256.Sum256(append([]byte("signer:"), []byte(seed)...))
 	key, err := crypto.ToECDSA(h[:])
@@ -84,7 +85,7 @@ func BuildGenesisState(
 	elGenesisHash common.Hash,
 ) (*state.CachingBeaconState, []*bls.PrivateKey, error) {
 	if validatorCount == 0 {
-		return nil, nil, fmt.Errorf("validator count must be > 0")
+		return nil, nil, errors.New("validator count must be > 0")
 	}
 
 	// Derive BLS keys.
@@ -99,7 +100,9 @@ func BuildGenesisState(
 
 	// Set genesis time and slot.
 	beaconState.SetGenesisTime(genesisTime)
-	beaconState.SetSlot(0)
+	if err := beaconState.SetSlot(0); err != nil {
+		return nil, nil, fmt.Errorf("set slot: %w", err)
+	}
 
 	// Set fork parameters for genesis. When multiple forks activate at
 	// epoch 0 (typical in dev mode), CurrentVersion must reflect the
@@ -127,11 +130,11 @@ func BuildGenesisState(
 	beaconState.SetEth1DepositIndex(uint64(validatorCount))
 
 	// Collect pubkeys for sync committee initialization.
-	var allPubkeys []common.Bytes48
+	allPubkeys := make([]common.Bytes48, validatorCount)
 
 	// Add validators.
 	maxEffectiveBalance := cfg.MaxEffectiveBalance
-	for i := 0; i < validatorCount; i++ {
+	for i := range validatorCount {
 		pubkey := keys[i].PublicKey()
 		pubkeyCompressed := bls.CompressPublicKey(pubkey)
 		var pubkeyBytes [48]byte
@@ -155,8 +158,10 @@ func BuildGenesisState(
 			math.MaxUint64, // withdrawable epoch (far future)
 		)
 
-		beaconState.AddValidator(validator, maxEffectiveBalance)
-		allPubkeys = append(allPubkeys, common.Bytes48(pubkeyBytes))
+		if err := beaconState.AddValidator(validator, maxEffectiveBalance); err != nil {
+			return nil, nil, fmt.Errorf("add validator: %w", err)
+		}
+		allPubkeys[i] = common.Bytes48(pubkeyBytes)
 	}
 
 	// Initialize sync committees (Altair+). Fill with validator pubkeys
@@ -165,7 +170,7 @@ func BuildGenesisState(
 	if version >= clparams.AltairVersion {
 		committeeSize := int(cfg.SyncCommitteeSize)
 		committeePubkeys := make([]common.Bytes48, committeeSize)
-		for i := 0; i < committeeSize; i++ {
+		for i := range committeeSize {
 			committeePubkeys[i] = allPubkeys[i%len(allPubkeys)]
 		}
 		// Compute aggregate pubkey (needed for sync committee verification).
@@ -181,8 +186,12 @@ func BuildGenesisState(
 		copy(aggPubkeyFixed[:], aggPubkey)
 
 		syncCommittee := solid.NewSyncCommitteeFromParameters(committeePubkeys, aggPubkeyFixed)
-		beaconState.SetCurrentSyncCommittee(syncCommittee)
-		beaconState.SetNextSyncCommittee(syncCommittee)
+		if err := beaconState.SetCurrentSyncCommittee(syncCommittee); err != nil {
+			return nil, nil, fmt.Errorf("set current sync committee: %w", err)
+		}
+		if err := beaconState.SetNextSyncCommittee(syncCommittee); err != nil {
+			return nil, nil, fmt.Errorf("set next sync committee: %w", err)
+		}
 
 		// Initialize epoch participation flags and inactivity scores.
 		beaconState.SetPreviousEpochParticipationFlags(make(cltypes.ParticipationFlagsList, validatorCount))
@@ -191,30 +200,57 @@ func BuildGenesisState(
 	}
 
 	// Compute genesis validators root.
-	validatorsRoot, err := beaconState.Validators().HashSSZ()
+	var validatorsRoot [32]byte
+	if version >= clparams.GloasVersion {
+		validatorsRoot, err = beaconState.Validators().HashSSZProgressive()
+	} else {
+		validatorsRoot, err = beaconState.Validators().HashSSZ()
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("hash validators: %w", err)
 	}
+	beaconState.Validators().SetProgressiveHashing(version >= clparams.GloasVersion)
 	beaconState.SetGenesisValidatorsRoot(common.Hash(validatorsRoot))
 
 	// Initialize RANDAO mixes with the genesis validators root.
 	for i := uint64(0); i < cfg.EpochsPerHistoricalVector; i++ {
-		beaconState.SetRandaoMixAt(int(i), common.Hash(validatorsRoot))
+		if err := beaconState.SetRandaoMixAt(int(i), common.Hash(validatorsRoot)); err != nil {
+			return nil, nil, fmt.Errorf("set randao mix: %w", err)
+		}
 	}
 
-	// Set the latest execution payload header referencing the EL genesis block.
-	execHeader := cltypes.NewEth1Header(version)
-	execHeader.BlockHash = elGenesisHash
-	beaconState.SetLatestExecutionPayloadHeader(execHeader)
+	var genesisBid *cltypes.ExecutionPayloadBid
+	if version >= clparams.GloasVersion {
+		emptyRequests := cltypes.NewExecutionRequestsWithVersion(cfg, version)
+		emptyRequestsRoot, err := emptyRequests.HashSSZ()
+		if err != nil {
+			return nil, nil, fmt.Errorf("hash empty execution requests: %w", err)
+		}
+		genesisBid = &cltypes.ExecutionPayloadBid{
+			ParentBlockHash:       elGenesisHash,
+			BlobKzgCommitments:    *solid.NewStaticProgressiveListSSZ[*cltypes.KZGCommitment](int(cfg.MaxBlobCommittmentsPerBlock), 48),
+			ExecutionRequestsRoot: emptyRequestsRoot,
+		}
+		beaconState.SetLatestExecutionPayloadBid(genesisBid)
+		beaconState.SetLatestBlockHash(elGenesisHash)
+	} else {
+		execHeader := cltypes.NewEth1Header(version)
+		execHeader.BlockHash = elGenesisHash
+		beaconState.SetLatestExecutionPayloadHeader(execHeader)
+	}
 
 	// Set latest block header. The body root for genesis is the hash of
 	// an empty BeaconBlockBody at the genesis version.
 	genesisBody := cltypes.NewBeaconBody(cfg, version)
-	// Ensure the execution payload has all required sub-fields initialized.
-	genesisBody.ExecutionPayload.Extra = solid.NewExtraData()
-	genesisBody.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
-	if version >= clparams.CapellaVersion {
-		genesisBody.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	if genesisBid != nil {
+		genesisBody.SignedExecutionPayloadBid.Message = genesisBid.Copy()
+	}
+	if genesisBody.ExecutionPayload != nil {
+		genesisBody.ExecutionPayload.Extra = solid.NewExtraData()
+		genesisBody.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
+		if version >= clparams.CapellaVersion {
+			genesisBody.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+		}
 	}
 	if version >= clparams.AltairVersion {
 		genesisBody.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.SyncCommitteeSize) / 8)

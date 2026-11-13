@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -43,7 +44,7 @@ type ContractsDeployer struct {
 	address              common.Address
 	contractBackend      bind.ContractBackend
 	cl                   *MockCl
-	chainId              *big.Int
+	chainId              *uint256.Int
 	txnInclusionVerifier engineapitester.TxnInclusionVerifier
 }
 
@@ -51,7 +52,7 @@ func NewContractsDeployer(
 	key *ecdsa.PrivateKey,
 	cb bind.ContractBackend,
 	cl *MockCl,
-	chainId *big.Int,
+	chainId *uint256.Int,
 	txnInclusionVerifier engineapitester.TxnInclusionVerifier,
 ) ContractsDeployer {
 	return ContractsDeployer{
@@ -172,7 +173,8 @@ func (d ContractsDeployer) DeployKeyperSet(
 	}
 
 	// DeployCore ended with VerifyTxnsInclusion — wait for committed state (4 txns: 3 deploys + 1 init)
-	if err = d.waitForNonceAt(ctx, 4); err != nil {
+	err = d.waitForNonceAt(ctx, 4)
+	if err != nil {
 		return common.Address{}, nil, err
 	}
 
@@ -238,7 +240,8 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return common.Address{}, nil, err
 	}
 
-	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block,
+	err = d.txnInclusionVerifier.VerifyTxnsInclusion(
+		ctx, block,
 		keyperSetDeployTxn.Hash(),
 		setPublisherTxn.Hash(),
 		setThresholdTxn.Hash(),

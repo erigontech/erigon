@@ -51,6 +51,10 @@ func (ms *MessageSender) SendGetBlockBodies(ctx context.Context, peerId *PeerId,
 	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_GET_BLOCK_BODIES_66, req, peerId)
 }
 
+func (ms *MessageSender) SendGetBlockAccessLists(ctx context.Context, peerId *PeerId, req eth.GetBlockAccessListsPacket66) error {
+	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71, req, peerId)
+}
+
 func (ms *MessageSender) SendNewBlockHashes(ctx context.Context, peerId *PeerId, req eth.NewBlockHashesPacket) error {
 	return ms.sendMessageToPeer(ctx, sentryproto.MessageId_NEW_BLOCK_HASHES_66, req, peerId)
 }

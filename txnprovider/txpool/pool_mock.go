@@ -16,6 +16,7 @@ import (
 	common "github.com/erigontech/erigon/common"
 	kv "github.com/erigontech/erigon/db/kv"
 	remoteproto "github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	sentryproto "github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	txpoolcfg "github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -120,15 +121,15 @@ func (c *MockPoolAddNewGoodPeerCall) DoAndReturn(f func(PeerID)) *MockPoolAddNew
 }
 
 // AddRemoteTxns mocks base method.
-func (m *MockPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots) {
+func (m *MockPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "AddRemoteTxns", ctx, newTxns)
+	m.ctrl.Call(m, "AddRemoteTxns", ctx, newTxns, peerID, sentry)
 }
 
 // AddRemoteTxns indicates an expected call of AddRemoteTxns.
-func (mr *MockPoolMockRecorder) AddRemoteTxns(ctx, newTxns any) *MockPoolAddRemoteTxnsCall {
+func (mr *MockPoolMockRecorder) AddRemoteTxns(ctx, newTxns, peerID, sentry any) *MockPoolAddRemoteTxnsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRemoteTxns", reflect.TypeOf((*MockPool)(nil).AddRemoteTxns), ctx, newTxns)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddRemoteTxns", reflect.TypeOf((*MockPool)(nil).AddRemoteTxns), ctx, newTxns, peerID, sentry)
 	return &MockPoolAddRemoteTxnsCall{Call: call}
 }
 
@@ -144,13 +145,13 @@ func (c *MockPoolAddRemoteTxnsCall) Return() *MockPoolAddRemoteTxnsCall {
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPoolAddRemoteTxnsCall) Do(f func(context.Context, TxnSlots)) *MockPoolAddRemoteTxnsCall {
+func (c *MockPoolAddRemoteTxnsCall) Do(f func(context.Context, TxnSlots, PeerID, sentryproto.SentryClient)) *MockPoolAddRemoteTxnsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolAddRemoteTxnsCall) DoAndReturn(f func(context.Context, TxnSlots)) *MockPoolAddRemoteTxnsCall {
+func (c *MockPoolAddRemoteTxnsCall) DoAndReturn(f func(context.Context, TxnSlots, PeerID, sentryproto.SentryClient)) *MockPoolAddRemoteTxnsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -271,6 +272,46 @@ func (c *MockPoolGetRlpCall) DoAndReturn(f func(kv.Tx, []byte) ([]byte, error)) 
 	return c
 }
 
+// HeldOrQueuedIdHashes mocks base method.
+func (m *MockPool) HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (Hashes, Hashes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HeldOrQueuedIdHashes", tx, hashes)
+	ret0, _ := ret[0].(Hashes)
+	ret1, _ := ret[1].(Hashes)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// HeldOrQueuedIdHashes indicates an expected call of HeldOrQueuedIdHashes.
+func (mr *MockPoolMockRecorder) HeldOrQueuedIdHashes(tx, hashes any) *MockPoolHeldOrQueuedIdHashesCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HeldOrQueuedIdHashes", reflect.TypeOf((*MockPool)(nil).HeldOrQueuedIdHashes), tx, hashes)
+	return &MockPoolHeldOrQueuedIdHashesCall{Call: call}
+}
+
+// MockPoolHeldOrQueuedIdHashesCall wrap *gomock.Call
+type MockPoolHeldOrQueuedIdHashesCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPoolHeldOrQueuedIdHashesCall) Return(held, queued Hashes, err error) *MockPoolHeldOrQueuedIdHashesCall {
+	c.Call = c.Call.Return(held, queued, err)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPoolHeldOrQueuedIdHashesCall) Do(f func(kv.Tx, Hashes) (Hashes, Hashes, error)) *MockPoolHeldOrQueuedIdHashesCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPoolHeldOrQueuedIdHashesCall) DoAndReturn(f func(kv.Tx, Hashes) (Hashes, Hashes, error)) *MockPoolHeldOrQueuedIdHashesCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // IdHashKnown mocks base method.
 func (m *MockPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 	m.ctrl.T.Helper()
@@ -348,6 +389,42 @@ func (c *MockPoolOnNewBlockCall) DoAndReturn(f func(context.Context, *remoteprot
 	return c
 }
 
+// RejectFramePrefix mocks base method.
+func (m *MockPool) RejectFramePrefix(hash common.Hash) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "RejectFramePrefix", hash)
+}
+
+// RejectFramePrefix indicates an expected call of RejectFramePrefix.
+func (mr *MockPoolMockRecorder) RejectFramePrefix(hash any) *MockPoolRejectFramePrefixCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RejectFramePrefix", reflect.TypeOf((*MockPool)(nil).RejectFramePrefix), hash)
+	return &MockPoolRejectFramePrefixCall{Call: call}
+}
+
+// MockPoolRejectFramePrefixCall wrap *gomock.Call
+type MockPoolRejectFramePrefixCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPoolRejectFramePrefixCall) Return() *MockPoolRejectFramePrefixCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPoolRejectFramePrefixCall) Do(f func(common.Hash)) *MockPoolRejectFramePrefixCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPoolRejectFramePrefixCall) DoAndReturn(f func(common.Hash)) *MockPoolRejectFramePrefixCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // Started mocks base method.
 func (m *MockPool) Started() bool {
 	m.ctrl.T.Helper()
@@ -382,44 +459,6 @@ func (c *MockPoolStartedCall) Do(f func() bool) *MockPoolStartedCall {
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockPoolStartedCall) DoAndReturn(f func() bool) *MockPoolStartedCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// ValidateSerializedTxn mocks base method.
-func (m *MockPool) ValidateSerializedTxn(serializedTxn []byte) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ValidateSerializedTxn", serializedTxn)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// ValidateSerializedTxn indicates an expected call of ValidateSerializedTxn.
-func (mr *MockPoolMockRecorder) ValidateSerializedTxn(serializedTxn any) *MockPoolValidateSerializedTxnCall {
-	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ValidateSerializedTxn", reflect.TypeOf((*MockPool)(nil).ValidateSerializedTxn), serializedTxn)
-	return &MockPoolValidateSerializedTxnCall{Call: call}
-}
-
-// MockPoolValidateSerializedTxnCall wrap *gomock.Call
-type MockPoolValidateSerializedTxnCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockPoolValidateSerializedTxnCall) Return(arg0 error) *MockPoolValidateSerializedTxnCall {
-	c.Call = c.Call.Return(arg0)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockPoolValidateSerializedTxnCall) Do(f func([]byte) error) *MockPoolValidateSerializedTxnCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPoolValidateSerializedTxnCall) DoAndReturn(f func([]byte) error) *MockPoolValidateSerializedTxnCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

@@ -3,14 +3,14 @@ package app
 import (
 	"runtime"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var (
 	PreverifiedFlag = cli.StringFlag{
 		Name:     "preverified",
 		Category: "Snapshots",
-		Usage:    "preverified to use (remote, local, embedded)",
+		Usage:    "preverified to use (remote, local)",
 		Value:    "remote",
 	}
 	ConcurrencyFlag = cli.IntFlag{

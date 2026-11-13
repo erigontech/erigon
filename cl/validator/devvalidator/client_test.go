@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,12 +41,14 @@ func TestPostAndDecode_AttesterDuties(t *testing.T) {
 			http.Error(w, "bad body", http.StatusBadRequest)
 			return
 		}
-		require.NotEmpty(t, indices)
+		assert.NotEmpty(t, indices)
 
 		// Return duties wrapped in standard Beacon API response.
-		resp := map[string]interface{}{"data": expectedDuties}
+		resp := map[string]any{"data": expectedDuties}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -71,8 +74,10 @@ func TestGet_AttesterDuties_Fails(t *testing.T) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		resp := map[string]interface{}{"data": []interface{}{}}
-		json.NewEncoder(w).Encode(resp)
+		resp := map[string]any{"data": []any{}}
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -81,7 +86,7 @@ func TestGet_AttesterDuties_Fails(t *testing.T) {
 	ctx := context.Background()
 
 	// GET must fail with 405 — this is the bug that postAndDecode fixes.
-	var duties []interface{}
+	var duties []any
 	err := client.get(ctx, "/eth/v1/validator/duties/attester/0", &duties)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "405")

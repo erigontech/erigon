@@ -40,6 +40,9 @@ const sampleNumber = 3 // Number of transactions sampled in a block
 // OracleBackend includes all necessary background APIs for oracle.
 type OracleBackend interface {
 	HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
+	// LatestHead returns the number and canonical hash of the latest block
+	// without reading its header: the identity the tip cache is keyed by.
+	LatestHead(ctx context.Context) (uint64, common.Hash, error)
 	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
 	ChainConfig() *chain.Config
 	GetLatestBlockNumber() (uint64, error)
@@ -47,10 +50,43 @@ type OracleBackend interface {
 	GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 
+	// CheckBlockRewardsAvailable reports whether the transactions of a block and the
+	// gas used GetReceiptsGasUsed reads for them can still be served under the node's
+	// retention.
+	CheckBlockRewardsAvailable(ctx context.Context, blockNumber uint64) error
+
+	// CanonicalHashes returns the canonical hashes of [from, to] on the
+	// backend's view, one entry per height. Heights the view has no canonical
+	// marker for (beyond the head, or pruned) get the zero hash. It resolves
+	// the whole range at once because a per-height lookup is a remote round
+	// trip in rpcdaemon mode.
+	CanonicalHashes(ctx context.Context, from, to uint64) ([]common.Hash, error)
+
+	// FrozenBlocks returns the frozen (snapshot) boundary: the canonical
+	// number-to-hash mapping at or below it is immutable.
+	FrozenBlocks() uint64
+
+	// HeaderByHashNumber and BlockByHashNumber fetch by an already-resolved
+	// canonical (hash, number) pair, so a cached entry can never name a
+	// different block than the one processed.
+	HeaderByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error)
+	BlockByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Block, error)
+
+	// PrepareFork resolves, on the caller's goroutine, whatever identity Fork
+	// validates a forked snapshot against. It must be called before the first
+	// Fork and is a no-op afterwards: Fork runs on the fan-out goroutines,
+	// which must never read the parent transaction. Its error reports what
+	// stays unresolved; it does not decide the request's fate, and Fork then
+	// answers nil.
+	PrepareFork(ctx context.Context) error
+
 	// Fork opens a new TemporalTx and returns a goroutine-local backend together
 	// with a cleanup function (call via defer cleanup()).
-	// If the backend does not support forking, it returns (nil, nil, nil) and
-	// the caller should fall back to using the main backend sequentially.
+	// A (nil, nil, nil) return means no forked backend is available for this
+	// call — the backend may not support forking at all, or a concurrent reorg
+	// may have made a consistent fork momentarily impossible. It is a per-call
+	// answer, not a static capability: callers fall back to sequential reads on
+	// this backend for the current request and must not memoize the nil.
 	Fork(ctx context.Context) (OracleBackend, func(), error)
 }
 
@@ -103,8 +139,6 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, hi
 		log.Warn("Sanitizing invalid gasprice oracle ignore price", "provided", params.IgnorePrice, "updated", ignorePrice)
 	}
 
-	setBorDefaultGpoIgnorePrice(backend.ChainConfig(), params, log)
-
 	return &Oracle{
 		backend:          backend,
 		maxPrice:         maxPrice,
@@ -124,27 +158,27 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, hi
 // NODE: if caller wants legacy txn SuggestedPrice, we need to add
 // baseFee to the returned bigInt
 func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
-	latestHead, latestPrice := oracle.cache.GetLatest()
-	head, err := oracle.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
-	if err != nil {
-		return latestPrice, err
-	}
-	if head == nil {
-		return latestPrice, nil
-	}
+	price, _, _, err := oracle.SuggestTipCapAtHead(ctx)
+	return price, err
+}
 
-	headHash := head.Hash()
+// SuggestTipCapAtHead is SuggestTipCap that also returns the head the tip was sampled at.
+func (oracle *Oracle) SuggestTipCapAtHead(ctx context.Context) (*uint256.Int, uint64, common.Hash, error) {
+	latestHead, latestPrice := oracle.cache.GetLatest()
+	number, headHash, err := oracle.backend.LatestHead(ctx)
+	if err != nil {
+		return latestPrice, 0, common.Hash{}, err
+	}
 	if latestHead == headHash {
-		return latestPrice, nil
+		return latestPrice, number, headHash, nil
 	}
 
 	// check again, the last request could have populated the cache
 	latestHead, latestPrice = oracle.cache.GetLatest()
 	if latestHead == headHash {
-		return latestPrice, nil
+		return latestPrice, number, headHash, nil
 	}
 
-	number := head.Number.Uint64()
 	txPrices := make([]*uint256.Int, 0, 2*sampleNumber*oracle.checkBlocks)
 
 	// Phase 1: fetch checkBlocks blocks in parallel (or sequentially when Fork
@@ -155,7 +189,7 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 	}
 	phase1, err := oracle.fetchBlockPricesParallel(ctx, number, count1)
 	if err != nil {
-		return latestPrice, err
+		return latestPrice, 0, common.Hash{}, err
 	}
 
 	// Post-process phase 1: apply the empty-block fallback (issue #17617) and
@@ -187,7 +221,7 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 		if count2 > 0 {
 			phase2, err := oracle.fetchBlockPricesParallel(ctx, startBlock2, count2)
 			if err != nil {
-				return latestPrice, err
+				return latestPrice, 0, common.Hash{}, err
 			}
 			for _, prices := range phase2 {
 				if len(prices) == 0 && latestPrice != nil {
@@ -212,7 +246,7 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 
 	oracle.cache.SetLatest(headHash, price)
 
-	return price, nil
+	return price, number, headHash, nil
 }
 
 // fetchBlockPricesParallel fetches prices for count consecutive blocks, starting
@@ -226,10 +260,13 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 //
 // The returned slice has length count: entry i corresponds to block head-i.
 func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64, count int) ([][]*uint256.Int, error) {
+	if err := oracle.backend.PrepareFork(ctx); err != nil {
+		oracle.log.Debug("gas price: parent identity unresolved, serving sequentially", "err", err)
+	}
 	results := make([][]*uint256.Int, count)
 	var (
-		nextIdx uint64
-		seqOnce int32 // CAS flag: 0 = available, 1 = sequential mode claimed
+		nextIdx atomic.Uint64
+		seqOnce atomic.Int32 // CAS flag: 0 = available, 1 = sequential mode claimed
 	)
 	g, fetchCtx := errgroup.WithContext(ctx)
 	for range min(maxBlockFetchers, count) {
@@ -239,9 +276,10 @@ func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64,
 				return forkErr
 			}
 			if localBackend == nil {
-				// Fork not supported: allow exactly one goroutine to proceed
-				// sequentially on the shared backend; the others exit.
-				if !atomic.CompareAndSwapInt32(&seqOnce, 0, 1) {
+				// No forked backend for this call (unsupported, or a concurrent
+				// reorg): exactly one goroutine proceeds sequentially on the
+				// shared backend; the others exit.
+				if !seqOnce.CompareAndSwap(0, 1) {
 					return nil
 				}
 				localBackend = oracle.backend
@@ -252,7 +290,7 @@ func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64,
 				if err := fetchCtx.Err(); err != nil {
 					return err
 				}
-				idx := int(atomic.AddUint64(&nextIdx, 1)) - 1
+				idx := int(nextIdx.Add(1)) - 1
 				if idx >= count {
 					return nil
 				}
@@ -278,7 +316,8 @@ func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64,
 // on every comparison (O(n log n) allocations). Now we allocate exactly once
 // per transaction (O(n)) and sort with slices.SortFunc (pdqsort).
 func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend OracleBackend, blockNum uint64, limit int,
-	ignoreUnder *uint256.Int, out *[]*uint256.Int) error {
+	ignoreUnder *uint256.Int, out *[]*uint256.Int,
+) error {
 	block, err := backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
 	if err != nil {
 		oracle.log.Error("getBlockPrices", "err", err)
@@ -294,7 +333,7 @@ func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend Ora
 	// Pre-compute effective tip for every transaction exactly once.
 	type txWithTip struct {
 		tx  types.Transaction
-		tip *uint256.Int
+		tip uint256.Int
 	}
 	items := make([]txWithTip, len(block.Transactions()))
 	for i, tx := range block.Transactions() {
@@ -302,7 +341,7 @@ func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend Ora
 	}
 
 	// Sort ascending by effective tip; slices.SortFunc uses pdqsort (no reflection).
-	slices.SortFunc(items, func(a, b txWithTip) int { return a.tip.Cmp(b.tip) })
+	slices.SortFunc(items, func(a, b txWithTip) int { return a.tip.Cmp(&b.tip) })
 
 	// Since items are sorted ascending, all tips below ignoreUnder form a
 	// contiguous prefix that we can skip with a single pass.
@@ -320,17 +359,10 @@ func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend Ora
 		}
 		sender, _ := item.tx.GetSender()
 		if sender.Value() != coinbase {
-			*out = append(*out, item.tip)
+			tipCopy := new(uint256.Int).Set(&item.tip)
+			*out = append(*out, tipCopy)
 			count++
 		}
 	}
 	return nil
-}
-
-// setBorDefaultGpoIgnorePrice enforces gpo IgnorePrice to be equal to BorDefaultGpoIgnorePrice (25gwei by default)
-func setBorDefaultGpoIgnorePrice(chainConfig *chain.Config, gasPriceConfig gaspricecfg.Config, log log.Logger) {
-	if chainConfig.Bor != nil && gasPriceConfig.IgnorePrice != gaspricecfg.BorDefaultGpoIgnorePrice {
-		log.Warn("Sanitizing invalid bor gasprice oracle ignore price", "provided", gasPriceConfig.IgnorePrice, "updated", gaspricecfg.BorDefaultGpoIgnorePrice)
-		gasPriceConfig.IgnorePrice = gaspricecfg.BorDefaultGpoIgnorePrice
-	}
 }

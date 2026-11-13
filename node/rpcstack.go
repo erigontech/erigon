@@ -20,355 +20,72 @@
 package node
 
 import (
-	"compress/gzip"
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
-	"slices"
+	"net/netip"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	"github.com/rs/cors"
+
+	"github.com/klauspost/compress/gzhttp"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 )
-
-// httpConfig is the JSON-RPC/HTTP configuration.
-type httpConfig struct {
-	Modules            []string
-	CorsAllowedOrigins []string
-	Vhosts             []string
-	Compression        bool
-	prefix             string // path prefix on which to mount http handler
-	// RpcConcurrencyLimit is the maximum number of concurrent HTTP RPC requests.
-	// Requests beyond this limit receive an immediate 503 before touching any middleware.
-	// 0 means unlimited (admission control disabled).
-	RpcConcurrencyLimit int64
-}
-
-// wsConfig is the JSON-RPC/Websocket configuration
-type wsConfig struct {
-	Origins []string
-	Modules []string
-	prefix  string // path prefix on which to mount ws handler
-}
-
-type rpcHandler struct {
-	http.Handler
-	server *rpc.Server
-}
-
-type httpServer struct {
-	logger   log.Logger
-	timeouts rpccfg.HTTPTimeouts
-	mux      http.ServeMux // registered handlers go here
-
-	mu       sync.Mutex
-	server   *http.Server
-	listener net.Listener // non-nil when server is running
-
-	// HTTP RPC handler things.
-
-	httpConfig  httpConfig
-	httpHandler atomic.Value // *rpcHandler
-
-	// WebSocket handler things.
-	wsConfig  wsConfig
-	wsHandler atomic.Value // *rpcHandler
-
-	// These are set by setListenAddr.
-	endpoint string
-	host     string
-	port     int
-
-	handlerNames map[string]string
-}
-
-func newHTTPServer(logger log.Logger, timeouts rpccfg.HTTPTimeouts) *httpServer {
-	h := &httpServer{logger: logger, timeouts: timeouts, handlerNames: make(map[string]string)}
-
-	h.httpHandler.Store((*rpcHandler)(nil))
-	h.wsHandler.Store((*rpcHandler)(nil))
-	return h
-}
-
-// setListenAddr configures the listening address of the server.
-// The address can only be set while the server isn't running.
-func (h *httpServer) setListenAddr(host string, port int) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if h.listener != nil && (host != h.host || port != h.port) {
-		return fmt.Errorf("HTTP server already running on %s", h.endpoint)
-	}
-
-	h.host, h.port = host, port
-	h.endpoint = fmt.Sprintf("%s:%d", host, port)
-	return nil
-}
-
-// listenAddr returns the listening address of the server.
-func (h *httpServer) listenAddr() string {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if h.listener != nil {
-		return h.listener.Addr().String()
-	}
-	return h.endpoint
-}
-
-// start starts the HTTP server if it is enabled and not already running.
-func (h *httpServer) start() error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if h.endpoint == "" || h.listener != nil {
-		return nil // already running or not configured
-	}
-
-	// Initialize the server.
-	h.server = &http.Server{Handler: h} // nolint
-	h.server.Protocols = new(http.Protocols)
-	h.server.Protocols.SetHTTP1(true)
-	h.server.Protocols.SetUnencryptedHTTP2(true)
-	if h.timeouts != (rpccfg.HTTPTimeouts{}) {
-		CheckTimeouts(&h.timeouts)
-		h.server.ReadTimeout = h.timeouts.ReadTimeout
-		h.server.WriteTimeout = h.timeouts.WriteTimeout
-		h.server.IdleTimeout = h.timeouts.IdleTimeout
-	}
-
-	// Start the server.
-	listener, err := net.Listen("tcp", h.endpoint)
-	if err != nil {
-		// If the server fails to start, we need to clear out the RPC and WS
-		// configuration so they can be configured another time.
-		h.disableRPC()
-		h.disableWS()
-		return err
-	}
-	h.listener = listener
-	go h.server.Serve(listener) // nolint:errcheck
-
-	if h.wsAllowed() {
-		url := fmt.Sprintf("ws://%v", listener.Addr())
-		if h.wsConfig.prefix != "" {
-			url += h.wsConfig.prefix
-		}
-		h.logger.Info("WebSocket enabled", "url", url)
-	}
-	// if server is websocket only, return after logging
-	if !h.rpcAllowed() {
-		return nil
-	}
-	// Log http endpoint.
-	h.logger.Info("HTTP server started",
-		"endpoint", listener.Addr(),
-		"prefix", h.httpConfig.prefix,
-		"cors", strings.Join(h.httpConfig.CorsAllowedOrigins, ","),
-		"vhosts", strings.Join(h.httpConfig.Vhosts, ","),
-	)
-
-	// Log all handlers mounted on server.
-	paths := make([]string, len(h.handlerNames))
-	i := 0
-	for path := range h.handlerNames {
-		paths[i] = path
-		i++
-	}
-	slices.Sort(paths)
-	logged := make(map[string]bool, len(paths))
-	for _, path := range paths {
-		name := h.handlerNames[path]
-		if !logged[name] {
-			h.logger.Info(name+" enabled", "url", "http://"+listener.Addr().String()+path)
-			logged[name] = true
-		}
-	}
-	return nil
-}
-
-func (h *httpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// check if ws request and serve if ws enabled
-	// Note: WebSocket connections bypass rpcAdmissionHandler intentionally.
-	// HTTP admission control limits inflight requests per connection, but WebSocket
-	// is a persistent long-lived connection where the relevant limit is the number
-	// of concurrent connections, not inflight requests. A dedicated WebSocket
-	// connection limiter will be addressed in a separate PR.
-	ws := h.wsHandler.Load().(*rpcHandler)
-	if ws != nil && isWebsocket(r) {
-		if checkPath(r, h.wsConfig.prefix) {
-			ws.ServeHTTP(w, r)
-		}
-		return
-	}
-	// if http-rpc is enabled, try to serve request
-	rpc := h.httpHandler.Load().(*rpcHandler)
-	if rpc != nil {
-		// First try to route in the mux.
-		// Requests to a path below root are handled by the mux,
-		// which has all the handlers registered via Node.RegisterHandler.
-		// These are made available when RPC is enabled.
-		muxHandler, pattern := h.mux.Handler(r)
-		if pattern != "" {
-			muxHandler.ServeHTTP(w, r)
-			return
-		}
-
-		if checkPath(r, h.httpConfig.prefix) {
-			rpc.ServeHTTP(w, r)
-			return
-		}
-	}
-	w.WriteHeader(http.StatusNotFound)
-}
-
-// checkPath checks whether a given request URL matches a given path prefix.
-func checkPath(r *http.Request, path string) bool {
-	// if no prefix has been specified, request URL must be on root
-	if path == "" {
-		return r.URL.Path == "/"
-	}
-	// otherwise, check to make sure prefix matches
-	return len(r.URL.Path) >= len(path) && r.URL.Path[:len(path)] == path
-}
-
-// stop shuts down the HTTP server.
-func (h *httpServer) stop() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.doStop()
-}
-
-func (h *httpServer) doStop() {
-	if h.listener == nil {
-		return // not running
-	}
-
-	// Shut down the server.
-	httpHandler := h.httpHandler.Load().(*rpcHandler)
-	wsHandler := h.httpHandler.Load().(*rpcHandler)
-	if httpHandler != nil {
-		h.httpHandler.Store((*rpcHandler)(nil))
-		httpHandler.server.Stop()
-	}
-	if wsHandler != nil {
-		h.wsHandler.Store((*rpcHandler)(nil))
-		wsHandler.server.Stop()
-	}
-	h.server.Shutdown(context.Background()) //nolint:errcheck
-	h.listener.Close()
-	h.logger.Info("HTTP server stopped", "endpoint", h.listener.Addr())
-
-	// Clear out everything to allow re-configuring it later.
-	h.host, h.port, h.endpoint = "", 0, ""
-	h.server, h.listener = nil, nil
-}
-
-// enableRPC turns on JSON-RPC over HTTP on the server.
-func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig, allowList rpc.AllowList) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if h.rpcAllowed() {
-		return errors.New("JSON-RPC over HTTP is already enabled")
-	}
-
-	// Create RPC server and handler.
-	srv := rpc.NewServer(50, false /* traceRequests */, false /* traceSingleRequest */, true, h.logger, 0)
-	srv.SetAllowList(allowList)
-	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false, h.logger); err != nil {
-		return err
-	}
-	h.httpConfig = config
-	h.httpHandler.Store(&rpcHandler{
-		Handler: NewHTTPHandlerStack(srv, config.CorsAllowedOrigins, config.Vhosts, config.Compression, config.RpcConcurrencyLimit, true),
-		server:  srv,
-	})
-	return nil
-}
-
-// disableRPC stops the HTTP RPC handler. This is internal, the caller must hold h.mu.
-func (h *httpServer) disableRPC() bool {
-	handler := h.httpHandler.Load().(*rpcHandler)
-	if handler != nil {
-		h.httpHandler.Store((*rpcHandler)(nil))
-		handler.server.Stop()
-	}
-	return handler != nil
-}
-
-// enableWS turns on JSON-RPC over WebSocket on the server.
-func (h *httpServer) enableWS(apis []rpc.API, config wsConfig, allowList rpc.AllowList) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if h.wsAllowed() {
-		return errors.New("JSON-RPC over WebSocket is already enabled")
-	}
-
-	// Create RPC server and handler.
-	srv := rpc.NewServer(50, false /* traceRequests */, false /* debugSingleRequest */, true, h.logger, 0)
-	srv.SetAllowList(allowList)
-	if err := RegisterApisFromWhitelist(apis, config.Modules, srv, false, h.logger); err != nil {
-		return err
-	}
-	h.wsConfig = config
-	h.wsHandler.Store(&rpcHandler{
-		Handler: srv.WebsocketHandler(config.Origins, nil, false, h.logger),
-		server:  srv,
-	})
-	return nil
-}
-
-// disableWS disables the WebSocket handler. This is internal, the caller must hold h.mu.
-func (h *httpServer) disableWS() bool {
-	ws := h.wsHandler.Load().(*rpcHandler)
-	if ws != nil {
-		h.wsHandler.Store((*rpcHandler)(nil))
-		ws.server.Stop()
-	}
-	return ws != nil
-}
-
-// rpcAllowed returns true when JSON-RPC over HTTP is enabled.
-func (h *httpServer) rpcAllowed() bool {
-	return h.httpHandler.Load().(*rpcHandler) != nil
-}
-
-// wsAllowed returns true when JSON-RPC over WebSocket is enabled.
-func (h *httpServer) wsAllowed() bool {
-	return h.wsHandler.Load().(*rpcHandler) != nil
-}
-
-// isWebsocket checks the header of an http request for a websocket upgrade request.
-func isWebsocket(r *http.Request) bool {
-	return strings.ToLower(r.Header.Get("Upgrade")) == "websocket" &&
-		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
-}
 
 // NewHTTPHandlerStack returns wrapped http-related handlers.
 // When tagAsRPC is true and rpcConcurrencyLimit > 0, enforces admission control
 // (503 if inflight > limit) to prevent goroutine pile-up under load.
-func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression bool, rpcConcurrencyLimit int64, tagAsRPC bool) http.Handler {
+func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression, compressLoopback bool, rpcConcurrencyLimit int64, tagAsRPC bool) http.Handler {
 	handler := newCorsHandler(srv, cors)
 	handler = newVHostHandler(vhosts, handler)
 	if compression {
-		handler = newGzipHandler(handler)
+		if compressLoopback {
+			handler = newGzipHandler(handler)
+		} else {
+			handler = newSkipLoopbackCompressionHandler(handler, newGzipHandler(handler))
+		}
 	}
 	if tagAsRPC {
 		handler = newRPCAdmissionHandler(rpcConcurrencyLimit, handler)
 	}
 	return handler
+}
+
+// newSkipLoopbackCompressionHandler decides per request, not per listener, so a
+// server bound to 0.0.0.0 still skips compression for local clients.
+func newSkipLoopbackCompressionHandler(plain, compressed http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isLocalClient(r) {
+			plain.ServeHTTP(w, r)
+			return
+		}
+		compressed.ServeHTTP(w, r)
+	})
+}
+
+// isLocalClient treats a loopback request carrying a forwarding header as remote:
+// it comes from a reverse proxy on the same host. A faked header only turns
+// compression back on, so it needs no trust check.
+func isLocalClient(r *http.Request) bool {
+	return isLoopbackAddress(r.RemoteAddr) &&
+		r.Header.Get("X-Forwarded-For") == "" &&
+		r.Header.Get("Forwarded") == ""
+}
+
+func isLoopbackAddress(addr string) bool {
+	ap, err := netip.ParseAddrPort(addr)
+	if err != nil {
+		return false
+	}
+	return ap.Addr().Unmap().IsLoopback()
 }
 
 // rpcAdmissionHandler limits the number of concurrent HTTP RPC requests.
@@ -380,7 +97,10 @@ type rpcAdmissionHandler struct {
 	next     http.Handler
 }
 
-var rpcAdmissionRejected = metrics.GetOrCreateCounter(`rpc_admission_rejected_total`)
+var (
+	rpcAdmissionRejected = metrics.GetOrCreateCounter(`rpc_admission_rejected_total`)
+	wsConnectionRejected = metrics.GetOrCreateCounter(`ws_connection_rejected_total`)
+)
 
 func newRPCAdmissionHandler(limit int64, next http.Handler) http.Handler {
 	return &rpcAdmissionHandler{limit: limit, next: next}
@@ -403,18 +123,83 @@ func (h *rpcAdmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	h.next.ServeHTTP(w, r.WithContext(ctx))
 }
 
-func newCorsHandler(srv http.Handler, allowedOrigins []string) http.Handler {
-	// disable CORS support if user has not specified a custom CORS configuration
-	if len(allowedOrigins) == 0 {
-		return srv
+// NewWSConnectionLimiter wraps next so that at most limit concurrent WebSocket
+// connections are served. Connections beyond the limit receive HTTP 503. If
+// limit is 0, next is returned unwrapped.
+func NewWSConnectionLimiter(limit int64, next http.Handler) http.Handler {
+	if limit <= 0 {
+		return next
 	}
-	c := cors.New(cors.Options{
-		AllowedOrigins: allowedOrigins,
-		AllowedMethods: []string{http.MethodPost, http.MethodGet},
-		AllowedHeaders: []string{"*"},
-		MaxAge:         600,
+	return &wsConnectionLimiter{limit: limit, next: next}
+}
+
+type wsConnectionLimiter struct {
+	count atomic.Int64
+	limit int64
+	next  http.Handler
+}
+
+func (h *wsConnectionLimiter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.count.Add(1) > h.limit {
+		h.count.Add(-1)
+		wsConnectionRejected.Inc()
+		rpc.WriteOverloadedResponse(w)
+		return
+	}
+	defer h.count.Add(-1)
+	h.next.ServeHTTP(w, r)
+}
+
+// NewWSOriginHandler refuses WebSocket handshakes from browser origins that the HTTP CORS
+// configuration would not accept. Requests without an Origin header are not from a browser and
+// pass through. With no allowed origins, next is returned unwrapped.
+func NewWSOriginHandler(allowedOrigins []string, next http.Handler) http.Handler {
+	if len(allowedOrigins) == 0 {
+		return next
+	}
+	c := cors.New(cors.Options{AllowedOrigins: allowedOrigins})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Origin") != "" && !c.OriginAllowed(r) {
+			http.Error(w, "origin not allowed", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
-	return c.Handler(srv)
+}
+
+func newCorsHandler(srv http.Handler, allowedOrigins []string) http.Handler {
+	var c *cors.Cors
+	next := srv
+	// CORS support stays disabled if the user has not specified a custom CORS configuration
+	if len(allowedOrigins) > 0 {
+		c = cors.New(cors.Options{
+			AllowedOrigins: allowedOrigins,
+			AllowedMethods: []string{http.MethodPost, http.MethodGet},
+			AllowedHeaders: []string{"*"},
+			MaxAge:         600,
+		})
+		next = c.Handler(srv)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && fromOtherSite(r) && !(c != nil && r.Header.Get("Origin") != "" && c.OriginAllowed(r)) {
+			http.Error(w, "cross-site GET requests are not allowed", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// fromOtherSite reports whether a browser sent r on behalf of another site's page. A GET needs no
+// CORS preflight, so such a page could otherwise call any method through the query.
+func fromOtherSite(r *http.Request) bool {
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "same-origin", "none":
+		return false
+	case "":
+		return r.Header.Get("Origin") != ""
+	default:
+		return true
+	}
 }
 
 // virtualHostHandler is a handler which validates the Host-header of incoming requests.
@@ -446,6 +231,7 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Either invalid (too many colons) or no port specified
 		host = r.Host
 	}
+	host = strings.ToLower(host)
 	if ipAddr := net.ParseIP(host); ipAddr != nil {
 		// It's an IP address, we can serve that
 		h.next.ServeHTTP(w, r)
@@ -461,50 +247,148 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.next.ServeHTTP(w, r)
 		return
 	}
-	if _, exist := h.vhosts[strings.ToLower(host)]; exist {
+	if _, exist := h.vhosts[host]; exist {
 		h.next.ServeHTTP(w, r)
 		return
 	}
 	http.Error(w, "invalid host specified", http.StatusForbidden)
 }
 
-var gzPool = sync.Pool{
-	New: func() any {
-		w := gzip.NewWriter(io.Discard)
-		return w
-	},
-}
+// minGzipBodySize is the minimum response body size to compress, for gzip and
+// zstd alike -- gzhttp carries one MinSize threshold for both encoders.
+// Responses smaller than this are sent as-is: framing overhead would exceed
+// savings.
+const minGzipBodySize = 1024
 
-type gzipResponseWriter struct {
-	io.Writer
+// Raw and compressed byte counters: out/in gives the live compression ratio,
+// the out rate tracks RPC egress.
+var (
+	// path="streaming" is kept from the counters these replace: dropping it would
+	// break existing selectors.
+	gzipInBytes  = metrics.GetOrCreateCounter(`rpc_gzip_in_bytes_total{path="streaming"}`)
+	gzipOutBytes = metrics.GetOrCreateCounter(`rpc_gzip_out_bytes_total{path="streaming"}`)
+	// New series: no selector pins the label, it is carried for symmetry.
+	zstdInBytes  = metrics.GetOrCreateCounter(`rpc_zstd_in_bytes_total{path="streaming"}`)
+	zstdOutBytes = metrics.GetOrCreateCounter(`rpc_zstd_out_bytes_total{path="streaming"}`)
+)
+
+var (
+	gzipWritersInUse = metrics.GetOrCreateGauge(`rpc_gzip_writers_in_use`)
+	zstdWritersInUse = metrics.GetOrCreateGauge(`rpc_zstd_writers_in_use`)
+)
+
+// gzipWrapper compresses with klauspost's gzhttp middleware, which buffers only
+// minGzipBodySize -- enough to decide whether compressing pays -- then streams,
+// so no response is held whole.
+var gzipWrapper = func() func(http.Handler) http.HandlerFunc {
+	wrapper, err := gzhttp.NewWrapper(
+		gzhttp.MinSize(minGzipBodySize),
+		gzhttp.CompressionLevel(gzipLevel), // gzip only
+		gzhttp.EnableZstd(true),
+		gzhttp.ZstdCompressionLevel(int(zstdLevel)), // zstd only
+		gzhttp.Implementation(gzipWriterFactory),
+		gzhttp.ZstdImplementation(zstdWriterFactory),
+	)
+	if err != nil {
+		panic(fmt.Sprintf("rpc gzip wrapper: %v", err))
+	}
+	return wrapper
+}()
+
+// countingResponseWriter counts body bytes while forwarding the optional
+// interfaces gzhttp probes for: Flusher for streaming responses, and Hijacker,
+// which newNoGzipResponseWriter looks for on the pass-through path.
+type countingResponseWriter struct {
 	http.ResponseWriter
+	n int
+	// afterWrite runs once the byte count has moved, so a response that never
+	// returns still advances the metrics.
+	afterWrite func()
 }
 
-func (w *gzipResponseWriter) WriteHeader(status int) {
-	w.Header().Del("Content-Length")
-	w.ResponseWriter.WriteHeader(status)
+func (w *countingResponseWriter) Write(b []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(b)
+	w.n += n
+	if w.afterWrite != nil {
+		w.afterWrite()
+	}
+	return n, err
 }
 
-func (w *gzipResponseWriter) Write(b []byte) (int, error) {
-	return w.Writer.Write(b)
+func (w *countingResponseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+	if w.afterWrite != nil {
+		w.afterWrite()
+	}
 }
+
+// Unwrap lets http.NewResponseController reach the real writer.
+func (w *countingResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *countingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, errors.New("http.Hijacker interface is not supported")
+}
+
+// gzipMeter counts one request on both sides of the compressor: raw sees the
+// handler's bytes, wire sees what left the process.
+type gzipMeter struct {
+	raw           countingResponseWriter
+	wire          countingResponseWriter
+	rawCommitted  int
+	wireCommitted int
+}
+
+// commit adds what has been counted since the last call, to the counters for
+// whichever encoder gzhttp settled on. Only a compressed response has a ratio,
+// so nothing is committed while it passes the rest through untouched -- a client
+// offering neither encoding, a body under MinSize, a content type it skips --
+// where both sides count the same bytes and out/in reads 1. One request is
+// served by one goroutine, so the deltas need no lock.
+func (m *gzipMeter) commit() {
+	var in, out metrics.Counter
+	switch strings.ToLower(m.wire.Header().Get("Content-Encoding")) {
+	case "gzip":
+		in, out = gzipInBytes, gzipOutBytes
+	case "zstd":
+		in, out = zstdInBytes, zstdOutBytes
+	default:
+		return
+	}
+	if d := m.raw.n - m.rawCommitted; d > 0 {
+		in.AddInt(d)
+		m.rawCommitted = m.raw.n
+	}
+	if d := m.wire.n - m.wireCommitted; d > 0 {
+		out.AddInt(d)
+		m.wireCommitted = m.wire.n
+	}
+}
+
+type gzipMeterKey struct{}
 
 func newGzipHandler(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m, ok := r.Context().Value(gzipMeterKey{}).(*gzipMeter)
+		if !ok {
 			next.ServeHTTP(w, r)
 			return
 		}
-
-		w.Header().Set("Content-Encoding", "gzip")
-
-		gz := gzPool.Get().(*gzip.Writer)
-		defer gzPool.Put(gz)
-
-		gz.Reset(w)
-		defer gz.Close()
-
-		next.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, Writer: gz}, r)
+		m.raw.ResponseWriter = w
+		next.ServeHTTP(&m.raw, r)
+	})
+	compressed := gzipWrapper(inner)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m := &gzipMeter{}
+		m.wire.ResponseWriter = w
+		m.raw.afterWrite = m.commit
+		m.wire.afterWrite = m.commit
+		compressed.ServeHTTP(&m.wire, r.WithContext(context.WithValue(r.Context(), gzipMeterKey{}, m)))
+		m.commit()
 	})
 }
 
@@ -522,7 +406,7 @@ func RegisterApisFromWhitelist(apis []rpc.API, modules []string, srv *rpc.Server
 	// Register all the APIs exposed by the services
 	for _, api := range apis {
 		if exposeAll || whitelist[api.Namespace] || (len(whitelist) == 0 && api.Public) {
-			if err := srv.RegisterName(api.Namespace, api.Service); err != nil {
+			if err := srv.RegisterAPI(api); err != nil {
 				return err
 			}
 		}

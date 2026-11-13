@@ -27,11 +27,12 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/metrics"
@@ -48,16 +49,16 @@ import (
 )
 
 type BuilderExecCfg struct {
-	builderState BuilderState
-	notifier     stagedsync.ChainEventNotifier
-	chainConfig  *chain.Config
-	engine       rules.Engine
-	blockReader  services.FullBlockReader
-	vmConfig     *vm.Config
-	tmpdir       string
-	interrupt    *atomic.Bool
-	payloadId    uint64
-	txnProvider  txnprovider.TxnProvider
+	builderState           BuilderState
+	notifier               stagedsync.ChainEventNotifier
+	chainConfig            *chain.Config
+	engine                 rules.Engine
+	blockReader            dbservices.FullBlockReader
+	vmConfig               *vm.Config
+	interrupt              *atomic.Bool
+	payloadId              uint64
+	txnProvider            txnprovider.TxnProvider
+	requireAllTransactions bool
 }
 
 func StageBuilderExecCfg(
@@ -66,23 +67,23 @@ func StageBuilderExecCfg(
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	vmConfig *vm.Config,
-	tmpdir string,
 	interrupt *atomic.Bool,
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
-	blockReader services.FullBlockReader,
+	requireAllTransactions bool,
+	blockReader dbservices.FullBlockReader,
 ) BuilderExecCfg {
 	return BuilderExecCfg{
-		builderState: builderState,
-		notifier:     notifier,
-		chainConfig:  chainConfig,
-		engine:       engine,
-		blockReader:  blockReader,
-		vmConfig:     vmConfig,
-		tmpdir:       tmpdir,
-		interrupt:    interrupt,
-		payloadId:    payloadId,
-		txnProvider:  txnProvider,
+		builderState:           builderState,
+		notifier:               notifier,
+		chainConfig:            chainConfig,
+		engine:                 engine,
+		blockReader:            blockReader,
+		vmConfig:               vmConfig,
+		interrupt:              interrupt,
+		payloadId:              payloadId,
+		txnProvider:            txnProvider,
+		requireAllTransactions: requireAllTransactions,
 	}
 }
 
@@ -91,7 +92,7 @@ func StageBuilderExecCfg(
 //
 // State changes flow through a single execution path:
 //  1. IBS executes transactions using a NoopWriter / in-memory buffer (no per-tx writes to sd)
-//  2. FinalizeBlockExecution applies the accumulated IBS changes to sd via the block assembler writer
+//  2. the builder applies the assembler's per-phase write sets to sd
 //  3. ComputeCommitment(sd) produces the state root
 //  4. sd writes are discarded when Builder.Build returns (tx is read-only, sd is never flushed)
 //
@@ -104,7 +105,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	vmConfig := *cfg.vmConfig
 	vmConfig.NoReceipts = false
 	cfg.vmConfig = &vmConfig
-	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
+	chainID := cfg.chainConfig.ChainID
 	current := cfg.builderState.BuiltBlock
 
 	// sd writes accumulate in-memory and are discarded when Build returns.
@@ -114,45 +115,41 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		return err
 	}
 	sd.SetTxNum(txNum)
-	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
 
-	stateWriter := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	stateReader := state.NewReaderV3(sd.AsGetter(tx))
+	stateReader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	// filterSd is a separate SharedDomains used only for filterBadTransactions.
 	// The filter makes speculative nonce/balance writes that may not match actual
 	// execution results (e.g., a tx passes the filter but fails in the EVM).
 	// These speculative writes must NOT pollute sd's commitment computation.
 	// filterSd must be backed by its own MemoryBatch to ensure full isolation.
-	filterMb, err := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
+	filterMb, err := membatchwithdb.NewMemoryBatch(tx)
 	if err != nil {
 		return err
 	}
 	defer filterMb.Close()
-	filterSd, err := execctx.NewSharedDomains(ctx, filterMb, logger)
+	filterSd, err := execctx.NewSharedDomains(ctx, filterMb, logger, execctx.WithoutDeferredBranchUpdates())
 	if err != nil {
 		return err
 	}
 	defer filterSd.Close()
 	filterWriter := state.NewWriter(filterSd.AsPutDel(filterMb), nil, txNum)
-	filterReader := state.NewReaderV3(filterSd.AsGetter(filterMb))
+	filterReader := state.NewReaderV3(filterSd.AsStateGetter(filterMb, execctxapi.StateGetterOptions{}))
 
 	ibs := state.New(stateReader)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(current.Header.Number.Uint64(), -1)
 
 	current.PayloadId = cfg.payloadId
 	ba := exec.NewBlockAssembler(exec.AssemblerCfg{
-		ChainConfig:     cfg.chainConfig,
-		Engine:          cfg.engine,
-		BlockReader:     cfg.blockReader,
-		ExperimentalBAL: execCfg.IsExperimentalBAL(),
+		ChainConfig:            cfg.chainConfig,
+		Engine:                 cfg.engine,
+		BlockReader:            cfg.blockReader,
+		ExperimentalBAL:        execCfg.IsExperimentalBAL(),
+		RequireAllTransactions: cfg.requireAllTransactions,
 	}, current)
-	ba.SetStateWriter(stateWriter)
 
-	if ba.HasBAL() {
-		ibs.SetVersionMap(state.NewVersionMap(nil))
-	}
+	ibs.SetVersionMap(state.NewVersionMap(nil))
 
 	execCfg = execCfg.WithAuthor(accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase))
 
@@ -170,11 +167,22 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	coinbase := accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase)
 
 	yielded := mapset.NewSet[[32]byte]()
+	nonceTooHigh := map[accounts.Address][]nonceTooHighTxn{}
+	readNonce := func(sender accounts.Address) (uint64, error) {
+		if !ibs.IsVersioned() {
+			return ibs.GetNonce(sender)
+		}
+		// Filtering must observe executed writes without adding reads to the BAL.
+		view := state.NewVersionedAccountView(sender, len(ba.Txns), ibs.VersionMap(), stateReader)
+		nonce := view.GetNonce()
+		return nonce, view.Err()
+	}
 
 	interrupt := cfg.interrupt
 	const amount = 50
+	filtration := &filtrationStats{}
 	for {
-		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger)
+		txns, provided, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, nonceTooHigh, filterReader, filterWriter, readNonce, logger, filtration)
 		if err != nil {
 			return err
 		}
@@ -188,19 +196,35 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 			if stop {
 				break
 			}
+			retry, err := retryNonceTooHighTransactions(nonceTooHigh, yielded, readNonce)
+			if err != nil {
+				return err
+			}
+			if retry {
+				continue
+			}
 		}
 
 		// if we yielded less than the count we wanted, assume the txpool has run dry now
 		if len(txns) < amount {
+			if cfg.requireAllTransactions {
+				break
+			}
 			if interrupt != nil && !interrupt.Load() {
 				// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
 				// since there may be new txns that can arrive
-				time.Sleep(50 * time.Millisecond)
+				if provided < amount {
+					select {
+					case <-time.After(50 * time.Millisecond):
+					case <-stopSignalsOf(ctx).stopped:
+					}
+				}
 			} else {
 				break
 			}
 		}
 	}
+	logger.Info("Block txn filtration", append([]any{"block", current.Header.Number.Uint64()}, filtration.logArgs()...)...)
 
 	metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)
 
@@ -215,22 +239,28 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		ba.Receipts = types.Receipts{}
 	}
 
-	block, err := ba.AssembleBlock(stateReader, ibs, tx, logger)
+	block, err := ba.AssembleBlock(ibs, tx, logger)
 	if err != nil {
 		return err
 	}
 
-	header := block.HeaderNoCopy()
-
-	if execCfg.ChainConfig().IsPrague(header.Time) {
-		hash := common.Hash{}
-		if len(current.Requests) > 0 {
-			hash = *current.Requests.Hash()
-		}
-		header.RequestsHash = &hash
-	}
-
 	blockHeight := block.NumberU64()
+
+	// FinalizeBlockExecution skipped the so.data CommitBlock of the versioned state; commit the accumulated per-phase write-sets to the
+	// domains via ApplyWrites instead — the same domain apply the parallel
+	// executor and block generation use (rw_v3 handles the self-destruct delete,
+	// EIP-161 removal and storage-subtree cascade). Each recorded phase
+	// (init/txs/finalize) is applied in order.
+	blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
+	blockRules := blockCtx.Rules(cfg.chainConfig)
+	for _, ws := range ba.WriteSets() {
+		if ws == nil || ws.IsEmpty() {
+			continue
+		}
+		if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, nil, blockRules, false); err != nil {
+			return fmt.Errorf("apply versioned block writes: %w", err)
+		}
+	}
 
 	// Compute state root directly from the domain writes accumulated during
 	// block assembly. All state changes flow through CommitBlock in
@@ -255,10 +285,16 @@ func getNextTransactions(
 	amount int,
 	executionAt uint64,
 	alreadyYielded mapset.Set[[32]byte],
+	nonceTooHigh map[accounts.Address][]nonceTooHighTxn,
 	simStateReader state.StateReader,
 	simStateWriter state.StateWriter,
+	readNonce func(accounts.Address) (uint64, error),
 	logger log.Logger,
-) ([]types.Transaction, error) {
+	stats *filtrationStats,
+) ([]types.Transaction, int, error) {
+	if cfg.txnProvider == nil {
+		return nil, 0, nil
+	}
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
@@ -272,12 +308,12 @@ func getNextTransactions(
 	provideOpts := []txnprovider.ProvideOption{
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
+		txnprovider.WithParentBlockWaitStop(stopSignalsOf(ctx).parentBlockWaitStopped),
 		txnprovider.WithBlockTime(header.Time),
-		// EIP-8037: remaining regular gas is the primary budget; remaining state
-		// gas filters by intrinsic state gas. Execution-time state gas (SSTOREs)
-		// is enforced by post-execution rollback in the block assembler.
+		// EIP-8037: runtime state gas is enforced by post-execution rollback
+		// in the block assembler.
 		txnprovider.WithGasTarget(mdgas.NewFullMdGas(
-			header.GasLimit-gasUsed.BlockRegular,
+			header.GasLimit-gasUsed.BlockExecution,
 			header.GasLimit-gasUsed.BlockState,
 			remainingBlobGas,
 		)),
@@ -287,53 +323,106 @@ func getNextTransactions(
 
 	allTxns, err := cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	if cfg.requireAllTransactions {
+		// Explicit lists must be checked against each preceding transaction's actual
+		// writes. The pool filter predicts nonces and can reorder dependent transactions.
+		return allTxns, len(allTxns), nil
 	}
 
 	blockNum := executionAt + 1
-	txns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger)
+	txns, nonceTooHighTxns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, readNonce, logger, stats)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	// Remove nonce-too-high transactions from alreadyYielded so they can be reconsidered
-	// in subsequent iterations. When best() skips blob TXs that exceed remaining blob gas,
-	// it can create nonce gaps in the returned set. filterBadTransactions rejects the
-	// higher-nonce TXs, but they get stuck in the yielded set and are never returned again.
-	// By removing only nonce-too-high TXs (nonce > sim state nonce), we allow them to be
-	// reconsidered after earlier-nonce TXs are accepted. TXs rejected for other reasons
-	// (nonce-too-low, fee-too-low, etc.) remain yielded to avoid infinite re-evaluation.
-	if len(txns) < len(allTxns) && alreadyYielded != nil {
-		accepted := make(map[[32]byte]struct{}, len(txns))
-		for _, tx := range txns {
-			accepted[tx.Hash()] = struct{}{}
-		}
-		for _, tx := range allTxns {
-			h := tx.Hash()
-			if _, ok := accepted[h]; ok {
-				continue
-			}
-			sender, ok := tx.GetSender()
-			if !ok {
-				continue
-			}
-			account, err := simStateReader.ReadAccountData(sender)
-			if err != nil || account == nil {
-				continue
-			}
-			if tx.GetNonce() > account.Nonce {
-				alreadyYielded.Remove(h)
-			}
-		}
+	for _, txn := range nonceTooHighTxns {
+		sender, _ := txn.GetSender()
+		nonceTooHigh[sender] = append(nonceTooHigh[sender], nonceTooHighTxn{hash: txn.Hash(), nonce: txn.GetNonce()})
 	}
 
-	return txns, nil
+	return txns, len(allTxns), nil
 }
 
-func filterBadTransactions(transactions []types.Transaction, chainID *uint256.Int, config *chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, logger log.Logger) ([]types.Transaction, error) {
+type nonceTooHighTxn struct {
+	hash  [32]byte
+	nonce uint64
+}
+
+// Keep nonce-gapped transactions yielded until execution reaches their nonce.
+// Frame code can advance account nonces through CREATE even when using keyed nonces.
+func retryNonceTooHighTransactions(nonceTooHigh map[accounts.Address][]nonceTooHighTxn, yielded mapset.Set[[32]byte], readNonce func(accounts.Address) (uint64, error)) (bool, error) {
+	var retry bool
+	for sender, txns := range nonceTooHigh {
+		nonce, err := readNonce(sender)
+		if err != nil {
+			return false, err
+		}
+		pending := txns[:0]
+		for _, txn := range txns {
+			if txn.nonce <= nonce {
+				yielded.Remove(txn.hash)
+				retry = true
+			} else {
+				pending = append(pending, txn)
+			}
+		}
+		clear(txns[len(pending):])
+		if len(pending) == 0 {
+			delete(nonceTooHigh, sender)
+		} else {
+			nonceTooHigh[sender] = pending
+		}
+	}
+	return retry, nil
+}
+
+// filtrationStats accumulates txpool-filtration outcomes across all batches of a
+// single block build, so the builder can log one concise summary instead of a
+// per-batch line.
+type filtrationStats struct {
+	filtered      int
+	badChainID    int
+	noSender      int
+	noAccount     int
+	nonceTooLow   int
+	notEOA        int
+	feeTooLow     int
+	overflow      int
+	balanceTooLow int
+}
+
+func (s *filtrationStats) dropped() int {
+	return s.badChainID + s.noSender + s.noAccount + s.nonceTooLow + s.notEOA + s.feeTooLow + s.overflow + s.balanceTooLow
+}
+
+// logArgs returns key/value pairs for the summary, omitting zero-valued drop reasons.
+func (s *filtrationStats) logArgs() []any {
+	args := []any{"filtered", s.filtered, "dropped", s.dropped()}
+	add := func(k string, v int) {
+		if v > 0 {
+			args = append(args, k, v)
+		}
+	}
+	add("bad_chain_id", s.badChainID)
+	add("no_sender", s.noSender)
+	add("no_account", s.noAccount)
+	add("nonce_too_low", s.nonceTooLow)
+	add("not_eoa", s.notEOA)
+	add("fee_too_low", s.feeTooLow)
+	add("overflow", s.overflow)
+	add("balance_too_low", s.balanceTooLow)
+	return args
+}
+
+func filterBadTransactions(transactions []types.Transaction, chainID *uint256.Int, config *chain.Config, blockNumber uint64, header *types.Header, simStateReader state.StateReader, simStateWriter state.StateWriter, readNonce func(accounts.Address) (uint64, error), logger log.Logger, stats *filtrationStats) ([]types.Transaction, []types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
 	gasBailout := false
+	// Predictions are local to this batch. Frame execution may advance the account
+	// nonce by more than one, so the next batch starts from actual execution state.
+	nonces := make(map[accounts.Address]uint64)
 
 	missedTxs := 0
 	badChainId := 0
@@ -346,6 +435,8 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 	overflowCnt := 0
 	for len(transactions) > 0 && missedTxs != len(transactions) {
 		transaction := transactions[0]
+		frame, isFrame := transaction.Unwrap().(*types.FrameTransaction)
+		usesLegacyNonce := !isFrame || frame.UsesLegacyNonce()
 		transactionChainId := transaction.GetChainID()
 		if !transactionChainId.IsZero() && transactionChainId.Cmp(chainID) != 0 {
 			transactions = transactions[1:]
@@ -360,33 +451,47 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		}
 		account, err := simStateReader.ReadAccountData(senderAddress)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
+		}
+		if account == nil && isFrame {
+			emptyAccount := accounts.NewAccount()
+			account = &emptyAccount
 		}
 		if account == nil {
 			transactions = transactions[1:]
 			noAccountCnt++
 			continue
 		}
-		// Check transaction nonce
-		if account.Nonce > transaction.GetNonce() {
-			transactions = transactions[1:]
-			nonceTooLowCnt++
-			continue
+		nonce, known := nonces[senderAddress]
+		if !known {
+			nonce, err = readNonce(senderAddress)
+			if err != nil {
+				return nil, nil, err
+			}
+			nonces[senderAddress] = nonce
 		}
-		if account.Nonce < transaction.GetNonce() {
-			missedTxs++
-			transactions = append(transactions[1:], transaction)
-			continue
+		// Execution validates keyed nonces against nonce-manager storage.
+		if usesLegacyNonce {
+			if nonce > transaction.GetNonce() {
+				transactions = transactions[1:]
+				nonceTooLowCnt++
+				continue
+			}
+			if nonce < transaction.GetNonce() {
+				missedTxs++
+				transactions = append(transactions[1:], transaction)
+				continue
+			}
 		}
 		missedTxs = 0
 
 		// Make sure the sender is an EOA (EIP-3607)
-		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType {
+		if !account.IsEmptyCodeHash() && !isFrame {
 			isEoaCodeAllowed := false
-			if config.IsPrague(header.Time) || config.IsBhilai(header.Number.Uint64()) {
+			if config.IsPrague(header.Time) {
 				code, err := simStateReader.ReadAccountCode(senderAddress)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 
 				_, isDelegated := types.ParseDelegation(code)
@@ -410,6 +515,14 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 					continue
 				}
 			}
+		}
+		if isFrame {
+			if usesLegacyNonce {
+				nonces[senderAddress] = nonce + 1
+			}
+			filtered = append(filtered, transaction)
+			transactions = transactions[1:]
+			continue
 		}
 		txnGasLimit := transaction.GetGasLimit()
 		value := transaction.GetValue()
@@ -440,17 +553,29 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		newAccount := new(accounts.Account)
 		*newAccount = *account
 		// Updates account in the simulation
-		newAccount.Nonce++
+		newAccount.Nonce = nonce + 1
+		nonces[senderAddress] = newAccount.Nonce
 		newAccount.Balance.Sub(&account.Balance, want)
 		if err := simStateWriter.UpdateAccountData(senderAddress, account, newAccount); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		// Mark transaction as valid
 		filtered = append(filtered, transaction)
 		transactions = transactions[1:]
 	}
-	logger.Info("Filtration", "initial", initialCnt, "no sender", noSenderCnt, "no account", noAccountCnt, "nonce too low", nonceTooLowCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt, "bad chain id", badChainId, "filtered", len(filtered))
-	return filtered, nil
+	logger.Debug("Filtration", "initial", initialCnt, "noSender", noSenderCnt, "noAccount", noAccountCnt, "nonceTooLow", nonceTooLowCnt, "nonceTooHigh", missedTxs, "senderNotEOA", notEOACnt, "feeTooLow", feeTooLowCnt, "overflow", overflowCnt, "balanceTooLow", balanceTooLowCnt, "badChainID", badChainId, "filtered", len(filtered))
+	if stats != nil {
+		stats.filtered += len(filtered)
+		stats.badChainID += badChainId
+		stats.noSender += noSenderCnt
+		stats.noAccount += noAccountCnt
+		stats.nonceTooLow += nonceTooLowCnt
+		stats.notEOA += notEOACnt
+		stats.feeTooLow += feeTooLowCnt
+		stats.overflow += overflowCnt
+		stats.balanceTooLow += balanceTooLowCnt
+	}
+	return filtered, transactions, nil
 }
 
 func NotifyPendingLogs(logPrefix string, notifier stagedsync.ChainEventNotifier, logs types.Logs, logger log.Logger) {

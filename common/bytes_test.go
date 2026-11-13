@@ -27,7 +27,7 @@ import (
 func TestCopyBytes(t *testing.T) {
 	input := []byte{1, 2, 3, 4}
 
-	v := Copy(input)
+	v := bytes.Clone(input)
 	if !bytes.Equal(v, []byte{1, 2, 3, 4}) {
 		t.Fatal("not equal after copy")
 	}

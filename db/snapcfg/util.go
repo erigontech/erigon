@@ -17,9 +17,7 @@
 package snapcfg
 
 import (
-	"bytes"
 	"context"
-	_ "embed"
 	"errors"
 	"fmt"
 	"io"
@@ -31,8 +29,6 @@ import (
 	"strings"
 	"sync"
 
-	snapshothashes "github.com/erigontech/erigon-snapshot"
-	"github.com/erigontech/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
 
@@ -41,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/version"
 	ver "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
@@ -53,53 +48,48 @@ type (
 
 var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", ver.DefaultSnapshotGitBranch)
 
+// knownChains is the set of chain names with a preverified-hash source. It is
+// the authoritative answer for KnownCfg's (_, known bool) return. Immutable.
+var knownChains = map[string]struct{}{
+	networkname.Mainnet:  {},
+	networkname.Sepolia:  {},
+	networkname.Gnosis:   {},
+	networkname.Chiado:   {},
+	networkname.Hoodi:    {},
+	networkname.Bloatnet: {},
+}
+
 type preverifiedRegistry struct {
 	mu     sync.RWMutex
-	raw    map[string][]byte      // raw embedded TOML bytes (cheap, no parsing)
-	data   map[string]Preverified // parsed on demand
+	raw    map[string][]byte      // raw TOML bytes loaded at runtime (fetched or local)
+	data   map[string]Preverified // parsed view of raw
 	cached map[string]*Cfg
 }
 
 var registry = &preverifiedRegistry{
-	raw: map[string][]byte{
-		networkname.Mainnet:  snapshothashes.Mainnet,
-		networkname.Sepolia:  snapshothashes.Sepolia,
-		networkname.Gnosis:   snapshothashes.Gnosis,
-		networkname.Chiado:   snapshothashes.Chiado,
-		networkname.Hoodi:    snapshothashes.Hoodi,
-		networkname.Bloatnet: snapshothashes.Bloatnet,
-	},
+	raw:    make(map[string][]byte),
 	data:   make(map[string]Preverified),
 	cached: make(map[string]*Cfg),
 }
 
 func (r *preverifiedRegistry) Get(networkName string) (*Cfg, bool) {
+	_, knownOk := knownChains[networkName]
+
 	r.mu.RLock()
 	if cfg, ok := r.cached[networkName]; ok {
 		r.mu.RUnlock()
 		return cfg, true
 	}
-	pv, pvOk := r.data[networkName]
-	rawBytes, rawOk := r.raw[networkName]
+	pv, dataOk := r.data[networkName]
 	r.mu.RUnlock()
 
-	if !pvOk && !rawOk {
+	if !knownOk && !dataOk {
 		return newCfg(networkName, Preverified{}), false
 	}
 
-	if !pvOk && rawOk {
-		// Parse outside the lock (fromEmbeddedToml is a pure function on immutable data)
-		pv = fromEmbeddedToml(rawBytes)
-		r.mu.Lock()
-		// Double-check: another goroutine may have parsed it
-		if existing, ok := r.data[networkName]; ok {
-			pv = existing
-		} else {
-			r.data[networkName] = pv
-		}
-		r.mu.Unlock()
-	}
-
+	// pv is the zero Preverified{} when the chain is known but hashes haven't been loaded yet.
+	// That's expected during the brief window between registry init and LoadRemotePreverified/SetToml;
+	// callers in that window only consult the `known` boolean.
 	cfg := newCfg(networkName, pv.Typed(knownTypes[networkName]))
 
 	r.mu.Lock()
@@ -114,49 +104,14 @@ func (r *preverifiedRegistry) Get(networkName string) (*Cfg, bool) {
 	return cfg, true
 }
 
-func (r *preverifiedRegistry) Set(networkName string, pv Preverified) {
+func (r *preverifiedRegistry) Set(networkName string, pv Preverified, raw []byte) {
 	r.mu.Lock()
 	r.data[networkName] = pv
-	delete(r.raw, networkName)    // prevent stale re-parse
+	if raw != nil {
+		r.raw[networkName] = raw
+	}
 	delete(r.cached, networkName) // Invalidate cache atomically
 	r.mu.Unlock()
-}
-
-// Reset replaces all data, clearing raw and cached.
-func (r *preverifiedRegistry) Reset(data map[string]Preverified) {
-	r.mu.Lock()
-	r.data = data
-	r.raw = nil
-	r.cached = make(map[string]*Cfg) // Clear all cached
-	r.mu.Unlock()
-}
-
-// Has checks whether a chain name exists in either raw or data without triggering parsing.
-func (r *preverifiedRegistry) Has(networkName string) bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if _, ok := r.data[networkName]; ok {
-		return true
-	}
-	_, ok := r.raw[networkName]
-	return ok
-}
-
-var snapshotHashPtrs = map[string]*[]byte{
-	networkname.Mainnet:  &snapshothashes.Mainnet,
-	networkname.Sepolia:  &snapshothashes.Sepolia,
-	networkname.Gnosis:   &snapshothashes.Gnosis,
-	networkname.Chiado:   &snapshothashes.Chiado,
-	networkname.Hoodi:    &snapshothashes.Hoodi,
-	networkname.Bloatnet: &snapshothashes.Bloatnet,
-}
-
-func fromEmbeddedToml(in []byte) Preverified {
-	items := fromToml(in)
-	return Preverified{
-		Local: false,
-		Items: items,
-	}
 }
 
 type Preverified struct {
@@ -165,8 +120,59 @@ type Preverified struct {
 	Items PreverifiedItems
 }
 
+// keepNewest stores item under key unless an entry with an equal or newer version is already there.
+func keepNewest(best *btree.Map[string, PreverifiedItem], kept *btree.Map[string, snaptype.Version], key string, item PreverifiedItem, v snaptype.Version) (stored bool) {
+	if current, ok := kept.Get(key); ok && !current.Less(v) {
+		return false
+	}
+	best.Set(key, item)
+	kept.Set(key, v)
+	return true
+}
+
+const maxLoggedDroppedNames = 16
+
+// typeFilterDrops groups why Typed did not keep a preverified item. Only an unparsable
+// name is a defect: a manifest naming types this binary has no reader for, or shipping
+// several versions of one file, is the filter working.
+type typeFilterDrops struct {
+	unreadable      int // no snapshot type in this binary reads the file
+	superseded      int // a newer version of the same file was kept
+	outOfWindow     int // version outside the type's supported range
+	unparsable      int
+	unparsableNames []string
+}
+
+func (d *typeFilterDrops) unparsableItem(name string) {
+	d.unparsable++
+	if len(d.unparsableNames) < maxLoggedDroppedNames {
+		d.unparsableNames = append(d.unparsableNames, name)
+	}
+}
+
+// droppedNames returns the names in all that kept no longer contains, capped at
+// limit, along with the total dropped count.
+func droppedNames(all, kept []PreverifiedItem, limit int) (names []string, dropped int) {
+	keptNames := make(map[string]struct{}, len(kept))
+	for _, item := range kept {
+		keptNames[item.Name] = struct{}{}
+	}
+	for _, item := range all {
+		if _, ok := keptNames[item.Name]; ok {
+			continue
+		}
+		dropped++
+		if len(names) < limit {
+			names = append(names, item.Name)
+		}
+	}
+	return names, dropped
+}
+
 func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
+	var keptVersions btree.Map[string, snaptype.Version]
+	var drops typeFilterDrops
 
 	for _, p := range p.Items {
 		if strings.HasPrefix(p.Name, "salt") && strings.HasSuffix(p.Name, "txt") {
@@ -180,11 +186,33 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		v, name, ok := strings.Cut(p.Name, "-")
 		if !ok {
+			drops.unparsableItem(p.Name)
 			continue
 		}
 
 		if strings.HasPrefix(p.Name, "caplin") {
-			bestVersions.Set(p.Name, p)
+			caplinFile, _, known := snaptype.ParseFileName("caplin", filepath.Base(v+"-"+name))
+			if !known || caplinFile.Type == nil {
+				drops.unreadable++
+				continue
+			}
+
+			caplinVersion, err := ver.ParseVersion(strings.TrimPrefix(v, "caplin/"))
+			if err != nil {
+				drops.unparsableItem(p.Name)
+				continue
+			}
+			// One window for every caplin file, taken from BeaconBlocks: an .idx carries
+			// its .seg's data version, so filtering them apart would drop an index whose
+			// segment was kept. The per-type windows are identical today.
+			versions := snaptype.BeaconBlocks.Versions()
+			if caplinVersion.Less(versions.MinSupported) || versions.Current.Less(caplinVersion) {
+				drops.outOfWindow++
+				continue
+			}
+			if !keepNewest(&bestVersions, &keptVersions, "caplin/"+name, p, caplinVersion) {
+				drops.superseded++
+			}
 			continue
 		}
 
@@ -207,6 +235,11 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 				bestVersions.Set(p.Name, p)
 				continue
 			}
+			drops.unparsableItem(p.Name)
+			continue
+		}
+		if dot < lastSep {
+			drops.unparsableItem(p.Name)
 			continue
 		}
 
@@ -224,9 +257,13 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		for _, typ := range types {
 			if typeName == typ.Name() {
-				var versions version.Versions
+				var versions ver.Versions
 				if strings.HasSuffix(p.Name, "idx") {
-					versions = typ.Indexes()[idxIndex].Version
+					indexes := typ.Indexes()
+					if idxIndex >= len(indexes) {
+						break
+					}
+					versions = indexes[idxIndex].Version
 				} else {
 					versions = typ.Versions()
 				}
@@ -238,31 +275,23 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		}
 
 		if !include {
+			drops.unreadable++
 			continue
 		}
 
 		version, err := ver.ParseVersion(v)
 		if err != nil {
+			drops.unparsableItem(p.Name)
 			continue
 		}
 
-		if version.Less(minVersion) {
+		if version.Less(minVersion) || preferredVersion.Less(version) {
+			drops.outOfWindow++
 			continue
 		}
 
-		if preferredVersion.Less(version) {
-			continue
-		}
-
-		if current, ok := bestVersions.Get(name); ok {
-			v, _, _ := strings.Cut(current.Name, "-")
-			cv, _ := ver.ParseVersion(v)
-
-			if cv.Less(version) {
-				bestVersions.Set(name, p)
-			}
-		} else {
-			bestVersions.Set(name, p)
+		if !keepNewest(&bestVersions, &keptVersions, name, p, version) {
+			drops.superseded++
 		}
 	}
 
@@ -277,15 +306,21 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	slices.SortFunc(versioned, func(i, j PreverifiedItem) int {
 		return strings.Compare(i.Name, j.Name)
 	})
+	if drops.unparsable > 0 {
+		log.Root().Warn("Preverified list has entries the type filter could not parse",
+			"count", drops.unparsable, "names", strings.Join(drops.unparsableNames, ","))
+	}
+	if drops.outOfWindow > 0 {
+		log.Root().Info("Preverified list has entries outside the versions this binary supports",
+			"count", drops.outOfWindow)
+	}
 	if len(p.Items) != len(versioned) {
-		log.Root().Warn("Preverified list reduced after applying type filter", "from", len(p.Items), "to", len(versioned))
-		// for _, v := range p.Items {
-		// 	if !slices.ContainsFunc(versioned, func(item PreverifiedItem) bool {
-		// 		return item.Name == v.Name
-		// 	}) {
-		// 		log.Root().Warn("Preverified item removed by type filter", "name", v.Name)
-		// 	}
-		// }
+		names, dropped := droppedNames(p.Items, versioned, maxLoggedDroppedNames)
+		log.Root().Debug("Preverified list reduced after applying type filter",
+			"from", len(p.Items), "to", len(versioned), "dropped", dropped,
+			"unreadable", drops.unreadable, "superseded", drops.superseded,
+			"outOfWindow", drops.outOfWindow, "unparsable", drops.unparsable,
+			"names", strings.Join(names, ","))
 	} else {
 		log.Root().Debug("Preverified list has same len after applying type filter", "len", len(p.Items))
 	}
@@ -364,13 +399,13 @@ func ExtractBlockFromName(name string, v ver.Version) (block uint64, err error) 
 
 	return block, nil
 }
-func fromToml(in []byte) PreverifiedItems {
+
+func fromToml(in []byte) (PreverifiedItems, error) {
 	var outMap map[string]string
 	if err := toml.Unmarshal(in, &outMap); err != nil {
-		panic(err)
+		return nil, err
 	}
-
-	return preverified.ItemsFromMap(outMap)
+	return preverified.ItemsFromMap(outMap), nil
 }
 
 func newCfg(networkName string, preverified Preverified) *Cfg {
@@ -396,7 +431,7 @@ func newCfg(networkName string, preverified Preverified) *Cfg {
 type Cfg struct {
 	ExpectBlocks      uint64
 	Preverified       Preverified          // immutable
-	PreverifiedParsed []*snaptype.FileInfo //Preverified field after `snaptype.ParseFileName("", p.Name)`
+	PreverifiedParsed []*snaptype.FileInfo // Preverified field after `snaptype.ParseFileName("", p.Name)`
 	// The preverified list were loaded from local storage. That means they were committed after an
 	// initial sync completed successfully.
 	Local       bool
@@ -416,6 +451,15 @@ func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
 }
 
 func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
+	// Caplin entries are skipped below and no core entry can match a caplin enum, so the
+	// scan is a no-op for these types — and IsFrozen calls this per segment opened.
+	if snaptype.IsCaplinType(t) {
+		if t == snaptype.CaplinEnums.BeaconBlocks {
+			return snaptype.Erigon2MergeLimit
+		}
+		return snaptype.CaplinMergeLimit
+	}
+
 	hasType := t == snaptype.MinCoreEnum
 
 	for _, info := range c.PreverifiedParsed {
@@ -447,13 +491,6 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	// This should only get called the first time a new type is added and created - as it will
 	// not have previous history to check against
 
-	// BeaconBlocks && BlobSidecars follow their own slot based sharding scheme which is
-	// not the same as other snapshots which follow a block based sharding scheme
-	// TODO: If we add any more sharding schemes (we currently have blocks, state & beacon block schemes)
-	// - we may need to add some kind of sharding scheme identifier to snaptype.Type
-	if snaptype.IsCaplinType(t) {
-		return snaptype.CaplinMergeLimit
-	}
 	if hasType {
 		return snaptype.Erigon2MergeLimit
 	}
@@ -498,42 +535,30 @@ func KnownCfgOrDevnet(networkName string) *Cfg {
 	return cfg
 }
 
-// EmbeddedWebseedsRaw holds the unparsed embedded webseed TOML bytes per chain.
-var EmbeddedWebseedsRaw = map[string][]byte{
-	networkname.Mainnet:  webseed.Mainnet,
-	networkname.Sepolia:  webseed.Sepolia,
-	networkname.Gnosis:   webseed.Gnosis,
-	networkname.Chiado:   webseed.Chiado,
-	networkname.Hoodi:    webseed.Hoodi,
-	networkname.Bloatnet: webseed.Bloatnet,
+// EmbeddedWebseeds holds the public HTTP webseed URLs for each chain. Vendored
+// from erigon-snapshot/webseed, which used to ship one one-key TOML file per
+// chain; the only consumers want the URL list, so the TOML wrapper was dropped.
+var EmbeddedWebseeds = map[string][]string{
+	networkname.Mainnet:  {"v1:https://erigon36-v1-snapshots-mainnet.erigon.network"},
+	networkname.Sepolia:  {"v1:https://erigon36-v1-snapshots-sepolia.erigon.network"},
+	networkname.Gnosis:   {"v1:https://erigon36-v1-snapshots-gnosis.erigon.network"},
+	networkname.Chiado:   {"v1:https://erigon36-v1-snapshots-chiado.erigon.network"},
+	networkname.Hoodi:    {"v1:https://erigon36-v1-snapshots-hoodi.erigon.network"},
+	networkname.Bloatnet: {"v1:https://erigon36-v1-snapshots-bloatnet.erigon.network"},
 }
 
-// GetEmbeddedWebseeds parses and returns the webseed URLs for a single chain.
+// GetEmbeddedWebseeds returns the webseed URLs for a single chain.
 func GetEmbeddedWebseeds(chain string) ([]string, bool) {
-	raw, ok := EmbeddedWebseedsRaw[chain]
-	if !ok {
-		return nil, false
-	}
-	a := map[string]string{}
-	if err := toml.Unmarshal(raw, &a); err != nil {
-		panic(err)
-	}
-	res := make([]string, 0, len(a))
-	for _, l := range a {
-		res = append(res, l)
-	}
-	slices.Sort(res)
-	return res, true
+	s, ok := EmbeddedWebseeds[chain]
+	return s, ok
 }
 
 const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
 
-// fetchChainToml fetches a single chain's TOML file from the snapshot CDN.
-// TODO: Copied from github.com/erigontech/erigon-snapshot/embed.go (getURLByChain + fetchSnapshotHashes).
-// Remove the copies in erigon-snapshot once this is the canonical location.
-func fetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, branch, chain string) ([]byte, error) {
+// FetchChainToml fetches a single chain's TOML file from the snapshot CDN.
+func FetchChainToml(ctx context.Context, source SnapshotSource, branch, chain string) ([]byte, error) {
 	var url string
-	if source == snapshothashes.R2 {
+	if source == R2 {
 		url = ChainTomlR2URL(branch, chain)
 	} else {
 		url = ChainTomlGitHubURL(branch, chain)
@@ -542,7 +567,7 @@ func fetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, b
 	if err != nil {
 		return nil, err
 	}
-	if source == snapshothashes.R2 {
+	if source == R2 {
 		InsertCloudflareHeaders(req)
 	}
 	resp, err := http.DefaultClient.Do(req)
@@ -563,54 +588,100 @@ func fetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, b
 	return res, nil
 }
 
-// LoadRemotePreverified fetches and loads snapshot hashes for a single chain.
-func LoadRemotePreverified(ctx context.Context, chainName string) error {
-	if s, ok := os.LookupEnv(RemotePreverifiedEnvKey); ok {
-		log.Info("Loading local preverified override file", "file", s)
+// FetchTomlFromURL fetches a chain.toml file from an arbitrary URL. Plain HTTP
+// GET, no CDN-specific headers. Used by the --snap.chaintoml-url override.
+func FetchTomlFromURL(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch snapshot hashes from overridden URL %q: status code %d %s", url, resp.StatusCode, resp.Status)
+	}
+	res, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(res) == 0 {
+		return nil, fmt.Errorf("empty response from overridden URL %s", url)
+	}
+	return res, nil
+}
 
-		b, err := os.ReadFile(s)
+// LoadRemotePreverified fetches and loads snapshot hashes for a single chain.
+//
+// forceChainTomlURL, when non-empty, replaces the default R2/GitHub fetch with
+// a single HTTP GET to that exact URL. There is no fallback — if the URL fetch
+// fails the function returns the error and the registry is not modified. The
+// ERIGON_REMOTE_PREVERIFIED env var (local-file override) still takes
+// precedence over both forceChainTomlURL and the default path.
+func LoadRemotePreverified(ctx context.Context, chainName string, forceChainTomlURL string) error {
+	var hashes []byte
+	switch {
+	case os.Getenv(RemotePreverifiedEnvKey) != "":
+		path := os.Getenv(RemotePreverifiedEnvKey)
+		log.Info("Loading local preverified override file", "file", path)
+
+		b, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("reading remote preverified override file: %w", err)
 		}
-		if ptr, ok := snapshotHashPtrs[chainName]; ok {
-			*ptr = bytes.Clone(b)
+		hashes = b
+	case forceChainTomlURL != "":
+		log.Info("Loading snapshot hashes from forced URL", "chain", chainName, "url", forceChainTomlURL)
+
+		b, err := FetchTomlFromURL(ctx, forceChainTomlURL)
+		if err != nil {
+			return fmt.Errorf("fetching forced chain.toml URL %q: %w", forceChainTomlURL, err)
 		}
-	} else {
+		hashes = b
+	default:
 		log.Info("Loading remote snapshot hashes", "chain", chainName)
 
-		hashes, err := fetchChainToml(ctx, snapshothashes.R2, snapshotGitBranch, chainName)
+		var err error
+		hashes, err = FetchChainToml(ctx, R2, snapshotGitBranch, chainName)
+		if err == nil {
+			_, err = fromToml(hashes) // a CDN error page can come back with HTTP 200
+		}
 		if err != nil {
 			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "chain", chainName, "err", err)
 
-			hashes, err = fetchChainToml(ctx, snapshothashes.Github, snapshotGitBranch, chainName)
+			hashes, err = FetchChainToml(ctx, Github, snapshotGitBranch, chainName)
 			if err != nil {
 				return err
 			}
 		}
-
-		if ptr, ok := snapshotHashPtrs[chainName]; ok {
-			*ptr = hashes
-		}
 	}
 
-	// Re-load the preverified hashes for this chain
-	if ptr, ok := snapshotHashPtrs[chainName]; ok {
-		registry.Set(chainName, fromEmbeddedToml(*ptr))
+	items, err := fromToml(hashes)
+	if err != nil {
+		return fmt.Errorf("parse snapshot hashes of %s: %w", chainName, err)
 	}
+	registry.Set(chainName, Preverified{Items: items}, hashes)
 	return nil
 }
 
-func SetToml(networkName string, toml []byte, local bool) {
-	if registry.Has(networkName) {
-		registry.Set(networkName, Preverified{Local: local, Items: fromToml(toml)})
+func SetToml(networkName string, toml []byte, local bool) error {
+	if _, ok := knownChains[networkName]; !ok {
+		return nil
 	}
+	items, err := fromToml(toml)
+	if err != nil {
+		return fmt.Errorf("parse snapshot hashes of %s: %w", networkName, err)
+	}
+	registry.Set(networkName, Preverified{Local: local, Items: items}, toml)
+	return nil
 }
 
 func GetToml(networkName string) []byte {
-	if ptr, ok := snapshotHashPtrs[networkName]; ok {
-		return *ptr
-	}
-	return nil
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+	return registry.raw[networkName]
 }
 
 // Converts webseed value to URL. Mostly this is just stripping v1: for now, as nothing else is in

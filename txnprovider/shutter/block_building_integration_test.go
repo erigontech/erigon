@@ -70,7 +70,6 @@ func TestShutterBlockBuilding(t *testing.T) {
 	amount := big.NewInt(1)
 	// amount of blocks it takes to deploy a new keyper set based on contractsDeployer.DeployKeyperSet
 	keyperSetDeploymentBlocks := uint64(4)
-	txnPointer := uint64(0)
 
 	// deploy initial eon 0
 	currentBlock, err := uni.rpcApiClient.BlockNumber()
@@ -82,6 +81,7 @@ func TestShutterBlockBuilding(t *testing.T) {
 
 	t.Run("eon 0", func(t *testing.T) {
 		require.Equal(t, shutter.EonIndex(0), ekg.EonIndex)
+		txnPointer := uint64(0)
 
 		t.Run("build shutter block", func(t *testing.T) {
 			// submit 1 shutter txn
@@ -169,6 +169,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 		_, _, err = uni.contractsDeployer.DeployKeyperSet(ctx, uni.contractsDeployment, ekg)
 		require.NoError(t, err)
 		require.Equal(t, shutter.EonIndex(1), ekg.EonIndex)
+		// the sequencer contract numbers submissions per eon, so the keyper txn pointer restarts at 0
+		txnPointer := uint64(0)
 
 		t.Run("build shutter block", func(t *testing.T) {
 			// submit 1 shutter txn using the new eon
@@ -215,10 +217,11 @@ type blockBuildingUniverse struct {
 func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingUniverse {
 	logger := testlog.Logger(t, log.LvlDebug)
 	dataDir := t.TempDir()
-	genesis, coinbasePrivKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	genesis, coinbasePrivKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
 	chainConfig := genesis.Config
 	chainConfig.ChainName = "shutter-devnet"
-	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
+	chainConfig.TerminalTotalDifficulty = uint256.NewInt(0)
 	chainConfig.ShanghaiTime = common.NewUint64(0)
 	chainConfig.CancunTime = common.NewUint64(0)
 	chainConfig.PragueTime = common.NewUint64(0)
@@ -227,11 +230,15 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	bank := testhelpers.NewBank(new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))
 	bank.RegisterGenesisAlloc(genesis)
 	// first we need to deploy the shutter smart contracts, so we start an engine api tester without shutter
-	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
 		Logger:      logger,
 		DataDir:     dataDir,
 		Genesis:     genesis,
 		CoinbaseKey: coinbasePrivKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, eat.Close())
 	})
 	// prepare shutter config for the next engine api tester
 	shutterPort, err := freeport.NextFreePort()
@@ -250,7 +257,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	contractDeployerPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	contractDeployer := crypto.PubkeyToAddress(contractDeployerPrivKey.PublicKey)
-	chainIdU256, _ := uint256.FromBig(genesis.Config.ChainID)
+	chainIdU256 := genesis.Config.ChainID
 	shutterConfig := shuttercfg.ConfigByChainName(chainspec.Chiado.Config.ChainName)
 	shutterConfig.BootstrapNodes = []string{decryptionKeySenderPeerAddr}
 	shutterConfig.PrivateKey = eat.NodeKey
@@ -334,12 +341,11 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	decryptionKeySender, err := testhelpers.DialDecryptionKeysSender(ctx, logger, decryptionKeySenderPort, decryptionKeySenderP2pPrivKey)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		err := decryptionKeySender.Close()
-		require.NoError(t, err)
+		require.NoError(t, decryptionKeySender.Close())
 	})
 	// now that we've deployed all shutter contracts - we can restart erigon with shutter enabled
-	eat.Close(t)
-	eat = engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
+	require.NoError(t, eat.Close())
+	eat, err = engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
 		Logger:           logger,
 		DataDir:          dataDir,
 		Genesis:          genesis,
@@ -347,6 +353,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		EthConfigTweaker: func(ethConfig *ethconfig.Config) { ethConfig.Shutter = shutterConfig },
 		MockClState:      eat.MockCl.State(),
 	})
+	require.NoError(t, err)
 	// need to recreate these since we have a new engine api tester with new ports
 	cl = testhelpers.NewMockCl(logger, eat.MockCl, slotCalculator)
 	err = cl.Initialise(ctx)

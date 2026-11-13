@@ -25,7 +25,7 @@ runs:
   using: composite
   steps:
     - id: restore
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v5
       with:
         path: ${{ inputs.modcache-path }}/cache/download
         key: gomodcache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}

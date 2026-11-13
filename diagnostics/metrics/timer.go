@@ -28,10 +28,10 @@ type HistTimer struct {
 }
 
 func NewHistTimer(name string) *HistTimer {
-	rawName := strings.Split(name, "{")
+	before, _, _ := strings.Cut(name, "{")
 	return &HistTimer{
 		Histogram: GetOrCreateHistogram(name),
 		start:     time.Now(),
-		name:      rawName[0],
+		name:      before,
 	}
 }

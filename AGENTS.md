@@ -1,0 +1,218 @@
+# Erigon Agent Guidelines
+
+Use B2-level English in code, code-comments, github. Use programming terminology freely and exactly
+
+## Ponytail
+
+Use [Ponytail](https://github.com/DietrichGebert/ponytail) for coding tasks to keep changes simple.
+
+- Reuse an existing installation. Otherwise, follow the upstream [installation instructions](https://github.com/DietrichGebert/ponytail#install) and [portability guide](https://github.com/DietrichGebert/ponytail/blob/main/docs/agent-portability.md) for your agent and version. Prefer user-local setup, complete prerequisites and activation steps, and verify it is loaded.
+- If native integration is unavailable, clone Ponytail outside the Erigon checkout and read `skills/ponytail/SKILL.md` from that checkout at the start of each coding session. Preserve existing agent configuration and this `AGENTS.md`.
+- Before handing off code changes, use `ponytail-review` through your agent's invocation syntax, or read and apply `skills/ponytail-review/SKILL.md` from the Ponytail checkout. Review the current diff for unnecessary complexity; this supplements correctness, security, and performance checks.
+
+Explicit task requirements and Erigon's guidelines take precedence, including TDD, test coverage, and comment rules. Keep downloaded files and personal settings out of commits.
+
+## Build & Test
+
+```bash
+make erigon              # Build main binary (./build/bin/erigon)
+make integration         # Build integration test binary
+make lint                # Run golangci-lint + mod tidy check
+make test-short          # Quick unit tests (-short -failfast)
+make test-all            # Full test suite with coverage
+make gen                 # Generate all auto-generated code (mocks, grpc, etc.)
+```
+
+Before committing, always verify changes with: `make lint && make erigon integration`
+
+## Architecture Overview
+
+- Erigon is an Ethereum execution client
+- Data flow: `db -> snapshots`
+- `snapshots` are immutable
+- `Unwind` beyond data in snapshots not allowed
+
+## Key Directories
+
+| Directory | Purpose | Component Docs |
+|-----------|---------|----------------|
+| `cmd/` | Entry points: erigon, rpcdaemon, caplin, sentry, downloader | - |
+| `execution/commitment/` | Sequential and parallel commitment tries | [parallel-patricia-hashed.md](docs/design/parallel-patricia-hashed.md) |
+| `execution/stagedsync/` | Staged sync pipeline | [agents.md](execution/stagedsync/agents.md) |
+| `db/` | Storage: MDBX, snapshots, ETL | [agents.md](db/agents.md) |
+| `cl/` | Consensus layer (Caplin) | [agents.md](cl/agents.md) |
+| `p2p/` | P2P networking (DevP2P) | [agents.md](p2p/agents.md) |
+| `rpc/jsonrpc/` | JSON-RPC API | - |
+
+## Running
+
+```bash
+./build/bin/erigon --datadir=./data --chain=mainnet
+./build/bin/erigon --datadir=dev --chain=dev  # PoS dev mode
+```
+
+## Test-Driven Development
+
+When fixing bugs or adding new features, follow the test-driven development (TDD) cycle: **Red → Green → Refactor**.
+
+1. **Red** — write a failing test that specifies the desired behavior. Confirm it fails *for the right reason* (the behavior is missing or wrong), not because of a typo, missing import, or wrong setup.
+2. **Green** — write the minimum production code needed to make the test pass. Do not write code the current failing test does not demand.
+3. **Refactor** — clean up code and tests with the suite staying green. Skipping this step is how technical debt accumulates.
+
+### Before adding a test
+
+Inspect the relevant existing tests first. Verify whether one already covers the behavior and fails for the intended reason when the implementation is incorrect. If it does, use that failure as the Red step and do not add duplicate coverage. Add a new test only when the existing suite does not protect the required behavior or when a more focused regression test materially improves failure diagnosis.
+
+### Before changing a bound or constant
+
+A deliberate tolerance and an off-by-one are indistinguishable at the call site. Before changing a bound, threshold or rounding expression, read the code that *produces* the value being compared against and confirm the intended relationship.
+
+A red test does not settle this. It proves the code disagrees with your expectation, not that your expectation matches the system's contract — a test that encodes the same wrong assumption as the change passes for the wrong reason.
+
+### For bug fixes
+
+Reproduce the bug as a failing test **before** touching the fix. This proves three things at once: (a) the bug exists, (b) the agent/contributor understands it, and (c) the fix actually addresses it — the test flips red → green when the fix lands.
+
+Never write the fix first and then "add a test for it" — that test only proves the code matches itself, not that it fixes the original defect. If the bug cannot be reproduced as a test, stop and either get more information or escalate; do not guess at a fix.
+
+### For new features
+
+- Drive the API shape from how the test wants to call it (outside-in).
+- Start with the simplest meaningful behavior, not the full design.
+- Add edge cases as separate Red → Green cycles, not bundled into one giant test.
+
+### Anti-patterns
+
+- **Test-after development**: writing code first, then "adding a test" — this is not TDD; the test merely echoes the code's existing behavior.
+- **Tests that pass on the first run**: means the test did not actually drive anything; either the behavior already existed or the assertion is wrong.
+- **Skipping the refactor step**: the suite is green but the design didn't improve.
+- **Bundling many behaviors into one test**: makes failures hard to localize and refactors brittle.
+- **Adding `t.Skip` instead of fixing a failing test**: forbidden for automated agents — see [Test skips](#test-skips) below.
+
+### When pragmatism applies
+
+TDD is the default for behavior changes (bug fixes, new logic, new endpoints). It applies less cleanly to:
+- Pure refactors with no behavior change — existing tests are the safety net; do not write new tests just to satisfy the cycle.
+- Exploratory spikes — throw the spike away and TDD the real implementation.
+- Mechanical changes — renames, generated code regeneration, dependency bumps.
+- Trivial changes that introduce no new logic — comments, documentation, formatting, build metadata, and simple constant, fixture-value, or version updates. Use the existing test suite, build, or lint checks instead of adding a test that merely mirrors the edit.
+- Feature removals — remove or update tests for the obsolete behavior; do not add a test merely to prove that deleted code is absent. Add coverage when the removal changes remaining observable behavior or when absence is itself a required contract.
+
+When skipping TDD for one of these reasons, say so explicitly in the PR description.
+
+## Test skips
+
+These rules apply project-wide — to every contributor and every automated agent (LLM coding assistants, CI bots, etc.).
+
+### Why skips are dangerous
+
+A failing test is a real failure to be diagnosed and fixed. Skipping it converts a loud "this is broken" signal into silence, then into a later surprise for whoever removes the skip and finds the bug still there.
+
+### Valid reasons a skip may exist
+
+The first two reasons require an explicit, linked tracking issue and apply to human contributors; an automated agent may not invoke them on its own initiative (only when a user explicitly directs it — see below). The third is test-suite partitioning and applies to every contributor, including automated agents.
+
+1. **External test suites we import where we can't pass all the tests** — usually a feature we haven't implemented yet (e.g. an upstream Ethereum spec test). The skip documents the gap rather than hiding a regression.
+
+2. **Flaky tests** — partially valid, with very low (not zero) tolerance. The rule is **reproduce locally and fix**; a skip is a last resort only after serious root-cause analysis (not "I ran it three times and it passed"), with that investigation attached to the tracking issue. The test owner is responsible for un-skipping once the flake is fixed.
+
+3. **Long-running tests excluded from short mode** — a test too slow or resource-heavy for the quick `-short` suite may use the canonical guard `if testing.Short() { t.Skip("...") }` (message such as `"long-running test"`). It must still run in the full (non-`-short`) suite, the guard must depend only on `testing.Short()`, and no tracking issue is needed because this partitions the suite rather than hiding a defect. Never add the guard in response to a failure, hang, or flake.
+
+For the first two reasons, the skip carries an inline comment linking the tracking issue, which is closed by removing the skip — not by closing it with the skip still in place.
+
+### Rule for automated agents (LLM assistants etc.)
+
+**Automated agents must never, on their own initiative, add a skip to hide unsupported behavior, a failure, or a flake** — not with a "the user can review it" framing, not as an `AskUserQuestion` option, not as a "tactical unblock" in a text answer, not behind a conditional or env-var gate. The sole standing exception is the canonical `testing.Short()` guard described above, for genuinely long-running tests.
+
+When an agent encounters a failing test:
+- Investigate: read logs, reproduce locally, narrow to a minimal repro
+- Fix the underlying bug
+- If genuinely unfixable in-session: (a) escalate with the findings, or (b) report a tracked blocker — never (c) skip it
+
+If a flaky test blocks the agent's own CI iteration, the agent reproduces locally and either fixes it or hands off with the repro recipe. Adding a skip "just to get CI green" is exactly this pattern.
+
+Except for that `testing.Short()` convention, this applies to all forms of test muting: `t.Skip`, `t.SkipNow`, `t.Skipf`, `SkipLoad`, `bt.SkipLoad`, build-tag exclusions, conditional bypasses behind `dbg.*` env flags, and removing tests from a runner matrix without a tracking issue. **All are off-limits for automated agents.**
+
+If a user explicitly directs an agent to add any other skip in the current turn (overriding this rule for a specific case), the agent should still flag the trade-off and ensure a tracking issue exists.
+
+## Conventions
+
+Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
+
+Don't sign commits, pr's, issues, comments.
+
+Run `make lint` before every commit and push and fix every finding; it is non-deterministic, so run it until clean. PRs must pass it before being opened or updated.
+
+## Code Style
+
+### Benchmarks
+
+Prefer keeping benchmarks in a separate `xyz_bench_test.go` file instead of mixing them with tests in `xyz_test.go`.
+
+### Comments
+
+**Default: no comment.** Clear names and small focused functions read on their own. The vast majority of code — including code written by automated agents — should carry zero new comments. Before adding one, ask whether renaming, extracting a helper, or restructuring would remove the need. Almost always, it does.
+
+A comment may be warranted for: a non-obvious invariant the types don't enforce; a workaround for a bug in a dependency or the runtime (link the issue/commit); a surprising edge case a reader would otherwise miss; a performance-sensitive choice where the obvious implementation would be wrong.
+
+When a comment is genuinely required, it MUST be:
+
+- **Concise, but err on the side of clarity.** Most comments fit in a sentence or two; keep an extra sentence when cutting it would cost understanding, and cut it when it only adds length — two clear sentences beat both a cryptic one-liner and a six-line essay. An explanation that needs sub-headings (`// Concurrency:` / `// Why:`) or bullet lists to stay organized has outgrown source: put the full story in the commit message, the PR description, or a design doc, and keep the distilled why in the code.
+- **High-level, not scenario-specific.** Explain the invariant or gotcha in general terms. Don't walk through specific call sites, sequences of operations, or particular situations a reader could find with `grep`. The right level of abstraction is "what must remain true," not "what happened to me last Tuesday."
+- **Free of forensic detail.** Strip dates (`// found on 2026-05-21`), devnet/branch names (`// seen on bal-devnet-7`), PR/issue/review references (`// flagged in #21314 round-4 review`), incident anecdotes, "used by X, Y, Z" callsite lists, and scope or limitation narration (`// forward-only`, `// safety net`, `// cannot repair X`). That history belongs in the commit message and PR description, where it survives intact; in source it rots, misleads later readers, and bloats the file.
+- **Stated once.** The why lives at its canonical place — the field, type or function it belongs to; other sites get a terse pointer, not the paragraph again.
+- **Not a restatement of the code.** If a reader could delete the comment without losing information, delete it. Standard Go idioms and well-known library behavior don't need annotation.
+
+
+If a constraint really needs to be enforced for the codebase's safety, prefer **code that enforces it** (a runtime assert, a type the caller can't misuse, a single private constructor) over a comment that describes it. A `panic` survives refactors; a long comment doesn't.
+
+Function docstrings follow the same rule: a one-line summary, plus param/return notes only when the signature doesn't already say it. A docstring that needs sections is a sign the function does too much, or the explanation belongs elsewhere. A test docstring may name the non-obvious scenario the test pins, under the same rules.
+
+`// TODO` notes are only acceptable with a linked tracking issue and an owner. Better: file the issue and don't add the TODO; or fix it now.
+
+**For automated agents:** the forensic-detail and scenario rules above are hard limits; length is a judgment call with clarity as the tiebreaker. When a comment grows, look at what the growth is made of: call-site inventories and incident history move to the commit message; a sentence that saves the reader a wrong guess stays.
+
+## Code Reviews
+
+Keep review feedback focused on the behavior and code changed by the PR. Do not require unrelated pre-existing issues to be fixed in the same change. When a review uncovers one, ask the author to create a follow-up issue or PR instead. Expand the current PR only when the pre-existing issue prevents the proposed change from being correct or safe. Keeping changes focused shortens the development cycle and makes the PR easier to review.
+
+## Pull Requests & Workflows
+
+When manually dispatching a workflow that is not part of the PR's automatic check list, add a comment on the PR explaining which workflow was dispatched, why it was chosen, and include a direct link to the workflow run.
+
+### Pull request scope
+
+Keep each PR focused on one coherent unit of work. Judge scope by the concepts changed, not only by the number of lines or files. Prefer a small diff when practical, but do not split an implementation from the tests that verify it or make a change incomplete only to reduce its size.
+
+A large PR is acceptable when one cohesive change must touch many places, such as a mass rename, an API or package migration, generated-code updates, a mechanical refactor across call sites, or applying one established pattern consistently across the codebase. Keep unrelated behavior changes out of such PRs.
+
+### Stacked pull requests
+
+For a large change with multiple dependent, independently reviewable parts, consider using stacked pull requests instead of one large PR. Keep each layer focused, buildable, testable, and safe to merge. Put foundational changes below dependent changes. Do not add unrelated work or pre-existing issues to the stack; track them in separate issues or PRs.
+
+### Referring to numbered points in GitHub text
+
+To refer to a numbered list item, point, step, or nit in PR descriptions, issue descriptions, or comments, write it in words — "point 1", "item 1", "the first nit". Use `#N` only as a reference to a GitHub issue or PR number; GitHub auto-links it, so a bare `#1` would point at an unrelated PR.
+
+### Backport PRs to release branches
+
+When opening a PR against `release/3.4` (or another release branch):
+
+- **Title**: prefix with `[r3.4]` — e.g. `[r3.4] db/version: enforce upper-bound file version check`. Variants `[r34]` and `[3.4]` also appear but `[r3.4]` is the dominant form.
+- **Body**: keep it short. For a straight cherry-pick: `Cherry-pick of #<N> to release/3.4.` When release-branch adjustments were needed (different APIs, skipped tests, etc.), add a `## r3.4-specific adaptations` section listing the deltas. When the change is not a cherry-pick of a merged PR (e.g. a dependency bump pulling a fix), describe what's being pulled in and why it's needed on the release branch.
+- **Branch name**: keep a `3.4` marker. Common forms: `cherry-pick-<PR#>-to-release-3.4`, `cherry-pick-<PR#>-r34`, `cp/<PR#>-to-3.4`, or `<user>/<short>_34`.
+- **Base branch**: `release/3.4`.
+
+## Workflows
+
+Make sure all scripts and shell code used from GitHub workflows is cross platform, for macOS, Windows and Linux.
+
+Read [`CI-GUIDELINES.md`](CI-GUIDELINES.md) for guidelines before making changes to workflows.
+
+## Go Test Caching
+
+Go's test result cache keys on the mtime+size of every file read (via Go stdlib) during a test run. CI normalizes mtimes via `git restore-mtime` in `.github/actions/setup-erigon/action.yml` so that unchanged files get stable mtimes across runs.
+
+**When a test reads a data file at runtime** (via `os.Open`, `os.ReadFile`, `os.Stat`, etc.) that lives outside a `testdata/` directory, it must be added to the `git restore-mtime` pattern list in `setup-erigon/action.yml`. Otherwise that package's test results will never be cached in CI.
+
+Covered patterns already include `**/testdata/**`, `execution/tests/test-corners/**`, `cl/spectest/**/data_*/**`, `cl/transition/**/test_data/**`, `cl/utils/eth2shuffle/spec/**`, and `execution/state/genesiswrite/*.json`.

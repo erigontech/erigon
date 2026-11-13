@@ -28,7 +28,7 @@ func TestFairMix(t *testing.T) {
 		t.Skip()
 	}
 
-	for i := 0; i < 500; i++ {
+	for range 500 {
 		testMixerFairness(t)
 	}
 }

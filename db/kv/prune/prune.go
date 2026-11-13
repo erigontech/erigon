@@ -8,7 +8,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -19,6 +18,7 @@ type Stat struct {
 	MaxTxNum         uint64
 	PruneCountTx     uint64
 	PruneCountValues uint64
+	ScanCountKeys    uint64
 	DupsDeleted      uint64
 	LastPrunedValue  []byte
 	LastPrunedKey    []byte
@@ -54,11 +54,13 @@ type StorageMode int
 const (
 	DefaultStorageMode StorageMode = iota
 	KeyStorageMode
-	PrefixValStorageMode //TODO: change name
+	PrefixValStorageMode // TODO: change name
 	StepValueStorageMode
 	StepKeyStorageMode
 	ValueOffset8StorageMode // txNum at val[8:16], used by TxLookup
 )
+
+const logPollEvery = 1024
 
 func HashSeekingPrune(
 	ctx context.Context,
@@ -69,8 +71,8 @@ func HashSeekingPrune(
 	keysCursor kv.RwCursorDupSort, valDelCursor kv.PseudoDupSortRwCursor,
 	asserts bool,
 	mode StorageMode,
-) (stat *Stat, err error) {
-	stat = &Stat{MinTxNum: math.MaxUint64}
+) (*Stat, error) {
+	stat := &Stat{MinTxNum: math.MaxUint64}
 	start := time.Now()
 
 	if limit == 0 { // limits amount of txn to be pruned
@@ -117,7 +119,7 @@ func HashSeekingPrune(
 		}
 	}
 
-	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	loadErr := collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		switch mode {
 		case KeyStorageMode:
 			//seek := make([]byte, 8, 256)
@@ -136,24 +138,25 @@ func HashSeekingPrune(
 			if vtx := binary.BigEndian.Uint64(vv); vtx != binary.BigEndian.Uint64(txnm) {
 				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", filenameBase, vtx, binary.BigEndian.Uint64(txnm))
 			}
-			if err = valDelCursor.DeleteCurrent(); err != nil {
+			if err := valDelCursor.DeleteCurrent(); err != nil {
 				return err
 			}
 		case DefaultStorageMode:
-			err = valDelCursor.DeleteExact(key, txnm)
-			if err != nil {
+			if err := valDelCursor.DeleteExact(key, txnm); err != nil {
 				return err
 			}
 		}
 		stat.PruneCountValues++
 
-		select {
-		case <-logEvery.C:
-			txNum := binary.BigEndian.Uint64(txnm)
-			logger.Info("[snapshots] prune index", "name", filenameBase, "pruned tx", stat.PruneCountTx,
-				"pruned values", stat.PruneCountValues,
-				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(stepSize), float64(txNum)/float64(stepSize)))
-		default:
+		if stat.PruneCountValues%logPollEvery == 0 {
+			select {
+			case <-logEvery.C:
+				txNum := binary.BigEndian.Uint64(txnm)
+				logger.Info("[snapshots] prune index", "name", filenameBase, "prunedTx", stat.PruneCountTx,
+					"prunedValues", stat.PruneCountValues,
+					"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(stepSize), float64(txNum)/float64(stepSize)))
+			default:
+			}
 		}
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
@@ -169,7 +172,7 @@ func HashSeekingPrune(
 				break
 			}
 			stat.PruneCountTx++
-			if err = keysCursor.Delete(txnb); err != nil {
+			if err := keysCursor.Delete(txnb); err != nil {
 				return nil, err
 			}
 		}
@@ -177,7 +180,7 @@ func HashSeekingPrune(
 
 	logger.Debug("hash prune res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys", stat.PruneCountTx, "vals", stat.PruneCountValues, "spent ms", time.Since(start).Milliseconds())
 
-	return stat, err
+	return stat, loadErr
 }
 
 type StartPos struct {
@@ -188,27 +191,23 @@ type StartPos struct {
 func TableScanningPrune(
 	ctx context.Context,
 	name, filenameBase string,
-	txFrom, txTo, limit, stepSize uint64,
+	txFrom, txTo, stepSize uint64,
 	logEvery *time.Ticker,
 	logger log.Logger,
 	keysCursor kv.RwCursorDupSort, valDelCursor kv.PseudoDupSortRwCursor,
-	asserts bool,
 	prevStat *Stat,
 	mode StorageMode,
 ) (stat *Stat, err error) {
 	stat = &Stat{MinTxNum: math.MaxUint64}
 	start := time.Now()
 	defer func() {
-		logger.Trace("scan prune res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys",
+		logger.Trace("scan prune res", "name", name, "txFrom", txFrom, "txTo", txTo, "keys",
 			stat.PruneCountTx, "vals", stat.PruneCountValues, "dups", stat.DupsDeleted,
 			"spent ms", time.Since(start).Milliseconds(),
 			"key prune status", stat.KeyProgress.String(),
 			"val prune status", stat.ValueProgress.String())
 	}()
 
-	if limit == 0 { // limits amount of txn to be pruned
-		limit = math.MaxUint64
-	}
 	var throttling *time.Duration
 	if v := ctx.Value("throttle"); v != nil {
 		throttling = v.(*time.Duration)
@@ -222,7 +221,7 @@ func TableScanningPrune(
 		}
 	}
 
-	var keyCursorPosition = &StartPos{}
+	keyCursorPosition := &StartPos{}
 	if keysCursor != nil {
 		if prevStat.KeyProgress == InProgress {
 			keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey) //nolint:govet
@@ -234,7 +233,7 @@ func TableScanningPrune(
 	}
 
 	if prevStat.KeyProgress != Done {
-		txnb := common.Copy(keyCursorPosition.StartKey)
+		txnb := bytes.Clone(keyCursorPosition.StartKey)
 		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
 		for ; txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
 			if err != nil {
@@ -242,7 +241,7 @@ func TableScanningPrune(
 			}
 			select {
 			case <-ctx.Done():
-				stat.LastPrunedKey = common.Copy(txnb)
+				stat.LastPrunedKey = bytes.Clone(txnb)
 				stat.KeyProgress = InProgress
 				return stat, nil
 			default:
@@ -256,7 +255,7 @@ func TableScanningPrune(
 				time.Sleep(*throttling)
 			}
 			//println("key", hex.EncodeToString(txnb), "value", hex.EncodeToString(val))
-			if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
+			if err := keysCursor.DeleteCurrentDuplicates(); err != nil {
 				return nil, err
 			}
 		}
@@ -264,6 +263,11 @@ func TableScanningPrune(
 
 	stat.KeyProgress = Done
 	stat.LastPrunedKey = nil
+
+	if valDelCursor == nil { // the caller prunes values and owns their progress
+		stat.ValueProgress, stat.LastPrunedValue = prevStat.ValueProgress, prevStat.LastPrunedValue
+		return stat, nil
+	}
 
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
@@ -286,7 +290,7 @@ func TableScanningPrune(
 		}
 	}
 
-	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
+	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +314,6 @@ func tableScanningPrune(
 	txNumGetter func(key, val []byte) uint64,
 	valDelCursor kv.PseudoDupSortRwCursor,
 	keysCursor kv.RwCursorDupSort,
-	asserts bool,
 	throttling *time.Duration,
 	logEvery *time.Ticker,
 	logger log.Logger,
@@ -329,36 +332,45 @@ func tableScanningPrune(
 	if err != nil {
 		return nil, fmt.Errorf("cursor position %s: %w", filenameBase, err)
 	}
+	var polls int
+	var walkKey []byte
 	for ; val != nil; val, txNumBytes, err = valDelCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 		}
 
 		if ctx.Err() != nil {
-			return common.Copy(val), nil
+			return bytes.Clone(val), nil
 		}
+		stat.ScanCountKeys++
 
-		txNum := txNumGetter(val, txNumBytes)
-		// Early skip: avoid LastDup/FirstDup/CountDuplicates cursor ops for out-of-range entries
-		if txNum >= txTo {
-			continue
-		}
-
-		if asserts && txNum < txFrom {
-			panic(fmt.Errorf("assert: index pruning txn=%d [%d-%d)", txNum, txFrom, txTo))
-		}
+		// Different storage modes have different dup-iteration orders:
+		//   - StepValueStorageMode (^step||val): FirstDup = newest, LastDup = oldest
+		//   - PrefixValStorageMode (txNum||val): FirstDup = oldest, LastDup = newest
+		// Be encoding-agnostic: read both endpoints, derive min/max, and infer
+		// iteration direction (firstIsOldest) for the selective branch's break.
+		txNumAtFirst := txNumGetter(val, txNumBytes)
 
 		lastDupTxNumB, err := valDelCursor.LastDup()
 		if err != nil {
 			return nil, fmt.Errorf("LastDup iterate over %s index keys: %w", filenameBase, err)
 		}
-		lastDupTxNum := txNumGetter(val, lastDupTxNumB)
+		txNumAtLast := txNumGetter(val, lastDupTxNumB)
 
-		stat.MinTxNum = min(stat.MinTxNum, txNum)
-		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
+		minTxNum, maxTxNum := txNumAtFirst, txNumAtLast
+		firstIsOldest := txNumAtFirst <= txNumAtLast
+		if !firstIsOldest {
+			minTxNum, maxTxNum = maxTxNum, minTxNum
+		}
 
-		// All dups in prune range: bulk delete without repositioning cursor
-		if lastDupTxNum < txTo && txNum >= txFrom {
+		// All dups outside [txFrom, txTo): nothing to prune for this key.
+		if maxTxNum < txFrom || minTxNum >= txTo {
+			continue
+		}
+
+		// All dups in prune range [txFrom, txTo): safe bulk delete.
+		// Stats reflect what is actually deleted: the full [minTxNum, maxTxNum] span.
+		if minTxNum >= txFrom && maxTxNum < txTo {
 			if throttling != nil {
 				time.Sleep(*throttling)
 			}
@@ -374,8 +386,19 @@ func tableScanningPrune(
 				stat.DupsDeleted += dups
 			}
 			stat.PruneCountValues += dups
-		} else {
-			// Selective per-dup deletion: reposition to first dup for iteration
+			stat.MinTxNum = min(stat.MinTxNum, minTxNum)
+			stat.MaxTxNum = max(stat.MaxTxNum, maxTxNum)
+			goto nextKey
+		}
+
+		// Partial overlap: iterate dups and delete those in range.
+		// Stats are updated only for actually-deleted dups (per-dup below) so
+		// out-of-range survivors don't inflate Min/MaxTxNum.
+		// Order-aware early-break preserves the optimization from before the fix:
+		//   - firstIsOldest (PrefixVal): once we cross txTo, all remaining are newer.
+		//   - !firstIsOldest (StepValue): once we cross under txFrom, all are older.
+		{
+			walkKey = append(walkKey[:0], val...)
 			_, err = valDelCursor.FirstDup()
 			if err != nil {
 				return nil, fmt.Errorf("FirstDup iterate over %s index keys: %w", filenameBase, err)
@@ -384,38 +407,54 @@ func tableScanningPrune(
 				if err != nil {
 					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 				}
-				txNumDup := txNumGetter(val, txNumBytes)
-				if txNumDup < txFrom {
-					continue
+				txNumDup := txNumGetter(walkKey, txNumBytes)
+				if firstIsOldest {
+					if txNumDup < txFrom {
+						continue
+					}
+					if txNumDup >= txTo {
+						break
+					}
+				} else {
+					if txNumDup >= txTo {
+						continue
+					}
+					if txNumDup < txFrom {
+						break
+					}
 				}
-				if txNumDup >= txTo {
-					break
-				}
-				if throttling != nil {
-					time.Sleep(*throttling)
-				}
-				if ctx.Err() != nil {
-					return common.Copy(val), nil
-				}
-
 				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
 				stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
-				if err = valDelCursor.DeleteCurrent(); err != nil {
+				if err := valDelCursor.DeleteCurrent(); err != nil {
 					return nil, err
 				}
 				stat.PruneCountValues++
 			}
-		}
-
-		select {
-		case <-logEvery.C:
-			args := []interface{}{"name", filenameBase, "pruned values", stat.PruneCountValues}
-			if keysCursor != nil {
-				args = append(args, "pruned tx", stat.PruneCountTx)
+			// Check throttle/ctx only AFTER all in-range dups for this key are deleted,
+			// to keep per-key deletions atomic (no interrupt between newer/older dup).
+			if throttling != nil {
+				time.Sleep(*throttling)
 			}
-			args = append(args, "val status", stat.ValueProgress.String())
-			logger.Info("[snapshots] prune index", args...)
-		default:
+			if ctx.Err() != nil {
+				stat.LastPrunedValue = bytes.Clone(walkKey)
+				stat.ValueProgress = InProgress
+				return bytes.Clone(walkKey), nil
+			}
+		}
+	nextKey:
+
+		polls++
+		if polls%logPollEvery == 0 {
+			select {
+			case <-logEvery.C:
+				args := []any{"name", filenameBase, "scanned keys", stat.ScanCountKeys, "pruned values", stat.PruneCountValues}
+				if keysCursor != nil {
+					args = append(args, "pruned tx", stat.PruneCountTx)
+				}
+				args = append(args, "val status", stat.ValueProgress.String())
+				logger.Info("[snapshots] prune index", args...)
+			default:
+			}
 		}
 	}
 

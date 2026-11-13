@@ -1,0 +1,965 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package cltypes
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/merkle_tree"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/ssz"
+)
+
+var (
+	_ ssz.HashableSSZ = (*PayloadAttestationData)(nil)
+	_ ssz.HashableSSZ = (*PayloadAttestation)(nil)
+	_ ssz.HashableSSZ = (*PayloadAttestationMessage)(nil)
+	_ ssz.HashableSSZ = (*IndexedPayloadAttestation)(nil)
+	_ ssz.HashableSSZ = (*ExecutionPayloadBid)(nil)
+	_ ssz.HashableSSZ = (*SignedExecutionPayloadBid)(nil)
+	_ ssz.HashableSSZ = (*ExecutionPayloadEnvelope)(nil)
+	_ ssz.HashableSSZ = (*SignedExecutionPayloadEnvelope)(nil)
+
+	_ ssz2.SizedObjectSSZ = (*PayloadAttestationData)(nil)
+	_ ssz2.SizedObjectSSZ = (*PayloadAttestation)(nil)
+	_ ssz2.SizedObjectSSZ = (*PayloadAttestationMessage)(nil)
+	_ ssz2.SizedObjectSSZ = (*IndexedPayloadAttestation)(nil)
+	_ ssz2.SizedObjectSSZ = (*ExecutionPayloadBid)(nil)
+	_ ssz2.SizedObjectSSZ = (*SignedExecutionPayloadBid)(nil)
+	_ ssz2.SizedObjectSSZ = (*ExecutionPayloadEnvelope)(nil)
+	_ ssz2.SizedObjectSSZ = (*SignedExecutionPayloadEnvelope)(nil)
+)
+
+type PayloadStatus uint64
+
+const (
+	PayloadStatusEmpty   PayloadStatus = 0 // PAYLOAD_STATUS_EMPTY per EIP-7732 fork-choice spec
+	PayloadStatusFull    PayloadStatus = 1 // PAYLOAD_STATUS_FULL per EIP-7732 fork-choice spec
+	PayloadStatusPending PayloadStatus = 2 // PAYLOAD_STATUS_PENDING per EIP-7732 fork-choice spec
+)
+
+// PayloadAttestationSSZSize is the fixed SSZ encoding size of PayloadAttestation
+// using the mainnet PTC_SIZE (512). For preset-aware code, use
+// PayloadAttestationSSZSizeWithPtcSize(cfg.PtcSize) instead.
+//
+// AggregationBits (PtcSize/8) + PayloadAttestationData (Hash + uint64 + bool + bool) + Signature (Bytes96)
+const PayloadAttestationSSZSize = int(clparams.MaxPtcSize/8) + length.Hash + 8 + 1 + 1 + length.Bytes96
+
+// PayloadAttestationSSZSizeWithPtcSize returns the fixed SSZ encoding size of a
+// PayloadAttestation for a given PTC_SIZE preset value.
+func PayloadAttestationSSZSizeWithPtcSize(ptcSize uint64) int {
+	return int(ptcSize/8) + length.Hash + 8 + 1 + 1 + length.Bytes96
+}
+
+// PayloadAttestationData represents attestation data for a payload.
+type PayloadAttestationData struct {
+	BeaconBlockRoot   common.Hash `json:"beacon_block_root"`
+	Slot              uint64      `json:"slot,string"`
+	PayloadPresent    bool        `json:"payload_present"`
+	BlobDataAvailable bool        `json:"blob_data_available"`
+}
+
+func boolToUint64(b bool) uint64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func (p *PayloadAttestationData) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(
+		p.BeaconBlockRoot[:],
+		p.Slot,
+		boolToUint64(p.PayloadPresent),
+		boolToUint64(p.BlobDataAvailable),
+	)
+}
+
+func (p *PayloadAttestationData) EncodingSizeSSZ() int {
+	return length.Hash + 8 + 1 + 1
+}
+
+func (p *PayloadAttestationData) Static() bool {
+	return true
+}
+
+func (p *PayloadAttestationData) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, p.BeaconBlockRoot[:], p.Slot, p.PayloadPresent, p.BlobDataAvailable)
+}
+
+func (p *PayloadAttestationData) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, p.BeaconBlockRoot[:], &p.Slot, &p.PayloadPresent, &p.BlobDataAvailable)
+}
+
+func (p *PayloadAttestationData) DecodeSSZStrict(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZStrict(buf, version, p.BeaconBlockRoot[:], &p.Slot, &p.PayloadPresent, &p.BlobDataAvailable)
+}
+
+func (p *PayloadAttestationData) Clone() clonable.Clonable {
+	return &PayloadAttestationData{
+		BeaconBlockRoot:   p.BeaconBlockRoot,
+		Slot:              p.Slot,
+		PayloadPresent:    p.PayloadPresent,
+		BlobDataAvailable: p.BlobDataAvailable,
+	}
+}
+
+// PayloadAttestation represents an attestation for a payload.
+type PayloadAttestation struct {
+	AggregationBits *solid.BitVector        `json:"aggregation_bits"`
+	Data            *PayloadAttestationData `json:"data"`
+	Signature       common.Bytes96          `json:"signature"`
+}
+
+func (p *PayloadAttestation) HashSSZ() ([32]byte, error) {
+	return merkle_tree.ProgressiveContainerRootAll(p.AggregationBits, p.Data, p.Signature[:])
+}
+
+func (p *PayloadAttestation) EncodingSizeSSZ() int {
+	if p.AggregationBits == nil {
+		p.AggregationBits = solid.NewBitVector(int(clparams.MaxPtcSize))
+	}
+	if p.Data == nil {
+		p.Data = new(PayloadAttestationData)
+	}
+	return p.AggregationBits.EncodingSizeSSZ() + p.Data.EncodingSizeSSZ() + length.Bytes96
+}
+
+func (p *PayloadAttestation) Static() bool {
+	return true
+}
+
+func (p *PayloadAttestation) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, p.AggregationBits, p.Data, p.Signature[:])
+}
+
+func (p *PayloadAttestation) DecodeSSZ(buf []byte, version int) error {
+	return p.decodeSSZ(buf, version, false)
+}
+
+func (p *PayloadAttestation) DecodeSSZStrict(buf []byte, version int) error {
+	return p.decodeSSZ(buf, version, true)
+}
+
+func (p *PayloadAttestation) decodeSSZ(buf []byte, version int, strict bool) error {
+	// Infer PTC_SIZE from the buffer length. The fixed structure is:
+	//   AggregationBits (PTC_SIZE/8) + PayloadAttestationData (42) + Signature (96)
+	// so PTC_SIZE = (len(buf) - 42 - 96) * 8
+	dataAndSigSize := length.Hash + 8 + 1 + 1 + length.Bytes96 // 42 + 96 = 138
+	ptcSize := (len(buf) - dataAndSigSize) * 8
+	if ptcSize <= 0 {
+		ptcSize = int(clparams.MaxPtcSize) // fallback
+	}
+	p.AggregationBits = solid.NewBitVector(ptcSize)
+	p.Data = new(PayloadAttestationData)
+	if strict {
+		return ssz2.UnmarshalSSZStrict(buf, version, p.AggregationBits, p.Data, p.Signature[:])
+	}
+	return ssz2.UnmarshalSSZ(buf, version, p.AggregationBits, p.Data, p.Signature[:])
+}
+
+func (p *PayloadAttestation) Clone() clonable.Clonable {
+	ptcSize := int(clparams.MaxPtcSize)
+	if p != nil && p.AggregationBits != nil {
+		ptcSize = p.AggregationBits.BitCap()
+	}
+	return &PayloadAttestation{
+		AggregationBits: solid.NewBitVector(ptcSize),
+		Data:            new(PayloadAttestationData),
+	}
+}
+
+// PayloadAttestationMessage represents a single validator's payload attestation message.
+type PayloadAttestationMessage struct {
+	ValidatorIndex uint64                  `json:"validator_index,string"`
+	Data           *PayloadAttestationData `json:"data"`
+	Signature      common.Bytes96          `json:"signature"`
+}
+
+func (p *PayloadAttestationMessage) EncodingSizeSSZ() int {
+	return 8 + p.Data.EncodingSizeSSZ() + length.Bytes96
+}
+
+func (p *PayloadAttestationMessage) Static() bool {
+	return true
+}
+
+func (p *PayloadAttestationMessage) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, p.ValidatorIndex, p.Data, p.Signature[:])
+}
+
+func (p *PayloadAttestationMessage) DecodeSSZ(buf []byte, version int) error {
+	p.Data = new(PayloadAttestationData)
+	return ssz2.UnmarshalSSZ(buf, version, &p.ValidatorIndex, p.Data, p.Signature[:])
+}
+
+func (p *PayloadAttestationMessage) DecodeSSZStrict(buf []byte, version int) error {
+	p.Data = new(PayloadAttestationData)
+	return ssz2.UnmarshalSSZStrict(buf, version, &p.ValidatorIndex, p.Data, p.Signature[:])
+}
+
+func (p *PayloadAttestationMessage) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(p.ValidatorIndex, p.Data, p.Signature[:])
+}
+
+func (p *PayloadAttestationMessage) Clone() clonable.Clonable {
+	return &PayloadAttestationMessage{
+		ValidatorIndex: p.ValidatorIndex,
+		Data:           p.Data.Clone().(*PayloadAttestationData),
+		Signature:      p.Signature,
+	}
+}
+
+// IndexedPayloadAttestation represents an indexed payload attestation with attesting validator indices.
+type IndexedPayloadAttestation struct {
+	AttestingIndices *solid.RawUint64List    `json:"attesting_indices"`
+	Data             *PayloadAttestationData `json:"data"`
+	Signature        common.Bytes96          `json:"signature"`
+}
+
+func NewIndexedPayloadAttestation(cfg *clparams.BeaconChainConfig) *IndexedPayloadAttestation {
+	limit := int(clparams.MaxPtcSize)
+	if cfg != nil && cfg.PtcSize > 0 {
+		limit = int(cfg.PtcSize)
+	}
+	return &IndexedPayloadAttestation{
+		AttestingIndices: solid.NewRawUint64List(limit, nil),
+		Data:             &PayloadAttestationData{},
+	}
+}
+
+func (i *IndexedPayloadAttestation) Static() bool {
+	return false
+}
+
+func (i *IndexedPayloadAttestation) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, i.AttestingIndices, i.Data, i.Signature[:])
+}
+
+func (i *IndexedPayloadAttestation) DecodeSSZ(buf []byte, version int) error {
+	limit := int(clparams.MaxPtcSize)
+	if i.AttestingIndices != nil && i.AttestingIndices.Cap() > 0 {
+		limit = i.AttestingIndices.Cap()
+	}
+	i.AttestingIndices = solid.NewRawUint64List(limit, nil)
+	i.Data = new(PayloadAttestationData)
+	return ssz2.UnmarshalSSZ(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
+}
+
+func (i *IndexedPayloadAttestation) EncodingSizeSSZ() int {
+	return 4 + i.AttestingIndices.EncodingSizeSSZ() + // offset for AttestingIndices (variable-length)
+		i.Data.EncodingSizeSSZ() + length.Bytes96
+}
+
+func (i *IndexedPayloadAttestation) HashSSZ() ([32]byte, error) {
+	return merkle_tree.ProgressiveContainerRootAll(i.AttestingIndices, i.Data, i.Signature[:])
+}
+
+func (i *IndexedPayloadAttestation) Clone() clonable.Clonable {
+	limit := int(clparams.MaxPtcSize)
+	if i.AttestingIndices.Cap() > 0 {
+		limit = i.AttestingIndices.Cap()
+	}
+	newIndices := solid.NewRawUint64List(limit, make([]uint64, i.AttestingIndices.Length()))
+	for idx := 0; idx < i.AttestingIndices.Length(); idx++ {
+		newIndices.Set(idx, i.AttestingIndices.Get(idx))
+	}
+	return &IndexedPayloadAttestation{
+		AttestingIndices: newIndices,
+		Data:             i.Data.Clone().(*PayloadAttestationData),
+		Signature:        i.Signature,
+	}
+}
+
+// ExecutionPayloadBid represents a bid for an execution payload from a builder.
+// Its SSZ methods must preserve the field order defined by the Gloas schema.
+type ExecutionPayloadBid struct {
+	ParentBlockHash       common.Hash                   `json:"parent_block_hash"`
+	ParentBlockRoot       common.Hash                   `json:"parent_block_root"`
+	BlockHash             common.Hash                   `json:"block_hash"`
+	PrevRandao            common.Hash                   `json:"prev_randao"`
+	FeeRecipient          common.Address                `json:"fee_recipient"`
+	GasLimit              uint64                        `json:"gas_limit,string"`
+	BuilderIndex          uint64                        `json:"builder_index,string"`
+	Slot                  uint64                        `json:"slot,string"`
+	Value                 uint64                        `json:"value,string"`             // Gwei
+	ExecutionPayment      uint64                        `json:"execution_payment,string"` // Gwei
+	BlobKzgCommitments    solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments"`
+	ExecutionRequestsRoot common.Hash                   `json:"execution_requests_root"`
+}
+
+// VersionedHashes returns blob versioned hashes in commitment order.
+// The result is non-nil even without commitments because the EL treats nil as missing input.
+func (e *ExecutionPayloadBid) VersionedHashes() []common.Hash {
+	hashes := make([]common.Hash, e.BlobKzgCommitments.Len())
+	for i := range hashes {
+		hashes[i], _ = utils.KzgCommitmentToVersionedHash(common.Bytes48(*e.BlobKzgCommitments.Get(i)))
+	}
+	return hashes
+}
+
+func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
+	schema, err := e.hashSchema()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.ProgressiveContainerRootAll(schema...)
+}
+
+func (e *ExecutionPayloadBid) ParentBlockHashMerkleProof() ([][32]byte, error) {
+	schema, err := e.hashSchema()
+	if err != nil {
+		return nil, err
+	}
+	return merkle_tree.ProgressiveContainerProofAll(0, schema...)
+}
+
+func (e *ExecutionPayloadBid) hashSchema() ([]any, error) {
+	blobRoot, err := e.BlobKzgCommitments.HashSSZProgressive(nil)
+	if err != nil {
+		return nil, err
+	}
+	return []any{
+		e.ParentBlockHash[:],
+		e.ParentBlockRoot[:],
+		e.BlockHash[:],
+		e.PrevRandao[:],
+		e.FeeRecipient[:],
+		e.GasLimit,
+		e.BuilderIndex,
+		e.Slot,
+		e.Value,
+		e.ExecutionPayment,
+		blobRoot[:],
+		e.ExecutionRequestsRoot[:],
+	}, nil
+}
+
+func (e *ExecutionPayloadBid) EncodingSizeSSZ() int {
+	// The fixed section contains five hashes, one address, five uint64 values,
+	// and the offset for BlobKzgCommitments.
+	const dynamicOffsetSize = 4
+	return length.Hash*5 +
+		length.Addr +
+		length.BlockNum*5 +
+		dynamicOffsetSize +
+		e.BlobKzgCommitments.EncodingSizeSSZ()
+}
+
+func (e *ExecutionPayloadBid) Static() bool {
+	return false
+}
+
+func (e *ExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(
+		buf,
+		e.ParentBlockHash[:],
+		e.ParentBlockRoot[:],
+		e.BlockHash[:],
+		e.PrevRandao[:],
+		e.FeeRecipient[:],
+		e.GasLimit,
+		e.BuilderIndex,
+		e.Slot,
+		e.Value,
+		e.ExecutionPayment,
+		&e.BlobKzgCommitments,
+		e.ExecutionRequestsRoot[:],
+	)
+}
+
+func (e *ExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
+	return e.decodeSSZ(buf, version, false)
+}
+
+// DecodeSSZStrict decodes an execution payload bid using canonical SSZ rules.
+func (e *ExecutionPayloadBid) DecodeSSZStrict(buf []byte, version int) error {
+	return e.decodeSSZ(buf, version, true)
+}
+
+func (e *ExecutionPayloadBid) decodeSSZ(buf []byte, version int, strict bool) error {
+	e.BlobKzgCommitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
+	schema := []any{
+		e.ParentBlockHash[:],
+		e.ParentBlockRoot[:],
+		e.BlockHash[:],
+		e.PrevRandao[:],
+		e.FeeRecipient[:],
+		&e.GasLimit,
+		&e.BuilderIndex,
+		&e.Slot,
+		&e.Value,
+		&e.ExecutionPayment,
+		&e.BlobKzgCommitments,
+		e.ExecutionRequestsRoot[:],
+	}
+	if strict {
+		return ssz2.UnmarshalSSZStrict(buf, version, schema...)
+	}
+	return ssz2.UnmarshalSSZ(buf, version, schema...)
+}
+
+func (e *ExecutionPayloadBid) Clone() clonable.Clonable {
+	commitments := e.BlobKzgCommitments.Clone().(*solid.ListSSZ[*KZGCommitment])
+	commitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
+	return &ExecutionPayloadBid{
+		BlobKzgCommitments: *commitments,
+	}
+}
+
+func (e *ExecutionPayloadBid) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	commitments, ok := fields["blob_kzg_commitments"]
+	if !ok || bytes.Equal(bytes.TrimSpace(commitments), []byte("null")) {
+		return errors.New("execution payload bid contains null blob KZG commitments")
+	}
+	e.BlobKzgCommitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
+	type executionPayloadBid ExecutionPayloadBid
+	if err := json.Unmarshal(data, (*executionPayloadBid)(e)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {
+	return &ExecutionPayloadBid{
+		ParentBlockHash:       e.ParentBlockHash,
+		ParentBlockRoot:       e.ParentBlockRoot,
+		BlockHash:             e.BlockHash,
+		PrevRandao:            e.PrevRandao,
+		FeeRecipient:          e.FeeRecipient,
+		GasLimit:              e.GasLimit,
+		BuilderIndex:          e.BuilderIndex,
+		Slot:                  e.Slot,
+		Value:                 e.Value,
+		ExecutionPayment:      e.ExecutionPayment,
+		BlobKzgCommitments:    *e.BlobKzgCommitments.ShallowCopy(),
+		ExecutionRequestsRoot: e.ExecutionRequestsRoot,
+	}
+}
+
+// SignedExecutionPayloadBid represents a signed execution payload bid.
+type SignedExecutionPayloadBid struct {
+	Message   *ExecutionPayloadBid `json:"message"`
+	Signature common.Bytes96       `json:"signature"`
+}
+
+func (s *SignedExecutionPayloadBid) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(s.Message, s.Signature[:])
+}
+
+func (s *SignedExecutionPayloadBid) EncodingSizeSSZ() int {
+	return signedDynamicSize(s.Message.EncodingSizeSSZ())
+}
+
+func (s *SignedExecutionPayloadBid) Static() bool {
+	return false
+}
+
+func (s *SignedExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, s.Message, s.Signature[:])
+}
+
+func (s *SignedExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
+	return s.decodeSSZ(buf, version, false)
+}
+
+// DecodeSSZStrict decodes a signed execution payload bid using canonical SSZ rules.
+func (s *SignedExecutionPayloadBid) DecodeSSZStrict(buf []byte, version int) error {
+	return s.decodeSSZ(buf, version, true)
+}
+
+func (s *SignedExecutionPayloadBid) decodeSSZ(buf []byte, version int, strict bool) error {
+	if s.Message == nil {
+		s.Message = &ExecutionPayloadBid{
+			BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48),
+		}
+	}
+	if strict {
+		return ssz2.UnmarshalSSZStrict(buf, version, s.Message, s.Signature[:])
+	}
+	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
+}
+
+func (s *SignedExecutionPayloadBid) Clone() clonable.Clonable {
+	return &SignedExecutionPayloadBid{
+		Message:   s.Message.Clone().(*ExecutionPayloadBid),
+		Signature: s.Signature,
+	}
+}
+
+// ExecutionPayloadEnvelope represents an execution payload envelope with associated metadata.
+type ExecutionPayloadEnvelope struct {
+	Payload               *Eth1Block         `json:"payload"`
+	ExecutionRequests     *ExecutionRequests `json:"execution_requests"`
+	BuilderIndex          uint64             `json:"builder_index,string"`
+	BeaconBlockRoot       common.Hash        `json:"beacon_block_root"`
+	ParentBeaconBlockRoot common.Hash        `json:"parent_beacon_block_root"`
+
+	beaconCfg *clparams.BeaconChainConfig
+}
+
+func NewExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *ExecutionPayloadEnvelope {
+	return NewExecutionPayloadEnvelopeWithVersion(cfg, clparams.GloasVersion)
+}
+
+// NewExecutionPayloadEnvelopeWithVersion creates an envelope for the advertised consensus version.
+func NewExecutionPayloadEnvelopeWithVersion(cfg *clparams.BeaconChainConfig, version clparams.StateVersion) *ExecutionPayloadEnvelope {
+	return &ExecutionPayloadEnvelope{
+		Payload:               NewEth1Block(version, cfg),
+		ExecutionRequests:     NewExecutionRequestsWithVersion(cfg, version),
+		BuilderIndex:          0,
+		BeaconBlockRoot:       common.Hash{},
+		ParentBeaconBlockRoot: common.Hash{},
+		beaconCfg:             cfg,
+	}
+}
+
+// ParseExecutionPayloadEnvelopeVersion validates the consensus version advertised by an envelope endpoint.
+func ParseExecutionPayloadEnvelopeVersion(header string) (clparams.StateVersion, error) {
+	if header == "" {
+		return clparams.GloasVersion, nil
+	}
+	name := strings.ToLower(header)
+	if name == "glamsterdam" {
+		return clparams.GloasVersion, nil
+	}
+	version, err := clparams.StringToClVersion(name)
+	if err != nil {
+		return 0, err
+	}
+	if version < clparams.GloasVersion {
+		return 0, fmt.Errorf("execution payload envelope consensus version %s predates Gloas", header)
+	}
+	return version, nil
+}
+
+// ValidateExecutionPayloadEnvelopeVersion rejects fork schemas unsupported by this build.
+func ValidateExecutionPayloadEnvelopeVersion(version clparams.StateVersion) error {
+	if version != clparams.GloasVersion {
+		return fmt.Errorf("unsupported execution payload envelope consensus version %d", version)
+	}
+	return nil
+}
+
+// ValidateExecutionPayloadEnvelopeBuilderIndex checks the envelope admission key against its block bid.
+func ValidateExecutionPayloadEnvelopeBuilderIndex(block *SignedBeaconBlock, signedEnvelope *SignedExecutionPayloadEnvelope) error {
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return errors.New("beacon block is incomplete")
+	}
+	if signedEnvelope == nil || signedEnvelope.Message == nil {
+		return errors.New("execution payload envelope is incomplete")
+	}
+	signedBid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if signedBid == nil || signedBid.Message == nil {
+		return errors.New("beacon block has no execution payload bid")
+	}
+	if signedEnvelope.Message.BuilderIndex != signedBid.Message.BuilderIndex {
+		return fmt.Errorf("envelope builder index %d does not match bid builder index %d", signedEnvelope.Message.BuilderIndex, signedBid.Message.BuilderIndex)
+	}
+	return nil
+}
+
+// ValidateExecutionPayloadEnvelopeCommitments verifies the envelope fields committed by a beacon block's execution payload bid.
+func ValidateExecutionPayloadEnvelopeCommitments(beaconCfg *clparams.BeaconChainConfig, block *SignedBeaconBlock, signedEnvelope *SignedExecutionPayloadEnvelope) error {
+	return validateExecutionPayloadEnvelopeCommitments(beaconCfg, block, signedEnvelope, true)
+}
+
+// ValidateExecutionPayloadEnvelopeBidCommitments verifies bid-bound fields while leaving payload-hash derivation to the execution engine.
+func ValidateExecutionPayloadEnvelopeBidCommitments(beaconCfg *clparams.BeaconChainConfig, block *SignedBeaconBlock, signedEnvelope *SignedExecutionPayloadEnvelope) error {
+	return validateExecutionPayloadEnvelopeCommitments(beaconCfg, block, signedEnvelope, false)
+}
+
+func validateExecutionPayloadEnvelopeCommitments(beaconCfg *clparams.BeaconChainConfig, block *SignedBeaconBlock, signedEnvelope *SignedExecutionPayloadEnvelope, validateBlockHash bool) error {
+	if beaconCfg == nil {
+		return errors.New("beacon chain config is nil")
+	}
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return errors.New("beacon block is incomplete")
+	}
+	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
+		return errors.New("execution payload envelope is incomplete")
+	}
+
+	envelope := signedEnvelope.Message
+	if envelope.Payload.Extra == nil || envelope.Payload.Transactions == nil || envelope.Payload.Withdrawals == nil {
+		return errors.New("execution payload envelope payload is incomplete")
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("hash beacon block: %w", err)
+	}
+	if envelope.BeaconBlockRoot != blockRoot {
+		return fmt.Errorf("envelope beacon block root %x does not match block root %x", envelope.BeaconBlockRoot, blockRoot)
+	}
+	if envelope.ParentBeaconBlockRoot != block.Block.ParentRoot {
+		return fmt.Errorf("envelope parent beacon block root %x does not match block parent root %x", envelope.ParentBeaconBlockRoot, block.Block.ParentRoot)
+	}
+	if envelope.Payload.SlotNumber != block.Block.Slot {
+		return fmt.Errorf("envelope payload slot %d does not match block slot %d", envelope.Payload.SlotNumber, block.Block.Slot)
+	}
+
+	signedBid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if signedBid == nil || signedBid.Message == nil {
+		return errors.New("beacon block has no execution payload bid")
+	}
+	bid := signedBid.Message
+	if envelope.BuilderIndex != bid.BuilderIndex {
+		return fmt.Errorf("envelope builder index %d does not match bid builder index %d", envelope.BuilderIndex, bid.BuilderIndex)
+	}
+	if envelope.Payload.ParentHash != bid.ParentBlockHash {
+		return fmt.Errorf("envelope payload parent hash %x does not match bid parent block hash %x", envelope.Payload.ParentHash, bid.ParentBlockHash)
+	}
+	if envelope.Payload.BlockHash != bid.BlockHash {
+		return fmt.Errorf("envelope payload block hash %x does not match bid block hash %x", envelope.Payload.BlockHash, bid.BlockHash)
+	}
+	if envelope.Payload.PrevRandao != bid.PrevRandao {
+		return fmt.Errorf("envelope payload prev randao %x does not match bid prev randao %x", envelope.Payload.PrevRandao, bid.PrevRandao)
+	}
+	if envelope.Payload.GasLimit != bid.GasLimit {
+		return fmt.Errorf("envelope payload gas limit %d does not match bid gas limit %d", envelope.Payload.GasLimit, bid.GasLimit)
+	}
+	if envelope.ExecutionRequests == nil {
+		return errors.New("execution payload envelope has no execution requests")
+	}
+	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("hash execution requests: %w", err)
+	}
+	if requestsRoot != bid.ExecutionRequestsRoot {
+		return fmt.Errorf("envelope execution requests root %x does not match bid execution requests root %x", requestsRoot, bid.ExecutionRequestsRoot)
+	}
+	if validateBlockHash {
+		requestsHash := ComputeExecutionRequestHash(GetExecutionRequestsList(beaconCfg, envelope.ExecutionRequests))
+		if _, err := envelope.Payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash, nil); err != nil {
+			return fmt.Errorf("validate envelope payload block hash: %w", err)
+		}
+	}
+	return nil
+}
+
+func (e *ExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
+	if e == nil || e.Payload == nil || e.ExecutionRequests == nil {
+		return [32]byte{}, errors.New("execution payload envelope is incomplete")
+	}
+	return merkle_tree.ProgressiveContainerRootAll(
+		e.Payload,
+		e.ExecutionRequests,
+		e.BuilderIndex,
+		e.BeaconBlockRoot[:],
+		e.ParentBeaconBlockRoot[:],
+	)
+}
+
+func (e *ExecutionPayloadEnvelope) Static() bool {
+	return false
+}
+
+func (e *ExecutionPayloadEnvelope) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(
+		buf,
+		e.Payload,
+		e.ExecutionRequests,
+		e.BuilderIndex,
+		e.BeaconBlockRoot[:],
+		e.ParentBeaconBlockRoot[:],
+	)
+}
+
+func (e *ExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
+	e.initializeDecodeFields(version)
+	return ssz2.UnmarshalSSZ(
+		buf, version,
+		e.Payload,
+		e.ExecutionRequests,
+		&e.BuilderIndex,
+		e.BeaconBlockRoot[:],
+		e.ParentBeaconBlockRoot[:],
+	)
+}
+
+// DecodeSSZStrict decodes an execution payload envelope using canonical SSZ rules.
+func (e *ExecutionPayloadEnvelope) DecodeSSZStrict(buf []byte, version int) error {
+	e.initializeDecodeFields(version)
+	return ssz2.UnmarshalSSZStrict(
+		buf, version,
+		e.Payload,
+		e.ExecutionRequests,
+		&e.BuilderIndex,
+		e.BeaconBlockRoot[:],
+		e.ParentBeaconBlockRoot[:],
+	)
+}
+
+func (e *ExecutionPayloadEnvelope) initializeDecodeFields(version int) {
+	if e.Payload == nil {
+		e.Payload = NewEth1Block(clparams.StateVersion(version), e.beaconCfg)
+	}
+	if e.ExecutionRequests == nil {
+		e.ExecutionRequests = NewExecutionRequestsWithVersion(e.beaconCfg, clparams.StateVersion(version))
+	}
+}
+
+func (e *ExecutionPayloadEnvelope) EncodingSizeSSZ() int {
+	// Payload and ExecutionRequests are dynamic, so each contributes a 4-byte offset.
+	const dynamicOffsetSize = 4
+	return 2*dynamicOffsetSize +
+		e.Payload.EncodingSizeSSZ() +
+		e.ExecutionRequests.EncodingSizeSSZ() +
+		length.BlockNum +
+		2*length.Hash
+}
+
+func (e *ExecutionPayloadEnvelope) Clone() clonable.Clonable {
+	cloned := NewExecutionPayloadEnvelope(e.beaconCfg)
+	if e.Payload == nil {
+		return cloned
+	}
+	encoded, err := e.EncodeSSZ(nil)
+	if err != nil {
+		log.Error("ExecutionPayloadEnvelope.Clone: EncodeSSZ failed", "err", err)
+		return cloned
+	}
+	if err := cloned.DecodeSSZ(encoded, int(e.Payload.Version())); err != nil {
+		log.Error("ExecutionPayloadEnvelope.Clone: DecodeSSZ failed", "err", err)
+		return cloned
+	}
+	return cloned
+}
+
+// SignedExecutionPayloadEnvelope represents a signed execution payload envelope.
+type SignedExecutionPayloadEnvelope struct {
+	Message   *ExecutionPayloadEnvelope `json:"message"`
+	Signature common.Bytes96            `json:"signature"`
+
+	beaconCfg *clparams.BeaconChainConfig
+}
+
+// ValidateForConfig checks structural and protocol constraints before hashing an envelope.
+func (s *SignedExecutionPayloadEnvelope) ValidateForConfig(cfg *clparams.BeaconChainConfig) error {
+	return s.validateForConfig(cfg, (*ExecutionRequests).validateForConfig)
+}
+
+func (s *SignedExecutionPayloadEnvelope) validateForConfig(
+	cfg *clparams.BeaconChainConfig,
+	validateRequests func(*ExecutionRequests, *clparams.BeaconChainConfig) error,
+) error {
+	if s == nil {
+		return errors.New("nil execution payload envelope")
+	}
+	if cfg == nil {
+		return errors.New("nil beacon chain config")
+	}
+	if s.Message == nil {
+		return errors.New("nil execution payload envelope message")
+	}
+	payload := s.Message.Payload
+	if payload == nil {
+		return errors.New("execution payload envelope has nil payload")
+	}
+	if payload.Extra == nil {
+		return errors.New("execution payload envelope has nil extra data")
+	}
+	if err := payload.Extra.ValidateBounds(); err != nil {
+		return fmt.Errorf("invalid execution payload extra data: %w", err)
+	}
+	if payload.Transactions == nil {
+		return errors.New("execution payload envelope has nil transactions")
+	}
+	if payload.Withdrawals == nil {
+		return errors.New("execution payload envelope has nil withdrawals")
+	}
+	if err := payload.Withdrawals.ValidateBounds(int(cfg.MaxWithdrawalsPerPayload)); err != nil {
+		return fmt.Errorf("invalid execution payload withdrawals: %w", err)
+	}
+	if err := solid.RangeErr(payload.Withdrawals, func(i int, withdrawal *Withdrawal, _ int) error {
+		if withdrawal == nil {
+			return fmt.Errorf("nil withdrawal at index %d", i)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if payload.BlockAccessList == nil {
+		return errors.New("execution payload envelope has nil block access list")
+	}
+	requests := s.Message.ExecutionRequests
+	if requests == nil {
+		return errors.New("execution payload envelope has nil execution requests")
+	}
+	if payload.Version() < clparams.GloasVersion {
+		return fmt.Errorf("execution payload version %d predates Gloas", payload.Version())
+	}
+	if requests.Version() < clparams.GloasVersion {
+		return fmt.Errorf("execution requests version %d predates Gloas", requests.Version())
+	}
+	if payload.Version() != requests.Version() {
+		return fmt.Errorf("payload and execution requests versions differ: %d != %d", payload.Version(), requests.Version())
+	}
+	if err := validateRequests(requests, cfg); err != nil {
+		return fmt.Errorf("invalid execution requests: %w", err)
+	}
+	return nil
+}
+
+// ValidateForPersistence checks that the configured decoder can read the encoded envelope.
+func (s *SignedExecutionPayloadEnvelope) ValidateForPersistence(cfg *clparams.BeaconChainConfig) error {
+	if err := s.validateForConfig(cfg, (*ExecutionRequests).validateForPersistence); err != nil {
+		return err
+	}
+	if err := ValidateExecutionPayloadEnvelopeVersion(s.Message.Payload.Version()); err != nil {
+		return err
+	}
+	if size := s.EncodingSizeSSZ(); uint64(size) > clparams.MaxChunkSize {
+		return fmt.Errorf("execution payload envelope encoding size %d exceeds max %d", size, clparams.MaxChunkSize)
+	}
+	payload := s.Message.Payload
+	var transactionsErr error
+	if payload.Version() >= clparams.GloasVersion {
+		transactionsErr = payload.Transactions.ValidateProgressiveBounds()
+	} else {
+		transactionsErr = payload.Transactions.ValidateBounds(cfg.MaxTransactionsPerPayload, cfg.MaxBytesPerTransaction)
+	}
+	if transactionsErr != nil {
+		return fmt.Errorf("transactions exceed decoder resource limit: %w", transactionsErr)
+	}
+	if err := payload.BlockAccessList.ValidateBounds(cfg.MaxBytesPerTransaction); err != nil {
+		return fmt.Errorf("block access list exceeds decoder resource limit: %w", err)
+	}
+	return nil
+}
+
+func (s *SignedExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(s.Message, s.Signature[:])
+}
+
+func (s *SignedExecutionPayloadEnvelope) Static() bool {
+	return false
+}
+
+func (s *SignedExecutionPayloadEnvelope) EncodeSSZ(buf []byte) ([]byte, error) {
+	if size := s.EncodingSizeSSZ(); size < 0 || uint64(size) > clparams.MaxChunkSize {
+		return nil, fmt.Errorf("execution payload envelope encoding size %d exceeds max %d", size, clparams.MaxChunkSize)
+	}
+	return ssz2.MarshalSSZ(buf, s.Message, s.Signature[:])
+}
+
+func (s *SignedExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
+	return s.decodeSSZ(buf, version, false)
+}
+
+// DecodeSSZStrict decodes a signed execution payload envelope using canonical SSZ rules.
+func (s *SignedExecutionPayloadEnvelope) DecodeSSZStrict(buf []byte, version int) error {
+	return s.decodeSSZ(buf, version, true)
+}
+
+func (s *SignedExecutionPayloadEnvelope) decodeSSZ(buf []byte, version int, strict bool) error {
+	if s.Message == nil {
+		s.Message = NewExecutionPayloadEnvelope(s.beaconCfg)
+	}
+	if strict {
+		return ssz2.UnmarshalSSZStrict(buf, version, s.Message, s.Signature[:])
+	}
+	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
+}
+
+func (s *SignedExecutionPayloadEnvelope) EncodingSizeSSZ() int {
+	return signedDynamicSize(s.Message.EncodingSizeSSZ())
+}
+
+func (s *SignedExecutionPayloadEnvelope) Clone() clonable.Clonable {
+	var message *ExecutionPayloadEnvelope
+	if s.Message != nil {
+		message = s.Message.Clone().(*ExecutionPayloadEnvelope)
+	}
+	return &SignedExecutionPayloadEnvelope{
+		Message:   message,
+		Signature: s.Signature,
+		beaconCfg: s.beaconCfg,
+	}
+}
+
+func ValidateGloasEnvelopeAgainstBid(beaconCfg *clparams.BeaconChainConfig, blockRoot common.Hash, bid *ExecutionPayloadBid, env *SignedExecutionPayloadEnvelope) error {
+	if beaconCfg == nil {
+		return errors.New("nil beacon chain config")
+	}
+	if bid == nil {
+		return errors.New("nil execution payload bid")
+	}
+	if env == nil || env.Message == nil || env.Message.Payload == nil {
+		return errors.New("nil execution payload envelope")
+	}
+	envelope := env.Message
+	payload := envelope.Payload
+	if envelope.BeaconBlockRoot != blockRoot {
+		return fmt.Errorf("beacon block root mismatch: envelope=%v block=%v", envelope.BeaconBlockRoot, blockRoot)
+	}
+	if envelope.ParentBeaconBlockRoot != bid.ParentBlockRoot {
+		return fmt.Errorf("parent beacon block root mismatch: envelope=%v bid=%v", envelope.ParentBeaconBlockRoot, bid.ParentBlockRoot)
+	}
+	if envelope.BuilderIndex != bid.BuilderIndex {
+		return fmt.Errorf("builder index mismatch: envelope=%d bid=%d", envelope.BuilderIndex, bid.BuilderIndex)
+	}
+	if payload.BlockHash != bid.BlockHash {
+		return fmt.Errorf("block hash mismatch: envelope=%v bid=%v", payload.BlockHash, bid.BlockHash)
+	}
+	if payload.ParentHash != bid.ParentBlockHash {
+		return fmt.Errorf("parent block hash mismatch: envelope=%v bid=%v", payload.ParentHash, bid.ParentBlockHash)
+	}
+	if payload.PrevRandao != bid.PrevRandao {
+		return fmt.Errorf("prev randao mismatch: envelope=%v bid=%v", payload.PrevRandao, bid.PrevRandao)
+	}
+	if payload.GasLimit != bid.GasLimit {
+		return fmt.Errorf("gas limit mismatch: envelope=%d bid=%d", payload.GasLimit, bid.GasLimit)
+	}
+	if payload.SlotNumber != bid.Slot {
+		return fmt.Errorf("slot mismatch: envelope=%d bid=%d", payload.SlotNumber, bid.Slot)
+	}
+	if envelope.ExecutionRequests == nil {
+		return errors.New("nil execution requests")
+	}
+	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("execution requests root: %w", err)
+	}
+	if requestsRoot != bid.ExecutionRequestsRoot {
+		return fmt.Errorf("execution requests root mismatch: envelope=%v bid=%v", requestsRoot, bid.ExecutionRequestsRoot)
+	}
+	requestsHash := ComputeExecutionRequestHash(GetExecutionRequestsList(beaconCfg, envelope.ExecutionRequests))
+	header, err := payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash, nil)
+	if err != nil {
+		return fmt.Errorf("payload header: %w", err)
+	}
+	if header.Hash() != payload.BlockHash {
+		return fmt.Errorf("payload block hash mismatch: header=%v payload=%v", header.Hash(), payload.BlockHash)
+	}
+	return nil
+}

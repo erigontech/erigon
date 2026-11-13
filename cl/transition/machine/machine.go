@@ -18,11 +18,16 @@
 package machine
 
 import (
+	"errors"
+
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 )
+
+// ErrInvalidExecutionPayloadBid marks a deterministic execution payload bid validation failure.
+var ErrInvalidExecutionPayloadBid = errors.New("invalid execution payload bid")
 
 type Interface interface {
 	BlockValidator
@@ -48,20 +53,30 @@ type BlockHeaderProcessor interface {
 	ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex uint64, parentRoot common.Hash, bodyRoot [32]byte) error
 	ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error
 	ProcessExecutionPayload(s abstract.BeaconState, body cltypes.GenericBeaconBody) error
+	// ProcessExecutionPayloadBid leaves signature verification to the ProcessBlock batch.
+	ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error
+	ProcessParentExecutionPayload(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error
+	ApplyParentExecutionPayload(s abstract.BeaconState, requests *cltypes.ExecutionRequests) error
 	ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error
 	ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error
 	ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) error
+	// [New in Gloas:EIP7732] ProcessExecutionPayloadEnvelope processes the execution payload envelope, which includes the payload header and the randao reveal
+	ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 }
 
 type BlockOperationProcessor interface {
 	ProcessProposerSlashing(s abstract.BeaconState, propSlashing *cltypes.ProposerSlashing) error
 	ProcessAttesterSlashing(s abstract.BeaconState, attSlashing *cltypes.AttesterSlashing) error
-	ProcessAttestations(s abstract.BeaconState, attestations *solid.ListSSZ[*solid.Attestation]) error
+	ProcessAttestations(s abstract.BeaconState, attestations *solid.ListSSZ[*solid.Attestation], parentSlot uint64) error
 	ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) error
 	ProcessVoluntaryExit(s abstract.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit) error
 	ProcessBlsToExecutionChange(state abstract.BeaconState, signedChange *cltypes.SignedBLSToExecutionChange) error
 	ProcessDepositRequest(s abstract.BeaconState, depositRequest *solid.DepositRequest) error
 	ProcessWithdrawalRequest(s abstract.BeaconState, withdrawalRequest *solid.WithdrawalRequest) error
 	ProcessConsolidationRequest(s abstract.BeaconState, consolidationRequest *solid.ConsolidationRequest) error
+	ProcessBuilderDepositRequest(s abstract.BeaconState, builderDepositRequest *solid.BuilderDepositRequest) error
+	ProcessBuilderExitRequest(s abstract.BeaconState, builderExitRequest *solid.BuilderExitRequest) error
+	// ProcessPayloadAttestation leaves signature verification to the ProcessBlock batch.
+	ProcessPayloadAttestation(s abstract.BeaconState, payloadAttestation *cltypes.PayloadAttestation) error
 	FullValidate() bool
 }

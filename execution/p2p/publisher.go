@@ -20,9 +20,9 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -57,7 +57,7 @@ type Publisher struct {
 	tasks         chan publishTask
 }
 
-func (p Publisher) PublishNewBlock(block *types.Block, td *big.Int) {
+func (p Publisher) PublishNewBlock(block *types.Block, td uint256.Int) {
 	p.enqueueTask(publishTask{
 		taskType: newBlockPublishTask,
 		block:    block,
@@ -97,12 +97,14 @@ func (p Publisher) enqueueTask(t publishTask) {
 	select {
 	case p.tasks <- t: // enqueued
 	default:
-		p.logger.Warn(
-			"[p2p-publisher] task queue is full, dropping task",
-			"blockNumber", t.block.Number(),
-			"blockHash", t.block.Hash(),
-			"taskType", t.taskType,
-		)
+		logArgs := []any{"taskType", t.taskType}
+		if t.block != nil {
+			logArgs = append(logArgs, "blockNumber", t.block.Number(), "blockHash", t.block.Hash())
+		}
+		if t.blockRangeUpdate != nil {
+			logArgs = append(logArgs, "latest", t.blockRangeUpdate.Latest)
+		}
+		p.logger.Warn("[p2p-publisher] task queue is full, dropping task", logArgs...)
 	}
 }
 
@@ -197,7 +199,7 @@ func (p Publisher) processNewBlockHashesPublishTask(ctx context.Context, t publi
 type publishTask struct {
 	taskType         publishTaskType
 	block            *types.Block
-	td               *big.Int
+	td               uint256.Int
 	blockRangeUpdate *eth.BlockRangeUpdatePacket
 }
 

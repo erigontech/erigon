@@ -21,8 +21,19 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func setRateLimiterLastRefill(t *testing.T, rl *peerRateLimiter, key peerProtocolKey, lastRefill time.Time) {
+	t.Helper()
+	bucketI, ok := rl.buckets.Load(key)
+	require.True(t, ok)
+	bucket := bucketI.(*tokenBucket)
+	bucket.mu.Lock()
+	bucket.lastRefill = lastRefill
+	bucket.mu.Unlock()
+}
 
 func TestRateLimiter_AllowRequest(t *testing.T) {
 	rl := newPeerRateLimiter()
@@ -30,7 +41,7 @@ func TestRateLimiter_AllowRequest(t *testing.T) {
 	proto := communication.BeaconBlocksByRangeProtocolV2
 
 	// First 128 single-token requests should be allowed (burst capacity).
-	for i := 0; i < 128; i++ {
+	for i := range 128 {
 		require.True(t, rl.allowRequest(peer, proto, 1), "request %d should be allowed", i)
 	}
 
@@ -52,12 +63,130 @@ func TestRateLimiter_PingLimit(t *testing.T) {
 	require.False(t, rl.allowRequest(peer, proto, 1), "3rd ping should be rate-limited")
 }
 
+func testRateLimiterRecoversWithoutPunishment(t *testing.T, protocolName string, burst int) {
+	t.Helper()
+	rl := newPeerRateLimiter()
+	peerID := "16Uiu2peer1"
+	key := peerProtocolKey{peerID: peerID, protocol: protocolName}
+
+	require.True(t, rl.allowRequest(peerID, protocolName, 1))
+	setRateLimiterLastRefill(t, rl, key, time.Now().Add(time.Hour))
+	for range burst - 1 {
+		require.True(t, rl.allowRequest(peerID, protocolName, 1))
+	}
+	require.False(t, rl.allowRequest(peerID, protocolName, 1))
+
+	_, punished := rl.punished.Load(key)
+	assert.False(t, punished)
+	setRateLimiterLastRefill(t, rl, key, time.Now().Add(-time.Second))
+	assert.True(t, rl.allowRequest(peerID, protocolName, 1))
+}
+
+func TestRateLimiter_StatusRecoversWithoutPunishment(t *testing.T) {
+	for _, protocolName := range []string{communication.StatusProtocolV1, communication.StatusProtocolV2} {
+		t.Run(protocolName, func(t *testing.T) {
+			testRateLimiterRecoversWithoutPunishment(t, protocolName, 5)
+		})
+	}
+}
+
+func TestRateLimiter_GoodbyeRecoversWithoutPunishment(t *testing.T) {
+	testRateLimiterRecoversWithoutPunishment(t, communication.GoodbyeProtocolV1, 1)
+}
+
+func TestRateLimiter_EnvelopeRebuildDebtRefills(t *testing.T) {
+	rl := newPeerRateLimiter()
+	now := time.Now()
+	rl.now = func() time.Time { return now }
+	peerID := "16Uiu2peer1"
+	key := peerProtocolKey{peerID: peerID, protocol: envelopeRebuildKey}
+
+	bucket := rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	rl.finishEnvelopeRebuild(bucket, 2*time.Second, true)
+	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
+	setRateLimiterLastRefill(t, rl, key, now.Add(-2*time.Second))
+	bucket = rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	rl.finishEnvelopeRebuild(bucket, 0, false)
+}
+
+func TestRateLimiter_EnvelopeRebuildCreditIsCapped(t *testing.T) {
+	rl := newPeerRateLimiter()
+	now := time.Now()
+	rl.now = func() time.Time { return now }
+	peerID := "16Uiu2peer1"
+	key := peerProtocolKey{peerID: peerID, protocol: envelopeRebuildKey}
+
+	bucket := rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	rl.finishEnvelopeRebuild(bucket, 0, false)
+	setRateLimiterLastRefill(t, rl, key, now.Add(-time.Hour))
+	bucket = rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	rl.finishEnvelopeRebuild(bucket, 1500*time.Millisecond, true)
+	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
+}
+
+func TestRateLimiter_EnvelopeRebuildChargeDoesNotRefillSlotTime(t *testing.T) {
+	rl := newPeerRateLimiter()
+	now := time.Now()
+	rl.now = func() time.Time { return now }
+	peerID := "16Uiu2peer1"
+
+	for range 3 {
+		bucket := rl.tryStartEnvelopeRebuild(peerID)
+		require.NotNil(t, bucket)
+		now = now.Add(500 * time.Millisecond)
+		rl.finishEnvelopeRebuild(bucket, 500*time.Millisecond, true)
+	}
+	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
+}
+
+func TestRateLimiter_EnvelopeRebuildInProgressDoesNotRefillCredit(t *testing.T) {
+	rl := newPeerRateLimiter()
+	now := time.Now()
+	rl.now = func() time.Time { return now }
+	peerID := "16Uiu2peer1"
+
+	bucket := rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	rl.finishEnvelopeRebuild(bucket, time.Second, true)
+	bucket = rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	now = now.Add(2 * time.Second)
+	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
+	rl.finishEnvelopeRebuild(bucket, 2*time.Second, true)
+	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
+	now = now.Add(time.Second)
+	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
+	now = now.Add(time.Second)
+	bucket = rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, bucket)
+	rl.finishEnvelopeRebuild(bucket, 0, false)
+}
+
+func TestRateLimiter_EnvelopeRebuildFinishUsesAdmittedBucket(t *testing.T) {
+	rl := newPeerRateLimiter()
+	peerID := "16Uiu2peer1"
+	key := peerProtocolKey{peerID: peerID, protocol: envelopeRebuildKey}
+
+	first := rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, first)
+	rl.buckets.Delete(key)
+	second := rl.tryStartEnvelopeRebuild(peerID)
+	require.NotNil(t, second)
+	rl.finishEnvelopeRebuild(first, 0, false)
+	require.Nil(t, rl.tryStartEnvelopeRebuild(peerID))
+	rl.finishEnvelopeRebuild(second, 0, false)
+}
+
 func TestRateLimiter_Concurrency(t *testing.T) {
 	rl := newPeerRateLimiter()
 	peer := "16Uiu2peer1"
 
 	// Acquire up to the limit.
-	for i := 0; i < maxConcurrentRequestsPerPeer; i++ {
+	for i := range maxConcurrentRequestsPerPeer {
 		require.True(t, rl.acquireConcurrency(peer), "acquire %d should succeed", i)
 	}
 
@@ -89,7 +218,7 @@ func TestRateLimiter_PunishmentBlocksRequests(t *testing.T) {
 func TestRateLimiter_UnknownProtocolAllowed(t *testing.T) {
 	rl := newPeerRateLimiter()
 	// Protocols not in the rate limit map should be allowed (no rate config = no limit).
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		require.True(t, rl.allowRequest("peer1", "/unknown/protocol/v1", 1))
 	}
 }
@@ -112,11 +241,10 @@ func TestRateLimiter_PerItemCost(t *testing.T) {
 	require.False(t, rl.allowRequest(peer, proto, 1))
 }
 
-func TestRateLimiter_ConsumeTokensZeroCost(t *testing.T) {
+func TestRateLimiter_ConsumeTokensNonPositiveCost(t *testing.T) {
 	rl := newPeerRateLimiter()
-	// Zero and negative costs should always succeed.
 	require.True(t, rl.consumeTokens("peer1", communication.PingProtocolV1, 0))
-	require.True(t, rl.consumeTokens("peer1", communication.PingProtocolV1, -5))
+	require.False(t, rl.consumeTokens("peer1", communication.PingProtocolV1, -5))
 }
 
 func TestRateLimiter_PunishmentDrainsBucket(t *testing.T) {
@@ -164,10 +292,6 @@ func TestRateLimiter_Cleanup(t *testing.T) {
 	rl.allowRequest(peer, proto, 1)
 	rl.allowRequest(peer, proto, 1) // triggers punishment
 
-	// Also create a concurrency entry and release it.
-	rl.acquireConcurrency(peer)
-	rl.releaseConcurrency(peer)
-
 	key := peerProtocolKey{peerID: peer, protocol: proto}
 
 	// Verify entries exist.
@@ -175,8 +299,6 @@ func TestRateLimiter_Cleanup(t *testing.T) {
 	require.True(t, hasBucket)
 	_, hasPunishment := rl.punished.Load(key)
 	require.True(t, hasPunishment)
-	_, hasConcurrency := rl.concurrency.Load(peer)
-	require.True(t, hasConcurrency)
 
 	// Run cleanup — bucket and punishment should survive (recently used / not expired).
 	rl.cleanup()
@@ -185,8 +307,16 @@ func TestRateLimiter_Cleanup(t *testing.T) {
 	require.True(t, hasBucket, "recent bucket should survive cleanup")
 	_, hasPunishment = rl.punished.Load(key)
 	require.True(t, hasPunishment, "unexpired punishment should survive cleanup")
+}
 
-	// Concurrency entries are intentionally not cleaned up (negligible memory).
-	_, hasConcurrency = rl.concurrency.Load(peer)
-	require.True(t, hasConcurrency, "concurrency entries should persist")
+func TestRateLimiter_ConcurrencyEntryFreedWithLastRelease(t *testing.T) {
+	rl := newPeerRateLimiter()
+	peer := "16Uiu2peer1"
+
+	require.True(t, rl.acquireConcurrency(peer))
+	require.True(t, rl.acquireConcurrency(peer))
+	rl.releaseConcurrency(peer)
+	require.Equal(t, 1, rl.concurrency[peer])
+	rl.releaseConcurrency(peer)
+	require.NotContains(t, rl.concurrency, peer)
 }

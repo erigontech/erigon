@@ -5,10 +5,10 @@ description: Run Erigon Hive simulator tests locally or via GitHub Actions. Test
 
 # Erigon Hive Tests
 
-Runs Hive simulator tests for EL/CL protocol interoperability. Two modes:
+Runs Hive simulator tests for EL/CL protocol interoperability. Three modes:
 1. **`make test-hive`** — uses `act` (nektos) to simulate the GitHub Actions workflow locally
 2. **`make hive-local`** — builds hive and runs suites directly (no `act` needed)
-3. **`make eest-bal`** — runs the BAL/Amsterdam-specific EEST fixtures
+3. **`make eest-devnet`** — runs the CI-equivalent Glamsterdam `consume-enginex` shard
 
 ## Prerequisites
 
@@ -22,7 +22,7 @@ Runs Hive simulator tests for EL/CL protocol interoperability. Two modes:
 
 Hive spawns per test:
 - One container per EL client instance (erigon)
-- One container per simulator (e.g., `ethereum/engine`, `eels/consume-engine`)
+- One container per simulator (e.g., `ethereum/engine`, `eels/consume-enginex`)
 - Intermediate build images for each client Dockerfile
 
 The CI workflow always runs `docker system prune -af --volumes` on exit (even on failure). Replicate this locally.
@@ -48,12 +48,20 @@ SUITE=eest make test-hive
 make hive-local
 ```
 
-### BAL/Amsterdam-specific (EIP-7928 fixtures)
+### Direct EEST EngineX runs
 
 ```bash
-# Runs eels/consume-engine with amsterdam fixtures
-make eest-bal
+# Runs the unsharded stable EngineX fixtures
+make eest-hive
+
+# Matches the CI glamsterdam-devnet shard
+make eest-devnet
 ```
+
+`make eest-devnet` selects Amsterdam and `BPO2ToAmsterdam`, enables parallel
+execution and BAL validation, and uses the CI simulator parallelism and timeout
+flags. Use `SUITE=eest make test-hive` to exercise the complete stable/devnet
+matrix.
 
 ## Cleanup (ALWAYS run after hive tests)
 
@@ -117,9 +125,9 @@ cd temp/<hive-dir>/hive
 # Run with a specific test pattern
 ./hive --sim ethereum/engine --sim.limit=".*cancun.*" --sim.parallelism=4 --client erigon
 
-# Run EEST engine simulator
-./hive --sim ethereum/eels/consume-engine --sim.limit="" --client erigon \
-  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v5.3.0/fixtures_develop.tar.gz
+# Run stable EEST EngineX simulator (URL pinned in test-fixtures.json)
+./hive --sim ethereum/eels/consume-enginex --sim.limit="" --sim.parallelism=4 --client erigon \
+  --sim.buildarg fixtures=$(jq -r '."eest_stable".url' test-fixtures.json)
 ```
 
 ## Suites Covered
@@ -132,14 +140,13 @@ cd temp/<hive-dir>/hive
 | `engine/api` | Engine API conformance |
 | `engine/auth` | JWT authentication |
 | `rpc-compat` | RPC compatibility with reference |
-| `eels/consume-engine` | EEST execution spec tests |
-| `eels/consume-engine` (amsterdam) | EIP-7928 BAL Amsterdam fixtures |
+| `eels/consume-enginex` | Stable and fork-partitioned devnet EEST EngineX tests |
 
 ## Related Skill
 
 For an **interactive, ephemeral hive workflow** (handles versioned EEST fixtures, Dockerfile setup, BAL workarounds, per-suite parallelism), use the `/hive-test` skill instead:
 ```
-/hive-test eest-bal          # run BAL amsterdam tests
+/hive-test eest-devnet       # run devnet (BAL/glamsterdam) tests
 /hive-test engine rpc-compat # run engine + rpc suites
 /hive-test all               # run everything
 ```
@@ -152,6 +159,8 @@ This skill (`erigon-test-hive`) documents the Makefile targets for reference —
 | Local command | CI workflow | File |
 |---------------|-------------|------|
 | `make test-hive` | Test Hive | `test-hive.yml` |
+| `SUITE=eest make test-hive` | Hive EEST tests | `test-hive-eest.yml` |
+| `make eest-devnet` | Hive EEST `glamsterdam-devnet` shard | `test-hive-eest.yml` |
 
 To dispatch remotely on a branch:
 ```bash
@@ -166,6 +175,6 @@ gh workflow run "Test Hive" --ref <branch>
 | `GITHUB_TOKEN` not set | `export GITHUB_TOKEN=$(gh auth token)` |
 | Docker build fails | Ensure `make erigon` succeeded first (builds binary used in Docker image) |
 | Hive clone fails | Check network; hive is cloned fresh each run into `temp/` |
-| EEST fixtures 404 | Check `EEST_VERSION` in Makefile; fixtures URL must match a released tag |
+| EEST fixtures 404 | Check the URL pinned in `test-fixtures.json`; the version must match a released tag |
 | Disk full / OOM | Run `docker system prune -af --volumes` — previous hive runs left dangling images/containers |
 | Containers stuck running | `docker ps --filter "name=hive" -q \| xargs -r docker stop` |

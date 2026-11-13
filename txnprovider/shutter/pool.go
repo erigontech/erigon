@@ -29,6 +29,9 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
@@ -40,6 +43,7 @@ var _ txnprovider.TxnProvider = (*Pool)(nil)
 type Pool struct {
 	logger                  log.Logger
 	config                  shuttercfg.Config
+	chainConfig             *chain.Config
 	baseTxnProvider         txnprovider.TxnProvider
 	blockListener           *BlockListener
 	blockTracker            *BlockTracker
@@ -55,6 +59,7 @@ type Pool struct {
 func NewPool(
 	logger log.Logger,
 	config shuttercfg.Config,
+	chainConfig *chain.Config,
 	baseTxnProvider txnprovider.TxnProvider,
 	contractBackend bind.ContractBackend,
 	stateChangesClient stateChangesClient,
@@ -100,6 +105,7 @@ func NewPool(
 	return &Pool{
 		logger:                  logger,
 		config:                  config,
+		chainConfig:             chainConfig,
 		blockListener:           blockListener,
 		blockTracker:            blockTracker,
 		eonTracker:              eonTracker,
@@ -193,12 +199,35 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 	parentBlockWaitTimeout := time.Second * time.Duration(p.slotCalculator.SecondsPerSlot())
 	parentBlockWaitCtx, parentBlockWaitCtxCancel := context.WithTimeout(ctx, parentBlockWaitTimeout)
 	defer parentBlockWaitCtxCancel()
+	if provideOpts.ParentBlockWaitStop != nil {
+		go func() {
+			select {
+			case <-provideOpts.ParentBlockWaitStop:
+				parentBlockWaitCtxCancel()
+			case <-parentBlockWaitCtx.Done():
+			}
+		}()
+	}
 	parentBlockWaitStart := time.Now()
 	err := p.blockTracker.Wait(parentBlockWaitCtx, parentBlockNum)
+	parentBlockWaitCtxCancel()
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			parentBlockWaitSecs.ObserveDuration(parentBlockWaitStart)
-			parentBlockMissed.Inc()
+		if ctx.Err() == nil {
+			select {
+			case <-provideOpts.ParentBlockWaitStop:
+				parentBlockWaitStopped.Inc()
+				p.logger.Debug("parent block wait stopped", "parentBlockNum", parentBlockNum,
+					"waited", time.Since(parentBlockWaitStart))
+				return nil, nil
+			default:
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				parentBlockWaitSecs.ObserveDuration(parentBlockWaitStart)
+				parentBlockMissed.Inc()
+				p.logger.Warn("parent block wait timeout, falling back to base txn provider",
+					"parentBlockNum", parentBlockNum, "timeout", parentBlockWaitTimeout)
+				return p.baseTxnProvider.ProvideTxns(ctx, opts...)
+			}
 		}
 
 		return nil, fmt.Errorf("issue while waiting for parent block %d: %w", parentBlockNum, err)
@@ -280,12 +309,9 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		return p.baseTxnProvider.ProvideTxns(ctx, opts...)
 	}
 
-	// TODO(yperbasis): revisit Shutter gas filtering for EIP-8037.
-	// The shutter pool lacks chain config to compute intrinsic state gas,
-	// so txn.GetGasLimit() is used as a conservative proxy for both
-	// dimensions. State gas enforcement ultimately relies on best() in
-	// the base txpool (for additional public txns) and applyTransaction
-	// (for all txns).
+	isAmsterdam := p.chainConfig.IsAmsterdam(blockTime)
+	isEIP3860 := p.chainConfig.IsShanghai(blockTime)
+	isEIP7623 := p.chainConfig.IsPrague(blockTime)
 	availableGas := provideOpts.GasTarget
 	txnsIdFilter := provideOpts.TxnIdsFilter
 	txns := make([]types.Transaction, 0, len(decryptedTxns.Transactions))
@@ -294,15 +320,86 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		if txnsIdFilter != nil && txnsIdFilter.Contains(txn.Hash()) {
 			continue
 		}
-		gasLimit := txn.GetGasLimit()
-		blobGas := txn.GetBlobGas()
-		if gasLimit > availableGas.Regular || gasLimit > availableGas.State || blobGas > availableGas.Blob {
+		limits, gasErr := protocol.TransactionGasLimits(txn, isAmsterdam)
+		if gasErr != nil {
 			continue
 		}
-		availableGas.Regular -= gasLimit
-		availableGas.State -= gasLimit
-		availableGas.Blob -= blobGas
-		decryptedTxnsGas += gasLimit
+		executionGas, stateGas := limits.Execution, limits.State
+		if executionGas > availableGas.Execution {
+			sender, _ := txn.GetSender()
+			p.logger.Warn(
+				"skipping decrypted txn: insufficient execution gas",
+				"hash", txn.Hash(),
+				"type", txn.Type(),
+				"sender", sender,
+				"executionGas", executionGas,
+				"availableExecution", availableGas.Execution,
+			)
+			continue
+		}
+		if stateGas > availableGas.State {
+			sender, _ := txn.GetSender()
+			p.logger.Warn(
+				"skipping decrypted txn: insufficient state gas",
+				"hash", txn.Hash(),
+				"type", txn.Type(),
+				"sender", sender,
+				"gasLimit", stateGas,
+				"availableState", availableGas.State,
+			)
+			continue
+		}
+		accessList := txn.GetAccessList()
+		to := txn.GetTo()
+		txnSender, senderOk := txn.GetSender()
+		intrinsicGasResult, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+			Data:               txn.GetData(),
+			AuthorizationsLen:  uint64(len(txn.GetAuthorizations())),
+			AccessListLen:      uint64(len(accessList)),
+			StorageKeysLen:     uint64(accessList.StorageKeys()),
+			IsContractCreation: txn.IsContractDeploy(),
+			IsSelfTransfer:     senderOk && to != nil && txnSender.Value() == *to,
+			HasValue:           !txn.GetValue().IsZero(),
+			IsEIP2:             true,
+			IsEIP2028:          true,
+			IsEIP3860:          isEIP3860,
+			IsEIP7623:          isEIP7623,
+			IsEIP7976:          isAmsterdam,
+			IsEIP7981:          isAmsterdam,
+			IsEIP2780:          isAmsterdam,
+		})
+		if frame, ok := txn.Unwrap().(*types.FrameTransaction); ok {
+			intrinsicGasResult.ExecutionGas, intrinsicGasResult.FloorGasCost, _, err = frame.GasLimits()
+			overflow = err != nil
+		}
+		if overflow {
+			sender, _ := txn.GetSender()
+			p.logger.Warn(
+				"skipping decrypted txn with intrinsic gas overflow",
+				"hash", txn.Hash(),
+				"type", txn.Type(),
+				"sender", sender,
+			)
+			continue
+		}
+		intrinsicGas := intrinsicGasResult.ExecutionGas
+		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
+			intrinsicGas = intrinsicGasResult.FloorGasCost
+		}
+		if intrinsicGas > availableGas.Execution {
+			sender, _ := txn.GetSender()
+			p.logger.Warn(
+				"skipping decrypted txn: insufficient execution gas",
+				"hash", txn.Hash(),
+				"type", txn.Type(),
+				"sender", sender,
+				"intrinsicGas", intrinsicGas,
+				"availableExecution", availableGas.Execution,
+			)
+			continue
+		}
+		availableGas.Execution -= intrinsicGas
+		decryptedTxnsGas += txn.GetGasLimit()
 		txns = append(txns, txn)
 		if txnsIdFilter != nil {
 			txnsIdFilter.Add(txn.Hash())

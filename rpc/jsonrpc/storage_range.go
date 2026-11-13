@@ -19,11 +19,13 @@ package jsonrpc
 import (
 	"bytes"
 	"container/heap"
+	"math"
 	"slices"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 )
@@ -84,10 +86,10 @@ func storageRangeAt(ttx kv.TemporalTx, contractAddress common.Address, start []b
 func storageRangeAtErigon(ttx kv.TemporalTx, contractAddress common.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: storageMap{}}
 
-	fromKey := append(common.Copy(contractAddress.Bytes()), start...)
-	toKey, _ := kv.NextSubtree(contractAddress.Bytes())
+	fromKey := append(bytes.Clone(contractAddress[:]), start...)
+	toKey, _ := kv.NextSubtree(contractAddress[:])
 
-	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim) //no limit because need skip empty records
+	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim) // no limit because need skip empty records
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -101,10 +103,7 @@ func storageRangeAtErigon(ttx kv.TemporalTx, contractAddress common.Address, sta
 			continue // Skip deleted entries
 		}
 		key := common.BytesToHash(k[20:])
-		seckey, err := common.HashData(k[20:])
-		if err != nil {
-			return StorageRangeResult{}, err
-		}
+		seckey := crypto.Keccak256Hash(k[20:])
 		var value uint256.Int
 		value.SetBytes(v)
 		result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
@@ -131,9 +130,13 @@ func storageRangeAtErigon(ttx kv.TemporalTx, contractAddress common.Address, sta
 func storageRangeAtGethCompat(ttx kv.TemporalTx, contractAddress common.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: storageMap{}}
 
+	if maxResult < 0 {
+		maxResult = 0
+	}
+
 	// Always scan all storage for this contract — we need to sort by hashed key
 	// to match Geth's trie-based iteration order.
-	fromKey := common.Copy(contractAddress.Bytes())
+	fromKey := bytes.Clone(contractAddress[:])
 	toKey, _ := kv.NextSubtree(fromKey)
 
 	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim)
@@ -148,8 +151,8 @@ func storageRangeAtGethCompat(ttx kv.TemporalTx, contractAddress common.Address,
 	// time and O(k) memory, where k = maxResult+1 and n = total storage entries.
 	startHash := common.BytesToHash(start)
 	hasStart := len(start) > 0
-	limit := maxResult + 1 // +1 to determine nextKey
-	h := make(storageEntryMaxHeap, 0, limit+1)
+	limit := min(maxResult, math.MaxInt-1) + 1 // +1 to determine nextKey
+	var h storageEntryMaxHeap
 
 	for r.HasNext() {
 		k, v, err := r.Next()
@@ -160,11 +163,7 @@ func storageRangeAtGethCompat(ttx kv.TemporalTx, contractAddress common.Address,
 			continue
 		}
 		rawKey := k[20:]
-		seckey, err := common.HashData(rawKey)
-		if err != nil {
-			return StorageRangeResult{}, err
-		}
-
+		seckey := crypto.Keccak256Hash(rawKey)
 		// Skip entries with hashed key < start.
 		if hasStart && bytes.Compare(seckey[:], startHash[:]) < 0 {
 			continue
@@ -196,7 +195,8 @@ func storageRangeAtGethCompat(ttx kv.TemporalTx, contractAddress common.Address,
 	// Fill result with up to maxResult entries; the extra one (if present) becomes nextKey.
 	for i := range entries {
 		if i >= maxResult {
-			result.NextKey = &entries[i].seckey
+			nextKey := entries[i].seckey
+			result.NextKey = &nextKey
 			break
 		}
 		key := entries[i].key

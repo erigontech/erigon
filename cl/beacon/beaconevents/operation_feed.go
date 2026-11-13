@@ -1,15 +1,13 @@
 package beaconevents
 
-import ethevent "github.com/erigontech/erigon/p2p/event"
+import ethevent "github.com/erigontech/erigon/common/event"
 
 type operationFeed struct {
-	feed *ethevent.Feed
+	feed ethevent.Feed
 }
 
 func newOpFeed() *operationFeed {
-	return &operationFeed{
-		feed: &ethevent.Feed{},
-	}
+	return &operationFeed{}
 }
 
 func (f *operationFeed) Subscribe(channel chan *EventStream) ethevent.Subscription {
@@ -42,7 +40,6 @@ func (f *operationFeed) SendProposerSlashing(value *ProposerSlashingData) int {
 		Event: OpProposerSlashing,
 		Data:  value,
 	})
-
 }
 
 func (f *operationFeed) SendAttesterSlashing(value *AttesterSlashingData) int {
@@ -78,4 +75,40 @@ func (f *operationFeed) SendDataColumnSidecar(value *DataColumnSidecarData) int 
 		Event: OpDataColumnSidecar,
 		Data:  value,
 	})
+}
+
+// SendPayloadAttestationMessage emits a payload_attestation_message event. [New in Gloas:EIP7732]
+func (f *operationFeed) SendPayloadAttestationMessage(value *PayloadAttestationMessageData) int {
+	return f.feed.TrySend(&EventStream{
+		Event: OpPayloadAttestationMessage,
+		Data:  &VersionedPayloadAttestationMessage{Version: "gloas", Data: value},
+	})
+}
+
+// SendExecutionPayloadBid emits an execution_payload_bid event. [New in Gloas:EIP7732]
+func (f *operationFeed) SendExecutionPayloadBid(value *SignedExecutionPayloadBidData) int {
+	return f.feed.TrySend(&EventStream{
+		Event: OpExecutionPayloadBid,
+		Data:  &VersionedSignedExecutionPayloadBid{Version: "gloas", Data: value},
+	})
+}
+
+// SendExecutionPayloadAvailable emits an execution_payload_available event. [New in Gloas:EIP7732]
+func (f *operationFeed) SendExecutionPayloadAvailable(value *ExecutionPayloadAvailableData) int {
+	return f.feed.TrySend(&EventStream{
+		Event: OpExecutionPayloadAvailable,
+		Data:  value,
+	})
+}
+
+func (f *operationFeed) SendExecutionPayload(value *ExecutionPayloadData) int {
+	return f.feed.TrySend(&EventStream{Event: OpExecutionPayload, Data: value})
+}
+
+func (f *operationFeed) SendExecutionPayloadGossip(value *ExecutionPayloadGossipData) int {
+	return f.feed.TrySend(&EventStream{Event: OpExecutionPayloadGossip, Data: value})
+}
+
+func (f *operationFeed) SendProposerPreferences(value *VersionedSignedProposerPreferences) int {
+	return f.feed.TrySend(&EventStream{Event: OpProposerPreferences, Data: value})
 }

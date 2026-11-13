@@ -21,9 +21,9 @@ package testforks
 
 import (
 	"fmt"
-	"math/big"
 	"slices"
 
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
@@ -60,7 +60,7 @@ var blobSchedule = map[string]*params.BlobConfig{
 var Forks = map[string]*chain.Config{}
 
 func init() {
-	c := &chain.Config{ChainID: big.NewInt(1)}
+	c := &chain.Config{ChainID: uint256.NewInt(1)}
 	Forks["Frontier"] = c
 
 	c = configCopy(c)
@@ -83,10 +83,12 @@ func init() {
 	c = configCopy(c)
 	c.TangerineWhistleBlock = common.NewUint64(0)
 	Forks["EIP150"] = c
+	Forks["TangerineWhistle"] = c
 
 	c = configCopy(c)
 	c.SpuriousDragonBlock = common.NewUint64(0)
 	Forks["EIP158"] = c
+	Forks["SpuriousDragon"] = c
 
 	c = configCopy(c)
 	c.ByzantiumBlock = common.NewUint64(5)
@@ -142,7 +144,7 @@ func init() {
 	Forks["ArrowGlacier"] = c
 
 	c = configCopy(c)
-	c.TerminalTotalDifficulty = big.NewInt(0xC00000)
+	c.TerminalTotalDifficulty = uint256.NewInt(0xC0000)
 	Forks["ArrowGlacierToParisAtDiffC0000"] = c
 
 	c = configCopy(c)
@@ -151,7 +153,7 @@ func init() {
 	Forks["GrayGlacier"] = c
 
 	c = configCopy(c)
-	c.TerminalTotalDifficulty = big.NewInt(0)
+	c.TerminalTotalDifficulty = uint256.NewInt(0)
 	Forks["Merge"] = c
 	Forks["Paris"] = c
 
@@ -207,8 +209,6 @@ func init() {
 	Forks["BPO2"] = c
 
 	// Amsterdam branches from BPO2 (not BPO3/BPO4).
-	// In EEST, Amsterdam inherits Osaka blob params; the devnet test fixtures
-	// were generated with BPO2's blob schedule (target=14, max=21, fraction=11684671).
 	cAms := configCopy(c)
 	cAms.AmsterdamTime = common.NewUint64(15_000)
 	Forks["BPO2ToAmsterdamAtTime15k"] = cAms
@@ -216,6 +216,39 @@ func init() {
 	cAms = configCopy(cAms)
 	cAms.AmsterdamTime = common.NewUint64(0)
 	Forks["Amsterdam"] = cAms
+
+	cBogota := configCopy(cAms)
+	cBogota.BogotaTime = common.NewUint64(15_000)
+	Forks["AmsterdamToBogotaAtTime15k"] = cBogota
+	cBogota = configCopy(cBogota)
+	cBogota.BogotaTime = common.NewUint64(0)
+	Forks["Bogota"] = cBogota
+
+	cAmsBpo := configCopy(cAms)
+	cAmsBpo.BlobSchedule["bpo3"] = &params.BlobConfig{
+		Target:                21,
+		Max:                   32,
+		BaseFeeUpdateFraction: 17527006,
+	}
+	cAmsBpo.Bpo3Time = common.NewUint64(15_000)
+	Forks["AmsterdamToBPOIncreaseAtTime15k"] = cAmsBpo
+
+	cAmsBpo = configCopy(cAmsBpo)
+	cAmsBpo.Bpo3Time = common.NewUint64(0)
+	Forks["AmsterdamBPOIncrease"] = cAmsBpo
+
+	cAmsBpo = configCopy(cAms)
+	cAmsBpo.BlobSchedule["bpo3"] = &params.BlobConfig{
+		Target:                9,
+		Max:                   14,
+		BaseFeeUpdateFraction: 7511574,
+	}
+	cAmsBpo.Bpo3Time = common.NewUint64(15_000)
+	Forks["AmsterdamToBPODecreaseAtTime15k"] = cAmsBpo
+
+	cAmsBpo = configCopy(cAmsBpo)
+	cAmsBpo.Bpo3Time = common.NewUint64(0)
+	Forks["AmsterdamBPODecrease"] = cAmsBpo
 
 	// BPO3/BPO4 continue from BPO2 as a separate chain
 	c = configCopy(c)
@@ -237,7 +270,9 @@ func init() {
 
 func configCopy(c *chain.Config) *chain.Config {
 	cpy := new(chain.Config)
-	copier.Copy(cpy, c)
+	if err := copier.CopyWithOption(cpy, c, copier.Option{DeepCopy: true}); err != nil {
+		panic(fmt.Sprintf("testforks: failed to deep-copy chain.Config: %s", err))
+	}
 	return cpy
 }
 

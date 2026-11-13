@@ -114,11 +114,6 @@ func ZeroGammas(degree uint64) *Gammas {
 	return &gammas
 }
 
-// DegreeFromThreshold returns the degree polynomials should have for the given threshold.
-func DegreeFromThreshold(threshold uint64) uint64 {
-	return threshold - 1
-}
-
 // Eval evaluates the polynomial at the given coordinate.
 func (p *Polynomial) Eval(x *big.Int) *big.Int {
 	// uses Horner's method
@@ -189,7 +184,9 @@ func (g *Gammas) GobEncode() ([]byte, error) {
 func (g *Gammas) GobDecode(data []byte) error {
 	for i := 0; i < len(data); i += blst.BLST_P2_COMPRESS_BYTES {
 		p := new(blst.P2Affine)
-		p.Uncompress(data[i : i+blst.BLST_P2_COMPRESS_BYTES])
+		if p.Uncompress(data[i:i+blst.BLST_P2_COMPRESS_BYTES]) == nil {
+			return errors.New("failed to deserialize gamma")
+		}
 		if !p.InG2() {
 			return errors.New("gamma is not on curve")
 		}

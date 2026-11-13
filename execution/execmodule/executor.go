@@ -18,16 +18,19 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
@@ -42,7 +45,7 @@ import (
 type PipelineExecutor struct {
 	sync                    *stagedsync.Sync
 	db                      kv.TemporalRwDB
-	blockReader             services.FullBlockReader
+	blockReader             dbservices.FullBlockReader
 	chainConfig             *chain.Config
 	engine                  rules.Engine
 	validationSync          *stagedsync.Sync
@@ -59,7 +62,7 @@ type PipelineExecutor struct {
 func NewPipelineExecutor(
 	sync *stagedsync.Sync,
 	db kv.TemporalRwDB,
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	validationSync *stagedsync.Sync,
@@ -110,78 +113,87 @@ func (pe *PipelineExecutor) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalR
 }
 
 // RunPrune executes pruning on the main pipeline.
-func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) error {
-	return pe.sync.RunPrune(ctx, tx, initialCycle, timeout)
+func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (kv.FinalityContext, error) {
+	finalityCtx, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle, pe.blockReader.TxnumReader())
+	if err != nil {
+		return nil, err
+	}
+	err = pe.sync.RunPrune(ctx, tx, initialCycle, finalityCtx, timeout)
+	return finalityCtx, err
 }
 
-// CommitCycleFn is called between hasMore iterations to persist accumulated
-// state and obtain a fresh tx for the next iteration. Implementations must
-// flush the SharedDomains, commit, and return a fresh kv.TemporalRwTx.
-type CommitCycleFn func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error)
+// Commits sd and, if another iteration follows, returns a fresh tx+SD to run it on; (nil,nil,nil) leaves the loop unchanged.
+type CommitCycleFn func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error)
 
-// ShouldBreakFn is called after each iteration (after prune, before commit)
-// to check whether the loop should stop early. Return true to break.
+// PruneFn replaces the in-loop pe.sync.RunPrune call. It is called after
+// pe.sync.Run and before CommitCycle. Implementations typically close the
+// read-side tx (if separate) and run pruning on a tx of their choosing.
+type PruneFn func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error
+
+// ShouldBreakFn is an optional callback to stop the loop early (return true).
 type ShouldBreakFn func(tx kv.TemporalRwTx) (bool, error)
-
-// BeforeIterationFn is called before each pipeline Run (e.g. to set state cache).
-type BeforeIterationFn func(sd *execctx.SharedDomains)
 
 // RunLoopConfig configures a single RunLoop invocation.
 type RunLoopConfig struct {
-	InitialCycle    bool
-	FirstCycle      bool
-	PruneTimeout    time.Duration
-	CommitCycle     CommitCycleFn     // required when hasMore
-	ShouldBreak     ShouldBreakFn     // optional early exit
-	BeforeIteration BeforeIterationFn // optional per-iteration setup
+	InitialCycle bool
+	FirstCycle   bool
+	CommitCycle  CommitCycleFn
+	PruneFn      PruneFn
+	ShouldBreak  ShouldBreakFn // optional
 }
 
-// RunLoop executes the pipeline in a hasMore loop:
-//
-//	for hasMore {
-//	    [BeforeIteration] → sync.Run → RunPrune → [ShouldBreak] → if hasMore { CommitCycle }
-//	}
-//
-// RunPrune runs unconditionally on every iteration (including the last) to
-// match the original stageloop.ProcessFrozenBlocks behaviour. The loop
-// continues until Run returns hasMore=false, ShouldBreak returns true, or
-// an error occurs. The returned tx may differ from the input tx if
-// CommitCycle was called (which returns a fresh tx).
-func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg RunLoopConfig) (kv.TemporalRwTx, error) {
-	for hasMore := true; hasMore; {
-		if cfg.BeforeIteration != nil {
-			cfg.BeforeIteration(sd)
-		}
-
+// RunLoop runs sync.Run → PruneFn → ShouldBreak → CommitCycle in a hasMore loop.
+// Exits when Run returns hasMore=false, ShouldBreak returns true, or on error.
+// Returns the final tx and operational SD, owned by the caller (commit if CommitCycle didn't, then close). Intermediate SDs are closed here.
+func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg RunLoopConfig) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
+	stop := false
+	for hasMore := true; hasMore && !stop; {
 		var err error
 		hasMore, err = pe.sync.Run(sd, tx, cfg.InitialCycle, cfg.FirstCycle)
 		if err != nil {
-			return tx, err
+			return tx, sd, err
 		}
 
-		if err := pe.sync.RunPrune(ctx, tx, cfg.InitialCycle, cfg.PruneTimeout); err != nil {
-			return tx, err
+		if err := cfg.PruneFn(ctx, cfg.InitialCycle, tx, sd); err != nil {
+			return tx, sd, err
 		}
 
 		if cfg.ShouldBreak != nil {
-			stop, err := cfg.ShouldBreak(tx)
+			stop, err = cfg.ShouldBreak(tx)
 			if err != nil {
-				return tx, err
-			}
-			if stop {
-				break
+				return tx, sd, err
 			}
 		}
 
-		if hasMore {
-			newTx, err := cfg.CommitCycle(ctx, sd)
-			if err != nil {
-				return tx, err
-			}
+		newTx, newSD, err := cfg.CommitCycle(ctx, hasMore, sd)
+		if err != nil {
+			return tx, sd, err
+		}
+		if newTx != nil {
 			tx = newTx
 		}
+		// CommitCycle committed sd and handed back a fresh one for the next
+		// iteration: close the spent SD and continue on the fresh one. The exit
+		// SD (newSD == nil) is returned for the caller to finalize, never closed
+		// here.
+		if newSD != nil {
+			sd.Close()
+			sd = newSD
+		}
 	}
-	return tx, nil
+	return tx, sd, nil
+}
+
+type initialSyncPublicationError struct {
+	err error
+}
+
+func (e *initialSyncPublicationError) Error() string {
+	return e.err.Error()
+}
+
+func (e *initialSyncPublicationError) Unwrap() error {
+	return e.err
 }
 
 // ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
@@ -193,10 +205,35 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	// Closure form: CommitCycle reassigns tx across iterations, so we need
+	// to roll back the current value at function exit, not the original.
+	defer func() { tx.Rollback() }()
+
+	// Drop the snapshots stage's download-completion pin on every exit (see
+	// Notifications.ClearSnapshotDownloadPin for its lifecycle). Registered
+	// before the stage so a failure inside it, after the pin is published, is
+	// covered too; the publish runs on a non-cancelled ctx because the failure
+	// often IS a cancellation. Skipped when only downloading — execution, and
+	// with it the handoff the pin bridges, happens elsewhere.
+	defer func() {
+		if onlySnapDownload {
+			return
+		}
+		hook.ClearSnapshotDownloadPin()
+		// Publish unconditionally: a publish inside the pipeline reports the pin's
+		// commitment block from an uncommitted Execution bump, which a failure then
+		// rolls back, so subscribers need the honest drop pushed to them either way.
+		// PublishSyncState dedups, so an unchanged reply costs a ro-tx.
+		if viewErr := pe.db.View(context.WithoutCancel(ctx), func(tx kv.Tx) error {
+			hook.NotifySyncState(tx)
+			return nil
+		}); viewErr != nil {
+			pe.logger.Warn("[OtterSync] sync-state publish after dropping the download pin failed", "err", viewErr)
+		}
+	}()
 
 	// Run snapshots stage — downloads block files.
-	if err = pe.sync.RunSnapshots(nil, tx); err != nil {
+	if err := pe.sync.RunSnapshots(nil, tx); err != nil {
 		return err
 	}
 	if onlySnapDownload {
@@ -212,7 +249,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	if err != nil {
 		return err
 	}
-	defer doms.Close()
+	defer func() { doms.Close() }() // RunLoop rotates doms; close whichever is current at exit
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	var finishStageBeforeSync uint64
@@ -221,29 +258,43 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		if err != nil {
 			return err
 		}
-		if err = hook.BeforeRun(tx, false); err != nil {
+		if err := hook.BeforeRun(tx, false); err != nil {
 			return err
 		}
 	}
 
-	tx, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
+	var finalityCtx kv.FinalityContext
+	tx, doms, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: true,
-		FirstCycle:   false,
-		PruneTimeout: 0,
-		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
-			if err := sd.Flush(ctx, tx); err != nil {
-				return nil, fmt.Errorf("ProcessFrozenBlocks: flush: %w", err)
+		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
+			var err error
+			finalityCtx, err = pe.RunPrune(ctx, rwtx, initialCycle, 0)
+			return err
+		},
+		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
+			// The spent SD is closed by RunLoop; a fresh one opens for the next cycle.
+			if err := sd.Commit(ctx, tx); err != nil {
+				return nil, nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)
 			}
-			sd.ClearRam(true)
-			if err := tx.Commit(); err != nil {
-				return nil, err
+			// Prune runs via PruneFn (sync.RunPrune); kick file building so
+			// snapshot files advance as PFB processes frozen blocks.
+			pe.db.BuildFilesInBackground(finalityCtx)
+			// Last iter: skip BeginTemporalRw — no next iter will use it.
+			if !hasMore {
+				return nil, nil, nil
 			}
 			newTx, err := pe.db.BeginTemporalRw(ctx) //nolint:gocritic
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			tx = newTx
-			return newTx, nil
+			newSD, err := execctx.NewSharedDomains(ctx, newTx, pe.logger)
+			if err != nil {
+				return nil, nil, err
+			}
+			newSD.SetInMemHistoryReads(inMemHistoryReads)
+			hook.NotifySyncState(newTx)
+			return newTx, newSD, nil
 		},
 		ShouldBreak: func(curTx kv.TemporalRwTx) (bool, error) {
 			if pe.blockReader.FrozenBlocks() > 0 {
@@ -261,38 +312,41 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		return fmt.Errorf("ProcessFrozenBlocks: %w", err)
 	}
 
-	if err := doms.Flush(ctx, tx); err != nil {
-		return fmt.Errorf("ProcessFrozenBlocks: final flush: %w", err)
-	}
-	doms.ClearRam(true)
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-
 	if hook != nil {
 		if err := pe.db.View(ctx, func(tx kv.Tx) error {
 			headersProgress, err := stages.GetStageProgress(tx, stages.Headers)
 			if err != nil {
 				return err
 			}
-			if err = hook.SendNotifications(tx, finishStageBeforeSync); err != nil {
-				return err
-			}
-			if err = hook.UpdateHead(tx, finishStageBeforeSync, false); err != nil {
-				return err
-			}
+			// Before UpdateHead, which publishes the sync state computed from it.
 			hook.LastNewBlockSeen(headersProgress)
+			if err := hook.SendNotifications(tx, finishStageBeforeSync); err != nil {
+				return err
+			}
+			if err := hook.UpdateHead(tx, finishStageBeforeSync, false); err != nil {
+				return err
+			}
 			return nil
 		}); err != nil {
-			return err
+			return &initialSyncPublicationError{err: err}
 		}
 	}
 	return nil
 }
 
+// lastValidationExecStageTiming reports the Execution stage duration of the most
+// recent ValidateBlock, so on a multi-header fork this is the last block's, not
+// the whole validation's.
+func (pe *PipelineExecutor) lastValidationExecStageTiming() time.Duration {
+	if pe.validationSync == nil {
+		return 0
+	}
+	return pe.validationSync.LastStageTiming(stages.Execution)
+}
+
 // ValidateBlock executes a fork validation by running the pipeline block-by-block
 // over a side fork. All pipeline execution goes through PipelineExecutor.
-func (pe *PipelineExecutor) ValidateBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
+func (pe *PipelineExecutor) ValidateBlock(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.Body) error {
 	// Use a terse logger to suppress low-level noise during fork validation.
 	// Defaults to LvlWarn (matching the original hard-coded level), but can
 	// be overridden via dbg.ExecTerseLoggerLevel for debugging — Erigon's
@@ -310,8 +364,12 @@ func (pe *PipelineExecutor) ValidateBlock(ctx context.Context, sd *execctx.Share
 		return err
 	}
 
-	if err := stageloop.StateStep(ctx, chainReader, pe.engine, sd, tx, pe.validationSync, unwindPoint, headersChain, bodiesChain); err != nil {
-		pe.logger.Warn("Could not validate block", "err", err)
+	if err := stageloop.StateStep(chainReader, pe.engine, sd, tx, pe.validationSync, unwindPoint, headersChain, bodiesChain); err != nil {
+		if errors.Is(err, stageloop.ErrStateStepHasMoreWork) {
+			pe.logger.Debug("Could not validate block", "err", err)
+		} else if !commonerrors.IsOnlyCanceled(err) {
+			pe.logger.Warn("Could not validate block", "err", err)
+		}
 		return err
 	}
 

@@ -21,7 +21,6 @@
 package ethconfig
 
 import (
-	"math/big"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -40,16 +39,12 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
-
-// BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
-var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
 
 // Fail-back block gas limit. Better specify one in the chain config.
 const DefaultBlockGasLimit uint64 = 60_000_000
@@ -64,7 +59,7 @@ func DefaultBlockGasLimitByChain(chainConfig *chain.Config) uint64 {
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
 	Blocks:           20,
-	Default:          uint256.NewInt(0),
+	Default:          uint256.NewInt(common.GWei / 1000),
 	Percentile:       60,
 	MaxHeaderHistory: 0,
 	MaxBlockHistory:  0,
@@ -85,14 +80,15 @@ var LightClientGPO = gaspricecfg.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	Sync: Sync{
-		ExecWorkerCount:            dbg.Exec3Workers, //only half of CPU, other half will spend for snapshots build/merge/prune
+		ExecWorkerCount:            dbg.Exec3Workers, // only half of CPU, other half will spend for snapshots build/merge/prune
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
-		//LoopBlockLimit:             100_000,
+		// LoopBlockLimit:             100_000,
 		ParallelStateFlushing:    true,
 		ChaosMonkey:              false,
 		AlwaysGenerateChangesets: !dbg.BatchCommitments,
 		MaxReorgDepth:            dbg.MaxReorgDepth,
+		PersistReceiptsCacheV2:   true,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -112,13 +108,13 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
-	FcuTimeout:          1 * time.Second,
-	FcuBackgroundPrune:  true,
-	FcuBackgroundCommit: false, // to enable, we need to 1) have rawdb API go via execctx and 2) revive Coherent cache for rpcdaemon
-	ExperimentalBAL:     false,
+	FcuTimeout:         1 * time.Second,
+	FcuBackgroundPrune: true,
+	ExperimentalBAL:    false,
+	WarmupKzgCtxOnInit: true,
 }
 
-const DefaultChainDBPageSize = 16 * datasize.KB
+const DefaultChainDBPageSize = 4 * datasize.KB
 
 func init() {
 	home := os.Getenv("HOME")
@@ -127,16 +123,17 @@ func init() {
 			home = user.HomeDir
 		}
 	}
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		Defaults.Ethash.DatasetDir = filepath.Join(home, "Library", "erigon-ethash")
-	} else if runtime.GOOS == "windows" {
+	case "windows":
 		localappdata := os.Getenv("LOCALAPPDATA")
 		if localappdata != "" {
 			Defaults.Ethash.DatasetDir = filepath.Join(localappdata, "erigon-thash")
 		} else {
 			Defaults.Ethash.DatasetDir = filepath.Join(home, "AppData", "Local", "erigon-ethash")
 		}
-	} else {
+	default:
 		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
 			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "erigon-ethash")
 		}
@@ -151,9 +148,18 @@ type BlocksFreezing struct {
 	ProduceE2         bool // produce new block files
 	ProduceE3         bool // produce new state files
 	NoDownloader      bool // possible to use snapshots without calling Downloader
+	P2PManifest       bool // discover snapshot manifest from P2P peers instead of centralized preverified.toml
 	DisableDownloadE3 bool // disable download state snapshots
 	DownloaderAddr    string
 	ChainName         string
+	E2RetireStep      uint64 // optional, 0 means we use hardcoded default of 1_000
+	// ChainTomlURL, when non-empty, overrides the default R2/GitHub fetch of
+	// the preverified chain.toml with a direct HTTP GET to this URL. Local
+	// preverified.toml in the datadir still takes precedence.
+	ChainTomlURL string
+	// ManifestReady is closed when P2P manifest discovery completes.
+	// Set by the backend when P2PManifest is enabled. Nil otherwise.
+	ManifestReady <-chan struct{}
 }
 
 func (s BlocksFreezing) String() string {
@@ -180,6 +186,12 @@ func NewSnapCfg(keepBlocks, produceE2, produceE3 bool, chainName string) BlocksF
 // Config contains configuration options for ETH protocol.
 type Config struct {
 	Sync
+
+	// StateCacheBudget, when > 0, overrides the per-domain state-cache byte
+	// budget the ExecModule allocates. Test harnesses that build one ExecModule
+	// per fixture set this small to avoid the full production cache each time;
+	// 0 means the production default.
+	StateCacheBudget datasize.ByteSize
 
 	// The genesis block, which is inserted if the database is empty.
 	// If nil, the Ethereum main net block is used.
@@ -216,8 +228,7 @@ type Config struct {
 	// Ethash options
 	Ethash ethashcfg.Config
 
-	Clique chainspec.ConsensusSnapshotConfig
-	Aura   chain.AuRaConfig
+	Aura chain.AuRaConfig
 
 	// Transaction pool options
 	TxPool  txpoolcfg.Config
@@ -237,11 +248,6 @@ type Config struct {
 
 	ExperimentalBAL bool
 
-	// URL to connect to Heimdall node
-	HeimdallURL string
-	// No heimdall service
-	WithoutHeimdall bool
-
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
@@ -253,19 +259,42 @@ type Config struct {
 	// Whether to avoid overriding chain config already stored in the DB
 	KeepStoredChainConfig bool
 
-	// PoS Single Slot finality
-	PolygonPosSingleSlotFinality        bool
-	PolygonPosSingleSlotFinalityBlockAt uint64
-
-	// Account Abstraction
-	AllowAA bool
+	// GenesisFromFile marks a genesis supplied through --override.genesis.
+	// On restart, its block hash after fork overrides must match the stored genesis hash.
+	// The chain config may differ, subject to the writer's compatibility checks.
+	GenesisFromFile bool
 
 	// fork choice update timeout
-	FcuTimeout          time.Duration
-	FcuBackgroundPrune  bool
-	FcuBackgroundCommit bool
+	FcuTimeout         time.Duration
+	FcuBackgroundPrune bool
 
 	MCPAddress string
+
+	// ErigondbDomainStepsInFrozenFile overrides erigondb.toml stepsInFrozenFile for the
+	// domain merge cap only (history/II are unaffected). nil = no override;
+	// config3.UnboundedDomainMerge disables the cap; any other positive value is used
+	// directly as the cap in steps.
+	ErigondbDomainStepsInFrozenFile *uint64 `toml:",omitempty"`
+
+	// CommitmentPlainValues overrides the references_in_commitment_branches value written into a
+	// freshly created erigondb.toml (true => plain keys => references=false); nil = unset.
+	CommitmentPlainValues *bool `toml:",omitempty"`
+
+	// WarmupKzgCtxOnInit, when true, eagerly initialises the KZG trusted setup
+	// in the background on startup so the first block doesn't pay the ~2s init
+	// cost. Tests that don't need the trusted setup loaded leave this false
+	// to avoid the extra work.
+	WarmupKzgCtxOnInit bool
+}
+
+// CommitmentRefsFirstStart maps CommitmentPlainValues to a first-start
+// references_in_commitment_branches override (nil = use the config default).
+func (c *Config) CommitmentRefsFirstStart() *bool {
+	if c.CommitmentPlainValues == nil {
+		return nil
+	}
+	refs := !*c.CommitmentPlainValues
+	return &refs
 }
 
 type Sync struct {
@@ -280,11 +309,12 @@ type Sync struct {
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
 
-	ChaosMonkey                      bool
-	AlwaysGenerateChangesets         bool
-	MaxReorgDepth                    uint64
-	KeepExecutionProofs              bool
-	ExperimentalConcurrentCommitment bool
-	PersistReceiptsCacheV2           bool
-	SnapshotDownloadToBlock          uint64 // exclusive [0,toBlock)
+	ChaosMonkey              bool
+	AlwaysGenerateChangesets bool
+	MaxReorgDepth            uint64
+	KeepExecutionProofs      bool
+	PersistReceiptsCacheV2   bool
+	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
+
+	SlowBlockThreshold *time.Duration
 }

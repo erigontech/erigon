@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -82,8 +83,9 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	domains.SetTxNum(txNum)
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	setup := New(NewReaderV3(domains.AsGetter(tx)))
-	setup.CreateAccount(addr, true)
-	setup.SetState(addr, key, valA)
+	defer setup.Close()
+	require.NoError(t, setup.CreateAccount(addr, true))
+	require.NoError(t, setup.SetState(addr, key, valA))
 	err = setup.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
 	err = setup.CommitBlock(&chain.Rules{}, w)
@@ -91,9 +93,10 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 
 	// IBS for the next block — reads block-start state (slot=A) from domains.
 	ibs := New(NewReaderV3(domains.AsGetter(tx)))
+	defer ibs.Close()
 
 	// Tx1: A → B.
-	ibs.SetState(addr, key, valB)
+	require.NoError(t, ibs.SetState(addr, key, valB))
 	rw1 := &recordingWriter{}
 	err = ibs.FinalizeTx(&chain.Rules{}, rw1)
 	require.NoError(t, err)
@@ -101,7 +104,7 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	require.Equal(t, valB, rw1.storageWrites[0].val, "tx1 must write B")
 
 	// Tx2: B → A (reverts to the block-start value).
-	ibs.SetState(addr, key, valA)
+	require.NoError(t, ibs.SetState(addr, key, valA))
 	rw2 := &recordingWriter{}
 	err = ibs.FinalizeTx(&chain.Rules{}, rw2)
 	require.NoError(t, err)
@@ -111,6 +114,47 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	require.Len(t, rw2.storageWrites, 1, "tx2 must emit a storage write (A→B→A must not be skipped)")
 	require.Equal(t, valA, rw2.storageWrites[0].val, "tx2 must write A")
 	require.Equal(t, valB, rw2.storageWrites[0].orig, "tx2 origin must be B (last written value)")
+}
+
+func TestWriterAccountAndStorageNotifications(t *testing.T) {
+	for _, tc := range []struct {
+		name                          string
+		storageOriginal, storageValue uint64
+		nonces                        []uint64
+		action                        notifications.Action
+	}{
+		{"storage only", 0, 1, []uint64{1}, notifications.ActionStorage},
+		{"storage cleared", 1, 0, []uint64{1}, notifications.ActionStorage},
+		{"account and storage", 0, 1, []uint64{2}, notifications.ActionUpsert},
+		{"account restored", 0, 1, []uint64{2, 1}, notifications.ActionUpsert},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, tx, domains := NewTestRwTx(t)
+			accumulator := notifications.NewAccumulator()
+			accumulator.StartChange(&types.Header{Number: *uint256.NewInt(1)}, nil, false)
+			writer := NewWriter(domains.AsPutDel(tx), accumulator, 1)
+			address := accounts.InternAddress(common.Address{1})
+			original := accounts.NewAccount()
+			original.Nonce = 1
+			account := original
+
+			storageValue := uint256.NewInt(tc.storageValue)
+			require.NoError(t, writer.WriteAccountStorage(address, 0, accounts.ZeroKey, *uint256.NewInt(tc.storageOriginal), *storageValue))
+			for _, nonce := range tc.nonces {
+				account.Nonce = nonce
+				require.NoError(t, writer.UpdateAccountData(address, &original, &account))
+			}
+			changes := accumulator.Changes()
+			require.Len(t, changes, 1)
+			require.Len(t, changes[0].Changes, 1)
+			require.Equal(t, tc.action, changes[0].Changes[0].Action)
+			require.Len(t, changes[0].Changes[0].StorageChanges, 1)
+			require.Equal(t, storageValue.Bytes(), changes[0].Changes[0].StorageChanges[0].Data)
+			if tc.action == notifications.ActionUpsert {
+				require.Equal(t, accounts.SerialiseV3(&account), changes[0].Changes[0].Data)
+			}
+		})
+	}
 }
 
 func TestNull(t *testing.T) {
@@ -124,13 +168,14 @@ func TestNull(t *testing.T) {
 	r := NewReaderV3(domains.AsGetter(tx))
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
+	defer state.Close()
 
 	address := accounts.InternAddress(common.HexToAddress("0x823140710bf13990e4500136726d8b55"))
-	state.CreateAccount(address, true)
+	require.NoError(t, state.CreateAccount(address, true))
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int
 
-	state.SetState(address, accounts.ZeroKey, value)
+	require.NoError(t, state.SetState(address, accounts.ZeroKey, value))
 
 	err = state.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
@@ -157,8 +202,10 @@ func TestTouchDelete(t *testing.T) {
 	r := NewReaderV3(domains.AsGetter(tx))
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
+	defer state.Close()
 
-	state.GetOrNewStateObject(accounts.ZeroAddress)
+	_, err = state.GetOrNewStateObject(accounts.ZeroAddress)
+	require.NoError(t, err)
 
 	err = state.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
@@ -170,7 +217,8 @@ func TestTouchDelete(t *testing.T) {
 
 	snapshot := state.PushSnapshot()
 	defer state.PopSnapshot(snapshot)
-	state.AddBalance(accounts.ZeroAddress, uint256.Int{}, tracing.BalanceChangeUnspecified)
+	err = state.AddBalance(accounts.ZeroAddress, uint256.Int{}, tracing.BalanceChangeUnspecified)
+	require.NoError(t, err)
 
 	if len(state.journal.dirties) != 1 {
 		t.Fatal("expected one dirty state object")
@@ -190,6 +238,7 @@ func TestSnapshot(t *testing.T) {
 
 	r := NewReaderV3(domains.AsGetter(tx))
 	state := New(r)
+	defer state.Close()
 
 	stateobjaddr := toAddr([]byte("aa"))
 	storageaddr := accounts.ZeroKey
@@ -200,11 +249,11 @@ func TestSnapshot(t *testing.T) {
 	genesis := state.PushSnapshot()
 
 	// set initial state object value
-	state.SetState(stateobjaddr, storageaddr, *data1)
+	require.NoError(t, state.SetState(stateobjaddr, storageaddr, *data1))
 	snapshot := state.PushSnapshot()
 
 	// set a new state object value, revert it and ensure correct content
-	state.SetState(stateobjaddr, storageaddr, *data2)
+	require.NoError(t, state.SetState(stateobjaddr, storageaddr, *data2))
 	state.RevertToSnapshot(snapshot, nil)
 	state.PopSnapshot(snapshot)
 	value, err := state.GetState(stateobjaddr, storageaddr)
@@ -234,6 +283,7 @@ func TestSnapshotEmpty(t *testing.T) {
 
 	r := NewReaderV3(domains.AsGetter(tx))
 	state := New(r)
+	defer state.Close()
 
 	snapshot := state.PushSnapshot()
 	state.RevertToSnapshot(snapshot, nil)
@@ -253,6 +303,7 @@ func TestSnapshot2(t *testing.T) {
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
 	state := New(NewReaderV3(domains.AsGetter(tx)))
+	defer state.Close()
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -261,15 +312,16 @@ func TestSnapshot2(t *testing.T) {
 	data0 := uint256.NewInt(17)
 	data1 := uint256.NewInt(18)
 
-	state.SetState(stateobjaddr0, storageaddr, *data0)
-	state.SetState(stateobjaddr1, storageaddr, *data1)
+	require.NoError(t, state.SetState(stateobjaddr0, storageaddr, *data0))
+	require.NoError(t, state.SetState(stateobjaddr1, storageaddr, *data1))
 
 	// db, trie are already non-empty values
 	so0, err := state.getStateObject(stateobjaddr0, true)
 	require.NoError(t, err)
 	so0.SetBalance(*uint256.NewInt(42), true, tracing.BalanceChangeUnspecified)
-	so0.SetNonce(43, true)
-	so0.SetCode(accounts.InternCodeHash(crypto.HashData([]byte{'c', 'a', 'f', 'e'})), []byte{'c', 'a', 'f', 'e'}, true)
+	so0.SetNonce(43, true, tracing.NonceChangeUnspecified)
+	_, err = so0.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'})), Bytes: []byte{'c', 'a', 'f', 'e'}}, true, tracing.CodeChangeUnspecified)
+	require.NoError(t, err)
 	so0.selfdestructed = false
 	so0.deleted = false
 	state.setStateObject(stateobjaddr0, so0)
@@ -284,8 +336,9 @@ func TestSnapshot2(t *testing.T) {
 	so1, err := state.getStateObject(stateobjaddr1, true)
 	require.NoError(t, err)
 	so1.SetBalance(*uint256.NewInt(52), true, tracing.BalanceChangeUnspecified)
-	so1.SetNonce(53, true)
-	so1.SetCode(accounts.InternCodeHash(crypto.HashData([]byte{'c', 'a', 'f', 'e', '2'})), []byte{'c', 'a', 'f', 'e', '2'}, true)
+	so1.SetNonce(53, true, tracing.NonceChangeUnspecified)
+	_, err = so1.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'})), Bytes: []byte{'c', 'a', 'f', 'e', '2'}}, true, tracing.CodeChangeUnspecified)
+	require.NoError(t, err)
 	so1.selfdestructed = true
 	so1.deleted = true
 	state.setStateObject(stateobjaddr1, so1)
@@ -303,8 +356,10 @@ func TestSnapshot2(t *testing.T) {
 	so0Restored, err := state.getStateObject(stateobjaddr0, true)
 	require.NoError(t, err)
 	// Update lazily-loaded values before comparing.
-	so0Restored.GetState(storageaddr)
-	so0Restored.Code()
+	_, _, err = so0Restored.GetState(storageaddr)
+	require.NoError(t, err)
+	_, err = so0Restored.Code()
+	require.NoError(t, err)
 	// non-deleted is equal (restored)
 	compareStateObjects(so0Restored, so0, t)
 
@@ -327,6 +382,7 @@ func TestCodeResolve(t *testing.T) {
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
 	state := New(NewReaderV3(domains.AsGetter(tx)))
+	defer state.Close()
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -334,7 +390,8 @@ func TestCodeResolve(t *testing.T) {
 	so0, err := state.GetOrNewStateObject(stateobjaddr0)
 	require.NoError(t, err)
 	del := types.AddressToDelegation(stateobjaddr1)
-	so0.SetCode(accounts.InternCodeHash(crypto.HashData(del)), del, true)
+	_, err = so0.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash(del)), Bytes: del}, true, tracing.CodeChangeUnspecified)
+	require.NoError(t, err)
 	so0.selfdestructed = false
 	so0.deleted = false
 	state.setStateObject(stateobjaddr0, so0)
@@ -342,7 +399,8 @@ func TestCodeResolve(t *testing.T) {
 	so1, err := state.GetOrNewStateObject(stateobjaddr1)
 	require.NoError(t, err)
 	target := []byte{'c', 'a', 'f', 'e'}
-	so1.SetCode(accounts.InternCodeHash(crypto.HashData(target)), target, true)
+	_, err = so1.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash(target)), Bytes: target}, true, tracing.CodeChangeUnspecified)
+	require.NoError(t, err)
 	so1.selfdestructed = false
 	so1.deleted = false
 	state.setStateObject(stateobjaddr1, so1)
@@ -354,8 +412,9 @@ func TestCodeResolve(t *testing.T) {
 	require.NoError(t, err)
 
 	state1 := New(NewReaderV3(domains.AsGetter(tx)))
+	defer state1.Close()
 	state1.SetVersionMap(&VersionMap{})
-	state1.Prepare(&chain.Rules{}, accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, nil, nil, nil)
+	state1.Prepare(&chain.Rules{}, accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, nil, nil)
 
 	_, ok, err := state1.GetDelegatedDesignation(stateobjaddr0)
 	require.NoError(t, err)
@@ -363,9 +422,9 @@ func TestCodeResolve(t *testing.T) {
 	code, err := state1.GetCode(stateobjaddr0)
 	require.NoError(t, err)
 	require.Equal(t, del, code)
-	code, err = state1.ResolveCode(stateobjaddr0)
+	resolved, err := state1.ResolveCode(stateobjaddr0)
 	require.NoError(t, err)
-	require.Equal(t, target, code)
+	require.Equal(t, target, resolved.Bytes)
 }
 
 func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
@@ -386,7 +445,7 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	if so0.data.CodeHash != so1.data.CodeHash {
 		t.Fatalf("CodeHash mismatch: have %v, want %v", so0.data.CodeHash, so1.data.CodeHash)
 	}
-	if !bytes.Equal(so0.code, so1.code) {
+	if !bytes.Equal(so0.code.Bytes, so1.code.Bytes) {
 		t.Fatalf("Code mismatch: have %v, want %v", so0.code, so1.code)
 	}
 
@@ -424,13 +483,13 @@ func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Shar
 	dirs := datadir.New(tb.TempDir())
 
 	stepSize := uint64(16)
-	db := temporaltest.NewTestDBWithStepSize(tb, dirs, stepSize)
+	db := temporaltest.NewTestDB(tb, dirs, temporaltest.WithStepSize(stepSize))
 	tb.Cleanup(db.Close)
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(tb, err)
 	tb.Cleanup(tx.Rollback)
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(tb, err)
 	tb.Cleanup(domains.Close)
 
@@ -447,14 +506,17 @@ func TestDump(t *testing.T) {
 	require.NoError(t, err)
 
 	st := New(NewReaderV3(domains.AsGetter(tx)))
+	defer st.Close()
 
 	// generate a few entries
 	obj1, err := st.GetOrNewStateObject(toAddr([]byte{0x01}))
 	require.NoError(t, err)
-	st.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
+	err = st.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
+	require.NoError(t, err)
 	obj2, err := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	require.NoError(t, err)
-	obj2.SetCode(accounts.InternCodeHash(crypto.HashData([]byte{3, 3, 3, 3, 3, 3, 3})), []byte{3, 3, 3, 3, 3, 3, 3}, true)
+	_, err = obj2.SetCode(accounts.Code{Hash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3})), Bytes: []byte{3, 3, 3, 3, 3, 3, 3}}, true, tracing.CodeChangeUnspecified)
+	require.NoError(t, err)
 	obj2.setIncarnation(1)
 	obj3, err := st.GetOrNewStateObject(toAddr([]byte{0x02}))
 	require.NoError(t, err)

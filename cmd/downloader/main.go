@@ -17,39 +17,34 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
-	"time"
 
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/go-viper/mapstructure/v2"
-	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/keepalive"
-	"google.golang.org/grpc/reflection"
 
 	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -59,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/fromdb"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -66,14 +62,12 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/nat"
 
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
-
-	_ "github.com/erigontech/erigon/db/snaptype2"     //hack
-	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
+	_ "github.com/erigontech/erigon/db/snaptype2" // hack
 )
 
 func main() {
@@ -110,15 +104,18 @@ var (
 	targetFile           string
 	disableIPV6          bool
 	disableIPV4          bool
+	disableTCP           bool
 	seedbox              bool
 	dbWritemap           bool
 	all                  bool
+	diffMode             bool
 )
 
 var cobraFlagValues struct {
 	webseeds string
-	//preverifiedSource string
-	datadir string
+	// preverifiedSource string
+	datadir      string
+	chainTomlURL string
 }
 
 func init() {
@@ -128,6 +125,7 @@ func init() {
 	withChainFlag(rootCmd)
 
 	rootCmd.Flags().StringVar(&cobraFlagValues.webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
+	rootCmd.Flags().StringVar(&cobraFlagValues.chainTomlURL, utils.SnapChainTomlURLFlag.Name, utils.SnapChainTomlURLFlag.Value, utils.SnapChainTomlURLFlag.Usage)
 	rootCmd.Flags().StringVar(&natSetting, "nat", utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&downloadRateStr, "torrent.download.rate", utils.TorrentDownloadRateFlag.Value, utils.TorrentDownloadRateFlag.Usage)
@@ -142,6 +140,7 @@ func init() {
 	rootCmd.Flags().StringVar(&staticPeersStr, utils.TorrentStaticPeersFlag.Name, utils.TorrentStaticPeersFlag.Value, utils.TorrentStaticPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV4, "downloader.disable.ipv4", utils.DisableIPV4.Value, utils.DisableIPV4.Usage)
+	rootCmd.Flags().BoolVar(&disableTCP, utils.DisableTCP.Name, utils.DisableTCP.Value, utils.DisableTCP.Usage)
 	rootCmd.Flags().BoolVar(&seedbox, "seedbox", false, "Turns downloader into independent (doesn't need Erigon) software which discover/download/seed new files - useful for Erigon network, and can work on very cheap hardware. It will: 1) download .torrent from webseed 2) download new files after upgrade 3) we planing add discovery of new files soon")
 	rootCmd.Flags().BoolVar(&dbWritemap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&verify, "verify", false, utils.DownloaderVerifyFlag.Usage)
@@ -178,6 +177,7 @@ func init() {
 	if err := printTorrentHashes.MarkFlagFilename("targetfile"); err != nil {
 		panic(err)
 	}
+	printTorrentHashes.Flags().BoolVar(&diffMode, "diff", false, "show diff against the currently released .toml from erigon-snapshot (GitHub)")
 	rootCmd.AddCommand(printTorrentHashes)
 
 	withChainFlag(&verifyWebseedsCmd)
@@ -186,7 +186,7 @@ func init() {
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&cobraFlagValues.datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	flags.DirVar(cmd.Flags(), &cobraFlagValues.datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	panicif.Err(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	panicif.Err(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 }
@@ -227,7 +227,7 @@ var rootCmd = &cobra.Command{
 func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	ctx := cmd.Context()
 	dirs := datadir.New(cobraFlagValues.datadir)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
+	if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {
 		return err
 	}
 	if err := checkChainName(ctx, dirs, chain); err != nil {
@@ -248,7 +248,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	}
 
 	logger.Info(
-		"[snapshots] cli flags",
+		"[Downloader] cli flags",
 		"chain", chain,
 		"addr", downloaderApiAddr,
 		"datadir", dirs.DataDir,
@@ -276,7 +276,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		webseedsList = append(webseedsList, known...)
 	}
 	if seedbox {
-		err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain)
+		err = downloadercfg.LoadSnapshotsHashes(ctx, dirs, chain, strings.TrimSpace(cobraFlagValues.chainTomlURL))
 		if err != nil {
 			return err
 		}
@@ -294,6 +294,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		downloadercfg.NewCfgOpts{
 			DownloadRateLimit: downloadRate.TorrentRateLimit(),
 			UploadRateLimit:   uploadRate.TorrentRateLimit(),
+			DisableTCP:        g.Some(disableTCP),
 		},
 	)
 	if err != nil {
@@ -313,14 +314,12 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	manualDataVerification := verify || verifyFailfast || len(verifyFiles) > 0
 	cfg.ManualDataVerification = manualDataVerification
 
-	cfg.LogPrefix = "[snapshots] "
-
 	d, err := downloader.New(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
+	logger.Info("[Downloader] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
 	d.HandleTorrentClientStatus(nil)
 
@@ -340,7 +339,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		verifyFiles = strings.Split(_verifyFiles, ",")
 	}
 	if manualDataVerification { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
+		if err := d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
 			return err
 		}
 		if verifyFailfast {
@@ -359,23 +358,22 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	// I'm kinda curious... but it was false before.
-	d.InitBackgroundLogger(true)
+	d.InitBackgroundLogger()
 	if seedbox {
-		var downloadItems []*downloaderproto.DownloadItem
 		snapCfg := snapcfg.KnownCfgOrDevnet(chain)
-		for _, it := range snapCfg.Preverified.Items {
-			downloadItems = append(downloadItems, &downloaderproto.DownloadItem{
+		downloadItems := make([]*downloaderproto.DownloadItem, len(snapCfg.Preverified.Items))
+		for i, it := range snapCfg.Preverified.Items {
+			downloadItems[i] = &downloaderproto.DownloadItem{
 				Path:        it.Name,
 				TorrentHash: downloadergrpc.String2Proto(it.Hash),
-			})
+			}
 		}
 		if _, err := bittorrentServer.Download(ctx, &downloaderproto.DownloadRequest{Items: downloadItems}); err != nil {
 			return err
 		}
 	}
 
-	grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil /* transportCredentials */, logger)
+	grpcServer, err := StartGrpc(ctx, bittorrentServer, downloaderApiAddr, nil /* transportCredentials */, logger)
 	if err != nil {
 		return err
 	}
@@ -407,10 +405,7 @@ var printTorrentHashes = &cobra.Command{
 	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "downloader")
-		if err := doPrintTorrentHashes(cmd.Context(), logger); err != nil {
-			log.Error(err.Error())
-		}
-		return nil
+		return doPrintTorrentHashes(cmd.Context(), logger)
 	},
 }
 
@@ -418,8 +413,8 @@ var manifestCmd = &cobra.Command{
 	Use:     "manifest",
 	Example: "go run ./cmd/downloader manifest --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		logger := debug.SetupCobra(cmd, "downloader")
-		if err := manifest(cmd.Context(), logger); err != nil {
+		debug.SetupCobra(cmd, "downloader")
+		if err := manifest(); err != nil {
 			log.Error(err.Error())
 		}
 		return nil
@@ -482,6 +477,7 @@ var torrentCat = &cobra.Command{
 		return err
 	},
 }
+
 var torrentClean = &cobra.Command{
 	Use:     "torrent_clean",
 	Short:   "RemoveFile all .torrent files from datadir directory",
@@ -542,7 +538,7 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 	if len(webseedsList) == 0 { // fallback to default if exact list not passed
 		if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
 			for _, s := range known {
-				//TODO: enable validation of this buckets also. skipping to make CI useful.
+				// TODO: enable validation of this buckets also. skipping to make CI useful.
 				if strings.Contains(s, "erigon2-v2") {
 					continue
 				}
@@ -592,7 +588,7 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 	return wseed.VerifyManifestedBuckets(ctx, verifyFailfast)
 }
 
-func manifest(ctx context.Context, logger log.Logger) error {
+func manifest() error {
 	dirs := datadir.New(cobraFlagValues.datadir)
 
 	files, err := downloader.SeedableFiles(dirs, chain, true)
@@ -606,7 +602,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 		//".kv", ".kvi", ".bt", ".kvei", // e3 domain
 		//".v", ".vi", //e3 hist
 		//".ef", ".efi", //e3 idx
-		".txt", //salt-state.txt, salt-blocks.txt, manifest.txt
+		".txt", // salt-state.txt, salt-blocks.txt, manifest.txt
 	}
 	l, _ := dir.ListFiles(dirs.Snap, extList...)
 	for _, fPath := range l {
@@ -638,7 +634,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 
 func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(cobraFlagValues.datadir)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
+	if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {
 		return err
 	}
 
@@ -671,6 +667,10 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	for _, t := range torrents {
 		res[t.DisplayName] = t.InfoHash.String()
 	}
+	if diffMode {
+		return doDiffTorrentHashes(ctx, res)
+	}
+
 	serialized, err := toml.Marshal(res)
 	if err != nil {
 		return err
@@ -693,63 +693,74 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 		logger.Info("amount of lines in target file is equal or greater than amount of lines in snapshot dir", "old", len(oldLines), "new", len(res))
 		return nil
 	}
-	if err := os.WriteFile(targetFile, serialized, 0644); err != nil { // nolint
+	if err := os.WriteFile(targetFile, serialized, 0o644); err != nil { // nolint
 		return err
 	}
 	return nil
 }
 
-func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
-	lis, err := net.Listen("tcp", addr)
+type hashChange struct{ name, released, local string }
+
+func doDiffTorrentHashes(ctx context.Context, local map[string]string) error {
+	branch := version.DefaultSnapshotGitBranch
+	url := snapcfg.ChainTomlGitHubURL(branch, chain)
+	body, err := snapcfg.FetchChainToml(ctx, snapcfg.Github, branch, chain)
 	if err != nil {
-		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
+		return fmt.Errorf("diff: %w", err)
 	}
 
-	var (
-		streamInterceptors = make([]grpc.StreamServerInterceptor, 0, 1)
-		unaryInterceptors  = make([]grpc.UnaryServerInterceptor, 0, 1)
-	)
-	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())
-
-	//if metrics.Enabled {
-	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-	//	unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	//}
-
-	opts := []grpc.ServerOption{
-		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779
-		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
-			MinTime:             10 * time.Second,
-			PermitWithoutStream: true,
-		}),
-		grpc.ChainStreamInterceptor(streamInterceptors...),
-		grpc.ChainUnaryInterceptor(unaryInterceptors...),
+	released := map[string]string{}
+	if err := toml.Unmarshal(body, &released); err != nil {
+		return fmt.Errorf("diff: unmarshal released toml: %w", err)
 	}
-	if creds == nil {
-		// no specific opts
-	} else {
-		opts = append(opts, grpc.Creds(*creds))
+
+	var added, removed []string
+	var changed []hashChange
+	for name, localHash := range local {
+		if relHash, ok := released[name]; !ok {
+			added = append(added, name)
+		} else if relHash != localHash {
+			changed = append(changed, hashChange{name, relHash, localHash})
+		}
 	}
-	grpcServer := grpc.NewServer(opts...)
-	reflection.Register(grpcServer) // Register reflection service on gRPC server.
+	for name := range released {
+		if _, ok := local[name]; !ok {
+			removed = append(removed, name)
+		}
+	}
+
+	slices.Sort(added)
+	slices.Sort(removed)
+	slices.SortFunc(changed, func(a, b hashChange) int { return cmp.Compare(a.name, b.name) })
+
+	fmt.Printf("released branch: %s  url: %s\n", branch, url)
+	fmt.Printf("released: %d entries, local: %d entries, changed: %d, added: %d, removed: %d\n", len(released), len(local), len(changed), len(added), len(removed))
+
+	if len(added) == 0 && len(removed) == 0 && len(changed) == 0 {
+		fmt.Println("no diff")
+		return nil
+	}
+	for _, c := range changed {
+		fmt.Printf("CHANGED %s released=%s local=%s\n", c.name, c.released, c.local)
+	}
+	for _, name := range added {
+		fmt.Printf("ADDED   %s %s\n", name, local[name])
+	}
+	for _, name := range removed {
+		fmt.Printf("REMOVED %s %s\n", name, released[name])
+	}
+	return nil
+}
+
+func StartGrpc(ctx context.Context, snServer *downloader.GrpcServer, addr string, creds credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
+	grpcServer := grpcutil.NewServerWithOpts(creds)
 	if snServer != nil {
 		downloaderproto.RegisterDownloaderServer(grpcServer, snServer)
 	}
 
-	//if metrics.Enabled {
-	//	grpc_prometheus.Register(grpcServer)
-	//}
-
-	healthServer := health.NewServer()
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
-
-	go func() {
-		defer healthServer.Shutdown()
-		if err := grpcServer.Serve(lis); err != nil {
-			logger.Error("gRPC server stop", "err", err)
-		}
-	}()
+	if err := grpcutil.StartServer(ctx, grpcServer, addr, true, logger, "gRPC server stop"); err != nil {
+		return nil, err
+	}
 	logger.Info("Started gRPC server", "on", addr)
 	return grpcServer, nil
 }

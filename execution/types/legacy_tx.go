@@ -20,9 +20,9 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -116,21 +116,8 @@ type LegacyTx struct {
 
 func (tx *LegacyTx) GetTipCap() *uint256.Int { return &tx.GasPrice }
 func (tx *LegacyTx) GetFeeCap() *uint256.Int { return &tx.GasPrice }
-func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
-	if baseFee == nil {
-		return tx.GetTipCap()
-	}
-	gasFeeCap := tx.GetFeeCap()
-	// return 0 because effectiveFee cant be < 0
-	if gasFeeCap.Lt(baseFee) {
-		return uint256.NewInt(0)
-	}
-	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
-	if tx.GetTipCap().Lt(effectiveFee) {
-		return tx.GetTipCap()
-	} else {
-		return effectiveFee
-	}
+func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int {
+	return CalcEffectiveGasTip(baseFee, tx.GetTipCap, tx.GetFeeCap)
 }
 
 func (tx *LegacyTx) GetAccessList() AccessList {
@@ -197,7 +184,7 @@ func (tx *LegacyTx) copy() *LegacyTx {
 			TransactionMisc: TransactionMisc{},
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
-			Data:            common.Copy(tx.Data),
+			Data:            bytes.Clone(tx.Data),
 			GasLimit:        tx.GasLimit,
 			Value:           tx.Value,
 			V:               tx.V,
@@ -271,7 +258,6 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 		return err
 	}
 	return nil
-
 }
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
@@ -367,14 +353,9 @@ func (tx *LegacyTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := rlpHash([]any{
-		tx.Nonce,
-		&tx.GasPrice,
-		tx.GasLimit,
-		tx.To,
-		&tx.Value,
-		tx.Data,
-		tx.V, tx.R, tx.S,
+	payloadSize := tx.payloadSize()
+	hash := rlpPayloadHash(func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize)
 	})
 	tx.hash.Store(&hash)
 	return hash
@@ -387,14 +368,14 @@ type legacyTxSigHash struct {
 	To       *common.Address `rlp:"nil"`
 	Value    *uint256.Int
 	Data     []byte
-	ChainID  *big.Int
+	ChainID  *uint256.Int
 	V        uint
 	R        uint
 }
 
-func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
+func (tx *LegacyTx) SigningHash(chainID *uint256.Int) common.Hash {
 	if chainID != nil && chainID.Sign() != 0 {
-		return rlpHash(&legacyTxSigHash{
+		return RlpHash(&legacyTxSigHash{
 			Nonce:    tx.Nonce,
 			GasPrice: &tx.GasPrice,
 			Gas:      tx.GasLimit,
@@ -406,7 +387,7 @@ func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
 			R:        uint(0),
 		})
 	}
-	return rlpHash([]any{
+	return RlpHash([]any{
 		tx.Nonce,
 		&tx.GasPrice,
 		tx.GasLimit,
@@ -423,7 +404,11 @@ func (tx *LegacyTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.I
 }
 
 func (tx *LegacyTx) GetChainID() *uint256.Int {
-	return DeriveChainId(&tx.V)
+	chainID, err := DeriveChainId(&tx.V)
+	if err != nil {
+		return new(uint256.Int)
+	}
+	return chainID
 }
 
 func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {
@@ -433,6 +418,7 @@ func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {
 	}
 	return s, true
 }
+
 func (tx *LegacyTx) Sender(signer Signer) (accounts.Address, error) {
 	if from := tx.from; !from.IsNil() && !from.IsZero() {
 		// Sender address can never be zero in a transaction with a valid signer

@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/binary"
+	"math"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
@@ -29,10 +30,10 @@ func TestValidator(t *testing.T) {
 	// Initializing some dummy data
 	var pubKey [48]byte
 	var withdrawalCred common.Hash
-	for i := 0; i < 48; i++ {
+	for i := range 48 {
 		pubKey[i] = byte(i)
 	}
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		withdrawalCred[i] = byte(i + 50)
 	}
 	effectiveBalance := uint64(123456789)
@@ -72,7 +73,7 @@ func TestValidatorSetTest(t *testing.T) {
 	num := 1000
 	vset := NewValidatorSet(1000000)
 	vset2 := NewValidatorSet(1000000)
-	for i := 0; i < num; i++ {
+	for i := range num {
 		var pk [48]byte
 		var wk [32]byte
 		binary.BigEndian.PutUint32(pk[:], uint32(i))
@@ -80,7 +81,8 @@ func TestValidatorSetTest(t *testing.T) {
 		vset.Append(NewValidatorFromParameters(
 			pk, wk, uint64(1), true, uint64(1), uint64(1), uint64(1), uint64(1),
 		))
-		vset.HashSSZ()
+		_, err := vset.HashSSZ()
+		require.NoError(t, err)
 	}
 	firstHash, err := vset.HashSSZ()
 	require.NoError(t, err)
@@ -102,4 +104,17 @@ func TestMarshalUnmarshalJson(t *testing.T) {
 	err = decoded.UnmarshalJSON(encoded)
 	require.NoError(t, err)
 	assert.Equal(t, validator, decoded)
+}
+
+func TestValidatorSetRejectsNegativeIndex(t *testing.T) {
+	set := NewValidatorSet(4)
+	for range 3 {
+		set.Append(NewValidator())
+	}
+	wrapping := math.MinInt64 / validatorSize * 2
+	require.Positive(t, wrapping*validatorSize)
+	for _, idx := range []int{-1, wrapping} {
+		require.PanicsWithValue(t, "ValidatorSet -- Get: out of bounds", func() { set.Get(idx) })
+		require.PanicsWithValue(t, "ValidatorSet -- Set: out of bounds", func() { set.Set(idx, NewValidator()) })
+	}
 }

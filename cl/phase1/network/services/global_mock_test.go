@@ -17,9 +17,12 @@
 package services
 
 import (
+	"testing"
+
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -70,4 +73,33 @@ func (m *mockFuncs) VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar) 
 	ret := m.ctrl.Call(m, "VerifyDataColumnSidecar", sidecar)
 	ret0, _ := ret[0].(bool)
 	return ret0
+}
+
+// [New in Gloas:EIP7732] GLOAS verification functions with kzg_commitments parameter
+func (m *mockFuncs) VerifyDataColumnSidecarWithCommitments(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VerifyDataColumnSidecarWithCommitments", sidecar, kzgCommitments)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+func (m *mockFuncs) VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VerifyDataColumnSidecarKZGProofsWithCommitments", sidecar, kzgCommitments)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// saveSignatureGlobals restores the package-level signature-verification func
+// vars when the test finishes, so a test's mock (bound to its own gomock
+// controller) can't leak into a later shuffled test and panic there.
+func saveSignatureGlobals(t testing.TB) {
+	origComputeSigningRoot := computeSigningRoot
+	origBlsVerify := blsVerify
+	origBlsVerifyMultipleSignatures := blsVerifyMultipleSignatures
+	t.Cleanup(func() {
+		computeSigningRoot = origComputeSigningRoot
+		blsVerify = origBlsVerify
+		blsVerifyMultipleSignatures = origBlsVerifyMultipleSignatures
+	})
 }

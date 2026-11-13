@@ -16,25 +16,20 @@
 
 package utils
 
-import "github.com/erigontech/erigon/common"
+import (
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+)
 
 // Check if leaf at index verifies against the Merkle root and branch
 func IsValidMerkleBranch(leaf common.Hash, branch []common.Hash, depth uint64, index uint64, root [32]byte) bool {
 	value := leaf
-	for i := uint64(0); i < depth; i++ {
+	for i := range depth {
 		if (index / PowerOf2(i) % 2) == 1 {
-			value = Sha256(append(branch[i][:], value[:]...))
+			value = crypto.Sha256(branch[i][:], value[:])
 		} else {
-			value = Sha256(append(value[:], branch[i][:]...))
+			value = crypto.Sha256(value[:], branch[i][:])
 		}
 	}
 	return value == root
-}
-
-func PreparateRootsForHashing(roots []common.Hash) [][32]byte {
-	ret := make([][32]byte, len(roots))
-	for i := range roots {
-		copy(ret[i][:], roots[i][:])
-	}
-	return ret
 }

@@ -27,6 +27,8 @@ var (
 	updateForkChoiceDuration      = metrics.NewSummary(`update_fork_choice{type="execution_duration"}`)
 	updateForkChoiceDepth         = metrics.NewSummary(`update_fork_choice{type="fork_depth"}`)
 	updateForkChoicePruneDuration = metrics.NewSummary(`update_fork_choice{type="prune_duration"}`)
+	validateChainDuration         = metrics.NewSummary(`validate_chain{type="execution_duration"}`)
+	insertBlocksDuration          = metrics.NewSummary(`insert_blocks{type="execution_duration"}`)
 )
 
 func UpdateForkChoiceArrivalDelay(blockTime uint64) {

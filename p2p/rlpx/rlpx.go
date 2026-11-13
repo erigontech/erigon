@@ -34,6 +34,7 @@ import (
 	"io"
 	mrand "math/rand"
 	"net"
+	"slices"
 	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -156,7 +157,11 @@ func (c *Conn) Read() (code uint64, data []byte, wireSize int, err error) {
 		if actualSize > maxUint24 {
 			return code, nil, 0, errPlainMessageTooLarge
 		}
-		c.snappyReadBuffer = growslice(c.snappyReadBuffer, actualSize)
+		// A 3-byte copy tag emits at most 64 bytes, so a valid block can't decode to more.
+		if actualSize > len(data)*64/3 {
+			return code, nil, 0, snappy.ErrCorrupt
+		}
+		c.snappyReadBuffer = slices.Grow(c.snappyReadBuffer[:0], actualSize)[:actualSize]
 		data, err = snappy.Decode(c.snappyReadBuffer, data)
 	}
 	return code, data, wireSize, err
@@ -186,17 +191,14 @@ func (h *sessionState) readFrame(conn io.Reader) ([]byte, error) {
 		rsize += 16 - padding
 	}
 
-	// Read the frame content.
-	frame, err := h.rbuf.read(conn, int(rsize))
+	// Read the frame content and MAC together so frame uses the current buffer.
+	frame, err := h.rbuf.read(conn, int(rsize)+16)
 	if err != nil {
 		return nil, err
 	}
+	frame, frameMAC := frame[:rsize], frame[rsize:]
 
 	// Validate frame MAC.
-	frameMAC, err := h.rbuf.read(conn, 16)
-	if err != nil {
-		return nil, err
-	}
 	wantFrameMAC := h.ingressMAC.computeFrame(frame)
 	if !hmac.Equal(wantFrameMAC, frameMAC) {
 		return nil, errors.New("bad frame MAC")
@@ -222,7 +224,8 @@ func (c *Conn) Write(code uint64, data []byte) (uint32, error) {
 		// Ensure the buffer has sufficient size.
 		// Package snappy will allocate its own buffer if the provided
 		// one is smaller than MaxEncodedLen.
-		c.snappyWriteBuffer = growslice(c.snappyWriteBuffer, snappy.MaxEncodedLen(len(data)))
+		snappyBound := snappy.MaxEncodedLen(len(data))
+		c.snappyWriteBuffer = slices.Grow(c.snappyWriteBuffer[:0], snappyBound)[:snappyBound]
 		data = snappy.Encode(c.snappyWriteBuffer, data)
 	}
 
@@ -245,12 +248,12 @@ func (h *sessionState) writeFrame(conn io.Writer, code uint64, data []byte) erro
 	h.enc.XORKeyStream(header, header)
 
 	// Write header MAC.
-	h.wbuf.Write(h.egressMAC.computeHeader(header))
+	h.wbuf.Write(h.egressMAC.computeHeader(header)) //nolint:errcheck
 
 	// Encode and encrypt the frame data.
 	offset := len(h.wbuf.data)
 	h.wbuf.data = rlp.AppendUint64(h.wbuf.data, code)
-	h.wbuf.Write(data)
+	h.wbuf.Write(data) //nolint:errcheck
 	if padding := fsize % 16; padding > 0 {
 		h.wbuf.appendZero(16 - padding)
 	}
@@ -258,7 +261,7 @@ func (h *sessionState) writeFrame(conn io.Writer, code uint64, data []byte) erro
 	h.enc.XORKeyStream(framedata, framedata)
 
 	// Write frame MAC.
-	h.wbuf.Write(h.egressMAC.computeFrame(framedata))
+	h.wbuf.Write(h.egressMAC.computeFrame(framedata)) //nolint:errcheck
 
 	_, err := conn.Write(h.wbuf.data)
 	return err
@@ -358,6 +361,8 @@ const (
 	shaLen = 32                     // hash length (for nonce etc)
 
 	eciesOverhead = 65 /* pubkey */ + 16 /* IV */ + 32 /* MAC */
+
+	maxHandshakeMsgSize = 2048
 )
 
 var (
@@ -368,6 +373,8 @@ var (
 	// errPlainMessageTooLarge is returned if a decompressed message length exceeds
 	// the allowed 24 bits (i.e. length >= 16MB).
 	errPlainMessageTooLarge = errors.New("message length >= 16MB")
+
+	errHandshakeMsgTooLarge = errors.New("handshake message too large")
 )
 
 // Secrets represents the connection secrets which are negotiated during the handshake.
@@ -490,11 +497,11 @@ func (h *handshakeState) secrets(auth, authResp []byte) (Secrets, error) {
 
 	// setup sha3 instances for the MACs
 	mac1 := keccak.NewFastKeccak()
-	mac1.Write(xor(s.MAC, h.respNonce))
-	mac1.Write(auth)
+	mac1.Write(xor(s.MAC, h.respNonce)) //nolint:errcheck
+	mac1.Write(auth)                    //nolint:errcheck
 	mac2 := keccak.NewFastKeccak()
-	mac2.Write(xor(s.MAC, h.initNonce))
-	mac2.Write(authResp)
+	mac2.Write(xor(s.MAC, h.initNonce)) //nolint:errcheck
+	mac2.Write(authResp)                //nolint:errcheck
 	if h.initiator {
 		s.EgressMAC, s.IngressMAC = mac1, mac2
 	} else {
@@ -607,6 +614,9 @@ func (h *handshakeState) readMsg(msg any, prv *ecdsa.PrivateKey, r io.Reader) ([
 		return nil, err
 	}
 	size := binary.BigEndian.Uint16(prefix)
+	if size > maxHandshakeMsgSize {
+		return nil, errHandshakeMsgTooLarge
+	}
 
 	// Read the handshake packet.
 	packet, err := h.rbuf.read(r, int(size))
@@ -640,7 +650,7 @@ func (h *handshakeState) sealEIP8(msg any) ([]byte, error) {
 	binary.BigEndian.PutUint16(prefix, uint16(len(h.wbuf.data)+eciesOverhead))
 
 	enc, err := ecies.Encrypt(rand.Reader, h.remote, h.wbuf.data, nil, prefix)
-	return append(prefix, enc...), err
+	return append(prefix, enc...), err //nolint:makezero
 }
 
 // importPublicKey unmarshals 64 or 65 bytes long public keys.
@@ -673,7 +683,7 @@ func exportPubkey(pub *ecies.PublicKey) []byte {
 
 func xor(one, other []byte) (xor []byte) {
 	xor = make([]byte, len(one))
-	for i := 0; i < len(one); i++ {
+	for i := range one {
 		xor[i] = one[i] ^ other[i]
 	}
 	return xor

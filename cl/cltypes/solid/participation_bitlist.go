@@ -19,12 +19,17 @@ package solid
 import (
 	"encoding/json"
 	"math/bits"
+	"runtime"
+	"slices"
 	"strconv"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // ParticipationBitList is like a dynamic binary string. It's like a flipbook of 1s and 0s!
@@ -76,6 +81,11 @@ func (*ParticipationBitList) Static() bool {
 
 // CopyTo is like a Power Rangers team up episode - we get the bits from another list!
 func (u *ParticipationBitList) CopyTo(target IterableSSZ[byte]) {
+	if participation, ok := target.(*ParticipationBitList); ok {
+		participation.u = append(participation.u[:0], u.u[:u.l]...)
+		participation.l = u.l
+		return
+	}
 	target.Clear()
 	for i := 0; i < u.l; i++ {
 		target.Append(u.u[i])
@@ -83,10 +93,7 @@ func (u *ParticipationBitList) CopyTo(target IterableSSZ[byte]) {
 }
 
 func (u *ParticipationBitList) Copy() *ParticipationBitList {
-	n := NewParticipationBitList(u.l, u.c)
-	n.u = make([]byte, len(u.u), cap(u.u))
-	copy(n.u, u.u)
-	return n
+	return &ParticipationBitList{u: slices.Clone(u.u), l: u.l, c: u.c}
 }
 
 // Range allows us to do something to each bit in the list, just like a Power Rangers roll call.
@@ -99,7 +106,7 @@ func (u *ParticipationBitList) Range(fn func(index int, value byte, length int) 
 // Pop removes the first bit from the list, like when the Red Ranger takes the first hit.
 func (u *ParticipationBitList) Pop() (x byte) {
 	x, u.u = u.u[0], u.u[1:]
-	u.l = u.l - 1
+	u.l--
 	return x
 }
 
@@ -109,7 +116,7 @@ func (u *ParticipationBitList) Append(v byte) {
 		u.u = append(u.u, 0)
 	}
 	u.u[u.l] = v
-	u.l = u.l + 1
+	u.l++
 }
 
 // Get lets us peek at a bit in the list, like when the team uses their sensors to spot the monster.
@@ -144,30 +151,52 @@ func (u *ParticipationBitList) HashSSZ() ([32]byte, error) {
 		}
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(u.l))
-	return utils.Sha256(baseRoot[:], lengthRoot[:]), nil
+	return crypto.Sha256(baseRoot[:], lengthRoot[:]), nil
 }
 
-func (arr *ParticipationBitList) getBaseHash(xs []byte, depth uint8) error {
-	elements := arr.u
-	offset := 32*(arr.l/32) + 32
-	if len(arr.u) <= offset {
-		elements = append(elements, make([]byte, offset-len(arr.u)+1)...)
+func (u *ParticipationBitList) HashSSZProgressive() ([32]byte, error) {
+	return merkle_tree.ProgressiveBasicListRoot(u.Bytes(), uint64(u.l))
+}
+
+// participationSubtreeChunks is the number of chunks one goroutine hashes. Larger subtrees lower the
+// parallelism; down to 1024 chunks, smaller ones only add goroutines.
+const participationSubtreeChunks = 4096
+
+func (u *ParticipationBitList) getBaseHash(out []byte, depth uint8) error {
+	u.makeBuf((u.l + length.Hash - 1) / length.Hash * length.Hash)
+	subtreeDepth := min(depth, merkle_tree.GetDepth(participationSubtreeChunks))
+	subtreeSize := (1 << subtreeDepth) * length.Hash
+	subtrees := (len(u.buf) + subtreeSize - 1) / subtreeSize
+	roots := make([]byte, subtrees*length.Hash)
+	var g errgroup.Group
+	g.SetLimit(runtime.GOMAXPROCS(0))
+	for i := range subtrees {
+		g.Go(func() error {
+			start := i * subtreeSize
+			// Full regions hold a power-of-two chunk count and never pad, so only the last region can append past its end.
+			region := u.buf[start:min(start+subtreeSize, len(u.buf))]
+			clear(region[copy(region, u.u[start:u.l]):])
+			return merkleizeLayers(region, roots[i*length.Hash:], 0, subtreeDepth)
+		})
 	}
-	elements = elements[:offset]
-	for i := uint8(0); i < depth; i++ {
-		// Sequential
-		layerLen := len(elements)
-		if layerLen%64 == 32 {
-			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	return merkleizeLayers(roots, out, subtreeDepth, depth)
+}
+
+// merkleizeLayers overwrites layer while hashing it, and its zero-hash padding may append past len(layer).
+func merkleizeLayers(layer, out []byte, fromDepth, toDepth uint8) error {
+	for depth := fromDepth; depth < toDepth; depth++ {
+		if len(layer)%64 == length.Hash {
+			layer = append(layer, merkle_tree.ZeroHashes[depth][:]...)
 		}
-		outputLen := len(elements) / 2
-		arr.makeBuf(outputLen)
-		if err := merkle_tree.HashByteSlice(arr.buf, elements); err != nil {
+		if err := merkle_tree.HashByteSlice(layer, layer); err != nil {
 			return err
 		}
-		elements = arr.buf
+		layer = layer[:len(layer)/2]
 	}
-	copy(xs, elements[:32])
+	copy(out, layer[:length.Hash])
 	return nil
 }
 

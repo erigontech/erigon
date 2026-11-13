@@ -32,6 +32,21 @@ import (
 type accessList struct {
 	addresses map[accounts.Address]int
 	slots     []map[accounts.StorageKey]struct{}
+
+	// Memo of the last resolved (address -> slot set) and the last slot known
+	// warm within it: repeated AddSlot on the same addr skips the addresses
+	// lookup, and on the same (addr, slot) skips both map lookups.
+	// lastSlots == nil means no memo — lastAddr alone can't say, since its
+	// zero value NilAddress is a legal argument.
+	lastAddr     accounts.Address
+	lastSlots    map[accounts.StorageKey]struct{}
+	lastWarmSlot accounts.StorageKey
+
+	// A cleared, truncated or reverted map keeps its buckets for the next call
+	// to reuse, so what a pooled list pins is the largest each has been, not
+	// what it holds now. Every shrink records it: see markPeak.
+	peak     []int
+	addrPeak int
 }
 
 // newAccessList creates a new accessList.
@@ -45,11 +60,48 @@ func newAccessList() *accessList {
 // The slots backing array is retained; cleared inner maps are reused by
 // subsequent AddSlot calls without new allocations.
 func (al *accessList) Reset() {
-	for _, s := range al.slots {
+	for i, s := range al.slots {
+		al.markPeak(i, len(s))
 		clear(s)
 	}
+	al.markAddrPeak()
 	al.slots = al.slots[:0]
 	clear(al.addresses)
+	al.dropMemo()
+}
+
+// entries reports the keys this list pins, not the keys it holds.
+func (al *accessList) entries() int {
+	for i, s := range al.slots {
+		al.markPeak(i, len(s))
+	}
+	al.markAddrPeak()
+	total := al.addrPeak
+	for _, n := range al.peak {
+		total += n
+	}
+	return total
+}
+
+func (al *accessList) markAddrPeak() {
+	if n := len(al.addresses); n > al.addrPeak {
+		al.addrPeak = n
+	}
+}
+
+func (al *accessList) markPeak(idx, n int) {
+	if idx >= len(al.peak) {
+		al.peak = append(al.peak, make([]int, idx+1-len(al.peak))...)
+	}
+	if n > al.peak[idx] {
+		al.peak[idx] = n
+	}
+}
+
+func (al *accessList) dropMemo() {
+	al.lastAddr = accounts.NilAddress
+	al.lastSlots = nil
+	al.lastWarmSlot = accounts.StorageKey{}
 }
 
 // ContainsAddress returns true if the address is in the access list.
@@ -61,6 +113,13 @@ func (al *accessList) ContainsAddress(address accounts.Address) bool {
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
 func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKey) (addressPresent bool, slotPresent bool) {
+	if al.lastSlots != nil && al.lastAddr == address {
+		if slot == al.lastWarmSlot {
+			return true, true
+		}
+		_, slotPresent = al.lastSlots[slot]
+		return true, slotPresent
+	}
 	idx, ok := al.addresses[address]
 	if !ok {
 		return false, false
@@ -100,6 +159,24 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
 func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
+	if al.lastSlots != nil && al.lastAddr == address {
+		if slot == al.lastWarmSlot {
+			return false, false
+		}
+		// Probe-then-insert: a plain read on the warm case beats mapassign's
+		// write bookkeeping, and warm re-reads dominate cold inserts.
+		if _, ok := al.lastSlots[slot]; ok {
+			al.lastWarmSlot = slot
+			return false, false
+		}
+		al.lastSlots[slot] = struct{}{}
+		al.lastWarmSlot = slot
+		return false, true
+	}
+	return al.addSlotSlow(address, slot)
+}
+
+func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
 	idx, addrPresent := al.addresses[address]
 	if !addrPresent || idx == -1 {
 		// Address not present, or addr present but no slots yet.
@@ -115,14 +192,16 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 		}
 		slotmap[slot] = struct{}{}
 		al.slots = append(al.slots, slotmap)
+		al.lastAddr, al.lastSlots, al.lastWarmSlot = address, slotmap, slot
 		return !addrPresent, true
 	}
 	slotmap := al.slots[idx]
-	if _, ok := slotmap[slot]; !ok {
-		slotmap[slot] = struct{}{}
-		return false, true
+	al.lastAddr, al.lastSlots, al.lastWarmSlot = address, slotmap, slot
+	if _, ok := slotmap[slot]; ok {
+		return false, false
 	}
-	return false, false
+	slotmap[slot] = struct{}{}
+	return false, true
 }
 
 // DeleteSlot removes an (address, slot)-tuple from the access list.
@@ -138,7 +217,9 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 		panic("reverting slot change, address has no slots")
 	}
 	slotmap := al.slots[idx]
+	al.markPeak(idx, len(slotmap))
 	delete(slotmap, slot)
+	al.dropMemo()
 	// Since additions and rollbacks are always in LIFO order, when a slot map
 	// becomes empty it must be the last one appended — truncate the slice.
 	if len(slotmap) == 0 {
@@ -162,5 +243,6 @@ func (al *accessList) DeleteAddress(address accounts.Address) {
 	if idx != -1 {
 		panic("reverting address change, address still has slots")
 	}
+	al.markAddrPeak()
 	delete(al.addresses, address)
 }

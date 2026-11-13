@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -40,10 +40,6 @@ type SnapNameSchema interface {
 	// metadata
 	AccessorIdxCount() uint16
 	DataDirectory() string
-
-	// hack, ideally doesn't belong here but
-	// is self contained info in file
-	DataFileCompression() seg.FileCompression
 }
 
 type _fileMetadata struct {
@@ -129,8 +125,8 @@ func (s *E2SnapSchema) IndexTags() []string {
 	return s.indexFileTags
 }
 
-func (a *E2SnapSchema) AccessorList() statecfg.Accessors {
-	return a.accessors
+func (s *E2SnapSchema) AccessorList() statecfg.Accessors {
+	return s.accessors
 }
 
 // fileName assumes no folderName in it
@@ -244,18 +240,13 @@ func (s *E2SnapSchema) DataDirectory() string {
 	return s.dataFileMetadata.folder
 }
 
-func (s *E2SnapSchema) DataFileCompression() seg.FileCompression {
-	return seg.CompressNone
-}
-
 // E3 Schema
 type E3SnapSchema struct {
 	stepSize uint64
 
-	dataExtension       DataExtension
-	dataFileTag         string
-	dataFileCompression seg.FileCompression
-	accessors           statecfg.Accessors
+	dataExtension DataExtension
+	dataFileTag   string
+	accessors     statecfg.Accessors
 
 	accessorIdxExtension AccessorExtension
 	// caches
@@ -300,10 +291,9 @@ func NewE3SnapSchemaBuilder(accessors statecfg.Accessors, stepSize uint64) *E3Sn
 	return &eschema
 }
 
-func (b *E3SnapSchemaBuilder) Data(dataFolder string, fileTag string, ext DataExtension, compression seg.FileCompression, version version.Versions) *E3SnapSchemaBuilder {
+func (b *E3SnapSchemaBuilder) Data(dataFolder string, fileTag string, ext DataExtension, version version.Versions) *E3SnapSchemaBuilder {
 	b.e.dataFileTag = fileTag
 	b.e.dataExtension = ext
-	b.e.dataFileCompression = compression
 	b.e.dataFileMetadata = &_fileMetadata{
 		folder:    dataFolder,
 		supported: true,
@@ -420,13 +410,14 @@ func (s *E3SnapSchema) Parse(baseFileName string) (f *SnapInfo, ok bool) {
 
 	info.Ext = "." + subs[6]
 
-	if s.dataExtension.Equals(info.Ext) {
+	switch {
+	case s.dataExtension.Equals(info.Ext):
 		return info, true
-	} else if s.accessorIdxExtension.Equals(info.Ext) && s.indexFileMetadata.supported {
+	case s.accessorIdxExtension.Equals(info.Ext) && s.indexFileMetadata.supported:
 		return info, true
-	} else if info.Ext == ".kvei" && s.existenceFileMetadata.supported {
+	case info.Ext == ".kvei" && s.existenceFileMetadata.supported:
 		return info, true
-	} else if info.Ext == ".bt" && s.btIdxFileMetadata.supported {
+	case info.Ext == ".bt" && s.btIdxFileMetadata.supported:
 		return info, true
 	}
 
@@ -519,48 +510,9 @@ func (s *E3SnapSchema) DataDirectory() string {
 	return s.dataFileMetadata.folder
 }
 
-func (s *E3SnapSchema) DataFileCompression() seg.FileCompression {
-	return s.dataFileCompression
-}
-
-// debug method for getting all file extensions for this schema
-func (s *E3SnapSchema) FileExtensions() (extensions []string) {
-	extensions = append(extensions, s.dataExtension.String())
-	if s.indexFileMetadata.supported {
-		extensions = append(extensions, s.accessorIdxExtension.String())
-	}
-
-	if s.btIdxFileMetadata.supported {
-		extensions = append(extensions, ".bt")
-	}
-
-	if s.existenceFileMetadata.supported {
-		extensions = append(extensions, ".kvei")
-	}
-
-	return
-}
-
-// these are v + vi or bt/kvei residing in same folder `snapshots/forkables`
-func NewForkableSnapSchema(cfg statecfg.ForkableCfg, stepSize uint64, dirs datadir.Dirs) SnapNameSchema {
-	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize)
-	b.Data(dirs.SnapForkable, cfg.Name, DataExtensionV, cfg.Compression, version.V1_1_exact)
-	if cfg.Accessors&statecfg.AccessorBTree != 0 {
-		b.BtIndex(version.V1_1_exact)
-	}
-	if cfg.Accessors&statecfg.AccessorHashMap != 0 {
-		b.Accessor(dirs.SnapForkable, version.V1_1_exact)
-	}
-	if cfg.Accessors&statecfg.AccessorExistence != 0 {
-		b.Existence(version.V1_1_exact)
-	}
-
-	return b.Build()
-}
-
 func NewDomainSnapSchema(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.Dirs) *E3SnapSchema {
 	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
-		Data(dirs.SnapDomain, cfg.Name.String(), DataExtensionKv, cfg.Compression, cfg.FileVersion.DataKV)
+		Data(dirs.SnapDomain, cfg.Name.String(), DataExtensionKv, cfg.FileVersion.DataKV)
 
 	if cfg.Accessors.Has(statecfg.AccessorBTree) {
 		b.BtIndex(cfg.FileVersion.AccessorBT)
@@ -578,7 +530,7 @@ func NewDomainSnapSchema(cfg statecfg.DomainCfg, stepSize uint64, dirs datadir.D
 
 func NewHistorySnapSchema(cfg statecfg.HistCfg, stepSize uint64, dirs datadir.Dirs) *E3SnapSchema {
 	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
-		Data(dirs.SnapHistory, cfg.HistoryIdx.String(), DataExtensionV, cfg.Compression, cfg.FileVersion.DataV)
+		Data(dirs.SnapHistory, cfg.HistoryIdx.String(), DataExtensionV, cfg.FileVersion.DataV)
 
 	if cfg.Accessors.Has(statecfg.AccessorHashMap) {
 		b.Accessor(dirs.SnapAccessors, cfg.FileVersion.AccessorVI)
@@ -589,7 +541,7 @@ func NewHistorySnapSchema(cfg statecfg.HistCfg, stepSize uint64, dirs datadir.Di
 
 func NewIISnapSchema(cfg statecfg.InvIdxCfg, stepSize uint64, dirs datadir.Dirs) *E3SnapSchema {
 	b := NewE3SnapSchemaBuilder(cfg.Accessors, stepSize).
-		Data(dirs.SnapIdx, cfg.Name.String(), DataExtensionEf, cfg.Compression, cfg.FileVersion.DataEF)
+		Data(dirs.SnapIdx, cfg.Name.String(), DataExtensionEf, cfg.FileVersion.DataEF)
 	if cfg.Accessors.Has(statecfg.AccessorHashMap) {
 		b.Accessor(dirs.SnapAccessors, cfg.FileVersion.AccessorEFI)
 	}
@@ -599,7 +551,7 @@ func NewIISnapSchema(cfg statecfg.InvIdxCfg, stepSize uint64, dirs datadir.Dirs)
 
 // fullpath pattern
 func findFilesWithVersionsByPattern(searchVer version.Version, pattern string, supported version.Versions, parseOp func(filename string) (*SnapInfo, bool)) (string, error) {
-	matches, err := filepath.Glob(pattern)
+	matches, err := dir.Glob(pattern)
 	if err != nil {
 		panic(fmt.Sprintf("invalid pattern: %s, err: %v", pattern, err))
 	}
@@ -620,7 +572,7 @@ func findFilesWithVersionsByPattern(searchVer version.Version, pattern string, s
 		if !ok {
 			panic(fmt.Sprintf("match %s can't be parsed, shouldn't happen, fail fast", filename))
 		}
-		if info.Version.GreaterOrEqual(supported.MinSupported) && info.Version.LessOrEqual(supported.Current) && maxVersion.Less(info.Version) {
+		if supported.Supports(info.Version) && maxVersion.Less(info.Version) {
 			maxVersion = info.Version
 			maxMatch = match
 			continue

@@ -7,10 +7,84 @@ description: Run the full Erigon test suite locally using GOGC=80 make test-all.
 
 Runs the complete test suite with 60-minute timeout and coverage output. Takes ~30 minutes.
 
+## Prerequisite: Test fixtures
+
+`make test-all` no longer downloads any fixture tarballs. Execution spec tests moved out of `go test ./...` and into the dedicated `eest-spec-*` Makefile targets driven by the **EEST spec tests** workflow (`test-eest-spec.yml`); the consensus spec test (`cl/spectest`) is skipped here via `ERIGON_SKIP_CL_SPECTEST=true` (set automatically by the Makefile) and runs only in `test-integration-caplin.yml`.
+
+To exercise the EEST suites locally, see `erigon-eest-spec` (or run a specific shard directly):
+
+```bash
+make eest-spec-statetests-stable-{sequential,parallel}
+                                             # state tests vs eest_stable fixtures
+make eest-spec-blocktests-stable-sequential  # blockchain tests vs eest_stable fixtures (serial commitment)
+make eest-spec-blocktests-stable-parallel    # same, but with parallel commitment
+make eest-spec-enginextests-stable-sequential # engine-x tests vs eest_stable (serial commitment)
+make eest-spec-enginextests-stable-parallel  # same, but with parallel commitment
+make eest-spec-enginextests-devnet-{sequential,parallel}
+                                             # devnet engine-x tests in both commitment modes
+make eest-spec-statetests-devnet-{sequential,parallel}
+                                             # state tests vs eest_devnet fixtures
+make eest-spec-transactiontests-{stable,devnet}-race
+                                             # transaction tests with evm.race
+make eest-spec-blocktests-devnet-{sequential,parallel}
+                                             # devnet blocktests in both commitment modes
+make eest-spec-statetests-legacy-{sequential,parallel}
+                                             # pinned legacy Cancun state-test archive
+make eest-spec-rlptests-legacy-race          # complete pinned legacy RLP suite
+make eest-spec-transactiontests-legacy-race  # complete pinned legacy transaction suite
+make eest-spec-difficultytests-legacy-race   # complete pinned legacy difficulty suite
+make eest-spec-blocktests-legacy-consensus-sequential
+                                             # Hive consensus fixture selection;
+                                             # -parallel and
+                                             # -race-{sequential,parallel} variants too
+make eest-spec-blocktests-legacy-constantinople-sequential
+                                             # Hive legacy fixture selection;
+                                             # -parallel plus three race partitions:
+                                             # ...-race-constantinople,
+                                             # ...-race-constantinople-fix, and
+                                             # ...-race-other-forks; each race
+                                             # partition has sequential/parallel variants
+make eest-spec-blocktests-legacy-cancun-sequential
+                                             # Hive legacy-cancun selection;
+                                             # -parallel plus six race partitions:
+                                             # ...-race-{berlin,shanghai,cancun,
+                                             # london,paris,other-forks}; each race
+                                             # partition has sequential/parallel variants
+make eest-spec-enginextests-benchmark-1m-sequential
+                                             # engine-x benchmark fixtures @ 1M gas target
+                                             # (with per-test --time stats);
+                                             # -5m/-10m/-30m/-60m/-100m/-150m variants too,
+                                             # each with a "-sequential" / "-parallel" pair
+make eest-spec-blocktests-stable-race-cancun-sequential
+                                             # race-detector variant, sharded per fork:
+                                             # -pre-cancun/-cancun/-prague/-osaka, plus
+                                             # eest-spec-blocktests-devnet-race-amsterdam-
+                                             # {sequential,parallel}. Each stable-race
+                                             # and devnet-race sub-shard has a
+                                             # "-sequential" / "-parallel" pair
+                                             # (e.g. ...-race-cancun-{sequential,parallel})
+```
+
+The shard list / failure budgets / `commitment-parallel` flags live in `tools/eest-spec-shards.yml` (single source of truth for both this workflow and `tools/run-eest-spec-test.sh`). See `EEST_SPEC_SHARDS` / `EEST_SPEC_RACE_SHARDS` in the root `Makefile` for the partition into race vs non-race targets.
+
+**Pitfall: stale `evm` / `evm.race` binary.** Always invoke shards via `make eest-spec-<shard>` — the Makefile lists `evm` (or `evm.race`) as a prereq and `go build` is cache-aware, so a stale binary gets rebuilt automatically. Calling `bash tools/run-eest-spec-test.sh <shard>` directly **bypasses** the rebuild and silently exercises whatever `build/bin/evm{,.race}` happens to be on disk against current fixtures, inflating failures or hiding regressions. After pulling code, switching branches, or any time you suspect the binary is older than HEAD: `rm -f build/bin/evm build/bin/evm.race && make evm evm.race` before re-running.
+
+## Prerequisite: Create RAM Disk
+
+Before running `make test-all`, create a RAM disk and export its path as `ERIGON_EXECUTION_TESTS_TMPDIR`:
+
+```bash
+path=$(bash tools/create-ramdisk)
+```
+
+Then prepend `ERIGON_EXECUTION_TESTS_TMPDIR=$path` to the test command (see below). The `execution/tests` suite does heavy temp-file I/O; backing that with tmpfs avoids disk bottlenecks and matches how CI runs the same workflow (`ramdisk: true` in `test-all-erigon.yml`, which invokes the same `tools/create-ramdisk` script via `setup-erigon`).
+
+The script is cross-platform (Linux tmpfs, macOS hdiutil, Windows ImDisk). Linux requires `sudo` to mount tmpfs at `/mnt/erigon-ramdisk`. Override size with `RAMDISK_SIZE_MB` (default 2048).
+
 ## Command
 
 ```bash
-GOGC=80 make test-all
+ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all
 ```
 
 Equivalent to the **"All tests"** GitHub Actions workflow (`test-all-erigon.yml`).
@@ -54,15 +128,19 @@ Tests skipped via `-short` in `test-short` run fully here. If a test passes in `
 
 - Before marking a PR ready for review
 - After significant logic changes to verify no edge cases break
-- Full gate: `make lint && make erigon integration && GOGC=80 make test-all`
+- Full gate: `path=$(bash tools/create-ramdisk) && make lint && make erigon integration && ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all`
 
 ## CI Equivalent
 
 | Local command | CI workflow | File |
 |---------------|-------------|------|
 | `GOGC=80 make test-all` | All tests | `test-all-erigon.yml` |
+| `make eest-spec-<suite>-<fixtures>` | EEST spec tests | `test-eest-spec.yml` |
+| `cd cl/spectest && make tests && make mainnet` | Consensus spec | `test-integration-caplin.yml` |
 
 To dispatch remotely:
 ```bash
 gh workflow run "All tests" --ref <branch>
+gh workflow run "EEST spec tests" --ref <branch>
+gh workflow run "Consensus spec" --ref <branch>
 ```

@@ -28,11 +28,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -58,7 +58,7 @@ type Task interface {
 	Version() state.Version
 	VersionMap() *state.VersionMap
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
-	VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites
+	VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
 	ResetGasPool(*protocol.GasPool)
 
@@ -74,6 +74,7 @@ type Task interface {
 	BlockTime() uint64
 	BlockGasLimit() uint64
 	BlockRoot() common.Hash
+	BlockHeader() *types.Header
 
 	Rules() *chain.Rules
 
@@ -90,33 +91,31 @@ type Task interface {
 	isNil() bool
 }
 
-type AAValidationResult struct {
-	PaymasterContext []byte
-	GasUsed          uint64
-}
-
 // TxResult is the ouput of the task execute process
 type TxResult struct {
 	Task
-	ExecutionResult   evmtypes.ExecutionResult
-	ValidationResults []AAValidationResult
-	Err               error
-	Coinbase          accounts.Address
-	TxIn              state.ReadSet
-	TxOut             state.VersionedWrites
+	ExecutionResult evmtypes.ExecutionResult
+	Err             error
+	// Operational reports that Err is an execution infrastructure failure, not a block-validity verdict.
+	Operational bool
+	Coinbase    accounts.Address
+	TxIn        state.ReadSet
+	TxOut       *state.WriteSet
 
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
-	TraceFroms        map[accounts.Address]struct{}
-	TraceTos          map[accounts.Address]struct{}
-	AccessedAddresses state.AccessSet
+	TraceFroms map[accounts.Address]struct{}
+	TraceTos   map[accounts.Address]struct{}
 
-	// CollectorWrites holds collector-format writes (all 4 account fields per
-	// address) produced by MakeWriteSet during worker execution. Used by the
-	// parallel finalize path to skip full IBS reconstruction: fee-calc balance
-	// adjustments are applied directly to these writes.
-	CollectorWrites state.VersionedWrites
+	// Dep is the highest predecessor TxIndex this tx read as an in-flight or
+	// mid-execution-changed value (state.IntraBlockState.dep). >= 0 means the
+	// tx's reads were not against a single settled snapshot — an intra-tx
+	// read-consistency failure the version-set validator can't express — so the
+	// tx must re-execute once that predecessor commits. It is a validation
+	// verdict (a blocker to wait for), not an execution error. UnknownDep (< 0)
+	// means every read was settled.
+	Dep int
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -153,7 +152,7 @@ func (r *TxResult) CreateNextReceipt(prev *types.Receipt) (*types.Receipt, error
 func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLogIndex uint32) (*types.Receipt, error) {
 	logIndex := firstLogIndex
 	for i := range r.Logs {
-		r.Logs[i].Index = uint(logIndex)
+		r.Logs[i].Index = hexutil.Uint(logIndex)
 		logIndex++
 	}
 
@@ -166,13 +165,15 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		GasUsed:                  r.ExecutionResult.ReceiptGasUsed,
 		CumulativeGasUsed:        cumulativeGasUsed,
 		TxHash:                   r.TxHash(),
-		Logs:                     r.Logs,
+		Payer:                    r.ExecutionResult.Payer,
+		FrameReceipts:            r.ExecutionResult.FrameReceipts,
 		FirstLogIndexWithinBlock: firstLogIndex,
 	}
+	receipt.SetLogs(r.Logs)
 
 	for _, l := range receipt.Logs {
 		l.TxHash = receipt.TxHash
-		l.BlockNumber = blockNum
+		l.BlockNumber = hexutil.Uint64(blockNum)
 		l.BlockHash = receipt.BlockHash
 	}
 	if r.ExecutionResult.Failed() {
@@ -183,12 +184,11 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 
 	// if the transaction created a contract, store the creation address in the receipt.
 	txMessage, err := r.TxMessage()
-
 	if err != nil {
 		return nil, err
 	}
 
-	if txMessage != nil && txMessage.To().IsNil() {
+	if txMessage != nil && r.Tx().IsContractDeploy() {
 		txSender, err := r.TxSender()
 		if err != nil {
 			return nil, err
@@ -220,18 +220,14 @@ type TxTask struct {
 	HistoryExecution   bool // use history reader for that txn instead of state reader
 	BalanceIncreaseSet map[accounts.Address]uint256.Int
 
-	Incarnation           int
-	Tracer                *calltracer.CallTracer
-	Hooks                 *tracing.Hooks
-	Config                *chain.Config
-	Engine                rules.Engine
-	Logger                log.Logger
-	Trace                 bool
-	AAValidationBatchSize uint64 // number of consecutive RIP-7560 transactions, should be 0 for single transactions and transactions that are not first in the transaction order
-	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
+	Tracer *calltracer.CallTracer
+	Hooks  *tracing.Hooks
+	Config *chain.Config
+	Engine rules.Engine
+	Logger log.Logger
+	Trace  bool
 
 	gasPool      *protocol.GasPool
-	sender       accounts.Address
 	message      *types.Message
 	signer       *types.Signer
 	dependencies []int
@@ -272,36 +268,49 @@ func (t *TxTask) TxHash() common.Hash {
 }
 
 func (t *TxTask) TxSender() (accounts.Address, error) {
-	if !t.sender.IsNil() {
-		return t.sender, nil
-	}
 	if t.TxIndex < 0 || t.TxIndex >= len(t.Txs) {
 		return accounts.NilAddress, nil
 	}
 	if sender, ok := t.Tx().GetSender(); ok {
-		t.sender = sender
-		return t.sender, nil
+		return sender, nil
 	}
 	if t.signer == nil {
 		t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
 	}
-	sender, err := t.signer.Sender(t.Tx())
+	sender, err := t.Tx().Sender(*t.signer)
 	if err != nil {
-		return accounts.NilAddress, err
+		return accounts.NilAddress, fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, t.TxHash(), err)
 	}
-	t.sender = sender
 	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNumber(), "txIdx", t.TxIndex)
-	return t.sender, nil
+	return sender, nil
+}
+
+// ChargesSenderAtValidation reports whether this run skips the sender charge (nonce, gas, value) and validation applies it.
+func (t *TxTask) ChargesSenderAtValidation(incarnation int) bool {
+	if incarnation != 0 || t.Config.Aura != nil || t.Rules().IsAmsterdam {
+		return false
+	}
+	txn := t.Tx()
+	isPlain := txn != nil && len(txn.GetAuthorizations()) == 0 &&
+		len(txn.GetBlobHashes()) == 0 && txn.Type() != types.FrameTxType
+	if !isPlain {
+		return false
+	}
+	sender, err := t.TxSender()
+	senderOnlyPays := err == nil && !sender.IsNil() && sender.Value() != t.Header.Coinbase && (txn.GetTo() == nil || sender.Value() != *txn.GetTo())
+	return senderOnlyPays
 }
 
 func (t *TxTask) TxMessage() (*types.Message, error) {
 	if t.message == nil {
 		if tx := t.Tx(); tx != nil {
+			if _, err := t.TxSender(); err != nil {
+				return nil, err
+			}
 			if t.signer == nil {
 				t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
 			}
 			message, err := tx.AsMessage(*t.signer, t.Header.BaseFee, t.Rules())
-
 			if err != nil {
 				return nil, err
 			}
@@ -345,6 +354,10 @@ func (t *TxTask) BlockRoot() common.Hash {
 	return t.Header.Root
 }
 
+func (t *TxTask) BlockHeader() *types.Header {
+	return t.Header
+}
+
 func (t *TxTask) BlockTime() uint64 {
 	if t.Header == nil {
 		return 0
@@ -370,14 +383,25 @@ func (t *TxTask) Rules() *chain.Rules {
 func (t *TxTask) ResetTx(txNum uint64, txIndex int) {
 	t.TxNum = txNum
 	t.TxIndex = txIndex
-	t.sender = accounts.NilAddress
 	t.message = nil
 	t.signer = nil
 	t.dependencies = nil
 }
 
 func (t *TxTask) GasPool() *protocol.GasPool {
-	return t.gasPool
+	if t.gasPool != nil {
+		return t.gasPool
+	}
+	// Workers can't share the block gas pool (SubGas races on speculative
+	// depletion), so hand out a fresh per-invocation pool sized to the block
+	// limit. Returning nil would make preCheck's CheckBlockGasInclusion no-op,
+	// letting a tx that alone exceeds the block limit slip past and fail later
+	// with the wrong error variant (serial returns ErrGasLimitReached). Cross-tx
+	// depletion is still caught post-execution against the shared pool.
+	if t.Header == nil || t.Config == nil {
+		return nil
+	}
+	return protocol.NewGasPool(t.Header.GasLimit, t.Config.GetMaxBlobGasPerBlock(t.Header.Time))
 }
 
 func (t *TxTask) ResetGasPool(gasPool *protocol.GasPool) {
@@ -412,8 +436,8 @@ func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
 	return ibs.VersionedReads()
 }
 
-func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites {
-	return ibs.VersionedWrites(false)
+func (t *TxTask) VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet {
+	return ibs.VersionedWrites()
 }
 
 func (t *TxTask) IsBlockEnd() bool {
@@ -435,7 +459,6 @@ func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *call
 			vmCfg.Tracer = callTracer.Tracer().Hooks
 		}
 		msg, err := t.TxMessage()
-
 		if err != nil {
 			return err
 		}
@@ -450,7 +473,7 @@ func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *call
 	return nil
 }
 
-func (txTask *TxTask) Execute(evm *vm.EVM,
+func (t *TxTask) Execute(evm *vm.EVM,
 	engine rules.Engine,
 	genesis *types.Genesis,
 	ibs *state.IntraBlockState,
@@ -458,27 +481,33 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
-	calcFees bool) *TxResult {
+	calcFees bool,
+) *TxResult {
 	var result TxResult
 
-	ibs.SetTrace(txTask.Trace)
+	ibs.SetTrace(t.Trace)
 
-	rules := txTask.Rules()
+	rules := t.Rules()
 
 	var err error
-	header := txTask.Header
-	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
+	header := t.Header
+	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", t.TxNum, t.BlockNum, t.HistoryExecution)
 
 	switch {
-	case txTask.TxIndex == -1:
-		if txTask.BlockNumber() == 0 {
+	case t.TxIndex == -1:
+		if t.BlockNumber() == 0 {
 
-			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
+			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", t.TxNum, t.BlockNum)
 			if genesis != nil {
-				_, ibs, err = genesiswrite.GenesisToBlock(nil, genesis, dirs, txTask.Logger)
+				var genesisIbs *state.IntraBlockState
+				_, genesisIbs, err = genesiswrite.GenesisToBlock(genesis, dirs, t.Logger)
 				if err != nil {
 					panic(err)
 				}
+				// Deferred, not closed here: the result's read/write sets are taken
+				// from this state after the switch.
+				defer genesisIbs.Close()
+				ibs = genesisIbs
 			}
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{}
@@ -486,178 +515,114 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 
 		// Block initialisation
-		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
+		// fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", t.TxNum, t.BlockNum)
 		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
+			// Block initialisation runs between transactions, so the worker's EVM is
+			// free: reuse it instead of building one per system call.
+			ret, err := protocol.SysCallContractWithEVM(evm, contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
 			return ret, err
 		}
-		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
-		if result.Err == nil {
+		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, t.Logger, nil)
+		if result.Err == nil && !ibs.IsVersioned() {
+			// The versionMap path finalizes from the write-set after the switch;
+			// the serial path commits the init writes here.
 			result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
-	case txTask.IsBlockEnd():
-		if txTask.BlockNumber() == 0 {
+	case t.IsBlockEnd():
+		if t.BlockNumber() == 0 {
 			break
 		}
 
 		result.TraceTos = map[accounts.Address]struct{}{}
-		result.TraceTos[accounts.InternAddress(txTask.Header.Coinbase)] = struct{}{}
-		for _, uncle := range txTask.Uncles {
+		result.TraceTos[accounts.InternAddress(t.Header.Coinbase)] = struct{}{}
+		for _, uncle := range t.Uncles {
 			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
 		}
 	default:
-		if txTask.Tx().Type() == types.AccountAbstractionTxType {
-			if !chainConfig.AllowAA {
-				result.Err = errors.New("account abstraction transactions are not allowed")
-				return &result
-			}
-			aaTxn, ok := txTask.Tx().(*types.AccountAbstractionTransaction)
-			if !ok {
-				result.Err = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
-				return &result
-			}
-
-			result = *txTask.executeAA(aaTxn, evm, txTask.GasPool(), ibs, chainConfig)
-			break
-		}
 
 		result.Coinbase = evm.Context.Coinbase
 
 		// MA applytx
 		result.ExecutionResult, result.Err = func() (evmtypes.ExecutionResult, error) {
-			message, err := txTask.TxMessage()
-
+			message, err := t.TxMessage()
 			if err != nil {
-				return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
+				return evmtypes.ExecutionResult{}, err
 			}
 
 			// Apply the transaction to the current state (included in the env).
 			var applyRes *evmtypes.ExecutionResult
 			var applyErr error
 
-			if !calcFees {
-				applyRes, applyErr = protocol.ApplyMessageNoFeeBurnOrTip(evm, message, txTask.GasPool(), true, false, engine)
-			} else {
-				applyRes, applyErr = protocol.ApplyMessage(evm, message, txTask.GasPool(), true, false, engine)
+			switch {
+			case !calcFees && t.ChargesSenderAtValidation(ibs.Incarnation()):
+				applyRes, applyErr = protocol.ApplyMessageChargeSenderAtValidation(evm, message, t.GasPool(), engine)
+			case !calcFees:
+				applyRes, applyErr = protocol.ApplyMessageNoFeeBurnOrTip(evm, message, t.GasPool(), true, false, engine)
+			default:
+				applyRes, applyErr = protocol.ApplyMessage(evm, message, t.GasPool(), true, false, engine)
 			}
 
 			if applyErr != nil {
-				if _, ok := applyErr.(protocol.ErrExecAbortError); !ok {
-					return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
-				}
-
 				return evmtypes.ExecutionResult{}, applyErr
 			}
 
 			if applyRes == nil {
-				return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex()}
+				return evmtypes.ExecutionResult{}, errors.New("apply returned nil execution result")
 			}
 
 			return *applyRes, err
 		}()
 
 		if result.Err == nil {
-			// Capture residual-balance selfdestructs before SoftFinalise clears the
-			// journal.  These are accounts selfdestructed in this tx that also received
-			// ETH after the SELFDESTRUCT opcode (EIP-7708 case 2).  SoftFinalise calls
-			// clearJournalAndRefund, so GetRemovedAccountsWithBalance returns nothing
-			// afterwards.
-			result.ExecutionResult.SelfDestructedWithBalance = ibs.GetRemovedAccountsWithBalance()
-
-			// TODO these can be removed - use result instead
-			// Update the state with pending changes
-			ibs.SoftFinalise()
-			//txTask.Error = ibs.FinalizeTx(rules, noop)
-			result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
+			// The versionMap path produces its write-set from the recorded IO
+			// after the switch; only the serial path clears pending changes here.
+			if !ibs.IsVersioned() {
+				ibs.SoftFinalise()
+			}
+			result.Logs = ibs.GetLogs(t.TxIndex, t.TxHash(), t.BlockNumber(), t.BlockHash())
 		}
 
+	}
+	// A panic recovered inside versioned transition execution is an infrastructure
+	// failure, not a block-validity verdict; route it operationally like a state-read
+	// error rather than letting it condemn the block as invalid.
+	if result.Err != nil && errors.Is(result.Err, protocol.ErrExecPanic) && t.TxIndex >= 0 && !t.IsBlockEnd() {
+		result.Operational = true
+	}
+	if stateErr := ibs.StateReadError(); stateErr != nil && t.TxIndex >= 0 && !t.IsBlockEnd() {
+		result.Operational = true
+		result.Err = stateErr
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
-		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
-			panic(err)
-		}
-
-		result.AccessedAddresses = ibs.AccessedAddresses()
-		result.TxIn = txTask.VersionedReads(ibs)
-		result.TxOut = txTask.VersionedWrites(ibs)
-	}
-
-	return &result
-}
-
-func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
-	evm *vm.EVM,
-	gasPool *protocol.GasPool,
-	ibs *state.IntraBlockState,
-	chainConfig *chain.Config) *TxResult {
-	var result TxResult
-
-	if !txTask.InBatch {
-		// this is the first transaction in an AA transaction batch, run all validation frames, then execute execution frames in its own txtask
-		startIdx := uint64(txTask.TxIndex)
-		endIdx := startIdx + txTask.AAValidationBatchSize
-
-		validationResults := make([]AAValidationResult, txTask.AAValidationBatchSize+1)
-		log.Info("🕵️‍♂️[aa] found AA bundle", "startIdx", startIdx, "endIdx", endIdx)
-
-		var outerErr error
-		for i := startIdx; i <= endIdx; i++ {
-			// check if next n transactions are AA transactions and run validation
-			if txTask.Txs[i].Type() == types.AccountAbstractionTxType {
-				aaTxn, ok := txTask.Txs[i].(*types.AccountAbstractionTransaction)
-				if !ok {
-					outerErr = fmt.Errorf("invalid transaction type, expected AccountAbstractionTx, got %T", txTask.Tx)
-					break
-				}
-
-				paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, txTask.Header, evm, chainConfig)
-				if err != nil {
-					outerErr = err
-					break
-				}
-
-				validationResults[i-startIdx] = AAValidationResult{
-					PaymasterContext: paymasterContext,
-					GasUsed:          validationGasUsed,
-				}
-			} else {
-				outerErr = fmt.Errorf("invalid txcount, expected txn %d to be type %d", i, types.AccountAbstractionTxType)
-				break
+		t.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
+		// Genesis (block 0, txIndex -1) resolves `ibs` to the throwaway versioned
+		// IBS that GenesisToBlock builds, whatever the executor. Its writes reach
+		// the executor only through MakeWriteSet(stateWriter); the FinalizedWrites
+		// write-set is not applied for it, so keep genesis on the MakeWriteSet path.
+		isGenesis := t.TxIndex == -1 && t.BlockNumber() == 0
+		if ibs.IsVersioned() && !isGenesis {
+			result.TxOut, _ = ibs.FinalizedWrites(rules) // the read error is checked below for both branches
+		} else {
+			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
+				result.Operational = true
+				result.Err = err
+				return &result
 			}
+			result.TxOut = t.VersionedWrites(ibs)
 		}
 
-		if outerErr != nil {
-			result.Err = outerErr
-			return &result
+		// FinalizedWrites composes pre-tx state to decide EIP-161 removals and can
+		// hit a read failure of its own; surface it operationally and drop the
+		// write-set built from it rather than committing a wrong deletion.
+		if stateErr := ibs.StateReadError(); stateErr != nil && t.TxIndex >= 0 && !t.IsBlockEnd() {
+			result.Operational = true
+			result.Err = stateErr
+			result.TxOut = nil
+		} else {
+			result.TxIn = t.VersionedReads(ibs)
 		}
-		log.Info("✅[aa] validated AA bundle", "len", startIdx-endIdx)
-
-		result.ValidationResults = validationResults
 	}
-
-	if len(result.ValidationResults) == 0 {
-		result.Err = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
-	}
-
-	aaTxn = txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier
-	validationRes := result.ValidationResults[0]
-	result.ValidationResults = result.ValidationResults[1:]
-
-	status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, validationRes.PaymasterContext, validationRes.GasUsed, gasPool, evm, txTask.Header, ibs)
-	if err != nil {
-		result.Err = err
-		return &result
-	}
-
-	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockRegularGasUsed = gasUsed
-	// Update the state with pending changes
-	ibs.SoftFinalise()
-	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
-
-	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
 
 	return &result
 }
@@ -673,6 +638,7 @@ type Queue[T queueable[T]] []T
 func (h Queue[T]) Len() int {
 	return len(h)
 }
+
 func (h Queue[T]) Less(i, j int) bool {
 	return h[i].compare(h[j]) < 0
 }
@@ -739,6 +705,7 @@ func (q *QueueWithRetry) RetriesLen() (l int) {
 	q.lock.Unlock()
 	return l
 }
+
 func (q *QueueWithRetry) RetryTxNumsList() (out []uint64) {
 	q.lock.Lock()
 	for _, t := range q.retires {
@@ -852,6 +819,7 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 		}
 	}
 }
+
 func (q *QueueWithRetry) popNoWait() (task Task, ok bool) {
 	q.lock.Lock()
 	has := q.retires.Len() > 0
@@ -907,6 +875,7 @@ func (q *QueueWithRetry) Release() {
 		<-q.newTasks
 	}
 	// Clear retry heap, keep backing array.
+	clear(q.retires)
 	q.retires = q.retires[:0]
 	q.parked = q.newTasks
 	q.newTasks = nil

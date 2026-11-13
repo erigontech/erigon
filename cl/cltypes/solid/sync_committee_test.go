@@ -38,7 +38,7 @@ func TestSyncCommittee(t *testing.T) {
 
 	// Test SetCommittee
 	newCommittee := make([]common.Bytes48, 512)
-	for i := 0; i < 512; i++ {
+	for i := range 512 {
 		copy(newCommittee[i][:], []byte{byte(i)})
 	}
 	syncCommittee.SetCommittee(newCommittee)
@@ -138,10 +138,19 @@ func TestSyncCommitteeMinimalPreset(t *testing.T) {
 	assert.True(t, sc.Equal(fromJSON))
 }
 
+func TestSyncCommitteeSizeInferenceDoesNotMutate(t *testing.T) {
+	const committeeSize = 32
+	syncCommittee := &SyncCommittee{data: make([]byte, (committeeSize+1)*48)}
+
+	require.Zero(t, syncCommittee.committeeSize)
+	require.Equal(t, committeeSize, syncCommittee.CommitteeSize())
+	require.Zero(t, syncCommittee.committeeSize)
+}
+
 func TestSyncCommitteeJson(t *testing.T) {
 	// Test MarshalJSON and UnmarshalJSON
 	committee := make([]common.Bytes48, 512)
-	for i := 0; i < 512; i++ {
+	for i := range 512 {
 		copy(committee[i][:], []byte{byte(i)})
 	}
 	aggregatePublicKey := [48]byte{1, 2, 3} // Example aggregate public key

@@ -17,13 +17,18 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/libp2p/go-libp2p/core/network"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -31,15 +36,16 @@ const (
 )
 
 func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
-
 	req := &cltypes.BeaconBlocksByRangeRequest{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
+	if err := ssz_snappy.DecodeAndReadFixedSizeNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err
 	}
 
-	// Consume additional rate-limit tokens proportional to the requested block count.
-	// The wrapper already consumed 1 token for admission.
-	if cost := min(int(req.Count), MaxRequestsBlocks) - 1; !c.consumeRateLimit(s, cost) {
+	if req.StartSlot+req.Count < req.StartSlot {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+	}
+
+	if cost := requestCost(req.Count, 1, MaxRequestsBlocks); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -49,10 +55,17 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 	}
 	defer tx.Rollback()
 
-	written := uint64(0)
-	for slot := req.StartSlot; slot < req.StartSlot+MaxRequestsBlocks; slot++ {
+	// Serve only blocks in [start_slot, start_slot+count): empty slots are left out, not replaced by
+	// later blocks. Search up to MAX_REQUEST_BLOCKS_DENEB slots and answer with at most
+	// MaxRequestsBlocks blocks; the spec allows a response with fewer blocks than requested.
+	endSlot := req.StartSlot + min(req.Count, c.beaconConfig.MaxRequestBlocksDeneb)
+	written := 0
+	for slot := req.StartSlot; slot < endSlot && written < MaxRequestsBlocks; slot++ {
 		block, err := c.beaconDB.ReadBlockBySlot(c.ctx, tx, slot)
 		if err != nil {
+			if errors.Is(err, snapshot_format.ErrExecutionBodyNotFound) {
+				break
+			}
 			return err
 		}
 		if block == nil {
@@ -76,37 +89,31 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 			return err
 		}
 		written++
-		if written >= req.Count {
-			break
-		}
 	}
 
 	return nil
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
-
-	var req solid.HashListSSZ = solid.NewHashList(100)
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
+	// BeaconBlocksByRoot v2 keeps the original request limit until Deneb activates.
+	maxRoots := c.beaconConfig.MaxRequestBlocks
+	if c.ethClock.GetCurrentEpoch() >= c.beaconConfig.DenebForkEpoch {
+		maxRoots = c.beaconConfig.MaxRequestBlocksDeneb
+	}
+	var req solid.HashListSSZ = solid.NewHashList(int(maxRoots))
+	if err := ssz_snappy.DecodeAndReadNoForkDigestMax(s, req, clparams.Phase0Version, maxRoots*length.Hash); err != nil {
+		if errors.Is(err, ssz_snappy.ErrPayloadExceedsLimit) {
+			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+		}
 		return err
 	}
 
-	blockRoots := []common.Hash{}
-	for i := 0; i < req.Length(); i++ {
-		blockRoot := req.Get(i)
-		blockRoots = append(blockRoots, blockRoot)
-		// Limit the number of blocks to the count specified in the request.
-		if len(blockRoots) >= MaxRequestsBlocks {
-			break
-		}
-	}
-
-	if len(blockRoots) == 0 {
+	if req.Length() == 0 {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 
-	// Consume additional rate-limit tokens proportional to the number of roots.
-	if cost := len(blockRoots) - 1; !c.consumeRateLimit(s, cost) {
+	// Cap the charge at the response limit so peers retain credit for the remaining roots.
+	if cost := requestCost(uint64(req.Length()), 1, MaxRequestsBlocks); !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -116,37 +123,52 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	}
 	defer tx.Rollback()
 
-	var block *cltypes.SignedBeaconBlock
-	req.Range(func(index int, blockRoot common.Hash, length int) bool {
-		block, err = c.beaconDB.ReadBlockByRoot(c.ctx, tx, blockRoot)
+	seen := make(map[common.Hash]struct{}, req.Length())
+	// Only successfully written blocks count toward the response limit; missing or
+	// duplicate roots must not prevent later known blocks from being served.
+	written := 0
+	for i := 0; i < req.Length() && written < MaxRequestsBlocks; i++ {
+		blockRoot := req.Get(i)
+		if _, ok := seen[blockRoot]; ok {
+			continue
+		}
+		seen[blockRoot] = struct{}{}
+		block, err := c.beaconDB.ReadBlockByRoot(c.ctx, tx, blockRoot)
+		if errors.Is(err, snapshot_format.ErrExecutionBodyNotFound) {
+			block, err = nil, nil
+		}
 		if err != nil {
-			return false
+			return err
+		}
+		// If the block is not in the database, check the fork choice store.
+		// Recently received blocks (e.g. via gossip) may not have been persisted yet.
+		if block == nil && c.forkChoiceReader != nil {
+			block, _ = c.forkChoiceReader.GetBlock(blockRoot)
 		}
 		if block == nil {
-			return true
+			log.Debug("[Sentinel] beaconBlocksByRoot: block not found", "root", blockRoot)
+			continue
 		}
 
-		// Read the fork digest
 		forkDigest, err := c.ethClock.ComputeForkDigest(block.Block.Slot / c.beaconConfig.SlotsPerEpoch)
 		if err != nil {
-			return false
+			return err
 		}
 
-		if _, err = s.Write([]byte{0}); err != nil {
-			return false
+		if _, err := s.Write([]byte{SuccessfulResponsePrefix}); err != nil {
+			return err
 		}
 
-		if _, err = s.Write(forkDigest[:]); err != nil {
-			return false
+		if _, err := s.Write(forkDigest[:]); err != nil {
+			return err
 		}
-		// obtain block and write
-		if err = ssz_snappy.EncodeAndWrite(s, block); err != nil {
-			return false
+		if err := ssz_snappy.EncodeAndWrite(s, block); err != nil {
+			return err
 		}
-		return true
-	})
+		written++
+	}
 
-	return err
+	return nil
 }
 
 type emptyString struct{}

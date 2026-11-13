@@ -98,12 +98,13 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 
 		intz := sliceSizeRegex.FindAllString(sliced, -1)
 
-		if len(intz) == 0 {
+		switch len(intz) {
+		case 0:
 			// is a slice
 			typ.T = SliceTy
 			typ.Elem = &embeddedType
 			typ.stringKind = embeddedType.stringKind + sliced
-		} else if len(intz) == 1 {
+		case 1:
 			// is an array
 			typ.T = ArrayTy
 			typ.Elem = &embeddedType
@@ -112,7 +113,7 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 				return Type{}, fmt.Errorf("abi: error parsing variable size: %w", err)
 			}
 			typ.stringKind = embeddedType.stringKind + sliced
-		} else {
+		default:
 			return Type{}, errors.New("invalid formatting of array type")
 		}
 		return typ, err
@@ -128,23 +129,27 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 	var varSize int
 	if len(parsedType[3]) > 0 {
 		var err error
-		varSize, err = strconv.Atoi(parsedType[2])
+		varSize, err = strconv.Atoi(parsedType[3])
 		if err != nil {
 			return Type{}, fmt.Errorf("abi: error parsing variable size: %w", err)
 		}
-	} else {
-		if parsedType[0] == "uint" || parsedType[0] == "int" {
-			// this should fail because it means that there's something wrong with
-			// the abi type (the compiler should always format it to the size...always)
-			return Type{}, fmt.Errorf("unsupported arg type: %s", t)
-		}
+	} else if parsedType[0] == "uint" || parsedType[0] == "int" {
+		// this should fail because it means that there's something wrong with
+		// the abi type (the compiler should always format it to the size...always)
+		return Type{}, fmt.Errorf("unsupported arg type: %s", t)
 	}
 	// varType is the parsed abi type
 	switch varType := parsedType[1]; varType {
 	case "int":
+		if varSize < 8 || varSize > 256 || varSize%8 != 0 {
+			return Type{}, fmt.Errorf("unsupported arg type: %s", t)
+		}
 		typ.Size = varSize
 		typ.T = IntTy
 	case "uint":
+		if varSize < 8 || varSize > 256 || varSize%8 != 0 {
+			return Type{}, fmt.Errorf("unsupported arg type: %s", t)
+		}
 		typ.Size = varSize
 		typ.T = UintTy
 	case "bool":
@@ -171,6 +176,11 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 			names      []string
 			expression strings.Builder // canonical parameter expression
 		)
+		if len(components) > 0 {
+			fields = make([]reflect.StructField, len(components))
+			elems = make([]*Type, len(components))
+			names = make([]string, len(components))
+		}
 		expression.WriteString("(")
 		overloadedNames := make(map[string]string)
 		for idx, c := range components {
@@ -186,13 +196,13 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 				return Type{}, fmt.Errorf("abi: field %d has invalid name: abi name %q normalized to go field %q", idx, c.Name, fieldName)
 			}
 			overloadedNames[fieldName] = fieldName
-			fields = append(fields, reflect.StructField{
+			fields[idx] = reflect.StructField{
 				Name: fieldName, // reflect.StructOf will panic for any exported field.
 				Type: cType.GetType(),
 				Tag:  reflect.StructTag("json:\"" + c.Name + "\""),
-			})
-			elems = append(elems, &cType)
-			names = append(names, c.Name)
+			}
+			elems[idx] = &cType
+			names[idx] = c.Name
 			expression.WriteString(cType.stringKind)
 			if idx != len(components)-1 {
 				expression.WriteString(",")

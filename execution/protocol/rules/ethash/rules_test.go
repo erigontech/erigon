@@ -20,73 +20,38 @@
 package ethash
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/empty"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-type diffTest struct {
-	ParentTimestamp    uint64
-	ParentDifficulty   uint256.Int
-	CurrentTimestamp   uint64
-	CurrentBlocknumber uint256.Int
-	CurrentDifficulty  uint256.Int
-}
-
-func (d *diffTest) UnmarshalJSON(b []byte) (err error) {
-	var ext struct {
-		ParentTimestamp    string
-		ParentDifficulty   string
-		CurrentTimestamp   string
-		CurrentBlocknumber string
-		CurrentDifficulty  string
-	}
-	if err := json.Unmarshal(b, &ext); err != nil {
-		return err
-	}
-
-	d.ParentTimestamp = math.MustParseUint64(ext.ParentTimestamp)
-	d.ParentDifficulty = *uint256.MustFromHex(ext.ParentDifficulty)
-	d.CurrentTimestamp = math.MustParseUint64(ext.CurrentTimestamp)
-	d.CurrentBlocknumber = *uint256.MustFromHex(ext.CurrentBlocknumber)
-	d.CurrentDifficulty = *uint256.MustFromHex(ext.CurrentDifficulty)
-
-	return nil
-}
-
-func TestCalcDifficulty(t *testing.T) {
-	file, err := os.Open(filepath.Join("..", "..", "tests", "testdata", "BasicTests", "difficulty.json"))
-	if err != nil {
-		t.Skip(err)
-	}
-	defer file.Close()
-
-	tests := make(map[string]diffTest)
-	err = json.NewDecoder(file).Decode(&tests)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	homestead := uint64(1150000)
-	config := &chain.Config{HomesteadBlock: &homestead}
-
-	for name, test := range tests {
-		number := test.CurrentBlocknumber.Uint64() - 1
-		diff := CalcDifficulty(config, test.CurrentTimestamp,
-			test.ParentTimestamp,
-			test.ParentDifficulty,
-			number,
-			empty.UncleHash,
-		)
-		if diff.Cmp(&test.CurrentDifficulty) != 0 {
-			t.Error(name, "failed. Expected", &test.CurrentDifficulty, "and calculated", &diff)
-		}
+func TestCalcDifficultyAddsBombAfterMinimum(t *testing.T) {
+	zero := uint64(0)
+	for _, test := range []struct {
+		name         string
+		config       *chain.Config
+		currentBlock uint64
+	}{
+		{"Frontier", &chain.Config{}, 200_000},
+		{"Homestead", &chain.Config{HomesteadBlock: &zero}, 200_000},
+		{"Byzantium", &chain.Config{HomesteadBlock: &zero, ByzantiumBlock: &zero}, 3_200_000},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			difficulty := CalcDifficulty(
+				test.config,
+				1_000,
+				0,
+				*uint256.NewInt(minimumDifficulty),
+				test.currentBlock-1,
+				empty.UncleHash,
+			)
+			expected := uint256.NewInt(minimumDifficulty + 1)
+			if !difficulty.Eq(expected) {
+				t.Fatalf("got %s, want %s", &difficulty, expected)
+			}
+		})
 	}
 }

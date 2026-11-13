@@ -13,10 +13,30 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(git status:*)",
       "Bash(gh pr edit:*)",
-      "Bash(git lfs ls-files:*)",
       "Bash(grep:*)",
       "Bash(git add:*)",
-      "WebFetch(domain:pypi.org)"
+      "WebFetch(domain:pypi.org)",
+      "Bash(CGO_CFLAGS=-D__BLST_PORTABLE__ go test:*)",
+      "Bash(find:*)",
+      "Bash(gh pr:*)"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/comment-policy.py\""
+          }
+        ]
+      }
+    ]
+  },
+  "includeCoAuthoredBy": false,
+  "attribution": {
+    "commit": "",
+    "pr": ""
   }
 }

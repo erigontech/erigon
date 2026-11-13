@@ -1,4 +1,6 @@
 {
-  "hive_ref": "88786d9744dabb08bdaec8d8b53142cde6e6b79a",
-  "execution_apis_ref": "8deedf1556015a54404fbfe735a74844715f4011"
+  "hive_repository": "ethereum/hive",
+  "hive_ref": "64d7af92c63962779d0c9bbf404bb58733bd1b05",
+  "devp2p_geth_ref": "157c94647241b260d19e5a8e01a08e439591e504",
+  "execution_apis_ref": "62eefaaad6452abfec850ef0c7a3cbdd90106302"
 }

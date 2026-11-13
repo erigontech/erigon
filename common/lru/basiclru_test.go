@@ -20,10 +20,6 @@
 package lru
 
 import (
-	crand "crypto/rand"
-	"fmt"
-	"io"
-	"math/rand"
 	"testing"
 )
 
@@ -33,7 +29,7 @@ import (
 func TestBasicLRU(t *testing.T) {
 	cache := NewBasicLRU[int, int](128)
 
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		cache.Add(i, i)
 	}
 	if cache.Len() != 128 {
@@ -58,7 +54,7 @@ func TestBasicLRU(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 128; i++ {
+	for i := range 128 {
 		_, ok := cache.Get(i)
 		if ok {
 			t.Fatalf("%d should be evicted", i)
@@ -119,7 +115,7 @@ func TestBasicLRUAddExistingKey(t *testing.T) {
 // This test checks GetOldest and RemoveOldest.
 func TestBasicLRUGetOldest(t *testing.T) {
 	cache := NewBasicLRU[int, int](128)
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		cache.Add(i, i)
 	}
 
@@ -185,50 +181,4 @@ func TestBasicLRUPeek(t *testing.T) {
 	if cache.Contains(1) {
 		t.Errorf("should not have updated recent-ness of 1")
 	}
-}
-
-func BenchmarkLRU(b *testing.B) {
-	var (
-		capacity = 1000
-		indexes  = make([]int, capacity*20)
-		keys     = make([]string, capacity)
-		values   = make([][]byte, capacity)
-	)
-	for i := range indexes {
-		indexes[i] = rand.Intn(capacity)
-	}
-	for i := range keys {
-		b := make([]byte, 32)
-		crand.Read(b)
-		keys[i] = string(b)
-		crand.Read(b)
-		values[i] = b
-	}
-
-	var sink []byte
-
-	b.Run("Add/BasicLRU", func(b *testing.B) {
-		cache := NewBasicLRU[int, int](capacity)
-		for i := 0; b.Loop(); i++ {
-			cache.Add(i, i)
-		}
-	})
-	b.Run("Get/BasicLRU", func(b *testing.B) {
-		cache := NewBasicLRU[string, []byte](capacity)
-		for i := 0; i < capacity; i++ {
-			index := indexes[i]
-			cache.Add(keys[index], values[index])
-		}
-
-		b.ResetTimer()
-		for i := 0; b.Loop(); i++ {
-			k := keys[indexes[i%len(indexes)]]
-			v, ok := cache.Get(k)
-			if ok {
-				sink = v
-			}
-		}
-	})
-
-	fmt.Fprintln(io.Discard, sink)
 }

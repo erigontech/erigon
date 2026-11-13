@@ -154,7 +154,7 @@ echo "If a required blockhash is not provided, the exit code should be \`4\`:"
 echo "Example where blockhashes are provided: "
 cmd="./evm t8n --input.alloc=./testdata/3/alloc.json --input.txs=./testdata/3/txs.json --input.env=./testdata/3/env.json  --trace"
 tick && echo $cmd && tick
-$cmd 2>&1 >/dev/null
+$cmd >/dev/null 2>&1
 cmd="cat trace-0-0x72fadbef39cd251a437eea619cfeda752271a5faaaa2147df012e112159ffb81.jsonl | grep BLOCKHASH -C2"
 tick && echo $cmd && tick
 echo "$ticks"

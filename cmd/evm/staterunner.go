@@ -24,16 +24,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"maps"
 	"os"
+	"slices"
+	"sync"
 
-	"github.com/urfave/cli/v2"
+	"github.com/c2h5oh/datasize"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/vm"
@@ -42,23 +48,34 @@ import (
 var stateTestCommand = cli.Command{
 	Action:    stateTestCmd,
 	Name:      "statetest",
-	Usage:     "executes the given state tests",
+	Usage:     "Executes the given state tests. Filenames can be fed via standard input (batch mode) or as an argument (one-off execution).",
 	ArgsUsage: "<file>",
+	Flags: []cli.Flag{
+		&BenchFlag,
+		&DebugFlag,
+		&DumpFlag,
+		&JSONOutputFlag,
+		&MachineFlag,
+		&RunFlag,
+		&ExcludeFlag,
+		&WorkersFlag,
+		&DisableMemoryFlag,
+		&DisableStackFlag,
+		&DisableStorageFlag,
+		&DisableReturnDataFlag,
+	},
 }
 
-// StatetestResult contains the execution status after running a state test, any
-// error that might have occurred and a dump of the final state if requested.
-type StatetestResult struct {
-	Name  string       `json:"name"`
-	Pass  bool         `json:"pass"`
-	Root  *common.Hash `json:"stateRoot,omitempty"`
-	Fork  string       `json:"fork"`
-	Error string       `json:"error,omitempty"`
-	State *state.Dump  `json:"state,omitempty"`
-	Stats *execStats   `json:"benchStats,omitempty"`
+func newStateTestSharedDomains(db kv.TemporalRoDB, tx kv.TemporalTx) (*execctx.SharedDomains, error) {
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	if err != nil {
+		return nil, err
+	}
+	sd.EnableParaTrieDB(db)
+	return sd, nil
 }
 
-func stateTestCmd(ctx *cli.Context) error {
+func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
 	if machineFriendlyOutput {
 		log.Root().SetHandler(log.DiscardHandler())
@@ -68,109 +85,256 @@ func stateTestCmd(ctx *cli.Context) error {
 
 	// Configure the EVM logger
 	config := &logger.LogConfig{
-		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
-		DisableStack:      ctx.Bool(DisableStackFlag.Name),
-		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
-		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
+		EnableMemory:     !ctx.Bool(DisableMemoryFlag.Name),
+		DisableStack:     ctx.Bool(DisableStackFlag.Name),
+		DisableStorage:   ctx.Bool(DisableStorageFlag.Name),
+		EnableReturnData: !ctx.Bool(DisableReturnDataFlag.Name),
 	}
+	workers := ctx.Uint64(WorkersFlag.Name)
+	if workers == 0 {
+		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
+	}
+
 	cfg := vm.Config{}
+	traceOut := newTraceSink(workers)
+	defer traceOut.flush()
 	if machineFriendlyOutput {
-		cfg.Tracer = logger.NewJSONLogger(config, os.Stderr).Tracer().Hooks
+		cfg.Tracer = logger.NewJSONLogger(config, traceOut).Tracer().Hooks
 	} else if ctx.Bool(DebugFlag.Name) {
 		cfg.Tracer = logger.NewStructLogger(config).Tracer().Hooks
 	}
 
-	if len(ctx.Args().First()) != 0 {
-		return runStateTest(ctx.Args().First(), cfg, ctx.Bool(MachineFlag.Name), ctx.Bool(BenchFlag.Name))
+	filter, err := compileTestFilter(ctx.String(RunFlag.Name), ctx.StringSlice(ExcludeFlag.Name))
+	if err != nil {
+		return err
 	}
+
+	path := ctx.Args().First()
+	if len(path) != 0 {
+		collected := filter.filterFiles(collectFiles(path))
+		results, err := runStateTestsParallel(ctx, cfg, traceOut, collected, workers, filter)
+		if err != nil {
+			return err
+		}
+		report(ctx, results)
+		return nil
+	}
+	// Otherwise, read filenames from stdin and execute back-to-back.
+	env, err := newStateTestEnv()
+	if err != nil {
+		return err
+	}
+	defer env.Close()
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		fname := scanner.Text()
 		if len(fname) == 0 {
 			return nil
 		}
-		if err := runStateTest(fname, cfg, ctx.Bool(MachineFlag.Name), ctx.Bool(BenchFlag.Name)); err != nil {
+		results, err := runStateTest(ctx, cfg, traceOut, env, fname, filter)
+		if err != nil {
 			return err
 		}
+		report(ctx, results)
 	}
-	return nil
+	return scanner.Err()
 }
 
-// runStateTest loads the state-test given by fname, and executes the test.
-func runStateTest(fname string, cfg vm.Config, jsonOut bool, bench bool) error {
-	// Load the test content from the input file
-	src, err := os.ReadFile(fname)
-	if err != nil {
-		return err
-	}
-	var stateTests map[string]testutil.StateTest
-	if err = json.Unmarshal(src, &stateTests); err != nil {
-		return err
-	}
-
-	// Iterate over all the stateTests, run them and aggregate the results
-	results, err := aggregateResultsFromStateTests(stateTests, cfg, jsonOut, bench)
-	if err != nil {
-		return err
-	}
-
-	out, _ := json.MarshalIndent(results, "", "  ")
-	fmt.Println(string(out))
-	return nil
+// traceSink receives the --json opcode trace and the per-test stateRoot line.
+// The tracer emits one line per opcode, so unbuffered stderr costs a write(2)
+// each; buffering is only safe while tests run sequentially, since with
+// workers > 1 every goroutine shares this writer.
+type traceSink struct {
+	io.Writer
+	buffered *bufio.Writer
 }
 
-func aggregateResultsFromStateTests(
-	stateTests map[string]testutil.StateTest, cfg vm.Config,
-	jsonOut bool, bench bool) ([]StatetestResult, error) {
+func newTraceSink(workers uint64) *traceSink {
+	if workers > 1 {
+		return &traceSink{Writer: os.Stderr}
+	}
+	bw := bufio.NewWriterSize(os.Stderr, int(64*datasize.KB))
+	return &traceSink{Writer: bw, buffered: bw}
+}
+
+// flush is called once per subtest, so a consumer streaming stderr still sees
+// whole tests, in order, without waiting for the run to end.
+func (s *traceSink) flush() {
+	if s.buffered == nil {
+		return
+	}
+	if err := s.buffered.Flush(); err != nil {
+		log.Warn("Failed to flush stderr", "err", err)
+	}
+}
+
+// stateTestEnv is the scratch database the tests run against. Building one
+// costs an MDBX env plus a datadir tree, so it is created once and reused: no
+// test ever commits, so rolling back each subtest's tx leaves it empty again.
+type stateTestEnv struct {
+	db     kv.TemporalRwDB
+	tmpDir string
+}
+
+func newStateTestEnv() (*stateTestEnv, error) {
 	tmpDir, err := os.MkdirTemp("", "erigon-statetest-*")
 	if err != nil {
 		return nil, err
 	}
-	defer dir.RemoveAll(tmpDir)
-	dirs := datadir.New(tmpDir)
+	return &stateTestEnv{db: temporaltest.NewTestDB(nil, datadir.New(tmpDir)), tmpDir: tmpDir}, nil
+}
 
-	db := temporaltest.NewTestDB(nil, dirs)
-	defer db.Close()
-
-	tx, txErr := db.BeginTemporalRw(context.Background())
-	if txErr != nil {
-		return nil, txErr
+func (e *stateTestEnv) Close() {
+	e.db.Close()
+	if err := dir.RemoveAll(e.tmpDir); err != nil {
+		log.Warn("failed to remove temp dir", "dir", e.tmpDir, "err", err)
 	}
-	defer tx.Rollback()
-	results := make([]StatetestResult, 0, len(stateTests))
+}
 
-	for key, test := range stateTests {
-		for _, st := range test.Subtests() {
-			// Run the test and aggregate the result
-			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
-
-			statedb, root, err := test.Run(nil, tx, st, cfg, dirs)
+func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, traceOut *traceSink, files []string, workers uint64, filter testFilter) ([]testResult, error) {
+	if workers == 1 {
+		env, err := newStateTestEnv()
+		if err != nil {
+			return nil, err
+		}
+		defer env.Close()
+		results := make([]testResult, 0, len(files)*4) // pre-allocate
+		for _, fname := range files {
+			r, err := runStateTest(ctx, cfg, traceOut, env, fname, filter)
 			if err != nil {
-				// Test failed, mark as so and dump any state to aid debugging
-				result.Pass, result.Error = false, err.Error()
+				return nil, err
 			}
+			results = append(results, r...)
+		}
+		return results, nil
+	}
+	var (
+		wg     sync.WaitGroup
+		fileCh = make(chan struct {
+			index int
+			fname string
+		}, len(files))
+		resultCh = make(chan fileResult, len(files))
+	)
+	for i, fname := range files {
+		fileCh <- struct {
+			index int
+			fname string
+		}{i, fname}
+	}
+	close(fileCh)
 
-			// print state root for evmlab tracing
-			if statedb != nil {
-				result.Root = &root
-				if jsonOut {
-					_, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", root.Bytes())
-					if printErr != nil {
-						log.Warn("Failed to write to stderr", "err", printErr)
+	for range workers {
+		wg.Go(func() {
+			// One env per worker: a second concurrent rwtx on the same MDBX env would deadlock.
+			env, err := newStateTestEnv()
+			if err != nil {
+				for item := range fileCh {
+					resultCh <- fileResult{index: item.index, err: err}
+				}
+				return
+			}
+			defer env.Close()
+			for item := range fileCh {
+				r, err := runStateTest(ctx, cfg, traceOut, env, item.fname, filter)
+				resultCh <- fileResult{index: item.index, results: r, err: err}
+			}
+		})
+	}
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	ordered := make([]fileResult, len(files))
+	for fr := range resultCh {
+		if fr.err != nil {
+			return nil, fr.err
+		}
+		ordered[fr.index] = fr
+	}
+	// Pre-estimate total results
+	total := 0
+	for _, fr := range ordered {
+		total += len(fr.results)
+	}
+	results := make([]testResult, 0, total)
+	for _, fr := range ordered {
+		results = append(results, fr.results...)
+	}
+	return results, nil
+}
+
+// runStateTest loads the state-test given by fname, and executes the test.
+func runStateTest(ctx *cli.Command, cfg vm.Config, traceOut *traceSink, env *stateTestEnv, fname string, filter testFilter) ([]testResult, error) {
+	src, err := os.ReadFile(fname)
+	if err != nil {
+		return nil, err
+	}
+	var stateTests map[string]testutil.StateTest
+	if err := json.Unmarshal(src, &stateTests); err != nil {
+		return nil, err
+	}
+
+	bench := ctx.Bool(BenchFlag.Name)
+	// Emit the per-test stateRoot line on stderr only when running sequentially.
+	// In parallel mode (workers > 1) the stderr writes from concurrent goroutines
+	// interleave non-deterministically, which defeats differential fuzzing tools
+	// (e.g. goevmlab) that rely on per-test ordering.
+	emitStateRoot := ctx.Uint64(WorkersFlag.Name) == 1
+	results := make([]testResult, 0, len(stateTests))
+	db := env.db
+
+	// Sorted, not map order: a differential-fuzzing consumer needs the same
+	// sequence of results for the same file on every run.
+	for _, key := range slices.Sorted(maps.Keys(stateTests)) {
+		if !filter.includeCase(fname, key) {
+			continue
+		}
+		test := stateTests[key]
+		for _, st := range test.Subtests() {
+			result := &testResult{Name: key, Fork: st.Fork, Pass: true}
+
+			func() {
+				tx, err := db.BeginTemporalRw(context.Background())
+				if err != nil {
+					result.Pass, result.Error = false, err.Error()
+					return
+				}
+				defer tx.Rollback()
+
+				// Per-subtest SD: closed without Flush so its writes never enter the branch cache.
+				sd, err := newStateTestSharedDomains(db, tx)
+				if err != nil {
+					result.Pass, result.Error = false, err.Error()
+					return
+				}
+				defer sd.Close()
+
+				statedb, root, err := test.Run(sd, tx, st, cfg)
+				if err != nil {
+					result.Pass, result.Error = false, err.Error()
+				}
+				if statedb != nil {
+					h := common.Hash(root)
+					result.Root = &h
+					if emitStateRoot {
+						if _, printErr := fmt.Fprintf(traceOut, "{\"stateRoot\": \"%#x\"}\n", h[:]); printErr != nil {
+							log.Warn("Failed to write to stderr", "err", printErr)
+						}
 					}
 				}
-			}
+				if bench {
+					// Reuse the subtest's tx+sd: a second concurrent rwtx on the same env would deadlock.
+					_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
+						_, _, gasUsed, _ := test.RunNoVerify(sd, tx, st, cfg)
+						return nil, gasUsed, nil
+					})
+					result.Stats = &stats
+				}
+			}()
 
-			// if benchmark requested rerun test w/o verification and collect stats
-			if bench {
-				_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
-					_, _, gasUsed, _ := test.RunNoVerify(nil, tx, st, cfg, dirs)
-					return nil, gasUsed, nil
-				})
-
-				result.Stats = &stats
-			}
-
+			traceOut.flush()
 			results = append(results, *result)
 		}
 	}

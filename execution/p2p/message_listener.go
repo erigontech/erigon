@@ -38,6 +38,12 @@ type DecodedInboundMessage[TPacket any] struct {
 	PeerId  *PeerId
 }
 
+// BlockBodiesEnvelope carries a request ID and the RLP payload of the body list.
+type BlockBodiesEnvelope struct {
+	RequestId     uint64
+	EncodedBodies []byte
+}
+
 type UnregisterFunc = event.UnregisterFunc
 
 type RegisterOpt func(*registerOptions)
@@ -69,29 +75,31 @@ func NewMessageListener(
 	peerPenalizer *PeerPenalizer,
 ) *MessageListener {
 	return &MessageListener{
-		logger:                  logger,
-		sentryClient:            sentryClient,
-		statusDataFactory:       statusDataFactory,
-		peerPenalizer:           peerPenalizer,
-		newBlockObservers:       event.NewObservers[*DecodedInboundMessage[*eth.NewBlockPacket]](),
-		newBlockHashesObservers: event.NewObservers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]](),
-		blockHeadersObservers:   event.NewObservers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]](),
-		blockBodiesObservers:    event.NewObservers[*DecodedInboundMessage[*eth.BlockBodiesPacket66]](),
-		peerEventObservers:      event.NewObservers[*sentryproto.PeerEvent](),
+		logger:                    logger,
+		sentryClient:              sentryClient,
+		statusDataFactory:         statusDataFactory,
+		peerPenalizer:             peerPenalizer,
+		newBlockObservers:         event.NewObservers[*DecodedInboundMessage[*eth.NewBlockPacket]](),
+		newBlockHashesObservers:   event.NewObservers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]](),
+		blockHeadersObservers:     event.NewObservers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]](),
+		blockBodiesObservers:      event.NewObservers[*DecodedInboundMessage[BlockBodiesEnvelope]](),
+		blockAccessListsObservers: event.NewObservers[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]](),
+		peerEventObservers:        event.NewObservers[*sentryproto.PeerEvent](),
 	}
 }
 
 type MessageListener struct {
-	logger                  log.Logger
-	sentryClient            sentryproto.SentryClient
-	statusDataFactory       libsentry.StatusDataFactory
-	peerPenalizer           *PeerPenalizer
-	newBlockObservers       *event.Observers[*DecodedInboundMessage[*eth.NewBlockPacket]]
-	newBlockHashesObservers *event.Observers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
-	blockHeadersObservers   *event.Observers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
-	blockBodiesObservers    *event.Observers[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]
-	peerEventObservers      *event.Observers[*sentryproto.PeerEvent]
-	stopWg                  sync.WaitGroup
+	logger                    log.Logger
+	sentryClient              sentryproto.SentryClient
+	statusDataFactory         libsentry.StatusDataFactory
+	peerPenalizer             *PeerPenalizer
+	newBlockObservers         *event.Observers[*DecodedInboundMessage[*eth.NewBlockPacket]]
+	newBlockHashesObservers   *event.Observers[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
+	blockHeadersObservers     *event.Observers[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
+	blockBodiesObservers      *event.Observers[*DecodedInboundMessage[BlockBodiesEnvelope]]
+	blockAccessListsObservers *event.Observers[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]]
+	peerEventObservers        *event.Observers[*sentryproto.PeerEvent]
+	stopWg                    sync.WaitGroup
 }
 
 func (ml *MessageListener) Run(ctx context.Context) error {
@@ -102,12 +110,10 @@ func (ml *MessageListener) Run(ctx context.Context) error {
 		ml.listenPeerEventsBackground,
 	}
 
-	ml.stopWg.Add(len(backgroundLoops))
 	for _, loop := range backgroundLoops {
-		go func() {
-			defer ml.stopWg.Done()
+		ml.stopWg.Go(func() {
 			loop(ctx)
-		}()
+		})
 	}
 
 	<-ctx.Done()
@@ -119,6 +125,7 @@ func (ml *MessageListener) Run(ctx context.Context) error {
 	ml.newBlockHashesObservers.Close()
 	ml.blockHeadersObservers.Close()
 	ml.blockBodiesObservers.Close()
+	ml.blockAccessListsObservers.Close()
 	return ctx.Err()
 }
 
@@ -134,8 +141,12 @@ func (ml *MessageListener) RegisterBlockHeadersObserver(observer event.Observer[
 	return ml.blockHeadersObservers.Register(observer)
 }
 
-func (ml *MessageListener) RegisterBlockBodiesObserver(observer event.Observer[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]) UnregisterFunc {
+func (ml *MessageListener) RegisterBlockBodiesObserver(observer event.Observer[*DecodedInboundMessage[BlockBodiesEnvelope]]) UnregisterFunc {
 	return ml.blockBodiesObservers.Register(observer)
+}
+
+func (ml *MessageListener) RegisterBlockAccessListsObserver(observer event.Observer[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]]) UnregisterFunc {
+	return ml.blockAccessListsObservers.Register(observer)
 }
 
 func (ml *MessageListener) RegisterPeerEventObserver(observer event.Observer[*sentryproto.PeerEvent], opts ...RegisterOpt) UnregisterFunc {
@@ -160,6 +171,7 @@ func (ml *MessageListener) listenInboundMessages(ctx context.Context) {
 				sentryproto.MessageId_NEW_BLOCK_HASHES_66,
 				sentryproto.MessageId_BLOCK_HEADERS_66,
 				sentryproto.MessageId_BLOCK_BODIES_66,
+				sentryproto.MessageId_BLOCK_ACCESS_LISTS_71,
 			},
 		}
 
@@ -175,7 +187,9 @@ func (ml *MessageListener) listenInboundMessages(ctx context.Context) {
 		case sentryproto.MessageId_BLOCK_HEADERS_66:
 			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockHeadersObservers, message)
 		case sentryproto.MessageId_BLOCK_BODIES_66:
-			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockBodiesObservers, message)
+			return notifyBlockBodiesObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockBodiesObservers, message)
+		case sentryproto.MessageId_BLOCK_ACCESS_LISTS_71:
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockAccessListsObservers, message)
 		default:
 			return nil
 		}
@@ -236,15 +250,7 @@ func notifyInboundMessageObservers[TPacket any](
 
 	var decodedData TPacket
 	if err := rlp.DecodeBytes(message.Data, &decodedData); err != nil {
-		if rlp.IsInvalidRLPError(err) {
-			logger.Debug(messageListenerLogPrefix("penalizing peer - invalid rlp"), "peerId", peerId, "err", err)
-
-			if penalizeErr := peerPenalizer.Penalize(ctx, peerId); penalizeErr != nil {
-				err = fmt.Errorf("%w: %w", penalizeErr, err)
-			}
-		}
-
-		return err
+		return handleInboundMessageDecodeError(ctx, logger, peerPenalizer, peerId, err)
 	}
 
 	decodedMessage := DecodedInboundMessage[TPacket]{
@@ -255,6 +261,72 @@ func notifyInboundMessageObservers[TPacket any](
 	observers.Notify(&decodedMessage)
 
 	return nil
+}
+
+func notifyBlockBodiesObservers(
+	ctx context.Context,
+	logger log.Logger,
+	peerPenalizer *PeerPenalizer,
+	observers *event.Observers[*DecodedInboundMessage[BlockBodiesEnvelope]],
+	message *sentryproto.InboundMessage,
+) error {
+	peerId := PeerIdFromH512(message.PeerId)
+	requestId, encodedBodies, err := decodeBlockBodiesEnvelope(message.Data)
+	if err != nil {
+		return handleInboundMessageDecodeError(ctx, logger, peerPenalizer, peerId, err)
+	}
+
+	observers.Notify(&DecodedInboundMessage[BlockBodiesEnvelope]{
+		InboundMessage: message,
+		Decoded: BlockBodiesEnvelope{
+			RequestId:     requestId,
+			EncodedBodies: encodedBodies,
+		},
+		PeerId: peerId,
+	})
+	return nil
+}
+
+func decodeBlockBodiesEnvelope(data []byte) (uint64, []byte, error) {
+	envelope, rest, err := rlp.SplitList(data)
+	if err != nil {
+		return 0, nil, err
+	}
+	if len(rest) != 0 {
+		return 0, nil, rlp.ErrMoreThanOneValue
+	}
+
+	requestId, encodedBodies, err := rlp.SplitUint64(envelope)
+	if err != nil {
+		return 0, nil, err
+	}
+	encodedBodies, rest, err = rlp.SplitList(encodedBodies)
+	if err != nil {
+		return 0, nil, err
+	}
+	if len(rest) != 0 {
+		return 0, nil, rlp.ErrMoreThanOneValue
+	}
+
+	return requestId, encodedBodies, nil
+}
+
+func handleInboundMessageDecodeError(
+	ctx context.Context,
+	logger log.Logger,
+	peerPenalizer *PeerPenalizer,
+	peerId *PeerId,
+	err error,
+) error {
+	if !rlp.IsInvalidRLPError(err) {
+		return err
+	}
+
+	logger.Debug(messageListenerLogPrefix("penalizing peer - invalid rlp"), "peerId", peerId, "err", err)
+	if penalizeErr := peerPenalizer.Penalize(ctx, peerId); penalizeErr != nil {
+		return fmt.Errorf("%w: %w", penalizeErr, err)
+	}
+	return err
 }
 
 func messageListenerLogPrefix(message string) string {
