@@ -2577,29 +2577,32 @@ func TestMarkWritesValidatedMarksACellRecreatedAtTheSameIncarnation(t *testing.T
 	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
 }
 
-// A base read of an account the BAL lists with no change needs no validation: any in-block write to it fails the
-// block in the BAL check. A read of an in-block write and an account with a BAL change are still validated.
-func TestValidateReadSet_BALReadOnlyAccountSkipsStorageValidation(t *testing.T) {
+// A read of the base skips validation only while no tx wrote a storage, lifecycle or address cell of the account;
+// each such cell below the reader makes the read stale.
+func TestValidateReadSet_BaseReadOfQuietAccountSkipsValidation(t *testing.T) {
 	t.Parallel()
+	base := ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}
 	for _, tc := range []struct {
-		name    string
-		account types.AccountChanges
-		read    ReadHeader
-		want    VersionValidity
+		name  string
+		path  AccountPath
+		value any
+		read  ReadHeader
+		want  VersionValidity
 	}{
-		{"read only", types.AccountChanges{}, ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}, VersionValid},
-		{"read of an aborted write", types.AccountChanges{}, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, VersionInvalid},
-		{"balance change", types.AccountChanges{BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}, ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}, VersionInvalid},
+		{"no cells", 0, nil, base, VersionValid},
+		{"storage write", StoragePath, *uint256.NewInt(8), base, VersionInvalid},
+		{"self-destruct", SelfDestructPath, true, base, VersionInvalid},
+		{"read of a removed write", 0, nil, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, VersionInvalid},
+		{"read of an aborted write", StoragePath, *uint256.NewInt(8), ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, VersionInvalid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			addr := getAddress(91)
 			key := accounts.InternKey(common.Hash{0x07})
-			account := tc.account
-			account.Address = addr.Value()
-			account.StorageReads = []common.Hash{key.Value()}
-			vm := NewVersionMap(types.BlockAccessList{account})
-			writeFor(vm, addr, StoragePath, key, Version{TxIndex: 1}, *uint256.NewInt(8), true)
+			vm := NewVersionMap(nil)
+			if tc.value != nil {
+				writeFor(vm, addr, tc.path, key, Version{TxIndex: 1}, tc.value, true)
+			}
 
 			rs := ReadSet{}
 			rs.SetStorage(addr, key, VersionedRead[uint256.Int]{

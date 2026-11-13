@@ -462,15 +462,15 @@ func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageK
 	return changes[k].Value, true
 }
 
-// balListsUnchanged reports whether the access list lists addr without any change.
-func (vm *VersionMap) balListsUnchanged(addr accounts.Address) bool {
-	address := addr.Value()
-	i := sort.Search(len(vm.bal), func(i int) bool { return bytes.Compare(vm.bal[i].Address[:], address[:]) >= 0 })
-	if i == len(vm.bal) || vm.bal[i].Address != address {
-		return false
+// hasNoCells reports whether no tx wrote a storage, lifecycle or address cell of addr.
+func (vm *VersionMap) hasNoCells(addr accounts.Address) bool {
+	e := vm.load(addr)
+	if e == nil {
+		return true
 	}
-	a := &vm.bal[i]
-	return len(a.StorageChanges) == 0 && len(a.BalanceChanges) == 0 && len(a.NonceChanges) == 0 && len(a.CodeChanges) == 0
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return len(e.Storage) == 0 && !hasLifecycleCells(e) && (e.Address == nil || e.Address.Len() == 0)
 }
 
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
@@ -2145,11 +2145,10 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		}
 	}
 	for a, inner := range rs.storage {
-		// A committed in-block write to an account the BAL lists unchanged fails the block in the BAL check, so a base
-		// read of it stays valid. A read of an in-block write may come from an aborted incarnation.
-		unchanged := vm.balListsUnchanged(a)
+		// With no storage, lifecycle or address cell, a read of the base cannot be stale.
+		quiet := vm.hasNoCells(a)
 		for k, tr := range inner {
-			if unchanged && tr.Source == StorageRead {
+			if quiet && tr.Version.TxIndex == originIndex {
 				continue
 			}
 			if !ok(vm.validateReadImpl(txIdx, a, StoragePath, k, tr.Source, tr.Version, liveStorage(vm, a, k, txIdx), checkVersion, traceInvalid, tracePrefix, false)) {

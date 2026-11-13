@@ -1368,9 +1368,7 @@ func TestEngineApiNewPayloadBALInvalid(t *testing.T) {
 // TestEngineApiBALUnchangedClaimLieInvalid pins that a BAL listing a written account with reads and no changes makes
 // the block invalid, also when a later tx of the block reads what an earlier one wrote.
 func TestEngineApiBALUnchangedClaimLieInvalid(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
+	forceParallelExec(t)
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -1414,9 +1412,7 @@ func TestEngineApiBALUnchangedClaimLieInvalid(t *testing.T) {
 // TestEngineApiBALUnchangedClaimLieShapesInvalid pins that a BAL hiding a committed storage write makes the block
 // invalid in each shape of the lie, and that a net-zero write inside one tx is an honest read.
 func TestEngineApiBALUnchangedClaimLieShapesInvalid(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
+	forceParallelExec(t)
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -1445,10 +1441,7 @@ func TestEngineApiBALUnchangedClaimLieShapesInvalid(t *testing.T) {
 			require.Len(t, c.StorageChanges, 1)
 			require.Len(t, c.StorageChanges[0].Changes, 2)
 			hideStorageWrites(c)
-			status := newPayloadWithBAL(ctx, t, eat, payload, bal)
-			// The second SSTORE's gas depends on the slot it reads, so a stale read can fail the gas check before the BAL one.
-			require.Equalf(t, enginetypes.InvalidStatus, status.Status, "validation error: %v", status.ValidationError)
-			require.NotNil(t, status.ValidationError)
+			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
 		})
 
 		t.Run("original value restored inside one tx", func(t *testing.T) {
@@ -1623,9 +1616,7 @@ func requireBALMismatch(t *testing.T, status *enginetypes.PayloadStatus) {
 // self-destruct, the second one reading the slot the first wrote, and that claiming the account unchanged while a tx
 // changes it makes the block invalid.
 func TestEngineApiBALSameTxSelfdestructLieInvalid(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
+	forceParallelExec(t)
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -1711,4 +1702,10 @@ func requireOnlyStorageReadsAndBalances(t *testing.T, c *types.AccountChanges, r
 		require.Equal(t, indexBalancePairs[2*i], uint64(bc.Index))
 		require.Equal(t, indexBalancePairs[2*i+1], bc.Value.Uint64())
 	}
+}
+
+func forceParallelExec(t *testing.T) {
+	prev := dbg.Exec3Parallel
+	dbg.Exec3Parallel = true
+	t.Cleanup(func() { dbg.Exec3Parallel = prev })
 }
