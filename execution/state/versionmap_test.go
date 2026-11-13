@@ -2609,7 +2609,15 @@ func TestValidateReadSet_BaseReadOfQuietAccountSkipsValidation(t *testing.T) {
 				ReadHeader: tc.read,
 				Val:        *uint256.NewInt(7),
 			})
-			require.Equal(t, tc.want, vm.ValidateReadSet(3, rs, validateEqualVersion, false, ""))
+			checks := 0
+			countChecks := func(read, write Version) VersionValidity {
+				checks++
+				return validateEqualVersion(read, write)
+			}
+			require.Equal(t, tc.want, vm.ValidateReadSet(3, rs, countChecks, false, ""))
+			if tc.value == nil && tc.read.Source == StorageRead {
+				require.Zero(t, checks, "a base read of a quiet account is not validated")
+			}
 		})
 	}
 }
