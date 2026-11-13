@@ -70,6 +70,8 @@ type StateCache struct {
 	// (including the content-addressed ones), leaving canonical publication as
 	// the only writer — an A/B lever and an operational kill switch.
 	disableFills bool
+	// warmupAccountFills counts running BAL warmups that fill every account of their block.
+	warmupAccountFills atomic.Int32
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -555,6 +557,15 @@ func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindTo
 
 	c.finishPublication(committedStateVersion)
 }
+
+// LeaveAccountFillsToWarmup makes other readers skip account fills until done runs: concurrent fills of the same
+// keys contend on the cache's single write path.
+func (c *StateCache) LeaveAccountFillsToWarmup() (done func()) {
+	c.warmupAccountFills.Add(1)
+	return func() { c.warmupAccountFills.Add(-1) }
+}
+
+func (c *StateCache) WarmupFillsAccounts() bool { return c.warmupAccountFills.Load() > 0 }
 
 // Caches reports whether the given domain has a cache attached.
 func (c *StateCache) Caches(domain kv.Domain) bool {

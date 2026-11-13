@@ -530,6 +530,9 @@ func perKeyWarmupBAL(bal types.BlockAccessList, cold coldState, storageRead bool
 }
 
 func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, tasks []balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}, workers int) error {
+	if bra.stateCache != nil && dbg.WarmOwnsAccountFills {
+		defer bra.stateCache.LeaveAccountFillsToWarmup()()
+	}
 	var nextTask atomic.Uint64
 	wg, workerCtx := errgroup.WithContext(ctx)
 	for w := range workers {
