@@ -228,7 +228,7 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 						"convert the datadir with `integration commitment convert --v3`", name, major)
 				}
 				if !statecfg.ExperimentalCommitmentV3 && major >= 3 {
-					return fmt.Errorf("commitment file %s requires commitment v3; run with COMMITMENT_V3=true", name)
+					return fmt.Errorf("commitment file %s requires commitment v3; run with --experimental.commitment-v3 or ERIGON_COMMITMENT_V3=true", name)
 				}
 				return nil
 			})

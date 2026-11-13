@@ -282,7 +282,7 @@ var cmdCommitmentVerify = &cobra.Command{
 
 func commitmentVerify(ctx context.Context, logger log.Logger) error {
 	if !statecfg.ExperimentalCommitmentV3 {
-		return errors.New("verify reads v3 commitment records; run with COMMITMENT_V3=true")
+		return errors.New("verify reads v3 commitment records; run with ERIGON_COMMITMENT_V3=true")
 	}
 	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, logger)
 	if err != nil {
@@ -582,7 +582,7 @@ Examples:
 			return errors.New("--continue is mutually exclusive with --restore")
 		}
 		if (convertV3 || convertRestore) && statecfg.ExperimentalCommitmentV3 {
-			return errors.New("convert --v3 and --restore open legacy commitment files; run them without COMMITMENT_V3=true")
+			return errors.New("convert --v3 and --restore open legacy commitment files; run them without ERIGON_COMMITMENT_V3=true")
 		}
 		if convertRestore {
 			return commitmentRestore(ctx, logger)
