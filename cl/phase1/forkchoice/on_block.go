@@ -1031,17 +1031,20 @@ func (f *ForkChoiceStore) queueLightClientEvents(before *cltypes.LightClientUpda
 		return
 	}
 	version := lcUpdate.AttestedHeader.Version().String()
+	sendFinality := f.forkGraph.NewestLightClientFinalityUpdate() == lcUpdate
 	f.queueEmit(func() {
-		f.emitters.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
-			Version: version,
-			Data: cltypes.LightClientFinalityUpdate{
-				AttestedHeader:  lcUpdate.AttestedHeader,
-				FinalizedHeader: lcUpdate.FinalizedHeader,
-				FinalityBranch:  lcUpdate.FinalityBranch,
-				SyncAggregate:   lcUpdate.SyncAggregate,
-				SignatureSlot:   lcUpdate.SignatureSlot,
-			},
-		})
+		if sendFinality {
+			f.emitters.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
+				Version: version,
+				Data: cltypes.LightClientFinalityUpdate{
+					AttestedHeader:  lcUpdate.AttestedHeader,
+					FinalizedHeader: lcUpdate.FinalizedHeader,
+					FinalityBranch:  lcUpdate.FinalityBranch,
+					SyncAggregate:   lcUpdate.SyncAggregate,
+					SignatureSlot:   lcUpdate.SignatureSlot,
+				},
+			})
+		}
 		f.emitters.State().SendLightClientOptimisticUpdate(&beaconevents.LightClientOptimisticUpdateData{
 			Version: version,
 			Data: cltypes.LightClientOptimisticUpdate{
