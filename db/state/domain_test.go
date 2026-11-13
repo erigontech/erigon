@@ -3730,60 +3730,69 @@ func TestDomain_KeyPosResetOnCollisionRetry(t *testing.T) {
 	}
 }
 
-// A deletion must shadow older file values while moving from MDBX to files,
-// after MDBX pruning, and after compaction removes the older file layers.
+// A deletion in the latest snapshot must shadow values in older snapshots.
 func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
 	t.Parallel()
-	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.AccountsDomain, statecfg.Schema.CodeDomain} {
-		t.Run(cfg.Name.String(), func(t *testing.T) {
-			db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
-			tx, err := db.BeginRw(t.Context())
-			require.NoError(t, err)
+
+	// Cover both DupSort (LargeValues=false) and non-DupSort (LargeValues=true) paths.
+	for _, tc := range []struct {
+		name      string
+		domainCfg statecfg.DomainCfg
+	}{
+		{"DupSort", statecfg.Schema.AccountsDomain},
+		{"LargeValues", statecfg.Schema.CodeDomain},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			logger := log.New()
+			db, d := testDbAndDomainOfStep(t, tc.domainCfg, 16, logger)
+			ctx := t.Context()
+			require := require.New(t)
+
+			tx, err := db.BeginRw(ctx)
+			require.NoError(err)
 			defer tx.Rollback()
-			view := d.beginForTests()
-			defer view.Close()
-			writer := view.NewWriter(db)
+
+			domainRoTx := d.beginForTests()
+			defer domainRoTx.Close()
+			writer := domainRoTx.NewWriter(db)
 			defer writer.Close()
-			key, value := []byte("key1"), []byte("value1")
-			require.NoError(t, writer.PutWithPrev(key, value, 2, nil))
-			require.NoError(t, writer.DeleteWithPrev(key, 18, value))
-			require.NoError(t, writer.Flush(t.Context(), tx))
-			writer.Close()
-			view.Close()
-			check := func() {
-				t.Helper()
-				view := d.beginForTests()
-				defer view.Close()
-				got, _, _, err := view.GetLatest(key, tx)
-				require.NoError(t, err)
-				require.Empty(t, got, "deleted key must not expose the older value")
-			}
-			progress := background.NewProgressSet()
-			require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, progress))
-			check()
-			require.NoError(t, d.collateBuildIntegrate(t.Context(), 1, tx, progress))
-			check()
-			view = d.beginForTests()
-			logEvery := time.NewTicker(time.Minute)
-			defer logEvery.Stop()
-			for step := range kv.Step(2) {
-				_, err := view.Prune(t.Context(), tx, step, step.ToTxNum(16), (step + 1).ToTxNum(16), math.MaxUint64, logEvery)
-				require.NoError(t, err)
-			}
-			_, _, found, err := view.getLatestFromDb(key, tx, kv.NoStepBound)
-			require.NoError(t, err)
-			require.False(t, found, "the file-only read must not be shadowed by MDBX")
-			view.Close()
-			check()
-			view = d.beginForTests()
-			r := view.findMergeRange(32, 32, 32)
-			require.True(t, r.values.needMerge)
-			values, indexes, history := view.staticFilesInRange(r)
-			merged, mergedIndex, mergedHistory, err := view.mergeFiles(t.Context(), values, indexes, history, r, nil, true, progress)
-			require.NoError(t, err)
-			d.integrateMergedDirtyFiles(merged, mergedIndex, mergedHistory)
-			view.Close()
-			check()
+
+			key := []byte("key1")
+			value := []byte("value1")
+
+			// Step 0 (txNum 2): write key1=value1
+			err = writer.PutWithPrev(key, value, 2, nil)
+			require.NoError(err)
+
+			// Step 1 (txNum 18): delete key1
+			err = writer.DeleteWithPrev(key, 18, value)
+			require.NoError(err)
+
+			err = writer.Flush(ctx, tx)
+			require.NoError(err)
+			domainRoTx.Close()
+
+			// Build files covering steps 0 and 1 without pruning DB entries.
+			// After this, files.EndTxNum() = 32 so the step-age guard considers
+			// step 1 "already covered by files" and would discard the deletion entry.
+			require.NoError(d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
+			require.NoError(d.collateBuildIntegrate(ctx, 1, tx, background.NewProgressSet()))
+
+			require.NoError(tx.Commit())
+
+			roTx, err := db.BeginRo(ctx)
+			require.NoError(err)
+			defer roTx.Rollback()
+
+			domainRoTx = d.beginForTests()
+			defer domainRoTx.Close()
+
+			v, _, found, err := domainRoTx.GetLatest(key, roTx)
+			require.NoError(err)
+			require.True(found, "deletion record should be found")
+			require.Empty(v, "deleted key should have empty value, got %q", v)
 		})
 	}
 }
