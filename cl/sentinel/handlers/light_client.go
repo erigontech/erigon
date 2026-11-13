@@ -70,7 +70,7 @@ func (c *ConsensusHandlers) finalityLightClientUpdateHandler(s network.Stream) e
 
 func (c *ConsensusHandlers) lightClientBootstrapHandler(s network.Stream) error {
 	root := &cltypes.Root{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, root, clparams.Phase0Version); err != nil {
+	if err := ssz_snappy.DecodeAndReadFixedSizeNoForkDigest(s, root, clparams.Phase0Version); err != nil {
 		return err
 	}
 
@@ -92,7 +92,7 @@ func (c *ConsensusHandlers) lightClientBootstrapHandler(s network.Stream) error 
 
 func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) error {
 	req := &cltypes.LightClientUpdatesByRangeRequest{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
+	if err := ssz_snappy.DecodeAndReadFixedSizeNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err
 	}
 	endPeriod := req.StartPeriod + req.Count

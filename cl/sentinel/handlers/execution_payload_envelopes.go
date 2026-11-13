@@ -43,7 +43,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	// Use current epoch's version for decoding
 	version := c.beaconConfig.GetCurrentStateVersion(curEpoch)
 	req := &cltypes.ExecutionPayloadEnvelopesByRangeRequest{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
+	if err := ssz_snappy.DecodeAndReadFixedSizeNoForkDigest(s, req, version); err != nil {
 		return err
 	}
 
