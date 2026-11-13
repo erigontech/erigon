@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-func seedBlobKZGTestPool(t *testing.T, ctx context.Context) *TxPool {
+func seedBlobKZGTestPool(t testing.TB, ctx context.Context) *TxPool {
 	t.Helper()
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))

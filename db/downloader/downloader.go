@@ -540,13 +540,14 @@ func (d *Downloader) StartChainTomlDiscovery(ctx context.Context, networkName st
 }
 
 // StartTorrentPeerManager launches the background torrent peer manager that
-// synchronizes torrent peers with the DevP2P peer set.
+// synchronizes torrent peers with the DevP2P peer set. It does not run when the
+// client does not dial peers: its reachability check would dial them anyway.
 func (d *Downloader) StartTorrentPeerManager(ctx context.Context) {
 	d.lock.RLock()
 	fn := d.nodeSourceFn
 	d.lock.RUnlock()
 
-	if fn == nil {
+	if fn == nil || !d.cfg.ClientConfig.DialForPeerConns {
 		return
 	}
 

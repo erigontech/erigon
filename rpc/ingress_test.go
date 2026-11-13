@@ -27,7 +27,7 @@ import (
 // TestBudgetedReaderChargesBytesPastSmallBodyLimit pins that a body is charged exactly for
 // the bytes past smallBodyLimit it has delivered, and released as a whole.
 func TestBudgetedReaderChargesBytesPastSmallBodyLimit(t *testing.T) {
-	budget := &ingressBudget{limit: maxRequestContentLength}
+	budget := &ingressBudget{limit: MaxRequestContentLength}
 	size := int(smallBodyLimit) + 3
 	body := budget.reader(bytes.NewReader(make([]byte, size)))
 

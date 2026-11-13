@@ -176,6 +176,11 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 			names      []string
 			expression strings.Builder // canonical parameter expression
 		)
+		if len(components) > 0 {
+			fields = make([]reflect.StructField, len(components))
+			elems = make([]*Type, len(components))
+			names = make([]string, len(components))
+		}
 		expression.WriteString("(")
 		overloadedNames := make(map[string]string)
 		for idx, c := range components {
@@ -191,13 +196,13 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 				return Type{}, fmt.Errorf("abi: field %d has invalid name: abi name %q normalized to go field %q", idx, c.Name, fieldName)
 			}
 			overloadedNames[fieldName] = fieldName
-			fields = append(fields, reflect.StructField{
+			fields[idx] = reflect.StructField{
 				Name: fieldName, // reflect.StructOf will panic for any exported field.
 				Type: cType.GetType(),
 				Tag:  reflect.StructTag("json:\"" + c.Name + "\""),
-			})
-			elems = append(elems, &cType)
-			names = append(names, c.Name)
+			}
+			elems[idx] = &cType
+			names[idx] = c.Name
 			expression.WriteString(cType.stringKind)
 			if idx != len(components)-1 {
 				expression.WriteString(",")

@@ -145,7 +145,7 @@ func TestValidateChainCancelsWarmup(t *testing.T) {
 			require.NoError(t, warmupCtx.Err(), "warmup must remain active before validation")
 			go func() {
 				defer close(done)
-				result, err = m.ValidateChain(t.Context(), block.Header())
+				result, err = m.ValidateChain(t.Context(), block)
 			}()
 			select {
 			case <-done:

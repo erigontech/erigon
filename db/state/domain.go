@@ -776,7 +776,7 @@ func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 }
 
 func (dt *DomainRoTx) getLatestFromFile(i int, filekey, buf []byte, hi, lo uint64) (v []byte, ok bool, offset uint64, err error) {
-	if dbg.KVReadLevelledMetrics {
+	if dbg.KVFileReadSummaries {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
 
@@ -813,7 +813,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey, buf []byte, hi, lo uint6
 }
 
 func (dt *DomainRoTx) getLatestFromFileValSize(i int, filekey []byte, hi, lo uint64) (size int, ok bool, err error) {
-	if dbg.KVReadLevelledMetrics {
+	if dbg.KVFileReadSummaries {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {

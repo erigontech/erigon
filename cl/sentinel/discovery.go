@@ -17,6 +17,7 @@
 package sentinel
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -79,7 +80,7 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 	}
 
 	// Create a filter that matches any of our target subnets
-	iterator := s.listener.RandomNodes()
+	iterator := s.nodesOnOurFork(s.listener.RandomNodes())
 	filteredIterator := enode.Filter(iterator, func(node *enode.Node) bool {
 		var peerSubnets bitfield.Bitvector64
 		if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
@@ -190,6 +191,24 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 	}
 	// ctxErr tells a search that ran out of time or was cancelled from one whose walk ended on its own.
 	log.Debug("[Sentinel] Subnet peer search ended", "nodesChecked", checked, "subnetsReachedMinPeers", satisfied, "subnetsSearched", len(subnets), "peersFound", totalFound, "ctxErr", ctx.Err())
+}
+
+// nodesOnOurFork passes on only the discovered nodes that advertise our current fork digest; every dial path takes
+// discovered nodes through it.
+func (s *Sentinel) nodesOnOurFork(it enode.Iterator) enode.Iterator {
+	return enode.Filter(it, s.onOurFork)
+}
+
+// onOurFork reports whether a discovered node advertises our current fork digest in its ENR. Discovery is shared by
+// every network, and a node without it, such as one of another network, of another fork or an execution layer node,
+// fails the status handshake after the dial.
+func (s *Sentinel) onOurFork(node *enode.Node) bool {
+	var forkID []byte
+	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.Eth2key, &forkID)); err != nil || len(forkID) < 4 {
+		return false
+	}
+	digest, err := s.ethClock.CurrentForkDigest()
+	return err == nil && bytes.Equal(forkID[:4], digest[:])
 }
 
 // proactiveSubnetPeerSearch is a goroutine that monitors subnet coverage
@@ -498,8 +517,10 @@ func (s *Sentinel) listenForPeers() {
 		return
 	}
 
-	iterator := s.listener.RandomNodes()
+	iterator := s.nodesOnOurFork(s.listener.RandomNodes())
 	defer iterator.Close()
+	// The filter skips rejected nodes inside Next, so the loop below only sees the context end once the iterator closes.
+	defer context.AfterFunc(s.ctx, iterator.Close)()
 	for {
 		if err := s.ctx.Err(); err != nil {
 			log.Debug("Stopping Ethereum 2.0 peer discovery", "err", err)

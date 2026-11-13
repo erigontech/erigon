@@ -333,6 +333,7 @@ func tableScanningPrune(
 		return nil, fmt.Errorf("cursor position %s: %w", filenameBase, err)
 	}
 	var polls int
+	var walkKey []byte
 	for ; val != nil; val, txNumBytes, err = valDelCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
@@ -397,6 +398,7 @@ func tableScanningPrune(
 		//   - firstIsOldest (PrefixVal): once we cross txTo, all remaining are newer.
 		//   - !firstIsOldest (StepValue): once we cross under txFrom, all are older.
 		{
+			walkKey = append(walkKey[:0], val...)
 			_, err = valDelCursor.FirstDup()
 			if err != nil {
 				return nil, fmt.Errorf("FirstDup iterate over %s index keys: %w", filenameBase, err)
@@ -405,7 +407,7 @@ func tableScanningPrune(
 				if err != nil {
 					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 				}
-				txNumDup := txNumGetter(val, txNumBytes)
+				txNumDup := txNumGetter(walkKey, txNumBytes)
 				if firstIsOldest {
 					if txNumDup < txFrom {
 						continue
@@ -434,9 +436,9 @@ func tableScanningPrune(
 				time.Sleep(*throttling)
 			}
 			if ctx.Err() != nil {
-				stat.LastPrunedValue = bytes.Clone(val)
+				stat.LastPrunedValue = bytes.Clone(walkKey)
 				stat.ValueProgress = InProgress
-				return bytes.Clone(val), nil
+				return bytes.Clone(walkKey), nil
 			}
 		}
 	nextKey:

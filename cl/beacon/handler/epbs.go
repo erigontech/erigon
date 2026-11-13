@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/envelope_history"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/transition"
@@ -918,6 +919,10 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 		finalizedSlot := a.forkchoiceStore.FinalizedCheckpoint().Epoch * a.beaconChainCfg.SlotsPerEpoch
 		isFinalized = blockRoot == canonicalRoot && slot <= finalizedSlot
 	}
+	if a.forkchoiceStore.IsEnvelopeRejected(blockRoot) {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+			fmt.Errorf("execution payload envelope not found for block %v", blockRoot))
+	}
 	return newBeaconResponse(envelope).
 		WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
 		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
@@ -925,11 +930,17 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 }
 
 func (a *ApiHandler) executionPayloadEnvelopeForRoot(ctx context.Context, blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, uint64, bool, error) {
+	if a.forkchoiceStore.IsEnvelopeRejected(blockRoot) {
+		return nil, 0, false, nil
+	}
 	var envelope *cltypes.SignedExecutionPayloadEnvelope
 	var err error
 	if a.forkchoiceStore.HasEnvelope(blockRoot) {
 		envelope, err = a.forkchoiceStore.ReadEnvelopeFromDisk(blockRoot)
 		if err != nil {
+			if a.forkchoiceStore.IsEnvelopeRejected(blockRoot) {
+				return nil, 0, false, nil
+			}
 			return nil, 0, false, err
 		}
 	}
@@ -1024,6 +1035,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
+	receivedAt := time.Now()
 	if !blobDataIncluded && contents == nil {
 		contents, err = a.pendingLocalExecutionPayloadEnvelopeContents(signedEnvelope)
 		if err != nil {
@@ -1047,6 +1059,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			return
 		}
 	}
+	gossipWithContents := canonical && validation == BlockPublishingValidationGossip && contents != nil
 	admissionToken, err := a.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(
 		r.Context(),
 		signedEnvelope.Message.BeaconBlockRoot,
@@ -1063,11 +1076,17 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	if err != nil {
 		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen) {
 			lookupRequired := errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeLookupRequired)
+			// The anchor envelope is stored at checkpoint sync without data availability, the state transition or a broadcast by this node.
+			answerFromState := gossipWithContents && signedEnvelope.Message.BeaconBlockRoot != a.forkchoiceStore.AnchorRoot()
 			var persisted *cltypes.SignedExecutionPayloadEnvelope
 			if lookupRequired {
 				persisted = a.readExecutionPayloadEnvelopeForAdmissionRetry(gossipKey)
 			}
 			if lookupRequired && !signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
+				if answerFromState && a.executionPayloadEnvelopeBroadcastOnly(gossipKey, signedEnvelope) {
+					w.WriteHeader(http.StatusAccepted)
+					return
+				}
 				beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err).WriteTo(w)
 				return
 			}
@@ -1078,6 +1097,22 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			}
 			retry, retrying, retryClaimed = a.claimExecutionPayloadEnvelopeRetry(gossipKey, requestRoot)
 			if !retrying {
+				if answerFromState {
+					if !lookupRequired {
+						persisted = a.persistedExecutionPayloadEnvelope(gossipKey.BeaconBlockRoot)
+					}
+					// Fork choice keeps the persisted envelope of a payload that it marks invalid.
+					payloadStatus, known := a.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(gossipKey.BeaconBlockRoot)
+					invalidated := known && payloadStatus == execution_client.PayloadStatusInvalidated
+					if !invalidated && signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
+						w.WriteHeader(http.StatusOK)
+						return
+					}
+					if a.executionPayloadEnvelopeBroadcasts.Contains(requestRoot) {
+						w.WriteHeader(http.StatusAccepted)
+						return
+					}
+				}
 				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 				return
 			}
@@ -1108,6 +1143,11 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			a.forkchoiceStore.FinishExecutionPayloadEnvelopeForGossip(admissionToken, accepted)
 		}()
 	}
+	contentsRequired := a.executionPayloadEnvelopeContentsRequired(gossipKey, signedEnvelope)
+	if contents == nil && contentsRequired {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errExecutionPayloadEnvelopeContentsRequired).WriteTo(w)
+		return
+	}
 	if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
@@ -1123,10 +1163,89 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			return
 		}
 	}
-	contentsIntegrationFailed := false
+	// The envelope goes out before its columns and the EL, but only after the contents validation, so that
+	// a 400 still means the envelope was not broadcast.
+	envelopeFirst := gossipWithContents && (!retrying || retry.GossipRequired)
+	workCtx := r.Context()
+	if envelopeFirst {
+		var cancel context.CancelFunc
+		workCtx, cancel = context.WithTimeout(context.WithoutCancel(r.Context()), time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second)
+		defer cancel()
+		releasePreparation := a.forkchoiceStore.BeginPendingPayloadEnvelope(gossipKey.BeaconBlockRoot)
+		defer releasePreparation()
+		context.AfterFunc(workCtx, releasePreparation)
+	}
+	var columnWork *envelopeColumnWork
 	if contents != nil {
-		if err := a.validateAndStoreExecutionPayloadEnvelopeContents(r.Context(), contents); err != nil {
-			if !errors.Is(err, errExecutionPayloadEnvelopeIntegration) {
+		columnWork, err = a.validateExecutionPayloadEnvelopeContents(workCtx, contents)
+		if err == nil && envelopeFirst {
+			err = workCtx.Err()
+		}
+		if err != nil {
+			status := http.StatusBadRequest
+			if envelopeFirst && errors.Is(err, context.DeadlineExceeded) && errors.Is(workCtx.Err(), context.DeadlineExceeded) {
+				status = http.StatusServiceUnavailable
+				err = fmt.Errorf("execution payload envelope contents validation did not finish within a slot, nothing was broadcast: %w", err)
+			}
+			beaconhttp.NewEndpointError(status, err).WriteTo(w)
+			return
+		}
+	}
+	blockEquivocated := func() bool {
+		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
+		return !ok || block == nil || block.Block == nil ||
+			a.forkchoiceStore.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, signedEnvelope.Message.BeaconBlockRoot)
+	}
+	if validation != BlockPublishingValidationGossip {
+		if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForConsensus(r.Context(), signedEnvelope, columnWork == nil); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+		if validation == BlockPublishingValidationConsensusAndEquivocation && blockEquivocated() {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("execution payload envelope block has an equivocation")).WriteTo(w)
+			return
+		}
+	}
+	// The block epoch's digest, not the wall clock's, so that a POST after an epoch boundary still reaches
+	// the block's topics.
+	var forkDigest common.Bytes4
+	if columnWork != nil && (envelopeFirst || a.sentinel != nil) {
+		forkDigest, err = a.ethClock.ComputeForkDigest(columnWork.slot / a.beaconChainCfg.SlotsPerEpoch)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
+		}
+	}
+	if envelopeFirst {
+		encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
+		if err == nil {
+			err = a.gossipManager.PublishToForkDigest(workCtx, forkDigest, gossip.TopicNameExecutionPayload, encodedSSZ)
+		}
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
+		}
+		a.forkchoiceStore.RecordExecutionPayloadArrival(gossipKey.BeaconBlockRoot, signedEnvelope.Message.Payload.SlotNumber, receivedAt)
+		if envelopeRoot, err := signedEnvelope.HashSSZ(); err == nil {
+			a.executionPayloadEnvelopeBroadcasts.Add(envelopeRoot, struct{}{})
+		}
+	}
+	contentsIntegrationFailed := false
+	columnWriteFailed := false
+	var columnPublishErr error
+	if columnWork != nil {
+		publishCtx := workCtx
+		if !envelopeFirst {
+			// The columns are still published, within a slot, when the client goes away.
+			var cancelPublish context.CancelFunc
+			publishCtx, cancelPublish = context.WithTimeout(context.WithoutCancel(r.Context()), time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second)
+			defer cancelPublish()
+		}
+		if err := a.publishAndStoreExecutionPayloadEnvelopeColumns(workCtx, publishCtx, columnWork, forkDigest); err != nil {
+			columnWriteFailed = errors.Is(err, errExecutionPayloadEnvelopeIntegration)
+			if errors.Is(err, errExecutionPayloadColumnPublish) {
+				columnPublishErr = err
+			} else if !envelopeFirst && !errors.Is(err, errExecutionPayloadEnvelopeIntegration) {
 				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 				return
 			}
@@ -1134,8 +1253,9 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		}
 	}
 	if validation != BlockPublishingValidationGossip {
-		if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForConsensus(r.Context(), signedEnvelope); err != nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		finalizedSlot := a.forkchoiceStore.FinalizedCheckpoint().Epoch * a.beaconChainCfg.SlotsPerEpoch
+		if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)).WriteTo(w)
 			return
 		}
 	}
@@ -1148,19 +1268,29 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	emitGossipEvent := false
 	emitIntegrationEvents := false
 	var persistenceErr error
-	// An interrupted validation parks the envelope without persisting it; a re-POST must process it again.
-	validationInterrupted := false
-	if err := a.processExecutionPayloadEnvelope(r.Context(), signedEnvelope); err != nil {
+	// Set when the EL verdict is pending, or when fork choice ignored an envelope that this request already
+	// published. The claim is then not marked as seen.
+	integrationPending := false
+	if err := a.processExecutionPayloadEnvelope(workCtx, signedEnvelope); err != nil {
 		switch {
+		case validation != BlockPublishingValidationGossip &&
+			a.forkchoiceStore.ExecutionPayloadInvalidated(gossipKey.BeaconBlockRoot, signedEnvelope.Message.Payload.BlockHash):
+			// A payload marked invalid after the consensus validation is never accepted or published, whatever error
+			// the import returned: an ignored or interrupted import does not recheck it.
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errExecutionPayloadInvalidated).WriteTo(w)
+			return
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
 			persistenceErr = err
 		case errors.Is(err, forkchoice.ErrPayloadValidationInterrupted):
 			// The envelope passed every consensus check; only the EL verdict is pending.
-			validationInterrupted = true
-		case !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
+			integrationPending = true
+		case validation != BlockPublishingValidationGossip && columnWriteFailed && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
+			// Consensus validation saw the blob data, so this local write failure remains repairable.
+		case !envelopeFirst && !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
-		case canonical && validation != BlockPublishingValidationGossip:
+		case canonical && validation != BlockPublishingValidationGossip &&
+			!(errors.Is(err, forkchoice.ErrIgnore) && (retrying || contentsRequired)):
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
@@ -1168,13 +1298,17 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		case persistenceErr != nil:
 			gossipValidated = true
 		case errors.Is(err, forkchoice.ErrIgnore):
-			persisted, _ := a.forkchoiceStore.ReadEnvelopeFromDisk(signedEnvelope.Message.BeaconBlockRoot)
+			persisted := a.persistedExecutionPayloadEnvelope(signedEnvelope.Message.BeaconBlockRoot)
 			if !signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
-				if canonical {
+				if canonical && !envelopeFirst {
 					beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err).WriteTo(w)
 					return
 				}
 				status = http.StatusAccepted
+				if envelopeFirst {
+					integrationPending = true
+					emitGossipEvent = true
+				}
 				break
 			}
 			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
@@ -1204,8 +1338,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		emitIntegrationEvents = true
 	}
 	if gossipValidated && (canonical || a.sentinel != nil) && validation == BlockPublishingValidationConsensusAndEquivocation {
-		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
-		if !ok || block == nil || block.Block == nil || a.forkchoiceStore.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, signedEnvelope.Message.BeaconBlockRoot) {
+		if blockEquivocated() {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("execution payload envelope block has an equivocation")).WriteTo(w)
 			return
 		}
@@ -1239,7 +1372,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			a.emitFullHeadV2(block, signedEnvelope.Message.BeaconBlockRoot)
 		}
 	}
-	if gossipValidated && (canonical || a.sentinel != nil) && (!retrying || retry.GossipRequired) {
+	if !envelopeFirst && gossipValidated && (canonical || a.sentinel != nil) && (!retrying || retry.GossipRequired) {
 		encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
@@ -1252,34 +1385,48 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		if err != nil {
 			if envelopeRoot, hashErr := signedEnvelope.HashSSZ(); hashErr == nil {
 				a.recordExecutionPayloadEnvelopeRetry(gossipKey, executionPayloadEnvelopeRetry{
-					EnvelopeRoot: envelopeRoot, GossipRequired: true,
+					EnvelopeRoot: envelopeRoot, GossipRequired: true, ContentsRequired: contentsIntegrationFailed,
 				})
 			}
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
 	}
-	if contentsIntegrationFailed {
+	switch {
+	case contentsIntegrationFailed:
 		if envelopeRoot, hashErr := signedEnvelope.HashSSZ(); hashErr == nil {
-			a.recordExecutionPayloadEnvelopeRetry(gossipKey, executionPayloadEnvelopeRetry{EnvelopeRoot: envelopeRoot})
+			a.recordExecutionPayloadEnvelopeRetry(gossipKey, executionPayloadEnvelopeRetry{EnvelopeRoot: envelopeRoot, ContentsRequired: true})
 		}
-	} else if !validationInterrupted {
+	case !integrationPending:
 		a.clearExecutionPayloadEnvelopeRetry(gossipKey)
+	case columnWork != nil:
+		a.clearExecutionPayloadEnvelopeContentsRequired(gossipKey)
 	}
 	if persistenceErr != nil {
 		beaconhttp.WrapEndpointError(persistenceErr).WriteTo(w)
 		return
 	}
+	if columnPublishErr != nil {
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, columnPublishErr).WriteTo(w)
+		return
+	}
 
-	accepted = !contentsIntegrationFailed && !validationInterrupted
+	accepted = !contentsIntegrationFailed && !integrationPending
 	w.WriteHeader(status)
 }
 
-func (a *ApiHandler) readExecutionPayloadEnvelopeForAdmissionRetry(key executionPayloadEnvelopeGossipKey) *cltypes.SignedExecutionPayloadEnvelope {
-	persisted, err := a.forkchoiceStore.ReadEnvelopeFromDisk(key.BeaconBlockRoot)
+func (a *ApiHandler) persistedExecutionPayloadEnvelope(blockRoot common.Hash) *cltypes.SignedExecutionPayloadEnvelope {
+	persisted, err := a.forkchoiceStore.ReadEnvelopeFromDisk(blockRoot)
 	if err != nil || persisted == nil || persisted.Message == nil {
-		a.forkchoiceStore.ForgetExecutionPayloadEnvelopeForGossip(key.BeaconBlockRoot, key.BuilderIndex)
 		return nil
+	}
+	return persisted
+}
+
+func (a *ApiHandler) readExecutionPayloadEnvelopeForAdmissionRetry(key executionPayloadEnvelopeGossipKey) *cltypes.SignedExecutionPayloadEnvelope {
+	persisted := a.persistedExecutionPayloadEnvelope(key.BeaconBlockRoot)
+	if persisted == nil {
+		a.forkchoiceStore.ForgetExecutionPayloadEnvelopeForGossip(key.BeaconBlockRoot, key.BuilderIndex)
 	}
 	return persisted
 }
@@ -1416,99 +1563,104 @@ func (a *ApiHandler) pendingLocalExecutionPayloadEnvelopeContents(signedEnvelope
 	return contents, nil
 }
 
-func (a *ApiHandler) validateAndStoreExecutionPayloadEnvelopeContents(ctx context.Context, contents *cltypes.SignedExecutionPayloadEnvelopeContents) error {
-	if contents == nil || contents.SignedExecutionPayloadEnvelope == nil {
-		return errors.New("execution payload envelope contents has nil envelope")
-	}
-	if err := contents.SignedExecutionPayloadEnvelope.ValidateForPersistence(a.beaconChainCfg); err != nil {
-		return err
-	}
-	if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelope(ctx, contents.SignedExecutionPayloadEnvelope); err != nil {
-		return err
-	}
-	return a.storeExecutionPayloadEnvelopeContents(ctx, contents)
+type envelopeColumnWork struct {
+	slot        uint64
+	blockRoot   common.Hash
+	commitments *solid.ListSSZ[*cltypes.KZGCommitment]
+	bundles     map[common.Bytes48]BlobBundle
 }
 
-var errExecutionPayloadEnvelopeIntegration = errors.New("execution payload envelope integration failed")
-
-func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, contents *cltypes.SignedExecutionPayloadEnvelopeContents) error {
-	if contents == nil || contents.SignedExecutionPayloadEnvelope == nil || contents.SignedExecutionPayloadEnvelope.Message == nil {
-		return errors.New("execution payload envelope contents has nil envelope")
+func (a *ApiHandler) validateExecutionPayloadEnvelopeContents(ctx context.Context, contents *cltypes.SignedExecutionPayloadEnvelopeContents) (*envelopeColumnWork, error) {
+	if contents == nil || contents.SignedExecutionPayloadEnvelope == nil {
+		return nil, errors.New("execution payload envelope contents has nil envelope")
+	}
+	if err := contents.SignedExecutionPayloadEnvelope.ValidateForPersistence(a.beaconChainCfg); err != nil {
+		return nil, err
+	}
+	if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelope(ctx, contents.SignedExecutionPayloadEnvelope); err != nil {
+		return nil, err
 	}
 	envelope := contents.SignedExecutionPayloadEnvelope.Message
 	block, ok := a.forkchoiceStore.GetBlock(envelope.BeaconBlockRoot)
 	if !ok || block == nil || block.Block == nil || block.Block.Body == nil {
-		return errors.New("execution payload envelope references an unknown block")
+		return nil, errors.New("execution payload envelope references an unknown block")
 	}
 	bid := block.Block.Body.GetSignedExecutionPayloadBid()
 	if bid == nil || bid.Message == nil {
-		return errors.New("execution payload envelope block has no bid")
+		return nil, errors.New("execution payload envelope block has no bid")
 	}
 	commitments := &bid.Message.BlobKzgCommitments
 	if contents.Blobs == nil || contents.KZGProofs == nil || contents.Blobs.Len() != commitments.Len() ||
 		contents.KZGProofs.Len() != commitments.Len()*int(a.beaconChainCfg.NumberOfColumns) {
-		return errors.New("execution payload envelope blob, proof, and commitment counts do not match")
+		return nil, errors.New("execution payload envelope blob, proof, and commitment counts do not match")
 	}
-	if commitments.Len() == 0 {
+	bundles, err := a.blobBundlesFor(commitments, contents.Blobs, contents.KZGProofs, int(a.beaconChainCfg.NumberOfColumns), true)
+	if err != nil {
+		return nil, err
+	}
+	return &envelopeColumnWork{slot: block.Block.Slot, blockRoot: envelope.BeaconBlockRoot, commitments: commitments, bundles: bundles}, nil
+}
+
+var (
+	errExecutionPayloadEnvelopeIntegration      = errors.New("execution payload envelope integration failed")
+	errExecutionPayloadColumnPublish            = errors.New("execution payload data columns were not published")
+	errExecutionPayloadEnvelopeContentsRequired = errors.New("blob data is required to repair the columns of this execution payload envelope")
+	errExecutionPayloadInvalidated              = errors.New("execution payload was marked invalid")
+)
+
+func (a *ApiHandler) publishAndStoreExecutionPayloadEnvelopeColumns(storeCtx, publishCtx context.Context, work *envelopeColumnWork, forkDigest common.Bytes4) error {
+	if work.commitments.Len() == 0 {
 		return nil
 	}
-	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, 0, commitments.Len())
-	bundles := make([]BlobBundle, 0, commitments.Len())
-	for i := 0; i < commitments.Len(); i++ {
-		blob := contents.Blobs.Get(i)
-		commitment := commitments.Get(i)
-		if blob == nil || commitment == nil {
-			return fmt.Errorf("execution payload envelope blob %d is nil", i)
-		}
-		bundle := BlobBundle{Blob: blob, Commitment: common.Bytes48(*commitment), KzgProofs: make([]common.Bytes48, a.beaconChainCfg.NumberOfColumns)}
-		cells, err := peerdasutils.ComputeCells(blob)
-		if err != nil {
-			return err
-		}
-		proofs := make([]cltypes.KZGProof, a.beaconChainCfg.NumberOfColumns)
-		for j := range proofs {
-			proof := contents.KZGProofs.Get(i*int(a.beaconChainCfg.NumberOfColumns) + j)
-			if proof == nil {
-				return fmt.Errorf("execution payload envelope proof %d is nil", j)
-			}
-			proofs[j] = *proof
-			bundle.KzgProofs[j] = common.Bytes48(*proof)
-		}
-		bundles = append(bundles, bundle)
-		cellsAndProofs = append(cellsAndProofs, peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: proofs})
-	}
-	columns, err := peerdasutils.GetDataColumnSidecarsGloas(a.beaconChainCfg, block.Block.Slot, envelope.BeaconBlockRoot, cellsAndProofs)
+	cellsAndProofs, _, err := collectPublishedPayloadData(work.commitments, false, func(commitment common.Bytes48) (BlobBundle, bool) {
+		bundle, ok := work.bundles[commitment]
+		return bundle, ok
+	})
 	if err != nil {
 		return err
 	}
-	for _, column := range columns {
-		if !das.VerifyDataColumnSidecarKZGProofsWithCommitments(column, commitments) {
-			return fmt.Errorf("execution payload envelope column %d has invalid KZG proof", column.Index)
-		}
+	columns, err := peerdasutils.GetDataColumnSidecarsGloas(a.beaconChainCfg, work.slot, work.blockRoot, cellsAndProofs)
+	if err != nil {
+		return err
+	}
+	var publishErr error
+	if a.sentinel != nil {
+		publishErr = a.publishEnvelopeColumns(publishCtx, forkDigest, work.slot, work.blockRoot, columns)
 	}
 	if len(columns) != 0 && a.columnStorage == nil {
-		return fmt.Errorf("%w: data column storage unavailable", errExecutionPayloadEnvelopeIntegration)
+		return errors.Join(publishErr, fmt.Errorf("%w: data column storage unavailable", errExecutionPayloadEnvelopeIntegration))
 	}
 	for _, column := range columns {
-		if err := a.columnStorage.WriteColumnSidecars(ctx, envelope.BeaconBlockRoot, int64(column.Index), column); err != nil {
-			return fmt.Errorf("%w: %w", errExecutionPayloadEnvelopeIntegration, err)
+		if err := a.columnStorage.WriteColumnSidecars(storeCtx, work.blockRoot, int64(column.Index), column); err != nil {
+			return errors.Join(publishErr, fmt.Errorf("%w: %w", errExecutionPayloadEnvelopeIntegration, err))
 		}
 	}
-	for _, bundle := range bundles {
+	for _, bundle := range work.bundles {
 		a.blobBundles.Add(bundle.Commitment, bundle)
 	}
+	return publishErr
+}
+
+func (a *ApiHandler) publishEnvelopeColumns(ctx context.Context, forkDigest common.Bytes4, slot uint64, blockRoot common.Hash, columns []*cltypes.DataColumnSidecar) error {
+	var failed []uint64
+	var firstErr error
 	for _, column := range columns {
-		if a.sentinel != nil {
-			encoded, err := column.EncodeSSZ(nil)
-			if err != nil {
-				return err
-			}
-			if err := a.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(das.ComputeSubnetForDataColumnSidecar(column.Index)), encoded); err != nil {
-				a.logger.Debug("failed to publish execution payload data column", "err", err)
+		encoded, err := column.EncodeSSZ(nil)
+		if err == nil {
+			err = a.gossipManager.PublishToForkDigest(ctx, forkDigest, gossip.TopicNameDataColumnSidecar(das.ComputeSubnetForDataColumnSidecar(column.Index)), encoded)
+		}
+		if err != nil {
+			failed = append(failed, column.Index)
+			if firstErr == nil {
+				firstErr = err
 			}
 		}
 	}
-	return nil
+	if len(failed) == 0 {
+		return nil
+	}
+	a.logger.Warn("failed to publish execution payload data columns", "slot", slot, "blockRoot", blockRoot, "columns", failed, "err", firstErr)
+	return fmt.Errorf("%w: %v: %w", errExecutionPayloadColumnPublish, failed, firstErr)
 }
 
 func (a *ApiHandler) processExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {

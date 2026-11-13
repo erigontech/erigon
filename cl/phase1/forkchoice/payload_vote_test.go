@@ -38,6 +38,8 @@ func (g ptcVoteForkGraph) IsBlockInvalid(common.Hash) bool {
 	return false
 }
 
+func (g ptcVoteForkGraph) IsEnvelopeRejected(common.Hash) bool { return false }
+
 func (g ptcVoteForkGraph) MarkPayloadUnavailable(common.Hash) {}
 func (g ptcVoteForkGraph) MarkPayloadAvailable(common.Hash)   {}
 func (g ptcVoteForkGraph) IsPayloadUnavailable(common.Hash) bool {
@@ -70,6 +72,7 @@ type payloadVoteForkGraph struct {
 	invalidatedHeader  *common.Hash
 	unavailablePayload *common.Hash
 	acceptedPayloads   map[common.Hash]bool
+	rejectedEnvelopes  map[common.Hash]bool
 	retained           *bool
 }
 
@@ -85,8 +88,22 @@ func (g payloadVoteForkGraph) WithRetainedBlock(_ common.Hash, fn func(func(comm
 	return true
 }
 
-func (g payloadVoteForkGraph) HasEnvelope(common.Hash) bool {
-	return g.hasEnvelope
+func (g payloadVoteForkGraph) HasEnvelope(root common.Hash) bool {
+	return g.hasEnvelope && !g.IsEnvelopeRejected(root)
+}
+
+func (g payloadVoteForkGraph) IsEnvelopeRejected(root common.Hash) bool {
+	return g.rejectedEnvelopes[root]
+}
+
+func (g payloadVoteForkGraph) RejectEnvelope(root common.Hash) bool {
+	if !g.IsBlockRetained(root) {
+		return false
+	}
+	g.rejectedEnvelopes[root] = true
+	g.ClearPayloadAccepted(root)
+	g.MarkPayloadUnavailable(root)
+	return true
 }
 
 func (g payloadVoteForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
@@ -717,6 +734,66 @@ func TestValidateParentPayloadPathUsesValidationAvailability(t *testing.T) {
 	}
 }
 
+func TestValidateParentPayloadPathWithTerminalParent(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	parentRoot := common.Hash{1}
+	executionHash := common.Hash{2}
+	previousExecutionHash := common.Hash{3}
+	parent := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	parent.Block.Body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		BlockHash:       executionHash,
+		ParentBlockHash: previousExecutionHash,
+	}}
+
+	for _, test := range []struct {
+		name     string
+		full     bool
+		rejected bool
+		invalid  bool
+	}{
+		{name: "rejected FULL", full: true, rejected: true},
+		{name: "rejected EMPTY", rejected: true},
+		{name: "invalid FULL", full: true, invalid: true},
+		{name: "invalid EMPTY", invalid: true},
+		{name: "missing FULL", full: true},
+	} {
+		for _, requireEngineAcceptance := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/requireEngineAcceptance=%t", test.name, requireEngineAcceptance), func(t *testing.T) {
+				f := newPayloadVoteTestStore(t, parentRoot, false, false)
+				var invalidatedRoot common.Hash
+				f.forkGraph = payloadVoteForkGraph{
+					ForkGraph:         ptcVoteForkGraph{blocks: map[common.Hash]*cltypes.SignedBeaconBlock{parentRoot: parent}},
+					rejectedEnvelopes: map[common.Hash]bool{parentRoot: test.rejected},
+					invalidatedHeader: &invalidatedRoot,
+				}
+				if test.invalid {
+					f.forkGraph.MarkHeaderAsInvalid(parentRoot)
+				} else {
+					f.executionPayloadStatus.Add(executionHash, execution_client.PayloadStatusValidated)
+				}
+				child := cltypes.NewBeaconBlock(cfg, clparams.GloasVersion)
+				child.ParentRoot = parentRoot
+				parentHash := previousExecutionHash
+				if test.full {
+					parentHash = executionHash
+				}
+				child.Body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{ParentBlockHash: parentHash}}
+
+				err := f.validateParentPayloadPath(child, requireEngineAcceptance)
+				switch {
+				case !test.full:
+					require.NoError(t, err)
+				case test.rejected || test.invalid:
+					require.Error(t, err)
+					require.NotErrorIs(t, err, ErrParentEnvelopePending)
+				default:
+					require.ErrorIs(t, err, ErrParentEnvelopePending)
+				}
+			})
+		}
+	}
+}
+
 func TestParentPayloadStatusFromBidsRejectsIncompleteBlocks(t *testing.T) {
 	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(nil, &cltypes.BeaconBlock{}))
 	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(&cltypes.SignedBeaconBlock{}, &cltypes.BeaconBlock{}))
@@ -901,6 +978,45 @@ func TestPayloadStatusGetterUsesDurableAuthorityAfterEviction(t *testing.T) {
 			got, found := f.GetRecentExecutionPayloadStatusByRoot(root)
 			require.True(t, found)
 			require.Equal(t, status, got)
+		})
+	}
+}
+
+func TestRejectedEnvelopePreservesSiblingAndRejectsLateValidation(t *testing.T) {
+	root, sibling, executionHash := common.Hash{1}, common.Hash{2}, common.Hash{3}
+	for _, status := range []execution_client.PayloadStatus{
+		execution_client.PayloadStatusNone, execution_client.PayloadStatusNotValidated,
+		execution_client.PayloadStatusValidated, execution_client.PayloadStatusInvalidated,
+	} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			f := newPayloadVoteTestStore(t, root, true, false)
+			unavailableRoot := common.Hash{}
+			f.forkGraph = payloadVoteForkGraph{
+				hasEnvelope: true, unavailablePayload: &unavailableRoot,
+				acceptedPayloads: make(map[common.Hash]bool), rejectedEnvelopes: make(map[common.Hash]bool),
+			}
+			f.MarkPayloadStatus(root, executionHash, execution_client.PayloadStatusNotValidated)
+			f.MarkPayloadVerified(sibling, executionHash)
+			var err error
+			f.executionPayloadGasLimit, err = lru.New[common.Hash, uint64](2)
+			require.NoError(t, err)
+			f.selectedHead.Store(&ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusFull})
+			f.RejectEnvelope(root)
+			require.Nil(t, f.selectedHead.Load())
+			f.payloadStatusByRoot.Purge()
+			envelope := &cltypes.ExecutionPayloadEnvelope{Payload: &cltypes.Eth1Block{BlockHash: executionHash}}
+			block := cltypes.NewSignedBeaconBlock(f.beaconCfg, clparams.GloasVersion)
+
+			err = f.applyPayloadValidationResultLocked(status, nil, envelope, block, root)
+
+			require.ErrorIs(t, err, ErrInvalidExecutionPayloadEnvelope)
+			require.False(t, f.isPayloadAvailable(root))
+			require.False(t, f.forkGraph.IsBlockInvalid(root))
+			require.True(t, f.IsPayloadVerified(sibling))
+			require.True(t, f.isPayloadAvailable(sibling))
+			got, ok := f.GetRecentExecutionPayloadStatus(executionHash)
+			require.True(t, ok)
+			require.EqualValues(t, execution_client.PayloadStatusValidated, got)
 		})
 	}
 }

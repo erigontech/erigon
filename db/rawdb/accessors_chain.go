@@ -752,9 +752,6 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 }
 
 func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (err error) {
-	// Pre-processing
-	body.SendersFromTxs()
-
 	baseTxnID, err := db.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
 	if err != nil {
 		return err
@@ -1290,6 +1287,34 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 	}
 	if err := tx.Put(kv.DatabaseInfo, kv.CommitmentLayoutFlagKey, value); err != nil {
 		return fmt.Errorf("writing DB commitment history enabled flag: %w", err)
+	}
+	return nil
+}
+
+func ReadCaplinBlobsArchiveFromSlot(tx kv.Getter) (uint64, error) {
+	v, err := tx.GetOne(kv.DatabaseInfo, kv.CaplinBlobsArchiveFromSlotKey)
+	if err != nil {
+		return 0, fmt.Errorf("reading caplin blobs archive from-slot: %w", err)
+	}
+	if len(v) == 0 {
+		return 0, nil
+	}
+	if len(v) != 8 {
+		return 0, fmt.Errorf("incorrect length of caplin blobs archive from-slot: %d", len(v))
+	}
+	return binary.BigEndian.Uint64(v), nil
+}
+
+func RaiseCaplinBlobsArchiveFromSlot(tx kv.RwTx, slot uint64) error {
+	stored, err := ReadCaplinBlobsArchiveFromSlot(tx)
+	if err != nil {
+		return err
+	}
+	if slot <= stored {
+		return nil
+	}
+	if err := tx.Put(kv.DatabaseInfo, kv.CaplinBlobsArchiveFromSlotKey, binary.BigEndian.AppendUint64(nil, slot)); err != nil {
+		return fmt.Errorf("writing caplin blobs archive from-slot: %w", err)
 	}
 	return nil
 }

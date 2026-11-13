@@ -1693,9 +1693,9 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 
 	// Phase 2: Reverse check — merge-join domain .kv with ETL-sorted commitment refs.
 	// Collect previous file paths for no-op write detection.
-	var prevCommitmentPaths []string
-	for _, pf := range prevFiles {
-		prevCommitmentPaths = append(prevCommitmentPaths, pf.Fullpath())
+	prevCommitmentPaths := make([]string, len(prevFiles))
+	for i, pf := range prevFiles {
+		prevCommitmentPaths[i] = pf.Fullpath()
 	}
 	// Sort newest-first so we check the most recent previous file first.
 	slices.SortFunc(prevCommitmentPaths, func(a, b string) int {

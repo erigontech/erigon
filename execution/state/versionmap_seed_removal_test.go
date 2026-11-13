@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -380,6 +381,37 @@ func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 	acc, ok, _ = vm.View(2, reader).GetAccount(recreated)
 	require.True(t, ok, "re-created at index 2: present at block end")
 	require.Equal(t, uint64(1), acc.Nonce)
+}
+
+func TestHasEmptyBaseAccount(t *testing.T) {
+	t.Parallel()
+	addr := func(s string) accounts.Address { return accounts.InternAddress(common.HexToAddress(s)) }
+	empty, absent, funded := addr("0xe1"), addr("0xa1"), addr("0xf1")
+	emptyAcc, systemAcc, fundedAcc := accounts.NewAccount(), accounts.NewAccount(), accounts.NewAccount()
+	fundedAcc.Balance = *uint256.NewInt(1)
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{
+		empty: &emptyAcc, params.SystemAddress: &systemAcc, funded: &fundedAcc,
+	}}
+	listed := func(a accounts.Address) types.AccountChanges { return types.AccountChanges{Address: a.Value()} }
+	changed := listed(empty)
+	changed.BalanceChanges = []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(1)}}
+	for _, tc := range []struct {
+		name         string
+		eip161, aura bool
+		bal          types.BlockAccessList
+		want         bool
+	}{
+		{"empty", true, false, types.BlockAccessList{listed(empty)}, true},
+		{"empty with a change", true, false, types.BlockAccessList{changed}, true},
+		{"absent and funded", true, false, types.BlockAccessList{listed(absent), listed(funded)}, false},
+		{"before EIP-161", false, false, types.BlockAccessList{listed(empty)}, false},
+		{"Aura system address", true, true, types.BlockAccessList{listed(params.SystemAddress)}, false},
+		{"system address", true, false, types.BlockAccessList{listed(params.SystemAddress)}, true},
+	} {
+		got, err := NewVersionMap(tc.bal).HasEmptyBaseAccount(tc.eip161, tc.aura, reader)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, got, tc.name)
+	}
 }
 
 // A BAL existence marker at the index that drains the account is not a revival.

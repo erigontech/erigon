@@ -90,45 +90,55 @@ hive_consume_enginex_regexes() {
 }
 
 # --- 1. partition ---
+fork_rows() {
+	jq -r --arg f "$2" '.test_cases | map(select(.format==$f)) | group_by(.fork)[] | "\(.[0].fork)\t\(length)\t[fork_\(.[0].fork)-x]"' "$1"
+}
+test_rows() {
+	jq -r --arg f "$2" '.test_cases[] | select(.format==$f) | "\(.fork)\t1\teels/consume-enginex/\(.id)"' "$1"
+}
 check_partition() {
-	local title="$1" index="$2" format="$3" idprefix="$4" regexes="$5"
+	local title="$1" format="$2" regexes="$3"
 	echo "==== partition: $title (format=$format) ===="
 	if [[ -z "${regexes//[[:space:]]/}" ]]; then
 		echo "  ERROR: no shard regexes parsed for $title — the scrape returned empty (shard rename / label or quoting change?)" >&2
 		return 1
 	fi
 	printf '%s\n' "$regexes" | sed 's/^/  regex  /'
-	jq -r --arg f "$format" '.test_cases | map(select(.format==$f)) | group_by(.fork)[] | "\(.[0].fork)\t\(length)"' "$index" \
-	| awk -v idprefix="$idprefix" '
-		FNR==NR { i=index($0,"="); name[++k]=substr($0,1,i-1); rx[k]=substr($0,i+1); n=k; next }
+	jq -rR --arg rx "$regexes" '
+		($rx | split("\n") | map(select(. != "") | capture("^(?<name>[^=]*)=(?<re>.*)$"))) as $s
+		| split("\t") as [$fork, $cnt, $id]
+		| [$fork, $cnt, ($s[] | select(.re as $re | $id | test($re)) | .name)] | join("\t")' \
+	| awk -F'\t' '
 		{
-			fork=$1; cnt=$2; id=idprefix "[fork_" fork "-x]"; m=0
-			for (i=1;i<=n;i++) if (id ~ rx[i]) { m++; tot[name[i]]+=cnt }
-			total+=cnt
-			if (m==0)      { printf "  GAP      %-28s %7d  (matched by no shard)\n", fork, cnt; gaps++ }
-			else if (m>=2) { printf "  OVERLAP  %-28s %7d  (matched by %d shards)\n", fork, cnt, m; overlaps++ }
+			m=NF-2
+			for (i=3;i<=NF;i++) tot[$i]+=$2
+			total+=$2
+			if (m==0) gap[$1]+=$2
+			if (m>=2) over[$1]+=$2
 		}
 		END {
+			for (f in gap)  { printf "  GAP      %-28s %7d  (matched by no shard)\n", f, gap[f]; gaps++ }
+			for (f in over) { printf "  OVERLAP  %-28s %7d  (matched by 2+ shards)\n", f, over[f]; overlaps++ }
 			print "  --- per-shard totals ---"
 			for (s in tot) printf "  %-18s %7d\n", s, tot[s]
 			printf "  total=%d  gaps=%d  overlaps=%d\n", total, gaps+0, overlaps+0
 			if (total == 0) { print "  ERROR: no forks found for this format — index format labels changed?" > "/dev/stderr"; exit 1 }
 			if (gaps || overlaps) exit 1
 		}
-	' <(printf '%s\n' "$regexes") -
+	'
 }
 
 rc=0
 check_transaction_race_shards || rc=1
 echo
-check_partition "spec race shards (blocktest --run)"  "$stable_index" blockchain_test        ""                     "$(race_regexes)" || rc=1
+fork_rows "$stable_index" blockchain_test | check_partition "spec race shards (blocktest --run)" blockchain_test "$(race_regexes)" || rc=1
 echo
 check_race_mode_parity || rc=1
 echo
-check_partition "hive stable consume-enginex (sim-limit)" "$stable_index" blockchain_test_engine_x "eels/consume-enginex/" "$(hive_consume_enginex_regexes eest_stable)" || rc=1
+test_rows "$stable_index" blockchain_test_engine_x | check_partition "hive stable consume-enginex (sim-limit)" blockchain_test_engine_x "$(hive_consume_enginex_regexes eest_stable)" || rc=1
 echo
 if [[ -f "$devnet_index" ]]; then
-	check_partition "hive devnet consume-enginex (sim-limit)" "$devnet_index" blockchain_test_engine_x "eels/consume-enginex/" "$(hive_consume_enginex_regexes eest_devnet)" || rc=1
+	test_rows "$devnet_index" blockchain_test_engine_x | check_partition "hive devnet consume-enginex (sim-limit)" blockchain_test_engine_x "$(hive_consume_enginex_regexes eest_devnet)" || rc=1
 	echo
 else
 	echo "==== devnet check SKIPPED (index not found: $devnet_index) ===="

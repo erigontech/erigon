@@ -61,6 +61,11 @@ const (
 	FrameSignatureP256
 )
 
+var (
+	p256N     = elliptic.P256().Params().N
+	p256HalfN = new(big.Int).Rsh(p256N, 1)
+)
+
 var FrameExpiryVerifier = common.HexToAddress("0x81413f0cF12e9b6a49B1D0439E081c577D57FfFf")
 
 var FrameNonceManager = common.HexToAddress("0x8250968C12e01A19d6F667b9B2F3b3A4d0e51cB7")
@@ -105,10 +110,16 @@ type FrameTransaction struct {
 	Signatures          []FrameSignature
 	Fees                FrameFees
 	BlobVersionedHashes []common.Hash
-	verifiedSignatures  atomic.Pointer[common.Hash] `rlp:"-"`
+	verifiedSignatures  atomic.Pointer[frameSignatureValidation] `rlp:"-"`
 }
 
 type frameTransactionRLP FrameTransaction
+
+type frameSignatureValidation struct {
+	sender      common.Address
+	signingHash common.Hash
+	signatures  []FrameSignature
+}
 
 func (frame *Frame) ResolvedTarget(sender common.Address) common.Address {
 	if frame.Target == nil {
@@ -179,8 +190,7 @@ func (sig *FrameSignature) validate(sender common.Address, hash common.Hash) err
 		}
 		r := new(big.Int).SetBytes(sig.Signature[:32])
 		s := new(big.Int).SetBytes(sig.Signature[32:64])
-		n := elliptic.P256().Params().N
-		if r.Sign() == 0 || r.Cmp(n) >= 0 || s.Sign() == 0 || s.Cmp(new(big.Int).Rsh(new(big.Int).Set(n), 1)) > 0 {
+		if r.Sign() == 0 || r.Cmp(p256N) >= 0 || s.Sign() == 0 || s.Cmp(p256HalfN) > 0 {
 			return errors.New("signature verification failed")
 		}
 		if common.BytesToAddress(crypto.Keccak256(sig.Signature[64:])[12:]) != sig.ResolvedSigner(sender) {
@@ -250,22 +260,54 @@ func (tx *FrameTransaction) Validate() error {
 	if limits.Execution > params.MaxTxnGasLimit {
 		return errors.New("frame transaction exceeds execution gas cap")
 	}
+	return tx.validateSignatures()
+}
+
+func (tx *FrameTransaction) validateSignatures() error {
 	if len(tx.Signatures) == 0 {
 		return nil
 	}
-	// Use fresh contents, including signature bytes: Hash can be cached before
-	// a mutation, and SigningHash omits signatures over the transaction itself.
-	validationHash := prefixedRlpHash(FrameTxType, (*frameTransactionRLP)(tx))
-	if verified := tx.verifiedSignatures.Load(); verified != nil && *verified == validationHash {
+	var signingHash common.Hash
+	if slices.ContainsFunc(tx.Signatures, func(sig FrameSignature) bool {
+		return (sig.Scheme == FrameSignatureSecp256k1 || sig.Scheme == FrameSignatureP256) && len(sig.Message) == 0
+	}) {
+		signingHash = tx.SigningHash(nil)
+	}
+	// Successful cryptographic checks are cached; Validate still checks structure and gas.
+	// Copied signer, message and signature bytes, plus a fresh digest for signatures over
+	// the transaction, prevent changed inputs from reusing an earlier result.
+	// Arbitrary payload bytes are not validated, so they are not compared or copied.
+	if cached := tx.verifiedSignatures.Load(); cached != nil && cached.sender == tx.SenderAddress && cached.signingHash == signingHash &&
+		slices.EqualFunc(tx.Signatures, cached.signatures, func(a, b FrameSignature) bool {
+			return a.Scheme == b.Scheme && bytes.Equal(a.Signer, b.Signer) && bytes.Equal(a.Message, b.Message) &&
+				(a.Scheme == FrameSignatureArbitrary || bytes.Equal(a.Signature, b.Signature))
+		}) {
 		return nil
 	}
-	hash := tx.SigningHash(nil)
+	hasCrypto := false
 	for i := range tx.Signatures {
-		if err := tx.Signatures[i].validate(tx.SenderAddress, hash); err != nil {
+		sig := &tx.Signatures[i]
+		if err := sig.validate(tx.SenderAddress, signingHash); err != nil {
 			return fmt.Errorf("invalid frame signature %d: %w", i, err)
 		}
+		hasCrypto = hasCrypto || sig.Scheme != FrameSignatureArbitrary
 	}
-	tx.verifiedSignatures.Store(&validationHash)
+	if hasCrypto {
+		signatures := slices.Clone(tx.Signatures)
+		for i := range signatures {
+			sig := &signatures[i]
+			sig.Signer = bytes.Clone(sig.Signer)
+			sig.Message = bytes.Clone(sig.Message)
+			if sig.Scheme == FrameSignatureArbitrary {
+				sig.Signature = nil
+			} else {
+				sig.Signature = bytes.Clone(sig.Signature)
+			}
+		}
+		tx.verifiedSignatures.Store(&frameSignatureValidation{
+			sender: tx.SenderAddress, signingHash: signingHash, signatures: signatures,
+		})
+	}
 	return nil
 }
 
@@ -312,16 +354,12 @@ func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.M
 	if !tx.UsesLegacyNonce() {
 		args.KeyedNoncesLen = uint64(len(tx.NonceKeys))
 	}
+	// EIP-8250 prices the full nonce encodings as calldata, including RLP prefixes.
+	args.DataLen, args.DataNonZeroLen = tx.nonceDataCounts()
 	addData := func(data []byte) {
 		args.DataLen += uint64(len(data))
 		args.DataNonZeroLen += uint64(mdgas.CountNonZeroBytes(data))
 	}
-	nonceData, err := rlp.EncodeToBytes(tx.NonceKeys)
-	if err != nil {
-		return 0, 0, limits, err
-	}
-	// EIP-8250 prices the full nonce encodings as calldata, including RLP prefixes.
-	addData(rlp.AppendUint64(nonceData, tx.Nonce))
 	var total uint64
 	for i := range tx.Frames {
 		frame := &tx.Frames[i]
@@ -357,6 +395,27 @@ func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.M
 		return 0, 0, limits, errors.New("frame gas limit overflow")
 	}
 	return intrinsic, floor, limits, nil
+}
+
+func (tx *FrameTransaction) nonceDataCounts() (size, nonZero uint64) {
+	payloadLen := 0
+	for _, key := range tx.NonceKeys {
+		keyLen := rlp.Uint256Len(key)
+		payloadLen += keyLen
+		// Single-byte integers (including zero as 0x80) and integer prefixes
+		// each contribute one nonzero byte.
+		nonZero++
+		if keyLen > 1 {
+			keyBytes := key.Bytes32()
+			nonZero += uint64(mdgas.CountNonZeroBytes(keyBytes[:]))
+		}
+	}
+	var buf [9]byte
+	prefixLen := rlp.EncodeListPrefixToBuf(payloadLen, buf[:])
+	nonZero += uint64(mdgas.CountNonZeroBytes(buf[:prefixLen]))
+	nonceLen := rlp.EncodeU64ToBuf(tx.Nonce, buf[:])
+	nonZero += uint64(mdgas.CountNonZeroBytes(buf[:nonceLen]))
+	return uint64(payloadLen + prefixLen + nonceLen), nonZero
 }
 
 func (tx *FrameTransaction) GetValue() *uint256.Int { return new(uint256.Int) }
@@ -486,11 +545,38 @@ func (tx *FrameTransaction) EncodeRLP(w io.Writer) error {
 }
 
 func (tx *FrameTransaction) EncodingSize() int {
-	payload, err := rlp.EncodeToBytes((*frameTransactionRLP)(tx))
-	if err != nil {
-		panic(err)
+	payloadSize := rlp.Uint256Len(tx.ChainID)
+	nonceKeysSize := 0
+	for _, key := range tx.NonceKeys {
+		nonceKeysSize += rlp.Uint256Len(key)
 	}
-	return 1 + len(payload)
+	payloadSize += rlp.ListLen(nonceKeysSize)
+	payloadSize += rlp.U64Len(tx.Nonce) + rlp.StringLen(tx.SenderAddress[:])
+
+	framesSize := 0
+	for i := range tx.Frames {
+		frame := &tx.Frames[i]
+		targetSize := 1
+		if frame.Target != nil {
+			targetSize += len(*frame.Target)
+		}
+		frameSize := rlp.U64Len(uint64(frame.Mode)) + rlp.U64Len(uint64(frame.Flags)) + targetSize
+		frameSize += rlp.ListLen(rlp.U64Len(frame.Limits.Execution) + rlp.U64Len(frame.Limits.State))
+		frameSize += rlp.Uint256Len(frame.Value) + rlp.StringLen(frame.Data)
+		framesSize += rlp.ListLen(frameSize)
+	}
+	payloadSize += rlp.ListLen(framesSize)
+
+	signaturesSize := 0
+	for i := range tx.Signatures {
+		sig := &tx.Signatures[i]
+		sigSize := rlp.U64Len(uint64(sig.Scheme)) + rlp.StringLen(sig.Signer) + rlp.StringLen(sig.Message) + rlp.StringLen(sig.Signature)
+		signaturesSize += rlp.ListLen(sigSize)
+	}
+	payloadSize += rlp.ListLen(signaturesSize)
+	payloadSize += rlp.ListLen(rlp.Uint256Len(tx.Fees.TipCap) + rlp.Uint256Len(tx.Fees.FeeCap) + rlp.Uint256Len(tx.Fees.BlobFeeCap))
+	payloadSize += rlp.ListLen(blobVersionedHashesSize(tx.BlobVersionedHashes))
+	return 1 + rlp.ListLen(payloadSize)
 }
 
 func (tx *FrameTransaction) Hash() common.Hash {

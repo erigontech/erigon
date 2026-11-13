@@ -21,9 +21,9 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 )
 
 // ErrForwardSyncStale is returned when forward sync makes no progress for an extended period.
@@ -90,10 +90,12 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 				return highestBlockProcessed, nil
 			}
 			if errors.Is(err, forkchoice.ErrParentEnvelopePending) {
-				// Parent is FULL but its envelope is not yet on disk.  This is
-				// normal during forward sync: the envelope either arrives in this
-				// batch (for a later block) or in a subsequent batch.  Return
-				// whatever progress was made so far (do NOT ban the peer).
+				// The anchor's envelope is outside the downloaded block batches.
+				if block.Block.ParentRoot == cfg.forkChoice.AnchorRoot() {
+					if recoveryErr := ensureAnchorEnvelopeOnce(ctx, cfg); recoveryErr != nil {
+						logger.Debug("[Caplin] forward sync: anchor envelope recovery failed", "err", recoveryErr)
+					}
+				}
 				logger.Debug("[Caplin] forward sync: parent envelope pending, will retry", "blockSlot", block.Block.Slot)
 				if newHighestBlockProcessed > 0 {
 					return newHighestBlockProcessed, nil
@@ -166,6 +168,9 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		}
 
 		if !collectExecution {
+			continue
+		}
+		if _, accepted := cfg.forkChoice.GetHeader(blockRoot); !accepted {
 			continue
 		}
 		// Add the block to the block collector (pre-GLOAS only)
@@ -436,10 +441,9 @@ func anchorEnvelopeMatches(env *cltypes.SignedExecutionPayloadEnvelope, anchorRo
 	return env != nil && env.Message != nil && env.Message.BeaconBlockRoot == anchorRoot
 }
 
-// ensureAnchorEnvelopeOnce proactively fetches the anchor block's execution payload
-// envelope from P2P if it is not already on disk. Called once at the start of
-// forwardSync, before any blocks are processed.
-// [New in Gloas:EIP7732]
+// ensureAnchorEnvelopeOnce recovers and validates the checkpoint anchor's envelope.
+// It reuses a stored envelope or fetches one through HTTP with P2P fallback.
+// Calls may be repeated; verified, rejected, or invalidated payloads return early.
 func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	anchorSlot := cfg.forkChoice.AnchorSlot()
 	epoch := anchorSlot / cfg.beaconCfg.SlotsPerEpoch
@@ -448,16 +452,19 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	}
 
 	anchorRoot := cfg.forkChoice.AnchorRoot()
-	// Find the anchor block root via the header stored in the fork graph
+	if cfg.forkChoice.IsEnvelopeRejected(anchorRoot) {
+		return fmt.Errorf("%w: anchor envelope previously rejected", forkchoice.ErrInvalidExecutionPayloadEnvelope)
+	}
+	if cfg.forkChoice.IsBlockInvalid(anchorRoot) {
+		return fmt.Errorf("%w: anchor execution payload previously invalidated", forkchoice.ErrInvalidExecutionPayloadEnvelope)
+	}
 	anchorHeader, ok := cfg.forkChoice.GetHeader(anchorRoot)
 	if !ok {
-		// Try to find by iterating — the anchor root should be the finalized root
 		log.Debug("[ensureAnchorEnvelopeOnce] anchor header not found, skipping")
 		return nil
 	}
 	_ = anchorHeader
 
-	// Get anchor block root from state
 	if cfg.forkChoice.IsPayloadVerified(anchorRoot) {
 		return nil
 	}
@@ -475,18 +482,26 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	if bid == nil {
 		return nil
 	}
+	ctx, cancelValidation := context.WithCancelCause(ctx)
+	defer cancelValidation(nil)
+	validate := func(env *cltypes.SignedExecutionPayloadEnvelope) error {
+		terminal, err := validateAndRecordAnchorEnvelope(cfg, anchorState, anchorRoot, bid, env)
+		if terminal {
+			cancelValidation(err)
+		}
+		return err
+	}
 
 	log.Info("[Caplin] Proactively fetching anchor envelope for GLOAS checkpoint sync",
 		"anchorSlot", anchorSlot, "anchorRoot", common.Hash(anchorRoot),
 		"bidBlockHash", bid.BlockHash)
 
-	var env *cltypes.SignedExecutionPayloadEnvelope
-	if cfg.forkChoice.HasEnvelope(anchorRoot) {
-		env, err = cfg.forkChoice.ReadEnvelopeFromDisk(anchorRoot)
-		if err != nil {
-			return fmt.Errorf("failed to read anchor envelope: %w", err)
-		}
-	} else {
+	env, err := cfg.forkChoice.ReadEnvelopeFromDisk(anchorRoot)
+	if err != nil {
+		log.Debug("[Caplin] Stored anchor envelope unavailable, fetching from network", "anchorRoot", anchorRoot, "err", err)
+		env = nil
+	}
+	if env == nil {
 		// Try HTTP API first (checkpoint sync endpoint), then fall back to P2P.
 		// HTTP is more reliable on devnets with few peers. The checkpoint endpoint
 		// serves the server's current finalized envelope, which can be a newer block
@@ -499,10 +514,11 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 		} else {
 			// Fall back to P2P (root-specific request)
 			log.Info("[Caplin] HTTP anchor envelope unavailable or ahead of local anchor, trying P2P...", "anchorSlot", anchorSlot)
-			envMap, err := network2.RequestEnvelopesFrantically(ctx, cfg.rpc, [][32]byte{anchorRoot}, func(env *cltypes.SignedExecutionPayloadEnvelope) error {
-				return validateAnchorEnvelope(cfg.beaconCfg, anchorState, common.Hash(anchorRoot), bid, env)
-			}, nil)
+			envMap, err := network2.RequestEnvelopesFrantically(ctx, cfg.rpc, [][32]byte{anchorRoot}, validate, nil)
 			if err != nil {
+				if cause := context.Cause(ctx); cause != nil {
+					err = cause
+				}
 				return fmt.Errorf("failed to request anchor envelope: %w", err)
 			}
 			env = envMap[common.Hash(anchorRoot)]
@@ -512,7 +528,7 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 		log.Info("[Caplin] Anchor envelope not received (block may be EMPTY)", "anchorSlot", anchorSlot)
 		return nil // Not fatal — if EMPTY, envelope doesn't exist
 	}
-	if err := validateAnchorEnvelope(cfg.beaconCfg, anchorState, anchorRoot, bid, env); err != nil {
+	if err := validate(env); err != nil {
 		return fmt.Errorf("invalid anchor envelope: %w", err)
 	}
 
@@ -543,13 +559,13 @@ func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anc
 	if err != nil {
 		log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
 	}
-	status, retained := cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
+	status, recorded := cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
 		anchorRoot,
 		env.Message.Payload.BlockHash,
 		status,
 		env.Message.Payload.GasLimit,
 	)
-	if !retained {
+	if !recorded {
 		return nil
 	}
 	if status == execution_client.PayloadStatusInvalidated {
@@ -558,11 +574,27 @@ func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anc
 	return nil
 }
 
-func validateAnchorEnvelope(beaconCfg *clparams.BeaconChainConfig, anchorState *state.CachingBeaconState, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
-	if err := cltypes.ValidateGloasEnvelopeAgainstBid(beaconCfg, anchorRoot, bid, env); err != nil {
-		return err
+func validateAndRecordAnchorEnvelope(cfg *Cfg, anchorState *state.CachingBeaconState, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+	if err := cltypes.ValidateGloasEnvelopeAgainstBid(cfg.beaconCfg, anchorRoot, bid, env); err != nil {
+		return false, err
 	}
-	return verifyAnchorEnvelopeSignature(beaconCfg, anchorState, env, bid.Slot)
+	if err := verifyAnchorEnvelopeSignature(cfg.beaconCfg, anchorState, env, bid.Slot); err != nil {
+		return false, err
+	}
+	if err := forkchoice.ValidatePayloadBlobHashes(env.Message.Payload, bid.VersionedHashes()); err != nil {
+		if errors.Is(err, misc.ErrMismatchBlobHashes) {
+			cfg.forkChoice.RejectEnvelope(anchorRoot)
+		} else {
+			cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
+				anchorRoot,
+				env.Message.Payload.BlockHash,
+				execution_client.PayloadStatusInvalidated,
+				env.Message.Payload.GasLimit,
+			)
+		}
+		return true, fmt.Errorf("%w: anchor payload validation failed: %w", forkchoice.ErrInvalidExecutionPayloadEnvelope, err)
+	}
+	return false, nil
 }
 
 func verifyAnchorEnvelopeSignature(beaconCfg *clparams.BeaconChainConfig, anchorState *state.CachingBeaconState, env *cltypes.SignedExecutionPayloadEnvelope, slot uint64) error {
@@ -608,17 +640,7 @@ func verifyAnchorEnvelopeSignature(beaconCfg *clparams.BeaconChainConfig, anchor
 }
 
 func validateAnchorPayloadWithEL(ctx context.Context, cfg *Cfg, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error) {
-	versionedHashes, executionRequestsList, err := buildAnchorNewPayloadArgs(cfg.beaconCfg, bid, env)
-	if err != nil {
-		return execution_client.PayloadStatusNone, err
-	}
+	versionedHashes := bid.VersionedHashes()
+	executionRequestsList := cltypes.GetExecutionRequestsList(cfg.beaconCfg, env.Message.ExecutionRequests)
 	return cfg.gloasPayloadValidator.NewPayloadWithAdmission(ctx, env.Message.Payload, &bid.ParentBlockRoot, versionedHashes, executionRequestsList)
-}
-
-func buildAnchorNewPayloadArgs(beaconCfg *clparams.BeaconChainConfig, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {
-	versionedHashes, err := gloasVersionedHashes(&bid.BlobKzgCommitments)
-	if err != nil {
-		return nil, nil, err
-	}
-	return versionedHashes, gloasExecutionRequestsList(beaconCfg, env.Message.ExecutionRequests), nil
 }

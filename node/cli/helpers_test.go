@@ -88,6 +88,34 @@ func TestExitErrHandler(t *testing.T) {
 	require.NotNil(t, app.ExitErrHandler, "ExitErrHandler should be configured")
 }
 
+func TestExitErrHandlerPrintsTheError(t *testing.T) {
+	originalOsExiter := cli.OsExiter
+	defer func() { cli.OsExiter = originalOsExiter }()
+	for _, tc := range []struct {
+		name       string
+		err        error
+		wantCode   int
+		wantStderr string
+	}{
+		{"exit error", cli.Exit("ERROR(10): invalid input", 10), 10, "ERROR(10): invalid input\n"},
+		{"empty exit error", cli.Exit("", 1), 1, ""},
+		{"plain error", errors.New("invalid input"), 1, "Error: invalid input\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			app := NewApp("test usage")
+			app.ErrWriter = &stderr
+			var exitCode int
+			cli.OsExiter = func(code int) { exitCode = code }
+
+			app.ExitErrHandler(t.Context(), app, tc.err)
+
+			require.Equal(t, tc.wantCode, exitCode)
+			require.Equal(t, tc.wantStderr, stderr.String())
+		})
+	}
+}
+
 // TestHelpFlagStillWorks verifies that --help still prints full usage
 func TestHelpFlagStillWorks(t *testing.T) {
 	app := NewApp("test usage")

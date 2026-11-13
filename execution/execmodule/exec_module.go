@@ -517,8 +517,9 @@ const nextForkBanner = `
 =============================================== GLAMSTERDAM ACTIVATED ===============================================
 `
 
-func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
+func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (ValidationResult, error) {
 	defer validateChainDuration.ObserveDuration(time.Now())
+	blockHash, blockNumber := block.Hash(), block.NumberU64()
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return ValidationResult{
@@ -533,12 +534,12 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	e.currentContext.ResetPendingUpdates()
 	e.forkValidator.ClearWithUnwind()
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
+	header, body := block.HeaderNoCopy(), block.Body()
 	var (
-		header             *types.Header
-		body               *types.Body
 		currentBlockNumber *uint64
 		payloadExecuted    bool
 		canonical          bool
+		missingSegment     bool
 		err                error
 	)
 	alreadyExecuted := func(tx kv.Getter) (bool, error) {
@@ -553,9 +554,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		progress, err := stages.GetStageProgress(tx, stages.Execution)
 		return progress >= blockNumber, err
 	}
-	// Read header/body from the block overlay on currentContext if available
-	// (block data written by InsertBlocks hasn't been flushed to DB yet),
-	// falling back to a plain DB read otherwise.
 	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 		overlay := e.currentContext.BlockOverlay()
 		roTx, err := e.db.BeginTemporalRo(ctx)
@@ -564,13 +562,12 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 		defer roTx.Rollback()
 		overlay.UpdateTxn(roTx)
-		header, err = e.blockReader.Header(ctx, overlay, blockHash, blockNumber)
+		storedHeader, err := e.blockReader.Header(ctx, overlay, blockHash, blockNumber)
 		if err != nil {
 			return ValidationResult{}, err
 		}
-		body, err = e.blockReader.BodyWithTransactions(ctx, overlay, blockHash, blockNumber)
-		if err != nil {
-			return ValidationResult{}, err
+		if storedHeader == nil {
+			return ValidationResult{ValidationStatus: ExecutionStatusMissingSegment}, nil
 		}
 		e.readAheader.AddHeaderAndBody(ctx, e.db, overlay, header, body)
 		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
@@ -580,13 +577,13 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 	} else {
 		if err := e.db.View(ctx, func(tx kv.Tx) error {
-			header, err = e.blockReader.Header(ctx, tx, blockHash, blockNumber)
+			storedHeader, err := e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 			if err != nil {
 				return err
 			}
-			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
-			if err != nil {
-				return err
+			if storedHeader == nil {
+				missingSegment = true
+				return nil
 			}
 			e.readAheader.AddHeaderAndBody(ctx, e.db, tx, header, body)
 			currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
@@ -595,12 +592,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}); err != nil {
 			return ValidationResult{}, err
 		}
-	}
-	if header == nil || body == nil {
-		return ValidationResult{
-			LatestValidHash:  common.Hash{},
-			ValidationStatus: ExecutionStatusMissingSegment,
-		}, nil
+		if missingSegment {
+			return ValidationResult{ValidationStatus: ExecutionStatusMissingSegment}, nil
+		}
 	}
 	if math.AbsoluteDifference(*currentBlockNumber, blockNumber) >= e.syncCfg.MaxReorgDepth {
 		return ValidationResult{
@@ -693,7 +687,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		doms.Close()
 		return ValidationResult{}, err
 	}
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), ensureReadAheadSuspended, e.logger)
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body, ensureReadAheadSuspended, e.logger)
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
 	}

@@ -6,6 +6,7 @@ package engine_types
 import (
 	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/holiman/uint256"
 
@@ -212,7 +213,7 @@ func (s *PayloadStatus) EncodeSSZ(dst []byte) ([]byte, error) {
 	var validationErr [][]byte
 	if s.ValidationError != nil && s.ValidationError.Error() != nil {
 		msg := s.ValidationError.Error().Error()
-		validationErr = [][]byte{[]byte(msg[:min(len(msg), sszMaxValidationError)])}
+		validationErr = [][]byte{[]byte(strings.ToValidUTF8(msg[:min(len(msg), sszMaxValidationError)], ""))}
 	}
 	return ssz2.MarshalSSZ(dst, []byte{status}, latestHashes, solid.NewTransactionsSSZFromTransactions(validationErr))
 }

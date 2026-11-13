@@ -130,6 +130,7 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 	}
 	if finalizedCheckpoint.Epoch > f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch {
 		f.finalizedCheckpoint.Store(finalizedCheckpoint)
+		f.forkGraph.KeepFinalizedLightClientUpdates(finalizedCheckpoint.Root)
 		f.queueOperationPrune(finalizedCheckpoint)
 		f.onNewFinalized(finalizedCheckpoint)
 

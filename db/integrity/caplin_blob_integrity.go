@@ -34,7 +34,7 @@ import (
 )
 
 // CheckCaplinBlobSidecars verifies frozen blob snapshot coverage, canonical identity, and cryptographic proofs.
-func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeblocks.CaplinSnapshots, beaconCfg *clparams.BeaconChainConfig, failFast bool, logger log.Logger) error {
+func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeblocks.CaplinSnapshots, beaconCfg *clparams.BeaconChainConfig, blobsFromSlot uint64, failFast bool, logger log.Logger) error {
 	if snapshots == nil {
 		return fmt.Errorf("blob snapshot integrity: caplin snapshots are unavailable")
 	}
@@ -87,7 +87,12 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 		}
 		return nil
 	}
-	if coverageErr := checkCaplinBlobSnapshotCoverage(view, beaconCfg); coverageErr != nil {
+	if visibleErr := checkCaplinBlobSnapshotsVisible(snapshots, view); visibleErr != nil {
+		if reportErr := report(visibleErr); reportErr != nil {
+			return reportErr
+		}
+	}
+	if coverageErr := checkCaplinBlobSnapshotCoverage(view, beaconCfg, blobsFromSlot); coverageErr != nil {
 		if reportErr := report(coverageErr); reportErr != nil {
 			return reportErr
 		}
@@ -287,7 +292,26 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freez
 	return nil
 }
 
-func checkCaplinBlobSnapshotCoverage(view *freezeblocks.CaplinView, beaconCfg *clparams.BeaconChainConfig) error {
+func checkCaplinBlobSnapshotsVisible(snapshots *freezeblocks.CaplinSnapshots, view *freezeblocks.CaplinView) error {
+	visible := view.BlobSidecars()
+	var visibleFrom, visibleTo uint64
+	if len(visible) > 0 {
+		visibleFrom, _ = visible[0].Src().GetRange()
+		_, visibleTo = visible[len(visible)-1].Src().GetRange()
+	}
+	var err error
+	snapshots.WalkDirtySegments(snaptype.BlobSidecars.Enum(), func(segment *snapshotsync.DirtySegment) bool {
+		from, to := segment.GetRange()
+		if from >= visibleFrom && to <= visibleTo {
+			return true
+		}
+		err = fmt.Errorf("blob snapshot segment %d-%d is not visible; visible blob snapshots cover %d-%d", from, to, visibleFrom, visibleTo)
+		return false
+	})
+	return err
+}
+
+func checkCaplinBlobSnapshotCoverage(view *freezeblocks.CaplinView, beaconCfg *clparams.BeaconChainConfig, blobsFromSlot uint64) error {
 	blobSegments := view.BlobSidecars()
 	if beaconCfg.DenebForkEpoch == math.MaxUint64 {
 		if len(blobSegments) != 0 {
@@ -314,22 +338,23 @@ func checkCaplinBlobSnapshotCoverage(view *freezeblocks.CaplinView, beaconCfg *c
 		requiredTo = (beaconTo - 1) / snaptype.CaplinMergeLimit * snaptype.CaplinMergeLimit
 	}
 
+	floor := max(expectedFrom, blobsFromSlot)
 	next := expectedFrom
 	for _, segment := range blobSegments {
 		from, to := segment.Src().GetRange()
 		if from < next {
 			return fmt.Errorf("overlapping or pre-Deneb blob snapshot range %d-%d; expected next slot %d", from, to, next)
 		}
-		if from > next {
-			return fmt.Errorf("missing blob snapshot coverage %d-%d", next, from)
+		if from > max(next, floor) {
+			return fmt.Errorf("missing blob snapshot coverage %d-%d", max(next, floor), from)
 		}
 		if to <= from || to > beaconTo {
 			return fmt.Errorf("invalid blob snapshot range %d-%d; beacon snapshots end at %d", from, to, beaconTo)
 		}
 		next = to
 	}
-	if next < requiredTo {
-		return fmt.Errorf("missing blob snapshot coverage %d-%d", next, requiredTo)
+	if max(next, floor) < requiredTo {
+		return fmt.Errorf("missing blob snapshot coverage %d-%d", max(next, floor), requiredTo)
 	}
 	return nil
 }

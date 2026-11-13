@@ -715,7 +715,7 @@ func (api *BaseAPI) buildAccessedState(
 		return nil, nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
 
-	if err = ethapi.CommitCallState(ibs, blockRules, recordingState); err != nil {
+	if err = ethapi.FinalizeCallTxTo(ibs, blockRules, recordingState); err != nil {
 		return nil, nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
@@ -1345,8 +1345,6 @@ func buildWitnessTrie(
 	accessed *accessedState,
 	produceExclusionProofs bool,
 ) (encodedNodes []hexutil.Bytes, err error) {
-	encodedNodes = []hexutil.Bytes{}
-
 	sdCtx.SetStateReader(trieReaderFor(hc, tx, firstTxNumInBlock))
 	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
@@ -1371,8 +1369,9 @@ func buildWitnessTrie(
 		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
 	}
 
-	for _, node := range witnessNodes {
-		encodedNodes = append(encodedNodes, node)
+	encodedNodes = make([]hexutil.Bytes, len(witnessNodes))
+	for i, node := range witnessNodes {
+		encodedNodes[i] = node
 	}
 	return encodedNodes, nil
 }
@@ -2144,9 +2143,9 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
 
-	err = ethapi.CommitCallState(ibs, blockRules, stateless)
+	err = ethapi.FinalizeCallTxTo(ibs, blockRules, stateless)
 	if err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
+		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] FinalizeCallTxTo failed: %w", err)
 	}
 
 	// Finalize and compute the resulting state root

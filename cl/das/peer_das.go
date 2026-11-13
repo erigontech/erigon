@@ -1262,6 +1262,16 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		d.removeBlobRecoveryResult(blockRoot)
 		log.Trace("[blobsRecover] saved blobs", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs)
 
+		// Columns stored while the matrix was recovered need no rebuild. The union keeps the earlier indices when a prune
+		// has dropped the block's columns meanwhile.
+		if stored, err := d.columnStorage.GetSavedColumnIndex(ctx, slot, blockRoot); err != nil {
+			log.Warn("[blobsRecover] failed to get saved column index after recovering the matrix", "err", err, "slot", slot, "blockRoot", blockRoot)
+		} else {
+			existingColumns = slices.Concat(existingColumns, stored)
+			slices.Sort(existingColumns)
+			existingColumns = slices.Compact(existingColumns)
+		}
+
 		// remove column sidecars that are not in our custody group
 		custodyColumns, err := d.state.GetMyCustodyColumns()
 		if err != nil {

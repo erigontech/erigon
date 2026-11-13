@@ -17,6 +17,7 @@
 package merkle_tree
 
 import (
+	"fmt"
 	"math/bits"
 	"slices"
 
@@ -29,6 +30,9 @@ import (
 // MerkleizeVector uses our optimized routine to hash a list of 32-byte
 // elements.
 func MerkleizeVector(elements [][32]byte, length uint64) ([32]byte, error) {
+	if uint64(len(elements)) > length {
+		return [32]byte{}, fmt.Errorf("merkleize: %d chunks exceed limit %d", len(elements), length)
+	}
 	depth := GetDepth(length)
 	// Return zerohash at depth
 	if len(elements) == 0 {
@@ -57,6 +61,9 @@ func BitlistRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
 		size          uint64
 	)
 	unpackedRoots, size = parseBitlist(unpackedRoots, bits)
+	if size > limit {
+		return [32]byte{}, fmt.Errorf("bitlist: %d bits exceed limit %d", size, limit)
+	}
 
 	roots := packBits(unpackedRoots)
 	base, err := MerkleizeVector(roots, (limit+255)/256)

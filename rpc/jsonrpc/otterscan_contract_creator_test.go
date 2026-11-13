@@ -81,6 +81,79 @@ func TestGetContractCreator(t *testing.T) {
 	})
 }
 
+func TestGetContractCreatorGenesisAlloc(t *testing.T) {
+	contract := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc: types.GenesisAlloc{
+				testAddr: {Balance: big.NewInt(1_000_000_000_000)},
+				contract: {Balance: big.NewInt(7), Code: []byte{0x00}},
+			},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	c, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), contract, uint256.NewInt(1), 100_000, uint256.NewInt(1), nil), *signer, testKey)
+		require.NoError(t, err)
+		block.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
+	creator, err := api.GetContractCreator(m.Ctx, contract)
+	require.NoError(t, err)
+	require.Nil(t, creator)
+
+	t.Run("pruned history", func(t *testing.T) {
+		base := newBaseApiForTest(m)
+		base._pruneMode.Store(&prune.Mode{Initialised: true, History: prune.Distance(1), Blocks: prune.ArchiveMode.Blocks})
+		api := NewOtterscanAPI(base, m.DB, 25)
+
+		creator, err := api.GetContractCreator(m.Ctx, contract)
+		require.ErrorIs(t, err, state.ErrPruned)
+		require.Nil(t, creator)
+	})
+}
+
+// A recreated genesis contract is not reported as genesis. The right answer is the CREATE2 transaction, which is not found yet.
+func TestGetContractCreatorRecreatedGenesisContractIsNotGenesis(t *testing.T) {
+	initCode := []byte{0x60, 0x00, 0x60, 0x00, 0x53, 0x60, 0x01, 0x60, 0x00, 0xf3}
+	factoryCode := append(append([]byte{0x69}, initCode...), 0x60, 0x00, 0x52, 0x60, 0x00, 0x60, 0x0a, 0x60, 0x16, 0x60, 0x00, 0xf5, 0x00)
+	factory := common.HexToAddress("0x00000000000000000000000000000000000000fa")
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc: types.GenesisAlloc{
+				testAddr: {Balance: big.NewInt(1_000_000_000_000)},
+				factory:  {Code: factoryCode},
+				target:   {Balance: big.NewInt(7), Code: []byte{0x33, 0xff}},
+			},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	c, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
+		to := target
+		if i == 1 {
+			to = factory
+		}
+		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), to, uint256.NewInt(0), 100_000, uint256.NewInt(1), nil), *signer, testKey)
+		require.NoError(t, err)
+		block.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
+	creator, err := api.GetContractCreator(m.Ctx, target)
+	require.ErrorContains(t, err, "binary search")
+	require.Nil(t, creator)
+}
+
 func TestGetContractCreatorDelegatedEOA(t *testing.T) {
 	senderKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)

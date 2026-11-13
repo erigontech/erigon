@@ -1437,3 +1437,32 @@ func TestDecompressorTruncatedDictVarint(t *testing.T) {
 		})
 	}
 }
+
+func TestDecompressorRejectsDepthsOutOfTreeOrder(t *testing.T) {
+	t.Run("patterns", func(t *testing.T) {
+		dict := []byte{50, 0, 1, 0}
+		aux := make([]byte, 24+len(dict)+8)
+		binary.BigEndian.PutUint64(aux[16:24], uint64(len(dict)))
+		copy(aux[24:], dict)
+
+		fpath := filepath.Join(t.TempDir(), "patternDepths")
+		require.NoError(t, os.WriteFile(fpath, aux, 0o644))
+
+		d, err := NewDecompressor(fpath)
+		require.ErrorIs(t, err, &ErrCompressedFileCorrupted{})
+		require.Nil(t, d)
+	})
+	t.Run("positions", func(t *testing.T) {
+		dict := []byte{50, 0, 1, 1}
+		aux := make([]byte, 24+8+len(dict))
+		binary.BigEndian.PutUint64(aux[24:32], uint64(len(dict)))
+		copy(aux[32:], dict)
+
+		fpath := filepath.Join(t.TempDir(), "positionDepths")
+		require.NoError(t, os.WriteFile(fpath, aux, 0o644))
+
+		d, err := NewDecompressor(fpath)
+		require.ErrorIs(t, err, &ErrCompressedFileCorrupted{})
+		require.Nil(t, d)
+	})
+}

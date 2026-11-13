@@ -48,7 +48,6 @@ func TestSelfdestructedThenFundedThenTouched(t *testing.T) {
 		parallel bool
 		workers  int
 	}{
-		{"serial", false, 1},
 		{"parallel/workers=1", true, 1},
 		{"parallel/workers=4", true, 4},
 	} {

@@ -152,7 +152,12 @@ func (cc *ExecutionClientEngine) NewPayload(
 	if payloadStatus.Status == engine_types.AcceptedStatus {
 		log.Info("[ExecutionClientEngine] New block accepted")
 	}
-	return newPayloadStatusByEngineStatus(payloadStatus.Status), checkPayloadStatus(payloadStatus)
+	status := newPayloadStatusByEngineStatus(payloadStatus.Status)
+	err = checkPayloadStatus(payloadStatus)
+	if payloadStatus.Status == engine_types.InvalidStatus && payloadStatus.LatestValidHash != nil && *payloadStatus.LatestValidHash != (common.Hash{}) {
+		err = &InvalidPayloadError{LatestValidHash: *payloadStatus.LatestValidHash, Err: err}
+	}
+	return status, err
 }
 
 func (cc *ExecutionClientEngine) ForkChoiceUpdate(

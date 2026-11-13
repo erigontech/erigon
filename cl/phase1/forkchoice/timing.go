@@ -19,6 +19,8 @@ package forkchoice
 import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 )
@@ -91,9 +93,8 @@ func (f *ForkChoiceStore) shouldApplyProposerBoost() bool {
 // NOTE: Both elements are time-based checks on when the *block* was received.
 // PTC_TIMELINESS_INDEX records whether the block arrived before the PTC deadline
 // (75% of slot), NOT whether the PTC has voted the payload present.
-func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, blockRoot common.Hash) uint64 {
+func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, blockRoot common.Hash, timeMs uint64) uint64 {
 	var timeliness [clparams.NumBlockTimelinessDeadlines]bool
-	timeMs := f.timeMs.Load()
 	currentSlot := f.slotAtTimeMs(timeMs)
 	if currentSlot == block.Slot {
 		epoch := f.computeEpochAtSlot(currentSlot)
@@ -279,11 +280,11 @@ func pendingAttestationScore(ws WeightStore) func(common.Hash) uint64 {
 	}
 }
 
-func (f *ForkChoiceStore) isHeadWeakWith(root common.Hash, checkpointState *checkpointState, headWeight func(common.Hash) uint64) bool {
-	if checkpointState == nil {
+func (f *ForkChoiceStore) isHeadWeakWith(root common.Hash, justifiedState *checkpointState, headWeight func(common.Hash) uint64) bool {
+	if justifiedState == nil {
 		return false
 	}
-	committeeWeight := checkpointState.unslashedActiveBalance / f.beaconCfg.SlotsPerEpoch
+	committeeWeight := justifiedState.unslashedActiveBalance / f.beaconCfg.SlotsPerEpoch
 	reorgThreshold := committeeWeight * clparams.ReorgHeadWeightThreshold / 100
 	weight := headWeight(root)
 	headBlock, ok := f.forkGraph.GetBlock(root)
@@ -292,28 +293,39 @@ func (f *ForkChoiceStore) isHeadWeakWith(root common.Hash, checkpointState *chec
 	}
 	headSlot := headBlock.Block.Slot
 
-	lenIndicies := uint64(len(checkpointState.shuffledSet))
-	if lenIndicies > 0 {
-		committeesPerSlot := checkpointState.committeeCount(lenIndicies)
-		count := committeesPerSlot * f.beaconCfg.SlotsPerEpoch
-		for ci := range committeesPerSlot {
-			index := (headSlot%f.beaconCfg.SlotsPerEpoch)*committeesPerSlot + ci
-			start := (lenIndicies * index) / count
-			end := (lenIndicies * (index + 1)) / count
-			for _, validatorIndex := range checkpointState.shuffledSet[start:end] {
-				if !f.isUnequivocating(validatorIndex) {
-					continue
-				}
-				vi := int(validatorIndex)
-				if vi < checkpointState.validatorSetSize &&
-					readFromBitset(checkpointState.actives, vi) {
-					weight += checkpointState.balances[vi]
-				}
+	if !f.hasEquivocator {
+		return weight < reorgThreshold
+	}
+
+	committeeState := f.headEpochCommitteeState(root, headSlot, justifiedState)
+	for ci := range committeeState.committeeCount(uint64(len(committeeState.shuffledSet))) {
+		committee, _ := committeeState.beaconCommittee(headSlot, ci)
+		for _, validatorIndex := range committee {
+			if !f.isUnequivocating(validatorIndex) {
+				continue
+			}
+			vi := int(validatorIndex)
+			if vi < justifiedState.validatorSetSize {
+				weight += justifiedState.balances[vi]
 			}
 		}
 	}
 
 	return weight < reorgThreshold
+}
+
+// headEpochCommitteeState returns a state exposing the head epoch's shuffling, without replaying states or reading from disk.
+func (f *ForkChoiceStore) headEpochCommitteeState(root common.Hash, headSlot uint64, justifiedState *checkpointState) *checkpointState {
+	headEpoch := f.computeEpochAtSlot(headSlot)
+	boundary := f.getAncestor(f.getNodeForRoot(root), f.computeStartSlotAtEpoch(headEpoch))
+	dependentSlot := computeShufflingDependentSlot(headEpoch, f.beaconCfg.MinSeedLookahead, f.beaconCfg.SlotsPerEpoch)
+	if shuffled, ok := caches.ShuffledIndiciesCacheGlobal.Get(headEpoch, f.getAncestor(boundary, dependentSlot).Root); ok {
+		return &checkpointState{beaconConfig: f.beaconCfg, shuffledSet: shuffled}
+	}
+	if cached, ok := f.checkpointStates.Load(solid.Checkpoint{Epoch: headEpoch, Root: boundary.Root}); ok {
+		return cached.(*checkpointState)
+	}
+	return justifiedState
 }
 
 // getBlockTimeliness returns the timeliness vector for a block root.

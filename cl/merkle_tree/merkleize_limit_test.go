@@ -69,12 +69,8 @@ func TestMerkleRootFromFlatLeavesWithLimitNonPowerOfTwo(t *testing.T) {
 		for count := uint64(1); count <= limit; count++ {
 			t.Run(fmt.Sprintf("limit%d_chunks%d", limit, count), func(t *testing.T) {
 				chunks := progressiveTestChunks(int(count))
-				leaves := make([]byte, 0, count*32)
-				for _, chunk := range chunks {
-					leaves = append(leaves, chunk[:]...)
-				}
 				var root [32]byte
-				require.NoError(t, merkle_tree.MerkleRootFromFlatLeavesWithLimit(leaves, root[:], limit))
+				require.NoError(t, merkle_tree.MerkleRootFromFlatLeavesWithLimit(flatChunks(chunks), root[:], limit))
 				require.Equal(t, referenceMerkleize(chunks, limit), root)
 			})
 		}
@@ -99,4 +95,70 @@ func TestMerkleTreeNonPowerOfTwoLimit(t *testing.T) {
 func TestMerkleProofRejectsEmptySchema(t *testing.T) {
 	_, err := merkle_tree.MerkleProof(0, 0)
 	require.Error(t, err)
+}
+
+func flatChunks(chunks [][32]byte) []byte {
+	leaves := make([]byte, 0, len(chunks)*32)
+	for _, chunk := range chunks {
+		leaves = append(leaves, chunk[:]...)
+	}
+	return leaves
+}
+
+func TestMerkleizeVectorRejectsOverLimit(t *testing.T) {
+	for _, limit := range []uint64{0, 3, 4} {
+		t.Run(fmt.Sprintf("limit%d", limit), func(t *testing.T) {
+			_, err := merkle_tree.MerkleizeVector(progressiveTestChunks(int(limit)+1), limit)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestMerkleRootFromFlatLeavesWithLimitRejectsOverLimit(t *testing.T) {
+	for _, limit := range []uint64{0, 3, 4} {
+		t.Run(fmt.Sprintf("limit%d", limit), func(t *testing.T) {
+			var root [32]byte
+			leaves := flatChunks(progressiveTestChunks(int(limit) + 1))
+			require.Error(t, merkle_tree.MerkleRootFromFlatLeavesWithLimit(leaves, root[:], limit))
+		})
+	}
+}
+
+func TestMerkleRootFromFlatLeavesWithLimitEmpty(t *testing.T) {
+	for _, limit := range []uint64{0, 1, 3, 4, 16} {
+		t.Run(fmt.Sprintf("limit%d", limit), func(t *testing.T) {
+			var root [32]byte
+			require.NoError(t, merkle_tree.MerkleRootFromFlatLeavesWithLimit(nil, root[:], limit))
+			want, err := merkle_tree.MerkleizeVector(nil, limit)
+			require.NoError(t, err)
+			require.Equal(t, want, root)
+		})
+	}
+}
+
+func TestMerkleRootFromFlatLeavesWithLimitUnbalanced(t *testing.T) {
+	var root [32]byte
+	require.NoError(t, merkle_tree.MerkleRootFromFlatLeavesWithLimit([]byte{1, 2, 3, 4, 5}, root[:], 4))
+
+	padded := make([]byte, 32)
+	copy(padded, []byte{1, 2, 3, 4, 5})
+	var want [32]byte
+	require.NoError(t, merkle_tree.MerkleRootFromFlatLeavesWithLimit(padded, want[:], 4))
+	require.Equal(t, want, root)
+
+	require.Error(t, merkle_tree.MerkleRootFromFlatLeavesWithLimit(make([]byte, 4*32+1), root[:], 4))
+}
+
+func TestBitlistRootWithLimitRejectsOverLimit(t *testing.T) {
+	_, err := merkle_tree.BitlistRootWithLimit([]byte{0x04}, 1)
+	require.Error(t, err, "2 bits, limit 1")
+
+	bits := make([]byte, 38)
+	bits[0] = 0xff
+	bits[37] = 0x01
+	_, err = merkle_tree.BitlistRootWithLimit(bits, 256)
+	require.Error(t, err, "296 bits, limit 256")
+
+	_, err = merkle_tree.BitlistRootWithLimit(bits, 296)
+	require.NoError(t, err, "296 bits, limit 296")
 }

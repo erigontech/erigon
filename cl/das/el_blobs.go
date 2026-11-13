@@ -68,10 +68,10 @@ func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.Sig
 		if !store(sidecar.Index) {
 			continue
 		}
-		if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(sidecar.Index), sidecar); err != nil {
-			return nil, err
-		}
 		stored = append(stored, sidecar)
+	}
+	if err := d.columnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, stored); err != nil {
+		return nil, err
 	}
 	if err := d.TryScheduleRecover(block.Block.Slot, blockRoot); err != nil {
 		log.Warn("[peerdas] failed to schedule blob recovery after EL import", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)

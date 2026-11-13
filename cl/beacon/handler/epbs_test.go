@@ -1658,6 +1658,7 @@ func testPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T, 
 	currentSlot := handler.ethClock.GetCurrentSlot()
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	clock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{}, nil).AnyTimes()
 	handler.ethClock = clock
 	handler.beaconChainCfg.GloasForkEpoch = 0
 
@@ -1851,7 +1852,7 @@ func TestPostExecutionPayloadEnvelopesRejectsTrailingJSON(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
-func TestValidateAndStoreExecutionPayloadEnvelopeContentsRejectsUnpersistableEnvelope(t *testing.T) {
+func TestValidateExecutionPayloadEnvelopeContentsRejectsUnpersistableEnvelope(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	contents := cltypes.NewSignedExecutionPayloadEnvelopeContents(handler.beaconChainCfg, 64)
 	payload := contents.SignedExecutionPayloadEnvelope.Message.Payload
@@ -1864,7 +1865,7 @@ func TestValidateAndStoreExecutionPayloadEnvelopeContentsRejectsUnpersistableEnv
 		int(clparams.GloasVersion),
 	))
 
-	err := handler.validateAndStoreExecutionPayloadEnvelopeContents(t.Context(), contents)
+	_, err := handler.validateExecutionPayloadEnvelopeContents(t.Context(), contents)
 
 	require.ErrorContains(t, err, "encoding size")
 }

@@ -35,7 +35,6 @@ func (c *ChainEndpoint) storeBlobsForBlock(
 	ctx context.Context,
 	blobDB blob_storage.BlobStorage,
 	beaconConfig *clparams.BeaconChainConfig,
-	baseUriBlob string,
 	block *cltypes.SignedBeaconBlock,
 ) error {
 	commitments := block.Block.Body.GetBlobKzgCommitments()
@@ -56,9 +55,9 @@ func (c *ChainEndpoint) storeBlobsForBlock(
 	if err != nil {
 		return err
 	}
-	blobs, err := retrieveBlobsFromRemoteEndpoint(ctx, baseUriBlob, block)
+	blobs, err := retrieveBlobsFromRemoteEndpoint(ctx, c.Endpoint, blockRoot, commitments.Len())
 	if err != nil {
-		return fmt.Errorf("failed to retrieve blobs at slot %d: %w, uri: %s/0x%x", block.Block.Slot, err, baseUriBlob, blockRoot)
+		return fmt.Errorf("failed to retrieve blobs at slot %d, root %x: %w", block.Block.Slot, blockRoot, err)
 	}
 	if err := storeRemoteBlobs(ctx, blobDB, ids, blobs, block); err != nil {
 		return fmt.Errorf("failed to verify and store blobs at slot %d: %w", block.Block.Slot, err)

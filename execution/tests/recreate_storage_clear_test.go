@@ -46,7 +46,7 @@ import (
 // then re-created at the same CREATE2 address in block 3. Pre-Cancun (no
 // EIP-6780) the self-destruct fully removes the account, so the re-created
 // contract must observe EMPTY storage — the block-1 slot must not survive the
-// cross-block destruct+recreate. Runs both serial and parallel executors.
+// cross-block destruct+recreate.
 func TestRecreateStorageClearedAcrossBlocks(t *testing.T) {
 	// creator: CALLDATACOPY(0,0,CALLDATASIZE); CREATE2(0,0,CALLDATASIZE,0)
 	creatorCode := common.FromHex("0x36600060003760003660006000f5")
@@ -59,7 +59,6 @@ func TestRecreateStorageClearedAcrossBlocks(t *testing.T) {
 		name     string
 		parallel bool
 	}{
-		{"serial", false},
 		{"parallel", true},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
@@ -172,13 +171,14 @@ func TestParallelStorageRewriteAfterDestroyAndRecreate(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		committed bool
+		readAfter bool
 		blocks    [][]revivalCall
 	}{
-		{"committed", true, [][]revivalCall{{destroy, create, write}}},
-		{"committed, read after", true, [][]revivalCall{{write, destroy, create, write, read}}},
-		{"created in block", false, [][]revivalCall{{create, write, destroy, create, write}}},
-		{"created in block, read after", false, [][]revivalCall{{create, write, destroy, create, write, read}}},
-		{"created in previous block", false, [][]revivalCall{{create, write}, {destroy, create, write}}},
+		{"committed", true, false, [][]revivalCall{{destroy, create, write}}},
+		{"committed, read after", true, true, [][]revivalCall{{write, destroy, create, write, read}}},
+		{"created in block", false, false, [][]revivalCall{{create, write, destroy, create, write}}},
+		{"created in block, read after", false, true, [][]revivalCall{{create, write, destroy, create, write, read}}},
+		{"created in previous block", false, false, [][]revivalCall{{create, write}, {destroy, create, write}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			alloc := types.GenesisAlloc{
@@ -194,8 +194,6 @@ func TestParallelStorageRewriteAfterDestroyAndRecreate(t *testing.T) {
 			keys := revivalKeys(t, alloc, 6)
 			gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 
-			prevParallel := dbg.Exec3Parallel
-			dbg.Exec3Parallel = false
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 			signer := types.LatestSignerForChainID(config.ChainID)
 			chainPack, err := m.GenerateChain(len(tc.blocks), func(i int, b *blockgen.BlockGen) {
@@ -206,14 +204,15 @@ func TestParallelStorageRewriteAfterDestroyAndRecreate(t *testing.T) {
 					b.AddTx(txn)
 				}
 			})
-			dbg.Exec3Parallel = prevParallel
 			require.NoError(t, err)
 
 			check := func(t *testing.T, st *state.IntraBlockState) {
 				require.Equal(t, *uint256.NewInt(7), storageAt(t, st, victim, 0))
 				require.Equal(t, *uint256.NewInt(0x593d), storageAt(t, st, victim, 0x32))
+				if tc.readAfter {
+					require.Equal(t, *uint256.NewInt(0x593d), storageAt(t, st, reader, 0))
+				}
 			}
-			importSerially(t, gspec, keys[0], chainPack, check)
 			for range 25 {
 				importInParallel(t, gspec, keys[0], chainPack, check)
 			}

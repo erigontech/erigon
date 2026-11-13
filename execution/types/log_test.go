@@ -606,6 +606,25 @@ func TestLogsMarshalFastJSONTo(t *testing.T) {
 		"empty topics": {{Topics: []common.Hash{}}},
 		"full":         {full},
 		"several":      {full, {}, full},
+		"shared fields change one at a time": func() Logs {
+			out := Logs{full}
+			for _, change := range []func(*Log){
+				func(l *Log) { l.Index++ },
+				func(l *Log) { l.BlockNumber++ },
+				func(l *Log) { l.TxHash[0]++ },
+				func(l *Log) { l.TxIndex++ },
+				func(l *Log) { l.BlockHash[0]++ },
+				func(l *Log) { l.Removed = !l.Removed },
+				func(l *Log) { l.BlockTimestamp = at(uint64(*l.BlockTimestamp) + 1) },
+				func(l *Log) { l.BlockTimestamp = nil },
+				func(l *Log) { l.BlockTimestamp = at(0) },
+			} {
+				next := *out[len(out)-1]
+				change(&next)
+				out = append(out, &next)
+			}
+			return out
+		}(),
 		"large": func() Logs {
 			out := make(Logs, 2*jsonstream.FlushThreshold/128)
 			for i := range out {
@@ -654,6 +673,10 @@ func TestLogMatchesItsTags(t *testing.T) {
 			got, err := jsonstream.Marshal(l)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
+
+			got, err = jsonstream.Marshal(Logs{l})
+			require.NoError(t, err)
+			require.Equal(t, "["+string(want)+"]", string(got))
 		})
 	}
 }
@@ -662,4 +685,37 @@ func TestLogMatchesItsTags(t *testing.T) {
 func at(v uint64) *hexutil.Uint64 {
 	h := hexutil.Uint64(v)
 	return &h
+}
+
+// A log already stamped with the block time, as receipts are when they enter the RPC cache, is
+// returned as it is: no copy and no allocation.
+func TestAppendFilteredLogsReusesStampedLogs(t *testing.T) {
+	logs := Logs{{Address: common.Address{1}}, {Address: common.Address{2}}}
+	logs.SetBlockTimestamp(7)
+	f := NewLogFilter(nil, nil)
+	dst := make(Logs, 0, len(logs))
+	allocs := testing.AllocsPerRun(10, func() {
+		dst = logs.AppendFilteredLogs(dst[:0], f, 7, 0)
+	})
+	require.Zero(t, allocs)
+	require.Same(t, logs[0], dst[0])
+	require.Same(t, logs[1], dst[1])
+}
+
+func TestAppendFilteredLogsCopiesLogsStampedWithAnotherTime(t *testing.T) {
+	logs := Logs{{Address: common.Address{1}}, {Address: common.Address{2}}}
+	logs[0].BlockTimestamp = at(5)
+	got := logs.AppendFilteredLogs(nil, NewLogFilter(nil, nil), 7, 0)
+	require.NotSame(t, logs[0], got[0])
+	require.Equal(t, at(7), got[0].BlockTimestamp)
+	require.Equal(t, at(5), logs[0].BlockTimestamp)
+	require.Equal(t, at(7), got[1].BlockTimestamp)
+}
+
+func TestSetBlockTimestamp(t *testing.T) {
+	logs := Logs{{}, {}}
+	logs.SetBlockTimestamp(7)
+	require.Equal(t, at(7), logs[0].BlockTimestamp)
+	*logs[0].BlockTimestamp = 0
+	require.Equal(t, at(7), logs[1].BlockTimestamp, "each log owns its timestamp")
 }

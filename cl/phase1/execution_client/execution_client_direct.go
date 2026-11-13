@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -87,9 +88,20 @@ func (cc *ExecutionClientDirect) NewPayload(
 		return PayloadStatusInvalidated, err
 	}
 
+	if payload.Version() >= clparams.DenebVersion {
+		cfg := cc.chainRW.Config()
+		if err := misc.ValidateBlobs(payload.BlobGasUsed, cfg.GetMaxBlobGasPerBlock(payload.Time), cfg.GetMaxBlobsPerBlock(payload.Time), versionedHashes, &txs); err != nil {
+			if errors.Is(err, misc.ErrNilBlobHashes) {
+				return PayloadStatusNone, err
+			}
+			return PayloadStatusInvalidated, err
+		}
+	}
+
 	cc.chainRW.StartSendersRecovery(ctx, payload.BlockHash, header, txs)
 	startInsertBlock := time.Now()
-	if err := cc.chainRW.InsertBlock(ctx, types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals, bal)); err != nil {
+	block := types.NewBlockFromStorageWithBinaryTxs(payload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals, bal)
+	if err := cc.chainRW.InsertBlock(ctx, block); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return PayloadStatusInvalidated, err
 		}
@@ -112,7 +124,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 	}
 
 	startValidateChain := time.Now()
-	status, _, _, err := cc.chainRW.ValidateChain(ctx, payload.BlockHash, payload.BlockNumber)
+	status, _, lvh, err := cc.chainRW.ValidateChain(ctx, block)
 	if err != nil {
 		return PayloadStatusNone, err
 	}
@@ -120,7 +132,11 @@ func (cc *ExecutionClientDirect) NewPayload(
 	// check status
 	switch status {
 	case execmodule.ExecutionStatusBadBlock, execmodule.ExecutionStatusInvalidForkchoice:
-		return PayloadStatusInvalidated, errors.New("bad block")
+		err := errors.New("bad block")
+		if status == execmodule.ExecutionStatusBadBlock && lvh != (common.Hash{}) {
+			return PayloadStatusInvalidated, &InvalidPayloadError{LatestValidHash: lvh, Err: err}
+		}
+		return PayloadStatusInvalidated, err
 	case execmodule.ExecutionStatusBusy, execmodule.ExecutionStatusMissingSegment, execmodule.ExecutionStatusTooFarAway:
 		return PayloadStatusNotValidated, nil
 	case execmodule.ExecutionStatusSuccess:

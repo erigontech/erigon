@@ -292,6 +292,11 @@ message FrameValidationRequest {
 }
 
 message FrameValidationReply {
+  enum RejectionReason {
+    UNSPECIFIED = 0;
+    NONCE_TOO_LOW = 1;
+  }
+
   bool valid = 1;
   types.H160 payer = 2;
   types.H256 max_cost = 3;
@@ -300,6 +305,8 @@ message FrameValidationReply {
   uint64 deadline = 6;
   repeated types.H160 dependencies = 7;
   repeated FrameCreationNonce creation_nonces = 8;
+  // Only meaningful when valid is false; unspecified reasons are generic rejections.
+  RejectionReason rejection_reason = 9;
 }
 
 message BlockForTxNumRequest {

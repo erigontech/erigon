@@ -170,6 +170,24 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		return nil, searchErr
 	}
 	if creationTxnID == 0 {
+		afterGenesis, err := api._txNumReader.Min(ctx, tx, 1)
+		if err != nil {
+			return nil, err
+		}
+		if err := api.checkPruneState(ctx, tx, 0); err != nil {
+			return nil, err
+		}
+		codeChanges, err := tx.IndexRange(kv.CodeHistoryIdx, addr[:], int(afterGenesis), -1, order.Asc, 1)
+		if err != nil {
+			return nil, err
+		}
+		defer codeChanges.Close()
+		if !codeChanges.HasNext() {
+			return nil, nil
+		}
+		if _, err := codeChanges.Next(); err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
 	}
 

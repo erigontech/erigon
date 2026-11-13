@@ -318,6 +318,44 @@ func (c *MockDataColumnStorageWriteColumnSidecarsCall) DoAndReturn(f func(contex
 	return c
 }
 
+// WriteColumnSidecarsBatch mocks base method.
+func (m *MockDataColumnStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "WriteColumnSidecarsBatch", ctx, blockRoot, sidecars)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// WriteColumnSidecarsBatch indicates an expected call of WriteColumnSidecarsBatch.
+func (mr *MockDataColumnStorageMockRecorder) WriteColumnSidecarsBatch(ctx, blockRoot, sidecars any) *MockDataColumnStorageWriteColumnSidecarsBatchCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteColumnSidecarsBatch", reflect.TypeOf((*MockDataColumnStorage)(nil).WriteColumnSidecarsBatch), ctx, blockRoot, sidecars)
+	return &MockDataColumnStorageWriteColumnSidecarsBatchCall{Call: call}
+}
+
+// MockDataColumnStorageWriteColumnSidecarsBatchCall wrap *gomock.Call
+type MockDataColumnStorageWriteColumnSidecarsBatchCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockDataColumnStorageWriteColumnSidecarsBatchCall) Return(arg0 error) *MockDataColumnStorageWriteColumnSidecarsBatchCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockDataColumnStorageWriteColumnSidecarsBatchCall) Do(f func(context.Context, common.Hash, []*cltypes.DataColumnSidecar) error) *MockDataColumnStorageWriteColumnSidecarsBatchCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockDataColumnStorageWriteColumnSidecarsBatchCall) DoAndReturn(f func(context.Context, common.Hash, []*cltypes.DataColumnSidecar) error) *MockDataColumnStorageWriteColumnSidecarsBatchCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // WriteStream mocks base method.
 func (m *MockDataColumnStorage) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
 	m.ctrl.T.Helper()

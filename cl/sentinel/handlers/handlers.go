@@ -208,6 +208,10 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		}
 
 		if err := fn(s); err != nil {
+			if errors.Is(err, ssz_snappy.ErrPayloadExceedsLimit) && ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix) == nil {
+				_ = s.Close()
+				return
+			}
 			if errors.Is(err, ErrResourceUnavailable) {
 				// write resource unavailable prefix
 				if _, err := s.Write([]byte{ResourceUnavailablePrefix}); err != nil {

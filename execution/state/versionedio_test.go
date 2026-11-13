@@ -1696,6 +1696,17 @@ func TestAccountState_IndexCrossoverKeepsSlotsFindable(t *testing.T) {
 	require.Len(t, account.storageReads, 4*slotIndexMin)
 }
 
+// A slot read by many txs must occupy one storageReads entry, otherwise finalize
+// sorts one entry per read instead of one per slot.
+func TestAccountState_RepeatedReadsKeepOneEntry(t *testing.T) {
+	account := newAccountState(accounts.InternAddress(common.HexToAddress("0xbeef")))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	for range 3 {
+		account.updateReadStorage(slot, *uint256.NewInt(7))
+	}
+	require.Equal(t, []accounts.StorageKey{slot}, account.storageReads)
+}
+
 // TestAccountState_MatchesReferenceBuilder fuzzes read/write sequences that
 // cross slotIndexMin in both lists and compares the normalized result against a
 // straightforward builder. The indexes are pure bookkeeping, so any divergence
@@ -2179,4 +2190,26 @@ func TestAccountStateBalanceTrackingDoesNotAllocate(t *testing.T) {
 		}
 	})
 	require.Zero(t, allocs, "allocations per run for %d accounts", len(states))
+}
+
+func TestWriteSetMergeFromExtendsTheSetInPlace(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	balance := func(v uint64) *VersionedWrite[uint256.Int] {
+		return &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(v)}
+	}
+	nonce := &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: 7}
+
+	ws := newWriteSet(balance(1), nonce)
+	nextBalance := balance(2)
+	next := newWriteSet(nextBalance)
+
+	ws.MergeFrom(next)
+
+	got, ok := ws.GetBalance(addr)
+	require.True(t, ok)
+	require.Equal(t, *uint256.NewInt(2), got.Val, "next wins on the same path")
+	gotNonce, ok := ws.GetNonce(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(7), gotNonce.Val)
+	require.NotSame(t, nextBalance, got, "the merged cell must not alias next")
 }
