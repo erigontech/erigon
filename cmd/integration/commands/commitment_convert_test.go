@@ -49,7 +49,9 @@ import (
 func TestCommitmentConvertReturnsErrors(t *testing.T) {
 	enabled := statecfg.ExperimentalCommitmentV3
 	t.Cleanup(func() {
-		convertRestore, convertContinue, convertV3, statecfg.ExperimentalCommitmentV3 = false, false, false, enabled
+		convertSqueeze, convertNibblesV2, convertRestore, convertContinue, convertV3, statecfg.ExperimentalCommitmentV3 = false, false, false, false, false, enabled
+		cmdCommitmentConvert.Flags().Lookup("squeeze").Changed = false
+		cmdCommitmentConvert.Flags().Lookup("nibbles.v2").Changed = false
 	})
 	root := RootCommand()
 	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--restore", "--continue"})
@@ -71,6 +73,13 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "backup", ".restore_v3_reset_pending"), nil, 0o644))
 	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", dirs.DataDir, "--chain", "mainnet", "--v3"})
 	require.ErrorContains(t, root.ExecuteContext(t.Context()), "convert --restore")
+
+	convertV3 = false
+	statecfg.ExperimentalCommitmentV3 = true
+	for _, mode := range [][]string{nil, {"--squeeze=true"}, {"--nibbles.v2=true"}} {
+		root.SetArgs(append([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet"}, mode...))
+		require.ErrorContains(t, root.ExecuteContext(t.Context()), "without ERIGON_COMMITMENT_V3=true", mode)
+	}
 }
 
 func TestCommitmentVerifyRejectsAsOfWithoutHistory(t *testing.T) {
