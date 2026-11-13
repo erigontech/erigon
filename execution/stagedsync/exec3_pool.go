@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const (
@@ -184,6 +185,16 @@ func (pt *poolTask) rerunAfter(named int) bool {
 	return pt.waitThen(t, psReexec)
 }
 
+// rerunAfterWriter re-runs the task once the writer it read from publishes a validated result or commits.
+func (pt *poolTask) rerunAfterWriter(named int) bool {
+	if pt.reruns >= poolNamedReruns {
+		return pt.rerunAfter(named)
+	}
+	pt.reruns++
+	pt.next = psReexec
+	return !pt.be.requeueAtValidated(pt.tv.index, named, pt)
+}
+
 func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 	be, tv := pt.be, pt.tv
 	defer func() {
@@ -202,7 +213,7 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 		case psRecheck:
 			valid, _, blocker := be.selfLoopEvaluate(tv, pt.result)
 			if !valid {
-				if !pt.rerunAfter(blocker) {
+				if !pt.rerunAfterWriter(blocker) {
 					return
 				}
 				continue
@@ -251,14 +262,14 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 		return pt.rerunAfter(tv.index - 1)
 	}
 	if result.Dep >= 0 {
-		return pt.rerunAfter(be.taskIndexOf(result.Dep))
+		return pt.rerunAfterWriter(be.taskIndexOf(result.Dep))
 	}
 	be.selfLoopFlush(tv.version, result, pt.prevWrites)
 	pt.prevWrites = result.TxOut
 
 	valid, target, blocker := be.selfLoopEvaluate(tv, result)
 	if !valid {
-		return pt.rerunAfter(blocker)
+		return pt.rerunAfterWriter(blocker)
 	}
 	return pt.settle(p, result, target)
 }
@@ -272,6 +283,11 @@ func (pt *poolTask) settle(p *taskPool, result *exec.TxResult, target int) bool 
 }
 
 func (pt *poolTask) publish(p *taskPool) bool {
+	if r := pt.result; r != nil && r.Err == nil {
+		burnt := r.ExecutionResult.BurntContractAddress
+		pt.be.versionMap.MarkWritesValidated(r.TxOut, func(a accounts.Address) bool { return a == r.Coinbase || a == burnt })
+		pt.be.signalValidated(pt.tv.index)
+	}
 	pt.send(p, pt.result)
 	pt.result = nil
 	pt.next = psReexec

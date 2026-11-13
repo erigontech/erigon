@@ -2644,6 +2644,10 @@ type blockExecutor struct {
 	committedFrontier atomic.Int64
 	wakeMu            sync.Mutex
 	wakeAt            map[int][]*poolTask
+	// wakeValidated holds named re-runs waiting for a writer's worker to publish a validated
+	// result; validated marks writers published since their last re-exec signal.
+	wakeValidated map[int][]*poolTask
+	validated     map[int]bool
 	// poolTasks[i] is task i's pool state. After sending its result a task is parked
 	// (no goroutine); the committed-dependent re-check re-queues it to re-execute.
 	poolTasks []*poolTask
@@ -2693,6 +2697,8 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		readerByAddr:        map[accounts.Address][]addrReader{},
 		revalidate:          map[int]bool{},
 		selfLoopDispatched:  map[int]bool{},
+		wakeValidated:       map[int][]*poolTask{},
+		validated:           map[int]bool{},
 	}
 	be.committedFrontier.Store(-1)
 	return be
@@ -3028,8 +3034,9 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 func (be *blockExecutor) signalCommitted(tx int) {
 	be.wakeMu.Lock()
 	be.committedFrontier.Store(int64(tx))
-	waiters := be.wakeAt[tx]
+	waiters := append(be.wakeAt[tx], be.wakeValidated[tx]...)
 	delete(be.wakeAt, tx)
+	delete(be.wakeValidated, tx)
 	be.wakeMu.Unlock()
 	for _, pt := range waiters {
 		be.pool.push(pt)
@@ -3039,6 +3046,9 @@ func (be *blockExecutor) signalCommitted(tx int) {
 // signalSelfLoopReexec re-queues the parked task of an already-sent tx to
 // re-execute, or latches the request when the task is still running.
 func (be *blockExecutor) signalSelfLoopReexec(tx int) {
+	be.wakeMu.Lock()
+	delete(be.validated, tx)
+	be.wakeMu.Unlock()
 	pt := be.poolTasks[tx]
 	if pt == nil {
 		return
@@ -3067,6 +3077,33 @@ func (be *blockExecutor) finishTask(tx int) {
 		pt.parked = false
 		pt.mu.Unlock()
 	}
+}
+
+// signalValidated wakes the named re-runs waiting for tx, whose worker just published a
+// validated result with its writes marked Validated.
+func (be *blockExecutor) signalValidated(tx int) {
+	be.wakeMu.Lock()
+	be.validated[tx] = true
+	waiters := be.wakeValidated[tx]
+	delete(be.wakeValidated, tx)
+	be.wakeMu.Unlock()
+	for _, pt := range waiters {
+		be.pool.push(pt)
+	}
+}
+
+// requeueAtValidated is requeueAt that also wakes when target's worker publishes a validated result.
+func (be *blockExecutor) requeueAtValidated(tx, target int, pt *poolTask) bool {
+	if target >= tx {
+		return be.requeueAt(tx, target, pt)
+	}
+	be.wakeMu.Lock()
+	defer be.wakeMu.Unlock()
+	if int(be.committedFrontier.Load()) >= target || be.validated[target] {
+		return false
+	}
+	be.wakeValidated[target] = append(be.wakeValidated[target], pt)
+	return true
 }
 
 func (be *blockExecutor) frontier() int {
