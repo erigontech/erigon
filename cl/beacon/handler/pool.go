@@ -373,10 +373,27 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter,
 		return
 	}
 
+	var raw struct {
+		Attestation1 *json.RawMessage `json:"attestation_1"`
+		Attestation2 *json.RawMessage `json:"attestation_2"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	if raw.Attestation1 == nil || raw.Attestation2 == nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation_1 and attestation_2 are required")).WriteTo(w)
+		return
+	}
+
 	req := cltypes.NewAttesterSlashing(clVersion)
 	req.Attestation_1.AttestingIndices.SetCap(int(maxIndices))
 	req.Attestation_2.AttestingIndices.SetCap(int(maxIndices))
-	if err := json.Unmarshal(body, req); err != nil {
+	if err := json.Unmarshal(*raw.Attestation1, req.Attestation_1); err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	if err := json.Unmarshal(*raw.Attestation2, req.Attestation_2); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}

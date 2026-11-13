@@ -143,16 +143,21 @@ func TestPostPoolAttesterSlashingIndexLimit(t *testing.T) {
 	cfg.MaxValidatorsPerCommittee = 1
 	cfg.MaxCommitteesPerSlot = 2
 	for _, tc := range []struct {
-		name   string
-		epoch  uint64
-		limit  int
-		count  int
-		status int
+		name           string
+		epoch          uint64
+		limit          int
+		count          int
+		first          bool
+		duplicateField string
+		status         int
 	}{
 		{name: "pre-Electra at limit", epoch: 0, limit: 1, count: 1, status: http.StatusOK},
 		{name: "pre-Electra over limit", epoch: 0, limit: 1, count: 2, status: http.StatusBadRequest},
 		{name: "Electra at limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 2, status: http.StatusOK},
 		{name: "Electra over limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 3, status: http.StatusBadRequest},
+		{name: "Electra first attestation over limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 3, first: true, status: http.StatusBadRequest},
+		{name: "Electra repeated first attestation at limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 2, first: true, duplicateField: "attestation_1", status: http.StatusOK},
+		{name: "Electra repeated second attestation at limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 2, duplicateField: "attestation_2", status: http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler, store := newAttesterSlashingTestHandler(t, &cfg, tc.epoch)
@@ -161,8 +166,14 @@ func TestPostPoolAttesterSlashingIndexLimit(t *testing.T) {
 			for i := range tc.count {
 				slashing.Attestation_2.AttestingIndices.Append(uint64(i + 1))
 			}
+			if tc.first {
+				slashing.Attestation_1, slashing.Attestation_2 = slashing.Attestation_2, slashing.Attestation_1
+			}
 			body, err := json.Marshal(slashing)
 			require.NoError(t, err)
+			if tc.duplicateField != "" {
+				body = fmt.Appendf(nil, `{"%s":null,%s`, tc.duplicateField, body[1:])
+			}
 
 			resp := httptest.NewRecorder()
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/attester_slashings", bytes.NewReader(body))
@@ -174,8 +185,37 @@ func TestPostPoolAttesterSlashingIndexLimit(t *testing.T) {
 				require.Equal(t, tc.limit, stored[0].Attestation_1.AttestingIndices.Cap())
 				require.Equal(t, tc.limit, stored[0].Attestation_2.AttestingIndices.Cap())
 			} else {
+				require.Contains(t, resp.Body.String(), "attesting indices exceed limit")
 				require.Zero(t, store.Pool.AttesterSlashingsPool.Len())
 			}
+		})
+	}
+}
+
+func TestPostPoolAttesterSlashingRequiresBothAttestations(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	attestation := cltypes.NewIndexedAttestation(clparams.Phase0Version)
+	attestation.AttestingIndices.Append(1)
+
+	for _, tc := range []struct {
+		name string
+		body map[string]*cltypes.IndexedAttestation
+	}{
+		{name: "missing first", body: map[string]*cltypes.IndexedAttestation{"attestation_2": attestation}},
+		{name: "missing second", body: map[string]*cltypes.IndexedAttestation{"attestation_1": attestation}},
+		{name: "null first", body: map[string]*cltypes.IndexedAttestation{"attestation_1": nil, "attestation_2": attestation}},
+		{name: "null second", body: map[string]*cltypes.IndexedAttestation{"attestation_1": attestation, "attestation_2": nil}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, store := newAttesterSlashingTestHandler(t, &cfg, 0)
+			body, err := json.Marshal(tc.body)
+			require.NoError(t, err)
+
+			resp := httptest.NewRecorder()
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/attester_slashings", bytes.NewReader(body))
+			handler.PostEthV1BeaconPoolAttesterSlashings(resp, req)
+			require.Equal(t, http.StatusBadRequest, resp.Code, resp.Body.String())
+			require.Zero(t, store.Pool.AttesterSlashingsPool.Len())
 		})
 	}
 }
