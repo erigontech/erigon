@@ -404,6 +404,70 @@ func TestSharedDomain_UnwindDropsWritesBufferedBeforeUnwind(t *testing.T) {
 	}
 }
 
+func TestSharedDomain_MergeKeepsOtherWritesBufferedBeforeUnwind(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 4)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	receiver, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer receiver.Close()
+	other, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer other.Close()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	key := addr[:]
+	kept := []byte{0x10}
+	require.NoError(t, other.DomainPut(kv.AccountsDomain, rwTx, key, kept, 1, nil))
+	const unwindTo = 2
+	unwound := &changeset.StateChangeSet{}
+	other.SetChangesetAccumulator(unwound)
+	other.SetTxNum(unwindTo)
+	require.NoError(t, other.DomainPut(kv.AccountsDomain, rwTx, key, []byte{0x20}, unwindTo, kept))
+	other.SetChangesetAccumulator(nil)
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	for d := range diffs {
+		diffs[d] = unwound.Diffs[d].GetDiffSet()
+	}
+	other.Unwind(unwindTo, &diffs)
+
+	require.NoError(t, receiver.Merge(ctx, 0, other, unwindTo))
+	require.NoError(t, receiver.Flush(ctx, rwTx))
+	it, err := rwTx.IndexRange(kv.AccountsHistoryIdx, key, 0, -1, order.Asc, -1)
+	require.NoError(t, err)
+	txNums, err := stream.ToArrayU64(it)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{1}, txNums, "history index after merging a batch unwound to txNum %d", unwindTo)
+}
+
+func TestSharedDomain_DiscardWritesCoversWritesBufferedBeforeUnwind(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 4)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	key := addr[:]
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, key, []byte{0x10}, 1, nil))
+	domains.Unwind(2, nil)
+	domains.DiscardWrites(kv.AccountsDomain)
+	require.NoError(t, domains.Flush(ctx, rwTx))
+
+	got, _, err := rwTx.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, got, "discarded domain written before an unwind")
+}
+
 // TestNewSharedDomains_StateAheadOfBlocks verifies that when the persisted
 // commitment state is ahead of the TxNums index (catch-up scenario),
 // NewSharedDomains returns ErrBehindCommitment but the SharedDomains itself
