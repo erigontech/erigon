@@ -269,31 +269,16 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 	}
 }
 
-// balBuildJobs feeds one builder goroutine, started once and shared: it adds sealed txs
-// to their block access list in publish order, off the apply goroutine.
-var balBuildJobs = sync.OnceValue(func() chan<- balBuildJob {
-	// Above the 1078-job peak measured on a 300M max-tx BAL block; a full buffer blocks the apply goroutine.
-	jobs := make(chan balBuildJob, 2*1024)
-	go func() {
-		for j := range jobs {
-			j.run()
-		}
-	}()
-	return jobs
-})
-
 // balBuildJobHook runs before each tx job on the builder goroutine; tests use it to delay one.
 var balBuildJobHook func(*asyncBALBuilder)
 
 type balBuildJob struct {
-	a      *asyncBALBuilder
 	io     *state.VersionedIO
 	sealed int
 	flush  bool
 }
 
-func (j balBuildJob) run() {
-	a := j.a
+func (a *asyncBALBuilder) run(j balBuildJob) {
 	if j.flush {
 		a.done <- struct{}{}
 		return
@@ -315,22 +300,37 @@ func (j balBuildJob) run() {
 	}
 }
 
-// asyncBALBuilder is one block's access list, built on the shared builder goroutine.
-// Its fields belong to that goroutine between add and the end of finish.
+// asyncBALBuilder adds sealed txs to the current block's access list in publish order, on its own goroutine off
+// the apply goroutine. b and err belong to that goroutine from add until finish receives on done.
 type asyncBALBuilder struct {
-	b    *state.BlockAccessListBuilder
-	err  any
+	jobs chan balBuildJob
 	done chan struct{}
+	b    *state.BlockAccessListBuilder
+	err  error
 }
 
 func (a *asyncBALBuilder) add(io *state.VersionedIO, sealed int) {
+	if a.jobs == nil {
+		// Above the 1078-job peak measured on a 300M max-tx BAL block; a full buffer blocks the apply goroutine.
+		jobs := make(chan balBuildJob, 2*1024)
+		a.jobs, a.done = jobs, make(chan struct{}, 1)
+		go func() {
+			for j := range jobs {
+				a.run(j)
+			}
+		}()
+	}
 	if a.b == nil {
 		a.b = state.NewBlockAccessListBuilder()
 	}
-	if a.done == nil {
-		a.done = make(chan struct{}, 1)
+	a.jobs <- balBuildJob{io: io, sealed: sealed}
+}
+
+// stop ends the builder goroutine after its queued jobs.
+func (a *asyncBALBuilder) stop() {
+	if a.jobs != nil {
+		close(a.jobs)
 	}
-	balBuildJobs() <- balBuildJob{a: a, io: io, sealed: sealed}
 }
 
 // finish waits for the block's queued txs and returns its builder, nil when none was
@@ -339,7 +339,7 @@ func (a *asyncBALBuilder) finish() *state.BlockAccessListBuilder {
 	if a.b == nil {
 		return nil
 	}
-	balBuildJobs() <- balBuildJob{a: a, flush: true}
+	a.jobs <- balBuildJob{flush: true}
 	<-a.done
 	b, err := a.b, a.err
 	a.b, a.err = nil, nil
@@ -586,6 +586,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		var pendingAccumulatorWrites []state.WriteSetView
 		// balBuilder builds the current block's access list from its published txs.
 		var balBuilder asyncBALBuilder
+		defer balBuilder.stop()
 		// foldErr is the first per-tx fold error of the current block, surfaced at
 		// its blockResult.
 		var foldErr error
