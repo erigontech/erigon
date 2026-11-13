@@ -18,16 +18,19 @@ package types
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/rand"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func BenchmarkHeaderRLP(b *testing.B) {
@@ -245,6 +248,20 @@ func BenchmarkReceiptRLP(b *testing.B) {
 			_ = rlp.DecodeBytes(buf.Bytes(), &decoded)
 		}
 	})
+
+	b.Run(`DecodeTyped`, func(b *testing.B) {
+		typed := tr.RandReceiptFixed()
+		typed.Type = DynamicFeeTxType
+		enc, err := rlp.EncodeToBytes(typed)
+		require.NoError(b, err)
+		b.ReportAllocs()
+		var decoded Receipt
+		for b.Loop() {
+			if err := rlp.DecodeBytes(enc, &decoded); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
 
 func BenchmarkLogJSON(b *testing.B) {
@@ -415,17 +432,61 @@ func BenchmarkDecodeAccessList(b *testing.B) {
 }
 
 func BenchmarkDecodeBlockAccessListSidecar(b *testing.B) {
-	bal := make(BlockAccessList, 98*1024)
-	for i := range bal {
-		bal[i].Address[0], bal[i].Address[1], bal[i].Address[2] = byte(i>>16), byte(i>>8), byte(i)
+	const accountCount, txCount = 98 * 1024, 14_000
+	address := func(i int) (a common.Address) {
+		a[0], a[1], a[2] = byte(i>>16), byte(i>>8), byte(i)
+		return a
 	}
-	enc, err := EncodeBlockAccessListBytes(bal)
-	require.NoError(b, err)
-	b.ReportAllocs()
-	b.SetBytes(int64(len(enc)))
-	for b.Loop() {
-		if _, err := DecodeBlockAccessListSidecarForBlock(enc, 300_000_000, 20); err != nil {
-			b.Fatal(err)
+	slot := func(i int) (h common.Hash) {
+		binary.BigEndian.PutUint32(h[:], uint32(i))
+		h[31] = 0xab
+		return h
+	}
+	value := func(i int) uint256.Int { return *uint256.NewInt(uint64(i)*1_000_003 + 1e18) }
+
+	addrOnly := make(BlockAccessList, accountCount)
+	for i := range addrOnly {
+		addrOnly[i].Address = address(i)
+	}
+
+	transfers := make(BlockAccessList, 2*txCount+1)
+	for i := range 2 * txCount {
+		transfers[i].Address = address(i)
+		transfers[i].BalanceChanges = []*BalanceChange{{Index: uint32(i/2 + 1), Value: value(i)}}
+		transfers[i].NonceChanges = []*NonceChange{{Index: uint32(i/2 + 1), Value: uint64(i)}}
+	}
+	coinbase := &transfers[2*txCount]
+	coinbase.Address = address(2 * txCount)
+	for i := range txCount {
+		coinbase.BalanceChanges = append(coinbase.BalanceChanges, &BalanceChange{Index: uint32(i + 1), Value: value(i)})
+	}
+
+	storage := make(BlockAccessList, 10_000)
+	for i := range storage {
+		storage[i].Address = address(i)
+		for j := range 4 {
+			storage[i].StorageChanges = append(storage[i].StorageChanges, SlotChanges{
+				Slot:    accounts.InternKey(slot(2 * j)),
+				Changes: []*StorageChange{{Index: uint32(i%txCount + 1), Value: value(j)}},
+			})
+			storage[i].StorageReads = append(storage[i].StorageReads, slot(2*j+1))
 		}
+	}
+
+	for _, c := range []struct {
+		name string
+		bal  BlockAccessList
+	}{{"addr-only", addrOnly}, {"transfers", transfers}, {"storage", storage}} {
+		enc, err := EncodeBlockAccessListBytes(c.bal)
+		require.NoError(b, err)
+		b.Run(c.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(enc)))
+			for b.Loop() {
+				if _, err := DecodeBlockAccessListSidecarForBlock(enc, 300_000_000, txCount); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
