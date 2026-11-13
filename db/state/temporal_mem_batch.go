@@ -951,12 +951,13 @@ func (sd *TemporalMemBatch) flushPreUnwindWriters(ctx context.Context, tx kv.RwT
 	return nil
 }
 
-func flushDomainWriters(ctx context.Context, tx kv.RwTx, ws []*DomainBufferedWriter, keepExistingHistoryBelowTxNum uint64) error {
+func flushDomainWriters(ctx context.Context, tx kv.RwTx, ws []*DomainBufferedWriter, keepHistoryBelowTxNum uint64) error {
+	keep := newKeepRetainedHistory(keepHistoryBelowTxNum)
 	for _, w := range slices.Backward(ws) {
 		if w.discard {
 			continue
 		}
-		if err := w.h.flush(ctx, tx, keepExistingHistoryBelowTxNum); err != nil {
+		if err := w.h.flush(ctx, tx, keep); err != nil {
 			return err
 		}
 	}
