@@ -37,7 +37,9 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -350,4 +352,117 @@ func TestFoldTxBindsChangesetSavedAfterFirstTx(t *testing.T) {
 	domains.SavePastChangesetAccumulator(common.Hash{1}, 1, cs)
 	require.NoError(t, pe.foldTx(t.Context(), rwTx, &txResult{blockNum: 1, blockHash: common.Hash{1}, txNum: 11}))
 	require.Same(t, cs, domains.GetChangesetAccumulator())
+}
+
+func TestApplyLoopRestoresChangesetTargetAtBlockResult(t *testing.T) {
+	fx := newResumeBALFixture(t)
+	run := fx.prepare(t, fx.block, fromBlockStart)
+	var atBlockResult []*changeset.StateChangeSet
+	run.cfg.SetBALSink(func(uint64, types.BlockAccessList) {
+		atBlockResult = append(atBlockResult, run.domains.GetChangesetAccumulator())
+	})
+	verdict, err := run.run(t.Context(), t)
+	require.NoError(t, err)
+	require.Nil(t, verdict)
+	require.Equal(t, []*changeset.StateChangeSet{nil}, atBlockResult)
+}
+
+// failFinalizeEngine fails the exec loop at block end once the apply loop has
+// bound the block changeset, so the loop exits inside the block.
+type failFinalizeEngine struct {
+	rules.Engine
+	domains *execctx.SharedDomains
+	bound   bool
+}
+
+func (e *failFinalizeEngine) Finalize(*chain.Config, *types.Header, *state.IntraBlockState, []*types.Header,
+	types.Receipts, []*types.Withdrawal, rules.ChainReader, rules.SystemCall, bool, log.Logger,
+) (types.FlatRequests, error) {
+	for deadline := time.Now().Add(5 * time.Second); !e.bound && time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		e.bound = e.domains.GetChangesetAccumulator() != nil
+	}
+	panic("finalize failed")
+}
+
+func TestApplyLoopRestoresChangesetTargetOnMidBlockExit(t *testing.T) {
+	fx := newResumeBALFixture(t)
+	run := fx.prepare(t, fx.block, fromBlockStart)
+	engine := &failFinalizeEngine{Engine: run.cfg.engine, domains: run.domains}
+	run.cfg.engine = engine
+	blockResults := 0
+	run.cfg.SetBALSink(func(uint64, types.BlockAccessList) { blockResults++ })
+
+	_, err := ExecV3(t.Context(), run.cfg, run.domains, run.tx, stages.ModeForkValidation, false, "resume-bal", run.rng, run.src, log.New())
+	require.ErrorContains(t, err, "finalize failed")
+	require.True(t, engine.bound, "the fold must bind the block changeset before the exit")
+	require.Zero(t, blockResults, "the apply loop must exit inside the block")
+	require.Nil(t, run.domains.GetChangesetAccumulator())
+}
+
+// The commitment calculator flushes earlier blocks' branch updates into their
+// own changesets under changesetMu while the fold keeps its block's changeset
+// bound; a repeated flush at the same txNum records no new diff.
+func TestFoldBindRacesCommitmentFlush(t *testing.T) {
+	db := newResumeTestDB(t)
+	rwTx, domains := temporaltest.NewTestTxSD(t, db)
+	domains.SetDisableInlineTouchKey(true)
+	pe := newParallelLogIndexTestExec(db, domains, 0)
+	const blocks, txsPerBlock = 64, 3
+	css := make([]*changeset.StateChangeSet, blocks+1)
+	for b := 1; b <= blocks; b++ {
+		css[b] = &changeset.StateChangeSet{}
+		domains.SavePastChangesetAccumulator(common.Hash{byte(b)}, uint64(b), css[b])
+	}
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	folded := make(chan struct{})
+	flushed := make(chan error, 1)
+	go func() {
+		for {
+			for b := 1; b < blocks; b++ {
+				domains.LockChangesetAccumulator()
+				restore := domains.SwapCommitmentDiffLocked(css[b])
+				err := domains.DomainPut(kv.CommitmentDomain, roTx, []byte{byte(b)}, []byte{1}, uint64(b)*10+txsPerBlock, []byte{})
+				restore()
+				domains.UnlockChangesetAccumulator()
+				if err != nil {
+					flushed <- err
+					return
+				}
+			}
+			select {
+			case <-folded:
+				flushed <- nil
+				return
+			default:
+			}
+		}
+	}()
+
+	for b := 2; b <= blocks; b++ {
+		for i := range txsPerBlock {
+			txNum := uint64(b)*10 + uint64(i)
+			require.NoError(t, pe.foldTx(t.Context(), rwTx, &txResult{blockNum: uint64(b), blockHash: common.Hash{byte(b)}, txNum: txNum}))
+			addr := common.Address{byte(b), byte(i)}
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, addr[:], []byte{1}, txNum, []byte{}))
+		}
+	}
+	pe.unbindFoldChangeset()
+	close(folded)
+	require.NoError(t, <-flushed)
+
+	for b := 1; b <= blocks; b++ {
+		wantAccounts, wantCommitment := txsPerBlock, 1
+		if b == 1 {
+			wantAccounts = 0
+		}
+		if b == blocks {
+			wantCommitment = 0
+		}
+		require.Equal(t, wantAccounts, css[b].Diffs[kv.AccountsDomain].Len(), "block %d account diffs", b)
+		require.Equal(t, wantCommitment, css[b].Diffs[kv.CommitmentDomain].Len(), "block %d commitment diffs", b)
+	}
+	require.Nil(t, domains.GetChangesetAccumulator())
 }
