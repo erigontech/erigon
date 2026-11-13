@@ -1125,3 +1125,25 @@ func TestCachePopulatingGetterSkipsKeysTheCacheHolds(t *testing.T) {
 	require.Empty(t, got)
 	require.Zero(t, source.accountReads, "a key an exec worker already cached must not be read again")
 }
+
+func TestCachePopulatingGetterSeedsCodeHashOnACachedAccount(t *testing.T) {
+	code := []byte{0xaa, 0x01, 0x02, 0x03}
+	account := accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))}
+	source := &sharedCodeTemporalGetter{account: accounts.SerialiseV3(&account), code: code}
+	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
+	frontier := cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })
+	cached, other := accounts.InternAddress(common.Address{19: 1}), accounts.InternAddress(common.Address{19: 2})
+	otherValue := other.Value()
+	seedFill(stateCache, kv.AccountsDomain, otherValue[:], source.account, 5)
+	reader := state.NewReaderV3(&cachePopulatingGetter{TemporalGetter: source, view: stateCache.View(frontier), stepSize: 16})
+	_, err := reader.ReadAccountCode(cached)
+	require.NoError(t, err)
+
+	_, err = reader.ReadAccountData(other)
+	require.NoError(t, err)
+	gotCode, err := reader.ReadAccountCode(other)
+	require.NoError(t, err)
+	require.Equal(t, code, gotCode)
+	require.Equal(t, 1, source.codeReads, "a cached account must still map its address to the cached code")
+}
