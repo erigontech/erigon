@@ -2627,13 +2627,15 @@ func TestNewVersionMapSeedWorkerPanicFallsBackToSerial(t *testing.T) {
 	defer func() { balSeedJobHook = nil }()
 
 	vm := NewVersionMap(bal)
-	require.True(t, panicked.Load(), "no seed job ran on a worker")
-	coinbase := accounts.InternAddress(common.BigToAddress(big.NewInt(n + 1)))
-	for tx := range n {
-		v, res, ok := vm.ReadBalance(coinbase, tx+1)
-		require.True(t, ok)
-		require.Equal(t, MVReadResultDone, res.Status())
-		require.Equal(t, uint64(tx), v.Uint64())
+	require.True(t, panicked.Load(), "no seed chunk ran on a worker")
+	for i := range bal {
+		addr := accounts.InternAddress(bal[i].Address)
+		for _, c := range bal[i].BalanceChanges {
+			v, res, ok := vm.ReadBalance(addr, int(c.Index))
+			require.True(t, ok, "account %x index %d", bal[i].Address, c.Index)
+			require.Equal(t, MVReadResultDone, res.Status())
+			require.Equal(t, c.Value, v, "account %x index %d", bal[i].Address, c.Index)
+		}
 	}
 }
 

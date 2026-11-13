@@ -36,7 +36,7 @@ const FlagValidated statusFlag = 2
 
 const flagDeleted statusFlag = 3
 
-// flagSeeded asks noOpBind for the Done cell WriteChanges seeded, untouched since.
+// flagSeeded asks noOpBind for the Done cell the BAL seed wrote, untouched since.
 const flagSeeded statusFlag = 4
 
 // valueStatus is the cell's value transition relative to what the writing tx read:
@@ -619,7 +619,7 @@ var balSeedWorkers = sync.OnceValue(func() chan func() {
 	return jobs
 })
 
-// balSeedJobHook, when set by a test, runs at the start of each seed job on a worker.
+// balSeedJobHook, when set by a test, runs on a worker after it took a chunk and before it seeds it.
 var balSeedJobHook func()
 
 // forEachBALChunk runs fn over account ranges [lo, hi) of about balSeedChunkCells cells
@@ -639,8 +639,11 @@ func forEachBALChunk(n int, cellsOf func(i int) int, fn func(lo, hi int)) {
 		return
 	}
 	var next atomic.Int64
-	run := func() {
+	run := func(hook func()) {
 		for c := int(next.Add(1) - 1); c < chunks; c = int(next.Add(1) - 1) {
+			if hook != nil {
+				hook()
+			}
 			fn(bounds[c], bounds[c+1])
 		}
 	}
@@ -654,10 +657,7 @@ func forEachBALChunk(n int, cellsOf func(i int) int, fn func(lo, hi int)) {
 				panicked.Store(true)
 			}
 		}()
-		if balSeedJobHook != nil {
-			balSeedJobHook()
-		}
-		run()
+		run(balSeedJobHook)
 	}
 	for range min(runtime.GOMAXPROCS(0), chunks) - 1 {
 		wg.Add(1)
@@ -669,7 +669,7 @@ func forEachBALChunk(n int, cellsOf func(i int) int, fn func(lo, hi int)) {
 	}
 	func() {
 		defer wg.Wait() // a panic on the caller still waits, so no worker writes after it
-		run()
+		run(nil)
 	}()
 	// A panic on a worker would kill the process; the serial rerun raises it on the caller instead.
 	if panicked.Load() {
@@ -2326,7 +2326,7 @@ type WriteCell[T any] struct {
 	Value     T
 }
 
-// seededCell marks a cell WriteChanges seeded from the BAL. A value store or a delete drops it and a
+// seededCell marks a cell the BAL seed wrote. A value store or a delete drops it and a
 // status mark keeps it, so a set bit means every reader of the cell saw the seed.
 const seededCell uint32 = 1 << 24
 
