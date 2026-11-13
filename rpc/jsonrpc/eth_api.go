@@ -223,6 +223,18 @@ func (api *BaseAPI) shareCodeByHash(ibs *state.IntraBlockState) {
 	}
 }
 
+// blockReaderWrapper is a block reader that wraps another one, such as the rpcdaemon's RemoteBackend.
+type blockReaderWrapper interface {
+	BlockReader() dbservices.FullBlockReader
+}
+
+func unwrapBlockReader(r dbservices.FullBlockReader) dbservices.FullBlockReader {
+	if w, ok := r.(blockReaderWrapper); ok {
+		return w.BlockReader()
+	}
+	return r
+}
+
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, conf *rpccfg.BaseApiConfig) *BaseAPI {
 	if conf == nil {
 		conf = &rpccfg.BaseApiConfig{}
@@ -252,7 +264,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		getLogsMaxResults: conf.GetLogsMaxResults,
 		logQueryLimit:     conf.LogQueryLimit,
 	}
-	_, api.remoteBlocks = blockReader.(*freezeblocks.RemoteBlockReader)
+	_, api.remoteBlocks = unwrapBlockReader(blockReader).(*freezeblocks.RemoteBlockReader)
 	api._preMergeData.SetTTL(defaultPreMergeDataTTL)
 	api._preMergeUnsettledTTL = defaultUnsettledPreMergeTTL
 	return api

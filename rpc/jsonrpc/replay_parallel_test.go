@@ -27,11 +27,18 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // readTxLimitDB opens the first n read txs; past them it acts as a full read-tx semaphore:
@@ -169,6 +176,9 @@ func TestReplayTxnsParallelKeepsBlockAfterReorgAboveIt(t *testing.T) {
 // one more backend read tx while it holds one, and could wait for it until the request times out.
 func TestTraceBlockOnRemoteBlockReaderIsSequential(t *testing.T) {
 	m, _ := createLogIndexTestModule(t)
+	remoteBase := func() *BaseAPI {
+		return NewBaseApi(nil, m.StateCache, rpcdaemonBlockReader(t, m, true), m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	}
 	const readTxs = 100
 	opened := func(db *readTxLimitDB) int32 { return readTxs - db.left.Load() }
 
@@ -184,10 +194,8 @@ func TestTraceBlockOnRemoteBlockReaderIsSequential(t *testing.T) {
 		want := trace(t, newDebugApiForTest(m))
 
 		withReplayCPUs(t, 16)
-		api := newDebugApiForTest(m)
-		api.remoteBlocks = true
 		db := newReadTxLimitDB(m.DB, readTxs)
-		api.db = db
+		api := NewPrivateDebugAPI(remoteBase(), db, nil, &rpccfg.DebugApiConfig{})
 		require.Equal(t, want, trace(t, api))
 		require.EqualValues(t, 1, opened(db))
 	})
@@ -198,15 +206,36 @@ func TestTraceBlockOnRemoteBlockReaderIsSequential(t *testing.T) {
 		require.NoError(t, err)
 
 		withReplayCPUs(t, 16)
-		api := newTraceApiForTest(m)
-		api.remoteBlocks = true
 		db := newReadTxLimitDB(m.DB, readTxs)
-		api.kv = db
+		api := NewTraceAPI(remoteBase(), db, &rpccfg.TraceApiConfig{})
 		got, err := api.Block(m.Ctx, 1, nil, nil)
 		require.NoError(t, err)
 		require.Equal(t, want, got)
 		require.EqualValues(t, 1, opened(db))
 	})
+}
+
+// rpcdaemonBlockReader builds the block reader as a separate rpcdaemon does: its own reader
+// with --datadir, a remote one without it, wrapped in a RemoteBackend either way.
+func rpcdaemonBlockReader(t *testing.T, m *execmoduletester.ExecModuleTester, remote bool) *rpcservices.RemoteBackend {
+	_, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	client := remoteproto.NewETHBACKENDClient(conn)
+	if remote {
+		return rpcservices.NewRemoteBackend(client, m.DB, freezeblocks.NewRemoteBlockReader(client))
+	}
+	return rpcservices.NewRemoteBackend(client, m.DB, m.BlockReader)
+}
+
+// TestNewBaseApiDetectsRemoteBlocks pins that only an rpcdaemon without --datadir counts as a
+// remote block reader, also behind the RemoteBackend that wraps it.
+func TestNewBaseApiDetectsRemoteBlocks(t *testing.T) {
+	m, _ := createLogIndexTestModule(t)
+	newBase := func(reader dbservices.FullBlockReader) *BaseAPI {
+		return NewBaseApi(nil, m.StateCache, reader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	}
+	require.False(t, newBase(m.BlockReader).remoteBlocks, "embedded")
+	require.False(t, newBase(rpcdaemonBlockReader(t, m, false)).remoteBlocks, "rpcdaemon with --datadir")
+	require.True(t, newBase(rpcdaemonBlockReader(t, m, true)).remoteBlocks, "rpcdaemon without --datadir")
 }
 
 // TestReplayTxnsParallelBoundsBufferedTxns pins that a slow txn holds back every txn a window
