@@ -319,7 +319,7 @@ func (s *dataColumnSidecarService) PublishColumns(ctx context.Context, sidecars 
 		return
 	}
 	// The block may have waited for its parent, the EL or recovery while finality moved on; peers would ignore
-	// or reject its columns then.
+	// or reject its Fulu columns then.
 	slot, ok := s.afterFinality(sidecars[0])
 	if !ok {
 		log.Debug("[dataColumnSidecarService] not publishing local columns below finality", "slot", slot)
@@ -347,11 +347,14 @@ func (s *dataColumnSidecarService) PublishColumns(ctx context.Context, sidecars 
 	}
 }
 
-// afterFinality returns the sidecar's slot and whether the gossip finality rules allow the sidecar. For Fulu, its
-// slot is after the finalized epoch start and the finalized checkpoint is an ancestor of its block.
+// afterFinality returns the sidecar's slot and whether peers would still accept the sidecar. For Fulu, its slot is
+// after the finalized epoch start and the finalized checkpoint is an ancestor of its block. Gloas has no finality
+// rules, but its block must be imported or still importable: recovery also runs for blocks backfilled below finality,
+// whose columns peers no longer need.
 func (s *dataColumnSidecarService) afterFinality(sidecar *cltypes.DataColumnSidecar) (uint64, bool) {
 	if sidecar.Version() >= clparams.GloasVersion {
-		return sidecar.Slot, sidecar.Slot > s.forkChoice.FinalizedSlot()
+		_, _, notImportable := s.lookupBlock(sidecar.Slot, sidecar.BeaconBlockRoot)
+		return sidecar.Slot, !notImportable
 	}
 	header := sidecar.SignedBlockHeader.Header
 	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
@@ -406,11 +409,6 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return ErrIgnore
 	}
 
-	// [IGNORE] The sidecar is from a slot greater than the latest finalized slot
-	if slot <= s.forkChoice.FinalizedSlot() {
-		return ErrIgnore
-	}
-
 	store, err := s.shouldStore(slot, blockRoot, msg.Index)
 	if err != nil {
 		return err
@@ -418,9 +416,9 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 
 	// [IGNORE] A valid block for the sidecar's slot has been seen.
 	// Only checks recent blocks in forkChoice memory - older blocks don't need sidecar validation.
-	block, ok := s.forkChoice.GetBlock(blockRoot)
+	block, ok, notImportable := s.lookupBlock(slot, blockRoot)
 	if !ok {
-		if !store {
+		if !store || notImportable {
 			return ErrIgnore
 		}
 		return errGloasSidecarBlockUnavailable
@@ -507,6 +505,33 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 	return valid, nil
 }
 
+// lookupBlock returns the block of root once fork choice has imported it, else whether it can never be imported.
+// Fork choice holds a block while its state transition runs, and publishes the header only after the transition
+// succeeds. The importability sample waits for an import in progress and precedes the last lookup, so that lookup
+// sees a block imported meanwhile, and a miss after a "not importable" sample is final.
+func (s *dataColumnSidecarService) lookupBlock(slot uint64, root common.Hash) (block *cltypes.SignedBeaconBlock, ok, notImportable bool) {
+	if block, ok = s.importedBlock(root); ok {
+		return block, true, false
+	}
+	notImportable = s.blockNotImportable(slot)
+	block, ok = s.importedBlock(root)
+	return block, ok, !ok && notImportable
+}
+
+func (s *dataColumnSidecarService) importedBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	if _, ok := s.forkChoice.GetHeader(root); !ok {
+		return nil, false
+	}
+	return s.forkChoice.GetBlock(root)
+}
+
+// blockNotImportable reports whether fork choice rejects a block at slot, as at or below the finalized checkpoint
+// start slot or the anchor slot. A Gloas sidecar whose block is unknown at such a slot can never be validated.
+func (s *dataColumnSidecarService) blockNotImportable(slot uint64) bool {
+	finalizedStartSlot, ok := safeMultiplyUint64(s.forkChoice.FinalizedCheckpoint().Epoch, s.cfg.SlotsPerEpoch)
+	return !ok || slot <= max(finalizedStartSlot, s.forkChoice.AnchorSlot())
+}
+
 // scheduleSidecarForLaterProcessing queues a GLOAS sidecar until its block arrives.
 func (s *dataColumnSidecarService) scheduleSidecarForLaterProcessing(sidecar *cltypes.DataColumnSidecar) {
 	// Bound hashing and retained data before the block's commitments are available.
@@ -530,12 +555,12 @@ func (s *dataColumnSidecarService) tryProcessPendingGloasSidecar(
 	_ common.Hash,
 	sidecar *cltypes.DataColumnSidecar,
 ) pendingJobDecision {
-	if sidecar.Slot <= s.forkChoice.FinalizedSlot() {
-		log.Debug("[dataColumnSidecarService] pending GLOAS sidecar slot is now finalized",
-			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
-		return pendingJobRemove
-	}
-	if _, ok := s.forkChoice.GetBlock(sidecar.BeaconBlockRoot); !ok {
+	if _, ok, notImportable := s.lookupBlock(sidecar.Slot, sidecar.BeaconBlockRoot); !ok {
+		if notImportable {
+			log.Debug("[dataColumnSidecarService] pending GLOAS sidecar's block can no longer be imported",
+				"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
+			return pendingJobRemove
+		}
 		return pendingJobKeep
 	}
 	// Subnet validation already ran before queue admission.
