@@ -19,7 +19,8 @@ concurrency:
       format('{0}-{1}', github.workflow, github.head_ref) ||
       format('{0}-{1}', github.workflow, github.run_id)
     }}
-  cancel-in-progress: true
+  # Only a new commit cancels a running set; ready_for_review waits for it.
+  cancel-in-progress: ${{ github.event.action != 'ready_for_review' }}
 
 permissions:
   contents: read
