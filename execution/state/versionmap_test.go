@@ -2674,7 +2674,15 @@ func TestValidateReadSet_BaseReadOfQuietAccountPathSkipsValidation(t *testing.T)
 
 			rs := ReadSet{}
 			tc.read(&rs, addr, tc.hdr)
-			require.Equal(t, tc.want, vm.ValidateReadSet(3, rs, validateEqualVersion, false, ""))
+			checks := 0
+			countChecks := func(read, write Version) VersionValidity {
+				checks++
+				return validateEqualVersion(read, write)
+			}
+			require.Equal(t, tc.want, vm.ValidateReadSet(3, rs, countChecks, false, ""))
+			if tc.want == VersionValid {
+				require.Zero(t, checks, "a base read of a quiet path is not validated")
+			}
 		})
 	}
 }
