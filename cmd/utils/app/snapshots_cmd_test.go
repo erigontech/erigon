@@ -1632,11 +1632,19 @@ func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 	require.NoError(t, err)
 	compressor.DisableFsync()
 	writer := seg.NewWriter(compressor, statecfg.Schema.AccountsDomain.Compression)
-	key, value := []byte("account-key"), []byte("account-value")
-	_, err = writer.Write(key)
-	require.NoError(t, err)
-	_, err = writer.Write(value)
-	require.NoError(t, err)
+	// Use multiple ordered keys so lookups cannot succeed by returning the
+	// fixture's only value, and also probe a key outside the existence filter.
+	entries := []struct{ key, value []byte }{
+		{[]byte("account-key-01"), []byte("account-value-01")},
+		{[]byte("account-key-02"), []byte("account-value-02")},
+		{[]byte("account-key-03"), []byte("account-value-03")},
+	}
+	for _, entry := range entries {
+		_, err = writer.Write(entry.key)
+		require.NoError(t, err)
+		_, err = writer.Write(entry.value)
+		require.NoError(t, err)
+	}
 	require.NoError(t, compressor.Compress())
 	compressor.Close()
 
@@ -1709,11 +1717,40 @@ func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 	require.NoError(t, err)
 	defer decompressor.Close()
 	defer index.Close()
-	_, got, _, found, err := index.Get(key, nil,
-		seg.NewReader(decompressor.MakeGetter(), statecfg.Schema.AccountsDomain.Compression))
+	for _, entry := range entries {
+		_, got, _, found, err := index.Get(entry.key, nil,
+			seg.NewReader(decompressor.MakeGetter(), statecfg.Schema.AccountsDomain.Compression))
+		require.NoError(t, err)
+		require.True(t, found, "rebuilt state accessor must retrieve %q", entry.key)
+		require.Equal(t, entry.value, got)
+	}
+
+	// Exercise the normal state read path, which hashes each queried key with
+	// the regenerated state salt and consults the existence filter before
+	// the B-tree. Direct B-tree lookups alone never verify salt compatibility.
+	chainDB = mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
 	require.NoError(t, err)
-	require.True(t, found, "rebuilt state accessor must retrieve the original account key")
-	require.Equal(t, value, got)
+	defer agg.Close()
+	// The fixture deliberately contains only AccountsDomain. Disable coupling
+	// to other domain snapshots so the file remains visible for a real read.
+	agg.DisableInterDomainDependencies()
+	require.NoError(t, chainDB.View(ctx, func(tx kv.Tx) error {
+		files := agg.BeginFilesRo()
+		defer files.Close()
+		for _, entry := range entries {
+			got, _, found, err := files.GetLatest(kv.AccountsDomain, entry.key, tx, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.True(t, found, "normal state reader must find %q through the rebuilt filter", entry.key)
+			require.Equal(t, entry.value, got)
+		}
+		got, _, found, err := files.GetLatest(kv.AccountsDomain, []byte("account-key-04"), tx, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.False(t, found, "normal state reader must reject a missing key")
+		require.Nil(t, got)
+		return nil
+	}))
 }
 
 func Test_prepareAccessorsForRebuildRenewsLegacyAndCurrentSalts(t *testing.T) {
