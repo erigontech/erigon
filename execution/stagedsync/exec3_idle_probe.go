@@ -101,8 +101,8 @@ func (p *taskPool) beginIdleWindow(be *blockExecutor) {
 	if !logNpPhases || p == nil {
 		return
 	}
-	be.idleState.tasks = len(be.tasks)
 	p.mu.Lock()
+	be.idleState.tasks = len(be.tasks)
 	p.tick()
 	p.idle.be, p.idle.start = be, p.idle.last
 	p.mu.Unlock()
