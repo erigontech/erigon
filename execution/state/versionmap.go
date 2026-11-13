@@ -13,7 +13,6 @@ import (
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -267,8 +266,6 @@ type VersionMap struct {
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
-	// balUnchanged holds the addresses the access list lists without any change.
-	balUnchanged map[common.Address]struct{}
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -439,14 +436,6 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		HasBAL: len(changes) > 0,
 		bal:    changes,
 	}
-	for i := range changes {
-		if a := &changes[i]; len(a.StorageChanges) == 0 && len(a.BalanceChanges) == 0 && len(a.NonceChanges) == 0 && len(a.CodeChanges) == 0 {
-			if vm.balUnchanged == nil {
-				vm.balUnchanged = map[common.Address]struct{}{}
-			}
-			vm.balUnchanged[a.Address] = struct{}{}
-		}
-	}
 	vm.WriteChanges(changes)
 	return vm
 }
@@ -473,17 +462,34 @@ func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageK
 	return changes[k].Value, true
 }
 
-// balListsUnchanged reports whether the access list lists addr without any change.
-func (vm *VersionMap) balListsUnchanged(addr accounts.Address) bool {
-	_, ok := vm.balUnchanged[addr.Value()]
-	return ok
-}
-
-// BALCoversBaseRead reports whether a read of addr from base state needs no validation. The BAL lists addr unchanged,
-// so after every tx its state equals the base, or the BAL check fails the block. A read of an in-block write is not
-// covered: it may come from an aborted incarnation.
-func (vm *VersionMap) BALCoversBaseRead(addr accounts.Address, source ReadSource) bool {
-	return source == StorageRead && vm.balListsUnchanged(addr)
+// hasNoCells reports whether no tx wrote a cell of path, a lifecycle cell or an address cell of addr.
+func (vm *VersionMap) hasNoCells(addr accounts.Address, path AccountPath) bool {
+	e := vm.load(addr)
+	if e == nil {
+		return true
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if hasLifecycleCells(e) || e.Address != nil && e.Address.Len() > 0 {
+		return false
+	}
+	switch path {
+	case StoragePath:
+		return len(e.Storage) == 0
+	case BalancePath:
+		return e.Balance == nil || e.Balance.Len() == 0
+	case NoncePath:
+		return e.Nonce == nil || e.Nonce.Len() == 0
+	case CodePath:
+		return e.Code == nil || e.Code.Len() == 0
+	case CodeHashPath:
+		return e.CodeHash == nil || e.CodeHash.Len() == 0
+	case CodeSizePath:
+		return e.CodeSize == nil || e.CodeSize.Len() == 0
+	case AddressPath, SelfDestructPath, IncarnationPath, CreateContractPath:
+		return true
+	}
+	return false
 }
 
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
@@ -2128,7 +2134,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	// authoritative basis for every path except storage, which needs the wipe-aware
 	// liveStorage reader.
 	validatePath := func(addr accounts.Address, path AccountPath, hdr ReadHeader) VersionValidity {
-		if vm.BALCoversBaseRead(addr, hdr.Source) {
+		if hdr.Version.TxIndex == originIndex && vm.hasNoCells(addr, path) {
 			return VersionValid
 		}
 		return vm.validateReadImpl(txIdx, addr, path, accounts.NilKey, hdr.Source, hdr.Version,
@@ -2161,10 +2167,9 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		}
 	}
 	for a, inner := range rs.storage {
-		// The storage form of BALCoversBaseRead, with the address lookup hoisted out of the slot loop.
-		unchanged := vm.balListsUnchanged(a)
+		quiet := vm.hasNoCells(a, StoragePath)
 		for k, tr := range inner {
-			if unchanged && tr.Source == StorageRead {
+			if quiet && tr.Version.TxIndex == originIndex {
 				continue
 			}
 			if !ok(vm.validateReadImpl(txIdx, a, StoragePath, k, tr.Source, tr.Version, liveStorage(vm, a, k, txIdx), checkVersion, traceInvalid, tracePrefix, false)) {
@@ -2185,9 +2190,6 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	// A balance-only revival writes no code cell for a committed code read to
 	// version-mismatch against, but the destruct below it wiped the code.
 	wipedCommitted := func(addr accounts.Address, hdr ReadHeader) VersionValidity {
-		if vm.BALCoversBaseRead(addr, hdr.Source) {
-			return VersionValid
-		}
 		if hdr.Source == StorageRead || hdr.Source == MapRead {
 			if _, ok := vm.selfDestructInRange(addr, hdr.Version.TxIndex+1, txIdx, true); ok {
 				return VersionInvalid

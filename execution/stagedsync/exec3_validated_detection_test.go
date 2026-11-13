@@ -194,27 +194,6 @@ func TestRevalCandidates_BALKeepsReadersOfDroppedWrite(t *testing.T) {
 	require.Equal(t, []int{1}, be.revalCandidates(0, newWS().build(), oldW))
 }
 
-func TestIndexReadsSkipsBaseReadsOfAccountsTheBALListsUnchanged(t *testing.T) {
-	unchanged := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
-	changed := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000bb"))
-	be := newDetExecutor(t, 4)
-	be.versionMap = state.NewVersionMap(types.BlockAccessList{
-		{Address: unchanged.Value()},
-		{Address: changed.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}},
-	})
-	base := state.ReadSet{}
-	base.SetHeader(unchanged, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.StorageRead})
-	base.SetHeader(changed, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.StorageRead})
-	be.indexReads(1, base)
-	require.Empty(t, be.readerByAddr[unchanged], "a base read the BAL check covers is indexed")
-	require.NotEmpty(t, be.readerByAddr[changed])
-
-	fromWrite := state.ReadSet{}
-	fromWrite.SetHeader(unchanged, state.BalancePath, accounts.NilKey, state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 1}})
-	be.indexReads(2, fromWrite)
-	require.NotEmpty(t, be.readerByAddr[unchanged], "a read of another tx's write is not indexed")
-}
-
 func TestMarkReadersDirty(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
 	slot1 := accounts.InternKey(common.HexToHash("0x01"))

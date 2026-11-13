@@ -2577,29 +2577,32 @@ func TestMarkWritesValidatedMarksACellRecreatedAtTheSameIncarnation(t *testing.T
 	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
 }
 
-// A base read of an account the BAL lists with no change needs no validation: any in-block write to it fails the
-// block in the BAL check. A read of an in-block write and an account with a BAL change are still validated.
-func TestValidateReadSet_BALReadOnlyAccountSkipsStorageValidation(t *testing.T) {
+// A read of the base skips validation only while no tx wrote a storage, lifecycle or address cell of the account;
+// each such cell below the reader makes the read stale.
+func TestValidateReadSet_BaseReadOfQuietAccountSkipsValidation(t *testing.T) {
 	t.Parallel()
+	base := ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}
 	for _, tc := range []struct {
-		name    string
-		account types.AccountChanges
-		read    ReadHeader
-		want    VersionValidity
+		name  string
+		path  AccountPath
+		value any
+		read  ReadHeader
+		want  VersionValidity
 	}{
-		{"read only", types.AccountChanges{}, ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}, VersionValid},
-		{"read of an aborted write", types.AccountChanges{}, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, VersionInvalid},
-		{"balance change", types.AccountChanges{BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}, ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}, VersionInvalid},
+		{"no cells", 0, nil, base, VersionValid},
+		{"storage write", StoragePath, *uint256.NewInt(8), base, VersionInvalid},
+		{"self-destruct", SelfDestructPath, true, base, VersionInvalid},
+		{"read of a removed write", 0, nil, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, VersionInvalid},
+		{"read of an aborted write", StoragePath, *uint256.NewInt(8), ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, VersionInvalid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			addr := getAddress(91)
 			key := accounts.InternKey(common.Hash{0x07})
-			account := tc.account
-			account.Address = addr.Value()
-			account.StorageReads = []common.Hash{key.Value()}
-			vm := NewVersionMap(types.BlockAccessList{account})
-			writeFor(vm, addr, StoragePath, key, Version{TxIndex: 1}, *uint256.NewInt(8), true)
+			vm := NewVersionMap(nil)
+			if tc.value != nil {
+				writeFor(vm, addr, tc.path, key, Version{TxIndex: 1}, tc.value, true)
+			}
 
 			rs := ReadSet{}
 			rs.SetStorage(addr, key, VersionedRead[uint256.Int]{
@@ -2611,56 +2614,59 @@ func TestValidateReadSet_BALReadOnlyAccountSkipsStorageValidation(t *testing.T) 
 	}
 }
 
-// A base account read of an address the BAL lists with no change needs no validation: any in-block write to it fails
-// the block in the BAL check. A read of an in-block write and an address with a BAL change are still validated.
-func TestValidateReadSet_BALReadOnlyAccountSkipsAccountValidation(t *testing.T) {
+// A base read of an account path skips validation only while no tx wrote a cell of that path, a lifecycle cell or an
+// address cell; a write on another path does not stop the skip.
+func TestValidateReadSet_BaseReadOfQuietAccountPathSkipsValidation(t *testing.T) {
 	t.Parallel()
-	baseRead := ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}
-	abortedRead := ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}
+	base := ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}
+	balance := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: hdr})
+	}
+	nonce := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetNonce(addr, VersionedRead[uint64]{ReadHeader: hdr})
+	}
+	codeHash := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{ReadHeader: hdr})
+	}
+	codeSize := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
+	}
+	code := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: hdr, Val: accounts.NewCode([]byte{0x01})})
+	}
+	exists := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr})
+	}
 	for _, tc := range []struct {
-		name      string
-		read      func(rs *ReadSet, addr accounts.Address, hdr ReadHeader)
-		writePath AccountPath
-		write     any
+		name  string
+		read  func(rs *ReadSet, addr accounts.Address, hdr ReadHeader)
+		path  AccountPath
+		value any
+		hdr   ReadHeader
+		want  VersionValidity
 	}{
-		{"existence read, created by a lower tx", func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
-			rs.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr})
-		}, IncarnationPath, uint64(1)},
-		{"nonce read, created by a lower tx", func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
-			rs.SetNonce(addr, VersionedRead[uint64]{ReadHeader: hdr})
-		}, IncarnationPath, uint64(1)},
-		{"code hash read, code written by a lower tx", func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
-			rs.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{ReadHeader: hdr})
-		}, CodeHashPath, accounts.InternCodeHash(common.Hash{0x01})},
-		{"code size read, code written by a lower tx", func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
-			rs.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
-		}, CodeSizePath, 3},
-		{"code read, code wiped by a lower tx's destruct", func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
-			rs.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: hdr, Val: accounts.NewCode([]byte{0x01})})
-		}, SelfDestructPath, true},
+		{"balance read, no cells", balance, 0, nil, base, VersionValid},
+		{"balance read, code hash written", balance, CodeHashPath, accounts.InternCodeHash(common.Hash{0x01}), base, VersionValid},
+		{"balance read, balance written", balance, BalancePath, *uint256.NewInt(1), base, VersionInvalid},
+		{"nonce read, nonce written", nonce, NoncePath, uint64(1), base, VersionInvalid},
+		{"nonce read, created", nonce, IncarnationPath, uint64(1), base, VersionInvalid},
+		{"existence read, created", exists, IncarnationPath, uint64(1), base, VersionInvalid},
+		{"code hash read, code hash written", codeHash, CodeHashPath, accounts.InternCodeHash(common.Hash{0x01}), base, VersionInvalid},
+		{"code size read, code size written", codeSize, CodeSizePath, 3, base, VersionInvalid},
+		{"code read, destructed", code, SelfDestructPath, true, base, VersionInvalid},
+		{"balance read of a removed write", balance, 0, nil, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, VersionInvalid},
 	} {
-		for _, c := range []struct {
-			name    string
-			account types.AccountChanges
-			read    ReadHeader
-			want    VersionValidity
-		}{
-			{"read only", types.AccountChanges{}, baseRead, VersionValid},
-			{"read of an aborted write", types.AccountChanges{}, abortedRead, VersionInvalid},
-			{"balance change", types.AccountChanges{BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}, baseRead, VersionInvalid},
-		} {
-			t.Run(tc.name+"/"+c.name, func(t *testing.T) {
-				t.Parallel()
-				addr := getAddress(92)
-				account := c.account
-				account.Address = addr.Value()
-				vm := NewVersionMap(types.BlockAccessList{account})
-				writeFor(vm, addr, tc.writePath, accounts.NilKey, Version{TxIndex: 1}, tc.write, true)
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := getAddress(92)
+			vm := NewVersionMap(nil)
+			if tc.value != nil {
+				writeFor(vm, addr, tc.path, accounts.NilKey, Version{TxIndex: 1}, tc.value, true)
+			}
 
-				rs := ReadSet{}
-				tc.read(&rs, addr, c.read)
-				require.Equal(t, c.want, vm.ValidateReadSet(3, rs, validateEqualVersion, false, ""))
-			})
-		}
+			rs := ReadSet{}
+			tc.read(&rs, addr, tc.hdr)
+			require.Equal(t, tc.want, vm.ValidateReadSet(3, rs, validateEqualVersion, false, ""))
+		})
 	}
 }
