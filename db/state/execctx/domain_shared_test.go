@@ -564,12 +564,13 @@ func TestSharedDomain_MergeKeepsEarliestHistoryValueAtSameTxNum(t *testing.T) {
 	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
 	key := addr[:]
 	for _, tc := range []struct {
-		name                                    string
-		earliest                                []byte
-		receiverUnwound, otherUnwound, viaMerge bool
+		name                                                       string
+		earliest                                                   []byte
+		receiverUnwound, otherUnwound, otherUnwoundFirst, viaMerge bool
 	}{
 		{name: "plain merge", earliest: []byte{0x10}},
 		{name: "merged batch unwound", earliest: []byte{0x10}, otherUnwound: true},
+		{name: "merged batch wrote after its unwind", earliest: []byte{0x10}, otherUnwoundFirst: true},
 		{name: "receiver unwound", earliest: []byte{0x10}, receiverUnwound: true},
 		{name: "receiver unwound, no earlier value", earliest: []byte{}, receiverUnwound: true},
 		{name: "two batches merged into an unwound receiver", earliest: []byte{0x10}, receiverUnwound: true, viaMerge: true},
@@ -599,6 +600,9 @@ func TestSharedDomain_MergeKeepsEarliestHistoryValueAtSameTxNum(t *testing.T) {
 			if tc.receiverUnwound {
 				var noDiffs [kv.DomainLen][]kv.DomainEntryDiff
 				receiver.Unwind(6, &noDiffs)
+			}
+			if tc.otherUnwoundFirst {
+				other.Unwind(6, nil)
 			}
 			require.NoError(t, other.DomainPut(kv.CodeDomain, rwTx, key, []byte{0x30}, 5, []byte{0x20}))
 			if tc.otherUnwound {

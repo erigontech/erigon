@@ -762,6 +762,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		return slices.ContainsFunc(b.preUnwindDomainWriters[:], func(ws []*DomainBufferedWriter) bool { return len(ws) > 0 })
 	}
 	if unwound(other) && !unwound(sd) {
+		sd.unwindToTxNum = other.unwindToTxNum
 		sd.detachPreUnwindWriters()
 	}
 	for domain, writer := range sd.domainWriters {
