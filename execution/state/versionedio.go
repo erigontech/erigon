@@ -235,11 +235,14 @@ func (s *ReadSet) SetStorage(addr accounts.Address, key accounts.StorageKey, tr 
 	}
 	inner := s.storage[addr]
 	if inner == nil {
-		inner = make(map[accounts.StorageKey]VersionedRead[uint256.Int])
+		inner = make(map[accounts.StorageKey]VersionedRead[uint256.Int], stubRSSlotPresize)
 		s.storage[addr] = inner
 	}
 	inner[key] = tr
 }
+
+// stubRSSlotPresize is a dbg bound: the capacity of a fresh per-address slot read map.
+var stubRSSlotPresize = dbg.EnvInt("STUB_RS_SLOT_PRESIZE", 0)
 
 func (s *ReadSet) GetAddress(addr accounts.Address) (VersionedRead[AccountView], bool) {
 	tr, ok := s.address[addr]
