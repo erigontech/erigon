@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,12 +36,12 @@ import (
 	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -299,12 +300,68 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
+// canonicalViewReader resolves mutable canonical mappings through the state transaction.
+// RemoteBlockReader opens separate backend transactions, so it can see a newer
+// canonical chain even when the caller's ViewID has not changed.
+type canonicalViewReader struct {
+	dbservices.FullBlockReader
+}
+
+// HeaderNumber may locate a hash outside tx; a header's hash fixes its height.
+// Callers must still confirm canonicality with CanonicalHash before reading state.
+func (r canonicalViewReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
+	if number := rawdb.ReadHeaderNumber(tx, hash); number != nil {
+		return number, nil
+	}
+	return r.FullBlockReader.HeaderNumber(ctx, tx, hash)
+}
+
+func (r canonicalViewReader) CanonicalHash(ctx context.Context, tx kv.Getter, number uint64) (common.Hash, bool, error) {
+	dbtx, ok := tx.(kv.Tx)
+	if !ok {
+		return common.Hash{}, false, errors.New("canonical hash lookup requires a database transaction")
+	}
+	// A remote GetOne uses the cursor stream, which can renew the transaction
+	// after its TTL. Range reads the existing transaction through a unary call,
+	// so BLOCKHASH cannot switch the state view during execution.
+	key := hexutil.EncodeTs(number)
+	it, err := dbtx.Range(kv.HeaderCanonical, key, nil, order.Asc, 1)
+	if err != nil {
+		return common.Hash{}, false, err
+	}
+	defer it.Close()
+	if it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return common.Hash{}, false, err
+		}
+		hash := common.BytesToHash(v)
+		if bytes.Equal(k, key) && hash != (common.Hash{}) {
+			return hash, true, nil
+		}
+	}
+	// Frozen mappings may be absent from MDBX, but cannot change in a reorg.
+	// Confirm that the block is frozen before consulting the backend's newer view.
+	frozen, err := r.IsFrozen(ctx, number)
+	if err != nil {
+		return common.Hash{}, false, fmt.Errorf("frozen block range is unavailable: %w", err)
+	}
+	if !frozen {
+		return common.Hash{}, false, nil
+	}
+	return r.FullBlockReader.CanonicalHash(ctx, tx, number)
+}
+
 // resolveCommittedBlockNumber resolves a selector only when its canonical block
 // is available in tx. If tx cannot resolve it, the overlay probe distinguishes
 // an unknown selector from a known block that is unavailable in the committed
 // view. The probe never changes the selected transaction.
 func (api *BaseAPI) resolveCommittedBlockNumber(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (uint64, error) {
-	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
+	reader := api._blockReader
+	if _, byHash := blockNrOrHash.Hash(); byHash {
+		reader = canonicalViewReader{reader}
+	}
+	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, reader)
 	if _, ok := errors.AsType[rpc.BlockNotFoundErr](err); !ok {
 		return blockNumber, err
 	}
@@ -505,30 +562,41 @@ func checkTxIndex(blockNum uint64, txIndex, txCount int) error {
 	return nil
 }
 
-// checkTxIndexInBlock validates an index and returns the txNum of the block's
-// initial system transaction. User transaction zero has pre-state at minTxNum+1.
-func (api *BaseAPI) checkTxIndexInBlock(ctx context.Context, tx kv.Tx, blockNum uint64, txIndex int) (minTxNum uint64, err error) {
-	if txIndex < -1 {
-		return 0, checkTxIndex(blockNum, txIndex, 0)
-	}
+func (api *BaseAPI) readBlockTxNumBounds(ctx context.Context, tx kv.Tx, blockNum uint64) (minTxNum, maxTxNum uint64, ok bool, err error) {
 	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {
-		return 0, err
+		return 0, 0, false, err
 	}
 	defer c.Close()
 	minTxNum, hasMin, err := api._txNumReader.MinExact(ctx, tx, c, blockNum)
 	if err != nil {
-		return 0, err
+		return 0, 0, false, err
 	}
 	maxTxNum, hasMax, err := api._txNumReader.MaxExact(ctx, tx, c, blockNum)
-	if err != nil {
-		return 0, err
+	return minTxNum, maxTxNum, hasMin && hasMax && maxTxNum > minTxNum, err
+}
+
+// checkTxIndexInBlock returns the block's initial system txNum and the validated
+// index as an int. User transaction zero has pre-state at minTxNum+1.
+func checkTxIndexInBlock[I int | uint64 | hexutil.Uint](ctx context.Context, api *BaseAPI, tx kv.Tx, blockNum uint64, txIndex I) (minTxNum uint64, index int, err error) {
+	// Clamp before conversion so unsigned indices cannot wrap into negative values,
+	// including the -1 whole-block sentinel. Errors still report the original index.
+	index = int(min(txIndex, I(math.MaxInt)))
+	if index < -1 {
+		return 0, index, checkTxIndex(blockNum, index, 0)
 	}
-	if !hasMin || !hasMax || maxTxNum <= minTxNum {
-		return 0, fmt.Errorf("%w: transaction bounds are unavailable for block %d", state.ErrPruned, blockNum)
+	minTxNum, maxTxNum, ok, err := api.readBlockTxNumBounds(ctx, tx, blockNum)
+	if err != nil {
+		return 0, index, err
+	}
+	if !ok {
+		return 0, index, fmt.Errorf("%w: transaction bounds are unavailable for block %d", state.ErrPruned, blockNum)
 	}
 	txCount := int(maxTxNum-minTxNum) - 1
-	return minTxNum, checkTxIndex(blockNum, txIndex, txCount)
+	if err := checkTxIndex(blockNum, index, txCount); err != nil {
+		return minTxNum, index, &rpc.InvalidParamsError{Message: fmt.Sprintf("transaction index %d out of range for block %d", txIndex, blockNum)}
+	}
+	return minTxNum, index, nil
 }
 
 // checkPruneHistory requires history from the block's first system transaction.
@@ -571,28 +639,19 @@ func (api *BaseAPI) checkPruneTransactionHistoryAtIndex(ctx context.Context, tx 
 			indexedKey, hasIndexedKey = historyFloorCacheKey(tx.(kv.TemporalTx), head)
 			// The block-level replay floor may reject an indexed read whose pre-state
 			// survives. Check its exact txNum only when that floor would reject it.
-			c, err := tx.Cursor(kv.MaxTxNum)
-			if err != nil {
-				return 0, err
-			}
-			defer c.Close()
-			minTxNum, hasMin, err := api._txNumReader.MinExact(ctx, tx, c, block)
-			if err != nil {
-				return 0, err
-			}
-			maxTxNum, hasMax, err := api._txNumReader.MaxExact(ctx, tx, c, block)
+			minTxNum, maxTxNum, ok, err := api.readBlockTxNumBounds(ctx, tx, block)
 			if err != nil {
 				return 0, err
 			}
 			// Only a position in this block can bypass its replay floor. Max names the
 			// final system transaction, whose pre-state follows all user transactions.
-			if hasMin && hasMax && maxTxNum > minTxNum && txIndex < maxTxNum-minTxNum && minTxNum+txIndex+1 >= floors.startTxNum {
+			if ok && txIndex < maxTxNum-minTxNum && minTxNum+txIndex+1 >= floors.startTxNum {
 				return block, nil
 			}
 			return 0, fmt.Errorf("%w: requested block %d at transaction index %d, history is available from txNum %d", state.ErrPruned, block, txIndex, floors.startTxNum)
 		})
-		// Closing a remote cursor can also renew its view. Check after the deferred
-		// Close completes, so the history floor and indexed bounds describe one view.
+		// Closing the bounds cursor can renew the remote view. Recheck after the
+		// bounds lookup so the history floor and indexed bounds describe one view.
 		if hasIndexedKey {
 			if current, ok := historyFloorCacheKey(tx.(kv.TemporalTx), indexedKey.head); !ok || current != indexedKey {
 				continue
@@ -712,16 +771,24 @@ func (api *BaseAPI) historyAndCommitmentStartBlocks(ctx context.Context, tx kv.T
 }
 
 func historyFloorCacheKey(tx kv.TemporalTx, head uint64) (pruneFloorCacheKey, bool) {
-	files, ok := tx.Debug().(interface{ HistoryFilesGeneration() uint64 })
+	generation, ok := historyFilesGeneration(tx)
 	if !ok {
 		return pruneFloorCacheKey{}, false
 	}
 	return pruneFloorCacheKey{
 		head:                   head,
 		dbViewID:               tx.ViewID(),
-		historyFilesGeneration: files.HistoryFilesGeneration(),
+		historyFilesGeneration: generation,
 		blockFilesGeneration:   blockFilesGeneration(tx),
 	}, true
+}
+
+func historyFilesGeneration(tx kv.TemporalTx) (uint64, bool) {
+	files, ok := tx.Debug().(interface{ HistoryFilesGeneration() uint64 })
+	if !ok {
+		return 0, false
+	}
+	return files.HistoryFilesGeneration(), true
 }
 
 func (api *BaseAPI) readHistoryStartBlocks(ctx context.Context, tx kv.TemporalTx, head uint64) (historyPruneFloors, error) {
@@ -758,6 +825,11 @@ func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, h
 			replay:             head,
 		}, nil
 	}
+	// Genesis writes its state at a system txNum inside block 0, and nothing precedes
+	// it, so a history starting in block 0 is complete.
+	if containingBlock == 0 {
+		return historyPruneFloors{}, nil
+	}
 	blockStartTxNum, hasStart, err := api._txNumReader.MinExact(ctx, tx, nil, containingBlock)
 	if err != nil {
 		return historyPruneFloors{}, err
@@ -773,12 +845,12 @@ func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, h
 	}
 	if !hasStart || startTxNum > blockStartTxNum {
 		floors.wholeBlock = min(containingBlock+1, head)
-	} else if containingBlock > 0 {
+	} else {
 		floors.postState = containingBlock - 1
 	}
 	if !hasStart || startTxNum > blockStartTxNum+1 {
 		floors.replay = min(containingBlock+1, head)
-	} else if containingBlock > 0 {
+	} else {
 		floors.stateAfterSystemTx = containingBlock - 1
 	}
 	return floors, nil

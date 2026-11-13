@@ -152,7 +152,9 @@ func (f *forkGraphDisk) beginChainSegmentLocked(signedBlock *cltypes.SignedBeaco
 		)
 		return nil, MissingSegment, nil
 	}
-	finalizedBlock, hasFinalized := f.GetBlock(parentState.FinalizedCheckpoint().Root)
+	// The finalized block may be unavailable; the update is then built without finality, as create_light_client_update
+	// allows.
+	finalizedBlock, _ := f.GetBlock(parentState.FinalizedCheckpoint().Root)
 	parentBlock, hasParentBlock := f.GetBlock(block.ParentRoot)
 	seg := &ChainSegment{
 		signedBlock:    signedBlock,
@@ -162,7 +164,7 @@ func (f *forkGraphDisk) beginChainSegmentLocked(signedBlock *cltypes.SignedBeaco
 		parentSlot:     parentState.Slot(),
 		runTransition:  !isBlockRootTheCurrentState,
 		storeDiffs:     f.rcfg.Beacon || f.rcfg.Validator || f.rcfg.Lighthouse,
-		buildLCUpdate:  block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation && hasFinalized && f.rcfg.Beacon && !isBlockRootTheCurrentState,
+		buildLCUpdate:  block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation && f.rcfg.Beacon && !isBlockRootTheCurrentState,
 		finalizedBlock: finalizedBlock,
 		parentBlock:    parentBlock,
 	}

@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
-	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -65,21 +64,10 @@ func generateStandaloneIIFile(t *testing.T, name kv.InvertedIdx, dirs datadir.Di
 	ver := version.V1_0_standart
 	stepSize := uint64(10)
 	schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapIdx, name.String(), DataExtensionEf, seg.CompressNone, ver).
+		Data(dirs.SnapIdx, name.String(), DataExtensionEf, ver).
 		Accessor(dirs.SnapAccessors, ver).
 		Build()
-	createConfig := SnapshotCreationConfig{
-		RootNumPerStep: stepSize,
-		MergeStages:    []uint64{20, 40},
-		MinimumSize:    10,
-		SafetyMargin:   5,
-	}
-	repo := NewSnapshotRepo(name.String(), FromII(name), &SnapshotConfig{
-		SnapshotCreationConfig: &createConfig,
-		Schema:                 schema,
-	}, log.New())
-	t.Cleanup(repo.Close)
-	populateFiles2(t, dirs, repo, ranges)
+	populateFiles2(t, dirs, schema, stepSize, ranges)
 }
 
 // TestRetire_RetiresFrozenFileEntirelyBelowCutoff pins that a

@@ -980,14 +980,17 @@ func TestWebsocketMessageBudgetDropsPartialFrame(t *testing.T) {
 	frame := make([]byte, frameHeaderSize+int(sentPayloadSize))
 	frame[0], frame[1] = 0x81, 0xff
 	binary.BigEndian.PutUint64(frame[2:10], uint64(declaredPayloadSize))
-	_, err = conn.Write(frame)
-	require.NoError(t, err)
+	require.NoError(t, conn.(*net.TCPConn).SetWriteBuffer(4*1024))
+	_, writeErr := conn.Write(frame)
 
-	data, err := io.ReadAll(reader)
-	if netErr, ok := errors.AsType[net.Error](err); ok {
-		require.False(t, netErr.Timeout(), "the refused partial frame kept the socket open")
-	} else {
-		require.NoError(t, err)
+	data, readErr := io.ReadAll(reader)
+	// Rejection can close the socket before the write completes.
+	for _, err := range []error{writeErr, readErr} {
+		if netErr, ok := errors.AsType[net.Error](err); ok {
+			require.False(t, netErr.Timeout(), "the refused partial frame kept the socket open")
+		} else {
+			require.NoError(t, err)
+		}
 	}
 	require.Empty(t, data)
 	select {

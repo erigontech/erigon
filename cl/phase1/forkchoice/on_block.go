@@ -165,8 +165,8 @@ func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeacon
 	return nil
 }
 
-// invalidateCachedHead forces the next GetHead to recompute. A GetHead running while f.mu
-// was released caches a head that predates this block.
+// invalidateCachedHead forces the next GetHead to recompute. Heads cached while validation
+// releases f.mu can be stale after block or payload updates. The caller must hold f.mu.
 func (f *ForkChoiceStore) invalidateCachedHead() {
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
@@ -739,6 +739,9 @@ func (f *ForkChoiceStore) rebookPendingEnvelopeRetry(root common.Hash, booked, n
 }
 
 func (f *ForkChoiceStore) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
+	if f.IsEnvelopeRejected(blockRoot) {
+		return false
+	}
 	return f.pendingEnvelopes != nil && f.pendingEnvelopes.Contains(blockRoot) ||
 		f.pendingLocalSelfBuildEnvelopes != nil && f.pendingLocalSelfBuildEnvelopes.Contains(blockRoot)
 }
@@ -1028,17 +1031,20 @@ func (f *ForkChoiceStore) queueLightClientEvents(before *cltypes.LightClientUpda
 		return
 	}
 	version := lcUpdate.AttestedHeader.Version().String()
+	sendFinality := f.forkGraph.NewestLightClientFinalityUpdate() == lcUpdate
 	f.queueEmit(func() {
-		f.emitters.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
-			Version: version,
-			Data: cltypes.LightClientFinalityUpdate{
-				AttestedHeader:  lcUpdate.AttestedHeader,
-				FinalizedHeader: lcUpdate.FinalizedHeader,
-				FinalityBranch:  lcUpdate.FinalityBranch,
-				SyncAggregate:   lcUpdate.SyncAggregate,
-				SignatureSlot:   lcUpdate.SignatureSlot,
-			},
-		})
+		if sendFinality {
+			f.emitters.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
+				Version: version,
+				Data: cltypes.LightClientFinalityUpdate{
+					AttestedHeader:  lcUpdate.AttestedHeader,
+					FinalizedHeader: lcUpdate.FinalizedHeader,
+					FinalityBranch:  lcUpdate.FinalityBranch,
+					SyncAggregate:   lcUpdate.SyncAggregate,
+					SignatureSlot:   lcUpdate.SignatureSlot,
+				},
+			})
+		}
 		f.emitters.State().SendLightClientOptimisticUpdate(&beaconevents.LightClientOptimisticUpdateData{
 			Version: version,
 			Data: cltypes.LightClientOptimisticUpdate{
