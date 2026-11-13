@@ -571,6 +571,46 @@ func TestSharedDomain_MergeKeepsReceiverRowsWrittenAfterItsUnwind(t *testing.T) 
 	require.Equal(t, reexecuted, got, "latest written after the receiver's unwind, merged with an unwound batch")
 }
 
+func TestSharedDomain_MergeKeepsEarliestHistoryValueAtSameTxNum(t *testing.T) {
+	t.Parallel()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	key := addr[:]
+	for _, otherUnwound := range []bool{false, true} {
+		t.Run(fmt.Sprintf("other unwound=%v", otherUnwound), func(t *testing.T) {
+			t.Parallel()
+
+			ctx := t.Context()
+			db := newTestDb(t, 4)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			receiver, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer receiver.Close()
+			other, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer other.Close()
+
+			require.NoError(t, receiver.DomainPut(kv.CodeDomain, rwTx, key, []byte{0x20}, 5, []byte{0x10}))
+			require.NoError(t, other.DomainPut(kv.CodeDomain, rwTx, key, []byte{0x30}, 5, []byte{0x20}))
+			if otherUnwound {
+				other.Unwind(6, nil)
+			}
+			require.NoError(t, receiver.Merge(ctx, 5, other, 5))
+			require.NoError(t, receiver.Flush(ctx, rwTx))
+
+			prev, ok, err := rwTx.HistorySeek(kv.CodeDomain, key, 5)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Equal(t, []byte{0x10}, prev, "value before txNum 5")
+			latest, _, err := rwTx.GetLatest(kv.CodeDomain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Equal(t, []byte{0x30}, latest)
+		})
+	}
+}
+
 // TestNewSharedDomains_StateAheadOfBlocks verifies that when the persisted
 // commitment state is ahead of the TxNums index (catch-up scenario),
 // NewSharedDomains returns ErrBehindCommitment but the SharedDomains itself

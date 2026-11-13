@@ -935,11 +935,8 @@ func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 func (sd *TemporalMemBatch) flushPreUnwindWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
 	for di, ws := range sd.preUnwindDomainWriters {
-		for _, w := range ws {
-			if err := w.Flush(ctx, tx); err != nil {
-				return err
-			}
-			w.Close()
+		if err := flushDomainWriters(ctx, tx, ws); err != nil {
+			return err
 		}
 		if len(ws) > 0 {
 			aggTx.d[di].closeValsCursor()
@@ -954,25 +951,37 @@ func (sd *TemporalMemBatch) flushPreUnwindWriters(ctx context.Context, tx kv.RwT
 	return nil
 }
 
-func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
-	aggTx := AggTx(tx)
-	for _, ws := range sd.pastDomainWriters {
-		for _, w := range ws {
-			if err := w.Flush(ctx, tx); err != nil {
-				return err
-			}
-			w.Close()
-		}
-	}
-	for di, w := range sd.domainWriters {
-		if w == nil {
+func flushDomainWriters(ctx context.Context, tx kv.RwTx, ws []*DomainBufferedWriter) error {
+	for _, w := range slices.Backward(ws) {
+		if w.discard {
 			continue
 		}
+		if err := w.h.Flush(ctx, tx); err != nil {
+			return err
+		}
+	}
+	for _, w := range ws {
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
-		aggTx.d[di].closeValsCursor() // TODO: why?
 		w.Close()
+	}
+	return nil
+}
+
+func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
+	aggTx := AggTx(tx)
+	for di, w := range sd.domainWriters {
+		ws := sd.pastDomainWriters[di]
+		if w != nil {
+			ws = append(slices.Clip(ws), w)
+		}
+		if err := flushDomainWriters(ctx, tx, ws); err != nil {
+			return err
+		}
+		if w != nil {
+			aggTx.d[di].closeValsCursor() // TODO: why?
+		}
 	}
 	for _, writer := range slices.Backward(sd.pastIIWriters) {
 		if err := writer.Flush(ctx, tx); err != nil {
