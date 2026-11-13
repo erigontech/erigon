@@ -1012,7 +1012,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		}
 		// The errgroup cancels with err only after closeApplyChannels; publish it first
 		// so the apply loop does not read the leftover tx results as an invalid block.
-		if err != nil && !errors.Is(err, rules.ErrInvalidBlock) {
+		if err != nil && !errors.Is(err, rules.ErrInvalidBlock) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			pe.execLoopErr = err
 			pe.cancelOperational(0, err)
 		}

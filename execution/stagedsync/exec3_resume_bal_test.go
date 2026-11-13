@@ -104,6 +104,7 @@ type resumeBALFixture struct {
 	// fromStateFiles moves the seeded state into the files of the first step and
 	// empties the state tables, as a snapshot sync leaves them.
 	fromStateFiles bool
+	exhausted      *ErrLoopExhausted // set by exec on a resumable partial batch
 }
 
 func newResumeBALFixture(t *testing.T) *resumeBALFixture {
@@ -497,6 +498,7 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	}
 	src := &singleBlockSource{block: block, num: 1, parent: fx.genesis.Header(), bal: block.BlockAccessList()}
 	out, err := ExecV3(ctx, cfg, domains, rwTx, stages.ModeForkValidation, false, "resume-bal", rng, src, logger)
+	fx.exhausted = out.exhausted
 	if err != nil {
 		require.Nil(t, out.verdict)
 		return nil, err
@@ -666,4 +668,16 @@ func TestExecLoopPanicMidBlockIsNotInvalidBlock(t *testing.T) {
 			require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 		})
 	}
+}
+
+// TestExecLoopCancelAfterStopForMoreWorkResumes pins that a context error the exec loop
+// returns after a stop for more work keeps the batch resumable instead of failing it.
+func TestExecLoopCancelAfterStopForMoreWorkResumes(t *testing.T) {
+	execLoopStartHook = func(pe *parallelExecutor) { pe.cancelExecLoop(&stopCause{kind: stopMoreWork}) }
+	defer func() { execLoopStartHook = nil }()
+	fx := newResumeBALFixture(t)
+	verdict, err := fx.exec(t, fx.block, fromBlockStart)
+	require.NoError(t, err)
+	require.Nil(t, verdict)
+	require.NotNil(t, fx.exhausted)
 }
