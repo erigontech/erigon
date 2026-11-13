@@ -413,3 +413,19 @@ func BenchmarkDecodeAccessList(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkDecodeBlockAccessListSidecar(b *testing.B) {
+	bal := make(BlockAccessList, 98*1024)
+	for i := range bal {
+		bal[i].Address[0], bal[i].Address[1], bal[i].Address[2] = byte(i>>16), byte(i>>8), byte(i)
+	}
+	enc, err := EncodeBlockAccessListBytes(bal)
+	require.NoError(b, err)
+	b.ReportAllocs()
+	b.SetBytes(int64(len(enc)))
+	for b.Loop() {
+		if _, err := DecodeBlockAccessListSidecarForBlock(enc, 300_000_000, 20); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

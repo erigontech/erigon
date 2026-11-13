@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -778,11 +779,12 @@ func encodingSizeHashList(hashes []common.Hash) int {
 var ErrInvalidBlockAccessList = errors.New("invalid block access list")
 
 func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream, budget *blockAccessListDecodeBudget) error {
-	if _, err := s.List(); err != nil {
+	size, err := s.List()
+	if err != nil {
 		return err
 	}
-	var changes []*AccountChanges
-
+	// EIP-7928: a genuine empty list (0xc0) decodes to an initialized empty slice, not nil.
+	bal := make(BlockAccessList, 0, accountChangesCount(s.Peek(), size, budget))
 	for s.MoreDataInList() {
 		if err := budget.takeItem(); err != nil {
 			return err
@@ -791,29 +793,37 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream, budget *blockAcc
 		if err := ac.decodeRLP(s, budget); err != nil {
 			return err
 		}
-		if budget != nil && len(changes) > 0 && bytes.Compare(changes[len(changes)-1].Address[:], ac.Address[:]) >= 0 {
+		if budget != nil && len(bal) > 0 && bytes.Compare(bal[len(bal)-1].Address[:], ac.Address[:]) >= 0 {
 			return fmt.Errorf("%w: account addresses must be strictly increasing", ErrInvalidBlockAccessList)
 		}
-		acCopy := ac
-		changes = append(changes, &acCopy)
+		bal = append(bal, ac)
 	}
 	if err := s.ListEnd(); err != nil {
 		return err
 	}
-	if len(changes) == 0 {
-		// EIP-7928: a genuine empty list (0xc0) was successfully decoded.
-		// Return an initialized empty slice, not nil.
-		*out = make(BlockAccessList, 0)
-		return nil
-	}
-	bal := make(BlockAccessList, len(changes))
-	for i, ac := range changes {
-		if ac != nil {
-			bal[i] = *ac
-		}
-	}
 	*out = bal
 	return nil
+}
+
+// minAccountChangesLen is the encoded size of an entry with no changes: list prefix, address, five empty lists.
+const minAccountChangesLen = 1 + 1 + length.Addr + 5
+
+// accountChangesCount returns how many entries a list body holds, so decoding allocates once; it is 0 when the stream
+// is not slice-backed. The count is capped by size/minAccountChangesLen and by the items the budget still allows, so a
+// malformed list cannot reserve more than it could decode.
+func accountChangesCount(body []byte, size uint64, budget *blockAccessListDecodeBudget) int {
+	if uint64(len(body)) < size {
+		return 0
+	}
+	n, err := rlp.CountValues(body[:size])
+	if err != nil {
+		return 0
+	}
+	limit := size / minAccountChangesLen
+	if budget != nil {
+		limit = min(limit, budget.remaining)
+	}
+	return int(min(uint64(n), limit))
 }
 
 // DecodeBlockAccessListBytes decodes a syntactically valid RLP block access list.
@@ -822,7 +832,8 @@ func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
 }
 
 func decodeBlockAccessListBytes(data []byte, budget *blockAccessListDecodeBudget) (BlockAccessList, error) {
-	stream := rlp.NewStream(bytes.NewReader(data), 0)
+	stream := rlp.NewBytesStream(data)
+	defer rlp.PutStream(stream)
 	var bal BlockAccessList
 	if err := decodeBlockAccessList(&bal, stream, budget); err != nil {
 		return nil, err

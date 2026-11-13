@@ -129,8 +129,7 @@ type FilesItem struct {
 	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
 	// version is the file's parsed on-disk version, used as a per-file regime marker.
-	version  version.Version
-	refcount atomic.Int32
+	version version.Version
 
 	canDelete atomic.Bool
 }
@@ -790,14 +789,6 @@ func (files visibleFiles) String(stepSize uint64) string {
 
 func (files visibleFiles) Len() int {
 	return len(files)
-}
-
-func (files visibleFiles) VisibleFiles() []VisibleFile {
-	res := make([]VisibleFile, 0, len(files))
-	for _, file := range files {
-		res = append(res, file)
-	}
-	return res
 }
 
 // dirListing holds a directory path and its pre-read entry names.
