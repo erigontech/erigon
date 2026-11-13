@@ -31,6 +31,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -179,18 +181,19 @@ func TestGetNextTransactionsFrameNonceRetry(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
 		name         string
-		key          uint64
+		keys         []uint256.Int
 		wrapped      bool
 		wantNonceGap bool
 	}{
-		{name: "legacy nonce gap", key: 0, wantNonceGap: true},
-		{name: "keyed nonce with low fee", key: 1},
-		{name: "wrapped keyed nonce with low fee", key: 1, wrapped: true},
+		{name: "legacy nonce gap", wantNonceGap: true},
+		{name: "keyed nonce with low fee", keys: []uint256.Int{{1}}},
+		{name: "zero key with low fee", keys: []uint256.Int{{}}},
+		{name: "wrapped keyed nonce with low fee", keys: []uint256.Int{{1}}, wrapped: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			sim := &frameFilterState{account: &accounts.Account{}}
 			frame := &types.FrameTransaction{
-				NonceKeys: []uint256.Int{*uint256.NewInt(test.key)}, Nonce: 1, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1},
+				NonceKeys: test.keys, Nonce: 1, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1},
 				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
 				Fees:   types.FrameFees{MaxFee: *uint256.NewInt(1)},
 			}
@@ -221,30 +224,59 @@ func TestGetNextTransactionsFrameNonceRetry(t *testing.T) {
 	}
 }
 
+func TestFrameFilterBlobFeeBudget(t *testing.T) {
+	t.Parallel()
+	for _, shortfall := range []uint64{0, 1} {
+		t.Run(fmt.Sprint(shortfall), func(t *testing.T) {
+			header := &types.Header{Time: 1, BaseFee: uint256.NewInt(2), ExcessBlobGas: new(uint64)}
+			blobBaseFee, err := misc.GetBlobGasPrice(chain.AllProtocolChanges, *header.ExcessBlobGas, header.Time)
+			require.NoError(t, err)
+			frame := &types.FrameTransaction{
+				ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1},
+				Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100_000, State: 40_000}}},
+				BlobVersionedHashes: []common.Hash{{1}},
+			}
+			frame.Fees.MaxFee.Mul(uint256.NewInt(frame.GetGasLimit()), header.BaseFee)
+			blobCost := new(uint256.Int).Mul(uint256.NewInt(frame.GetBlobGas()), &blobBaseFee)
+			frame.Fees.MaxFee.Add(&frame.Fees.MaxFee, blobCost)
+			frame.Fees.MaxFee.SubUint64(&frame.Fees.MaxFee, shortfall)
+			frame.Fees.TipCap.AddUint64(&frame.Fees.MaxFee, 1)
+			sim := &frameFilterState{account: &accounts.Account{}}
+			got, _, err := filterBadTransactions([]types.Transaction{frame}, &frame.ChainID, chain.AllProtocolChanges, 1, header, sim, sim, sim.GetNonce, log.New(), nil)
+			require.NoError(t, err)
+			if shortfall == 0 {
+				require.Equal(t, []types.Transaction{frame}, got)
+			} else {
+				require.Empty(t, got)
+			}
+		})
+	}
+}
+
 func TestGetNextTransactionsFrameReleasesNonceGap(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
 		name      string
-		key       uint64
+		keys      []uint256.Int
 		wrapped   bool
 		postNonce uint64
 	}{
-		{name: "legacy nonce", key: 0, postNonce: 1},
-		{name: "legacy nonce with create", key: 0, postNonce: 2},
-		{name: "rejected legacy frame", key: 0},
-		{name: "keyed nonce", key: 1},
-		{name: "keyed nonce with create", key: 1, postNonce: 1},
-		{name: "wrapped keyed nonce with create", key: 1, wrapped: true, postNonce: 1},
+		{name: "legacy nonce", postNonce: 1},
+		{name: "legacy nonce with create", postNonce: 2},
+		{name: "rejected legacy frame"},
+		{name: "keyed nonce", keys: []uint256.Int{{1}}},
+		{name: "keyed nonce with create", keys: []uint256.Int{{1}}, postNonce: 1},
+		{name: "wrapped keyed nonce with create", keys: []uint256.Int{{1}}, wrapped: true, postNonce: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			sender := accounts.InternAddress(common.Address{1})
 			st := newFundedState(sender)
 			gapped := newTxnFrom(sender, 1, params.TxGas)
 			frame := &types.FrameTransaction{
-				NonceKeys: []uint256.Int{*uint256.NewInt(test.key)}, ChainID: *chain.AllProtocolChanges.ChainID, SenderAddress: sender.Value(),
+				NonceKeys: test.keys, ChainID: *chain.AllProtocolChanges.ChainID, SenderAddress: sender.Value(),
 				Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}},
-				Fees:   types.FrameFees{MaxFee: *uint256.NewInt(1)},
 			}
+			frame.Fees.MaxFee.SetUint64(frame.GetGasLimit())
 			var tx types.Transaction = frame
 			if test.wrapped {
 				tx = &types.FrameTxWrapper{FrameTransaction: frame}
