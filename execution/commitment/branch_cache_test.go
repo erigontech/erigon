@@ -752,12 +752,15 @@ func TestBranchCache_ReadFillHasNoKnownWriteTime(t *testing.T) {
 	filled, written := []byte{1}, []byte{2}
 	c.Fill(filled, []byte("observed"), 0, 1)
 	c.Put(written, []byte("written"), 0, 2)
-	_, _, ok := c.GetBefore(filled, 18)
+	got, _, ok := c.Get(filled)
+	require.True(t, ok)
+	require.Equal(t, []byte("observed"), got)
+	_, _, ok = c.GetBefore(filled, 18)
 	require.False(t, ok)
 	c.Unwind(18)
 	_, _, ok = c.Get(filled)
 	require.False(t, ok)
-	got, _, ok := c.Get(written)
+	got, _, ok = c.Get(written)
 	require.True(t, ok)
 	require.Equal(t, []byte("written"), got)
 }

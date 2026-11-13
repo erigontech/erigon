@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -137,7 +138,8 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 					prefix := nibbles.HexToCompact([]byte{nibble(keys[targetIdx])})
 					emptyBranch, _, err := tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
 					require.NoError(t, err)
-					require.Truef(t, commitment.BranchData(emptyBranch).IsEmptyBranchRecord(), "expected an empty branch record, got %x", emptyBranch)
+					require.Len(t, emptyBranch, 4)
+					require.Zero(t, commitment.BranchData(emptyBranch).ChildCount())
 					_, _, inDB, err := tx.Debug().GetLatestFromDB(kv.CommitmentDomain, prefix)
 					require.NoError(t, err)
 					require.Equal(t, branch == "recreated_db", inDB, "exercise the requested empty branch source")
@@ -176,6 +178,122 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 					require.NoError(t, err)
 					require.Equalf(t, expected, actual, "replacement block %d", round+1)
 				}
+			})
+		}
+	}
+}
+
+func TestCommitmentStorageBranchRepeatedUnwind(t *testing.T) {
+	const stepSize = uint64(16)
+	for _, files := range []bool{false, true} {
+		for _, deferred := range []bool{false, true} {
+			t.Run(fmt.Sprintf("files_%t/deferred_%t", files, deferred), func(t *testing.T) {
+				ctx := t.Context()
+				db, agg := testDbAndAggregatorv3(t, stepSize)
+				keys, contract := mkAddrs(0x10, 3), mkAddrs(0x20, 1)[0]
+				slot := func(i byte) []byte {
+					key := make([]byte, length.Addr+length.Hash)
+					copy(key, contract)
+					key[length.Addr], key[len(key)-1] = i*37, i
+					return key
+				}
+				account := func(nonce uint64) []byte {
+					acc := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(nonce + 7), CodeHash: accounts.EmptyCodeHash}
+					return accounts.SerialiseV3(&acc)
+				}
+				write := func(database kv.TemporalRwDB, txNum uint64, update func(*execctx.SharedDomains, kv.TemporalRwTx)) (*changeset.StateChangeSet, []byte) {
+					t.Helper()
+					cs := &changeset.StateChangeSet{}
+					var root []byte
+					require.NoError(t, database.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+						doms, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(database), execctx.WithoutSharedBranchCache())
+						require.NoError(t, err)
+						defer doms.Close()
+						doms.SetDeferCommitmentUpdates(deferred)
+						doms.SetChangesetAccumulator(cs)
+						update(doms, tx)
+						root, err = doms.ComputeCommitment(ctx, tx, true, 0, txNum, "", nil)
+						require.NoError(t, err)
+						root = bytes.Clone(root)
+						require.NoError(t, doms.FlushPendingUpdates(tx))
+						doms.SetChangesetAccumulator(nil)
+						return doms.Flush(ctx, tx)
+					}))
+					return cs, root
+				}
+				unwind := func(txNum uint64, cs *changeset.StateChangeSet) {
+					t.Helper()
+					require.NoError(t, db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+						doms, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutSharedBranchCache())
+						require.NoError(t, err)
+						defer doms.Close()
+						var diffs [kv.DomainLen][]kv.DomainEntryDiff
+						for idx := range cs.Diffs {
+							diffs[idx] = changeset.DeserializeDiffSet(changeset.SerializeDiffSet(cs.Diffs[idx].GetDiffSet(), nil))
+						}
+						doms.Unwind(txNum, &diffs)
+						doms.SetTxNum(txNum)
+						return doms.Flush(ctx, tx)
+					}))
+				}
+				putAccounts := func(doms *execctx.SharedDomains, tx kv.TemporalRwTx, txNum uint64) {
+					for i, key := range keys {
+						require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, key, account(uint64(i+1)), txNum, nil))
+					}
+				}
+				putContract := func(doms *execctx.SharedDomains, tx kv.TemporalRwTx, txNum uint64, value byte) {
+					require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, contract, account(200+uint64(value)), txNum, nil))
+					for i := byte(1); i <= 2; i++ {
+						require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, slot(i), []byte{value, i}, txNum, nil))
+					}
+				}
+				write(db, 2, func(doms *execctx.SharedDomains, tx kv.TemporalRwTx) {
+					putAccounts(doms, tx, 2)
+					putContract(doms, tx, 2, 1)
+				})
+				write(db, 5, func(doms *execctx.SharedDomains, tx kv.TemporalRwTx) {
+					require.NoError(t, doms.DomainDel(kv.AccountsDomain, tx, contract, 5, nil))
+				})
+				deepChanges, _ := write(db, 20, func(doms *execctx.SharedDomains, tx kv.TemporalRwTx) {
+					require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, keys[0], account(20), 20, nil))
+				})
+				if files {
+					require.NoError(t, agg.BuildFiles(db, 21, unboundedFinalityCtx))
+					require.NoError(t, db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+						_, err := tx.PruneSmallBatches(ctx, time.Hour)
+						require.NoError(t, err)
+						require.Equal(t, stepSize, tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
+						return nil
+					}))
+				}
+				// Deleting an account can leave its unreachable storage branch in the domain.
+				require.NoError(t, db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+					path := nibbles.KeybytesToHex(crypto.Keccak256(contract))
+					prefix := nibbles.HexToCompact(path[:len(path)-1])
+					branch, _, err := tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
+					require.NoError(t, err)
+					require.Equal(t, 2, commitment.BranchData(branch).ChildCount())
+					return nil
+				}))
+				shallowChanges, _ := write(db, 37, func(doms *execctx.SharedDomains, tx kv.TemporalRwTx) {
+					putContract(doms, tx, 37, 7)
+				})
+				unwind(37, shallowChanges)
+				unwind(20, deepChanges)
+				write(db, 20, func(doms *execctx.SharedDomains, tx kv.TemporalRwTx) {
+					putContract(doms, tx, 20, 9)
+				})
+				_, actual := write(db, 21, func(doms *execctx.SharedDomains, tx kv.TemporalRwTx) {
+					require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, slot(1), []byte{0xEE}, 21, nil))
+				})
+
+				cleanDB, _ := testDbAndAggregatorv3(t, stepSize)
+				_, expected := write(cleanDB, 21, func(doms *execctx.SharedDomains, tx kv.TemporalRwTx) {
+					putAccounts(doms, tx, 21)
+					putContract(doms, tx, 21, 9)
+					require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, slot(1), []byte{0xEE}, 21, nil))
+				})
+				require.Equal(t, expected, actual)
 			})
 		}
 	}

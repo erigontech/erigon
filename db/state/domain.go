@@ -1614,6 +1614,11 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txNumUnwindTo ui
 		if diff.Value == nil || txNumUnwindTo%dt.stepSize == 0 || !bytes.Equal(diffStepInverted, unwindStepInverted) {
 			continue
 		}
+		// A branch absent from the trie may still have unreachable bytes in storage.
+		// Creating an empty version for it would leave a restore no retained update owns.
+		if d.Name == kv.CommitmentDomain && len(diff.Value) == 0 {
+			continue
+		}
 		// A value already supplied by an older version needs no new entry.
 		// Otherwise that entry could outlive the changesets of this step.
 		if !found {
@@ -1631,11 +1636,6 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txNumUnwindTo ui
 			}
 		}
 		if bytes.Equal(retainedValue, diff.Value) {
-			continue
-		}
-		// New trie branches record an empty previous value without reading storage.
-		// An older empty branch record already represents that same empty state.
-		if d.Name == kv.CommitmentDomain && len(diff.Value) == 0 && commitment.BranchData(retainedValue).IsEmptyBranchRecord() {
 			continue
 		}
 		if d.LargeValues {

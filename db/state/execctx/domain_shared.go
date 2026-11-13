@@ -1325,8 +1325,8 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 }
 
 // servableUnderBound gates a value against an in-flight unwind's per-key
-// maxStep. Callers convert their unit first: StateCache stamps txNums, while
-// mem batches and BranchCache already use step indices.
+// maxStep. StateCache validity stamps must first be converted from txNums;
+// mem batches already use step indices.
 func servableUnderBound(cStep, maxStep kv.Step) bool {
 	return cStep <= maxStep
 }
