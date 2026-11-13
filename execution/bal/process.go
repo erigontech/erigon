@@ -127,6 +127,9 @@ func matchesSidecar(blockBal *types.BlockAccessListSidecar, h *types.Header, bui
 	if blockBal.ValidateForHeader(h.GasLimit) != nil {
 		return false
 	}
+	if stubBALBuild {
+		return true
+	}
 	built.AddRemaining(vio)
 	return built.Matches(blockBal.BlockAccessList())
 }
@@ -146,3 +149,5 @@ func reportBALMismatch(blockNum uint64, blockHash common.Hash, blockBal types.Bl
 		writeBALToFile(blockBal, dataDir, fmt.Sprintf("block_bal_%d.txt", blockNum), logger)
 	}
 }
+
+const stubBALBuild = true // dbg probe: bound of building and matching the BAL on validation

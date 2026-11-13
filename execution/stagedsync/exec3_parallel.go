@@ -666,7 +666,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					if !finalized && foldErr == nil {
 						foldErr = pe.foldTx(ctx, rwTx, applyResult)
 					}
-					if applyResult.txIO != nil {
+					if applyResult.txIO != nil && !stubBALBuild {
 						if balBuilder == nil {
 							balBuilder = state.NewBlockAccessListBuilder()
 						}
@@ -3697,3 +3697,5 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 
 	dispatch()
 }
+
+const stubBALBuild = true // dbg probe: bound of building and matching the BAL on validation
