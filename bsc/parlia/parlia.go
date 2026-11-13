@@ -217,7 +217,7 @@ func (p *Parlia) ValidateBlockPostExecution(chainConfig *chain.Config, header *t
 			}
 			sender, ok := tx.GetSender()
 			if !ok {
-				logger.Warn("tx %d has no sender", i)
+				logger.Warn("[parlia] tx has no sender", "txIndex", i)
 				continue
 			}
 			_, ok = bscchain.NanoBlackList[sender.Value()]

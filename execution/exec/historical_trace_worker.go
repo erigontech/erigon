@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 type HistoricalTraceWorker struct {
@@ -151,6 +152,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 	rw.vmCfg.Tracer = nil
 
 	rw.ibs.Reset()
+	transactions.VersionedCallState(rw.ibs)
 	ibs, cc := rw.ibs, rw.execArgs.ChainConfig
 
 	ibs.SetTrace(txTask.Trace)
@@ -486,6 +488,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					reader := state.NewHistoryReaderV3(tx, outputTxNum)
 					ibs := state.New(reader)
 					defer ibs.Close()
+					transactions.VersionedCallState(ibs)
 					ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 					syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 						return protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{})
