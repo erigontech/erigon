@@ -510,6 +510,11 @@ func (p *Progress) publishReruns(te *txExecutor, execMode string) (curReruns [re
 	curVoidTail = time.Duration(voidTailNs - p.prevVoidTailNs)
 	p.prevVoidTailNs = voidTailNs
 	mxVoidTailSecondsTotal.WithLabelValues(execMode).Add(curVoidTail.Seconds())
+	var repeats int
+	for _, n := range curReruns {
+		repeats += n
+	}
+	mxRepeatsTotal.WithLabelValues(execMode).AddInt(repeats)
 	return curReruns, wasted, wastedByReason, curVoidTail
 }
 
@@ -679,7 +684,6 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 
 		mxExecRepeats.SetInt(repeats)
 		mxExecsTotal.WithLabelValues(execMode).AddUint64(execDiff)
-		mxRepeatsTotal.WithLabelValues(execMode).AddInt(repeats)
 		mxExecTriggers.SetInt(int(execCount))
 
 		p.prevExecCount = execCount

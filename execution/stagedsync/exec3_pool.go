@@ -234,6 +234,13 @@ func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
 	}
 }
 
+// countRerun adds a re-run, the time of the run it replaces and that run's void tail to the totals.
+func (pt *poolTask) countRerun(pe *parallelExecutor) {
+	pe.reruns[pt.rerunCause].Add(1)
+	pe.wastedNs[pt.rerunCause].Add(pt.lastRunNs)
+	pe.voidTailNs.Add(pt.lastVoidNs)
+}
+
 func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	be, tv := pt.be, pt.tv
 	finalExec := be.frontier() >= tv.index-1
@@ -255,11 +262,7 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 		poolOnRun(int(tv.version.Incarnation) + 1)
 	}
 	if tv.version.Incarnation > 0 {
-		p.pe.reruns[pt.rerunCause].Add(1)
-		p.pe.wastedNs[pt.rerunCause].Add(pt.lastRunNs)
-		if pt.rerunCause == rerunAbort {
-			p.pe.voidTailNs.Add(pt.lastVoidNs)
-		}
+		pt.countRerun(p.pe)
 	}
 	be.cntExec.Add(1)
 	p.pe.execCount.Add(1)
