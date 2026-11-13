@@ -1820,12 +1820,6 @@ func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
 	return max(dt.ht.files[0].startTxNum, dt.ht.iit.files[0].startTxNum)
 }
 
-// valuesFilesCoverHistory is false when a values file of a range that history covers is not visible: the writes of
-// that range then exist only in history.
-func (dt *DomainRoTx) valuesFilesCoverHistory() bool {
-	return dt.files.EndTxNum() >= dt.ht.files.EndTxNum()
-}
-
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
@@ -1835,12 +1829,12 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 	if roTx != nil {
 		// If the newest value of the key was written in a step before txNum's step, nothing changed it at or after txNum,
 		// so it is also the value as of txNum. Referenced commitment files hold shortened keys that only the aggregator can
-		// expand, and values files that do not cover history can miss a newer write.
+		// expand.
 		latest, step, ok, err := dt.GetLatest(key, roTx)
 		if err != nil {
 			return nil, false, err
 		}
-		if ok && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) && !dt.commitmentVisibleFilesReferenced() && dt.valuesFilesCoverHistory() {
+		if ok && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) && !dt.commitmentVisibleFilesReferenced() {
 			return latest, true, nil
 		}
 	}
