@@ -112,6 +112,44 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 	require.Equal(t, f3, fileItems[0])
 }
 
+func TestCalcVisibleFilesStopsAtTheFirstGap(t *testing.T) {
+	t.Parallel()
+	dirtyFilesOf := func(ranges ...[2]uint64) *DirtyFiles {
+		files := newDirtyFiles()
+		for _, r := range ranges {
+			item := newFilesItem(r[0], r[1])
+			item.decompressor = &seg.Decompressor{}
+			files.Set(item)
+		}
+		return files
+	}
+	endsOf := func(files visibleFiles) (ends []uint64) {
+		for _, f := range files {
+			ends = append(ends, f.endTxNum)
+		}
+		return ends
+	}
+	allFiles := func(uint64, uint64) bool { return true }
+
+	t.Run("no gap", func(t *testing.T) {
+		files := dirtyFilesOf([2]uint64{0, 4}, [2]uint64{4, 8}, [2]uint64{8, 12})
+		require.Equal(t, []uint64{4, 8, 12}, endsOf(calcVisibleFiles(files, 0, allFiles, false, 12)))
+	})
+	t.Run("gap in the middle", func(t *testing.T) {
+		files := dirtyFilesOf([2]uint64{0, 4}, [2]uint64{4, 8}, [2]uint64{12, 16}, [2]uint64{16, 20})
+		require.Equal(t, []uint64{4, 8}, endsOf(calcVisibleFiles(files, 0, allFiles, false, 20)))
+	})
+	t.Run("partial overlap is not a gap", func(t *testing.T) {
+		files := dirtyFilesOf([2]uint64{0, 8}, [2]uint64{4, 12}, [2]uint64{8, 16})
+		require.Equal(t, []uint64{8, 12, 16}, endsOf(calcVisibleFiles(files, 0, allFiles, false, 16)))
+	})
+	t.Run("file hidden by the checker", func(t *testing.T) {
+		files := dirtyFilesOf([2]uint64{0, 4}, [2]uint64{4, 8}, [2]uint64{8, 12})
+		dependentMissing := func(start, _ uint64) bool { return start != 4 }
+		require.Equal(t, []uint64{4}, endsOf(calcVisibleFiles(files, 0, dependentMissing, false, 12)))
+	})
+}
+
 func TestVisibleFileVersion(t *testing.T) {
 	t.Parallel()
 	vf := visibleFile{src: &FilesItem{version: version.V2_1}}
