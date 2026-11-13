@@ -116,7 +116,6 @@ func TestImportBurntContractSelfdestructLosesBurn(t *testing.T) {
 // importBurntContractBlock builds a pre-Cancun block serially with burnt as the
 // burnt-fee contract and a tx to to, then imports it with parallel execution.
 func importBurntContractBlock(t *testing.T, burnt, to common.Address, alloc types.GenesisAlloc, wantGas uint64) {
-
 	config := chain.AllProtocolChanges.Copy()
 	config.CancunTime = nil
 	config.PragueTime = nil

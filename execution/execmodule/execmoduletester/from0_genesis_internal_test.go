@@ -52,9 +52,7 @@ func TestFromZero_GenesisAllocPreservedAfterResetReExec(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	t.Run("parallel", func(t *testing.T) {
-		runFromZeroGenesisAllocPreservedAfterResetReExec(t)
-	})
+	runFromZeroGenesisAllocPreservedAfterResetReExec(t)
 }
 
 func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
@@ -136,9 +134,7 @@ func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 // zero address. Re-executing from block 0 must keep it, as the genesis runs with
 // EIP-161 disabled; removing it changes every later state root.
 func TestFromZero_AuraGenesisEmptyZeroAddressRetained(t *testing.T) {
-	t.Run("parallel", func(t *testing.T) {
-		runAuraGenesisEmptyZeroAddressRetained(t)
-	})
+	runAuraGenesisEmptyZeroAddressRetained(t)
 }
 
 func runAuraGenesisEmptyZeroAddressRetained(t *testing.T) {
@@ -296,9 +292,7 @@ func TestFromZero_BranchCacheCoherentAcrossBatches(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	t.Run("parallel", func(t *testing.T) {
-		runBranchCacheCoherentAcrossBatches(t)
-	})
+	runBranchCacheCoherentAcrossBatches(t)
 }
 
 func runBranchCacheCoherentAcrossBatches(t *testing.T) {

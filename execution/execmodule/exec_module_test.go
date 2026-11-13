@@ -4250,7 +4250,6 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 // create contracts must reach the state root of serial execution, whether parallel exec
 // charges the sender at validation (zero value) or in the run (value).
 func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
-
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
@@ -4298,7 +4297,6 @@ func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 // Value transfers whose recipient is credited at validation must reach the state root of serial
 // execution, also when the recipient spends, its balance is read, or it gets code in the block.
 func TestRecipientCreditAtValidationMatchesSerialExecution(t *testing.T) {
-
 	keys := make([]*ecdsa.PrivateKey, 10)
 	alloc := types.GenesisAlloc{}
 	for i := range keys {
@@ -4352,7 +4350,6 @@ func TestRecipientCreditAtValidationMatchesSerialExecution(t *testing.T) {
 // A tx that serial execution rejects on its sender's nonce or balance must reject the
 // block with the same error when parallel exec charges the sender at validation.
 func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
-
 	balance := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 	feeCap := *uint256.NewInt(10 * common.GWei)
 	for _, tc := range []struct {

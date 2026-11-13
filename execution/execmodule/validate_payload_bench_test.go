@@ -242,13 +242,6 @@ func startWindowProfile(b *testing.B) func() {
 	}
 }
 
-func boolMetric(v bool) float64 {
-	if v {
-		return 1
-	}
-	return 0
-}
-
 // benchChainConfig is AllProtocolChanges without Amsterdam, which is where
 // mainnet is. Under Amsterdam a transfer to an account that does not exist
 // reverts and burns the whole gas limit, which would empty the cold arm.

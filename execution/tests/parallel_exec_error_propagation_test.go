@@ -108,8 +108,6 @@ func runParallelExecV3WithContext(t *testing.T, ctx context.Context, m *execmodu
 func runParallelExecV3WithChaosGate(t *testing.T, ctx context.Context, m *execmoduletester.ExecModuleTester, maxBlockNum uint64, chaosMonkey, initialCycle bool) error {
 	t.Helper()
 
-	// Callers must not use t.Parallel: executor selection is process-wide.
-
 	syncCfg := m.Cfg().Sync
 	syncCfg.ChaosMonkey = chaosMonkey
 	execCfg := stagedsync.StageExecuteBlocksCfg(

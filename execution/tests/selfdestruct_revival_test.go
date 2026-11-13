@@ -41,7 +41,6 @@ import (
 // A redeploy keeps the nonce and code it wrote. Parallel execution must accept the
 // block built by the serial generator.
 func TestCreditRevivesDestroyedContract(t *testing.T) {
-
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)

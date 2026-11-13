@@ -68,10 +68,6 @@ EXPOSE 8545 8546 8551 30303 30303/udp 30304 30304/udp
 ENTRYPOINT ["/erigon.sh"]
 ```
 
-### erigon.sh Modifications
-
-Only one addition to upstream — Amsterdam/BAL parallel execution:
-
 ### Running Hive Tests Locally
 
 ```bash

@@ -82,7 +82,6 @@ func TestValidateChainExecutesLagWithinLoopBlockLimit(t *testing.T) {
 }
 
 func TestValidateChainAcceptsPayloadBeyondBatchSize(t *testing.T) {
-
 	m, payload := newExecLagTester(t, 12, execmoduletester.WithBatchSize(1))
 
 	result, err := m.ValidateChain(t.Context(), payload)

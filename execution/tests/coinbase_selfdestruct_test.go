@@ -29,7 +29,6 @@ import (
 )
 
 func TestCoinbaseSelfdestructWorkerCount(t *testing.T) {
-
 	raw, err := os.ReadFile("testdata/coinbase_selfdestruct.json")
 	require.NoError(t, err)
 
