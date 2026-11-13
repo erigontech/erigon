@@ -2160,7 +2160,7 @@ func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeac
 	return nil, g.addChainSegmentStatus, g.addChainSegmentErr
 }
 
-func (g *getFinalizedExecutionHashForkGraph) BeginChainSegment(*cltypes.SignedBeaconBlock, bool) (*fork_graph.ChainSegment, fork_graph.ChainSegmentInsertionResult, error) {
+func (g *getFinalizedExecutionHashForkGraph) BeginChainSegment(*cltypes.SignedBeaconBlock, common.Hash, bool) (*fork_graph.ChainSegment, fork_graph.ChainSegmentInsertionResult, error) {
 	return nil, fork_graph.ReplayRequired, nil
 }
 
