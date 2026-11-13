@@ -28,9 +28,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -242,14 +239,7 @@ func (s *txViewStream) Send(pair *remoteproto.Pair) error {
 func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 	viewStream := &txViewStream{KV_TxServer: stream}
 	stream = viewStream
-	ctx := stream.Context()
-	if md, _ := metadata.FromIncomingContext(ctx); len(md.Get(remoteproto.TxTryAcquireMetadataKey)) > 0 {
-		ctx = kv.WithTryAcquire(ctx)
-	}
-	id, errBegin := s.begin(ctx)
-	if errors.Is(errBegin, kv.ErrReadTxLimitExceeded) {
-		return status.Error(codes.ResourceExhausted, errBegin.Error())
-	}
+	id, errBegin := s.begin(stream.Context())
 	if errBegin != nil {
 		return fmt.Errorf("server-side error: %w", errBegin)
 	}

@@ -20,11 +20,9 @@ import (
 	"context"
 	"io"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
-	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -255,13 +253,4 @@ func TestIndexJoinFallsBackToClientSideJoin(t *testing.T) {
 	txNums, err := stream.ToArrayU64(it)
 	require.NoError(t, err)
 	require.Equal(t, []uint64{5, 8}, txNums)
-}
-
-func TestBeginRoTryAcquireAtReadTxLimit(t *testing.T) {
-	db := &DB{roTxsLimiter: semaphore.NewWeighted(0)}
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	_, err := db.BeginRo(kv.WithTryAcquire(ctx)) //nolint:gocritic // no tx is opened
-	require.ErrorIs(t, err, kv.ErrReadTxLimitExceeded)
 }

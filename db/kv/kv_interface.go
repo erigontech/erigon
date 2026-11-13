@@ -938,9 +938,9 @@ func IsNonBlockingAcquire(ctx context.Context) bool {
 
 type tryAcquireKey struct{}
 
-// WithTryAcquire tags ctx so that BeginRo of every DB, remote included, returns
-// ErrReadTxLimitExceeded instead of waiting for a read-tx slot. It is for callers that
-// already hold a read tx and can do without another one.
+// WithTryAcquire tags ctx so that BeginRo of an MDBX DB returns ErrReadTxLimitExceeded
+// instead of waiting for a read-tx slot. It is for callers that already hold a read tx and
+// can do without another one.
 func WithTryAcquire(ctx context.Context) context.Context {
 	return context.WithValue(ctx, tryAcquireKey{}, struct{}{})
 }

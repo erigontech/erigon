@@ -20,29 +20,21 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"net"
 	"runtime"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/kv/remotedb"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
@@ -424,37 +416,4 @@ func TestRangeCopiesPairsAndClosesIterator(t *testing.T) {
 	_, err = s.Range(t.Context(), &remoteproto.RangeReq{TxId: 1, Limit: -1})
 	require.ErrorIs(t, err, errNext)
 	require.True(t, it.closed)
-}
-
-// fullReadSlotsDB has no read-tx slot left: BeginTemporalRo fails under kv.WithTryAcquire
-// and waits for ctx otherwise.
-type fullReadSlotsDB struct{ kv.TemporalRoDB }
-
-func (fullReadSlotsDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
-	if kv.IsTryAcquire(ctx) {
-		return nil, kv.ErrReadTxLimitExceeded
-	}
-	<-ctx.Done()
-	return nil, ctx.Err()
-}
-
-// TestRemoteBeginRoTryAcquireOverGrpc pins that a remotedb client gets ErrReadTxLimitExceeded
-// from a KV server with no read-tx slot left, over a real gRPC connection.
-func TestRemoteBeginRoTryAcquireOverGrpc(t *testing.T) {
-	server := grpcutil.NewServer(0, nil)
-	remoteproto.RegisterKVServer(server, NewKvServer(t.Context(), fullReadSlotsDB{}, nil, nil, log.New()))
-	listener := bufconn.Listen(1024 * 1024)
-	go func() { _ = server.Serve(listener) }()
-	t.Cleanup(server.Stop)
-	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
-	require.NoError(t, err)
-	t.Cleanup(func() { conn.Close() })
-	db, err := remotedb.NewRemote(gointerfaces.VersionFromProto(KvServiceAPIVersion), log.New(), remoteproto.NewKVClient(conn)).Open()
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	_, err = db.BeginRo(kv.WithTryAcquire(ctx)) //nolint:gocritic // no tx is opened
-	require.ErrorIs(t, err, kv.ErrReadTxLimitExceeded)
 }
