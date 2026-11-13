@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -178,6 +179,9 @@ func ReadBlockRootByStateRoot(tx kv.Tx, stateRoot common.Hash) (common.Hash, err
 
 func ReadCanonicalBlockRoot(tx kv.Tx, slot uint64) (common.Hash, error) {
 	var blockRoot common.Hash
+	if slot > math.MaxUint32 {
+		return blockRoot, nil // beyond the 4-byte slot keys, so no block can be stored at it
+	}
 
 	bRoot, err := tx.GetOne(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {

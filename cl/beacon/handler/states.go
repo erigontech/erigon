@@ -207,7 +207,7 @@ func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beac
 
 	state, err := a.forkchoiceStateAtBlockSlot(blockId, blockRoot, *slot)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	if state == nil {
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
