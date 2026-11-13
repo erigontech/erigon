@@ -698,7 +698,7 @@ func TestCachePopulatingGetterKeepsFresherEntry(t *testing.T) {
 
 		v, _, err := cpg.GetLatest(domain, key, kv.GetLatestOptions{})
 		require.NoError(t, err)
-		require.Equal(t, stale, v, "read-through must still return the view's value")
+		require.Equal(t, fresh, v, "a cached key is not read again")
 
 		got, ok := sc.View(nil).Get(domain, key)
 		require.True(t, ok, "domain %s", domain)
@@ -724,14 +724,14 @@ func TestCachePopulatingGetterDoesNotCacheBoundedRead(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestCachePopulatingGetterWarmOnlySkipsCachedKey(t *testing.T) {
+func TestCachePopulatingGetterSkipsCachedKey(t *testing.T) {
 	account := accounts.Account{Nonce: 1}
 	source := &sharedCodeTemporalGetter{account: accounts.SerialiseV3(&account)}
 	sc := newTestStateCache()
 	t.Cleanup(sc.Close)
 	addr := common.Address{19: 1}
 	seedFill(sc, kv.AccountsDomain, addr[:], source.account, 5)
-	cpg := &cachePopulatingGetter{TemporalGetter: source, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 16, warmOnly: true}
+	cpg := &cachePopulatingGetter{TemporalGetter: source, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 16}
 	v, _, err := cpg.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Equal(t, source.account, v)

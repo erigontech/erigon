@@ -101,8 +101,6 @@ type cachePopulatingGetter struct {
 	view     cache.ReadView
 	snapshot cache.Frontier
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
-	// warmOnly answers from the cache when it holds the key: a warmup only fills, and exec reads the same keys at the same time.
-	warmOnly bool
 	// Exec derives an account's code hash from its cached record; the addr→codeHash seed only serves warmup code reads.
 	skipCodeHashSeed bool
 }
@@ -117,7 +115,7 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache, readsCode bool) ex
 		return execctx.NewTemporalTxStateGetter(ttx)
 	}
 	frontier := cache.FrontierWithStateVersion(debug, stateVersion)
-	getter := &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize(), warmOnly: true, skipCodeHashSeed: !readsCode}
+	getter := &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize(), skipCodeHashSeed: !readsCode}
 	if !kv.UnderlyingTxIsWritable(ttx) {
 		getter.snapshot = frontier
 	}
@@ -125,7 +123,8 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache, readsCode bool) ex
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
-	if cpg.warmOnly && opts.MaxStep() == kv.NoStepBound {
+	// A warmup only fills, and exec fills the keys it reads first: a cached key needs no second read.
+	if opts.MaxStep() == kv.NoStepBound {
 		if v, txNum, ok := cpg.view.GetWithTxNum(name, k); ok {
 			return v, kv.Step(txNum / cpg.stepSize), nil
 		}
