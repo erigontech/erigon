@@ -257,6 +257,7 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger,
 ) error {
 	var currentInc uint64
+	codeChanged := make(map[common.Address]struct{})
 
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == length.Addr {
@@ -264,24 +265,28 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 				return nil
 			}
 			// Diffs carry values from individual database steps, not necessarily the
-			// unwind target. Read the restored account, including the uncommitted unwind.
+			// unwind target. Read the restored account and code, including the uncommitted unwind.
 			var err error
 			v, _, err = state.GetLatest(kv.AccountsDomain, k, kv.GetLatestOptions{})
 			if err != nil {
 				return err
 			}
+			address := common.Address(k)
 			if len(v) > 0 {
 				var account accounts.Account
 				if err := accounts.DeserialiseV3(&account, v); err != nil {
 					return fmt.Errorf("%w, %x", err, v)
 				}
-				var address common.Address
-				copy(address[:], k)
 				newV := accounts.SerialiseV3(&account)
 				accumulator.ChangeAccount(address, account.Incarnation, newV)
+				if _, changed := codeChanged[address]; changed {
+					code, _, err := state.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
+					if err != nil {
+						return err
+					}
+					accumulator.ChangeCode(address, account.Incarnation, bytes.Clone(code))
+				}
 			} else {
-				var address common.Address
-				copy(address[:], k)
 				accumulator.DeleteAccount(address)
 			}
 			return nil
@@ -309,9 +314,17 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 	stateChanges.SortAndFlushInBackground(true)
 
 	if changeset != nil {
-		if accumulator != nil && len(changeset[kv.CodeDomain]) > 0 {
-			// Unwind notifications omit code changes, which can invalidate code-only dependencies.
-			accumulator.MarkIncomplete()
+		if accumulator != nil {
+			for _, entry := range changeset[kv.CodeDomain] {
+				address := common.Address([]byte(entry.Key)[:length.Addr])
+				if _, seen := codeChanged[address]; seen {
+					continue
+				}
+				codeChanged[address] = struct{}{}
+				if err := stateChanges.Collect(address[:], nil); err != nil {
+					return err
+				}
+			}
 		}
 		accountDiffs := changeset[kv.AccountsDomain]
 		for _, entry := range accountDiffs {

@@ -1914,6 +1914,7 @@ func TestFramePoolReloadValidationBudgets(t *testing.T) {
 				return nil, ctx.Err()
 			}
 		}}
+		pool.started.Store(false)
 		require.NoError(t, pool.start(t.Context()))
 		for _, frame := range frames {
 			mt := pool.byHash[string(frame.IDHash[:])]
@@ -1942,6 +1943,7 @@ func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {
 				require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
 					return tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...))
 				}))
+				pool.started.Store(false)
 				require.NoError(t, pool.start(ctx))
 			}
 			require.Contains(t, pool.byHash, string(frame.IDHash[:]))
@@ -1950,7 +1952,7 @@ func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {
 	}
 }
 
-func TestFramePoolStartupUsesExecutedHead(t *testing.T) {
+func TestFramePoolStartupUsesAnnouncedHead(t *testing.T) {
 	for _, mode := range []string{"new local transaction", "restored local transaction"} {
 		t.Run(mode, func(t *testing.T) {
 			chainConfig := chain.AllProtocolChanges.Copy()
@@ -1975,6 +1977,11 @@ func TestFramePoolStartupUsesExecutedHead(t *testing.T) {
 				}
 				return stages.SaveStageProgress(tx, stages.Execution, executed.Number.Uint64())
 			}))
+			reset := newBlockChangeForAccounts(executedHead, 0, sender)
+			reset.StateChangesIncomplete = true
+			reset.ChangeBatch[0].BlockHeight = executed.Number.Uint64()
+			reset.ChangeBatch[0].BlockTime = executed.Time
+			require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			backend := &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
 			pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
 				if req.ExpectedBlockHash == nil || gointerfaces.ConvertH256ToHash(req.ExpectedBlockHash) != executedHead {
@@ -1991,6 +1998,7 @@ func TestFramePoolStartupUsesExecutedHead(t *testing.T) {
 					return tx.Put(kv.RecentLocalTransaction, make([]byte, 8), frame.IDHash[:])
 				}))
 			}
+			pool.started.Store(false)
 			require.NoError(t, pool.start(ctx))
 			require.Equal(t, executedHead, pool.stateBlockHash)
 			if mode == "new local transaction" {
@@ -2044,6 +2052,7 @@ func TestFramePoolReloadDeletesRejectedRows(t *testing.T) {
 			backend.valid, backend.err = tc.valid, tc.backendErr
 			backend.calls = nil
 
+			pool.started.Store(false)
 			require.NoError(t, pool.start(ctx))
 			if tc.alreadyPooled {
 				require.Empty(t, backend.calls)
@@ -2100,6 +2109,7 @@ func TestFramePoolReloadDeletesRejectedNonceSuccessor(t *testing.T) {
 		return nil
 	}))
 
+	pool.started.Store(false)
 	require.NoError(t, pool.start(ctx))
 	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
 	require.NotContains(t, pool.byHash, string(ordinary.IDHash[:]))
@@ -2124,6 +2134,7 @@ func TestFramePoolReloadErrorRetainsTransaction(t *testing.T) {
 		return tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...))
 	}))
 	backend.err = errors.New("validation backend unavailable")
+	pool.started.Store(false)
 	require.NoError(t, pool.start(ctx))
 	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
 	require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)

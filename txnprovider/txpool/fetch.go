@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -788,6 +789,7 @@ func (f *Fetch) ConnectSentries() {
 }
 
 func (f *Fetch) ConnectCore() {
+	f.pool.MarkStateStale()
 	f.connectWg.Go(func() {
 		for {
 			select {
@@ -796,15 +798,15 @@ func (f *Fetch) ConnectCore() {
 			default:
 			}
 			if err := f.handleStateChanges(f.ctx, f.stateChangesClient); err != nil {
-				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-					select {
-					case <-f.ctx.Done():
-						return
-					case <-time.After(3 * time.Second):
-					}
+				if errors.Is(err, errRefreshStateSnapshot) {
 					continue
 				}
-				f.logger.Warn("[txpool.handleStateChanges]", "err", err)
+				if !grpcutil.IsRetryLater(err) && !grpcutil.IsEndOfStream(err) {
+					f.logger.Warn("[txpool.handleStateChanges]", "err", err)
+				}
+			}
+			if common.Sleep(f.ctx, 3*time.Second) != nil {
+				return
 			}
 		}
 	})
@@ -1319,6 +1321,8 @@ func (f *Fetch) dropAlternate(peer fetchPeer) {
 	}
 }
 
+var errRefreshStateSnapshot = errors.New("refresh state snapshot")
+
 func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClient) error {
 	// Any return ends this subscription, including a clean stream end. Keep the pool
 	// stale until a new subscription restores a usable state view.
@@ -1329,15 +1333,34 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 	if err != nil {
 		return err
 	}
-	for req, err := stream.Recv(); ; req, err = stream.Recv() {
+	var refreshTimer *time.Timer
+	for {
+		batch, err := stream.Recv()
+		if refreshTimer != nil {
+			if !refreshTimer.Stop() {
+				// The callback may still cancel the stream after Recv returns.
+				// Keep transaction and activation observations, but recover state through a fresh subscription.
+				if batch != nil {
+					f.collectStateChangeTxns(batch)
+					f.pool.RetainBogotaActivation(batch)
+				}
+				return errRefreshStateSnapshot
+			}
+			refreshTimer = nil
+		}
 		if err != nil {
 			return err
 		}
-		if req == nil {
+		if batch == nil {
 			return nil
 		}
-		if err := f.handleStateChangesRequest(ctx, req); err != nil && !errors.Is(err, errStateViewSuperseded) {
-			return err
+		if err := f.handleStateChangesRequest(ctx, batch); err != nil {
+			if !errors.Is(err, errStateViewSuperseded) {
+				return err
+			}
+			// A newer commit may have no notification. Drain queued batches, but
+			// reconnect for a fresh snapshot if the stream stays idle.
+			refreshTimer = time.AfterFunc(time.Second, cancel)
 		}
 
 		if f.wg != nil { // to help tests
@@ -1363,10 +1386,8 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 			f.logger.Warn("[fetch] onNewBlock", "err", applyErr)
 		}
 		// Retry the failed batch: recovery must not depend on another block arriving.
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Second):
+		if err := common.Sleep(ctx, time.Second); err != nil {
+			return err
 		}
 	}
 }

@@ -17,8 +17,10 @@
 package stagedsync
 
 import (
+	"encoding/binary"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -33,8 +35,57 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
 )
+
+func TestUnwindCodeNotificationsUseRestoredState(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		removed bool
+	}{
+		{name: "restored code"},
+		{name: "removed account", removed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, logger := t.Context(), log.New()
+			_, tx := temporaltest.NewTestTx(t)
+			doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+			require.NoError(t, err)
+			defer doms.Close()
+			address := common.Address{1}
+			code := types.AddressToDelegation(accounts.InternAddress(common.Address{2}))
+			account := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: accounts.NewCode(code).Hash}
+			if !tc.removed {
+				require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, address[:], accounts.SerialiseV3(&account), 0, nil))
+				require.NoError(t, doms.DomainPut(kv.CodeDomain, tx, address[:], code, 0, nil))
+			}
+			var diffs [kv.DomainLen][]kv.DomainEntryDiff
+			// Step-local values can differ from the unwind target, even for the same address.
+			for step := range uint64(2) {
+				key := binary.BigEndian.AppendUint64(address[:], ^step)
+				diffs[kv.CodeDomain] = append(diffs[kv.CodeDomain], kv.DomainEntryDiff{Key: string(key), Value: []byte{0xfe}})
+			}
+			accumulator := shards.NewAccumulator()
+			header := makeHeader(1, common.Hash{})
+			accumulator.StartChange(header, nil, true)
+			require.NoError(t, stateChangesStreamAtUnwind(ctx, tx, doms.AsSnapshotGetter(tx), 1, 0, accumulator, &diffs, logger))
+			batch := accumulator.Batch(header).ToProtoBatch()
+			require.False(t, batch.StateChangesIncomplete)
+			require.Len(t, batch.ChangeBatch[0].Changes, 1)
+			change := batch.ChangeBatch[0].Changes[0]
+			if tc.removed {
+				require.Equal(t, remoteproto.Action_REMOVE, change.Action)
+				require.Empty(t, change.Code)
+			} else {
+				require.Equal(t, remoteproto.Action_UPSERT_CODE, change.Action)
+				require.Equal(t, accounts.SerialiseV3(&account), change.Data)
+				require.Equal(t, code, change.Code)
+			}
+		})
+	}
+}
 
 func TestUnwindStateNotificationCompleteness(t *testing.T) {
 	for _, tc := range []struct {

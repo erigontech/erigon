@@ -228,25 +228,16 @@ type StateChangesClient interface {
 
 func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient, cache kvcache.Cache) {
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
+		for ctx.Err() == nil {
+			err := subscribeToStateChanges(ctx, client, cache)
+			if ctx.Err() != nil {
 				return
-			default:
 			}
-			if err := subscribeToStateChanges(ctx, client, cache); err != nil {
-				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-					// ctx-aware retry delay so callers cancelling ctx don't have to
-					// wait up to 3s for the next retry cycle.
-					err = common.Sleep(ctx, 3*time.Second)
-					if err == nil {
-						continue
-					}
-				}
-				if errors.Is(err, context.Canceled) {
-					return
-				}
+			if err != nil && !grpcutil.IsRetryLater(err) && !grpcutil.IsEndOfStream(err) {
 				log.Warn("[rpcdaemon subscribeToStateChanges]", "err", err)
+			}
+			if common.Sleep(ctx, 3*time.Second) != nil {
+				return
 			}
 		}
 	}()

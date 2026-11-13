@@ -32,8 +32,7 @@ import (
 
 // Caplin compresses blob sidecars into the same directory the block snapshots merge in, and its
 // in-progress target is a .tmp. Deleting every .tmp here destroys that file mid-write: the dump
-// then fails on rename and, because the blob frontier only advances once the whole range is
-// dumped, every already-compressed range in that run is redone.
+// then fails on rename.
 func TestRemoveOverlapsKeepsTmpOfForeignTypes(t *testing.T) {
 	dir := t.TempDir()
 	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet},

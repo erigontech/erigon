@@ -27,6 +27,7 @@ import (
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -157,7 +158,11 @@ func TestRemoteFrameSimulationDoesNotBlockOrdinaryPropagation(t *testing.T) {
 	pool.cfg.SyncToNewPeersEvery = time.Hour
 	pool.p2pFetcher.ctx = ctx
 	ctrl := gomock.NewController(t)
-	stateChanges := direct.NewStateDiffClientDirect(remotedbserver.NewKvServer(ctx, nil, nil, nil, pool.logger))
+	kvServer := remotedbserver.NewKvServer(ctx, nil, nil, nil, pool.logger)
+	kvServer.SetStateChangesSnapshot(func(context.Context) (*remoteproto.StateChangeBatch, error) {
+		return newBlockChangeForAccounts(common.Hash{}, 0, sender), nil
+	})
+	stateChanges := direct.NewStateDiffClientDirect(kvServer)
 	pool.p2pFetcher.stateChangesClient = stateChanges
 	propagated := make(chan struct{}, 2)
 	sentry := sentryproto.NewMockSentryClient(ctrl)

@@ -42,7 +42,7 @@ func (a *Accumulator) Changes() []StateChange {
 }
 
 // An incomplete batch still needs dispatch without recorded block changes.
-// Before sending it, the dispatcher adds an entry for the current head so
+// Before sending it, the dispatcher adds an entry for the executed head so
 // consumers can identify the announced state.
 func (a *Accumulator) HasPendingChanges() bool {
 	return a != nil && (len(a.changes) > 0 || a.stateChangesIncomplete)
@@ -62,7 +62,7 @@ func (a *Accumulator) Checkpoint() (restore func()) {
 	return func() { *a = saved }
 }
 
-// Batch includes the current head without adding synthetic entries to recorded changes.
+// Batch includes the supplied executed head without adding synthetic entries to recorded changes.
 // It shares recorded changes, which must stay unchanged until publication finishes.
 func (a *Accumulator) Batch(head *types.Header) *BlockBatchNotification {
 	batch := &BlockBatchNotification{

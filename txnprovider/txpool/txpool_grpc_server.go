@@ -24,7 +24,9 @@ import (
 
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
@@ -220,6 +222,9 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 	}
 	discardReasons, err := s.txPool.AddLocalTxns(ctx, slots)
 	if err != nil {
+		if errors.Is(err, errPoolNotReady) {
+			return nil, status.Error(codes.Unavailable, err.Error())
+		}
 		return nil, err
 	}
 

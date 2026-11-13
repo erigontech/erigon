@@ -19,7 +19,9 @@ package shutter
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -53,6 +55,22 @@ func (bl *BlockListener) Run(ctx context.Context) error {
 	defer bl.logger.Info("block listener stopped")
 	bl.logger.Info("running block listener")
 
+	for ctx.Err() == nil {
+		err := bl.listen(ctx)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		bl.logger.Warn("block listener subscription failed", "err", err)
+		if err := common.Sleep(ctx, 3*time.Second); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
+func (bl *BlockListener) listen(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	sub, err := bl.stateChangesClient.StateChanges(ctx, &remoteproto.StateChangeRequest{})
 	if err != nil {
 		return err

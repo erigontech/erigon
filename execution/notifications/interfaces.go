@@ -29,11 +29,6 @@ type StateChangeConsumer interface {
 	SendStateChanges(ctx context.Context, sc *remoteproto.StateChangeBatch)
 }
 
-// BlockBatchConsumer receives native-typed block notifications without protobuf conversion.
-type BlockBatchConsumer interface {
-	OnNewBlock(ctx context.Context, notification *BlockBatchNotification) error
-}
-
 // ChainEventNotifier is the interface for delivering chain events (new headers,
 // logs, receipts) to subscribers. Implemented by shards.Events.
 type ChainEventNotifier interface {

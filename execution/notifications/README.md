@@ -27,13 +27,16 @@ exec3 block execution (execution/stagedsync/exec3_serial.go, exec3_parallel.go)
 
 Dispatcher.Dispatch()  (execution/execmodule/notification_dispatcher.go)
   → prepareStateChanges()
-    → Accumulator.Batch(currentHeader)
+    → Accumulator.Batch(executedHeader)
     → set state version, pending fees, gas limit and finalized height
     → BlockBatchNotification.RefreshAccounts(state)
   → publish headers, receipts and logs
   → StateChangeConsumer.SendStateChanges(batch.ToProtoBatch())
   → Accumulator.Reset()
 ```
+
+Normal dispatch uses the header at Finish stage progress so the announced head
+matches the supplied state. Stored head markers can be ahead of execution.
 
 Preparation keeps recorded execution changes intact. Synthetic head entries and
 final account values are added only to the output batch. A preparation failure
@@ -70,8 +73,8 @@ StateChangeConsumer.SendStateChanges(StateChangeBatch)  [protobuf]
 TxPool uses transaction directions to track mined and unwound transactions, and
 account/storage/code changes to refresh sender state and invalidate frame validations.
 
-On subscription, the KV server reads a reset from committed execution state. Under
-the publication lock, it selects the newer of this reset and the latest published
+On subscription, the KV server reads a reset at committed Execution stage progress.
+Under the publication lock, it selects the newer of this reset and the latest published
 head, keeping the head and state version together. It sends that reset before later
 batches, including when the latest publication is still awaiting commit.
 
@@ -79,10 +82,11 @@ For incomplete batches, `RefreshAccounts` appends final values for addresses wit
 recorded account changes. This keeps older entries from overwriting current values
 in the RPC state cache, but it does not reconstruct omitted changes.
 
-The pool waits for committed state matching the announced version before refreshing
-all pooled senders and revalidating frames. If that version has been superseded,
-transaction membership changes are retained for a newer batch; obsolete account
-values are not applied.
+When the batch is incomplete or the pool's state view is stale, the pool waits for
+committed state matching the announced version before refreshing all pooled senders
+and revalidating frames. If that version has been superseded, transaction membership
+changes are retained for a newer batch; obsolete account values are not applied.
+Complete batches can be applied before commit while the pool has a usable state view.
 
 ### Consumer Summary
 

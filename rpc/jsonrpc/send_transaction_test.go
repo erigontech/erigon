@@ -116,10 +116,7 @@ type submissionReadTx struct {
 }
 
 func (tx *submissionReadTx) Rollback() {
-	if tx.db != nil {
-		tx.db.readers--
-		tx.db = nil
-	}
+	tx.db.readers--
 	tx.TemporalTx.Rollback()
 }
 
@@ -149,6 +146,7 @@ func TestSendRawTransactionReleasesReadBeforeAdmission(t *testing.T) {
 	_, err = api.SendRawTransaction(t.Context(), encoded.Bytes())
 	require.NoError(t, err)
 	require.True(t, called)
+	require.Zero(t, db.readers, "each database reader must be released exactly once")
 }
 
 func TestSendRawTransactionUnprotected(t *testing.T) {

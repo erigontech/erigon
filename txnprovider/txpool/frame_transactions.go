@@ -115,6 +115,10 @@ func (tx *TxnSlot) hasKeyedNonce() bool {
 // The caller must hold the pool lock to read the local transaction history.
 func (p *TxPool) splitRestoredTxns(txns TxnSlots) (ordinary, frames TxnSlots) {
 	for i, txn := range txns.Txns {
+		// Replayed notifications must not apply admission penalties to pooled transactions.
+		if p.byHash[string(txn.IDHash[:])] != nil {
+			continue
+		}
 		isLocal := p.isLocalLRU.Contains(string(txn.IDHash[:]))
 		if txn.TxType() == FrameTxnType {
 			frames.Append(txn, txns.Senders.At(i), isLocal)
@@ -234,19 +238,7 @@ func (p *TxPool) precheckFrame(txn *TxnSlot, isLocal bool, senderID uint64) fram
 // Head publication can precede pool updates. Waiting on the generation also
 // covers recovery and same-height reorgs without polling the backend.
 func (p *TxPool) waitForStateChange(ctx context.Context, generation uint64) bool {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	// Serialize cancellation with Wait so its wakeup cannot be lost.
-	stop := context.AfterFunc(ctx, func() {
-		p.lock.Lock()
-		p.lastSeenCond.Broadcast()
-		p.lock.Unlock()
-	})
-	defer stop()
-	for generation == p.stateGeneration && ctx.Err() == nil {
-		p.lastSeenCond.Wait()
-	}
-	return generation != p.stateGeneration
+	return p.waitForCondition(ctx, func() bool { return generation != p.stateGeneration })
 }
 
 // applyFrameValidation requires the pool lock. Stale batches and cleared sender
@@ -583,11 +575,45 @@ func (p *TxPool) parkFrameLocked(mt *metaTxn, reason string) {
 	}
 }
 
+type bogotaActivation struct {
+	active      bool
+	crossedBack bool
+}
+
+func (p *TxPool) RetainBogotaActivation(changes *remoteproto.StateChangeBatch) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	activation := p.bogotaActivationAfter(changes)
+	p.pendingActivation = &activation
+}
+
+func (p *TxPool) bogotaActivationAfter(changes *remoteproto.StateChangeBatch) bogotaActivation {
+	activation := bogotaActivation{active: p.headIsBogota}
+	if p.pendingActivation != nil {
+		activation = *p.pendingActivation
+	}
+	activeBefore := activation.active
+	// Forward history can overlap a subscription reset. Intermediate forward entries
+	// do not prove a reorg; an explicit unwind must survive later reactivation.
+	for _, change := range changes.ChangeBatch {
+		active := p.chainConfig.IsBogota(change.BlockTime)
+		if change.Direction == remoteproto.Direction_UNWIND && activation.active && !active {
+			activation.crossedBack = true
+		}
+		activation.active = active
+	}
+	// An incomplete reset may omit the unwind entries, but its final head still
+	// proves a crossing back before hardfork activation.
+	if changes.StateChangesIncomplete && activeBefore && !activation.active {
+		activation.crossedBack = true
+	}
+	return activation
+}
+
 // invalidateFrames drops expired transactions and parks those whose validation may be stale.
 // The caller holds the pool lock; revalidateFrames performs the EVM work later.
 func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*metaTxn {
 	head := changes.ChangeBatch[len(changes.ChangeBatch)-1]
-	wasBogota := p.headIsBogota
 	if len(p.all.senderIDFrameTxn) == 0 {
 		return nil
 	}
@@ -600,12 +626,8 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	accountChanges := make(map[common.Address][]byte)
 	nonceSlots := make(map[common.Hash]struct{})
 	rootSlots := make(map[common.Hash]struct{})
-	// Reactivation later in the batch must not hide an earlier activation unwind.
-	activationUnwound := false
+	activationCrossedBack := p.bogotaActivationAfter(changes).crossedBack
 	for _, batch := range changes.ChangeBatch {
-		isBogota := p.chainConfig.IsBogota(batch.BlockTime)
-		activationUnwound = activationUnwound || wasBogota && !isBogota
-		wasBogota = isBogota
 		for _, change := range batch.Changes {
 			address := gointerfaces.ConvertH160toAddress(change.Address)
 			touched[address] = struct{}{}
@@ -640,7 +662,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			roots = protocol.FrameTransactionRecentRoots(frame)
 		}
 		invalidRoots := slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
-			return activationUnwound || !ref.ValidAt(pendingSlot)
+			return activationCrossedBack || !ref.ValidAt(pendingSlot)
 		})
 		if invalidRoots {
 			p.removeFromSubPool(mt, "recent root no longer usable")

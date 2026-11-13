@@ -127,7 +127,7 @@ func benchmarkValidatePayload(b *testing.B, w workload, stateSize, blocksPerOp i
 				require.NoError(b, err)
 				require.Equal(b, execmodule.ExecutionStatusSuccess, status)
 
-				result, err := m.ValidateChain(ctx, block.Header())
+				result, err := m.ValidateChain(ctx, block)
 				require.NoError(b, err)
 				require.Equal(b, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
 				newPayload += time.Since(start)
