@@ -1654,10 +1654,7 @@ func TestEngineApiBALSameTxSelfdestructLieInvalid(t *testing.T) {
 			require.Equal(t, enginetypes.ValidStatus, newPayloadWithBAL(ctx, t, eat, payload, bal).Status)
 
 			c.BalanceChanges = nil
-			status := newPayloadWithBAL(ctx, t, eat, payload, bal)
-			// The re-creating tx reads the kept balance, so a stale read can fail the gas check before the BAL one.
-			require.Equalf(t, enginetypes.InvalidStatus, status.Status, "validation error: %v", status.ValidationError)
-			require.NotNil(t, status.ValidationError)
+			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
 		})
 	})
 }
