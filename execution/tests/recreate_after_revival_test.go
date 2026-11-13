@@ -48,7 +48,7 @@ func setExecWorkers(t *testing.T, workers int) {
 	ethconfig.Defaults.Sync.ExecWorkerCount = workers
 }
 
-// generatedBlockWant pins the root and gas of generated blocks, as the serial executor computes them.
+// generatedBlockWant pins the root and gas of generated blocks.
 // Generation and import share the versioned state code, so neither can check the other.
 var generatedBlockWant = map[string]struct {
 	root string

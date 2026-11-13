@@ -235,9 +235,8 @@ type ExecModule struct {
 	accum *Accumulation
 
 	// configuration
-	config          *chain.Config
-	syncCfg         ethconfig.Sync
-	experimentalBAL bool
+	config  *chain.Config
+	syncCfg ethconfig.Sync
 	// rules engine
 	engine         rules.Engine
 	balRegenerator *bal.Regenerator
@@ -291,7 +290,6 @@ func NewExecModule(
 	logger log.Logger,
 	engine rules.Engine,
 	syncCfg ethconfig.Sync,
-	experimentalBAL bool,
 	fcuBackgroundPrune bool,
 	onlySnapDownloadOnStart bool,
 	readAheader *exec.BlockReadAheader,
@@ -319,7 +317,6 @@ func NewExecModule(
 		engine:                  engine,
 		balRegenerator:          bal.NewRegenerator(blockReader, engine, logger),
 		syncCfg:                 syncCfg,
-		experimentalBAL:         experimentalBAL,
 		backgroundCtx:           ctx,
 		fcuBackgroundPrune:      fcuBackgroundPrune,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,

@@ -17,7 +17,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -342,7 +341,6 @@ type txExecutor struct {
 	cfg              ExecuteBlockCfg
 	rs               *state.StateV3Buffered
 	doms             *execctx.SharedDomains
-	u                Unwinder
 	isForkValidation bool
 	isApplyingBlocks bool
 	applyTx          kv.TemporalTx
@@ -390,10 +388,6 @@ func (te *txExecutor) logWrongTrieRoot(msg string) {
 	te.logger.Error(msg)
 }
 
-func (te *txExecutor) readState() *state.StateV3Buffered {
-	return te.rs
-}
-
 func (te *txExecutor) domains() *execctx.SharedDomains {
 	return te.doms
 }
@@ -403,27 +397,6 @@ func (te *txExecutor) domains() *execctx.SharedDomains {
 // so exec-side state writes do not compile — state writes are the apply loop's job.
 func (te *txExecutor) domainsRead() execctx.DomainReader {
 	return te.doms
-}
-
-func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header, err error) {
-	if te.applyTx != nil {
-		err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
-			h, err = te.cfg.blockReader.Header(ctx, te.applyTx, hash, number)
-			return err
-		})
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		if err := te.cfg.db.View(ctx, func(tx kv.Tx) (err error) {
-			h, err = te.cfg.blockReader.Header(ctx, tx, hash, number)
-			return err
-		}); err != nil {
-			return nil, err
-		}
-	}
-
-	return h, nil
 }
 
 // reconstructPriorReceipts re-derives receipts of a resumed block's prefix txs
@@ -644,8 +617,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			header := b.HeaderNoCopy()
 
 			// BlockContext: workers override GetHash with their own per-worker
-			// function (installWorkerGetHash) using their own roTx. The
-			// placeholder here uses execRoTx for the serial path fallback.
+			// function (installWorkerGetHash) using their own roTx; this
+			// placeholder uses execRoTx.
 			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 				return src.header(ctx, hash, number)
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
@@ -670,8 +643,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					Withdrawals:     b.Withdrawals(),
 					// use history reader instead of state reader to catch up to the tx where we left off
 					// Every task of a block that starts at or before the last frozen txNum reads history, so all of them
-					// seed origins from one pinned base. The serial executor keeps the per-tx condition: it skips
-					// ApplyStateWrites for historic tasks, so this one would drop a crossing block's suffix writes.
+					// seed origins from one pinned base.
 					HistoryExecution: lastFrozenTxNum > 0 && blockStartTxNum <= lastFrozenTxNum,
 					Config:           te.cfg.chainConfig,
 					Engine:           te.cfg.engine,
@@ -770,56 +742,6 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 	return nil
 }
 
-type FlushAndComputeCommitmentTimes struct {
-	Flush             time.Duration
-	ComputeCommitment time.Duration
-}
-
-// computeAndCheckCommitmentV3 - does write state to db and then check commitment
-func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
-	if header == nil {
-		return false, times, errors.New("header is nil")
-	}
-
-	start := time.Now()
-	// E2 state root check was in another stage - means we did flush state even if state root will not match
-	// And Unwind expecting it
-	if !parallel {
-		if err := e.Update(applyTx, header.Number.Uint64()); err != nil {
-			return false, times, err
-		}
-		// The SharedDomains flush on Commit bumps the state version for both executors.
-	}
-
-	if cfg.discardCommitment {
-		return true, times, nil
-	}
-
-	// Use applyTx, not a fresh BeginTemporalRo: Headers wrote MaxTxNum for
-	// header.Number to applyTx in this batch and a fresh RO snapshot would
-	// miss it, silently falling back to the previous block's max txNum via
-	// c.Last(). Pairing that stale txNum with header.Number in
-	// KeyCommitmentState makes the next iter's SeekCommitment loop back.
-	txNumsReader := cfg.blockReader.TxnumReader()
-	blockTxNum, err := txNumsReader.Max(ctx, applyTx, header.Number.Uint64())
-	if err != nil {
-		return false, times, err
-	}
-	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
-
-	times.ComputeCommitment = time.Since(start)
-	if err != nil {
-		return false, times, fmt.Errorf("compute commitment: %w", err)
-	}
-
-	if !bytes.Equal(computedRootHash, header.Root[:]) {
-		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root[:], header.Hash()))
-		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), applyTx, cfg, e, logger, u)
-		return false, times, err
-	}
-	return true, times, nil
-}
-
 // shouldMarkExhaustedAtBlock reports whether the per-cycle block-limit has been
 // crossed, marking the batch exhausted so the stage loop resumes from the next
 // block. On the initial cycle it holds off until at least one frozen step of
@@ -844,20 +766,9 @@ func shouldMarkExhaustedAtBlock(initialCycle bool, lastExecutedStep, lastFrozenS
 	return true
 }
 
-func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64) bool {
-	if cfg.syncCfg.AlwaysGenerateChangesets {
-		return true
-	}
-	if blockNum < cfg.blockReader.FrozenBlocks() {
-		return false
-	}
-	// Generate changesets for blocks within the reorg window of the batch end,
-	// so the node can handle reorgs at the tip.
-	return blockNum+cfg.syncCfg.MaxReorgDepth >= maxBlockNum
-}
-
 // changesetWindowStart returns the first block in [startBlockNum, maxBlockNum]
-// for which shouldGenerateChangeSets is true, or math.MaxUint64 when there is
+// that needs changesets (all of them with alwaysGenerateChangesets, else the unfrozen
+// blocks within maxReorgDepth of maxBlockNum), or math.MaxUint64 when there is
 // none. Parallel exec gates per-block changeset capture and the commitment
 // calculator's per-block mode on this boundary.
 func changesetWindowStart(alwaysGenerateChangesets bool, maxReorgDepth uint64, frozenBlocks uint64, startBlockNum uint64, maxBlockNum uint64) uint64 {
