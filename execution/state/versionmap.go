@@ -269,6 +269,9 @@ type VersionMap struct {
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
+	// balReads: BAL-listed paths read from bal, not from cells (NewBALReadVersionMap).
+	balReads bool
+	balCodes [][]balCode
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -833,6 +836,10 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 	if vm == nil {
 		return
 	}
+	if vm.balReads {
+		vm.applyBALFields(addr, txIdx, account)
+		return
+	}
 	e := vm.load(addr)
 	if e == nil {
 		return
@@ -922,6 +929,16 @@ func readFloorLife[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel 
 
 // ReadStorageLife is ReadStorage folded with the lifecycle verdict (one RLock).
 func (vm *VersionMap) ReadStorageLife(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, ReadResult, bool, lifecycleVerdict) {
+	if vm != nil && vm.balReads {
+		life := vm.balLife(addr, txIdx)
+		if v, res, ok := vm.balStorage(addr, key, txIdx); ok {
+			return v, res, true, life
+		}
+		if ov, seeded := vm.LoadOriginStorage(addr, key); seeded {
+			return ov, ReadResult{depIdx: originIndex}, true, life
+		}
+		return uint256.Int{}, balMiss(), false, life
+	}
 	val, res, ok, life := readFloorLife(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] {
 		if e.Storage == nil {
 			return nil
@@ -939,21 +956,38 @@ func (vm *VersionMap) ReadStorageLife(addr accounts.Address, key accounts.Storag
 
 // ReadNonceLife is ReadNonce folded with the lifecycle verdict (one RLock).
 func (vm *VersionMap) ReadNonceLife(addr accounts.Address, txIdx int) (uint64, ReadResult, bool, lifecycleVerdict) {
+	if vm != nil && vm.balReads {
+		v, res, ok := vm.balNonce(addr, txIdx)
+		return v, res, ok, vm.balLife(addr, txIdx)
+	}
 	return readFloorLife(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint64]] { return e.Nonce })
 }
 
 // ReadCodeLife is ReadCode folded with the lifecycle verdict (one RLock).
 func (vm *VersionMap) ReadCodeLife(addr accounts.Address, txIdx int) (accounts.Code, ReadResult, bool, lifecycleVerdict) {
+	if vm != nil && vm.balReads {
+		v, res, ok := vm.balCode(addr, txIdx)
+		return v, res, ok, vm.balLife(addr, txIdx)
+	}
 	return readFloorLife(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.Code]] { return e.Code })
 }
 
 // ReadCodeSizeLife is ReadCodeSize folded with the lifecycle verdict (one RLock).
 func (vm *VersionMap) ReadCodeSizeLife(addr accounts.Address, txIdx int) (int, ReadResult, bool, lifecycleVerdict) {
+	if vm != nil && vm.balReads {
+		v, res, ok := vm.balCode(addr, txIdx)
+		return v.Len(), res, ok, vm.balLife(addr, txIdx)
+	}
 	return readFloorLife(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[int]] { return e.CodeSize })
 }
 
 func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.Account, ReadResult, bool) {
 	val, res, ok := readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[*accounts.Account]] { return e.Address })
+	if vm != nil && vm.balReads {
+		if bacc, bres, bok := vm.balExistence(addr, txIdx); bok && (!ok || bres.depIdx > res.depIdx) {
+			return bacc, bres, true
+		}
+	}
 	if ok {
 		return val, res, true
 	}
@@ -971,10 +1005,16 @@ func (vm *VersionMap) ReadSelfDestruct(addr accounts.Address, txIdx int) (bool, 
 }
 
 func (vm *VersionMap) ReadBalance(addr accounts.Address, txIdx int) (uint256.Int, ReadResult, bool) {
+	if vm != nil && vm.balReads {
+		return vm.balBalance(addr, txIdx)
+	}
 	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] { return e.Balance })
 }
 
 func (vm *VersionMap) ReadNonce(addr accounts.Address, txIdx int) (uint64, ReadResult, bool) {
+	if vm != nil && vm.balReads {
+		return vm.balNonce(addr, txIdx)
+	}
 	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint64]] { return e.Nonce })
 }
 
@@ -983,14 +1023,25 @@ func (vm *VersionMap) ReadIncarnation(addr accounts.Address, txIdx int) (uint64,
 }
 
 func (vm *VersionMap) ReadCode(addr accounts.Address, txIdx int) (accounts.Code, ReadResult, bool) {
+	if vm != nil && vm.balReads {
+		return vm.balCode(addr, txIdx)
+	}
 	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.Code]] { return e.Code })
 }
 
 func (vm *VersionMap) ReadCodeHash(addr accounts.Address, txIdx int) (accounts.CodeHash, ReadResult, bool) {
+	if vm != nil && vm.balReads {
+		c, res, ok := vm.balCode(addr, txIdx)
+		return c.Hash, res, ok
+	}
 	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.CodeHash]] { return e.CodeHash })
 }
 
 func (vm *VersionMap) ReadCodeSize(addr accounts.Address, txIdx int) (int, ReadResult, bool) {
+	if vm != nil && vm.balReads {
+		c, res, ok := vm.balCode(addr, txIdx)
+		return c.Len(), res, ok
+	}
 	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[int]] { return e.CodeSize })
 }
 
@@ -999,6 +1050,15 @@ func (vm *VersionMap) ReadCreateContract(addr accounts.Address, txIdx int) (bool
 }
 
 func (vm *VersionMap) ReadStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, ReadResult, bool) {
+	if vm != nil && vm.balReads {
+		if v, res, ok := vm.balStorage(addr, key, txIdx); ok {
+			return v, res, true
+		}
+		if ov, seeded := vm.LoadOriginStorage(addr, key); seeded {
+			return ov, ReadResult{depIdx: originIndex}, true
+		}
+		return uint256.Int{}, balMiss(), false
+	}
 	val, res, ok := readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] {
 		if e.Storage == nil {
 			return nil
@@ -1596,6 +1656,9 @@ func (vm *VersionMap) WritesAlreadySeeded(addr accounts.Address, ws *WriteSet) b
 	if !vm.HasBAL {
 		return false
 	}
+	if vm.balReads {
+		return !writesAccountLifecycle(ws, addr)
+	}
 	// A net-zero write has no BAL cell, and a re-run may have dropped the cell a reader saw.
 	for _, vw := range ws.storage[addr] {
 		if vw.valStatus == ValueUnchanged {
@@ -1969,6 +2032,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string, recursive bool,
 ) VersionValidity {
+	if vm.balReads && !recursive && balReadPath(path) {
+		return VersionValid
+	}
 	if !recursive && source == MapRead && wipedByDestruct(path) {
 		// A field read wiped by a destruct is recorded at the destruct's version. It
 		// stays valid while that destruct holds and no later write revives the field.
