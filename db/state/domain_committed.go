@@ -50,15 +50,9 @@ func CommitmentBranchReferenced(fileVersion version.Version, stepSize, from, to 
 
 // commitmentVisibleFilesReferenced reports whether any visible commitment file is referenced.
 func (at *AggregatorRoTx) commitmentVisibleFilesReferenced() bool {
-	return at.d[kv.CommitmentDomain].commitmentVisibleFilesReferenced()
-}
-
-func (dt *DomainRoTx) commitmentVisibleFilesReferenced() bool {
-	if dt.name != kv.CommitmentDomain {
-		return false
-	}
-	for _, f := range dt.files {
-		if CommitmentBranchReferenced(f.Version(), dt.stepSize, f.startTxNum, f.endTxNum) {
+	stepSize := at.StepSize()
+	for _, f := range at.d[kv.CommitmentDomain].files {
+		if CommitmentBranchReferenced(f.Version(), stepSize, f.startTxNum, f.endTxNum) {
 			return true
 		}
 	}
