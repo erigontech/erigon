@@ -21,6 +21,7 @@
 package tracers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 
@@ -38,6 +39,8 @@ type Context struct {
 	TxIndex     int          // Index of the transaction within a block (zero if dangling txn or call)
 	TxHash      common.Hash  // Hash of the transaction being traced (zero if dangling call)
 	BlockNumber *uint256.Int // Number of the block (nil if dangling txn or call)
+
+	Ctx context.Context // Cancelled to stop a tracer constructor that runs client code (nil if it never stops)
 }
 
 // Tracer interface extends vm.EVMLogger and additionally

@@ -410,7 +410,8 @@ func requireV3RecordsMatchAccounts(t *testing.T, doms *execctx.SharedDomains, tx
 	it, err := tx.RangeAsOf(kv.CommitmentDomain, nil, nil, 1000, order.Asc, -1)
 	require.NoError(t, err)
 	defer it.Close()
-	hasher, matcher := v3.NewRecordHasher(), v3.NewRecordMatcher()
+	hasher, matcher := v3.NewRecordHasher(), v3.NewRecordMatcher(t.TempDir())
+	defer matcher.Close()
 	var stateRoot []byte
 	for it.HasNext() {
 		k, _, err := it.Next()

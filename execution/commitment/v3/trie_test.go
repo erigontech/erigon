@@ -689,7 +689,9 @@ func TestFoldParity(t *testing.T) {
 						}
 						got, err := fold(n, 0)
 						require.NoError(t, err)
-						require.Equal(t, branchRef(&refs), got)
+						want, err := branchRef(&refs)
+						require.NoError(t, err)
+						require.Equal(t, want, got)
 					}
 					require.Equal(t, want, foldPlaneRoot(t, n))
 				})
@@ -708,7 +710,8 @@ func TestFoldParity(t *testing.T) {
 		wrapped := extensionRef([]byte{3, 4}, stored)
 		refs[2] = wrapped[:]
 		refs[5] = hashLongRef(appendStorageLeafRLP(nil, nibbles.HexToCompact(append(append([]byte(nil), path[1:]...), nibbles.Terminator)), []byte{7}))
-		want := branchRef(&refs)
+		want, err := branchRef(&refs)
+		require.NoError(t, err)
 		require.Equal(t, want, got)
 	})
 	t.Run("E30/FoldRejectsUnknownPlane", func(t *testing.T) {
@@ -716,6 +719,21 @@ func TestFoldParity(t *testing.T) {
 		n.addLeaf(0, 1, 1)
 		_, err := fold(n, 0)
 		require.ErrorIs(t, err, errFoldPlane)
+	})
+	t.Run("E22/FoldRejectsInlinableStorageBranch", func(t *testing.T) {
+		n := newNode(planeStorage, bytes.Repeat([]byte{1}, 62)...)
+		n.addLeaf(0, 0, 1)
+		n.addLeaf(1, 0, 2)
+		_, err := fold(n, 1)
+		require.ErrorIs(t, err, errFoldNode)
+	})
+	t.Run("E30/FoldRejectsExtensionChildWithoutHash", func(t *testing.T) {
+		n := newNode(planeStorage)
+		n.setStoredChild(2, bytes.Repeat([]byte{0x31}, 32), []byte{3, 4})
+		n.hashMask &^= 1 << 2
+		n.addLeaf(5, 6, 7)
+		_, err := fold(n, 0)
+		require.ErrorIs(t, err, errFoldNode)
 	})
 }
 

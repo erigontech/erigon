@@ -17,12 +17,19 @@
 package v3
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
-	"slices"
+	"io"
+	"os"
 
+	"github.com/c2h5oh/datasize"
+
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/etl"
 )
 
 var errVerifyRecords = errors.New("commitment v3: record verification failed")
@@ -146,8 +153,12 @@ type storageRootExpectation struct {
 
 type RecordMatcher struct {
 	pending       map[string]pendingHash
-	roots         []storageRootExpectation
-	rootsPos      int
+	tmpdir        string
+	roots         *etl.Collector
+	rootsFile     *os.File
+	rootsReader   *bufio.Reader
+	root          storageRootExpectation
+	hasRoot       bool
 	storagePlane  bool
 	accountRoot   [32]byte
 	records       uint64
@@ -156,8 +167,24 @@ type RecordMatcher struct {
 	inTrie, live  bool
 }
 
-func NewRecordMatcher() *RecordMatcher {
-	return &RecordMatcher{pending: map[string]pendingHash{}, accountRoot: empty.RootHash}
+func NewRecordMatcher(tmpdir string) *RecordMatcher {
+	return newRecordMatcher(tmpdir, etl.BufferOptimalSize/8)
+}
+
+func newRecordMatcher(tmpdir string, buf datasize.ByteSize) *RecordMatcher {
+	roots := etl.NewCollector("commitment v3 verify", tmpdir, etl.NewSortableBuffer(buf), log.Root()).LogLvl(log.LvlTrace)
+	return &RecordMatcher{pending: map[string]pendingHash{}, tmpdir: tmpdir, roots: roots, accountRoot: empty.RootHash}
+}
+
+func (m *RecordMatcher) Close() {
+	m.roots.Close()
+	if m.rootsFile == nil {
+		return
+	}
+	name := m.rootsFile.Name()
+	m.rootsFile.Close()
+	m.rootsFile = nil
+	_ = dir.RemoveFile(name)
 }
 
 func isStorageRootKey(key []byte) bool {
@@ -169,11 +196,9 @@ func (m *RecordMatcher) Expect(key, hash []byte) error {
 		if m.storagePlane {
 			return fmt.Errorf("%w: storage root %x expected after the account plane", errVerifyRecords, key)
 		}
-		var e storageRootExpectation
-		copy(e.addrHash[:], key[1:33])
-		copy(e.root[:], hash)
-		m.roots = append(m.roots, e)
-		return nil
+		var root [32]byte
+		copy(root[:], hash)
+		return m.roots.Collect(key[1:33], root[:])
 	}
 	if key[0] == tagStorageNode {
 		if err := m.enterTrie(key[1:33]); err != nil || !m.live {
@@ -187,17 +212,60 @@ func (m *RecordMatcher) enterTrie(addrHash []byte) error {
 	if m.inTrie && bytes.Equal(m.trie[:], addrHash) {
 		return nil
 	}
-	if !m.storagePlane {
-		m.storagePlane = true
-		slices.SortFunc(m.roots, func(a, b storageRootExpectation) int { return bytes.Compare(a.addrHash[:], b.addrHash[:]) })
+	if err := m.startStoragePlane(); err != nil {
+		return err
 	}
-	if m.rootsPos < len(m.roots) && bytes.Compare(m.roots[m.rootsPos].addrHash[:], addrHash) < 0 {
-		return fmt.Errorf("%w: account %x has storage root %x but no storage trie", errVerifyRecords, m.roots[m.rootsPos].addrHash, m.roots[m.rootsPos].root)
+	if m.hasRoot && bytes.Compare(m.root.addrHash[:], addrHash) < 0 {
+		return fmt.Errorf("%w: account %x has storage root %x but no storage trie", errVerifyRecords, m.root.addrHash, m.root.root)
 	}
 	copy(m.trie[:], addrHash)
 	m.inTrie = true
-	m.live = m.rootsPos < len(m.roots) && bytes.Equal(m.roots[m.rootsPos].addrHash[:], addrHash)
+	m.live = m.hasRoot && bytes.Equal(m.root.addrHash[:], addrHash)
 	return nil
+}
+
+func (m *RecordMatcher) startStoragePlane() error {
+	if m.storagePlane {
+		return nil
+	}
+	m.storagePlane = true
+	f, err := os.CreateTemp(m.tmpdir, "commitment-v3-storage-roots-")
+	if err != nil {
+		return err
+	}
+	m.rootsFile = f
+	w := bufio.NewWriter(f)
+	if err := m.roots.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		if _, err := w.Write(k); err != nil {
+			return err
+		}
+		_, err := w.Write(v)
+		return err
+	}, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	m.roots.Close()
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	m.rootsReader = bufio.NewReader(f)
+	return m.nextRoot()
+}
+
+func (m *RecordMatcher) nextRoot() error {
+	_, err := io.ReadFull(m.rootsReader, m.root.addrHash[:])
+	if errors.Is(err, io.EOF) {
+		m.hasRoot = false
+		return nil
+	}
+	if err == nil {
+		_, err = io.ReadFull(m.rootsReader, m.root.root[:])
+	}
+	m.hasRoot = err == nil
+	return err
 }
 
 func (m *RecordMatcher) Record(key []byte, hash [32]byte) error {
@@ -217,11 +285,10 @@ func (m *RecordMatcher) Record(key []byte, hash [32]byte) error {
 		if !isStorageRootKey(key) {
 			return m.match(key, &hash, false)
 		}
-		if m.roots[m.rootsPos].root != hash {
-			return fmt.Errorf("%w: account %x stores storage root %x, storage trie folds to %x", errVerifyRecords, key[1:33], m.roots[m.rootsPos].root, hash)
+		if m.root.root != hash {
+			return fmt.Errorf("%w: account %x stores storage root %x, storage trie folds to %x", errVerifyRecords, key[1:33], m.root.root, hash)
 		}
-		m.rootsPos++
-		return nil
+		return m.nextRoot()
 	}
 	return m.match(key, &hash, false)
 }
@@ -246,9 +313,11 @@ func (m *RecordMatcher) match(key []byte, hash *[32]byte, expected bool) error {
 }
 
 func (m *RecordMatcher) Finish() (root [32]byte, records, orphans uint64, err error) {
-	if m.rootsPos < len(m.roots) {
-		e := m.roots[m.rootsPos]
-		return root, m.records, 0, fmt.Errorf("%w: account %x has storage root %x but no storage trie", errVerifyRecords, e.addrHash, e.root)
+	if err := m.startStoragePlane(); err != nil {
+		return root, m.records, 0, err
+	}
+	if m.hasRoot {
+		return root, m.records, 0, fmt.Errorf("%w: account %x has storage root %x but no storage trie", errVerifyRecords, m.root.addrHash, m.root.root)
 	}
 	orphans = m.orphanStorage
 	for key, p := range m.pending {

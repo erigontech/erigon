@@ -94,6 +94,8 @@ type v3Trie interface {
 	SetDeferCommitmentUpdates(bool)
 	TakeDeferredDeltas() [][]commitment.BranchDelta
 	SetStorageFanOutMin(int)
+	TraceCollapsesRoot(ctx context.Context, updates *commitment.Updates, tracer commitment.CollapseTracer) ([]byte, error)
+	BranchChildCount(read func([]byte) ([]byte, error), nibblePrefix []byte) (int, error)
 }
 
 type trieContextFactorySetter interface {
@@ -450,13 +452,9 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 	}
 }
 
-type collapseRootTracingTrie interface {
-	TraceCollapsesRoot(ctx context.Context, updates *commitment.Updates, tracer commitment.CollapseTracer) ([]byte, error)
-}
-
 func (sdc *SharedDomainsCommitmentContext) TraceCollapses(ctx context.Context, tx kv.TemporalTx, blockNum, txNum uint64, tracer commitment.CollapseTracer) (bool, []byte, error) {
 	sdc.trieContext(tx, blockNum, txNum, ctx, nil)
-	if t, ok := sdc.patriciaTrie.(collapseRootTracingTrie); ok {
+	if t, ok := sdc.patriciaTrie.(v3Trie); ok {
 		root, err := t.TraceCollapsesRoot(ctx, sdc.updates, tracer)
 		return true, root, err
 	}
@@ -489,9 +487,7 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte)
 		enc, _, err := stateReader.Read(kv.CommitmentDomain, key, sdc.sharedDomains.StepSize())
 		return enc, err
 	}
-	if t, ok := sdc.Trie().(interface {
-		BranchChildCount(read func([]byte) ([]byte, error), nibblePrefix []byte) (int, error)
-	}); ok {
+	if t, ok := sdc.patriciaTrie.(v3Trie); ok {
 		return t.BranchChildCount(read, nibblePrefix)
 	}
 	enc, err := read(nibbles.HexToCompact(nibblePrefix))
@@ -1042,9 +1038,9 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		}
 		return txNum, blockNum, nil
 	}
-	otherKey, otherErr := commitment.KeyCommitmentV3State, "the datadir holds commitment v3 records: start with COMMITMENT_V3=true"
+	otherKey, otherErr := commitment.KeyCommitmentV3State, "the datadir holds commitment v3 records: start erigon with --experimental.commitment-v3 (other tools: ERIGON_COMMITMENT_V3=true)"
 	if sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV3 {
-		otherKey, otherErr = KeyCommitmentState, "commitment v3 is enabled, but the datadir holds legacy commitment: convert it with `integration commitment convert --v3` first"
+		otherKey, otherErr = KeyCommitmentState, "commitment v3 is enabled, but the datadir holds legacy commitment: with ERIGON_COMMITMENT_V3 unset, convert it with `integration commitment convert --v3` first"
 	}
 	other, _, err := tx.GetLatest(kv.CommitmentDomain, otherKey, kv.GetLatestOptions{})
 	if err != nil {

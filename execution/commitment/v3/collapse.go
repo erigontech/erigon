@@ -419,3 +419,19 @@ func (c *recordCache) BranchOwned(prefix []byte) ([]byte, kv.Step, error) {
 func (c *recordCache) LeafRefs(key, data []byte) *commitment.LeafRefs {
 	return leafRefsOf(c.PatriciaContext, key, data)
 }
+
+type branchReader func(key []byte) ([]byte, error)
+
+func (r branchReader) Branch(key []byte) ([]byte, kv.Step, error) {
+	data, err := r(key)
+	return data, 0, err
+}
+
+func (t *Trie) BranchChildCount(read func([]byte) ([]byte, error), nibblePrefix []byte) (int, error) {
+	ctx := branchReader(read)
+	n, err := liveBranch(func(plane byte, addrHash, path []byte) (*node, error) { return unfold(ctx, path, plane, addrHash) }, nibblePrefix)
+	if err != nil || n == nil {
+		return 0, err
+	}
+	return bits.OnesCount16(n.childMask), nil
+}

@@ -37,7 +37,7 @@ func storageEntryOf(path []byte, update *commitment.Update) (storageEntry, error
 	switch {
 	case update.Deleted():
 		return storageEntry{path: path, deleted: true}, nil
-	case update.Flags&commitment.StorageUpdate == 0 || update.StorageLen < 0:
+	case update.Flags&commitment.StorageUpdate == 0 || update.StorageLen < 0 || int(update.StorageLen) > len(update.Storage):
 		return storageEntry{}, errPhaseAUpdate
 	}
 	return storageEntry{path: path, value: update.Storage[:update.StorageLen]}, nil

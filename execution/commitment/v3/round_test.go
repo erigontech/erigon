@@ -117,6 +117,11 @@ func TestPartition(t *testing.T) {
 		err := p.add(append(path(1), path(2)...), &commitment.Update{})
 		require.ErrorIs(t, err, errPhaseAUpdate)
 	})
+	t.Run("OversizedStorageLenIsInvalid", func(t *testing.T) {
+		p := &partitioner{}
+		err := p.add(append(path(1), path(2)...), &commitment.Update{Flags: commitment.StorageUpdate, StorageLen: 33})
+		require.ErrorIs(t, err, errPhaseAUpdate)
+	})
 	t.Run("E34/E63/PartitionFeedMatchesSerialPartition", func(t *testing.T) {
 		items := make([]feedEntry, 0, hashParallelMin*3)
 		for i := range hashParallelMin {

@@ -62,3 +62,34 @@ func TestParentStateServesOnlyPreBlockReads(t *testing.T) {
 	_, ok = p.GetCommittedStorage(stored, slotB)
 	require.False(t, ok, "a slot read only from an earlier tx's write is not parent state")
 }
+
+func TestParentStateServesOriginVersionReads(t *testing.T) {
+	seeded, written := accounts.InternAddress(common.Address{4}), accounts.InternAddress(common.Address{5})
+	slot, inBlock := accounts.InternKey(common.Hash{3}), accounts.InternKey(common.Hash{4})
+	pre := accounts.Account{Nonce: 3, Balance: *uint256.NewInt(30), CodeHash: accounts.EmptyCodeHash}
+	mid := accounts.Account{Nonce: 4, Balance: *uint256.NewInt(40), CodeHash: accounts.EmptyCodeHash}
+	fromOrigin := state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: -2}}
+	fromTx := state.ReadHeader{Source: state.MapRead, Version: state.Version{TxIndex: 0}}
+
+	io := state.NewVersionedIO(2)
+	var first state.ReadSet
+	first.SetAddress(seeded, state.VersionedRead[state.AccountView]{ReadHeader: fromOrigin, Val: state.NewAccountView(&pre)})
+	first.SetStorage(seeded, slot, state.VersionedRead[uint256.Int]{ReadHeader: fromOrigin, Val: *uint256.NewInt(5)})
+	io.RecordReads(state.Version{TxIndex: 0}, first)
+	var second state.ReadSet
+	second.SetAddress(written, state.VersionedRead[state.AccountView]{ReadHeader: fromTx, Val: state.NewAccountView(&mid)})
+	second.SetStorage(seeded, inBlock, state.VersionedRead[uint256.Int]{ReadHeader: fromTx, Val: *uint256.NewInt(6)})
+	io.RecordReads(state.Version{TxIndex: 1}, second)
+
+	p := parentStateFromReads(io)
+	acc, ok := p.GetCommittedAccount(seeded)
+	require.True(t, ok, "an origin-version read is the pre-block account")
+	require.Equal(t, pre, *acc)
+	val, ok := p.GetCommittedStorage(seeded, slot)
+	require.True(t, ok, "an origin-version read is the pre-block slot")
+	require.Equal(t, []byte{5}, val)
+	_, ok = p.GetCommittedAccount(written)
+	require.False(t, ok, "a map read of an in-block write is not parent state")
+	_, ok = p.GetCommittedStorage(seeded, inBlock)
+	require.False(t, ok, "a map read of an in-block slot write is not parent state")
+}

@@ -161,7 +161,8 @@ func Validate(data []byte, depth int) error {
 		}
 		return nil
 	}
-	if data[0]&hdrHasSelfExt != 0 {
+	selfExt := data[0]&hdrHasSelfExt != 0
+	if selfExt {
 		if len(data) < 2 {
 			return ErrRecordTruncated
 		}
@@ -182,11 +183,11 @@ func Validate(data []byte, depth int) error {
 		return ErrRecordTruncated
 	}
 	child, leaf, ext := l.child, l.leaf, l.ext
-	if child == 0 || (depth != 0 && bits.OnesCount16(child) < 2) || leaf&^child != 0 || ext&leaf != 0 || ext&^child != 0 {
+	if child == 0 || (!selfExt && bits.OnesCount16(child) < 2) || leaf&^child != 0 || ext&leaf != 0 || ext&^child != 0 {
 		return ErrRecordMasks
 	}
-	if data[0]&hdrHasSelfExt != 0 && (depth != 0 || bits.OnesCount16(child) != 1) {
-		return fmt.Errorf("%w: self extension needs depth 0 and one child", ErrRecordRoot)
+	if selfExt && (depth != 0 || bits.OnesCount16(child) != 1 || leaf != 0 || ext != 0) {
+		return fmt.Errorf("%w: self extension needs depth 0 and one non-leaf child without an extension", ErrRecordRoot)
 	}
 	off := l.trailerStart()
 	if off > len(data) {

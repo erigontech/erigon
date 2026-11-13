@@ -23,12 +23,14 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -867,6 +869,7 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 // Unwind drops [txNumUnwindTo, ∞)
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
+	sd.unwindCollectedTouches(changeset)
 	if !sd.localCacheUnwind {
 		sd.invalidateCaches(txNumUnwindTo)
 		if sd.branchCache != nil && changeset != nil {
@@ -876,6 +879,36 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 		}
 	}
 	sd.stageCacheUnwind(txNumUnwindTo)
+}
+
+func (sd *SharedDomains) unwindCollectedTouches(diffs *[kv.DomainLen][]kv.DomainEntryDiff) {
+	updates := sd.sdCtx.GetUpdates()
+	if updates.Mode() != commitment.ModeCollect {
+		return
+	}
+	retouch := func(key string) {
+		domain := kv.StorageDomain
+		if len(key) == length.Addr {
+			domain = kv.AccountsDomain
+		}
+		if v, _, _, ok := sd.latestFromMem(domain, []byte(key)); ok {
+			sd.sdCtx.TouchKey(domain, key, v)
+		}
+	}
+	if diffs == nil {
+		for _, key := range updates.UntouchAll() {
+			retouch(key)
+		}
+		return
+	}
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		for _, diff := range diffs[d] {
+			key := diff.Key[:len(diff.Key)-8]
+			if updates.Untouch(key) {
+				retouch(strings.Clone(key))
+			}
+		}
+	}
 }
 
 func (sd *SharedDomains) invalidateCaches(txNum uint64) {
@@ -2082,11 +2115,18 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 		return changes, err
 	}
 	defer it.Close()
-	var k []byte
+	var k, prev []byte
 	for it.HasNext() {
 		k, _, err = it.Next()
 		if err != nil {
 			return changes, err
+		}
+		if sd.commitmentV3 {
+			if bytes.Equal(k, prev) {
+				changes++
+				continue
+			}
+			prev = append(prev[:0], k...)
 		}
 		if !sd.disableInlineTouchKey {
 			if err := sd.GetCommitmentContext().TouchKeyFromState(tx, k); err != nil {

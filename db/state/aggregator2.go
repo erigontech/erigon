@@ -224,11 +224,13 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 		if dirPath == d.SnapDomain || dirPath == d.SnapHistory {
 			err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
 				if statecfg.Schema.CommitmentDomain.CommitmentV3Records && major < 3 {
-					return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; "+
-						"convert the datadir with `integration commitment convert --v3`", name, major)
+					return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; with ERIGON_COMMITMENT_V3 unset, "+
+						"convert the datadir with `integration commitment convert --v3`, "+
+						"or roll back an interrupted conversion with `integration commitment convert --restore`", name, major)
 				}
 				if !statecfg.ExperimentalCommitmentV3 && major >= 3 {
-					return fmt.Errorf("commitment file %s requires commitment v3; run with COMMITMENT_V3=true", name)
+					return fmt.Errorf("commitment file %s requires commitment v3; run erigon with --experimental.commitment-v3 (other tools: ERIGON_COMMITMENT_V3=true), "+
+						"or roll back an interrupted conversion with `integration commitment convert --restore`", name)
 				}
 				return nil
 			})

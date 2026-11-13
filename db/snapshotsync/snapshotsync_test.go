@@ -317,6 +317,7 @@ func TestLegacyCommitmentFiles(t *testing.T) {
 		{Name: "idx/v2.0-commitment.16-32.ef"},
 		{Name: "history/v3.0-commitment.32-48.v"},
 		{Name: "idx/v2.0-commitment.32-48.ef"},
+		{Name: "idx/v2.0-commitment.48-64.ef"},
 		{Name: "domain/v2.0-accounts.0-16.kv"},
 		{Name: "domain/v2.0-accounts.0-16.bt"},
 		{Name: "domain/v2.0-storage.0-16.kv"},
@@ -339,7 +340,7 @@ func TestLegacyCommitmentFiles(t *testing.T) {
 				want := map[string]bool{}
 				var names []string
 				if v3 {
-					names = []string{"domain/v2.2-commitment.0-16.kv", "domain/v2.0-commitment.0-16.kvi", "domain/v2.2-commitment.16-32.kv", "history/v2.0-commitment.0-16.v", "idx/v2.0-commitment.0-16.ef", "accessor/v2.0-commitment.0-16.vi", "history/v2.0-commitment.16-32.v", "domain/v2.0-accounts.0-16.kv", "domain/v2.0-accounts.0-16.bt", "domain/v2.0-storage.0-16.kv", "domain/v2.0-storage.0-16.kvei"}
+					names = []string{"domain/v2.2-commitment.0-16.kv", "domain/v2.0-commitment.0-16.kvi", "domain/v2.2-commitment.16-32.kv", "history/v2.0-commitment.0-16.v", "idx/v2.0-commitment.0-16.ef", "accessor/v2.0-commitment.0-16.vi", "history/v2.0-commitment.16-32.v", "idx/v2.0-commitment.48-64.ef", "domain/v2.0-accounts.0-16.kv", "domain/v2.0-accounts.0-16.bt", "domain/v2.0-storage.0-16.kv", "domain/v2.0-storage.0-16.kvei"}
 				} else {
 					names = []string{"domain/v3.0-commitment.16-32.kv", "domain/v3.0-commitment.32-48.kv", "domain/v2.0-commitment.32-48.bt", "history/v3.0-commitment.16-32.v", "history/v3.0-commitment.32-48.v", "idx/v2.0-commitment.32-48.ef"}
 				}
@@ -357,6 +358,16 @@ func TestLegacyCommitmentFiles(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestCommitmentFilterKeepsARealManifestWithV3Off(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	cfg, ok := snapcfg.KnownCfg(networkname.Mainnet)
+	require.True(t, ok)
+	require.True(t, slices.ContainsFunc(cfg.Preverified.Items, func(p snapcfg.PreverifiedItem) bool {
+		return strings.Contains(p.Name, "commitment.")
+	}))
+	require.Empty(t, incompatibleCommitmentFiles(cfg.Preverified.Items, 0))
 }
 
 // TestBuildBlackListForPruning_CommitmentHistory locks down the commitment
@@ -832,6 +843,12 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 		{name: "v3 on a datadir converted below the state tip", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv"}, wantFile: ".16-32."},
 		{name: "v3 code above a converted datadir", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv", "v3.0-commitment.16-32.kv"}, extraFiles: []string{"domain/v2.0-code.32-48.kv"}, wantFile: "steps 32-48"},
 		{name: "v3 off legacy only"},
+		{name: "v3 off with a v3-only range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v2.0-accounts.32-48.kv"}, wantFile: ".32-48."},
+		{name: "v3 off with a v3-only range below a legacy range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v2.0-accounts.32-48.kv", "domain/v2.2-commitment.48-64.kv", "domain/v2.0-accounts.48-64.kv"}, wantFile: ".32-48."},
+		{name: "v3 off with v3 commitment split across one accounts range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v3.0-commitment.48-64.kv", "domain/v2.0-accounts.32-64.kv"}, wantFile: ".32-64."},
+		{name: "v3 off with v3 commitment split across one accounts range below a legacy range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v3.0-commitment.48-64.kv", "domain/v2.0-accounts.32-64.kv", "domain/v2.2-commitment.64-80.kv", "domain/v2.0-accounts.64-80.kv"}, wantFile: ".32-64."},
+		{name: "v3 off with code above every legacy commitment", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v2.0-code.32-48.kv"}, wantFile: "steps 32-48"},
+		{name: "v3 off with a commitment index past every history file", extraFiles: []string{"idx/v2.0-commitment.32-48.ef"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
@@ -860,15 +877,18 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 				if len(tc.localFiles) > 0 {
 					remedy = "--snap.skip-state-snapshot-download"
 				}
+				if !tc.v3 {
+					remedy = "run with `--experimental.commitment-v3`"
+				}
 				require.ErrorContains(t, err, remedy)
 				require.ErrorContains(t, err, tc.wantFile)
 				require.Empty(t, downloader.names)
 				return
 			}
 			require.NoError(t, err)
-			want := legacyFiles
+			want := append(slices.Clone(legacyFiles), tc.extraFiles...)
 			if tc.v3 {
-				want = slices.DeleteFunc(slices.Clone(legacyFiles), func(name string) bool {
+				want = slices.DeleteFunc(want, func(name string) bool {
 					return strings.Contains(name, kv.CommitmentDomain.String())
 				})
 			}

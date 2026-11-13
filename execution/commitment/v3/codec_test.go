@@ -406,7 +406,7 @@ func TestRecordCodec(t *testing.T) {
 				self = extFixture([]byte{1})
 			}
 			data := commitmenttest.Record(&commitmenttest.RecordSpec{Flags: flags, ChildMask: child, ExtensionMask: ext, SelfExtension: self, Extensions: extAt})
-			wantErr := flags&hdrHasEmb != 0
+			wantErr := flags&hdrHasEmb != 0 || flags&(hdrHasSelfExt|hdrHasChildExt) == hdrHasSelfExt|hdrHasChildExt
 			t.Run(string(rune('a'+combination)), func(t *testing.T) {
 				err := Validate(data, depth)
 				require.Equal(t, wantErr, err != nil)
@@ -494,6 +494,9 @@ func TestRecordCodec(t *testing.T) {
 			{name: "leaf root and self extension", data: append([]byte{hdrIsLeafRoot | hdrHasSelfExt}, make([]byte, 33)...), depth: 0, want: ErrRecordRoot},
 			{name: "self extension odd padding", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 1, SelfExtension: []byte{3, 0x12, 0x31}}), depth: 0, want: ErrRecordTrailer},
 			{name: "self extension has two children", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 3, SelfExtension: extFixture([]byte{1})}), depth: 0, want: ErrRecordRoot},
+			{name: "self extension over a leaf", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, ChildMask: 1, LeafMask: 1, SelfExtension: extFixture([]byte{1}), Leaves: [16]commitmenttest.Leaf{0: {Suffix: packPath(bytes.Repeat([]byte{1}, 63), nil), Value: []byte{1}}}}), depth: 0, want: ErrRecordRoot},
+			{name: "self extension and child extension", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt | hdrHasChildExt, ChildMask: 1, ExtensionMask: 1, SelfExtension: extFixture([]byte{1}), Extensions: [16][]byte{0: extFixture([]byte{2})}}), depth: 0, want: ErrRecordRoot},
+			{name: "root branch has one child", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 1, ExtensionMask: 1, Extensions: [16][]byte{0: extFixture([]byte{1})}}), depth: 0, want: ErrRecordMasks},
 			{name: "short extension trailer", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasChildExt, ChildMask: 3, ExtensionMask: 1, Extensions: [16][]byte{0: {3, 0x12}}}), depth: 3, want: ErrRecordTruncated},
 			{name: "embedded flag", data: commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasEmb, ChildMask: 1}), depth: 3, want: ErrRecordFormat},
 		}
@@ -680,16 +683,16 @@ func TestConsensusHash(t *testing.T) {
 		var refs [16][]byte
 		refs[1] = bytes.Repeat([]byte{0x11}, 32)
 		refs[14] = bytes.Repeat([]byte{0x22}, 32)
-		got := branchRef(&refs)
+		got, err := branchRef(&refs)
+		require.NoError(t, err)
 		require.Equal(t, common.Hex2Bytes("c7c2cc5c8eba62b7ff0b998ee46c6cc41075ee8d2dbefa0fa4b26bdb2530f272"), got[:])
 	})
 	t.Run("E22/BranchRefRejectsInlinableBranch", func(t *testing.T) {
 		var refs [16][]byte
 		refs[0] = []byte{0xc1, 0x01}
 		refs[1] = []byte{0xc1, 0x02}
-		require.PanicsWithValue(t, "commitment v3: inlinable branch child", func() {
-			branchRef(&refs)
-		})
+		_, err := branchRef(&refs)
+		require.ErrorIs(t, err, errFoldNode)
 	})
 	t.Run("E22/BranchRefAllowsOrdinaryBranches", func(t *testing.T) {
 		for childCount := 2; childCount <= 16; childCount++ {
@@ -698,7 +701,8 @@ func TestConsensusHash(t *testing.T) {
 				for i := range childCount {
 					refs[i] = bytes.Repeat([]byte{byte(i + 1)}, 32)
 				}
-				require.NotPanics(t, func() { branchRef(&refs) })
+				_, err := branchRef(&refs)
+				require.NoError(t, err)
 			})
 		}
 	})
@@ -782,18 +786,18 @@ func TestValidateRejectsUnsafeDepths(t *testing.T) {
 	t.Run("depth 64", func(t *testing.T) {
 		data := commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1, LeafMask: 1, Leaves: [16]commitmenttest.Leaf{0: {Suffix: bytes.Repeat([]byte{1}, 31), Value: []byte{2}}}})
 		require.NotPanics(t, func() {
-			require.Error(t, Validate(data, 64))
+			require.ErrorIs(t, Validate(data, 64), ErrRecordRoot)
 		})
 	})
 
 	t.Run("child extension reaches suffix", func(t *testing.T) {
 		data := commitmenttest.Record(&commitmenttest.RecordSpec{
 			Flags:         hdrHasChildExt,
-			ChildMask:     1,
+			ChildMask:     0b11,
 			ExtensionMask: 1,
 			Extensions:    [16][]byte{0: extFixture(bytes.Repeat([]byte{1}, 63))},
 		})
-		require.Error(t, Validate(data, 0))
+		require.ErrorIs(t, Validate(data, 0), ErrRecordTrailer)
 	})
 
 	t.Run("self extension over 63", func(t *testing.T) {
@@ -813,7 +817,7 @@ func TestEnumerateRecordChildrenRejectsUnsafeDepth(t *testing.T) {
 	require.NotPanics(t, func() {
 		err = enumerateRecordChildren(nil, [32]byte{}, nil, data, 64, &records)
 	})
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrRecordRoot)
 }
 
 func TestComputeLeafRefsSkipsInlineStorageLeaves(t *testing.T) {
