@@ -146,6 +146,9 @@ var (
 	ReadAheadWait                 = EnvBool("READ_AHEAD_WAIT", false)
 	ReadAheadBALCode              = EnvBool("READ_AHEAD_BAL_CODE", false)
 	ReadAheadTxCode               = EnvBool("READ_AHEAD_TX_CODE", false)
+	StubExecNoFill                = EnvBool("STUB_EXEC_NOFILL", false)
+	StubWarmNoSeed                = EnvBool("STUB_WARM_NOSEED", false)
+	StubCachePresize              = EnvInt("STUB_CACHE_PRESIZE", 0)
 	FilesBlockingAsyncIO          = EnvBool("FILES_BLOCKING_ASYNC_IO", false)
 	FilesBlockingAsyncIOMultiPage = EnvBool("FILES_BLOCKING_ASYNC_IO_MULTI_PAGE", true)
 

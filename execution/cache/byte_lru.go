@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cachebudget"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -125,8 +126,9 @@ func NewByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64) 
 
 func newOtter[V any](maxWeight int64, weigh func(uint64, V) int64, onDeletion func(otter.DeletionEvent[uint64, V])) *otter.Cache[uint64, V] {
 	return otter.Must(&otter.Options[uint64, V]{
-		MaximumWeight: uint64(maxWeight),
-		Weigher:       func(k uint64, v V) uint32 { return uint32(min(weigh(k, v), math.MaxUint32)) },
+		MaximumWeight:   uint64(maxWeight),
+		InitialCapacity: dbg.StubCachePresize,
+		Weigher:         func(k uint64, v V) uint32 { return uint32(min(weigh(k, v), math.MaxUint32)) },
 		// Atomic: called inside the delete itself, so otter allocates no event per
 		// eviction to hand to the executor.
 		OnAtomicDeletion: onDeletion,
