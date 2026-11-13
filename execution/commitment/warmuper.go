@@ -208,6 +208,9 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 	}
 }
 
+// FoldStarts is a dbg probe counter: incremented when a commitment computation starts.
+var FoldStarts atomic.Uint64
+
 func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int, gen uint64) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return

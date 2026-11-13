@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -105,6 +106,9 @@ func (*balCommitmentContext) Storage([]byte) (*commitment.Update, error) {
 	return nil, errors.New("BAL commitment warmup does not read storage")
 }
 
+// stubWarmStopAtFold is a dbg bound: the BAL trie warmup stops when the block's fold starts.
+var stubWarmStopAtFold = dbg.EnvBool("STUB_WARM_STOP_AT_FOLD", false)
+
 // warmBALCommitment warms the trie branches of keys, the BAL's balCommitmentWarmupKeys.
 func warmBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte, workers int) error {
 	if err := ctx.Err(); err != nil {
@@ -127,6 +131,20 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte, workers i
 		LogPrefix:  "BAL",
 	})
 	warmuper.Start()
+	if stubWarmStopAtFold {
+		g0, done := commitment.FoldStarts.Load(), make(chan struct{})
+		defer close(done)
+		go func() {
+			for commitment.FoldStarts.Load() == g0 {
+				select {
+				case <-done:
+					return
+				case <-time.After(200 * time.Microsecond):
+				}
+			}
+			warmuper.Close()
+		}()
+	}
 	var previous []byte
 	for _, key := range keys {
 		startDepth := 0
