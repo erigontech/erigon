@@ -101,7 +101,6 @@ func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 	}
 
 	limit := attestingIndicesLimit
-	// A beacon body sets the fork after decoding its zero-value attestations.
 	if i.AttestingIndices != nil {
 		limit = i.AttestingIndices.Cap()
 		if len(tmp.AttestingIndices) > limit {
