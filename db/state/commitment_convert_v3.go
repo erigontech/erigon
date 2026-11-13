@@ -726,7 +726,7 @@ func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOfTxNum uint64) (Com
 		it = stream.UnionKV(hist, latest, -1)
 	}
 	defer it.Close()
-	c, state, err := foldCommitmentV3Records(ctx, it)
+	c, state, err := foldCommitmentV3Records(ctx, a.dirs.Tmp, it)
 	if err != nil {
 		return CommitmentV3Check{}, err
 	}
@@ -744,7 +744,7 @@ func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOfTxNum uint64) (Com
 	return c, nil
 }
 
-func foldCommitmentV3Records(ctx context.Context, it stream.KV) (CommitmentV3Check, []byte, error) {
+func foldCommitmentV3Records(ctx context.Context, tmpdir string, it stream.KV) (CommitmentV3Check, []byte, error) {
 	workers := max(1, runtime.GOMAXPROCS(0))
 	in := make(chan *kvBatch, workers*2)
 	out := make(chan *hashedBatch, workers*2)
@@ -816,7 +816,8 @@ func foldCommitmentV3Records(ctx context.Context, it stream.KV) (CommitmentV3Che
 		}
 		return nil
 	}, func() { close(out) })
-	matcher := v3.NewRecordMatcher()
+	matcher := v3.NewRecordMatcher(tmpdir)
+	defer matcher.Close()
 	g.Go(func() error {
 		waiting := map[uint64]*hashedBatch{}
 		var next uint64

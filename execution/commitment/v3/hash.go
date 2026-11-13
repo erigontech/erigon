@@ -73,13 +73,13 @@ func extensionRef(ext []byte, childHash []byte) [32]byte {
 	return keccak.Sum256(appendExtensionRLP(scratch[:0], ext, childHash))
 }
 
-func branchRef(refs *[16][]byte) [32]byte {
+func branchRef(refs *[16][]byte) ([32]byte, error) {
 	var scratch [refScratch]byte
 	encoded := appendBranchRLP(scratch[:0], refs)
 	if len(encoded) < 32 {
-		panic("commitment v3: inlinable branch child")
+		return [32]byte{}, fmt.Errorf("%w: inlinable branch", errFoldNode)
 	}
-	return keccak.Sum256(encoded)
+	return keccak.Sum256(encoded), nil
 }
 
 func appendBranchRLP(dst []byte, refs *[16][]byte) []byte {

@@ -491,10 +491,12 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	}
 	var cold coldState
 	if mmap.NewProbe() != nil {
-		group.Go(func() error {
-			prefetchBALCommitment(ctx, db, trieKeys())
-			return nil
-		})
+		if !statecfg.ExperimentalCommitmentV3 {
+			group.Go(func() error {
+				prefetchBALCommitment(ctx, db, trieKeys())
+				return nil
+			})
+		}
 		cold = stateKeysCold(ctx, db, bal)
 	}
 	group.Go(func() error {

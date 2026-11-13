@@ -569,6 +569,34 @@ func TestConvertPhase3RestoreKeepsUnmovedDomainFile(t *testing.T) {
 	}
 }
 
+func TestConvertPhase3RestoreKeepsEveryRange(t *testing.T) {
+	dirs := datadir.Open(t.TempDir())
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	rangeFiles := []string{
+		"v2.0-commitment.0-16.bt",
+		"v2.0-commitment.0-16.kv",
+		"v2.0-commitment.16-32.bt",
+		"v2.0-commitment.16-32.kv",
+	}
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+	for _, name := range rangeFiles {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), []byte("ORIG_"+name), 0o644))
+	}
+	blocked := filepath.Join(backupDir, rangeFiles[3])
+	require.NoError(t, os.MkdirAll(blocked, 0o755))
+
+	moved, err := convertPhase3(dirs.SnapDomain, backupDir, []commitmentHistoryRange{{fromStep: 0, toStep: 16}, {fromStep: 16, toStep: 32}})
+	require.Error(t, err)
+	require.Equal(t, 3, moved)
+	require.NoError(t, dir.RemoveFile(blocked))
+
+	_, err = RestoreCommitmentFiles(t.Context(), dirs, log.New())
+	require.NoError(t, err)
+	for _, name := range rangeFiles {
+		require.Equal(t, []byte("ORIG_"+name), readFileBytesForTest(t, filepath.Join(dirs.SnapDomain, name)))
+	}
+}
+
 func TestConvertPhase3RestoreKeepsUnmovedHistoryAccessor(t *testing.T) {
 	dirs := datadir.Open(t.TempDir())
 	backupRoot := filepath.Join(dirs.Snap, "backup")

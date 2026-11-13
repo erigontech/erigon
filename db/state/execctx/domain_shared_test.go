@@ -2119,6 +2119,58 @@ func TestTouchChangedKeysFromHistoryRestoresTheStoredRoot(t *testing.T) {
 	}
 }
 
+func TestUnwindRevertsCollectedTouches(t *testing.T) {
+	below, above := common.HexToAddress("0x01"), common.HexToAddress("0x8000000000000000000000000000000000000002")
+	location := common.HexToHash("0x03")
+	slot := bytes.Join([][]byte{below[:], location[:]}, nil)
+	balance := func(b uint64) []byte {
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(b)
+		return accounts.SerialiseV3(&acc)
+	}
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(v3))
+			ctx := t.Context()
+			open := func() (*execctx.SharedDomains, kv.TemporalRwTx) {
+				rw, err := newTestDb(t, 1).BeginTemporalRw(ctx)
+				require.NoError(t, err)
+				t.Cleanup(rw.Rollback)
+				sd, err := execctx.NewSharedDomains(ctx, rw, log.New())
+				require.NoError(t, err)
+				t.Cleanup(sd.Close)
+				return sd, rw
+			}
+			writeBelow := func(sd *execctx.SharedDomains, rw kv.TemporalRwTx) {
+				require.NoError(t, sd.DomainPut(kv.AccountsDomain, rw, below[:], balance(1), 1, nil))
+				require.NoError(t, sd.DomainPut(kv.StorageDomain, rw, slot, []byte{5}, 1, nil))
+			}
+
+			post, postRw := open()
+			writeBelow(post, postRw)
+			want, err := post.ComputeCommitment(ctx, postRw, false, 1, 1, "", nil)
+			require.NoError(t, err)
+
+			sd, rw := open()
+			writeBelow(sd, rw)
+			unwound := &changeset.StateChangeSet{}
+			sd.SetChangesetAccumulator(unwound)
+			require.NoError(t, sd.DomainPut(kv.AccountsDomain, rw, below[:], balance(3), 2, nil))
+			require.NoError(t, sd.DomainPut(kv.StorageDomain, rw, slot, []byte{7}, 2, nil))
+			require.NoError(t, sd.DomainPut(kv.AccountsDomain, rw, above[:], balance(2), 2, nil))
+			var diffs [kv.DomainLen][]kv.DomainEntryDiff
+			for d := range unwound.Diffs {
+				diffs[d] = unwound.Diffs[d].GetDiffSet()
+			}
+			sd.Unwind(2, &diffs)
+
+			got, err := sd.ComputeCommitment(ctx, rw, false, 1, 1, "", nil)
+			require.NoError(t, err)
+			require.Equal(t, want, got, "the fold after an unwind sees the post-unwind state")
+		})
+	}
+}
+
 func TestPickTrieVariant(t *testing.T) {
 	for _, tc := range []struct {
 		parallel, v3 bool

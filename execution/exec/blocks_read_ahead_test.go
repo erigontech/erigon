@@ -334,12 +334,25 @@ func TestWarmBALPropagatesWorkerCancellation(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+type prefetchRecordingTx struct {
+	commitmentRecordingTx
+}
+
+func (tx *prefetchRecordingTx) AggTx() any { return tx }
+
+func (tx *prefetchRecordingTx) PrefetchLatest(_ context.Context, domain kv.Domain, _ [][]byte) (int, error) {
+	tx.mu.Lock()
+	tx.domains = append(tx.domains, domain)
+	tx.mu.Unlock()
+	return 0, nil
+}
+
 func TestWarmBALSkipsCommitmentWarmupOnV3(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(true))
 	defer func(v int) { dbg.TrieBALWarmupers = v }(dbg.TrieBALWarmupers)
 	dbg.TrieBALWarmupers = 2
 
-	tx := new(commitmentRecordingTx)
+	tx := new(prefetchRecordingTx)
 	db := &singleTxRoDB{tx: tx}
 	bal := types.BlockAccessList{{
 		Address:        common.Address{19: 2},

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -867,6 +868,7 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 // Unwind drops [txNumUnwindTo, ∞)
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
+	sd.unwindCollectedTouches(changeset)
 	if !sd.localCacheUnwind {
 		sd.invalidateCaches(txNumUnwindTo)
 		if sd.branchCache != nil && changeset != nil {
@@ -876,6 +878,28 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 		}
 	}
 	sd.stageCacheUnwind(txNumUnwindTo)
+}
+
+func (sd *SharedDomains) unwindCollectedTouches(diffs *[kv.DomainLen][]kv.DomainEntryDiff) {
+	updates := sd.sdCtx.GetUpdates()
+	if diffs == nil || updates.Mode() != commitment.ModeCollect {
+		return
+	}
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		domain := kv.AccountsDomain
+		if d == kv.StorageDomain {
+			domain = kv.StorageDomain
+		}
+		for _, diff := range diffs[d] {
+			key := diff.Key[:len(diff.Key)-8]
+			if !updates.Untouch(key) {
+				continue
+			}
+			if v, _, _, ok := sd.latestFromMem(domain, []byte(key)); ok {
+				sd.sdCtx.TouchKey(domain, strings.Clone(key), v)
+			}
+		}
+	}
 }
 
 func (sd *SharedDomains) invalidateCaches(txNum uint64) {

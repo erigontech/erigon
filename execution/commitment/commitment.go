@@ -1731,6 +1731,15 @@ func (t *Updates) Drain(fn func(plainKey string, update *Update) error) error {
 	return nil
 }
 
+func (t *Updates) Untouch(plainKey string) bool {
+	if t.mode != ModeCollect {
+		return false
+	}
+	_, ok := t.treeIdx[plainKey]
+	delete(t.treeIdx, plainKey)
+	return ok
+}
+
 func (t *Updates) TouchHashedKey(hashedKey []byte) {
 	switch t.mode {
 	case ModeDirect:

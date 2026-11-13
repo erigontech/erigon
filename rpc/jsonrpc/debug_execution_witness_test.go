@@ -964,8 +964,8 @@ func collectChainWitnesses(t *testing.T, commitmentV3 bool) chainWitnesses {
 
 func TestWitnessesMatchHPHUnderCommitmentV3(t *testing.T) {
 	var hph, v3 chainWitnesses
-	t.Run("hph", func(t *testing.T) { hph = collectChainWitnesses(t, false) })
-	t.Run("v3", func(t *testing.T) { v3 = collectChainWitnesses(t, true) })
+	require.True(t, t.Run("hph", func(t *testing.T) { hph = collectChainWitnesses(t, false) }))
+	require.True(t, t.Run("v3", func(t *testing.T) { v3 = collectChainWitnesses(t, true) }))
 	require.NotEmpty(t, hph.Legacy)
 	for n := range hph.Legacy {
 		require.Equal(t, string(hph.Legacy[n]), string(v3.Legacy[n]), "debug_executionWitness legacy, block %d", n+1)

@@ -83,7 +83,13 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, bas
 			address, slot := a.Value(), k.Value()
 			plainKey := slices.Concat(address[:], slot[:])
 			m[k] = cc.touchHash(plainKey)
-			cc.prefetchTouched(plainKey, cc.touchedAccounts[a], m[k])
+			if cc.branchPrefetch == nil {
+				if cc.prefetchFn != nil {
+					cc.prefetchFn(plainKey)
+				}
+			} else if !cc.balBlock {
+				cc.queueBranch(cc.touchedAccounts[a], m[k])
+			}
 		}
 	}
 }
@@ -115,18 +121,12 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 			cc.baseErr = err
 		}
 	}
-	cc.prefetchTouched(address[:], cc.touchedAccounts[a], nil)
-}
-
-func (cc *commitmentCalculator) prefetchTouched(plainKey, account, slot []byte) {
 	if cc.branchPrefetch == nil {
 		if cc.prefetchFn != nil {
-			cc.prefetchFn(plainKey)
+			cc.prefetchFn(address[:])
 		}
-		return
-	}
-	if !cc.balBlock {
-		cc.queueBranch(account, slot)
+	} else if !cc.balBlock {
+		cc.queueBranch(cc.touchedAccounts[a], nil)
 	}
 }
 
