@@ -101,19 +101,11 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 	if code, ok := ibs.sharedCode(codeHash); ok {
 		return accounts.Code{Hash: codeHash, Bytes: code}, nil
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
-		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
-	}
-	var readStart time.Time
-	if dbg.KVReadLevelledMetrics {
-		readStart = time.Now()
-	}
-	code, err := ibs.stateReader.ReadAccountCode(addr)
-	if dbg.KVReadLevelledMetrics {
-		ibs.codeReadDuration += time.Since(readStart)
-		ibs.codeReadCount++
-	}
-	ibs.stateReader.SetTrace(false, "")
+	var code []byte
+	err = ibs.measureCodeRead(addr, func() (err error) {
+		code, err = ibs.stateReader.ReadAccountCode(addr)
+		return err
+	})
 	ibs.RecordStateReadError(err)
 	if len(code) == 0 {
 		return accounts.EmptyCode, err
@@ -1386,6 +1378,24 @@ func (ibs *IntraBlockState) recordedCode(addr accounts.Address, tr VersionedRead
 	return code, nil
 }
 
+// measureCodeRead runs a committed code read with the code-read tracing and metrics.
+func (ibs *IntraBlockState) measureCodeRead(addr accounts.Address, read func() error) error {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
+	}
+	var readStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		readStart = time.Now()
+	}
+	err := read()
+	if dbg.KVReadLevelledMetrics {
+		ibs.codeReadDuration += time.Since(readStart)
+		ibs.codeReadCount++
+	}
+	ibs.stateReader.SetTrace(false, "")
+	return err
+}
+
 // readOriginCodeSegmentTo copies a segment of the committed code of addr into dst. Not copied
 // when the code is already on a state object, absent, or held by a cache.
 func (ibs *IntraBlockState) readOriginCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (accounts.CodeHash, bool, error) {
@@ -1403,7 +1413,11 @@ func (ibs *IntraBlockState) readOriginCodeSegmentTo(addr accounts.Address, from 
 	if _, ok := ibs.sharedCode(codeHash); ok {
 		return accounts.CodeHash{}, false, nil
 	}
-	copied, err := segmentReader.ReadAccountCodeSegmentTo(addr, from, dst)
+	var copied bool
+	err = ibs.measureCodeRead(addr, func() (err error) {
+		copied, err = segmentReader.ReadAccountCodeSegmentTo(addr, from, dst)
+		return err
+	})
 	ibs.RecordStateReadError(err)
 	if err != nil || !copied {
 		return accounts.CodeHash{}, false, err
@@ -1425,7 +1439,10 @@ func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, erro
 		code = r.vwCode.Val
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetCode(addr)
-		code = tr.Val
+		var err error
+		if code, err = s.recordedCode(addr, tr); err != nil {
+			return accounts.Code{}, err
+		}
 	case outcomeMapDone:
 		code = r.mapCodeVal
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:

@@ -357,3 +357,30 @@ func TestCodeSegment_CopiesFromTheOffsetAndZeroPads(t *testing.T) {
 		})
 	}
 }
+
+func segmentReadThenLowerCodeWrite(t *testing.T) (*IntraBlockState, *VersionMap, accounts.Address, []byte) {
+	t.Helper()
+	vm := NewVersionMap(nil)
+	ibs, _, addr, code := newSegmentRead(t, vm)
+	_, err := segmentOf(ibs, addr, len(code))
+	require.NoError(t, err)
+	ws := &WriteSet{}
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: accounts.NewCode([]byte{0x60, 0x00})})
+	vm.FlushVersionedWrites(ws, true)
+	return ibs, vm, addr, code
+}
+
+// A read without bytes stands for the code the transaction first read, not a later write of a lower transaction.
+func TestCodeSegment_RefreshKeepsTheFirstReadCode(t *testing.T) {
+	ibs, _, addr, code := segmentReadThenLowerCodeWrite(t)
+	got, err := refreshCode(ibs, addr)
+	require.NoError(t, err)
+	require.Equal(t, code, got.Bytes)
+}
+
+func TestCodeSegment_VersionedReaderKeepsTheFirstReadCode(t *testing.T) {
+	ibs, vm, addr, code := segmentReadThenLowerCodeWrite(t)
+	got, err := NewVersionedStateReader(5, ibs.VersionedReads(), vm, ibs.stateReader).ReadAccountCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+}

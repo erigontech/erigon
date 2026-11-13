@@ -974,7 +974,11 @@ func (r *ReaderV3) ReadAccountCodeSegmentTo(address accounts.Address, from uint6
 		return false, nil
 	}
 	r.addr = address.Value()
-	return segmentReader.ReadCodeSegmentTo(r.addr[:], r.txNum, from, dst)
+	copied, err := segmentReader.ReadCodeSegmentTo(r.addr[:], r.txNum, from, dst)
+	if r.trace && err == nil && copied {
+		fmt.Printf("%sReadAccountCodeSegmentTo [%x] => from %d, %d bytes, txNum: %d, stack: %s\n", r.tracePrefix, address, from, len(dst), r.txNum, dbg.Stack())
+	}
+	return copied, err
 }
 
 func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
