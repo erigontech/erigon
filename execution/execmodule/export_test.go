@@ -16,7 +16,11 @@
 
 package execmodule
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/erigontech/erigon/common"
+)
 
 // SetInMemHistoryReads overrides the ERIGON_IN_MEM_HISTORY flag for the test.
 // Callers must not run in parallel, since the flag is package-global.
@@ -24,4 +28,8 @@ func SetInMemHistoryReads(t *testing.T, enabled bool) {
 	prev := inMemHistoryReads
 	inMemHistoryReads = enabled
 	t.Cleanup(func() { inMemHistoryReads = prev })
+}
+
+func MarkValidated(e *ExecModule, hash common.Hash) {
+	e.forkValidator.markValidated(hash)
 }

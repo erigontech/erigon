@@ -517,7 +517,7 @@ const nextForkBanner = `
 =============================================== GLAMSTERDAM ACTIVATED ===============================================
 `
 
-func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
+func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (result ValidationResult, err error) {
 	defer validateChainDuration.ObserveDuration(time.Now())
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
@@ -544,7 +544,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		currentBlockNumber *uint64
 		payloadExecuted    bool
 		canonical          bool
-		err                error
 	)
 	alreadyExecuted := func(tx kv.Getter) (bool, error) {
 		var err error
@@ -614,9 +613,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}, nil
 	}
 	if e.inclusionListPending(blockHash) && e.forkValidator.ForgetValidHash(blockHash) {
-		// Re-execution cannot change validity, so a re-check that fails keeps the old verdict.
+		// Re-execution cannot change validity, so a re-check that gives no verdict keeps the old one.
 		defer func() {
-			if !e.forkValidator.IsValidated(blockHash) {
+			if result.ValidationStatus != ExecutionStatusBadBlock && !e.forkValidator.IsValidated(blockHash) {
 				e.forkValidator.markValidated(blockHash)
 			}
 		}()
@@ -747,7 +746,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		e.nextForkActivated = true
 		e.logger.Info(nextForkBanner)
 	}
-	result := ValidationResult{
+	result = ValidationResult{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  lvh,
 	}

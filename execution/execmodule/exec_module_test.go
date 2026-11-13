@@ -1274,7 +1274,8 @@ func (c lateCancelCtx) Err() error {
 
 func TestFailedInclusionListRecheckKeepsSideForkValidated(t *testing.T) {
 	t.Parallel()
-	for limit := int64(0); ; limit++ {
+	const maxCancellationPoints = 32
+	for limit := int64(0); limit <= maxCancellationPoints; limit++ {
 		m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 		canonical, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
 			gen.SetCoinbase(common.Address{1})
@@ -1298,6 +1299,25 @@ func TestFailedInclusionListRecheckKeepsSideForkValidated(t *testing.T) {
 			return
 		}
 	}
+	t.Fatalf("ValidateChain was still cancelled after %d cancellation points", maxCancellationPoints)
+}
+
+func TestInvalidInclusionListRecheckDropsValidatedMark(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	badBlock := tamperBlockGasUsed(t, chainPack.TopBlock, 21_000)
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{badBlock.WithInclusionList(types.Transactions{signedInclusionListTxn(t, m)})})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	// Stands in for an earlier verdict that a non-deterministic execution got wrong.
+	execmodule.MarkValidated(m.ExecModule, badBlock.Hash())
+
+	validation, err := m.ValidateChain(t.Context(), badBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
+	require.False(t, m.ExecModule.IsValidated(badBlock.Hash()))
 }
 
 func TestInclusionListRecheckOfSideForkKeepsExtendingFork(t *testing.T) {
@@ -1378,7 +1398,6 @@ func TestInclusionListSatisfiedUsesStateAfterBlockTxns(t *testing.T) {
 }
 
 // Not parallel: it toggles the global dbg.Exec3Parallel.
-// Not parallel: it toggles the global dbg.Exec3Parallel.
 func TestValidateChainKeepsCachedInclusionListVerdict(t *testing.T) {
 	prevParallel := dbg.Exec3Parallel
 	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
@@ -1402,6 +1421,7 @@ func TestValidateChainKeepsCachedInclusionListVerdict(t *testing.T) {
 	}
 }
 
+// Not parallel: it toggles the global dbg.Exec3Parallel.
 func TestValidateChainChecksInclusionListAgainstStateAfterBlockTxns(t *testing.T) {
 	prevParallel := dbg.Exec3Parallel
 	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
