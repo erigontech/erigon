@@ -85,3 +85,45 @@ func TestSelfdestructRefundAfterRecreate(t *testing.T) {
 		})
 	}
 }
+
+// Before London, one block: X destroys itself, another contract's SELFDESTRUCT
+// sends 3 wei to X, and the same CREATE2 deploys X again. In the next tx X reads
+// slot 1 and destroys itself, which earns the SELFDESTRUCT refund as its first
+// destruct did: X has not destroyed itself before in that tx.
+func TestSelfdestructRefundInTxAfterRecreate(t *testing.T) {
+	runtime := program.New().Push(1).Op(vm.SLOAD, vm.POP, vm.CALLER, vm.SELFDESTRUCT).Bytes()
+	init := program.New().ReturnViaCodeCopy(runtime)
+	factory := common.HexToAddress("0xfac7")
+	x := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(init.Bytes())))
+	donor := common.HexToAddress("0xd040")
+
+	petersburg := chain.TestChainBerlinConfig.Copy()
+	petersburg.IstanbulBlock, petersburg.MuirGlacierBlock, petersburg.BerlinBlock = nil, nil, nil
+	for _, fork := range []struct {
+		name   string
+		config *chain.Config
+	}{{"petersburg", petersburg}, {"berlin", chain.TestChainBerlinConfig}} {
+		t.Run(fork.name, func(t *testing.T) {
+			alloc := types.GenesisAlloc{
+				factory: {Code: program.New().Create2(init.Bytes(), 0).Op(vm.STOP).Bytes()},
+				donor:   {Code: program.New().Selfdestruct(x).Bytes(), Balance: big.NewInt(3)},
+			}
+			keys := revivalKeys(t, alloc, 5)
+			gspec := &types.Genesis{Config: fork.config, GasLimit: 30_000_000, Alloc: alloc}
+			chainPack := buildBlockSerially(t, gspec, keys, common.Address{1}, 10_000_000_000, []revivalCall{
+				{to: factory},
+				{to: x},
+				{to: donor},
+				{to: factory},
+				{to: x},
+			})
+			receipts := chainPack.Receipts[0]
+			require.Equal(t, receipts[1].GasUsed, receipts[4].GasUsed, "the re-created X earns the SELFDESTRUCT refund")
+			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				exists, err := st.Exist(accounts.InternAddress(x))
+				require.NoError(t, err)
+				require.False(t, exists)
+			})
+		})
+	}
+}
