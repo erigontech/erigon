@@ -90,8 +90,8 @@ const (
 
 	// A recovery scheduled by a stored column starts once no column of the block has been stored for the quiet period,
 	// so gossip can deliver the remaining columns first. A deadline caps the wait when columns keep trickling in: a
-	// quarter of the slot before Gloas. From Gloas the columns come with the envelope, so the cap is the custody grace
-	// after the payload deadline, the point where a custody node starts fetching the missing columns.
+	// quarter of the slot before Gloas. From Gloas the columns come with the envelope, which may arrive as late as the
+	// payload deadline, so the cap is the payload deadline plus the custody grace.
 	blobRecoveryQuietPeriod         = 150 * time.Millisecond
 	blobRecoveryDeadlineSlotDivisor = 4
 )
