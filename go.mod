@@ -25,7 +25,7 @@ require (
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
 	github.com/anacrolix/missinggo/v2 v2.11.0
 	github.com/anacrolix/sync v0.5.5-0.20251119100342-d78dd1f686f1
-	github.com/anacrolix/torrent v1.61.1-0.20260908035318-5561014ea28f
+	github.com/anacrolix/torrent v1.61.1-0.20261024051421-5f95cd33fd29
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/bnb-chain/ics23 v0.1.0
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500

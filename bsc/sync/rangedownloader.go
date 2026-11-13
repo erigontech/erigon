@@ -17,7 +17,9 @@
 package bscsync
 
 import (
+	"cmp"
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -27,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -34,15 +37,17 @@ import (
 // (downloadBlocksUsingWaypoints): parallel, multi-peer, forward range fetch.
 // The waypoint work-unit + Merkle-root trust anchor are replaced by fixed
 // block-number ranges + structural verification (verifyChain). Everything else
-// — the worker pool, gap truncation, per-window peer refresh, RAM-bounded
-// worker count, backoff — mirrors bor.
+// — the RAM-bounded worker count, backoff — mirrors bor.
 
 // estBlockSize is a conservative per-block over-estimate (matching bor's
 // waypoint sizing) used to bound worker count: a worker buffers a whole range,
 // so RAM/worker ≈ rangeSize × estBlockSize.
 const estBlockSize = 1 * datasize.MB
 
-var rangeSize = dbg.EnvUint("BSC_BLOCK_RANGE_SIZE", 1024)
+var (
+	rangeSize     = dbg.EnvUint("BSC_BLOCK_RANGE_SIZE", 1024)
+	rangeDeadline = dbg.EnvDuration("BSC_BLOCK_RANGE_DEADLINE", 2*time.Minute)
+)
 
 // insertFunc persists an ascending, gap-free batch of blocks. It is the seam
 // bor filled with store.InsertBlocks; here it wraps the exec-module client.
@@ -50,102 +55,169 @@ type insertFunc func(ctx context.Context, blocks []*types.Block) error
 
 type blockRange struct {
 	from, to uint64 // inclusive
+	deadline time.Duration
+	failed   map[p2p.PeerId]bool
+}
+
+type rangeResult struct {
+	r        blockRange
+	peer     p2p.PeerId
+	blocks   []*types.Block
+	took     time.Duration
+	timedOut bool
+	err      error
+}
+
+func maxRangesByRAM() int {
+	return estimate.EstimatedRamPerWorker(datasize.ByteSize(rangeSize) * estBlockSize).WorkersByRAMOnly()
 }
 
 // downloadRanges fetches [from,target()] forward in parallel range-chunks, calling
-// insert with each assembled ascending batch. target is evaluated once per round. parent is the header at from-1
+// insert with each assembled ascending batch. target is evaluated after every range result. parent is the header at from-1
 // (used to verify the first range links to the persisted chain); it may be nil
 // only at genesis. It returns when the cursor passes the target or ctx is
 // cancelled. Peer backoff uses peerBackoff (poll for peers, not bor's 1m
 // steady-state wait).
-func downloadRanges(ctx context.Context, logger log.Logger, svc rangeFetcher, from uint64, target func() uint64, parent *types.Header, insert insertFunc) error {
-	maxWorkers := estimate.EstimatedRamPerWorker(datasize.ByteSize(rangeSize) * estBlockSize).WorkersByRAMOnly()
+func downloadRanges(ctx context.Context, logger log.Logger, svc rangeFetcher, from uint64, target func() uint64, parent *types.Header, maxRanges int, insert insertFunc) error {
+	fetchCtx, cancelFetches := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	defer cancelFetches()
+	results := make(chan rangeResult, maxRanges)
+
 	prev := parent
 	fetchStart := time.Now()
 	var done uint64
+	cursor, next := from, from
+	var queued []blockRange
+	held := make(map[uint64]rangeResult)
+	busy := make(map[p2p.PeerId]bool)
+	rates := make(map[p2p.PeerId]float64)
 
-	// Ranges are generated lazily from a cursor rather than materialized up front:
-	// a full-chain sync (0 → ~126M at 1024/range) would otherwise pre-allocate
-	// ~123k range structs. nextFrom is the first not-yet-persisted block.
-	for nextFrom := from; ; {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		to := target()
-		if nextFrom > to {
+		if cursor > to {
 			return nil
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
 
-		peers := svc.ListPeersMayHaveBlockNum(to)
-		if len(peers) == 0 {
-			logger.Warn("[bsc] no peers for range, backing off", "from", nextFrom, "to", to, "backoff", peerBackoff)
+		for len(queued)+len(busy)+len(held) < maxRanges && next <= to {
+			end := min(next+rangeSize-1, to)
+			queued = append(queued, blockRange{from: next, to: end, deadline: rangeDeadline})
+			next = end + 1
+		}
+		waiting := queued[:0]
+		for _, r := range queued {
+			var peer *p2p.PeerId
+			if r.from <= to {
+				peer = fastestIdlePeer(svc.ListPeersMayHaveBlockNum(r.from), busy, r.failed, rates)
+			}
+			if peer == nil {
+				waiting = append(waiting, r)
+				continue
+			}
+			if r.to > to {
+				waiting = append(waiting, blockRange{from: to + 1, to: r.to, deadline: r.deadline})
+				r.to = to
+			}
+			busy[*peer] = true
+			wg.Go(func() {
+				select {
+				case results <- fetchRange(fetchCtx, svc, r, peer):
+				case <-fetchCtx.Done():
+				}
+			})
+		}
+		queued = waiting
+
+		if len(busy) == 0 {
+			logger.Warn("[bsc] no peers for range, backing off", "from", cursor, "to", to, "backoff", peerBackoff)
+			for i := range queued {
+				queued[i].failed = nil
+			}
 			if err := common.Sleep(ctx, peerBackoff); err != nil {
 				return err
 			}
 			continue
 		}
 
-		remaining := (to-nextFrom)/rangeSize + 1
-		numWorkers := min(uint64(maxWorkers), uint64(len(peers)), remaining)
-
-		// Build just this batch of ranges (numWorkers of them) from the cursor.
-		batch := make([]blockRange, 0, numWorkers)
-		f := nextFrom
-		for range numWorkers {
-			t := min(f+rangeSize-1, to)
-			batch = append(batch, blockRange{from: f, to: t})
-			f = t + 1
+		var res rangeResult
+		select {
+		case res = <-results:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-
-		blockBatches := make([][]*types.Block, len(batch))
-		var wg sync.WaitGroup
-		for i, r := range batch {
-			i, r, peerID := i, r, peers[i]
-			wg.Go(func() {
-				blocks, err := fetchRangeFromPeer(ctx, svc, r.from, r.to, peerID)
-				if err != nil {
-					logger.Debug("[bsc] range fetch failed, will retry", "from", r.from, "to", r.to, "peer", peerID, "err", err)
-					return // leaves blockBatches[i] nil → treated as a gap
-				}
-				blockBatches[i] = blocks
-			})
-		}
-		wg.Wait()
-
-		// Assemble in order; verify each range links to the previous (boundary +
-		// intra-range + body checks via verifyChain). Stop at the first gap or
-		// verification failure so we never insert a hole or a fork; the cursor
-		// rewinds to the start of the failed range for retry.
-		var assembled []*types.Block
-		advanceTo := f // past the whole batch, unless a gap rewinds it
-		for i, r := range batch {
-			blocks := blockBatches[i]
-			if len(blocks) == 0 {
-				advanceTo = r.from
-				break
+		delete(busy, res.peer)
+		if res.err != nil {
+			logger.Debug("[bsc] range fetch failed, will retry", "from", res.r.from, "to", res.r.to, "peer", res.peer.String(), "timedOut", res.timedOut, "err", res.err)
+			if res.timedOut {
+				res.r.deadline *= 2
 			}
-			if err := verifyChain(prev, blocks); err != nil {
-				logger.Debug("[bsc] range verify failed, will retry", "from", r.from, "to", r.to, "err", err)
-				advanceTo = r.from
-				break
-			}
-			assembled = append(assembled, blocks...)
-			prev = blocks[len(blocks)-1].HeaderNoCopy()
-		}
-		nextFrom = advanceTo
-
-		if len(assembled) == 0 {
+			delete(rates, res.peer)
+			queued = requeue(queued, res.r, res.peer)
 			continue
 		}
+		rates[res.peer] = float64(len(res.blocks)) / res.took.Seconds()
+		held[res.r.from] = res
 
-		if err := insert(ctx, assembled); err != nil {
+		var batch []*types.Block
+		for h, ok := held[cursor]; ok; h, ok = held[cursor] {
+			delete(held, cursor)
+			if err := verifyChain(prev, h.blocks); err != nil {
+				logger.Debug("[bsc] range verify failed, will retry", "from", h.r.from, "to", h.r.to, "peer", h.peer.String(), "err", err)
+				delete(rates, h.peer)
+				queued = requeue(queued, h.r, h.peer)
+				break
+			}
+			batch = append(batch, h.blocks...)
+			prev = h.blocks[len(h.blocks)-1].HeaderNoCopy()
+			cursor = h.r.to + 1
+		}
+		if len(batch) == 0 {
+			continue
+		}
+		if err := insert(ctx, batch); err != nil {
 			return err
 		}
 
-		done += uint64(len(assembled))
+		done += uint64(len(batch))
 		logger.Info("[bsc] downloaded blocks",
-			"to", assembled[len(assembled)-1].NumberU64(),
-			"workers", len(batch), "peers", len(peers),
+			"to", cursor-1, "inFlight", len(busy), "held", len(held), "peers", len(svc.ListPeersMayHaveBlockNum(cursor)),
 			"blk/s", uint64(float64(done)/time.Since(fetchStart).Seconds()))
 	}
+}
+
+// fetchRange cancels on the deadline instead of using a context deadline: a
+// context.DeadlineExceeded makes TrackingFetcher mark the peer as missing the range.
+func fetchRange(ctx context.Context, svc rangeFetcher, r blockRange, peer *p2p.PeerId) rangeResult {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	timer := time.AfterFunc(r.deadline, cancel)
+	start := time.Now()
+	blocks, err := fetchRangeFromPeer(ctx, svc, r.from, r.to, peer)
+	return rangeResult{r: r, peer: *peer, blocks: blocks, took: time.Since(start), timedOut: !timer.Stop(), err: err}
+}
+
+func fastestIdlePeer(peers []*p2p.PeerId, busy, failed map[p2p.PeerId]bool, rates map[p2p.PeerId]float64) *p2p.PeerId {
+	var best *p2p.PeerId
+	for _, peer := range peers {
+		if busy[*peer] || failed[*peer] {
+			continue
+		}
+		if best == nil || rates[*peer] > rates[*best] {
+			best = peer
+		}
+	}
+	return best
+}
+
+func requeue(queued []blockRange, r blockRange, peer p2p.PeerId) []blockRange {
+	if r.failed == nil {
+		r.failed = make(map[p2p.PeerId]bool)
+	}
+	r.failed[peer] = true
+	i, _ := slices.BinarySearchFunc(queued, r.from, func(q blockRange, from uint64) int { return cmp.Compare(q.from, from) })
+	return slices.Insert(queued, i, r)
 }

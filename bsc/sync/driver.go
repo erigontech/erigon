@@ -189,7 +189,7 @@ func downloadTo(ctx context.Context, logger log.Logger, cfg Config, target func(
 		}
 		return nil
 	}
-	if err := downloadRanges(ctx, logger, cfg.Svc, head+1, target, parent, insert); err != nil {
+	if err := downloadRanges(ctx, logger, cfg.Svc, head+1, target, parent, maxRangesByRAM(), insert); err != nil {
 		return nil, err
 	}
 	if last == nil {

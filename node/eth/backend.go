@@ -373,46 +373,10 @@ func New(
 		return nil, err
 	}
 
-	var chainConfig *chain.Config
-	var genesis *types.Block
-	var compatErr *chain.ConfigCompatError
-	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
-		genesisConfig, err := rawdb.ReadGenesis(tx)
-		if err != nil {
-			return err
-		}
-
-		if genesisConfig != nil {
-			config.Genesis = genesisConfig
-		}
-
-		if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
-			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
-		}
-
-		h, err := rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
-			return err
-		}
-		genesisSpec := config.Genesis
-		if h != (common.Hash{}) { // fallback to db content
-			genesisSpec = nil
-		}
-		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
-		if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
-			return genesisErr
-		}
-		return nil
-	}); err != nil {
+	chainConfig, genesis, err := setupGenesis(rawChainDB, config, dirs, logger, tracer)
+	if err != nil {
 		return nil, err
 	}
-	// The rejected config is not written, so starting would run this process on a schedule
-	// the database contradicts, with no path back to agreement short of a rewind.
-	if compatErr != nil {
-		return nil, fmt.Errorf("incompatible chain config: %w", compatErr)
-	}
-	chainConfig.AllowAA = config.AllowAA
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
@@ -1189,6 +1153,55 @@ func (s *Ethereum) RegisterMinedBlockObserver(callback func(msg *types.Block)) e
 
 func (s *Ethereum) ChainKV() kv.RwDB            { return s.chainDB }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
+
+func setupGenesis(db kv.RwDB, config *ethconfig.Config, dirs datadir.Dirs, logger log.Logger, tracer *tracers.Tracer) (*chain.Config, *types.Block, error) {
+	var chainConfig *chain.Config
+	var genesisBlock *types.Block
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		genesisSpec, err := selectGenesis(tx, config)
+		if err != nil {
+			return err
+		}
+
+		chainConfig, genesisBlock, err = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
+		return err
+	}); err != nil {
+		if _, ok := errors.AsType[*chain.ConfigCompatError](err); ok {
+			return nil, nil, fmt.Errorf("incompatible chain config: %w", err)
+		}
+		return nil, nil, err
+	}
+	chainConfig.AllowAA = config.AllowAA
+	if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
+		tracer.Hooks.OnBlockchainInit(chainConfig)
+	}
+	return chainConfig, genesisBlock, nil
+}
+
+// selectGenesis returns an explicit genesis for the writer to validate.
+// Otherwise, any stored genesis replaces config.Genesis. If block 0 exists,
+// this path returns nil so the writer uses the stored block.
+func selectGenesis(tx kv.Tx, config *ethconfig.Config) (*types.Genesis, error) {
+	if config.GenesisFromFile {
+		return config.Genesis, nil
+	}
+	storedGenesis, err := rawdb.ReadGenesis(tx)
+	if err != nil {
+		return nil, err
+	}
+	if storedGenesis != nil {
+		config.Genesis = storedGenesis
+	}
+	storedHash, err := rawdb.ReadCanonicalHash(tx, 0)
+	if err != nil {
+		return nil, err
+	}
+	if storedHash != (common.Hash{}) { // fallback to db content
+		return nil, nil
+	}
+	return config.Genesis, nil
+}
+
 func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
 

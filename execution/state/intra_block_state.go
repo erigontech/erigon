@@ -185,17 +185,7 @@ type IntraBlockState struct {
 	// Versioned storage used for parallel tx processing, versions
 	// are maintaned across transactions until they are reset
 	// at the block level.
-	versionMap *VersionMap
-	// waitCommit blocks a read that observes an in-flight (estimate) predecessor
-	// write until that predecessor commits, so execution pauses in place instead
-	// of aborting via ErrDependency. Returns false on shutdown.
-	waitCommit func(depTxIndex int) bool
-	// wakeGen counts resumes from a dep-wait pause. A lower-txIndex writer may
-	// commit a new value while this worker sleeps in waitCommit, so any frame
-	// read cached before the pause can be stale on wake. ReadStamp folds wakeGen
-	// in, so a resume invalidates the vm's frame caches on the next lookup — what
-	// makes those caches safe under the dep-wait executor.
-	wakeGen         uint64
+	versionMap      *VersionMap
 	versionedWrites WriteSet
 	versionedReads  ReadSet
 	// versionedOrigins collects committed pre-block base cells (at originIndex) that a cold
@@ -333,11 +323,6 @@ func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 // retune a per-task overlay (PrevBlockReader.SetBlock) without rebuilding the IBS.
 func (ibs *IntraBlockState) StateReader() StateReader {
 	return ibs.stateReader
-}
-
-// SetWaitCommit installs the mid-flow dep-pause hook (self-loop). See waitCommit.
-func (ibs *IntraBlockState) SetWaitCommit(f func(depTxIndex int) bool) {
-	ibs.waitCommit = f
 }
 
 func (ibs *IntraBlockState) VersionMap() *VersionMap {
@@ -2950,6 +2935,14 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 			}
 			continue
 		}
+		// See updateAccount: the account write of a recreate below the original incarnation clears
+		// the old code and storage, so it must land before the new ones.
+		downRev := original.Incarnation > account.Incarnation
+		if downRev {
+			if err := stateWriter.UpdateAccountData(addr, original, account); err != nil {
+				return err
+			}
+		}
 		if code, ok := writes.GetCode(addr); ok {
 			if err := stateWriter.UpdateAccountCode(addr, account.Incarnation, account.CodeHash, code.Val.Bytes); err != nil {
 				return err
@@ -2965,8 +2958,10 @@ func (ibs *IntraBlockState) WriteFlushedTo(writes *WriteSet, stateWriter StateWr
 				return err
 			}
 		}
-		if err := stateWriter.UpdateAccountData(addr, original, account); err != nil {
-			return err
+		if !downRev {
+			if err := stateWriter.UpdateAccountData(addr, original, account); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

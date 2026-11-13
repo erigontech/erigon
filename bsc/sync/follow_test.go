@@ -47,12 +47,11 @@ func TestFollowTipHandsOverFromCatchUpToTipMode(t *testing.T) {
 			<-reg.registered
 		}
 		ts := newTipSync(logger, chainRW, svc, newFakeNetwork(network).fetchBackwards, te, fakeParliaDB{chainRW}, newFakeVerifier())
-		done := make(chan error, 1)
-		go func() { done <- followTip(ctx, logger, cfg, ts) }()
-
 		pkt := eth.NewBlockHashesPacket{{Hash: head.Hash(), Number: head.NumberU64()}}
 		reg.sendHashes(1, pkt)
 		reg.sendHashes(2, pkt)
+		done := make(chan error, 1)
+		go func() { done <- followTip(ctx, logger, cfg, ts) }()
 		synctest.Wait()
 
 		require.Equal(t, head.Hash(), chainRW.CurrentHeader(ctx).Hash())

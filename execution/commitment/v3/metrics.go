@@ -78,7 +78,7 @@ func (c *meteredContext) wrapFactory(f commitment.TrieContextFactory) commitment
 }
 
 func (c *meteredContext) publish(start time.Time, keys uint64) {
-	m := commitment.NewMetrics("")
+	m := &commitment.Metrics{}
 	m.AddRoundKeys(keys)
 	m.AddBranchRead(int(c.readBytes.Load()))
 	commitment.ObserveRound(m, start)
