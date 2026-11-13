@@ -2150,13 +2150,14 @@ func TestAsyncBALBuilderEncodesAsSerial(t *testing.T) {
 func TestAsyncBALBuilderFinishWaitsForLastJob(t *testing.T) {
 	const txs = 8
 	var a asyncBALBuilder
-	release := make(chan struct{})
+	blocked, release := make(chan struct{}), make(chan struct{})
 	var seen int
 	balBuildJobHook = func(b *asyncBALBuilder) {
 		if b != &a {
 			return
 		}
 		if seen++; seen == txs+1 {
+			close(blocked)
 			<-release
 		}
 	}
@@ -2166,7 +2167,13 @@ func TestAsyncBALBuilderFinishWaitsForLastJob(t *testing.T) {
 	for sealed := 1; sealed <= txs+1; sealed++ {
 		a.add(io, sealed)
 	}
-	time.AfterFunc(50*time.Millisecond, func() { close(release) })
+	<-blocked
+	go func() {
+		for len(balBuildJobs()) == 0 { // finish has queued its flush behind the blocked job
+			runtime.Gosched()
+		}
+		close(release)
+	}()
 	b := a.finish()
 	require.Equal(t, txs, b.Next())
 }
