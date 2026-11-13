@@ -818,7 +818,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 			}
 		}
 		if haltOnInitialSyncFailure(err) {
-			e.logger.Error("Initial sync failed during parallel execution — halting process")
+			e.logger.Error("Initial sync failed — halting process")
 			go func() {
 				if stopErr := e.stopNode(); stopErr != nil {
 					e.logger.Error("Could not stop node on initial sync failure", "err", stopErr)

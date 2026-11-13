@@ -558,7 +558,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, pe *parallelExecutor) {
 	readCount := te.readCount.Load()
 	writeCount := uint64(te.writeCount.Load())
 
-	// not sure why this happens but sometime we read more from disk than from memory
+	// not sure why this happens but sometimes we read more from disk than from memory
 	totalReadCount := te.taskExecMetrics.ReadCount.Load()
 	if totalReadCount > readCount {
 		readCount = totalReadCount
