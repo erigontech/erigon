@@ -463,8 +463,9 @@ func (d *Domain) minStepInDB(tx kv.Tx) uint64 {
 	return uint64(first)
 }
 
-// firstStepToBuild returns the earliest pending step, clamped to filesEnd,
-// or any such step below minStep when the build must be deferred.
+// firstStepToBuild returns the earliest pending step, clamped to filesEnd.
+// A result below minStep need not be the earliest: it already proves that
+// the build must be deferred, so the values scan can stop early.
 func (d *Domain) firstStepToBuild(tx kv.Tx, filesEnd, minStep kv.Step) (kv.Step, bool, error) {
 	if !d.HistoryDisabled && !d.SnapshotsDisabled {
 		first, found, err := d.InvertedIndex.firstStepInDB(tx)

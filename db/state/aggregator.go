@@ -2223,8 +2223,9 @@ type fileBuildPlan struct {
 func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 	stateStep := kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
 	plan := fileBuildPlan{firstStep: stateStep}
-	// A one-step resume reaches the existing state-file boundary. Older backfills
-	// would lower visibility, so retain their MDBX data while healthy entities advance.
+	// Each step is published separately. Resuming more than one step behind would
+	// first publish a file ending below the state-file boundary, lowering shared
+	// visibility. Retain those entities' MDBX data while healthy entities advance.
 	var minResumeStep kv.Step
 	if stateStep > 0 {
 		minResumeStep = stateStep - 1
@@ -2398,11 +2399,9 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			}
 		}
 
-		// trying to create as much small-step-files as possible:
-		// - to reduce amount of small merges
-		// - to remove old data from db as early as possible
-		// - during files build, may happen commit of new data. on each loop step getting latest id in db
-		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
+		// Build complete steps below the sampled lastInDB before starting merges.
+		// Newly completed steps are handled by a later build job.
+		for ; step < lastInDB; step++ {
 			if err := a.buildFilesWithPlan(a.ctx, db, step, finalityCtx, fin, plan); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
