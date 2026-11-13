@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand/v2"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -2086,4 +2088,483 @@ func TestSharedDomain_MergeUnwindKeepsDeeperTarget(t *testing.T) {
 
 	mergeAndCheck(deepTarget, shallowTarget)
 	mergeAndCheck(shallowTarget, deepTarget)
+}
+
+func t3ReviewBatch(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
+	t.Helper()
+	db := newTestDb(t, 4)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+	return tx, sd
+}
+
+func rcacheReviewBatch(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
+	t.Helper()
+	saved := statecfg.Schema.RCacheDomain
+	statecfg.EnableHistoricalRCache()
+	t.Cleanup(func() { statecfg.Schema.RCacheDomain = saved })
+	return t3ReviewBatch(t)
+}
+
+func TestT3HistoryOwnsEqualPrev(t *testing.T) {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		for _, source := range []string{"caller", "transaction"} {
+			t.Run(domain.String()+"/"+source, func(t *testing.T) {
+				tx, sd := t3ReviewBatch(t)
+				key := flushGoldenAddress(0x91)
+				if domain == kv.StorageDomain {
+					key = flushGoldenStorageKey(key, 1)
+				}
+				mem := sd.GetMemBatch()
+				require.NoError(t, mem.DomainPut(domain, string(key), []byte("first"), 1, nil))
+				prev := []byte("first")
+				if source == "transaction" {
+					require.NoError(t, mem.Flush(t.Context(), tx))
+					var err error
+					prev, _, err = tx.GetLatest(domain, key, kv.GetLatestOptions{})
+					require.NoError(t, err)
+				}
+				owned, _, ok := mem.GetLatest(domain, key)
+				require.True(t, ok)
+				require.Equal(t, owned, prev)
+				require.NotEqual(t, fmt.Sprintf("%p", &owned[0]), fmt.Sprintf("%p", &prev[0]))
+				require.NoError(t, mem.DomainPut(domain, string(key), []byte("second"), 2, prev))
+				copy(prev, "xxxxx")
+				require.Equal(t, "first", string(owned))
+				require.NoError(t, mem.Flush(t.Context(), tx))
+				got, ok, err := tx.HistorySeek(domain, key, 2)
+				require.NoError(t, err)
+				require.True(t, ok)
+				if !bytes.Equal(got, []byte("first")) {
+					t.Fatalf("history prev at txNum 2: want %q, got %q", "first", got)
+				}
+			})
+		}
+	}
+}
+
+func TestT3MergePreservesParentHistory(t *testing.T) {
+	for _, last := range []uint64{2, 3} {
+		t.Run(fmt.Sprintf("receiverThrough%d", last), func(t *testing.T) {
+			tx, sd := t3ReviewBatch(t)
+			key := flushGoldenAddress(0x91)
+			mem := sd.GetMemBatch()
+			for i := uint64(1); i <= last; i++ {
+				require.NoError(t, mem.DomainPut(kv.AccountsDomain, string(key), []byte{byte(i)}, i, []byte{byte(i - 1)}))
+			}
+			child, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+			require.NoError(t, err)
+			defer child.Close()
+			child.SetParent(sd)
+			flushGoldenPut(t, child, tx, kv.AccountsDomain, key, []byte{9}, 2)
+			require.NoError(t, mem.Merge(child.GetMemBatch()))
+			require.NoError(t, mem.Flush(t.Context(), tx))
+			var got []string
+			cursor, err := tx.Cursor(kv.TblAccountHistoryVals)
+			require.NoError(t, err)
+			defer cursor.Close()
+			for k, v, err := cursor.First(); k != nil; k, v, err = cursor.Next() {
+				require.NoError(t, err)
+				got = append(got, fmt.Sprintf("%x", v))
+			}
+			want := []string{"000000000000000100", "000000000000000201", fmt.Sprintf("0000000000000002%02x", last)}
+			if last == 3 {
+				want = append(want, "000000000000000302")
+			}
+			if fmt.Sprint(want) != fmt.Sprint(got) {
+				t.Errorf("parent history rows: want %v, got %v", want, got)
+			}
+			n, err := tx.Count(kv.TblAccountHistoryKeys)
+			require.NoError(t, err)
+			if n != last {
+				t.Errorf("parent history-key rows: want %d, got %d", last, n)
+			}
+			valueCursor, err := tx.CursorDupSort(kv.TblAccountVals)
+			require.NoError(t, err)
+			defer valueCursor.Close()
+			valueKey, value, err := valueCursor.SeekExact(key)
+			require.NoError(t, err)
+			require.Equal(t, key, valueKey)
+			wantValue := append(bytes.Repeat([]byte{0xff}, 8), 9)
+			if !bytes.Equal(wantValue, value) {
+				t.Errorf("parent value row: want %x, got %x", wantValue, value)
+			}
+			valueKey, value, err = valueCursor.NextDup()
+			require.NoError(t, err)
+			require.Nil(t, valueKey)
+			require.Nil(t, value)
+			if last == 3 {
+				value, ok, err := tx.GetAsOf(kv.AccountsDomain, key, 3)
+				require.NoError(t, err)
+				require.True(t, ok)
+				if !bytes.Equal(value, []byte{2}) {
+					t.Errorf("GetAsOf at txNum 3: want 02, got %x", value)
+				}
+			}
+		})
+	}
+}
+
+func TestT3MergeKeepsChildDiscarded(t *testing.T) {
+	tx, sd := t3ReviewBatch(t)
+	key := flushGoldenAddress(0x91)
+	storageKey := flushGoldenStorageKey(key, 1)
+	mem := sd.GetMemBatch()
+	require.NoError(t, mem.DomainPut(kv.AccountsDomain, string(key), []byte{1}, 1, nil))
+	require.NoError(t, mem.DomainPut(kv.StorageDomain, string(storageKey), []byte{1}, 1, nil))
+	child, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer child.Close()
+	child.SetParent(sd)
+	flushGoldenPut(t, child, tx, kv.AccountsDomain, key, []byte{2}, 2)
+	flushGoldenPut(t, child, tx, kv.StorageDomain, storageKey, []byte{2}, 2)
+	child.DiscardWrites(kv.AccountsDomain)
+	child.DiscardWrites(kv.StorageDomain)
+	require.EqualError(t, mem.Merge(child.GetMemBatch()), "can't merge batches with discarded writes in accounts")
+	value, _, ok := mem.GetLatest(kv.AccountsDomain, key)
+	require.True(t, ok)
+	require.Equal(t, []byte{1}, value)
+	value, _, ok = mem.GetLatest(kv.StorageDomain, storageKey)
+	require.True(t, ok)
+	require.Equal(t, []byte{1}, value)
+	require.NoError(t, mem.Flush(t.Context(), tx))
+	for _, table := range []string{kv.TblAccountHistoryVals, kv.TblAccountHistoryKeys} {
+		n, err := tx.Count(table)
+		require.NoError(t, err)
+		if n != 1 {
+			t.Errorf("%s rows after merging discarded child: want 1, got %d", table, n)
+		}
+	}
+	storageHistoryRows, err := tx.Count(kv.TblStorageHistoryVals)
+	require.NoError(t, err)
+	if storageHistoryRows != 1 {
+		t.Errorf("storage history rows after merging discarded child: want 1, got %d", storageHistoryRows)
+	}
+	storageValueRows, err := tx.Count(kv.TblStorageVals)
+	require.NoError(t, err)
+	if storageValueRows != 1 {
+		t.Errorf("storage value rows after merging discarded child: want 1, got %d", storageValueRows)
+	}
+}
+
+func TestT3MergeRejectsReceiverDiscarded(t *testing.T) {
+	tx, sd := t3ReviewBatch(t)
+	child := reviewChild(t, tx, sd)
+	key := flushGoldenAddress(0x91)
+	require.NoError(t, child.GetMemBatch().DomainPut(kv.AccountsDomain, string(key), []byte{2}, 2, nil))
+	sd.DiscardWrites(kv.AccountsDomain)
+	require.EqualError(t, sd.GetMemBatch().Merge(child.GetMemBatch()), "can't merge batches with discarded writes in accounts")
+}
+
+func TestMergeRejectsExplicitRCacheDiscard(t *testing.T) {
+	tx, sd := rcacheReviewBatch(t)
+	child := reviewChild(t, tx, sd)
+	child.DiscardWrites(kv.RCacheDomain)
+	require.EqualError(t, sd.GetMemBatch().Merge(child.GetMemBatch()), "can't merge batches with discarded writes in rcache")
+}
+
+func TestMergeOverlapAdoptsChildValues(t *testing.T) {
+	tx, receiver := t3ReviewBatch(t)
+	keyA := flushGoldenAddress(0x91)
+	keyB := flushGoldenAddress(0x92)
+	mem := receiver.GetMemBatch()
+	require.NoError(t, mem.DomainPut(kv.AccountsDomain, string(keyA), []byte{0x11}, 1, nil))
+	require.NoError(t, mem.DomainPut(kv.AccountsDomain, string(keyA), []byte{0x14}, 5, []byte{0x11}))
+	require.NoError(t, mem.DomainPut(kv.AccountsDomain, string(keyB), []byte{0x21}, 1, nil))
+	require.NoError(t, mem.DomainDel(kv.AccountsDomain, string(keyB), 5, []byte{0x21}))
+	child := reviewChild(t, tx, receiver)
+	flushGoldenPut(t, child, tx, kv.AccountsDomain, keyA, []byte{0x15}, 5)
+	flushGoldenPut(t, child, tx, kv.AccountsDomain, keyB, []byte{0x25}, 5)
+	require.NoError(t, mem.Merge(child.GetMemBatch()))
+	require.NoError(t, mem.Flush(t.Context(), tx))
+
+	rows := func(table string) []string {
+		cursor, err := tx.CursorDupSort(table)
+		require.NoError(t, err)
+		defer cursor.Close()
+		var rows []string
+		for key, value, err := cursor.First(); key != nil; key, value, err = cursor.Next() {
+			require.NoError(t, err)
+			rows = append(rows, fmt.Sprintf("%x:%x", key, value))
+		}
+		return rows
+	}
+	invertedStepValue := func(step uint64, value []byte) []byte {
+		stepBytes := binary.BigEndian.AppendUint64(nil, ^step)
+		return append(stepBytes, value...)
+	}
+	historyValue := func(txNum uint64, value []byte) []byte {
+		return append(binary.BigEndian.AppendUint64(nil, txNum), value...)
+	}
+	row := func(key, value []byte) string { return fmt.Sprintf("%x:%x", key, value) }
+	require.Equal(t, []string{
+		row(keyA, invertedStepValue(1, []byte{0x15})),
+		row(keyA, invertedStepValue(0, []byte{0x11})),
+		row(keyB, invertedStepValue(1, []byte{0x25})),
+		row(keyB, invertedStepValue(0, []byte{0x21})),
+	}, rows(kv.TblAccountVals))
+	require.Equal(t, []string{
+		row(keyA, historyValue(1, nil)),
+		row(keyA, historyValue(5, []byte{0x11})),
+		row(keyA, historyValue(5, []byte{0x14})),
+		row(keyB, historyValue(1, nil)),
+		row(keyB, historyValue(5, nil)),
+		row(keyB, historyValue(5, []byte{0x21})),
+	}, rows(kv.TblAccountHistoryVals))
+}
+
+func TestT4UnwindEarlierCommittedBatch(t *testing.T) {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
+		t.Run(domain.String(), func(t *testing.T) {
+			db := newTestDb(t, 4)
+			tx, err := db.BeginTemporalRw(t.Context())
+			require.NoError(t, err)
+			defer func() { tx.Rollback() }()
+			domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+			require.NoError(t, err)
+			key := flushGoldenAddress(0x91)
+			if domain == kv.StorageDomain {
+				key = flushGoldenStorageKey(key, 1)
+			} else if domain == kv.CommitmentDomain {
+				key = []byte{0xa0, 0x01}
+			}
+			want := []byte{0x10}
+			flushGoldenPut(t, domains, tx, domain, key, want, 1)
+			older := executeGoldenBlock(t, domains, tx, "t4", 2, func() {
+				flushGoldenPut(t, domains, tx, domain, key, []byte{0x20}, 2)
+			})
+			require.NoError(t, domains.Flush(t.Context(), tx))
+			require.NoError(t, tx.Commit())
+			domains.Close()
+
+			tx, err = db.BeginTemporalRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			domains, err = execctx.NewSharedDomains(t.Context(), tx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+			newer := executeGoldenBlock(t, domains, tx, "t4", 3, func() {
+				flushGoldenPut(t, domains, tx, domain, key, []byte{0x30}, 3)
+			})
+			var diffs [kv.DomainLen][]kv.DomainEntryDiff
+			for d := range diffs {
+				diffs[d] = changeset.MergeDiffSets(newer.Diffs[d].GetDiffSet(), older.Diffs[d].GetDiffSet())
+			}
+			domains.Unwind(2, &diffs)
+			require.NoError(t, domains.Flush(t.Context(), tx))
+			require.NoError(t, tx.Commit())
+			roTx, err := db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer roTx.Rollback()
+			got, _, err := roTx.GetLatest(domain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			if !bytes.Equal(want, got) {
+				t.Fatalf("committed GetLatest after unwind: want %x, got %x", want, got)
+			}
+		})
+	}
+}
+
+func TestT4UnwindSameTxAfterFlush(t *testing.T) {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
+		t.Run(domain.String(), func(t *testing.T) {
+			db := newTestDb(t, 1)
+			tx, err := db.BeginTemporalRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+			key := flushGoldenAddress(0x91)
+			if domain == kv.StorageDomain {
+				key = flushGoldenStorageKey(key, 1)
+			} else if domain == kv.CommitmentDomain {
+				key = []byte{0xa0, 0x01}
+			}
+			want := []byte{0x10}
+			flushGoldenPut(t, domains, tx, domain, key, want, 1)
+			change := executeGoldenBlock(t, domains, tx, "t4", 2, func() {
+				flushGoldenPut(t, domains, tx, domain, key, []byte{0x20}, 2)
+			})
+			require.NoError(t, domains.Flush(t.Context(), tx))
+			flushGoldenPut(t, domains, tx, domain, key, []byte{0x30}, 2)
+			var diffs [kv.DomainLen][]kv.DomainEntryDiff
+			diffs[domain] = change.Diffs[domain].GetDiffSet()
+			domains.Unwind(2, &diffs)
+			require.NoError(t, domains.Flush(t.Context(), tx))
+			require.NoError(t, tx.Commit())
+			roTx, err := db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer roTx.Rollback()
+			got, _, err := roTx.GetLatest(domain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			if !bytes.Equal(want, got) {
+				t.Fatalf("committed GetLatest after same-tx unwind: want %x, got %x", want, got)
+			}
+		})
+	}
+}
+
+func reviewChild(t *testing.T, tx kv.TemporalRwTx, parent *execctx.SharedDomains) *execctx.SharedDomains {
+	t.Helper()
+	child, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(child.Close)
+	child.SetParent(parent)
+	return child
+}
+
+func TestReviewMergeFlushedChild(t *testing.T) {
+	tx, sd := t3ReviewBatch(t)
+	child := reviewChild(t, tx, sd)
+	key := flushGoldenAddress(0x91)
+	require.NoError(t, child.GetMemBatch().DomainPut(kv.AccountsDomain, string(key), []byte{2}, 2, nil))
+	require.NoError(t, child.GetMemBatch().Flush(t.Context(), tx))
+	if err := sd.GetMemBatch().Merge(child.GetMemBatch()); err != nil {
+		t.Fatalf("merge of flushed child: want nil, got %v", err)
+	}
+	require.NoError(t, sd.GetMemBatch().Flush(t.Context(), tx))
+}
+
+func TestReviewDiscardedChildDomains(t *testing.T) {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
+		t.Run(domain.String(), func(t *testing.T) {
+			tx, sd := t3ReviewBatch(t)
+			child := reviewChild(t, tx, sd)
+			key := flushGoldenAddress(0x91)
+			if domain == kv.StorageDomain {
+				key = flushGoldenStorageKey(key, 1)
+			}
+			require.NoError(t, sd.GetMemBatch().DomainPut(domain, string(key), []byte{1}, 1, nil))
+			require.NoError(t, child.GetMemBatch().DomainPut(domain, string(key), []byte{2}, 2, []byte{1}))
+			child.DiscardWrites(domain)
+			err := sd.GetMemBatch().Merge(child.GetMemBatch())
+			require.EqualError(t, err, fmt.Sprintf("can't merge batches with discarded writes in %s", domain))
+			value, _, ok := sd.GetMemBatch().GetLatest(domain, key)
+			require.True(t, ok)
+			require.Equal(t, []byte{1}, value)
+			require.NoError(t, sd.GetMemBatch().Flush(t.Context(), tx))
+			tables := map[kv.Domain]string{
+				kv.AccountsDomain:   kv.TblAccountVals,
+				kv.StorageDomain:    kv.TblStorageVals,
+				kv.CodeDomain:       kv.TblCodeVals,
+				kv.CommitmentDomain: kv.TblCommitmentVals,
+			}
+			n, err := tx.Count(tables[domain])
+			require.NoError(t, err)
+			if n != 1 {
+				t.Fatalf("%s value rows after discarded child: want 1, got %d", domain, n)
+			}
+			value, _, err = tx.GetLatest(domain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			if !bytes.Equal(value, []byte{1}) {
+				t.Errorf("%s parent value after discarded child: want 01, got %x", domain, value)
+			}
+		})
+	}
+}
+
+func TestReviewMergeNestedChild(t *testing.T) {
+	tx, sd := t3ReviewBatch(t)
+	child := reviewChild(t, tx, sd)
+	grandchild := reviewChild(t, tx, child)
+	greatgrandchild := reviewChild(t, tx, grandchild)
+	key := flushGoldenAddress(0x91)
+	require.NoError(t, child.GetMemBatch().DomainPut(kv.AccountsDomain, string(key), []byte{1}, 1, nil))
+	require.NoError(t, grandchild.GetMemBatch().DomainPut(kv.AccountsDomain, string(key), []byte{2}, 2, []byte{1}))
+	require.NoError(t, greatgrandchild.GetMemBatch().DomainPut(kv.AccountsDomain, string(key), []byte{3}, 2, []byte{2}))
+	require.NoError(t, grandchild.GetMemBatch().Merge(greatgrandchild.GetMemBatch()))
+	require.NoError(t, child.GetMemBatch().Merge(grandchild.GetMemBatch()))
+	if err := sd.GetMemBatch().Merge(child.GetMemBatch()); err != nil {
+		t.Fatalf("merge of previously merged child: want nil, got %v", err)
+	}
+	require.NoError(t, sd.GetMemBatch().Flush(t.Context(), tx))
+
+	var historyRows []string
+	cursor, err := tx.Cursor(kv.TblAccountHistoryVals)
+	require.NoError(t, err)
+	defer cursor.Close()
+	for keyRow, value, err := cursor.First(); keyRow != nil; keyRow, value, err = cursor.Next() {
+		require.NoError(t, err)
+		historyRows = append(historyRows, fmt.Sprintf("%x:%x", keyRow, value))
+	}
+	require.Equal(t, []string{
+		fmt.Sprintf("%x:%x", key, binary.BigEndian.AppendUint64(nil, 1)),
+		fmt.Sprintf("%x:%x", key, append(binary.BigEndian.AppendUint64(nil, 2), 1)),
+		fmt.Sprintf("%x:%x", key, append(binary.BigEndian.AppendUint64(nil, 2), 2)),
+	}, historyRows)
+	value, _, err := tx.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, []byte{3}, value)
+}
+
+func TestMergeLargeValueOverlapKeepsReceiverPrev(t *testing.T) {
+	tx, sd := t3ReviewBatch(t)
+	key := flushGoldenAddress(0x92)
+	mem := sd.GetMemBatch()
+	require.NoError(t, mem.DomainPut(kv.CodeDomain, string(key), []byte{'A'}, 1, nil))
+	require.NoError(t, mem.DomainPut(kv.CodeDomain, string(key), []byte{'B'}, 2, []byte{'A'}))
+	child := reviewChild(t, tx, sd)
+	require.NoError(t, child.GetMemBatch().DomainPut(kv.CodeDomain, string(key), []byte{'C'}, 2, []byte{'B'}))
+	require.NoError(t, mem.Merge(child.GetMemBatch()))
+	require.NoError(t, mem.Flush(t.Context(), tx))
+
+	var historyRows []string
+	cursor, err := tx.Cursor(kv.TblCodeHistoryVals)
+	require.NoError(t, err)
+	defer cursor.Close()
+	for historyKey, historyValue, err := cursor.First(); historyKey != nil; historyKey, historyValue, err = cursor.Next() {
+		require.NoError(t, err)
+		historyRows = append(historyRows, fmt.Sprintf("%x:%x", historyKey, historyValue))
+	}
+	require.Equal(t, []string{
+		fmt.Sprintf("%x:%x", append(bytes.Clone(key), binary.BigEndian.AppendUint64(nil, 1)...), []byte(nil)),
+		fmt.Sprintf("%x:%x", append(bytes.Clone(key), binary.BigEndian.AppendUint64(nil, 2)...), []byte{'A'}),
+	}, historyRows)
+	value, ok, err := tx.GetAsOf(kv.CodeDomain, key, 2)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, []byte{'A'}, value)
+}
+
+func TestFlushReadersRaceWithMarkFlushed(t *testing.T) {
+	tx, domains := t3ReviewBatch(t)
+	mem := domains.GetMemBatch()
+	accounts := make([][]byte, 400)
+	storage := make([][]byte, 400)
+	for i := range accounts {
+		accounts[i] = flushGoldenAddress(byte(i))
+		storage[i] = flushGoldenStorageKey(accounts[i], 1)
+		require.NoError(t, mem.DomainPut(kv.AccountsDomain, string(accounts[i]), []byte{1}, 1, nil))
+		require.NoError(t, mem.DomainPut(kv.StorageDomain, string(storage[i]), []byte{1}, 1, nil))
+	}
+
+	done := make(chan struct{})
+	var readers sync.WaitGroup
+	read := func(domain kv.Domain, keys [][]byte) {
+		defer readers.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			for _, key := range keys {
+				mem.GetLatest(domain, key)
+				if _, _, err := mem.GetAsOf(domain, key, 2); err != nil {
+					panic(err)
+				}
+			}
+		}
+	}
+	readers.Add(2)
+	go read(kv.AccountsDomain, accounts)
+	go read(kv.StorageDomain, storage)
+	require.NoError(t, mem.Flush(t.Context(), tx))
+	close(done)
+	readers.Wait()
 }

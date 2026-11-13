@@ -908,6 +908,9 @@ func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.St
 	if stepFrom > stepTo {
 		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
 	}
+	if err := batch.projectValues(); err != nil {
+		return err
+	}
 
 	coll, err := d.collateETL(ctx, stepFrom, stepTo, wal.valsCollector(), vt, dstDir)
 	defer wal.Close()

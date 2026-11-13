@@ -283,7 +283,6 @@ func execOneBatch(ctx context.Context, emt *ExecModuleTester, cfg stagedsync.Exe
 		return 0, err
 	}
 	defer doms.Close()
-	doms.SetInMemHistoryReads(false)
 
 	s, err := emt.Sync.StageState(stages.Execution, tx, true, false)
 	if err != nil {
@@ -375,14 +374,6 @@ func runBranchCacheCoherentAcrossBatches(t *testing.T) {
 		"re-exec from 0 in tiny batches must reproduce each block's trie root; a stale BranchCache corrupts it")
 }
 
-// TestExec_RestoresCommitmentStateReader checks that an execution batch leaves
-// the commitment state reader as it found it. The exec mode is whatever the
-// suite selects — the serial/parallel CI matrix (and the EXEC3_PARALLEL default)
-// cover both. It bites in parallel: the commitment calculator installs a
-// GetAsOf-based asOfStateReader on the shared context, and leaving it there
-// makes a later foreground SeekCommitment in the offline re-exec path (in-mem
-// history reads disabled) fail with "GetAsOf called on TemporalMemBatch with
-// inMemHistoryReads disabled". Serial installs no custom reader.
 func TestExec_RestoresCommitmentStateReader(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	keyAddr := crypto.PubkeyToAddress(key.PublicKey)
@@ -420,7 +411,6 @@ func TestExec_RestoresCommitmentStateReader(t *testing.T) {
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	require.NoError(t, err)
 	defer doms.Close()
-	doms.SetInMemHistoryReads(false)
 
 	readerBefore := doms.GetCommitmentContext().StateReader()
 
@@ -433,5 +423,5 @@ func TestExec_RestoresCommitmentStateReader(t *testing.T) {
 	require.NoError(t, doms.Commit(ctx, tx))
 
 	require.Equal(t, readerBefore, doms.GetCommitmentContext().StateReader(),
-		"exec must restore the commitment state reader it found; leaving the parallel calculator's asOfStateReader installed breaks a later foreground SeekCommitment with in-mem history reads disabled")
+		"exec must restore the commitment state reader it found; leaving the parallel calculator's asOfStateReader installed breaks a later foreground SeekCommitment")
 }

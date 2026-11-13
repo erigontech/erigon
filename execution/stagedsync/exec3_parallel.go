@@ -389,12 +389,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// via its own Updates buffer.
 	pe.rs.Domains().SetDisableInlineTouchKey(true)
 	defer pe.rs.Domains().SetDisableInlineTouchKey(false)
-	// Restore the caller's InMemHistoryReads on exit; forcing it false breaks
-	// post-exec callers (forkchoice GetAsOf, RPC reads) that need in-mem history.
-	prevInMemHistoryReads := pe.rs.Domains().InMemHistoryReads()
-	pe.rs.Domains().SetInMemHistoryReads(true)
-	defer pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
-
 	// The calculator installs its own asOfStateReader on the shared commitment
 	// context; restore the prior reader on exit so it doesn't leak GetAsOf reads
 	// into later foreground commitment reads.

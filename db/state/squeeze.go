@@ -549,7 +549,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		domains.DiscardWrites(kv.AccountsDomain)
 		domains.DiscardWrites(kv.StorageDomain)
 		domains.DiscardWrites(kv.CodeDomain)
-		domains.SetInMemHistoryReads(false)
 		domains.EnableParaTrieDB(rwDb)
 		return nil
 	}
@@ -1254,7 +1253,14 @@ type rebuiltCommitment struct {
 
 func dumpCommitmentStep(ctx context.Context, a *Aggregator, sd *execctx.SharedDomains, step kv.Step) error {
 	d := a.d[kv.CommitmentDomain]
-	wal := sd.GetMemBatch().(*TemporalMemBatch).domainWriters[d.Name]
+	mem := sd.GetMemBatch().(*TemporalMemBatch)
+	wal := mem.domainWriters[d.Name]
+	if err := mem.projectHistory(); err != nil {
+		return err
+	}
+	if err := mem.projectValues(); err != nil {
+		return err
+	}
 	defer wal.Close()
 	coll, err := d.collateETL(ctx, step, step+1, wal.valsCollector(), nil, "")
 	if err != nil {

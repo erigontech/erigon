@@ -57,9 +57,7 @@ func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd execctx.DomainRea
 	return &HistoryReaderV3{ttx: ttx, sd: sd, txNum: txNum}
 }
 
-// getAsOf reads through sd's as-of read (in-batch memory, the shared state cache, then ttx). When sd is nil, or
-// sd.mem has inMemHistoryReads disabled, it falls through to ttx so the same reader type
-// serves both the in-batch and persisted-history modes.
+// getAsOf reads through sd's as-of read (in-batch memory, the shared state cache, then ttx).
 func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok bool, err error) {
 	if hr.asOf == nil {
 		hr.asOf = hr.ttx
@@ -67,10 +65,7 @@ func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok
 			hr.asOf = hr.sd.AsOfGetter(hr.ttx)
 		}
 	}
-	if enc, ok, err = hr.asOf.GetAsOf(domain, key, hr.txNum); hr.sd != nil && errors.Is(err, kv.ErrInMemHistoryDisabled) {
-		return hr.ttx.GetAsOf(domain, key, hr.txNum)
-	}
-	return enc, ok, err
+	return hr.asOf.GetAsOf(domain, key, hr.txNum)
 }
 
 func (hr *HistoryReaderV3) String() string {

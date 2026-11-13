@@ -82,7 +82,6 @@ func TestStateCache_UncommittedBatchWinsOnEveryReadPath(t *testing.T) {
 	require.NoError(t, err)
 	defer sd2.Close()
 	sd2.BindStateCache(sc)
-	sd2.SetInMemHistoryReads(true)
 	sd2.SetTxNum(30)
 	require.NoError(t, sd2.DomainPut(kv.AccountsDomain, rw2, addr[:], acc2, 30, acc1))
 	require.NoError(t, sd2.DomainPut(kv.CodeDomain, rw2, addr[:], code2, 30, code1))

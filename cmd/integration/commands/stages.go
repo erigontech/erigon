@@ -905,7 +905,6 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 		return 0, err
 	}
 	defer doms.Close()
-	doms.SetInMemHistoryReads(false)
 	doms.SetStateCache(stateCache)
 	execctx.GuardAggregatorForCache(db, stateCache)
 

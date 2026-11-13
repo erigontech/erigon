@@ -869,8 +869,6 @@ func (sd *SharedDomains) stageCacheUnwind(txNumUnwindTo uint64) {
 }
 
 func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
-func (sd *SharedDomains) SetInMemHistoryReads(v bool)      { sd.mem.SetInMemHistoryReads(v) }
-func (sd *SharedDomains) InMemHistoryReads() bool          { return sd.mem.InMemHistoryReads() }
 
 // GetLatestFromMemory reads local and parent memory. On a miss, maxStep is the
 // upper bound that a fallback read must honor.
