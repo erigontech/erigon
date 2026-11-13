@@ -1142,3 +1142,63 @@ func TestHistoryDisabledFallsThrough(t *testing.T) {
 		})
 	}
 }
+
+func newOverlayWithRows(tb testing.TB, rwTx kv.TemporalRwTx, rows int) *membatchwithdb.MemoryMutation {
+	tb.Helper()
+	src, err := membatchwithdb.NewMemoryBatch(rwTx)
+	require.NoError(tb, err)
+	for i := range rows {
+		require.NoError(tb, src.Put(kv.HeaderNumber, fmt.Appendf(nil, "K%08d", i), []byte("v")))
+	}
+	return src
+}
+
+func TestFlushIntoEmptyOverlayCopiesNoEntries(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	src := newOverlayWithRows(t, rwTx, 10_000)
+	defer src.Close()
+
+	allocs := testing.AllocsPerRun(1, func() {
+		dst, err := membatchwithdb.NewMemoryBatch(rwTx)
+		require.NoError(t, err)
+		require.NoError(t, src.Flush(t.Context(), dst))
+		dst.Close()
+	})
+	require.Less(t, allocs, 1000.0)
+}
+
+func TestFlushIntoEmptyOverlayKeepsOverlaysIndependent(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	initializeDbNonDupSort(t, rwTx) // AAAA, CAAA, CBAA, CCAA
+	src := newOverlayWithRows(t, rwTx, 3)
+	defer src.Close()
+	require.NoError(t, src.Delete(kv.HeaderNumber, []byte("AAAA")))
+	_, err := src.IncrementSequence(kv.EthTx, 7)
+	require.NoError(t, err)
+
+	dst, err := membatchwithdb.NewMemoryBatch(rwTx)
+	require.NoError(t, err)
+	defer dst.Close()
+	require.NoError(t, src.Flush(t.Context(), dst))
+
+	get := func(m *membatchwithdb.MemoryMutation, k string) string {
+		v, err := m.GetOne(kv.HeaderNumber, []byte(k))
+		require.NoError(t, err)
+		return string(v)
+	}
+	require.Equal(t, "v", get(dst, "K00000002"))
+	require.Empty(t, get(dst, "AAAA"))
+	require.Equal(t, "value1", get(dst, "CAAA"))
+	seq, err := dst.ReadSequence(kv.EthTx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), seq)
+
+	require.NoError(t, dst.Put(kv.HeaderNumber, []byte("K00000001"), []byte("dst")))
+	require.NoError(t, dst.Delete(kv.HeaderNumber, []byte("K00000000")))
+	require.NoError(t, src.Put(kv.HeaderNumber, []byte("K00000002"), []byte("src")))
+	require.Equal(t, "v", get(src, "K00000001"))
+	require.Equal(t, "v", get(src, "K00000000"))
+	require.Equal(t, "v", get(dst, "K00000002"))
+	require.Equal(t, "dst", get(dst, "K00000001"))
+	require.Empty(t, get(dst, "K00000000"))
+}

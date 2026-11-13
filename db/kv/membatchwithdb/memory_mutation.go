@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 	"unsafe"
@@ -706,6 +707,9 @@ func (m *MemoryMutation) CreateTable(bucket string) error {
 }
 
 func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
+	if dst, ok := tx.(*MemoryMutation); ok && dst.untouched() {
+		return m.copyInto(dst)
+	}
 	// Obtain buckets touched.
 	buckets, err := m.memTx.ListTables()
 	if err != nil {
@@ -1461,3 +1465,31 @@ func (td temporaldb) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) 
 }
 
 func (td temporaldb) Path() string { return "<mem>" }
+
+func (m *MemoryMutation) untouched() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	store, ok := m.memTx.(*memStore)
+	return ok && m.overlay == nil && len(m.deletedEntries) == 0 && len(m.deletedDups) == 0 && len(m.clearedTables) == 0 && store.empty()
+}
+
+// copyInto gives an untouched dst the state Flush would build in it, sharing m's tables copy-on-write.
+// Like Flush, it does not carry deletedDups.
+func (m *MemoryMutation) copyInto(dst *MemoryMutation) error {
+	src, ok := m.memTx.(*memStore)
+	if !ok {
+		return fmt.Errorf("MemoryMutation.Flush: unexpected in-memory store %T", m.memTx)
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	dst.mu.Lock()
+	defer dst.mu.Unlock()
+	src.copyInto(dst.memTx.(*memStore))
+	for bucket := range m.clearedTables {
+		dst.clearedTables[bucket] = struct{}{}
+	}
+	for bucket, keys := range m.deletedEntries {
+		dst.deletedEntries[bucket] = maps.Clone(keys)
+	}
+	return nil
+}

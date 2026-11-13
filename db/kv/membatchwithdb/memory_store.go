@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"maps"
 	"sort"
 	"sync"
 	"unsafe"
@@ -96,6 +97,24 @@ func memTableIsDupSort(table string) bool {
 		return false
 	}
 	return config.Flags&kv.DupSort != 0
+}
+
+func (s *memStore) empty() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.tables) == 0 && len(s.sequences) == 0
+}
+
+// copyInto replaces dst's tables with copy-on-write copies of s's.
+func (s *memStore) copyInto(dst *memStore) {
+	s.mu.Lock() // Copy writes the source tree's isolation id
+	defer s.mu.Unlock()
+	dst.mu.Lock()
+	defer dst.mu.Unlock()
+	for name, t := range s.tables {
+		dst.tables[name] = &memTable{tree: t.tree.Copy(), dupSort: t.dupSort}
+	}
+	maps.Copy(dst.sequences, s.sequences)
 }
 
 // getOrCreateTable must be called with mu held (read or write).
