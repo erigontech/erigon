@@ -967,3 +967,59 @@ func TestDecodeBlockAccessListReservesNoMoreThanTheBudget(t *testing.T) {
 		t.Fatalf("a zero budget reserved %d bytes for a malformed list", grew)
 	}
 }
+
+func TestDecodeBlockAccessListAllocatesPerKindNotPerChange(t *testing.T) {
+	bal := make(BlockAccessList, 100)
+	for i := range bal {
+		bal[i].Address[0] = byte(i + 1)
+		bal[i].StorageChanges = []SlotChanges{
+			{Slot: accounts.InternKey(common.Hash{1}), Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(5)}}},
+			{Slot: accounts.InternKey(common.Hash{2}), Changes: []*StorageChange{{Index: 1}, {Index: 2}}},
+		}
+		bal[i].StorageReads = []common.Hash{{3}, {4}}
+		bal[i].BalanceChanges = []*BalanceChange{{Index: 1, Value: *uint256.NewInt(7)}}
+		bal[i].NonceChanges = []*NonceChange{{Index: 1, Value: 1}}
+		bal[i].CodeChanges = []*CodeChange{{Index: 1, Bytecode: []byte{0x60}}}
+	}
+	enc, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got BlockAccessList
+	allocs := testing.AllocsPerRun(10, func() {
+		if got, err = DecodeBlockAccessListBytes(enc); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !reflect.DeepEqual(got, bal) {
+		t.Fatal("decoded BAL differs from the encoded one")
+	}
+	if allocs > float64(2*len(bal)) {
+		t.Fatalf("decoding %d accounts allocated %v times, want per kind, not per change", len(bal), allocs)
+	}
+	got[0].BalanceChanges = append(got[0].BalanceChanges, &BalanceChange{Index: 2})
+	if got[1].BalanceChanges[0].Index != 1 {
+		t.Fatal("appending to one account's changes overwrote the next account")
+	}
+}
+
+func TestDecodeBlockAccessListChangeArenaReservesNoMoreThanTheBudget(t *testing.T) {
+	list := func(body []byte) []byte {
+		prefix := make([]byte, rlp.ListPrefixLen(len(body)))
+		rlp.EncodeListPrefixToBuf(len(body), prefix)
+		return bytes.Join([][]byte{prefix, body}, nil)
+	}
+	balances := list(bytes.Repeat([]byte{0xc0}, 2_700_000))
+	entry := list(bytes.Join([][]byte{{0x94}, make([]byte, 20), {0xc0, 0xc0}, balances, {0xc0, 0xc0}}, nil))
+	enc := list(entry)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err := DecodeBlockAccessListSidecarForHeader(enc, BalItemCost)
+	runtime.ReadMemStats(&after)
+	if err == nil {
+		t.Fatal("decoded a malformed balance change")
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 64*1024 {
+		t.Fatalf("a one-item budget reserved %d bytes for a malformed change list", grew)
+	}
+}
