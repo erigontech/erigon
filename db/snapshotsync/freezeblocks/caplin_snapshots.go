@@ -448,11 +448,6 @@ func readCanonicalBlock(ctx context.Context, tx kv.Tx, r BeaconSnapshotReader, s
 	if err := ctx.Err(); err != nil {
 		return nil, common.Hash{}, err
 	}
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			block, root, err = nil, common.Hash{}, fmt.Errorf("block at slot %d: corrupt beacon snapshot: %v", slot, recovered)
-		}
-	}()
 	block, err = r.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
 	if err != nil {
 		return nil, common.Hash{}, err

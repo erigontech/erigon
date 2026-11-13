@@ -948,15 +948,17 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 		childSlot uint64
 		childRoot common.Hash
 		finalized uint64
+		parent    common.Hash
 		expected  uint64
 		err       string
 	}{
-		{"payload skipped", false, false, slot + 3, common.Hash{}, 0, 0, ""},
-		{"payload skipped, its blobs stored", false, true, slot + 3, common.Hash{}, 0, 0, ""},
-		{"payload on chain", true, false, slot + 3, common.Hash{}, 0, 2, "blob storage count mismatch at slot 7"},
-		{"payload skipped by a block that is not canonical", false, true, slot + 3, common.Hash{0xee}, 0, 0, "block at slot 10 is not canonical"},
-		{"payload skipped by a finalized child not frozen yet", false, true, unfrozen, common.Hash{}, epochEnd(unfrozen + 32), 0, ""},
-		{"payload skipped by a child after the finalized checkpoint", false, true, unfrozen, common.Hash{}, epochEnd(unfrozen), 2, ""},
+		{"payload skipped", false, false, slot + 3, common.Hash{}, 0, common.Hash{}, 0, ""},
+		{"payload skipped, its blobs stored", false, true, slot + 3, common.Hash{}, 0, common.Hash{}, 0, ""},
+		{"payload on chain", true, false, slot + 3, common.Hash{}, 0, common.Hash{}, 2, "blob storage count mismatch at slot 7"},
+		{"payload skipped by a block that is not canonical", false, true, slot + 3, common.Hash{0xee}, 0, common.Hash{}, 0, "block at slot 10 is not canonical"},
+		{"payload skipped by a finalized child not frozen yet", false, true, unfrozen, common.Hash{}, epochEnd(unfrozen + 32), common.Hash{}, 0, ""},
+		{"payload skipped by a child after the finalized checkpoint", false, true, unfrozen, common.Hash{}, epochEnd(unfrozen), common.Hash{}, 2, ""},
+		{"next block builds on another parent", false, true, slot + 3, common.Hash{}, 0, common.Hash{0xaa}, 2, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := clparams.MainnetBeaconConfig
@@ -973,6 +975,9 @@ func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
 			child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
 			child.Block.Slot = tc.childSlot
 			child.Block.ParentRoot = root
+			if tc.parent != (common.Hash{}) {
+				child.Block.ParentRoot = tc.parent
+			}
 			child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{0x02}
 			if tc.onChain {
 				child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = bid.BlockHash
@@ -1052,7 +1057,7 @@ func dumpedBlobWord(t *testing.T, dirs datadir.Dirs, slot uint64) []byte {
 	return word
 }
 
-func TestBlobCountFromBlocksRejectsABlockThatIsNotTheCanonicalOne(t *testing.T) {
+func TestDumpBlobSidecarsRangeStopsWhenTheFrozenWordIsNotTheCanonicalBlock(t *testing.T) {
 	const slot = 7
 	cfg := clparams.MainnetBeaconConfig
 	cfg.GloasForkEpoch = 0
@@ -1073,6 +1078,13 @@ func TestBlobCountFromBlocksRejectsABlockThatIsNotTheCanonicalOne(t *testing.T) 
 	other := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
 	other.Block.Slot = slot - 1
 	otherRoot, err := other.Block.HashSSZ()
+	require.NoError(t, err)
+	gloasOther := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	gloasOther.Block.Slot = slot - 1
+	for range 2 {
+		gloasOther.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	}
+	gloasOtherRoot, err := gloasOther.Block.HashSSZ()
 	require.NoError(t, err)
 	blobless := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
 	blobless.Block.Slot = slot
@@ -1096,6 +1108,7 @@ func TestBlobCountFromBlocksRejectsABlockThatIsNotTheCanonicalOne(t *testing.T) 
 		{"canonical block missing from the beacon segment", nil, root, "blob storage count mismatch at slot 7: 0 != 2"},
 		{"frozen block not canonical at its slot", blockSnapshotWord(t, block), common.Hash{0xee}, "block at slot 7 is not canonical"},
 		{"frozen block of another slot", blockSnapshotWord(t, other), otherRoot, "blob storage count mismatch at slot 7: 0 != 2"},
+		{"frozen Gloas block of another slot, canonical by root", blockSnapshotWord(t, gloasOther), gloasOtherRoot, "block at slot 7 is not canonical"},
 		{"frozen blobless Deneb block not canonical at its slot", blockSnapshotWord(t, blobless), common.Hash{0xee}, "blob storage count mismatch at slot 7: 0 != 2"},
 		{"frozen Deneb word whose body lost its commitments", withBodyRoot(t, blockSnapshotWord(t, blobless), denebBodyRoot), denebRoot, "blob storage count mismatch at slot 7: 0 != 2"},
 	} {

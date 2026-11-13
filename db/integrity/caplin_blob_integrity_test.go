@@ -695,10 +695,10 @@ func TestCheckCaplinBlobSidecarsFollowsTheChildsPayloadStatus(t *testing.T) {
 		{"payload skipped", 7, false, integrityChain{}, false, ""},
 		{"payload skipped, its blobs kept", 7, false, integrityChain{}, true, ""},
 		{"payload on chain", 7, true, integrityChain{}, false, "expected 1 sidecars, got 0"},
-		{"payload skipped by a block that is not canonical", 7, false, integrityChain{canonical: map[uint64]common.Hash{9: {0xee}}}, false, "blob snapshot slot 7: read child block: block at slot 9 is not canonical"},
+		{"payload skipped by a block that is not canonical", 7, false, integrityChain{canonical: map[uint64]common.Hash{9: {0xee}}}, false, "blob snapshot slot 7: payload status: block at slot 9 is not canonical"},
 		{"payload skipped by a finalized child not frozen yet", edge, false, integrityChain{}, false, ""},
-		{"child in a beacon segment whose index starts past it", edge, false, integrityChain{nextBase: new(uint64(snaptype.CaplinMergeLimit + 1))}, false, "blob snapshot slot 9999: read child block: slot 10000 is before the base data id 10001"},
-		{"child in a beacon segment with a stale index", edge, false, integrityChain{nextBase: new(uint64(0))}, false, "blob snapshot slot 9999: read child block: block at slot 10000: corrupt beacon snapshot"},
+		{"child in a beacon segment whose index starts past it", edge, false, integrityChain{nextBase: new(uint64(snaptype.CaplinMergeLimit + 1))}, false, "blob snapshot slot 9999: payload status: slot 10000 is before the base data id 10001"},
+		{"child in a beacon segment with a stale index", edge, false, integrityChain{nextBase: new(uint64(0))}, false, "blob snapshot slot 9999: payload status: slot 10000 is at or after the index end 10000"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := denebBlobIntegrityConfig()

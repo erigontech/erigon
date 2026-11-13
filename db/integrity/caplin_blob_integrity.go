@@ -262,7 +262,7 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freez
 	if expected > 0 && len(sidecars) == 0 && block.Version() >= clparams.GloasVersion {
 		skipped, err := freezeblocks.PayloadSkipped(ctx, tx, snapshots, reader, block, canonicalRoot)
 		if err != nil {
-			return fmt.Errorf("blob snapshot slot %d: read child block: %w", slot, err)
+			return fmt.Errorf("blob snapshot slot %d: payload status: %w", slot, err)
 		}
 		if skipped {
 			expected = 0
