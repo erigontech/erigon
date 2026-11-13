@@ -175,6 +175,9 @@ func (h *hashList) hashVectorSSZ() ([32]byte, error) {
 }
 
 func (h *hashList) HashSSZ() ([32]byte, error) {
+	if h.l > h.c {
+		return [32]byte{}, fmt.Errorf("hash list length exceeds limit: %d > %d", h.l, h.c)
+	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(h.l))
 	coreRoot, err := h.hashVectorSSZ()
 	if err != nil {

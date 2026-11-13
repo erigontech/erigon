@@ -57,3 +57,10 @@ func TestMerkleRootFromFlatFromIntermediateLevelWithLimitAcceptsPaddedLevels(t *
 		})
 	}
 }
+
+func TestMerkleRootFromFlatFromIntermediateLevelWithLimitRejectsShiftOverflow(t *testing.T) {
+	var root [32]byte
+	// A level holds at most ceil(limit / 2^start) nodes. The shifted comparison
+	// wraps here, so the bound must not be computed as (chunks-1)<<start.
+	require.Error(t, merkle_tree.MerkleRootFromFlatFromIntermediateLevelWithLimit(make([]byte, 5*32), root[:], 1<<62, 62))
+}

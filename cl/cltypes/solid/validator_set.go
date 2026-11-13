@@ -239,6 +239,9 @@ func (v *ValidatorSet) Get(idx int) Validator {
 }
 
 func (v *ValidatorSet) HashSSZ() ([32]byte, error) {
+	if v.l > v.c {
+		return [32]byte{}, fmt.Errorf("validator set length exceeds limit: %d > %d", v.l, v.c)
+	}
 	// generate root list
 	if v.MerkleTree == nil {
 		tree := &merkle_tree.MerkleTree{}

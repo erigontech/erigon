@@ -214,6 +214,9 @@ func (arr *byteBasedUint64Slice) Cap() int {
 
 // HashListSSZ computes the SSZ hash of the slice as a list. It returns the hash and any error encountered.
 func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
+	if arr.l > arr.c {
+		return [32]byte{}, fmt.Errorf("uint64 list length exceeds limit: %d > %d", arr.l, arr.c)
+	}
 	if arr.MerkleTree == nil {
 		arr.MerkleTree = &merkle_tree.MerkleTree{}
 		cap := uint64((arr.c*8 + length.Hash - 1) / length.Hash)
