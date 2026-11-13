@@ -812,6 +812,23 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	require.Empty(t, got)
 }
 
+// An account without code leaves the address-to-code-hash cache alone: exec
+// never resolves code for it through that cache.
+func TestCachePopulatingGetterSkipsCodeHashSeedWithoutCode(t *testing.T) {
+	addr := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
+	eoa := accounts.Account{Nonce: 1}
+	frontier := cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })
+	for _, value := range [][]byte{accounts.SerialiseV3(&eoa), nil} {
+		sc := newTestStateCache()
+		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: value}, view: sc.View(frontier), stepSize: 16}
+		_, _, err := cpg.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		_, ok := sc.View(nil).GetAddrCodeHash(addr)
+		require.False(t, ok)
+		sc.Close()
+	}
+}
+
 func TestReadAheadGetterCurrentStepFill(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
 	stateCache := newTestStateCache()
