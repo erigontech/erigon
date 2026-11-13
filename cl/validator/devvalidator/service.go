@@ -167,6 +167,7 @@ func (s *Service) resolveIndices(ctx context.Context) error {
 	}
 
 	var validators []validatorEntry
+	waiting := false
 	for {
 		err := s.client.get(ctx, "/eth/v1/beacon/states/head/validators", &validators)
 		if err == nil {
@@ -176,6 +177,10 @@ func (s *Service) resolveIndices(ctx context.Context) error {
 		var statusErr *statusError
 		if !errors.As(err, &statusErr) || statusErr.code != http.StatusServiceUnavailable {
 			return fmt.Errorf("get validators: %w", err)
+		}
+		if !waiting {
+			s.logger.Info("[dev-validator] waiting for head state", "err", err)
+			waiting = true
 		}
 		if err := common.Sleep(ctx, time.Second); err != nil {
 			return err
