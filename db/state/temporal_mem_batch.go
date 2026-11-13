@@ -31,6 +31,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -221,7 +222,16 @@ func (sd *TemporalMemBatch) PutCommitmentBranchDiff(k string, v []byte, txNum ui
 	return sd.domainWriters[kv.CommitmentDomain].PutWithPrevDiff(kb, v, txNum, preval, diff)
 }
 
+// shortcut: dbg bound probe, drops history and unwind-diff appends (keeps the values collector); remove after the bound.
+var probeSkipHistDiff = dbg.EnvBool("PROBE_SKIP_HISTDIFF", false)
+
 func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, sameTxNumUpdate bool) error {
+	if probeSkipHistDiff && domain != kv.CommitmentDomain {
+		if len(v) == 0 {
+			return sd.domainWriters[domain].addValue(k, nil, kv.Step(txNum/sd.stepSize))
+		}
+		return sd.domainWriters[domain].addValue(k, v, kv.Step(txNum/sd.stepSize))
+	}
 	// A same-txNum update only rewrites the value: history and the unwind diff
 	// record the value as of BEFORE txNum, which the first write already did —
 	// this write's preval is the intra-txNum intermediate, not a real prev.

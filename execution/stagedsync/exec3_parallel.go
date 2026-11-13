@@ -131,6 +131,8 @@ type parallelExecutor struct {
 	// persistent live accumulator — the apply loop is the sole sd.mem writer, so a
 	// global install would only race the fold's own transient bind.
 	currentChangeSet *changeset.StateChangeSet
+	probeRestore     func()
+	probeBoundHash   common.Hash
 	// currentChangeSetBlock is the block currentChangeSet belongs to (0 == none).
 	currentChangeSetBlock uint64
 	// currentChangeSetHash is the hash currentChangeSet was last saved under.
@@ -268,20 +270,44 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 	}
 }
 
+// shortcut: dbg bound probe, the fold binds a block's changeset once per block instead of per tx; remove after the bound.
+var probeFoldBindBlock = dbg.EnvBool("PROBE_FOLD_BIND_BLOCK", false)
+
+func (pe *parallelExecutor) probeUnbind() {
+	if pe.probeRestore != nil {
+		pe.probeRestore()
+		pe.probeRestore = nil
+	}
+}
+
 // foldTx applies one published tx's versionMap view and indexes to sd.mem.
 // Finalize logs share the final virtual task's txNum. That task has already
 // handled the receipt cache, so finalize indexes logs without changing it.
 func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
-	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
-	defer restoreCS()
+	if probeFoldBindBlock {
+		if pe.probeBoundHash != r.blockHash || pe.probeRestore == nil {
+			pe.probeUnbind()
+			pe.probeRestore = pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
+			pe.probeBoundHash = r.blockHash
+		}
+	} else {
+		restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
+		defer restoreCS()
+	}
 	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
 		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+	}
+	if probeSkipFoldIdx {
+		return nil
 	}
 	if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
 		return fmt.Errorf("fold index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
 	return nil
 }
+
+// shortcut: dbg bound probe, drops the fold log/trace index and receipt-cache writes; remove after the bound.
+var probeSkipFoldIdx = dbg.EnvBool("PROBE_SKIP_FOLD_IDX", false)
 
 func (pe *parallelExecutor) exec(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
@@ -681,6 +707,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
+					pe.probeUnbind()
 					built := balBuilder
 					balBuilder = nil
 					if finalized {
