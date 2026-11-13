@@ -576,8 +576,17 @@ func TestSharedDomain_MergeKeepsEarliestHistoryValueAtSameTxNum(t *testing.T) {
 
 	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
 	key := addr[:]
-	for _, otherUnwound := range []bool{false, true} {
-		t.Run(fmt.Sprintf("other unwound=%v", otherUnwound), func(t *testing.T) {
+	for _, tc := range []struct {
+		name                          string
+		earliest                      []byte
+		receiverUnwound, otherUnwound bool
+	}{
+		{name: "plain merge", earliest: []byte{0x10}},
+		{name: "merged batch unwound", earliest: []byte{0x10}, otherUnwound: true},
+		{name: "receiver unwound", earliest: []byte{0x10}, receiverUnwound: true},
+		{name: "receiver unwound, no earlier value", earliest: []byte{}, receiverUnwound: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			ctx := t.Context()
@@ -592,9 +601,13 @@ func TestSharedDomain_MergeKeepsEarliestHistoryValueAtSameTxNum(t *testing.T) {
 			require.NoError(t, err)
 			defer other.Close()
 
-			require.NoError(t, receiver.DomainPut(kv.CodeDomain, rwTx, key, []byte{0x20}, 5, []byte{0x10}))
+			require.NoError(t, receiver.DomainPut(kv.CodeDomain, rwTx, key, []byte{0x20}, 5, tc.earliest))
+			if tc.receiverUnwound {
+				var noDiffs [kv.DomainLen][]kv.DomainEntryDiff
+				receiver.Unwind(6, &noDiffs)
+			}
 			require.NoError(t, other.DomainPut(kv.CodeDomain, rwTx, key, []byte{0x30}, 5, []byte{0x20}))
-			if otherUnwound {
+			if tc.otherUnwound {
 				other.Unwind(6, nil)
 			}
 			require.NoError(t, receiver.Merge(ctx, 5, other, 5))
@@ -603,7 +616,7 @@ func TestSharedDomain_MergeKeepsEarliestHistoryValueAtSameTxNum(t *testing.T) {
 			prev, ok, err := rwTx.HistorySeek(kv.CodeDomain, key, 5)
 			require.NoError(t, err)
 			require.True(t, ok)
-			require.Equal(t, []byte{0x10}, prev, "value before txNum 5")
+			require.True(t, bytes.Equal(tc.earliest, prev), "value before txNum 5: %x", prev)
 			latest, _, err := rwTx.GetLatest(kv.CodeDomain, key, kv.GetLatestOptions{})
 			require.NoError(t, err)
 			require.Equal(t, []byte{0x30}, latest)

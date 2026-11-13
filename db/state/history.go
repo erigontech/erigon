@@ -469,6 +469,10 @@ func (ht *HistoryRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *histo
 }
 
 func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
+	return w.flush(ctx, tx, 0)
+}
+
+func (w *historyBufferedWriter) flush(ctx context.Context, tx kv.RwTx, keepExistingBelowTxNum uint64) error {
 	if w.discard {
 		return nil
 	}
@@ -476,12 +480,27 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	if w.historyVals != nil {
-		if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		load := loadFunc
+		if w.largeValues && keepExistingBelowTxNum > 0 {
+			load = keepExistingBelow(keepExistingBelowTxNum)
+		}
+		if err := w.historyVals.Load(tx, w.historyValsTable, load, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
 	}
 	w.close()
 	return nil
+}
+
+func keepExistingBelow(txNum uint64) etl.LoadFunc {
+	return func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if binary.BigEndian.Uint64(k[len(k)-8:]) < txNum {
+			if existing, err := table.Get(k); err != nil || existing != nil {
+				return err
+			}
+		}
+		return next(k, k, v)
+	}
 }
 
 func (w *historyBufferedWriter) valsCollector() *etl.Collector {

@@ -935,7 +935,7 @@ func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 func (sd *TemporalMemBatch) flushPreUnwindWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
 	for di, ws := range sd.preUnwindDomainWriters {
-		if err := flushDomainWriters(ctx, tx, ws); err != nil {
+		if err := flushDomainWriters(ctx, tx, ws, 0); err != nil {
 			return err
 		}
 		if len(ws) > 0 {
@@ -951,12 +951,12 @@ func (sd *TemporalMemBatch) flushPreUnwindWriters(ctx context.Context, tx kv.RwT
 	return nil
 }
 
-func flushDomainWriters(ctx context.Context, tx kv.RwTx, ws []*DomainBufferedWriter) error {
+func flushDomainWriters(ctx context.Context, tx kv.RwTx, ws []*DomainBufferedWriter, keepExistingHistoryBelowTxNum uint64) error {
 	for _, w := range slices.Backward(ws) {
 		if w.discard {
 			continue
 		}
-		if err := w.h.Flush(ctx, tx); err != nil {
+		if err := w.h.flush(ctx, tx, keepExistingHistoryBelowTxNum); err != nil {
 			return err
 		}
 	}
@@ -978,7 +978,7 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if w != nil {
 			ws = append(slices.Clip(ws), w)
 		}
-		if err := flushDomainWriters(ctx, tx, ws); err != nil {
+		if err := flushDomainWriters(ctx, tx, ws, sd.unwindToTxNum); err != nil {
 			return err
 		}
 		if w != nil {
