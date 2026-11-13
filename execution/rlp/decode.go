@@ -786,35 +786,6 @@ func (s *Stream) ViewBytes() ([]byte, error) {
 	}
 }
 
-// ViewList reads a whole list and returns its content, for callers that parse it with Split.
-// On a stream from NewBytesStream the result aliases the input; any other reader gets a copy.
-func (s *Stream) ViewList() ([]byte, error) {
-	kind, size, err := s.Kind()
-	if err != nil {
-		return nil, err
-	}
-	if kind != List {
-		return nil, ErrExpectedList
-	}
-	if s.sliceRdr == nil {
-		b := make([]byte, size)
-		if err := s.readFull(b); err != nil {
-			return nil, err
-		}
-		return b, nil
-	}
-	if err := s.willRead(size); err != nil {
-		return nil, err
-	}
-	if uint64(len(s.sliceRdr)-s.off) < size {
-		return nil, io.ErrUnexpectedEOF
-	}
-	end := s.off + int(size)
-	b := s.sliceRdr[s.off:end:end]
-	s.off = end
-	return b, nil
-}
-
 // ReadBytes reads an RLP string into b, which must match the exact decoded value size.
 func (s *Stream) ReadBytes(b []byte) error {
 	kind, size, err := s.Kind()

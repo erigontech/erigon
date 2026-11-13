@@ -23,11 +23,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"strings"
 	"testing"
 	"testing/quick"
-
-	"github.com/holiman/uint256"
 )
 
 func TestCountValues(t *testing.T) {
@@ -335,43 +332,6 @@ func TestStringLen(t *testing.T) {
 		enc, _ := EncodeToBytes(test.v)
 		if len(enc) != test.len {
 			t.Errorf("len(EncodeToBytes(%#x)) -> %d, test says %d", test.v, len(enc), test.len)
-		}
-	}
-}
-
-func TestSplitUint256(t *testing.T) {
-	max := "A0" + strings.Repeat("FF", 32)
-	tests := []struct {
-		input string
-		val   string
-		rest  string
-		err   error
-	}{
-		{"01", "0x1", "", nil},
-		{"7FFF", "0x7f", "FF", nil},
-		{"80FF", "0x0", "FF", nil},
-		{"81FAFF", "0xfa", "FF", nil},
-		{max, "0x" + strings.Repeat("ff", 32), "", nil},
-
-		// errors
-		{"", "0x0", "", io.ErrUnexpectedEOF},
-		{"00", "0x0", "00", ErrCanonInt},
-		{"8100", "0x0", "8100", ErrCanonSize},
-		{"8200FF", "0x0", "8200FF", ErrCanonInt},
-		{"A1" + strings.Repeat("FF", 33), "0x0", "A1" + strings.Repeat("FF", 33), errUint256Large},
-		{"C0", "0x0", "C0", ErrExpectedString},
-	}
-	for i, test := range tests {
-		var val uint256.Int
-		rest, err := SplitUint256(unhex(test.input), &val)
-		if val.Hex() != test.val {
-			t.Errorf("test %d: val mismatch: got %s, want %s (input %q)", i, val.Hex(), test.val, test.input)
-		}
-		if !bytes.Equal(rest, unhex(test.rest)) {
-			t.Errorf("test %d: rest mismatch: got %x, want %s (input %q)", i, rest, test.rest, test.input)
-		}
-		if !errors.Is(err, test.err) {
-			t.Errorf("test %d: error mismatch: got %q, want %q", i, err, test.err)
 		}
 	}
 }

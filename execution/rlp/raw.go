@@ -23,8 +23,6 @@ import (
 	"encoding/binary"
 	"io"
 	"reflect"
-
-	"github.com/holiman/uint256"
 )
 
 // RawValue represents an encoded RLP value and can be used to delay
@@ -83,23 +81,6 @@ func SplitUint64(b []byte) (x uint64, rest []byte, err error) {
 		}
 		return x, rest, nil
 	}
-}
-
-// SplitUint256 decodes an integer of up to 32 bytes at the beginning of b into dst,
-// with the canonical-encoding checks of Stream.ReadUint256.
-func SplitUint256(b []byte, dst *uint256.Int) (rest []byte, err error) {
-	content, rest, err := SplitString(b)
-	if err != nil {
-		return b, err
-	}
-	if len(content) > 32 {
-		return b, errUint256Large
-	}
-	if len(content) > 0 && content[0] == 0 {
-		return b, ErrCanonInt
-	}
-	dst.SetBytes(content)
-	return rest, nil
 }
 
 // SplitList splits b into the content of a list and any remaining
