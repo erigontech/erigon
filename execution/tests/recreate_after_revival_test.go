@@ -48,8 +48,9 @@ func setExecWorkers(t *testing.T, workers int) {
 	ethconfig.Defaults.Sync.ExecWorkerCount = workers
 }
 
-// generatedBlockWant pins the root and gas of generated blocks.
-// Generation and import share the versioned state code, so neither can check the other.
+// generatedBlockWant pins the root and gas of generated blocks, as the removed serial executor computed them.
+// Generation and import share the versioned state code, so the missing-entry hint checks nothing: check a new
+// row against an independent source (another client, or the expected state worked out by hand).
 var generatedBlockWant = map[string]struct {
 	root string
 	gas  uint64

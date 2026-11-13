@@ -565,7 +565,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				if ws == nil || ws.IsEmpty() {
 					continue
 				}
-				if err := state.ApplyWrites(ws, domains, tx, blockNum, txNum, nil, blockRules, false); err != nil {
+				if err := state.ApplyWrites(ws, domains, tx, blockNum, txNum, blockRules, false); err != nil {
 					return nil, nil, fmt.Errorf("apply versioned block writes: %w", err)
 				}
 			}

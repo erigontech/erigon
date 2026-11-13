@@ -60,7 +60,6 @@ type Task interface {
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
 	VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
-	ResetGasPool(*protocol.GasPool)
 
 	Tx() types.Transaction
 	TxType() uint8
@@ -210,15 +209,14 @@ type ApplyMessage func(evm *vm.EVM, msg protocol.Message, gp *protocol.GasPool, 
 // which is processed by a single thread that writes into the ReconState1 and
 // flushes to the database
 type TxTask struct {
-	TxNum              uint64
-	TxIndex            int // -1 for block initialisation
-	Header             *types.Header
-	Txs                types.Transactions
-	Uncles             []*types.Header
-	Withdrawals        types.Withdrawals
-	EvmBlockContext    evmtypes.BlockContext
-	HistoryExecution   bool // use history reader for that txn instead of state reader
-	BalanceIncreaseSet map[accounts.Address]uint256.Int
+	TxNum            uint64
+	TxIndex          int // -1 for block initialisation
+	Header           *types.Header
+	Txs              types.Transactions
+	Uncles           []*types.Header
+	Withdrawals      types.Withdrawals
+	EvmBlockContext  evmtypes.BlockContext
+	HistoryExecution bool // use history reader for that txn instead of state reader
 
 	Tracer *calltracer.CallTracer
 	Hooks  *tracing.Hooks
@@ -404,10 +402,6 @@ func (t *TxTask) GasPool() *protocol.GasPool {
 	return protocol.NewGasPool(t.Header.GasLimit, t.Config.GetMaxBlobGasPerBlock(t.Header.Time))
 }
 
-func (t *TxTask) ResetGasPool(gasPool *protocol.GasPool) {
-	t.gasPool = gasPool
-}
-
 func (t *TxTask) Version() state.Version {
 	return state.Version{BlockNum: t.BlockNumber(), TxNum: t.TxNum, TxIndex: t.TxIndex}
 }
@@ -449,7 +443,6 @@ func (t *TxTask) IsHistoric() bool {
 }
 
 func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
-	t.BalanceIncreaseSet = nil
 	ibs.Reset()
 	ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
 
@@ -595,7 +588,6 @@ func (t *TxTask) Execute(evm *vm.EVM,
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
-		t.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
 		// Genesis (block 0, txIndex -1) resolves `ibs` to the throwaway versioned
 		// IBS that GenesisToBlock builds, whatever the executor. Its writes reach
 		// the executor only through MakeWriteSet(stateWriter); the FinalizedWrites

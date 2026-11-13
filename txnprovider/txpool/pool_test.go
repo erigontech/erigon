@@ -2832,8 +2832,8 @@ func TestZombieQueuedEviction(t *testing.T) {
 
 // TestStalePendingEvictionViaMineNonce verifies that when the execution layer
 // correctly emits a state-diff UPSERT for an AuRa/Gnosis system-transaction
-// sender (fixed in the executor by passing the accumulator to the block-end
-// stateWriter), the txpool evicts the now-stale pending transactions.
+// sender (the apply loop sends the finalize writes to the accumulator), the txpool
+// evicts the now-stale pending transactions.
 //
 // Scenario:
 //  1. addr1 has two pending txns: T1 (nonce=0) and T2 (nonce=1).
@@ -2922,8 +2922,8 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 	writeAccount(2, 1)
 
 	// ── Step 4: OnNewBlock with the correct stateChanges from the fixed EL ───
-	// The fix ensures addr1 appears in stateChanges with
-	// nonce=2 because the block-end stateWriter now carries the accumulator.
+	// addr1 appears in stateChanges with nonce=2 because the apply loop sends the
+	// finalize writes to the accumulator.
 	h1 := gointerfaces.ConvertHashToH256([32]byte{1})
 	blockChange := &remoteproto.StateChangeBatch{
 		StateVersionId: 1, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
