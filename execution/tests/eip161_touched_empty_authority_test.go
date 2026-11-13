@@ -190,8 +190,8 @@ func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
 	}
 }
 
-// A transaction touches an absent account, which EIP-161 keeps absent. A later transaction
-// delegates the account as an EIP-7702 authority and clears the delegation in the same
+// A transaction touches an absent or empty account, which is absent after it (EIP-161). A later
+// transaction delegates the account as an EIP-7702 authority and clears the delegation in the same
 // authorization list. The account has no code before and after the block, so its block access
 // list entry has a nonce change and no code change.
 func TestTouchedEmptyAuthoritySetAndClearedHasNoCodeChange(t *testing.T) {
@@ -214,18 +214,22 @@ func TestTouchedEmptyAuthoritySetAndClearedHasNoCodeChange(t *testing.T) {
 	feeCap := uint256.NewInt(10_000_000_000)
 
 	for _, tc := range []struct {
-		name     string
-		coinbase common.Address
-		tip      uint64
-		code     []byte
+		name           string
+		coinbase       common.Address
+		tip            uint64
+		code           []byte
+		emptyAuthority bool
 	}{
-		{"self-destruct beneficiary", common.Address{1}, 1, append(append([]byte{byte(vm.PUSH20)}, authority[:]...), byte(vm.SELFDESTRUCT))},
-		{"zero tip", authority, 0, []byte{byte(vm.STOP)}},
+		{"self-destruct beneficiary", common.Address{1}, 1, append(append([]byte{byte(vm.PUSH20)}, authority[:]...), byte(vm.SELFDESTRUCT)), false},
+		{"zero tip", authority, 0, []byte{byte(vm.STOP)}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			alloc := types.GenesisAlloc{toucher: {Code: tc.code}, delegate: {Code: []byte{byte(vm.STOP)}}}
 			for _, sender := range senders {
 				alloc[sender] = types.GenesisAccount{Balance: big.NewInt(1_000_000_000_000_000_000)}
+			}
+			if tc.emptyAuthority {
+				alloc[authority] = types.GenesisAccount{Balance: big.NewInt(0)}
 			}
 			gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 			fill := func(b *blockgen.BlockGen) {
