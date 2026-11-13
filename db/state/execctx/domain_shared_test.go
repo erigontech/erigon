@@ -532,6 +532,45 @@ func TestSharedDomain_MergeFlushesValuesInWriteOrder(t *testing.T) {
 	}
 }
 
+func TestSharedDomain_MergeKeepsReceiverRowsWrittenAfterItsUnwind(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 4)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	receiver, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer receiver.Close()
+	other, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer other.Close()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	key := addr[:]
+	require.NoError(t, receiver.DomainPut(kv.AccountsDomain, rwTx, key, []byte{0x10}, 1, nil))
+	unwound := &changeset.StateChangeSet{}
+	receiver.SetChangesetAccumulator(unwound)
+	receiver.SetTxNum(2)
+	require.NoError(t, receiver.DomainPut(kv.AccountsDomain, rwTx, key, []byte{0x20}, 2, []byte{0x10}))
+	receiver.SetChangesetAccumulator(nil)
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	for d := range diffs {
+		diffs[d] = unwound.Diffs[d].GetDiffSet()
+	}
+	receiver.Unwind(2, &diffs)
+	reexecuted := []byte{0x30}
+	require.NoError(t, receiver.DomainPut(kv.AccountsDomain, rwTx, key, reexecuted, 2, []byte{0x10}))
+	other.Unwind(3, nil)
+
+	require.NoError(t, receiver.Merge(ctx, 2, other, 3))
+	require.NoError(t, receiver.Flush(ctx, rwTx))
+	got, _, err := rwTx.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, reexecuted, got, "latest written after the receiver's unwind, merged with an unwound batch")
+}
+
 // TestNewSharedDomains_StateAheadOfBlocks verifies that when the persisted
 // commitment state is ahead of the TxNums index (catch-up scenario),
 // NewSharedDomains returns ErrBehindCommitment but the SharedDomains itself
