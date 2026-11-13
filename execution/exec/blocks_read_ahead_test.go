@@ -724,6 +724,20 @@ func TestCachePopulatingGetterDoesNotCacheBoundedRead(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestCachePopulatingGetterWarmOnlySkipsCachedKey(t *testing.T) {
+	account := accounts.Account{Nonce: 1}
+	source := &sharedCodeTemporalGetter{account: accounts.SerialiseV3(&account)}
+	sc := newTestStateCache()
+	t.Cleanup(sc.Close)
+	addr := common.Address{19: 1}
+	seedFill(sc, kv.AccountsDomain, addr[:], source.account, 5)
+	cpg := &cachePopulatingGetter{TemporalGetter: source, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 16, warmOnly: true}
+	v, _, err := cpg.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, source.account, v)
+	require.Zero(t, source.accountReads)
+}
+
 // Same invariant for the code addr→code binding, which is rebound when an
 // account's code changes and is therefore just as clobber-able as accounts.
 func TestCachePopulatingGetterKeepsFresherCodeBinding(t *testing.T) {

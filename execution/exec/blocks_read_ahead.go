@@ -101,6 +101,8 @@ type cachePopulatingGetter struct {
 	view     cache.ReadView
 	snapshot cache.Frontier
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
+	// warmOnly answers from the cache when it holds the key: a warmup only fills, and exec reads the same keys at the same time.
+	warmOnly bool
 }
 
 func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGetter {
@@ -113,7 +115,7 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 		return execctx.NewTemporalTxStateGetter(ttx)
 	}
 	frontier := cache.FrontierWithStateVersion(debug, stateVersion)
-	getter := &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
+	getter := &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize(), warmOnly: true}
 	if !kv.UnderlyingTxIsWritable(ttx) {
 		getter.snapshot = frontier
 	}
@@ -121,6 +123,11 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if cpg.warmOnly && opts.MaxStep() == kv.NoStepBound {
+		if v, txNum, ok := cpg.view.GetWithTxNum(name, k); ok {
+			return v, kv.Step(txNum / cpg.stepSize), nil
+		}
+	}
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k, opts)
 	if err == nil && opts.MaxStep() == kv.NoStepBound {
 		readTxNum := cache.ClampFillTxNum(cpg.snapshot, name, step.LastTxNum(cpg.stepSize))
