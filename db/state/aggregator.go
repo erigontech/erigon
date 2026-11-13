@@ -2225,6 +2225,10 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 	plan := fileBuildPlan{firstStep: stateStep}
 	// A one-step resume reaches the existing state-file boundary. Older backfills
 	// would lower visibility, so retain their MDBX data while healthy entities advance.
+	var minResumeStep kv.Step
+	if stateStep > 0 {
+		minResumeStep = stateStep - 1
+	}
 	for id, d := range at.d {
 		if d == nil || !d.d.Enabled.Load() {
 			plan.deferredDomains[id] = true
@@ -2233,12 +2237,12 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 		if d.FirstStepNotInFiles() >= stateStep {
 			continue
 		}
-		first, found, err := d.d.firstStepToBuild(tx, d.FirstStepNotInFiles(), stateStep-1)
+		first, found, err := d.d.firstStepToBuild(tx, d.FirstStepNotInFiles(), minResumeStep)
 		if err != nil {
 			return plan, err
 		}
 		if found {
-			if first < stateStep && stateStep-first > 1 {
+			if first < minResumeStep {
 				plan.deferredDomains[id] = true
 				at.a.logger.Warn("[snapshots] missing files require rebuilding; keeping pending data in MDBX", "domain", d.d.Name, "pendingStep", first, "stateStep", stateStep)
 				continue
@@ -2260,7 +2264,7 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 		}
 		if found {
 			first = max(ii.FirstStepNotInFiles(), first)
-			if first < stateStep && stateStep-first > 1 {
+			if first < minResumeStep {
 				plan.deferredIndices[id] = true
 				at.a.logger.Warn("[snapshots] missing files require rebuilding; keeping pending data in MDBX", "index", ii.ii.Name, "fromStep", first, "stateStep", stateStep)
 				continue

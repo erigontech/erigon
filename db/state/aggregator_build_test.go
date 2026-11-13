@@ -166,6 +166,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 		for _, test := range []struct{ resumeStep, stateSteps kv.Step }{{0, 1}, {1, 2}, {0, 3}, {1, 4}} {
 			resumeStep := test.resumeStep
 			t.Run(fmt.Sprintf("%s/step_%d/state_%d", target, resumeStep, test.stateSteps), func(t *testing.T) {
+				deferred := test.stateSteps > resumeStep+1
 				db, agg := testDbAndAggregatorv3(t, stepSize)
 				ctx := t.Context()
 				configure := func(agg *Aggregator) {
@@ -249,7 +250,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					}
 					plan, err := at.planFileBuild(counted)
 					require.NoError(t, err)
-					if test.stateSteps > resumeStep+1 {
+					if deferred {
 						require.Equal(t, test.stateSteps, plan.firstStep, "an unsafe backfill must not block healthy entities")
 						if target == "receipt_without_history" || target == "rcache" {
 							require.Equal(t, 1, counted.scans)
@@ -263,40 +264,21 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 				finished, started := agg.buildFilesInBackground(asTemporalRoDB(db), lastTxNum, false, unboundedFinalityCtx)
 				require.True(t, started)
 				<-finished
-				if test.stateSteps > resumeStep+1 {
-					require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
-						at := agg.BeginFilesRo()
-						defer at.Close()
-						require.Equal(t, lastTxNum, at.TxNumsInFiles(kv.StateDomains...), "healthy snapshots must keep advancing")
-						_, err := at.prune(ctx, tx, 0, true, nil)
-						require.NoError(t, err)
-						got, _, found, err := at.d[kv.AccountsDomain].GetLatest(key, tx)
-						require.NoError(t, err)
-						require.True(t, found)
-						require.Equal(t, value, got, "rejected resume must preserve filed state")
-						for _, domain := range []kv.Domain{kv.ReceiptDomain, kv.RCacheDomain} {
-							got, _, found, readErr := at.d[domain].GetLatest(key, tx)
-							require.NoError(t, readErr)
-							require.True(t, found)
-							require.Equal(t, value, got, "retain pending data for %s", domain)
-						}
-						entries, err := at.IndexRange(kv.LogAddrIdx, key, 0, int(lastTxNum), order.Asc, -1, tx)
-						require.NoError(t, err)
-						defer entries.Close()
-						txNums, err := stream.ToArray(entries)
-						require.NoError(t, err)
-						require.Equal(t, []uint64{uint64(resumeStep)*stepSize + 1}, txNums)
-						return at.CheckFilesDBGap(tx)
-					}))
-					return
-				}
 				require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 					at := agg.BeginFilesRo()
 					defer at.Close()
-					require.Equal(t, lastTxNum, at.TxNumsInFiles(kv.ReceiptDomain), "receipt files must catch up")
-					require.Equal(t, lastTxNum, at.TxNumsInFiles(kv.StateDomains...), "state snapshot production must continue")
+					require.Equal(t, lastTxNum, at.TxNumsInFiles(kv.StateDomains...), "healthy snapshots must keep advancing")
+					if !deferred {
+						require.Equal(t, lastTxNum, at.TxNumsInFiles(kv.ReceiptDomain), "receipt files must catch up")
+					}
 					_, err := at.prune(ctx, tx, 0, true, nil)
 					require.NoError(t, err)
+					if deferred {
+						got, _, found, readErr := at.d[kv.AccountsDomain].GetLatest(key, tx)
+						require.NoError(t, readErr)
+						require.True(t, found)
+						require.Equal(t, value, got, "rejected resume must preserve filed state")
+					}
 					for _, domain := range []kv.Domain{kv.ReceiptDomain, kv.RCacheDomain} {
 						got, _, found, readErr := at.d[domain].GetLatest(key, tx)
 						require.NoError(t, readErr)
@@ -309,6 +291,9 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					txNums, err := stream.ToArray(entries)
 					require.NoError(t, err)
 					require.Equal(t, []uint64{uint64(resumeStep)*stepSize + 1}, txNums)
+					if deferred {
+						return at.CheckFilesDBGap(tx)
+					}
 					return nil
 				}))
 			})
