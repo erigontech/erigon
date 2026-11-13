@@ -1206,6 +1206,11 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 	return nil
 }
 
+// frameTxnBodyFields is the number of fields in a bare frame transaction body:
+// chain id, nonce, sender, frames, max priority fee, max fee, max fee per blob
+// gas and blob versioned hashes.
+const frameTxnBodyFields = 8
+
 // hasBlobTxn reports whether a Transactions payload contains a blob transaction
 // or a frame transaction that carries blobs, wrapped or bare. Malformed payloads, and payloads
 // over maxTransactionsPerPacket, report false and are left to the regular parser.
@@ -1248,7 +1253,13 @@ func isBlobEnvelope(txBytes []byte) bool {
 		}
 		var lastLen int
 		var lastIsList bool
-		for pos, end := bodyPos, bodyPos+bodyLen; pos < end; {
+		fields := 0
+		for pos, end := bodyPos, bodyPos+bodyLen; pos < end; fields++ {
+			// A bare frame body has exactly frameTxnBodyFields fields; leave
+			// anything longer to the regular parser.
+			if fields == frameTxnBodyFields {
+				return false
+			}
 			dataPos, dataLen, isList, err := rlp.Prefix(txBytes, pos)
 			if err != nil {
 				return false

@@ -1385,6 +1385,18 @@ func TestHasBlobTxnBareFrame(t *testing.T) {
 	require.True(t, hasBlobTxn(EncodeTransactions([][]byte{makeBareFrameBlobTxnRlp(t)}, nil)))
 }
 
+func TestHasBlobTxnBareFrameFieldLimit(t *testing.T) {
+	// A type-6 body of many empty strings followed by a nonempty list is not a
+	// valid frame body; the scan must give up instead of walking every field.
+	body := bytes.Repeat([]byte{0x80}, frameTxnBodyFields)
+	body = append(body, 0xc1, 0x01)
+	rlpList := func(b []byte) []byte { return append([]byte{0xc0 + byte(len(b))}, b...) }
+	require.False(t, isBlobEnvelope(append([]byte{FrameTxnType}, rlpList(body)...)))
+	// Exactly frameTxnBodyFields fields with a nonempty last list is a blob frame.
+	body = append(bytes.Repeat([]byte{0x80}, frameTxnBodyFields-1), 0xc1, 0x01)
+	require.True(t, isBlobEnvelope(append([]byte{FrameTxnType}, rlpList(body)...)))
+}
+
 func TestPenalizePeerForBroadcastBlobTxn(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []string{"blob", "frame-blob", "bare-frame-blob"} {
