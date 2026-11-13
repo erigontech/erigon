@@ -423,7 +423,9 @@ func TestSharedDomain_MergeKeepsOtherWritesBufferedBeforeUnwind(t *testing.T) {
 	key := addr[:]
 	kept := []byte{0x10}
 	require.NoError(t, other.DomainPut(kv.AccountsDomain, rwTx, key, kept, 1, nil))
+	require.NoError(t, other.IndexAdd(kv.TracesToIdx, key, 1))
 	const unwindTo = 2
+	require.NoError(t, other.IndexAdd(kv.TracesToIdx, key, unwindTo))
 	unwound := &changeset.StateChangeSet{}
 	other.SetChangesetAccumulator(unwound)
 	other.SetTxNum(unwindTo)
@@ -442,6 +444,11 @@ func TestSharedDomain_MergeKeepsOtherWritesBufferedBeforeUnwind(t *testing.T) {
 	txNums, err := stream.ToArrayU64(it)
 	require.NoError(t, err)
 	require.Equal(t, []uint64{1}, txNums, "history index after merging a batch unwound to txNum %d", unwindTo)
+	it, err = rwTx.IndexRange(kv.TracesToIdx, key, 0, -1, order.Asc, -1)
+	require.NoError(t, err)
+	txNums, err = stream.ToArrayU64(it)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{1}, txNums, "traces index after merging a batch unwound to txNum %d", unwindTo)
 }
 
 func TestSharedDomain_DiscardWritesCoversWritesBufferedBeforeUnwind(t *testing.T) {
