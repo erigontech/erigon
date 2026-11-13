@@ -481,7 +481,7 @@ func TestSharedDomain_MergeFlushesValuesInWriteOrder(t *testing.T) {
 	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
 	key := addr[:]
 	older, newest := []byte{0x14}, []byte{0x15}
-	for _, name := range []string{"receiver wrote first", "two merges", "merged batch wrote after its own merge", "two merges then unwind above them"} {
+	for _, name := range []string{"receiver wrote first", "two merges", "merged batch wrote after its own merge", "two merges then unwind above them", "merged batch unwound above both"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			ctx := t.Context()
@@ -504,7 +504,7 @@ func TestSharedDomain_MergeFlushesValuesInWriteOrder(t *testing.T) {
 
 			receiver, other := newBatch(), newBatch()
 			switch name {
-			case "receiver wrote first":
+			case "receiver wrote first", "merged batch unwound above both":
 				put(receiver, older, 4)
 			case "two merges", "two merges then unwind above them":
 				first := newBatch()
@@ -516,6 +516,9 @@ func TestSharedDomain_MergeFlushesValuesInWriteOrder(t *testing.T) {
 				merge(other, child, 4)
 			}
 			put(other, newest, 5)
+			if name == "merged batch unwound above both" {
+				other.Unwind(6, nil)
+			}
 			merge(receiver, other, 5)
 			if name == "two merges then unwind above them" {
 				receiver.Unwind(6, nil)
