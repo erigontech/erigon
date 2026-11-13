@@ -365,7 +365,8 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 			return ErrTxTypeNotSupported
 		}
 		r.Type = b[0]
-		inner := rlp.NewStream(bytes.NewReader(b[1:]), uint64(len(b)-1))
+		inner := rlp.NewBytesStream(b[1:])
+		defer rlp.PutStream(inner)
 		if err := r.decodePayload(inner); err != nil {
 			return err
 		}
