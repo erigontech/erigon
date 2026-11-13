@@ -1389,12 +1389,16 @@ func (r *borrowingCodeReader) ReadAccountCode(addr accounts.Address) ([]byte, er
 	return r.code, nil
 }
 
-func (r *borrowingCodeReader) BorrowAccountCode(addr accounts.Address) ([]byte, bool, error) {
+func (r *borrowingCodeReader) ReadAccountCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (bool, error) {
 	if r.refuse {
-		return nil, false, nil
+		return false, nil
 	}
 	r.borrows++
-	return r.code, addr == r.addr, nil
+	if addr != r.addr {
+		return false, nil
+	}
+	common.CopySegment(dst, r.code, from)
+	return true, nil
 }
 
 func runExtCodeCopy(t *testing.T, borrow bool, memOffset, codeOffset, length uint256.Int, memSize uint64) ([]byte, int) {

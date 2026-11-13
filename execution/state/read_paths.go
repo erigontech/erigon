@@ -1282,12 +1282,19 @@ func recordWipedCodeRead(s *IntraBlockState, addr accounts.Address, path Account
 
 // readCode returns the contract code with its hash.
 func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSource, Version, error) {
-	return readCodeBorrowing(s, addr, false)
+	return readCodeSegment(s, addr, nil)
 }
 
-// readCodeBorrowing is readCode; with borrow, a storage read that misses every cache may
-// return bytes borrowed from the worker and record the read without them.
-func readCodeBorrowing(s *IntraBlockState, addr accounts.Address, borrow bool) (accounts.Code, ReadSource, Version, error) {
+// codeSegment is the target of a code read that copies only a segment of the code.
+type codeSegment struct {
+	from   uint64
+	dst    []byte
+	copied bool // the read copied the segment into dst and returned the code without bytes
+}
+
+// readCodeSegment is readCode; with seg, a storage read that misses every cache copies the
+// segment into seg.dst and records the read without the code bytes.
+func readCodeSegment(s *IntraBlockState, addr accounts.Address, seg *codeSegment) (accounts.Code, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
 			code, err := s.recordedCode(addr, tr)
@@ -1295,15 +1302,16 @@ func readCodeBorrowing(s *IntraBlockState, addr accounts.Address, borrow bool) (
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, borrow, &r)
-	if borrow && r.err == nil && r.outcome == outcomeReturnDefault && r.hdr.Source == StorageRead {
-		code, borrowed, err := s.borrowOriginCode(addr)
+	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, seg != nil, &r)
+	if seg != nil && r.err == nil && r.outcome == outcomeReturnDefault && r.hdr.Source == StorageRead {
+		codeHash, copied, err := s.readOriginCodeSegmentTo(addr, seg.from, seg.dst)
 		if err != nil {
 			return accounts.Code{}, StorageRead, UnknownVersion, err
 		}
-		if borrowed {
-			s.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{r.hdr, accounts.Code{Hash: code.Hash}})
-			return code, StorageRead, r.hdr.Version, nil
+		if copied {
+			seg.copied = true
+			s.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{r.hdr, accounts.Code{Hash: codeHash}})
+			return accounts.Code{Hash: codeHash}, StorageRead, r.hdr.Version, nil
 		}
 		r = readPathResult{}
 		versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
@@ -1360,8 +1368,8 @@ func codeBytesDropped(c accounts.Code) bool {
 	return c.Bytes == nil && !c.Hash.IsEmpty()
 }
 
-type codeBorrower interface {
-	BorrowAccountCode(accounts.Address) ([]byte, bool, error)
+type codeSegmentReader interface {
+	ReadAccountCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (bool, error)
 }
 
 // recordedCode returns a recorded read's code, re-reading bytes the record dropped.
@@ -1378,29 +1386,29 @@ func (ibs *IntraBlockState) recordedCode(addr accounts.Address, tr VersionedRead
 	return code, nil
 }
 
-// borrowOriginCode decodes addr's committed code into the worker's buffer. Not borrowed
+// readOriginCodeSegmentTo copies a segment of the committed code of addr into dst. Not copied
 // when the code is already on a state object, absent, or held by a cache.
-func (ibs *IntraBlockState) borrowOriginCode(addr accounts.Address) (accounts.Code, bool, error) {
-	borrower, ok := ibs.stateReader.(codeBorrower)
+func (ibs *IntraBlockState) readOriginCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (accounts.CodeHash, bool, error) {
+	segmentReader, ok := ibs.stateReader.(codeSegmentReader)
 	if !ok || ibs.stateObjects[addr] != nil {
-		return accounts.Code{}, false, nil
+		return accounts.CodeHash{}, false, nil
 	}
 	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
-		return accounts.Code{}, false, nil
+		return accounts.CodeHash{}, false, nil
 	}
 	codeHash, err := ibs.originCodeHash(addr)
 	if err != nil || codeHash.IsEmpty() {
-		return accounts.Code{}, false, err
+		return accounts.CodeHash{}, false, err
 	}
 	if _, ok := ibs.sharedCode(codeHash); ok {
-		return accounts.Code{}, false, nil
+		return accounts.CodeHash{}, false, nil
 	}
-	code, borrowed, err := borrower.BorrowAccountCode(addr)
+	copied, err := segmentReader.ReadAccountCodeSegmentTo(addr, from, dst)
 	ibs.RecordStateReadError(err)
-	if err != nil || !borrowed {
-		return accounts.Code{}, false, err
+	if err != nil || !copied {
+		return accounts.CodeHash{}, false, err
 	}
-	return accounts.Code{Hash: codeHash, Bytes: code}, true, nil
+	return codeHash, true, nil
 }
 
 // refreshCode is the in-memory-only variant for CodePath. CodePath is never recorded

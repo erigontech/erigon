@@ -19,6 +19,7 @@ package execctx
 import (
 	"slices"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -36,7 +37,7 @@ type stateGetter struct {
 	m          kv.GetLatestMetrics
 	codeBuf    *[]byte
 	ownCodeBuf []byte
-	memo       accounts.Code // last BorrowCode decode: a code hash maps to immutable bytes
+	memo       accounts.Code // last ReadCodeSegmentTo decode: a code hash maps to immutable bytes
 }
 
 var _ execctxapi.StateGetter = (*stateGetter)(nil)
@@ -57,11 +58,16 @@ func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return code, ok, err
 }
 
-// BorrowCode returns bytes that alias the code buffer until the next code read on this getter.
-func (g *stateGetter) BorrowCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	code, borrowed, err := g.sd.borrowCode(g.tx, g.view, addr, txNum, *g.codeBuf, &g.memo)
+// ReadCodeSegmentTo copies the code of addr from offset from into dst, zero-padded, when the
+// code misses the code cache; the decode does not fill the cache. ok is false when the caller
+// must read the code normally.
+func (g *stateGetter) ReadCodeSegmentTo(addr []byte, txNum, from uint64, dst []byte) (ok bool, err error) {
+	code, ok, err := g.sd.decodeUncachedCode(g.tx, g.view, addr, txNum, *g.codeBuf, &g.memo)
+	if ok {
+		common.CopySegment(dst, code, from)
+	}
 	*g.codeBuf = slices.Grow((*g.codeBuf)[:0], min(len(code), maxLentCodeBuf))
-	return code, borrowed, err
+	return ok, err
 }
 
 func (g *stateGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {

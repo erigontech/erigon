@@ -178,7 +178,7 @@ func (tx codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOpt
 // A caller-owned buffer outlives each getter, so a later getter decodes into it
 // instead of growing its own.
 // Identical code at many addresses is decoded once; any other read into the buffer ends the reuse.
-func TestStateGetterBorrowCodeReusesTheLastDecode(t *testing.T) {
+func TestStateGetterCodeSegmentReusesTheLastDecode(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
 	code := bytes.Repeat([]byte{0x21}, 1024)
@@ -203,11 +203,12 @@ func TestStateGetterBorrowCodeReusesTheLastDecode(t *testing.T) {
 	var buf []byte
 	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf))
 	borrower := getter.(interface {
-		BorrowCode(addr []byte, txNum uint64) ([]byte, bool, error)
+		ReadCodeSegmentTo(addr []byte, txNum, from uint64, dst []byte) (bool, error)
 	})
 	borrow := func(b byte, want []byte, decodes int) {
 		t.Helper()
-		got, borrowed, lendErr := borrower.BorrowCode(addr(b), 5)
+		got := make([]byte, len(want))
+		borrowed, lendErr := borrower.ReadCodeSegmentTo(addr(b), 5, 0, got)
 		require.NoError(t, lendErr)
 		require.True(t, borrowed)
 		require.Equal(t, want, got)
@@ -771,7 +772,7 @@ func TestAsOfGetterServesCommittedValueFromStateCache(t *testing.T) {
 	require.Equal(t, 1, tx.reads, "a value committed at txNum 5 is not the value as of 5")
 }
 
-func TestStateGetterBorrowCodeLeavesTheCacheEmpty(t *testing.T) {
+func TestStateGetterCodeSegmentLeavesTheCacheEmpty(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
 	addr := make([]byte, 20)
@@ -800,17 +801,19 @@ func TestStateGetterBorrowCodeLeavesTheCacheEmpty(t *testing.T) {
 	var buf []byte
 	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf))
 	borrower := getter.(interface {
-		BorrowCode(addr []byte, txNum uint64) ([]byte, bool, error)
+		ReadCodeSegmentTo(addr []byte, txNum, from uint64, dst []byte) (bool, error)
 	})
 
-	got, borrowed, err := borrower.BorrowCode(addr, 5)
+	got := make([]byte, len(code))
+	borrowed, err := borrower.ReadCodeSegmentTo(addr, 5, 0, got)
 	require.NoError(t, err)
 	require.True(t, borrowed)
 	require.Equal(t, code, got)
 	_, cached := sc.View(nil).GetCodeByHash(codeHash[:])
 	require.False(t, cached, "a borrowed read must not fill the code cache")
 
-	got, borrowed, err = borrower.BorrowCode(addr2, 5)
+	got = make([]byte, len(code2))
+	borrowed, err = borrower.ReadCodeSegmentTo(addr2, 5, 0, got)
 	require.NoError(t, err)
 	require.True(t, borrowed)
 	require.Equal(t, code2, got)
@@ -820,12 +823,12 @@ func TestStateGetterBorrowCodeLeavesTheCacheEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, code, got)
-	_, borrowed, err = borrower.BorrowCode(addr, 5)
+	borrowed, err = borrower.ReadCodeSegmentTo(addr, 5, 0, nil)
 	require.NoError(t, err)
 	require.False(t, borrowed, "a cached code stays on the normal path")
 }
 
-func TestStateGetterBorrowCodeRefusesAnAccountWrittenInTheBatch(t *testing.T) {
+func TestStateGetterCodeSegmentRefusesAnAccountWrittenInTheBatch(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
 	addr := make([]byte, 20)
@@ -849,9 +852,9 @@ func TestStateGetterBorrowCodeRefusesAnAccountWrittenInTheBatch(t *testing.T) {
 
 	var buf []byte
 	borrower := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf)).(interface {
-		BorrowCode(addr []byte, txNum uint64) ([]byte, bool, error)
+		ReadCodeSegmentTo(addr []byte, txNum, from uint64, dst []byte) (bool, error)
 	})
-	_, borrowed, err := borrower.BorrowCode(addr, 5)
+	borrowed, err := borrower.ReadCodeSegmentTo(addr, 5, 0, nil)
 	require.NoError(t, err)
 	require.False(t, borrowed, "the batch's code hash must not be paired with the committed bytes")
 }

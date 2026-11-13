@@ -966,15 +966,15 @@ func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key common.
 	}
 }
 
-func (r *ReaderV3) BorrowAccountCode(address accounts.Address) ([]byte, bool, error) {
-	borrower, ok := r.getter.(interface {
-		BorrowCode(addr []byte, txNum uint64) ([]byte, bool, error)
+func (r *ReaderV3) ReadAccountCodeSegmentTo(address accounts.Address, from uint64, dst []byte) (bool, error) {
+	segmentReader, ok := r.getter.(interface {
+		ReadCodeSegmentTo(addr []byte, txNum, from uint64, dst []byte) (bool, error)
 	})
 	if !ok {
-		return nil, false, nil
+		return false, nil
 	}
 	r.addr = address.Value()
-	return borrower.BorrowCode(r.addr[:], r.txNum)
+	return segmentReader.ReadCodeSegmentTo(r.addr[:], r.txNum, from, dst)
 }
 
 func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {

@@ -786,14 +786,20 @@ func (ibs *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 	return code.Bytes, err
 }
 
-// GetCodeBorrowed is GetCode for a caller that copies the result at once: on a cache miss
-// the result aliases a worker buffer that the next state read overwrites.
-func (ibs *IntraBlockState) GetCodeBorrowed(addr accounts.Address) ([]byte, error) {
+// ReadCodeSegmentTo copies the code of addr from offset from into dst, zero-padded past its
+// end. On a code-cache miss it decodes the code without caching it.
+func (ibs *IntraBlockState) ReadCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) error {
 	if ibs.versionMap == nil || ibs.codeAccess != nil {
-		return ibs.GetCode(addr)
+		code, err := ibs.GetCode(addr)
+		common.CopySegment(dst, code, from)
+		return err
 	}
-	code, _, _, err := readCodeBorrowing(ibs, addr, true)
-	return code.Bytes, err
+	seg := codeSegment{from: from, dst: dst}
+	code, _, _, err := readCodeSegment(ibs, addr, &seg)
+	if !seg.copied {
+		common.CopySegment(dst, code.Bytes, from)
+	}
+	return err
 }
 
 func (ibs *IntraBlockState) getCode(addr accounts.Address) (accounts.Code, error) {
