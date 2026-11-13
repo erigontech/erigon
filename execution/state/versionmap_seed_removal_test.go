@@ -531,3 +531,30 @@ func TestReadersSkipWrites(t *testing.T) {
 	require.False(t, NewBALReadVersionMap(bal).ReadersSkipWrites(a, lifecycle))
 	require.False(t, NewVersionMap(nil).ReadersSkipWrites(a, fields), "a map without a BAL serves reads from cells")
 }
+
+// TestBALReadFieldMissReadsPreBlockState pins that a field the BAL does not change reads the
+// pre-block value, not the in-block address record: a CREATE2 onto a funded address writes a
+// record with the fields the account had at creation.
+func TestBALReadFieldMissReadsPreBlockState(t *testing.T) {
+	c := accounts.InternAddress(common.HexToAddress("0xc2ea7e"))
+	funded := accounts.NewAccount()
+	funded.Balance = *uint256.NewInt(100_000)
+	reader := &staticAccountReader{addr: c, acc: &funded}
+	vm := NewBALReadVersionMap(types.BlockAccessList{{
+		Address:      c.Value(),
+		NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}},
+		CodeChanges:  []*types.CodeChange{{Index: 1, Bytecode: []byte{0x60, 0x01}}},
+	}})
+	record := accounts.NewAccount()
+	vm.WriteAddress(c, Version{TxIndex: 0}, &record, true)
+
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	b, err := ibs.GetBalance(c)
+	require.NoError(t, err)
+	require.Equal(t, uint64(100_000), b.Uint64())
+	n, err := ibs.GetNonce(c)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), n)
+}

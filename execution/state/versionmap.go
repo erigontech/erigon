@@ -264,7 +264,7 @@ type VersionMap struct {
 	s atomic.Pointer[xsync.Map[accounts.Address, *AddressEntry]]
 	// nonEmpty latches before the first entry is taken: nothing removes entries.
 	nonEmpty atomic.Bool
-	HasBAL   bool // When true, all significant writes are pre-populated from BAL
+	HasBAL   bool // the block carries an access list
 	bal      types.BlockAccessList
 	// balReads: BAL-listed paths read from bal, not from cells (NewBALReadVersionMap).
 	balReads bool
