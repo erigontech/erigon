@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
+	"math"
 	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -25,6 +26,7 @@ type poolTask struct {
 	prevWrites *state.WriteSet
 	result     *exec.TxResult
 	reruns     int
+	runFirst   uint64
 
 	mu      sync.Mutex
 	parked  bool
@@ -43,6 +45,9 @@ func (h taskHeap) Len() int { return len(h) }
 func (h taskHeap) Less(i, j int) bool {
 	if h[i].be.blockNum != h[j].be.blockNum {
 		return h[i].be.blockNum < h[j].be.blockNum
+	}
+	if h[i].runFirst != h[j].runFirst {
+		return h[i].runFirst > h[j].runFirst
 	}
 	return h[i].tv.index < h[j].tv.index
 }
@@ -141,7 +146,14 @@ func (wk *poolWorker) ensureTx(p *taskPool) error {
 }
 
 func (pe *parallelExecutor) dispatchPoolTask(be *blockExecutor, tv *taskVersion) {
-	pt := &poolTask{be: be, tv: tv, next: psRun}
+	pt := &poolTask{be: be, tv: tv, next: psRun, runFirst: math.MaxUint64}
+	// Past the block head, long txs run first so they do not finish last.
+	if tv.index >= max(8, 2*pe.workerCount) {
+		pt.runFirst = 0
+		if tx := tv.Tx(); tx != nil {
+			pt.runFirst = tx.GetGasLimit()
+		}
+	}
 	be.poolTasks[tv.index] = pt
 	pe.pool.push(pt)
 }

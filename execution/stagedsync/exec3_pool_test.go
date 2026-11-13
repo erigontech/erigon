@@ -388,3 +388,23 @@ func TestPoolSettleWaitsForReadTargetUnlessBAL(t *testing.T) {
 		}
 	}
 }
+
+func TestPoolRunsBlockHeadInOrderThenLongestFirst(t *testing.T) {
+	pe := &parallelExecutor{workerCount: 2}
+	pe.pool = &taskPool{pe: pe}
+	pe.pool.cond = sync.NewCond(&pe.pool.mu)
+	gas := []uint64{10, 20, 30, 40, 50, 60, 70, 80, 21000, 90000, 50000, 90000, 30000}
+	txs := make(types.Transactions, len(gas))
+	for i, g := range gas {
+		txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{GasLimit: g}}
+	}
+	be := &blockExecutor{blockNum: 1, poolTasks: make([]*poolTask, len(gas)+1)}
+	for i := range len(gas) + 1 {
+		pe.dispatchPoolTask(be, &taskVersion{execTask: &execTask{Task: &exec.TxTask{TxIndex: i, Txs: txs}, index: i}})
+	}
+	var order []int
+	for pe.pool.queue.Len() > 0 {
+		order = append(order, pe.pool.pop().tv.index)
+	}
+	require.Equal(t, []int{0, 1, 2, 3, 4, 5, 6, 7, 9, 11, 10, 12, 8, 13}, order)
+}
