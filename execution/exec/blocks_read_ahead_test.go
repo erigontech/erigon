@@ -1164,3 +1164,38 @@ func TestCachePopulatingGetterSeedsCodeHashOnACachedAccount(t *testing.T) {
 	require.Equal(t, code, gotCode)
 	require.Equal(t, 1, source.codeReads, "a cached account must still map its address to the cached code")
 }
+
+// A cached-account hit stamps its address-to-code-hash mapping with the account's txNum, so an unwind to that txNum drops it.
+func TestCachePopulatingGetterStampsTheSeededCodeHashWithTheAccountTxNum(t *testing.T) {
+	account := accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xaa, 0x01}))}
+	value := accounts.SerialiseV3(&account)
+	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
+	addr := common.Address{19: 1}
+	seedFill(stateCache, kv.AccountsDomain, addr[:], value, 5)
+	cpg := &cachePopulatingGetter{TemporalGetter: &sharedCodeTemporalGetter{account: value}, view: stateCache.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })), stepSize: 16}
+	_, _, err := cpg.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{})
+	require.NoError(t, err)
+	_, ok := stateCache.View(nil).GetAddrCodeHash(addr[:])
+	require.True(t, ok)
+
+	stateCache.Applier().Unwind(6)
+	_, ok = stateCache.View(nil).GetAddrCodeHash(addr[:])
+	require.True(t, ok, "an unwind above the account's txNum keeps the mapping")
+	stateCache.Applier().Unwind(5)
+	_, ok = stateCache.View(nil).GetAddrCodeHash(addr[:])
+	require.False(t, ok, "an unwind to the account's txNum drops the mapping")
+}
+
+// A bounded read skips the cache, because the cached value can be newer than the bound.
+func TestCachePopulatingGetterBoundedReadSkipsAVisibleEntry(t *testing.T) {
+	addr := common.Address{19: 1}
+	cached, historical := accounts.SerialiseV3(&accounts.Account{Nonce: 2}), accounts.SerialiseV3(&accounts.Account{Nonce: 1})
+	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
+	seedFill(stateCache, kv.AccountsDomain, addr[:], cached, 5)
+	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: historical}, view: stateCache.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })), stepSize: 16}
+	got, _, err := cpg.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{}.WithMaxStep(0))
+	require.NoError(t, err)
+	require.Equal(t, historical, got)
+}
