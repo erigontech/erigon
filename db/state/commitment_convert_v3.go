@@ -684,7 +684,7 @@ func (b *hashedBatch) expect(key, hash []byte) error {
 
 var hashedBatchPool = sync.Pool{New: func() any { return &hashedBatch{} }}
 
-const commitmentV3VerifyGroup = 8
+const commitmentV3VerifyGroup = 4
 
 func VerifyCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, history bool, logger log.Logger) error {
 	started := time.Now()
