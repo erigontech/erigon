@@ -55,6 +55,8 @@ linters:
     gomoddirectives:
       replace-allow-list:
         - github.com/holiman/bloomfilter/v2
+        - github.com/tendermint/tendermint
+        - github.com/cometbft/cometbft
     revive:
       rules:
         - name: atomic
