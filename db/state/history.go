@@ -449,6 +449,13 @@ func (w *historyBufferedWriter) close() {
 	}
 }
 
+func (w *historyBufferedWriter) detach() *historyBufferedWriter {
+	detached := *w
+	detached.ii = w.ii.detach()
+	w.historyVals = nil
+	return &detached
+}
+
 func (ht *HistoryRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *historyBufferedWriter {
 	w := &historyBufferedWriter{
 		discard: discard,
@@ -462,6 +469,10 @@ func (ht *HistoryRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *histo
 }
 
 func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
+	return w.flush(ctx, tx, nil)
+}
+
+func (w *historyBufferedWriter) flush(ctx context.Context, tx kv.RwTx, keep *keepRetainedHistory) error {
 	if w.discard {
 		return nil
 	}
@@ -469,12 +480,40 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	if w.historyVals != nil {
-		if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		load := loadFunc
+		if w.largeValues && keep != nil {
+			load = keep.load
+		}
+		if err := w.historyVals.Load(tx, w.historyValsTable, load, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
 	}
 	w.close()
 	return nil
+}
+
+type keepRetainedHistory struct {
+	belowTxNum uint64
+	written    map[string]struct{}
+}
+
+func newKeepRetainedHistory(belowTxNum uint64) *keepRetainedHistory {
+	if belowTxNum == 0 {
+		return nil
+	}
+	return &keepRetainedHistory{belowTxNum: belowTxNum, written: map[string]struct{}{}}
+}
+
+func (r *keepRetainedHistory) load(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if binary.BigEndian.Uint64(k[len(k)-8:]) < r.belowTxNum {
+		if _, ok := r.written[string(k)]; !ok {
+			if existing, err := table.Get(k); err != nil || existing != nil {
+				return err
+			}
+			r.written[string(k)] = struct{}{}
+		}
+	}
+	return next(k, k, v)
 }
 
 func (w *historyBufferedWriter) valsCollector() *etl.Collector {
