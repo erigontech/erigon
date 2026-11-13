@@ -19,6 +19,7 @@ package state
 import (
 	"cmp"
 	"slices"
+	"sort"
 
 	"github.com/holiman/uint256"
 
@@ -244,12 +245,19 @@ func balChangeIndexes(ac *types.AccountChanges, fn func(uint32)) {
 	}
 }
 
+// balNextChangeIndex relies on each change list being strictly increasing by index, which the decoder enforces.
 func balNextChangeIndex(ac *types.AccountChanges, after uint32) uint32 {
 	var m uint32
-	balChangeIndexes(ac, func(idx uint32) {
-		if idx > after && (m == 0 || idx < m) {
-			m = idx
+	take := func(n int, index func(int) uint32) {
+		if k := sort.Search(n, func(k int) bool { return index(k) > after }); k < n && (m == 0 || index(k) < m) {
+			m = index(k)
 		}
-	})
+	}
+	take(len(ac.BalanceChanges), func(k int) uint32 { return ac.BalanceChanges[k].Index })
+	take(len(ac.NonceChanges), func(k int) uint32 { return ac.NonceChanges[k].Index })
+	take(len(ac.CodeChanges), func(k int) uint32 { return ac.CodeChanges[k].Index })
+	for _, sc := range ac.StorageChanges {
+		take(len(sc.Changes), func(k int) uint32 { return sc.Changes[k].Index })
+	}
 	return m
 }
