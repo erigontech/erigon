@@ -1645,6 +1645,7 @@ func TestVersionedIO_PresentAccountClearedDelegationKept(t *testing.T) {
 	io := NewVersionedIO(1)
 	reads := ReadSet{}
 	reads.SetAddress(addr, VersionedRead[AccountView]{Val: NewAccountView(&accounts.Account{Nonce: 4, CodeHash: delegation.Hash})})
+	reads.SetSelfDestruct(addr, VersionedRead[bool]{Val: false})
 	io.RecordReads(Version{TxIndex: 0}, reads)
 	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
 		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}}, Val: uint64(5)},

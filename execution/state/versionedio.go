@@ -3029,7 +3029,7 @@ type accountState struct {
 	slotWrites          map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
 	storageReads        []accounts.StorageKey               // copied into changes.StorageReads by finalize
 	slotReads           map[accounts.StorageKey]int         // slot -> index into storageReads, built with slotWrites
-	initialCodeEmpty    bool                                // pre-block code was empty (created contract or empty-codehash read)
+	initialCodeEmpty    bool                                // pre-block code was empty (created contract, empty code-hash read, or the account read absent or destroyed)
 }
 
 // matches compares the account with a sidecar entry without building and sorting its lists.
