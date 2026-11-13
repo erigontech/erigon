@@ -135,6 +135,9 @@ type parallelExecutor struct {
 	currentChangeSetBlock uint64
 	// currentChangeSetHash is the hash currentChangeSet was last saved under.
 	currentChangeSetHash common.Hash
+	// foldUnbind restores the changeset the apply fold bound for foldBoundHash.
+	foldUnbind    func()
+	foldBoundHash common.Hash
 }
 
 // drainToClose empties both channels until their producers close them.
@@ -268,12 +271,29 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 	}
 }
 
+// bindFoldChangeset keeps a block's changeset bound across its txs. The apply
+// loop is the only sd.mem writer, and every other diff swap is a swap and
+// restore inside one changesetMu hold, so rebinding per tx only waits on the lock.
+func (pe *parallelExecutor) bindFoldChangeset(blockNum uint64, blockHash common.Hash) {
+	if pe.foldUnbind != nil && pe.foldBoundHash == blockHash {
+		return
+	}
+	pe.unbindFoldChangeset()
+	pe.foldUnbind, pe.foldBoundHash = pe.bindBlockChangesetForFold(blockNum, blockHash), blockHash
+}
+
+func (pe *parallelExecutor) unbindFoldChangeset() {
+	if pe.foldUnbind != nil {
+		pe.foldUnbind()
+		pe.foldUnbind = nil
+	}
+}
+
 // foldTx applies one published tx's versionMap view and indexes to sd.mem.
 // Finalize logs share the final virtual task's txNum. That task has already
 // handled the receipt cache, so finalize indexes logs without changing it.
 func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
-	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
-	defer restoreCS()
+	pe.bindFoldChangeset(r.blockNum, r.blockHash)
 	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
 		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
@@ -464,6 +484,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				drainToClose(applyResults, rootResults)
 			}
 		}()
+		defer pe.unbindFoldChangeset()
 
 		if pe.enableChaosMonkey && pe.chaosFaults.ApplyLoopPanic != nil {
 			panic(pe.chaosFaults.ApplyLoopPanic)
@@ -681,6 +702,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
+					pe.unbindFoldChangeset()
 					built := balBuilder
 					balBuilder = nil
 					if finalized {

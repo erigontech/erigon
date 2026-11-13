@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -28,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -295,4 +297,44 @@ func TestChargedTxKeepsOneCopyOfItsWrites(t *testing.T) {
 	_, kept := recorded.GetNonce(created)
 	require.True(t, kept, "the worker's writes must be recorded")
 	require.Equal(t, 1, workerWrites.Count(), "the worker's write-set must stay as the worker left it")
+}
+
+// The commitment calculator holds changesetMu while it flushes the previous
+// block, so a fold that rebinds the changeset per tx waits behind it.
+func TestFoldTxBindsBlockChangesetOnce(t *testing.T) {
+	db := newResumeTestDB(t)
+	rwTx, domains := temporaltest.NewTestTxSD(t, db)
+	pe := newParallelLogIndexTestExec(db, domains, 0)
+	hash := common.Hash{1}
+	domains.SavePastChangesetAccumulator(hash, 1, &changeset.StateChangeSet{})
+
+	require.NoError(t, pe.foldTx(t.Context(), rwTx, &txResult{blockNum: 1, blockHash: hash, txNum: 10}))
+	domains.LockChangesetAccumulator()
+	folded := make(chan error, 1)
+	go func() { folded <- pe.foldTx(t.Context(), rwTx, &txResult{blockNum: 1, blockHash: hash, txNum: 11}) }()
+	select {
+	case err := <-folded:
+		domains.UnlockChangesetAccumulator()
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		domains.UnlockChangesetAccumulator()
+		require.NoError(t, <-folded)
+		t.Fatal("the second tx of the block waited for changesetMu")
+	}
+}
+
+func TestFoldTxRebindsChangesetPerBlock(t *testing.T) {
+	db := newResumeTestDB(t)
+	rwTx, domains := temporaltest.NewTestTxSD(t, db)
+	pe := newParallelLogIndexTestExec(db, domains, 0)
+	cs1, cs2 := &changeset.StateChangeSet{}, &changeset.StateChangeSet{}
+	domains.SavePastChangesetAccumulator(common.Hash{1}, 1, cs1)
+	domains.SavePastChangesetAccumulator(common.Hash{2}, 2, cs2)
+
+	require.NoError(t, pe.foldTx(t.Context(), rwTx, &txResult{blockNum: 1, blockHash: common.Hash{1}, txNum: 10}))
+	require.Same(t, cs1, domains.GetChangesetAccumulator())
+	require.NoError(t, pe.foldTx(t.Context(), rwTx, &txResult{blockNum: 2, blockHash: common.Hash{2}, txNum: 20}))
+	require.Same(t, cs2, domains.GetChangesetAccumulator())
+	pe.unbindFoldChangeset()
+	require.Nil(t, domains.GetChangesetAccumulator())
 }
