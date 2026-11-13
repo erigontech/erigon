@@ -842,6 +842,8 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 		{name: "v3 on a converted datadir", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv", "v3.0-commitment.16-32.kv"}},
 		{name: "v3 on a datadir converted below the state tip", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv"}, wantFile: ".16-32."},
 		{name: "v3 code above a converted datadir", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv", "v3.0-commitment.16-32.kv"}, extraFiles: []string{"domain/v2.0-code.32-48.kv"}, wantFile: "steps 32-48"},
+		{name: "v3 on a datadir converted only above step 0", v3: true, localFiles: []string{"v3.0-commitment.16-32.kv"}, wantFile: ".0-16."},
+		{name: "v3 on a datadir with a gap in its converted commitment", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv", "v3.0-commitment.32-48.kv"}, wantFile: ".16-32."},
 		{name: "v3 off legacy only"},
 		{name: "v3 off with a v3-only range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v2.0-accounts.32-48.kv"}, wantFile: ".32-48."},
 		{name: "v3 off with a v3-only range below a legacy range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v2.0-accounts.32-48.kv", "domain/v2.2-commitment.48-64.kv", "domain/v2.0-accounts.48-64.kv"}, wantFile: ".32-48."},
