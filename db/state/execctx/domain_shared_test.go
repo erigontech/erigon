@@ -342,6 +342,20 @@ func TestSharedDomain_UnwindPrunesBoundaryTxNum(t *testing.T) {
 	require.Equal(t, keptVal, v, "write below the boundary txNum must survive")
 }
 
+func putAndUnwind(t *testing.T, sd *execctx.SharedDomains, tx kv.TemporalTx, domain kv.Domain, key, val, prev []byte, txNum uint64) {
+	t.Helper()
+	unwound := &changeset.StateChangeSet{}
+	sd.SetChangesetAccumulator(unwound)
+	sd.SetTxNum(txNum)
+	require.NoError(t, sd.DomainPut(domain, tx, key, val, txNum, prev))
+	sd.SetChangesetAccumulator(nil)
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	for d := range diffs {
+		diffs[d] = unwound.Diffs[d].GetDiffSet()
+	}
+	sd.Unwind(txNum, &diffs)
+}
+
 func TestSharedDomain_UnwindDropsWritesBufferedBeforeUnwind(t *testing.T) {
 	t.Parallel()
 
@@ -377,16 +391,7 @@ func TestSharedDomain_UnwindDropsWritesBufferedBeforeUnwind(t *testing.T) {
 			require.NoError(t, err)
 			defer domains.Close()
 			const unwindTo = 2
-			unwound := &changeset.StateChangeSet{}
-			domains.SetChangesetAccumulator(unwound)
-			domains.SetTxNum(unwindTo)
-			require.NoError(t, domains.DomainPut(domain, rwTx, key, []byte{0x20}, unwindTo, committed))
-			domains.SetChangesetAccumulator(nil)
-			var diffs [kv.DomainLen][]kv.DomainEntryDiff
-			for d := range diffs {
-				diffs[d] = unwound.Diffs[d].GetDiffSet()
-			}
-			domains.Unwind(unwindTo, &diffs)
+			putAndUnwind(t, domains, rwTx, domain, key, []byte{0x20}, committed, unwindTo)
 			require.NoError(t, domains.Flush(ctx, rwTx))
 			require.NoError(t, rwTx.Commit())
 
@@ -426,16 +431,7 @@ func TestSharedDomain_MergeKeepsOtherWritesBufferedBeforeUnwind(t *testing.T) {
 	require.NoError(t, other.IndexAdd(kv.TracesToIdx, key, 1))
 	const unwindTo = 2
 	require.NoError(t, other.IndexAdd(kv.TracesToIdx, key, unwindTo))
-	unwound := &changeset.StateChangeSet{}
-	other.SetChangesetAccumulator(unwound)
-	other.SetTxNum(unwindTo)
-	require.NoError(t, other.DomainPut(kv.AccountsDomain, rwTx, key, []byte{0x20}, unwindTo, kept))
-	other.SetChangesetAccumulator(nil)
-	var diffs [kv.DomainLen][]kv.DomainEntryDiff
-	for d := range diffs {
-		diffs[d] = unwound.Diffs[d].GetDiffSet()
-	}
-	other.Unwind(unwindTo, &diffs)
+	putAndUnwind(t, other, rwTx, kv.AccountsDomain, key, []byte{0x20}, kept, unwindTo)
 
 	require.NoError(t, receiver.Merge(ctx, 0, other, unwindTo))
 	require.NoError(t, receiver.Flush(ctx, rwTx))
@@ -550,16 +546,7 @@ func TestSharedDomain_MergeKeepsReceiverRowsWrittenAfterItsUnwind(t *testing.T) 
 	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
 	key := addr[:]
 	require.NoError(t, receiver.DomainPut(kv.AccountsDomain, rwTx, key, []byte{0x10}, 1, nil))
-	unwound := &changeset.StateChangeSet{}
-	receiver.SetChangesetAccumulator(unwound)
-	receiver.SetTxNum(2)
-	require.NoError(t, receiver.DomainPut(kv.AccountsDomain, rwTx, key, []byte{0x20}, 2, []byte{0x10}))
-	receiver.SetChangesetAccumulator(nil)
-	var diffs [kv.DomainLen][]kv.DomainEntryDiff
-	for d := range diffs {
-		diffs[d] = unwound.Diffs[d].GetDiffSet()
-	}
-	receiver.Unwind(2, &diffs)
+	putAndUnwind(t, receiver, rwTx, kv.AccountsDomain, key, []byte{0x20}, []byte{0x10}, 2)
 	reexecuted := []byte{0x30}
 	require.NoError(t, receiver.DomainPut(kv.AccountsDomain, rwTx, key, reexecuted, 2, []byte{0x10}))
 	other.Unwind(3, nil)
