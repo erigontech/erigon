@@ -126,10 +126,9 @@ type parallelExecutor struct {
 	// changeset; blocks below it run without one.
 	changesetWindowStart uint64
 	// currentChangeSet is the block's changeset while it is being built: the exec
-	// loop creates it and saves it by hash, then the apply fold and the committer
-	// bind it transiently by hash under changesetMu. Deliberately NOT installed as a
-	// persistent live accumulator — the apply loop is the sole sd.mem writer, so a
-	// global install would only race the fold's own transient bind.
+	// loop creates it and saves it by hash, then the apply fold binds it by hash
+	// from the block's first folded tx to its block result, and the committer binds
+	// it by hash under changesetMu.
 	currentChangeSet *changeset.StateChangeSet
 	// currentChangeSetBlock is the block currentChangeSet belongs to (0 == none).
 	currentChangeSetBlock uint64
@@ -218,8 +217,8 @@ func (pe *parallelExecutor) cancelOperational(blockNum uint64, err error) {
 }
 
 // ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
-// block-specific StateChangeSet, to be saved by hash and bound transiently by
-// the apply fold and the committer. Idempotent; a no-op outside the changeset
+// block-specific StateChangeSet, to be saved by hash and bound by the apply fold
+// (first folded tx to block result) and the committer. Idempotent; a no-op outside the changeset
 // window. A zero blockHash defers the save to the first caller that knows it.
 // Exec-loop only.
 func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64, blockHash common.Hash) {
@@ -253,8 +252,8 @@ func (pe *parallelExecutor) clearChangesetAccumulator() {
 
 // bindBlockChangesetForFold binds block N's saved changeset (by hash) so the
 // apply fold's DomainPuts record account/storage/code diffs into it — letting
-// unwind revert state, not just commitment. The bind is transient and
-// self-restoring under changesetMu; nothing installs a persistent global.
+// unwind revert state, not just commitment. The bind lasts from the block's
+// first folded tx to its block result, or to the apply loop's exit.
 // Returns a restore closure, or nil if the block has no saved changeset yet.
 func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash common.Hash) (restore func()) {
 	pe.domains().LockChangesetAccumulator()

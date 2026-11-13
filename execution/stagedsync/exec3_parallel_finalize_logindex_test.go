@@ -366,7 +366,8 @@ func TestApplyLoopRestoresChangesetTargetAtBlockResult(t *testing.T) {
 	verdict, err := run.run(t.Context(), t)
 	require.NoError(t, err)
 	require.Nil(t, verdict)
-	require.Equal(t, []*changeset.StateChangeSet{prev}, atBlockResult)
+	require.Len(t, atBlockResult, 1)
+	require.Same(t, prev, atBlockResult[0])
 }
 
 // failFinalizeEngine fails the exec loop at block end once the apply loop has
