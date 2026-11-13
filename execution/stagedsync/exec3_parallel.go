@@ -2661,8 +2661,15 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
+	if stubNoSeed {
+		accessList = nil
+	}
+	seedStart := time.Now()
 	versionMap := state.NewVersionMap(accessList)
 	versionMap.SeedAddresses()
+	if len(accessList) > 0 {
+		log.Info("[probe] bal seed", "block", blockNum, "accounts", len(accessList), "elapsed", time.Since(seedStart))
+	}
 	be := &blockExecutor{
 		blockNum:            blockNum,
 		blockHash:           blockHash,
@@ -3697,3 +3704,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 
 	dispatch()
 }
+
+// dbg probe: STUB_NO_SEED=true runs BAL blocks without seeding the version map (HasBAL=false, plain Block-STM).
+var stubNoSeed = dbg.EnvBool("STUB_NO_SEED", false)
