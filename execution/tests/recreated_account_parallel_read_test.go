@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -45,8 +44,8 @@ import (
 // while the re-creation is still running. Parallel import must accept the
 // block the serial generator built.
 func TestParallelReadOfRecreatedAccountBeforeRecreatorCommits(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 
 	// The constructor self-destructs while the account still holds its
 	// pre-block wei and deploys 32 bytes of code once that wei is gone.
@@ -100,8 +99,6 @@ func TestParallelReadOfRecreatedAccountBeforeRecreatorCommits(t *testing.T) {
 	for _, receipt := range chainPack.Receipts[0] {
 		require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 	}
-
-	dbg.Exec3Parallel = true
 	require.NoError(t, m.InsertChain(chainPack))
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -131,8 +128,8 @@ func iterations(n uint64) []byte {
 // the earlier tx's value. tx0 credits A; tx1, still running when tx0 folds, only
 // bumps A's nonce with a CREATE2.
 func TestParallelFoldKeepsEarlierTxFieldOfSameAccount(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 
 	a := common.HexToAddress("0xaaaa")
 	config := chain.TestChainOsakaConfig.Copy()
@@ -172,8 +169,6 @@ func TestParallelFoldKeepsEarlierTxFieldOfSameAccount(t *testing.T) {
 	for _, receipt := range chainPack.Receipts[0] {
 		require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 	}
-
-	dbg.Exec3Parallel = true
 	require.NoError(t, m.InsertChain(chainPack))
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -197,8 +192,8 @@ func TestParallelBlockPastDispatchWindow(t *testing.T) {
 }
 
 func testParallelBlockPastDispatchWindow(t *testing.T, withBAL bool) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 
 	const txs = 80
 	counter := common.HexToAddress("0xc0c0")
@@ -229,8 +224,6 @@ func testParallelBlockPastDispatchWindow(t *testing.T, withBAL bool) {
 	for _, receipt := range chainPack.Receipts[0] {
 		require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 	}
-
-	dbg.Exec3Parallel = true
 	require.NoError(t, m.InsertChain(chainPack))
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))

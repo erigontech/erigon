@@ -26,8 +26,7 @@ jobs:
           - macos-15
           - windows-2025
         # Run both serial and parallel commitment paths every time so
-        # divergence is caught on the PR rather than after a release. Execution
-        # is parallel in both legs (dbg.Exec3Parallel defaults true). The matrix
+        # divergence is caught on the PR rather than after a release. The matrix
         # entries spawn separate runners and run concurrently — wall-clock
         # unchanged, runner-minutes doubled.
         commitment_mode:

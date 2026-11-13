@@ -682,7 +682,7 @@ func TestApplyLoopChannelCloseOrder(t *testing.T) {
 // execLoopShouldExit doesn't honor that signal the exec loop parks on
 // its main select forever waiting for work the dispatcher will never
 // produce. Symptom in production: chiado
-// `EXEC3_PARALLEL=true ... --sync.loop.block.limit=10_000` parallel
+// `--sync.loop.block.limit=10_000` parallel
 // exec from block 0 silently hangs at the first step boundary
 // (block 150662 in chiado's case) — a hang masking the wrong-trie-root
 // failure that issue erigon#20711 reported as the visible symptom.

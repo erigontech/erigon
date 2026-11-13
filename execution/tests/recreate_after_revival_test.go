@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -159,11 +158,10 @@ type revivalCall struct {
 // counts and checks the resulting state.
 func importInParallel(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, chainPack *blockgen.ChainPack, check func(t *testing.T, st *state.IntraBlockState)) {
 	t.Helper()
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 	for _, workers := range []int{1, 2, 4, 8} {
 		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
-			dbg.Exec3Parallel = true
 			ethconfig.Defaults.Sync.ExecWorkerCount = workers
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 			require.NoError(t, m.InsertChain(chainPack))

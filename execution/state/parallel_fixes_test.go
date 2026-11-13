@@ -278,7 +278,7 @@ func TestTouchUpdates_MixedBatch(t *testing.T) {
 // versionedRead consults versionedWrites before the stateObject, those
 // spurious zero writes made same-tx re-reads return 0 — wrong gas
 // (SSTORE_SET vs dirty-update, +19900) and a wrong written value
-// (EEST cancun/eip6780_selfdestruct/* under EXEC3_PARALLEL). The calc now
+// (EEST cancun/eip6780_selfdestruct/*). The calc now
 // gets per-slot DELETEs from the self-destruct storage cascade instead.
 func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xAA})
