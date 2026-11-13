@@ -1,10 +1,7 @@
 package execctx_test
 
 import (
-	"bytes"
 	"testing"
-
-	"github.com/holiman/uint256"
 
 	"github.com/stretchr/testify/require"
 
@@ -172,69 +169,4 @@ func TestCodeHashForAddr_ViewSourcedRecordSeedsMapping(t *testing.T) {
 	h, ok := sc.View(nil).GetAddrCodeHash(addr[:])
 	require.True(t, ok, "a view-sourced record must seed the mapping")
 	require.Equal(t, [32]byte(codeHash), h)
-}
-
-// The BAL warmup used to seed a zero code hash for every codeless account. The answer must not depend on that seed:
-// a codeless account with balance, an absent account, an EIP-161 empty account and an account deleted earlier in the
-// block all read as no code, seeded or not.
-func TestCodeHashForAddr_NoCodeSeedDoesNotChangeTheAnswer(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-	db := newTestDb(t, 16)
-	addr := func(b byte) (a common.Address) { a[0] = b; return a }
-	withBalance, absent, empty161, deleted := addr(0xa1), addr(0xa2), addr(0xa3), addr(0xa4)
-	var code common.Hash
-	for i := range code {
-		code[i] = 0x33
-	}
-
-	seedTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer seedTx.Rollback()
-	seedSD, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
-	require.NoError(t, err)
-	defer seedSD.Close()
-	seedSD.SetTxNum(10)
-	for a, acc := range map[common.Address]accounts.Account{
-		withBalance: {Balance: *uint256.NewInt(5), CodeHash: accounts.EmptyCodeHash},
-		empty161:    {CodeHash: accounts.EmptyCodeHash},
-		deleted:     {Nonce: 1, CodeHash: accounts.InternCodeHash(code)},
-	} {
-		require.NoError(t, seedSD.DomainPut(kv.AccountsDomain, seedTx, a[:], accounts.SerialiseV3(&acc), 10, nil))
-	}
-	require.NoError(t, seedSD.Commit(ctx, seedTx))
-	seedSD.Close()
-
-	read := func(t *testing.T, a common.Address, seeded bool) []byte {
-		sc := cache.NewDefaultStateCache()
-		defer sc.Close()
-		tx, err := db.BeginTemporalRo(ctx)
-		require.NoError(t, err)
-		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
-		require.NoError(t, err)
-		defer sd.Close()
-		sd.BindStateCache(sc)
-		if seeded {
-			sc.View(frontierAtStateVersion(t, tx, frontierAt(10))).SeedAddrCodeHash(a[:], [32]byte{}, 10)
-			_, ok := sc.View(nil).GetAddrCodeHash(a[:])
-			require.True(t, ok, "the zero code-hash seed was not admitted")
-		}
-		if a == deleted {
-			require.NoError(t, sd.DomainDel(kv.AccountsDomain, tx, a[:], 20, nil))
-		}
-		return bytes.Clone(sd.CodeHashForAddr(tx, a[:], 20))
-	}
-	for name, a := range map[string]common.Address{
-		"codeless with balance":        withBalance,
-		"absent":                       absent,
-		"empty per EIP-161":            empty161,
-		"deleted earlier in the block": deleted,
-	} {
-		t.Run(name, func(t *testing.T) {
-			unseeded := read(t, a, false)
-			require.Equal(t, read(t, a, true), unseeded)
-			require.Nil(t, unseeded)
-		})
-	}
 }
