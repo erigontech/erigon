@@ -47,7 +47,7 @@ Use this map when reviewing `cl/transition/impl/eth2/operations.go`.
 | `operations.go`: `ProcessProposerSlashing` | Phase0 `process_proposer_slashing` |
 | `operations.go`: `ProcessAttesterSlashing` | Phase0 `process_attester_slashing`; `is_slashable_attestation_data`; `is_valid_indexed_attestation` |
 | `operations.go`: `ProcessDeposit` | Phase0 `process_deposit`; Electra modified deposit queuing through `pending_deposits` |
-| `operations.go`: `getPendingBalanceToWithdraw` | Electra helper for `process_withdrawal_request`, `process_consolidation_request`, voluntary exits, and pending partial withdrawals |
+| `operations.go`: `GetPendingBalanceToWithdraw` | Electra helper for `process_withdrawal_request`, `process_consolidation_request`, voluntary exits, and pending partial withdrawals |
 | `operations.go`: `IsVoluntaryExitApplicable`, `ProcessVoluntaryExit` | Phase0 `process_voluntary_exit`; Electra pending-partial-withdrawal guard; Gloas builder voluntary exits |
 | `operations.go`: `ProcessWithdrawals`, `processWithdrawalsPreGloas`, `processWithdrawalsGloas` | Capella `process_withdrawals`; Electra pending partial withdrawals; Gloas modified `process_withdrawals` with parent-empty early return and payload expected withdrawals |
 | `operations.go`: `applyWithdrawals` | Capella balance decreases; Gloas builder balance withdrawals |
