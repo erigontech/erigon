@@ -2233,14 +2233,14 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 		if d.FirstStepNotInFiles() >= stateStep {
 			continue
 		}
-		first, found, err := d.d.firstStepToBuild(tx, d.FirstStepNotInFiles())
+		first, found, err := d.d.firstStepToBuild(tx, d.FirstStepNotInFiles(), stateStep-1)
 		if err != nil {
 			return plan, err
 		}
 		if found {
 			if first < stateStep && stateStep-first > 1 {
 				plan.deferredDomains[id] = true
-				at.a.logger.Warn("[snapshots] missing files require rebuilding; keeping pending data in MDBX", "domain", d.d.Name, "fromStep", first, "stateStep", stateStep)
+				at.a.logger.Warn("[snapshots] missing files require rebuilding; keeping pending data in MDBX", "domain", d.d.Name, "pendingStep", first, "stateStep", stateStep)
 				continue
 			}
 			plan.firstStep = min(plan.firstStep, first)

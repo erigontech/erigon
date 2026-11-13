@@ -18,7 +18,6 @@ package state
 
 import (
 	"encoding/binary"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -50,12 +49,23 @@ func BenchmarkDomainBuildResumeStep(b *testing.B) {
 				require.NoError(b, writer.PutWithPrev(binary.BigEndian.AppendUint64(nil, i), []byte{1}, step*d.stepSize+1, nil))
 			}
 			require.NoError(b, writer.Flush(b.Context(), tx))
-			for _, filesEnd := range []kv.Step{0, 8, 9} {
-				b.Run(fmt.Sprintf("files_end_%d", filesEnd), func(b *testing.B) {
+			for _, tc := range []struct {
+				name     string
+				filesEnd kv.Step
+				minStep  kv.Step
+				want     kv.Step
+			}{
+				{name: "files_end_0", want: 8},
+				{name: "files_end_8", filesEnd: 8, want: 8},
+				{name: "files_end_9", filesEnd: 9, want: 9},
+				{name: "deferred", minStep: 10, want: 8},
+			} {
+				b.Run(tc.name, func(b *testing.B) {
 					b.ReportAllocs()
 					for b.Loop() {
-						first, found, err := d.firstStepToBuild(tx, filesEnd)
-						if err != nil || !found || first != max(filesEnd, 8) {
+						first, found, err := d.firstStepToBuild(tx, tc.filesEnd, tc.minStep)
+						validStep := first == tc.want || (first > tc.want && first < tc.minStep)
+						if err != nil || !found || !validStep {
 							b.Fatalf("step=%d found=%t err=%v", first, found, err)
 						}
 					}

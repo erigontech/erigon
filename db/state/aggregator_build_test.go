@@ -134,6 +134,32 @@ func TestAggregatorBuildDefersNewlyEnabledEntities(t *testing.T) {
 	t.Run("after_prune", assertPendingData)
 }
 
+type buildPlanningTx struct {
+	kv.Tx
+	table     string
+	scans     int
+	nextCalls int
+}
+
+func (tx *buildPlanningTx) Cursor(table string) (kv.Cursor, error) {
+	cursor, err := tx.Tx.Cursor(table) //nolint:gocritic // The caller owns the returned cursor.
+	if err != nil || table != tx.table {
+		return cursor, err
+	}
+	tx.scans++
+	return &buildPlanningCursor{Cursor: cursor, tx: tx}, nil
+}
+
+type buildPlanningCursor struct {
+	kv.Cursor
+	tx *buildPlanningTx
+}
+
+func (c *buildPlanningCursor) Next() ([]byte, []byte, error) {
+	c.tx.nextCalls++
+	return c.Cursor.Next()
+}
+
 func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 	const stepSize = uint64(10)
 	for _, target := range []string{"receipt", "receipt_without_history", "rcache", "logaddrs"} {
@@ -217,10 +243,18 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					defer at.Close()
 					require.NoError(t, at.CheckFilesDBGap(tx))
 					require.Equal(t, stateFilesEnd, at.TxNumsInFiles(kv.StateDomains...))
-					plan, err := at.planFileBuild(tx)
+					counted := &buildPlanningTx{Tx: tx, table: agg.d[kv.ReceiptDomain].ValuesTable}
+					if target == "rcache" {
+						counted.table = agg.d[kv.RCacheDomain].ValuesTable
+					}
+					plan, err := at.planFileBuild(counted)
 					require.NoError(t, err)
 					if test.stateSteps > resumeStep+1 {
 						require.Equal(t, test.stateSteps, plan.firstStep, "an unsafe backfill must not block healthy entities")
+						if target == "receipt_without_history" || target == "rcache" {
+							require.Equal(t, 1, counted.scans)
+							require.Zero(t, counted.nextCalls, "the first row already requires deferring this entity")
+						}
 					} else {
 						require.Equal(t, resumeStep, plan.firstStep)
 					}
