@@ -104,3 +104,9 @@ func TestSetGoMemLimitInstallsDerivedLimit(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, want, debug.SetMemoryLimit(-1))
 }
+
+func TestIOOverlapExtraPs(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, (estimate.IOOverlapFactor-1)*6, ioOverlapExtraPs(6, 6))
+	require.Zero(t, ioOverlapExtraPs(6, 16), "a CPU quota caps GOMAXPROCS below the CPU count: extra Ps only get throttled")
+}

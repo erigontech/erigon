@@ -27,6 +27,7 @@ import (
 	"net/http/pprof" //nolint:gosec
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/disk"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/fdlimit"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/downloader"
@@ -245,11 +247,36 @@ func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logg
 	return SetupWithPrefix(nodeCtx, ctx, "erigon", rootLogger)
 }
 
+// raiseGomaxprocsForIO adds Ps above the CPU count once, after package init: a goroutine
+// faulting on an mmap'd state file holds its P, so extra Ps let runnable work overlap the faults.
+func raiseGomaxprocsForIO(logger log.Logger) {
+	if os.Getenv("GOMAXPROCS") != "" {
+		return
+	}
+	base := runtime.GOMAXPROCS(0)
+	extra := dbg.EnvInt("GOMAXPROCS_EXTRA", ioOverlapExtraPs(base, runtime.NumCPU()))
+	if extra <= 0 {
+		return
+	}
+	runtime.GOMAXPROCS(base + extra)
+	logger.Info("[gomaxprocs] raised for io overlap", "from", base, "to", base+extra)
+}
+
+// ioOverlapExtraPs is zero under a CPU quota: the runtime already caps GOMAXPROCS
+// below the CPU count there, and Ps above the quota only get throttled.
+func ioOverlapExtraPs(base, cpus int) int {
+	if base < cpus {
+		return 0
+	}
+	return (estimate.IOOverlapFactor - 1) * base
+}
+
 // SetupWithPrefix is Setup with an explicit log-file prefix, for binaries other than erigon.
 func SetupWithPrefix(nodeCtx context.Context, ctx *cli.Command, filePrefix string, rootLogger bool) (log.Logger, *tracers.Tracer, *http.ServeMux, *http.ServeMux, error) {
 	RaiseFdLimit()
 
 	logger := logging.SetupLoggerCtx(filePrefix, ctx, log.LvlInfo, log.LvlInfo, rootLogger)
+	raiseGomaxprocsForIO(logger)
 	SetGoMemLimit(logger)
 	tracer, err := SetupTracerCtx(ctx)
 	if err != nil {
