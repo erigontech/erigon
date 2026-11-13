@@ -18,6 +18,7 @@ package cltypes
 
 import (
 	"encoding/json"
+	"errors"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -68,6 +69,9 @@ func (b *BlobSidecar) UnmarshalJSON(buf []byte) error {
 	tmp.CommitmentInclusionProof = solid.NewHashVector(CommitmentBranchSize)
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
+	}
+	if tmp.Blob == nil {
+		return errors.New("blob sidecar has a null blob")
 	}
 	b.Index = tmp.Index
 	b.Blob = *tmp.Blob

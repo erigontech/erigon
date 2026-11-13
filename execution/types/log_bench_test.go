@@ -23,14 +23,26 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func BenchmarkLogsMarshalFastJSON(b *testing.B) {
 	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	timestamp := hexutil.Uint64(1_700_000_000)
 	logs := make(Logs, 1000)
 	for i := range logs {
-		logs[i] = &Log{Topics: []common.Hash{topic, {}, {}}, Data: make([]byte, 32)}
+		tx := i / 8
+		logs[i] = &Log{
+			Topics:         []common.Hash{topic, {}, {}},
+			Data:           make([]byte, 32),
+			BlockNumber:    26_000_000,
+			TxHash:         common.Hash{byte(tx), byte(tx >> 8)},
+			TxIndex:        hexutil.Uint(tx),
+			BlockHash:      common.Hash{0xbb},
+			Index:          hexutil.Uint(i),
+			BlockTimestamp: &timestamp,
+		}
 	}
 	b.Run("stream", func(b *testing.B) {
 		b.ReportAllocs()
@@ -90,6 +102,37 @@ func BenchmarkAppendFilteredLogs(b *testing.B) {
 					}
 				}
 				b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*len(logs)), "ns/log")
+			})
+		}
+	}
+}
+
+func receiptsOfBlock(receipts, logsPerReceipt int, stamped bool) []Logs {
+	out := make([]Logs, receipts)
+	for i := range out {
+		for j := range logsPerReceipt {
+			out[i] = append(out[i], &Log{Address: common.Address{byte(j % 2)}, Topics: make([]common.Hash, 3), Data: make([]byte, 32)})
+		}
+		if stamped {
+			out[i].SetBlockTimestamp(7)
+		}
+	}
+	return out
+}
+
+func BenchmarkAppendFilteredLogsOfBlock(b *testing.B) {
+	f := NewLogFilter([]common.Address{{0}}, nil)
+	for _, n := range []int{20, 150, 400} {
+		for _, stamped := range []bool{false, true} {
+			block := receiptsOfBlock(n, 2, stamped)
+			b.Run(fmt.Sprintf("receipts=%d/stamped=%v", n, stamped), func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					var dst Logs
+					for _, r := range block {
+						dst = r.AppendFilteredLogs(dst, f, 7, 0)
+					}
+				}
 			})
 		}
 	}

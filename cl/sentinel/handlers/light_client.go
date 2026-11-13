@@ -47,7 +47,7 @@ func (c *ConsensusHandlers) optimisticLightClientUpdateHandler(s network.Stream)
 }
 
 func (c *ConsensusHandlers) finalityLightClientUpdateHandler(s network.Stream) error {
-	lc := c.forkChoiceReader.NewestLightClientUpdate()
+	lc := c.forkChoiceReader.NewestLightClientFinalityUpdate()
 	if lc == nil {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
@@ -70,7 +70,7 @@ func (c *ConsensusHandlers) finalityLightClientUpdateHandler(s network.Stream) e
 
 func (c *ConsensusHandlers) lightClientBootstrapHandler(s network.Stream) error {
 	root := &cltypes.Root{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, root, clparams.Phase0Version); err != nil {
+	if err := ssz_snappy.DecodeAndReadFixedSizeNoForkDigest(s, root, clparams.Phase0Version); err != nil {
 		return err
 	}
 
@@ -92,7 +92,7 @@ func (c *ConsensusHandlers) lightClientBootstrapHandler(s network.Stream) error 
 
 func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) error {
 	req := &cltypes.LightClientUpdatesByRangeRequest{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
+	if err := ssz_snappy.DecodeAndReadFixedSizeNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err
 	}
 	endPeriod := req.StartPeriod + req.Count
@@ -113,9 +113,8 @@ func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) e
 
 	// The response must include the earliest available update and use consecutive periods.
 	// Skip leading gaps, but stop once a gap would split the response.
-	for i := req.StartPeriod; i < endPeriod; i++ {
-		update, has := c.forkChoiceReader.GetLightClientUpdate(i)
-		if !has {
+	for _, update := range c.forkChoiceReader.GetLightClientUpdates(req.StartPeriod, endPeriod) {
+		if update == nil {
 			if len(lightClientUpdates) > 0 {
 				break
 			}
