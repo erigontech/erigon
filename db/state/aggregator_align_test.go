@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,18 +71,34 @@ func TestVisibleFilesAligned_LaggingCommitmentClampsEveryone(t *testing.T) {
 
 func TestVisibleFilesAligned_GapHidesEveryFileAfterIt(t *testing.T) {
 	t.Parallel()
-	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+	for name, historyOff := range map[string][]kv.Domain{
+		"commitment history off":      nil, // the default
+		"one more domain history off": {kv.AccountsDomain},
+		"every history off":           {kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			db, agg := testDbAndAggregatorv3(t, alignStepSize)
+			for _, d := range historyOff {
+				agg.d[d].History.SnapshotsDisabled, agg.d[d].History.HistoryDisabled = true, true
+			}
 
-	ranges := []testFileRange{{0, 1}, {2, 3}}
-	generateStateFiles(t, agg.Dirs(), ranges)
-	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
-	generateCommitmentFile(t, agg.Dirs(), ranges)
-	require.NoError(t, agg.OpenFolder(db))
+			ranges := []testFileRange{{0, 1}, {2, 3}}
+			generateStateFiles(t, agg.Dirs(), ranges)
+			generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+			generateCommitmentFile(t, agg.Dirs(), ranges)
+			require.NoError(t, agg.OpenFolder(db))
 
-	at := agg.BeginFilesRo()
-	defer at.Close()
-	for _, d := range kv.StateDomains {
-		require.EqualValues(t, alignStepSize, at.d[d].files.EndTxNum(), "domain %s", d)
+			requireVisibleEnd(t, agg, alignStepSize)
+			at := agg.BeginFilesRo()
+			defer at.Close()
+			for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+				if !slices.Contains(historyOff, d) {
+					require.EqualValues(t, alignStepSize, at.d[d].ht.files.EndTxNum(), "history %s", d)
+					require.EqualValues(t, alignStepSize, at.d[d].ht.iit.files.EndTxNum(), "history index %s", d)
+				}
+			}
+		})
 	}
 }
 
