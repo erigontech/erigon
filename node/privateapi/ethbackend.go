@@ -22,6 +22,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/holiman/uint256"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -595,11 +596,14 @@ func (s *EthBackendServer) validateFrameTransaction(ctx context.Context, frame *
 	}
 	// Fee eligibility belongs to pool admission. Clamp fees here so low fee caps
 	// do not become cached failures of prefix validation.
-	if blockContext.BaseFee.Gt(frame.GetFeeCap()) {
-		blockContext.BaseFee.Set(frame.GetFeeCap())
+	if blobGas := frame.GetBlobGas(); blobGas != 0 {
+		maximum := new(uint256.Int).Div(&frame.Fees.MaxFee, uint256.NewInt(blobGas))
+		if blockContext.BlobBaseFee.Gt(maximum) {
+			blockContext.BlobBaseFee.Set(maximum)
+		}
 	}
-	if blockContext.BlobBaseFee.Gt(&frame.Fees.BlobFeeCap) {
-		blockContext.BlobBaseFee.Set(&frame.Fees.BlobFeeCap)
+	if cap := frame.ExecutionFeeCap(&blockContext.BlobBaseFee); blockContext.BaseFee.Gt(cap) {
+		blockContext.BaseFee.Set(cap)
 	}
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, s.chainConfig, vm.Config{})
 	defer context.AfterFunc(ctx, evm.Cancel)()

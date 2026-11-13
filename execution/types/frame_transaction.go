@@ -44,7 +44,7 @@ const (
 	FrameDefault = iota
 	FrameVerify
 	FrameSender
-	FramePostTx
+	FrameAssert
 )
 
 const (
@@ -94,9 +94,49 @@ type FrameSignature struct {
 }
 
 type FrameFees struct {
-	TipCap     uint256.Int
-	FeeCap     uint256.Int
-	BlobFeeCap uint256.Int
+	MaxFee uint256.Int
+	TipCap uint256.Int
+}
+
+type FrameFeeBudget struct {
+	MaxCost  uint256.Int
+	BlobCost uint256.Int
+	GasPrice uint256.Int
+}
+
+var ErrFrameFeeBudget = errors.New("frame fee budget below base fees")
+
+// Budget reserves base fees and as much of the priority fee as MaxFee permits.
+// GASPRICE rounds the reserved priority fee down; settlement uses the remaining
+// budget directly rather than multiplying that rounded price by gas used.
+func (fees *FrameFees) Budget(gas, blobGas uint64, baseFee, blobBaseFee *uint256.Int) (budget FrameFeeBudget, err error) {
+	var required, executionCost uint256.Int
+	_, overflow := budget.BlobCost.MulOverflow(uint256.NewInt(blobGas), blobBaseFee)
+	if overflow {
+		return budget, ErrFrameFeeBudget
+	}
+	_, overflow = executionCost.MulOverflow(uint256.NewInt(gas), baseFee)
+	if overflow {
+		return budget, ErrFrameFeeBudget
+	}
+	_, overflow = required.AddOverflow(&executionCost, &budget.BlobCost)
+	if overflow || required.Gt(&fees.MaxFee) {
+		return budget, ErrFrameFeeBudget
+	}
+	available := new(uint256.Int).Sub(&fees.MaxFee, &required)
+	priority := fees.PriorityCost(gas, available)
+	budget.MaxCost.Add(&required, &priority)
+	budget.GasPrice.Div(&priority, uint256.NewInt(gas))
+	budget.GasPrice.Add(&budget.GasPrice, baseFee)
+	return budget, nil
+}
+
+func (fees *FrameFees) PriorityCost(gas uint64, available *uint256.Int) uint256.Int {
+	var priority uint256.Int
+	if _, overflow := priority.MulOverflow(&fees.TipCap, uint256.NewInt(gas)); overflow || priority.Gt(available) {
+		return *available
+	}
+	return priority
 }
 
 // FrameTransaction carries an explicit sender and a sequence of calls that
@@ -132,9 +172,9 @@ func (frame *Frame) ResolvedTarget(sender common.Address) common.Address {
 }
 
 // IsStatic selects STATICCALL execution. VERIFY still allows APPROVE to change
-// nonce and payment state; POST_TX forbids APPROVE.
+// nonce and payment state; ASSERT forbids APPROVE.
 func (frame *Frame) IsStatic() bool {
-	return frame.Mode == FrameVerify || frame.Mode == FramePostTx
+	return frame.Mode == FrameVerify || frame.Mode == FrameAssert
 }
 
 func (frame *Frame) IsExpiryVerifier() bool {
@@ -229,9 +269,6 @@ func (tx *FrameTransaction) Validate() error {
 	if len(tx.Frames) == 0 || len(tx.Frames) > FrameMaxCount {
 		return errors.New("invalid frame count")
 	}
-	if len(tx.BlobVersionedHashes) == 0 && !tx.Fees.BlobFeeCap.IsZero() {
-		return errors.New("blob fee without blobs")
-	}
 	if len(tx.BlobVersionedHashes) > params.MaxBlobsPerTxn {
 		return errors.New("too many frame transaction blobs")
 	}
@@ -243,11 +280,11 @@ func (tx *FrameTransaction) Validate() error {
 	var expirySeen bool
 	for i := range tx.Frames {
 		frame := &tx.Frames[i]
-		if frame.Mode > FramePostTx || frame.Flags >= 8 {
+		if frame.Mode > FrameAssert || frame.Flags >= 8 {
 			return fmt.Errorf("invalid frame %d mode or flags", i)
 		}
-		if i > 0 && tx.Frames[i-1].Mode == FramePostTx && frame.Mode != FramePostTx {
-			return fmt.Errorf("invalid frame %d mode or flags: POST_TX frames must form a trailing suffix", i)
+		if i > 0 && tx.Frames[i-1].Mode == FrameAssert && frame.Mode != FrameAssert {
+			return fmt.Errorf("invalid frame %d mode or flags: ASSERT frames must form a trailing suffix", i)
 		}
 		if frame.Mode != FrameSender && !frame.Value.IsZero() {
 			return fmt.Errorf("frame %d value requires sender mode", i)
@@ -335,7 +372,18 @@ func (tx *FrameTransaction) GetNonce() uint64 { return tx.Nonce }
 
 func (tx *FrameTransaction) GetTipCap() *uint256.Int { return &tx.Fees.TipCap }
 
-func (tx *FrameTransaction) GetFeeCap() *uint256.Int { return &tx.Fees.FeeCap }
+func (tx *FrameTransaction) GetFeeCap() *uint256.Int {
+	return tx.ExecutionFeeCap(new(uint256.Int))
+}
+
+// ExecutionFeeCap converts the total fee budget to a per-gas bound after blobs.
+func (tx *FrameTransaction) ExecutionFeeCap(blobBaseFee *uint256.Int) *uint256.Int {
+	var blobCost uint256.Int
+	if _, overflow := blobCost.MulOverflow(uint256.NewInt(tx.GetBlobGas()), blobBaseFee); overflow || blobCost.Gt(&tx.Fees.MaxFee) {
+		return new(uint256.Int)
+	}
+	return new(uint256.Int).Div(new(uint256.Int).Sub(&tx.Fees.MaxFee, &blobCost), uint256.NewInt(tx.GetGasLimit()))
+}
 
 func (tx *FrameTransaction) GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int {
 	return CalcEffectiveGasTip(baseFee, tx.GetTipCap, tx.GetFeeCap)
@@ -398,7 +446,12 @@ func (tx *FrameTransaction) GasLimits() (intrinsic, floor uint64, limits mdgas.M
 		args.SignatureGas += sig.VerificationGas()
 		addData(sig.Signer)
 		addData(sig.Message)
-		addData(sig.Signature)
+		if len(sig.Message) == 0 {
+			args.DataLen += uint64(len(sig.Signature))
+			args.DataNonZeroLen += uint64(len(sig.Signature))
+		} else {
+			addData(sig.Signature)
+		}
 	}
 	intrinsicGas := mdgas.CalcFrameIntrinsicGas(args)
 	intrinsic, floor = intrinsicGas.ExecutionGas, intrinsicGas.FloorGasCost
@@ -429,7 +482,10 @@ func (tx *FrameTransaction) nonceDataCounts() (size, nonZero uint64) {
 	var buf [9]byte
 	prefixLen := rlp.EncodeListPrefixToBuf(payloadLen, buf[:])
 	nonZero += uint64(mdgas.CountNonZeroBytes(buf[:prefixLen]))
-	nonceLen := rlp.EncodeU64ToBuf(tx.Nonce, buf[:])
+	var nonceLen int
+	if tx.UsesLegacyNonce() || tx.Nonce != math.MaxUint64 {
+		nonceLen = rlp.EncodeU64ToBuf(tx.Nonce, buf[:])
+	}
 	nonZero += uint64(mdgas.CountNonZeroBytes(buf[:nonceLen]))
 	return uint64(payloadLen + prefixLen + nonceLen), nonZero
 }
@@ -482,18 +538,19 @@ func (tx *FrameTransaction) AsMessage(_ Signer, baseFee *uint256.Int, rules *cha
 	if err := tx.Validate(); err != nil {
 		return nil, err
 	}
+	feeCap := *tx.GetFeeCap()
 	msg := &Message{
 		from: accounts.InternAddress(tx.SenderAddress), nonce: tx.Nonce,
-		gasLimit: tx.GetGasLimit(), gasPrice: tx.Fees.FeeCap, feeCap: tx.Fees.FeeCap, tipCap: tx.Fees.TipCap,
-		maxFeePerBlobGas: tx.Fees.BlobFeeCap, blobHashes: tx.BlobVersionedHashes,
+		gasLimit: tx.GetGasLimit(), gasPrice: feeCap, feeCap: feeCap, tipCap: tx.Fees.TipCap,
+		blobHashes: tx.BlobVersionedHashes,
 		checkNonce: true, checkTransaction: true, checkGas: true,
 		frameTransaction: tx,
 	}
 	if baseFee != nil {
-		tip := tx.GetEffectiveGasTip(baseFee)
+		tip := CalcEffectiveGasTip(baseFee, msg.TipCap, msg.FeeCap)
 		msg.gasPrice.Add(baseFee, &tip)
-		if msg.gasPrice.Gt(&tx.Fees.FeeCap) {
-			msg.gasPrice.Set(&tx.Fees.FeeCap)
+		if msg.gasPrice.Gt(&msg.feeCap) {
+			msg.gasPrice.Set(&msg.feeCap)
 		}
 	}
 	return msg, nil
@@ -507,11 +564,11 @@ func (tx *FrameTransaction) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (tx *FrameTransaction) validateNonceKeys() error {
-	if len(tx.NonceKeys) == 0 || len(tx.NonceKeys) > FrameMaxNonceKeys {
+	if len(tx.NonceKeys) > FrameMaxNonceKeys {
 		return errors.New("invalid nonce key count")
 	}
-	if len(tx.NonceKeys) > 1 && tx.NonceKeys[0].IsZero() {
-		return errors.New("zero nonce key alongside other keys")
+	if tx.UsesLegacyNonce() && tx.Nonce == math.MaxUint64 {
+		return errors.New("nonce has max value")
 	}
 	for i := 1; i < len(tx.NonceKeys); i++ {
 		if !tx.NonceKeys[i-1].Lt(&tx.NonceKeys[i]) {
@@ -521,10 +578,10 @@ func (tx *FrameTransaction) validateNonceKeys() error {
 	return nil
 }
 
-// UsesLegacyNonce identifies the [0] key set, which consumes the sender's account
-// nonce. Other key sets share Nonce as their sequence in FrameNonceManager storage.
+// UsesLegacyNonce identifies the empty key set, which consumes the sender's account
+// nonce. Every explicit key, including zero, selects FrameNonceManager storage.
 func (tx *FrameTransaction) UsesLegacyNonce() bool {
-	return len(tx.NonceKeys) == 1 && tx.NonceKeys[0].IsZero()
+	return len(tx.NonceKeys) == 0
 }
 
 func FrameNonceSlot(sender common.Address, key uint256.Int) common.Hash {
@@ -590,7 +647,7 @@ func (tx *FrameTransaction) EncodingSize() int {
 		signaturesSize += rlp.ListLen(sigSize)
 	}
 	payloadSize += rlp.ListLen(signaturesSize)
-	payloadSize += rlp.ListLen(rlp.Uint256Len(tx.Fees.TipCap) + rlp.Uint256Len(tx.Fees.FeeCap) + rlp.Uint256Len(tx.Fees.BlobFeeCap))
+	payloadSize += rlp.ListLen(rlp.Uint256Len(tx.Fees.MaxFee) + rlp.Uint256Len(tx.Fees.TipCap))
 	payloadSize += rlp.ListLen(blobVersionedHashesSize(tx.BlobVersionedHashes))
 	return 1 + rlp.ListLen(payloadSize)
 }
@@ -605,13 +662,15 @@ func (tx *FrameTransaction) Hash() common.Hash {
 }
 
 func (tx *FrameTransaction) SigningHash(*uint256.Int) common.Hash {
-	// Empty-message entries sign this transaction, so omit their signatures to
-	// avoid self-reference. Signatures over explicit messages stay in the hash.
-	signatures := slices.Clone(tx.Signatures)
-	for i := range signatures {
-		if len(signatures[i].Message) == 0 {
-			signatures[i].Signature = nil
+	// Empty-message signatures commit to their length instead of their bytes,
+	// avoiding self-reference without allowing relayers to increase their gas cost.
+	signatures := make([]any, len(tx.Signatures))
+	for i, sig := range tx.Signatures {
+		var signature any = sig.Signature
+		if len(sig.Message) == 0 {
+			signature = uint64(len(sig.Signature))
 		}
+		signatures[i] = []any{sig.Scheme, sig.Signer, sig.Message, signature}
 	}
 	return prefixedRlpHash(FrameTxType, []any{
 		tx.ChainID, tx.NonceKeys, tx.Nonce, tx.SenderAddress, tx.Frames,

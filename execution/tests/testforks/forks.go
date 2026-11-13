@@ -250,6 +250,12 @@ func init() {
 	cAmsBpo.Bpo3Time = common.NewUint64(0)
 	Forks["AmsterdamBPODecrease"] = cAmsBpo
 
+	for _, name := range []string{"BPOIncrease", "BPODecrease", "ToBPOIncreaseAtTime15k", "ToBPODecreaseAtTime15k"} {
+		cBogotaBpo := configCopy(Forks["Amsterdam"+name])
+		cBogotaBpo.BogotaTime = common.NewUint64(0)
+		Forks["Bogota"+name] = cBogotaBpo
+	}
+
 	// BPO3/BPO4 continue from BPO2 as a separate chain
 	c = configCopy(c)
 	c.Bpo3Time = common.NewUint64(15_000)

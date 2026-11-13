@@ -1386,7 +1386,7 @@ func TestSSZRESTNewPayloadBlobValidation(t *testing.T) {
 				cfg.BogotaTime = common.NewUint64(0)
 				version, fork = clparams.GloasVersion, "amsterdam"
 				txs[0] = &types.FrameTransaction{
-					ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: common.Address{0x01},
+					ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: common.Address{0x01},
 					Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 21_000}}},
 					BlobVersionedHashes: []common.Hash{tc.blobHash},
 				}

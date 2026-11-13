@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2"
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -4238,7 +4237,7 @@ func TestValidatePayloadBlobHashes(t *testing.T) {
 		DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &common.Address{1}}},
 		BlobVersionedHashes:   hashes[:2],
 	}
-	frame := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, Frames: []types.Frame{{}}, BlobVersionedHashes: hashes[2:]}
+	frame := &types.FrameTransaction{NonceKeys: nil, Frames: []types.Frame{{}}, BlobVersionedHashes: hashes[2:]}
 	raw, err := types.MarshalTransactionsBinary(types.Transactions{
 		&types.LegacyTx{}, &types.AccessListTx{}, &types.DynamicFeeTransaction{},
 		&types.SetCodeTransaction{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &common.Address{1}}}},

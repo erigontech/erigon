@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -507,13 +508,23 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 
 		if config.IsLondon(blockNumber) {
 			baseFee256 := header.BaseFee
-			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
-			if !transaction.GetFeeCap().IsZero() || !transaction.GetTipCap().IsZero() {
-				if err := protocol.CheckEip1559TxGasFeeCap(senderAddress, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */); err != nil {
-					transactions = transactions[1:]
-					feeTooLowCnt++
-					continue
+			var feeErr error
+			if isFrame {
+				var blobBaseFee uint256.Int
+				if header.ExcessBlobGas != nil && frame.GetBlobGas() != 0 {
+					blobBaseFee, err = misc.GetBlobGasPrice(config, *header.ExcessBlobGas, header.Time)
+					if err != nil {
+						return nil, nil, err
+					}
 				}
+				_, feeErr = frame.Fees.Budget(frame.GetGasLimit(), frame.GetBlobGas(), baseFee256, &blobBaseFee)
+			} else if !transaction.GetFeeCap().IsZero() || !transaction.GetTipCap().IsZero() {
+				feeErr = protocol.CheckEip1559TxGasFeeCap(senderAddress, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */)
+			}
+			if feeErr != nil {
+				transactions = transactions[1:]
+				feeTooLowCnt++
+				continue
 			}
 		}
 		if isFrame {

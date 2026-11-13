@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -350,22 +351,24 @@ func delegateIssuance(block *types.Block, chainConfig *chain.Config, engine rule
 }
 
 func delegateBlockFees(block *types.Block, chainConfig *chain.Config, receipts types.Receipts) (uint256.Int, error) {
-	var fee, gasUsed, totalFees uint256.Int
-	isLondon := chainConfig.IsLondon(block.NumberU64())
+	var totalFees, blobBaseFee uint256.Int
 	baseFee := block.BaseFee()
-
+	if !chainConfig.IsLondon(block.NumberU64()) {
+		baseFee = nil
+	}
+	if excess := block.HeaderNoCopy().ExcessBlobGas; excess != nil {
+		var err error
+		blobBaseFee, err = misc.GetBlobGasPrice(chainConfig, *excess, block.Time())
+		if err != nil {
+			return totalFees, err
+		}
+	}
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		if !isLondon {
-			fee.Set(txn.GetTipCap())
-		} else {
-			effectiveTip := txn.GetEffectiveGasTip(baseFee)
-			fee.Add(baseFee, &effectiveTip)
+		fee, err := ethutils.GasFeePaid(txn, receipt.GasUsed, baseFee, &blobBaseFee)
+		if err != nil {
+			return totalFees, err
 		}
-
-		gasUsed.SetUint64(receipt.GasUsed)
-		fee.Mul(&fee, &gasUsed)
-
 		totalFees.Add(&totalFees, &fee)
 	}
 

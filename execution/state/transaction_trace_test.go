@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // A state that runs several transactions keeps their logs, so the event table
@@ -33,10 +34,28 @@ func TestTransactionTraceEventsExcludeEarlierTransactions(t *testing.T) {
 	t.Cleanup(ibs.Close)
 	earlier, own := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
 	ibs.AddLog(&types.Log{Address: earlier})
-	ctx := ibs.NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{{Mode: types.FramePostTx}}}, uint256.Int{})
+	ctx := ibs.NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{{Mode: types.FrameAssert}}}, uint256.Int{})
 	ibs.AddLog(&types.Log{Address: own})
 	trace, err := ctx.TransactionTrace(ibs)
 	require.NoError(t, err)
 	require.Len(t, trace.Events, 1)
 	require.Equal(t, own, trace.Events[0].Address)
+}
+
+func TestTransactionTraceNonceIncludesEarlierTransactions(t *testing.T) {
+	address := accounts.InternAddress(common.HexToAddress("0x1000"))
+	account := accounts.NewAccount()
+	versions := NewVersionMap(nil)
+	versions.WriteNonce(address, Version{TxIndex: 0}, 1, true)
+	ibs := NewWithVersionMap(&fieldReader{addr: address, account: &account}, versions)
+	t.Cleanup(ibs.Close)
+	ibs.SetTxContext(1, 1)
+	ctx := ibs.NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{{Mode: types.FrameAssert}}}, uint256.Int{})
+	require.NoError(t, ibs.SetNonce(address, 2, 0))
+	trace, err := ctx.TransactionTrace(ibs)
+	require.NoError(t, err)
+	require.Equal(t, []NonceChange{{Address: address, Before: 1, After: 2}}, trace.Nonces)
+	read, ok := ibs.versionedReads.GetNonce(address)
+	require.True(t, ok)
+	require.Equal(t, Version{TxIndex: 0}, read.Version)
 }

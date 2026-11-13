@@ -40,14 +40,14 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-func TestPostTxReplayPreservesFeeAccounting(t *testing.T) {
+func TestAssertReplayPreservesFeeAccounting(t *testing.T) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
 	sender, body, assertion := common.HexToAddress("0x1000"), common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
 	// With no value transfers, the payer's balance delta must equal the pre-charge.
-	code := program.New().Push0().Push(0x14).Op(vm.TXTRACE).
-		Push0().Push(sender).Push(3).Op(vm.TXDIFF).
-		Push0().Push(sender).Push(2).Op(vm.TXDIFF, vm.SUB, vm.EQ)
+	code := program.New().Push0().Push(0x19).Op(vm.TXTRACE).
+		Push0().Push(6).Op(vm.TXTRACE).
+		Push0().Push(5).Op(vm.TXTRACE, vm.SUB, vm.EQ)
 	destination := code.Size() + 7
 	code.Op(vm.PUSH2).Append([]byte{byte(destination >> 8), byte(destination)}).Op(vm.JUMPI).
 		Push0().Push0().Op(vm.REVERT, vm.JUMPDEST, vm.STOP)
@@ -64,15 +64,17 @@ func TestPostTxReplayPreservesFeeAccounting(t *testing.T) {
 	}))
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 		for nonce := range uint64(2) {
-			b.AddTx(&types.FrameTransaction{
-				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, Nonce: nonce, SenderAddress: sender,
-				Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+			tx := &types.FrameTransaction{
+				ChainID: *cfg.ChainID, NonceKeys: nil, Nonce: nonce, SenderAddress: sender,
+				Fees: types.FrameFees{MaxFee: uint256.Int{1}},
 				Frames: []types.Frame{
 					{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
 					{Mode: types.FrameSender, Target: &body, Limits: mdgas.MdGas{Execution: 10_000}},
-					{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
+					{Mode: types.FrameAssert, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
 				},
-			})
+			}
+			tx.Fees.MaxFee.Mul(&tx.Fees.MaxFee, uint256.NewInt(tx.GetGasLimit()))
+			b.AddTx(tx)
 		}
 	})
 	require.NoError(t, err)

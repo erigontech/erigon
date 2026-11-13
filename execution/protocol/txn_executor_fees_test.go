@@ -98,10 +98,14 @@ func TestTransactionFeeDistribution(t *testing.T) {
 					if kind == "frame" {
 						require.NoError(t, ibs.SetCode(sender, program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
 						tx := &types.FrameTransaction{
-							ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender.Value(),
+							ChainID: *cfg.ChainID, NonceKeys: nil, SenderAddress: sender.Value(),
 							Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}}},
-							Fees:                types.FrameFees{FeeCap: uint256.Int{test.feeCap}, TipCap: uint256.Int{tipCap}, BlobFeeCap: uint256.Int{13}},
+							Fees:                types.FrameFees{MaxFee: uint256.Int{test.feeCap}, TipCap: uint256.Int{tipCap}},
 							BlobVersionedHashes: blobs,
+						}
+						tx.Fees.TipCap.SetUint64(test.wantTip)
+						if !test.free {
+							tx.Fees.MaxFee.SetUint64(tx.GetGasLimit()*(2+test.wantTip) + 7*tx.GetBlobGas())
 						}
 						var err error
 						msg, err = tx.AsMessage(types.Signer{}, &evm.Context.BaseFee, evm.ChainRules())

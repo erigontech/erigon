@@ -57,6 +57,7 @@ type GraphQLReceipt struct {
 	Data                 []byte           `json:"data"`
 	Gas                  uint64           `json:"gas"`
 	MaxFeePerGas         *uint256.Int     `json:"maxFeePerGas,omitempty"`
+	MaxFee               *uint256.Int     `json:"maxFee,omitempty"`
 	MaxPriorityFeePerGas *uint256.Int     `json:"maxPriorityFeePerGas,omitempty"`
 	MaxFeePerBlobGas     *hexutil.U256    `json:"maxFeePerBlobGas,omitempty"`
 	AccessList           types.AccessList `json:"accessList"`
@@ -89,7 +90,8 @@ func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfi
 	if blobTx, ok := txn.(*types.BlobTx); ok {
 		transaction.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
 	} else if frame, ok := txn.(*types.FrameTransaction); ok {
-		transaction.MaxFeePerBlobGas = (*hexutil.U256)(&frame.Fees.BlobFeeCap)
+		transaction.MaxFeePerGas = nil
+		transaction.MaxFee = &frame.Fees.MaxFee
 	}
 	return transaction
 }

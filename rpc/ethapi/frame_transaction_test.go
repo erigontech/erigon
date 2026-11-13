@@ -27,14 +27,16 @@ import (
 )
 
 func TestFrameRPCTransaction(t *testing.T) {
-	tx := &types.FrameTransaction{NonceKeys: []uint256.Int{{}}, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1}, Frames: []types.Frame{{Mode: 1, Flags: 3}}, Signatures: []types.FrameSignature{{Signature: []byte{1}}}}
+	tx := &types.FrameTransaction{NonceKeys: nil, ChainID: *uint256.NewInt(1), SenderAddress: common.Address{1}, Frames: []types.Frame{{Mode: 1, Flags: 3}}, Signatures: []types.FrameSignature{{Signature: []byte{1}}}}
 	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
 	data, err := json.Marshal(result)
 	require.NoError(t, err)
 	var fields map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(data, &fields))
-	require.JSONEq(t, `["0x0"]`, string(fields["nonceKeys"]))
+	require.JSONEq(t, `[]`, string(fields["nonceKeys"]))
 	require.Contains(t, fields, "frames")
 	require.Contains(t, fields, "signatures")
-	require.JSONEq(t, `"0x0"`, string(fields["maxFeePerBlobGas"]))
+	require.NotContains(t, fields, "maxFeePerGas")
+	require.NotContains(t, fields, "maxFeePerBlobGas")
+	require.JSONEq(t, `"0x0"`, string(fields["maxFee"]))
 }

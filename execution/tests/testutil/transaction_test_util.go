@@ -106,7 +106,7 @@ func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 			}
 		}
 
-		if rules.IsLondon {
+		if rules.IsLondon && tx.Type() != types.FrameTxType {
 			// EIP-1559 gas fee cap
 			err = protocol.CheckEip1559TxGasFeeCap(sender, msg.FeeCap(), msg.TipCap(), nil, false /* isFree */)
 			if err != nil {
@@ -119,7 +119,7 @@ func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 		}
 
 		// EIP-2681: Limit account nonce to 2^64-1
-		if msg.Nonce()+1 < msg.Nonce() {
+		if msg.Nonce()+1 < msg.Nonce() && tx.Type() != types.FrameTxType {
 			return nil, nil, requiredGas, fmt.Errorf("%w: nonce: %d", protocol.ErrNonceMax, msg.Nonce())
 		}
 		h := tx.Hash()

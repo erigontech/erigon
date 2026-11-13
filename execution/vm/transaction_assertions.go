@@ -19,13 +19,11 @@ package vm
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func inPostTx(evm *EVM) bool {
-	return evm.FrameContext != nil && evm.FrameContext.Transaction.Frames[evm.FrameContext.Index].Mode == types.FramePostTx
+func inAssert(evm *EVM) bool {
+	return evm.FrameContext != nil && evm.FrameContext.Transaction.Frames[evm.FrameContext.Index].Mode == types.FrameAssert
 }
 
 // Assertion read errors must survive call rollback and reach the transaction
@@ -37,23 +35,23 @@ func (evm *EVM) assertionReadError(err error) error {
 }
 
 func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
-	if !inPostTx(evm) {
+	if !inAssert(evm) {
 		return pc, nil, ErrFrameContext
 	}
 	param, index := call.Stack.pop1Peek1()
-	if !param.IsUint64() || param.Uint64() > 0x15 || !index.IsUint64() {
+	if !param.IsUint64() || param.Uint64() > 0x1a || !index.IsUint64() {
 		return pc, nil, ErrFrameParameter
 	}
 	p, i := param.Uint64(), index.Uint64()
-	if (p <= 2 || p == 0x0c || p >= 0x14) && i != 0 {
+	if (p <= 3 || p == 0x11 || p >= 0x19) && i != 0 {
 		return pc, nil, ErrFrameParameter
 	}
 	ctx := evm.FrameContext
-	if p == 0x14 {
+	if p == 0x19 {
 		index.Set(&ctx.MaxCost)
 		return pc, nil, nil
 	}
-	if p == 0x15 {
+	if p == 0x1a {
 		address := ctx.Payer.Value()
 		index.SetBytes(address[:])
 		return pc, nil, nil
@@ -68,51 +66,71 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	case p == 1:
 		index.SetUint64(uint64(len(trace.Slots)))
 	case p == 2:
-		index.SetUint64(uint64(len(trace.Deployed)))
-	case p <= 5:
+		index.SetUint64(uint64(len(trace.Codes)))
+	case p == 3:
+		index.SetUint64(uint64(len(trace.Nonces)))
+	case p <= 6:
 		if i >= uint64(len(trace.Balances)) {
 			return pc, nil, ErrFrameParameter
 		}
 		entry := &trace.Balances[i]
 		switch p {
-		case 3:
+		case 4:
 			address := entry.Address.Value()
 			index.SetBytes(address[:])
-		case 4:
-			index.Set(&entry.Before)
 		case 5:
+			index.Set(&entry.Before)
+		case 6:
 			index.Set(&entry.After)
 		}
-	case p <= 9:
+	case p <= 10:
 		if i >= uint64(len(trace.Slots)) {
 			return pc, nil, ErrFrameParameter
 		}
 		entry := &trace.Slots[i]
 		switch p {
-		case 6:
+		case 7:
 			address := entry.Address.Value()
 			index.SetBytes(address[:])
-		case 7:
-			key := entry.Key.Value()
-			index.SetBytes(key[:])
 		case 8:
 			index.Set(&entry.Before)
 		case 9:
 			index.Set(&entry.After)
+		case 10:
+			key := entry.Key.Value()
+			index.SetBytes(key[:])
 		}
-	case p <= 0x0b:
-		if i >= uint64(len(trace.Deployed)) {
+	case p <= 13:
+		if i >= uint64(len(trace.Codes)) {
 			return pc, nil, ErrFrameParameter
 		}
-		entry := &trace.Deployed[i]
-		if p == 0x0a {
+		entry := &trace.Codes[i]
+		switch p {
+		case 11:
 			address := entry.Address.Value()
 			index.SetBytes(address[:])
-		} else {
+		case 12:
+			hash := entry.Before.Value()
+			index.SetBytes(hash[:])
+		case 13:
 			hash := entry.After.Value()
 			index.SetBytes(hash[:])
 		}
-	case p == 0x0c:
+	case p <= 16:
+		if i >= uint64(len(trace.Nonces)) {
+			return pc, nil, ErrFrameParameter
+		}
+		entry := &trace.Nonces[i]
+		switch p {
+		case 14:
+			address := entry.Address.Value()
+			index.SetBytes(address[:])
+		case 15:
+			index.SetUint64(entry.Before)
+		case 16:
+			index.SetUint64(entry.After)
+		}
+	case p == 17:
 		index.SetUint64(uint64(len(trace.Events)))
 	default:
 		if i >= uint64(len(trace.Events)) {
@@ -120,14 +138,14 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 		}
 		event := trace.Events[i]
 		switch p {
-		case 0x0d:
+		case 18:
 			index.SetBytes(event.Address[:])
-		case 0x0e:
+		case 19:
 			index.SetUint64(uint64(len(event.Topics)))
-		case 0x13:
+		case 24:
 			index.SetUint64(uint64(len(event.Data)))
 		default:
-			topic := p - 0x0f
+			topic := p - 20
 			if topic >= uint64(len(event.Topics)) {
 				return pc, nil, ErrFrameParameter
 			}
@@ -137,96 +155,8 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	return pc, nil, nil
 }
 
-func gasTxDiff(evm *EVM, call *CallContext, _ mdgas.MdGas, _ uint64) (mdgas.MdGasCost, error) {
-	param, key, index := call.Stack.back3(0, 1, 2)
-	ibs := evm.IntraBlockState()
-	var cost uint64
-	if !param.IsUint64() {
-		return mdgas.MdGasCost{Execution: cost}, nil
-	}
-	if p := param.Uint64(); p <= 1 {
-		address, slot := ibs.InternAddress(key), ibs.InternStorageKey(index)
-		if _, warm := ibs.SlotInAccessList(address, slot); !warm {
-			cost = coldStorageAccessCost(evm.chainRules) - params.WarmStorageReadCostEIP2929
-		}
-	} else if p <= 5 && !ibs.AddressInAccessList(ibs.InternAddress(key)) {
-		cost = coldAccountAccessCost(evm.chainRules) - params.WarmStorageReadCostEIP2929
-	}
-	return mdgas.MdGasCost{Execution: cost}, nil
-}
-
-func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
-	if !inPostTx(evm) {
-		return pc, nil, ErrFrameContext
-	}
-	param, key, index := call.Stack.pop2Peek1()
-	if !param.IsUint64() || param.Uint64() > 0x0c {
-		return pc, nil, ErrFrameParameter
-	}
-	p := param.Uint64()
-	if p >= 2 && p != 7 && p != 9 && p != 0x0c && !index.IsZero() {
-		return pc, nil, ErrFrameParameter
-	}
-	ibs := evm.IntraBlockState()
-	trace, err := evm.FrameContext.TransactionTrace(ibs)
-	if err != nil {
-		return pc, nil, evm.assertionReadError(err)
-	}
-	if p <= 5 {
-		address := ibs.InternAddress(key)
-		ibs.MarkAddressAccess(address, false)
-		if p <= 1 {
-			slot := ibs.InternStorageKey(index)
-			ibs.AddSlotOnlyToAccessList(address, slot)
-			value, err := trace.Storage(ibs, address, slot, p == 0)
-			if err != nil {
-				return pc, nil, evm.assertionReadError(err)
-			}
-			index.Set(&value)
-			return pc, nil, nil
-		}
-		ibs.AddAddressToAccessList(address)
-		if p <= 3 {
-			value, err := trace.Balance(ibs, address, p == 2)
-			if err != nil {
-				return pc, nil, evm.assertionReadError(err)
-			}
-			index.Set(&value)
-			return pc, nil, nil
-		}
-		hash, err := trace.CodeHash(ibs, address, p == 4)
-		if err != nil {
-			return pc, nil, evm.assertionReadError(err)
-		}
-		value := hash.Value()
-		index.SetBytes(value[:])
-		return pc, nil, nil
-	}
-	var indices []int
-	switch p {
-	case 6, 7:
-		indices = trace.SlotIndicesByAddress[ibs.InternAddress(key)]
-	case 8, 9:
-		indices = trace.EventIndicesByAddress[ibs.InternAddress(key)]
-	case 0x0a:
-		index.SetUint64(trace.AccountFlags[ibs.InternAddress(key)])
-		return pc, nil, nil
-	case 0x0b, 0x0c:
-		indices = trace.EventIndicesByTopic[key.Bytes32()]
-	}
-	if p == 6 || p == 8 || p == 0x0b {
-		index.SetUint64(uint64(len(indices)))
-	} else {
-		if !index.IsUint64() || index.Uint64() >= uint64(len(indices)) {
-			return pc, nil, ErrFrameParameter
-		}
-		index.SetUint64(uint64(indices[index.Uint64()]))
-	}
-	return pc, nil, nil
-}
-
 func opEventDataCopy(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
-	if !inPostTx(evm) {
+	if !inAssert(evm) {
 		return pc, nil, ErrFrameContext
 	}
 	eventIndex, memoryOffset := call.Stack.pop2()

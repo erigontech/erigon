@@ -855,7 +855,10 @@ func (st *TxnExecutor) payCoinbase(gasUsed uint64) (uint256.Int, error) {
 	if st.evm.ChainRules().IsLondon {
 		effectiveTip = types.CalcEffectiveGasTip(&st.evm.Context.BaseFee, st.msg.TipCap, st.msg.FeeCap)
 	}
-	tipAmount := u256.Mul(u256.U64(gasUsed), effectiveTip)
+	return st.payCoinbaseAmount(u256.Mul(u256.U64(gasUsed), effectiveTip))
+}
+
+func (st *TxnExecutor) payCoinbaseAmount(tipAmount uint256.Int) (uint256.Int, error) {
 	if st.noFeeBurnAndTip {
 		return tipAmount, nil
 	}

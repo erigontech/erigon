@@ -2306,7 +2306,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 	}
 
 	// Don't add blob txn to queued if it's less than current pending blob base fee
-	if mt.TxnSlot.HasBlobs() && mt.TxnSlot.GetBlobFeeCap().LtUint64(p.pendingBlobFee.Load()) {
+	if mt.TxnSlot.TxType() != FrameTxnType && mt.TxnSlot.HasBlobs() && mt.TxnSlot.GetBlobFeeCap().LtUint64(p.pendingBlobFee.Load()) {
 		return txpoolcfg.FeeTooLow
 	}
 
@@ -2350,7 +2350,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 
 	hashStr := string(mt.TxnSlot.IDHash[:])
 	p.byHash[hashStr] = mt
-	p.reserveFrame(mt.TxnSlot.frameValidation)
+	p.reserveFrame(mt.TxnSlot)
 	p.discardReasonsLRU.Remove(hashStr)
 	p.frameRejections.Remove(hashStr)
 
@@ -2386,7 +2386,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 // dropping transaction from all sub-structures and from db
 // Important: don't call it while iterating by all
 func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
-	p.releaseFrame(mt.TxnSlot.frameValidation)
+	p.releaseFrame(mt.TxnSlot)
 	if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok && frame.UsesLegacyNonce() {
 		p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
 	}
@@ -2779,8 +2779,12 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			senderTxnKept = true
 		}
 
+		feeCap := mt.TxnSlot.GetFeeCap()
+		if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok {
+			feeCap = frame.ExecutionFeeCap(uint256.NewInt(p.pendingBlobFee.Load()))
+		}
 		if mt.keyedNonce {
-			mt.minFeeCap = *mt.TxnSlot.GetFeeCap()
+			mt.minFeeCap = *feeCap
 			mt.minBlobFeeCap = blobFeeCap(mt.TxnSlot, math.MaxUint64)
 			mt.minTip = math.MaxUint64
 			if mt.TxnSlot.GetTipCap().IsUint64() {
@@ -2793,8 +2797,8 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			return true
 		}
 
-		if minFeeCap.Gt(mt.TxnSlot.GetFeeCap()) {
-			*minFeeCap = *mt.TxnSlot.GetFeeCap()
+		if minFeeCap.Gt(feeCap) {
+			*minFeeCap = *feeCap
 		}
 		mt.minFeeCap = *minFeeCap
 		minBlobFeeCap = blobFeeCap(mt.TxnSlot, minBlobFeeCap)
@@ -2895,6 +2899,11 @@ func (p *TxPool) promote(cacheView kvcache.CacheView, pendingBaseFee uint64, pen
 // block's base fee and blob fee. The txn's own blob fee cap is checked too, as the chain minimum is only set once
 // onSenderStateChange has seen the txn.
 func coversPendingFees(mt *metaTxn, pendingBaseFee, pendingBlobFee uint64) bool {
+	if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok {
+		if _, err := frame.Fees.Budget(frame.GetGasLimit(), frame.GetBlobGas(), uint256.NewInt(pendingBaseFee), uint256.NewInt(pendingBlobFee)); err != nil {
+			return false
+		}
+	}
 	return mt.minFeeCap.CmpUint64(pendingBaseFee) >= 0 && mt.minBlobFeeCap >= pendingBlobFee &&
 		(!mt.TxnSlot.HasBlobs() || mt.TxnSlot.GetBlobFeeCap().CmpUint64(pendingBlobFee) >= 0)
 }

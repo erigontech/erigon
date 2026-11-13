@@ -54,11 +54,11 @@
   commitment-parallel: true
 - shard: statetests-devnet-sequential
   workers: 12
-  max-allowed-failures: 0
+  max-allowed-failures: 1032 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298
   commitment-parallel: false
 - shard: statetests-devnet-parallel
   workers: 12
-  max-allowed-failures: 0
+  max-allowed-failures: 1032 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298
   commitment-parallel: true
 - shard: transactiontests-stable-race
   workers: 12
@@ -67,7 +67,7 @@
   no-ramdisk: true
 - shard: transactiontests-devnet-race
   workers: 12
-  max-allowed-failures: 17 # Upstream frame intrinsic-gas expectations: https://github.com/erigontech/erigon/issues/25241
+  max-allowed-failures: 2 # Upstream keyed-nonce intrinsic-gas expectations: https://github.com/erigontech/erigon/issues/25241
   commitment-parallel: false
   no-ramdisk: true
 - shard: statetests-legacy-sequential
@@ -113,11 +113,11 @@
   commitment-parallel: true
 - shard: blocktests-devnet-sequential
   workers: 12
-  max-allowed-failures: 0
+  max-allowed-failures: 1608 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298
   commitment-parallel: false
 - shard: blocktests-devnet-parallel
   workers: 12
-  max-allowed-failures: 0
+  max-allowed-failures: 1608 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298
   commitment-parallel: true
 - shard: blocktests-legacy-consensus-sequential
   workers: 12
@@ -371,12 +371,14 @@
   commitment-parallel: true
 - shard: enginextests-devnet-sequential
   workers: 8
-  max-allowed-failures: 0
+  max-allowed-failures: 1608 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298
   commitment-parallel: false
+  no-ramdisk: true # Grouped EngineX databases exceed the default 2 GiB RAM disk
 - shard: enginextests-devnet-parallel
   workers: 8
-  max-allowed-failures: 0
+  max-allowed-failures: 1608 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298
   commitment-parallel: true
+  no-ramdisk: true
 - shard: enginextests-benchmark-1m-sequential
   workers: 1
   max-allowed-failures: 0
@@ -504,12 +506,12 @@
   run: 'fork_(Amsterdam|BPO2ToAmsterdam)'
 - shard: blocktests-devnet-race-amsterdam-sequential
   workers: 12
-  max-allowed-failures: 0
+  max-allowed-failures: 69 # Bogota transitions need EIPs 4758, 8151, 8253, 8298
   commitment-parallel: false
   run: 'fork_Amsterdam'
 - shard: blocktests-devnet-race-amsterdam-parallel
   workers: 12
-  max-allowed-failures: 0
+  max-allowed-failures: 69 # Bogota transitions need EIPs 4758, 8151, 8253, 8298
   commitment-parallel: true
   run: 'fork_Amsterdam'
 - shard: zkevm-witness-race

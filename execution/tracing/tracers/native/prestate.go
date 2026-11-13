@@ -112,14 +112,13 @@ func (a *account) exists() bool {
 }
 
 type prestateTracer struct {
-	env        *tracing.VMContext
-	pre        state
-	post       state
-	config     prestateTracerConfig
-	frameTx    *types.FrameTransaction
-	frameIndex int
-	interrupt  atomic.Bool           // Atomic flag to signal execution interruption
-	reason     atomic.Pointer[error] // Reason for the interruption, populated by Stop
+	env       *tracing.VMContext
+	pre       state
+	post      state
+	config    prestateTracerConfig
+	frameTx   *types.FrameTransaction
+	interrupt atomic.Bool           // Atomic flag to signal execution interruption
+	reason    atomic.Pointer[error] // Reason for the interruption, populated by Stop
 }
 
 type prestateTracerConfig struct {
@@ -154,7 +153,6 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 			OnSystemCallStartV2: t.OnSystemCallStartV2,
 			OnTxEndV2:           t.OnTxEndV2,
 			OnOpcodeV2:          t.OnOpcodeV2,
-			OnEnterV2:           t.OnEnterV2,
 			OnExitV2:            t.OnExitV2,
 		},
 		GetResult:         t.GetResult,
@@ -163,15 +161,7 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 	}, nil
 }
 
-func (t *prestateTracer) OnEnterV2(depth int, typ byte, from, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
-	// Frames are the depth-one children of the synthetic transaction root,
-	// including skipped frames. Nested calls keep the current frame's mode.
-	if t.frameTx != nil && depth == 1 {
-		t.frameIndex++
-	}
-}
-
-// Capture the journaled status after call, atomic batch and POST_TX body rollbacks.
+// Capture the journaled status after call, atomic batch and ASSERT body rollbacks.
 // Finalization can clear these markers before OnTxEnd runs.
 func (t *prestateTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if depth != 0 || !t.config.DiffMode {
@@ -204,24 +194,6 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 	stackLen := len(stackData)
 	caller := scope.Address()
 	switch {
-	case stackLen >= 3 && op == vm.TXDIFF:
-		// The hook runs before TXDIFF rejects its context or reserved operand.
-		if !t.env.Rules.IsBogota || t.frameTx == nil || t.frameIndex < 0 || t.frameIndex >= len(t.frameTx.Frames) ||
-			t.frameTx.Frames[t.frameIndex].Mode != types.FramePostTx {
-			return
-		}
-		param := &stackData[stackLen-1]
-		if !param.IsUint64() || param.Uint64() > 5 {
-			return
-		}
-		if param.Uint64() >= 2 && !stackData[stackLen-3].IsZero() {
-			return
-		}
-		addr := accounts.InternAddress(stackData[stackLen-2].Bytes20())
-		t.lookupAccount(addr)
-		if param.Uint64() <= 1 {
-			t.lookupStorage(addr, stackData[stackLen-3].Bytes32())
-		}
 	case stackLen >= 1 && (op == vm.SLOAD || op == vm.SSTORE):
 		slot := common.Hash(stackData[stackLen-1].Bytes32())
 		t.lookupStorage(caller, slot)
@@ -261,7 +233,6 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	t.env = env
 	t.frameTx, _ = tx.Unwrap().(*types.FrameTransaction)
-	t.frameIndex = -1
 	t.lookupAccount(from)
 	t.lookupAccount(env.Coinbase)
 	if frameTx := t.frameTx; frameTx != nil {

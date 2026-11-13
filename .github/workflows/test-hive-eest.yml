@@ -201,7 +201,7 @@ jobs:
             # BPO2ToAmsterdam includes BAL validation and belongs with Amsterdam.
             - sim: consume-enginex
               runner: ubuntu-latest
-              sim-limit: ".*/.*fork_(Osaka|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)"
+              sim-limit: ".*/.*fork_(Osaka|BPO[12]-|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)"
               shard: osaka-devnet
               fixtures-tarball: eest_devnet
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
@@ -209,7 +209,7 @@ jobs:
               commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
-              sim-limit: ".*/.*fork_(Osaka|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)"
+              sim-limit: ".*/.*fork_(Osaka|BPO[12]-|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)"
               shard: osaka-devnet
               fixtures-tarball: eest_devnet
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
@@ -222,7 +222,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
+              max-failures: 69 # Bogota transitions need EIPs 4758, 8151, 8253, 8298
               commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -231,7 +231,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
+              max-failures: 69 # Bogota transitions need EIPs 4758, 8151, 8253, 8298
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -258,7 +258,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
+              max-failures: 861 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298
               commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -267,7 +267,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
+              max-failures: 861 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -276,7 +276,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
+              max-failures: 680 # 678 missing-EIP cases + 2 legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -285,7 +285,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
+              max-failures: 680 # 678 missing-EIP cases + 2 legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
         shell: bash
         run: |

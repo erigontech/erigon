@@ -1103,14 +1103,14 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 }
 
 // readNonce returns the nonce using the version-aware read pipeline.
-func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
+func readNonce(s *IntraBlockState, addr accounts.Address, committed bool) (uint64, ReadSource, Version, error) {
+	if committed || s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetNonce(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, NoncePath, accounts.NilKey, false, false, &r)
+	versionedReadCore(s, addr, NoncePath, accounts.NilKey, committed, false, &r)
 	if r.err != nil {
 		s.RecordStateReadError(r.err)
 		return 0, r.source, r.version, r.err
@@ -1141,6 +1141,9 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 	case outcomeLegacyStorage:
 		if r.so == nil || r.so.deleted {
 			return 0, StorageRead, UnknownVersion, nil
+		}
+		if committed {
+			return r.so.original.Nonce, StorageRead, UnknownVersion, nil
 		}
 		return r.so.Nonce(), StorageRead, UnknownVersion, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:

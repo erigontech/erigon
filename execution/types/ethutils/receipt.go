@@ -159,16 +159,6 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		CumulativeGasUsed: hexutil.Uint64(receipt.CumulativeGasUsed),
 	}
 
-	if !chainConfig.IsLondon(header.Number.Uint64()) {
-		result.EffectiveGasPrice = (*hexutil.U256)(new(uint256.Int).Set(txn.GetTipCap()))
-	} else {
-		baseFee := header.BaseFee
-		effectiveTip := txn.GetEffectiveGasTip(baseFee)
-		var gasPrice uint256.Int
-		gasPrice.Add(baseFee, &effectiveTip)
-		result.EffectiveGasPrice = (*hexutil.U256)(&gasPrice)
-	}
-
 	// Assign status if postState is empty.
 	if len(receipt.PostState) == 0 {
 		status := hexutil.Uint64(receipt.Status)
@@ -198,6 +188,17 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 			result.BlobGasUsed = &blobGasUsed
 		}
 	}
+
+	baseFee := header.BaseFee
+	if !chainConfig.IsLondon(header.Number.Uint64()) {
+		baseFee = nil
+	}
+	blobFee := new(uint256.Int)
+	if result.BlobGasPrice != nil {
+		blobFee.Set((*uint256.Int)(result.BlobGasPrice))
+	}
+	price := ReceiptGasPrice(txn, receipt.GasUsed, baseFee, blobFee)
+	result.EffectiveGasPrice = (*hexutil.U256)(price)
 
 	return result
 }
@@ -312,4 +313,47 @@ func LogReceipts(level log.Lvl, msg string, receipts types.Receipts, txns types.
 		return
 	}
 	logger.Log(level, msg, "block", header.Number.Uint64(), "receipts", string(result))
+}
+
+// GasFeePaid excludes blob fees, which receipts report separately. Frame tips use
+// the budget left after actual base fees, not the lower bound returned by GASPRICE.
+func GasFeePaid(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) (uint256.Int, error) {
+	if frame, ok := txn.Unwrap().(*types.FrameTransaction); ok {
+		if baseFee == nil {
+			baseFee = new(uint256.Int)
+		}
+		if blobBaseFee == nil {
+			blobBaseFee = new(uint256.Int)
+		}
+		budget, err := frame.Fees.Budget(frame.GetGasLimit(), frame.GetBlobGas(), baseFee, blobBaseFee)
+		if err != nil {
+			return uint256.Int{}, err
+		}
+		var basePaid, available uint256.Int
+		basePaid.Mul(uint256.NewInt(gasUsed), baseFee)
+		available.Sub(&budget.MaxCost, &budget.BlobCost).Sub(&available, &basePaid)
+		tip := frame.Fees.PriorityCost(gasUsed, &available)
+		return *basePaid.Add(&basePaid, &tip), nil
+	}
+	price := *txn.GetTipCap()
+	if baseFee != nil {
+		tip := txn.GetEffectiveGasTip(baseFee)
+		price.Add(baseFee, &tip)
+	}
+	return *price.Mul(&price, uint256.NewInt(gasUsed)), nil
+}
+
+func ReceiptGasPrice(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) *uint256.Int {
+	if txn.Type() != types.FrameTxType {
+		if baseFee == nil {
+			return txn.GetTipCap()
+		}
+		tip := txn.GetEffectiveGasTip(baseFee)
+		return new(uint256.Int).Add(baseFee, &tip)
+	}
+	fee, err := GasFeePaid(txn, gasUsed, baseFee, blobBaseFee)
+	if err != nil {
+		log.Warn("cannot derive receipt gas price", "txHash", txn.Hash(), "err", err)
+	}
+	return fee.Div(&fee, uint256.NewInt(gasUsed))
 }
