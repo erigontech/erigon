@@ -77,7 +77,6 @@ func TestParallelReadOfRecreatedAccountBeforeRecreatorCommits(t *testing.T) {
 		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(1_000_000_000_000_000_000)}
 	}
 
-	dbg.Exec3Parallel = false
 	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
@@ -151,7 +150,6 @@ func TestParallelFoldKeepsEarlierTxFieldOfSameAccount(t *testing.T) {
 		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(1_000_000_000_000_000_000)}
 	}
 
-	dbg.Exec3Parallel = false
 	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
@@ -190,17 +188,24 @@ func TestParallelFoldKeepsEarlierTxFieldOfSameAccount(t *testing.T) {
 	}))
 }
 
-// A BAL block dispatches a bounded window of txs past the commit frontier. A block
-// of many more txs than the window, each depending on the one before it, must still
-// complete and match the serial result.
-func TestParallelBALBlockPastDispatchWindow(t *testing.T) {
+// A block dispatches a bounded window of txs past the commit frontier, with or without a
+// block access list. A block of many more txs than the window, each depending on the one
+// before it, must still complete and match the serial result.
+func TestParallelBlockPastDispatchWindow(t *testing.T) {
+	t.Run("bal", func(t *testing.T) { testParallelBlockPastDispatchWindow(t, true) })
+	t.Run("no_bal", func(t *testing.T) { testParallelBlockPastDispatchWindow(t, false) })
+}
+
+func testParallelBlockPastDispatchWindow(t *testing.T, withBAL bool) {
 	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
 	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
 
 	const txs = 80
 	counter := common.HexToAddress("0xc0c0")
 	config := chain.TestChainOsakaConfig.Copy()
-	config.AmsterdamTime = common.NewUint64(0)
+	if withBAL {
+		config.AmsterdamTime = common.NewUint64(0)
+	}
 	signer := types.LatestSignerForChainID(config.ChainID)
 	key, err := crypto.ToECDSA(common.LeftPadBytes([]byte{1}, 32))
 	require.NoError(t, err)
@@ -210,7 +215,6 @@ func TestParallelBALBlockPastDispatchWindow(t *testing.T) {
 		sender:  {Balance: big.NewInt(1_000_000_000_000_000_000)},
 	}
 
-	dbg.Exec3Parallel = false
 	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))

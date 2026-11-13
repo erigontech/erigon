@@ -127,6 +127,10 @@ func (back *RemoteBackend) FrozenBlocksObserved() (uint64, bool) {
 	return back.blockReader.FrozenBlocksObserved()
 }
 
+func (back *RemoteBackend) IsFrozen(ctx context.Context, blockNum uint64) (bool, error) {
+	return back.blockReader.IsFrozen(ctx, blockNum)
+}
+
 func (back *RemoteBackend) FrozenBlocksInView(tx kv.Getter) uint64 {
 	return back.blockReader.FrozenBlocksInView(tx)
 }

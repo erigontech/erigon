@@ -98,7 +98,8 @@ func OmittedInclusionListTxns(blockTxns, inclusionListTxns types.Transactions) t
 
 func txnValidAtBlockEnd(evm *vm.EVM, gp *GasPool, msg *types.Message) (bool, error) {
 	executor := NewTxnExecutor(evm, msg, gp)
-	intrinsicGasResult, overflow := executor.calcIntrinsicGas(msg.To().IsNil(), msg.Authorizations(), msg.AccessList())
+	rules, vmConfig := evm.ChainRules(), evm.Config()
+	intrinsicGasResult, overflow := intrinsicGas(msg, rules, vmConfig.HasEip3860(rules))
 	if overflow {
 		return false, nil
 	}

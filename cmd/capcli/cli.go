@@ -186,16 +186,16 @@ type ChainEndpoint struct {
 }
 
 func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, expectedBlockRoot *common.Hash) (*cltypes.SignedBeaconBlock, error) {
-	log.Debug("[Checkpoint Sync] Requesting beacon block", "uri", uri)
+	log.Debug("[Checkpoint Sync] Requesting beacon block", "endpoint", redactEndpoint(uri))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
-		return nil, err
+		return nil, redactURLError(err)
 	}
 
 	req.Header.Set("Accept", "application/octet-stream")
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, redactURLError(err)
 	}
 	defer func() {
 		err = r.Body.Close()
@@ -239,10 +239,7 @@ const maxBlobSidecarJSONSize = 512 << 10
 func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root common.Hash, maxSidecars int) ([]*cltypes.BlobSidecar, error) {
 	base, err := url.Parse(endpoint)
 	if err != nil {
-		if ue, ok := errors.AsType[*url.Error](err); ok {
-			err = ue.Err // ue.URL is the whole endpoint
-		}
-		return nil, fmt.Errorf("invalid endpoint: %w", err)
+		return nil, redactURLError(err)
 	}
 	blobUri := base.JoinPath("eth/v1/beacon/blob_sidecars", fmt.Sprintf("0x%x", root))
 	log.Debug("[Blob Retrieval] Requesting blob sidecars", "endpoint", redactURL(base), "blockRoot", root)
@@ -255,11 +252,7 @@ func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root 
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
-		// The *url.Error holds the whole request URL; only its password is masked.
-		if ue, ok := errors.AsType[*url.Error](err); ok {
-			ue.URL = redactURL(blobUri)
-		}
-		return nil, err
+		return nil, redactURLError(err)
 	}
 	defer r.Body.Close()
 
@@ -296,6 +289,9 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if !validEndpoint(c.Endpoint) {
+		return errors.New("--endpoint is not an http or https URL with a host")
+	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	dirs := datadir.New(c.Datadir)
@@ -321,11 +317,11 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		return err
 	}
 
-	log.Info("Hooked", "uri", baseUri)
+	log.Info("Hooked", "endpoint", redactEndpoint(c.Endpoint))
 	// Let's fetch the head first
 	currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, baseUri+"/head", nil)
 	if err != nil {
-		return fmt.Errorf("failed to retrieve head: %w, uri: %s", err, baseUri+"/head")
+		return fmt.Errorf("failed to retrieve head: %w", err)
 	}
 	currentRoot, err := currentBlock.Block.HashSSZ()
 	if err != nil {
@@ -365,7 +361,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		// Let's fetch the head first
 		currentBlock, err := retrieveAndSanitizeBlockFromRemoteEndpoint(ctx, beaconConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*common.Hash)(&currentRoot))
 		if err != nil {
-			return false, fmt.Errorf("failed to retrieve block: %w, uri: %s", err, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot))
+			return false, fmt.Errorf("failed to retrieve block 0x%s: %w", stringifiedRoot, err)
 		}
 		currentRoot, err = currentBlock.Block.HashSSZ()
 		if err != nil {
@@ -827,12 +823,12 @@ func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
 	headResponse := map[string]any{}
 	req, err := http.NewRequestWithContext(ctx, "GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
 	if err != nil {
-		return 0, err
+		return 0, redactURLError(err)
 	}
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, redactURLError(err)
 	}
 	defer resp.Body.Close()
 	if err := json.NewDecoder(resp.Body).Decode(&headResponse); err != nil {
@@ -858,12 +854,12 @@ func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (
 	response := map[string]any{}
 	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
 	if err != nil {
-		return common.Hash{}, err
+		return common.Hash{}, redactURLError(err)
 	}
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return common.Hash{}, err
+		return common.Hash{}, redactURLError(err)
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		return common.Hash{}, nil
@@ -882,16 +878,16 @@ func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (
 }
 
 func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, uri string, slot uint64) (*state.CachingBeaconState, error) {
-	log.Info("[Checkpoint Sync] Requesting beacon state", "uri", uri)
+	log.Info("[Checkpoint Sync] Requesting beacon state", "endpoint", redactEndpoint(uri), "slot", slot)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
-		return nil, err
+		return nil, redactURLError(err)
 	}
 
 	req.Header.Set("Accept", "application/octet-stream")
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, redactURLError(err)
 	}
 	defer func() {
 		err = r.Body.Close()
@@ -1006,14 +1002,14 @@ func (b *BenchmarkNode) Run(ctx context.Context) error {
 		uri = strings.Replace(uri, "{epoch}", strconv.FormatUint(i/beaconConfig.SlotsPerEpoch, 10), 1)
 		elapsed, err := timeRequest(ctx, uri, b.Accept, b.Method, b.Body)
 		if err != nil {
-			log.Warn("Failed to benchmark", "error", err, "uri", uri)
+			log.Warn("Failed to benchmark", "slot", i, "error", err)
 			continue
 		}
 		_, err = fmt.Fprintf(f, "%d,%d\n", i, elapsed.Milliseconds())
 		if err != nil {
 			return err
 		}
-		log.Info("Benchmarked", "slot", i, "elapsed", elapsed, "uri", uri)
+		log.Info("Benchmarked", "slot", i, "elapsed", elapsed)
 	}
 	return nil
 }
@@ -1021,7 +1017,7 @@ func (b *BenchmarkNode) Run(ctx context.Context) error {
 func timeRequest(ctx context.Context, uri, accept, method, body string) (time.Duration, error) {
 	req, err := http.NewRequestWithContext(ctx, method, uri, nil)
 	if err != nil {
-		return 0, err
+		return 0, redactURLError(err)
 	}
 	if method == "POST" {
 		req.Body = io.NopCloser(strings.NewReader(body))
@@ -1030,7 +1026,7 @@ func timeRequest(ctx context.Context, uri, accept, method, body string) (time.Du
 	start := time.Now()
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, redactURLError(err)
 	}
 	defer r.Body.Close()
 	if r.StatusCode != http.StatusOK {
@@ -1687,6 +1683,31 @@ func (m *MakeDepositArgs) Run(ctx context.Context) error {
 // the user info, the path or the query.
 func redactURL(u *url.URL) string {
 	return (&url.URL{Scheme: u.Scheme, Host: u.Host}).String()
+}
+
+// redactURLError redacts the request URL that a *url.Error from net/http carries.
+func redactURLError(err error) error {
+	ue, ok := errors.AsType[*url.Error](err)
+	if !ok {
+		return err
+	}
+	if ue.Op == "parse" {
+		// The parse error quotes the malformed part of the URL, which can be the key.
+		return errors.New("malformed endpoint URL")
+	}
+	ue.URL = redactEndpoint(ue.URL)
+	if strings.HasPrefix(ue.Err.Error(), "failed to parse Location header") {
+		// net/http quotes the header, and a server can repeat the request's path and query in it.
+		ue.Err = errors.New("malformed redirect Location header")
+	}
+	return err
+}
+
+// validEndpoint reports whether endpoint is an http or https URL with a host. Callers do not echo a rejected value: it
+// can carry an API key.
+func validEndpoint(endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != ""
 }
 
 // redactEndpoint is redactURL for an --endpoint value.

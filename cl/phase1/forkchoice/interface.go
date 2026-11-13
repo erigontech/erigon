@@ -81,14 +81,17 @@ type ForkChoiceStorageReader interface {
 	Synced() bool
 	GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool)
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
-	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
+	NewestLightClientFinalityUpdate() *cltypes.LightClientUpdate
+	GetLightClientUpdates(startPeriod, endPeriod uint64) []*cltypes.LightClientUpdate
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	// [New in Gloas:EIP7732] GetBlock returns the full block for a given block root.
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 	HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool
 	HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool
-	// [New in Gloas:EIP7732] HasEnvelope checks if a signed execution payload envelope exists.
+	// [New in Gloas:EIP7732] HasEnvelope reports whether an envelope is cached for a retained root
+	// and is neither corrupt nor rejected. It does not read disk or imply EL validation.
 	HasEnvelope(blockRoot common.Hash) bool
+	IsEnvelopeRejected(blockRoot common.Hash) bool
 	IsBlockInvalid(blockRoot common.Hash) bool
 	// [New in Gloas:EIP7732] HasPendingExecutionPayloadEnvelope reports an envelope that is
 	// waiting for its block or its data columns.
@@ -102,6 +105,9 @@ type ForkChoiceStorageReader interface {
 	ExecutionPayloadReceivedBefore(blockRoot common.Hash, deadline time.Time) bool
 	// IsPayloadVerified reports whether the EL has fully validated the payload.
 	IsPayloadVerified(blockRoot common.Hash) bool
+	// ExecutionPayloadInvalidated reports whether fork choice has marked the payload invalid by its beacon block
+	// root or by its execution block hash.
+	ExecutionPayloadInvalidated(blockRoot, executionBlockHash common.Hash) bool
 	// [New in Gloas:EIP7732] ReadEnvelopeFromDisk reads a signed execution payload envelope from disk.
 	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 	GetRecentExecutionPayloadStatusByRoot(blockRoot common.Hash) (execution_client.PayloadStatus, bool)
@@ -185,7 +191,8 @@ type ForkChoiceStorageWriter interface {
 	ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	QueuePendingExecutionPayloadEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time)
 	RecordExecutionPayloadArrival(blockRoot common.Hash, slot uint64, receivedAt time.Time)
-	ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
+	// checkBlobData: run the data availability check; pass false only while holding every bid blob with KZG proofs verified here or received from this node's EL.
+	ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData bool) error
 	// [New in Gloas:EIP7732] ApplyLocalSelfBuildEnvelope processes a locally-produced
 	// self-build envelope, skipping BLS signature verification. EL validation still runs.
 	// MUST only be called from the local block production path.

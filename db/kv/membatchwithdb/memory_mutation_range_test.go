@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
 
@@ -321,4 +322,69 @@ func TestRangeOnDupSortTableCollapsesIdenticalValue(t *testing.T) {
 	_, values := collectStream(t, it)
 
 	require.Equal(t, []string{"value1.1", "value1.3", "value3.1", "value3.3"}, values)
+}
+
+func TestCursorLastSkipsDeletedDbTail(t *testing.T) {
+	batch := newBatchOverDbNonDupSort(t)
+	require.NoError(t, batch.Delete(kv.HeaderNumber, []byte("CCAA")))
+
+	c, err := batch.Cursor(kv.HeaderNumber)
+	require.NoError(t, err)
+	defer c.Close()
+	k, v, err := c.Last()
+	require.NoError(t, err)
+	require.Equal(t, "CBAA", string(k))
+	require.Equal(t, "value2", string(v))
+}
+
+func TestTxNumsLastAfterTruncateOnOverlay(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	for blockNum := range uint64(5) {
+		require.NoError(t, rawdbv3.TxNums.Append(rwTx, blockNum, blockNum*10+9))
+	}
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx)
+	require.NoError(t, err)
+	t.Cleanup(batch.Close)
+
+	require.NoError(t, rawdbv3.TxNums.Truncate(batch, 3))
+	blockNum, txNum, err := rawdbv3.TxNums.Last(batch)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), blockNum)
+	require.Equal(t, uint64(29), txNum)
+}
+
+func TestCursorLastSkipsDeletedTailOnNestedBatch(t *testing.T) {
+	parent := newBatchOverDbNonDupSort(t)
+	child, err := membatchwithdb.NewMemoryBatch(parent)
+	require.NoError(t, err)
+	t.Cleanup(child.Close)
+	require.NoError(t, child.Delete(kv.HeaderNumber, []byte("CCAA")))
+
+	c, err := child.Cursor(kv.HeaderNumber)
+	require.NoError(t, err)
+	defer c.Close()
+	k, v, err := c.Last()
+	require.NoError(t, err)
+	require.Equal(t, "CBAA", string(k))
+	require.Equal(t, "value2", string(v))
+}
+
+func TestCursorLastKeepsEmptyValueOnNestedBatch(t *testing.T) {
+	parent := newBatchOverDbNonDupSort(t)
+	require.NoError(t, parent.Put(kv.HeaderNumber, []byte("AAAA"), []byte{}))
+	child, err := membatchwithdb.NewMemoryBatch(parent)
+	require.NoError(t, err)
+	t.Cleanup(child.Close)
+	for _, k := range []string{"CAAA", "CBAA", "CCAA"} {
+		require.NoError(t, child.Delete(kv.HeaderNumber, []byte(k)))
+	}
+
+	c, err := child.Cursor(kv.HeaderNumber)
+	require.NoError(t, err)
+	defer c.Close()
+	k, v, err := c.Last()
+	require.NoError(t, err)
+	require.Equal(t, "AAAA", string(k))
+	require.NotNil(t, v)
+	require.Empty(t, v)
 }

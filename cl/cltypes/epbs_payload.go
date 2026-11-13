@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/length"
@@ -241,11 +242,41 @@ type IndexedPayloadAttestation struct {
 	Signature        common.Bytes96          `json:"signature"`
 }
 
-func NewIndexedPayloadAttestation() *IndexedPayloadAttestation {
+func NewIndexedPayloadAttestation(cfg *clparams.BeaconChainConfig) *IndexedPayloadAttestation {
+	limit := int(clparams.MaxPtcSize)
+	if cfg != nil && cfg.PtcSize > 0 {
+		limit = int(cfg.PtcSize)
+	}
 	return &IndexedPayloadAttestation{
-		AttestingIndices: solid.NewRawUint64List(int(clparams.MaxPtcSize), []uint64{}),
+		AttestingIndices: solid.NewRawUint64List(limit, nil),
 		Data:             &PayloadAttestationData{},
 	}
+}
+
+func (i *IndexedPayloadAttestation) UnmarshalJSON(buf []byte) error {
+	var decoded struct {
+		AttestingIndices *json.RawMessage        `json:"attesting_indices"`
+		Data             *PayloadAttestationData `json:"data"`
+		Signature        *common.Bytes96         `json:"signature"`
+	}
+	if err := json.Unmarshal(buf, &decoded); err != nil {
+		return err
+	}
+	if decoded.AttestingIndices == nil || decoded.Data == nil || decoded.Signature == nil {
+		return errors.New("indexed payload attestation requires attesting_indices, data, and signature")
+	}
+	limit := int(clparams.MaxPtcSize)
+	if i.AttestingIndices != nil && i.AttestingIndices.Cap() > 0 {
+		limit = i.AttestingIndices.Cap()
+	}
+	indices := solid.NewRawUint64List(limit, nil)
+	if err := json.Unmarshal(*decoded.AttestingIndices, indices); err != nil {
+		return err
+	}
+	i.AttestingIndices = indices
+	i.Data = decoded.Data
+	i.Signature = *decoded.Signature
+	return nil
 }
 
 func (i *IndexedPayloadAttestation) Static() bool {
@@ -257,7 +288,11 @@ func (i *IndexedPayloadAttestation) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (i *IndexedPayloadAttestation) DecodeSSZ(buf []byte, version int) error {
-	i.AttestingIndices = solid.NewRawUint64List(int(clparams.MaxPtcSize), nil)
+	limit := int(clparams.MaxPtcSize)
+	if i.AttestingIndices != nil && i.AttestingIndices.Cap() > 0 {
+		limit = i.AttestingIndices.Cap()
+	}
+	i.AttestingIndices = solid.NewRawUint64List(limit, nil)
 	i.Data = new(PayloadAttestationData)
 	return ssz2.UnmarshalSSZ(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
 }
@@ -272,7 +307,11 @@ func (i *IndexedPayloadAttestation) HashSSZ() ([32]byte, error) {
 }
 
 func (i *IndexedPayloadAttestation) Clone() clonable.Clonable {
-	newIndices := solid.NewRawUint64List(int(clparams.MaxPtcSize), make([]uint64, i.AttestingIndices.Length()))
+	limit := int(clparams.MaxPtcSize)
+	if i.AttestingIndices.Cap() > 0 {
+		limit = i.AttestingIndices.Cap()
+	}
+	newIndices := solid.NewRawUint64List(limit, make([]uint64, i.AttestingIndices.Length()))
 	for idx := 0; idx < i.AttestingIndices.Length(); idx++ {
 		newIndices.Set(idx, i.AttestingIndices.Get(idx))
 	}
@@ -298,6 +337,16 @@ type ExecutionPayloadBid struct {
 	ExecutionPayment      uint64                        `json:"execution_payment,string"` // Gwei
 	BlobKzgCommitments    solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments"`
 	ExecutionRequestsRoot common.Hash                   `json:"execution_requests_root"`
+}
+
+// VersionedHashes returns blob versioned hashes in commitment order.
+// The result is non-nil even without commitments because the EL treats nil as missing input.
+func (e *ExecutionPayloadBid) VersionedHashes() []common.Hash {
+	hashes := make([]common.Hash, e.BlobKzgCommitments.Len())
+	for i := range hashes {
+		hashes[i], _ = utils.KzgCommitmentToVersionedHash(common.Bytes48(*e.BlobKzgCommitments.Get(i)))
+	}
+	return hashes
 }
 
 func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
