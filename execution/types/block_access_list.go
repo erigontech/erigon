@@ -921,8 +921,10 @@ func countBlockAccessListItems(body []byte, changesPerList int) (c blockAccessLi
 			if err != nil {
 				return c
 			}
-			c.slots++
-			c.storage += min(countValues(changes), changesPerList)
+			if len(changes) > 0 { // the decoder rejects an empty slot, so it must not size the arena
+				c.slots++
+				c.storage += min(countValues(changes), changesPerList)
+			}
 		}
 		c.reads += countValues(lists[1])
 		c.balances += min(countValues(lists[2]), changesPerList)
