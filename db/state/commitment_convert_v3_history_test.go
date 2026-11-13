@@ -253,6 +253,7 @@ func requireCommitmentHistoryRoots(t *testing.T, db kv.TemporalRwDB, agg *state.
 	}
 	require.Greater(t, len(asOf), 90)
 	defer state.SetCommitmentV3FoldRangesForTest(state.SetCommitmentV3FoldRangesForTest(5))
+	defer state.SetCommitmentV3FoldChunkForTest(state.SetCommitmentV3FoldChunkForTest(1))
 	checks, err := state.FoldCommitmentV3(t.Context(), agg, append(asOf, math.MaxUint64), nil)
 	require.NoError(t, err)
 	for i, txNum := range asOf {

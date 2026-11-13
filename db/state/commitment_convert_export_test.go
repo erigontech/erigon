@@ -70,6 +70,12 @@ func SetCommitmentV3FoldRangesForTest(n uint64) uint64 {
 	return old
 }
 
+func SetCommitmentV3FoldChunkForTest(n int) int {
+	old := commitmentV3FoldChunk
+	commitmentV3FoldChunk = n
+	return old
+}
+
 func SetLegacyShapeMinVersionsForTest(n uint64) uint64 {
 	old := legacyShapeMinVersions
 	legacyShapeMinVersions = n
