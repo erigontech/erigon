@@ -636,6 +636,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 	// forkValidator.sharedDom inside ValidatePayload and later phases close it,
 	// so we Close explicitly only on the early-return error paths below.
 	doms.SetInMemHistoryReads(inMemHistoryReads)
+	probeT0 := time.Now()
 	if err := doms.InitBlockOverlay(roTx); err != nil {
 		doms.Close()
 		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
@@ -657,12 +658,15 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 	// Do NOT UpdateTxn on e.currentContext.BlockOverlay() here — that would
 	// reassign its backing db to our soon-to-be-rolled-back roTx and leave
 	// e.currentContext in an inconsistent state for UpdateForkChoice.
+	probeT1 := time.Now()
 	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 		if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
 			doms.Close()
 			return ValidationResult{}, fmt.Errorf("ValidateChain: flush overlay to validation tx: %w", err)
 		}
 	}
+	// shortcut: dbg timer probe for the validation overlay copy; remove after the bound.
+	e.logger.Info("[ovlprobe] ValidateChain overlay", "npOvlInit", probeT1.Sub(probeT0), "npOvlFlush", time.Since(probeT1))
 	// Set state cache in SharedDomains for use during state reading
 	doms.SetStateCache(e.stateCache)
 	// Either unwind path may run, and both can run in one validation. Share one
