@@ -1139,6 +1139,14 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						kv = append(kv, idleNames[i], d)
 					}
 					pe.logger.Info("[np-phase] idle", kv...)
+					cp := &blockExecutor.crit
+					var tail time.Duration
+					if !cp.lastCommit.IsZero() {
+						tail = time.Since(cp.lastCommit)
+					}
+					pe.logger.Info("[np-phase] crit", "blk", blockResult.BlockNum, "spineOnly", cp.spineOnly, "spine", cp.spine, "handoff", cp.handoff,
+						"first", cp.work[workFirst], "rerun", cp.work[workRerun], "recheck", cp.work[workRecheck], "wake", cp.wake, "pre", cp.pre, "tail", tail,
+						"nSpineOnly", cp.steps[0], "nSent", cp.steps[1], "nWork", cp.steps[2], "nFirst", cp.workSteps3[workFirst], "nRerun", cp.workSteps3[workRerun], "nRecheck", cp.workSteps3[workRecheck])
 				}
 				// Covers an empty block that created no accumulator via a tx-result; the
 				// save must land before the blockResult, else the calculator races ahead,
@@ -2624,6 +2632,7 @@ type blockExecutor struct {
 	// for worker-occupancy attribution vs the npWait/npProc wall.
 	execCpuNanos atomic.Int64
 	idleState    blockIdleState
+	crit         critPath
 
 	// coinbase is the block's fee recipient, cached from the first tx result so
 	// dependency-ordered validation can gate coinbase readers.
@@ -3032,6 +3041,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 		if r, ferr := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, stateReader); ferr != nil || r != nil {
 			return r, ferr
 		}
+		be.noteCommitted(tx)
 		be.signalCommitted(tx)
 	}
 	return nil, nil
@@ -3293,6 +3303,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	tx := task.index
+	if logNpPhases && be.poolTasks != nil && be.poolTasks[tx] != nil {
+		stampNow(&be.poolTasks[tx].st.recv)
+	}
 	if be.publishTasks.checkComplete(tx) {
 		if res.Err != nil {
 			pe.logger.Warn("[parallel] dropped a failed result for a published tx", "block", be.blockNum, "tx", res.Version().TxIndex, "incarnation", res.Version().Incarnation, "err", res.Err)
