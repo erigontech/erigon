@@ -88,6 +88,41 @@ func TestGetLightClientUpdatesLeadingGap(t *testing.T) {
 	require.Equal(t, uint64(299), got[99])
 }
 
+// The response holds the earliest known update and the consecutive ones after it; a gap ends it.
+func TestGetLightClientUpdatesStopsAtAnInteriorGap(t *testing.T) {
+	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+
+	for _, period := range []uint64{3, 4, 6, 7} {
+		update := cltypes.NewLightClientUpdate(postState.Version(), postState.BeaconConfig())
+		update.SignatureSlot = period
+		fcu.LCUpdates[period] = update
+	}
+
+	require.Equal(t, []uint64{3, 4}, fetchLightClientUpdatePeriods(t, handler, 0, 10))
+}
+
+// Without an update that has finality, finality_update has nothing to serve, while optimistic_update serves the newest
+// update.
+func TestLightClientFinalityUpdateNeedsAnUpdateWithFinality(t *testing.T) {
+	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	fcu.NewestLCUpdate = cltypes.NewLightClientUpdate(postState.Version(), postState.BeaconConfig())
+	fcu.NewestLCFinalityUpdate = nil
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	for path, want := range map[string]int{
+		"/eth/v1/beacon/light_client/finality_update":   http.StatusNotFound,
+		"/eth/v1/beacon/light_client/optimistic_update": http.StatusOK,
+	} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+path, nil)
+		require.NoError(t, err)
+		resp, err := server.Client().Do(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, want, resp.StatusCode, path)
+	}
+}
+
 func fetchLightClientUpdatePeriods(t *testing.T, handler *ApiHandler, start, count uint64) []uint64 {
 	t.Helper()
 	server := httptest.NewServer(handler.mux)

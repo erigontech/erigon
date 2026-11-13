@@ -72,6 +72,18 @@ func TestIPTracker(t *testing.T) {
 			{opStatement, 0, "1.2.3.4", "5.6.9.1"},
 			{opPredict, 0, "1.2.3.4", ""},
 		},
+		"tieKeepsPrediction": {
+			{opStatement, 0, "1.2.3.4", "5.6.7.1"},
+			{opStatement, 0, "1.2.3.4", "5.6.8.1"},
+			{opStatement, 0, "1.2.3.4", "5.6.9.1"},
+			{opPredict, 0, "1.2.3.4", ""},
+			{opStatement, 0, "1.2.3.5", "5.6.10.1"},
+			{opStatement, 0, "1.2.3.5", "5.6.11.1"},
+			{opStatement, 0, "1.2.3.5", "5.6.12.1"},
+			{opPredict, 0, "1.2.3.4", ""},
+			{opStatement, 1000, "1.2.3.4", "5.6.7.1"}, // moves 1.2.3.4 behind 1.2.3.5 in the top count
+			{opPredict, 1000, "1.2.3.4", ""},
+		},
 		"sameNetworkIPv6": {
 			{opStatement, 0, "2001:db8::1", "2001:db9::1"},
 			{opStatement, 0, "2001:db8::1", "2001:db9::2"},

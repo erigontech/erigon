@@ -21,12 +21,15 @@ import (
 	"errors"
 	"fmt"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 )
 
 // storeBlobsForBlock fetches and stores the sidecars a block needs, and fails if the store does
@@ -95,6 +98,13 @@ func storeRemoteBlobs(
 		}
 		if common.Bytes48(*commitments.Get(int(sidecar.Index))) != sidecar.KzgCommitment {
 			return fmt.Errorf("blob sidecar at index %d carries a commitment the block does not reference", sidecar.Index)
+		}
+		if sidecar.KzgProof == common.Bytes48(goethkzg.PointAtInfinity) {
+			proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(&sidecar.Blob), goethkzg.KZGCommitment(sidecar.KzgCommitment), 0)
+			if err != nil {
+				return fmt.Errorf("blob sidecar at index %d: compute its KZG proof: %w", sidecar.Index, err)
+			}
+			sidecar.KzgProof = common.Bytes48(proof)
 		}
 	}
 	_, inserted, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, blobDB, ids, blobs,

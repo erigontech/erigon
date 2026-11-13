@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -472,6 +474,116 @@ func (t *voluntaryExitTestSuite) TestImmediateInitiatedExitReturnsValidationErro
 	t.Require().EqualError(service.ProcessMessage(context.Background(), nil, msg), "verify exit has not been initiated. exitEpoch: 99, farFutureEpoch: 18446744073709551615")
 	t.Require().False(service.seen.Contains(10))
 	t.Require().False(t.operationsPool.VoluntaryExitsPool.Has(10))
+}
+
+func (t *voluntaryExitTestSuite) TestCachedExitPendingWithdrawals() {
+	for _, cache := range []string{"seen", "pool"} {
+		t.Run(cache, func() {
+			t.SetupTest()
+			service, msg := t.exitAtEpochs(256, 256, 0, 256, math.MaxUint64)
+			var head *state.CachingBeaconState
+			t.Require().NoError(t.syncedData.ViewHeadState(func(st *state.CachingBeaconState) error {
+				var err error
+				head, err = st.Copy()
+				return err
+			}))
+			head.SetVersion(clparams.ElectraVersion)
+			t.Require().NoError(t.syncedData.OnHeadStateWithBlockRoot(head, common.Hash{}))
+			t.Require().NoError(service.ProcessMessage(t.T().Context(), nil, msg))
+			if cache == "seen" {
+				t.Require().True(t.operationsPool.VoluntaryExitsPool.DeleteIfExist(10))
+			} else {
+				t.Require().True(service.seen.Remove(10))
+			}
+
+			head.AppendPendingPartialWithdrawal(&solid.PendingPartialWithdrawal{
+				ValidatorIndex: 10, Amount: 1, WithdrawableEpoch: math.MaxUint64,
+			})
+			t.Require().NoError(head.SetSlot(head.Slot() + 1))
+			t.Require().NoError(t.syncedData.OnHeadStateWithBlockRoot(head, common.Hash{}))
+			t.Require().EqualError(service.ProcessMessage(t.T().Context(), nil, msg), "validator has pending withdrawals in the queue")
+
+			msg.ImmediateVerification = false
+			t.syncedData.UnsetHeadState()
+			t.Require().ErrorIs(service.ProcessMessage(t.T().Context(), nil, msg), ErrIgnore)
+		})
+	}
+}
+
+func TestVoluntaryExitPendingWithdrawals(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		version         clparams.StateVersion
+		withdrawalIndex uint64
+		amount          uint64
+		immediate       bool
+		blocked         bool
+	}{
+		{name: "electra gossip", version: clparams.ElectraVersion, amount: 1, blocked: true},
+		{name: "electra immediate", version: clparams.ElectraVersion, amount: 1, immediate: true, blocked: true},
+		{name: "fulu gossip", version: clparams.FuluVersion, amount: 1, blocked: true},
+		{name: "fulu immediate", version: clparams.FuluVersion, amount: 1, immediate: true, blocked: true},
+		{name: "deneb", version: clparams.DenebVersion, amount: 1},
+		{name: "other validator", version: clparams.ElectraVersion, withdrawalIndex: 1, amount: 1},
+		{name: "zero balance", version: clparams.ElectraVersion},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			saveSignatureGlobals(t)
+			verified := false
+			blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+				verified = true
+				return true, nil
+			}
+
+			cfg := clparams.MainnetBeaconConfig
+			st := state.New(&cfg)
+			st.SetVersion(tc.version)
+			require.NoError(t, st.SetSlot(cfg.ShardCommitteePeriod*cfg.SlotsPerEpoch))
+			for range 2 {
+				require.NoError(t, st.AddValidator(solid.NewValidatorFromParameters(
+					common.Bytes48{}, common.Hash{}, cfg.MinActivationBalance, false,
+					0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch,
+				), cfg.MinActivationBalance))
+			}
+			st.PendingPartialWithdrawals().Append(&solid.PendingPartialWithdrawal{
+				ValidatorIndex: tc.withdrawalIndex, Amount: tc.amount, WithdrawableEpoch: cfg.FarFutureEpoch,
+			})
+			syncedData := synced_data.NewSyncedDataManager(&cfg, true)
+			require.NoError(t, syncedData.OnOwnedHeadStateWithBlockRoot(st, common.Hash{}))
+			operations := pool.OperationsPool{
+				VoluntaryExitsPool: pool.NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](10, "voluntaryExitsPool"),
+			}
+			clock := eth_clock.NewEthereumClock(1000, common.Hash{}, &cfg)
+			verifier := NewBatchSignatureVerifier(t.Context(), nil)
+			verifier.Start()
+			service := NewVoluntaryExitService(operations, beaconevents.NewEventEmitter(), syncedData, &cfg, clock, verifier).(*voluntaryExitService)
+			service.now = func() time.Time { return clock.GetSlotTime(st.Slot()) }
+			msg := &SignedVoluntaryExitForGossip{
+				SignedVoluntaryExit:   &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: cfg.ShardCommitteePeriod}},
+				ImmediateVerification: tc.immediate,
+			}
+
+			err := service.ProcessMessage(t.Context(), nil, msg)
+			if tc.blocked {
+				if tc.immediate {
+					require.EqualError(t, err, "validator has pending withdrawals in the queue")
+				} else {
+					require.ErrorIs(t, err, ErrIgnore)
+				}
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, !tc.blocked, verified)
+			if !tc.blocked && !tc.immediate {
+				require.Eventually(t, func() bool {
+					return service.seen.Contains(0) && operations.VoluntaryExitsPool.Has(0)
+				}, time.Second, time.Millisecond)
+			} else {
+				require.Equal(t, !tc.blocked, service.seen.Contains(0))
+				require.Equal(t, !tc.blocked, operations.VoluntaryExitsPool.Has(0))
+			}
+		})
+	}
 }
 
 func TestVoluntaryExit(t *testing.T) {

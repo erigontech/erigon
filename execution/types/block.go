@@ -1416,9 +1416,7 @@ func (b *Block) HeaderNoCopy() *Header { return b.header }
 
 // Body returns the non-header content of the block.
 func (b *Block) Body() *Body {
-	bd := &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals}
-	bd.SendersFromTxs()
-	return bd
+	return &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals}
 }
 
 func (b *Block) SendersToTxs(senders []common.Address) {

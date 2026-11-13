@@ -77,7 +77,6 @@ func TestParallelReadOfRecreatedAccountBeforeRecreatorCommits(t *testing.T) {
 		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(1_000_000_000_000_000_000)}
 	}
 
-	dbg.Exec3Parallel = false
 	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
@@ -151,7 +150,6 @@ func TestParallelFoldKeepsEarlierTxFieldOfSameAccount(t *testing.T) {
 		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(1_000_000_000_000_000_000)}
 	}
 
-	dbg.Exec3Parallel = false
 	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
@@ -217,7 +215,6 @@ func testParallelBlockPastDispatchWindow(t *testing.T, withBAL bool) {
 		sender:  {Balance: big.NewInt(1_000_000_000_000_000_000)},
 	}
 
-	dbg.Exec3Parallel = false
 	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
