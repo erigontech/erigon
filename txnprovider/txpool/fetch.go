@@ -1332,7 +1332,14 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 	var refreshSnapshot *time.Timer
 	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if refreshSnapshot != nil {
-			refreshSnapshot.Stop()
+			if !refreshSnapshot.Stop() {
+				// The callback may still cancel the stream after Recv returns.
+				// Keep transaction hints, but recover state through a fresh subscription.
+				if req != nil {
+					f.collectStateChangeTxns(req)
+				}
+				return context.Canceled
+			}
 			refreshSnapshot = nil
 		}
 		if err != nil {

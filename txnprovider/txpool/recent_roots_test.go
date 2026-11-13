@@ -135,6 +135,7 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 	}{
 		{"before first Bogota block", 76, 19, remoteproto.Direction_FORWARD, false, false},
 		{"first activation in batch", 76, 19, remoteproto.Direction_FORWARD, true, false},
+		{"retained forward history after active snapshot", 100, 21, remoteproto.Direction_FORWARD, true, false},
 		{"head crosses back before activation", 100, 21, remoteproto.Direction_UNWIND, false, true},
 		{"activation unwind followed by active head", 100, 21, remoteproto.Direction_UNWIND, true, true},
 	} {

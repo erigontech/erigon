@@ -23,6 +23,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -187,6 +188,37 @@ func TestGrpcServerAddDuplicateDuringAdmission(t *testing.T) {
 		Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS},
 		Errors:   []string{"already known"},
 	}, reply)
+}
+
+func TestGrpcServerAddUnavailablePool(t *testing.T) {
+	for _, starting := range []bool{false, true} {
+		name := "recovering"
+		if starting {
+			name = "starting"
+		}
+		t.Run(name, func(t *testing.T) {
+			_, pool, poolDB, _ := newTestPool(t)
+			if starting {
+				pool.started.Store(false)
+			} else {
+				pool.MarkStateStale()
+			}
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+				defer cancel()
+				server := NewGrpcServer(ctx, pool, poolDB, nil, uint256.Int{1}, pool.logger)
+				start := time.Now()
+				reply, err := server.Add(ctx, &txpoolproto.AddRequest{
+					RlpTxs: [][]byte{hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)},
+				})
+				require.Equal(t, codes.Unavailable, status.Code(err))
+				require.ErrorContains(t, err, "retry later")
+				require.Zero(t, time.Since(start), "unavailable admission must not wait for recovery")
+				require.Nil(t, reply)
+				require.Empty(t, pool.byHash)
+			})
+		})
+	}
 }
 
 func TestGrpcServerAddNonceTooLow(t *testing.T) {

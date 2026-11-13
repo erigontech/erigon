@@ -416,11 +416,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	for _, txn := range unwindTxns.Txns {
 		p.recoverAuthorizations(txn)
 	}
-	if stateChanges.StateChangesIncomplete {
-		for _, txn := range minedTxns.Txns {
-			p.recoverAuthorizations(txn)
-		}
-	}
 
 	coreDB, cache := p.chainDB()
 	coreTx, err := beginBlockState(ctx, coreDB, stateChanges)
@@ -529,8 +524,8 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	defer p.forgetUnusedSenders(senderIDsOf(&minedTxns))
 	if stateChanges.StateChangesIncomplete {
 		// A missed unwind can leave an orphaned transaction marked as mined.
-		// Check the recovered nonce state before removing pooled replacements;
-		// transactions whose nonces are still usable go through restoration instead.
+		// Check the recovered nonce state before removing pooled replacements.
+		// An unused nonce alone does not establish an unwind or restore pool membership.
 		var consumed TxnSlots
 		for i, txn := range minedTxns.Txns {
 			used, err := p.nonceConsumed(txn, cacheView)
@@ -538,13 +533,8 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 				return frames, err
 			}
 			sender := minedTxns.Senders.At(i)
-			switch {
-			case used:
+			if used {
 				consumed.Append(txn, sender, false)
-			case txn.Txn.GetBlobGas() != 0:
-				unwindBlobTxns.Append(txn, sender, false)
-			default:
-				unwindTxns.Append(txn, sender, false)
 			}
 		}
 		minedTxns = consumed
@@ -1737,7 +1727,10 @@ func (p *TxPool) recoverAuthorizations(tx *TxnSlot) {
 	tx.AuthAndNonces = authorities
 }
 
-var errStateViewStale = errors.New("pool state recovery pending")
+var (
+	errStateViewStale = errors.New("pool state recovery pending")
+	errPoolNotReady   = errors.New("transaction pool is not ready; retry later")
+)
 
 func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, waitForRecovery bool, f func(kv.TemporalTx, kvcache.CacheView) error) error {
 	for {
@@ -1979,20 +1972,19 @@ const localAdmissionTimeout = 30 * time.Second
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
 	ctx, cancel := context.WithTimeout(ctx, localAdmissionTimeout)
 	defer cancel()
-	if err := p.waitForStartup(ctx); err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
-	}
-	return p.addNewTxns(ctx, newTxns, nil, true)
-}
-
-func (p *TxPool) waitForStartup(ctx context.Context) error {
-	if p.Started() {
-		return ctx.Err()
 	}
 	// The first state batch can arrive before persisted transactions are restored.
 	// Admission must see those transactions for nonce and replacement checks.
-	p.waitForCondition(ctx, p.Started)
-	return ctx.Err()
+	if !p.Started() {
+		return nil, errPoolNotReady
+	}
+	reasons, err := p.addNewTxns(ctx, newTxns, nil, false)
+	if errors.Is(err, errStateViewStale) {
+		return nil, errPoolNotReady
+	}
+	return reasons, err
 }
 
 func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource, waitForRecovery bool) ([]txpoolcfg.DiscardReason, error) {

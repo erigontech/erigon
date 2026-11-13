@@ -40,7 +40,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
 
-	// Admission may wait for pool recovery, which needs its own database reader.
+	// Admission opens its own state view; release this database reader before calling it.
 	cc, err := func() (*chain.Config, error) {
 		tx, err := api.db.BeginTemporalRo(ctx)
 		if err != nil {

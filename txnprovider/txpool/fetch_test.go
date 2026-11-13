@@ -579,6 +579,46 @@ func TestFetchStateChangeRecoveryStopsOnCancellation(t *testing.T) {
 	require.ErrorIs(t, fetch.handleStateChanges(ctx, client), context.Canceled)
 }
 
+func TestFetchExpiredRefreshDoesNotApplyReceivedBatch(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
+		ctrl := gomock.NewController(t)
+		pool := NewMockPool(ctrl)
+		pool.EXPECT().MarkStateStale()
+		applied := 0
+		pool.EXPECT().OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+			func(context.Context, *remoteproto.StateChangeBatch, TxnSlots, TxnSlots, TxnSlots) error {
+				applied++
+				if applied == 1 {
+					return errStateViewSuperseded
+				}
+				return nil
+			}).AnyTimes()
+		stream := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)
+		stale := newBlockChangeForAccounts(common.Hash{1}, 0)
+		stream.EXPECT().Recv().Return(stale, nil)
+		client := remoteproto.NewMockKVClient(ctrl)
+		rlp := decodeHex(TxnParseMainnetTests[0].PayloadStr)
+		client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+			func(streamCtx context.Context, _ *remoteproto.StateChangeRequest, _ ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+				stream.EXPECT().Recv().DoAndReturn(func() (*remoteproto.StateChangeBatch, error) {
+					<-streamCtx.Done()
+					batch := newBlockChangeForAccounts(common.Hash{2}, 0)
+					batch.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
+					batch.ChangeBatch[0].Txs = [][]byte{rlp}
+					return batch, nil
+				})
+				stream.EXPECT().Recv().Return(nil, io.EOF).AnyTimes()
+				return stream, nil
+			})
+		fetch := NewFetch(ctx, nil, pool, client, nil, u256.N1, log.New())
+		require.Error(t, fetch.handleStateChanges(ctx, client))
+		require.Equal(t, 1, applied, "a timed-out subscription must not apply another state batch")
+		require.Len(t, fetch.pendingTxnChanges, 1, "the received unwind must survive the reconnect")
+		require.Equal(t, rlp, fetch.pendingTxnChanges[0].txn.Rlp)
+	})
+}
+
 func TestFetchCoalescesSupersededStateChanges(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -771,8 +811,7 @@ func TestFetchReconcilesRetainedForwardAfterGap(t *testing.T) {
 			require.NoError(t, fetch.handleStateChangesRequest(ctx, reset))
 			_, present := pool.byHash[string(replacement.IDHash[:])]
 			require.Equal(t, tc.replacement && !tc.consumed, present)
-			_, restored := pool.byHash[string(original.IDHash[:])]
-			require.Equal(t, !tc.replacement && !tc.consumed, restored)
+			require.NotContains(t, pool.byHash, string(original.IDHash[:]), "a forward hint must not restore an absent transaction")
 			require.Empty(t, fetch.pendingTxnChanges)
 		})
 	}

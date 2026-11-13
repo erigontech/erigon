@@ -119,7 +119,7 @@ func TestPoolStartupWaitsWithoutDatabaseReader(t *testing.T) {
 	}
 }
 
-func TestLocalAdmissionWaitsForStartupRestore(t *testing.T) {
+func TestLocalAdmissionRejectsBeforeStartupRestore(t *testing.T) {
 	ctx, pool, poolDB, coreDB := newTestPool(t)
 	pool.started.Store(false)
 	sender := common.Address{1}
@@ -146,28 +146,23 @@ func TestLocalAdmissionWaitsForStartupRestore(t *testing.T) {
 		go func() { started <- pool.start(ctx) }()
 		var txns TxnSlots
 		txns.Append(replacement, sender[:], true)
-		admitted := make(chan []txpoolcfg.DiscardReason, 1)
-		addErr := make(chan error, 1)
-		go func() {
-			reasons, err := pool.AddLocalTxns(ctx, txns)
-			admitted <- reasons
-			addErr <- err
-		}()
-		synctest.Wait()
+		_, err := pool.AddLocalTxns(ctx, txns)
+		require.ErrorIs(t, err, errPoolNotReady)
 		reset := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
 		require.NoError(t, coreDB.View(ctx, func(tx kv.Tx) error {
-			var err error
-			reset.StateVersionId, err = rawdb.GetStateVersion(tx)
-			return err
+			var readErr error
+			reset.StateVersionId, readErr = rawdb.GetStateVersion(tx)
+			return readErr
 		}))
 		require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 		<-reading
-		synctest.Wait()
-		require.Empty(t, admitted, "a usable state view must not release admission before persisted transactions are restored")
+		_, err = pool.AddLocalTxns(ctx, txns)
+		require.ErrorIs(t, err, errPoolNotReady, "a usable state view must not allow admission before persisted transactions are restored")
 		unblock()
 		require.NoError(t, <-started)
-		require.NoError(t, <-addErr)
-		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NotReplaced}, <-admitted)
+		reasons, err := pool.AddLocalTxns(ctx, txns)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NotReplaced}, reasons)
 		require.Contains(t, pool.byHash, string(original.IDHash[:]))
 		require.NotContains(t, pool.byHash, string(replacement.IDHash[:]))
 	})
@@ -305,15 +300,15 @@ func TestFetchReconcilesRetainedFrameAfterGap(t *testing.T) {
 				backend.err = context.DeadlineExceeded
 				require.NoError(t, fetch.handleStateChangesRequest(ctx, reset))
 				require.Empty(t, fetch.pendingTxnChanges)
-				if !tc.consumed {
+				if !tc.consumed && tc.direction == remoteproto.Direction_UNWIND {
 					restored := pool.byHash[string(frame.IDHash[:])]
 					require.NotNil(t, restored, "a usable nonce must survive a backend failure")
 					require.Zero(t, restored.currentSubPool)
 					require.Equal(t, frame.BlobBundles, restored.TxnSlot.BlobBundles)
 					return
 				}
-				require.NotContains(t, pool.byHash, string(frame.IDHash[:]), "a consumed nonce must not be restored while validation is unavailable")
-				require.Empty(t, backend.calls, "committed nonce state is enough to reject restoration")
+				require.NotContains(t, pool.byHash, string(frame.IDHash[:]), "only an explicit unwind with an unused nonce may restore a transaction")
+				require.Empty(t, backend.calls)
 				_, knownSender := pool.senders.getID(sender)
 				require.False(t, knownSender, "a rejected restoration must not leave an unused sender")
 
@@ -325,6 +320,39 @@ func TestFetchReconcilesRetainedFrameAfterGap(t *testing.T) {
 				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 			})
 		}
+	}
+}
+
+func TestPoolRepeatedUnwindDoesNotPenalizeSender(t *testing.T) {
+	for _, incomplete := range []bool{false, true} {
+		t.Run(fmt.Sprintf("incomplete=%t", incomplete), func(t *testing.T) {
+			ctx, pool, _, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			pool.cfg.AccountSlots = 16
+			pool.cfg.MaxNonceGap = 64
+			var txns TxnSlots
+			for i := range 17 {
+				txn := newTestTxnSlot(uint64(i), 0, 1, 2, 21_000)
+				txn.IDHash = txn.Txn.Hash()
+				txns.Append(txn, sender[:], false)
+			}
+			pool.AddRemoteTxns(ctx, txns, nil, nil)
+			require.NoError(t, pool.processRemoteTxns(ctx))
+			require.Len(t, pool.byHash, 17)
+
+			change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+			change.StateChangesIncomplete = incomplete
+			require.NoError(t, coreDB.View(ctx, func(tx kv.Tx) error {
+				var err error
+				change.StateVersionId, err = rawdb.GetStateVersion(tx)
+				return err
+			}))
+			var unwind TxnSlots
+			unwind.Append(txns.Txns[16], sender[:], false)
+			require.NoError(t, pool.OnNewBlock(ctx, change, unwind, TxnSlots{}, TxnSlots{}))
+			for _, txn := range txns.Txns {
+				require.Contains(t, pool.byHash, string(txn.IDHash[:]), "replaying an unwind must preserve pooled transactions")
+			}
+		})
 	}
 }
 
@@ -424,7 +452,7 @@ func TestFramePoolFailedBlockUpdateBlocksSelection(t *testing.T) {
 	require.Equal(t, reservation, pool.frameReservations[sender])
 }
 
-func TestFramePoolAdmissionWaitsForStateRecovery(t *testing.T) {
+func TestFramePoolAdmissionRejectsDuringStateRecovery(t *testing.T) {
 	_, pool, sender := keyedFramePoolEnv(t)
 	synctest.Test(t, func(t *testing.T) {
 		ctx := t.Context()
@@ -433,7 +461,8 @@ func TestFramePoolAdmissionWaitsForStateRecovery(t *testing.T) {
 		reading, resume := make(chan struct{}), make(chan struct{})
 		unblock := sync.OnceFunc(func() { close(resume) })
 		defer unblock()
-		pool._chainDB = stateReadHookDB{pool._chainDB, func() error {
+		coreDB := pool._chainDB
+		pool._chainDB = stateReadHookDB{coreDB, func() error {
 			close(reading)
 			<-resume
 			return nil
@@ -445,42 +474,16 @@ func TestFramePoolAdmissionWaitsForStateRecovery(t *testing.T) {
 		var txns TxnSlots
 		frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
 		txns.Append(frame, sender[:], true)
-		admitted := make(chan error, 1)
-		go func() {
-			reasons, err := pool.AddLocalTxns(ctx, txns)
-			if err == nil && (len(reasons) != 1 || reasons[0] != txpoolcfg.Success) {
-				err = fmt.Errorf("frame admission failed: %v", reasons)
-			}
-			admitted <- err
-		}()
-		synctest.Wait()
-		select {
-		case err := <-admitted:
-			t.Fatalf("admission finished before recovery: %v", err)
-		default:
-		}
+		_, err := pool.AddLocalTxns(ctx, txns)
+		require.ErrorIs(t, err, errPoolNotReady)
 		require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls, "simulation must not use the stale head")
-		time.Sleep(2 * frameValidationTimeout)
 		unblock()
 		require.NoError(t, <-updated)
-		require.NoError(t, <-admitted)
+		pool._chainDB = coreDB
+		reasons, err := pool.AddLocalTxns(ctx, txns)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 		require.Equal(t, PendingSubPool, pool.byHash[string(frame.IDHash[:])].currentSubPool)
-	})
-}
-
-func TestLocalAdmissionBoundsRecoveryWait(t *testing.T) {
-	_, pool, sender := keyedFramePoolEnv(t)
-	pool.MarkStateStale()
-	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		stop := time.AfterFunc(time.Minute, cancel)
-		defer stop.Stop()
-		var txns TxnSlots
-		txns.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)
-		_, err := pool.AddLocalTxns(ctx, txns)
-		require.ErrorIs(t, err, context.DeadlineExceeded, "admission must time out without caller cancellation")
-		require.NoError(t, ctx.Err())
 	})
 }
 
@@ -520,10 +523,15 @@ func TestFramePoolRecoveryDuringAdmission(t *testing.T) {
 				require.True(t, pool.stateViewStale)
 				time.Sleep(2 * frameValidationTimeout)
 				synctest.Wait()
-				select {
-				case <-done:
-					t.Fatal("admission must wait for recovery despite the simulation deadline")
-				default:
+				if local {
+					<-done
+					require.ErrorIs(t, admissionErr, errPoolNotReady)
+				} else {
+					select {
+					case <-done:
+						t.Fatal("remote admission must wait for recovery despite the simulation deadline")
+					default:
+					}
 				}
 				require.Len(t, backend.calls, 1, "recovery must not repeatedly simulate against stale state")
 				if !local {
@@ -532,10 +540,12 @@ func TestFramePoolRecoveryDuringAdmission(t *testing.T) {
 
 				change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
 				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
-				<-done
-				require.NoError(t, admissionErr)
 				if local {
+					reasons, admissionErr = pool.AddLocalTxns(ctx, txns)
+					require.NoError(t, admissionErr)
 					require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+				} else {
+					<-done
 				}
 				require.Contains(t, pool.byHash, string(frame.IDHash[:]))
 				require.Len(t, backend.calls, 2)
@@ -735,21 +745,6 @@ func TestPoolBlockTimeTracksAdvancingHeads(t *testing.T) {
 	})
 }
 
-func TestLocalAdmissionStartupWaitDeadline(t *testing.T) {
-	_, pool, _, _ := newTestPool(t)
-	pool.started.Store(false)
-	synctest.Test(t, func(t *testing.T) {
-		var txns TxnSlots
-		sender := common.Address{1}
-		txns.Append(newTestTxnSlot(0, 0, 100, 200, 21_000), sender[:], true)
-		start := time.Now()
-		_, err := pool.AddLocalTxns(t.Context(), txns)
-		require.ErrorIs(t, err, context.DeadlineExceeded)
-		require.Equal(t, 30*time.Second, time.Since(start))
-		require.Empty(t, pool.byHash)
-	})
-}
-
 func TestStartupKeepsAnnouncedGenesisHead(t *testing.T) {
 	ctx, pool, poolDB, _ := newTestPool(t)
 	pool.started.Store(false)
@@ -841,9 +836,9 @@ func TestIncompleteBatchRestoresSetCodeAuthorities(t *testing.T) {
 		reset.StateVersionId, err = rawdb.GetStateVersion(tx)
 		return err
 	}))
-	var mined TxnSlots
-	mined.Append(&slot, sender[:], false)
-	require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, mined))
+	var unwind TxnSlots
+	unwind.Append(&slot, sender[:], false)
+	require.NoError(t, pool.OnNewBlock(ctx, reset, unwind, TxnSlots{}, TxnSlots{}))
 	restored := pool.byHash[string(slot.IDHash[:])]
 	require.NotNil(t, restored)
 	require.Equal(t, []AuthAndNonce{{authority, 0}}, restored.TxnSlot.AuthAndNonces)

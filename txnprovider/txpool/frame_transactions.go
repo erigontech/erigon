@@ -115,6 +115,10 @@ func (tx *TxnSlot) hasKeyedNonce() bool {
 // The caller must hold the pool lock to read the local transaction history.
 func (p *TxPool) splitRestoredTxns(txns TxnSlots) (ordinary, frames TxnSlots) {
 	for i, txn := range txns.Txns {
+		// Replayed notifications must not apply admission penalties to pooled transactions.
+		if p.byHash[string(txn.IDHash[:])] != nil {
+			continue
+		}
 		isLocal := p.isLocalLRU.Contains(string(txn.IDHash[:]))
 		if txn.TxType() == FrameTxnType {
 			frames.Append(txn, txns.Senders.At(i), isLocal)
@@ -581,11 +585,11 @@ func (p *TxPool) bogotaActivationAfter(changes *remoteproto.StateChangeBatch) bo
 	if p.pendingActivation != nil {
 		activation = *p.pendingActivation
 	}
-	// Reactivation must not hide an earlier activation unwind. Missing history
-	// alone requires revalidation against the recovered state.
+	// Forward history can overlap a subscription reset. Only unwind entries prove
+	// a reorg across activation, which a later reactivation must not hide.
 	for _, change := range changes.ChangeBatch {
 		active := p.chainConfig.IsBogota(change.BlockTime)
-		activation.unwound = activation.unwound || activation.active && !active
+		activation.unwound = activation.unwound || change.Direction == remoteproto.Direction_UNWIND && activation.active && !active
 		activation.active = active
 	}
 	return activation
