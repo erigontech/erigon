@@ -2134,7 +2134,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	// authoritative basis for every path except storage, which needs the wipe-aware
 	// liveStorage reader.
 	validatePath := func(addr accounts.Address, path AccountPath, hdr ReadHeader) VersionValidity {
-		if hdr.Version.TxIndex == originIndex && vm.hasNoCells(addr, path) {
+		if (hdr.Version.TxIndex == originIndex || hdr.Source == StorageRead && hdr.Version == UnknownVersion) && vm.hasNoCells(addr, path) {
 			return VersionValid
 		}
 		return vm.validateReadImpl(txIdx, addr, path, accounts.NilKey, hdr.Source, hdr.Version,
