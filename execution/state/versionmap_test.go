@@ -2756,3 +2756,48 @@ func TestWritesAlreadySeededRefusesACellATxOverwrote(t *testing.T) {
 
 	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 2, 42, ValueChanged)))
 }
+
+// A read of the base skips validation only while no tx wrote a storage, lifecycle or address cell of the account;
+// each such cell below the reader makes the read stale.
+func TestValidateReadSet_BaseReadOfQuietAccountSkipsValidation(t *testing.T) {
+	t.Parallel()
+	base := ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}
+	for _, tc := range []struct {
+		name  string
+		path  AccountPath
+		value any
+		read  ReadHeader
+		want  VersionValidity
+	}{
+		{"no cells", 0, nil, base, VersionValid},
+		{"storage write", StoragePath, *uint256.NewInt(8), base, VersionInvalid},
+		{"self-destruct", SelfDestructPath, true, base, VersionInvalid},
+		{"read of a removed write", 0, nil, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, VersionInvalid},
+		{"read of an aborted write", StoragePath, *uint256.NewInt(8), ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, VersionInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := getAddress(91)
+			key := accounts.InternKey(common.Hash{0x07})
+			vm := NewVersionMap(nil)
+			if tc.value != nil {
+				writeFor(vm, addr, tc.path, key, Version{TxIndex: 1}, tc.value, true)
+			}
+
+			rs := ReadSet{}
+			rs.SetStorage(addr, key, VersionedRead[uint256.Int]{
+				ReadHeader: tc.read,
+				Val:        *uint256.NewInt(7),
+			})
+			checks := 0
+			countChecks := func(read, write Version) VersionValidity {
+				checks++
+				return validateEqualVersion(read, write)
+			}
+			require.Equal(t, tc.want, vm.ValidateReadSet(3, rs, countChecks, false, ""))
+			if tc.value == nil && tc.read.Source == StorageRead {
+				require.Zero(t, checks, "a base read of a quiet account is not validated")
+			}
+		})
+	}
+}
