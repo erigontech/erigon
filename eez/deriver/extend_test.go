@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -89,6 +90,29 @@ func TestExtendRejectsUnincludableTransaction(t *testing.T) {
 	_, err := b.extend(t, t.Context(), b.transfer(t, 0), b.transfer(t, 2))
 	require.ErrorIs(t, err, deriver.ErrRejected)
 	require.ErrorContains(t, err, "nonce too high")
+}
+
+// slowPrepare is the EEZ engine taking delay to prepare a block's header.
+type slowPrepare struct {
+	headerless
+	delay time.Duration
+}
+
+func (e slowPrepare) Prepare(chain rules.ChainHeaderReader, header *types.Header) error {
+	time.Sleep(e.delay)
+	return e.headerless.Prepare(chain, header)
+}
+
+// TestExtendOutlastsTheSlotBudget: a derived block is built past the budget of
+// its slot, since L1 already fixed it; the slot paces only production.
+func TestExtendOutlastsTheSlotBudget(t *testing.T) {
+	b := newStateGasBlock(t, 1, false)
+	// Each Prepare alone takes twice what the exec module allows the build of a
+	// past slot: a quarter slot, then half a slot of grace.
+	delay := time.Duration(b.genesis.Config.SecondsPerSlot()) * time.Second * 3 / 2
+	b.txs = []types.Transaction{b.transfer(t, 0)}
+	_, built := b.build(t, func(e *eezrules.Engine) rules.Engine { return slowPrepare{headerless{e}, delay} })
+	require.Len(t, built.Block.Transactions(), 1)
 }
 
 // callbackContext counts the callbacks registered on it that are still live.

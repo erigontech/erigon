@@ -324,11 +324,21 @@ func (c *ExecChain) commit(ctx context.Context, in HeaderInputs, block *types.Bl
 	return c.ForkChoice(ctx, block.Hash(), safe, finalized)
 }
 
+// strictBuildTimeout bounds an explicit-list build. The exec module would
+// otherwise discard it past the budget of its slot, which a block L1 already
+// holds does not have to meet; the bound only frees the caller from a stuck
+// build.
+const strictBuildTimeout = time.Minute
+
 func (c *ExecChain) assemble(ctx context.Context, number uint64, params *builder.Parameters) (*types.BlockWithReceipts, error) {
-	// The exec module registers the discard of an explicit-list build on the
-	// caller's context; a context of this call releases it on return.
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	if params.RequireAllTransactions {
+		// The exec module takes the budget of an explicit-list build from the
+		// deadline of its context and registers the build's discard on it; a
+		// context of this call releases the discard on return.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, strictBuildTimeout)
+		defer cancel()
+	}
 	id, err := retryBusy(ctx, func() (uint64, bool, error) {
 		r, err := c.exec.AssembleBlock(ctx, params)
 		return r.PayloadID, r.Busy, err
