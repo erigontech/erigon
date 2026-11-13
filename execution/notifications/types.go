@@ -111,8 +111,6 @@ type ReceiptNotification struct {
 	Header  *types.Header
 }
 
-// Proto conversion methods — used at the gRPC boundary only.
-
 func directionToProto(d Direction) remoteproto.Direction {
 	if d == DirectionUnwind {
 		return remoteproto.Direction_UNWIND

@@ -1334,33 +1334,34 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 	if err != nil {
 		return err
 	}
-	var refreshSnapshot *time.Timer
-	for req, err := stream.Recv(); ; req, err = stream.Recv() {
-		if refreshSnapshot != nil {
-			if !refreshSnapshot.Stop() {
+	var refreshTimer *time.Timer
+	for {
+		batch, err := stream.Recv()
+		if refreshTimer != nil {
+			if !refreshTimer.Stop() {
 				// The callback may still cancel the stream after Recv returns.
 				// Keep transaction and activation observations, but recover state through a fresh subscription.
-				if req != nil {
-					f.collectStateChangeTxns(req)
-					f.pool.RetainBogotaActivation(req)
+				if batch != nil {
+					f.collectStateChangeTxns(batch)
+					f.pool.RetainBogotaActivation(batch)
 				}
 				return errRefreshStateSnapshot
 			}
-			refreshSnapshot = nil
+			refreshTimer = nil
 		}
 		if err != nil {
 			return err
 		}
-		if req == nil {
+		if batch == nil {
 			return nil
 		}
-		if err := f.handleStateChangesRequest(ctx, req); err != nil {
+		if err := f.handleStateChangesRequest(ctx, batch); err != nil {
 			if !errors.Is(err, errStateViewSuperseded) {
 				return err
 			}
 			// A newer commit may have no notification. Drain queued batches, but
 			// reconnect for a fresh snapshot if the stream stays idle.
-			refreshSnapshot = time.AfterFunc(time.Second, cancel)
+			refreshTimer = time.AfterFunc(time.Second, cancel)
 		}
 
 		if f.wg != nil { // to help tests

@@ -576,8 +576,8 @@ func (p *TxPool) parkFrameLocked(mt *metaTxn, reason string) {
 }
 
 type bogotaActivation struct {
-	active  bool
-	unwound bool
+	active      bool
+	crossedBack bool
 }
 
 func (p *TxPool) RetainBogotaActivation(changes *remoteproto.StateChangeBatch) {
@@ -597,12 +597,16 @@ func (p *TxPool) bogotaActivationAfter(changes *remoteproto.StateChangeBatch) bo
 	// do not prove a reorg; an explicit unwind must survive later reactivation.
 	for _, change := range changes.ChangeBatch {
 		active := p.chainConfig.IsBogota(change.BlockTime)
-		activation.unwound = activation.unwound || change.Direction == remoteproto.Direction_UNWIND && activation.active && !active
+		if change.Direction == remoteproto.Direction_UNWIND && activation.active && !active {
+			activation.crossedBack = true
+		}
 		activation.active = active
 	}
 	// An incomplete reset may omit the unwind entries, but its final head still
 	// proves a crossing back before hardfork activation.
-	activation.unwound = activation.unwound || changes.StateChangesIncomplete && activeBefore && !activation.active
+	if changes.StateChangesIncomplete && activeBefore && !activation.active {
+		activation.crossedBack = true
+	}
 	return activation
 }
 
@@ -622,7 +626,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 	accountChanges := make(map[common.Address][]byte)
 	nonceSlots := make(map[common.Hash]struct{})
 	rootSlots := make(map[common.Hash]struct{})
-	activationUnwound := p.bogotaActivationAfter(changes).unwound
+	activationCrossedBack := p.bogotaActivationAfter(changes).crossedBack
 	for _, batch := range changes.ChangeBatch {
 		for _, change := range batch.Changes {
 			address := gointerfaces.ConvertH160toAddress(change.Address)
@@ -658,7 +662,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			roots = protocol.FrameTransactionRecentRoots(frame)
 		}
 		invalidRoots := slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
-			return activationUnwound || !ref.ValidAt(pendingSlot)
+			return activationCrossedBack || !ref.ValidAt(pendingSlot)
 		})
 		if invalidRoots {
 			p.removeFromSubPool(mt, "recent root no longer usable")

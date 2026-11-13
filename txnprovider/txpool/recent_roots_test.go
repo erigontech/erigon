@@ -136,14 +136,46 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 		incomplete  bool
 		evict       bool
 	}{
-		{"before first Bogota block", 76, 19, remoteproto.Direction_FORWARD, false, false, false},
-		{"first activation in batch", 76, 19, remoteproto.Direction_FORWARD, true, false, false},
-		{"retained forward history after active snapshot", 100, 21, remoteproto.Direction_FORWARD, true, false, false},
-		{"head crosses back before activation", 100, 21, remoteproto.Direction_UNWIND, false, false, true},
-		{"activation unwind followed by active head", 100, 21, remoteproto.Direction_UNWIND, true, false, true},
-		{"reset crosses back before activation", 100, 21, remoteproto.Direction_FORWARD, false, true, true},
-		{"reset before first Bogota block", 76, 19, remoteproto.Direction_FORWARD, false, true, false},
-		{"incomplete forward history after active snapshot", 100, 21, remoteproto.Direction_FORWARD, true, true, false},
+		{
+			name:        "before first Bogota block",
+			initialTime: 76, initialSlot: 19, direction: remoteproto.Direction_FORWARD,
+			activeHead: false, incomplete: false, evict: false,
+		},
+		{
+			name:        "first activation in batch",
+			initialTime: 76, initialSlot: 19, direction: remoteproto.Direction_FORWARD,
+			activeHead: true, incomplete: false, evict: false,
+		},
+		{
+			name:        "retained forward history after active snapshot",
+			initialTime: 100, initialSlot: 21, direction: remoteproto.Direction_FORWARD,
+			activeHead: true, incomplete: false, evict: false,
+		},
+		{
+			name:        "head crosses back before activation",
+			initialTime: 100, initialSlot: 21, direction: remoteproto.Direction_UNWIND,
+			activeHead: false, incomplete: false, evict: true,
+		},
+		{
+			name:        "activation unwind followed by active head",
+			initialTime: 100, initialSlot: 21, direction: remoteproto.Direction_UNWIND,
+			activeHead: true, incomplete: false, evict: true,
+		},
+		{
+			name:        "reset crosses back before activation",
+			initialTime: 100, initialSlot: 21, direction: remoteproto.Direction_FORWARD,
+			activeHead: false, incomplete: true, evict: true,
+		},
+		{
+			name:        "reset before first Bogota block",
+			initialTime: 76, initialSlot: 19, direction: remoteproto.Direction_FORWARD,
+			activeHead: false, incomplete: true, evict: false,
+		},
+		{
+			name:        "incomplete forward history after active snapshot",
+			initialTime: 100, initialSlot: 21, direction: remoteproto.Direction_FORWARD,
+			activeHead: true, incomplete: true, evict: false,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
