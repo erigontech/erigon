@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -110,26 +109,4 @@ func seedLogEmittingContract(t *testing.T, db kv.TemporalRwDB, addr common.Addre
 	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
 		return putLogEmittingContract(putter, addr)
 	})
-}
-
-// Consensus system calls can emit logs after all regular transactions have
-// finished. Those logs have no receipt, but snapshot indexes must still place
-// them at the block's final virtual txNum.
-func TestSerialBlockEndLogsReachLogIndex(t *testing.T) {
-	engine := &logEmittingSyscallEngine{
-		Engine:   ethash.NewFaker(),
-		contract: accounts.InternAddress(logIndexContract),
-		calls:    1,
-	}
-	se, _ := newSerialFinalizeTestExec(t, engine)
-	tasks := newLogIndexTestTasks(se.cfg.chainConfig)
-	rwTx := se.applyTx.(kv.TemporalRwTx)
-	require.NoError(t, putLogEmittingContract(se.doms.AsPutDel(rwTx), logIndexContract))
-
-	_, err := se.executeBlock(t.Context(), tasks, false)
-	require.NoError(t, err)
-	require.NoError(t, se.doms.Flush(t.Context(), rwTx))
-
-	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
-	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
 }

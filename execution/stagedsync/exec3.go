@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -293,157 +294,7 @@ func finalizeExecV3Outcome(out execV3Outcome, err error) (execV3Outcome, error) 
 	return out, err
 }
 
-// execV3Serial runs the serial executor. It stays welded to the stage
-// (execStage/u) rather than taking the stage-agnostic split ExecV3 has, and the
-// stage wrapper calls it directly.
-func execV3Serial(ctx context.Context,
-	execStage *StageState, u Unwinder, cfg ExecuteBlockCfg,
-	doms *execctx.SharedDomains, rwTx kv.TemporalRwTx,
-	rng execRange, logger log.Logger,
-) (execErr error) {
-	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
-	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
-	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
-	hooks := cfg.vmConfig.Tracer
-	applyTx := rwTx
-	initialTxNum := rng.initialTxNum
-	blockNum := rng.blockNum
-	inputTxNum := rng.inputTxNum
-	offsetFromBlockBeginning := rng.offsetFromBlockBeginning
-	maxBlockNum := rng.maxBlockNum
-	var err error
-
-	shouldReportToTxPool := cfg.notifications != nil && maxBlockNum <= blockNum+64
-	var accumulator *shards.Accumulator
-	if shouldReportToTxPool {
-		accumulator = cfg.notifications.Accumulator
-		if accumulator == nil {
-			accumulator = shards.NewAccumulator()
-		}
-	}
-	rs := state.NewStateV3Buffered(state.NewStateV3(doms, cfg.syncCfg.PersistReceiptsCacheV2, logger))
-
-	commitThreshold := cfg.batchSize.Bytes()
-
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-	defer resetExecGauges(ctx)
-	defer resetDomainGauges(ctx)
-
-	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
-
-	if maxBlockNum < blockNum {
-		return nil
-	}
-
-	var lastHeader *types.Header
-	var readAhead chan uint64
-	startBlockNum := blockNum
-	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
-
-	doms.SetDiscardCommitment(cfg.discardCommitment)
-	// Exec-only mode (DiscardCommitment) runs no trie work, so skip the trie setup.
-	if !cfg.discardCommitment {
-		doms.EnableParaTrieDB(cfg.db)
-		doms.EnableTrieWarmup(true)
-		doms.SetDeferCommitmentUpdates(false)
-		if isForkValidation {
-			doms.SetDeferCommitmentUpdates(true)
-		}
-		defer doms.SetDeferCommitmentUpdates(false)
-	}
-	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
-		cfg.readAheader.WaitForRunningWarmup(ctx)
-	}
-	if !initialCycle && isApplyingBlocks {
-		var clean func()
-
-		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
-		defer clean()
-	}
-
-	se := &serialExecutor{
-		txExecutor: txExecutor{
-			cfg:               cfg,
-			rs:                rs,
-			doms:              doms,
-			u:                 u,
-			isForkValidation:  isForkValidation,
-			isApplyingBlocks:  isApplyingBlocks,
-			applyTx:           applyTx,
-			logger:            logger,
-			logPrefix:         execStage.LogPrefix(),
-			progress:          NewProgress(blockNum, inputTxNum, commitThreshold, execStage.LogPrefix(), logger),
-			enableChaosMonkey: initialCycle,
-			hooks:             hooks,
-		},
-	}
-	se.lastCommittedTxNum.Store(inputTxNum)
-	se.lastCommittedBlockNum.Store(blockNum)
-
-	defer func() {
-		if isApplyingBlocks {
-			se.LogComplete(stepsInDb)
-		}
-	}()
-
-	lastHeader, applyTx, execErr = se.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
-		initialTxNum, inputTxNum, initialCycle, applyTx, accumulator, readAhead, logEvery)
-
-	if u != nil && !u.HasUnwindPoint() {
-		if lastHeader != nil {
-			switch {
-			case execErr == nil || IsOnlyLoopExhausted(execErr):
-				_, _, err = computeAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, false, logger, u)
-				if err != nil {
-					return err
-				}
-
-				// Per-block validation runs inline inside each block's apply loop iteration
-				// (see blockValidator). No aggregate post-loop Wait needed.
-
-				se.lastCommittedBlockNum.Store(lastHeader.Number.Uint64())
-				// Get current txNum from the last executed block
-				currentTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, applyTx, lastHeader.Number.Uint64())
-				if err != nil {
-					return err
-				}
-				committedTransactions := currentTxNum - se.lastCommittedTxNum.Load()
-				se.lastCommittedTxNum.Store(currentTxNum)
-
-				stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
-
-				if initialCycle {
-					se.LogCommitments(committedTransactions, stepsInDb, se.LastCommitProgress())
-				}
-			case errors.Is(execErr, ErrWrongTrieRoot):
-				execErr = handleIncorrectRootHashError(
-					lastHeader.Number.Uint64(), lastHeader.Hash(), applyTx, cfg, execStage, logger, u,
-				)
-			default:
-				return execErr
-			}
-		} else {
-			if execErr != nil {
-				switch {
-				case errors.Is(execErr, ErrWrongTrieRoot):
-					return fmt.Errorf("can't handle incorrect root err: %w", execErr)
-				case IsOnlyLoopExhausted(execErr):
-					break
-				default:
-					return execErr
-				}
-			} else {
-				return fmt.Errorf("last processed block unexpectedly nil")
-			}
-		}
-	}
-
-	return execV3Finalize(ctx, execErr, cfg, doms, se.lastCommittedTxNum.Load(), se.lastCommittedBlockNum.Load(),
-		lastHeader, shouldReportToTxPool, execStage.LogPrefix(), logger)
-}
-
-// execV3Finalize runs the post-exec tail shared by ExecV3 and execV3Serial: the
+// execV3Finalize runs the post-exec tail of ExecV3: the
 // BAD_BLOCK_HALT debug exit, the frozen-step commitment guard, and the tx-pool
 // block-progress notification. It never unwinds — that is the caller's job.
 func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, doms *execctx.SharedDomains,
@@ -672,6 +523,26 @@ func (te *txExecutor) readHookBlock(ctx context.Context, tx kv.Tx, blockHash com
 		err = fmt.Errorf("block %d %x not found", blockNum, blockHash)
 	}
 	return b, err
+}
+
+// minAuthIntrinsicGas is the smallest intrinsic charge per authorization on any fork, so no valid tx or block applies
+// more authorizations than its gas limit divided by it.
+const minAuthIntrinsicGas = min(params.PerEmptyAccountCost, params.ExecutionPerAuthBaseCostEIP8038)
+
+func warmTxsHashes(block *types.Block, chainID *uint256.Int) {
+	authBudget := block.GasLimit() / minAuthIntrinsicGas
+	for _, t := range block.Transactions() {
+		_ = t.Hash()
+		if sc, ok := t.(*types.SetCodeTransaction); ok {
+			n := uint64(len(sc.Authorizations))
+			if n > authBudget || n*minAuthIntrinsicGas > min(t.GetGasLimit(), block.GasLimit()) {
+				continue
+			}
+			authBudget -= n
+			sc.WarmAuthorities(chainID)
+		}
+	}
+	_ = block.Hash()
 }
 
 func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64) (types.BlockAccessList, error) {

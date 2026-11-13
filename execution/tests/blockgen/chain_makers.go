@@ -482,17 +482,11 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	) (*types.Block, types.Receipts, error) {
 		txNumIncrement()
 
-		var versionMap *state.VersionMap
-		// Create versionMap when Amsterdam is configured (config-based check, applies
-		// to pre-Amsterdam blocks too on chains where the fork is scheduled).
-		needsVersionMap := dbg.Exec3Parallel || config.AmsterdamTime != nil
-		if needsVersionMap {
-			versionMap = state.NewVersionMap(nil)
-			// SetVersionMap forces noMaterialize: the stateObject cache would let a
-			// reused IBS serve stale account state across txs (e.g. a revived account's
-			// code hash), producing a header the executor's cache-free run disagrees with.
-			ibs.SetVersionMap(versionMap)
-		}
+		versionMap := state.NewVersionMap(nil)
+		// SetVersionMap forces noMaterialize: the stateObject cache would let a
+		// reused IBS serve stale account state across txs (e.g. a revived account's
+		// code hash), producing a header the executor's cache-free run disagrees with.
+		ibs.SetVersionMap(versionMap)
 
 		b := &BlockGen{
 			i:           i,
@@ -511,19 +505,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				txNumIncrement()
 			},
 		}
-		if versionMap == nil {
-			b.txWriter = stateWriter
-		}
 		if chainreader.Config().IsShanghai(parent.Time()) {
 			b.withdrawals = []*types.Withdrawal{}
 		}
 		b.header = makeHeader(chainreader, parent, b.engine)
 		// blockIO carries the per-phase write-sets: it feeds both the Amsterdam
-		// BAL and the versioned write-set commit, so create it for any versioned
-		// block, not only Amsterdam.
-		if versionMap != nil || chainreader.Config().IsEIPEnabled(7928, b.header.Time) {
-			b.blockIO = &state.VersionedIO{}
-		}
+		// BAL and the versioned write-set commit.
+		b.blockIO = &state.VersionedIO{}
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			if b.header.Number.Uint64() >= *daoBlock && b.header.Number.Uint64() < *daoBlock+misc.DAOForkExtraRange {
@@ -608,23 +596,19 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// Write state changes to db
 			blockContext := protocol.NewEVMBlockContext(b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, config)
 			blockRules := blockContext.Rules(config)
-			if b.versionMap != nil && b.blockIO != nil {
-				// Commit from the versionMap write-set via ApplyWrites — the same
-				// domain apply the parallel executor uses (rw_v3 handles the
-				// self-destruct delete, EIP-161 removal and storage-subtree cascade)
-				// — instead of so.data via CommitBlock, so generation matches import.
-				// Each recorded phase (init txIdx=-1, txs, finalize) is applied in order.
-				blockNum := b.header.Number.Uint64()
-				for _, ws := range b.blockIO.Outputs() {
-					if ws == nil || ws.IsEmpty() {
-						continue
-					}
-					if err := state.ApplyWrites(ws, domains, tx, blockNum, txNum, nil, blockRules, false); err != nil {
-						return nil, nil, fmt.Errorf("apply versioned block writes: %w", err)
-					}
+			// Commit from the versionMap write-set via ApplyWrites — the same
+			// domain apply the parallel executor uses (rw_v3 handles the
+			// self-destruct delete, EIP-161 removal and storage-subtree cascade)
+			// — instead of so.data via CommitBlock, so generation matches import.
+			// Each recorded phase (init txIdx=-1, txs, finalize) is applied in order.
+			blockNum := b.header.Number.Uint64()
+			for _, ws := range b.blockIO.Outputs() {
+				if ws == nil || ws.IsEmpty() {
+					continue
 				}
-			} else if err := ibs.CommitBlock(blockRules, stateWriter); err != nil {
-				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
+				if err := state.ApplyWrites(ws, domains, tx, blockNum, txNum, nil, blockRules, false); err != nil {
+					return nil, nil, fmt.Errorf("apply versioned block writes: %w", err)
+				}
 			}
 
 			if config.IsPrague(b.header.Time) {

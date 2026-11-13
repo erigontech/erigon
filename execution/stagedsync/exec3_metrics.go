@@ -492,9 +492,6 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	case *parallelExecutor:
 		te = &ex.txExecutor
 		suffix = " parallel"
-	case *serialExecutor:
-		te = &ex.txExecutor
-		suffix = " serial"
 	}
 
 	taskGas := te.taskExecMetrics.GasUsed.Total.Load()
@@ -532,7 +529,6 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 
 	var readRatio float64
 	var execRatio float64
-	var avgTaskGasPerSec int64
 	var avgTaskDur time.Duration
 	var avgReadDur time.Duration
 	var avgExecDur time.Duration
@@ -562,7 +558,6 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		}
 
 		avgTaskGas = curTaskGas / curActivations
-		avgTaskGasPerSec = int64(float64(avgTaskGas) / seconds)
 	}
 
 	curTaskGasPerSec := int64(float64(curTaskGas) / seconds)
@@ -646,20 +641,6 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		p.prevInvalidCount = invalidCount
 		p.prevReadCount = readCount
 		p.prevWriteCount = writeCount
-	case *serialExecutor:
-		readCount := te.taskExecMetrics.ReadCount.Load()
-		curReadCount := readCount - p.prevReadCount
-		p.prevReadCount = readCount
-
-		execVals = []any{
-			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
-			"aratio", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
-			"tdur", common.Round(avgTaskDur, 0),
-			"trdur", fmt.Sprintf("%v(%.2f%%)", common.Round(avgReadDur, 0), readRatio),
-			"rd", common.PrettyCounter(curReadCount),
-			"rd/s", common.PrettyCounter(uint64(float64(curReadCount) / seconds)),
-			"buf", fmt.Sprintf("%s/%s", common.ByteCount(uint64(sizeEstimate)), common.ByteCount(p.commitThreshold)),
-		}
 	}
 
 	blockCount := te.blockExecMetrics.BlockCount.Load()
@@ -722,9 +703,6 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, stepsInDb floa
 		te = &ex.txExecutor
 		suffix = " parallel"
 
-	case *serialExecutor:
-		te = &ex.txExecutor
-		suffix = " serial"
 	}
 
 	currentTime := time.Now()
@@ -778,9 +756,6 @@ func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64
 		te = &ex.txExecutor
 		suffix = " parallel"
 
-	case *serialExecutor:
-		te = &ex.txExecutor
-		suffix = " serial"
 	}
 
 	gas := te.committedGas.Load()

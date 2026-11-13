@@ -91,7 +91,7 @@ func testImportCoinbaseIsBurntContract(t *testing.T, amsterdam, selfdestruct boo
 }
 
 // Before Cancun a burnt-fee contract that self-destructs loses the burn of the same
-// tx: serial credits it inside the tx, before the destruct takes effect. That holds
+// tx: it is credited inside the tx, before the destruct takes effect. That holds
 // also for a burnt-fee contract the tx creates.
 func TestImportBurntContractSelfdestructLosesBurn(t *testing.T) {
 	beneficiary := common.Address{0x44}
