@@ -1033,3 +1033,23 @@ func TestDecodeBlockAccessListParallelPanicFallsBackToSerial(t *testing.T) {
 		t.Fatalf("serial fallback decoded %d entries, want %d", len(got), len(bal))
 	}
 }
+
+// An item shorter than the smallest entry cannot decode, so a list of them must not make the parallel decoder index
+// and allocate one entry per item before the serial decoder rejects the list.
+func TestDecodeBlockAccessListParallelRejectsShortItemsBeforeAllocating(t *testing.T) {
+	allocs := func(items int) float64 {
+		body := bytes.Repeat([]byte{0xc0}, items)
+		prefix := make([]byte, rlp.ListPrefixLen(len(body)))
+		rlp.EncodeListPrefixToBuf(len(body), prefix)
+		data := slices.Concat(prefix, body)
+		budget := &blockAccessListDecodeBudget{remaining: uint64(items)}
+		return testing.AllocsPerRun(5, func() {
+			if _, ok := decodeBlockAccessListParallel(data, budget); ok {
+				t.Fatal("a list of empty items decoded")
+			}
+		})
+	}
+	if small, large := allocs(balDecodeChunk+1), allocs(150_000); large > small {
+		t.Fatalf("allocs grow with the list: %v for %d items, %v for 150000", small, balDecodeChunk+1, large)
+	}
+}

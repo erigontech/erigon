@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -879,6 +880,9 @@ func decodeBlockAccessListBytes(data []byte, budget *blockAccessListDecodeBudget
 	return decodeBlockAccessListSerial(data, budget)
 }
 
+// minAccountChangesLen is the encoded size of an entry with no changes: list prefix, address, five empty lists.
+const minAccountChangesLen = 1 + 1 + length.Addr + 5
+
 func decodeBlockAccessListParallel(data []byte, budget *blockAccessListDecodeBudget) (BlockAccessList, bool) {
 	content, rest, err := rlp.SplitList(data)
 	if err != nil || len(rest) != 0 {
@@ -891,7 +895,7 @@ func decodeBlockAccessListParallel(data []byte, budget *blockAccessListDecodeBud
 			return nil, false
 		}
 		k, _, r, err := rlp.Split(content)
-		if err != nil || k != rlp.List {
+		if err != nil || k != rlp.List || len(content)-len(r) < minAccountChangesLen {
 			return nil, false
 		}
 		items = append(items, content[:len(content)-len(r)])
