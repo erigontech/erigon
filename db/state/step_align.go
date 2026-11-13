@@ -152,13 +152,6 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 			break
 		}
 	}
-	for _, files := range lists {
-		for i := 1; i < len(files) && files[i].startTxNum < end; i++ {
-			if prev := files[i-1].endTxNum; files[i].startTxNum != prev {
-				return 0, fmt.Errorf("%s: no visible file for txNum %d-%d", files[i].Fullpath(), prev, files[i].startTxNum)
-			}
-		}
-	}
 	if err := at.refuseFilesHiddenByAGap(); err != nil {
 		return 0, err
 	}
@@ -172,25 +165,44 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 	return end, nil
 }
 
-// refuseFilesHiddenByAGap stops a rebase that would otherwise end at a gap and ignore the values files after it.
+// refuseFilesHiddenByAGap stops a rebase that would otherwise end at a gap and ignore the files after it.
 func (at *AggregatorRoTx) refuseFilesHiddenByAGap() error {
 	at.a.dirtyFilesLock.Lock()
 	defer at.a.dirtyFilesLock.Unlock()
 	ceiling := at.a.dirtyFilesEndTxNumMinimax()
-	for _, d := range at.d {
-		if d == nil || !d.d.Enabled || len(d.files) == 0 {
-			continue
+	refuse := func(files visibleFiles, dirty *DirtyFiles) (err error) {
+		if len(files) == 0 {
+			return nil
 		}
-		end := d.files.EndTxNum()
-		var err error
-		d.d.dirtyFiles.Scan(func(f *FilesItem) bool {
+		end := files.EndTxNum()
+		dirty.Scan(func(f *FilesItem) bool {
 			if f.startTxNum > end && f.endTxNum <= ceiling {
-				err = fmt.Errorf("%s: no visible file for txNum %d-%d", d.files[len(d.files)-1].Fullpath(), end, f.startTxNum)
+				err = fmt.Errorf("%s: no visible file for txNum %d-%d", files[len(files)-1].Fullpath(), end, f.startTxNum)
 				return false
 			}
 			return true
 		})
-		if err != nil {
+		return err
+	}
+	for _, d := range at.d {
+		if d == nil || !d.d.Enabled {
+			continue
+		}
+		if err := refuse(d.files, d.d.dirtyFiles); err != nil {
+			return err
+		}
+		if err := refuse(d.ht.files, d.d.History.dirtyFiles); err != nil {
+			return err
+		}
+		if err := refuse(d.ht.iit.files, d.d.History.InvertedIndex.dirtyFiles); err != nil {
+			return err
+		}
+	}
+	for _, ii := range at.iis {
+		if ii == nil || !ii.ii.Enabled {
+			continue
+		}
+		if err := refuse(ii.files, ii.ii.dirtyFiles); err != nil {
 			return err
 		}
 	}

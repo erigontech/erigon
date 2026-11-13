@@ -542,19 +542,16 @@ func (d *Domain) retireFilesNotInList(fNames []string) retiredFiles {
 // Aggregator.recalcVisibleFiles uses it to assemble a cross-entity consistent
 // snapshot that is published via a single atomic store.
 func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles, *iiVisible) {
-	dv := newDomainVisible(d.Name, keepFilesBeforeFirstGap(calcVisibleFiles(d.dirtyFiles, d.Accessors, d.dependentPresent(), false, toTxNum)))
+	var checker func(startTxNum, endTxNum uint64) bool
+	if d.checker != nil {
+		ue := FromDomain(d.Name)
+		checker = func(startTxNum, endTxNum uint64) bool {
+			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
+		}
+	}
+	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
 	hv, hiv := d.History.calcVisibleFiles(toTxNum)
 	return dv, hv, hiv
-}
-
-func (d *Domain) dependentPresent() func(startTxNum, endTxNum uint64) bool {
-	if d.checker == nil {
-		return nil
-	}
-	ue := FromDomain(d.Name)
-	return func(startTxNum, endTxNum uint64) bool {
-		return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
-	}
 }
 
 func (d *Domain) Tables() []string { return append(d.History.Tables(), d.ValuesTable) }
@@ -2164,12 +2161,12 @@ func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
 	return maxStepInFiles < dt.d.maxStepInDB(dbtx)
 }
 
-func (dt *DomainRoTx) checkFilesDBGap(tx kv.Tx, visibleCeiling uint64) error {
+func (dt *DomainRoTx) checkFilesDBGap(tx kv.Tx) error {
 	prg, err := GetPruneValProgress(tx, []byte(dt.d.ValuesTable))
 	if err != nil {
 		return err
 	}
-	if filesEnd := dt.files.EndTxNum(); prg.TxTo > filesEnd && !dt.d.dirtyFiles.coversWithoutHole(filesEnd, prg.TxTo, visibleCeiling, dt.d.dependentPresent()) {
+	if filesEnd := dt.files.EndTxNum(); prg.TxTo > filesEnd {
 		return fmt.Errorf("gap between snapshot files and DB for domain %s: files end at txNum %d but the DB was pruned up to %d — [%d, %d) is in neither. Maybe you removed snapshot files (e.g. `snapshots rm-state --latest`) but forgot to run `integration stage_exec --reset` (or `integration stage_custom_trace --reset` for custom-trace domains)?",
 			dt.d.FilenameBase, filesEnd, prg.TxTo, filesEnd, prg.TxTo)
 	}

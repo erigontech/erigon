@@ -65,18 +65,6 @@ func newDirtyFiles() *DirtyFiles {
 	return &DirtyFiles{*btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false})}
 }
 
-// coversWithoutHole reports whether data files that become visible once their accessors exist cover [from,to).
-func (df *DirtyFiles) coversWithoutHole(from, to, toTxNum uint64, checker func(startTxNum, endTxNum uint64) bool) bool {
-	df.Scan(func(f *FilesItem) bool {
-		eligible := f.decompressor != nil && !f.canDelete.Load() && f.endTxNum <= toTxNum && (checker == nil || checker(f.startTxNum, f.endTxNum))
-		if eligible && f.startTxNum <= from && from < f.endTxNum {
-			from = f.endTxNum
-		}
-		return true
-	})
-	return from >= to
-}
-
 func (df *DirtyFiles) copy() *DirtyFiles {
 	return &DirtyFiles{*df.BTreeG.Copy()}
 }
@@ -652,29 +640,19 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 		newVisibleFiles = visibleFiles{}
 	}
 
-	// Check for gaps in visible files and warn if found
+	// a latest read cannot tell that a key's value was in the hole, so nothing after it is visible
 	for i := 1; i < len(newVisibleFiles); i++ {
 		prev := newVisibleFiles[i-1]
 		curr := newVisibleFiles[i]
-		if prev.endTxNum != curr.startTxNum {
+		if prev.endTxNum < curr.startTxNum {
 			log.Warn("[agg] gap in visible files", "prev", prev.src.decompressor.FileName(),
 				"prevEnd", prev.endTxNum, "curr", curr.src.decompressor.FileName(), "currStart", curr.startTxNum,
 				"gap", curr.startTxNum-prev.endTxNum)
+			return newVisibleFiles[:i]
 		}
 	}
 
 	return newVisibleFiles
-}
-
-// keepFilesBeforeFirstGap drops the first values file after a hole and all newer ones: a latest read cannot tell
-// that a key's value was in the hole. History reads go by txNum, so a hole affects only the reads that land in it.
-func keepFilesBeforeFirstGap(files visibleFiles) visibleFiles {
-	for i := 1; i < len(files); i++ {
-		if files[i-1].endTxNum < files[i].startTxNum {
-			return files[:i]
-		}
-	}
-	return files
 }
 
 func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canBeVisible bool) {
