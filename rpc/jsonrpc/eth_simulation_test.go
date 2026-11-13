@@ -22,8 +22,10 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -38,6 +40,84 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
+
+func TestCheckStorageReplacementsBoundsTheRequest(t *testing.T) {
+	t.Parallel()
+	rwTx, sd := temporaltest.NewTestTxSD(t, temporaltest.NewTestDB(t, datadir.New(t.TempDir())))
+	addrA, addrB := common.HexToAddress("0xaa"), common.HexToAddress("0xbb")
+	putDel := sd.AsPutDel(rwTx)
+	for slot := byte(1); slot <= 2; slot++ {
+		require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addrA, common.Hash{31: slot}), []byte{slot}, 1, nil))
+		require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addrB, common.Hash{31: slot}), []byte{slot}, 1, nil))
+	}
+	empty := map[common.Hash]common.Hash{}
+	overrides := ethapi.StateOverrides{accounts.InternAddress(addrA): {State: &empty}, accounts.InternAddress(addrB): {State: &empty}}
+	check := func(limit int) error {
+		return (&simulator{}).checkStorageReplacements(t.Context(), &overrides, sd, rwTx, true, 0, limit)
+	}
+
+	require.NoError(t, check(4))
+	require.ErrorContains(t, check(3), "more than 3 storage slots")
+}
+
+func TestCheckStorageReplacementsCountsSlotsAtTheBaseBlock(t *testing.T) {
+	t.Parallel()
+	rwTx, sd := temporaltest.NewTestTxSD(t, temporaltest.NewTestDB(t, datadir.New(t.TempDir())))
+	addr := common.HexToAddress("0xaa")
+	putDel := sd.AsPutDel(rwTx)
+	for slot := byte(1); slot <= 3; slot++ {
+		require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}), []byte{slot}, 1, nil))
+		require.NoError(t, putDel.DomainDel(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}), 2, []byte{slot}))
+	}
+	require.NoError(t, sd.Flush(t.Context(), rwTx))
+	empty := map[common.Hash]common.Hash{}
+	overrides := ethapi.StateOverrides{accounts.InternAddress(addr): {State: &empty}}
+
+	require.NoError(t, (&simulator{}).checkStorageReplacements(t.Context(), &overrides, sd, rwTx, true, 2, 2), "the head has no slots")
+	require.ErrorContains(t, (&simulator{}).checkStorageReplacements(t.Context(), &overrides, sd, rwTx, false, 2, 2), "more than 2 storage slots")
+}
+
+func TestCheckStorageReplacementsCountsHeadAndBaseSlotsOnce(t *testing.T) {
+	t.Parallel()
+	rwTx, sd := temporaltest.NewTestTxSD(t, temporaltest.NewTestDB(t, datadir.New(t.TempDir())))
+	addr := common.HexToAddress("0xaa")
+	putDel := sd.AsPutDel(rwTx)
+	for slot := byte(1); slot <= 2; slot++ {
+		require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}), []byte{slot}, 1, nil))
+		require.NoError(t, putDel.DomainDel(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}), 2, []byte{slot}))
+		require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot + 2}), []byte{slot}, 2, nil))
+	}
+	require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: 5}), []byte{5}, 1, nil))
+	require.NoError(t, sd.Flush(t.Context(), rwTx))
+	empty := map[common.Hash]common.Hash{}
+	overrides := ethapi.StateOverrides{accounts.InternAddress(addr): {State: &empty}}
+
+	require.NoError(t, (&simulator{}).checkStorageReplacements(t.Context(), &overrides, sd, rwTx, false, 2, 5))
+	err := (&simulator{}).checkStorageReplacements(t.Context(), &overrides, sd, rwTx, false, 2, 4)
+	require.ErrorContains(t, err, "more than 4 storage slots")
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, rpc.ErrCodeClientLimitExceeded, rpcErr.ErrorCode())
+}
+
+func TestCheckStorageReplacementsSkipsBaseSlotsAlreadySwept(t *testing.T) {
+	t.Parallel()
+	rwTx, sd := temporaltest.NewTestTxSD(t, temporaltest.NewTestDB(t, datadir.New(t.TempDir())))
+	addr := common.HexToAddress("0xaa")
+	putDel := sd.AsPutDel(rwTx)
+	for slot := byte(1); slot <= 3; slot++ {
+		require.NoError(t, putDel.DomainPut(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}), []byte{slot}, 1, nil))
+		require.NoError(t, putDel.DomainDel(kv.StorageDomain, dbutils.GenerateStoragePlainKey(addr, common.Hash{31: slot}), 2, []byte{slot}))
+	}
+	require.NoError(t, sd.Flush(t.Context(), rwTx))
+	empty := map[common.Hash]common.Hash{}
+	interned := accounts.InternAddress(addr)
+	overrides := ethapi.StateOverrides{interned: {State: &empty}}
+	sim := &simulator{sweptStorage: map[accounts.Address]struct{}{interned: {}}}
+
+	require.NoError(t, sim.checkStorageReplacements(t.Context(), &overrides, sd, rwTx, false, 2, 2))
+	require.Zero(t, sim.replacedSlots)
+}
 
 func TestSimulationSkipsDisabledCommitmentHistory(t *testing.T) {
 	t.Parallel()
