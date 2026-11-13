@@ -1665,8 +1665,8 @@ func (sd *SharedDomains) codeForSegment(tx kv.TemporalTx, view cache.ReadView, a
 	if len(codeHash) == 0 || sd.uncommittedCodeInMem(addr) {
 		return nil, false, nil
 	}
-	if cached, ok := view.GetCodeByHash(codeHash); ok {
-		return cached, true, nil
+	if _, ok := view.GetCodeByHash(codeHash); ok {
+		return nil, false, nil
 	}
 	if h := memo.Hash.Value(); memo.Bytes != nil && bytes.Equal(h[:], codeHash) {
 		return memo.Bytes, true, nil
