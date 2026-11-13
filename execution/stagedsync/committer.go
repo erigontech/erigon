@@ -354,7 +354,7 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 			// select can pick the result first and let handleBlockRequest drop the
 			// request as stale (blockNum <= lastBlockResultSeen). That drops the
 			// block's compute-ahead, and the contiguity gate then keeps compute-ahead
-			// off for the rest of the batch.
+			// off for the remaining pre-window blocks.
 			reqs = cc.drainBlockRequests(ctx, reqs)
 			cc.handleMessage(ctx, result)
 		case req, ok := <-reqs:
@@ -453,9 +453,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			if upd := cc.doms.GetCommitmentContext().PeekPendingUpdate(); upd != nil && upd.BlockNum == r.BlockNum {
 				cc.doms.GetCommitmentContext().ResetPendingUpdates()
 			}
-			delete(cc.pending, r.BlockNum)
-			delete(cc.computedAhead, r.BlockNum)
-			delete(cc.balRoots, r.BlockNum)
+			cc.forgetBlock(r.BlockNum)
 			cc.clearTouched()
 			return
 		}
@@ -466,9 +464,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		if r.Err != nil {
 			if cc.computedAhead[r.BlockNum] {
 				cc.doms.GetCommitmentContext().ResetPendingUpdates()
-				delete(cc.pending, r.BlockNum)
-				delete(cc.computedAhead, r.BlockNum)
-				delete(cc.balRoots, r.BlockNum)
+				cc.forgetBlock(r.BlockNum)
 			}
 			return
 		}
@@ -530,9 +526,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
 				"overlap", overlap, "gap", gap, "residual", residual)
 		}
-		delete(cc.pending, r.BlockNum)
-		delete(cc.computedAhead, r.BlockNum)
-		delete(cc.balRoots, r.BlockNum)
+		cc.forgetBlock(r.BlockNum)
 		cc.maybeComputeAhead(ctx, r.BlockNum+1)
 
 	case *commitComputeRequest:
@@ -583,6 +577,12 @@ func (cc *commitmentCalculator) computeAheadGateOpen(n uint64) bool {
 		return true
 	}
 	return cc.hasSeenBlockResult && cc.lastBlockResultSeen+1 >= n
+}
+
+func (cc *commitmentCalculator) forgetBlock(n uint64) {
+	delete(cc.pending, n)
+	delete(cc.computedAhead, n)
+	delete(cc.balRoots, n)
 }
 
 // maybeComputeAhead computes block n from its BAL when it is BAL-driven, the

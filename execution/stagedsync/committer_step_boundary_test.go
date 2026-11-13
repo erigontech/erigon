@@ -1247,39 +1247,47 @@ func TestComputeAhead_WindowFailureAtEdgePublishedOnce(t *testing.T) {
 	commitmentdb.WantParentReads(false)
 
 	ctx := context.Background()
-	db, tx, doms := setupStepTest(t)
-	doms.SetDeferCommitmentUpdates(true)
-	blockHash := common.Hash{0xa1}
-	addr := accounts.InternAddress([20]byte{0xa2})
-	value := *uint256.NewInt(14)
-	cs := &changeset.StateChangeSet{}
-	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{SpuriousDragonBlock: common.NewUint64(0)}, "test", log.New(), false, 1, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
-	require.NoError(t, err)
-	defer cc.Stop()
-	cc.handleBlockRequest(ctx, &blockRequest{
-		blockNum: 1, blockHash: blockHash, firstTxNum: 15, lastTxNum: 17,
-		stateRoot: common.Hash{0xbe, 0xef},
-		bal: types.BlockAccessList{{
-			Address:        addr.Value(),
-			BalanceChanges: []*types.BalanceChange{{Index: 0, Value: value}},
-			NonceChanges:   []*types.NonceChange{{Index: 0, Value: 1}, {Index: 1, Value: 2}},
-		}},
-	})
-	require.Empty(t, out)
-	av := addr.Value()
-	putCorruptAccount(t, doms, tx, av[:])
-	doms.SavePastChangesetAccumulator(blockHash, 1, cs)
-	previous := &commitment.PendingCommitmentUpdate{BlockNum: 0}
-	doms.GetCommitmentContext().SetPendingUpdate(previous)
-	cc.handleMessage(ctx, recordTx(newRawViewVM(15), 1, blockHash, 15, &chain.Rules{IsAmsterdam: true}, nonceBalanceWrites(addr, 1, value)))
-	require.True(t, cc.pending[1].failed)
-	require.Len(t, out, 1)
-	require.Error(t, (<-out).err)
+	for _, pendingBlock := range []uint64{0, 1} {
+		t.Run(fmt.Sprintf("pending_block_%d", pendingBlock), func(t *testing.T) {
+			db, tx, doms := setupStepTest(t)
+			doms.SetDeferCommitmentUpdates(true)
+			blockHash := common.Hash{0xa1}
+			addr := accounts.InternAddress([20]byte{0xa2})
+			value := *uint256.NewInt(14)
+			cs := &changeset.StateChangeSet{}
+			out := make(chan commitmentResult, 64)
+			cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+			require.NoError(t, err)
+			defer cc.Stop()
+			cc.handleBlockRequest(ctx, &blockRequest{
+				blockNum: 1, blockHash: blockHash, firstTxNum: 15, lastTxNum: 17,
+				stateRoot: common.Hash{0xbe, 0xef},
+				bal: types.BlockAccessList{{
+					Address:        addr.Value(),
+					BalanceChanges: []*types.BalanceChange{{Index: 0, Value: value}},
+					NonceChanges:   []*types.NonceChange{{Index: 0, Value: 1}, {Index: 1, Value: 2}},
+				}},
+			})
+			require.Empty(t, out)
+			av := addr.Value()
+			putCorruptAccount(t, doms, tx, av[:])
+			doms.SavePastChangesetAccumulator(blockHash, 1, cs)
+			pending := &commitment.PendingCommitmentUpdate{BlockNum: pendingBlock}
+			doms.GetCommitmentContext().SetPendingUpdate(pending)
+			cc.handleMessage(ctx, recordTx(newRawViewVM(15), 1, blockHash, 15, &chain.Rules{IsAmsterdam: true}, nonceBalanceWrites(addr, 1, value)))
+			require.True(t, cc.pending[1].failed)
+			require.Len(t, out, 1)
+			require.ErrorContains(t, (<-out).err, "step-checkpoint")
 
-	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: blockHash, StateRoot: common.Hash{0xbe, 0xef}, lastTxNum: 17})
-	require.Empty(t, out)
-	require.Same(t, previous, doms.GetCommitmentContext().PeekPendingUpdate())
+			cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: blockHash, StateRoot: common.Hash{0xbe, 0xef}, lastTxNum: 17})
+			require.Empty(t, out)
+			if pendingBlock == 1 {
+				require.Nil(t, doms.GetCommitmentContext().PeekPendingUpdate())
+			} else {
+				require.Same(t, pending, doms.GetCommitmentContext().PeekPendingUpdate())
+			}
+		})
+	}
 }
 
 func TestHandleMessage_RejectedComputedAheadWindowBlock(t *testing.T) {
