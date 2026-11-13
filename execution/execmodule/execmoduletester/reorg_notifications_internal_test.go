@@ -407,6 +407,7 @@ func TestReorgCodeRollbackPreservesRecentRoots(t *testing.T) {
 		cancel()
 		require.ErrorIs(t, <-runDone, context.Canceled)
 	})
+	require.Eventually(t, pool.Started, 5*time.Second, time.Millisecond)
 	var encoded bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&encoded))
 	server := txpool.NewGrpcServer(ctx, pool, poolDB, nil, *cfg.ChainID, logger)
