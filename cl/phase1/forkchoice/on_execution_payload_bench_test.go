@@ -27,6 +27,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func BenchmarkApplyEnvelopeValidatedPath(b *testing.B) {
@@ -79,15 +81,17 @@ func benchmarkEnvelopeFixture(
 ) (*clparams.BeaconChainConfig, *state2.CachingBeaconState, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) {
 	b.Helper()
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(b)
-	transactions := make([][]byte, transactionCount)
+	transactions := make(types.Transactions, transactionCount)
 	for i := range transactions {
-		transactions[i] = make([]byte, 256)
-		_, err := rand.Read(transactions[i])
-		require.NoError(b, err)
+		transactions[i] = &types.DynamicFeeTransaction{CommonTx: types.CommonTx{
+			Nonce: uint64(i), GasLimit: 100_000, To: &common.Address{1}, Data: make([]byte, 256),
+		}}
 	}
-	envelope.Message.Payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions(transactions)
+	raw, err := types.MarshalTransactionsBinary(transactions)
+	require.NoError(b, err)
+	envelope.Message.Payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions(raw)
 	bal := make([]byte, balSize)
-	_, err := rand.Read(bal)
+	_, err = rand.Read(bal)
 	require.NoError(b, err)
 	require.NoError(b, envelope.Message.Payload.BlockAccessList.SetBytes(bal))
 

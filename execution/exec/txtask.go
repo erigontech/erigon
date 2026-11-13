@@ -605,7 +605,9 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			result.TxOut, _ = ibs.FinalizedWrites(rules) // the read error is checked below for both branches
 		} else {
 			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
-				panic(err)
+				result.Operational = true
+				result.Err = err
+				return &result
 			}
 			result.TxOut = t.VersionedWrites(ibs)
 		}

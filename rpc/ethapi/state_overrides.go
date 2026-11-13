@@ -18,6 +18,7 @@ package ethapi
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -69,8 +70,8 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 		}
 		// Apply state diff into specified accounts.
 		if account.StateDiff != nil {
-			// The versioned SetState does not create the absent account the materializing one creates.
-			if ibs.IsVersioned() && len(*account.StateDiff) > 0 {
+			// SetState does not create an absent account.
+			if len(*account.StateDiff) > 0 {
 				exists, err := ibs.Exist(addr)
 				if err != nil {
 					return err
@@ -176,20 +177,16 @@ func (so *StateOverrides) overridePrecompiles(precompiles vm.PrecompiledContract
 }
 
 // FinalizeCallTx ends one transaction of a request that runs several on the same state.
-// On the versioned path the writes go to the version map, where the next transaction index
-// reads them; on the materializing path FinalizeTx commits them to the state objects.
+// The writes go to the version map, where the next transaction index reads them.
 func FinalizeCallTx(ibs *state.IntraBlockState, rules *chain.Rules) error {
 	return FinalizeCallTxTo(ibs, rules, nil)
 }
 
-// FinalizeCallTxTo is FinalizeCallTx that also hands the tx's state changes to stateWriter,
-// as FinalizeTx does for a materialized state; a nil stateWriter takes none.
+// FinalizeCallTxTo is FinalizeCallTx that also hands the tx's state changes to stateWriter;
+// a nil stateWriter takes none.
 func FinalizeCallTxTo(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
 	if !ibs.IsVersioned() {
-		if stateWriter == nil {
-			stateWriter = state.NewNoopWriter()
-		}
-		return ibs.FinalizeTx(rules, stateWriter)
+		return errors.New("call state has no version map")
 	}
 	writes, err := ibs.FinalizedWrites(rules)
 	if err != nil {
@@ -206,23 +203,12 @@ func FinalizeCallTxTo(ibs *state.IntraBlockState, rules *chain.Rules, stateWrite
 	return nil
 }
 
-// EndCallTx is FinalizeCallTxTo that also moves a versioned state to the next tx index,
+// EndCallTx is FinalizeCallTxTo that also moves the state to the next tx index,
 // where the finished tx's writes read back.
 func EndCallTx(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
 	if err := FinalizeCallTxTo(ibs, rules, stateWriter); err != nil {
 		return err
 	}
-	if ibs.IsVersioned() {
-		ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
-	}
+	ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
 	return nil
-}
-
-// CommitCallState hands stateWriter the changes not yet handed to it: a versioned
-// state's pending tx, or a materialized state's dirty objects.
-func CommitCallState(ibs *state.IntraBlockState, rules *chain.Rules, stateWriter state.StateWriter) error {
-	if ibs.IsVersioned() {
-		return FinalizeCallTxTo(ibs, rules, stateWriter)
-	}
-	return ibs.CommitBlock(rules, stateWriter)
 }

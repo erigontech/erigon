@@ -139,3 +139,40 @@ func TestValidated_SealSameIncarnationStaysValid(t *testing.T) {
 	require.Equal(t, VersionValid, valid,
 		"read-dep matches the final sealed dep at the same incarnation -> reader stays valid, no re-exec")
 }
+
+// A fee recipient's destruct stays Estimate until the seal, so a reader that already probed the
+// account (an earlier fee credit gives it cells) must not take a value its destructing tx wrote
+// and the destruct wipes.
+func TestValidated_DestructedFeeRecipientHidesItsWrites(t *testing.T) {
+	t.Parallel()
+	fee := accounts.InternAddress(common.HexToAddress("0xfee"))
+	slot := accounts.InternKey(common.Hash{0x01})
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(100)
+	base := &sdAccountReader{addr: fee, account: &acc}
+	vm := NewVersionMap(nil)
+	credit := balanceWrite(fee, Version{TxIndex: 1}, 150)
+	vm.FlushVersionedWrites(credit, false)
+	vm.MarkWritesComplete(credit)
+
+	reader := NewWithVersionMap(base, vm)
+	defer reader.Close()
+	reader.SetTxContext(1, 10)
+	_, err := reader.GetBalance(fee)
+	require.NoError(t, err)
+
+	writer := NewWithVersionMap(base, vm)
+	defer writer.Close()
+	writer.SetTxContext(1, 3)
+	require.NoError(t, writer.SetState(fee, slot, *uint256.NewInt(7)))
+	destroyed, err := writer.Selfdestruct(fee, false)
+	require.NoError(t, err)
+	require.True(t, destroyed)
+	ws := writer.VersionedWrites()
+	vm.FlushVersionedWrites(ws, false)
+	vm.MarkWritesValidated(ws, func(a accounts.Address) bool { return a == fee })
+
+	val, err := reader.GetState(fee, slot)
+	require.NoError(t, err)
+	require.True(t, reader.HadInvalidRead() || val.IsZero(), "read %s", val.String())
+}

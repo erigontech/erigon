@@ -43,7 +43,6 @@ func TestEIP8246FundedThenSelfdestructedAccount(t *testing.T) {
 		parallel bool
 		workers  int
 	}{
-		{"serial", false, 1},
 		{"parallel/workers=1", true, 1},
 		{"parallel/workers=4", true, 4},
 	} {
@@ -81,6 +80,7 @@ func TestEIP8246FundedThenSelfdestructedAccount(t *testing.T) {
 				block.AddTx(sign(types.NewTransaction(block.TxNonce(sender), contract, uint256.NewInt(1), 300_000, gasPrice, nil)))
 			})
 			require.NoError(t, err)
+			requireGeneratedBlock(t, chainPack)
 			for _, receipt := range chainPack.Receipts[0] {
 				require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 			}
@@ -101,14 +101,13 @@ func TestEIP8246FundedThenSelfdestructedAccount(t *testing.T) {
 // balance away, so the account is empty at destruct time. Under EIP-8246 it must
 // still exist, so a later same-block credit lands on it: the created contract
 // ends with the post-destruct credit and the beneficiary keeps the swept
-// balance. Covers the zero-balance preserve path across serial and parallel exec.
+// balance. Covers the zero-balance preserve path.
 func TestEIP8246PreserveToNonSelfBeneficiaryThenCredited(t *testing.T) {
 	for _, mode := range []struct {
 		name     string
 		parallel bool
 		workers  int
 	}{
-		{"serial", false, 1},
 		{"parallel/workers=1", true, 1},
 		{"parallel/workers=4", true, 4},
 	} {
@@ -150,6 +149,7 @@ func TestEIP8246PreserveToNonSelfBeneficiaryThenCredited(t *testing.T) {
 				block.AddTx(sign(types.NewTransaction(block.TxNonce(sender), contract, uint256.NewInt(3), 300_000, gasPrice, nil)))
 			})
 			require.NoError(t, err)
+			requireGeneratedBlock(t, chainPack)
 			for _, receipt := range chainPack.Receipts[0] {
 				require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 			}

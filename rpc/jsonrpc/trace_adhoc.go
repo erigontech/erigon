@@ -1289,7 +1289,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader)
 	if err != nil {
-		return nil, unknownBlockAsResourceNotFound(err)
+		return nil, callBlockError(err, *blockNrOrHash)
 	}
 
 	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
@@ -1537,7 +1537,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	}
 	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader)
 	if err != nil {
-		return nil, unknownBlockAsResourceNotFound(err)
+		return nil, callBlockError(err, *parentNrOrHash)
 	}
 
 	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
@@ -1980,8 +1980,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	if err != nil {
 		return nil, &rpc.InvalidParamsError{Message: "invalid raw transaction: " + err.Error()}
 	}
-	if api.gasCap != 0 && txn.GetGasLimit() > api.gasCap {
-		return nil, clientLimitExceededError(fmt.Sprintf("transaction gas limit %d exceeds the RPC gas cap %d", txn.GetGasLimit(), api.gasCap))
+	if err := checkTransactionGasCap(txn, api.gasCap); err != nil {
+		return nil, err
 	}
 
 	dbtx, err := api.kv.BeginTemporalRo(ctx)
