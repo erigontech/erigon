@@ -100,6 +100,15 @@ func TestRunnersReportRejections(t *testing.T) {
 				fixture["blocks"].([]any)[0].(map[string]any)["rlp"] = "0xc0"
 			})
 		}, 0, "rlp", true},
+		// The block's list cannot be decoded, so it is dropped and the block
+		// is still judged against its header.
+		{"block with an undecodable list", "blocktest", func(t *testing.T) string {
+			return writeEditedFixture(t, blockFixtures+"invalid_list.json", func(fixture map[string]any) {
+				block := fixture["blocks"].([]any)[0].(map[string]any)
+				account := block["rlp_decoded"].(map[string]any)["blockAccessList"].([]any)[0].(map[string]any)
+				account["balanceChanges"].([]any)[0].(map[string]any)["blockAccessIndex"] = "0x100000000"
+			})
+		}, 0, "block access list mismatch", false},
 		{"engine valid", "enginetest", func(*testing.T) string { return engineFixture }, 0, "", false},
 		{"engine rejected for another reason", "enginetest", func(t *testing.T) string {
 			return writeEditedFixture(t, engineFixture, expectPayload1Invalid("TransactionException.INSUFFICIENT_ACCOUNT_FUNDS"))
