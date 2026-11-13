@@ -134,6 +134,7 @@ func (c *Chain) Run(ctx context.Context) error {
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = c.Chain
 	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
+	defer csn.Close()
 	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, networkType).GetLatestBeaconState(ctx)
 	if err != nil {
 		return err
@@ -485,6 +486,7 @@ func (c *DumpSnapshots) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	var to uint64
 	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
@@ -527,6 +529,7 @@ func (c *CheckSnapshots) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	var to uint64
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -547,6 +550,7 @@ func (c *CheckSnapshots) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 
 	genesisHeader, _, _, err := csn.ReadHeader(0, nil)
 	if err != nil {
@@ -614,6 +618,7 @@ func (c *LoopSnapshots) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	var to uint64
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -634,6 +639,7 @@ func (c *LoopSnapshots) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 
 	br := &snapshot_format.MockBlockReader{}
 	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconConfig)
@@ -667,6 +673,7 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	tx, err := db.BeginRo(ctx)
@@ -681,6 +688,7 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}
+	defer allSnapshots.Close()
 	if err := state_accessors.ReadValidatorsTable(tx, vt); err != nil {
 		return err
 	}
@@ -715,6 +723,7 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
 	gSpot, err := initial_state.GetGenesisState(ctx, t)
 	if err != nil {
@@ -726,6 +735,7 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
+	defer stateSn.Close()
 	if _, err := antiquary.FillStaticValidatorsTableIfNeeded(log.Root(), stateSn, vt); err != nil {
 		return err
 	}
@@ -1092,6 +1102,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
 
 	targetSlot := storeCheckFloor(beaconConfig, csn.FrozenBlobs())
@@ -1212,6 +1223,7 @@ func (c *DumpBlobsSnapshots) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	var to uint64
 	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
@@ -1354,6 +1366,7 @@ func (c *CheckBlobsSnapshots) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1366,6 +1379,7 @@ func (c *CheckBlobsSnapshots) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 	to := csn.FrozenBlobs()
 
 	for i := beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch + 1; i < to; i++ {
@@ -1502,6 +1516,7 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1514,6 +1529,7 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 	to := csn.FrozenBlobs()
 	start := max(beaconConfig.SlotsPerEpoch * beaconConfig.DenebForkEpoch)
 	for i := start; i < to; i++ {
@@ -1561,6 +1577,7 @@ func (c *DumpStateSnapshots) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	var to uint64
 	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
@@ -1585,6 +1602,7 @@ func (c *DumpStateSnapshots) Run(ctx context.Context) error {
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
+	defer stateSn.Close()
 	r, _ := stateSn.Get(kv.BlockRoot, 999424)
 	fmt.Printf("%x\n", r)
 
