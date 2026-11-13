@@ -13,6 +13,10 @@
 - caplin: lower head latency and shorter fork-choice and head-state lock holds: the next-epoch state is precomputed off the fork-choice lock, head events are sent before the head-state copy, and head `validators` responses are encoded after the head-state lock is released (#25473, #25539, #25542, #25543, #25596, #25619, #25646, #25647, #25660).
 - caplin: faster fork-choice head computation: vote weights are kept across `get_head` calls and votes are applied when they are recorded, instead of being recounted on every call (#24985, #25595).
 
+### Changed
+
+- p2p: the discovery endpoint predictor, which fills the local node record's IP and UDP port when they are not configured, now counts endpoint statements once per reporter network (IPv4 /24, IPv6 /48; hosts on the LAN individually) and ignores statements about an endpoint of the other address family. A node whose discovery peers all share one public /24 or /48 no longer predicts its endpoint from them. A prediction needs statements from 10 networks within 5 minutes; a node behind NAT without UPnP or NAT-PMP that sees fewer keeps its record without a predicted endpoint, and can set it with `--nat extip:<IP>` (#24975) — by @mardgez13
+
 ---
 
 # Erigon v3.8.1 — Watery Whiskers — TBD
