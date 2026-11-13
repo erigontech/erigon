@@ -228,8 +228,19 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint
 			ranges[p.Name] = rangedFile{stepRange: r}
 		}
 	}
+	hasIncompatible := func(f rangedFile) bool {
+		if !f.required {
+			return incompatible[f.stepRange]
+		}
+		for r := range incompatible {
+			if !r.history && r.from < f.to && f.from < r.to {
+				return true
+			}
+		}
+		return false
+	}
 	for name, f := range ranges {
-		if compatible[f.stepRange] || f.required && f.to <= localV3Tip || !v3 && !incompatible[f.stepRange] {
+		if compatible[f.stepRange] || f.required && f.to <= localV3Tip || !v3 && !hasIncompatible(f) {
 			continue
 		}
 		skipped[name] = f.required

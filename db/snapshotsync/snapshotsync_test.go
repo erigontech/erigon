@@ -845,7 +845,9 @@ func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
 		{name: "v3 off legacy only"},
 		{name: "v3 off with a v3-only range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v2.0-accounts.32-48.kv"}, wantFile: ".32-48."},
 		{name: "v3 off with a v3-only range below a legacy range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v2.0-accounts.32-48.kv", "domain/v2.2-commitment.48-64.kv", "domain/v2.0-accounts.48-64.kv"}, wantFile: ".32-48."},
-		{name: "v3 off with v3 commitment split across one accounts range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v3.0-commitment.48-64.kv", "domain/v2.0-accounts.32-64.kv"}, wantFile: "steps 32-64"},
+		{name: "v3 off with v3 commitment split across one accounts range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v3.0-commitment.48-64.kv", "domain/v2.0-accounts.32-64.kv"}, wantFile: ".32-64."},
+		{name: "v3 off with v3 commitment split across one accounts range below a legacy range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v3.0-commitment.48-64.kv", "domain/v2.0-accounts.32-64.kv", "domain/v2.2-commitment.64-80.kv", "domain/v2.0-accounts.64-80.kv"}, wantFile: ".32-64."},
+		{name: "v3 off with code above every legacy commitment", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v2.0-code.32-48.kv"}, wantFile: "steps 32-48"},
 		{name: "v3 off with a commitment index past every history file", extraFiles: []string{"idx/v2.0-commitment.32-48.ef"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
