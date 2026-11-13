@@ -417,7 +417,7 @@ func TestFetchRefreshesSupersededSnapshot(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 		defer cancel()
 		server := remotedbserver.NewKvServer(ctx, nil, nil, nil, log.New())
-		snapshots := 0
+		var snapshotTimes []time.Time
 		server.SetStateChangesSnapshot(func(ctx context.Context) (*remoteproto.StateChangeBatch, error) {
 			reset := newBlockChangeForAccounts(common.Hash{1}, 0)
 			err := coreDB.View(ctx, func(tx kv.Tx) error {
@@ -428,8 +428,8 @@ func TestFetchRefreshesSupersededSnapshot(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
-			snapshots++
-			if snapshots == 1 {
+			snapshotTimes = append(snapshotTimes, time.Now())
+			if len(snapshotTimes) == 1 {
 				// Advance committed state after the snapshot read, without publishing.
 				err = coreDB.Update(ctx, func(tx kv.RwTx) error {
 					_, incrementErr := rawdb.IncrementStateVersion(tx)
@@ -450,7 +450,8 @@ func TestFetchRefreshesSupersededSnapshot(t *testing.T) {
 		require.NoError(t, <-started, "startup must recover without another publication")
 		synctest.Wait()
 		require.NoError(t, ctx.Err())
-		require.Equal(t, 2, snapshots)
+		require.Len(t, snapshotTimes, 2)
+		require.Equal(t, time.Second, snapshotTimes[1].Sub(snapshotTimes[0]), "an intentional refresh must reconnect without failure backoff")
 		require.False(t, pool.stateViewStale)
 		require.Contains(t, pool.byHash, string(slot.IDHash[:]), "refreshing the snapshot must retain pending unwound transactions")
 		require.Empty(t, fetch.pendingTxnChanges)
@@ -613,7 +614,7 @@ func TestFetchExpiredRefreshDoesNotApplyReceivedBatch(t *testing.T) {
 				return stream, nil
 			})
 		fetch := NewFetch(ctx, nil, pool, client, nil, u256.N1, log.New())
-		require.Error(t, fetch.handleStateChanges(ctx, client))
+		require.ErrorIs(t, fetch.handleStateChanges(ctx, client), errRefreshStateSnapshot)
 		require.Equal(t, 1, applied, "a timed-out subscription must not apply another state batch")
 		require.Len(t, fetch.pendingTxnChanges, 1, "the received unwind must survive the reconnect")
 		require.Equal(t, rlp, fetch.pendingTxnChanges[0].txn.Rlp)

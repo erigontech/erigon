@@ -797,6 +797,9 @@ func (f *Fetch) ConnectCore() {
 			default:
 			}
 			if err := f.handleStateChanges(f.ctx, f.stateChangesClient); err != nil {
+				if errors.Is(err, errRefreshStateSnapshot) {
+					continue
+				}
 				if !grpcutil.IsRetryLater(err) && !grpcutil.IsEndOfStream(err) {
 					f.logger.Warn("[txpool.handleStateChanges]", "err", err)
 				}
@@ -1319,6 +1322,8 @@ func (f *Fetch) dropAlternate(peer fetchPeer) {
 	}
 }
 
+var errRefreshStateSnapshot = errors.New("refresh state snapshot")
+
 func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClient) error {
 	// Any return ends this subscription, including a clean stream end. Keep the pool
 	// stale until a new subscription restores a usable state view.
@@ -1339,7 +1344,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 					f.collectStateChangeTxns(req)
 					f.pool.RetainBogotaActivation(req)
 				}
-				return context.Canceled
+				return errRefreshStateSnapshot
 			}
 			refreshSnapshot = nil
 		}

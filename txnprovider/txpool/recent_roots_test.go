@@ -384,7 +384,7 @@ func TestFetchRecentRootActivationUnwind(t *testing.T) {
 							})
 							return stream, nil
 						})
-					require.ErrorIs(t, fetch.handleStateChanges(ctx, client), context.Canceled)
+					require.ErrorIs(t, fetch.handleStateChanges(ctx, client), errRefreshStateSnapshot)
 				})
 			}
 			require.NoError(t, fetch.handleStateChangesRequest(ctx, replacement))
