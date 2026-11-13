@@ -382,11 +382,9 @@ func (ac *AccountChanges) decodeRLP(s *rlp.Stream, budget *blockAccessListDecode
 		return err
 	}
 
-	address, err := s.Addr()
-	if err != nil {
+	if err := s.AddrTo(&ac.Address); err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-	ac.Address = address
 	slots, err := decodeSlotChangesList(s, budget, arena)
 	if err != nil {
 		return fmt.Errorf("read StorageChanges: %w", err)

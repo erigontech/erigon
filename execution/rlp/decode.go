@@ -1013,6 +1013,31 @@ func (s *Stream) MoreDataInList() bool {
 // Addr decodes an RLP string of exactly 20 bytes as an address. It reads
 // through the stream's scratch buffer, so unlike ReadBytes it never forces
 // the destination to escape to the heap.
+// AddrTo decodes the next value as an address into dst, which the caller owns.
+func (s *Stream) AddrTo(dst *common.Address) error {
+	if b, ok := s.nextHeader(); ok && b == EmptyStringCode+byte(len(dst)) && s.fits(1+len(dst)) {
+		copy(dst[:], s.sliceRdr[s.off+1:])
+		s.skip(1 + len(dst))
+		return nil
+	}
+	kind, size, err := s.Kind()
+	switch {
+	case err != nil:
+		return err
+	case kind == List:
+		return ErrExpectedString
+	case kind == Byte:
+		return fmt.Errorf("input value has wrong size 1, want %d", len(dst))
+	case size != uint64(len(dst)):
+		return fmt.Errorf("input value has wrong size %d, want %d", size, len(dst))
+	}
+	if err := s.readFull(s.uintbuf[:len(dst)]); err != nil {
+		return err
+	}
+	copy(dst[:], s.uintbuf[:len(dst)])
+	return nil
+}
+
 func (s *Stream) Addr() (a common.Address, err error) {
 	if b, ok := s.nextHeader(); ok && b == EmptyStringCode+byte(len(a)) && s.fits(1+len(a)) {
 		copy(a[:], s.sliceRdr[s.off+1:])

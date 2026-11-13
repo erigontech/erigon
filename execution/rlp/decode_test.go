@@ -1538,3 +1538,30 @@ func TestSliceHintOnCorruptInput(t *testing.T) {
 		}
 	}
 }
+
+func TestAddrToMatchesAddr(t *testing.T) {
+	for _, input := range []string{
+		"940102030405060708090a0b0c0d0e0f1011121314",
+		"80",
+		"01",
+		"93" + "01020304050607080910111213141516171819",
+		"c0",
+		"94" + "0102",
+	} {
+		b, err := hex.DecodeString(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stream := range []func() *Stream{
+			func() *Stream { return NewBytesStream(b) },
+			func() *Stream { return NewStream(bytes.NewReader(b), uint64(len(b))) },
+		} {
+			want, wantErr := stream().Addr()
+			var got common.Address
+			gotErr := stream().AddrTo(&got)
+			if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) || got != want {
+				t.Errorf("input %s: AddrTo = %x, %v; Addr = %x, %v", input, got, gotErr, want, wantErr)
+			}
+		}
+	}
+}
