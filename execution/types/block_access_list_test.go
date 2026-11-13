@@ -903,3 +903,67 @@ func TestBlockAccessListDecodeAcceptsOnlyCanonicalEncoding(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountChangesCount(t *testing.T) {
+	bal := make(BlockAccessList, 3)
+	for i := range bal {
+		bal[i].Address[0] = byte(i + 1)
+	}
+	bal[0].CodeChanges = []*CodeChange{{Index: 1, Bytecode: make([]byte, 32)}}
+	enc, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, body, _, err := rlp.Split(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uint64(len(body))/minAccountChangesLen <= 3 {
+		t.Fatal("the size limit must exceed the entry count, or the count is never checked")
+	}
+	if got := accountChangesCount(body, uint64(len(body)), nil); got != 3 {
+		t.Fatalf("valid list: got %d entries, want 3", got)
+	}
+	if got := accountChangesCount(nil, uint64(len(body)), nil); got != 0 {
+		t.Fatalf("no slice: got %d entries, want 0", got)
+	}
+	short := bytes.Repeat([]byte{0x01}, 10*minAccountChangesLen)
+	if got := accountChangesCount(short, uint64(len(short)), nil); got != 10 {
+		t.Fatalf("values shorter than an entry: got %d, want 10", got)
+	}
+}
+
+func TestDecodeBlockAccessListAllocatesOnce(t *testing.T) {
+	bal := make(BlockAccessList, 5)
+	for i := range bal {
+		bal[i].Address[0] = byte(i + 1)
+	}
+	enc, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeBlockAccessListBytes(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 5 || cap(got) != 5 {
+		t.Fatalf("decoded len %d cap %d, want 5 and 5", len(got), cap(got))
+	}
+}
+
+func TestDecodeBlockAccessListReservesNoMoreThanTheBudget(t *testing.T) {
+	body := bytes.Repeat([]byte{0x01}, 2_700_000)
+	prefix := make([]byte, rlp.ListPrefixLen(len(body)))
+	rlp.EncodeListPrefixToBuf(len(body), prefix)
+	enc := bytes.Join([][]byte{prefix, body}, nil)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err := DecodeBlockAccessListSidecarForHeader(enc, 0)
+	runtime.ReadMemStats(&after)
+	if err == nil {
+		t.Fatal("decoded a list the budget does not allow")
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 64*1024 {
+		t.Fatalf("a zero budget reserved %d bytes for a malformed list", grew)
+	}
+}
