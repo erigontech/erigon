@@ -111,6 +111,7 @@ type parallelExecutor struct {
 	// coalesce block.
 	cancelWorkers context.CancelFunc
 	pool          *taskPool
+	spineBusy     atomic.Bool
 	runWG         sync.WaitGroup
 	workersCtx    context.Context
 	// results carries finished tasks from dispatchRunSelfLoop to the exec loop.
@@ -1088,8 +1089,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			if logNpPhases {
 				npWait += time.Since(npWaitStart)
 				npProcStart = time.Now()
+				pe.spineBusy.Store(true)
 			}
 			blockResult, err = pe.processSingleResult(ctx, applyTx, txResult)
+			if logNpPhases {
+				pe.spineBusy.Store(false)
+			}
 		}
 		if logNpPhases {
 			npProc += time.Since(npProcStart)
@@ -1127,6 +1132,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"valFail", blockExecutor.cntValidationFail,
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
+					win, acc, allIdle, k := pe.pool.endIdleWindow(blockExecutor)
+					kv := []any{"blk", blockResult.BlockNum, "win", win, "k", k, "allIdle", allIdle,
+						"rdHit", time.Duration(blockExecutor.idleState.readHit.Load()), "rdMiss", time.Duration(blockExecutor.idleState.readMiss.Load())}
+					for i, d := range acc {
+						kv = append(kv, idleNames[i], d)
+					}
+					pe.logger.Info("[np-phase] idle", kv...)
 				}
 				// Covers an empty block that created no accumulator via a tx-result; the
 				// save must land before the blockResult, else the calculator races ahead,
@@ -1380,6 +1392,7 @@ func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) e
 		}
 	}
 	be.execStarted = time.Now()
+	pe.pool.beginIdleWindow(be)
 	be.scheduleExecution(ctx, pe)
 	return nil
 }
@@ -2610,6 +2623,7 @@ type blockExecutor struct {
 	// execCpuNanos sums exec CPU across ALL incarnations (NEWPAYLOAD_PHASES only)
 	// for worker-occupancy attribution vs the npWait/npProc wall.
 	execCpuNanos atomic.Int64
+	idleState    blockIdleState
 
 	// coinbase is the block's fee recipient, cached from the first tx result so
 	// dependency-ordered validation can gate coinbase readers.
@@ -3032,6 +3046,7 @@ func (be *blockExecutor) signalCommitted(tx int) {
 	delete(be.wakeAt, tx)
 	be.wakeMu.Unlock()
 	for _, pt := range waiters {
+		be.noteParked(pt, -1)
 		be.pool.push(pt)
 	}
 }
@@ -3103,6 +3118,7 @@ func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask) bool {
 		return false
 	}
 	be.wakeAt[target] = append(be.wakeAt[target], pt)
+	be.noteParked(pt, 1)
 	return true
 }
 
@@ -3349,6 +3365,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	if !be.execTasks.checkComplete(tx) {
 		be.execTasks.markComplete(tx)
 		be.execTasks.removeDependency(tx)
+		be.noteDispatchState()
 	}
 
 	// do validations ...
@@ -3713,4 +3730,5 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	}
 
 	dispatch()
+	be.noteDispatchState()
 }

@@ -322,6 +322,13 @@ func (rw *WorkerContext) RunTxTask(txTask Task) (result *TxResult) {
 	return result
 }
 
+// ReadDurations returns the read time since the last publish that hit sd.mem or the state
+// cache, and the time of reads that went to the DB or files.
+func (rw *WorkerContext) ReadDurations() (hit, miss time.Duration) {
+	m := rw.readMetrics
+	return m.CacheReadDuration + m.StateCacheHitDuration, m.DbReadDuration + m.FileReadDuration
+}
+
 // PublishReadMetrics folds this worker's accumulated reads into the per-batch
 // sd.metrics that the slow-block emitter samples, then resets. The per-read
 // increments stay lock-free (single-owner readMetrics); only this boundary
