@@ -1253,7 +1253,8 @@ func preflightBackupDir(backupDir string) error {
 	if len(entries) > 0 {
 		return fmt.Errorf(
 			"[commitment_convert] pre-flight: backup dir %s already exists with %d entries; "+
-				"refuse to overwrite a prior conversion's backup (rm -rf %s and retry)",
+				"refuse to overwrite a prior conversion's backup (roll back with `integration commitment convert --restore`, "+
+				"or keep the converted files: rm -rf %s and retry)",
 			backupDir, len(entries), backupDir,
 		)
 	}

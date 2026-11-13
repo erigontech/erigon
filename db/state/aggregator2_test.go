@@ -136,7 +136,7 @@ func TestCheckSnapshotsCompatibilityV3RecordsRequiresFlag(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
 
-	require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "run with --experimental.commitment-v3 or ERIGON_COMMITMENT_V3=true")
+	require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "run erigon with --experimental.commitment-v3 (other tools: ERIGON_COMMITMENT_V3=true)")
 }
 
 func TestOpenRefusesPendingRestoreReset(t *testing.T) {
