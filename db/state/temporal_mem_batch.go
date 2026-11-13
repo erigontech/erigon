@@ -456,6 +456,7 @@ func (sd *TemporalMemBatch) republishAll() {
 		sd.publishMu[d].Lock()
 		if sd.unwindChangeset != nil {
 			sd.publishTree[d] = nil
+			sd.publishDirty[d] = false
 			sd.published[d].Store(nil)
 			sd.publishMu[d].Unlock()
 			continue

@@ -290,12 +290,18 @@ func TestGetLatestPublishedSeesVersionsInOrder(t *testing.T) {
 	}
 	const writes = 2000
 	var wg sync.WaitGroup
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
-		wg.Go(func() {
-			for i := 1; i <= writes; i++ {
+	sd.DeferPublish()
+	sd.Publish()
+	wg.Go(func() {
+		for i := 1; i <= writes; i++ {
+			sd.DeferPublish()
+			for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 				sd.putLatest(domain, "k", []byte(fmt.Sprintf("%06d", i)), uint64(i))
 			}
-		})
+			sd.Publish()
+		}
+	})
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		for range 4 {
 			wg.Go(func() {
 				last := ""
@@ -331,19 +337,23 @@ func TestGetLatestDuringMergeNeverReturnsTheReplacedValue(t *testing.T) {
 	}
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		sd, other := newBatch(), newBatch()
+		sd.DeferPublish()
 		sd.putLatest(domain, "k", []byte("old"), 1)
+		sd.Publish()
+		v, _, _ := sd.GetLatestPublished(domain, []byte("k"))
+		require.Equal(t, "old", string(v), "domain %s: the receiver must serve a published view before Merge", domain)
 		other.putLatest(domain, "k", []byte("merged"), 2)
 
 		var during string
 		mergeCopiedHook = func(b *TemporalMemBatch) {
-			v, _, _ := b.GetLatestPublished(domain, []byte("k"))
-			during = string(v)
+			got, _, _ := b.GetLatestPublished(domain, []byte("k"))
+			during = string(got)
 		}
 		require.NoError(t, sd.Merge(other))
 		mergeCopiedHook = nil
 
 		require.Equal(t, "merged", during, "domain %s: a read inside Merge returned the replaced value", domain)
-		v, _, _ := sd.GetLatestPublished(domain, []byte("k"))
+		v, _, _ = sd.GetLatestPublished(domain, []byte("k"))
 		require.Equal(t, "merged", string(v), "domain %s", domain)
 	}
 }
@@ -501,4 +511,18 @@ func TestSizeEstimateCountsThePublishedTree(t *testing.T) {
 	}
 	sd.Publish()
 	require.Equal(t, uint64(sd.metrics.CachePutSize)+keys*publishedTreeBytesPerKey, sd.SizeEstimate())
+}
+
+// An unwind with a pending changeset drops the published trees, so a later Publish has nothing to copy.
+func TestPublishAfterUnwindWithChangeset(t *testing.T) {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		sd := newPublishTestBatch()
+		sd.putLatest(domain, "k", []byte("v1"), 1)
+		sd.Unwind(1, &[kv.DomainLen][]kv.DomainEntryDiff{})
+		sd.DeferPublish()
+		require.NotPanics(t, sd.Publish, "domain %s", domain)
+		v, _, _ := sd.GetLatestPublished(domain, []byte("k"))
+		locked, _, _ := sd.GetLatest(domain, []byte("k"))
+		require.Equal(t, string(locked), string(v), "domain %s", domain)
+	}
 }
