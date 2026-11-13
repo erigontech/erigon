@@ -1328,6 +1328,31 @@ func (vm *VersionMap) IsNetAbsent(addr accounts.Address, txIdx int) bool {
 	return state == LifecycleAbsent
 }
 
+// AccountLifecycleWithDestructDep is AccountLifecycleAt plus, unless the account is absent, the index
+// of a destruct below txIdx that the verdict did not count as settled, or UnknownDep. Both come from
+// one lock and one flag load per cell: a mark can move the destruct's flag between two separate probes.
+func (vm *VersionMap) AccountLifecycleWithDestructDep(addr accounts.Address, txIdx int) (state AccountLifecycleState, dep int) {
+	if vm == nil {
+		return LifecycleLive, UnknownDep
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return LifecycleLive, UnknownDep
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	state, _, _, _ = accountLifecycleLocked(e, txIdx, false)
+	if state == LifecycleAbsent {
+		return state, UnknownDep
+	}
+	fk, fv := floorCell(e.SelfDestruct, txIdx)
+	// A settled destruct that a live verdict did not count was still in flight when the verdict ran.
+	if fv != nil && (!fv.settled() || state == LifecycleLive && fv.Value) {
+		return state, fk
+	}
+	return state, UnknownDep
+}
+
 // destructKeptBalance reports whether the destruct at destructTxIndex kept a non-zero balance
 // (EIP-8246), so that the account survived it although the destruct dropped its record. A balance
 // that is still an estimate is not a verdict yet, so it counts as kept.
