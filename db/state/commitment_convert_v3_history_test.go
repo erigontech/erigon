@@ -613,6 +613,7 @@ func TestConvertCommitmentFiles_V3HistorySerialRecreatedAccountRefusesBeforeSwap
 	err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
 	tx.Rollback()
 	require.ErrorContains(t, err, "[commitment_convert] phase 1 history:")
+	require.ErrorContains(t, err, "no commitment file was replaced; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true")
 
 	require.Equal(t, beforeDomain, snapshotCommitmentFiles(t, agg.Dirs().SnapDomain))
 	require.Equal(t, beforeHistory, snapshotCommitmentFiles(t, agg.Dirs().SnapHistory))

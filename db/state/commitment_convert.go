@@ -63,6 +63,8 @@ type ConvertOpts struct {
 	BeforeSwap func() error
 }
 
+const rebuildV3Advice = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true"
+
 // fileState describes the detected current encoding of a commitment .kv file.
 type fileState struct {
 	keysV2   bool
@@ -702,6 +704,9 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	// Phase 1: convert all.
 	phaseStart := time.Now()
 	processedFiles, skippedFiles, totalSizeDelta, processedKeys, err := convertPhase1(ctx, at, pendingFiles, rebuildDir, opts, grandTotalKeys, logger)
+	if err != nil && opts.TargetV3 {
+		return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3Advice)
+	}
 	if err != nil {
 		return err
 	}
@@ -716,7 +721,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	historyStage := newCommitmentV3HistoryStage(dirs)
 	if opts.TargetV3 {
 		if historyRanges, err = convertCommitmentHistoryV3(ctx, at, historyStage, logger); err != nil {
-			return fmt.Errorf("[commitment_convert] phase 1 history: %w", err)
+			return fmt.Errorf("[commitment_convert] phase 1 history: %w; no commitment file was replaced; %s", err, rebuildV3Advice)
 		}
 	}
 

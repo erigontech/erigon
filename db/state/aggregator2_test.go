@@ -115,7 +115,7 @@ func TestCheckSnapshotsCompatibilityV3RecordsRejectsLegacyCommitment(t *testing.
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
 
-	require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "with ERIGON_COMMITMENT_V3 unset, convert the datadir with `integration commitment convert --v3`, or roll back an interrupted conversion with `integration commitment convert --restore`")
+	require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "with ERIGON_COMMITMENT_V3 unset, convert the datadir with `integration commitment convert --v3`, or roll back an interrupted conversion with `integration commitment convert --restore`; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true")
 }
 
 func TestCheckSnapshotsCompatibilityV3RecordsIgnoresConvertBackups(t *testing.T) {
