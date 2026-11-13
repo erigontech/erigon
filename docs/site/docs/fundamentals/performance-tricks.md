@@ -42,19 +42,24 @@ vmtouch -vdlw /mnt/erigon/snapshots/domain/*bt
 
 ## Swap and execution throughput
 
-Erigon relies on memory-mapped state files and can become significantly slower
-when memory pages are moved to swap. On Linux, check whether swap is configured
-**and whether it is in use**:
+Erigon uses file-backed memory mappings for MDBX and snapshot files. Linux can
+evict those pages and read them back from their backing files; it does not swap
+them out. Under memory pressure, **anonymous memory**, such as the Go heap and
+in-process caches, can be moved to swap and slow down execution.
+
+On Linux, check whether swap is configured **and whether it is in use**:
 
 ```bash
 free -h
 swapon --show
 ```
 
-Erigon logs a warning when swap has pages in use. For a dedicated,
-well-provisioned node, aim for enough physical memory that active swapping is
-unnecessary. To disable swap temporarily *after verifying sufficient available
-RAM*:
+Erigon logs host-wide swap usage as informational context at startup. This
+number can include unrelated processes and pages that were swapped out before
+Erigon started; it does not prove that Erigon itself is swapping or losing
+throughput. For a dedicated, well-provisioned node, aim for enough physical
+memory that active swapping is unnecessary. To disable swap temporarily *after
+verifying sufficient available RAM*:
 
 ```bash
 sudo swapoff -a
@@ -65,16 +70,11 @@ out-of-memory process termination. Also note that `swapoff -a` is not
 persistent; configure swap activation at boot according to your Linux
 distribution if you decide to disable it permanently.
 
-For a memory-constrained node, a starting point to **limit Go heap usage** is:
-
-```bash
-GOGC=50 GOMEMLIMIT=10GiB ./build/bin/erigon --batchSize=120M
-```
-
-This is an example, not a universal recommendation. Leave headroom for the
-operating system, memory-mapped files, and other processes. More aggressive
-garbage collection can use additional CPU and reduce throughput; test against
-your actual memory limit before relying on this configuration.
+For memory-constrained nodes, see the
+[out-of-memory troubleshooting guide](/help-center/common-errors-and-solutions#out-of-memory-oom-or-unexpected-process-termination)
+for the existing `GOMEMLIMIT`, `GOGC`, and `--batchSize` guidance. Erigon
+also automatically sets a memory limit by default, so tune these settings only
+when your workload requires it.
 
 ## Handle Memory Allocation Issues
 
