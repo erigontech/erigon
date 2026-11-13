@@ -619,8 +619,8 @@ var balSeedWorkers = sync.OnceValue(func() chan func() {
 	return jobs
 })
 
-// balSeedJobHook, when set by a test, runs on a worker after it took a chunk and before it seeds it.
-var balSeedJobHook func()
+// balSeedChunkHook, when set by a test, runs after a worker or the caller took a chunk and before it seeds it.
+var balSeedChunkHook func(onWorker bool)
 
 // forEachBALChunk runs fn over account ranges [lo, hi) of about balSeedChunkCells cells
 // each, on the caller and on any idle seed worker; an account heavier than that is a
@@ -639,10 +639,10 @@ func forEachBALChunk(n int, cellsOf func(i int) int, fn func(lo, hi int)) {
 		return
 	}
 	var next atomic.Int64
-	run := func(hook func()) {
+	run := func(onWorker bool) {
 		for c := int(next.Add(1) - 1); c < chunks; c = int(next.Add(1) - 1) {
-			if hook != nil {
-				hook()
+			if balSeedChunkHook != nil {
+				balSeedChunkHook(onWorker)
 			}
 			fn(bounds[c], bounds[c+1])
 		}
@@ -657,7 +657,7 @@ func forEachBALChunk(n int, cellsOf func(i int) int, fn func(lo, hi int)) {
 				panicked.Store(true)
 			}
 		}()
-		run(balSeedJobHook)
+		run(true)
 	}
 	for range min(runtime.GOMAXPROCS(0), chunks) - 1 {
 		wg.Add(1)
@@ -669,7 +669,7 @@ func forEachBALChunk(n int, cellsOf func(i int) int, fn func(lo, hi int)) {
 	}
 	func() {
 		defer wg.Wait() // a panic on the caller still waits, so no worker writes after it
-		run(nil)
+		run(false)
 	}()
 	// A panic on a worker would kill the process; the serial rerun raises it on the caller instead.
 	if panicked.Load() {

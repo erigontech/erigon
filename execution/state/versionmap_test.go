@@ -2618,19 +2618,26 @@ func TestNewVersionMapSeedWorkerPanicFallsBackToSerial(t *testing.T) {
 	const n = 3000
 	bal := transfersBAL(n)
 	withOneSeedWorker(t)
-	var panicked atomic.Bool
-	balSeedJobHook = func() {
-		if panicked.CompareAndSwap(false, true) {
+	workerTook := make(chan struct{})
+	balSeedChunkHook = func(onWorker bool) {
+		if !onWorker {
+			select {
+			case <-workerTook:
+			case <-time.After(10 * time.Second):
+				t.Fatal("no seed chunk ran on a worker")
+			}
+			return
+		}
+		select {
+		case <-workerTook:
+		default:
+			close(workerTook)
 			panic("crafted account")
 		}
 	}
-	defer func() { balSeedJobHook = nil }()
+	defer func() { balSeedChunkHook = nil }()
 
-	var vm *VersionMap
-	for attempt := 0; attempt < 1000 && !panicked.Load(); attempt++ { // the caller may take every chunk before the worker starts
-		vm = NewVersionMap(bal)
-	}
-	require.True(t, panicked.Load(), "no seed chunk ran on a worker")
+	vm := NewVersionMap(bal)
 	for i := range bal {
 		addr := accounts.InternAddress(bal[i].Address)
 		for _, c := range bal[i].BalanceChanges {
@@ -2647,12 +2654,15 @@ func TestForEachBALChunkWaitsForWorkersWhenTheCallerPanics(t *testing.T) {
 	withOneSeedWorker(t)
 	workerStarted := make(chan struct{})
 	var workerDone atomic.Bool
-	balSeedJobHook = func() {
+	balSeedChunkHook = func(onWorker bool) {
+		if !onWorker {
+			return
+		}
 		close(workerStarted)
 		time.Sleep(50 * time.Millisecond)
 		workerDone.Store(true)
 	}
-	defer func() { balSeedJobHook = nil }()
+	defer func() { balSeedChunkHook = nil }()
 
 	require.Panics(t, func() {
 		forEachBALChunk(4, func(int) int { return balSeedChunkCells }, func(lo, hi int) {
