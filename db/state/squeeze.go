@@ -744,6 +744,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 
 		curBlock := ^uint64(0) // sentinel: no block started yet
+		var prevKey []byte
 		if err := batch.Load(ctx, func(blockNum uint64, rawKey []byte) error {
 			if blockNum != curBlock {
 				// Finalize the previous keyed block (or, on first key, start from blockFrom).
@@ -764,7 +765,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				domains.SetTxNum(toTxNum)
 				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 				curBlock = blockNum
+			} else if bytes.Equal(rawKey, prevKey) {
+				return nil
 			}
+			prevKey = append(prevKey[:0], rawKey...)
 			if err := domains.GetCommitmentCtx().TouchKeyFromState(rwTx, rawKey); err != nil {
 				return fmt.Errorf("[rebuild_commitment_history] block %d: %w", blockNum, err)
 			}

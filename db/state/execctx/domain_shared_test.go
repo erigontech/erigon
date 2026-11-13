@@ -2119,6 +2119,44 @@ func TestTouchChangedKeysFromHistoryRestoresTheStoredRoot(t *testing.T) {
 	}
 }
 
+type countingStateReader struct {
+	commitmentdb.StateReader
+	reads map[string]int
+}
+
+func (r *countingStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	r.reads[string(plainKey)]++
+	return r.StateReader.Read(d, plainKey, stepSize)
+}
+
+func TestTouchChangedKeysFromHistoryReadsEachKeyOnce(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	ctx := t.Context()
+	rw, err := newTestDb(t, 1).BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(rw.Rollback)
+	sd1, err := execctx.NewSharedDomains(ctx, rw, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd1.Close)
+	addr := common.HexToAddress("0x01")
+	for txNum := uint64(1); txNum <= 3; txNum++ {
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(txNum)
+		require.NoError(t, sd1.DomainPut(kv.AccountsDomain, rw, addr[:], accounts.SerialiseV3(&acc), txNum, nil))
+	}
+	require.NoError(t, sd1.Flush(ctx, rw))
+
+	sd2, err := execctx.NewSharedDomains(ctx, rw, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd2.Close)
+	reader := &countingStateReader{StateReader: commitmentdb.NewLatestStateReader(rw, sd2, commitmentdb.LatestStateReaderOptions{}), reads: map[string]int{}}
+	sd2.GetCommitmentContext().SetStateReader(reader)
+	n, _, err := sd2.TouchChangedKeysFromHistory(rw, 0, 4)
+	require.NoError(t, err)
+	require.Equal(t, 3, n)
+	require.Equal(t, map[string]int{string(addr[:]): 1}, reader.reads)
+}
+
 func TestUnwindRevertsCollectedTouches(t *testing.T) {
 	below, above := common.HexToAddress("0x01"), common.HexToAddress("0x8000000000000000000000000000000000000002")
 	location := common.HexToHash("0x03")
