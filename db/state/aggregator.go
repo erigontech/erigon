@@ -2146,7 +2146,15 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult) 
 	// anything (deferred to reclaimRetired), so it won't re-create a file we delete.
 	var deleted []string
 	var retired []*FilesItem
-	for id, d := range at.d {
+	// Commitment goes first: a domain input is kept while a commitment file of its range is still dirty.
+	order := []kv.Domain{kv.CommitmentDomain}
+	for id := range at.d {
+		if kv.Domain(id) != kv.CommitmentDomain {
+			order = append(order, kv.Domain(id))
+		}
+	}
+	for _, id := range order {
+		d := at.d[id]
 		if !d.d.Enabled {
 			continue
 		}
