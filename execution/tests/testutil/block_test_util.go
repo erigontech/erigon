@@ -101,20 +101,25 @@ type btBlock struct {
 	ExpectException string
 	Rlp             string
 	UncleHeaders    []*btHeader
-	BlockAccessList btBlockAccessList `json:"blockAccessList"`
+	// The access list stays raw until accessList decodes it, so one that cannot
+	// be decoded is dropped instead of failing the fixture.
+	BlockAccessList jsoniter.RawMessage `json:"blockAccessList"`
 	// An expected-invalid block's access list is only in rlp_decoded.
 	RlpDecoded *struct {
-		BlockAccessList btBlockAccessList `json:"blockAccessList"`
+		BlockAccessList jsoniter.RawMessage `json:"blockAccessList"`
 	} `json:"rlp_decoded"`
 }
 
-// accessList returns the block's access list, or dropped when its hash
-// differs from the header's, as sync drops a peer's. A list the header commits
-// to is returned even if malformed.
+// accessList returns the block's access list, or dropped when it cannot be
+// decoded or its hash differs from the header's, as sync drops a peer's. A
+// list the header commits to is returned even if malformed.
 func (bb *btBlock) accessList(header *types.Header) (sidecar *types.BlockAccessListSidecar, dropped bool) {
-	list := bb.BlockAccessList
-	if len(list) == 0 && bb.RlpDecoded != nil {
-		list = bb.RlpDecoded.BlockAccessList
+	list, err := decodeAccessList(bb.BlockAccessList)
+	if err == nil && len(list) == 0 && bb.RlpDecoded != nil {
+		list, err = decodeAccessList(bb.RlpDecoded.BlockAccessList)
+	}
+	if err != nil {
+		return nil, true
 	}
 	sidecar = types.NewBlockAccessListSidecar(list.toBAL())
 	if sidecar == nil {
@@ -128,6 +133,14 @@ func (bb *btBlock) accessList(header *types.Header) (sidecar *types.BlockAccessL
 		return nil, true
 	}
 	return sidecar, false
+}
+
+func decodeAccessList(raw jsoniter.RawMessage) (list btBlockAccessList, err error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	err = jsoniter.ConfigFastest.Unmarshal(raw, &list)
+	return list, err
 }
 
 // btBlockAccessList and related types for parsing block access list data from test JSON.

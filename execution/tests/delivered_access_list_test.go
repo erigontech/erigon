@@ -68,6 +68,13 @@ func TestBlockTestDropsMismatchedBlockAccessList(t *testing.T) {
 			account := block["blockAccessList"].([]any)[16].(map[string]any)
 			account["nonceChanges"].([]any)[1].(map[string]any)["postNonce"] = "0x03"
 		}, false, "bad-access-list"},
+		// A blockAccessIndex past uint32 cannot be decoded, so the list is
+		// dropped the same way.
+		{"undecodable_list", func(fixture map[string]any) {
+			block := fixture["blocks"].([]any)[0].(map[string]any)
+			account := block["blockAccessList"].([]any)[1].(map[string]any)
+			account["balanceChanges"].([]any)[0].(map[string]any)["blockAccessIndex"] = "0x100000000"
+		}, false, "bad-access-list"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bt, paths := loadDeliveredAccessListTest(t, "valid", tc.edit)
