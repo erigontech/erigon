@@ -117,20 +117,6 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 				_, pruneErr := tx.PruneSmallBatches(ctx, time.Hour)
 				require.NoError(t, pruneErr)
 				require.Equal(t, filesEnd, tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
-				unwind := func(txNum uint64, cs *changeset.StateChangeSet) {
-					t.Helper()
-					doms, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutSharedBranchCache())
-					require.NoError(t, err)
-					defer doms.Close()
-					var diffs [kv.DomainLen][]kv.DomainEntryDiff
-					for idx := range cs.Diffs {
-						diffs[idx] = changeset.DeserializeDiffSet(changeset.SerializeDiffSet(cs.Diffs[idx].GetDiffSet(), nil))
-					}
-					doms.Unwind(txNum, &diffs)
-					doms.SetTxNum(txNum)
-					require.NoError(t, doms.Flush(ctx, tx))
-				}
-
 				if branch == "recreated_db" {
 					write(tx, filesEnd+6, keys[targetIdx], nil)
 				}
@@ -149,8 +135,8 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 				// unnecessary restore left by the first unwind in this subtree.
 				deepChanges, _ := write(tx, deepUnwindTxNum, keys[otherBranchIdx], account(500))
 				shallowChanges, _ := write(tx, shallowUnwindTxNum, keys[targetIdx], account(1000))
-				unwind(shallowUnwindTxNum, shallowChanges)
-				unwind(deepUnwindTxNum, deepChanges)
+				unwindStateChanges(t, tx, shallowUnwindTxNum, shallowChanges)
+				unwindStateChanges(t, tx, deepUnwindTxNum, deepChanges)
 
 				cleanDB, _ := testDbAndAggregatorv3(t, stepSize)
 				cleanTx, err := cleanDB.BeginTemporalRw(ctx)
@@ -224,16 +210,8 @@ func TestCommitmentStorageBranchRepeatedUnwind(t *testing.T) {
 				unwind := func(txNum uint64, cs *changeset.StateChangeSet) {
 					t.Helper()
 					require.NoError(t, db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-						doms, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutSharedBranchCache())
-						require.NoError(t, err)
-						defer doms.Close()
-						var diffs [kv.DomainLen][]kv.DomainEntryDiff
-						for idx := range cs.Diffs {
-							diffs[idx] = changeset.DeserializeDiffSet(changeset.SerializeDiffSet(cs.Diffs[idx].GetDiffSet(), nil))
-						}
-						doms.Unwind(txNum, &diffs)
-						doms.SetTxNum(txNum)
-						return doms.Flush(ctx, tx)
+						unwindStateChanges(t, tx, txNum, cs)
+						return nil
 					}))
 				}
 				putAccounts := func(doms *execctx.SharedDomains, tx kv.TemporalRwTx, txNum uint64) {
@@ -297,4 +275,19 @@ func TestCommitmentStorageBranchRepeatedUnwind(t *testing.T) {
 			})
 		}
 	}
+}
+
+func unwindStateChanges(t *testing.T, tx kv.TemporalRwTx, txNum uint64, cs *changeset.StateChangeSet) {
+	t.Helper()
+	ctx := t.Context()
+	doms, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutSharedBranchCache())
+	require.NoError(t, err)
+	defer doms.Close()
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	for idx := range cs.Diffs {
+		diffs[idx] = changeset.DeserializeDiffSet(changeset.SerializeDiffSet(cs.Diffs[idx].GetDiffSet(), nil))
+	}
+	doms.Unwind(txNum, &diffs)
+	doms.SetTxNum(txNum)
+	require.NoError(t, doms.Flush(ctx, tx))
 }
