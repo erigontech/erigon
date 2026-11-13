@@ -46,7 +46,6 @@ func TestSelfDestructedContractCreatesAfterRevert(t *testing.T) {
 		t.Run(fmt.Sprintf("eip8246=%v", eip8246), func(t *testing.T) {
 			prev := dbg.Exec3Parallel
 			t.Cleanup(func() { dbg.Exec3Parallel = prev })
-			dbg.Exec3Parallel = false
 
 			key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 			require.NoError(t, err)
