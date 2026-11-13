@@ -45,28 +45,14 @@ func VerifyGaslimit(parentGasLimit, headerGasLimit uint64) error {
 	return nil
 }
 
-// MaxGasLimit is the largest gas limit within the ±1/1024 bound of the parent's that
-// VerifyParentGasLimit checks, or the parent's gas limit when that bound is empty.
-func MaxGasLimit(config *chain.Config, parent, header *types.Header) uint64 {
-	gasLimit := parentGasLimit(config, parent, header)
-	delta := gasLimit / params.GasLimitBoundDivisor
-	if delta == 0 {
-		return gasLimit
-	}
-	return gasLimit + delta - 1
-}
-
 // VerifyParentGasLimit checks the parent-relative gas limit rule (±1/1024).
+// Applies the elasticity multiplier at the London transition boundary.
 func VerifyParentGasLimit(config *chain.Config, parent, header *types.Header) error {
-	return VerifyGaslimit(parentGasLimit(config, parent, header), header.GasLimit)
-}
-
-// parentGasLimit applies the elasticity multiplier at the London transition boundary.
-func parentGasLimit(config *chain.Config, parent, header *types.Header) uint64 {
+	parentGasLimit := parent.GasLimit
 	if config.IsLondon(header.Number.Uint64()) && !config.IsLondon(parent.Number.Uint64()) {
-		return parent.GasLimit * params.ElasticityMultiplier
+		parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
 	}
-	return parent.GasLimit
+	return VerifyGaslimit(parentGasLimit, header.GasLimit)
 }
 
 // CalcGasLimit computes the gas limit of the next block after parent. It aims

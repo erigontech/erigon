@@ -75,8 +75,6 @@ type stubExecutionModule struct {
 	inclusionListFunc      func(ctx context.Context) (types.Transactions, error)
 	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
 	isValidatedFunc        func(hash common.Hash) bool
-	readyFunc              func(ctx context.Context) (bool, error)
-	getTDFunc              func(ctx context.Context, hash *common.Hash, number *uint64) (*uint256.Int, error)
 
 	getPayloadBodiesByHashFunc func(ctx context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error)
 }
@@ -200,28 +198,10 @@ func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash comm
 	return nil, nil
 }
 
-func (s *stubExecutionModule) GetTD(ctx context.Context, hash *common.Hash, number *uint64) (*uint256.Int, error) {
-	if s.getTDFunc != nil {
-		return s.getTDFunc(ctx, hash, number)
-	}
+func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
 	return nil, nil
 }
-
-func (s *stubExecutionModule) GetHeaderIfIdle(ctx context.Context, hash *common.Hash, number *uint64) (*types.Header, bool, error) {
-	if ready, err := s.Ready(ctx); err != nil || !ready {
-		return nil, false, err
-	}
-	header, err := s.GetHeader(ctx, hash, number)
-	return header, true, err
-}
-
-func (s *stubExecutionModule) Ready(ctx context.Context) (bool, error) {
-	if s.readyFunc != nil {
-		return s.readyFunc(ctx)
-	}
-	return true, nil
-}
-
+func (s *stubExecutionModule) Ready(_ context.Context) (bool, error) { return true, nil }
 func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, error) {
 	return 0, false, nil
 }
