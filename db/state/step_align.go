@@ -46,6 +46,7 @@ func (a *Aggregator) AlignFilesToStepSize(ctx context.Context, stepSize uint64) 
 	for {
 		merged, err := a.mergeStepAligned(ctx, stepSize, end)
 		if err != nil {
+			a.cleanAfterMerge(nil)
 			return 0, err
 		}
 		if !merged {
