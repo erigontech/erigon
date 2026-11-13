@@ -43,6 +43,8 @@ import (
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
+
+	_ "github.com/erigontech/erigon/bsc/chain" // Register BSC chains
 )
 
 func init() {

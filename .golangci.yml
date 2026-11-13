@@ -55,6 +55,7 @@ linters:
     gomoddirectives:
       replace-allow-list:
         - github.com/holiman/bloomfilter/v2
+        - github.com/tendermint/tendermint
     revive:
       rules:
         - name: atomic
@@ -332,6 +333,7 @@ linters:
       - build/
       - vendor/
       - third_party$
+      - execution/vm/lightclient/
       - builtin$
       - examples$
       - testdata
@@ -348,6 +350,7 @@ formatters:
       - build/
       - vendor/
       - third_party$
+      - execution/vm/lightclient/
       - builtin$
       - examples$
       - testdata

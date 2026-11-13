@@ -58,6 +58,8 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
+
+	_ "github.com/erigontech/erigon/bsc/chain" // Register BSC chains
 )
 
 const (
@@ -756,7 +758,16 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			}
 
 			var minBlock, latestBlock uint64
-			if protocol >= direct.ETH69 {
+			switch {
+			case protocol == direct.ETH70 && isBscNetwork(status.NetworkId):
+				statusPacketBsc70, err := handShake[eth.StatusPacketBsc70](ctx, status, rw, protocol, protocol, encodeStatusPacketBsc70, compatStatusPacketBsc70, handshakeTimeout)
+				if err != nil {
+					return err
+				}
+
+				minBlock = statusPacketBsc70.EarliestBlock
+				latestBlock = statusPacketBsc70.LatestBlock
+			case protocol >= direct.ETH69:
 				statusPacket69, err := handShake[eth.StatusPacket69](ctx, status, rw, protocol, protocol, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
 				if err != nil {
 					return err
@@ -764,7 +775,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 				minBlock = statusPacket69.MinimumBlock
 				latestBlock = statusPacket69.LatestBlock
-			} else {
+			default:
 				statusPacket, err := handShake[eth.StatusPacket](ctx, status, rw, protocol, protocol, encodeStatusPacket, compatStatusPacket, handshakeTimeout)
 				if err != nil {
 					return err
