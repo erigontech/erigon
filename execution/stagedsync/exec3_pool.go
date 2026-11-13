@@ -64,6 +64,9 @@ type taskPool struct {
 	cond   *sync.Cond
 	queue  taskHeap
 	closed bool
+
+	workers int
+	idle    idleProbe
 }
 
 // Test hooks; nil in production.
@@ -73,7 +76,7 @@ var (
 )
 
 func newTaskPool(pe *parallelExecutor, base []*exec.WorkerContext) *taskPool {
-	p := &taskPool{pe: pe}
+	p := &taskPool{pe: pe, workers: len(base)}
 	p.cond = sync.NewCond(&p.mu)
 	context.AfterFunc(pe.workersCtx, func() {
 		p.mu.Lock()
@@ -92,6 +95,9 @@ func (p *taskPool) push(pt *poolTask) {
 		return
 	}
 	p.mu.Lock()
+	if logNpPhases {
+		p.tick()
+	}
 	heap.Push(&p.queue, pt)
 	p.mu.Unlock()
 	p.cond.Signal()
@@ -101,7 +107,15 @@ func (p *taskPool) pop() *poolTask {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for !p.closed && p.queue.Len() == 0 {
+		if logNpPhases {
+			p.tick()
+			p.idle.idle++
+		}
 		p.cond.Wait()
+		if logNpPhases {
+			p.tick()
+			p.idle.idle--
+		}
 	}
 	if p.closed {
 		return nil
@@ -117,6 +131,11 @@ func (p *taskPool) workerLoop(wk *poolWorker) {
 	}()
 	for pt := p.pop(); pt != nil; pt = p.pop() {
 		pt.step(p, wk)
+		if logNpPhases && dbg.KVReadLevelledMetrics {
+			hit, miss := wk.w.ReadDurations()
+			pt.be.idleState.readHit.Add(int64(hit))
+			pt.be.idleState.readMiss.Add(int64(miss))
+		}
 		wk.w.PublishReadMetrics()
 	}
 }
