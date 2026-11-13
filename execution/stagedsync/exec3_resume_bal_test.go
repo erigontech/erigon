@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -622,23 +623,47 @@ func TestResumedBlockWithWrongRequestsHashIsInvalid(t *testing.T) {
 }
 
 // panicFinalizeEngine panics the exec loop at block end, after the apply loop
-// has had time to take the block's tx results.
-type panicFinalizeEngine struct{ rules.Engine }
+// has had time to take the block's tx results. beforePanic runs first.
+type panicFinalizeEngine struct {
+	rules.Engine
+	beforePanic func()
+}
 
-func (panicFinalizeEngine) Finalize(*chain.Config, *types.Header, *state.IntraBlockState, []*types.Header,
+func (e panicFinalizeEngine) Finalize(*chain.Config, *types.Header, *state.IntraBlockState, []*types.Header,
 	types.Receipts, []*types.Withdrawal, rules.ChainReader, rules.SystemCall, bool, log.Logger,
 ) (types.FlatRequests, error) {
+	if e.beforePanic != nil {
+		e.beforePanic()
+	}
 	time.Sleep(50 * time.Millisecond)
 	panic("finalize failed")
 }
 
 // TestExecLoopPanicMidBlockIsNotInvalidBlock pins that an exec-loop panic after
-// the block's tx results reached the apply loop is an internal error, not a verdict.
+// the block's tx results reached the apply loop is an internal error, not a verdict,
+// also when a stop cause was published before the panic.
 func TestExecLoopPanicMidBlockIsNotInvalidBlock(t *testing.T) {
-	fx := newResumeBALFixture(t)
-	fx.engine = panicFinalizeEngine{Engine: fx.engine}
-	verdict, err := fx.exec(t, fx.block, fromBlockStart)
-	require.Nil(t, verdict)
-	require.ErrorContains(t, err, "finalize failed")
-	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+	for _, tc := range []struct {
+		name      string
+		stopFirst *stopCause
+	}{
+		{"no stop cause", nil},
+		{"after a reached-max stop", &stopCause{block: 1, kind: stopReachedMax}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var pe atomic.Pointer[parallelExecutor]
+			execLoopStartHook = func(p *parallelExecutor) { pe.Store(p) }
+			defer func() { execLoopStartHook = nil }()
+			fx := newResumeBALFixture(t)
+			engine := panicFinalizeEngine{Engine: fx.engine}
+			if tc.stopFirst != nil {
+				engine.beforePanic = func() { pe.Load().cancelExecLoop(tc.stopFirst) }
+			}
+			fx.engine = engine
+			verdict, err := fx.exec(t, fx.block, fromBlockStart)
+			require.Nil(t, verdict)
+			require.ErrorContains(t, err, "finalize failed")
+			require.NotErrorIs(t, err, rules.ErrInvalidBlock)
+		})
+	}
 }
