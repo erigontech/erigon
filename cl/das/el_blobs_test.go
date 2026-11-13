@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -502,6 +503,9 @@ func TestImportColumnsFromBlobsGloasRecoveryRunsForBlockInForkChoice(t *testing.
 	d.gloasDataCache = gloasDataCache
 	block, root, blobs, proofs := elBlobsFixtureOfVersion(t, cfg, clparams.GloasVersion, 2)
 	d.forkChoice = forkChoiceBlocks{root: block}
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Unix(0, 0)).AnyTimes()
+	d.ethClock = clock
 
 	_, err = d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
 	require.NoError(t, err)
