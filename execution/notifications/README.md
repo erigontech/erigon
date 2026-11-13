@@ -82,10 +82,11 @@ For incomplete batches, `RefreshAccounts` appends final values for addresses wit
 recorded account changes. This keeps older entries from overwriting current values
 in the RPC state cache, but it does not reconstruct omitted changes.
 
-The pool waits for committed state matching the announced version before refreshing
-all pooled senders and revalidating frames. If that version has been superseded,
-transaction membership changes are retained for a newer batch; obsolete account
-values are not applied.
+When the batch is incomplete or the pool's state view is stale, the pool waits for
+committed state matching the announced version before refreshing all pooled senders
+and revalidating frames. If that version has been superseded, transaction membership
+changes are retained for a newer batch; obsolete account values are not applied.
+Complete batches can be applied before commit while the pool has a usable state view.
 
 ### Consumer Summary
 

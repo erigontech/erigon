@@ -51,9 +51,9 @@ func NewAccumulation() *Accumulation {
 // Shared between the DevP2P StageLoop path (via Hook) and the Engine API path
 // (via PipelineExecutor).
 //
-// Key design: reads block metadata from a kv.Tx which can be either the SD's
-// blockOverlay (before commit) or a committed DB tx. The state version is
-// supplied separately because only the durable state flush owns that value.
+// Block metadata comes from the SD's block overlay or a committed database transaction.
+// The domain flush advances the state version, so callers supply it separately.
+// Before commit, notifications carry the projected version of that flush.
 type Dispatcher struct {
 	chainConfig         *chain.Config
 	headerReader        dbservices.HeaderReader
