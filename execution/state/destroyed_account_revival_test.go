@@ -182,3 +182,47 @@ func TestConsumedAbsenceOutlivesRecreationFlush(t *testing.T) {
 		})
 	}
 }
+
+// flushOnReadReader runs onRead inside the committed account read, the window between the
+// version-map probe and the destruct check that follows it.
+type flushOnReadReader struct {
+	*accountStateReader
+	onRead func()
+}
+
+func (r *flushOnReadReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if r.onRead != nil {
+		r.onRead()
+		r.onRead = nil
+	}
+	return r.accountStateReader.ReadAccountData(addr)
+}
+
+// A destruct that goes in flight while a later tx reads the account must become a
+// dependency of that read: the committed record the read falls back to is pre-destruct.
+func TestCommittedFallbackDependsOnInFlightDestruct(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246AE"))
+	vm := NewVersionMap(nil)
+	header := func(path AccountPath) WriteHeader {
+		return WriteHeader{Address: addr, Path: path, Version: Version{TxIndex: 0}}
+	}
+	reader := &flushOnReadReader{accountStateReader: newAccountStateReader(addr)}
+	reader.onRead = func() {
+		vm.FlushVersionedWrites(newWriteSet(
+			&VersionedWrite[bool]{WriteHeader: header(SelfDestructPath), Val: true},
+			&VersionedWrite[uint256.Int]{WriteHeader: header(BalancePath)},
+		), false)
+	}
+
+	ibs := NewWithVersionMap(reader, vm)
+	ibs.SetTxContext(1, 1)
+	ibs.SetVersion(0)
+	ibs.eip8246 = true
+	ibs.eip161 = true
+	defer ibs.Close()
+	_, _, _, err := ibs.versionedAccountBase(addr, true)
+	require.NoError(t, err)
+	require.Nil(t, reader.onRead, "the flush must land inside the committed read")
+	require.Equal(t, 0, ibs.DepTxIndex())
+}
