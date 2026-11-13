@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/cl/aggregation"
@@ -184,12 +183,9 @@ type attestationService struct {
 	netCfg                 *clparams.NetworkConfig
 	emitters               *beaconevents.EventEmitter
 	batchSignatureVerifier *BatchSignatureVerifier
-	// validatorAttestationSeen maps from epoch to validator index. This is used to ignore duplicate validator attestations in the same epoch.
-	validatorAttestationSeen *lru.CacheWithTTL[uint64, uint64] // validator index -> epoch
-	validatorClaimMu         sync.Mutex
-	targetStateBuildClaims   *lru.Cache[targetStateBuildClaim, struct{}]
-	// attestationProcessed           *lru.CacheWithTTL[[32]byte, struct{}]
-	awaitingBlock *blockArrivalQueue
+	validatorVotes         *validatorVotes
+	targetStateBuildClaims *lru.Cache[targetStateBuildClaim, struct{}]
+	awaitingBlock          *blockArrivalQueue
 }
 
 // AttestationWithGossipData type represents attestation with the gossip data where it's coming from.
@@ -217,21 +213,19 @@ func NewAttestationService(
 	emitters *beaconevents.EventEmitter,
 	batchSignatureVerifier *BatchSignatureVerifier,
 ) AttestationService {
-	epochDuration := time.Duration(beaconCfg.SlotsPerEpoch*beaconCfg.SecondsPerSlot) * time.Second
 	a := &attestationService{
-		ctx:                      ctx,
-		forkchoiceStore:          forkchoiceStore,
-		aggregationPool:          aggregationPool,
-		ethClock:                 ethClock,
-		syncedDataManager:        syncedDataManager,
-		beaconCfg:                beaconCfg,
-		netCfg:                   netCfg,
-		emitters:                 emitters,
-		batchSignatureVerifier:   batchSignatureVerifier,
-		validatorAttestationSeen: lru.NewWithTTL[uint64, uint64]("validator_attestation_seen", validatorAttestationCacheSize, epochDuration),
-		targetStateBuildClaims:   newTargetStateBuildClaims(),
-		// attestationProcessed:     lru.NewWithTTL[[32]byte, struct{}]("attestation_processed", validatorAttestationCacheSize, epochDuration),
-		awaitingBlock: newBlockArrivalQueue(forkchoiceStore, maxAttestationsAwaitingBlock, time.Duration(beaconCfg.SecondsPerSlot)*time.Second),
+		ctx:                    ctx,
+		forkchoiceStore:        forkchoiceStore,
+		aggregationPool:        aggregationPool,
+		ethClock:               ethClock,
+		syncedDataManager:      syncedDataManager,
+		beaconCfg:              beaconCfg,
+		netCfg:                 netCfg,
+		emitters:               emitters,
+		batchSignatureVerifier: batchSignatureVerifier,
+		validatorVotes:         newValidatorVotes(),
+		targetStateBuildClaims: newTargetStateBuildClaims(),
+		awaitingBlock:          newBlockArrivalQueue(forkchoiceStore, maxAttestationsAwaitingBlock, time.Duration(beaconCfg.SecondsPerSlot)*time.Second),
 	}
 	go a.awaitingBlock.run(ctx)
 	return a
@@ -311,7 +305,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		data = att.Attestation.Data
 	}
 
-	// Commented because we have a check in validatorAttestationSeen that does the same thing.
+	// Commented because we have a check in validatorVotes that does the same thing.
 
 	// key, err := att.Attestation.HashSSZ()
 	// if err != nil {
@@ -377,7 +371,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		claimBuild = claimTargetStateBuild(s.targetStateBuildClaims, att.SingleAttestation.AttesterIndex, targetEpoch)
 		verifyBeforeBuild = func() error {
 			validatorIndex := att.SingleAttestation.AttesterIndex
-			if epochLastTime, ok := s.validatorAttestationSeen.Get(validatorIndex); ok && epochLastTime == targetEpoch {
+			if s.validatorVotes.seen(validatorIndex, targetEpoch) {
 				return fmt.Errorf("%w: %w", ErrIgnore, ErrAttestationAlreadySeen)
 			}
 			pubKey, signingRoot, err := attestationSignatureData(
@@ -470,7 +464,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 
 	// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
-	if epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex); ok && epochLastTime == targetEpoch {
+	if s.validatorVotes.seen(vIndex, targetEpoch) {
 		return fmt.Errorf("%w: %w", ErrIgnore, ErrAttestationAlreadySeen)
 	}
 	// [New in Gloas] [REJECT] attestation.data.index == 0 if block.slot == attestation.data.slot
@@ -532,7 +526,7 @@ func (s *attestationService) onVerifiedAttestation(vIndex, targetEpoch uint64, a
 	defer monitor.ObserveAggregateAttestation(start)
 	// Claimed only now: a message dropped before its signature was
 	// verified must not consume the validator's slot for the epoch.
-	if !s.claimValidatorAttestation(vIndex, targetEpoch) {
+	if !s.validatorVotes.claim(vIndex, targetEpoch) {
 		return
 	}
 	if err := s.aggregationPool.AddAttestation(attestation); errors.Is(err, aggregation.ErrPoolLimit) || errors.Is(err, aggregation.ErrVoterAlreadyCounted) {
@@ -548,16 +542,4 @@ func (s *attestationService) onVerifiedAttestation(vIndex, targetEpoch uint64, a
 	} else if att.SingleAttestation != nil {
 		s.emitters.Operation().SendSingleAttestation(att.SingleAttestation)
 	}
-}
-
-// claimValidatorAttestation records the validator's vote for the target epoch and reports whether
-// this call made the claim. Copies of one vote can pass the seen check before either is verified.
-func (s *attestationService) claimValidatorAttestation(vIndex, targetEpoch uint64) bool {
-	s.validatorClaimMu.Lock()
-	defer s.validatorClaimMu.Unlock()
-	if epoch, ok := s.validatorAttestationSeen.Get(vIndex); ok && epoch == targetEpoch {
-		return false
-	}
-	s.validatorAttestationSeen.Add(vIndex, targetEpoch)
-	return true
 }

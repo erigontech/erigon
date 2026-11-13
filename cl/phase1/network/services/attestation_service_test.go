@@ -534,7 +534,7 @@ func (t *attestationTestSuite) TestElectraAttestationAlreadySeenBeforeTargetShuf
 		return []uint64{attester}, headState.CommitteeCount(epoch), nil
 	}
 	t.addTargetShufflingAncestors(data)
-	t.attService.(*attestationService).validatorAttestationSeen.Add(attester, epoch)
+	t.attService.(*attestationService).validatorVotes.claim(attester, epoch)
 
 	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
 		SingleAttestation: &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: data},
@@ -810,7 +810,7 @@ func (t *attestationTestSuite) TestElectraAttestationAlreadySeenBeforeTargetAnce
 	t.mockForkChoice.Ancestors[finalized.Epoch*t.beaconConfig.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: finalized.Root}
 	t.mockForkChoice.FinalizedCheckpointVal = finalized
 	attester := committee[0]
-	t.attService.(*attestationService).validatorAttestationSeen.Add(attester, epoch)
+	t.attService.(*attestationService).validatorVotes.claim(attester, epoch)
 
 	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
 		SingleAttestation: &solid.SingleAttestation{CommitteeIndex: 0, AttesterIndex: attester, Data: data},
