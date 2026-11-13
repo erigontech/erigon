@@ -2629,12 +2629,16 @@ func TestValidateReadSet_BaseReadOfQuietAccountSkipsValidation(t *testing.T) {
 // address cell; a write on another path does not stop the skip.
 func TestValidateReadSet_BaseReadOfQuietAccountPathSkipsValidation(t *testing.T) {
 	t.Parallel()
-	base := ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}
+	field := ReadHeader{Source: MapRead, Version: Version{TxIndex: originIndex}}
+	stored := ReadHeader{Source: StorageRead, Version: UnknownVersion}
 	balance := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
 		rs.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: hdr})
 	}
 	nonce := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
 		rs.SetNonce(addr, VersionedRead[uint64]{ReadHeader: hdr})
+	}
+	incarnation := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader: hdr})
 	}
 	codeHash := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
 		rs.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{ReadHeader: hdr})
@@ -2648,6 +2652,7 @@ func TestValidateReadSet_BaseReadOfQuietAccountPathSkipsValidation(t *testing.T)
 	exists := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
 		rs.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr})
 	}
+	hash := accounts.InternCodeHash(common.Hash{0x01})
 	for _, tc := range []struct {
 		name  string
 		read  func(rs *ReadSet, addr accounts.Address, hdr ReadHeader)
@@ -2656,21 +2661,30 @@ func TestValidateReadSet_BaseReadOfQuietAccountPathSkipsValidation(t *testing.T)
 		hdr   ReadHeader
 		want  VersionValidity
 	}{
-		{"balance read, no cells", balance, 0, nil, base, VersionValid},
-		{"balance read, code hash written", balance, CodeHashPath, accounts.InternCodeHash(common.Hash{0x01}), base, VersionValid},
-		{"balance read, balance written", balance, BalancePath, *uint256.NewInt(1), base, VersionInvalid},
-		{"nonce read, nonce written", nonce, NoncePath, uint64(1), base, VersionInvalid},
-		{"nonce read, created", nonce, IncarnationPath, uint64(1), base, VersionInvalid},
-		{"existence read, created", exists, IncarnationPath, uint64(1), base, VersionInvalid},
-		{"code hash read, code hash written", codeHash, CodeHashPath, accounts.InternCodeHash(common.Hash{0x01}), base, VersionInvalid},
-		{"code size read, code size written", codeSize, CodeSizePath, 3, base, VersionInvalid},
-		{"code read, destructed", code, SelfDestructPath, true, base, VersionInvalid},
+		{"balance read, no cells", balance, 0, nil, field, VersionValid},
+		{"balance read, code hash written", balance, CodeHashPath, hash, field, VersionValid},
+		{"balance read, balance written", balance, BalancePath, *uint256.NewInt(1), field, VersionInvalid},
+		{"balance read, address written", balance, AddressPath, &accounts.Account{Incarnation: 1}, field, VersionInvalid},
+		{"nonce read, nonce written", nonce, NoncePath, uint64(1), field, VersionInvalid},
+		{"nonce read, created", nonce, IncarnationPath, uint64(1), field, VersionInvalid},
+		{"incarnation read, nonce written", incarnation, NoncePath, uint64(1), field, VersionValid},
+		{"existence read, balance written", exists, BalancePath, *uint256.NewInt(1), field, VersionValid},
+		{"existence read, created", exists, IncarnationPath, uint64(1), field, VersionInvalid},
+		{"absent account read, balance written", exists, BalancePath, *uint256.NewInt(1), stored, VersionValid},
+		{"code hash read, code hash written", codeHash, CodeHashPath, hash, field, VersionInvalid},
+		{"code size read, code size written", codeSize, CodeSizePath, 3, stored, VersionInvalid},
+		{"code read, balance written", code, BalancePath, *uint256.NewInt(1), stored, VersionValid},
+		{"code read, code written", code, CodePath, accounts.NewCode([]byte{0x02}), stored, VersionInvalid},
+		{"code read, destructed", code, SelfDestructPath, true, stored, VersionInvalid},
 		{"balance read of a removed write", balance, 0, nil, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, VersionInvalid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			addr := getAddress(92)
 			vm := NewVersionMap(nil)
+			if tc.hdr == field {
+				vm.StoreOriginAccount(addr, &accounts.Account{})
+			}
 			if tc.value != nil {
 				writeFor(vm, addr, tc.path, accounts.NilKey, Version{TxIndex: 1}, tc.value, true)
 			}
