@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand/v2"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -2100,6 +2102,14 @@ func t3ReviewBatch(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	return tx, sd
 }
 
+func rcacheReviewBatch(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
+	t.Helper()
+	saved := statecfg.Schema.RCacheDomain
+	statecfg.EnableHistoricalRCache()
+	t.Cleanup(func() { statecfg.Schema.RCacheDomain = saved })
+	return t3ReviewBatch(t)
+}
+
 func TestT3HistoryOwnsEqualPrev(t *testing.T) {
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		for _, source := range []string{"caller", "transaction"} {
@@ -2248,6 +2258,13 @@ func TestT3MergeRejectsReceiverDiscarded(t *testing.T) {
 	require.NoError(t, child.GetMemBatch().DomainPut(kv.AccountsDomain, string(key), []byte{2}, 2, nil))
 	sd.DiscardWrites(kv.AccountsDomain)
 	require.EqualError(t, sd.GetMemBatch().Merge(child.GetMemBatch()), "can't merge batches with discarded writes in accounts")
+}
+
+func TestMergeRejectsExplicitRCacheDiscard(t *testing.T) {
+	tx, sd := rcacheReviewBatch(t)
+	child := reviewChild(t, tx, sd)
+	child.DiscardWrites(kv.RCacheDomain)
+	require.EqualError(t, sd.GetMemBatch().Merge(child.GetMemBatch()), "can't merge batches with discarded writes in rcache")
 }
 
 func TestMergeOverlapAdoptsChildValues(t *testing.T) {
@@ -2455,13 +2472,99 @@ func TestReviewMergeNestedChild(t *testing.T) {
 	tx, sd := t3ReviewBatch(t)
 	child := reviewChild(t, tx, sd)
 	grandchild := reviewChild(t, tx, child)
+	greatgrandchild := reviewChild(t, tx, grandchild)
 	key := flushGoldenAddress(0x91)
 	require.NoError(t, child.GetMemBatch().DomainPut(kv.AccountsDomain, string(key), []byte{1}, 1, nil))
-	require.NoError(t, child.GetMemBatch().DomainPut(kv.AccountsDomain, string(key), []byte{2}, 2, []byte{1}))
-	require.NoError(t, grandchild.GetMemBatch().DomainPut(kv.AccountsDomain, string(key), []byte{3}, 2, []byte{2}))
+	require.NoError(t, grandchild.GetMemBatch().DomainPut(kv.AccountsDomain, string(key), []byte{2}, 2, []byte{1}))
+	require.NoError(t, greatgrandchild.GetMemBatch().DomainPut(kv.AccountsDomain, string(key), []byte{3}, 2, []byte{2}))
+	require.NoError(t, grandchild.GetMemBatch().Merge(greatgrandchild.GetMemBatch()))
 	require.NoError(t, child.GetMemBatch().Merge(grandchild.GetMemBatch()))
 	if err := sd.GetMemBatch().Merge(child.GetMemBatch()); err != nil {
 		t.Fatalf("merge of previously merged child: want nil, got %v", err)
 	}
 	require.NoError(t, sd.GetMemBatch().Flush(t.Context(), tx))
+
+	var historyRows []string
+	cursor, err := tx.Cursor(kv.TblAccountHistoryVals)
+	require.NoError(t, err)
+	defer cursor.Close()
+	for keyRow, value, err := cursor.First(); keyRow != nil; keyRow, value, err = cursor.Next() {
+		require.NoError(t, err)
+		historyRows = append(historyRows, fmt.Sprintf("%x:%x", keyRow, value))
+	}
+	require.Equal(t, []string{
+		fmt.Sprintf("%x:%x", key, binary.BigEndian.AppendUint64(nil, 1)),
+		fmt.Sprintf("%x:%x", key, append(binary.BigEndian.AppendUint64(nil, 2), 1)),
+		fmt.Sprintf("%x:%x", key, append(binary.BigEndian.AppendUint64(nil, 2), 2)),
+	}, historyRows)
+	value, _, err := tx.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, []byte{3}, value)
+}
+
+func TestMergeLargeValueOverlapKeepsReceiverPrev(t *testing.T) {
+	tx, sd := t3ReviewBatch(t)
+	key := flushGoldenAddress(0x92)
+	mem := sd.GetMemBatch()
+	require.NoError(t, mem.DomainPut(kv.CodeDomain, string(key), []byte{'A'}, 1, nil))
+	require.NoError(t, mem.DomainPut(kv.CodeDomain, string(key), []byte{'B'}, 2, []byte{'A'}))
+	child := reviewChild(t, tx, sd)
+	require.NoError(t, child.GetMemBatch().DomainPut(kv.CodeDomain, string(key), []byte{'C'}, 2, []byte{'B'}))
+	require.NoError(t, mem.Merge(child.GetMemBatch()))
+	require.NoError(t, mem.Flush(t.Context(), tx))
+
+	var historyRows []string
+	cursor, err := tx.Cursor(kv.TblCodeHistoryVals)
+	require.NoError(t, err)
+	defer cursor.Close()
+	for historyKey, historyValue, err := cursor.First(); historyKey != nil; historyKey, historyValue, err = cursor.Next() {
+		require.NoError(t, err)
+		historyRows = append(historyRows, fmt.Sprintf("%x:%x", historyKey, historyValue))
+	}
+	require.Equal(t, []string{
+		fmt.Sprintf("%x:%x", append(bytes.Clone(key), binary.BigEndian.AppendUint64(nil, 1)...), []byte(nil)),
+		fmt.Sprintf("%x:%x", append(bytes.Clone(key), binary.BigEndian.AppendUint64(nil, 2)...), []byte{'A'}),
+	}, historyRows)
+	value, ok, err := tx.GetAsOf(kv.CodeDomain, key, 2)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, []byte{'A'}, value)
+}
+
+func TestFlushReadersRaceWithMarkFlushed(t *testing.T) {
+	tx, domains := t3ReviewBatch(t)
+	mem := domains.GetMemBatch()
+	accounts := make([][]byte, 400)
+	storage := make([][]byte, 400)
+	for i := range accounts {
+		accounts[i] = flushGoldenAddress(byte(i))
+		storage[i] = flushGoldenStorageKey(accounts[i], 1)
+		require.NoError(t, mem.DomainPut(kv.AccountsDomain, string(accounts[i]), []byte{1}, 1, nil))
+		require.NoError(t, mem.DomainPut(kv.StorageDomain, string(storage[i]), []byte{1}, 1, nil))
+	}
+
+	done := make(chan struct{})
+	var readers sync.WaitGroup
+	read := func(domain kv.Domain, keys [][]byte) {
+		defer readers.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			for _, key := range keys {
+				mem.GetLatest(domain, key)
+				if _, _, err := mem.GetAsOf(domain, key, 2); err != nil {
+					panic(err)
+				}
+			}
+		}
+	}
+	readers.Add(2)
+	go read(kv.AccountsDomain, accounts)
+	go read(kv.StorageDomain, storage)
+	require.NoError(t, mem.Flush(t.Context(), tx))
+	close(done)
+	readers.Wait()
 }

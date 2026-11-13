@@ -135,9 +135,10 @@ NOTES:
 - LSP found the only production write into a `TemporalMemBatch` domain writer outside chain projection at `db/state/commitment_convert.go:489` through the writer initialized at `:424-425`; direct test writers are used at `db/state/domain_test.go:317`, `:328`, `:331`, and `:376`, plus `db/state/temporal_mem_batch_test.go:90`, while `db/state/squeeze.go:1257-1265` and `db/state/domain.go:913-915` only project and collate. The field references were checked with gopls.
 - The parent `b16730c6c44` value rows for the overlap test are one `AccountVals` row per case: key `910000000000000000000000000000000000006e`, value `ffffffffffffffff09`.
 - T5 is dropped because an overlapping grandchild leaves projected rows in its domain writers and a flushed child retains drained collectors. `Merge` moves current and past domain writers back to `pastDomainWriters`.
-- `Merge` rejects explicit discarded writes on receiver or other writable domains before changing either batch. The permanently disabled RCache writer is excluded because its discard bit is configuration state, not `DiscardWrites`.
+- `Merge` rejects a discard-state mismatch against the receiver's current writer for any domain, including RCache; config-disabled RCache writers match on both sides, while an explicit discard on one enabled side fails.
 - `TestT3MergeKeepsChildDiscarded` and `TestReviewDiscardedChildDomains` now assert the discarded-write merge error, unchanged receiver chains, and receiver-only rows after `Flush`.
 - `TestMergeOverlapAdoptsChildValues`: history rows match `f9da00be8fb`; value rows do not. For a (key, step) both batches wrote, the branch writes the child's value (`fffffffffffffffe15`, `fffffffffffffffe25`) and main writes the receiver's trimmed one (`fffffffffffffffe14`, a delete), so main's latest disagrees with its own in-memory read. Production does not merge into a non-empty receiver (research log F15).
+- Review findings: read paths return chain fields instead of copying `dataWithTxNum` while `Flush` marks entries; equal-boundary large-value merges keep the receiver's `prev`; nested merges retain exact account history rows `tx1`, `tx2/prev01`, and `tx2/prev02`; the reader race test is clean under `-race`.
 
 ## Checkpoints (supervisor)
 

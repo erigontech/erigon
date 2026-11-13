@@ -349,8 +349,8 @@ func (sd *TemporalMemBatch) getLatest(sh *latestShard, domain kv.Domain, key []b
 		return nil, kv.NoStepBound, false
 	}
 
-	if latest, ok := sd.overlayLatest(sh, domain, key); ok {
-		return latest.data, kv.Step(latest.txNum / sd.stepSize), true
+	if latest, txNum, ok := sd.overlayLatest(sh, domain, key); ok {
+		return latest, kv.Step(txNum / sd.stepSize), true
 	}
 	return unwoundLatest(domain, common.ToStringZeroCopy(key))
 }
@@ -395,9 +395,9 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 		if !ok {
 			return unwoundLatest(domain, keyS)
 		}
-		for i, dataWithTxNum := range dataWithTxNums {
-			if ts > dataWithTxNum.txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum) {
-				return dataWithTxNum.data, true, nil
+		for i := range dataWithTxNums {
+			if ts > dataWithTxNums[i].txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum) {
+				return dataWithTxNums[i].data, true, nil
 			}
 		}
 		return unwoundLatest(domain, keyS)
@@ -407,9 +407,9 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 	if !ok {
 		return unwoundLatest(domain, keyS)
 	}
-	for i, dataWithTxNum := range dataWithTxNums {
-		if ts > dataWithTxNum.txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum) {
-			return dataWithTxNum.data, true, nil
+	for i := range dataWithTxNums {
+		if ts > dataWithTxNums[i].txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum) {
+			return dataWithTxNums[i].data, true, nil
 		}
 	}
 	return unwoundLatest(domain, keyS)
@@ -450,8 +450,8 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 	if sd.unwindChangeset != nil {
 		if values := sd.unwindChangeset[domain]; len(values) > 0 {
 			wrappedIt = func(k []byte, v []byte) (cont bool, err error) {
-				if latest, ok := sd.overlayLatest(sd.shard(domain, common.ToStringZeroCopy(k)), domain, k); ok { // overlay wins over the changeset, as in getLatest
-					return it(k, latest.data)
+				if latest, _, ok := sd.overlayLatest(sd.shard(domain, common.ToStringZeroCopy(k)), domain, k); ok {
+					return it(k, latest)
 				}
 				if entry, ok := values[common.ToStringZeroCopy(k)]; ok {
 					if len(entry.Value) == 0 {
@@ -469,7 +469,7 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 }
 
 // overlayLatest requires sh's lock to be held.
-func (sd *TemporalMemBatch) overlayLatest(sh *latestShard, domain kv.Domain, k []byte) (dataWithTxNum, bool) {
+func (sd *TemporalMemBatch) overlayLatest(sh *latestShard, domain kv.Domain, k []byte) ([]byte, uint64, bool) {
 	keyS := common.ToStringZeroCopy(k)
 	var vals []dataWithTxNum
 	var ok bool
@@ -479,9 +479,10 @@ func (sd *TemporalMemBatch) overlayLatest(sh *latestShard, domain kv.Domain, k [
 		vals, ok = sh.m[keyS]
 	}
 	if !ok || len(vals) == 0 {
-		return dataWithTxNum{}, false
+		return nil, 0, false
 	}
-	return vals[len(vals)-1], true
+	latest := &vals[len(vals)-1]
+	return latest.data, latest.txNum, true
 }
 
 func (sd *TemporalMemBatch) GetChangesetAccumulator() *changeset.StateChangeSet {
@@ -702,28 +703,37 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	defer sd.unlockAllDomains()
 	other.rlockAllDomains()
 	defer other.runlockAllDomains()
+	var receiverDiscard [kv.DomainLen]bool
 	for domain, writer := range sd.domainWriters {
-		if kv.Domain(domain) != kv.RCacheDomain && writer != nil && writer.discard {
-			return fmt.Errorf("can't merge batches with discarded writes in %s", kv.Domain(domain))
+		if writer != nil {
+			receiverDiscard[domain] = writer.discard
 		}
 	}
-	for domain, writers := range sd.pastDomainWriters {
-		for _, writer := range writers {
-			if kv.Domain(domain) != kv.RCacheDomain && writer != nil && writer.discard {
-				return fmt.Errorf("can't merge batches with discarded writes in %s", kv.Domain(domain))
+	checkDiscard := func(domain int, writer *DomainBufferedWriter) error {
+		if writer != nil && writer.discard != receiverDiscard[domain] {
+			return fmt.Errorf("can't merge batches with discarded writes in %s", kv.Domain(domain))
+		}
+		return nil
+	}
+	checkPast := func(writers *[kv.DomainLen][]*DomainBufferedWriter) error {
+		for d, domainWriters := range writers {
+			for _, writer := range domainWriters {
+				if err := checkDiscard(d, writer); err != nil {
+					return err
+				}
 			}
 		}
+		return nil
+	}
+	if err := checkPast(&sd.pastDomainWriters); err != nil {
+		return err
+	}
+	if err := checkPast(&other.pastDomainWriters); err != nil {
+		return err
 	}
 	for domain, writer := range other.domainWriters {
-		if kv.Domain(domain) != kv.RCacheDomain && writer != nil && writer.discard {
-			return fmt.Errorf("can't merge batches with discarded writes in %s", kv.Domain(domain))
-		}
-	}
-	for domain, writers := range other.pastDomainWriters {
-		for _, writer := range writers {
-			if kv.Domain(domain) != kv.RCacheDomain && writer != nil && writer.discard {
-				return fmt.Errorf("can't merge batches with discarded writes in %s", kv.Domain(domain))
-			}
+		if err := checkDiscard(domain, writer); err != nil {
+			return err
 		}
 	}
 	for d := range other.latest {
@@ -895,7 +905,13 @@ func (sd *TemporalMemBatch) mergeChain(domain kv.Domain, key string, receiver, o
 	}
 	merged := make([]dataWithTxNum, 0, keep+len(other))
 	merged = append(merged, receiver[:keep]...)
-	return append(merged, other...), nil
+	merged = append(merged, other...)
+	if keep < len(receiver) && receiver[keep].txNum == firstTxNum {
+		if writer := sd.domainWriters[domain]; writer != nil && writer.largeVals {
+			merged[keep].prev = receiver[keep].prev
+		}
+	}
+	return merged, nil
 }
 
 // Flush writes the mem-batch to tx. With kv.WithFlushCallback options, the
@@ -948,7 +964,7 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 					if len(history) == 0 {
 						return true
 					}
-					latest := history[len(history)-1]
+					latest := &history[len(history)-1]
 					cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
 					return true
 				})
@@ -959,7 +975,7 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 					if len(history) == 0 {
 						continue
 					}
-					latest := history[len(history)-1]
+					latest := &history[len(history)-1]
 					cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
 				}
 			}
