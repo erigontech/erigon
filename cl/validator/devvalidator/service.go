@@ -22,7 +22,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const envelopeSubmissionRetryInterval = 500 * time.Millisecond
+const (
+	envelopeSubmissionRetryInterval = 500 * time.Millisecond
+	headStateRetryInterval          = time.Second
+)
 
 // Service is the embedded dev validator. It runs as a goroutine inside
 // Caplin, producing blocks and attestations for all configured validators.
@@ -182,7 +185,7 @@ func (s *Service) resolveIndices(ctx context.Context) error {
 			s.logger.Info("[dev-validator] waiting for head state", "err", err)
 			waiting = true
 		}
-		if err := common.Sleep(ctx, time.Second); err != nil {
+		if err := common.Sleep(ctx, headStateRetryInterval); err != nil {
 			return err
 		}
 	}
