@@ -262,7 +262,7 @@ func newForwardSyncPersistenceFixture(t *testing.T) (*Cfg, *chainTipBatchForkGra
 	t.Helper()
 	engine := &testExecutionEngine{supportInsertion: true, payloadStatus: execution_client.PayloadStatusValidated}
 	anchorSlot := clparams.MainnetBeaconConfig.FuluForkEpoch * clparams.MainnetBeaconConfig.SlotsPerEpoch
-	fixture := newLockOrderFixtureWithConfig(t, anchorSlot, engine, common.Hash{1}, false)
+	fixture := newLockOrderFixtureWithConfig(t, anchorSlot, engine, common.Hash{1}, false, nil)
 	cfg := fixture.cfg
 
 	block := cltypes.NewSignedBeaconBlock(cfg.beaconCfg, clparams.FuluVersion)
