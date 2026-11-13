@@ -20,7 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
+	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
 
@@ -37,8 +37,6 @@ var (
 	errNoReplayReadTx    = errors.New("no read tx left for a replay worker")
 	errReplayWorkerPanic = errors.New("replay worker crashed")
 )
-
-var replayCPUs = func() int { return runtime.GOMAXPROCS(0) }
 
 func replayWorkerCount(cpus, txnCount int) int {
 	return max(1, min(cpus, txnCount, maxReplayWorkers))
@@ -62,12 +60,7 @@ func replayTxnsParallel(ctx context.Context, db kv.TemporalRoDB, callerTx kv.Tem
 		return nil, err
 	}
 
-	jobs := make(chan int, txnCount)
-	for i := range txnCount {
-		jobs <- i
-	}
-	close(jobs)
-
+	var next atomic.Int64
 	writtenTxns := make([]chan struct{}, txnCount)
 	for i := range writtenTxns {
 		writtenTxns[i] = make(chan struct{})
@@ -103,7 +96,7 @@ func replayTxnsParallel(ctx context.Context, db kv.TemporalRoDB, callerTx kv.Tem
 			if err != nil {
 				return err
 			}
-			for txnIndex := range jobs {
+			for txnIndex := int(next.Add(1)) - 1; txnIndex < txnCount; txnIndex = int(next.Add(1)) - 1 {
 				if txnIndex >= window {
 					select {
 					case <-writtenTxns[txnIndex-window]:

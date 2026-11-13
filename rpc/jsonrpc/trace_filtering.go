@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
 	"time"
 
@@ -918,7 +919,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 	results := make([]*TraceCallResult, len(txns))
 
-	replay, err := replayTxnsParallel(ctx, api.kv, dbtx, header.Number.Uint64(), baseTxNum, len(txns), replayWorkerCount(replayCPUs(), len(txns)), len(txns), func(_ context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
+	replay, err := replayTxnsParallel(ctx, api.kv, dbtx, header.Number.Uint64(), baseTxNum, len(txns), replayWorkerCount(runtime.GOMAXPROCS(0), len(txns)), len(txns), func(_ context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
 		// blockCtx captures workerTx in its GetHash closure, so it cannot
 		// be shared across workers (each needs its own copy).
 		blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)

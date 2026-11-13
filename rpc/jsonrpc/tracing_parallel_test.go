@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"math/big"
+	"runtime"
 	"testing"
 	"time"
 
@@ -44,9 +45,8 @@ import (
 // withReplayCPUs makes the block replays of this test see n cores: one core keeps the
 // sequential path, more cores take the parallel one.
 func withReplayCPUs(t *testing.T, n int) {
-	prev := replayCPUs
-	replayCPUs = func() int { return n }
-	t.Cleanup(func() { replayCPUs = prev })
+	prev := runtime.GOMAXPROCS(n)
+	t.Cleanup(func() { runtime.GOMAXPROCS(prev) })
 }
 
 // requireSameTraceOnAnyCores traces block 1 with one core and with 16 cores and requires

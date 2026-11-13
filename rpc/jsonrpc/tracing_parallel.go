@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"runtime"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -36,7 +37,7 @@ import (
 // the transactions do not wait for each other. The objects are written in block order as
 // they complete.
 func (api *DebugAPIImpl) traceBlockParallel(ctx context.Context, tx kv.TemporalTx, block *types.Block, baseTxNum uint64, config *tracersConfig.TraceConfig,
-	chainConfig *chain.Config, rules *chain.Rules, signer *types.Signer, stream *jsonstream.Stream,
+	chainConfig *chain.Config, rules *chain.Rules, signer *types.Signer, stream *jsonstream.Stream, workers int,
 ) error {
 	txns := block.Transactions()
 	header := block.HeaderNoCopy()
@@ -49,7 +50,6 @@ func (api *DebugAPIImpl) traceBlockParallel(ctx context.Context, tx kv.TemporalT
 		done[i] = make(chan struct{})
 	}
 
-	workers := debugTraceBlockWorkers(len(txns))
 	ctx, cancel := context.WithCancel(ctx)
 	replay, err := replayTxnsParallel(ctx, api.db, tx, header.Number.Uint64(), baseTxNum, len(txns), workers, 2*workers, func(ctx context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
 		blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)
@@ -118,5 +118,5 @@ func (api *DebugAPIImpl) traceBlockParallel(ctx context.Context, tx kv.TemporalT
 // debugTraceBlockWorkers gives a quarter of the cores to one block: more workers per request
 // compete for the same cores and caches, so they cost CPU without lowering latency.
 func debugTraceBlockWorkers(txnCount int) int {
-	return replayWorkerCount(replayCPUs()/4, txnCount)
+	return replayWorkerCount(runtime.GOMAXPROCS(0)/4, txnCount)
 }
