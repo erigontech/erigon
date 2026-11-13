@@ -2633,9 +2633,15 @@ func TestNewVersionMapSeedAllocatesNoMoreThanTheSerialSeed(t *testing.T) {
 		bal[i].StorageChanges = []types.SlotChanges{{Slot: accounts.InternKey(common.Hash{31: 1}), Changes: []*types.StorageChange{{Index: 1, Value: *uint256.NewInt(1)}}}}
 		bal[i].BalanceChanges = []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}
 	}
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(4)) // AllocsPerRun would force 1 and so the serial path
 	NewVersionMap(bal)
-	allocs := testing.AllocsPerRun(5, func() { newVersionMapSink = NewVersionMap(bal) })
-	require.LessOrEqual(t, allocs/n, 12.1)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for range 5 {
+		newVersionMapSink = NewVersionMap(bal)
+	}
+	runtime.ReadMemStats(&after)
+	require.LessOrEqual(t, float64(after.Mallocs-before.Mallocs)/5/n, 12.1)
 }
 
 // A net-zero storage write has no BAL cell, so it must not count as already seeded.
