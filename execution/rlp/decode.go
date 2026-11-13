@@ -983,9 +983,8 @@ func (s *Stream) MoreDataInList() bool {
 	return listLimit > 0
 }
 
-// Addr decodes an RLP string of exactly 20 bytes as an address. It reads
-// through the stream's scratch buffer, so unlike ReadBytes it never forces
-// the destination to escape to the heap.
+// Addr decodes an RLP string of exactly 20 bytes as an address. Unlike
+// ReadBytes it never forces the destination to escape to the heap.
 func (s *Stream) Addr() (a common.Address, err error) {
 	kind, size, err := s.Kind()
 	switch {
@@ -1007,8 +1006,7 @@ func (s *Stream) Addr() (a common.Address, err error) {
 }
 
 // ReadHash decodes an RLP string of exactly 32 bytes as a hash. Like Addr, it
-// reads through the stream's scratch buffer and never forces the destination
-// to escape to the heap.
+// never forces the destination to escape to the heap.
 func (s *Stream) ReadHash() (h common.Hash, err error) {
 	kind, size, err := s.Kind()
 	switch {
