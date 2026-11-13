@@ -62,7 +62,7 @@ func TestValidateChainAcceptsPayloadBeyondLoopBlockLimit(t *testing.T) {
 	m, payload := newExecLagTester(t, 12, execmoduletester.WithLoopBlockLimit(5))
 
 	for range 2 {
-		result, err := m.ValidateChain(t.Context(), payload.Header())
+		result, err := m.ValidateChain(t.Context(), payload)
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
 	}
@@ -77,7 +77,7 @@ func TestValidateChainAcceptsPayloadBeyondLoopBlockLimit(t *testing.T) {
 func TestValidateChainExecutesLagWithinLoopBlockLimit(t *testing.T) {
 	m, payload := newExecLagTester(t, 3, execmoduletester.WithLoopBlockLimit(5))
 
-	result, err := m.ValidateChain(t.Context(), payload.Header())
+	result, err := m.ValidateChain(t.Context(), payload)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
 }
@@ -89,7 +89,7 @@ func TestValidateChainAcceptsPayloadBeyondBatchSize(t *testing.T) {
 
 	m, payload := newExecLagTester(t, 12, execmoduletester.WithBatchSize(1))
 
-	result, err := m.ValidateChain(t.Context(), payload.Header())
+	result, err := m.ValidateChain(t.Context(), payload)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
 	require.Equal(t, uint64(1), execProgress(t, m))
@@ -121,7 +121,7 @@ func TestValidateChainBeyondLoopBlockLimitDoesNotWarn(t *testing.T) {
 	log.Root().SetHandler(recorder)
 	t.Cleanup(func() { log.Root().SetHandler(prev) })
 
-	result, err := m.ValidateChain(t.Context(), payload.Header())
+	result, err := m.ValidateChain(t.Context(), payload)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
 	require.False(t, recorder.warned.Load())
@@ -131,7 +131,7 @@ func TestValidateChainAcceptsCanonicalUnexecutedBlock(t *testing.T) {
 	const lag = 12
 	m, chainPack := execmoduletester.NewWithExecLag(t, lag, 1, execmoduletester.WithLoopBlockLimit(5))
 
-	result, err := m.ValidateChain(t.Context(), chainPack.Blocks[lag].Header())
+	result, err := m.ValidateChain(t.Context(), chainPack.Blocks[lag])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
 }
@@ -140,7 +140,7 @@ func TestValidateChainExecutesCanonicalUnexecutedBlockWithinLimit(t *testing.T) 
 	m, chainPack := execmoduletester.NewWithExecLag(t, 3, 1, execmoduletester.WithLoopBlockLimit(5))
 
 	block := chainPack.Blocks[3]
-	result, err := m.ValidateChain(t.Context(), block.Header())
+	result, err := m.ValidateChain(t.Context(), block)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
 	require.True(t, m.ExecModule.IsValidated(block.Hash()), "the block must be executed, not answered from the canonical mapping")
@@ -154,7 +154,7 @@ func TestValidateChainDoesNotInvalidateUnexecutedCanonicalAncestorsOfBadTip(t *t
 	bad := tip.WithSeal(badHeader)
 	execmoduletester.InsertUnexecutedCanonical(t, m, []*types.Block{bad})
 
-	result, err := m.ValidateChain(t.Context(), bad.Header())
+	result, err := m.ValidateChain(t.Context(), bad)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusMissingSegment, result.ValidationStatus)
 	require.Equal(t, common.Hash{}, result.LatestValidHash)
@@ -168,7 +168,7 @@ func TestValidateChainRejectsBadHeaderWhileLagging(t *testing.T) {
 	bad := tip.WithSeal(badHeader)
 	execmoduletester.InsertUnexecutedCanonical(t, m, []*types.Block{bad})
 
-	result, err := m.ValidateChain(t.Context(), bad.Header())
+	result, err := m.ValidateChain(t.Context(), bad)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
 	require.Equal(t, common.Hash{}, result.LatestValidHash)
