@@ -1426,6 +1426,17 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				if preserved != nil {
 					return preserved, MapRead, Version{TxIndex: destructTxIndex}, nil
 				}
+				// A destruct this attempt has read stays in force even if its cell becomes an
+				// estimate again, so the committed record must not revive the account, here or
+				// in a later load of it. Only a re-creation by the destroying tx itself is left to
+				// the committed reader.
+				if _, res, _ := ibs.versionMap.ReadAddress(addr, destructTxIndex+1); res.DepIdx() != destructTxIndex || res.accSource() == AccountFromBAL {
+					destructVersion := sdRes.Version()
+					if _, ok := ibs.versionedReads.GetAddress(addr); !ok {
+						ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: destructVersion}})
+					}
+					return nil, MapRead, destructVersion, nil
+				}
 			}
 		}
 	}
