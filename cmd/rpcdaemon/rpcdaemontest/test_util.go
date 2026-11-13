@@ -655,8 +655,6 @@ func CreateTestExecModuleForTracesCollision(t *testing.T) *execmoduletester.Exec
 			},
 		},
 	}
-	// This test uses intra-block SELFDESTRUCT + CREATE2 reincarnation which the
-	// parallel executor doesn't handle correctly yet. Use serial execution.
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithoutExperimentalBAL())
 	chain, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
