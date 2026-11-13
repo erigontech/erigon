@@ -449,7 +449,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		}
 
 	case *blockResult:
-		if pb, ok := cc.pending[r.BlockNum]; ok && pb.failed {
+		if pb, ok := cc.pending[r.BlockNum]; (ok && pb.failed) || (r.Err != nil && cc.computedAhead[r.BlockNum]) {
 			if upd := cc.doms.GetCommitmentContext().PeekPendingUpdate(); upd != nil && upd.BlockNum == r.BlockNum {
 				cc.doms.GetCommitmentContext().ResetPendingUpdates()
 			}
@@ -462,10 +462,6 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// non-canonical), and emitting an ErrWrongTrieRoot here would race the
 		// apply loop's Err return and mask the original validation diagnostic.
 		if r.Err != nil {
-			if cc.computedAhead[r.BlockNum] {
-				cc.doms.GetCommitmentContext().ResetPendingUpdates()
-				cc.forgetBlock(r.BlockNum)
-			}
 			return
 		}
 

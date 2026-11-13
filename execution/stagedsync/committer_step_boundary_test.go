@@ -816,21 +816,29 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
 }
 
-func TestComputeAhead_WindowStepBoundaryCheckpointMidBlock(t *testing.T) {
+func setAheadFlags(t *testing.T, balDriven bool) {
+	t.Helper()
 	t.Cleanup(statecfg.SetCommitmentV3(true))
-	previousBAL := dbg.BALDrivenCommitment
-	previousIgnore := dbg.IgnoreBAL
-	previousShadow := dbg.BALShadowCompute
-	previousParentReads := commitmentdb.ParentReadsWanted()
+	bal, ignore, shadow, batch, parentReads := dbg.BALDrivenCommitment, dbg.IgnoreBAL, dbg.BALShadowCompute, dbg.BatchCommitments, commitmentdb.ParentReadsWanted()
 	t.Cleanup(func() {
-		dbg.BALDrivenCommitment = previousBAL
-		dbg.IgnoreBAL = previousIgnore
-		dbg.BALShadowCompute = previousShadow
-		commitmentdb.WantParentReads(previousParentReads)
+		dbg.BALDrivenCommitment, dbg.IgnoreBAL, dbg.BALShadowCompute, dbg.BatchCommitments = bal, ignore, shadow, batch
+		commitmentdb.WantParentReads(parentReads)
 	})
-	dbg.IgnoreBAL = false
-	dbg.BALShadowCompute = false
+	dbg.BALDrivenCommitment, dbg.IgnoreBAL, dbg.BALShadowCompute = balDriven, false, false
 	commitmentdb.WantParentReads(false)
+}
+
+func newAheadCalculator(t *testing.T, doms *execctx.SharedDomains, db kv.TemporalRoDB, perBlockFrom uint64) (*commitmentCalculator, chan commitmentResult) {
+	t.Helper()
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(context.Background(), context.Background(), doms, db, &chain.Config{}, "test", log.New(), false, perBlockFrom, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	t.Cleanup(cc.Stop)
+	return cc, out
+}
+
+func TestComputeAhead_WindowStepBoundaryCheckpointMidBlock(t *testing.T) {
+	setAheadFlags(t, false)
 
 	ctx := context.Background()
 	const firstTxNum = uint64(11)
@@ -867,10 +875,7 @@ func TestComputeAhead_WindowStepBoundaryCheckpointMidBlock(t *testing.T) {
 		liveCS := &changeset.StateChangeSet{}
 		doms.SavePastChangesetAccumulator(blockHash, 2, ownCS)
 		doms.SetChangesetAccumulator(liveCS)
-		out := make(chan commitmentResult, 64)
-		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 2, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
-		require.NoError(t, err)
-		defer cc.Stop()
+		cc, out := newAheadCalculator(t, doms, db, 2)
 		vm := newRawViewVM(firstTxNum)
 		for _, write := range writes {
 			addrValue := write.addr.Value()
@@ -935,14 +940,7 @@ func TestComputeAhead_WindowStepBoundaryCheckpointMidBlock(t *testing.T) {
 }
 
 func TestComputeAhead_WindowBlock(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(true))
-	previousBAL := dbg.BALDrivenCommitment
-	previousIgnore := dbg.IgnoreBAL
-	t.Cleanup(func() {
-		dbg.BALDrivenCommitment = previousBAL
-		dbg.IgnoreBAL = previousIgnore
-	})
-	dbg.IgnoreBAL = false
+	setAheadFlags(t, false)
 
 	ctx := context.Background()
 	blockHash := common.Hash{0x71}
@@ -962,10 +960,7 @@ func TestComputeAhead_WindowBlock(t *testing.T) {
 		db, tx, doms := setupStepTest(t)
 		doms.SetDeferCommitmentUpdates(true)
 		ownCS := &changeset.StateChangeSet{}
-		out := make(chan commitmentResult, 64)
-		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
-		require.NoError(t, err)
-		defer cc.Stop()
+		cc, out := newAheadCalculator(t, doms, db, 1)
 
 		acc := accounts.Account{Nonce: 0, Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
 		av := addr.Value()
@@ -1019,17 +1014,7 @@ func TestComputeAhead_WindowBlock(t *testing.T) {
 }
 
 func TestComputeAhead_WindowBlocksWaitForPreviousResult(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(true))
-	previousBAL := dbg.BALDrivenCommitment
-	previousIgnore := dbg.IgnoreBAL
-	previousBatch := dbg.BatchCommitments
-	t.Cleanup(func() {
-		dbg.BALDrivenCommitment = previousBAL
-		dbg.IgnoreBAL = previousIgnore
-		dbg.BatchCommitments = previousBatch
-	})
-	dbg.BALDrivenCommitment = true
-	dbg.IgnoreBAL = false
+	setAheadFlags(t, true)
 	dbg.BatchCommitments = false
 
 	ctx := context.Background()
@@ -1053,10 +1038,7 @@ func TestComputeAhead_WindowBlocksWaitForPreviousResult(t *testing.T) {
 
 		db, tx, doms := setupStepTest(t)
 		doms.SetDeferCommitmentUpdates(true)
-		out := make(chan commitmentResult, 64)
-		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
-		require.NoError(t, err)
-		defer cc.Stop()
+		cc, out := newAheadCalculator(t, doms, db, 1)
 		for i := range addrs {
 			doms.SavePastChangesetAccumulator(hashes[i], uint64(i+1), &changeset.StateChangeSet{})
 			acc := accounts.Account{Nonce: uint64(i), Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
@@ -1084,10 +1066,7 @@ func TestComputeAhead_WindowBlocksWaitForPreviousResult(t *testing.T) {
 		av := addrs[i].Value()
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&acc), uint64(i+1), nil))
 	}
-	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
-	require.NoError(t, err)
-	defer cc.Stop()
+	cc, out := newAheadCalculator(t, doms, db, 1)
 
 	cc.handleBlockRequest(ctx, &blockRequest{blockNum: 1, blockHash: hashes[0], firstTxNum: 1, lastTxNum: 1, stateRoot: common.BytesToHash(roots[0]), bal: bals[0]})
 	require.True(t, cc.computedAhead[1])
@@ -1120,19 +1099,7 @@ func TestComputeAhead_WindowBlocksWaitForPreviousResult(t *testing.T) {
 }
 
 func TestComputeAhead_WindowBlockUnsafeModes(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(true))
-	previousBAL := dbg.BALDrivenCommitment
-	previousIgnore := dbg.IgnoreBAL
-	previousShadow := dbg.BALShadowCompute
-	previousParentReads := commitmentdb.ParentReadsWanted()
-	t.Cleanup(func() {
-		dbg.BALDrivenCommitment = previousBAL
-		dbg.IgnoreBAL = previousIgnore
-		dbg.BALShadowCompute = previousShadow
-		commitmentdb.WantParentReads(previousParentReads)
-	})
-	dbg.BALDrivenCommitment = true
-	dbg.IgnoreBAL = false
+	setAheadFlags(t, true)
 
 	for _, tc := range []struct {
 		name        string
@@ -1153,10 +1120,7 @@ func TestComputeAhead_WindowBlockUnsafeModes(t *testing.T) {
 			value := *uint256.NewInt(13)
 			ownCS := &changeset.StateChangeSet{}
 			doms.SavePastChangesetAccumulator(blockHash, 1, ownCS)
-			out := make(chan commitmentResult, 64)
-			cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
-			require.NoError(t, err)
-			defer cc.Stop()
+			cc, out := newAheadCalculator(t, doms, db, 1)
 			acc := accounts.Account{Nonce: 0, Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
 			av := addr.Value()
 			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&acc), 1, nil))
@@ -1182,21 +1146,7 @@ func TestComputeAhead_WindowBlockUnsafeModes(t *testing.T) {
 }
 
 func TestComputeAhead_WindowWrongRootPublishedOnce(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(true))
-	previousBAL := dbg.BALDrivenCommitment
-	previousIgnore := dbg.IgnoreBAL
-	previousShadow := dbg.BALShadowCompute
-	previousParentReads := commitmentdb.ParentReadsWanted()
-	t.Cleanup(func() {
-		dbg.BALDrivenCommitment = previousBAL
-		dbg.IgnoreBAL = previousIgnore
-		dbg.BALShadowCompute = previousShadow
-		commitmentdb.WantParentReads(previousParentReads)
-	})
-	dbg.BALDrivenCommitment = true
-	dbg.IgnoreBAL = false
-	dbg.BALShadowCompute = false
-	commitmentdb.WantParentReads(false)
+	setAheadFlags(t, true)
 
 	ctx := context.Background()
 	db, _, doms := setupStepTest(t)
@@ -1206,10 +1156,7 @@ func TestComputeAhead_WindowWrongRootPublishedOnce(t *testing.T) {
 	value := *uint256.NewInt(14)
 	cs := &changeset.StateChangeSet{}
 	doms.SavePastChangesetAccumulator(blockHash, 1, cs)
-	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
-	require.NoError(t, err)
-	defer cc.Stop()
+	cc, out := newAheadCalculator(t, doms, db, 1)
 	cc.handleBlockRequest(ctx, &blockRequest{
 		blockNum: 1, blockHash: blockHash, firstTxNum: 1, lastTxNum: 1,
 		stateRoot: common.Hash{0xbe, 0xef},
@@ -1230,21 +1177,7 @@ func TestComputeAhead_WindowWrongRootPublishedOnce(t *testing.T) {
 }
 
 func TestComputeAhead_WindowFailureAtEdgePublishedOnce(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(true))
-	previousBAL := dbg.BALDrivenCommitment
-	previousIgnore := dbg.IgnoreBAL
-	previousShadow := dbg.BALShadowCompute
-	previousParentReads := commitmentdb.ParentReadsWanted()
-	t.Cleanup(func() {
-		dbg.BALDrivenCommitment = previousBAL
-		dbg.IgnoreBAL = previousIgnore
-		dbg.BALShadowCompute = previousShadow
-		commitmentdb.WantParentReads(previousParentReads)
-	})
-	dbg.BALDrivenCommitment = true
-	dbg.IgnoreBAL = false
-	dbg.BALShadowCompute = false
-	commitmentdb.WantParentReads(false)
+	setAheadFlags(t, true)
 
 	ctx := context.Background()
 	for _, pendingBlock := range []uint64{0, 1} {
@@ -1255,10 +1188,7 @@ func TestComputeAhead_WindowFailureAtEdgePublishedOnce(t *testing.T) {
 			addr := accounts.InternAddress([20]byte{0xa2})
 			value := *uint256.NewInt(14)
 			cs := &changeset.StateChangeSet{}
-			out := make(chan commitmentResult, 64)
-			cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
-			require.NoError(t, err)
-			defer cc.Stop()
+			cc, out := newAheadCalculator(t, doms, db, 1)
 			cc.handleBlockRequest(ctx, &blockRequest{
 				blockNum: 1, blockHash: blockHash, firstTxNum: 15, lastTxNum: 17,
 				stateRoot: common.Hash{0xbe, 0xef},
@@ -1291,21 +1221,7 @@ func TestComputeAhead_WindowFailureAtEdgePublishedOnce(t *testing.T) {
 }
 
 func TestHandleMessage_RejectedComputedAheadWindowBlock(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(true))
-	previousBAL := dbg.BALDrivenCommitment
-	previousIgnore := dbg.IgnoreBAL
-	previousShadow := dbg.BALShadowCompute
-	previousParentReads := commitmentdb.ParentReadsWanted()
-	t.Cleanup(func() {
-		dbg.BALDrivenCommitment = previousBAL
-		dbg.IgnoreBAL = previousIgnore
-		dbg.BALShadowCompute = previousShadow
-		commitmentdb.WantParentReads(previousParentReads)
-	})
-	dbg.BALDrivenCommitment = false
-	dbg.IgnoreBAL = false
-	dbg.BALShadowCompute = false
-	commitmentdb.WantParentReads(false)
+	setAheadFlags(t, false)
 
 	ctx := context.Background()
 	blockHash := common.Hash{0xb1}
@@ -1323,10 +1239,7 @@ func TestHandleMessage_RejectedComputedAheadWindowBlock(t *testing.T) {
 		db, tx, doms := setupStepTest(t)
 		doms.SetDeferCommitmentUpdates(true)
 		doms.SavePastChangesetAccumulator(blockHash, 1, &changeset.StateChangeSet{})
-		out := make(chan commitmentResult, 64)
-		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
-		require.NoError(t, err)
-		defer cc.Stop()
+		cc, out := newAheadCalculator(t, doms, db, 1)
 		acc := accounts.Account{Nonce: 0, Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 1, nil))
 		cc.handleBlockRequest(ctx, &blockRequest{blockNum: 1, blockHash: blockHash, firstTxNum: 1, lastTxNum: 1, stateRoot: common.Hash{}, bal: bal})
@@ -1344,10 +1257,7 @@ func TestHandleMessage_RejectedComputedAheadWindowBlock(t *testing.T) {
 	db, tx, doms := setupStepTest(t)
 	doms.SetDeferCommitmentUpdates(true)
 	ownCS := &changeset.StateChangeSet{}
-	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
-	require.NoError(t, err)
-	defer cc.Stop()
+	cc, out := newAheadCalculator(t, doms, db, 1)
 	acc := accounts.Account{Nonce: 0, Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
 	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 1, nil))
 	req := &blockRequest{blockNum: 1, blockHash: blockHash, firstTxNum: 1, lastTxNum: 1, stateRoot: common.BytesToHash(root), bal: bal}
