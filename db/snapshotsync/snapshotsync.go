@@ -195,26 +195,21 @@ func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint
 	}
 	v3 := statecfg.ExperimentalCommitmentV3
 	dependents := make(map[string]bool)
-	if v3 {
-		for _, pair := range statecfg.DomainDependencies() {
-			dependents[pair[0].String()] = true
-		}
+	for _, pair := range statecfg.DomainDependencies() {
+		dependents[pair[0].String()] = true
 	}
 	ranges := make(map[string]rangedFile)
 	compatible := make(map[stepRange]bool)
 	incompatible := make(map[stepRange]bool)
 	skipped := make(map[string]bool)
 	for _, p := range items {
-		if !v3 && !strings.Contains(p.Name, "commitment.") {
-			continue
-		}
 		info, _, ok := snaptype.ParseFileName("", p.Name)
 		if !ok {
 			continue
 		}
 		r := stepRange{history: isStateHistory(p.Name), from: info.From, to: info.To}
 		if info.TypeString != kv.CommitmentDomain.String() {
-			if v3 && !r.history && dependents[info.TypeString] {
+			if !r.history && dependents[info.TypeString] {
 				ranges[p.Name] = rangedFile{stepRange: r, required: true}
 			}
 			continue
@@ -752,6 +747,7 @@ func SyncSnapshots(
 		if localV3Tip > 0 {
 			v3Remedy = "run with `--snap.skip-state-snapshot-download`, or restore with `integration commitment convert --restore`, sync with `--experimental.commitment-v3` off and convert again"
 		}
+		legacyRemedy := "run with `--experimental.commitment-v3` or `--snap.skip-state-snapshot-download`"
 		items, err := SnapshotsToDownload(ctx, logPrefix, headerchain, blobs, caplinState, blobRetention, prune, caplin, tx, blockReader, cc, syncCfg, stepSize, snapCfg.Preverified, toBlock, toStep)
 		if err != nil {
 			return err
@@ -759,8 +755,11 @@ func SyncSnapshots(
 		downloadRequest := make([]dbservices.DownloadRequest, 0, len(items))
 		var skippedTip uint64
 		for _, p := range items {
-			if missingV3, ok := incompatibleCommitment[p.Name]; ok {
-				if missingV3 {
+			if missing, ok := incompatibleCommitment[p.Name]; ok {
+				if missing && !statecfg.ExperimentalCommitmentV3 {
+					return fmt.Errorf("commitment v3 is disabled, but the snapshot manifest has only v3 commitment for %s: %s", p.Name, legacyRemedy)
+				}
+				if missing {
 					return fmt.Errorf("commitment v3 is enabled, but the snapshot manifest has no v3 commitment for %s: %s", p.Name, v3Remedy)
 				}
 				if info, _, ok := snaptype.ParseFileName("", p.Name); ok && info.TypeString == kv.CommitmentDomain.String() && info.Ext == ".kv" {
@@ -793,7 +792,7 @@ func SyncSnapshots(
 			return fmt.Errorf("commitment v3 is enabled, but the snapshot manifest has no v3 commitment for steps %d-%d of its state: %s", commitmentTip, stateTip, v3Remedy)
 		}
 		if stateTip > commitmentTip && skippedTip > commitmentTip {
-			return fmt.Errorf("commitment v3 is disabled, but the snapshot manifest has only v3 commitment for steps %d-%d of its state: run with `--experimental.commitment-v3` or `--snap.skip-state-snapshot-download`", commitmentTip, min(stateTip, skippedTip))
+			return fmt.Errorf("commitment v3 is disabled, but the snapshot manifest has only v3 commitment for steps %d-%d of its state: %s", commitmentTip, min(stateTip, skippedTip), legacyRemedy)
 		}
 
 		// Only add the preverified hashes until the initial sync completed for the first time.
