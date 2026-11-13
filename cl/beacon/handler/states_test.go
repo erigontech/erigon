@@ -45,7 +45,7 @@ import (
 
 func TestGetStateFork(t *testing.T) {
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -54,26 +54,53 @@ func TestGetStateFork(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	finalizedEpoch := blocks[len(blocks)-1].Block.Slot / handler.beaconChainCfg.SlotsPerEpoch
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: finalizedEpoch}
+	fcu.FinalizedSlotVal = (finalizedEpoch+1)*handler.beaconChainCfg.SlotsPerEpoch - 1
+
+	nonCanonicalBlock := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.Phase0Version)
+	nonCanonicalBlock.Block.Slot = blocks[0].Block.Slot
+	nonCanonicalBlock.Block.ParentRoot = blocks[0].Block.ParentRoot
+	nonCanonicalBlock.Block.StateRoot = common.Hash{0xca, 0xfe}
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(tx, nonCanonicalBlock, false))
+	require.NoError(t, tx.Commit())
 
 	cases := []struct {
-		blockID string
-		code    int
+		blockID   string
+		code      int
+		finalized bool
 	}{
 		{
-			blockID: "0x" + common.Bytes2Hex(postRoot[:]),
-			code:    http.StatusOK,
+			blockID:   "0x" + common.Bytes2Hex(postRoot[:]),
+			code:      http.StatusOK,
+			finalized: false,
 		},
 		{
-			blockID: "head",
-			code:    http.StatusOK,
+			blockID:   "head",
+			code:      http.StatusOK,
+			finalized: false,
+		},
+		{
+			blockID:   strconv.FormatInt(int64(blocks[0].Block.Slot), 10),
+			code:      http.StatusOK,
+			finalized: true,
+		},
+		{
+			blockID:   strconv.FormatInt(int64(blocks[len(blocks)-1].Block.Slot), 10),
+			code:      http.StatusOK,
+			finalized: false,
+		},
+		{
+			blockID:   "0x" + common.Bytes2Hex(nonCanonicalBlock.Block.StateRoot[:]),
+			code:      http.StatusOK,
+			finalized: false,
 		},
 		{
 			blockID: "0x" + common.Bytes2Hex(make([]byte, 32)),
 			code:    http.StatusNotFound,
-		},
-		{
-			blockID: strconv.FormatInt(int64(postState.Slot()), 10),
-			code:    http.StatusOK,
 		},
 	}
 
@@ -94,6 +121,7 @@ func TestGetStateFork(t *testing.T) {
 			jsonVal := make(map[string]any)
 			// unmarshal the json
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(&jsonVal))
+			require.Equal(t, c.finalized, jsonVal["finalized"])
 			data := jsonVal["data"].(map[string]any)
 			require.Equal(t, "0x00000000", data["current_version"])
 			require.Equal(t, "0x00000000", data["previous_version"])
