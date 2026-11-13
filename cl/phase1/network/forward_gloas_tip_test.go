@@ -435,6 +435,31 @@ func TestForwardBeaconDownloaderKeepsPeersWhenContextIsCancelledDuringRequestMor
 	}
 }
 
+func TestForwardBeaconDownloaderKeepsHeldGloasTipWhenContextIsCancelledDuringProcessing(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	tip := makeGloasBlock(11, hash(0xaa), common.Hash{})
+	client, _ := newNoPeersRPC(t, cfg)
+	downloader := newHeldTipDownloader(t, cfg, client, tip, "tip-peer")
+	downloader.SetCurrentSlotSampler(func() uint64 { return 12 })
+	var banned []string
+	downloader.banPeer = func(peer string) { banned = append(banned, peer) }
+	ctx, cancel := context.WithCancel(t.Context())
+	downloader.SetProcessFunction(func(highest uint64, _ []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		cancel()
+		return highest, fmt.Errorf("failed to read signed header: %w", context.Canceled)
+	})
+
+	require.False(t, downloader.ImportHeldGloasTip(ctx, 50*time.Millisecond, acceptAnyTip))
+	require.Empty(t, banned)
+	require.Same(t, tip, downloader.gloasLookahead)
+	require.Equal(t, "tip-peer", downloader.gloasLookaheadPeer)
+
+	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+	require.True(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip), "the next run imports the tip in the same slot")
+}
+
 // When P2P does not serve the tip's envelope, the beacon API still gets part of the budget.
 func TestForwardBeaconDownloaderFetchesHeldGloasTipEnvelopeFromHTTPAfterP2P(t *testing.T) {
 	cfg := gloasFromGenesisConfig()
