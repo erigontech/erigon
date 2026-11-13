@@ -443,12 +443,14 @@ func TestProgressFlushRerunsPublishesWhatTheLastTickMissed(t *testing.T) {
 	p := &Progress{}
 	p.publishReruns(&te, execModeOf(&te))
 	discards, wasted, voidTail := sumExecMetric(mxDiscardsTotal, "abort"), sumExecMetric(mxDiscardSecondsTotal, "abort"), sumExecMetric(mxVoidTailSecondsTotal)
-	repeats := sumExecMetric(mxRepeatsTotal)
+	repeats, execs := sumExecMetric(mxRepeatsTotal), sumExecMetric(mxExecsTotal)
 
 	te.reruns[rerunAbort].Add(2)
 	te.wastedNs[rerunAbort].Add(int64(time.Millisecond))
 	te.voidTailNs.Add(int64(time.Microsecond))
+	te.execCount.Add(5)
 	p.FlushReruns(&te)
+	require.Equal(t, float64(5), sumExecMetric(mxExecsTotal)-execs, "exec_execs_total must count the runs after the last tick")
 	require.Equal(t, float64(2), sumExecMetric(mxDiscardsTotal, "abort")-discards)
 	require.InDelta(t, time.Millisecond.Seconds(), sumExecMetric(mxDiscardSecondsTotal, "abort")-wasted, 1e-9)
 	require.InDelta(t, time.Microsecond.Seconds(), sumExecMetric(mxVoidTailSecondsTotal)-voidTail, 1e-9)
@@ -458,8 +460,8 @@ func TestProgressFlushRerunsPublishesWhatTheLastTickMissed(t *testing.T) {
 	require.Equal(t, float64(2), sumExecMetric(mxRepeatsTotal)-repeats, "exec_repeats_total must count the re-runs a flush publishes")
 }
 
-// A re-run of any cause that read an unfinished write counts the time after that read as void tail.
-func TestPoolCountRerunAddsVoidTailForEveryCause(t *testing.T) {
+// A sender re-run that read an unfinished write counts the time after that read as void tail, as an abort does.
+func TestPoolCountRerunAddsVoidTailOfASenderRerun(t *testing.T) {
 	var pe parallelExecutor
 	pt := &poolTask{rerunCause: rerunSender, lastRunNs: int64(time.Millisecond), lastVoidNs: int64(time.Microsecond)}
 	pt.countRerun(&pe)

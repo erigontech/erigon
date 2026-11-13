@@ -493,29 +493,26 @@ func execModeOf(te *txExecutor) string {
 	return "other"
 }
 
-// publishReruns adds the re-runs, wasted time and void tail accumulated since its last call to the counters.
-func (p *Progress) publishReruns(te *txExecutor, execMode string) (curReruns [rerunCauses]int, wasted time.Duration, wastedByReason []string, curVoidTail time.Duration) {
-	wastedByReason = make([]string, 0, rerunCauses)
+// publishReruns adds the runs, re-runs, wasted time and void tail accumulated since its last call to the counters.
+func (p *Progress) publishReruns(te *txExecutor, execMode string) (execs uint64, curReruns [rerunCauses]int, repeats int, curWasted [rerunCauses]time.Duration, curVoidTail time.Duration) {
+	execCount := uint64(te.execCount.Load())
+	execs, p.prevExecCount = execCount-p.prevExecCount, execCount
+	mxExecsTotal.WithLabelValues(execMode).AddUint64(execs)
 	for cause, reason := range rerunReasons {
 		reruns, wastedNs := te.reruns[cause].Load(), te.wastedNs[cause].Load()
 		curReruns[cause] = int(reruns - p.prevReruns[cause])
-		curWasted := time.Duration(wastedNs - p.prevWastedNs[cause])
+		curWasted[cause] = time.Duration(wastedNs - p.prevWastedNs[cause])
 		p.prevReruns[cause], p.prevWastedNs[cause] = reruns, wastedNs
-		wasted += curWasted
-		wastedByReason = append(wastedByReason, fmt.Sprintf("%s=%v", reason, common.Round(curWasted, 0)))
+		repeats += curReruns[cause]
 		mxDiscardsTotal.WithLabelValues(execMode, reason).AddInt(curReruns[cause])
-		mxDiscardSecondsTotal.WithLabelValues(execMode, reason).Add(curWasted.Seconds())
+		mxDiscardSecondsTotal.WithLabelValues(execMode, reason).Add(curWasted[cause].Seconds())
 	}
 	voidTailNs := te.voidTailNs.Load()
 	curVoidTail = time.Duration(voidTailNs - p.prevVoidTailNs)
 	p.prevVoidTailNs = voidTailNs
 	mxVoidTailSecondsTotal.WithLabelValues(execMode).Add(curVoidTail.Seconds())
-	var repeats int
-	for _, n := range curReruns {
-		repeats += n
-	}
 	mxRepeatsTotal.WithLabelValues(execMode).AddInt(repeats)
-	return curReruns, wasted, wastedByReason, curVoidTail
+	return execs, curReruns, repeats, curWasted, curVoidTail
 }
 
 // FlushReruns publishes the re-run totals that accumulated after the last LogExecution.
@@ -630,14 +627,14 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 			readCount = storageReadCount
 		}
 
-		execDiff := execCount - p.prevExecCount
-
 		execMode := execModeOf(te)
 
-		curReruns, wasted, wastedByReason, curVoidTail := p.publishReruns(te, execMode)
-		var repeats int
-		for _, n := range curReruns {
-			repeats += n
+		execDiff, curReruns, repeats, curWasted, curVoidTail := p.publishReruns(te, execMode)
+		var wasted time.Duration
+		wastedByReason := make([]string, 0, rerunCauses)
+		for cause, reason := range rerunReasons {
+			wasted += curWasted[cause]
+			wastedByReason = append(wastedByReason, fmt.Sprintf("%s=%v", reason, common.Round(curWasted[cause], 0)))
 		}
 
 		var repeatRatio float64
@@ -683,10 +680,8 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		}
 
 		mxExecRepeats.SetInt(repeats)
-		mxExecsTotal.WithLabelValues(execMode).AddUint64(execDiff)
 		mxExecTriggers.SetInt(int(execCount))
 
-		p.prevExecCount = execCount
 		p.prevReadCount = readCount
 		p.prevWriteCount = writeCount
 	case *serialExecutor:
