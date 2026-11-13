@@ -88,37 +88,13 @@ if $_rpc_tests_cached; then
       git -C "$WORKSPACE/rpc-tests" reset --hard FETCH_HEAD >/dev/null 2>&1 || true
   fi
   # Remove stale untracked test fixtures left by runs using a different branch/version,
-  # but preserve .venv/ and build/ which are the expensive parts of the cache.
-  git -C "$WORKSPACE/rpc-tests" clean -fd -e .venv -e build >/dev/null 2>&1
+  # but preserve build/ which holds the compiled rpc_int binary.
+  git -C "$WORKSPACE/rpc-tests" clean -fd -e build >/dev/null 2>&1
 else
   rm -rf "$WORKSPACE/rpc-tests" >/dev/null 2>&1
   git -c advice.detachedHead=false clone --depth 1 --branch "$RPC_VERSION" https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests" >/dev/null 2>&1
 fi
 cd "$WORKSPACE/rpc-tests"
-
-# Create and activate Python virtual environment, reusing existing one if already set up for this version
-VENV_MARKER=".venv/.installed-${RPC_VERSION//\//_}"
-if [ -f ".venv/bin/activate" ] && [ -f "$VENV_MARKER" ]; then
-  echo "Using cached Python virtual environment"
-  source .venv/bin/activate
-else
-  # Try to create a Python virtual environment or install packages globally if it fails
-  if python3 -m venv .venv >/dev/null 2>&1; then :
-  elif python3 -m virtualenv .venv >/dev/null 2>&1; then :
-  elif virtualenv .venv >/dev/null 2>&1; then :
-  else
-    echo "Failed to create a virtual environment, installing packages globally."
-    pip3 install -r requirements.txt 1>/dev/null
-  fi
-
-  # Activate virtual environment if it was created
-  if [ -f ".venv/bin/activate" ]; then
-    source .venv/bin/activate
-    pip3 install --upgrade pip 1>/dev/null
-    pip3 install -r requirements.txt 1>/dev/null
-    touch "$VENV_MARKER"
-  fi
-fi
 
 # Remove the local results directory if any
 cd "$WORKSPACE/rpc-tests/integration"
@@ -173,12 +149,6 @@ if [ -n "$RESULT_DIR" ]; then
   cp -r "$WORKSPACE/rpc-tests/integration/$CHAIN/results/" "$RESULT_DIR"
   # Clean up the local result directory
   rm -rf "$WORKSPACE/rpc-tests/integration/$CHAIN/results/"
-fi
-
-# Deactivate the Python virtual environment if it was created
-cd "$WORKSPACE/rpc-tests"
-if [ -f ".venv/bin/activate" ]; then
-  deactivate 2>/dev/null || :
 fi
 
 exit "$RUN_TESTS_EXIT_CODE"

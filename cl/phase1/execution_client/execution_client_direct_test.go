@@ -39,6 +39,7 @@ type newPayloadModuleStub struct {
 	execmodule.ExecutionModule
 	inserted        []*types.Block
 	validationCalls int
+	validation      execmodule.ValidationResult
 }
 
 func (s *newPayloadModuleStub) InsertBlocks(_ context.Context, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
@@ -52,7 +53,7 @@ func (s *newPayloadModuleStub) CurrentHeader(context.Context) (*types.Header, er
 
 func (s *newPayloadModuleStub) ValidateChain(context.Context, common.Hash, uint64) (execmodule.ValidationResult, error) {
 	s.validationCalls++
-	return execmodule.ValidationResult{ValidationStatus: execmodule.ExecutionStatusSuccess}, nil
+	return s.validation, nil
 }
 
 func TestDirectNewPayloadTransactionEncoding(t *testing.T) {
@@ -107,6 +108,46 @@ func TestDirectNewPayloadTransactionEncoding(t *testing.T) {
 			require.Len(t, module.inserted, 1)
 			require.Len(t, module.inserted[0].Transactions(), len(tc.transactions))
 			require.Equal(t, 1, module.validationCalls)
+		})
+	}
+}
+
+func TestDirectNewPayloadCarriesLatestValidHash(t *testing.T) {
+	lvh := common.Hash{0x42}
+	for _, tc := range []struct {
+		name    string
+		status  execmodule.ExecutionStatus
+		lvh     common.Hash
+		wantLVH common.Hash
+	}{
+		{name: "bad block with lvh", status: execmodule.ExecutionStatusBadBlock, lvh: lvh, wantLVH: lvh},
+		{name: "bad block without lvh", status: execmodule.ExecutionStatusBadBlock},
+		{name: "invalid forkchoice with lvh", status: execmodule.ExecutionStatusInvalidForkchoice, lvh: lvh},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			module := &newPayloadModuleStub{validation: execmodule.ValidationResult{ValidationStatus: tc.status, LatestValidHash: tc.lvh}}
+			client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+			require.NoError(t, err)
+
+			payload := cltypes.NewEth1Block(clparams.FuluVersion, &clparams.MainnetBeaconConfig)
+			payload.BlockNumber = 1
+			payload.Extra = solid.NewExtraData()
+			payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+			payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+			parentRoot := common.Hash{}
+			payload.BlockHash, err = payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
+			require.NoError(t, err)
+
+			status, err := client.NewPayload(t.Context(), payload, &parentRoot, nil, nil)
+			require.EqualValues(t, PayloadStatusInvalidated, status)
+			require.Error(t, err)
+			var invalid *InvalidPayloadError
+			if tc.wantLVH == (common.Hash{}) {
+				require.NotErrorAs(t, err, &invalid)
+				return
+			}
+			require.ErrorAs(t, err, &invalid)
+			require.Equal(t, tc.wantLVH, invalid.LatestValidHash)
 		})
 	}
 }

@@ -1483,9 +1483,14 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		// stale nonce/codeHash flows through the per-field refresh (which
 		// only overwrites fields a versionMap cell exists for), so Empty()
 		// returns false and the EVM misses CallNewAccountGas.
-		if destroyed, _, revived := ibs.versionMap.AccountLifecycle(addr, ibs.txIndex); destroyed && !revived {
+		destroyed, revived, destructDep := ibs.versionMap.AccountLifecycleWithDestructDep(addr, ibs.txIndex)
+		if destroyed && !revived {
 			ibs.finalizeProvisionalAddressRead(addr)
 			return nil, StorageRead, UnknownVersion, nil
+		}
+		// An in-flight destruct below is not destroyed yet, but the committed record predates it.
+		if destructDep != UnknownDep {
+			ibs.dep = max(ibs.dep, destructDep)
 		}
 		// readAccount above recorded a nil map-read marker; the DB resolved
 		// the account, so reconcile the recorded read — a later record cell

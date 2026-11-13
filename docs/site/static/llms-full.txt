@@ -453,7 +453,7 @@ docker pull erigontech/erigon:<version_tag>
 For example:
 
 ```sh
-docker pull erigontech/erigon:v3.8.0
+docker pull erigontech/erigon:v3.8.1
 ```
 
 **3. Start the Erigon container**
@@ -467,7 +467,7 @@ docker run -it erigontech/erigon:<version_tag> <flags>
 For example:
 
 ```sh
-docker run -it erigontech/erigon:v3.8.0 --chain=hoodi --prune.mode=minimal --datadir /erigon-data
+docker run -it erigontech/erigon:v3.8.1 --chain=hoodi --prune.mode=minimal --datadir /erigon-data
 ```
 
 - `-v` connects a folder on your computer to the container (must have authorization)
@@ -482,16 +482,16 @@ docker run -it erigontech/erigon:v3.8.0 --chain=hoodi --prune.mode=minimal --dat
 
 **1. Select Your Processor Architecture and Download**
 
-Go to the Erigon [releases page](https://github.com/erigontech/erigon/releases) on GitHub and select the latest stable version (e.g., v3.8.0) or whichever version you prefer.
+Go to the Erigon [releases page](https://github.com/erigontech/erigon/releases) on GitHub and select the latest stable version (e.g., v3.8.1) or whichever version you prefer.
 
 Download the appropriate binary file for your processor architecture:
 
 | Processor Type | Binary File Type | Example File Name |
 | --- | --- | --- |
-| 64-bit Intel/AMD | Debian Package (.deb) | erigon_3.8.0_amd64.deb |
-| 64-bit ARM | Debian Package (.deb) | erigon_3.8.0_arm64.deb |
-| 64-bit Intel/AMD | Compressed Archive (.tar.gz) | erigon_v3.8.0_linux_amd64.tar.gz |
-| 64-bit ARM | Compressed Archive (.tar.gz) | erigon_v3.8.0_linux_arm64.tar.gz |
+| 64-bit Intel/AMD | Debian Package (.deb) | erigon_3.8.1_amd64.deb |
+| 64-bit ARM | Debian Package (.deb) | erigon_3.8.1_arm64.deb |
+| 64-bit Intel/AMD | Compressed Archive (.tar.gz) | erigon_v3.8.1_linux_amd64.tar.gz |
+| 64-bit ARM | Compressed Archive (.tar.gz) | erigon_v3.8.1_linux_arm64.tar.gz |
 
 The amd64 artifacts are compiled for the `x86-64-v2` baseline (SSE4.2, POPCNT). Intel Nehalem (2008) and AMD Bulldozer (2011) or newer qualify; older hardware is not supported.
 
@@ -512,7 +512,7 @@ sha256sum <DOWNLOADED_FILE_NAME>
 Example with a `tar.gz` file:
 
 ```sh
-sha256sum erigon_v3.8.0_linux_amd64.tar.gz
+sha256sum erigon_v3.8.1_linux_amd64.tar.gz
 ```
 
 This command will output a long string (the computed checksum) followed by the file name.
@@ -632,7 +632,7 @@ git fetch --tags
 Check out the desired version tag by replacing `<tag_name>` with the version you want. Normally the latest stable version is the best; check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
 
 ```sh
-git checkout v3.8.0
+git checkout v3.8.1
 ```
 
 **2.3 Compile the Software**
@@ -741,7 +741,7 @@ git fetch --tags
 Check out the desired version tag by replacing `<tag_name>` with the version you want. Normally the latest stable version is the best; check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
 
 ```bash
-git checkout v3.8.0
+git checkout v3.8.1
 ```
 
 You might need to change the `ExecutionPolicy` to allow scripts created locally or signed by a trusted publisher to run. Open a **Powershell session as Administrator** and type:
@@ -985,7 +985,7 @@ Create a new file named `docker-compose.yml` in a directory where you want to ma
 ```yaml
 services:
   erigon:
-    image: erigontech/erigon:v3.8.0
+    image: erigontech/erigon:v3.8.1
     container_name: erigon-node
     restart: always
     command:
@@ -1030,7 +1030,7 @@ echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
 
 or by exporting it in your shell. Forward the `30303`, `42069`, `4000` and `4001` ports on your router, plus the QUIC UDP port used by your image; otherwise, peers still cannot reach you.
 
-QUIC support depends on the image version. v3.7.1 uses `4001/udp`; builds that include `--caplin.quic.disable` default to `4002/udp`. Check `docker run --rm erigontech/erigon:v3.8.0 --help` for `--caplin.discovery.quicport`, and keep only the QUIC UDP mapping that matches its port. If that option is absent, the image has no QUIC support; remove both QUIC UDP mappings. Keep `4001:4001/tcp` in all cases.
+QUIC support depends on the image version. v3.7.1 uses `4001/udp`; builds that include `--caplin.quic.disable` default to `4002/udp`. Check `docker run --rm erigontech/erigon:v3.8.1 --help` for `--caplin.discovery.quicport`, and keep only the QUIC UDP mapping that matches its port. If that option is absent, the image has no QUIC support; remove both QUIC UDP mappings. Keep `4001:4001/tcp` in all cases.
 
 If only the QUIC port cannot be published, add `--caplin.quic.disable` to the `command` block **only if the selected image's `--help` lists it**, and remove both QUIC UDP mappings. This switch is unavailable in v3.7.1 and earlier. Caplin still needs `4000/udp` for discovery whether or not QUIC is enabled.
 
@@ -1078,7 +1078,7 @@ Publishing each port individually is explicit, but Docker's Network Address Tran
 ```yaml
 services:
   erigon:
-    image: erigontech/erigon:v3.8.0
+    image: erigontech/erigon:v3.8.1
     network_mode: host
     command:
       - --chain=mainnet
@@ -1204,7 +1204,7 @@ Create a new file named `docker-compose.yml` in a directory where you want to ma
 ```yaml
 services:
   erigon:
-    image: erigontech/erigon:v3.8.0
+    image: erigontech/erigon:v3.8.1
     container_name: erigon-node
     restart: always
     command:
@@ -1249,7 +1249,7 @@ echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
 
 or by exporting it in your shell. Forward the `30303`, `42069`, `4000` and `4001` ports on your router, plus the QUIC UDP port used by your image, otherwise peers still cannot reach you.
 
-QUIC support depends on the image version. v3.7.1 uses `4001/udp`; builds that include `--caplin.quic.disable` default to `4002/udp`. Check `docker run --rm erigontech/erigon:v3.8.0 --help` for `--caplin.discovery.quicport`, and keep only the QUIC UDP mapping that matches its port. If that option is absent, the image has no QUIC support; remove both QUIC UDP mappings. Keep `4001:4001/tcp` in all cases.
+QUIC support depends on the image version. v3.7.1 uses `4001/udp`; builds that include `--caplin.quic.disable` default to `4002/udp`. Check `docker run --rm erigontech/erigon:v3.8.1 --help` for `--caplin.discovery.quicport`, and keep only the QUIC UDP mapping that matches its port. If that option is absent, the image has no QUIC support; remove both QUIC UDP mappings. Keep `4001:4001/tcp` in all cases.
 
 If only the QUIC port cannot be published, add `--caplin.quic.disable` to the `command` block **only if the selected image's `--help` lists it**, and remove both QUIC UDP mappings. This switch is unavailable in v3.7.1 and earlier. Caplin still needs `4000/udp` for discovery whether or not QUIC is enabled.
 
@@ -1297,7 +1297,7 @@ Publishing each port individually is explicit, but Docker's Network Address Tran
 ```yaml
 services:
   erigon:
-    image: erigontech/erigon:v3.8.0
+    image: erigontech/erigon:v3.8.1
     network_mode: host
     command:
       - --chain=gnosis
@@ -1442,7 +1442,7 @@ erigon [options]
 
 - Alternatively you can use the Docker syntax, for example:
 
-  `docker run -it erigontech/erigon:v3.8.0 [options]`
+  `docker run -it erigontech/erigon:v3.8.1 [options]`
 
 **Built from Source**
 
@@ -1942,7 +1942,7 @@ Erigon stores the majority of its chain data in **snapshot files** (`.seg` segme
 
 ## `seg du` — Disk Usage Report
 
-The `seg du` subcommand scans the snapshot directory for a given `--datadir` and reports a breakdown of disk usage by category, the detected (and configured) node type, and estimated sizes for each pruning mode.
+The `seg du` subcommand scans the snapshot directory for a given `--datadir` and reports a breakdown of disk usage by category, the configured node type, and estimated sizes for each pruning mode. Each estimate sums the files the downloader would select for that mode, plus any file in the state directories whose name Erigon does not recognise, which every row counts.
 
 ### Syntax
 
@@ -1982,12 +1982,12 @@ total: 1.8TB (4285 files)
 
 Sizes use Erigon's `ByteCount` format (e.g. `850.4GB`, `1.2TB` — binary scale, no space). Block/step counts and prune-window sizes use `.` as the thousands separator, matching the binary's own output.
 
-The estimator only sums files already on disk, so the **archive** row always equals the current total and no node-type estimate can exceed it. Estimates are therefore most meaningful against an archive datadir (shown above); on an already-pruned node the larger modes are capped at what is physically present. Rows are always printed in the fixed order `archive → full → blocks → minimal`.
+The estimator only sums files already on disk, so no node-type estimate can exceed what is present. Commitment history and Caplin data are left out of every row, as a default node does not download them. Estimates are therefore most meaningful against an archive datadir (shown above); on an already-pruned node the larger modes are capped at what is physically present. Rows are printed in the fixed order `archive → full → blocks → minimal`. When a headers or bodies segment cannot be read, or the indexed bodies do not cover every block in the headers and bodies segments on disk, `seg du` logs a warning and prints the report without estimates (`"estimates": null` in JSON).
 
 **Header fields explained:**
 
-- **Chain** — detected from `chaindata` (falls back to `unknown` if the database is locked or empty).
-- **Mode** — the configured pruning mode read from the database, plus the mode detected from which files are present on disk. If they disagree, both are shown (e.g., `full (files look like archive)`).
+- **Chain** — read from `chaindata` when it can be opened; `unknown` otherwise.
+- **Mode** — the configured pruning mode read from `chaindata`; `mode unknown` when it cannot be read.
 - **blocks 0–N** — the highest block number across all block segment files.
 - **steps 0–N** — the highest step number across all state files. A step is an internal Erigon unit covering a fixed number of *transactions* (`config3.DefaultStepSize` = 390,625 txNums), so the number of blocks per step varies with chain activity.
 
@@ -2037,15 +2037,15 @@ Use `--json` to get a machine-readable object suitable for scripting:
 erigon seg du --datadir /data/erigon --json | jq '.estimates'
 ```
 
-The JSON schema matches the `duResult` struct: top-level fields `chain`, `configured_mode`, `detected_mode`, `block_range`, `step_range`, `total_bytes`, `total_files`, `categories`, `subcategories`, `other_extensions`, `estimates`.
+The JSON schema matches the `duResult` struct: top-level fields `chain`, `configured_mode`, `block_range`, `step_range`, `total_bytes`, `total_files`, `categories`, `subcategories`, `other_extensions`, `estimates`, `caplin_bytes`.
 
 :::tip
-Run `seg du` while the node is **stopped**. If Erigon is running and holds the database lock, the command falls back to `unknown` for the chain name and omits the configured mode — it will still scan snapshot files and produce size figures, but mode information will be incomplete.
+`seg du` reads only snapshot files for its figures. `chaindata`, when it can be opened, supplies the chain name and the configured mode; without it both show as unknown and the figures are the same.
 :::
 
 ## Snapshot Types (Pruning Modes)
 
-The snapshot set on disk reflects the node's **pruning mode**, and `seg du` automatically detects which mode your current files correspond to. For what each mode retains and how to choose one, see [Pruning Modes](https://docs.erigon.tech/fundamentals/pruning-modes).
+The snapshot set on disk reflects the node's **pruning mode**, and `seg du` shows the mode configured in `chaindata`. For what each mode retains and how to choose one, see [Pruning Modes](https://docs.erigon.tech/fundamentals/pruning-modes).
 
 The `seg du` estimates table shows the projected disk footprint for each mode given the files currently present, so you can evaluate a mode change before committing to a resync.
 
