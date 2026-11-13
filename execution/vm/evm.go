@@ -41,11 +41,17 @@ import (
 
 func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
 	p, ok := evm.precompiles[addr]
-	return p, ok
+	if ok || !evm.statefulPrecompiles {
+		return p, ok
+	}
+	return statefulResolve(addr)
 }
 
 // runPrecompile puts the identity output into the buffer a RETURN of the callee frame would use.
-func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
+func (evm *EVM) runPrecompile(p PrecompiledContract, env PrecompileEnv, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
+	if sp, ok := p.(StatefulPrecompile); ok {
+		return evm.runStatefulPrecompile(sp, env, input, gas, tracer)
+	}
 	if _, ok := p.(*milliTimestamp); ok {
 		p = &milliTimestamp{millis: evm.Context.Time*1000 + uint64(evm.Context.Milliseconds)}
 	}
@@ -56,14 +62,9 @@ func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdG
 	if buf == nil {
 		return RunPrecompiledContract(p, input, gas, tracer)
 	}
-	gasCost := p.RequiredGas(input)
-	if gas.Execution < gasCost {
-		return nil, gas, ErrOutOfGas
-	}
-	remaining := gas
-	remaining.Execution -= gasCost
-	if tracer.HasGasChangeHook() {
-		tracer.EmitGasChange(gas, remaining, tracing.GasChangeCallPrecompiledContract)
+	remaining, err := chargePrecompile(p, input, gas, tracer)
+	if err != nil {
+		return nil, remaining, err
 	}
 	*buf = append((*buf)[:0], input...)
 	return slices.Clip(*buf), remaining, nil
@@ -113,8 +114,10 @@ type EVM struct {
 	// replaced wholesale by SetPrecompiles for state-override RPC calls.
 	precompiles PrecompiledContracts
 
-	readOnly   bool   // Whether to throw on stateful modifications
-	returnData []byte // Last CALL's return data for subsequent reuse
+	readOnly bool // Whether to throw on stateful modifications
+	// statefulPrecompiles is whether the chain rules route stateful precompiles.
+	statefulPrecompiles bool
+	returnData          []byte // Last CALL's return data for subsequent reuse
 
 	spareFrame *CallContext // a finished nested frame's context, see putCallContext
 }
@@ -151,6 +154,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 	}
 	evm.jt = jumpTable(evm.chainRules, vmConfig)
 	evm.precompiles = Precompiles(evm.chainRules)
+	evm.statefulPrecompiles = statefulPrecompilesOn(evm.chainRules)
 
 	return evm
 }
@@ -182,6 +186,7 @@ func (evm *EVM) ResetForSystemCall(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.returnData = nil
 	evm.jt = jumpTable(chainRules, vmConfig)
 	evm.precompiles = Precompiles(chainRules)
+	evm.statefulPrecompiles = statefulPrecompilesOn(chainRules)
 }
 
 // Cancel requests cancellation without waiting for execution to stop.
@@ -369,7 +374,8 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
+		env := PrecompileEnv{Self: addr, Caller: caller, Value: value, ReadOnly: evm.readOnly, DirectCall: true}
+		ret, gasRemaining, err = evm.runPrecompile(p, env, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
@@ -444,7 +450,8 @@ func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input [
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
+		env := PrecompileEnv{Self: addr, Caller: caller, Value: value, ReadOnly: evm.readOnly}
+		ret, gasRemaining, err = evm.runPrecompile(p, env, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		contract := Contract{caller: caller, addr: caller, value: value, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, false)
@@ -503,7 +510,8 @@ func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Add
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
+		env := PrecompileEnv{Self: addr, Caller: callerAddress, Value: value, ReadOnly: evm.readOnly}
+		ret, gasRemaining, err = evm.runPrecompile(p, env, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		contract := Contract{caller: callerAddress, addr: caller, value: value, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, false)
@@ -575,7 +583,8 @@ func (evm *EVM) StaticCall(caller accounts.Address, addr accounts.Address, input
 
 	switch {
 	case isPrecompile:
-		ret, gasRemaining, err = evm.runPrecompile(p, input, gasRemaining, tracer)
+		env := PrecompileEnv{Self: addr, Caller: caller, ReadOnly: true, DirectCall: true}
+		ret, gasRemaining, err = evm.runPrecompile(p, env, input, gasRemaining, tracer)
 	case code.Len() > 0:
 		contract := Contract{caller: caller, addr: addr, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, true)
