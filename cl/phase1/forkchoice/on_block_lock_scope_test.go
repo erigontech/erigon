@@ -334,7 +334,7 @@ func TestNewPayloadPublishesInvalidatedBeforeReleasingAdmission(t *testing.T) {
 		defer store.mu.Unlock()
 		_, _, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 			blockRoot, func() error { return nil }, derived,
-			block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+			block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil, nil)
 	}()
 	awaitSignal(t, elEntered, "NewPayload to start")
 
@@ -396,7 +396,7 @@ func TestNewPayloadSkipsELWhenBlockIsNoLongerAdmissible(t *testing.T) {
 	store.mu.Lock()
 	status, _, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 		blockRoot, func() error { return errBlockAtFinalizedHorizon }, noDerivedHash,
-		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil, nil)
 	store.mu.Unlock()
 
 	require.ErrorIs(t, err, errBlockAtFinalizedHorizon)
@@ -548,7 +548,7 @@ func TestNewPayloadKeepsInvalidAheadOfValidated(t *testing.T) {
 		defer store.mu.Unlock()
 		_, _, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 			blockRoot, func() error { return nil }, noDerivedHash,
-			block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+			block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil, nil)
 	}()
 	awaitSignal(t, elEntered, "NewPayload to start")
 
@@ -577,7 +577,7 @@ func TestNewPayloadPublishesInvalidatedAgainstThePayload(t *testing.T) {
 		defer store.mu.Unlock()
 		_, _, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 			common.HexToHash("0xaaaa"), func() error { return nil }, derived,
-			payload, &block.Block.ParentRoot, nil, nil)
+			payload, &block.Block.ParentRoot, nil, nil, nil)
 	}()
 	awaitSignal(t, elEntered, "NewPayload to start")
 
@@ -610,7 +610,7 @@ func TestNewPayloadPublishesInvalidatedAgainstThePayload(t *testing.T) {
 	store.mu.Lock()
 	second, _, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 		common.HexToHash("0xbbbb"), func() error { return nil }, derived,
-		payload, &block.Block.ParentRoot, nil, nil)
+		payload, &block.Block.ParentRoot, nil, nil, nil)
 	store.mu.Unlock()
 	require.NoError(t, err)
 	require.EqualValues(t, execution_client.PayloadStatusInvalidated, second)
@@ -634,7 +634,7 @@ func TestNewPayloadHonoursTheAuthoritativeInvalidSet(t *testing.T) {
 	store.mu.Lock()
 	status, _, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 		common.HexToHash("0xcccc"), func() error { return nil }, derived,
-		payload, &block.Block.ParentRoot, nil, nil)
+		payload, &block.Block.ParentRoot, nil, nil, nil)
 	store.mu.Unlock()
 	require.NoError(t, err)
 	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
@@ -664,7 +664,7 @@ func TestNewPayloadChecksAdmissionOnlyAfterWinningTheToken(t *testing.T) {
 			common.HexToHash("0xbbbb"), func() error {
 				checked.Store(true)
 				return nil
-			}, noDerivedHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+			}, noDerivedHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil, nil)
 		store.mu.Unlock()
 		done <- err
 	}()
@@ -743,7 +743,7 @@ func TestNewPayloadDoesNotWaitForTheLockWhileHoldingTheToken(t *testing.T) {
 			blockRoot, func() error {
 				checked.Store(true)
 				return nil
-			}, noDerivedHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+			}, noDerivedHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil, nil)
 		store.mu.Unlock()
 	}()
 
@@ -773,7 +773,7 @@ func TestNewPayloadForBlockWhileYieldingLockSkipsValidatedPayload(t *testing.T) 
 	f.mu.Lock()
 	status, _, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 		blockRoot, func() error { return nil }, noDerivedHash,
-		&cltypes.Eth1Block{}, nil, nil, nil)
+		&cltypes.Eth1Block{}, nil, nil, nil, nil)
 	locked := f.mu.TryLock()
 	f.mu.Unlock()
 
@@ -873,7 +873,7 @@ func TestNewPayloadInvalidVerdictSurvivesStatusCacheEviction(t *testing.T) {
 	store.mu.Lock()
 	status, _, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 		blockRoot, func() error { return nil }, derived,
-		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil, nil)
 	store.mu.Unlock()
 	require.ErrorContains(t, err, "bad block")
 	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
@@ -952,7 +952,7 @@ func TestNewPayloadFastPathPublishesNothingToRetract(t *testing.T) {
 	store.mu.Lock()
 	status, published, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 		blockRoot, func() error { return nil }, noDerivedHash,
-		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil, nil)
 	store.mu.Unlock()
 
 	require.NoError(t, err)
