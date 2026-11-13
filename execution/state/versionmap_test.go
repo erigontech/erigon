@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"math"
 	"math/big"
 	"math/rand"
 	"reflect"
@@ -2635,13 +2636,16 @@ func TestNewVersionMapSeedAllocatesNoMoreThanTheSerialSeed(t *testing.T) {
 	}
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(4)) // AllocsPerRun would force 1 and so the serial path
 	NewVersionMap(bal)
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
+	// Mallocs counts every goroutine in the process, so keep the least of several runs.
+	least := math.MaxFloat64
 	for range 5 {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
 		newVersionMapSink = NewVersionMap(bal)
+		runtime.ReadMemStats(&after)
+		least = min(least, float64(after.Mallocs-before.Mallocs)/n)
 	}
-	runtime.ReadMemStats(&after)
-	require.LessOrEqual(t, float64(after.Mallocs-before.Mallocs)/5/n, 12.1)
+	require.LessOrEqual(t, least, 12.1)
 }
 
 // A net-zero storage write has no BAL cell, so it must not count as already seeded.
