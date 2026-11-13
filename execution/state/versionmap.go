@@ -667,8 +667,10 @@ func forEachBALChunk(n int, cellsOf func(i int) int, fn func(lo, hi int)) {
 			wg.Done()
 		}
 	}
-	run()
-	wg.Wait()
+	func() {
+		defer wg.Wait() // a panic on the caller still waits, so no worker writes after it
+		run()
+	}()
 	// A panic on a worker would kill the process; the serial rerun raises it on the caller instead.
 	if panicked.Load() {
 		fn(0, n)

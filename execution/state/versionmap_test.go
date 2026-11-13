@@ -2595,11 +2595,29 @@ func TestNewVersionMapSeedsLargeBAL(t *testing.T) {
 	require.True(t, ok)
 }
 
+// withOneSeedWorker gives the parallel seed one worker that always takes a job, whatever GOMAXPROCS the test runs with.
+func withOneSeedWorker(t *testing.T) {
+	prevProcs := runtime.GOMAXPROCS(4) // the seed dispatches jobs only with more than one P
+	jobs := make(chan func(), 1)
+	go func() {
+		for job := range jobs {
+			job()
+		}
+	}()
+	prevWorkers := balSeedWorkers
+	balSeedWorkers = func() chan func() { return jobs }
+	t.Cleanup(func() {
+		balSeedWorkers = prevWorkers
+		close(jobs)
+		runtime.GOMAXPROCS(prevProcs)
+	})
+}
+
 // A panic on a seed worker falls back to a serial seed on the caller.
 func TestNewVersionMapSeedWorkerPanicFallsBackToSerial(t *testing.T) {
 	const n = 3000
 	bal := transfersBAL(n)
-	NewVersionMap(bal) // starts the seed workers
+	withOneSeedWorker(t)
 	var panicked atomic.Bool
 	balSeedJobHook = func() {
 		if panicked.CompareAndSwap(false, true) {
@@ -2608,12 +2626,7 @@ func TestNewVersionMapSeedWorkerPanicFallsBackToSerial(t *testing.T) {
 	}
 	defer func() { balSeedJobHook = nil }()
 
-	var vm *VersionMap
-	for range 100 { // a job reaches a worker only when one is idle
-		if vm = NewVersionMap(bal); panicked.Load() {
-			break
-		}
-	}
+	vm := NewVersionMap(bal)
 	require.True(t, panicked.Load(), "no seed job ran on a worker")
 	coinbase := accounts.InternAddress(common.BigToAddress(big.NewInt(n + 1)))
 	for tx := range n {
@@ -2622,6 +2635,27 @@ func TestNewVersionMapSeedWorkerPanicFallsBackToSerial(t *testing.T) {
 		require.Equal(t, MVReadResultDone, res.Status())
 		require.Equal(t, uint64(tx), v.Uint64())
 	}
+}
+
+// A panic on the caller's own chunk returns only after the workers stopped, so none writes after the caller recovers.
+func TestForEachBALChunkWaitsForWorkersWhenTheCallerPanics(t *testing.T) {
+	withOneSeedWorker(t)
+	workerStarted := make(chan struct{})
+	var workerDone atomic.Bool
+	balSeedJobHook = func() {
+		close(workerStarted)
+		time.Sleep(50 * time.Millisecond)
+		workerDone.Store(true)
+	}
+	defer func() { balSeedJobHook = nil }()
+
+	require.Panics(t, func() {
+		forEachBALChunk(4, func(int) int { return balSeedChunkCells }, func(lo, hi int) {
+			<-workerStarted
+			panic("crafted account")
+		})
+	})
+	require.True(t, workerDone.Load(), "the caller returned while a worker was still running")
 }
 
 // Seeding many small accounts in parallel allocates no more per account than the serial seed did: 12.1 allocations
