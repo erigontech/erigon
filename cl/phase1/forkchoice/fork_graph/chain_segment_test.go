@@ -181,13 +181,11 @@ func TestAddChainSegmentLightClientUpdateReachesPeriodStoreAtFinalization(t *tes
 	update := g.NewestLightClientUpdate()
 	require.NotNil(t, update)
 	period := g.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot)
-	_, served := g.GetLightClientUpdate(period)
-	require.False(t, served, "served before finalization")
+	require.Nil(t, g.GetLightClientUpdates(period, period+1, common.Hash{})[0], "served before finalization")
 
 	g.KeepFinalizedLightClientUpdates(common.Hash(mustBlockRoot(t, blocks[len(blocks)-1])))
 
-	_, served = g.GetLightClientUpdate(period)
-	require.True(t, served)
+	require.Same(t, update, g.GetLightClientUpdates(period, period+1, common.Hash{})[0])
 }
 
 func TestAddChainSegmentMissingSegmentLeavesGraphUnchanged(t *testing.T) {
