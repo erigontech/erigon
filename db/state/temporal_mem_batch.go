@@ -961,8 +961,10 @@ func flushDomainWriters(ctx context.Context, tx kv.RwTx, ws []*DomainBufferedWri
 		}
 	}
 	for _, w := range ws {
-		if err := w.Flush(ctx, tx); err != nil {
-			return err
+		if !w.discard {
+			if err := w.flushValues(ctx, tx); err != nil {
+				return err
+			}
 		}
 		w.Close()
 	}

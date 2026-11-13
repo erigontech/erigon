@@ -667,6 +667,10 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
 	}
+	return w.flushValues(ctx, tx)
+}
+
+func (w *DomainBufferedWriter) flushValues(ctx context.Context, tx kv.RwTx) error {
 	if w.values == nil {
 		w.Close()
 		return nil
