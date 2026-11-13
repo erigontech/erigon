@@ -422,8 +422,46 @@ func TestFoldBindRacesCommitmentFlush(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
+	// A state write while the flusher holds a swapped commitment diff keeps the fold's bound target.
+	require.NoError(t, pe.foldTx(t.Context(), rwTx, &txResult{blockNum: 2, blockHash: common.Hash{2}, txNum: 20}))
+	inSwap, release, swapDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(swapDone)
+		domains.LockChangesetAccumulator()
+		restore := domains.SwapCommitmentDiffLocked(css[1])
+		close(inSwap)
+		<-release
+		restore()
+		domains.UnlockChangesetAccumulator()
+	}()
+	<-inSwap
+	wrote := make(chan error, 1)
+	go func() {
+		addr := common.Address{2, 0}
+		wrote <- domains.DomainPut(kv.AccountsDomain, rwTx, addr[:], []byte{1}, 20, []byte{})
+	}()
+	select {
+	case err := <-wrote:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		close(release)
+		t.Fatal("a state write blocked while the commitment diff was swapped")
+	}
+	close(release)
+	<-swapDone
+
 	folded := make(chan struct{})
 	flushed := make(chan error, 1)
+	stopped := false
+	stopFlusher := func() error {
+		if stopped {
+			return nil
+		}
+		stopped = true
+		close(folded)
+		return <-flushed
+	}
+	defer func() { _ = stopFlusher() }()
 	go func() {
 		for {
 			for b := 1; b < blocks; b++ {
@@ -448,6 +486,9 @@ func TestFoldBindRacesCommitmentFlush(t *testing.T) {
 
 	for b := 2; b <= blocks; b++ {
 		for i := range txsPerBlock {
+			if b == 2 && i == 0 {
+				continue // folded and written in the deterministic phase above
+			}
 			txNum := uint64(b)*10 + uint64(i)
 			require.NoError(t, pe.foldTx(t.Context(), rwTx, &txResult{blockNum: uint64(b), blockHash: common.Hash{byte(b)}, txNum: txNum}))
 			addr := common.Address{byte(b), byte(i)}
@@ -455,8 +496,7 @@ func TestFoldBindRacesCommitmentFlush(t *testing.T) {
 		}
 	}
 	pe.unbindFoldChangeset()
-	close(folded)
-	require.NoError(t, <-flushed)
+	require.NoError(t, stopFlusher())
 
 	for b := 1; b <= blocks; b++ {
 		wantAccounts, wantCommitment := txsPerBlock, 1
