@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -132,10 +133,10 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 		if idxSlot == nil {
 			return nil, nil
 		}
-		if slot < idxSlot.BaseDataID() {
-			return nil, fmt.Errorf("slot %d is before the base data id %d", slot, idxSlot.BaseDataID())
+		blockOffset, err := slotOffset(idxSlot, slot)
+		if err != nil {
+			return nil, err
 		}
-		blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
 
 		gg := seg.Src().MakeGetter()
 		gg.Reset(blockOffset)
@@ -191,10 +192,10 @@ func (r *beaconSnapshotReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx
 		if idxSlot == nil {
 			return nil, nil
 		}
-		if slot < idxSlot.BaseDataID() {
-			return nil, fmt.Errorf("slot %d is before the base data id %d", slot, idxSlot.BaseDataID())
+		blockOffset, err := slotOffset(idxSlot, slot)
+		if err != nil {
+			return nil, err
 		}
-		blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
 
 		gg := seg.Src().MakeGetter()
 		gg.Reset(blockOffset)
@@ -259,10 +260,10 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 		if idxSlot == nil {
 			return nil, nil
 		}
-		if *slot < idxSlot.BaseDataID() {
-			return nil, fmt.Errorf("slot %d is before the base data id %d", slot, idxSlot.BaseDataID())
+		blockOffset, err := slotOffset(idxSlot, *slot)
+		if err != nil {
+			return nil, err
 		}
-		blockOffset := idxSlot.OrdinalLookup(*slot - idxSlot.BaseDataID())
 
 		gg := seg.Src().MakeGetter()
 		gg.Reset(blockOffset)
@@ -315,4 +316,14 @@ func (r *beaconSnapshotReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, r
 
 	h, _, _, err := r.sn.ReadHeader(*slot, tx)
 	return h, err
+}
+
+func slotOffset(idx *recsplit.Index, slot uint64) (uint64, error) {
+	if slot < idx.BaseDataID() {
+		return 0, fmt.Errorf("slot %d is before the base data id %d", slot, idx.BaseDataID())
+	}
+	if end := idx.BaseDataID() + idx.KeyCount(); slot >= end {
+		return 0, fmt.Errorf("slot %d is at or after the index end %d", slot, end)
+	}
+	return idx.OrdinalLookup(slot - idx.BaseDataID()), nil
 }
