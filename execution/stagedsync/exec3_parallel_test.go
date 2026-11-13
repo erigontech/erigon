@@ -2095,6 +2095,19 @@ func TestAsyncBALBuilderAllocatesAsSerial(t *testing.T) {
 		a.finish()
 	})
 	require.LessOrEqual(t, async, serial)
+
+	// Each execImpl call also starts the goroutine and allocates its queue and done channel: 7 measured, and 2 more
+	// when the runtime allocates a new g instead of reusing an exited one.
+	const builderLifecycle = 7 + 2
+	perCall := testing.AllocsPerRun(100, func() {
+		var a asyncBALBuilder
+		for sealed := 1; sealed <= txs+1; sealed++ {
+			a.add(io, sealed)
+		}
+		a.finish()
+		a.stop()
+	})
+	require.LessOrEqual(t, perCall, serial+builderLifecycle)
 }
 
 // mixedBALIO records txs that read and write balance, nonce, code and storage, with one self-destruct.
