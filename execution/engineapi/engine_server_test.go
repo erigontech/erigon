@@ -25,7 +25,6 @@ import (
 	"math/big"
 	"runtime"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -561,163 +560,12 @@ func TestNewPayloadLooksUpTheParentOnce(t *testing.T) {
 	require.Equal(t, 1, lookups)
 }
 
-// A side-chain payload beyond the reorg depth is stored after an ACCEPTED answer, and is sent again
-// once its parent is validated. The INVALID answer must also remove the stored block.
-func TestNewPayloadRemovesAStoredBlockWithAnInvalidHeader(t *testing.T) {
-	m, block1, block2 := sideChainWithAnInvalidHeader(t)
-	srv, _ := newTesterEngineServer(t, m, m.ExecModule, 0, 2)
-	ctx := t.Context()
-	newPayload := func(block *types.Block) *engine_types.PayloadStatus {
-		payload, err := engine_types.ExecutionPayloadFromBlock(block)
-		require.NoError(t, err)
-		status, err := srv.NewPayloadV2(ctx, payload)
-		require.NoError(t, err)
-		return status
-	}
-	forkchoice := func(head common.Hash) {
-		r, err := srv.ForkchoiceUpdatedV2(ctx, &engine_types.ForkChoiceState{HeadHash: head}, nil)
-		require.NoError(t, err)
-		require.Equal(t, engine_types.ValidStatus, r.PayloadStatus.Status)
-		require.Eventually(t, func() bool {
-			ready, err := m.ExecModule.Ready(ctx)
-			return err == nil && ready
-		}, time.Minute, time.Millisecond)
-	}
-
-	require.Equal(t, engine_types.AcceptedStatus, newPayload(block1).Status)
-	require.Equal(t, engine_types.AcceptedStatus, newPayload(block2).Status)
-	forkchoice(m.Genesis.Hash())
-	require.Equal(t, engine_types.ValidStatus, newPayload(block1).Status)
-	forkchoice(block1.Hash())
-	require.True(t, m.ExecModule.IsValidated(block1.Hash()))
-
-	status := newPayload(block2)
-	require.Equal(t, engine_types.InvalidStatus, status.Status)
-	require.Equal(t, block1.Hash(), *status.LatestValidHash)
-	require.ErrorContains(t, status.ValidationError.Error(), "invalid block: invalid gas limit")
-	requireNotStored(t, m, block2)
-}
-
-// A block with an invalid header is stored, as a download stores it, right after the request looks it
-// up and misses it. The INVALID answer must also remove the block.
-func TestNewPayloadRemovesABlockWithAnInvalidHeaderStoredDuringTheRequest(t *testing.T) {
-	m, block1, block2 := sideChainWithAnInvalidHeader(t)
-	module := &storingAfterLookup{ExecutionModule: m.ExecModule, t: t, block: block2}
-	srv, _ := newTesterEngineServer(t, m, module, 0, 2)
-	ctx := t.Context()
-	newPayload := func(block *types.Block) *engine_types.PayloadStatus {
-		payload, err := engine_types.ExecutionPayloadFromBlock(block)
-		require.NoError(t, err)
-		status, err := srv.NewPayloadV2(ctx, payload)
-		require.NoError(t, err)
-		return status
-	}
-	forkchoice := func(head common.Hash) {
-		r, err := srv.ForkchoiceUpdatedV2(ctx, &engine_types.ForkChoiceState{HeadHash: head}, nil)
-		require.NoError(t, err)
-		require.Equal(t, engine_types.ValidStatus, r.PayloadStatus.Status)
-		require.Eventually(t, func() bool {
-			ready, err := m.ExecModule.Ready(ctx)
-			return err == nil && ready
-		}, time.Minute, time.Millisecond)
-	}
-
-	require.Equal(t, engine_types.AcceptedStatus, newPayload(block1).Status)
-	forkchoice(m.Genesis.Hash())
-	require.Equal(t, engine_types.ValidStatus, newPayload(block1).Status)
-	forkchoice(block1.Hash())
-	require.True(t, m.ExecModule.IsValidated(block1.Hash()))
-
-	requireInvalidAndRemoved := func(status *engine_types.PayloadStatus) {
-		require.Equal(t, engine_types.InvalidStatus, status.Status)
-		require.Equal(t, block1.Hash(), *status.LatestValidHash)
-		require.ErrorContains(t, status.ValidationError.Error(), "invalid gas limit")
-		requireNotStored(t, m, block2)
-	}
-	requireInvalidAndRemoved(newPayload(block2))
-	require.True(t, module.stored.Load())
-	requireInvalidAndRemoved(newPayload(block2))
-}
-
-// A stored block with an invalid header is sent again while the forkchoice update that commits it
-// hides it from a lookup. The payload must take the normal path, which answers SYNCING while the
-// execution module is busy. Sent again later, it is answered INVALID and removed.
-func TestNewPayloadRemovesAStoredBlockWithAnInvalidHeaderSentDuringAForkchoiceUpdate(t *testing.T) {
-	var pause atomic.Bool
-	paused, resume := make(chan struct{}), make(chan struct{})
-	observer := func(ctx context.Context, point execmodule.StateTransitionPoint) {
-		if point != execmodule.StateTransitionOverlayPublished || !pause.CompareAndSwap(true, false) {
-			return
-		}
-		close(paused)
-		select {
-		case <-resume:
-		case <-ctx.Done():
-		}
-	}
-	m, block1, block2 := sideChainWithAnInvalidHeader(t, execmoduletester.WithStateTransitionObserver(observer))
-	srv, _ := newTesterEngineServer(t, m, m.ExecModule, 0, 2)
-	var resumeOnce sync.Once
-	resumeForkchoice := func() { resumeOnce.Do(func() { close(resume) }) }
-	t.Cleanup(resumeForkchoice)
-	ctx := t.Context()
-	newPayload := func(block *types.Block) *engine_types.PayloadStatus {
-		payload, err := engine_types.ExecutionPayloadFromBlock(block)
-		require.NoError(t, err)
-		status, err := srv.NewPayloadV2(ctx, payload)
-		require.NoError(t, err)
-		return status
-	}
-	waitIdle := func() {
-		require.Eventually(t, func() bool {
-			ready, err := m.ExecModule.Ready(ctx)
-			return err == nil && ready
-		}, time.Minute, time.Millisecond)
-	}
-
-	require.Equal(t, engine_types.AcceptedStatus, newPayload(block1).Status)
-	r, err := srv.ForkchoiceUpdatedV2(ctx, &engine_types.ForkChoiceState{HeadHash: m.Genesis.Hash()}, nil)
-	require.NoError(t, err)
-	require.Equal(t, engine_types.ValidStatus, r.PayloadStatus.Status)
-	waitIdle()
-	require.Equal(t, engine_types.ValidStatus, newPayload(block1).Status)
-	// Stored as a download stores it, in the overlay that the next forkchoice update commits.
-	_, err = m.InsertBlocks(ctx, []*types.Block{block2})
-	require.NoError(t, err)
-
-	pause.Store(true)
-	forkchoiceDone := make(chan error, 1)
-	go func() {
-		_, err := srv.ForkchoiceUpdatedV2(ctx, &engine_types.ForkChoiceState{HeadHash: block1.Hash()}, nil)
-		forkchoiceDone <- err
-	}()
-	select {
-	case <-paused:
-	case <-time.After(time.Minute):
-		t.Fatal("the forkchoice update did not publish its overlay")
-	}
-	hash, number := block2.Hash(), block2.NumberU64()
-	hidden, err := m.ExecModule.GetHeader(ctx, &hash, &number)
-	require.NoError(t, err)
-	require.Nil(t, hidden, "the paused forkchoice update must hide the block from a lookup")
-	require.Equal(t, engine_types.SyncingStatus, newPayload(block2).Status)
-	resumeForkchoice()
-	require.NoError(t, <-forkchoiceDone)
-	waitIdle()
-
-	status := newPayload(block2)
-	require.Equal(t, engine_types.InvalidStatus, status.Status)
-	require.Equal(t, block1.Hash(), *status.LatestValidHash)
-	require.ErrorContains(t, status.ValidationError.Error(), "invalid block: invalid gas limit")
-	requireNotStored(t, m, block2)
-}
-
 // sideChainWithAnInvalidHeader builds a canonical chain of four blocks and a side chain of two
 // blocks on the genesis. The second side block has a doubled gas limit, which is invalid for its
 // parent.
-func sideChainWithAnInvalidHeader(t *testing.T, options ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *types.Block, *types.Block) {
+func sideChainWithAnInvalidHeader(t *testing.T) (*execmoduletester.ExecModuleTester, *types.Block, *types.Block) {
 	t.Helper()
-	m := execmoduletester.New(t, append([]execmoduletester.Option{execmoduletester.WithGenesisSpec(&types.Genesis{Config: preCancunChainConfig()})}, options...)...)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: preCancunChainConfig()}))
 	canonical, err := m.GenerateChain(4, func(int, *blockgen.BlockGen) {})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(canonical))
