@@ -641,7 +641,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 			return fmt.Errorf("[commitment_convert] legacy commitment files are not visible to the aggregator: %s", strings.Join(unindexed, ", "))
 		}
 		if err := checkCommitmentHistoryV3Start(at.d[kv.CommitmentDomain], at.StepSize()); err != nil {
-			return err
+			return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3Advice)
 		}
 	}
 

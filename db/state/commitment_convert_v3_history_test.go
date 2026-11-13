@@ -307,6 +307,7 @@ func TestConvertCommitmentFiles_V3HistoryRefusesPrunedStart(t *testing.T) {
 	err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
 	tx.Rollback()
 	require.ErrorContains(t, err, "commitment history below step")
+	require.ErrorContains(t, err, "erigon seg rm-state --domain=commitment")
 	require.NoDirExists(t, filepath.Join(dirs.Snap, "backup"))
 }
 
