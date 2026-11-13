@@ -1823,15 +1823,7 @@ func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
 // valuesFilesCoverHistory is false when a values file of a range that history covers is not visible: the writes of
 // that range then exist only in history.
 func (dt *DomainRoTx) valuesFilesCoverHistory() bool {
-	if dt.files.EndTxNum() < dt.ht.files.EndTxNum() {
-		return false
-	}
-	for i := 1; i < len(dt.files); i++ {
-		if dt.files[i-1].endTxNum < dt.files[i].startTxNum {
-			return false
-		}
-	}
-	return true
+	return dt.files.EndTxNum() >= dt.ht.files.EndTxNum()
 }
 
 // GetAsOf does not always require usage of roTx. If it is possible to determine
