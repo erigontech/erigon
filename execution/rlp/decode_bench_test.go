@@ -48,28 +48,3 @@ func BenchmarkDecodeIntSliceReuse(b *testing.B) {
 		}
 	}
 }
-
-func BenchmarkDecodeByteArrays(b *testing.B) {
-	type slot struct {
-		Addr [20]byte
-		Key  [32]byte
-	}
-	in := make([]slot, 1024)
-	for i := range in {
-		in[i].Addr[0], in[i].Addr[19] = byte(i>>8)|0x80, byte(i)
-		in[i].Key[0], in[i].Key[31] = byte(i>>8)|0x80, byte(i)
-	}
-	enc, err := EncodeToBytes(in)
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.SetBytes(int64(len(enc)))
-	b.ReportAllocs()
-
-	var out []slot
-	for b.Loop() {
-		if err := DecodeBytes(enc, &out); err != nil {
-			b.Fatalf("Decode error: %v", err)
-		}
-	}
-}

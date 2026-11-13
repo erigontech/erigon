@@ -448,13 +448,7 @@ func decodeByteArray(s *Stream, val reflect.Value) error {
 		if uint64(len(slice)) > size {
 			return &decodeError{msg: "input string too short", typ: val.Type()}
 		}
-		if len(slice) <= len(s.uintbuf) {
-			b, err := s.readSmall(len(slice))
-			if err != nil {
-				return err
-			}
-			copy(slice, b)
-		} else if err := s.readFull(slice); err != nil {
+		if err := s.readFull(slice); err != nil {
 			return err
 		}
 		// Reject cases where single byte encoding should have been used.
