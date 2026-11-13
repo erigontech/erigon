@@ -517,8 +517,9 @@ type txExecutor struct {
 
 	execRequests chan *execRequest
 	execCount    atomic.Int64
-	abortCount   atomic.Int64
-	invalidCount atomic.Int64
+	reruns       [rerunCauses]atomic.Int64
+	wastedNs     [rerunCauses]atomic.Int64
+	voidTailNs   atomic.Int64
 	readCount    atomic.Int64
 	writeCount   atomic.Int64
 

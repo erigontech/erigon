@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	g "github.com/anacrolix/generics"
 	"github.com/heimdalr/dag"
@@ -129,6 +130,8 @@ type ReadSet struct {
 	// non-revertable "real EVM access" bit) on the read side, so the access set
 	// travels with the read-set rather than as a separate IntraBlockState cache.
 	access AccessSet
+
+	firstDepReadAt time.Time // when this run first read an in-flight cell
 }
 
 func (s *ReadSet) entries() int {
@@ -2668,8 +2671,8 @@ func (io *VersionedIO) WriteCount() (count int64) {
 }
 
 func (io *VersionedIO) ReadCount() (count int64) {
-	for _, input := range io.inputs {
-		count += int64(input.readSet.Len())
+	for i := range io.inputs {
+		count += int64(io.inputs[i].readSet.Len())
 	}
 
 	return count

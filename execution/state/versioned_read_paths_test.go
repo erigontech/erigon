@@ -1189,6 +1189,37 @@ func TestVersionedRead_F_MVReadResultDependencyRecordsDep(t *testing.T) {
 	assert.Equal(t, uint256.NewInt(50), &bal, "no pause hook: falls through to the in-flight value")
 }
 
+func TestVersionedRead_FirstDepReadTimeOnlyOnDependencyPath(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	done := accounts.InternAddress([20]byte{0xf1})
+	first := accounts.InternAddress([20]byte{0xf2})
+	second := accounts.InternAddress([20]byte{0xf3})
+	mvhm.WriteBalance(done, Version{TxIndex: 1}, *uint256.NewInt(7), true)
+	mvhm.WriteBalance(first, Version{TxIndex: 2}, *uint256.NewInt(8), false)
+	mvhm.WriteBalance(second, Version{TxIndex: 3}, *uint256.NewInt(9), false)
+
+	_, err := ibs.GetBalance(done)
+	require.NoError(t, err)
+	require.True(t, ibs.FirstDepReadAt().IsZero(), "a read of a finished write must not take the time")
+
+	before := time.Now()
+	_, err = ibs.GetBalance(first)
+	require.NoError(t, err)
+	at := ibs.FirstDepReadAt()
+	require.False(t, at.Before(before), "the first dependency read must take the time")
+
+	_, err = ibs.GetBalance(second)
+	require.NoError(t, err)
+	require.Equal(t, 3, ibs.DepTxIndex())
+	require.True(t, at.Equal(ibs.FirstDepReadAt()), "a later dependency read must keep the first time")
+}
+
 // A run that skips the wait on an in-flight self-destruct must still record it as a dependency: the
 // destruct burns the balance even when the balance cell already reads as Done.
 func TestVersionedRead_InFlightSelfDestructWithoutWaitRecordsDep(t *testing.T) {

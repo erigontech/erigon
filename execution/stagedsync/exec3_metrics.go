@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,6 +53,10 @@ var (
 		"parallel-exec re-executions, by sync mode")
 	mxDiscardsTotal = metrics.GetOrCreateCounterVec("exec_discards_total", []string{"mode", "reason"},
 		"parallel-exec tasks thrown away, by sync mode and reason")
+	mxDiscardSecondsTotal = metrics.GetOrCreateCounterVec("exec_discard_seconds_total", []string{"mode", "reason"},
+		"parallel-exec run time thrown away, by sync mode and reason")
+	mxVoidTailSecondsTotal = metrics.GetOrCreateCounterVec("exec_void_tail_seconds_total", []string{"mode"},
+		"parallel-exec run time from the first dependency read to the end of the run, by sync mode")
 
 	mxExecDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="all"}`)
 	mxExecDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="all"}`)
@@ -454,8 +459,9 @@ type Progress struct {
 	prevTaskGas             int64
 	prevBlockCount          int64
 	prevBlockDuration       time.Duration
-	prevAbortCount          uint64
-	prevInvalidCount        uint64
+	prevReruns              [rerunCauses]int64
+	prevWastedNs            [rerunCauses]int64
+	prevVoidTailNs          int64
 	prevReadCount           int64
 	prevAccountReadCount    int64
 	prevStorageReadCount    int64
@@ -475,6 +481,45 @@ type executor interface {
 	LogExecution()
 	LogCommitments(committedTransactions uint64, stepsInDb float64, lastProgress commitment.CommitProgress)
 	LogComplete(stepsInDb float64)
+}
+
+func execModeOf(te *txExecutor) string {
+	switch {
+	case te.isForkValidation:
+		return "newpayload"
+	case te.isApplyingBlocks:
+		return "applyingblocks"
+	}
+	return "other"
+}
+
+// publishReruns adds the runs, re-runs, wasted time and void tail accumulated since its last call to the counters.
+func (p *Progress) publishReruns(te *txExecutor, execMode string) (execs uint64, curReruns [rerunCauses]int, repeats int, curWasted [rerunCauses]time.Duration, curVoidTail time.Duration) {
+	execCount := uint64(te.execCount.Load())
+	execs, p.prevExecCount = execCount-p.prevExecCount, execCount
+	mxExecsTotal.WithLabelValues(execMode).AddUint64(execs)
+	for cause, reason := range rerunReasons {
+		reruns, wastedNs := te.reruns[cause].Load(), te.wastedNs[cause].Load()
+		curReruns[cause] = int(reruns - p.prevReruns[cause])
+		curWasted[cause] = time.Duration(wastedNs - p.prevWastedNs[cause])
+		p.prevReruns[cause], p.prevWastedNs[cause] = reruns, wastedNs
+		repeats += curReruns[cause]
+		mxDiscardsTotal.WithLabelValues(execMode, reason).AddInt(curReruns[cause])
+		mxDiscardSecondsTotal.WithLabelValues(execMode, reason).Add(curWasted[cause].Seconds())
+	}
+	voidTailNs := te.voidTailNs.Load()
+	curVoidTail = time.Duration(voidTailNs - p.prevVoidTailNs)
+	p.prevVoidTailNs = voidTailNs
+	mxVoidTailSecondsTotal.WithLabelValues(execMode).Add(curVoidTail.Seconds())
+	mxRepeatsTotal.WithLabelValues(execMode).AddInt(repeats)
+	return execs, curReruns, repeats, curWasted, curVoidTail
+}
+
+// FlushReruns publishes the re-run totals that accumulated after the last LogExecution.
+func (p *Progress) FlushReruns(te *txExecutor) {
+	p.logMu.Lock()
+	defer p.logMu.Unlock()
+	p.publishReruns(te, execModeOf(te))
 }
 
 func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
@@ -573,8 +618,6 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	switch ex.(type) {
 	case *parallelExecutor:
 		execCount := uint64(te.execCount.Load())
-		abortCount := uint64(te.abortCount.Load())
-		invalidCount := uint64(te.invalidCount.Load())
 		readCount := te.readCount.Load()
 		writeCount := uint64(te.writeCount.Load())
 
@@ -584,12 +627,19 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 			readCount = storageReadCount
 		}
 
-		execDiff := execCount - p.prevExecCount
+		execMode := execModeOf(te)
 
-		repeats := max(int(execDiff)-max(int(te.lastExecutedTxNum.Load())-int(p.prevExecutedTxNum), 0), 0)
+		execDiff, curReruns, repeats, curWasted, curVoidTail := p.publishReruns(te, execMode)
+		var wasted time.Duration
+		wastedByReason := make([]string, 0, rerunCauses)
+		for cause, reason := range rerunReasons {
+			wasted += curWasted[cause]
+			wastedByReason = append(wastedByReason, fmt.Sprintf("%s=%v", reason, common.Round(curWasted[cause], 0)))
+		}
+
 		var repeatRatio float64
 
-		if repeats > 0 {
+		if repeats > 0 && execDiff > 0 {
 			repeatRatio = 100.0 * float64(repeats) / float64(execDiff)
 		}
 
@@ -612,8 +662,10 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		execVals = []any{
 			"exec", common.PrettyCounter(execDiff),
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
-			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
-			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
+			"abort", common.PrettyCounter(curReruns[rerunAbort]),
+			"invalid", common.PrettyCounter(curReruns[rerunInvalid] + curReruns[rerunPoolInvalid]),
+			"wasted", fmt.Sprintf("%v(%s)", common.Round(wasted, 0), strings.Join(wastedByReason, ",")),
+			"voidtail", common.Round(curVoidTail, 0).String(),
 			"tgas/s", common.PrettyCounter(curTaskGasPerSec),
 			"tcpus", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", common.Round(avgTaskDur, 0).String(),
@@ -628,22 +680,8 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		}
 
 		mxExecRepeats.SetInt(repeats)
-		execMode := "other"
-		switch {
-		case te.isForkValidation:
-			execMode = "newpayload"
-		case te.isApplyingBlocks:
-			execMode = "applyingblocks"
-		}
-		mxExecsTotal.WithLabelValues(execMode).AddUint64(execDiff)
-		mxRepeatsTotal.WithLabelValues(execMode).AddInt(repeats)
-		mxDiscardsTotal.WithLabelValues(execMode, "abort").AddUint64(abortCount - p.prevAbortCount)
-		mxDiscardsTotal.WithLabelValues(execMode, "invalid").AddUint64(invalidCount - p.prevInvalidCount)
 		mxExecTriggers.SetInt(int(execCount))
 
-		p.prevExecCount = execCount
-		p.prevAbortCount = abortCount
-		p.prevInvalidCount = invalidCount
 		p.prevReadCount = readCount
 		p.prevWriteCount = writeCount
 	case *serialExecutor:
