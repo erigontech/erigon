@@ -150,6 +150,7 @@ var (
 	StubWarmNoSeed                = EnvBool("STUB_WARM_NOSEED", false)
 	StubCachePresize              = EnvInt("STUB_CACHE_PRESIZE", 0)
 	WarmOwnsAccountFills          = EnvBool("WARM_OWNS_ACCOUNT_FILLS", false)
+	WarmSkipCached                = EnvBool("WARM_SKIP_CACHED", false)
 	FilesBlockingAsyncIO          = EnvBool("FILES_BLOCKING_ASYNC_IO", false)
 	FilesBlockingAsyncIOMultiPage = EnvBool("FILES_BLOCKING_ASYNC_IO_MULTI_PAGE", true)
 

@@ -121,6 +121,11 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if dbg.WarmSkipCached && opts.MaxStep() == kv.NoStepBound {
+		if v, txNum, ok := cpg.view.GetWithTxNum(name, k); ok {
+			return v, kv.Step(txNum / cpg.stepSize), nil
+		}
+	}
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k, opts)
 	if err == nil && opts.MaxStep() == kv.NoStepBound {
 		readTxNum := cache.ClampFillTxNum(cpg.snapshot, name, step.LastTxNum(cpg.stepSize))
