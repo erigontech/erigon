@@ -824,6 +824,22 @@ func (ibs *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 	return code.Bytes, err
 }
 
+// ReadCodeSegmentTo copies the code of addr from offset from into dst, zero-padded past its
+// end. On a code-cache miss it decodes the code without caching it.
+func (ibs *IntraBlockState) ReadCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) error {
+	if ibs.versionMap == nil || ibs.codeAccess != nil {
+		code, err := ibs.GetCode(addr)
+		common.CopySegment(dst, code, from)
+		return err
+	}
+	seg := codeSegment{from: from, dst: dst}
+	code, _, _, err := readCodeSegment(ibs, addr, &seg)
+	if !seg.copied {
+		common.CopySegment(dst, code.Bytes, from)
+	}
+	return err
+}
+
 func (ibs *IntraBlockState) getCode(addr accounts.Address) (accounts.Code, error) {
 	if ibs.versionMap == nil {
 		stateObject, err := ibs.getStateObject(addr, true)
@@ -2759,16 +2775,6 @@ func (ibs *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 		}
 	}
 	return ibs.MakeWriteSet(chainRules, stateWriter)
-}
-
-func (ibs *IntraBlockState) BalanceIncreaseSet() map[accounts.Address]uint256.Int {
-	s := make(map[accounts.Address]uint256.Int, len(ibs.balanceInc))
-	for addr, bi := range ibs.balanceInc {
-		if !bi.transferred {
-			s[addr] = bi.increase
-		}
-	}
-	return s
 }
 
 func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter StateWriter) error {

@@ -176,12 +176,19 @@ func (pt *poolTask) waitThen(t, next int) bool {
 const poolNamedReruns = 3
 
 func (pt *poolTask) rerunAfter(named int) bool {
-	t := pt.tv.index - 1
-	if pt.reruns < poolNamedReruns {
-		t = named
-	}
 	pt.reruns++
-	return pt.waitThen(t, psReexec)
+	if pt.reruns <= poolNamedReruns {
+		pt.next = psReexec
+		return !pt.be.requeueAtValidated(pt.tv.index, named, pt)
+	}
+	return pt.waitThen(pt.tv.index-1, psReexec)
+}
+
+// rerunAfterPredecessor re-runs the task once its predecessor commits: the predecessor's deferred sender charge
+// (pre-Amsterdam) lands only at commit, so waking on its validation could repeat the same failure.
+func (pt *poolTask) rerunAfterPredecessor() bool {
+	pt.reruns++
+	return pt.waitThen(pt.tv.index-1, psReexec)
 }
 
 func (pt *poolTask) step(p *taskPool, wk *poolWorker) {
@@ -238,20 +245,27 @@ func (pt *poolTask) run(p *taskPool, wk *poolWorker) bool {
 	if poolOnRun != nil {
 		poolOnRun(int(tv.version.Incarnation) + 1)
 	}
-	result := wk.w.RunTxTask(tv)
+	return pt.afterRun(p, wk.w.RunTxTask(tv), finalExec)
+}
+
+// afterRun decides what follows a run: re-run, publish, or wait for the read target.
+func (pt *poolTask) afterRun(p *taskPool, result *exec.TxResult, finalExec bool) bool {
+	be, tv := pt.be, pt.tv
+	// A run that recorded a read dependency is void whatever it returned (a cancelled frame tx returns an error).
+	// A recorded dependency always names a lower tx.
+	if result.Dep >= 0 && result.Dep < tv.version.TxIndex && !result.Operational {
+		return pt.rerunAfter(be.taskIndexOf(result.Dep))
+	}
 	if txTask, ok := tv.Task.(*exec.TxTask); ok && txTask.ChargesSenderAtValidation(int(tv.version.Incarnation)) &&
 		(result.Err != nil || touchedSenderAccount(txTask, result)) {
-		return pt.rerunAfter(tv.index - 1)
+		return pt.rerunAfterPredecessor()
 	}
 	if result.Err != nil {
 		if finalExec {
 			pt.send(p, result)
 			return false
 		}
-		return pt.rerunAfter(tv.index - 1)
-	}
-	if result.Dep >= 0 {
-		return pt.rerunAfter(be.taskIndexOf(result.Dep))
+		return pt.rerunAfterPredecessor()
 	}
 	be.selfLoopFlush(tv.version, result, pt.prevWrites)
 	pt.prevWrites = result.TxOut
@@ -279,7 +293,7 @@ func (pt *poolTask) publish(p *taskPool) bool {
 	if pt.pending {
 		pt.pending = false
 		pt.mu.Unlock()
-		return pt.rerunAfter(pt.tv.index - 1)
+		return pt.rerunAfterPredecessor()
 	}
 	pt.parked = true
 	pt.mu.Unlock()

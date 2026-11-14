@@ -19,11 +19,13 @@ package execctx
 import (
 	"slices"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const maxLentCodeBuf = 256 * 1024
@@ -35,6 +37,7 @@ type stateGetter struct {
 	m          kv.GetLatestMetrics
 	codeBuf    *[]byte
 	ownCodeBuf []byte
+	memo       accounts.Code // last ReadCodeSegmentTo decode: a code hash maps to immutable bytes
 }
 
 var _ execctxapi.StateGetter = (*stateGetter)(nil)
@@ -50,8 +53,21 @@ func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptio
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
 	code, ok, err := g.sd.getCode(g.tx, g.view, addr, txNum, *g.codeBuf)
+	g.memo.Bytes = nil // this read may have decoded over the memo's bytes
 	*g.codeBuf = slices.Grow((*g.codeBuf)[:0], min(len(code), maxLentCodeBuf))
 	return code, ok, err
+}
+
+// ReadCodeSegmentTo copies the code of addr from offset from into dst, zero-padded: from the code
+// cache on a hit, else from a decode that does not fill the cache. ok is false when the caller
+// must read the code normally.
+func (g *stateGetter) ReadCodeSegmentTo(addr []byte, txNum, from uint64, dst []byte) (ok bool, err error) {
+	code, ok, err := g.sd.codeForSegment(g.tx, g.view, addr, txNum, *g.codeBuf, &g.memo)
+	if ok {
+		common.CopySegment(dst, code, from)
+	}
+	*g.codeBuf = slices.Grow((*g.codeBuf)[:0], min(len(code), maxLentCodeBuf))
+	return ok, err
 }
 
 func (g *stateGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {

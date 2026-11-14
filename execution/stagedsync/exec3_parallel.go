@@ -8,6 +8,7 @@ import (
 	"maps"
 	"math"
 	"os"
+	"runtime/debug"
 	"runtime/pprof"
 	"slices"
 	"sort"
@@ -268,13 +269,93 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 	}
 }
 
+// balBuildJobHook runs before each tx job on the builder goroutine; tests use it to delay one.
+var balBuildJobHook func(*asyncBALBuilder)
+
+type balBuildJob struct {
+	io     *state.VersionedIO
+	sealed int
+	flush  bool
+}
+
+func (a *asyncBALBuilder) run(j balBuildJob) {
+	if j.flush {
+		a.done <- struct{}{}
+		return
+	}
+	if a.err != nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			a.err = fmt.Errorf("%v\n%s", r, debug.Stack())
+		}
+	}()
+	if h := balBuildJobHook; h != nil {
+		h(a)
+	}
+	for a.b.Next()+1 < j.sealed {
+		i := a.b.Next()
+		a.b.Add(i, j.io.ReadSet(i), j.io.WriteSet(i))
+	}
+}
+
+// asyncBALBuilder adds sealed txs to the current block's access list in publish order, on its own goroutine off
+// the apply goroutine. b and err belong to that goroutine from add until finish receives on done.
+type asyncBALBuilder struct {
+	jobs chan balBuildJob
+	done chan struct{}
+	b    *state.BlockAccessListBuilder
+	err  error
+}
+
+func (a *asyncBALBuilder) add(io *state.VersionedIO, sealed int) {
+	if a.jobs == nil {
+		// Above the 1078-job peak measured on a 300M max-tx BAL block; a full buffer blocks the apply goroutine.
+		jobs := make(chan balBuildJob, 2*1024)
+		a.jobs, a.done = jobs, make(chan struct{}, 1)
+		go func() {
+			for j := range jobs {
+				a.run(j)
+			}
+		}()
+	}
+	if a.b == nil {
+		a.b = state.NewBlockAccessListBuilder()
+	}
+	a.jobs <- balBuildJob{io: io, sealed: sealed}
+}
+
+// stop ends the builder goroutine after its queued jobs.
+func (a *asyncBALBuilder) stop() {
+	if a.jobs != nil {
+		close(a.jobs)
+	}
+}
+
+// finish waits for the block's queued txs and returns its builder, nil when none was
+// added. A panic in the builder is raised again here, on the caller.
+func (a *asyncBALBuilder) finish() *state.BlockAccessListBuilder {
+	if a.b == nil {
+		return nil
+	}
+	a.jobs <- balBuildJob{flush: true}
+	<-a.done
+	b, err := a.b, a.err
+	a.b, a.err = nil, nil
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
 // foldTx applies one published tx's versionMap view and indexes to sd.mem.
 // Finalize logs share the final virtual task's txNum. That task has already
 // handled the receipt cache, so finalize indexes logs without changing it.
 func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
 	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
 	defer restoreCS()
-	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
+	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, r.rules); err != nil {
 		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
 	if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
@@ -503,8 +584,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// Collect per-tx writes to notify the accumulator AFTER StartChange (which
 		// arrives with the blockResult, after all txResults).
 		var pendingAccumulatorWrites []state.WriteSetView
-		// balBuilder holds the current block's access list up to its last published tx.
-		var balBuilder *state.BlockAccessListBuilder
+		// balBuilder builds the current block's access list from its published txs.
+		var balBuilder asyncBALBuilder
+		defer balBuilder.stop()
 		// foldErr is the first per-tx fold error of the current block, surfaced at
 		// its blockResult.
 		var foldErr error
@@ -667,13 +749,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						foldErr = pe.foldTx(ctx, rwTx, applyResult)
 					}
 					if applyResult.txIO != nil {
-						if balBuilder == nil {
-							balBuilder = state.NewBlockAccessListBuilder()
-						}
-						for balBuilder.Next()+1 < applyResult.balSealed {
-							i := balBuilder.Next()
-							balBuilder.Add(i, applyResult.txIO.ReadSet(i), applyResult.txIO.WriteSet(i))
-						}
+						balBuilder.add(applyResult.txIO, applyResult.balSealed)
 					}
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
@@ -681,8 +757,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
-					built := balBuilder
-					balBuilder = nil
+					built := balBuilder.finish()
 					if finalized {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						continue
@@ -997,6 +1072,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop error", "err", err)
 		} else {
 			pe.logger.Debug("[" + pe.logPrefix + "] exec loop exit")
+		}
+		// The errgroup cancels with err only after closeApplyChannels; publish it first
+		// so the apply loop does not read the leftover tx results as an invalid block.
+		if err != nil && !errors.Is(err, rules.ErrInvalidBlock) {
+			pe.cancelOperational(0, err)
 		}
 	}()
 
@@ -1731,7 +1811,8 @@ type txResult struct {
 // sweep, broadcast the advanced frontier.
 //
 // A read that observes an in-flight estimate aborts the run (result.Dep); the task
-// is re-queued once the commit frontier reaches its predecessor.
+// is re-queued once that writer validates, and after the named re-run limit once the
+// commit frontier reaches its predecessor.
 
 // selfLoopFlush publishes tv's writes to the versionMap, plus deletion of any key
 // the previous incarnation wrote that this one dropped.
@@ -2459,8 +2540,13 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	evm.Context.PostApplyMessage = nil
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
+	// A speculative run that read an unfinished write is re-run anyway: cancel it at its next jump or call.
+	ev.versionMap.SetSpecRun(ev.Version().TxIndex, &state.SpecRun{Run: evm, Incarnation: ev.Version().Incarnation})
 	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
 		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
+	ev.versionMap.SetSpecRun(ev.Version().TxIndex, nil)
+	// The cancel must not reach this worker's next task, which may run without a Reset.
+	evm.Reset(evm.TxContext, evm.IntraBlockState())
 
 	// Occupancy accounting: sum every incarnation's exec CPU (including aborts) so
 	// occupancy reveals whether workers are starved or compute-bound.
@@ -2644,6 +2730,11 @@ type blockExecutor struct {
 	committedFrontier atomic.Int64
 	wakeMu            sync.Mutex
 	wakeAt            map[int][]*poolTask
+	// wakeValidated maps a task to the named re-runs waiting for it to validate; finalizing
+	// F also re-queues wakeValidated[F]. validatedTasks holds the tasks validated since
+	// their last re-exec signal.
+	wakeValidated  map[int][]*poolTask
+	validatedTasks map[int]bool
 	// poolTasks[i] is task i's pool state. After sending its result a task is parked
 	// (no goroutine); the committed-dependent re-check re-queues it to re-execute.
 	poolTasks []*poolTask
@@ -2693,6 +2784,9 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		readerByAddr:        map[accounts.Address][]addrReader{},
 		revalidate:          map[int]bool{},
 		selfLoopDispatched:  map[int]bool{},
+		wakeAt:              map[int][]*poolTask{},
+		wakeValidated:       map[int][]*poolTask{},
+		validatedTasks:      map[int]bool{},
 	}
 	be.committedFrontier.Store(-1)
 	return be
@@ -3029,7 +3123,9 @@ func (be *blockExecutor) signalCommitted(tx int) {
 	be.wakeMu.Lock()
 	be.committedFrontier.Store(int64(tx))
 	waiters := be.wakeAt[tx]
+	waiters = append(waiters, be.wakeValidated[tx]...)
 	delete(be.wakeAt, tx)
+	delete(be.wakeValidated, tx)
 	be.wakeMu.Unlock()
 	for _, pt := range waiters {
 		be.pool.push(pt)
@@ -3039,6 +3135,9 @@ func (be *blockExecutor) signalCommitted(tx int) {
 // signalSelfLoopReexec re-queues the parked task of an already-sent tx to
 // re-execute, or latches the request when the task is still running.
 func (be *blockExecutor) signalSelfLoopReexec(tx int) {
+	be.wakeMu.Lock()
+	delete(be.validatedTasks, tx)
+	be.wakeMu.Unlock()
 	pt := be.poolTasks[tx]
 	if pt == nil {
 		return
@@ -3069,6 +3168,32 @@ func (be *blockExecutor) finishTask(tx int) {
 	}
 }
 
+// signalValidated wakes the named re-runs waiting for tx: its writes are now
+// Validated, which a reader continues on.
+func (be *blockExecutor) signalValidated(tx int) {
+	be.wakeMu.Lock()
+	be.validatedTasks[tx] = true
+	waiters := be.wakeValidated[tx]
+	delete(be.wakeValidated, tx)
+	be.wakeMu.Unlock()
+	for _, pt := range waiters {
+		be.pool.push(pt)
+	}
+}
+
+// requeueAtValidated registers pt to be re-queued when target validates or commits.
+// Returns false when target already did; the caller then continues in place.
+func (be *blockExecutor) requeueAtValidated(tx, target int, pt *poolTask) bool {
+	be.checkWaitTarget(tx, target)
+	be.wakeMu.Lock()
+	defer be.wakeMu.Unlock()
+	if int(be.committedFrontier.Load()) >= target || be.validatedTasks[target] {
+		return false
+	}
+	be.wakeValidated[target] = append(be.wakeValidated[target], pt)
+	return true
+}
+
 func (be *blockExecutor) frontier() int {
 	return int(be.committedFrontier.Load())
 }
@@ -3083,6 +3208,17 @@ func (be *blockExecutor) dispatchLimit() int {
 // requeueAt registers pt to be re-queued when the frontier reaches target. Returns
 // false when the frontier is already there; the caller then continues in place.
 func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask) bool {
+	be.checkWaitTarget(tx, target)
+	be.wakeMu.Lock()
+	defer be.wakeMu.Unlock()
+	if int(be.committedFrontier.Load()) >= target {
+		return false
+	}
+	be.wakeAt[target] = append(be.wakeAt[target], pt)
+	return true
+}
+
+func (be *blockExecutor) checkWaitTarget(tx, target int) {
 	// A target beyond the last task can never be signalled — the worker would park
 	// forever. That means a versionMap (block-TxIndex) dependency reached here
 	// without a taskIndexOf translation; fail loud at the exact site.
@@ -3097,13 +3233,6 @@ func (be *blockExecutor) requeueAt(tx, target int, pt *poolTask) bool {
 		panic(fmt.Sprintf("[self-loop] block %d: task %d waiting for HIGHER target %d (forward dependency — invariant violation); "+
 			"block start TxIndex=%d", be.blockNum, tx, target, be.tasks[0].Version().TxIndex))
 	}
-	be.wakeMu.Lock()
-	defer be.wakeMu.Unlock()
-	if int(be.committedFrontier.Load()) >= target {
-		return false
-	}
-	be.wakeAt[target] = append(be.wakeAt[target], pt)
-	return true
 }
 
 // revalidateCommittedDependents re-checks changedTx's committed-but-not-published
@@ -3232,6 +3361,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 					be.versionMap.MarkWritesValidated(be.blockIO.WriteSet(txVersion.TxIndex), be.isFeeRecipient(txResult))
 				}
 				be.validateTasks.markComplete(tx)
+				be.signalValidated(tx)
 				// Validated against current state; only a later write to one of its
 				// read cells (markReadersDirty) re-flags it for finalize re-validation.
 				delete(be.revalidate, tx)
@@ -3650,10 +3780,10 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		be.poolTasks = make([]*poolTask, len(be.tasks))
 		be.pool = pe.pool
 		be.runInc = make([]atomic.Int64, len(be.tasks))
+		be.versionMap.InitSpecRuns(be.tasks[len(be.tasks)-1].Version().TxIndex)
 		for i := range be.runInc {
 			be.runInc[i].Store(-1)
 		}
-		be.wakeAt = map[int][]*poolTask{}
 	}
 
 	maxValidated := be.validateTasks.maxComplete()

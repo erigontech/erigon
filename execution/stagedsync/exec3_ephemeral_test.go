@@ -21,8 +21,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/blockreplay"
+	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -30,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -319,4 +322,39 @@ func TestSelfLoopEvaluateBlockerOnSelfDestructEstimate(t *testing.T) {
 	valid, _, blocker := be.selfLoopEvaluate(tv, &exec.TxResult{TxIn: rs})
 	require.False(t, valid)
 	require.Equal(t, 1, blocker, "the self-destruct estimate's writer must be the blocker")
+}
+
+// readsUnfinishedWrite is a tx whose run reads a balance that an earlier, unfinished tx wrote.
+type readsUnfinishedWrite struct {
+	exec.Task
+	addr      accounts.Address
+	cancelled bool
+}
+
+func (r *readsUnfinishedWrite) Execute(evm *vm.EVM, _ rules.Engine, _ *types.Genesis, ibs *state.IntraBlockState,
+	_ state.StateWriter, _ *chain.Config, _ rules.ChainReader, _ datadir.Dirs, _ bool,
+) *exec.TxResult {
+	_, err := ibs.GetBalance(r.addr)
+	r.cancelled = evm.Cancelled()
+	return &exec.TxResult{Err: err}
+}
+
+// A worker reuses its EVM, and block-init and system tasks run on it without a Reset: the cancel of a void
+// run must not reach them.
+func TestTaskVersionCancelDoesNotReachTheNextTask(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xce"))
+	vmap := state.NewVersionMap(nil)
+	vmap.InitStamps(3)
+	vmap.WriteBalance(addr, state.Version{TxIndex: 1}, *uint256.NewInt(1), false)
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), vmap)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{})
+	task := &readsUnfinishedWrite{addr: addr}
+	tv := &taskVersion{execTask: &execTask{Task: task}, version: state.Version{TxIndex: 2}, versionMap: vmap}
+
+	result := tv.Execute(evm, nil, nil, ibs, nil, chain.AllProtocolChanges, nil, datadir.Dirs{}, false)
+	require.True(t, task.cancelled, "the read dependency cancels the running EVM")
+	require.Equal(t, 1, result.Dep)
+	require.False(t, evm.Cancelled(), "the next task on this worker runs on an uncancelled EVM")
 }

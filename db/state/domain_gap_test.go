@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -138,4 +139,25 @@ func TestInvertedIndex_RmStateLatestHole(t *testing.T) {
 	defer ic.Close()
 	require.Less(t, ic.files.EndTxNum(), filesEnd, "newest file dropped")
 	require.ErrorContains(t, ic.checkFilesDBGap(tx), "gap between snapshot files and DB")
+}
+
+func TestCheckFilesDBGapRefusesPrunedRangeInDependencyHiddenFile(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	split := []testFileRange{{0, 4}, {4, 6}, {6, 8}, {8, 12}}
+	generateAccountsFile(t, dirs, split)
+	generateStorageFile(t, dirs, split)
+	generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 4}, {4, 8}, {8, 12}})
+	require.NoError(t, agg.OpenFolder(db))
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, SavePruneValProgress(tx, agg.d[kv.AccountsDomain].ValuesTable, &prune.Stat{TxTo: 120}))
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	require.EqualValues(t, 40, at.d[kv.AccountsDomain].files.EndTxNum())
+	require.ErrorContains(t, at.CheckFilesDBGap(tx), "gap between snapshot files and DB")
 }

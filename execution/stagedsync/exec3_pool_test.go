@@ -223,7 +223,6 @@ func newPoolUnit(t *testing.T, tasks int) (*parallelExecutor, *blockExecutor) {
 	pe.pool = newTaskPool(pe, nil)
 	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(1), nil, discardConsumers(1), false, nil)
 	be.pool = pe.pool
-	be.wakeAt = map[int][]*poolTask{}
 	be.committedFrontier.Store(-1)
 	be.poolTasks = make([]*poolTask, tasks)
 	be.runInc = make([]atomic.Int64, tasks)
@@ -266,10 +265,12 @@ func TestPoolStepConsumesSignalLatchedBeforePark(t *testing.T) {
 		if pending {
 			require.False(t, pt.parked, "a task parked although a re-exec signal arrived before it parked")
 			require.False(t, pt.pending, "the latched signal was not consumed")
-			require.Equal(t, []*poolTask{pt}, be.wakeAt[1], "the task was not queued to re-run after its predecessor commits")
+			require.Equal(t, []*poolTask{pt}, be.wakeAt[1], "a re-exec signal re-runs the task after its predecessor commits")
+			require.Empty(t, be.wakeValidated, "a predecessor wait is not a named-writer wait")
 		} else {
 			require.True(t, pt.parked, "a task with no signal must park")
 			require.Empty(t, be.wakeAt)
+			require.Empty(t, be.wakeValidated)
 		}
 	}
 }
@@ -303,15 +304,43 @@ func TestPoolIncarnationLimitIsOperational(t *testing.T) {
 }
 
 func TestPoolRerunAfterWaitsForPredecessorAfterNamedReruns(t *testing.T) {
-	for _, tc := range []struct{ reruns, target int }{{0, 0}, {poolNamedReruns - 1, 0}, {poolNamedReruns, 1}} {
+	for _, tc := range []struct {
+		reruns, target int
+		named          bool
+	}{{0, 0, true}, {poolNamedReruns - 1, 0, true}, {poolNamedReruns, 1, false}} {
 		_, be := newPoolUnit(t, 3)
 		pt := newPoolUnitTask(be, 2)
 		pt.reruns = tc.reruns
 
 		require.False(t, pt.rerunAfter(0), "the task must wait, not re-run in place")
-		require.Equal(t, []*poolTask{pt}, be.wakeAt[tc.target], "after %d named re-runs", tc.reruns)
+		waiters := be.wakeAt
+		if tc.named {
+			waiters = be.wakeValidated
+		}
+		require.Equal(t, []*poolTask{pt}, waiters[tc.target], "after %d named re-runs", tc.reruns)
 		require.Equal(t, psReexec, pt.next)
 	}
+}
+
+// A named re-run waits for its writer to validate, not for every lower task to commit: waiting on
+// the in-order commit frontier runs the readers of independent writers one after another.
+func TestPoolNamedRerunWakesWhenWriterValidates(t *testing.T) {
+	pe, be := newPoolUnit(t, 4)
+	pt := newPoolUnitTask(be, 3)
+
+	require.False(t, pt.rerunAfter(1), "the task must wait for its writer")
+	require.Equal(t, 0, pe.pool.queue.Len())
+
+	be.signalValidated(1)
+	require.Equal(t, 1, pe.pool.queue.Len(), "the writer validated but the frontier-behind reader stayed parked")
+	require.Same(t, pt, pe.pool.pop())
+
+	pt2 := newPoolUnitTask(be, 2)
+	require.True(t, pt2.rerunAfter(1), "a writer that already validated must not park the reader")
+
+	be.signalSelfLoopReexec(1)
+	pt3 := newPoolUnitTask(be, 3)
+	require.False(t, pt3.rerunAfter(1), "a writer queued to re-execute is no longer validated")
 }
 
 type failingRoDB struct {
@@ -387,4 +416,31 @@ func TestPoolSettleWaitsForReadTargetUnlessBAL(t *testing.T) {
 			require.Equal(t, []*poolTask{pt}, be.wakeAt[0], "a non-BAL block must wait for the read target to commit")
 		}
 	}
+}
+
+// A run that recorded a read dependency is void whatever it returned: a cancelled frame tx returns an error, and its
+// re-run must still wait for the named writer, not for the whole lower prefix.
+func TestPoolDependencyVerdictWinsOverTheRunError(t *testing.T) {
+	pe, be := newPoolUnit(t, 4)
+	pt := newPoolUnitTask(be, 3)
+	pt.tv.version.Incarnation = 1
+	res := &exec.TxResult{Err: errors.New("frame execution cancelled"), Dep: 1}
+
+	require.False(t, pt.afterRun(pe.pool, res, false), "the task must wait for its writer")
+	require.Equal(t, []*poolTask{pt}, be.wakeValidated[be.taskIndexOf(1)])
+	require.Empty(t, be.wakeAt, "a dependency verdict is not a predecessor wait")
+}
+
+// A failed task reset reads nothing: its zero Dep is not a dependency, so tx 0 sends its error instead of waiting
+// for its own validation.
+func TestPoolResetFailureIsNoDependency(t *testing.T) {
+	pe, be := newPoolUnit(t, 4)
+	pt := newPoolUnitTask(be, 0)
+	pt.tv.version.Incarnation = 1
+	res := &exec.TxResult{Err: errors.New("reset failed")}
+
+	require.False(t, pt.afterRun(pe.pool, res, true))
+	require.Len(t, pe.results, 1, "the final run's error is the tx's verdict")
+	require.Empty(t, be.wakeValidated)
+	require.Empty(t, be.wakeAt)
 }

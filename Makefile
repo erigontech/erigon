@@ -106,7 +106,7 @@ GODEBUG ?= cgocheck=0
 # Defaults suitable for local use on a reasonable machine; adjust as conditions
 # change. CI can override via GO_FLAGS.
 default_test_timeout      := 20m
-default_test_race_timeout := 60m
+default_test_race_timeout := 30m
 
 GOTEST_PACKAGES = ./...
 GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS) $(GOTEST_PACKAGES)
@@ -404,7 +404,6 @@ eest-devnet:
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
 		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile && \
-		echo "ENV ERIGON_EXEC3_PARALLEL=true" >> clients/erigon/Dockerfile && \
 		sed -i'' -e '/^echo "Running erigon/i\FLAGS="$$FLAGS $(EEST_GLAMSTERDAM_ERIGON_FLAGS)"' clients/erigon/erigon.sh && \
 		grep -qF -- '$(EEST_GLAMSTERDAM_ERIGON_FLAGS)' clients/erigon/erigon.sh
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log

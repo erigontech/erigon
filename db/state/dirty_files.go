@@ -639,14 +639,15 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 		newVisibleFiles = visibleFiles{}
 	}
 
-	// Check for gaps in visible files and warn if found
+	// a latest read cannot tell that a key's value was in the hole, so nothing after it is visible
 	for i := 1; i < len(newVisibleFiles); i++ {
 		prev := newVisibleFiles[i-1]
 		curr := newVisibleFiles[i]
-		if prev.endTxNum != curr.startTxNum {
+		if prev.endTxNum < curr.startTxNum {
 			log.Warn("[agg] gap in visible files", "prev", prev.src.decompressor.FileName(),
 				"prevEnd", prev.endTxNum, "curr", curr.src.decompressor.FileName(), "currStart", curr.startTxNum,
 				"gap", curr.startTxNum-prev.endTxNum)
+			return newVisibleFiles[:i]
 		}
 	}
 

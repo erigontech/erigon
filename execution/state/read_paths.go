@@ -101,19 +101,11 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 	if code, ok := ibs.sharedCode(codeHash); ok {
 		return accounts.Code{Hash: codeHash, Bytes: code}, nil
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
-		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
-	}
-	var readStart time.Time
-	if dbg.KVReadLevelledMetrics {
-		readStart = time.Now()
-	}
-	code, err := ibs.stateReader.ReadAccountCode(addr)
-	if dbg.KVReadLevelledMetrics {
-		ibs.codeReadDuration += time.Since(readStart)
-		ibs.codeReadCount++
-	}
-	ibs.stateReader.SetTrace(false, "")
+	var code []byte
+	err = ibs.measureCodeRead(addr, func() (err error) {
+		code, err = ibs.stateReader.ReadAccountCode(addr)
+		return err
+	})
 	ibs.RecordStateReadError(err)
 	if len(code) == 0 {
 		return accounts.EmptyCode, err
@@ -350,7 +342,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	destructed, sdRes, ok := s.readSelfDestructMemo(addr)
 	// An in-flight self-destruct may burn a field whose own cell already reads as Done.
 	if ok && sdRes.Status() == MVReadResultDependency {
-		s.dep = max(s.dep, sdRes.DepIdx())
+		s.recordDep(sdRes.DepIdx())
 	}
 	if ok && sdRes.resolved() && destructed {
 		destructTxIndex := sdRes.DepIdx()
@@ -465,7 +457,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			if res.Status() == MVReadResultDone {
 				if prHeader, prOK := s.versionedReads.getHeader(addr, path, key); prOK {
 					if hdr.Version.TxIndex > destructedVersion.TxIndex && hdr.Version != prHeader.Version {
-						s.dep = max(s.dep, hdr.Version.TxIndex)
+						s.recordDep(hdr.Version.TxIndex)
 						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d (%d.%d) WR DEP (%d.%d)!=(%d.%d) %x %s\n",
 								s.blockNum, s.txIndex, s.version,
@@ -560,7 +552,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 		// The predecessor write is in flight (Estimate): record the dependency verdict
 		// and fall back to the in-flight value.
-		s.dep = max(s.dep, res.DepIdx())
+		s.recordDep(res.DepIdx())
 		hdr.Source = MapRead
 		s.versionedReads.SetHeader(addr, path, key, hdr)
 		r.outcome = outcomeMapDone
@@ -607,7 +599,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					// on the vanished writer to force re-execution rather than committing a
 					// torn result the version-only validator can't catch. Only a real (>=0)
 					// writer forces the re-exec.
-					s.dep = max(s.dep, prHeader.Version.TxIndex)
+					s.recordDep(prHeader.Version.TxIndex)
 					// Fall through to storage read.
 				}
 			}
@@ -686,11 +678,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			r.outcome = outcomeReturnDefault
 			r.source = UnknownSource
 			r.version = UnknownVersion
-			if !commited && path != CodePath {
-				hdr.Source = StorageRead
-				r.hdr = hdr
-				r.recordVR = true
-			}
+			hdr.Source = StorageRead
+			r.hdr = hdr
+			r.recordVR = !commited && path != CodePath
 			return
 		}
 
@@ -1289,13 +1279,46 @@ func recordWipedCodeRead(s *IntraBlockState, addr accounts.Address, path Account
 
 // readCode returns the contract code with its hash.
 func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSource, Version, error) {
+	return readCodeSegment(s, addr, nil)
+}
+
+// codeSegment is the target of a code read that copies only a segment of the code.
+type codeSegment struct {
+	from   uint64
+	dst    []byte
+	copied bool // the read copied the segment into dst and returned the code without bytes
+}
+
+// readCodeSegment is readCode; with seg, a storage read that misses every cache copies the
+// segment into seg.dst and records the read without the code bytes.
+func readCodeSegment(s *IntraBlockState, addr accounts.Address, seg *codeSegment) (accounts.Code, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
+			if seg != nil && codeBytesDropped(tr.Val) {
+				if _, copied, err := s.readOriginCodeSegmentTo(addr, seg.from, seg.dst); err != nil || copied {
+					seg.copied = copied
+					return tr.Val, tr.Source, tr.Version, err
+				}
+			}
+			code, err := s.recordedCode(addr, tr)
+			return code, tr.Source, tr.Version, err
 		}
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
+	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, seg != nil, &r)
+	if seg != nil && r.err == nil && r.outcome == outcomeReturnDefault && r.hdr.Source == StorageRead {
+		codeHash, copied, err := s.readOriginCodeSegmentTo(addr, seg.from, seg.dst)
+		if err != nil {
+			return accounts.Code{}, StorageRead, UnknownVersion, err
+		}
+		if copied {
+			seg.copied = true
+			s.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{r.hdr, accounts.Code{Hash: codeHash}})
+			return accounts.Code{Hash: codeHash}, StorageRead, r.hdr.Version, nil
+		}
+		r = readPathResult{}
+		versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
+	}
 	if r.err != nil {
 		s.RecordStateReadError(r.err)
 		return accounts.Code{}, r.source, r.version, r.err
@@ -1305,7 +1328,8 @@ func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSou
 		return r.vwCode.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetCode(addr)
-		return tr.Val, r.source, r.version, nil
+		code, err := s.recordedCode(addr, tr)
+		return code, r.source, r.version, err
 	case outcomeMapDone:
 		v := r.mapCodeVal
 		if r.recordVR {
@@ -1342,6 +1366,76 @@ func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSou
 	}
 }
 
+// codeBytesDropped reports a non-empty code read recorded without its bytes.
+func codeBytesDropped(c accounts.Code) bool {
+	return c.Bytes == nil && !c.Hash.IsEmpty()
+}
+
+type codeSegmentReader interface {
+	ReadAccountCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (bool, error)
+}
+
+// recordedCode returns a recorded read's code, re-reading bytes the record dropped.
+func (ibs *IntraBlockState) recordedCode(addr accounts.Address, tr VersionedRead[accounts.Code]) (accounts.Code, error) {
+	if !codeBytesDropped(tr.Val) {
+		return tr.Val, nil
+	}
+	code, err := ibs.originCodeDirect(addr)
+	if err != nil {
+		return accounts.Code{}, err
+	}
+	tr.Val = code
+	ibs.versionedReads.SetCode(addr, tr)
+	return code, nil
+}
+
+// measureCodeRead runs a committed code read with the code-read tracing and metrics.
+func (ibs *IntraBlockState) measureCodeRead(addr accounts.Address, read func() error) error {
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
+	}
+	var readStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		readStart = time.Now()
+	}
+	err := read()
+	if dbg.KVReadLevelledMetrics {
+		ibs.codeReadDuration += time.Since(readStart)
+		ibs.codeReadCount++
+	}
+	ibs.stateReader.SetTrace(false, "")
+	return err
+}
+
+// readOriginCodeSegmentTo copies a segment of the committed code of addr into dst. Not copied
+// when the code is already on a state object, absent, or held by a cache.
+func (ibs *IntraBlockState) readOriginCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (accounts.CodeHash, bool, error) {
+	segmentReader, ok := ibs.stateReader.(codeSegmentReader)
+	if !ok || ibs.stateObjects[addr] != nil {
+		return accounts.CodeHash{}, false, nil
+	}
+	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
+		return accounts.CodeHash{}, false, nil
+	}
+	codeHash, err := ibs.originCodeHash(addr)
+	if err != nil || codeHash.IsEmpty() {
+		return accounts.CodeHash{}, false, err
+	}
+	if _, ok := ibs.sharedCode(codeHash); ok {
+		return accounts.CodeHash{}, false, nil
+	}
+	var copied bool
+	err = ibs.measureCodeRead(addr, func() (err error) {
+		copied, err = segmentReader.ReadAccountCodeSegmentTo(addr, from, dst)
+		return err
+	})
+	ibs.RecordStateReadError(err)
+	if err != nil || !copied {
+		return accounts.CodeHash{}, false, err
+	}
+	return codeHash, true, nil
+}
+
 // refreshCode is the in-memory-only variant for CodePath. CodePath is never recorded
 // via the skipStorage branch (the `path != CodePath` guard), so the default case records nothing.
 func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, error) {
@@ -1356,7 +1450,10 @@ func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, erro
 		code = r.vwCode.Val
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetCode(addr)
-		code = tr.Val
+		var err error
+		if code, err = s.recordedCode(addr, tr); err != nil {
+			return accounts.Code{}, err
+		}
 	case outcomeMapDone:
 		code = r.mapCodeVal
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
@@ -1780,6 +1877,15 @@ func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
 		return ReadStamp{}, false
 	}
 	return ReadStamp{len(ibs.journal.entries), ibs.journal.epoch}, true
+}
+
+// recordDep records that this run read through tx dep's unfinished or vanished write: its result is void, so
+// its run is cancelled at the next jump or call.
+func (ibs *IntraBlockState) recordDep(dep int) {
+	ibs.dep = max(ibs.dep, dep)
+	if ibs.HadInvalidRead() {
+		ibs.versionMap.cancelRun(ibs.txIndex, ibs.version)
+	}
 }
 
 func (ibs *IntraBlockState) sharedCode(codeHash accounts.CodeHash) ([]byte, bool) {

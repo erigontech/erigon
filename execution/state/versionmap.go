@@ -270,6 +270,10 @@ type VersionMap struct {
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
 
+	// specRuns[txIdx+1] is txIdx's running speculative run; a read dependency it records cancels it (the
+	// result is void). Sized by InitStamps.
+	specRuns []atomic.Pointer[SpecRun]
+
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
 	// write-once, so it lives in lock-free maps separate from the per-account e.mu-guarded cells
@@ -306,7 +310,13 @@ type writeStamps struct {
 func (vm *VersionMap) InitStamps(lastTxIndex int) {
 	n := lastTxIndex + 2
 	vm.stamps = &writeStamps{n: n, inflight: make([]atomic.Int32, n+1), last: make([]atomic.Uint64, n+1)}
+	vm.InitSpecRuns(lastTxIndex)
 	vm.writeSeq.Store(1)
+}
+
+// InitSpecRuns makes room for the speculative runs of txs up to lastTxIndex; without it SetSpecRun keeps nothing.
+func (vm *VersionMap) InitSpecRuns(lastTxIndex int) {
+	vm.specRuns = make([]atomic.Pointer[SpecRun], lastTxIndex+2)
 }
 
 func (vm *VersionMap) WriteSeq() uint64 { return vm.writeSeq.Load() }
@@ -463,6 +473,36 @@ func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageK
 		return uint256.Int{}, false
 	}
 	return changes[k].Value, true
+}
+
+// hasNoCells reports whether no tx wrote a cell of path, a lifecycle cell or an address cell of addr.
+func (vm *VersionMap) hasNoCells(addr accounts.Address, path AccountPath) bool {
+	e := vm.load(addr)
+	if e == nil {
+		return true
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if hasLifecycleCells(e) || e.Address != nil && e.Address.Len() > 0 {
+		return false
+	}
+	switch path {
+	case StoragePath:
+		return len(e.Storage) == 0
+	case BalancePath:
+		return e.Balance == nil || e.Balance.Len() == 0
+	case NoncePath:
+		return e.Nonce == nil || e.Nonce.Len() == 0
+	case CodePath:
+		return e.Code == nil || e.Code.Len() == 0
+	case CodeHashPath:
+		return e.CodeHash == nil || e.CodeHash.Len() == 0
+	case CodeSizePath:
+		return e.CodeSize == nil || e.CodeSize.Len() == 0
+	case AddressPath, SelfDestructPath, IncarnationPath, CreateContractPath:
+		return true
+	}
+	return false
 }
 
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
@@ -2163,6 +2203,9 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	// authoritative basis for every path except storage, which needs the wipe-aware
 	// liveStorage reader.
 	validatePath := func(addr accounts.Address, path AccountPath, hdr ReadHeader) VersionValidity {
+		if (hdr.Version.TxIndex == originIndex || hdr.Source == StorageRead && hdr.Version == UnknownVersion) && vm.hasNoCells(addr, path) {
+			return VersionValid
+		}
 		return vm.validateReadImpl(txIdx, addr, path, accounts.NilKey, hdr.Source, hdr.Version,
 			vm.ReadStatus(addr, path, accounts.NilKey, txIdx), checkVersion, traceInvalid, tracePrefix, false)
 	}
@@ -2193,7 +2236,11 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		}
 	}
 	for a, inner := range rs.storage {
+		quiet := vm.hasNoCells(a, StoragePath)
 		for k, tr := range inner {
+			if quiet && tr.Version.TxIndex == originIndex {
+				continue
+			}
 			if !ok(vm.validateReadImpl(txIdx, a, StoragePath, k, tr.Source, tr.Version, liveStorage(vm, a, k, txIdx), checkVersion, traceInvalid, tracePrefix, false)) {
 				return
 			}
@@ -2223,7 +2270,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		if !ok(validatePath(a, CodePath, tr.ReadHeader)) {
 			return
 		}
-		if len(tr.Val.Bytes) != 0 && !ok(wipedCommitted(a, tr.ReadHeader)) {
+		if (len(tr.Val.Bytes) != 0 || codeBytesDropped(tr.Val)) && !ok(wipedCommitted(a, tr.ReadHeader)) {
 			return
 		}
 	}
@@ -2448,4 +2495,29 @@ func (vm *VersionMap) accountLiveAt(addr accounts.Address, txIdx int) bool {
 func (res ReadResult) resolved() bool {
 	s := res.Status()
 	return s == MVReadResultDone || s == MVReadResultValidated
+}
+
+// Canceller stops a running speculative execution (vm.EVM).
+type Canceller interface{ Cancel() }
+
+// SpecRun is one incarnation's speculative execution of a tx.
+type SpecRun struct {
+	Run         Canceller
+	Incarnation Incarnation
+}
+
+// SetSpecRun publishes txIdx's running speculative run; nil clears it, before its EVM is reused.
+func (vm *VersionMap) SetSpecRun(txIdx int, r *SpecRun) {
+	if vm != nil && txIdx+1 >= 0 && txIdx+1 < len(vm.specRuns) {
+		vm.specRuns[txIdx+1].Store(r)
+	}
+}
+
+// cancelRun cancels txIdx's speculative run when it is incarnation inc.
+func (vm *VersionMap) cancelRun(txIdx int, inc Incarnation) {
+	if vm != nil && txIdx+1 >= 0 && txIdx+1 < len(vm.specRuns) {
+		if r := vm.specRuns[txIdx+1].Load(); r != nil && r.Incarnation == inc {
+			r.Run.Cancel()
+		}
+	}
 }

@@ -1837,6 +1837,17 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 	if !dt.d.Enabled {
 		return nil, false, nil
 	}
+	if roTx != nil && dt.name != kv.CommitmentDomain {
+		// If the newest value of the key was written in a step before txNum's step, nothing changed it at or after txNum,
+		// so it is also the value as of txNum.
+		latest, step, ok, err := dt.GetLatest(key, roTx)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) {
+			return latest, true, nil
+		}
+	}
 
 	v, hOk, err := dt.ht.HistorySeek(key, txNum, roTx)
 	if err != nil {

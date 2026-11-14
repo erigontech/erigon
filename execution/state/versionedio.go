@@ -2235,6 +2235,8 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	if r, ok := vr.reads.GetCode(address); ok && r.Val.Bytes != nil {
 		return r.Val.Bytes, nil
+	} else if ok && codeBytesDropped(r.Val) && vr.stateReader != nil {
+		return vr.stateReader.ReadAccountCode(address)
 	}
 
 	// Check version map for CodePath entries written by prior transactions
@@ -2262,6 +2264,8 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	if r, ok := vr.reads.GetCode(address); ok && r.Val.Bytes != nil {
 		return len(r.Val.Bytes), nil
+	} else if ok && codeBytesDropped(r.Val) && vr.stateReader != nil {
+		return vr.stateReader.ReadAccountCodeSize(address)
 	}
 
 	if vr.versionMap != nil {

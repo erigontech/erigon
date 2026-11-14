@@ -225,7 +225,7 @@ func TestReadinessWaitIsBoundedWhenReadyBlocks(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, status)
 	require.Equal(t, engine_types.SyncingStatus, status.Status)
-	require.Less(t, time.Since(start), 500*time.Millisecond, "a blocking Ready must not stretch the wait past its budget")
+	require.Less(t, time.Since(start), time.Second, "a blocking Ready (one second) must not stretch the wait past its budget")
 }
 
 // TestWaitForResponseDoesNotCallBackAfterDeadline proves no callback starts once the budget is
@@ -245,7 +245,7 @@ func TestWaitForResponseDoesNotCallBackAfterDeadline(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, busy)
 	require.Equal(t, 1, calls, "a callback must not start after the deadline")
-	require.Less(t, time.Since(start), 100*time.Millisecond)
+	require.Less(t, time.Since(start), time.Second, "a second callback would sleep for a second")
 }
 
 // TestWaitForResponseDoesNotCallBackAfterCancellation proves no callback starts once the context
