@@ -141,9 +141,9 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.Ge
 }
 
 func (cpg *cachePopulatingGetter) seedCodeHash(addr, account []byte, txNum uint64) {
-	var codeHash common.Hash
-	copy(codeHash[:], accounts.DeserialiseV3CodeHash(account))
-	cpg.view.SeedAddrCodeHash(addr, codeHash, txNum)
+	if h := accounts.DeserialiseV3CodeHash(account); h != nil {
+		cpg.view.SeedAddrCodeHash(addr, common.Hash(h), txNum)
+	}
 }
 
 func (cpg *cachePopulatingGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, error) {
