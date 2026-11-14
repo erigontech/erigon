@@ -76,7 +76,7 @@ func TestDomain_RmStateLatestHole(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, v2, got)
-	require.NoError(t, drt.checkFilesDBGap(tx), "no gap before the file is removed")
+	require.NoError(t, drt.checkFilesDBGap(tx, nil), "no gap before the file is removed")
 	drt.Close()
 
 	// `rm-state --latest`: drop the newest file (step 1), the one holding v2.
@@ -93,7 +93,7 @@ func TestDomain_RmStateLatestHole(t *testing.T) {
 	require.Equal(t, v1, got, "stale value served from below the hole")
 
 	// The gap check catches what GetLatest cannot.
-	require.ErrorContains(t, drt.checkFilesDBGap(tx), "gap between snapshot files and DB")
+	require.ErrorContains(t, drt.checkFilesDBGap(tx, nil), "gap between snapshot files and DB")
 }
 
 // TestInvertedIndex_RmStateLatestHole verifies the standalone-index gap check with
@@ -131,7 +131,7 @@ func TestInvertedIndex_RmStateLatestHole(t *testing.T) {
 	// aligned index equals filesEnd. This persists TxTo = filesEnd.
 	_, err = ic.TableScanningPrune(ctx, tx, 0, filesEnd, math.MaxUint64, logEvery, false, nil, nil, nil, prune.DefaultStorageMode)
 	require.NoError(t, err)
-	require.NoError(t, ic.checkFilesDBGap(tx), "healthy: pruned to filesEnd, no gap")
+	require.NoError(t, ic.checkFilesDBGap(tx, nil), "healthy: pruned to filesEnd, no gap")
 	ic.Close()
 
 	// `rm-state --latest`: drop the newest index file (step 1).
@@ -140,7 +140,7 @@ func TestInvertedIndex_RmStateLatestHole(t *testing.T) {
 	ic = ii.beginForTests()
 	defer ic.Close()
 	require.Less(t, ic.files.EndTxNum(), filesEnd, "newest file dropped")
-	require.ErrorContains(t, ic.checkFilesDBGap(tx), "gap between snapshot files and DB")
+	require.ErrorContains(t, ic.checkFilesDBGap(tx, nil), "gap between snapshot files and DB")
 }
 
 func TestCheckFilesDBGapRefusesPrunedRangeInDependencyHiddenFile(t *testing.T) {
@@ -207,4 +207,50 @@ func TestFilesHiddenByAMissingAccessorAreNotAGap(t *testing.T) {
 	require.NoError(t, at.CheckFilesDBGap(tx))
 	_, err = agg.StepAlignedEnd(10)
 	require.ErrorContains(t, err, "hidden by a missing accessor")
+}
+
+// A cut that only the shared ceiling causes stays a gap: building accessors cannot make the state files past a lagging
+// index visible, so the DB pruned past the cut has the range in neither.
+func TestCheckFilesDBGapKeepsTheSharedCeiling(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	state := []testFileRange{{0, 2}, {2, 4}}
+	generateStateFiles(t, dirs, state)
+	generateCommitmentFile(t, dirs, state)
+	generateStandaloneIIFiles(t, dirs, []testFileRange{{0, 3}})
+	require.NoError(t, agg.OpenFolder(db))
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, SavePruneValProgress(tx, agg.d[kv.AccountsDomain].ValuesTable, &prune.Stat{TxTo: 30}))
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	require.EqualValues(t, 20, at.d[kv.AccountsDomain].files.EndTxNum())
+	require.ErrorContains(t, at.CheckFilesDBGap(tx), "gap between snapshot files and DB for domain accounts")
+}
+
+// A missing history accessor hides the index files that depend on it, yet once it is built they all hold their data:
+// the history prune point past the cut only warns.
+func TestCheckFilesDBGapSparesAMissingHistoryAccessor(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateStateFiles(t, dirs, ranges)
+	generateCommitmentFile(t, dirs, ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(dirs.SnapAccessors, "v2.0-accounts.1-2.vi")))
+	require.NoError(t, agg.OpenFolder(db))
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, SavePruneValProgress(tx, agg.d[kv.AccountsDomain].History.ValuesTable, &prune.Stat{TxTo: 30}))
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	require.Less(t, at.d[kv.AccountsDomain].ht.files.EndTxNum(), uint64(30))
+	require.NoError(t, at.CheckFilesDBGap(tx))
 }

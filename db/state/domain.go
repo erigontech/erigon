@@ -542,30 +542,33 @@ func (d *Domain) retireFilesNotInList(fNames []string) retiredFiles {
 // Aggregator.recalcVisibleFiles uses it to assemble a cross-entity consistent
 // snapshot that is published via a single atomic store.
 func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles, *iiVisible) {
-	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, d.dependencyChecker(), false, toTxNum))
-	hv, hiv := d.History.calcVisibleFiles(toTxNum)
+	return d.calcVisibleFilesFor(toTxNum, false)
+}
+
+// calcVisibleFilesFor with accessorsBuilt gives the lists as they are once every missing accessor is built.
+func (d *Domain) calcVisibleFilesFor(toTxNum uint64, accessorsBuilt bool) (*domainVisible, visibleFiles, *iiVisible) {
+	l := d.Accessors
+	if accessorsBuilt {
+		l = 0
+	}
+	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, l, d.dependencyChecker(accessorsBuilt), false, toTxNum))
+	hv, hiv := d.History.calcVisibleFilesFor(toTxNum, accessorsBuilt)
 	return dv, hv, hiv
 }
 
-func (d *Domain) dependencyChecker() func(startTxNum, endTxNum uint64) bool {
+func (d *Domain) dependencyChecker(accessorsBuilt bool) func(startTxNum, endTxNum uint64) bool {
 	if d.checker == nil {
 		return nil
 	}
 	ue := FromDomain(d.Name)
+	if accessorsBuilt {
+		return func(startTxNum, endTxNum uint64) bool {
+			return d.checker.CheckDependentFilesPresent(ue, startTxNum, endTxNum)
+		}
+	}
 	return func(startTxNum, endTxNum uint64) bool {
 		return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 	}
-}
-
-// fileSets lists the values, history and history index files; the last two only when history has snapshots.
-func (d *Domain) fileSets() []fileSet {
-	sets := []fileSet{{"domain " + d.FilenameBase, d.ValuesTable, d.dirtyFiles, d.Accessors, d.dependencyChecker()}}
-	if h := d.History; !h.SnapshotsDisabled && !h.HistoryDisabled {
-		sets = append(sets,
-			fileSet{"history " + h.FilenameBase, h.ValuesTable, h.dirtyFiles, h.Accessors, nil},
-			fileSet{"history index " + h.FilenameBase, h.ValuesTable, h.InvertedIndex.dirtyFiles, h.InvertedIndex.Accessors, h.InvertedIndex.dependencyChecker()})
-	}
-	return sets
 }
 
 func (d *Domain) Tables() []string { return append(d.History.Tables(), d.ValuesTable) }
@@ -2175,15 +2178,28 @@ func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
 	return maxStepInFiles < dt.d.maxStepInDB(dbtx)
 }
 
-func (dt *DomainRoTx) checkFilesDBGap(tx kv.Tx) error {
+// checkFilesDBGap checks the values, history and history index files; without a repaired view they count as visible.
+func (dt *DomainRoTx) checkFilesDBGap(tx kv.Tx, repaired *aggregatorVisible) error {
 	const hint = "`integration stage_exec --reset` (or `integration stage_custom_trace --reset` for custom-trace domains)"
-	visible := []visibleFiles{dt.files, dt.ht.files, dt.ht.iit.files}
-	for i, set := range dt.d.fileSets() {
-		if err := set.checkFilesDBGap(tx, visible[i].EndTxNum(), hint); err != nil {
-			return err
+	d, id := dt.d, dt.d.Name
+	values, history, index := dt.files.EndTxNum(), dt.ht.files.EndTxNum(), dt.ht.iit.files.EndTxNum()
+	repairedValues, repairedHistory, repairedIndex := values, history, index
+	if repaired != nil && repaired.d[id] != nil {
+		repairedValues, repairedHistory = visibleFiles(repaired.d[id].files).EndTxNum(), repaired.dh[id].EndTxNum()
+		if repaired.dhii[id] != nil {
+			repairedIndex = repaired.dhii[id].files.EndTxNum()
 		}
 	}
-	return nil
+	if err := checkFilesDBGap(tx, d.ValuesTable, "domain "+d.FilenameBase, values, repairedValues, hint); err != nil {
+		return err
+	}
+	if h := d.History; h.SnapshotsDisabled || h.HistoryDisabled {
+		return nil
+	}
+	if err := checkFilesDBGap(tx, d.History.ValuesTable, "history "+d.FilenameBase, history, repairedHistory, hint); err != nil {
+		return err
+	}
+	return checkFilesDBGap(tx, d.History.ValuesTable, "history index "+d.FilenameBase, index, repairedIndex, hint)
 }
 
 // checks if there is anything to prune in DOMAIN tables.

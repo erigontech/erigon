@@ -232,22 +232,27 @@ func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
 // calcVisibleFiles is pure — it does not mutate ii. Used by the Aggregator to
 // assemble a cross-entity snapshot published atomically as aggregatorVisible.
 func (ii *InvertedIndex) calcVisibleFiles(toTxNum uint64) *iiVisible {
-	return newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, ii.dependencyChecker(), false, toTxNum))
+	return ii.calcVisibleFilesFor(toTxNum, false)
 }
 
-func (ii *InvertedIndex) dependencyChecker() func(startTxNum, endTxNum uint64) bool {
+func (ii *InvertedIndex) calcVisibleFilesFor(toTxNum uint64, accessorsBuilt bool) *iiVisible {
+	l := ii.Accessors
+	if accessorsBuilt {
+		l = 0
+	}
+	return newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, l, ii.dependencyChecker(accessorsBuilt), false, toTxNum))
+}
+
+func (ii *InvertedIndex) dependencyChecker(accessorsBuilt bool) func(startTxNum, endTxNum uint64) bool {
 	c := ii.checker
 	if c == nil {
 		return nil
 	}
 	ue := FromII(ii.Name)
-	return func(startTxNum, endTxNum uint64) bool {
-		return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
+	if accessorsBuilt {
+		return func(startTxNum, endTxNum uint64) bool { return c.CheckDependentFilesPresent(ue, startTxNum, endTxNum) }
 	}
-}
-
-func (ii *InvertedIndex) fileSet() fileSet {
-	return fileSet{"index " + ii.FilenameBase, ii.ValuesTable, ii.dirtyFiles, ii.Accessors, ii.dependencyChecker()}
+	return func(startTxNum, endTxNum uint64) bool { return c.CheckDependentPresent(ue, All, startTxNum, endTxNum) }
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
@@ -819,8 +824,13 @@ func (iit *InvertedIndexRoTx) CanHashPrune(tx kv.Tx) bool {
 	return false
 }
 
-func (iit *InvertedIndexRoTx) checkFilesDBGap(tx kv.Tx) error {
-	return iit.ii.fileSet().checkFilesDBGap(tx, iit.files.EndTxNum(), "`integration stage_exec --reset`")
+// checkFilesDBGap without a repaired view counts the visible files only.
+func (iit *InvertedIndexRoTx) checkFilesDBGap(tx kv.Tx, repaired *iiVisible) error {
+	visible, repairedEnd := iit.files.EndTxNum(), iit.files.EndTxNum()
+	if repaired != nil {
+		repairedEnd = repaired.files.EndTxNum()
+	}
+	return checkFilesDBGap(tx, iit.ii.ValuesTable, "index "+iit.ii.FilenameBase, visible, repairedEnd, "`integration stage_exec --reset`")
 }
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {

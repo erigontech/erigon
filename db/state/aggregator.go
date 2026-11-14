@@ -1850,14 +1850,7 @@ type aggregatorVisible struct {
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
-	toTxNum := a.dirtyFilesEndTxNumMinimax()
-	next := a.calcVisibleFiles(toTxNum)
-	// A list cut at a gap ends below the dirty ceiling; commitment past an accounts or storage cut would reference
-	// hidden files, so everyone aligns to the lowest visible end.
-	for end := a.alignedVisibleEndTxNum(next); end > 0 && end < toTxNum; end = a.alignedVisibleEndTxNum(next) {
-		toTxNum = end
-		next = a.calcVisibleFiles(toTxNum)
-	}
+	next := a.alignedVisibleFiles(false)
 	next.minimaxTxNum = next.stateMinimaxTxNum()
 
 	if a.visibilityLoweringForbidden.Load() {
@@ -1893,19 +1886,39 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	reclaimFiles(a.reclaimRetiredLocked())
 }
 
-func (a *Aggregator) calcVisibleFiles(toTxNum uint64) *aggregatorVisible {
+// alignedVisibleFiles aligns every visible list to the lowest visible end: a list cut at a gap ends below the dirty
+// ceiling, and commitment past an accounts or storage cut would reference hidden files. With accessorsBuilt it gives
+// the view BuildMissedAccessors leads to. The caller holds dirtyFilesLock.
+func (a *Aggregator) alignedVisibleFiles(accessorsBuilt bool) *aggregatorVisible {
+	toTxNum := a.dirtyFilesEndTxNumMinimax()
+	next := a.calcVisibleFiles(toTxNum, accessorsBuilt)
+	for end := a.alignedVisibleEndTxNum(next); end > 0 && end < toTxNum; end = a.alignedVisibleEndTxNum(next) {
+		toTxNum = end
+		next = a.calcVisibleFiles(toTxNum, accessorsBuilt)
+	}
+	return next
+}
+
+// repairedVisibleFiles is the aligned view once every missing accessor is built.
+func (a *Aggregator) repairedVisibleFiles() *aggregatorVisible {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	return a.alignedVisibleFiles(true)
+}
+
+func (a *Aggregator) calcVisibleFiles(toTxNum uint64, accessorsBuilt bool) *aggregatorVisible {
 	next := &aggregatorVisible{}
 	for id, d := range a.d {
 		if d == nil {
 			continue
 		}
-		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
+		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFilesFor(toTxNum, accessorsBuilt)
 	}
 	for id, ii := range a.standaloneIIs() {
 		if ii == nil {
 			continue
 		}
-		next.iis[id] = ii.calcVisibleFiles(toTxNum)
+		next.iis[id] = ii.calcVisibleFilesFor(toTxNum, accessorsBuilt)
 	}
 	return next
 }
@@ -2524,19 +2537,20 @@ func (at *AggregatorRoTx) Generation() uint64 { return at.visible.generation }
 // snapshot/DB management operations — e.g. `seg rm-state --latest` and then starting
 // erigon without `integration stage_exec --reset`. Meant to run once at startup.
 func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
+	repaired := at.a.repairedVisibleFiles()
 	for _, dt := range at.d {
 		if dt == nil || !dt.d.Enabled {
 			continue
 		}
-		if err := dt.checkFilesDBGap(tx); err != nil {
+		if err := dt.checkFilesDBGap(tx, repaired); err != nil {
 			return err
 		}
 	}
-	for _, iit := range at.iis {
+	for id, iit := range at.iis {
 		if iit == nil || !iit.ii.Enabled {
 			continue
 		}
-		if err := iit.checkFilesDBGap(tx); err != nil {
+		if err := iit.checkFilesDBGap(tx, repaired.iis[id]); err != nil {
 			return err
 		}
 	}

@@ -810,8 +810,16 @@ func (sf HistoryFiles) CleanupOnError() {
 }
 
 func (h *History) calcVisibleFiles(toTxNum uint64) (visibleFiles, *iiVisible) {
-	hv := calcVisibleFiles(h.dirtyFiles, h.Accessors, nil, false, toTxNum)
-	hiv := h.InvertedIndex.calcVisibleFiles(toTxNum)
+	return h.calcVisibleFilesFor(toTxNum, false)
+}
+
+func (h *History) calcVisibleFilesFor(toTxNum uint64, accessorsBuilt bool) (visibleFiles, *iiVisible) {
+	l := h.Accessors
+	if accessorsBuilt {
+		l = 0
+	}
+	hv := calcVisibleFiles(h.dirtyFiles, l, nil, false, toTxNum)
+	hiv := h.InvertedIndex.calcVisibleFilesFor(toTxNum, accessorsBuilt)
 	return hv, hiv
 }
 

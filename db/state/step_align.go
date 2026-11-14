@@ -175,20 +175,31 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 // refuseAccessorHiddenFiles stops step alignment while a missing accessor hides files: they would join the tail it
 // deletes, though building the accessor is all they need.
 func (at *AggregatorRoTx) refuseAccessorHiddenFiles() error {
-	var sets []fileSet
-	for _, d := range at.d {
-		if d != nil && d.d.Enabled {
-			sets = append(sets, d.d.fileSets()...)
+	repaired := at.a.repairedVisibleFiles()
+	type list struct {
+		name           string
+		visible, built uint64
+	}
+	var lists []list
+	for id, d := range at.d {
+		if d == nil || !d.d.Enabled || repaired.d[id] == nil {
+			continue
+		}
+		name := d.d.FilenameBase
+		lists = append(lists, list{"domain " + name, d.files.EndTxNum(), visibleFiles(repaired.d[id].files).EndTxNum()},
+			list{"history " + name, d.ht.files.EndTxNum(), repaired.dh[id].EndTxNum()})
+		if repaired.dhii[id] != nil {
+			lists = append(lists, list{"history index " + name, d.ht.iit.files.EndTxNum(), repaired.dhii[id].files.EndTxNum()})
 		}
 	}
-	for _, ii := range at.iis {
-		if ii != nil && ii.ii.Enabled {
-			sets = append(sets, ii.ii.fileSet())
+	for id, ii := range at.iis {
+		if ii != nil && ii.ii.Enabled && repaired.iis[id] != nil {
+			lists = append(lists, list{"index " + ii.ii.FilenameBase, ii.files.EndTxNum(), repaired.iis[id].files.EndTxNum()})
 		}
 	}
-	for _, s := range sets {
-		if visible, built := s.visibleEnd(false), s.visibleEnd(true); built > visible {
-			return fmt.Errorf("%s files after txNum %d are hidden by a missing accessor; build the accessors first", s.name, visible)
+	for _, l := range lists {
+		if l.built > l.visible {
+			return fmt.Errorf("%s files after txNum %d are hidden by a missing accessor; build the accessors first", l.name, l.visible)
 		}
 	}
 	return nil
