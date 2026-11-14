@@ -770,10 +770,12 @@ func (w *readAheadRecordingWriter) WriteAccountStorage(addr accounts.Address, in
 	return w.StateWriter.WriteAccountStorage(addr, incarnation, key, original, value)
 }
 
-var readAheadBlocksByResult = metrics.GetOrCreateCounterVec("read_ahead_exec_blocks_total", []string{"result"})
-var readAheadExecTransactions = metrics.GetOrCreateCounter("read_ahead_exec_transactions_total")
-var readAheadExecKeys = metrics.GetOrCreateCounterVec("read_ahead_exec_keys_total", []string{"kind", "direction"})
-var readAheadExecSeconds = metrics.GetOrCreateSummary("read_ahead_exec_block_seconds")
+var (
+	readAheadBlocksByResult   = metrics.GetOrCreateCounterVec("read_ahead_exec_blocks_total", []string{"result"})
+	readAheadExecTransactions = metrics.GetOrCreateCounter("read_ahead_exec_transactions_total")
+	readAheadExecKeys         = metrics.GetOrCreateCounterVec("read_ahead_exec_keys_total", []string{"kind", "direction"})
+	readAheadExecSeconds      = metrics.GetOrCreateSummary("read_ahead_exec_block_seconds")
+)
 
 func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute bool, execBlock *atomic.Uint64) (chan uint64, context.CancelFunc) {
 	const readAheadBlocks = 500
