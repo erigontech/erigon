@@ -2596,7 +2596,7 @@ func TestValidateReadSet_BaseReadOfQuietAccountSkipsValidation(t *testing.T) {
 		{"self-destruct", SelfDestructPath, true, base, VersionInvalid, false},
 		{"address write", AddressPath, &accounts.Account{Incarnation: 1}, base, VersionValid, false},
 		{"incarnation write", IncarnationPath, uint64(1), base, VersionInvalid, false},
-		{"create contract", CreateContractPath, true, base, VersionValid, false},
+		{"create contract", CreateContractPath, true, base, VersionInvalid, false},
 		{"read of a removed write", 0, nil, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, VersionInvalid, false},
 		{"read of an aborted write", StoragePath, *uint256.NewInt(8), ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, VersionInvalid, false},
 	} {

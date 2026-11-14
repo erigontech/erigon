@@ -2212,14 +2212,6 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 			}
 			return uint256.Int{}, false, nil
 		}
-		// A creation clears the slots of the prior incarnation without writing them, and a
-		// seeded origin can hold their old values.
-		if created, res, ok := vr.versionMap.ReadCreateContract(address, vr.txIndex); ok && created && res.resolved() {
-			if val, slot, ok := liveStorageValue(vr.versionMap, address, key, vr.txIndex); ok && slot.Status() != MVReadResultNone && slot.DepIdx() >= res.DepIdx() {
-				return val, true, nil
-			}
-			return uint256.Int{}, false, nil
-		}
 		if val, ok := versionedUpdateStorage(vr.versionMap, address, key, vr.txIndex); ok {
 			return val, true, nil
 		}

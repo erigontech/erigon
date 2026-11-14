@@ -156,3 +156,41 @@ func TestCreate2OverStorageOnlyAccountReplacesItsStorage(t *testing.T) {
 		})
 	}
 }
+
+// After a CREATE2 to an account with storage but no nonce and no code, a later tx of the same
+// block sees only the new contract's storage: an old slot reads as zero, a write to an old slot
+// is priced as a write to an empty slot, and a slot the init code wrote keeps its value.
+func TestTxAfterCreate2OverStorageOnlyAccountSeesNewStorage(t *testing.T) {
+	keys, senders := eip161TouchKeys(t, 1)
+	runtime := program.New().Push(1).Op(vm.SLOAD).Push(1).Op(vm.ADD).Push(3).Op(vm.SSTORE).Sstore(5, 7).Push(2).Op(vm.SLOAD).Push(4).Op(vm.SSTORE).Op(vm.STOP).Bytes()
+	initCode := program.New().Sstore(2, 1).ReturnViaCodeCopy(runtime).Bytes()
+	factory := common.HexToAddress("0xfac7")
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	for _, fork := range eip161TouchForks {
+		t.Run(fork.name, func(t *testing.T) {
+			gspec := &types.Genesis{Config: fork.config, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+				senders[0]: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+				factory:    {Code: program.New().Create2(initCode, 0).Op(vm.STOP).Bytes()},
+				target: {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{
+					common.HexToHash("0x01"): common.HexToHash("0x09"),
+					common.HexToHash("0x05"): common.HexToHash("0x03"),
+				}},
+			}}
+			chainPack := generateEIP161TouchBlock(t, gspec, keys[0], func(b *blockgen.BlockGen) {
+				for _, to := range []common.Address{factory, target} {
+					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), to, uint256.NewInt(0), 1_000_000, uint256.NewInt(10_000_000_000), nil), *types.LatestSignerForChainID(fork.config.ChainID), keys[0])
+					require.NoError(t, err)
+					b.AddTx(txn)
+				}
+			})
+			requireGeneratedBlock(t, chainPack)
+			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				require.Equal(t, uint256.Int{}, storageAt(t, st, target, 1))
+				require.Equal(t, *uint256.NewInt(1), storageAt(t, st, target, 2))
+				require.Equal(t, *uint256.NewInt(1), storageAt(t, st, target, 3), "slot 1 reads as zero")
+				require.Equal(t, *uint256.NewInt(1), storageAt(t, st, target, 4), "slot 2 keeps the init code's value")
+				require.Equal(t, *uint256.NewInt(7), storageAt(t, st, target, 5))
+			})
+		})
+	}
+}

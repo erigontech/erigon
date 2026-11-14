@@ -481,7 +481,6 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			return
 		}
 	}
-
 	switch res.Status() {
 	case MVReadResultDone, MVReadResultValidated:
 		hdr.Source = MapRead
@@ -535,6 +534,16 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				r.source = MapRead
 				r.version = r.life.canonicalVer
 				return
+			}
+		}
+		if path == StoragePath && storageClearedByCreate(r.life, true, hdr.Version.TxIndex) {
+			readClearedByCreate(s, hdr, r)
+			return
+		}
+		// A value below this tx is older than a creation in it.
+		if path == StoragePath {
+			if created, ok := s.versionedWriteCreateContract(addr); ok && created {
+				r.mapStorageVal = uint256.Int{}
 			}
 		}
 		r.outcome = outcomeMapDone
@@ -647,6 +656,10 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			r.outcome = outcomeReturnZero
 			r.source = MapRead
 			r.version = r.life.canonicalVer
+			return
+		}
+		if path == StoragePath && storageClearedByCreate(r.life, false, UnknownDep) {
+			readClearedByCreate(s, hdr, r)
 			return
 		}
 
@@ -1255,6 +1268,23 @@ func recordWipedSelfDestruct(s *IntraBlockState, addr accounts.Address, life lif
 		ReadHeader: ReadHeader{Source: MapRead, Version: life.canonicalVer},
 		Val:        life.state == LifecycleAbsent,
 	})
+}
+
+// readClearedByCreate reads as zero a slot that a contract creation below the read replaced,
+// anchored on the creation, as liveStorage validates it. While the creation is in flight, the
+// read depends on it.
+func readClearedByCreate(s *IntraBlockState, hdr ReadHeader, r *readPathResult) {
+	if r.life.createInc < 0 {
+		s.dep = max(s.dep, r.life.createdAt)
+	}
+	hdr.Source = MapRead
+	hdr.Version = Version{TxIndex: r.life.createdAt, Incarnation: r.life.createInc}
+	r.mapStorageVal = uint256.Int{}
+	r.outcome = outcomeMapDone
+	r.hdr = hdr
+	r.recordVR = true
+	r.source = MapRead
+	r.version = hdr.Version
 }
 
 // recordWipedStorageRead records a zero slot read at the destruct that wiped it,

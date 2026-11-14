@@ -82,6 +82,8 @@ var generatedBlockWant = map[string]struct {
 	"TestCreate2AfterDestructAndTransferRevival":                                        {"0x9ac7dae57dab901312f629da58429619436b41ed1da83348ba3a48587444810a", 185647},
 	"TestCreate2OverStorageOnlyAccountReplacesItsStorage/amsterdam":                     {"0x3d17c5551d42fdc4d2032fcec9e39520832fdc557dd000b7203a3bc377fb8dba", 97920},
 	"TestCreate2OverStorageOnlyAccountReplacesItsStorage/prague":                        {"0x98adec99881cc8d35f9329cf1b85b414ffa616577e349068d2205963cd383812", 75183},
+	"TestTxAfterCreate2OverStorageOnlyAccountSeesNewStorage/amsterdam":                  {"0xcc4ec4a1e2e146f8c0c647aba08d93033327607d8d8cb1baf7715066916b644b", 423810},
+	"TestTxAfterCreate2OverStorageOnlyAccountSeesNewStorage/prague":                     {"0xfed67065ca3af5ee716990abd3c341ec3c2c6000c7a56d50121dcdfe102f27de", 170960},
 	"TestCreateAfterSameTxRevival/osaka":                                                {"0xa7158442c8b79c9264115e2c6c56a57f62e5f4a150169bd59f80afeb3b674e01", 176348},
 	"TestCreateAfterSameTxRevival/shanghai":                                             {"0xa7158442c8b79c9264115e2c6c56a57f62e5f4a150169bd59f80afeb3b674e01", 176348},
 	"TestCreditedEmptyAccountIsKept/burnt-fee_recipient_with_a_non-zero_burn/amsterdam": {"0x35f5a7f038bfd5a4d33cb7e28ca02099e9ed963d06ed83201dafcf1b24fcbb3d", 15000},
