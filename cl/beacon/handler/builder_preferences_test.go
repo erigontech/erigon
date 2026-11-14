@@ -118,16 +118,23 @@ func TestPostValidatorBuilderPreferencesAcceptsMaximumJSONList(t *testing.T) {
 			Data: make([]byte, cltypes.MaxBuilderAuthDataSize), Slot: 10,
 		}},
 	}
-	entries := make(cltypes.BuilderPreferencesEntries, cltypes.MaxBuilderPreferencesEntries)
-	for i := range entries {
-		entries[i] = entry
-	}
-	body, err := entries.MarshalJSON()
+	encoded, err := entry.MarshalJSON()
 	require.NoError(t, err)
-	require.Greater(t, len(body), 32<<20)
-	client.EXPECT().SubmitBuilderPreferences(gomock.Any(), url, entry.ProposerPubkey, gomock.Any()).Return(nil).Times(len(entries))
+	body := make([]io.Reader, 0, 2*cltypes.MaxBuilderPreferencesEntries+1)
+	body = append(body, strings.NewReader("["))
+	for i := range cltypes.MaxBuilderPreferencesEntries {
+		if i != 0 {
+			body = append(body, strings.NewReader(","))
+		}
+		body = append(body, bytes.NewReader(encoded))
+	}
+	body = append(body, strings.NewReader("]"))
+	bodySize := (len(encoded)+1)*cltypes.MaxBuilderPreferencesEntries + 1
+	require.Greater(t, bodySize, 32<<20)
+	client.EXPECT().SubmitBuilderPreferences(gomock.Any(), url, entry.ProposerPubkey, gomock.Any()).Return(nil).Times(cltypes.MaxBuilderPreferencesEntries)
 	handler := &ApiHandler{builderClient: client}
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/builder_preferences", bytes.NewReader(body))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/builder_preferences", io.MultiReader(body...))
+	request.ContentLength = int64(bodySize)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
