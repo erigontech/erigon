@@ -95,6 +95,7 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
+	fastConfirmation       *fastConfirmationTracker
 	timeMs                 atomic.Uint64
 	highestSeen            atomic.Uint64
 	highestSeenRoot        atomic.Value // common.Hash
@@ -818,6 +819,10 @@ func (f *ForkChoiceStore) GetEth1Hash(eth2Root common.Hash) common.Hash {
 func (f *ForkChoiceStore) GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
+	return f.finalizedExecutionHashLocked(eth2Root)
+}
+
+func (f *ForkChoiceStore) finalizedExecutionHashLocked(eth2Root common.Hash) common.Hash {
 	if bid := f.executionPayloadBid(eth2Root); bid != nil {
 		return bid.ParentBlockHash
 	}

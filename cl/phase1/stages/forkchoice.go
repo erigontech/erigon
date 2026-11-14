@@ -88,7 +88,7 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 		if _, err := engine.ForkChoiceUpdate(
 			ctx,
 			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
-			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
+			cfg.forkChoice.GetSafeExecutionHash(headRoot, cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root)),
 			executionHead, nil, headVersion,
 		); err != nil {
 			switch {

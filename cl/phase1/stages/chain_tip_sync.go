@@ -220,6 +220,8 @@ MainLoop:
 			return err
 		}
 		select {
+		case <-cfg.forkChoice.FastConfirmationChanged():
+			break MainLoop
 		case <-presenceTicker.C:
 			// Check if the highest seen block is greater than or equal to the target slot
 			if cfg.forkChoice.HighestSeen() >= args.targetSlot {

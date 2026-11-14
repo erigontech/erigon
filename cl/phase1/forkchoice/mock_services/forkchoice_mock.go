@@ -359,6 +359,10 @@ func (f *ForkChoiceStorageMock) GetEth1Hash(eth2Root common.Hash) common.Hash {
 	return common.Hash{}
 }
 
+func (f *ForkChoiceStorageMock) GetSafeExecutionHash(head, fallback common.Hash) common.Hash {
+	return fallback
+}
+
 func (f *ForkChoiceStorageMock) GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash {
 	return f.GetEth1Hash(eth2Root)
 }

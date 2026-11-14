@@ -30,6 +30,7 @@ import (
 )
 
 type sleepForSlotForkChoiceFake struct {
+	safeChanged    <-chan struct{}
 	head           common.Hash
 	headSlot       uint64
 	payloadStatus  cltypes.PayloadStatus
@@ -452,3 +453,20 @@ func (f blockingSleepForSlotForkChoiceFake) GetExecutionHead(forkchoice.ForkChoi
 	}
 	return common.Hash{}, true
 }
+
+func (f sleepForSlotForkChoiceFake) FastConfirmationChanged() <-chan struct{} { return f.safeChanged }
+
+func TestSleepForSlotWakesForSafeOnlyChange(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		changed := make(chan struct{}, 1)
+		changed <- struct{}{}
+		head := common.Hash{1}
+		_, woke, err := waitForNextSlotOrHeadChange(t.Context(), 11, sleepForSlotConfig(100), sleepForSlotForkChoiceFake{head: head, safeChanged: changed}, sleepForSlotSyncedDataFake{head: head}, sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: started.Add(12 * time.Second)}, sleepForSlotWake{}, common.Hash{})
+		require.NoError(t, err)
+		require.True(t, woke)
+		require.Equal(t, started, time.Now())
+	})
+}
+
+func (blockingSleepForSlotForkChoiceFake) FastConfirmationChanged() <-chan struct{} { return nil }

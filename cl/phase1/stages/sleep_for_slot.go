@@ -31,6 +31,7 @@ import (
 const sleepForSlotHeadPollInterval = 200 * time.Millisecond
 
 type sleepForSlotForkChoice interface {
+	FastConfirmationChanged() <-chan struct{}
 	GetHeadNode() (forkchoice.ForkChoiceNode, uint64, error)
 	GetExecutionHead(forkchoice.ForkChoiceNode) (common.Hash, bool)
 	RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx context.Context, minSlot uint64)
@@ -81,6 +82,8 @@ func waitForNextSlotOrHeadChange(
 		select {
 		case <-ctx.Done():
 			return sleepForSlotWake{}, false, ctx.Err()
+		case <-forkChoice.FastConfirmationChanged():
+			return lastWake, true, nil
 		case <-timer.C:
 			return sleepForSlotWake{}, false, nil
 		case <-tick:

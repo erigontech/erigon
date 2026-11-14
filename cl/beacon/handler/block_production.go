@@ -1855,7 +1855,7 @@ func (a *ApiHandler) produceBeaconBody(
 	if payloadSource.parentExecutionRequests != nil {
 		beaconBody.ParentExecutionRequests = payloadSource.parentExecutionRequests
 	}
-	finalizedHash, safeHash := a.payloadBuildFinalityHashes(baseState, head)
+	finalizedHash, safeHash := a.payloadBuildFinalityHashes(baseState, baseBlockRoot, head)
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
 		return nil, nil, err
@@ -2207,7 +2207,7 @@ func (a *ApiHandler) produceBeaconBody(
 	return beaconBody, executionValue, nil
 }
 
-func (a *ApiHandler) payloadBuildFinalityHashes(baseState *state.CachingBeaconState, parentHash common.Hash) (common.Hash, common.Hash) {
+func (a *ApiHandler) payloadBuildFinalityHashes(baseState *state.CachingBeaconState, headRoot, parentHash common.Hash) (common.Hash, common.Hash) {
 	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
 	if finalizedHash == (common.Hash{}) {
 		finalizedHash = parentHash
@@ -2216,6 +2216,7 @@ func (a *ApiHandler) payloadBuildFinalityHashes(baseState *state.CachingBeaconSt
 	if safeHash == (common.Hash{}) {
 		safeHash = parentHash
 	}
+	safeHash = a.forkchoiceStore.GetSafeExecutionHash(headRoot, safeHash)
 	return finalizedHash, safeHash
 }
 
@@ -3320,6 +3321,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.FinalizedCheckpoint().Root)
 	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
 	headVersion := a.beaconChainCfg.GetCurrentStateVersion(headSlot / a.beaconChainCfg.SlotsPerEpoch)
+	safeHash = a.forkchoiceStore.GetSafeExecutionHash(headRoot, safeHash)
 	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
 		// Storing the block does not depend on the execution layer acknowledging the head in time,
 		// and the next head sends another update.

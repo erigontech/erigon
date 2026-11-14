@@ -811,3 +811,16 @@ func TestBatchSignatureVerifierWaitReturnsIgnoreOnContextCancel(t *testing.T) {
 	err := verifier.VerifyAttestation(ctx, &AggregateVerificationData{})
 	require.ErrorIs(t, err, ErrIgnore)
 }
+
+func TestBatchSignatureVerifierFlushWaitsForAggregateCallbacks(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+	verifier := NewBatchSignatureVerifier(t.Context(), nil)
+	entry := newRepeatedSignatureEntry(1, 1)
+	applied := false
+	entry.F = func() { applied = true }
+	verifier.aggregateProofVerify <- entry
+	verifier.Start()
+	require.NoError(t, verifier.FlushAggregateProofs(t.Context()))
+	require.True(t, applied, "flush returned before the prior aggregate was applied")
+}

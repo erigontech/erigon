@@ -259,6 +259,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinMevRelayUrl,
 	&utils.CaplinAllowPrivateBuilderURLs,
 	&utils.CaplinValidatorMonitorFlag,
+	&utils.EnableFastConfirmationFlag,
 	&utils.CaplinPayloadPreparationDisableFlag,
 	&utils.CaplinCustomConfigFlag,
 	&utils.CaplinCustomGenesisFlag,
