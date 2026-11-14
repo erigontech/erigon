@@ -17,11 +17,13 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"math"
 	"net/http"
@@ -881,6 +883,28 @@ func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter
 }
 
 func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	return a.validatorIdentities(r, nil)
+}
+
+func (a *ApiHandler) PostEthV1ValidatorIdentities(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	var ids []string
+	if len(bytes.TrimSpace(body)) > 0 {
+		if err := json.Unmarshal(body, &ids); err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+		}
+	}
+	return a.validatorIdentities(r, ids)
+}
+
+func (a *ApiHandler) validatorIdentities(r *http.Request, ids []string) (*beaconhttp.BeaconResponse, error) {
+	filter, err := parseValidatorIdentityFilter(ids)
+	if err != nil {
+		return nil, err
+	}
 	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -903,7 +927,7 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 	if blockId.Head() {
 		// If we are looking at the head, we can just read the validators from the head state
 		if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, _ uint64) error {
-			validatorIdentities = newValidatorIdentities(s.Validators())
+			validatorIdentities = newValidatorIdentities(s.Validators(), filter)
 			isOptimistic = a.forkchoiceStore.IsRootOptimistic(root)
 			return nil
 		}); err != nil {
@@ -935,7 +959,7 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 		}
 		isFinalized = *slot <= a.forkchoiceStore.FinalizedSlot()
 		isOptimistic = a.forkchoiceStore.IsRootOptimistic(blockRoot)
-		validatorIdentities = newValidatorIdentities(validators)
+		validatorIdentities = newValidatorIdentities(validators, filter)
 	}
 	if validatorIdentities == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validators not found"))
@@ -946,12 +970,58 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 		WithFinalized(isFinalized), nil
 }
 
-func newValidatorIdentities(validators *solid.ValidatorSet) *solid.ListSSZ[*validatorIdentityResponse] {
+// validatorIdentityFilter holds the ids of a validator_identities request. Indices and
+// public keys are kept apart so that public keys are matched against the validator
+// set being served, not against the head state.
+type validatorIdentityFilter struct {
+	indices map[uint64]struct{}
+	pubkeys map[common.Bytes48]struct{}
+}
+
+func (f *validatorIdentityFilter) empty() bool {
+	return len(f.indices) == 0 && len(f.pubkeys) == 0
+}
+
+func parseValidatorIdentityFilter(ids []string) (*validatorIdentityFilter, error) {
+	f := &validatorIdentityFilter{
+		indices: make(map[uint64]struct{}),
+		pubkeys: make(map[common.Bytes48]struct{}),
+	}
+	for _, id := range ids {
+		isPublicKey, err := checkValidValidatorId(id)
+		if err != nil {
+			return nil, err
+		}
+		if isPublicKey {
+			var b48 common.Bytes48
+			if err := b48.UnmarshalText([]byte(id)); err != nil {
+				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+			}
+			f.pubkeys[b48] = struct{}{}
+			continue
+		}
+		idx, err := strconv.ParseUint(id, 10, 64)
+		if err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+		}
+		f.indices[idx] = struct{}{}
+	}
+	return f, nil
+}
+
+func newValidatorIdentities(validators *solid.ValidatorSet, filter *validatorIdentityFilter) *solid.ListSSZ[*validatorIdentityResponse] {
 	if validators == nil {
 		return nil
 	}
 	validatorIdentities := solid.NewStaticListSSZ[*validatorIdentityResponse](validators.Length(), (&validatorIdentityResponse{}).EncodingSizeSSZ())
 	validators.Range(func(i int, v solid.Validator, l int) bool {
+		if !filter.empty() {
+			_, byIndex := filter.indices[uint64(i)]
+			_, byPubkey := filter.pubkeys[common.Bytes48(v.PublicKey())]
+			if !byIndex && !byPubkey {
+				return true
+			}
+		}
 		validatorIdentities.Append(&validatorIdentityResponse{
 			Index:           uint64(i),
 			Pubkey:          v.PublicKey(),

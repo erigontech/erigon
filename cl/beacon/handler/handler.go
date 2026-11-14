@@ -622,6 +622,7 @@ func (a *ApiHandler) init() {
 							r.Post("/validator_balances", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconValidatorsBalances))
 							r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidator))
 							r.Get("/validator_identities", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorIdentities))
+							r.Post("/validator_identities", beaconhttp.HandleEndpointFunc(a.PostEthV1ValidatorIdentities))
 							r.Get("/pending_consolidations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingConsolidations))
 							r.Get("/pending_deposits", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingDeposits))
 							r.Get("/pending_partial_withdrawals", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesPendingPartialWithdrawals))
