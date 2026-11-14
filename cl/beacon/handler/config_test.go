@@ -17,10 +17,7 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -28,7 +25,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/gossip"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -137,24 +133,17 @@ func TestGetSpecUsesSpecConfigKeyNames(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			network, config, _, err := clparams.GetConfigsByNetworkName(name)
 			require.NoError(t, err)
-			h := &ApiHandler{beaconChainCfg: config, netConfig: network, routerCfg: &beacon_router_configuration.RouterConfiguration{Config: true}}
-			w := httptest.NewRecorder()
-			h.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/eth/v1/config/spec", nil))
-			require.Equal(t, http.StatusOK, w.Code)
-			var response struct {
-				Data map[string]json.RawMessage `json:"data"`
-			}
-			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+			spec := specData(t, config, network)
 			for _, test := range []struct{ key, oldKey, want string }{
 				{"MAX_PAYLOAD_SIZE", "GOSSIP_MAX_SIZE", `"10485760"`},
 				{"MAXIMUM_GOSSIP_CLOCK_DISPARITY", "MAXIMUM_GOSSIP_CLOCK_DISPARITY_MILLIS", `"500"`},
 				{"PENDING_DEPOSITS_LIMIT", "PENDING_DEPOSIT_LIMIT", `"134217728"`},
 			} {
 				t.Run(test.key, func(t *testing.T) {
-					if _, ok := response.Data[test.oldKey]; ok {
+					if _, ok := spec[test.oldKey]; ok {
 						t.Errorf("unexpected response key %s", test.oldKey)
 					}
-					got, ok := response.Data[test.key]
+					got, ok := spec[test.key]
 					if !ok {
 						t.Fatalf("%s: expected %s, got <missing>", test.key, test.want)
 					}
@@ -202,15 +191,15 @@ func TestGetSpecUsesResolvedPresetSizes(t *testing.T) {
 
 func TestGetSpecUsesUncappedPresetSizes(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte("MAX_PAYLOAD_SIZE: 1048576\n"), 0o644))
+	require.NoError(t, os.WriteFile(configPath, []byte("MAX_PAYLOAD_SIZE: 1024\n"), 0o644))
 	config, network, err := clparams.CustomConfig(configPath)
 	require.NoError(t, err)
 	spec := specData(t, &config, &network)
 
 	require.JSONEq(t, `"2097616"`, string(spec["MAX_ATTESTER_SLASHING_SIZE"]))
 	require.JSONEq(t, `"16829"`, string(spec["MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE"]))
-	require.Equal(t, uint64(1048576), gossip.MaxUncompressedSize(gossip.TopicNameAttesterSlashing, &config, &network))
-	require.Equal(t, uint64(16829), gossip.MaxUncompressedSize(gossip.TopicNameBeaconAggregateAndProof, &config, &network))
+	require.Equal(t, uint64(1024), gossip.MaxUncompressedSize(gossip.TopicNameAttesterSlashing, &config, &network))
+	require.Equal(t, uint64(1024), gossip.MaxUncompressedSize(gossip.TopicNameBeaconAggregateAndProof, &config, &network))
 }
 
 func TestGetSpecDerivesUpdateTimeout(t *testing.T) {
@@ -218,15 +207,8 @@ func TestGetSpecDerivesUpdateTimeout(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte("PRESET_BASE: minimal\n"), 0o644))
 	config, network, err := clparams.CustomConfig(path)
 	require.NoError(t, err)
-	h := &ApiHandler{beaconChainCfg: &config, netConfig: &network, routerCfg: &beacon_router_configuration.RouterConfiguration{Config: true}}
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/eth/v1/config/spec", nil))
-	require.Equal(t, http.StatusOK, w.Code)
-	var response struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-	require.JSONEq(t, `"64"`, string(response.Data["UPDATE_TIMEOUT"]))
+	spec := specData(t, &config, &network)
+	require.JSONEq(t, `"64"`, string(spec["UPDATE_TIMEOUT"]))
 }
 
 func TestNamedNetworkRuntimeConfigDefaults(t *testing.T) {
