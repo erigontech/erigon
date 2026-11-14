@@ -147,6 +147,9 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	if err := s.syncedDataManager.ViewHeadState(func(state *state.CachingBeaconState) error {
 		val, err := state.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 		if err != nil {
+			if msg.ImmediateVerification {
+				return err
+			}
 			return ErrIgnore
 		}
 		curEpoch := state.Slot() / s.beaconCfg.SlotsPerEpoch

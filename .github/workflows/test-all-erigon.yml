@@ -76,6 +76,10 @@ jobs:
           ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
         run: |
           if ! make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"; then
+            # A failed or timed-out test is a real result: a cold rerun only repeats it or hides a flake.
+            if grep -q -e '^--- FAIL' -e '^panic: ' run.log; then
+              exit 1
+            fi
             # Retry after clearing the Go build cache. Low disk space can cause
             # severe, non-obvious build/test failures that don't surface a clear
             # "no space left" message. Tuning a cache size limit is too fragile;

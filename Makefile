@@ -505,7 +505,7 @@ kurtosis-cleanup:
 	@echo "-----------------------------------\n"
 	kurtosis enclave rm -f makefile-kurtosis-testnet
 
-## lintci:                            run golangci-lint linters (full run, used in CI; skips fast-only and mod tidy)
+## lintci:                            run golangci-lint linters (full run, used in CI; skips the fast-only pass)
 lintci:
 	@$(GOLANGCI) run --config ./.golangci.yml
 	@$(MAKE) check-generated
