@@ -753,13 +753,6 @@ func (r blobRetryRange) workCountWithoutCache() uint64 {
 	return width + 1
 }
 
-func (r blobRetryRange) intervalCount() int {
-	if r.intervals == nil {
-		return 1
-	}
-	return r.intervals.Len()
-}
-
 func (b *BlobHistoryDownloader) addRetryBlocks(blocks []incompleteBlock) {
 	for _, item := range blocks {
 		b.addRetrySlot(item.block.GetSlot())

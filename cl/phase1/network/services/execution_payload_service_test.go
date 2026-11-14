@@ -2277,3 +2277,8 @@ func TestExecutionPayloadServiceDropsPendingEnvelopeWhenBlockIsInvalid(t *testin
 	require.Zero(t, impl.pending.count.Load())
 	require.Zero(t, impl.pendingBytes.Load())
 }
+
+func (q *pendingJobQueue[K, M]) stopAndWait() {
+	q.cancelLoop()
+	q.loopWG.Wait()
+}

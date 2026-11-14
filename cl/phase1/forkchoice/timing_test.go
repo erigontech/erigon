@@ -87,84 +87,6 @@ func TestComputeShufflingDependentSlotUsesGenesisInEarlyEpochs(t *testing.T) {
 	require.Equal(t, uint64(31), computeShufflingDependentSlot(2, 1, 32))
 }
 
-func TestShouldApplyProposerBoost_PreGloas(t *testing.T) {
-	// Mainnet config: 12s slots, GLOAS not activated
-	// Threshold: 3999 milliseconds into slot
-
-	tests := []struct {
-		name        string
-		genesisTime uint64
-		currentTime uint64
-		want        bool
-	}{
-		{"at slot start (0s)", 0, 0, true},
-		{"1s into slot", 0, 1, true},
-		{"3s into slot", 0, 3, true},
-		{"4s into slot (after deadline)", 0, 4, false},
-		{"6s into slot", 0, 6, false},
-		{"11s into slot", 0, 11, false},
-		{"next slot start (12s)", 0, 12, true},
-		{"next slot 2s in (14s)", 0, 14, true},
-		{"next slot 5s in (17s)", 0, 17, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, tt.genesisTime, tt.currentTime*1000)
-			require.Equal(t, tt.want, f.shouldApplyProposerBoost())
-		})
-	}
-}
-
-func TestShouldApplyProposerBoost_PostGloas(t *testing.T) {
-	// Post-GLOAS: threshold is 3000ms = 3 seconds
-	// epoch 0 with GloasForkEpoch=0, slot size 12, slots per epoch 32
-	// So slot 0 is in epoch 0, which is >= GloasForkEpoch
-
-	tests := []struct {
-		name        string
-		genesisTime uint64
-		currentTime uint64
-		want        bool
-	}{
-		{"at slot start (0s)", 0, 0, true},
-		{"1s into slot", 0, 1, true},
-		{"2s into slot", 0, 2, true},
-		{"3s into slot (at threshold)", 0, 3, false}, // 3*1000 = 3000, NOT < 3000
-		{"4s into slot", 0, 4, false},
-		{"next slot start (12s)", 0, 12, true},
-		{"next slot 2s in (14s)", 0, 14, true},
-		{"next slot 3s in (15s)", 0, 15, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := newTestForkChoiceStore(12, 3, 32, 0, tt.genesisTime, tt.currentTime*1000)
-			require.Equal(t, tt.want, f.shouldApplyProposerBoost())
-		})
-	}
-}
-
-func TestShouldApplyProposerBoost_ForkTransition(t *testing.T) {
-	// GLOAS activates at epoch 10, slots per epoch 32
-	// Slot 319 = epoch 9 (pre-GLOAS, threshold 3999ms)
-	// Slot 320 = epoch 10 (post-GLOAS, threshold 3s)
-
-	f := newTestForkChoiceStore(12, 3, 32, 10, 0, 0)
-
-	// Slot 319 (epoch 9), 3s into slot: pre-GLOAS threshold is 3999ms, so timely
-	f.timeMs.Store((319*12 + 3) * 1000)
-	require.True(t, f.shouldApplyProposerBoost())
-
-	// Slot 320 (epoch 10), 3s into slot: post-GLOAS threshold is 3000ms, 3*1000=3000 NOT < 3000
-	f.timeMs.Store((320*12 + 3) * 1000)
-	require.False(t, f.shouldApplyProposerBoost())
-
-	// Slot 320, 2s into slot: 2*1000=2000 < 3000, timely
-	f.timeMs.Store((320*12 + 2) * 1000)
-	require.True(t, f.shouldApplyProposerBoost())
-}
-
 // --- recordBlockTimeliness tests ---
 
 func TestRecordBlockTimelinessUsesMilliseconds(t *testing.T) {
@@ -396,29 +318,6 @@ func TestUpdateProposerBoostRoot_NotOverwritten(t *testing.T) {
 	timeliness, ok := f.getBlockTimeliness(secondRoot)
 	require.True(t, ok)
 	require.True(t, timeliness[clparams.AttestationTimelinessIndex])
-}
-
-// --- isHeadLate tests ---
-
-func TestIsHeadLate_Timely(t *testing.T) {
-	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 0)
-	root := common.Hash{0x01}
-	block := &cltypes.BeaconBlock{Slot: 0}
-	f.recordBlockTimeliness(block, root, f.timeMs.Load())
-	require.False(t, f.isHeadLate(root), "timely block should not be late")
-}
-
-func TestIsHeadLate_Late(t *testing.T) {
-	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 5*1000)
-	root := common.Hash{0x02}
-	block := &cltypes.BeaconBlock{Slot: 0}
-	f.recordBlockTimeliness(block, root, f.timeMs.Load())
-	require.True(t, f.isHeadLate(root), "late block should be late")
-}
-
-func TestIsHeadLate_Unknown(t *testing.T) {
-	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 0)
-	require.True(t, f.isHeadLate(common.Hash{0xFF}), "unknown block should be treated as late")
 }
 
 // --- isHeadWeak tests ---

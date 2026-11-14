@@ -2030,3 +2030,13 @@ func TestPostForkchoiceHighestFinalizedFailureDoesNotPublish(t *testing.T) {
 	f.requireCopiesAndPublishes(t, 0)
 	require.Equal(t, f.headSlot, f.cfg.blobDownloader.HeadSlot())
 }
+
+// computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
+// It updates the fork choice if possible and sets the status in the RPC. It returns the head slot, head root, and any error encountered.
+func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
+	head, headSlot, err := selectForkChoiceHead(cfg)
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+	return headSlot, head.Root, notifyServicesOfHead(ctx, logger, cfg, head, headSlot)
+}

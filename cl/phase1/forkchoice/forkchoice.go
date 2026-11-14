@@ -219,7 +219,6 @@ type ForkChoiceStore struct {
 	// [New in Gloas:EIP7732] Block timeliness tracking.
 	// Pre-GLOAS: stores [block_timely, false] (only index 0 is meaningful).
 	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.
-	// Used by is_head_late and proposer boost reorg logic.
 	blockTimeliness sync.Map // map[common.Hash][clparams.NumBlockTimelinessDeadlines]bool
 	// [New in Gloas:EIP7732]
 	gloasWeightTree *gloasWeightTree

@@ -6843,3 +6843,7 @@ func TestCheckBlockProductionSlot(t *testing.T) {
 	require.Error(t, checkBlockProductionSlot(current+2, current))
 	require.Error(t, checkBlockProductionSlot(math.MaxUint64, current))
 }
+
+func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock, validation BlockPublishingValidation) error {
+	return a.broadcastBlockWithIntegrationWait(ctx, blk, validation, true)
+}

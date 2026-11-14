@@ -61,21 +61,6 @@ func (f *ForkChoiceStore) getPayloadAttestationDueMs(_ uint64) uint64 {
 	return f.beaconCfg.PayloadAttestationDueMs()
 }
 
-// shouldApplyProposerBoost returns whether a block arriving at the current store time
-// is timely enough to receive the proposer boost (i.e. arrived before the attestation deadline).
-//
-// This is equivalent to checking block_timeliness[ATTESTATION_TIMELINESS_INDEX] at the
-// current store time. It is NOT the same as WeightStore.ShouldApplyProposerBoost(),
-// which implements the spec's should_apply_proposer_boost for weight calculation
-// (GLOAS: complex logic with equivocation checks; pre-GLOAS: checks proposer_boost_root != zero).
-func (f *ForkChoiceStore) shouldApplyProposerBoost() bool {
-	timeMs := f.timeMs.Load()
-	timeIntoSlotMs := (timeMs - utils.SecondsToMilliseconds(f.genesisTime)) % (f.beaconCfg.SecondsPerSlot * 1000)
-	epoch := f.computeEpochAtSlot(f.slotAtTimeMs(timeMs))
-	attestationDueMs := f.getAttestationDueMs(epoch)
-	return timeIntoSlotMs < attestationDueMs
-}
-
 // recordBlockTimeliness implements record_block_timeliness from the spec.
 // It stores a two-element timeliness vector keyed by block root.
 //
@@ -223,19 +208,6 @@ func (f *ForkChoiceStore) shouldApplyProposerBoostGloasWith(proposerBoostRoot co
 		return true
 	})
 	return !hasEquivocation
-}
-
-// isHeadLate returns true if the head block was not received on time.
-// Uses the block_timely element (index 0) of the timeliness vector.
-// [New in Gloas:EIP7732] Updated to use the two-element timeliness vector.
-func (f *ForkChoiceStore) isHeadLate(root common.Hash) bool {
-	raw, ok := f.blockTimeliness.Load(root)
-	if !ok {
-		// Unknown block — treat as late (conservative)
-		return true
-	}
-	timeliness := raw.([clparams.NumBlockTimelinessDeadlines]bool)
-	return !timeliness[clparams.AttestationTimelinessIndex]
 }
 
 // isHeadWeak returns true if the head block has insufficient attestation support

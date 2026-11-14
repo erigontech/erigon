@@ -157,20 +157,6 @@ func builderRouteKeyLess(left, right builderRouteKey) bool {
 	return left.url < right.url
 }
 
-func (s *builderRouteStore) Claim(root common.Hash, url string) (uint64, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.now()
-	s.pruneExpired(now)
-	route, ok := s.routes[builderRouteKey{root: root, url: url}]
-	if !ok || !route.trusted || route.state != builderRouteIdle {
-		return 0, false
-	}
-	route.claimID = s.newClaimID()
-	route.state = builderRouteInFlight
-	return route.claimID, true
-}
-
 func (s *builderRouteStore) ClaimOrAdd(root common.Hash, url string) (uint64, bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

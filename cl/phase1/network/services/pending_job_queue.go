@@ -119,11 +119,6 @@ func newPendingJobQueue[K comparable, M any](
 	return q
 }
 
-func (q *pendingJobQueue[K, M]) stopAndWait() {
-	q.cancelLoop()
-	q.loopWG.Wait()
-}
-
 // enqueueLazy reserves capacity before building the key so a full queue skips
 // potentially expensive work. A duplicate arriving at capacity is therefore
 // reported as full because detecting it would require building the key. Storage
