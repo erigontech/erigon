@@ -1503,7 +1503,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		case fillsCode:
 			v = fillView.FillCode(k, v, opts.codeHash, readTxNum)
 		default:
-			fillView.Fill(domain, k, v, readTxNum)
+			fillView.FillOnSecondMiss(domain, k, v, readTxNum)
 		}
 	}
 	return v, step, nil
