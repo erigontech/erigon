@@ -1276,19 +1276,13 @@ func TestReadAheadExecReadsAndWritesContractStorage(t *testing.T) {
 	engine := ethash.NewFaker()
 	require.NoError(t, db.UpdateTemporal(ctx, func(rwTx kv.TemporalRwTx) error {
 		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		if err != nil {
-			return err
-		}
+		require.NoError(t, err)
 		defer domains.Close()
 		acc := accounts.NewAccount()
 		acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
 		putter := domains.AsPutDel(rwTx)
-		if err := putter.DomainPut(kv.CodeDomain, contract[:], code, 0, nil); err != nil {
-			return err
-		}
-		if err := putter.DomainPut(kv.AccountsDomain, contract[:], accounts.SerialiseV3(&acc), 0, nil); err != nil {
-			return err
-		}
+		require.NoError(t, putter.DomainPut(kv.CodeDomain, contract[:], code, 0, nil))
+		require.NoError(t, putter.DomainPut(kv.AccountsDomain, contract[:], accounts.SerialiseV3(&acc), 0, nil))
 		return domains.Flush(ctx, rwTx)
 	}))
 	signer := types.MakeSigner(config, 1, 1)
@@ -1581,13 +1575,11 @@ func TestReadAheadCommitmentSkipsRestoredStorage(t *testing.T) {
 }
 
 type counterexamplePressureTx struct {
-	kv.TemporalTx
-	p        latestPrefetcher
+	prefetcherTx
 	rollback func()
 }
 
-func (tx counterexamplePressureTx) AggTx() any { return tx.p }
-func (tx counterexamplePressureTx) Rollback()  { tx.rollback() }
+func (tx counterexamplePressureTx) Rollback() { tx.rollback() }
 
 type counterexamplePressurePrefetcher struct {
 	sample  atomic.Bool
@@ -1624,7 +1616,7 @@ func TestReadAheadCommitmentPreservesPermanentReaderFloor(t *testing.T) {
 			}
 			t.Cleanup(tx.Rollback)
 			active.Add(1)
-			return counterexamplePressureTx{p: childPrefetcher, rollback: func() {
+			return counterexamplePressureTx{prefetcherTx: prefetcherTx{p: childPrefetcher}, rollback: func() {
 				tx.Rollback()
 				active.Add(-1)
 			}}, nil
