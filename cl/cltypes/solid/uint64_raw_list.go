@@ -45,6 +45,9 @@ func NewRawUint64List(limit int, u []uint64) *RawUint64List {
 }
 
 func (arr *RawUint64List) SetCap(c int) {
+	if arr.c != c {
+		arr.cachedHash = common.Hash{}
+	}
 	arr.c = c
 }
 
@@ -70,7 +73,10 @@ func (arr *RawUint64List) Set(index int, v uint64) {
 func (arr *RawUint64List) CopyTo(target IterableSSZ[uint64]) {
 	if c, ok := target.(*RawUint64List); ok {
 		c.u = append(c.u[:0], arr.u...)
-		c.cachedHash = arr.cachedHash
+		c.cachedHash = common.Hash{}
+		if c.c == arr.c {
+			c.cachedHash = arr.cachedHash
+		}
 		return
 	}
 	panic("incompatible type")
