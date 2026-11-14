@@ -109,7 +109,6 @@ func startEventStream(t *testing.T, w http.ResponseWriter) (*ApiHandler, <-chan 
 }
 
 func TestEventStreamSlowClientDoesNotBlockEmitters(t *testing.T) {
-	t.Parallel()
 	w := newStalledStreamWriter()
 	defer close(w.release)
 	a, handlerDone := startEventStream(t, w)
@@ -146,7 +145,6 @@ func waitDone(t *testing.T, done <-chan struct{}, failure string) {
 }
 
 func TestEventStreamOverflowClosesStalledStream(t *testing.T) {
-	t.Parallel()
 	w := newStalledStreamWriter()
 	defer close(w.release)
 	a, handlerDone := startEventStream(t, w)
@@ -161,7 +159,6 @@ func TestEventStreamOverflowClosesStalledStream(t *testing.T) {
 }
 
 func TestEventStreamOverflowDoesNotDrainQueueToSlowClient(t *testing.T) {
-	t.Parallel()
 	w := &slowStreamWriter{ResponseRecorder: httptest.NewRecorder(), delay: 10 * time.Millisecond}
 	a, handlerDone := startEventStream(t, w)
 
@@ -210,7 +207,6 @@ func (w *slowStreamWriter) Write(b []byte) (int, error) {
 }
 
 func TestEventStreamWriteErrorClosesStream(t *testing.T) {
-	t.Parallel()
 	w := &failingStreamWriter{ResponseRecorder: httptest.NewRecorder()}
 	_, handlerDone := startEventStream(t, w)
 
@@ -308,7 +304,6 @@ func (w *flushUntilAbortWriter) SetWriteDeadline(t time.Time) error {
 }
 
 func TestEventStreamTeardownLeavesPastWriteDeadline(t *testing.T) {
-	t.Parallel()
 	w := newFlushUntilAbortWriter()
 	a, handlerDone := startEventStream(t, w)
 	waitDone(t, w.flushStarted, "event stream never flushed")

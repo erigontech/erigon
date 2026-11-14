@@ -454,7 +454,6 @@ func TestGloasPayloadDecisionDelay(t *testing.T) {
 }
 
 func TestStartPayloadPreparationSkipsEngineWithoutDirectBuilder(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	var output bytes.Buffer
@@ -621,7 +620,6 @@ func TestPreparePayloadLoopRunsImmediatelyWithPreparationDeadline(t *testing.T) 
 }
 
 func TestPreparePayloadLoopWaitsForCurrentSlotHead(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name               string
 		elapsed            time.Duration
@@ -691,7 +689,6 @@ func TestPreparePayloadLoopWaitsForCurrentSlotHead(t *testing.T) {
 }
 
 func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
-	t.Parallel()
 	for _, test := range []struct {
 		name          string
 		elapsed       time.Duration
@@ -777,7 +774,6 @@ func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 }
 
 func TestPreparePayloadLoopUsesCurrentForkTimingAtGloasTransition(t *testing.T) {
-	t.Parallel()
 	for _, test := range []struct {
 		name            string
 		elapsed         time.Duration
@@ -837,7 +833,6 @@ func TestPreparePayloadLoopUsesCurrentForkTimingAtGloasTransition(t *testing.T) 
 }
 
 func TestPreparePayloadLoopChecksProposerBeforeGloasDecisionWait(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	postState, handler, syncedData, forkchoiceStore, validatorParams := setupGloasPreparationTest(t)
 	currentSlot := postState.Slot()
@@ -897,7 +892,6 @@ func TestPrecheckPreparationInputsRejectsHeadOutsideLookahead(t *testing.T) {
 }
 
 func TestPreparePayloadLoopClassifiesGloasPathWarnings(t *testing.T) {
-	t.Parallel()
 	const pendingWarning = "PayloadPreparation: Gloas payload path is still pending"
 	const failureWarning = "PayloadPreparation: Gloas payload path resolution failed"
 	for _, test := range []struct {
@@ -1301,7 +1295,6 @@ func TestFirstGloasProductionUsesTransitionWithdrawals(t *testing.T) {
 }
 
 func TestPreparePayloadLoopMemoizesEffectiveAttributes(t *testing.T) {
-	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		config := payloadPreparationLoopConfig(1, 1, 2)
@@ -1387,7 +1380,6 @@ func TestPreparePayloadLoopMemoizesEffectiveAttributes(t *testing.T) {
 }
 
 func TestPreparePayloadLoopMemoizesRealPreparation(t *testing.T) {
-	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion, clparams.GloasVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			_, _, _, _, postState, handler, _, syncedData, forkchoiceStore, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
@@ -1467,7 +1459,6 @@ func TestPreparePayloadLoopMemoizesRealPreparation(t *testing.T) {
 }
 
 func TestPreparePayloadLoopMemoizesTheGasLimitItUsed(t *testing.T) {
-	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		config := payloadPreparationLoopConfig(1, 1, 2)
@@ -1516,7 +1507,6 @@ func TestPreparePayloadLoopMemoizesTheGasLimitItUsed(t *testing.T) {
 }
 
 func TestPreparePayloadLoopReusesPreFuluProposerIndex(t *testing.T) {
-	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		config := payloadPreparationLoopConfig(1, 2, 2)
@@ -1582,7 +1572,6 @@ func TestPreparationKeyDistinguishesUnsetGasLimit(t *testing.T) {
 }
 
 func TestPreparePayloadLoopMemoizesTheGloasPathItResolved(t *testing.T) {
-	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		config := payloadPreparationLoopConfig(1, 1, 1)
@@ -1623,7 +1612,6 @@ func TestPreparePayloadLoopMemoizesTheGloasPathItResolved(t *testing.T) {
 }
 
 func TestPreparePayloadLoopRetriesBusySkipAfterPTCDeadline(t *testing.T) {
-	t.Parallel()
 	for _, test := range []struct {
 		name          string
 		blockWorkEnds time.Duration
@@ -1691,7 +1679,6 @@ func TestPreparePayloadLoopRetriesBusySkipAfterPTCDeadline(t *testing.T) {
 }
 
 func TestInvalidProductionRequestDoesNotWaitForPreparation(t *testing.T) {
-	t.Parallel()
 	handler := &ApiHandler{}
 	finishPreparation, ok := handler.payloadPreparationGate.tryBeginPreparation(0, 0)
 	require.True(t, ok)
@@ -1715,7 +1702,6 @@ func TestInvalidProductionRequestDoesNotWaitForPreparation(t *testing.T) {
 }
 
 func TestPublishedBlockStorageSuppressesStaleHeadPreparation(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	storage := blob_storage_mock.NewMockBlobStorage(ctrl)
@@ -1809,7 +1795,6 @@ func TestBlockPublicationClearsMarkerAfterSuccessfulIntegration(t *testing.T) {
 }
 
 func TestFailedBlockGossipKeepsProducedBlockMarker(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	storage := blob_storage_mock.NewMockBlobStorage(ctrl)
 	storage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
@@ -1840,7 +1825,6 @@ func TestFailedBlockGossipKeepsProducedBlockMarker(t *testing.T) {
 }
 
 func TestMissingLegacySelfBuildEnvelopeDoesNotFailBlockPublication(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	fcu.OnTickFn = func(uint64) {}
@@ -1865,7 +1849,6 @@ func TestMissingLegacySelfBuildEnvelopeDoesNotFailBlockPublication(t *testing.T)
 }
 
 func TestPreparePayloadLoopSkipsSlotsTooFarAhead(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	targetSlot := postState.Slot() + 1
@@ -1899,7 +1882,6 @@ func TestPreparePayloadLoopSkipsSlotsTooFarAhead(t *testing.T) {
 }
 
 func TestPreparePayloadLoopStandsOffWhileProducing(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	targetSlot := postState.Slot() + 1
@@ -1924,7 +1906,6 @@ func TestPreparePayloadLoopStandsOffWhileProducing(t *testing.T) {
 }
 
 func TestPreparePayloadLoopSkipsSlotsThatHaveStarted(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	targetSlot := postState.Slot() + 1
@@ -1948,7 +1929,6 @@ func TestPreparePayloadLoopSkipsSlotsThatHaveStarted(t *testing.T) {
 }
 
 func TestPreparePayloadLoopSkipsSlotsWithInsufficientLead(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -1976,7 +1956,6 @@ func TestPreparePayloadLoopSkipsSlotsWithInsufficientLead(t *testing.T) {
 // A copy and slot processing cannot be cancelled once started, so an attempt that is still
 // allowed to start the builder must not start them without room to finish.
 func TestPreparePayloadLoopSkipsStateWorkWithoutItsLead(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -2004,7 +1983,6 @@ func TestPreparePayloadLoopSkipsStateWorkWithoutItsLead(t *testing.T) {
 // A deterministic rejection cannot change while the slot, selected head, and validator
 // registrations stay fixed. Retrying it on every tick would repeat the expensive state work.
 func TestPreparePayloadLoopMemoizesStableFailure(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -2042,7 +2020,6 @@ func TestPreparePayloadLoopMemoizesStableFailure(t *testing.T) {
 }
 
 func TestPreparePayloadLoopRetriesExecutionFailures(t *testing.T) {
-	t.Parallel()
 	for _, failure := range []error{errNoPayloadID, context.Canceled, errBlockWorkInFlight, errors.New("storage unavailable"), errors.New("execution unavailable")} {
 		t.Run(failure.Error(), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -2068,7 +2045,6 @@ func TestPreparePayloadLoopRetriesExecutionFailures(t *testing.T) {
 }
 
 func TestPreparePayloadLoopMemoizesDerivationFailureUntilHeadChanges(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		invalidate func(*testing.T, *state.CachingBeaconState)
@@ -2213,7 +2189,6 @@ func TestPayloadPreparationCountsHeadWaits(t *testing.T) {
 }
 
 func TestPayloadPreparationPTCWaitCountsPendingOnce(t *testing.T) {
-	t.Parallel()
 	postState, handler, syncedData, store, validatorParams := setupGloasPreparationTest(t)
 	currentSlot := postState.Slot()
 	targetSlot := currentSlot + 1
@@ -2252,7 +2227,6 @@ func TestPayloadPreparationPTCWaitCountsPendingOnce(t *testing.T) {
 }
 
 func TestPayloadPreparationExpiredAdmissionCountsLate(t *testing.T) {
-	t.Parallel()
 	store := mock_services.NewForkChoiceStorageMock(t)
 	handler := &ApiHandler{forkchoiceStore: store}
 	engine := newPayloadBuildEngine(t, gomock.NewController(t))
@@ -2414,7 +2388,6 @@ func TestPayloadPreparationDiscardsImportInterruptedStartup(t *testing.T) {
 }
 
 func TestPayloadPreparationDiscardsImportAfterDeadline(t *testing.T) {
-	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		store := mock_services.NewForkChoiceStorageMock(t)
 		ctx, cancel := context.WithDeadlineCause(t.Context(), time.Now().Add(time.Second), errPreparationTooLate)
@@ -3027,7 +3000,6 @@ func TestProductionUsesTargetSlotRandao(t *testing.T) {
 }
 
 func TestProductionUsesPreparedWarmupForPayloadCollection(t *testing.T) {
-	t.Parallel()
 	t.Run("Electra", func(t *testing.T) {
 		_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 		requireProductionUsesPreparedWarmup(t, postState, handler)
@@ -3162,7 +3134,6 @@ func TestPreparePayloadForRetriesWhileTheExecutionLayerIsBusy(t *testing.T) {
 }
 
 func TestPreparePayloadLoopRecoversAfterExecutionRetryCutoff(t *testing.T) {
-	t.Parallel()
 	for _, test := range []struct {
 		name string
 		err  error
@@ -3291,7 +3262,6 @@ func TestPreparePayloadLoopRecoversAfterExecutionRetryCutoff(t *testing.T) {
 }
 
 func TestPreparePayloadBuildBacksOffWhileExecutionHeadDiffers(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	handler := &ApiHandler{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
 	baseBlockRoot := common.Hash{0x41}
@@ -3362,7 +3332,6 @@ func TestPreparePayloadForStopsRetryWhenTheHeadChanges(t *testing.T) {
 // Production waits only for a builder-start attempt that has already entered the execution layer.
 // The attempt is one non-blocking call; state copying and contention retries happen outside it.
 func TestProductionWaitsForActivePreparationAttempt(t *testing.T) {
-	t.Parallel()
 	var gate payloadPreparationGate
 	finishPreparation, ok := gate.tryBeginPreparation(0, 0)
 	require.True(t, ok)
@@ -3389,7 +3358,6 @@ func TestProductionWaitsForActivePreparationAttempt(t *testing.T) {
 }
 
 func TestPreparePayloadForStopsWhenProductionStartsDuringStateCopy(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1

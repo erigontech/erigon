@@ -59,11 +59,30 @@ type testBlob struct {
 // carries for it: one blob proof before Fulu, one proof per cell from Fulu on.
 func newTestBlob(t testing.TB, seed byte, version clparams.StateVersion) testBlob {
 	t.Helper()
+	key := testBlobKey{seed: seed, cellProofs: version >= clparams.FuluVersion}
+	cached, ok := testBlobs.Load(key)
+	if !ok {
+		cached, _ = testBlobs.LoadOrStore(key, computeTestBlob(t, key))
+	}
+	b := cached.(testBlob)
+	blob := *b.blob
+	return testBlob{blob: &blob, commitment: b.commitment, proofs: slices.Clone(b.proofs)}
+}
+
+type testBlobKey struct {
+	seed       byte
+	cellProofs bool
+}
+
+// testBlobs memoizes newTestBlob: its KZG proofs take seconds under -race.
+var testBlobs sync.Map
+
+func computeTestBlob(t testing.TB, key testBlobKey) testBlob {
 	blob := &cltypes.Blob{}
-	blob[31] = seed // last byte of the first field element keeps it below the modulus
+	blob[31] = key.seed // last byte of the first field element keeps it below the modulus
 	commitment, err := kzg.Ctx().BlobToKZGCommitment((*goethkzg.Blob)(blob), 0)
 	require.NoError(t, err)
-	if version >= clparams.FuluVersion {
+	if key.cellProofs {
 		_, proofs, err := peerdasutils.ComputeCellsAndKZGProofs(blob[:])
 		require.NoError(t, err)
 		return testBlob{blob: blob, commitment: cltypes.KZGCommitment(commitment), proofs: proofs}
@@ -542,10 +561,6 @@ func TestPostEthV2BeaconBlocksPublishesRequestBlobsOnNonProducingNode(t *testing
 // node builds and publishes every data column from the request's blobs and cell proofs.
 func TestPostEthV2BeaconBlocksPublishesRequestColumnsOnNonProducingNode(t *testing.T) {
 	t.Parallel()
-	if clparams.GetBeaconConfig() == nil {
-		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg)
-	}
 	handler, published := newPublishingHandler(t, clparams.FuluVersion, nil)
 	b := newTestBlob(t, 1, clparams.FuluVersion)
 	block := newRequestBlock(handler.beaconChainCfg, clparams.FuluVersion, handler.beaconChainCfg.SlotsPerEpoch, b)

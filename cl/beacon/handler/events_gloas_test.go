@@ -52,7 +52,6 @@ func TestFastConfirmationTopicIsNotAdvertisedBeforeItHasAProducer(t *testing.T) 
 }
 
 func TestPayloadAttributesSubscriberTrackedWhileStreamIsOpen(t *testing.T) {
-	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	emitter := beaconevents.NewEventEmitter()
 	handler := &ApiHandler{emitters: emitter, beaconChainCfg: &cfg}

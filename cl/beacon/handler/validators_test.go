@@ -49,7 +49,6 @@ func TestValidatorIdentityResponseJSONUint64AsString(t *testing.T) {
 }
 
 func TestHeadValidatorsSlowClientDoesNotBlockHeadStatePublish(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	manager, ok := syncedData.(*synced_data.SyncedDataManager)
 	require.True(t, ok)

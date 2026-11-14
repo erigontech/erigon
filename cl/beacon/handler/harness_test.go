@@ -25,7 +25,6 @@ import (
 )
 
 func TestHarnessPhase0(t *testing.T) {
-	t.Parallel()
 	beacontest.Execute(
 		append(
 			defaultHarnessOpts(harnessConfig{t: t, v: clparams.Phase0Version}),
@@ -40,7 +39,6 @@ func TestHarnessPhase0(t *testing.T) {
 }
 
 func TestHarnessPhase0Finalized(t *testing.T) {
-	t.Parallel()
 	beacontest.Execute(
 		append(
 			defaultHarnessOpts(harnessConfig{t: t, v: clparams.Phase0Version, finalized: true}),
@@ -52,7 +50,6 @@ func TestHarnessPhase0Finalized(t *testing.T) {
 }
 
 func TestHarnessBellatrix(t *testing.T) {
-	t.Parallel()
 	beacontest.Execute(
 		append(
 			defaultHarnessOpts(harnessConfig{t: t, v: clparams.BellatrixVersion, finalized: true}),
@@ -67,7 +64,6 @@ func TestHarnessBellatrix(t *testing.T) {
 }
 
 func TestHarnessCapella(t *testing.T) {
-	t.Parallel()
 	beacontest.Execute(
 		append(
 			defaultHarnessOpts(harnessConfig{t: t, v: clparams.CapellaVersion, finalized: true}),
@@ -77,7 +73,6 @@ func TestHarnessCapella(t *testing.T) {
 }
 
 func TestHarnessForkChoice(t *testing.T) {
-	t.Parallel()
 	beacontest.Execute(
 		append(
 			defaultHarnessOpts(harnessConfig{t: t, v: clparams.BellatrixVersion, forkmode: 1}),
