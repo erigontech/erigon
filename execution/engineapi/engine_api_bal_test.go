@@ -1322,7 +1322,6 @@ func TestEngineApiNewPayloadBALInvalid(t *testing.T) {
 // TestEngineApiBALUnchangedClaimLieInvalid pins that a BAL listing a written account with reads and no changes makes
 // the block invalid, also when a later tx of the block reads what an earlier one wrote.
 func TestEngineApiBALUnchangedClaimLieInvalid(t *testing.T) {
-	forceParallelExec(t)
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -1364,7 +1363,6 @@ func TestEngineApiBALUnchangedClaimLieInvalid(t *testing.T) {
 // TestEngineApiBALUnchangedClaimLieShapesInvalid pins that a BAL hiding a committed storage write makes the block
 // invalid in each shape of the lie, and that a net-zero write inside one tx is an honest read.
 func TestEngineApiBALUnchangedClaimLieShapesInvalid(t *testing.T) {
-	forceParallelExec(t)
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -1575,7 +1573,6 @@ func requireBALMismatch(t *testing.T, status *enginetypes.PayloadStatus) {
 // self-destruct, the second one reading the slot the first wrote, and that claiming the account unchanged while a tx
 // changes it makes the block invalid.
 func TestEngineApiBALSameTxSelfdestructLieInvalid(t *testing.T) {
-	forceParallelExec(t)
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -1666,7 +1663,6 @@ func requireOnlyStorageReadsAndBalances(t *testing.T, c *types.AccountChanges, r
 // TestEngineApiBALUnchangedAccountLieInvalid pins that a BAL listing an account with no change while a tx changes it
 // makes the block invalid when a later tx of the block reads that account.
 func TestEngineApiBALUnchangedAccountLieInvalid(t *testing.T) {
-	forceParallelExec(t)
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -1755,10 +1751,4 @@ func requireUnchanged(t *testing.T, c *types.AccountChanges) {
 	require.Empty(t, c.BalanceChanges)
 	require.Empty(t, c.NonceChanges)
 	require.Empty(t, c.CodeChanges)
-}
-
-func forceParallelExec(t *testing.T) {
-	prev := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = prev })
 }
