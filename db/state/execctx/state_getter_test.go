@@ -158,21 +158,69 @@ func TestTemporalTxStateGetterCodePresence(t *testing.T) {
 }
 
 // codeBufTx stands in for the compressed-file layer: it decodes into the buffer
-// the caller lends, the way seg's Getter does.
+// the caller passes, the way seg's Getter does.
 type codeBufTx struct {
 	kv.TemporalTx
-	code     map[string][]byte
-	lentCaps *[]int
+	code    map[string][]byte
+	bufCaps *[]int
 }
 
 func (tx codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	if domain != kv.CodeDomain {
 		return tx.TemporalTx.GetLatest(domain, key, opts)
 	}
-	if tx.lentCaps != nil {
-		*tx.lentCaps = append(*tx.lentCaps, cap(opts.Buf()))
+	if tx.bufCaps != nil {
+		*tx.bufCaps = append(*tx.bufCaps, cap(opts.Buf()))
 	}
 	return append(opts.Buf()[:0], tx.code[string(key)]...), 0, nil
+}
+
+// Identical code at many addresses is decoded once; any other read into the buffer ends the reuse.
+func TestStateGetterCodeSegmentReusesTheLastDecode(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	code := bytes.Repeat([]byte{0x21}, 1024)
+	other := bytes.Repeat([]byte{0x22}, 1024)
+	addr := func(b byte) []byte { return append(make([]byte, 19), b) }
+	byAddr := map[string][]byte{string(addr(1)): code, string(addr(2)): code, string(addr(3)): other}
+	for a, c := range byAddr {
+		commitAccount(t, db, nil, []byte(a), accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(c))}), 1)
+	}
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	var bufCaps []int
+	tx := codeBufTx{TemporalTx: roTx, code: byAddr, bufCaps: &bufCaps}
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+	var buf []byte
+	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf))
+	segmentGetter := getter.(execctxapi.CodeSegmentGetter)
+	readSegment := func(b byte, want []byte, decodes int) {
+		t.Helper()
+		got := make([]byte, len(want))
+		copied, readErr := segmentGetter.ReadCodeSegmentTo(addr(b), 5, 0, got)
+		require.NoError(t, readErr)
+		require.True(t, copied)
+		require.Equal(t, want, got)
+		require.Len(t, bufCaps, decodes)
+	}
+
+	readSegment(1, code, 1)
+	readSegment(2, code, 1)
+	readSegment(3, other, 2)
+	readSegment(1, code, 3)
+
+	_, ok, err := getter.GetCode(addr(3), 5)
+	require.NoError(t, err)
+	require.True(t, ok)
+	decodes := len(bufCaps)
+	readSegment(1, code, decodes+1)
 }
 
 // A caller-owned buffer outlives each getter, so a later getter decodes into it
@@ -189,8 +237,8 @@ func TestStateGetterCallerCodeBufOutlivesGetter(t *testing.T) {
 		bytes.Repeat([]byte{0x28}, 1024),
 	}
 	addrs := make([][]byte, len(codes))
-	var lentCaps []int
-	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}, lentCaps: &lentCaps}
+	var bufCaps []int
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}, bufCaps: &bufCaps}
 	for i := range codes {
 		addrs[i] = make([]byte, 20)
 		addrs[i][0] = byte(i + 1)
@@ -219,8 +267,8 @@ func TestStateGetterCallerCodeBufOutlivesGetter(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, codes[i], got)
 	}
-	require.Len(t, lentCaps, len(codes))
-	require.GreaterOrEqual(t, lentCaps[1], len(codes[1]), "the second getter must decode into the buffer the first one grew")
+	require.Len(t, bufCaps, len(codes))
+	require.GreaterOrEqual(t, bufCaps[1], len(codes[1]), "the second getter must decode into the buffer the first one grew")
 }
 
 func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
@@ -247,8 +295,8 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	var lentCaps []int
-	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}, lentCaps: &lentCaps}
+	var bufCaps []int
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}, bufCaps: &bufCaps}
 	for i, addr := range addrs {
 		tx.code[string(addr)] = codes[i]
 	}
@@ -272,9 +320,9 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 	for i := range codes {
 		require.Equal(t, codes[i], got[i], "read %d must not alias the buffer a later read decodes into", i)
 	}
-	require.Len(t, lentCaps, len(codes))
+	require.Len(t, bufCaps, len(codes))
 	for i := 1; i < len(codes); i++ {
-		require.Positive(t, lentCaps[i], "read %d must decode into the lent buffer", i)
+		require.Positive(t, bufCaps[i], "read %d must decode into the passed buffer", i)
 	}
 }
 
@@ -720,4 +768,119 @@ func TestAsOfGetterServesCommittedValueFromStateCache(t *testing.T) {
 	_, _, err = asOf.GetAsOf(kv.AccountsDomain, committed, 5)
 	require.NoError(t, err)
 	require.Equal(t, 1, tx.reads, "a value committed at txNum 5 is not the value as of 5")
+}
+
+func TestStateGetterCodeSegmentLeavesTheCacheEmpty(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	addr := make([]byte, 20)
+	addr[0] = 0x17
+	code := bytes.Repeat([]byte{0x17}, 1024)
+	codeHash := crypto.Keccak256Hash(code)
+	commitAccount(t, db, nil, addr, accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(codeHash)}), 5)
+	addr2 := bytes.Clone(addr)
+	addr2[0] = 0x18
+	code2 := bytes.Repeat([]byte{0x18}, 1024)
+	commitAccount(t, db, nil, addr2, accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code2))}), 5)
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	var bufCaps []int
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{string(addr): code, string(addr2): code2}, bufCaps: &bufCaps}
+
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+
+	var buf []byte
+	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf))
+	segmentGetter := getter.(execctxapi.CodeSegmentGetter)
+
+	got := make([]byte, len(code))
+	copied, err := segmentGetter.ReadCodeSegmentTo(addr, 5, 0, got)
+	require.NoError(t, err)
+	require.True(t, copied)
+	require.Equal(t, code, got)
+	_, cached := sc.View(nil).GetCodeByHash(codeHash[:])
+	require.False(t, cached, "a segment read must not fill the code cache")
+
+	got = make([]byte, len(code2))
+	copied, err = segmentGetter.ReadCodeSegmentTo(addr2, 5, 0, got)
+	require.NoError(t, err)
+	require.True(t, copied)
+	require.Equal(t, code2, got)
+	require.GreaterOrEqual(t, bufCaps[1], len(code2), "the second segment read must decode into the grown buffer")
+
+	got, ok, err := getter.GetCode(addr, 5)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, code, got)
+	decodes := len(bufCaps)
+	got = make([]byte, len(code))
+	copied, err = segmentGetter.ReadCodeSegmentTo(addr, 5, 0, got)
+	require.NoError(t, err)
+	require.True(t, copied, "a cached code is copied from the cache")
+	require.Equal(t, code, got)
+	require.Len(t, bufCaps, decodes, "a cache hit must not decode")
+}
+
+// Without a bound state cache the segment copy still works: it decodes into the caller's buffer.
+func TestStateGetterCodeSegmentWorksWithoutAStateCache(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	addr := make([]byte, 20)
+	addr[0] = 0x1b
+	code := bytes.Repeat([]byte{0x1b}, 1024)
+	commitAccount(t, db, nil, addr, accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))}), 1)
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	var bufCaps []int
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{string(addr): code}, bufCaps: &bufCaps}
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	var buf []byte
+	segmentGetter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf)).(execctxapi.CodeSegmentGetter)
+	got := make([]byte, len(code))
+	copied, err := segmentGetter.ReadCodeSegmentTo(addr, 5, 0, got)
+	require.NoError(t, err)
+	require.True(t, copied, "the segment copy must not need a state cache")
+	require.Equal(t, code, got)
+	require.Len(t, bufCaps, 1, "the decode goes into the caller's buffer")
+}
+
+func TestStateGetterCodeSegmentRefusesAnAccountWrittenInTheBatch(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	addr := make([]byte, 20)
+	addr[0] = 0x19
+	committedCode := bytes.Repeat([]byte{0x19}, 1024)
+	batchHash := crypto.Keccak256Hash([]byte{0x1a})
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{string(addr): committedCode}}
+
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+	account := accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(batchHash)})
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, account, 5, nil))
+
+	var buf []byte
+	segmentGetter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf)).(execctxapi.CodeSegmentGetter)
+	copied, err := segmentGetter.ReadCodeSegmentTo(addr, 5, 0, nil)
+	require.NoError(t, err)
+	require.False(t, copied, "the batch's code hash must not be paired with the committed bytes")
 }

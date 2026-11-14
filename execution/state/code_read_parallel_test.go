@@ -1,13 +1,16 @@
 package state
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -193,4 +196,250 @@ func TestRefreshCodeAssertsHashPresent(t *testing.T) {
 	ibs.SetVersion(0)
 
 	assert.Panics(t, func() { _, _ = refreshCode(ibs, addr) })
+}
+
+type segmentCodeReader struct {
+	codeReader
+	segmentReads, fullReads int
+}
+
+func (r *segmentCodeReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+	r.fullReads++
+	return r.codeReader.ReadAccountCode(addr)
+}
+
+func (r *segmentCodeReader) ReadAccountCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (bool, error) {
+	if addr != r.addr {
+		return false, nil
+	}
+	r.segmentReads++
+	common.CopySegment(dst, r.code, from)
+	return true, nil
+}
+
+// decliningCodeReader serves no segments, like a reader over history or the previous block.
+type decliningCodeReader struct {
+	codeReader
+}
+
+func (decliningCodeReader) ReadAccountCodeSegmentTo(accounts.Address, uint64, []byte) (bool, error) {
+	return false, nil
+}
+
+// A declined segment read is not counted: the full read that replaces it counts once.
+func TestCodeSegment_DeclinedReadCountsOnce(t *testing.T) {
+	prev := dbg.KVReadLevelledMetrics
+	dbg.KVReadLevelledMetrics = true
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prev })
+	_, reader, addr, code := newSegmentRead(t, nil)
+	ibs := NewWithVersionMap(&decliningCodeReader{codeReader: reader.codeReader}, NewVersionMap(nil))
+	ibs.SetTxContext(100, 5)
+	ibs.SetVersion(0)
+
+	got, err := segmentOf(ibs, addr, len(code))
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	require.Equal(t, int64(1), ibs.CodeReadCount())
+}
+
+func segmentOf(ibs *IntraBlockState, addr accounts.Address, n int) ([]byte, error) {
+	dst := make([]byte, n)
+	err := ibs.ReadCodeSegmentTo(addr, 0, dst)
+	return dst, err
+}
+
+func newSegmentRead(t *testing.T, vm *VersionMap) (*IntraBlockState, *segmentCodeReader, accounts.Address, []byte) {
+	t.Helper()
+	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+	code := []byte{0x60, 0x01, 0x60, 0x02, 0x01}
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	reader := &segmentCodeReader{codeReader: codeReader{addr: addr, account: &acc, code: code}}
+	ibs := NewWithVersionMap(reader, vm)
+	ibs.SetTxContext(100, 5)
+	ibs.SetVersion(0)
+	return ibs, reader, addr, code
+}
+
+func TestCodeSegment_RecordsTheSameHeaderWithoutBytes(t *testing.T) {
+	normal, _, addr, code := newSegmentRead(t, NewVersionMap(nil))
+	got, err := normal.GetCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	wantRead, ok := normal.versionedReads.GetCode(addr)
+	require.True(t, ok)
+
+	segmented, reader, addr, code := newSegmentRead(t, NewVersionMap(nil))
+	got, err = segmentOf(segmented, addr, len(code))
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	require.Equal(t, 1, reader.segmentReads)
+	require.Empty(t, segmented.stateObjects)
+
+	haveRead, ok := segmented.versionedReads.GetCode(addr)
+	require.True(t, ok)
+	require.Equal(t, wantRead.ReadHeader, haveRead.ReadHeader)
+	require.Nil(t, haveRead.Val.Bytes, "the decoded bytes must not be retained")
+	require.Equal(t, wantRead.Val.Hash, haveRead.Val.Hash)
+}
+
+func TestCodeSegment_LaterReadSeesFullCode(t *testing.T) {
+	for name, read := range map[string]func(*IntraBlockState, accounts.Address) ([]byte, error){
+		"GetCode": (*IntraBlockState).GetCode,
+		"ResolveCode": func(ibs *IntraBlockState, addr accounts.Address) ([]byte, error) {
+			code, err := ibs.ResolveCode(addr)
+			return code.Bytes, err
+		},
+		"ReadCodeSegmentTo": func(ibs *IntraBlockState, addr accounts.Address) ([]byte, error) {
+			return segmentOf(ibs, addr, 5)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ibs, _, addr, code := newSegmentRead(t, NewVersionMap(nil))
+			_, err := segmentOf(ibs, addr, 5)
+			require.NoError(t, err)
+
+			got, err := read(ibs, addr)
+			require.NoError(t, err)
+			require.Equal(t, code, got)
+		})
+	}
+}
+
+func TestCodeSegment_LowerTxCodeWriteInvalidatesTheRead(t *testing.T) {
+	vm := NewVersionMap(nil)
+	ibs, _, addr, _ := newSegmentRead(t, vm)
+	_, err := segmentOf(ibs, addr, 5)
+	require.NoError(t, err)
+
+	ws := &WriteSet{}
+	lowerCode := accounts.NewCode([]byte{0x60, 0x00})
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: lowerCode})
+	vm.FlushVersionedWrites(ws, true)
+
+	io := NewVersionedIO(6)
+	io.RecordReads(Version{TxIndex: 5}, ibs.VersionedReads())
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""))
+}
+
+func TestCodeSegment_LowerTxSelfDestructInvalidatesTheRead(t *testing.T) {
+	vm := NewVersionMap(nil)
+	ibs, _, addr, _ := newSegmentRead(t, vm)
+	_, err := segmentOf(ibs, addr, 5)
+	require.NoError(t, err)
+
+	ws := &WriteSet{}
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}}, Val: true})
+	vm.FlushVersionedWrites(ws, true)
+
+	io := NewVersionedIO(6)
+	io.RecordReads(Version{TxIndex: 5}, ibs.VersionedReads())
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""))
+}
+
+func TestCodeSegment_UncommittedCodeStaysOnTheNormalPath(t *testing.T) {
+	t.Run("version map", func(t *testing.T) {
+		vm := NewVersionMap(nil)
+		ibs, reader, addr, _ := newSegmentRead(t, vm)
+		mapped := accounts.NewCode([]byte{0x60, 0x00})
+		ws := &WriteSet{}
+		ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: mapped})
+		vm.FlushVersionedWrites(ws, true)
+
+		got, err := segmentOf(ibs, addr, len(mapped.Bytes))
+		require.NoError(t, err)
+		require.Equal(t, mapped.Bytes, got)
+		require.Zero(t, reader.segmentReads)
+	})
+	t.Run("own write", func(t *testing.T) {
+		ibs, reader, addr, _ := newSegmentRead(t, NewVersionMap(nil))
+		own := []byte{0x60, 0x00}
+		require.NoError(t, ibs.SetCode(addr, own, tracing.CodeChangeUnspecified))
+
+		got, err := segmentOf(ibs, addr, len(own))
+		require.NoError(t, err)
+		require.Equal(t, own, got)
+		require.Zero(t, reader.segmentReads)
+	})
+}
+
+// A repeated segment read copies again, from the worker's last decode, instead of reading the full code.
+func TestCodeSegment_RepeatedReadCopiesAgain(t *testing.T) {
+	ibs, reader, addr, code := newSegmentRead(t, NewVersionMap(nil))
+	for range 3 {
+		got, err := segmentOf(ibs, addr, len(code))
+		require.NoError(t, err)
+		require.Equal(t, code, got)
+	}
+	require.Zero(t, reader.fullReads, "a repeated segment read must not read the full code")
+	require.Equal(t, 3, reader.segmentReads)
+	read, ok := ibs.versionedReads.GetCode(addr)
+	require.True(t, ok)
+	require.True(t, codeBytesDropped(read.Val), "the read stays recorded without bytes")
+}
+
+func TestCodeSegment_CopiesFromTheOffsetAndZeroPads(t *testing.T) {
+	for name, vm := range map[string]*VersionMap{"version map": NewVersionMap(nil), "no version map": nil} {
+		t.Run(name, func(t *testing.T) {
+			ibs, _, addr, code := newSegmentRead(t, vm)
+			dst := []byte{0xff, 0xff, 0xff, 0xff}
+			require.NoError(t, ibs.ReadCodeSegmentTo(addr, 3, dst))
+			require.Equal(t, []byte{code[3], code[4], 0, 0}, dst)
+		})
+	}
+}
+
+func segmentReadThenLowerCodeWrite(t *testing.T) (*IntraBlockState, *VersionMap, accounts.Address, []byte) {
+	t.Helper()
+	vm := NewVersionMap(nil)
+	ibs, _, addr, code := newSegmentRead(t, vm)
+	_, err := segmentOf(ibs, addr, len(code))
+	require.NoError(t, err)
+	ws := &WriteSet{}
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: accounts.NewCode([]byte{0x60, 0x00})})
+	vm.FlushVersionedWrites(ws, true)
+	return ibs, vm, addr, code
+}
+
+// Code an earlier tx of the block wrote (a CREATE2 deploy, a 7702 delegation) is what a later tx's EXTCODECOPY copies,
+// not the committed code, and the copy does not go through the segment reader.
+func TestCodeSegment_CopiesCodeAnEarlierTxWrote(t *testing.T) {
+	for name, written := range map[string][]byte{
+		"create2 deploy":  {0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3},
+		"7702 delegation": append([]byte{0xef, 0x01, 0x00}, bytes.Repeat([]byte{0x44}, 20)...),
+	} {
+		t.Run(name, func(t *testing.T) {
+			vm := NewVersionMap(nil)
+			ibs, reader, addr, _ := newSegmentRead(t, vm)
+			ws := &WriteSet{}
+			ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 1}, valStatus: ValueChanged}, Val: accounts.NewCode(written)})
+			vm.FlushVersionedWrites(ws, true)
+
+			got, err := segmentOf(ibs, addr, len(written)+2)
+			require.NoError(t, err)
+			require.Equal(t, append(bytes.Clone(written), 0, 0), got)
+			require.Zero(t, reader.segmentReads, "code from the version map must not be read from the committed state")
+		})
+	}
+}
+
+// A read without bytes stands for the code the transaction first read, not a later write of a lower transaction.
+func TestCodeSegment_RefreshKeepsTheFirstReadCode(t *testing.T) {
+	ibs, _, addr, code := segmentReadThenLowerCodeWrite(t)
+	got, err := refreshCode(ibs, addr)
+	require.NoError(t, err)
+	require.Equal(t, code, got.Bytes)
+}
+
+func TestCodeSegment_VersionedReaderKeepsTheFirstReadCode(t *testing.T) {
+	ibs, vm, addr, code := segmentReadThenLowerCodeWrite(t)
+	vr := NewVersionedStateReader(5, ibs.VersionedReads(), vm, ibs.stateReader)
+	got, err := vr.ReadAccountCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	size, err := vr.ReadAccountCodeSize(addr)
+	require.NoError(t, err)
+	require.Equal(t, len(code), size)
 }

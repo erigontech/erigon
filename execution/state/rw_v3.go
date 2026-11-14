@@ -942,6 +942,19 @@ func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key common.
 	}
 }
 
+func (r *ReaderV3) ReadAccountCodeSegmentTo(address accounts.Address, from uint64, dst []byte) (bool, error) {
+	segmentReader, ok := r.getter.(execctxapi.CodeSegmentGetter)
+	if !ok {
+		return false, nil
+	}
+	r.addr = address.Value()
+	copied, err := segmentReader.ReadCodeSegmentTo(r.addr[:], r.txNum, from, dst)
+	if r.trace && err == nil && copied {
+		fmt.Printf("%sReadAccountCodeSegmentTo [%x] => from %d, %d bytes, txNum: %d, stack: %s\n", r.tracePrefix, address, from, len(dst), r.txNum, dbg.Stack())
+	}
+	return copied, err
+}
+
 func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	r.addr = address.Value()
 	enc, _, err := r.getter.GetCode(r.addr[:], r.txNum)
