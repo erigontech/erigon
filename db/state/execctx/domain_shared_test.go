@@ -1631,7 +1631,6 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		require.Equal(t, uint64(0), db1RoTx.Debug().TxNumsInFiles(kv.StorageDomain))
 		expectedRootHash, err := sd1.ComputeCommitment(ctx, db1RoTx, false, blockNum, toTxNum, "", nil)
 		require.NoError(t, err)
-		require.NoError(t, err)
 
 		// now create a new empty database db2 and SharedDomains sd2 over it
 		db2 := newTestDb(t, stepSize)
@@ -1650,7 +1649,6 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		// double-check: if we try to compute the initial commitment trie root in db2, it is empty
 		initialRootHash, err = sd2.ComputeCommitment(ctx, roTx2, false, blockNum, toTxNum, "", nil)
 		require.NoError(t, err)
-		require.NoError(t, err)
 		require.Equal(t, empty.RootHash[:], initialRootHash)
 
 		// test core: touch in sd2 the changed keys in [fromTxNum, toTxNum+1) using historical state changes from db1
@@ -1662,7 +1660,6 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		// compute the commitment trie root in sd2 reading state for touched keys from db1
 		sd2.GetCommitmentContext().SetStateReader(commitmentdb.NewLatestStateReader(db1RoTx, sd1, commitmentdb.LatestStateReaderOptions{}))
 		rootHash, err := sd2.ComputeCommitment(ctx, roTx2, false, blockNum, toTxNum, "", nil)
-		require.NoError(t, err)
 		require.NoError(t, err)
 		require.Equal(t, expectedRootHash, rootHash)
 	}
