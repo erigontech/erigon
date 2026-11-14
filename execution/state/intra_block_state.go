@@ -1051,8 +1051,9 @@ func (ibs *IntraBlockState) GetCommittedState(addr accounts.Address, key account
 }
 
 func (ibs *IntraBlockState) HasSelfdestructed(addr accounts.Address) (bool, error) {
-	destructed, _, _, err := readSelfDestruct(ibs, addr)
-	return destructed, err
+	destructed, source, _, err := readSelfDestruct(ibs, addr)
+	// A destruct read from the version map is an earlier transaction's, not this one's.
+	return destructed && source != MapRead, err
 }
 
 func (ibs *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) ReadResult {
