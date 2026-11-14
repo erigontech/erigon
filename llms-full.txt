@@ -160,10 +160,10 @@ If you must split the datadir across a fast and a slow device, see [Optimizing S
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [pruning mode](https://docs.erigon.tech/fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](https://docs.erigon.tech/fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise. Each figure is the size of the whole datadir with the node stopped, excluding the transient `temp/` directory.
+The amount of disk space recommended and RAM you need depends on the [pruning mode](https://docs.erigon.tech/fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](https://docs.erigon.tech/fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise. A figure marked † is the `erigon seg du` estimate of the snapshot files a node of that mode keeps: only `snapshots/` is counted, without Caplin snapshots. Every other figure is the size of the whole datadir with the node stopped, excluding the transient `temp/` directory.
 
 :::note
-These nodes were measured before the receipts cache was on by default. From 3.7 it is on, which adds about 441 GB on a mainnet archive node and a few GB on full and minimal nodes, whose receipts follow their history window. See [Database](https://docs.erigon.tech/fundamentals/database). The recommended disk sizes below already leave room for it.
+The receipts cache is on by default from 3.7. Figures marked † count it; other figures may have been measured without it. It adds about 441 GB on a mainnet archive node and a few GB on full and minimal nodes, whose receipts follow their history window. See [Database](https://docs.erigon.tech/fundamentals/database). The recommended disk sizes below already leave room for it.
 :::
 
 **Ethereum mainnet**
@@ -3215,7 +3215,6 @@ Erigon's own variables — everything below except the [Docker](https://docs.eri
 
 **Execution and Processing:**
 
-- `EXEC3_PARALLEL` - Enables parallel block execution (Block-STM). **Default changed to `true` in v3.5** — parallel execution is now on by default. Set to `false` or use `--exec.serial` to revert to single-threaded execution.
 - `EXEC3_WORKERS` - Sets the number of parallel execution workers (default: number of CPU cores)
 - `STAGES_ONLY_BLOCKS` - Limits stages to blocks only
 

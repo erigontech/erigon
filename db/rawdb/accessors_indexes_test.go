@@ -111,7 +111,8 @@ func TestLookupStorage(t *testing.T) {
 			}
 			// Delete the transactions and check purge
 			for i, txn := range txs {
-				if err := rawdb.DeleteTxLookupEntry(tx, txn.Hash()); err != nil {
+				h := txn.Hash()
+				if err := tx.Delete(kv.TxLookup, h[:]); err != nil {
 					t.Fatal(err)
 				}
 				if txn2, _, _, _, _, _ := readTransactionByHash(tx, txn.Hash(), br); txn2 != nil {
