@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -139,7 +140,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 			},
 			msg:     mockMsg2,
 			wantErr: true,
-			err:     ErrIgnore,
+			err:     raw.ErrInvalidValidatorIndex,
 		},
 		{
 			name: "validator is not active",
