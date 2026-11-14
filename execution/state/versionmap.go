@@ -581,6 +581,25 @@ func seed[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int) {
 	c.state.Or(seededCell)
 }
 
+// seedRemovalWrites marks the cells flushed from a BAL empty-removal stamp as seeded so an
+// equal in-flight flush preserves their Done flag.
+func (vm *VersionMap) seedRemovalWrites(ws *WriteSet) {
+	for addr, vw := range ws.selfDestruct {
+		if e := vm.load(addr); e != nil {
+			e.mu.Lock()
+			seed(e.SelfDestruct, vw.Version.TxIndex)
+			e.mu.Unlock()
+		}
+	}
+	for addr, vw := range ws.balance {
+		if e := vm.load(addr); e != nil {
+			e.mu.Lock()
+			seed(e.Balance, vw.Version.TxIndex)
+			e.mu.Unlock()
+		}
+	}
+}
+
 // Typed Write primitives. Each takes the AccountPath-contracted value type directly so
 // wrong-type writes are caught at compile time.
 
@@ -1372,13 +1391,16 @@ func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool
 // the same txIndex, so readers bound to it stay valid. A reincarnated account always
 // re-versions: across a removal an equal value does not mean an unchanged state.
 func flushCell[T any](vm *VersionMap, e *AddressEntry, cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, vw *VersionedWrite[T], flag statusFlag, eq func(a, b T) bool, destructed bool) *btree.Map[int, *WriteCell[T]] {
-	if !destructed && cells != nil {
+	if cells != nil {
 		if ci, ok := cells.Get(vw.Version.TxIndex); ok && eq(ci.Value, vw.Val) {
-			ci.setFlagUnlessDone(flag)
-			ci.valStatus = vw.valStatus
-			ci.accSource = AccountFromBase
-			vw.bind(e, ci)
-			return cells
+			keepSeededRemoval := destructed && ci.seeded() && ci.loadFlag() == FlagDone && ci.valStatus == vw.valStatus
+			if keepSeededRemoval || !destructed {
+				ci.setFlagUnlessDone(flag)
+				ci.valStatus = vw.valStatus
+				ci.accSource = AccountFromBase
+				vw.bind(e, ci)
+				return cells
+			}
 		}
 	}
 	cells, cell := putCell(vm, cells, addr, path, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
@@ -1517,8 +1539,16 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			e.Address = flushCell(vm, e, e.Address, addr, AddressPath, vw, flag, eqAccount, destructed)
 		}
 		if vw, ok := writes.selfDestruct[addr]; ok {
-			cells, cell := putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
-			e.SelfDestruct = cells
+			var cell *WriteCell[bool]
+			if e.SelfDestruct != nil {
+				if ci, ok := e.SelfDestruct.Get(vw.Version.TxIndex); ok && ci.seeded() && ci.loadFlag() == FlagDone && ci.Value == vw.Val && ci.valStatus == vw.valStatus {
+					ci.accSource = AccountFromBase
+					cell = ci
+				}
+			}
+			if cell == nil {
+				e.SelfDestruct, cell = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
+			}
 			vw.bind(e, cell)
 			if vw.Val {
 				e.destructed.Store(true)

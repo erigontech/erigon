@@ -223,6 +223,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 	}
 	for _, ws := range stamps {
 		vm.FlushVersionedWrites(ws, true)
+		vm.seedRemovalWrites(ws)
 	}
 	return nil
 }

@@ -579,3 +579,71 @@ func TestVersionedReaderServesBALMarkedAccountFromOrigin(t *testing.T) {
 	}
 	require.Zero(t, reader.reads, "the stored origin answers every tx")
 }
+
+// TestInFlightFlushOfSeededRemovalKeepsDoneFlags pins #26286: an in-flight flush of a
+// destroying tx that matches the BAL-seeded empty removal keeps SelfDestructPath and
+// BalancePath Done instead of turning them back into Estimate cells.
+func TestInFlightFlushOfSeededRemovalKeepsDoneFlags(t *testing.T) {
+	t.Parallel()
+	t.Run("matching_removal_stays_done", func(t *testing.T) {
+		t.Parallel()
+		x, _, vm := seededRemovalOfPrefundedAccount(t)
+
+		_, sdBefore, ok := vm.ReadSelfDestruct(x, 1)
+		require.True(t, ok)
+		require.Equal(t, MVReadResultDone, sdBefore.Status())
+		_, balBefore, ok := vm.ReadBalance(x, 1)
+		require.True(t, ok)
+		require.Equal(t, MVReadResultDone, balBefore.Status())
+
+		removal := &WriteSet{}
+		removal.SetContractRemoval(x, Version{TxIndex: 0})
+		vm.FlushVersionedWrites(removal, false)
+
+		destructed, sdAfter, ok := vm.ReadSelfDestruct(x, 1)
+		require.True(t, ok)
+		require.True(t, destructed)
+		require.Equal(t, MVReadResultDone, sdAfter.Status(), "seeded SelfDestruct cell must stay Done")
+
+		bal, balAfter, ok := vm.ReadBalance(x, 1)
+		require.True(t, ok)
+		require.True(t, bal.IsZero())
+		require.Equal(t, ValueDeleted, balAfter.ValStatus())
+		require.Equal(t, MVReadResultDone, balAfter.Status(), "seeded Balance cell must stay Done")
+
+		vm.MarkWritesValidated(removal, nil)
+		_, sdVal, _ := vm.ReadSelfDestruct(x, 1)
+		require.Equal(t, MVReadResultDone, sdVal.Status())
+		_, balVal, _ := vm.ReadBalance(x, 1)
+		require.Equal(t, MVReadResultDone, balVal.Status())
+
+		vm.MarkWritesComplete(removal)
+		_, sdDone, _ := vm.ReadSelfDestruct(x, 1)
+		require.Equal(t, MVReadResultDone, sdDone.Status())
+		_, balDone, _ := vm.ReadBalance(x, 1)
+		require.Equal(t, MVReadResultDone, balDone.Status())
+	})
+
+	t.Run("mismatched_flush_becomes_estimate", func(t *testing.T) {
+		t.Parallel()
+		x, _, vm := seededRemovalOfPrefundedAccount(t)
+
+		mismatch := &WriteSet{}
+		mismatch.SetSelfDestruct(x, &VersionedWrite[bool]{
+			WriteHeader: WriteHeader{Address: x, Path: SelfDestructPath, Version: Version{TxIndex: 0}},
+			Val:         false,
+		})
+		mismatch.SetBalance(x, &VersionedWrite[uint256.Int]{
+			WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: Version{TxIndex: 0}, valStatus: ValueChanged},
+			Val:         *uint256.NewInt(1),
+		})
+		vm.FlushVersionedWrites(mismatch, false)
+
+		_, sdAfter, ok := vm.ReadSelfDestruct(x, 1)
+		require.True(t, ok)
+		require.Equal(t, MVReadResultDependency, sdAfter.Status())
+		_, balAfter, ok := vm.ReadBalance(x, 1)
+		require.True(t, ok)
+		require.Equal(t, MVReadResultDependency, balAfter.Status())
+	})
+}
