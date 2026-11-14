@@ -230,20 +230,14 @@ func TestCommittedFallbackDependsOnInFlightDestruct(t *testing.T) {
 		h.valStatus = status
 		return h
 	}
-	destruct := func() *WriteSet {
-		return newWriteSet(
-			&VersionedWrite[bool]{WriteHeader: header(SelfDestructPath, ValueChanged), Val: true},
-			&VersionedWrite[uint256.Int]{WriteHeader: header(BalancePath, ValueDeleted)},
-			&VersionedWrite[accounts.CodeHash]{WriteHeader: header(CodeHashPath, ValueDeleted), Val: accounts.EmptyCodeHash},
-		)
-	}
 	vm.FlushVersionedWrites(newWriteSet(
 		&VersionedWrite[*accounts.Account]{WriteHeader: header(AddressPath, ValueChanged), Val: &accounts.Account{CodeHash: accounts.EmptyCodeHash, Root: empty.RootHash}},
 		&VersionedWrite[bool]{WriteHeader: header(SelfDestructPath, ValueChanged), Val: true},
 		&VersionedWrite[uint256.Int]{WriteHeader: header(BalancePath, ValueDeleted)},
 	), true)
-	// Flush inside the committed read, so no later field read can supply the dependency instead.
-	flushing := &flushOnReadReader{accountStateReader: reader, onRead: func() { vm.FlushVersionedWrites(destruct(), false) }}
+	// The destruct goes back in flight inside the committed read, so no later field read can
+	// supply the dependency instead.
+	flushing := &flushOnReadReader{accountStateReader: reader, onRead: func() { redestruct(vm, addr, 0) }}
 
 	ibs := NewWithVersionMap(flushing, vm)
 	ibs.SetTxContext(1, 1)
