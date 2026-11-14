@@ -838,8 +838,8 @@ type blockAccessListArena struct {
 }
 
 // newBlockAccessListArena sizes each kind from a walk of the list body. The walk only counts items present in the body,
-// at most maxIndex+1 per change list (its indices strictly increase), and all kinds share the budget, so a malformed
-// list cannot reserve more than a valid one could hold.
+// at most maxIndex+1 per change list (its indices strictly increase), and the budget caps what it charges, so a
+// malformed list cannot reserve more than a valid one could hold.
 func newBlockAccessListArena(body []byte, size uint64, budget *blockAccessListDecodeBudget) blockAccessListArena {
 	if uint64(len(body)) < size {
 		return blockAccessListArena{}
@@ -853,12 +853,17 @@ func newBlockAccessListArena(body []byte, size uint64, budget *blockAccessListDe
 	if budget != nil {
 		remaining = budget.remaining
 	}
+	// Slots and storage reads are charged to the budget together; change records are not charged, so each change
+	// kind is capped by the budget on its own.
+	charged := remaining
 	take := func(n int) int {
-		k := min(uint64(n), remaining)
-		remaining -= k
+		k := min(uint64(n), charged)
+		charged -= k
 		return int(k)
 	}
-	slots, reads, storage, balances, nonces, codes := take(c.slots), take(c.reads), take(c.storage), take(c.balances), take(c.nonces), take(c.codes)
+	capped := func(n int) int { return int(min(uint64(n), remaining)) }
+	slots, reads := take(c.slots), take(c.reads)
+	storage, balances, nonces, codes := capped(c.storage), capped(c.balances), capped(c.nonces), capped(c.codes)
 	return blockAccessListArena{
 		slots:       make([]SlotChanges, 0, slots),
 		reads:       make([]common.Hash, 0, reads),

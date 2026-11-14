@@ -1026,28 +1026,70 @@ func TestDecodeBlockAccessListChangeArenaReservesNoMoreThanTheBudget(t *testing.
 	}
 }
 
-// The kinds of a BAL share one decode budget, so a malformed list that fills several kinds reserves no more than a
-// valid list could hold in total.
-func TestDecodeBlockAccessListArenaKindsShareTheBudget(t *testing.T) {
+// Slots and storage reads are charged to one decode budget, so a malformed list that fills both reserves no more
+// than a valid list could hold in total.
+func TestDecodeBlockAccessListArenaSlotsAndReadsShareTheBudget(t *testing.T) {
 	const items = 100_000
 	list := func(body []byte) []byte {
 		prefix := make([]byte, rlp.ListPrefixLen(len(body)))
 		rlp.EncodeListPrefixToBuf(len(body), prefix)
 		return bytes.Join([][]byte{prefix, body}, nil)
 	}
-	full := list(bytes.Repeat([]byte{0xc0}, items))
-	entry := list(bytes.Join([][]byte{{0x94}, make([]byte, 20), {0xc0, 0xc0}, full, full, full}, nil))
+	slots := list(bytes.Repeat([]byte{0xc3, 0x80, 0xc1, 0xc0}, items)) // an empty slot key with one change each
+	reads := list(bytes.Repeat([]byte{0xc0}, items))
+	entry := list(bytes.Join([][]byte{{0x94}, make([]byte, 20), slots, reads, {0xc0, 0xc0, 0xc0}}, nil))
 	enc := list(entry)
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	_, err := DecodeBlockAccessListSidecarForHeader(enc, items*BalItemCost)
 	runtime.ReadMemStats(&after)
 	if err == nil {
-		t.Fatal("decoded a malformed change list")
+		t.Fatal("decoded a malformed slot list")
 	}
-	perItem := uint64(max(unsafe.Sizeof(BalanceChange{}), unsafe.Sizeof(NonceChange{}), unsafe.Sizeof(CodeChange{})) + unsafe.Sizeof(uintptr(0)))
-	if grew, limit := after.TotalAlloc-before.TotalAlloc, items*perItem+64*1024; grew > limit {
-		t.Fatalf("a %d-item budget reserved %d bytes over three kinds, more than one budget of items (%d)", items, grew, limit)
+	charged := uint64(max(unsafe.Sizeof(SlotChanges{}), unsafe.Sizeof(common.Hash{})))
+	storage := uint64(unsafe.Sizeof(StorageChange{}) + unsafe.Sizeof(uintptr(0)))
+	if grew, limit := after.TotalAlloc-before.TotalAlloc, items*(charged+storage)+64*1024; grew > limit {
+		t.Fatalf("a %d-item budget reserved %d bytes for slots and reads, more than one budget of items (%d)", items, grew, limit)
+	}
+}
+
+// A BAL at the budget limit gets every arena sized up front: change records are not charged to the budget, so the
+// charged slots and reads must not use up the capacity of the balance and nonce changes.
+func TestBlockAccessListArenaAtTheBudgetLimitHoldsEveryChange(t *testing.T) {
+	const gasLimit = 60_000_000
+	bal, txCount := budgetBlockAccessList(gasLimit)
+	enc, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _, err := rlp.SplitList(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var slots, reads, storage, balances, nonces int
+	for _, a := range bal {
+		slots += len(a.StorageChanges)
+		reads += len(a.StorageReads)
+		for _, sc := range a.StorageChanges {
+			storage += len(sc.Changes)
+		}
+		balances += len(a.BalanceChanges)
+		nonces += len(a.NonceChanges)
+	}
+	arena := newBlockAccessListArena(body, uint64(len(body)), &blockAccessListDecodeBudget{remaining: gasLimit / BalItemCost, maxIndex: uint64(txCount) + 1})
+	for _, kind := range []struct {
+		name      string
+		have, got int
+	}{
+		{"slots", slots, cap(arena.slots)},
+		{"reads", reads, cap(arena.reads)},
+		{"storage changes", storage, cap(arena.storage)},
+		{"balance changes", balances, cap(arena.balances)},
+		{"nonce changes", nonces, cap(arena.nonces)},
+	} {
+		if kind.got < kind.have {
+			t.Errorf("the arena holds %d of %d %s", kind.got, kind.have, kind.name)
+		}
 	}
 }
 
