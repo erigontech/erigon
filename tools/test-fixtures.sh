@@ -4,7 +4,7 @@
 # For each entry KEY in the manifest, ensures:
 #   CACHE_DIR/KEY.tar.gz   downloaded & sha256-verified against the manifest
 #   CACHE_DIR/KEY/         extracted contents
-#   CACHE_DIR/KEY/.sha256  sentinel file recording the verified sha256
+#   CACHE_DIR/KEY/.sha256  verified sha256 and any selected archive paths
 #
 # Re-running is a no-op when the sentinel already matches. Tarballs are kept
 # alongside the extracted dirs so re-extraction (after `make clean` or a
@@ -12,18 +12,23 @@
 # 2x local disk usage vs. extracted-only; CI caches only *.tar.gz to stay
 # under cache budget and re-extracts on each run.
 #
-# Usage: tools/test-fixtures.sh [--download-only] [MANIFEST [CACHE_DIR [KEY...]]]
+# Usage: tools/test-fixtures.sh [--download-only] [--include ARCHIVE_PATH]... [MANIFEST [CACHE_DIR [KEY...]]]
 #   --download-only   download & sha256-verify the tarballs, skip extraction
+#   --include PATH    extract only this archive path; repeat for multiple paths
 #   MANIFEST defaults to test-fixtures.json
 #   CACHE_DIR defaults to test-fixtures-cache
 #   KEY...    optional manifest keys; default = all keys
 set -euo pipefail
 
 download_only=false
-if [[ "${1:-}" == "--download-only" ]]; then
-	download_only=true
-	shift
-fi
+includes=()
+while (( $# > 0 )); do
+	case "$1" in
+		--download-only) download_only=true; shift ;;
+		--include) includes+=("${2:?--include requires an archive path}"); shift 2 ;;
+		*) break ;;
+	esac
+done
 
 manifest="${1:-test-fixtures.json}"
 cache="${2:-test-fixtures-cache}"
@@ -101,13 +106,14 @@ while IFS=$'\t' read -r name url want; do
 	tar_path="$cache/${name}.tar.gz"
 	out_dir="$cache/${name}"
 	sentinel="$out_dir/.sha256"
+	signature=$(printf '%s\n' "$want" ${includes[@]+"${includes[@]}"})
 
 	if [[ "$download_only" == true ]]; then
 		ensure_tarball "$name" "$url" "$want"
 		continue
 	fi
 
-	if [[ -f "$sentinel" ]] && [[ "$(cat "$sentinel")" == "$want" ]]; then
+	if [[ -f "$sentinel" ]] && { [[ "$(cat "$sentinel")" == "$want" ]] || [[ "$(cat "$sentinel")" == "$signature" ]]; }; then
 		echo "$name: cached (sha256 ${want:0:12})"
 		continue
 	fi
@@ -117,8 +123,8 @@ while IFS=$'\t' read -r name url want; do
 	echo "$name: extracting"
 	rm -rf "$out_dir.tmp" "$out_dir"
 	mkdir -p "$out_dir.tmp"
-	tar --no-same-owner --no-same-permissions -xzf "$tar_path" -C "$out_dir.tmp"
-	echo "$want" > "$out_dir.tmp/.sha256"
+	tar --no-same-owner --no-same-permissions -xzf "$tar_path" -C "$out_dir.tmp" -- ${includes[@]+"${includes[@]}"}
+	printf '%s\n' "$signature" > "$out_dir.tmp/.sha256"
 	mv "$out_dir.tmp" "$out_dir"
 	echo "$name: ok"
 done <<< "$manifest_entries"

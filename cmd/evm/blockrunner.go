@@ -21,6 +21,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -31,6 +32,7 @@ import (
 	"sync"
 
 	"github.com/urfave/cli/v3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/tests/testutil"
@@ -103,9 +105,77 @@ type fileResult struct {
 }
 
 func runBlockTestsParallel(files []string, workers uint64, filter testFilter) ([]testResult, error) {
-	return runTestFilesParallel(files, workers, func(path string) ([]testResult, error) {
-		return runBlockTest(path, filter)
+	if workers == 1 {
+		return runTestFilesParallel(files, workers, func(path string) ([]testResult, error) {
+			return runBlockTest(path, filter)
+		})
+	}
+	type blockCase struct {
+		file int
+		name string
+		raw  json.RawMessage
+	}
+	type blockResult struct {
+		file   int
+		result testResult
+	}
+	group, ctx := errgroup.WithContext(context.Background())
+	jobs := make(chan blockCase)
+	completed := make(chan blockResult)
+	group.Go(func() error {
+		defer close(jobs)
+		for index, path := range files {
+			tests, err := readBlockTests(path)
+			if err != nil {
+				return err
+			}
+			for _, name := range slices.Sorted(maps.Keys(tests)) {
+				if !filter.includeCase(path, name) {
+					continue
+				}
+				select {
+				case jobs <- blockCase{file: index, name: name, raw: tests[name]}:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+		}
+		return nil
 	})
+	for range workers {
+		group.Go(func() error {
+			for job := range jobs {
+				result, err := runBlockTestCase(job.name, job.raw)
+				if err != nil {
+					return err
+				}
+				select {
+				case completed <- blockResult{file: job.file, result: result}:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			return nil
+		})
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- group.Wait()
+		close(completed)
+	}()
+	ordered := make([][]testResult, len(files))
+	for result := range completed {
+		ordered[result.file] = append(ordered[result.file], result.result)
+	}
+	if err := <-done; err != nil {
+		return nil, err
+	}
+	results := make([]testResult, 0)
+	for _, fileResults := range ordered {
+		slices.SortFunc(fileResults, func(a, b testResult) int { return cmp.Compare(a.Name, b.Name) })
+		results = append(results, fileResults...)
+	}
+	return results, nil
 }
 
 func runTestFilesParallel(files []string, workers uint64, runner func(string) ([]testResult, error)) ([]testResult, error) {
@@ -198,35 +268,46 @@ func collectFiles(path string) []string {
 	return out
 }
 
-func runBlockTest(fname string, filter testFilter) ([]testResult, error) {
+func readBlockTests(fname string) (map[string]json.RawMessage, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
 	}
-
-	var tests map[string]*testutil.BlockTest
+	var tests map[string]json.RawMessage
 	if err := json.Unmarshal(src, &tests); err != nil {
 		return nil, err
 	}
+	return tests, nil
+}
 
-	// Pull out keys to sort and ensure tests are run in order
-	keys := slices.Sorted(maps.Keys(tests))
+func runBlockTestCase(name string, raw json.RawMessage) (testResult, error) {
+	var test testutil.BlockTest
+	if err := test.UnmarshalJSON(raw); err != nil {
+		return testResult{}, fmt.Errorf("%s: %w", name, err)
+	}
+	result := testResult{Name: name, Pass: true}
+	if err := test.RunCLI(); err != nil {
+		result.Pass = false
+		result.Error = err.Error()
+	}
+	return result, nil
+}
 
-	// Run all the tests
-	results := make([]testResult, 0, len(keys))
-	for _, name := range keys {
+func runBlockTest(fname string, filter testFilter) ([]testResult, error) {
+	tests, err := readBlockTests(fname)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]testResult, 0, len(tests))
+	for _, name := range slices.Sorted(maps.Keys(tests)) {
 		if !filter.includeCase(fname, name) {
 			continue
 		}
-
-		result := &testResult{Name: name, Pass: true}
-		if err := tests[name].RunCLI(); err != nil {
-			result.Pass = false
-			result.Error = err.Error()
+		result, err := runBlockTestCase(name, tests[name])
+		if err != nil {
+			return nil, err
 		}
-
-		results = append(results, *result)
+		results = append(results, result)
 	}
-
 	return results, nil
 }
