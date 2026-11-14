@@ -19,6 +19,7 @@ package solid
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
@@ -127,6 +128,9 @@ func (h *hashList) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf)%length.Hash > 0 {
 		return ssz.ErrBadDynamicLength
 	}
+	if l := len(buf) / length.Hash; l > h.c {
+		return fmt.Errorf("hash list length exceeds limit: %d > %d", l, h.c)
+	}
 	h.MerkleTree = nil
 	h.u = bytes.Clone(buf)
 	h.l = len(h.u) / length.Hash
@@ -171,6 +175,9 @@ func (h *hashList) hashVectorSSZ() ([32]byte, error) {
 }
 
 func (h *hashList) HashSSZ() ([32]byte, error) {
+	if h.l > h.c {
+		return [32]byte{}, fmt.Errorf("hash list length exceeds limit: %d > %d", h.l, h.c)
+	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(h.l))
 	coreRoot, err := h.hashVectorSSZ()
 	if err != nil {

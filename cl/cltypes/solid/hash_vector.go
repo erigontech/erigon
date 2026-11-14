@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
@@ -53,7 +54,18 @@ func (h hashVector) MarshalJSON() ([]byte, error) {
 }
 
 func (h *hashVector) UnmarshalJSON(buf []byte) error {
-	return json.Unmarshal(buf, h.u)
+	var hashes []common.Hash
+	if err := json.Unmarshal(buf, &hashes); err != nil {
+		return err
+	}
+	if len(hashes) != h.Length() {
+		return fmt.Errorf("hash vector length mismatch: %d != %d", len(hashes), h.Length())
+	}
+	h.u.Clear()
+	for _, hash := range hashes {
+		h.u.Append(hash)
+	}
+	return nil
 }
 
 func (h *hashVector) Cap() int {

@@ -103,10 +103,6 @@ func decodeHashListRequest(buf []byte, limit int) ([]common.Hash, error) {
 	if err := ssz2.UnmarshalSSZStrict(buf, 0, list); err != nil {
 		return nil, err
 	}
-	// HashList.DecodeSSZ checks element size but does not enforce the list limit.
-	if list.Length() > limit {
-		return nil, fmt.Errorf("hash list length %d exceeds limit %d", list.Length(), limit)
-	}
 	return hashListValues(list), nil
 }
 
@@ -458,9 +454,6 @@ func decodeBlobsV4Request(buf []byte) ([]common.Hash, [sszCellBitvectorBytes]byt
 	var cellMask [sszCellBitvectorBytes]byte
 	if err := ssz2.UnmarshalSSZStrict(buf, 0, hashes, cellMask[:]); err != nil {
 		return nil, cellMask, err
-	}
-	if hashes.Length() > maxGetBlobHashes {
-		return nil, cellMask, fmt.Errorf("too many blob hashes: %d", hashes.Length())
 	}
 	return hashListValues(hashes), cellMask, nil
 }
