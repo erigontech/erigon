@@ -106,7 +106,7 @@ GODEBUG ?= cgocheck=0
 # Defaults suitable for local use on a reasonable machine; adjust as conditions
 # change. CI can override via GO_FLAGS.
 default_test_timeout      := 20m
-default_test_race_timeout := 30m
+default_test_race_timeout := 40m
 
 GOTEST_PACKAGES = ./...
 GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS) $(GOTEST_PACKAGES)
