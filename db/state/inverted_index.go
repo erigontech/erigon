@@ -845,12 +845,6 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	return min == 0 || min < iit.files.EndTxNum() || pruneInProgress || untilTx > stat.TxTo
 }
 
-func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
-	maxStepInFiles := iit.files.EndTxNum() / iit.stepSize
-	maxStepInDB := iit.ii.maxTxNumInDB(dbtx) / iit.stepSize
-	return maxStepInFiles < maxStepInDB
-}
-
 type InvertedIndexPruneStat struct {
 	MinTxNum         uint64
 	MaxTxNum         uint64
