@@ -26,24 +26,31 @@ func TransitionState(impl Interface, s abstract.BeaconState, block *cltypes.Sign
 	if err := impl.ProcessSlots(s, block.Block.Slot); err != nil {
 		return err
 	}
-	return transitionBlock(impl, s, block)
+	return transitionBlock(impl, s, block, true)
+}
+
+func TransitionStateForReplay(impl Interface, s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
+	if err := impl.ProcessSlots(s, block.Block.Slot); err != nil {
+		return err
+	}
+	return transitionBlock(impl, s, block, false)
 }
 
 func TransitionStateFromPrecomputedEpochState(impl Interface, s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
 	if s.Slot() == block.Block.Slot {
-		return transitionBlock(impl, s, block)
+		return transitionBlock(impl, s, block, true)
 	}
 	return TransitionState(impl, s, block)
 }
 
-func transitionBlock(impl Interface, s abstract.BeaconState, block *cltypes.SignedBeaconBlock) error {
+func transitionBlock(impl Interface, s abstract.BeaconState, block *cltypes.SignedBeaconBlock, validateSignatures bool) error {
 	currentBlock := block.Block
 	if err := impl.VerifyBlockSignature(s, block); err != nil {
 		return err
 	}
 
 	// Transition block
-	if err := ProcessBlock(impl, s, block.Block); err != nil {
+	if err := ProcessBlockWithSignatureValidation(impl, s, block.Block, validateSignatures); err != nil {
 		return err
 	}
 

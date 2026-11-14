@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
@@ -599,4 +600,16 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	bsRoot, err := bs.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(bsRoot), common.HexToHash("0x58a3f366bcefe6c30fb3a6506bed726f9a51bb272c77a8a3ed88c34435d44cb7"))
+}
+
+func TestOnBlockWithoutFullValidationRejectsBadSlashingSignature(t *testing.T) {
+	blocks, pre, _ := tests.GetPhase0Random()
+	block := blocks[0]
+	require.Positive(t, block.Block.Body.ProposerSlashings.Len())
+	block.Block.Body.ProposerSlashings.Get(0).Header1.Signature = common.Bytes96(bls.InfiniteSignature)
+	store := newBellatrixForkChoiceStore(t, pre, nil)
+	store.OnTick((pre.GenesisTime() + block.Block.Slot*pre.BeaconConfig().SecondsPerSlot) * 1000)
+	err := store.OnBlock(t.Context(), block, false, false, false)
+	require.Error(t, err, "OnBlock imported a new block with an invalid proposer-slashing signature")
+	require.ErrorContains(t, err, "signature")
 }

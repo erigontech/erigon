@@ -162,6 +162,17 @@ func TestProcessBlockBatchRejectsInvalidPayloadAttestationSignature(t *testing.T
 	require.NotErrorIs(t, err, machine.ErrInvalidExecutionPayloadBid)
 }
 
+func TestProcessBlockBatchSkipsSignaturesWithoutFullValidation(t *testing.T) {
+	s, _, block := blockSignatureFixture(t, 4)
+	block.Body.PayloadAttestations.Get(0).Signature = common.Bytes96(bls.InfiniteSignature)
+	require.NoError(t, machine.ProcessBlockWithSignatureValidation(blockSignatureProcessor{}, s, block, false))
+
+	s, _, block = blockSignatureFixture(t, 4)
+	block.Body.PayloadAttestations.Get(0).Signature = common.Bytes96(bls.InfiniteSignature)
+	err := machine.ProcessBlockWithSignatureValidation(blockSignatureProcessor{}, s, block, true)
+	require.Error(t, err)
+}
+
 func TestProcessBlockBatchRejectsInvalidExecutionPayloadBidSignature(t *testing.T) {
 	s, keys, block := blockSignatureFixture(t, 4)
 	require.NoError(t, machine.ProcessBlock(blockSignatureProcessor{}, s, block))

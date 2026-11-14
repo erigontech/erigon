@@ -36,6 +36,10 @@ import (
 
 // ProcessBlock processes a block with the block processor
 func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.GenericBeaconBlock) error {
+	return ProcessBlockWithSignatureValidation(impl, s, block, true)
+}
+
+func ProcessBlockWithSignatureValidation(impl BlockProcessor, s abstract.BeaconState, block cltypes.GenericBeaconBlock, validateSignatures bool) error {
 	var (
 		version                                = s.Version()
 		body                                   = block.GetBody()
@@ -136,7 +140,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
 	// process signature validation
-	if len(signatures) != 0 {
+	if validateSignatures && len(signatures) != 0 {
 		valid, err := bls.VerifyMultipleSignatures(signatures, messages, publicKeys)
 		if err != nil || !valid {
 			if bidSignature != nil {

@@ -36,6 +36,11 @@ func TransitionState(s abstract.BeaconState, block *cltypes.SignedBeaconBlock, b
 	return machine2.TransitionState(cvm, s, block)
 }
 
+func TransitionStateForReplay(s abstract.BeaconState, block *cltypes.SignedBeaconBlock, blockRewardsCollector *eth2.BlockRewardsCollector) error {
+	impl := &eth2.Impl{BlockRewardsCollector: blockRewardsCollector}
+	return machine2.TransitionStateForReplay(impl, s, block)
+}
+
 func TransitionStateFromPrecomputedEpochState(s abstract.BeaconState, block *cltypes.SignedBeaconBlock, blockRewardsCollector *eth2.BlockRewardsCollector, fullValidation bool) error {
 	cvm := &eth2.Impl{FullValidation: fullValidation, BlockRewardsCollector: blockRewardsCollector}
 	return machine2.TransitionStateFromPrecomputedEpochState(cvm, s, block)

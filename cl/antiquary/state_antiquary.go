@@ -491,8 +491,14 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 		}
 		// We sanity check the state every 1k slots or when we start.
-		if err := transition.TransitionState(s.currentState, block, blockRewardsCollector, fullValidation); err != nil {
-			return err
+		var transitionErr error
+		if fullValidation {
+			transitionErr = transition.TransitionState(s.currentState, block, blockRewardsCollector, true)
+		} else {
+			transitionErr = transition.TransitionStateForReplay(s.currentState, block, blockRewardsCollector)
+		}
+		if transitionErr != nil {
+			return transitionErr
 		}
 		if reachesGloasFork && block.Block.Slot == forkSlot {
 			if err := stateAntiquaryCollector.collectPtcWindowEpoch(s.currentState); err != nil {
