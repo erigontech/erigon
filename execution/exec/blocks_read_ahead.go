@@ -22,11 +22,17 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/holiman/uint256"
 )
 
 type BlockReadAheader struct {
@@ -692,7 +698,84 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 	return types.NewBlockFromStorage(header.Hash(), header, body.Transactions, body.Uncles, body.Withdrawals, bal), true
 }
 
-func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader) (chan uint64, context.CancelFunc) {
+type ReadAheadStorageKey struct {
+	Address accounts.Address
+	Slot    accounts.StorageKey
+}
+
+type ReadAheadExecStats struct {
+	Transactions       int
+	AccountsRead       int
+	StorageRead        int
+	CodeRead           int
+	AccountsWritten    int
+	StorageWritten     int
+	StorageReadKeys    map[ReadAheadStorageKey]struct{}
+	StorageWrittenKeys map[ReadAheadStorageKey]struct{}
+	Errored            bool
+}
+
+type readAheadCountingReader struct {
+	state.StateReader
+	stats *ReadAheadExecStats
+}
+
+func (r *readAheadCountingReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	r.stats.AccountsRead++
+	return r.StateReader.ReadAccountData(addr)
+}
+
+func (r *readAheadCountingReader) ReadAccountStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	r.stats.StorageRead++
+	if r.stats.StorageReadKeys == nil {
+		r.stats.StorageReadKeys = make(map[ReadAheadStorageKey]struct{})
+	}
+	r.stats.StorageReadKeys[ReadAheadStorageKey{Address: addr, Slot: key}] = struct{}{}
+	return r.StateReader.ReadAccountStorage(addr, key)
+}
+
+func (r *readAheadCountingReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+	r.stats.CodeRead++
+	return r.StateReader.ReadAccountCode(addr)
+}
+
+func (r *readAheadCountingReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
+	r.stats.CodeRead++
+	return r.StateReader.ReadAccountCodeSize(addr)
+}
+
+type readAheadRecordingWriter struct {
+	state.StateWriter
+	stats    *ReadAheadExecStats
+	accounts map[accounts.Address]struct{}
+	storage  map[accounts.Address]map[accounts.StorageKey]struct{}
+}
+
+func (w *readAheadRecordingWriter) UpdateAccountData(addr accounts.Address, original, account *accounts.Account) error {
+	w.stats.AccountsWritten++
+	w.accounts[addr] = struct{}{}
+	return w.StateWriter.UpdateAccountData(addr, original, account)
+}
+
+func (w *readAheadRecordingWriter) WriteAccountStorage(addr accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+	w.stats.StorageWritten++
+	if w.stats.StorageWrittenKeys == nil {
+		w.stats.StorageWrittenKeys = make(map[ReadAheadStorageKey]struct{})
+	}
+	w.stats.StorageWrittenKeys[ReadAheadStorageKey{Address: addr, Slot: key}] = struct{}{}
+	if w.storage[addr] == nil {
+		w.storage[addr] = make(map[accounts.StorageKey]struct{})
+	}
+	w.storage[addr][key] = struct{}{}
+	return w.StateWriter.WriteAccountStorage(addr, incarnation, key, original, value)
+}
+
+var readAheadBlocksByResult = metrics.GetOrCreateCounterVec("read_ahead_exec_blocks_total", []string{"result"})
+var readAheadExecTransactions = metrics.GetOrCreateCounter("read_ahead_exec_transactions_total")
+var readAheadExecKeys = metrics.GetOrCreateCounterVec("read_ahead_exec_keys_total", []string{"kind", "direction"})
+var readAheadExecSeconds = metrics.GetOrCreateSummary("read_ahead_exec_block_seconds")
+
+func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute bool, execBlock *atomic.Uint64) (chan uint64, context.CancelFunc) {
 	const readAheadBlocks = 500
 	readAhead := make(chan uint64, readAheadBlocks)
 	g, gCtx := errgroup.WithContext(ctx)
@@ -706,7 +789,6 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 					tx.Rollback()
 				}
 			}()
-
 			for i := 0; ; i++ {
 				select {
 				case bn, ok = <-readAhead:
@@ -716,7 +798,6 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 				case <-gCtx.Done():
 					return gCtx.Err()
 				}
-
 				if i%100 == 0 {
 					if tx != nil {
 						tx.Rollback()
@@ -726,77 +807,124 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 						return err
 					}
 				}
-
-				if err := blocksReadAheadFunc(gCtx, tx, bn+readAheadBlocks, engine, blockReader); err != nil {
+				target := bn + readAheadBlocks
+				if execute && execBlock != nil && target <= execBlock.Load() {
+					readAheadBlocksByResult.WithLabelValues("late").Inc()
+					continue
+				}
+				if err := blocksReadAheadFunc(gCtx, tx, target, engine, blockReader, chainConfig, execute); err != nil {
 					return err
 				}
 			}
 		})
 	}
-	return readAhead, func() {
-		close(readAhead)
-		_ = g.Wait()
-	}
+	return readAhead, func() { close(readAhead); _ = g.Wait() }
 }
 
-func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader dbservices.FullBlockReader) error {
+func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute bool) error {
 	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
+		readAheadBlocksByResult.WithLabelValues("error").Inc()
 		return err
 	}
 	if block == nil {
 		return nil
 	}
-	_, _ = engine.Author(block.HeaderNoCopy()) // heavy on some engines and cached
-
+	_, _ = engine.Author(block.HeaderNoCopy())
 	ttx, ok := tx.(kv.TemporalTx)
 	if !ok {
 		return nil
 	}
-
 	stateReader := state.NewReaderV3(execctx.NewTemporalTxStateGetter(ttx))
 	senders := block.Body().SendersFromTxs()
-
 	for _, sender := range senders {
 		a, _ := stateReader.ReadAccountData(accounts.InternAddress(sender))
+		if a != nil {
+			// Code domain using .bt index - means no false-positives
+			if code, _ := stateReader.ReadAccountCode(accounts.InternAddress(sender)); len(code) > 0 {
+				_, _ = code[0], code[len(code)-1]
+			}
+		}
+	}
+	for _, txn := range block.Transactions() {
+		toaddr := txn.GetTo()
+		if toaddr == nil {
+			continue
+		}
+		to := accounts.InternAddress(*toaddr)
+		a, _ := stateReader.ReadAccountData(to)
 		if a == nil {
 			continue
 		}
-
-		// Code domain using .bt index - means no false-positives
-		if code, _ := stateReader.ReadAccountCode(accounts.InternAddress(sender)); len(code) > 0 {
+		if code, _ := stateReader.ReadAccountCode(to); len(code) > 0 {
 			_, _ = code[0], code[len(code)-1]
 		}
-	}
-
-	for _, txn := range block.Transactions() {
-		toaddr := txn.GetTo()
-		if toaddr != nil {
-			to := accounts.InternAddress(*toaddr)
-			a, _ := stateReader.ReadAccountData(to)
-			if a == nil {
-				continue
+		for _, list := range txn.GetAccessList() {
+			_, _ = stateReader.ReadAccountData(accounts.InternAddress(list.Address))
+			for _, slot := range list.StorageKeys {
+				_, _, _ = stateReader.ReadAccountStorageByPlainKey(accounts.InternAddress(list.Address), slot)
 			}
-			//if account != nil && !bytes.Equal(account.CodeHash, types.EmptyCodeHash.Bytes()) {
-			//	reader.Code(*tx.To(), common.BytesToHash(account.CodeHash))
-			//}
-			if code, _ := stateReader.ReadAccountCode(to); len(code) > 0 {
-				_, _ = code[0], code[len(code)-1]
-			}
-
-			for _, list := range txn.GetAccessList() {
-				_, _ = stateReader.ReadAccountData(accounts.InternAddress(list.Address))
-				if len(list.StorageKeys) > 0 {
-					for _, slot := range list.StorageKeys {
-						_, _, _ = stateReader.ReadAccountStorageByPlainKey(accounts.InternAddress(list.Address), slot)
-					}
-				}
-			}
-			// TODO: exec txn and pre-fetch commitment keys. see also: `func (p *statePrefetcher) Prefetch` in geth
 		}
-
 	}
 	_, _ = stateReader.ReadAccountData(accounts.InternAddress(block.Coinbase()))
-
+	if execute {
+		started := time.Now()
+		stats := runReadAheadBlock(ctx, tx, block, engine, blockReader, chainConfig)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if stats.Errored {
+			return nil
+		}
+		readAheadExecTransactions.AddInt(stats.Transactions)
+		for kind, n := range map[string]int{"account": stats.AccountsRead, "storage": stats.StorageRead, "code": stats.CodeRead} {
+			readAheadExecKeys.WithLabelValues(kind, "read").AddInt(n)
+		}
+		readAheadExecKeys.WithLabelValues("account", "write").AddInt(stats.AccountsWritten)
+		readAheadExecKeys.WithLabelValues("storage", "write").AddInt(stats.StorageWritten)
+		readAheadExecSeconds.Observe(time.Since(started).Seconds())
+	}
+	readAheadBlocksByResult.WithLabelValues("done").Inc()
 	return nil
+}
+
+func runReadAheadBlock(ctx context.Context, tx kv.Tx, block *types.Block, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config) (stats ReadAheadExecStats) {
+	defer func() {
+		if recover() != nil {
+			stats = ReadAheadExecStats{Errored: true}
+			readAheadBlocksByResult.WithLabelValues("error").Inc()
+		}
+	}()
+	ttx, ok := tx.(kv.TemporalTx)
+	if !ok {
+		return
+	}
+	reader := &readAheadCountingReader{StateReader: state.NewReaderV3(execctx.NewTemporalTxStateGetter(ttx)), stats: &stats}
+	ibs := state.New(reader)
+	header := block.HeaderNoCopy()
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+		return blockReader.Header(ctx, tx, hash, number)
+	}
+	bc := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, chainConfig)
+	evm := vm.NewEVM(bc, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
+	writer := &readAheadRecordingWriter{StateWriter: state.NewNoopWriter(), stats: &stats, accounts: make(map[accounts.Address]struct{}), storage: make(map[accounts.Address]map[accounts.StorageKey]struct{})}
+	for _, txn := range block.Transactions() {
+		if ctx.Err() != nil {
+			return
+		}
+		msg, err := txn.AsMessage(*types.MakeSigner(chainConfig, header.Number.Uint64(), header.Time), header.BaseFee, evm.ChainRules())
+		if err != nil {
+			continue
+		}
+		msg.SetCheckNonce(false)
+		msg.SetCheckTransaction(false)
+		evm.Reset(protocol.NewEVMTxContext(msg), ibs)
+		stats.Transactions++
+		_, err = protocol.ApplyMessage(evm, msg, protocol.NewGasPool(header.GasLimit, ^uint64(0)), true, true, engine)
+		if err != nil {
+			continue
+		}
+		_ = ibs.FinalizeTx(evm.ChainRules(), writer)
+	}
+	return
 }

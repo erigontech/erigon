@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -39,9 +40,11 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 // stubTemporalGetter stands in for the committed-state read view a warmup
@@ -67,6 +70,15 @@ type countingGetter struct {
 type singleTxRoDB struct {
 	kv.RoDB
 	tx kv.Tx
+}
+
+type readAheadBlockReader struct {
+	dbservices.FullBlockReader
+	block *types.Block
+}
+
+func (r readAheadBlockReader) BlockByNumber(context.Context, kv.Tx, uint64) (*types.Block, error) {
+	return r.block, nil
 }
 
 type firstAccountReadErrorTx struct {
@@ -1214,4 +1226,94 @@ func TestCachePopulatingGetterBoundedReadSkipsAVisibleEntry(t *testing.T) {
 	got, _, err := cpg.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{}.WithMaxStep(0))
 	require.NoError(t, err)
 	require.Equal(t, historical, got)
+}
+
+func TestReadAheadExecReadsAndWritesContractStorage(t *testing.T) {
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	contract := common.Address{19: 0xc0}
+	code := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.POP), byte(vm.PUSH1), 9, byte(vm.PUSH1), 1, byte(vm.SSTORE), byte(vm.STOP)}
+	config := chain.TestChainOsakaConfig
+	engine := ethash.NewFaker()
+	require.NoError(t, db.UpdateTemporal(ctx, func(rwTx kv.TemporalRwTx) error {
+		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		if err != nil {
+			return err
+		}
+		defer domains.Close()
+		acc := accounts.NewAccount()
+		acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		putter := domains.AsPutDel(rwTx)
+		if err := putter.DomainPut(kv.CodeDomain, contract[:], code, 0, nil); err != nil {
+			return err
+		}
+		if err := putter.DomainPut(kv.AccountsDomain, contract[:], accounts.SerialiseV3(&acc), 0, nil); err != nil {
+			return err
+		}
+		return domains.Flush(ctx, rwTx)
+	}))
+	signer := types.MakeSigner(config, 1, 1)
+	txn, err := types.SignTx(&types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, To: &contract, GasLimit: 100_000}, GasPrice: *uint256.NewInt(0)}, *signer, key)
+	require.NoError(t, err)
+	header := &types.Header{Number: *uint256.NewInt(1), Time: 1, GasLimit: 30_000_000, Difficulty: uint256.Int{}}
+	block := types.NewBlock(header, []types.Transaction{txn}, nil, nil, nil, nil)
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	beforeReads := readAheadExecKeys.WithLabelValues("storage", "read").GetValue()
+	beforeWrites := readAheadExecKeys.WithLabelValues("storage", "write").GetValue()
+	require.NoError(t, blocksReadAheadFunc(ctx, roTx, 1, engine, readAheadBlockReader{block: block}, config, false))
+	require.Equal(t, beforeReads, readAheadExecKeys.WithLabelValues("storage", "read").GetValue())
+	require.Equal(t, beforeWrites, readAheadExecKeys.WithLabelValues("storage", "write").GetValue())
+	stats := runReadAheadBlock(ctx, roTx, block, engine, nil, config)
+	storageRead := ReadAheadStorageKey{Address: accounts.InternAddress(contract), Slot: accounts.InternKey(common.Hash{})}
+	storageWrite := ReadAheadStorageKey{Address: accounts.InternAddress(contract), Slot: accounts.InternKey(common.Hash{31: 1})}
+	require.Contains(t, stats.StorageReadKeys, storageRead)
+	require.Contains(t, stats.StorageWrittenKeys, storageWrite)
+	require.Equal(t, 1, stats.Transactions)
+	reader := state.NewReaderV3(execctx.NewTemporalTxStateGetter(roTx))
+	value, _, err := reader.ReadAccountStorage(accounts.InternAddress(contract), storageWrite.Slot)
+	require.NoError(t, err)
+	require.Zero(t, value.Uint64(), "speculative execution must not write to the database")
+}
+
+func TestReadAheadExecSkipsStaleNonceCheck(t *testing.T) {
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	contract := common.Address{19: 0xc1}
+	code := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.STOP)}
+	config := chain.TestChainOsakaConfig
+	engine := ethash.NewFaker()
+	require.NoError(t, db.UpdateTemporal(ctx, func(rwTx kv.TemporalRwTx) error {
+		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		if err != nil {
+			return err
+		}
+		defer domains.Close()
+		acc := accounts.NewAccount()
+		acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		putter := domains.AsPutDel(rwTx)
+		if err := putter.DomainPut(kv.CodeDomain, contract[:], code, 0, nil); err != nil {
+			return err
+		}
+		if err := putter.DomainPut(kv.AccountsDomain, contract[:], accounts.SerialiseV3(&acc), 0, nil); err != nil {
+			return err
+		}
+		return domains.Flush(ctx, rwTx)
+	}))
+	signer := types.MakeSigner(config, 1, 1)
+	txn, err := types.SignTx(&types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, To: &contract, GasLimit: 100_000}, GasPrice: *uint256.NewInt(0)}, *signer, key)
+	require.NoError(t, err)
+	header := &types.Header{Number: *uint256.NewInt(1), Time: 1, GasLimit: 30_000_000, Difficulty: uint256.Int{}}
+	block := types.NewBlock(header, []types.Transaction{txn}, nil, nil, nil, nil)
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	stats := runReadAheadBlock(ctx, roTx, block, engine, nil, config)
+	require.Contains(t, stats.StorageReadKeys, ReadAheadStorageKey{Address: accounts.InternAddress(contract), Slot: accounts.InternKey(common.Hash{})})
+	require.Equal(t, 1, stats.Transactions)
 }

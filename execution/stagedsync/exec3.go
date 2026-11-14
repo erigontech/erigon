@@ -197,6 +197,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	var readAhead chan uint64
+	var clean func()
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
@@ -221,12 +222,6 @@ func ExecV3(ctx context.Context,
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
-	if !initialCycle && isApplyingBlocks {
-		var clean func()
-
-		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
-		defer clean()
-	}
 
 	pe := &parallelExecutor{
 		txExecutor: txExecutor{
@@ -243,6 +238,10 @@ func ExecV3(ctx context.Context,
 			blockSrc:          blockSrc,
 		},
 		workerCount: cfg.syncCfg.ExecWorkerCount,
+	}
+	if !initialCycle && isApplyingBlocks {
+		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader, cfg.chainConfig, dbg.ReadAheadExec, &pe.execBlockNum)
+		defer clean()
 	}
 	pe.lastCommittedTxNum.Store(inputTxNum)
 	// blockNum is the next block to execute (from doms.BlockNum()), so the last
@@ -340,6 +339,7 @@ type txExecutor struct {
 	taskExecMetrics  *exec.WorkerMetrics
 	blockExecMetrics *blockExecMetrics
 	hooks            *tracing.Hooks
+	execBlockNum     atomic.Uint64
 
 	// blockSrc, when non-nil, overrides the default DB-backed block source —
 	// e.g. an ephemeral single-block source with no DB behind it.
@@ -597,6 +597,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 				break
 			}
 
+			te.execBlockNum.Store(blockNum)
 			select {
 			case readAhead <- blockNum:
 			default:

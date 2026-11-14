@@ -59,18 +59,18 @@ Branch `awskii/readahead-exec-prefetch`, base main `ce34587ba46`. This plan file
 
 ### Task 1: speculative execution in `blocksReadAheadFunc`
 
-- [ ] knobs `READ_AHEAD_EXEC`, `READ_AHEAD_EXEC_COMMITMENT` (declared, unused until Task 3)
-- [ ] `blocksReadAheadFunc` gains the chain config and an exec switch; exec3 passes `dbg.ReadAheadExec`,
+- [x] knobs `READ_AHEAD_EXEC`, `READ_AHEAD_EXEC_COMMITMENT` (declared, unused until Task 3)
+- [x] `blocksReadAheadFunc` gains the chain config and an exec switch; exec3 passes `dbg.ReadAheadExec`,
       `CustomTraceMapReduce` passes false
-- [ ] speculative run as in Design, returning per-block stats (txs, accounts read, storage read, code read,
+- [x] speculative run as in Design, returning per-block stats (txs, accounts read, storage read, code read,
       accounts written, storage written) used by the metrics and by tests
-- [ ] late skip with the shared exec-block atomic, fed from the exec loop next to `readAhead <- blockNum`
-- [ ] metrics
-- [ ] test: a chain whose block calls a contract that reads storage slot S and writes slot T, with neither
+- [x] late skip with the shared exec-block atomic, fed from the exec loop next to `readAhead <- blockNum`
+- [x] metrics
+- [x] test: a chain whose block calls a contract that reads storage slot S and writes slot T, with neither
       in an access list. With exec on, the stats show S read and T written; with exec off both are zero;
       the DB is byte-identical before and after. Guard: removing the tx loop turns it red at the assertion
       on S
-- [ ] test: a tx whose sender nonce is stale still runs and reads S
+- [x] test: a tx whose sender nonce is stale still runs and reads S
 
 ### Task 2: wire it into multi-block runs
 
