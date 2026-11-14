@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"time"
 
@@ -46,6 +47,12 @@ import (
 // Above the largest request the spec allows, about 17 MB: MAX_COMMITTEES_PER_SLOT * TARGET_AGGREGATORS_PER_COMMITTEE
 // aggregates, each with a full Electra aggregation bitlist.
 const maxAggregateAndProofsRequestSize = 32 << 20
+
+const (
+	attesterSlashingJSONOverhead = 4 << 10
+	// Each of the two lists carries decimal uint64 strings with JSON delimiters.
+	attesterSlashingJSONBytesPerIndexPair = 2 * 32
+)
 
 const blockArrivalPollInterval = 50 * time.Millisecond
 
@@ -354,9 +361,39 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 
 func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) {
 	clVersion := a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetCurrentEpoch())
+	maxIndices := state.MaxIndexedAttestationIndices(a.beaconChainCfg, clVersion)
+	if maxIndices > uint64(math.MaxInt) || maxIndices > (math.MaxInt64-attesterSlashingJSONOverhead)/attesterSlashingJSONBytesPerIndexPair {
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("attester slashing limits exceed supported range")).WriteTo(w)
+		return
+	}
+	maxBodySize := attesterSlashingJSONOverhead + int64(maxIndices)*attesterSlashingJSONBytesPerIndexPair
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodySize))
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+
+	var raw struct {
+		Attestation1 *json.RawMessage `json:"attestation_1"`
+		Attestation2 *json.RawMessage `json:"attestation_2"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	if raw.Attestation1 == nil || raw.Attestation2 == nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation_1 and attestation_2 are required")).WriteTo(w)
+		return
+	}
 
 	req := cltypes.NewAttesterSlashing(clVersion)
-	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
+	req.Attestation_1.AttestingIndices.SetCap(int(maxIndices))
+	req.Attestation_2.AttestingIndices.SetCap(int(maxIndices))
+	if err := json.Unmarshal(*raw.Attestation1, req.Attestation_1); err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	if err := json.Unmarshal(*raw.Attestation2, req.Attestation_2); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}

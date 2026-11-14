@@ -18,6 +18,7 @@ package cltypes
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -99,16 +100,22 @@ func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 		return err
 	}
 
-	if i.AttestingIndices == nil {
-		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimit, nil)
+	limit := attestingIndicesLimit
+	if i.AttestingIndices != nil {
+		limit = i.AttestingIndices.Cap()
+		if len(tmp.AttestingIndices) > limit {
+			return fmt.Errorf("attesting indices exceed limit: %d > %d", len(tmp.AttestingIndices), limit)
+		}
 	}
-	for _, index := range tmp.AttestingIndices {
+	indices := make([]uint64, len(tmp.AttestingIndices))
+	for j, index := range tmp.AttestingIndices {
 		v, err := strconv.ParseUint(index, 10, 64)
 		if err != nil {
 			return err
 		}
-		i.AttestingIndices.Append(v)
+		indices[j] = v
 	}
+	i.AttestingIndices = solid.NewRawUint64List(limit, indices)
 	i.Data = tmp.Data
 	i.Signature = tmp.Signature
 	return nil
