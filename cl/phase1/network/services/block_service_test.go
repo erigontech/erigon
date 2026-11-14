@@ -115,6 +115,7 @@ type onBlockErrorStore struct {
 	err     error
 	calls   atomic.Int32
 	headers sync.Map
+	blocks  sync.Map
 }
 
 type doneObservedContext struct {
@@ -142,7 +143,15 @@ func (s *onBlockErrorStore) OnBlock(_ context.Context, block *cltypes.SignedBeac
 		return err
 	}
 	s.headers.Store(common.Hash(root), block.SignedBeaconBlockHeader().Header)
+	s.blocks.Store(common.Hash(root), block)
 	return nil
+}
+
+func (s *onBlockErrorStore) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	if block, ok := s.blocks.Load(root); ok {
+		return block.(*cltypes.SignedBeaconBlock), true
+	}
+	return s.ForkChoiceStorage.GetBlock(root)
 }
 
 func (s *onBlockErrorStore) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
@@ -1810,7 +1819,7 @@ func TestUnknownParentBlockDoesNotHoldPayloadPreparation(t *testing.T) {
 }
 
 func TestScheduledBlockWaitsForProposerStateBeforeCancelingPayloadPreparation(t *testing.T) {
-	service, child, store, root, job := parkUnknownParentBlockForRetry(t, true)
+	service, child, store, root, job := parkUnknownParentBlockWithBlobsForRetry(t, true, 0)
 	stateErr := errors.New("parent state unavailable")
 	store.ViewStateAtBlockRootFn = func(common.Hash, func(*state.CachingBeaconState) error) error {
 		return stateErr
@@ -1836,7 +1845,7 @@ func TestScheduledBlockWaitsForProposerStateBeforeCancelingPayloadPreparation(t 
 }
 
 func TestAuthenticatedScheduledBlockTakesPayloadImportClaim(t *testing.T) {
-	service, child, store, root, job := parkUnknownParentBlockForRetry(t, true)
+	service, child, store, root, job := parkUnknownParentBlockWithBlobsForRetry(t, true, 0)
 	service.processScheduledBlock(t.Context(), root, job, time.Now())
 	require.ErrorIs(t, job.lastAttempt.err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
 
@@ -1852,7 +1861,7 @@ func TestAuthenticatedScheduledBlockTakesPayloadImportClaim(t *testing.T) {
 }
 
 func TestWrongProposerScheduledBlockDoesNotCancelPayloadPreparation(t *testing.T) {
-	service, child, store, root, job := parkUnknownParentBlockForRetry(t, false)
+	service, child, store, root, job := parkUnknownParentBlockWithBlobsForRetry(t, false, 0)
 	store.OnBlockErr = forkchoice.ErrParentEnvelopePending
 	ctx, finish, ok := store.TryBeginPayloadPreparation(t.Context(), child.Block.Slot, child.Block.Slot+1)
 	require.True(t, ok)
@@ -1907,7 +1916,7 @@ func TestScheduledBlockRejectsInvalidParentSlotBeforeStateAccess(t *testing.T) {
 }
 
 func TestUnrelatedScheduledBlockErrorDoesNotRetainImportClaim(t *testing.T) {
-	service, child, store, root, job := parkUnknownParentBlockForRetry(t, true)
+	service, child, store, root, job := parkUnknownParentBlockWithBlobsForRetry(t, true, 0)
 	store.OnBlockErr = errors.New("unrelated retry error")
 	validationCalls := 0
 	store.ViewStateAtBlockRootFn = func(root common.Hash, fn func(*state.CachingBeaconState) error) error {
@@ -1946,10 +1955,17 @@ func TestShouldRetainBlockImportClaim(t *testing.T) {
 	}
 }
 
-func parkUnknownParentBlockForRetry(t *testing.T, matchingProposer bool) (*blockService, *cltypes.SignedBeaconBlock, *mock_services.ForkChoiceStorageMock, common.Hash, *blockJob) {
+func parkUnknownParentBlockWithBlobsForRetry(t *testing.T, matchingProposer bool, blobs int) (*blockService, *cltypes.SignedBeaconBlock, *mock_services.ForkChoiceStorageMock, common.Hash, *blockJob) {
 	t.Helper()
-	serviceInterface, child, store, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	serviceInterface, child, store, _, _ := newGloasGossipValidationFixtureWithBlobs(t, nil, blobs)
 	service := serviceInterface.(*blockService)
+	root, job := parkUnknownParentBlock(t, service, child, store, matchingProposer)
+	return service, child, store, root, job
+}
+
+func parkUnknownParentBlock(t *testing.T, service *blockService, child *cltypes.SignedBeaconBlock, store *mock_services.ForkChoiceStorageMock, matchingProposer bool) (common.Hash, *blockJob) {
+	t.Helper()
+	parentRoot := child.Block.ParentRoot
 	parent := store.Blocks[parentRoot]
 	parentHeader := store.Headers[parentRoot]
 	if !matchingProposer {
@@ -1965,7 +1981,7 @@ func parkUnknownParentBlockForRetry(t *testing.T, matchingProposer bool) (*block
 		parentState := store.StateAtBlockRootVal[parentRoot]
 		require.NoError(t, parentState.AddValidator(validator, service.beaconCfg.MaxEffectiveBalance))
 		require.NoError(t, service.syncedData.OnHeadState(parentState))
-		child.Block.ProposerIndex = 1
+		child.Block.ProposerIndex = uint64(parentState.ValidatorLength() - 1)
 		domain, err := parentState.GetDomain(service.beaconCfg.DomainBeaconProposer, child.Block.Slot/service.beaconCfg.SlotsPerEpoch)
 		require.NoError(t, err)
 		signingRoot, err := fork.ComputeSigningRoot(child.Block, domain)
@@ -1985,7 +2001,7 @@ func parkUnknownParentBlockForRetry(t *testing.T, matchingProposer bool) (*block
 	store.Blocks[parentRoot] = parent
 	store.Headers[parentRoot] = parentHeader
 	store.OnBlockErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
-	return service, child, store, root, job
+	return root, job
 }
 
 func TestBlockServiceGossipRejectsWrongEmptyParentExecutionHead(t *testing.T) {
@@ -2071,6 +2087,12 @@ func TestBlockServiceGossipAcceptsChildOfHeaderOnlyCheckpointAnchor(t *testing.T
 
 func newGloasGossipValidationFixture(t *testing.T, childParentHash func(parentExecutionHead, parentBlockHash common.Hash) common.Hash) (BlockService, *cltypes.SignedBeaconBlock, *mock_services.ForkChoiceStorageMock, common.Hash, common.Hash) {
 	t.Helper()
+	return newGloasGossipValidationFixtureWithBlobs(t, childParentHash, 0)
+}
+
+// newGloasGossipValidationFixtureWithBlobs gives the child's bid that many blob commitments before the block is signed.
+func newGloasGossipValidationFixtureWithBlobs(t *testing.T, childParentHash func(parentExecutionHead, parentBlockHash common.Hash) common.Hash, blobs int) (BlockService, *cltypes.SignedBeaconBlock, *mock_services.ForkChoiceStorageMock, common.Hash, common.Hash) {
+	t.Helper()
 	ctrl := gomock.NewController(t)
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
@@ -2119,10 +2141,17 @@ func newGloasGossipValidationFixture(t *testing.T, childParentHash func(parentEx
 	if childParentHash != nil {
 		selectedParentHash = childParentHash(parentExecutionHead, parentBlockHash)
 	}
-	child.Block.Body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+	childBid := &cltypes.ExecutionPayloadBid{
 		ParentBlockHash: selectedParentHash,
 		ParentBlockRoot: parentRoot,
-	}}
+	}
+	if blobs > 0 {
+		childBid.BlobKzgCommitments = *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
+		for i := range blobs {
+			childBid.BlobKzgCommitments.Append(&cltypes.KZGCommitment{byte(i + 1)})
+		}
+	}
+	child.Block.Body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: childBid}
 	domain, err := parentState.GetDomain(cfg.DomainBeaconProposer, childSlot/cfg.SlotsPerEpoch)
 	require.NoError(t, err)
 	signingRoot, err := fork.ComputeSigningRoot(child.Block, domain)
