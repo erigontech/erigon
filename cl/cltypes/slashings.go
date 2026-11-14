@@ -17,7 +17,6 @@
 package cltypes
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 
@@ -74,8 +73,8 @@ func (a *AttesterSlashing) SetVersionWithConfig(v clparams.StateVersion, cfg *cl
 
 func (a *AttesterSlashing) UnmarshalJSON(buf []byte) error {
 	var raw struct {
-		Attestation1 json.RawMessage `json:"attestation_1"`
-		Attestation2 json.RawMessage `json:"attestation_2"`
+		Attestation1 *json.RawMessage `json:"attestation_1"`
+		Attestation2 *json.RawMessage `json:"attestation_2"`
 	}
 	if err := json.Unmarshal(buf, &raw); err != nil {
 		return err
@@ -86,14 +85,14 @@ func (a *AttesterSlashing) UnmarshalJSON(buf []byte) error {
 	return decodeIndexedAttestationJSON("attestation_2", raw.Attestation2, &a.Attestation_2)
 }
 
-func decodeIndexedAttestationJSON(name string, raw json.RawMessage, target **IndexedAttestation) error {
-	if trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+func decodeIndexedAttestationJSON(name string, raw *json.RawMessage, target **IndexedAttestation) error {
+	if raw == nil {
 		return fmt.Errorf("attester slashing is missing %s", name)
 	}
 	if *target == nil {
 		*target = &IndexedAttestation{}
 	}
-	if err := json.Unmarshal(raw, *target); err != nil {
+	if err := json.Unmarshal(*raw, *target); err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}
 	return nil
