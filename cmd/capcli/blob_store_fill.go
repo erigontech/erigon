@@ -54,6 +54,8 @@ const fillWorkers = 8
 // 6 MB. A variable so tests can shorten it.
 var fillRequestTimeout = time.Minute
 
+var fillRetryWait = time.Second
+
 type BlobArchiveStoreFill struct {
 	chainCfg
 	outputFolder
@@ -318,11 +320,7 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 
 func fetchAndStoreBlobs(ctx context.Context, store blob_storage.BlobStorage, endpoint string, root common.Hash, block *cltypes.SignedBeaconBlock) error {
 	commitments := block.Block.Body.GetBlobKzgCommitments()
-	// An endpoint that accepts the request and never answers fails like any other, so the next one
-	// is tried.
-	fetchCtx, cancel := context.WithTimeout(ctx, fillRequestTimeout)
-	defer cancel()
-	sidecars, err := retrieveBlobsFromRemoteEndpoint(fetchCtx, endpoint, root, commitments.Len())
+	sidecars, err := retrieveBlobsFromRemoteEndpoint(ctx, endpoint, root, commitments.Len())
 	if err != nil {
 		return err
 	}
