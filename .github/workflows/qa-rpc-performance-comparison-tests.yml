@@ -287,12 +287,17 @@ jobs:
             exit 1
           fi
 
-      - name: Show CPU affinity and frequency governor
+      - name: Check CPU affinity and frequency governor
         run: |
           echo "Expected: client on $CLIENT_CPUS, rpc_perf on $RPC_PERF_CPUS"
           # Match the process name, not the command line: the runner's own paths contain the client name.
-          for pid in $(pgrep -i "$CLIENT"); do
-            echo "$(taskset -cp "$pid" 2>/dev/null) $(ps -o comm= -p "$pid")"
+          pids=$(pgrep -i "$CLIENT" || true)
+          [ -n "$pids" ] || echo "::warning::No $CLIENT process found"
+          [ "$(echo "$pids" | wc -w)" -le 1 ] || echo "::warning::More than one $CLIENT process is running"
+          for pid in $pids; do
+            cpus=$(taskset -acp "$pid" 2>/dev/null | sed 's/.*: //' | sort -u | paste -sd' ')
+            echo "pid $pid $(ps -o comm= -p "$pid"): $cpus"
+            [ "$cpus" = "$CLIENT_CPUS" ] || echo "::warning::$CLIENT pid $pid runs on CPUs $cpus, expected $CLIENT_CPUS"
           done
           echo "governor: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo unknown)"
 
