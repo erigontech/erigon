@@ -793,9 +793,9 @@ func (f *ForkChoiceStore) FinalizedCheckpoint() solid.Checkpoint {
 	return f.finalizedCheckpoint.Load().(solid.Checkpoint)
 }
 
-// FinalizedCheckpoint returns justified checkpoint
+// FinalizedSlot returns the start slot of the finalized checkpoint epoch.
 func (f *ForkChoiceStore) FinalizedSlot() uint64 {
-	return f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch) + (f.beaconCfg.SlotsPerEpoch - 1)
+	return f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch)
 }
 
 // FinalizedCheckpoint returns justified checkpoint

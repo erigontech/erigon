@@ -83,7 +83,7 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 			}
 			beforeFinalized = finalized
 
-			if err := s.IncrementBeaconState(ctx, finalized); err != nil {
+			if err := s.IncrementBeaconState(ctx, finalized+1); err != nil {
 				if s.currentState != nil {
 					s.logger.Warn("Could not to increment beacon state, trying again later", "err", err, "slot", s.currentState.Slot())
 				} else {
@@ -256,7 +256,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	start := time.Now()
 
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
-	slot := s.currentState.Slot() + 1
+	slot := max(s.currentState.Slot(), s.stateScannedThrough) + 1
 
 	events := state_accessors.NewStateEvents()
 	slashingOccurred := false
@@ -624,6 +624,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	if err := commitBatch(); err != nil {
 		return err
 	}
+	s.stateScannedThrough = slot - 1
 	endTime := time.Since(start)
 	stateRoot, err := s.currentState.HashSSZ()
 	if err != nil {
@@ -821,6 +822,7 @@ func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.
 
 	s.balances32 = s.balances32[:0]
 	s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
+	s.stateScannedThrough = 0
 	return s.currentState.InitBeaconState()
 }
 

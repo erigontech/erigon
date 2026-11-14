@@ -82,8 +82,9 @@ type Antiquary struct {
 	genesisState    *state.CachingBeaconState
 	syncedData      synced_data.SyncedData
 	// set to nil
-	currentState *state.CachingBeaconState
-	balances32   []byte
+	currentState        *state.CachingBeaconState
+	balances32          []byte
+	stateScannedThrough uint64
 	// maxSlotsPerCommit bounds how many slots the antiquary accumulates into one
 	// mdbx transaction. A very large commit overflows libmdbx's gc_fill_returned
 	// while serializing the transaction's retired-page list; bounding it avoids that.
