@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -324,6 +326,54 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	return nil
 }
 
+// readReferencePages reads the cold file pages that the branch's shortened keys point to in one batch, so the expansion
+// does not wait for them one after another. It returns the number of pages it read.
+func readReferencePages(branch commitment.BranchData, accounts, storage *seg.Reader) int {
+	pr := mmap.NewProbe()
+	if pr == nil {
+		return 0
+	}
+	var cold []uintptr
+	_, _ = branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		r, plainLen := accounts, length.Addr
+		if isStorage {
+			r, plainLen = storage, length.Addr+length.Hash
+		}
+		if len(key) > 0 && len(key) != plainLen {
+			if page, isCold := probeWordPage(r, pr, DecodeReferenceKey(key)); isCold && !slices.Contains(cold, page) {
+				cold = append(cold, page)
+			}
+		}
+		return nil, nil
+	})
+	if len(cold) < 2 { // one page is read as fast by the expansion itself
+		return 0
+	}
+	if mmap.ReadPages(context.Background(), cold) != nil {
+		return 0
+	}
+	return len(cold)
+}
+
+// probeWordPage reports the page of the word at offset when it is not resident.
+func probeWordPage(r *seg.Reader, pr *mmap.Probe, offset uint64) (page uintptr, cold bool) {
+	r.SetProbe(pr)
+	defer r.SetProbe(nil)
+	defer func() {
+		if rec := recover(); rec != nil {
+			p, ok := rec.(mmap.ColdPage)
+			if !ok {
+				panic(rec)
+			}
+			page, cold = uintptr(p), true
+		}
+	}()
+	if offset < uint64(r.Size()) {
+		r.Reset(offset)
+	}
+	return 0, false
+}
+
 // ExpandShortenedKeysInBranch expands shortened key references (file offsets) in branch data back
 // to full plain keys by looking them up in the supplied account and storage domain files.
 //
@@ -344,6 +394,7 @@ func ExpandShortenedKeysInBranch(
 ) (commitment.BranchData, error) {
 	storageGetter := storage.dataReader(storageFile.decompressor)
 	accountGetter := accounts.dataReader(accountFile.decompressor)
+	readReferencePages(branch, accountGetter, storageGetter)
 	logger := log.Root()
 	stepSize := accounts.d.stepSize
 
