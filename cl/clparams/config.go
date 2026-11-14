@@ -1697,11 +1697,11 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockUpperBound() uint64 {
 }
 
 func (b *BeaconChainConfig) MaxRequestBlobSidecarsByVersion(v StateVersion) int {
-	switch v {
-	case DenebVersion:
-		return int(b.MaxRequestBlobSidecars)
-	case ElectraVersion, FuluVersion, GloasVersion:
+	if v >= ElectraVersion {
 		return int(b.MaxRequestBlobSidecarsElectra)
+	}
+	if v == DenebVersion {
+		return int(b.MaxRequestBlobSidecars)
 	}
 	panic("invalid version")
 }

@@ -99,11 +99,6 @@ const bucketIdleExpiry = 10 * time.Minute
 
 // peerRateLimiter enforces per-peer, per-protocol rate limits and per-peer
 // concurrent stream caps on incoming ReqResp handlers.
-//
-// Rate limits are counted per response item, aligned with Lighthouse's approach.
-// The wrapper pre-consumes 1 token for admission; batch handlers (blocks-by-range,
-// blobs-by-range, etc.) consume additional tokens proportional to the requested
-// item count after decoding the request.
 type peerRateLimiter struct {
 	// protocolLimits maps protocol name -> rate config
 	protocolLimits map[string]protocolRateConfig
@@ -118,6 +113,9 @@ type peerRateLimiter struct {
 	punished sync.Map // map[peerProtocolKey]time.Time
 }
 
+// blockRateBurst is the token bucket capacity of the block protocols.
+const blockRateBurst = 128
+
 func newPeerRateLimiter() *peerRateLimiter {
 	rl := &peerRateLimiter{
 		protocolLimits: make(map[string]protocolRateConfig),
@@ -125,7 +123,7 @@ func newPeerRateLimiter() *peerRateLimiter {
 
 	// Rate limits aligned with other consensus clients.
 	// Format: maxTokens (burst), refillRate (tokens/second)
-	blockRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}                  // 128 per 10s
+	blockRate := protocolRateConfig{maxTokens: blockRateBurst, refillRate: 12.8}       // 128 per 10s
 	blobRate := protocolRateConfig{maxTokens: 72, refillRate: 7.2}                     // 72 per 10s
 	dataColRate := protocolRateConfig{maxTokens: 16384, refillRate: 1638.4}            // 16384 per 10s (proportional to blockRate × NumberOfColumns)
 	lcRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}                     // 128 per 10s
@@ -175,13 +173,13 @@ func (rl *peerRateLimiter) allowRequest(peerID string, protocol string, cost int
 	return rl.consumeTokens(peerID, protocol, cost)
 }
 
-// consumeTokens attempts to consume cost tokens from the bucket for the given
-// peer and protocol. If the bucket is exhausted, false is returned and, unless
-// the protocol has noPunishment, the peer is punished. Batch handlers call this
-// after decoding the request to charge for the actual number of response items.
+// consumeTokens charges cost tokens for the given peer and protocol.
+// If there are too few tokens, it returns false and punishes the peer unless
+// noPunishment is set. Zero costs succeed and negative costs are rejected.
 func (rl *peerRateLimiter) consumeTokens(peerID string, protocol string, cost int) bool {
+	// Negative costs may be caused by overflow and must never bypass charging.
 	if cost <= 0 {
-		return true
+		return cost == 0
 	}
 	key := peerProtocolKey{peerID: peerID, protocol: protocol}
 	cfg, hasCfg := rl.protocolLimits[protocol]
