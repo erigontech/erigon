@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -2049,4 +2050,167 @@ func TestDispatchLimitBoundsEveryBlock(t *testing.T) {
 			require.Equal(t, 99, be.dispatchLimit())
 		})
 	}
+}
+
+func TestAsyncBALBuilderWorkerSurvivesPanic(t *testing.T) {
+	var a asyncBALBuilder
+	defer a.stop()
+	a.add(nil, 1)
+	var raised any
+	func() {
+		defer func() { raised = recover() }()
+		a.finish()
+	}()
+	require.Contains(t, fmt.Sprint(raised), "ReadSet", "the raised panic keeps the stack of the builder goroutine")
+
+	a.add(state.NewVersionedIO(1), 1)
+	b := a.finish()
+	require.NotNil(t, b)
+	require.Equal(t, 0, b.Next())
+}
+
+// serialBALBuilderSink keeps the serial builder on the heap, as the apply loop did.
+var serialBALBuilderSink *state.BlockAccessListBuilder
+
+func TestAsyncBALBuilderAllocatesAsSerial(t *testing.T) {
+	const txs = 64
+	io := state.NewVersionedIO(txs)
+	for i := range txs {
+		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+		v := state.Version{TxIndex: i, Incarnation: 1}
+		ws := &state.WriteSet{}
+		ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Key: accounts.NilKey, Version: v}, Val: *uint256.NewInt(uint64(i))})
+		io.RecordWrites(v, ws)
+	}
+	serial := testing.AllocsPerRun(100, func() {
+		serialBALBuilderSink = state.NewBlockAccessListBuilder()
+		serialBALBuilderSink.AddRemaining(io)
+	})
+	var a asyncBALBuilder
+	defer a.stop()
+	async := testing.AllocsPerRun(100, func() {
+		for sealed := 1; sealed <= txs+1; sealed++ {
+			a.add(io, sealed)
+		}
+		a.finish()
+	})
+	require.LessOrEqual(t, async, serial)
+
+	// Each execImpl call also starts the goroutine and allocates its queue and done channel: 7 measured, and 2 more
+	// when the runtime allocates a new g instead of reusing an exited one.
+	const builderLifecycle = 7 + 2
+	perCall := testing.AllocsPerRun(100, func() {
+		var a asyncBALBuilder
+		for sealed := 1; sealed <= txs+1; sealed++ {
+			a.add(io, sealed)
+		}
+		a.finish()
+		a.stop()
+	})
+	require.LessOrEqual(t, perCall, serial+builderLifecycle)
+}
+
+// mixedBALIO records txs that read and write balance, nonce, code and storage, with one self-destruct.
+func mixedBALIO(txs int) *state.VersionedIO {
+	io := state.NewVersionedIO(txs)
+	addrAt := func(i int) accounts.Address {
+		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+	}
+	contract := addrAt(1000)
+	for i := range txs {
+		v := state.Version{TxIndex: i, Incarnation: 1}
+		wh := func(a accounts.Address, p state.AccountPath, k accounts.StorageKey) state.WriteHeader {
+			return state.WriteHeader{Address: a, Path: p, Key: k, Version: v}
+		}
+		rh := state.ReadHeader{Source: state.StorageRead, Version: v}
+		sender, slot, readSlot := addrAt(i), accounts.InternKey(common.Hash{byte(i % 7)}), accounts.InternKey(common.Hash{0xff, byte(i % 5)})
+		rs := state.ReadSet{}
+		rs.SetBalance(addrAt(i+txs), state.VersionedRead[uint256.Int]{ReadHeader: rh, Val: *uint256.NewInt(uint64(i))})
+		rs.SetStorage(contract, readSlot, state.VersionedRead[uint256.Int]{ReadHeader: rh, Val: *uint256.NewInt(uint64(i))})
+		ws := &state.WriteSet{}
+		ws.SetBalance(sender, &state.VersionedWrite[uint256.Int]{WriteHeader: wh(sender, state.BalancePath, accounts.NilKey), Val: *uint256.NewInt(uint64(i))})
+		ws.SetNonce(sender, &state.VersionedWrite[uint64]{WriteHeader: wh(sender, state.NoncePath, accounts.NilKey), Val: uint64(i + 1)})
+		ws.SetStorage(contract, slot, &state.VersionedWrite[uint256.Int]{WriteHeader: wh(contract, state.StoragePath, slot), Val: *uint256.NewInt(uint64(i))})
+		if i%5 == 0 {
+			code := accounts.NewCode([]byte{0x60, byte(i), 0x00})
+			ws.SetCode(sender, &state.VersionedWrite[accounts.Code]{WriteHeader: wh(sender, state.CodePath, accounts.NilKey), Val: code})
+			ws.SetCodeHash(sender, &state.VersionedWrite[accounts.CodeHash]{WriteHeader: wh(sender, state.CodeHashPath, accounts.NilKey), Val: code.Hash})
+			ws.SetCodeSize(sender, &state.VersionedWrite[int]{WriteHeader: wh(sender, state.CodeSizePath, accounts.NilKey), Val: code.Len()})
+		}
+		if i == txs/2 {
+			ws.SetSelfDestruct(addrAt(i-1), &state.VersionedWrite[bool]{WriteHeader: wh(addrAt(i-1), state.SelfDestructPath, accounts.NilKey), Val: true})
+		}
+		io.RecordReads(v, rs)
+		io.RecordWrites(v, ws)
+	}
+	return io
+}
+
+// One builder fed two blocks in a row gives each block its own list.
+func TestAsyncBALBuilderEncodesAsSerial(t *testing.T) {
+	var a asyncBALBuilder
+	defer a.stop()
+	for _, txs := range []int{200, 150} {
+		io := mixedBALIO(txs)
+		serial := state.NewBlockAccessListBuilder()
+		serial.AddRemaining(io)
+
+		for sealed := 1; sealed <= txs; sealed++ {
+			a.add(io, sealed)
+		}
+		async := a.finish()
+		async.AddRemaining(io)
+
+		want, err := types.EncodeBlockAccessListBytes(serial.Build())
+		require.NoError(t, err)
+		got, err := types.EncodeBlockAccessListBytes(async.Build())
+		require.NoError(t, err)
+		require.Equal(t, want, got, "block of %d txs", txs)
+	}
+}
+
+func TestAsyncBALBuilderFinishWaitsForLastJob(t *testing.T) {
+	const txs = 8
+	var a asyncBALBuilder
+	defer a.stop()
+	blocked, release := make(chan struct{}), make(chan struct{})
+	var seen int
+	balBuildJobHook = func(b *asyncBALBuilder) {
+		if b != &a {
+			return
+		}
+		if seen++; seen == txs+1 {
+			close(blocked)
+			<-release
+		}
+	}
+	defer func() { balBuildJobHook = nil }()
+
+	io := mixedBALIO(txs)
+	for sealed := 1; sealed <= txs+1; sealed++ {
+		a.add(io, sealed)
+	}
+	<-blocked
+	go func() {
+		for len(a.jobs) == 0 { // finish has queued its flush behind the blocked job
+			runtime.Gosched()
+		}
+		close(release)
+	}()
+	b := a.finish()
+	require.Equal(t, txs, b.Next())
+}
+
+// A builder started outside a synctest bubble does not break a builder used inside one.
+func TestAsyncBALBuilderInBubble(t *testing.T) {
+	var a asyncBALBuilder
+	defer a.stop()
+	a.add(state.NewVersionedIO(1), 1)
+	a.finish()
+	synctest.Test(t, func(t *testing.T) {
+		var b asyncBALBuilder
+		defer b.stop()
+		b.add(state.NewVersionedIO(1), 1)
+		b.finish()
+	})
 }

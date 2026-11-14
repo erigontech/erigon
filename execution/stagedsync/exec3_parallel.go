@@ -8,6 +8,7 @@ import (
 	"maps"
 	"math"
 	"os"
+	"runtime/debug"
 	"runtime/pprof"
 	"slices"
 	"sort"
@@ -268,6 +269,86 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 	}
 }
 
+// balBuildJobHook runs before each tx job on the builder goroutine; tests use it to delay one.
+var balBuildJobHook func(*asyncBALBuilder)
+
+type balBuildJob struct {
+	io     *state.VersionedIO
+	sealed int
+	flush  bool
+}
+
+func (a *asyncBALBuilder) run(j balBuildJob) {
+	if j.flush {
+		a.done <- struct{}{}
+		return
+	}
+	if a.err != nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			a.err = fmt.Errorf("%v\n%s", r, debug.Stack())
+		}
+	}()
+	if h := balBuildJobHook; h != nil {
+		h(a)
+	}
+	for a.b.Next()+1 < j.sealed {
+		i := a.b.Next()
+		a.b.Add(i, j.io.ReadSet(i), j.io.WriteSet(i))
+	}
+}
+
+// asyncBALBuilder adds sealed txs to the current block's access list in publish order, on its own goroutine off
+// the apply goroutine. b and err belong to that goroutine from add until finish receives on done.
+type asyncBALBuilder struct {
+	jobs chan balBuildJob
+	done chan struct{}
+	b    *state.BlockAccessListBuilder
+	err  error
+}
+
+func (a *asyncBALBuilder) add(io *state.VersionedIO, sealed int) {
+	if a.jobs == nil {
+		// Above the 1078-job peak measured on a 300M max-tx BAL block; a full buffer blocks the apply goroutine.
+		jobs := make(chan balBuildJob, 2*1024)
+		a.jobs, a.done = jobs, make(chan struct{}, 1)
+		go func() {
+			for j := range jobs {
+				a.run(j)
+			}
+		}()
+	}
+	if a.b == nil {
+		a.b = state.NewBlockAccessListBuilder()
+	}
+	a.jobs <- balBuildJob{io: io, sealed: sealed}
+}
+
+// stop ends the builder goroutine after its queued jobs.
+func (a *asyncBALBuilder) stop() {
+	if a.jobs != nil {
+		close(a.jobs)
+	}
+}
+
+// finish waits for the block's queued txs and returns its builder, nil when none was
+// added. A panic in the builder is raised again here, on the caller.
+func (a *asyncBALBuilder) finish() *state.BlockAccessListBuilder {
+	if a.b == nil {
+		return nil
+	}
+	a.jobs <- balBuildJob{flush: true}
+	<-a.done
+	b, err := a.b, a.err
+	a.b, a.err = nil, nil
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
 // foldTx applies one published tx's versionMap view and indexes to sd.mem.
 // Finalize logs share the final virtual task's txNum. That task has already
 // handled the receipt cache, so finalize indexes logs without changing it.
@@ -503,8 +584,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// Collect per-tx writes to notify the accumulator AFTER StartChange (which
 		// arrives with the blockResult, after all txResults).
 		var pendingAccumulatorWrites []state.WriteSetView
-		// balBuilder holds the current block's access list up to its last published tx.
-		var balBuilder *state.BlockAccessListBuilder
+		// balBuilder builds the current block's access list from its published txs.
+		var balBuilder asyncBALBuilder
+		defer balBuilder.stop()
 		// foldErr is the first per-tx fold error of the current block, surfaced at
 		// its blockResult.
 		var foldErr error
@@ -667,13 +749,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						foldErr = pe.foldTx(ctx, rwTx, applyResult)
 					}
 					if applyResult.txIO != nil {
-						if balBuilder == nil {
-							balBuilder = state.NewBlockAccessListBuilder()
-						}
-						for balBuilder.Next()+1 < applyResult.balSealed {
-							i := balBuilder.Next()
-							balBuilder.Add(i, applyResult.txIO.ReadSet(i), applyResult.txIO.WriteSet(i))
-						}
+						balBuilder.add(applyResult.txIO, applyResult.balSealed)
 					}
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
@@ -681,8 +757,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
-					built := balBuilder
-					balBuilder = nil
+					built := balBuilder.finish()
 					if finalized {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
 						continue
