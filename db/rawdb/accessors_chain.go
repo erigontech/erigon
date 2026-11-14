@@ -1378,6 +1378,15 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 	transactions := block.Transactions()
+	// Hashing the transactions overlaps with reading the receipts.
+	hashed := make(chan struct{})
+	go func() {
+		defer close(hashed)
+		for _, txn := range transactions {
+			txn.Hash()
+		}
+	}()
+	defer func() { <-hashed }()
 
 	minTxNum, err := txNumReader.Min(context.Background(), tx, blockNum)
 	if err != nil {
@@ -1413,14 +1422,16 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 			// match the next receipt position, otherwise derive the block instead.
 			return nil, nil
 		}
-		txn := transactions[txnIdx]
-		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txn.Hash(), true)
 		res = append(res, x)
 		receiptIdx++
 	}
 	if receiptIdx != len(transactions) {
 		// Block receipt RPCs require the full ordered receipt set.
 		return nil, nil
+	}
+	<-hashed
+	for i, x := range res {
+		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, transactions[i].Hash(), true)
 	}
 	return res, nil
 }
