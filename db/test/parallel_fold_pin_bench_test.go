@@ -18,6 +18,8 @@ package test
 
 import (
 	"bytes"
+	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,11 +29,9 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
-// A parallel fold whose worker views have drifted off the caller's snapshot
-// reads through one serialized reader over the caller's tx. Both arms fold the
-// same keys from a read-only caller; the drifted arm just has a commit landing
-// between the caller's view and the workers'.
-func BenchmarkSharedDomains_ParallelFold_PinnedFallback(b *testing.B) {
+// Compare folds with and without a commit after the caller opens its snapshot,
+// for different shares of account and storage values held in memory.
+func BenchmarkSharedDomains_ParallelFold_Snapshot(b *testing.B) {
 	// No b.RunParallel: mutates the process-global trie-selection flag.
 	orig := statecfg.ExperimentalParallelCommitment
 	b.Cleanup(func() { statecfg.ExperimentalParallelCommitment = orig })
@@ -94,10 +94,16 @@ func BenchmarkSharedDomains_ParallelFold_PinnedFallback(b *testing.B) {
 		return nil
 	}))
 	require.NotEmpty(b, touches)
+	slices.SortFunc(touches, func(a, z keyTouch) int {
+		if a.dom != z.dom {
+			return int(a.dom) - int(z.dom)
+		}
+		return bytes.Compare(a.key, z.key)
+	})
 
 	var bump byte
 	var roots [][]byte
-	run := func(b *testing.B, drift, parallel bool) {
+	run := func(b *testing.B, drift, parallel bool, memPercent int) {
 		statecfg.ExperimentalParallelCommitment = parallel
 		callerTx, err := db.BeginTemporalRo(ctx)
 		require.NoError(b, err)
@@ -115,11 +121,23 @@ func BenchmarkSharedDomains_ParallelFold_PinnedFallback(b *testing.B) {
 		doms := newSharedDomainsBench(b, db, callerTx)
 		defer doms.Close()
 
+		for i, item := range touches {
+			inMemory := i%100 < memPercent
+			if inMemory {
+				// DomainPut on SharedDomains skips unchanged values, so fill the batch directly.
+				require.NoError(b, doms.GetMemBatch().DomainPut(item.dom, string(item.key), item.val, txNum, item.val))
+			}
+			v, _, found := doms.GetLatestFromMemory(item.dom, item.key)
+			require.Equal(b, inMemory, found)
+			if found {
+				require.Equal(b, item.val, v)
+			}
+		}
 		b.ReportAllocs()
 		for b.Loop() {
 			b.StopTimer()
-			for _, t := range touches {
-				require.NoError(b, doms.DomainPut(t.dom, callerTx, t.key, t.val, txNum, nil))
+			for _, item := range touches {
+				doms.GetCommitmentCtx().TouchKey(item.dom, string(item.key), item.val)
 			}
 			b.StartTimer()
 
@@ -129,11 +147,15 @@ func BenchmarkSharedDomains_ParallelFold_PinnedFallback(b *testing.B) {
 		}
 	}
 
-	b.Run("parallel_worker_views_match", func(b *testing.B) { run(b, false, true) })
-	b.Run("parallel_worker_views_drifted", func(b *testing.B) { run(b, true, true) })
-	b.Run("sequential_trie", func(b *testing.B) { run(b, false, false) })
+	for _, memPercent := range []int{0, 50, 100} {
+		b.Run(fmt.Sprintf("memory_%d", memPercent), func(b *testing.B) {
+			b.Run("parallel_match", func(b *testing.B) { run(b, false, true, memPercent) })
+			b.Run("parallel_drift", func(b *testing.B) { run(b, true, true, memPercent) })
+			b.Run("sequential", func(b *testing.B) { run(b, false, false, memPercent) })
+		})
+	}
 
-	// Both arms must fold to the same root, or the timings compare different work.
+	// Every arm must fold to the same root, or the timings compare different work.
 	for _, rh := range roots {
 		require.Equal(b, roots[0], rh)
 	}

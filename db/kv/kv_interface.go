@@ -914,6 +914,8 @@ var ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutil
 // available for a new concurrent read transaction. The RPC layer remaps this to HTTP 503 / JSON-RPC -32005.
 var ErrReadTxLimitExceeded = errors.New("read-tx limit exceeded: too many concurrent read transactions")
 
+var ErrSnapshotCloneUnsupported = errors.New("transaction backend does not support snapshot cloning")
+
 // ErrPrefetchIncomplete reports a batch prefetch that stopped with key lookups still pending.
 var ErrPrefetchIncomplete = errors.New("batch prefetch stopped with lookups pending")
 

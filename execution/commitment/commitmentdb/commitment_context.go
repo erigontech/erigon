@@ -681,10 +681,9 @@ type filesPinner interface {
 	Pin() kv.TemporalFilesPin
 }
 
-// beginWorkerRo opens a per-worker read tx for parallel/warmup commitment reads,
-// bound to the pinned file snapshot when one is available so all workers observe
-// the main tx's generation. Falls back to an independent snapshot when the
-// backend can't pin files.
+// beginWorkerRo opens a read transaction at the current database snapshot.
+// When pin is non-nil, its state-file readers use that pinned generation.
+// Pinning files does not pin the database snapshot.
 func beginWorkerRo(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin) (kv.TemporalTx, error) {
 	if pin != nil {
 		return pin.BeginTemporalRo(ctx)
@@ -769,9 +768,8 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 	}
 }
 
-// concurrentTrieContextFactory is like warmupTrieContextFactory but blocking, and also creates a per-goroutine
-// etl.Collector for each context so that PutBranch writes are isolated (no shared writer race).
-// Returns the factory and a drain function that collects all created collectors.
+// concurrentTrieContextFactory gives each fold worker a reader on the required
+// snapshot and its own branch-update collector.
 func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin, tx kv.TemporalTx, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
 	stepSize := sdc.sharedDomains.StepSize()
 	var mu sync.Mutex
@@ -781,23 +779,25 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 	// same transaction; only the worker's own view is per-worker.
 	sharedSource := sdc.stateReader != nil && !sdc.stateReader.BindsWorkerTx()
 	caller := resolveCallerView(tx)
+	cloner, _ := kv.UnderlyingTx(tx).(interface {
+		CloneState(context.Context) (kv.TemporalTx, error)
+	})
 
-	// Workers that cannot read on their own view fall back to this one reader
-	// over the caller's tx, taken in turns. It is built here and not in the
-	// factory because the factory runs inside each worker goroutine, and
-	// building a reader touches tx: AsStateGetter reads the state version off it.
-	var pinnedMu sync.Mutex
-	var pinnedMetrics *kvmetrics.DomainMetrics
-	var pinned *syncStateReader
+	// Workers without their own reader on the required snapshot share this one.
+	// Construct it before workers start because construction may access the
+	// source transaction. The same lock also protects snapshot cloning.
+	var sourceMu sync.Mutex
+	var fallbackMetrics *kvmetrics.DomainMetrics
+	var fallbackReader *syncStateReader
 	if sharedSource || (tx != nil && !caller.writer) {
-		pinnedMetrics = kvmetrics.NewDomainMetrics()
+		fallbackMetrics = kvmetrics.NewDomainMetrics()
 		src := sdc.stateReader
 		if src != nil {
-			src = src.CloneForWorker(kvmetrics.ContextWithMetrics(foldCtx, pinnedMetrics), tx)
+			src = src.CloneForWorker(kvmetrics.ContextWithMetrics(foldCtx, fallbackMetrics), tx)
 		} else {
-			src = NewLatestStateReader(tx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(pinnedMetrics))
+			src = NewLatestStateReader(tx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(fallbackMetrics))
 		}
-		pinned = newSyncStateReader(&pinnedMu, src)
+		fallbackReader = newSyncStateReader(&sourceMu, src)
 	}
 
 	factory := func(ctx context.Context) (commitment.PatriciaContext, func()) {
@@ -807,6 +807,17 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 			roTx, err = beginWorkerRo(ctx, db, pin) //nolint:gocritic
 			if err != nil {
 				return &errorTrieContext{err: err}, func() {}
+			}
+			if cloner != nil && sdc.stateReader == nil && !caller.writer && caller.mayDrift(roTx) {
+				// Close the unused view first so cloning cannot wait for a reader
+				// slot still held by the view it replaces.
+				roTx.Rollback()
+				sourceMu.Lock()
+				roTx, err = cloner.CloneState(ctx)
+				sourceMu.Unlock()
+				if err != nil && !errors.Is(err, kv.ErrSnapshotCloneUnsupported) {
+					return &errorTrieContext{err: err}, func() {}
+				}
 			}
 		}
 
@@ -822,26 +833,24 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 		// (a race) or take the global metrics lock. Folded in at teardown.
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
-		warmupCtx := &TrieContext{
+		trieCtx := &TrieContext{
 			stepSize:       stepSize,
 			txNum:          txNum,
 			localCollector: collector,
 			traceW:         sdc.traceW,
 		}
 		if roTx != nil {
-			warmupCtx.putter = sdc.sharedDomains.AsPutDel(roTx)
+			trieCtx.putter = sdc.sharedDomains.AsPutDel(roTx)
 		}
 		switch {
-		case pinned != nil && caller.mayDrift(roTx):
-			// A read view opened at fold time sits at the then-current head, which
-			// is the caller's snapshot only while no commit can land between them.
-			// Clones share the reader and its lock; only the scratch buffer is
-			// per worker.
-			warmupCtx.stateReader = pinned.CloneForWorker(workerCtx, roTx)
+		case fallbackReader != nil && caller.mayDrift(roTx):
+			// Fallback workers share the reader and lock, but each needs its own
+			// buffer so another worker's read cannot overwrite returned bytes.
+			trieCtx.stateReader = fallbackReader.CloneForWorker(workerCtx, roTx)
 		case sdc.stateReader != nil:
-			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
+			trieCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		default:
-			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(wm))
+			trieCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(wm))
 		}
 		cleanup := func() {
 			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
@@ -849,15 +858,15 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 				roTx.Rollback()
 			}
 		}
-		return warmupCtx, cleanup
+		return trieCtx, cleanup
 	}
 
 	drain := func() []*etl.Collector {
 		mu.Lock()
 		defer mu.Unlock()
-		if pinnedMetrics != nil {
-			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, pinnedMetrics)
-			pinnedMetrics = nil
+		if fallbackMetrics != nil {
+			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, fallbackMetrics)
+			fallbackMetrics = nil
 		}
 		c := collectors
 		collectors = nil
