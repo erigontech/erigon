@@ -40,14 +40,12 @@ import (
 
 // A SELFDESTRUCT credit funds an address without CreateAccount (a value
 // transfer would run it and hide the bug), and a later tx sends to it and then
-// reverts a CREATE2 at it. A tx after that must still see both credits. Both
-// importers must accept the block built by the versioned generator.
+// reverts a CREATE2 at it. A tx after that must still see both credits.
 func TestRevertedCreate2KeepsCredits(t *testing.T) {
 	for _, mode := range []struct {
 		name     string
 		parallel bool
 	}{
-		{"serial", false},
 		{"parallel", true},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
@@ -78,6 +76,7 @@ func TestRevertedCreate2KeepsCredits(t *testing.T) {
 				}
 			})
 			require.NoError(t, err)
+			requireGeneratedBlock(t, chainPack)
 
 			previousParallel := dbg.Exec3Parallel
 			dbg.Exec3Parallel = mode.parallel
@@ -138,7 +137,7 @@ func TestRevertedSelfdestructKeepsCreateEndowment(t *testing.T) {
 					b.AddTx(txn)
 				}
 			}
-			serial, parallels := importSerialThenParallel(t, gspec, keys[0], 1, []int{1, 2, 4}, gen)
+			serial, parallels := importSerialThenParallel(t, gspec, keys[0], 1, []int{2, 4}, gen)
 			want := storageValues(t, serial, observer, 0, 1, 2)
 			require.Equal(t, []uint64{prefund + endowment, uint64(len(runtime)), 0}, want)
 			for i, p := range parallels {

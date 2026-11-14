@@ -62,6 +62,9 @@ func (d *TTLDNSDialer) DialContext(ctx context.Context, network, address string)
 	if err != nil {
 		return nil, err
 	}
+	if len(addrs) == 0 {
+		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+	}
 	var dialErr error
 	for _, ip := range addrs {
 		var dialer net.Dialer

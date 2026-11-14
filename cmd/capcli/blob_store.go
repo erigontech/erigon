@@ -134,19 +134,3 @@ func storeRemoteBlobs(
 	}
 	return nil
 }
-
-// localBlobsStored reports whether the store holds every sidecar of a block. The count row alone is
-// not enough: pruning deletes the sidecar files and keeps the row.
-func localBlobsStored(ctx context.Context, blobDB blob_storage.BlobStorage, slot uint64, root common.Hash, commitments int) (bool, error) {
-	count, err := blobDB.KzgCommitmentsCount(ctx, root)
-	if err != nil || count != uint32(commitments) {
-		return false, err
-	}
-	for idx := range commitments {
-		present, err := blobDB.BlobSidecarExists(ctx, slot, root, uint64(idx))
-		if err != nil || !present {
-			return false, err
-		}
-	}
-	return true, nil
-}

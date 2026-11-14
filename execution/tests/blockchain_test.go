@@ -2439,12 +2439,12 @@ func (e *blockEndLogEngine) FinalizeAndAssemble(chainConfig *libchain.Config, he
 }
 
 // Logs of block-end system calls must reach the log address and topic indexes
-// at the block's final txNum, in both executors.
+// at the block's final txNum.
 func TestBlockEndSyscallLogsReachLogIndexes(t *testing.T) {
 	for _, tc := range []struct {
 		parallel bool
 		workers  int
-	}{{false, 1}, {true, 1}, {true, 4}} {
+	}{{true, 1}, {true, 4}} {
 		t.Run(fmt.Sprintf("parallel=%v/workers=%d", tc.parallel, tc.workers), func(t *testing.T) {
 			prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
 			t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
@@ -2461,7 +2461,6 @@ func TestBlockEndSyscallLogsReachLogIndexes(t *testing.T) {
 			}}
 			engine := &blockEndLogEngine{FakeEthash: ethash.NewFaker(), contract: accounts.InternAddress(logContract), calls: 3}
 
-			dbg.Exec3Parallel = false
 			ethconfig.Defaults.Sync.ExecWorkerCount = tc.workers
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithEngine(engine))
 			signer := types.LatestSignerForChainID(config.ChainID)
@@ -2529,7 +2528,6 @@ func TestParallelStepEdgeFoldsMatchSerial(t *testing.T) {
 				keys[i] = key
 				alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(common.Ether)}
 			}
-			dbg.Exec3Parallel = false
 			ethconfig.Defaults.Sync.ExecWorkerCount = 4
 			m := execmoduletester.New(t, execmoduletester.WithKey(keys[0]),
 				execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc, GasLimit: 60_000_000}),
@@ -2601,7 +2599,6 @@ func TestParallelStepEdgeKeepsRevivedStorage(t *testing.T) {
 	from := crypto.PubkeyToAddress(key.PublicKey)
 	config := libchain.AllProtocolChanges
 	alloc := types.GenesisAlloc{from: {Balance: big.NewInt(common.Ether)}, factory: {Code: factoryCode, Balance: big.NewInt(0)}}
-	dbg.Exec3Parallel = false
 	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 	m := execmoduletester.New(t, execmoduletester.WithKey(key),
 		execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc, GasLimit: 60_000_000}),

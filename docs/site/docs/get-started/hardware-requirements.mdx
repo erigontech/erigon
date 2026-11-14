@@ -75,10 +75,10 @@ If you must split the datadir across a fast and a slow device, see [Optimizing S
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise. On Ethereum mainnet and Gnosis Chain, full and minimal figures are the snapshot data a node of that mode keeps, as reported by `erigon seg du`; `chaindata/` and Caplin data are not counted. All other figures are the size of the whole datadir with the node stopped, excluding the transient `temp/` directory.
+The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise. A figure marked † is the `erigon seg du` estimate of the snapshot files a node of that mode keeps: only `snapshots/` is counted, without Caplin snapshots. Every other figure is the size of the whole datadir with the node stopped, excluding the transient `temp/` directory.
 
 :::note
-These nodes were measured before the receipts cache was on by default. From 3.7 it is on, which adds about 441 GB on a mainnet archive node and a few GB on full and minimal nodes, whose receipts follow their history window. See [Database](../fundamentals/database). The recommended disk sizes below already leave room for it.
+The receipts cache is on by default from 3.7. Figures marked † count it; other figures may have been measured without it. It adds about 441 GB on a mainnet archive node and a few GB on full and minimal nodes, whose receipts follow their history window. See [Database](../fundamentals/database). The recommended disk sizes below already leave room for it.
 :::
 
 <Tabs>

@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -515,11 +516,15 @@ func TestResumedBlockValidatesBlockAccessList(t *testing.T) {
 		point        resumePoint
 		wantMismatch bool
 	}{
+		{"full/no sidecar, valid", fx.block.WithBlockAccessListSidecar(nil), fromBlockStart, false},
+		{"full/no sidecar, phantom account", phantom.WithBlockAccessListSidecar(nil), fromBlockStart, true},
 		{"full/valid", fx.block, fromBlockStart, false},
 		{"full/phantom account", phantom, fromBlockStart, true},
 		{"full/dropped block-start writes", droppedInit, fromBlockStart, true},
 		{"after tx0/valid", fx.block, afterTx0, false},
 		{"after tx0/phantom account", phantom, afterTx0, true},
+		{"after tx0/no sidecar, valid", fx.block.WithBlockAccessListSidecar(nil), afterTx0, false},
+		{"after tx0/no sidecar, phantom account", phantom.WithBlockAccessListSidecar(nil), afterTx0, true},
 		{"after block start/valid", fx.block, afterBlockInit, false},
 		{"after block start/dropped block-start writes", droppedInit, afterBlockInit, true},
 		{"before block end/valid", fx.block, beforeBlockEnd, false},
@@ -614,4 +619,26 @@ func TestResumedBlockWithWrongRequestsHashIsInvalid(t *testing.T) {
 		require.NotNil(t, verdict, "resume point %d", point)
 		require.ErrorIs(t, verdict.err, rules.ErrInvalidBlock, "resume point %d", point)
 	}
+}
+
+// panicFinalizeEngine panics the exec loop at block end, after the apply loop
+// has had time to take the block's tx results.
+type panicFinalizeEngine struct{ rules.Engine }
+
+func (panicFinalizeEngine) Finalize(*chain.Config, *types.Header, *state.IntraBlockState, []*types.Header,
+	types.Receipts, []*types.Withdrawal, rules.ChainReader, rules.SystemCall, bool, log.Logger,
+) (types.FlatRequests, error) {
+	time.Sleep(50 * time.Millisecond)
+	panic("finalize failed")
+}
+
+// TestExecLoopPanicMidBlockIsNotInvalidBlock pins that an exec-loop panic after
+// the block's tx results reached the apply loop is an internal error, not a verdict.
+func TestExecLoopPanicMidBlockIsNotInvalidBlock(t *testing.T) {
+	fx := newResumeBALFixture(t)
+	fx.engine = panicFinalizeEngine{Engine: fx.engine}
+	verdict, err := fx.exec(t, fx.block, fromBlockStart)
+	require.Nil(t, verdict)
+	require.ErrorContains(t, err, "finalize failed")
+	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 }
