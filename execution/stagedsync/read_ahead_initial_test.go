@@ -75,6 +75,7 @@ func TestReadAheadInitialExecMatchesNormalExecution(t *testing.T) {
 		execmoduletester.InsertUnexecutedCanonical(t, m, chainPack.Blocks)
 		applyTx, err := m.DB.BeginTemporalRw(context.Background())
 		require.NoError(t, err)
+		defer applyTx.Rollback()
 		doms, err := execctx.NewSharedDomains(context.Background(), applyTx, m.Log)
 		require.NoError(t, err)
 		_, err = m.Sync.Run(doms, applyTx, true, true)
