@@ -77,10 +77,6 @@ type ReadHeader struct {
 	accSource AccountSource
 }
 
-func (h ReadHeader) PreBlock() bool {
-	return h.Source == StorageRead || (h.Source == MapRead && h.Version.TxIndex == originIndex)
-}
-
 // VersionedRead is a single versioned read.  The per-path map it lives in fixes
 // the address (map key) and path — and, for storage, the slot key — so the
 // struct carries only the header and the path-typed value.

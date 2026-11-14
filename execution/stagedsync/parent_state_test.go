@@ -63,7 +63,7 @@ func TestParentStateServesOnlyPreBlockReads(t *testing.T) {
 	require.False(t, ok, "a slot read only from an earlier tx's write is not parent state")
 }
 
-func TestParentStateServesOriginVersionReads(t *testing.T) {
+func TestParentStateDoesNotServeOriginVersionReads(t *testing.T) {
 	seeded, written := accounts.InternAddress(common.Address{4}), accounts.InternAddress(common.Address{5})
 	slot, inBlock := accounts.InternKey(common.Hash{3}), accounts.InternKey(common.Hash{4})
 	pre := accounts.Account{Nonce: 3, Balance: *uint256.NewInt(30), CodeHash: accounts.EmptyCodeHash}
@@ -82,12 +82,10 @@ func TestParentStateServesOriginVersionReads(t *testing.T) {
 	io.RecordReads(state.Version{TxIndex: 1}, second)
 
 	p := parentStateFromReads(io)
-	acc, ok := p.GetCommittedAccount(seeded)
-	require.True(t, ok, "an origin-version read is the pre-block account")
-	require.Equal(t, pre, *acc)
-	val, ok := p.GetCommittedStorage(seeded, slot)
-	require.True(t, ok, "an origin-version read is the pre-block slot")
-	require.Equal(t, []byte{5}, val)
+	_, ok := p.GetCommittedAccount(seeded)
+	require.False(t, ok, "an origin-version map read is not parent state")
+	_, ok = p.GetCommittedStorage(seeded, slot)
+	require.False(t, ok, "an origin-version map read is not parent state")
 	_, ok = p.GetCommittedAccount(written)
 	require.False(t, ok, "a map read of an in-block write is not parent state")
 	_, ok = p.GetCommittedStorage(seeded, inBlock)
