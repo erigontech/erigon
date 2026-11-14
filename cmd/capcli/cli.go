@@ -426,7 +426,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 				if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
 					kzgCommitments = c.Len()
 				}
-				stored, err := localBlobsStored(ctx, blobDB, *slot, currentRoot, kzgCommitments)
+				stored, err := blob_storage.BlobsStored(ctx, blobDB, *slot, currentRoot, kzgCommitments)
 				if err != nil {
 					return false, err
 				}
