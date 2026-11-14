@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
@@ -74,6 +73,7 @@ type stubExecutionModule struct {
 	updateForkChoiceFunc   func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
 	inclusionListFunc      func(ctx context.Context) (types.Transactions, error)
 	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
+	isValidatedFunc        func(hash common.Hash) bool
 
 	getPayloadBodiesByHashFunc func(ctx context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error)
 }
@@ -183,7 +183,10 @@ func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) 
 	return false, nil
 }
 
-func (s *stubExecutionModule) IsValidated(_ common.Hash) bool {
+func (s *stubExecutionModule) IsValidated(hash common.Hash) bool {
+	if s.isValidatedFunc != nil {
+		return s.isValidatedFunc(hash)
+	}
 	return false
 }
 
@@ -1822,10 +1825,6 @@ func TestNewPayloadRegistersSendersRecovery(t *testing.T) {
 }
 
 func TestNewPayloadRegistersSendersRecoveryForBALPayload(t *testing.T) {
-	parallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
-
 	config := allForksChainConfig()
 	config.TerminalTotalDifficulty = nil
 	key, err := crypto.GenerateKey()

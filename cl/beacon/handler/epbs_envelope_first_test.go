@@ -29,6 +29,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -421,45 +422,47 @@ func TestPostEnvelopeContentsGossipModeImportsAfterClientCancel(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsGossipModeImportStopsAtTheOneSlotDeadline(t *testing.T) {
-	f := newEnvelopeContentsFixture(t, 0, 0)
-	f.handler.beaconChainCfg.SecondsPerSlot = 1
-	var validationDeadline, importDeadline time.Time
-	f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = func(ctx context.Context, _ *cltypes.SignedExecutionPayloadEnvelope) error {
-		validationDeadline, _ = ctx.Deadline()
-		return nil
-	}
-	imported := make(chan struct{})
-	f.wrapImport(func(ctx context.Context, next func() error) error {
-		importDeadline, _ = ctx.Deadline()
-		close(imported)
-		select {
-		case <-ctx.Done():
-			return forkchoice.ErrPayloadValidationInterrupted
-		case <-time.After(3 * time.Second):
-			return next()
+	synctest.Test(t, func(t *testing.T) {
+		f := newEnvelopeContentsFixture(t, 0, 0)
+		f.handler.beaconChainCfg.SecondsPerSlot = 1
+		var validationDeadline, importDeadline time.Time
+		f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = func(ctx context.Context, _ *cltypes.SignedExecutionPayloadEnvelope) error {
+			validationDeadline, _ = ctx.Deadline()
+			return nil
 		}
+		imported := make(chan struct{})
+		f.wrapImport(func(ctx context.Context, next func() error) error {
+			importDeadline, _ = ctx.Deadline()
+			close(imported)
+			select {
+			case <-ctx.Done():
+				return forkchoice.ErrPayloadValidationInterrupted
+			case <-time.After(3 * time.Second):
+				return next()
+			}
+		})
+		body, err := f.contents().EncodeSSZ(nil)
+		require.NoError(t, err)
+		done := make(chan *httptest.ResponseRecorder, 1)
+		go func() { done <- f.post(t.Context(), body, "application/octet-stream", "true", "") }()
+
+		select {
+		case <-imported:
+		case recorder := <-done:
+			require.Failf(t, "the handler answered before the import", "status %d: %s", recorder.Code, recorder.Body.String())
+		}
+		var recorder *httptest.ResponseRecorder
+		select {
+		case recorder = <-done:
+		case <-time.After(10 * time.Second):
+			require.FailNow(t, "the handler did not answer")
+		}
+
+		requireSameDeadline(t, validationDeadline, importDeadline, "the import")
+		require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+		require.False(t, f.forkchoice.HasEnvelope(f.root))
+		f.requireClaimReleased()
 	})
-	body, err := f.contents().EncodeSSZ(nil)
-	require.NoError(t, err)
-	done := make(chan *httptest.ResponseRecorder, 1)
-	go func() { done <- f.post(t.Context(), body, "application/octet-stream", "true", "") }()
-
-	select {
-	case <-imported:
-	case recorder := <-done:
-		require.Failf(t, "the handler answered before the import", "status %d: %s", recorder.Code, recorder.Body.String())
-	}
-	var recorder *httptest.ResponseRecorder
-	select {
-	case recorder = <-done:
-	case <-time.After(10 * time.Second):
-		require.FailNow(t, "the handler did not answer")
-	}
-
-	requireSameDeadline(t, validationDeadline, importDeadline, "the import")
-	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
-	require.False(t, f.forkchoice.HasEnvelope(f.root))
-	f.requireClaimReleased()
 }
 
 func TestPostEnvelopeContentsGossipModeRepostOfImportedEnvelopeAnswersOK(t *testing.T) {
@@ -758,34 +761,36 @@ func TestPostEnvelopeContentsGossipModeHoldsPreparationUntilImport(t *testing.T)
 }
 
 func TestPostEnvelopeContentsGossipModeReleasesPreparationAfterOneSlot(t *testing.T) {
-	f := newEnvelopeContentsFixture(t, 0, 1)
-	f.handler.beaconChainCfg.SecondsPerSlot = 1
-	writing := make(chan struct{})
-	release := make(chan struct{})
-	closeWriting := sync.OnceFunc(func() { close(writing) })
-	closeRelease := sync.OnceFunc(func() { close(release) })
-	t.Cleanup(closeRelease)
-	f.failWrite = func(uint64) error {
-		closeWriting()
-		<-release
-		return nil
-	}
-	body, err := f.contents(f.blobs...).EncodeSSZ(nil)
-	require.NoError(t, err)
-	done := make(chan *httptest.ResponseRecorder, 1)
-	go func() { done <- f.post(t.Context(), body, "application/octet-stream", "true", "") }()
+	synctest.Test(t, func(t *testing.T) {
+		f := newEnvelopeContentsFixture(t, 0, 1)
+		f.handler.beaconChainCfg.SecondsPerSlot = 1
+		writing := make(chan struct{})
+		release := make(chan struct{})
+		closeWriting := sync.OnceFunc(func() { close(writing) })
+		closeRelease := sync.OnceFunc(func() { close(release) })
+		t.Cleanup(closeRelease)
+		f.failWrite = func(uint64) error {
+			closeWriting()
+			<-release
+			return nil
+		}
+		body, err := f.contents(f.blobs...).EncodeSSZ(nil)
+		require.NoError(t, err)
+		done := make(chan *httptest.ResponseRecorder, 1)
+		go func() { done <- f.post(t.Context(), body, "application/octet-stream", "true", "") }()
 
-	select {
-	case <-writing:
-	case recorder := <-done:
-		require.Failf(t, "the handler answered before the first column write", "status %d: %s", recorder.Code, recorder.Body.String())
-	}
-	require.False(t, f.preparationAllowed(), "preparation must wait while the columns are stored")
-	require.Eventually(t, f.preparationAllowed, 2*time.Second, 10*time.Millisecond, "the hold must end one slot after gossip validation")
-	closeRelease()
+		select {
+		case <-writing:
+		case recorder := <-done:
+			require.Failf(t, "the handler answered before the first column write", "status %d: %s", recorder.Code, recorder.Body.String())
+		}
+		require.False(t, f.preparationAllowed(), "preparation must wait while the columns are stored")
+		require.Eventually(t, f.preparationAllowed, 2*time.Second, 10*time.Millisecond, "the hold must end one slot after gossip validation")
+		closeRelease()
 
-	recorder := <-done
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		recorder := <-done
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	})
 }
 
 func TestPostEnvelopeContentsGossipModeAnswersAcceptedOncePublished(t *testing.T) {
@@ -966,52 +971,60 @@ func TestPostEnvelopeContentsGossipModeValidationDeadlineAnswersUnavailable(t *t
 	}
 
 	t.Run("the contents validation reaches the one-slot deadline", func(t *testing.T) {
-		f := newEnvelopeContentsFixture(t, 0, 2)
-		body := f.contents(f.blobs...)
+		synctest.Test(t, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			body := f.contents(f.blobs...)
 
-		first := f.postContents(waitForDeadline(f, func(err error) error { return err }), body, "")
+			first := f.postContents(waitForDeadline(f, func(err error) error { return err }), body, "")
 
-		require.Equal(t, http.StatusServiceUnavailable, first.Code, first.Body.String())
-		f.requireNoEvents()
-		f.requireClaimReleased()
-		f.requireNoArrival()
+			require.Equal(t, http.StatusServiceUnavailable, first.Code, first.Body.String())
+			f.requireNoEvents()
+			f.requireClaimReleased()
+			f.requireNoArrival()
 
-		f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = nil
-		second := f.postContents(t.Context(), body, "")
+			f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = nil
+			second := f.postContents(t.Context(), body, "")
 
-		require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+			require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+		})
 	})
 
 	t.Run("the contents validation succeeds after the one-slot deadline", func(t *testing.T) {
-		f := newEnvelopeContentsFixture(t, 0, 2)
+		synctest.Test(t, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
 
-		recorder := f.postContents(waitForDeadline(f, func(error) error { return nil }), f.contents(f.blobs...), "")
+			recorder := f.postContents(waitForDeadline(f, func(error) error { return nil }), f.contents(f.blobs...), "")
 
-		require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
-		f.requireNoEvents()
-		f.requireClaimReleased()
+			require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+			f.requireNoEvents()
+			f.requireClaimReleased()
+		})
 	})
 
 	t.Run("a non-context error after the deadline stays a bad request", func(t *testing.T) {
-		f := newEnvelopeContentsFixture(t, 0, 2)
+		synctest.Test(t, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
 
-		recorder := f.postContents(waitForDeadline(f, func(error) error { return errors.New("invalid signature") }), f.contents(f.blobs...), "")
+			recorder := f.postContents(waitForDeadline(f, func(error) error { return errors.New("invalid signature") }), f.contents(f.blobs...), "")
 
-		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-		f.requireNoEvents()
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			f.requireNoEvents()
+		})
 	})
 
 	t.Run("a deadline error before the deadline stays a bad request", func(t *testing.T) {
-		f := newEnvelopeContentsFixture(t, 0, 2)
-		f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope) error {
-			return fmt.Errorf("validation: %w", context.DeadlineExceeded)
-		}
+		synctest.Test(t, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope) error {
+				return fmt.Errorf("validation: %w", context.DeadlineExceeded)
+			}
 
-		recorder := f.postAllBlobs(false, "")
+			recorder := f.postAllBlobs(false, "")
 
-		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-		f.requireNoEvents()
-		f.requireNoArrival()
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			f.requireNoEvents()
+			f.requireNoArrival()
+		})
 	})
 
 	// The rows below are not on the early path, so their contents validation runs under the request context.
@@ -1044,112 +1057,126 @@ func TestPostEnvelopeContentsGossipModeValidationDeadlineAnswersUnavailable(t *t
 
 	for _, interruption := range interruptions {
 		t.Run("consensus mode when "+interruption.name, func(t *testing.T) {
-			f := newEnvelopeContentsFixture(t, 0, 2)
+			synctest.Test(t, func(t *testing.T) {
+				f := newEnvelopeContentsFixture(t, 0, 2)
 
-			recorder := f.postContents(interruption.interrupt(f), f.contents(f.blobs...), "?broadcast_validation=consensus")
+				recorder := f.postContents(interruption.interrupt(f), f.contents(f.blobs...), "?broadcast_validation=consensus")
 
-			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-			f.requireNoEvents()
+				require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+				f.requireNoEvents()
+			})
 		})
 
 		t.Run("legacy route when "+interruption.name, func(t *testing.T) {
-			f := newEnvelopeContentsFixture(t, 0, 2)
+			synctest.Test(t, func(t *testing.T) {
+				f := newEnvelopeContentsFixture(t, 0, 2)
 
-			recorder := f.postLegacy(interruption.interrupt(f))
+				recorder := f.postLegacy(interruption.interrupt(f))
 
-			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-			f.requireNoEvents()
+				require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+				f.requireNoEvents()
+			})
 		})
 
 		t.Run("retry of a persisted envelope when "+interruption.name, func(t *testing.T) {
-			f := newEnvelopeContentsFixture(t, 0, 2)
-			f.failPublish = failPublishOf(5)
-			body := f.contents(f.blobs...)
-			require.Equal(t, http.StatusInternalServerError, f.postContents(t.Context(), body, "").Code)
-			events := len(f.events)
+			synctest.Test(t, func(t *testing.T) {
+				f := newEnvelopeContentsFixture(t, 0, 2)
+				f.failPublish = failPublishOf(5)
+				body := f.contents(f.blobs...)
+				require.Equal(t, http.StatusInternalServerError, f.postContents(t.Context(), body, "").Code)
+				events := len(f.events)
 
-			recorder := f.postContents(interruption.interrupt(f), body, "")
+				recorder := f.postContents(interruption.interrupt(f), body, "")
 
-			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-			require.Len(t, f.events, events)
+				require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+				require.Len(t, f.events, events)
+			})
 		})
 	}
 
 	t.Run("consensus mode when the client leaves before consensus validation", func(t *testing.T) {
-		f := newEnvelopeContentsFixture(t, 0, 2)
-		requestCtx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope) error {
-			cancel()
-			return nil
-		}
+		synctest.Test(t, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			requestCtx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope) error {
+				cancel()
+				return nil
+			}
 
-		recorder := f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
+			recorder := f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
 
-		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-		require.Equal(t, []contentsEventKind{eventConsensusValidation}, f.phases())
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Equal(t, []contentsEventKind{eventConsensusValidation}, f.phases())
+		})
 	})
 
 	t.Run("consensus mode when the client leaves during consensus validation", func(t *testing.T) {
-		f := newEnvelopeContentsFixture(t, 0, 2)
-		requestCtx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		f.duringConsensusValidation = cancel
+		synctest.Test(t, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			requestCtx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			f.duringConsensusValidation = cancel
 
-		recorder := f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
+			recorder := f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
 
-		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-		require.Equal(t, []contentsEventKind{eventConsensusValidation}, f.phases())
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Equal(t, []contentsEventKind{eventConsensusValidation}, f.phases())
+		})
 	})
 
 	t.Run("consensus mode when the client leaves during column writes", func(t *testing.T) {
-		f := newEnvelopeContentsFixture(t, 0, 2)
-		requestCtx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		f.failWrite = func(uint64) error {
-			cancel()
-			return nil
-		}
-		imports := 0
-		f.wrapImport(func(ctx context.Context, next func() error) error {
-			imports++
-			if ctx.Err() != nil {
-				return forkchoice.ErrPayloadValidationInterrupted
+		synctest.Test(t, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			requestCtx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			f.failWrite = func(uint64) error {
+				cancel()
+				return nil
 			}
-			return next()
+			imports := 0
+			f.wrapImport(func(ctx context.Context, next func() error) error {
+				imports++
+				if ctx.Err() != nil {
+					return forkchoice.ErrPayloadValidationInterrupted
+				}
+				return next()
+			})
+
+			recorder := f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
+
+			f.requireAllColumns("published", f.succeededIndices(eventColumnPublish))
+			require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+			require.Equal(t, 1, imports)
+			require.Len(t, f.eventsOf(eventEnvelopePublish), 1)
 		})
-
-		recorder := f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
-
-		f.requireAllColumns("published", f.succeededIndices(eventColumnPublish))
-		require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
-		require.Equal(t, 1, imports)
-		require.Len(t, f.eventsOf(eventEnvelopePublish), 1)
 	})
 
 	t.Run("consensus mode when the payload is invalidated and the client leaves during column writes", func(t *testing.T) {
-		f := newEnvelopeContentsFixture(t, 0, 2)
-		requestCtx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		f.failWrite = func(uint64) error {
-			f.payloadInvalidated = true
-			cancel()
-			return nil
-		}
-		imports := 0
-		f.wrapImport(func(ctx context.Context, next func() error) error {
-			imports++
-			if ctx.Err() != nil {
-				return forkchoice.ErrPayloadValidationInterrupted
+		synctest.Test(t, func(t *testing.T) {
+			f := newEnvelopeContentsFixture(t, 0, 2)
+			requestCtx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			f.failWrite = func(uint64) error {
+				f.payloadInvalidated = true
+				cancel()
+				return nil
 			}
-			return next()
+			imports := 0
+			f.wrapImport(func(ctx context.Context, next func() error) error {
+				imports++
+				if ctx.Err() != nil {
+					return forkchoice.ErrPayloadValidationInterrupted
+				}
+				return next()
+			})
+
+			recorder := f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Equal(t, 1, imports)
+			require.Empty(t, f.eventsOf(eventEnvelopePublish))
 		})
-
-		recorder := f.postContents(requestCtx, f.contents(f.blobs...), "?broadcast_validation=consensus")
-
-		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-		require.Equal(t, 1, imports)
-		require.Empty(t, f.eventsOf(eventEnvelopePublish))
 	})
 }
 

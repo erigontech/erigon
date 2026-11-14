@@ -17,6 +17,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -33,6 +34,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/go-retryablehttp"
 	"github.com/pelletier/go-toml/v2"
 	"google.golang.org/grpc"
 
@@ -233,6 +235,12 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 // maxBlobSidecarJSONSize bounds one sidecar in a JSON response: the hex blob is 256 KiB.
 const maxBlobSidecarJSONSize = 512 << 10
 
+type blobStatusError int
+
+func (e blobStatusError) Error() string {
+	return fmt.Sprintf("blob retrieval failed, bad status code %d", int(e))
+}
+
 // retrieveBlobsFromRemoteEndpoint fetches the blob sidecars of root from a beacon API base URL, which
 // may carry a query such as an API key. A response with more than maxSidecars entries is refused
 // before they are decoded: an empty entry is a few bytes on the wire but a whole blob in memory.
@@ -244,31 +252,50 @@ func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root 
 	blobUri := base.JoinPath("eth/v1/beacon/blob_sidecars", fmt.Sprintf("0x%x", root))
 	log.Debug("[Blob Retrieval] Requesting blob sidecars", "endpoint", redactURL(base), "blockRoot", root)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, blobUri.String(), nil)
+	req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, blobUri.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 
-	r, err := http.DefaultClient.Do(req)
+	client := &retryablehttp.Client{
+		HTTPClient:   &http.Client{Timeout: fillRequestTimeout},
+		RetryWaitMin: fillRetryWait,
+		RetryWaitMax: 30 * time.Second,
+		RetryMax:     2,
+		CheckRetry:   retryablehttp.DefaultRetryPolicy,
+		Backoff: func(lo, hi time.Duration, attempt int, resp *http.Response) time.Duration {
+			return min(retryablehttp.DefaultBackoff(lo, hi, attempt, resp), hi)
+		},
+		ErrorHandler: retryablehttp.PassthroughErrorHandler,
+	}
+	var raw []byte
+	req.SetResponseHandler(func(r *http.Response) (err error) {
+		if r.StatusCode == http.StatusOK {
+			raw, err = io.ReadAll(io.LimitReader(r.Body, int64(maxSidecars+1)*maxBlobSidecarJSONSize))
+		}
+		return err
+	})
+	r, err := client.Do(req)
+	if r != nil {
+		defer r.Body.Close()
+	}
 	if err != nil {
 		return nil, redactURLError(err)
 	}
-	defer r.Body.Close()
 
 	if r.StatusCode == http.StatusNotFound {
 		// No blobs for this block (pre-Deneb or no blob transactions)
 		return nil, nil
 	}
 	if r.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("blob retrieval failed, bad status code %d", r.StatusCode)
+		return nil, blobStatusError(r.StatusCode)
 	}
 
 	var blobsResponse struct {
 		Data []json.RawMessage `json:"data"`
 	}
-	body := io.LimitReader(r.Body, int64(maxSidecars+1)*maxBlobSidecarJSONSize)
-	if err := json.NewDecoder(body).Decode(&blobsResponse); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&blobsResponse); err != nil {
 		return nil, fmt.Errorf("blob retrieval decode failed %w", err)
 	}
 	if len(blobsResponse.Data) > maxSidecars {
@@ -405,7 +432,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 				if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
 					kzgCommitments = c.Len()
 				}
-				stored, err := localBlobsStored(ctx, blobDB, *slot, currentRoot, kzgCommitments)
+				stored, err := blob_storage.BlobsStored(ctx, blobDB, *slot, currentRoot, kzgCommitments)
 				if err != nil {
 					return false, err
 				}
