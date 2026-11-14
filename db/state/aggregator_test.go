@@ -28,7 +28,6 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/background"
@@ -623,10 +622,44 @@ func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 	// Before fix: mergeFiles returned "failed to create commitment value transformer: file
 	// v2.0-storage.0-0.kv was not found" because the transformer was called with the
 	// zero-value MergeRange from values (needMerge=false, from=0, to=0).
-	_, err := agg.mergeLoopStep(t.Context(), 2*stepSize)
-	if err != nil {
-		assert.NotContains(t, err.Error(), "failed to create commitment value transformer",
-			"transformer must not be called when values.needMerge=false")
+	somethingDone, err := agg.mergeLoopStep(t.Context(), 2*stepSize)
+	require.NoError(t, err)
+	require.True(t, somethingDone)
+
+	aggTx = agg.BeginFilesRo()
+	defer aggTx.Close()
+
+	ht := aggTx.d[kv.CommitmentDomain].ht
+	require.Len(t, ht.files, 1)
+	require.Equal(t, uint64(0), ht.files[0].startTxNum)
+	require.Equal(t, 2*stepSize, ht.files[0].endTxNum)
+	require.Len(t, ht.iit.files, 1)
+	require.Equal(t, uint64(0), ht.iit.files[0].startTxNum)
+	require.Equal(t, 2*stepSize, ht.iit.files[0].endTxNum)
+
+	require.NoError(t, ht.IntegrityHistoryValueAccessor(t.Context(), true, 0))
+	require.NoError(t, ht.iit.IntegrityInvertedIndexAllValuesAreInRange(t.Context(), true, 0))
+
+	for _, tc := range []struct {
+		dirPath string
+		ext     string
+		want    string
+	}{
+		{dirs.SnapHistory, ".v", "commitment.0-2.v"},
+		{dirs.SnapIdx, ".ef", "commitment.0-2.ef"},
+		{dirs.SnapAccessors, ".vi", "commitment.0-2.vi"},
+		{dirs.SnapAccessors, ".efi", "commitment.0-2.efi"},
+	} {
+		files, err := dir.ListFiles(tc.dirPath, tc.ext)
+		require.NoError(t, err)
+		var commitmentFiles []string
+		for _, p := range files {
+			if strings.Contains(filepath.Base(p), "commitment") {
+				commitmentFiles = append(commitmentFiles, p)
+			}
+		}
+		require.Len(t, commitmentFiles, 1)
+		require.Contains(t, commitmentFiles[0], tc.want)
 	}
 }
 
