@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2"
@@ -3555,59 +3556,62 @@ func TestValidatePayloadWithELReleasesForkChoiceMuDuringNewPayload(t *testing.T)
 }
 
 func TestOnExecutionPayloadMergesStrongerConcurrentValidationResult(t *testing.T) {
-	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-	blockRoot := envelope.Message.BeaconBlockRoot
-	ctrl := gomock.NewController(t)
-	engine := execution_client.NewMockExecutionEngine(ctrl)
-	firstStarted := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	secondStarted := make(chan struct{})
-	releaseSecond := make(chan struct{})
-	var calls atomic.Int32
-	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(2).
-		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
-			if calls.Add(1) == 1 {
-				close(firstStarted)
-				<-releaseFirst
-				return execution_client.PayloadStatusNone, nil
-			}
-			close(secondStarted)
-			<-releaseSecond
-			return execution_client.PayloadStatusValidated, nil
-		})
-	graph := &concurrentPayloadValidationForkGraph{
-		dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
-		bothRead:                  make(chan struct{}),
-	}
-	f := newPayloadVoteTestStore(t, blockRoot, false, false)
-	f.beaconCfg = cfg
-	f.engine = engine
-	f.forkGraph = graph
-	f.executionPayloadGasLimit, _ = lru.New[common.Hash, uint64](16)
-	firstDone := make(chan error, 1)
-	secondDone := make(chan error, 1)
+	synctest.Test(t, func(t *testing.T) {
+		cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+		blockRoot := envelope.Message.BeaconBlockRoot
+		ctrl := gomock.NewController(t)
+		engine := execution_client.NewMockExecutionEngine(ctrl)
+		firstStarted := make(chan struct{})
+		releaseFirst := make(chan struct{})
+		secondStarted := make(chan struct{})
+		releaseSecond := make(chan struct{})
+		var calls atomic.Int32
+		engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(2).
+			DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+				if calls.Add(1) == 1 {
+					close(firstStarted)
+					<-releaseFirst
+					return execution_client.PayloadStatusNone, nil
+				}
+				close(secondStarted)
+				<-releaseSecond
+				return execution_client.PayloadStatusValidated, nil
+			})
+		graph := &concurrentPayloadValidationForkGraph{
+			dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+			bothRead:                  make(chan struct{}),
+		}
+		f := newPayloadVoteTestStore(t, blockRoot, false, false)
+		f.beaconCfg = cfg
+		f.engine = engine
+		f.forkGraph = graph
+		f.executionPayloadGasLimit, _ = lru.New[common.Hash, uint64](16)
+		firstDone := make(chan error, 1)
+		secondDone := make(chan error, 1)
 
-	go func() { firstDone <- f.OnExecutionPayload(t.Context(), envelope, false, true) }()
-	<-firstStarted
-	go func() { secondDone <- f.OnExecutionPayload(t.Context(), envelope, false, true) }()
-	<-graph.bothRead
-	require.Eventually(t, func() bool {
+		go func() { firstDone <- f.OnExecutionPayload(t.Context(), envelope, false, true) }()
+		<-firstStarted
+		go func() { secondDone <- f.OnExecutionPayload(t.Context(), envelope, false, true) }()
+		<-graph.bothRead
+		// The second call must wait for admission before the fork-choice lock is taken here: earlier it can still need
+		// the lock back, and would block on it while this goroutine waits for it to start validating.
+		synctest.Wait()
 		f.envelopeAppliesMu.Lock()
-		defer f.envelopeAppliesMu.Unlock()
-		return f.envelopeApplies[blockRoot] == 2
-	}, lockScopeTimeout, time.Millisecond)
-	f.mu.Lock()
-	close(releaseFirst)
-	<-secondStarted
-	f.mu.Unlock()
-	require.NoError(t, <-firstDone)
-	close(releaseSecond)
-	require.ErrorIs(t, <-secondDone, ErrIgnore)
+		require.Equal(t, 2, f.envelopeApplies[blockRoot])
+		f.envelopeAppliesMu.Unlock()
+		f.mu.Lock()
+		close(releaseFirst)
+		<-secondStarted
+		f.mu.Unlock()
+		require.NoError(t, <-firstDone)
+		close(releaseSecond)
+		require.ErrorIs(t, <-secondDone, ErrIgnore)
 
-	status, ok := f.GetRecentExecutionPayloadStatusByRoot(blockRoot)
-	require.True(t, ok)
-	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusValidated), status)
-	require.True(t, f.IsPayloadVerified(blockRoot))
+		status, ok := f.GetRecentExecutionPayloadStatusByRoot(blockRoot)
+		require.True(t, ok)
+		require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusValidated), status)
+		require.True(t, f.IsPayloadVerified(blockRoot))
+	})
 }
 
 func TestRefreshEnvelopeBlockDoesNotReplayState(t *testing.T) {
