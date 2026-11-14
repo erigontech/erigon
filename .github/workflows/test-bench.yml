@@ -36,12 +36,7 @@ jobs:
       # picture across every shard.
       fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
-        # Each entry runs on its own GitHub-hosted runner — wall-clock
-        # unchanged, runner-minutes doubled. Bench numbers are reported per
-        # matrix entry so serial vs parallel commitment can be compared
-        # directly. Execution is parallel in both legs (default).
         commitment_mode:
-          - serial
           - parallel
     env:
       ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}

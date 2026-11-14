@@ -5,49 +5,47 @@
 #
 # Where <shard> is one of:
 #
-#   statetests-stable-{sequential,parallel}    state tests vs. eest_stable
-#   statetests-devnet-{sequential,parallel}    state tests vs. eest_devnet
-#   statetests-legacy-{sequential,parallel}    complete legacy Cancun state tests
+#   statetests-stable-parallel    state tests vs. eest_stable
+#   statetests-devnet-parallel    state tests vs. eest_devnet
+#   statetests-legacy-parallel    complete legacy Cancun state tests
 #   transactiontests-stable-race               transaction tests vs. eest_stable
 #   transactiontests-devnet-race               transaction tests vs. eest_devnet
 #   rlptests-legacy-race                      complete legacy RLP tests
 #   transactiontests-legacy-race              complete legacy transaction tests
 #   difficultytests-legacy-race               complete legacy difficulty tests
-#   blocktests-stable-sequential               blockchain tests vs. eest_stable
-#   blocktests-devnet-{sequential,parallel}    blockchain tests vs. eest_devnet
-#   blocktests-legacy-consensus-{sequential,parallel}
+#   blocktests-stable-parallel                 blockchain tests vs. eest_stable
+#   blocktests-devnet-parallel    blockchain tests vs. eest_devnet
+#   blocktests-legacy-consensus-parallel
 #                                              Hive consensus suite
-#   blocktests-legacy-consensus-race-{sequential,parallel}
+#   blocktests-legacy-consensus-race-parallel
 #                                              race-detector variants of the
 #                                              Hive consensus suite
-#   blocktests-legacy-constantinople-{sequential,parallel}
+#   blocktests-legacy-constantinople-parallel
 #                                              Hive legacy suite
 #   blocktests-legacy-constantinople-race-*
-#                                              three fork partitions, each with
-#                                              sequential/parallel commitment
-#   blocktests-legacy-cancun-{sequential,parallel}
+#                                              three fork partitions
+#   blocktests-legacy-cancun-parallel
 #                                              Hive legacy-cancun suite
 #   blocktests-legacy-cancun-race-*
-#                                              six fork partitions, each with
-#                                              sequential/parallel commitment
-#   enginextests-stable-{sequential,parallel}  engine-x tests vs. eest_stable
-#   enginextests-devnet-{sequential,parallel}  engine-x tests vs. eest_devnet
-#   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-sequential
+#                                              six fork partitions
+#   enginextests-stable-parallel  engine-x tests vs. eest_stable
+#   enginextests-devnet-parallel  engine-x tests vs. eest_devnet
+#   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-parallel
 #                                              engine-x benchmark fixtures per
 #                                              gas-target subdir; each value
 #                                              maps to one for_osaka_at_<NNNN>M/
 #                                              directory under the engine_x
 #                                              benchmark fixtures
-#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka,amsterdam}-sequential
+#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka,amsterdam}-parallel
 #                                              race-detector variant of
-#                                              blocktests-stable-sequential, split by
+#                                              blocktests-stable-parallel, split by
 #                                              fork via the manifest `run` regex so
 #                                              each sub-shard fits under ~30
 #                                              min. Caller (Makefile / CI) must
 #                                              export EVM_BIN to the race-built
 #                                              binary; otherwise -race
 #                                              detection doesn't fire.
-#   blocktests-devnet-race-amsterdam-{sequential,parallel}
+#   blocktests-devnet-race-amsterdam-parallel
 #                                              race-detector variants filtered
 #                                              to the Amsterdam fork only.
 #   zkevm-witness                              zkevm execution-witness conformance
@@ -56,15 +54,8 @@
 #                                              (canonical) per block.
 #   zkevm-witness-race                         race-detector variant of the above over
 #                                              the whole corpus (run via evm.race).
-#   *-parallel                                  any of the above with "-parallel"
-#                                              appended runs with
-#                                              ERIGON_COMMITMENT_PARALLEL=true. Every
-#                                              other shard runs with
-#                                              ERIGON_COMMITMENT_PARALLEL=false so
-#                                              the runtime default in
-#                                              statecfg.ExperimentalParallelCommitment
-#                                              can flip without redefining the shards.
-#                                              Execution is parallel in every shard.
+#   Every shard runs with parallel commitment; the manifest pins it through
+#   commitment-parallel. Execution is parallel in every shard.
 #
 # Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
 # is decided here (not by the binary, which always exits 0): the shard fails

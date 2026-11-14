@@ -14,55 +14,48 @@ Runs the complete test suite with 60-minute timeout and coverage output. Takes ~
 To exercise the EEST suites locally, see `erigon-eest-spec` (or run a specific shard directly):
 
 ```bash
-make eest-spec-statetests-stable-{sequential,parallel}
+make eest-spec-statetests-stable-parallel
                                              # state tests vs eest_stable fixtures
-make eest-spec-blocktests-stable-sequential  # blockchain tests vs eest_stable fixtures (serial commitment)
+make eest-spec-blocktests-stable-parallel  # blockchain tests vs eest_stable fixtures
 make eest-spec-blocktests-stable-parallel    # same, but with parallel commitment
-make eest-spec-enginextests-stable-sequential # engine-x tests vs eest_stable (serial commitment)
+make eest-spec-enginextests-stable-parallel # engine-x tests vs eest_stable
 make eest-spec-enginextests-stable-parallel  # same, but with parallel commitment
-make eest-spec-enginextests-devnet-{sequential,parallel}
-                                             # devnet engine-x tests in both commitment modes
-make eest-spec-statetests-devnet-{sequential,parallel}
+make eest-spec-enginextests-devnet-parallel
+                                             # devnet engine-x tests
+make eest-spec-statetests-devnet-parallel
                                              # state tests vs eest_devnet fixtures
 make eest-spec-transactiontests-{stable,devnet}-race
                                              # transaction tests with evm.race
-make eest-spec-blocktests-devnet-{sequential,parallel}
-                                             # devnet blocktests in both commitment modes
-make eest-spec-statetests-legacy-{sequential,parallel}
+make eest-spec-blocktests-devnet-parallel
+                                             # devnet blocktests
+make eest-spec-statetests-legacy-parallel
                                              # pinned legacy Cancun state-test archive
 make eest-spec-rlptests-legacy-race          # complete pinned legacy RLP suite
 make eest-spec-transactiontests-legacy-race  # complete pinned legacy transaction suite
 make eest-spec-difficultytests-legacy-race   # complete pinned legacy difficulty suite
-make eest-spec-blocktests-legacy-consensus-sequential
+make eest-spec-blocktests-legacy-consensus-parallel
                                              # Hive consensus fixture selection;
                                              # -parallel and
-                                             # -race-{sequential,parallel} variants too
-make eest-spec-blocktests-legacy-constantinople-sequential
+                                             # -race-parallel variants too
+make eest-spec-blocktests-legacy-constantinople-parallel
                                              # Hive legacy fixture selection;
                                              # -parallel plus three race partitions:
                                              # ...-race-constantinople,
                                              # ...-race-constantinople-fix, and
-                                             # ...-race-other-forks; each race
-                                             # partition has sequential/parallel variants
-make eest-spec-blocktests-legacy-cancun-sequential
+                                             # ...-race-other-forks
+make eest-spec-blocktests-legacy-cancun-parallel
                                              # Hive legacy-cancun selection;
                                              # -parallel plus six race partitions:
                                              # ...-race-{berlin,shanghai,cancun,
-                                             # london,paris,other-forks}; each race
-                                             # partition has sequential/parallel variants
-make eest-spec-enginextests-benchmark-1m-sequential
+                                             # london,paris,other-forks}
+make eest-spec-enginextests-benchmark-1m-parallel
                                              # engine-x benchmark fixtures @ 1M gas target
                                              # (with per-test --time stats);
-                                             # -5m/-10m/-30m/-60m/-100m/-150m variants too,
-                                             # each with a "-sequential" / "-parallel" pair
-make eest-spec-blocktests-stable-race-cancun-sequential
+                                             # -5m/-10m/-30m/-60m/-100m/-150m variants too
+make eest-spec-blocktests-stable-race-cancun-parallel
                                              # race-detector variant, sharded per fork:
                                              # -pre-cancun/-cancun/-prague/-osaka, plus
-                                             # eest-spec-blocktests-devnet-race-amsterdam-
-                                             # {sequential,parallel}. Each stable-race
-                                             # and devnet-race sub-shard has a
-                                             # "-sequential" / "-parallel" pair
-                                             # (e.g. ...-race-cancun-{sequential,parallel})
+                                             # eest-spec-blocktests-devnet-race-amsterdam-parallel
 ```
 
 The shard list / failure budgets / `commitment-parallel` flags live in `tools/eest-spec-shards.yml` (single source of truth for both this workflow and `tools/run-eest-spec-test.sh`). See `EEST_SPEC_SHARDS` / `EEST_SPEC_RACE_SHARDS` in the root `Makefile` for the partition into race vs non-race targets.
