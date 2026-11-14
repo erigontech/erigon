@@ -26,8 +26,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -105,16 +107,16 @@ func TestImportBurntContractSelfdestructLosesBurn(t *testing.T) {
 
 	t.Run("existing contract", func(t *testing.T) {
 		x := common.Address{0x33}
-		importBurntContractBlock(t, x, x, types.GenesisAlloc{x: {Balance: big.NewInt(1), Code: destruct}})
+		importBurntContractBlock(t, x, x, types.GenesisAlloc{x: {Balance: big.NewInt(1), Code: destruct}}, 74_603)
 	})
 	t.Run("created in the tx", func(t *testing.T) {
-		importBurntContractBlock(t, created, factory, types.GenesisAlloc{factory: {Code: factoryCode}})
+		importBurntContractBlock(t, created, factory, types.GenesisAlloc{factory: {Code: factoryCode}}, 81_635)
 	})
 }
 
 // importBurntContractBlock builds a pre-Cancun block serially with burnt as the
 // burnt-fee contract and a tx to to, then imports it with parallel execution.
-func importBurntContractBlock(t *testing.T, burnt, to common.Address, alloc types.GenesisAlloc) {
+func importBurntContractBlock(t *testing.T, burnt, to common.Address, alloc types.GenesisAlloc, wantGas uint64) {
 	prevParallel := dbg.Exec3Parallel
 	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
 
@@ -131,7 +133,6 @@ func importBurntContractBlock(t *testing.T, burnt, to common.Address, alloc type
 	alloc[sender] = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)}
 	genesis := &types.Genesis{Config: config, Alloc: alloc}
 
-	dbg.Exec3Parallel = false
 	gen := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
 	signer := types.LatestSignerForChainID(config.ChainID)
 	blocks, err := gen.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
@@ -144,8 +145,19 @@ func importBurntContractBlock(t *testing.T, burnt, to common.Address, alloc type
 		}
 	})
 	require.NoError(t, err)
+	require.Equal(t, wantGas, blocks.TopBlock.GasUsed())
 
 	dbg.Exec3Parallel = true
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), blocks.Blocks))
+
+	wantBurn := uint256.NewInt(blocks.Receipts[0][1].GasUsed * blocks.TopBlock.BaseFee().Uint64())
+	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		balance, err := st.GetBalance(accounts.InternAddress(burnt))
+		require.NoError(t, err)
+		require.Equal(t, *wantBurn, balance, "only the second tx's burn survives")
+		return nil
+	}))
 }

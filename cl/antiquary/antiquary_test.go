@@ -936,7 +936,7 @@ func TestBlobSegmentCompleteRejectsACountAboveTheBlock(t *testing.T) {
 	a := &Antiquary{ctx: t.Context(), logger: log.New(), blobStorage: storage, blobBackfilled: &atomic.Bool{}}
 
 	for _, want := range []uint64{2, 0} {
-		complete, err := a.blobSegmentComplete(tx, 3, 4, func(uint64) (uint64, error) { return want, nil })
+		complete, err := a.blobSegmentComplete(tx, 3, 4, func(kv.Tx, uint64) (uint64, bool, error) { return want, false, nil })
 		require.NoError(t, err)
 		require.False(t, complete, "the dump requires the counts to be equal, want %d", want)
 	}
@@ -962,9 +962,9 @@ func TestBlobSegmentCompleteScansFilesAndResumesAtTheGap(t *testing.T) {
 	}).AnyTimes()
 	a := &Antiquary{ctx: t.Context(), logger: log.New(), blobStorage: storage, blobBackfilled: &atomic.Bool{}}
 	var asked []uint64
-	blobCount := func(slot uint64) (uint64, error) {
+	blobCount := func(_ kv.Tx, slot uint64) (uint64, bool, error) {
 		asked = append(asked, slot)
-		return wants[slot], nil
+		return wants[slot], false, nil
 	}
 
 	complete, err := a.blobSegmentComplete(tx, 0, 5, blobCount)

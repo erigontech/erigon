@@ -538,14 +538,26 @@ func postForkchoiceOperations(tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot 
 			logger.Warn("failed to emit next payload attributes event", "err", err)
 		}
 
-		if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot()); err != nil {
+		if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(headState, headRoot, headState.Slot()); err != nil {
 			logger.Warn("failed to produce and cache attestation data", "err", err)
 		}
-	} else if _, cached, _ := cfg.attestationDataProducer.CachedAttestationData(headSlot); !cached {
-		if err := cfg.syncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
-			_, err := cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, root, headState.Slot())
+	} else if _, cached := cfg.attestationDataProducer.CachedAttestationData(headRoot, headSlot); !cached {
+		warmHead := func(headState *state.CachingBeaconState) error {
+			_, err := cfg.attestationDataProducer.ProduceAndCacheAttestationData(headState, headRoot, headSlot)
 			return err
-		}); err != nil {
+		}
+		headChanged := false
+		err := cfg.syncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, slot uint64) error {
+			headChanged = root != headRoot || slot != headSlot
+			if headChanged {
+				return nil
+			}
+			return warmHead(headState)
+		})
+		if err == nil && headChanged {
+			err = cfg.forkChoice.ViewStateAtBlockRoot(headRoot, warmHead)
+		}
+		if err != nil {
 			logger.Warn("failed to produce and cache attestation data", "err", err)
 		}
 	}

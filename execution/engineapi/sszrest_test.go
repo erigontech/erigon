@@ -56,6 +56,12 @@ func newTestEngineServer(cfg *chain.Config, consuming bool) *EngineServer {
 	return NewEngineServer(log.New(), cfg, nil, nil, false, true, false, consuming, nil, nil, 0, 0)
 }
 
+func newBodiesTestEngineServer(t *testing.T, module execmodule.ExecutionModule) *EngineServer {
+	cfg := allForksConfig()
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), module, nil, nil, cfg, ethconfig.Sync{}, nil)
+	return NewEngineServer(log.New(), cfg, module, downloader, false, true, false, true, nil, nil, 0, 0)
+}
+
 type bodiesExecutionModule struct {
 	execmodule.ExecutionModule
 	bodies        map[common.Hash]*execmodule.PayloadBody
@@ -586,7 +592,7 @@ func TestSSZRESTBodiesRequestLimit(t *testing.T) {
 					32: {Number: *uint256.NewInt(32), Time: 200},
 				},
 			}
-			srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+			srv := newBodiesTestEngineServer(t, module)
 			rec := httptest.NewRecorder()
 			srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), tc.method, tc.path, "cancun", tc.body))
 
@@ -622,7 +628,7 @@ func TestSSZRESTBodiesExcludePoW(t *testing.T) {
 					pos.Hash(): {Transactions: [][]byte{{0x02}}},
 				},
 			}
-			srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+			srv := newBodiesTestEngineServer(t, module)
 			rec := httptest.NewRecorder()
 			srv.SSZRESTHandler().ServeHTTP(rec,
 				newSSZRequest(t.Context(), tc.method, tc.path, "paris", tc.body))
@@ -656,7 +662,7 @@ func TestSSZRESTBodiesByHashFiltersForkEra(t *testing.T) {
 			prague.Hash():   prague,
 		},
 	}
-	srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+	srv := newBodiesTestEngineServer(t, module)
 	hashes := []common.Hash{prague.Hash(), cancun.Hash(), shanghai.Hash(), {0xff}}
 	body, err := encodeHashListRequest(hashes, sszMaxBodiesRequest)
 	require.NoError(t, err)
@@ -678,6 +684,33 @@ func TestSSZRESTBodiesByHashFiltersForkEra(t *testing.T) {
 			require.Empty(t, entries[i].Withdrawals)
 			require.Empty(t, entries[i].BlockAccessList)
 		}
+	}
+}
+
+func TestSSZRESTBodiesByHashOmitsAKnownBadBlock(t *testing.T) {
+	valid := &types.Header{Time: 200}
+	invalid := &types.Header{Time: 201}
+	module := &bodiesExecutionModule{
+		bodies: map[common.Hash]*execmodule.PayloadBody{
+			valid.Hash():   {Transactions: [][]byte{{0x01}}},
+			invalid.Hash(): {Transactions: [][]byte{{0x02}}},
+		},
+		headersByHash: map[common.Hash]*types.Header{valid.Hash(): valid, invalid.Hash(): invalid},
+	}
+	srv := newBodiesTestEngineServer(t, module)
+	srv.blockDownloader.ReportBadHeader(invalid.Hash(), common.Hash{}, "invalid block")
+	body, err := encodeHashListRequest([]common.Hash{valid.Hash(), invalid.Hash(), valid.Hash()}, sszMaxBodiesRequest)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec,
+		newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/bodies/hash", "cancun", body))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	entries, err := decodeBodiesResponse(rec.Body.Bytes(), clparams.DenebVersion)
+	require.NoError(t, err)
+	require.Len(t, entries, 3)
+	for i, available := range []bool{true, false, true} {
+		require.Equal(t, available, entries[i].Available, "entry %d", i)
 	}
 }
 
@@ -751,7 +784,7 @@ func TestSSZRESTBodiesRejectHeaderReadErrors(t *testing.T) {
 					return make([]*execmodule.PayloadBody, len(hashes)), nil
 				},
 			}
-			srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+			srv := newBodiesTestEngineServer(t, module)
 			rec := httptest.NewRecorder()
 			srv.SSZRESTHandler().ServeHTTP(rec,
 				newSSZRequest(t.Context(), tc.method, tc.path, "cancun", tc.body))
@@ -793,7 +826,7 @@ func TestSSZRESTBodiesSkipRetrievalOutsideForkEra(t *testing.T) {
 					headers[11].Hash(): headers[11],
 				},
 			}
-			srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+			srv := newBodiesTestEngineServer(t, module)
 			rec := httptest.NewRecorder()
 			srv.SSZRESTHandler().ServeHTTP(rec,
 				newSSZRequest(t.Context(), tc.method, tc.path, "cancun", tc.body))
@@ -1901,7 +1934,7 @@ func TestSSZRESTMaximalForkchoiceUpdateFitsBodyLimit(t *testing.T) {
 
 func TestSSZRESTGetInclusionListRoute(t *testing.T) {
 	txns := types.Transactions{types.NewTransaction(0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), nil)}
-	srv := NewEngineServer(log.New(), &chain.Config{}, &stubExecutionModule{
+	srv := NewEngineServer(log.New(), &chain.Config{BogotaTime: common.NewUint64(0)}, &stubExecutionModule{
 		inclusionListFunc: func(context.Context) (types.Transactions, error) { return txns, nil },
 	}, nil, false, true, false, false, nil, nil, 0, 0)
 

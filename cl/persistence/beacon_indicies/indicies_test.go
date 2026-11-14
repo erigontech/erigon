@@ -443,6 +443,36 @@ func TestPruneBlocksRemovesAllBlocksBeforeSlot(t *testing.T) {
 	}
 }
 
+func TestReadBlockRootsAtSlotListsEveryStoredBlockOfTheSlot(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	store := func(slot, proposer uint64) common.Hash {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+		block.Block.Slot = slot
+		block.Block.ProposerIndex = proposer
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		require.NoError(t, WriteBeaconBlock(tx, block))
+		return root
+	}
+	store(3, 0)
+	first, second := store(4, 0), store(4, 1)
+	store(5, 0)
+
+	roots, err := ReadBlockRootsAtSlot(tx, 4)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []common.Hash{first, second}, roots)
+
+	roots, err = ReadBlockRootsAtSlot(tx, 6)
+	require.NoError(t, err)
+	require.Empty(t, roots)
+}
+
 func TestPruneBlocksPrunesExecutionPayloadEnvelopeSignaturesBeforeSlot(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
@@ -602,4 +632,22 @@ func TestZstdWriterPoolMatchesReferenceEncoderOptionsOnLargePayload(t *testing.T
 		putZstdWriter(enc)
 		require.Equal(t, want.Bytes(), got.Bytes())
 	}
+}
+
+// Slot keys are 4 bytes: a slot beyond them has no canonical block, it is not read as the truncated slot.
+func TestReadCanonicalBlockRootIgnoresASlotBeyondTheKeyRange(t *testing.T) {
+	db := setupTestDB(t)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	root := common.Hash{1}
+	require.NoError(t, MarkRootCanonical(tx, 5, root))
+
+	got, err := ReadCanonicalBlockRoot(tx, 5)
+	require.NoError(t, err)
+	require.Equal(t, root, got)
+	got, err = ReadCanonicalBlockRoot(tx, 1<<32+5)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, got)
 }

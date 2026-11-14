@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // Version is the MCP server version reported to clients.
@@ -85,6 +87,31 @@ func (e *ErigonMCPServer) ServeContext(ctx context.Context) error {
 	return server.NewStdioServer(e.mcpServer).Listen(ctx, os.Stdin, os.Stdout)
 }
 
+// guardHTTP refuses browser pages from other origins, so a web page cannot call the tools or read the SSE stream.
+// Origin is checked instead of Host because a DNS-rebinding page has a matching Host, and non-browser clients send no Origin.
+func guardHTTP(next http.Handler) http.Handler {
+	return http.MaxBytesHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" && !isLoopbackOrigin(origin) {
+			http.Error(w, "origin not allowed", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	}), rpc.MaxRequestContentLength)
+}
+
+func isLoopbackOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // ListenAndServe starts the MCP HTTP endpoint, shutting it down when ctx is
 // cancelled. Streamable HTTP is served at /mcp, the legacy SSE pair at
 // /sse + /message.
@@ -100,7 +127,7 @@ func (e *ErigonMCPServer) ListenAndServe(ctx context.Context, addr string) error
 	// deadline.
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           guardHTTP(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}

@@ -18,6 +18,7 @@ package freezeblocks
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"math"
 	"os"
@@ -810,12 +811,15 @@ func TestBlobCountFromBlocksRejectsSlotsWithoutBlockSegment(t *testing.T) {
 	require.Equal(t, uint64(30_000), sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum()))
 
 	blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &clparams.MainnetBeaconConfig))
-	n, err := blobCount(25_000)
-	require.NoError(t, err, "an empty slot inside a frozen block segment is blobless")
-	require.Zero(t, n)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		n, _, err := blobCount(tx, 25_000)
+		require.NoError(t, err, "an empty slot inside a frozen block segment is blobless")
+		require.Zero(t, n)
+		return nil
+	}))
 
 	store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
-	err = DumpBlobSidecarsRange(t.Context(), db, store, 10_000, 20_000, 0, dirs, 1, blobCount, log.LvlDebug, log.New())
+	err := DumpBlobSidecarsRange(t.Context(), db, store, 10_000, 20_000, 0, dirs, 1, blobCount, log.LvlDebug, log.New())
 	require.ErrorContains(t, err, "no frozen beacon block segment")
 }
 
@@ -863,4 +867,401 @@ func TestRemoveBlobIndexAndTorrents(t *testing.T) {
 		}
 	}
 	require.ElementsMatch(t, kept, left)
+}
+
+func TestRetireBlobsBelowDropsSegmentsUnderTheFloor(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	for _, tc := range []struct {
+		name        string
+		floor       uint64
+		wantRetired int
+		wantFirst   uint64
+	}{
+		{name: "zero floor keeps everything", floor: 0, wantRetired: 0, wantFirst: 0},
+		{name: "floor inside the first segment keeps it", floor: limit - 1, wantRetired: 0, wantFirst: 0},
+		{name: "floor at a segment end retires it", floor: limit, wantRetired: 1, wantFirst: limit},
+		{name: "floor inside the second segment", floor: limit + 1, wantRetired: 1, wantFirst: limit},
+		{name: "floor past the tip keeps the newest segment", floor: 10 * limit, wantRetired: 2, wantFirst: 2 * limit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			for i := range uint64(3) {
+				writeEmptyBlobSidecarsSegment(t, dirs, i*limit, (i+1)*limit)
+			}
+			sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+			t.Cleanup(sn.Close)
+			require.NoError(t, sn.OpenFolder())
+
+			var deleted []string
+			_, err := sn.RetireBlobsBelow(tc.floor, func(paths []string) error {
+				deleted = append(deleted, paths...)
+				return nil
+			})
+			require.NoError(t, err)
+
+			view := sn.View()
+			defer view.Close()
+			segs := view.BlobSidecars()
+			require.Len(t, segs, 3-tc.wantRetired)
+			require.Equal(t, tc.wantFirst, segs[0].From())
+			require.Equal(t, uint64(3*limit), sn.FrozenBlobs())
+			if tc.wantRetired == 0 {
+				require.Empty(t, deleted)
+			} else {
+				require.NotEmpty(t, deleted)
+				for _, path := range deleted {
+					require.False(t, strings.Contains(filepath.Base(path), "beaconblocks"))
+				}
+			}
+		})
+	}
+}
+
+func TestRetireBlobsBelowWaitsForOverlapCleanup(t *testing.T) {
+	const limit = snaptype.CaplinMergeLimit
+	dirs := datadir.New(t.TempDir())
+	writeEmptyBlobSidecarsSegment(t, dirs, 0, limit)
+	writeEmptyBlobSidecarsSegment(t, dirs, limit, 2*limit)
+	writeEmptyBlobSidecarsSegment(t, dirs, 0, 2*limit)
+	writeEmptyBlobSidecarsSegment(t, dirs, 2*limit, 3*limit)
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	retired, err := sn.RetireBlobsBelow(10*limit, func([]string) error {
+		t.Fatal("no file may be handed to the seeder while superseded segments remain")
+		return nil
+	})
+	require.NoError(t, err)
+	require.False(t, retired)
+	require.Equal(t, uint64(3*limit), sn.FrozenBlobs())
+}
+
+func TestBlobCountFromBlocksFollowsTheChildsPayloadStatus(t *testing.T) {
+	const slot = 7
+	const unfrozen = snaptype.CaplinMergeLimit + 1
+	epochEnd := func(slot uint64) uint64 { return slot/32*32 + 31 }
+	for _, tc := range []struct {
+		name      string
+		onChain   bool
+		stored    bool
+		childSlot uint64
+		childRoot common.Hash
+		finalized uint64
+		parent    common.Hash
+		expected  uint64
+		err       string
+	}{
+		{"payload skipped", false, false, slot + 3, common.Hash{}, 0, common.Hash{}, 0, ""},
+		{"payload skipped, its blobs stored", false, true, slot + 3, common.Hash{}, 0, common.Hash{}, 0, ""},
+		{"payload on chain", true, false, slot + 3, common.Hash{}, 0, common.Hash{}, 2, "blob storage count mismatch at slot 7"},
+		{"payload skipped by a block that is not canonical", false, true, slot + 3, common.Hash{0xee}, 0, common.Hash{}, 0, "block at slot 10 is not canonical"},
+		{"payload skipped by a finalized child not frozen yet", false, true, unfrozen, common.Hash{}, epochEnd(unfrozen + 32), common.Hash{}, 0, ""},
+		{"payload skipped by a child after the finalized checkpoint", false, true, unfrozen, common.Hash{}, epochEnd(unfrozen), common.Hash{}, 2, ""},
+		{"next block builds on another parent", false, true, slot + 3, common.Hash{}, 0, common.Hash{0xaa}, 2, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.GloasForkEpoch = 0
+			block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+			block.Block.Slot = slot
+			bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+			bid.BlockHash = common.Hash{0x01}
+			for range 2 {
+				block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+			}
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+			child.Block.Slot = tc.childSlot
+			child.Block.ParentRoot = root
+			if tc.parent != (common.Hash{}) {
+				child.Block.ParentRoot = tc.parent
+			}
+			child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{0x02}
+			if tc.onChain {
+				child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = bid.BlockHash
+			}
+
+			dirs := datadir.New(t.TempDir())
+			writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
+				switch s {
+				case slot:
+					return blockSnapshotWord(t, block)
+				case tc.childSlot:
+					return blockSnapshotWord(t, child)
+				}
+				return nil
+			})
+			sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+			t.Cleanup(sn.Close)
+			require.NoError(t, sn.OpenFolder())
+
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			childRoot, err := child.Block.HashSSZ()
+			require.NoError(t, err)
+			if tc.childRoot != (common.Hash{}) {
+				childRoot = tc.childRoot
+			}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
+				require.NoError(t, beacon_indicies.WriteHighestFinalized(tx, tc.finalized))
+				if tc.childSlot < snaptype.CaplinMergeLimit {
+					return beacon_indicies.MarkRootCanonical(tx, tc.childSlot, childRoot)
+				}
+				return beacon_indicies.WriteBeaconBlockAndIndicies(tx, child, true)
+			}))
+
+			blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &cfg))
+			var n uint64
+			var skipped bool
+			err = db.View(t.Context(), func(tx kv.Tx) (err error) {
+				n, skipped, err = blobCount(tx, slot)
+				return err
+			})
+			if tc.childRoot != (common.Hash{}) {
+				require.ErrorContains(t, err, tc.err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.expected, n)
+			require.Equal(t, tc.expected == 0, skipped)
+
+			store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+			if tc.stored {
+				require.NoError(t, store.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{blobSidecar(slot, 0), blobSidecar(slot, 1)}))
+			}
+			err = DumpBlobSidecarsRange(t.Context(), db, store, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, blobCount, log.LvlDebug, log.New())
+			if tc.err != "" {
+				require.ErrorContains(t, err, tc.err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.expected > 0, len(dumpedBlobWord(t, dirs, slot)) > 0)
+		})
+	}
+}
+
+func dumpedBlobWord(t *testing.T, dirs datadir.Dirs, slot uint64) []byte {
+	t.Helper()
+	f, _, ok := snaptype.ParseFileName(dirs.Snap, snaptype.BlobSidecars.FileName(version.ZeroVersion, 0, snaptype.CaplinMergeLimit))
+	require.True(t, ok)
+	d, err := seg.NewDecompressor(f.Path)
+	require.NoError(t, err)
+	defer d.Close()
+	g := d.MakeGetter()
+	for range slot {
+		g.Skip()
+	}
+	word, _ := g.Next(nil)
+	return word
+}
+
+func TestDumpBlobSidecarsRangeStopsWhenTheFrozenWordIsNotTheCanonicalBlock(t *testing.T) {
+	const slot = 7
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 0
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	block.Block.Slot = slot
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0x01}
+	for range 2 {
+		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	}
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	child.Block.Slot = slot + 1
+	child.Block.ParentRoot = root
+	child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{0x02}
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+	other := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	other.Block.Slot = slot - 1
+	otherRoot, err := other.Block.HashSSZ()
+	require.NoError(t, err)
+	gloasOther := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	gloasOther.Block.Slot = slot - 1
+	for range 2 {
+		gloasOther.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	}
+	gloasOtherRoot, err := gloasOther.Block.HashSSZ()
+	require.NoError(t, err)
+	blobless := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	blobless.Block.Slot = slot
+	blobless.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x01}})
+	deneb := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	deneb.Block.Slot = slot
+	deneb.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x01}})
+	for range 2 {
+		deneb.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	}
+	denebRoot, err := deneb.Block.HashSSZ()
+	require.NoError(t, err)
+	denebBodyRoot, err := deneb.Block.Body.HashSSZ()
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name      string
+		word      []byte
+		canonical common.Hash
+		err       string
+	}{
+		{"canonical block missing from the beacon segment", nil, root, "blob storage count mismatch at slot 7: 0 != 2"},
+		{"frozen block not canonical at its slot", blockSnapshotWord(t, block), common.Hash{0xee}, "block at slot 7 is not canonical"},
+		{"frozen block of another slot", blockSnapshotWord(t, other), otherRoot, "blob storage count mismatch at slot 7: 0 != 2"},
+		{"frozen Gloas block of another slot, canonical by root", blockSnapshotWord(t, gloasOther), gloasOtherRoot, "block at slot 7 is not canonical"},
+		{"frozen blobless Deneb block not canonical at its slot", blockSnapshotWord(t, blobless), common.Hash{0xee}, "blob storage count mismatch at slot 7: 0 != 2"},
+		{"frozen Deneb word whose body lost its commitments", withBodyRoot(t, blockSnapshotWord(t, blobless), denebBodyRoot), denebRoot, "blob storage count mismatch at slot 7: 0 != 2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
+				switch {
+				case s == slot:
+					return tc.word
+				case s == slot+1:
+					return blockSnapshotWord(t, child)
+				}
+				return nil
+			})
+			sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+			t.Cleanup(sn.Close)
+			require.NoError(t, sn.OpenFolder())
+
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, tc.canonical))
+				return beacon_indicies.MarkRootCanonical(tx, slot+1, childRoot)
+			}))
+			store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+			require.NoError(t, store.WriteBlobSidecars(t.Context(), tc.canonical, []*cltypes.BlobSidecar{blobSidecar(slot, 0), blobSidecar(slot, 1)}))
+
+			blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &cfg))
+			err := DumpBlobSidecarsRange(t.Context(), db, store, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, blobCount, log.LvlDebug, log.New())
+			require.ErrorContains(t, err, tc.err)
+		})
+	}
+}
+
+func withBodyRoot(t *testing.T, word []byte, bodyRoot common.Hash) []byte {
+	t.Helper()
+	dec, err := zstd.NewReader(nil)
+	require.NoError(t, err)
+	raw, err := dec.DecodeAll(word, nil)
+	dec.Close()
+	require.NoError(t, err)
+	copy(raw[1:1+len(bodyRoot)], bodyRoot[:])
+	var b bytes.Buffer
+	enc, err := zstd.NewWriter(&b)
+	require.NoError(t, err)
+	_, err = enc.Write(raw)
+	require.NoError(t, err)
+	require.NoError(t, enc.Close())
+	return b.Bytes()
+}
+
+func TestBlobCountFromBlocksStopsOnCancel(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(uint64) []byte { return nil })
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	blobCount := BlobCountFromBlocks(ctx, sn, NewBeaconSnapshotReader(sn, nil, &cfg))
+	err := db.View(t.Context(), func(tx kv.Tx) error {
+		_, _, err := blobCount(tx, 7)
+		return err
+	})
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestBlobCountFromBlocksDumpsACanonicalDenebBlockWithTransactions(t *testing.T) {
+	const slot = 7
+	cfg := clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	block.Block.Slot = slot
+	block.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x01, 0x02}})
+	for range 2 {
+		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	}
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	blobless := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	blobless.Block.Slot = slot + 1
+	blobless.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x03}})
+	blobLessRoot, err := blobless.Block.HashSSZ()
+	require.NoError(t, err)
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
+		switch s {
+		case slot:
+			return blockSnapshotWord(t, block)
+		case slot + 1:
+			return blockSnapshotWord(t, blobless)
+		}
+		return nil
+	})
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot+1, blobLessRoot))
+		return beacon_indicies.MarkRootCanonical(tx, slot, root)
+	}))
+	store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	require.NoError(t, store.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{blobSidecar(slot, 0), blobSidecar(slot, 1)}))
+
+	blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &cfg))
+	require.NoError(t, DumpBlobSidecarsRange(t.Context(), db, store, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, blobCount, log.LvlDebug, log.New()))
+	require.NotEmpty(t, dumpedBlobWord(t, dirs, slot))
+	require.Empty(t, dumpedBlobWord(t, dirs, slot+1))
+}
+
+func TestBlobCountFromBlocksRejectsAPreGloasChildOfAGloasBlock(t *testing.T) {
+	const slot = 7
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 0
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	block.Block.Slot = slot
+	for range 2 {
+		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	}
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	child := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	child.Block.Slot = slot + 1
+	child.Block.ParentRoot = root
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
+		switch s {
+		case slot:
+			return blockSnapshotWord(t, block)
+		case slot + 1:
+			return blockSnapshotWord(t, child)
+		}
+		return nil
+	})
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(tx, slot, root)
+	}))
+
+	blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &cfg))
+	require.NotPanics(t, func() {
+		err = db.View(t.Context(), func(tx kv.Tx) error {
+			_, _, countErr := blobCount(tx, slot)
+			return countErr
+		})
+	})
+	require.ErrorContains(t, err, "block at slot 8: pre-Gloas block after a Gloas block")
 }

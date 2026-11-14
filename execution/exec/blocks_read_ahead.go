@@ -1,9 +1,9 @@
 package exec
 
 import (
-	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,7 +15,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -34,7 +33,6 @@ type BlockReadAheader struct {
 	// keeps some caches for block themselves
 	headers *lru.Cache[common.Hash, *types.Header]
 	bodies  *lru.Cache[common.Hash, *types.Body]
-	senders *lru.Cache[common.Hash, []byte] // just do raw senders
 	bals    *lru.Cache[common.Hash, *types.BlockAccessListSidecar]
 
 	recoveries *lru.Cache[common.Hash, *SendersRecovery]
@@ -65,10 +63,6 @@ func NewBlockReadAheader() *BlockReadAheader {
 	if err != nil {
 		panic(err)
 	}
-	senders, err := lru.New[common.Hash, []byte](4)
-	if err != nil {
-		panic(err)
-	}
 	bals, err := lru.New[common.Hash, *types.BlockAccessListSidecar](4)
 	if err != nil {
 		panic(err)
@@ -81,7 +75,6 @@ func NewBlockReadAheader() *BlockReadAheader {
 		recoveries: recoveries,
 		headers:    headers,
 		bodies:     bodies,
-		senders:    senders,
 		bals:       bals,
 		warmupGate: semaphore.NewWeighted(1),
 	}
@@ -128,17 +121,29 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if opts.MaxStep() == kv.NoStepBound {
+		if v, txNum, ok := cpg.view.GetVisible(name, k); ok {
+			if name == kv.AccountsDomain {
+				cpg.seedCodeHash(k, v, txNum)
+			}
+			return v, kv.Step(txNum / cpg.stepSize), nil
+		}
+	}
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k, opts)
 	if err == nil && opts.MaxStep() == kv.NoStepBound {
 		readTxNum := cache.ClampFillTxNum(cpg.snapshot, name, step.LastTxNum(cpg.stepSize))
 		cpg.view.Fill(name, k, v, readTxNum)
 		if name == kv.AccountsDomain {
-			var codeHash common.Hash
-			copy(codeHash[:], accounts.DeserialiseV3CodeHash(v))
-			cpg.view.SeedAddrCodeHash(k, codeHash, readTxNum)
+			cpg.seedCodeHash(k, v, readTxNum)
 		}
 	}
 	return v, step, err
+}
+
+func (cpg *cachePopulatingGetter) seedCodeHash(addr, account []byte, txNum uint64) {
+	var codeHash common.Hash
+	copy(codeHash[:], accounts.DeserialiseV3CodeHash(account))
+	cpg.view.SeedAddrCodeHash(addr, codeHash, txNum)
 }
 
 func (cpg *cachePopulatingGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, error) {
@@ -267,21 +272,31 @@ func (bra *BlockReadAheader) WaitForWarmup(ctx context.Context) {
 	}
 }
 
-func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
-	if _, ok := bra.bodies.Get(blockHash); !ok {
-		return
-	}
-	bra.senders.Add(blockHash, bytes.Clone(senders))
+type SendersRecovery struct {
+	done     chan struct{}
+	senders  []accounts.Address
+	err      error
+	failedTx int
 }
 
-type SendersRecovery struct {
-	done    chan struct{}
-	senders []byte
+type senderError struct {
+	txIndex int
 	err     error
 }
 
+func (e *senderError) Error() string { return e.err.Error() }
+func (e *senderError) Unwrap() error { return e.err }
+
 func StartSendersRecovery(ctx context.Context, signer *types.Signer, txns types.Transactions) *SendersRecovery {
-	r := &SendersRecovery{done: make(chan struct{}), senders: make([]byte, len(txns)*length.Addr)}
+	return startSendersRecovery(ctx, func(int) *types.Signer { return signer }, txns)
+}
+
+func StartBatchSendersRecovery(ctx context.Context, signers []*types.Signer, txns types.Transactions) *SendersRecovery {
+	return startSendersRecovery(ctx, func(i int) *types.Signer { return signers[i] }, txns)
+}
+
+func startSendersRecovery(ctx context.Context, signerOf func(int) *types.Signer, txns types.Transactions) *SendersRecovery {
+	r := &SendersRecovery{done: make(chan struct{}), senders: make([]accounts.Address, len(txns)), failedTx: -1}
 	go func() {
 		defer close(r.done)
 		var next atomic.Int64
@@ -293,36 +308,46 @@ func StartSendersRecovery(ctx context.Context, signer *types.Signer, txns types.
 					if err := groupCtx.Err(); err != nil {
 						return err
 					}
-					from, err := signer.SenderWithContext(cryptoContext, txns[i])
+					from, err := signerOf(i).SenderWithContext(cryptoContext, txns[i])
 					if err != nil {
-						return err
+						return &senderError{txIndex: i, err: fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, txns[i].Hash(), err)}
 					}
-					fromValue := from.Value()
-					copy(r.senders[i*length.Addr:], fromValue[:])
+					r.senders[i] = from
 				}
 				return nil
 			})
 		}
 		r.err = group.Wait()
+		if se, ok := errors.AsType[*senderError](r.err); ok {
+			r.failedTx, r.err = se.txIndex, se.err
+		}
 	}()
 	return r
+}
+
+func (r *SendersRecovery) Wait(ctx context.Context) ([]accounts.Address, error) {
+	select {
+	case <-r.done:
+		return r.senders, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (r *SendersRecovery) FailedTx() int {
+	return r.failedTx
 }
 
 func (bra *BlockReadAheader) AddSendersRecovery(blockHash common.Hash, r *SendersRecovery) {
 	bra.recoveries.Add(blockHash, r)
 }
 
-func (bra *BlockReadAheader) RecoveredSenders(ctx context.Context, blockHash common.Hash) ([]byte, bool) {
-	r, ok := bra.recoveries.Get(blockHash)
-	if !ok {
-		return nil, false
+func (bra *BlockReadAheader) TakeSendersRecovery(blockHash common.Hash) (*SendersRecovery, bool) {
+	r, ok := bra.recoveries.Peek(blockHash)
+	if ok {
+		bra.recoveries.Remove(blockHash)
 	}
-	select {
-	case <-r.done:
-	case <-ctx.Done():
-		return nil, false
-	}
-	return r.senders, r.err == nil
+	return r, ok
 }
 
 func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal *types.BlockAccessListSidecar) {
@@ -643,26 +668,6 @@ func (bra *BlockReadAheader) ReadBodyWithTransactions(blockHash common.Hash) (*t
 	return bra.bodies.Get(blockHash)
 }
 
-// ExecRecoversBALSenders reports whether parallel exec workers recover the senders of
-// blocks with a non-empty BAL; the Execution stage then writes them.
-func ExecRecoversBALSenders() bool {
-	return dbg.Exec3Parallel && !dbg.IgnoreBAL && !dbg.StagesOnlyBlocks
-}
-
-func RecoversSenders(header *types.Header) bool {
-	return ExecRecoversBALSenders() && header.HasNonEmptyBAL()
-}
-
-// ExecRecoversSenders is RecoversSenders for a cached block: execution recovers the
-// senders only when it can load the block's access list, else it takes the plain path.
-func (bra *BlockReadAheader) ExecRecoversSenders(header *types.Header) bool {
-	if !RecoversSenders(header) {
-		return false
-	}
-	bal, ok := bra.bals.Get(header.Hash())
-	return ok && len(bal.BlockAccessList()) > 0
-}
-
 func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types.Block, bool) {
 	header, ok := bra.headers.Get(blockHash)
 	if header == nil || !ok {
@@ -672,15 +677,11 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 	if body == nil || !ok {
 		return nil, false
 	}
-	senders, ok := bra.senders.Get(blockHash)
-	if (len(senders) == 0 || !ok) && !bra.ExecRecoversSenders(header) {
-		return nil, false
+	for _, txn := range body.Transactions {
+		if _, ok := txn.GetSender(); !ok {
+			return nil, false
+		}
 	}
-	sendersAddresses := make([]common.Address, 0, len(senders)/length.Addr)
-	for i := 0; i < len(senders); i += length.Addr {
-		sendersAddresses = append(sendersAddresses, common.BytesToAddress(senders[i:i+length.Addr]))
-	}
-	body.SendersToTxs(sendersAddresses)
 	bal, _ := bra.bals.Get(blockHash)
 	return types.NewBlockFromStorage(header.Hash(), header, body.Transactions, body.Uncles, body.Withdrawals, bal), true
 }

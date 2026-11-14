@@ -24,6 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -245,6 +248,64 @@ func TestAuthoritativeAddressWriteDropsBALSource(t *testing.T) {
 	}
 }
 
+// TestEstimateFlushReplacesBALAddressMarker pins that the creating tx's in-flight flush may
+// replace its Done existence marker with an Estimate (the marker value is a placeholder),
+// and that its complete flush then publishes the tx value as Done.
+func TestEstimateFlushReplacesBALAddressMarker(t *testing.T) {
+	prevAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prevAssert })
+
+	a := accounts.InternAddress(common.HexToAddress("0xacc5"))
+	other := accounts.InternAddress(common.HexToAddress("0x07e5"))
+	marker := accounts.NewAccount()
+	marker.Balance = *uint256.NewInt(7)
+	inFlight := accounts.NewAccount()
+
+	vm := NewVersionMap(types.BlockAccessList{{Address: other.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}}}})
+	vm.WriteAddressExists(a, Version{TxIndex: 0}, &marker)
+	ws := &WriteSet{}
+	ws.SetAddress(a, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: a, Path: AddressPath, Version: Version{TxIndex: 0}}, Val: &inFlight})
+
+	vm.FlushVersionedWrites(ws, false)
+	_, res, ok := vm.ReadAddress(a, 1)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDependency, res.Status())
+
+	vm.FlushVersionedWrites(ws, true)
+	got, res, ok := vm.ReadAddress(a, 1)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, res.Status())
+	require.Equal(t, inFlight.Balance, got.Balance)
+}
+
+// TestEstimateFlushKeepsBALSeededCode pins that the deploying tx's in-flight flush of the
+// code its BAL entry already seeded leaves the seeded Done code cells in place.
+func TestEstimateFlushKeepsBALSeededCode(t *testing.T) {
+	prevAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prevAssert })
+
+	a := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	bytecode := []byte{0x60, 0x00}
+	vm := NewVersionMap(types.BlockAccessList{{Address: a.Value(), CodeChanges: []*types.CodeChange{{Index: 1, Bytecode: bytecode}}}})
+	code := accounts.NewCode(bytecode)
+	v := Version{TxIndex: 0}
+	ws := &WriteSet{}
+	ws.SetCode(a, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: a, Path: CodePath, Version: v}, Val: code})
+	ws.SetCodeSize(a, &VersionedWrite[int]{WriteHeader: WriteHeader{Address: a, Path: CodeSizePath, Version: v}, Val: code.Len()})
+
+	vm.FlushVersionedWrites(ws, false)
+	got, res, ok := vm.ReadCode(a, 1)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, res.Status())
+	require.Equal(t, code.Hash, got.Hash)
+	size, res, ok := vm.ReadCodeSize(a, 1)
+	require.True(t, ok)
+	require.Equal(t, MVReadResultDone, res.Status())
+	require.Equal(t, len(bytecode), size)
+}
+
 func TestBALMarkedAccountReadsCommittedBaseOncePerBlock(t *testing.T) {
 	a := accounts.InternAddress(common.HexToAddress("0xba5e"))
 	acc := accounts.NewAccount()
@@ -323,6 +384,37 @@ func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 	require.Equal(t, uint64(1), acc.Nonce)
 }
 
+func TestHasEmptyBaseAccount(t *testing.T) {
+	t.Parallel()
+	addr := func(s string) accounts.Address { return accounts.InternAddress(common.HexToAddress(s)) }
+	empty, absent, funded := addr("0xe1"), addr("0xa1"), addr("0xf1")
+	emptyAcc, systemAcc, fundedAcc := accounts.NewAccount(), accounts.NewAccount(), accounts.NewAccount()
+	fundedAcc.Balance = *uint256.NewInt(1)
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{
+		empty: &emptyAcc, params.SystemAddress: &systemAcc, funded: &fundedAcc,
+	}}
+	listed := func(a accounts.Address) types.AccountChanges { return types.AccountChanges{Address: a.Value()} }
+	changed := listed(empty)
+	changed.BalanceChanges = []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(1)}}
+	for _, tc := range []struct {
+		name         string
+		eip161, aura bool
+		bal          types.BlockAccessList
+		want         bool
+	}{
+		{"empty", true, false, types.BlockAccessList{listed(empty)}, true},
+		{"empty with a change", true, false, types.BlockAccessList{changed}, true},
+		{"absent and funded", true, false, types.BlockAccessList{listed(absent), listed(funded)}, false},
+		{"before EIP-161", false, false, types.BlockAccessList{listed(empty)}, false},
+		{"Aura system address", true, true, types.BlockAccessList{listed(params.SystemAddress)}, false},
+		{"system address", true, false, types.BlockAccessList{listed(params.SystemAddress)}, true},
+	} {
+		got, err := NewVersionMap(tc.bal).HasEmptyBaseAccount(tc.eip161, tc.aura, reader)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, got, tc.name)
+	}
+}
+
 // A BAL existence marker at the index that drains the account is not a revival.
 func TestSeededRemovalAtMarkerIndexStaysAbsent(t *testing.T) {
 	t.Parallel()
@@ -340,6 +432,125 @@ func TestSeededRemovalAtMarkerIndexStaysAbsent(t *testing.T) {
 	ibs := NewWithVersionMap(reader, vm)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 1)
+	exists, err := ibs.Exist(x)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+// seededRemovalOfPrefundedAccount returns a version map seeded with the access list of a block in
+// which tx 0 creates and destroys the prefunded x and tx 1 re-creates it.
+func seededRemovalOfPrefundedAccount(t *testing.T) (accounts.Address, *accountStateReader, *VersionMap) {
+	t.Helper()
+	x := accounts.InternAddress(common.HexToAddress("0x5a1e"))
+	baseAcc := accounts.NewAccount()
+	baseAcc.Balance = *uint256.NewInt(5)
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &baseAcc}}
+	vm := NewVersionMap(types.BlockAccessList{{
+		Address:        x.Value(),
+		BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}},
+		NonceChanges:   []*types.NonceChange{{Index: 2, Value: 1}},
+		CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: []byte{0x00}}},
+	}})
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+	return x, reader, vm
+}
+
+// Tx 0 creates and destroys the prefunded x, tx 1 re-creates it. Tx 1 reads x while the
+// removal is still the seeded Done cell, then tx 0 flushes its own removal (Estimate) before
+// tx 1 asks for the account: x must stay absent, so the re-creation pays for a new account.
+func TestDestructObservedBeforeItsInFlightFlushKeepsTheAccountAbsent(t *testing.T) {
+	t.Parallel()
+	x, reader, vm := seededRemovalOfPrefundedAccount(t)
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	balance, err := ibs.GetBalance(x)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero())
+
+	removal := &WriteSet{}
+	removal.SetContractRemoval(x, Version{TxIndex: 0})
+	vm.FlushVersionedWrites(removal, false)
+
+	empty, err := ibs.Empty(x)
+	require.NoError(t, err)
+	require.True(t, empty)
+	exists, err := ibs.Exist(x)
+	require.NoError(t, err)
+	require.False(t, exists)
+
+	vm.MarkWritesValidated(removal, nil)
+	require.Equal(t, VersionValid, validateReads(vm, ibs, 1))
+	for _, path := range []AccountPath{SelfDestructPath, BalancePath, CodeHashPath} {
+		vm.Delete(x, path, accounts.NilKey, 0, false)
+	}
+	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 1), "a withdrawn destruct invalidates the absence")
+}
+
+// As above, but tx 1 credits x in the window: the credit creates a fresh account instead of
+// reloading the pre-block one, so tx 1 stays valid once tx 0 is validated.
+func TestCreditAfterObservedDestructCreatesAFreshAccount(t *testing.T) {
+	t.Parallel()
+	x, reader, vm := seededRemovalOfPrefundedAccount(t)
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	_, err := ibs.GetBalance(x)
+	require.NoError(t, err)
+
+	removal := &WriteSet{}
+	removal.SetContractRemoval(x, Version{TxIndex: 0})
+	vm.FlushVersionedWrites(removal, false)
+
+	require.NoError(t, ibs.AddBalance(x, *uint256.NewInt(1), tracing.BalanceChangeTransfer))
+	balance, err := ibs.GetBalance(x)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(1), balance)
+
+	vm.MarkWritesValidated(removal, nil)
+	require.Equal(t, VersionValid, validateReads(vm, ibs, 1))
+}
+
+// As above, but tx 1 funds x again between two destructs, so its account cell lies below the
+// destruct of tx 2 that tx 3 reads; it is not a re-creation by the destroying tx.
+func TestRepeatedDestructObservedBeforeItsInFlightFlushKeepsTheAccountAbsent(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress(common.HexToAddress("0x5a1f"))
+	baseAcc := accounts.NewAccount()
+	baseAcc.Balance = *uint256.NewInt(5)
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &baseAcc}}
+	bal := types.BlockAccessList{{
+		Address: x.Value(),
+		BalanceChanges: []*types.BalanceChange{
+			{Index: 1, Value: uint256.Int{}},
+			{Index: 2, Value: *uint256.NewInt(1)},
+			{Index: 3, Value: uint256.Int{}},
+		},
+		NonceChanges: []*types.NonceChange{{Index: 4, Value: 1}},
+		CodeChanges:  []*types.CodeChange{{Index: 4, Bytecode: []byte{0x00}}},
+	}}
+	vm := NewVersionMap(bal)
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+	funded := accounts.NewAccount()
+	funded.Balance = *uint256.NewInt(1)
+	vm.WriteAddress(x, Version{TxIndex: 1}, &funded, true)
+
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 3)
+	balance, err := ibs.GetBalance(x)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero())
+
+	removal := &WriteSet{}
+	removal.SetContractRemoval(x, Version{TxIndex: 2})
+	vm.FlushVersionedWrites(removal, false)
+
+	empty, err := ibs.Empty(x)
+	require.NoError(t, err)
+	require.True(t, empty)
 	exists, err := ibs.Exist(x)
 	require.NoError(t, err)
 	require.False(t, exists)

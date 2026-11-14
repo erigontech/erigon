@@ -530,6 +530,9 @@ func createBlockAmount(pruneType []byte, v []byte) (BlockAmount, error) {
 
 	switch string(pruneType) {
 	case string(kv.PruneTypeOlder):
+		if len(v) != 8 {
+			return nil, fmt.Errorf("prune distance must be 8 bytes, got %d bytes", len(v))
+		}
 		blockAmount = Distance(binary.BigEndian.Uint64(v))
 	default:
 		return nil, fmt.Errorf("unexpected block amount type: %s", string(pruneType))

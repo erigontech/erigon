@@ -2523,3 +2523,61 @@ func TestHistoryCanPruneUntilMalformedProgress(t *testing.T) {
 	defer hc.Close()
 	require.NotPanics(t, func() { hc.canPruneUntil(rwTx, 100) })
 }
+
+func TestHistoryIdxRange_DescDBBounds(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	for _, largeValues := range []bool{false, true} {
+		t.Run(fmt.Sprintf("largeValues=%t", largeValues), func(t *testing.T) {
+			db, h, _ := filledHistory(t, largeValues, logger)
+			roTx, err := db.BeginRo(t.Context())
+			require.NoError(t, err)
+			defer roTx.Rollback()
+			hc := h.beginForTests()
+			defer hc.Close()
+
+			var key [8]byte
+			binary.BigEndian.PutUint64(key[:], 1)
+			key[0] = 1
+
+			rangeOf := func(from, to uint64) []uint64 {
+				var res []uint64
+				for n := from; n > to; n-- {
+					res = append(res, n)
+				}
+				return res
+			}
+
+			it, err := hc.IdxRange(key[:], 19, 2, order.Desc, -1, roTx)
+			require.NoError(t, err)
+			got, err := stream.ToArrayU64(it)
+			require.NoError(t, err)
+			require.Equal(t, rangeOf(19, 2), got)
+
+			it, err = hc.IdxRange(key[:], 5, -1, order.Desc, -1, roTx)
+			require.NoError(t, err)
+			got, err = stream.ToArrayU64(it)
+			require.NoError(t, err)
+			require.Equal(t, rangeOf(5, 0), got)
+
+			// adjacent bounds, and an empty previous value right after endTxNum
+			it, err = hc.IdxRange(key[:], 3, 2, order.Desc, -1, roTx)
+			require.NoError(t, err)
+			got, err = stream.ToArrayU64(it)
+			require.NoError(t, err)
+			require.Equal(t, rangeOf(3, 2), got)
+
+			it, err = hc.IdxRange(key[:], 5, 0, order.Desc, -1, roTx)
+			require.NoError(t, err)
+			got, err = stream.ToArrayU64(it)
+			require.NoError(t, err)
+			require.Equal(t, rangeOf(5, 0), got)
+
+			it, err = hc.IdxRange(key[:], -1, 995, order.Desc, -1, roTx)
+			require.NoError(t, err)
+			got, err = stream.ToArrayU64(it)
+			require.NoError(t, err)
+			require.Equal(t, rangeOf(1000, 995), got)
+		})
+	}
+}

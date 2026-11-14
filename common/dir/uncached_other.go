@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,18 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !darwin && !windows && !linux
+//go:build !linux
 
-package diskutils
+package dir
 
-import "github.com/erigontech/erigon/common/log/v3"
+import (
+	"io"
+	"os"
+)
 
-func MountPointForDirPath(dirPath string) string {
-	log.Debug("[diskutils] Implemented only for darwin")
-	return "/"
-}
-
-func DiskInfo(disk string) (string, error) {
-	log.Debug("[diskutils] Implemented only for darwin")
-	return "", nil
-}
+func UncachedWriter(f *os.File) io.Writer { return f }

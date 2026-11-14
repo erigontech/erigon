@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 
 	"github.com/spf13/afero"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
@@ -43,6 +44,8 @@ const (
 	listBatch       = 64
 	rwLocksCount    = 64
 	tmpSuffix       = ".tmp"
+	// maxParallelSyncs bounds the temp files of one batch that encode and fsync at once.
+	maxParallelSyncs = 16
 )
 
 // ErrPruneNotStarted reports that pruning failed before any bucket was attempted, so the
@@ -138,6 +141,76 @@ func (b *bucketStore) writeAdmitted(slot uint64, root common.Hash, idx uint64, v
 	return created, nil
 }
 
+type batchEntry struct {
+	idx uint64
+	v   ssz.Marshaler
+}
+
+// writeMissingAdmitted stores the entries whose target is absent, skipping the rest. It
+// encodes and fsyncs all temp files in parallel and renames them only once every one is
+// durable, so a failure before the renames leaves no target of this batch. existing and
+// created hold positions into entries, also when err is set; entries left out of both were
+// not stored. The caller holds startWrite and the stripe lock that serializes writes of
+// these files.
+func (b *bucketStore) writeMissingAdmitted(slot uint64, root common.Hash, entries []batchEntry) (existing, created []int, err error) {
+	l := b.forBucket(slot / subdivisionSlot)
+	l.RLock()
+	defer l.RUnlock()
+	var missing []int
+	for i, e := range entries {
+		_, file := b.path(slot, root, e.idx)
+		if _, err := b.fs.Stat(file); err == nil {
+			existing = append(existing, i)
+		} else if errors.Is(err, os.ErrNotExist) {
+			missing = append(missing, i)
+		} else {
+			return existing, nil, err
+		}
+	}
+	if len(missing) == 0 {
+		return existing, nil, nil
+	}
+	dir, _ := b.path(slot, root, 0)
+	if err := b.fs.MkdirAll(dir, 0o755); err != nil {
+		return existing, nil, err
+	}
+	targets := make([]string, len(missing))
+	temps := make([]string, len(missing))
+	for j, i := range missing {
+		_, targets[j] = b.path(slot, root, entries[i].idx)
+		temps[j] = targets[j] + tmpSuffix
+	}
+	if err := b.encodeAll(temps, entries, missing); err != nil {
+		for _, tmp := range temps {
+			b.removeTemp(tmp)
+		}
+		return existing, nil, err
+	}
+	for j, i := range missing {
+		if err := b.fs.Rename(temps[j], targets[j]); err != nil {
+			for _, tmp := range temps[j:] {
+				b.removeTemp(tmp)
+			}
+			return existing, created, err
+		}
+		created = append(created, i)
+	}
+	return existing, created, nil
+}
+
+// encodeAll encodes entries[positions[j]] onto temps[j].
+func (b *bucketStore) encodeAll(temps []string, entries []batchEntry, positions []int) error {
+	if len(temps) == 1 { // inline, so a panic reaches the caller's recover and its deferred unlocks
+		return b.encodeTo(temps[0], entries[positions[0]].v)
+	}
+	var g errgroup.Group
+	g.SetLimit(maxParallelSyncs)
+	for j, i := range positions {
+		g.Go(func() error { return b.encodeTo(temps[j], entries[i].v) })
+	}
+	return g.Wait()
+}
+
 // removeTemp best-effort deletes the temp file; the caller already holds the
 // real error.
 func (b *bucketStore) removeTemp(tmp string) {
@@ -174,8 +247,7 @@ func (b *bucketStore) read(slot uint64, root common.Hash, idx uint64, out ssz.En
 	}
 	defer fh.Close()
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(fh, out, version); err != nil {
-		// A sidecar that will not decode is a truncated pre-rename write; reporting it absent
-		// lets the caller re-fetch and overwrite it, which returning the error never does.
+		// An undecodable sidecar is reported as absent; blob writes (writeAdmitted) then overwrite it.
 		log.Warn("[blob_storage] discarding undecodable sidecar", "file", file, "err", err)
 		return false, nil
 	}

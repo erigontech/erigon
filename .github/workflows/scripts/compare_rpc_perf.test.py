@@ -147,11 +147,12 @@ with tempfile.TemporaryDirectory() as tmp:
     check("overview header has the clients in fixed order",
           any(line.split() == ["Test", "QPS", "erigon", "geth", "reth"] for line in md.splitlines()), md)
     header = next(line for line in md.splitlines() if line.split()[:2] == ["Test", "QPS"])
-    rows = [line[:-2] for line in md.splitlines() if line[-1:] in ("🟢", "🟡", "🔴", "⚪")]
+    rows = [line.rsplit(" ", 1)[0] for line in md.splitlines() if line[-1:] in ("🟢", "🟡", "🔴", "⚪")]
     check("overview columns are ASCII and aligned, the status closes each row",
           len(rows) == 6 and all(r.isascii() and len(r) == len(header) for r in rows), md)
     row = overview_row(md, "eth_call", "1")
-    check("erigon fastest is green, fastest marked with *", row == ["eth_call", "1", "2.00*", "err", "4.00", "🟢"], row)
+    check("erigon fastest by 1.3x or more is double green, fastest marked with *",
+          row == ["eth_call", "1", "2.00*", "err", "4.00", "🟢🟢"], row)
     check("a client below 100% HTTP is err and not the fastest", "1.00*" not in row, row)
     row = overview_row(md, "eth_call", "2")
     check("erigon below 1.3x the fastest is yellow", row[-1:] == ["🟡"] and "10.00*" in row, row)
@@ -163,6 +164,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("erigon below 100% HTTP is red", row == ["eth_call", "5", "err", "-", "1.00*", "🔴"], row)
     row = overview_row(md, "mixed", "1")
     check("no erigon result, no status", row == ["mixed", "1", "-", "-", "1.00*", "⚪"], row)
+    check("legend explains the white status", "⚪ no Erigon result" in md, md)
 
 with tempfile.TemporaryDirectory() as tmp:
     write_result(tmp, "erigon", "mixed", [
@@ -192,8 +194,33 @@ with tempfile.TemporaryDirectory() as tmp:
     write_result(tmp, "reth", "eth_call", [{"qps": "1", "testRepetitions": [rep(2, 2.0, 9)]}])
     text = mod.render_overview(mod.load_results(tmp), "p50")
     row = overview_row(text, "eth_call", "1")
-    check("p50 overview uses p50 latency and status", row == ["eth_call", "1", "1.00*", "2.00", "🟢"], row)
+    check("p50 overview uses p50 latency and status", row == ["eth_call", "1", "1.00*", "2.00", "🟢🟢"], row)
     check("p50 overview legend names p50", "status on p50" in text and "p50 latency" in text, text)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_call", [
+        {"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "2", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "3", "testRepetitions": [rep(1, 1.0, 3)]},
+    ])
+    write_result(tmp, "geth", "eth_call", [
+        {"qps": "1", "testRepetitions": [rep(1, 1.3, 3)]},
+        {"qps": "2", "testRepetitions": [rep(1, 1.2, 3)]},
+        {"qps": "3", "testRepetitions": [rep(1, 1.0, 3)]},
+    ])
+    write_result(tmp, "reth", "eth_call", [
+        {"qps": "1", "testRepetitions": [rep(1, 5.0, 3)]},
+        {"qps": "2", "testRepetitions": [rep(1, 5.0, 3)]},
+        {"qps": "3", "testRepetitions": [rep(1, 5.0, 3)]},
+    ])
+    text = mod.render_overview(mod.load_results(tmp), "p95")
+    row = overview_row(text, "eth_call", "1")
+    check("erigon fastest by exactly 1.3x the next client is double green", row[-1:] == ["🟢🟢"], row)
+    row = overview_row(text, "eth_call", "2")
+    check("erigon fastest by less than 1.3x the next client is green", row[-1:] == ["🟢"], row)
+    row = overview_row(text, "eth_call", "3")
+    check("erigon tied with another client is green", row[-1:] == ["🟢"], row)
+    check("legend explains double green", "🟢🟢 fastest by >= 1.3x" in text, text)
 
 # --- main ---------------------------------------------------------------------
 

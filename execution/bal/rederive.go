@@ -59,13 +59,7 @@ func RederiveBlockAccessList(
 	blockNum := header.Number.Uint64()
 	balIO := &state.VersionedIO{}
 	noopWriter := state.NewNoopWriter()
-	hashFn := protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-		h, err := getHeader(hash, number)
-		if err == nil && h == nil {
-			err = fmt.Errorf("header %d %x not found", number, hash)
-		}
-		return h, err
-	})
+	hashFn := protocol.GetHashFn(header, getHeader)
 	// phaseErr returns the error of the phase that just ran. The node's own
 	// failures come first: the EVM folds failed state reads and header lookups
 	// into failed calls, and the executor recovers panics into errors.

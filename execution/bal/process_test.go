@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	balpkg "github.com/erigontech/erigon/execution/bal"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -386,22 +387,70 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 	_ = fmt.Sprintf // suppress unused import
 }
 
-func TestProcessChecksStoredBALBytesAndComputedBAL(t *testing.T) {
+func TestProcessChecksBALSidecarAndComputedBAL(t *testing.T) {
 	computed := balpkg.Create(1, nil, state.NewVersionedIO(0), "", log.New())
 	computedBytes, err := types.EncodeBlockAccessListBytes(computed)
 	require.NoError(t, err)
 	other := types.BlockAccessList{{Address: common.HexToAddress("0x01")}}
 	otherBytes, err := types.EncodeBlockAccessListBytes(other)
 	require.NoError(t, err)
+	sidecar := func(raw []byte) *types.BlockAccessListSidecar {
+		s, err := types.DecodeBlockAccessListSidecar(raw)
+		require.NoError(t, err)
+		return s
+	}
 
-	process := func(headerHash common.Hash, stored []byte) error {
+	process := func(headerHash common.Hash, stored *types.BlockAccessListSidecar) error {
 		h := &types.Header{Number: *uint256.NewInt(1), GasLimit: 60_000_000, BlockAccessListHash: &headerHash}
 		_, err := balpkg.Process(stored, h, nil, state.NewVersionedIO(0), true, false, "", log.New())
 		return err
 	}
-	require.NoError(t, process(computed.Hash(), computedBytes))
+	require.NoError(t, process(computed.Hash(), sidecar(computedBytes)))
 	require.NoError(t, process(computed.Hash(), nil))
-	require.ErrorContains(t, process(computed.Hash(), append(computedBytes, 0)), "hash mismatch")
-	require.ErrorContains(t, process(computed.Hash(), otherBytes), "hash mismatch")
-	require.ErrorContains(t, process(other.Hash(), otherBytes), "block access list mismatch")
+	require.ErrorContains(t, process(computed.Hash(), sidecar(otherBytes)), "hash mismatch")
+	require.ErrorContains(t, process(computed.Hash(), types.NewBlockAccessListSidecar(other)), "hash mismatch")
+	require.ErrorContains(t, process(other.Hash(), sidecar(otherBytes)), "block access list mismatch")
+	require.ErrorContains(t, process(other.Hash(), nil), "block access list mismatch")
+}
+
+func executedBALSidecar(t *testing.T) (*state.VersionedIO, types.BlockAccessList, *types.BlockAccessListSidecar) {
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	slot := accounts.InternKey(common.BigToHash(big.NewInt(1)))
+	io := state.NewVersionedIO(2)
+	writeSets := map[int]*state.WriteSet{}
+	addBalanceWrite(writeSets, 0, addr, 7)
+	addStorageWrite(writeSets, 1, addr, slot, 9)
+	recordAll(io, map[int]state.ReadSet{}, writeSets)
+
+	computed := balpkg.Create(1, nil, io, "", log.New())
+	raw, err := types.EncodeBlockAccessListBytes(computed)
+	require.NoError(t, err)
+	sidecar, err := types.DecodeBlockAccessListSidecar(raw)
+	require.NoError(t, err)
+	return io, computed, sidecar
+}
+
+func TestProcessReturnsTheSidecarListWhenItMatches(t *testing.T) {
+	io, computed, sidecar := executedBALSidecar(t)
+	headerHash := computed.Hash()
+	h := &types.Header{Number: *uint256.NewInt(1), GasLimit: 60_000_000, BlockAccessListHash: &headerHash}
+
+	got, err := balpkg.Process(sidecar, h, nil, io, true, false, "", log.New())
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Same(t, &sidecar.BlockAccessList()[0], &got[0])
+}
+
+func TestProcessRejectsAMatchingSidecarTheHeaderDoesNotAllow(t *testing.T) {
+	process := func(headerHash *common.Hash, gasLimit uint64) error {
+		io, _, sidecar := executedBALSidecar(t)
+		h := &types.Header{Number: *uint256.NewInt(1), GasLimit: gasLimit, BlockAccessListHash: headerHash}
+		_, err := balpkg.Process(sidecar, h, nil, io, true, false, "", log.New())
+		return err
+	}
+	_, computed, _ := executedBALSidecar(t)
+	computedHash := computed.Hash()
+	require.ErrorContains(t, process(&common.Hash{1}, 60_000_000), "hash mismatch")
+	require.ErrorIs(t, process(&computedHash, types.BalItemCost), rules.ErrInvalidBlock)
+	require.ErrorContains(t, process(nil, 60_000_000), "BlockAccessListHash is nil")
 }

@@ -374,6 +374,29 @@ func TestBALPrefetchKeysOfAnEmptyBAL(t *testing.T) {
 	require.Empty(t, slots)
 }
 
+// coldStorageTriePrefetcher reports a cold page only for prefixes below the storage root.
+type coldStorageTriePrefetcher struct{}
+
+func (coldStorageTriePrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, error) {
+	cold := 0
+	for _, k := range keys {
+		if len(k) > storageTrieDepth/2 {
+			cold++
+		}
+	}
+	return cold, nil
+}
+
+func TestTrieMostlyResidentSeesAColdStorageTrieOfOneAccount(t *testing.T) {
+	var keys [][]byte
+	for i := range 64 {
+		k := make([]byte, 128)
+		k[64], k[65], k[66] = byte(i>>4)&0xf, byte(i)&0xf, 3
+		keys = append(keys, k)
+	}
+	require.False(t, trieMostlyResident(context.Background(), coldStorageTriePrefetcher{}, keys))
+}
+
 func TestTrieMostlyResidentWithoutKeysSkipsTheWalk(t *testing.T) {
 	require.True(t, trieMostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, nil))
 }

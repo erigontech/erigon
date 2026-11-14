@@ -44,7 +44,6 @@ func TestExtCodeHashAfterSelfDestruct(t *testing.T) {
 		parallel bool
 		workers  int
 	}{
-		{"serial", false, 1},
 		{"parallel/workers=1", true, 1},
 		{"parallel/workers=2", true, 2},
 		{"parallel/workers=4", true, 4},

@@ -263,7 +263,7 @@ func TestParseMessage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, batch, err := parseMessage(json.RawMessage(tt.input))
+			got, batch, err := parseMessage(json.RawMessage(tt.input), 0)
 			require.NoError(t, err)
 			require.Equal(t, tt.batch, batch)
 			require.Len(t, got, len(tt.want))

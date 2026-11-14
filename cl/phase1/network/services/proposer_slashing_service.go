@@ -68,7 +68,7 @@ func (s *proposerSlashingService) IsMyGossipMessage(name string) bool {
 
 func (s *proposerSlashingService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.ProposerSlashing, error) {
 	obj := &cltypes.ProposerSlashing{}
-	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil

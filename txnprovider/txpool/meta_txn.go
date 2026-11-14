@@ -16,10 +16,26 @@
 
 package txpool
 
-import "github.com/holiman/uint256"
+import (
+	"math"
+
+	"github.com/holiman/uint256"
+)
+
+// blobFeeCap returns min(capSoFar, the txn's blob fee cap), or capSoFar for a txn without blobs.
+func blobFeeCap(slot *TxnSlot, capSoFar uint64) uint64 {
+	if !slot.HasBlobs() {
+		return capSoFar
+	}
+	if c := slot.GetBlobFeeCap(); c.LtUint64(capSoFar) {
+		return c.Uint64()
+	}
+	return capSoFar
+}
 
 func newMetaTxn(slot *TxnSlot, isLocal bool, timestamp uint64) *metaTxn {
 	mt := &metaTxn{TxnSlot: slot, keyedNonce: slot.hasKeyedNonce(), worstIndex: -1, bestIndex: -1, timestamp: timestamp}
+	mt.minBlobFeeCap = math.MaxUint64 // set in onSenderStateChange
 	if isLocal {
 		mt.subPool = IsLocal
 	}
@@ -30,6 +46,7 @@ func newMetaTxn(slot *TxnSlot, isLocal bool, timestamp uint64) *metaTxn {
 type metaTxn struct {
 	TxnSlot                   *TxnSlot
 	minFeeCap                 uint256.Int
+	minBlobFeeCap             uint64 // lowest blob fee cap up to this txn in its sender's nonce chain; set in onSenderStateChange
 	nonceDistance             uint64 // how far their nonces are from the state's nonce for the sender
 	cumulativeBalanceDistance uint64 // how far their cumulativeRequiredBalance are from the state's balance for the sender
 	minTip                    uint64
@@ -154,7 +171,7 @@ func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 
 // SortByNonceLess separates keyed sequences from account nonces. One keyed domain
 // in this index is enough because pool policy allows only one frame transaction
-// per sender; replacement separately requires an identical nonce-key set.
+// per sender; sender admission requires matching nonce keys for replacements.
 func SortByNonceLess(a, b *metaTxn) bool {
 	if a.TxnSlot.SenderID != b.TxnSlot.SenderID {
 		return a.TxnSlot.SenderID < b.TxnSlot.SenderID

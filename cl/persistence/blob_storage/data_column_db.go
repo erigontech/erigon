@@ -3,9 +3,11 @@ package blob_storage
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sync"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -28,6 +30,7 @@ const (
 //go:generate mockgen -typed=true -destination=./mock_services/data_column_storage_mock.go -package=mock_services . DataColumnStorage
 type DataColumnStorage interface {
 	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
+	WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error
 	RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error
 	ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error)
 	ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error)
@@ -67,48 +70,76 @@ func (s *dataColumnStorageImpl) columnKey(slot uint64, root common.Hash) columnK
 	return columnKey{root: root, bucket: slot / subdivisionSlot, width: s.beaconChainConfig.NumberOfColumns}
 }
 
-func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
-	// Get slot from sidecar - version-aware handling
-	// For Fulu: slot is in SignedBlockHeader.Header.Slot
-	// For GLOAS: slot is directly in Slot field
-	var slot uint64
-	switch {
-	case columnData.Version() >= clparams.GloasVersion:
-		slot = columnData.Slot
-	case columnData.SignedBlockHeader != nil:
-		slot = columnData.SignedBlockHeader.Header.Slot
-	default:
-		slot = columnData.Slot // fallback
+func sidecarSlot(sidecar *cltypes.DataColumnSidecar) uint64 {
+	if sidecar.Version() < clparams.GloasVersion && sidecar.SignedBlockHeader != nil {
+		return sidecar.SignedBlockHeader.Header.Slot
 	}
+	return sidecar.Slot
+}
 
-	// Ensure BlockRoot and Slot are set
+func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
+	slot := sidecarSlot(columnData)
 	columnData.BlockRoot = blockRoot
 	columnData.Slot = slot
+	return s.writeColumns(blockRoot, slot, []batchEntry{{idx: uint64(columnIndex), v: columnData}}, []*cltypes.DataColumnSidecar{columnData})
+}
 
-	created, err := func() (bool, error) {
+// WriteColumnSidecarsBatch stores the sidecars of one block: it validates them all first, skips
+// columns already on disk, and renames the new ones into place only after all of them are fsynced.
+func (s *dataColumnStorageImpl) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	if len(sidecars) == 0 {
+		return nil
+	}
+	if slices.Contains(sidecars, nil) {
+		return errors.New("nil column sidecar")
+	}
+	slot := sidecarSlot(sidecars[0])
+	entries := make([]batchEntry, len(sidecars))
+	seen := make(map[uint64]struct{}, len(sidecars))
+	for i, sidecar := range sidecars {
+		if got := sidecarSlot(sidecar); got != slot {
+			return fmt.Errorf("column sidecars span slots %d and %d", slot, got)
+		}
+		if sidecar.Index >= s.beaconChainConfig.NumberOfColumns {
+			return fmt.Errorf("column index %d out of range", sidecar.Index)
+		}
+		if _, dup := seen[sidecar.Index]; dup {
+			return fmt.Errorf("duplicate column index %d", sidecar.Index)
+		}
+		seen[sidecar.Index] = struct{}{}
+		entries[i] = batchEntry{idx: sidecar.Index, v: sidecar}
+	}
+	for _, sidecar := range sidecars {
+		sidecar.BlockRoot = blockRoot
+		sidecar.Slot = slot
+	}
+	return s.writeColumns(blockRoot, slot, entries, sidecars)
+}
+
+func (s *dataColumnStorageImpl) writeColumns(blockRoot common.Hash, slot uint64, entries []batchEntry, sidecars []*cltypes.DataColumnSidecar) error {
+	created, err := func() ([]int, error) {
 		lock := s.forRoot(blockRoot)
 		lock.Lock()
 		defer lock.Unlock()
 		if !s.startWrite(slot) {
-			return false, nil
+			return nil, nil
 		}
 		defer s.finishWrite()
-		created, err := s.writeAdmitted(slot, blockRoot, uint64(columnIndex), columnData)
-		if err != nil {
-			return false, err
+		existing, created, err := s.writeMissingAdmitted(slot, blockRoot, entries)
+		key := s.columnKey(slot, blockRoot)
+		for _, i := range slices.Concat(existing, created) {
+			s.bitmaps.set(key, entries[i].idx)
 		}
-		s.bitmaps.set(s.columnKey(slot, blockRoot), uint64(columnIndex))
-		return created, nil
+		return created, err
 	}()
-	if err != nil {
-		return err
-	}
-	if created {
+	if len(created) > 0 {
 		s.emitters.NotifyDataColumnStored(blockRoot)
-		s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(columnData))
-		log.Trace("wrote data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", columnIndex)
+		for _, i := range created {
+			s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(sidecars[i]))
+			log.Trace("wrote data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", entries[i].idx)
+		}
 	}
-	return nil
+	return err
 }
 
 func (s *dataColumnStorageImpl) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {

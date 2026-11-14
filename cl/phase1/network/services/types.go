@@ -58,8 +58,8 @@ type ProposerSlashingService serviceinterface.Service[*cltypes.ProposerSlashing]
 //go:generate mockgen -typed=true -destination=./mock_services/data_column_sidecar_service_mock.go -package=mock_services . DataColumnSidecarService
 type DataColumnSidecarService interface {
 	serviceinterface.Service[*cltypes.DataColumnSidecar]
-	// PublishColumnsFromEL handles columns built from local EL blobs as if they arrived on gossip.
-	PublishColumnsFromEL(ctx context.Context, sidecars []*cltypes.DataColumnSidecar)
+	// PublishColumns handles columns built from local EL blobs or recovered as if they arrived on gossip.
+	PublishColumns(ctx context.Context, sidecars []*cltypes.DataColumnSidecar)
 }
 
 //go:generate mockgen -typed=true -destination=./mock_services/attester_slashing_service_mock.go -package=mock_services . AttesterSlashingService

@@ -20,8 +20,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"time"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -56,6 +58,7 @@ type SnapshotsCfg struct {
 	notifier           *shards.Notifications
 	caplin             bool
 	blobs              bool
+	blobsFromSlot      uint64
 	caplinState        bool
 	syncConfig         ethconfig.Sync
 	prune              prune.Mode
@@ -84,6 +87,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	notifier *shards.Notifications,
 	caplin bool,
 	blobs bool,
+	blobsFromSlot uint64,
 	caplinState bool,
 	prune prune.Mode,
 	afterDownload func(ctx context.Context) error,
@@ -100,6 +104,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 		caplin:             caplin,
 		syncConfig:         syncConfig,
 		blobs:              blobs,
+		blobsFromSlot:      blobsFromSlot,
 		prune:              prune,
 		caplinState:        caplinState,
 		afterDownload:      afterDownload,
@@ -279,6 +284,16 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 	}
 }
 
+// snapshotBlobRetention resolves the blob serving window of the chain. An unknown chain keeps
+// an unbounded window, so no blob segment is skipped.
+func snapshotBlobRetention(cfg SnapshotsCfg) snapshotsync.BlobRetention {
+	r := snapshotsync.BlobRetention{SnapshotDir: cfg.dirs.Snap, FromSlot: cfg.blobsFromSlot, ServeWindowSlots: math.MaxUint64}
+	if _, beaconCfg, _, err := clparams.GetConfigsByNetworkName(cfg.chainConfig.ChainName); err == nil {
+		r.ServeWindowSlots = beaconCfg.MinSlotsForBlobsSidecarsRequest() + beaconCfg.SlotsPerEpoch
+	}
+	return r
+}
+
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
 	if !s.CurrentSyncCycle.IsFirstCycle {
 		return nil
@@ -324,6 +339,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		true, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
+		snapshotBlobRetention(cfg),
 		cfg.prune,
 		cstate,
 		tx,
@@ -374,6 +390,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		false, /*headerChain=*/
 		cfg.blobs,
 		cfg.caplinState,
+		snapshotBlobRetention(cfg),
 		cfg.prune,
 		cstate,
 		tx,

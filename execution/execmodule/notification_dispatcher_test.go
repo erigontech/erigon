@@ -23,7 +23,10 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -55,7 +58,7 @@ func TestDispatcherUsesSuppliedStateVersion(t *testing.T) {
 	accumulator := notifications.NewAccumulator()
 	accumulator.StartChange(header, nil, false)
 	capture := new(stateChangesCapture)
-	dispatcher := NewDispatcher(chain.AllProtocolChanges, nil, capture, log.New())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, nil, capture, nil, log.New())
 
 	const projectedStateVersion = uint64(7)
 	require.NoError(t, dispatcher.Dispatch(
@@ -66,6 +69,7 @@ func TestDispatcherUsesSuppliedStateVersion(t *testing.T) {
 		nil,
 		0,
 		1,
+		nil,
 		nil,
 	))
 	require.NotNil(t, capture.batch)
@@ -80,10 +84,10 @@ func TestDispatcherNotifiesAfterUnwindToGenesis(t *testing.T) {
 	events := shards.NewEvents()
 	headers, unsubscribe := events.AddHeaderSubscription()
 	t.Cleanup(unsubscribe)
-	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, log.New())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, nil, log.New())
 	unwindPoint := uint64(0)
 
-	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, nil, 1, 1, &unwindPoint))
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, nil, 1, 1, &unwindPoint, nil))
 
 	select {
 	case got := <-headers:
@@ -103,10 +107,10 @@ func TestDispatcherCapsHeadersAfterDeepUnwind(t *testing.T) {
 	events := shards.NewEvents()
 	headers, unsubscribe := events.AddHeaderSubscription()
 	t.Cleanup(unsubscribe)
-	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, log.New())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, nil, log.New())
 	unwindPoint := uint64(0)
 
-	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, nil, 2_000, 1_500, &unwindPoint))
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, nil, 2_000, 1_500, &unwindPoint, nil))
 
 	select {
 	case got := <-headers:
@@ -119,4 +123,143 @@ func TestDispatcherCapsHeadersAfterDeepUnwind(t *testing.T) {
 	default:
 		t.Fatal("headers after deep unwind were not announced")
 	}
+}
+
+func oneLogBlockReceipts(blockNum uint64) notifications.BlockReceipts {
+	header := &types.Header{Number: *uint256.NewInt(blockNum)}
+	l := &types.Log{BlockNumber: hexutil.Uint64(blockNum)}
+	receipt := &types.Receipt{BlockNumber: uint256.NewInt(blockNum), Logs: types.Logs{l}}
+	return notifications.BlockReceipts{Receipts: types.Receipts{receipt}, Txs: []types.Transaction{types.NewTransaction(blockNum, common.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), nil)}, Header: header}
+}
+
+func loadOneLogBlockReceipts(_ context.Context, _ kv.TemporalTx, blockNum uint64) (notifications.BlockReceipts, error) {
+	return oneLogBlockReceipts(blockNum), nil
+}
+
+func writeHeadersAndFillCache(t *testing.T, tx kv.RwTx, recent *notifications.RecentReceipts, blocks uint64) {
+	t.Helper()
+	for blockNum := uint64(1); blockNum <= blocks; blockNum++ {
+		b := oneLogBlockReceipts(blockNum)
+		require.NoError(t, rawdb.WriteHeader(tx, b.Header))
+		require.NoError(t, rawdb.WriteCanonicalHash(tx, b.Header.Hash(), blockNum))
+		recent.Add(b.Receipts, b.Txs, b.Header)
+	}
+}
+
+func TestDispatcherDeliversLogsOfBlocksMissingFromTheCache(t *testing.T) {
+	const blocks = notifications.MaxNotifiedBlocks
+	_, tx := temporaltest.NewTestTx(t)
+	recent := notifications.NewRecentReceipts(notifications.MaxNotifiedBlocks)
+	writeHeadersAndFillCache(t, tx, recent, blocks)
+	recent.Clear()
+	events := shards.NewEvents()
+	logs, unsubscribe := events.AddLogsSubscription()
+	t.Cleanup(unsubscribe)
+	events.EmptyLogSubscription(false)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, loadOneLogBlockReceipts, log.New())
+
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, 0, blocks, nil, tx))
+
+	select {
+	case got := <-logs:
+		require.Len(t, got, blocks, "every block's log is delivered")
+		for i, l := range got {
+			require.Equal(t, uint64(i+1), uint64(l.BlockNumber), "in block order")
+		}
+	default:
+		t.Fatal("no logs delivered")
+	}
+}
+
+func TestDispatcherDeliversReceiptsOfBlocksMissingFromTheCache(t *testing.T) {
+	const blocks = notifications.MaxNotifiedBlocks
+	_, tx := temporaltest.NewTestTx(t)
+	recent := notifications.NewRecentReceipts(notifications.MaxNotifiedBlocks)
+	writeHeadersAndFillCache(t, tx, recent, blocks)
+	recent.Clear()
+	events := shards.NewEvents()
+	receipts, unsubscribe := events.AddReceiptsSubscription()
+	t.Cleanup(unsubscribe)
+	events.EmptyReceiptSubscription(false)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, loadOneLogBlockReceipts, log.New())
+
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, 0, blocks, nil, tx))
+
+	select {
+	case got := <-receipts:
+		require.Len(t, got, blocks, "every block's receipt is delivered")
+		for i, r := range got {
+			blockNum := uint64(i + 1)
+			require.Equal(t, blockNum, r.Receipt.BlockNumber.Uint64(), "in block order")
+			require.Equal(t, blockNum, r.Header.Number.Uint64(), "with the block's header")
+			require.Equal(t, blockNum, r.Tx.GetNonce(), "with the block's transaction")
+		}
+	default:
+		t.Fatal("no receipts delivered")
+	}
+}
+
+func TestDispatcherSendsRemovedLogsOfBlocksLoadedAfterACacheMiss(t *testing.T) {
+	const blocks = 10
+	_, tx := temporaltest.NewTestTx(t)
+	recent := notifications.NewRecentReceipts(notifications.MaxNotifiedBlocks)
+	writeHeadersAndFillCache(t, tx, recent, blocks)
+	recent.Clear()
+	events := shards.NewEvents()
+	logs, unsubscribe := events.AddLogsSubscription()
+	t.Cleanup(unsubscribe)
+	events.EmptyLogSubscription(false)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, loadOneLogBlockReceipts, log.New())
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, 0, blocks, nil, tx))
+	require.Len(t, <-logs, blocks)
+
+	recent.Unwind(0)
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, blocks, blocks, nil, nil))
+
+	select {
+	case got := <-logs:
+		require.Len(t, got, blocks, "every loaded block's log is removed")
+		for _, l := range got {
+			require.True(t, l.Removed)
+		}
+	default:
+		t.Fatal("no removed logs delivered")
+	}
+}
+
+// The Engine API path has no committed tx, so the cache alone must cover the longest notify span.
+func TestDispatcherForkchoicePathDeliversLogsOfTheWholeNotifySpan(t *testing.T) {
+	const blocks = 1_500
+	_, tx := temporaltest.NewTestTx(t)
+	recent := shards.NewNotifications(nil).RecentReceipts
+	writeHeadersAndFillCache(t, tx, recent, blocks)
+	events := shards.NewEvents()
+	logs, unsubscribe := events.AddLogsSubscription()
+	t.Cleanup(unsubscribe)
+	events.EmptyLogSubscription(false)
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, events, nil, nil, log.New())
+
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, 0, blocks, nil, nil))
+
+	select {
+	case got := <-logs:
+		require.Len(t, got, 1_024, "the whole notify span is delivered")
+		require.Equal(t, uint64(blocks-1_024+1), uint64(got[0].BlockNumber))
+		require.Equal(t, uint64(blocks), uint64(got[len(got)-1].BlockNumber))
+	default:
+		t.Fatal("no logs delivered")
+	}
+}
+
+func TestDispatcherKeepsBlocksAboveFinalizedWithoutSubscribers(t *testing.T) {
+	const blocks = 3
+	_, tx := temporaltest.NewTestTx(t)
+	recent := notifications.NewRecentReceipts(notifications.MaxNotifiedBlocks)
+	writeHeadersAndFillCache(t, tx, recent, blocks)
+	rawdb.WriteForkchoiceFinalized(tx, oneLogBlockReceipts(2).Header.Hash())
+	dispatcher := NewDispatcher(chain.AllProtocolChanges, shards.NewEvents(), nil, nil, log.New())
+
+	require.NoError(t, dispatcher.Dispatch(t.Context(), tx, 0, nil, recent, 0, blocks, nil, nil))
+
+	require.Equal(t, []uint64{1, 2}, recent.Missing(1, blocks+1))
 }

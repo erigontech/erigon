@@ -1011,6 +1011,8 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	if err := rejectPendingState(bNrOrHash); err != nil {
 		return nil, err
 	}
+	ctx, storeEVM, stopEVMTimeout := setupEVMTimeout(ctx, api.evmCallTimeout)
+	defer stopEVMTimeout()
 
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -1146,10 +1148,14 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 		evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, config), txCtx, ibs, chainConfig, config)
 		evm.SetPrecompiles(activePrecompiles)
+		storeEVM(evm)
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
 			return nil, nil, err
+		}
+		if evm.Cancelled() {
+			return nil, nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 		}
 		if !tracer.Equal(prevTracer) {
 			return nil, tracer, nil
@@ -1176,6 +1182,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	for {
 		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
+			}
 			return nil, err
 		}
 		result, tracer, err := step(prevTracer)

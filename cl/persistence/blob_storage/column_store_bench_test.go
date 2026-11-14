@@ -125,3 +125,33 @@ func BenchmarkColumnLookups(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkColumnWrite writes the 8 custody columns of one block per op, one call each against
+// one batch call, onto a real on-disk fs.
+func BenchmarkColumnWrite(b *testing.B) {
+	const custody = 8
+	for _, batch := range []bool{false, true} {
+		b.Run(fmt.Sprintf("columns=%d/batch=%v", custody, batch), func(b *testing.B) {
+			fs := afero.NewBasePathFs(afero.NewOsFs(), b.TempDir())
+			store := newBenchColumnStore(b, fs, benchColumnConfig())
+			sidecars := benchColumnSidecars(b, 6)[:custody]
+			for _, s := range sidecars {
+				s.SignedBlockHeader.Header.Slot = subdivisionSlot + 1
+			}
+			for i := 0; b.Loop(); i++ {
+				root := benchRoot(i)
+				if batch {
+					if err := store.WriteColumnSidecarsBatch(b.Context(), root, sidecars); err != nil {
+						b.Fatal(err)
+					}
+					continue
+				}
+				for c, s := range sidecars {
+					if err := store.WriteColumnSidecars(b.Context(), root, int64(c), s); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+		})
+	}
+}

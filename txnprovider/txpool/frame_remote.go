@@ -123,7 +123,7 @@ func (p *TxPool) processRemoteBatch(ctx context.Context) ([]txpoolcfg.DiscardRea
 	var reasons []txpoolcfg.DiscardReason
 	if len(ordinary.Txns) > 0 {
 		var err error
-		reasons, err = p.addNewTxns(ctx, ordinary, ordinarySources, true)
+		reasons, err = p.addNewTxns(ctx, ordinary, ordinarySources)
 		if err != nil {
 			return reasons, err
 		}
@@ -178,7 +178,7 @@ func (p *TxPool) processRemoteFrame(ctx context.Context, frame remoteFrameTxn) {
 	}()
 	var txns TxnSlots
 	txns.Append(frame.txn, frame.sender[:], false)
-	_, err := p.addNewTxns(ctx, txns, []remoteSource{frame.source}, true)
+	_, err := p.addNewTxns(ctx, txns, []remoteSource{frame.source})
 	if err != nil && ctx.Err() == nil {
 		p.logger.Warn("[txpool] remote frame admission failed", "hash", frame.txn.IDHash, "err", err)
 	}

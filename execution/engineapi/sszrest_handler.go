@@ -417,6 +417,9 @@ func (e *EngineServer) handleSSZBodiesByHash(w http.ResponseWriter, r *http.Requ
 	}
 	headers := make([]*types.Header, len(blockHashes))
 	for i, hash := range blockHashes {
+		if e.isKnownBadBlock(hash) {
+			continue
+		}
 		header, err := e.executionService.GetHeader(r.Context(), &hash, nil)
 		if err != nil {
 			writeEngineProblem(w, err)

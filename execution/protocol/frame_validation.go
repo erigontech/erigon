@@ -78,6 +78,8 @@ const (
 	maxFrameValidationStateGas     = 500_000
 )
 
+var errFramePrefix = errors.New("unrecognized frame validation prefix")
+
 var frameExpiryCode = common.FromHex("60083614600a575f5ffd5b5f3560c01c4211601657005b5f5ffd")
 
 // ValidateFrameTransactionPrefix checks public-pool structure and gas budgets
@@ -138,15 +140,14 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 // sender approval and, if separate, payer approval. Restricting this prefix
 // bounds unpaid validation work; execution frames after it are not simulated.
 func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, error) {
-	invalid := errors.New("unrecognized frame validation prefix")
 	if len(tx.Frames) == 0 {
-		return nil, invalid
+		return nil, errFramePrefix
 	}
 	v := &frameValidationTracer{deploymentFrame: -1}
 	i := 0
 	if f := &tx.Frames[0]; f.IsExpiryVerifier() {
 		if len(f.Data) != 8 || f.Flags != 0 || f.Limits.State != 0 {
-			return nil, invalid
+			return nil, errFramePrefix
 		}
 		v.Deadline = binary.BigEndian.Uint64(f.Data)
 		i++
@@ -156,21 +157,21 @@ func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, 
 		i++
 	}
 	if i >= len(tx.Frames) {
-		return nil, invalid
+		return nil, errFramePrefix
 	}
 	verify := &tx.Frames[i]
 	if verify.Mode != types.FrameVerify || verify.ResolvedTarget(tx.SenderAddress) != tx.SenderAddress {
-		return nil, invalid
+		return nil, errFramePrefix
 	}
 	switch verify.Flags {
 	case types.FrameApproveBoth:
 	case types.FrameApproveExecution:
 		i++
 		if i >= len(tx.Frames) || tx.Frames[i].Mode != types.FrameVerify || tx.Frames[i].Flags != types.FrameApprovePayment {
-			return nil, invalid
+			return nil, errFramePrefix
 		}
 	default:
-		return nil, invalid
+		return nil, errFramePrefix
 	}
 	v.paymentFrame = i
 	var execution, state uint64
@@ -183,7 +184,7 @@ func frameValidationPrefix(tx *types.FrameTransaction) (*frameValidationTracer, 
 	for j, frame := range tx.Frames {
 		if j > v.paymentFrame {
 			if frame.Mode == types.FrameVerify {
-				return nil, invalid
+				return nil, errFramePrefix
 			}
 			continue
 		}

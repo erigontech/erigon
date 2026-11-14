@@ -89,6 +89,7 @@ func TestNewBlobHistoryDownloaderRequiresClock(t *testing.T) {
 			nil,
 			nil,
 			false,
+			0,
 			false,
 			log.New(),
 		)

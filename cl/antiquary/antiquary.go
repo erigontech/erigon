@@ -522,6 +522,20 @@ func (s *Antiquary) NotifyBlobBackfilled(completed bool) {
 	s.blobBackfilled.Store(completed)
 }
 
+// RetireBlobSnapshotsBelow drops blob snapshot segments that hold nothing at or above floor
+// and stops seeding them.
+func (s *Antiquary) RetireBlobSnapshotsBelow(floor uint64) error {
+	if s == nil || s.sn == nil {
+		return nil
+	}
+	var onDelete func([]string) error
+	if s.downloader != nil {
+		onDelete = func(paths []string) error { return s.downloader.Delete(s.ctx, paths) }
+	}
+	_, err := s.sn.RetireBlobsBelow(floor, onDelete)
+	return err
+}
+
 const caplinSnapshotBuildSemaWeight int64 = 1
 
 // blobCompressWorkers picks the compression parallelism for a dump, with a func to release the
@@ -530,8 +544,8 @@ const caplinSnapshotBuildSemaWeight int64 = 1
 // One worker keeps steady-state retirement from competing with execution. Catching up may use the
 // full estimate, but only while holding the limiter that admits one kind of snapshot build at a
 // time, since EL retirement sizes its own workers from the same estimate of the host. A limiter it
-// cannot take drops the dump to one worker rather than skipping it: the blob gate stays shut until
-// the whole range lands, so retiring slowly beats not retiring.
+// cannot take drops the dump to one worker rather than skipping it, since retiring slowly beats not
+// retiring.
 func (s *Antiquary) blobCompressWorkers(from, to uint64) (int, func()) {
 	noop := func() {}
 	if !isBlobBacklog(from, to) {
@@ -550,9 +564,6 @@ func (s *Antiquary) blobCompressWorkers(from, to uint64) (int, func()) {
 
 // isBlobBacklog reports whether the pending range is a catch-up rather than the single chunk
 // retired at the tip, which is what decides how many workers the compression may use.
-//
-// The span is the one DumpBlobsSidecar counts chunks with: it breaks once `toSlot-i` drops below a
-// merge limit, so two chunks are compressed exactly when the span reaches two of them.
 func isBlobBacklog(from, to uint64) bool {
 	return to >= from && to-from >= 2*snaptype.CaplinMergeLimit
 }
@@ -584,9 +595,12 @@ const blobRetirementGapLogInterval = 10 * time.Minute
 func (s *Antiquary) blobSegmentComplete(tx kv.Tx, from, to uint64, blobCount freezeblocks.BlobCountBySlotFn) (bool, error) {
 	if !s.blobBackfilled.Load() {
 		for slot := max(from, s.blobCheckedTo); slot < to; slot++ {
-			want, err := blobCount(slot)
+			want, skipped, err := blobCount(tx, slot)
 			if err != nil {
 				return false, err
+			}
+			if skipped {
+				continue
 			}
 			blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 			if err != nil {

@@ -22,8 +22,6 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"math/big"
 	"os"
 
@@ -31,7 +29,6 @@ import (
 
 	"github.com/erigontech/erigon/cmd/evm/internal/t8ntool"
 	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/common/log/v3"
 	cli2 "github.com/erigontech/erigon/node/cli"
 )
 
@@ -224,14 +221,6 @@ func init() {
 
 func main() {
 	if err := app.Run(context.Background(), os.Args); err != nil {
-		code := 1
-		if ec, ok := errors.AsType[*t8ntool.NumberedError](err); ok {
-			code = ec.ExitCode()
-		}
-		_, printErr := fmt.Fprintln(os.Stderr, err)
-		if printErr != nil {
-			log.Warn("print error", "err", printErr)
-		}
-		os.Exit(code)
+		os.Exit(1) // fallback: NewApp's ExitErrHandler normally prints and exits first
 	}
 }

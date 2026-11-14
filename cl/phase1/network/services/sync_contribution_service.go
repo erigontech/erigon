@@ -167,7 +167,7 @@ func (s *syncContributionService) DecodeGossipMessage(pid peer.ID, data []byte, 
 			},
 		},
 	}
-	if err := obj.SignedContributionAndProof.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj.SignedContributionAndProof, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil

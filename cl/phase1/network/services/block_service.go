@@ -209,7 +209,7 @@ type blockValidationContext struct {
 
 // elColumnsPublisher handles columns built from local EL blobs as if they arrived on gossip.
 type elColumnsPublisher interface {
-	PublishColumnsFromEL(ctx context.Context, sidecars []*cltypes.DataColumnSidecar)
+	PublishColumns(ctx context.Context, sidecars []*cltypes.DataColumnSidecar)
 }
 
 type blockService struct {
@@ -329,8 +329,14 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return err
 	}
 	b.publishBlockGossipEvent(msg)
-	b.startELColumnsImportOnce(ctx, msg)
+	afterAdmission := startsELColumnsImportAfterAdmission(msg)
+	if !afterAdmission {
+		b.startELColumnsImportOnce(ctx, msg)
+	}
 	accepted, err := b.processAndStoreBlock(ctx, msg, false)
+	if accepted && afterAdmission {
+		b.startELColumnsImportOnce(ctx, msg)
+	}
 	if err != nil {
 		if waitsForBlockDependency(err) {
 			job, _ := b.scheduleBlockForLaterProcessing(msg, nil, true, false)
@@ -362,12 +368,19 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	return nil
 }
 
+// startsELColumnsImportAfterAdmission reports whether the EL column import waits for fork choice to admit the block:
+// a Gloas data column sidecar is accepted only for a block that passed on_block.
+func startsELColumnsImportAfterAdmission(block *cltypes.SignedBeaconBlock) bool {
+	return block.Version() >= clparams.GloasVersion
+}
+
 // startELColumnsImportOnce starts the EL column import for the first block of a proposer and slot only, so equivocating
 // blocks and retries of a queued block do not repeat the getBlobs call and the column work.
 func (b *blockService) startELColumnsImportOnce(ctx context.Context, block *cltypes.SignedBeaconBlock) {
 	// The importer's fork and engine checks give the same result for every block of a proposer and slot, its blob-count
-	// check does not. A queued block gets here before gossip validation checked that count.
-	if v := block.Version(); v >= clparams.FuluVersion && v < clparams.GloasVersion && b.blobCountOutOfRange(block) {
+	// check does not, so a block it would skip must not take the claim of a valid block of the same proposer and slot.
+	// A queued Fulu block also gets here before gossip validation checked that count.
+	if block.Version() >= clparams.FuluVersion && b.blobCountOutOfRange(block) {
 		return
 	}
 	if started, _ := b.elImportsStarted.ContainsOrAdd(blockGossipKey(block), struct{}{}); !started {
@@ -375,16 +388,21 @@ func (b *blockService) startELColumnsImportOnce(ctx context.Context, block *clty
 	}
 }
 
-// blobCountOutOfRange reports whether a Fulu block has no blobs or more than the blob limit of its epoch.
+// blobCountOutOfRange reports whether a Fulu or Gloas block has no blobs or more than the blob limit of its epoch.
 func (b *blockService) blobCountOutOfRange(block *cltypes.SignedBeaconBlock) bool {
-	blobs := uint64(block.Block.Body.BlobKzgCommitments.Len())
+	commitments := block.GetBlobKzgCommitments()
+	if commitments == nil {
+		return true
+	}
+	blobs := uint64(commitments.Len())
 	return blobs == 0 || blobs > b.beaconCfg.GetBlobParameters(block.Block.Slot/b.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock
 }
 
-// importColumnsFromELBlobs builds the custody columns of a Fulu block from the blobs in the EL's pool
-// (engine_getBlobsV2), so the block need not wait for them on gossip.
+// importColumnsFromELBlobs builds the data columns of a Fulu or Gloas block from the blobs in the EL's pool
+// (engine_getBlobsV2), stores the ones this node keeps and publishes those on its subscribed subnets, so the block need
+// not wait for them on gossip.
 func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock) {
-	if block.Version() < clparams.FuluVersion || block.Version() >= clparams.GloasVersion || b.engine == nil || b.blobCountOutOfRange(block) {
+	if block.Version() < clparams.FuluVersion || b.engine == nil || b.blobCountOutOfRange(block) {
 		return
 	}
 	peerDas := b.forkchoiceStore.GetPeerDas()
@@ -398,9 +416,10 @@ func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *clty
 	if available, err := peerDas.IsDataAvailable(block.Block.Slot, blockRoot); err != nil || available {
 		return
 	}
-	versionedHashes := make([]common.Hash, 0, block.Block.Body.BlobKzgCommitments.Len())
-	for i := range block.Block.Body.BlobKzgCommitments.Len() {
-		hash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*block.Block.Body.BlobKzgCommitments.Get(i)))
+	commitments := block.GetBlobKzgCommitments()
+	versionedHashes := make([]common.Hash, 0, commitments.Len())
+	for i := range commitments.Len() {
+		hash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*commitments.Get(i)))
 		if err != nil {
 			return
 		}
@@ -419,7 +438,7 @@ func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *clty
 		return
 	}
 	// The EL wait may have used up the import deadline, but the columns must still be published.
-	b.dataColumns.PublishColumnsFromEL(context.WithoutCancel(ctx), toPublish)
+	b.dataColumns.PublishColumns(context.WithoutCancel(ctx), toPublish)
 	log.Debug("[blockService] imported columns from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "blobs", len(blobs))
 }
 
@@ -1348,9 +1367,14 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 					return fmt.Errorf("%w: block proposer index %d does not match expected proposer %d", forkchoice.ErrBlockInvalid, block.ProposerIndex, validationContext.expectedProposer)
 				}
 				authenticated = true
-				b.startELColumnsImportOnce(ctx, job.block)
+				if !startsELColumnsImportAfterAdmission(job.block) {
+					b.startELColumnsImportOnce(ctx, job.block)
+				}
 			}
 			accepted, blockErr = b.processAndStoreBlock(ctx, block, hasPendingBlockWrite)
+			if accepted && startsELColumnsImportAfterAdmission(job.block) {
+				b.startELColumnsImportOnce(ctx, job.block)
+			}
 			return blockErr
 		}
 	} else if hasPendingBlockWrite {

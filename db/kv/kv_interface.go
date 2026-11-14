@@ -792,16 +792,6 @@ type BucketMigrator interface {
 	ClearTable(string) error
 }
 
-// PendingMutations in-memory storage of changes
-// Later they can either be flushed to the database or abandon
-type PendingMutations interface {
-	Putter
-	// Flush all in-memory data into `tx`
-	Flush(ctx context.Context, tx RwTx) error
-	Close()
-	BatchSize() int
-}
-
 type (
 	DBVerbosityLvl int8
 	Label          string
