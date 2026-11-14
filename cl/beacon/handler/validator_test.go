@@ -272,6 +272,5 @@ func (t *validatorTestSuite) TestGetEthV2ValidatorAggregateAttestationUsesCommit
 }
 
 func TestValidator(t *testing.T) {
-	t.Parallel()
 	suite.Run(t, new(validatorTestSuite))
 }

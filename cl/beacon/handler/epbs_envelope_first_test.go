@@ -242,7 +242,6 @@ func (f *envelopeContentsFixture) makePersistedEnvelopeUnusable(tc unavailablePe
 }
 
 func TestPostEnvelopeContentsGossipModePublishesEnvelopeFirst(t *testing.T) {
-	t.Parallel()
 	withBlobs := []contentsEventKind{eventEnvelopePublish, eventColumnPublish, eventColumnWrite, eventImport}
 	for _, tc := range []struct {
 		name         string
@@ -270,7 +269,6 @@ func TestPostEnvelopeContentsGossipModePublishesEnvelopeFirst(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsGossipModePublishesEnvelopeUnderTheBlockEpochDigest(t *testing.T) {
-	t.Parallel()
 	const epoch = 3
 	slotsPerEpoch := clparams.MainnetBeaconConfig.SlotsPerEpoch
 	for _, tc := range []struct {
@@ -302,7 +300,6 @@ func TestPostEnvelopeContentsGossipModePublishesEnvelopeUnderTheBlockEpochDigest
 }
 
 func TestPostEnvelopeContentsGossipModePublishesEnvelopeAfterClientCancel(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	slot := time.Duration(f.handler.beaconChainCfg.SecondsPerSlot) * time.Second
 	requestCtx, cancelRequest := context.WithCancel(t.Context())
@@ -352,7 +349,6 @@ func requireSameDeadline(t *testing.T, want, got time.Time, what string) {
 }
 
 func TestPostEnvelopeContentsGossipModeImportsAfterClientCancel(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		name         string
 		pendingLocal bool
@@ -569,7 +565,6 @@ func TestPostEnvelopeContentsGossipModeRepostOfImportedEnvelopeAnswersOK(t *test
 }
 
 func TestPostEnvelopeContentsGossipModeRepostOfUnimportedEnvelopeAnswersAccepted(t *testing.T) {
-	t.Parallel()
 	const rejected = "invalid execution payload"
 	t.Run("the import was rejected", func(t *testing.T) {
 		f := newEnvelopeContentsFixture(t, 0, 2)
@@ -672,7 +667,6 @@ func TestPostEnvelopeContentsGossipModeRepostOfUnimportedEnvelopeAnswersAccepted
 }
 
 func TestPostEnvelopeContentsGossipModeEnvelopePublishFailureStopsBeforeColumns(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	f.failEnvelope = errors.New("injected envelope publish failure")
 	body := f.contents(f.blobs...)
@@ -708,7 +702,6 @@ func (r eofRecorder) Read(p []byte) (int, error) {
 }
 
 func TestPostEnvelopeContentsGossipModeRecordsDecodeTimeAsArrival(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 1)
 	var bodyDone, gossipEntry, arrival time.Time
 	var arrivalRecorded, sampled bool
@@ -743,7 +736,6 @@ func (f *envelopeContentsFixture) preparationAllowed() bool {
 }
 
 func TestPostEnvelopeContentsGossipModeHoldsPreparationUntilImport(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	writes, imports := 0, 0
 	f.failWrite = func(uint64) error {
@@ -797,7 +789,6 @@ func TestPostEnvelopeContentsGossipModeReleasesPreparationAfterOneSlot(t *testin
 }
 
 func TestPostEnvelopeContentsGossipModeAnswersAcceptedOncePublished(t *testing.T) {
-	t.Parallel()
 	t.Run("pendingLocal with a storage failure and missing data availability", func(t *testing.T) {
 		f := newEnvelopeContentsFixture(t, 0, 2)
 		f.failWrite = func(uint64) error { return errors.New("injected write failure") }
@@ -867,7 +858,6 @@ func TestPostEnvelopeContentsGossipModeAnswersAcceptedOncePublished(t *testing.T
 }
 
 func TestPostEnvelopeRetryWithoutContentsKeepsContentsRequired(t *testing.T) {
-	t.Parallel()
 	const failedColumn = 5
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	f.failPublish = failPublishOf(failedColumn)
@@ -929,7 +919,6 @@ func TestPostEnvelopeFreshClaimWithoutContentsKeepsContentsRequired(t *testing.T
 }
 
 func TestPostEnvelopeContentsRepairWithPendingImportClearsContentsRequired(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		importErr error
@@ -1165,7 +1154,6 @@ func TestPostEnvelopeContentsGossipModeValidationDeadlineAnswersUnavailable(t *t
 }
 
 func TestPostEnvelopeConsensusModeBroadcastFailureKeepsContentsRequired(t *testing.T) {
-	t.Parallel()
 	const failedColumn = 5
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	f.failPublish = failPublishOf(failedColumn)
@@ -1199,7 +1187,6 @@ func TestPostEnvelopeConsensusModeBroadcastFailureKeepsContentsRequired(t *testi
 }
 
 func TestPostEnvelopeConsensusModeRetryPublishesFailedEnvelope(t *testing.T) {
-	t.Parallel()
 	const failedColumn = 5
 	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
 		for _, tc := range []struct {
@@ -1264,7 +1251,6 @@ func TestPostEnvelopeConsensusModeRetryPublishesFailedEnvelope(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsConsensusModesPublishEnvelopeLast(t *testing.T) {
-	t.Parallel()
 	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
 		for _, tc := range []struct {
 			name          string
@@ -1303,7 +1289,6 @@ func TestPostEnvelopeContentsConsensusModesPublishEnvelopeLast(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsConsensusFailurePublishesNothing(t *testing.T) {
-	t.Parallel()
 	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
 		for _, pendingLocal := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/pendingLocal=%t", mode, pendingLocal), func(t *testing.T) {
@@ -1323,7 +1308,6 @@ func TestPostEnvelopeContentsConsensusFailurePublishesNothing(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsConsensusModesWriteFailureAnswersAccepted(t *testing.T) {
-	t.Parallel()
 	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
 		query := "?broadcast_validation=" + mode
 		t.Run(mode+"/DA missing", func(t *testing.T) {
@@ -1463,7 +1447,6 @@ func TestPostEnvelopeContentsConsensusModesWriteFailureAnswersAccepted(t *testin
 }
 
 func TestPostEnvelopeContentsConsensusRepairUsesAdmissionContentsRequired(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	f.failFirstCustodyWrite()
 	body := f.contents(f.blobs...)
@@ -1491,7 +1474,6 @@ func TestPostEnvelopeContentsConsensusRepairUsesAdmissionContentsRequired(t *tes
 }
 
 func TestPostEnvelopeContentsConsensusAndEquivocationRechecksBeforeColumns(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	block := f.forkchoice.Blocks[f.root].Block
 	f.duringConsensusValidation = func() {
@@ -1506,7 +1488,6 @@ func TestPostEnvelopeContentsConsensusAndEquivocationRechecksBeforeColumns(t *te
 }
 
 func TestPostEnvelopeContentsConsensusModesRecheckFinalityAfterTheWrites(t *testing.T) {
-	t.Parallel()
 	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newEnvelopeContentsFixture(t, 0, 2)
@@ -1530,7 +1511,6 @@ func TestPostEnvelopeContentsConsensusModesRecheckFinalityAfterTheWrites(t *test
 }
 
 func TestPostEnvelopeConsensusModeWithoutBlobDataReadsStoredColumns(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	f.expirePendingLocal()
 
@@ -1548,7 +1528,6 @@ func TestPostEnvelopeConsensusModeWithoutBlobDataReadsStoredColumns(t *testing.T
 }
 
 func TestPostEnvelopeContentsConsensusModesImportRejectionAfterColumnsKeepsBadRequest(t *testing.T) {
-	t.Parallel()
 	for _, mode := range []string{"consensus", "consensus_and_equivocation"} {
 		for _, tc := range []struct {
 			name        string
@@ -1595,7 +1574,6 @@ func TestPostEnvelopeContentsConsensusModesImportRejectionAfterColumnsKeepsBadRe
 }
 
 func TestPostEnvelopeContentsConsensusAndEquivocationChecksBeforeTheEnvelope(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	block := f.forkchoice.Blocks[f.root].Block
 	f.wrapImport(func(_ context.Context, next func() error) error {
@@ -1614,7 +1592,6 @@ func TestPostEnvelopeContentsConsensusAndEquivocationChecksBeforeTheEnvelope(t *
 }
 
 func TestPostEnvelopeContentsLegacyRoutePublishesEnvelopeLast(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 2)
 
 	recorder := f.postLegacy(t.Context())
@@ -1624,7 +1601,6 @@ func TestPostEnvelopeContentsLegacyRoutePublishesEnvelopeLast(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsRequiredDoesNotRefuseADifferentEnvelope(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	f.failPublish = failPublishOf(5)
 	f.failFirstCustodyWrite()
@@ -1642,7 +1618,6 @@ func TestPostEnvelopeContentsRequiredDoesNotRefuseADifferentEnvelope(t *testing.
 }
 
 func TestPostEnvelopeNonEarlyPathsImportUnderTheRequestContext(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		name                     string
 		columns                  bool
@@ -1731,7 +1706,6 @@ func TestPostEnvelopeNonEarlyPathsImportUnderTheRequestContext(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsRepostNotAnsweredFromStateKeepsItsStatus(t *testing.T) {
-	t.Parallel()
 	requireFirstOK := func(t *testing.T, f *envelopeContentsFixture) {
 		t.Helper()
 		first := f.postAllBlobs(false, "")

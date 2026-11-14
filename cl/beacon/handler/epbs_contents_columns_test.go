@@ -423,7 +423,6 @@ func (f *envelopeContentsFixture) requirePublishedColumnsEqual(want [][]byte) {
 }
 
 func TestPostEnvelopeContentsPublishesColumnsBeforeFirstWrite(t *testing.T) {
-	t.Parallel()
 	for _, mode := range []string{"stateless", "pendingLocal"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newEnvelopeContentsFixture(t, 0, 2)
@@ -442,7 +441,6 @@ func TestPostEnvelopeContentsPublishesColumnsBeforeFirstWrite(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsWriteFailureStillPublishesColumns(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		name          string
 		pendingLocal  bool
@@ -483,7 +481,6 @@ func TestPostEnvelopeContentsWriteFailureStillPublishesColumns(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsPublishesColumnsAfterClientCancel(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	requestCtx, cancelRequest := context.WithCancel(t.Context())
 	f.failPublish = func(uint64) error { cancelRequest(); return nil }
@@ -504,7 +501,6 @@ func TestPostEnvelopeContentsPublishesColumnsAfterClientCancel(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsPublishesColumnsUnderTheBlockEpochDigest(t *testing.T) {
-	t.Parallel()
 	const epoch = 3
 	slotsPerEpoch := clparams.MainnetBeaconConfig.SlotsPerEpoch
 	for _, tc := range []struct {
@@ -535,7 +531,6 @@ func TestPostEnvelopeContentsPublishesColumnsUnderTheBlockEpochDigest(t *testing
 }
 
 func TestPostEnvelopeContentsColumnPublishFailureAllowsRepairingRePost(t *testing.T) {
-	t.Parallel()
 	const failedColumn = 5
 	for _, tc := range []struct {
 		name, query   string
@@ -604,7 +599,6 @@ func TestPostEnvelopeContentsColumnPublishFailureAllowsRepairingRePost(t *testin
 }
 
 func TestPostEnvelopeContentsColumnPublishFailureWinsOverWriteFailure(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	f.failWrite = func(uint64) error { return errors.New("injected write failure") }
 	f.failPublish = func(index uint64) error {
@@ -621,7 +615,6 @@ func TestPostEnvelopeContentsColumnPublishFailureWinsOverWriteFailure(t *testing
 }
 
 func TestPostEnvelopeContentsLogsBlockOfFailedColumnPublish(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 1)
 	var logged bytes.Buffer
 	f.handler.logger = log.New()
@@ -643,7 +636,6 @@ func TestPostEnvelopeContentsLogsBlockOfFailedColumnPublish(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsUsesCachedLocalBundle(t *testing.T) {
-	t.Parallel()
 	for _, query := range []string{"", "?broadcast_validation=consensus", "?broadcast_validation=consensus_and_equivocation"} {
 		t.Run(query, func(t *testing.T) {
 			f := newEnvelopeContentsFixture(t, 0, 1)
@@ -661,7 +653,6 @@ func TestPostEnvelopeContentsUsesCachedLocalBundle(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsStoredColumnsPassDataAvailability(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		name         string
 		pendingLocal bool
@@ -682,7 +673,6 @@ func TestPostEnvelopeContentsStoredColumnsPassDataAvailability(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsRejectsInvalidProofBeforePublishing(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	contents := f.contents(f.blobs...)
 	contents.KZGProofs.Set(7, &f.blobs[1].proofs[7])
@@ -695,7 +685,6 @@ func TestPostEnvelopeContentsRejectsInvalidProofBeforePublishing(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsRejectsBlobOfAnotherCommitment(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 1)
 	other := newTestBlob(t, 99, clparams.FuluVersion)
 
@@ -708,7 +697,6 @@ func TestPostEnvelopeContentsRejectsBlobOfAnotherCommitment(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsRejectsNilElements(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		cached bool
@@ -751,7 +739,6 @@ func TestPostEnvelopeContentsRejectsNilElements(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsTreatsCachedNilBlobAsMiss(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 1)
 	cached := bundleOf(f.blobs[0])
 	cached.Blob = nil
@@ -764,7 +751,6 @@ func TestPostEnvelopeContentsTreatsCachedNilBlobAsMiss(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsCachedBundleWithWrongProofCountIsVerified(t *testing.T) {
-	t.Parallel()
 	cachedOneProof := func(f *envelopeContentsFixture) {
 		cached := bundleOf(f.blobs[0])
 		cached.KzgProofs = cached.KzgProofs[:1]
@@ -794,7 +780,6 @@ func TestPostEnvelopeContentsCachedBundleWithWrongProofCountIsVerified(t *testin
 }
 
 func TestPostEnvelopeContentsMixesCachedAndRequestBundles(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		cached int
@@ -815,7 +800,6 @@ func TestPostEnvelopeContentsMixesCachedAndRequestBundles(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsConsensusModesRetryOfIgnoredEnvelope(t *testing.T) {
-	t.Parallel()
 	const failedColumn = 5
 	importIgnoringAfterPersisting := func(f *envelopeContentsFixture, persisted *cltypes.SignedExecutionPayloadEnvelope) {
 		f.forkchoice.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {

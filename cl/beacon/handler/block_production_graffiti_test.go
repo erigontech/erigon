@@ -47,7 +47,6 @@ func (e rpcError) Error() string  { return "rpc error" }
 func (e rpcError) ErrorCode() int { return e.code }
 
 func TestGraffitiCommitPrefix(t *testing.T) {
-	t.Parallel()
 	require.Equal(t, "a53e", graffitiCommitPrefix("0xa53e9545"))
 	require.Equal(t, "a53e", graffitiCommitPrefix("a53e9545"))
 	require.Equal(t, "ab00", graffitiCommitPrefix("ab"))
@@ -55,14 +54,12 @@ func TestGraffitiCommitPrefix(t *testing.T) {
 }
 
 func TestGraffitiClientCode(t *testing.T) {
-	t.Parallel()
 	require.Equal(t, "GE", graffitiClientCode("GE"))
 	require.Equal(t, "GE", graffitiClientCode("GETH"))
 	require.Equal(t, "N", graffitiClientCode("N"))
 }
 
 func TestFetchExecutionClientVersion(t *testing.T) {
-	t.Parallel()
 	t.Run("available is cached", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		engine := execution_client.NewMockExecutionEngine(ctrl)
@@ -222,7 +219,6 @@ func TestDefaultGraffiti(t *testing.T) {
 }
 
 func TestCombinedGraffiti(t *testing.T) {
-	t.Parallel()
 	clCommit := graffitiCommitPrefix(version.GitCommit)
 
 	withELVersion := func() *ApiHandler {
@@ -357,7 +353,6 @@ func TestCombinedGraffiti(t *testing.T) {
 }
 
 func TestGraffitiFromHex(t *testing.T) {
-	t.Parallel()
 	t.Run("a full 32-byte value matches common.HexToHash", func(t *testing.T) {
 		full := "0x" + strings.Repeat("ab", 32)
 		require.Equal(t, common.HexToHash(full), graffitiFromHex(full))
@@ -374,7 +369,6 @@ func TestGraffitiFromHex(t *testing.T) {
 }
 
 func TestRequestGraffiti(t *testing.T) {
-	t.Parallel()
 	clCommit := graffitiCommitPrefix(version.GitCommit)
 
 	newHandler := func(preserveGraffiti bool) *ApiHandler {

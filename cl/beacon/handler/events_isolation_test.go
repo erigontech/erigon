@@ -37,7 +37,6 @@ import (
 // A stream that asked only for state topics is not subscribed to the operation feed, so gossip traffic never reaches
 // its buffer.
 func TestEventStreamSubscribesOnlyTheFeedsOfItsTopics(t *testing.T) {
-	t.Parallel()
 	emitters := beaconevents.NewEventEmitter()
 	sub := subscribeEventStream(emitters, mapset.NewSet(beaconevents.StateHead, beaconevents.StateBlock))
 	defer sub.unsubscribe()
@@ -51,7 +50,6 @@ func TestEventStreamSubscribesOnlyTheFeedsOfItsTopics(t *testing.T) {
 // State and operation events have separate buffers: a full operation buffer does not make the stream miss a head event,
 // which is sent without waiting for subscribers.
 func TestEventStreamHeadIsNotCrowdedOutByOperationEvents(t *testing.T) {
-	t.Parallel()
 	emitters := beaconevents.NewEventEmitter()
 	sub := subscribeEventStream(emitters, mapset.NewSet(beaconevents.StateHead, beaconevents.OpSingleAttestation))
 	defer sub.unsubscribe()
@@ -67,7 +65,6 @@ func TestEventStreamHeadIsNotCrowdedOutByOperationEvents(t *testing.T) {
 // Every topic a feed emits is listed under that feed: a stream subscribes only the feeds of its topics, so a topic
 // listed under the wrong feed would never reach it.
 func TestEventStreamTopicsAreListedUnderTheFeedThatEmitsThem(t *testing.T) {
-	t.Parallel()
 	emitters := beaconevents.NewEventEmitter()
 	emitted := map[beaconevents.EventTopic]eventFeed{}
 	for feed, sender := range map[eventFeed]any{stateFeed: emitters.State(), operationFeed: emitters.Operation()} {

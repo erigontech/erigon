@@ -43,7 +43,6 @@ import (
 )
 
 func TestPayloadAttributesEventSkipsStateWithoutSubscriber(t *testing.T) {
-	t.Parallel()
 	config := payloadPreparationLoopConfig(12, 0, 0)
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
@@ -70,7 +69,6 @@ func TestPayloadAttributesEventSkipsStateWithoutSubscriber(t *testing.T) {
 }
 
 func TestPayloadAttributesEventAtGloasForkBoundary(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, postState, handler, _, _, store, _ := setupTestingHandler(
 		t, clparams.ElectraVersion, log.Root(), false,
 	)
@@ -431,7 +429,6 @@ func TestPayloadAttributesEventAtPayloadDecisionWithoutHeadChange(t *testing.T) 
 }
 
 func TestPayloadAttributesEventSkipsStateWorkForFarBehindHead(t *testing.T) {
-	t.Parallel()
 	headState, handler, store, _ := setupEmptyGloasHead(t)
 	store.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
 		t.Fatal("payload attributes event copied state for a head beyond the proposer lookahead")
@@ -448,7 +445,6 @@ func TestPayloadAttributesEventSkipsStateWorkForFarBehindHead(t *testing.T) {
 }
 
 func TestPayloadAttributesEventDropsHeadChangedBeforePublication(t *testing.T) {
-	t.Parallel()
 	headState, handler, store, parentRoot := setupEmptyGloasHead(t)
 	var headCalls atomic.Int32
 	store.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, uint64, error) {

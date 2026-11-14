@@ -115,7 +115,6 @@ func (r *apiEnvelopeRebuilder) Rebuild(ctx context.Context, _ *envelope_history.
 }
 
 func TestGetExecutionPayloadEnvelopeRebuildsPrunedBlock(t *testing.T) {
-	t.Parallel()
 	handler, root, envelope, forkchoiceStore := newHistoricalEnvelopeHandlerAtSlot(t, 64)
 	handler.envelopeRebuilder = &apiEnvelopeRebuilder{envelope: envelope}
 	forkchoiceStore.IsRootOptimisticVal = true
@@ -129,7 +128,6 @@ func TestGetExecutionPayloadEnvelopeRebuildsPrunedBlock(t *testing.T) {
 }
 
 func TestGetExecutionPayloadEnvelopeUsesFinalizedCheckpointStart(t *testing.T) {
-	t.Parallel()
 	for _, test := range []struct {
 		name          string
 		slot          uint64
@@ -150,7 +148,6 @@ func TestGetExecutionPayloadEnvelopeUsesFinalizedCheckpointStart(t *testing.T) {
 }
 
 func TestGetExecutionPayloadEnvelopeReadsBlockFromDatabase(t *testing.T) {
-	t.Parallel()
 	handler, root, envelope, forkchoiceStore := newHistoricalEnvelopeHandlerAtSlot(t, 64)
 	forkchoiceStore.SetEnvelope(root, envelope)
 
@@ -161,7 +158,6 @@ func TestGetExecutionPayloadEnvelopeReadsBlockFromDatabase(t *testing.T) {
 }
 
 func TestGetExecutionPayloadEnvelopeForkGraphPathDoesNotReadIndices(t *testing.T) {
-	t.Parallel()
 	handler, root, envelope, forkchoiceStore := newHistoricalEnvelopeHandlerAtSlot(t, 64)
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	block.Block.Slot = 64
@@ -178,7 +174,6 @@ func TestGetExecutionPayloadEnvelopeForkGraphPathDoesNotReadIndices(t *testing.T
 }
 
 func TestGetExecutionPayloadEnvelopeReturnsNotFoundWhenUnavailable(t *testing.T) {
-	t.Parallel()
 	handler, root, _, _ := newHistoricalEnvelopeHandlerAtSlot(t, 64)
 	handler.envelopeRebuilder = &apiEnvelopeRebuilder{}
 
@@ -189,7 +184,6 @@ func TestGetExecutionPayloadEnvelopeReturnsNotFoundWhenUnavailable(t *testing.T)
 }
 
 func TestGetExecutionPayloadEnvelopeDoesNotRebuildRejectedRoot(t *testing.T) {
-	t.Parallel()
 	handler, root, envelope, fc := newHistoricalEnvelopeHandlerAtSlot(t, 64)
 	rebuilder := &apiEnvelopeRebuilder{envelope: envelope}
 	handler.envelopeRebuilder = rebuilder
@@ -202,7 +196,6 @@ func TestGetExecutionPayloadEnvelopeDoesNotRebuildRejectedRoot(t *testing.T) {
 }
 
 func TestGetExecutionPayloadEnvelopeRechecksRejectionAfterLookup(t *testing.T) {
-	t.Parallel()
 	for _, source := range []string{"fork graph", "history", "rebuild"} {
 		t.Run(source, func(t *testing.T) {
 			handler, root, envelope, fc := newHistoricalEnvelopeHandlerAtSlot(t, 64)
@@ -236,7 +229,6 @@ func TestGetExecutionPayloadEnvelopeRechecksRejectionAfterLookup(t *testing.T) {
 }
 
 func TestGetExecutionPayloadEnvelopeReadError(t *testing.T) {
-	t.Parallel()
 	for _, test := range []struct {
 		name     string
 		rejected bool
@@ -271,7 +263,6 @@ func TestGetExecutionPayloadEnvelopeReadError(t *testing.T) {
 }
 
 func TestGetExecutionPayloadEnvelopeChecksGloasForkBeforeReadingBlock(t *testing.T) {
-	t.Parallel()
 	t.Run("pre-Gloas block with pruned execution body", func(t *testing.T) {
 		handler, root, _, _ := newHistoricalEnvelopeHandlerAtSlot(t, 64)
 		handler.beaconChainCfg.GloasForkEpoch = 3
@@ -298,7 +289,6 @@ func TestGetExecutionPayloadEnvelopeChecksGloasForkBeforeReadingBlock(t *testing
 }
 
 func TestGetExecutionPayloadEnvelopeBoundsRebuildWait(t *testing.T) {
-	t.Parallel()
 	handler, root, _, _ := newHistoricalEnvelopeHandlerAtSlot(t, 64)
 	trackedDB := &readTrackingDB{RwDB: handler.indiciesDB}
 	handler.indiciesDB = trackedDB

@@ -255,7 +255,6 @@ func payloadPreparationLoopConfig(secondsPerSlot, fuluForkEpoch, gloasForkEpoch 
 }
 
 func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
-	t.Parallel()
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,
 		IntervalsPerSlot: 3,
@@ -294,7 +293,6 @@ func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
 }
 
 func TestBlockBuilderWindowUsesPartialWarmup(t *testing.T) {
-	t.Parallel()
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,
 		IntervalsPerSlot: 3,
@@ -310,7 +308,6 @@ func TestBlockBuilderWindowUsesPartialWarmup(t *testing.T) {
 }
 
 func TestPreparedPayloadMatchesOnlyTheSamePrime(t *testing.T) {
-	t.Parallel()
 	var p preparedPayload
 	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	now := time.Unix(100, 0)
@@ -328,7 +325,6 @@ func TestPreparedPayloadMatchesOnlyTheSamePrime(t *testing.T) {
 }
 
 func TestPreparedPayloadKeepsTheEarliestMatchingPrime(t *testing.T) {
-	t.Parallel()
 	var p preparedPayload
 	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	firstPrime := time.Unix(100, 0)
@@ -340,7 +336,6 @@ func TestPreparedPayloadKeepsTheEarliestMatchingPrime(t *testing.T) {
 }
 
 func TestMaximumPreparedAdvancePreservesRecentBuildTime(t *testing.T) {
-	t.Parallel()
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,
 		IntervalsPerSlot: 3,
@@ -351,7 +346,6 @@ func TestMaximumPreparedAdvancePreservesRecentBuildTime(t *testing.T) {
 }
 
 func TestPayloadPreparationScratchReusesState(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, postState, _, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	var scratch payloadPreparationScratch
 
@@ -368,7 +362,6 @@ func TestPayloadPreparationScratchReusesState(t *testing.T) {
 }
 
 func TestPayloadPreparationScratchReleasesStateBetweenTargetSlots(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, postState, _, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	var scratch payloadPreparationScratch
 
@@ -383,7 +376,6 @@ func TestPayloadPreparationScratchReleasesStateBetweenTargetSlots(t *testing.T) 
 }
 
 func TestShouldWaitForCurrentSlotHead(t *testing.T) {
-	t.Parallel()
 	currentSlotStart := time.Unix(100, 0)
 	attestationDeadline := 4 * time.Second
 	tests := []struct {
@@ -441,7 +433,6 @@ func TestShouldWaitForCurrentSlotHead(t *testing.T) {
 }
 
 func TestGloasPayloadDecisionDelay(t *testing.T) {
-	t.Parallel()
 	selectedSlotStart := time.Unix(100, 0)
 	deadline := 9 * time.Second
 
@@ -477,7 +468,6 @@ func TestStartPayloadPreparationSkipsEngineWithoutDirectBuilder(t *testing.T) {
 }
 
 func TestStartPayloadPreparationSkipsWithoutValidatorAPI(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	engine := newPayloadBuildEngine(t, ctrl)
 	handler := &ApiHandler{
@@ -490,7 +480,6 @@ func TestStartPayloadPreparationSkipsWithoutValidatorAPI(t *testing.T) {
 }
 
 func TestStartPayloadPreparationSkipsNilEngine(t *testing.T) {
-	t.Parallel()
 	handler := &ApiHandler{}
 	require.NotPanics(t, func() {
 		handler.StartPayloadPreparation(t.Context())
@@ -498,7 +487,6 @@ func TestStartPayloadPreparationSkipsNilEngine(t *testing.T) {
 }
 
 func TestStartPayloadPreparationCanBeDisabledIndependently(t *testing.T) {
-	t.Parallel()
 	for _, disabled := range []bool{false, true} {
 		t.Run(fmt.Sprint(disabled), func(t *testing.T) {
 			var output bytes.Buffer
@@ -523,7 +511,6 @@ func TestStartPayloadPreparationCanBeDisabledIndependently(t *testing.T) {
 }
 
 func TestPreparePayloadLoopStopsWithZeroSlotDuration(t *testing.T) {
-	t.Parallel()
 	handler := &ApiHandler{beaconChainCfg: &clparams.BeaconChainConfig{}, logger: log.Root()}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -534,7 +521,6 @@ func TestPreparePayloadLoopStopsWithZeroSlotDuration(t *testing.T) {
 }
 
 func TestPreparePayloadLoopWarnsWhenGloasWindowIsTooShort(t *testing.T) {
-	t.Parallel()
 	var output bytes.Buffer
 	logger := log.New()
 	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
@@ -552,7 +538,6 @@ func TestPreparePayloadLoopWarnsWhenGloasWindowIsTooShort(t *testing.T) {
 }
 
 func TestPreparePayloadLoopWarnsWhenGloasWindowCannotFitStateWork(t *testing.T) {
-	t.Parallel()
 	var output bytes.Buffer
 	logger := log.New()
 	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
@@ -572,7 +557,6 @@ func TestPreparePayloadLoopWarnsWhenGloasWindowCannotFitStateWork(t *testing.T) 
 }
 
 func TestPreparePayloadLoopDoesNotWarnAboutUnscheduledGloas(t *testing.T) {
-	t.Parallel()
 	var output bytes.Buffer
 	logger := log.New()
 	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
@@ -588,7 +572,6 @@ func TestPreparePayloadLoopDoesNotWarnAboutUnscheduledGloas(t *testing.T) {
 }
 
 func TestPreparePayloadLoopRunsImmediatelyWithPreparationDeadline(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	targetSlot := postState.Slot() + 1
@@ -873,7 +856,6 @@ func TestPreparePayloadLoopChecksProposerBeforeGloasDecisionWait(t *testing.T) {
 }
 
 func TestPrecheckPreparationInputsRejectsHeadOutsideLookahead(t *testing.T) {
-	t.Parallel()
 	_, handler, syncedData, _, _ := setupGloasPreparationTest(t)
 	headState := state.New(handler.beaconChainCfg)
 	headState.SetVersion(clparams.GloasVersion)
@@ -1019,7 +1001,6 @@ func setupFirstGloasPayloadStates(
 }
 
 func TestExecutionPayloadSourceAtGloasForkBoundary(t *testing.T) {
-	t.Parallel()
 	config := clparams.MainnetBeaconConfig
 	config.AltairForkEpoch = 0
 	config.BellatrixForkEpoch = 0
@@ -1073,7 +1054,6 @@ func TestExecutionPayloadSourceAtGloasForkBoundary(t *testing.T) {
 }
 
 func TestExecutionPayloadSourceAtGloasGenesis(t *testing.T) {
-	t.Parallel()
 	config := payloadPreparationLoopConfig(12, 0, 0)
 	genesisHash := common.Hash{0xa1}
 	genesisRoot := common.Hash{0x41}
@@ -1103,7 +1083,6 @@ func TestExecutionPayloadSourceAtGloasGenesis(t *testing.T) {
 }
 
 func TestTargetGasLimitForFirstSepoliaGloasSlot(t *testing.T) {
-	t.Parallel()
 	_, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
 	baseState := state.New(config)
 	baseState.SetVersion(clparams.FuluVersion)
@@ -1141,7 +1120,6 @@ func TestTargetGasLimitForFirstSepoliaGloasSlot(t *testing.T) {
 }
 
 func TestTargetGasLimitForLaterSepoliaGloasSlot(t *testing.T) {
-	t.Parallel()
 	_, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
 	targetSlot := (config.GloasForkEpoch + 1) * config.SlotsPerEpoch
 	baseState := state.New(config)
@@ -1157,7 +1135,6 @@ func TestTargetGasLimitForLaterSepoliaGloasSlot(t *testing.T) {
 }
 
 func TestPreparePayloadForFirstGloasSlotUsesProposalAttributes(t *testing.T) {
-	t.Parallel()
 	for _, removePreference := range []bool{false, true} {
 		t.Run(fmt.Sprintf("preference removed %t", removePreference), func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -1232,7 +1209,6 @@ func TestPreparePayloadForFirstGloasSlotUsesProposalAttributes(t *testing.T) {
 }
 
 func TestFirstGloasProductionRejectsChangedBeaconHead(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	baseBlockRoot := common.Hash{0x41}
@@ -1255,7 +1231,6 @@ func TestFirstGloasProductionRejectsChangedBeaconHead(t *testing.T) {
 }
 
 func TestFirstGloasProductionUsesTransitionWithdrawals(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, forkchoiceStore, validatorParams := setupTestingHandler(
 		t, clparams.ElectraVersion, log.Root(), false,
@@ -1561,7 +1536,6 @@ func TestPreparePayloadLoopReusesPreFuluProposerIndex(t *testing.T) {
 }
 
 func TestPreparationKeyDistinguishesUnsetGasLimit(t *testing.T) {
-	t.Parallel()
 	var unset, zero preparationKey
 	limit := hexutil.Uint64(0)
 	zero.setTargetGasLimit(&limit)
@@ -1747,7 +1721,6 @@ func TestPublishedBlockStorageSuppressesStaleHeadPreparation(t *testing.T) {
 }
 
 func TestFailedBlockBroadcastKeepsProducedBlockMarker(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.DenebVersion)
 	block.Block.Slot = 1
@@ -1763,7 +1736,6 @@ func TestFailedBlockBroadcastKeepsProducedBlockMarker(t *testing.T) {
 }
 
 func TestBlockPublicationClearsMarkerAfterSuccessfulIntegration(t *testing.T) {
-	t.Parallel()
 	for _, test := range []struct {
 		name           string
 		integrationErr error
@@ -2113,7 +2085,6 @@ func TestPreparePayloadLoopMemoizesDerivationFailureUntilHeadChanges(t *testing.
 }
 
 func TestPayloadPreparationCountsOutcomes(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		reason string
 		err    error
@@ -2136,7 +2107,6 @@ func TestPayloadPreparationCountsOutcomes(t *testing.T) {
 }
 
 func TestPreparePayloadLoopRecordsOutcome(t *testing.T) {
-	t.Parallel()
 	config := payloadPreparationLoopConfig(1, 1, 2)
 	currentSlot := config.SlotsPerEpoch
 	handler, root, _, synced := newPayloadPreparationLoopHarness(t, gomock.NewController(t), &config, currentSlot, currentSlot, 750*time.Millisecond)
@@ -2153,7 +2123,6 @@ func TestPreparePayloadLoopRecordsOutcome(t *testing.T) {
 }
 
 func TestPayloadPreparationCountsHeadWaits(t *testing.T) {
-	t.Parallel()
 	config := payloadPreparationLoopConfig(1, 1, 2)
 	currentSlot := config.SlotsPerEpoch
 	for _, tc := range []struct {
@@ -2243,7 +2212,6 @@ func TestPayloadPreparationExpiredAdmissionCountsLate(t *testing.T) {
 }
 
 func TestPayloadPreparationCountsCollectionReuse(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		reason      string
 		preparedID  []byte
@@ -2269,7 +2237,6 @@ func TestPayloadPreparationCountsCollectionReuse(t *testing.T) {
 }
 
 func TestPreparePayloadForStartsBuildWithCompleteAttributes(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
 	config := *handler.beaconChainCfg
@@ -2342,7 +2309,6 @@ func TestPreparePayloadForStartsBuildWithCompleteAttributes(t *testing.T) {
 }
 
 func TestPayloadPreparationSeesImportAfterAdvisorySample(t *testing.T) {
-	t.Parallel()
 	config := payloadPreparationLoopConfig(4, 1, 2)
 	currentSlot := config.SlotsPerEpoch
 	handler, root, store, synced := newPayloadPreparationLoopHarness(t, gomock.NewController(t), &config, currentSlot, currentSlot-1, 2*time.Second)
@@ -2373,7 +2339,6 @@ func TestPayloadPreparationSeesImportAfterAdvisorySample(t *testing.T) {
 }
 
 func TestPayloadPreparationDiscardsImportInterruptedStartup(t *testing.T) {
-	t.Parallel()
 	store := mock_services.NewForkChoiceStorageMock(t)
 	engine := newPayloadBuildEngine(t, gomock.NewController(t))
 	engine.startPayloadBuild = func(ctx context.Context, _ common.Hash, _ *engine_types.PayloadAttributes) ([]byte, error) {
@@ -2411,7 +2376,6 @@ func TestPayloadPreparationDiscardsImportAfterDeadline(t *testing.T) {
 }
 
 func TestPayloadPreparationKeepsBuilderStartedBeforeDeadline(t *testing.T) {
-	t.Parallel()
 	store := mock_services.NewForkChoiceStorageMock(t)
 	ctx, cancel := context.WithCancelCause(t.Context())
 	payloadID := []byte{1}
@@ -2428,7 +2392,6 @@ func TestPayloadPreparationKeepsBuilderStartedBeforeDeadline(t *testing.T) {
 }
 
 func TestPreparePayloadForGloasPaths(t *testing.T) {
-	t.Parallel()
 	for _, test := range []struct {
 		name                 string
 		payloadStatus        cltypes.PayloadStatus
@@ -2526,7 +2489,6 @@ func TestPreparePayloadForGloasPaths(t *testing.T) {
 }
 
 func TestFullPayloadSourceReusesDecodedRequests(t *testing.T) {
-	t.Parallel()
 	beaconState, handler, _, store, _ := setupGloasPreparationTest(t)
 	reads := 0
 	requests := cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion)
@@ -2543,7 +2505,6 @@ func TestFullPayloadSourceReusesDecodedRequests(t *testing.T) {
 }
 
 func TestFullPayloadSourceCoalescesConcurrentRequestReads(t *testing.T) {
-	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		_, handler, _, store, _ := setupGloasPreparationTest(t)
 		root := common.Hash{1}
@@ -2580,7 +2541,6 @@ func TestFullPayloadSourceCoalescesConcurrentRequestReads(t *testing.T) {
 }
 
 func TestFullPayloadSourceEvictsRequestsAndRetriesReadFailures(t *testing.T) {
-	t.Parallel()
 	beaconState, handler, _, store, _ := setupGloasPreparationTest(t)
 	reads := make(map[common.Hash]int)
 	requests := cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion)
@@ -2604,7 +2564,6 @@ func TestFullPayloadSourceEvictsRequestsAndRetriesReadFailures(t *testing.T) {
 }
 
 func TestExecutionPayloadSourceMarksReorgToEmptyAfterNegativePtcDecision(t *testing.T) {
-	t.Parallel()
 	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
 	targetSlot := postState.Slot() + 1
 	baseBlockRoot := common.Hash{0x41}
@@ -2629,7 +2588,6 @@ func TestExecutionPayloadSourceMarksReorgToEmptyAfterNegativePtcDecision(t *test
 }
 
 func TestExecutionPayloadSourceFallsBackToEmptyForUnavailableGloasPayload(t *testing.T) {
-	t.Parallel()
 	for _, test := range []struct {
 		name          string
 		payloadStatus cltypes.PayloadStatus
@@ -2678,7 +2636,6 @@ func TestExecutionPayloadSourceFallsBackToEmptyForUnavailableGloasPayload(t *tes
 }
 
 func TestExecutionPayloadSourceRejectsChangedBeaconHead(t *testing.T) {
-	t.Parallel()
 	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
 	targetSlot := postState.Slot() + 1
 	baseBlockRoot := common.Hash{0x41}
@@ -2701,7 +2658,6 @@ func TestExecutionPayloadSourceRejectsChangedBeaconHead(t *testing.T) {
 }
 
 func TestExecutionPayloadSourceUsesResolvedGloasHead(t *testing.T) {
-	t.Parallel()
 	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
 	targetSlot := postState.Slot() + 1
 	baseBlockRoot := common.Hash{0x41}
@@ -2730,7 +2686,6 @@ func TestExecutionPayloadSourceUsesResolvedGloasHead(t *testing.T) {
 }
 
 func TestExecutionPayloadSourceRejectsHeadLookupFailure(t *testing.T) {
-	t.Parallel()
 	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
 	baseBlockRoot := common.Hash{0x41}
 	headErr := errors.New("fork choice unavailable")
@@ -2767,7 +2722,6 @@ func setupGloasPreparationTest(t *testing.T) (
 }
 
 func TestPreparationGateRefusesActiveBlockWork(t *testing.T) {
-	t.Parallel()
 	var gate payloadPreparationGate
 	finishBlockWork := gate.beginBlockWork()
 	defer finishBlockWork()
@@ -2778,7 +2732,6 @@ func TestPreparationGateRefusesActiveBlockWork(t *testing.T) {
 }
 
 func TestPreparationGateRefusesPendingProducedBlock(t *testing.T) {
-	t.Parallel()
 	var gate payloadPreparationGate
 	now := time.Now()
 	gate.noteProducedBlock(10, 10, now, now.Add(time.Hour))
@@ -2797,7 +2750,6 @@ func TestPreparationGateRefusesPendingProducedBlock(t *testing.T) {
 }
 
 func TestPreparationGateBlockWorkReleaseIsIdempotent(t *testing.T) {
-	t.Parallel()
 	var gate payloadPreparationGate
 	finishBlockWork := gate.beginBlockWork()
 
@@ -2809,7 +2761,6 @@ func TestPreparationGateBlockWorkReleaseIsIdempotent(t *testing.T) {
 }
 
 func TestPayloadBuildPanicReleasesPreparationGate(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	baseBlockRoot := common.Hash{0x41}
@@ -2830,7 +2781,6 @@ func TestPayloadBuildPanicReleasesPreparationGate(t *testing.T) {
 }
 
 func TestProducedBlockSigningExpiryStartsAtTheLaterBoundary(t *testing.T) {
-	t.Parallel()
 	targetSlotStart := time.Unix(100, 0)
 	signingWindow := time.Second
 	for _, test := range []struct {
@@ -2854,7 +2804,6 @@ func TestProducedBlockSigningExpiryStartsAtTheLaterBoundary(t *testing.T) {
 }
 
 func TestPreparationGateTracksProducedBlockUntilSlotHeadIsSelected(t *testing.T) {
-	t.Parallel()
 	var gate payloadPreparationGate
 	expiresAt := time.Unix(200, 0)
 	now := expiresAt.Add(-time.Second)
@@ -2867,7 +2816,6 @@ func TestPreparationGateTracksProducedBlockUntilSlotHeadIsSelected(t *testing.T)
 }
 
 func TestPreparationGateTracksProductionThatFinishesAfterItsSlot(t *testing.T) {
-	t.Parallel()
 	var gate payloadPreparationGate
 	expiresAt := time.Unix(200, 0)
 	now := expiresAt.Add(-time.Second)
@@ -2879,7 +2827,6 @@ func TestPreparationGateTracksProductionThatFinishesAfterItsSlot(t *testing.T) {
 }
 
 func TestPreparationGateIgnoresProducedBlocksOutsideCurrentWindow(t *testing.T) {
-	t.Parallel()
 	var gate payloadPreparationGate
 	expiresAt := time.Unix(200, 0)
 	gate.noteProducedBlock(10, 20, expiresAt.Add(-time.Second), expiresAt)
@@ -2888,7 +2835,6 @@ func TestPreparationGateIgnoresProducedBlocksOutsideCurrentWindow(t *testing.T) 
 }
 
 func TestPreparationGateExpiresAndClearsProducedBlock(t *testing.T) {
-	t.Parallel()
 	var gate payloadPreparationGate
 	expiresAt := time.Unix(200, 0)
 	completedAt := expiresAt.Add(-time.Second)
@@ -2903,7 +2849,6 @@ func TestPreparationGateExpiresAndClearsProducedBlock(t *testing.T) {
 }
 
 func TestPreparationGateTracksOverlappingProducedBlocks(t *testing.T) {
-	t.Parallel()
 	for _, test := range []struct {
 		name       string
 		firstSlot  uint64
@@ -2938,7 +2883,6 @@ func TestPreparationGateTracksOverlappingProducedBlocks(t *testing.T) {
 }
 
 func TestPreparationGateClearsOnlyThePublishedProducedBlock(t *testing.T) {
-	t.Parallel()
 	now := time.Unix(199, 0)
 	newGate := func() *payloadPreparationGate {
 		gate := new(payloadPreparationGate)
@@ -2957,7 +2901,6 @@ func TestPreparationGateClearsOnlyThePublishedProducedBlock(t *testing.T) {
 }
 
 func TestPreparationGateReplacesAnExpiredHigherSlotMarker(t *testing.T) {
-	t.Parallel()
 	var gate payloadPreparationGate
 	gate.noteProducedBlock(10, 11, time.Unix(190, 0), time.Unix(200, 0))
 	gate.noteProducedBlock(11, 10, time.Unix(205, 0), time.Unix(210, 0))
@@ -2967,7 +2910,6 @@ func TestPreparationGateReplacesAnExpiredHigherSlotMarker(t *testing.T) {
 }
 
 func TestProductionUsesTargetSlotRandao(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -3058,7 +3000,6 @@ func requireProductionUsesPreparedWarmup(t *testing.T, postState *state.CachingB
 }
 
 func TestProductionLogsPreparedPayloadIDMismatch(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	var output bytes.Buffer
 	logger := log.New()
@@ -3096,7 +3037,6 @@ func TestProductionLogsPreparedPayloadIDMismatch(t *testing.T) {
 
 // Builder startup is non-blocking, so temporary execution contention is retried outside the gate.
 func TestPreparePayloadForRetriesWhileTheExecutionLayerIsBusy(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -3295,7 +3235,6 @@ func TestPreparePayloadBuildBacksOffWhileExecutionHeadDiffers(t *testing.T) {
 }
 
 func TestPreparePayloadForStopsRetryWhenTheHeadChanges(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -3405,7 +3344,6 @@ func TestPreparePayloadForStopsWhenProductionStartsDuringStateCopy(t *testing.T)
 }
 
 func TestPreparePayloadForStopsWhenProducedBlockCompletesDuringStateCopy(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 2
@@ -3451,7 +3389,6 @@ func TestPreparePayloadForStopsWhenProducedBlockCompletesDuringStateCopy(t *test
 }
 
 func TestPreparePayloadForRejectsInsufficientLeadAfterStateWork(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -3480,7 +3417,6 @@ func TestPreparePayloadForRejectsInsufficientLeadAfterStateWork(t *testing.T) {
 // The lead can shrink while the attempt waits for the head-state view, so it is checked again
 // before the copy starts.
 func TestPreparePayloadForRejectsStateWorkWithoutItsLead(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -3507,7 +3443,6 @@ func TestPreparePayloadForRejectsStateWorkWithoutItsLead(t *testing.T) {
 }
 
 func TestPreparePayloadForRejectsChangedHeadBeforeStartingBuilder(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -3535,7 +3470,6 @@ func TestPreparePayloadForRejectsChangedHeadBeforeStartingBuilder(t *testing.T) 
 }
 
 func TestPreparePayloadForSkipsStateCopyWhenBlockWorkStarts(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -3569,7 +3503,6 @@ func TestPreparePayloadForSkipsStateCopyWhenBlockWorkStarts(t *testing.T) {
 }
 
 func TestPreparePayloadForUsesPostEpochProposer(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	config := *handler.beaconChainCfg
@@ -3667,7 +3600,6 @@ func TestFuluPreparationRejectsUnregisteredProposerBeforeCopyingState(t *testing
 // Memoization must use the head paired with the state that produced the verdict, not an earlier
 // selected-head snapshot.
 func TestPreparePayloadForReturnsViewedHeadWhenProposalIsNotOurs(t *testing.T) {
-	t.Parallel()
 	postState, handler, syncedData, _, _ := setupGloasPreparationTest(t)
 	targetSlot := postState.Slot() + 1
 	viewRoot := common.Hash{0x41}
@@ -3695,7 +3627,6 @@ func TestPreparePayloadForReturnsViewedHeadWhenProposalIsNotOurs(t *testing.T) {
 }
 
 func TestPreparePayloadForPairsRootAndStateFromOneView(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -3731,7 +3662,6 @@ func TestPreparePayloadForPairsRootAndStateFromOneView(t *testing.T) {
 }
 
 func TestPreparedPayloadKeepsConsecutiveSlots(t *testing.T) {
-	t.Parallel()
 	var p preparedPayload
 	first := []byte{1, 1, 1, 1, 1, 1, 1, 1}
 	second := []byte{2, 2, 2, 2, 2, 2, 2, 2}
@@ -3750,7 +3680,6 @@ func TestPreparedPayloadKeepsConsecutiveSlots(t *testing.T) {
 }
 
 func TestPreparedPayloadCopiesTheID(t *testing.T) {
-	t.Parallel()
 	var p preparedPayload
 	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	now := time.Unix(100, 0)
@@ -3764,7 +3693,6 @@ func TestPreparedPayloadCopiesTheID(t *testing.T) {
 }
 
 func TestGloasPreparationRechecksParentDuringExecutionRetry(t *testing.T) {
-	t.Parallel()
 	for _, change := range []string{"head", "payload status", "verification", "PTC decision"} {
 		t.Run(change, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -3806,7 +3734,6 @@ func TestGloasPreparationRechecksParentDuringExecutionRetry(t *testing.T) {
 }
 
 func TestBlockBuilderWindowGloasLateStartKeepsMinimumBuildTime(t *testing.T) {
-	t.Parallel()
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,
 		IntervalsPerSlot: 3,
@@ -3831,7 +3758,6 @@ func TestBlockBuilderWindowGloasLateStartKeepsMinimumBuildTime(t *testing.T) {
 }
 
 func TestBlockBuilderWindowShortGloasWarmupPollsNoLaterThanUnprepared(t *testing.T) {
-	t.Parallel()
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,
 		IntervalsPerSlot: 3,

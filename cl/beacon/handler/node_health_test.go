@@ -32,7 +32,6 @@ import (
 )
 
 func TestGetNodeHealthWhileSyncing(t *testing.T) {
-	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	a := &ApiHandler{syncedData: synced_data.NewSyncedDataManager(&cfg, true)}
 	require.True(t, a.syncedData.Syncing())
@@ -61,7 +60,6 @@ func TestGetNodeHealthWhileSyncing(t *testing.T) {
 }
 
 func TestGetNodeHealthAcceptsInformationalSyncingStatus(t *testing.T) {
-	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	a := &ApiHandler{syncedData: synced_data.NewSyncedDataManager(&cfg, true)}
 	server := httptest.NewServer(http.HandlerFunc(a.GetEthV1NodeHealth))
@@ -76,7 +74,6 @@ func TestGetNodeHealthAcceptsInformationalSyncingStatus(t *testing.T) {
 }
 
 func TestGetNodeHealthWhenSynced(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	syncedData := sync_mock_services.NewMockSyncedData(ctrl)
 	syncedData.EXPECT().StateHead().Return(common.Hash{1}, uint64(10), true).AnyTimes()

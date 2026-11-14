@@ -168,7 +168,6 @@ func TestEventStreamOverflowDoesNotDrainQueueToSlowClient(t *testing.T) {
 }
 
 func TestEventStreamQueueRejectsMessagesOverByteBudget(t *testing.T) {
-	t.Parallel()
 	q := newEventStreamQueue()
 	msg := make([]byte, eventStreamWriteQueueBytes/4)
 
@@ -229,7 +228,6 @@ func (w *deadlineRecorder) SetWriteDeadline(t time.Time) error {
 }
 
 func TestWriteEventStreamClearsDeadlineAfterEachWrite(t *testing.T) {
-	t.Parallel()
 	w := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
 	q := newEventStreamQueue()
 	require.True(t, q.push([]byte("a")))
@@ -245,7 +243,6 @@ func TestWriteEventStreamClearsDeadlineAfterEachWrite(t *testing.T) {
 }
 
 func TestWriteEventStreamWithoutDeadlineSupport(t *testing.T) {
-	t.Parallel()
 	w := httptest.NewRecorder()
 	q := newEventStreamQueue()
 	require.True(t, q.push([]byte("a")))
@@ -256,7 +253,6 @@ func TestWriteEventStreamWithoutDeadlineSupport(t *testing.T) {
 }
 
 func TestWriteEventStreamReleasesQueuedBytes(t *testing.T) {
-	t.Parallel()
 	w := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
 	q := newEventStreamQueue()
 	require.True(t, q.push([]byte("a")))

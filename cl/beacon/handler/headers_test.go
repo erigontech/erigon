@@ -61,7 +61,6 @@ func (r *failingBeaconHeaderReader) ReadHeaderByRoot(context.Context, kv.Tx, com
 }
 
 func TestGetHeadersIncludesFinalized(t *testing.T) {
-	t.Parallel()
 	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	blockRoot, err := blocks[0].Block.HashSSZ()
 	require.NoError(t, err)
@@ -166,7 +165,6 @@ func TestGetHeadersIncludesFinalized(t *testing.T) {
 }
 
 func TestGetHeadHeaderIsCanonicalBeforeDatabasePromotion(t *testing.T) {
-	t.Parallel()
 	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	head := blocks[len(blocks)-1]
 	headRoot, err := head.Block.HashSSZ()
@@ -196,7 +194,6 @@ func TestGetHeadHeaderIsCanonicalBeforeDatabasePromotion(t *testing.T) {
 }
 
 func TestGetHeaderByRootUsesImportedBlockBeforePersistence(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, _, handler, _, syncData, forkchoiceStore, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	block := blocks[len(blocks)-1].Clone().(*cltypes.SignedBeaconBlock)
 	block.Block.Slot++
@@ -222,7 +219,6 @@ func TestGetHeaderByRootUsesImportedBlockBeforePersistence(t *testing.T) {
 }
 
 func TestGetHeaderByRootKeepsLiveSideBranchNonCanonical(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, _, handler, _, syncData, forkchoiceStore, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	block := blocks[len(blocks)-1].Clone().(*cltypes.SignedBeaconBlock)
 	block.Block.Slot++
@@ -247,7 +243,6 @@ func TestGetHeaderByRootKeepsLiveSideBranchNonCanonical(t *testing.T) {
 }
 
 func TestGetHeaderByRootRejectsUnavailableForkchoiceBlock(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	block := blocks[len(blocks)-1].Clone().(*cltypes.SignedBeaconBlock)
 	block.Block.Slot++
@@ -281,7 +276,6 @@ func TestGetHeaderByRootRejectsUnavailableForkchoiceBlock(t *testing.T) {
 }
 
 func TestGetHeaderByRootPreservesDatabaseReaderError(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	block := blocks[len(blocks)-1].Clone().(*cltypes.SignedBeaconBlock)
 	block.Block.Slot++
@@ -301,7 +295,6 @@ func TestGetHeaderByRootPreservesDatabaseReaderError(t *testing.T) {
 }
 
 func TestGetHeaderByRootSamplesOptimisticStatusAfterFallback(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	block := blocks[len(blocks)-1].Clone().(*cltypes.SignedBeaconBlock)
 	block.Block.Slot++

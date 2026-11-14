@@ -29,7 +29,6 @@ import (
 )
 
 func TestGetStateValidatorUnknownIndexIsNotFound(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, postState, h, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	var err error
 	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()

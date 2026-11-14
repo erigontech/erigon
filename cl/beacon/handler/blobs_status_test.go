@@ -28,7 +28,6 @@ import (
 )
 
 func TestBlobEndpointsReturnNotFoundForEmptySlot(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	server := httptest.NewServer(h.mux)
 	defer server.Close()
