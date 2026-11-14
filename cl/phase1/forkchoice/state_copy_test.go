@@ -119,6 +119,15 @@ func TestNewForkChoiceStoreSeedsAnchorTotalFromForkGraphState(t *testing.T) {
 	require.Equal(t, expected, total)
 }
 
+type ownedReplayStateForkGraph struct {
+	fork_graph.ForkGraph
+	replayed *state.CachingBeaconState
+}
+
+func (g ownedReplayStateForkGraph) ReplayStateWithOwnership(common.Hash) (*state.CachingBeaconState, bool, error) {
+	return g.replayed, true, nil
+}
+
 func TestGetStateAtBlockRootHoldsReadLockDuringCurrentStateCopy(t *testing.T) {
 	root := common.Hash{0x01}
 	graph := &getFinalizedExecutionHashForkGraph{
@@ -403,6 +412,20 @@ func TestGetOwnedStateAtBlockRootCopiesReplayedState(t *testing.T) {
 	require.Equal(t, uint64(22), owned.Eth1DataVotes().Get(0).DepositCount)
 	require.Equal(t, common.Hash{0x33}, owned.Eth1DataVotes().Get(0).BlockHash)
 	require.Equal(t, common.Hash{0x44}, owned.GetLatestExecutionPayloadBid().BlockHash)
+}
+
+func TestGetOwnedStateAtBlockRootKeepsOwnedReplay(t *testing.T) {
+	root := common.Hash{0x01}
+	replayed := state.New(&clparams.MainnetBeaconConfig)
+	base := &getFinalizedExecutionHashForkGraph{
+		states:           map[common.Hash]*state.CachingBeaconState{root: replayed},
+		currentStateRoot: common.Hash{0xff},
+	}
+	store := &ForkChoiceStore{forkGraph: ownedReplayStateForkGraph{ForkGraph: base, replayed: replayed}}
+
+	owned, err := store.GetOwnedStateAtBlockRoot(root)
+	require.NoError(t, err)
+	require.Same(t, replayed, owned)
 }
 
 func TestGetOwnedStateAtBlockRootCopiesCurrentState(t *testing.T) {

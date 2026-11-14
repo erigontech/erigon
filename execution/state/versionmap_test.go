@@ -2577,6 +2577,56 @@ func TestMarkWritesValidatedMarksACellRecreatedAtTheSameIncarnation(t *testing.T
 	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
 }
 
+// A read of the base skips validation only while no tx wrote a storage, lifecycle or address cell of the account;
+// each such cell below the reader makes the read stale.
+func TestValidateReadSet_BaseReadOfQuietAccountSkipsValidation(t *testing.T) {
+	t.Parallel()
+	base := ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}
+	for _, tc := range []struct {
+		name  string
+		path  AccountPath
+		value any
+		read  ReadHeader
+		want  VersionValidity
+		quiet bool // a base read of an account with no storage, lifecycle or address cell
+	}{
+		{"no cells", 0, nil, base, VersionValid, true},
+		{"balance write", BalancePath, *uint256.NewInt(5), base, VersionValid, true},
+		{"storage write", StoragePath, *uint256.NewInt(8), base, VersionInvalid, false},
+		{"self-destruct", SelfDestructPath, true, base, VersionInvalid, false},
+		{"address write", AddressPath, &accounts.Account{Incarnation: 1}, base, VersionValid, false},
+		{"incarnation write", IncarnationPath, uint64(1), base, VersionInvalid, false},
+		{"create contract", CreateContractPath, true, base, VersionValid, false},
+		{"read of a removed write", 0, nil, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, VersionInvalid, false},
+		{"read of an aborted write", StoragePath, *uint256.NewInt(8), ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, VersionInvalid, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := getAddress(91)
+			key := accounts.InternKey(common.Hash{0x07})
+			vm := NewVersionMap(nil)
+			if tc.value != nil {
+				writeFor(vm, addr, tc.path, key, Version{TxIndex: 1}, tc.value, true)
+			}
+
+			rs := ReadSet{}
+			rs.SetStorage(addr, key, VersionedRead[uint256.Int]{
+				ReadHeader: tc.read,
+				Val:        *uint256.NewInt(7),
+			})
+			checks := 0
+			countChecks := func(read, write Version) VersionValidity {
+				checks++
+				return validateEqualVersion(read, write)
+			}
+			require.Equal(t, tc.want, vm.ValidateReadSet(3, rs, countChecks, false, ""))
+			if tc.read == base {
+				require.Equal(t, !tc.quiet, checks > 0, "only a quiet account skips the version checks")
+			}
+		})
+	}
+}
+
 // A net-zero storage write has no BAL cell, so it must not count as already seeded.
 func TestWritesAlreadySeededRefusesANetZeroStorageWrite(t *testing.T) {
 	vm := NewVersionMap(nil)

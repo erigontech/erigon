@@ -633,3 +633,21 @@ func TestZstdWriterPoolMatchesReferenceEncoderOptionsOnLargePayload(t *testing.T
 		require.Equal(t, want.Bytes(), got.Bytes())
 	}
 }
+
+// Slot keys are 4 bytes: a slot beyond them has no canonical block, it is not read as the truncated slot.
+func TestReadCanonicalBlockRootIgnoresASlotBeyondTheKeyRange(t *testing.T) {
+	db := setupTestDB(t)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	root := common.Hash{1}
+	require.NoError(t, MarkRootCanonical(tx, 5, root))
+
+	got, err := ReadCanonicalBlockRoot(tx, 5)
+	require.NoError(t, err)
+	require.Equal(t, root, got)
+	got, err = ReadCanonicalBlockRoot(tx, 1<<32+5)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, got)
+}
