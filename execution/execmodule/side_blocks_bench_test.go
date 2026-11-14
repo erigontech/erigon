@@ -57,7 +57,7 @@ func BenchmarkForkChoiceWithSideBlocks(b *testing.B) {
 					for _, block := range payloads {
 						_, err := m.InsertBlocks(b.Context(), []*types.Block{block})
 						require.NoError(b, err)
-						result, err := m.ValidateChain(b.Context(), block.Header())
+						result, err := m.ValidateChain(b.Context(), block)
 						require.NoError(b, err)
 						require.Equal(b, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
 					}

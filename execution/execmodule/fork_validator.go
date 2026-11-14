@@ -338,7 +338,6 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 	headersChain = append(headersChain, header)
 	bodiesChain = append(bodiesChain, body)
 	hash := header.Hash()
-	number := header.Number.Uint64()
 	var beforeIO blockmetrics.Sample
 	if fv.blockMetricsCache != nil {
 		sd.TakeCommitmentTime() // discard anything left by an earlier block

@@ -739,7 +739,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {
 	dbHeadHash := rawdb.ReadHeadBlockHash(tx)
-	var overlay kv.RwTx
+	var overlay *membatchwithdb.MemoryMutation
 	if e.currentContext != nil {
 		overlay = e.currentContext.BlockOverlay()
 	}

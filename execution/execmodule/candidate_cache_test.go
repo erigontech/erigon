@@ -47,7 +47,7 @@ func testValidatedCandidateEvictionAndForkChoiceCleanup(t *testing.T, parallel b
 	states := make([]*execctx.SharedDomains, 5)
 	validate := func(block *types.Block) {
 		t.Helper()
-		result, err := m.ValidateChain(t.Context(), block.Header())
+		result, err := m.ValidateChain(t.Context(), block)
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
 	}
@@ -102,7 +102,7 @@ func TestValidatedCandidateClosedAfterValidHashEviction(t *testing.T) {
 	}
 	validate := func(block *types.Block) {
 		t.Helper()
-		result, err := m.ValidateChain(t.Context(), block.Header())
+		result, err := m.ValidateChain(t.Context(), block)
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
 	}
@@ -143,7 +143,7 @@ func TestValidatedCandidateClosedBySetHead(t *testing.T) {
 	require.NoError(t, err)
 	_, err = m.InsertBlocks(t.Context(), child.Blocks)
 	require.NoError(t, err)
-	result, err := m.ValidateChain(t.Context(), child.Blocks[0].Header())
+	result, err := m.ValidateChain(t.Context(), child.Blocks[0])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
 	state := m.ForkValidator.ValidatedState(child.Blocks[0].Hash())
@@ -161,7 +161,7 @@ func TestValidatedCandidateDropsChainedAncestors(t *testing.T) {
 	_, err = m.InsertBlocks(t.Context(), chain.Blocks)
 	require.NoError(t, err)
 	for _, block := range chain.Blocks {
-		result, err := m.ValidateChain(t.Context(), block.Header())
+		result, err := m.ValidateChain(t.Context(), block)
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
 	}

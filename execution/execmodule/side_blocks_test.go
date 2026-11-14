@@ -190,7 +190,7 @@ func TestInvalidPayloadKeepsValidSiblings(t *testing.T) {
 
 	_, err := m.InsertBlocks(t.Context(), []*types.Block{bad})
 	require.NoError(t, err)
-	result, err := m.ValidateChain(t.Context(), bad.Header())
+	result, err := m.ValidateChain(t.Context(), bad)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
 
@@ -224,7 +224,7 @@ func TestInvalidRetainedSideBlockIsDropped(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, has)
 
-	result, err := m.ValidateChain(t.Context(), bad.Header())
+	result, err := m.ValidateChain(t.Context(), bad)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
 
@@ -499,10 +499,8 @@ func TestValidateChainPurgesPersistedSideAncestor(t *testing.T) {
 		return nil
 	}))
 	updateForkChoiceTo(t, m, alternatePack.Blocks[0])
-	_, err = m.InsertBlocks(t.Context(), []*types.Block{persisted})
-	require.NoError(t, err)
 
-	result, err := m.ValidateChain(t.Context(), badChild.Header())
+	result, err := m.ValidateChain(t.Context(), badChild)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
 	updateForkChoiceTo(t, m, canonicalHead)
@@ -604,7 +602,7 @@ func insertAndValidateBlocks(t *testing.T, m *execmoduletester.ExecModuleTester,
 	for _, block := range blocks {
 		_, err := m.InsertBlocks(t.Context(), []*types.Block{block})
 		require.NoError(t, err)
-		result, err := m.ValidateChain(t.Context(), block.Header())
+		result, err := m.ValidateChain(t.Context(), block)
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
 	}
