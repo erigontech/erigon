@@ -142,6 +142,12 @@ jobs:
       CLIENT: ${{ matrix.client }}
       REMOTES: ${{ matrix.remotes }}
       RPC_TEST: ${{ needs.setup.outputs.rpc_test }}
+      # The rpc-latest-* runners have 16 cores with 2 threads each (CPU n and n+16 share core n).
+      # rpc_perf gets cores 12-15, the client and its CL the other 12, so the load generator
+      # never takes CPU from the client. Geth, Nethermind and Reth are pinned to CLIENT_CPUS
+      # by their services on the runners.
+      CLIENT_CPUS: 0-11,16-27
+      RPC_PERF_CPUS: 12-15,28-31
 
     steps:
       - name: Set reference data dir based on branch
@@ -247,7 +253,7 @@ jobs:
           set +e # Disable exit on error
           echo "Starting Erigon..."
 
-          ./erigon --prune.mode=minimal --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
+          taskset -c "$CLIENT_CPUS" ./erigon --prune.mode=minimal --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
           ERIGON_PID=$!
           echo "ERIGON_PID=$ERIGON_PID" >> $GITHUB_ENV
@@ -280,6 +286,27 @@ jobs:
             echo "::error::Error detected during tests: Port 8545 did not open in time"
             exit 1
           fi
+
+      - name: Check CPU affinity and frequency governor
+        run: |
+          echo "Expected: client on $CLIENT_CPUS, rpc_perf on $RPC_PERF_CPUS"
+          # Match the process name, not the command line: the runner's own paths contain the client name.
+          pids=$(pgrep -i "$CLIENT" || true)
+          [ -n "$pids" ] || echo "::warning::No $CLIENT process found"
+          [ "$(echo "$pids" | wc -w)" -le 1 ] || echo "::warning::More than one $CLIENT process is running"
+          # Expand a CPU list such as 0-11,16-27 into one CPU per line.
+          expand() { tr ',' '\n' <<< "$1" | while IFS=- read -r a b; do seq "$a" "${b:-$a}"; done; }
+          allowed=$(expand "$CLIENT_CPUS")
+          for pid in $pids; do
+            # One affinity list per thread. Some runtimes pin threads to a single CPU
+            # (e.g. .NET server GC), so check that every thread stays inside the expected set.
+            cpus=$(taskset -acp "$pid" 2>/dev/null | sed 's/.*: //' | sort -u | paste -sd' ')
+            echo "pid $pid $(ps -o comm= -p "$pid"): $cpus"
+            [ -n "$cpus" ] || echo "::warning::Cannot read the CPU affinity of $CLIENT pid $pid"
+            outside=$(for l in $cpus; do expand "$l"; done | sort -un | grep -vxF -f <(echo "$allowed") | paste -sd, || true)
+            [ -z "$outside" ] || echo "::warning::$CLIENT pid $pid has threads on CPUs $outside, outside $CLIENT_CPUS"
+          done
+          echo "governor: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo unknown)"
 
       - name: Wait for Erigon to reach the tip
         if: matrix.client == 'erigon'
