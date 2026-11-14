@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -36,8 +37,10 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/blockmetrics"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -64,6 +67,83 @@ type sideForkReader struct {
 	canonicalHash common.Hash
 	forkHeader    *types.Header
 	forkBody      *types.Body
+}
+
+// viewedBlock is a block the tests' databases and block readers do not hold until a test commits it.
+var viewedBlock = types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(1)}, nil)
+
+// The payload witness view runs under the engine lock, so a module that stays busy must not make it wait longer than its wait.
+func TestValidateChainAndViewGivesUpOnABusyModule(t *testing.T) {
+	module := &ExecModule{db: temporaltest.NewTestDB(t, datadir.New(t.TempDir())), semaphore: semaphore.NewWeighted(1), logger: log.New()}
+	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+	t.Cleanup(func() { module.semaphore.Release(1) })
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	result, err := module.ValidateChainAndView(ctx, viewedBlock, 10*time.Millisecond, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
+	require.NoError(t, err)
+	require.Equal(t, ExecutionStatusBusy, result.ValidationStatus)
+}
+
+// A Ready probe or a background commit holds the module only briefly, so the view waits for it.
+func TestValidateChainAndViewWaitsForTheModule(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	synctest.Test(t, func(t *testing.T) {
+		module := &ExecModule{db: db, semaphore: semaphore.NewWeighted(1), forkValidator: &ForkValidator{}, blockReader: sideForkReader{forkHeader: &types.Header{}}, logger: log.New()}
+		require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+		var released atomic.Bool
+		time.AfterFunc(10*time.Millisecond, func() {
+			released.Store(true)
+			module.semaphore.Release(1)
+		})
+
+		result, err := module.ValidateChainAndView(t.Context(), viewedBlock, time.Second, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
+		require.NoError(t, err)
+		require.True(t, released.Load())
+		require.Equal(t, ExecutionStatusMissingSegment, result.ValidationStatus)
+	})
+}
+
+// A forkchoice update is answered before its commit, which can land while the view waits for the module.
+func TestValidateChainAndViewFindsABlockCommittedWhileItWaits(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		releaseModule bool
+	}{
+		{"the module stays busy", false},
+		{"the module is released after the commit", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			synctest.Test(t, func(t *testing.T) {
+				module := &ExecModule{db: db, semaphore: semaphore.NewWeighted(1), forkValidator: &ForkValidator{}, blockReader: sideForkReader{forkHeader: &types.Header{}}, logger: log.New()}
+				require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+				committed := make(chan error, 1)
+				go func() {
+					time.Sleep(10 * time.Millisecond)
+					committed <- db.Update(t.Context(), func(tx kv.RwTx) error {
+						return errors.Join(
+							rawdb.WriteHeaderNumber(tx, viewedBlock.Hash(), 1),
+							rawdb.WriteCanonicalHash(tx, viewedBlock.Hash(), 1),
+							stages.SaveStageProgress(tx, stages.Execution, 1),
+						)
+					})
+					if tc.releaseModule {
+						module.semaphore.Release(1)
+					}
+				}()
+
+				result, err := module.ValidateChainAndView(t.Context(), viewedBlock, time.Second, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
+				require.NoError(t, err)
+				require.NoError(t, <-committed)
+				if !tc.releaseModule {
+					module.semaphore.Release(1)
+				}
+				require.Equal(t, ExecutionStatusSuccess, result.ValidationStatus)
+				require.Equal(t, viewedBlock.Hash(), result.LatestValidHash)
+			})
+		})
+	}
 }
 
 func TestDrainWaitsForInFlightExecution(t *testing.T) {
@@ -239,7 +319,7 @@ func TestForkValidatorSuspendsReadAheadBeforeItsOwnUnwind(t *testing.T) {
 	// Stop at the suspension boundary; this test needs no execution pipeline to
 	// prove that suspension failure aborts before the validator stages its unwind.
 	suspendErr := errors.New("read-ahead suspension cancelled")
-	_, _, _, criticalErr := fv.ValidatePayload(t.Context(), nil, nil, payloadHeader, &types.Body{}, func() error {
+	_, _, _, criticalErr := fv.ValidatePayload(t.Context(), nil, nil, payloadHeader, &types.Body{}, false, func() error {
 		return suspendErr
 	}, log.New())
 	require.ErrorIs(t, criticalErr, suspendErr)

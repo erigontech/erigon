@@ -179,7 +179,7 @@ func TestNewPayloadBoundsDerivedBlobHashAllocations(t *testing.T) {
 	measure := func(derive bool) uint64 {
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
-		status, err := srv.newPayload(ctx, payload, []common.Hash{}, &common.Hash{}, nil, clparams.DenebVersion, derive)
+		status, err := srv.newPayload(ctx, payload, []common.Hash{}, &common.Hash{}, nil, clparams.DenebVersion, derive, nil)
 		runtime.ReadMemStats(&after)
 		require.NoError(t, err)
 		require.Equal(t, engine_types.InvalidStatus, status.Status)
@@ -243,6 +243,70 @@ func TestNewPayloadV2WithdrawalsValidation(t *testing.T) {
 			require.Equal(t, engine_types.SyncingStatus, status.Status)
 		})
 	}
+}
+
+// newValidPayloadServer returns a server whose stub module accepts the returned Capella payload as VALID.
+func newValidPayloadServer(t *testing.T) (*EngineServer, *stubExecutionModule, *engine_types.ExecutionPayload) {
+	parent := makeParentHeader(1000)
+	parent.Number.SetUint64(99)
+	header := makeParentHeader(1001)
+	header.ParentHash = parent.Hash()
+	header.UncleHash = empty.UncleHash
+	header.TxHash = empty.RootHash
+	withdrawalsHash := types.DeriveSha(types.Withdrawals{})
+	header.WithdrawalsHash = &withdrawalsHash
+	block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, types.Withdrawals{}, nil)
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+
+	cfg := preCancunChainConfig()
+	stub := &stubExecutionModule{
+		getHeaderFunc:     getHeaderReturning(parent.Hash(), parent),
+		currentHeaderFunc: func(context.Context) (*types.Header, error) { return parent, nil },
+	}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 64)
+	return srv, stub, payload
+}
+
+// onValid reads the validated state in the engine-lock section of the validation, so no forkchoice update or other
+// payload replaces or commits that state first.
+func TestNewPayloadRunsOnValidUnderTheEngineLock(t *testing.T) {
+	srv, _, payload := newValidPayloadServer(t)
+
+	var validHash common.Hash
+	var lockHeld bool
+	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash) {
+		validHash = blockHash
+		lockHeld = !srv.lock.TryLock()
+		if !lockHeld {
+			srv.lock.Unlock()
+		}
+	})
+	require.NoError(t, err)
+	require.Equal(t, engine_types.ValidStatus, status.Status)
+	require.Equal(t, payload.BlockHash, validHash)
+	require.True(t, lockHeld)
+}
+
+// The readiness wait of the witness route runs before the engine lock is taken, so a busy module does not stall a
+// forkchoice update.
+func TestNewPayloadWaitsForReadinessWithoutTheEngineLock(t *testing.T) {
+	srv, stub, payload := newValidPayloadServer(t)
+	var lockHeldInReady bool
+	stub.readyFunc = func(context.Context) (bool, error) {
+		if srv.lock.TryLock() {
+			srv.lock.Unlock()
+		} else {
+			lockHeldInReady = true
+		}
+		return true, nil
+	}
+
+	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(common.Hash) {})
+	require.NoError(t, err)
+	require.Equal(t, engine_types.ValidStatus, status.Status)
+	require.False(t, lockHeldInReady)
 }
 
 func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
@@ -1152,11 +1216,21 @@ type storingAfterValidation struct {
 
 func (m *storingAfterValidation) ValidateChain(ctx context.Context, block *types.Block) (execmodule.ValidationResult, error) {
 	result, err := m.ExecutionModule.ValidateChain(ctx, block)
+	m.storeAfterFirstValidation(ctx, block)
+	return result, err
+}
+
+func (m *storingAfterValidation) ValidateChainAndView(ctx context.Context, block *types.Block, wait time.Duration, fn execmodule.BlockStateView) (execmodule.ValidationResult, error) {
+	result, err := m.ExecutionModule.ValidateChainAndView(ctx, block, wait, fn)
+	m.storeAfterFirstValidation(ctx, block)
+	return result, err
+}
+
+func (m *storingAfterValidation) storeAfterFirstValidation(ctx context.Context, block *types.Block) {
 	if block.Hash() == m.block.Hash() && m.stored.CompareAndSwap(false, true) {
 		_, insertErr := m.ExecutionModule.InsertBlocks(ctx, []*types.Block{m.block})
 		require.NoError(m.t, insertErr)
 	}
-	return result, err
 }
 
 func withHeaderChange(block *types.Block, change func(*types.Header)) *types.Block {
@@ -1186,6 +1260,209 @@ func TestGetPayloadBodiesByHashOmitsAnInvalidBlockStoredAfterItsValidation(t *te
 		require.Equal(t, []bool{true, false}, v1, "%s request: V1", request)
 		require.Equal(t, []bool{true, false}, v2, "%s request: V2", request)
 	}
+}
+
+// witnessChain is a committed genesis with a four-block chain of transfers and a three-block side fork on it, none of
+// them sent to the server yet.
+type witnessChain struct {
+	t      *testing.T
+	srv    *EngineServer
+	blocks []*types.Block
+	side   []*types.Block
+}
+
+func newWitnessChain(t *testing.T, wrap func(*execmoduletester.ExecModuleTester, []*types.Block) execmodule.ExecutionModule, opts ...execmoduletester.Option) *witnessChain {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	genesis := &types.Genesis{Config: preCancunChainConfig(), Alloc: types.GenesisAlloc{sender: {Balance: big.NewInt(1e18)}}}
+	m := execmoduletester.New(t, append([]execmoduletester.Option{execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key)}, opts...)...)
+	transfer := func(to common.Address) func(int, *blockgen.BlockGen) {
+		return func(i int, b *blockgen.BlockGen) {
+			txn, err := types.SignTx(types.NewTransaction(uint64(i), to, uint256.NewInt(uint64(i+1)), 21_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(nil), key)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	}
+	chain, err := m.GenerateChain(4, transfer(common.Address{0x01}))
+	require.NoError(t, err)
+	side, err := m.GenerateChain(3, func(i int, b *blockgen.BlockGen) {
+		b.SetCoinbase(common.Address{0x99})
+		transfer(common.Address{0x02})(i, b)
+	})
+	require.NoError(t, err)
+	var module execmodule.ExecutionModule = m.ExecModule
+	if wrap != nil {
+		module = wrap(m, chain.Blocks)
+	}
+	srv := newEngineServerWithReorgDepth(t, m, module, 16)
+	srv.witnessBuilder = jsonrpc.NewPrivateDebugAPI(jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, nil, &rpccfg.DebugApiConfig{})
+	return &witnessChain{t: t, srv: srv, blocks: chain.Blocks, side: side.Blocks}
+}
+
+// witness sends block as the witness route does.
+func (c *witnessChain) witness(block *types.Block) (*engine_types.PayloadStatus, *jsonrpc.ExecutionWitnessResult, error) {
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(c.t, err)
+	var witness *jsonrpc.ExecutionWitnessResult
+	var witnessErr error
+	status, err := c.srv.newPayload(c.t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash) {
+		witness, witnessErr = c.srv.payloadWitness(c.t.Context(), blockHash)
+	})
+	require.NoError(c.t, err)
+	return status, witness, witnessErr
+}
+
+func (c *witnessChain) requireWitness(block *types.Block) *jsonrpc.ExecutionWitnessResult {
+	c.t.Helper()
+	status, witness, err := c.witness(block)
+	require.Equal(c.t, engine_types.ValidStatus, status.Status)
+	require.NoError(c.t, err)
+	require.NotEmpty(c.t, witness.State)
+	return witness
+}
+
+func (c *witnessChain) dropCachedWitnesses() {
+	c.srv.payloadWitnesses = jsonrpc.NewWitnessResultCache(payloadWitnessCacheSize, payloadWitnessCacheBytes)
+}
+
+// requireCommittedWitnesses checks each witness against the one rebuilt from the committed changesets of its block.
+func (c *witnessChain) requireCommittedWitnesses(blocks []*types.Block, witnesses []*jsonrpc.ExecutionWitnessResult) {
+	c.t.Helper()
+	c.dropCachedWitnesses()
+	for i, witness := range witnesses {
+		committed := c.requireWitness(blocks[i])
+		require.Equal(c.t, committed.State, witness.State, "block %d", blocks[i].NumberU64())
+		require.Equal(c.t, committed.Codes, witness.Codes, "block %d", blocks[i].NumberU64())
+		require.Equal(c.t, committed.Headers, witness.Headers, "block %d", blocks[i].NumberU64())
+	}
+}
+
+// commitWithWitnesses commits blocks one by one through the witness route.
+func (c *witnessChain) commitWithWitnesses(blocks []*types.Block) []*jsonrpc.ExecutionWitnessResult {
+	c.t.Helper()
+	var witnesses []*jsonrpc.ExecutionWitnessResult
+	for _, block := range blocks {
+		witnesses = append(witnesses, c.requireWitness(block))
+		require.Equal(c.t, engine_types.ValidStatus, forkchoiceV2AndWait(c.t, c.srv, block.Hash()).Status)
+	}
+	return witnesses
+}
+
+func storingFirstBlockAfterValidation(t *testing.T) func(*execmoduletester.ExecModuleTester, []*types.Block) execmodule.ExecutionModule {
+	return func(m *execmoduletester.ExecModuleTester, blocks []*types.Block) execmodule.ExecutionModule {
+		return &storingAfterValidation{ExecutionModule: m.ExecModule, t: t, block: blocks[0]}
+	}
+}
+
+// A block insertion that takes the execution module as soon as the validation releases it, as the background block
+// downloader can, drops the validated state; the payload witness must still be built from that state.
+func TestNewPayloadWitnessSurvivesAnInsertionAfterValidation(t *testing.T) {
+	c := newWitnessChain(t, storingFirstBlockAfterValidation(t))
+
+	c.requireWitness(c.blocks[0])
+}
+
+// A payload validated by a plain newPayload whose retained state a block insertion drops is still a VALID payload with
+// a witness.
+func TestNewPayloadWitnessForAValidPayloadWhoseStateWasDropped(t *testing.T) {
+	c := newWitnessChain(t, storingFirstBlockAfterValidation(t))
+	require.Equal(t, engine_types.ValidStatus, newPayloadV2(t, c.srv, c.blocks[0]).Status)
+
+	c.requireWitness(c.blocks[0])
+}
+
+func TestNewPayloadWitnessForAValidPayloadThatIsNoLongerTheRetainedTip(t *testing.T) {
+	c := newWitnessChain(t, nil)
+	witnesses := []*jsonrpc.ExecutionWitnessResult{c.requireWitness(c.blocks[0]), c.requireWitness(c.blocks[1])}
+	c.dropCachedWitnesses()
+
+	for i, witness := range witnesses {
+		require.Equal(t, witness, c.requireWitness(c.blocks[i]), "block %d", c.blocks[i].NumberU64())
+	}
+}
+
+func TestNewPayloadWitnessForChildrenOfUncommittedPayloads(t *testing.T) {
+	c := newWitnessChain(t, nil)
+	c.requireWitness(c.blocks[0])
+	forkchoiceV2AndWait(t, c.srv, c.blocks[0].Hash())
+
+	uncommitted := []*jsonrpc.ExecutionWitnessResult{c.requireWitness(c.blocks[1]), c.requireWitness(c.blocks[2]), c.requireWitness(c.blocks[3])}
+
+	require.Equal(t, engine_types.ValidStatus, forkchoiceV2AndWait(t, c.srv, c.blocks[3].Hash()).Status)
+	c.requireCommittedWitnesses(c.blocks[1:], uncommitted)
+}
+
+func TestNewPayloadWitnessForASideFork(t *testing.T) {
+	c := newWitnessChain(t, nil)
+	c.commitWithWitnesses(c.blocks[:2])
+
+	side := []*jsonrpc.ExecutionWitnessResult{c.requireWitness(c.side[0]), c.requireWitness(c.side[1]), c.requireWitness(c.side[2])}
+
+	require.Equal(t, engine_types.ValidStatus, forkchoiceV2AndWait(t, c.srv, c.side[2].Hash()).Status)
+	c.requireCommittedWitnesses(c.side, side)
+}
+
+func TestNewPayloadWitnessForAReorgedOutPayload(t *testing.T) {
+	c := newWitnessChain(t, nil)
+	canonical := c.commitWithWitnesses(c.blocks[:2])
+	for _, block := range c.side {
+		require.Equal(t, engine_types.ValidStatus, newPayloadV2(t, c.srv, block).Status)
+	}
+	require.Equal(t, engine_types.ValidStatus, forkchoiceV2AndWait(t, c.srv, c.side[2].Hash()).Status)
+	c.dropCachedWitnesses()
+
+	for i, witness := range canonical {
+		require.Equal(t, witness, c.requireWitness(c.blocks[i]), "block %d", c.blocks[i].NumberU64())
+	}
+}
+
+// The background commit of a forkchoice update holds the execution module after the update is answered; a witness
+// request for the new head right after it must not wait for the module.
+func TestNewPayloadWitnessForACommittedPayloadWhileTheModuleIsBusy(t *testing.T) {
+	var hold atomic.Bool
+	committed, release := make(chan struct{}), make(chan struct{})
+	observer := func(ctx context.Context, p execmodule.StateTransitionPoint) {
+		if p == execmodule.StateTransitionCommitComplete && hold.CompareAndSwap(true, false) {
+			close(committed)
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+		}
+	}
+	c := newWitnessChain(t, nil, execmoduletester.WithParallelStateFlushing(true), execmoduletester.WithStateTransitionObserver(observer))
+	t.Cleanup(func() { close(release) })
+	require.Equal(t, engine_types.ValidStatus, newPayloadV2(t, c.srv, c.blocks[0]).Status)
+	hold.Store(true)
+	r, err := c.srv.ForkchoiceUpdatedV2(t.Context(), &engine_types.ForkChoiceState{HeadHash: c.blocks[0].Hash()}, nil)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.ValidStatus, r.PayloadStatus.Status)
+	<-committed
+
+	c.requireWitness(c.blocks[0])
+}
+
+// A known VALID payload whose state must be rebuilt gets SYNCING while the module is busy, as /payloads answers.
+func TestNewPayloadWitnessAnswersSyncingWhenTheModuleIsBusy(t *testing.T) {
+	srv, stub, payload := newValidPayloadServer(t)
+	parentHeader := stub.getHeaderFunc
+	stub.getHeaderFunc = func(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error) {
+		if blockHash != nil && *blockHash == payload.BlockHash {
+			return &types.Header{Number: *uint256.NewInt(uint64(payload.BlockNumber))}, nil
+		}
+		return parentHeader(ctx, blockHash, blockNumber)
+	}
+	stub.isValidatedFunc = func(hash common.Hash) bool { return hash == payload.BlockHash }
+	stub.validateChainBlockFunc = func(context.Context, *types.Block) (execmodule.ValidationResult, error) {
+		return execmodule.ValidationResult{ValidationStatus: execmodule.ExecutionStatusBusy}, nil
+	}
+
+	onValidCalled := false
+	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(common.Hash) { onValidCalled = true })
+	require.NoError(t, err)
+	require.Equal(t, engine_types.SyncingStatus, status.Status)
+	require.False(t, onValidCalled)
 }
 
 func TestGetPayloadBodiesByHashOmitsABlockRejectedByAForkchoiceUpdate(t *testing.T) {

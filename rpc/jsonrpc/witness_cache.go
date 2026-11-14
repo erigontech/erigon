@@ -75,6 +75,15 @@ type witnessResultCache struct {
 	building      map[common.Hash]*witnessBuild
 }
 
+// WitnessResultCache is a witness LRU bounded by entry count and resident bytes.
+type WitnessResultCache = witnessResultCache
+
+// NewWitnessResultCache holds at most blocks witnesses and maxBytes resident bytes,
+// always keeping the newest witness.
+func NewWitnessResultCache(blocks uint, maxBytes int) *WitnessResultCache {
+	return newWitnessResultCache(blocks, maxBytes, false, false)
+}
+
 type witnessBuild struct {
 	done   chan struct{}
 	result *ExecutionWitnessResult
@@ -130,6 +139,13 @@ func (c *witnessResultCache) store(num uint64, hash common.Hash, r *ExecutionWit
 	r.headerByNumber = nil // only the build's BLOCKHASH lookups read it
 	c.Add(hash, r)
 	c.feed.publish(witnessPush{num: num, hash: hash, result: r})
+}
+
+// AddPayloadWitness caches r without Keys and headerByNumber, which the payload-witness route never serves.
+func (c *witnessResultCache) AddPayloadWitness(hash common.Hash, r *ExecutionWitnessResult) {
+	r.Keys = nil
+	r.headerByNumber = nil
+	c.Add(hash, r)
 }
 
 type witnessStoreFunc func(r *ExecutionWitnessResult, took time.Duration)

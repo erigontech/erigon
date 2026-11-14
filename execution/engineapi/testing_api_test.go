@@ -74,6 +74,8 @@ type stubExecutionModule struct {
 	updateForkChoiceFunc   func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
 	inclusionListFunc      func(ctx context.Context) (types.Transactions, error)
 	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
+	readyFunc              func(ctx context.Context) (bool, error)
+	isValidatedFunc        func(hash common.Hash) bool
 
 	getPayloadBodiesByHashFunc func(ctx context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error)
 }
@@ -183,8 +185,8 @@ func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) 
 	return false, nil
 }
 
-func (s *stubExecutionModule) IsValidated(_ common.Hash) bool {
-	return false
+func (s *stubExecutionModule) IsValidated(hash common.Hash) bool {
+	return s.isValidatedFunc != nil && s.isValidatedFunc(hash)
 }
 
 func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash common.Hash) (*uint64, error) {
@@ -197,9 +199,20 @@ func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash comm
 func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
 	return nil, nil
 }
-func (s *stubExecutionModule) Ready(_ context.Context) (bool, error) { return true, nil }
+
+func (s *stubExecutionModule) Ready(ctx context.Context) (bool, error) {
+	if s.readyFunc != nil {
+		return s.readyFunc(ctx)
+	}
+	return true, nil
+}
+
 func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, error) {
 	return 0, false, nil
+}
+
+func (s *stubExecutionModule) ValidateChainAndView(ctx context.Context, block *types.Block, _ time.Duration, _ execmodule.BlockStateView) (execmodule.ValidationResult, error) {
+	return s.ValidateChain(ctx, block)
 }
 
 func (s *stubExecutionModule) InclusionList(ctx context.Context) (types.Transactions, error) {

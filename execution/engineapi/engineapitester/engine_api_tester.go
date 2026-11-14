@@ -251,6 +251,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if args.EnableTestingAPI {
 		httpAPIs = append(httpAPIs, "testing")
 	}
+	if args.EnableDebugAPI {
+		httpAPIs = append(httpAPIs, "debug")
+	}
 	httpConfig := httpcfg.HttpCfg{
 		Enabled:                  true,
 		HttpServerEnabled:        true,
@@ -477,6 +480,7 @@ type EngineApiTesterInitArgs struct {
 	StateTransitionObserver execmodule.StateTransitionObserver
 	MaintenanceObserver     state.MaintenanceObserver
 	EnableTestingAPI        bool
+	EnableDebugAPI          bool
 }
 
 type EngineApiTester struct {
