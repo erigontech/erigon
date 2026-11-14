@@ -80,6 +80,7 @@ type Index struct {
 
 	grData      []uint64
 	data        []byte  // slice of correct size for the index to work with
+	recs        []byte  // probe only: records view, the mapped file
 	mmapHandle1 mmap.Ro // mmap handle for unix (this is used to close mmap)
 	golombRice  []uint32
 
@@ -117,7 +118,7 @@ func MustOpen(indexFile string) *Index {
 	return idx
 }
 
-var stubKviHeap = dbg.EnvBool("STUB_KVI_HEAP", false) // probe only: bound of .kvi page faults
+var stubKviHeap = os.Getenv("STUB_KVI_HEAP") // probe only: true = whole commitment .kvi in heap, hash = all but the records
 
 func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	_, fName := filepath.Split(indexFilePath)
@@ -145,9 +146,20 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 		return nil, err
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
-	if stubKviHeap && strings.Contains(fName, "commitment") && strings.HasSuffix(fName, ".kvi") {
-		idx.data = bytes.Clone(idx.data)
-		log.Info("[stub] commitment .kvi in heap", "file", fName, "size", idx.size)
+	idx.recs = idx.data
+	if stubKviHeap != "" && strings.Contains(fName, "commitment") && strings.HasSuffix(fName, ".kvi") && idx.size > 17 {
+		switch stubKviHeap {
+		case "true":
+			idx.data = bytes.Clone(idx.data)
+			idx.recs = idx.data
+		case "hash":
+			recEnd := min(17+int(binary.BigEndian.Uint64(idx.data[8:]))*int(idx.data[16]), int(idx.size))
+			buf := make([]byte, idx.size)
+			copy(buf[:17], idx.data[:17])
+			copy(buf[recEnd:], idx.data[recEnd:])
+			idx.data = buf
+		}
+		log.Info("[stub] commitment .kvi in heap", "mode", stubKviHeap, "file", fName, "size", idx.size)
 	}
 
 	if err := idx.init(); err != nil {
@@ -453,7 +465,7 @@ func (idx *Index) LookupProbe(bucketHash, fingerprint uint64, pr *mmap.Probe) (u
 	}
 	if idx.keyCount == 1 {
 		if !idx.enums {
-			return binary.BigEndian.Uint64(idx.data[9+idx.bytesPerRec:]) & idx.recMask, true
+			return binary.BigEndian.Uint64(idx.recs[9+idx.bytesPerRec:]) & idx.recMask, true
 		}
 		return 0, true
 	}
@@ -515,9 +527,9 @@ func (idx *Index) LookupProbe(bucketHash, fingerprint uint64, pr *mmap.Probe) (u
 	rec := int(cumKeys) + int(remap16(remix(fingerprint+idx.startSeed[level]+b), m))
 
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
-	pr.Touch(unsafe.Pointer(&idx.data[pos]))
+	pr.Touch(unsafe.Pointer(&idx.recs[pos]))
 
-	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
+	found := binary.BigEndian.Uint64(idx.recs[pos:]) & idx.recMask
 	if idx.dataStructureVersion == 0 && idx.lessFalsePositives && idx.enums && idx.keyCount > 0 {
 		if len(idx.existenceV0) == 0 {
 			msg := fmt.Sprintf("existence filter is empty, file %s, len data %d first byte %b, "+
@@ -550,7 +562,7 @@ func (idx *Index) ExtractOffsets() map[uint64]uint64 {
 	m := map[uint64]uint64{}
 	pos := 1 + 8 + idx.bytesPerRec
 	for rec := uint64(0); rec < idx.keyCount; rec++ {
-		offset := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
+		offset := binary.BigEndian.Uint64(idx.recs[pos:]) & idx.recMask
 		m[offset] = 0
 		pos += idx.bytesPerRec
 	}
