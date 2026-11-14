@@ -1969,11 +1969,27 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string, recursive bool,
 ) VersionValidity {
+	return vm.validateRead(txIndex, addr, path, key, source, version, rr, checkVersion, traceInvalid, tracePrefix, recursive, false)
+}
+
+func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
+	rr ReadResult,
+	checkVersion func(readVersion, writeVersion Version) VersionValidity,
+	traceInvalid bool, tracePrefix string, recursive bool, absent bool,
+) VersionValidity {
 	if !recursive && source == MapRead && wipedByDestruct(path) {
 		// A field read wiped by a destruct is recorded at the destruct's version. It
 		// stays valid while that destruct holds and no later write revives the field.
 		if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.resolved() && destructed &&
 			version.TxIndex == sdRR.DepIdx() && version.Incarnation == sdRR.Incarnation() {
+			if absent {
+				for _, p := range [...]AccountPath{AddressPath, BalancePath, NoncePath, CodeHashPath} {
+					if hi, ok := vm.LatestTxIndex(addr, p, accounts.NilKey, txIndex-1); ok && hi > version.TxIndex {
+						return VersionInvalid
+					}
+				}
+				return VersionValid
+			}
 			if hi, ok := vm.LatestTxIndex(addr, path, key, txIndex-1); ok && hi > version.TxIndex {
 				return VersionInvalid
 			}
@@ -1989,6 +2005,15 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 			return VersionValid
 		}
+	}
+	if absent && source == MapRead {
+		// An absent AddressPath MapRead only stays valid while its destruct holds (checked
+		// above). Do not fall through to AddressPath cells (such as a BAL existence marker at
+		// the same version), which do not prove absence once the destruct is withdrawn.
+		if traceInvalid {
+			traceInvalidRead(tracePrefix, addr, path, key, txIndex, rr, source, version, VersionInvalid)
+		}
+		return VersionInvalid
 	}
 	valid := VersionValid
 	switch rr.Status() {
@@ -2120,30 +2145,34 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	}
 
 	if traceInvalid && valid == VersionInvalid {
-		if len(tracePrefix) > 0 {
-			tracePrefix += "  RD"
-		} else {
-			tracePrefix = "RD"
-		}
-		fmt.Printf("%s %x %s, %d %s, %s (%d.%d)!=(%d.%d) %s\n", tracePrefix, addr,
-			AccountKey{path, key}.String(), txIndex, func() string {
-				switch rr.Status() {
-				case MVReadResultDone:
-					return "done"
-				case MVReadResultValidated:
-					return "validated"
-				case MVReadResultDependency:
-					return "dependency"
-				case MVReadResultNone:
-					return "none"
-				default:
-					return "unknown"
-				}
-			}(),
-			source, version.TxIndex, version.Incarnation, rr.depIdx, rr.incarnation, valid)
+		traceInvalidRead(tracePrefix, addr, path, key, txIndex, rr, source, version, valid)
 	}
 
 	return valid
+}
+
+func traceInvalidRead(tracePrefix string, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIndex int, rr ReadResult, source ReadSource, version Version, valid VersionValidity) {
+	if len(tracePrefix) > 0 {
+		tracePrefix += "  RD"
+	} else {
+		tracePrefix = "RD"
+	}
+	fmt.Printf("%s %x %s, %d %s, %s (%d.%d)!=(%d.%d) %s\n", tracePrefix, addr,
+		AccountKey{path, key}.String(), txIndex, func() string {
+			switch rr.Status() {
+			case MVReadResultDone:
+				return "done"
+			case MVReadResultValidated:
+				return "validated"
+			case MVReadResultDependency:
+				return "dependency"
+			case MVReadResultNone:
+				return "none"
+			default:
+				return "unknown"
+			}
+		}(),
+		source, version.TxIndex, version.Incarnation, rr.depIdx, rr.incarnation, valid)
 }
 
 // ValidateVersion check if transaction's readSet is still valid based on the current multi-versioned memory
@@ -2168,7 +2197,9 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	}
 
 	for a, tr := range rs.address {
-		if !ok(validatePath(a, AddressPath, tr.ReadHeader)) {
+		absent := tr.Val == nil || tr.Val.IsNil()
+		if !ok(vm.validateRead(txIdx, a, AddressPath, accounts.NilKey, tr.Source, tr.Version,
+			vm.ReadStatus(a, AddressPath, accounts.NilKey, txIdx), checkVersion, traceInvalid, tracePrefix, false, absent)) {
 			return
 		}
 	}
