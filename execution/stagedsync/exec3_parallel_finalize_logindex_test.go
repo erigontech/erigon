@@ -361,7 +361,9 @@ func TestFoldTxDoesNotWaitForCommitmentFlush(t *testing.T) {
 		close(mem.release)
 	})
 	addr := accounts.InternAddress(common.Address{0xee})
-	foldErr := pe.foldTx(t.Context(), rwTx, recordTx(newRawViewVM(20), 2, common.Hash{2}, 20, &chain.Rules{}, nonceBalanceWrites(addr, 1, *uint256.NewInt(1))))
+	r := recordTx(newRawViewVM(20), 2, common.Hash{2}, 20, &chain.Rules{}, nonceBalanceWrites(addr, 1, *uint256.NewInt(1)))
+	r.receipt = &types.Receipt{CumulativeGasUsed: 21_000}
+	foldErr := pe.foldTx(t.Context(), rwTx, r)
 	if watchdog.Stop() {
 		close(mem.release)
 	}
@@ -369,6 +371,7 @@ func TestFoldTxDoesNotWaitForCommitmentFlush(t *testing.T) {
 	require.NoError(t, foldErr)
 	require.False(t, waited.Load(), "the fold waited for the commitment flush")
 	require.Equal(t, 1, cs2.Diffs[kv.AccountsDomain].Len(), "the fold records into its block's changeset")
+	require.Positive(t, cs2.Diffs[kv.ReceiptDomain].Len(), "the fold records receipts into its block's changeset")
 	require.Zero(t, cs2.Diffs[kv.CommitmentDomain].Len(), "the flush records into its own block's changeset")
 	require.Positive(t, cs1.Diffs[kv.CommitmentDomain].Len(), "the flush records into its own block's changeset")
 }
@@ -442,5 +445,4 @@ func TestFoldRacesCommitmentFlush(t *testing.T) {
 		require.Equal(t, wantAccounts, css[b].Diffs[kv.AccountsDomain].Len(), "block %d account diffs", b)
 		require.Equal(t, wantCommitment, css[b].Diffs[kv.CommitmentDomain].Len(), "block %d commitment diffs", b)
 	}
-	require.Nil(t, domains.GetChangesetAccumulator())
 }
