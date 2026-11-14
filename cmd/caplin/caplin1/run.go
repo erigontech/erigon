@@ -516,7 +516,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
 	attestationService := services.NewAttestationService(ctx, forkChoice, aggregationPool, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier)
 	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, batchSignatureVerifier, validatorParameters, false)
-	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, pool, false, batchSignatureVerifier, validatorParameters)
+	aggregateAndProofService := services.NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, pool, false, batchSignatureVerifier, validatorParameters, config.EnableFastConfirmation)
 	voluntaryExitService := services.NewVoluntaryExitService(pool, emitters, syncedDataManager, beaconConfig, ethClock, batchSignatureVerifier)
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig, batchSignatureVerifier)
 	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock, emitters)
@@ -553,23 +553,15 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		go batchSignatureVerifier.Start()
 	}
 
-	{ // start ticking forkChoice
-		go func() {
-			tickInterval := time.NewTicker(2 * time.Millisecond)
-			for {
-				select {
-				case <-tickInterval.C:
-					nowMs := uint64(time.Now().UnixMilli())
-					forkChoice.OnTick(nowMs)
-					if err := forkChoice.OnFastConfirmation(ctx, nowMs, batchSignatureVerifier.FlushAggregateProofs); err != nil {
-						logger.Warn("Fast confirmation unavailable", "err", err)
-					}
-				case <-ctx.Done():
-					return
-				}
+	var onFastConfirmation func(uint64)
+	if config.EnableFastConfirmation {
+		onFastConfirmation = func(nowMs uint64) {
+			if err := forkChoice.OnFastConfirmation(ctx, nowMs, batchSignatureVerifier.FlushAggregateProofs); err != nil {
+				logger.Warn("Fast confirmation unavailable", "err", err)
 			}
-		}()
+		}
 	}
+	go runForkChoiceClock(ctx, forkChoice.OnTick, onFastConfirmation)
 
 	logger.Info("Started Ethereum 2.0 Gossip Service")
 

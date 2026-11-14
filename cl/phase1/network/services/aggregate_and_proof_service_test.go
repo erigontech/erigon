@@ -121,7 +121,7 @@ func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced
 	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
 	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
-	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
+	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams(), false)
 	return blockService, syncedDataManager, forkchoiceMock
 }
 
@@ -872,7 +872,7 @@ func setupAggregateAndProofTestWithConfig(t *testing.T, cfg *clparams.BeaconChai
 	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
 	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
-	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
+	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams(), false)
 	return blockService, syncedDataManager, forkchoiceMock
 }
 
@@ -1589,7 +1589,7 @@ func TestAggregateAndProofForLateBlockIsProcessedOnceBlockArrives(t *testing.T) 
 	validatorParams := validator_params.NewValidatorParams()
 	validatorParams.SetFeeRecipient(0, common.Address{})
 	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
-	service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, clock, cfg, opPool, false, verifier, validatorParams)
+	service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoice, clock, cfg, opPool, false, verifier, validatorParams, false)
 
 	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, agg), ErrIgnore)
 
@@ -1598,8 +1598,8 @@ func TestAggregateAndProofForLateBlockIsProcessedOnceBlockArrives(t *testing.T) 
 		"aggregate was not processed by fork choice after its block arrived")
 }
 
-func TestAggregateAndProofIsVerifiedWhenTheNodeHasValidators(t *testing.T) {
-	for _, validatorSource := range []string{"none", "fee recipient", "attached"} {
+func TestAggregateAndProofVerification(t *testing.T) {
+	for _, validatorSource := range []string{"none", "fee recipient", "attached", "fast confirmation"} {
 		t.Run(validatorSource, func(t *testing.T) {
 			saveSignatureGlobals(t)
 			blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
@@ -1643,7 +1643,7 @@ func TestAggregateAndProofIsVerifiedWhenTheNodeHasValidators(t *testing.T) {
 				validatorParams.AddAttachedValidator(localValidator)
 			}
 			clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
-			service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoiceMock, clock, cfg, opPool, false, verifier, validatorParams)
+			service := NewAggregateAndProofService(ctx, syncedDataManager, forkChoiceMock, clock, cfg, opPool, false, verifier, validatorParams, validatorSource == "fast confirmation")
 
 			err = service.ProcessMessage(context.Background(), nil, agg)
 			stored := func() bool {

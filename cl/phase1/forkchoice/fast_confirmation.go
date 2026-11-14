@@ -32,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
+var errFastConfirmationSnapshotChanged = errors.New("fork choice changed during fast confirmation snapshot")
+
 type fastConfirmationTracker struct {
 	mu                 sync.Mutex
 	rule               *fastConfirmation
@@ -79,6 +81,9 @@ func (f *ForkChoiceStore) OnFastConfirmation(ctx context.Context, nowMs uint64, 
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
 	slot := f.slotAtTimeMs(nowMs)
+	if f.Slot() != slot {
+		return nil
+	}
 	if tracker.attempted && tracker.lastSlot == slot {
 		return nil
 	}
@@ -99,7 +104,10 @@ func (f *ForkChoiceStore) OnFastConfirmation(ctx context.Context, nowMs uint64, 
 		reset()
 	}
 	defer func() {
-		if err != nil {
+		if errors.Is(err, errFastConfirmationSnapshotChanged) {
+			tracker.attempted, tracker.lastSlot = attempted, previousSlot
+			err = nil
+		} else if err != nil {
 			reset()
 		}
 	}()
@@ -221,7 +229,7 @@ func (f *ForkChoiceStore) fastConfirmationView(slot uint64) (*fcrView, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if f.Slot() != slot || f.headHash != head.Root {
-		return nil, errors.New("fork choice changed during fast confirmation snapshot")
+		return nil, errFastConfirmationSnapshotChanged
 	}
 	v := &fcrView{
 		slot: slot, slotsPerEpoch: f.beaconCfg.SlotsPerEpoch, balanceIncrement: f.beaconCfg.EffectiveBalanceIncrement, proposerBoost: f.beaconCfg.ProposerScoreBoost,

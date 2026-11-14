@@ -77,6 +77,7 @@ type aggregateAndProofServiceImpl struct {
 	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, common.Hash]
 	targetStateBuildClaims *lru.Cache[targetStateBuildClaim, struct{}]
 	validatorParams        *validator_params.ValidatorParams
+	enableFastConfirmation bool
 
 	awaitingBlock *blockArrivalQueue
 }
@@ -91,6 +92,7 @@ func NewAggregateAndProofService(
 	test bool,
 	batchSignatureVerifier *BatchSignatureVerifier,
 	validatorParams *validator_params.ValidatorParams,
+	enableFastConfirmation bool,
 ) AggregateAndProofService {
 	seenAggCache, err := lru.New[seenAggregateIndex, common.Hash]("seenAggregate", seenAggregateCacheSize)
 	if err != nil {
@@ -107,6 +109,7 @@ func NewAggregateAndProofService(
 		seenAggreatorIndexes:   seenAggCache,
 		targetStateBuildClaims: newTargetStateBuildClaims(),
 		validatorParams:        validatorParams,
+		enableFastConfirmation: enableFastConfirmation,
 		awaitingBlock: newBlockArrivalQueue(
 			forkchoiceStore,
 			int(beaconCfg.MaxCommitteesPerSlot*beaconCfg.TargetAggregatorsPerCommittee),
@@ -369,8 +372,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
 	monitor.ObserveCommitteeSize(float64(len(committee)))
 
-	// A node with validators verifies every aggregate: it relays them and packs them into its own blocks.
-	if len(a.validatorParams.GetValidators()) > 0 || aggregateAndProof.ImmediateProcess {
+	// Fast confirmation needs gossip votes even without local validators.
+	if a.enableFastConfirmation || len(a.validatorParams.GetValidators()) > 0 || aggregateAndProof.ImmediateProcess {
 		// Set beacon config on the aggregate's attestation so HashSSZ uses the correct
 		// AggregationBits limit for the active preset (e.g. minimal: 8192, mainnet: 131072).
 		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.SetBeaconConfig(a.beaconCfg)

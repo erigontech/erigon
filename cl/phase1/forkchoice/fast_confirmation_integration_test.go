@@ -110,6 +110,50 @@ func TestFastConfirmationRunsOncePerSlot(t *testing.T) {
 	require.Equal(t, observed, store.fastConfirmation.rule.greatestUnrealized)
 }
 
+func TestFastConfirmationRetriesSnapshotConflict(t *testing.T) {
+	_, anchor, _ := tests.GetBellatrixRandom()
+	store := newOverlapTestStore(t, anchor, nil, false).store
+	store.EnableFastConfirmation(anchor.CurrentJustifiedCheckpoint())
+	now := (anchor.GenesisTime() + (anchor.Slot()+1)*anchor.BeaconConfig().SecondsPerSlot) * 1000
+	store.OnTick(now)
+	store.SetSynced(true)
+	rule := store.fastConfirmation.rule
+	calls := 0
+	apply := func(context.Context) error {
+		calls++
+		if calls == 1 {
+			return errFastConfirmationSnapshotChanged
+		}
+		return nil
+	}
+	require.NoError(t, store.OnFastConfirmation(t.Context(), now, apply))
+	require.Same(t, rule, store.fastConfirmation.rule)
+	require.False(t, store.fastConfirmation.attempted)
+	require.NoError(t, store.OnFastConfirmation(t.Context(), now+2, apply))
+	require.Equal(t, 2, calls)
+	require.True(t, store.fastConfirmation.attempted)
+	require.NoError(t, store.OnFastConfirmation(t.Context(), now+4, apply))
+	require.Equal(t, 2, calls)
+}
+
+func TestFastConfirmationWaitsForClock(t *testing.T) {
+	_, anchor, _ := tests.GetBellatrixRandom()
+	store := newOverlapTestStore(t, anchor, nil, false).store
+	store.EnableFastConfirmation(store.FinalizedCheckpoint())
+	store.SetSynced(true)
+	now := (anchor.GenesisTime() + (anchor.Slot()+1)*anchor.BeaconConfig().SecondsPerSlot) * 1000
+	calls := 0
+	apply := func(context.Context) error {
+		calls++
+		return context.Canceled
+	}
+	require.NoError(t, store.OnFastConfirmation(t.Context(), now, apply))
+	require.Zero(t, calls)
+	store.OnTick(now)
+	require.ErrorIs(t, store.OnFastConfirmation(t.Context(), now, apply), context.Canceled)
+	require.Equal(t, 1, calls)
+}
+
 func TestFastConfirmationSafeHashNeverPrecedesFinalized(t *testing.T) {
 	store, graph, old := executionHeadFixture(t)
 	newer := common.Hash{4}
