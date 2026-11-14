@@ -765,7 +765,19 @@ func (w *readAheadRecordingWriter) UpdateAccountData(addr accounts.Address, orig
 	return w.StateWriter.UpdateAccountData(addr, original, account)
 }
 
+func (w *readAheadRecordingWriter) DeleteAccount(addr accounts.Address, original *accounts.Account) error {
+	w.stats.AccountsWritten++
+	if w.stats.AccountWrittenKeys == nil {
+		w.stats.AccountWrittenKeys = make(map[accounts.Address]struct{})
+	}
+	w.stats.AccountWrittenKeys[addr] = struct{}{}
+	return w.StateWriter.DeleteAccount(addr, original)
+}
+
 func (w *readAheadRecordingWriter) WriteAccountStorage(addr accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+	if original == value {
+		return w.StateWriter.WriteAccountStorage(addr, incarnation, key, original, value)
+	}
 	w.stats.StorageWritten++
 	if w.stats.StorageWrittenKeys == nil {
 		w.stats.StorageWrittenKeys = make(map[ReadAheadStorageKey]struct{})
@@ -798,14 +810,15 @@ var (
 	readAheadExecKeys           = metrics.GetOrCreateCounterVec("read_ahead_exec_keys_total", []string{"kind", "direction"})
 	readAheadExecSeconds        = metrics.GetOrCreateSummary("read_ahead_exec_block_seconds")
 	readAheadExecCommitmentKeys = metrics.GetOrCreateCounter("read_ahead_exec_commitment_keys_total")
-	readAheadPrefetchCommitment = prefetchCommitmentWithTx
+	readAheadPrefetchCommitment = func(ctx context.Context, db kv.RoDB, tx kv.TemporalTx, keys [][]byte) error {
+		return prefetchCommitmentWithTx(ctx, db, tx, keys, 1)
+	}
 )
 
-func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute bool, execBlock *atomic.Uint64, distance int, commitmentSwitch ...bool) (chan uint64, context.CancelFunc) {
+func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute, executeCommitment bool, execBlock *atomic.Uint64, distance int) (chan uint64, context.CancelFunc) {
 	if workers <= 0 || distance <= 0 {
 		return nil, func() {}
 	}
-	executeCommitment := len(commitmentSwitch) > 0 && commitmentSwitch[0]
 	readAhead := make(chan uint64, distance)
 	workerCtx, cancel := context.WithCancel(ctx)
 	g, gCtx := errgroup.WithContext(workerCtx)
@@ -836,7 +849,7 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 					if tx != nil {
 						tx.Rollback()
 					}
-					tx, err = db.BeginRo(ctx)
+					tx, err = db.BeginRo(gCtx)
 					if err != nil {
 						return err
 					}
@@ -969,12 +982,7 @@ func runReadAheadBlock(ctx context.Context, tx kv.Tx, block *types.Block, engine
 	}
 	bc := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, chainConfig)
 	evm := vm.NewEVM(bc, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
-	var cancelMu sync.Mutex
-	stopCancel := context.AfterFunc(ctx, func() {
-		cancelMu.Lock()
-		evm.Cancel()
-		cancelMu.Unlock()
-	})
+	stopCancel := context.AfterFunc(ctx, evm.Cancel)
 	defer stopCancel()
 	writer := &readAheadRecordingWriter{StateWriter: state.NewNoopWriter(), stats: &stats, accounts: make(map[accounts.Address]struct{}), storage: make(map[accounts.Address]map[accounts.StorageKey]struct{})}
 	for _, txn := range block.Transactions() {
@@ -987,12 +995,10 @@ func runReadAheadBlock(ctx context.Context, tx kv.Tx, block *types.Block, engine
 		}
 		msg.SetCheckNonce(false)
 		msg.SetCheckTransaction(false)
-		cancelMu.Lock()
 		evm.Reset(protocol.NewEVMTxContext(msg), ibs)
 		if ctx.Err() != nil {
 			evm.Cancel()
 		}
-		cancelMu.Unlock()
 		stats.Transactions++
 		_, err = protocol.ApplyMessage(evm, msg, protocol.NewGasPool(header.GasLimit, ^uint64(0)), true, true, nil)
 		if err != nil {

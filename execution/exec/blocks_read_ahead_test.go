@@ -20,7 +20,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"slices"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -29,6 +33,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
@@ -36,12 +43,17 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -49,6 +61,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // stubTemporalGetter stands in for the committed-state read view a warmup
@@ -1434,7 +1447,7 @@ func TestReviewReadAheadCleanupStopsQueuedExecution(t *testing.T) {
 				<-release
 			}
 		}
-		input, clean := BlocksReadAhead(t.Context(), 1, &singleTxRoDB{tx: tx}, ethash.NewFaker(), readAheadBlockReader{block: block}, chain.TestChainOsakaConfig, true, nil, 500)
+		input, clean := BlocksReadAhead(t.Context(), 1, &singleTxRoDB{tx: tx}, ethash.NewFaker(), readAheadBlockReader{block: block}, chain.TestChainOsakaConfig, true, false, nil, 500)
 		input <- 0
 		<-entered
 		input <- 1
@@ -1504,8 +1517,209 @@ func TestReadAheadNegativeDistanceDoesNotPanic(t *testing.T) {
 	var observed any
 	func() {
 		defer func() { observed = recover() }()
-		_, clean := BlocksReadAhead(t.Context(), 2, nil, nil, nil, nil, false, nil, -1)
+		_, clean := BlocksReadAhead(t.Context(), 2, nil, nil, nil, nil, false, false, nil, -1)
 		clean()
 	}()
 	require.Nil(t, observed, "READ_AHEAD_DISTANCE=-1 must not crash execution; observed panic: %v", observed)
+}
+
+func TestReadAheadCleanupCancelsBlockedBeginRo(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		raw := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).RoTxsLimiter(semaphore.NewWeighted(1)).MustOpen()
+		defer raw.Close()
+		held, err := raw.BeginRo(ctx)
+		require.NoError(t, err)
+		defer held.Rollback()
+		started := make(chan struct{}, 1)
+		db := &commitmentBeginFuncDB{begin: func(ctx context.Context) (kv.Tx, error) {
+			started <- struct{}{}
+			return raw.BeginRo(ctx)
+		}}
+		input, clean := BlocksReadAhead(ctx, 1, db, ethash.NewFaker(), nil, chain.TestChainOsakaConfig, true, true, nil, 1)
+		input <- 0
+		<-started
+		finished := make(chan struct{})
+		go func() { clean(); close(finished) }()
+		synctest.Wait()
+		returned := false
+		select {
+		case <-finished:
+			returned = true
+		default:
+		}
+		cancel()
+		<-finished
+		require.True(t, returned, "cleanup returned while BeginRo was waiting = %t", returned)
+	})
+}
+
+func counterexampleRealCommitmentKeys(t *testing.T, snapshot *reviewReadAheadTx, block *types.Block, config *chain.Config) [][]byte {
+	t.Helper()
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	putter := domains.AsPutDel(rwTx)
+	for domain, values := range snapshot.values {
+		for key, value := range values {
+			require.NoError(t, putter.DomainPut(domain, []byte(key), value, 0, nil))
+		}
+	}
+	updates := domains.GetCommitmentContext().GetUpdates()
+	require.NoError(t, updates.HashSort(ctx, nil, func(_, _ []byte, _ *commitment.Update) error { return nil }))
+	ibs := state.New(state.NewReaderV3(execctx.NewTemporalTxStateGetter(snapshot)))
+	defer ibs.Close()
+	header := block.HeaderNoCopy()
+	engine := ethash.NewFaker()
+	bc := protocol.NewEVMBlockContext(header, nil, engine, accounts.NilAddress, config)
+	evm := vm.NewEVM(bc, evmtypes.TxContext{}, ibs, config, vm.Config{})
+	writer := state.NewWriter(putter, nil, 1)
+	for _, txn := range block.Transactions() {
+		msg, err := txn.AsMessage(*types.MakeSigner(config, header.Number.Uint64(), header.Time), header.BaseFee, evm.ChainRules())
+		require.NoError(t, err)
+		msg.SetCheckNonce(false)
+		msg.SetCheckTransaction(false)
+		evm.Reset(protocol.NewEVMTxContext(msg), ibs)
+		result, err := protocol.ApplyMessage(evm, msg, protocol.NewGasPool(header.GasLimit, ^uint64(0)), true, true, nil)
+		require.NoError(t, err)
+		require.NoError(t, result.Err)
+		require.NoError(t, ibs.FinalizeTx(evm.ChainRules(), writer))
+	}
+	var keys [][]byte
+	require.NoError(t, updates.HashSort(ctx, nil, func(hashed, _ []byte, _ *commitment.Update) error {
+		keys = append(keys, bytes.Clone(hashed))
+		return nil
+	}))
+	slices.SortFunc(keys, bytes.Compare)
+	return keys
+}
+
+func TestReadAheadCommitmentIncludesDeletedAccount(t *testing.T) {
+	tx, block := reviewReadAheadFixture(t, []byte{byte(vm.PUSH1), 0xd0, byte(vm.SELFDESTRUCT)})
+	contract := *block.Transactions()[0].GetTo()
+	slot := common.Hash{31: 1}
+	tx.values[kv.StorageDomain] = map[string][]byte{string(append(bytes.Clone(contract[:]), slot[:]...)): {9}}
+	config := chain.TestChainBerlinConfig
+	stats := runReadAheadBlock(t.Context(), tx, block, ethash.NewFaker(), nil, config)
+	require.False(t, stats.Errored)
+	require.Equal(t, 1, stats.Transactions)
+	want := counterexampleRealCommitmentKeys(t, tx, block, config)
+	deleted := [][]byte{commitmentStateKey(contract[:], nil)}
+	got := readAheadCommitmentKeys(stats)
+	missing := 0
+	for _, key := range deleted {
+		require.Contains(t, want, key, "real execution must send the deleted key to commitment")
+		if !slices.ContainsFunc(got, func(k []byte) bool { return bytes.Equal(k, key) }) {
+			missing++
+		}
+	}
+	require.Zero(t, missing, "deleted account/storage commitment keys missing = %d", missing)
+}
+
+func TestReadAheadCommitmentSkipsRestoredStorage(t *testing.T) {
+	code := []byte{byte(vm.PUSH1), 9, byte(vm.PUSH1), 1, byte(vm.SSTORE), byte(vm.PUSH1), 0, byte(vm.PUSH1), 1, byte(vm.SSTORE), byte(vm.STOP)}
+	tx, block := reviewReadAheadFixture(t, code)
+	stats := runReadAheadBlock(t.Context(), tx, block, ethash.NewFaker(), nil, chain.TestChainOsakaConfig)
+	require.False(t, stats.Errored)
+	require.Equal(t, 1, stats.Transactions)
+	want := counterexampleRealCommitmentKeys(t, tx, block, chain.TestChainOsakaConfig)
+	contract, slot := *block.Transactions()[0].GetTo(), common.Hash{31: 1}
+	key := commitmentStateKey(contract[:], slot[:])
+	require.NotContains(t, want, key, "real writer must skip a storage value restored to its original")
+	got := readAheadCommitmentKeys(stats)
+	found := slices.ContainsFunc(got, func(k []byte) bool { return bytes.Equal(k, key) })
+	require.False(t, found, "unchanged storage included in speculative commitment keys = %t", found)
+}
+
+type counterexamplePressureTx struct {
+	kv.TemporalTx
+	p        latestPrefetcher
+	rollback func()
+}
+
+func (tx counterexamplePressureTx) AggTx() any { return tx.p }
+func (tx counterexamplePressureTx) Rollback()  { tx.rollback() }
+
+type counterexamplePressurePrefetcher struct {
+	sample  atomic.Bool
+	release <-chan struct{}
+}
+
+func (p *counterexamplePressurePrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, error) {
+	if p.sample.Swap(false) {
+		return len(keys), nil
+	}
+	<-p.release
+	return 0, io.ErrUnexpectedEOF
+}
+
+func TestReadAheadCommitmentPreservesPermanentReaderFloor(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const workers, execWorkers = 8, 2
+		limit := httpcfg.RoTxsLimit(1, execWorkers, 0, 0, 0, workers)
+		raw := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).RoTxsLimiter(semaphore.NewWeighted(limit)).MustOpen()
+		t.Cleanup(raw.Close)
+		for range workers + execWorkers + 4 {
+			tx, err := raw.BeginRo(t.Context())
+			require.NoError(t, err)
+			t.Cleanup(tx.Rollback)
+		}
+		var active atomic.Int64
+		active.Store(workers + execWorkers + 4)
+		release := make(chan struct{})
+		childPrefetcher := &counterexamplePressurePrefetcher{release: release}
+		db := &commitmentBeginFuncDB{begin: func(ctx context.Context) (kv.Tx, error) {
+			tx, err := raw.BeginRo(ctx)
+			if err != nil {
+				return nil, err
+			}
+			t.Cleanup(tx.Rollback)
+			active.Add(1)
+			return counterexamplePressureTx{p: childPrefetcher, rollback: func() {
+				tx.Rollback()
+				active.Add(-1)
+			}}, nil
+		}}
+		var keys [][]byte
+		for i := range 10 {
+			address := common.Address{19: byte(i)}
+			keys = append(keys, commitmentStateKey(address[:], nil))
+		}
+		slices.SortFunc(keys, bytes.Compare)
+		var wg sync.WaitGroup
+		for range workers {
+			p := &counterexamplePressurePrefetcher{release: release}
+			p.sample.Store(true)
+			parent := prefetcherTx{p: p}
+			wg.Go(func() { _ = prefetchCommitmentWithTx(t.Context(), db, parent, keys) })
+		}
+		synctest.Wait()
+		held := active.Load()
+		acquired := make(chan bool, 1)
+		wg.Go(func() {
+			tx, err := raw.BeginRo(t.Context())
+			if err != nil {
+				acquired <- false
+				return
+			}
+			t.Cleanup(tx.Rollback)
+			tx.Rollback()
+			acquired <- true
+		})
+		synctest.Wait()
+		immediate := false
+		select {
+		case immediate = <-acquired:
+		default:
+		}
+		close(release)
+		wg.Wait()
+		require.True(t, immediate, "permanent reader acquired before prefetch released = %t (limit=%d, held=%d)", immediate, limit, held)
+	})
 }
