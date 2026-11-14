@@ -642,11 +642,11 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 
 	if iit.seekInFilesCache != nil {
 		iit.seekInFilesCache.total++
-		fromCache, ok := iit.seekInFilesCache.Get(hi)
+		fromCache, ok := iit.seekInFilesCache.get(key, hi)
 		// A miss is stored as found=0, and a hit is only stored when found>txNum,
 		// so found=0 is unambiguous. It has to be tested first: txNum=0 also
 		// satisfies txNum<=found and would turn the miss into a hit.
-		if ok && fromCache.lo == lo && fromCache.requested <= txNum {
+		if ok && fromCache.requested <= txNum {
 			if fromCache.found == 0 {
 				iit.seekInFilesCache.hit++
 				return false, res, nil
@@ -684,13 +684,13 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 			return false, iiSeekResult{txNum: equalOrHigherTxNum}, fmt.Errorf("inverted_index(%s) at (%x, %d) returned value %d, but it out-of-bounds %d-%d. it may signal that .ef file is broke - can detect by `erigon snapshots integrity --check=InvertedIndex`, or re-download files", g.FileName(), key, txNum, iit.files[i].startTxNum, iit.files[i].endTxNum, equalOrHigherTxNum)
 		}
 		if iit.seekInFilesCache != nil && equalOrHigherTxNum-txNum > 0 { // > 0 to improve cache hit-rate
-			iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, lo: lo, found: equalOrHigherTxNum, keyOrdinal: keyOrdinal, rank: rank, fileIdx: i})
+			iit.seekInFilesCache.add(key, hi, iiSeekInFilesCacheItem{requested: txNum, found: equalOrHigherTxNum, keyOrdinal: keyOrdinal, rank: rank, fileIdx: i})
 		}
 		return true, iiSeekResult{txNum: equalOrHigherTxNum, keyOrdinal: keyOrdinal, rank: rank, fileIdx: i}, nil
 	}
 
 	if iit.seekInFilesCache != nil {
-		iit.seekInFilesCache.Add(hi, iiSeekInFilesCacheItem{requested: txNum, lo: lo, found: 0})
+		iit.seekInFilesCache.add(key, hi, iiSeekInFilesCacheItem{requested: txNum, found: 0})
 	}
 	return false, res, nil
 }
