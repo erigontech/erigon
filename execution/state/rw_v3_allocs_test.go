@@ -299,7 +299,7 @@ func TestWriteSetApplyKeyDoesNotScalePerSlot(t *testing.T) {
 			}
 		}
 		return testing.AllocsPerRun(5, func() {
-			require.NoError(t, ApplyWrites(writes, domains, tx, 1, 1, nil, &chain.Rules{}, false))
+			require.NoError(t, ApplyWrites(writes, domains, tx, nil, 1, 1, nil, &chain.Rules{}, false))
 		})
 	}
 
@@ -333,7 +333,7 @@ func TestApplyWritesAccountFieldsDoNotAllocatePerField(t *testing.T) {
 			}
 		}
 		return testing.AllocsPerRun(5, func() {
-			require.NoError(t, ApplyWrites(writes, domains, tx, 1, 1, nil, &chain.Rules{}, false))
+			require.NoError(t, ApplyWrites(writes, domains, tx, nil, 1, 1, nil, &chain.Rules{}, false))
 		})
 	}
 
@@ -385,14 +385,13 @@ func TestApplyWritesFoldTakesPrevFromRecordedOrigin(t *testing.T) {
 			_, tx, domains := NewTestRwTx(t)
 			reads := &storageLatestReads{TemporalTx: tx}
 			changes := &changeset.StateChangeSet{}
-			domains.SetChangesetAccumulator(changes)
 			view := storageFoldView(addr, key, &VersionedWrite[uint256.Int]{
 				WriteHeader: WriteHeader{valStatus: tc.status},
 				Val:         *uint256.NewInt(tc.val),
 				orig:        *uint256.NewInt(tc.orig),
 			})
 
-			require.NoError(t, ApplyWrites(view, domains, reads, 1, 1, nil, &chain.Rules{}, false))
+			require.NoError(t, ApplyWrites(view, domains, reads, changes, 1, 1, nil, &chain.Rules{}, false))
 
 			require.Zero(t, reads.count, "the recorded origin is the previous value")
 			got, _, ok := domains.GetLatestFromMemory(kv.StorageDomain, composite)
@@ -416,7 +415,7 @@ func TestApplyWritesFoldReadsPrevWithoutRecordedOrigin(t *testing.T) {
 	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, composite, []byte{9}, 1, nil))
 
 	view := storageFoldView(addr, key, &VersionedWrite[uint256.Int]{})
-	require.NoError(t, ApplyWrites(view, domains, tx, 1, 2, nil, &chain.Rules{}, false))
+	require.NoError(t, ApplyWrites(view, domains, tx, nil, 1, 2, nil, &chain.Rules{}, false))
 
 	got, _, ok := domains.GetLatestFromMemory(kv.StorageDomain, composite)
 	require.True(t, ok)
@@ -434,7 +433,6 @@ func TestApplyWritesFoldReadsPrevAfterAnEarlierCreate(t *testing.T) {
 	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, composite, []byte{5}, 1, nil))
 	require.NoError(t, domains.DomainDelPrefix(kv.StorageDomain, tx, addrValue[:], 2))
 	changes := &changeset.StateChangeSet{}
-	domains.SetChangesetAccumulator(changes)
 
 	vm := NewVersionMap(nil)
 	vm.WriteCreateContract(addr, Version{TxIndex: 0}, true, true)
@@ -445,7 +443,7 @@ func TestApplyWritesFoldReadsPrevAfterAnEarlierCreate(t *testing.T) {
 		orig:        *uint256.NewInt(5),
 	})
 
-	require.NoError(t, ApplyWrites(NewVersionMapWriteView(ws, vm, 1), domains, tx, 1, 3, nil, &chain.Rules{}, false))
+	require.NoError(t, ApplyWrites(NewVersionMapWriteView(ws, vm, 1), domains, tx, changes, 1, 3, nil, &chain.Rules{}, false))
 
 	diff := changes.Diffs[kv.StorageDomain].GetDiffSet()
 	require.Len(t, diff, 1)
@@ -493,7 +491,7 @@ func TestApplyWritesFoldPrevAfterCreationInUncommittedPriorBlock(t *testing.T) {
 				block1.FlushVersionedWrites(writes, true)
 				block1.SealUpTo(txIdx)
 				block1Folds = append(block1Folds, func() error {
-					return ApplyWrites(NewVersionMapWriteView(writes, block1, txIdx), domains, tx, 1, txNum, nil, rules, false)
+					return ApplyWrites(NewVersionMapWriteView(writes, block1, txIdx), domains, tx, nil, 1, txNum, nil, rules, false)
 				})
 			}
 			createdIdx := 0
@@ -537,8 +535,7 @@ func TestApplyWritesFoldPrevAfterCreationInUncommittedPriorBlock(t *testing.T) {
 				execWindow.RemoveTail()
 			}
 			changes := &changeset.StateChangeSet{}
-			domains.SetChangesetAccumulator(changes)
-			require.NoError(t, ApplyWrites(NewVersionMapWriteView(writes, block2, 0), domains, tx, 2, 4, nil, rules, false))
+			require.NoError(t, ApplyWrites(NewVersionMapWriteView(writes, block2, 0), domains, tx, changes, 2, 4, nil, rules, false))
 
 			diff := changes.Diffs[kv.StorageDomain].GetDiffSet()
 			require.Len(t, diff, 1)

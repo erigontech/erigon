@@ -127,9 +127,8 @@ type parallelExecutor struct {
 	changesetWindowStart uint64
 	// currentChangeSet is the block's changeset while it is being built: the exec
 	// loop creates it and saves it by hash, then the apply fold and the committer
-	// bind it transiently by hash under changesetMu. Deliberately NOT installed as a
-	// persistent live accumulator — the apply loop is the sole sd.mem writer, so a
-	// global install would only race the fold's own transient bind.
+	// look it up by hash and write into it explicitly. Never installed as the
+	// accumulator: the fold and the committer write into different blocks' changesets.
 	currentChangeSet *changeset.StateChangeSet
 	// currentChangeSetBlock is the block currentChangeSet belongs to (0 == none).
 	currentChangeSetBlock uint64
@@ -215,8 +214,8 @@ func (pe *parallelExecutor) cancelOperational(blockNum uint64, err error) {
 }
 
 // ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
-// block-specific StateChangeSet, to be saved by hash and bound transiently by
-// the apply fold and the committer. Idempotent; a no-op outside the changeset
+// block-specific StateChangeSet, to be saved by hash and looked up by the apply
+// fold and the committer. Idempotent; a no-op outside the changeset
 // window. A zero blockHash defers the save to the first caller that knows it.
 // Exec-loop only.
 func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64, blockHash common.Hash) {
@@ -248,36 +247,16 @@ func (pe *parallelExecutor) clearChangesetAccumulator() {
 	pe.currentChangeSetHash = common.Hash{}
 }
 
-// bindBlockChangesetForFold binds block N's saved changeset (by hash) so the
-// apply fold's DomainPuts record account/storage/code diffs into it — letting
-// unwind revert state, not just commitment. The bind is transient and
-// self-restoring under changesetMu; nothing installs a persistent global.
-// Returns a restore closure; a no-op if the block has no saved changeset.
-func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash common.Hash) (restore func()) {
-	pe.domains().LockChangesetAccumulator()
-	defer pe.domains().UnlockChangesetAccumulator()
-	cs := pe.domains().GetChangesetByHash(blockNum, blockHash)
-	if cs == nil {
-		return func() {}
-	}
-	unswap := pe.domains().SwapChangesetAccumulatorLocked(cs)
-	return func() {
-		pe.domains().LockChangesetAccumulator()
-		unswap()
-		pe.domains().UnlockChangesetAccumulator()
-	}
-}
-
-// foldTx applies one published tx's versionMap view and indexes to sd.mem.
+// foldTx applies one published tx's versionMap view and indexes to sd.mem,
+// recording their diffs into the block's saved changeset so unwind reverts state.
 // Finalize logs share the final virtual task's txNum. That task has already
 // handled the receipt cache, so finalize indexes logs without changing it.
 func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
-	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
-	defer restoreCS()
-	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
+	cs := pe.domains().GetChangesetByHash(r.blockNum, r.blockHash)
+	if err := pe.rs.ApplyStateWrites(ctx, rwTx, cs, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
 		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
-	if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
+	if err := pe.rs.ApplyTxIndexes(rwTx, cs, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
 		return fmt.Errorf("fold index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
 	return nil

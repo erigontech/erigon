@@ -553,11 +553,11 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		}
 
 		if !txTask.HistoryExecution {
-			if err := se.rs.ApplyStateWrites(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, nil,
+			if err := se.rs.ApplyStateWrites(ctx, se.applyTx, se.doms.GetChangesetAccumulator(), txTask.BlockNumber(), txTask.TxNum, nil,
 				txTask.BalanceIncreaseSet, txTask.Rules()); err != nil {
 				return false, err
 			}
-			if err := se.rs.ApplyTxIndexes(se.applyTx, txTask.TxNum, applyReceipt, se.blobGasUsed,
+			if err := se.rs.ApplyTxIndexes(se.applyTx, se.doms.GetChangesetAccumulator(), txTask.TxNum, applyReceipt, se.blobGasUsed,
 				result.Logs, result.TraceFroms, result.TraceTos); err != nil {
 				return false, err
 			}

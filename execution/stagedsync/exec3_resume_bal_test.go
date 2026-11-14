@@ -335,7 +335,7 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 		if ws == nil || ws.IsEmpty() {
 			continue
 		}
-		require.NoError(t, state.ApplyWrites(ws, domains, tx, 1, txNum, nil, blockRules, false))
+		require.NoError(t, state.ApplyWrites(ws, domains, tx, nil, 1, txNum, nil, blockRules, false))
 	}
 	root, err := domains.ComputeCommitment(ctx, tx, false, 1, txNum, "resume-bal", nil)
 	require.NoError(t, err)

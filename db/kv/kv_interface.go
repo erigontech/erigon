@@ -672,8 +672,9 @@ func WithFlushCallback(domain Domain, cb func(k []byte, v []byte, step Step, txN
 }
 
 type TemporalMemBatch interface {
-	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte) error
-	DomainDel(domain Domain, k string, txNum uint64, preval []byte) error
+	// DomainPut and DomainDel record the write's unwind entry into diff; a nil diff records none.
+	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte, diff *DomainDiff) error
+	DomainDel(domain Domain, k string, txNum uint64, preval []byte, diff *DomainDiff) error
 	// GetLatest returns the key's latest in-mem value. On a miss, step carries
 	// the key's in-flight-unwind bound — NoStepBound when none — so callers
 	// can bound their fall-through read.
