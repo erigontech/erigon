@@ -74,10 +74,10 @@ Branch `awskii/readahead-exec-prefetch`, base main `ce34587ba46`. This plan file
 
 ### Task 2: wire it into multi-block runs
 
-- [ ] `READ_AHEAD_INITIAL`, `READ_AHEAD_BLOCKS_WORKERS`, `READ_AHEAD_DISTANCE`; exec3 starts
+- [x] `READ_AHEAD_INITIAL`, `READ_AHEAD_BLOCKS_WORKERS`, `READ_AHEAD_DISTANCE`; exec3 starts
       `BlocksReadAhead` on `isApplyingBlocks && (!initialCycle || dbg.ReadAheadInitial)` with the worker knob
-- [ ] `RoTxsLimit` reserves the worker knob instead of the constant 2
-- [ ] test: a multi-block ExecV3 run (pick the nearest existing driver, e.g.
+- [x] `RoTxsLimit` reserves the worker knob instead of the constant 2
+- [x] test: a multi-block ExecV3 run (pick the nearest existing driver, e.g.
       `exec3_ephemeral_multiblock_test.go` or `execmoduletester`) with every knob on gives the same state
       root and receipts as with every knob off, and the done-blocks metric (or stats hook) is above 0 with
       the knobs on. Guard: dropping the initial-cycle start turns the counter assertion red

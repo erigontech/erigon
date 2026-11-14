@@ -777,9 +777,8 @@ var (
 	readAheadExecSeconds      = metrics.GetOrCreateSummary("read_ahead_exec_block_seconds")
 )
 
-func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute bool, execBlock *atomic.Uint64) (chan uint64, context.CancelFunc) {
-	const readAheadBlocks = 500
-	readAhead := make(chan uint64, readAheadBlocks)
+func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute bool, execBlock *atomic.Uint64, distance int) (chan uint64, context.CancelFunc) {
+	readAhead := make(chan uint64, distance)
 	g, gCtx := errgroup.WithContext(ctx)
 	for range workers {
 		g.Go(func() (err error) {
@@ -809,7 +808,7 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 						return err
 					}
 				}
-				target := bn + readAheadBlocks
+				target := bn + uint64(distance)
 				if execute && execBlock != nil && target <= execBlock.Load() {
 					readAheadBlocksByResult.WithLabelValues("late").Inc()
 					continue
@@ -885,8 +884,8 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 		readAheadExecKeys.WithLabelValues("account", "write").AddInt(stats.AccountsWritten)
 		readAheadExecKeys.WithLabelValues("storage", "write").AddInt(stats.StorageWritten)
 		readAheadExecSeconds.Observe(time.Since(started).Seconds())
+		readAheadBlocksByResult.WithLabelValues("done").Inc()
 	}
-	readAheadBlocksByResult.WithLabelValues("done").Inc()
 	return nil
 }
 
