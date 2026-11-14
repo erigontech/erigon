@@ -58,19 +58,23 @@ type validatedChildren struct {
 
 var ErrStateNotFound = errors.New("state not found")
 
-var nextEpochStateOutcomes = metrics.GetOrCreateCounterVec("caplin_next_epoch_state_outcomes_total", []string{"outcome"})
+var (
+	nextEpochStateOutcomes          = metrics.GetOrCreateCounterVec("caplin_next_epoch_state_outcomes_total", []string{"outcome"})
+	replaySyncedHeadFallbackCounter = metrics.GetOrCreateCounter("caplin_forkchoice_replay_synced_head_total")
+)
 
 type ChainSegmentInsertionResult uint
 
 const (
-	Success        ChainSegmentInsertionResult = 0
-	InvalidBlock   ChainSegmentInsertionResult = 1
-	MissingSegment ChainSegmentInsertionResult = 2
-	BelowAnchor    ChainSegmentInsertionResult = 3
-	LogisticError  ChainSegmentInsertionResult = 4
-	PreValidated   ChainSegmentInsertionResult = 5
-	Started        ChainSegmentInsertionResult = 6
-	ReplayRequired ChainSegmentInsertionResult = 7
+	Success                        ChainSegmentInsertionResult = 0
+	InvalidBlock                   ChainSegmentInsertionResult = 1
+	MissingSegment                 ChainSegmentInsertionResult = 2
+	BelowAnchor                    ChainSegmentInsertionResult = 3
+	LogisticError                  ChainSegmentInsertionResult = 4
+	PreValidated                   ChainSegmentInsertionResult = 5
+	Started                        ChainSegmentInsertionResult = 6
+	ReplayRequired                 ChainSegmentInsertionResult = 7
+	PrecomputedEpochStateAvailable ChainSegmentInsertionResult = 8
 )
 
 func (r ChainSegmentInsertionResult) String() string {
@@ -91,6 +95,8 @@ func (r ChainSegmentInsertionResult) String() string {
 		return "segment started"
 	case ReplayRequired:
 		return "parent state needs a replay"
+	case PrecomputedEpochStateAvailable:
+		return "precomputed epoch state available"
 	default:
 		return fmt.Sprintf("%d <unknown>", r)
 	}
@@ -413,10 +419,25 @@ func (f *forkGraphDisk) CurrentStateLocked(blockRoot common.Hash) *state.Caching
 }
 
 func (f *forkGraphDisk) ReplayState(blockRoot common.Hash) (*state.CachingBeaconState, error) {
-	return f.replayState(blockRoot, false)
+	replayed, _, err := f.ReplayStateWithOwnership(blockRoot)
+	return replayed, err
 }
 
-func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *state.CachingBeaconState) (out *state.CachingBeaconState, ok bool, err error) {
+func (f *forkGraphDisk) ReplayStateWithOwnership(blockRoot common.Hash) (*state.CachingBeaconState, bool, error) {
+	if _, ok := f.GetHeader(blockRoot); !ok {
+		return nil, false, nil
+	}
+	if state, ok, err := f.useHeadStateIfPossible(blockRoot, nil); ok || err != nil {
+		if ok {
+			replaySyncedHeadFallbackCounter.Inc()
+		}
+		return state, ok, err
+	}
+	replayed, err := f.replayState(blockRoot, false)
+	return replayed, false, err
+}
+
+func (f *forkGraphDisk) useHeadStateIfPossible(blockRoot common.Hash, in *state.CachingBeaconState) (out *state.CachingBeaconState, ok bool, err error) {
 	if f.syncedData == nil {
 		return
 	}
@@ -442,9 +463,16 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 		if errors.Is(err, synced_data.ErrNotSynced) {
 			err = nil
 		}
-		if ok || err != nil {
-			return
-		}
+	}
+	return
+}
+
+func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *state.CachingBeaconState) (out *state.CachingBeaconState, ok bool, err error) {
+	if out, ok, err = f.useHeadStateIfPossible(blockRoot, in); ok || err != nil {
+		return
+	}
+	if f.syncedData == nil {
+		return
 	}
 
 	// check if the state is in the cache

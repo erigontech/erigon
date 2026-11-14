@@ -64,6 +64,9 @@ func NewRemoteBackend(client remoteproto.ETHBACKENDClient, db kv.RoDB, blockRead
 	}
 }
 
+// BlockReader returns the block reader that RemoteBackend wraps.
+func (back *RemoteBackend) BlockReader() dbservices.FullBlockReader { return back.blockReader }
+
 func (back *RemoteBackend) CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64) {
 	return back.blockReader.CanPruneTo(currentBlockInDB)
 }
