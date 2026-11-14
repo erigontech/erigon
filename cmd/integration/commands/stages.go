@@ -744,7 +744,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return errors.New("cannot unwind past 0")
 		}
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-			minUnwindableBlockNum, _, err := rawtemporaldb.CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
+			minUnwindableBlockNum, _, err := rawtemporaldb.CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx, br.TxnumReader())
 			if err != nil {
 				return err
 			}
@@ -1338,7 +1338,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	notifications := shards.NewNotifications(nil)
 	blockRetire := freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
 	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader())
-	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
+	sync := stagedsync.New(blockReader.TxnumReader(), cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 	return blockRetire, blockRetire.Close, engine, vmConfig, sync
 }
 

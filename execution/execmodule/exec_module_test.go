@@ -43,12 +43,14 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -820,7 +822,7 @@ func newStateAheadOfTxNums(t *testing.T, invalidExecutionProgress, keepChangeset
 	return m, chainPack, truncateTxNumsBelowCommitment(t, m, invalidExecutionProgress, keepChangesets)
 }
 
-func newExecutedTransferChain(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+func newExecutedTransferChain(t *testing.T, opts ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
 	t.Helper()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -831,7 +833,7 @@ func newExecutedTransferChain(t *testing.T) (*execmoduletester.ExecModuleTester,
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	m := execmoduletester.New(t, append(opts, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))...)
 	chainPack, err := m.GenerateChain(10, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -848,6 +850,26 @@ func newExecutedTransferChain(t *testing.T) (*execmoduletester.ExecModuleTester,
 	// TxNums.Last are now both at block 10.
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
 	return m, chainPack
+}
+
+func TestUpdateForkChoiceResentHeadBelowSnapshotState(t *testing.T) {
+	m, chainPack := newExecutedTransferChain(t, execmoduletester.WithStepSize(8))
+	m.ExecModule.Drain()
+	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	agg.WaitForFiles()
+	require.NoError(t, agg.BuildFiles2(t.Context(), m.DB, 0, 3, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, m.BlockReader.TxnumReader()), false))
+	agg.WaitForFiles()
+	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		require.Equal(t, uint64(24), tx.Debug().TxNumsInFiles(kv.AccountsDomain))
+		return nil
+	}))
+	truncateTxNumsBelowCommitment(t, m, false, false)
+	head := chainPack.Blocks[6].Header()
+	for range 2 {
+		result, err := m.UpdateForkChoice(t.Context(), head)
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusTooFarAway, result.Status)
+	}
 }
 
 func truncateTxNumsBelowCommitment(t *testing.T, m *execmoduletester.ExecModuleTester, invalidExecutionProgress, keepChangesets bool) uint64 {
