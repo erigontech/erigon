@@ -1130,6 +1130,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
 						"spec", blockExecutor.cntSpecExec,
 						"valFail", blockExecutor.cntValidationFail,
+						"valSkip", blockExecutor.cntValidationSkip,
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
@@ -1771,6 +1772,7 @@ func (be *blockExecutor) taskIndexOf(versionTxIndex int) int {
 // out of order rather than behind the whole linear prefix. valid=false forces
 // re-exec; blocker is the highest stale writer to wait for.
 func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult) (valid bool, target int, blocker int) {
+	result.ValStamp = be.versionMap.WriteSeq()
 	blocker = -1
 	v := be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn,
 		func(rv, wv state.Version) state.VersionValidity {
@@ -2584,7 +2586,9 @@ type blockExecutor struct {
 	profile bool
 
 	// Stats for debugging purposes
-	cntExec, cntSpecExec, cntValidationFail int
+	cntExec, cntSpecExec, cntValidationFail, cntValidationSkip int
+
+	oracleHook func()
 
 	// finalizedResults stores the finalized execResult snapshot per TX, so the
 	// publish loop can't see a different incarnation if be.results[tx] is overwritten
@@ -2661,6 +2665,8 @@ type blockExecutor struct {
 	// each task exactly once. Touched only on the exec-loop goroutine.
 	selfLoopDispatched map[int]bool
 }
+
+var validationSkipHook func(int)
 
 // readyForDepOrderValidation decides whether tx may be validated out of contiguous
 // order: exec-complete and not already validated. The self-loop worker only sends a
@@ -3197,6 +3203,25 @@ func (be *blockExecutor) validateNow(txIdx int) bool {
 		}, false, "") == state.VersionValid
 }
 
+func (be *blockExecutor) arrivalValid(txIdx int, valStamp uint64) bool {
+	if !be.versionMap.QuietBelow(txIdx, valStamp) {
+		return be.validateNow(txIdx)
+	}
+	be.cntValidationSkip++
+	if validationSkipHook != nil {
+		validationSkipHook(txIdx)
+	}
+	if dbg.AssertEnabled {
+		if be.oracleHook != nil {
+			be.oracleHook()
+		}
+		if !be.validateNow(txIdx) && be.versionMap.QuietBelow(txIdx, valStamp) {
+			panic(fmt.Sprintf("validation skip oracle: tx %d skipped arrival validation but is stale", txIdx))
+		}
+	}
+	return true
+}
+
 // runDepOrderValidation is the dependency-ordered validation pass. It finalizes the
 // contiguous validated-but-not-finalized prefix, then validates the dependency-ready
 // txs out of order, committing each or cascading a re-validation of successors on
@@ -3222,9 +3247,12 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			txResult := be.results[tx]
 			txVersion := txResult.Task.Version()
 
-			// Validation is unconditional: a verdict also depends on the unstamped origin layer, so a quiet
-			// write stamp does not imply an unchanged read set.
-			valid := be.validateNow(txVersion.TxIndex)
+			// Trust the worker's verdict only when no tx below this one wrote since it was
+			// stamped. Otherwise re-validate against the CURRENT versionMap: a predecessor
+			// may have changed or sealed since (including an in-flight Validated cell the
+			// reader early-broke on), so a stale verdict would commit against a value that
+			// has moved.
+			valid := be.arrivalValid(txVersion.TxIndex, txResult.ValStamp)
 
 			if valid {
 				// A regular OCC tx's writes go Validated here, not Done: a reader
@@ -3655,6 +3683,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		be.poolTasks = make([]*poolTask, len(be.tasks))
 		be.pool = pe.pool
 		be.runInc = make([]atomic.Int64, len(be.tasks))
+		be.versionMap.InitStamps(be.tasks[len(be.tasks)-1].Version().TxIndex)
 		for i := range be.runInc {
 			be.runInc[i].Store(-1)
 		}
