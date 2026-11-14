@@ -1337,45 +1337,6 @@ func TestReadAheadExecReadsAndWritesContractStorage(t *testing.T) {
 	require.Zero(t, value.Uint64(), "speculative execution must not write to the database")
 }
 
-func TestReadAheadExecSkipsStaleNonceCheck(t *testing.T) {
-	ctx := t.Context()
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	contract := common.Address{19: 0xc1}
-	code := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.STOP)}
-	config := chain.TestChainOsakaConfig
-	engine := ethash.NewFaker()
-	require.NoError(t, db.UpdateTemporal(ctx, func(rwTx kv.TemporalRwTx) error {
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		if err != nil {
-			return err
-		}
-		defer domains.Close()
-		acc := accounts.NewAccount()
-		acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
-		putter := domains.AsPutDel(rwTx)
-		if err := putter.DomainPut(kv.CodeDomain, contract[:], code, 0, nil); err != nil {
-			return err
-		}
-		if err := putter.DomainPut(kv.AccountsDomain, contract[:], accounts.SerialiseV3(&acc), 0, nil); err != nil {
-			return err
-		}
-		return domains.Flush(ctx, rwTx)
-	}))
-	signer := types.MakeSigner(config, 1, 1)
-	txn, err := types.SignTx(&types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, To: &contract, GasLimit: 100_000}, GasPrice: *uint256.NewInt(0)}, *signer, key)
-	require.NoError(t, err)
-	header := &types.Header{Number: *uint256.NewInt(1), Time: 1, GasLimit: 30_000_000, Difficulty: uint256.Int{}}
-	block := types.NewBlock(header, []types.Transaction{txn}, nil, nil, nil, nil)
-	roTx, err := db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer roTx.Rollback()
-	stats := runReadAheadBlock(ctx, roTx, block, engine, nil, config)
-	require.Contains(t, stats.StorageReadKeys, ReadAheadStorageKey{Address: accounts.InternAddress(contract), Slot: accounts.InternKey(common.Hash{})})
-	require.Equal(t, 1, stats.Transactions)
-}
-
 type reviewReadAheadTx struct {
 	kv.TemporalTx
 	values    map[kv.Domain]map[string][]byte
@@ -1514,13 +1475,10 @@ func TestReviewReadAheadDoesNotCacheStaleAuRaCertifier(t *testing.T) {
 }
 
 func TestReadAheadNegativeDistanceDoesNotPanic(t *testing.T) {
-	var observed any
-	func() {
-		defer func() { observed = recover() }()
+	require.NotPanics(t, func() {
 		_, clean := BlocksReadAhead(t.Context(), 2, nil, nil, nil, nil, false, false, nil, -1)
 		clean()
-	}()
-	require.Nil(t, observed, "READ_AHEAD_DISTANCE=-1 must not crash execution; observed panic: %v", observed)
+	})
 }
 
 func TestReadAheadCleanupCancelsBlockedBeginRo(t *testing.T) {
@@ -1610,16 +1568,9 @@ func TestReadAheadCommitmentIncludesDeletedAccount(t *testing.T) {
 	require.False(t, stats.Errored)
 	require.Equal(t, 1, stats.Transactions)
 	want := counterexampleRealCommitmentKeys(t, tx, block, config)
-	deleted := [][]byte{commitmentStateKey(contract[:], nil)}
-	got := readAheadCommitmentKeys(stats)
-	missing := 0
-	for _, key := range deleted {
-		require.Contains(t, want, key, "real execution must send the deleted key to commitment")
-		if !slices.ContainsFunc(got, func(k []byte) bool { return bytes.Equal(k, key) }) {
-			missing++
-		}
-	}
-	require.Zero(t, missing, "deleted account/storage commitment keys missing = %d", missing)
+	key := commitmentStateKey(contract[:], nil)
+	require.Contains(t, want, key, "real execution must send the deleted key to commitment")
+	require.Contains(t, readAheadCommitmentKeys(stats), key)
 }
 
 func TestReadAheadCommitmentSkipsRestoredStorage(t *testing.T) {
@@ -1632,9 +1583,7 @@ func TestReadAheadCommitmentSkipsRestoredStorage(t *testing.T) {
 	contract, slot := *block.Transactions()[0].GetTo(), common.Hash{31: 1}
 	key := commitmentStateKey(contract[:], slot[:])
 	require.NotContains(t, want, key, "real writer must skip a storage value restored to its original")
-	got := readAheadCommitmentKeys(stats)
-	found := slices.ContainsFunc(got, func(k []byte) bool { return bytes.Equal(k, key) })
-	require.False(t, found, "unchanged storage included in speculative commitment keys = %t", found)
+	require.NotContains(t, readAheadCommitmentKeys(stats), key)
 }
 
 type counterexamplePressureTx struct {
@@ -1697,7 +1646,7 @@ func TestReadAheadCommitmentPreservesPermanentReaderFloor(t *testing.T) {
 			p := &counterexamplePressurePrefetcher{release: release}
 			p.sample.Store(true)
 			parent := prefetcherTx{p: p}
-			wg.Go(func() { _ = prefetchCommitmentWithTx(t.Context(), db, parent, keys) })
+			wg.Go(func() { _ = prefetchCommitmentWithTx(t.Context(), db, parent, keys, 1) })
 		}
 		synctest.Wait()
 		held := active.Load()

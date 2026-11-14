@@ -715,7 +715,6 @@ type ReadAheadExecStats struct {
 	StorageReadKeys    map[ReadAheadStorageKey]struct{}
 	StorageWrittenKeys map[ReadAheadStorageKey]struct{}
 	AccountWrittenKeys map[accounts.Address]struct{}
-	CommitmentKeys     int
 	Errored            bool
 }
 
@@ -750,14 +749,11 @@ func (r *readAheadCountingReader) ReadAccountCodeSize(addr accounts.Address) (in
 
 type readAheadRecordingWriter struct {
 	state.StateWriter
-	stats    *ReadAheadExecStats
-	accounts map[accounts.Address]struct{}
-	storage  map[accounts.Address]map[accounts.StorageKey]struct{}
+	stats *ReadAheadExecStats
 }
 
 func (w *readAheadRecordingWriter) UpdateAccountData(addr accounts.Address, original, account *accounts.Account) error {
 	w.stats.AccountsWritten++
-	w.accounts[addr] = struct{}{}
 	if w.stats.AccountWrittenKeys == nil {
 		w.stats.AccountWrittenKeys = make(map[accounts.Address]struct{})
 	}
@@ -783,10 +779,6 @@ func (w *readAheadRecordingWriter) WriteAccountStorage(addr accounts.Address, in
 		w.stats.StorageWrittenKeys = make(map[ReadAheadStorageKey]struct{})
 	}
 	w.stats.StorageWrittenKeys[ReadAheadStorageKey{Address: addr, Slot: key}] = struct{}{}
-	if w.storage[addr] == nil {
-		w.storage[addr] = make(map[accounts.StorageKey]struct{})
-	}
-	w.storage[addr][key] = struct{}{}
 	return w.StateWriter.WriteAccountStorage(addr, incarnation, key, original, value)
 }
 
@@ -942,9 +934,8 @@ func blocksReadAheadFunc(ctx context.Context, db kv.RoDB, tx kv.Tx, blockNum uin
 		}
 		if executeCommitment {
 			keys := readAheadCommitmentKeys(stats)
-			stats.CommitmentKeys = len(keys)
 			if len(keys) > 0 {
-				readAheadExecCommitmentKeys.AddInt(stats.CommitmentKeys)
+				readAheadExecCommitmentKeys.AddInt(len(keys))
 				ttx := tx.(kv.TemporalTx)
 				if err := readAheadPrefetchCommitment(ctx, db, ttx, keys); err != nil && ctx.Err() != nil {
 					return ctx.Err()
@@ -984,7 +975,7 @@ func runReadAheadBlock(ctx context.Context, tx kv.Tx, block *types.Block, engine
 	evm := vm.NewEVM(bc, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
 	stopCancel := context.AfterFunc(ctx, evm.Cancel)
 	defer stopCancel()
-	writer := &readAheadRecordingWriter{StateWriter: state.NewNoopWriter(), stats: &stats, accounts: make(map[accounts.Address]struct{}), storage: make(map[accounts.Address]map[accounts.StorageKey]struct{})}
+	writer := &readAheadRecordingWriter{StateWriter: state.NewNoopWriter(), stats: &stats}
 	for _, txn := range block.Transactions() {
 		if ctx.Err() != nil {
 			return

@@ -39,10 +39,7 @@ import (
 )
 
 func commitmentStateKey(address, slot []byte) []byte {
-	plainKey := make([]byte, len(address)+len(slot))
-	copy(plainKey, address)
-	copy(plainKey[len(address):], slot)
-	return commitment.KeyToHexNibbleHash(plainKey)
+	return commitment.KeyToHexNibbleHash(slices.Concat(address, slot))
 }
 
 func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
@@ -278,11 +275,7 @@ func withTemporalTx(ctx context.Context, db kv.RoDB, fn func(ttx kv.TemporalTx))
 
 // keysWithChild keeps the keys whose branch at depth has their next nibble.
 // A key whose path ends above depth has no branch there, so checks at shallower depths can be skipped.
-func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, depth int) [][]byte {
-	return keysWithChildPar(ctx, db, ttx, keys, depth, prefetchPar)
-}
-
-func keysWithChildPar(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, depth, par int) [][]byte {
+func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, depth, par int) [][]byte {
 	keep := make([]bool, len(keys))
 	inChunks(ctx, db, ttx, len(keys), max(1, min(par, len(keys)/256)), func(tx kv.TemporalTx, from, to int) {
 		// Only the child bitmap is needed: a raw branch skips the reads that resolve shortened keys.
@@ -324,11 +317,7 @@ func keysWithChildPar(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [
 }
 
 // prefetchKeys spreads keys over prefetchPar read txs and returns the first read failure (see firstFailure).
-func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.Domain, keys [][]byte) error {
-	return prefetchKeysPar(ctx, db, ttx, domain, keys, prefetchPar)
-}
-
-func prefetchKeysPar(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.Domain, keys [][]byte, par int) error {
+func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.Domain, keys [][]byte, par int) error {
 	if len(keys) < 2*par {
 		par = 1
 	}
@@ -424,7 +413,7 @@ func prefetchBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte) {
 
 func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte) error {
 	var err error
-	if txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) { err = prefetchKeys(ctx, db, ttx, domain, keys) }); txErr != nil {
+	if txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) { err = prefetchKeys(ctx, db, ttx, domain, keys, prefetchPar) }); txErr != nil {
 		return txErr
 	}
 	return err
@@ -465,16 +454,12 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) er
 	return cmp.Or(txErr, err)
 }
 
-func prefetchCommitmentWithTx(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, hashedKeys [][]byte, parallelism ...int) error {
-	par := 1
-	if len(parallelism) > 0 {
-		par = parallelism[0]
-	}
+func prefetchCommitmentWithTx(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, hashedKeys [][]byte, par int) error {
 	p, ok := ttx.AggTx().(latestPrefetcher)
 	if !ok || trieMostlyResident(ctx, p, hashedKeys) {
 		return nil
 	}
-	if err := prefetchKeysPar(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys, 0), par); err != nil {
+	if err := prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys, 0), par); err != nil {
 		return err
 	}
 	// The account trie walk loses a storage key at the extension above its account, so storage tries start again at their root.
@@ -501,12 +486,12 @@ func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [
 	active := keys
 	for depth := start; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
 		if depth > prefetchFlatDepth {
-			if err := prefetchKeysPar(ctx, db, ttx, kv.CommitmentDomain, compactPrefixes(active, depth), par); err != nil {
+			if err := prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, compactPrefixes(active, depth), par); err != nil {
 				return err
 			}
 		}
 		if depth >= prefetchFlatDepth {
-			active = keysWithChildPar(ctx, db, ttx, active, depth, par)
+			active = keysWithChild(ctx, db, ttx, active, depth, par)
 		}
 	}
 	return nil
