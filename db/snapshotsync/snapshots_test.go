@@ -843,8 +843,8 @@ func TestRetireFilesBelowLogsWhatItRetired(t *testing.T) {
 }
 
 // The SnapshotDownloadToBlock cleanup: after downloading past the target block, the extra
-// segments (ending at/beyond it) are retired across all block types and handed to the seeder,
-// while segments fully below it stay.
+// segments (ending beyond it) are retired across all block types and handed to the seeder,
+// while segments ending at or below it stay.
 func TestRetireFilesAbove(t *testing.T) {
 	logger := log.New()
 	dir := t.TempDir()
@@ -868,14 +868,21 @@ func TestRetireFilesAbove(t *testing.T) {
 		return nil
 	}))
 
-	require.Equal(1, s.dirty[txEnum].Len())
+	require.Equal(2, s.dirty[txEnum].Len())
 	require.True(visibleHas(s, txEnum, 0, 10_000), "segment fully below the target is kept")
-	require.False(visibleHas(s, txEnum, 10_000, 20_000))
+	require.True(visibleHas(s, txEnum, 10_000, 20_000), "segment ending at the target is kept")
 	require.False(visibleHas(s, txEnum, 20_000, 30_000))
 
-	require.Contains(deleted, snaptype.SegmentFileName(version.V1_0, 10_000, 20_000, txEnum), "seeder told about removed files")
-	require.Contains(deleted, snaptype.SegmentFileName(version.V1_0, 20_000, 30_000, txEnum))
+	require.Contains(deleted, snaptype.SegmentFileName(version.V1_0, 20_000, 30_000, txEnum), "seeder told about removed files")
+	require.NotContains(deleted, snaptype.SegmentFileName(version.V1_0, 10_000, 20_000, txEnum))
 	require.NotContains(deleted, snaptype.SegmentFileName(version.V1_0, 0, 10_000, txEnum))
+
+	for _, f := range deleted {
+		if filepath.Ext(f) != ".seg" {
+			continue
+		}
+		require.True(filterToBlock(filepath.Base(f), 20_000, kv.Step(0), false), "%s is retired but the capped download requests it again", f)
+	}
 }
 
 func TestRemoveOverlaps(t *testing.T) {

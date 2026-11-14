@@ -1732,7 +1732,7 @@ func (s *BaseRoSnapshots) RetireFilesBelow(typ snaptype.Type, blockTo uint64, on
 	return true, nil
 }
 
-// RetireFilesAbove retires VISIBLE segments whose range ends at or beyond blockNum — the extra
+// RetireFilesAbove retires VISIBLE segments whose range ends beyond blockNum — the extra
 // files downloaded past a SnapshotDownloadToBlock target — handing their files (.seg + indexes)
 // to onDelete for the seeder. Reads visible only; unlink is deferred to the reader watermark.
 func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []string) error) error {
@@ -1745,7 +1745,7 @@ func (s *BaseRoSnapshots) RetireFilesAbove(blockNum uint64, onDelete func(l []st
 	var names, paths []string
 	for _, t := range s.types {
 		for _, sn := range v.Segments(t) {
-			if sn.To() < blockNum {
+			if BlockFileRetainedUnderCap(sn.To(), blockNum) {
 				continue
 			}
 			names = append(names, sn.src.FileName())
