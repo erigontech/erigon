@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
@@ -1822,10 +1821,6 @@ func TestNewPayloadRegistersSendersRecovery(t *testing.T) {
 }
 
 func TestNewPayloadRegistersSendersRecoveryForBALPayload(t *testing.T) {
-	parallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
-
 	config := allForksChainConfig()
 	config.TerminalTotalDifficulty = nil
 	key, err := crypto.GenerateKey()

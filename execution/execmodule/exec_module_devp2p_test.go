@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
@@ -231,9 +230,6 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 // the per-request regeneration budget and retries of the unserved suffix.
 func TestGetBlockAccessListsResponseMatrix(t *testing.T) {
 	t.Parallel()
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	const (
 		chainLength    = 45
 		emptyBlockNum  = 42

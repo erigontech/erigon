@@ -34,7 +34,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
@@ -282,9 +281,8 @@ func shanghaiConfig() *chain.Config {
 // one batch into a fresh parallel node.
 func importSerialThenParallel(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, n int, workerCounts []int, gen func(i int, b *blockgen.BlockGen)) (*execmoduletester.ExecModuleTester, []*execmoduletester.ExecModuleTester) {
 	t.Helper()
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
 	t.Cleanup(func() {
-		dbg.Exec3Parallel = prevParallel
 		ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers
 	})
 	ethconfig.Defaults.Sync.ExecWorkerCount = 1
@@ -296,7 +294,6 @@ func importSerialThenParallel(t *testing.T, gspec *types.Genesis, key *ecdsa.Pri
 
 	var parallels []*execmoduletester.ExecModuleTester
 	for _, workers := range workerCounts {
-		dbg.Exec3Parallel = true
 		ethconfig.Defaults.Sync.ExecWorkerCount = workers
 		p := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 		require.NoErrorf(t, p.InsertChain(chainPack), "workers=%d: parallel import", workers)
