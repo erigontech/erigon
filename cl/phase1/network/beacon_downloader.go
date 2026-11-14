@@ -607,6 +607,9 @@ Process:
 
 	previousHighestSlotProcessed := f.highestSlotProcessed
 	highestSlotProcessed, err := f.process(previousHighestSlotProcessed, processBlocks, envelopes)
+	if err != nil && ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		if resp.fromHTTP {
 			f.httpPreferred.Store(false)

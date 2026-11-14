@@ -101,7 +101,8 @@ type cachePopulatingGetter struct {
 	view     cache.ReadView
 	snapshot cache.Frontier
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
-	// Exec derives an account's code hash from its cached record; the addr→codeHash seed only serves warmup code reads.
+	// Without a code phase the warmup does not write the addr→codeHash seed: exec reads it first but falls back to the
+	// cached account record.
 	skipCodeHashSeed bool
 }
 
@@ -123,9 +124,11 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache, readsCode bool) ex
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
-	// A warmup only fills, and exec fills the keys it reads first: a cached key needs no second read.
 	if opts.MaxStep() == kv.NoStepBound {
-		if v, txNum, ok := cpg.view.GetWithTxNum(name, k); ok {
+		if v, txNum, ok := cpg.view.GetVisible(name, k); ok {
+			if name == kv.AccountsDomain {
+				cpg.seedCodeHash(k, v, txNum)
+			}
 			return v, kv.Step(txNum / cpg.stepSize), nil
 		}
 	}
@@ -133,13 +136,20 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.Ge
 	if err == nil && opts.MaxStep() == kv.NoStepBound {
 		readTxNum := cache.ClampFillTxNum(cpg.snapshot, name, step.LastTxNum(cpg.stepSize))
 		cpg.view.Fill(name, k, v, readTxNum)
-		if name == kv.AccountsDomain && !cpg.skipCodeHashSeed {
-			var codeHash common.Hash
-			copy(codeHash[:], accounts.DeserialiseV3CodeHash(v))
-			cpg.view.SeedAddrCodeHash(k, codeHash, readTxNum)
+		if name == kv.AccountsDomain {
+			cpg.seedCodeHash(k, v, readTxNum)
 		}
 	}
 	return v, step, err
+}
+
+func (cpg *cachePopulatingGetter) seedCodeHash(addr, account []byte, txNum uint64) {
+	if cpg.skipCodeHashSeed {
+		return
+	}
+	if h := accounts.DeserialiseV3CodeHash(account); h != nil {
+		cpg.view.SeedAddrCodeHash(addr, common.Hash(h), txNum)
+	}
 }
 
 func (cpg *cachePopulatingGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, error) {

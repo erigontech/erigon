@@ -39,7 +39,8 @@ type ForkGraph interface {
 	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
 	// BeginChainSegment and CommitChainSegment require the fork-choice write lock;
 	// ChainSegment.Transition between them needs no lock.
-	BeginChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*ChainSegment, ChainSegmentInsertionResult, error)
+	// The caller must supply blockRoot as signedBlock.Block's hash tree root.
+	BeginChainSegment(signedBlock *cltypes.SignedBeaconBlock, blockRoot common.Hash, fullValidation bool) (*ChainSegment, ChainSegmentInsertionResult, error)
 	CommitChainSegment(segment *ChainSegment) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
 	SetNextEpochState(parentRoot common.Hash, state *state.CachingBeaconState)
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)

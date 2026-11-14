@@ -61,6 +61,7 @@ type fillFixture struct {
 	sidecars map[common.Hash][]*cltypes.BlobSidecar
 	tip      common.Hash // the last block added; the next one builds on it
 	frozen   uint64      // the frozen blob frontier
+	version  clparams.StateVersion
 }
 
 func newFillFixture(t *testing.T) *fillFixture {
@@ -71,10 +72,11 @@ func newFillFixture(t *testing.T) *fillFixture {
 		blocks:   &storeCheckReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{}},
 		store:    blob_storage.NewBlobStore(db, afero.NewMemMapFs()),
 		sidecars: map[common.Hash][]*cltypes.BlobSidecar{},
+		version:  clparams.DenebVersion,
 	}
 }
 
-// addBlock makes slot hold a canonical Deneb block with valid sidecars for blobs blobs, which the
+// addBlock makes slot hold a canonical block of the fixture's version with valid sidecars for blobs blobs, which the
 // endpoint serves. It returns the block root.
 func (f *fillFixture) addBlock(slot uint64, blobs int) common.Hash {
 	return f.addBlockWithTransactions(slot, blobs, false)
@@ -84,7 +86,7 @@ func (f *fillFixture) addBlock(slot uint64, blobs int) common.Hash {
 // serves the block as storage does, without them, so its own hash is not the canonical root.
 func (f *fillFixture) addBlockWithTransactions(slot uint64, blobs int, txs bool) common.Hash {
 	t := f.t
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, f.version)
 	block.Block.Slot = slot
 	block.Block.ParentRoot = f.tip
 	if txs {
@@ -189,6 +191,22 @@ func TestBlobArchiveStoreFillFetchesOnlyMissingSlots(t *testing.T) {
 	require.True(t, f.storedValid(fillTestSlot, missing))
 	require.EqualValues(t, 1, requestsFor(requests, missing))
 	require.Zero(t, requestsFor(requests, stored), "a slot the store serves correctly was fetched again")
+}
+
+// Fulu blocks carry no per-blob KZG proof, so an endpoint that rebuilds sidecars from columns can
+// serve the empty proof, the compressed point at infinity.
+func TestBlobArchiveStoreFillRecomputesAnEmptyKZGProof(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.FuluVersion
+	root := f.addBlock(fillTestSlot, 2)
+	for _, sidecar := range f.sidecars[root] {
+		sidecar.KzgProof = common.Bytes48{0xc0}
+	}
+	url, _ := f.endpoint(false)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+
+	require.True(t, f.storedValid(fillTestSlot, root))
 }
 
 func TestBlobArchiveStoreFillReplacesInvalidSidecars(t *testing.T) {
@@ -344,11 +362,14 @@ func TestBlobArchiveStoreFillReportsASlotTheResponseDidNotRepair(t *testing.T) {
 // An endpoint that never answers, or answers with a malformed or oversized body, fails like any
 // other, so the next endpoint fills the slot.
 func TestBlobArchiveStoreFillMovesPastABadEndpoint(t *testing.T) {
-	defer func(old time.Duration) { fillRequestTimeout = old }(fillRequestTimeout)
-	fillRequestTimeout = 200 * time.Millisecond
+	defer func(timeout, wait time.Duration) { fillRequestTimeout, fillRetryWait = timeout, wait }(fillRequestTimeout, fillRetryWait)
+	fillRequestTimeout, fillRetryWait = 200*time.Millisecond, time.Millisecond
 	for name, respond := range map[string]func(good string) http.HandlerFunc{
 		"stalled": func(string) http.HandlerFunc {
 			return func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }
+		},
+		"unavailable": func(string) http.HandlerFunc {
+			return func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }
 		},
 		"null blob": func(string) http.HandlerFunc {
 			return func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"data":[{"blob":null}]}`)) }
@@ -389,6 +410,84 @@ func TestBlobArchiveStoreFillMovesPastABadEndpoint(t *testing.T) {
 			require.EqualValues(t, want, requestsFor(requests, root), "the slot was filled from the bad endpoint")
 		})
 	}
+}
+
+func failOnce(t *testing.T, good string, fail http.HandlerFunc) (string, *atomic.Int64) {
+	var calls atomic.Int32
+	var failedAt, retryGap atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch calls.Add(1) {
+		case 1:
+			failedAt.Store(time.Now().UnixNano())
+			fail(w, r)
+			return
+		case 2:
+			retryGap.Store(time.Now().UnixNano() - failedAt.Load())
+		}
+		http.Redirect(w, r, good+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, &retryGap
+}
+
+func TestBlobArchiveStoreFillRetriesATransientFailure(t *testing.T) {
+	defer func(timeout, wait time.Duration) { fillRequestTimeout, fillRetryWait = timeout, wait }(fillRequestTimeout, fillRetryWait)
+	fillRequestTimeout, fillRetryWait = 200*time.Millisecond, time.Millisecond
+	for name, fail := range map[string]http.HandlerFunc{
+		"503":     func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) },
+		"429":     func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTooManyRequests) },
+		"stalled": func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() },
+		"stalled body": func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"data":[`))
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFillFixture(t)
+			root := f.addBlock(fillTestSlot, 1)
+			good, _ := f.endpoint(false)
+
+			url, _ := failOnce(t, good, fail)
+
+			require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+			require.True(t, f.storedValid(fillTestSlot, root))
+		})
+	}
+}
+
+func TestBlobArchiveStoreFillWaitsForRetryAfter(t *testing.T) {
+	defer func(wait time.Duration) { fillRetryWait = wait }(fillRetryWait)
+	fillRetryWait = time.Millisecond
+	f := newFillFixture(t)
+	root := f.addBlock(fillTestSlot, 1)
+	good, _ := f.endpoint(false)
+	url, retryGap := failOnce(t, good, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+	require.True(t, f.storedValid(fillTestSlot, root))
+	require.GreaterOrEqual(t, time.Duration(retryGap.Load()), time.Second)
+}
+
+func TestBlobArchiveStoreFillDoesNotRetryABadRequest(t *testing.T) {
+	defer func(wait time.Duration) { fillRetryWait = wait }(fillRetryWait)
+	fillRetryWait = time.Millisecond
+	f := newFillFixture(t)
+	root := f.addBlock(fillTestSlot, 1)
+	good, _ := f.endpoint(false)
+	var calls atomic.Int32
+	pruned := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	t.Cleanup(pruned.Close)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{pruned.URL, good}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+	require.True(t, f.storedValid(fillTestSlot, root))
+	require.EqualValues(t, 1, calls.Load())
 }
 
 // Providers that authenticate with a query-string key must get the block id in the path.
