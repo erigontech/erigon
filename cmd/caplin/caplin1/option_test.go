@@ -56,6 +56,6 @@ func TestBuilderOptionKeepsDynamicAndLegacyGatingIndependent(t *testing.T) {
 		builderOption, skippedLegacy := builderOptionForConfig(config, &clparams.MainnetBeaconConfig)
 		require.Nil(t, builderOption)
 		require.True(t, skippedLegacy)
-		require.False(t, config.BeaconAPIRouter.Builder)
+		require.True(t, config.BeaconAPIRouter.Builder)
 	})
 }

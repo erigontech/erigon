@@ -554,7 +554,7 @@ func (a *ApiHandler) init() {
 			}
 			if a.routerCfg.Beacon {
 				r.Route("/beacon", func(r chi.Router) {
-					if a.routerCfg.Builder {
+					if a.builderRelayEnabled() {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV1BlindedBlocks))
 					}
 					r.Get("/blobs/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlobs))
@@ -659,7 +659,7 @@ func (a *ApiHandler) init() {
 					r.Get("/execution_payload_envelope/{slot}/{builder_index}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadEnvelope))
 					r.Get("/execution_payload_envelopes/{slot}/{beacon_block_root}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadEnvelopeByBlockRoot))
 					r.Get("/execution_payload_envelopes/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadEnvelopeBySlot))
-					if a.routerCfg.Builder {
+					if a.builderRelayEnabled() {
 						r.Post("/register_validator", beaconhttp.HandleEndpointFunc(a.PostEthV1BuilderRegisterValidator))
 					}
 				})
@@ -687,7 +687,7 @@ func (a *ApiHandler) init() {
 						r.Get("/attester_slashings", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttesterSlashings)) // reuse
 						r.Post("/attester_slashings", a.PostEthV1BeaconPoolAttesterSlashings)                              // resue
 					})
-					if a.routerCfg.Builder {
+					if a.builderRelayEnabled() {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BlindedBlocks))
 					}
 				})
@@ -716,6 +716,10 @@ func (a *ApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.init()
 	})
 	a.mux.ServeHTTP(w, r)
+}
+
+func (a *ApiHandler) builderRelayEnabled() bool {
+	return a.routerCfg.Builder && a.builderClient != nil && a.builderClient.RelayConfigured()
 }
 
 func (a *ApiHandler) getStateHead() (common.Hash, uint64, int, error) {

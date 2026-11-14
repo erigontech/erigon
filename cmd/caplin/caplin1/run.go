@@ -321,10 +321,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	if builderOption, skippedLegacy := builderOptionForConfig(&config, beaconConfig); builderOption != nil {
 		caplinOptions = append(caplinOptions, builderOption)
 		if skippedLegacy {
-			log.Warn("builder api enable but relay url not set. Skipping builder mode")
+			log.Warn("MEV relay URL not set; relay-dependent builder endpoints disabled")
 		}
 	} else if skippedLegacy {
-		log.Warn("builder api enable but relay url not set. Skipping builder mode")
+		log.Warn("MEV relay URL not set; relay-dependent builder endpoints disabled")
 	}
 	log.Info("Starting caplin")
 

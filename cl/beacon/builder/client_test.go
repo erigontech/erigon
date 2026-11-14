@@ -587,6 +587,12 @@ func TestDynamicBuilderClientDoesNotRequireLegacyRelay(t *testing.T) {
 	client := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{})
 	require.NotNil(t, client)
 	require.Nil(t, client.url)
+	require.False(t, client.RelayConfigured())
+}
+
+func TestBuilderClientReportsConfiguredRelay(t *testing.T) {
+	client := newBlockBuilderClient("https://relay.example", mockBeaconConfig, BuilderTargetPolicy{}, false)
+	require.True(t, client.RelayConfigured())
 }
 
 func TestDynamicBuilderDialUsesValidatedAddress(t *testing.T) {

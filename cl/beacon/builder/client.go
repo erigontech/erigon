@@ -82,6 +82,10 @@ func NewBlockBuilderClientWithPolicy(baseURL string, beaconConfig *clparams.Beac
 	return newBlockBuilderClient(baseURL, beaconConfig, policy, true)
 }
 
+func (b *builderClient) RelayConfigured() bool {
+	return b.url != nil
+}
+
 func newBlockBuilderClient(baseUrl string, beaconConfig *clparams.BeaconChainConfig, policy BuilderTargetPolicy, checkStatus bool) *builderClient {
 	var u *url.URL
 	var err error
