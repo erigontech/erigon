@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
@@ -77,6 +78,7 @@ type handlerFixtureRow struct {
 var handlerChainFixtures [clparams.ElectraVersion + 1]struct {
 	once   sync.Once
 	tables map[string][]handlerFixtureRow
+	err    error
 }
 
 func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger, useRealSyncDataMgr bool) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData synced_data.SyncedData, fcu *mock_services2.ForkChoiceStorageMock, vp *validator_params.ValidatorParams) {
@@ -123,27 +125,46 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
 	fixture := &handlerChainFixtures[v]
+	antiquaryDir := t.TempDir()
+	// Nothing inside once.Do may stop the test: a done Once would hand later callers an empty fixture.
 	fixture.once.Do(func() {
-		tests.LoadChain(blocks, db, t)
-		a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New(t.TempDir()), nil, db, nil, nil, reader, syncedData, logger, true, true, false, false, nil)
-		require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
-		fixture.tables = make(map[string][]handlerFixtureRow)
-		require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
-			tables, err := tx.ListTables()
+		fixture.err = db.Update(ctx, func(tx kv.RwTx) error {
+			for _, block := range blocks {
+				if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true); err != nil {
+					return err
+				}
+				if err := beacon_indicies.WriteHighestFinalized(tx, block.Block.Slot+64); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if fixture.err != nil {
+			return
+		}
+		a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New(antiquaryDir), nil, db, nil, nil, reader, syncedData, logger, true, true, false, false, nil)
+		if fixture.err = a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33); fixture.err != nil {
+			return
+		}
+		tables := make(map[string][]handlerFixtureRow)
+		fixture.err = db.View(ctx, func(tx kv.Tx) error {
+			names, err := tx.ListTables()
 			if err != nil {
 				return err
 			}
-			for _, table := range tables {
+			for _, table := range names {
 				if err := tx.ForEach(table, nil, func(k, v []byte) error {
-					fixture.tables[table] = append(fixture.tables[table], handlerFixtureRow{bytes.Clone(k), bytes.Clone(v)})
+					tables[table] = append(tables[table], handlerFixtureRow{bytes.Clone(k), bytes.Clone(v)})
 					return nil
 				}); err != nil {
 					return err
 				}
 			}
 			return nil
-		}))
+		})
+		fixture.tables = tables
 	})
+	require.NoError(t, fixture.err)
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 		for table, rows := range fixture.tables {
 			for _, row := range rows {
