@@ -17,8 +17,10 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -70,6 +72,26 @@ type countingGetter struct {
 type singleTxRoDB struct {
 	kv.RoDB
 	tx kv.Tx
+}
+
+func readAheadTableDump(t *testing.T, db kv.RoDB) common.Hash {
+	t.Helper()
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	names, err := tx.ListTables()
+	require.NoError(t, err)
+	sort.Strings(names)
+	var dump bytes.Buffer
+	for _, name := range names {
+		require.NoError(t, tx.ForEach(name, nil, func(key, value []byte) error {
+			dump.WriteString(name)
+			dump.Write(key)
+			dump.Write(value)
+			return nil
+		}))
+	}
+	return crypto.Keccak256Hash(dump.Bytes())
 }
 
 type readAheadBlockReader struct {
@@ -1267,7 +1289,9 @@ func TestReadAheadExecReadsAndWritesContractStorage(t *testing.T) {
 	require.NoError(t, blocksReadAheadFunc(ctx, roTx, 1, engine, readAheadBlockReader{block: block}, config, false))
 	require.Equal(t, beforeReads, readAheadExecKeys.WithLabelValues("storage", "read").GetValue())
 	require.Equal(t, beforeWrites, readAheadExecKeys.WithLabelValues("storage", "write").GetValue())
+	beforeDump := readAheadTableDump(t, db)
 	stats := runReadAheadBlock(ctx, roTx, block, engine, nil, config)
+	require.Equal(t, beforeDump, readAheadTableDump(t, db), "speculative execution must leave every database table unchanged")
 	storageRead := ReadAheadStorageKey{Address: accounts.InternAddress(contract), Slot: accounts.InternKey(common.Hash{})}
 	storageWrite := ReadAheadStorageKey{Address: accounts.InternAddress(contract), Slot: accounts.InternKey(common.Hash{31: 1})}
 	require.Contains(t, stats.StorageReadKeys, storageRead)
