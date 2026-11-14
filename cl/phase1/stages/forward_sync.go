@@ -407,8 +407,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	return nil
 }
 
-// requestCustodyBackfill asks for the custody columns of the blocks forward sync imported: it
-// imports them without checking their data.
+// requestCustodyBackfill asks for the missing custody columns of the stored blocks between fromSlot and toSlot.
 func requestCustodyBackfill(cfg *Cfg, fromSlot, toSlot uint64) {
 	if cfg.peerDas != nil && toSlot > fromSlot {
 		cfg.peerDas.BackfillCustodyColumns(fromSlot, toSlot)

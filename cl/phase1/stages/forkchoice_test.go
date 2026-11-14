@@ -1,6 +1,7 @@
 package stages
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math"
@@ -22,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	das_mock_services "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -1012,6 +1014,167 @@ func TestForkChoiceIndexWaitKeepsRetryDeadline(t *testing.T) {
 	})
 }
 
+type canonicalRoots struct {
+	roots []common.Hash
+	err   error
+}
+
+func readCanonicalRootsOnAnotherGoroutine(ctx context.Context, db kv.RoDB, slots ...uint64) canonicalRoots {
+	done := make(chan canonicalRoots, 1)
+	go func() {
+		var res canonicalRoots
+		res.err = db.View(ctx, func(tx kv.Tx) error {
+			for _, slot := range slots {
+				root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+				if err != nil {
+					return err
+				}
+				res.roots = append(res.roots, root)
+			}
+			return nil
+		})
+		done <- res
+	}()
+	select {
+	case res := <-done:
+		return res
+	case <-time.After(5 * time.Second):
+		return canonicalRoots{err: errors.New("the read did not finish")}
+	}
+}
+
+type branchFixture struct {
+	cfg        *Cfg
+	block      *cltypes.SignedBeaconBlock
+	branchRoot common.Hash
+	forkSlot   uint64
+}
+
+func newBranchOnCanonicalAnchorFixture(t *testing.T) branchFixture {
+	t.Helper()
+	cfg, block, branchRoot := newForkChoicePublicationFixture(t)
+	forkSlot := block.Block.Slot - 1
+	require.NoError(t, persistAcceptedBlock(t.Context(), cfg, block))
+	require.NoError(t, cfg.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
+		writeTestBlockIndices(t, tx, block.Block.ParentRoot, common.Hash{}, common.Hash{0xa0}, forkSlot, true)
+		return nil
+	}))
+	return branchFixture{cfg: cfg, block: block, branchRoot: branchRoot, forkSlot: forkSlot}
+}
+
+func newReorgOntoTwoBlockBranchFixture(t *testing.T) (f branchFixture, oldTipRoot common.Hash) {
+	t.Helper()
+	cfg, block, branchRoot := newForkChoicePublicationFixture(t)
+	require.NoError(t, persistAcceptedBlock(t.Context(), cfg, block))
+	f = branchFixture{cfg: cfg, block: block, branchRoot: branchRoot, forkSlot: block.Block.Slot - 2}
+	forkRoot, branchParentRoot := common.Hash{0xa0}, common.Hash{0xa1}
+	oldRoot1, oldRoot2, oldTipRoot := common.Hash{0xaa, 1}, common.Hash{0xaa, 2}, common.Hash{0xaa, 3}
+	require.NoError(t, cfg.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
+		writeTestBlockIndices(t, tx, forkRoot, common.Hash{}, common.Hash{0xa2}, f.forkSlot, true)
+		writeTestBlockIndices(t, tx, branchParentRoot, forkRoot, common.Hash{0xa3}, f.forkSlot+1, false)
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, branchRoot, branchParentRoot))
+		writeTestBlockIndices(t, tx, oldRoot1, forkRoot, common.Hash{0xa4}, f.forkSlot+1, true)
+		writeTestBlockIndices(t, tx, oldRoot2, oldRoot1, common.Hash{0xa5}, f.forkSlot+2, true)
+		writeTestBlockIndices(t, tx, oldTipRoot, oldRoot2, common.Hash{0xa6}, f.forkSlot+3, true)
+		return nil
+	}))
+	return f, oldTipRoot
+}
+
+func TestForkchoiceRoutineBackfillsTheNewCanonicalBranchAfterCommit(t *testing.T) {
+	f, _ := newReorgOntoTwoBlockBranchFixture(t)
+	headSlot := f.block.Block.Slot
+	ctrl := gomock.NewController(t)
+	peerDas := das_mock_services.NewMockPeerDas(ctrl)
+	seenByCall := make(chan canonicalRoots, 1)
+	peerDas.EXPECT().BackfillCustodyColumns(f.forkSlot, headSlot).Times(1).DoAndReturn(func(uint64, uint64) {
+		seenByCall <- readCanonicalRootsOnAnotherGoroutine(t.Context(), f.cfg.indiciesDB, headSlot, headSlot+1)
+	})
+	f.cfg.peerDas = peerDas
+
+	require.NoError(t, doForkchoiceRoutine(t.Context(), log.New(), f.cfg, Args{}))
+	ctrl.Finish()
+
+	seen := <-seenByCall
+	require.NoError(t, seen.err)
+	require.Equal(t, []common.Hash{f.branchRoot, {}}, seen.roots, "the backfill must be requested after the new canonical chain is committed")
+}
+
+func TestForkchoiceRoutineBackfillsAReorgWhenTheHeadNotificationFails(t *testing.T) {
+	f, _ := newReorgOntoTwoBlockBranchFixture(t)
+	wantErr := errors.New("execution layer rejected the head")
+	f.cfg.executionClient.(*testExecutionEngine).forkChoiceErr = wantErr
+	f.cfg.forkChoice.MarkPayloadStatus(f.branchRoot, f.block.Block.Body.ExecutionPayload.BlockHash, execution_client.PayloadStatusValidated)
+	peerDas := das_mock_services.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().BackfillCustodyColumns(f.forkSlot, f.block.Block.Slot).Times(1)
+	f.cfg.peerDas = peerDas
+
+	err := doForkchoiceRoutine(t.Context(), log.New(), f.cfg, Args{})
+
+	require.ErrorIs(t, err, wantErr)
+	requireCanonicalRoot(t, f.cfg.indiciesDB, f.block.Block.Slot, f.branchRoot)
+}
+
+func TestForkchoiceRoutineDoesNotBackfillOnChainExtension(t *testing.T) {
+	f := newBranchOnCanonicalAnchorFixture(t)
+	f.cfg.peerDas = das_mock_services.NewMockPeerDas(gomock.NewController(t))
+
+	require.NoError(t, doForkchoiceRoutine(t.Context(), log.New(), f.cfg, Args{}))
+
+	requireCanonicalRoot(t, f.cfg.indiciesDB, f.block.Block.Slot, f.branchRoot)
+}
+
+func requireCanonicalRoot(t *testing.T, db kv.RoDB, slot uint64, want common.Hash) {
+	t.Helper()
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+		require.NoError(t, err)
+		require.Equal(t, want, root)
+		return nil
+	}))
+}
+
+type failingStateRootReadTx struct {
+	kv.RwTx
+	root common.Hash
+	err  error
+}
+
+func (tx failingStateRootReadTx) GetOne(table string, key []byte) ([]byte, error) {
+	if table == kv.BlockRootToStateRoot && bytes.Equal(key, tx.root[:]) {
+		return nil, tx.err
+	}
+	return tx.RwTx.GetOne(table, key)
+}
+
+func TestUpdateCanonicalChainReportsAReorgWhenTheEventCannotBeBuilt(t *testing.T) {
+	for _, failOldTip := range []bool{true, false} {
+		name := "new head state root"
+		if failOldTip {
+			name = "old head state root"
+		}
+		t.Run(name, func(t *testing.T) {
+			f, oldTipRoot := newReorgOntoTwoBlockBranchFixture(t)
+			failingRoot := f.branchRoot
+			if failOldTip {
+				failingRoot = oldTipRoot
+			}
+
+			require.NoError(t, f.cfg.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
+				faultyTx := failingStateRootReadTx{RwTx: tx, root: failingRoot, err: errors.New("state root read failed")}
+				forkSlot, reorged, err := updateCanonicalChainInTheDatabase(faultyTx, f.block.Block.Slot, f.branchRoot, f.cfg)
+				require.NoError(t, err)
+				require.True(t, reorged)
+				require.Equal(t, f.forkSlot, forkSlot)
+				root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, f.block.Block.Slot)
+				require.NoError(t, err)
+				require.Equal(t, f.branchRoot, root, "the canonical chain was changed")
+				return nil
+			}))
+		})
+	}
+}
+
 func TestPayloadAttributesStageOwnershipAtGloas(t *testing.T) {
 	config := clparams.MainnetBeaconConfig
 	config.AltairForkEpoch = 0
@@ -1234,7 +1397,8 @@ func TestUpdateCanonicalChainWaitsForBlockIndices(t *testing.T) {
 			}))
 
 			err := db.Update(t.Context(), func(tx kv.RwTx) error {
-				return updateCanonicalChainInTheDatabase(tx, 102, root102b, cfg)
+				_, _, err := updateCanonicalChainInTheDatabase(tx, 102, root102b, cfg)
+				return err
 			})
 			require.ErrorIs(t, err, errBlockIndicesPending, "canonical publication must wait for the pending block write")
 			requireCanonical(root101a, root102a)
@@ -1248,7 +1412,8 @@ func TestUpdateCanonicalChainWaitsForBlockIndices(t *testing.T) {
 				return nil
 			}))
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-				return updateCanonicalChainInTheDatabase(tx, 102, root102b, cfg)
+				_, _, err := updateCanonicalChainInTheDatabase(tx, 102, root102b, cfg)
+				return err
 			}))
 			requireCanonical(root101b, root102b)
 		})
@@ -1266,7 +1431,8 @@ func TestUpdateCanonicalChainFromAnchorWithoutIndices(t *testing.T) {
 			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 			tx := mdbxtest.BeginRw(t, db)
 
-			require.NoError(t, updateCanonicalChainInTheDatabase(tx, anchorSlot, fixture.headRoot, fixture.cfg))
+			_, _, err := updateCanonicalChainInTheDatabase(tx, anchorSlot, fixture.headRoot, fixture.cfg)
+			require.NoError(t, err)
 			root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, anchorSlot)
 			require.NoError(t, err)
 			require.Equal(t, fixture.headRoot, root)
@@ -1275,7 +1441,8 @@ func TestUpdateCanonicalChainFromAnchorWithoutIndices(t *testing.T) {
 			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, anchorSlot+1, oldRoot))
 			require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, newRoot, anchorSlot+2))
 			require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, newRoot, fixture.headRoot))
-			require.NoError(t, updateCanonicalChainInTheDatabase(tx, anchorSlot+2, newRoot, fixture.cfg))
+			_, _, err = updateCanonicalChainInTheDatabase(tx, anchorSlot+2, newRoot, fixture.cfg)
+			require.NoError(t, err)
 			root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, anchorSlot+1)
 			require.NoError(t, err)
 			require.Equal(t, common.Hash{}, root, "the skipped slot must no longer be canonical")
@@ -1303,7 +1470,7 @@ func drainReorgEvent(t *testing.T, tx kv.RwTx, headSlot uint64, headRoot common.
 	sub := cfg.emitter.State().Subscribe(ch)
 	defer sub.Unsubscribe()
 
-	err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg)
+	_, _, err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg)
 	require.NoError(t, err)
 
 	for {

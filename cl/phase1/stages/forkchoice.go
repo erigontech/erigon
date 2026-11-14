@@ -124,7 +124,7 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 
 // updateCanonicalChainInTheDatabase marks the chain from headRoot back to a canonical
 // block or the trusted anchor as canonical, once the required block indices are available.
-func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot common.Hash, cfg *Cfg) error {
+func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot common.Hash, cfg *Cfg) (forkSlot uint64, reorged bool, err error) {
 	type canonicalEntry struct {
 		slot uint64
 		root common.Hash
@@ -138,22 +138,22 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 	// leave any canonical ancestors from the old fork unchanged.
 	storedSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, headRoot)
 	if err != nil {
-		return fmt.Errorf("failed to read block slot by block root: %w", err)
+		return 0, false, fmt.Errorf("failed to read block slot by block root: %w", err)
 	}
 	if storedSlot == nil && headRoot != anchorRoot {
-		return fmt.Errorf("%w for %s", errBlockIndicesPending, headRoot)
+		return 0, false, fmt.Errorf("%w for %s", errBlockIndicesPending, headRoot)
 	}
 
 	// Read the current canonical block root for the given slot
 	currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 	if err != nil {
-		return fmt.Errorf("failed to read canonical block root: %w", err)
+		return 0, false, fmt.Errorf("failed to read canonical block root: %w", err)
 	}
 
 	// Capture the actual old canonical tip before any mutations.
 	oldHeadSlot, oldHeadRoot, err := beacon_indicies.ReadCanonicalHead(tx)
 	if err != nil {
-		return fmt.Errorf("failed to read canonical head: %w", err)
+		return 0, false, fmt.Errorf("failed to read canonical head: %w", err)
 	}
 
 	// List of new canonical chain entries
@@ -165,20 +165,20 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 
 		// Read the parent block root
 		if currentRoot, err = beacon_indicies.ReadParentBlockRoot(tx, currentRoot); err != nil {
-			return fmt.Errorf("failed to read parent block root: %w", err)
+			return 0, false, fmt.Errorf("failed to read parent block root: %w", err)
 		}
 
 		// Read the slot for the current block root
 		if newFoundSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, currentRoot); err != nil {
-			return fmt.Errorf("failed to read block slot by block root: %w", err)
+			return 0, false, fmt.Errorf("failed to read block slot by block root: %w", err)
 		}
 		if newFoundSlot == nil {
 			if currentRoot != anchorRoot {
-				return fmt.Errorf("%w for %s", errBlockIndicesPending, currentRoot)
+				return 0, false, fmt.Errorf("%w for %s", errBlockIndicesPending, currentRoot)
 			}
 			header, ok := cfg.forkChoice.GetHeader(anchorRoot)
 			if !ok {
-				return fmt.Errorf("anchor header is not available for %s", anchorRoot)
+				return 0, false, fmt.Errorf("anchor header is not available for %s", anchorRoot)
 			}
 			newFoundSlot = &header.Slot
 		}
@@ -188,7 +188,7 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 		// Read the canonical block root for the new slot
 		currentCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 		if err != nil {
-			return fmt.Errorf("failed to read canonical block root: %w", err)
+			return 0, false, fmt.Errorf("failed to read canonical block root: %w", err)
 		}
 
 		// Append the current slot and root to the list of reconnection roots
@@ -197,34 +197,35 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 
 	// Truncate the canonical chain at the current slot
 	if err := beacon_indicies.TruncateCanonicalChain(tx, currentSlot); err != nil {
-		return fmt.Errorf("failed to truncate canonical chain: %w", err)
+		return 0, false, fmt.Errorf("failed to truncate canonical chain: %w", err)
 	}
 
 	// Mark the new canonical chain segments in reverse order
 	for _, reconnectionRoot := range slices.Backward(reconnectionRoots) {
 		if err := beacon_indicies.MarkRootCanonical(tx, reconnectionRoot.slot, reconnectionRoot.root); err != nil {
-			return fmt.Errorf("failed to mark root canonical: %w", err)
+			return 0, false, fmt.Errorf("failed to mark root canonical: %w", err)
 		}
 	}
 
 	// Mark the head slot and root as canonical
 	if err := beacon_indicies.MarkRootCanonical(tx, headSlot, headRoot); err != nil {
-		return fmt.Errorf("failed to mark root canonical: %w", err)
+		return 0, false, fmt.Errorf("failed to mark root canonical: %w", err)
 	}
 
 	// A reorg occurred if the fork point (currentSlot) is strictly below the
 	// old canonical tip. Normal chain extension lands exactly at oldHeadSlot.
-	if oldHeadRoot != (common.Hash{}) && currentSlot < oldHeadSlot {
+	reorged = oldHeadRoot != (common.Hash{}) && currentSlot < oldHeadSlot
+	if reorged {
 		log.Debug("cl reorg", "new_head_slot", headSlot, "fork_slot", currentSlot, "old_head", oldHeadRoot, "new_canonical", headRoot)
 		oldStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(tx, oldHeadRoot)
 		if err != nil {
 			log.Warn("failed to read state root by block root", "err", err, "block_root", oldHeadRoot)
-			return nil
+			return currentSlot, true, nil
 		}
 		newStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(tx, headRoot)
 		if err != nil {
 			log.Warn("failed to read state root by block root", "err", err, "block_root", headRoot)
-			return nil
+			return currentSlot, true, nil
 		}
 		reorgDepth := uint64(0)
 		if oldHeadSlot > currentSlot {
@@ -247,7 +248,7 @@ func updateCanonicalChainInTheDatabase(tx kv.RwTx, headSlot uint64, headRoot com
 		cfg.emitter.State().SendChainReorg(reorgEvent)
 	}
 
-	return nil
+	return currentSlot, reorged, nil
 }
 
 func currentHeadSnapshot(store forkchoice.ForkChoiceStorageReader, isGloas bool) func() (common.Hash, uint64, string, bool, error) {
@@ -625,7 +626,8 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
-	if err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg); err != nil {
+	forkSlot, reorged, err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg)
+	if err != nil {
 		if errors.Is(err, errBlockIndicesPending) {
 			cfg.forkChoiceWaitingForIndices = true
 			logger.Debug("[Caplin] waiting to publish fork choice", "err", err)
@@ -651,6 +653,10 @@ func doForkchoiceRoutine(ctx context.Context, logger log.Logger, cfg *Cfg, args 
 	notifyErr := waitNotified()
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	// The das worker walks the canonical chain, so it must be asked after the commit.
+	if reorged {
+		requestCustodyBackfill(cfg, forkSlot, headSlot)
 	}
 	if notifyErr != nil {
 		return fmt.Errorf("failed to compute and notify services of new fork choice: %w", notifyErr)
