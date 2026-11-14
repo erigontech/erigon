@@ -40,11 +40,10 @@ This command is part of the "Publishable v2" snapshot release flow:
 
 1. Shutdown Erigon
 2. **Run `seg retire`** (this command)
-3. Optionally run `seg clearIndexing`
-4. Run `seg index`
-5. Create torrent files
-6. Run integrity check
-7. Run `publishable` command
+3. Run `seg accessor --rebuild` (add `--new-salt` to regenerate salts)
+4. Create torrent files
+5. Run integrity check
+6. Run `publishable` command
 
 ## Example
 
