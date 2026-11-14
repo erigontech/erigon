@@ -432,6 +432,20 @@ func (fx *resumeBALFixture) moveToStateFiles(t *testing.T, db kv.TemporalRwDB, d
 // invalid-block verdict and the operational error, at most one of them set.
 func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumePoint) (*blockVerdict, error) {
 	t.Helper()
+	return fx.prepare(t, block, point).run(context.Background(), t)
+}
+
+// resumeBALRun is a block execution seeded by prepare and not yet started.
+type resumeBALRun struct {
+	cfg     ExecuteBlockCfg
+	domains *execctx.SharedDomains
+	tx      kv.TemporalRwTx
+	rng     execRange
+	src     *singleBlockSource
+}
+
+func (fx *resumeBALFixture) prepare(t *testing.T, block *types.Block, point resumePoint) *resumeBALRun {
+	t.Helper()
 	ctx := context.Background()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
@@ -495,7 +509,12 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 		rng.initialTxNum = resumeBALBlockStartTxNum + uint64(point)
 	}
 	src := &singleBlockSource{block: block, num: 1, parent: fx.genesis.Header(), bal: block.BlockAccessList()}
-	out, err := ExecV3(ctx, cfg, domains, rwTx, stages.ModeForkValidation, false, "resume-bal", rng, src, logger)
+	return &resumeBALRun{cfg: cfg, domains: domains, tx: rwTx, rng: rng, src: src}
+}
+
+func (r *resumeBALRun) run(ctx context.Context, t *testing.T) (*blockVerdict, error) {
+	t.Helper()
+	out, err := ExecV3(ctx, r.cfg, r.domains, r.tx, stages.ModeForkValidation, false, "resume-bal", r.rng, r.src, log.New())
 	if err != nil {
 		require.Nil(t, out.verdict)
 		return nil, err

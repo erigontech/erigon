@@ -126,15 +126,17 @@ type parallelExecutor struct {
 	// changeset; blocks below it run without one.
 	changesetWindowStart uint64
 	// currentChangeSet is the block's changeset while it is being built: the exec
-	// loop creates it and saves it by hash, then the apply fold and the committer
-	// bind it transiently by hash under changesetMu. Deliberately NOT installed as a
-	// persistent live accumulator — the apply loop is the sole sd.mem writer, so a
-	// global install would only race the fold's own transient bind.
+	// loop creates it and saves it by hash, then the apply fold binds it by hash
+	// from the block's first folded tx to its block result, and the committer binds
+	// it by hash under changesetMu.
 	currentChangeSet *changeset.StateChangeSet
 	// currentChangeSetBlock is the block currentChangeSet belongs to (0 == none).
 	currentChangeSetBlock uint64
 	// currentChangeSetHash is the hash currentChangeSet was last saved under.
 	currentChangeSetHash common.Hash
+	// foldUnbind restores the changeset the apply fold bound for foldBoundHash.
+	foldUnbind    func()
+	foldBoundHash common.Hash
 }
 
 // drainToClose empties both channels until their producers close them.
@@ -215,8 +217,8 @@ func (pe *parallelExecutor) cancelOperational(blockNum uint64, err error) {
 }
 
 // ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
-// block-specific StateChangeSet, to be saved by hash and bound transiently by
-// the apply fold and the committer. Idempotent; a no-op outside the changeset
+// block-specific StateChangeSet, to be saved by hash and bound by the apply fold
+// (first folded tx to block result) and the committer. Idempotent; a no-op outside the changeset
 // window. A zero blockHash defers the save to the first caller that knows it.
 // Exec-loop only.
 func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64, blockHash common.Hash) {
@@ -250,15 +252,15 @@ func (pe *parallelExecutor) clearChangesetAccumulator() {
 
 // bindBlockChangesetForFold binds block N's saved changeset (by hash) so the
 // apply fold's DomainPuts record account/storage/code diffs into it — letting
-// unwind revert state, not just commitment. The bind is transient and
-// self-restoring under changesetMu; nothing installs a persistent global.
-// Returns a restore closure; a no-op if the block has no saved changeset.
+// unwind revert state, not just commitment. The bind lasts from the block's
+// first folded tx to its block result, or to the apply loop's exit.
+// Returns a restore closure, or nil if the block has no saved changeset yet.
 func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash common.Hash) (restore func()) {
 	pe.domains().LockChangesetAccumulator()
 	defer pe.domains().UnlockChangesetAccumulator()
 	cs := pe.domains().GetChangesetByHash(blockNum, blockHash)
 	if cs == nil {
-		return func() {}
+		return nil
 	}
 	unswap := pe.domains().SwapChangesetAccumulatorLocked(cs)
 	return func() {
@@ -268,12 +270,29 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 	}
 }
 
+// bindFoldChangeset keeps a block's changeset bound across its txs. The apply
+// loop is the only sd.mem writer, and every other diff swap is a swap and
+// restore inside one changesetMu hold, so rebinding per tx only waits on the lock.
+func (pe *parallelExecutor) bindFoldChangeset(blockNum uint64, blockHash common.Hash) {
+	if pe.foldUnbind != nil && pe.foldBoundHash == blockHash {
+		return
+	}
+	pe.unbindFoldChangeset()
+	pe.foldUnbind, pe.foldBoundHash = pe.bindBlockChangesetForFold(blockNum, blockHash), blockHash
+}
+
+func (pe *parallelExecutor) unbindFoldChangeset() {
+	if pe.foldUnbind != nil {
+		pe.foldUnbind()
+		pe.foldUnbind = nil
+	}
+}
+
 // foldTx applies one published tx's versionMap view and indexes to sd.mem.
 // Finalize logs share the final virtual task's txNum. That task has already
 // handled the receipt cache, so finalize indexes logs without changing it.
 func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
-	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
-	defer restoreCS()
+	pe.bindFoldChangeset(r.blockNum, r.blockHash)
 	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
 		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
@@ -464,6 +483,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 				drainToClose(applyResults, rootResults)
 			}
 		}()
+		defer pe.unbindFoldChangeset()
 
 		if pe.enableChaosMonkey && pe.chaosFaults.ApplyLoopPanic != nil {
 			panic(pe.chaosFaults.ApplyLoopPanic)
@@ -681,6 +701,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
+					pe.unbindFoldChangeset()
 					built := balBuilder
 					balBuilder = nil
 					if finalized {
