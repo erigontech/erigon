@@ -18,12 +18,14 @@ package state
 
 import (
 	"math"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -160,4 +162,49 @@ func TestCheckFilesDBGapRefusesPrunedRangeInDependencyHiddenFile(t *testing.T) {
 	defer at.Close()
 	require.EqualValues(t, 40, at.d[kv.AccountsDomain].files.EndTxNum())
 	require.ErrorContains(t, at.CheckFilesDBGap(tx), "gap between snapshot files and DB")
+}
+
+// A history pruned past a gap in its files has the range in neither, the same as a domain.
+func TestCheckFilesDBGapRefusesHistoryPrunedPastAGap(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	gapped := []testFileRange{{0, 1}, {2, 3}}
+	generateStateFiles(t, dirs, gapped)
+	generateCommitmentFile(t, dirs, gapped)
+	require.NoError(t, agg.OpenFolder(db))
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, SavePruneValProgress(tx, agg.d[kv.AccountsDomain].History.ValuesTable, &prune.Stat{TxTo: 30}))
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	require.ErrorContains(t, at.CheckFilesDBGap(tx), "gap between snapshot files and DB for history accounts")
+}
+
+// A middle file without its accessor hides the files after it while they still hold the data: the gap check warns
+// instead of stopping the node, and step alignment refuses instead of planning to delete them.
+func TestFilesHiddenByAMissingAccessorAreNotAGap(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateStateFiles(t, dirs, ranges)
+	generateCommitmentFile(t, dirs, ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(dirs.SnapDomain, "v1.0-accounts.1-2.bt")))
+	require.NoError(t, agg.OpenFolder(db))
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, SavePruneValProgress(tx, agg.d[kv.AccountsDomain].ValuesTable, &prune.Stat{TxTo: 30}))
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	require.EqualValues(t, 10, at.d[kv.AccountsDomain].files.EndTxNum())
+	require.NoError(t, at.CheckFilesDBGap(tx))
+	_, err = agg.StepAlignedEnd(10)
+	require.ErrorContains(t, err, "hidden by a missing accessor")
 }

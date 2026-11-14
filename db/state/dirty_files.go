@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -652,6 +653,43 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 	}
 
 	return newVisibleFiles
+}
+
+// fileSet is one list of dirty files with what decides their visibility, and the table its DB prune progress is kept under.
+type fileSet struct {
+	name       string
+	pruneTable string
+	files      *DirtyFiles
+	accessors  statecfg.Accessors
+	checker    func(startTxNum, endTxNum uint64) bool
+}
+
+// visibleEnd is where the set's visible files end without the aligned ceiling; withoutAccessors counts a file whose
+// accessors are missing as visible, as it is once BuildMissedAccessors has run.
+func (s fileSet) visibleEnd(withoutAccessors bool) uint64 {
+	l := s.accessors
+	if withoutAccessors {
+		l = 0
+	}
+	return calcVisibleFiles(s.files, l, s.checker, false, math.MaxUint64).EndTxNum()
+}
+
+// checkFilesDBGap refuses a datadir whose DB was pruned past the files that hold the data: reads in between would
+// return stale values. Files hidden only by a missing accessor still hold it, so they warn instead.
+func (s fileSet) checkFilesDBGap(tx kv.Tx, visibleEnd uint64, hint string) error {
+	prg, err := GetPruneValProgress(tx, []byte(s.pruneTable))
+	if err != nil {
+		return err
+	}
+	if prg.TxTo <= visibleEnd {
+		return nil
+	}
+	if filesEnd := s.visibleEnd(true); prg.TxTo > filesEnd {
+		return fmt.Errorf("gap between snapshot files and DB for %s: files end at txNum %d but the DB was pruned up to %d — [%d, %d) is in neither. Maybe you removed snapshot files (e.g. `snapshots rm-state --latest`) but forgot to run %s?",
+			s.name, filesEnd, prg.TxTo, filesEnd, prg.TxTo, hint)
+	}
+	log.Warn("[snapshots] files up to the DB prune point stay hidden until their accessors are built", "files", s.name, "visibleEnd", visibleEnd, "prunedTo", prg.TxTo)
+	return nil
 }
 
 func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canBeVisible bool) {

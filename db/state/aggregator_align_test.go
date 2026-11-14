@@ -294,3 +294,19 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
 		"lowering a history-II end while values ends stay put must trip the forbid assert")
 }
+
+// Commitment past an accounts or storage cut would reference hidden files, so it stops at the cut too.
+func TestVisibleFilesAligned_CommitmentStopsAtAStateGap(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+	full := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {2, 3}})
+	generateStandaloneIIFiles(t, agg.Dirs(), full)
+	generateCommitmentFile(t, agg.Dirs(), full)
+	require.NoError(t, agg.OpenFolder(db))
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	require.EqualValues(t, alignStepSize, at.d[kv.AccountsDomain].files.EndTxNum())
+	require.EqualValues(t, alignStepSize, at.d[kv.CommitmentDomain].files.EndTxNum())
+}

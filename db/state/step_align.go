@@ -123,6 +123,9 @@ func (at *AggregatorRoTx) stepAlignedFileLists() []visibleFiles {
 }
 
 func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
+	if err := at.refuseAccessorHiddenFiles(); err != nil {
+		return 0, err
+	}
 	lists := at.stepAlignedFileLists()
 	end := uint64(math.MaxUint64)
 	for _, files := range lists {
@@ -155,7 +158,7 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 	for _, files := range lists {
 		for i := 1; i < len(files) && files[i].startTxNum < end; i++ {
 			if prev := files[i-1].endTxNum; files[i].startTxNum != prev {
-				return 0, fmt.Errorf("%s: no visible file for txNum %d-%d", files[i].Fullpath(), prev, files[i].startTxNum)
+				return 0, fmt.Errorf("%s overlaps the file before it at txNum %d-%d", files[i].Fullpath(), files[i].startTxNum, prev)
 			}
 		}
 	}
@@ -167,6 +170,28 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 		}
 	}
 	return end, nil
+}
+
+// refuseAccessorHiddenFiles stops step alignment while a missing accessor hides files: they would join the tail it
+// deletes, though building the accessor is all they need.
+func (at *AggregatorRoTx) refuseAccessorHiddenFiles() error {
+	var sets []fileSet
+	for _, d := range at.d {
+		if d != nil && d.d.Enabled {
+			sets = append(sets, d.d.fileSets()...)
+		}
+	}
+	for _, ii := range at.iis {
+		if ii != nil && ii.ii.Enabled {
+			sets = append(sets, ii.ii.fileSet())
+		}
+	}
+	for _, s := range sets {
+		if visible, built := s.visibleEnd(false), s.visibleEnd(true); built > visible {
+			return fmt.Errorf("%s files after txNum %d are hidden by a missing accessor; build the accessors first", s.name, visible)
+		}
+	}
+	return nil
 }
 
 func fileRangesUpTo(files visibleFiles, end uint64) (ranges [][2]uint64) {

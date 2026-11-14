@@ -136,5 +136,5 @@ func TestStepAlignedEndRefusesOverlappingFiles(t *testing.T) {
 	generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), []testFileRange{{0, 2}, {1, 3}, {2, 4}})
 	require.NoError(t, agg.OpenFolder(db))
 	_, err := agg.StepAlignedEnd(20)
-	require.ErrorContains(t, err, "no visible file for txNum 20-10")
+	require.ErrorContains(t, err, "overlaps the file before it at txNum 10-20")
 }

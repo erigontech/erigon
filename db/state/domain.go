@@ -542,16 +542,30 @@ func (d *Domain) retireFilesNotInList(fNames []string) retiredFiles {
 // Aggregator.recalcVisibleFiles uses it to assemble a cross-entity consistent
 // snapshot that is published via a single atomic store.
 func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles, *iiVisible) {
-	var checker func(startTxNum, endTxNum uint64) bool
-	if d.checker != nil {
-		ue := FromDomain(d.Name)
-		checker = func(startTxNum, endTxNum uint64) bool {
-			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
-		}
-	}
-	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
+	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, d.dependencyChecker(), false, toTxNum))
 	hv, hiv := d.History.calcVisibleFiles(toTxNum)
 	return dv, hv, hiv
+}
+
+func (d *Domain) dependencyChecker() func(startTxNum, endTxNum uint64) bool {
+	if d.checker == nil {
+		return nil
+	}
+	ue := FromDomain(d.Name)
+	return func(startTxNum, endTxNum uint64) bool {
+		return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
+	}
+}
+
+// fileSets lists the values, history and history index files; the last two only when history has snapshots.
+func (d *Domain) fileSets() []fileSet {
+	sets := []fileSet{{"domain " + d.FilenameBase, d.ValuesTable, d.dirtyFiles, d.Accessors, d.dependencyChecker()}}
+	if h := d.History; !h.SnapshotsDisabled && !h.HistoryDisabled {
+		sets = append(sets,
+			fileSet{"history " + h.FilenameBase, h.ValuesTable, h.dirtyFiles, h.Accessors, nil},
+			fileSet{"history index " + h.FilenameBase, h.ValuesTable, h.InvertedIndex.dirtyFiles, h.InvertedIndex.Accessors, h.InvertedIndex.dependencyChecker()})
+	}
+	return sets
 }
 
 func (d *Domain) Tables() []string { return append(d.History.Tables(), d.ValuesTable) }
@@ -2162,13 +2176,12 @@ func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
 }
 
 func (dt *DomainRoTx) checkFilesDBGap(tx kv.Tx) error {
-	prg, err := GetPruneValProgress(tx, []byte(dt.d.ValuesTable))
-	if err != nil {
-		return err
-	}
-	if filesEnd := dt.files.EndTxNum(); prg.TxTo > filesEnd {
-		return fmt.Errorf("gap between snapshot files and DB for domain %s: files end at txNum %d but the DB was pruned up to %d — [%d, %d) is in neither. Maybe you removed snapshot files (e.g. `snapshots rm-state --latest`) but forgot to run `integration stage_exec --reset` (or `integration stage_custom_trace --reset` for custom-trace domains)?",
-			dt.d.FilenameBase, filesEnd, prg.TxTo, filesEnd, prg.TxTo)
+	const hint = "`integration stage_exec --reset` (or `integration stage_custom_trace --reset` for custom-trace domains)"
+	visible := []visibleFiles{dt.files, dt.ht.files, dt.ht.iit.files}
+	for i, set := range dt.d.fileSets() {
+		if err := set.checkFilesDBGap(tx, visible[i].EndTxNum(), hint); err != nil {
+			return err
+		}
 	}
 	return nil
 }

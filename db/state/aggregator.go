@@ -1851,18 +1851,12 @@ type aggregatorVisible struct {
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
-	next := &aggregatorVisible{}
-	for id, d := range a.d {
-		if d == nil {
-			continue
-		}
-		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
-	}
-	for id, ii := range a.standaloneIIs() {
-		if ii == nil {
-			continue
-		}
-		next.iis[id] = ii.calcVisibleFiles(toTxNum)
+	next := a.calcVisibleFiles(toTxNum)
+	// A list cut at a gap ends below the dirty ceiling; commitment past an accounts or storage cut would reference
+	// hidden files, so everyone aligns to the lowest visible end.
+	for end := a.alignedVisibleEndTxNum(next); end > 0 && end < toTxNum; end = a.alignedVisibleEndTxNum(next) {
+		toTxNum = end
+		next = a.calcVisibleFiles(toTxNum)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
 
@@ -1897,6 +1891,55 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
 	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
 	reclaimFiles(a.reclaimRetiredLocked())
+}
+
+func (a *Aggregator) calcVisibleFiles(toTxNum uint64) *aggregatorVisible {
+	next := &aggregatorVisible{}
+	for id, d := range a.d {
+		if d == nil {
+			continue
+		}
+		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
+	}
+	for id, ii := range a.standaloneIIs() {
+		if ii == nil {
+			continue
+		}
+		next.iis[id] = ii.calcVisibleFiles(toTxNum)
+	}
+	return next
+}
+
+// alignedVisibleEndTxNum is dirtyFilesEndTxNumMinimax over the visible lists.
+func (a *Aggregator) alignedVisibleEndTxNum(v *aggregatorVisible) uint64 {
+	ceiling := uint64(math.MaxUint64)
+	lower := func(end uint64) {
+		if end > 0 {
+			ceiling = min(ceiling, end)
+		}
+	}
+	for id, d := range a.d {
+		if d == nil || !d.Enabled || a.unalignedDomain[id] || v.d[id] == nil {
+			continue
+		}
+		lower(visibleFiles(v.d[id].files).EndTxNum())
+		if !d.History.SnapshotsDisabled {
+			lower(v.dh[id].EndTxNum())
+			if v.dhii[id] != nil {
+				lower(v.dhii[id].files.EndTxNum())
+			}
+		}
+	}
+	for id, ii := range a.standaloneIIs() {
+		if ii == nil || !ii.Enabled || a.unalignedIdx[id] || v.iis[id] == nil {
+			continue
+		}
+		lower(v.iis[id].files.EndTxNum())
+	}
+	if ceiling == math.MaxUint64 {
+		return 0
+	}
+	return ceiling
 }
 
 // stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors

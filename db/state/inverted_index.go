@@ -232,15 +232,22 @@ func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
 // calcVisibleFiles is pure — it does not mutate ii. Used by the Aggregator to
 // assemble a cross-entity snapshot published atomically as aggregatorVisible.
 func (ii *InvertedIndex) calcVisibleFiles(toTxNum uint64) *iiVisible {
-	var checker func(startTxNum, endTxNum uint64) bool
+	return newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, ii.dependencyChecker(), false, toTxNum))
+}
+
+func (ii *InvertedIndex) dependencyChecker() func(startTxNum, endTxNum uint64) bool {
 	c := ii.checker
-	if c != nil {
-		ue := FromII(ii.Name)
-		checker = func(startTxNum, endTxNum uint64) bool {
-			return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
-		}
+	if c == nil {
+		return nil
 	}
-	return newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
+	ue := FromII(ii.Name)
+	return func(startTxNum, endTxNum uint64) bool {
+		return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
+	}
+}
+
+func (ii *InvertedIndex) fileSet() fileSet {
+	return fileSet{"index " + ii.FilenameBase, ii.ValuesTable, ii.dirtyFiles, ii.Accessors, ii.dependencyChecker()}
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
@@ -813,15 +820,7 @@ func (iit *InvertedIndexRoTx) CanHashPrune(tx kv.Tx) bool {
 }
 
 func (iit *InvertedIndexRoTx) checkFilesDBGap(tx kv.Tx) error {
-	prg, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
-	if err != nil {
-		return err
-	}
-	if filesEnd := iit.files.EndTxNum(); prg.TxTo > filesEnd {
-		return fmt.Errorf("gap between snapshot files and DB for index %s: files end at txNum %d but the DB was pruned up to %d — [%d, %d) is in neither. Maybe you removed snapshot files (e.g. `snapshots rm-state --latest`) but forgot to run `integration stage_exec --reset`?",
-			iit.ii.FilenameBase, filesEnd, prg.TxTo, filesEnd, prg.TxTo)
-	}
-	return nil
+	return iit.ii.fileSet().checkFilesDBGap(tx, iit.files.EndTxNum(), "`integration stage_exec --reset`")
 }
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
