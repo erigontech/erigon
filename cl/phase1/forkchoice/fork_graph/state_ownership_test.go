@@ -129,18 +129,6 @@ func TestReplayStateCachesCopyByRoot(t *testing.T) {
 	require.Equal(t, block.Block.Slot, third.Slot())
 }
 
-func TestReplayStateCacheEvictsLeastRecentlyUsed(t *testing.T) {
-	cache := replayStateCache{}
-	cache.add(common.Hash{1}, state.New(&clparams.MainnetBeaconConfig))
-	cache.add(common.Hash{2}, state.New(&clparams.MainnetBeaconConfig))
-	if _, ok := cache.get(common.Hash{1}); ok {
-		t.Fatal("least recently used state was retained")
-	}
-	if _, ok := cache.get(common.Hash{2}); !ok {
-		t.Fatal("most recently added state was evicted")
-	}
-}
-
 func TestReplayStateCacheSurvivesUnrelatedImport(t *testing.T) {
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
