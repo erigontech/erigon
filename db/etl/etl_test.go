@@ -1307,6 +1307,23 @@ func TestCloseDisposesProvidersBeforeBuffer(t *testing.T) {
 	require.True(t, probe.sawOwnChunks, "buffer was recycled before its providers were disposed")
 }
 
+type failingWriteBuffer struct{ *sortableBuffer }
+
+func (failingWriteBuffer) Write(io.Writer) error { return errors.New("no space left on device") }
+
+func TestFlushToDiskRemovesFileOnWriteError(t *testing.T) {
+	tmpdir := t.TempDir()
+	buf := NewSortableBuffer(BufferOptimalSize)
+	buf.Put([]byte{1}, []byte{2})
+
+	_, err := FlushToDisk(t.Name(), failingWriteBuffer{buf}, tmpdir, log.LvlDebug)
+	require.Error(t, err)
+
+	files, err := os.ReadDir(tmpdir)
+	require.NoError(t, err)
+	require.Empty(t, files)
+}
+
 // TestSortableBufferAllEmptyEntries: entries whose key and value are both
 // zero-length keep insertion order too, which they only can if each still has
 // an offset of its own. nil and empty stay distinguishable.
