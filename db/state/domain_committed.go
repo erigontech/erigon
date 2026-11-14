@@ -260,7 +260,8 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 		return nil, false
 	}
 
-	dt.lookupFullKey, _ = getter.Next(dt.lookupFullKey[:0])
+	key, _ := getter.Next(dt.lookupFullKey[:0])
+	dt.lookupFullKey = append(dt.lookupFullKey[:0], key...) // an uncompressed Next returns an mmap slice, unusable as scratch
 	return dt.lookupFullKey, true
 }
 

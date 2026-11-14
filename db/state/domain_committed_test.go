@@ -17,10 +17,14 @@
 package state
 
 import (
+	"encoding/binary"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -56,4 +60,24 @@ func TestCommitmentBranchReferenced(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestLookupByShortenedKeyDoesNotKeepAnMmapSlice(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "v1.0-storage.0-1.kv")
+	c, err := seg.NewCompressor(t.Context(), t.Name(), path, t.TempDir(), seg.DefaultCfg, log.LvlError, log.New())
+	require.NoError(t, err)
+	defer c.Close()
+	require.NoError(t, c.AddUncompressedWord([]byte("key")))
+	require.NoError(t, c.Compress())
+	d, err := seg.NewDecompressor(path)
+	require.NoError(t, err)
+	defer d.Close()
+	dt := &DomainRoTx{}
+
+	got, found := dt.lookupByShortenedKey(EncodeReferenceKey(make([]byte, binary.MaxVarintLen64), 0), seg.NewReader(d.MakeGetter(), seg.CompressNone))
+
+	require.True(t, found)
+	require.Equal(t, "key", string(got))
+	got[0] = 'x' // faults on a read-only mapping
 }
