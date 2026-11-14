@@ -564,15 +564,12 @@ func (d *Domain) Close() {
 	d.closeWhatNotInList([]string{})
 }
 
+// PutWithPrev records no changeset diff; use PutWithPrevDiff to record one.
 func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []byte) error {
-	return w.PutWithPrevDiff(k, v, txNum, preval, w.diff)
+	return w.PutWithPrevDiff(k, v, txNum, preval, nil)
 }
 
-// PutWithPrevDiff is PutWithPrev with an explicit diff target instead of the
-// writer's own w.diff — for a caller that is its domain's sole writer and
-// wants to route this write's diff without going through SetDiff (which is
-// shared, mutable, and would otherwise need a lock to stay race-free against
-// a concurrent SetDiff from elsewhere).
+// PutWithPrevDiff records this write's previous value into diff when diff is not nil.
 func (w *DomainBufferedWriter) PutWithPrevDiff(k, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error {
 	step := kv.Step(txNum / w.h.ii.stepSize)
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
@@ -588,12 +585,12 @@ func (w *DomainBufferedWriter) PutWithPrevDiff(k, v []byte, txNum uint64, preval
 	return w.addValue(k, v, step)
 }
 
+// DeleteWithPrev records no changeset diff; use DeleteWithPrevDiff to record one.
 func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byte) (err error) {
-	return w.DeleteWithPrevDiff(k, txNum, prev, w.diff)
+	return w.DeleteWithPrevDiff(k, txNum, prev, nil)
 }
 
-// DeleteWithPrevDiff is DeleteWithPrev with an explicit diff target — see
-// PutWithPrevDiff.
+// DeleteWithPrevDiff is DeleteWithPrev that records into diff when it is not nil.
 func (w *DomainBufferedWriter) DeleteWithPrevDiff(k []byte, txNum uint64, prev []byte, diff *kv.DomainDiff) (err error) {
 	step := kv.Step(txNum / w.h.ii.stepSize)
 
@@ -635,7 +632,6 @@ type DomainBufferedWriter struct {
 	stepBytes [8]byte // current inverted step representation
 	aux       []byte  // auxilary buffer for key1 + key2
 	aux2      []byte  // auxilary buffer for step + val
-	diff      *kv.DomainDiff
 
 	h *historyBufferedWriter
 }

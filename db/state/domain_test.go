@@ -2613,20 +2613,20 @@ func TestDomain_Unwind(t *testing.T) {
 		var preval1, preval2, preval3, preval4 []byte
 
 		for i := range maxTx {
-			writer.diff = &kv.DomainDiff{}
+			diff := &kv.DomainDiff{}
 			if i%3 == 0 && i > 0 { // once in 3 txn Put key3 -> value3.i and skip other keys update
 				if i%12 == 0 { // once in 12 txn delete key3 before update
-					err = writer.DeleteWithPrev([]byte("key3"), i, preval3)
+					err = writer.DeleteWithPrevDiff([]byte("key3"), i, preval3, diff)
 					require.NoError(t, err)
 					preval3 = nil
-					diffSetMap[i] = writer.diff.GetDiffSet()
+					diffSetMap[i] = diff.GetDiffSet()
 					continue
 				}
 				v3 := fmt.Appendf(nil, "value3.%d", i)
-				err = writer.PutWithPrev([]byte("key3"), v3, i, preval3)
+				err = writer.PutWithPrevDiff([]byte("key3"), v3, i, preval3, diff)
 				require.NoError(t, err)
 				preval3 = v3
-				diffSetMap[i] = writer.diff.GetDiffSet()
+				diffSetMap[i] = diff.GetDiffSet()
 				continue
 			}
 
@@ -2634,13 +2634,13 @@ func TestDomain_Unwind(t *testing.T) {
 			v2 := fmt.Appendf(nil, "value2.%d", i)
 			nv3 := fmt.Appendf(nil, "valuen3.%d", i)
 
-			err = writer.PutWithPrev([]byte("key1"), v1, i, preval1)
+			err = writer.PutWithPrevDiff([]byte("key1"), v1, i, preval1, diff)
 			require.NoError(t, err)
-			err = writer.PutWithPrev([]byte("key2"), v2, i, preval2)
+			err = writer.PutWithPrevDiff([]byte("key2"), v2, i, preval2, diff)
 			require.NoError(t, err)
-			err = writer.PutWithPrev([]byte("k4"), nv3, i, preval4)
+			err = writer.PutWithPrevDiff([]byte("k4"), nv3, i, preval4, diff)
 			require.NoError(t, err)
-			diffSetMap[i] = writer.diff.GetDiffSet()
+			diffSetMap[i] = diff.GetDiffSet()
 
 			preval1, preval2, preval4 = v1, v2, nv3
 		}
@@ -3812,22 +3812,22 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			value2 := []byte("value2")
 
 			// txNum 0 (step 0): write key1=value1 (new key, prev=nil)
-			writer.diff = &kv.DomainDiff{}
-			err = writer.PutWithPrev(key, value1, 0, nil)
+			diff := &kv.DomainDiff{}
+			err = writer.PutWithPrevDiff(key, value1, 0, nil, diff)
 			require.NoError(err)
 
 			// txNum 17 (step 1): delete key1 (prev=value1)
-			writer.diff = &kv.DomainDiff{}
-			err = writer.DeleteWithPrev(key, 17, value1)
+			diff = &kv.DomainDiff{}
+			err = writer.DeleteWithPrevDiff(key, 17, value1, diff)
 			require.NoError(err)
 
 			// txNum 18 (step 1): re-write key1=value2 (prev=nil, key was deleted)
 			// Only this diff is needed for the unwind — it captures the previous
 			// state (deleted → Value=[]byte{}) that unwind must restore.
-			writer.diff = &kv.DomainDiff{}
-			err = writer.PutWithPrev(key, value2, 18, nil)
+			diff = &kv.DomainDiff{}
+			err = writer.PutWithPrevDiff(key, value2, 18, nil, diff)
 			require.NoError(err)
-			txNum18Diff := writer.diff.GetDiffSet()
+			txNum18Diff := diff.GetDiffSet()
 
 			// Verify the nil-vs-empty distinction survives serialization round-trip.
 			// Production diffs go through SerializeDiffSet/DeserializeDiffSet when
