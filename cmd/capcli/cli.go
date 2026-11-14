@@ -432,7 +432,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 				if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
 					kzgCommitments = c.Len()
 				}
-				stored, err := localBlobsStored(ctx, blobDB, *slot, currentRoot, kzgCommitments)
+				stored, err := blob_storage.BlobsStored(ctx, blobDB, *slot, currentRoot, kzgCommitments)
 				if err != nil {
 					return false, err
 				}
@@ -1423,6 +1423,7 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1435,8 +1436,10 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 	to := csn.FrozenBlobs()
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
+	blobCountFn := freezeblocks.BlobCountFromBlocks(ctx, csn, snr)
 	start := max(beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch+1, c.From)
 	slotsToRegen := map[uint64]struct{}{}
 	for i := start; i < to; i++ {
@@ -1455,6 +1458,15 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx context.Context) error {
 		wantCommitments := 0
 		if c := bBlock.Block.Body.GetBlobKzgCommitments(); c != nil {
 			wantCommitments = c.Len()
+		}
+		if wantCommitments > 0 && len(sds) == 0 {
+			count, payloadSkipped, err := blobCountFn(tx, i)
+			if err != nil {
+				return err
+			}
+			if payloadSkipped {
+				wantCommitments = int(count)
+			}
 		}
 		if len(sds) != wantCommitments {
 			if !c.CheckNeedRegen {

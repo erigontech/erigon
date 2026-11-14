@@ -271,6 +271,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		RpcTxSyncDefaultTimeout:  rpccfg.DefaultRpcTxSyncDefaultTimeout,
 		RpcTxSyncMaxTimeout:      rpccfg.DefaultRpcTxSyncMaxTimeout,
 	}
+	if args.EngineApiClientTimeout != nil {
+		httpConfig.AuthRpcTimeouts.ReadTimeout = max(httpConfig.AuthRpcTimeouts.ReadTimeout, *args.EngineApiClientTimeout)
+	}
 	nodeKeyConfig := p2p.NodeKeyConfig{}
 	nodeKey, err := nodeKeyConfig.LoadOrGenerateAndSave(nodeKeyConfig.DefaultPath(args.DataDir))
 	if err != nil {

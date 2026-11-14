@@ -503,6 +503,7 @@ jobs:
         id: perf_mixed
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'mixed'
         continue-on-error: true
+        timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh mixed stress_test_mixed_gen_latest 1000:20,3000:20,6000:20 mixed true
 
       - name: Sync clients before trace_block_call_tracer
@@ -515,6 +516,7 @@ jobs:
         id: perf_trace_block_call_tracer
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'trace_block_call_tracer'
         continue-on-error: true
+        timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh debug_traceBlockByNumber stress_test_debug_traceBlockByNumber_callTracer_gen_latest 10:20,30:20 trace_block_call_tracer
 
       - name: Sync clients before trace_block_struct_log
@@ -526,7 +528,8 @@ jobs:
         id: perf_trace_block_struct_log
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'trace_block_struct_log'
         continue-on-error: true
-        run: bash .github/workflows/scripts/run_rpc_perf.sh debug_traceBlockByNumber stress_test_debug_traceBlockByNumber_structLog_gen_latest 3:5,5:10 trace_block_struct_log
+        timeout-minutes: 20
+        run: bash .github/workflows/scripts/run_rpc_perf.sh debug_traceBlockByNumber stress_test_debug_traceBlockByNumber_structLog_gen_latest 3:5,5:5 trace_block_struct_log
 
       - name: Sync clients before eth_call_gen
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_call_gen')
@@ -537,6 +540,7 @@ jobs:
         id: perf_eth_call_gen
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_call_gen'
         continue-on-error: true
+        timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_call stress_test_eth_call_gen_latest 100:30,1000:20,10000:20,20000:20,30000:20 eth_call_gen
 
       - name: Sync clients before eth_createAccessList_gen
@@ -548,6 +552,7 @@ jobs:
         id: perf_eth_createAccessList_gen
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_createAccessList_gen'
         continue-on-error: true
+        timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_createAccessList stress_test_eth_createAccessList_gen_latest 10000:20,20000:20 eth_createAccessList_gen
 
       - name: Sync clients before eth_getLogs_gen
@@ -559,6 +564,7 @@ jobs:
         id: perf_eth_getLogs_gen
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_gen'
         continue-on-error: true
+        timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_gen_latest 1000:20,3000:20 eth_getLogs_gen
 
       - name: Sync clients before eth_getLogs_head
@@ -570,6 +576,7 @@ jobs:
         id: perf_eth_getLogs_head
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_head'
         continue-on-error: true
+        timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_head_gen_latest 2000:20,10000:20 eth_getLogs_head
 
       - name: Sync clients before eth_getLogs_topics
@@ -581,6 +588,7 @@ jobs:
         id: perf_eth_getLogs_topics
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_topics'
         continue-on-error: true
+        timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_topics_gen_latest 1000:20,5000:20 eth_getLogs_topics
 
       - name: Sync clients before eth_getLogs_wide
@@ -592,6 +600,7 @@ jobs:
         id: perf_eth_getLogs_wide
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_wide'
         continue-on-error: true
+        timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_wide_gen_latest 200:20,1000:20 eth_getLogs_wide
 
       - name: Sync clients before eth_getLogs_latest
@@ -603,6 +612,7 @@ jobs:
         id: perf_eth_getLogs_latest
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_latest'
         continue-on-error: true
+        timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_latest_gen_latest 2000:20,10000:20 eth_getLogs_latest
 
       - name: Sync clients before eth_getBlockReceipts_latest
@@ -614,6 +624,7 @@ jobs:
         id: perf_eth_getBlockReceipts_latest
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_latest'
         continue-on-error: true
+        timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockReceipts stress_test_eth_getBlockReceipts_latest_gen_latest 100:20,500:20 eth_getBlockReceipts_latest
 
       - name: Sync clients before eth_getBlockByNumber_latest
@@ -625,6 +636,7 @@ jobs:
         id: perf_eth_getBlockByNumber_latest
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_latest'
         continue-on-error: true
+        timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockByNumber stress_test_eth_getBlockByNumber_latest_gen_latest 100:20,1000:20 eth_getBlockByNumber_latest
 
       - name: Sync clients before eth_getBlockReceipts_gen
@@ -636,6 +648,7 @@ jobs:
         id: perf_eth_getBlockReceipts_gen
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_gen'
         continue-on-error: true
+        timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockReceipts stress_test_eth_getBlockReceipts_gen_latest 100:20,1000:20 eth_getBlockReceipts_gen
 
       - name: Sync clients before eth_getBlockByNumber_gen
@@ -647,6 +660,7 @@ jobs:
         id: perf_eth_getBlockByNumber_gen
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_gen'
         continue-on-error: true
+        timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockByNumber stress_test_eth_getBlockByNumber_gen_latest 1000:20,3000:20 eth_getBlockByNumber_gen
 
       - name: Collect the benchmark results

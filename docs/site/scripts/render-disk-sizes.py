@@ -61,6 +61,20 @@ def _validate_display(net: str, mode: str, display) -> str:
     return display
 
 
+# Appended to a figure measured with `erigon seg du`; the page explains it next to the tables.
+SEG_DU_MARK = "†"
+METHODS = (None, "seg-du")
+
+
+def _validate_method(net: str, mode: str, method) -> bool:
+    """Return whether the entry is a `seg du` figure; an entry without a method is a whole-datadir size."""
+    if method not in METHODS:
+        raise SystemExit(
+            f"Error: networks.{net}.{mode}.method must be absent or 'seg-du', got {method!r}"
+        )
+    return method == "seg-du"
+
+
 def _validate_date(net: str, mode: str, value) -> str:
     if not isinstance(value, str):
         raise SystemExit(f"Error: networks.{net}.{mode}.measured_at must be a string")
@@ -114,13 +128,16 @@ def render_text(text: str, data: dict) -> str:
     def value_repl(m: re.Match) -> str:
         net, mode = m.group("net"), m.group("mode")
         try:
-            display = networks[net][mode]["display"]
+            entry = networks[net][mode]
+            display = entry["display"]
         except (KeyError, TypeError):
             raise SystemExit(
                 f"Error: disk-sizes.json has no display value for "
                 f"networks.{net}.{mode} (referenced by a marker in the page)"
             )
         display = _validate_display(net, mode, display)
+        if _validate_method(net, mode, entry.get("method")):
+            display += SEG_DU_MARK
         return "{/* ds:" + net + ":" + mode + " */}" + display + "{/* ds:end */}"
 
     def date_repl(m: re.Match) -> str:

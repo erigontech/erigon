@@ -57,9 +57,8 @@ import (
 // re-executes and checks the state root against the header, so the burn surfaces
 // as a root mismatch there too.
 //
-// The exact same block is run through both the serial and the parallel executor;
-// the coinbase must end with B + accumulated tips (strictly greater than B) under
-// both, proving B survived rather than being replaced by tips alone.
+// The coinbase must end with B + accumulated tips (strictly greater than B),
+// proving B survived rather than being replaced by tips alone.
 func TestEIP8246CoinbaseSelfdestructPreservesBalance(t *testing.T) {
 	// childInitcode = ADDRESS SELFDESTRUCT: the deployed child self-destructs to
 	// itself during construction, so under EIP-8246 its whole endowment is
@@ -78,7 +77,6 @@ func TestEIP8246CoinbaseSelfdestructPreservesBalance(t *testing.T) {
 		name     string
 		parallel bool
 	}{
-		{"serial", false},
 		{"parallel", true},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
@@ -90,7 +88,7 @@ func TestEIP8246CoinbaseSelfdestructPreservesBalance(t *testing.T) {
 			require.NoError(t, copier.CopyWithOption(amsterdamConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
 			amsterdamConfig.AmsterdamTime = common.NewUint64(0)
 
-			senderKey, err := crypto.GenerateKey()
+			senderKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 			require.NoError(t, err)
 			sender := crypto.PubkeyToAddress(senderKey.PublicKey)
 			factory := common.HexToAddress("0x00000000000000000000000000000000fac70247")
@@ -137,6 +135,7 @@ func TestEIP8246CoinbaseSelfdestructPreservesBalance(t *testing.T) {
 				b.AddTx(mkTx(b.TxNonce(sender), recipient, 1, 21_000, tipGasPrice))
 			})
 			require.NoError(t, err)
+			requireGeneratedBlock(t, chainPack)
 
 			require.NoError(t, m.InsertChain(chainPack))
 

@@ -95,10 +95,12 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
-	timeMs           atomic.Uint64
-	highestSeen      atomic.Uint64
-	highestSeenRoot  atomic.Value // common.Hash
-	blocksProcessing atomic.Int64
+	timeMs                 atomic.Uint64
+	highestSeen            atomic.Uint64
+	highestSeenRoot        atomic.Value // common.Hash
+	blocksProcessing       atomic.Int64
+	blockImportPrepareHook func()
+	blockImportsInFlight   map[common.Hash]chan struct{}
 	// all of *solid.Checkpoint type
 	justifiedCheckpoint           atomic.Value
 	finalizedCheckpoint           atomic.Value
@@ -890,16 +892,28 @@ func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash) (*state.Cac
 	return f.forkGraph.ReplayState(blockRoot)
 }
 
-// GetOwnedStateAtBlockRoot is GetStateAtBlockRoot, but it also copies a replayed
-// state, because replay leaves pointers to stored block objects in it.
+type ownedStateReplayer interface {
+	ReplayStateWithOwnership(common.Hash) (*state.CachingBeaconState, bool, error)
+}
+
+// GetOwnedStateAtBlockRoot is GetStateAtBlockRoot, but it also copies an aliased replay.
 func (f *ForkChoiceStore) GetOwnedStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
 	copied, current, err := f.copyCurrentState(blockRoot)
 	if current || err != nil {
 		return copied, err
 	}
-	replayed, err := f.forkGraph.ReplayState(blockRoot)
+	var replayed *state.CachingBeaconState
+	owned := false
+	if replayer, ok := f.forkGraph.(ownedStateReplayer); ok {
+		replayed, owned, err = replayer.ReplayStateWithOwnership(blockRoot)
+	} else {
+		replayed, err = f.forkGraph.ReplayState(blockRoot)
+	}
 	if replayed == nil || err != nil {
 		return replayed, err
+	}
+	if owned {
+		return replayed, nil
 	}
 	return replayed.Copy()
 }
@@ -1070,12 +1084,25 @@ func (f *ForkChoiceStore) GetLightClientBootstrap(blockRoot common.Hash) (*cltyp
 	return f.forkGraph.GetLightClientBootstrap(blockRoot)
 }
 
+// NewestLightClientFinalityUpdate returns the newest light client update that has finality.
+func (f *ForkChoiceStore) NewestLightClientFinalityUpdate() *cltypes.LightClientUpdate {
+	return f.forkGraph.NewestLightClientFinalityUpdate()
+}
+
 func (f *ForkChoiceStore) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 	return f.forkGraph.NewestLightClientUpdate()
 }
 
-func (f *ForkChoiceStore) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
-	return f.forkGraph.GetLightClientUpdate(period)
+// GetLightClientUpdates returns the best update of each sync committee period in [startPeriod, endPeriod) on the
+// canonical chain, nil for a period without one: the better of the update finalization settled for the period and the
+// best candidate on the selected head's chain (a period finalization settled only in part can still have candidates).
+// Without a selected head, only settled updates are returned. The whole range is read against one head.
+func (f *ForkChoiceStore) GetLightClientUpdates(startPeriod, endPeriod uint64) []*cltypes.LightClientUpdate {
+	var head common.Hash
+	if node := f.selectedHead.Load(); node != nil {
+		head = node.Root
+	}
+	return f.forkGraph.GetLightClientUpdates(startPeriod, endPeriod, head)
 }
 
 func (f *ForkChoiceStore) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool) {
