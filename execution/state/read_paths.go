@@ -102,9 +102,10 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 		return accounts.Code{Hash: codeHash, Bytes: code}, nil
 	}
 	var code []byte
-	err = ibs.measureCodeRead(addr, func() (err error) {
+	err = ibs.measureCodeRead(addr, func() (bool, error) {
+		var err error
 		code, err = ibs.stateReader.ReadAccountCode(addr)
-		return err
+		return true, err
 	})
 	ibs.RecordStateReadError(err)
 	if len(code) == 0 {
@@ -1375,6 +1376,8 @@ type codeSegmentReader interface {
 	ReadAccountCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (bool, error)
 }
 
+var _ codeSegmentReader = (*ReaderV3)(nil)
+
 // recordedCode returns a recorded read's code, re-reading bytes the record dropped.
 func (ibs *IntraBlockState) recordedCode(addr accounts.Address, tr VersionedRead[accounts.Code]) (accounts.Code, error) {
 	if !codeBytesDropped(tr.Val) {
@@ -1389,8 +1392,9 @@ func (ibs *IntraBlockState) recordedCode(addr accounts.Address, tr VersionedRead
 	return code, nil
 }
 
-// measureCodeRead runs a committed code read with the code-read tracing and metrics.
-func (ibs *IntraBlockState) measureCodeRead(addr accounts.Address, read func() error) error {
+// measureCodeRead runs a committed code read with the code-read tracing and metrics. A read that reports false
+// was declined and is not counted, so the read that replaces it counts once.
+func (ibs *IntraBlockState) measureCodeRead(addr accounts.Address, read func() (bool, error)) error {
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
@@ -1398,8 +1402,8 @@ func (ibs *IntraBlockState) measureCodeRead(addr accounts.Address, read func() e
 	if dbg.KVReadLevelledMetrics {
 		readStart = time.Now()
 	}
-	err := read()
-	if dbg.KVReadLevelledMetrics {
+	counted, err := read()
+	if dbg.KVReadLevelledMetrics && counted {
 		ibs.codeReadDuration += time.Since(readStart)
 		ibs.codeReadCount++
 	}
@@ -1425,9 +1429,10 @@ func (ibs *IntraBlockState) readOriginCodeSegmentTo(addr accounts.Address, from 
 		return accounts.CodeHash{}, false, nil
 	}
 	var copied bool
-	err = ibs.measureCodeRead(addr, func() (err error) {
+	err = ibs.measureCodeRead(addr, func() (bool, error) {
+		var err error
 		copied, err = segmentReader.ReadAccountCodeSegmentTo(addr, from, dst)
-		return err
+		return copied, err
 	})
 	ibs.RecordStateReadError(err)
 	if err != nil || !copied {
@@ -1436,8 +1441,9 @@ func (ibs *IntraBlockState) readOriginCodeSegmentTo(addr accounts.Address, from 
 	return codeHash, true, nil
 }
 
-// refreshCode is the in-memory-only variant for CodePath. CodePath is never recorded
-// via the skipStorage branch (the `path != CodePath` guard), so the default case records nothing.
+// refreshCode re-reads CodePath from the versioned IO; a read-set hit recorded without bytes reads the committed code
+// again. CodePath is never recorded via the skipStorage branch (the `path != CodePath` guard), so the default case
+// records nothing.
 func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, error) {
 	var r readPathResult
 	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, true, &r)

@@ -217,6 +217,31 @@ func (r *segmentCodeReader) ReadAccountCodeSegmentTo(addr accounts.Address, from
 	return true, nil
 }
 
+// decliningCodeReader serves no segments, like a reader over history or the previous block.
+type decliningCodeReader struct {
+	codeReader
+}
+
+func (decliningCodeReader) ReadAccountCodeSegmentTo(accounts.Address, uint64, []byte) (bool, error) {
+	return false, nil
+}
+
+// A declined segment read is not counted: the full read that replaces it counts once.
+func TestCodeSegment_DeclinedReadCountsOnce(t *testing.T) {
+	prev := dbg.KVReadLevelledMetrics
+	dbg.KVReadLevelledMetrics = true
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prev })
+	_, reader, addr, code := newSegmentRead(t, nil)
+	ibs := NewWithVersionMap(&decliningCodeReader{codeReader: reader.codeReader}, NewVersionMap(nil))
+	ibs.SetTxContext(100, 5)
+	ibs.SetVersion(0)
+
+	got, err := segmentOf(ibs, addr, len(code))
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	require.Equal(t, int64(1), ibs.CodeReadCount())
+}
+
 func segmentOf(ibs *IntraBlockState, addr accounts.Address, n int) ([]byte, error) {
 	dst := make([]byte, n)
 	err := ibs.ReadCodeSegmentTo(addr, 0, dst)

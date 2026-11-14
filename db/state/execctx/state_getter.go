@@ -40,7 +40,10 @@ type stateGetter struct {
 	memo       accounts.Code // last ReadCodeSegmentTo decode: a code hash maps to immutable bytes
 }
 
-var _ execctxapi.StateGetter = (*stateGetter)(nil)
+var (
+	_ execctxapi.StateGetter       = (*stateGetter)(nil)
+	_ execctxapi.CodeSegmentGetter = (*stateGetter)(nil)
+)
 
 // GetLatest never writes to a process-wide metrics accumulator shared by concurrent readers.
 func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {

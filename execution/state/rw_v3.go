@@ -986,9 +986,7 @@ func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key common.
 }
 
 func (r *ReaderV3) ReadAccountCodeSegmentTo(address accounts.Address, from uint64, dst []byte) (bool, error) {
-	segmentReader, ok := r.getter.(interface {
-		ReadCodeSegmentTo(addr []byte, txNum, from uint64, dst []byte) (bool, error)
-	})
+	segmentReader, ok := r.getter.(execctxapi.CodeSegmentGetter)
 	if !ok {
 		return false, nil
 	}

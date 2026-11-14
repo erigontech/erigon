@@ -1363,16 +1363,16 @@ func TestBlockhashRecordsAHeaderReadError(t *testing.T) {
 	require.ErrorIs(t, ibs.StateReadError(), readErr)
 }
 
-type borrowingCodeReader struct {
+type segmentCodeReader struct {
 	state.NoopReader
-	addr     accounts.Address
-	code     []byte
-	borrows  int
-	attempts int
-	refuse   bool
+	addr         accounts.Address
+	code         []byte
+	segmentReads int
+	attempts     int
+	refuse       bool
 }
 
-func (r *borrowingCodeReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+func (r *segmentCodeReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
 	if addr != r.addr {
 		return nil, nil
 	}
@@ -1383,19 +1383,19 @@ func (r *borrowingCodeReader) ReadAccountData(addr accounts.Address) (*accounts.
 	return &acc, nil
 }
 
-func (r *borrowingCodeReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
+func (r *segmentCodeReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
 	if addr != r.addr {
 		return nil, nil
 	}
 	return r.code, nil
 }
 
-func (r *borrowingCodeReader) ReadAccountCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (bool, error) {
+func (r *segmentCodeReader) ReadAccountCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (bool, error) {
 	r.attempts++
 	if r.refuse {
 		return false, nil
 	}
-	r.borrows++
+	r.segmentReads++
 	if addr != r.addr {
 		return false, nil
 	}
@@ -1403,7 +1403,7 @@ func (r *borrowingCodeReader) ReadAccountCodeSegmentTo(addr accounts.Address, fr
 	return true, nil
 }
 
-func runExtCodeCopy(t *testing.T, borrow bool, memOffset, codeOffset, length uint256.Int, memSize uint64) (mem []byte, attempts, borrows int) {
+func runExtCodeCopy(t *testing.T, segments bool, memOffset, codeOffset, length uint256.Int, memSize uint64) (mem []byte, attempts, segmentReads int) {
 	t.Helper()
 
 	addrBytes := common.Address{0xC0, 0xDE}
@@ -1412,7 +1412,7 @@ func runExtCodeCopy(t *testing.T, borrow bool, memOffset, codeOffset, length uin
 	for i := range code {
 		code[i] = byte(i + 1)
 	}
-	reader := &borrowingCodeReader{addr: addr, code: code, refuse: !borrow}
+	reader := &segmentCodeReader{addr: addr, code: code, refuse: !segments}
 	ibs := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
 	ibs.SetTxContext(100, 1)
 	ibs.SetVersion(0)
@@ -1430,10 +1430,10 @@ func runExtCodeCopy(t *testing.T, borrow bool, memOffset, codeOffset, length uin
 
 	_, _, err := opExtCodeCopy(0, evm, callContext)
 	require.NoError(t, err)
-	return bytes.Clone(callContext.Memory.store), reader.attempts, reader.borrows
+	return bytes.Clone(callContext.Memory.store), reader.attempts, reader.segmentReads
 }
 
-func TestOpExtCodeCopyBorrowMatchesNormalPath(t *testing.T) {
+func TestOpExtCodeCopySegmentReadMatchesNormalPath(t *testing.T) {
 	for _, tc := range []struct {
 		name                          string
 		memOffset, codeOffset, length uint256.Int
@@ -1453,11 +1453,11 @@ func TestOpExtCodeCopyBorrowMatchesNormalPath(t *testing.T) {
 				want[tc.memOffset.Uint64()+i] = b
 			}
 			off, offAttempts, _ := runExtCodeCopy(t, false, tc.memOffset, tc.codeOffset, tc.length, tc.memSize)
-			on, _, onBorrows := runExtCodeCopy(t, true, tc.memOffset, tc.codeOffset, tc.length, tc.memSize)
-			require.Equal(t, want, off, "a refused borrow must take the normal path")
+			on, _, onSegmentReads := runExtCodeCopy(t, true, tc.memOffset, tc.codeOffset, tc.length, tc.memSize)
+			require.Equal(t, want, off, "a declined segment read must take the normal path")
 			require.Equal(t, want, on)
 			require.Equal(t, 1, offAttempts, "the refused run must try the segment read")
-			require.Equal(t, 1, onBorrows, "the miss must be borrowed")
+			require.Equal(t, 1, onSegmentReads, "the miss must be read as a segment")
 		})
 	}
 }
