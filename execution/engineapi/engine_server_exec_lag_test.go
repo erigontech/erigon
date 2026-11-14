@@ -104,7 +104,7 @@ func TestNewPayloadOfCanonicalUnexecutedBlockIsNotValid(t *testing.T) {
 	srv, chainPack := newExecLagEngineServer(t, 5, lag)
 
 	block := chainPack.Blocks[lag]
-	status, err := srv.getQuickPayloadStatusIfPossible(t.Context(), block.Hash(), block.NumberU64(), block.ParentHash(), nil, true, defaultReadinessWait)
+	status, err := srv.getQuickPayloadStatusIfPossible(t.Context(), block.Hash(), block.NumberU64(), block.ParentHash(), nil, nil, true, defaultReadinessWait)
 	require.NoError(t, err)
 	require.Nil(t, status)
 }
@@ -121,7 +121,7 @@ func TestNewPayloadWithBadHeaderWhileLaggingIsInvalidWithNullLatestValidHash(t *
 	require.Equal(t, engine_types.InvalidStatus, status.Status)
 	require.Nil(t, status.LatestValidHash)
 
-	cached, err := srv.getQuickPayloadStatusIfPossible(t.Context(), bad.Hash(), bad.NumberU64(), bad.ParentHash(), nil, true, defaultReadinessWait)
+	cached, err := srv.getQuickPayloadStatusIfPossible(t.Context(), bad.Hash(), bad.NumberU64(), bad.ParentHash(), nil, nil, true, defaultReadinessWait)
 	require.NoError(t, err)
 	require.NotNil(t, cached)
 	require.Equal(t, engine_types.InvalidStatus, cached.Status)
