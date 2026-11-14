@@ -82,10 +82,10 @@ check_transaction_race_shards() {
 	fi
 	printf '  ok  %s\n' "${actual//$'\n'/$'\n  ok  '}"
 }
-hive_consume_enginex_regexes() {
-	local fixture_set="$1"
+hive_consumer_regexes() {
+	local fixture_set="$1" sim="$2"
 	yq -o=json '.jobs.load-matrix.steps[] | select(.id == "load") | .env.SHARDS | from_yaml' "$hive" \
-		| jq -r --arg fixture_set "$fixture_set" '.[] | select(.sim=="consume-enginex" and .["fixtures-tarball"]==$fixture_set) | "\(.shard)=\(.["sim-limit"])"' \
+		| jq -r --arg fixture_set "$fixture_set" --arg sim "$sim" '.[] | select(.sim==$sim and .["fixtures-tarball"]==$fixture_set) | "\(.shard)=\(.["sim-limit"])"' \
 		| sort -u
 }
 
@@ -94,7 +94,7 @@ fork_rows() {
 	jq -r --arg f "$2" '.test_cases | map(select(.format==$f)) | group_by(.fork)[] | "\(.[0].fork)\t\(length)\t[fork_\(.[0].fork)-x]"' "$1"
 }
 test_rows() {
-	jq -r --arg f "$2" '.test_cases[] | select(.format==$f) | "\(.fork)\t1\teels/consume-enginex/\(.id)"' "$1"
+	jq -r --arg f "$2" --arg sim "$3" '.test_cases[] | select(.format==$f) | "\(.fork)\t1\teels/\($sim)/\(.id)"' "$1"
 }
 check_partition() {
 	local title="$1" format="$2" regexes="$3"
@@ -135,15 +135,17 @@ fork_rows "$stable_index" blockchain_test | check_partition "spec race shards (b
 echo
 check_race_mode_parity || rc=1
 echo
-test_rows "$stable_index" blockchain_test_engine_x | check_partition "hive stable consume-enginex (sim-limit)" blockchain_test_engine_x "$(hive_consume_enginex_regexes eest_stable)" || rc=1
-echo
-if [[ -f "$devnet_index" ]]; then
-	test_rows "$devnet_index" blockchain_test_engine_x | check_partition "hive devnet consume-enginex (sim-limit)" blockchain_test_engine_x "$(hive_consume_enginex_regexes eest_devnet)" || rc=1
+for sim in consume-enginex consume-wirex; do
+	test_rows "$stable_index" blockchain_test_engine_x "$sim" | check_partition "hive stable $sim (sim-limit)" blockchain_test_engine_x "$(hive_consumer_regexes eest_stable "$sim")" || rc=1
 	echo
-else
-	echo "==== devnet check SKIPPED (index not found: $devnet_index) ===="
-	echo
-fi
+	if [[ -f "$devnet_index" ]]; then
+		test_rows "$devnet_index" blockchain_test_engine_x "$sim" | check_partition "hive devnet $sim (sim-limit)" blockchain_test_engine_x "$(hive_consumer_regexes eest_devnet "$sim")" || rc=1
+		echo
+	else
+		echo "==== devnet $sim check SKIPPED (index not found: $devnet_index) ===="
+		echo
+	fi
+done
 if (( rc == 0 )); then
 	echo "EEST shard coverage OK."
 else
