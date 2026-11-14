@@ -69,6 +69,11 @@ func NpBegin() {
 	npMu.Lock()
 	defer npMu.Unlock()
 	npActive = true
+	if npCountOn {
+		for i := range npCnt {
+			npCnt[i].Store(0)
+		}
+	}
 	npMarks = append(npMarks[:0],
 		npMark{"httpStart", time.Unix(0, npHTTPAt.Load())},
 		npMark{"httpRead", time.Unix(0, npBatchAt.Load())},
@@ -136,4 +141,44 @@ func NpFlush(logger log.Logger, blk uint64) {
 	logger.Info("[np-phase] spans", spans...)
 	logger.Info("[np-phase] pre-stage", append(pre, "total", preTotal)...)
 	logger.Info("[np-phase] post-exec", append(post, "total", postTotal)...)
+	npCountsLog(logger, blk)
+}
+
+// probe only: per-newPayload counters, on with NP_COUNT=true; NpBegin resets them, NpFlush logs them.
+const (
+	NpStoGet = iota
+	NpStoMem
+	NpStoCacheHit
+	NpStoCacheMiss
+	NpStoOrigin
+	NpWarmStoHit
+	NpWarmStoMiss
+	NpInternKey
+	NpColdAcc
+	NpColdSto
+	NpStoBatchOK
+	npCountN
+)
+
+var (
+	npCountOn  = EnvBool("NP_COUNT", false)
+	npCnt      [npCountN]atomic.Int64
+	npCntNames = [npCountN]string{"stoGet", "stoMem", "stoCacheHit", "stoCacheMiss", "stoOrigin", "warmStoHit", "warmStoMiss", "internKey", "coldAcc", "coldSto", "stoBatchOK"}
+)
+
+func NpCount(i int) {
+	if npCountOn {
+		npCnt[i].Add(1)
+	}
+}
+
+func npCountsLog(logger log.Logger, blk uint64) {
+	if !npCountOn {
+		return
+	}
+	kv := []any{"blk", blk}
+	for i := range npCnt {
+		kv = append(kv, npCntNames[i], npCnt[i].Swap(0))
+	}
+	logger.Info("[np-phase] counts", kv...)
 }

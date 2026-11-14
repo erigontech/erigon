@@ -126,8 +126,14 @@ func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.Ge
 			if name == kv.AccountsDomain {
 				cpg.seedCodeHash(k, v, txNum)
 			}
+			if name == kv.StorageDomain {
+				dbg.NpCount(dbg.NpWarmStoHit)
+			}
 			return v, kv.Step(txNum / cpg.stepSize), nil
 		}
+	}
+	if name == kv.StorageDomain {
+		dbg.NpCount(dbg.NpWarmStoMiss)
 	}
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k, opts)
 	if err == nil && opts.MaxStep() == kv.NoStepBound {
@@ -509,13 +515,25 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 			return nil
 		})
 		cold = stateKeysCold(ctx, db, bal)
+		if cold.accounts {
+			dbg.NpCount(dbg.NpColdAcc)
+		}
+		if cold.storage {
+			dbg.NpCount(dbg.NpColdSto)
+		}
 	}
 	group.Go(func() error {
 		defer dbg.NpSpan("stateWarm", time.Now())
 		warm, warmTasks, warmWorkers := bal, tasks, balWorkers
 		if cold.any() {
 			var stripped bool
-			if warm, stripped = perKeyWarmupBAL(bal, cold, prefetchBALState(ctx, db, bal, cold)); stripped {
+			t0 := time.Now()
+			storageRead := prefetchBALState(ctx, db, bal, cold)
+			dbg.NpSpan("statePrefetch", t0)
+			if storageRead {
+				dbg.NpCount(dbg.NpStoBatchOK)
+			}
+			if warm, stripped = perKeyWarmupBAL(bal, cold, storageRead); stripped {
 				warmTasks, warmWorkers = makeBALWarmupPlan(warm, workers)
 			}
 		}

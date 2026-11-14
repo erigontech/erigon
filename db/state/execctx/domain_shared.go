@@ -1386,11 +1386,18 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	}
 	// Mem batches hold the current transaction's uncommitted state, so a hit
 	// needs no shared-cache fill. Parent hits also obey any bound from the child.
+	isSto := domain == kv.StorageDomain
+	if isSto {
+		dbg.NpCount(dbg.NpStoGet)
+	}
 	v, step, stagedMaxStep, ok := sd.latestFromMem(domain, k)
 	maxStep := min(stagedMaxStep, stepBound)
 	if ok && servableUnderBound(step, maxStep) {
 		if wm != nil {
 			wm.UpdateCacheReads(domain, start)
+		}
+		if isSto {
+			dbg.NpCount(dbg.NpStoMem)
 		}
 		return v, step, nil
 	}
@@ -1435,8 +1442,14 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 						domain, k, v, vDB, sd.txNum))
 				}
 			}
+			if isSto {
+				dbg.NpCount(dbg.NpStoCacheHit)
+			}
 			return v, cStep, nil
 		}
+	}
+	if isSto {
+		dbg.NpCount(dbg.NpStoCacheMiss)
 	}
 
 	// branchCache sits between sd.mem/parent.mem and the aggTx files for

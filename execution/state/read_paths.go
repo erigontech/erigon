@@ -72,6 +72,7 @@ func (ibs *IntraBlockState) originStorageDirect(addr accounts.Address, key accou
 	if dbg.KVReadLevelledMetrics {
 		ibs.storageReadDuration += time.Since(readStart)
 	}
+	dbg.NpCount(dbg.NpStoOrigin)
 	ibs.storageReadCount++
 	ibs.stateReader.SetTrace(false, "")
 	ibs.RecordStateReadError(err)

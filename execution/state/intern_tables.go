@@ -17,10 +17,29 @@
 package state
 
 import (
+	"encoding/binary"
+
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+// probe only: STUB_SAC_PREINTERN=true interns and holds the sac test block's storage keys at start-up, so the
+// block's exec interns are table hits.
+var sacHeldKeys = func() []accounts.StorageKey {
+	if !dbg.EnvBool("STUB_SAC_PREINTERN", false) {
+		return nil
+	}
+	held := make([]accounts.StorageKey, len(sacProbeKeys))
+	for i, k := range sacProbeKeys {
+		var h common.Hash
+		binary.BigEndian.PutUint32(h[28:], k)
+		held[i] = accounts.InternKey(h)
+	}
+	return held
+}()
 
 // storageKeyCacheSize must comfortably exceed a contract's live slot count,
 // or conflict misses dominate.
@@ -53,6 +72,7 @@ func slotIndex(word *uint256.Int) uint64 {
 
 // A nil handle marks an unused entry; the zero word is a legitimate key.
 func (c *storageKeyCache) fill(i uint64, word *uint256.Int) accounts.StorageKey {
+	dbg.NpCount(dbg.NpInternKey)
 	h := accounts.InternKey(word.Bytes32())
 	c.words[i], c.handles[i] = *word, h
 	return h
@@ -66,6 +86,7 @@ func (ibs *IntraBlockState) InternStorageKey(word *uint256.Int) accounts.Storage
 	if c == nil {
 		if ibs.internOps < storageKeyCacheMinOps {
 			ibs.internOps++
+			dbg.NpCount(dbg.NpInternKey)
 			return accounts.InternKey(word.Bytes32())
 		}
 		c = new(storageKeyCache)
