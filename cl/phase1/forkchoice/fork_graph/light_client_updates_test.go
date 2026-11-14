@@ -51,7 +51,7 @@ func TestRecordLightClientUpdateWaitsForFinalizationForThePeriodStore(t *testing
 	f.recordLightClientUpdateLocked(common.Hash{1}, update)
 
 	require.Same(t, update, f.NewestLightClientUpdate())
-	_, ok := f.GetLightClientUpdate(1, common.Hash{})
+	_, ok := lightClientUpdateAt(f, 1, common.Hash{})
 	require.False(t, ok)
 	require.Len(t, f.lightClientUpdateCandidates[1], 1)
 }
@@ -87,19 +87,19 @@ func TestFinalizationKeepsOnlyCanonicalLightClientUpdates(t *testing.T) {
 	f.headers.Store(nextFinalized, &cltypes.BeaconBlockHeader{Slot: periodStart + 96, ParentRoot: later})
 	laterUpdate := lightClientTestUpdate(cfg, 500, periodStart+69)
 	f.recordLightClientUpdateLocked(later, laterUpdate)
-	_, ok := f.GetLightClientUpdate(1, common.Hash{})
+	_, ok := lightClientUpdateAt(f, 1, common.Hash{})
 	require.False(t, ok, "settled before finalization")
 
 	f.KeepFinalizedLightClientUpdates(finalized)
 
-	got, ok := f.GetLightClientUpdate(1, common.Hash{})
+	got, ok := lightClientUpdateAt(f, 1, common.Hash{})
 	require.True(t, ok)
 	require.Same(t, canonicalUpdate, got)
 	require.Len(t, f.lightClientUpdateCandidates[1], 1, "only the candidate above the finalized slot waits")
 
 	f.KeepFinalizedLightClientUpdates(nextFinalized)
 
-	got, ok = f.GetLightClientUpdate(1, common.Hash{})
+	got, ok = lightClientUpdateAt(f, 1, common.Hash{})
 	require.True(t, ok)
 	require.Same(t, laterUpdate, got, "the next finalization settles it")
 	require.Empty(t, f.lightClientUpdateCandidates)
@@ -122,7 +122,7 @@ func TestFinalizationKeepsTheCanonicalCandidateAmongManyBetterSideBranchOnes(t *
 	}
 	f.KeepFinalizedLightClientUpdates(finalized)
 
-	got, ok := f.GetLightClientUpdate(1, common.Hash{})
+	got, ok := lightClientUpdateAt(f, 1, common.Hash{})
 	require.True(t, ok)
 	require.Same(t, canonicalUpdate, got)
 }
@@ -145,7 +145,7 @@ func TestFinalizationKeepsACanonicalCandidateThatArrivesAfterManySideBranchOnes(
 
 	f.KeepFinalizedLightClientUpdates(finalized)
 
-	got, ok := f.GetLightClientUpdate(1, common.Hash{})
+	got, ok := lightClientUpdateAt(f, 1, common.Hash{})
 	require.True(t, ok)
 	require.Same(t, canonicalUpdate, got)
 }
@@ -172,11 +172,11 @@ func TestFinalizationKeepsTheBestCanonicalUpdateAcrossSteps(t *testing.T) {
 			f.recordLightClientUpdateLocked(c, updates[1])
 
 			f.KeepFinalizedLightClientUpdates(fin1)
-			got, ok := f.GetLightClientUpdate(1, common.Hash{})
+			got, ok := lightClientUpdateAt(f, 1, common.Hash{})
 			require.True(t, ok)
 			require.Same(t, updates[0], got)
 			f.KeepFinalizedLightClientUpdates(fin2)
-			got, _ = f.GetLightClientUpdate(1, common.Hash{})
+			got, _ = lightClientUpdateAt(f, 1, common.Hash{})
 			require.Same(t, updates[tt.wantIdx], got)
 		})
 	}
@@ -199,19 +199,19 @@ func TestGetLightClientUpdateServesTheBestCandidateOnTheHeadChain(t *testing.T) 
 	f.recordLightClientUpdateLocked(canonical, canonicalUpdate)
 	f.recordLightClientUpdateLocked(side, sideUpdate)
 
-	got, ok := f.GetLightClientUpdate(1, head)
+	got, ok := lightClientUpdateAt(f, 1, head)
 	require.True(t, ok)
 	require.Same(t, canonicalUpdate, got)
-	got, ok = f.GetLightClientUpdate(1, sideHead)
+	got, ok = lightClientUpdateAt(f, 1, sideHead)
 	require.True(t, ok)
 	require.Same(t, sideUpdate, got)
-	_, ok = f.GetLightClientUpdate(2, head)
+	_, ok = lightClientUpdateAt(f, 2, head)
 	require.False(t, ok, "no update of another period")
 
 	next := common.Hash{6}
 	f.headers.Store(next, &cltypes.BeaconBlockHeader{Slot: 2*p + 6, ParentRoot: head})
 	f.recordLightClientUpdateLocked(next, lightClientTestUpdate(cfg, int(cfg.SyncCommitteeSize), 2*p+5))
-	got, ok = f.GetLightClientUpdate(1, next)
+	got, ok = lightClientUpdateAt(f, 1, next)
 	require.True(t, ok)
 	require.Same(t, canonicalUpdate, got, "a candidate of the next period on the way down is not one of this period")
 }
@@ -239,7 +239,7 @@ func TestGetLightClientUpdateComparesTheSettledUpdateWithTheHeadChain(t *testing
 			f.recordLightClientUpdateLocked(c, unsettled)
 			f.KeepFinalizedLightClientUpdates(fin)
 
-			got, ok := f.GetLightClientUpdate(1, head)
+			got, ok := lightClientUpdateAt(f, 1, head)
 			require.True(t, ok)
 			if tt.wantUnsettled {
 				require.Same(t, unsettled, got)
@@ -270,7 +270,7 @@ func TestGetLightClientUpdateRanksTheCandidatesOnTheHeadChain(t *testing.T) {
 			f.recordLightClientUpdateLocked(b, updates[0])
 			f.recordLightClientUpdateLocked(c, updates[1])
 
-			got, ok := f.GetLightClientUpdate(1, head)
+			got, ok := lightClientUpdateAt(f, 1, head)
 			require.True(t, ok)
 			require.Same(t, updates[tt.wantIdx], got)
 		})
@@ -295,7 +295,7 @@ func TestGetLightClientUpdateDuringFinalization(t *testing.T) {
 			f.KeepFinalizedLightClientUpdates(finalized)
 		}()
 		for {
-			_, ok := f.GetLightClientUpdate(1, finalized)
+			_, ok := lightClientUpdateAt(f, 1, finalized)
 			require.True(t, ok)
 			select {
 			case <-done:
@@ -328,4 +328,147 @@ func TestGetLightClientUpdatesServesARangeAgainstOneHead(t *testing.T) {
 	require.Equal(t, []*cltypes.LightClientUpdate{first}, f.GetLightClientUpdates(1, 2, head), "a candidate of a later period is not one of the range")
 	require.Equal(t, []*cltypes.LightClientUpdate{settled, nil, nil, nil}, f.GetLightClientUpdates(0, 4, common.Hash{}))
 	require.Nil(t, f.GetLightClientUpdates(2, 2, head))
+}
+
+// Block import records candidates while the Beacon API handlers look them up.
+func TestLightClientUpdateCandidatesRecordAndLookupConcurrently(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	head := common.Hash{0xff}
+	f.headers.Store(head, &cltypes.BeaconBlockHeader{Slot: p + 100})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range 200 {
+			f.recordLightClientUpdateLocked(common.Hash{byte(i), 1}, lightClientTestUpdate(cfg, 400, p+uint64(i%50)))
+		}
+	}()
+	for {
+		f.GetLightClientUpdates(0, 3, head)
+		select {
+		case <-done:
+			return
+		default:
+		}
+	}
+}
+
+// A head read before finalization settled a competing branch is not on the finalized chain: its candidates are not
+// served beside that branch's settled updates.
+func TestGetLightClientUpdatesIgnoresAHeadOffTheFinalizedChain(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	fork, b1, b2, a1 := common.Hash{1}, common.Hash{2}, common.Hash{3}, common.Hash{4}
+	f.headers.Store(fork, &cltypes.BeaconBlockHeader{Slot: p + 5})
+	f.headers.Store(b1, &cltypes.BeaconBlockHeader{Slot: p + 10, ParentRoot: fork})
+	f.headers.Store(b2, &cltypes.BeaconBlockHeader{Slot: p + 40, ParentRoot: b1})
+	f.headers.Store(a1, &cltypes.BeaconBlockHeader{Slot: p + 50, ParentRoot: fork})
+	settled := lightClientTestUpdate(cfg, 400, p+9)
+	f.recordLightClientUpdateLocked(b1, settled)
+	f.recordLightClientUpdateLocked(a1, lightClientTestUpdate(cfg, int(cfg.SyncCommitteeSize), p+49))
+
+	f.KeepFinalizedLightClientUpdates(b2)
+
+	require.Equal(t, []*cltypes.LightClientUpdate{settled}, f.GetLightClientUpdates(1, 2, a1), "the stale head's candidate is not served")
+	require.Equal(t, []*cltypes.LightClientUpdate{settled}, f.GetLightClientUpdates(1, 2, b2))
+}
+
+// Pruning can hide the finalized block's own header while the head still descends from it: the walk recognises the
+// finalized root without loading its header.
+func TestGetLightClientUpdatesServesCandidatesWhenTheFinalizedHeaderIsPruned(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	fin, c, head := common.Hash{1}, common.Hash{2}, common.Hash{3}
+	f.headers.Store(fin, &cltypes.BeaconBlockHeader{Slot: p + 10})
+	f.headers.Store(c, &cltypes.BeaconBlockHeader{Slot: p + 40, ParentRoot: fin})
+	f.headers.Store(head, &cltypes.BeaconBlockHeader{Slot: p + 50, ParentRoot: c})
+	candidate := lightClientTestUpdate(cfg, 400, p+39)
+	f.recordLightClientUpdateLocked(c, candidate)
+	f.KeepFinalizedLightClientUpdates(fin)
+
+	f.lowestAvailableBlock.Store(p + 20)
+	_, visible := f.GetHeader(fin)
+	require.False(t, visible, "the finalized header is below the pruned boundary")
+
+	require.Equal(t, []*cltypes.LightClientUpdate{candidate}, f.GetLightClientUpdates(1, 2, head))
+}
+
+// The walk goes on below the lowest candidate until it reaches the finalized block, so blocks without a candidate
+// between them do not hide that the head is on the finalized chain.
+func TestGetLightClientUpdatesServesCandidatesAboveBlocksWithoutOne(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	fin, x, c, head := common.Hash{1}, common.Hash{2}, common.Hash{3}, common.Hash{4}
+	f.headers.Store(fin, &cltypes.BeaconBlockHeader{Slot: p + 10})
+	f.headers.Store(x, &cltypes.BeaconBlockHeader{Slot: p + 20, ParentRoot: fin})
+	f.headers.Store(c, &cltypes.BeaconBlockHeader{Slot: p + 40, ParentRoot: x})
+	f.headers.Store(head, &cltypes.BeaconBlockHeader{Slot: p + 50, ParentRoot: c})
+	candidate := lightClientTestUpdate(cfg, 400, p+39)
+	f.recordLightClientUpdateLocked(c, candidate)
+	f.KeepFinalizedLightClientUpdates(fin)
+
+	require.Equal(t, []*cltypes.LightClientUpdate{candidate}, f.GetLightClientUpdates(1, 2, head))
+}
+
+// lightClientUpdateAt returns the best update of one period, as a range lookup of that period does.
+func lightClientUpdateAt(f *forkGraphDisk, period uint64, head common.Hash) (*cltypes.LightClientUpdate, bool) {
+	update := f.GetLightClientUpdates(period, period+1, head)[0]
+	return update, update != nil
+}
+
+// A stale head on a branch that conflicts with the finalized block serves no candidates, also when pruning hides the
+// finalized header, so the walk ends at a hidden header of its own branch before it passes the finalized slot.
+func TestGetLightClientUpdatesIgnoresAConflictingHeadWhenTheFinalizedHeaderIsPruned(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	fin, fork, b1, b2 := common.Hash{1}, common.Hash{2}, common.Hash{3}, common.Hash{4}
+	f.headers.Store(fin, &cltypes.BeaconBlockHeader{Slot: p + 10})
+	f.headers.Store(fork, &cltypes.BeaconBlockHeader{Slot: p + 2})
+	f.headers.Store(b1, &cltypes.BeaconBlockHeader{Slot: p + 5, ParentRoot: fork})
+	f.headers.Store(b2, &cltypes.BeaconBlockHeader{Slot: p + 50, ParentRoot: b1})
+	settled := lightClientTestUpdate(cfg, 400, p+9)
+	f.recordLightClientUpdateLocked(fin, settled)
+	f.recordLightClientUpdateLocked(b2, lightClientTestUpdate(cfg, int(cfg.SyncCommitteeSize), p+49))
+	f.KeepFinalizedLightClientUpdates(fin)
+	f.lowestAvailableBlock.Store(p + 20)
+
+	require.Equal(t, []*cltypes.LightClientUpdate{settled}, f.GetLightClientUpdates(1, 2, b2))
+}
+
+// Before any finalization is recorded, the candidates on the head's chain are served, also when the chain ends at an
+// unknown parent, as the anchor's does.
+func TestGetLightClientUpdatesServesCandidatesBeforeTheFirstFinalization(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	anchor, head := common.Hash{1}, common.Hash{2}
+	f.headers.Store(anchor, &cltypes.BeaconBlockHeader{Slot: p + 10, ParentRoot: common.Hash{0xee}})
+	f.headers.Store(head, &cltypes.BeaconBlockHeader{Slot: p + 20, ParentRoot: anchor})
+	candidate := lightClientTestUpdate(cfg, 400, p+19)
+	f.recordLightClientUpdateLocked(head, candidate)
+
+	require.Equal(t, []*cltypes.LightClientUpdate{candidate}, f.GetLightClientUpdates(1, 2, head))
+}
+
+// The newest finality update is the last recorded update that has finality; a later update without it is only the
+// newest update.
+func TestNewestLightClientFinalityUpdateKeepsTheLastUpdateWithFinality(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{beaconCfg: cfg}
+	p := cfg.SlotsPerEpoch * cfg.EpochsPerSyncCommitteePeriod
+	withFinality := lightClientTestUpdate(cfg, 400, p+10)
+	withFinality.FinalityBranch.Set(0, common.Hash{1})
+	withoutFinality := lightClientTestUpdate(cfg, 400, p+20)
+
+	f.recordLightClientUpdateLocked(common.Hash{1}, withFinality)
+	f.recordLightClientUpdateLocked(common.Hash{2}, withoutFinality)
+
+	require.Same(t, withoutFinality, f.NewestLightClientUpdate())
+	require.Same(t, withFinality, f.NewestLightClientFinalityUpdate())
 }

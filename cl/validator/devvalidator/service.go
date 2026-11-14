@@ -22,7 +22,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const envelopeSubmissionRetryInterval = 500 * time.Millisecond
+const (
+	envelopeSubmissionRetryInterval = 500 * time.Millisecond
+	headStateRetryInterval          = time.Second
+)
 
 // Service is the embedded dev validator. It runs as a goroutine inside
 // Caplin, producing blocks and attestations for all configured validators.
@@ -71,7 +74,9 @@ func (s *Service) Start(ctx context.Context) {
 
 	// Resolve validator indices from the beacon state.
 	if err := s.resolveIndices(ctx); err != nil {
-		s.logger.Error("[dev-validator] failed to resolve indices", "err", err)
+		if ctx.Err() == nil {
+			s.logger.Error("[dev-validator] failed to resolve indices", "err", err)
+		}
 		return
 	}
 
@@ -165,8 +170,24 @@ func (s *Service) resolveIndices(ctx context.Context) error {
 	}
 
 	var validators []validatorEntry
-	if err := s.client.get(ctx, "/eth/v1/beacon/states/head/validators", &validators); err != nil {
-		return fmt.Errorf("get validators: %w", err)
+	waiting := false
+	for {
+		err := s.client.get(ctx, "/eth/v1/beacon/states/head/validators", &validators)
+		if err == nil {
+			break
+		}
+		// 503 until the beacon node publishes its head state.
+		var statusErr *statusError
+		if !errors.As(err, &statusErr) || statusErr.code != http.StatusServiceUnavailable {
+			return fmt.Errorf("get validators: %w", err)
+		}
+		if !waiting {
+			s.logger.Info("[dev-validator] waiting for head state", "err", err)
+			waiting = true
+		}
+		if err := common.Sleep(ctx, headStateRetryInterval); err != nil {
+			return err
+		}
 	}
 
 	resolved := 0
