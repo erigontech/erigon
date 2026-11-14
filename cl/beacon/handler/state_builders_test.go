@@ -93,7 +93,6 @@ func postStateBuilders(t *testing.T, handler *ApiHandler, stateID, body string) 
 }
 
 func TestPostStateBuildersReturnsAndFiltersBuilders(t *testing.T) {
-	t.Parallel()
 	handler, _, builders := setupStateBuildersHandler(t)
 
 	t.Run("all without body", func(t *testing.T) {
@@ -123,7 +122,6 @@ func TestPostStateBuildersReturnsAndFiltersBuilders(t *testing.T) {
 }
 
 func TestPostStateBuildersRejectsInvalidFilters(t *testing.T) {
-	t.Parallel()
 	handler, _, _ := setupStateBuildersHandler(t)
 	tests := []string{
 		`{"ids":["nope"]}`,
@@ -146,7 +144,6 @@ func TestPostStateBuildersRejectsInvalidFilters(t *testing.T) {
 }
 
 func TestPostStateBuildersRejectsPreGloasAndMissingState(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, preGloasHandler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	resp, _ := postStateBuilders(t, preGloasHandler, "head", `{}`)
 	resp.Body.Close()
@@ -176,7 +173,6 @@ func advancedBuildersState(t *testing.T) (*ApiHandler, *state.CachingBeaconState
 // block, so the request falls back to the archive state, which is pre-Gloas in this fixture and
 // answers 400; serving the advanced state would answer 200.
 func TestPostStateBuildersSkipsAdvancedForkchoiceStateForSlotAndStateRoot(t *testing.T) {
-	t.Parallel()
 	handler, postState, _ := advancedBuildersState(t)
 	fcu := handler.forkchoiceStore.(*mock_services.ForkChoiceStorageMock)
 	var stateRoot common.Hash
@@ -198,7 +194,6 @@ func TestPostStateBuildersSkipsAdvancedForkchoiceStateForSlotAndStateRoot(t *tes
 }
 
 func TestPostStateBuildersServesAdvancedForkchoiceStateForFinalized(t *testing.T) {
-	t.Parallel()
 	handler, _, builders := advancedBuildersState(t)
 	resp, decoded := postStateBuilders(t, handler, "finalized", `{}`)
 	defer resp.Body.Close()

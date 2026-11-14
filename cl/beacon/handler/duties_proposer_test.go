@@ -43,7 +43,6 @@ import (
 )
 
 func TestGetDutiesProposerHistoricalEpochIgnoresHeadEffectiveBalance(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, postState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
@@ -80,7 +79,6 @@ func TestGetDutiesProposerHistoricalEpochIgnoresHeadEffectiveBalance(t *testing.
 }
 
 func TestGetHistoricalProposerDependentRootEpochZeroReturnsGenesisRoot(t *testing.T) {
-	t.Parallel()
 	db, _, _, preState, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	genesisRoot, err := preState.GetBlockRootAtSlot(0)
@@ -100,7 +98,6 @@ func TestGetHistoricalProposerDependentRootEpochZeroReturnsGenesisRoot(t *testin
 }
 
 func TestGetDutiesProposerEpochZeroReturnsGenesisRootAndDuties(t *testing.T) {
-	t.Parallel()
 	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
 	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
@@ -131,7 +128,6 @@ func TestGetDutiesProposerEpochZeroReturnsGenesisRootAndDuties(t *testing.T) {
 }
 
 func TestGetDutiesProposerAdvancesHeadCopyAcrossTargetFork(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, postState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 
 	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
@@ -186,7 +182,6 @@ func TestGetDutiesProposerAdvancesHeadCopyAcrossTargetFork(t *testing.T) {
 }
 
 func TestGetDutiesProposerUsesTargetForkBeforeHeadFork(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, postState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 
 	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
@@ -247,7 +242,6 @@ func TestGetDutiesProposerUsesTargetForkBeforeHeadFork(t *testing.T) {
 }
 
 func TestGetDutiesProposerUsesHeadStateWhenFinalizedSlotIsStillAvailable(t *testing.T) {
-	t.Parallel()
 	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
@@ -276,7 +270,6 @@ func TestGetDutiesProposerUsesHeadStateWhenFinalizedSlotIsStillAvailable(t *test
 }
 
 func TestGetDutiesProposerFutureEpochUsesHeadStateBeforeLowestAvailableSlot(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
@@ -299,7 +292,6 @@ func TestGetDutiesProposerFutureEpochUsesHeadStateBeforeLowestAvailableSlot(t *t
 }
 
 func TestGetDutiesProposerFutureEpochTooFarReturnsBadRequest(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
@@ -317,7 +309,6 @@ func TestGetDutiesProposerFutureEpochTooFarReturnsBadRequest(t *testing.T) {
 
 // Processing the empty slots after the head would carry the head root into their block roots.
 func TestGetDependentRootUsesHeadRootForSlotsAfterHead(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	headEpoch := syncedData.HeadSlot() / handler.beaconChainCfg.SlotsPerEpoch
@@ -336,7 +327,6 @@ type proposerDutiesResponse struct {
 }
 
 func TestEpochSlotOverflows(t *testing.T) {
-	t.Parallel()
 	require.False(t, epochSlotOverflows(0, 32))
 	require.False(t, epochSlotOverflows(1000, 32))
 	require.False(t, epochSlotOverflows(math.MaxUint64/32-1, 32))
@@ -346,7 +336,6 @@ func TestEpochSlotOverflows(t *testing.T) {
 }
 
 func TestGetDutiesProposerEpochOverflowReturnsBadRequest(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	epoch := uint64(math.MaxUint64)
@@ -358,7 +347,6 @@ func TestGetDutiesProposerEpochOverflowReturnsBadRequest(t *testing.T) {
 }
 
 func TestGetDutiesProposerV2UsesFuluDependentRoot(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, postState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 
 	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
@@ -400,7 +388,6 @@ func TestGetDutiesProposerV2UsesFuluDependentRoot(t *testing.T) {
 }
 
 func TestComputeDependentRootSlotNoUnderflow(t *testing.T) {
-	t.Parallel()
 	slotsPerEpoch := uint64(32)
 	tests := []struct {
 		name     string
@@ -424,7 +411,6 @@ func TestComputeDependentRootSlotNoUnderflow(t *testing.T) {
 }
 
 func TestGetAttesterDutiesEpochOverflowReturnsBadRequest(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	epoch := uint64(math.MaxUint64)
@@ -437,7 +423,6 @@ func TestGetAttesterDutiesEpochOverflowReturnsBadRequest(t *testing.T) {
 }
 
 func TestPostPtcDutiesEpochOverflowReturnsBadRequest(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	epoch := uint64(math.MaxUint64)

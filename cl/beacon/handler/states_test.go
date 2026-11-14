@@ -45,7 +45,6 @@ import (
 )
 
 func TestGetStateFork(t *testing.T) {
-	t.Parallel()
 	// setupTestingHandler(t, clparams.Phase0Version)
 	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -133,7 +132,6 @@ func TestGetStateFork(t *testing.T) {
 }
 
 func TestGetStateRoot(t *testing.T) {
-	t.Parallel()
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -193,7 +191,6 @@ func TestGetStateRoot(t *testing.T) {
 }
 
 func TestGetStateFullHistorical(t *testing.T) {
-	t.Parallel()
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
@@ -286,7 +283,6 @@ func TestGetStateFullHistorical(t *testing.T) {
 }
 
 func TestGetStateFullForkchoice(t *testing.T) {
-	t.Parallel()
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -358,7 +354,6 @@ func TestGetStateFullForkchoice(t *testing.T) {
 // advanced past its block, as an anchor state can be, is not served for that
 // block's slot or root.
 func TestGetStateFullSkipsForkchoiceStateAtLaterSlot(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
 	postRoot, err := postState.HashSSZ()
@@ -402,7 +397,6 @@ func TestGetStateFullSkipsForkchoiceStateAtLaterSlot(t *testing.T) {
 
 // An invalid block or state id is answered 400 by every endpoint, also by those that return the parser's error as is.
 func TestInvalidIdsAreBadRequests(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -430,7 +424,6 @@ func TestInvalidIdsAreBadRequests(t *testing.T) {
 
 // A fork choice failure while reading a valid state id is an internal error, not an invalid id.
 func TestGetStateFullForkchoiceErrorIsInternal(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
 	var err error
@@ -455,7 +448,6 @@ func TestGetStateFullForkchoiceErrorIsInternal(t *testing.T) {
 // state_id still gets the fork choice state when it was advanced past its
 // block, as the anchor checkpoint state can be.
 func TestGetStateFullFinalizedServesAdvancedForkchoiceState(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
 	var err error
@@ -492,7 +484,6 @@ func TestGetStateFullFinalizedServesAdvancedForkchoiceState(t *testing.T) {
 }
 
 func TestGetStateSyncCommittees(t *testing.T) {
-	t.Parallel()
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
@@ -559,7 +550,6 @@ func TestGetStateSyncCommittees(t *testing.T) {
 }
 
 func TestGetStateSyncCommitteesHistorical(t *testing.T) {
-	t.Parallel()
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
@@ -619,7 +609,6 @@ func TestGetStateSyncCommitteesHistorical(t *testing.T) {
 }
 
 func TestGetStateFinalityCheckpoints(t *testing.T) {
-	t.Parallel()
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
@@ -679,7 +668,6 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 }
 
 func TestGetRandao(t *testing.T) {
-	t.Parallel()
 	// setupTestingHandler(t, clparams.Phase0Version)
 	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
@@ -758,7 +746,6 @@ func TestGetRandao(t *testing.T) {
 }
 
 func TestGetRandaoMissingPreviousEpochMix(t *testing.T) {
-	t.Parallel()
 	db, _, _, pre, post, h, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 	epoch := post.Slot() / h.beaconChainCfg.SlotsPerEpoch
 	require.Greater(t, epoch, pre.Slot()/h.beaconChainCfg.SlotsPerEpoch)
@@ -777,7 +764,6 @@ func TestGetRandaoMissingPreviousEpochMix(t *testing.T) {
 }
 
 func TestGetCommitteesMissingRandaoMixReturns404(t *testing.T) {
-	t.Parallel()
 	db, _, _, _, post, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.FinalizedSlotVal = post.Slot() + 1
 	epoch := post.Slot()/h.beaconChainCfg.SlotsPerEpoch - 1
@@ -809,7 +795,6 @@ func TestGetCommitteesMissingRandaoMixReturns404(t *testing.T) {
 }
 
 func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
-	t.Parallel()
 	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	handler.beaconChainCfg.FuluForkEpoch = 1
 	handler.beaconChainCfg.InitializeForkSchedule()
@@ -870,7 +855,6 @@ func getPendingQueue(t *testing.T, server *httptest.Server, stateID, endpoint st
 }
 
 func TestGetPendingQueuesRejectPreElectraState(t *testing.T) {
-	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
 	var err error
@@ -888,7 +872,6 @@ func TestGetPendingQueuesRejectPreElectraState(t *testing.T) {
 }
 
 func TestGetPendingQueuesRejectNonCanonicalCacheMiss(t *testing.T) {
-	t.Parallel()
 	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	slot := blocks[len(blocks)-1].Block.Slot
 	sideBlockRoot := common.Hash{1}
@@ -912,7 +895,6 @@ func TestGetPendingQueuesRejectNonCanonicalCacheMiss(t *testing.T) {
 }
 
 func TestGetPendingQueuesRejectUnreconstructedCacheMiss(t *testing.T) {
-	t.Parallel()
 	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 
 	var err error
@@ -935,7 +917,6 @@ func TestGetPendingQueuesRejectUnreconstructedCacheMiss(t *testing.T) {
 }
 
 func TestGetPendingQueuesFallBackToHistoricalOnCacheMiss(t *testing.T) {
-	t.Parallel()
 	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 
 	var err error
@@ -989,7 +970,6 @@ func TestResponseValidatorsDoesNotParkResponseInPool(t *testing.T) {
 // A state that left the fork-choice cache is served from the epoch data stored under the
 // epoch's start slot. States before Fulu have no proposer lookahead.
 func TestGetStateProposerLookaheadHistorical(t *testing.T) {
-	t.Parallel()
 	db, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	cfg := handler.beaconChainCfg
 	epoch := postState.Slot() / cfg.SlotsPerEpoch

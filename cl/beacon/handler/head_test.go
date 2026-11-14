@@ -37,7 +37,6 @@ import (
 )
 
 func TestGetSelectedHeadDoesNotTrailTheMemoizedHeadState(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	syncedData := sync_mock_services.NewMockSyncedData(ctrl)
 	syncedData.EXPECT().StateHead().Return(common.Hash{0xbb}, uint64(99), true)
@@ -59,7 +58,6 @@ func TestGetSelectedHeadDoesNotTrailTheMemoizedHeadState(t *testing.T) {
 }
 
 func TestDebugBeaconHeadsReportsSelectedHeadOptimistic(t *testing.T) {
-	t.Parallel()
 	for _, optimistic := range []bool{false, true} {
 		t.Run(strconv.FormatBool(optimistic), func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -86,7 +84,6 @@ func TestDebugBeaconHeadsReportsSelectedHeadOptimistic(t *testing.T) {
 }
 
 func TestGetStateHeadKeepsMemoizedStateIdentity(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	syncedData := sync_mock_services.NewMockSyncedData(ctrl)
 	syncedData.EXPECT().StateHead().Return(common.Hash{0xbb}, uint64(99), true)
@@ -109,7 +106,6 @@ func TestGetStateHeadKeepsMemoizedStateIdentity(t *testing.T) {
 }
 
 func TestGetSelectedHeadFallsBackToMemoizedStateIdentity(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	syncedData := sync_mock_services.NewMockSyncedData(ctrl)
 	syncedData.EXPECT().StateHead().Return(common.Hash{0xbb}, uint64(99), true)
@@ -129,7 +125,6 @@ func TestGetSelectedHeadFallsBackToMemoizedStateIdentity(t *testing.T) {
 }
 
 func TestHeadBlockIDUsesSelectedHead(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	syncedData := sync_mock_services.NewMockSyncedData(ctrl)
 	syncedData.EXPECT().StateHead().Return(common.Hash{0xbb}, uint64(99), true)
@@ -157,7 +152,6 @@ func TestHeadBlockIDUsesSelectedHead(t *testing.T) {
 }
 
 func TestGetStateHeadReportsSyncing(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	syncedData := sync_mock_services.NewMockSyncedData(ctrl)
 	syncedData.EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
@@ -174,7 +168,6 @@ func TestGetStateHeadReportsSyncing(t *testing.T) {
 }
 
 func TestSelectedHeadStateUsesWinningSideBranch(t *testing.T) {
-	t.Parallel()
 	submittedRoot := common.Hash{0xaa}
 	selectedRoot := common.Hash{0xbb}
 	submittedState := state.New(&clparams.MainnetBeaconConfig)
@@ -196,7 +189,6 @@ func TestSelectedHeadStateUsesWinningSideBranch(t *testing.T) {
 }
 
 func TestSelectedHeadStateReportsMissingAuxiliaryRoot(t *testing.T) {
-	t.Parallel()
 	auxiliaryRoot := common.Hash{0xaa}
 	a := &ApiHandler{forkchoiceStore: mock_services2.NewForkChoiceStorageMock(t)}
 
@@ -205,7 +197,6 @@ func TestSelectedHeadStateReportsMissingAuxiliaryRoot(t *testing.T) {
 }
 
 func TestSelectedHeadStateReportsMissingSelectedRoot(t *testing.T) {
-	t.Parallel()
 	auxiliaryRoot := common.Hash{0xaa}
 	selectedRoot := common.Hash{0xbb}
 	fcu := mock_services2.NewForkChoiceStorageMock(t)
@@ -218,7 +209,6 @@ func TestSelectedHeadStateReportsMissingSelectedRoot(t *testing.T) {
 }
 
 func TestMemoizedExpectedWithdrawalsMatchesExplicitHeadRoot(t *testing.T) {
-	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
 	cfg.BellatrixForkEpoch = 0
@@ -245,7 +235,6 @@ func TestMemoizedExpectedWithdrawalsMatchesExplicitHeadRoot(t *testing.T) {
 }
 
 func TestViewHeadStateWithIdentityReportsSyncing(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	syncedData := sync_mock_services.NewMockSyncedData(ctrl)
 	syncedData.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).Return(synced_data.ErrNotSynced)

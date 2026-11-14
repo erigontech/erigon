@@ -70,7 +70,6 @@ func testBuilderPreferencesEntries() cltypes.BuilderPreferencesEntries {
 }
 
 func TestPostValidatorBuilderPreferencesReportsPartialFailuresAfterSubmittingAll(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	client := mock_services.NewMockBuilderClient(ctrl)
 	entries := testBuilderPreferencesEntries()
@@ -91,7 +90,6 @@ func TestPostValidatorBuilderPreferencesReportsPartialFailuresAfterSubmittingAll
 }
 
 func TestPostValidatorBuilderPreferencesAcceptsSSZ(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	client := mock_services.NewMockBuilderClient(ctrl)
 	entries := testBuilderPreferencesEntries()[:1]
@@ -110,7 +108,6 @@ func TestPostValidatorBuilderPreferencesAcceptsSSZ(t *testing.T) {
 }
 
 func TestPostValidatorBuilderPreferencesAcceptsMaximumJSONList(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	client := mock_services.NewMockBuilderClient(ctrl)
 	url := "https://builder.example/" + strings.Repeat("a", 2000)
@@ -141,7 +138,6 @@ func TestPostValidatorBuilderPreferencesAcceptsMaximumJSONList(t *testing.T) {
 }
 
 func TestPostValidatorBuilderPreferencesRejectsExcessEntriesBeforeReadingTheirBodies(t *testing.T) {
-	t.Parallel()
 	prefix := "[" + strings.Repeat("{},", cltypes.MaxBuilderPreferencesEntries) + "{"
 	reader := &boundedChunkReader{data: []byte(prefix + "}]"), limit: len(prefix)}
 	handler := &ApiHandler{builderClient: mock_services.NewMockBuilderClient(gomock.NewController(t))}
@@ -157,7 +153,6 @@ func TestPostValidatorBuilderPreferencesRejectsExcessEntriesBeforeReadingTheirBo
 }
 
 func TestPostValidatorBuilderPreferencesReportsMalformedJSONEntryAndContinues(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	client := mock_services.NewMockBuilderClient(ctrl)
 	valid := testBuilderPreferencesEntries()[1]
@@ -179,7 +174,6 @@ func TestPostValidatorBuilderPreferencesReportsMalformedJSONEntryAndContinues(t 
 }
 
 func TestPostValidatorBuilderPreferencesRejectsStructurallyInvalidJSON(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	handler := &ApiHandler{builderClient: mock_services.NewMockBuilderClient(ctrl)}
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/builder_preferences", strings.NewReader(`[{"url":7}`))
@@ -194,7 +188,6 @@ func TestPostValidatorBuilderPreferencesRejectsStructurallyInvalidJSON(t *testin
 }
 
 func TestPostValidatorBuilderPreferencesBoundsSlowEntriesAndContinues(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	client := mock_services.NewMockBuilderClient(ctrl)
 	entries := make(cltypes.BuilderPreferencesEntries, 40)

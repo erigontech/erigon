@@ -58,7 +58,6 @@ type blobsTestFixture struct {
 }
 
 func TestGetBlobsFromFrozenSnapshots(t *testing.T) {
-	t.Parallel()
 	f := setupBlobsTest(t)
 
 	f.handler.caplinSnapshots = frozenBlobSnapshotReader{
@@ -76,7 +75,6 @@ func TestGetBlobsFromFrozenSnapshots(t *testing.T) {
 }
 
 func TestGetBlobsEmptyWhenFrozenSidecarsMissing(t *testing.T) {
-	t.Parallel()
 	f := setupBlobsTest(t)
 
 	f.handler.caplinSnapshots = frozenBlobSnapshotReader{frozenBlobsExclusive: f.slot + 1}
@@ -87,7 +85,6 @@ func TestGetBlobsEmptyWhenFrozenSidecarsMissing(t *testing.T) {
 }
 
 func TestGetBlobsErrorsWhenFrozenSnapshotReadFails(t *testing.T) {
-	t.Parallel()
 	f := setupBlobsTest(t)
 
 	f.handler.caplinSnapshots = frozenBlobSnapshotReader{
@@ -183,7 +180,6 @@ type blobSidecarsEnvelope struct {
 // returns the required envelope fields (version, execution_optimistic, finalized) per the
 // Beacon API specification. This test checks the non-finalized and optimistic state.
 func TestBlobSidecarsResponseEnvelope(t *testing.T) {
-	t.Parallel()
 	f := setupBlobsTest(t)
 
 	// Set up forkchoice mock to simulate non-finalized and optimistic block.
@@ -226,7 +222,6 @@ func TestBlobSidecarsResponseEnvelope(t *testing.T) {
 // TestBlobSidecarsEmptyResponseEnvelope verifies that even when no blobs are found,
 // the response envelope still includes all required fields. This test checks the finalized and non-optimistic state.
 func TestBlobSidecarsEmptyResponseEnvelope(t *testing.T) {
-	t.Parallel()
 	f := setupBlobsTest(t)
 
 	// Set up forkchoice mock to simulate finalized and non-optimistic block.

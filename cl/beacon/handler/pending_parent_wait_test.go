@@ -54,14 +54,12 @@ func parkedFor(n int) func() bool {
 }
 
 func TestAwaitParkedEnvelopeEndsOnceTheEnvelopeIsNoLongerParked(t *testing.T) {
-	t.Parallel()
 	start := time.Now()
 	require.NoError(t, awaitParkedEnvelope(t.Context(), start.Add(5*time.Second), time.Millisecond, parkedFor(3), noHeadChange, noRetry))
 	require.Less(t, time.Since(start), time.Second)
 }
 
 func TestAwaitParkedEnvelopeEndsAtTheDeadline(t *testing.T) {
-	t.Parallel()
 	start := time.Now()
 	deadline := start.Add(50 * time.Millisecond)
 	// A poll interval far longer than the deadline: the deadline itself must end the wait.
@@ -72,7 +70,6 @@ func TestAwaitParkedEnvelopeEndsAtTheDeadline(t *testing.T) {
 
 // A block that becomes head during the wait ends it at once instead of at the deadline.
 func TestAwaitParkedEnvelopeReturnsAHeadChangeMidWait(t *testing.T) {
-	t.Parallel()
 	checks := 0
 	headErr := func() error {
 		checks++
@@ -88,7 +85,6 @@ func TestAwaitParkedEnvelopeReturnsAHeadChangeMidWait(t *testing.T) {
 }
 
 func TestAwaitParkedEnvelopeReturnsTheCallerCancellation(t *testing.T) {
-	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	err := awaitParkedEnvelope(ctx, time.Now().Add(5*time.Second), time.Hour, func() bool { return true }, noHeadChange, noRetry)
@@ -118,7 +114,6 @@ func TestAwaitParkedEnvelopeDoesNotWaitForABlockedRetry(t *testing.T) {
 // On 12 s slots the Gloas attestation is due at 3 s and the payload is collected by 2.25 s; the
 // wait ends one publication margin (750 ms) before that.
 func TestProposalWaitCutoff(t *testing.T) {
-	t.Parallel()
 	slotStart := time.Unix(1000, 0)
 	require.Equal(t, slotStart.Add(1500*time.Millisecond), proposalWaitCutoff(slotStart, &clparams.MainnetBeaconConfig, clparams.GloasVersion))
 }
@@ -149,7 +144,6 @@ func pendingParentWaitFixture(t *testing.T, remaining time.Duration) (*ApiHandle
 // Columns that complete after the first retry: the wait retries at the pace fork choice sets and
 // ends as soon as the envelope is applied.
 func TestAwaitPendingParentPayloadRetriesUntilTheEnvelopeIsApplied(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, baseBlockRoot, applied := pendingParentWaitFixture(t, 5*time.Second)
 	var attempts atomic.Int32
 	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
@@ -191,7 +185,6 @@ func TestAwaitPendingParentPayloadRetriesAFailingApplyUntilTheCutoff(t *testing.
 
 // At or after the cutoff a proposal does not wait at all.
 func TestAwaitPendingParentPayloadDoesNotWaitPastTheCutoff(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, -time.Millisecond)
 	var retries atomic.Int32
 	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
@@ -232,7 +225,6 @@ func TestAwaitPendingParentPayloadLetsTheApplyOutliveTheWait(t *testing.T) {
 // An apply in flight when the wait starts can park the envelope later in the wait: the wait keeps
 // retrying, so it applies the envelope once it is parked.
 func TestAwaitPendingParentPayloadRetriesAnEnvelopeParkedDuringTheWait(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, baseBlockRoot, applied := pendingParentWaitFixture(t, 5*time.Second)
 	forkchoiceStore.PendingEnvelopeRoots = nil
 	forkchoiceStore.ApplyInFlightRoots = map[common.Hash]struct{}{baseBlockRoot: {}}
@@ -254,7 +246,6 @@ func TestAwaitPendingParentPayloadRetriesAnEnvelopeParkedDuringTheWait(t *testin
 // When the PTC votes for a parent from the previous slot already rule out FULL, the proposal
 // builds on EMPTY whatever the wait does, so it does not wait.
 func TestAwaitPendingParentPayloadSkipsAParentThePtcVotesRuleOut(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
 	forkchoiceStore.VotesRuleOutFullRoots = map[common.Hash]struct{}{baseBlockRoot: {}}
 	var retries atomic.Int32
@@ -270,7 +261,6 @@ func TestAwaitPendingParentPayloadSkipsAParentThePtcVotesRuleOut(t *testing.T) {
 
 // The votes decide only for a parent from the previous slot; an older parent is still waited for.
 func TestAwaitPendingParentPayloadIgnoresVotesForAnOlderParent(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, baseBlockRoot, applied := pendingParentWaitFixture(t, 5*time.Second)
 	forkchoiceStore.VotesRuleOutFullRoots = map[common.Hash]struct{}{baseBlockRoot: {}}
 	var retries atomic.Int32
@@ -286,7 +276,6 @@ func TestAwaitPendingParentPayloadIgnoresVotesForAnOlderParent(t *testing.T) {
 }
 
 func TestAwaitPendingParentPayloadWaitsOnlyForAParkedEnvelope(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
 	forkchoiceStore.PendingEnvelopeRoots = nil
 	var retries atomic.Int32
@@ -303,7 +292,6 @@ func TestAwaitPendingParentPayloadWaitsOnlyForAParkedEnvelope(t *testing.T) {
 // instead of building on the EMPTY variant right away. A parked copy of an envelope that is
 // already persisted is stale and does not count.
 func TestEnvelopeParkedFlagsOnlyAnUnpersistedParkedEnvelope(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	head := forkchoice.ForkChoiceNode{Root: common.Hash{1}, PayloadStatus: cltypes.PayloadStatusEmpty}
 
@@ -350,7 +338,6 @@ func TestAwaitHeadStateAfterChangeWaitsForTheNewHeadState(t *testing.T) {
 }
 
 func TestAwaitHeadStateAfterChangeGivesUpAtTheCutoff(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, staleRoot, _ := pendingParentWaitFixture(t, 50*time.Millisecond)
 	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
 	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, staleRoot))
@@ -364,7 +351,6 @@ func TestAwaitHeadStateAfterChangeGivesUpAtTheCutoff(t *testing.T) {
 // A published state that is not the fork-choice head would fail the same way: the head moved from
 // A to B to C and only B's state is published.
 func TestAwaitHeadStateAfterChangeWaitsForTheForkChoiceHeadState(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, _, _ := pendingParentWaitFixture(t, 100*time.Millisecond)
 	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
 	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, common.Hash{0x42}))
@@ -375,7 +361,6 @@ func TestAwaitHeadStateAfterChangeWaitsForTheForkChoiceHeadState(t *testing.T) {
 
 // After the cutoff the second attempt does not start, even when the new head state is published.
 func TestAwaitHeadStateAfterChangeDoesNotRetryPastTheCutoff(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, _, _ := pendingParentWaitFixture(t, -time.Millisecond)
 	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
 	newRoot := common.Hash{0x42}
@@ -398,7 +383,6 @@ func (c slotTimeClock) IsSlotCurrentSlotWithMaximumClockDisparity(uint64) bool {
 // The envelope of the EMPTY head is parked at the start of production and applied by the wait's
 // retry: production then builds on the FULL parent instead of the EMPTY fallback.
 func TestProduceBlockBuildsOnTheParentAppliedDuringTheWait(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	handler.beaconChainCfg.FuluForkEpoch = 0
@@ -470,7 +454,6 @@ func TestProduceBlockBuildsOnTheParentAppliedDuringTheWait(t *testing.T) {
 // When the head moves from A to B and back to A, the published state of A is the head's state
 // again, so production is retried at once.
 func TestAwaitHeadStateAfterChangeRetriesAtOnceWhenTheHeadReturns(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, root, _ := pendingParentWaitFixture(t, 5*time.Second)
 	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
 	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, root))
@@ -497,7 +480,6 @@ func notCurrentSlotClock(t *testing.T) eth_clock.EthereumClock {
 // A request for a slot that is not current does not wait: it would hold off payload preparation
 // until that slot's cutoff.
 func TestAwaitPendingParentPayloadDoesNotWaitForASlotThatIsNotCurrent(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
 	handler.ethClock = notCurrentSlotClock(t)
 	var retries atomic.Int32
@@ -511,7 +493,6 @@ func TestAwaitPendingParentPayloadDoesNotWaitForASlotThatIsNotCurrent(t *testing
 }
 
 func TestAwaitHeadStateAfterChangeDoesNotWaitForASlotThatIsNotCurrent(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, staleRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
 	handler.ethClock = notCurrentSlotClock(t)
 	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
@@ -524,7 +505,6 @@ func TestAwaitHeadStateAfterChangeDoesNotWaitForASlotThatIsNotCurrent(t *testing
 // The time a retry gets back can be another caller's booking, which is dropped if that attempt is
 // cut short. The wait checks again at the poll interval instead of sleeping until the dropped time.
 func TestAwaitPendingParentPayloadRetriesBeforeAnotherCallersBookingEnds(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, baseBlockRoot, applied := pendingParentWaitFixture(t, 5*time.Second)
 	var retries atomic.Int32
 	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {

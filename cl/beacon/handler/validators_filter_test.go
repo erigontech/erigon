@@ -24,7 +24,6 @@ import (
 )
 
 func TestSortedIndicesBelow(t *testing.T) {
-	t.Parallel()
 	in := []uint64{7, 3, math.MaxUint64, 3, 0, 10, 9}
 	require.Equal(t, []uint64{0, 3, 7, 9}, sortedIndicesBelow(in, 10))
 	require.Equal(t, []uint64{7, 3, math.MaxUint64, 3, 0, 10, 9}, in, "input must not be reordered")
