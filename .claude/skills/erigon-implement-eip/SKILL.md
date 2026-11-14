@@ -118,10 +118,10 @@ The most important tests when implementing a new EIP for the EL are the EEST spe
 - `make eest-spec-statetests-{stable,devnet}-parallel` — state tests against the stable/devnet EEST fixtures.
 - `make eest-spec-blocktests-{stable,devnet}-parallel` — blockchain tests against the stable/devnet EEST fixtures.
 - `make eest-spec-enginextests-{stable,devnet}-parallel` — engine-x tests against the stable/devnet EEST fixtures.
-- `make eest-spec-enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-parallel` — engine-x tests against the per-gas-target benchmark fixtures, with `--time` per-test stats and both commitment modes.
-- `make eest-spec-blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-parallel` and `make eest-spec-blocktests-devnet-race-amsterdam-parallel` — race-detector variants split by fork and commitment mode.
+- `make eest-spec-enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-parallel` — engine-x tests against the per-gas-target benchmark fixtures, with `--time` per-test stats.
+- `make eest-spec-blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-parallel` and `make eest-spec-blocktests-devnet-race-amsterdam-parallel` — race-detector variants split by fork.
 
-The shard list, failure budgets, and `commitment-parallel` flags are defined in `tools/eest-spec-shards.yml` (single source of truth shared with the CI workflow and the local runner script). Execution remains parallel in every paired shard. See `EEST_SPEC_SHARDS` / `EEST_SPEC_RACE_SHARDS` in the root `Makefile` for the partition into non-race vs race targets.
+The shard list, failure budgets, and `commitment-parallel` flags are defined in `tools/eest-spec-shards.yml` (single source of truth shared with the CI workflow and the local runner script). Every shard runs parallel commitment and parallel execution. See `EEST_SPEC_SHARDS` / `EEST_SPEC_RACE_SHARDS` in the root `Makefile` for the partition into non-race vs race targets.
 
 **Pitfall: stale `evm` / `evm.race` binary.** When iterating on an EIP implementation, always invoke shards via `make eest-spec-<shard>` rather than `bash tools/run-eest-spec-test.sh <shard>` — the make target lists `evm` (or `evm.race`) as a prereq and `go build` is cache-aware, so a fresh binary is built before each run. The script invoked directly **bypasses** that rebuild, so the runners exercise whatever `build/bin/evm{,.race}` happens to be on disk against current fixtures — silently inflating failures (e.g. devnet shards "regressing" by thousands of tests) or hiding regressions when comparing budgets before/after a change.
 

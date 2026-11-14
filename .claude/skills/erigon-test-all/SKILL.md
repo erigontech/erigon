@@ -16,10 +16,8 @@ To exercise the EEST suites locally, see `erigon-eest-spec` (or run a specific s
 ```bash
 make eest-spec-statetests-stable-parallel
                                              # state tests vs eest_stable fixtures
-make eest-spec-blocktests-stable-parallel  # blockchain tests vs eest_stable fixtures
-make eest-spec-blocktests-stable-parallel    # same, but with parallel commitment
-make eest-spec-enginextests-stable-parallel # engine-x tests vs eest_stable
-make eest-spec-enginextests-stable-parallel  # same, but with parallel commitment
+make eest-spec-blocktests-stable-parallel    # blockchain tests vs eest_stable fixtures
+make eest-spec-enginextests-stable-parallel  # engine-x tests vs eest_stable
 make eest-spec-enginextests-devnet-parallel
                                              # devnet engine-x tests
 make eest-spec-statetests-devnet-parallel
