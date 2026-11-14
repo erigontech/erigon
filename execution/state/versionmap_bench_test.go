@@ -10,6 +10,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -92,5 +93,34 @@ func BenchmarkMarkWritesValidated(b *testing.B) {
 			close(stop)
 			wg.Wait()
 		})
+	}
+}
+
+// transfersBAL mimics a block of n ether transfers: each tx changes a sender's balance and
+// nonce and a recipient's balance, and the coinbase balance changes at every tx.
+func transfersBAL(n int) types.BlockAccessList {
+	coinbase := n
+	bal := make(types.BlockAccessList, 2*n+1)
+	for i := range bal {
+		bal[i].Address = common.BigToAddress(big.NewInt(int64(i + 1)))
+	}
+	for tx := range n {
+		idx := uint32(tx + 1)
+		sender, recipient := tx, n+1+tx
+		if sender >= coinbase {
+			sender++
+		}
+		bal[sender].BalanceChanges = []*types.BalanceChange{{Index: idx, Value: *uint256.NewInt(uint64(tx))}}
+		bal[sender].NonceChanges = []*types.NonceChange{{Index: idx, Value: 1}}
+		bal[recipient].BalanceChanges = []*types.BalanceChange{{Index: idx, Value: *uint256.NewInt(uint64(tx))}}
+		bal[coinbase].BalanceChanges = append(bal[coinbase].BalanceChanges, &types.BalanceChange{Index: idx, Value: *uint256.NewInt(uint64(tx))})
+	}
+	return bal
+}
+
+func BenchmarkNewVersionMapFromBAL(b *testing.B) {
+	bal := transfersBAL(15000)
+	for b.Loop() {
+		NewVersionMap(bal).SeedAddresses()
 	}
 }

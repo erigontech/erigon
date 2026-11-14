@@ -2,6 +2,7 @@ package state
 
 import (
 	"fmt"
+	"math"
 	"math/big"
 	"math/rand"
 	"reflect"
@@ -2577,6 +2578,125 @@ func TestMarkWritesValidatedMarksACellRecreatedAtTheSameIncarnation(t *testing.T
 	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
 }
 
+func TestNewVersionMapSeedsLargeBAL(t *testing.T) {
+	t.Parallel()
+	const n = 3000
+	vm := NewVersionMap(transfersBAL(n))
+	vm.SeedAddresses()
+	coinbase := accounts.InternAddress(common.BigToAddress(big.NewInt(n + 1)))
+	for tx := range n {
+		v, res, ok := vm.ReadBalance(coinbase, tx+1)
+		require.True(t, ok)
+		require.Equal(t, MVReadResultDone, res.Status())
+		require.Equal(t, uint64(tx), v.Uint64())
+	}
+	lastRecipient := accounts.InternAddress(common.BigToAddress(big.NewInt(2*n + 1)))
+	_, _, ok := vm.ReadAddress(lastRecipient, n+1)
+	require.True(t, ok)
+}
+
+// withOneSeedWorker gives the parallel seed one worker that always takes a job, whatever GOMAXPROCS the test runs with.
+func withOneSeedWorker(t *testing.T) {
+	prevProcs := runtime.GOMAXPROCS(4) // the seed dispatches jobs only with more than one P
+	jobs := make(chan func(), 1)
+	go func() {
+		for job := range jobs {
+			job()
+		}
+	}()
+	prevWorkers := balSeedWorkers
+	balSeedWorkers = func() chan func() { return jobs }
+	t.Cleanup(func() {
+		balSeedWorkers = prevWorkers
+		close(jobs)
+		runtime.GOMAXPROCS(prevProcs)
+	})
+}
+
+// A panic on a seed worker falls back to a serial seed on the caller.
+func TestNewVersionMapSeedWorkerPanicFallsBackToSerial(t *testing.T) {
+	const n = 3000
+	bal := transfersBAL(n)
+	withOneSeedWorker(t)
+	workerTook := make(chan struct{})
+	balSeedChunkHook = func(onWorker bool) {
+		if !onWorker {
+			select {
+			case <-workerTook:
+			case <-time.After(10 * time.Second):
+				t.Fatal("no seed chunk ran on a worker")
+			}
+			return
+		}
+		select {
+		case <-workerTook:
+		default:
+			close(workerTook)
+			panic("crafted account")
+		}
+	}
+	defer func() { balSeedChunkHook = nil }()
+
+	vm := NewVersionMap(bal)
+	for i := range bal {
+		addr := accounts.InternAddress(bal[i].Address)
+		for _, c := range bal[i].BalanceChanges {
+			v, res, ok := vm.ReadBalance(addr, int(c.Index))
+			require.True(t, ok, "account %x index %d", bal[i].Address, c.Index)
+			require.Equal(t, MVReadResultDone, res.Status())
+			require.Equal(t, c.Value, v, "account %x index %d", bal[i].Address, c.Index)
+		}
+	}
+}
+
+// A panic on the caller's own chunk returns only after the workers stopped, so none writes after the caller recovers.
+func TestForEachBALChunkWaitsForWorkersWhenTheCallerPanics(t *testing.T) {
+	withOneSeedWorker(t)
+	workerStarted := make(chan struct{})
+	var workerDone atomic.Bool
+	balSeedChunkHook = func(onWorker bool) {
+		if !onWorker {
+			return
+		}
+		close(workerStarted)
+		time.Sleep(50 * time.Millisecond)
+		workerDone.Store(true)
+	}
+	defer func() { balSeedChunkHook = nil }()
+
+	require.Panics(t, func() {
+		forEachBALChunk(4, func(int) int { return balSeedChunkCells }, func(lo, hi int) {
+			<-workerStarted
+			panic("crafted account")
+		})
+	})
+	require.True(t, workerDone.Load(), "the caller returned while a worker was still running")
+}
+
+// Seeding many small accounts in parallel allocates no more per account than the serial seed did: 12.1 allocations
+// per account for this list.
+func TestNewVersionMapSeedAllocatesNoMoreThanTheSerialSeed(t *testing.T) {
+	const n = 20000
+	bal := make(types.BlockAccessList, n)
+	for i := range bal {
+		bal[i].Address[0], bal[i].Address[1], bal[i].Address[2] = byte(i>>16), byte(i>>8), byte(i)
+		bal[i].StorageChanges = []types.SlotChanges{{Slot: accounts.InternKey(common.Hash{31: 1}), Changes: []*types.StorageChange{{Index: 1, Value: *uint256.NewInt(1)}}}}
+		bal[i].BalanceChanges = []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}
+	}
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(4)) // AllocsPerRun would force 1 and so the serial path
+	NewVersionMap(bal)
+	// Mallocs counts every goroutine in the process, so keep the least of several runs.
+	least := math.MaxFloat64
+	for range 5 {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		newVersionMapSink = NewVersionMap(bal)
+		runtime.ReadMemStats(&after)
+		least = min(least, float64(after.Mallocs-before.Mallocs)/n)
+	}
+	require.LessOrEqual(t, least, 12.1)
+}
+
 // A read of the base skips validation only while no tx wrote a storage, lifecycle or address cell of the account;
 // each such cell below the reader makes the read stale.
 func TestValidateReadSet_BaseReadOfQuietAccountSkipsValidation(t *testing.T) {
@@ -2709,4 +2829,18 @@ func TestWritesAlreadySeededRefusesACellATxOverwrote(t *testing.T) {
 	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 1, 42, ValueChanged), true)
 
 	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 2, 42, ValueChanged)))
+}
+
+// Accounts a BAL lists with reads only get no version-map entry, so seeding them reserves nothing.
+func TestNewVersionMapReservesNothingForReadOnlyAccounts(t *testing.T) {
+	const n = 20000
+	bal := make(types.BlockAccessList, n)
+	for i := range bal {
+		bal[i].Address[0], bal[i].Address[1], bal[i].Address[2] = byte(i>>16), byte(i>>8), byte(i)
+	}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	newVersionMapSink = NewVersionMap(bal)
+	runtime.ReadMemStats(&after)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(64*1024))
 }
