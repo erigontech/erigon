@@ -116,7 +116,7 @@ func TestProgressiveByteListRootReferenceVectors(t *testing.T) {
 			original := make([]byte, len(data))
 			copy(original, data)
 
-			root, err := merkle_tree.ProgressiveByteListRoot(data)
+			root, err := merkle_tree.ProgressiveBasicListRoot(data, uint64(len(data)))
 			require.NoError(t, err)
 			require.Equal(t, [32]byte(common.HexToHash(test.expected)), root)
 			require.Equal(t, original, data, "input bytes must not be modified")
