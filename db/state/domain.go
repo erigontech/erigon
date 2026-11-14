@@ -379,6 +379,9 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	switch mode {
 	case statecfg.ExistenceFilterInMem:
 		accessor.ForceExistenceFilterInRAM()
+		if d.Name == kv.CommitmentDomain { // the trie fold looks up every branch it reads in this index
+			accessor.ForceHashInRAM()
+		}
 	case statecfg.ExistenceFilterNormal:
 		accessor.ForceExistenceFilterNormal()
 	case statecfg.ExistenceFilterWillNeed:
