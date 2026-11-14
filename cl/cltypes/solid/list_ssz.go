@@ -100,6 +100,7 @@ func (l *ListSSZ[T]) EnsureStaticProgressive(limit int, bytesPerElement int) {
 		l.bytesPerElement = bytesPerElement
 	}
 	l.progressive = true
+	l.invalidateRoots()
 }
 
 // Progressive lists are semantically unbounded, so decode limits are resource guards rather than protocol maxima.

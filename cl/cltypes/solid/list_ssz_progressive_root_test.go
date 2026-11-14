@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -49,6 +50,51 @@ func requireProgressiveRoot(t *testing.T, list *ListSSZ[*PendingPartialWithdrawa
 	root, err := list.HashSSZProgressive(nil)
 	require.NoError(t, err)
 	return root
+}
+
+func TestListSSZHashSSZAfterEnsureStaticProgressive(t *testing.T) {
+	for _, count := range []int{0, 3} {
+		t.Run(fmt.Sprintf("elements=%d", count), func(t *testing.T) {
+			list := newProgressiveRootTestList(progressiveRootTestValues(count)...)
+			legacy, err := list.HashSSZ()
+			require.NoError(t, err)
+
+			list.EnsureStaticProgressive(progressiveRootTestLimit, SizePendingPartialWithdrawal)
+			got, err := list.HashSSZ()
+			require.NoError(t, err)
+
+			fresh := NewStaticProgressiveListSSZ[*PendingPartialWithdrawal](progressiveRootTestLimit, SizePendingPartialWithdrawal)
+			for _, element := range list.list {
+				fresh.Append(element)
+			}
+			want, err := fresh.HashSSZ()
+			require.NoError(t, err)
+			require.NotEqual(t, legacy, want)
+			require.Equal(t, want, got)
+		})
+	}
+}
+
+func TestListSSZEnsureStaticProgressiveNoOpPreservesCache(t *testing.T) {
+	list := newProgressiveRootTestList(1, 2, 3)
+	list.EnsureStaticProgressive(progressiveRootTestLimit, SizePendingPartialWithdrawal)
+	want, err := list.HashSSZ()
+	require.NoError(t, err)
+	limit := list.limit
+	cache := list.ownedProgressiveRoot()
+	require.NotNil(t, cache)
+	cachedRoot := cache.root.Load()
+	require.NotNil(t, cachedRoot)
+
+	list.EnsureStaticProgressive(progressiveRootTestLimit, SizePendingPartialWithdrawal)
+
+	require.Equal(t, limit, list.limit)
+	require.Equal(t, want, [32]byte(list.root))
+	require.Same(t, cache, list.ownedProgressiveRoot())
+	require.Same(t, cachedRoot, cache.root.Load())
+	got, err := list.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, want, got)
 }
 
 func TestListSSZProgressiveRootMemoized(t *testing.T) {
