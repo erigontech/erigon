@@ -100,6 +100,7 @@ func (p *taskPool) push(pt *poolTask) {
 	if logNpPhases {
 		p.tick()
 		stampNow(&pt.st.push)
+		pt.st.pushIdle.Store(int32(p.idle.idle))
 	}
 	heap.Push(&p.queue, pt)
 	p.mu.Unlock()

@@ -112,6 +112,7 @@ type parallelExecutor struct {
 	cancelWorkers context.CancelFunc
 	pool          *taskPool
 	spineBusy     atomic.Bool
+	selEnter      time.Time // exec-loop goroutine only
 	runWG         sync.WaitGroup
 	workersCtx    context.Context
 	// results carries finished tasks from dispatchRunSelfLoop to the exec loop.
@@ -1039,6 +1040,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 		if logNpPhases {
 			npWaitStart = time.Now()
+			pe.selEnter = npWaitStart
 		}
 		var blockResult *blockResult
 		select {
@@ -1150,7 +1152,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					}
 					pe.logger.Info("[np-phase] spine", spkv...)
 					pe.logger.Info("[np-phase] crit", "blk", blockResult.BlockNum, "spineOnly", cp.spineOnly, "spine", cp.spine, "handoff", cp.handoff,
-						"first", cp.work[workFirst], "rerun", cp.work[workRerun], "recheck", cp.work[workRecheck], "wake", cp.wake, "pre", cp.pre, "tail", tail,
+						"first", cp.work[workFirst], "rerun", cp.work[workRerun], "recheck", cp.work[workRecheck], "wake", cp.wake, "hoBusy", cp.hoBusy, "hoWake", cp.hoWake, "wkIdle", cp.wkIdle, "wkQueued", cp.wkQueued, "pre", cp.pre, "tail", tail,
 						"nSpineOnly", cp.steps[0], "nSent", cp.steps[1], "nWork", cp.steps[2], "nFirst", cp.workSteps3[workFirst], "nRerun", cp.workSteps3[workRerun], "nRecheck", cp.workSteps3[workRecheck])
 				}
 				// Covers an empty block that created no accumulator via a tx-result; the
@@ -3336,6 +3338,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	tx := task.index
 	if logNpPhases && be.poolTasks != nil && be.poolTasks[tx] != nil {
 		stampNow(&be.poolTasks[tx].st.recv)
+		be.poolTasks[tx].st.sel.Store(pe.selEnter.UnixNano())
 	}
 	if be.publishTasks.checkComplete(tx) {
 		if res.Err != nil {

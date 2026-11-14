@@ -134,15 +134,19 @@ const (
 
 type taskStamps struct {
 	push, pick, send, recv atomic.Int64
-	kind                   atomic.Int32
+	sel                    atomic.Int64 // when the exec-loop iteration that received the result began to wait
+	kind, pushIdle         atomic.Int32 // pushIdle: workers parked when the task was pushed
 }
 
 type critPath struct {
 	lastCommit                      time.Time
 	spineOnly, spine, handoff, wake time.Duration
-	pre                             time.Duration
-	work                            [3]time.Duration
-	steps, workSteps3               [3]int
+	// handoff split: the exec loop was busy when the result became due, or it was parked;
+	// wake split: a worker was parked at push, or all workers were busy.
+	hoBusy, hoWake, wkIdle, wkQueued time.Duration
+	pre                              time.Duration
+	work                             [3]time.Duration
+	steps, workSteps3                [3]int
 }
 
 func stampNow(a *atomic.Int64) {
@@ -178,6 +182,12 @@ func (be *blockExecutor) noteCommitted(tx int) {
 	}
 	cp.spine += now.Sub(r)
 	cp.handoff += r.Sub(maxT(s, cF))
+	if due, sel := maxT(s, cF), at(&st.sel); sel.After(due) && r.After(sel) {
+		cp.hoBusy += sel.Sub(due)
+		cp.hoWake += r.Sub(sel)
+	} else {
+		cp.hoWake += r.Sub(due)
+	}
 	if !s.After(cF) {
 		cp.steps[1]++
 		return
@@ -189,6 +199,11 @@ func (be *blockExecutor) noteCommitted(tx int) {
 	if q.After(cF) {
 		pp := maxT(p, cF)
 		cp.wake += q.Sub(pp)
+		if st.pushIdle.Load() > 0 {
+			cp.wkIdle += q.Sub(pp)
+		} else {
+			cp.wkQueued += q.Sub(pp)
+		}
 		cp.pre += pp.Sub(cF)
 	}
 }
