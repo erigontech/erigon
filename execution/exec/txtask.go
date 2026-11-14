@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -81,6 +82,7 @@ type Task interface {
 	GasPool() *protocol.GasPool
 
 	IsBlockEnd() bool
+	IsSystemTx() bool
 	IsHistoric() bool
 
 	TracingHooks() *tracing.Hooks
@@ -99,6 +101,7 @@ type TxResult struct {
 	// Operational reports that Err is an execution infrastructure failure, not a block-validity verdict.
 	Operational bool
 	Coinbase    accounts.Address
+	FeePolicy   evmtypes.FeePolicy
 	TxIn        state.ReadSet
 	TxOut       *state.WriteSet
 
@@ -226,6 +229,8 @@ type TxTask struct {
 	Engine rules.Engine
 	Logger log.Logger
 	Trace  bool
+
+	isSystemTx bool // consensus system transaction (Parlia): runs outside the block gas pool
 
 	gasPool      *protocol.GasPool
 	message      *types.Message
@@ -444,6 +449,10 @@ func (t *TxTask) IsBlockEnd() bool {
 	return t.TxIndex == len(t.Txs)
 }
 
+func (t *TxTask) IsSystemTx() bool { return t.isSystemTx }
+
+func (t *TxTask) SetSystemTx(v bool) { t.isSystemTx = v }
+
 func (t *TxTask) IsHistoric() bool {
 	return t.HistoryExecution
 }
@@ -539,8 +548,13 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
 		}
 	default:
+		if t.isSystemTx {
+			result = *t.executeSystemTx(engine, evm, ibs)
+			break
+		}
 
 		result.Coinbase = evm.Context.Coinbase
+		result.FeePolicy = evm.Context.FeePolicy
 
 		// MA applytx
 		result.ExecutionResult, result.Err = func() (evmtypes.ExecutionResult, error) {
@@ -623,6 +637,55 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			result.TxIn = t.VersionedReads(ibs)
 		}
 	}
+
+	return &result
+}
+
+// executeSystemTx runs a consensus system transaction as a free call: no gas
+// pool, no intrinsic gas, and the engine owns the surrounding state effect.
+func (t *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *state.IntraBlockState) *TxResult {
+	var result TxResult
+
+	msg, err := t.TxMessage()
+	if err != nil {
+		result.Err = err
+		return &result
+	}
+	from := msg.From()
+
+	if err = engine.ApplySystemTx(t.Tx(), ibs, t.Header); err != nil {
+		result.Err = err
+		return &result
+	}
+
+	nonce, err := ibs.GetNonce(from)
+	if err != nil {
+		result.Err = err
+		return &result
+	}
+	if err = ibs.SetNonce(from, nonce+1, tracing.NonceChangeEoACall); err != nil {
+		result.Err = err
+		return &result
+	}
+
+	rules := t.Rules()
+	if rules.IsCancun {
+		ibs.Prepare(rules, from, evm.Context.Coinbase, msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
+	}
+
+	_, _, gasUsed, err := evm.Call(from, msg.To(), msg.Data(), mdgas.MdGas{Execution: msg.Gas()}, *msg.Value(), false)
+	if err != nil {
+		// A reverted system tx is a consensus violation: reject the block.
+		result.Err = err
+		return &result
+	}
+	result.ExecutionResult.ReceiptGasUsed = gasUsed.Total()
+	result.ExecutionResult.BlockExecutionGasUsed = gasUsed.Total()
+
+	if !ibs.IsVersioned() {
+		ibs.SoftFinalise()
+	}
+	result.Logs = ibs.GetLogs(t.TxIndex, t.TxHash(), t.BlockNumber(), t.BlockHash())
 
 	return &result
 }

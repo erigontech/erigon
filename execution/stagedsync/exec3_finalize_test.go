@@ -222,8 +222,7 @@ func (s *testFinalizeScenario) buildExecResult() *execResult {
 
 	task := &taskVersion{
 		execTask: &execTask{
-			Task:               txTask,
-			shouldDelayFeeCalc: true,
+			Task: txTask,
 		},
 		version: state.Version{
 			BlockNum: blockNum,
@@ -337,7 +336,7 @@ func simpleTransferScenario() *testFinalizeScenario {
 	transferAmt := uint256.NewInt(1_000_000_000)
 	tip := uint256.NewInt(21_000)
 
-	// When shouldDelayFeeCalc=true, execution runs with calcFees=false:
+	// Execution runs with calcFees=false:
 	// sender is only debited the transfer amount (no gas), and coinbase
 	// is NOT touched during execution. Fees are applied during finalize.
 	newSenderBal := new(uint256.Int).Sub(senderBal, transferAmt)
@@ -1356,7 +1355,7 @@ func TestCalcFees_SameTxDestroyedCoinbase_EmitsRemoval(t *testing.T) {
 				Config:          chain.TestChainBerlinConfig,
 				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
 			}
-			task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
+			task := &taskVersion{execTask: &execTask{Task: txTask}, version: version}
 			result := &execResult{TxResult: &exec.TxResult{
 				Task: task,
 				ExecutionResult: evmtypes.ExecutionResult{
@@ -1415,7 +1414,7 @@ func TestCalcFees_SameTxDestroyedBurntContract_StaysRemoved(t *testing.T) {
 		Config:          chain.TestChainBerlinConfig,
 		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
 	}
-	task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
+	task := &taskVersion{execTask: &execTask{Task: txTask}, version: version}
 	result := &execResult{TxResult: &exec.TxResult{
 		Task: task,
 		ExecutionResult: evmtypes.ExecutionResult{
@@ -1467,7 +1466,7 @@ func TestCalcFees_TipUndoesEIP161RemovalOfCoinbase(t *testing.T) {
 				Config:          chain.TestChainBerlinConfig,
 				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
 			}
-			task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
+			task := &taskVersion{execTask: &execTask{Task: txTask}, version: version}
 			result := &execResult{TxResult: &exec.TxResult{
 				Task: task,
 				ExecutionResult: evmtypes.ExecutionResult{
@@ -1677,7 +1676,7 @@ func TestCalcFees_BALCoinbaseAddressPath(t *testing.T) {
 				Config:          chain.TestChainBerlinConfig,
 				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
 			}
-			task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
+			task := &taskVersion{execTask: &execTask{Task: txTask}, version: version}
 			result := &execResult{TxResult: &exec.TxResult{
 				Task:            task,
 				ExecutionResult: evmtypes.ExecutionResult{FeeTipped: *uint256.NewInt(tip), BurntContractAddress: accounts.NilAddress},
@@ -1755,7 +1754,7 @@ func coinbaseTipResult(coinbase accounts.Address, tip uint64) (*execResult, *tas
 		Config:          chain.TestChainBerlinConfig,
 		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
 	}
-	task := &taskVersion{execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true}, version: version}
+	task := &taskVersion{execTask: &execTask{Task: txTask}, version: version}
 	result := &execResult{TxResult: &exec.TxResult{
 		Task: task,
 		ExecutionResult: evmtypes.ExecutionResult{

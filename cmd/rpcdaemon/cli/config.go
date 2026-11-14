@@ -40,6 +40,7 @@ import (
 	grpcHealth "google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
+	"github.com/erigontech/erigon/bsc/parlia"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/health"
@@ -1050,6 +1051,8 @@ func (e *remoteRulesEngine) init(db kv.RoDB, remoteKV remoteproto.KVClient, logg
 		if err != nil {
 			return err
 		}
+	case cc.Parlia != nil:
+		eng = parlia.New(cc, logger)
 	default:
 		eng = ethash.NewFaker()
 	}
@@ -1107,6 +1110,10 @@ func (e *remoteRulesEngine) Initialize(config *chain.Config, chain rules.ChainHe
 		return err
 	}
 	return e.engine.Initialize(config, chain, header, state, syscall, logger, tracer)
+}
+
+func (e *remoteRulesEngine) FeePolicy(header *types.Header) evmtypes.FeePolicy {
+	return evmtypes.FeePolicy{}
 }
 
 func (e *remoteRulesEngine) GetTransferFunc() evmtypes.TransferFunc {
@@ -1176,6 +1183,14 @@ func (e *remoteRulesEngine) APIs(_ rules.ChainHeaderReader) []rpc.API {
 
 func (e *remoteRulesEngine) TxDependencies(header *types.Header) [][]int {
 	panic("remoteRulesEngine.TxDependencies not supported")
+}
+
+func (e *remoteRulesEngine) IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error) {
+	panic("remoteRulesEngine.IsSystemTransaction not supported")
+}
+
+func (e *remoteRulesEngine) ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error {
+	panic("remoteRulesEngine.ApplySystemTx not supported")
 }
 
 func readChainConfigFromDB(ctx context.Context, db kv.RoDB) (*chain.Config, error) {

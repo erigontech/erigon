@@ -1249,9 +1249,8 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 	for i, txTask := range execRequest.tasks {
 		t := &execTask{
-			Task:               txTask,
-			index:              i,
-			shouldDelayFeeCalc: true,
+			Task:  txTask,
+			index: i,
 		}
 
 		blockNum := t.Version().BlockNum
@@ -1858,8 +1857,7 @@ const (
 
 type execTask struct {
 	exec.Task
-	index              int
-	shouldDelayFeeCalc bool
+	index int
 }
 
 type execResult struct {
@@ -1872,7 +1870,16 @@ type execResult struct {
 // tx of result is validated: the coinbase, or the burnt-fee recipient.
 func (be *blockExecutor) isFeeRecipient(result *execResult) func(accounts.Address) bool {
 	burnt := result.ExecutionResult.BurntContractAddress
-	return func(addr accounts.Address) bool { return addr == be.coinbase || addr == burnt }
+	recipient := result.tipRecipient()
+	return func(addr accounts.Address) bool { return addr == be.coinbase || addr == recipient || addr == burnt }
+}
+
+// tipRecipient is the address calcFees credits the tip to.
+func (result *execResult) tipRecipient() accounts.Address {
+	if r := result.FeePolicy.TipRecipient; !r.IsNil() {
+		return r
+	}
+	return result.Coinbase
 }
 
 func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint32, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
@@ -1974,28 +1981,39 @@ func (result *execResult) calcFees(
 	txIndex := task.Version().TxIndex
 	taskVersion := task.Version()
 
+	recipient := result.tipRecipient()
+	tipCredit := result.ExecutionResult.FeeTipped
+	if blobRecipient := result.FeePolicy.BlobFeeRecipient; !blobRecipient.IsNil() {
+		// One deferred credit per tx, so a chain that splits the tip and the blob
+		// fee across two addresses cannot be replayed here.
+		if blobRecipient != recipient {
+			return nil, fmt.Errorf("deferred fee credit: blob recipient %x differs from tip recipient %x", blobRecipient, recipient)
+		}
+		tipCredit.Add(&result.ExecutionResult.FeeTipped, &result.ExecutionResult.FeeBlob)
+	}
+
 	// Read at txIndex (floor txIndex-1): strictly prior tx, excluding this tx's own
 	// prior incarnations that would double-apply the tip on re-execution. Current-tx
 	// worker writes are picked up below via TxOut.
 	vsReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader)
 
-	coinbaseAcc, err := vsReader.ReadAccountData(result.Coinbase)
+	coinbaseAcc, err := vsReader.ReadAccountData(recipient)
 	if err != nil {
 		return nil, err
 	}
 	// The tip credits only Balance, so seed the coinbase's whole-account origin into
 	// the versionMap — else the apply compose has no base and wipes its committed
 	// nonce/code/balance.
-	state.SeedOrigin(vm, result.Coinbase, coinbaseAcc)
+	state.SeedOrigin(vm, recipient, coinbaseAcc)
 	var newCoinbaseBalance uint256.Int
 	if coinbaseAcc != nil {
 		newCoinbaseBalance = coinbaseAcc.Balance
 	}
 	burntAddr := result.ExecutionResult.BurntContractAddress
 	hasBurnt := !burntAddr.IsNil()
-	coinbaseFee := result.ExecutionResult.FeeTipped
+	coinbaseFee := tipCredit
 	// Two entries for one account would overwrite each other, so a single entry carries both fees.
-	if hasBurnt && burntAddr == result.Coinbase {
+	if hasBurnt && burntAddr == recipient {
 		if chainRules.IsLondon {
 			coinbaseFee.Add(&coinbaseFee, &result.ExecutionResult.FeeBurnt)
 		}
@@ -2026,26 +2044,26 @@ func (result *execResult) calcFees(
 	coinbaseCreatedContract := false
 	cbOverride := false
 	cbBalanceDeleted := false
-	if bw, ok := result.TxOut.GetBalance(result.Coinbase); ok {
+	if bw, ok := result.TxOut.GetBalance(recipient); ok {
 		newCoinbaseBalance = bw.Val
 		cbOverride = true
 		cbBalanceDeleted = bw.Deletes()
 	}
-	if nw, ok := result.TxOut.GetNonce(result.Coinbase); ok {
+	if nw, ok := result.TxOut.GetNonce(recipient); ok {
 		coinbaseNonce = nw.Val
 	}
 	coinbaseCodeHash := accounts.EmptyCodeHash
-	if cw, ok := result.TxOut.GetCodeHash(result.Coinbase); ok {
+	if cw, ok := result.TxOut.GetCodeHash(recipient); ok {
 		// Only a real contract signal: deployed code (non-empty) or a removed
 		// contract's code (ValueDeleted). An empty-codehash write from account
 		// creation — e.g. a self-destruct beneficiary funding a new coinbase — is not.
 		coinbaseHasCodeHashWrite = cw.Deletes() || !cw.Val.IsEmpty()
 		coinbaseCodeHash = cw.Val
 	}
-	if sw, ok := result.TxOut.GetSelfDestruct(result.Coinbase); ok {
+	if sw, ok := result.TxOut.GetSelfDestruct(recipient); ok {
 		coinbaseSelfdestructed = sw.Val
 	}
-	if cw, ok := result.TxOut.GetCreateContract(result.Coinbase); ok {
+	if cw, ok := result.TxOut.GetCreateContract(recipient); ok {
 		coinbaseCreatedContract = cw.Val
 	}
 	burntOverride := false
@@ -2122,7 +2140,7 @@ func (result *execResult) calcFees(
 	// The fee credit touches the coinbase, so a zero tip removes an empty one (EIP-161).
 	coinbaseEmptied := !emitCoinbase && !coinbaseNetDeleted && coinbaseAcc != nil && !coinbaseSelfdestructed && newCoinbaseBalance.IsZero() &&
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
-		state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, result.Coinbase)
+		state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, recipient)
 
 	// A destroyed burnt recipient whose fee was burned (or left it empty) is removed,
 	// matching serial; mirrors coinbaseNetDeleted.
@@ -2137,9 +2155,9 @@ func (result *execResult) calcFees(
 	addWrites := &state.WriteSet{}
 	if coinbaseNetDeleted || coinbaseEmptied {
 		if coinbaseWasContract {
-			addWrites.SetContractRemoval(result.Coinbase, taskVersion)
+			addWrites.SetContractRemoval(recipient, taskVersion)
 		} else {
-			addWrites.SetEmptyRemoval(result.Coinbase, taskVersion)
+			addWrites.SetEmptyRemoval(recipient, taskVersion)
 		}
 	}
 	if burntEmptied || burntNetDeleted {
@@ -2154,13 +2172,13 @@ func (result *execResult) calcFees(
 			// A fee credit revives an EOA coinbase a worker removed (EIP-161); retract the
 			// removal. A genuine contract self-destruct keeps its wipe.
 			if coinbaseSelfdestructed && !coinbaseWasContract {
-				addWrites.SetSelfDestruct(result.Coinbase, &state.VersionedWrite[bool]{
-					WriteHeader: state.WriteHeader{Address: result.Coinbase, Path: state.SelfDestructPath, Version: taskVersion},
+				addWrites.SetSelfDestruct(recipient, &state.VersionedWrite[bool]{
+					WriteHeader: state.WriteHeader{Address: recipient, Path: state.SelfDestructPath, Version: taskVersion},
 				})
 			}
-			addWrites.SetBalance(result.Coinbase, &state.VersionedWrite[uint256.Int]{
+			addWrites.SetBalance(recipient, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{
-					Address: result.Coinbase,
+					Address: recipient,
 					Path:    state.BalancePath,
 					Version: taskVersion,
 					Reason:  tracing.BalanceIncreaseRewardTransactionFee,
@@ -2172,7 +2190,7 @@ func (result *execResult) calcFees(
 			// first credit; without mirroring that, getVersionedAccount returns nil for
 			// a freshly-credited coinbase and Empty() returns true — charging a stale
 			// CallNewAccountGas for a mid-tx CALL-with-value to the coinbase.
-			cbLifecycle, _, _, _ := vm.AccountLifecycleAt(result.Coinbase, txIndex)
+			cbLifecycle, _, _, _ := vm.AccountLifecycleAt(recipient, txIndex)
 			// On a BAL block the record of a live coinbase already exists; re-emitting it each tx
 			// misses the pre-seeded cells and takes the coinbase's write lock on every validation.
 			skipAddress := vm.HasBAL && coinbaseAcc != nil && !coinbaseNetDestructed && !cbOverride && !coinbaseSelfdestructed && cbLifecycle == state.LifecycleLive
@@ -2189,9 +2207,9 @@ func (result *execResult) calcFees(
 				}
 			}
 			if !skipAddress {
-				addWrites.SetAddress(result.Coinbase, &state.VersionedWrite[*accounts.Account]{
+				addWrites.SetAddress(recipient, &state.VersionedWrite[*accounts.Account]{
 					WriteHeader: state.WriteHeader{
-						Address: result.Coinbase,
+						Address: recipient,
 						Path:    state.AddressPath,
 						Version: taskVersion,
 					},
@@ -2207,9 +2225,9 @@ func (result *execResult) calcFees(
 			// spurious block-access-list entry for an ordinary fee credit.
 			coinbaseRevivedCodeless := !chainRules.IsAmsterdam && !coinbaseHasCodeHashWrite && cbLifecycle == state.LifecycleRevived && addrAcc.CodeHash == accounts.EmptyCodeHash
 			if coinbaseAcc == nil || coinbaseNetDestructed || coinbaseRevivedCodeless {
-				addWrites.SetCodeHash(result.Coinbase, &state.VersionedWrite[accounts.CodeHash]{
+				addWrites.SetCodeHash(recipient, &state.VersionedWrite[accounts.CodeHash]{
 					WriteHeader: state.WriteHeader{
-						Address: result.Coinbase,
+						Address: recipient,
 						Path:    state.CodeHashPath,
 						Version: taskVersion,
 					},
@@ -2221,10 +2239,10 @@ func (result *execResult) calcFees(
 			// doesn't resurrect it. Skipped on a BAL block, where the nonce reset is not an
 			// access-list entry and emitting one would diverge from the sealed map.
 			if !chainRules.IsAmsterdam {
-				if fn, fres, fok := vm.ReadNonce(result.Coinbase, txIndex); fok && fres.Status() != state.MVReadResultNone && fn != addrAcc.Nonce {
-					addWrites.SetNonce(result.Coinbase, &state.VersionedWrite[uint64]{
+				if fn, fres, fok := vm.ReadNonce(recipient, txIndex); fok && fres.Status() != state.MVReadResultNone && fn != addrAcc.Nonce {
+					addWrites.SetNonce(recipient, &state.VersionedWrite[uint64]{
 						WriteHeader: state.WriteHeader{
-							Address: result.Coinbase,
+							Address: recipient,
 							Path:    state.NoncePath,
 							Version: taskVersion,
 						},
@@ -2460,7 +2478,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
 
 	result = ev.execTask.Execute(evm, engine, genesis, ibs, stateWriter,
-		chainConfig, chainReader, dirs, !ev.shouldDelayFeeCalc)
+		chainConfig, chainReader, dirs, false)
 
 	// Occupancy accounting: sum every incarnation's exec CPU (including aborts) so
 	// occupancy reveals whether workers are starved or compute-bound.
@@ -2839,7 +2857,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 		}
 	}
 
-	if txn := txTask.Tx(); txn != nil {
+	if txn := txTask.Tx(); txn != nil && !txTask.IsSystemTx() {
 		limits, err := protocol.TransactionGasLimits(txn, txTask.Rules().IsAmsterdam)
 		if err != nil {
 			return be.invalidBlockResult(fmt.Errorf("%w: invalid transaction gas limits at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
@@ -2949,7 +2967,9 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				delete(be.revalidate, tx)
 			}
 		}
-		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
+		// System txs are excluded: their result carries no Coinbase and they
+		// distribute SystemAddress themselves.
+		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && !txTask.IsSystemTx() && txResult.Err == nil {
 			taskVer, ok := txResult.Task.(*taskVersion)
 			if !ok {
 				return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)

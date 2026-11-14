@@ -82,6 +82,8 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+
+	_ "github.com/erigontech/erigon/bsc/chain" // Register BSC chains
 )
 
 // These are all the command line flags we support.
@@ -780,6 +782,10 @@ var (
 		Name:    "snap.download.to.block",
 		Usage:   "Download snapshots up to the given block number (exclusive). Disabled by default. Useful for testing and shadow forks.",
 		Aliases: []string{"shadow.fork.block"},
+	}
+	SyncTargetBlockFlag = cli.Uint64Flag{
+		Name:  "sync.target-block",
+		Usage: "Stop the block-download driver once the head reaches this block number. 0 = no bound.",
 	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
@@ -1592,6 +1598,21 @@ func SetP2PConfig(ctx *cli.Command, cfg *p2p.Config, nodeName, datadir string, l
 			Fatalf("Option %q: %v", NetrestrictFlag.Name, err)
 		}
 		cfg.NetRestrict = list
+	}
+
+	if ctx.String(ChainFlag.Name) == networkname.Chapel {
+		// BSC advertises eth/70 and eth/68 only — it rejects eth/69 and has no
+		// eth/71. BSC discovery still uses discv4 (enode bootnodes + static
+		// peers); it hasn't moved to discv5 at all.
+		if !ctx.IsSet(P2pProtocolVersionFlag.Name) {
+			cfg.ProtocolVersion = []uint{direct.ETH70, direct.ETH68}
+		}
+		if !ctx.IsSet(DiscoveryV4Flag.Name) {
+			cfg.DiscoveryV4 = true
+		}
+		if !ctx.IsSet(DiscoveryV5Flag.Name) {
+			cfg.DiscoveryV5 = false
+		}
 	}
 
 	if ctx.String(ChainFlag.Name) == networkname.Dev {

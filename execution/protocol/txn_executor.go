@@ -648,6 +648,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 	}
+	if err := st.payBlobFee(fees.blobGasVal); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+	}
 	burnAmount, burntContractAddress, err := st.burnFees(st.txnGasUsed, fees.blobGasVal)
 	if err != nil {
 		return nil, err
@@ -669,6 +672,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		Reverted:       errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:     ret,
 		FeeTipped:      tipAmount,
+		FeeBlob:        fees.blobGasVal,
 		FeeBurnt:       burnAmount,
 	}
 
@@ -859,7 +863,19 @@ func (st *TxnExecutor) payCoinbase(gasUsed uint64) (uint256.Int, error) {
 	if st.noFeeBurnAndTip {
 		return tipAmount, nil
 	}
-	return tipAmount, st.state.AddBalance(st.evm.Context.Coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee)
+	tipRecipient := st.evm.Context.FeePolicy.TipRecipient
+	if tipRecipient.IsNil() {
+		tipRecipient = st.evm.Context.Coinbase
+	}
+	return tipAmount, st.state.AddBalance(tipRecipient, tipAmount, tracing.BalanceIncreaseRewardTransactionFee)
+}
+
+func (st *TxnExecutor) payBlobFee(blobCost uint256.Int) error {
+	recipient := st.evm.Context.FeePolicy.BlobFeeRecipient
+	if st.noFeeBurnAndTip || recipient.IsNil() {
+		return nil
+	}
+	return st.state.AddBalance(recipient, blobCost, tracing.BalanceIncreaseRewardTransactionFee)
 }
 
 func (st *TxnExecutor) burnFees(gasUsed uint64, blobCost uint256.Int) (uint256.Int, accounts.Address, error) {

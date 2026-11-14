@@ -38,6 +38,9 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	_ "github.com/erigontech/erigon/bsc/chain" // Register BSC chains
+	bscp2p "github.com/erigontech/erigon/bsc/p2p"
+	bscsync "github.com/erigontech/erigon/bsc/sync"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -195,6 +198,7 @@ type Ethereum struct {
 
 	sentinel sentinelproto.SentinelClient
 
+	bscP2PService  *bscp2p.Service
 	stopNode       func() error
 	bgComponentsEg errgroup.Group
 	readAheader    *exec.BlockReadAheader
@@ -580,6 +584,8 @@ func New(
 	switch {
 	case chainConfig.Aura != nil:
 		rulesConfig = &config.Aura
+	case chainConfig.Parlia != nil:
+		rulesConfig = chainConfig.Parlia
 	default:
 		rulesConfig = &config.Ethash
 	}
@@ -977,6 +983,16 @@ func New(
 				svc.Start(ctx)
 			}()
 		}
+	}
+
+	if chainConfig.Parlia != nil {
+		backend.bscP2PService = bscp2p.NewService(
+			logger,
+			p2pConfig.MaxPeers,
+			backend.sentryProvider.Multiplexer,
+			statusDataProvider.GetStatusData,
+			config.Dirs.Tmp,
+		)
 	}
 
 	if !dbg.NoBackgroundMaintenance() {
@@ -1405,9 +1421,27 @@ func (s *Ethereum) Start() error {
 		return currentTD
 	}
 
-	if chainspec.IsChainPoS(s.chainConfig, currentTDProvider) {
+	switch {
+	case chainspec.IsChainPoS(s.chainConfig, currentTDProvider):
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
 		go s.execModule.Start(s.sentryCtx, hook)
+	case s.chainConfig.Parlia != nil:
+		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Info("[bsc] block downloader goroutine terminated")
+			s.execModule.Start(s.sentryCtx, hook) // startup snapshot catch-up; returns
+			chainRW := chainreader.NewChainReaderEth1(s.chainConfig, s.execModule, s.config.FcuTimeout)
+			err := bscsync.RunBlockDownloader(s.sentryCtx, s.logger, bscsync.Config{
+				ChainRW:     chainRW,
+				Svc:         s.bscP2PService,
+				TargetBlock: s.config.Sync.TargetBlock,
+				FcuInterval: uint64(s.config.Sync.LoopBlockLimit),
+			})
+			if err == nil || errors.Is(err, context.Canceled) {
+				return err
+			}
+			s.logger.Error("[bsc] block downloader crashed", "err", err)
+			return err
+		})
 	}
 
 	if s.txPool != nil {

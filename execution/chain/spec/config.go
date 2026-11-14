@@ -141,6 +141,7 @@ type Spec struct {
 	Genesis          *types.Genesis
 	Config           *chain.Config
 	Bootnodes        []string // list of bootnodes for the chain, if any
+	StaticPeers      []string // list of peers to always stay connected to, if any
 	DNSNetwork       string   // address of a public DNS-based node list. See https://github.com/ethereum/discv4-dns-lists for more information.
 	NetworkID        uint64   // Optional custom network ID (defaults to ChainID if 0)
 }

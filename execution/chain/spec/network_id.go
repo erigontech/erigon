@@ -23,6 +23,7 @@ const (
 	GnosisChainID     = 100
 	ChiadoChainID     = 10200
 	BloatnetNetworkID = 12159 // Bloatnet NetworkID (ChainID is 1/mainnet)
+	ChapelChainID     = 97    // BSC testnet
 )
 
 var NetworkNameByID = make(map[uint64]string)

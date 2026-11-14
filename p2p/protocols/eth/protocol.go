@@ -81,6 +81,10 @@ const (
 	// Protocol messages added in eth/71 (EIP-8159 Block Access List Exchange)
 	GetBlockAccessListsMsg = 0x12
 	BlockAccessListsMsg    = 0x13
+
+	// BSC (Parlia) handshake extension, sent right after Status on networks
+	// 56/97/714. Reuses the eth/63-era 0x0b slot, unused in modern eth.
+	UpgradeStatusMsg = 0x0b
 )
 
 var toProto68 = map[uint64]sentryproto.MessageId{
@@ -178,6 +182,39 @@ type StatusPacket69 struct {
 	ForkID                    forkid.ID
 	MinimumBlock, LatestBlock uint64
 	LatestBlockHash           common.Hash
+}
+
+// StatusPacketBsc70 is BSC's eth/70 status message. BSC took eth/69's
+// available-block-range fields but kept TD, because Parlia's fork choice still
+// breaks ties on total difficulty — so the layout matches neither StatusPacket
+// nor StatusPacket69 and only ever appears on BSC networks.
+type StatusPacketBsc70 struct {
+	ProtocolVersion uint32
+	NetworkID       uint64
+	TD              *uint256.Int
+	Genesis         common.Hash
+	ForkID          forkid.ID
+	EarliestBlock   uint64
+	LatestBlock     uint64
+	LatestBlockHash common.Hash
+}
+
+// UpgradeStatusPacket is BSC's post-Status handshake extension (bsc eth/67+).
+type UpgradeStatusPacket struct {
+	Extension *rlp.RawValue `rlp:"nil"`
+}
+
+type UpgradeStatusExtension struct {
+	DisablePeerTxBroadcast bool
+}
+
+func (e *UpgradeStatusExtension) Encode() (*rlp.RawValue, error) {
+	rawBytes, err := rlp.EncodeToBytes(e)
+	if err != nil {
+		return nil, err
+	}
+	raw := rlp.RawValue(rawBytes)
+	return &raw, nil
 }
 
 // NewBlockHashesPacket is the network packet for the block announcements.
@@ -456,6 +493,9 @@ func (*StatusPacket) Kind() byte   { return StatusMsg }
 
 func (*StatusPacket69) Name() string { return "Status" }
 func (*StatusPacket69) Kind() byte   { return StatusMsg }
+
+func (*StatusPacketBsc70) Name() string { return "Status" }
+func (*StatusPacketBsc70) Kind() byte   { return StatusMsg }
 
 func (*NewBlockHashesPacket) Name() string { return "NewBlockHashes" }
 func (*NewBlockHashesPacket) Kind() byte   { return NewBlockHashesMsg }
