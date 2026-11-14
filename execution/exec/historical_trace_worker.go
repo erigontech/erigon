@@ -511,7 +511,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
-	readAhead, clean := BlocksReadAhead(ctx, 2, cfg.ChainDB, cfg.Engine, cfg.BlockReader, cfg.ChainConfig, false, nil, 500)
+	readAhead, clean := BlocksReadAhead(ctx, 2, cfg.ChainDB, cfg.Engine, cfg.BlockReader, cfg.ChainConfig, false, false, nil, 500)
 	defer clean()
 
 	inputTxNum := fromTxNum

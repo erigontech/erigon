@@ -84,10 +84,10 @@ Branch `awskii/readahead-exec-prefetch`, base main `ce34587ba46`. This plan file
 
 ### Task 3: commitment branch prefetch
 
-- [ ] shared hashed-key helper used by both `balCommitmentWarmupKeys` and the read-ahead
-- [ ] with `READ_AHEAD_EXEC_COMMITMENT`, `prefetchCommitment` runs on the written keys of each speculative
+- [x] shared hashed-key helper used by both `balCommitmentWarmupKeys` and the read-ahead
+- [x] with `READ_AHEAD_EXEC_COMMITMENT`, `prefetchCommitment` runs on the written keys of each speculative
       block; its count goes to the metrics and stats
-- [ ] test: a block writing existing accounts and slots prefetches a non-zero number of commitment keys;
+- [x] test: a block writing existing accounts and slots prefetches a non-zero number of commitment keys;
       off gives zero. Guard: removing the call turns it red
 
 ### Task 4: verification (supervisor)

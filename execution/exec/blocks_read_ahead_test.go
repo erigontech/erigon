@@ -1288,12 +1288,28 @@ func TestReadAheadExecReadsAndWritesContractStorage(t *testing.T) {
 	defer roTx.Rollback()
 	beforeReads := readAheadExecKeys.WithLabelValues("storage", "read").GetValue()
 	beforeWrites := readAheadExecKeys.WithLabelValues("storage", "write").GetValue()
-	require.NoError(t, blocksReadAheadFunc(ctx, roTx, 1, engine, readAheadBlockReader{block: block}, config, false))
+	require.NoError(t, blocksReadAheadFunc(ctx, db, roTx, 1, engine, readAheadBlockReader{block: block}, config, false, false))
 	require.Equal(t, beforeReads, readAheadExecKeys.WithLabelValues("storage", "read").GetValue())
 	require.Equal(t, beforeWrites, readAheadExecKeys.WithLabelValues("storage", "write").GetValue())
 	beforeReads = readAheadExecKeys.WithLabelValues("storage", "read").GetValue()
-	require.NoError(t, blocksReadAheadFunc(ctx, roTx, 1, engine, readAheadBlockReader{block: block}, config, true))
+	require.NoError(t, blocksReadAheadFunc(ctx, db, roTx, 1, engine, readAheadBlockReader{block: block}, config, true, false))
 	require.Greater(t, readAheadExecKeys.WithLabelValues("storage", "read").GetValue(), beforeReads, "execute=true must run speculative transactions")
+	prefetch := readAheadPrefetchCommitment
+	t.Cleanup(func() { readAheadPrefetchCommitment = prefetch })
+	prefetchCalls := 0
+	var prefetchedKeys [][]byte
+	readAheadPrefetchCommitment = func(_ context.Context, _ kv.RoDB, _ kv.TemporalTx, keys [][]byte) error {
+		prefetchCalls++
+		prefetchedKeys = keys
+		return nil
+	}
+	require.NoError(t, blocksReadAheadFunc(ctx, db, roTx, 1, engine, readAheadBlockReader{block: block}, config, true, false))
+	require.Zero(t, prefetchCalls, "commitment prefetch must stay off when its switch is off")
+	require.NoError(t, blocksReadAheadFunc(ctx, db, roTx, 1, engine, readAheadBlockReader{block: block}, config, true, true))
+	require.Equal(t, 1, prefetchCalls, "commitment prefetch must receive one call")
+	storageKey := common.Hash{31: 1}
+	require.Contains(t, prefetchedKeys, commitmentStateKey(contract[:], storageKey[:]))
+	require.Contains(t, prefetchedKeys, commitmentStateKey(contract[:], nil))
 	beforeDump := readAheadTableDump(t, db)
 	stats := runReadAheadBlock(ctx, roTx, block, engine, nil, config)
 	require.Equal(t, beforeDump, readAheadTableDump(t, db), "speculative execution must leave every database table unchanged")
@@ -1418,7 +1434,7 @@ func TestReviewReadAheadCleanupStopsQueuedExecution(t *testing.T) {
 				<-release
 			}
 		}
-		input, clean := BlocksReadAhead(t.Context(), 1, &singleTxRoDB{tx: tx}, ethash.NewFaker(), readAheadBlockReader{block: block}, chain.TestChainOsakaConfig, true, nil, 500)
+		input, clean := BlocksReadAhead(t.Context(), 1, &singleTxRoDB{tx: tx}, ethash.NewFaker(), readAheadBlockReader{block: block}, chain.TestChainOsakaConfig, true, false, nil, 500)
 		input <- 0
 		<-entered
 		input <- 1

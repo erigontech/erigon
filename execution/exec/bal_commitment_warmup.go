@@ -38,6 +38,13 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+func commitmentStateKey(address, slot []byte) []byte {
+	plainKey := make([]byte, len(address)+len(slot))
+	copy(plainKey, address)
+	copy(plainKey[len(address):], slot)
+	return commitment.KeyToHexNibbleHash(plainKey)
+}
+
 func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
 	keyCount := 0
 	for i := range bal {
@@ -52,14 +59,11 @@ func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
 		account := &bal[i]
 		address := account.Address
 		if len(account.BalanceChanges)+len(account.NonceChanges)+len(account.CodeChanges) > 0 {
-			keys = append(keys, commitment.KeyToHexNibbleHash(address[:]))
+			keys = append(keys, commitmentStateKey(address[:], nil))
 		}
 		for _, storage := range account.StorageChanges {
 			slot := storage.Slot.Value()
-			plainKey := make([]byte, len(address)+len(slot))
-			copy(plainKey, address[:])
-			copy(plainKey[len(address):], slot[:])
-			keys = append(keys, commitment.KeyToHexNibbleHash(plainKey))
+			keys = append(keys, commitmentStateKey(address[:], slot[:]))
 		}
 	}
 	slices.SortFunc(keys, bytes.Compare)
@@ -449,19 +453,24 @@ func flatPrefixes(keys [][]byte, start int) [][]byte {
 func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) error {
 	var err error
 	txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) {
-		p, ok := ttx.AggTx().(latestPrefetcher)
-		if !ok || trieMostlyResident(ctx, p, hashedKeys) {
-			return
-		}
-		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys, 0)); err != nil {
-			return
-		}
-		// The account trie walk loses a storage key at the extension above its account, so storage tries start again at their root.
-		if err = walkTriePrefixes(ctx, db, ttx, hashedKeys, 0); err == nil {
-			err = walkTriePrefixes(ctx, db, ttx, storageKeysOf(hashedKeys), storageTrieDepth)
-		}
+		err = prefetchCommitmentWithTx(ctx, db, ttx, hashedKeys)
 	})
 	return cmp.Or(txErr, err)
+}
+
+func prefetchCommitmentWithTx(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, hashedKeys [][]byte) error {
+	p, ok := ttx.AggTx().(latestPrefetcher)
+	if !ok || trieMostlyResident(ctx, p, hashedKeys) {
+		return nil
+	}
+	if err := prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys, 0)); err != nil {
+		return err
+	}
+	// The account trie walk loses a storage key at the extension above its account, so storage tries start again at their root.
+	if err := walkTriePrefixes(ctx, db, ttx, hashedKeys, 0); err != nil {
+		return err
+	}
+	return walkTriePrefixes(ctx, db, ttx, storageKeysOf(hashedKeys), storageTrieDepth)
 }
 
 const storageTrieDepth = 64

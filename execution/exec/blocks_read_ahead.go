@@ -1,9 +1,11 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -712,6 +714,8 @@ type ReadAheadExecStats struct {
 	StorageWritten     int
 	StorageReadKeys    map[ReadAheadStorageKey]struct{}
 	StorageWrittenKeys map[ReadAheadStorageKey]struct{}
+	AccountWrittenKeys map[accounts.Address]struct{}
+	CommitmentKeys     int
 	Errored            bool
 }
 
@@ -754,6 +758,10 @@ type readAheadRecordingWriter struct {
 func (w *readAheadRecordingWriter) UpdateAccountData(addr accounts.Address, original, account *accounts.Account) error {
 	w.stats.AccountsWritten++
 	w.accounts[addr] = struct{}{}
+	if w.stats.AccountWrittenKeys == nil {
+		w.stats.AccountWrittenKeys = make(map[accounts.Address]struct{})
+	}
+	w.stats.AccountWrittenKeys[addr] = struct{}{}
 	return w.StateWriter.UpdateAccountData(addr, original, account)
 }
 
@@ -770,14 +778,30 @@ func (w *readAheadRecordingWriter) WriteAccountStorage(addr accounts.Address, in
 	return w.StateWriter.WriteAccountStorage(addr, incarnation, key, original, value)
 }
 
+func readAheadCommitmentKeys(stats ReadAheadExecStats) [][]byte {
+	keys := make([][]byte, 0, len(stats.AccountWrittenKeys)+len(stats.StorageWrittenKeys))
+	for address := range stats.AccountWrittenKeys {
+		value := address.Value()
+		keys = append(keys, commitmentStateKey(value[:], nil))
+	}
+	for key := range stats.StorageWrittenKeys {
+		address, slot := key.Address.Value(), key.Slot.Value()
+		keys = append(keys, commitmentStateKey(address[:], slot[:]))
+	}
+	slices.SortFunc(keys, bytes.Compare)
+	return keys
+}
+
 var (
-	readAheadBlocksByResult   = metrics.GetOrCreateCounterVec("read_ahead_exec_blocks_total", []string{"result"})
-	readAheadExecTransactions = metrics.GetOrCreateCounter("read_ahead_exec_transactions_total")
-	readAheadExecKeys         = metrics.GetOrCreateCounterVec("read_ahead_exec_keys_total", []string{"kind", "direction"})
-	readAheadExecSeconds      = metrics.GetOrCreateSummary("read_ahead_exec_block_seconds")
+	readAheadBlocksByResult     = metrics.GetOrCreateCounterVec("read_ahead_exec_blocks_total", []string{"result"})
+	readAheadExecTransactions   = metrics.GetOrCreateCounter("read_ahead_exec_transactions_total")
+	readAheadExecKeys           = metrics.GetOrCreateCounterVec("read_ahead_exec_keys_total", []string{"kind", "direction"})
+	readAheadExecSeconds        = metrics.GetOrCreateSummary("read_ahead_exec_block_seconds")
+	readAheadExecCommitmentKeys = metrics.GetOrCreateCounter("read_ahead_exec_commitment_keys_total")
+	readAheadPrefetchCommitment = prefetchCommitmentWithTx
 )
 
-func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute bool, execBlock *atomic.Uint64, distance int) (chan uint64, context.CancelFunc) {
+func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute, executeCommitment bool, execBlock *atomic.Uint64, distance int) (chan uint64, context.CancelFunc) {
 	readAhead := make(chan uint64, distance)
 	workerCtx, cancel := context.WithCancel(ctx)
 	g, gCtx := errgroup.WithContext(workerCtx)
@@ -818,7 +842,7 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 					readAheadBlocksByResult.WithLabelValues("late").Inc()
 					continue
 				}
-				if err := blocksReadAheadFunc(gCtx, tx, target, engine, blockReader, chainConfig, execute); err != nil {
+				if err := blocksReadAheadFunc(gCtx, db, tx, target, engine, blockReader, chainConfig, execute, executeCommitment); err != nil {
 					return err
 				}
 			}
@@ -831,7 +855,7 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 	}
 }
 
-func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute bool) error {
+func blocksReadAheadFunc(ctx context.Context, db kv.RoDB, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute, executeCommitment bool) error {
 	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
 		readAheadBlocksByResult.WithLabelValues("error").Inc()
@@ -885,7 +909,6 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 					}
 				}
 			}
-			// TODO: exec txn and pre-fetch commitment keys. see also: `func (p *statePrefetcher) Prefetch` in geth
 		}
 
 	}
@@ -899,6 +922,17 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 		}
 		if stats.Errored {
 			return nil
+		}
+		if executeCommitment {
+			keys := readAheadCommitmentKeys(stats)
+			stats.CommitmentKeys = len(keys)
+			if len(keys) > 0 {
+				readAheadExecCommitmentKeys.AddInt(stats.CommitmentKeys)
+				ttx := tx.(kv.TemporalTx)
+				if err := readAheadPrefetchCommitment(ctx, db, ttx, keys); err != nil && ctx.Err() != nil {
+					return ctx.Err()
+				}
+			}
 		}
 		readAheadExecTransactions.AddInt(stats.Transactions)
 		for kind, n := range map[string]int{"account": stats.AccountsRead, "storage": stats.StorageRead, "code": stats.CodeRead} {
