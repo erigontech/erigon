@@ -1315,6 +1315,32 @@ func TestInvalidInclusionListRecheckDropsValidatedMark(t *testing.T) {
 	require.False(t, m.ExecModule.IsValidated(badBlock.Hash()))
 }
 
+// A re-check that finds the block invalid and then fails to purge it must not restore the mark.
+func TestInvalidInclusionListRecheckFailingAfterVerdictDropsValidatedMark(t *testing.T) {
+	t.Parallel()
+	const maxCancellationPoints = 64
+	droppedOnError := false
+	for limit := int64(0); limit <= maxCancellationPoints; limit++ {
+		m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+		chainPack, err := m.GenerateChain(1, nil)
+		require.NoError(t, err)
+		badBlock := tamperBlockGasUsed(t, chainPack.TopBlock, 21_000)
+		insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{badBlock.WithInclusionList(types.Transactions{signedInclusionListTxn(t, m)})})
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+		execmodule.MarkValidated(m.ExecModule, badBlock.Hash())
+
+		validation, err := m.ValidateChain(newLateCancelCtx(t.Context(), limit), badBlock)
+		if err == nil {
+			require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
+			require.True(t, droppedOnError, "no failure after the invalid verdict dropped the mark")
+			return
+		}
+		droppedOnError = droppedOnError || !m.ExecModule.IsValidated(badBlock.Hash())
+	}
+	t.Fatalf("ValidateChain was still cancelled after %d cancellation points", maxCancellationPoints)
+}
+
 func TestInclusionListRecheckOfSideForkKeepsExtendingFork(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))

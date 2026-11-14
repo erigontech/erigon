@@ -514,7 +514,7 @@ const nextForkBanner = `
 =============================================== GLAMSTERDAM ACTIVATED ===============================================
 `
 
-func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (result ValidationResult, err error) {
+func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (ValidationResult, error) {
 	defer validateChainDuration.ObserveDuration(time.Now())
 	blockHash, blockNumber := block.Hash(), block.NumberU64()
 	if !e.semaphore.TryAcquire(1) {
@@ -603,10 +603,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (res
 			LatestValidHash:  common.Hash{},
 		}, nil
 	}
+	var foundInvalid bool
 	if e.inclusionListPending(blockHash) && e.forkValidator.ForgetValidHash(blockHash) {
 		// Re-execution cannot change validity, so a re-check that gives no verdict keeps the old one.
 		defer func() {
-			if result.ValidationStatus != ExecutionStatusBadBlock && !e.forkValidator.IsValidated(blockHash) {
+			if !foundInvalid && !e.forkValidator.IsValidated(blockHash) {
 				e.forkValidator.markValidated(blockHash)
 			}
 		}()
@@ -707,6 +708,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (res
 		validationStatus = ExecutionStatusMissingSegment
 	}
 	isInvalidChain := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
+	foundInvalid = isInvalidChain
 	// Only open a second tx when we actually need to write (bad-chain purge).
 	// On the valid-chain path (the common case at tip) opening + empty-committing
 	// a second RwTx just produces no-op commits with openTxs>=2, pinning freelist
@@ -737,7 +739,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (res
 		e.nextForkActivated = true
 		e.logger.Info(nextForkBanner)
 	}
-	result = ValidationResult{
+	result := ValidationResult{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  lvh,
 	}
