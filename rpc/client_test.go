@@ -1145,3 +1145,24 @@ func TestClientServesReverseCalls(t *testing.T) {
 	require.Nil(t, resp.Error)
 	require.JSONEq(t, `"hi"`, string(resp.Result))
 }
+
+// A call the remote end made to the client is canceled when the connection is
+// closed.
+func TestClientCancelCallsOnDisconnect(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	clientConn, remoteConn := net.Pipe()
+	defer remoteConn.Close()
+	client := initClient(NewCodec(clientConn), logger)
+	svc := newWaitService()
+	if err := client.RegisterName("test", svc); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_, _ = remoteConn.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"test_wait"}`))
+	}()
+	<-svc.started
+	remoteConn.Close()
+	svc.awaitDone(t)
+	client.Close()
+}
