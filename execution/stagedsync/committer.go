@@ -45,8 +45,9 @@ type commitComputeRequest struct{}
 // pendingBlock is a blockRequest the calculator has received but not yet
 // computed, together with the mode selected for it.
 type pendingBlock struct {
-	req  *blockRequest
-	mode calcMode
+	req    *blockRequest
+	mode   calcMode
+	failed bool
 }
 
 // computedAheadCount counts BAL compute-ahead computations across all calculators;
@@ -183,8 +184,8 @@ type commitmentCalculator struct {
 
 	// lastComputedAheadBlock is the highest block computed ahead so far.
 	// Compute-ahead reads the commitment domain for its baseline, so it may only
-	// run when the preceding block advanced the domain (was itself computed ahead,
-	// or is the batch's first block) — otherwise it would read a stale trie
+	// run when the preceding block's commitment is already in the domain (or the
+	// block is the batch's first) — otherwise it would read a stale trie
 	// across a block whose BAL sidecar was missing.
 	lastComputedAheadBlock uint64
 	hasComputedAhead       bool
@@ -353,7 +354,7 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 			// select can pick the result first and let handleBlockRequest drop the
 			// request as stale (blockNum <= lastBlockResultSeen). That drops the
 			// block's compute-ahead, and the contiguity gate then keeps compute-ahead
-			// off for the rest of the batch.
+			// off for the remaining pre-window blocks.
 			reqs = cc.drainBlockRequests(ctx, reqs)
 			cc.handleMessage(ctx, result)
 		case req, ok := <-reqs:
@@ -422,6 +423,10 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				base = cc.blockBase
 			}
 		}
+		cc.maybeComputeAhead(ctx, r.blockNum)
+		if pb, ok := cc.pending[r.blockNum]; ok && pb.failed {
+			return
+		}
 		if r.writes != nil && !r.writes.IsEmpty() {
 			cc.balBlock = r.rules != nil && r.rules.IsAmsterdam
 			cc.hashAtFold = !perBlock
@@ -444,6 +449,14 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		}
 
 	case *blockResult:
+		if pb, ok := cc.pending[r.BlockNum]; (ok && pb.failed) || (r.Err != nil && cc.computedAhead[r.BlockNum]) {
+			if upd := cc.doms.GetCommitmentContext().PeekPendingUpdate(); upd != nil && upd.BlockNum == r.BlockNum {
+				cc.doms.GetCommitmentContext().ResetPendingUpdates()
+			}
+			cc.forgetBlock(r.BlockNum)
+			cc.clearTouched()
+			return
+		}
 		// A rejected block: skip commitment. sd.mem may hold partial-tx writes
 		// from txs that succeeded before the failing one (root would be
 		// non-canonical), and emitting an ErrWrongTrieRoot here would race the
@@ -462,9 +475,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		switch {
 		case cc.computedAhead[r.BlockNum]:
 			// Already computed ahead from its BAL. In shadow mode, recompute
-			// incrementally and cross-check; otherwise the verified root was already
-			// published. Either way clear the per-block dirty flags so a later
-			// transition compute doesn't re-flush them.
+			// incrementally and cross-check; otherwise the root is verified, and was
+			// published unless the block owns a changeset. Either way clear the
+			// per-block dirty flags so a later transition compute doesn't re-flush them.
 			if dbg.BALShadowCompute {
 				cc.shadowCrossCheck(ctx, r)
 			} else {
@@ -509,9 +522,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
 				"overlap", overlap, "gap", gap, "residual", residual)
 		}
-		delete(cc.pending, r.BlockNum)
-		delete(cc.computedAhead, r.BlockNum)
-		delete(cc.balRoots, r.BlockNum)
+		cc.forgetBlock(r.BlockNum)
 		cc.maybeComputeAhead(ctx, r.BlockNum+1)
 
 	case *commitComputeRequest:
@@ -564,21 +575,18 @@ func (cc *commitmentCalculator) computeAheadGateOpen(n uint64) bool {
 	return cc.hasSeenBlockResult && cc.lastBlockResultSeen+1 >= n
 }
 
+func (cc *commitmentCalculator) forgetBlock(n uint64) {
+	delete(cc.pending, n)
+	delete(cc.computedAhead, n)
+	delete(cc.balRoots, n)
+}
+
 // maybeComputeAhead computes block n from its BAL when it is BAL-driven, the
 // compute-ahead gate is open, and doing so is safe — overlapping with block n's
 // execution. Idempotent (computedAhead guard).
-//
-// Two safety restrictions:
-//   - Only pre-window blocks (!ownsChangeset) compute ahead, under computeIsolated
-//     (nil accumulator), so nothing leaks into a later window block's changeset.
-//     A changeset-owning block computes incrementally at its own boundary.
-//   - Compute ahead only contiguously from the batch's first block: n's baseline
-//     comes from the commitment domain, which only a prior compute-ahead (or the
-//     prior cycle) advanced. Computing across a missing-BAL block would read a
-//     stale trie.
 func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64) {
 	pb, ok := cc.pending[n]
-	if !ok || pb.mode != calcModeBALDriven || cc.computedAhead[n] {
+	if !ok || pb.failed || pb.mode != calcModeBALDriven || cc.computedAhead[n] {
 		return
 	}
 	// Cap compute-ahead at the batch's coalesce block so commitment cannot outrun
@@ -586,13 +594,17 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 	if sc, stopping := stopCauseOf(cc.signalCtx); stopping && n > sc.block {
 		return
 	}
-	if cc.ownsChangeset(n) {
-		return
-	}
 	if !cc.computeAheadGateOpen(n) {
 		return
 	}
-	if n != cc.firstBlockNum && !(cc.hasComputedAhead && cc.lastComputedAheadBlock == n-1) {
+	if cc.ownsChangeset(n) {
+		if cc.branchPrefetch == nil || cc.doms.GetChangesetByHash(n, pb.req.blockHash) == nil || dbg.BALShadowCompute || commitmentdb.ParentReadsWanted() {
+			return
+		}
+		if n != cc.firstBlockNum && !(cc.hasComputed && cc.lastComputedBlock == n-1) {
+			return
+		}
+	} else if n != cc.firstBlockNum && !(cc.hasComputedAhead && cc.lastComputedAheadBlock == n-1) {
 		return
 	}
 	cc.computeBlockFromBAL(ctx, pb)
@@ -610,43 +622,47 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		StateRoot: req.stateRoot,
 		lastTxNum: req.lastTxNum,
 	}
+	fail := func(err error) {
+		pb.failed = true
+		cc.fail(ctx, br, err)
+	}
 	vm := state.NewVersionMap(req.bal)
 	vm.SetBaseTxNum(req.firstTxNum)
 	eip161Enabled := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
 	isAura := cc.chainConfig.Aura != nil
 	base := cc.asOfReader.dr.StateReaderAt(req.firstTxNum)
 	if ambiguous, err := vm.HasEmptyBaseAccount(eip161Enabled, isAura, base); err != nil {
-		cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
+		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	} else if ambiguous {
 		pb.mode = calcModeIncremental
 		return
 	}
 	if err := vm.SeedEmptyRemovals(eip161Enabled, isAura, base); err != nil {
-		cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
+		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	}
 	// A block straddling an unfrozen step edge must checkpoint at that edge, else
 	// the step's commitment .kv lags its account/storage .kv. The per-tx BAL lets
 	// compute-ahead do this mid-block.
 	if err := cc.checkpointStepsFromBAL(ctx, req, vm); err != nil {
-		cc.fail(ctx, br, err)
+		fail(err)
 		return
 	}
 	rh, flushOwn, err := cc.computeRootFromBAL(ctx, req, vm, math.MaxUint32, targetOf(br))
 	if err != nil {
-		cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
+		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	}
 	if !bytes.Equal(rh, req.stateRoot[:]) {
 		cc.doms.GetCommitmentContext().ResetPendingUpdates()
-		cc.fail(ctx, br, fmt.Errorf("%w: BAL-driven block %d root %x expected %x",
+		fail(fmt.Errorf("%w: BAL-driven block %d root %x expected %x",
 			ErrWrongTrieRoot, req.blockNum, rh, req.stateRoot))
 		return
 	}
 	if flushOwn != nil {
 		if err := flushOwn(); err != nil {
-			cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d flush: %w", req.blockNum, err))
+			fail(fmt.Errorf("BAL-driven compute-ahead block %d flush: %w", req.blockNum, err))
 			return
 		}
 	}
@@ -657,8 +673,10 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	computedAheadCount.Add(1)
 	cc.lastComputedBlock = req.blockNum
 	cc.hasComputed = true
-	// Shadow mode defers publish to the incremental cross-check; otherwise publish now.
-	if !dbg.BALShadowCompute {
+	if logNpPhases {
+		cc.logger.Info("[np-phase] ahead", "blk", req.blockNum, "window", cc.ownsChangeset(req.blockNum))
+	}
+	if !dbg.BALShadowCompute && !cc.ownsChangeset(req.blockNum) {
 		cc.publish(ctx, commitmentResult{blockNum: req.blockNum, blockHash: req.blockHash, txNum: req.lastTxNum, rootHash: rh})
 	}
 }
