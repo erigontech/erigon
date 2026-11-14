@@ -139,6 +139,17 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.extendingForkHeadHash = common.Hash{}
 }
 
+// ForgetValidHash reports whether hash was validated before it was forgotten.
+func (fv *ForkValidator) ForgetValidHash(hash common.Hash) bool {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	return fv.validHashes.Remove(hash)
+}
+
+func (fv *ForkValidator) markValidated(hash common.Hash) {
+	fv.validHashes.Add(hash, true)
+}
+
 // MergeExtendingFork merges the shared domains of the current extending fork into the current shared domains if fcu chooses its head hash as the fork choice.
 func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, target *Accumulation) error {
 	fv.lock.Lock()
@@ -316,6 +327,55 @@ func (fv *ForkValidator) ClearWithUnwind() {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	fv.clear()
+}
+
+type extendingFork struct {
+	sharedDom      *execctx.SharedDomains
+	accumulator    *shards.Accumulator
+	recentReceipts *shards.RecentReceipts
+	headHash       common.Hash
+	number         uint64
+}
+
+// detachExtendingFork moves the extending fork out of fv without closing it.
+// It returns nil when there is none or when hash is its head. The shared
+// validation notifications are copied out, since the next validation resets them.
+func (fv *ForkValidator) detachExtendingFork(hash common.Hash) *extendingFork {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	if fv.sharedDom == nil || fv.extendingForkHeadHash == hash {
+		return nil
+	}
+	f := &extendingFork{
+		sharedDom:      fv.sharedDom,
+		accumulator:    shards.NewAccumulator(),
+		recentReceipts: shards.NewRecentReceipts(512),
+		headHash:       fv.extendingForkHeadHash,
+		number:         fv.extendingForkNumber,
+	}
+	if fv.extendingForkNotifications != nil {
+		fv.extendingForkNotifications.Accumulator.CopyAndReset(f.accumulator)
+		fv.extendingForkNotifications.RecentReceipts.CopyAndReset(f.recentReceipts)
+	}
+	fv.sharedDom = nil
+	fv.extendingForkHeadHash = common.Hash{}
+	fv.extendingForkNumber = 0
+	return f
+}
+
+// restoreExtendingFork replaces the current extending fork with f.
+func (fv *ForkValidator) restoreExtendingFork(f *extendingFork) {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	fv.clear()
+	fv.sharedDom = f.sharedDom
+	fv.extendingForkHeadHash = f.headHash
+	fv.extendingForkNumber = f.number
+	fv.extendingForkNotifications = fv.executor.ValidationNotifications()
+	fv.extendingForkNotifications.Accumulator.Reset(0)
+	fv.extendingForkNotifications.RecentReceipts.Clear()
+	f.accumulator.CopyAndReset(fv.extendingForkNotifications.Accumulator)
+	f.recentReceipts.CopyAndReset(fv.extendingForkNotifications.RecentReceipts)
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.

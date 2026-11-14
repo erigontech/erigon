@@ -1,9 +1,11 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,7 +16,9 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -23,10 +27,14 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 type BlockReadAheader struct {
@@ -34,6 +42,12 @@ type BlockReadAheader struct {
 	headers *lru.Cache[common.Hash, *types.Header]
 	bodies  *lru.Cache[common.Hash, *types.Body]
 	bals    *lru.Cache[common.Hash, *types.BlockAccessListSidecar]
+	// inclusionLists is the only copy of each IL (never persisted), so unlike
+	// the other caches a miss cannot fall back to the DB.
+	inclusionLists *lru.Cache[common.Hash, inclusionListEntry]
+	// inclusionListResults is keyed by block and IL so that replacing a
+	// block's IL never hands the old IL's result to the new one.
+	inclusionListResults *lru.Cache[inclusionListKey, bool]
 
 	recoveries *lru.Cache[common.Hash, *SendersRecovery]
 
@@ -54,6 +68,35 @@ type BlockReadAheader struct {
 	stateCache *cache.StateCache
 }
 
+const (
+	inclusionListCapacity       = 96
+	inclusionListResultCapacity = 256
+)
+
+type inclusionListEntry struct {
+	txns types.Transactions
+	hash common.Hash
+}
+
+type inclusionListKey struct {
+	block common.Hash
+	il    common.Hash
+}
+
+// InclusionListHash identifies an IL by its txn hashes, independent of their order.
+func InclusionListHash(txns types.Transactions) common.Hash {
+	txnHashes := make([]common.Hash, len(txns))
+	for i, txn := range txns {
+		txnHashes[i] = txn.Hash()
+	}
+	slices.SortFunc(txnHashes, func(a, b common.Hash) int { return bytes.Compare(a[:], b[:]) })
+	buf := make([]byte, 0, len(txnHashes)*length.Hash)
+	for _, h := range txnHashes {
+		buf = append(buf, h[:]...)
+	}
+	return crypto.Keccak256Hash(buf)
+}
+
 func NewBlockReadAheader() *BlockReadAheader {
 	headers, err := lru.New[common.Hash, *types.Header](4)
 	if err != nil {
@@ -67,16 +110,26 @@ func NewBlockReadAheader() *BlockReadAheader {
 	if err != nil {
 		panic(err)
 	}
+	ils, err := lru.New[common.Hash, inclusionListEntry](inclusionListCapacity)
+	if err != nil {
+		panic(err)
+	}
+	ilResults, err := lru.New[inclusionListKey, bool](inclusionListResultCapacity)
+	if err != nil {
+		panic(err)
+	}
 	recoveries, err := lru.New[common.Hash, *SendersRecovery](4)
 	if err != nil {
 		panic(err)
 	}
 	return &BlockReadAheader{
-		recoveries: recoveries,
-		headers:    headers,
-		bodies:     bodies,
-		bals:       bals,
-		warmupGate: semaphore.NewWeighted(1),
+		recoveries:           recoveries,
+		headers:              headers,
+		bodies:               bodies,
+		bals:                 bals,
+		inclusionLists:       ils,
+		inclusionListResults: ilResults,
+		warmupGate:           semaphore.NewWeighted(1),
 	}
 }
 
@@ -355,6 +408,17 @@ func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal *type
 		return
 	}
 	bra.bals.Add(blockHash, bal)
+}
+
+func (bra *BlockReadAheader) AddInclusionList(blockHash common.Hash, il types.Transactions) {
+	if il == nil {
+		return
+	}
+	bra.inclusionLists.Add(blockHash, inclusionListEntry{txns: il, hash: InclusionListHash(il)})
+}
+
+func (bra *BlockReadAheader) SetInclusionListResult(blockHash, ilHash common.Hash, satisfied bool) {
+	bra.inclusionListResults.Add(inclusionListKey{block: blockHash, il: ilHash}, satisfied)
 }
 
 const balWarmupStorageChunkSize = 64
@@ -666,6 +730,33 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 
 func (bra *BlockReadAheader) ReadBodyWithTransactions(blockHash common.Hash) (*types.Body, bool) {
 	return bra.bodies.Get(blockHash)
+}
+
+func (bra *BlockReadAheader) ReadInclusionList(blockHash common.Hash) (types.Transactions, common.Hash, bool) {
+	cached, ok := bra.inclusionLists.Get(blockHash)
+	return cached.txns, cached.hash, ok
+}
+
+func (bra *BlockReadAheader) ReadInclusionListResult(blockHash, ilHash common.Hash) (bool, bool) {
+	return bra.inclusionListResults.Get(inclusionListKey{block: blockHash, il: ilHash})
+}
+
+// CheckInclusionList checks the IL cached for blockHash against the state after
+// blockTxns, unless a verdict for this block and IL is already cached.
+func (bra *BlockReadAheader) CheckInclusionList(gp *protocol.GasPool, blockHash common.Hash, blockTxns types.Transactions, stateReader state.StateReader, blockContext *evmtypes.BlockContext, chainConfig *chain.Config, vmConfig *vm.Config) error {
+	il, ilHash, ok := bra.ReadInclusionList(blockHash)
+	if !ok {
+		return nil
+	}
+	if _, checked := bra.ReadInclusionListResult(blockHash, ilHash); checked {
+		return nil
+	}
+	satisfied, err := protocol.CheckInclusionListTransactions(gp, blockTxns, il, stateReader, blockContext, chainConfig, vmConfig)
+	if err != nil {
+		return err
+	}
+	bra.SetInclusionListResult(blockHash, ilHash, satisfied)
+	return nil
 }
 
 func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types.Block, bool) {

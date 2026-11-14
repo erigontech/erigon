@@ -26,8 +26,8 @@ func encodeHashListRequest(hashes []common.Hash, limit int) ([]byte, error) {
 	return ssz2.MarshalSSZ(nil, list)
 }
 
-func encodeNewPayloadEnvelope(version clparams.StateVersion, payload *engine_types.ExecutionPayload, parentRoot common.Hash, requests []hexutil.Bytes) ([]byte, error) {
-	return ssz2.MarshalSSZ(nil, newPayloadEnvelopeSchema(version, payload, &parentRoot, newTransactionsSSZ(requests))...)
+func encodeNewPayloadEnvelope(version clparams.StateVersion, payload *engine_types.ExecutionPayload, parentRoot common.Hash, requests, inclusionList []hexutil.Bytes) ([]byte, error) {
+	return ssz2.MarshalSSZ(nil, newPayloadEnvelopeSchema(version, payload, &parentRoot, newTransactionsSSZ(requests), newTransactionsSSZ(inclusionList))...)
 }
 
 func encodeForkchoiceUpdate(version clparams.StateVersion, state *engine_types.ForkChoiceState, attrs *engine_types.PayloadAttributes, custody []byte) ([]byte, error) {

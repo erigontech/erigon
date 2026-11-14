@@ -179,7 +179,7 @@ func TestNewPayloadBoundsDerivedBlobHashAllocations(t *testing.T) {
 	measure := func(derive bool) uint64 {
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
-		status, err := srv.newPayload(ctx, payload, []common.Hash{}, &common.Hash{}, nil, clparams.DenebVersion, derive)
+		status, err := srv.newPayload(ctx, payload, []common.Hash{}, &common.Hash{}, nil, nil, clparams.DenebVersion, derive)
 		runtime.ReadMemStats(&after)
 		require.NoError(t, err)
 		require.Equal(t, engine_types.InvalidStatus, status.Status)
@@ -326,6 +326,9 @@ func TestNewPayloadRejectsMoreTransactionsThanGasLimitAllows(t *testing.T) {
 
 			var status *engine_types.PayloadStatus
 			switch {
+			case test.frame:
+				payload.BlockAccessList = &hexutil.Bytes{0xc0}
+				status, err = srv.NewPayloadV6(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{}, []hexutil.Bytes{})
 			case test.amsterdam:
 				payload.BlockAccessList = &hexutil.Bytes{0xc0}
 				status, err = srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, header.ParentBeaconBlockRoot, []hexutil.Bytes{})

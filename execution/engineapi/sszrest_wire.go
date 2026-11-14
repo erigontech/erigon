@@ -46,7 +46,7 @@ const (
 
 // These are implemented wire schemas, independent of the chain's fork schedule.
 // Each operation applies its own fork activation rules after decoding.
-var engineForkOrder = []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"}
+var engineForkOrder = []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam", "bogota"}
 
 func engineForkVersion(name string) (clparams.StateVersion, bool) {
 	switch name {
@@ -62,6 +62,8 @@ func engineForkVersion(name string) (clparams.StateVersion, bool) {
 		return clparams.FuluVersion, true
 	case "amsterdam":
 		return clparams.GloasVersion, true
+	case "bogota":
+		return clparams.HezeVersion, true
 	default:
 		return 0, false
 	}
@@ -69,6 +71,8 @@ func engineForkVersion(name string) (clparams.StateVersion, bool) {
 
 func forkNameAtTime(cfg *chain.Config, time uint64) string {
 	switch {
+	case cfg.IsBogota(time):
+		return "bogota"
 	case cfg.IsAmsterdam(time):
 		return "amsterdam"
 	case cfg.IsOsaka(time):
@@ -139,25 +143,31 @@ const (
 // ExecutionPayloadEnvelope is the request body of POST /payloads.
 // parent_beacon_block_root exists since Cancun, execution_requests since
 // Prague; expected blob versioned hashes are recomputed from the transactions.
-func newPayloadEnvelopeSchema(version clparams.StateVersion, payload *engine_types.ExecutionPayload, parentRoot *common.Hash, requests *solid.TransactionsSSZ) []any {
+func newPayloadEnvelopeSchema(version clparams.StateVersion, payload *engine_types.ExecutionPayload, parentRoot *common.Hash, requests, inclusionList *solid.TransactionsSSZ) []any {
 	switch {
 	case version < clparams.DenebVersion:
 		return []any{payload}
 	case version < clparams.ElectraVersion:
 		return []any{payload, parentRoot[:]}
-	default:
+	case version < clparams.HezeVersion:
 		return []any{payload, parentRoot[:], requests}
+	default:
+		return []any{payload, parentRoot[:], requests, inclusionList}
 	}
 }
 
-func decodeNewPayloadEnvelope(buf []byte, version clparams.StateVersion) (*engine_types.ExecutionPayload, common.Hash, []hexutil.Bytes, error) {
+func decodeNewPayloadEnvelope(buf []byte, version clparams.StateVersion) (*engine_types.ExecutionPayload, common.Hash, []hexutil.Bytes, []hexutil.Bytes, error) {
 	payload := engine_types.NewExecutionPayloadSSZ(version)
 	parentRoot := common.Hash{}
 	requests := solid.NewTransactionsSSZWithLimits(sszMaxExecutionRequests, sszMaxBytesPerExecutionRequest)
-	if err := ssz2.UnmarshalSSZStrict(buf, int(version), newPayloadEnvelopeSchema(version, payload, &parentRoot, requests)...); err != nil {
-		return nil, common.Hash{}, nil, err
+	inclusionList := &solid.TransactionsSSZ{}
+	if err := ssz2.UnmarshalSSZStrict(buf, int(version), newPayloadEnvelopeSchema(version, payload, &parentRoot, requests, inclusionList)...); err != nil {
+		return nil, common.Hash{}, nil, nil, err
 	}
-	return payload, parentRoot, transactionsBytes(requests), nil
+	if version < clparams.HezeVersion {
+		return payload, parentRoot, transactionsBytes(requests), nil, nil
+	}
+	return payload, parentRoot, transactionsBytes(requests), transactionsBytes(inclusionList), nil
 }
 
 // Paris attributes have a fixed SSZ size. Withdrawals make later versions

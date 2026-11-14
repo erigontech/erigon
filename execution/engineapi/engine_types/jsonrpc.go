@@ -165,10 +165,25 @@ type ExecutionPayloadBodyV2 struct {
 }
 
 type PayloadStatus struct {
-	Status          EngineStatus      `json:"status"`
-	ValidationError *StringifiedError `json:"validationError"`
-	LatestValidHash *common.Hash      `json:"latestValidHash"`
-	CriticalError   error             `json:"-"`
+	Status                 EngineStatus      `json:"status"`
+	ValidationError        *StringifiedError `json:"validationError"`
+	LatestValidHash        *common.Hash      `json:"latestValidHash"`
+	CriticalError          error             `json:"-"`
+	InclusionListSatisfied *bool             `json:"inclusionListSatisfied,omitempty"`
+	// SSZVersion selects the JSON shape too: from HezeVersion on, the response
+	// is PayloadStatusV2 and always carries inclusionListSatisfied, even as null.
+	SSZVersion clparams.StateVersion `json:"-"`
+}
+
+func (s PayloadStatus) MarshalJSON() ([]byte, error) {
+	type alias PayloadStatus
+	if s.SSZVersion.Before(clparams.HezeVersion) {
+		return json.Marshal(alias(s))
+	}
+	return json.Marshal(struct {
+		alias
+		InclusionListSatisfied *bool `json:"inclusionListSatisfied"`
+	}{alias(s), s.InclusionListSatisfied})
 }
 
 type ForkChoiceUpdatedResponse struct {

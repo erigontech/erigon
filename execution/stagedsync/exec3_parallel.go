@@ -3540,6 +3540,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			ibs.StartAccessRecording()
 
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
+				if pe.cfg.readAheader != nil && be.tasks[0].Version().TxIndex <= 0 {
+					ilReader := state.NewVersionedStateReader(finalVersion.TxIndex, state.ReadSet{}, be.versionMap, reader)
+					if err := pe.cfg.readAheader.CheckInclusionList(be.gasPool, be.blockHash, tt.Txs, ilReader, &tt.EvmBlockContext, pe.cfg.chainConfig, pe.cfg.vmConfig); err != nil {
+						return be.operationalBlockResult(fmt.Errorf("can't check inclusion list for block %d: %w", be.blockNum, err)), nil
+					}
+				}
+
 				// Syscalls share the main ibs so their writes land in
 				// ibs.VersionedWrites and reach finalizeWrites. A separate syscallIBS
 				// would strand those writes and never feed them to the commitment

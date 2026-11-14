@@ -66,7 +66,9 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 	}
 	defer e.semaphore.Release(1)
 	e.logger.Debug("ethereumExecutionModule.InsertBlocks: semaphore acquired", "wait", time.Since(start))
-	e.forkValidator.ClearWithUnwind()
+	if !e.allValidated(blocks) {
+		e.forkValidator.ClearWithUnwind()
+	}
 	frozenBlocks := e.blockReader.FrozenBlocks()
 
 	// Open a read-only tx for the base data; writes accumulate in the
@@ -173,6 +175,10 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			}
 			e.readAheader.AddBlockAccessList(blockHash, blockAccessList)
 		}
+		inclusionList := block.InclusionList()
+		if inclusionList != nil {
+			e.readAheader.AddInclusionList(blockHash, inclusionList)
+		}
 		e.logger.Trace("Inserted block", "hash", blockHash, "number", header.Number)
 	}
 
@@ -184,4 +190,13 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		}
 	}
 	return ExecutionStatusSuccess, nil
+}
+
+func (e *ExecModule) allValidated(blocks []*types.Block) bool {
+	for _, block := range blocks {
+		if !e.forkValidator.IsValidated(block.Hash()) {
+			return false
+		}
+	}
+	return true
 }

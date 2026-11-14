@@ -412,6 +412,13 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			if txTask.IsBlockEnd() && txTask.BlockNumber() > 0 { //nolint:gocritic
 				// fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
+				if se.cfg.readAheader != nil && startTxIndex == 0 {
+					ilReader := state.NewReaderV3(se.rs.Domains().AsStateGetter(se.applyTx, execctxapi.StateGetterOptions{}))
+					if err := se.cfg.readAheader.CheckInclusionList(gasPool, txTask.BlockHash(), txTask.Txs, ilReader, &txTask.EvmBlockContext, se.cfg.chainConfig, se.cfg.vmConfig); err != nil {
+						return fmt.Errorf("can't check inclusion list for block %d: %w", txTask.BlockNumber(), err)
+					}
+				}
+
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsStateGetter(se.applyTx, execctxapi.StateGetterOptions{})))
 				defer ibs.Close()
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)

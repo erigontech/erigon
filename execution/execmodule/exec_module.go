@@ -517,7 +517,7 @@ const nextForkBanner = `
 =============================================== GLAMSTERDAM ACTIVATED ===============================================
 `
 
-func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (ValidationResult, error) {
+func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (result ValidationResult, err error) {
 	defer validateChainDuration.ObserveDuration(time.Now())
 	blockHash, blockNumber := block.Hash(), block.NumberU64()
 	if !e.semaphore.TryAcquire(1) {
@@ -532,6 +532,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 	}
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
+	if e.forkValidator.IsValidated(blockHash) && e.inclusionListPending(blockHash) {
+		if kept := e.forkValidator.detachExtendingFork(blockHash); kept != nil {
+			defer e.forkValidator.restoreExtendingFork(kept)
+		}
+	}
 	e.forkValidator.ClearWithUnwind()
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	header, body := block.HeaderNoCopy(), block.Body()
@@ -540,7 +545,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 		payloadExecuted    bool
 		canonical          bool
 		missingSegment     bool
-		err                error
 	)
 	alreadyExecuted := func(tx kv.Getter) (bool, error) {
 		var err error
@@ -601,6 +605,14 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 			ValidationStatus: ExecutionStatusTooFarAway,
 			LatestValidHash:  common.Hash{},
 		}, nil
+	}
+	if e.inclusionListPending(blockHash) && e.forkValidator.ForgetValidHash(blockHash) {
+		// Re-execution cannot change validity, so a re-check that gives no verdict keeps the old one.
+		defer func() {
+			if result.ValidationStatus != ExecutionStatusBadBlock && !e.forkValidator.IsValidated(blockHash) {
+				e.forkValidator.markValidated(blockHash)
+			}
+		}()
 	}
 	// Finality fixes canonical hashes even after their unwind history is pruned.
 	if payloadExecuted || (!canonical && e.forkValidator.IsValidated(blockHash)) {
@@ -728,7 +740,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 		e.nextForkActivated = true
 		e.logger.Info(nextForkBanner)
 	}
-	result := ValidationResult{
+	result = ValidationResult{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  lvh,
 	}
@@ -736,6 +748,15 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 		result.ValidationError = validationError.Error()
 	}
 	return result, nil
+}
+
+func (e *ExecModule) inclusionListPending(blockHash common.Hash) bool {
+	_, ilHash, ok := e.readAheader.ReadInclusionList(blockHash)
+	if !ok {
+		return false
+	}
+	_, checked := e.readAheader.ReadInclusionListResult(blockHash, ilHash)
+	return !checked
 }
 
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {

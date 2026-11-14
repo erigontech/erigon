@@ -26,12 +26,14 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -118,6 +120,30 @@ func TestSerialFinalizeClassifiesRulesEngineError(t *testing.T) {
 	}
 }
 
+func TestSerialBlockEndChecksInclusionList(t *testing.T) {
+	se, task := newSerialFinalizeTestExec(t, ethash.NewFaker())
+	se.cfg.readAheader = exec.NewBlockReadAheader()
+	task.Header.ReceiptHash = empty.RootHash
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	omitted, err := types.SignTx(
+		types.NewTransaction(0, common.Address{}, uint256.NewInt(0), params.TxGas, uint256.NewInt(0), nil),
+		*types.LatestSignerForChainID(se.cfg.chainConfig.ChainID), key,
+	)
+	require.NoError(t, err)
+	blockHash := task.BlockHash()
+	se.cfg.readAheader.AddInclusionList(blockHash, types.Transactions{omitted})
+
+	_, err = se.executeBlock(t.Context(), []exec.Task{task}, true)
+	require.NoError(t, err)
+
+	_, ilHash, ok := se.cfg.readAheader.ReadInclusionList(blockHash)
+	require.True(t, ok)
+	satisfied, checked := se.cfg.readAheader.ReadInclusionListResult(blockHash, ilHash)
+	require.True(t, checked)
+	require.False(t, satisfied)
+}
+
 // failingAccountTemporalTx fails GetLatest for one account in the Accounts domain and
 // passes everything else through, so a finalize-time beneficiary read surfaces as a
 // state-read error rather than a block verdict.
@@ -177,4 +203,29 @@ func TestWarmTxsHashesSkipsAuthListAboveGasLimit(t *testing.T) {
 	}
 	require.NotNil(t, setCode(1_000_000, 100).RecoveredAuthorities(), "a list the gas limit can pay for is warmed")
 	require.Nil(t, setCode(21_000, 1_000).RecoveredAuthorities(), "a list above the gas limit is left to the executor")
+}
+
+func TestSerialResumedBlockEndLeavesInclusionListUnchecked(t *testing.T) {
+	se, task := newSerialFinalizeTestExec(t, ethash.NewFaker())
+	se.cfg.readAheader = exec.NewBlockReadAheader()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	signer := *types.LatestSignerForChainID(se.cfg.chainConfig.ChainID)
+	included, err := types.SignTx(types.NewTransaction(0, common.Address{}, uint256.NewInt(0), params.TxGas, uint256.NewInt(0), nil), signer, key)
+	require.NoError(t, err)
+	omitted, err := types.SignTx(types.NewTransaction(1, common.Address{}, uint256.NewInt(0), params.TxGas, uint256.NewInt(0), nil), signer, key)
+	require.NoError(t, err)
+	task.Txs = types.Transactions{included}
+	task.TxIndex = 1
+	task.TxNum = 2
+	blockHash := task.BlockHash()
+	se.cfg.readAheader.AddInclusionList(blockHash, types.Transactions{omitted})
+
+	_, err = se.executeBlock(t.Context(), []exec.Task{task}, true)
+	require.NoError(t, err)
+
+	_, ilHash, ok := se.cfg.readAheader.ReadInclusionList(blockHash)
+	require.True(t, ok)
+	_, checked := se.cfg.readAheader.ReadInclusionListResult(blockHash, ilHash)
+	require.False(t, checked)
 }
