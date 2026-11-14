@@ -192,3 +192,62 @@ func (be *blockExecutor) noteCommitted(tx int) {
 		cp.pre += pp.Sub(cF)
 	}
 }
+
+// Spine split (NEWPAYLOAD_PHASES only): exec-loop serial time per named part, summed per block.
+// Each spMark charges the time since the previous mark to its part.
+const (
+	spPre     = iota // block lookup, changeset accumulator
+	spRec            // result bookkeeping, RecordReads
+	spIdx            // indexReads
+	spDirty          // markReadersDirty of the worker writes
+	spWrec           // RecordWrites, re-incarnation write diff
+	spQueue          // validate/exec task bookkeeping
+	spVal            // dep-order validation and its bookkeeping
+	spRevDep         // revalidateCommittedDependents, self-loop re-exec signal
+	spReval          // finalize-boundary re-validation
+	spCharge         // charge-at-validation sender
+	spFee            // calcFees, tip flush
+	spSeal           // MarkWritesComplete, SealUpTo
+	spFinGas         // receipt offsets, gas pool, state reader
+	spReceipt        // execResult.finalize
+	spFlush          // merge finalize reads/writes, FlushVersionedWrites, markReadersDirty
+	spView           // WithoutVanished, write view, publish queue
+	spCommit         // noteCommitted, signalCommitted wake pushes
+	spSched          // scheduleExecution
+	spPub            // publish bookkeeping, receipt copy
+	spSend           // sendResult to the apply loop
+	spBlkEnd         // block-end section
+	spOther          // rest of the result step
+	spParts
+)
+
+var spNames = [spParts]string{"pre", "rec", "idx", "dirty", "wrec", "queue", "val", "revdep", "reval", "charge", "fee", "seal", "fingas", "receipt", "flush", "view", "commit", "sched", "pub", "send", "blkend", "other"}
+
+type spineParts struct {
+	last time.Time
+	acc  [spParts]time.Duration
+	n    int
+}
+
+func (be *blockExecutor) spStart(t0 time.Time) {
+	if logNpPhases {
+		be.sp.last = t0
+		be.sp.n++
+		be.spMark(spPre)
+	}
+}
+
+func (be *blockExecutor) spMark(part int) {
+	if !logNpPhases || be.sp.last.IsZero() {
+		return
+	}
+	now := time.Now()
+	be.sp.acc[part] += now.Sub(be.sp.last)
+	be.sp.last = now
+}
+
+// spStop charges the rest of the result step to part; marks outside a step are no-ops.
+func (be *blockExecutor) spStop(part int) {
+	be.spMark(part)
+	be.sp.last = time.Time{}
+}

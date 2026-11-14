@@ -1144,6 +1144,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					if !cp.lastCommit.IsZero() {
 						tail = time.Since(cp.lastCommit)
 					}
+					spkv := []any{"blk", blockResult.BlockNum, "nRes", blockExecutor.sp.n}
+					for i, d := range blockExecutor.sp.acc {
+						spkv = append(spkv, spNames[i], d)
+					}
+					pe.logger.Info("[np-phase] spine", spkv...)
 					pe.logger.Info("[np-phase] crit", "blk", blockResult.BlockNum, "spineOnly", cp.spineOnly, "spine", cp.spine, "handoff", cp.handoff,
 						"first", cp.work[workFirst], "rerun", cp.work[workRerun], "recheck", cp.work[workRecheck], "wake", cp.wake, "pre", cp.pre, "tail", tail,
 						"nSpineOnly", cp.steps[0], "nSent", cp.steps[1], "nWork", cp.steps[2], "nFirst", cp.workSteps3[workFirst], "nRerun", cp.workSteps3[workRerun], "nRecheck", cp.workSteps3[workRecheck])
@@ -1597,6 +1602,10 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) error {
 // processSingleResult routes one worker result to its block executor's
 // nextResult.
 func (pe *parallelExecutor) processSingleResult(ctx context.Context, applyTx kv.TemporalTx, txResult *exec.TxResult) (*blockResult, error) {
+	var t0 time.Time
+	if logNpPhases {
+		t0 = time.Now()
+	}
 	pe.RLock()
 	blockExecutor, ok := pe.blockExecutors[txResult.Version().BlockNum]
 	pe.RUnlock()
@@ -1610,7 +1619,14 @@ func (pe *parallelExecutor) processSingleResult(ctx context.Context, applyTx kv.
 	// preceding blockResult to trigger the fast-path install above).
 	pe.ensureChangesetAccumulator(txResult.Version().BlockNum, blockExecutor.blockHash)
 
-	return blockExecutor.nextResult(ctx, pe, txResult, applyTx)
+	blockExecutor.spStart(t0)
+	r, err := blockExecutor.nextResult(ctx, pe, txResult, applyTx)
+	if r != nil {
+		blockExecutor.spStop(spBlkEnd)
+	} else {
+		blockExecutor.spStop(spOther)
+	}
+	return r, err
 }
 
 func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelCauseFunc, error) {
@@ -2633,6 +2649,7 @@ type blockExecutor struct {
 	execCpuNanos atomic.Int64
 	idleState    blockIdleState
 	crit         critPath
+	sp           spineParts
 
 	// coinbase is the block's fee recipient, cached from the first tx result so
 	// dependency-ordered validation can gate coinbase readers.
@@ -2897,10 +2914,12 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 		}
 	}
 
+	be.spMark(spFinGas)
 	_, addReads, finalizeWrites, err := txResult.finalize(cumulativeGasUsed, firstLogIndex, pe.cfg.engine, be.versionMap, *stateReader)
 	if err != nil {
 		return nil, err
 	}
+	be.spMark(spReceipt)
 	addWrites := finalizeWrites
 
 	// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
@@ -2921,6 +2940,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 		be.markReadersDirty(tx, merged)
 	}
 
+	be.spMark(spFlush)
 	// A read-only versionMap-slice view over the tx's raw write-set; apply and
 	// the calculator resolve each account's base from the versionMap.
 	rawWrites, err := state.WithoutVanished(be.blockIO.WriteSet(txVersion.TxIndex), be.versionMap, txVersion.TxIndex, txTask.Rules().IsAmsterdam, *stateReader)
@@ -2934,6 +2954,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 	be.finalizedResults[tx] = txResult
 	txResult.cumulativeBlobGasUsed = be.blobGasUsed
 	be.publishTasks.pushPending(tx)
+	be.spMark(spView)
 	return nil, nil
 }
 
@@ -2972,6 +2993,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				delete(be.revalidate, tx)
 			}
 		}
+		be.spMark(spReval)
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult.Err == nil {
 			taskVer, ok := txResult.Task.(*taskVersion)
 			if !ok {
@@ -3012,6 +3034,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				// the fee onto the stale pre-charge balance when the sender is the fee recipient.
 				txResult.TxOut = ownedWrites
 			}
+			be.spMark(spCharge)
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
 			if err != nil {
 				return nil, err
@@ -3028,6 +3051,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				be.markReadersDirty(tx, tipWrites)
 			}
 		}
+		be.spMark(spFee)
 		be.coinbaseFlushedUpTo = tx
 		// Promote the whole tx Estimate->Done and seal in one step. Done is granted
 		// only at the seal frontier, so no committed-dependent re-exec can downgrade a
@@ -3037,12 +3061,14 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 			be.versionMap.MarkWritesComplete(be.blockIO.WriteSet(txVersion.TxIndex))
 			be.versionMap.SealUpTo(txVersion.TxIndex)
 		}
+		be.spMark(spSeal)
 
 		if r, ferr := be.finalizeValidatedTx(pe, applyTx, tx, txTask, txResult, txVersion, stateReader); ferr != nil || r != nil {
 			return r, ferr
 		}
 		be.noteCommitted(tx)
 		be.signalCommitted(tx)
+		be.spMark(spCommit)
 	}
 	return nil, nil
 }
@@ -3238,6 +3264,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 		toValidate := be.validateTasks.takePendingWhere(func(t int) bool {
 			return be.readyForDepOrderValidation(t)
 		})
+		be.spMark(spVal)
 
 		for _, tx := range toValidate {
 			txResult := be.results[tx]
@@ -3270,9 +3297,12 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 				if ok {
 					delete(be.writeChangedPrev, tx)
 				}
+				be.spMark(spVal)
 				be.revalidateCommittedDependents(tx, prev)
+				be.spMark(spRevDep)
 				continue
 			}
+			be.spMark(spVal)
 
 			be.cntValidationFail++
 			be.execFailed[tx]++
@@ -3282,6 +3312,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			// place; leave execTasks complete so the re-sent result re-validates
 			// without going through the dispatch path.
 			be.signalSelfLoopReexec(tx)
+			be.spMark(spRevDep)
 		}
 
 		if r, ferr := be.advanceCoinbaseAndFinalize(pe, applyTx, stateReader); ferr != nil || r != nil {
@@ -3331,10 +3362,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	txVersion := res.Version()
 
 	be.blockIO.RecordReads(txVersion, res.TxIn)
+	be.spMark(spRec)
 	be.indexReads(tx, res.TxIn)
+	be.spMark(spIdx)
 	// This tx's writes just published; flag any successor that already read one of
 	// its cells for finalize-boundary re-validation.
 	be.markReadersDirty(tx, res.TxOut)
+	be.spMark(spDirty)
 
 	if res.Version().Incarnation == 0 {
 		be.blockIO.RecordWrites(txVersion, res.TxOut)
@@ -3362,6 +3396,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 	}
 
+	be.spMark(spWrec)
 	if dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex) {
 		tracePrefix := fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
 		fmt.Println(tracePrefix, "RD", be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", be.blockIO.WriteSet(txVersion.TxIndex).Count())
@@ -3380,6 +3415,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		be.execTasks.removeDependency(tx)
 		be.noteDispatchState()
 	}
+	be.spMark(spQueue)
 
 	// do validations ...
 	var stateReader state.StateReader
@@ -3390,6 +3426,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	maxValidated := be.validateTasks.maxComplete()
 	be.scheduleExecution(ctx, pe)
+	be.spMark(spSched)
 
 	if be.publishTasks.minPending() != -1 {
 		toPublish := make(sort.IntSlice, 0, 2)
@@ -3453,9 +3490,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.applyCount += applyResult.writes.Count()
 			}
 
+			be.spMark(spPub)
 			if err := be.sendResult(ctx, &applyResult, false); err != nil {
 				return nil, err
 			}
+			be.spMark(spSend)
 		}
 	}
 
