@@ -40,6 +40,7 @@ import (
 // Per the beacon-APIs spec, Uint64 fields in ValidatorIdentityResponse must be
 // serialized as JSON strings. Regression test for erigon#20562.
 func TestValidatorIdentityResponseJSONUint64AsString(t *testing.T) {
+	t.Parallel()
 	v := &validatorIdentityResponse{Index: 1, ActivationEpoch: 1}
 	got, err := json.Marshal(v)
 	require.NoError(t, err)
@@ -48,6 +49,7 @@ func TestValidatorIdentityResponseJSONUint64AsString(t *testing.T) {
 }
 
 func TestHeadValidatorsSlowClientDoesNotBlockHeadStatePublish(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	manager, ok := syncedData.(*synced_data.SyncedDataManager)
 	require.True(t, ok)
@@ -76,6 +78,7 @@ func TestHeadValidatorsSlowClientDoesNotBlockHeadStatePublish(t *testing.T) {
 }
 
 func TestHeadValidatorsResponseMatchesHeadState(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, postState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.IsRootOptimisticVal = true
 	head, err := postState.Copy()
@@ -117,6 +120,7 @@ func TestHeadValidatorsResponseMatchesHeadState(t *testing.T) {
 }
 
 func TestHeadValidatorsAreCopiedInsideTheView(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		query string
 		ids   []uint64

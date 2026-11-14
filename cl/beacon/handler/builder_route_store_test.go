@@ -30,6 +30,7 @@ import (
 )
 
 func TestBuilderRouteStoreReaddingSpentRouteDoesNotRearm(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(100, 0)
 	routes := newBuilderRouteStore(2, time.Minute, func() time.Time { return now })
 	root := common.Hash{1}
@@ -45,6 +46,7 @@ func TestBuilderRouteStoreReaddingSpentRouteDoesNotRearm(t *testing.T) {
 }
 
 func TestBuilderWinningResponseFailsWhenRouteCapacityIsFull(t *testing.T) {
+	t.Parallel()
 	handler := &ApiHandler{builderRoutes: newBuilderRouteStore(1, time.Minute, time.Now)}
 	require.True(t, handler.builderRoutes.Add(common.Hash{1}, "https://one.example"))
 	recorder := httptest.NewRecorder()
@@ -59,6 +61,7 @@ func TestBuilderWinningResponseFailsWhenRouteCapacityIsFull(t *testing.T) {
 }
 
 func TestBuilderRouteStoreReservationPreventsLateCapacityFailure(t *testing.T) {
+	t.Parallel()
 	routes := newBuilderRouteStore(1, time.Minute, time.Now)
 	require.True(t, routes.Reserve())
 	require.False(t, routes.Add(common.Hash{1}, "https://other.example"))
@@ -68,6 +71,7 @@ func TestBuilderRouteStoreReservationPreventsLateCapacityFailure(t *testing.T) {
 }
 
 func TestBuilderRouteStoreReservationUpgradesSpentUnboundRoute(t *testing.T) {
+	t.Parallel()
 	routes := newBuilderRouteStore(2, time.Minute, time.Now)
 	root := common.Hash{1}
 	url := "https://builder.example"
@@ -82,6 +86,7 @@ func TestBuilderRouteStoreReservationUpgradesSpentUnboundRoute(t *testing.T) {
 }
 
 func TestBuilderRouteStoreReservationUpgradesInFlightUnboundRoute(t *testing.T) {
+	t.Parallel()
 	routes := newBuilderRouteStore(2, time.Minute, time.Now)
 	root := common.Hash{1}
 	url := "https://builder.example"
@@ -99,6 +104,7 @@ func TestBuilderRouteStoreReservationUpgradesInFlightUnboundRoute(t *testing.T) 
 }
 
 func TestBuilderRouteStoreReservationPreservesInFlightTrustedRoute(t *testing.T) {
+	t.Parallel()
 	routes := newBuilderRouteStore(2, time.Minute, time.Now)
 	root := common.Hash{1}
 	url := "https://builder.example"
@@ -116,6 +122,7 @@ func TestBuilderRouteStoreReservationPreservesInFlightTrustedRoute(t *testing.T)
 }
 
 func TestBuilderRouteStoreStaleCompletionDoesNotMatchRecreatedRoute(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(100, 0)
 	routes := newBuilderRouteStore(2, time.Minute, func() time.Time { return now })
 	root := common.Hash{1}
@@ -146,6 +153,7 @@ func TestBuilderRouteStoreStaleCompletionDoesNotMatchRecreatedRoute(t *testing.T
 }
 
 func TestBuilderRouteStoreReleasedReservationFreesCapacity(t *testing.T) {
+	t.Parallel()
 	routes := newBuilderRouteStore(1, time.Minute, time.Now)
 	require.True(t, routes.Reserve())
 	routes.ReleaseReservation()
@@ -153,6 +161,7 @@ func TestBuilderRouteStoreReleasedReservationFreesCapacity(t *testing.T) {
 }
 
 func TestBuilderRouteStoreAllowsAliasesForSameRoot(t *testing.T) {
+	t.Parallel()
 	routes := newBuilderRouteStore(2, time.Minute, time.Now)
 	root := common.Hash{1}
 
@@ -165,6 +174,7 @@ func TestBuilderRouteStoreAllowsAliasesForSameRoot(t *testing.T) {
 }
 
 func TestBuilderRouteStoreClaimOrAddReportsTrustedRoute(t *testing.T) {
+	t.Parallel()
 	routes := newBuilderRouteStore(1, time.Minute, time.Now)
 	root := common.Hash{1}
 	url := "https://builder.example"
@@ -180,6 +190,7 @@ func TestBuilderRouteStoreClaimOrAddReportsTrustedRoute(t *testing.T) {
 }
 
 func TestBuilderRouteStoreTrustedClaimDoesNotExtendExpiry(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(100, 0)
 	ttl := time.Minute
 	routes := newBuilderRouteStore(1, ttl, func() time.Time { return now })
@@ -199,6 +210,7 @@ func TestBuilderRouteStoreTrustedClaimDoesNotExtendExpiry(t *testing.T) {
 }
 
 func TestBuilderRouteStoreClaimOrAddIsBoundedAndSingleflight(t *testing.T) {
+	t.Parallel()
 	routes := newBuilderRouteStore(1, time.Minute, time.Now)
 	root := common.Hash{1}
 	url := "https://builder.example"
@@ -220,6 +232,7 @@ func TestBuilderRouteStoreClaimOrAddIsBoundedAndSingleflight(t *testing.T) {
 }
 
 func TestBuilderRouteStoreClaimOrAddDoesNotEvictTrustedIdleRoute(t *testing.T) {
+	t.Parallel()
 	routes := newBuilderRouteStore(1, time.Minute, time.Now)
 	trustedRoot := common.Hash{1}
 	trustedURL := "https://trusted.example"
@@ -232,6 +245,7 @@ func TestBuilderRouteStoreClaimOrAddDoesNotEvictTrustedIdleRoute(t *testing.T) {
 }
 
 func TestBuilderRouteStoreClaimOrAddDoesNotEvictCompletedRoute(t *testing.T) {
+	t.Parallel()
 	routes := newBuilderRouteStore(1, time.Minute, time.Now)
 	claimID, _, claimed := routes.ClaimOrAdd(common.Hash{1}, "https://one.example")
 	require.True(t, claimed)
@@ -242,6 +256,7 @@ func TestBuilderRouteStoreClaimOrAddDoesNotEvictCompletedRoute(t *testing.T) {
 }
 
 func TestBuilderRouteStoreCapacityPreservesAcceptedRoutes(t *testing.T) {
+	t.Parallel()
 	routes := newBuilderRouteStore(2, time.Minute, time.Now)
 
 	require.True(t, routes.Add(common.Hash{1}, "https://one.example"))
@@ -256,6 +271,7 @@ func TestBuilderRouteStoreCapacityPreservesAcceptedRoutes(t *testing.T) {
 }
 
 func TestBuilderRouteStoreExpiryFreesCapacity(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(100, 0)
 	routes := newBuilderRouteStore(1, time.Minute, func() time.Time { return now })
 
@@ -270,6 +286,7 @@ func TestBuilderRouteStoreExpiryFreesCapacity(t *testing.T) {
 }
 
 func TestBuilderRouteStoreEvictsSpentRouteBeforeRejectingPromise(t *testing.T) {
+	t.Parallel()
 	routes := newBuilderRouteStore(1, time.Minute, time.Now)
 	firstRoot := common.Hash{1}
 	require.True(t, routes.Add(firstRoot, "https://one.example"))
@@ -285,6 +302,7 @@ func TestBuilderRouteStoreEvictsSpentRouteBeforeRejectingPromise(t *testing.T) {
 }
 
 func TestBuilderRouteStoreEvictsOldestSpentRoute(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(100, 0)
 	routes := newBuilderRouteStore(2, time.Minute, func() time.Time { return now })
 	first := builderRouteKey{root: common.Hash{1}, url: "https://one.example"}
@@ -307,6 +325,7 @@ func TestBuilderRouteStoreEvictsOldestSpentRoute(t *testing.T) {
 }
 
 func TestBuilderRouteStoreEqualExpiryUsesKeyTieBreak(t *testing.T) {
+	t.Parallel()
 	for _, reverse := range []bool{false, true} {
 		t.Run(fmt.Sprint("reverse=", reverse), func(t *testing.T) {
 			routes := newBuilderRouteStore(2, time.Minute, func() time.Time { return time.Unix(100, 0) })

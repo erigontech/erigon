@@ -30,6 +30,7 @@ import (
 )
 
 func TestGloasEventTopicsAreValid(t *testing.T) {
+	t.Parallel()
 	for _, topic := range []beaconevents.EventTopic{
 		beaconevents.StateHeadV2,
 		beaconevents.OpExecutionPayload,
@@ -45,11 +46,13 @@ func TestGloasEventTopicsAreValid(t *testing.T) {
 }
 
 func TestFastConfirmationTopicIsNotAdvertisedBeforeItHasAProducer(t *testing.T) {
+	t.Parallel()
 	_, ok := validTopics[beaconevents.EventTopic("fast_confirmation")]
 	require.False(t, ok)
 }
 
 func TestPayloadAttributesSubscriberTrackedWhileStreamIsOpen(t *testing.T) {
+	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	emitter := beaconevents.NewEventEmitter()
 	handler := &ApiHandler{emitters: emitter, beaconChainCfg: &cfg}

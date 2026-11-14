@@ -67,6 +67,7 @@ func postBeaconCommitteeSubscription(t *testing.T, handler *ApiHandler) int {
 // The beacon-APIs spec declares 503 CurrentlySyncing for this endpoint, so a node without a head
 // state must not report the condition as an internal error.
 func TestBeaconCommitteeSubscriptionIsUnavailableWhileSyncing(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -79,6 +80,7 @@ func TestBeaconCommitteeSubscriptionIsUnavailableWhileSyncing(t *testing.T) {
 }
 
 func TestBeaconCommitteeSubscriptionRecordsAttachedValidatorsBeforeSubscribing(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, _, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -100,6 +102,7 @@ func TestBeaconCommitteeSubscriptionRecordsAttachedValidatorsBeforeSubscribing(t
 }
 
 func TestBeaconCommitteeSubscriptionReportsOtherFailuresAsInternalError(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -112,6 +115,7 @@ func TestBeaconCommitteeSubscriptionReportsOtherFailuresAsInternalError(t *testi
 }
 
 func TestBeaconCommitteeSubscriptionSucceedsWhenSynced(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
@@ -125,6 +129,7 @@ func TestBeaconCommitteeSubscriptionSucceedsWhenSynced(t *testing.T) {
 
 // The subnets come from the request, so a syncing node subscribes too, and the endpoint has no 503 response.
 func TestSyncCommitteeSubscriptionSucceedsWhileSyncing(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().Syncing().Return(true).AnyTimes()
 	ctrl := gomock.NewController(t)
@@ -141,6 +146,7 @@ func TestSyncCommitteeSubscriptionSucceedsWhileSyncing(t *testing.T) {
 }
 
 func TestSyncCommitteeSubscriptionRecordsAttachedValidatorWhenExpired(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
 	require.Equal(t, http.StatusOK, postSyncCommitteeSubscriptions(t, handler, []ValidatorSyncCommitteeSubscriptionsRequest{{
@@ -166,6 +172,7 @@ func postSyncCommitteeSubscriptions(t *testing.T, handler *ApiHandler, subs []Va
 // A validator client subscribes before the period in which its validator joins the committee, so the subnets come
 // from the requested committee positions, not from the head state's committee.
 func TestSyncCommitteeSubscriptionUsesRequestedIndices(t *testing.T) {
+	t.Parallel()
 	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	require.NoError(t, sd.OnHeadState(s))
 	subcommitteeSize := handler.beaconChainCfg.SyncCommitteeSize / handler.beaconChainCfg.SyncCommitteeSubnetCount
@@ -190,6 +197,7 @@ func TestSyncCommitteeSubscriptionUsesRequestedIndices(t *testing.T) {
 
 // sync_committee_indices is required; an empty list is a valid request with nothing to subscribe.
 func TestSyncCommitteeSubscriptionRequiresIndices(t *testing.T) {
+	t.Parallel()
 	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	require.NoError(t, sd.OnHeadState(s))
 	ctrl := gomock.NewController(t)
@@ -206,6 +214,7 @@ func TestSyncCommitteeSubscriptionRequiresIndices(t *testing.T) {
 }
 
 func TestSyncCommitteeSubscriptionRejectsInvalidIndices(t *testing.T) {
+	t.Parallel()
 	_, _, _, s, _, handler, _, sd, _, validatorParams := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	require.NoError(t, sd.OnHeadState(s))
 	for _, index := range []string{strconv.FormatUint(handler.beaconChainCfg.SyncCommitteeSize, 10), "x", "-1"} {

@@ -49,6 +49,7 @@ import (
 )
 
 func TestCaplinBlockProductionIntegration(t *testing.T) {
+	t.Parallel()
 	if clparams.GetBeaconConfig() == nil {
 		cfg := clparams.MainnetBeaconConfig
 		clparams.InitGlobalStaticConfig(&cfg)

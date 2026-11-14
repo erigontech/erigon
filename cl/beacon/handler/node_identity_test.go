@@ -65,6 +65,7 @@ func identityMetadataJSON(t *testing.T, currentEpoch uint64) string {
 }
 
 func TestNodeIdentityMetadataFollowsSpecFormat(t *testing.T) {
+	t.Parallel()
 	for _, epoch := range []uint64{10, 11} {
 		require.JSONEq(t,
 			`{"seq_number":"6","attnets":"0x0000000000030000","syncnets":"0x0f","custody_group_count":"7"}`,
@@ -73,6 +74,7 @@ func TestNodeIdentityMetadataFollowsSpecFormat(t *testing.T) {
 }
 
 func TestNodeIdentityMetadataOmitsCustodyGroupCountBeforeFulu(t *testing.T) {
+	t.Parallel()
 	require.JSONEq(t,
 		`{"seq_number":"6","attnets":"0x0000000000030000","syncnets":"0x0f"}`,
 		identityMetadataJSON(t, 9))

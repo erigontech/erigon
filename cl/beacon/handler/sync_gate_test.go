@@ -46,6 +46,7 @@ import (
 // merely seen, so neither a chain-wide gap nor a rejected block trips it, while a head that
 // stopped advancing behind its imported descendants does.
 func TestSyncGateFollowsBlocksImportedOnTheHead(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	headSlot := postState.Slot()
 	tolerance := handler.beaconChainCfg.SlotsPerEpoch
@@ -77,6 +78,7 @@ func TestSyncGateFollowsBlocksImportedOnTheHead(t *testing.T) {
 // the checkpoint is another block is stale: an older head, or one on a branch fork choice left. A
 // checkpoint or a path the fork graph cannot resolve says nothing either way.
 func TestSyncGateRefusesAHeadThatDoesNotDescendFromTheJustifiedCheckpoint(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	headRoot, headSlot, ok := handler.syncedData.StateHead()
 	require.True(t, ok)
@@ -113,6 +115,7 @@ func TestSyncGateRefusesAHeadThatDoesNotDescendFromTheJustifiedCheckpoint(t *tes
 // The justified block can come before its epoch start, when the epoch's first slots are empty. A head
 // that descends from it through a block at the epoch start is still a head get_head may select.
 func TestSyncGateComparesAtTheJustifiedBlock(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	_, headSlot, ok := handler.syncedData.StateHead()
 	require.True(t, ok)
@@ -131,6 +134,7 @@ func TestSyncGateComparesAtTheJustifiedBlock(t *testing.T) {
 
 // A head below the justified block cannot descend from it, also once the fork graph pruned its path.
 func TestSyncGateRefusesAHeadBelowTheJustifiedBlock(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	_, headSlot, ok := handler.syncedData.StateHead()
 	require.True(t, ok)
@@ -145,6 +149,7 @@ func TestSyncGateRefusesAHeadBelowTheJustifiedBlock(t *testing.T) {
 // The ancestry walk is remembered per served head and justified checkpoint once it resolves: the
 // parent links between them do not change. An unresolved path is walked again.
 func TestSyncGateRemembersTheResolvedJustifiedAncestry(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	_, headSlot, ok := handler.syncedData.StateHead()
 	require.True(t, ok)
@@ -171,6 +176,7 @@ func TestSyncGateRemembersTheResolvedJustifiedAncestry(t *testing.T) {
 }
 
 func TestSyncGateReportsAMissingHeadStateAsNotSynced(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 	syncedData.(*sync_mock_services.MockSyncedData).EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
 
@@ -178,6 +184,7 @@ func TestSyncGateReportsAMissingHeadStateAsNotSynced(t *testing.T) {
 }
 
 func TestNodeSyncingReportsHeadBehindImportedBlocks(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.HighestImportedDescendantVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
 
@@ -187,6 +194,7 @@ func TestNodeSyncingReportsHeadBehindImportedBlocks(t *testing.T) {
 }
 
 func TestNodeHealthReportsHeadBehindImportedBlocks(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.HighestImportedDescendantVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
 
@@ -196,6 +204,7 @@ func TestNodeHealthReportsHeadBehindImportedBlocks(t *testing.T) {
 }
 
 func TestBlockProductionRefusesHeadBehindImportedBlocks(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.HighestImportedDescendantVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
 	targetSlot := postState.Slot() + 1
@@ -220,6 +229,7 @@ func TestBlockProductionRefusesHeadBehindImportedBlocks(t *testing.T) {
 }
 
 func TestBlockProductionRefusesHistoricSlot(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.beaconChainCfg.InitializeForkSchedule()
@@ -277,6 +287,7 @@ func TestBlockProductionRefusesHistoricSlot(t *testing.T) {
 // Validator endpoints refuse to serve a head that trails the imported blocks, as block
 // production does: data built on it cannot become canonical.
 func TestValidatorEndpointsRefuseHeadBehindImportedBlocks(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		method, path, body string
 	}{
@@ -304,6 +315,7 @@ func TestValidatorEndpointsRefuseHeadBehindImportedBlocks(t *testing.T) {
 // Submitted attestations are validated and published as on a synced node: they may come from
 // another node's data, and the spec answers a submission only with 200, 400, 415 or 500.
 func TestPoolAttestationsAreNotGatedByALaggingHead(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		path, version string
 		code          int
@@ -330,6 +342,7 @@ func TestPoolAttestationsAreNotGatedByALaggingHead(t *testing.T) {
 
 // A malformed request is a 400 whatever the head: the parameters are checked before the gate.
 func TestBlockProductionRejectsAnOutOfRangeBuilderBoostFactorOnALaggingHead(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.HighestImportedDescendantVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
 	targetSlot := postState.Slot() + 1

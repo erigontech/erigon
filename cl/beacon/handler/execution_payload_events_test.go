@@ -44,6 +44,7 @@ import (
 )
 
 func TestImportedEnvelopeEventsSurvivePartialColumnStorage(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	if clparams.GetBeaconConfig() == nil {
 		cfg := clparams.MainnetBeaconConfig

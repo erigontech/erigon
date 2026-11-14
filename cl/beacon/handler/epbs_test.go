@@ -72,6 +72,7 @@ import (
 )
 
 func TestGetPayloadAttestationDataAcceptsCanonicalSlotQuery(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 2
 	fcu.HeadSlotVal = 64
@@ -185,6 +186,7 @@ func publishPtcDutiesHead(t *testing.T, syncedData synced_data.SyncedData, headS
 }
 
 func TestPostPtcDutiesDependentRootAtGloasGenesis(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 
@@ -200,6 +202,7 @@ func TestPostPtcDutiesDependentRootAtGloasGenesis(t *testing.T) {
 }
 
 func TestPostPtcDutiesDependentRootAtEpochOne(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 
@@ -230,6 +233,7 @@ func TestPostPtcDutiesDependentRootAtEpochOne(t *testing.T) {
 }
 
 func TestPostPtcDutiesDependentRootMatchesHeadV2(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 
@@ -279,6 +283,7 @@ func TestPostPtcDutiesDependentRootMatchesHeadV2(t *testing.T) {
 }
 
 func TestPostPtcDutiesDependentRootUnchangedWithinEpoch(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 
@@ -413,6 +418,7 @@ func (f ptcForkEpochDutiesFixture) post(t *testing.T) *httptest.ResponseRecorder
 }
 
 func TestPostPtcDutiesForkEpochUsesAdvancedFuluState(t *testing.T) {
+	t.Parallel()
 	fixture := newPtcForkEpochDutiesFixture(t, 2)
 	require.NotEqual(t, fixture.predictedPtc, fixture.advancedPtc)
 
@@ -433,6 +439,7 @@ func TestPostPtcDutiesForkEpochUsesAdvancedFuluState(t *testing.T) {
 }
 
 func TestPostPtcDutiesForkEpochUnavailableBeforeClockReachesFork(t *testing.T) {
+	t.Parallel()
 	fixture := newPtcForkEpochDutiesFixture(t, 1)
 
 	recorder := fixture.post(t)
@@ -442,6 +449,7 @@ func TestPostPtcDutiesForkEpochUnavailableBeforeClockReachesFork(t *testing.T) {
 }
 
 func TestPostPtcDutiesForkEpochDoesNotMutatePublishedHead(t *testing.T) {
+	t.Parallel()
 	fixture := newPtcForkEpochDutiesFixture(t, 2)
 	var beforeRoot common.Hash
 	require.NoError(t, fixture.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
@@ -464,6 +472,7 @@ func TestPostPtcDutiesForkEpochDoesNotMutatePublishedHead(t *testing.T) {
 }
 
 func TestGetPayloadAttestationDataUsesEnvelopeReceiptDeadline(t *testing.T) {
+	t.Parallel()
 	const slot = uint64(64)
 	slotStart := time.Unix(1_700_000_000, 0)
 	payloadDue := 6 * time.Second
@@ -516,6 +525,7 @@ func TestGetPayloadAttestationDataUsesEnvelopeReceiptDeadline(t *testing.T) {
 }
 
 func TestGetPayloadAttestationDataSupportsSSZ(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 2
 	fcu.HeadSlotVal = 64
@@ -536,6 +546,7 @@ func TestGetPayloadAttestationDataSupportsSSZ(t *testing.T) {
 }
 
 func TestGetPayloadAttestationDataRejectsPreGloasSlot(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 2
 	fcu.HeadSlotVal = 63
@@ -548,6 +559,7 @@ func TestGetPayloadAttestationDataRejectsPreGloasSlot(t *testing.T) {
 }
 
 func TestGetPayloadAttestationDataRejectsUnsupportedResponseType(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	fcu.HeadSlotVal = 64
@@ -561,6 +573,7 @@ func TestGetPayloadAttestationDataRejectsUnsupportedResponseType(t *testing.T) {
 }
 
 func TestGetPayloadAttestationDataReturnsNoContentWithoutSlotBlock(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	fcu.HeadSlotVal = 63
@@ -579,6 +592,7 @@ func TestGetPayloadAttestationDataReturnsNoContentWithoutSlotBlock(t *testing.T)
 }
 
 func TestGetPayloadAttestationDataReportsSyncing(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{
 		"/eth/v1/validator/payload_attestation_data?slot=64",
 		"/eth/v1/validator/payload_attestation_data?slot=invalid",
@@ -600,6 +614,7 @@ func TestGetPayloadAttestationDataReportsSyncing(t *testing.T) {
 // The stale-head gate answers before a gated endpoint reads the head, so the selected-head
 // lookup keeps its own test for a missing head state.
 func TestGetSelectedHeadReportsAMissingHeadStateAsUnavailable(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 	handler.enableMemoizedHeadState = true
 	syncedData.(*sync_mock_services.MockSyncedData).EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
@@ -611,6 +626,7 @@ func TestGetSelectedHeadReportsAMissingHeadStateAsUnavailable(t *testing.T) {
 }
 
 func TestGetPayloadAttestationDataRejectsInvalidCanonicalSlotQuery(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 
@@ -630,6 +646,7 @@ func TestGetPayloadAttestationDataRejectsInvalidCanonicalSlotQuery(t *testing.T)
 }
 
 func TestGetPayloadAttestationDataPreservesLegacyPathAlias(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	fcu.HeadSlotVal = 64
@@ -642,6 +659,7 @@ func TestGetPayloadAttestationDataPreservesLegacyPathAlias(t *testing.T) {
 }
 
 func TestGetPayloadAttestationDataAcceptsMaximumSlot(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	fcu.HeadSlotVal = ^uint64(0)
@@ -658,6 +676,7 @@ type nonNilSentinelClient struct {
 }
 
 func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[null]`))
@@ -673,6 +692,7 @@ func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
 }
 
 func TestPostPayloadAttestationsRequiresGloasVersion(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	for _, version := range []string{"", "fulu"} {
 		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[]`))
@@ -685,6 +705,7 @@ func TestPostPayloadAttestationsRequiresGloasVersion(t *testing.T) {
 }
 
 func TestPostPayloadAttestationsRejectsOversizedSSZ(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	msgSize := (&cltypes.PayloadAttestationMessage{Data: new(cltypes.PayloadAttestationData)}).EncodingSizeSSZ()
 	maxSize := int(handler.beaconChainCfg.PtcSize) * msgSize
@@ -700,6 +721,7 @@ func TestPostPayloadAttestationsRejectsOversizedSSZ(t *testing.T) {
 }
 
 func TestPostPayloadAttestationsAcceptsEmptySSZ(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", http.NoBody)
 	request.Header.Set("Content-Type", "application/octet-stream")
@@ -712,6 +734,7 @@ func TestPostPayloadAttestationsAcceptsEmptySSZ(t *testing.T) {
 }
 
 func TestPostPayloadAttestationsAcceptsMoreThanBlockAggregateLimitSSZ(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	attestationService := mock_services.NewMockPayloadAttestationService(ctrl)
@@ -743,6 +766,7 @@ func TestPostPayloadAttestationsAcceptsMoreThanBlockAggregateLimitSSZ(t *testing
 }
 
 func TestPostPayloadAttestationsAcceptsSSZContentTypeParameters(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	attestationService := mock_services.NewMockPayloadAttestationService(ctrl)
@@ -772,6 +796,7 @@ func TestPostPayloadAttestationsAcceptsSSZContentTypeParameters(t *testing.T) {
 }
 
 func TestPostPayloadAttestationsRejectsNonCanonicalSSZAndTrailingJSON(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	message := &cltypes.PayloadAttestationMessage{Data: new(cltypes.PayloadAttestationData)}
 	validSSZ, err := message.EncodeSSZ(nil)
@@ -802,6 +827,7 @@ func TestPostPayloadAttestationsRejectsNonCanonicalSSZAndTrailingJSON(t *testing
 }
 
 func TestPostPayloadAttestationsCapsJSONCardinality(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	maxItems := int(handler.beaconChainCfg.PtcSize)
 	for _, tc := range []struct {
@@ -831,6 +857,7 @@ func TestPostPayloadAttestationsCapsJSONCardinality(t *testing.T) {
 }
 
 func TestPostPayloadAttestationsRejectsQueuedWithoutPooling(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -856,6 +883,7 @@ func TestPostPayloadAttestationsRejectsQueuedWithoutPooling(t *testing.T) {
 }
 
 func TestPostPayloadAttestationsAcceptsDuplicateWithoutPooling(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	msg := newTestPayloadAttestationMessage(t, 12, common.HexToHash("0x1234"))
@@ -878,6 +906,7 @@ func TestPostPayloadAttestationsAcceptsDuplicateWithoutPooling(t *testing.T) {
 }
 
 func TestPostPayloadAttestationsReturnsPublishFailure(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	msg := newTestPayloadAttestationMessage(t, 12, common.HexToHash("0x1234"))
@@ -904,6 +933,7 @@ func TestPostPayloadAttestationsReturnsPublishFailure(t *testing.T) {
 }
 
 func TestPostPayloadAttestationsRejectsRetryableValidation(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	msg := newTestPayloadAttestationMessage(t, 12, common.HexToHash("0x1234"))
@@ -923,6 +953,7 @@ func TestPostPayloadAttestationsRejectsRetryableValidation(t *testing.T) {
 }
 
 func TestPostPayloadAttestationsRejectsMalformedContentType(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[]`))
@@ -936,6 +967,7 @@ func TestPostPayloadAttestationsRejectsMalformedContentType(t *testing.T) {
 }
 
 func TestPostPayloadAttestationsRejectsUnsupportedContentType(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[]`))
@@ -949,6 +981,7 @@ func TestPostPayloadAttestationsRejectsUnsupportedContentType(t *testing.T) {
 }
 
 func TestPostExecutionPayloadEnvelopeAcceptsGossipIntegrationError(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.OnExecutionPayloadErr = errors.New("invalid execution payload")
 	handler.emitters = beaconevents.NewEventEmitter()
@@ -970,6 +1003,7 @@ func TestPostExecutionPayloadEnvelopeAcceptsGossipIntegrationError(t *testing.T)
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsDuplicateAfterBroadcast(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
@@ -997,6 +1031,7 @@ func TestPostExecutionPayloadEnvelopeRejectsDuplicateAfterBroadcast(t *testing.T
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsIncompleteEnvelopeBeforeDuplicateCheck(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
@@ -1025,6 +1060,7 @@ func TestPostExecutionPayloadEnvelopeRejectsIncompleteEnvelopeBeforeDuplicateChe
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsMatchingAnchorEnvelopeAlreadyStoredByP2P(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
@@ -1051,6 +1087,7 @@ func TestPostExecutionPayloadEnvelopeRejectsMatchingAnchorEnvelopeAlreadyStoredB
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsMismatchedBuilderBeforePersistedRead(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	root := common.HexToHash("0x1234")
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
@@ -1084,6 +1121,7 @@ func TestPostExecutionPayloadEnvelopeRejectsMismatchedBuilderBeforePersistedRead
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsAnchorBuilderMismatchBeforeAdmission(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	root := common.HexToHash("0x1234")
 	fcu.AnchorRootVal = root
@@ -1128,6 +1166,7 @@ func TestPostExecutionPayloadEnvelopeRejectsAnchorBuilderMismatchBeforeAdmission
 }
 
 func TestPostExecutionPayloadEnvelopePreservesConcurrentStoredDuplicateResponses(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
@@ -1218,6 +1257,7 @@ func unavailablePersistedEnvelopeCases() []unavailablePersistedEnvelopeCase {
 }
 
 func TestPostExecutionPayloadEnvelopeUnavailablePersistedLookupDoesNotPoisonAdmission(t *testing.T) {
+	t.Parallel()
 	for _, admission := range []struct {
 		name             string
 		plainAlreadySeen bool
@@ -1285,6 +1325,7 @@ func TestPostExecutionPayloadEnvelopeUnavailablePersistedLookupDoesNotPoisonAdmi
 }
 
 func TestExecutionPayloadEnvelopeP2PStaleMarkerRecoversWithoutREST(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
@@ -1318,6 +1359,7 @@ func TestExecutionPayloadEnvelopeP2PStaleMarkerRecoversWithoutREST(t *testing.T)
 }
 
 func TestPostExecutionPayloadEnvelopeRetriesAfterBroadcastFailure(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
@@ -1357,6 +1399,7 @@ func TestPostExecutionPayloadEnvelopeRetriesAfterBroadcastFailure(t *testing.T) 
 // A retried POST whose validation is interrupted keeps the retry record, so the client can retry the
 // persisted envelope again.
 func TestPostExecutionPayloadEnvelopeKeepsTheRetryRecordWhenARetryIsInterrupted(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.gossipManager = gossip_mock.NewMockGossip(gomock.NewController(t))
 	handler.sentinel = &nonNilSentinelClient{}
@@ -1397,6 +1440,7 @@ func TestPostExecutionPayloadEnvelopeKeepsTheRetryRecordWhenARetryIsInterrupted(
 }
 
 func TestPostExecutionPayloadEnvelopeBroadcastFailureDoesNotAuthorizeDifferentEnvelope(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.gossipManager = gossip_mock.NewMockGossip(gomock.NewController(t))
 	handler.sentinel = &nonNilSentinelClient{}
@@ -1429,6 +1473,7 @@ func TestPostExecutionPayloadEnvelopeBroadcastFailureDoesNotAuthorizeDifferentEn
 }
 
 func TestPostExecutionPayloadEnvelopeAllowsOnlyOneRetryInFlight(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.sentinel = &nonNilSentinelClient{}
 	gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
@@ -1471,6 +1516,7 @@ func TestPostExecutionPayloadEnvelopeAllowsOnlyOneRetryInFlight(t *testing.T) {
 }
 
 func TestExecutionPayloadEnvelopeAdmissionsCoalesceConcurrentClaims(t *testing.T) {
+	t.Parallel()
 	var admissions forkchoice.ExecutionPayloadEnvelopeAdmissions
 	root := common.HexToHash("0x1234")
 	token, err := admissions.Claim(t.Context(), root, 42)
@@ -1504,6 +1550,7 @@ func TestExecutionPayloadEnvelopeAdmissionsCoalesceConcurrentClaims(t *testing.T
 }
 
 func TestPostExecutionPayloadEnvelopeClaimsBeforeConcurrentValidation(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
@@ -1564,6 +1611,7 @@ func TestPostExecutionPayloadEnvelopeClaimsBeforeConcurrentValidation(t *testing
 }
 
 func TestPostExecutionPayloadEnvelopeConcurrentWaiterRetriesRejectedOwner(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
@@ -1605,6 +1653,7 @@ func TestPostExecutionPayloadEnvelopeConcurrentWaiterRetriesRejectedOwner(t *tes
 }
 
 func TestPostExecutionPayloadEnvelopesRequiresBlobDataHeader(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", strings.NewReader(`{}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -1618,6 +1667,7 @@ func TestPostExecutionPayloadEnvelopesRequiresBlobDataHeader(t *testing.T) {
 }
 
 func TestPostExecutionPayloadEnvelopesRejectsMalformedContents(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", strings.NewReader(`{}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -1631,6 +1681,7 @@ func TestPostExecutionPayloadEnvelopesRejectsMalformedContents(t *testing.T) {
 }
 
 func TestPostExecutionPayloadEnvelopesRejectsNullEnvelope(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes",
 		strings.NewReader(`{"signed_execution_payload_envelope":null,"kzg_proofs":[],"blobs":[]}`))
@@ -1644,6 +1695,7 @@ func TestPostExecutionPayloadEnvelopesRejectsNullEnvelope(t *testing.T) {
 }
 
 func TestPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T) {
+	t.Parallel()
 	t.Run("canonical", func(t *testing.T) { testPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t, true) })
 	t.Run("legacy", func(t *testing.T) { testPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t, false) })
 }
@@ -1744,6 +1796,7 @@ func testPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T, 
 }
 
 func TestPostExecutionPayloadEnvelopesSSZDecodesReferencedScheduleCapacity(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	currentSlot := handler.ethClock.GetCurrentSlot()
 	referencedSlot := currentSlot - 1
@@ -1781,6 +1834,7 @@ func TestPostExecutionPayloadEnvelopesSSZDecodesReferencedScheduleCapacity(t *te
 }
 
 func TestPostExecutionPayloadEnvelopesUsesReferencedBlockForExactBlobCount(t *testing.T) {
+	t.Parallel()
 	for _, contentType := range []string{"application/json", "application/octet-stream"} {
 		t.Run(contentType, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
@@ -1837,6 +1891,7 @@ func TestPostExecutionPayloadEnvelopesUsesReferencedBlockForExactBlobCount(t *te
 }
 
 func TestPostExecutionPayloadEnvelopesRejectsTrailingJSON(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	envelope := validTestSignedExecutionPayloadEnvelope(handler.beaconChainCfg)
 	body, err := json.Marshal(envelope)
@@ -1853,6 +1908,7 @@ func TestPostExecutionPayloadEnvelopesRejectsTrailingJSON(t *testing.T) {
 }
 
 func TestValidateExecutionPayloadEnvelopeContentsRejectsUnpersistableEnvelope(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	contents := cltypes.NewSignedExecutionPayloadEnvelopeContents(handler.beaconChainCfg, 64)
 	payload := contents.SignedExecutionPayloadEnvelope.Message.Payload
@@ -1871,6 +1927,7 @@ func TestValidateExecutionPayloadEnvelopeContentsRejectsUnpersistableEnvelope(t 
 }
 
 func TestPostExecutionPayloadEnvelopesEmitsImportedAndAvailableEvents(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.emitters = beaconevents.NewEventEmitter()
 	events := make(chan *beaconevents.EventStream, 3)
@@ -1907,6 +1964,7 @@ func TestPostExecutionPayloadEnvelopesEmitsImportedAndAvailableEvents(t *testing
 }
 
 func TestPostExecutionPayloadEnvelopesRejectsStatefulEnvelopeWhenColumnsAreMissing(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{
 		"/eth/v1/beacon/execution_payload_envelopes",
 		"/eth/v1/beacon/execution_payload_envelope",
@@ -1962,6 +2020,7 @@ func TestPostExecutionPayloadEnvelopesRejectsStatefulEnvelopeWhenColumnsAreMissi
 }
 
 func TestPostExecutionPayloadEnvelopesRejectsInvalidBroadcastValidation(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	envelope := validTestSignedExecutionPayloadEnvelope(handler.beaconChainCfg)
 	body, err := json.Marshal(envelope)
@@ -1978,6 +2037,7 @@ func TestPostExecutionPayloadEnvelopesRejectsInvalidBroadcastValidation(t *testi
 }
 
 func TestPostExecutionPayloadEnvelopeConsensusFailureIsNotBroadcast(t *testing.T) {
+	t.Parallel()
 	for _, validation := range []string{"consensus", "consensus_and_equivocation"} {
 		t.Run(validation, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
@@ -2007,6 +2067,7 @@ func TestPostExecutionPayloadEnvelopeConsensusFailureIsNotBroadcast(t *testing.T
 }
 
 func TestPostExecutionPayloadEnvelopesRejectsEquivocatingBlockBeforeGossip(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
@@ -2036,6 +2097,7 @@ func TestPostExecutionPayloadEnvelopesRejectsEquivocatingBlockBeforeGossip(t *te
 }
 
 func TestPostExecutionPayloadEnvelopesReturnsErrorWhenGossipPublishFails(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.emitters = beaconevents.NewEventEmitter()
 	events := make(chan *beaconevents.EventStream, 4)
@@ -2086,6 +2148,7 @@ func TestPostExecutionPayloadEnvelopesReturnsErrorWhenGossipPublishFails(t *test
 }
 
 func TestPostExecutionPayloadEnvelopeDuplicateDoesNotRepublishOrEmit(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.gossipManager = gossip_mock.NewMockGossip(gomock.NewController(t))
 	handler.emitters = beaconevents.NewEventEmitter()
@@ -2118,6 +2181,7 @@ func TestPostExecutionPayloadEnvelopeDuplicateDoesNotRepublishOrEmit(t *testing.
 }
 
 func TestPostExecutionPayloadEnvelopeConcurrentIdenticalImportDoesNotRepublish(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.emitters = beaconevents.NewEventEmitter()
 	events := make(chan *beaconevents.EventStream, 4)
@@ -2185,6 +2249,7 @@ func TestPostExecutionPayloadEnvelopeConcurrentIdenticalImportDoesNotRepublish(t
 }
 
 func TestPostExecutionPayloadEnvelopeMissingBlockRequiresRetry(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
@@ -2234,6 +2299,7 @@ func (s *invalidatingFullHeadStore) GetHeadNode() (forkchoice.ForkChoiceNode, ui
 }
 
 func TestEmitFullHeadV2KeepsPayloadStatusWithHeadSnapshot(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name            string
 		invalidateAfter int
@@ -2271,6 +2337,7 @@ func TestEmitFullHeadV2KeepsPayloadStatusWithHeadSnapshot(t *testing.T) {
 }
 
 func TestEmitFullHeadV2DoesNotCopyState(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.emitters = beaconevents.NewEventEmitter()
 	events := make(chan *beaconevents.EventStream, 1)
@@ -2302,6 +2369,7 @@ func TestEmitFullHeadV2DoesNotCopyState(t *testing.T) {
 }
 
 func TestEmitFullHeadV2DropsChangedPayloadSnapshot(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.emitters = beaconevents.NewEventEmitter()
 	events := make(chan *beaconevents.EventStream, 1)
@@ -2332,6 +2400,7 @@ func TestEmitFullHeadV2DropsChangedPayloadSnapshot(t *testing.T) {
 }
 
 func TestEmitFullHeadV2DropsChangedOptimismSnapshot(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.emitters = beaconevents.NewEventEmitter()
 	events := make(chan *beaconevents.EventStream, 1)
@@ -2362,6 +2431,7 @@ func TestEmitFullHeadV2DropsChangedOptimismSnapshot(t *testing.T) {
 }
 
 func TestGetExecutionPayloadEnvelopeDoesNotFinalizeSameSlotSideBranch(t *testing.T) {
+	t.Parallel()
 	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	root := common.HexToHash("0x1234")
 	slot := uint64(12)
@@ -2383,6 +2453,7 @@ func TestGetExecutionPayloadEnvelopeDoesNotFinalizeSameSlotSideBranch(t *testing
 }
 
 func TestGetExecutionPayloadEnvelopeFinalizesCheckpointRootOnly(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	root := common.HexToHash("0x1234")
 	slot := uint64(64)
@@ -2400,6 +2471,7 @@ func TestGetExecutionPayloadEnvelopeFinalizesCheckpointRootOnly(t *testing.T) {
 }
 
 func TestGetExecutionPayloadEnvelopeFinalityBoundaryMatrix(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name      string
 		slot      uint64
@@ -2434,6 +2506,7 @@ func TestGetExecutionPayloadEnvelopeFinalityBoundaryMatrix(t *testing.T) {
 }
 
 func TestGetExecutionPayloadEnvelopeRejectsZeroSlotsPerEpoch(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	root := common.HexToHash("0x1234")
 	fcu.Envelopes[root] = &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
@@ -2447,6 +2520,7 @@ func TestGetExecutionPayloadEnvelopeRejectsZeroSlotsPerEpoch(t *testing.T) {
 }
 
 func TestPostExecutionPayloadEnvelopesClassifiesIntegrationFailureByValidationMode(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		validation string
 		status     int
@@ -2480,6 +2554,7 @@ func TestPostExecutionPayloadEnvelopesClassifiesIntegrationFailureByValidationMo
 // A client that gives up while the EL validates must not stop the publication, whether the
 // validation was interrupted or completed.
 func TestPostExecutionPayloadEnvelopePublishesAfterTheClientGaveUp(t *testing.T) {
+	t.Parallel()
 	for _, outcome := range []struct {
 		name   string
 		err    error
@@ -2545,6 +2620,7 @@ func TestPostExecutionPayloadEnvelopePublishesAfterTheClientGaveUp(t *testing.T)
 // An interrupted validation parks the envelope without persisting it, so the client's re-POST
 // must be processed again instead of being refused as already seen.
 func TestPostExecutionPayloadEnvelopeAcceptsARepostAfterAnInterruptedValidation(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{
 		"/eth/v1/beacon/execution_payload_envelope",
 		"/eth/v1/beacon/execution_payload_envelopes?broadcast_validation=gossip",
@@ -2588,6 +2664,7 @@ func TestPostExecutionPayloadEnvelopeAcceptsARepostAfterAnInterruptedValidation(
 // The publish window starts when publishing starts: a validation slower than a slot must not use
 // it up.
 func TestPostExecutionPayloadEnvelopePublishesAfterASlowValidation(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	slot := time.Duration(handler.beaconChainCfg.SecondsPerSlot) * time.Second
 	const validation = 100 * time.Millisecond
@@ -2623,6 +2700,7 @@ func TestPostExecutionPayloadEnvelopePublishesAfterASlowValidation(t *testing.T)
 }
 
 func TestPostExecutionPayloadEnvelopeGossipsPersistenceFailureBeforeReturningError(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
@@ -2651,6 +2729,7 @@ func TestPostExecutionPayloadEnvelopeGossipsPersistenceFailureBeforeReturningErr
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsPreGloasVersion(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig),
@@ -2669,6 +2748,7 @@ func TestPostExecutionPayloadEnvelopeRejectsPreGloasVersion(t *testing.T) {
 }
 
 func TestPostExecutionPayloadEnvelopeDoesNotApplyLegacyJSONTransactionLimit(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.MaxTransactionsPerPayload = 2
 	fcu.OnExecutionPayloadErr = errors.New("reached forkchoice")
@@ -2690,6 +2770,7 @@ func TestPostExecutionPayloadEnvelopeDoesNotApplyLegacyJSONTransactionLimit(t *t
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsSecondJSONValueBeforeForkchoice(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	envelope := validTestSignedExecutionPayloadEnvelope(handler.beaconChainCfg)
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x5678")
@@ -2706,6 +2787,7 @@ func TestPostExecutionPayloadEnvelopeRejectsSecondJSONValueBeforeForkchoice(t *t
 }
 
 func TestPostExecutionPayloadEnvelopeAcceptsTrailingJSONWhitespace(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	envelope := validTestSignedExecutionPayloadEnvelope(handler.beaconChainCfg)
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x9abc")
@@ -2724,6 +2806,7 @@ func TestPostExecutionPayloadEnvelopeAcceptsTrailingJSONWhitespace(t *testing.T)
 }
 
 func TestPostExecutionPayloadEnvelopeSuppressesPreparationDuringExecutionWork(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	executed := false
 	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
@@ -2773,6 +2856,7 @@ func TestPostPtcDutiesDoesNotCapValidatorCount(t *testing.T) {
 }
 
 func TestPostExecutionPayloadBidAcceptsSSZ(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	bid := &cltypes.SignedExecutionPayloadBid{
 		Message: newTestExecutionPayloadBid(12, 3, 1000),
@@ -2791,6 +2875,7 @@ func TestPostExecutionPayloadBidAcceptsSSZ(t *testing.T) {
 }
 
 func TestPostExecutionPayloadBidCanonicalPluralRequiresVersionButSingularAliasDoesNot(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(12, 3, 1000)}
 	body, err := json.Marshal(bid)
@@ -2810,6 +2895,7 @@ func TestPostExecutionPayloadBidCanonicalPluralRequiresVersionButSingularAliasDo
 }
 
 func TestPostExecutionPayloadEnvelopesCanonicalPluralRequiresHeadersAndValidation(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	envelope := validTestSignedExecutionPayloadEnvelope(handler.beaconChainCfg)
 	body, err := json.Marshal(envelope)
@@ -2844,6 +2930,7 @@ func TestPostExecutionPayloadEnvelopesCanonicalPluralRequiresHeadersAndValidatio
 }
 
 func TestPostExecutionPayloadBidsRejectsTrailingJSON(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(12, 3, 1000)}
 	body, err := json.Marshal(bid)
@@ -2860,6 +2947,7 @@ func TestPostExecutionPayloadBidsRejectsTrailingJSON(t *testing.T) {
 }
 
 func TestPostExecutionPayloadBidRejectsIgnoredBid(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -2885,6 +2973,7 @@ func TestPostExecutionPayloadBidRejectsIgnoredBid(t *testing.T) {
 }
 
 func TestPostExecutionPayloadBidRejectsHardIgnore(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -2910,6 +2999,7 @@ func TestPostExecutionPayloadBidRejectsHardIgnore(t *testing.T) {
 }
 
 func TestPostExecutionPayloadBidRejectsOversizedSSZ(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(strings.Repeat("\x00", int(maxSignedExecutionPayloadBidSSZSize())+1)))
@@ -2923,6 +3013,7 @@ func TestPostExecutionPayloadBidRejectsOversizedSSZ(t *testing.T) {
 }
 
 func TestPostExecutionPayloadBidRejectsNonCanonicalSSZBeforeProcessingOrPublishing(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -2955,6 +3046,7 @@ func TestPostExecutionPayloadBidRejectsNonCanonicalSSZBeforeProcessingOrPublishi
 }
 
 func TestPostExecutionPayloadBidRejectsMissingMessage(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(`{}`))
@@ -2969,6 +3061,7 @@ func TestPostExecutionPayloadBidRejectsMissingMessage(t *testing.T) {
 }
 
 func TestPostExecutionPayloadBidRejectsNullCommitmentBeforeProcessingOrPublishing(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -2992,6 +3085,7 @@ func TestPostExecutionPayloadBidRejectsNullCommitmentBeforeProcessingOrPublishin
 }
 
 func TestPostExecutionPayloadBidRejectsMalformedContentType(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(`{}`))
@@ -3138,6 +3232,7 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 }
 
 func TestGetValidatorExecutionPayloadBidRejectsChangedHeadBeforeBuilding(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	handler, forkchoiceStore, payload := setupExecutionPayloadBidTest(t, ctrl)
 	forkchoiceStore.HeadVal = common.Hash{0x42}
@@ -3154,6 +3249,7 @@ func TestGetValidatorExecutionPayloadBidRejectsChangedHeadBeforeBuilding(t *test
 }
 
 func TestGetValidatorExecutionPayloadBidRevalidatesOneHeadSnapshot(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	handler, forkchoiceStore, payload := setupExecutionPayloadBidTest(t, ctrl)
 	baseRoot := forkchoiceStore.HeadVal
@@ -3191,6 +3287,7 @@ func TestGetValidatorExecutionPayloadBidRevalidatesOneHeadSnapshot(t *testing.T)
 }
 
 func TestGetValidatorExecutionPayloadBidRechecksPtcDecisionWithEnvelopeCache(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name          string
 		evictRequests bool
@@ -3268,6 +3365,7 @@ func TestGetValidatorExecutionPayloadBidRechecksPtcDecisionWithEnvelopeCache(t *
 }
 
 func TestGetValidatorExecutionPayloadBidRevalidatesEmptyFallback(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name                       string
 		recoverEnvelope            bool
@@ -3363,6 +3461,7 @@ func TestGetValidatorExecutionPayloadBidRevalidatesEmptyFallback(t *testing.T) {
 }
 
 func TestGetValidatorExecutionPayloadBidRejectsInactiveBuilder(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.FuluForkEpoch = 0
@@ -3401,6 +3500,7 @@ func TestGetValidatorExecutionPayloadBidRejectsInactiveBuilder(t *testing.T) {
 }
 
 func TestGetValidatorExecutionPayloadEnvelopeBuildsFromSelectedLocalBid(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -3457,6 +3557,7 @@ func TestGetValidatorExecutionPayloadEnvelopeBuildsFromSelectedLocalBid(t *testi
 }
 
 func TestPendingBuilderPayloadStoreRefusesEvictionUntilSlotExpires(t *testing.T) {
+	t.Parallel()
 	store := newPendingBuilderPayloadStore(1)
 	firstHash := common.HexToHash("0x01")
 	secondHash := common.HexToHash("0x02")
@@ -3507,6 +3608,7 @@ func TestPendingBuilderPayloadStoreRefusesEvictionUntilSlotExpires(t *testing.T)
 }
 
 func TestAggregatePayloadAttestationMessagesFiltersAndLimits(t *testing.T) {
+	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	cfg.PtcSize = 5
 	cfg.MaxPayloadAttestations = 2
@@ -3536,6 +3638,7 @@ func TestAggregatePayloadAttestationMessagesFiltersAndLimits(t *testing.T) {
 }
 
 func TestAggregatePayloadAttestationMessagesIncludesDuplicatePTCPositions(t *testing.T) {
+	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	cfg.PtcSize = 3
 	cfg.MaxPayloadAttestations = 1
@@ -3553,6 +3656,7 @@ func TestAggregatePayloadAttestationMessagesIncludesDuplicatePTCPositions(t *tes
 }
 
 func TestAggregatePayloadAttestationMessagesSkipsMalformedSignatureGroup(t *testing.T) {
+	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	cfg.PtcSize = 2
 	cfg.MaxPayloadAttestations = 2
@@ -3574,6 +3678,7 @@ func TestAggregatePayloadAttestationMessagesSkipsMalformedSignatureGroup(t *test
 }
 
 func TestAggregatePayloadAttestationMessagesSkipsUnavailablePTC(t *testing.T) {
+	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	cfg.PtcSize = 2
 	cfg.MaxPayloadAttestations = 2
@@ -3596,6 +3701,7 @@ func TestAggregatePayloadAttestationMessagesSkipsUnavailablePTC(t *testing.T) {
 }
 
 func TestSnapshotPayloadAttestationPTCsCopiesMessageSlots(t *testing.T) {
+	t.Parallel()
 	source := []uint64{10, 11}
 	provider := fixedPTCProvider{
 		ptc: map[uint64][]uint64{
@@ -3653,6 +3759,7 @@ func newTestPayloadAttestationMessage(t *testing.T, validatorIndex uint64, beaco
 }
 
 func TestPostValidatorProposerPreferencesAcceptsBatchJSON(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.epbsPool = pool.NewEpbsPool()
 	proposalSlot := handler.ethClock.GetCurrentSlot() + 4
@@ -3699,6 +3806,7 @@ func TestPostValidatorProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 }
 
 func TestPostProposerPreferencesStoresValidatedPreferenceOnce(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	epbsPool := pool.NewEpbsPool()
 	preference := &cltypes.SignedProposerPreferences{
@@ -3733,6 +3841,7 @@ func TestPostProposerPreferencesStoresValidatedPreferenceOnce(t *testing.T) {
 }
 
 func TestPostProposerPreferencesPublishResultsAndDigest(t *testing.T) {
+	t.Parallel()
 	publishErr := errors.New("publish failed")
 	digestErr := errors.New("digest failed")
 	for _, test := range []struct {
@@ -3829,6 +3938,7 @@ func TestPostProposerPreferencesPublishResultsAndDigest(t *testing.T) {
 }
 
 func TestPostProposerPreferencesAcknowledgesOnlyIdenticalRetries(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name       string
 		change     func(*cltypes.SignedProposerPreferences)
@@ -3910,6 +4020,7 @@ func TestPostProposerPreferencesAcknowledgesOnlyIdenticalRetries(t *testing.T) {
 }
 
 func TestPostProposerPreferencesWithoutServiceConcurrentRequests(t *testing.T) {
+	t.Parallel()
 	for _, conflicting := range []bool{false, true} {
 		t.Run(fmt.Sprintf("conflicting=%t", conflicting), func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -3977,6 +4088,7 @@ func TestPostProposerPreferencesWithoutServiceConcurrentRequests(t *testing.T) {
 }
 
 func TestPostValidatorProposerPreferencesGloasForkBoundary(t *testing.T) {
+	t.Parallel()
 	for _, contentType := range []string{"application/json", "application/octet-stream"} {
 		t.Run(contentType, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fc, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
@@ -4060,6 +4172,7 @@ func TestPostValidatorProposerPreferencesGloasForkBoundary(t *testing.T) {
 }
 
 func TestPostProposerPreferencesRejectsTransientIgnore(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	preference := &cltypes.SignedProposerPreferences{
 		Message: &cltypes.ProposerPreferences{ProposalSlot: 32},
@@ -4077,6 +4190,7 @@ func TestPostProposerPreferencesRejectsTransientIgnore(t *testing.T) {
 }
 
 func TestPostProposerPreferencesRecordsFeeRecipientFromValidPastPreference(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name           string
 		path           string
@@ -4163,6 +4277,7 @@ func TestPostProposerPreferencesRecordsFeeRecipientFromValidPastPreference(t *te
 }
 
 func TestPostProposerPreferencesRejectsFarFutureSlotWithoutService(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.epbsPool = pool.NewEpbsPool()
 	preference := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
@@ -4179,6 +4294,7 @@ func TestPostProposerPreferencesRejectsFarFutureSlotWithoutService(t *testing.T)
 }
 
 func TestPostValidatorProposerPreferencesRequiresVersionAndReportsIndexedFailures(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.epbsPool = pool.NewEpbsPool()
 	preferences := []*cltypes.SignedProposerPreferences{
@@ -4223,6 +4339,7 @@ func TestPostValidatorProposerPreferencesRequiresVersionAndReportsIndexedFailure
 }
 
 func TestPostValidatorProposerPreferencesAcceptsBatchSSZ(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentEpoch().Return(uint64(0)).AnyTimes()
@@ -4248,6 +4365,7 @@ func TestPostValidatorProposerPreferencesAcceptsBatchSSZ(t *testing.T) {
 }
 
 func TestPostValidatorProposerPreferencesRequiresJSONArrayButPoolRetainsSingletonCompatibility(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentEpoch().Return(uint64(0)).AnyTimes()
@@ -4273,6 +4391,7 @@ func TestPostValidatorProposerPreferencesRequiresJSONArrayButPoolRetainsSingleto
 }
 
 func TestPostValidatorProposerPreferencesCapsJSONCardinality(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	for _, tc := range []struct {
 		name        string
@@ -4301,6 +4420,7 @@ func TestPostValidatorProposerPreferencesCapsJSONCardinality(t *testing.T) {
 }
 
 func TestPostBeaconPoolProposerPreferencesAcceptsBatchJSON(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.epbsPool = pool.NewEpbsPool()
 	proposalSlot := handler.ethClock.GetCurrentSlot() + 4
@@ -4332,6 +4452,7 @@ func TestPostBeaconPoolProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 }
 
 func TestGetValidatorExecutionPayloadEnvelopesBySlot(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	slot := uint64(3)
@@ -4349,6 +4470,7 @@ func TestGetValidatorExecutionPayloadEnvelopesBySlot(t *testing.T) {
 }
 
 func TestGetValidatorExecutionPayloadEnvelopeByBlockRoot(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	slot := uint64(64)
@@ -4462,6 +4584,7 @@ func TestPostPtcDutiesNextEpochWhileHeadIsInPreviousEpoch(t *testing.T) {
 }
 
 func TestPostPtcDutiesUnavailableWhileHeadLagsMoreThanOneEpoch(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	headEpoch := uint64(2)
@@ -4479,6 +4602,7 @@ func TestPostPtcDutiesUnavailableWhileHeadLagsMoreThanOneEpoch(t *testing.T) {
 }
 
 func TestGetExecutionPayloadEnvelopeBySlotOfHeadBlock(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	head := blocks[len(blocks)-1]
 	root, err := head.Block.HashSSZ()
@@ -4496,6 +4620,7 @@ func TestGetExecutionPayloadEnvelopeBySlotOfHeadBlock(t *testing.T) {
 
 // A skipped slot has no canonical block root, while the head state's block_roots ring repeats the parent root there.
 func TestGetExecutionPayloadEnvelopeBySkippedSlotIsNotFound(t *testing.T) {
+	t.Parallel()
 	db, blocks, _, _, postState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	parent := blocks[len(blocks)-3]
 	parentRoot, err := parent.Block.HashSSZ()
@@ -4517,6 +4642,7 @@ func TestGetExecutionPayloadEnvelopeBySkippedSlotIsNotFound(t *testing.T) {
 }
 
 func TestGetExecutionPayloadEnvelopeBySlotBeyondUint32IsNotFound(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	head := blocks[len(blocks)-1]
 	root, err := head.Block.HashSSZ()
@@ -4532,6 +4658,7 @@ func TestGetExecutionPayloadEnvelopeBySlotBeyondUint32IsNotFound(t *testing.T) {
 }
 
 func TestPostExecutionPayloadEnvelopesAcceptsBloblessStatelessContents(t *testing.T) {
+	t.Parallel()
 	if clparams.GetBeaconConfig() == nil {
 		cfg := clparams.MainnetBeaconConfig
 		clparams.InitGlobalStaticConfig(&cfg)
@@ -4566,6 +4693,7 @@ func TestPostExecutionPayloadEnvelopesAcceptsBloblessStatelessContents(t *testin
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsTooManyWithdrawalsBeforeAdmission(t *testing.T) {
+	t.Parallel()
 	for _, contentType := range []string{"application/json", "application/octet-stream"} {
 		t.Run(contentType, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)

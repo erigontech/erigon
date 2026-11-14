@@ -55,6 +55,7 @@ func sig96(i int) common.Bytes96 {
 }
 
 func TestGetBlockOperationsBLSToExecutionChanges(t *testing.T) {
+	t.Parallel()
 	// A block may carry at most MaxBlsToExecutionChanges. ListSSZ.Append does not enforce the
 	// limit and HashSSZ merkleizes to the limit's depth regardless of length, so an over-long
 	// list is published with a wrong body root instead of failing locally.

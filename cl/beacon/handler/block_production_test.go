@@ -105,6 +105,7 @@ import (
 var _ serviceinterface.Service[*cltypes.SignedExecutionPayloadBid] = acceptingExecutionPayloadBidService{}
 
 func TestNewAttestationCandidateUsesGloasParentHeaderSlot(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	s := state_mock.NewMockBeaconState(ctrl)
 	cfg := clparams.MainnetBeaconConfig
@@ -125,6 +126,7 @@ func TestNewAttestationCandidateUsesGloasParentHeaderSlot(t *testing.T) {
 }
 
 func TestNewAttestationCandidateRecordsOnlyNewFlags(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	s := state_mock.NewMockBeaconState(ctrl)
 	cfg := clparams.MainnetBeaconConfig
@@ -152,6 +154,7 @@ func TestNewAttestationCandidateRecordsOnlyNewFlags(t *testing.T) {
 }
 
 func TestNewAttestationCandidateReservesNothingWithoutNewFlags(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	s := state_mock.NewMockBeaconState(ctrl)
 	cfg := clparams.MainnetBeaconConfig
@@ -178,6 +181,7 @@ func TestNewAttestationCandidateReservesNothingWithoutNewFlags(t *testing.T) {
 }
 
 func TestNewAttestationCandidateReadsPreviousEpochParticipation(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	s := state_mock.NewMockBeaconState(ctrl)
 	cfg := clparams.MainnetBeaconConfig
@@ -427,6 +431,7 @@ func (acceptingExecutionPayloadBidService) ValidateBid(context.Context, *cltypes
 }
 
 func TestStoreDataColumnSidecars(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	storage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
 	handler := &ApiHandler{columnStorage: storage}
@@ -438,6 +443,7 @@ func TestStoreDataColumnSidecars(t *testing.T) {
 }
 
 func TestStoreDataColumnSidecarsRejectsInvalidInput(t *testing.T) {
+	t.Parallel()
 	root := common.Hash{1}
 	require.NoError(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), root, nil))
 	require.Error(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{{}}))
@@ -448,6 +454,7 @@ func TestStoreDataColumnSidecarsRejectsInvalidInput(t *testing.T) {
 }
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
+	t.Parallel()
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,
 		IntervalsPerSlot: 3,
@@ -463,6 +470,7 @@ func TestBlockBuilderWindowPreGloas(t *testing.T) {
 }
 
 func TestBlockBuilderWindowGloas(t *testing.T) {
+	t.Parallel()
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,
 		IntervalsPerSlot: 3,
@@ -478,6 +486,7 @@ func TestBlockBuilderWindowGloas(t *testing.T) {
 }
 
 func TestSelectGloasBidUsesGweiAndBoostSemantics(t *testing.T) {
+	t.Parallel()
 	localWei := big.NewInt(1_500_000_000)
 	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 1)}
 	bid.Message.ExecutionPayment = 1
@@ -494,6 +503,7 @@ func TestSelectGloasBidUsesGweiAndBoostSemantics(t *testing.T) {
 }
 
 func TestSelectGloasBidLocalWinsTieAndZeroBoost(t *testing.T) {
+	t.Parallel()
 	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 2)}
 
 	require.Nil(t, selectGloasBid(big.NewInt(2_000_000_000), []gloasBidCandidate{{
@@ -509,6 +519,7 @@ func TestSelectGloasBidLocalWinsTieAndZeroBoost(t *testing.T) {
 }
 
 func TestSelectGloasBidUsesValidBuilderWhenLocalBuildIsUnavailable(t *testing.T) {
+	t.Parallel()
 	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 0)}
 	selected := selectGloasBid(nil, []gloasBidCandidate{{
 		bid: bid, boostFactor: 100, maxExecutionPayment: math.MaxUint64,
@@ -519,6 +530,7 @@ func TestSelectGloasBidUsesValidBuilderWhenLocalBuildIsUnavailable(t *testing.T)
 }
 
 func TestProduceBlockUsesConfiguredBuilderWhenLocalExecutionIsUnavailable(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	handler.beaconChainCfg.FuluForkEpoch = 0
@@ -582,6 +594,7 @@ func TestProduceBlockUsesConfiguredBuilderWhenLocalExecutionIsUnavailable(t *tes
 }
 
 func TestProduceBlockUsesP2PBidWhenLocalExecutionIsUnavailable(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	handler.beaconChainCfg.FuluForkEpoch = 0
@@ -642,6 +655,7 @@ func TestProduceBlockUsesP2PBidWhenLocalExecutionIsUnavailable(t *testing.T) {
 }
 
 func TestRequestConfiguredBuilderBidsAppliesLocalProposalPolicy(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name          string
 		feeRecipient  common.Address
@@ -719,6 +733,7 @@ func TestRequestConfiguredBuilderBidsAppliesLocalProposalPolicy(t *testing.T) {
 }
 
 func TestSelectGloasBidCapsExecutionPaymentAndAvoidsOverflow(t *testing.T) {
+	t.Parallel()
 	capped := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 1)}
 	capped.Message.ExecutionPayment = 100
 	overflow := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 2, ^uint64(0))}
@@ -738,6 +753,7 @@ func TestSelectGloasBidCapsExecutionPaymentAndAvoidsOverflow(t *testing.T) {
 }
 
 func TestSelectGloasBidSaturatesOverflowTotalsAndKeepsFirstTie(t *testing.T) {
+	t.Parallel()
 	a := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, math.MaxUint64-1)}
 	a.Message.ExecutionPayment = 2
 	b := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 2, math.MaxUint64)}
@@ -763,6 +779,7 @@ func TestSelectGloasBidSaturatesOverflowTotalsAndKeepsFirstTie(t *testing.T) {
 }
 
 func TestSelectGloasBidLocalWinsOneWeiAboveSaturatedExternal(t *testing.T) {
+	t.Parallel()
 	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, math.MaxUint64)}
 	bid.Message.ExecutionPayment = 1
 	localValueWei := new(big.Int).Add(
@@ -776,6 +793,7 @@ func TestSelectGloasBidLocalWinsOneWeiAboveSaturatedExternal(t *testing.T) {
 }
 
 func TestSelectGloasBidAppliesMinimumBidToCappedValue(t *testing.T) {
+	t.Parallel()
 	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 5)}
 	bid.Message.ExecutionPayment = 10
 	require.Nil(t, selectGloasBid(new(big.Int), []gloasBidCandidate{{
@@ -787,6 +805,7 @@ func TestSelectGloasBidAppliesMinimumBidToCappedValue(t *testing.T) {
 }
 
 func TestDecodeGloasBlockProductionOptionsJSONAndSSZ(t *testing.T) {
+	t.Parallel()
 	config := &cltypes.BuilderConfig{
 		MinBid:             4,
 		BuilderBoostFactor: 125,
@@ -828,6 +847,7 @@ func TestDecodeGloasBlockProductionOptionsJSONAndSSZ(t *testing.T) {
 }
 
 func TestDecodeGloasBlockProductionOptionsRejectsInvalidBuildersPerEntry(t *testing.T) {
+	t.Parallel()
 	body := `{"min_bid":"0","builder_boost_factor":"100","builders":[null,{"url":"https://missing-auth.example"},{"url":"https://wrong-slot.example","auth":{"message":{"data":"0x01","slot":"11"},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"},"builder_pubkeys":[],"max_execution_payment":"0","min_bid":"0","builder_boost_factor":"0"},{"url":"https://builder.example","auth":{"message":{"data":"0x01","slot":"10"},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"},"builder_pubkeys":[],"max_execution_payment":"0","min_bid":"0","builder_boost_factor":"0"}]}`
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10?include_payload=true", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -840,6 +860,7 @@ func TestDecodeGloasBlockProductionOptionsRejectsInvalidBuildersPerEntry(t *test
 }
 
 func TestDecodeGloasBlockProductionOptionsIsolatesDuplicateEntriesJSON(t *testing.T) {
+	t.Parallel()
 	entry := &cltypes.BuilderEntry{
 		URL: "https://builder.example",
 		Auth: &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{
@@ -866,6 +887,7 @@ func TestDecodeGloasBlockProductionOptionsIsolatesDuplicateEntriesJSON(t *testin
 }
 
 func TestDecodeGloasBlockProductionOptionsDeduplicatesPoliciesForOneRequest(t *testing.T) {
+	t.Parallel()
 	base := &cltypes.BuilderEntry{
 		URL: "https://builder.example",
 		Auth: &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{
@@ -907,6 +929,7 @@ func TestDecodeGloasBlockProductionOptionsDeduplicatesPoliciesForOneRequest(t *t
 }
 
 func TestDecodeGloasBlockProductionOptionsIsolatesInvalidAndDuplicateEntriesSSZ(t *testing.T) {
+	t.Parallel()
 	makeEntry := func(url, auth string, slot uint64) *cltypes.BuilderEntry {
 		return &cltypes.BuilderEntry{
 			URL: url,
@@ -937,6 +960,7 @@ func TestDecodeGloasBlockProductionOptionsIsolatesInvalidAndDuplicateEntriesSSZ(
 }
 
 func TestDecodeGloasBlockProductionOptionsRejectsInvalidMetadata(t *testing.T) {
+	t.Parallel()
 	valid := `{"min_bid":"0","builder_boost_factor":"100","builders":[]}`
 	for _, tc := range []struct {
 		name    string
@@ -963,6 +987,7 @@ func TestDecodeGloasBlockProductionOptionsRejectsInvalidMetadata(t *testing.T) {
 }
 
 func TestDecodeGloasBlockProductionOptionsAcceptsMaximumJSONConfig(t *testing.T) {
+	t.Parallel()
 	config := &cltypes.BuilderConfig{Builders: make([]*cltypes.BuilderEntry, cltypes.MaxBuilderEntries)}
 	for i := range config.Builders {
 		authData := make([]byte, cltypes.MaxBuilderAuthDataSize)
@@ -986,6 +1011,7 @@ func TestDecodeGloasBlockProductionOptionsAcceptsMaximumJSONConfig(t *testing.T)
 }
 
 func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(nil))
 	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
@@ -1057,6 +1083,7 @@ func TestGloasProductionUsesProposerPreferenceFeeRecipient(t *testing.T) {
 }
 
 func TestGloasProductionFallsBackToEmptyWithoutMEVBoost(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
 	var output syncedBuffer
@@ -1100,6 +1127,7 @@ func TestGloasProductionFallsBackToEmptyWithoutMEVBoost(t *testing.T) {
 }
 
 func TestGloasProductionRejectsChangedBeaconHead(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
 	baseBlockRoot := common.Hash{0x41}
@@ -1129,6 +1157,7 @@ func TestGloasProductionRejectsChangedBeaconHead(t *testing.T) {
 }
 
 func TestGloasProductionFallsBackToEmptyWhenFullEnvelopeCannotBeRead(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
 	var output syncedBuffer
@@ -1175,12 +1204,14 @@ func TestGloasProductionFallsBackToEmptyWhenFullEnvelopeCannotBeRead(t *testing.
 }
 
 func TestProductionUsesLocalPayloadWhenBuilderClientIsMissing(t *testing.T) {
+	t.Parallel()
 	requireProductionUsesLocalPayload(t, func(_ *gomock.Controller, handler *ApiHandler, _ *state.CachingBeaconState, _ uint64, _ common.Hash) {
 		require.Nil(t, handler.builderClient)
 	})
 }
 
 func TestProductionUsesLocalPayloadWhenBuilderBidIsMalformed(t *testing.T) {
+	t.Parallel()
 	requireProductionUsesLocalPayload(t, func(ctrl *gomock.Controller, handler *ApiHandler, postState *state.CachingBeaconState, targetSlot uint64, parentHash common.Hash) {
 		header := validBuilderHeaderForTest(t, postState, targetSlot, parentHash)
 		header.Data.Message.Value = "not-a-number"
@@ -1191,6 +1222,7 @@ func TestProductionUsesLocalPayloadWhenBuilderBidIsMalformed(t *testing.T) {
 }
 
 func TestProductionUsesLocalPayloadWhenBuilderWithdrawalsRootIsWrong(t *testing.T) {
+	t.Parallel()
 	requireProductionUsesLocalPayload(t, func(ctrl *gomock.Controller, handler *ApiHandler, postState *state.CachingBeaconState, targetSlot uint64, parentHash common.Hash) {
 		header := validBuilderHeaderForTest(t, postState, targetSlot, parentHash)
 		header.Data.Message.Header.WithdrawalsRoot[0] ^= 0xff
@@ -1202,6 +1234,7 @@ func TestProductionUsesLocalPayloadWhenBuilderWithdrawalsRootIsWrong(t *testing.
 }
 
 func TestProcessBlockForProductionRejectsUnexpectedPayloadWithdrawal(t *testing.T) {
+	t.Parallel()
 	blocks, s, _ := tests.GetCapellaRandom()
 	block := blocks[0].Block
 	block.Body.ExecutionPayload.Withdrawals.Clear()
@@ -1220,6 +1253,7 @@ func TestProcessBlockForProductionRejectsUnexpectedPayloadWithdrawal(t *testing.
 }
 
 func TestProductionUsesValidBuilderPayloadAfterSlotAdvance(t *testing.T) {
+	t.Parallel()
 	var header *builder.ExecutionHeader
 	block := produceBlockWithBuilderForTest(t, func(ctrl *gomock.Controller, handler *ApiHandler, postState *state.CachingBeaconState, targetSlot uint64, parentHash common.Hash) {
 		require.Equal(t, targetSlot, postState.Slot())
@@ -1342,6 +1376,7 @@ func validBuilderHeaderForTest(
 }
 
 func TestGetBuilderPayloadValidatesWithdrawalsRoot(t *testing.T) {
+	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.BellatrixVersion, clparams.CapellaVersion, clparams.ElectraVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			var fixtureState *state.CachingBeaconState
@@ -1412,6 +1447,7 @@ func TestGetBuilderPayloadValidatesWithdrawalsRoot(t *testing.T) {
 }
 
 func TestGetMEVBoostPayloadRejectsMalformedHeader(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
 	parentHash := postState.LatestExecutionPayloadHeader().BlockHash
@@ -1516,6 +1552,7 @@ func TestGetMEVBoostPayloadRejectsMalformedHeader(t *testing.T) {
 }
 
 func TestParseGloasPublishedBlockRejectsWrapperAndOversizeBodies(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	h.beaconChainCfg.GloasForkEpoch = 0
 	for _, tc := range []struct {
@@ -1535,6 +1572,7 @@ func TestParseGloasPublishedBlockRejectsWrapperAndOversizeBodies(t *testing.T) {
 }
 
 func TestGetMEVBoostPayloadRejectsNilBlobCommitmentBeforeDeneb(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -1553,6 +1591,7 @@ func TestGetMEVBoostPayloadRejectsNilBlobCommitmentBeforeDeneb(t *testing.T) {
 }
 
 func TestGetBuilderPayloadUsesForkBlobLimit(t *testing.T) {
+	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
@@ -1607,6 +1646,7 @@ func TestGetBuilderPayloadUsesForkBlobLimit(t *testing.T) {
 }
 
 func TestParseGloasPublishedBlockRejectsNonCanonicalSSZ(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	h.beaconChainCfg.GloasForkEpoch = 0
 	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
@@ -1621,6 +1661,7 @@ func TestParseGloasPublishedBlockRejectsNonCanonicalSSZ(t *testing.T) {
 }
 
 func TestPostEthV2BeaconBlocksForwardsGloasBlockToWinningBuilder(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	forkchoiceStore.OnTickFn = func(uint64) {}
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -1668,6 +1709,7 @@ func TestPostEthV2BeaconBlocksForwardsGloasBlockToWinningBuilder(t *testing.T) {
 }
 
 func TestPostEthV2BeaconBlocksBuilderHandoffOutlivesIntegrationCancellation(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	forkchoiceStore.OnTickFn = func(uint64) {}
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -1721,6 +1763,7 @@ func TestPostEthV2BeaconBlocksBuilderHandoffOutlivesIntegrationCancellation(t *t
 }
 
 func TestPostEthV2BeaconBlocksForwardsUnboundBuilderRoute(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	forkchoiceStore.OnTickFn = func(uint64) {}
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -1763,6 +1806,7 @@ func TestPostEthV2BeaconBlocksForwardsUnboundBuilderRoute(t *testing.T) {
 }
 
 func TestPostEthV2BeaconBlocksReturnsAcceptedAndForwardsBuilderAfterPermanentIntegrationFailure(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	forkchoiceStore.OnTickFn = func(uint64) {}
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -1813,6 +1857,7 @@ func TestPostEthV2BeaconBlocksReturnsAcceptedAndForwardsBuilderAfterPermanentInt
 }
 
 func TestPostEthV2BeaconBlocksConsensusRejectsPreflightFailureBeforeGossip(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.beaconChainCfg.InitializeForkSchedule()
@@ -1837,6 +1882,7 @@ func TestPostEthV2BeaconBlocksConsensusRejectsPreflightFailureBeforeGossip(t *te
 }
 
 func TestPostEthV2BeaconBlocksConsensusBroadcastsBeforeExecutionInvalidation(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	forkchoiceStore.OnTickFn = func(uint64) {}
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -1876,6 +1922,7 @@ func TestPostEthV2BeaconBlocksConsensusBroadcastsBeforeExecutionInvalidation(t *
 }
 
 func TestPostEthV2BeaconBlocksReturnsServerErrorForTransientIntegrationFailure(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	forkchoiceStore.OnTickFn = func(uint64) {}
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -1904,6 +1951,7 @@ func TestPostEthV2BeaconBlocksReturnsServerErrorForTransientIntegrationFailure(t
 }
 
 func TestPostEthV1BeaconBlocksDoesNotWaitForFullIntegration(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	forkchoiceStore.OnTickFn = func(uint64) {}
 	version := handler.beaconChainCfg.GetCurrentStateVersion(handler.ethClock.GetCurrentEpoch())
@@ -1931,6 +1979,7 @@ func TestPostEthV1BeaconBlocksDoesNotWaitForFullIntegration(t *testing.T) {
 }
 
 func TestForwardPublishedBlockToBuilderOnlyOnce(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.beaconChainCfg.InitializeForkSchedule()
@@ -1967,6 +2016,7 @@ func TestForwardPublishedBlockToBuilderOnlyOnce(t *testing.T) {
 }
 
 func TestForwardPublishedBlockTrustedReservationSupersedesUnboundClaim(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.beaconChainCfg.InitializeForkSchedule()
@@ -2011,6 +2061,7 @@ func TestForwardPublishedBlockTrustedReservationSupersedesUnboundClaim(t *testin
 }
 
 func TestForwardPublishedBlockToBuilderDoesNotForwardPreGloasBlock(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.ElectraVersion)
 	blockRoot, err := block.Block.HashSSZ()
@@ -2026,6 +2077,7 @@ func TestForwardPublishedBlockToBuilderDoesNotForwardPreGloasBlock(t *testing.T)
 }
 
 func TestForwardPublishedBlockToBuilderDoesNotStartPastPayloadDeadline(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
@@ -2046,6 +2098,7 @@ func TestForwardPublishedBlockToBuilderDoesNotStartPastPayloadDeadline(t *testin
 }
 
 func TestForwardPublishedBlockToBuilderStopsAtPayloadDeadline(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.beaconChainCfg.SecondsPerSlot = 1
@@ -2079,6 +2132,7 @@ func TestForwardPublishedBlockToBuilderStopsAtPayloadDeadline(t *testing.T) {
 }
 
 func TestConfiguredBuilderReservationCancelsPreemptedUntrustedHandoff(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
@@ -2110,6 +2164,7 @@ func TestConfiguredBuilderReservationCancelsPreemptedUntrustedHandoff(t *testing
 }
 
 func TestForwardPublishedBlockToBuilderRetriesAfterFailure(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.beaconChainCfg.InitializeForkSchedule()
@@ -2174,6 +2229,7 @@ func (c *publicBuilderSubmitter) SubmitSignedBeaconBlockPublic(ctx context.Conte
 }
 
 func TestForwardPublishedBlockUnboundFailuresConsumeRouteBudget(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.beaconChainCfg.InitializeForkSchedule()
@@ -2223,6 +2279,7 @@ func TestForwardPublishedBlockUnboundFailuresConsumeRouteBudget(t *testing.T) {
 }
 
 func TestValidateSelfBuildPayloadAvailablePreservesUnsignedPayloadForValidator(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
@@ -2241,6 +2298,7 @@ func TestValidateSelfBuildPayloadAvailablePreservesUnsignedPayloadForValidator(t
 }
 
 func TestParseBlockPublishingValidationRejectsUnknownV2Value(t *testing.T) {
+	t.Parallel()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks?broadcast_validation=fast", nil)
 	_, err := (&ApiHandler{}).parseBlockPublishingValidation(req, 2)
 	require.Error(t, err)
@@ -2258,6 +2316,7 @@ func TestParseBlockPublishingValidationRejectsUnknownV2Value(t *testing.T) {
 }
 
 func TestBroadcastBlockRunsGossipValidationBeforePublishing(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	blockService := network_services_mock.NewMockBlockService(ctrl)
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
@@ -2270,6 +2329,7 @@ func TestBroadcastBlockRunsGossipValidationBeforePublishing(t *testing.T) {
 }
 
 func TestBroadcastBlockRejectsKnownRootWithDifferentSignature(t *testing.T) {
+	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.GloasVersion} {
 		for _, validation := range []BlockPublishingValidation{BlockPublishingValidationConsensus, BlockPublishingValidationConsensusAndEquivocation} {
 			t.Run(version.String()+"/"+string(validation), func(t *testing.T) {
@@ -2302,6 +2362,7 @@ func TestBroadcastBlockRejectsKnownRootWithDifferentSignature(t *testing.T) {
 }
 
 func TestBroadcastBlockAcceptsExactKnownReplay(t *testing.T) {
+	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.GloasVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
@@ -2341,6 +2402,7 @@ func TestBroadcastBlockAcceptsExactKnownReplay(t *testing.T) {
 }
 
 func TestBroadcastBlockRejectsUnknownBlockAtFinalizedHorizonBeforeWrites(t *testing.T) {
+	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.GloasVersion} {
 		for _, validation := range []BlockPublishingValidation{BlockPublishingValidationConsensus, BlockPublishingValidationConsensusAndEquivocation} {
 			t.Run(version.String()+"/"+string(validation), func(t *testing.T) {
@@ -2365,6 +2427,7 @@ func TestBroadcastBlockRejectsUnknownBlockAtFinalizedHorizonBeforeWrites(t *test
 }
 
 func TestBroadcastBlockReportsAcceptedWhenEquivocationAppearsDuringIntegration(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	block := blocks[1]
@@ -2387,6 +2450,7 @@ func TestBroadcastBlockReportsAcceptedWhenEquivocationAppearsDuringIntegration(t
 }
 
 func TestBroadcastBlockRejectsKnownBlockAfterConflictingProposal(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
@@ -2412,6 +2476,7 @@ func TestBroadcastBlockRejectsKnownBlockAfterConflictingProposal(t *testing.T) {
 }
 
 func TestBroadcastBlockReleasesGossipReservationAfterPreparationFailure(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	blockService := network_services_mock.NewMockBlockService(ctrl)
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
@@ -2426,6 +2491,7 @@ func TestBroadcastBlockReleasesGossipReservationAfterPreparationFailure(t *testi
 }
 
 func TestBroadcastBlockDoesNotStoreBeforeBlockPublication(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	block := blocks[1]
@@ -2455,6 +2521,7 @@ func TestBroadcastBlockDoesNotStoreBeforeBlockPublication(t *testing.T) {
 }
 
 func TestBroadcastBlockSchedulesFullRecoveryAfterBlobStorageFailure(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	block := blocks[1]
@@ -2498,6 +2565,7 @@ func TestBroadcastBlockSchedulesFullRecoveryAfterBlobStorageFailure(t *testing.T
 }
 
 func TestBroadcastBlockSchedulesRecoveryAfterSidecarsAndForkchoiceSucceed(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	block := blocks[1]
@@ -2542,6 +2610,7 @@ func TestBroadcastBlockSchedulesRecoveryAfterSidecarsAndForkchoiceSucceed(t *tes
 }
 
 func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	block := blocks[1]
 	fcu.OnTickFn = func(uint64) {}
@@ -2571,6 +2640,7 @@ func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testin
 }
 
 func TestStoreBlockAndBlobsToleratesBusyForkchoice(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	block := blocks[1]
@@ -2601,6 +2671,7 @@ func TestStoreBlockAndBlobsToleratesBusyForkchoice(t *testing.T) {
 }
 
 func TestStoreBlockAndBlobsClassifiesKnownRootMismatchAsPermanent(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	stored := blocks[1]
 	root, err := stored.Block.HashSSZ()
@@ -2615,6 +2686,7 @@ func TestStoreBlockAndBlobsClassifiesKnownRootMismatchAsPermanent(t *testing.T) 
 }
 
 func TestStoreBlockAndBlobsClassifiesFinalizedHorizonRaceAsPermanent(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	block := blocks[1]
 	fcu.FinalizedSlotVal = block.Block.Slot
@@ -2624,6 +2696,7 @@ func TestStoreBlockAndBlobsClassifiesFinalizedHorizonRaceAsPermanent(t *testing.
 }
 
 func TestStoreBlockAndBlobsClassifiesKnownEquivocationAsPermanent(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	block := blocks[1]
 	root, err := block.Block.HashSSZ()
@@ -2832,6 +2905,7 @@ func (p *publishedGossip) columnCount() int {
 }
 
 func TestBroadcastBlockStoresAllColumnsInArchiveMode(t *testing.T) {
+	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			f := newPublishedColumnsFixture(t, version)
@@ -2845,6 +2919,7 @@ func TestBroadcastBlockStoresAllColumnsInArchiveMode(t *testing.T) {
 }
 
 func TestBroadcastBlockWritesColumnsAfterOnBlockAndIndexWrite(t *testing.T) {
+	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			f := newPublishedColumnsFixture(t, version)
@@ -2873,6 +2948,7 @@ func TestBroadcastBlockWritesColumnsAfterOnBlockAndIndexWrite(t *testing.T) {
 // block to be imported, so a peer that asks for the block of a column can get it, and that a stalled
 // import holds the columns back for at most publishedBlockStoreWaitBeforeColumns.
 func TestBroadcastGloasBlockHoldsColumnsUntilBlockIsServable(t *testing.T) {
+	t.Parallel()
 	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
 	importing, release := make(chan struct{}), make(chan struct{})
 	f.forkchoice.afterOnBlock = func() {
@@ -2893,6 +2969,7 @@ func TestBroadcastGloasBlockHoldsColumnsUntilBlockIsServable(t *testing.T) {
 }
 
 func TestBroadcastGloasBlockGossipsColumnsOnceTheStoreJobFails(t *testing.T) {
+	t.Parallel()
 	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
 	f.handler.forkchoiceStore = &rejectingOnBlockForkchoice{ForkChoiceStorage: f.forkchoice, err: forkchoice.ErrBlockInvalid}
 	start := time.Now()
@@ -2904,6 +2981,7 @@ func TestBroadcastGloasBlockGossipsColumnsOnceTheStoreJobFails(t *testing.T) {
 }
 
 func TestBroadcastGloasBlockGossipsColumnsWhileColumnWriteBlocks(t *testing.T) {
+	t.Parallel()
 	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
 	blocked, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
@@ -2927,6 +3005,7 @@ func TestBroadcastGloasBlockGossipsColumnsWhileColumnWriteBlocks(t *testing.T) {
 }
 
 func TestBroadcastBlockColumnWriteFailureKeepsImportedBlockAndRetries(t *testing.T) {
+	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			f := newPublishedColumnsFixture(t, version)
@@ -2958,6 +3037,7 @@ func TestBroadcastBlockColumnWriteFailureKeepsImportedBlockAndRetries(t *testing
 // TestBroadcastBlockStoresCustodyRaisedByItsOwnImport proves the columns are chosen after OnBlock,
 // which may raise the custody group count.
 func TestBroadcastBlockStoresCustodyRaisedByItsOwnImport(t *testing.T) {
+	t.Parallel()
 	const raisedCgc = 16
 	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
 		t.Run(version.String(), func(t *testing.T) {
@@ -2979,6 +3059,7 @@ func TestBroadcastBlockStoresCustodyRaisedByItsOwnImport(t *testing.T) {
 // TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA covers the v1 block POST, which
 // skips the integration wait: a stateful envelope POST that follows must find the custody columns.
 func TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA(t *testing.T) {
+	t.Parallel()
 	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
 	release := make(chan struct{})
 	releaseWrites := sync.OnceFunc(func() { close(release) })
@@ -3027,6 +3108,7 @@ func TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA(t *testi
 }
 
 func TestBroadcastBlockExactReplayCompletesMissingDataSidecars(t *testing.T) {
+	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.DenebVersion, clparams.FuluVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -3107,6 +3189,7 @@ func TestBroadcastBlockExactReplayCompletesMissingDataSidecars(t *testing.T) {
 }
 
 func TestPublishGossipReturnsPublishFailure(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
 	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, []byte{1}).Return(errors.New("gossip unavailable"))
@@ -3118,6 +3201,7 @@ func TestPublishGossipReturnsPublishFailure(t *testing.T) {
 }
 
 func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
+	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.AltairVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -3144,6 +3228,7 @@ func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
 }
 
 func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
+	t.Parallel()
 	h := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", nil)
 	req.Header.Set("Content-Type", "text/plain")
@@ -3157,6 +3242,7 @@ func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
 }
 
 func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	builderClient.EXPECT().SubmitBlindedBlocks(gomock.Any(), gomock.Any()).DoAndReturn(
@@ -3182,6 +3268,7 @@ func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
 }
 
 func TestPublishBlindedBlocksRejectsMissingPreFuluPayload(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	builderClient.EXPECT().SubmitBlindedBlocks(gomock.Any(), gomock.Any()).Return(nil, nil, nil, nil)
@@ -3201,6 +3288,7 @@ func TestPublishBlindedBlocksRejectsMissingPreFuluPayload(t *testing.T) {
 }
 
 func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		mutate     func(*cltypes.SignedBlindedBeaconBlock)
@@ -3271,6 +3359,7 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 }
 
 func TestValidateBuilderPayload(t *testing.T) {
+	t.Parallel()
 	validPayload := func(version clparams.StateVersion) *cltypes.Eth1Block {
 		payload := cltypes.NewEth1Block(version, &clparams.MainnetBeaconConfig)
 		payload.Extra = solid.NewExtraData()
@@ -3328,6 +3417,7 @@ func TestValidateBuilderPayload(t *testing.T) {
 }
 
 func TestValidateBuilderPayloadRejectsOlderResponseVersion(t *testing.T) {
+	t.Parallel()
 	payload := cltypes.NewEth1Block(clparams.BellatrixVersion, &clparams.MainnetBeaconConfig)
 	payload.Extra = solid.NewExtraData()
 	payload.Transactions = &solid.TransactionsSSZ{}
@@ -3336,6 +3426,7 @@ func TestValidateBuilderPayloadRejectsOlderResponseVersion(t *testing.T) {
 }
 
 func TestValidateBuilderPayloadRejectsMissingElectraExecutionRequests(t *testing.T) {
+	t.Parallel()
 	payload := cltypes.NewEth1Block(clparams.ElectraVersion, &clparams.MainnetBeaconConfig)
 	payload.Extra = solid.NewExtraData()
 	payload.Transactions = &solid.TransactionsSSZ{}
@@ -3346,6 +3437,7 @@ func TestValidateBuilderPayloadRejectsMissingElectraExecutionRequests(t *testing
 }
 
 func TestValidateBuilderExecutionRequestsDoesNotApplyLegacyGloasDepositMaximum(t *testing.T) {
+	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxDepositRequestsPerPayload = 1
 	requests := cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
@@ -3356,6 +3448,7 @@ func TestValidateBuilderExecutionRequestsDoesNotApplyLegacyGloasDepositMaximum(t
 }
 
 func TestValidateBuilderExecutionRequestsBoundsGloasDepositResources(t *testing.T) {
+	t.Parallel()
 	requests := cltypes.NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
 	request := &solid.DepositRequest{}
 	for range int(clparams.MaxChunkSize)/solid.SizeDepositRequest + 1 {
@@ -3366,6 +3459,7 @@ func TestValidateBuilderExecutionRequestsBoundsGloasDepositResources(t *testing.
 }
 
 func TestValidateBuilderExecutionRequestsPreservesOtherProtocolLimits(t *testing.T) {
+	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxDepositRequestsPerPayload = 1
 	cfg.MaxWithdrawalRequestsPerPayload = 1
@@ -3381,6 +3475,7 @@ func TestValidateBuilderExecutionRequestsPreservesOtherProtocolLimits(t *testing
 }
 
 func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
+	t.Parallel()
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,
 		IntervalsPerSlot: 3,
@@ -3396,6 +3491,7 @@ func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
 }
 
 func TestBlockBuilderWindowLateRequestGrabsImmediately(t *testing.T) {
+	t.Parallel()
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,
 		IntervalsPerSlot: 3,
@@ -3410,6 +3506,7 @@ func TestBlockBuilderWindowLateRequestGrabsImmediately(t *testing.T) {
 }
 
 func TestBlockBuilderWindowReservesPublicationMargin(t *testing.T) {
+	t.Parallel()
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,
 		IntervalsPerSlot: 3,
@@ -3435,6 +3532,7 @@ func TestBlockBuilderWindowReservesPublicationMargin(t *testing.T) {
 }
 
 func TestShouldRetryGetPayloadStopsAtDeadline(t *testing.T) {
+	t.Parallel()
 	deadline := time.Unix(100, 0)
 
 	require.True(t, shouldRetryGetPayload(deadline.Add(-time.Nanosecond), deadline))
@@ -3443,6 +3541,7 @@ func TestShouldRetryGetPayloadStopsAtDeadline(t *testing.T) {
 }
 
 func TestPollAssembledPayloadReturnsReadyPayload(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now.Add(-time.Millisecond), pollUntil: now.Add(time.Second)}
@@ -3459,6 +3558,7 @@ func TestPollAssembledPayloadReturnsReadyPayload(t *testing.T) {
 }
 
 func TestPollAssembledPayloadRetriesWhileBusy(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
@@ -3478,6 +3578,7 @@ func TestPollAssembledPayloadRetriesWhileBusy(t *testing.T) {
 }
 
 func TestPollAssembledPayloadRetriesOnError(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
@@ -3497,6 +3598,7 @@ func TestPollAssembledPayloadRetriesOnError(t *testing.T) {
 }
 
 func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		err  error
@@ -3615,6 +3717,7 @@ func TestProductionReportsBuilderCancellationAfterPollDeadline(t *testing.T) {
 }
 
 func TestPollAssembledPayloadStopsOnInvalidResponse(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
 	calls := 0
@@ -3643,6 +3746,7 @@ func TestProductionReportsUnknownPayloadOnce(t *testing.T) {
 }
 
 func TestPollAssembledPayloadStopsAtDeadline(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
@@ -3658,6 +3762,7 @@ func TestPollAssembledPayloadStopsAtDeadline(t *testing.T) {
 }
 
 func TestPollAssembledPayloadLateRequestGrabsOnce(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	past := time.Now().Add(-time.Second)
 	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
@@ -3672,6 +3777,7 @@ func TestPollAssembledPayloadLateRequestGrabsOnce(t *testing.T) {
 }
 
 func TestPollAssembledPayloadReturnsOnContextCancel(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now.Add(time.Hour), pollUntil: now.Add(time.Hour)}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -3687,6 +3793,7 @@ func TestPollAssembledPayloadReturnsOnContextCancel(t *testing.T) {
 }
 
 func TestSetupHeaderResponseForBlockProductionGloasPayloadIncluded(t *testing.T) {
+	t.Parallel()
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
 
@@ -3700,6 +3807,7 @@ func TestSetupHeaderResponseForBlockProductionGloasPayloadIncluded(t *testing.T)
 }
 
 func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *testing.T) {
+	t.Parallel()
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
 
@@ -3709,6 +3817,7 @@ func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *te
 }
 
 func TestProduceBlockV4IncludesRequestPayloadAfterSharedCacheEviction(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.FuluForkEpoch = 0
@@ -3783,6 +3892,7 @@ func TestProduceBlockV4IncludesRequestPayloadAfterSharedCacheEviction(t *testing
 }
 
 func TestProduceBeaconBodyRejectsInvalidFuluCellProofLength(t *testing.T) {
+	t.Parallel()
 	proofIndexes := []struct {
 		name  string
 		index int
@@ -3803,6 +3913,7 @@ func TestProduceBeaconBodyRejectsInvalidFuluCellProofLength(t *testing.T) {
 }
 
 func TestProduceBeaconBodyAcceptsExactFuluCellProofLength(t *testing.T) {
+	t.Parallel()
 	body, err := produceFuluBodyWithProofLength(t, 0, length.Bytes48)
 
 	require.NoError(t, err)
@@ -3810,6 +3921,7 @@ func TestProduceBeaconBodyAcceptsExactFuluCellProofLength(t *testing.T) {
 }
 
 func TestProduceBeaconBodyPreservesPreFuluValidationOrder(t *testing.T) {
+	t.Parallel()
 	bundle := &engine_types.BlobsBundle{
 		Blobs:       []hexutil.Bytes{make([]byte, cltypes.BYTES_PER_BLOB)},
 		Commitments: []hexutil.Bytes{make([]byte, length.Bytes48-1)},
@@ -3873,6 +3985,7 @@ func produceBodyWithBundle(t *testing.T, version clparams.StateVersion, bundle *
 }
 
 func TestProduceBeaconBodyAcceptsMissingBlobsBundleBeforeDeneb(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
 
 	payload := cltypes.NewEth1BlockFromExecutionHeader(postState.LatestExecutionPayloadHeader(), clparams.CapellaVersion, h.beaconChainCfg)
@@ -3897,6 +4010,7 @@ func TestProduceBeaconBodyAcceptsMissingBlobsBundleBeforeDeneb(t *testing.T) {
 }
 
 func TestProduceBeaconBodyRejectsMissingBlobsBundleAtDeneb(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
 
 	baseBlock := blocks[len(blocks)-1].Block
@@ -3951,6 +4065,7 @@ func produceBodyWithNilWithdrawals(t *testing.T, version clparams.StateVersion) 
 }
 
 func TestCacheExecutionBodyUsesBlockHash(t *testing.T) {
+	t.Parallel()
 	reader := tests.NewMockBlockReader()
 	handler := &ApiHandler{blockReader: reader}
 	payload := cltypes.NewEth1Block(clparams.BellatrixVersion, &clparams.MainnetBeaconConfig)
@@ -3964,6 +4079,7 @@ func TestCacheExecutionBodyUsesBlockHash(t *testing.T) {
 }
 
 func TestProduceBeaconBodyRejectsMissingWithdrawalsAtCapella(t *testing.T) {
+	t.Parallel()
 	body, reader, err := produceBodyWithNilWithdrawals(t, clparams.CapellaVersion)
 
 	require.Nil(t, body)
@@ -3973,6 +4089,7 @@ func TestProduceBeaconBodyRejectsMissingWithdrawalsAtCapella(t *testing.T) {
 }
 
 func TestProduceBeaconBodyAcceptsMissingWithdrawalsBeforeCapella(t *testing.T) {
+	t.Parallel()
 	body, _, err := produceBodyWithNilWithdrawals(t, clparams.BellatrixVersion)
 
 	require.NoError(t, err)
@@ -3981,6 +4098,7 @@ func TestProduceBeaconBodyAcceptsMissingWithdrawalsBeforeCapella(t *testing.T) {
 }
 
 func TestSelectHigherGloasP2PBidValueUsesWei(t *testing.T) {
+	t.Parallel()
 	t.Run("higher bid", func(t *testing.T) {
 		localValueWei := gweiToWei(big.NewInt(2))
 		externalBid := &cltypes.SignedExecutionPayloadBid{
@@ -4019,15 +4137,18 @@ func TestSelectHigherGloasP2PBidValueUsesWei(t *testing.T) {
 }
 
 func TestPreferLocalExecutionValueRejectsNilBuilderValue(t *testing.T) {
+	t.Parallel()
 	require.True(t, preferLocalExecutionValue(big.NewInt(1), nil, 100))
 }
 
 func TestShouldRequestBuilderHeader(t *testing.T) {
+	t.Parallel()
 	require.True(t, shouldRequestBuilderHeader(clparams.FuluVersion))
 	require.False(t, shouldRequestBuilderHeader(clparams.GloasVersion))
 }
 
 func TestGetBuilderPayloadRejectsInvalidBlockValue(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name  string
 		value string
@@ -4088,6 +4209,7 @@ func TestProcessProducedBlockFallsBackWithoutCandidateStateLeak(t *testing.T) {
 }
 
 func TestProcessProducedBlockRetainsBidAfterUnclassifiedTransitionFailure(t *testing.T) {
+	t.Parallel()
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
 	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
@@ -4119,6 +4241,7 @@ func TestProcessProducedBlockRetainsBidAfterUnclassifiedTransitionFailure(t *tes
 }
 
 func TestProcessProducedBlockDoesNotReplacePreselectedConfiguredBid(t *testing.T) {
+	t.Parallel()
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	configuredBid := fixture.externalBid
 	configuredBid.Message.Value = 2
@@ -4143,6 +4266,7 @@ func TestProcessProducedBlockDoesNotReplacePreselectedConfiguredBid(t *testing.T
 }
 
 func TestProcessProducedBlockUsesAuthoritativeP2PSelection(t *testing.T) {
+	t.Parallel()
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
 	selectedBid := fixture.externalBid
@@ -4172,6 +4296,7 @@ func TestProcessProducedBlockUsesAuthoritativeP2PSelection(t *testing.T) {
 }
 
 func TestProcessProducedBlockHonorsAuthoritativeNoP2PSelection(t *testing.T) {
+	t.Parallel()
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
 	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
@@ -4192,6 +4317,7 @@ func TestProcessProducedBlockHonorsAuthoritativeNoP2PSelection(t *testing.T) {
 }
 
 func TestProcessProducedBlockEvictsInvalidBidWhenSelfBuildFails(t *testing.T) {
+	t.Parallel()
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
 	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
@@ -4222,6 +4348,7 @@ func TestProcessProducedBlockEvictsInvalidBidWhenSelfBuildFails(t *testing.T) {
 }
 
 func TestProcessProducedBlockEvictsInvalidBidSignatureThroughMachine(t *testing.T) {
+	t.Parallel()
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
 	wrongKey, err := bls.GenerateKey()
@@ -4310,6 +4437,7 @@ func TestProcessProducedBlockRetainsValidBidAfterInvalidPayloadAttestationSignat
 }
 
 func TestProcessProducedBlockSelectsExternalBidWithoutLegacyBuilderBoost(t *testing.T) {
+	t.Parallel()
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	originalRoot, err := fixture.productionState.HashSSZ()
 	require.NoError(t, err)
@@ -4332,6 +4460,7 @@ func TestProcessProducedBlockSelectsExternalBidWithoutLegacyBuilderBoost(t *test
 }
 
 func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
+	t.Parallel()
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg = fixture.block.Cfg
@@ -4595,6 +4724,7 @@ func TestGetEthV3ValidatorBlockStaysQuietWhenCancelledDuringTheRetryWait(t *test
 }
 
 func TestSelfBuildEnvelopeCacheSeparatesBlockRoots(t *testing.T) {
+	t.Parallel()
 	cache, err := lru.New[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]("testSelfBuildEnvelopes", 4)
 	require.NoError(t, err)
 	handler := &ApiHandler{selfBuildEnvelopes: cache}
@@ -4621,6 +4751,7 @@ func TestSelfBuildEnvelopeCacheSeparatesBlockRoots(t *testing.T) {
 }
 
 func TestProcessProducedBlockTreatsNilExecutionValueAsZero(t *testing.T) {
+	t.Parallel()
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	fixture.block.ExecutionValue = nil
 	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
@@ -4634,6 +4765,7 @@ func TestProcessProducedBlockTreatsNilExecutionValueAsZero(t *testing.T) {
 }
 
 func TestProcessProducedBlockRejectsBlindedGloasBlock(t *testing.T) {
+	t.Parallel()
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	block := &cltypes.BlindOrExecutionBeaconBlock{
 		BlindedBeaconBody: cltypes.NewBlindedBeaconBody(fixture.block.Cfg, clparams.GloasVersion),
@@ -4647,6 +4779,7 @@ func TestProcessProducedBlockRejectsBlindedGloasBlock(t *testing.T) {
 }
 
 func TestProcessProducedBlockRejectsNilBlock(t *testing.T) {
+	t.Parallel()
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
 
@@ -4656,6 +4789,7 @@ func TestProcessProducedBlockRejectsNilBlock(t *testing.T) {
 }
 
 func TestProcessProducedBlockRejectsBlockWithoutBody(t *testing.T) {
+	t.Parallel()
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
 	block := &cltypes.BlindOrExecutionBeaconBlock{Cfg: fixture.block.Cfg}
@@ -4679,6 +4813,7 @@ func TestProcessProducedBlockRejectsBlockWithoutBody(t *testing.T) {
 }
 
 func TestProcessProducedBlockRejectsInvalidExternalBidGuards(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		options gloasBidSelectionOptions
@@ -4714,6 +4849,7 @@ func TestProcessProducedBlockRejectsInvalidExternalBidGuards(t *testing.T) {
 }
 
 func TestConsensusBlockValueUsesWeiWithoutOverflow(t *testing.T) {
+	t.Parallel()
 	rewards := &eth2.BlockRewardsCollector{
 		Attestations:      ^uint64(0),
 		AttesterSlashings: 2,
@@ -4883,6 +5019,7 @@ func newGloasBidSelectionFixture(t *testing.T, options gloasBidSelectionOptions)
 }
 
 func TestSetupHeaderResponsePreservesLargeExecutionValue(t *testing.T) {
+	t.Parallel()
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
 	valueWei := gweiToWei(new(big.Int).SetUint64(^uint64(0)))
@@ -4893,6 +5030,7 @@ func TestSetupHeaderResponsePreservesLargeExecutionValue(t *testing.T) {
 }
 
 func TestProduceBlockPreservesLargeExecutionValue(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	h.routerCfg.Builder = false
@@ -4918,6 +5056,7 @@ func TestProduceBlockPreservesLargeExecutionValue(t *testing.T) {
 }
 
 func TestProduceBlockUsesLocalPayloadWithoutBuilderClient(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	require.True(t, h.routerCfg.Builder)
@@ -4962,6 +5101,7 @@ func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
 }
 
 func TestSetupHeaderResponsePreservesExecutionValueAboveUint64(t *testing.T) {
+	t.Parallel()
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
 	value := new(big.Int).Lsh(big.NewInt(1), 80)
@@ -4970,6 +5110,7 @@ func TestSetupHeaderResponsePreservesExecutionValueAboveUint64(t *testing.T) {
 }
 
 func TestBroadcastGloasBuilderBlockDoesNotRequireEnvelopeBlobsYet(t *testing.T) {
+	t.Parallel()
 	commitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
 	commitment := cltypes.KZGCommitment{1}
 	commitments.Append(&commitment)
@@ -4992,6 +5133,7 @@ func TestBroadcastGloasBuilderBlockDoesNotRequireEnvelopeBlobsYet(t *testing.T) 
 // GetAssembledBlock, and decoding the execution requests. This is the code path
 // that was broken in issue #14319 and fixed in PR #14326.
 func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// --- Set up real execution layer ---
@@ -5127,6 +5269,7 @@ func (s *fcuSpy) ForkChoiceUpdate(ctx context.Context, finalized, safe, head com
 // the slot number to the execution engine in PayloadAttributes when the
 // Glamsterdam (Gloas) fork is active, per EIP-7843.
 func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// --- Set up real execution layer with Amsterdam activated ---
@@ -5227,6 +5370,7 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 
 // The block after the requested state can be gone after pruning while the canonical index still names it.
 func TestExpectedWithdrawalsHistoricalBlockBodyPruned(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
 	delete(handler.blockReader.(*tests.MockBlockReader).U, blocks[1].Block.Slot)
 
@@ -5240,6 +5384,7 @@ func TestExpectedWithdrawalsHistoricalBlockBodyPruned(t *testing.T) {
 
 // A block the fork choice still holds in memory serves the request before the DB has it.
 func TestExpectedWithdrawalsReadsTheNextBlockFromForkChoice(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
 	delete(handler.blockReader.(*tests.MockBlockReader).U, blocks[1].Block.Slot)
 	root, err := blocks[1].Block.HashSSZ()
@@ -5255,6 +5400,7 @@ func TestExpectedWithdrawalsReadsTheNextBlockFromForkChoice(t *testing.T) {
 }
 
 func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
+	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
 	a := &ApiHandler{beaconChainCfg: &cfg}
@@ -5307,6 +5453,7 @@ func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
 }
 
 func TestProduceBeaconBodyComputesWithdrawalsAtGloasTransition(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	handler.beaconChainCfg.FuluForkEpoch = 0
@@ -5349,6 +5496,7 @@ func TestProduceBeaconBodyComputesWithdrawalsAtGloasTransition(t *testing.T) {
 }
 
 func TestPayloadAttributesOmitFieldsTheChosenVersionCannotCarry(t *testing.T) {
+	t.Parallel()
 	root := common.Hash{0xaa}
 	withdrawals := []*types.Withdrawal{{Index: 1}}
 	slotNumber := hexutil.Uint64(64)
@@ -5542,6 +5690,7 @@ func TestPollAssembledPayloadStillReportsFailuresThatPrecededTheCancellation(t *
 }
 
 func TestFeeRecipientForProposalUsesGenesisPreferences(t *testing.T) {
+	t.Parallel()
 	config := clparams.MainnetBeaconConfig
 	config.GloasForkEpoch = 0
 	config.MinSeedLookahead = 1
@@ -5581,6 +5730,7 @@ func TestFeeRecipientForProposalUsesGenesisPreferences(t *testing.T) {
 }
 
 func TestFeeRecipientForProposalIgnoresUnrelatedPreferences(t *testing.T) {
+	t.Parallel()
 	config := clparams.MainnetBeaconConfig
 	targetSlot := 3 * config.SlotsPerEpoch
 	baseState := state.New(&config)
@@ -5847,6 +5997,7 @@ func TestProductionSaysNothingWhenTheRequestWasAbandoned(t *testing.T) {
 }
 
 func TestProcessProducedBlockConfiguredBidPreservesSelfBuildFallback(t *testing.T) {
+	t.Parallel()
 	for _, exitBuilder := range []bool{false, true} {
 		t.Run(fmt.Sprint(exitBuilder), func(t *testing.T) {
 			fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{exitBuilder: exitBuilder})
@@ -5881,6 +6032,7 @@ func TestProcessProducedBlockConfiguredBidPreservesSelfBuildFallback(t *testing.
 }
 
 func TestProduceBeaconBodyIncludesPTCVotesReceivedDuringPayloadWait(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
 	// The state needs the Gloas fork epoch in its own config for GetPTC.
@@ -6010,6 +6162,7 @@ func requestAttestationData(t *testing.T, handler *ApiHandler, ctx context.Conte
 }
 
 func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
+	t.Parallel()
 	const waitCap = 60 * time.Millisecond
 	fallbackRoot := common.HexToHash("0xfaaa")
 	forkChoiceRoot := common.HexToHash("0xfc01")
@@ -6118,6 +6271,7 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 }
 
 func TestGetEthV1ValidatorAttestationDataUsesForkChoiceHead(t *testing.T) {
+	t.Parallel()
 	syncedHeadRoot := common.HexToHash("0x1234")
 	for _, tt := range []struct {
 		name               string
@@ -6199,6 +6353,7 @@ func TestGetEthV1ValidatorAttestationDataUsesForkChoiceHead(t *testing.T) {
 }
 
 func TestGetEthV1ValidatorAttestationDataBoundsAncestorLookup(t *testing.T) {
+	t.Parallel()
 	slotsPerEpoch := clparams.MainnetBeaconConfig.SlotsPerEpoch
 	for _, tt := range []struct {
 		name              string
@@ -6251,6 +6406,7 @@ func TestGetEthV1ValidatorAttestationDataBoundsAncestorLookup(t *testing.T) {
 }
 
 func TestGetEthV1ValidatorAttestationDataCacheHeadChange(t *testing.T) {
+	t.Parallel()
 	for _, haveHead := range []bool{true, false} {
 		t.Run(fmt.Sprintf("fork choice head available %t", haveHead), func(t *testing.T) {
 			_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -6292,6 +6448,7 @@ func TestGetEthV1ValidatorAttestationDataCacheHeadChange(t *testing.T) {
 }
 
 func TestGetEthV1ValidatorAttestationDataRejectsMismatchedHeadState(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, headState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.aggregatePool = nil
 	slot := headState.Slot()
@@ -6320,6 +6477,7 @@ func TestGetEthV1ValidatorAttestationDataRejectsMismatchedHeadState(t *testing.T
 }
 
 func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
+	t.Parallel()
 	oldRoot := common.HexToHash("0x1234")
 	newRoot := common.HexToHash("0x5678")
 	for _, tt := range []struct {
@@ -6431,6 +6589,7 @@ func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
 }
 
 func TestGetEthV1ValidatorAttestationDataWaitCapIsMemoized(t *testing.T) {
+	t.Parallel()
 	const waitCap = 60 * time.Millisecond
 	root := common.HexToHash("0x1234")
 	_, _, _, _, headState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -6469,6 +6628,7 @@ func TestGetEthV1ValidatorAttestationDataWaitCapIsMemoized(t *testing.T) {
 }
 
 func TestGetEthV1ValidatorAttestationDataConcurrentWaitReusesMemo(t *testing.T) {
+	t.Parallel()
 	const waitCap = 400 * time.Millisecond
 	root := common.HexToHash("0x1234")
 	_, _, _, _, headState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -6527,6 +6687,7 @@ func TestGetEthV1ValidatorAttestationDataConcurrentWaitReusesMemo(t *testing.T) 
 // Gloas attestation data uses index 1 for FULL blocks in the head's chain, 0 for EMPTY blocks or blocks from the
 // attestation slot, and returns 503 for a FULL block whose payload is not verified.
 func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
+	t.Parallel()
 	const attestationSlot = uint64(10)
 	root := common.HexToHash("0xabcd")
 	for _, tt := range []struct {
@@ -6623,6 +6784,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 }
 
 func TestGetEthV1ValidatorAttestationDataGloasFallbackKeepsRequestHead(t *testing.T) {
+	t.Parallel()
 	const attestationSlot = uint64(10)
 	root := common.HexToHash("0xabcd")
 	childRoot := common.HexToHash("0x1111")
@@ -6664,6 +6826,7 @@ func TestGetEthV1ValidatorAttestationDataGloasFallbackKeepsRequestHead(t *testin
 }
 
 func TestGetEthV1ValidatorAttestationDataGloasHeadReadDoesNotBlock(t *testing.T) {
+	t.Parallel()
 	const (
 		attestationSlot = uint64(10)
 		waitCap         = 20 * time.Millisecond
@@ -6779,6 +6942,7 @@ func TestGetEthV1ValidatorAttestationDataGloasHeadReadDoesNotBlock(t *testing.T)
 // Before Electra the served data carries the requested committee index, so pins would grow with the
 // requests; the pool uses pins only from Electra on, so none are made.
 func TestGetEthV1ValidatorAttestationDataPinsOnlyFromElectra(t *testing.T) {
+	t.Parallel()
 	const attestationSlot = uint64(10)
 	for _, tc := range []struct {
 		version clparams.StateVersion
@@ -6818,6 +6982,7 @@ func TestGetEthV1ValidatorAttestationDataPinsOnlyFromElectra(t *testing.T) {
 
 // A requested slot far ahead must be rejected before the head state is advanced slot by slot to it.
 func TestGetEthV3ValidatorBlockRejectsFarFutureSlot(t *testing.T) {
+	t.Parallel()
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
 	handler := &ApiHandler{ethClock: clock}
@@ -6836,6 +7001,7 @@ func TestGetEthV3ValidatorBlockRejectsFarFutureSlot(t *testing.T) {
 }
 
 func TestCheckBlockProductionSlot(t *testing.T) {
+	t.Parallel()
 	const current = 100
 	require.NoError(t, checkBlockProductionSlot(current-1, current), "a past slot keeps today's behaviour")
 	require.NoError(t, checkBlockProductionSlot(current, current))

@@ -31,6 +31,7 @@ import (
 )
 
 func TestGetLightClientUpdatesRange(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
 	for period := range uint64(300) {
@@ -74,6 +75,7 @@ func TestGetLightClientUpdatesRange(t *testing.T) {
 }
 
 func TestGetLightClientUpdatesLeadingGap(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
 	for period := uint64(200); period < 300; period++ {
@@ -90,6 +92,7 @@ func TestGetLightClientUpdatesLeadingGap(t *testing.T) {
 
 // The response holds the earliest known update and the consecutive ones after it; a gap ends it.
 func TestGetLightClientUpdatesStopsAtAnInteriorGap(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
 	for _, period := range []uint64{3, 4, 6, 7} {
@@ -104,6 +107,7 @@ func TestGetLightClientUpdatesStopsAtAnInteriorGap(t *testing.T) {
 // Without an update that has finality, finality_update has nothing to serve, while optimistic_update serves the newest
 // update.
 func TestLightClientFinalityUpdateNeedsAnUpdateWithFinality(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 	fcu.NewestLCUpdate = cltypes.NewLightClientUpdate(postState.Version(), postState.BeaconConfig())
 	fcu.NewestLCFinalityUpdate = nil
