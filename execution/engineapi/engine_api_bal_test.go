@@ -1709,6 +1709,100 @@ func requireOnlyStorageReadsAndBalances(t *testing.T, c *types.AccountChanges, r
 	}
 }
 
+// TestEngineApiBALUnchangedAccountLieInvalid pins that a BAL listing an account with no change while a tx changes it
+// makes the block invalid when a later tx of the block reads that account.
+func TestEngineApiBALUnchangedAccountLieInvalid(t *testing.T) {
+	forceParallelExec(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	childInitCode := common.FromHex(balLieContractInitCode)
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		t.Run("hidden balance change", func(t *testing.T) {
+			send := balLieSender(t, eat)
+			probe := deployBALLieContract(ctx, t, eat, send, accountProbeInitCode, nil)
+			receiver := common.HexToAddress("0x7e1")
+			payload, bal := buildBALLiePayload(ctx, t, eat, []common.Hash{send(&receiver, 1, nil).Hash(), probeAccount(send, probe, receiver)})
+			c := findAccountChanges(bal, accounts.InternAddress(receiver))
+			require.NotNil(t, c)
+			require.NotEmpty(t, c.BalanceChanges)
+			c.BalanceChanges = nil
+			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
+		})
+
+		t.Run("hidden nonce change", func(t *testing.T) {
+			send := balLieSender(t, eat)
+			probe := deployBALLieContract(ctx, t, eat, send, accountProbeInitCode, nil)
+			factory := deployBALLieContract(ctx, t, eat, send, create2FactoryInitCode, nil)
+			payload, bal := buildBALLiePayload(ctx, t, eat, []common.Hash{send(&factory, 0, childInitCode).Hash(), probeAccount(send, probe, factory)})
+			c := findAccountChanges(bal, accounts.InternAddress(factory))
+			require.NotNil(t, c)
+			require.NotEmpty(t, c.NonceChanges)
+			c.NonceChanges = nil
+			requireUnchanged(t, c)
+			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
+		})
+
+		t.Run("create over an address listed unchanged", func(t *testing.T) {
+			child, payload, bal := buildCreateThenProbeBlock(ctx, t, eat, childInitCode, false)
+			c := findAccountChanges(bal, accounts.InternAddress(child))
+			require.NotNil(t, c)
+			*c = types.AccountChanges{Address: c.Address, StorageReads: c.StorageReads}
+			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
+		})
+
+		t.Run("create collision over an address listed unchanged", func(t *testing.T) {
+			child, payload, bal := buildCreateThenProbeBlock(ctx, t, eat, childInitCode, true)
+			require.Equal(t, enginetypes.ValidStatus, newPayloadWithBAL(ctx, t, eat, payload, bal).Status)
+			c := findAccountChanges(bal, accounts.InternAddress(child))
+			require.NotNil(t, c)
+			*c = types.AccountChanges{Address: c.Address, StorageReads: c.StorageReads}
+			requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
+		})
+	})
+}
+
+// accountProbeInitCode deploys a runtime that reads BALANCE, EXTCODEHASH and EXTCODESIZE of the calldata address.
+const accountProbeInitCode = "600c600c600039600c6000f3" + "600035803150803f503b5000"
+
+func probeAccount(send func(to *common.Address, value uint64, data []byte) types.Transaction, probe, target common.Address) common.Hash {
+	return send(&probe, 0, common.LeftPadBytes(target[:], 32)).Hash()
+}
+
+// buildCreateThenProbeBlock builds a block where a create2FactoryInitCode factory creates a child from initCode and a
+// later tx reads the child, or creates it again when recreate is set.
+func buildCreateThenProbeBlock(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, initCode []byte, recreate bool) (common.Address, *engineapitester.MockClPayload, types.BlockAccessList) {
+	t.Helper()
+	send := balLieSender(t, eat)
+	factory := deployBALLieContract(ctx, t, eat, send, create2FactoryInitCode, nil)
+	child := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	var probe common.Address
+	if !recreate {
+		probe = deployBALLieContract(ctx, t, eat, send, accountProbeInitCode, nil)
+	}
+	txHashes := []common.Hash{send(&factory, 0, initCode).Hash()}
+	if recreate {
+		txHashes = append(txHashes, send(&factory, 0, initCode).Hash())
+	} else {
+		txHashes = append(txHashes, probeAccount(send, probe, child))
+	}
+	payload, bal := buildBALLiePayload(ctx, t, eat, txHashes)
+	return child, payload, bal
+}
+
+func requireUnchanged(t *testing.T, c *types.AccountChanges) {
+	t.Helper()
+	require.Empty(t, c.StorageChanges)
+	require.Empty(t, c.BalanceChanges)
+	require.Empty(t, c.NonceChanges)
+	require.Empty(t, c.CodeChanges)
+}
+
 func forceParallelExec(t *testing.T) {
 	prev := dbg.Exec3Parallel
 	dbg.Exec3Parallel = true

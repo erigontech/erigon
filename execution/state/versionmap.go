@@ -465,15 +465,34 @@ func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageK
 	return changes[k].Value, true
 }
 
-// hasNoCells reports whether no tx wrote a storage, lifecycle or address cell of addr.
-func (vm *VersionMap) hasNoCells(addr accounts.Address) bool {
+// hasNoCells reports whether no tx wrote a cell of path, a lifecycle cell or an address cell of addr.
+func (vm *VersionMap) hasNoCells(addr accounts.Address, path AccountPath) bool {
 	e := vm.load(addr)
 	if e == nil {
 		return true
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return len(e.Storage) == 0 && !hasLifecycleCells(e) && (e.Address == nil || e.Address.Len() == 0)
+	if hasLifecycleCells(e) || e.Address != nil && e.Address.Len() > 0 {
+		return false
+	}
+	switch path {
+	case StoragePath:
+		return len(e.Storage) == 0
+	case BalancePath:
+		return e.Balance == nil || e.Balance.Len() == 0
+	case NoncePath:
+		return e.Nonce == nil || e.Nonce.Len() == 0
+	case CodePath:
+		return e.Code == nil || e.Code.Len() == 0
+	case CodeHashPath:
+		return e.CodeHash == nil || e.CodeHash.Len() == 0
+	case CodeSizePath:
+		return e.CodeSize == nil || e.CodeSize.Len() == 0
+	case AddressPath, SelfDestructPath, IncarnationPath, CreateContractPath:
+		return true
+	}
+	return false
 }
 
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
@@ -2174,6 +2193,9 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	// authoritative basis for every path except storage, which needs the wipe-aware
 	// liveStorage reader.
 	validatePath := func(addr accounts.Address, path AccountPath, hdr ReadHeader) VersionValidity {
+		if (hdr.Version.TxIndex == originIndex || hdr.Source == StorageRead && hdr.Version == UnknownVersion) && vm.hasNoCells(addr, path) {
+			return VersionValid
+		}
 		return vm.validateReadImpl(txIdx, addr, path, accounts.NilKey, hdr.Source, hdr.Version,
 			vm.ReadStatus(addr, path, accounts.NilKey, txIdx), checkVersion, traceInvalid, tracePrefix, false)
 	}
@@ -2204,8 +2226,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		}
 	}
 	for a, inner := range rs.storage {
-		// With no storage, lifecycle or address cell, a read of the base cannot be stale.
-		quiet := vm.hasNoCells(a)
+		quiet := vm.hasNoCells(a, StoragePath)
 		for k, tr := range inner {
 			if quiet && tr.Version.TxIndex == originIndex {
 				continue
