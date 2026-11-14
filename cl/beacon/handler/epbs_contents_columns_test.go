@@ -162,10 +162,6 @@ func forkDigestOfEpoch(epoch uint64) common.Bytes4 {
 // slot is 0.
 func newEnvelopeContentsFixture(t *testing.T, slot uint64, blobCount int) *envelopeContentsFixture {
 	t.Helper()
-	if clparams.GetBeaconConfig() == nil {
-		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg)
-	}
 	ctrl := gomock.NewController(t)
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	cfg := handler.beaconChainCfg

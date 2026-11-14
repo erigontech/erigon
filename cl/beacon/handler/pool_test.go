@@ -830,7 +830,6 @@ func TestPoolSyncCommittees(t *testing.T) {
 // PublishBackground, never the blocking Publish, and must not depend on the
 // publish completing before writing the HTTP response.
 func TestPoolSyncCommitteesPublishesInBackground(t *testing.T) {
-	t.Parallel()
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
 			Slot:            1,
@@ -1305,7 +1304,6 @@ func TestSyncCommitteeMessageExpiryDoesNotAliasToFutureForHugeSlot(t *testing.T)
 // wires syncCommitteeMessageExpiry's result into PublishBackground for the
 // message's own slot, not just that it calls PublishBackground at all.
 func TestPoolSyncCommitteesUsesCalculatedExpiry(t *testing.T) {
-	t.Parallel()
 	const msgSlot = 1
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
@@ -1359,7 +1357,6 @@ func TestPoolSyncCommitteesUsesCalculatedExpiry(t *testing.T) {
 // sync-committee service, with the message's own content, so a later
 // duplicate submission can be recognized as already published.
 func TestPoolSyncCommitteesMarksMessagePublishedOnSuccessfulAdmission(t *testing.T) {
-	t.Parallel()
 	msg := &cltypes.SyncCommitteeMessage{
 		Slot:            1,
 		BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
@@ -1543,7 +1540,6 @@ func servePoolAttestations(t *testing.T, handler *ApiHandler, tt poolAttestation
 }
 
 func TestPoolAttestationsDoNotPublishIgnored(t *testing.T) {
-	t.Parallel()
 	requests := poolAttestationRequests(t, 1)
 	outcomes := []struct {
 		name   string
@@ -1596,7 +1592,6 @@ func (s *arrivingHeaderStore) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader
 // A validator client may attest before the node imports the block it votes for, e.g. while blob data is still
 // awaited. The submission waits for the block, then is processed again and published.
 func TestPoolAttestationsWaitForUnseenBlock(t *testing.T) {
-	t.Parallel()
 	blockNotSeen := fmt.Errorf("%w: %w: %v", services.ErrIgnore, services.ErrBlockNotSeen, common.Hash{})
 	for _, tt := range poolAttestationRequests(t, 1) {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1668,7 +1663,6 @@ func TestPoolAttestationsFailWhenBlockDoesNotArrive(t *testing.T) {
 }
 
 func TestWritePoolingFailuresDeclaresJSON(t *testing.T) {
-	t.Parallel()
 	rec := httptest.NewRecorder()
 	(&ApiHandler{}).writePoolingFailures(rec, []poolingFailure{{Index: 0, Message: "invalid"}})
 	require.Equal(t, http.StatusBadRequest, rec.Code)

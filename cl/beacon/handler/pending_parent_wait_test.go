@@ -97,7 +97,6 @@ func TestAwaitParkedEnvelopeReturnsTheCallerCancellation(t *testing.T) {
 
 // A blocked retry does not hold the wait, and the retry is told to stop when the wait returns.
 func TestAwaitParkedEnvelopeDoesNotWaitForABlockedRetry(t *testing.T) {
-	t.Parallel()
 	release := make(chan struct{})
 	defer close(release)
 	stopped := make(chan struct{})
@@ -173,7 +172,6 @@ func TestAwaitPendingParentPayloadRetriesUntilTheEnvelopeIsApplied(t *testing.T)
 
 // An apply that keeps failing is retried at its pace until the cutoff, and no longer after it.
 func TestAwaitPendingParentPayloadRetriesAFailingApplyUntilTheCutoff(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, 300*time.Millisecond)
 	var retries atomic.Int32
 	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
@@ -209,7 +207,6 @@ func TestAwaitPendingParentPayloadDoesNotWaitPastTheCutoff(t *testing.T) {
 
 // An apply in flight at the cutoff is not cut short by the wait's return or by the request.
 func TestAwaitPendingParentPayloadLetsTheApplyOutliveTheWait(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, 50*time.Millisecond)
 	release := make(chan struct{})
 	applyCtxErr := make(chan error, 1)
@@ -335,7 +332,6 @@ func TestEnvelopeParkedFlagsOnlyAnUnpersistedParkedEnvelope(t *testing.T) {
 // After a head change, production is retried only once the new head's state is published:
 // the state it failed on would fail the same way.
 func TestAwaitHeadStateAfterChangeWaitsForTheNewHeadState(t *testing.T) {
-	t.Parallel()
 	handler, forkchoiceStore, postState, staleRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
 	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
 	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, staleRoot))

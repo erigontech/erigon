@@ -46,7 +46,6 @@ func TestBuilderRouteStoreReaddingSpentRouteDoesNotRearm(t *testing.T) {
 }
 
 func TestBuilderWinningResponseFailsWhenRouteCapacityIsFull(t *testing.T) {
-	t.Parallel()
 	handler := &ApiHandler{builderRoutes: newBuilderRouteStore(1, time.Minute, time.Now)}
 	require.True(t, handler.builderRoutes.Add(common.Hash{1}, "https://one.example"))
 	recorder := httptest.NewRecorder()

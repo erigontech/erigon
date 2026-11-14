@@ -122,7 +122,6 @@ func TestFetchExecutionClientVersion(t *testing.T) {
 }
 
 func TestDefaultGraffiti(t *testing.T) {
-	t.Parallel()
 	clCommit := graffitiCommitPrefix(version.GitCommit)
 
 	t.Run("cached execution client version yields full graffiti", func(t *testing.T) {

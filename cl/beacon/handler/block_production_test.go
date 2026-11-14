@@ -1661,7 +1661,6 @@ func TestParseGloasPublishedBlockRejectsNonCanonicalSSZ(t *testing.T) {
 }
 
 func TestPostEthV2BeaconBlocksForwardsGloasBlockToWinningBuilder(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	forkchoiceStore.OnTickFn = func(uint64) {}
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -1709,7 +1708,6 @@ func TestPostEthV2BeaconBlocksForwardsGloasBlockToWinningBuilder(t *testing.T) {
 }
 
 func TestPostEthV2BeaconBlocksBuilderHandoffOutlivesIntegrationCancellation(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	forkchoiceStore.OnTickFn = func(uint64) {}
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -1763,7 +1761,6 @@ func TestPostEthV2BeaconBlocksBuilderHandoffOutlivesIntegrationCancellation(t *t
 }
 
 func TestPostEthV2BeaconBlocksForwardsUnboundBuilderRoute(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	forkchoiceStore.OnTickFn = func(uint64) {}
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -1806,7 +1803,6 @@ func TestPostEthV2BeaconBlocksForwardsUnboundBuilderRoute(t *testing.T) {
 }
 
 func TestPostEthV2BeaconBlocksReturnsAcceptedAndForwardsBuilderAfterPermanentIntegrationFailure(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	forkchoiceStore.OnTickFn = func(uint64) {}
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -1979,7 +1975,6 @@ func TestPostEthV1BeaconBlocksDoesNotWaitForFullIntegration(t *testing.T) {
 }
 
 func TestForwardPublishedBlockToBuilderOnlyOnce(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.beaconChainCfg.InitializeForkSchedule()
@@ -2016,7 +2011,6 @@ func TestForwardPublishedBlockToBuilderOnlyOnce(t *testing.T) {
 }
 
 func TestForwardPublishedBlockTrustedReservationSupersedesUnboundClaim(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.beaconChainCfg.InitializeForkSchedule()
@@ -2098,7 +2092,6 @@ func TestForwardPublishedBlockToBuilderDoesNotStartPastPayloadDeadline(t *testin
 }
 
 func TestForwardPublishedBlockToBuilderStopsAtPayloadDeadline(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.beaconChainCfg.SecondsPerSlot = 1
@@ -2132,7 +2125,6 @@ func TestForwardPublishedBlockToBuilderStopsAtPayloadDeadline(t *testing.T) {
 }
 
 func TestConfiguredBuilderReservationCancelsPreemptedUntrustedHandoff(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
@@ -2164,7 +2156,6 @@ func TestConfiguredBuilderReservationCancelsPreemptedUntrustedHandoff(t *testing
 }
 
 func TestForwardPublishedBlockToBuilderRetriesAfterFailure(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.beaconChainCfg.InitializeForkSchedule()
@@ -2229,7 +2220,6 @@ func (c *publicBuilderSubmitter) SubmitSignedBeaconBlockPublic(ctx context.Conte
 }
 
 func TestForwardPublishedBlockUnboundFailuresConsumeRouteBudget(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.beaconChainCfg.InitializeForkSchedule()
@@ -2491,7 +2481,6 @@ func TestBroadcastBlockReleasesGossipReservationAfterPreparationFailure(t *testi
 }
 
 func TestBroadcastBlockDoesNotStoreBeforeBlockPublication(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	block := blocks[1]
@@ -2521,7 +2510,6 @@ func TestBroadcastBlockDoesNotStoreBeforeBlockPublication(t *testing.T) {
 }
 
 func TestBroadcastBlockSchedulesFullRecoveryAfterBlobStorageFailure(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	block := blocks[1]
@@ -2565,7 +2553,6 @@ func TestBroadcastBlockSchedulesFullRecoveryAfterBlobStorageFailure(t *testing.T
 }
 
 func TestBroadcastBlockSchedulesRecoveryAfterSidecarsAndForkchoiceSucceed(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	block := blocks[1]
@@ -2760,10 +2747,6 @@ func (j *runningPublishedBlockJob) Wait(ctx context.Context) error {
 
 func newPublishedColumnsFixture(t *testing.T, version clparams.StateVersion) *publishedColumnsFixture {
 	t.Helper()
-	if clparams.GetBeaconConfig() == nil {
-		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg)
-	}
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	f := &publishedColumnsFixture{
 		handler:         handler,
@@ -2948,7 +2931,6 @@ func TestBroadcastBlockWritesColumnsAfterOnBlockAndIndexWrite(t *testing.T) {
 // block to be imported, so a peer that asks for the block of a column can get it, and that a stalled
 // import holds the columns back for at most publishedBlockStoreWaitBeforeColumns.
 func TestBroadcastGloasBlockHoldsColumnsUntilBlockIsServable(t *testing.T) {
-	t.Parallel()
 	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
 	importing, release := make(chan struct{}), make(chan struct{})
 	f.forkchoice.afterOnBlock = func() {
@@ -2969,7 +2951,6 @@ func TestBroadcastGloasBlockHoldsColumnsUntilBlockIsServable(t *testing.T) {
 }
 
 func TestBroadcastGloasBlockGossipsColumnsOnceTheStoreJobFails(t *testing.T) {
-	t.Parallel()
 	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
 	f.handler.forkchoiceStore = &rejectingOnBlockForkchoice{ForkChoiceStorage: f.forkchoice, err: forkchoice.ErrBlockInvalid}
 	start := time.Now()
@@ -2981,7 +2962,6 @@ func TestBroadcastGloasBlockGossipsColumnsOnceTheStoreJobFails(t *testing.T) {
 }
 
 func TestBroadcastGloasBlockGossipsColumnsWhileColumnWriteBlocks(t *testing.T) {
-	t.Parallel()
 	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
 	blocked, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
@@ -3059,7 +3039,6 @@ func TestBroadcastBlockStoresCustodyRaisedByItsOwnImport(t *testing.T) {
 // TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA covers the v1 block POST, which
 // skips the integration wait: a stateful envelope POST that follows must find the custody columns.
 func TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA(t *testing.T) {
-	t.Parallel()
 	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
 	release := make(chan struct{})
 	releaseWrites := sync.OnceFunc(func() { close(release) })
@@ -3108,14 +3087,10 @@ func TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA(t *testi
 }
 
 func TestBroadcastBlockExactReplayCompletesMissingDataSidecars(t *testing.T) {
-	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.DenebVersion, clparams.FuluVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			cfg := clparams.MainnetBeaconConfig
-			if clparams.GetBeaconConfig() == nil {
-				clparams.InitGlobalStaticConfig(&cfg)
-			}
 			block := cltypes.NewSignedBeaconBlock(&cfg, version)
 			block.Block.Slot = cfg.SlotsPerEpoch
 			commitment := &cltypes.KZGCommitment{1}
@@ -3793,7 +3768,6 @@ func TestPollAssembledPayloadReturnsOnContextCancel(t *testing.T) {
 }
 
 func TestSetupHeaderResponseForBlockProductionGloasPayloadIncluded(t *testing.T) {
-	t.Parallel()
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
 
@@ -3807,7 +3781,6 @@ func TestSetupHeaderResponseForBlockProductionGloasPayloadIncluded(t *testing.T)
 }
 
 func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *testing.T) {
-	t.Parallel()
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
 
@@ -3817,7 +3790,6 @@ func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *te
 }
 
 func TestProduceBlockV4IncludesRequestPayloadAfterSharedCacheEviction(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.FuluForkEpoch = 0
@@ -5019,7 +4991,6 @@ func newGloasBidSelectionFixture(t *testing.T, options gloasBidSelectionOptions)
 }
 
 func TestSetupHeaderResponsePreservesLargeExecutionValue(t *testing.T) {
-	t.Parallel()
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
 	valueWei := gweiToWei(new(big.Int).SetUint64(^uint64(0)))
@@ -5101,7 +5072,6 @@ func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
 }
 
 func TestSetupHeaderResponsePreservesExecutionValueAboveUint64(t *testing.T) {
-	t.Parallel()
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
 	value := new(big.Int).Lsh(big.NewInt(1), 80)
@@ -5133,7 +5103,6 @@ func TestBroadcastGloasBuilderBlockDoesNotRequireEnvelopeBlobsYet(t *testing.T) 
 // GetAssembledBlock, and decoding the execution requests. This is the code path
 // that was broken in issue #14319 and fixed in PR #14326.
 func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 
 	// --- Set up real execution layer ---
@@ -5269,7 +5238,6 @@ func (s *fcuSpy) ForkChoiceUpdate(ctx context.Context, finalized, safe, head com
 // the slot number to the execution engine in PayloadAttributes when the
 // Glamsterdam (Gloas) fork is active, per EIP-7843.
 func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
-	t.Parallel()
 	ctx := context.Background()
 
 	// --- Set up real execution layer with Amsterdam activated ---
@@ -6032,7 +6000,6 @@ func TestProcessProducedBlockConfiguredBidPreservesSelfBuildFallback(t *testing.
 }
 
 func TestProduceBeaconBodyIncludesPTCVotesReceivedDuringPayloadWait(t *testing.T) {
-	t.Parallel()
 	ctrl := gomock.NewController(t)
 	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
 	// The state needs the Gloas fork epoch in its own config for GetPTC.
@@ -6162,7 +6129,6 @@ func requestAttestationData(t *testing.T, handler *ApiHandler, ctx context.Conte
 }
 
 func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
-	t.Parallel()
 	const waitCap = 60 * time.Millisecond
 	fallbackRoot := common.HexToHash("0xfaaa")
 	forkChoiceRoot := common.HexToHash("0xfc01")
@@ -6477,7 +6443,6 @@ func TestGetEthV1ValidatorAttestationDataRejectsMismatchedHeadState(t *testing.T
 }
 
 func TestGetEthV1ValidatorAttestationDataWaitsForSlotImport(t *testing.T) {
-	t.Parallel()
 	oldRoot := common.HexToHash("0x1234")
 	newRoot := common.HexToHash("0x5678")
 	for _, tt := range []struct {
@@ -6628,7 +6593,6 @@ func TestGetEthV1ValidatorAttestationDataWaitCapIsMemoized(t *testing.T) {
 }
 
 func TestGetEthV1ValidatorAttestationDataConcurrentWaitReusesMemo(t *testing.T) {
-	t.Parallel()
 	const waitCap = 400 * time.Millisecond
 	root := common.HexToHash("0x1234")
 	_, _, _, _, headState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -6826,7 +6790,6 @@ func TestGetEthV1ValidatorAttestationDataGloasFallbackKeepsRequestHead(t *testin
 }
 
 func TestGetEthV1ValidatorAttestationDataGloasHeadReadDoesNotBlock(t *testing.T) {
-	t.Parallel()
 	const (
 		attestationSlot = uint64(10)
 		waitCap         = 20 * time.Millisecond

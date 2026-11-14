@@ -425,7 +425,6 @@ func TestPostEnvelopeContentsGossipModeImportsAfterClientCancel(t *testing.T) {
 }
 
 func TestPostEnvelopeContentsGossipModeImportStopsAtTheOneSlotDeadline(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 0)
 	f.handler.beaconChainCfg.SecondsPerSlot = 1
 	var validationDeadline, importDeadline time.Time
@@ -468,7 +467,6 @@ func TestPostEnvelopeContentsGossipModeImportStopsAtTheOneSlotDeadline(t *testin
 }
 
 func TestPostEnvelopeContentsGossipModeRepostOfImportedEnvelopeAnswersOK(t *testing.T) {
-	t.Parallel()
 	requireFirstOK := func(t *testing.T, _ *envelopeContentsFixture, post func() *httptest.ResponseRecorder) {
 		t.Helper()
 		first := post()
@@ -768,7 +766,6 @@ func TestPostEnvelopeContentsGossipModeHoldsPreparationUntilImport(t *testing.T)
 }
 
 func TestPostEnvelopeContentsGossipModeReleasesPreparationAfterOneSlot(t *testing.T) {
-	t.Parallel()
 	f := newEnvelopeContentsFixture(t, 0, 1)
 	f.handler.beaconChainCfg.SecondsPerSlot = 1
 	writing := make(chan struct{})
@@ -899,7 +896,6 @@ func TestPostEnvelopeRetryWithoutContentsKeepsContentsRequired(t *testing.T) {
 }
 
 func TestPostEnvelopeFreshClaimWithoutContentsKeepsContentsRequired(t *testing.T) {
-	t.Parallel()
 	const failedColumn = 5
 	f := newEnvelopeContentsFixture(t, 0, 2)
 	f.failPublish = failPublishOf(failedColumn)
@@ -969,7 +965,6 @@ func TestPostEnvelopeContentsRepairWithPendingImportClearsContentsRequired(t *te
 }
 
 func TestPostEnvelopeContentsGossipModeValidationDeadlineAnswersUnavailable(t *testing.T) {
-	t.Parallel()
 	waitForDeadline := func(f *envelopeContentsFixture, result func(ctxErr error) error) context.Context {
 		f.handler.beaconChainCfg.SecondsPerSlot = 1
 		f.forkchoice.ValidateExecutionPayloadEnvelopeFunc = func(ctx context.Context, _ *cltypes.SignedExecutionPayloadEnvelope) error {

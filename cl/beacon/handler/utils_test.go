@@ -53,6 +53,12 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
+func TestMain(m *testing.M) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.InitGlobalStaticConfig(&cfg)
+	m.Run()
+}
+
 func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger, useRealSyncDataMgr bool) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData synced_data.SyncedData, fcu *mock_services2.ForkChoiceStorageMock, vp *validator_params.ValidatorParams) {
 	ctrl := gomock.NewController(t)
 	bcfg := clparams.MainnetBeaconConfig

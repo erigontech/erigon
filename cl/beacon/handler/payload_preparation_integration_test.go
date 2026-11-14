@@ -103,7 +103,6 @@ func (c *preparationExecutionClient) StartPayloadBuild(ctx context.Context, head
 }
 
 func TestGloasFullParentPreparationWithExecutionModule(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
@@ -381,7 +380,6 @@ func prepareGossipIntegrationEnvelope(
 }
 
 func TestGloasGossipAcceptsEnvelopeWhenELInvalidatesPayload(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
@@ -413,7 +411,6 @@ func TestGloasGossipAcceptsEnvelopeWhenELInvalidatesPayload(t *testing.T) {
 }
 
 func TestGloasGossipReturnsBeforeNewPayloadFinishes(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
@@ -452,7 +449,6 @@ func TestGloasGossipReturnsBeforeNewPayloadFinishes(t *testing.T) {
 }
 
 func TestGloasGossipAcceptsEnvelopeWithImportOnlyCommitmentFailure(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
@@ -473,7 +469,6 @@ func TestGloasGossipAcceptsEnvelopeWithImportOnlyCommitmentFailure(t *testing.T)
 }
 
 func TestGloasGossipRejectsEnvelopeWithBadSignature(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
@@ -491,7 +486,6 @@ func TestGloasGossipRejectsEnvelopeWithBadSignature(t *testing.T) {
 }
 
 func TestGloasCanonicalForkChoiceAdvancesExecutionHeadOverUnverifiedFullHead(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
@@ -546,7 +540,6 @@ func TestGloasCanonicalForkChoiceAdvancesExecutionHeadOverUnverifiedFullHead(t *
 }
 
 func TestGloasPreparationDiscardsBuildAfterPayloadInvalidation(t *testing.T) {
-	t.Parallel()
 	fixture := newGloasPreparationIntegrationFixture(t)
 	fixture.runForkChoice(t)
 	targetSlot := fixture.parentSlot + 1
@@ -564,7 +557,6 @@ func TestGloasPreparationDiscardsBuildAfterPayloadInvalidation(t *testing.T) {
 }
 
 func TestGloasPreparationDiscardsBuildAfterHeadChange(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("long-running test")
 	}
@@ -781,7 +773,6 @@ func newPreparationCollectionFixture(t *testing.T, path preparationCollectionPat
 }
 
 func TestPayloadPreparationCollectionWithExecutionModule(t *testing.T) {
-	t.Parallel()
 	if testing.Short() {
 		t.Skip("long-running test")
 	}

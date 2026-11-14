@@ -72,7 +72,6 @@ import (
 )
 
 func TestGetPayloadAttestationDataAcceptsCanonicalSlotQuery(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 2
 	fcu.HeadSlotVal = 64
@@ -525,7 +524,6 @@ func TestGetPayloadAttestationDataUsesEnvelopeReceiptDeadline(t *testing.T) {
 }
 
 func TestGetPayloadAttestationDataSupportsSSZ(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 2
 	fcu.HeadSlotVal = 64
@@ -676,7 +674,6 @@ type nonNilSentinelClient struct {
 }
 
 func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[null]`))
@@ -1325,7 +1322,6 @@ func TestPostExecutionPayloadEnvelopeUnavailablePersistedLookupDoesNotPoisonAdmi
 }
 
 func TestExecutionPayloadEnvelopeP2PStaleMarkerRecoversWithoutREST(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
@@ -1550,7 +1546,6 @@ func TestExecutionPayloadEnvelopeAdmissionsCoalesceConcurrentClaims(t *testing.T
 }
 
 func TestPostExecutionPayloadEnvelopeClaimsBeforeConcurrentValidation(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
@@ -1702,10 +1697,6 @@ func TestPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T) 
 
 func testPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T, canonical bool) {
 	ctrl := gomock.NewController(t)
-	if clparams.GetBeaconConfig() == nil {
-		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg)
-	}
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	currentSlot := handler.ethClock.GetCurrentSlot()
 	clock := eth_clock.NewMockEthereumClock(ctrl)
@@ -1927,7 +1918,6 @@ func TestValidateExecutionPayloadEnvelopeContentsRejectsUnpersistableEnvelope(t 
 }
 
 func TestPostExecutionPayloadEnvelopesEmitsImportedAndAvailableEvents(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.emitters = beaconevents.NewEventEmitter()
 	events := make(chan *beaconevents.EventStream, 3)
@@ -2554,7 +2544,6 @@ func TestPostExecutionPayloadEnvelopesClassifiesIntegrationFailureByValidationMo
 // A client that gives up while the EL validates must not stop the publication, whether the
 // validation was interrupted or completed.
 func TestPostExecutionPayloadEnvelopePublishesAfterTheClientGaveUp(t *testing.T) {
-	t.Parallel()
 	for _, outcome := range []struct {
 		name   string
 		err    error
@@ -2664,7 +2653,6 @@ func TestPostExecutionPayloadEnvelopeAcceptsARepostAfterAnInterruptedValidation(
 // The publish window starts when publishing starts: a validation slower than a slot must not use
 // it up.
 func TestPostExecutionPayloadEnvelopePublishesAfterASlowValidation(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	slot := time.Duration(handler.beaconChainCfg.SecondsPerSlot) * time.Second
 	const validation = 100 * time.Millisecond
@@ -4659,10 +4647,6 @@ func TestGetExecutionPayloadEnvelopeBySlotBeyondUint32IsNotFound(t *testing.T) {
 
 func TestPostExecutionPayloadEnvelopesAcceptsBloblessStatelessContents(t *testing.T) {
 	t.Parallel()
-	if clparams.GetBeaconConfig() == nil {
-		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg)
-	}
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	root := common.Hash{3}
 	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 12, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}

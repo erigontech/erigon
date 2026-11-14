@@ -164,7 +164,6 @@ func awaitPayloadAttributesEvent(t *testing.T, handler *ApiHandler, events chan 
 }
 
 func TestPayloadAttributesEventUsesFullParent(t *testing.T) {
-	t.Parallel()
 	headState, handler, _, store, validatorParams := setupGloasPreparationTest(t)
 	parentRoot := common.Hash{0x41}
 	emptyParentHash := common.Hash{0xa1}
@@ -244,7 +243,6 @@ func TestPayloadAttributesEventUsesFullParent(t *testing.T) {
 }
 
 func TestPayloadAttributesEventUsesEmptyParent(t *testing.T) {
-	t.Parallel()
 	for _, test := range []struct {
 		name               string
 		unreadableEnvelope bool
@@ -286,7 +284,6 @@ func TestPayloadAttributesEventUsesEmptyParent(t *testing.T) {
 }
 
 func TestPayloadAttributesLoopDrainsStateFeedDuringStateWork(t *testing.T) {
-	t.Parallel()
 	_, _, _, _, postState, handler, _, _, store, _ := setupTestingHandler(
 		t, clparams.ElectraVersion, log.Root(), false,
 	)
@@ -388,7 +385,6 @@ func setupEmptyGloasHead(t *testing.T) (*state.CachingBeaconState, *ApiHandler, 
 }
 
 func TestPayloadAttributesEventAfterMissedSlotTargetsNextSlot(t *testing.T) {
-	t.Parallel()
 	headState, handler, _, parentRoot := setupEmptyGloasHead(t)
 	currentSlot := headState.Slot() + 1
 	mockSlotClock(t, handler, currentSlot)
@@ -407,7 +403,6 @@ func TestPayloadAttributesEventAfterMissedSlotTargetsNextSlot(t *testing.T) {
 }
 
 func TestPayloadAttributesEventAtPayloadDecisionWithoutHeadChange(t *testing.T) {
-	t.Parallel()
 	headState, handler, _, parentRoot := setupEmptyGloasHead(t)
 	currentSlot := headState.Slot()
 	decisionDue := time.Duration(handler.beaconChainCfg.PayloadAttestationDueMs()) * time.Millisecond
