@@ -95,10 +95,12 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
-	timeMs           atomic.Uint64
-	highestSeen      atomic.Uint64
-	highestSeenRoot  atomic.Value // common.Hash
-	blocksProcessing atomic.Int64
+	timeMs                 atomic.Uint64
+	highestSeen            atomic.Uint64
+	highestSeenRoot        atomic.Value // common.Hash
+	blocksProcessing       atomic.Int64
+	blockImportPrepareHook func()
+	blockImportsInFlight   map[common.Hash]chan struct{}
 	// all of *solid.Checkpoint type
 	justifiedCheckpoint           atomic.Value
 	finalizedCheckpoint           atomic.Value
@@ -890,16 +892,28 @@ func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash) (*state.Cac
 	return f.forkGraph.ReplayState(blockRoot)
 }
 
-// GetOwnedStateAtBlockRoot is GetStateAtBlockRoot, but it also copies a replayed
-// state, because replay leaves pointers to stored block objects in it.
+type ownedStateReplayer interface {
+	ReplayStateWithOwnership(common.Hash) (*state.CachingBeaconState, bool, error)
+}
+
+// GetOwnedStateAtBlockRoot is GetStateAtBlockRoot, but it also copies an aliased replay.
 func (f *ForkChoiceStore) GetOwnedStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
 	copied, current, err := f.copyCurrentState(blockRoot)
 	if current || err != nil {
 		return copied, err
 	}
-	replayed, err := f.forkGraph.ReplayState(blockRoot)
+	var replayed *state.CachingBeaconState
+	owned := false
+	if replayer, ok := f.forkGraph.(ownedStateReplayer); ok {
+		replayed, owned, err = replayer.ReplayStateWithOwnership(blockRoot)
+	} else {
+		replayed, err = f.forkGraph.ReplayState(blockRoot)
+	}
 	if replayed == nil || err != nil {
 		return replayed, err
+	}
+	if owned {
+		return replayed, nil
 	}
 	return replayed.Copy()
 }

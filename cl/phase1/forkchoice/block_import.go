@@ -97,9 +97,6 @@ func preparePostState(postState *state.CachingBeaconState, block *cltypes.Beacon
 		return true
 	})
 
-	_, _ = postState.PendingConsolidations().HashSSZ()
-	_, _ = postState.PendingDeposits().HashSSZ()
-	_, _ = postState.PendingPartialWithdrawals().HashSSZ()
 	return prepared
 }
 

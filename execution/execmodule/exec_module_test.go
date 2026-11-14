@@ -1392,79 +1392,65 @@ func TestInclusionListSatisfiedUsesStateAfterBlockTxns(t *testing.T) {
 	require.True(t, *satisfied)
 }
 
-// Not parallel: it toggles the global dbg.Exec3Parallel.
 func TestValidateChainKeepsCachedInclusionListVerdict(t *testing.T) {
-	prevParallel := dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	il := types.Transactions{signedInclusionListTxn(t, m)}
+	block := chainPack.Blocks[0].WithInclusionList(il)
+	// The real verdict is false; a re-check would overwrite this seed.
+	m.ReadAheader.SetInclusionListResult(block.Hash(), exec.InclusionListHash(il), true)
 
-	for _, parallel := range []bool{false, true} {
-		t.Run(fmt.Sprintf("parallel=%t", parallel), func(t *testing.T) {
-			dbg.Exec3Parallel = parallel
-			m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-			chainPack, err := m.GenerateChain(1, nil)
-			require.NoError(t, err)
-			il := types.Transactions{signedInclusionListTxn(t, m)}
-			block := chainPack.Blocks[0].WithInclusionList(il)
-			// The real verdict is false; a re-check would overwrite this seed.
-			m.ReadAheader.SetInclusionListResult(block.Hash(), exec.InclusionListHash(il), true)
-
-			insertAndValidate(t, m, block)
-			satisfied, ok := m.ReadAheader.ReadInclusionListResult(block.Hash(), exec.InclusionListHash(il))
-			require.True(t, ok)
-			require.True(t, satisfied)
-		})
-	}
+	insertAndValidate(t, m, block)
+	satisfied, ok := m.ReadAheader.ReadInclusionListResult(block.Hash(), exec.InclusionListHash(il))
+	require.True(t, ok)
+	require.True(t, satisfied)
 }
 
-// Not parallel: it toggles the global dbg.Exec3Parallel.
 func TestValidateChainChecksInclusionListAgainstStateAfterBlockTxns(t *testing.T) {
-	prevParallel := dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
-
-	for _, parallel := range []bool{false, true} {
-		for _, tc := range []struct {
-			name         string
-			nonce        uint64
-			to           common.Address
-			fullBlockGas bool
-			satisfied    bool
-		}{
-			{name: "next nonce txn is missing", nonce: 1, to: common.Address{1}, satisfied: false},
-			{name: "spent nonce txn is invalid", nonce: 0, to: common.Address{2}, satisfied: true},
-			{name: "next nonce txn above gas left is skipped", nonce: 1, to: common.Address{1}, fullBlockGas: true, satisfied: true},
-		} {
-			t.Run(fmt.Sprintf("parallel=%t/%s", parallel, tc.name), func(t *testing.T) {
-				dbg.Exec3Parallel = parallel
-				m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-				blockTxn := signedInclusionListTxn(t, m)
-				chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
-					gen.AddTx(blockTxn)
-				})
-				require.NoError(t, err)
-				ilGas := params.TxGas
-				if tc.fullBlockGas {
-					ilGas = chainPack.Blocks[0].GasLimit()
-				}
-				ilTxn, err := types.SignTx(
-					types.NewTransaction(tc.nonce, tc.to, uint256.NewInt(1), ilGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
-					*types.LatestSignerForChainID(m.ChainConfig.ChainID),
-					m.Key,
-				)
-				require.NoError(t, err)
-				il := types.Transactions{ilTxn}
-				block := chainPack.Blocks[0].WithInclusionList(il)
-
-				insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
-				require.NoError(t, err)
-				require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
-				validation, err := m.ValidateChain(t.Context(), block)
-				require.NoError(t, err)
-				require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
-				satisfied, ok := m.ReadAheader.ReadInclusionListResult(block.Hash(), exec.InclusionListHash(il))
-				require.True(t, ok)
-				require.Equal(t, tc.satisfied, satisfied)
+	t.Parallel()
+	for _, tc := range []struct {
+		name         string
+		nonce        uint64
+		to           common.Address
+		fullBlockGas bool
+		satisfied    bool
+	}{
+		{name: "next nonce txn is missing", nonce: 1, to: common.Address{1}, satisfied: false},
+		{name: "spent nonce txn is invalid", nonce: 0, to: common.Address{2}, satisfied: true},
+		{name: "next nonce txn above gas left is skipped", nonce: 1, to: common.Address{1}, fullBlockGas: true, satisfied: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+			blockTxn := signedInclusionListTxn(t, m)
+			chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
+				gen.AddTx(blockTxn)
 			})
-		}
+			require.NoError(t, err)
+			ilGas := params.TxGas
+			if tc.fullBlockGas {
+				ilGas = chainPack.Blocks[0].GasLimit()
+			}
+			ilTxn, err := types.SignTx(
+				types.NewTransaction(tc.nonce, tc.to, uint256.NewInt(1), ilGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+				*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+				m.Key,
+			)
+			require.NoError(t, err)
+			il := types.Transactions{ilTxn}
+			block := chainPack.Blocks[0].WithInclusionList(il)
+
+			insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+			validation, err := m.ValidateChain(t.Context(), block)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+			satisfied, ok := m.ReadAheader.ReadInclusionListResult(block.Hash(), exec.InclusionListHash(il))
+			require.True(t, ok)
+			require.Equal(t, tc.satisfied, satisfied)
+		})
 	}
 }
 
@@ -4978,10 +4964,6 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 // create contracts must reach the state root of serial execution, whether parallel exec
 // charges the sender at validation (zero value) or in the run (value).
 func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
-	prevParallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
-
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
@@ -5029,10 +5011,6 @@ func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 // Value transfers whose recipient is credited at validation must reach the state root of serial
 // execution, also when the recipient spends, its balance is read, or it gets code in the block.
 func TestRecipientCreditAtValidationMatchesSerialExecution(t *testing.T) {
-	prevParallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
-
 	keys := make([]*ecdsa.PrivateKey, 10)
 	alloc := types.GenesisAlloc{}
 	for i := range keys {
@@ -5086,10 +5064,6 @@ func TestRecipientCreditAtValidationMatchesSerialExecution(t *testing.T) {
 // A tx that serial execution rejects on its sender's nonce or balance must reject the
 // block with the same error when parallel exec charges the sender at validation.
 func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
-	prevParallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
-
 	balance := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 	feeCap := *uint256.NewInt(10 * common.GWei)
 	for _, tc := range []struct {
