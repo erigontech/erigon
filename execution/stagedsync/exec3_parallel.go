@@ -668,7 +668,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					}
 					if applyResult.txIO != nil {
 						if balBuilder == nil {
-							balBuilder = state.NewBlockAccessListBuilder()
+							balBuilder = state.NewBlockAccessListBuilderFor(applyResult.versionMap)
 						}
 						for balBuilder.Next()+1 < applyResult.balSealed {
 							i := balBuilder.Next()
