@@ -18,6 +18,7 @@ package beaconhttp
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -185,7 +186,7 @@ func Uint64FromQueryParams(r *http.Request, name string) (*uint64, error) {
 	}
 	num, err := strconv.ParseUint(str, 10, 64)
 	if err != nil {
-		return nil, err
+		return nil, NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid query parameter %s: %q is not a base-10 uint64", name, str))
 	}
 	return &num, nil
 }
