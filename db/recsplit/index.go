@@ -24,6 +24,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -116,6 +117,8 @@ func MustOpen(indexFile string) *Index {
 	return idx
 }
 
+var stubKviHeap = dbg.EnvBool("STUB_KVI_HEAP", false) // probe only: bound of .kvi page faults
+
 func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	_, fName := filepath.Split(indexFilePath)
 	idx := &Index{
@@ -142,6 +145,10 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 		return nil, err
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
+	if stubKviHeap && strings.Contains(fName, "commitment") && strings.HasSuffix(fName, ".kvi") {
+		idx.data = bytes.Clone(idx.data)
+		log.Info("[stub] commitment .kvi in heap", "file", fName, "size", idx.size)
+	}
 
 	if err := idx.init(); err != nil {
 		return nil, err
