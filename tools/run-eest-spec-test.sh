@@ -248,8 +248,8 @@ cleanup() {
 trap cleanup EXIT
 
 # Linux: do NOT auto-create a ramdisk. tools/create-ramdisk uses sudo mount
-# and never unmounts; CI gets the env var pre-set via the setup-erigon
-# action's ramdisk: true input. Local Linux users can opt in by exporting
+# and never unmounts; CI gets the env var pre-set by the test-eest-spec
+# workflow. Local Linux users can opt in by exporting
 # ERIGON_EXECUTION_TESTS_TMPDIR or TMPDIR=/dev/shm.
 # Shards with no-ramdisk: true in the manifest skip the Darwin auto-ramdisk too:
 # their datadirs are few and long-lived, so tmpfs buys nothing — and the 150m

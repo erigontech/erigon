@@ -5,9 +5,12 @@ runs:
   using: composite
   steps:
     # Skip all Go cache saves in merge-queue runs: caches saved on the ephemeral
-    # merge-queue ref cannot be restored by any later run. Sibling matrix jobs
-    # can also share one primary key; skip the prune/tar/upload when another job
-    # in this run has already saved the exact entry.
+    # merge-queue ref cannot be restored by any later run. Cache keys name a
+    # class (workflow|job|matrix) per ISO week, so a probe hit means an earlier
+    # run already saved this week's entry and saving again is neither possible
+    # nor useful. Two runs finishing at the same time can both miss the probe
+    # and race the save; the loser's reserve-conflict failure is swallowed
+    # below — a lost cache save only costs the next run a rebuild.
     - name: Check for existing build cache entry
       id: gocache-probe
       if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_GOCACHE_PATH != '' && env.ERIGON_CI_GOCACHE_KEY != '' }}
@@ -25,6 +28,7 @@ runs:
 
     - uses: ./.github/actions/save-build-cache
       if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_GOCACHE_PATH != '' && env.ERIGON_CI_GOCACHE_KEY != '' && steps.gocache-probe.outputs.cache-hit != 'true' }}
+      continue-on-error: true
       with:
         gocache: ${{ env.ERIGON_CI_GOCACHE_PATH }}
         key: ${{ env.ERIGON_CI_GOCACHE_KEY }}
@@ -41,6 +45,7 @@ runs:
 
     - uses: ./.github/actions/save-mod-cache
       if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_MODCACHE_COMPLETE == 'true' && env.ERIGON_CI_MODCACHE != '' && env.ERIGON_CI_MODCACHE_KEY != '' && steps.modcache-probe.outputs.cache-hit != 'true' }}
+      continue-on-error: true
       with:
         modcache-path: ${{ env.ERIGON_CI_MODCACHE }}
         key: ${{ env.ERIGON_CI_MODCACHE_KEY }}

@@ -33,21 +33,64 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
-      # Warming runs replace the shard matrix with one build per cache class;
-      # the -race suffix routes build-cache-extra-key below.
       - id: load
-        env:
-          CACHE_WARMING_ONLY: ${{ inputs.cache-warming-only }}
         run: |
-          if [ "$CACHE_WARMING_ONLY" = "true" ]; then
-            echo 'matrix=[{"shard":"build","target":"evm"},{"shard":"build-race","target":"evm.race"}]' >> "$GITHUB_OUTPUT"
-          else
-            matrix=$(yq -o=json '.' tools/eest-spec-shards.yml | jq -c '[.[] | select(env.SKIP_DEVNET_SHARDS != "true" or (.shard | contains("-devnet") | not))]')
-            echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-          fi
+          matrix=$(yq -o=json '.' tools/eest-spec-shards.yml | jq -c '[.[] | select(env.SKIP_DEVNET_SHARDS != "true" or (.shard | contains("-devnet") | not))]')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  # Build evm and evm.race once per run and ship them as an artifact, so the 75
+  # shard jobs below skip Go installation, module download, the ~3GB GOCACHE
+  # restore and the redundant per-shard rebuild (~14m of overhead each). Runs in
+  # warming mode build nothing new except caches: this job is also what keeps
+  # the test-eest-spec build cache fresh, so it runs there too.
+  build-binaries:
+    name: build-evm-binaries
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
+    timeout-minutes: 60
+    steps:
+      - name: Checkout custom actions
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
+        with:
+          cache-namespace: test-eest-spec
+
+      - name: Build evm binaries
+        run: make evm evm.race
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: evm-binaries
+          path: build/bin
+          # Long enough to cover "re-run failed jobs" on a red run; the shard
+          # jobs cannot rebuild the binaries themselves.
+          retention-days: 3
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running shards (which are skipped
+      # anyway when this job fails). Mirrors the step in eest-spec-tests.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
 
   eest-spec-tests:
-    needs: load-matrix
+    needs: [load-matrix, build-binaries]
+    # Warming runs only build/refresh caches (build-binaries above).
+    if: ${{ !inputs.cache-warming-only }}
     name: eest-spec-${{ matrix.shard }}
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
@@ -75,16 +118,24 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-erigon
-        id: erigon
+      # No Go toolchain, no build caches: consume the binaries built once by
+      # build-binaries. Zipped artifacts normalize file modes, so restore the
+      # executable bit the run script checks for.
+      - name: Download evm binaries
+        uses: actions/download-artifact@v8
         with:
-          cleanup-space: ${{ !inputs.cache-warming-only }}
-          # matrix.no-ramdisk is absent (null, falsy) for shards without the key.
-          ramdisk: ${{ !inputs.cache-warming-only && !matrix.no-ramdisk }}
-          cache-namespace: test-eest-spec
-          # All non-race shards build the same evm binary and all race shards the
-          # same evm.race, so the cache splits by class rather than by shard.
-          build-cache-extra-key: eest-spec${{ contains(matrix.shard, '-race') && '-race' || '' }}
+          name: evm-binaries
+          path: build/bin
+
+      - name: Make evm binaries executable
+        run: chmod +x build/bin/evm build/bin/evm.race
+
+      - name: Create RAM disk
+        # matrix.no-ramdisk is absent (null, falsy) for shards without the key.
+        if: ${{ !matrix.no-ramdisk }}
+        run: |
+          path=$(bash tools/create-ramdisk)
+          echo "ERIGON_EXECUTION_TESTS_TMPDIR=$path" >> "$GITHUB_ENV"
 
       # Restore-only: PR / merge_group runs never SAVE, so they don't mint a
       # per-ref ~1.6GB duplicate every run. The base-branch (main) entry is
@@ -92,7 +143,7 @@ jobs:
       # readable from every PR. A miss here self-heals (tools/test-fixtures.sh
       # re-downloads), and the warmer repopulates main.
       - name: Restore EEST tarballs
-        if: ${{ !inputs.cache-warming-only && !contains(matrix.shard, 'legacy') }}
+        if: ${{ !contains(matrix.shard, 'legacy') }}
         uses: actions/cache/restore@v6
         with:
           # Only the .tar.gz files are cached; each shard re-extracts just the
@@ -109,7 +160,7 @@ jobs:
             test-fixtures-eest-${{ runner.os }}-
 
       - name: Restore legacy fixture tarballs
-        if: ${{ !inputs.cache-warming-only && contains(matrix.shard, 'legacy') }}
+        if: ${{ contains(matrix.shard, 'legacy') }}
         uses: actions/cache/restore@v6
         with:
           path: |
@@ -120,22 +171,16 @@ jobs:
             test-fixtures-legacy-${{ runner.os }}-
 
       - name: Run eest-spec-${{ matrix.shard }}
-        if: '!inputs.cache-warming-only'
         env:
           EEST_SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
           EEST_SPEC_WORKERS: ${{ matrix.workers }}
           ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment-parallel }}
           SHARD: ${{ matrix.shard }}
-        run: make "eest-spec-$SHARD"
-
-      - name: Build evm binary (cache warming)
-        if: inputs.cache-warming-only
-        env:
-          TARGET: ${{ matrix.target }}
-        run: make "$TARGET"
-
-      - uses: ./.github/actions/cleanup-erigon
-        if: always()
+          # Mirrors the Makefile's eest-spec-* targets: race shards run the
+          # race-instrumented binary. Direct script call (not make) because the
+          # make targets are .PHONY and would rebuild evm here.
+          EVM_BIN: ${{ contains(matrix.shard, '-race') && 'build/bin/evm.race' || 'build/bin/evm' }}
+        run: bash tools/run-eest-spec-test.sh "$SHARD"
 
       # In the merge queue, cancel the run on first failure so the gate
       # doesn't stall waiting for still-running siblings. PR runs keep
