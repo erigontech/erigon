@@ -1912,14 +1912,14 @@ func (f *ForkChoiceStore) emitExecutionPayloadIntegrationEvents(blockRoot common
 	}); err != nil || headEvent == nil {
 		return
 	}
-	f.emitters.WithHeadEventLock(func() {
+	f.emitters.EmitHeadV2IfCurrent(headEvent, func() bool {
 		currentHead, currentHeadSlot, err := f.GetHeadNode()
 		if err != nil || currentHead.Root != head.Root || currentHeadSlot != headSlot ||
 			beaconevents.PayloadStatusName(currentHead.PayloadStatus) != headEvent.Data.PayloadStatus ||
 			f.IsRootOptimistic(currentHead.Root) != headEvent.Data.ExecutionOptimistic {
-			return
+			return false
 		}
-		f.emitters.State().SendHeadV2(headEvent)
+		return true
 	})
 }
 

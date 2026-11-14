@@ -14,6 +14,11 @@ type EventEmitter struct {
 	stateFeed                    *stateFeed     // block state feed
 	operationFeed                *operationFeed // block operation feed
 	headEventMu                  sync.Mutex
+	lastHeadRoot                 common.Hash
+	lastHeadV2Root               common.Hash
+	lastHeadV2PayloadStatus      string
+	hasHeadEvent                 bool
+	hasHeadV2Event               bool
 	payloadAttributesSubscribers atomic.Int64
 	blockIndicesMu               sync.Mutex
 	blockIndicesChanged          chan struct{}
@@ -61,6 +66,40 @@ func (e *EventEmitter) WithHeadEventLock(fn func()) {
 	e.headEventMu.Lock()
 	defer e.headEventMu.Unlock()
 	fn()
+}
+
+func (e *EventEmitter) EmitHeadEventsIfCurrent(head *HeadData, headV2 *HeadV2Data, current func() bool) bool {
+	e.headEventMu.Lock()
+	defer e.headEventMu.Unlock()
+	if !current() {
+		return false
+	}
+	if !e.hasHeadEvent || e.lastHeadRoot != head.Block {
+		e.stateFeed.TrySendHead(head)
+		e.lastHeadRoot = head.Block
+		e.hasHeadEvent = true
+	}
+	e.sendHeadV2IfChanged(headV2)
+	return true
+}
+
+func (e *EventEmitter) EmitHeadV2IfCurrent(headV2 *HeadV2Data, current func() bool) bool {
+	e.headEventMu.Lock()
+	defer e.headEventMu.Unlock()
+	if !current() {
+		return false
+	}
+	e.sendHeadV2IfChanged(headV2)
+	return true
+}
+
+func (e *EventEmitter) sendHeadV2IfChanged(headV2 *HeadV2Data) {
+	if !e.hasHeadV2Event || e.lastHeadV2Root != headV2.Data.Block || e.lastHeadV2PayloadStatus != headV2.Data.PayloadStatus {
+		e.stateFeed.SendHeadV2(headV2)
+		e.lastHeadV2Root = headV2.Data.Block
+		e.lastHeadV2PayloadStatus = headV2.Data.PayloadStatus
+		e.hasHeadV2Event = true
+	}
 }
 
 func NewEventEmitter() *EventEmitter {

@@ -1826,10 +1826,51 @@ func TestPostForkchoiceSameRootRerunKeepsPublishedState(t *testing.T) {
 			f.requireCopiesAndPublishes(t, 1)
 			require.Same(t, published, f.publishedHead(t))
 			headV2Statuses, headEvents := f.drainHeadEvents()
-			require.Equal(t, []string{beaconevents.PayloadStatusName(test.to)}, headV2Statuses)
-			require.Equal(t, 1, headEvents)
+			if test.from == test.to {
+				require.Empty(t, headV2Statuses)
+			} else {
+				require.Equal(t, []string{beaconevents.PayloadStatusName(test.to)}, headV2Statuses)
+			}
+			require.Empty(t, headEvents)
 		})
 	}
+}
+
+func TestHeadEventsDeduplicateAcrossStateCopy(t *testing.T) {
+	f := newSameRootFixture(t, 0, 32)
+	emitPass := func() {
+		t.Helper()
+		require.True(t, emitHeadEventBeforeStateCopy(f.cfg.beaconCfg, f.cfg.forkChoice, f.cfg.emitter, f.headSlot, f.headRoot))
+		copied, err := f.cfg.forkChoice.GetOwnedStateAtBlockRoot(f.headRoot)
+		require.NoError(t, err)
+		require.NoError(t, emitHeadEvent(f.cfg.beaconCfg, f.cfg.forkChoice, f.cfg.emitter, f.headSlot, f.headRoot, copied))
+	}
+
+	f.setHeadStatus(t, cltypes.PayloadStatusEmpty)
+	emitPass()
+	headV2Statuses, headEvents := f.drainHeadEvents()
+	require.Equal(t, []string{"empty"}, headV2Statuses, "head_v2 events after the pre-copy and post-copy paths")
+	require.Equal(t, 1, headEvents, "head events after the pre-copy and post-copy paths")
+
+	f.setHeadStatus(t, cltypes.PayloadStatusFull)
+	emitPass()
+	headV2Statuses, headEvents = f.drainHeadEvents()
+	require.Equal(t, []string{"full"}, headV2Statuses, "head_v2 events after payload status changes")
+	require.Empty(t, headEvents, "head events after payload status changes")
+
+	newRoot := common.Hash{0xab}
+	newHeadV2 := &beaconevents.HeadV2Data{Data: beaconevents.HeadV2Content{
+		Slot:          f.headSlot + 1,
+		Block:         newRoot,
+		PayloadStatus: "full",
+	}}
+	require.True(t, f.cfg.emitter.EmitHeadEventsIfCurrent(&beaconevents.HeadData{
+		Slot:  f.headSlot + 1,
+		Block: newRoot,
+	}, newHeadV2, func() bool { return true }))
+	headV2Statuses, headEvents = f.drainHeadEvents()
+	require.Equal(t, []string{"full"}, headV2Statuses, "head_v2 events after the head root changes")
+	require.Equal(t, 1, headEvents, "head events after the head root changes")
 }
 
 func TestPostForkchoiceSameRootRerunFinishesFailedPass(t *testing.T) {
@@ -1991,8 +2032,8 @@ func TestPostForkchoiceSameRootFallsBackWhenEventNotEmitted(t *testing.T) {
 
 	f.requireCopiesAndPublishes(t, 2)
 	headV2Statuses, headEvents := f.drainHeadEvents()
-	require.Equal(t, []string{"empty"}, headV2Statuses)
-	require.Equal(t, 1, headEvents)
+	require.Empty(t, headV2Statuses)
+	require.Empty(t, headEvents)
 }
 
 func TestPostForkchoiceGateFollowsHeadSlotFork(t *testing.T) {
