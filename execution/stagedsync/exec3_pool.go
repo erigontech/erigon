@@ -4,7 +4,10 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
@@ -66,6 +69,7 @@ type taskPool struct {
 	cond   *sync.Cond
 	queue  taskHeap
 	closed bool
+	qlen   atomic.Int32 // probe: queue length readable without mu
 
 	workers int
 	idle    idleProbe
@@ -103,6 +107,7 @@ func (p *taskPool) push(pt *poolTask) {
 		pt.st.pushIdle.Store(int32(p.idle.idle))
 	}
 	heap.Push(&p.queue, pt)
+	p.qlen.Add(1)
 	p.mu.Unlock()
 	p.cond.Signal()
 }
@@ -111,6 +116,14 @@ func (p *taskPool) pop() *poolTask {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for !p.closed && p.queue.Len() == 0 {
+		if probeWorkerSpin {
+			p.mu.Unlock()
+			spinUntil(func() bool { return p.qlen.Load() > 0 })
+			p.mu.Lock()
+			if p.closed || p.queue.Len() > 0 {
+				break
+			}
+		}
 		if logNpPhases {
 			p.tick()
 			p.idle.idle++
@@ -124,7 +137,20 @@ func (p *taskPool) pop() *poolTask {
 	if p.closed {
 		return nil
 	}
+	p.qlen.Add(-1)
 	return heap.Pop(&p.queue).(*poolTask)
+}
+
+// Probe bounds of parked-goroutine wake latency: an idle worker (PROBE_WORKER_SPIN) or the exec
+// loop (PROBE_LOOP_SPIN) polls for work for up to probeSpinFor before it parks.
+var probeWorkerSpin, probeLoopSpin = dbg.EnvBool("PROBE_WORKER_SPIN", false), dbg.EnvBool("PROBE_LOOP_SPIN", false)
+
+const probeSpinFor = 200 * time.Microsecond
+
+func spinUntil(ready func() bool) {
+	for t0 := time.Now(); !ready() && time.Since(t0) < probeSpinFor; {
+		runtime.Gosched()
+	}
 }
 
 func (p *taskPool) workerLoop(wk *poolWorker) {

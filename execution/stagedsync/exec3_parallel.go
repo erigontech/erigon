@@ -1042,6 +1042,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			npWaitStart = time.Now()
 			pe.selEnter = npWaitStart
 		}
+		if probeLoopSpin {
+			spinUntil(func() bool { return len(pe.results) > 0 || len(pendingCh) > 0 })
+		}
 		var blockResult *blockResult
 		select {
 		case exec := <-pendingCh:
