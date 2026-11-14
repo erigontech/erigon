@@ -294,10 +294,17 @@ jobs:
           pids=$(pgrep -i "$CLIENT" || true)
           [ -n "$pids" ] || echo "::warning::No $CLIENT process found"
           [ "$(echo "$pids" | wc -w)" -le 1 ] || echo "::warning::More than one $CLIENT process is running"
+          # Expand a CPU list such as 0-11,16-27 into one CPU per line.
+          expand() { tr ',' '\n' <<< "$1" | while IFS=- read -r a b; do seq "$a" "${b:-$a}"; done; }
+          allowed=$(expand "$CLIENT_CPUS")
           for pid in $pids; do
+            # One affinity list per thread. Some runtimes pin threads to a single CPU
+            # (e.g. .NET server GC), so check that every thread stays inside the expected set.
             cpus=$(taskset -acp "$pid" 2>/dev/null | sed 's/.*: //' | sort -u | paste -sd' ')
             echo "pid $pid $(ps -o comm= -p "$pid"): $cpus"
-            [ "$cpus" = "$CLIENT_CPUS" ] || echo "::warning::$CLIENT pid $pid runs on CPUs $cpus, expected $CLIENT_CPUS"
+            [ -n "$cpus" ] || echo "::warning::Cannot read the CPU affinity of $CLIENT pid $pid"
+            outside=$(for l in $cpus; do expand "$l"; done | sort -un | grep -vxF -f <(echo "$allowed") | paste -sd, || true)
+            [ -z "$outside" ] || echo "::warning::$CLIENT pid $pid has threads on CPUs $outside, outside $CLIENT_CPUS"
           done
           echo "governor: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo unknown)"
 
