@@ -337,7 +337,7 @@ func getBeaconData(ctx context.Context, endpoint, path string, maxEntries int) (
 		return nil, fmt.Errorf("blob retrieval decode failed %w", err)
 	}
 	if len(response.Data) > maxEntries {
-		return nil, fmt.Errorf("blob response has %d sidecars, the block has %d commitments", len(response.Data), maxEntries)
+		return nil, fmt.Errorf("blob response has %d entries, the block has %d commitments", len(response.Data), maxEntries)
 	}
 	return response.Data, nil
 }

@@ -303,26 +303,31 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		return nil
 	}
 	if b.DryRun {
-		served := len(b.Endpoints) == 0
+		served := !unresolved && len(b.Endpoints) == 0
+		inWindow := false
 		for i := range b.Endpoints {
 			if err := b.findWindow(ctx, db, blocks, i, b.FromSlot); err != nil {
 				return fmt.Errorf("find the window of endpoint %d: %w", i+1, err)
 			}
-			served = served || slot >= b.windows[i].from.Load()
+			if slot >= b.windows[i].from.Load() {
+				inWindow = true
+				served = served || !unresolved
+			}
 		}
 		log.Info("Slot needs its sidecars", "slot", slot, "blockRoot", root, "blobs", blobs, "served", served)
-		if !served {
+		if !served && (!unresolved || !inWindow) {
 			report.add(&report.unserved, slot)
 			return nil
 		}
 		return nil
 	}
 	var lastErr error
-	unserved := true
+	unserved, attempted := true, false
 	for i, endpoint := range b.Endpoints {
 		if slot < b.windows[i].from.Load() {
 			continue
 		}
+		attempted = true
 		lastErr = fetchAndStoreBlobs(ctx, store, endpoint, root, block)
 		if err := store.err(); err != nil {
 			return fmt.Errorf("blob store write failed, stopping: %w", err)
@@ -347,7 +352,7 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		log.Debug("Endpoint could not fill slot", "slot", slot, "endpoint", redactEndpoint(endpoint), "err", lastErr)
 	}
 	if unserved {
-		if !unresolved {
+		if !unresolved || !attempted {
 			log.Debug("No endpoint serves slot", "slot", slot, "blockRoot", root)
 			report.add(&report.unserved, slot)
 		}
