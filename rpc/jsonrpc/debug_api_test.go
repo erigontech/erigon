@@ -565,6 +565,72 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 	require.Zero(t, coinbasePrestate.Nonce)
 }
 
+// TestTraceBlockPrestateDiffAfterSelfdestruct: a transaction touching an account
+// an earlier transaction of the block destroyed traces in the block as it does alone.
+func TestTraceBlockPrestateDiffAfterSelfdestruct(t *testing.T) {
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	m := execmoduletester.New(t, execmoduletester.WithKey(key), execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config:   chain.TestChainOsakaConfig.Copy(),
+		GasLimit: 60_000_000,
+		Alloc:    types.GenesisAlloc{sender: {Balance: big.NewInt(1e18)}},
+	}))
+	// Transaction 0 creates and destroys the coinbase; transaction 1 pays it a tip.
+	coinbase := types.CreateAddress(sender, 0)
+	beneficiary := common.HexToAddress("0x3000")
+	selfdestruct := append(append([]byte{byte(vm.PUSH20)}, beneficiary[:]...), byte(vm.SELFDESTRUCT))
+	gasPrice := uint256.NewInt(1_000_000_000)
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	generated, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(coinbase)
+		for _, txn := range []types.Transaction{
+			types.NewContractCreation(0, uint256.NewInt(1), 500_000, gasPrice, selfdestruct),
+			types.NewTransaction(1, common.HexToAddress("0x4000"), uint256.NewInt(1), 500_000, gasPrice, nil),
+		} {
+			signed, err := types.SignTx(txn, *signer, key)
+			require.NoError(t, err)
+			gen.AddTx(signed)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(generated))
+	for _, receipt := range generated.Receipts[0] {
+		require.Equal(t, types.ReceiptStatusSuccessful, receipt.Status)
+	}
+
+	api := newDebugApiForTest(m)
+	tracer, tracerConfig := "prestateTracer", json.RawMessage(`{"diffMode":true}`)
+	config := &tracersConfig.TraceConfig{Tracer: &tracer, TracerConfig: &tracerConfig}
+	var blockTraces []struct {
+		Result json.RawMessage `json:"result"`
+	}
+	readGasTrace(t, &blockTraces, func(stream *jsonstream.Stream) error {
+		return api.TraceBlockByNumber(m.Ctx, 1, config, stream)
+	})
+	block := generated.Blocks[0]
+	require.Len(t, blockTraces, len(block.Transactions()))
+	for i, txn := range block.Transactions() {
+		var txnTrace json.RawMessage
+		readGasTrace(t, &txnTrace, func(stream *jsonstream.Stream) error {
+			return api.TraceTransaction(m.Ctx, txn.Hash(), config, stream)
+		})
+		require.JSONEq(t, string(txnTrace), string(blockTraces[i].Result), "transaction %d", i)
+	}
+
+	var diff struct {
+		Post map[common.Address]struct {
+			Balance *hexutil.U256 `json:"balance"`
+		} `json:"post"`
+	}
+	require.NoError(t, json.Unmarshal(blockTraces[1].Result, &diff))
+	post, ok := diff.Post[coinbase]
+	require.True(t, ok, "%s", blockTraces[1].Result)
+	tip := new(uint256.Int).Sub(gasPrice, block.BaseFee())
+	tip.Mul(tip, uint256.NewInt(generated.Receipts[0][1].GasUsed))
+	require.Equal(t, (*hexutil.U256)(tip), post.Balance)
+}
+
 func TestTraceTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newDebugApiForTest(m)

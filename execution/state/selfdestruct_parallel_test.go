@@ -130,6 +130,110 @@ func TestSelfdestructParallel_AbsentAccount(t *testing.T) {
 	assert.Empty(t, ibs.stateObjects, "absent-account Selfdestruct must not materialize a stateObject")
 }
 
+// An earlier transaction's SELFDESTRUCT leaves a deleted account, which a later
+// transaction of the block has not self-destructed.
+func TestHasSelfdestructed_EarlierTxDestruct(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(100)
+	acc.Nonce = 1
+	reader := &sdAccountReader{addr: addr, account: &acc}
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	vm := NewVersionMap(nil)
+
+	destroyer := NewWithVersionMap(reader, vm)
+	destroyer.SetTxContext(1, 0)
+	destroyed, err := destroyer.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	require.True(t, destroyed)
+	vm.FlushVersionedWrites(finalizedWrites(t, destroyer, rules), true)
+
+	ibs := NewWithVersionMap(reader, vm)
+	ibs.SetTxContext(1, 1)
+	// The first call records the destruct; the second is served from that record.
+	for range 2 {
+		destructed, err := ibs.HasSelfdestructed(addr)
+		require.NoError(t, err)
+		require.False(t, destructed)
+	}
+}
+
+// HasSelfdestructed reports the transaction's own SELFDESTRUCT whatever earlier
+// transactions of the block left in the version map, so before London a second
+// SELFDESTRUCT of the contract in that transaction earns no refund.
+func TestHasSelfdestructed_OwnDestructAfterEarlierTx(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(100)
+	acc.Nonce = 1
+	reader := &sdAccountReader{addr: addr, account: &acc}
+	rules := &chain.Rules{IsSpuriousDragon: true}
+
+	type step func(t *testing.T, ibs *IntraBlockState)
+	destroy := func(t *testing.T, ibs *IntraBlockState) {
+		destroyed, err := ibs.Selfdestruct(addr, false)
+		require.NoError(t, err)
+		require.True(t, destroyed)
+	}
+	credit := func(t *testing.T, ibs *IntraBlockState) {
+		require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(3), tracing.BalanceChangeUnspecified))
+	}
+	// recreate follows the EVM's CREATE2: collision check, then the new contract.
+	recreate := func(t *testing.T, ibs *IntraBlockState) {
+		_, err := ibs.GetCodeHash(addr)
+		require.NoError(t, err)
+		_, err = ibs.GetNonce(addr)
+		require.NoError(t, err)
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		require.NoError(t, ibs.SetNonce(addr, 1, tracing.NonceChangeNewContract))
+		require.NoError(t, ibs.SetCode(addr, []byte{0x33, 0xff}, tracing.CodeChangeContractCreation))
+	}
+	for _, tc := range []struct {
+		name    string
+		earlier []step // one per earlier transaction
+		before  step   // this transaction, before its first SELFDESTRUCT
+	}{
+		{name: "no earlier write"},
+		{name: "destroyed earlier, re-created in this tx", earlier: []step{destroy}, before: recreate},
+		{name: "destroyed and re-created earlier", earlier: []step{destroy, recreate}},
+		{name: "destroyed, credited and re-created earlier", earlier: []step{destroy, credit, recreate}},
+		{name: "destroyed, credited and re-created in this tx", earlier: []step{destroy, credit}, before: recreate},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			vm := NewVersionMap(nil)
+			for i, run := range tc.earlier {
+				ibs := NewWithVersionMap(reader, vm)
+				ibs.SetTxContext(1, i)
+				run(t, ibs)
+				vm.FlushVersionedWrites(finalizedWrites(t, ibs, rules), true)
+			}
+
+			ibs := NewWithVersionMap(reader, vm)
+			ibs.SetTxContext(1, len(tc.earlier))
+			if tc.before != nil {
+				tc.before(t, ibs)
+			}
+			// The SELFDESTRUCT gas function asks before the opcode runs.
+			hasSelfdestructed := func() bool {
+				t.Helper()
+				destructed, err := ibs.HasSelfdestructed(addr)
+				require.NoError(t, err)
+				return destructed
+			}
+			require.False(t, hasSelfdestructed(), "the first SELFDESTRUCT earns the refund")
+			snapshot := ibs.PushSnapshot()
+			destroy(t, ibs)
+			ibs.RevertToSnapshot(snapshot, nil)
+			require.False(t, hasSelfdestructed(), "a reverted SELFDESTRUCT leaves the refund to the next")
+			destroy(t, ibs)
+			require.True(t, hasSelfdestructed(), "a second SELFDESTRUCT in the tx earns no refund")
+		})
+	}
+}
+
 // A self-destructed address whose write set also holds field, code and storage
 // writes must be applied as a pure delete: no account record is left, and its
 // code and its pre-block and same-tx storage are gone.
