@@ -18,6 +18,7 @@ package beaconevents
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -26,21 +27,23 @@ import (
 )
 
 func TestEmitterSet(t *testing.T) {
-	emitter := NewEventEmitter()
-	done := make(chan struct{})
-	go func() {
-		ch := make(chan *EventStream, 10)
-		t.Logf("Subscribing to emitter")
-		sub := emitter.Operation().Subscribe(ch)
-		defer sub.Unsubscribe()
-		t.Logf("Subscribed to emitter")
-		event := <-ch
-		t.Logf("Received event: %v", event)
-		close(done)
-	}()
-	time.Sleep(100 * time.Millisecond)
-	emitter.Operation().SendAttestation(&AttestationData{})
-	<-done
+	synctest.Test(t, func(t *testing.T) {
+		emitter := NewEventEmitter()
+		done := make(chan struct{})
+		go func() {
+			ch := make(chan *EventStream, 10)
+			t.Logf("Subscribing to emitter")
+			sub := emitter.Operation().Subscribe(ch)
+			defer sub.Unsubscribe()
+			t.Logf("Subscribed to emitter")
+			event := <-ch
+			t.Logf("Received event: %v", event)
+			close(done)
+		}()
+		synctest.Wait()
+		emitter.Operation().SendAttestation(&AttestationData{})
+		<-done
+	})
 }
 
 func TestPayloadAttributesSubscriberTracking(t *testing.T) {

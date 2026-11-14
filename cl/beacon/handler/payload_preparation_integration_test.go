@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/spf13/afero"
@@ -103,60 +104,62 @@ func (c *preparationExecutionClient) StartPayloadBuild(ctx context.Context, head
 }
 
 func TestGloasFullParentPreparationWithExecutionModule(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
-	ctx := t.Context()
-	fixture := newGloasPreparationIntegrationFixture(t)
-	require.True(t, fixture.store.IsPayloadVerified(fixture.parentRoot))
-	executionHead, _, _, err := fixture.reader.GetForkChoice(ctx)
-	require.NoError(t, err)
-	require.Equal(t, fixture.seedHash, executionHead, "NewPayload must leave fork choice at the EMPTY parent")
-	head, executionHead := fixture.runForkChoice(t)
-	require.Equal(t, forkchoice.ForkChoiceNode{Root: fixture.parentRoot, PayloadStatus: cltypes.PayloadStatusFull}, head)
-	require.Equal(t, fixture.parentPayload.Payload.BlockHash, executionHead)
-	require.NoError(t, fixture.handler.indiciesDB.View(ctx, func(tx kv.Tx) error {
-		root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, fixture.parentSlot)
+	synctest.Test(t, func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("long-running test")
+		}
+		ctx := t.Context()
+		fixture := newGloasPreparationIntegrationFixture(t)
+		require.True(t, fixture.store.IsPayloadVerified(fixture.parentRoot))
+		executionHead, _, _, err := fixture.reader.GetForkChoice(ctx)
 		require.NoError(t, err)
-		require.Equal(t, fixture.parentRoot, root, "the ForkChoice stage must publish the canonical head")
-		return nil
-	}))
+		require.Equal(t, fixture.seedHash, executionHead, "NewPayload must leave fork choice at the EMPTY parent")
+		head, executionHead := fixture.runForkChoice(t)
+		require.Equal(t, forkchoice.ForkChoiceNode{Root: fixture.parentRoot, PayloadStatus: cltypes.PayloadStatusFull}, head)
+		require.Equal(t, fixture.parentPayload.Payload.BlockHash, executionHead)
+		require.NoError(t, fixture.handler.indiciesDB.View(ctx, func(tx kv.Tx) error {
+			root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, fixture.parentSlot)
+			require.NoError(t, err)
+			require.Equal(t, fixture.parentRoot, root, "the ForkChoice stage must publish the canonical head")
+			return nil
+		}))
 
-	targetSlot := fixture.parentSlot + 1
-	proposer, err := fixture.parentState.GetBeaconProposerIndexForSlot(targetSlot)
-	require.NoError(t, err)
-	fixture.handler.validatorParams.SetFeeRecipient(proposer, common.Address{0x42})
-	callsBeforePreparation := fixture.engine.forkChoiceCalls
-	preparationCtx, cancel := context.WithCancel(ctx)
-	done := fixture.handler.StartPayloadPreparation(preparationCtx)
-	t.Cleanup(func() { cancel(); <-done })
-	var prepared preparedPayloadRecord
-	require.Eventually(t, func() bool {
-		fixture.handler.preparedPayload.mu.Lock()
-		defer fixture.handler.preparedPayload.mu.Unlock()
-		prepared = fixture.handler.preparedPayload.payloads[targetSlot]
-		return len(prepared.id) != 0
-	}, time.Until(fixture.handler.ethClock.GetSlotTime(targetSlot)), 10*time.Millisecond)
-	cancel()
-	<-done
-	require.Equal(t, callsBeforePreparation, fixture.engine.forkChoiceCalls)
-	require.NotEmpty(t, prepared.id)
-	require.True(t, prepared.primedAt.Before(fixture.handler.ethClock.GetSlotTime(targetSlot)))
-	require.NoError(t, common.Sleep(ctx, time.Until(fixture.handler.ethClock.GetSlotTime(targetSlot))))
-	warmup := time.Since(prepared.primedAt)
-	require.Greater(t, warmup, minimumPreparationLead)
-	t.Logf("FULL-parent builder warmup before production: %s", warmup)
+		targetSlot := fixture.parentSlot + 1
+		proposer, err := fixture.parentState.GetBeaconProposerIndexForSlot(targetSlot)
+		require.NoError(t, err)
+		fixture.handler.validatorParams.SetFeeRecipient(proposer, common.Address{0x42})
+		callsBeforePreparation := fixture.engine.forkChoiceCalls
+		preparationCtx, cancel := context.WithCancel(ctx)
+		done := fixture.handler.StartPayloadPreparation(preparationCtx)
+		t.Cleanup(func() { cancel(); <-done })
+		var prepared preparedPayloadRecord
+		require.Eventually(t, func() bool {
+			fixture.handler.preparedPayload.mu.Lock()
+			defer fixture.handler.preparedPayload.mu.Unlock()
+			prepared = fixture.handler.preparedPayload.payloads[targetSlot]
+			return len(prepared.id) != 0
+		}, time.Until(fixture.handler.ethClock.GetSlotTime(targetSlot)), 10*time.Millisecond)
+		cancel()
+		<-done
+		require.Equal(t, callsBeforePreparation, fixture.engine.forkChoiceCalls)
+		require.NotEmpty(t, prepared.id)
+		require.True(t, prepared.primedAt.Before(fixture.handler.ethClock.GetSlotTime(targetSlot)))
+		require.NoError(t, common.Sleep(ctx, time.Until(fixture.handler.ethClock.GetSlotTime(targetSlot))))
+		warmup := time.Since(prepared.primedAt)
+		require.Greater(t, warmup, minimumPreparationLead)
+		t.Logf("FULL-parent builder warmup before production: %s", warmup)
 
-	productionState, err := fixture.parentState.Copy()
-	require.NoError(t, err)
-	require.NoError(t, transition.DefaultMachine.ProcessSlots(productionState, targetSlot))
-	body, _, err := fixture.handler.produceBeaconBody(ctx, fixture.parentSlot, fixture.parentRoot, productionState, targetSlot, common.Bytes96{0xc0}, common.Hash{})
-	require.NoError(t, err)
-	require.Equal(t, fixture.parentPayload.Payload.BlockHash, body.SignedExecutionPayloadBid.Message.ParentBlockHash)
-	require.Equal(t, prepared.id, fixture.engine.productionID)
-	require.Equal(t, prepared.id, fixture.engine.collectedID)
-	_, _, mismatch := fixture.handler.preparedPayload.warmupAndMismatch(targetSlot, fixture.engine.productionID, time.Now())
-	require.False(t, mismatch)
+		productionState, err := fixture.parentState.Copy()
+		require.NoError(t, err)
+		require.NoError(t, transition.DefaultMachine.ProcessSlots(productionState, targetSlot))
+		body, _, err := fixture.handler.produceBeaconBody(ctx, fixture.parentSlot, fixture.parentRoot, productionState, targetSlot, common.Bytes96{0xc0}, common.Hash{})
+		require.NoError(t, err)
+		require.Equal(t, fixture.parentPayload.Payload.BlockHash, body.SignedExecutionPayloadBid.Message.ParentBlockHash)
+		require.Equal(t, prepared.id, fixture.engine.productionID)
+		require.Equal(t, prepared.id, fixture.engine.collectedID)
+		_, _, mismatch := fixture.handler.preparedPayload.warmupAndMismatch(targetSlot, fixture.engine.productionID, time.Now())
+		require.False(t, mismatch)
+	})
 }
 
 type gloasPreparationIntegrationFixture struct {
@@ -380,208 +383,222 @@ func prepareGossipIntegrationEnvelope(
 }
 
 func TestGloasGossipAcceptsEnvelopeWhenELInvalidatesPayload(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
-	fixture := newGloasPreparationIntegrationFixture(t)
-	_, childBlock, childEnvelope, _, childRoot, childSlot := produceGloasIntegrationChild(
-		t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
-	)
-	fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
-	service, root := prepareGossipIntegrationEnvelope(t, fixture, childBlock, childEnvelope)
-	require.Equal(t, childRoot, root)
-	newPayloadCalled := make(chan struct{})
-	fixture.engine.newPayloadHook = func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
-		close(newPayloadCalled)
-		return execution_client.PayloadStatusInvalidated, nil
-	}
+	synctest.Test(t, func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("long-running test")
+		}
+		fixture := newGloasPreparationIntegrationFixture(t)
+		_, childBlock, childEnvelope, _, childRoot, childSlot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+		service, root := prepareGossipIntegrationEnvelope(t, fixture, childBlock, childEnvelope)
+		require.Equal(t, childRoot, root)
+		newPayloadCalled := make(chan struct{})
+		fixture.engine.newPayloadHook = func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			close(newPayloadCalled)
+			return execution_client.PayloadStatusInvalidated, nil
+		}
 
-	require.NoError(t, service.ProcessMessage(t.Context(), nil, childEnvelope))
-	select {
-	case <-newPayloadCalled:
-	case <-time.After(5 * time.Second):
-		t.Fatal("NewPayload was not called")
-	}
-	require.Eventually(t, func() bool {
-		status, ok := fixture.store.GetRecentExecutionPayloadStatus(childEnvelope.Message.Payload.BlockHash)
-		return ok && status == execution_client.PayloadStatusInvalidated
-	}, 5*time.Second, 10*time.Millisecond)
-	waitForGossipIntegrationImport(t, fixture.store, childRoot, childEnvelope.Message.BuilderIndex)
-	require.False(t, fixture.store.HasEnvelope(childRoot))
+		require.NoError(t, service.ProcessMessage(t.Context(), nil, childEnvelope))
+		select {
+		case <-newPayloadCalled:
+		case <-time.After(5 * time.Second):
+			t.Fatal("NewPayload was not called")
+		}
+		require.Eventually(t, func() bool {
+			status, ok := fixture.store.GetRecentExecutionPayloadStatus(childEnvelope.Message.Payload.BlockHash)
+			return ok && status == execution_client.PayloadStatusInvalidated
+		}, 5*time.Second, 10*time.Millisecond)
+		waitForGossipIntegrationImport(t, fixture.store, childRoot, childEnvelope.Message.BuilderIndex)
+		require.False(t, fixture.store.HasEnvelope(childRoot))
+	})
 }
 
 func TestGloasGossipReturnsBeforeNewPayloadFinishes(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
-	fixture := newGloasPreparationIntegrationFixture(t)
-	_, childBlock, childEnvelope, _, childRoot, childSlot := produceGloasIntegrationChild(
-		t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
-	)
-	fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
-	service, _ := prepareGossipIntegrationEnvelope(t, fixture, childBlock, childEnvelope)
-	newPayloadCalled := make(chan struct{})
-	releaseNewPayload := make(chan struct{})
-	var releaseOnce sync.Once
-	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseNewPayload) }) })
-	fixture.engine.newPayloadHook = func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
-		close(newPayloadCalled)
-		<-releaseNewPayload
-		return execution_client.PayloadStatusValidated, nil
-	}
-	verdict := make(chan error, 1)
-	go func() { verdict <- service.ProcessMessage(t.Context(), nil, childEnvelope) }()
-	select {
-	case <-newPayloadCalled:
-	case <-time.After(5 * time.Second):
-		t.Fatal("NewPayload was not called")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("long-running test")
+		}
+		fixture := newGloasPreparationIntegrationFixture(t)
+		_, childBlock, childEnvelope, _, childRoot, childSlot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+		service, _ := prepareGossipIntegrationEnvelope(t, fixture, childBlock, childEnvelope)
+		newPayloadCalled := make(chan struct{})
+		releaseNewPayload := make(chan struct{})
+		var releaseOnce sync.Once
+		t.Cleanup(func() { releaseOnce.Do(func() { close(releaseNewPayload) }) })
+		fixture.engine.newPayloadHook = func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			close(newPayloadCalled)
+			<-releaseNewPayload
+			return execution_client.PayloadStatusValidated, nil
+		}
+		verdict := make(chan error, 1)
+		go func() { verdict <- service.ProcessMessage(t.Context(), nil, childEnvelope) }()
+		select {
+		case <-newPayloadCalled:
+		case <-time.After(5 * time.Second):
+			t.Fatal("NewPayload was not called")
+		}
 
-	select {
-	case err := <-verdict:
-		require.NoError(t, err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("gossip verdict waited for NewPayload")
-	}
-	releaseOnce.Do(func() { close(releaseNewPayload) })
-	waitForGossipIntegrationImport(t, fixture.store, childRoot, childEnvelope.Message.BuilderIndex)
-	require.True(t, fixture.store.HasEnvelope(childRoot))
+		select {
+		case err := <-verdict:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("gossip verdict waited for NewPayload")
+		}
+		releaseOnce.Do(func() { close(releaseNewPayload) })
+		waitForGossipIntegrationImport(t, fixture.store, childRoot, childEnvelope.Message.BuilderIndex)
+		require.True(t, fixture.store.HasEnvelope(childRoot))
+	})
 }
 
 func TestGloasGossipAcceptsEnvelopeWithImportOnlyCommitmentFailure(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
-	fixture := newGloasPreparationIntegrationFixture(t)
-	_, childBlock, childEnvelope, _, childRoot, childSlot := produceGloasIntegrationChild(
-		t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
-	)
-	childEnvelope.Message.Payload.PrevRandao[0]++
-	fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
-	service, _ := prepareGossipIntegrationEnvelope(t, fixture, childBlock, childEnvelope)
+	synctest.Test(t, func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("long-running test")
+		}
+		fixture := newGloasPreparationIntegrationFixture(t)
+		_, childBlock, childEnvelope, _, childRoot, childSlot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		childEnvelope.Message.Payload.PrevRandao[0]++
+		fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+		service, _ := prepareGossipIntegrationEnvelope(t, fixture, childBlock, childEnvelope)
 
-	require.NoError(t, service.ProcessMessage(t.Context(), nil, childEnvelope))
-	require.Eventually(t, func() bool {
-		_, err := fixture.store.TryClaimExecutionPayloadEnvelopeForGossip(childRoot, childEnvelope.Message.BuilderIndex)
-		return errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
-	}, 5*time.Second, 10*time.Millisecond)
-	require.False(t, fixture.store.HasEnvelope(childRoot))
+		require.NoError(t, service.ProcessMessage(t.Context(), nil, childEnvelope))
+		require.Eventually(t, func() bool {
+			_, err := fixture.store.TryClaimExecutionPayloadEnvelopeForGossip(childRoot, childEnvelope.Message.BuilderIndex)
+			return errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+		}, 5*time.Second, 10*time.Millisecond)
+		require.False(t, fixture.store.HasEnvelope(childRoot))
+	})
 }
 
 func TestGloasGossipRejectsEnvelopeWithBadSignature(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
-	fixture := newGloasPreparationIntegrationFixture(t)
-	_, childBlock, childEnvelope, _, _, childSlot := produceGloasIntegrationChild(
-		t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
-	)
-	fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
-	service, _ := prepareGossipIntegrationEnvelope(t, fixture, childBlock, childEnvelope)
-	childEnvelope.Signature[0]++
+	synctest.Test(t, func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("long-running test")
+		}
+		fixture := newGloasPreparationIntegrationFixture(t)
+		_, childBlock, childEnvelope, _, _, childSlot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+		service, _ := prepareGossipIntegrationEnvelope(t, fixture, childBlock, childEnvelope)
+		childEnvelope.Signature[0]++
 
-	err := service.ProcessMessage(t.Context(), nil, childEnvelope)
-	require.Error(t, err)
-	require.NotErrorIs(t, err, services.ErrIgnore)
+		err := service.ProcessMessage(t.Context(), nil, childEnvelope)
+		require.Error(t, err)
+		require.NotErrorIs(t, err, services.ErrIgnore)
+	})
 }
 
 func TestGloasCanonicalForkChoiceAdvancesExecutionHeadOverUnverifiedFullHead(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
-	fixture := newGloasPreparationIntegrationFixture(t)
-	fixture.runForkChoice(t)
-	_, childBlock, childEnvelope, childPayload, childRoot, childSlot := produceGloasIntegrationChild(
-		t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
-	)
+	synctest.Test(t, func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("long-running test")
+		}
+		fixture := newGloasPreparationIntegrationFixture(t)
+		fixture.runForkChoice(t)
+		_, childBlock, childEnvelope, childPayload, childRoot, childSlot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
 
-	importModule := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	importSeed, err := importModule.GenerateChain(1, nil)
-	require.NoError(t, err)
-	require.Equal(t, fixture.seedHash, importSeed.TopBlock.Hash())
-	require.NoError(t, importModule.InsertChain(importSeed))
-	importReader := chainreader.NewChainReaderEth1(importModule.ChainConfig, importModule.ExecModule, time.Second)
-	importDirect, err := execution_client.NewExecutionClientDirect(importReader, nil)
-	require.NoError(t, err)
-	importEngine := &preparationExecutionClient{ExecutionClientDirect: importDirect}
+		importModule := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+		importSeed, err := importModule.GenerateChain(1, nil)
+		require.NoError(t, err)
+		require.Equal(t, fixture.seedHash, importSeed.TopBlock.Hash())
+		require.NoError(t, importModule.InsertChain(importSeed))
+		importReader := chainreader.NewChainReaderEth1(importModule.ChainConfig, importModule.ExecModule, time.Second)
+		importDirect, err := execution_client.NewExecutionClientDirect(importReader, nil)
+		require.NoError(t, err)
+		importEngine := &preparationExecutionClient{ExecutionClientDirect: importDirect}
 
-	anchor, err := fixture.anchor.Copy()
-	require.NoError(t, err)
-	synced := synced_data.NewSyncedDataManager(fixture.handler.beaconChainCfg, true)
-	graph, err := fork_graph.NewForkGraphDisk(anchor, synced, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
-	require.NoError(t, err)
-	store, err := forkchoice.NewForkChoiceStore(
-		fixture.handler.ethClock, anchor, importEngine, pool.NewOperationsPool(fixture.handler.beaconChainCfg), graph,
-		beaconevents.NewEventEmitter(), synced, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(),
-		fixture.handler.validatorParams, false, nil,
-	)
-	require.NoError(t, err)
-	store.OnTick(utils.SecondsToMilliseconds(anchor.GenesisTime() + fixture.parentSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
-	applyGossipIntegrationEnvelope(t, fixture.handler.indiciesDB, store, fixture.parentBlock, fixture.parentEnvelope)
-	require.True(t, store.IsPayloadVerified(fixture.parentRoot))
-	store.OnTick(utils.SecondsToMilliseconds(anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
-	applyGossipIntegrationEnvelope(t, fixture.handler.indiciesDB, store, childBlock, childEnvelope)
-	require.False(t, store.IsPayloadVerified(childRoot))
+		anchor, err := fixture.anchor.Copy()
+		require.NoError(t, err)
+		synced := synced_data.NewSyncedDataManager(fixture.handler.beaconChainCfg, true)
+		graph, err := fork_graph.NewForkGraphDisk(anchor, synced, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+		require.NoError(t, err)
+		store, err := forkchoice.NewForkChoiceStore(
+			fixture.handler.ethClock, anchor, importEngine, pool.NewOperationsPool(fixture.handler.beaconChainCfg), graph,
+			beaconevents.NewEventEmitter(), synced, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(),
+			fixture.handler.validatorParams, false, nil,
+		)
+		require.NoError(t, err)
+		store.OnTick(utils.SecondsToMilliseconds(anchor.GenesisTime() + fixture.parentSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+		applyGossipIntegrationEnvelope(t, fixture.handler.indiciesDB, store, fixture.parentBlock, fixture.parentEnvelope)
+		require.True(t, store.IsPayloadVerified(fixture.parentRoot))
+		store.OnTick(utils.SecondsToMilliseconds(anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+		applyGossipIntegrationEnvelope(t, fixture.handler.indiciesDB, store, childBlock, childEnvelope)
+		require.False(t, store.IsPayloadVerified(childRoot))
 
-	head, _, err := store.GetHeadNode()
-	require.NoError(t, err)
-	require.Equal(t, forkchoice.ForkChoiceNode{Root: childRoot, PayloadStatus: cltypes.PayloadStatusFull}, head)
-	before, _, _, err := importReader.GetForkChoice(t.Context())
-	require.NoError(t, err)
-	require.NotEqual(t, childPayload.Payload.BlockHash, before)
+		head, _, err := store.GetHeadNode()
+		require.NoError(t, err)
+		require.Equal(t, forkchoice.ForkChoiceNode{Root: childRoot, PayloadStatus: cltypes.PayloadStatusFull}, head)
+		before, _, _, err := importReader.GetForkChoice(t.Context())
+		require.NoError(t, err)
+		require.NotEqual(t, childPayload.Payload.BlockHash, before)
 
-	_, sent := runGloasIntegrationForkChoice(t, store, importEngine, fixture.handler, synced)
-	require.Equal(t, childPayload.Payload.BlockHash, sent)
-	require.Equal(t, childRoot, synced.HeadRoot())
-	importModule.ExecModule.WaitIdle(t.Context())
-	after, _, _, err := importReader.GetForkChoice(t.Context())
-	require.NoError(t, err)
-	require.Equal(t, childPayload.Payload.BlockHash, after)
+		_, sent := runGloasIntegrationForkChoice(t, store, importEngine, fixture.handler, synced)
+		require.Equal(t, childPayload.Payload.BlockHash, sent)
+		require.Equal(t, childRoot, synced.HeadRoot())
+		importModule.ExecModule.WaitIdle(t.Context())
+		after, _, _, err := importReader.GetForkChoice(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, childPayload.Payload.BlockHash, after)
+	})
 }
 
 func TestGloasPreparationDiscardsBuildAfterPayloadInvalidation(t *testing.T) {
-	fixture := newGloasPreparationIntegrationFixture(t)
-	fixture.runForkChoice(t)
-	targetSlot := fixture.parentSlot + 1
-	proposer, err := fixture.parentState.GetBeaconProposerIndexForSlot(targetSlot)
-	require.NoError(t, err)
-	fixture.handler.validatorParams.SetFeeRecipient(proposer, common.Address{0x42})
-	fixture.engine.startPayloadBuildHook = func() {
-		fixture.store.MarkPayloadStatus(fixture.parentRoot, fixture.parentPayload.Payload.BlockHash, execution_client.PayloadStatusInvalidated)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newGloasPreparationIntegrationFixture(t)
+		fixture.runForkChoice(t)
+		targetSlot := fixture.parentSlot + 1
+		proposer, err := fixture.parentState.GetBeaconProposerIndexForSlot(targetSlot)
+		require.NoError(t, err)
+		fixture.handler.validatorParams.SetFeeRecipient(proposer, common.Address{0x42})
+		fixture.engine.startPayloadBuildHook = func() {
+			fixture.store.MarkPayloadStatus(fixture.parentRoot, fixture.parentPayload.Payload.BlockHash, execution_client.PayloadStatusInvalidated)
+		}
 
-	_, err = preparePayloadForTest(t, fixture.handler, targetSlot)
+		_, err = preparePayloadForTest(t, fixture.handler, targetSlot)
 
-	require.ErrorIs(t, err, errGloasPayloadPending)
-	require.Empty(t, fixture.handler.preparedPayload.payloads)
+		require.ErrorIs(t, err, errGloasPayloadPending)
+		require.Empty(t, fixture.handler.preparedPayload.payloads)
+	})
 }
 
 func TestGloasPreparationDiscardsBuildAfterHeadChange(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
-	fixture := newGloasPreparationIntegrationFixture(t)
-	fixture.runForkChoice(t)
-	_, childBlock, _, _, childRoot, childSlot := produceGloasIntegrationChild(
-		t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
-	)
-	targetSlot := childSlot + 1
-	proposer, err := fixture.parentState.GetBeaconProposerIndexForSlot(targetSlot)
-	require.NoError(t, err)
-	fixture.handler.validatorParams.SetFeeRecipient(proposer, common.Address{0x42})
-	fixture.engine.startPayloadBuildHook = func() {
-		fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
-		require.NoError(t, fixture.store.OnBlock(t.Context(), childBlock, true, false, false))
-	}
+	synctest.Test(t, func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("long-running test")
+		}
+		fixture := newGloasPreparationIntegrationFixture(t)
+		fixture.runForkChoice(t)
+		_, childBlock, _, _, childRoot, childSlot := produceGloasIntegrationChild(
+			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
+		)
+		targetSlot := childSlot + 1
+		proposer, err := fixture.parentState.GetBeaconProposerIndexForSlot(targetSlot)
+		require.NoError(t, err)
+		fixture.handler.validatorParams.SetFeeRecipient(proposer, common.Address{0x42})
+		fixture.engine.startPayloadBuildHook = func() {
+			fixture.store.OnTick(utils.SecondsToMilliseconds(fixture.anchor.GenesisTime() + childSlot*fixture.handler.beaconChainCfg.SecondsPerSlot))
+			require.NoError(t, fixture.store.OnBlock(t.Context(), childBlock, true, false, false))
+		}
 
-	_, err = preparePayloadForTest(t, fixture.handler, targetSlot)
+		_, err = preparePayloadForTest(t, fixture.handler, targetSlot)
 
-	// Import cancellation takes priority over the final head check.
-	require.ErrorIs(t, err, forkchoice.ErrPayloadImportInProgress)
-	head, _, err := fixture.store.GetHeadNode()
-	require.NoError(t, err)
-	require.Equal(t, childRoot, head.Root)
-	require.Empty(t, fixture.handler.preparedPayload.payloads)
+		// Import cancellation takes priority over the final head check.
+		require.ErrorIs(t, err, forkchoice.ErrPayloadImportInProgress)
+		head, _, err := fixture.store.GetHeadNode()
+		require.NoError(t, err)
+		require.Equal(t, childRoot, head.Root)
+		require.Empty(t, fixture.handler.preparedPayload.payloads)
+	})
 }
 
 func signExecutionPayloadEnvelope(
@@ -792,59 +809,61 @@ func TestPayloadPreparationCollectionWithExecutionModule(t *testing.T) {
 		}
 		for _, preparation := range preparations {
 			t.Run(path.name+"/"+preparation, func(t *testing.T) {
-				fixture := newPreparationCollectionFixture(t, path)
-				if preparation == "failed" {
-					fixture.engine.prepareErr = errors.New("temporary execution failure")
-				}
-				if preparation != "absent" {
-					_, err := preparePayloadForTest(t, fixture.handler, fixture.targetSlot)
-					switch {
-					case needsForkChoice:
-						require.ErrorIs(t, err, errGloasPathNeedsForkChoice)
-					case preparation == "failed":
-						require.ErrorIs(t, err, fixture.engine.prepareErr)
-					default:
-						require.NoError(t, err)
+				synctest.Test(t, func(t *testing.T) {
+					fixture := newPreparationCollectionFixture(t, path)
+					if preparation == "failed" {
+						fixture.engine.prepareErr = errors.New("temporary execution failure")
 					}
-				}
-				prepared := fixture.handler.preparedPayload.payloads[fixture.targetSlot]
-				if preparation == "mismatch" {
-					fixture.handler.validatorParams.SetFeeRecipient(fixture.proposer, common.Address{0x43})
-					if needsForkChoice {
-						fixture.handler.preparedPayload.set(fixture.targetSlot, []byte{0xff}, fixture.baseRoot, time.Now().Add(-time.Second))
+					if preparation != "absent" {
+						_, err := preparePayloadForTest(t, fixture.handler, fixture.targetSlot)
+						switch {
+						case needsForkChoice:
+							require.ErrorIs(t, err, errGloasPathNeedsForkChoice)
+						case preparation == "failed":
+							require.ErrorIs(t, err, fixture.engine.prepareErr)
+						default:
+							require.NoError(t, err)
+						}
 					}
-				}
-				reused := preparation == "prepared" && !needsForkChoice
-				if reused {
-					time.Sleep(maximumPreparedAdvance(&fixture.cfg, fixture.version))
-				}
-				fixture.slotStart = time.Now()
-				normal := computeBlockBuilderWindow(fixture.slotStart, fixture.slotStart, &fixture.cfg, fixture.version, 0)
-				block, err := fixture.handler.produceBlock(t.Context(), 3, fixture.currentSlot, fixture.baseRoot, fixture.productionState, fixture.targetSlot, common.Bytes96{0xc0}, common.Hash{})
-				require.NoError(t, err)
-				require.NotNil(t, block)
-				payload := block.BeaconBody.ExecutionPayload
-				if fixture.version >= clparams.GloasVersion {
-					built, ok := fixture.handler.selfBuildPayloads.Get(block.BeaconBody.SignedExecutionPayloadBid.Message.BlockHash)
-					require.True(t, ok)
-					payload = built.Payload
-				}
-				wantParent := fixture.parentHash
-				if path.wantParentFull {
-					wantParent = fixture.fullHash
-				}
-				require.Equal(t, wantParent, payload.ParentHash)
-				require.Equal(t, fixture.currentSlot, fixture.headState.Slot(), "preparation must only advance its copied state")
-				require.Equal(t, fixture.engine.productionID, fixture.engine.collectedID)
-				if reused {
-					require.Equal(t, prepared.id, fixture.engine.collectedID)
-					require.True(t, fixture.engine.firstCollection.Before(normal.firstGetAt), "prepared collection must start before the normal window")
-				} else {
-					require.False(t, fixture.engine.firstCollection.Before(normal.firstGetAt), "ordinary collection timing must be retained")
-					if len(prepared.id) > 0 {
-						require.NotEqual(t, prepared.id, fixture.engine.collectedID)
+					prepared := fixture.handler.preparedPayload.payloads[fixture.targetSlot]
+					if preparation == "mismatch" {
+						fixture.handler.validatorParams.SetFeeRecipient(fixture.proposer, common.Address{0x43})
+						if needsForkChoice {
+							fixture.handler.preparedPayload.set(fixture.targetSlot, []byte{0xff}, fixture.baseRoot, time.Now().Add(-time.Second))
+						}
 					}
-				}
+					reused := preparation == "prepared" && !needsForkChoice
+					if reused {
+						time.Sleep(maximumPreparedAdvance(&fixture.cfg, fixture.version))
+					}
+					fixture.slotStart = time.Now()
+					normal := computeBlockBuilderWindow(fixture.slotStart, fixture.slotStart, &fixture.cfg, fixture.version, 0)
+					block, err := fixture.handler.produceBlock(t.Context(), 3, fixture.currentSlot, fixture.baseRoot, fixture.productionState, fixture.targetSlot, common.Bytes96{0xc0}, common.Hash{})
+					require.NoError(t, err)
+					require.NotNil(t, block)
+					payload := block.BeaconBody.ExecutionPayload
+					if fixture.version >= clparams.GloasVersion {
+						built, ok := fixture.handler.selfBuildPayloads.Get(block.BeaconBody.SignedExecutionPayloadBid.Message.BlockHash)
+						require.True(t, ok)
+						payload = built.Payload
+					}
+					wantParent := fixture.parentHash
+					if path.wantParentFull {
+						wantParent = fixture.fullHash
+					}
+					require.Equal(t, wantParent, payload.ParentHash)
+					require.Equal(t, fixture.currentSlot, fixture.headState.Slot(), "preparation must only advance its copied state")
+					require.Equal(t, fixture.engine.productionID, fixture.engine.collectedID)
+					if reused {
+						require.Equal(t, prepared.id, fixture.engine.collectedID)
+						require.True(t, fixture.engine.firstCollection.Before(normal.firstGetAt), "prepared collection must start before the normal window")
+					} else {
+						require.False(t, fixture.engine.firstCollection.Before(normal.firstGetAt), "ordinary collection timing must be retained")
+						if len(prepared.id) > 0 {
+							require.NotEqual(t, prepared.id, fixture.engine.collectedID)
+						}
+					}
+				})
 			})
 		}
 	}
