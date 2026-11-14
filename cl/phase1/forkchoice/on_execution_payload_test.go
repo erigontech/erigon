@@ -3597,8 +3597,9 @@ func TestOnExecutionPayloadMergesStrongerConcurrentValidationResult(t *testing.T
 		// the lock back, and would block on it while this goroutine waits for it to start validating.
 		synctest.Wait()
 		f.envelopeAppliesMu.Lock()
-		require.Equal(t, 2, f.envelopeApplies[blockRoot])
+		applies := f.envelopeApplies[blockRoot]
 		f.envelopeAppliesMu.Unlock()
+		require.Equal(t, 2, applies)
 		f.mu.Lock()
 		close(releaseFirst)
 		<-secondStarted
