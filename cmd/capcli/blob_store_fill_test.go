@@ -62,7 +62,8 @@ type fillFixture struct {
 	store    blob_storage.BlobStorage
 	sidecars map[common.Hash][]*cltypes.BlobSidecar
 	tip      common.Hash // the last block added; the next one builds on it
-	frozen   uint64      // the frozen blob frontier
+	payload  common.Hash
+	frozen   uint64 // the frozen blob frontier
 	version  clparams.StateVersion
 }
 
@@ -91,6 +92,11 @@ func (f *fillFixture) addBlockWithTransactions(slot uint64, blobs int, txs bool)
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, f.version)
 	block.Block.Slot = slot
 	block.Block.ParentRoot = f.tip
+	if f.version >= clparams.GloasVersion {
+		bid := block.Block.Body.SignedExecutionPayloadBid.Message
+		bid.ParentBlockHash, bid.BlockHash = f.payload, common.Hash{byte(slot >> 8), byte(slot)}
+		f.payload = bid.BlockHash
+	}
 	if txs {
 		block.Block.Body.ExecutionPayload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x02, 0x01}})
 	}
@@ -101,18 +107,20 @@ func (f *fillFixture) addBlockWithTransactions(slot uint64, blobs int, txs bool)
 		var err error
 		commitments[i], err = kzg.Ctx().BlobToKZGCommitment(&data[i], 0)
 		require.NoError(t, err)
-		block.Block.Body.BlobKzgCommitments.Append((*cltypes.KZGCommitment)(&commitments[i]))
+		block.Block.Body.GetBlobKzgCommitments().Append((*cltypes.KZGCommitment)(&commitments[i]))
 	}
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	for i := range data {
 		proof, err := kzg.Ctx().ComputeBlobKZGProof(&data[i], commitments[i], 0)
 		require.NoError(t, err)
-		branch, err := block.Block.Body.KzgCommitmentMerkleProof(i)
-		require.NoError(t, err)
 		inclusion := solid.NewHashVector(cltypes.CommitmentBranchSize)
-		for j := range branch {
-			inclusion.Set(j, common.Hash(branch[j]))
+		if f.version < clparams.GloasVersion {
+			branch, err := block.Block.Body.KzgCommitmentMerkleProof(i)
+			require.NoError(t, err)
+			for j := range branch {
+				inclusion.Set(j, common.Hash(branch[j]))
+			}
 		}
 		f.sidecars[root] = append(f.sidecars[root], cltypes.NewBlobSidecar(uint64(i), (*cltypes.Blob)(&data[i]),
 			common.Bytes48(commitments[i]), common.Bytes48(proof), block.SignedBeaconBlockHeader(), inclusion))
@@ -145,7 +153,7 @@ func (f *fillFixture) storedValid(slot uint64, root common.Hash) bool {
 	return storedBlobsValid(f.t.Context(), f.store, slot, root, f.blocks.blocks[slot])
 }
 
-// endpoint serves the fixture's sidecars, or 404s when missing is set, and counts requests per root.
+// endpoint serves the fixture's sidecars, only their blobs for Gloas, or 404s when missing is set, and counts requests per root.
 func (f *fillFixture) endpoint(missing bool) (string, *sync.Map) {
 	requests := &sync.Map{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -153,11 +161,29 @@ func (f *fillFixture) endpoint(missing bool) (string, *sync.Map) {
 		counter, _ := requests.LoadOrStore(id, &atomic.Int32{})
 		counter.(*atomic.Int32).Add(1)
 		sidecars, ok := f.sidecars[common.HexToHash(id)]
-		if missing || !ok || !strings.Contains(r.URL.Path, "/eth/v1/beacon/blob_sidecars/") {
+		var data any = sidecars
+		switch {
+		case missing || !ok:
+			if !missing && f.version >= clparams.GloasVersion && strings.Contains(r.URL.Path, "/eth/v1/beacon/blobs/") {
+				data = []*cltypes.Blob{}
+				break
+			}
 			w.WriteHeader(http.StatusNotFound)
 			return
+		case strings.Contains(r.URL.Path, "/eth/v1/beacon/blobs/"):
+			blobs := make([]*cltypes.Blob, len(sidecars))
+			for i, sidecar := range sidecars {
+				blobs[i] = &sidecar.Blob
+			}
+			data = blobs
+		case !strings.Contains(r.URL.Path, "/eth/v1/beacon/blob_sidecars/"):
+			w.WriteHeader(http.StatusNotFound)
+			return
+		case f.version >= clparams.GloasVersion:
+			w.WriteHeader(http.StatusBadRequest)
+			return
 		}
-		if err := json.NewEncoder(w).Encode(map[string]any{"data": sidecars}); err != nil {
+		if err := json.NewEncoder(w).Encode(map[string]any{"data": data}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}))
@@ -178,6 +204,203 @@ func (f *fillFixture) fill(cmd *BlobArchiveStoreFill, store blob_storage.BlobSto
 		store = f.store
 	}
 	return cmd.fill(f.t.Context(), f.db, f.blocks, store, f.frozen)
+}
+
+func TestBlobArchiveStoreFillBuildsGloasSidecarsFromBlobs(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	root := f.addBlock(fillTestSlot, 2)
+	url, _ := f.endpoint(false)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+
+	require.True(t, f.storedValid(fillTestSlot, root))
+}
+
+func TestBlobArchiveStoreFillSkipsAGloasBlockWhosePayloadIsNotOnChain(t *testing.T) {
+	for _, gap := range []uint64{1, 200} {
+		t.Run(fmt.Sprintf("next block %d slots later", gap), func(t *testing.T) {
+			f, before, after := newSkippedPayloadFixture(t, gap)
+			url, _ := f.endpoint(false)
+
+			require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 1 + gap}, nil))
+
+			require.True(t, f.storedValid(fillTestSlot, before))
+			require.True(t, f.storedValid(fillTestSlot+1+gap, after))
+		})
+	}
+}
+
+func TestBlobArchiveStoreFillDryRunProbesPastASkippedGloasPayload(t *testing.T) {
+	f, _, _ := newSkippedPayloadFixture(t, 1)
+	url, _ := f.endpoint(false)
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 2, DryRun: true}
+
+	require.NoError(t, f.fill(cmd, nil))
+
+	require.Equal(t, uint64(fillTestSlot), cmd.windows[0].from.Load())
+}
+
+func TestBlobArchiveStoreFillDryRunServesAnUnresolvedGloasHead(t *testing.T) {
+	for name, notServed := range notServedAnswers {
+		t.Run(name, func(t *testing.T) {
+			f := newFillFixture(t)
+			f.version = clparams.GloasVersion
+			f.addBlock(fillTestSlot, 1)
+			head := f.addBlock(fillTestSlot+1, 1)
+			good, _ := f.endpoint(false)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if common.HexToHash(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]) == head {
+					notServed(w, r)
+					return
+				}
+				http.Redirect(w, r, good+r.URL.Path, http.StatusTemporaryRedirect)
+			}))
+			t.Cleanup(srv.Close)
+			cmd := &BlobArchiveStoreFill{Endpoints: []string{srv.URL}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 1, DryRun: true}
+			var logs bytes.Buffer
+			oldHandler := log.Root().GetHandler()
+			log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.SyncHandler(log.StreamHandler(&logs, log.LogfmtFormat()))))
+			t.Cleanup(func() { log.Root().SetHandler(oldHandler) })
+
+			require.NoError(t, f.fill(cmd, nil))
+
+			require.Equal(t, uint64(fillTestSlot), cmd.windows[0].from.Load())
+			require.Contains(t, logs.String(), fmt.Sprintf("msg=\"Slot needs its sidecars\" slot=%d", fillTestSlot+1))
+			require.Equal(t, 1, strings.Count(logs.String(), "served=false"))
+		})
+	}
+}
+
+func TestBlobArchiveStoreFillReportsAnUnresolvedSlotBelowAnEndpointWindow(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	f.addBlock(fillTestSlot, 1)
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{"http://beacon.example"}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}
+	cmd.windows = make([]endpointWindow, 1)
+	cmd.windows[0].from.Store(fillTestSlot + 1)
+	cmd.windows[0].once.Do(func() {})
+	report := &fillReport{}
+
+	require.NoError(t, cmd.fillSlot(t.Context(), f.db, f.blocks, &writeErrRecorder{BlobStorage: f.store}, fillTestSlot, report))
+	require.Empty(t, report.unserved)
+}
+
+func TestExpectedBlobsInTxTreatsAMissingGloasChildBodyAsUnresolved(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	root := f.addBlock(fillTestSlot, 1)
+	childRoot := common.HexToHash("0xcafe")
+	require.NoError(t, f.db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(tx, fillTestSlot+1, childRoot)
+	}))
+
+	var got int
+	var unresolved bool
+	require.NoError(t, f.db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		got, unresolved, err = expectedBlobsInTx(t.Context(), tx, f.blocks, root, f.blocks.blocks[fillTestSlot])
+		return err
+	}))
+	require.Equal(t, 1, got)
+	require.True(t, unresolved)
+}
+
+func TestBlobArchiveStoreFillKeepsAGloasBlockWhoseSuccessorIsNotItsChild(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	root := f.addBlock(fillTestSlot, 1)
+	f.tip, f.payload = common.Hash{0xee}, common.Hash{0xdd}
+	f.addBlock(fillTestSlot+2, 1)
+	url, _ := f.endpoint(false)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+
+	require.True(t, f.storedValid(fillTestSlot, root))
+}
+
+func TestBlobArchiveStoreFillDryRunServesAGloasBlockWithANonChildSuccessor(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	root := f.addBlock(fillTestSlot, 1)
+	f.tip, f.payload = common.Hash{0xee}, common.Hash{0xdd}
+	f.addBlock(fillTestSlot+2, 1)
+	delete(f.sidecars, root)
+	url, _ := f.endpoint(false)
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot, DryRun: true}
+
+	require.NoError(t, f.fill(cmd, nil))
+
+	require.Equal(t, uint64(fillTestSlot), cmd.windows[0].from.Load())
+}
+
+func TestBlobArchiveStoreFillFillsBeforeAnUnresolvedGloasHead(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	root := f.addBlock(fillTestSlot, 1)
+	head := f.addBlock(fillTestSlot+1, 1)
+	delete(f.sidecars, head)
+	url, _ := f.endpoint(false)
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 1}
+	var logs bytes.Buffer
+	oldHandler := log.Root().GetHandler()
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.SyncHandler(log.StreamHandler(&logs, log.LogfmtFormat()))))
+	t.Cleanup(func() { log.Root().SetHandler(oldHandler) })
+
+	require.NoError(t, f.fill(cmd, nil))
+	require.True(t, f.storedValid(fillTestSlot, root))
+	require.Zero(t, cmd.windows[0].from.Load())
+	output := logs.String()
+	require.Contains(t, output, "missing=2")
+	require.Contains(t, output, "filled=1")
+	require.Contains(t, output, "failed=0")
+	require.Contains(t, output, "unserved=0")
+	require.Contains(t, output, "unresolved=1")
+	require.Contains(t, output, fmt.Sprintf("lvl=warn msg=\"Slot has unresolved payload status\" slot=%d", fillTestSlot+1))
+}
+
+func TestBlobArchiveStoreFillTriesTheNextEndpointForAnUnresolvedGloasHead(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	head := f.addBlock(fillTestSlot, 1)
+	empty := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	t.Cleanup(empty.Close)
+	full, _ := f.endpoint(false)
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{empty.URL, full}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}
+
+	require.NoError(t, f.fill(cmd, nil))
+	require.True(t, f.storedValid(fillTestSlot, head))
+	require.Zero(t, cmd.windows[0].from.Load())
+}
+
+func TestBlobArchiveStoreFillKeepsAGloasBlockWhoseChildIsNotIndexed(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	root := f.addBlock(fillTestSlot, 1)
+	child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	child.Block.Slot, child.Block.ParentRoot = fillTestSlot+1, root
+	child.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = common.Hash{0xdd}
+	f.blocks.blocks[fillTestSlot+1] = child
+	f.addBlock(fillTestSlot+2, 0)
+	url, _ := f.endpoint(false)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot}, nil))
+
+	require.True(t, f.storedValid(fillTestSlot, root))
+}
+
+func newSkippedPayloadFixture(t *testing.T, gap uint64) (*fillFixture, common.Hash, common.Hash) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	before := f.addBlock(fillTestSlot, 1)
+	onChain := f.payload
+	skipped := f.addBlock(fillTestSlot+1, 2)
+	delete(f.sidecars, skipped)
+	f.payload = onChain
+	after := f.addBlock(fillTestSlot+1+gap, 1)
+	return f, before, after
 }
 
 func TestBlobArchiveStoreFillFetchesOnlyMissingSlots(t *testing.T) {
@@ -806,4 +1029,62 @@ func TestBlobArchiveStoreFillDenseWindowReads(t *testing.T) {
 	t.Logf("dense slots=%d reads=%d requests=%d", windowTestSlots, reader.reads.Load(), requests.Load())
 	require.EqualValues(t, fillTestSlot+windowTestServedFrom, cmd.windows[0].from.Load())
 	require.LessOrEqual(t, reader.reads.Load(), uint64(windowTestSlots+64))
+}
+
+func TestBlobArchiveStoreCheckPassesAfterFillingASkippedGloasPayload(t *testing.T) {
+	f, _, _ := newSkippedPayloadFixture(t, 1)
+	url, _ := f.endpoint(false)
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 2}, nil))
+
+	tx, err := f.db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	mismatched, _, err := checkBlobStore(t.Context(), tx, f.blocks, f.store, fillTestSlot+2, fillTestSlot, false)
+	require.NoError(t, err)
+	require.Zero(t, mismatched)
+}
+
+func TestBlobArchiveStoreCheckKeepsTheBlobsOfASkippedGloasPayload(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	before := f.addBlock(fillTestSlot, 1)
+	onChain := f.payload
+	skipped := f.addBlock(fillTestSlot+1, 2)
+	f.payload = onChain
+	after := f.addBlock(fillTestSlot+2, 1)
+	for _, root := range []common.Hash{before, skipped, after} {
+		f.storeValid(root)
+	}
+
+	tx, err := f.db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	mismatched, _, err := checkBlobStore(t.Context(), tx, f.blocks, f.store, fillTestSlot+2, fillTestSlot, true)
+	require.NoError(t, err)
+	require.Zero(t, mismatched)
+	require.True(t, f.storedValid(fillTestSlot+1, skipped))
+}
+
+func TestBlobArchiveStoreCheckFlagsPartialBlobsOfASkippedGloasPayload(t *testing.T) {
+	f := newFillFixture(t)
+	f.version = clparams.GloasVersion
+	before := f.addBlock(fillTestSlot, 1)
+	onChain := f.payload
+	skipped := f.addBlock(fillTestSlot+1, 2)
+	f.payload = onChain
+	after := f.addBlock(fillTestSlot+2, 1)
+	f.storeValid(before)
+	f.storeValid(after)
+	require.NoError(t, f.store.WriteBlobSidecars(t.Context(), skipped, f.sidecars[skipped][:1]))
+
+	tx, err := f.db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	mismatched, unresolved, err := checkBlobStore(t.Context(), tx, f.blocks, f.store, fillTestSlot+2, fillTestSlot, true)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), mismatched)
+	require.Zero(t, unresolved)
+	count, err := f.store.KzgCommitmentsCount(t.Context(), skipped)
+	require.NoError(t, err)
+	require.Zero(t, count)
 }

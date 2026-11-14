@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -81,8 +83,8 @@ var errNoSidecars = errors.New("the endpoint has no sidecars for the block")
 type fillReport struct {
 	withBlobs, valid, filled atomic.Uint64
 
-	mu               sync.Mutex
-	failed, unserved []uint64
+	mu                           sync.Mutex
+	failed, unserved, unresolved []uint64
 }
 
 func (r *fillReport) add(slots *[]uint64, slot uint64) {
@@ -194,9 +196,10 @@ func (b *BlobArchiveStoreFill) fill(ctx context.Context, db kv.RoDB, blocks free
 	err := g.Wait()
 	slices.Sort(report.failed)
 	slices.Sort(report.unserved)
+	slices.Sort(report.unresolved)
 	log.Info("Blob store fill finished", "fromSlot", b.FromSlot, "toSlot", b.ToSlot, "slotsWithBlobs", report.withBlobs.Load(),
 		"valid", report.valid.Load(), "missing", report.withBlobs.Load()-report.valid.Load(), "filled", report.filled.Load(), "failed", len(report.failed),
-		"unserved", len(report.unserved), "dryRun", b.DryRun)
+		"unserved", len(report.unserved), "unresolved", len(report.unresolved), "dryRun", b.DryRun)
 	if err != nil {
 		return err
 	}
@@ -288,7 +291,10 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		report.add(&report.failed, slot)
 		return nil
 	}
-	blobs := blobCount(block)
+	blobs, unresolved, err := expectedBlobs(ctx, db, blocks, root, block)
+	if err != nil {
+		return fmt.Errorf("read the slots after %d: %w", slot, err)
+	}
 	if blobs == 0 {
 		return nil
 	}
@@ -298,14 +304,21 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		return nil
 	}
 	if b.DryRun {
-		served := len(b.Endpoints) == 0
+		served := !unresolved && len(b.Endpoints) == 0
 		for i := range b.Endpoints {
 			if err := b.findWindow(ctx, db, blocks, i, b.FromSlot); err != nil {
 				return fmt.Errorf("find the window of endpoint %d: %w", i+1, err)
 			}
-			served = served || slot >= b.windows[i].from.Load()
+			if slot >= b.windows[i].from.Load() {
+				served = served || !unresolved
+			}
 		}
 		log.Info("Slot needs its sidecars", "slot", slot, "blockRoot", root, "blobs", blobs, "served", served)
+		if unresolved {
+			log.Warn("Slot has unresolved payload status", "slot", slot, "blockRoot", root)
+			report.add(&report.unresolved, slot)
+			return nil
+		}
 		if !served {
 			report.add(&report.unserved, slot)
 			return nil
@@ -332,18 +345,23 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		if ctx.Err() != nil {
 			return nil
 		}
-		if notServed(lastErr) {
+		if !notServed(lastErr) {
+			unserved = false
+		} else if !unresolved {
 			if err := b.findWindow(ctx, db, blocks, i, slot+1); err != nil {
 				return fmt.Errorf("find the window of endpoint %d: %w", i+1, err)
 			}
-		} else {
-			unserved = false
 		}
 		log.Debug("Endpoint could not fill slot", "slot", slot, "endpoint", redactEndpoint(endpoint), "err", lastErr)
 	}
 	if unserved {
-		log.Debug("No endpoint serves slot", "slot", slot, "blockRoot", root)
-		report.add(&report.unserved, slot)
+		if unresolved {
+			log.Warn("Slot has unresolved payload status", "slot", slot, "blockRoot", root)
+			report.add(&report.unresolved, slot)
+		} else {
+			log.Debug("No endpoint serves slot", "slot", slot, "blockRoot", root)
+			report.add(&report.unserved, slot)
+		}
 		return nil
 	}
 	log.Warn("Could not fill slot", "slot", slot, "blockRoot", root, "err", lastErr)
@@ -372,6 +390,43 @@ func blobCount(block *cltypes.SignedBeaconBlock) int {
 	return 0
 }
 
+func expectedBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, root common.Hash, block *cltypes.SignedBeaconBlock) (n int, unresolved bool, err error) {
+	err = db.View(ctx, func(tx kv.Tx) error {
+		n, unresolved, err = expectedBlobsInTx(ctx, tx, blocks, root, block)
+		return err
+	})
+	return n, unresolved, err
+}
+
+func expectedBlobsInTx(ctx context.Context, tx kv.Tx, blocks freezeblocks.BeaconSnapshotReader, root common.Hash, block *cltypes.SignedBeaconBlock) (int, bool, error) {
+	n := blobCount(block)
+	if n == 0 || block.Version() < clparams.GloasVersion {
+		return n, false, nil
+	}
+	var childSlot uint64
+	var childRoot common.Hash
+	if err := beacon_indicies.RangeBlockRoots(tx, block.Block.Slot+1, math.MaxUint64, func(slot uint64, root common.Hash) bool {
+		childSlot, childRoot = slot, root
+		return false
+	}); err != nil {
+		return 0, false, err
+	}
+	if childRoot == (common.Hash{}) {
+		return n, true, nil
+	}
+	child, err := blocks.ReadBeaconBlockBodyBySlot(ctx, tx, childSlot)
+	if err != nil {
+		return 0, false, err
+	}
+	if child == nil || child.Block.ParentRoot != root {
+		return n, true, nil
+	}
+	if forkchoice.ParentPayloadStatusFromBids(block, child.Block) == cltypes.PayloadStatusFull {
+		return n, false, nil
+	}
+	return 0, false, nil
+}
+
 func notServed(err error) bool {
 	status, ok := errors.AsType[blobStatusError](err)
 	return errors.Is(err, errNoSidecars) || ok && status == http.StatusBadRequest
@@ -386,18 +441,18 @@ func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, block
 			if w.err != nil {
 				return true
 			}
-			root, block, err := nextSlotWithBlobs(ctx, db, blocks, lo+uint64(n), b.ToSlot, scanned)
+			root, block, unresolved, err := nextSlotWithBlobs(ctx, db, blocks, lo+uint64(n), b.ToSlot, scanned)
 			if err != nil {
 				w.err = err
 				return true
 			}
-			if block == nil {
+			if block == nil || unresolved {
 				return true
 			}
 			if served, ok := answers[root]; ok {
 				return served
 			}
-			sidecars, err := retrieveBlobsFromRemoteEndpoint(ctx, b.Endpoints[i], root, blobCount(block))
+			sidecars, err := retrieveSidecars(ctx, b.Endpoints[i], root, block)
 			if err == nil && len(sidecars) == 0 {
 				err = errNoSidecars
 			}
@@ -407,7 +462,7 @@ func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, block
 		if w.err != nil {
 			return
 		}
-		_, block, err := nextSlotWithBlobs(ctx, db, blocks, lo+uint64(n), b.ToSlot, scanned)
+		_, block, _, err := nextSlotWithBlobs(ctx, db, blocks, lo+uint64(n), b.ToSlot, scanned)
 		if err != nil {
 			w.err = err
 			return
@@ -423,7 +478,7 @@ func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, block
 	return w.err
 }
 
-func nextSlotWithBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, from, to uint64, scanned map[uint64]uint64) (common.Hash, *cltypes.SignedBeaconBlock, error) {
+func nextSlotWithBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, from, to uint64, scanned map[uint64]uint64) (common.Hash, *cltypes.SignedBeaconBlock, bool, error) {
 	for slot := from; slot <= to; slot++ {
 		for start, end := range scanned {
 			if start <= slot && slot < end {
@@ -432,18 +487,23 @@ func nextSlotWithBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.Beac
 			}
 		}
 		root, block, err := readSlot(ctx, db, blocks, slot)
-		if err != nil || blobCount(block) > 0 {
+		n := 0
+		unresolved := false
+		if err == nil {
+			n, unresolved, err = expectedBlobs(ctx, db, blocks, root, block)
+		}
+		if err != nil || n > 0 {
 			scanned[from] = slot
-			return root, block, err
+			return root, block, unresolved, err
 		}
 	}
 	scanned[from] = to
-	return common.Hash{}, nil, nil
+	return common.Hash{}, nil, false, nil
 }
 
 func fetchAndStoreBlobs(ctx context.Context, store blob_storage.BlobStorage, endpoint string, root common.Hash, block *cltypes.SignedBeaconBlock) error {
 	commitments := block.Block.Body.GetBlobKzgCommitments()
-	sidecars, err := retrieveBlobsFromRemoteEndpoint(ctx, endpoint, root, commitments.Len())
+	sidecars, err := retrieveSidecars(ctx, endpoint, root, block)
 	if err != nil {
 		return err
 	}
@@ -521,10 +581,10 @@ func logFillProgress(ctx context.Context, from, to uint64, report *fillReport) {
 			return
 		case <-ticker.C:
 			report.mu.Lock()
-			failed, unserved := len(report.failed), len(report.unserved)
+			failed, unserved, unresolved := len(report.failed), len(report.unserved), len(report.unresolved)
 			report.mu.Unlock()
 			log.Info("Blob store fill progress", "fromSlot", from, "toSlot", to, "slotsWithBlobs", report.withBlobs.Load(),
-				"valid", report.valid.Load(), "filled", report.filled.Load(), "failed", failed, "unserved", unserved)
+				"valid", report.valid.Load(), "filled", report.filled.Load(), "failed", failed, "unserved", unserved, "unresolved", unresolved)
 		}
 	}
 }

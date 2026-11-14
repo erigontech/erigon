@@ -58,7 +58,7 @@ func (c *ChainEndpoint) storeBlobsForBlock(
 	if err != nil {
 		return err
 	}
-	blobs, err := retrieveBlobsFromRemoteEndpoint(ctx, c.Endpoint, blockRoot, commitments.Len())
+	blobs, err := retrieveSidecars(ctx, c.Endpoint, blockRoot, block)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve blobs at slot %d, root %x: %w", block.Block.Slot, blockRoot, err)
 	}
