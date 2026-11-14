@@ -16,11 +16,21 @@ import (
 // newTestForkChoiceStore creates a minimal ForkChoiceStore for timing tests.
 func newTestForkChoiceStore(secondsPerSlot, intervalsPerSlot, slotsPerEpoch, gloasForkEpoch, genesisTime, currentTimeMs uint64) *ForkChoiceStore {
 	cfg := &clparams.BeaconChainConfig{
-		SecondsPerSlot:   secondsPerSlot,
-		IntervalsPerSlot: intervalsPerSlot,
-		SlotsPerEpoch:    slotsPerEpoch,
-		GloasForkEpoch:   gloasForkEpoch,
-		GenesisSlot:      0,
+		SecondsPerSlot:           secondsPerSlot,
+		IntervalsPerSlot:         intervalsPerSlot,
+		SlotsPerEpoch:            slotsPerEpoch,
+		GloasForkEpoch:           gloasForkEpoch,
+		GenesisSlot:              0,
+		AttestationDueBps:        clparams.AttestationDueBps,
+		AggregateDueBps:          clparams.AggregateDueBps,
+		SyncMessageDueBps:        clparams.SyncMessageDueBps,
+		ContributionDueBps:       clparams.ContributionDueBps,
+		AttestationDueBpsGloas:   clparams.AttestationDueBpsGloas,
+		AggregateDueBpsGloas:     clparams.AggregateDueBpsGloas,
+		SyncMessageDueBpsGloas:   clparams.SyncMessageDueBpsGloas,
+		ContributionDueBpsGloas:  clparams.ContributionDueBpsGloas,
+		PayloadAttestationDueBps: clparams.PayloadAttestationDueBps,
+		ReorgHeadWeightThreshold: clparams.ReorgHeadWeightThreshold,
 	}
 	f := &ForkChoiceStore{
 		genesisTime: genesisTime,
@@ -63,14 +73,12 @@ func TestGetAggregateDueMs_PostGloas(t *testing.T) {
 
 func TestGetSyncMessageDueMs(t *testing.T) {
 	f := newTestForkChoiceStore(12, 3, 32, 10, 0, 0)
-	// Should match attestation due
 	require.Equal(t, f.getAttestationDueMs(5), f.getSyncMessageDueMs(5))
 	require.Equal(t, f.getAttestationDueMs(15), f.getSyncMessageDueMs(15))
 }
 
 func TestGetContributionDueMs(t *testing.T) {
 	f := newTestForkChoiceStore(12, 3, 32, 10, 0, 0)
-	// Should match aggregate due
 	require.Equal(t, f.getAggregateDueMs(5), f.getContributionDueMs(5))
 	require.Equal(t, f.getAggregateDueMs(15), f.getContributionDueMs(15))
 }
@@ -79,6 +87,29 @@ func TestGetPayloadAttestationDueMs(t *testing.T) {
 	// 12 * 7500 / 10 = 9000 ms
 	f := newTestForkChoiceStore(12, 3, 32, 10, 0, 0)
 	require.Equal(t, uint64(9000), f.getPayloadAttestationDueMs(10))
+}
+
+func TestGetTimingDueMsUsesConfiguredBps(t *testing.T) {
+	f := newTestForkChoiceStore(12, 3, 32, 10, 0, 0)
+	f.beaconCfg.AttestationDueBps = 2500
+	f.beaconCfg.AttestationDueBpsGloas = 1250
+	f.beaconCfg.AggregateDueBps = 2000
+	f.beaconCfg.AggregateDueBpsGloas = 4000
+	f.beaconCfg.SyncMessageDueBps = 3000
+	f.beaconCfg.SyncMessageDueBpsGloas = 1500
+	f.beaconCfg.ContributionDueBps = 4000
+	f.beaconCfg.ContributionDueBpsGloas = 2500
+	f.beaconCfg.PayloadAttestationDueBps = 6000
+
+	require.Equal(t, uint64(3000), f.getAttestationDueMs(0))
+	require.Equal(t, uint64(1500), f.getAttestationDueMs(10))
+	require.Equal(t, uint64(2400), f.getAggregateDueMs(0))
+	require.Equal(t, uint64(4800), f.getAggregateDueMs(10))
+	require.Equal(t, uint64(3600), f.getSyncMessageDueMs(0))
+	require.Equal(t, uint64(1800), f.getSyncMessageDueMs(10))
+	require.Equal(t, uint64(4800), f.getContributionDueMs(0))
+	require.Equal(t, uint64(3000), f.getContributionDueMs(10))
+	require.Equal(t, uint64(7200), f.getPayloadAttestationDueMs(10))
 }
 
 func TestComputeShufflingDependentSlotUsesGenesisInEarlyEpochs(t *testing.T) {
@@ -504,6 +535,14 @@ func TestIsHeadWeakWithoutEquivocatorsSkipsCommitteeLookup(t *testing.T) {
 	f, headRoot, justifiedState := newHeadWeakCommitteeStore(t, false)
 	f.forkGraph = noAncestorWalkForkGraph{f.forkGraph.(*headSnapshotForkGraph)}
 	require.True(t, f.isHeadWeakWith(headRoot, justifiedState, noAttestations))
+}
+
+func TestIsHeadWeakUsesConfiguredThreshold(t *testing.T) {
+	f, headRoot, justifiedState := newHeadWeakCommitteeStore(t, false)
+	config := *f.beaconCfg
+	config.ReorgHeadWeightThreshold = 1
+	f.beaconCfg = &config
+	require.False(t, f.isHeadWeakWith(headRoot, justifiedState, func(common.Hash) uint64 { return 100 }))
 }
 
 func TestIsHeadWeakUsesHeadEpochShufflingCaches(t *testing.T) {

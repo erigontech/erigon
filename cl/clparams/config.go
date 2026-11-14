@@ -256,7 +256,7 @@ var (
 )
 
 type NetworkConfig struct {
-	GossipMaxSize                   uint64             `yaml:"MAX_PAYLOAD_SIZE" json:"GOSSIP_MAX_SIZE,string"`                                      // The maximum allowed size of uncompressed gossip messages.
+	GossipMaxSize                   uint64             `yaml:"MAX_PAYLOAD_SIZE" json:"MAX_PAYLOAD_SIZE,string"`                                     // The maximum allowed size of uncompressed gossip messages.
 	GossipMaxSizeBellatrix          uint64             `yaml:"GOSSIP_MAX_SIZE_BELLATRIX" json:"GOSSIP_MAX_SIZE_BELLATRIX,string"`                   // The maximum allowed size of bellatrix uncompressed gossip messages.
 	MaxChunkSize                    uint64             `yaml:"MAX_CHUNK_SIZE" json:"MAX_CHUNK_SIZE,string"`                                         // The maximum allowed size of uncompressed req/resp chunked responses.
 	AttestationSubnetCount          uint64             `yaml:"ATTESTATION_SUBNET_COUNT" json:"ATTESTATION_SUBNET_COUNT,string"`                     // The number of attestation subnets used in the gossipsub protocol.
@@ -264,7 +264,7 @@ type NetworkConfig struct {
 	AttestationSubnetPrefixBits     uint64             `yaml:"ATTESTATION_SUBNET_PREFIX_BITS" json:"ATTESTATION_SUBNET_PREFIX_BITS,string"`         // The number of bits in the subnet prefix.
 	MessageDomainInvalidSnappy      ConfigHex4Bytes    `yaml:"-" json:"MESSAGE_DOMAIN_INVALID_SNAPPY"`                                              // 4-byte domain for gossip message-id isolation of invalid snappy messages
 	MessageDomainValidSnappy        ConfigHex4Bytes    `yaml:"-" json:"MESSAGE_DOMAIN_VALID_SNAPPY"`                                                // 4-byte domain for gossip message-id isolation of valid snappy messages
-	MaximumGossipClockDisparity     ConfigDurationMSec `yaml:"-" json:"MAXIMUM_GOSSIP_CLOCK_DISPARITY_MILLIS"`                                      // The maximum milliseconds of clock disparity assumed between honest nodes.
+	MaximumGossipClockDisparity     ConfigDurationMSec `yaml:"-" json:"MAXIMUM_GOSSIP_CLOCK_DISPARITY"`                                             // The maximum milliseconds of clock disparity assumed between honest nodes.
 	TtfbTimeout                     ConfigDurationSec  `yaml:"-" json:"TTFB_TIMEOUT"`                                                               // The maximum time to wait for first byte of request response (time-to-first-byte).
 	RespTimeout                     ConfigDurationSec  `yaml:"-" json:"RESP_TIMEOUT"`                                                               // The maximum time for complete response transfer.
 
@@ -618,8 +618,18 @@ type BeaconChainConfig struct {
 	SecondsPerETH1Block                       uint64 `yaml:"SECONDS_PER_ETH1_BLOCK" spec:"true" json:"SECONDS_PER_ETH1_BLOCK,string"`                           // SecondsPerETH1Block is the approximate time for a single eth1 block to be produced.
 
 	// Fork choice algorithm constants.
-	ProposerScoreBoost uint64 `yaml:"PROPOSER_SCORE_BOOST" spec:"true" json:"PROPOSER_SCORE_BOOST,string"` // ProposerScoreBoost defines a value that is a % of the committee weight for fork-choice boosting.
-	IntervalsPerSlot   uint64 `yaml:"INTERVALS_PER_SLOT" spec:"true" json:"INTERVALS_PER_SLOT,string"`     // IntervalsPerSlot defines the number of fork choice intervals in a slot defined in the fork choice spec.
+	ProposerScoreBoost       uint64 `yaml:"PROPOSER_SCORE_BOOST" spec:"true" json:"PROPOSER_SCORE_BOOST,string"` // ProposerScoreBoost defines a value that is a % of the committee weight for fork-choice boosting.
+	IntervalsPerSlot         uint64 `yaml:"INTERVALS_PER_SLOT" spec:"true" json:"INTERVALS_PER_SLOT,string"`     // IntervalsPerSlot defines the number of fork choice intervals in a slot defined in the fork choice spec.
+	ReorgHeadWeightThreshold uint64 `yaml:"REORG_HEAD_WEIGHT_THRESHOLD" json:"REORG_HEAD_WEIGHT_THRESHOLD,string"`
+	AttestationDueBps        uint64 `yaml:"ATTESTATION_DUE_BPS" json:"ATTESTATION_DUE_BPS,string"`
+	AggregateDueBps          uint64 `yaml:"AGGREGATE_DUE_BPS" json:"AGGREGATE_DUE_BPS,string"`
+	SyncMessageDueBps        uint64 `yaml:"SYNC_MESSAGE_DUE_BPS" json:"SYNC_MESSAGE_DUE_BPS,string"`
+	ContributionDueBps       uint64 `yaml:"CONTRIBUTION_DUE_BPS" json:"CONTRIBUTION_DUE_BPS,string"`
+	AttestationDueBpsGloas   uint64 `yaml:"ATTESTATION_DUE_BPS_GLOAS" json:"ATTESTATION_DUE_BPS_GLOAS,string"`
+	AggregateDueBpsGloas     uint64 `yaml:"AGGREGATE_DUE_BPS_GLOAS" json:"AGGREGATE_DUE_BPS_GLOAS,string"`
+	SyncMessageDueBpsGloas   uint64 `yaml:"SYNC_MESSAGE_DUE_BPS_GLOAS" json:"SYNC_MESSAGE_DUE_BPS_GLOAS,string"`
+	ContributionDueBpsGloas  uint64 `yaml:"CONTRIBUTION_DUE_BPS_GLOAS" json:"CONTRIBUTION_DUE_BPS_GLOAS,string"`
+	PayloadAttestationDueBps uint64 `yaml:"PAYLOAD_ATTESTATION_DUE_BPS" json:"PAYLOAD_ATTESTATION_DUE_BPS,string"`
 
 	// Ethereum PoW parameters.
 	DepositChainID         uint64 `yaml:"DEPOSIT_CHAIN_ID" spec:"true" json:"DEPOSIT_CHAIN_ID,string"`          // DepositChainID of the eth1 network. This used for replay protection.
@@ -669,12 +679,12 @@ type BeaconChainConfig struct {
 	DomainContributionAndProof        common.Bytes4 `yaml:"DOMAIN_CONTRIBUTION_AND_PROOF" spec:"true" json:"DOMAIN_CONTRIBUTION_AND_PROOF"`                 // DomainAggregateAndProof defines the BLS signature domain for contribution and proof.
 	DomainApplicationMask             common.Bytes4 `yaml:"DOMAIN_APPLICATION_MASK" spec:"true" json:"DOMAIN_APPLICATION_MASK"`                             // DomainApplicationMask defines the BLS signature domain for application mask.
 	DomainApplicationBuilder          common.Bytes4 `json:"-"`                                                                                              // DomainApplicationBuilder defines the BLS signature domain for application builder.
-	DomainBLSToExecutionChange        common.Bytes4 `json:"-"`                                                                                              // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
+	DomainBLSToExecutionChange        common.Bytes4 `json:"DOMAIN_BLS_TO_EXECUTION_CHANGE"`                                                                 // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
 	DomainBlobSideCar                 common.Bytes4 `yaml:"DOMAIN_BLOB_SIDECAR" spec:"true" json:"DOMAIN_BLOB_SIDECAR"`                                     // DomainBlobSideCar defines the BLS signature domain for blob sidecar verification
-	DomainBeaconBuilder               common.Bytes4 `json:"-"`                                                                                              // DomainBeaconBuilder defines the BLS signature domain for beacon builder.
-	DomainPtcAttester                 common.Bytes4 `json:"-"`                                                                                              // DomainPtcAttester defines the BLS signature domain for proto-danksharding attestation verification.
-	DomainProposerPreferences         common.Bytes4 `json:"-"`                                                                                              // DomainProposerPreferences defines the BLS signature domain for proposer preferences.
-	DomainBuilderDeposit              common.Bytes4 `json:"-"`                                                                                              // DomainBuilderDeposit defines the BLS signature domain for builder deposits.
+	DomainBeaconBuilder               common.Bytes4 `json:"DOMAIN_BEACON_BUILDER"`                                                                          // DomainBeaconBuilder defines the BLS signature domain for beacon builder.
+	DomainPtcAttester                 common.Bytes4 `json:"DOMAIN_PTC_ATTESTER"`                                                                            // DomainPtcAttester defines the BLS signature domain for proto-danksharding attestation verification.
+	DomainProposerPreferences         common.Bytes4 `json:"DOMAIN_PROPOSER_PREFERENCES"`                                                                    // DomainProposerPreferences defines the BLS signature domain for proposer preferences.
+	DomainBuilderDeposit              common.Bytes4 `json:"DOMAIN_BUILDER_DEPOSIT"`                                                                         // DomainBuilderDeposit defines the BLS signature domain for builder deposits.
 
 	// Slasher constants.
 	PruneSlasherStoragePeriod uint64 `json:"-"` // PruneSlasherStoragePeriod defines the time period expressed in number of epochs were proof of stake network should prune attestation and block header store.
@@ -779,11 +789,11 @@ type BeaconChainConfig struct {
 	WhistleBlowerRewardQuotientElectra    uint64 `yaml:"WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA" spec:"true" json:"WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA,string"`           // WhistleBlowerRewardQuotientElectra is used to calculate whistle blower reward post Electra hard fork.
 	MaxPendingPartialsPerWithdrawalsSweep uint64 `yaml:"MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP,string"` // MaxPendingPartialsPerWithdrawalsSweep bounds the size of the sweep searching for pending partials per slot.
 	MaxPendingDepositsPerEpoch            uint64 `yaml:"MAX_PENDING_DEPOSITS_PER_EPOCH" spec:"true" json:"MAX_PENDING_DEPOSITS_PER_EPOCH,string"`                         // MaxPendingDepositsPerEpoch defines the maximum number of pending deposits per epoch.
-	PendingDepositLimits                  uint64 `yaml:"PENDING_DEPOSITS_LIMIT" spec:"true" json:"PENDING_DEPOSIT_LIMIT,string"`                                          // PendingDepositLimit defines the maximum number of pending deposits.
-	PendingPartialWithdrawalsLimit        uint64 `yaml:"PENDING_PARTIAL_WITHDRAWALS_LIMIT" spec:"true" json:"PENDING_PARTIAL_WITHDRAWALS_LIMIT,string"`                   // PendingPartialWithdrawalsLimit defines the maximum number of pending partial withdrawals.
-	PendingConsolidationsLimit            uint64 `yaml:"PENDING_CONSOLIDATIONS_LIMIT" spec:"true" json:"PENDING_CONSOLIDATIONS_LIMIT,string"`                             // PendingConsolidationsLimit defines the maximum number of pending consolidations.
-	MaxBlobsPerBlockElectra               uint64 `yaml:"MAX_BLOBS_PER_BLOCK_ELECTRA" spec:"true" json:"MAX_BLOBS_PER_BLOCK_ELECTRA,string"`                               // MaxBlobsPerBlockElectra defines the maximum number of blobs per block for Electra.
-	BlobSidecarSubnetCountElectra         uint64 `yaml:"BLOB_SIDECAR_SUBNET_COUNT_ELECTRA" spec:"true" json:"BLOB_SIDECAR_SUBNET_COUNT_ELECTRA,string"`                   // BlobSidecarSubnetCountElectra defines the number of sidecars in the blob subnet for Electra.
+	PendingDepositLimits                  uint64 `yaml:"PENDING_DEPOSITS_LIMIT" spec:"true" json:"PENDING_DEPOSITS_LIMIT,string"`
+	PendingPartialWithdrawalsLimit        uint64 `yaml:"PENDING_PARTIAL_WITHDRAWALS_LIMIT" spec:"true" json:"PENDING_PARTIAL_WITHDRAWALS_LIMIT,string"` // PendingPartialWithdrawalsLimit defines the maximum number of pending partial withdrawals.
+	PendingConsolidationsLimit            uint64 `yaml:"PENDING_CONSOLIDATIONS_LIMIT" spec:"true" json:"PENDING_CONSOLIDATIONS_LIMIT,string"`           // PendingConsolidationsLimit defines the maximum number of pending consolidations.
+	MaxBlobsPerBlockElectra               uint64 `yaml:"MAX_BLOBS_PER_BLOCK_ELECTRA" spec:"true" json:"MAX_BLOBS_PER_BLOCK_ELECTRA,string"`             // MaxBlobsPerBlockElectra defines the maximum number of blobs per block for Electra.
+	BlobSidecarSubnetCountElectra         uint64 `yaml:"BLOB_SIDECAR_SUBNET_COUNT_ELECTRA" spec:"true" json:"BLOB_SIDECAR_SUBNET_COUNT_ELECTRA,string"` // BlobSidecarSubnetCountElectra defines the number of sidecars in the blob subnet for Electra.
 
 	// Constants for the Electra fork.
 	UnsetDepositRequestsStartIndex uint64     `yaml:"UNSET_DEPOSIT_REQUESTS_START_INDEX" spec:"true" json:"UNSET_DEPOSIT_REQUESTS_START_INDEX,string"` // UnsetDepositRequestsStartIndex defines the start index for unset deposit requests.
@@ -934,14 +944,18 @@ func (b *BeaconChainConfig) AttestationDueMs(gloas bool) uint64 {
 		return 0
 	}
 	if gloas {
-		return b.SecondsPerSlot * AttestationDueBpsGloas / (BpsFactor / 1000)
+		return b.BpsToMs(b.AttestationDueBpsGloas)
 	}
-	return b.SecondsPerSlot * AttestationDueBps / (BpsFactor / 1000)
+	return b.BpsToMs(b.AttestationDueBps)
+}
+
+func (b *BeaconChainConfig) BpsToMs(bps uint64) uint64 {
+	return b.SecondsPerSlot * bps / (BpsFactor / 1000)
 }
 
 // PayloadAttestationDueMs returns the Gloas PTC deadline in milliseconds from slot start.
 func (b *BeaconChainConfig) PayloadAttestationDueMs() uint64 {
-	return b.SecondsPerSlot * PayloadAttestationDueBps / (BpsFactor / 1000)
+	return b.BpsToMs(b.PayloadAttestationDueBps)
 }
 
 // InitializeForkSchedule initializes the schedules forks baked into the config.
@@ -1027,6 +1041,16 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Time parameter constants.
 	MinAttestationInclusionDelay:     1,
 	SecondsPerSlot:                   12,
+	AttestationDueBps:                AttestationDueBps,
+	AggregateDueBps:                  AggregateDueBps,
+	SyncMessageDueBps:                SyncMessageDueBps,
+	ContributionDueBps:               ContributionDueBps,
+	AttestationDueBpsGloas:           AttestationDueBpsGloas,
+	AggregateDueBpsGloas:             AggregateDueBpsGloas,
+	SyncMessageDueBpsGloas:           SyncMessageDueBpsGloas,
+	ContributionDueBpsGloas:          ContributionDueBpsGloas,
+	PayloadAttestationDueBps:         PayloadAttestationDueBps,
+	ReorgHeadWeightThreshold:         ReorgHeadWeightThreshold,
 	SlotsPerEpoch:                    32,
 	MinSeedLookahead:                 1,
 	MaxSeedLookahead:                 4,
