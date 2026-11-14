@@ -345,7 +345,7 @@ func TestWriteRawTransactions_UniqueKeys(t *testing.T) {
 	}
 }
 
-func TestTxnByIdxInBlock(t *testing.T) {
+func TestTxnRlpByIdxInBlock(t *testing.T) {
 	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
 
@@ -356,29 +356,27 @@ func TestTxnByIdxInBlock(t *testing.T) {
 	err := rawdb.WriteBody(tx, blockHash, blockNum, &types.Body{Transactions: []types.Transaction{txn}})
 	require.NoError(t, err)
 
-	got, ok, err := rawdb.TxnByIdxInBlock(tx, blockHash, blockNum, 0)
+	got, err := rawdb.TxnRlpByIdxInBlock(tx, blockHash, blockNum, 0)
 	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, txn.Hash(), got.Hash())
+	gotTxn, err := types.DecodeTransaction(got)
+	require.NoError(t, err)
+	require.Equal(t, txn.Hash(), gotTxn.Hash())
 
-	got, ok, err = rawdb.TxnByIdxInBlock(tx, blockHash, blockNum, 1_000_000)
+	got, err = rawdb.TxnRlpByIdxInBlock(tx, blockHash, blockNum, 1_000_000)
 	require.NoError(t, err)
-	require.False(t, ok)
 	require.Nil(t, got)
 
 	// txn ids are global: an index past the block's end must not reach the next block's transactions
 	nextTxn := types.NewTransaction(1, common.HexToAddress("0x5678"), uint256.NewInt(100), 21000, uint256.NewInt(1000000000), nil)
 	require.NoError(t, rawdb.WriteBody(tx, common.HexToHash("0xb10d"), blockNum+1, &types.Body{Transactions: []types.Transaction{nextTxn}}))
 	for _, i := range []int{-1, 1, 2, 3, 4} {
-		got, ok, err = rawdb.TxnByIdxInBlock(tx, blockHash, blockNum, i)
+		got, err = rawdb.TxnRlpByIdxInBlock(tx, blockHash, blockNum, i)
 		require.NoError(t, err)
-		require.False(t, ok, "index %d", i)
 		require.Nil(t, got, "index %d", i)
 	}
 
-	got, ok, err = rawdb.TxnByIdxInBlock(tx, common.HexToHash("0xdead"), blockNum, 0)
+	got, err = rawdb.TxnRlpByIdxInBlock(tx, common.HexToHash("0xdead"), blockNum, 0)
 	require.NoError(t, err)
-	require.False(t, ok)
 	require.Nil(t, got)
 }
 

@@ -50,9 +50,11 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -393,6 +395,203 @@ func TestNewPayloadOverBlobLimitOnBadParentWithUnknownAncestor(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, engine_types.InvalidStatus, status.Status)
 	require.Nil(t, status.LatestValidHash)
+}
+
+// With the stub, a payload that takes the normal path is ACCEPTED, as beyond the reorg depth.
+func TestNewPayloadVerifiesTheHeaderAgainstTheParent(t *testing.T) {
+	t.Parallel()
+
+	parent := makeParentHeader(1000)
+	parent.Number.SetUint64(99)
+	parent.GasLimit = 1 << 20
+	parentHash := parent.Hash()
+	for _, test := range []struct {
+		name             string
+		gasLimit         uint64
+		time             uint64
+		parentValidated  bool
+		headerCheckFails bool
+		blobHashes       []common.Hash
+		l2               bool
+	}{
+		{name: "gas limit above the parent's", gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, headerCheckFails: true},
+		{name: "time of the parent", gasLimit: parent.GasLimit, time: 1000, parentValidated: true, headerCheckFails: true},
+		{name: "smallest gas limit above an unvalidated parent's bound", gasLimit: parent.GasLimit + parent.GasLimit/1024, time: 1001, headerCheckFails: true},
+		{name: "time of an unvalidated parent", gasLimit: parent.GasLimit, time: 1000},
+		{name: "valid header on a validated parent", gasLimit: parent.GasLimit, time: 1001, parentValidated: true},
+		{name: "valid Cancun header on a validated parent", gasLimit: parent.GasLimit, time: 1001, parentValidated: true, blobHashes: []common.Hash{}},
+		{name: "L2 chain, gas limit above the parent's", gasLimit: 2 * parent.GasLimit, time: 1001, parentValidated: true, l2: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			to := common.Address{0x1}
+			txs := make(types.Transactions, 4)
+			for i := range txs {
+				txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, GasLimit: 21_000}}
+			}
+			header := makeParentHeader(test.time)
+			header.ParentHash = parentHash
+			header.UncleHash = empty.UncleHash
+			header.GasLimit = test.gasLimit
+			header.TxHash = types.DeriveSha(txs)
+			withdrawals := types.Withdrawals{}
+			withdrawalsHash := types.DeriveSha(withdrawals)
+			header.WithdrawalsHash = &withdrawalsHash
+			cfg := preCancunChainConfig()
+			if test.blobHashes != nil {
+				cfg = prePragueChainConfig()
+				header.BlobGasUsed = new(uint64)
+				header.ExcessBlobGas = new(uint64)
+				header.ParentBeaconBlockRoot = &common.Hash{}
+			}
+			if test.l2 {
+				cfg.L2 = testL2Config{}
+			}
+			header.BaseFee = misc.CalcBaseFee(cfg, parent)
+			block := types.NewBlockFromStorage(header.Hash(), header, txs, nil, withdrawals, nil)
+			payload, err := engine_types.ExecutionPayloadFromBlock(block)
+			require.NoError(t, err)
+
+			var recovered bool
+			stub := &stubExecutionModule{
+				getHeaderFunc:          getHeaderReturning(parentHash, parent),
+				currentHeaderFunc:      func(context.Context) (*types.Header, error) { return parent, nil },
+				isValidatedFunc:        func(hash common.Hash) bool { return test.parentValidated && hash == parentHash },
+				addSendersRecoveryFunc: func(common.Hash, *exec.SendersRecovery) { recovered = true },
+			}
+			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+			srv.test = true
+
+			var status *engine_types.PayloadStatus
+			if test.blobHashes != nil {
+				status, err = srv.NewPayloadV3(t.Context(), payload, test.blobHashes, header.ParentBeaconBlockRoot)
+			} else {
+				status, err = srv.NewPayloadV2(t.Context(), payload)
+			}
+			require.NoError(t, err)
+			require.Equal(t, engine_types.AcceptedStatus, status.Status)
+			require.Equal(t, !test.headerCheckFails, recovered, "senders are recovered early only for a payload that can be valid")
+		})
+	}
+}
+
+type testL2Config struct{}
+
+func (testL2Config) Name() string                                { return "test" }
+func (testL2Config) ResolveRules(_, _, _ uint64, _ *chain.Rules) {}
+
+// A new payload looks its stored parent up by hash once. A hash-only lookup of a header that is not
+// stored searches every header snapshot file.
+func TestNewPayloadLooksUpTheParentOnce(t *testing.T) {
+	t.Parallel()
+
+	parent := makeParentHeader(1000)
+	parent.Number.SetUint64(99)
+	parentHash := parent.Hash()
+	header := makeParentHeader(1001)
+	header.ParentHash = parentHash
+	header.UncleHash = empty.UncleHash
+	header.TxHash = empty.RootHash
+	withdrawals := types.Withdrawals{}
+	withdrawalsHash := types.DeriveSha(withdrawals)
+	header.WithdrawalsHash = &withdrawalsHash
+	cfg := preCancunChainConfig()
+	header.BaseFee = misc.CalcBaseFee(cfg, parent)
+	block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, withdrawals, nil)
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+
+	var lookups int
+	stub := &stubExecutionModule{
+		getHeaderFunc: func(ctx context.Context, hash *common.Hash, number *uint64) (*types.Header, error) {
+			if hash != nil && *hash == parentHash && number == nil {
+				lookups++
+			}
+			return getHeaderReturning(parentHash, parent)(ctx, hash, number)
+		},
+		currentHeaderFunc: func(context.Context) (*types.Header, error) { return parent, nil },
+		isValidatedFunc:   func(hash common.Hash) bool { return hash == parentHash },
+	}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+	srv.test = true
+
+	status, err := srv.NewPayloadV2(t.Context(), payload)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.AcceptedStatus, status.Status)
+	require.Equal(t, 1, lookups)
+}
+
+// A block with more transactions than its parent's gas limit allows is stored, as a download stores
+// it, right after the request first looks it up. The first answer must already leave the block
+// neither stored nor served.
+func TestNewPayloadRemovesABlockWithTooManyTransactionsStoredDuringTheRequest(t *testing.T) {
+	m, block1, block2 := sideChainWithTooManyTransactions(t)
+	module := &storingAfterLookup{ExecutionModule: m.ExecModule, t: t, block: block2}
+	srv := newEngineServerWithReorgDepth(t, m, module, ethconfig.Defaults.Sync.MaxReorgDepth)
+	_, err := m.InsertBlocks(t.Context(), []*types.Block{block1})
+	require.NoError(t, err)
+
+	status := newPayloadV2(t, srv, block2)
+	require.True(t, module.stored.Load())
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.ErrorContains(t, status.ValidationError.Error(), "invalid block: invalid gas limit")
+	require.Equal(t, block1.Hash(), *status.LatestValidHash)
+	requireNotStored(t, m, block2)
+	v1, v2 := bodiesServedByHash(t, srv, block2.Hash())
+	require.Equal(t, []bool{false}, v1)
+	require.Equal(t, []bool{false}, v2)
+}
+
+// sideChainWithTooManyTransactions builds a canonical chain of four blocks and a side chain of two
+// blocks on the genesis. The second side block has a doubled gas limit, which is invalid for its
+// parent, and as many transactions as that gas limit allows.
+func sideChainWithTooManyTransactions(t *testing.T) (*execmoduletester.ExecModuleTester, *types.Block, *types.Block) {
+	t.Helper()
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: preCancunChainConfig()}))
+	canonical, err := m.GenerateChain(4, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(canonical))
+	side, err := m.GenerateChain(2, func(_ int, b *blockgen.BlockGen) { b.SetCoinbase(common.Address{1}) })
+	require.NoError(t, err)
+	header2 := types.CopyHeader(side.Blocks[1].HeaderNoCopy())
+	header2.GasLimit *= 2
+	minTxBlockGas := mdgas.MinTxBlockGas(m.ChainConfig.IsLondon(header2.Number.Uint64()), m.ChainConfig.IsPrague(header2.Time), m.ChainConfig.IsAmsterdam(header2.Time))
+	to := common.Address{0x1}
+	txs := make(types.Transactions, header2.GasLimit/minTxBlockGas)
+	for i := range txs {
+		txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, GasLimit: 21_000}}
+	}
+	header2.TxHash = types.DeriveSha(txs)
+	return m, side.Blocks[0], types.NewBlockFromStorage(header2.Hash(), header2, txs, nil, side.Blocks[1].Withdrawals(), nil)
+}
+
+func requireNotStored(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block) {
+	t.Helper()
+	hash, number := block.Hash(), block.NumberU64()
+	header, err := m.ExecModule.GetHeader(t.Context(), &hash, &number)
+	require.NoError(t, err)
+	require.Nil(t, header, "an invalid block must be removed")
+}
+
+// storingAfterLookup is an execution module that stores its block right after the first lookup of
+// the block's header, as a download that runs during the request can.
+type storingAfterLookup struct {
+	execmodule.ExecutionModule
+	t      *testing.T
+	block  *types.Block
+	stored atomic.Bool
+}
+
+func (m *storingAfterLookup) GetHeader(ctx context.Context, hash *common.Hash, number *uint64) (*types.Header, error) {
+	header, err := m.ExecutionModule.GetHeader(ctx, hash, number)
+	if hash != nil && *hash == m.block.Hash() && m.stored.CompareAndSwap(false, true) {
+		_, insertErr := m.ExecutionModule.InsertBlocks(ctx, []*types.Block{m.block})
+		require.NoError(m.t, insertErr)
+	}
+	return header, err
 }
 
 func TestForkchoiceUpdatedV2RejectsNullWithdrawalWhenSyncing(t *testing.T) {
@@ -1077,7 +1276,11 @@ func TestQuickStatusHeaderLookup(t *testing.T) {
 			downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
 			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, true, true, nil, nil, 0, 0)
 
-			_, err := srv.getQuickPayloadStatusIfPossible(ctx, blockHash, test.number, parentHash, test.forkchoice, test.newPayload, defaultReadinessWait)
+			var knownParent *types.Header
+			if test.newPayload {
+				knownParent = parent
+			}
+			_, err := srv.getQuickPayloadStatusIfPossible(ctx, blockHash, test.number, parentHash, knownParent, test.forkchoice, test.newPayload, defaultReadinessWait)
 			require.NoError(t, err)
 			require.Equal(t, 1, lookups)
 		})
