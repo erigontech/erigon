@@ -17,7 +17,9 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -45,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -57,6 +60,23 @@ func TestMain(m *testing.M) {
 	cfg := clparams.MainnetBeaconConfig
 	clparams.InitGlobalStaticConfig(&cfg)
 	m.Run()
+}
+
+var testGenesisClock = sync.OnceValues(func() (uint64, common.Hash) {
+	genesis, err := initial_state.GetGenesisState(context.Background(), chainspec.MainnetChainID)
+	if err != nil {
+		panic(err)
+	}
+	return genesis.GenesisTime(), genesis.GenesisValidatorsRoot()
+})
+
+type handlerFixtureRow struct {
+	key, value []byte
+}
+
+var handlerChainFixtures [clparams.ElectraVersion + 1]struct {
+	once   sync.Once
+	tables map[string][]handlerFixtureRow
 }
 
 func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger, useRealSyncDataMgr bool) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData synced_data.SyncedData, fcu *mock_services2.ForkChoiceStorageMock, vp *validator_params.ValidatorParams) {
@@ -85,7 +105,10 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	fcu = mock_services2.NewForkChoiceStorageMock(t)
 	db = mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	reader := tests.LoadChain(blocks, db, t)
+	reader := tests.NewMockBlockReader()
+	for _, block := range blocks {
+		reader.U[block.Block.Slot] = block
+	}
 	firstBlockRoot, _ := blocks[0].Block.HashSSZ()
 	firstBlockHeader := blocks[0].SignedBeaconBlockHeader()
 
@@ -99,16 +122,47 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	}
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New(t.TempDir()), nil, db, nil, nil, reader, syncedData, logger, true, true, false, false, nil)
-	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
+	fixture := &handlerChainFixtures[v]
+	fixture.once.Do(func() {
+		tests.LoadChain(blocks, db, t)
+		a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New(t.TempDir()), nil, db, nil, nil, reader, syncedData, logger, true, true, false, false, nil)
+		require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
+		fixture.tables = make(map[string][]handlerFixtureRow)
+		require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+			tables, err := tx.ListTables()
+			if err != nil {
+				return err
+			}
+			for _, table := range tables {
+				if err := tx.ForEach(table, nil, func(k, v []byte) error {
+					fixture.tables[table] = append(fixture.tables[table], handlerFixtureRow{bytes.Clone(k), bytes.Clone(v)})
+					return nil
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+	})
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		for table, rows := range fixture.tables {
+			for _, row := range rows {
+				if err := tx.Put(table, row.key, row.value); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}))
+	vt = state_accessors.NewStaticValidatorTable()
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error { return state_accessors.ReadValidatorsTable(tx, vt) }))
 	// historical states reader below
 	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, preState, nil, syncedData)
 	opPool = pool.NewOperationsPool(&bcfg)
 	fcu.Pool = opPool
 
-	genesis, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
-	require.NoError(t, err)
-	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
+	genesisTime, genesisRoot := testGenesisClock()
+	ethClock := eth_clock.NewEthereumClock(genesisTime, genesisRoot, &bcfg)
 	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs())
 	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
 	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, firstBlockRoot, []*cltypes.BlobSidecar{
