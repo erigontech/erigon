@@ -360,7 +360,7 @@ func putAndUnwind(t *testing.T, sd *execctx.SharedDomains, tx kv.TemporalTx, dom
 }
 
 func TestSharedDomain_UnwindDropsWritesBufferedBeforeUnwind(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
 	slot := common.HexToHash("0x01")
@@ -413,7 +413,7 @@ func TestSharedDomain_UnwindDropsWritesBufferedBeforeUnwind(t *testing.T) {
 }
 
 func TestSharedDomain_MergeKeepsOtherWritesBufferedBeforeUnwind(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	ctx := t.Context()
 	db := newTestDb(t, 4)
@@ -451,7 +451,7 @@ func TestSharedDomain_MergeKeepsOtherWritesBufferedBeforeUnwind(t *testing.T) {
 }
 
 func TestSharedDomain_DiscardWritesCoversWritesBufferedBeforeUnwind(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	ctx := t.Context()
 	db := newTestDb(t, 4)
@@ -475,7 +475,7 @@ func TestSharedDomain_DiscardWritesCoversWritesBufferedBeforeUnwind(t *testing.T
 }
 
 func TestSharedDomain_MergeFlushesValuesInWriteOrder(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
 	key := addr[:]
@@ -532,7 +532,7 @@ func TestSharedDomain_MergeFlushesValuesInWriteOrder(t *testing.T) {
 }
 
 func TestSharedDomain_MergeKeepsReceiverRowsWrittenAfterItsUnwind(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	ctx := t.Context()
 	db := newTestDb(t, 4)
