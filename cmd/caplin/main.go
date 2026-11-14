@@ -110,6 +110,7 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 
 	return caplin1.RunCaplinService(ctx, executionEngine, clparams.CaplinConfig{
+		EnableFastConfirmation:    cfg.EnableFastConfirmation,
 		CaplinDiscoveryAddr:       cfg.Addr,
 		CaplinDiscoveryPort:       uint64(cfg.Port),
 		CaplinDiscoveryTCPPort:    uint64(cfg.ServerTcpPort),

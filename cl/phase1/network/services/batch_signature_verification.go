@@ -44,6 +44,7 @@ type BatchSignatureVerifier struct {
 var ErrInvalidBlsSignature = errors.New("invalid bls signature")
 
 type AggregateVerificationData struct {
+	barrier     chan struct{}
 	Signatures  [][]byte
 	SignRoots   [][]byte
 	Pks         [][]byte
@@ -177,6 +178,18 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData,
 		case <-b.ctx.Done():
 			return
 		case verification := <-incoming:
+			if verification.barrier != nil {
+				if len(aggregateVerificationData) > 0 && !b.processBatch(aggregateVerificationData, callbacks) {
+					return
+				}
+				aggregateVerificationData = make([]*AggregateVerificationData, 0, reservedSize)
+				select {
+				case callbacks <- func() { close(verification.barrier) }:
+				case <-b.ctx.Done():
+					return
+				}
+				continue
+			}
 			aggregateVerificationData = append(aggregateVerificationData, verification)
 			if len(aggregateVerificationData) >= batchSignatureVerificationThreshold {
 				if !b.processBatch(aggregateVerificationData, callbacks) {
@@ -326,4 +339,23 @@ func (b *BatchSignatureVerifier) runBatchVerification(signatures, signRoots, pks
 	}
 
 	return nil
+}
+
+func (b *BatchSignatureVerifier) FlushAggregateProofs(ctx context.Context) error {
+	done := make(chan struct{})
+	select {
+	case b.aggregateProofVerify <- &AggregateVerificationData{barrier: done}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-b.ctx.Done():
+		return b.ctx.Err()
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-b.ctx.Done():
+		return b.ctx.Err()
+	}
 }

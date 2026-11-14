@@ -390,6 +390,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
 	}
+	if config.EnableFastConfirmation {
+		forkChoice.EnableFastConfirmation(state.CurrentJustifiedCheckpoint())
+	}
 	go forkChoice.RunNextEpochPrecompute(ctx)
 	bls.SetEnabledCaching(true)
 
@@ -556,7 +559,11 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			for {
 				select {
 				case <-tickInterval.C:
-					forkChoice.OnTick(uint64(time.Now().UnixMilli()))
+					nowMs := uint64(time.Now().UnixMilli())
+					forkChoice.OnTick(nowMs)
+					if err := forkChoice.OnFastConfirmation(ctx, nowMs, batchSignatureVerifier.FlushAggregateProofs); err != nil {
+						logger.Warn("Fast confirmation unavailable", "err", err)
+					}
 				case <-ctx.Done():
 					return
 				}
