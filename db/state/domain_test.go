@@ -2671,7 +2671,7 @@ func TestDomain_Unwind(t *testing.T) {
 			}
 		}
 
-		err = domainRoTx.unwind(ctx, tx, unwindTo/d.stepSize, unwindTo, totalDiff)
+		err = domainRoTx.unwind(ctx, tx, unwindTo, totalDiff, nil)
 		currTx = unwindTo
 		require.NoError(t, err)
 		domainRoTx.Close()
@@ -3851,7 +3851,7 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			defer domainRoTx.Close()
 
 			// diff for txNum 18: prev was empty (key was deleted) → Value=[]byte{}
-			err = domainRoTx.unwind(ctx, tx, 1, 18, txNum18Diff)
+			err = domainRoTx.unwind(ctx, tx, 18, txNum18Diff, nil)
 			require.NoError(err)
 			domainRoTx.Close()
 			require.NoError(tx.Commit())

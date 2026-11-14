@@ -653,11 +653,11 @@ func TestBranchCache_FillDropsViewsOlderThanCommittedUnwind(t *testing.T) {
 	key := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
 	c.UnwindCommitted(10, 7)
 
-	c.Fill(key, []byte("old-view"), 1, 20, 6)
+	c.Fill(key, []byte("old-view"), 1, 6)
 	_, _, ok := c.Get(key)
 	require.False(t, ok)
 
-	c.Fill(key, []byte("new-view"), 1, 20, 7)
+	c.Fill(key, []byte("new-view"), 1, 7)
 	got, _, ok := c.Get(key)
 	require.True(t, ok)
 	require.Equal(t, []byte("new-view"), got)
@@ -670,19 +670,19 @@ func TestBranchCache_FillDropsViewsOlderThanCommitted(t *testing.T) {
 	c.Committed(7)
 	c.Put(key, []byte("committed"), 1, 20)
 
-	c.Fill(key, []byte("old-view"), 1, 19, 6)
+	c.Fill(key, []byte("old-view"), 1, 6)
 	got, _, ok := c.Get(key)
 	require.True(t, ok)
 	require.Equal(t, []byte("committed"), got)
 
 	c.Committed(5)
-	c.Fill(key, []byte("old-view"), 1, 19, 6)
+	c.Fill(key, []byte("old-view"), 1, 6)
 	got, _, ok = c.Get(key)
 	require.True(t, ok)
 	require.Equal(t, []byte("committed"), got, "an older commit view must not lower the bound")
 
 	other := []byte{0x01, 0x02, 0x03, 0x04, 0x06}
-	c.Fill(other, []byte("commit-view"), 1, 20, 7)
+	c.Fill(other, []byte("commit-view"), 1, 7)
 	got, _, ok = c.Get(other)
 	require.True(t, ok, "a view opened at the commit must still fill")
 	require.Equal(t, []byte("commit-view"), got)
@@ -701,7 +701,7 @@ func TestBranchCache_FillRacingCommittedDeletion(t *testing.T) {
 					case <-stop:
 						return
 					default:
-						c.Fill(key, []byte("replaced"), 1, 20, 1)
+						c.Fill(key, []byte("replaced"), 1, 1)
 					}
 				}
 			})
@@ -730,7 +730,7 @@ func TestBranchCache_FillRacingUnwindCommitted(t *testing.T) {
 					case <-stop:
 						return
 					default:
-						c.Fill(key, []byte("dead"), 1, 20, 1)
+						c.Fill(key, []byte("dead"), 1, 1)
 					}
 				}
 			})
@@ -744,4 +744,23 @@ func TestBranchCache_FillRacingUnwindCommitted(t *testing.T) {
 		close(stop)
 		wg.Wait()
 	}
+}
+
+func TestBranchCache_ReadFillHasNoKnownWriteTime(t *testing.T) {
+	c := NewBranchCache(16)
+	t.Cleanup(c.Close)
+	filled, written := []byte{1}, []byte{2}
+	c.Fill(filled, []byte("observed"), 0, 1)
+	c.Put(written, []byte("written"), 0, 2)
+	got, _, ok := c.Get(filled)
+	require.True(t, ok)
+	require.Equal(t, []byte("observed"), got)
+	_, _, ok = c.GetBefore(filled, 18)
+	require.False(t, ok)
+	c.Unwind(18)
+	_, _, ok = c.Get(filled)
+	require.False(t, ok)
+	got, _, ok = c.Get(written)
+	require.True(t, ok)
+	require.Equal(t, []byte("written"), got)
 }

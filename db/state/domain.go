@@ -1561,11 +1561,17 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	d.dirtyFiles.Set(fi)
 }
 
-// unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
-// context Flush should be managed by caller.
-func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64, domainDiffs []kv.DomainEntryDiff) error {
-	// fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
+// unwind restores the state before txNumUnwindTo using the supplied diffs
+// and prunes history from txNumUnwindTo onward. The caller manages flushing.
+func (dt *DomainRoTx) unwind(
+	ctx context.Context,
+	rwTx kv.RwTx,
+	txNumUnwindTo uint64,
+	domainDiffs []kv.DomainEntryDiff,
+	expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error),
+) error {
 	d := dt.d
+	step := txNumUnwindTo / dt.stepSize
 
 	sf := time.Now()
 	defer mxUnwindTook.ObserveDuration(sf)
@@ -1579,70 +1585,84 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		return err
 	}
 	defer valsCursor.Close()
-	// Revert keys using diff entries.
-	// Always: delete current entry at the write step, restore prevValue at unwind target step.
-	//
-	// DomainEntryDiff.Value semantics:
-	//   - nil            → "different step" — prev value lives at another step, skip the restore
-	//                       (only produced by legacy V0 changesets where valueLen==0 deserializes as nil)
-	//   - []byte{}       → "no previous value" — key was absent before this step, so write an
-	//                       empty tombstone to prevent getLatestFromDb falling through to files
-	//                       (which have no concept of deletions) and returning stale data
-	//   - non-empty      → restore the actual previous value
-	unwindStepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(step))
+	unwindStepInverted := make([]byte, 8)
+	binary.BigEndian.PutUint64(unwindStepInverted, ^uint64(step))
 
-	for i := range domainDiffs {
-		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
-		key := common.ToBytesZeroCopy(keyStr)
-		if dt.d.LargeValues {
-			// Delete the entry at the write step
-			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
+	for _, diff := range domainDiffs {
+		diffKey := common.ToBytesZeroCopy(diff.Key)
+		diffStepInverted, domainKey := diffKey[len(diffKey)-8:], diffKey[:len(diffKey)-8]
+		var retainedValue []byte
+		var found bool
+		k, v, err := valsCursor.Seek(domainKey)
+		for err == nil && k != nil {
+			var storedStepInverted, value []byte
+			if d.LargeValues {
+				if len(k) != len(domainKey)+8 || !bytes.Equal(k[:len(domainKey)], domainKey) {
+					break
+				}
+				storedStepInverted, value = k[len(domainKey):], v
+			} else {
+				if !bytes.Equal(k, domainKey) {
+					break
+				}
+				storedStepInverted, value = v[:8], v[8:]
+			}
+			// Earlier restores can leave newer versions absent from this branch's diffs.
+			newerThanUnwind := bytes.Compare(storedStepInverted, unwindStepInverted) < 0
+			writtenAtDiffStep := bytes.Equal(storedStepInverted, diffStepInverted)
+			if !newerThanUnwind && !writtenAtDiffStep {
+				// A partial prune may leave rows already superseded by snapshot files.
+				storedStep := kv.Step(^binary.BigEndian.Uint64(storedStepInverted))
+				if storedStep.LastTxNum(dt.stepSize) >= dt.files.EndTxNum() {
+					retainedValue, found = value, true
+				}
+				break
+			}
+			if err := valsCursor.DeleteCurrent(); err != nil {
 				return err
 			}
-			// nil = different step, skip; []byte{} = absent previously, write empty tombstone
-			if value != nil {
-				// key aliases the diff's immutable string, and dropping its trailing
-				// step leaves exactly the 8 bytes of spare capacity the append needs,
-				// so appending in place would rewrite that string. Build a new key.
-				unwindKey := make([]byte, 0, len(key))
-				unwindKey = append(unwindKey, key[:len(key)-8]...)
-				unwindKey = append(unwindKey, unwindStepBytes...)
-				if err := rwTx.Put(d.ValuesTable, unwindKey, value); err != nil {
-					return err
-				}
-			}
-			continue
+			k, v, err = valsCursor.Next()
 		}
-		stepBytes := key[len(key)-8:]
-		fullKey := key[:len(key)-8]
-		// Delete the current entry at the write step
-		valInDB, err := valsCursor.SeekBothRange(fullKey, stepBytes)
 		if err != nil {
 			return err
 		}
-		if len(valInDB) > 0 {
-			stepInDB := valInDB[:8]
-			if bytes.Equal(stepInDB, stepBytes) {
-				if err := valsCursor.DeleteCurrent(); err != nil {
+		// Only the partially retained step needs its overwritten value restored.
+		if diff.Value == nil || txNumUnwindTo%dt.stepSize == 0 || !bytes.Equal(diffStepInverted, unwindStepInverted) {
+			continue
+		}
+		// A branch absent from the trie may still have unreachable bytes in storage.
+		// Creating an empty version for it would leave a restore no retained update owns.
+		if d.Name == kv.CommitmentDomain && len(diff.Value) == 0 {
+			continue
+		}
+		// A value already supplied by an older version needs no new entry.
+		// Otherwise that entry could outlive the changesets of this step.
+		if !found {
+			var fileStartTxNum, fileEndTxNum uint64
+			retainedValue, found, fileStartTxNum, fileEndTxNum, err = dt.getLatestFromFiles(domainKey, nil, kv.NoStepBound)
+			if err != nil {
+				return err
+			}
+			if found && expandBranch != nil {
+				// Changesets contain full keys, even when the file uses references.
+				retainedValue, err = expandBranch(domainKey, retainedValue, fileStartTxNum, fileEndTxNum)
+				if err != nil {
 					return err
 				}
 			}
 		}
-
-		// A key changed at several steps in the range has one diff per step, sorted
-		// by key then descending step; only the lowest step's value is the value at
-		// txNumUnwindTo. Restore once, on the last (lowest-step) diff — else the
-		// DupSort table keeps several dups at the unwind step and getLatestFromDb
-		// returns the smallest. nil = different step, skip; []byte{} = absent, write tombstone.
-		lastForKey := i+1 == len(domainDiffs) || domainDiffs[i+1].Key[:len(domainDiffs[i+1].Key)-8] != keyStr[:len(keyStr)-8]
-		if value != nil && lastForKey {
-			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil { //nolint:makezero
-				return err
-			}
+		if bytes.Equal(retainedValue, diff.Value) {
+			continue
+		}
+		if d.LargeValues {
+			err = rwTx.Put(d.ValuesTable, diffKey, diff.Value)
+		} else {
+			err = valsCursor.Put(domainKey, append(unwindStepInverted, diff.Value...)) //nolint:makezero
+		}
+		if err != nil {
+			return err
 		}
 	}
-	// Compare valsKV with prevSeenKeys
 	if _, err := dt.ht.prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.FilenameBase, txNumUnwindTo, step, err)
 	}
@@ -2061,8 +2081,9 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx, maxStep kv.Step) (
 	return nil, 0, false, err
 }
 
-// GetLatest returns value, step in which the value last changed, and bool value which is true if the value
-// is present, and false if it is not present (not set or deleted)
+// GetLatest returns the latest value and its MDBX row step or snapshot file's
+// exclusive end step. The step does not establish when the value became valid.
+// The boolean can be true for an empty deletion record.
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
 	return dt.getLatest(key, roTx, kv.GetLatestOptions{})
 }

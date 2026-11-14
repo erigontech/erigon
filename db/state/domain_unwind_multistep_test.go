@@ -130,7 +130,7 @@ func TestDomain_MultiStepUnwindMatchesGroundTruth(t *testing.T) {
 			merged = changeset.MergeDiffSets(merged, blockDiffs[b])
 		}
 	}
-	require.NoError(t, udt.unwind(ctx, tx, target/stepSize, target, merged))
+	require.NoError(t, udt.unwind(ctx, tx, target, merged, nil))
 	udt.Close()
 
 	rdt := d.beginForTests()
@@ -154,4 +154,207 @@ func TestDomain_MultiStepUnwindMatchesGroundTruth(t *testing.T) {
 	gotSum := readInt(sumKey)
 	require.Equal(t, wantSum, gotSum, "sum key must match ground truth at the unwind target")
 	require.Equal(t, gotSum, computed, "invariant: sum of ring values must equal the sum key after unwind")
+}
+
+func TestDomain_RepeatedUnwindKeepsVersionOrder(t *testing.T) {
+	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain} {
+		for _, firstCut := range []uint64{20, 32, 34} {
+			t.Run(fmt.Sprintf("%s/cut_%d", cfg.Name, firstCut), func(t *testing.T) {
+				db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+				tx, err := db.BeginRw(t.Context())
+				require.NoError(t, err)
+				defer tx.Rollback()
+				view := d.beginForTests()
+				defer view.Close()
+				writer := view.NewWriter(db)
+				defer writer.Close()
+				key := []byte("key")
+				require.NoError(t, writer.PutWithPrev(key, []byte{1}, 2, nil))
+				writer.diff = &kv.DomainDiff{}
+				require.NoError(t, writer.PutWithPrev(key, []byte{2}, 34, []byte{1}))
+				diffs := writer.diff.GetDiffSet()
+				require.NoError(t, writer.Flush(t.Context(), tx))
+				// The second unwind has no diff for this key: it did not change in that range.
+				require.NoError(t, view.unwind(t.Context(), tx, firstCut, diffs, nil))
+				require.NoError(t, view.unwind(t.Context(), tx, 10, nil, nil))
+				writer.diff = nil
+				require.NoError(t, writer.PutWithPrev(key, []byte{3}, 12, []byte{1}))
+				require.NoError(t, writer.Flush(t.Context(), tx))
+				value, _, _, err := view.GetLatest(key, tx)
+				require.NoError(t, err)
+				require.Equal(t, []byte{3}, value)
+			})
+		}
+	}
+}
+
+func TestDomain_UnwindDoesNotRestoreAbsentBranch(t *testing.T) {
+	for _, oldBranch := range [][]byte{{0, 1, 0, 0}, {0, 1, 0, 1, 0}} {
+		t.Run(fmt.Sprintf("old_%x", oldBranch), func(t *testing.T) {
+			db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, log.New())
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			view := d.beginForTests()
+			defer view.Close()
+			writer := view.NewWriter(db)
+			defer writer.Close()
+
+			key := []byte("key")
+			require.NoError(t, writer.PutWithPrev(key, oldBranch, 2, nil))
+			writer.SetDiff(&kv.DomainDiff{})
+			// A branch absent from the trie can still have an old record in storage.
+			require.NoError(t, writer.PutWithPrev(key, []byte{0, 2, 0, 2, 0}, 34, []byte{}))
+			diffs := writer.Diff().GetDiffSet()
+			require.NoError(t, writer.Flush(t.Context(), tx))
+			require.NoError(t, view.unwind(t.Context(), tx, 33, diffs, nil))
+			// This key has no diff in the deeper unwound range.
+			require.NoError(t, view.unwind(t.Context(), tx, 20, nil, nil))
+
+			replacement := []byte{0, 4, 0, 4, 0}
+			writer.SetDiff(nil)
+			require.NoError(t, writer.PutWithPrev(key, replacement, 21, oldBranch))
+			require.NoError(t, writer.Flush(t.Context(), tx))
+			value, _, _, err := view.GetLatest(key, tx)
+			require.NoError(t, err)
+			require.Equal(t, replacement, value)
+		})
+	}
+}
+
+func TestDomain_UnwindRestoresExistingBranch(t *testing.T) {
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	view := d.beginForTests()
+	defer view.Close()
+	writer := view.NewWriter(db)
+	defer writer.Close()
+
+	key, oldBranch, previous := []byte("key"), []byte{0, 1, 0, 0}, []byte{0, 1, 0, 1, 0}
+	require.NoError(t, writer.PutWithPrev(key, oldBranch, 2, nil))
+	require.NoError(t, writer.PutWithPrev(key, previous, 33, oldBranch))
+	writer.SetDiff(&kv.DomainDiff{})
+	require.NoError(t, writer.PutWithPrev(key, []byte{0, 2, 0, 2, 0}, 35, previous))
+	diffs := writer.Diff().GetDiffSet()
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	require.NoError(t, view.unwind(t.Context(), tx, 35, diffs, nil))
+	value, _, _, err := view.GetLatest(key, tx)
+	require.NoError(t, err)
+	require.Equal(t, previous, value)
+}
+
+func TestDomain_UnwindRestoresDeletionOverBranchShapedValue(t *testing.T) {
+	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain} {
+		t.Run(cfg.Name.String(), func(t *testing.T) {
+			db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			view := d.beginForTests()
+			defer view.Close()
+			writer := view.NewWriter(db)
+			defer writer.Close()
+
+			// Outside the commitment domain, these four bytes are ordinary data.
+			key, oldValue := []byte("key"), []byte{0xAB, 0xCD, 0, 0}
+			require.NoError(t, writer.PutWithPrev(key, oldValue, 2, nil))
+			require.NoError(t, writer.DeleteWithPrev(key, 33, oldValue))
+			writer.SetDiff(&kv.DomainDiff{})
+			require.NoError(t, writer.PutWithPrev(key, []byte{9}, 35, []byte{}))
+			diffs := writer.Diff().GetDiffSet()
+			require.NoError(t, writer.Flush(t.Context(), tx))
+			require.NoError(t, view.unwind(t.Context(), tx, 35, diffs, nil))
+			value, _, _, err := view.GetLatest(key, tx)
+			require.NoError(t, err)
+			require.Empty(t, value)
+		})
+	}
+}
+
+func TestDomain_UnwindIgnoresFiledVersions(t *testing.T) {
+	const stepSize = uint64(16)
+	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain} {
+		t.Run(cfg.Name.String(), func(t *testing.T) {
+			db, d := testDbAndDomainOfStep(t, cfg, stepSize, log.New())
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			key := []byte("key")
+			write := func(txNum uint64, value, previous []byte) []kv.DomainEntryDiff {
+				view := d.beginForTests()
+				defer view.Close()
+				writer := view.NewWriter(db)
+				defer writer.Close()
+				writer.SetDiff(&kv.DomainDiff{})
+				require.NoError(t, writer.PutWithPrev(key, value, txNum, previous))
+				diffs := writer.Diff().GetDiffSet()
+				require.NoError(t, writer.Flush(t.Context(), tx))
+				return diffs
+			}
+			write(3*stepSize+1, []byte("A"), nil)
+			write(4*stepSize+1, []byte("B"), []byte("A"))
+			for step := range kv.Step(5) {
+				require.NoError(t, d.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
+			}
+			view := d.beginForTests()
+			defer view.Close()
+			logEvery := time.NewTicker(time.Hour)
+			defer logEvery.Stop()
+			// An interrupted prune can remove the newest filed row before the older one.
+			_, err = view.Prune(t.Context(), tx, 4, 4*stepSize, 5*stepSize, 0, logEvery)
+			require.NoError(t, err)
+			value, _, _, err := view.GetLatest(key, tx)
+			require.NoError(t, err)
+			require.Equal(t, []byte("B"), value)
+			write(5*stepSize+2, []byte("A"), value)
+			diffs := write(5*stepSize+6, []byte("C"), []byte("A"))
+			require.NoError(t, view.unwind(t.Context(), tx, 5*stepSize+6, diffs, nil))
+			value, _, _, err = view.GetLatest(key, tx)
+			require.NoError(t, err)
+			require.Equal(t, []byte("A"), value)
+		})
+	}
+}
+
+func TestDomain_RepeatedUnwindRemovesRestoredVersions(t *testing.T) {
+	for _, cfg := range []statecfg.DomainCfg{statecfg.Schema.StorageDomain, statecfg.Schema.CodeDomain} {
+		for _, restored := range [][]byte{nil, {7}} {
+			t.Run(fmt.Sprintf("%s/restore_%x", cfg.Name, restored), func(t *testing.T) {
+				db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+				tx, err := db.BeginRw(t.Context())
+				require.NoError(t, err)
+				defer tx.Rollback()
+				view := d.beginForTests()
+				defer view.Close()
+				key, ancestor := []byte("key"), []byte{1}
+				write := func(txNum uint64, value, previous []byte) []kv.DomainEntryDiff {
+					writer := view.NewWriter(db)
+					defer writer.Close()
+					writer.SetDiff(&kv.DomainDiff{})
+					require.NoError(t, writer.PutWithPrev(key, value, txNum, previous))
+					diffs := writer.Diff().GetDiffSet()
+					require.NoError(t, writer.Flush(t.Context(), tx))
+					return diffs
+				}
+				write(2, ancestor, nil)
+				first := write(34, []byte{2}, restored)
+				require.NoError(t, view.unwind(t.Context(), tx, 34, first, nil))
+				value, _, _, err := view.GetLatest(key, tx)
+				require.NoError(t, err)
+				require.Equal(t, len(restored), len(value))
+				if len(restored) > 0 {
+					require.Equal(t, restored, value)
+				}
+
+				// A restored version has no original write in the next branch's diffsets.
+				second := write(18, []byte{3}, ancestor)
+				require.NoError(t, view.unwind(t.Context(), tx, 10, second, nil))
+				value, _, _, err = view.GetLatest(key, tx)
+				require.NoError(t, err)
+				require.Equal(t, ancestor, value)
+			})
+		}
+	}
 }

@@ -186,8 +186,8 @@ func (v ReadView) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 	return v.c.get(domain, key)
 }
 
-// GetWithTxNum is Get plus the txNum the cached value reflects, so the read
-// path can bound a hit by step against an in-flight unwind's maxStep.
+// GetWithTxNum is Get plus a conservative validity stamp, so the read
+// path can bound a hit against an in-flight unwind.
 func (v ReadView) GetWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64, bool) {
 	if v.c == nil {
 		return nil, 0, false
@@ -196,7 +196,7 @@ func (v ReadView) GetWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64, bo
 }
 
 // GetVisible is GetWithTxNum limited to the bound view's own state: a value
-// written at or above its frontier, or any value once an unwind revoked the
+// stamped at or above its frontier, or any value once an unwind revoked the
 // view, is a miss.
 func (v ReadView) GetVisible(domain kv.Domain, key []byte) ([]byte, uint64, bool) {
 	if v.c == nil || v.frontier == nil {
@@ -215,7 +215,8 @@ func (v ReadView) GetVisible(domain kv.Domain, key []byte) ([]byte, uint64, bool
 	return val, txNum, true
 }
 
-// GetAsOf is GetVisible for a read as of ts: the latest visible value, written before ts, is also the value as of ts.
+// GetAsOf serves the latest visible value only when its validity stamp proves
+// that it was already valid before ts.
 func (v ReadView) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool) {
 	val, txNum, ok := v.GetVisible(domain, key)
 	return val, ok && txNum < ts
@@ -247,10 +248,10 @@ func (v ReadView) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return v.c.getAddrCodeHash(addr)
 }
 
-// GetCodeByAddressHash resolves the durable addr→codeHash mapping and then
-// probes the content-addressed code cache. On a hit it also fills the
-// addr-keyed code binding with the mapping's original txNum, avoiding both a
-// database read and a redundant keccak of the cached code.
+// GetCodeByAddressHash resolves the cached addr→codeHash mapping and then probes
+// the content-addressed code cache, avoiding a database read and another keccak.
+// On a hit it also offers an addr-keyed binding stamped with the greater of the
+// mapping's validity stamp and the code view's last visible txNum.
 func (v ReadView) GetCodeByAddressHash(addr []byte) ([]byte, bool) {
 	if v.c == nil {
 		return nil, false
@@ -295,12 +296,11 @@ func (v ReadView) CanFill() bool {
 // NeedsFrontier reports whether rebinding could make this view fill-eligible.
 func (v ReadView) NeedsFrontier() bool { return v.c != nil && v.frontier == nil }
 
-// Fill offers a value read from this view without replacing an authoritative
-// entry. Admission is checked against the view's frontier for the domain;
-// views without an exact frontier skip the fill. A code fill also checks the
-// accounts frontier: an addr-keyed code entry derives from the account — an
-// account deletion drops it without advancing the code frontier — so a view
-// that predates the deletion must not refill it (mirrors SeedAddrCodeHash).
+// Fill offers a value read from this view without replacing an authoritative entry.
+// Its stamp is at least the view's last visible txNum: an unwind can reuse an older
+// row, so the row's step does not prove historical validity. readTxNum may raise
+// this bound for a writable view. Views without an exact frontier skip the fill;
+// code fills also require a current accounts frontier.
 func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uint64) {
 	if v.c == nil || v.c.disableFills || v.frontier == nil {
 		return
@@ -328,8 +328,8 @@ func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) []byte
 }
 
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account
-// record read from this view, so admission checks the accounts frontier even
-// though the mapping lives in the code cache.
+// record read from this view. The accounts frontier governs both admission and
+// the validity stamp, even though the mapping lives in the code cache.
 func (v ReadView) SeedAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	if v.c == nil || v.c.disableFills || v.frontier == nil {
 		return
@@ -342,9 +342,6 @@ func (v ReadView) SeedAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	// the executing transaction that requested the lookup.
 	if h == ([32]byte{}) {
 		txNum = 0
-		if visibleEnd > 0 {
-			txNum = visibleEnd - 1
-		}
 	}
 	v.c.seedAddrCodeHash(addr, h, txNum, visibleEnd, v.readViewEpoch)
 }

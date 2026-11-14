@@ -95,6 +95,8 @@ func (g *Gen) Snapshot() Snapshot {
 	return Snapshot{epoch: s.epoch, floor: s.floor}
 }
 
+func (s Snapshot) IsCurrent(epoch uint32) bool { return epoch == s.epoch }
+
 // IsStale reports whether an entry stamped (txNum, epoch) reflects dead-fork
 // state under this snapshot.
 func (s Snapshot) IsStale(txNum uint64, epoch uint32) bool {

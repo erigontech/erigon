@@ -2054,11 +2054,10 @@ func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int) err
 	return nil
 }
 
-// previousBranch returns the record stored at the folding row's prefix, which the
-// update is merged onto. It falls back to a read only for a row this trie never
-// unfolded itself — a mounted row 0, seeded from the base.
 func (hph *HexPatriciaHashed) previousBranch(row int, updateKey []byte) ([]byte, error) {
 	if !hph.branchBefore[row] {
+		// A new branch has no merge base, even if storage still contains a
+		// branch whose deletion is pending among the deferred writes.
 		return nil, nil
 	}
 	if len(hph.rowBranch[row]) > 0 {
