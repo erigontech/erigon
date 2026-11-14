@@ -95,8 +95,19 @@ func CheckKernelAllocationHints(ctx context.Context, log log.Logger) {
 	if vmStat, err := mem.VirtualMemoryWithContext(ctx); err == nil {
 		swapStat, _ := mem.SwapMemoryWithContext(ctx)
 
+		// SwapMemory is a host-wide snapshot, not an indication that Erigon's
+		// own pages are swapped. Report it as context, not a performance warning.
+		if swapStat != nil && swapStat.Used > 0 {
+			log.Info(
+				"Host swap usage detected (not necessarily caused by Erigon)",
+				"host_swap_used_bytes", swapStat.Used,
+				"host_swap_total_bytes", swapStat.Total,
+			)
+		}
+
 		// Heuristic: if free+cached < 15% of total and swap total == 0, warn.
 		headroom := float64(vmStat.Available) / float64(vmStat.Total+1)
+
 		if headroom < 0.15 && (swapStat == nil || swapStat.Total == 0) {
 			logHint(
 				"Low available memory headroom and no swap may cause allocation failures",
