@@ -143,14 +143,14 @@ func setupEphemeralReplay(tb testing.TB, fx *blockreplay.Fixture) (*ephemeralRep
 
 // newDomains builds a fresh witness-backed SharedDomains for one run. Not part
 // of the ExecV3 measurement.
-func (r *ephemeralReplay) newDomains(tb testing.TB, fx *blockreplay.Fixture) (kv.TemporalRwTx, *execctx.SharedDomains) {
+func (r *ephemeralReplay) newDomains(tb testing.TB, fx *blockreplay.Fixture) (kv.TemporalRwTx, *execctx.SharedDomains, *blockreplay.WitnessWriteSet) {
 	tb.Helper()
 	tx, err := r.db.BeginTemporalRw(r.ctx) //nolint:gocritic
 	require.NoError(tb, err)
-	doms, _, err := blockreplay.NewWitnessDomains(r.ctx, tx, fx, ephemeralSeedTxNum, r.logger)
+	doms, ws, err := blockreplay.NewWitnessDomains(r.ctx, tx, fx, ephemeralSeedTxNum, r.logger)
 	require.NoError(tb, err)
 	doms.SetTxNum(r.inputTxNum)
-	return tx, doms
+	return tx, doms, ws
 }
 
 // exec runs the block once through parallel ExecV3. This is the only thing a
@@ -172,7 +172,10 @@ func (r *ephemeralReplay) execSeeded(tx kv.TemporalRwTx, doms *execctx.SharedDom
 
 // verify checks the post-state (Flush -> outputs read via the domains) against
 // the authoritative canonical outputs — the data, not the trie root.
-func (r *ephemeralReplay) verify(tx kv.TemporalRwTx, doms *execctx.SharedDomains, expected *blockreplay.Outputs) error {
+func (r *ephemeralReplay) verify(tx kv.TemporalRwTx, doms *execctx.SharedDomains, ws *blockreplay.WitnessWriteSet, expected *blockreplay.Outputs) error {
+	if diffs := ws.Diff(expected); len(diffs) > 0 {
+		return fmt.Errorf("write-set has extra writes (%d): %s", len(diffs), strings.Join(diffs, " | "))
+	}
 	got, err := blockreplay.CollectOutputs(state.NewReaderV3(doms.AsGetter(tx)), expected)
 	if err != nil {
 		return err
@@ -199,16 +202,17 @@ func BenchmarkEphemeralParallelReplay(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		b.StopTimer()
-		tx, doms := r.newDomains(b, fx)
+		tx, doms, ws := r.newDomains(b, fx)
 		b.StartTimer()
 
 		execErr := r.exec(tx, doms)
 
 		b.StopTimer()
-		require.NoError(b, execErr)
-		require.NoError(b, r.verify(tx, doms, expected))
+		verifyErr := r.verify(tx, doms, ws, expected)
 		doms.Close()
 		tx.Rollback()
+		require.NoError(b, execErr)
+		require.NoError(b, verifyErr)
 	}
 }
 
@@ -233,11 +237,11 @@ func BenchmarkEphemeralBALRoundTrip(b *testing.B) {
 
 	derive := func(seed types.BlockAccessList) types.BlockAccessList {
 		captured = nil
-		tx, doms := r.newDomains(b, fx)
+		tx, doms, ws := r.newDomains(b, fx)
+		defer tx.Rollback()
+		defer doms.Close()
 		require.NoError(b, r.execSeeded(tx, doms, seed))
-		require.NoError(b, r.verify(tx, doms, expected))
-		doms.Close()
-		tx.Rollback()
+		require.NoError(b, r.verify(tx, doms, ws, expected))
 		require.NotNil(b, captured, "no BAL derived (experimentalBAL not honored?)")
 		return captured
 	}
