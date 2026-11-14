@@ -67,7 +67,6 @@ type Cfg struct {
 	sn                           *freezeblocks.CaplinSnapshots
 	blobStore                    blob_storage.BlobStorage
 	peerDas                      das.PeerDas
-	headEvents                   headEventPublication
 	blobDownloader               *network2.BlobHistoryDownloader
 	attestationDataProducer      attestation_producer.AttestationDataProducer
 	caplinConfig                 clparams.CaplinConfig
@@ -95,8 +94,6 @@ type Cfg struct {
 	// EL adoption. Tolerated FCU timeouts still update it; an FCU the EL turned away as busy does not.
 	executionHead               common.Hash
 	forkChoiceRerunAt           time.Time
-	forkChoiceRerunHead         headEventPublication
-	forkChoiceRerunHeadEvents   headEventPublication
 	forkChoiceWaitingForIndices bool
 	forkChoiceIndicesChanged    <-chan struct{}
 	chainTipRejections          *chainTipRejections
@@ -118,7 +115,7 @@ type Args struct {
 	targetSlot, seenSlot   uint64
 
 	hasDownloaded bool
-	// headUnpublished is set while the fork choice head root differs from the head the beacon API serves or its head event is unpublished.
+	// headUnpublished is set while the fork choice head differs from the head the beacon API serves.
 	headUnpublished bool
 	// atForwardSyncTip is set for less than an epoch after ForwardSync imported a Gloas tip without a successor, while no newer block is seen.
 	atForwardSyncTip bool
@@ -365,10 +362,10 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 				cfg.forwardSyncTipRoot == cfg.forkChoice.HighestSeenRoot() &&
 				args.targetSlot < cfg.forwardSyncTipSlot+cfg.beaconCfg.SlotsPerEpoch
 			cfg.forkChoice.OnTick(uint64(cfg.ethClock.GetSlotTime(args.targetSlot).UnixMilli()))
-			if head, headSlot, err := cfg.forkChoice.GetHeadNode(); err != nil {
+			if head, _, err := cfg.forkChoice.GetHead(nil); err != nil {
 				log.Debug("[Caplin] failed to read the fork choice head", "err", err)
 			} else {
-				args.headUnpublished = head.Root != cfg.syncedData.HeadRoot() || headEventUnpublished(cfg.beaconCfg, head, headSlot, cfg.headEvents)
+				args.headUnpublished = head != cfg.syncedData.HeadRoot()
 			}
 			// Note that the target epoch is always one behind. this is because we are always behind in the current epoch, so it would not be very useful.
 			// Guard against uint64 underflow at genesis (GetCurrentEpoch() == 0).
@@ -559,7 +556,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					}
 					nextSlot := args.seenSlot + 1
 					wake, headChanged, err := waitForNextSlotOrHeadChange(
-						ctx, nextSlot, cfg.beaconCfg, cfg.forkChoice, cfg.syncedData, cfg.ethClock, cfg.sleepForSlotLastWake, cfg.executionHead, cfg.headEvents,
+						ctx, nextSlot, cfg.beaconCfg, cfg.forkChoice, cfg.syncedData, cfg.ethClock, cfg.sleepForSlotLastWake, cfg.executionHead,
 					)
 					cfg.sleepForSlotHeadChanged = headChanged
 					if headChanged {

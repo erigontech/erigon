@@ -337,16 +337,14 @@ func newChainTipBatchFixtureWithBlob(t *testing.T, replayStatus execution_client
 	}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconCfg)
 	engine := &testExecutionEngine{payloadStatus: replayStatus}
-	emitter := beaconevents.NewEventEmitter()
-	syncedData := synced_data.NewSyncedDataManager(beaconCfg, true)
 	store, err := forkchoice.NewForkChoiceStore(
 		clock,
 		anchorState,
 		engine,
 		pool.NewOperationsPool(beaconCfg),
 		graph,
-		emitter,
-		syncedData,
+		beaconevents.NewEventEmitter(),
+		synced_data.NewSyncedDataManager(beaconCfg, true),
 		nil,
 		public_keys_registry.NewInMemoryPublicKeysRegistry(),
 		validator_params.NewValidatorParams(),
@@ -373,10 +371,7 @@ func newChainTipBatchFixtureWithBlob(t *testing.T, replayStatus execution_client
 
 	stageCfg := &Cfg{
 		beaconCfg:             beaconCfg,
-		ethClock:              clock,
 		forkChoice:            store,
-		emitter:               emitter,
-		syncedData:            syncedData,
 		indiciesDB:            mdbxtest.NewTestDB(t, dbcfg.ChainDB),
 		executionClient:       engine,
 		gloasPayloadValidator: engine,
@@ -390,7 +385,6 @@ func TestChainTipSyncVerifiesStoredGloasPayloadWhileBehind(t *testing.T) {
 	delete(graph.parents, headRoot)
 	graph.insertOnAdd = true
 	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
-	cfg.headEvents = headEventPublication{root: headRoot, payloadStatus: "full"}
 
 	selectedRoot, _, err := cfg.forkChoice.GetHead(nil)
 	require.NoError(t, err)

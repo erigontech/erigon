@@ -2163,7 +2163,7 @@ func TestExecutionPayloadImportStoresEnvelopeSignature(t *testing.T) {
 	}))
 }
 
-func TestExecutionPayloadIndexRepairEmitsExecutionEventsExactlyOnce(t *testing.T) {
+func TestExecutionPayloadIndexRepairEmitsIntegrationEventsExactlyOnce(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	blockRoot := envelope.Message.BeaconBlockRoot
 	require.NoError(t, blockState.SetBlockRootAt(55, common.Hash{5}))
@@ -2179,6 +2179,9 @@ func TestExecutionPayloadIndexRepairEmitsExecutionEventsExactlyOnce(t *testing.T
 	operationEvents := make(chan *beaconevents.EventStream, 2)
 	operationSubscription := emitter.Operation().Subscribe(operationEvents)
 	defer operationSubscription.Unsubscribe()
+	stateEvents := make(chan *beaconevents.EventStream, 1)
+	stateSubscription := emitter.State().Subscribe(stateEvents)
+	defer stateSubscription.Unsubscribe()
 	f := newPayloadVoteTestStore(t, blockRoot, false, false)
 	f.beaconCfg = cfg
 	f.forkGraph = graph
@@ -2215,11 +2218,17 @@ func TestExecutionPayloadIndexRepairEmitsExecutionEventsExactlyOnce(t *testing.T
 	}
 	require.Equal(t, beaconevents.OpExecutionPayload, nextEvent(operationEvents).Event)
 	require.Equal(t, beaconevents.OpExecutionPayloadAvailable, nextEvent(operationEvents).Event)
+	require.Equal(t, beaconevents.StateHeadV2, nextEvent(stateEvents).Event)
 
 	require.ErrorIs(t, f.OnExecutionPayload(t.Context(), envelope, false, true), ErrIgnore)
 	select {
 	case event := <-operationEvents:
 		t.Fatalf("emitted duplicate integration event: %#v", event)
+	default:
+	}
+	select {
+	case event := <-stateEvents:
+		t.Fatalf("emitted duplicate head event: %#v", event)
 	default:
 	}
 }
@@ -5909,4 +5918,67 @@ func TestValidateExecutionPayloadEnvelopeForGossipRejectsInvalidBlock(t *testing
 
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+func TestHeadV2PayloadArrivalDoesNotDuplicateStageEvent(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	root := envelope.Message.BeaconBlockRoot
+	f := newPayloadVoteTestStore(t, root, true, false)
+	f.beaconCfg = cfg
+	f.forkGraph = &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}, hasEnvelope: true}
+	f.emitters = beaconevents.NewEventEmitter()
+	f.headHash, f.headSlot, f.headPayloadStatus = root, block.Block.Slot, cltypes.PayloadStatusEmpty
+	events := make(chan *beaconevents.EventStream, 8)
+	sub := f.emitters.State().SubscribeHeadV2(events)
+	defer sub.Unsubscribe()
+	emitStage := func(status string) {
+		t.Helper()
+		v2, err := beaconevents.BuildHeadV2Data(cfg, blockState, block.Block.Slot, root, block.Block.StateRoot, status, f.IsRootOptimistic(root))
+		require.NoError(t, err)
+		require.True(t, f.emitters.EmitHeadEventsIfCurrent(&beaconevents.HeadData{Slot: block.Block.Slot, Block: root}, v2, func() bool {
+			head, slot, err := f.GetHeadNode()
+			return err == nil && head.Root == root && slot == block.Block.Slot && beaconevents.PayloadStatusName(head.PayloadStatus) == status
+		}))
+	}
+	emitStage("empty")
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+	f.emitExecutionPayloadIntegrationEvents(root, envelope)
+	emitStage("full")
+	var statuses []string
+	for len(events) > 0 {
+		statuses = append(statuses, (<-events).Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+	}
+	require.Equal(t, []string{"empty", "full"}, statuses, "payload integration followed by the forkchoice stage must emit full once")
+}
+
+func TestHeadV2ReorgBackAfterPayloadArrival(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	root := envelope.Message.BeaconBlockRoot
+	oldRoot := common.Hash{0xab}
+	f := newPayloadVoteTestStore(t, root, true, false)
+	f.beaconCfg = cfg
+	f.forkGraph = &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}, hasEnvelope: true}
+	f.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 8)
+	sub := f.emitters.State().SubscribeHeadV2(events)
+	defer sub.Unsubscribe()
+	emitOldHead := func() {
+		t.Helper()
+		f.headHash, f.headSlot, f.headPayloadStatus = oldRoot, block.Block.Slot, cltypes.PayloadStatusFull
+		v2, err := beaconevents.BuildHeadV2Data(cfg, blockState, block.Block.Slot, oldRoot, block.Block.StateRoot, "full", f.IsRootOptimistic(oldRoot))
+		require.NoError(t, err)
+		require.True(t, f.emitters.EmitHeadEventsIfCurrent(&beaconevents.HeadData{Slot: block.Block.Slot, Block: oldRoot}, v2, func() bool {
+			head, _, err := f.GetHeadNode()
+			return err == nil && head.Root == oldRoot
+		}))
+	}
+	emitOldHead()
+	f.headHash, f.headSlot, f.headPayloadStatus = root, block.Block.Slot, cltypes.PayloadStatusFull
+	f.emitExecutionPayloadIntegrationEvents(root, envelope)
+	emitOldHead()
+	var roots []common.Hash
+	for len(events) > 0 {
+		roots = append(roots, (<-events).Data.(*beaconevents.HeadV2Data).Data.Block)
+	}
+	require.Equal(t, []common.Hash{oldRoot, root, oldRoot}, roots, "head_v2 must announce a return to the old head after payload integration announced another head")
 }

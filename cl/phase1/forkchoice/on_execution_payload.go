@@ -1883,6 +1883,44 @@ func (f *ForkChoiceStore) emitExecutionPayloadIntegrationEvents(blockRoot common
 	f.emitters.Operation().SendExecutionPayloadAvailable(&beaconevents.ExecutionPayloadAvailableData{
 		Slot: block.Block.Slot, BlockRoot: blockRoot,
 	})
+	if f.beaconCfg == nil {
+		return
+	}
+	f.mu.RLock()
+	headCached := f.headHash != (common.Hash{})
+	f.mu.RUnlock()
+	if !headCached && f.justifiedCheckpoint.Load() == nil {
+		return
+	}
+	head, headSlot, headErr := f.GetHeadNode()
+	if headErr != nil || head.Root != blockRoot || f.beaconCfg.SlotsPerEpoch == 0 {
+		return
+	}
+	var headEvent *beaconevents.HeadV2Data
+	if err := f.ViewStateAtBlockRoot(blockRoot, func(headState *state.CachingBeaconState) error {
+		var err error
+		headEvent, err = beaconevents.BuildHeadV2Data(
+			f.beaconCfg,
+			headState,
+			headSlot,
+			head.Root,
+			block.Block.StateRoot,
+			"full",
+			f.IsRootOptimistic(blockRoot),
+		)
+		return err
+	}); err != nil || headEvent == nil {
+		return
+	}
+	f.emitters.EmitHeadV2IfCurrent(headEvent, func() bool {
+		currentHead, currentHeadSlot, err := f.GetHeadNode()
+		if err != nil || currentHead.Root != head.Root || currentHeadSlot != headSlot ||
+			beaconevents.PayloadStatusName(currentHead.PayloadStatus) != headEvent.Data.PayloadStatus ||
+			f.IsRootOptimistic(currentHead.Root) != headEvent.Data.ExecutionOptimistic {
+			return false
+		}
+		return true
+	})
 }
 
 func (f *ForkChoiceStore) ensureExecutionPayloadEnvelopeIndices(ctx context.Context, blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied bool) (*cltypes.SignedExecutionPayloadEnvelope, bool, error) {

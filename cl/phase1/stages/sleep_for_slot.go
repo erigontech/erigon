@@ -56,11 +56,6 @@ type sleepForSlotWake struct {
 // stage again after this long; a persistent failure then costs one stage pass per interval, not one per poll.
 const sleepForSlotRewakeInterval = time.Second
 
-func headEventUnpublished(beaconCfg *clparams.BeaconChainConfig, head forkchoice.ForkChoiceNode, headSlot uint64, publication headEventPublication) bool {
-	isGloas := beaconCfg.GetCurrentStateVersion(headSlot/beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion
-	return head.Root != publication.root || headPayloadStatus(head, isGloas) != publication.payloadStatus
-}
-
 func waitForNextSlotOrHeadChange(
 	ctx context.Context,
 	nextSlot uint64,
@@ -70,15 +65,13 @@ func waitForNextSlotOrHeadChange(
 	clock sleepForSlotClock,
 	lastWake sleepForSlotWake,
 	lastExecutionHead common.Hash,
-	lastHeadEvent headEventPublication,
 ) (sleepForSlotWake, bool, error) {
 	nextSlotTime := clock.GetSlotTime(nextSlot)
 	timer := time.NewTimer(time.Until(nextSlotTime))
 	defer timer.Stop()
 
 	var tick <-chan time.Time
-	isGloas := beaconCfg.GetCurrentStateVersion(clock.GetCurrentEpoch()) >= clparams.GloasVersion
-	if isGloas {
+	if beaconCfg.GetCurrentStateVersion(clock.GetCurrentEpoch()) >= clparams.GloasVersion {
 		ticker := time.NewTicker(sleepForSlotHeadPollInterval)
 		defer ticker.Stop()
 		tick = ticker.C
@@ -117,7 +110,7 @@ func waitForNextSlotOrHeadChange(
 			if !time.Now().Before(nextSlotTime) {
 				return sleepForSlotWake{}, false, nil
 			}
-			changed := head.Root != syncedData.HeadRoot() || (ready && executionHead != lastExecutionHead) || headEventUnpublished(beaconCfg, head, headSlot, lastHeadEvent)
+			changed := head.Root != syncedData.HeadRoot() || (ready && executionHead != lastExecutionHead)
 			if changed && (head.Root != lastWake.root || (ready && executionHead != lastWake.executionHead) || time.Since(lastWake.at) >= sleepForSlotRewakeInterval) {
 				return sleepForSlotWake{root: head.Root, executionHead: executionHead, at: time.Now()}, true, nil
 			}
