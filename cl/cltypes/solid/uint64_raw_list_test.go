@@ -90,7 +90,10 @@ func TestRawUint64ListHashSSZAfterCopyToDifferentLimit(t *testing.T) {
 	_, err := source.HashSSZ()
 	require.NoError(t, err)
 
-	target := solid.NewRawUint64List(131072, nil)
+	target := solid.NewRawUint64List(131072, []uint64{4, 5, 6})
+	_, err = target.HashSSZ()
+	require.NoError(t, err)
+
 	source.CopyTo(target)
 	require.Equal(t, 131072, target.Cap())
 	root, err := target.HashSSZ()
