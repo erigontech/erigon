@@ -83,8 +83,8 @@ var errNoSidecars = errors.New("the endpoint has no sidecars for the block")
 type fillReport struct {
 	withBlobs, valid, filled atomic.Uint64
 
-	mu               sync.Mutex
-	failed, unserved []uint64
+	mu                           sync.Mutex
+	failed, unserved, unresolved []uint64
 }
 
 func (r *fillReport) add(slots *[]uint64, slot uint64) {
@@ -196,9 +196,10 @@ func (b *BlobArchiveStoreFill) fill(ctx context.Context, db kv.RoDB, blocks free
 	err := g.Wait()
 	slices.Sort(report.failed)
 	slices.Sort(report.unserved)
+	slices.Sort(report.unresolved)
 	log.Info("Blob store fill finished", "fromSlot", b.FromSlot, "toSlot", b.ToSlot, "slotsWithBlobs", report.withBlobs.Load(),
 		"valid", report.valid.Load(), "missing", report.withBlobs.Load()-report.valid.Load(), "filled", report.filled.Load(), "failed", len(report.failed),
-		"unserved", len(report.unserved), "dryRun", b.DryRun)
+		"unserved", len(report.unserved), "unresolved", len(report.unresolved), "dryRun", b.DryRun)
 	if err != nil {
 		return err
 	}
@@ -304,30 +305,32 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 	}
 	if b.DryRun {
 		served := !unresolved && len(b.Endpoints) == 0
-		inWindow := false
 		for i := range b.Endpoints {
 			if err := b.findWindow(ctx, db, blocks, i, b.FromSlot); err != nil {
 				return fmt.Errorf("find the window of endpoint %d: %w", i+1, err)
 			}
 			if slot >= b.windows[i].from.Load() {
-				inWindow = true
 				served = served || !unresolved
 			}
 		}
 		log.Info("Slot needs its sidecars", "slot", slot, "blockRoot", root, "blobs", blobs, "served", served)
-		if !served && (!unresolved || !inWindow) {
+		if unresolved {
+			log.Warn("Slot has unresolved payload status", "slot", slot, "blockRoot", root)
+			report.add(&report.unresolved, slot)
+			return nil
+		}
+		if !served {
 			report.add(&report.unserved, slot)
 			return nil
 		}
 		return nil
 	}
 	var lastErr error
-	unserved, attempted := true, false
+	unserved := true
 	for i, endpoint := range b.Endpoints {
 		if slot < b.windows[i].from.Load() {
 			continue
 		}
-		attempted = true
 		lastErr = fetchAndStoreBlobs(ctx, store, endpoint, root, block)
 		if err := store.err(); err != nil {
 			return fmt.Errorf("blob store write failed, stopping: %w", err)
@@ -352,7 +355,10 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		log.Debug("Endpoint could not fill slot", "slot", slot, "endpoint", redactEndpoint(endpoint), "err", lastErr)
 	}
 	if unserved {
-		if !unresolved || !attempted {
+		if unresolved {
+			log.Warn("Slot has unresolved payload status", "slot", slot, "blockRoot", root)
+			report.add(&report.unresolved, slot)
+		} else {
 			log.Debug("No endpoint serves slot", "slot", slot, "blockRoot", root)
 			report.add(&report.unserved, slot)
 		}
@@ -575,10 +581,10 @@ func logFillProgress(ctx context.Context, from, to uint64, report *fillReport) {
 			return
 		case <-ticker.C:
 			report.mu.Lock()
-			failed, unserved := len(report.failed), len(report.unserved)
+			failed, unserved, unresolved := len(report.failed), len(report.unserved), len(report.unresolved)
 			report.mu.Unlock()
 			log.Info("Blob store fill progress", "fromSlot", from, "toSlot", to, "slotsWithBlobs", report.withBlobs.Load(),
-				"valid", report.valid.Load(), "filled", report.filled.Load(), "failed", failed, "unserved", unserved)
+				"valid", report.valid.Load(), "filled", report.filled.Load(), "failed", failed, "unserved", unserved, "unresolved", unresolved)
 		}
 	}
 }

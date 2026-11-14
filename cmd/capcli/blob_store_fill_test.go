@@ -283,8 +283,7 @@ func TestBlobArchiveStoreFillReportsAnUnresolvedSlotBelowAnEndpointWindow(t *tes
 	report := &fillReport{}
 
 	require.NoError(t, cmd.fillSlot(t.Context(), f.db, f.blocks, &writeErrRecorder{BlobStorage: f.store}, fillTestSlot, report))
-	require.Len(t, report.unserved, 1)
-	require.Equal(t, uint64(fillTestSlot), report.unserved[0])
+	require.Empty(t, report.unserved)
 }
 
 func TestExpectedBlobsInTxTreatsAMissingGloasChildBodyAsUnresolved(t *testing.T) {
@@ -343,10 +342,21 @@ func TestBlobArchiveStoreFillFillsBeforeAnUnresolvedGloasHead(t *testing.T) {
 	delete(f.sidecars, head)
 	url, _ := f.endpoint(false)
 	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 1}
+	var logs bytes.Buffer
+	oldHandler := log.Root().GetHandler()
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.SyncHandler(log.StreamHandler(&logs, log.LogfmtFormat()))))
+	t.Cleanup(func() { log.Root().SetHandler(oldHandler) })
 
 	require.NoError(t, f.fill(cmd, nil))
 	require.True(t, f.storedValid(fillTestSlot, root))
 	require.Zero(t, cmd.windows[0].from.Load())
+	output := logs.String()
+	require.Contains(t, output, "missing=2")
+	require.Contains(t, output, "filled=1")
+	require.Contains(t, output, "failed=0")
+	require.Contains(t, output, "unserved=0")
+	require.Contains(t, output, "unresolved=1")
+	require.Contains(t, output, fmt.Sprintf("lvl=warn msg=\"Slot has unresolved payload status\" slot=%d", fillTestSlot+1))
 }
 
 func TestBlobArchiveStoreFillTriesTheNextEndpointForAnUnresolvedGloasHead(t *testing.T) {
