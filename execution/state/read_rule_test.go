@@ -39,7 +39,7 @@ func TestReadRule_XB1_RemovedAccountWipesCommittedStorage(t *testing.T) {
 
 	// The commitment read must agree: account absent, slot deleted.
 	view := vm.View(1, base)
-	_, ok := view.GetAccount(addr)
+	_, ok, _ := view.GetAccount(addr)
 	require.False(t, ok, "an EIP-161-removed account reads absent in the commitment view")
 	sv, _ := view.GetStorage(addr, slot)
 	require.True(t, sv.IsZero(), "committed slot wiped in the commitment view, got %s", sv.String())
@@ -108,7 +108,7 @@ func TestReadRule_B3_PostRemovalWriteVisibleBaseSuppressed(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, valS.IsZero(), "a committed slot the revival did not rewrite stays 0, got %s", valS.String())
 
-	acc, ok := vm.View(2, base).GetAccount(addr)
+	acc, ok, _ := vm.View(2, base).GetAccount(addr)
 	require.True(t, ok, "the revived account is present")
 	require.Equal(t, *uint256.NewInt(5), acc.Balance, "revived balance")
 }

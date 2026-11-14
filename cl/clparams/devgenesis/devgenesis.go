@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 
@@ -84,7 +85,7 @@ func BuildGenesisState(
 	elGenesisHash common.Hash,
 ) (*state.CachingBeaconState, []*bls.PrivateKey, error) {
 	if validatorCount == 0 {
-		return nil, nil, fmt.Errorf("validator count must be > 0")
+		return nil, nil, errors.New("validator count must be > 0")
 	}
 
 	// Derive BLS keys.
@@ -129,7 +130,7 @@ func BuildGenesisState(
 	beaconState.SetEth1DepositIndex(uint64(validatorCount))
 
 	// Collect pubkeys for sync committee initialization.
-	var allPubkeys []common.Bytes48
+	allPubkeys := make([]common.Bytes48, validatorCount)
 
 	// Add validators.
 	maxEffectiveBalance := cfg.MaxEffectiveBalance
@@ -160,7 +161,7 @@ func BuildGenesisState(
 		if err := beaconState.AddValidator(validator, maxEffectiveBalance); err != nil {
 			return nil, nil, fmt.Errorf("add validator: %w", err)
 		}
-		allPubkeys = append(allPubkeys, common.Bytes48(pubkeyBytes))
+		allPubkeys[i] = common.Bytes48(pubkeyBytes)
 	}
 
 	// Initialize sync committees (Altair+). Fill with validator pubkeys

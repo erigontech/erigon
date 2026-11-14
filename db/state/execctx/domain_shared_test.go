@@ -342,6 +342,289 @@ func TestSharedDomain_UnwindPrunesBoundaryTxNum(t *testing.T) {
 	require.Equal(t, keptVal, v, "write below the boundary txNum must survive")
 }
 
+func putAndUnwind(t *testing.T, sd *execctx.SharedDomains, tx kv.TemporalTx, domain kv.Domain, key, val, prev []byte, txNum uint64) {
+	t.Helper()
+	unwound := &changeset.StateChangeSet{}
+	sd.SetChangesetAccumulator(unwound)
+	sd.SetTxNum(txNum)
+	require.NoError(t, sd.DomainPut(domain, tx, key, val, txNum, prev))
+	sd.SetChangesetAccumulator(nil)
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	for d := range diffs {
+		diffs[d] = unwound.Diffs[d].GetDiffSet()
+	}
+	sd.Unwind(txNum, &diffs)
+}
+
+func TestSharedDomain_UnwindDropsWritesBufferedBeforeUnwind(t *testing.T) {
+	t.Parallel()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	slot := common.HexToHash("0x01")
+	keys := map[kv.Domain][]byte{
+		kv.AccountsDomain:   addr[:],
+		kv.StorageDomain:    composite(addr[:], slot[:]),
+		kv.CodeDomain:       addr[:],
+		kv.CommitmentDomain: {0xa0, 0x01},
+	}
+	for domain, key := range keys {
+		t.Run(domain.String(), func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+			db := newTestDb(t, 4)
+			committed := []byte{0x10}
+
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			require.NoError(t, domains.DomainPut(domain, rwTx, key, committed, 1, nil))
+			require.NoError(t, domains.Flush(ctx, rwTx))
+			domains.Close()
+			require.NoError(t, rwTx.Commit())
+
+			rwTx, err = db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+			const unwindTo = 2
+			putAndUnwind(t, domains, rwTx, domain, key, []byte{0x20}, committed, unwindTo)
+			require.NoError(t, domains.Flush(ctx, rwTx))
+			require.NoError(t, rwTx.Commit())
+
+			roTx, err := db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer roTx.Rollback()
+			got, _, err := roTx.GetLatest(domain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Equal(t, committed, got, "latest after unwinding a write buffered before the unwind")
+			history, err := roTx.HistoryRange(domain, unwindTo, -1, order.Asc, -1)
+			require.NoError(t, err)
+			defer history.Close()
+			require.False(t, history.HasNext(), "history rows at txNum >= %d after unwind", unwindTo)
+		})
+	}
+}
+
+func TestSharedDomain_MergeKeepsOtherWritesBufferedBeforeUnwind(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 4)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	receiver, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer receiver.Close()
+	other, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer other.Close()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	key := addr[:]
+	kept := []byte{0x10}
+	require.NoError(t, other.DomainPut(kv.AccountsDomain, rwTx, key, kept, 1, nil))
+	require.NoError(t, other.IndexAdd(kv.TracesToIdx, key, 1))
+	const unwindTo = 2
+	require.NoError(t, other.IndexAdd(kv.TracesToIdx, key, unwindTo))
+	putAndUnwind(t, other, rwTx, kv.AccountsDomain, key, []byte{0x20}, kept, unwindTo)
+
+	require.NoError(t, receiver.Merge(ctx, 0, other, unwindTo))
+	require.NoError(t, receiver.Flush(ctx, rwTx))
+	it, err := rwTx.IndexRange(kv.AccountsHistoryIdx, key, 0, -1, order.Asc, -1)
+	require.NoError(t, err)
+	txNums, err := stream.ToArrayU64(it)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{1}, txNums, "history index after merging a batch unwound to txNum %d", unwindTo)
+	it, err = rwTx.IndexRange(kv.TracesToIdx, key, 0, -1, order.Asc, -1)
+	require.NoError(t, err)
+	txNums, err = stream.ToArrayU64(it)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{1}, txNums, "traces index after merging a batch unwound to txNum %d", unwindTo)
+}
+
+func TestSharedDomain_DiscardWritesCoversWritesBufferedBeforeUnwind(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 4)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	key := addr[:]
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, key, []byte{0x10}, 1, nil))
+	domains.Unwind(2, nil)
+	domains.DiscardWrites(kv.AccountsDomain)
+	require.NoError(t, domains.Flush(ctx, rwTx))
+
+	got, _, err := rwTx.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, got, "discarded domain written before an unwind")
+}
+
+func TestSharedDomain_MergeFlushesValuesInWriteOrder(t *testing.T) {
+	t.Parallel()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	key := addr[:]
+	older, newest := []byte{0x14}, []byte{0x15}
+	for _, name := range []string{"receiver wrote first", "two merges", "merged batch wrote after its own merge", "two merges then unwind above them", "merged batch unwound above both"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+			db := newTestDb(t, 4)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			newBatch := func() *execctx.SharedDomains {
+				sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+				require.NoError(t, err)
+				t.Cleanup(sd.Close)
+				return sd
+			}
+			put := func(sd *execctx.SharedDomains, val []byte, txNum uint64) {
+				require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, val, txNum, nil))
+			}
+			merge := func(into, from *execctx.SharedDomains, txNum uint64) {
+				require.NoError(t, into.Merge(ctx, 0, from, txNum))
+			}
+
+			receiver, other := newBatch(), newBatch()
+			switch name {
+			case "receiver wrote first", "merged batch unwound above both":
+				put(receiver, older, 4)
+			case "two merges", "two merges then unwind above them":
+				first := newBatch()
+				put(first, older, 4)
+				merge(receiver, first, 4)
+			case "merged batch wrote after its own merge":
+				child := newBatch()
+				put(child, older, 4)
+				merge(other, child, 4)
+			}
+			put(other, newest, 5)
+			if name == "merged batch unwound above both" {
+				other.Unwind(6, nil)
+			}
+			merge(receiver, other, 5)
+			if name == "two merges then unwind above them" {
+				receiver.Unwind(6, nil)
+			}
+			require.NoError(t, receiver.Flush(ctx, rwTx))
+
+			got, _, err := rwTx.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Equal(t, newest, got, "latest after merging a newer write to the same step")
+		})
+	}
+}
+
+func TestSharedDomain_MergeKeepsReceiverRowsWrittenAfterItsUnwind(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := newTestDb(t, 4)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	receiver, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer receiver.Close()
+	other, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer other.Close()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	key := addr[:]
+	require.NoError(t, receiver.DomainPut(kv.AccountsDomain, rwTx, key, []byte{0x10}, 1, nil))
+	putAndUnwind(t, receiver, rwTx, kv.AccountsDomain, key, []byte{0x20}, []byte{0x10}, 2)
+	reexecuted := []byte{0x30}
+	require.NoError(t, receiver.DomainPut(kv.AccountsDomain, rwTx, key, reexecuted, 2, []byte{0x10}))
+	other.Unwind(3, nil)
+
+	require.NoError(t, receiver.Merge(ctx, 2, other, 3))
+	require.NoError(t, receiver.Flush(ctx, rwTx))
+	got, _, err := rwTx.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, reexecuted, got, "latest written after the receiver's unwind, merged with an unwound batch")
+}
+
+func TestSharedDomain_MergeKeepsEarliestHistoryValueAtSameTxNum(t *testing.T) {
+	t.Parallel()
+
+	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	key := addr[:]
+	for _, tc := range []struct {
+		name                                                       string
+		earliest                                                   []byte
+		receiverUnwound, otherUnwound, otherUnwoundFirst, viaMerge bool
+	}{
+		{name: "plain merge", earliest: []byte{0x10}},
+		{name: "merged batch unwound", earliest: []byte{0x10}, otherUnwound: true},
+		{name: "merged batch wrote after its unwind", earliest: []byte{0x10}, otherUnwoundFirst: true},
+		{name: "receiver unwound", earliest: []byte{0x10}, receiverUnwound: true},
+		{name: "receiver unwound, no earlier value", earliest: []byte{}, receiverUnwound: true},
+		{name: "two batches merged into an unwound receiver", earliest: []byte{0x10}, receiverUnwound: true, viaMerge: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := t.Context()
+			db := newTestDb(t, 4)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			receiver, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer receiver.Close()
+			other, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer other.Close()
+
+			first := receiver
+			if tc.viaMerge {
+				first, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+				require.NoError(t, err)
+				defer first.Close()
+			}
+			require.NoError(t, first.DomainPut(kv.CodeDomain, rwTx, key, []byte{0x20}, 5, tc.earliest))
+			if tc.receiverUnwound {
+				var noDiffs [kv.DomainLen][]kv.DomainEntryDiff
+				receiver.Unwind(6, &noDiffs)
+			}
+			if tc.otherUnwoundFirst {
+				other.Unwind(6, nil)
+			}
+			require.NoError(t, other.DomainPut(kv.CodeDomain, rwTx, key, []byte{0x30}, 5, []byte{0x20}))
+			if tc.otherUnwound {
+				other.Unwind(6, nil)
+			}
+			if tc.viaMerge {
+				require.NoError(t, receiver.Merge(ctx, 5, first, 5))
+			}
+			require.NoError(t, receiver.Merge(ctx, 5, other, 5))
+			require.NoError(t, receiver.Flush(ctx, rwTx))
+
+			prev, ok, err := rwTx.HistorySeek(kv.CodeDomain, key, 5)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.True(t, bytes.Equal(tc.earliest, prev), "value before txNum 5: %x", prev)
+			latest, _, err := rwTx.GetLatest(kv.CodeDomain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Equal(t, []byte{0x30}, latest)
+		})
+	}
+}
+
 // TestNewSharedDomains_StateAheadOfBlocks verifies that when the persisted
 // commitment state is ahead of the TxNums index (catch-up scenario),
 // NewSharedDomains returns ErrBehindCommitment but the SharedDomains itself
@@ -1990,4 +2273,100 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 	require.Equal(t, block2, storedBlock2)
 	require.Equal(t, txNum2, storedTx2)
 	require.Equal(t, trieState1, state2[16:])
+}
+
+func TestSharedDomain_MergeUnwindKeepsDeeperTarget(t *testing.T) {
+	t.Parallel()
+
+	stepSize := uint64(10)
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+	require := require.New(t)
+
+	const lastBlock = uint64(14)
+	const deepTarget = uint64(4)
+	const shallowTarget = uint64(9)
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
+	}
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	addr := make([]byte, length.Addr)
+	var perBlockDiffs [lastBlock + 1]*changeset.StateChangeSet
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		cs := &changeset.StateChangeSet{}
+		doms.SetChangesetAccumulator(cs)
+		acc := accounts.Account{Nonce: bn, Balance: *uint256.NewInt(bn * 1000)}
+		pv, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+		require.NoError(err)
+		require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, accounts.SerialiseV3(&acc), bn, pv))
+		perBlockDiffs[bn] = cs
+		doms.SetChangesetAccumulator(nil)
+	}
+	require.NoError(doms.Flush(ctx, rwTx))
+	doms.Close()
+	require.NoError(rwTx.Commit())
+
+	mergeRange := func(from, to uint64) *[kv.DomainLen][]kv.DomainEntryDiff {
+		var merged [kv.DomainLen][]kv.DomainEntryDiff
+		for bn := int64(to); bn >= int64(from); bn-- {
+			for idx, d := range perBlockDiffs[bn].Diffs {
+				keys := d.GetDiffSet()
+				if merged[idx] == nil {
+					merged[idx] = keys
+				} else {
+					merged[idx] = changeset.MergeDiffSets(merged[idx], keys)
+				}
+			}
+		}
+		return &merged
+	}
+
+	mergeAndCheck := func(target1, target2 uint64) {
+		rwTx, err := db.BeginTemporalRw(ctx)
+		require.NoError(err)
+		defer rwTx.Rollback()
+
+		sd1, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		require.NoError(err)
+		sd1.Unwind(target1+1, mergeRange(target1+1, lastBlock))
+		sd1.SetTxNum(target1)
+
+		sd2, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		require.NoError(err)
+		sd2.Unwind(target2+1, mergeRange(target2+1, lastBlock))
+		sd2.SetTxNum(target2)
+
+		require.NoError(sd1.Merge(ctx, shallowTarget, sd2, shallowTarget))
+		require.NoError(sd1.Flush(ctx, rwTx))
+		sd1.Close()
+
+		latest, _, err := rwTx.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
+		require.NoError(err)
+		var latestAcc accounts.Account
+		require.NoError(accounts.DeserialiseV3(&latestAcc, latest))
+		require.Equal(deepTarget, latestAcc.Nonce)
+
+		for ts := deepTarget + 1; ts <= lastBlock; ts++ {
+			v, ok, err := rwTx.GetAsOf(kv.AccountsDomain, addr, ts)
+			require.NoError(err)
+			require.True(ok)
+			var acc accounts.Account
+			require.NoError(accounts.DeserialiseV3(&acc, v))
+			require.Equalf(deepTarget, acc.Nonce, "GetAsOf(ts=%d) must not see history of unwound blocks", ts)
+		}
+
+		it, err := rwTx.IndexRange(kv.AccountsHistoryIdx, addr, int(deepTarget+1), -1, order.Asc, kv.Unlim)
+		require.NoError(err)
+		txNums, err := stream.ToArrayU64(it)
+		require.NoError(err)
+		require.Empty(txNums)
+	}
+
+	mergeAndCheck(deepTarget, shallowTarget)
+	mergeAndCheck(shallowTarget, deepTarget)
 }

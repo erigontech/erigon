@@ -653,6 +653,13 @@ func (w *DomainBufferedWriter) Close() {
 	}
 }
 
+func (w *DomainBufferedWriter) detach() *DomainBufferedWriter {
+	detached := *w
+	detached.h = w.h.detach()
+	w.values = nil
+	return &detached
+}
+
 func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
@@ -660,6 +667,10 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
 	}
+	return w.flushValues(ctx, tx)
+}
+
+func (w *DomainBufferedWriter) flushValues(ctx context.Context, tx kv.RwTx) error {
 	if w.values == nil {
 		w.Close()
 		return nil
@@ -776,7 +787,7 @@ func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 }
 
 func (dt *DomainRoTx) getLatestFromFile(i int, filekey, buf []byte, hi, lo uint64) (v []byte, ok bool, offset uint64, err error) {
-	if dbg.KVReadLevelledMetrics {
+	if dbg.KVFileReadSummaries {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
 
@@ -813,7 +824,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey, buf []byte, hi, lo uint6
 }
 
 func (dt *DomainRoTx) getLatestFromFileValSize(i int, filekey []byte, hi, lo uint64) (size int, ok bool, err error) {
-	if dbg.KVReadLevelledMetrics {
+	if dbg.KVFileReadSummaries {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
@@ -1227,7 +1238,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 		}
 		if exists {
-			existenceFilter, err = existence.OpenFilter(fPath, false)
+			existenceFilter, err = d.openExistenceFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 			}
@@ -1330,7 +1341,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 		}
 		if exists {
-			bloom, err = existence.OpenFilter(fPath, false)
+			bloom, err = d.openExistenceFilter(fPath)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 			}
@@ -1655,6 +1666,24 @@ func (dt *DomainRoTx) getLatestFromFiles(k, buf []byte, maxStep kv.Step) (v []by
 	return dt.lookupLatestFromFiles(k, buf, maxTxNum, true)
 }
 
+// mayContainInFiles reports whether some file may hold k. Only filters in the heap reject a key: a mapped filter
+// would read its pages one at a time here, so its key stays for the probed lookup, which batches those pages.
+func (dt *DomainRoTx) mayContainInFiles(k []byte) bool {
+	if len(dt.files) == 0 {
+		return false
+	}
+	if !dt.d.Accessors.Has(statecfg.AccessorExistence) {
+		return true
+	}
+	hi, _ := dt.ht.iit.hashKey(k)
+	for _, f := range slices.Backward(dt.files) {
+		if f.src.existence == nil || !f.src.existence.InMem() || f.src.existence.ContainsHash(hi) {
+			return true
+		}
+	}
+	return false
+}
+
 func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, bounded bool) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
 		return
@@ -1690,7 +1719,8 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		// fmt.Printf("getLatestFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.stepSize, dt.files[i].endTxNum/dt.stepSize)
 		if useExistenceFilter {
 			if f.src.existence != nil {
-				if !f.src.existence.ContainsHashProbe(hi, dt.probe) {
+				maybe := dt.probe == nil && f.src.existence.ContainsHash(hi) || dt.probe != nil && f.src.existence.ContainsHashProbe(hi, dt.probe)
+				if !maybe {
 					if traceGetLatest == dt.name {
 						fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dt.d.FilenameBase, k, f.src.existence.FileName)
 					}
@@ -1698,10 +1728,8 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 				} else if traceGetLatest == dt.name {
 					fmt.Printf("GetLatest(%s, %x) -> existence index %s -> true\n", dt.d.FilenameBase, k, f.src.existence.FileName)
 				}
-			} else {
-				if traceGetLatest == dt.name {
-					fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dt.name.String(), k, f.src.decompressor.FileName())
-				}
+			} else if traceGetLatest == dt.name {
+				fmt.Printf("GetLatest(%s, %x) -> existence index is nil %s\n", dt.name.String(), k, f.src.decompressor.FileName())
 			}
 		}
 

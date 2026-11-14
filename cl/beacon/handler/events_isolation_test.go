@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,7 +42,9 @@ func TestEventStreamSubscribesOnlyTheFeedsOfItsTopics(t *testing.T) {
 	defer sub.unsubscribe()
 
 	require.Zero(t, emitters.Operation().SendSingleAttestation(&beaconevents.SingleAttestationData{}))
-	require.Equal(t, 1, emitters.State().TrySendHead(&beaconevents.HeadData{}))
+	// The state feed reaches the block buffer, which ignores head; the head feed reaches the head buffer.
+	require.Equal(t, 2, emitters.State().TrySendHead(&beaconevents.HeadData{}))
+	require.Equal(t, beaconevents.StateHead, (<-sub.head).Event)
 }
 
 // State and operation events have separate buffers: a full operation buffer does not make the stream miss a head event,
@@ -55,7 +58,7 @@ func TestEventStreamHeadIsNotCrowdedOutByOperationEvents(t *testing.T) {
 	}
 
 	require.Equal(t, 1, emitters.State().TrySendHead(&beaconevents.HeadData{}), "head event dropped behind operation events")
-	e := <-sub.state
+	e := <-sub.head
 	require.Equal(t, beaconevents.StateHead, e.Event)
 }
 
@@ -159,4 +162,120 @@ func TestEventStreamDeliversStateAndOperationTopics(t *testing.T) {
 		t.Fatal("event stream closed")
 	default:
 	}
+}
+
+// floodUntilLagged calls send, which returns how many subscribers took the event, at most limit times from several
+// goroutines, and stops at the first call that reaches fewer than subscribers, so one subscriber has lagged while still
+// subscribed.
+func floodUntilLagged(t *testing.T, send func() int, subscribers, limit int) {
+	t.Helper()
+	var sends atomic.Int64
+	var lagged atomic.Bool
+	var senders sync.WaitGroup
+	for range 4 {
+		senders.Go(func() {
+			for !lagged.Load() && sends.Add(1) <= int64(limit) {
+				if send() < subscribers {
+					lagged.Store(true)
+				}
+			}
+		})
+	}
+	senders.Wait()
+	require.True(t, lagged.Load(), "no subscriber lagged within %d events", limit)
+}
+
+// A stream that cannot take a head event is closed, so the client reconnects instead of missing the head silently.
+func TestEventStreamClosesWhenItMissesAHeadEvent(t *testing.T) {
+	a, _, handlerDone := startTopicStream(t, "head")
+	require.Eventually(t, func() bool {
+		return a.emitters.State().SendHead(&beaconevents.HeadData{}) == 1
+	}, 5*time.Second, 10*time.Millisecond, "event stream never subscribed")
+
+	// Fewer events than the write queue holds cannot close the stream through a queue overflow, so only the lag
+	// error can close it.
+	floodUntilLagged(t, func() int { return a.emitters.State().TrySendHead(&beaconevents.HeadData{}) }, 1, eventStreamWriteQueueSize-1)
+	waitDone(t, handlerDone, "the stream kept running after it missed a head event")
+}
+
+// floodEvents sends n events from several goroutines, faster than a stream drains them.
+func floodEvents(n int, send func()) {
+	var senders sync.WaitGroup
+	var sent atomic.Int64
+	for range 4 {
+		senders.Go(func() {
+			for sent.Add(1) <= int64(n) {
+				send()
+			}
+		})
+	}
+	senders.Wait()
+}
+
+// startTopicStream runs the handler for topics until the test ends.
+func startTopicStream(t *testing.T, topics string) (*ApiHandler, *collectingStreamWriter, <-chan struct{}) {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	a := &ApiHandler{emitters: beaconevents.NewEventEmitter(), beaconChainCfg: &cfg}
+	w := &collectingStreamWriter{header: http.Header{}}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/events?topics="+topics, nil)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		a.EventSourceGetV1Events(w, req)
+	}()
+	return a, w, done
+}
+
+// A stream is closed only for a dropped event of a topic it asked for. A block stream does not ask for head, and a head
+// stream does not ask for head_v2, so a flood of those must not close them.
+func TestEventStreamStaysOpenWhenAnUnrequestedHeadIsDropped(t *testing.T) {
+	for _, tc := range []struct {
+		topics string
+		flood  func(*beaconevents.EventEmitter)
+		own    func(*beaconevents.EventEmitter) int
+		topic  beaconevents.EventTopic
+	}{
+		{
+			topics: "block",
+			flood:  func(e *beaconevents.EventEmitter) { e.State().TrySendHead(&beaconevents.HeadData{}) },
+			own:    func(e *beaconevents.EventEmitter) int { return e.State().SendBlock(&beaconevents.BlockData{}) },
+			topic:  beaconevents.StateBlock,
+		},
+		{
+			topics: "head",
+			flood:  func(e *beaconevents.EventEmitter) { e.State().SendHeadV2(&beaconevents.HeadV2Data{}) },
+			own:    func(e *beaconevents.EventEmitter) int { return e.State().SendHead(&beaconevents.HeadData{}) },
+			topic:  beaconevents.StateHead,
+		},
+	} {
+		t.Run(tc.topics, func(t *testing.T) {
+			a, w, done := startTopicStream(t, tc.topics)
+			require.Eventually(t, func() bool { return tc.own(a.emitters) > 0 }, 5*time.Second, 10*time.Millisecond, "event stream never subscribed")
+
+			floodEvents(1<<14, func() { tc.flood(a.emitters) })
+			require.Positive(t, tc.own(a.emitters))
+			require.Eventually(t, func() bool { return w.count(tc.topic) >= 2 }, 5*time.Second, 10*time.Millisecond, "the stream stopped delivering its own topic")
+			select {
+			case <-done:
+				t.Fatal("the stream was closed for an event it did not ask for")
+			default:
+			}
+		})
+	}
+}
+
+// A stream with head and another state topic takes head from the head feed only, not again from the state feed.
+func TestEventStreamDeliversAHeadEventOnce(t *testing.T) {
+	a, w, _ := startTopicStream(t, "head,block")
+	require.Eventually(t, func() bool { return a.emitters.State().SendBlock(&beaconevents.BlockData{}) > 0 }, 5*time.Second, 10*time.Millisecond, "event stream never subscribed")
+	require.Eventually(t, func() bool { return w.count(beaconevents.StateBlock) == 1 }, 5*time.Second, 10*time.Millisecond)
+
+	require.Equal(t, 2, a.emitters.State().SendHead(&beaconevents.HeadData{}))
+	require.Equal(t, 1, a.emitters.State().SendBlock(&beaconevents.BlockData{}))
+	// The second block follows the state feed's copy of the head in the same buffer, so once it is written that copy
+	// has been handled. The head's own buffer is read independently, so wait for it before counting.
+	require.Eventually(t, func() bool { return w.count(beaconevents.StateBlock) == 2 }, 5*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return w.count(beaconevents.StateHead) >= 1 }, 5*time.Second, 10*time.Millisecond)
+	require.Never(t, func() bool { return w.count(beaconevents.StateHead) > 1 }, 200*time.Millisecond, 10*time.Millisecond)
 }

@@ -47,12 +47,14 @@ type blobSidecarService struct {
 	syncedDataManager *synced_data.SyncedDataManager
 	ethClock          eth_clock.EthereumClock
 	emitters          *beaconevents.EventEmitter
+	expectedProposer  func(ctx context.Context, parentRoot common.Hash, parentSlot, slot uint64) (uint64, error)
 
 	test bool
 }
 
 // NewBlobSidecarService creates a new blob sidecar service
 func NewBlobSidecarService(
+	ctx context.Context,
 	beaconCfg *clparams.BeaconChainConfig,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	syncedDataManager *synced_data.SyncedDataManager,
@@ -67,6 +69,7 @@ func NewBlobSidecarService(
 		test:              test,
 		ethClock:          ethClock,
 		emitters:          emitters,
+		expectedProposer:  newExpectedProposers(ctx, beaconCfg, forkchoiceStore, syncedDataManager).get,
 	}
 	return b
 }
@@ -85,7 +88,7 @@ func (b *blobSidecarService) IsMyGossipMessage(name string) bool {
 
 func (b *blobSidecarService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.BlobSidecar, error) {
 	obj := &cltypes.BlobSidecar{}
-	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -94,7 +97,7 @@ func (b *blobSidecarService) DecodeGossipMessage(_ peer.ID, data []byte, version
 // ProcessMessage processes a blob sidecar message
 func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint64, msg *cltypes.BlobSidecar) error {
 	if b.test {
-		return b.verifyAndStoreBlobSidecar(msg)
+		return b.verifyAndStoreBlobSidecar(ctx, msg, 0)
 	}
 
 	sidecarVersion := b.beaconCfg.GetCurrentStateVersion(msg.SignedBlockHeader.Header.Slot / b.beaconCfg.SlotsPerEpoch)
@@ -138,14 +141,14 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 		return ErrInvalidSidecarSlot
 	}
 
-	if err := b.verifyAndStoreBlobSidecar(msg); err != nil {
+	if err := b.verifyAndStoreBlobSidecar(ctx, msg, parentHeader.Slot); err != nil {
 		return err
 	}
 	b.emitters.Operation().SendBlobSidecar(msg)
 	return nil
 }
 
-func (b *blobSidecarService) verifyAndStoreBlobSidecar(msg *cltypes.BlobSidecar) error {
+func (b *blobSidecarService) verifyAndStoreBlobSidecar(ctx context.Context, msg *cltypes.BlobSidecar, parentSlot uint64) error {
 	kzgCtx := kzg.Ctx()
 
 	if !b.test && !cltypes.VerifyCommitmentInclusionProof(msg.KzgCommitment, msg.CommitmentInclusionProof, msg.Index,
@@ -162,9 +165,18 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(msg *cltypes.BlobSidecar)
 		if err := b.verifySidecarsSignature(msg.SignedBlockHeader); err != nil {
 			return err
 		}
+		// Verify proofs and the signature first so unavailable proposer state
+		// cannot turn an invalid sidecar into IGNORE.
+		header := msg.SignedBlockHeader.Header
+		expectedProposer, err := b.expectedProposer(ctx, header.ParentRoot, parentSlot, header.Slot)
+		if err != nil {
+			return err
+		}
+		if header.ProposerIndex != expectedProposer {
+			return fmt.Errorf("blob sidecar proposer index %d does not match expected proposer %d", header.ProposerIndex, expectedProposer)
+		}
 	}
 	monitor.ObserveBlobVerificationTime(start)
-	// operation is not thread safe from here.
 	return b.forkchoiceStore.AddPreverifiedBlobSidecar(msg)
 }
 

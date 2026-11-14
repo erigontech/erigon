@@ -47,7 +47,7 @@ func (s *multiBlockSource) header(ctx context.Context, hash common.Hash, number 
 	if h, ok := s.headers[number]; ok {
 		return h, nil
 	}
-	return &types.Header{}, nil
+	return nil, nil
 }
 
 // loadMultiBlockRange returns the range fixture to replay: an external

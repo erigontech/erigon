@@ -54,27 +54,6 @@ var ourCapabilities = []string{
 	"engine_getBlobsV3",
 	"engine_getBlobsV4",
 	"engine_getInclusionListV1",
-	"POST /engine/v1/payloads",
-	"POST /engine/v2/payloads",
-	"POST /engine/v3/payloads",
-	"POST /engine/v4/payloads",
-	"POST /engine/v5/payloads",
-	"GET /engine/v1/payloads/{payload_id}",
-	"GET /engine/v2/payloads/{payload_id}",
-	"GET /engine/v3/payloads/{payload_id}",
-	"GET /engine/v4/payloads/{payload_id}",
-	"GET /engine/v5/payloads/{payload_id}",
-	"GET /engine/v6/payloads/{payload_id}",
-	"POST /engine/v1/forkchoice",
-	"POST /engine/v2/forkchoice",
-	"POST /engine/v3/forkchoice",
-	"POST /engine/v4/forkchoice",
-	"POST /engine/v1/blobs",
-	"POST /engine/v2/blobs",
-	"POST /engine/v3/blobs",
-	"GET /engine/v1/inclusion-list",
-	"POST /engine/v1/client/version",
-	"POST /engine/v1/capabilities",
 }
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
@@ -184,13 +163,13 @@ func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_newpayloadv1
 func (e *EngineServer) NewPayloadV1(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, nil, nil, nil, clparams.BellatrixVersion)
+	return e.newPayload(ctx, payload, nil, nil, nil, clparams.BellatrixVersion, false)
 }
 
 // NewPayloadV2 processes new payloads (blocks) from the beacon chain with withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_newpayloadv2
 func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, nil, nil, nil, clparams.CapellaVersion)
+	return e.newPayload(ctx, payload, nil, nil, nil, clparams.CapellaVersion, false)
 }
 
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
@@ -198,7 +177,7 @@ func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.E
 func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
 ) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, nil, clparams.DenebVersion)
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, nil, clparams.DenebVersion, false)
 }
 
 // NewPayloadV4 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas and requests.
@@ -206,7 +185,7 @@ func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.E
 func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes,
 ) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.ElectraVersion)
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.ElectraVersion, false)
 }
 
 // NewPayloadV5 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas, requests and block access list.
@@ -214,7 +193,7 @@ func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.E
 func (e *EngineServer) NewPayloadV5(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes,
 ) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.GloasVersion)
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.GloasVersion, false)
 }
 
 // Returns an array of execution payload bodies referenced by their block hashes
@@ -231,7 +210,16 @@ func (e *EngineServer) GetPayloadBodiesByHashV2(ctx context.Context, hashes []co
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
 	e.engineLogSpamer.RecordRequest()
-	return e.chainRW.GetPayloadBodiesByHash(ctx, hashes)
+	bodies, err := e.chainRW.GetPayloadBodiesByHash(ctx, hashes)
+	if err != nil {
+		return nil, err
+	}
+	for i, hash := range hashes {
+		if e.isKnownBadBlock(hash) {
+			bodies[i] = nil
+		}
+	}
+	return bodies, nil
 }
 
 // Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count"
@@ -306,9 +294,9 @@ func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash)
 	return ret, nil
 }
 
-func (e *EngineServer) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellIndices hexutil.Bytes) (engine_types.BlobsBundleV3, error) {
+func (e *EngineServer) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellMask hexutil.Bytes) (engine_types.BlobsBundleV3, error) {
 	e.logger.Debug("[GetBlobsV4] Received Request", "hashes", len(blobHashes))
-	resp, err := e.getBlobs(ctx, blobHashes, clparams.GloasVersion, cellIndices)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.GloasVersion, cellMask)
 	if err != nil {
 		return nil, err
 	}

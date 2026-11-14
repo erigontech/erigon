@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 func blockNumbersFromTraces(t *testing.T, b []byte) []int {
@@ -514,6 +515,30 @@ func TestFilterBoundPastHead(t *testing.T) {
 		require.NoError(t, client.CallContext(t.Context(), &result, "trace_filter", map[string]any{"fromBlock": "0x0", "toBlock": "0x0"}))
 		require.JSONEq(t, "[]", string(result))
 	})
+}
+
+// TestFilterRangeLimit checks that a range wider than --rpc.blockrange.limit
+// returns -32602, as eth_getLogs does, and that a range at the limit is served.
+func TestFilterRangeLimit(t *testing.T) {
+	m := execmoduletester.New(t)
+	chain, err := m.GenerateChain(2, func(i int, gen *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chain))
+
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	api := NewTraceAPI(newBaseApiWithLimits(m, 1, 0, 0), m.DB, &rpccfg.TraceApiConfig{})
+	require.NoError(t, server.RegisterName("trace", api))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	var result json.RawMessage
+	err = client.CallContext(t.Context(), &result, "trace_filter", map[string]any{"fromBlock": "0x0", "toBlock": "0x2"})
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+	require.EqualError(t, err, errExceedBlockRange+": 1")
+
+	require.NoError(t, client.CallContext(t.Context(), &result, "trace_filter", map[string]any{"fromBlock": "0x1", "toBlock": "0x2"}))
 }
 
 // An explicit null for an optional trace_filter member is the same as omitting it.

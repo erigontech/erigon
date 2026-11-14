@@ -44,12 +44,15 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 
 	// Sidecar retention cuts against wall-clock, not the stage head, so a stalled
 	// stage does not retain data forever.
-	blobFloor := cfg.beaconCfg.BlobSidecarServeRangeStartSlot(currentSlot)
-	if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.BlobPruningDisabled {
-		blobFloor = 0
-	}
+	blobFloor := cfg.caplinConfig.BlobRetentionFloor(cfg.beaconCfg, currentSlot)
 	if err := cfg.blobStore.PruneBelow(blobFloor); err != nil {
 		logger.Warn("failed to prune blob sidecars", "err", err)
+	}
+	// A bounded archive also sheds blob snapshots downloaded or kept under an older, lower cutoff.
+	if cfg.caplinConfig.BlobsArchiveFromSlot > 0 {
+		if err := cfg.antiquary.RetireBlobSnapshotsBelow(blobFloor); err != nil {
+			logger.Warn("failed to retire blob snapshots", "err", err)
+		}
 	}
 	columnFloor := cfg.beaconCfg.DataColumnSidecarServeRangeStartSlot(currentSlot)
 	if keep := cfg.caplinConfig.ColumnKeepSlots; keep > 0 {

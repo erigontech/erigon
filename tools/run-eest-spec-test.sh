@@ -125,13 +125,13 @@ shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '
 	.[] | select(.shard == $s)
 	| if (."commitment-parallel" | type) != "boolean"
 		then error("shard \($s) must define boolean commitment-parallel")
-		else "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel")\t\(."no-ramdisk" // false)\t\(."expected-tests" // 0)\t\(.run // "")"
+		else "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel")\t\(."no-ramdisk" // false)\t\(."expected-tests" // 0)\t\(."evm-timeout-minutes" // 0)\t\(.run // "")"
 	end')
 if [[ -z "$shard_row" ]]; then
 	echo "shard $shard not found in $manifest" >&2
 	exit 2
 fi
-IFS=$'\t' read -r default_workers default_max commitment_parallel shard_no_ramdisk expected_tests run_regex <<<"$shard_row"
+IFS=$'\t' read -r default_workers default_max commitment_parallel shard_no_ramdisk expected_tests evm_timeout_minutes run_regex <<<"$shard_row"
 # Always set ERIGON_COMMITMENT_PARALLEL explicitly (true or false) so the shard's
 # commitment mode is pinned to the manifest, independent of whatever
 # statecfg.ExperimentalParallelCommitment defaults to at runtime. Execution is
@@ -233,7 +233,12 @@ result_file=$(mktemp)
 raw_files=()
 part_files=()
 ramdisk=""
+evm_pid=""
+watchdog_pid=""
 cleanup() {
+	# A background evm ignores SIGINT, so an interrupted script must stop it before removing its files.
+	[[ -n "$watchdog_pid" ]] && kill "$watchdog_pid" 2>/dev/null || true
+	[[ -n "$evm_pid" ]] && kill "$evm_pid" 2>/dev/null && wait "$evm_pid" 2>/dev/null || true
 	# Auto-detach Darwin ramdisk we created in this run; leave existing
 	# user-provided ones (ERIGON_EXECUTION_TESTS_TMPDIR) untouched.
 	if [[ -n "$ramdisk" && "$(uname -s)" == "Darwin" ]]; then
@@ -281,7 +286,26 @@ for path in "${paths[@]}"; do
 	part_file=$(mktemp)
 	part_files+=("$part_file")
 	rc=0
-	"$evm_bin" "$cmd" --workers "$workers" --jsonout ${extra[@]+"${extra[@]}"} "$path" > "$raw_file" || rc=$?
+	if (( evm_timeout_minutes > 0 )); then
+		# A hung run would otherwise sit silent until the job timeout and leave no trace.
+		timed_out=$(mktemp)
+		raw_files+=("$timed_out")
+		GOTRACEBACK=all "$evm_bin" "$cmd" --workers "$workers" --jsonout ${extra[@]+"${extra[@]}"} "$path" > "$raw_file" &
+		evm_pid=$!
+		# Its own stdio goes to /dev/null: after a kill, its sleep must not keep the step's output pipes open.
+		( sleep $((evm_timeout_minutes * 60)); echo yes > "$timed_out"; kill -QUIT "$evm_pid"; sleep 60; kill -KILL "$evm_pid" ) </dev/null >/dev/null 2>&1 &
+		watchdog_pid=$!
+		wait "$evm_pid" || rc=$?
+		evm_pid=""
+		kill "$watchdog_pid" 2>/dev/null || true
+		watchdog_pid=""
+		if [[ -s "$timed_out" ]]; then
+			echo "ERROR: evm still running after ${evm_timeout_minutes} min; its goroutine dump is above" >&2
+			exit 1
+		fi
+	else
+		"$evm_bin" "$cmd" --workers "$workers" --jsonout ${extra[@]+"${extra[@]}"} "$path" > "$raw_file" || rc=$?
+	fi
 	if (( rc == 66 )); then
 		echo "ERROR: data race detected (race runtime exit code 66); see WARNING: DATA RACE in the log above" >&2
 		exit 1

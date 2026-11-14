@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -115,6 +115,9 @@ func (g *countingGetter) GetOne(string, []byte) ([]byte, error) {
 func (db *singleTxRoDB) BeginRo(context.Context) (kv.Tx, error) {
 	return db.tx, nil
 }
+
+// Rollback is a no-op: singleTxRoDB hands this one tx to every warmup goroutine, and the test rolls back the base tx.
+func (*firstAccountReadErrorTx) Rollback() {}
 
 func (tx *firstAccountReadErrorTx) GetLatest(domain kv.Domain, _ []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	if domain == kv.AccountsDomain {
@@ -467,15 +470,35 @@ func TestBlockReadAheaderCarriesBlockAccessListSidecar(t *testing.T) {
 	blockHash := header.Hash()
 	bal := types.BlockAccessList{}
 	balSidecar := types.NewBlockAccessListSidecar(bal)
-	sender := common.Address{1}
+	body.Transactions[0].SetSender(accounts.InternAddress(common.Address{1}))
 	bra.AddHeaderAndBody(context.Background(), nil, nil, header, body)
 	bra.AddBlockAccessList(blockHash, balSidecar)
-	bra.AddSenders(sender[:], blockHash)
 	block, ok := bra.ReadBlockWithSenders(blockHash)
 	require.True(t, ok)
 	require.Same(t, balSidecar, block.BlockAccessListSidecar())
 	require.Equal(t, bal, block.BlockAccessList())
 	require.NotNil(t, block.BlockAccessList())
+}
+
+func TestReadBlockWithSendersNeedsASenderOnEveryTx(t *testing.T) {
+	bra := NewBlockReadAheader()
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	txns := []types.Transaction{
+		types.NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil),
+		types.NewTransaction(1, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil),
+	}
+	blockHash := header.Hash()
+	bra.AddHeaderAndBody(context.Background(), nil, nil, header, &types.Body{Transactions: txns})
+	txns[0].SetSender(accounts.InternAddress(common.Address{1}))
+	_, ok := bra.ReadBlockWithSenders(blockHash)
+	require.False(t, ok, "a tx without a sender sends the block to the DB path")
+
+	txns[1].SetSender(accounts.InternAddress(common.Address{2}))
+	block, ok := bra.ReadBlockWithSenders(blockHash)
+	require.True(t, ok)
+	sender, ok := block.Transactions()[1].GetSender()
+	require.True(t, ok)
+	require.Equal(t, common.Address{2}, sender.Value())
 }
 
 func TestBlockReadAheaderPrefersCachedBlockAccessList(t *testing.T) {
@@ -789,6 +812,23 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	require.Empty(t, got)
 }
 
+// An account without code leaves the address-to-code-hash cache alone: exec
+// never resolves code for it through that cache.
+func TestCachePopulatingGetterSkipsCodeHashSeedWithoutCode(t *testing.T) {
+	addr := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
+	eoa := accounts.Account{Nonce: 1}
+	frontier := cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })
+	for _, value := range [][]byte{accounts.SerialiseV3(&eoa), nil} {
+		sc := newTestStateCache()
+		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: value}, view: sc.View(frontier), stepSize: 16}
+		_, _, err := cpg.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		_, ok := sc.View(nil).GetAddrCodeHash(addr)
+		require.False(t, ok)
+		sc.Close()
+	}
+}
+
 func TestReadAheadGetterCurrentStepFill(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
 	stateCache := newTestStateCache()
@@ -931,7 +971,7 @@ func emptyVisibleEnd(kv.Domain) (uint64, bool) { return 0, true }
 func TestStartSendersRecovery(t *testing.T) {
 	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
 	txns := make(types.Transactions, 64)
-	want := make([]byte, 0, len(txns)*length.Addr)
+	want := make([]accounts.Address, 0, len(txns))
 	for i := range txns {
 		key, err := crypto.GenerateKey()
 		require.NoError(t, err)
@@ -940,31 +980,35 @@ func TestStartSendersRecovery(t *testing.T) {
 			GasPrice: *uint256.NewInt(1),
 		}, *signer, key)
 		require.NoError(t, err)
-		addr := crypto.PubkeyToAddress(key.PublicKey)
-		want = append(want, addr[:]...)
+		want = append(want, accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey)))
 	}
 	blockHash := common.HexToHash("0x01")
 	bra := NewBlockReadAheader()
 	bra.AddSendersRecovery(blockHash, StartSendersRecovery(context.Background(), signer, txns))
 
-	senders, ok := bra.RecoveredSenders(context.Background(), blockHash)
+	r, ok := bra.TakeSendersRecovery(blockHash)
 	require.True(t, ok)
+	senders, err := r.Wait(context.Background())
+	require.NoError(t, err)
 	require.Equal(t, want, senders)
+	_, ok = bra.TakeSendersRecovery(blockHash)
+	require.False(t, ok, "a taken recovery is not kept as a second copy of the senders")
 }
 
-func TestRecoveredSendersMissingOrInvalid(t *testing.T) {
+func TestSendersRecoveryMissingOrInvalid(t *testing.T) {
 	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
-	bra := NewBlockReadAheader()
-	_, ok := bra.RecoveredSenders(context.Background(), common.HexToHash("0x01"))
+	_, ok := NewBlockReadAheader().TakeSendersRecovery(common.HexToHash("0x01"))
 	require.False(t, ok)
 
-	unsigned := types.Transactions{&types.LegacyTx{
-		CommonTx: types.CommonTx{GasLimit: 21_000},
-		GasPrice: *uint256.NewInt(1),
-	}}
-	bra.AddSendersRecovery(common.HexToHash("0x02"), StartSendersRecovery(context.Background(), signer, unsigned))
-	_, ok = bra.RecoveredSenders(context.Background(), common.HexToHash("0x02"))
-	require.False(t, ok)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	signed, err := types.SignTx(&types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 21_000}, GasPrice: *uint256.NewInt(1)}, *signer, key)
+	require.NoError(t, err)
+	unsigned := &types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, GasLimit: 21_000}, GasPrice: *uint256.NewInt(1)}
+	r := StartSendersRecovery(context.Background(), signer, types.Transactions{signed, unsigned})
+	_, err = r.Wait(context.Background())
+	require.ErrorIs(t, err, rules.ErrInvalidBlock)
+	require.Equal(t, 1, r.FailedTx())
 }
 
 func TestStartSendersRecoveryCancelled(t *testing.T) {
@@ -979,34 +1023,10 @@ func TestStartSendersRecoveryCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	bra := NewBlockReadAheader()
-	bra.AddSendersRecovery(common.HexToHash("0x01"), StartSendersRecovery(ctx, signer, types.Transactions{txn}))
-	_, ok := bra.RecoveredSenders(context.Background(), common.HexToHash("0x01"))
-	require.False(t, ok)
-}
-
-// Execution recovers senders only for a block whose access list it can load; a header
-// that commits to a BAL whose sidecar is missing keeps the Senders stage path.
-func TestExecRecoversSendersNeedsCachedBAL(t *testing.T) {
-	parallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
-	balHash := common.Hash{0x01}
-	header := &types.Header{Number: *uint256.NewInt(1), BlockAccessListHash: &balHash}
-	require.True(t, RecoversSenders(header))
-
-	bra := NewBlockReadAheader()
-	require.False(t, bra.ExecRecoversSenders(header), "no sidecar")
-	bra.bals.Add(header.Hash(), types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.Address{0x02}}}))
-	require.True(t, bra.ExecRecoversSenders(header))
-
-	dbg.StagesOnlyBlocks = true
-	t.Cleanup(func() { dbg.StagesOnlyBlocks = false })
-	require.False(t, bra.ExecRecoversSenders(header), "execution is disabled, so the Senders stage recovers")
-
-	dbg.StagesOnlyBlocks = false
-	dbg.Exec3Parallel = false
-	require.False(t, bra.ExecRecoversSenders(header), "serial exec has no workers, so the Senders stage recovers")
+	r := StartSendersRecovery(ctx, signer, types.Transactions{txn})
+	_, err = r.Wait(context.Background())
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, -1, r.FailedTx())
 }
 
 // Validation suspends warmup before an unwind and then executes; waiting for a running warmup must not wait for that suspension.
@@ -1078,4 +1098,104 @@ func TestBlockReadAheaderWaitForRunningWarmupWaitsForBodyWarmup(t *testing.T) {
 	}
 	bra.CancelWarmup()
 	<-waited
+}
+
+func TestPerKeyWarmupKeepsSlotsTheBatchDidNotRead(t *testing.T) {
+	bal := types.BlockAccessList{{Address: common.Address{19: 1}, StorageReads: []common.Hash{{}}}}
+	warm, stripped := perKeyWarmupBAL(bal, coldState{storage: true}, true)
+	require.True(t, stripped)
+	require.Equal(t, balAccounts(bal), warm, "slots the batch read are dropped")
+	warm, stripped = perKeyWarmupBAL(bal, coldState{storage: true}, false)
+	require.False(t, stripped)
+	require.Equal(t, bal, warm, "a failed storage batch leaves the slots to the per-key warmup")
+	warm, stripped = perKeyWarmupBAL(bal, coldState{accounts: true}, false)
+	require.False(t, stripped)
+	require.Equal(t, bal, warm, "a warm storage domain keeps the slots")
+}
+
+func TestBALAccountsKeepsAccountChangesWithoutStorage(t *testing.T) {
+	a1, a2 := common.Address{19: 1}, common.Address{19: 2}
+	bal := types.BlockAccessList{
+		{Address: a1, BalanceChanges: []*types.BalanceChange{{Index: 1}}, StorageChanges: []types.SlotChanges{{}}, StorageReads: []common.Hash{{}}},
+		{Address: a2, StorageReads: []common.Hash{{}}},
+	}
+	got := balAccounts(bal)
+	require.Equal(t, types.BlockAccessList{{Address: a1, BalanceChanges: bal[0].BalanceChanges}, {Address: a2}}, got)
+	require.Len(t, bal[0].StorageChanges, 1, "the BAL itself is unchanged")
+}
+
+func TestCachePopulatingGetterSkipsKeysTheCacheHolds(t *testing.T) {
+	account := accounts.SerialiseV3(&accounts.Account{Nonce: 1})
+	source := &sharedCodeTemporalGetter{account: account}
+	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
+	existing, absent := common.Address{19: 1}, common.Address{19: 2}
+	seedFill(stateCache, kv.AccountsDomain, existing[:], account, 5)
+	seedFill(stateCache, kv.AccountsDomain, absent[:], nil, 5)
+	cpg := &cachePopulatingGetter{TemporalGetter: source, view: stateCache.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })), stepSize: 16}
+
+	got, _, err := cpg.GetLatest(kv.AccountsDomain, existing[:], kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, account, got)
+	got, _, err = cpg.GetLatest(kv.AccountsDomain, absent[:], kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.Zero(t, source.accountReads, "a key an exec worker already cached must not be read again")
+}
+
+func TestCachePopulatingGetterSeedsCodeHashOnACachedAccount(t *testing.T) {
+	code := []byte{0xaa, 0x01, 0x02, 0x03}
+	account := accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))}
+	source := &sharedCodeTemporalGetter{account: accounts.SerialiseV3(&account), code: code}
+	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
+	frontier := cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })
+	cached, other := accounts.InternAddress(common.Address{19: 1}), accounts.InternAddress(common.Address{19: 2})
+	otherValue := other.Value()
+	seedFill(stateCache, kv.AccountsDomain, otherValue[:], source.account, 5)
+	reader := state.NewReaderV3(&cachePopulatingGetter{TemporalGetter: source, view: stateCache.View(frontier), stepSize: 16})
+	_, err := reader.ReadAccountCode(cached)
+	require.NoError(t, err)
+
+	_, err = reader.ReadAccountData(other)
+	require.NoError(t, err)
+	gotCode, err := reader.ReadAccountCode(other)
+	require.NoError(t, err)
+	require.Equal(t, code, gotCode)
+	require.Equal(t, 1, source.codeReads, "a cached account must still map its address to the cached code")
+}
+
+// A cached-account hit stamps its address-to-code-hash mapping with the account's txNum, so an unwind to that txNum drops it.
+func TestCachePopulatingGetterStampsTheSeededCodeHashWithTheAccountTxNum(t *testing.T) {
+	account := accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xaa, 0x01}))}
+	value := accounts.SerialiseV3(&account)
+	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
+	addr := common.Address{19: 1}
+	seedFill(stateCache, kv.AccountsDomain, addr[:], value, 5)
+	cpg := &cachePopulatingGetter{TemporalGetter: &sharedCodeTemporalGetter{account: value}, view: stateCache.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })), stepSize: 16}
+	_, _, err := cpg.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{})
+	require.NoError(t, err)
+	_, ok := stateCache.View(nil).GetAddrCodeHash(addr[:])
+	require.True(t, ok)
+
+	stateCache.Applier().Unwind(6)
+	_, ok = stateCache.View(nil).GetAddrCodeHash(addr[:])
+	require.True(t, ok, "an unwind above the account's txNum keeps the mapping")
+	stateCache.Applier().Unwind(5)
+	_, ok = stateCache.View(nil).GetAddrCodeHash(addr[:])
+	require.False(t, ok, "an unwind to the account's txNum drops the mapping")
+}
+
+// A bounded read skips the cache, because the cached value can be newer than the bound.
+func TestCachePopulatingGetterBoundedReadSkipsAVisibleEntry(t *testing.T) {
+	addr := common.Address{19: 1}
+	cached, historical := accounts.SerialiseV3(&accounts.Account{Nonce: 2}), accounts.SerialiseV3(&accounts.Account{Nonce: 1})
+	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
+	seedFill(stateCache, kv.AccountsDomain, addr[:], cached, 5)
+	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: historical}, view: stateCache.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })), stepSize: 16}
+	got, _, err := cpg.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{}.WithMaxStep(0))
+	require.NoError(t, err)
+	require.Equal(t, historical, got)
 }

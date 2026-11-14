@@ -17,7 +17,6 @@
 package stagedsync
 
 import (
-	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -25,55 +24,17 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func armAssert(t *testing.T) {
-	prev := dbg.AssertEnabled
-	dbg.AssertEnabled = true
-	t.Cleanup(func() { dbg.AssertEnabled = prev })
-}
-
-func TestValidationSkipOracleOnReplayedBlock(t *testing.T) {
-	armAssert(t)
-	var skipCount atomic.Int64
-	previous := validationSkipHook
-	t.Cleanup(func() { validationSkipHook = previous })
-	fx, err := blockreplay.Load(fixturePath(t))
-	require.NoError(t, err)
-	require.NotNil(t, fx.Outputs)
-	block, err := fx.Block()
-	require.NoError(t, err)
-	regularTxs := len(block.Transactions())
-	validationSkipHook = func(txIdx int) {
-		if txIdx >= 1 && txIdx < regularTxs {
-			skipCount.Add(1)
-		}
-	}
-
-	r, closeFn := setupEphemeralReplay(t, fx)
-	defer closeFn()
-	tx, doms := r.newDomains(t, fx)
-	defer tx.Rollback()
-	defer doms.Close()
-
-	require.NoError(t, r.exec(tx, doms))
-	require.Greater(t, skipCount.Load(), int64(0))
-	require.NoError(t, r.verify(tx, doms, fx.Outputs))
-}
-
 const arrivalWriter, arrivalReader = 1, 3
 
 var arrivalAddr = accounts.InternAddress(common.HexToAddress("0x0a"))
 
-// newArrivalExecutor returns an executor whose reader validated a balance read of the
-// writer's value, and that result with its stamp.
 func newArrivalExecutor(t *testing.T) (*blockExecutor, *exec.TxResult) {
 	vm := state.NewVersionMap(nil)
-	vm.InitStamps(arrivalReader + 1)
 	vm.WriteBalance(arrivalAddr, state.Version{TxIndex: arrivalWriter}, *uint256.NewInt(1), true)
 
 	var rs state.ReadSet
@@ -92,7 +53,6 @@ func newArrivalExecutor(t *testing.T) (*blockExecutor, *exec.TxResult) {
 	res := &exec.TxResult{TxIn: rs}
 	valid, _, _ := be.selfLoopEvaluate(tv, res)
 	require.True(t, valid)
-	require.NotZero(t, res.ValStamp, "the worker stamps before validating")
 	return be, res
 }
 
@@ -105,41 +65,12 @@ func writeBalanceBelowReader(vm *state.VersionMap) {
 	vm.FlushVersionedWrites(ws, true)
 }
 
-func TestArrivalValidSkipsOnlyWhenNoLowerWrite(t *testing.T) {
-	be, res := newArrivalExecutor(t)
-	require.True(t, be.arrivalValid(arrivalReader, res.ValStamp))
-	require.Equal(t, 1, be.cntValidationSkip)
-
-	writeBalanceBelowReader(be.versionMap)
-	require.False(t, be.arrivalValid(arrivalReader, res.ValStamp),
-		"a lower write after the stamp forces re-validation, which sees the stale read")
-	require.Equal(t, 1, be.cntValidationSkip)
-}
-
-func TestArrivalValidOracleIgnoresLowerWriteAfterSkip(t *testing.T) {
-	armAssert(t)
-	be, res := newArrivalExecutor(t)
-	be.oracleHook = func() { writeBalanceBelowReader(be.versionMap) }
-	require.NotPanics(t, func() { require.True(t, be.arrivalValid(arrivalReader, res.ValStamp)) },
-		"a lower write landing after the skip decision is finalize's to catch, not the oracle's")
-}
-
-func TestDeliveredStampedResultSkipsArrivalValidation(t *testing.T) {
-	a := accounts.InternAddress(common.HexToAddress("0xa0"))
-	b := accounts.InternAddress(common.HexToAddress("0xb1"))
-	c := accounts.InternAddress(common.HexToAddress("0xc2"))
-	d := accounts.InternAddress(common.HexToAddress("0xd3"))
-	s := newDepsTest(t, valueTransfers([]accounts.Address{a, b}, []accounts.Address{c, d}))
-	s.stamp = true
-	s.deliverTx(0, 0, state.ReadSet{})
-	require.True(t, s.be.validateTasks.checkComplete(0))
-	require.Equal(t, 1, s.be.cntValidationSkip, "a stamped result with no lower write since must skip arrival validation")
-}
-
-func TestArrivalValidOraclePanicsOnStaleSkip(t *testing.T) {
-	armAssert(t)
+// A stale read must not commit on arrival, with or without asserts.
+func TestArrivalValidRejectsStaleRead(t *testing.T) {
+	prev := dbg.AssertEnabled
+	dbg.AssertEnabled = false
+	t.Cleanup(func() { dbg.AssertEnabled = prev })
 	be, _ := newArrivalExecutor(t)
 	writeBalanceBelowReader(be.versionMap)
-	require.Panics(t, func() { be.arrivalValid(arrivalReader, be.versionMap.WriteSeq()) },
-		"a stamp that misses a lower write must not commit a stale read under ERIGON_ASSERT")
+	require.False(t, be.validateNow(arrivalReader))
 }

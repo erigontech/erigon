@@ -35,11 +35,12 @@ import (
 )
 
 type HttpEndpointConfig struct {
-	Timeouts rpccfg.HTTPTimeouts
-	HTTPS    bool
-	CertFile string
-	KeyFile  string
-	Listener net.Listener // optional pre-created listener; if set, StartHTTPEndpoint uses it instead of creating a new one
+	Timeouts              rpccfg.HTTPTimeouts
+	HTTPS                 bool
+	AllowUnencryptedHTTP2 bool
+	CertFile              string
+	KeyFile               string
+	Listener              net.Listener // optional pre-created listener; if set, StartHTTPEndpoint uses it instead of creating a new one
 }
 
 // StartHTTPEndpoint starts the HTTP RPC endpoint.
@@ -63,14 +64,20 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 	}
 	// make sure timeout values are meaningful
 	CheckTimeouts(&cfg.Timeouts)
-	// Bundle the http server. Server.Protocols is left nil, so the default applies: HTTP/1 plus
-	// HTTP/2 over TLS. Cleartext HTTP/2 is not served; a client that negotiates gets HTTP/1.1.
 	httpSrv := &http.Server{
 		Handler:           handler,
 		ReadTimeout:       cfg.Timeouts.ReadTimeout,
 		WriteTimeout:      cfg.Timeouts.WriteTimeout,
 		IdleTimeout:       cfg.Timeouts.IdleTimeout,
 		ReadHeaderTimeout: cfg.Timeouts.ReadTimeout,
+	}
+	// Leave Protocols unset for the HTTP/1 and TLS HTTP/2 defaults. Cleartext
+	// HTTP/2 must be enabled explicitly for the Engine API.
+	if cfg.AllowUnencryptedHTTP2 {
+		httpSrv.Protocols = new(http.Protocols)
+		httpSrv.Protocols.SetHTTP1(true)
+		httpSrv.Protocols.SetHTTP2(true)
+		httpSrv.Protocols.SetUnencryptedHTTP2(true)
 	}
 	// start the HTTP server
 	go func() {

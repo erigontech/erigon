@@ -17,10 +17,10 @@
 package rpchelper
 
 import (
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -191,33 +191,32 @@ func TestLogsEvictionBatchesRemoteFilterUpdate(t *testing.T) {
 }
 
 func TestConcurrentTouchAndEviction(t *testing.T) {
-	f := newTestFilters(t)
+	synctest.Test(t, func(t *testing.T) {
+		f := newTestFilters(t)
+		_, id, err := f.SubscribePendingTxs(8, ProtocolHTTP)
+		require.NoError(t, err)
 
-	_, id, err := f.SubscribePendingTxs(8, ProtocolHTTP)
-	require.NoError(t, err)
-
-	stop := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		for {
-			select {
-			case <-stop:
-				return
-			default:
+		const timeout = 50 * time.Millisecond
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			for range 20 {
+				time.Sleep(timeout / 2)
 				f.TouchSubscription(SubscriptionID(id))
-				runtime.Gosched()
 			}
-		}
+		})
+		wg.Go(func() {
+			for range 20 {
+				time.Sleep(timeout / 2)
+				f.evictStaleSubscriptions(timeout)
+			}
+		})
+		wg.Wait()
+		_, ok := f.pendingTxsSubs.Get(id)
+		require.True(t, ok)
+
+		time.Sleep(2 * timeout)
+		f.evictStaleSubscriptions(timeout)
+		_, ok = f.pendingTxsSubs.Get(id)
+		require.False(t, ok)
 	})
-
-	deadline := time.Now().Add(200 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		f.evictStaleSubscriptions(50 * time.Millisecond)
-		runtime.Gosched()
-	}
-	close(stop)
-	wg.Wait()
-
-	_, ok := f.pendingTxsSubs.Get(id)
-	require.True(t, ok)
 }

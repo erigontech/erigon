@@ -1,14 +1,18 @@
 package state
 
 import (
+	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -316,4 +320,127 @@ func TestEIP8246_PreservedAccount_OverlaysLaterFieldWrites(t *testing.T) {
 	require.Equal(t, fieldCodeHash, obj.data.CodeHash, "account-level code hash must agree with the field-level read")
 	require.Equal(t, uint64(7), obj.data.Nonce)
 	require.Equal(t, laterCodeHash, obj.data.CodeHash)
+}
+
+// Under EIP-8246 a contract created at an absent address and destroyed in one tx leaves only its
+// kept balance, so the tx publishes for the address what a plain transfer of that balance publishes.
+func TestEIP8246_CreateDestructPublishesAPlainBalance(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	slot := accounts.InternKey(common.Hash{0x01})
+	rules := &chain.Rules{IsSpuriousDragon: true, IsCancun: true, IsAmsterdam: true}
+	for _, tc := range []struct {
+		name           string
+		removedEarlier bool
+		kept           uint64
+	}{
+		{"absent, nothing kept", false, 0},
+		{"absent, balance kept", false, 5},
+		{"removed earlier in the block, nothing kept", true, 0},
+		{"removed earlier in the block, balance kept", true, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			publish := func(run func(ibs *IntraBlockState)) ([]string, types.AccountChanges) {
+				var reader StateReader = &emptyReader{}
+				vm := NewVersionMap(nil)
+				if tc.removedEarlier {
+					acc := accounts.NewAccount()
+					reader = &sdAccountReader{addr: addr, account: &acc}
+					removal := &WriteSet{}
+					removal.SetEmptyRemoval(addr, Version{TxIndex: 1})
+					vm.FlushVersionedWrites(removal, true)
+				}
+				ibs := NewWithVersionMap(reader, vm)
+				defer ibs.Close()
+				ibs.SetTxContext(1, 2)
+				run(ibs)
+				ws, err := ibs.FinalizedWrites(rules)
+				require.NoError(t, err)
+				io := NewVersionedIO(4)
+				ibs.MergeTxIOInto(io, ws)
+				var changes types.AccountChanges
+				for _, ac := range io.AsBlockAccessList() {
+					if ac.Address == addr.Value() {
+						changes = ac
+					}
+				}
+				var out []string
+				for h := range ws.AllHeaders() {
+					if h.Address != addr {
+						continue
+					}
+					w := fmt.Sprintf("%s %x deleted=%v", h.Path, h.Key.Value(), h.Deletes())
+					if b, ok := ws.GetBalance(addr); ok && h.Path == BalancePath {
+						w += " " + b.Val.String()
+					}
+					if a, ok := ws.GetAddress(addr); ok && h.Path == AddressPath && a.Val != nil {
+						w += fmt.Sprintf(" %+v", *a.Val)
+					}
+					out = append(out, w)
+				}
+				slices.Sort(out)
+				return out, changes
+			}
+			plain, _ := publish(func(ibs *IntraBlockState) {
+				require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(tc.kept), tracing.BalanceChangeUnspecified))
+			})
+			createDestruct, changes := publish(func(ibs *IntraBlockState) {
+				require.NoError(t, ibs.CreateAccount(addr, true))
+				require.NoError(t, ibs.SetNonce(addr, 1, tracing.NonceChangeUnspecified))
+				require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
+				require.NoError(t, ibs.SetState(addr, slot, *uint256.NewInt(7)))
+				destroyed, err := ibs.Selfdestruct(addr, true)
+				require.NoError(t, err)
+				require.True(t, destroyed)
+				if tc.kept > 0 {
+					require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(tc.kept), tracing.BalanceChangeUnspecified))
+				}
+			})
+			require.Equal(t, plain, createDestruct)
+			require.Equal(t, []common.Hash{slot.Value()}, changes.StorageReads, "the dead slot stays in the access list as a read")
+			require.Empty(t, changes.StorageChanges)
+		})
+	}
+}
+
+// CREATE may target an existing account that holds storage. Under EIP-8246 its create and destroy
+// must still wipe that storage when the tx's writes are applied.
+func TestEIP8246_CreateDestructWipesTheStorageOfAnExistingAccount(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress(common.HexToAddress("0x5dead"))
+	av := addr.Value()
+	pre := accounts.NewAccount()
+	pre.Incarnation = 1
+	pre.Balance.SetUint64(10)
+	slot := common.HexToHash("0x02")
+	storageKey := slices.Concat(av[:], slot[:])
+	domains.SetTxNum(1)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&pre), 1, nil))
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{0x42}, 1, nil))
+
+	rules := &chain.Rules{IsSpuriousDragon: true, IsCancun: true, IsAmsterdam: true}
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.NoError(t, ibs.SetNonce(addr, 1, tracing.NonceChangeUnspecified))
+	require.NoError(t, ibs.SubBalance(addr, *uint256.NewInt(10), tracing.BalanceDecreaseSelfdestruct))
+	_, err := ibs.Selfdestruct(addr, true)
+	require.NoError(t, err)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeUnspecified))
+	ws, err := ibs.FinalizedWrites(rules)
+	require.NoError(t, err)
+
+	domains.SetTxNum(2)
+	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, nil, rules, false))
+	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, av[:])
+	require.NoError(t, err)
+	var acc accounts.Account
+	require.NoError(t, accounts.DeserialiseV3(&acc, enc))
+	require.Equal(t, uint64(5), acc.Balance.Uint64())
+	v, _, err := domains.GetLatest(kv.StorageDomain, tx, storageKey)
+	require.NoError(t, err)
+	require.Empty(t, v)
 }

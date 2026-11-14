@@ -954,6 +954,7 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *e
 		finishProgressBefore,
 		finishProgressAfter,
 		prevUnwindPoint,
+		nil, // the overlay's blocks are not committed yet
 	); err != nil {
 		return true, err
 	}

@@ -353,11 +353,6 @@ func (c *RwCursorPseudoDupSort) CountDuplicates() (uint64, error) {
 
 const Unlim int = -1 // const Unbounded/EOF/EndOfTable []byte = nil
 
-type StatelessRwTx interface {
-	Getter
-	Putter
-}
-
 type GetPut interface {
 	Getter
 	Putter
@@ -792,16 +787,6 @@ type BucketMigrator interface {
 	ClearTable(string) error
 }
 
-// PendingMutations in-memory storage of changes
-// Later they can either be flushed to the database or abandon
-type PendingMutations interface {
-	Putter
-	// Flush all in-memory data into `tx`
-	Flush(ctx context.Context, tx RwTx) error
-	Close()
-	BatchSize() int
-}
-
 type (
 	DBVerbosityLvl int8
 	Label          string
@@ -923,6 +908,9 @@ var ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutil
 // ErrReadTxLimitExceeded is returned by BeginRo when the read-tx semaphore is full and no slot is
 // available for a new concurrent read transaction. The RPC layer remaps this to HTTP 503 / JSON-RPC -32005.
 var ErrReadTxLimitExceeded = errors.New("read-tx limit exceeded: too many concurrent read transactions")
+
+// ErrPrefetchIncomplete reports a batch prefetch that stopped with key lookups still pending.
+var ErrPrefetchIncomplete = errors.New("batch prefetch stopped with lookups pending")
 
 // ErrInMemHistoryDisabled is returned by TemporalMemBatch history reads when the batch keeps only
 // the latest value per key, so no historical answer exists in memory. Overlay read views treat it as

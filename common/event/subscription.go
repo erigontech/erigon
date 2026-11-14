@@ -33,7 +33,8 @@ import (
 // Subscriptions can fail while established. Failures are reported through an error
 // channel. It receives a value if there is an issue with the subscription (e.g. the
 // network connection delivering the events has been closed). Only one value will ever be
-// sent.
+// sent, except ErrSubscriberLagged: a Feed subscription gets it each time it misses a value
+// sent with Feed.TrySendOrFail, at most one pending at a time, and stays active.
 //
 // The error channel is closed when the subscription ends successfully (i.e. when the
 // source of events is closed). It is also closed when Unsubscribe is called.

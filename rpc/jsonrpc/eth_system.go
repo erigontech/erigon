@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -259,7 +260,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
-	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	tx, err := api.filters.BeginRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return 0, err
 	}
@@ -327,6 +328,13 @@ func (api *APIImpl) ProtocolVersion(ctx context.Context) (hexutil.Uint, error) {
 
 // GasPrice implements eth_gasPrice. Returns the current price per gas in wei.
 func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.U256, error) {
+	tip, head, err := api.cachedTipAtHead(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if tip != nil {
+		return gasPriceAt(tip, head), nil
+	}
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
@@ -337,21 +345,64 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.U256, error) {
 	if err != nil {
 		return nil, err
 	}
-	gasResult := uint256.NewInt(0)
-	gasResult.Set(tipcap)
-	head, err := api.headerByHashAndNumber(ctx, tx, hash, number)
+	head, err = api.headerByHashAndNumber(ctx, tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
-	if head != nil && head.BaseFee != nil {
-		gasResult.Add(tipcap, head.BaseFee)
-	}
+	return gasPriceAt(tipcap, head), nil
+}
 
-	return (*hexutil.U256)(gasResult), err
+func gasPriceAt(tip *uint256.Int, head *types.Header) *hexutil.U256 {
+	price := new(uint256.Int).Set(tip)
+	if head != nil && head.BaseFee != nil {
+		price.Add(price, head.BaseFee)
+	}
+	return (*hexutil.U256)(price)
+}
+
+// cachedTipAtHead returns the cached tip and its head on a plain db tx, so a
+// hit pins no state or block files. It returns a nil tip on a miss, including a
+// head that is only in the block files.
+func (api *APIImpl) cachedTipAtHead(ctx context.Context) (*uint256.Int, *types.Header, error) {
+	tx, err := api.filters.BeginRoWithOverlay(ctx, api.db)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	cachedHash, tip := api.gasCache.GetLatest()
+	if tip == nil {
+		return nil, nil, nil
+	}
+	number := rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceHead(tx))
+	if number == nil {
+		return nil, nil, nil
+	}
+	hash, err := rawdb.ReadCanonicalHash(tx, *number)
+	if err != nil || hash != cachedHash {
+		return nil, nil, err
+	}
+	var head *types.Header
+	if api.headersLRU != nil {
+		head, _ = api.headersLRU.Get(hash)
+	}
+	if head == nil {
+		head = rawdb.ReadHeader(tx, hash, *number)
+	}
+	if head == nil {
+		return nil, nil, nil
+	}
+	return tip, head, nil
 }
 
 // MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.
 func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.U256, error) {
+	tip, _, err := api.cachedTipAtHead(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if tip != nil {
+		return (*hexutil.U256)(new(uint256.Int).Set(tip)), nil
+	}
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err

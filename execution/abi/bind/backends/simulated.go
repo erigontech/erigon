@@ -31,7 +31,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -206,13 +205,10 @@ func (b *SimulatedBackend) stateByBlockNumber(db kv.TemporalTx, blockNumber *uin
 	return newCallState(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
 }
 
-// newCallState puts a one-shot read or call on the versioned state, like the RPC call sites, unless CALL_NO_MATERIALIZE is off.
+// newCallState puts a one-shot read or call on the versioned state, like the RPC call sites.
 func newCallState(r state.StateReader) *state.IntraBlockState {
-	s := state.New(r)
-	if dbg.CallNoMaterialize {
-		s.SetVersionMap(state.NewVersionMap(nil))
-		s.SetNoConflictDetection()
-	}
+	s := state.NewWithVersionMap(r, state.NewVersionMap(nil))
+	s.SetNoConflictDetection()
 	return s
 }
 

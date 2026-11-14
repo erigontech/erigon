@@ -28,6 +28,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -194,4 +196,31 @@ func TestWorkerCancellationDuringExecutionReturnsOperationalError(t *testing.T) 
 
 	require.ErrorIs(t, result.Err, context.Canceled)
 	require.True(t, result.Operational, "cancellation is not evidence that a block is invalid")
+}
+
+type missingHeaderReader struct {
+	dbservices.FullBlockReader
+	t     *testing.T
+	calls int
+}
+
+func (r *missingHeaderReader) Header(context.Context, kv.Getter, common.Hash, uint64) (*types.Header, error) {
+	r.calls++
+	if r.calls > 1 {
+		r.t.Fatal("the lookup went on after a missing header")
+	}
+	return nil, nil
+}
+
+// A worker's BLOCKHASH lookup fails when an ancestor header is missing, instead of answering
+// a hash or looking further.
+func TestWorkerGetHashFailsOnAMissingHeader(t *testing.T) {
+	reader := &missingHeaderReader{t: t}
+	w := NewWorkerContext(t.Context(), false, nil, nil, reader, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
+	defer w.Close()
+	w.installWorkerGetHash(&TxTask{Header: &types.Header{Number: *uint256.NewInt(10)}})
+
+	_, err := w.evm.Context.GetHash(5)
+	require.ErrorContains(t, err, "not found")
+	require.Equal(t, 1, reader.calls)
 }

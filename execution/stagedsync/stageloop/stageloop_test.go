@@ -18,6 +18,7 @@ package stageloop
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -221,4 +222,13 @@ func TestHookUpdateHeadNilSafe(t *testing.T) {
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		return NewHook(t.Context(), nil, nil, nil, log.New(), nil, nil, nil, nil, nil).UpdateHead(tx, 0, false)
 	}))
+}
+
+func TestBlockRangeAnnouncedOncePerMinuteDuringSync(t *testing.T) {
+	h := &Hook{lastAnnouncedBlockRangeLatestNumber: 100, lastAnnouncedBlockRangeTime: time.Now()}
+	require.False(t, h.blockRangeAnnounceDue(100, 200, false), "catch-up progress alone waits for the minute")
+	require.True(t, h.blockRangeAnnounceDue(100, 200, true), "a synced node announces every 32 blocks")
+	h.lastAnnouncedBlockRangeTime = time.Now().Add(-time.Minute)
+	require.True(t, h.blockRangeAnnounceDue(100, 101, false))
+	require.False(t, h.blockRangeAnnounceDue(100, 101, true), "a synced node is not announced by time")
 }

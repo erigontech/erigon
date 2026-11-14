@@ -166,8 +166,8 @@ func (c *EngineAPIRPCClient) GetBlobsV3(ctx context.Context, blobHashes []common
 	return callValue[engine_types.BlobsBundleV2](ctx, c.client, rpc_helper.EngineGetBlobsV3, blobHashes)
 }
 
-func (c *EngineAPIRPCClient) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellIndices hexutil.Bytes) (engine_types.BlobsBundleV3, error) {
-	return callValue[engine_types.BlobsBundleV3](ctx, c.client, rpc_helper.EngineGetBlobsV4, blobHashes, cellIndices)
+func (c *EngineAPIRPCClient) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellMask hexutil.Bytes) (engine_types.BlobsBundleV3, error) {
+	return callValue[engine_types.BlobsBundleV3](ctx, c.client, rpc_helper.EngineGetBlobsV4, blobHashes, cellMask)
 }
 
 func (c *EngineAPIRPCClient) GetInclusionListV1(ctx context.Context) ([]hexutil.Bytes, error) {

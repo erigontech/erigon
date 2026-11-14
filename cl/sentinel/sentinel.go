@@ -192,7 +192,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 	go s.listenForPeers()
 	go s.proactiveSubnetPeerSearch() // Proactively search for peers when subnet coverage is low
 	_, connected, _ := s.GetPeersCount()
-	recordPeerMetrics(connected)
+	recordPeerMetrics(connected, s.peerCountsByDirection(""))
 	go s.updatePeerMetrics()
 	//go s.forkWatcher()
 
@@ -210,7 +210,7 @@ func (s *Sentinel) updatePeerMetrics() {
 			return
 		case <-ticker.C:
 			_, connected, _ := s.GetPeersCount()
-			recordPeerMetrics(connected)
+			recordPeerMetrics(connected, s.peerCountsByDirection(""))
 		}
 	}
 }
@@ -225,9 +225,44 @@ func (s *Sentinel) String() string {
 	return s.listener.Self().String()
 }
 
-func (s *Sentinel) HasTooManyPeers() bool {
-	active, _, _ := s.GetPeersCount()
-	return active >= int(s.cfg.MaxPeerCount)
+type peerCounts struct {
+	inbound  int
+	outbound int
+}
+
+func (c peerCounts) total() int {
+	return c.inbound + c.outbound
+}
+
+func outboundReserve(maxPeers int) int {
+	return maxPeers/5 + min(maxPeers%5, 1)
+}
+
+func canAcceptInbound(c peerCounts, maxPeers int) bool {
+	return c.inbound < maxPeers-outboundReserve(maxPeers) && c.total() < maxPeers
+}
+
+func wantsOutbound(c peerCounts, maxPeers int) bool {
+	return c.total() < maxPeers || c.outbound < outboundReserve(maxPeers)
+}
+
+func peerIsInbound(conns []network.Conn) bool {
+	return len(conns) > 0 && conns[0].Stat().Direction != network.DirOutbound
+}
+
+func (s *Sentinel) peerCountsByDirection(exclude peer.ID) peerCounts {
+	var counts peerCounts
+	for _, pid := range s.p2p.Host().Network().Peers() {
+		if pid == exclude {
+			continue
+		}
+		if peerIsInbound(s.p2p.Host().Network().ConnsToPeer(pid)) {
+			counts.inbound++
+		} else {
+			counts.outbound++
+		}
+	}
+	return counts
 }
 
 func (s *Sentinel) GetPeersCount() (active int, connected int, disconnected int) {
@@ -261,11 +296,10 @@ func (s *Sentinel) GetPeersInfos() *sentinelproto.PeersInfoResponse {
 		if s.p2p.Host().Network().Connectedness(p) != network.Connected {
 			entry.State = "disconnected"
 		}
-		conns := s.p2p.Host().Network().ConnsToPeer(p)
-		if len(conns) == 0 || conns[0].Stat().Direction == network.DirOutbound {
-			entry.Direction = "outbound"
-		} else {
+		if peerIsInbound(s.p2p.Host().Network().ConnsToPeer(p)) {
 			entry.Direction = "inbound"
+		} else {
+			entry.Direction = "outbound"
 		}
 		if node, ok := s.pidToEnr.Load(p); ok {
 			entry.Enr = node.(*enode.Node).String()

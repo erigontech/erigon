@@ -115,7 +115,9 @@ func (d *peerdas) custodyBackfillWorker(ctx context.Context) {
 // serve range, and queues the blocks that commit to blobs and miss their columns for the column
 // sync worker. It waits while the queue holds maxBackfillQueued roots below the maximum backoff:
 // roots at the maximum backoff are retried once an epoch and may never complete, so they do not
-// hold the walk.
+// hold the walk. backfillSideBranchBlocks queues the stored blocks that are not canonical at that
+// moment, before the wait for the canonical chain and again after it, since a canonical root can
+// be reorged out during the wait.
 func (d *peerdas) backfillCustodyColumns(ctx context.Context, fromSlot, toSlot uint64) {
 	if d.indiciesDB == nil || d.blockReader == nil {
 		return
@@ -124,10 +126,12 @@ func (d *peerdas) backfillCustodyColumns(ctx context.Context, fromSlot, toSlot u
 	if currentSlot/d.beaconConfig.SlotsPerEpoch < d.beaconConfig.FuluForkEpoch {
 		return // no block has columns before Fulu
 	}
+	fromSlot = max(fromSlot, d.beaconConfig.DataColumnSidecarServeRangeStartSlot(currentSlot))
+	d.backfillSideBranchBlocks(ctx, fromSlot, toSlot)
 	if !d.waitForCanonicalSlot(ctx, toSlot) {
 		return
 	}
-	fromSlot = max(fromSlot, d.beaconConfig.DataColumnSidecarServeRangeStartSlot(currentSlot))
+	d.backfillSideBranchBlocks(ctx, fromSlot, toSlot)
 	queued := 0
 	for slot := toSlot; slot >= fromSlot; slot-- {
 		for d.blocksToCheckSync.activeLen() >= maxBackfillQueued {
@@ -187,10 +191,9 @@ func (d *peerdas) waitForCanonicalSlot(ctx context.Context, slot uint64) bool {
 	return ctx.Err() == nil
 }
 
-// backfillBlock returns the canonical block at slot if it commits to blobs, read without its
-// execution payload. Its root comes from the canonical index, since such a body does not hash
-// to it. A Gloas block commits to blobs in its bid, but its columns exist only if the payload was
-// revealed, so it is returned only once its envelope was processed.
+// backfillBlock returns the canonical block at slot, read without its execution payload, if
+// newBackfillColumnBlock accepts it. Its root comes from the canonical index, since such a body
+// does not hash to it.
 func (d *peerdas) backfillBlock(ctx context.Context, slot uint64) (*backfillColumnBlock, error) {
 	var block *backfillColumnBlock
 	err := d.indiciesDB.View(ctx, func(tx kv.Tx) error {
@@ -199,22 +202,120 @@ func (d *peerdas) backfillBlock(ctx context.Context, slot uint64) (*backfillColu
 			return err
 		}
 		body, err := d.blockReader.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
-		if err != nil || body == nil || body.Version() < clparams.FuluVersion {
+		if err != nil || body == nil {
 			return err
 		}
-		commitments := body.GetBlobKzgCommitments()
-		if commitments == nil || commitments.Len() == 0 {
-			return nil
-		}
-		if body.Version() >= clparams.GloasVersion {
-			// The envelope writes the execution block hash of a Gloas block.
-			payloadHash, err := beacon_indicies.ReadExecutionBlockHash(tx, root)
-			if err != nil || payloadHash == (common.Hash{}) {
-				return err
-			}
-		}
-		block = &backfillColumnBlock{version: body.Version(), slot: slot, root: root, commitments: commitments, signature: body.BlockSignature()}
-		return nil
+		block, err = newBackfillColumnBlock(tx, slot, root, body)
+		return err
 	})
 	return block, err
+}
+
+// newBackfillColumnBlock returns the column sync entry of block, or nil if it has no columns to
+// fetch: it predates Fulu or commits to no blobs, or it is a Gloas block whose envelope was not
+// processed (a Gloas block commits to blobs in its bid, but its columns exist only if the payload
+// was revealed).
+func newBackfillColumnBlock(tx kv.Tx, slot uint64, root common.Hash, block *cltypes.SignedBeaconBlock) (*backfillColumnBlock, error) {
+	if block.Version() < clparams.FuluVersion {
+		return nil, nil
+	}
+	commitments := block.GetBlobKzgCommitments()
+	if commitments == nil || commitments.Len() == 0 {
+		return nil, nil
+	}
+	if block.Version() >= clparams.GloasVersion {
+		// The envelope writes the execution block hash of a Gloas block.
+		payloadHash, err := beacon_indicies.ReadExecutionBlockHash(tx, root)
+		if err != nil || payloadHash == (common.Hash{}) {
+			return nil, err
+		}
+	}
+	return &backfillColumnBlock{version: block.Version(), slot: slot, root: root, commitments: commitments, signature: block.BlockSignature()}, nil
+}
+
+// backfillSideBranchBlocks queues, newest slot first, the stored blocks that are not canonical at
+// that moment, are held by fork choice, commit to blobs and miss their columns. This includes
+// blocks that the fork choice stage has not yet marked canonical. It never waits for room and ends
+// once the queue holds half of maxBackfillQueued, so these roots never take more than half of the
+// room the canonical walk has.
+func (d *peerdas) backfillSideBranchBlocks(ctx context.Context, fromSlot, toSlot uint64) {
+	if d.forkChoice == nil {
+		return
+	}
+	sideQuotaReached := func() bool { return d.blocksToCheckSync.activeLen() >= maxBackfillQueued/2 }
+	queued := 0
+	for slot := toSlot; slot >= fromSlot && ctx.Err() == nil && !sideQuotaReached(); slot-- {
+		for _, block := range d.sideBranchBlocks(ctx, slot) {
+			if sideQuotaReached() {
+				break
+			}
+			available, err := d.IsDataAvailable(slot, block.root)
+			switch {
+			case err != nil:
+				log.Warn("[custodyBackfill] failed to check the stored columns, skipping the side-branch block", "slot", slot, "blockRoot", block.root, "err", err)
+			case !available:
+				d.blocksToCheckSync.add(block.root, block, time.Now())
+				queued++
+			}
+		}
+		if slot == 0 {
+			break
+		}
+	}
+	if queued > 0 {
+		log.Debug("[custodyBackfill] queued stored non-canonical blocks missing custody columns", "from", fromSlot, "to", toSlot, "blocks", queued)
+	}
+}
+
+// sideBranchBlocks returns the stored blocks at slot, other than the canonical one, that
+// sideBranchBlock accepts. An unreadable root is logged and skipped.
+func (d *peerdas) sideBranchBlocks(ctx context.Context, slot uint64) []*backfillColumnBlock {
+	var blocks []*backfillColumnBlock
+	err := d.indiciesDB.View(ctx, func(tx kv.Tx) error {
+		canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+		if err != nil {
+			return err
+		}
+		roots, err := beacon_indicies.ReadBlockRootsAtSlot(tx, slot)
+		if err != nil {
+			return err
+		}
+		for _, root := range roots {
+			if root == canonicalRoot {
+				continue
+			}
+			block, err := d.sideBranchBlock(tx, root)
+			if err != nil {
+				log.Warn("[custodyBackfill] failed to read a side-branch block, skipping it", "slot", slot, "blockRoot", root, "err", err)
+			} else if block != nil {
+				blocks = append(blocks, block)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		log.Warn("[custodyBackfill] failed to read the side-branch blocks, skipping the slot", "slot", slot, "err", err)
+	}
+	return blocks
+}
+
+// sideBranchBlock returns the entry for the block with the given root if fork choice holds it and
+// newBackfillColumnBlock accepts it, or nil. The block comes from fork choice, but its signature
+// from the stored header: fork choice may hold a block whose signature was not yet checked, and
+// the stored header is written once the block is accepted.
+func (d *peerdas) sideBranchBlock(tx kv.Tx, root common.Hash) (*backfillColumnBlock, error) {
+	block, ok := d.forkChoice.GetBlock(root)
+	if !ok {
+		return nil, nil
+	}
+	entry, err := newBackfillColumnBlock(tx, block.Block.Slot, root, block)
+	if err != nil || entry == nil {
+		return nil, err
+	}
+	header, _, err := beacon_indicies.ReadSignedHeaderByBlockRoot(tx, root)
+	if err != nil || header == nil {
+		return nil, err
+	}
+	entry.signature = header.Signature
+	return entry, nil
 }

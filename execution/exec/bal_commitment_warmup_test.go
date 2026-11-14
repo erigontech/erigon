@@ -153,7 +153,7 @@ func TestWarmBALCommitmentReadsCommitmentDomain(t *testing.T) {
 		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
 	}}
 
-	require.NoError(t, warmBALCommitment(t.Context(), db, bal, 2))
+	require.NoError(t, warmBALCommitment(t.Context(), db, balCommitmentWarmupKeys(bal), 2))
 
 	tx.mu.Lock()
 	defer tx.mu.Unlock()
@@ -178,7 +178,7 @@ func TestWarmBALCommitmentCollectsWorkerFactoryErrors(t *testing.T) {
 		},
 	}
 
-	err := warmBALCommitment(t.Context(), db, bal, 2)
+	err := warmBALCommitment(t.Context(), db, balCommitmentWarmupKeys(bal), 2)
 	require.ErrorIs(t, err, firstErr)
 	require.ErrorIs(t, err, secondErr)
 }
@@ -189,7 +189,7 @@ func TestWarmBALCommitmentSkipsAnEndedContext(t *testing.T) {
 	cancel()
 	db := &commitmentBeginFuncDB{begin: func(context.Context) (kv.Tx, error) { return nil, errors.New("unexpected BeginRo") }}
 
-	err := warmBALCommitment(ctx, db, threeAccountChanges(), 3)
+	err := warmBALCommitment(ctx, db, balCommitmentWarmupKeys(threeAccountChanges()), 3)
 
 	require.Equal(t, context.Canceled, err)
 	require.Zero(t, db.calls.Load())
@@ -203,7 +203,7 @@ func TestWarmBALCommitmentReportsACancellationOnce(t *testing.T) {
 		return nil, context.Canceled
 	}}
 
-	err := warmBALCommitment(ctx, db, threeAccountChanges(), 3)
+	err := warmBALCommitment(ctx, db, balCommitmentWarmupKeys(threeAccountChanges()), 3)
 
 	require.Equal(t, context.Canceled, err)
 }
@@ -218,7 +218,7 @@ func TestWarmBALCommitmentReportsAWorkerErrorOnce(t *testing.T) {
 		return nil, kv.ErrReadTxLimitExceeded
 	}}
 
-	err := warmBALCommitment(t.Context(), db, threeAccountChanges(), 3)
+	err := warmBALCommitment(t.Context(), db, balCommitmentWarmupKeys(threeAccountChanges()), 3)
 
 	require.Equal(t, int64(3), db.calls.Load())
 	require.Equal(t, kv.ErrReadTxLimitExceeded, err)
@@ -229,7 +229,7 @@ func TestWarmBALCommitmentReportsAWorkerErrorOnce(t *testing.T) {
 func TestWarmBALCommitmentReportsAnErrorMessageOnce(t *testing.T) {
 	db := &commitmentBeginFuncDB{begin: func(context.Context) (kv.Tx, error) { return nil, errors.New("db closed") }}
 
-	err := warmBALCommitment(t.Context(), db, threeAccountChanges(), 3)
+	err := warmBALCommitment(t.Context(), db, balCommitmentWarmupKeys(threeAccountChanges()), 3)
 
 	require.EqualError(t, err, "db closed")
 }
@@ -299,7 +299,7 @@ func TestWarmBALCommitmentUsesAvailableBranchCache(t *testing.T) {
 		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
 	}}
 
-	require.NoError(t, warmBALCommitment(t.Context(), db, bal, 1))
+	require.NoError(t, warmBALCommitment(t.Context(), db, balCommitmentWarmupKeys(bal), 1))
 	require.Positive(t, tx.calls)
 	require.True(t, tx.opts.BranchCache())
 }
@@ -320,6 +320,207 @@ func TestBranchPrefetchReadsTouchedKeysThroughBranchCache(t *testing.T) {
 
 	require.Positive(t, tx.calls, "a touched key's path is read")
 	require.True(t, tx.opts.BranchCache(), "reads fill the shared BranchCache the calculator consults")
+}
+
+type coldPagesPrefetcher struct {
+	coldPerKey int
+	err        error
+}
+
+func (p coldPagesPrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, error) {
+	return p.coldPerKey * len(keys), p.err
+}
+
+func TestTrieMostlyResidentSkipsAResidentTrie(t *testing.T) {
+	keys := balCommitmentWarmupKeys(threeAccountChanges())
+	require.True(t, trieMostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, keys))
+	require.False(t, trieMostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, keys))
+}
+
+func TestBALPrefetchKeys(t *testing.T) {
+	a1, a2 := common.Address{19: 1}, common.Address{19: 2}
+	s1, s2, s3 := common.Hash{31: 1}, common.Hash{31: 2}, common.Hash{31: 3}
+	bal := types.BlockAccessList{
+		{Address: a1, StorageChanges: []types.SlotChanges{{Slot: accounts.InternKey(s1)}}, StorageReads: []common.Hash{s2}},
+		{Address: a2, StorageReads: []common.Hash{s3}},
+	}
+	accs, slots := balPrefetchKeys(bal)
+	require.Equal(t, [][]byte{a1[:], a2[:]}, accs)
+	require.Equal(t, [][]byte{append(a1[:], s1[:]...), append(a1[:], s2[:]...), append(a2[:], s3[:]...)}, slots)
+
+	// Keys are independent: appending to one must not overwrite its neighbour.
+	_ = append(slots[0], 0xff)
+	require.Equal(t, append(a1[:], s2[:]...), slots[1])
+}
+
+func TestBALPrefetchSampleIsTheEvenSampleOfAllKeys(t *testing.T) {
+	bal := make(types.BlockAccessList, 700)
+	for i := range bal {
+		bal[i].Address = common.Address{18: byte(i >> 8), 19: byte(i)}
+		for j := range i % 5 {
+			bal[i].StorageChanges = append(bal[i].StorageChanges, types.SlotChanges{Slot: accounts.InternKey(common.Hash{30: byte(j), 31: byte(i)})})
+			bal[i].StorageReads = append(bal[i].StorageReads, common.Hash{29: 1, 30: byte(j), 31: byte(i)})
+		}
+	}
+	accs, slots := balPrefetchKeys(bal)
+	sampleAccs, sampleSlots := balPrefetchSample(bal)
+	require.Equal(t, sampleEvenly(accs, 2*residencySampleKeys), sampleAccs)
+	require.Equal(t, sampleEvenly(slots, 2*residencySampleKeys), sampleSlots)
+}
+
+func TestBALPrefetchKeysOfAnEmptyBAL(t *testing.T) {
+	accs, slots := balPrefetchKeys(nil)
+	require.Empty(t, accs)
+	require.Empty(t, slots)
+}
+
+// coldStorageTriePrefetcher reports a cold page only for prefixes below the storage root.
+type coldStorageTriePrefetcher struct{}
+
+func (coldStorageTriePrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, error) {
+	cold := 0
+	for _, k := range keys {
+		if len(k) > storageTrieDepth/2 {
+			cold++
+		}
+	}
+	return cold, nil
+}
+
+func TestTrieMostlyResidentSeesAColdStorageTrieOfOneAccount(t *testing.T) {
+	var keys [][]byte
+	for i := range 64 {
+		k := make([]byte, 128)
+		k[64], k[65], k[66] = byte(i>>4)&0xf, byte(i)&0xf, 3
+		keys = append(keys, k)
+	}
+	require.False(t, trieMostlyResident(context.Background(), coldStorageTriePrefetcher{}, keys))
+}
+
+func TestTrieMostlyResidentWithoutKeysSkipsTheWalk(t *testing.T) {
+	require.True(t, trieMostlyResident(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, nil))
+}
+
+func TestSampleColdCountsColdPagesPerSampledKey(t *testing.T) {
+	keys := make([][]byte, 10_000)
+	for i := range keys {
+		keys[i] = []byte{byte(i >> 8), byte(i)}
+	}
+	sample := sampleEvenly(keys, residencySampleKeys)
+	require.Len(t, sample, residencySampleKeys)
+	require.Equal(t, keys[0], sample[0])
+	require.Len(t, sampleEvenly(keys[:2*residencySampleKeys-1], residencySampleKeys), residencySampleKeys)
+	require.Len(t, sampleEvenly(keys[:100], residencySampleKeys), 100)
+	for _, c := range []struct {
+		coldPerKey int
+		sample     [][]byte
+		want       bool
+	}{{0, sample, false}, {1, sample, true}, {1, nil, false}} {
+		got, err := sampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: c.coldPerKey}, kv.StorageDomain, c.sample)
+		require.NoError(t, err)
+		require.Equal(t, c.want, got, "coldPerKey=%d keys=%d", c.coldPerKey, len(c.sample))
+	}
+}
+
+// sharedPagesPrefetcher finds cold pages only on its first call: pages that all keys share,
+// which the first probe reads.
+type sharedPagesPrefetcher struct{ calls *atomic.Int32 }
+
+func (p sharedPagesPrefetcher) PrefetchLatest(_ context.Context, _ kv.Domain, keys [][]byte) (int, error) {
+	if p.calls.Add(1) == 1 {
+		return len(keys), nil
+	}
+	return 0, nil
+}
+
+func TestStateSampleColdIgnoresPagesTheFirstProbeRead(t *testing.T) {
+	keys := make([][]byte, 2*residencySampleKeys)
+	for i := range keys {
+		keys[i] = []byte{byte(i >> 8), byte(i)}
+	}
+	var calls atomic.Int32
+	require.False(t, stateSampleCold(context.Background(), sharedPagesPrefetcher{calls: &calls}, nil, keys, 0, 10*len(keys)).any())
+}
+
+func TestStateSampleColdKeepsThePerKeyWarmupWhenTheSampleReadEveryKey(t *testing.T) {
+	keys := [][]byte{{1}, {2}, {3}}
+	cold := coldPagesPrefetcher{coldPerKey: 1}
+	require.False(t, stateSampleCold(context.Background(), cold, nil, keys, 0, len(keys)).any(), "the probes already read every page of the domain")
+	require.True(t, stateSampleCold(context.Background(), cold, nil, keys, 0, 10*len(keys)).any())
+}
+
+// domainErrPrefetcher reports every page cold and fails its reads in one domain.
+type domainErrPrefetcher struct{ failing kv.Domain }
+
+func (p domainErrPrefetcher) PrefetchLatest(_ context.Context, domain kv.Domain, keys [][]byte) (int, error) {
+	if domain == p.failing {
+		return len(keys), errors.New("read failed")
+	}
+	return len(keys), nil
+}
+
+func TestStateSampleColdKeepsThePerKeyWarmupWhenOneDomainCannotRead(t *testing.T) {
+	keys := [][]byte{{1}, {2}, {3}}
+	for _, failing := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		require.False(t, stateSampleCold(context.Background(), domainErrPrefetcher{failing: failing}, keys, keys, 1000, 1000).any(), "failing %s", failing)
+	}
+}
+
+// domainColdPrefetcher reports every page cold in one domain and none in the others.
+type domainColdPrefetcher struct{ cold kv.Domain }
+
+func (p domainColdPrefetcher) PrefetchLatest(_ context.Context, domain kv.Domain, keys [][]byte) (int, error) {
+	if domain == p.cold {
+		return len(keys), nil
+	}
+	return 0, nil
+}
+
+func TestStateSampleColdGatesEachDomain(t *testing.T) {
+	keys := [][]byte{{1}, {2}, {3}}
+	require.Equal(t, coldState{storage: true}, stateSampleCold(context.Background(), domainColdPrefetcher{cold: kv.StorageDomain}, keys, keys, 1000, 1000))
+	require.Equal(t, coldState{accounts: true}, stateSampleCold(context.Background(), domainColdPrefetcher{cold: kv.AccountsDomain}, keys, keys, 1000, 1000))
+}
+
+func TestStateSampleColdKeepsThePerKeyWarmupWhenTheBatchCannotRead(t *testing.T) {
+	keys := [][]byte{{1}, {2}, {3}}
+	broken := coldPagesPrefetcher{coldPerKey: 1, err: errors.New("no batch ring")}
+	require.False(t, stateSampleCold(context.Background(), broken, keys, keys, 1000, 1000).any())
+}
+
+func TestStateSampleColdPicksTheBatchPrefetchOnlyForColdState(t *testing.T) {
+	keys := [][]byte{{1}, {2}, {3}}
+	require.False(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 0}, keys, keys, 1000, 1000).any())
+	require.True(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, keys, nil, 1000, 0).any())
+	require.False(t, stateSampleCold(context.Background(), coldPagesPrefetcher{coldPerKey: 1}, nil, nil, 0, 0).any(), "no state keys: nothing to batch")
+}
+
+// prefetcherTx hands p to the code under test as its AggTx.
+type prefetcherTx struct {
+	kv.TemporalTx
+	p latestPrefetcher
+}
+
+func (t prefetcherTx) AggTx() any { return t.p }
+func (prefetcherTx) Rollback()    {}
+
+// prefetcherDB opens read txs whose AggTx is p.
+type prefetcherDB struct {
+	kv.RoDB
+	p latestPrefetcher
+}
+
+func (d prefetcherDB) BeginRo(context.Context) (kv.Tx, error) { return prefetcherTx{p: d.p}, nil }
+
+func TestPrefetchKeysKeepsTheFirstReadError(t *testing.T) {
+	keys := make([][]byte, 4*prefetchPar) // spread over every planner tx
+	for i := range keys {
+		keys[i] = []byte{byte(i)}
+	}
+	parent := prefetcherTx{p: coldPagesPrefetcher{}}
+	failing := prefetcherDB{p: domainErrPrefetcher{failing: kv.CommitmentDomain}}
+	require.Error(t, prefetchKeys(context.Background(), failing, parent, kv.CommitmentDomain, keys), "an error from a planner's own tx")
+	require.NoError(t, prefetchKeys(context.Background(), prefetcherDB{p: coldPagesPrefetcher{}}, parent, kv.CommitmentDomain, keys))
 }
 
 // branchTx serves raw commitment branches from a small trie: compact prefix -> child bitmap.
@@ -346,4 +547,12 @@ func TestKeysWithChildKeepsKeysWhoseBranchHasTheirNextNibble(t *testing.T) {
 	keys := [][]byte{{1, 2, 0}, {1, 5, 0}, {3, 0, 0}, {4}}
 	got := keysWithChild(context.Background(), nil, tx, keys, 1)
 	require.Equal(t, [][]byte{{1, 2, 0}}, got, "1-5 has no child at branch 1, 3 has no branch, 4 ends above depth 1")
+}
+
+func TestFirstFailurePrefersAReadFailureOverAnIncompleteBatch(t *testing.T) {
+	failed := errors.New("io_uring read failed")
+	require.Equal(t, failed, firstFailure(nil, kv.ErrPrefetchIncomplete, failed))
+	require.Equal(t, failed, firstFailure(context.Canceled, failed), "a cancelled chunk does not hide a read failure")
+	require.Equal(t, kv.ErrPrefetchIncomplete, firstFailure(nil, kv.ErrPrefetchIncomplete))
+	require.NoError(t, firstFailure(nil, nil))
 }

@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"reflect"
 	"runtime"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -589,7 +593,7 @@ func TestNoBump_ValuePathKeepsVersionUnlessSelfDestructed(t *testing.T) {
 		require.NotNil(t, e)
 		c, ok := e.Balance.Get(5)
 		require.True(t, ok, "a balance cell exists at txIndex 5")
-		return c.incarnation
+		return c.loadInc()
 	}
 
 	t.Run("fresh create equal-value re-exec keeps the balance cell version", func(t *testing.T) {
@@ -633,7 +637,7 @@ func TestNoBump_CreateAccountMarker(t *testing.T) {
 	balCellInc := func(vm *VersionMap, addr accounts.Address) Incarnation {
 		c, ok := vm.load(addr).Balance.Get(5)
 		require.True(t, ok)
-		return c.incarnation
+		return c.loadInc()
 	}
 
 	t.Run("fresh address keeps the balance version", func(t *testing.T) {
@@ -676,14 +680,14 @@ func TestNoBump_CompleteFlushKeepsEqualValueVersion(t *testing.T) {
 	flush(vm, 0, 100, false)
 	flush(vm, 1, 100, false)
 	flush(vm, 1, 100, true)
-	require.Equal(t, Incarnation(0), cell(vm).incarnation, "an equal value at commit keeps the version")
+	require.Equal(t, Incarnation(0), cell(vm).loadInc(), "an equal value at commit keeps the version")
 	require.Equal(t, FlagDone, cell(vm).loadFlag())
 
 	vm = NewVersionMap(nil)
 	flush(vm, 0, 100, false)
 	flush(vm, 1, 100, false)
 	flush(vm, 1, 101, true)
-	require.Equal(t, Incarnation(1), cell(vm).incarnation, "a changed value at commit re-versions")
+	require.Equal(t, Incarnation(1), cell(vm).loadInc(), "a changed value at commit re-versions")
 }
 
 // TestOriginStorageIsWriteOnce pins the other half of the structural guarantee: the
@@ -805,6 +809,51 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	require.Equal(t, MVReadResultDependency, res2.Status(),
 		"invalid TX flush should produce Estimate entries")
 	require.Equal(t, 7, res2.DepIdx())
+}
+
+func TestFlushEstimateRacingMarkWritesCompleteKeepsDone(t *testing.T) {
+	prevAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = false
+	t.Cleanup(func() { dbg.AssertEnabled = prevAssert })
+
+	addr := getAddress(45)
+	vm := NewVersionMap(nil)
+	writes := newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
+	)
+	rerun := newWriteSet(cloneVW(writes.balance[addr]))
+	vm.FlushVersionedWrites(writes, false)
+	vm.MarkWritesValidated(writes, nil)
+	cell := writes.balance[addr].cell
+	const iterations = 10000
+	downgraded := 0
+	for range iterations {
+		cell.setState(1, FlagValidated)
+		var ready atomic.Int32
+		var workers sync.WaitGroup
+		workers.Go(func() {
+			ready.Add(1)
+			for ready.Load() != 2 {
+				runtime.Gosched()
+			}
+			for range 16 {
+				vm.FlushVersionedWrites(rerun, false)
+			}
+		})
+		workers.Go(func() {
+			ready.Add(1)
+			for ready.Load() != 2 {
+				runtime.Gosched()
+			}
+			runtime.Gosched()
+			vm.MarkWritesComplete(writes)
+		})
+		workers.Wait()
+		if cell.loadFlag() != FlagDone {
+			downgraded++
+		}
+	}
+	require.Zerof(t, downgraded, "%d of %d iterations downgraded Done", downgraded, iterations)
 }
 
 func TestMarkWritesCompleteRunsUnderReadersOfTheEntry(t *testing.T) {
@@ -2305,4 +2354,438 @@ func TestMarkWritesCompleteWaitsForReadersOfACreatedThenDestroyedEntry(t *testin
 	}
 	e.mu.RUnlock()
 	<-done
+}
+
+// An account's Root is derived by commitment, not part of the versioned value, so completing
+// an Address cell with an account that differs only in Root is not a one-value-per-version violation.
+func TestOneValuePerVersion_AddressCellIgnoresRoot(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	addr := getAddress(57)
+	vm := NewVersionMap(nil)
+	ver := Version{TxIndex: 5, Incarnation: 1}
+
+	published := newWriteSet(&VersionedWrite[*accounts.Account]{
+		WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Key: accounts.NilKey, Version: ver},
+		Val:         &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash, Root: empty.RootHash},
+	})
+	vm.FlushVersionedWrites(published, false)
+
+	zeroRoot := newWriteSet(&VersionedWrite[*accounts.Account]{
+		WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Key: accounts.NilKey, Version: ver},
+		Val:         &accounts.Account{Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash},
+	})
+	require.NotPanics(t, func() { vm.MarkWritesComplete(zeroRoot) })
+}
+
+// A panic inside a flush (here the Done->Estimate assert) must not leave the account's lock held:
+// the self-loop worker recovers it, and every later reader of the account would block forever.
+func TestFlushVersionedWritesPanicReleasesAccountLock(t *testing.T) {
+	prev := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prev })
+
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.Address{0xab})
+	ws := &WriteSet{}
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 0}}, Val: true})
+	vm.FlushVersionedWrites(ws, true)
+	require.Panics(t, func() { vm.FlushVersionedWrites(ws, false) }, "a Done cell downgraded to Estimate trips the assert")
+
+	read := make(chan struct{})
+	go func() {
+		vm.ReadSelfDestruct(addr, 1)
+		close(read)
+	}()
+	select {
+	case <-read:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a read after the recovered panic blocks on the account lock")
+	}
+}
+
+// TestReadResultFitsInRegisters pins ReadResult to at most 4 fields: the compiler keeps a struct in
+// registers only up to that size, and every version-map read returns one.
+func TestReadResultFitsInRegisters(t *testing.T) {
+	require.LessOrEqual(t, reflect.TypeFor[ReadResult]().NumField(), 4)
+}
+
+// A flush that panics must release the account lock, or the account's readers block forever
+// after the executor recovers the panic.
+func TestFlushVersionedWrites_PanicReleasesTheAccountLock(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(45)
+	vm := NewVersionMap(nil)
+	balanceWrite := func(incarnation Incarnation, val uint64) *WriteSet {
+		return newWriteSet(
+			&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: incarnation}}, Val: *uint256.NewInt(val)},
+		)
+	}
+	vm.FlushVersionedWrites(balanceWrite(2, 100), false)
+
+	require.Panics(t, func() { vm.FlushVersionedWrites(balanceWrite(1, 42), false) })
+	e := vm.load(addr)
+	require.True(t, e.mu.TryLock(), "the account lock is still held after the panic")
+	e.mu.Unlock()
+}
+
+func balanceWrite(addr accounts.Address, v Version, val uint64) *WriteSet {
+	return newWriteSet(&VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: v},
+		Val:         *uint256.NewInt(val),
+	})
+}
+
+func balanceFlag(t *testing.T, vm *VersionMap, addr accounts.Address, txIdx int) statusFlag {
+	t.Helper()
+	c, ok := vm.load(addr).Balance.Get(txIdx)
+	require.True(t, ok)
+	return c.loadFlag()
+}
+
+func TestMarkWritesValidatedDoesNotWaitForTheEntryLock(t *testing.T) {
+	t.Parallel()
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.HexToAddress("0x10"))
+	ws := flushPath(vm, addr, 3, BalancePath)
+	e := vm.load(addr)
+	e.mu.Lock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		vm.MarkWritesValidated(ws, nil)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		e.mu.Unlock()
+		<-done
+		t.Fatal("the mark waited for the entry lock")
+	}
+	e.mu.Unlock()
+	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
+}
+
+func TestMarkWritesValidatedLocksADestructedAccount(t *testing.T) {
+	t.Parallel()
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.HexToAddress("0x11"))
+	flushPath(vm, addr, 1, SelfDestructPath)
+	ws := flushPath(vm, addr, 3, BalancePath)
+	e := vm.load(addr)
+	e.mu.RLock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		vm.MarkWritesValidated(ws, nil)
+	}()
+	select {
+	case <-done:
+		e.mu.RUnlock()
+		t.Fatal("a destructed account was marked while a reader held its lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+	e.mu.RUnlock()
+	<-done
+	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
+}
+
+// A flush that matches a BAL-seeded Done cell leaves it Done; marking the tx validated must not
+// demote it, on the lock-free path and on the locked one a lower destruct takes.
+func TestMarkWritesValidatedKeepsASeededDoneCell(t *testing.T) {
+	t.Parallel()
+	for name, destructed := range map[string]bool{"lock-free": false, "locked": true} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			addr := accounts.InternAddress(common.HexToAddress("0x15"))
+			vm := NewVersionMap(types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 4, Value: *uint256.NewInt(7)}}}})
+			if destructed {
+				vm.MarkWritesValidated(flushPath(vm, addr, 1, SelfDestructPath), nil)
+			}
+			ws := balanceWrite(addr, Version{TxIndex: 3}, 7)
+			vm.FlushVersionedWrites(ws, false)
+			require.Equal(t, FlagDone, balanceFlag(t, vm, addr, 3), "a flush that matches the seed is a no-op")
+			vm.MarkWritesValidated(ws, nil)
+			require.Equal(t, FlagDone, balanceFlag(t, vm, addr, 3))
+			if destructed {
+				state, _, _, _ := vm.ResolvedAccountLifecycleAt(addr, 5)
+				require.Equal(t, LifecycleRevived, state, "the seeded balance revives the account")
+			}
+		})
+	}
+}
+
+func TestMarkWritesValidatedPanicsOnANewerIncarnation(t *testing.T) {
+	t.Parallel()
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.HexToAddress("0x12"))
+	stale := balanceWrite(addr, Version{TxIndex: 3}, 1)
+	vm.FlushVersionedWrites(stale, false)
+	vm.FlushVersionedWrites(balanceWrite(addr, Version{TxIndex: 3, Incarnation: 1}, 2), false)
+	require.Panics(t, func() { vm.MarkWritesValidated(stale, nil) })
+	require.Equal(t, FlagEstimate, balanceFlag(t, vm, addr, 3))
+}
+
+func TestMarkWritesMarksAWriteSetMergedBeforeItsFlush(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		mark func(*VersionMap, *WriteSet)
+		want statusFlag
+	}{
+		"validated": {func(vm *VersionMap, ws *WriteSet) { vm.MarkWritesValidated(ws, nil) }, FlagValidated},
+		"complete":  {func(vm *VersionMap, ws *WriteSet) { vm.MarkWritesComplete(ws) }, FlagDone},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			vm := NewVersionMap(nil)
+			a := accounts.InternAddress(common.HexToAddress("0x13"))
+			b := accounts.InternAddress(common.HexToAddress("0x14"))
+			first, second := balanceWrite(a, Version{TxIndex: 3}, 1), balanceWrite(b, Version{TxIndex: 3}, 2)
+			merged := first.Merge(second)
+			vm.FlushVersionedWrites(first, false)
+			vm.FlushVersionedWrites(second, false)
+			tc.mark(vm, merged)
+			require.Equal(t, tc.want, balanceFlag(t, vm, a, 3))
+			require.Equal(t, tc.want, balanceFlag(t, vm, b, 3))
+		})
+	}
+}
+
+func TestMarkWritesValidatedPanicsOnACellRecreatedAtANewerIncarnation(t *testing.T) {
+	t.Parallel()
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.HexToAddress("0x15"))
+	stale := balanceWrite(addr, Version{TxIndex: 3}, 1)
+	vm.FlushVersionedWrites(stale, false)
+	vm.Delete(addr, BalancePath, accounts.NilKey, 3, true)
+	vm.FlushVersionedWrites(balanceWrite(addr, Version{TxIndex: 3, Incarnation: 1}, 2), false)
+	require.Panics(t, func() { vm.MarkWritesValidated(stale, nil) })
+	require.Equal(t, FlagEstimate, balanceFlag(t, vm, addr, 3))
+}
+
+func TestMarkWritesValidatedMarksACellRecreatedAtTheSameIncarnation(t *testing.T) {
+	t.Parallel()
+	vm := NewVersionMap(nil)
+	addr := accounts.InternAddress(common.HexToAddress("0x16"))
+	first := balanceWrite(addr, Version{TxIndex: 3}, 1)
+	vm.FlushVersionedWrites(first, false)
+	vm.DeleteAll(addr, 3)
+	vm.FlushVersionedWrites(balanceWrite(addr, Version{TxIndex: 3}, 1), false)
+	vm.MarkWritesValidated(first, nil)
+	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
+}
+
+// A read of the base skips validation only while no tx wrote a storage, lifecycle or address cell of the account;
+// each such cell below the reader makes the read stale.
+func TestValidateReadSet_BaseReadOfQuietAccountSkipsValidation(t *testing.T) {
+	t.Parallel()
+	base := ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}
+	for _, tc := range []struct {
+		name  string
+		path  AccountPath
+		value any
+		read  ReadHeader
+		want  VersionValidity
+		quiet bool // a base read of an account with no storage, lifecycle or address cell
+	}{
+		{"no cells", 0, nil, base, VersionValid, true},
+		{"balance write", BalancePath, *uint256.NewInt(5), base, VersionValid, true},
+		{"storage write", StoragePath, *uint256.NewInt(8), base, VersionInvalid, false},
+		{"self-destruct", SelfDestructPath, true, base, VersionInvalid, false},
+		{"address write", AddressPath, &accounts.Account{Incarnation: 1}, base, VersionValid, false},
+		{"incarnation write", IncarnationPath, uint64(1), base, VersionInvalid, false},
+		{"create contract", CreateContractPath, true, base, VersionValid, false},
+		{"read of a removed write", 0, nil, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, VersionInvalid, false},
+		{"read of an aborted write", StoragePath, *uint256.NewInt(8), ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, VersionInvalid, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := getAddress(91)
+			key := accounts.InternKey(common.Hash{0x07})
+			vm := NewVersionMap(nil)
+			if tc.value != nil {
+				writeFor(vm, addr, tc.path, key, Version{TxIndex: 1}, tc.value, true)
+			}
+
+			rs := ReadSet{}
+			rs.SetStorage(addr, key, VersionedRead[uint256.Int]{
+				ReadHeader: tc.read,
+				Val:        *uint256.NewInt(7),
+			})
+			checks := 0
+			countChecks := func(read, write Version) VersionValidity {
+				checks++
+				return validateEqualVersion(read, write)
+			}
+			require.Equal(t, tc.want, vm.ValidateReadSet(3, rs, countChecks, false, ""))
+			if tc.read == base {
+				require.Equal(t, !tc.quiet, checks > 0, "only a quiet account skips the version checks")
+			}
+		})
+	}
+}
+
+// A base read of an account path skips validation only while no tx wrote a cell of that path, a lifecycle cell or an
+// address cell; a write on another path does not stop the skip.
+func TestValidateReadSet_BaseReadOfQuietAccountPathSkipsValidation(t *testing.T) {
+	t.Parallel()
+	field := ReadHeader{Source: MapRead, Version: Version{TxIndex: originIndex}}
+	stored := ReadHeader{Source: StorageRead, Version: UnknownVersion}
+	balance := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: hdr})
+	}
+	nonce := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetNonce(addr, VersionedRead[uint64]{ReadHeader: hdr})
+	}
+	incarnation := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader: hdr})
+	}
+	codeHash := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{ReadHeader: hdr})
+	}
+	codeSize := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
+	}
+	code := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: hdr, Val: accounts.NewCode([]byte{0x01})})
+	}
+	exists := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr})
+	}
+	hash := accounts.InternCodeHash(common.Hash{0x01})
+	for _, tc := range []struct {
+		name  string
+		read  func(rs *ReadSet, addr accounts.Address, hdr ReadHeader)
+		path  AccountPath
+		value any
+		hdr   ReadHeader
+		want  VersionValidity
+	}{
+		{"balance read, no cells", balance, 0, nil, field, VersionValid},
+		{"balance read, code hash written", balance, CodeHashPath, hash, field, VersionValid},
+		{"balance read, balance written", balance, BalancePath, *uint256.NewInt(1), field, VersionInvalid},
+		{"balance read, address written", balance, AddressPath, &accounts.Account{Incarnation: 1}, field, VersionInvalid},
+		{"nonce read, nonce written", nonce, NoncePath, uint64(1), field, VersionInvalid},
+		{"nonce read, created", nonce, IncarnationPath, uint64(1), field, VersionInvalid},
+		{"incarnation read, nonce written", incarnation, NoncePath, uint64(1), field, VersionValid},
+		{"existence read, balance written", exists, BalancePath, *uint256.NewInt(1), field, VersionValid},
+		{"existence read, created", exists, IncarnationPath, uint64(1), field, VersionInvalid},
+		{"absent account read, balance written", exists, BalancePath, *uint256.NewInt(1), stored, VersionValid},
+		{"code hash read, code hash written", codeHash, CodeHashPath, hash, field, VersionInvalid},
+		{"code size read, code size written", codeSize, CodeSizePath, 3, stored, VersionInvalid},
+		{"code read, balance written", code, BalancePath, *uint256.NewInt(1), stored, VersionValid},
+		{"code read, code written", code, CodePath, accounts.NewCode([]byte{0x02}), stored, VersionInvalid},
+		{"code read, destructed", code, SelfDestructPath, true, stored, VersionInvalid},
+		{"balance read of a removed write", balance, 0, nil, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, VersionInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := getAddress(92)
+			vm := NewVersionMap(nil)
+			if tc.hdr == field {
+				vm.StoreOriginAccount(addr, &accounts.Account{})
+			}
+			if tc.value != nil {
+				writeFor(vm, addr, tc.path, accounts.NilKey, Version{TxIndex: 1}, tc.value, true)
+			}
+
+			rs := ReadSet{}
+			tc.read(&rs, addr, tc.hdr)
+			checks := 0
+			countChecks := func(read, write Version) VersionValidity {
+				checks++
+				return validateEqualVersion(read, write)
+			}
+			require.Equal(t, tc.want, vm.ValidateReadSet(3, rs, countChecks, false, ""))
+			if tc.want == VersionValid {
+				require.Zero(t, checks, "a base read of a quiet path is not validated")
+			}
+		})
+	}
+}
+
+// A net-zero storage write has no BAL cell, so it must not count as already seeded.
+func TestWritesAlreadySeededRefusesANetZeroStorageWrite(t *testing.T) {
+	vm := NewVersionMap(nil)
+	vm.HasBAL = true
+	addr := accounts.InternAddress(common.HexToAddress("0xaa"))
+	seeded, netZero := accounts.InternKey(common.HexToHash("0x01")), accounts.InternKey(common.HexToHash("0x02"))
+	vm.WriteStorage(addr, seeded, Version{TxIndex: 1}, *uint256.NewInt(1), true)
+	ws := &WriteSet{}
+	ws.SetStorage(addr, netZero, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: netZero, Version: Version{TxIndex: 1}, valStatus: ValueUnchanged},
+		Val:         *uint256.NewInt(5),
+	})
+
+	require.False(t, vm.WritesAlreadySeeded(addr, ws))
+}
+
+func seededSlotBAL(addr accounts.Address, slot accounts.StorageKey) types.BlockAccessList {
+	return types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(42)}}}}}}
+}
+
+// The net-zero reset puts the access list value back as Done, but a reader may hold the value an
+// earlier run published there.
+func TestWritesAlreadySeededRefusesACellTheNetZeroResetMadeDone(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	slot := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(seededSlotBAL(addr, slot))
+	for incarnation, val := range []uint64{42, 9} {
+		ws := storageWriteSet(addr, slot, Incarnation(incarnation), val, ValueChanged)
+		vm.FlushVersionedWrites(ws, false)
+		vm.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
+	}
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 2, 5, ValueUnchanged), false)
+
+	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 3, 42, ValueChanged)))
+}
+
+// A run that dropped the slot deleted the seed; the cell a later run re-creates is not the seed,
+// even once the net-zero reset makes it Done.
+func TestWritesAlreadySeededRefusesARecreatedCell(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	slot := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(seededSlotBAL(addr, slot))
+	vm.Delete(addr, StoragePath, slot, 1, false)
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 2, 42, ValueChanged), false)
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 3, 5, ValueUnchanged), false)
+
+	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 4, 42, ValueChanged)))
+}
+
+func TestWritesAlreadySeededKeepsTheSeedThroughValidation(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	slot := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(seededSlotBAL(addr, slot))
+	ws := storageWriteSet(addr, slot, 0, 42, ValueChanged)
+	vm.FlushVersionedWrites(ws, false)
+	vm.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
+
+	require.True(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 0, 42, ValueChanged)))
+}
+
+// Completion moves the seeded Done cell to Done again through a CAS that must keep the seed bit.
+func TestWritesAlreadySeededKeepsTheSeedThroughCompletion(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	slot := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(seededSlotBAL(addr, slot))
+	ws := storageWriteSet(addr, slot, 0, 42, ValueChanged)
+	vm.FlushVersionedWrites(ws, false)
+	vm.MarkWritesComplete(ws)
+
+	require.True(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 0, 42, ValueChanged)))
+}
+
+func TestWritesAlreadySeededRefusesACellATxOverwrote(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	slot := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(seededSlotBAL(addr, slot))
+	require.True(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 0, 42, ValueChanged)))
+
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 0, 9, ValueChanged), true)
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 1, 42, ValueChanged), true)
+
+	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 2, 42, ValueChanged)))
 }

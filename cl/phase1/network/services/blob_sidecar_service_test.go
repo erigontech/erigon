@@ -29,9 +29,11 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 )
@@ -73,7 +75,7 @@ func setupBlobSidecarService(t *testing.T, ctrl *gomock.Controller, test bool) (
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitters := beaconevents.NewEventEmitter()
-	blockService := NewBlobSidecarService(cfg, forkchoiceMock, syncedDataManager, ethClock, emitters, test)
+	blockService := NewBlobSidecarService(t.Context(), cfg, forkchoiceMock, syncedDataManager, ethClock, emitters, test)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
 }
 
@@ -209,4 +211,127 @@ func TestBlobServiceSuccess(t *testing.T) {
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 
 	require.NoError(t, blobService.ProcessMessage(context.Background(), &sn, blobSidecar))
+}
+
+type blobProposerForkChoice struct {
+	*mock_services.ForkChoiceStorageMock
+	stored []*cltypes.BlobSidecar
+}
+
+func (f *blobProposerForkChoice) AddPreverifiedBlobSidecar(sidecar *cltypes.BlobSidecar) error {
+	f.stored = append(f.stored, sidecar)
+	return nil
+}
+
+func setupBlobProposerTest(t *testing.T, version clparams.StateVersion, wrongProposer bool) (*blobSidecarService, *blobProposerForkChoice, *cltypes.BlobSidecar) {
+	t.Helper()
+	cfg := forkBoundaryConfig(version + 1)
+	parentState := state.New(&cfg)
+	parentState.SetVersion(version)
+	require.NoError(t, parentState.SetSlot(1))
+	keys := make([]*bls.PrivateKey, 2)
+	for i := range keys {
+		key, err := bls.GenerateKey()
+		require.NoError(t, err)
+		keys[i] = key
+		balance, exitEpoch := cfg.MaxEffectiveBalance, cfg.FarFutureEpoch
+		validator := solid.NewValidatorFromParameters(common.Bytes48(bls.CompressPublicKey(key.PublicKey())), common.Hash{}, balance, false, 0, 0, exitEpoch, exitEpoch)
+		require.NoError(t, parentState.AddValidator(validator, balance))
+	}
+	_, block, sidecar := getObjectsForBlobSidecarServiceTests(t)
+	proof, err := block.Block.Body.KzgCommitmentMerkleProof(int(sidecar.Index))
+	require.NoError(t, err)
+	for i, hash := range proof {
+		sidecar.CommitmentInclusionProof.Set(i, hash)
+	}
+	header := sidecar.SignedBlockHeader.Header
+	parentProposer, err := parentState.GetBeaconProposerIndexForSlot(parentState.Slot())
+	require.NoError(t, err)
+	var expected uint64
+	for header.Slot = parentState.Slot() + 1; ; header.Slot++ {
+		require.Less(t, header.Slot+1, cfg.SlotsPerEpoch)
+		expected, err = parentState.GetBeaconProposerIndexForSlot(header.Slot)
+		require.NoError(t, err)
+		nextProposer, err := parentState.GetBeaconProposerIndexForSlot(header.Slot + 1)
+		require.NoError(t, err)
+		if expected != parentProposer && expected != nextProposer {
+			break
+		}
+	}
+	header.ParentRoot = common.Hash{1}
+	proposerIndex := expected
+	if wrongProposer {
+		proposerIndex = 1 - expected
+	}
+	header.ProposerIndex = proposerIndex
+	domain, err := fork.ComputeDomainAtEpoch(&cfg, cfg.DomainBeaconProposer, header.Slot/cfg.SlotsPerEpoch, parentState.GenesisValidatorsRoot())
+	require.NoError(t, err)
+	signingRoot, err := fork.ComputeSigningRoot(header, domain)
+	require.NoError(t, err)
+	copy(sidecar.SignedBlockHeader.Signature[:], keys[proposerIndex].Sign(signingRoot[:]).Bytes())
+	syncedData := synced_data.NewSyncedDataManager(&cfg, true)
+	require.NoError(t, syncedData.OnHeadState(parentState))
+	fc := &blobProposerForkChoice{ForkChoiceStorageMock: mock_services.NewForkChoiceStorageMock(t)}
+	fc.Headers[header.ParentRoot] = &cltypes.BeaconBlockHeader{Slot: parentState.Slot()}
+	fc.StateAtBlockRootVal[header.ParentRoot] = parentState
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(header.Slot).AnyTimes()
+	service := NewBlobSidecarService(t.Context(), &cfg, fc, syncedData, clock, beaconevents.NewEventEmitter(), false).(*blobSidecarService)
+	return service, fc, sidecar
+}
+
+func TestBlobServiceExpectedProposer(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.DenebVersion, clparams.ElectraVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			for _, tc := range []struct {
+				name          string
+				wrongProposer bool
+				missingState  bool
+				invalidProof  bool
+				invalidSig    bool
+				wantError     string
+				wantIgnore    bool
+			}{
+				{name: "unexpected proposer", wrongProposer: true, wantError: "does not match expected proposer"},
+				{name: "expected proposer"},
+				{name: "unavailable parent state", missingState: true, wantError: "view parent state", wantIgnore: true},
+				{name: "invalid proof with unavailable state", missingState: true, invalidProof: true, wantError: "blob KZG proof verification failed"},
+				{name: "invalid signature with unavailable state", missingState: true, invalidSig: true, wantError: "signature not valid"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					service, fc, sidecar := setupBlobProposerTest(t, version, tc.wrongProposer)
+					if tc.missingState {
+						delete(fc.StateAtBlockRootVal, sidecar.SignedBlockHeader.Header.ParentRoot)
+					}
+					if tc.invalidProof {
+						sidecar.KzgProof = common.Bytes48{}
+					}
+					if tc.invalidSig {
+						sidecar.SignedBlockHeader.Header.Root[0] ^= 1
+					}
+					events := make(chan *beaconevents.EventStream, 1)
+					subscription := service.emitters.Operation().Subscribe(events)
+					defer subscription.Unsubscribe()
+					subnet := uint64(0)
+
+					err := service.ProcessMessage(t.Context(), &subnet, sidecar)
+
+					if tc.wantError == "" {
+						require.NoError(t, err)
+						require.Equal(t, []*cltypes.BlobSidecar{sidecar}, fc.stored)
+						require.Len(t, events, 1)
+						return
+					}
+					require.ErrorContains(t, err, tc.wantError)
+					if tc.wantIgnore {
+						require.ErrorIs(t, err, ErrIgnore)
+					} else {
+						require.NotErrorIs(t, err, ErrIgnore)
+					}
+					require.Empty(t, fc.stored)
+					require.Empty(t, events)
+				})
+			}
+		})
+	}
 }

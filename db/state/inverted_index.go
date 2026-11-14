@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -63,8 +64,9 @@ type InvertedIndex struct {
 	salt    *atomic.Pointer[uint32]
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
-	stepSize          uint64 // amount of transactions inside single aggregation step
-	stepsInFrozenFile uint64 // starting from this number of steps, the file is considered frozen
+	lastInDB          atomic.Pointer[lastTxNumInView] // lastTxNumInDB of the latest read-only view
+	stepSize          uint64                          // amount of transactions inside single aggregation step
+	stepsInFrozenFile uint64                          // starting from this number of steps, the file is considered frozen
 
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
@@ -469,6 +471,12 @@ func (w *InvertedIndexBufferedWriter) close() {
 	if w.indexKeys != nil {
 		w.indexKeys.Close()
 	}
+}
+
+func (w *InvertedIndexBufferedWriter) detach() *InvertedIndexBufferedWriter {
+	detached := *w
+	w.index, w.indexKeys = nil, nil
+	return &detached
 }
 
 func (iit *InvertedIndexRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *InvertedIndexBufferedWriter {
@@ -1357,6 +1365,25 @@ func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) (uint64, error) {
 }
 
 func (ii *InvertedIndex) lastTxNumInDB(tx kv.Tx) (uint64, bool) {
+	// Read-only MDBX txs of one snapshot share its ID, so they share this answer.
+	if ro, ok := tx.(*mdbx.MdbxTx); ok && ro.IsRo() {
+		id := ro.ViewID()
+		if last := ii.lastInDB.Load(); last != nil && last.viewID == id {
+			return last.txNum, last.ok
+		}
+		txNum, found := ii.readLastTxNumInDB(tx)
+		ii.lastInDB.Store(&lastTxNumInView{viewID: id, txNum: txNum, ok: found})
+		return txNum, found
+	}
+	return ii.readLastTxNumInDB(tx)
+}
+
+type lastTxNumInView struct {
+	viewID, txNum uint64
+	ok            bool
+}
+
+func (ii *InvertedIndex) readLastTxNumInDB(tx kv.Tx) (uint64, bool) {
 	lst, _ := kv.LastKey(tx, ii.KeysTable)
 	if len(lst) == 0 {
 		return 0, false

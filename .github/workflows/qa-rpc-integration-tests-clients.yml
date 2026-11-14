@@ -23,10 +23,6 @@ jobs:
             runs-on: [ self-hosted, qa, Ethereum, rpc-integration-geth ]
             test_script: run_rpc_tests_geth.sh
             install_dir: /opt/go-ethereum
-          - client: nethermind
-            runs-on: [ self-hosted, qa, Ethereum, rpc-integration-nethermind ]
-            test_script: run_rpc_tests_nethermind.sh
-            install_dir: /opt/nethermind
     runs-on: ${{ matrix.runs-on }}
     env:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa

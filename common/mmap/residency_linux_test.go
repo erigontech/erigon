@@ -86,3 +86,32 @@ func TestReadPagesStartsNoBatchOnceTheContextIsDone(t *testing.T) {
 	cancel()
 	require.ErrorIs(t, ReadPages(ctx, []uintptr{uintptr(unsafe.Pointer(&m[0]))}), context.Canceled)
 }
+
+func TestMappingOfFindsTheMappingThatHoldsThePage(t *testing.T) {
+	defer func(prev bool) { BatchPrefetch = prev }(BatchPrefetch)
+	BatchPrefetch = true
+	f, err := os.CreateTemp(t.TempDir(), "f")
+	require.NoError(t, err)
+	defer f.Close()
+	bufs := [][]byte{make([]byte, 3*osPageSize), make([]byte, osPageSize), make([]byte, 2*osPageSize)}
+	for _, b := range []int{2, 0, 1} {
+		registerMapping(bufs[b], f)
+	}
+	defer func() {
+		for _, b := range bufs {
+			unregisterMapping(b)
+		}
+	}()
+	for _, b := range bufs {
+		start := uintptr(unsafe.Pointer(&b[0]))
+		for _, p := range []uintptr{start, start + uintptr(len(b)) - 1} {
+			m, ok := mappingOf(p)
+			require.True(t, ok)
+			require.Equal(t, start, m.start)
+			require.Equal(t, int(f.Fd()), m.fd)
+		}
+	}
+	unregisterMapping(bufs[1])
+	_, ok := mappingOf(uintptr(unsafe.Pointer(&bufs[1][0])))
+	require.False(t, ok, "an unregistered mapping is not found")
+}

@@ -230,6 +230,200 @@ func TestSendersRegisteredRecovery(t *testing.T) {
 	require.Equal([]common.Address{crypto.PubkeyToAddress(recoveredKey.PublicKey)}, senders)
 }
 
+func writeSignedBlock(t *testing.T, tx kv.RwTx, header *types.Header, key *ecdsa.PrivateKey) (common.Hash, *types.Body) {
+	t.Helper()
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, header.Number.Uint64(), header.Time)
+	txn, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{GasLimit: 21_000, Value: u256.Num1},
+		GasPrice: u256.Num1,
+	}, *signer, key)
+	require.NoError(t, err)
+	hash := header.Hash()
+	body := &types.Body{Transactions: []types.Transaction{txn}}
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteBody(tx, hash, header.Number.Uint64(), body))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, header.Number.Uint64()))
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Bodies, header.Number.Uint64()))
+	return hash, body
+}
+
+func TestSendersAttachesSendersToCachedBody(t *testing.T) {
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	header := &types.Header{Number: *common.Num1}
+	hash, body := writeSignedBlock(t, tx, header, key)
+	readAheader := exec.NewBlockReadAheader()
+	readAheader.AddHeaderAndBody(m.Ctx, nil, nil, header, body)
+	readAheader.AddSendersRecovery(hash, exec.StartSendersRecovery(m.Ctx, types.MakeSigner(chain.TestChainBerlinConfig, 1, 0), body.Transactions))
+
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, readAheader)
+	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New()))
+
+	cached, ok := readAheader.ReadBodyWithTransactions(hash)
+	require.True(t, ok)
+	sender, ok := cached.Transactions[0].GetSender()
+	require.True(t, ok, "the cached body is what execution reads, so the stage must leave the senders on its txs")
+	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), sender.Value())
+}
+
+func TestSendersWritesBALBlockSenders(t *testing.T) {
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	balHash := common.Hash{0x01}
+	var zero uint64
+	header := &types.Header{
+		Number:                *common.Num1,
+		BaseFee:               uint256.NewInt(1),
+		WithdrawalsHash:       &common.Hash{},
+		BlobGasUsed:           &zero,
+		ExcessBlobGas:         &zero,
+		ParentBeaconBlockRoot: &common.Hash{},
+		RequestsHash:          &common.Hash{},
+		BlockAccessListHash:   &balHash,
+	}
+	hash, body := writeSignedBlock(t, tx, header, key)
+	stored, err := m.BlockReader.Header(m.Ctx, tx, hash, 1)
+	require.NoError(t, err)
+	require.True(t, stored.HasNonEmptyBAL(), "the stage reads the header back from the DB")
+	readAheader := exec.NewBlockReadAheader()
+	readAheader.AddHeaderAndBody(m.Ctx, nil, nil, header, body)
+	readAheader.AddBlockAccessList(hash, types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.Address{0x02}}}))
+	readAheader.AddSendersRecovery(hash, exec.StartSendersRecovery(m.Ctx, types.MakeSigner(chain.TestChainBerlinConfig, 1, 0), body.Transactions))
+
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, readAheader)
+	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New()))
+
+	_, senders, err := m.BlockReader.BlockWithSenders(m.Ctx, tx, hash, 1)
+	require.NoError(t, err)
+	require.Equal(t, []common.Address{crypto.PubkeyToAddress(key.PublicKey)}, senders)
+}
+
+func TestSendersRecoversWhenRegisteredRecoveryFails(t *testing.T) {
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	header := &types.Header{Number: *common.Num1}
+	hash, _ := writeSignedBlock(t, tx, header, key)
+	unsigned := types.Transactions{&types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 21_000}, GasPrice: u256.Num1}}
+	readAheader := exec.NewBlockReadAheader()
+	readAheader.AddSendersRecovery(hash, exec.StartSendersRecovery(m.Ctx, types.MakeSigner(chain.TestChainBerlinConfig, 1, 0), unsigned))
+
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, readAheader)
+	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New()))
+
+	_, senders, err := m.BlockReader.BlockWithSenders(m.Ctx, tx, hash, 1)
+	require.NoError(t, err)
+	require.Equal(t, []common.Address{crypto.PubkeyToAddress(key.PublicKey)}, senders)
+}
+
+type recordingUnwinder struct {
+	point  uint64
+	reason stagedsync.UnwindReason
+	calls  int
+}
+
+func (u *recordingUnwinder) UnwindTo(point uint64, reason stagedsync.UnwindReason, _ kv.Tx) error {
+	u.point, u.reason = point, reason
+	u.calls++
+	return nil
+}
+func (u *recordingUnwinder) HasUnwindPoint() bool { return u.calls > 0 }
+func (u *recordingUnwinder) LogPrefix() string    { return "" }
+
+func TestSendersUnwindsToTheBlockBeforeABadSignature(t *testing.T) {
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
+	var hashes []common.Hash
+	for n := uint64(1); n <= 5; n++ {
+		txns := make([]types.Transaction, 3)
+		for i := range txns {
+			txns[i], err = types.SignTx(&types.LegacyTx{
+				CommonTx: types.CommonTx{Nonce: n*10 + uint64(i), GasLimit: 21_000, Value: u256.Num1},
+				GasPrice: u256.Num1,
+			}, *signer, key)
+			require.NoError(t, err)
+		}
+		if n == 4 {
+			txns[0] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: 40, GasLimit: 21_000}, GasPrice: u256.Num1}
+		}
+		header := &types.Header{Number: *uint256.NewInt(n)}
+		hash := header.Hash()
+		require.NoError(t, rawdb.WriteHeader(tx, header))
+		require.NoError(t, rawdb.WriteBody(tx, hash, n, &types.Body{Transactions: txns}))
+		require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, n))
+		hashes = append(hashes, hash)
+	}
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Bodies, 5))
+
+	u := &recordingUnwinder{}
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, t.TempDir(), m.BlockReader, exec.NewBlockReadAheader())
+	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, u, tx, 5, m.Ctx, log.New()))
+
+	require.Equal(t, 1, u.calls)
+	require.Equal(t, uint64(3), u.point)
+	require.NotNil(t, u.reason.Block)
+	require.Equal(t, hashes[3], *u.reason.Block)
+}
+
+func TestSendersBatchUsesEachBlocksSigner(t *testing.T) {
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	config := &chain.Config{ChainID: uint256.NewInt(1337), HomesteadBlock: common.NewUint64(2), SpuriousDragonBlock: common.NewUint64(2)}
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	to := common.Address{0x1}
+
+	frontier, err := types.SignTx(&types.LegacyTx{CommonTx: types.CommonTx{To: &to, GasLimit: 21_000}, GasPrice: u256.Num1}, *types.MakeSigner(config, 1, 0), key)
+	require.NoError(t, err)
+	malleable := frontier.(*types.LegacyTx)
+	curveOrder := uint256.MustFromHex("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141")
+	malleable.S.Sub(curveOrder, &malleable.S)
+	malleable.V.SetUint64(55 - malleable.V.Uint64())
+	protected, err := types.SignTx(&types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 21_000}, GasPrice: u256.Num1}, *types.MakeSigner(config, 2, 0), key)
+	require.NoError(t, err)
+
+	var hashes []common.Hash
+	for n, txn := range []types.Transaction{malleable, protected} {
+		header := &types.Header{Number: *uint256.NewInt(uint64(n + 1))}
+		hash := header.Hash()
+		require.NoError(t, rawdb.WriteHeader(tx, header))
+		require.NoError(t, rawdb.WriteBody(tx, hash, uint64(n+1), &types.Body{Transactions: []types.Transaction{txn}}))
+		require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, uint64(n+1)))
+		hashes = append(hashes, hash)
+	}
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Bodies, 2))
+
+	u := &recordingUnwinder{}
+	cfg := stagedsync.StageSendersCfg(config, false, t.TempDir(), m.BlockReader, exec.NewBlockReadAheader())
+	require.NoError(t, stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, u, tx, 2, m.Ctx, log.New()))
+
+	require.Zero(t, u.calls, "a Frontier-only and a Spurious-Dragon-only signature are both valid in their own blocks")
+	for i, hash := range hashes {
+		_, senders, err := m.BlockReader.BlockWithSenders(m.Ctx, tx, hash, uint64(i+1))
+		require.NoError(t, err)
+		require.Equal(t, []common.Address{sender}, senders)
+	}
+}
+
 func TestSendersMixesRegisteredAndRecoveredBlocks(t *testing.T) {
 	require := require.New(t)
 

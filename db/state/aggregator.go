@@ -17,6 +17,7 @@
 package state
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -168,7 +169,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*
 	// them until the runner OOMs. All collector access is nil-safe.
 	if dbg.KVReadLevelledMetrics {
 		a.metricsCollector = kvmetrics.NewCollector()
-		a.metricsCollector.Start() // joined by Stop() in Close, NOT via a.wg (a.wg is waited on for background merges before Close)
+		a.metricsCollector.Start()
 	}
 	return a, nil
 }
@@ -724,15 +725,15 @@ func (a *Aggregator) Close() {
 	a.dirtyFilesLock.Lock()
 	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
 	a.dirtyFilesLock.Unlock()
-	a.WaitForFiles()
-	if !a.background.BeginClose() { // idempotent: safe to call Close multiple times
+	// Every caller must wait for maintenance before it can safely close the database.
+	// Keep the aggregator context alive until that work finishes.
+	firstClose := a.background.BeginClose()
+	a.background.Wait()
+	if !firstClose {
 		return
 	}
 	a.ctxCancel()
-	if a.metricsCollector != nil {
-		a.metricsCollector.Stop() // drain buffered samples before wg.Wait joins the goroutine
-	}
-	a.background.Wait()
+	a.metricsCollector.Stop()
 
 	// A closed Aggregator may linger referenced; release the cached branch data
 	// eagerly and drop this cache from the active-instance count so later
@@ -1564,7 +1565,7 @@ func (as *AggregatorPruneStat) String() string {
 	if as == nil {
 		return ""
 	}
-	names := make([]string, 0)
+	names := make([]string, 0, len(as.Domains))
 	for k := range as.Domains {
 		names = append(names, k)
 	}
@@ -2724,12 +2725,12 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 // PrefetchLatest reads into the page cache, in io_uring batches, the file pages a latest read of each key touches.
 // Each wave runs every pending key's file lookup until its first cold page, then reads all those pages at once; reads
 // stay correct without it.
-func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) {
+func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, keys [][]byte) (pages int, err error) {
 	dt := at.d[domain]
 	dt.probe = mmap.NewProbe()
 	if dt.probe == nil || len(keys) == 0 {
 		dt.probe = nil
-		return
+		return 0, nil
 	}
 	defer func() {
 		dt.probe = nil
@@ -2739,14 +2740,24 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 			}
 		}
 	}()
-	pending := keys
+	// A key that no existence filter holds needs no page: drop it before the probed lookups, which touch every file.
+	pending := make([][]byte, 0, len(keys))
+	for _, k := range keys {
+		if ctx.Err() != nil {
+			return 0, nil
+		}
+		if dt.mayContainInFiles(k) {
+			pending = append(pending, k)
+		}
+	}
 	tried := map[uintptr]struct{}{}
-	for waves := 0; len(pending) > 0 && waves < 64 && ctx.Err() == nil; waves++ {
+	for waves := 0; len(pending) > 0 && waves < prefetchMaxWaves && ctx.Err() == nil; waves++ {
 		cold := make([]uintptr, 0, len(pending))
+		wave := make(map[uintptr]struct{}, len(pending)) // keys sharing a page count it once
 		next := pending[:0:0]
 		for _, k := range pending {
 			if ctx.Err() != nil {
-				return
+				return pages, err
 			}
 			page, ok := probeLatestFromFiles(dt, k)
 			if !ok {
@@ -2755,19 +2766,32 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 			if _, done := tried[page]; done {
 				continue // an earlier wave read or skipped it: leave the key to the normal read
 			}
-			cold = append(cold, page)
+			if _, dup := wave[page]; !dup {
+				wave[page] = struct{}{}
+				cold = append(cold, page)
+			}
 			next = append(next, k)
 		}
 		// A failed page goes into tried below, so the next wave goes on with the other keys.
-		if err := mmap.ReadPages(ctx, cold); err == nil {
+		if rerr := mmap.ReadPages(ctx, cold); rerr != nil {
+			err = cmp.Or(err, rerr)
+		} else {
 			dt.probe.MarkResident(cold)
 		}
+		pages += len(cold)
 		for _, page := range cold {
 			tried[page] = struct{}{}
 		}
 		pending = next
 	}
+	if len(pending) > 0 && ctx.Err() == nil {
+		err = cmp.Or(err, kv.ErrPrefetchIncomplete)
+	}
+	return pages, err
 }
+
+// prefetchMaxWaves bounds the waves of one PrefetchLatest call.
+var prefetchMaxWaves = 64
 
 func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {
 	defer func() {

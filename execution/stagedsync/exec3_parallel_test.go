@@ -593,7 +593,7 @@ func executeParallelWithCheck(pe *parallelExecutor, tasks []exec.Task, profile b
 	consumers := newResultStream()
 	consumers.register("applyResults", applyResults)
 
-	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, consumers, profile, nil}
+	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, consumers, profile, nil, nil}
 
 	// TODO get results back
 
@@ -2020,11 +2020,33 @@ func TestProcessRequestSetsVersionMapBase(t *testing.T) {
 
 	const edgeTxNum = 15
 	view := pe.blockExecutors[1].versionMap.View(edgeTxNum, state.NewNoopReader())
-	acc, ok := view.GetAccount(addr)
+	acc, ok, _ := view.GetAccount(addr)
 	require.NoError(t, view.Err())
 	require.True(t, ok)
 	require.Equal(t, uint64(100), acc.Balance.Uint64(), "view at the step edge must not include the write at txNum 16")
-	acc, ok = pe.blockExecutors[1].versionMap.View(edgeTxNum+1, state.NewNoopReader()).GetAccount(addr)
+	acc, ok, _ = pe.blockExecutors[1].versionMap.View(edgeTxNum+1, state.NewNoopReader()).GetAccount(addr)
 	require.True(t, ok)
 	require.Equal(t, uint64(600), acc.Balance.Uint64(), "view past txNum 16 includes its write")
+}
+
+// A block dispatches at most the window of tasks past the commit frontier, whether or not it
+// carries a block access list: speculative work past the frontier stays bounded.
+func TestDispatchLimitBoundsEveryBlock(t *testing.T) {
+	addr := common.HexToAddress("0xd15a")
+	for _, tc := range []struct {
+		name string
+		bal  types.BlockAccessList
+	}{
+		{"no access list", nil},
+		{"empty access list", types.BlockAccessList{}},
+		{"access list", types.BlockAccessList{{Address: addr, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			be := &blockExecutor{versionMap: state.NewVersionMap(tc.bal), tasks: make([]*execTask, 100)}
+			be.committedFrontier.Store(-1)
+			require.Equal(t, dispatchWindow-1, be.dispatchLimit())
+			be.committedFrontier.Store(90)
+			require.Equal(t, 99, be.dispatchLimit())
+		})
+	}
 }

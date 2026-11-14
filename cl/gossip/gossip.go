@@ -50,6 +50,10 @@ const SSZSnappyCodec = "ssz_snappy"
 // Ethereum consensus-layer spec value).
 const GossipSubD = 8
 
+// GossipSubDlo is the libp2p pubsub topic stable mesh low watermark (the
+// Ethereum consensus-layer spec value).
+const GossipSubDlo = 6
+
 // DecayToZero is the terminal value used when decaying pubsub scoring
 // values toward zero.
 const DecayToZero = 0.01

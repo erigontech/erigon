@@ -156,13 +156,14 @@ func TestBackwardBlockDownloader_PinnedHeaderWalkKeepsItsPeer(t *testing.T) {
 // requests overlap; byNumberFork, when set, is served by number instead of the chain for the ranges it covers.
 type concurrencyHeaderFetcher struct {
 	chainServingBbdFetcher
-	byNumberFork map[uint64]*types.Header
-	calls        atomic.Int64
-	inFlight     atomic.Int64
-	maxInFlight  atomic.Int64
+	byNumberFork   map[uint64]*types.Header
+	calls          atomic.Int64
+	inFlight       atomic.Int64
+	maxInFlight    atomic.Int64
+	waitForOverlap func(end uint64, inFlight int64)
 }
 
-func (s *concurrencyHeaderFetcher) track() func() {
+func (s *concurrencyHeaderFetcher) track(end uint64) func() {
 	s.calls.Add(1)
 	n := s.inFlight.Add(1)
 	for {
@@ -171,19 +172,23 @@ func (s *concurrencyHeaderFetcher) track() func() {
 			break
 		}
 	}
-	time.Sleep(50 * time.Millisecond)
+	if s.waitForOverlap != nil {
+		s.waitForOverlap(end, n)
+	} else {
+		time.Sleep(50 * time.Millisecond)
+	}
 	return func() { s.inFlight.Add(-1) }
 }
 
 func (s *concurrencyHeaderFetcher) FetchHeadersBackwards(ctx context.Context, hash common.Hash, amount uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
 	if amount > 1 {
-		defer s.track()()
+		defer s.track(0)()
 	}
 	return s.chainServingBbdFetcher.FetchHeadersBackwards(ctx, hash, amount, peerId, opts...)
 }
 
 func (s *concurrencyHeaderFetcher) FetchHeaders(_ context.Context, start, end uint64, _ *PeerId, _ ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
-	defer s.track()()
+	defer s.track(end)()
 	out := make([]*types.Header, 0, end-start)
 	for num := start; num < end; num++ {
 		h := s.headers[num-1]
@@ -210,7 +215,20 @@ func drainHeaderWalkFeed(ctx context.Context, t *testing.T, feed BbdResultFeed) 
 
 func TestBackwardBlockDownloader_HeaderWalkKeepsSeveralRequestsInFlight(t *testing.T) {
 	headers := headerWalkChain(5001)
-	fetcher := &concurrencyHeaderFetcher{chainServingBbdFetcher: chainServingBbdFetcher{headers: headers}}
+	overlapCtx, release := context.WithTimeout(t.Context(), 10*time.Second)
+	defer release()
+	fetcher := &concurrencyHeaderFetcher{
+		chainServingBbdFetcher: chainServingBbdFetcher{headers: headers},
+		waitForOverlap: func(end uint64, inFlight int64) {
+			if end == 0 || end > uint64(len(headers))-3*defaultBbdRequestConfig.blocksBatchSize {
+				return
+			}
+			if inFlight >= 4 {
+				release()
+			}
+			<-overlapCtx.Done()
+		},
+	}
 	bbd := newTestBbd(t, fetcher)
 	for i := uint64(2); i <= 4; i++ {
 		bbd.peerTracker.PeerConnected(PeerIdFromUint64(i))

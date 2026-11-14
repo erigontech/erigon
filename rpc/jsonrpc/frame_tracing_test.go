@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"math"
 	"math/big"
 	"strings"
 	"testing"
@@ -30,7 +31,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -49,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
@@ -125,35 +127,28 @@ func TestFrameTraceBlockAfterTracerError(t *testing.T) {
 			return {gasUsed: ctx.gasUsed, stateGasUsed: ctx.stateGasUsed};
 		}
 	}`
-	for _, versioned := range []bool{false, true} {
-		t.Run(map[bool]string{false: "materialized", true: "versioned"}[versioned], func(t *testing.T) {
-			previous := dbg.CallNoMaterialize
-			dbg.CallNoMaterialize = versioned
-			t.Cleanup(func() { dbg.CallNoMaterialize = previous })
-			var out bytes.Buffer
-			stream := jsonstream.New(&out)
-			require.NotPanics(t, func() {
-				require.NoError(t, api.TraceBlockByNumber(m.Ctx, 1, &config.TraceConfig{Tracer: &tracer}, stream))
-			})
-			require.NoError(t, stream.Flush())
-			var traces []struct {
-				Error *struct {
-					Message string `json:"message"`
-				} `json:"error"`
-				Result struct {
-					GasUsed      uint64 `json:"gasUsed"`
-					StateGasUsed uint64 `json:"stateGasUsed"`
-				} `json:"result"`
-			}
-			require.NoError(t, json.Unmarshal(out.Bytes(), &traces))
-			require.Len(t, traces, 2)
-			require.NotNil(t, traces[0].Error)
-			require.Contains(t, traces[0].Error.Message, "trace result failed")
-			require.Nil(t, traces[1].Error)
-			require.Equal(t, pack.Receipts[0][1].GasUsed, traces[1].Result.GasUsed)
-			require.Zero(t, traces[1].Result.StateGasUsed)
-		})
+	var out bytes.Buffer
+	stream := jsonstream.New(&out)
+	require.NotPanics(t, func() {
+		require.NoError(t, api.TraceBlockByNumber(m.Ctx, 1, &config.TraceConfig{Tracer: &tracer}, stream))
+	})
+	require.NoError(t, stream.Flush())
+	var traces []struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Result struct {
+			GasUsed      uint64 `json:"gasUsed"`
+			StateGasUsed uint64 `json:"stateGasUsed"`
+		} `json:"result"`
 	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &traces))
+	require.Len(t, traces, 2)
+	require.NotNil(t, traces[0].Error)
+	require.Contains(t, traces[0].Error.Message, "trace result failed")
+	require.Nil(t, traces[1].Error)
+	require.Equal(t, pack.Receipts[0][1].GasUsed, traces[1].Result.GasUsed)
+	require.Zero(t, traces[1].Result.StateGasUsed)
 }
 
 type frameCallTrace struct {
@@ -487,10 +482,8 @@ func TestFrameParityTracer(t *testing.T) {
 	}
 }
 
-// The proposed trace format makes the synthetic root discoverable through
-// toAddress: [ENTRY_POINT], even though it executes no entry-point code.
-// https://github.com/ethereum/execution-apis/pull/909
-func TestFrameTraceFilterSyntheticRoot(t *testing.T) {
+func newFrameTraceChain(t *testing.T) (*execmoduletester.ExecModuleTester, *types.FrameTransaction) {
+	t.Helper()
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
 	sender, target := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")
@@ -512,6 +505,73 @@ func TestFrameTraceFilterSyntheticRoot(t *testing.T) {
 			{Mode: types.FrameSender, Target: &target, Limits: mdgas.MdGas{Execution: 10_000}},
 		},
 	}
+	return m, frameTx
+}
+
+func TestFrameRawTransactionGasCap(t *testing.T) {
+	m, txn := newFrameTraceChain(t)
+	pack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	for _, tc := range []struct {
+		name                  string
+		execution, state, cap uint64
+		wantErr               string
+	}{
+		{name: "separate budgets", execution: 15_000_000, state: 40_000_000, cap: 50_000_000},
+		{name: "state exceeds cap", state: 50_000_001, cap: 50_000_000, wantErr: "exceeds the RPC gas cap"},
+		{name: "execution exceeds cap", execution: 1_000_000, cap: 500_000, wantErr: "exceeds the RPC gas cap"},
+		{name: "invalid budget", execution: math.MaxUint64, cap: 50_000_000, wantErr: "frame gas limit overflow"},
+		{name: "invalid budget without cap", execution: math.MaxUint64, wantErr: "frame gas limit overflow"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			txn.Frames[1].Limits = mdgas.MdGas{Execution: tc.execution, State: tc.state}
+			var encoded bytes.Buffer
+			require.NoError(t, txn.MarshalBinary(&encoded))
+			api := NewTraceAPI(newBaseApiForTest(m), m.DB, &rpccfg.TraceApiConfig{GasCap: tc.cap})
+			result, err := api.RawTransaction(m.Ctx, encoded.Bytes(), []string{TraceTypeTrace})
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				if tc.wantErr == "frame gas limit overflow" {
+					var invalidParams *rpc.InvalidParamsError
+					require.ErrorAs(t, err, &invalidParams)
+				}
+				require.Nil(t, result)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, result.Trace, 3)
+		})
+	}
+}
+
+func TestOtterscanFrameReceipt(t *testing.T) {
+	m, txn := newFrameTraceChain(t)
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	dbtx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer dbtx.Rollback()
+	var receipt *types.Receipt
+	tracer := &tracers.Tracer{Hooks: &tracing.Hooks{OnTxEnd: func(r *types.Receipt, err error) {
+		require.NoError(t, err)
+		receipt = r
+	}}}
+	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
+	result, err := api.runTracer(m.Ctx, dbtx, txn.Hash(), tracer)
+	require.NoError(t, err)
+	require.NotNil(t, receipt)
+	require.Equal(t, result.ReceiptForTracing(), receipt)
+	require.Len(t, receipt.FrameReceipts, len(txn.Frames))
+}
+
+// The proposed trace format makes the synthetic root discoverable through
+// toAddress: [ENTRY_POINT], even though it executes no entry-point code.
+// https://github.com/ethereum/execution-apis/pull/909
+func TestFrameTraceFilterSyntheticRoot(t *testing.T) {
+	m, frameTx := newFrameTraceChain(t)
+	sender := frameTx.SenderAddress
 	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))

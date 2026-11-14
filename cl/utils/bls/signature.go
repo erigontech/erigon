@@ -117,13 +117,13 @@ func VerifyAggregate(signature []byte, msg []byte, publicKeysBytes [][]byte) (bo
 		return false, err
 	}
 
-	publicKeys := []PublicKey{}
-	for _, publicKey := range publicKeysBytes {
+	publicKeys := make([]PublicKey, len(publicKeysBytes))
+	for i, publicKey := range publicKeysBytes {
 		key, err := NewPublicKeyFromBytes(publicKey)
 		if err != nil {
 			return false, err
 		}
-		publicKeys = append(publicKeys, key)
+		publicKeys[i] = key
 	}
 
 	return sig.VerifyAggregate(msg, publicKeys), nil

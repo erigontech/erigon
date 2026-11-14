@@ -609,10 +609,8 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 				copy(cell.extension[1+len(preExtension):], lowCell.extension[:lowCell.extLen])
 			}
 			cell.extLen = lowCell.extLen + 1 + int16(len(preExtension))
-			if cell.accountAddrLen == 0 && cell.storageAddrLen == 0 {
-				copy(cell.hashedExtension[:], cell.extension[:cell.extLen])
-				cell.hashedExtLen = cell.extLen
-			}
+			copy(cell.hashedExtension[:], cell.extension[:cell.extLen])
+			cell.hashedExtLen = cell.extLen
 		} else {
 			// Extension is related to a storage branch node, so we copy it upwards as is
 			cell.extLen = lowCell.extLen
@@ -1357,16 +1355,6 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 		if hph.traceW != nil {
 			fmt.Fprintf(hph.traceW, "needUnfolding root, rootChecked = %t\n", hph.rootChecked)
 		}
-		if hph.root.hashedExtLen == 64 && hph.root.accountAddrLen > 0 && hph.root.storageAddrLen > 0 {
-			// in case if root is a leaf node with storage and account, we need to derive storage part of a key
-			if err := hph.root.deriveHashedKeys(depth, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
-				log.Warn("deriveHashedKeys for root with storage", "err", err, "cell", hph.root.FullString())
-				return 0
-			}
-			if hph.traceW != nil {
-				fmt.Fprintf(hph.traceW, "derived prefix %x\n", hph.currentKey[:hph.currentKeyLen])
-			}
-		}
 		if hph.root.hashedExtLen == 0 && hph.root.hashLen == 0 {
 			if hph.rootChecked {
 				return 0 // Previously checked, empty root, no unfolding needed
@@ -2007,6 +1995,11 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 	}
 	// propagate cell into parent row
 	upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], childNibble)
+	if row == 0 {
+		if err := hph.deriveRootLeafPath(); err != nil {
+			return err
+		}
+	}
 
 	if err := hph.collectDeleteUpdate(updateKey, row); err != nil {
 		return err
@@ -2448,6 +2441,9 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 
 func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	hph.root.stateHashLen = 0
+	if _, err := hph.loadStateIfNeeded(&hph.root, skipStat{}); err != nil {
+		return nil, err
+	}
 	rootHash, err := hph.computeCellHash(&hph.root, 0, nil)
 	if err != nil {
 		return nil, err
@@ -3238,13 +3234,8 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		hph.root.setFromUpdate(update)
 		hph.root.loaded = hph.root.loaded.addFlag(cellLoadStorage)
 	}
-	// A leaf root's navigation path is derivable but not reliably persisted: without it a
-	// wall probe sees an unfoldable root and the mount paths overwrite the leaf in place.
-	if hph.root.accountAddrLen > 0 || hph.root.storageAddrLen > 0 {
-		hph.root.hashedExtLen = 0
-		if err := hph.root.deriveHashedKeys(0, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
-			return err
-		}
+	if err := hph.deriveRootLeafPath(); err != nil {
+		return err
 	}
 	// Blobs written before propagate folds set rootPresent carry false for non-empty
 	// roots; a non-empty root is present by definition.
@@ -3253,6 +3244,17 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	}
 
 	return nil
+}
+
+// deriveRootLeafPath rebuilds a leaf root's navigation path from its keys. The root is the
+// only cell that outlives a Process call, and neither a propagate fold nor a state blob
+// leaves it a path the next unfold can trust.
+func (hph *HexPatriciaHashed) deriveRootLeafPath() error {
+	if hph.root.accountAddrLen == 0 && hph.root.storageAddrLen == 0 {
+		return nil
+	}
+	hph.root.hashedExtLen = 0
+	return hph.root.deriveHashedKeys(0, hph.accountKeyLen, hph.cellHashBuf[:])
 }
 
 func HexTrieExtractStateRoot(enc []byte) ([]byte, uint64, uint64, error) {

@@ -67,11 +67,9 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 	if config.IsOsaka(currentHeaderTime) {
 		// EIP-7918: Blob base fee bounded by execution cost
 		max := config.GetMaxBlobsPerBlock(currentHeaderTime)
-		refBlobBaseFee, err := GetBlobGasPrice(config, parentExcessBlobGas, currentHeaderTime)
-		if err != nil {
-			panic(err) // should never happen assuming the parent is valid
-		}
-		if uint256.NewInt(0).Mul(blobBaseCost, parent.BaseFee).Cmp(uint256.NewInt(0).Mul(gasPerBlob, &refBlobBaseFee)) > 0 {
+		// A blob base fee that overflows is far above the reserve price.
+		refBlobBaseFee, overflow := blobGasPrice(config, parentExcessBlobGas, currentHeaderTime)
+		if !overflow && uint256.NewInt(0).Mul(blobBaseCost, parent.BaseFee).Cmp(uint256.NewInt(0).Mul(gasPerBlob, &refBlobBaseFee)) > 0 {
 			return parentExcessBlobGas + parentBlobGasUsed*(max-target)/max
 		}
 	}
@@ -79,31 +77,27 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 }
 
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
-// as described in the EIP-4844 spec.
-func FakeExponential(factor, denom *uint256.Int, excessBlobGas uint64) (uint256.Int, error) {
+// as described in the EIP-4844 spec. The bool reports an overflow of the 256-bit arithmetic.
+func FakeExponential(factor, denom *uint256.Int, excessBlobGas uint64) (uint256.Int, bool) {
 	numerator := uint256.NewInt(excessBlobGas)
 	output := uint256.NewInt(0)
 	numeratorAccum := new(uint256.Int)
-	_, overflow := numeratorAccum.MulOverflow(factor, denom)
-	if overflow {
-		return uint256.Int{}, fmt.Errorf("FakeExponential: overflow in MulOverflow(factor=%v, denom=%v)", factor, denom)
+	if _, overflow := numeratorAccum.MulOverflow(factor, denom); overflow {
+		return uint256.Int{}, true
 	}
 	divisor := new(uint256.Int)
-	for i := 1; numeratorAccum.Sign() > 0; i++ {
-		_, overflow = output.AddOverflow(output, numeratorAccum)
-		if overflow {
-			return uint256.Int{}, fmt.Errorf("FakeExponential: overflow in AddOverflow(output=%v, numeratorAccum=%v)", output, numeratorAccum)
+	for i := 1; !numeratorAccum.IsZero(); i++ {
+		if _, overflow := output.AddOverflow(output, numeratorAccum); overflow {
+			return uint256.Int{}, true
 		}
-		_, overflow = divisor.MulOverflow(denom, uint256.NewInt(uint64(i)))
-		if overflow {
-			return uint256.Int{}, fmt.Errorf("FakeExponential: overflow in MulOverflow(denom=%v, i=%v)", denom, i)
+		if _, overflow := divisor.MulOverflow(denom, uint256.NewInt(uint64(i))); overflow {
+			return uint256.Int{}, true
 		}
-		_, overflow = numeratorAccum.MulDivOverflow(numeratorAccum, numerator, divisor)
-		if overflow {
-			return uint256.Int{}, fmt.Errorf("FakeExponential: overflow in MulDivOverflow(numeratorAccum=%v, numerator=%v, divisor=%v)", numeratorAccum, numerator, divisor)
+		if _, overflow := numeratorAccum.MulDivOverflow(numeratorAccum, numerator, divisor); overflow {
+			return uint256.Int{}, true
 		}
 	}
-	return *output.Div(output, denom), nil
+	return *output.Div(output, denom), false
 }
 
 // VerifyPresenceOfCancunHeaderFields checks that the fields introduced in Cancun (EIP-4844, EIP-4788) are present.
@@ -135,15 +129,23 @@ func VerifyAbsenceOfCancunHeaderFields(header *types.Header) error {
 }
 
 func GetBlobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint64) (uint256.Int, error) {
+	price, overflow := blobGasPrice(config, excessBlobGas, headerTime)
+	if overflow {
+		return uint256.Int{}, fmt.Errorf("blob gas price overflow: excessBlobGas %d", excessBlobGas)
+	}
+	return price, nil
+}
+
+func blobGasPrice(config *chain.Config, excessBlobGas uint64, headerTime uint64) (uint256.Int, bool) {
 	key := blobGasPriceKey{config.GetMinBlobGasPrice(), config.GetBlobGasPriceUpdateFraction(headerTime), excessBlobGas}
 	if last := lastBlobGasPrice.Load(); last != nil && last.key == key {
-		return last.price, nil
+		return last.price, false
 	}
-	price, err := FakeExponential(uint256.NewInt(key.minPrice), uint256.NewInt(key.updateFraction), excessBlobGas)
-	if err == nil {
+	price, overflow := FakeExponential(uint256.NewInt(key.minPrice), uint256.NewInt(key.updateFraction), excessBlobGas)
+	if !overflow {
 		lastBlobGasPrice.Store(&blobGasPriceResult{key, price})
 	}
-	return price, err
+	return price, overflow
 }
 
 type blobGasPriceKey struct{ minPrice, updateFraction, excessBlobGas uint64 }
@@ -165,7 +167,7 @@ func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBl
 	if expectedBlobHashes == nil {
 		return ErrNilBlobHashes
 	}
-	actualBlobHashes := []common.Hash{}
+	actualBlobHashes := make([]common.Hash, 0, min(len(expectedBlobHashes), int(maxBlobsPerBlock)))
 	for _, txn := range *transactions {
 		for _, h := range txn.GetBlobHashes() {
 			if h[0] != kzg.BlobCommitmentVersionKZG {

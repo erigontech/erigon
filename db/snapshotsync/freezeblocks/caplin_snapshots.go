@@ -298,9 +298,15 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 		if err != nil {
 			return err
 		}
-		blobCount, err := blobCountFn(i)
+		blobCount, payloadSkipped, err := blobCountFn(tx, i)
 		if err != nil {
 			return err
+		}
+		if payloadSkipped {
+			if err := sn.AddWord(nil); err != nil {
+				return err
+			}
+			continue
 		}
 		if blobCount != uint64(commitmentsCount) {
 			return fmt.Errorf("blob storage count mismatch at slot %d: %d != %d", i, blobCount, commitmentsCount)
@@ -388,29 +394,79 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, 
 	return nil
 }
 
-type BlobCountBySlotFn func(slot uint64) (uint64, error)
+type BlobCountBySlotFn func(tx kv.Tx, slot uint64) (count uint64, payloadSkipped bool, err error)
 
 func BlobCountFromBlocks(ctx context.Context, sn *CaplinSnapshots, r BeaconSnapshotReader) BlobCountBySlotFn {
-	return func(slot uint64) (uint64, error) {
-		block, err := r.ReadBeaconBlockBodyBySlot(ctx, nil, slot)
-		if err != nil {
-			return 0, err
+	return func(tx kv.Tx, slot uint64) (uint64, bool, error) {
+		view := sn.View()
+		_, ok := view.BeaconBlocksSegment(slot)
+		view.Close()
+		if !ok {
+			return 0, false, fmt.Errorf("slot %d: no frozen beacon block segment to count its blobs against", slot)
 		}
-		if block == nil {
-			view := sn.View()
-			_, ok := view.BeaconBlocksSegment(slot)
-			view.Close()
-			if !ok {
-				return 0, fmt.Errorf("slot %d: no frozen beacon block segment to count its blobs against", slot)
-			}
-			return 0, nil
+		block, root, err := readCanonicalBlock(ctx, tx, r, slot)
+		if err != nil || block == nil {
+			return 0, false, err
 		}
 		commitments := block.Block.Body.GetBlobKzgCommitments()
-		if commitments == nil {
-			return 0, nil
+		if commitments == nil || commitments.Len() == 0 {
+			return 0, false, nil
 		}
-		return uint64(commitments.Len()), nil
+		if block.Version() >= clparams.GloasVersion {
+			skipped, err := PayloadSkipped(ctx, tx, sn, r, block, root)
+			if err != nil || skipped {
+				return 0, skipped, err
+			}
+		}
+		return uint64(commitments.Len()), false, nil
 	}
+}
+
+func PayloadSkipped(ctx context.Context, tx kv.Tx, sn *CaplinSnapshots, r BeaconSnapshotReader, block *cltypes.SignedBeaconBlock, root common.Hash) (bool, error) {
+	finalized, err := beacon_indicies.ReadHighestFinalized(tx)
+	if err != nil {
+		return false, err
+	}
+	checkpoint := finalized / sn.beaconCfg.SlotsPerEpoch * sn.beaconCfg.SlotsPerEpoch
+	for slot := block.Block.Slot + 1; slot <= max(sn.BlocksAvailable(), checkpoint); slot++ {
+		child, _, err := readCanonicalBlock(ctx, tx, r, slot)
+		if err != nil {
+			return false, err
+		}
+		if child == nil {
+			continue
+		}
+		if child.Version() < clparams.GloasVersion {
+			return false, fmt.Errorf("block at slot %d: pre-Gloas block after a Gloas block", slot)
+		}
+		return child.Block.ParentRoot == root && child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash != block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash, nil
+	}
+	return false, nil
+}
+
+func readCanonicalBlock(ctx context.Context, tx kv.Tx, r BeaconSnapshotReader, slot uint64) (block *cltypes.SignedBeaconBlock, root common.Hash, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, common.Hash{}, err
+	}
+	block, err = r.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
+	if err != nil {
+		return nil, common.Hash{}, err
+	}
+	if block == nil || block.Version() < clparams.GloasVersion {
+		return block, common.Hash{}, nil
+	}
+	root, err = block.Block.HashSSZ()
+	if err != nil {
+		return nil, common.Hash{}, err
+	}
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	if err != nil {
+		return nil, common.Hash{}, err
+	}
+	if block.Block.Slot != slot || root != canonicalRoot {
+		return nil, common.Hash{}, fmt.Errorf("block at slot %d is not canonical", slot)
+	}
+	return block, root, nil
 }
 
 func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, compressWorkers int, blobCountFn BlobCountBySlotFn, lvl log.Lvl, logger log.Logger) error {
@@ -563,4 +619,28 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 		return 0
 	}
 	return s.VisibleSegmentsMaxTo(snaptype.BlobSidecars.Enum())
+}
+
+// RetireBlobsBelow retires blob sidecar segments holding no slot at or above floor and hands
+// their files to onDelete so the seeder drops them. The newest segment always stays, so
+// FrozenBlobs and the backfill boundary it sets do not move. It waits while superseded segments
+// are still on disk: retiring the visible copy of a range would surface the hidden one and cut
+// visibility at the next gap.
+func (s *CaplinSnapshots) RetireBlobsBelow(floor uint64, onDelete func([]string) error) (bool, error) {
+	if floor == 0 {
+		return false, nil
+	}
+	var dirty int
+	s.WalkDirtySegments(snaptype.BlobSidecars.Enum(), func(*snapshotsync.DirtySegment) bool {
+		dirty++
+		return true
+	})
+	view := s.View()
+	visible := len(view.BlobSidecars())
+	view.Close()
+	if dirty != visible {
+		s.logger.Debug("Skipping blob retirement while dirty and visible segment counts differ", "dirty", dirty, "visible", visible)
+		return false, nil
+	}
+	return s.RetireFilesBelow(snaptype.BlobSidecars, min(floor+1, s.FrozenBlobs()), onDelete)
 }

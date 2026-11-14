@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -251,4 +252,33 @@ func TestZeroUnpricedBaseFee(t *testing.T) {
 			require.Equal(t, want, &got.BaseFee)
 		})
 	}
+}
+
+func TestZeroValueCallToCodeReadsNoCalleeBalance(t *testing.T) {
+	t.Parallel()
+
+	vm := state.NewVersionMap(nil)
+	callee := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	code := []byte{byte(STOP)}
+	account := accounts.NewAccount()
+	account.Nonce = 1
+	account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	v0 := state.Version{TxIndex: 0}
+	vm.WriteAddress(callee, v0, &account, true)
+	vm.WriteNonce(callee, v0, 1, true)
+	vm.WriteBalance(callee, v0, uint256.Int{}, true)
+	vm.WriteCodeHash(callee, v0, account.CodeHash, true)
+	vm.WriteCode(callee, v0, accounts.NewCode(code), true)
+	vm.WriteCodeSize(callee, v0, len(code), true)
+
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	_, _, _, err := evm.Call(accounts.ZeroAddress, callee, nil, mdgas.MdGas{Execution: 100_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+
+	reads := ibs.VersionedReads()
+	_, balanceRead := reads.GetBalance(callee)
+	require.False(t, balanceRead, "a zero-value call to an account with code depends on no balance")
 }

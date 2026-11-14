@@ -432,10 +432,10 @@ func (c *JsonRpcClient) GetBlobsV3(ctx context.Context, blobHashes []common.Hash
 	}, c.backOff(ctx))
 }
 
-func (c *JsonRpcClient) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellIndices hexutil.Bytes) ([]*enginetypes.BlobCellsAndProofsV1, error) {
+func (c *JsonRpcClient) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellMask hexutil.Bytes) ([]*enginetypes.BlobCellsAndProofsV1, error) {
 	return backoff.RetryWithData(func() ([]*enginetypes.BlobCellsAndProofsV1, error) {
 		var result []*enginetypes.BlobCellsAndProofsV1
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getBlobsV4", blobHashes, cellIndices)
+		err := c.rpcClient.CallContext(ctx, &result, "engine_getBlobsV4", blobHashes, cellMask)
 		if err != nil {
 			return nil, c.maybeMakePermanent(err)
 		}

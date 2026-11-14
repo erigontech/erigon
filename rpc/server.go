@@ -146,7 +146,11 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 
 	h := s.newConnHandler(context.WithValue(connCtx, peerInfoContextKey{}, codec.peerInfo()), codec)
 	for {
-		msgs, batch, err := readBatch(codec, s.logger)
+		msgs, batch, err := readBatch(codec, s.batchLimit, s.logger)
+		if tooLarge, ok := errors.AsType[*batchTooLargeError](err); ok {
+			h.handleBatchTooLarge(tooLarge, codec.takeRelease())
+			continue
+		}
 		if err != nil {
 			h.close(err, nil)
 			return
@@ -163,7 +167,7 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 // newConnHandler builds the handler of one connection, so every transport applies the
 // server's allow list and limits.
 func (s *Server) newConnHandler(ctx context.Context, conn jsonWriter) *handler {
-	return newHandler(ctx, conn, s.idgen, &s.services, s.batchLimit, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	return newHandler(ctx, conn, s.idgen, &s.services, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
 }
 
 // serveSingleRequest reads and processes a single RPC request from the given codec. This
@@ -179,7 +183,11 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 	h.inlineCalls = true
 	defer h.close(io.EOF, nil)
 
-	reqs, batch, err := codec.ReadBatch()
+	reqs, batch, err := codec.ReadBatch(s.batchLimit)
+	if tooLarge, ok := errors.AsType[*batchTooLargeError](err); ok {
+		h.handleBatchTooLarge(tooLarge, nil)
+		return nil
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, io.EOF):

@@ -19,6 +19,7 @@ package stagedsync
 
 import (
 	"context"
+	"math/big"
 	"os"
 	"testing"
 
@@ -46,7 +47,7 @@ import (
 
 // setup2CacheTest creates the minimal mdbx+temporal+domains stack used by the
 // 2-cache baseline tests. Cleanup is registered via t.Cleanup.
-func setup2CacheTest(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
+func setup2CacheTest(t testing.TB) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	t.Helper()
 	lgr := log.New()
 
@@ -350,4 +351,42 @@ func TestNotifyAccumulatorMergesBalanceAndCodeAtFinalIncarnation(t *testing.T) {
 	var got accounts.Account
 	require.NoError(t, accounts.DeserialiseV3(&got, change.Data))
 	require.Equal(t, uint64(1), got.Incarnation)
+}
+
+func BenchmarkNotifyAccumulator(b *testing.B) {
+	const txs = 2000
+	coinbase := accounts.InternAddress(common.HexToAddress("0xc0"))
+	addrOf := func(i int) accounts.Address {
+		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1000))))
+	}
+	for name, touched := range map[string]func(tx int) []accounts.Address{
+		"few_accounts":      func(tx int) []accounts.Address { return []accounts.Address{addrOf(tx % 4), coinbase} },
+		"distinct_accounts": func(tx int) []accounts.Address { return []accounts.Address{addrOf(2 * tx), addrOf(2*tx + 1), coinbase} },
+	} {
+		b.Run(name, func(b *testing.B) {
+			tx, domains := setup2CacheTest(b)
+			rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, log.New()))
+			writes := make([]state.WriteSetView, txs)
+			for i := range writes {
+				ws := newWS()
+				for _, addr := range touched(i) {
+					val := addr.Value()
+					seed := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(100), Incarnation: 1}
+					require.NoError(b, domains.DomainPut(kv.AccountsDomain, tx, val[:], accounts.SerialiseV3(&seed), 0, nil))
+					ws.bal(addr, state.Version{TxIndex: i}, *uint256.NewInt(uint64(i)))
+					ws.nonce(addr, state.Version{TxIndex: i}, uint64(i))
+				}
+				writes[i] = ws.build()
+			}
+			accumulator := shards.NewAccumulator()
+			var hdr types.Header
+			hdr.Number.SetUint64(1)
+			b.ReportAllocs()
+			for b.Loop() {
+				accumulator.Reset(0)
+				accumulator.StartChange(&hdr, nil, false)
+				require.NoError(b, rs.NotifyAccumulator(accumulator, tx, writes))
+			}
+		})
+	}
 }

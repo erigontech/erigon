@@ -338,10 +338,22 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 		return
 	}
 
-	if err := a.voluntaryExitService.ProcessMessage(r.Context(), nil, &services.SignedVoluntaryExitForGossip{
+	err = a.voluntaryExitService.ProcessMessage(r.Context(), nil, &services.SignedVoluntaryExitForGossip{
 		SignedVoluntaryExit:   &req,
 		ImmediateVerification: true,
-	}); err != nil && !errors.Is(err, services.ErrIgnore) {
+	})
+	if errors.Is(err, services.ErrIgnore) {
+		// The request itself was not verified, so only an exit already verified into the pool may be gossiped.
+		pooled, ok := a.operationsPool.VoluntaryExitsPool.Get(req.VoluntaryExit.ValidatorIndex)
+		if !ok {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if encodedSSZ, err = pooled.EncodeSSZ(nil); err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
+		}
+	} else if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}

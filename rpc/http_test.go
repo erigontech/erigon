@@ -81,7 +81,7 @@ func TestHTTPErrorResponseWithPut(t *testing.T) {
 }
 
 func TestHTTPErrorResponseWithMaxContentLength(t *testing.T) {
-	body := make([]rune, maxRequestContentLength+1)
+	body := make([]rune, MaxRequestContentLength+1)
 	confirmRequestValidationCode(t,
 		http.MethodPost, contentType, string(body), http.StatusRequestEntityTooLarge)
 }
@@ -153,14 +153,14 @@ func TestHTTPGetQueryRequiresJSONContentType(t *testing.T) {
 	}
 }
 
-// This checks that maxRequestContentLength is not applied to the response of a request.
+// This checks that MaxRequestContentLength is not applied to the response of a request.
 func TestHTTPRespBodyUnlimited(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
 
 	logger := log.New()
-	const respLength = maxRequestContentLength * 3
+	const respLength = MaxRequestContentLength * 3
 
 	s := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
 	defer s.Stop()
@@ -696,7 +696,7 @@ func TestHTTPBodyBudget(t *testing.T) {
 	for range 2 {
 		pr, pw := io.Pipe()
 		pipes = append(pipes, pw)
-		served.Go(func() { srv.ServeHTTP(httptest.NewRecorder(), newRequest(pr, maxRequestContentLength)) })
+		served.Go(func() { srv.ServeHTTP(httptest.NewRecorder(), newRequest(pr, MaxRequestContentLength)) })
 		go func() { _, _ = pw.Write(make([]byte, sent)) }()
 	}
 	require.Eventually(t, func() bool { return srv.ingress.used.Load() == srv.ingress.limit }, 5*time.Second, time.Millisecond)
@@ -734,7 +734,7 @@ func TestHTTPDeclaredBodyIsChargedAsRead(t *testing.T) {
 	pr, pw := io.Pipe()
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", pr)
 	req.Header.Set("Content-Type", contentType)
-	req.ContentLength = maxRequestContentLength
+	req.ContentLength = MaxRequestContentLength
 	served := make(chan struct{})
 	go func() {
 		defer close(served)
@@ -756,8 +756,8 @@ func TestHTTPDeclaredBodyIsChargedAsRead(t *testing.T) {
 func TestHTTPUndeclaredBodyBudget(t *testing.T) {
 	srv := newTestServer(log.New())
 	defer srv.Stop()
-	srv.ingress.limit = maxRequestContentLength
-	require.True(t, srv.ingress.acquire(maxRequestContentLength)) // another body holds the whole budget
+	srv.ingress.limit = MaxRequestContentLength
+	require.True(t, srv.ingress.acquire(MaxRequestContentLength)) // another body holds the whole budget
 
 	serve := func(size int) *httptest.ResponseRecorder {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(echoRequest(size)))
@@ -775,9 +775,21 @@ func TestHTTPUndeclaredBodyBudget(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	require.Contains(t, rec.Body.String(), ErrMsgServerOverloaded)
 
-	srv.ingress.release(maxRequestContentLength)
+	srv.ingress.release(MaxRequestContentLength)
 	rec = serve(int(smallBodyLimit) + 1)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"result"`)
 	require.Zero(t, srv.ingress.used.Load())
+}
+
+func TestHTTPGetQueryWithInvalidIDIsAParseError(t *testing.T) {
+	srv := newTestServer(log.New())
+	defer srv.Stop()
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/?method=test_rets&id=not-json", nil)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "-32700")
 }

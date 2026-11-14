@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -86,6 +88,34 @@ func TestExitErrHandler(t *testing.T) {
 	require.NotNil(t, app.ExitErrHandler, "ExitErrHandler should be configured")
 }
 
+func TestExitErrHandlerPrintsTheError(t *testing.T) {
+	originalOsExiter := cli.OsExiter
+	defer func() { cli.OsExiter = originalOsExiter }()
+	for _, tc := range []struct {
+		name       string
+		err        error
+		wantCode   int
+		wantStderr string
+	}{
+		{"exit error", cli.Exit("ERROR(10): invalid input", 10), 10, "ERROR(10): invalid input\n"},
+		{"empty exit error", cli.Exit("", 1), 1, ""},
+		{"plain error", errors.New("invalid input"), 1, "Error: invalid input\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stderr bytes.Buffer
+			app := NewApp("test usage")
+			app.ErrWriter = &stderr
+			var exitCode int
+			cli.OsExiter = func(code int) { exitCode = code }
+
+			app.ExitErrHandler(t.Context(), app, tc.err)
+
+			require.Equal(t, tc.wantCode, exitCode)
+			require.Equal(t, tc.wantStderr, stderr.String())
+		})
+	}
+}
+
 // TestHelpFlagStillWorks verifies that --help still prints full usage
 func TestHelpFlagStillWorks(t *testing.T) {
 	app := NewApp("test usage")
@@ -138,4 +168,27 @@ func TestNewAppDefaults(t *testing.T) {
 
 	// Verify ExitErrHandler is set
 	require.NotNil(t, app.ExitErrHandler)
+}
+
+const tlsHelperArgsEnv = "ERIGON_TEST_TLS_HELPER_ARGS"
+
+func TestTLSHelperProcess(t *testing.T) {
+	args := os.Getenv(tlsHelperArgsEnv)
+	if args == "" {
+		return
+	}
+	buildHttpCfg(t, strings.Fields(args))
+}
+
+func TestTLSWithMissingCertOrKeyIsFatal(t *testing.T) {
+	for _, args := range []string{"--tls", "--tls --tls.cert=cert.pem", "--tls --tls.key=key.pem"} {
+		t.Run(args, func(t *testing.T) {
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestTLSHelperProcess$")
+			cmd.Env = append(os.Environ(), tlsHelperArgsEnv+"="+args)
+			output, err := cmd.CombinedOutput()
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr, string(output))
+			require.Contains(t, string(output), "Fatal:")
+		})
+	}
 }

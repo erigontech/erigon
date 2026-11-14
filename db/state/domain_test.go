@@ -40,6 +40,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
@@ -60,6 +61,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	dto "github.com/prometheus/client_model/go"
 )
 
 type rndGen struct {
@@ -76,12 +78,12 @@ func newRnd(seed uint64) *rndGen {
 func (r *rndGen) IntN(n int) int                   { return int(r.Uint64N(uint64(n))) }
 func (r *rndGen) Read(p []byte) (n int, err error) { return r.oldGen.Read(p) } // seems `go1.22` doesn't have `Read` method on `math/v2` generator
 
-func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
+func testDbAndDomain(t testing.TB, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	return testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
 }
 
-func testDbAndDomainOfStep(t *testing.T, domainCfg statecfg.DomainCfg, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
+func testDbAndDomainOfStep(t testing.TB, domainCfg statecfg.DomainCfg, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
 	cfg := domainCfg
@@ -739,6 +741,47 @@ func (d *Domain) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv.
 	}
 	d.integrateDirtyFiles(sf, txFrom, txTo)
 	return nil
+}
+
+// The per-block read counters must not bring the per-file latency summaries with them: a summary is one shared
+// mutex for every file read of every worker.
+func TestDomain_FileReadObservesNoSummaryUnderBlockReadMetrics(t *testing.T) {
+	prevLevelled, prevSummaries := dbg.KVReadLevelledMetrics, dbg.KVFileReadSummaries
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics, dbg.KVFileReadSummaries = prevLevelled, prevSummaries })
+	dbg.KVReadLevelledMetrics, dbg.KVFileReadSummaries = true, false
+
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	key := bytes.Repeat([]byte{0xa1}, length.Addr)
+	domainRoTx := d.beginForTests()
+	writer := domainRoTx.NewWriter(db)
+	require.NoError(t, writer.PutWithPrev(key, []byte("value"), 1, nil))
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	domainRoTx.Close()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, background.NewProgressSet()))
+	roTx := d.beginForTests()
+	defer roTx.Close()
+	_, err = roTx.Prune(t.Context(), tx, 0, 0, d.stepSize, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+
+	sampleCount := func() uint64 {
+		var m dto.Metric
+		require.NoError(t, domainReadMetric(kv.AccountsDomain, 0).Write(&m))
+		return m.GetSummary().GetSampleCount()
+	}
+	before := sampleCount()
+	v, _, found, err := roTx.GetLatest(key, tx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, []byte("value"), v)
+	require.Equal(t, before, sampleCount())
 }
 
 func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
@@ -4278,5 +4321,97 @@ func TestDefaultExistenceFilterModeOffloadsBelow20GiB(t *testing.T) {
 		{statecfg.ExistenceFilterWillNeed, 16 << 30, statecfg.ExistenceFilterWillNeed},
 	} {
 		require.Equal(t, tc.want, defaultExistenceFilterMode(tc.mode, tc.total), "mode %d total %d", tc.mode, tc.total)
+	}
+}
+
+func TestDomain_MayContainInFilesUsesExistenceFilters(t *testing.T) {
+	prev := domainExistenceForceInMem
+	domainExistenceForceInMem = []string{kv.AccountsDomain.String()}
+	t.Cleanup(func() { domainExistenceForceInMem = prev })
+	db, d := testDbAndDomain(t, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainTx := d.beginForTests()
+	writer := domainTx.NewWriter(db)
+	for i := range 1000 {
+		require.NoError(t, writer.PutWithPrev(fmt.Appendf(nil, "present-%d", i), []byte("v"), 5, nil))
+	}
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	domainTx.Close()
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, background.NewProgressSet()))
+
+	domainTx = d.beginForTests()
+	defer domainTx.Close()
+	require.NotEmpty(t, domainTx.files)
+	for _, f := range domainTx.files {
+		require.True(t, f.src.existence.InMem(), "a freshly built filter follows the domain's filter mode")
+	}
+	for i := range 1000 {
+		require.True(t, domainTx.mayContainInFiles(fmt.Appendf(nil, "present-%d", i)))
+	}
+	absent := 0
+	for i := range 1000 {
+		if !domainTx.mayContainInFiles(fmt.Appendf(nil, "absent-%d", i)) {
+			absent++
+		}
+	}
+	require.Greater(t, absent, 950, "the existence filter drops absent keys apart from its false positives")
+}
+
+func TestDomain_MayContainInFilesWithoutFiles(t *testing.T) {
+	t.Parallel()
+	_, d := testDbAndDomain(t, log.New())
+	domainTx := d.beginForTests()
+	defer domainTx.Close()
+	require.False(t, domainTx.mayContainInFiles([]byte("k")))
+}
+
+// A mapped existence filter would read its pages one at a time, so its keys stay for the probed lookup.
+func TestDomain_MayContainInFilesKeepsKeysOfMappedFilters(t *testing.T) {
+	prev := domainExistenceForceRandom
+	domainExistenceForceRandom = []string{kv.AccountsDomain.String()}
+	t.Cleanup(func() { domainExistenceForceRandom = prev })
+	db, d := testDbAndDomain(t, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainTx := d.beginForTests()
+	writer := domainTx.NewWriter(db)
+	for i := range 100 {
+		require.NoError(t, writer.PutWithPrev(fmt.Appendf(nil, "present-%d", i), []byte("v"), 5, nil))
+	}
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	domainTx.Close()
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, background.NewProgressSet()))
+
+	domainTx = d.beginForTests()
+	defer domainTx.Close()
+	require.NotEmpty(t, domainTx.files)
+	for _, f := range domainTx.files {
+		require.False(t, f.src.existence.InMem(), "a mapped filter mode keeps the filter mapped")
+	}
+	for i := range 100 {
+		require.True(t, domainTx.mayContainInFiles(fmt.Appendf(nil, "absent-%d", i)))
+	}
+}
+
+func TestDomainCloseFilesAfterStep(t *testing.T) {
+	t.Parallel()
+	d := emptyTestDomain(t, 1)
+	d.scanDirtyFiles([]string{"v1.0-accounts.0-2.kv", "v1.0-accounts.2-4.kv"})
+	d.History.scanDirtyFiles([]string{"v1.0-accounts.0-2.v", "v1.0-accounts.2-4.v"})
+	d.History.InvertedIndex.scanDirtyFiles([]string{"v1.0-accounts.0-2.ef", "v1.0-accounts.2-4.ef"})
+	all := []*DirtyFiles{d.dirtyFiles, d.History.dirtyFiles, d.History.InvertedIndex.dirtyFiles}
+
+	d.closeFilesAfterStep(3)
+	for _, df := range all {
+		require.Equal(t, []string{"0-2", "2-4"}, stepRanges(t, df.Items(), d.stepSize))
+	}
+	d.closeFilesAfterStep(2)
+	for _, df := range all {
+		require.Equal(t, []string{"0-2"}, stepRanges(t, df.Items(), d.stepSize))
 	}
 }

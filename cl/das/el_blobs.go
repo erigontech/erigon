@@ -2,23 +2,28 @@ package das
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// ImportColumnsFromBlobs builds the data column sidecars of a Fulu block from an
+// ImportColumnsFromBlobs builds the data column sidecars of a Fulu or Gloas block from an
 // engine_getBlobsV2 response and stores the columns this node keeps. The response
 // must hold every blob of the block, each with one proof per cell; otherwise nothing
 // is stored. The cell proofs are not verified: the EL verified them when it admitted
 // the blob transaction, and the Fulu p2p spec says to skip verification of blobs
-// retrieved from the local EL. It returns the sidecars to publish: all of them when the
-// node subscribes to every topic, else the stored ones.
+// retrieved from the local EL. It returns the sidecars to publish: those on the subnets
+// this node subscribes to.
 func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte) ([]*cltypes.DataColumnSidecar, error) {
 	commitments := block.GetBlobKzgCommitments()
+	if commitments == nil {
+		return nil, errors.New("block has no blob kzg commitments")
+	}
 	if len(blobs) != commitments.Len() || len(cellProofs) != commitments.Len() {
 		return nil, fmt.Errorf("incomplete blobs: got %d blobs and %d proof sets for %d commitments", len(blobs), len(cellProofs), commitments.Len())
 	}
@@ -45,19 +50,16 @@ func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.Sig
 		}
 	}
 
-	inclusionProofRaw, err := block.Block.Body.KzgCommitmentsInclusionProof()
-	if err != nil {
-		return nil, err
-	}
-	inclusionProof := solid.NewHashVector(cltypes.KzgCommitmentsInclusionProofDepth)
-	for i := range inclusionProofRaw {
-		inclusionProof.Set(i, inclusionProofRaw[i])
-	}
-	sidecars, err := peerdasutils.GetDataColumnSidecars(block.SignedBeaconBlockHeader(), commitments, inclusionProof, cellsAndProofs)
-	if err != nil {
-		return nil, err
-	}
 	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return nil, err
+	}
+	var sidecars []*cltypes.DataColumnSidecar
+	if block.Version() >= clparams.GloasVersion {
+		sidecars, err = peerdasutils.GetDataColumnSidecarsGloas(d.beaconConfig, block.Block.Slot, blockRoot, cellsAndProofs)
+	} else {
+		sidecars, err = fuluDataColumnSidecars(block, commitments, cellsAndProofs)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -68,16 +70,31 @@ func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.Sig
 		if !store(sidecar.Index) {
 			continue
 		}
-		if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(sidecar.Index), sidecar); err != nil {
-			return nil, err
-		}
 		stored = append(stored, sidecar)
+	}
+	if err := d.columnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, stored); err != nil {
+		return nil, err
 	}
 	if err := d.TryScheduleRecover(block.Block.Slot, blockRoot); err != nil {
 		log.Warn("[peerdas] failed to schedule blob recovery after EL import", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
 	}
-	if d.caplinConfig.SubscribeAllTopics {
+	if d.caplinConfig.SubscribeAllTopics || d.IsArchivedMode() {
 		return sidecars, nil
 	}
+	if custody, err := d.state.GetMyCustodyColumns(); err != nil || len(custody) == 0 {
+		return nil, nil
+	}
 	return stored, nil
+}
+
+func fuluDataColumnSidecars(block *cltypes.SignedBeaconBlock, commitments *solid.ListSSZ[*cltypes.KZGCommitment], cellsAndProofs []peerdasutils.CellsAndKZGProofs) ([]*cltypes.DataColumnSidecar, error) {
+	inclusionProofRaw, err := block.Block.Body.KzgCommitmentsInclusionProof()
+	if err != nil {
+		return nil, err
+	}
+	inclusionProof := solid.NewHashVector(cltypes.KzgCommitmentsInclusionProofDepth)
+	for i := range inclusionProofRaw {
+		inclusionProof.Set(i, inclusionProofRaw[i])
+	}
+	return peerdasutils.GetDataColumnSidecars(block.SignedBeaconBlockHeader(), commitments, inclusionProof, cellsAndProofs)
 }

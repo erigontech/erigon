@@ -54,7 +54,7 @@ import (
 
 type addMockTxPool struct {
 	knownByCall      []bool
-	idHashKnownCalls int
+	knownTxnCalls    int
 	addReasons       []txpoolcfg.DiscardReason
 	addLocalSlotsLen int
 }
@@ -71,26 +71,33 @@ func (m *addMockTxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]t
 func (m *addMockTxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
 }
 func (m *addMockTxPool) CountContent() (int, int, int) { return 0, 0, 0 }
-func (m *addMockTxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
-	i := m.idHashKnownCalls
-	m.idHashKnownCalls++
-	if i < len(m.knownByCall) {
-		return m.knownByCall[i], nil
+func (m *addMockTxPool) RejectFramePrefix(common.Hash) {}
+func (m *addMockTxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
+	i := m.knownTxnCalls
+	m.knownTxnCalls++
+	if i < len(m.knownByCall) && m.knownByCall[i] {
+		return txpoolcfg.AlreadyKnown
 	}
-	return false, nil
+	return txpoolcfg.NotSet
 }
 
 func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) { return 0, false }
 
 func (m *addMockTxPool) GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle) { return nil }
 
-func TestMapFrameDiscardReasonToProto(t *testing.T) {
+func TestMapDiscardReasonToProto(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
 		reason txpoolcfg.DiscardReason
 		want   txpoolproto.ImportResult
 	}{
+		{txpoolcfg.IntrinsicGas, txpoolproto.ImportResult_INVALID},
+		{txpoolcfg.GasLimitTooHigh, txpoolproto.ImportResult_INVALID},
+		{txpoolcfg.NonceTooDistant, txpoolproto.ImportResult_INVALID},
+		{txpoolcfg.DelegatedNonceGap, txpoolproto.ImportResult_INVALID},
+		{txpoolcfg.DelegatedTxnLimit, txpoolproto.ImportResult_INVALID},
+		{txpoolcfg.NotReplaced, txpoolproto.ImportResult_FEE_TOO_LOW},
 		{txpoolcfg.InvalidFrame, txpoolproto.ImportResult_INVALID},
 		{txpoolcfg.FrameValidationUnavailable, txpoolproto.ImportResult_INTERNAL_ERROR},
 		{txpoolcfg.FrameStateChanged, txpoolproto.ImportResult_INTERNAL_ERROR},
@@ -136,6 +143,210 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	}
 }
 
+func TestGrpcServerAddDuplicateDuringAdmission(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	mockPool := &addMockTxPool{
+		knownByCall: []bool{false},
+		addReasons:  []txpoolcfg.DiscardReason{txpoolcfg.DuplicateHash},
+	}
+	server := NewGrpcServer(ctx, mockPool, mdbxtest.NewTestPoolDB(t), nil, uint256.Int{1}, log.New())
+	validRlp := hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)
+
+	reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{validRlp}})
+	require.NoError(t, err)
+	require.Equal(t, 1, mockPool.addLocalSlotsLen)
+	require.Equal(t, &txpoolproto.AddReply{
+		Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS},
+		Errors:   []string{"already known"},
+	}, reply)
+}
+
+func TestGrpcServerAddNonceTooLow(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pool := &addMockTxPool{addReasons: []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}}
+	server := NewGrpcServer(ctx, pool, mdbxtest.NewTestPoolDB(t), nil, uint256.Int{1}, log.New())
+	reply, err := server.Add(ctx, &txpoolproto.AddRequest{
+		RlpTxs: [][]byte{hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)},
+	})
+	require.NoError(t, err)
+	require.Equal(t, &txpoolproto.AddReply{
+		Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_STALE},
+		Errors:   []string{txpoolcfg.NonceTooLow.String()},
+	}, reply)
+}
+
+func TestGrpcServerAddBlobNonceGap(t *testing.T) {
+	ctx, pool, poolDB, _ := newTestPool(t)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	blob := types.MakeV1WrappedBlobTxn(&pool.chainID)
+	blob.Tx.Nonce = 1
+	signer := *types.LatestSignerForChainID(&pool.chainID)
+	signed, err := types.SignTx(blob, signer, key)
+	require.NoError(t, err)
+	var encoded bytes.Buffer
+	require.NoError(t, signed.(*types.BlobTxWrapper).MarshalBinaryWrapped(&encoded))
+	server := NewGrpcServer(ctx, pool, poolDB, nil, pool.chainID, pool.logger)
+	reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}})
+	require.NoError(t, err)
+	require.Equal(t, &txpoolproto.AddReply{
+		Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID},
+		Errors:   []string{"nonce-gapped blob transaction"},
+	}, reply)
+	hash := signed.Hash()
+	require.NotEqual(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]))
+	require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+		known, knownErr := pool.IdHashKnown(tx, hash[:])
+		require.NoError(t, knownErr)
+		require.False(t, known, "a blob transaction must be refetchable after its nonce gap closes")
+		return nil
+	}))
+
+	predecessor := newTestTxnSlot(0, 0, 1, 2, 21_000).Txn.(*types.DynamicFeeTransaction)
+	predecessor.ChainID = pool.chainID
+	signedPredecessor, err := types.SignTx(predecessor, signer, key)
+	require.NoError(t, err)
+	var predecessorRLP bytes.Buffer
+	require.NoError(t, signedPredecessor.MarshalBinary(&predecessorRLP))
+	reply, err = server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{predecessorRLP.Bytes()}})
+	require.NoError(t, err)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported)
+
+	reply, err = server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}})
+	require.NoError(t, err)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported)
+	require.Equal(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]))
+}
+
+func TestGrpcServerAddInvalidSelfAuthorizationNonce(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		nonce uint64
+	}{
+		{"below required nonce", 0},
+		{"above required nonce", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, poolDB, _ := newTestPool(t)
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, tc.nonce)
+			require.NoError(t, err)
+			txn := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000).Txn.(*types.SetCodeTransaction)
+			txn.ChainID = pool.chainID
+			txn.Authorizations = []types.Authorization{auth}
+			signed, err := types.SignTx(txn, *types.LatestSignerForChainID(&pool.chainID), key)
+			require.NoError(t, err)
+			var encoded bytes.Buffer
+			require.NoError(t, signed.MarshalBinary(&encoded))
+			server := NewGrpcServer(ctx, pool, poolDB, nil, pool.chainID, pool.logger)
+			hash := signed.Hash()
+			for range 2 {
+				reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}})
+				require.NoError(t, err)
+				require.Equal(t, &txpoolproto.AddReply{
+					Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID},
+					Errors:   []string{"self-authorization nonce must equal transaction nonce plus one"},
+				}, reply)
+				require.Equal(t, txpoolcfg.InvalidAuthorizationNonce, pool.KnownTxnReason(hash[:]), "repeated RPC submissions must reuse the rejection before signature recovery")
+			}
+			require.NoError(t, poolDB.View(ctx, func(tx kv.Tx) error {
+				known, knownErr := pool.IdHashKnown(tx, hash[:])
+				require.NoError(t, knownErr)
+				require.True(t, known, "this self-authorization nonce mismatch is independent of state")
+				return nil
+			}))
+		})
+	}
+}
+
+type concurrentAddTxPool struct {
+	*TxPool
+	admissions atomic.Int32
+	bothParsed chan struct{}
+}
+
+func (p *concurrentAddTxPool) AddLocalTxns(ctx context.Context, txns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+	if p.admissions.Add(1) == 2 {
+		close(p.bothParsed)
+	}
+	return p.TxPool.AddLocalTxns(ctx, txns)
+}
+
+func TestGrpcServerAddFrameFailureAfterConcurrentAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"invalid", nil},
+		{"unavailable", status.Error(codes.Unavailable, "backend unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			pool.chainID.SetUint64(1)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			wrapped := &concurrentAddTxPool{TxPool: pool, bothParsed: make(chan struct{})}
+			entered, admitted := make(chan struct{}), make(chan struct{})
+			var calls atomic.Int32
+			pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
+				if calls.Add(1) == 1 {
+					close(entered)
+					// Both requests must pass the initial membership check before either can admit the transaction.
+					select {
+					case <-wrapped.bothParsed:
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+					return backend.FrameValidation(ctx, req)
+				}
+				select {
+				case <-admitted:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				return &remoteproto.FrameValidationReply{Valid: false}, tc.err
+			}}
+			frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+			server := NewGrpcServer(ctx, wrapped, pool.poolDB, nil, pool.chainID, pool.logger)
+			request := &txpoolproto.AddRequest{RlpTxs: [][]byte{frame.Rlp}}
+			type outcome struct {
+				reply *txpoolproto.AddReply
+				err   error
+			}
+			first := make(chan outcome, 1)
+			go func() {
+				reply, err := server.Add(ctx, request)
+				first <- outcome{reply, err}
+				close(admitted)
+			}()
+			select {
+			case <-entered:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			reply, err := server.Add(ctx, request)
+			accepted := <-first
+			require.NoError(t, accepted.err)
+			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, accepted.reply.Imported)
+			require.NoError(t, err)
+			require.Equal(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(frame.IDHash[:]))
+			require.Equal(t, &txpoolproto.AddReply{
+				Imported: []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS},
+				Errors:   []string{txpoolcfg.AlreadyKnown.String()},
+			}, reply)
+		})
+	}
+}
+
 func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 	for _, persisted := range []bool{false, true} {
 		name := "memory only"
@@ -178,7 +389,7 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 
 			first, err := server.Add(ctx, request)
 			require.NoError(t, err)
-			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_INTERNAL_ERROR}, first.Imported)
+			require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID}, first.Imported)
 			require.Equal(t, []string{txpoolcfg.NonceTooDistant.String()}, first.Errors)
 			require.Empty(t, pool.byHash)
 			if persisted {
@@ -217,8 +428,6 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 }
 
 func TestGrpcServerParkedFrame(t *testing.T) {
-	t.Parallel()
-
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
 	var txns TxnSlots
@@ -242,11 +451,18 @@ func TestGrpcServerParkedFrame(t *testing.T) {
 		require.Equal(t, queued, status.QueuedCount)
 		require.Zero(t, status.BaseFeeCount)
 	}
+	checkMetrics := func(pending, queued uint32) {
+		t.Helper()
+		require.EqualValues(t, pending, pendingSubCounter.GetValue())
+		require.EqualValues(t, queued, queuedSubCounter.GetValue())
+		require.Zero(t, basefeeSubCounter.GetValue())
+	}
 	checkContent(txpoolproto.AllReply_PENDING, 1, 0)
 
 	checkParked := func() {
 		t.Helper()
 		checkContent(txpoolproto.AllReply_QUEUED, 0, 1)
+		checkMetrics(0, 1)
 		require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
 		require.Zero(t, pool.queued.Len(), "RPC classification must not put parked frames in a scheduling sub-pool")
 		var selected TxnsRlp
@@ -267,6 +483,101 @@ func TestGrpcServerParkedFrame(t *testing.T) {
 	change.ChangeBatch[0].BlockHeight = 2
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	checkContent(txpoolproto.AllReply_PENDING, 1, 0)
+	checkMetrics(1, 0)
+}
+
+func TestGrpcServerCachedFrameRejectionBeforeSignatures(t *testing.T) {
+	for _, tc := range []struct {
+		reason txpoolcfg.DiscardReason
+		want   txpoolproto.ImportResult
+	}{
+		{txpoolcfg.InvalidFrame, txpoolproto.ImportResult_INVALID},
+		{txpoolcfg.NonceTooLow, txpoolproto.ImportResult_STALE},
+	} {
+		t.Run(tc.reason.String(), func(t *testing.T) {
+			ctx, pool, sender := keyedFramePoolEnv(t)
+			pool.chainID.SetUint64(1)
+			frame := framePoolSlot(t, sender, 1, 2).Txn.(*types.FrameTransaction)
+			// Invalid signatures make a repeated signature check observable without instrumenting the verifier.
+			frame.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1, Signer: sender[:], Signature: make([]byte, 65)}}
+			var encoded bytes.Buffer
+			require.NoError(t, frame.MarshalBinary(&encoded))
+			hash := crypto.Keccak256Hash(encoded.Bytes())
+			pool.frameRejections.Add(string(hash[:]), frameRejection{generation: pool.stateGeneration, reason: tc.reason})
+			server := NewGrpcServer(ctx, pool, pool.poolDB, nil, pool.chainID, pool.logger)
+			reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}})
+			require.NoError(t, err)
+			require.Equal(t, []string{tc.reason.String()}, reply.Errors)
+			require.Equal(t, []txpoolproto.ImportResult{tc.want}, reply.Imported)
+			require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls)
+			require.NotEqual(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]))
+		})
+	}
+}
+
+func TestGrpcServerRejectedFrameResubmission(t *testing.T) {
+	for _, persisted := range []bool{false, true} {
+		ctx, pool, sender := keyedFramePoolEnv(t)
+		pool.chainID.SetUint64(1)
+		backend := pool.ethBackend.(*frameValidationBackend)
+		backend.valid = false
+		frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+		server := NewGrpcServer(ctx, pool, pool.poolDB, nil, pool.chainID, pool.logger)
+		request := &txpoolproto.AddRequest{RlpTxs: [][]byte{frame.Rlp}}
+		first, err := server.Add(ctx, request)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID}, first.Imported)
+		if persisted {
+			require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
+				return tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...))
+			}))
+		}
+		second, err := server.Add(ctx, request)
+		require.NoError(t, err)
+		require.Equal(t, first, second)
+		require.Len(t, backend.calls, 1)
+		require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+		require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+			known, readErr := pool.IdHashKnown(tx, frame.IDHash[:])
+			require.NoError(t, readErr)
+			require.True(t, known, "gossip must still deduplicate rejected transactions")
+			return nil
+		}))
+		backend.valid = true
+		require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		third, err := server.Add(ctx, request)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, third.Imported)
+		require.Len(t, backend.calls, 2)
+		duplicate, err := server.Add(ctx, request)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_ALREADY_EXISTS}, duplicate.Imported)
+	}
+}
+
+func TestGrpcServerFramePrefixRejectionKnownToGossip(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.chainID.SetUint64(1)
+	frame := framePoolSlot(t, sender, 1, 2).Txn.(*types.FrameTransaction)
+	frame.Frames[0].Limits.Execution = 150_000
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	hash := crypto.Keccak256Hash(encoded.Bytes())
+	server := NewGrpcServer(ctx, pool, pool.poolDB, nil, pool.chainID, pool.logger)
+	request := &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}}
+	reply, err := server.Add(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_INVALID}, reply.Imported)
+	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+		known, readErr := pool.IdHashKnown(tx, hash[:])
+		require.True(t, known, "gossip must not fetch a prefix already rejected by RPC")
+		return readErr
+	}))
+	retry, err := server.Add(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, reply, retry)
+	require.NotEqual(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]))
+	require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls)
 }
 
 // TestQueryAllWithoutPanicUnknown tries to reproduce https://github.com/erigontech/erigon/issues/18076 relying on

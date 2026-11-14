@@ -292,6 +292,30 @@ func TestSoleAccount_DeleteIncremental(t *testing.T) {
 	})
 }
 
+// Deleting the siblings of an account with one storage slot folds the root into that account.
+// The fold drops the account's memoized hash, so the root hash must load its slot.
+func TestSoleAccount_DeleteCollapseToAccountWithOneSlot(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(0xd, 1))
+	slot := storageLocsForNibble(0x7, 1, 1)[0]
+	ub0 := NewUpdateBuilder().Balance(a, 1).Storage(a, slot, "05")
+	ub1 := NewUpdateBuilder()
+	for i, nibble := range []int{0x3, 0xb} {
+		sibling := addrHex(findAddressForNibble(nibble, 2+i))
+		ub0.Balance(sibling, 2)
+		ub1.Delete(sibling)
+	}
+
+	kf, uf := NewUpdateBuilder().Balance(a, 1).Storage(a, slot, "05").Build()
+	want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+	carried, restored := lifecycleRoots(t, ub0, ub1)
+	require.Equal(t, want, carried, "carried trie")
+	require.Equal(t, want, restored, "state-restored trie")
+	k0, u0 := ub0.Build()
+	k1, u1 := ub1.Build()
+	requireForkParityAcrossGrains(t, k0, u0, k1, u1)
+}
+
 // The same shape re-expanding: a sole account whose storage collapses to one slot and then grows
 // back must re-insert the survivor under its own first storage nibble. The root cell's derived
 // navigation path has to hash the slot alone, not the whole account-plus-slot plain key.
@@ -349,6 +373,76 @@ func TestSoleAccount_StorageBranchUnderExtension(t *testing.T) {
 	carried, restored := lifecycleRoots(t, ub1, ub2)
 	require.Equal(t, want, carried, "carried trie lost the storage extension below the sole account")
 	require.Equal(t, want, restored, "state-restored trie lost the storage extension below the sole account")
+}
+
+// When the whole state is one account, the root cell is that account's leaf. Each case
+// changes that leaf, and the next batch must still find everything under it.
+func TestSoleAccount_RootLeafAcrossBatches(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForHexPrefix([]byte{2, 2}, 1))
+	besideA := addrHex(findAddressForHexPrefix([]byte{2, 5}, 2))
+	other := addrHex(findAddressForHexPrefix([]byte{0}, 3))
+	newcomer := addrHex(findAddressForHexPrefix([]byte{9}, 4))
+	slot := func(prefix []byte, i int) string { return slotLocsForHexPrefix(prefix, i+1, 1)[i] }
+	ub := NewUpdateBuilder
+	for _, tc := range []struct {
+		name    string
+		batches []*UpdateBuilder
+		final   *UpdateBuilder
+	}{
+		{
+			name: "swap_only_slot_then_grow",
+			batches: []*UpdateBuilder{
+				ub().Balance(a, 1).Storage(a, slot([]byte{8}, 0), "01"),
+				ub().DeleteStorage(a, slot([]byte{8}, 0)).Storage(a, slot([]byte{2}, 0), "02"),
+				ub().Storage(a, slot([]byte{0xc}, 0), "03"),
+			},
+			final: ub().Balance(a, 1).Storage(a, slot([]byte{2}, 0), "02").Storage(a, slot([]byte{0xc}, 0), "03"),
+		},
+		{
+			name:    "delete_collapse_then_new_account",
+			batches: []*UpdateBuilder{ub().Balance(a, 1).Balance(other, 2), ub().Delete(other), ub().Balance(newcomer, 3)},
+			final:   ub().Balance(a, 1).Balance(newcomer, 3),
+		},
+		{
+			name: "delete_collapse_under_root_extension_then_storage",
+			batches: []*UpdateBuilder{
+				ub().Balance(a, 1).Balance(besideA, 2),
+				ub().Delete(besideA).Storage(a, slot([]byte{0xc}, 0), "01"),
+				ub().Storage(a, slot([]byte{0, 0, 0}, 0), "02"),
+			},
+			final: ub().Balance(a, 1).Storage(a, slot([]byte{0xc}, 0), "01").Storage(a, slot([]byte{0, 0, 0}, 0), "02"),
+		},
+		{
+			name: "single_slot_grows_into_extension",
+			batches: []*UpdateBuilder{
+				ub().Balance(a, 1).Storage(a, slot([]byte{0xa, 3}, 0), "01"),
+				ub().Storage(a, slot([]byte{0xa, 5}, 0), "02"),
+				ub().Storage(a, slot([]byte{0xa, 3}, 1), "03"),
+			},
+			final: ub().Balance(a, 1).Storage(a, slot([]byte{0xa, 3}, 0), "01").
+				Storage(a, slot([]byte{0xa, 5}, 0), "02").Storage(a, slot([]byte{0xa, 3}, 1), "03"),
+		},
+		{
+			name: "delete_collapse_to_storage_extension_then_new_slot",
+			batches: []*UpdateBuilder{
+				ub().Balance(other, 2).Balance(a, 1).Storage(a, slot([]byte{6}, 0), "01").Storage(a, slot([]byte{6}, 1), "02"),
+				ub().Delete(other).Storage(a, slot([]byte{6}, 2), "03"),
+				ub().Storage(a, slot([]byte{9}, 0), "04"),
+			},
+			final: ub().Balance(a, 1).Storage(a, slot([]byte{6}, 0), "01").Storage(a, slot([]byte{6}, 1), "02").
+				Storage(a, slot([]byte{6}, 2), "03").Storage(a, slot([]byte{9}, 0), "04"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			kf, uf := tc.final.Build()
+			want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+			carried, restored := lifecycleRoots(t, tc.batches...)
+			require.Equal(t, want, carried, "carried trie")
+			require.Equal(t, want, restored, "state-restored trie")
+		})
+	}
 }
 
 // wide-minus-touch nibbles stay untouched on disk and must survive batch 2.
@@ -876,25 +970,25 @@ func TestDeepConcurrent_WhaleParity(t *testing.T) {
 	require.Equal(t, seqRoot, conRoot, "concurrent storage-fold root != sequential")
 }
 
-// A storage fold must not overwrite the account cell's hashedExtension with the storage
-// extension: only a plain-key-less cell navigates by its extension.
-func TestFillFromLowerCell_StorageFoldKeepsAccountNavPath(t *testing.T) {
+// An account cell at depth 64 navigates its storage by the extension of the branch that
+// folds into it, like a cell without a plain key.
+func TestFillFromLowerCell_StorageBranchSyncsAccountNavPath(t *testing.T) {
 	t.Parallel()
 
 	accountCell := &cell{accountAddrLen: length.Addr, hashLen: 32}
-	navPath := []byte{0x3, 0xc, 0x1, 0x9, 0xe}
-	copy(accountCell.hashedExtension[:], navPath)
-	accountCell.hashedExtLen = int16(len(navPath))
+	accountCell.hashedExtension[0] = 0xa
+	accountCell.hashedExtension[1] = 0xb
+	accountCell.hashedExtLen = 2
 
-	storageBranch := &cell{hashLen: 32}
+	storageBranch := &cell{hashLen: 32, extLen: 1}
+	storageBranch.extension[0] = 0xc
 
-	accountCell.fillFromLowerCell(storageBranch, 65, nil, 0x7)
+	accountCell.fillFromLowerCell(storageBranch, 66, []byte{0xa}, 0xb)
 
-	require.Equalf(t, navPath, accountCell.hashedExtension[:accountCell.hashedExtLen],
-		"account cell must keep its account navigation path across a storage propagate fold; "+
-			"got hashedExtLen=%d", accountCell.hashedExtLen)
+	want := []byte{0xa, 0xb, 0xc}
+	require.Equal(t, want, accountCell.extension[:accountCell.extLen])
+	require.Equal(t, want, accountCell.hashedExtension[:accountCell.hashedExtLen])
 	require.EqualValues(t, length.Addr, accountCell.accountAddrLen, "fold must not drop the account plain key")
-	require.EqualValues(t, 1, accountCell.extLen, "storage extension still travels up in extension space")
 }
 
 func TestFillFromLowerCell_AccountBranchSyncsNavPath(t *testing.T) {
@@ -940,7 +1034,6 @@ func TestFillFromLowerCell_KeyedCellKeepsForeignPlaneExtension(t *testing.T) {
 	}
 }
 
-// The sync skip is keyed on the plain key, not on depth.
 func TestFillFromLowerCell_StorageBranchSyncsNavPath(t *testing.T) {
 	t.Parallel()
 
@@ -952,4 +1045,20 @@ func TestFillFromLowerCell_StorageBranchSyncsNavPath(t *testing.T) {
 
 	require.Equal(t, []byte{0x5, 0xd}, branchCell.hashedExtension[:branchCell.hashedExtLen],
 		"a keyless cell deep in storage still navigates by its extension")
+}
+
+// Deleting an account leaf while two new accounts land below its old position leaves a
+// branch as the only survivor of the row unfolded from the leaf. The cell the leaf occupied
+// must drop the deleted account's plain key when that branch folds into it.
+func TestDeepFold_BranchSurvivorDropsDeletedAccountLeafKey(t *testing.T) {
+	t.Parallel()
+	x := addrHex(findAddressForHexPrefix([]byte{0}, 1))
+	y := addrHex(findAddressForHexPrefix([]byte{9}, 2))
+	a := addrHex(findAddressForHexPrefix([]byte{2, 5}, 3))
+	b := addrHex(findAddressForHexPrefix([]byte{2, 3, 1}, 4))
+	c := addrHex(findAddressForHexPrefix([]byte{2, 3, 7}, 5))
+	k0, u0 := NewUpdateBuilder().Balance(x, 1).Balance(y, 2).Balance(a, 3).Build()
+	k1, u1 := NewUpdateBuilder().Delete(a).Balance(b, 4).Balance(c, 5).Build()
+	kf, uf := NewUpdateBuilder().Balance(x, 1).Balance(y, 2).Balance(b, 4).Balance(c, 5).Build()
+	requireRestartParity(t, []engineBatch{{k0, u0}, {k1, u1}}, kf, uf)
 }

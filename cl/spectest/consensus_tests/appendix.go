@@ -28,7 +28,7 @@ import (
 var TestFormats = spectest.Appendix{}
 
 func init() {
-	// The UnimplementedHandler entries under fork_choice, sync and networking are tracked in https://github.com/erigontech/erigon/issues/25698.
+	// The UnimplementedHandler entries under fork_choice and networking are tracked in https://github.com/erigontech/erigon/issues/25698.
 	TestFormats.Add("bls").
 		With("aggregate_verify", &BlsAggregateVerify{}).
 		With("aggregate", spectest.UnimplementedHandler).
@@ -117,7 +117,7 @@ func init() {
 	TestFormats.Add("ssz_generic").
 		With("", spectest.UnimplementedHandler)
 	TestFormats.Add("sync").
-		With("optimistic", spectest.UnimplementedHandler)
+		With("optimistic", &ForkChoice{})
 	TestFormats.Add("transition").
 		With("core", &TransitionCore{})
 	TestFormats.Add("networking").
@@ -275,7 +275,7 @@ func addSszTests() {
 		)).
 		With("IndexedPayloadAttestation", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.IndexedPayloadAttestation {
-				return cltypes.NewIndexedPayloadAttestation()
+				return cltypes.NewIndexedPayloadAttestation(&clparams.MainnetBeaconConfig)
 			}, runAfterVersion(clparams.GloasVersion),
 		)).
 		With("PayloadAttestation", sszStaticTestByEmptyObject(&cltypes.PayloadAttestation{}, runAfterVersion(clparams.GloasVersion))).

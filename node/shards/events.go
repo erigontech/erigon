@@ -133,6 +133,11 @@ func (e *Events) EmptyReceiptSubscription(empty bool) {
 	e.hasReceiptSubscriptions = !empty
 }
 
+// HasReceiptOrLogSubscribers reports whether anyone reads RecentReceipts.
+func (e *Events) HasReceiptOrLogSubscribers() bool {
+	return e.HasLogSubscriptions() || e.HasReceiptSubscriptions()
+}
+
 func (e *Events) HasReceiptSubscriptions() bool {
 	e.lock.RLock()
 	defer e.lock.RUnlock()
@@ -479,7 +484,7 @@ func NewNotifications(stateChangesConsumer StateChangeConsumer) *Notifications {
 	return &Notifications{
 		Events:               NewEvents(),
 		Accumulator:          NewAccumulator(),
-		RecentReceipts:       NewRecentReceipts(512),
+		RecentReceipts:       NewRecentReceipts(notifications.MaxNotifiedBlocks),
 		StateChangesConsumer: stateChangesConsumer,
 	}
 }

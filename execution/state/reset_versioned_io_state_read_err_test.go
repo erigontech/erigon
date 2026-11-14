@@ -31,7 +31,7 @@ func TestResetVersionedIO_ClearsStateReadError(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(NewNoopReader())
-	ibs.recordStateReadError(errors.New("transient read failure"))
+	ibs.RecordStateReadError(errors.New("transient read failure"))
 	require.Error(t, ibs.StateReadError(), "precondition: error recorded")
 
 	ibs.ResetVersionedIO()

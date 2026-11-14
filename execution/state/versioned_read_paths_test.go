@@ -2,6 +2,7 @@ package state
 
 import (
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -883,6 +884,77 @@ func TestVersionedRead_DeletedBalanceKeepsRecordedAbsence(t *testing.T) {
 	require.Nil(t, vm.absentAccountHook, "the flush must land after the account read")
 	require.Nil(t, account)
 	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
+}
+
+// A repeat read of a committed absence returns the recorded absence although a lower tx's
+// destruct was flushed in between, and validation still rejects the read.
+func TestVersionedRead_RepeatedCommittedAbsenceKeepsRecordedRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xa1})
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 0}, 1, true)
+
+	exists, err = ibs.Exist(addr)
+	require.NoError(t, err)
+	require.False(t, exists)
+	empty, err := ibs.Empty(addr)
+	require.NoError(t, err)
+	require.True(t, empty)
+	_, balanceRecorded := ibs.versionedReads.GetBalance(addr)
+	require.False(t, balanceRecorded)
+	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 2))
+}
+
+// Repeat reads of a committed absence record nothing beyond the first read and do not take the
+// address entry's lock, which a higher tx's cell has created.
+func TestVersionedRead_RepeatedCommittedAbsenceSkipsVersionMap(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xa2})
+	vm := NewVersionMap(nil)
+	vm.WriteBalance(addr, Version{TxIndex: 5}, *uint256.NewInt(5), true)
+
+	once := NewWithVersionMap(&emptyReader{}, vm)
+	defer once.Close()
+	once.SetTxContext(1, 2)
+	_, err := once.Empty(addr)
+	require.NoError(t, err)
+
+	repeated := NewWithVersionMap(&emptyReader{}, vm)
+	defer repeated.Close()
+	repeated.SetTxContext(1, 2)
+	_, err = repeated.Empty(addr)
+	require.NoError(t, err)
+
+	entry := vm.load(addr)
+	require.NotNil(t, entry)
+	entry.mu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := repeated.Empty(addr)
+		if err == nil {
+			_, err = repeated.Exist(addr)
+		}
+		done <- err
+	}()
+	select {
+	case err = <-done:
+		entry.mu.Unlock()
+	case <-time.After(5 * time.Second):
+		entry.mu.Unlock()
+		<-done
+		require.Fail(t, "a repeat read took the version-map lock")
+	}
+	require.NoError(t, err)
+	require.Equal(t, once.VersionedReads(), repeated.VersionedReads())
 }
 
 // storage fallback. Empty reader + no prior writes/reads → falls through

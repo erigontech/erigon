@@ -44,10 +44,9 @@ const (
 )
 
 var (
-	ErrParseTxn     = fmt.Errorf("%w transaction", rlp.ErrParse)
-	ErrRejected     = errors.New("rejected")
-	ErrAlreadyKnown = errors.New("already known")
-	ErrRlpTooBig    = errors.New("txn rlp too big")
+	ErrParseTxn  = fmt.Errorf("%w transaction", rlp.ErrParse)
+	ErrRejected  = errors.New("rejected")
+	ErrRlpTooBig = errors.New("txn rlp too big")
 )
 
 // TxnParseContext is object that is required to parse transactions and turn transaction payload into TxnSlot objects
@@ -63,6 +62,7 @@ type TxnParseContext struct {
 	allowPreEip2s   bool // Allow s > secp256k1n/2; see EIP-2
 	chainIDRequired bool
 	poolRules       bool
+	rejectPrefix    func(common.Hash)
 }
 
 func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
@@ -86,6 +86,10 @@ func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
 
 // Set the RLP validate function
 func (ctx *TxnParseContext) ValidateRLP(f func(txnRlp []byte) error) { ctx.validateRlp = f }
+
+// RejectPrefix registers a callback for frame prefix policy rejections.
+// It receives the transaction hash and runs only when pool rules are enabled.
+func (ctx *TxnParseContext) RejectPrefix(f func(common.Hash)) { ctx.rejectPrefix = f }
 
 // Set the with sender flag
 func (ctx *TxnParseContext) WithSender(v bool) { ctx.withSender = v }
@@ -421,6 +425,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	if frame, ok := txn.(*types.FrameTransaction); ok {
 		if ctx.poolRules {
 			if err := protocol.ValidateFrameTransactionPrefix(frame); err != nil {
+				if ctx.rejectPrefix != nil {
+					ctx.rejectPrefix(slot.IDHash)
+				}
 				// Gossip skips policy rejections; RPC still reports an invalid transaction.
 				return p, fmt.Errorf("%w: %w: %w", ErrRejected, ErrParseTxn, err)
 			}

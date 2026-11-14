@@ -458,7 +458,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 
-				if priorComplete && !isInitialCycle {
+				if priorComplete && (!isInitialCycle || se.cfg.notifications.Events.HasReceiptOrLogSubscribers()) {
 					se.cfg.notifications.RecentReceipts.Add(finalizeReceipts, txTask.Txs, txTask.Header)
 				}
 				checkBloom := !se.cfg.vmConfig.StatelessExec && !se.cfg.vmConfig.NoReceipts
@@ -478,8 +478,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				// production on Gnosis Chain caused by stale pending txns).
 				stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), se.accumulator, txTask.TxNum)
 
-				if err = ibs.MakeWriteSet(txTask.Rules(), stateWriter); err != nil {
-					panic(err)
+				if err := ibs.MakeWriteSet(txTask.Rules(), stateWriter); err != nil {
+					return err
 				}
 			} else if txTask.TxIndex >= 0 { //nolint:gocritic
 				var prev, receipt *types.Receipt

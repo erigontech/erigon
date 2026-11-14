@@ -203,10 +203,20 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	ownedParams.PayloadId = e.nextPayloadId
 
 	secondsPerSlot := e.config.SecondsPerSlot()
+	maxBuildTime := buildDuration(params.Timestamp, time.Now(), secondsPerSlot)
+	// Explicit lists use the request budget, independent of the payload timestamp.
+	if ownedParams.RequireAllTransactions {
+		if deadline, ok := ctx.Deadline(); ok {
+			maxBuildTime = time.Until(deadline)
+		}
+	}
 	e.builders[e.nextPayloadId] = &builderEntry{
 		builder: builder.NewBlockBuilder(e.backgroundCtx, e.builderFunc, ownedParams,
-			buildDuration(params.Timestamp, time.Now(), secondsPerSlot), stopGraceDuration(secondsPerSlot)),
+			maxBuildTime, stopGraceDuration(secondsPerSlot)),
 		params: ownedParams,
+	}
+	if ownedParams.RequireAllTransactions {
+		context.AfterFunc(ctx, e.builders[e.nextPayloadId].builder.Discard)
 	}
 	e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)

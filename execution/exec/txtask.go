@@ -116,10 +116,6 @@ type TxResult struct {
 	// verdict (a blocker to wait for), not an execution error. UnknownDep (< 0)
 	// means every read was settled.
 	Dep int
-
-	// ValStamp is the versionMap write sequence loaded before the worker's read-set
-	// validation; 0 means not validated.
-	ValStamp uint64
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -232,7 +228,6 @@ type TxTask struct {
 	Trace  bool
 
 	gasPool      *protocol.GasPool
-	sender       accounts.Address
 	message      *types.Message
 	signer       *types.Signer
 	dependencies []int
@@ -273,15 +268,11 @@ func (t *TxTask) TxHash() common.Hash {
 }
 
 func (t *TxTask) TxSender() (accounts.Address, error) {
-	if !t.sender.IsNil() {
-		return t.sender, nil
-	}
 	if t.TxIndex < 0 || t.TxIndex >= len(t.Txs) {
 		return accounts.NilAddress, nil
 	}
 	if sender, ok := t.Tx().GetSender(); ok {
-		t.sender = sender
-		return t.sender, nil
+		return sender, nil
 	}
 	if t.signer == nil {
 		t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
@@ -290,12 +281,8 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	if err != nil {
 		return accounts.NilAddress, fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, t.TxHash(), err)
 	}
-	t.sender = sender
-	if RecoversSenders(t.Header) {
-		return t.sender, nil
-	}
 	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNumber(), "txIdx", t.TxIndex)
-	return t.sender, nil
+	return sender, nil
 }
 
 // ChargesSenderAtValidation reports whether this run skips the sender charge (nonce, gas, value) and validation applies it.
@@ -396,7 +383,6 @@ func (t *TxTask) Rules() *chain.Rules {
 func (t *TxTask) ResetTx(txNum uint64, txIndex int) {
 	t.TxNum = txNum
 	t.TxIndex = txIndex
-	t.sender = accounts.NilAddress
 	t.message = nil
 	t.signer = nil
 	t.dependencies = nil
@@ -619,7 +605,9 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			result.TxOut, _ = ibs.FinalizedWrites(rules) // the read error is checked below for both branches
 		} else {
 			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
-				panic(err)
+				result.Operational = true
+				result.Err = err
+				return &result
 			}
 			result.TxOut = t.VersionedWrites(ibs)
 		}

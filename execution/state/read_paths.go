@@ -50,7 +50,7 @@ func codeSizeFromStateObject(ibs *IntraBlockState, so *stateObject, addr account
 		ibs.codeReadCount++
 	}
 	ibs.stateReader.SetTrace(false, "")
-	ibs.recordStateReadError(err)
+	ibs.RecordStateReadError(err)
 	return size, err
 }
 
@@ -74,7 +74,7 @@ func (ibs *IntraBlockState) originStorageDirect(addr accounts.Address, key accou
 	}
 	ibs.storageReadCount++
 	ibs.stateReader.SetTrace(false, "")
-	ibs.recordStateReadError(err)
+	ibs.RecordStateReadError(err)
 	if err != nil {
 		return uint256.Int{}, err
 	}
@@ -114,7 +114,7 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 		ibs.codeReadCount++
 	}
 	ibs.stateReader.SetTrace(false, "")
-	ibs.recordStateReadError(err)
+	ibs.RecordStateReadError(err)
 	if len(code) == 0 {
 		return accounts.EmptyCode, err
 	}
@@ -184,7 +184,7 @@ func (ibs *IntraBlockState) originCodeSizeDirect(addr accounts.Address) (int, er
 		ibs.codeReadCount++
 	}
 	ibs.stateReader.SetTrace(false, "")
-	ibs.recordStateReadError(err)
+	ibs.RecordStateReadError(err)
 	return size, err
 }
 
@@ -265,7 +265,12 @@ type readPathResult struct {
 // reads as its empty value — EmptyCodeHash for the code hash), else outcomeReturnZero
 // when the account is absent (reads as the zero value).
 func wipedFieldOutcome(s *IntraBlockState, addr accounts.Address) readPathOutcome {
-	if state, _, _, _ := s.versionMap.AccountLifecycleAt(addr, s.txIndex); state == LifecycleRevived {
+	state, destructDep := s.versionMap.AccountLifecycleWithDestructDep(addr, s.txIndex)
+	// A destruct back in flight is not counted by the lifecycle, so the verdict may be stale.
+	if destructDep != UnknownDep {
+		s.dep = max(s.dep, destructDep)
+	}
+	if state == LifecycleRevived {
 		return outcomeReturnEmpty
 	}
 	return outcomeReturnZero
@@ -453,7 +458,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		panic(fmt.Errorf("readPaths: unknown path %v", path))
 	}
 
-	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, accSource: res.accSource}
+	hdr := ReadHeader{Version: Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, accSource: res.accSource()}
 
 	if !commited {
 		if hasWrite := s.versionedWriteHit(addr, path, key, r); hasWrite {
@@ -1019,7 +1024,7 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 	var r readPathResult
 	versionedReadCore(s, addr, BalancePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return uint256.Int{}, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1107,7 +1112,7 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 	var r readPathResult
 	versionedReadCore(s, addr, NoncePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return 0, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1292,7 +1297,7 @@ func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSou
 	var r readPathResult
 	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return accounts.Code{}, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1372,7 +1377,7 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 	var r readPathResult
 	versionedReadCore(s, addr, CodeSizePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return 0, r.source, r.version, r.err
 	}
 	switch r.outcome {
@@ -1425,7 +1430,7 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address, commited bool) (acc
 	var r readPathResult
 	versionedReadCore(s, addr, CodeHashPath, accounts.NilKey, commited, false, &r)
 	if r.err != nil {
-		s.recordStateReadError(r.err)
+		s.RecordStateReadError(r.err)
 		return accounts.NilCodeHash, r.source, r.version, r.err
 	}
 	switch r.outcome {
