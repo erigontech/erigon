@@ -22,10 +22,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
@@ -50,9 +52,11 @@ type fakeClock struct{ t time.Time }
 func (f *fakeClock) now() time.Time          { return f.t }
 func (f *fakeClock) advance(d time.Duration) { f.t = f.t.Add(d) }
 
-// columnResponseStream records when the handler renews the write deadline relative to the response bytes.
+// columnResponseStream records when the handler renews the write deadline relative to the response bytes,
+// and fails a Write made after the latest write deadline on the fake clock, like a real stream.
 type columnResponseStream struct {
 	envelopeHandlerStream
+	clock                *fakeClock
 	beforeFirstRead      func()
 	writeDeadlines       []time.Time
 	bytesAtWriteDeadline []int
@@ -67,6 +71,13 @@ func (s *columnResponseStream) Read(p []byte) (int, error) {
 		s.beforeFirstRead = nil
 	}
 	return s.envelopeHandlerStream.Read(p)
+}
+
+func (s *columnResponseStream) Write(p []byte) (int, error) {
+	if n := len(s.writeDeadlines); n > 0 && !s.clock.now().Before(s.writeDeadlines[n-1]) {
+		return 0, os.ErrDeadlineExceeded
+	}
+	return s.envelopeHandlerStream.Write(p)
 }
 
 func (s *columnResponseStream) SetDeadline(time.Time) error { return nil }
@@ -90,6 +101,8 @@ type clockedColumnStore struct {
 	stored  func(column int64) bool
 	probes  int
 	onProbe func(probe int)
+	writes  int
+	onWrite func(write int)
 }
 
 func (s *clockedColumnStore) ColumnSidecarExists(_ context.Context, _ uint64, _ common.Hash, column int64) (bool, error) {
@@ -101,7 +114,11 @@ func (s *clockedColumnStore) ColumnSidecarExists(_ context.Context, _ uint64, _ 
 }
 
 func (s *clockedColumnStore) WriteStream(w io.Writer, _ uint64, _ common.Hash, column uint64) error {
+	s.writes++
 	s.clock.advance(s.step)
+	if s.onWrite != nil {
+		s.onWrite(s.writes)
+	}
 	sidecar := cltypes.NewDataColumnSidecar()
 	sidecar.Index = column
 	return ssz_snappy.EncodeAndWrite(w, sidecar)
@@ -122,6 +139,39 @@ func decodeColumnChunks(t *testing.T, response []byte) (columns []uint64, chunkE
 		chunkEnds = append(chunkEnds, len(response)-r.Len())
 	}
 	return columns, chunkEnds
+}
+
+var errTestSlotLookup = errors.New("slot lookup failed")
+
+// slotLookupDB counts block root to slot lookups and fails them for failRoot.
+type slotLookupDB struct {
+	kv.RwDB
+	failRoot common.Hash
+	lookups  map[common.Hash]int
+}
+
+func (d *slotLookupDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	tx, err := d.RwDB.BeginRo(ctx) //nolint:gocritic // the caller owns the transaction
+	if err != nil {
+		return nil, err
+	}
+	return &slotLookupTx{Tx: tx, db: d}, nil
+}
+
+type slotLookupTx struct {
+	kv.Tx
+	db *slotLookupDB
+}
+
+func (t *slotLookupTx) GetOne(table string, key []byte) ([]byte, error) {
+	if table == kv.BlockRootToSlot {
+		root := common.BytesToHash(key)
+		t.db.lookups[root]++
+		if root == t.db.failRoot {
+			return nil, errTestSlotLookup
+		}
+	}
+	return t.Tx.GetOne(table, key)
 }
 
 type columnHandlerFixture struct {
@@ -167,7 +217,7 @@ func newColumnHandlerFixture(t *testing.T, step time.Duration, columns int) *col
 		db:      indiciesDB,
 		clock:   clock,
 		store:   store,
-		stream:  &columnResponseStream{envelopeHandlerStream: envelopeHandlerStream{conn: &remotePeerConn{peerID: peer.ID("column-peer")}}},
+		stream:  &columnResponseStream{clock: clock, envelopeHandlerStream: envelopeHandlerStream{conn: &remotePeerConn{peerID: peer.ID("column-peer")}}},
 		columns: requested,
 	}
 }
@@ -175,15 +225,21 @@ func newColumnHandlerFixture(t *testing.T, step time.Duration, columns int) *col
 // prepareByRoot queues a request for the fixture's columns of one stored block root.
 func (f *columnHandlerFixture) prepareByRoot(t *testing.T) {
 	t.Helper()
-	root := common.Hash{0x42}
+	f.prepareByRoots(t, common.Hash{0x42})
+}
+
+// prepareByRoots queues a request for the fixture's columns of each stored block root, in order.
+func (f *columnHandlerFixture) prepareByRoots(t *testing.T, roots ...common.Hash) {
+	t.Helper()
 	tx, err := f.db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, 0))
+	byRoot := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](len(roots))
+	for _, root := range roots {
+		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, 0))
+		byRoot.Append(&cltypes.DataColumnsByRootIdentifier{BlockRoot: root, Columns: f.columns})
+	}
 	require.NoError(t, tx.Commit())
-
-	byRoot := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
-	byRoot.Append(&cltypes.DataColumnsByRootIdentifier{BlockRoot: root, Columns: f.columns})
 	f.queueRequest(t, byRoot, communication.DataColumnSidecarsByRootProtocolV1)
 }
 
@@ -255,8 +311,8 @@ func TestDataColumnSidecarsByRootStopsWhenResponseBudgetIsSpent(t *testing.T) {
 		step        time.Duration
 		wantServed  int
 	}{
-		{"checked between sidecars", 0, 12 * time.Second, 3},
-		{"elapsed exactly the budget between sidecars", 20 * time.Second, 10 * time.Second, 1},
+		{"checked between sidecars", 6 * time.Second, 9 * time.Second, 3},
+		{"elapsed exactly the budget between sidecars", 21 * time.Second, 9 * time.Second, 1},
 		{"elapsed just below the budget between sidecars", 20 * time.Second, 10*time.Second - time.Nanosecond, 2},
 		{"spent before the first sidecar still serves one", 30 * time.Second, 0, 1},
 		{"just below the budget before the first sidecar serves all", 30*time.Second - time.Nanosecond, 0, 5},
@@ -299,7 +355,8 @@ func TestDataColumnSidecarsWriteDeadlineFailureStopsBeforeTheChunk(t *testing.T)
 }
 
 func TestDataColumnSidecarsByRootStopsProbingOnceBudgetIsSpent(t *testing.T) {
-	f := newColumnHandlerFixture(t, 30*time.Second, 5)
+	f := newColumnHandlerFixture(t, 9*time.Second, 5)
+	f.stream.beforeFirstRead = func() { f.clock.advance(21 * time.Second) }
 	f.store.stored = func(column int64) bool { return column == 0 }
 
 	require.NoError(t, f.serveByRoot(t))
@@ -329,7 +386,8 @@ func TestStreamHandlerClosesNormallyWhenColumnResponseBudgetIsSpent(t *testing.T
 	h, err := libp2p.New(libp2p.NoListenAddrs)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, h.Close()) })
-	f := newColumnHandlerFixture(t, 30*time.Second, 5)
+	f := newColumnHandlerFixture(t, 9*time.Second, 5)
+	f.stream.beforeFirstRead = func() { f.clock.advance(21 * time.Second) }
 	f.handlers.host = h
 	f.prepareByRoot(t)
 
@@ -341,18 +399,78 @@ func TestStreamHandlerClosesNormallyWhenColumnResponseBudgetIsSpent(t *testing.T
 	require.False(t, f.stream.reset)
 }
 
+func TestStreamHandlerClosesNormallyWithoutLookingUpRootsAfterColumnResponseBudgetIsSpent(t *testing.T) {
+	h, err := libp2p.New(libp2p.NoListenAddrs)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, h.Close()) })
+	f := newColumnHandlerFixture(t, 0, 1)
+	servedRoot, failingRoot := common.Hash{0x42}, common.Hash{0x43}
+	lookups := &slotLookupDB{RwDB: f.db, failRoot: failingRoot, lookups: map[common.Hash]int{}}
+	f.handlers.indiciesDB = lookups
+	f.handlers.host = h
+	f.stream.beforeFirstRead = func() { f.clock.advance(columnByRootResponseBudget) }
+	f.prepareByRoots(t, servedRoot, failingRoot)
+	var handlerErr error
+
+	f.handlers.wrapStreamHandler(communication.DataColumnSidecarsByRootProtocolV1, func(s network.Stream) error {
+		handlerErr = f.handlers.dataColumnSidecarsByRootHandler(s)
+		return handlerErr
+	})(f.stream)
+
+	require.NoError(t, handlerErr)
+	columns, _ := decodeColumnChunks(t, f.stream.response.Bytes())
+	require.Equal(t, []uint64{0}, columns)
+	require.True(t, f.stream.closed)
+	require.False(t, f.stream.reset)
+	require.Equal(t, 1, lookups.lookups[servedRoot])
+	require.Zero(t, lookups.lookups[failingRoot], "no root may be looked up after the budget is spent")
+}
+
+func TestStreamHandlerResetsWhenColumnReaderStallsInsideASidecar(t *testing.T) {
+	h, err := libp2p.New(libp2p.NoListenAddrs)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, h.Close()) })
+	f := newColumnHandlerFixture(t, 4*time.Second, 2)
+	f.handlers.host = h
+	f.prepareByRoot(t)
+	start := f.clock.now()
+	slotKey := f.stream.conn.RemotePeer().String()
+	f.store.onWrite = func(write int) {
+		if write == 2 {
+			require.Equal(t, 1, f.handlers.rateLimiter.concurrency[slotKey], "the peer's slot is held while the handler runs")
+			f.clock.advance(columnChunkWriteDeadline)
+		}
+	}
+	var handlerErr error
+
+	f.handlers.wrapStreamHandler(communication.DataColumnSidecarsByRootProtocolV1, func(s network.Stream) error {
+		handlerErr = f.handlers.dataColumnSidecarsByRootHandler(s)
+		return handlerErr
+	})(f.stream)
+
+	require.ErrorIs(t, handlerErr, os.ErrDeadlineExceeded)
+	require.True(t, f.stream.reset)
+	require.NotContains(t, f.handlers.rateLimiter.concurrency, slotKey)
+	require.Equal(t, []time.Time{start.Add(10 * time.Second), start.Add(4*time.Second + 10*time.Second)}, f.stream.writeDeadlines)
+	firstChunkEnd := f.stream.bytesAtWriteDeadline[1]
+	columns, _ := decodeColumnChunks(t, f.stream.response.Bytes()[:firstChunkEnd])
+	require.Equal(t, []uint64{0}, columns)
+	require.Greater(t, f.stream.response.Len(), firstChunkEnd, "the second sidecar must be cut off after it started")
+}
+
 func TestDataColumnSidecarsRenewedWriteDeadlineIsCappedAtResponseHardStop(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		readAdvance time.Duration
+		step        time.Duration
 		serve       func(f *columnHandlerFixture, t *testing.T) error
 	}{
-		{"by root with the request read spending the budget", 35 * time.Second, (*columnHandlerFixture).serveByRoot},
-		{"by range", 0, (*columnHandlerFixture).serveByRange},
-		{"by range with the request read spending the budget", 35 * time.Second, (*columnHandlerFixture).serveByRange},
+		{"by root with the request read spending the budget", 35 * time.Second, time.Second, (*columnHandlerFixture).serveByRoot},
+		{"by range", 0, 150 * time.Millisecond, (*columnHandlerFixture).serveByRange},
+		{"by range with the request read spending the budget", 35 * time.Second, 10 * time.Millisecond, (*columnHandlerFixture).serveByRange},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newColumnHandlerFixture(t, 9*time.Second, 128)
+			f := newColumnHandlerFixture(t, tc.step, 128)
 			f.stream.beforeFirstRead = func() { f.clock.advance(tc.readAdvance) }
 			hardStop := f.clock.now().Add(40 * time.Second)
 
@@ -365,4 +483,18 @@ func TestDataColumnSidecarsRenewedWriteDeadlineIsCappedAtResponseHardStop(t *tes
 			require.Equal(t, hardStop, f.stream.writeDeadlines[len(f.stream.writeDeadlines)-1])
 		})
 	}
+}
+
+func TestDataColumnSidecarsByRangeRenewalAfterTheHardStopStaysAtTheHardStop(t *testing.T) {
+	f := newColumnHandlerFixture(t, 0, 128)
+	hardStop := f.clock.now().Add(40 * time.Second)
+	f.store.onProbe = func(probe int) {
+		if probe == 129 {
+			f.clock.advance(41 * time.Second)
+		}
+	}
+
+	require.ErrorIs(t, f.serveByRange(t), os.ErrDeadlineExceeded)
+
+	require.Equal(t, hardStop, f.stream.writeDeadlines[len(f.stream.writeDeadlines)-1])
 }
