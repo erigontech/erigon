@@ -206,9 +206,6 @@ type BlockResult struct {
 
 type ApplyMessage func(evm *vm.EVM, msg protocol.Message, gp *protocol.GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error)
 
-// ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
-// which is processed by a single thread that writes into the ReconState1 and
-// flushes to the database
 type TxTask struct {
 	TxNum              uint64
 	TxIndex            int // -1 for block initialisation
@@ -668,29 +665,12 @@ func (h *Queue[T]) Pop() any {
 type QueueWithRetry struct {
 	closed   bool
 	newTasks chan Task
-	parked   chan Task
 	retires  Queue[Task]
 	lock     sync.Mutex
-	capacity int
 }
-
-var queuePool sync.Pool
 
 func NewQueueWithRetry(capacity int) *QueueWithRetry {
-	return &QueueWithRetry{newTasks: make(chan Task, capacity), capacity: capacity}
-}
-
-func GetQueueWithRetryFromPool(capacity int) *QueueWithRetry {
-	if v := queuePool.Get(); v != nil {
-		q := v.(*QueueWithRetry)
-		if q.capacity == capacity && q.parked != nil {
-			q.closed = false
-			q.newTasks = q.parked
-			q.parked = nil
-			return q
-		}
-	}
-	return NewQueueWithRetry(capacity)
+	return &QueueWithRetry{newTasks: make(chan Task, capacity)}
 }
 
 func (q *QueueWithRetry) NewTasksLen() int {
@@ -698,7 +678,7 @@ func (q *QueueWithRetry) NewTasksLen() int {
 	defer q.lock.Unlock()
 	return len(q.newTasks)
 }
-func (q *QueueWithRetry) Capacity() int { return q.capacity }
+
 func (q *QueueWithRetry) RetriesLen() (l int) {
 	q.lock.Lock()
 	l = q.retires.Len()
@@ -860,27 +840,6 @@ func (q *QueueWithRetry) Close() {
 		newTasks := q.newTasks
 		close(newTasks)
 	}
-}
-
-// Release puts the queue back into the pool
-func (q *QueueWithRetry) Release() {
-	q.lock.Lock()
-	if q.newTasks == nil || q.closed {
-		q.lock.Unlock()
-		return
-	}
-	q.closed = true
-	// Drain channel.
-	for len(q.newTasks) > 0 {
-		<-q.newTasks
-	}
-	// Clear retry heap, keep backing array.
-	clear(q.retires)
-	q.retires = q.retires[:0]
-	q.parked = q.newTasks
-	q.newTasks = nil
-	q.lock.Unlock()
-	queuePool.Put(q)
 }
 
 // ResultsQueue thread-safe priority-queue of execution results
