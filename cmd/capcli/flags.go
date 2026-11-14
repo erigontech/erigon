@@ -251,7 +251,7 @@ var (
 	blobStoreFillEndpointFlag = &cli.StringSliceFlag{Name: "endpoint", Usage: "beacon API URL to fetch blob sidecars from; repeat it to fall back to further endpoints"}
 	blobStoreFillFromSlotFlag = &cli.Uint64Flag{Name: "from-slot", Usage: "first slot to fill", Required: true}
 	blobStoreFillToSlotFlag   = &cli.Uint64Flag{Name: "to-slot", Usage: "last slot to fill", Required: true}
-	blobStoreFillDryRunFlag   = &cli.BoolFlag{Name: "dry-run", Usage: "only report the slots whose sidecars are missing or invalid"}
+	blobStoreFillDryRunFlag   = &cli.BoolFlag{Name: "dry-run", Usage: "only report the slots whose sidecars are missing or invalid; with --endpoint, also find the first slot each endpoint serves, a few requests"}
 )
 
 func (b *BlobArchiveStoreFill) fromCmd(cmd *cli.Command) error {
