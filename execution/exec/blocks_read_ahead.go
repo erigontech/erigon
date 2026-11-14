@@ -730,9 +730,6 @@ func (r *readAheadCountingReader) ReadAccountData(addr accounts.Address) (*accou
 
 func (r *readAheadCountingReader) ReadAccountStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	r.stats.StorageRead++
-	if r.stats.StorageReadKeys == nil {
-		r.stats.StorageReadKeys = make(map[ReadAheadStorageKey]struct{})
-	}
 	r.stats.StorageReadKeys[ReadAheadStorageKey{Address: addr, Slot: key}] = struct{}{}
 	return r.StateReader.ReadAccountStorage(addr, key)
 }
@@ -754,18 +751,12 @@ type readAheadRecordingWriter struct {
 
 func (w *readAheadRecordingWriter) UpdateAccountData(addr accounts.Address, original, account *accounts.Account) error {
 	w.stats.AccountsWritten++
-	if w.stats.AccountWrittenKeys == nil {
-		w.stats.AccountWrittenKeys = make(map[accounts.Address]struct{})
-	}
 	w.stats.AccountWrittenKeys[addr] = struct{}{}
 	return w.StateWriter.UpdateAccountData(addr, original, account)
 }
 
 func (w *readAheadRecordingWriter) DeleteAccount(addr accounts.Address, original *accounts.Account) error {
 	w.stats.AccountsWritten++
-	if w.stats.AccountWrittenKeys == nil {
-		w.stats.AccountWrittenKeys = make(map[accounts.Address]struct{})
-	}
 	w.stats.AccountWrittenKeys[addr] = struct{}{}
 	return w.StateWriter.DeleteAccount(addr, original)
 }
@@ -775,9 +766,6 @@ func (w *readAheadRecordingWriter) WriteAccountStorage(addr accounts.Address, in
 		return w.StateWriter.WriteAccountStorage(addr, incarnation, key, original, value)
 	}
 	w.stats.StorageWritten++
-	if w.stats.StorageWrittenKeys == nil {
-		w.stats.StorageWrittenKeys = make(map[ReadAheadStorageKey]struct{})
-	}
 	w.stats.StorageWrittenKeys[ReadAheadStorageKey{Address: addr, Slot: key}] = struct{}{}
 	return w.StateWriter.WriteAccountStorage(addr, incarnation, key, original, value)
 }
@@ -802,9 +790,7 @@ var (
 	readAheadExecKeys           = metrics.GetOrCreateCounterVec("read_ahead_exec_keys_total", []string{"kind", "direction"})
 	readAheadExecSeconds        = metrics.GetOrCreateSummary("read_ahead_exec_block_seconds")
 	readAheadExecCommitmentKeys = metrics.GetOrCreateCounter("read_ahead_exec_commitment_keys_total")
-	readAheadPrefetchCommitment = func(ctx context.Context, db kv.RoDB, tx kv.TemporalTx, keys [][]byte) error {
-		return prefetchCommitmentWithTx(ctx, db, tx, keys, 1)
-	}
+	readAheadPrefetchCommitment = prefetchCommitmentWithTx
 )
 
 func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute, executeCommitment bool, execBlock *atomic.Uint64, distance int) (chan uint64, context.CancelFunc) {
@@ -925,7 +911,7 @@ func blocksReadAheadFunc(ctx context.Context, db kv.RoDB, tx kv.Tx, blockNum uin
 
 	if execute {
 		started := time.Now()
-		stats := runReadAheadBlock(ctx, tx, block, engine, blockReader, chainConfig)
+		stats := runReadAheadBlock(ctx, ttx, block, engine, blockReader, chainConfig)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -936,8 +922,7 @@ func blocksReadAheadFunc(ctx context.Context, db kv.RoDB, tx kv.Tx, blockNum uin
 			keys := readAheadCommitmentKeys(stats)
 			if len(keys) > 0 {
 				readAheadExecCommitmentKeys.AddInt(len(keys))
-				ttx := tx.(kv.TemporalTx)
-				if err := readAheadPrefetchCommitment(ctx, db, ttx, keys); err != nil && ctx.Err() != nil {
+				if err := readAheadPrefetchCommitment(ctx, db, ttx, keys, 1); err != nil && ctx.Err() != nil {
 					return ctx.Err()
 				}
 			}
@@ -954,18 +939,17 @@ func blocksReadAheadFunc(ctx context.Context, db kv.RoDB, tx kv.Tx, blockNum uin
 	return nil
 }
 
-func runReadAheadBlock(ctx context.Context, tx kv.Tx, block *types.Block, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config) (stats ReadAheadExecStats) {
+func runReadAheadBlock(ctx context.Context, tx kv.TemporalTx, block *types.Block, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config) (stats ReadAheadExecStats) {
 	defer func() {
 		if recover() != nil {
 			stats = ReadAheadExecStats{Errored: true}
 			readAheadBlocksByResult.WithLabelValues("error").Inc()
 		}
 	}()
-	ttx, ok := tx.(kv.TemporalTx)
-	if !ok {
-		return
-	}
-	reader := &readAheadCountingReader{StateReader: state.NewReaderV3(execctx.NewTemporalTxStateGetter(ttx)), stats: &stats}
+	stats.StorageReadKeys = make(map[ReadAheadStorageKey]struct{})
+	stats.StorageWrittenKeys = make(map[ReadAheadStorageKey]struct{})
+	stats.AccountWrittenKeys = make(map[accounts.Address]struct{})
+	reader := &readAheadCountingReader{StateReader: state.NewReaderV3(execctx.NewTemporalTxStateGetter(tx)), stats: &stats}
 	ibs := state.New(reader)
 	header := block.HeaderNoCopy()
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {

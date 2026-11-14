@@ -65,7 +65,6 @@ func TestReadAheadInitialExecMatchesNormalExecution(t *testing.T) {
 			},
 		}
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
-		t.Cleanup(m.Close)
 		chainPack, err := m.GenerateChain(17, func(_ int, gen *blockgen.BlockGen) {
 			txn, signErr := types.SignTx(types.NewTransaction(gen.TxNonce(from), contract, uint256.NewInt(0), 100_000, uint256.NewInt(1), nil), *types.LatestSignerForChainID(genesis.Config.ChainID), key)
 			require.NoError(t, signErr)
@@ -89,10 +88,7 @@ func TestReadAheadInitialExecMatchesNormalExecution(t *testing.T) {
 		require.NotNil(t, current)
 		var receipts types.Receipts
 		for _, block := range chainPack.Blocks {
-			stored, err := m.BlockReader.BlockByNumber(context.Background(), tx, block.NumberU64())
-			require.NoError(t, err)
-			require.NotNil(t, stored)
-			got, err := rawdb.ReadReceiptsCacheV2(tx, stored, m.BlockReader.TxnumReader())
+			got, err := rawdb.ReadReceiptsCacheV2(tx, block, m.BlockReader.TxnumReader())
 			require.NoError(t, err)
 			receipts = append(receipts, got...)
 		}

@@ -1311,7 +1311,7 @@ func TestReadAheadExecReadsAndWritesContractStorage(t *testing.T) {
 	t.Cleanup(func() { readAheadPrefetchCommitment = prefetch })
 	prefetchCalls := 0
 	var prefetchedKeys [][]byte
-	readAheadPrefetchCommitment = func(_ context.Context, _ kv.RoDB, _ kv.TemporalTx, keys [][]byte) error {
+	readAheadPrefetchCommitment = func(_ context.Context, _ kv.RoDB, _ kv.TemporalTx, keys [][]byte, _ int) error {
 		prefetchCalls++
 		prefetchedKeys = keys
 		return nil
@@ -1554,7 +1554,6 @@ func counterexampleRealCommitmentKeys(t *testing.T, snapshot *reviewReadAheadTx,
 		keys = append(keys, bytes.Clone(hashed))
 		return nil
 	}))
-	slices.SortFunc(keys, bytes.Compare)
 	return keys
 }
 
