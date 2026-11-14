@@ -4,6 +4,8 @@
 Called by the update-disk-sizes GH Actions workflow after a successful
 sync-from-scratch run. Reads disk-usage-<chain>-<mode>.txt files produced
 by the sync workflows and updates the corresponding entries in the JSON.
+A disk-usage-<chain>-<mode>.method file next to one names how its bytes were
+measured; without it, the bytes are the size of the whole datadir.
 
 Usage:
     python3 update-disk-sizes.py <artifacts-dir> <json-path> <prune-mode>
@@ -17,6 +19,10 @@ import json
 import sys
 from datetime import date
 from pathlib import Path
+
+
+# Methods the renderer knows; see render-disk-sizes.py.
+METHODS = {"seg-du"}
 
 
 def format_bytes(b: int) -> str:
@@ -64,12 +70,20 @@ def main() -> None:
             print(f"Could not parse bytes from {artifact_file}: {raw!r}")
             continue
 
-        data["networks"][chain][prune_mode] = {
+        entry = {
             "bytes": bytes_val,
             "display": format_bytes(bytes_val),
             "measured_at": today,
             "source": "ci",
         }
+        method_file = artifact_file.with_suffix(".method")
+        if method_file.exists():
+            method = method_file.read_text().strip()
+            if method not in METHODS:
+                print(f"Error: unknown measurement method {method!r} in {method_file}")
+                sys.exit(1)
+            entry["method"] = method
+        data["networks"][chain][prune_mode] = entry
         print(f"Updated {chain}/{prune_mode}: {format_bytes(bytes_val)} ({bytes_val:,} bytes)")
         updated = True
 

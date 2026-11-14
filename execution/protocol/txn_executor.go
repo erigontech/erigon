@@ -456,7 +456,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 	auths := msg.Authorizations()
 
-	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, accessTuples)
+	rules := st.evm.ChainRules()
+	vmConfig := st.evm.Config()
+	intrinsicGasResult, overflow := intrinsicGas(msg, rules, vmConfig.HasEip3860(rules))
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
@@ -470,9 +472,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if err := st.buyGas(fees, gasBailout); err != nil {
 		return nil, err
 	}
-
-	rules := st.evm.ChainRules()
-	vmConfig := st.evm.Config()
 
 	if !contractCreation && !st.chargeSenderAtValidation {
 		// Increment the nonce for the next transaction
@@ -898,23 +897,39 @@ func (st *TxnExecutor) refundGas(gasLeft mdgas.MdGas) error {
 	return nil
 }
 
-func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Authorization, accessTuples types.AccessList) (mdgas.IntrinsicGasCalcResult, bool) {
-	rules := st.evm.ChainRules()
-	vmConfig := st.evm.Config()
+func intrinsicGas(msg Message, rules *chain.Rules, isEIP3860 bool) (mdgas.IntrinsicGasCalcResult, bool) {
+	contractCreation := msg.To().IsNil()
+	accessList := msg.AccessList()
 	return mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
-		Data:               st.data,
-		AuthorizationsLen:  uint64(len(auths)),
-		AccessListLen:      uint64(len(accessTuples)),
-		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
+		Data:               msg.Data(),
+		AuthorizationsLen:  uint64(len(msg.Authorizations())),
+		AccessListLen:      uint64(len(accessList)),
+		StorageKeysLen:     uint64(accessList.StorageKeys()),
 		IsContractCreation: contractCreation,
-		IsSelfTransfer:     !contractCreation && st.msg.To() == st.msg.From(),
-		HasValue:           !st.msg.Value().IsZero(),
+		IsSelfTransfer:     !contractCreation && msg.To() == msg.From(),
+		HasValue:           !msg.Value().IsZero(),
 		IsEIP2:             rules.IsHomestead,
 		IsEIP2028:          rules.IsIstanbul,
-		IsEIP3860:          vmConfig.HasEip3860(rules),
+		IsEIP3860:          isEIP3860,
 		IsEIP7623:          rules.IsPrague,
 		IsEIP7976:          rules.IsAmsterdam,
 		IsEIP7981:          rules.IsAmsterdam,
 		IsEIP2780:          rules.IsAmsterdam,
 	})
+}
+
+// PrecompileCallRunsOutOfGas reports whether a value transfer to a precompile cannot pay the precompile
+// gas after the intrinsic charge. Such a frame fails and reverts the transfer, so it writes nothing to
+// the recipient, but it still reads it.
+func PrecompileCallRunsOutOfGas(msg Message, rules *chain.Rules) bool {
+	p, ok := vm.Precompiles(rules)[msg.To()]
+	if !ok || len(msg.Authorizations()) > 0 {
+		return false
+	}
+	intrinsic, overflow := intrinsicGas(msg, rules, false)
+	if overflow || msg.Gas() < intrinsic.ExecutionGas {
+		return false
+	}
+	frameGas := mdgas.SplitTxnGasLimit(msg.Gas(), intrinsic.ExecutionGas, rules, msg.SkipExecutionGasCap())
+	return frameGas.Execution < p.RequiredGas(msg.Data())
 }
