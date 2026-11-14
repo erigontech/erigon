@@ -183,6 +183,8 @@ type IntraBlockState struct {
 	versionMap      *VersionMap
 	versionedWrites WriteSet
 	versionedReads  ReadSet
+	c5shadow        WriteSet
+	c5in, c5ra      bool
 	// versionedOrigins collects committed pre-block base cells (at originIndex) that a cold
 	// read resolves this tx. Reads record here (tx-local, lock-free) instead of writing the
 	// shared versionMap mid-execution; the executor publishes them batched at flush, so the
@@ -372,6 +374,7 @@ func (ibs *IntraBlockState) Reset() {
 	// originals in ibs.versionedWrites are no longer referenced after the
 	// boundary call, so recycle can take every VW back.
 	ibs.versionedWrites.recycle()
+	ibs.c5shadow.ReleaseAndReset()
 	ibs.versionedOrigins.ReleaseAndReset()
 	ibs.recordAccess = false
 	ibs.accountReadDuration = 0
@@ -476,6 +479,7 @@ func (ibs *IntraBlockState) Close() {
 	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
 	// set is unexported, so nothing outside holds a raw VersionedWrite.
 	ibs.versionedWrites.ReleaseAndReset()
+	ibs.c5shadow.ReleaseAndReset()
 	ibs.versionedOrigins.ReleaseAndReset()
 
 	releaseResources(stateObjects, journal)
@@ -2836,7 +2840,9 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 	// account view). Every FinalizedWrites caller is covered here, so no read path needs
 	// to remember to publish separately.
 	ibs.PublishOrigins()
+	ibs.versionedWrites.c5drop = stubC5Drop && ibs.blockNum >= stubC5MinBlk
 	writes := ibs.versionedWrites.Finalize()
+	ibs.versionedWrites.c5drop = false
 	var replaced map[accounts.Address]struct{}
 	if chainRules != nil && chainRules.IsAmsterdam {
 		replaced = ibs.publishCreateDestructAsBalances(writes)
@@ -3332,6 +3338,11 @@ func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 // takes every VW back.
 
 func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint256.Int) {
+	if ibs.c5dup() {
+		ibs.c5enter()
+		ibs.recordWriteBalance(addr, val)
+		ibs.c5leave()
+	}
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3353,6 +3364,11 @@ func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint25
 // leaf (ValueDeleted ⇒ nil on the projection, absent to the reader). Used by the
 // self-destruct burn so the delete decision rides the write, not the balance value.
 func (ibs *IntraBlockState) recordWriteBalanceDeleted(addr accounts.Address) {
+	if ibs.c5dup() {
+		ibs.c5enter()
+		ibs.recordWriteBalanceDeleted(addr)
+		ibs.c5leave()
+	}
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3372,6 +3388,11 @@ func (ibs *IntraBlockState) recordWriteBalanceDeleted(addr accounts.Address) {
 }
 
 func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64, reason tracing.NonceChangeReason) {
+	if ibs.c5dup() {
+		ibs.c5enter()
+		ibs.recordWriteNonce(addr, val, reason)
+		ibs.c5leave()
+	}
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3391,6 +3412,11 @@ func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64, 
 }
 
 func (ibs *IntraBlockState) recordWriteIncarnation(addr accounts.Address, val uint64) {
+	if ibs.c5dup() {
+		ibs.c5enter()
+		ibs.recordWriteIncarnation(addr, val)
+		ibs.c5leave()
+	}
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3409,6 +3435,11 @@ func (ibs *IntraBlockState) recordWriteIncarnation(addr accounts.Address, val ui
 }
 
 func (ibs *IntraBlockState) recordWriteSelfDestruct(addr accounts.Address, val bool) {
+	if ibs.c5dup() {
+		ibs.c5enter()
+		ibs.recordWriteSelfDestruct(addr, val)
+		ibs.c5leave()
+	}
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3427,6 +3458,11 @@ func (ibs *IntraBlockState) recordWriteSelfDestruct(addr accounts.Address, val b
 }
 
 func (ibs *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val bool) {
+	if ibs.c5dup() {
+		ibs.c5enter()
+		ibs.recordWriteCreateContract(addr, val)
+		ibs.c5leave()
+	}
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3445,6 +3481,11 @@ func (ibs *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val
 }
 
 func (ibs *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.Code) {
+	if ibs.c5dup() {
+		ibs.c5enter()
+		ibs.recordWriteCode(addr, val)
+		ibs.c5leave()
+	}
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3463,6 +3504,11 @@ func (ibs *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.
 }
 
 func (ibs *IntraBlockState) recordWriteCodeHash(addr accounts.Address, val accounts.CodeHash) {
+	if ibs.c5dup() {
+		ibs.c5enter()
+		ibs.recordWriteCodeHash(addr, val)
+		ibs.c5leave()
+	}
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3481,6 +3527,11 @@ func (ibs *IntraBlockState) recordWriteCodeHash(addr accounts.Address, val accou
 }
 
 func (ibs *IntraBlockState) recordWriteCodeSize(addr accounts.Address, val int) {
+	if ibs.c5dup() {
+		ibs.c5enter()
+		ibs.recordWriteCodeSize(addr, val)
+		ibs.c5leave()
+	}
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3499,6 +3550,11 @@ func (ibs *IntraBlockState) recordWriteCodeSize(addr accounts.Address, val int) 
 }
 
 func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, account *accounts.Account) {
+	if ibs.c5dup() {
+		ibs.c5enter()
+		ibs.recordWriteAddress(addr, account)
+		ibs.c5leave()
+	}
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3539,6 +3595,11 @@ func storageValueStatus(prev, val uint256.Int) valueStatus {
 // first write it is that committed origin and is captured, so a later re-write (an
 // intra-tx oscillation) still classifies against the origin rather than the prior step.
 func (ibs *IntraBlockState) recordWriteStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int, prev uint256.Int) {
+	if ibs.c5dup() {
+		ibs.c5enter()
+		ibs.recordWriteStorage(addr, key, val, prev)
+		ibs.c5leave()
+	}
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3764,6 +3825,7 @@ func (ibs *IntraBlockState) VersionedReads() ReadSet {
 func (ibs *IntraBlockState) ResetVersionedIO() {
 	ibs.versionedReads = ReadSet{}
 	ibs.versionedWrites.recycle()
+	ibs.c5shadow.ReleaseAndReset()
 	ibs.dep = UnknownDep
 	ibs.recordAccess = false
 	ibs.stateReadErr = nil
@@ -3944,4 +4006,25 @@ func (ibs *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 		}
 	}
 	return nil
+}
+
+// Probe C5: STUB_C5_X2 repeats every in-tx per-path write into a shadow set (doubling bound);
+// STUB_C5_DROP leaves accounts created and destroyed in the tx out of its finalized writes.
+var stubC5X2, stubC5Drop, stubC5MinBlk = dbg.EnvBool("STUB_C5_X2", false), dbg.EnvBool("STUB_C5_DROP", false), dbg.EnvUint("STUB_C5_MINBLK", 0)
+
+func (ibs *IntraBlockState) c5dup() bool {
+	return stubC5X2 && !ibs.c5in && ibs.versionMap != nil && ibs.blockNum >= stubC5MinBlk
+}
+
+func (ibs *IntraBlockState) c5enter() {
+	if ibs.versionedWrites.cells != nil && ibs.c5shadow.cells == nil {
+		ibs.c5shadow.UseArena()
+	}
+	ibs.c5in, ibs.c5ra, ibs.recordAccess = true, ibs.recordAccess, false
+	ibs.versionedWrites, ibs.c5shadow = ibs.c5shadow, ibs.versionedWrites
+}
+
+func (ibs *IntraBlockState) c5leave() {
+	ibs.versionedWrites, ibs.c5shadow = ibs.c5shadow, ibs.versionedWrites
+	ibs.c5in, ibs.recordAccess = false, ibs.c5ra
 }

@@ -1012,6 +1012,8 @@ type WriteSet struct {
 	storage        map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int]
 
 	cells *vwArenas // nil until UseArena
+
+	c5drop bool
 }
 
 type vwArenas struct {
@@ -1312,6 +1314,13 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 	}
 
 	for addr := range addrs {
+		if ws.c5drop {
+			if cc, ok := ws.createContract[addr]; ok && cc.Val {
+				if vw, ok := ws.selfDestruct[addr]; ok && vw.Val {
+					continue
+				}
+			}
+		}
 		sd := false
 		if vw, ok := ws.selfDestruct[addr]; ok {
 			out.SetSelfDestruct(addr, cloneVW(vw))
