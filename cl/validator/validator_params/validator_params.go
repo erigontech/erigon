@@ -61,6 +61,11 @@ func (vp *ValidatorParams) GetFeeRecipient(validatorIndex uint64) (common.Addres
 	return val.(common.Address), true
 }
 
+func (vp *ValidatorParams) HasAttachedValidator(validatorIndex uint64) bool {
+	_, ok := vp.attachedValidators.Load(validatorIndex)
+	return ok
+}
+
 func (vp *ValidatorParams) GetValidators() []uint64 {
 	validators := []uint64{}
 	vp.attachedValidators.Range(func(key, value any) bool {
