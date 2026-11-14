@@ -59,7 +59,7 @@ var (
 	}
 	BodyCacheLimitFlag = cli.StringFlag{
 		Name:  "bodies.cache",
-		Usage: "Limit on the cache for block bodies",
+		Usage: "Soft limit on the encoded size of blocks and BALs the backward downloader prefetches while it executes the previous batch",
 		Value: fmt.Sprintf("%d", ethconfig.Defaults.Sync.BodyCacheLimit),
 	}
 
