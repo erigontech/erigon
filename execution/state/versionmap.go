@@ -465,6 +465,17 @@ func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageK
 	return changes[k].Value, true
 }
 
+// hasNoCells reports whether no tx wrote a storage, lifecycle or address cell of addr.
+func (vm *VersionMap) hasNoCells(addr accounts.Address) bool {
+	e := vm.load(addr)
+	if e == nil {
+		return true
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return len(e.Storage) == 0 && !hasLifecycleCells(e) && (e.Address == nil || e.Address.Len() == 0)
+}
+
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
 func (vm *VersionMap) load(addr accounts.Address) *AddressEntry {
 	if !vm.nonEmpty.Load() {
@@ -2193,7 +2204,12 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		}
 	}
 	for a, inner := range rs.storage {
+		// With no storage, lifecycle or address cell, a read of the base cannot be stale.
+		quiet := vm.hasNoCells(a)
 		for k, tr := range inner {
+			if quiet && tr.Version.TxIndex == originIndex {
+				continue
+			}
 			if !ok(vm.validateReadImpl(txIdx, a, StoragePath, k, tr.Source, tr.Version, liveStorage(vm, a, k, txIdx), checkVersion, traceInvalid, tracePrefix, false)) {
 				return
 			}
