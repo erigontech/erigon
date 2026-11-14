@@ -159,8 +159,8 @@ Method:
   is a real regression: users see it as a hung Ctrl-C.
 - **stage-exec** — the matched pattern is the reason (`catch panic`,
   `wrong receipt`, `EXCEPTION`, …). Check whether **only the `parallel`
-  matrix entries** failed → the parallel executor (`ERIGON_EXEC3_PARALLEL`), not
-  execution in general.
+  matrix entries** failed → parallel commitment (`ERIGON_COMMITMENT_PARALLEL`),
+  not execution in general.
 - **RPC integration** — start from the job summary (`summary.md` is echoed
   there), then `results/test_report.json` for the failing methods and the
   per-test actual/expected/diff folders in the result dir (also at

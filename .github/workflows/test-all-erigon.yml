@@ -26,8 +26,7 @@ jobs:
           - macos-15
           - windows-2025
         # Run both the v3 and the parallel commitment paths every time so
-        # divergence is caught on the PR rather than after a release. Execution
-        # is parallel in both legs (dbg.Exec3Parallel defaults true). The matrix
+        # divergence is caught on the PR rather than after a release. The matrix
         # entries spawn separate runners and run concurrently — wall-clock
         # unchanged, runner-minutes doubled.
         commitment_mode:
@@ -79,6 +78,10 @@ jobs:
           ERIGON_COMMITMENT_V3: ${{ matrix.commitment_mode == 'v3' && 'true' || 'false' }}
         run: |
           if ! make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"; then
+            # A failed or timed-out test is a real result: a cold rerun only repeats it or hides a flake.
+            if grep -q -e '^--- FAIL' -e '^panic: ' run.log; then
+              exit 1
+            fi
             # Retry after clearing the Go build cache. Low disk space can cause
             # severe, non-obvious build/test failures that don't surface a clear
             # "no space left" message. Tuning a cache size limit is too fragile;

@@ -1,6 +1,6 @@
 ---
 name: erigon-test-unit
-description: Run Erigon unit tests locally using make test-short. Use this for fast pre-push verification. Equivalent to the "Unit tests" CI workflow.
+description: Run Erigon short tests locally for affected packages or the full suite with make test-short. Use for targeted regression checks, broad changes, or a requested full short test run.
 ---
 
 # Erigon Unit Tests
@@ -18,8 +18,8 @@ Equivalent to the **"Unit tests"** GitHub Actions workflow (`ci.yml`).
 ## Run Specific Package
 
 ```bash
-go test -short ./execution/stagedsync/...
-go test -short -run TestName ./path/to/package/...
+GOEXPERIMENT=jsonv2 go test -short ./execution/stagedsync/...
+GOEXPERIMENT=jsonv2 go test -short -run TestName ./path/to/package/...
 ```
 
 ## Run from Repository Root
@@ -33,9 +33,9 @@ make test-short
 
 ## When to Use
 
-- Before every push as a fast gate
-- After fixing a bug to confirm no regressions
-- Part of the quick gate: `make lint && make test-short`
+- Run affected package tests during local iteration and after fixing a bug.
+- Run the full short suite for broad changes or when explicitly requested.
+- Select lint and build checks using [Local verification in AGENTS.md](../../../AGENTS.md#local-verification).
 
 ## CI Equivalent
 

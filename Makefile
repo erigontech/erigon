@@ -404,7 +404,6 @@ eest-devnet:
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
 		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile && \
-		echo "ENV ERIGON_EXEC3_PARALLEL=true" >> clients/erigon/Dockerfile && \
 		sed -i'' -e '/^echo "Running erigon/i\FLAGS="$$FLAGS $(EEST_GLAMSTERDAM_ERIGON_FLAGS)"' clients/erigon/erigon.sh && \
 		grep -qF -- '$(EEST_GLAMSTERDAM_ERIGON_FLAGS)' clients/erigon/erigon.sh
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
@@ -506,7 +505,7 @@ kurtosis-cleanup:
 	@echo "-----------------------------------\n"
 	kurtosis enclave rm -f makefile-kurtosis-testnet
 
-## lintci:                            run golangci-lint linters (full run, used in CI; skips fast-only and mod tidy)
+## lintci:                            run golangci-lint linters (full run, used in CI; skips the fast-only pass)
 lintci:
 	@$(GOLANGCI) run --config ./.golangci.yml
 	@$(MAKE) check-generated

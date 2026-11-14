@@ -1113,11 +1113,6 @@ func (sd *SharedDomains) SetDiscardCommitment(v bool) {
 	sd.discardCommitment = v
 }
 
-// InlineTouchKeyDisabled returns true when inline TouchKey is disabled.
-func (sd *SharedDomains) InlineTouchKeyDisabled() bool {
-	return sd.disableInlineTouchKey
-}
-
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
 	return sd.mem.IteratePrefix(domain, prefix, roTx, it)
 }

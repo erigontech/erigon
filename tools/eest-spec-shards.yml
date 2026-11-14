@@ -19,9 +19,7 @@
 #   expected-tests        (optional) — exact result count. Used by legacy shards
 #                                      to guard the coverage moved out of Go tests.
 #   commitment-parallel   (required) — pins ERIGON_COMMITMENT_PARALLEL.
-#                                      Execution is parallel in every shard
-#                                      (dbg.Exec3Parallel defaults true); the
-#                                      -sequential/-parallel suffix selects
+#                                      The -sequential/-parallel suffix selects
 #                                      serial vs parallel commitment.
 #   commitment-v3         (optional, default false) — pins ERIGON_COMMITMENT_V3.
 #   no-ramdisk            (optional, default false) — true keeps the shard's

@@ -390,7 +390,7 @@ func requireBranchesConsistentWithAccounts(t *testing.T, doms *execctx.SharedDom
 
 func putCorruptAccount(t *testing.T, doms *execctx.SharedDomains, tx kv.TemporalRwTx, addr []byte) {
 	t.Helper()
-	defer doms.SetDisableInlineTouchKey(doms.InlineTouchKeyDisabled())
+	defer doms.SetDisableInlineTouchKey(false)
 	doms.SetDisableInlineTouchKey(true)
 	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr, []byte{0, 0, 0}, 0, nil))
 }

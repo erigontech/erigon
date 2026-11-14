@@ -134,8 +134,7 @@ fi
 IFS=$'\t' read -r default_workers default_max commitment_parallel commitment_v3 shard_no_ramdisk expected_tests evm_timeout_minutes run_regex <<<"$shard_row"
 # Always set ERIGON_COMMITMENT_PARALLEL explicitly (true or false) so the shard's
 # commitment mode is pinned to the manifest, independent of whatever
-# statecfg.ExperimentalParallelCommitment defaults to at runtime. Execution is
-# parallel in every shard (dbg.Exec3Parallel defaults true).
+# statecfg.ExperimentalParallelCommitment defaults to at runtime.
 export ERIGON_COMMITMENT_PARALLEL="$commitment_parallel"
 export ERIGON_COMMITMENT_V3="$commitment_v3"
 
