@@ -555,8 +555,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			ibs.ResetVersionedIO()
 
 			// Write state changes to db
-			blockContext := protocol.NewEVMBlockContext(b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, config)
-			blockRules := blockContext.Rules(config)
 			// Commit from the versionMap write-set via ApplyWrites, the same domain apply
 			// the executor uses, so generation matches import. Each recorded phase
 			// (init txIdx=-1, txs, finalize) is applied in order.
@@ -565,7 +563,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				if ws == nil || ws.IsEmpty() {
 					continue
 				}
-				if err := state.ApplyWrites(ws, domains, tx, blockNum, txNum, blockRules, false); err != nil {
+				if err := state.ApplyWrites(ws, domains, tx, blockNum, txNum, false); err != nil {
 					return nil, nil, fmt.Errorf("apply versioned block writes: %w", err)
 				}
 			}

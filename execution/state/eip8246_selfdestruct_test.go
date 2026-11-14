@@ -434,7 +434,7 @@ func TestEIP8246_CreateDestructWipesTheStorageOfAnExistingAccount(t *testing.T) 
 	require.NoError(t, err)
 
 	domains.SetTxNum(2)
-	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, rules, false))
+	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, false))
 	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, av[:])
 	require.NoError(t, err)
 	var acc accounts.Account

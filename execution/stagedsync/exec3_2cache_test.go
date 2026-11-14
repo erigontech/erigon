@@ -210,7 +210,7 @@ func TestNotifyAccumulatorFromVersionedWrites(t *testing.T) {
 	require.NoError(t, err)
 
 	writes := collector.Writes()
-	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 1, writes, &chain.Rules{}))
+	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 1, writes))
 	require.NoError(t, rs.NotifyAccumulator(accumulator, tx, []state.WriteSetView{writes}))
 
 	changes := accumulator.Changes()
@@ -239,7 +239,7 @@ func notifyAccumulatorFromAppliedWrites(t *testing.T, addr accounts.Address, see
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrVal[:], accounts.SerialiseV3(&seed), 0, nil))
 
 	for i, writeSet := range writes {
-		require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, uint64(i+1), writeSet, &chain.Rules{}))
+		require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, uint64(i+1), writeSet))
 	}
 
 	accumulator := shards.NewAccumulator()

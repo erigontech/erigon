@@ -205,9 +205,7 @@ type BlockResult struct {
 
 type ApplyMessage func(evm *vm.EVM, msg protocol.Message, gp *protocol.GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error)
 
-// ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
-// which is processed by a single thread that writes into the ReconState1 and
-// flushes to the database
+// TxTask is one transaction, or the init or end of a block, run by an execution worker.
 type TxTask struct {
 	TxNum            uint64
 	TxIndex          int // -1 for block initialisation
@@ -225,7 +223,6 @@ type TxTask struct {
 	Logger log.Logger
 	Trace  bool
 
-	gasPool      *protocol.GasPool
 	message      *types.Message
 	signer       *types.Signer
 	dependencies []int
@@ -387,14 +384,11 @@ func (t *TxTask) ResetTx(txNum uint64, txIndex int) {
 }
 
 func (t *TxTask) GasPool() *protocol.GasPool {
-	if t.gasPool != nil {
-		return t.gasPool
-	}
 	// Workers can't share the block gas pool (SubGas races on speculative
 	// depletion), so hand out a fresh per-invocation pool sized to the block
 	// limit. Returning nil would make preCheck's CheckBlockGasInclusion no-op,
 	// letting a tx that alone exceeds the block limit slip past and fail later
-	// with the wrong error variant (serial returns ErrGasLimitReached). Cross-tx
+	// with the wrong error variant. Cross-tx
 	// depletion is still caught post-execution against the shared pool.
 	if t.Header == nil || t.Config == nil {
 		return nil
@@ -518,7 +512,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, t.Logger, nil)
 		if result.Err == nil && !ibs.IsVersioned() {
 			// The versionMap path finalizes from the write-set after the switch;
-			// the serial path commits the init writes here.
+			// a non-versioned IBS commits the init writes here.
 			result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
 	case t.IsBlockEnd():
@@ -568,7 +562,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 
 		if result.Err == nil {
 			// The versionMap path produces its write-set from the recorded IO
-			// after the switch; only the serial path clears pending changes here.
+			// after the switch; a non-versioned IBS clears pending changes here.
 			if !ibs.IsVersioned() {
 				ibs.SoftFinalise()
 			}
@@ -586,7 +580,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 		result.Operational = true
 		result.Err = stateErr
 	}
-	// Prepare read set, write set and balanceIncrease set and send for serialisation
+	// Prepare the read and write sets.
 	if result.Err == nil {
 		// Genesis (block 0, txIndex -1) resolves `ibs` to the throwaway versioned
 		// IBS that GenesisToBlock builds, whatever the executor. Its writes reach

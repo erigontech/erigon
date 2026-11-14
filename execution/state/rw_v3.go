@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
@@ -79,7 +78,7 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 // domains — the single write-set commit path shared by the parallel executor and
 // block production. Writes carry complete account state, so no domain reads are
 // needed to reconstruct the serialised account.
-func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, rules *chain.Rules, trace bool) error {
+func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, trace bool) error {
 	if writes != nil && !writes.IsEmpty() {
 		// One buffer for every storage key this call writes: consumers copy what they keep.
 		// Made on the first slot, since an array here escapes even when unused.
@@ -330,12 +329,11 @@ func (rs *StateV3) ApplyStateWrites(_ context.Context,
 	blockNum uint64,
 	txNum uint64,
 	writes WriteSetView,
-	rules *chain.Rules,
 ) error {
 	if writes == nil || writes.IsEmpty() {
 		return nil
 	}
-	if err := ApplyWrites(writes, rs.domains, roTx, blockNum, txNum, rules, rs.trace.Load()); err != nil {
+	if err := ApplyWrites(writes, rs.domains, roTx, blockNum, txNum, rs.trace.Load()); err != nil {
 		return fmt.Errorf("StateV3.ApplyStateWrites: %w", err)
 	}
 	return nil
