@@ -59,7 +59,7 @@ func (c *BeaconClient) getResponse(ctx context.Context, path string) (*beaconRes
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("beacon GET %s: status %d: %s", path, resp.StatusCode, string(body))
+		return nil, &statusError{path: path, code: resp.StatusCode, body: string(body)}
 	}
 
 	var wrapper beaconResponse
@@ -67,6 +67,17 @@ func (c *BeaconClient) getResponse(ctx context.Context, path string) (*beaconRes
 		return nil, fmt.Errorf("beacon GET %s: decode: %w", path, err)
 	}
 	return &wrapper, nil
+}
+
+// statusError is a non-200 response to a Beacon API GET.
+type statusError struct {
+	path string
+	code int
+	body string
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("beacon GET %s: status %d: %s", e.path, e.code, e.body)
 }
 
 // post performs a POST request with a JSON body.

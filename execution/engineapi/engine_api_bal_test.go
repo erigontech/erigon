@@ -1403,9 +1403,7 @@ func TestEngineApiBALUnchangedClaimLieInvalid(t *testing.T) {
 		require.NotNil(t, token)
 		require.NotEmpty(t, token.StorageChanges)
 		hideStorageWrites(token)
-		status := newPayloadWithBAL(ctx, t, eat, payload, bal)
-		require.Equal(t, enginetypes.InvalidStatus, status.Status)
-		require.NotNil(t, status.ValidationError)
+		requireBALMismatch(t, newPayloadWithBAL(ctx, t, eat, payload, bal))
 	})
 }
 
@@ -1600,7 +1598,14 @@ func newPayloadWithBAL(ctx context.Context, t *testing.T, eat engineapitester.En
 	header.BlockAccessListHash = &balHash
 	elPayload.BlockHash = header.Hash()
 
-	status, err := eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+	status, err := engineapitester.RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
+		func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
+			r, err := eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+			if err != nil {
+				return nil, "", err
+			}
+			return r, r.Status, nil
+		})
 	require.NoError(t, err)
 	return status
 }

@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -45,7 +46,7 @@ import (
 
 func TestGetStateFork(t *testing.T) {
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -54,26 +55,53 @@ func TestGetStateFork(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	finalizedEpoch := blocks[len(blocks)-1].Block.Slot / handler.beaconChainCfg.SlotsPerEpoch
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: finalizedEpoch}
+	fcu.FinalizedSlotVal = (finalizedEpoch+1)*handler.beaconChainCfg.SlotsPerEpoch - 1
+
+	nonCanonicalBlock := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.Phase0Version)
+	nonCanonicalBlock.Block.Slot = blocks[0].Block.Slot
+	nonCanonicalBlock.Block.ParentRoot = blocks[0].Block.ParentRoot
+	nonCanonicalBlock.Block.StateRoot = common.Hash{0xca, 0xfe}
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(tx, nonCanonicalBlock, false))
+	require.NoError(t, tx.Commit())
 
 	cases := []struct {
-		blockID string
-		code    int
+		blockID   string
+		code      int
+		finalized bool
 	}{
 		{
-			blockID: "0x" + common.Bytes2Hex(postRoot[:]),
-			code:    http.StatusOK,
+			blockID:   "0x" + common.Bytes2Hex(postRoot[:]),
+			code:      http.StatusOK,
+			finalized: false,
 		},
 		{
-			blockID: "head",
-			code:    http.StatusOK,
+			blockID:   "head",
+			code:      http.StatusOK,
+			finalized: false,
+		},
+		{
+			blockID:   strconv.FormatInt(int64(blocks[0].Block.Slot), 10),
+			code:      http.StatusOK,
+			finalized: true,
+		},
+		{
+			blockID:   strconv.FormatInt(int64(blocks[len(blocks)-1].Block.Slot), 10),
+			code:      http.StatusOK,
+			finalized: false,
+		},
+		{
+			blockID:   "0x" + common.Bytes2Hex(nonCanonicalBlock.Block.StateRoot[:]),
+			code:      http.StatusOK,
+			finalized: false,
 		},
 		{
 			blockID: "0x" + common.Bytes2Hex(make([]byte, 32)),
 			code:    http.StatusNotFound,
-		},
-		{
-			blockID: strconv.FormatInt(int64(postState.Slot()), 10),
-			code:    http.StatusOK,
 		},
 	}
 
@@ -94,6 +122,7 @@ func TestGetStateFork(t *testing.T) {
 			jsonVal := make(map[string]any)
 			// unmarshal the json
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(&jsonVal))
+			require.Equal(t, c.finalized, jsonVal["finalized"])
 			data := jsonVal["data"].(map[string]any)
 			require.Equal(t, "0x00000000", data["current_version"])
 			require.Equal(t, "0x00000000", data["previous_version"])
@@ -364,6 +393,55 @@ func TestGetStateFullSkipsForkchoiceStateAtLaterSlot(t *testing.T) {
 			require.Equal(t, postRoot, gotRoot)
 		})
 	}
+}
+
+// An invalid block or state id is answered 400 by every endpoint, also by those that return the parser's error as is.
+func TestInvalidIdsAreBadRequests(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	for _, path := range []string{
+		"/eth/v2/beacon/blocks/18446744073709551616",
+		"/eth/v2/beacon/blocks/not-an-id",
+		"/eth/v1/beacon/blob_sidecars/18446744073709551616",
+		"/eth/v1/beacon/states/18446744073709551616/root",
+		"/eth/v2/debug/beacon/states/not-an-id",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+path, nil)
+			require.NoError(t, err)
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+			var body struct{ Message string }
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+			require.True(t, strings.HasPrefix(body.Message, "invalid path variable"), body.Message)
+		})
+	}
+}
+
+// A fork choice failure while reading a valid state id is an internal error, not an invalid id.
+func TestGetStateFullForkchoiceErrorIsInternal(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	fcu.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
+		return nil, errors.New("fork graph read failed")
+	}
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/head", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 }
 
 // TestGetStateFullFinalizedServesAdvancedForkchoiceState pins that a named

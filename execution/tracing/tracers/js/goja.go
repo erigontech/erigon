@@ -21,6 +21,7 @@ package js
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -135,11 +136,24 @@ type jsTracer struct {
 // The methods `result` and `fault` are required to be present.
 // The methods `step`, `enter`, and `exit` are optional, but note that
 // `enter` and `exit` always go together.
-func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, error) {
+func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (tracer *tracers.Tracer, err error) {
 	if c, ok := assetTracers[code]; ok {
 		code = c
 	}
 	vm := goja.New()
+	if ctx != nil && ctx.Ctx != nil {
+		defer context.AfterFunc(ctx.Ctx, func() { vm.Interrupt("execution timeout") })()
+		// A timeout inside a JS getter reaches Go as a panic from Object.Get.
+		defer func() {
+			if r := recover(); r != nil {
+				interrupted, ok := r.(*goja.InterruptedError)
+				if !ok {
+					panic(r)
+				}
+				tracer, err = nil, interrupted
+			}
+		}()
+	}
 	// By default field names are exported to JS as is, i.e. capitalized.
 	vm.SetFieldNameMapper(goja.UncapFieldNameMapper())
 	t := &jsTracer{
