@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -43,9 +44,12 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	mock_services2 "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
+	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 type contentsEventKind string
@@ -163,8 +167,57 @@ func forkDigestOfEpoch(epoch uint64) common.Bytes4 {
 func newEnvelopeContentsFixture(t *testing.T, slot uint64, blobCount int) *envelopeContentsFixture {
 	t.Helper()
 	ctrl := gomock.NewController(t)
-	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	cfg := handler.beaconChainCfg
+	config := clparams.MainnetBeaconConfig
+	config.AltairForkEpoch, config.BellatrixForkEpoch = 1, 1
+	config.InitializeForkSchedule()
+	cfg := &config
+	genesisTime, genesisRoot := testGenesisClock()
+	initialClock := eth_clock.NewEthereumClock(genesisTime, genesisRoot, cfg)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	fcu := mock_services2.NewForkChoiceStorageMock(t)
+	handler := NewApiHandler(
+		log.Root(),
+		nil,
+		initialClock,
+		cfg,
+		db,
+		fcu,
+		pool.OperationsPool{},
+		tests.NewMockBlockReader(),
+		nil,
+		nil,
+		nil,
+		"test-version",
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		false,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
 	cfg.GloasForkEpoch = 0
 	if slot == 0 {
 		slot = handler.ethClock.GetCurrentSlot()
