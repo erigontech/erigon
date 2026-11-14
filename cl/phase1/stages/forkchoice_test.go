@@ -213,6 +213,10 @@ func newLockOrderFixtureWithConfig(t *testing.T, slot uint64, engine execution_c
 	if executionHash != (common.Hash{}) {
 		if gloas {
 			headState.SetLatestBlockHash(executionHash)
+			headState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+				Slot:            slot,
+				ParentBlockHash: executionHash,
+			})
 		} else {
 			headState.SetVersion(clparams.FuluVersion)
 			header := cltypes.NewEth1Header(clparams.FuluVersion)

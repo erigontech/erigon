@@ -1571,7 +1571,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 // TestParallelResumeReconstructsPriorReceipts pins the block-end prefix
 // reconstruction for resumed blocks: receipts of transactions executed in an
 // earlier batch are re-derived so that engine.Finalize and the notification
-// cache see the complete set, mirroring the serial executor.
+// cache see the complete set.
 func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 	assert := assert.New(t)
 	db := newResumeTestDB(t)

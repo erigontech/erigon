@@ -401,7 +401,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				} else if len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.GetBlobKzgCommitments().Len() {
 					continue
 				}
-				blobSidecarService := services.NewBlobSidecarService(&clparams.MainnetBeaconConfig, forkStore, nil, ethClock, emitters, true)
+				blobSidecarService := services.NewBlobSidecarService(ctx, &clparams.MainnetBeaconConfig, forkStore, nil, ethClock, emitters, true)
 
 				blobs.Range(func(index int, value *cltypes.Blob, length int) bool {
 					var proof common.Bytes48

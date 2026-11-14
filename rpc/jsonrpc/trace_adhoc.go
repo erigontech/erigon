@@ -1289,7 +1289,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader)
 	if err != nil {
-		return nil, unknownBlockAsResourceNotFound(err)
+		return nil, callBlockError(err, *blockNrOrHash)
 	}
 
 	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
@@ -1537,7 +1537,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	}
 	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader)
 	if err != nil {
-		return nil, unknownBlockAsResourceNotFound(err)
+		return nil, callBlockError(err, *parentNrOrHash)
 	}
 
 	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)

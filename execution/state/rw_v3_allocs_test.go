@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -26,8 +27,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -296,7 +299,7 @@ func TestWriteSetApplyKeyDoesNotScalePerSlot(t *testing.T) {
 			}
 		}
 		return testing.AllocsPerRun(5, func() {
-			require.NoError(t, ApplyWrites(writes, domains, tx, 1, 1, nil, &chain.Rules{}, false))
+			require.NoError(t, ApplyWrites(writes, domains, tx, 1, 1, false))
 		})
 	}
 
@@ -330,11 +333,226 @@ func TestApplyWritesAccountFieldsDoNotAllocatePerField(t *testing.T) {
 			}
 		}
 		return testing.AllocsPerRun(5, func() {
-			require.NoError(t, ApplyWrites(writes, domains, tx, 1, 1, nil, &chain.Rules{}, false))
+			require.NoError(t, ApplyWrites(writes, domains, tx, 1, 1, false))
 		})
 	}
 
 	perAccount := (applyAllocs(true) - applyAllocs(false)) / n
 	require.Less(t, perAccount, 1.5,
 		"three more account fields cost %v allocations per account; holding them by value costs none", perAccount)
+}
+
+// storageLatestReads counts the storage reads ApplyWrites sends to the database.
+type storageLatestReads struct {
+	kv.TemporalTx
+	count int
+}
+
+func (s *storageLatestReads) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if name == kv.StorageDomain {
+		s.count++
+	}
+	return s.TemporalTx.GetLatest(name, k, opts)
+}
+
+func storageFoldView(addr accounts.Address, key accounts.StorageKey, vw *VersionedWrite[uint256.Int]) WriteSetView {
+	vw.WriteHeader.Address, vw.WriteHeader.Key, vw.WriteHeader.Path = addr, key, StoragePath
+	ws := &WriteSet{}
+	ws.SetStorage(addr, key, vw)
+	return NewVersionMapWriteView(ws, NewVersionMap(nil), 0)
+}
+
+// A storage write recorded by a tx already holds the value the tx read, so the fold
+// must take the slot's previous value from it and not read the state again.
+func TestApplyWritesFoldTakesPrevFromRecordedOrigin(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x02"))
+	addrValue, keyValue := addr.Value(), key.Value()
+	composite := slices.Concat(addrValue[:], keyValue[:])
+
+	for _, tc := range []struct {
+		name   string
+		status valueStatus
+		orig   uint64
+		val    uint64
+		want   []byte
+	}{
+		{"deleted", ValueDeleted, 5, 0, []byte{}},
+		{"created", ValueCreated, 0, 7, []byte{7}},
+		{"changed", ValueChanged, 5, 7, []byte{7}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, tx, domains := NewTestRwTx(t)
+			reads := &storageLatestReads{TemporalTx: tx}
+			changes := &changeset.StateChangeSet{}
+			domains.SetChangesetAccumulator(changes)
+			view := storageFoldView(addr, key, &VersionedWrite[uint256.Int]{
+				WriteHeader: WriteHeader{valStatus: tc.status},
+				Val:         *uint256.NewInt(tc.val),
+				orig:        *uint256.NewInt(tc.orig),
+			})
+
+			require.NoError(t, ApplyWrites(view, domains, reads, 1, 1, false))
+
+			require.Zero(t, reads.count, "the recorded origin is the previous value")
+			got, _, ok := domains.GetLatestFromMemory(kv.StorageDomain, composite)
+			require.True(t, ok, "the write reaches the shared domains")
+			require.True(t, bytes.Equal(tc.want, got), "got %x want %x", got, tc.want)
+			diff := changes.Diffs[kv.StorageDomain].GetDiffSet()
+			require.Len(t, diff, 1)
+			require.True(t, bytes.Equal(uint256.NewInt(tc.orig).Bytes(), diff[0].Value), "the changeset keeps the origin as prev, got %x", diff[0].Value)
+		})
+	}
+}
+
+// A write without a recorded origin (zero origin, default status) must still read the
+// previous value: a zero prev would turn a real delete into a no-op.
+func TestApplyWritesFoldReadsPrevWithoutRecordedOrigin(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x02"))
+	addrValue, keyValue := addr.Value(), key.Value()
+	composite := slices.Concat(addrValue[:], keyValue[:])
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, composite, []byte{9}, 1, nil))
+
+	view := storageFoldView(addr, key, &VersionedWrite[uint256.Int]{})
+	require.NoError(t, ApplyWrites(view, domains, tx, 1, 2, false))
+
+	got, _, ok := domains.GetLatestFromMemory(kv.StorageDomain, composite)
+	require.True(t, ok)
+	require.Empty(t, got, "the delete must be applied")
+}
+
+// A slot cleared by a creation earlier in the block must not take its prev value from
+// a later tx's origin, which can predate the clear.
+func TestApplyWritesFoldReadsPrevAfterAnEarlierCreate(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x02"))
+	addrValue, keyValue := addr.Value(), key.Value()
+	composite := slices.Concat(addrValue[:], keyValue[:])
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, composite, []byte{5}, 1, nil))
+	require.NoError(t, domains.DomainDelPrefix(kv.StorageDomain, tx, addrValue[:], 2))
+	changes := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(changes)
+
+	vm := NewVersionMap(nil)
+	vm.WriteCreateContract(addr, Version{TxIndex: 0}, true, true)
+	ws := &WriteSet{}
+	ws.SetStorage(addr, key, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Key: key, Path: StoragePath, valStatus: ValueChanged},
+		Val:         *uint256.NewInt(7),
+		orig:        *uint256.NewInt(5),
+	})
+
+	require.NoError(t, ApplyWrites(NewVersionMapWriteView(ws, vm, 1), domains, tx, 1, 3, false))
+
+	diff := changes.Diffs[kv.StorageDomain].GetDiffSet()
+	require.Len(t, diff, 1)
+	require.Empty(t, diff[0].Value, "the creation cleared the slot, so its prev value is empty")
+}
+
+// A slot cleared by a creation or destruct in an uncommitted prior block must take an empty
+// prev value: the block may still be in the exec window or already folded into the overlay.
+func TestApplyWritesFoldPrevAfterCreationInUncommittedPriorBlock(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x02"))
+	addrValue, keyValue := addr.Value(), key.Value()
+	composite := slices.Concat(addrValue[:], keyValue[:])
+	rules := &chain.Rules{ChainID: uint256.NewInt(1)}
+
+	for _, tc := range []struct {
+		name          string
+		destructFirst bool
+		inExecWindow  bool
+	}{
+		{name: "created, block in exec window", inExecWindow: true},
+		{name: "created, block folded into the overlay"},
+		{name: "destructed and re-created, block in exec window", destructFirst: true, inExecWindow: true},
+		{name: "destructed and re-created, block folded into the overlay", destructFirst: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, tx, domains := NewTestRwTx(t)
+			acc := accounts.NewAccount()
+			if tc.destructFirst {
+				acc.Nonce = 1
+			}
+			addrKey := addrValue[:]
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrKey, accounts.SerialiseV3(&acc), 1, nil))
+			require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, composite, []byte{5}, 1, nil))
+
+			reader := NewReaderV3(domains.AsGetter(tx))
+			block1 := NewVersionMap(nil)
+			var block1Folds []func() error
+			runBlock1Tx := func(txIdx int, txNum uint64, body func(*IntraBlockState) error) {
+				ibs := NewWithVersionMap(reader, block1)
+				t.Cleanup(ibs.Close)
+				ibs.SetTxContext(1, txIdx)
+				require.NoError(t, body(ibs))
+				writes := finalizedWrites(t, ibs, rules)
+				block1.FlushVersionedWrites(writes, true)
+				block1.SealUpTo(txIdx)
+				block1Folds = append(block1Folds, func() error {
+					return ApplyWrites(NewVersionMapWriteView(writes, block1, txIdx), domains, tx, 1, txNum, false)
+				})
+			}
+			createdIdx := 0
+			if tc.destructFirst {
+				runBlock1Tx(0, 2, func(ibs *IntraBlockState) error {
+					_, err := ibs.Selfdestruct(addr, false)
+					return err
+				})
+				createdIdx = 1
+			}
+			runBlock1Tx(createdIdx, 3, func(ibs *IntraBlockState) error {
+				if err := ibs.CreateAccount(addr, true); err != nil {
+					return err
+				}
+				return ibs.SetNonce(addr, 1, tracing.NonceChangeNewContract)
+			})
+			foldBlock1 := func() {
+				for _, fold := range block1Folds {
+					require.NoError(t, fold())
+				}
+			}
+
+			execWindow := NewPrevBlockList()
+			if tc.inExecWindow {
+				execWindow.PushHead(1, 3, block1)
+			} else {
+				foldBlock1()
+			}
+			block2Reader := NewPrevBlockReader(reader, execWindow)
+			block2Reader.SetBlock(2)
+
+			block2 := NewVersionMap(nil)
+			ibs := NewWithVersionMap(block2Reader, block2)
+			t.Cleanup(ibs.Close)
+			ibs.SetTxContext(2, 0)
+			require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(7)))
+			writes := finalizedWrites(t, ibs, rules)
+
+			if tc.inExecWindow {
+				foldBlock1()
+				execWindow.RemoveTail()
+			}
+			changes := &changeset.StateChangeSet{}
+			domains.SetChangesetAccumulator(changes)
+			require.NoError(t, ApplyWrites(NewVersionMapWriteView(writes, block2, 0), domains, tx, 2, 4, false))
+
+			diff := changes.Diffs[kv.StorageDomain].GetDiffSet()
+			require.Len(t, diff, 1)
+			require.Empty(t, diff[0].Value, "block 1 cleared the slot, so its prev value is empty")
+
+			require.NoError(t, domains.Flush(t.Context(), tx))
+			var unwindDiffs [kv.DomainLen][]kv.DomainEntryDiff
+			for idx, d := range changes.Diffs {
+				unwindDiffs[idx] = d.GetDiffSet()
+			}
+			require.NoError(t, tx.Unwind(t.Context(), 4, &unwindDiffs))
+			got, _, err := tx.GetLatest(kv.StorageDomain, composite, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Empty(t, got, "the unwind must restore the cleared slot, got %x", got)
+		})
+	}
 }

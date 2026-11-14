@@ -18,18 +18,26 @@ package peerdasutils
 
 import (
 	"fmt"
+	"slices"
 	"testing"
+
+	"github.com/erigontech/erigon/cl/cltypes"
 )
 
 func BenchmarkRecoverMatrix(b *testing.B) {
 	for _, blobCount := range []int{1, 6, 9, 16} {
-		_, half := testMatrix(b, blobCount)
-		b.Run(fmt.Sprintf("blobs=%d", blobCount), func(b *testing.B) {
-			for b.Loop() {
-				if _, err := RecoverMatrix(half, uint64(blobCount)); err != nil {
-					b.Fatal(err)
+		full, half := testMatrix(b, blobCount)
+		for _, tc := range []struct {
+			name  string
+			input []cltypes.MatrixEntry
+		}{{"half", half}, {"complete", slices.Concat(full...)}} {
+			b.Run(fmt.Sprintf("blobs=%d/%s", blobCount, tc.name), func(b *testing.B) {
+				for b.Loop() {
+					if _, err := RecoverMatrix(tc.input, uint64(blobCount)); err != nil {
+						b.Fatal(err)
+					}
 				}
-			}
-		})
+			})
+		}
 	}
 }

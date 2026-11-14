@@ -606,6 +606,25 @@ func TestLogsMarshalFastJSONTo(t *testing.T) {
 		"empty topics": {{Topics: []common.Hash{}}},
 		"full":         {full},
 		"several":      {full, {}, full},
+		"shared fields change one at a time": func() Logs {
+			out := Logs{full}
+			for _, change := range []func(*Log){
+				func(l *Log) { l.Index++ },
+				func(l *Log) { l.BlockNumber++ },
+				func(l *Log) { l.TxHash[0]++ },
+				func(l *Log) { l.TxIndex++ },
+				func(l *Log) { l.BlockHash[0]++ },
+				func(l *Log) { l.Removed = !l.Removed },
+				func(l *Log) { l.BlockTimestamp = at(uint64(*l.BlockTimestamp) + 1) },
+				func(l *Log) { l.BlockTimestamp = nil },
+				func(l *Log) { l.BlockTimestamp = at(0) },
+			} {
+				next := *out[len(out)-1]
+				change(&next)
+				out = append(out, &next)
+			}
+			return out
+		}(),
 		"large": func() Logs {
 			out := make(Logs, 2*jsonstream.FlushThreshold/128)
 			for i := range out {
@@ -654,6 +673,10 @@ func TestLogMatchesItsTags(t *testing.T) {
 			got, err := jsonstream.Marshal(l)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
+
+			got, err = jsonstream.Marshal(Logs{l})
+			require.NoError(t, err)
+			require.Equal(t, "["+string(want)+"]", string(got))
 		})
 	}
 }

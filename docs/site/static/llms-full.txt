@@ -160,10 +160,10 @@ If you must split the datadir across a fast and a slow device, see [Optimizing S
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [pruning mode](https://docs.erigon.tech/fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](https://docs.erigon.tech/fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise. Each figure is the size of the whole datadir with the node stopped, excluding the transient `temp/` directory.
+The amount of disk space recommended and RAM you need depends on the [pruning mode](https://docs.erigon.tech/fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](https://docs.erigon.tech/fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise. A figure marked † is the `erigon seg du` estimate of the snapshot files a node of that mode keeps: only `snapshots/` is counted, without Caplin snapshots. Every other figure is the size of the whole datadir with the node stopped, excluding the transient `temp/` directory.
 
 :::note
-These nodes were measured before the receipts cache was on by default. From 3.7 it is on, which adds about 441 GB on a mainnet archive node and a few GB on full and minimal nodes, whose receipts follow their history window. See [Database](https://docs.erigon.tech/fundamentals/database). The recommended disk sizes below already leave room for it.
+The receipts cache is on by default from 3.7. Figures marked † count it; other figures may have been measured without it. It adds about 441 GB on a mainnet archive node and a few GB on full and minimal nodes, whose receipts follow their history window. See [Database](https://docs.erigon.tech/fundamentals/database). The recommended disk sizes below already leave room for it.
 :::
 
 **Ethereum mainnet**
@@ -1938,7 +1938,7 @@ Erigon stores the majority of its chain data in **snapshot files** (`.seg` segme
 
 ## `seg du` — Disk Usage Report
 
-The `seg du` subcommand scans the snapshot directory for a given `--datadir` and reports a breakdown of disk usage by category, the detected (and configured) node type, and estimated sizes for each pruning mode.
+The `seg du` subcommand scans the snapshot directory for a given `--datadir` and reports a breakdown of disk usage by category, the configured node type, and estimated sizes for each pruning mode. Each estimate sums the files the downloader would select for that mode, plus any file in the state directories whose name Erigon does not recognise, which every row counts.
 
 ### Syntax
 
@@ -1978,12 +1978,12 @@ total: 1.8TB (4285 files)
 
 Sizes use Erigon's `ByteCount` format (e.g. `850.4GB`, `1.2TB` — binary scale, no space). Block/step counts and prune-window sizes use `.` as the thousands separator, matching the binary's own output.
 
-The estimator only sums files already on disk, so the **archive** row always equals the current total and no node-type estimate can exceed it. Estimates are therefore most meaningful against an archive datadir (shown above); on an already-pruned node the larger modes are capped at what is physically present. Rows are always printed in the fixed order `archive → full → blocks → minimal`.
+The estimator only sums files already on disk, so no node-type estimate can exceed what is present. Commitment history and Caplin data are left out of every row, as a default node does not download them. Estimates are therefore most meaningful against an archive datadir (shown above); on an already-pruned node the larger modes are capped at what is physically present. Rows are printed in the fixed order `archive → full → blocks → minimal`. When a headers or bodies segment cannot be read, or the indexed bodies do not cover every block in the headers and bodies segments on disk, `seg du` logs a warning and prints the report without estimates (`"estimates": null` in JSON).
 
 **Header fields explained:**
 
-- **Chain** — detected from `chaindata` (falls back to `unknown` if the database is locked or empty).
-- **Mode** — the configured pruning mode read from the database, plus the mode detected from which files are present on disk. If they disagree, both are shown (e.g., `full (files look like archive)`).
+- **Chain** — read from `chaindata` when it can be opened; `unknown` otherwise.
+- **Mode** — the configured pruning mode read from `chaindata`; `mode unknown` when it cannot be read.
 - **blocks 0–N** — the highest block number across all block segment files.
 - **steps 0–N** — the highest step number across all state files. A step is an internal Erigon unit covering a fixed number of *transactions* (`config3.DefaultStepSize` = 390,625 txNums), so the number of blocks per step varies with chain activity.
 
@@ -2033,15 +2033,15 @@ Use `--json` to get a machine-readable object suitable for scripting:
 erigon seg du --datadir /data/erigon --json | jq '.estimates'
 ```
 
-The JSON schema matches the `duResult` struct: top-level fields `chain`, `configured_mode`, `detected_mode`, `block_range`, `step_range`, `total_bytes`, `total_files`, `categories`, `subcategories`, `other_extensions`, `estimates`.
+The JSON schema matches the `duResult` struct: top-level fields `chain`, `configured_mode`, `block_range`, `step_range`, `total_bytes`, `total_files`, `categories`, `subcategories`, `other_extensions`, `estimates`, `caplin_bytes`.
 
 :::tip
-Run `seg du` while the node is **stopped**. If Erigon is running and holds the database lock, the command falls back to `unknown` for the chain name and omits the configured mode — it will still scan snapshot files and produce size figures, but mode information will be incomplete.
+`seg du` reads only snapshot files for its figures. `chaindata`, when it can be opened, supplies the chain name and the configured mode; without it both show as unknown and the figures are the same.
 :::
 
 ## Snapshot Types (Pruning Modes)
 
-The snapshot set on disk reflects the node's **pruning mode**, and `seg du` automatically detects which mode your current files correspond to. For what each mode retains and how to choose one, see [Pruning Modes](https://docs.erigon.tech/fundamentals/pruning-modes).
+The snapshot set on disk reflects the node's **pruning mode**, and `seg du` shows the mode configured in `chaindata`. For what each mode retains and how to choose one, see [Pruning Modes](https://docs.erigon.tech/fundamentals/pruning-modes).
 
 The `seg du` estimates table shows the projected disk footprint for each mode given the files currently present, so you can evaluate a mode change before committing to a resync.
 
@@ -3215,7 +3215,6 @@ Erigon's own variables — everything below except the [Docker](https://docs.eri
 
 **Execution and Processing:**
 
-- `EXEC3_PARALLEL` - Enables parallel block execution (Block-STM). **Default changed to `true` in v3.5** — parallel execution is now on by default. Set to `false` or use `--exec.serial` to revert to single-threaded execution.
 - `EXEC3_WORKERS` - Sets the number of parallel execution workers (default: number of CPU cores)
 - `STAGES_ONLY_BLOCKS` - Limits stages to blocks only
 
@@ -6708,8 +6707,8 @@ A failure inside the EVM, such as a revert or an out-of-gas halt, is reported in
 | Code | Cause |
 | --- | --- |
 | `-32602` | Invalid parameters: a malformed value, a missing required parameter or too many parameters; an unknown trace type; the `pending` block tag; `data` and `input` both set and different; a `chainId` that does not match the chain; `maxPriorityFeePerGas` above `maxFeePerGas`; an integer element in a `trace_get` path; a malformed raw transaction; the `trace_filter` errors listed under [trace_filter](https://docs.erigon.tech/interacting-with-erigon/trace#trace_filter). |
-| `-32001` | The selected block is unknown: a block number above the head, a hash the node does not know, or a `safe` or `finalized` tag that cannot be resolved. |
-| `-32603` | A block hash that is known but not canonical (`trace_call`, `trace_callMany`, `trace_replayBlockTransactions`). These methods trace canonical blocks only. |
+| `-32001` | The selected block is unknown: a block number above the head, a hash the node does not know, or a `safe` or `finalized` tag that cannot be resolved. Also a known hash that is not canonical, in `trace_replayBlockTransactions` and with `requireCanonical: true` in `trace_call` and `trace_callMany`. |
+| `4444` | `trace_call`, `trace_callMany`: a known hash that is not canonical, without `requireCanonical`. The node keeps state only for canonical blocks. |
 | `-38012` | `trace_call`, `trace_callMany`: the fee cap or gas price is below the block base fee. |
 | `-38013` | `trace_call`, `trace_callMany`: the gas limit is below the intrinsic gas. |
 | `-38014` | `trace_call`, `trace_callMany`: the sender cannot pay for the gas and the value. |
@@ -6929,7 +6928,7 @@ The call runs on the state at the end of the selected block, with the block envi
 
 1. `Object` - Call object. Supported fields: `from`, `to`, `gas`, `gasPrice`, `maxFeePerGas`, `maxPriorityFeePerGas`, `maxFeePerBlobGas`, `value`, `data` or `input`, `accessList`, `nonce`, `chainId`, `blobVersionedHashes`, `authorizationList`. All fields are optional, and `null` is the same as omitting a field. An omitted or `null` `to` creates a contract. `data` and `input` must be equal when both are set. `nonce` is accepted but neither checked nor used, so a creation derives its address from the sender's nonce in the state. `type` and unknown fields are ignored.
 2. `Array` - Trace types: zero or more of `"vmTrace"`, `"trace"`, `"stateDiff"`.
-3. `Quantity`, `Tag` or `Hash` - (optional) Block number, one of the tags `"latest"` (default), `"earliest"`, `"safe"`, `"finalized"`, or a block hash, as a string or as an EIP-1898 object (`{"blockHash": …}` or `{"blockNumber": …}`). `null` is the same as `"latest"`. The block must be canonical. `"pending"` is not supported and returns `-32602`: the call is executed against committed state, so there is no pending block to execute on top of.
+3. `Quantity`, `Tag` or `Hash` - (optional) Block number, one of the tags `"latest"` (default), `"earliest"`, `"safe"`, `"finalized"`, or a block hash, as a string or as an EIP-1898 object (`{"blockHash": …}` or `{"blockNumber": …}`). `null` is the same as `"latest"`. A hash selects its block even if it is not canonical, but the node keeps no state for such a block, so the call returns `4444`; with `requireCanonical: true` it returns `-32001`. `"pending"` is not supported and returns `-32602`: the call is executed against committed state, so there is no pending block to execute on top of.
 4. `Object` - (optional) Trace settings; see [Optional parameters and trace settings](https://docs.erigon.tech/interacting-with-erigon/trace#optional-parameters-and-trace-settings).
 
 Fees and gas follow `eth_call`:
@@ -7338,7 +7337,7 @@ Returns traces matching the given filter.
 
    A bound past the latest executed block returns `-32602`, as in `eth_getLogs`, rather than an empty or truncated result. As in `eth_getLogs`, a bound is a block number or tag: a block hash or an EIP-1898 object returns `-32602`; use `blockHash` to select a block by hash. An explicit `null` for `blockHash`, `fromBlock` or `toBlock` is the same as omitting it.
 
-   A range wider than `--rpc.blockrange.limit` (1,000 blocks by default) returns `-32000`. An unknown member, for example a misspelled one, returns `-32602`; member names are matched case-insensitively.
+   A range wider than `--rpc.blockrange.limit` (1,000 blocks by default) returns `-32602`, as in `eth_getLogs`. An unknown member, for example a misspelled one, returns `-32602`; member names are matched case-insensitively.
 
 2. `Boolean` - (optional) `gasBailOut`, default `false`.
 

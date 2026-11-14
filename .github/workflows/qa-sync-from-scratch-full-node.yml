@@ -147,21 +147,20 @@ jobs:
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
         run: |
           set -euo pipefail
-          # Erigon has stopped by now. Drop the external-sort scratch dir (peaks
-          # ~100 GB during sync, cleaned on the next startup) so we report the
-          # durable on-disk footprint, not the transient sync peak.
-          rm -rf "$ERIGON_DATA_DIR/temp"
-          # du -sB1 = actual disk blocks used, in bytes (NOT --apparent-size).
-          BYTES=$(du -sB1 "$ERIGON_DATA_DIR" | awk '{print $1}')
+          BYTES=$("$GITHUB_WORKSPACE/build/bin/erigon" seg du --datadir "$ERIGON_DATA_DIR" --json \
+            | python3 -c 'import json, sys; print(next(e["total_bytes"] for e in json.load(sys.stdin)["estimates"] if e["mode"] == sys.argv[1]))' "$MODE")
           echo "Disk usage for $CHAIN $MODE: ${BYTES} bytes"
           echo "$BYTES" > "$GITHUB_WORKSPACE/disk-usage-$CHAIN-$MODE.txt"
+          echo "seg-du" > "$GITHUB_WORKSPACE/disk-usage-$CHAIN-$MODE.method"
 
       - name: Upload disk usage
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: disk-usage-${{ env.CHAIN }}-${{ env.MODE }}
-          path: ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-${{ env.MODE }}.txt
+          path: |
+            ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-${{ env.MODE }}.txt
+            ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-${{ env.MODE }}.method
 
       # Restart the datadir just synced as a *minimal* node. EnsureNotChanged accepts
       # the switch because full and minimal differ only in the size of finite
@@ -182,6 +181,7 @@ jobs:
       #           since the gap is 1, 2, 4 ... steps depending on the merge ladder.
       - name: Test old file retirement after switching to minimal node
         id: retirement_step
+        if: ${{ !cancelled() && steps.test_step.outcome == 'success' }}
         run: |
           set +e # Disable exit on error
 

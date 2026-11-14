@@ -332,6 +332,8 @@ func (t *StateTest) RunNoVerify(sd *execctx.SharedDomains, tx kv.TemporalRwTx, s
 	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	w := rpchelper.NewLatestStateWriter(tx, sd, (*freezeblocks.BlockReader)(nil), writeBlockNr)
 	statedb = state.New(r)
+	statedb.SetVersionMap(state.NewVersionMap(nil))
+	statedb.SetTxContext(0, 0)
 
 	var baseFee *uint256.Int
 	if config.IsLondon(0) {
@@ -431,10 +433,12 @@ func (t *StateTest) RunNoVerify(sd *execctx.SharedDomains, tx kv.TemporalRwTx, s
 		return statedb, root, gasUsed, err
 	}
 
-	if err := statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
+	writes, err := statedb.FinalizedWrites(evm.ChainRules())
+	if err != nil {
 		return nil, root, gasUsed, err
 	}
-	if err := statedb.CommitBlock(evm.ChainRules(), w); err != nil {
+	statedb.FlushWritesToVersionMap(writes)
+	if err := statedb.WriteFlushedTo(writes, w); err != nil {
 		return nil, root, gasUsed, err
 	}
 

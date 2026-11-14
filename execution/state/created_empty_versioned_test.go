@@ -86,7 +86,7 @@ func TestEncodeExistingEmptyRemovals_CreatedSelfDestructSkipsBaseRead(t *testing
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}},
 	)
 
-	ibs.encodeExistingEmptyRemovals(&chain.Rules{IsSpuriousDragon: true}, writes, map[accounts.Address]struct{}{addr: {}})
+	ibs.encodeExistingEmptyRemovals(&chain.Rules{IsSpuriousDragon: true}, writes, map[accounts.Address]struct{}{addr: {}}, nil)
 
 	require.NoError(t, ibs.StateReadError())
 	ch, ok := writes.GetCodeHash(addr)

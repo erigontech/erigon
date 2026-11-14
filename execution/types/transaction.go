@@ -238,6 +238,9 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 	if len(data) <= 1 {
 		return nil, fmt.Errorf("short input: %v", len(data))
 	}
+	if data[0] >= 0x80 {
+		return DecodeTransaction(data)
+	}
 	s := rlp.NewBytesStream(data[1:])
 	defer rlp.PutStream(s)
 	var t Transaction
@@ -269,10 +272,6 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		if spec, ok := registeredTxType(data[0]); ok {
 			t = spec.New()
 			break
-		}
-		if data[0] >= 0x80 {
-			// txn is type legacy which is RLP encoded
-			return DecodeTransaction(data)
 		}
 		return nil, ErrTxTypeNotSupported
 	}

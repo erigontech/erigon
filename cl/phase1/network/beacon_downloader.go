@@ -607,6 +607,9 @@ Process:
 
 	previousHighestSlotProcessed := f.highestSlotProcessed
 	highestSlotProcessed, err := f.process(previousHighestSlotProcessed, processBlocks, envelopes)
+	if err != nil && ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		if resp.fromHTTP {
 			f.httpPreferred.Store(false)
@@ -748,6 +751,7 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 	fullRoots [][32]byte,
 ) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	validate := NewEnvelopeBlockValidator(f.beaconCfg, blockLookup(blocks))
 	// P2P failed for blocks that came from the beacon API, so skip its long envelope timeout.
 	if pid != "http-fallback" || f.httpFallbackURL == "" {
 		var envErr error
@@ -755,7 +759,7 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 			p2pCtx,
 			f.rpc,
 			fullRoots,
-			NewEnvelopeBlockValidator(f.beaconCfg, blockLookup(blocks)),
+			validate,
 			nil,
 			blocks...,
 		)
@@ -767,7 +771,17 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 		if envelopes == nil {
 			envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
 		}
-		httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, blocks, fullRoots, envelopes, f.beaconCfg)
+		// Keep HTTP results separate so P2P envelopes are not checked again here.
+		missingRoots := filterReceived(fullRoots, envelopes)
+		httpEnvelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+		httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, blocks, missingRoots, httpEnvelopes, f.beaconCfg)
+		for root, envelope := range httpEnvelopes {
+			if err := validate(envelope); err != nil {
+				log.Debug("[ForwardBeaconDownloader] discarded invalid HTTP envelope", "root", root, "err", err)
+				continue
+			}
+			envelopes[root] = envelope
+		}
 		if httpResult.fetched > 0 {
 			log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpResult.fetched)
 		}
@@ -781,9 +795,10 @@ func (f *ForwardBeaconDownloader) fetchGloasEnvelopes(
 }
 
 // ImportHeldGloasTip processes the held Gloas block, then passes it to importTip with the envelope that arrives within
-// envelopeTimeout (nil if none) and the time the fetch ended, and reports whether both succeeded. A tip that processing
-// rejects is dropped; any other tip that is not imported is tried again in the next slot. A held block that is the
-// parent of a downloaded block has a successor and is left to the batch path.
+// envelopeTimeout (nil if none) and the time the fetch ended, and reports whether both succeeded. A tip whose fetch
+// or processing is cut short by ctx cancellation is kept with its retry slot. Otherwise a tip that processing rejects is
+// dropped, and any other tip that is not imported is tried again in the next slot. A held block that is the parent of
+// a downloaded block has a successor and is left to the batch path.
 func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelopeTimeout time.Duration, importTip func(tip *cltypes.SignedBeaconBlock, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, receivedAt time.Time) bool) bool {
 	f.mu.Lock()
 	tip, tipPeer, retrySlot := f.gloasLookahead, f.gloasLookaheadPeer, f.gloasTipRetrySlot
@@ -820,6 +835,9 @@ func (f *ForwardBeaconDownloader) ImportHeldGloasTip(ctx context.Context, envelo
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	highestSlotProcessed, err := f.process(f.highestSlotProcessed, blocks, nil)
+	if err != nil && ctx.Err() != nil {
+		return false
+	}
 	if err != nil || highestSlotProcessed < tip.Block.Slot || !importTip(tip, root, envelopes[root], receivedAt) {
 		if f.currentSlot != nil {
 			f.gloasTipRetrySlot = saturatingIncrement(f.currentSlot())
@@ -1138,7 +1156,8 @@ type fetchEnvelopeHTTPResult struct {
 	fetched int
 }
 
-// fetchEnvelopesFromBeaconAPI fetches execution payload envelopes from the beacon API for FULL blocks missing from P2P.
+// fetchEnvelopesFromBeaconAPI fetches envelopes for the requested block roots.
+// Callers must check bid commitments and the payload hash before treating an envelope as available.
 func fetchEnvelopesFromBeaconAPI(
 	ctx context.Context,
 	baseURL string,
@@ -1168,9 +1187,6 @@ func fetchEnvelopesFromBeaconAPI(
 	}
 	for _, root := range fullRoots {
 		h := common.Hash(root)
-		if _, ok := received[h]; ok {
-			continue
-		}
 		slot, ok := rootToSlot[h]
 		if !ok {
 			continue
