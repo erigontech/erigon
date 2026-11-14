@@ -216,6 +216,7 @@ func BenchmarkEphemeralParallelReplay(b *testing.B) {
 // a BAL derived from a block's execution must be reproduced when the versionMap
 // is pre-seeded from it and the block re-executed. The reference BAL is derived
 // here rather than read from the header, since the header may carry no BAL hash.
+// Only the seeded executions are timed.
 func BenchmarkEphemeralBALRoundTrip(b *testing.B) {
 	fx, err := blockreplay.Load(fixturePath(b))
 	require.NoError(b, err)
@@ -234,18 +235,27 @@ func BenchmarkEphemeralBALRoundTrip(b *testing.B) {
 	derive := func(seed types.BlockAccessList) types.BlockAccessList {
 		captured = nil
 		tx, doms := r.newDomains(b, fx)
-		require.NoError(b, r.execSeeded(tx, doms, seed))
-		require.NoError(b, r.verify(tx, doms, expected))
+		b.StartTimer()
+		err := r.execSeeded(tx, doms, seed)
+		b.StopTimer()
+		if err == nil {
+			err = r.verify(tx, doms, expected)
+		}
 		doms.Close()
 		tx.Rollback()
+		require.NoError(b, err)
 		require.NotNil(b, captured, "no BAL derived (experimentalBAL not honored?)")
 		return captured
 	}
 
-	balOut := derive(nil)     // run 1: reference, no seed
-	balOut2 := derive(balOut) // run 2: pre-seed from run 1's BAL
-	require.Equal(b, balOut.Hash(), balOut2.Hash(),
-		"pre-seed != post-output: derived BAL changed when the versionMap was seeded from it")
+	b.StopTimer()
+	balOut := derive(nil) // reference, no seed
+	b.ResetTimer()
+	for range b.N {
+		balOut2 := derive(balOut) // pre-seeded from the reference BAL
+		require.Equal(b, balOut.Hash(), balOut2.Hash(),
+			"pre-seed != post-output: derived BAL changed when the versionMap was seeded from it")
+	}
 }
 
 // TestSelfLoopEvaluateBlockerTaskSpaceOnPartialBlock pins that selfLoopEvaluate

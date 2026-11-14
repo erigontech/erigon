@@ -2732,7 +2732,9 @@ func pathBit(p state.AccountPath) uint16 { return 1 << p }
 func cmpReaderTx(r addrReader, tx int) int { return cmp.Compare(r.tx, tx) }
 
 // dispatchWindow bounds how far past the commit frontier a block dispatches tasks.
-const dispatchWindow = 32
+func dispatchWindow(workers int) int {
+	return min(128, max(32, 8*workers))
+}
 
 // readersAbove returns the readers in the ascending list l that are > tx.
 func readersAbove(l []addrReader, tx int) []addrReader {
@@ -3081,8 +3083,8 @@ func (be *blockExecutor) frontier() int {
 // dispatchLimit is the last task that dispatch may enqueue now. It is at most window tasks past
 // the commit frontier, so results arrive close to block order and the per-result reader scans
 // stay short.
-func (be *blockExecutor) dispatchLimit() int {
-	return min(len(be.tasks)-1, be.frontier()+dispatchWindow)
+func (be *blockExecutor) dispatchLimit(workers int) int {
+	return min(len(be.tasks)-1, be.frontier()+dispatchWindow(workers))
 }
 
 // requeueAt registers pt to be re-queued when the frontier reaches target. Returns
@@ -3670,7 +3672,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			return 0
 		}
 		budget := len(be.tasks)
-		lastTx := be.dispatchLimit()
+		lastTx := be.dispatchLimit(pe.workerCount)
 		for {
 			nextTx := be.execTasks.minPending()
 			if nextTx < 0 || nextTx > lastTx {

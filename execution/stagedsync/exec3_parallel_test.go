@@ -657,6 +657,26 @@ func TestParallelExecutorWorkerPoolSize(t *testing.T) {
 	}
 }
 
+func TestDispatchWindow(t *testing.T) {
+	for _, tc := range []struct {
+		workers int
+		want    int
+	}{
+		{workers: 0, want: 32},
+		{workers: 1, want: 32},
+		{workers: 4, want: 32},
+		{workers: 6, want: 48},
+		{workers: 8, want: 64},
+		{workers: 16, want: 128},
+		{workers: 48, want: 128},
+		{workers: 128, want: 128},
+	} {
+		t.Run(fmt.Sprintf("workers=%d", tc.workers), func(t *testing.T) {
+			require.Equal(t, tc.want, dispatchWindow(tc.workers))
+		})
+	}
+}
+
 func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
 	tb.Helper()
 	ctx := tb.Context()
@@ -2044,9 +2064,9 @@ func TestDispatchLimitBoundsEveryBlock(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			be := &blockExecutor{versionMap: state.NewVersionMap(tc.bal), tasks: make([]*execTask, 100)}
 			be.committedFrontier.Store(-1)
-			require.Equal(t, dispatchWindow-1, be.dispatchLimit())
+			require.Equal(t, dispatchWindow(4)-1, be.dispatchLimit(4))
 			be.committedFrontier.Store(90)
-			require.Equal(t, 99, be.dispatchLimit())
+			require.Equal(t, 99, be.dispatchLimit(4))
 		})
 	}
 }
