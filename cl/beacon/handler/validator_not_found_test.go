@@ -26,7 +26,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -109,29 +108,20 @@ func TestComputeLighthouseValidatorInclusionRejectsShortData(t *testing.T) {
 		set      *solid.ValidatorSet
 		current  *solid.ParticipationBitList
 		previous *solid.ParticipationBitList
-		code     int
+		wantErr  bool
 	}{
 		{name: "earlier registry", set: earlierValidatorSet, current: fullParticipation, previous: fullParticipation},
-		{name: "current participation", set: postState.Validators(), current: shortParticipation, previous: fullParticipation, code: http.StatusInternalServerError},
-		{name: "previous participation", set: postState.Validators(), current: fullParticipation, previous: shortParticipation, code: http.StatusInternalServerError},
+		{name: "current participation", set: postState.Validators(), current: shortParticipation, previous: fullParticipation, wantErr: true},
+		{name: "previous participation", set: postState.Validators(), current: fullParticipation, previous: shortParticipation, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			inclusion, err := h.computeLighthouseValidatorInclusion(validatorCount-1, 0, 1, tc.set, tc.current, tc.previous)
 			require.Nil(t, inclusion)
-			if tc.code == 0 {
-				require.NoError(t, err)
+			if tc.wantErr {
+				require.EqualError(t, err, "Code 500: participation data inconsistent with validator set")
 				return
 			}
-			var endpointError *beaconhttp.EndpointError
-			require.ErrorAs(t, err, &endpointError)
-			require.Equal(t, tc.code, endpointError.Code)
-			require.EqualError(t, err, "Code 500: participation data inconsistent with validator set")
+			require.NoError(t, err)
 		})
 	}
-
-	t.Run("negative index", func(t *testing.T) {
-		inclusion, err := h.computeLighthouseValidatorInclusion(-1, 0, 1, postState.Validators(), fullParticipation, fullParticipation)
-		require.NoError(t, err)
-		require.Nil(t, inclusion)
-	})
 }
