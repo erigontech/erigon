@@ -497,18 +497,21 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	var group errgroup.Group
 	if dbg.TrieBALWarmupers > 0 {
 		group.Go(func() error {
+			defer dbg.NpSpan("trieWarm", time.Now())
 			return warmBALCommitment(ctx, db, trieKeys(), dbg.TrieBALWarmupers)
 		})
 	}
 	var cold coldState
 	if mmap.NewProbe() != nil {
 		group.Go(func() error {
+			defer dbg.NpSpan("triePrefetch", time.Now())
 			prefetchBALCommitment(ctx, db, trieKeys())
 			return nil
 		})
 		cold = stateKeysCold(ctx, db, bal)
 	}
 	group.Go(func() error {
+		defer dbg.NpSpan("stateWarm", time.Now())
 		warm, warmTasks, warmWorkers := bal, tasks, balWorkers
 		if cold.any() {
 			var stripped bool

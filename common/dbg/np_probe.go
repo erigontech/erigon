@@ -1,6 +1,7 @@
 package dbg
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,24 @@ var (
 	npBatchAt  atomic.Int64
 	npParsedAt atomic.Int64
 )
+
+type npSpan struct {
+	name       string
+	start, end time.Time
+}
+
+var npSpans []npSpan
+
+// NpSpan records a concurrent span (warmup, prefetch); NpFlush logs it relative to the handler start.
+func NpSpan(name string, start time.Time) {
+	if !npOn {
+		return
+	}
+	end := time.Now()
+	npMu.Lock()
+	defer npMu.Unlock()
+	npSpans = append(npSpans, npSpan{name, start, end})
+}
 
 type npMark struct {
 	name string
@@ -100,6 +119,21 @@ func NpFlush(logger log.Logger, blk uint64) {
 			postTotal += d
 		}
 	}
+	var h time.Time
+	for _, m := range marks {
+		if m.name == "handlerIn" {
+			h = m.at
+		}
+	}
+	spans := []any{"blk", blk, "np", marks[len(marks)-1].at.Sub(h)}
+	for _, sp := range npSpans {
+		if sp.end.Before(h) {
+			continue
+		}
+		spans = append(spans, sp.name, fmt.Sprintf("%.1f..%.1f", float64(sp.start.Sub(h).Microseconds())/1000, float64(sp.end.Sub(h).Microseconds())/1000))
+	}
+	npSpans = npSpans[:0]
+	logger.Info("[np-phase] spans", spans...)
 	logger.Info("[np-phase] pre-stage", append(pre, "total", preTotal)...)
 	logger.Info("[np-phase] post-exec", append(post, "total", postTotal)...)
 }

@@ -56,6 +56,8 @@ var computedAheadCount atomic.Int64
 // (stage/exec/commit/overlap/gap/residual) for perf attribution.
 var logNpPhases = dbg.EnvBool("NEWPAYLOAD_PHASES", false)
 
+var npFlushPrev time.Duration // probe only: set by the calculator goroutine
+
 // ComputedAheadCountForTest reports the number of BAL compute-ahead computations
 // performed so far; ResetComputedAheadForTest zeroes it. Test-only observability.
 func ComputedAheadCountForTest() int64 { return computedAheadCount.Load() }
@@ -813,7 +815,9 @@ func (cc *commitmentCalculator) finishPrefetch() {
 // path; the per-call differences live in m.
 
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
+	tc0 := time.Now()
 	cc.finishPrefetch()
+	tcPrefetch := time.Now()
 	// The version map is the ledger: exec's writes already encode every EIP-161 /
 	// self-destruct removal, so emitTouched folds the block's touched keys straight
 	// from the view with no EIP knowledge. In a cross-block batch the touched union
@@ -836,6 +840,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		return
 	}
 
+	tcEmit := time.Now()
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(cc.handOffUpdates())
 
@@ -857,6 +862,13 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		return
 	}
 
+	tcFold := time.Now()
+	defer func() {
+		if logNpPhases {
+			cc.logger.Info("[np-phase] commit", "blk", t.blockNum, "prefetchWait", tcPrefetch.Sub(tc0), "emit", tcEmit.Sub(tcPrefetch),
+				"flushPrev", npFlushPrev, "fold", tcFold.Sub(tcEmit)-npFlushPrev, "flushOwn", time.Since(tcFold), "isolated", flushOwn != nil)
+		}
+	}()
 	mismatch := m.checkRoot && !bytes.Equal(rh, t.stateRoot[:])
 	if flushOwn != nil {
 		if mismatch {
@@ -905,6 +917,7 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 	// diff is swapped to nil for the flush so that when that block owns no saved
 	// changeset the flush does not leak its branch deltas into the live
 	// accumulator (a later window block's changeset).
+	tf := time.Now()
 	if err := func() error {
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
@@ -913,6 +926,7 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 	}(); err != nil {
 		return nil, nil, err
 	}
+	npFlushPrev = time.Since(tf)
 
 	rh, err := cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.recordProgress, nil)
 	if err != nil {
@@ -981,6 +995,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	// Flush block N-1's own pending update (hash-routed to N-1's saved changeset,
 	// independent of N's diff below) — the one remaining changesetMu window, brief
 	// rather than spanning the fold that follows.
+	tf := time.Now()
 	if err := func() error {
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
@@ -988,6 +1003,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	}(); err != nil {
 		return nil, err
 	}
+	npFlushPrev = time.Since(tf)
 
 	// The exec loop saves the accumulator by hash before dispatching the block, so
 	// this identifies the block's changeset whatever the loop rotated to since. A
