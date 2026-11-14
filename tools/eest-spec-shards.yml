@@ -21,6 +21,7 @@
 #   commitment-parallel   (required) — pins ERIGON_COMMITMENT_PARALLEL.
 #                                      The -sequential/-parallel suffix selects
 #                                      serial vs parallel commitment.
+#   commitment-v3         (optional, default false) — pins ERIGON_COMMITMENT_V3.
 #   no-ramdisk            (optional, default false) — true keeps the shard's
 #                                      datadirs on disk instead of a RAM-backed
 #                                      tmpfs. The benchmark shards use a few
@@ -449,6 +450,12 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: false
+  expected-tests: 26687
+- shard: zkevm-witness-v3
+  workers: 8
+  max-allowed-failures: 0
+  commitment-parallel: false
+  commitment-v3: true
   expected-tests: 26687
 - shard: blocktests-stable-race-pre-cancun-sequential
   workers: 12

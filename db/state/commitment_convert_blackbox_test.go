@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -129,6 +130,7 @@ func TestConvertCommitmentFile_AlreadyTarget(t *testing.T) {
 //   - every non-state key in the output decodes canonically via DecodeKeyV2
 //   - the key count is preserved
 func TestConvertCommitmentFile_V1ToV2_KeysOnly(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -202,6 +204,7 @@ func TestConvertCommitmentFile_V1ToV2_KeysOnly(t *testing.T) {
 // short (sub-10-byte) plain-key references — the squeeze marker the read-side
 // detector keys off of.
 func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -262,6 +265,7 @@ func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
 // in tmpDir2, and compare tmpDir2/<file>.kv bytes against a snapshot taken
 // before the first conversion.
 func TestConvertCommitmentFile_RoundTrip_V1V2(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -353,6 +357,7 @@ func snapshotCommitmentFiles(t *testing.T, snapDir string) map[string][]byte {
 //     the commitment root computed against the reloaded files matches the
 //     root the original files produced.
 func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -439,6 +444,56 @@ func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
 		"commitment root must be unchanged across squeeze conversion")
 }
 
+func TestConvertCommitmentFiles_RejectsUnindexedLegacyFileBeforeBackup(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
+	rogue := filepath.Join(agg.Dirs().SnapDomain, "v2.0-commitment.999-1000.kv")
+	require.NoError(t, os.WriteFile(rogue, nil, 0o644))
+
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(rwTx.Rollback)
+	at := state.AggTx(rwTx)
+	err = state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{TargetV3: true}, log.New())
+	rwTx.Rollback()
+	require.ErrorContains(t, err, "v2.0-commitment.999-1000.kv")
+	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "backup"))
+}
+
+func TestConvertCommitmentFiles_BeforeSwapRunsBeforePhase5Failure(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, _ := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(rwTx.Rollback)
+	at := state.AggTx(rwTx)
+	original := pickLargestCommitmentFile(t, at).Fullpath()
+	var events []string
+	opts := state.ConvertOpts{
+		TargetV3: true,
+		BeforeSwap: func() error {
+			events = append(events, "before-swap")
+			_, statErr := os.Stat(original)
+			require.NoError(t, statErr)
+			return nil
+		},
+	}
+	state.SetConvertPhase5HookForTest(func() error {
+		events = append(events, "phase5")
+		return errors.New("injected phase5 failure")
+	})
+	t.Cleanup(func() { state.SetConvertPhase5HookForTest(nil) })
+	err = state.ConvertCommitmentFiles(t.Context(), at, opts, log.New())
+	rwTx.Rollback()
+	require.ErrorContains(t, err, "injected phase5 failure")
+	require.Equal(t, []string{"before-swap", "phase5"}, events)
+}
+
 // anyFileHasSqueezedField returns true if any non-state branch value in any of
 // the supplied .kv files contains an embedded plain-key reference shorter than
 // binary.MaxVarintLen64 (10 bytes) — the on-disk marker the read side keys off
@@ -510,6 +565,7 @@ func swapVersionExt(kviPath string) string {
 // pre-conversion snapshot. The composed round-trip also implicitly exercises
 // both axes in both directions.
 func TestConvertCommitmentFiles_RoundTripComposed(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -663,6 +719,7 @@ func TestConvertCommitmentFiles_BackupExists(t *testing.T) {
 // if a prior crashed run left junk under snapshots/rebuild/domain/, the
 // orchestrator wipes it on pre-flight and proceeds normally.
 func TestConvertCommitmentFiles_LeftoverRebuild(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -717,6 +774,7 @@ func listVisibleCommitmentKVs(t *testing.T, db kv.TemporalRwDB) []kv.VisibleFile
 // than by counting log lines (which is fragile across line-number /
 // timestamp changes — see the plan's "Decision now" note in Task 5).
 func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -905,7 +963,8 @@ func TestRestoreCommitmentFiles_HappyPath(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"), []byte("CONV_KV"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"), []byte("CONV_BT"), 0o644))
 
-	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New()))
+	_, restoreErr := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	require.NoError(t, restoreErr)
 
 	restoredKV := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"))
 	restoredBT := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"))
@@ -929,7 +988,7 @@ func TestRestoreCommitmentFiles_NoBackup(t *testing.T) {
 	}
 	_, agg := testDbAndAggregatorv3(t, 10)
 
-	err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	_, err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
 	require.Error(t, err, "must refuse to run without a backup directory")
 	require.Contains(t, err.Error(), "no backup",
 		"error must mention 'no backup' so the operator understands the cause")
@@ -964,7 +1023,8 @@ func TestRestoreCommitmentFiles_OrphanSweep(t *testing.T) {
 	require.NoError(t, os.WriteFile(convKVPath, []byte("CONV_KV"), 0o644))
 	require.NoError(t, os.WriteFile(convKVEIPath, []byte("CONV_KVEI"), 0o644))
 
-	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New()))
+	_, restoreErr := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	require.NoError(t, restoreErr)
 
 	// Sweep removed both cross-version artifacts.
 	_, statErr := os.Stat(convKVPath)
@@ -979,6 +1039,25 @@ func TestRestoreCommitmentFiles_OrphanSweep(t *testing.T) {
 	restoredBT := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"))
 	require.Equal(t, origKV, restoredKV)
 	require.Equal(t, origBT, restoredBT)
+}
+
+func TestRestoreCommitmentFiles_RejectsV3FileOutsideManifest(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	_, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backupDir, 0o755))
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.kv"), []byte("ORIG"), 0o644))
+	orphan := filepath.Join(dirs.SnapDomain, "v3.0-commitment.16-32.kv")
+	require.NoError(t, os.WriteFile(orphan, []byte("ORPHAN"), 0o644))
+
+	_, err := state.RestoreCommitmentFiles(t.Context(), dirs, log.New())
+	require.ErrorContains(t, err, "v3.0-commitment.16-32.kv")
+	require.FileExists(t, orphan)
+	require.FileExists(t, filepath.Join(backupDir, "v2.0-commitment.0-32.kv"))
 }
 
 // TestRestoreCommitmentFiles_RerunnableAfterPartialFailure simulates a restore
@@ -1009,7 +1088,11 @@ func TestRestoreCommitmentFiles_RerunnableAfterPartialFailure(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"), origKV, 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"), origBT, 0o644))
 
-	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New()))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "backup", ".restore_v3_reset_pending"), nil, 0o644))
+
+	restoredV3, restoreErr := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	require.NoError(t, restoreErr)
+	require.True(t, restoredV3)
 
 	// All three originals present with the expected content — the manifest-aware
 	// sweep must not have deleted the .kv/.bt files already in place.
@@ -1047,7 +1130,7 @@ func TestRestoreCommitmentFiles_RejectsForeignFile(t *testing.T) {
 	sentinel := filepath.Join(dirs.SnapDomain, "v2.1-commitment.0-32.kv")
 	require.NoError(t, os.WriteFile(sentinel, []byte("SENTINEL"), 0o644))
 
-	err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	_, err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
 	require.Error(t, err, "must refuse to run when backup contains a non-matching entry")
 	require.Contains(t, err.Error(), "random.bak",
 		"error must name the offending entry")
@@ -1084,7 +1167,7 @@ func TestRestoreCommitmentFiles_FailsWhenManifestEntryMissingFromBothSides(t *te
 	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.kv"), []byte("ORIG_KV"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"), []byte("ORIG_BT"), 0o644))
 
-	err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	_, err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
 	require.Error(t, err, "must fail when a manifest entry is in neither backup nor destination")
 	require.Contains(t, err.Error(), "v2.0-commitment.0-32.kvi",
 		"error must name the missing file")
@@ -1111,7 +1194,8 @@ func TestRestoreCommitmentFiles_AtomicManifestIgnoresStaleTmp(t *testing.T) {
 	// Stale tmp from a crashed manifest write — must be ignored, not parsed.
 	require.NoError(t, os.WriteFile(filepath.Join(backupDir, ".restore_manifest.tmp"), []byte("garbage"), 0o644))
 
-	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New()))
+	_, restoreErr := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	require.NoError(t, restoreErr)
 
 	restoredKV := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"))
 	require.Equal(t, origKV, restoredKV)
@@ -1136,7 +1220,7 @@ func TestRestoreCommitmentFiles_RejectsPathTraversalInManifest(t *testing.T) {
 	manifest := "../../etc/passwd-commitment.0-32.kv"
 	require.NoError(t, os.WriteFile(filepath.Join(backupDir, ".restore_manifest"), []byte(manifest), 0o644))
 
-	err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	_, err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
 	require.Error(t, err, "must reject manifest entries with path components")
 	require.Contains(t, err.Error(), "plain filename",
 		"error must call out the basename requirement")
@@ -1163,7 +1247,7 @@ func TestRestoreCommitmentFiles_RejectsEmptyManifest(t *testing.T) {
 	// Zero-byte manifest — simulates hand-truncation or a partial editor write.
 	require.NoError(t, os.WriteFile(filepath.Join(backupDir, ".restore_manifest"), nil, 0o644))
 
-	err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	_, err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
 	require.Error(t, err, "must refuse to proceed on an empty manifest")
 	require.Contains(t, err.Error(), "manifest")
 	require.Contains(t, err.Error(), "empty")

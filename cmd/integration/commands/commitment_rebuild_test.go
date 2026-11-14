@@ -18,6 +18,8 @@ package commands
 
 import (
 	"encoding/binary"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -32,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -39,32 +42,16 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-func dbWithStateTail(t *testing.T) (kv.TemporalRwDB, datadir.Dirs, func() uint64) {
+func dbWithState(t *testing.T, buildFiles bool) (kv.TemporalRwDB, datadir.Dirs, func() uint64) {
 	t.Helper()
 	const stepSize, txs, filed = 16, 64, 48
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
-	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
-	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	agg := fillAccountState(t, db, txs)
 	ctx := t.Context()
-
-	tx, domains := temporaltest.NewTestTxSD(t, db)
-	for txNum := range uint64(txs) {
-		addr := make([]byte, 20)
-		binary.BigEndian.PutUint64(addr[12:], txNum%5+1)
-		acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
-		prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, addr)
-		require.NoError(t, err)
-		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, prev))
-		_, err = domains.ComputeCommitment(ctx, tx, true, txNum, txNum, "", nil)
-		require.NoError(t, err)
-		require.NoError(t, rawdbv3.TxNums.Append(tx, txNum, txNum))
+	if buildFiles {
+		require.NoError(t, agg.BuildFiles(db, filed, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
 	}
-	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, txs-1))
-	require.NoError(t, domains.Flush(ctx, tx))
-	domains.Close()
-	require.NoError(t, tx.Commit())
-	require.NoError(t, agg.BuildFiles(db, filed, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
 
 	accountTables := db.Debug().DomainTables(kv.AccountsDomain)
 	countTail := func() (n uint64) {
@@ -82,6 +69,29 @@ func dbWithStateTail(t *testing.T) (kv.TemporalRwDB, datadir.Dirs, func() uint64
 	return db, dirs, countTail
 }
 
+func fillAccountState(t *testing.T, db kv.TemporalRwDB, txs uint64) *state.Aggregator {
+	t.Helper()
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	for txNum := range txs {
+		addr := make([]byte, 20)
+		binary.BigEndian.PutUint64(addr[12:], txNum%5+1)
+		acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
+		prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, addr)
+		require.NoError(t, err)
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, prev))
+		_, err = domains.ComputeCommitment(t.Context(), tx, true, txNum, txNum, "", nil)
+		require.NoError(t, err)
+		require.NoError(t, rawdbv3.TxNums.Append(tx, txNum, txNum))
+	}
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, txs-1))
+	require.NoError(t, domains.Flush(t.Context(), tx))
+	domains.Close()
+	require.NoError(t, tx.Commit())
+	return agg
+}
+
 func requireExecutionReset(t *testing.T, db kv.TemporalRwDB, countTail func() uint64) {
 	t.Helper()
 	require.Zero(t, countTail(), "the files-only rewrite covers only the files, so the DB tail past them must be gone")
@@ -94,7 +104,7 @@ func requireExecutionReset(t *testing.T, db kv.TemporalRwDB, countTail func() ui
 }
 
 func TestCommitmentRebuildWithoutHistoryDropsTheDBTail(t *testing.T) {
-	db, dirs, countTail := dbWithStateTail(t)
+	db, dirs, countTail := dbWithState(t, true)
 	snapCfg := ethconfig.Defaults.Snapshot
 	snapCfg.ChainName = networkname.Test
 	blockSnaps := blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, log.Root())
@@ -110,8 +120,32 @@ func TestCommitmentRebuildWithoutHistoryDropsTheDBTail(t *testing.T) {
 	requireExecutionReset(t, db, countTail)
 }
 
+func TestCommitmentConvertV3DropsTheDBTail(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, _, countTail := dbWithState(t, true)
+	require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
+	requireExecutionReset(t, db, countTail)
+}
+
+func TestCommitmentConvertV3RefusedKeepsTheDBTail(t *testing.T) {
+	db, dirs, countTail := dbWithState(t, true)
+	before := countTail()
+	backup := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backup, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(backup, "stale"), []byte{1}, 0o644))
+	require.Error(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
+	require.Equal(t, before, countTail())
+}
+
+func TestCommitmentConvertV3WithoutFilesKeepsTheDBTail(t *testing.T) {
+	db, _, countTail := dbWithState(t, false)
+	before := countTail()
+	require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
+	require.Equal(t, before, countTail())
+}
+
 func TestCommitmentClearKeepsTheDBTail(t *testing.T) {
-	db, dirs, countTail := dbWithStateTail(t)
+	db, dirs, countTail := dbWithState(t, true)
 	snapCfg := ethconfig.Defaults.Snapshot
 	snapCfg.ChainName = networkname.Test
 	blockSnaps := blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, log.Root())

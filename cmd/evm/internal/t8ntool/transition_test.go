@@ -65,6 +65,7 @@ func TestGetTransactionRejectsUnsupportedType(t *testing.T) {
 // so a construction that skips that step computes the state root sequentially no
 // matter what the flag says.
 func TestT8nSharedDomainsUsesParallelTrie(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	// No t.Parallel: mutates process-global statecfg flags.
 	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
 	statecfg.ExperimentalParallelCommitment = true

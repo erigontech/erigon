@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -45,6 +46,7 @@ import (
 // shortened keys (referenced); with it off it must be plain (read/verified directly, not as a
 // referenced file with stale offsets).
 func TestCheckStateVerify_VersionRegimes(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	t.Run("referenced", func(t *testing.T) {
 		t.Parallel()
 		runVersionRegimeCheck(t, true)

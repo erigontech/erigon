@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -99,6 +100,7 @@ func TestOpenAppliesCommitmentRefsFlagTrue(t *testing.T) {
 // a toml without the field inherits the compiled default; a downloaded plain set
 // (references=false) writes v2.2 plain files.
 func TestResolvedRefsFlagBindsCommitmentWriteVersion(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	t.Run("absent field inherits the compiled default", func(t *testing.T) {
 		dirs := datadir.New(t.TempDir())
 		content := fmt.Appendf(nil, "step_size = %d\nsteps_in_frozen_file = %d\n",

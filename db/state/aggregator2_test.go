@@ -17,9 +17,14 @@
 package state
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // A background build and merge can overlap; editing must stay disabled until
@@ -102,4 +107,49 @@ func TestWorkersCfgKeepsOnlyTheNewestRequest(t *testing.T) {
 	w.lockEditing()
 	w.unlockEditing()
 	require.Equal(t, 6, w.getCollateAndBuild())
+}
+
+func TestCheckSnapshotsCompatibilityV3RecordsRejectsLegacyCommitment(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+
+	require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "with ERIGON_COMMITMENT_V3 unset, convert the datadir with `integration commitment convert --v3`, or roll back an interrupted conversion with `integration commitment convert --restore`; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true")
+}
+
+func TestCheckSnapshotsCompatibilityV3RecordsIgnoresConvertBackups(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+
+	dirs := datadir.New(t.TempDir())
+	backup := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backup, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(backup, "v2.0-commitment.0-1.kv"), nil, 0o644))
+
+	require.NoError(t, CheckSnapshotsCompatibility(dirs))
+}
+
+func TestCheckSnapshotsCompatibilityV3RecordsRequiresFlag(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+
+	require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "run erigon with --experimental.commitment-v3 (other tools: ERIGON_COMMITMENT_V3=true), or roll back an interrupted conversion with `integration commitment convert --restore`")
+}
+
+func TestOpenRefusesPendingRestoreReset(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	dirs := datadir.New(t.TempDir())
+	backup := filepath.Join(dirs.Snap, "backup")
+	require.NoError(t, os.MkdirAll(backup, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(backup, restoreV3ResetPendingName), nil, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+
+	agg, err := NewTest(dirs).SanityOldNaming().Open(t.Context())
+	if err == nil {
+		agg.Close()
+	}
+	require.ErrorContains(t, err, "convert --restore")
 }

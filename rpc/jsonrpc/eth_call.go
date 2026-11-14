@@ -790,7 +790,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, errors.New("engine is not rules.Engine")
 	}
 
-	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, witnessModeLegacy)
+	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, witnessModeLegacy, nil)
 	if err != nil {
 		return nil, err
 	}

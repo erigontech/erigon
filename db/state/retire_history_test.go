@@ -174,6 +174,7 @@ func enableCommitmentHistory(agg *Aggregator) {
 // TestRetire_RetiresCommitmentAtOwnCutoff pins commitment retirement
 // at its own cutoff, independent of Default (0 here).
 func TestRetire_RetiresCommitmentAtOwnCutoff(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -201,6 +202,7 @@ func TestRetire_RetiresCommitmentAtOwnCutoff(t *testing.T) {
 // per-domain cutoff of 0 keeps the domain even when Default would cover it (how
 // commitment keep-all and the RCacheDomain skip are expressed).
 func TestRetire_KeepsDomainWhenCutoffZero(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 

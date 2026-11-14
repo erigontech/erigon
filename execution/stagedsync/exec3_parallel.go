@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -1698,6 +1699,7 @@ type blockResult struct {
 	Exhausted        *ErrLoopExhausted
 	Header           *types.Header      // for accumulator.StartChange in apply loop
 	Txs              types.Transactions // for accumulator.StartChange in apply loop
+	parentState      commitmentdb.ParentState
 	BAL              *types.BlockAccessListSidecar
 
 	// Exec window for newPayload wall attribution; the calculator pairs these with
@@ -3642,6 +3644,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			BAL:              be.balSidecar,
 			execStartedAt:    be.execStarted,
 			execEndedAt:      time.Now(),
+		}
+		if !isPartial && len(be.tasks) > 0 && commitmentdb.ParentReadsWanted() && !slices.ContainsFunc(be.tasks, func(t *execTask) bool { return t.Task.IsHistoric() }) {
+			be.result.parentState = parentStateFromReads(be.blockIO)
 		}
 		return be.result, nil
 	}

@@ -228,7 +228,7 @@ func TestOpenDirtyFilesAcceptsMixedVersions(t *testing.T) {
 // Two same-range commitment files of different versions collapse to one dirty item
 // resolved to the highest version (v2.1); the lower v2.0 twin is left on disk, never opened.
 func TestOpenDirtyFilesSameRangePrefersNewestVersion(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, order := range [][]string{
 		{"v2.0-commitment.0-2.kv", "v2.1-commitment.0-2.kv"},
 		{"v2.1-commitment.0-2.kv", "v2.0-commitment.0-2.kv"},

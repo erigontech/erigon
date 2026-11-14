@@ -20,24 +20,35 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -342,6 +353,7 @@ func TestOpenRollingPin(t *testing.T) {
 	pin, err := openRollingPin(ctx, m.DB)
 	require.NoError(t, err)
 	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
 
 	roTx, err := m.DB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -355,6 +367,110 @@ func TestOpenRollingPin(t *testing.T) {
 
 	pin.close()
 	pin.close() // idempotent
+}
+
+func TestOpenRollingPinWarmTxsOnlyForV3(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	pin, err := openRollingPin(ctx, m.DB)
+	require.NoError(t, err)
+	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
+	require.Empty(t, pin.warm)
+
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	pin, err = openRollingPin(ctx, m.DB)
+	require.NoError(t, err)
+	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
+	require.NotEmpty(t, pin.warm)
+}
+
+func TestOpenRollingPinWithFullReadTxLimiter(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	rawDB := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).
+		RoTxsLimiter(semaphore.NewWeighted(2)).MustOpen()
+	agg := state.NewTest(datadir.New(t.TempDir())).MustOpen(t.Context())
+	db, err := temporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	t.Cleanup(db.Close)
+	hash := hashN(0x42)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := stages.SaveStageProgress(tx, stages.Finish, 1); err != nil {
+			return err
+		}
+		return rawdb.WriteCanonicalHash(tx, hash, 1)
+	}))
+	committedTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer committedTx.Rollback()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	var pin *rollingPin
+	var pinErr error
+	go func() {
+		defer close(done)
+		pin, pinErr = openRollingPin(ctx, db)
+	}()
+	defer func() {
+		cancel()
+		<-done
+		pin.close()
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("openRollingPin blocked on optional warm transactions with a full read-tx limiter")
+	}
+	require.NoError(t, pinErr)
+	require.NotNil(t, pin)
+	require.NotNil(t, pin.tx)
+	require.Equal(t, uint64(1), pin.num)
+	require.Equal(t, hash, pin.hash)
+	require.Empty(t, pin.warm)
+}
+
+type headAdvancingDB struct {
+	kv.TemporalRwDB
+	advance func(context.Context) error
+	opened  int
+}
+
+func (db *headAdvancingDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	db.opened++
+	if db.opened == 2 {
+		if err := db.advance(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return db.TemporalRwDB.BeginTemporalRo(ctx) //nolint:gocritic
+}
+
+func TestOpenRollingPinDropsWarmTxAtAnotherHead(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	db := &headAdvancingDB{TemporalRwDB: m.DB, advance: func(ctx context.Context) error {
+		return m.DB.Update(ctx, func(tx kv.RwTx) error {
+			head, err := stages.GetStageProgress(tx, stages.Finish)
+			if err != nil {
+				return err
+			}
+			if err := stages.SaveStageProgress(tx, stages.Finish, head+1); err != nil {
+				return err
+			}
+			return rawdb.WriteCanonicalHash(tx, hashN(0x42), head+1)
+		})
+	}}
+
+	pin, err := openRollingPin(ctx, db)
+	require.NoError(t, err)
+	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
+	require.Equal(t, 2, db.opened)
+	require.Empty(t, pin.warm)
 }
 
 // TestBuildAndCacheHeadCaptureStalePin drives the head-capture build with no held pin.
@@ -407,6 +523,7 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 	pin, err := openRollingPin(ctx, m.DB)
 	require.NoError(t, err)
 	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
 	require.Equal(t, buildNum-1, pin.num, "pin sits one block behind the block to build")
 
 	require.NoError(t, m.InsertChain(testChain.Slice(int(buildNum)-1, int(buildNum))))
@@ -432,6 +549,98 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 	gotBytes, err := jsonstream.Marshal(cached)
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "head-capture witness must match the durable on-demand build")
+}
+
+func TestRunWitnessCacheBuilderParentReadsByVariant(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		v3          bool
+		headCapture bool
+	}{
+		{name: "legacy", headCapture: true},
+		{name: "v3", v3: true, headCapture: true},
+		{name: "v3 durable", v3: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
+			commitmentdb.WantParentReads(false)
+			cache := newWitnessResultCache(1, 0, tc.headCapture, tc.headCapture)
+			header, hash := encodeSyntheticHeader(t, 1)
+			cache.Add(hash, &ExecutionWitnessResult{})
+			dbg := &DebugAPIImpl{witnessCache: cache}
+			headerCh := make(chan [][]byte, 1)
+			headerCh <- [][]byte{header}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := make(chan struct{})
+			go func() {
+				RunWitnessCacheBuilder(ctx, dbg, headerCh)
+				close(done)
+			}()
+			require.Eventually(t, func() bool { return len(headerCh) == 0 }, time.Second, time.Millisecond)
+			require.Equal(t, tc.v3 && tc.headCapture, commitmentdb.ParentReadsWanted())
+			cancel()
+			select {
+			case <-done:
+				require.False(t, commitmentdb.ParentReadsWanted())
+			case <-time.After(time.Second):
+				t.Fatal("builder did not stop")
+			}
+		})
+	}
+}
+
+func TestBuildAndCacheHeadCaptureReadsParentRecords(t *testing.T) {
+	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
+	m, testChain := newV3HistoryTestExecModule(t)
+	ctx := context.Background()
+	const buildNum = uint64(6)
+	require.NoError(t, m.InsertChain(testChain.Slice(0, int(buildNum)-1)))
+	parentHash, _ := buildTestChainHeader(t, m, buildNum-1)
+	parentTx := func() kv.TemporalTx {
+		tx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		t.Cleanup(tx.Rollback)
+		return tx
+	}
+	pinA, recsA, pinB := parentTx(), parentTx(), parentTx()
+	require.NoError(t, m.InsertChain(testChain.Slice(int(buildNum)-1, int(buildNum))))
+	hash, _ := buildTestChainHeader(t, m, buildNum)
+
+	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	bn := rpc.BlockNumber(buildNum)
+	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+	require.NoError(t, err)
+	wantBytes, err := jsonstream.Marshal(want)
+	require.NoError(t, err)
+
+	build := func(pinTx kv.TemporalTx, get func(k []byte) ([]byte, kv.Step, bool), trace bool) (*ExecutionWitnessResult, bool) {
+		commitmentdb.PublishParentRecords(&commitmentdb.ParentRecords{BlockNum: buildNum, BlockHash: hash, ParentHash: parentHash, TraceCollapses: trace, Get: get})
+		committedTx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer committedTx.Rollback()
+		api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+		api.witnessCache = newWitnessResultCache(96, 0, true, true)
+		api.tryHeadCaptureBuild(ctx, committedTx, &rollingPin{tx: pinTx, num: buildNum - 1, hash: parentHash}, buildNum, hash)
+		return api.witnessCache.Get(hash)
+	}
+
+	served := 0
+	parentGet := func(k []byte) ([]byte, kv.Step, bool) {
+		v, step, err := recsA.GetLatest(kv.CommitmentDomain, k, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		served++
+		return v, step, true
+	}
+	got, ok := build(pinA, parentGet, true)
+	require.True(t, ok, "a build over correct parent records is cached")
+	require.NotZero(t, served, "the build reads commitment through the parent records")
+	gotBytes, err := jsonstream.Marshal(got)
+	require.NoError(t, err)
+	require.Equal(t, wantBytes, gotBytes, "the witness over parent records matches the durable build")
+
+	_, ok = build(pinB, func(k []byte) ([]byte, kv.Step, bool) { return []byte{0x01, 0x02}, 0, true }, false)
+	require.False(t, ok, "wrong parent records fail a gate and cache nothing")
 }
 
 // TestNewWitnessCacheBuilderAPISelectsMode pins that the head-capture argument routes
@@ -579,6 +788,7 @@ func insertHeadCaptureChain(t *testing.T, ctx context.Context, buildNum uint64) 
 	pin, err := openRollingPin(ctx, m.DB)
 	require.NoError(t, err)
 	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
 	require.Equal(t, buildNum-1, pin.num, "pin sits one block behind the block to build")
 
 	require.NoError(t, m.InsertChain(testChain.Slice(int(buildNum)-1, int(buildNum))))
@@ -692,8 +902,8 @@ func TestRollingPinStableUnderTipAdvance(t *testing.T) {
 	pin, err := openRollingPin(ctx, m.DB)
 	require.NoError(t, err)
 	require.NotNil(t, pin)
+	t.Cleanup(pin.close)
 	require.Equal(t, pinAt, pin.num)
-	defer pin.close()
 
 	baseHash, err := rawdb.ReadCanonicalHash(pin.tx, pinAt)
 	require.NoError(t, err)
@@ -809,4 +1019,152 @@ func TestWaitCommittedHeadPanicRollsBack(t *testing.T) {
 	tx := &panicGetTx{}
 	require.Panics(t, func() { _, _, _ = waitCommittedHead(context.Background(), panicGetDB{tx: tx}, 1, common.Hash{}) })
 	require.True(t, tx.rolledBack)
+}
+
+func newV3HistoryTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	t.Helper()
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	statecfg.EnableHistoricalCommitment()
+
+	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	return m, testChain
+}
+
+func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
+	previousAssert := dbg.AssertEnabled
+	t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
+	dbg.AssertEnabled = true
+	commitmentdb.WantParentReads(true)
+	t.Cleanup(func() { commitmentdb.WantParentReads(false) })
+	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
+	m, testChain := newV3HistoryTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
+
+	used := witnessCacheParentRecordsCounter.GetValueUint64()
+	stateHits := witnessCacheParentStateHitCounter.GetValueUint64()
+	warmed := witnessCacheWarmRecordsCounter.GetValueUint64()
+	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	traces := 0
+	for n := uint64(2); n <= uint64(testChain.Length()); n++ {
+		pin, err := openRollingPin(ctx, m.DB)
+		require.NoError(t, err)
+		require.NotNil(t, pin)
+		t.Cleanup(pin.close)
+		require.NoError(t, m.InsertChain(testChain.Slice(int(n)-1, int(n))), "block %d", n)
+		hash, _ := buildTestChainHeader(t, m, n)
+		parentHash, _ := buildTestChainHeader(t, m, n-1)
+		if r := commitmentdb.ParentRecordsFor(n, hash, parentHash); r != nil && r.TraceCollapses {
+			traces++
+		}
+		if n%2 == 1 {
+			commitmentdb.PublishParentRecords(nil)
+		}
+
+		api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+		api.witnessCache = newWitnessResultCache(96, 0, true, true)
+		func() {
+			committedTx, err := m.DB.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer committedTx.Rollback()
+			api.tryHeadCaptureBuild(ctx, committedTx, pin, n, hash)
+		}()
+		pin.close()
+		got, ok := api.witnessCache.Get(hash)
+		require.True(t, ok, "block %d head-capture build", n)
+
+		bn := rpc.BlockNumber(n)
+		want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		wantBytes, err := jsonstream.Marshal(want)
+		require.NoError(t, err)
+		gotBytes, err := jsonstream.Marshal(got)
+		require.NoError(t, err)
+		require.Equal(t, wantBytes, gotBytes, "block %d", n)
+	}
+	require.Positive(t, witnessCacheParentRecordsCounter.GetValueUint64()-used, "head-capture builds read the published records")
+	require.Positive(t, traces, "some blocks enable the head-capture trace")
+	require.Positive(t, witnessCacheParentStateHitCounter.GetValueUint64()-stateHits, "head-capture re-execution reads the validation's parent state")
+	require.Positive(t, witnessCacheWarmRecordsCounter.GetValueUint64()-warmed, "head-capture warms accessed paths the validation's records miss")
+}
+
+func TestHeadCaptureWarmPanicIsContained(t *testing.T) {
+	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
+	m, testChain := newV3HistoryTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.InsertChain(testChain.Slice(0, 1)))
+	pin, err := openRollingPin(ctx, m.DB)
+	require.NoError(t, err)
+	t.Cleanup(pin.close)
+	require.NotEmpty(t, pin.warm, "the pin opens warm txs")
+	require.NoError(t, m.InsertChain(testChain.Slice(1, 2)))
+	hash, _ := buildTestChainHeader(t, m, 2)
+	parentHash, _ := buildTestChainHeader(t, m, 1)
+	var panicked atomic.Bool
+	commitmentdb.PublishParentRecords(&commitmentdb.ParentRecords{BlockNum: 2, BlockHash: hash, ParentHash: parentHash, Get: func([]byte) ([]byte, kv.Step, bool) {
+		if panicked.CompareAndSwap(false, true) {
+			panic("simulated parent records panic")
+		}
+		return nil, 0, false
+	}})
+	failed := witnessCacheBuildFailOtherCounter.GetValueUint64()
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	api.witnessCache = newWitnessResultCache(96, 0, true, true)
+	committedTx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer committedTx.Rollback()
+	require.False(t, api.tryHeadCaptureBuild(ctx, committedTx, pin, 2, hash), "a warm worker panic fails the build")
+	_, ok := api.witnessCache.Get(hash)
+	require.False(t, ok)
+	require.Equal(t, failed+1, witnessCacheBuildFailOtherCounter.GetValueUint64(), "the failed build is counted once")
+}
+
+func TestHeadCaptureWarmedRecordsMatchPinnedState(t *testing.T) {
+	m, testChain := newV3HistoryTestExecModule(t)
+	require.NoError(t, m.InsertChain(testChain.Slice(0, 2)))
+	pin, err := openRollingPin(t.Context(), m.DB)
+	require.NoError(t, err)
+	t.Cleanup(pin.close)
+	accessed := &accessedState{Addresses: map[common.Address]struct{}{}, Storage: map[common.Address]map[common.Hash]struct{}{}}
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		it, err := pin.tx.Debug().RangeLatest(domain, nil, nil, kv.Unlim)
+		require.NoError(t, err)
+		for it.HasNext() {
+			key, _, err := it.Next()
+			require.NoError(t, err)
+			addr := common.BytesToAddress(key[:20])
+			accessed.Addresses[addr] = struct{}{}
+			if domain == kv.StorageDomain {
+				if accessed.Storage[addr] == nil {
+					accessed.Storage[addr] = map[common.Hash]struct{}{}
+				}
+				accessed.Storage[addr][common.BytesToHash(key[20:])] = struct{}{}
+			}
+		}
+		it.Close()
+	}
+	hc := &headCaptureSource{pinnedParentTx: pin.tx, warmTxs: pin.warm}
+	hc.warmPaths(accessed)
+	reader := hc.recordReader()
+	count, live := 0, 0
+	hc.warm.Range(func(key, _ any) bool {
+		k := []byte(key.(string))
+		want, step, err := pin.tx.GetLatest(kv.CommitmentDomain, k, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		got, gotStep, ok := reader.Get(k)
+		require.True(t, ok, "warmed key %x", k)
+		require.Equal(t, want, got, "warmed key %x", k)
+		require.Equal(t, step, gotStep)
+		count++
+		if len(want) != 0 {
+			live++
+		}
+		return true
+	})
+	require.Positive(t, count)
+	require.Positive(t, live)
 }

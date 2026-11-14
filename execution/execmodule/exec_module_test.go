@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -64,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider"
@@ -230,10 +230,10 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	require.Equal(t, uint64(1), extendingNum)
 	var inMemBlockNum, inMemTxNum uint64
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		v, _, err := extendingSd.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+		v, _, err := extendingSd.GetLatest(kv.CommitmentDomain, tx, commitmenttest.StateKey())
 		require.NoError(t, err)
-		inMemTxNum = binary.BigEndian.Uint64(v[:8])
-		inMemBlockNum = binary.BigEndian.Uint64(v[8:16])
+		inMemTxNum, inMemBlockNum, _, err = commitmenttest.DecodeState(v)
+		require.NoError(t, err)
 		return nil
 	})
 	require.NoError(t, err)
@@ -858,10 +858,11 @@ func truncateTxNumsBelowCommitment(t *testing.T, m *execmoduletester.ExecModuleT
 	// "too deep" and the pre-fix code rejects the FCU as ReorgTooDeep.
 	var commitBlock uint64
 	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmenttest.StateKey(), kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(v), 16)
-		commitBlock = binary.BigEndian.Uint64(v[8:16])
+		_, commitBlock, _, err = commitmenttest.DecodeState(v)
+		require.NoError(t, err)
 		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
 		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
 		if !keepChangesets {
@@ -923,10 +924,11 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 	const truncateTo uint64 = 5
 	var commitBlock uint64
 	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmenttest.StateKey(), kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(v), 16)
-		commitBlock = binary.BigEndian.Uint64(v[8:16])
+		_, commitBlock, _, err = commitmenttest.DecodeState(v)
+		require.NoError(t, err)
 		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
 		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
 		require.NoError(t, tx.ClearTable(kv.ChangeSets3))

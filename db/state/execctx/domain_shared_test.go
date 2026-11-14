@@ -46,9 +46,12 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
@@ -357,7 +360,7 @@ func putAndUnwind(t *testing.T, sd *execctx.SharedDomains, tx kv.TemporalTx, dom
 }
 
 func TestSharedDomain_UnwindDropsWritesBufferedBeforeUnwind(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
 	slot := common.HexToHash("0x01")
@@ -410,7 +413,7 @@ func TestSharedDomain_UnwindDropsWritesBufferedBeforeUnwind(t *testing.T) {
 }
 
 func TestSharedDomain_MergeKeepsOtherWritesBufferedBeforeUnwind(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	ctx := t.Context()
 	db := newTestDb(t, 4)
@@ -448,7 +451,7 @@ func TestSharedDomain_MergeKeepsOtherWritesBufferedBeforeUnwind(t *testing.T) {
 }
 
 func TestSharedDomain_DiscardWritesCoversWritesBufferedBeforeUnwind(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	ctx := t.Context()
 	db := newTestDb(t, 4)
@@ -472,7 +475,7 @@ func TestSharedDomain_DiscardWritesCoversWritesBufferedBeforeUnwind(t *testing.T
 }
 
 func TestSharedDomain_MergeFlushesValuesInWriteOrder(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
 	key := addr[:]
@@ -529,7 +532,7 @@ func TestSharedDomain_MergeFlushesValuesInWriteOrder(t *testing.T) {
 }
 
 func TestSharedDomain_MergeKeepsReceiverRowsWrittenAfterItsUnwind(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	ctx := t.Context()
 	db := newTestDb(t, 4)
@@ -795,10 +798,11 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	require.NoError(doms.Flush(ctx, rwTx))
 
 	// Verify: commitment "state" key is at blockNum ≤ unwindTarget.
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmenttest.StateKey(), kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16, "commitment state record must exist post-unwind (was forward-populated by executeRange)")
-	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	_, postBlock, _, err := commitmenttest.DecodeState(stateVal)
+	require.NoError(err)
 	require.LessOrEqualf(postBlock, unwindTarget,
 		"commitment state blockNum=%d must be ≤ unwindTarget=%d after repeated unwinds",
 		postBlock, unwindTarget)
@@ -951,10 +955,11 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 	// unwind step — but the value carried by the retained entry is the
 	// pre-step-1-write value (block 9's state), not the unwindTarget's
 	// state (block 4). A later GetLatest then sees blockNum=9 > target=4.
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmenttest.StateKey(), kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16, "commitment state record must exist after Merge+Flush")
-	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	_, postBlock, _, err := commitmenttest.DecodeState(stateVal)
+	require.NoError(err)
 	require.LessOrEqualf(postBlock, unwindTarget,
 		"commitment state blockNum=%d must be ≤ unwindTarget=%d after Merge+Flush; "+
 			"raw changeset merge lost the step-0 restoration value",
@@ -1061,11 +1066,11 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	rwTx, err = db.BeginTemporalRw(ctx)
 	require.NoError(err)
 	defer rwTx.Rollback()
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmenttest.StateKey(), kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16)
-	commitTxNum := binary.BigEndian.Uint64(stateVal[:8])
-	commitBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	commitTxNum, commitBlock, _, err := commitmenttest.DecodeState(stateVal)
+	require.NoError(err)
 	require.Equal(lastBlock, commitBlock, "pre-unwind: commitment state should be at last block")
 	require.Equal(lastBlock, commitTxNum, "pre-unwind: commitment state txNum")
 
@@ -1086,11 +1091,11 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	require.NoError(rwTx.Unwind(ctx, unwindTarget, &merged))
 
 	// Phase 5: the commitment "state" key should now decode to blockNum ≤ unwindTarget.
-	stateVal, _, err = rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+	stateVal, _, err = rwTx.GetLatest(kv.CommitmentDomain, commitmenttest.StateKey(), kv.GetLatestOptions{})
 	require.NoError(err)
 	require.GreaterOrEqual(len(stateVal), 16, "post-unwind: commitment state record must exist (was populated in phase 2)")
-	postTxNum := binary.BigEndian.Uint64(stateVal[:8])
-	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
+	postTxNum, postBlock, _, err := commitmenttest.DecodeState(stateVal)
+	require.NoError(err)
 	require.LessOrEqualf(postBlock, unwindTarget,
 		"post-unwind: commitment state blockNum=%d must be ≤ unwindTarget=%d (txNum=%d)",
 		postBlock, unwindTarget, postTxNum)
@@ -2141,6 +2146,48 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 	require.Equal(t, inFlightLogIdx, got, "must serve the in-flight block's log index, not the last committed one")
 }
 
+func TestCommitmentGetAsOfBeforeKeyCreation(t *testing.T) {
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(v3))
+			statecfg.EnableHistoricalCommitment()
+
+			ctx := t.Context()
+			db := newTestDb(t, 1000)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+
+			key, first, second := []byte{0x40, 0x01, 0x02}, []byte("first"), []byte("second")
+			require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, key, first, 5, nil))
+			require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, key, second, 9, first))
+			require.NoError(t, domains.Flush(ctx, rwTx))
+
+			beforeCreation := second
+			if v3 {
+				beforeCreation = nil
+			}
+			for _, tc := range []struct {
+				ts   uint64
+				want []byte
+			}{{3, beforeCreation}, {5, beforeCreation}, {6, first}, {9, first}, {10, second}} {
+				got, ok, err := rwTx.GetAsOf(kv.CommitmentDomain, key, tc.ts)
+				require.NoError(t, err)
+				if tc.want == nil {
+					require.False(t, ok, "ts=%d: key not created yet, got %x", tc.ts, got)
+					require.Nil(t, got, "ts=%d", tc.ts)
+					continue
+				}
+				require.True(t, ok, "ts=%d", tc.ts)
+				require.Equal(t, tc.want, got, "ts=%d", tc.ts)
+			}
+		})
+	}
+}
+
 // TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress verifies that a
 // zero-update commitment advances the persisted execution position without
 // changing the state root or serialized trie state.
@@ -2215,20 +2262,16 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 
 	state1, _, err := rwTx2.GetLatest(
 		kv.CommitmentDomain,
-		commitmentdb.KeyCommitmentState,
+		commitmenttest.StateKey(),
 		kv.GetLatestOptions{},
 	)
 	require.NoError(t, err)
 	require.Greater(t, len(state1), 16)
 
-	storedTx1, storedBlock1 := commitmentdb.DecodeTxBlockNums(state1)
+	storedTx1, storedBlock1, trieState1 := decodeStoredState(t, state1)
 
 	require.Equal(t, block1, storedBlock1)
 	require.Equal(t, txNum1, storedTx1)
-
-	// GetLatest may return transaction-backed memory. Preserve the serialized
-	// trie payload before committing and reopening the database transaction.
-	trieState1 := bytes.Clone(state1[16:])
 
 	domains2, err := execctx.NewSharedDomains(
 		ctx,
@@ -2262,17 +2305,215 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 
 	state2, _, err := rwTx3.GetLatest(
 		kv.CommitmentDomain,
-		commitmentdb.KeyCommitmentState,
+		commitmenttest.StateKey(),
 		kv.GetLatestOptions{},
 	)
 	require.NoError(t, err)
 	require.Greater(t, len(state2), 16)
 
-	storedTx2, storedBlock2 := commitmentdb.DecodeTxBlockNums(state2)
+	storedTx2, storedBlock2, trieState2 := decodeStoredState(t, state2)
 
 	require.Equal(t, block2, storedBlock2)
 	require.Equal(t, txNum2, storedTx2)
-	require.Equal(t, trieState1, state2[16:])
+	require.Equal(t, trieState1, trieState2)
+}
+
+func decodeStoredState(t *testing.T, state []byte) (txNum, blockNum uint64, payload []byte) {
+	t.Helper()
+	txNum, blockNum, root, err := commitmenttest.DecodeState(state)
+	require.NoError(t, err)
+	if statecfg.ExperimentalCommitmentV3 {
+		return txNum, blockNum, root
+	}
+	return txNum, blockNum, bytes.Clone(state[16:])
+}
+
+func TestSeekCommitmentRejectsOtherPlaneState(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		key     []byte
+		openV3  bool
+		wantErr string
+	}{
+		{"v3 rejects legacy state", commitmentdb.KeyCommitmentState, true, "legacy commitment"},
+		{"legacy rejects v3 state", commitment.KeyCommitmentV3State, false, "commitment v3 records"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(false))
+			ctx := t.Context()
+			db := newTestDb(t, 16)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+
+			sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			require.NoError(t, sd.DomainPut(kv.CommitmentDomain, rwTx, tc.key, make([]byte, 32), 1, nil))
+			require.NoError(t, sd.Flush(ctx, rwTx))
+			sd.Close()
+
+			t.Cleanup(statecfg.SetCommitmentV3(tc.openV3))
+			_, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
+func TestTouchChangedKeysFromHistoryRestoresTheStoredRoot(t *testing.T) {
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(v3))
+			ctx := t.Context()
+			db1 := newTestDb(t, 1)
+			rw, err := db1.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			t.Cleanup(rw.Rollback)
+			sd1, err := execctx.NewSharedDomains(ctx, rw, log.New())
+			require.NoError(t, err)
+			t.Cleanup(sd1.Close)
+			for i, a := range []common.Address{common.HexToAddress("0x01"), common.HexToAddress("0x8000000000000000000000000000000000000002")} {
+				acc := accounts.NewAccount()
+				acc.Balance = *uint256.NewInt(uint64(i + 1))
+				require.NoError(t, sd1.DomainPut(kv.AccountsDomain, rw, a[:], accounts.SerialiseV3(&acc), uint64(i+1), nil))
+			}
+			want, err := sd1.ComputeCommitment(ctx, rw, true, 1, 2, "", nil)
+			require.NoError(t, err)
+			require.NotEqual(t, empty.RootHash[:], want)
+			require.NoError(t, sd1.Flush(ctx, rw))
+			require.NoError(t, rw.Commit())
+
+			ro, err := db1.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			t.Cleanup(ro.Rollback)
+			ro2, err := newTestDb(t, 1).BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			t.Cleanup(ro2.Rollback)
+			sd2, err := execctx.NewSharedDomains(ctx, ro2, log.New())
+			require.NoError(t, err)
+			t.Cleanup(sd2.Close)
+			sd2.GetCommitmentContext().SetStateReader(commitmentdb.NewLatestStateReader(ro, sd1, commitmentdb.LatestStateReaderOptions{}))
+			n, _, err := sd2.TouchChangedKeysFromHistory(ro, 0, 3)
+			require.NoError(t, err)
+			require.Equal(t, 2, n)
+			got, err := sd2.ComputeCommitment(ctx, ro2, false, 1, 2, "", nil)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
+}
+
+type countingStateReader struct {
+	commitmentdb.StateReader
+	reads map[string]int
+}
+
+func (r *countingStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	r.reads[string(plainKey)]++
+	return r.StateReader.Read(d, plainKey, stepSize)
+}
+
+func TestTouchChangedKeysFromHistoryReadsEachKeyOnce(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	ctx := t.Context()
+	rw, err := newTestDb(t, 1).BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(rw.Rollback)
+	sd1, err := execctx.NewSharedDomains(ctx, rw, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd1.Close)
+	addr := common.HexToAddress("0x01")
+	for txNum := uint64(1); txNum <= 3; txNum++ {
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(txNum)
+		require.NoError(t, sd1.DomainPut(kv.AccountsDomain, rw, addr[:], accounts.SerialiseV3(&acc), txNum, nil))
+	}
+	require.NoError(t, sd1.Flush(ctx, rw))
+
+	sd2, err := execctx.NewSharedDomains(ctx, rw, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd2.Close)
+	reader := &countingStateReader{StateReader: commitmentdb.NewLatestStateReader(rw, sd2, commitmentdb.LatestStateReaderOptions{}), reads: map[string]int{}}
+	sd2.GetCommitmentContext().SetStateReader(reader)
+	n, _, err := sd2.TouchChangedKeysFromHistory(rw, 0, 4)
+	require.NoError(t, err)
+	require.Equal(t, 3, n)
+	require.Equal(t, map[string]int{string(addr[:]): 1}, reader.reads)
+}
+
+func TestUnwindRevertsCollectedTouches(t *testing.T) {
+	below, above := common.HexToAddress("0x01"), common.HexToAddress("0x8000000000000000000000000000000000000002")
+	location := common.HexToHash("0x03")
+	slot := bytes.Join([][]byte{below[:], location[:]}, nil)
+	balance := func(b uint64) []byte {
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(b)
+		return accounts.SerialiseV3(&acc)
+	}
+	for _, tc := range []struct{ v3, changeset bool }{{false, true}, {true, true}, {false, false}, {true, false}} {
+		t.Run(fmt.Sprintf("v3=%t/changeset=%t", tc.v3, tc.changeset), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
+			ctx := t.Context()
+			open := func() (*execctx.SharedDomains, kv.TemporalRwTx) {
+				rw, err := newTestDb(t, 1).BeginTemporalRw(ctx)
+				require.NoError(t, err)
+				t.Cleanup(rw.Rollback)
+				sd, err := execctx.NewSharedDomains(ctx, rw, log.New())
+				require.NoError(t, err)
+				t.Cleanup(sd.Close)
+				return sd, rw
+			}
+			writeBelow := func(sd *execctx.SharedDomains, rw kv.TemporalRwTx) {
+				require.NoError(t, sd.DomainPut(kv.AccountsDomain, rw, below[:], balance(1), 1, nil))
+				require.NoError(t, sd.DomainPut(kv.StorageDomain, rw, slot, []byte{5}, 1, nil))
+			}
+
+			post, postRw := open()
+			writeBelow(post, postRw)
+			want, err := post.ComputeCommitment(ctx, postRw, false, 1, 1, "", nil)
+			require.NoError(t, err)
+
+			sd, rw := open()
+			writeBelow(sd, rw)
+			unwound := &changeset.StateChangeSet{}
+			sd.SetChangesetAccumulator(unwound)
+			require.NoError(t, sd.DomainPut(kv.AccountsDomain, rw, below[:], balance(3), 2, nil))
+			require.NoError(t, sd.DomainPut(kv.StorageDomain, rw, slot, []byte{7}, 2, nil))
+			require.NoError(t, sd.DomainPut(kv.AccountsDomain, rw, above[:], balance(2), 2, nil))
+			var diffs [kv.DomainLen][]kv.DomainEntryDiff
+			for d := range unwound.Diffs {
+				diffs[d] = unwound.Diffs[d].GetDiffSet()
+			}
+			if tc.changeset {
+				sd.Unwind(2, &diffs)
+			} else {
+				sd.Unwind(2, nil)
+			}
+
+			got, err := sd.ComputeCommitment(ctx, rw, false, 1, 1, "", nil)
+			require.NoError(t, err)
+			require.Equal(t, want, got, "the fold after an unwind sees the post-unwind state")
+		})
+	}
+}
+
+func TestPickTrieVariant(t *testing.T) {
+	for _, tc := range []struct {
+		parallel, v3 bool
+		want         commitment.TrieVariant
+	}{
+		{false, false, commitment.VariantHexPatriciaTrie},
+		{true, false, commitment.VariantParallelHexPatricia},
+		{false, true, commitment.VariantCommitmentV3},
+		{true, true, commitment.VariantCommitmentV3},
+	} {
+		t.Run(fmt.Sprintf("parallel=%t/v3=%t", tc.parallel, tc.v3), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
+			parallel := statecfg.ExperimentalParallelCommitment
+			t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = parallel })
+			statecfg.ExperimentalParallelCommitment = tc.parallel
+			require.Equal(t, tc.want, execctx.PickTrieVariant(), "parallel=%v v3=%v", tc.parallel, tc.v3)
+		})
+	}
 }
 
 func TestSharedDomain_MergeUnwindKeepsDeeperTarget(t *testing.T) {

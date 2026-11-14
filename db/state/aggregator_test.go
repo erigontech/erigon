@@ -237,6 +237,7 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 }
 
 func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize := uint64(10)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 
@@ -295,6 +296,7 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 }
 
 func TestAggregator_CheckDependencyBtwnDomains(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize := uint64(10)
 	// testDbAggregatorWithNoFiles(t,  stepSize * 32, &testAggConfig{
 	// 	stepSize:                         10,
@@ -525,7 +527,7 @@ func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ran
 // empty files for steps S..S+k-1 that the merge later combined with
 // preverified inputs to advertise phantom coverage.
 func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	// generate* helpers hardcode stepSize=10; keep our aggregator consistent.
 	const stepSize = uint64(10)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
@@ -591,6 +593,7 @@ func putHistoryKey(t *testing.T, db kv.RwDB, table string, txNum uint64, k []byt
 }
 
 func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	// Regression: when commitment values are already merged (values.needMerge=false) but history
 	// is not, the old aggregator.mergeFiles called commitmentValTransformDomain with a zero
 	// MergeRange, causing "failed to create commitment value transformer: file
@@ -697,6 +700,7 @@ func TestCommitmentMergeNeedsTransform(t *testing.T) {
 // range-alignment hold. It reads each file's version through the visible-files layer and must
 // report referencing independently of the live write flag (set off here on purpose).
 func TestCommitmentVisibleFilesReferenced(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	check := func(t *testing.T, ver version.Version, want bool) {
 		t.Helper()
 		stepSize := uint64(10)
@@ -826,6 +830,7 @@ func testAggregatorPrune(t *testing.T, db kv.RwDB, agg *Aggregator) {
 }
 
 func TestAggregator_PruneKeepsDomainWithoutFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testAggregatorWithStateFilesOnly(t)
 	tbl := agg.d[kv.ReceiptDomain].ValuesTable
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
@@ -845,6 +850,7 @@ func TestAggregator_PruneKeepsDomainWithoutFiles(t *testing.T) {
 }
 
 func TestAggregator_PruneKeepsInvertedIndexWithoutFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testAggregatorWithStateFilesOnly(t)
 	ii := agg.searchII(kv.LogAddrIdx)
 	var txKey [8]byte
@@ -925,7 +931,7 @@ func TestAggregatorOpenFolderOpensAccessors(t *testing.T) {
 }
 
 func TestAggregatorOpenFolderHidesDataOnlyDomainFile(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
 	generateAccountsFile(t, agg.Dirs(), ranges)

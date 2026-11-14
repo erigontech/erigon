@@ -348,6 +348,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 		agg.StepSize(),
+		cfg.dirs,
 	); err != nil {
 		return err
 	}
@@ -399,6 +400,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 		agg.StepSize(),
+		cfg.dirs,
 	); err != nil {
 		return err
 	}
@@ -659,16 +661,12 @@ func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg) (bool, error) {
 // readCommitmentBlockFromDB reads the commitment domain's "state" key via a
 // temporary RO tx. The RwTx from the snapshot stage is not temporal, so we
 // need a separate temporal RO tx to read domain data from snapshot files.
-// The value format: txNum(8 bytes) + blockNum(8 bytes) + trie state.
 func readCommitmentBlockFromDB(ctx context.Context, db kv.TemporalRwDB) uint64 {
 	roTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0
 	}
 	defer roTx.Rollback()
-	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
-	if err != nil || len(v) < 16 {
-		return 0
-	}
-	return binary.BigEndian.Uint64(v[8:16])
+	n, _ := commitmentdb.LatestBlockNumWithCommitment(roTx)
+	return n
 }

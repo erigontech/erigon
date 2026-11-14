@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,10 +26,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
 // hexCompact emits a V1-encoded key with no terminator for the supplied nibbles.
@@ -465,4 +471,168 @@ func TestPreflightResume_validationErrorPreservesDisk(t *testing.T) {
 		_, statErr := os.Stat(p)
 		require.NoError(t, statErr, "file %s must survive validation-error return", p)
 	}
+}
+
+func TestConvertedSinkEmitSendsFullBatch(t *testing.T) {
+	out := make(chan *convertedBatch, 1)
+	sink := convertedSink{ctx: t.Context(), out: out, res: getConvertedBatch()}
+	require.NoError(t, sink.emit([]byte{1}, []byte{2}, v3.LegacyDirect))
+	require.NoError(t, sink.emit(bytes.Repeat([]byte{3}, commitmentV3BatchBytes), nil, v3.LegacyDirect))
+	full := <-out
+	require.Len(t, full.ents, 1)
+	require.LessOrEqual(t, len(full.buf), commitmentV3BatchBytes)
+	require.Len(t, sink.res.ents, 1)
+}
+
+func TestConvertResolveLegacyHistoryConflicts(t *testing.T) {
+	for _, kind := range []v3.LegacyKind{v3.LegacyDirect, v3.LegacySynthesized} {
+		t.Run(fmt.Sprint(kind), func(t *testing.T) {
+			_, err := resolveLegacyHistory(v3.StorageNodeKey([32]byte{}, nil, nil), []v3.LegacyEntry{
+				{Kind: kind, Value: []byte{1}},
+				{Kind: kind, Value: []byte{2}},
+			})
+			require.ErrorIs(t, err, v3.ErrLegacyConflict)
+		})
+	}
+}
+
+func TestHistoryConvertTxNumLookups(t *testing.T) {
+	const txs, stepSize, keys = 160, 16, 31
+	db, ii, _ := filledInvIndexOfSize(t, txs, stepSize, keys, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for step := range kv.Step(txs/stepSize - 1) {
+		require.NoError(t, ii.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
+	}
+	require.NoError(t, tx.Commit())
+
+	ic := ii.beginForTests()
+	defer ic.Close()
+	require.NotEmpty(t, ic.files)
+	filesEnd := ic.files[len(ic.files)-1].endTxNum
+	for _, keyNum := range []uint64{1, 7, 13, 31} {
+		var key [8]byte
+		binary.BigEndian.PutUint64(key[:], keyNum)
+		for txNum := uint64(0); txNum <= filesEnd+1; txNum++ {
+			var want uint64
+			for m := keyNum; m < txNum && m < filesEnd; m += keyNum {
+				want = m
+			}
+			got, ok, err := lastWriteBefore(ic, key[:], txNum)
+			require.NoError(t, err)
+			require.Equal(t, want != 0, ok, "key %d txNum %d", keyNum, txNum)
+			require.Equal(t, want, got, "key %d txNum %d", keyNum, txNum)
+		}
+		for _, f := range ic.files {
+			var want []uint64
+			for m := keyNum; m < f.endTxNum; m += keyNum {
+				if m >= f.startTxNum {
+					want = append(want, m)
+				}
+			}
+			got, err := appendFileTxNums(nil, ic, f.startTxNum, f.endTxNum, key[:])
+			require.NoError(t, err)
+			require.Equal(t, want, got, "key %d file %d-%d", keyNum, f.startTxNum, f.endTxNum)
+		}
+	}
+}
+
+func TestConvertPhase3RestoreKeepsUnmovedDomainFile(t *testing.T) {
+	dirs := datadir.Open(t.TempDir())
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	rangeFiles := []string{
+		"v2.0-commitment.0-32.bt",
+		"v2.0-commitment.0-32.kv",
+	}
+	original := map[string][]byte{
+		rangeFiles[0]: []byte("ORIG_BT"),
+		rangeFiles[1]: []byte("ORIG_KV"),
+	}
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+	for _, name := range rangeFiles {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), original[name], 0o644))
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(backupDir, rangeFiles[1]), 0o755))
+
+	moved, err := convertPhase3(dirs.SnapDomain, backupDir, []commitmentHistoryRange{{fromStep: 0, toStep: 32}})
+	require.Error(t, err)
+	require.Equal(t, 1, moved)
+	require.FileExists(t, filepath.Join(backupDir, rangeFiles[0]))
+	require.FileExists(t, filepath.Join(dirs.SnapDomain, rangeFiles[1]))
+	require.NoError(t, dir.RemoveFile(filepath.Join(backupDir, rangeFiles[1])))
+
+	_, err = RestoreCommitmentFiles(t.Context(), dirs, log.New())
+	require.NoError(t, err)
+	for _, name := range rangeFiles {
+		require.Equal(t, original[name], readFileBytesForTest(t, filepath.Join(dirs.SnapDomain, name)))
+	}
+}
+
+func TestConvertPhase3RestoreKeepsEveryRange(t *testing.T) {
+	dirs := datadir.Open(t.TempDir())
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	rangeFiles := []string{
+		"v2.0-commitment.0-16.bt",
+		"v2.0-commitment.0-16.kv",
+		"v2.0-commitment.16-32.bt",
+		"v2.0-commitment.16-32.kv",
+	}
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+	for _, name := range rangeFiles {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), []byte("ORIG_"+name), 0o644))
+	}
+	blocked := filepath.Join(backupDir, rangeFiles[3])
+	require.NoError(t, os.MkdirAll(blocked, 0o755))
+
+	moved, err := convertPhase3(dirs.SnapDomain, backupDir, []commitmentHistoryRange{{fromStep: 0, toStep: 16}, {fromStep: 16, toStep: 32}})
+	require.Error(t, err)
+	require.Equal(t, 3, moved)
+	require.NoError(t, dir.RemoveFile(blocked))
+
+	_, err = RestoreCommitmentFiles(t.Context(), dirs, log.New())
+	require.NoError(t, err)
+	for _, name := range rangeFiles {
+		require.Equal(t, []byte("ORIG_"+name), readFileBytesForTest(t, filepath.Join(dirs.SnapDomain, name)))
+	}
+}
+
+func TestConvertPhase3RestoreKeepsUnmovedHistoryAccessor(t *testing.T) {
+	dirs := datadir.Open(t.TempDir())
+	backupRoot := filepath.Join(dirs.Snap, "backup")
+	backupDir := filepath.Join(backupRoot, "accessor")
+	rangeFiles := []string{
+		"v2.0-commitment.0-32.efi",
+		"v2.0-commitment.0-32.vi",
+	}
+	original := map[string][]byte{
+		rangeFiles[0]: []byte("ORIG_EFI"),
+		rangeFiles[1]: []byte("ORIG_VI"),
+	}
+	require.NoError(t, os.MkdirAll(dirs.SnapAccessors, 0o755))
+	for _, name := range rangeFiles {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapAccessors, name), original[name], 0o644))
+	}
+	require.NoError(t, os.MkdirAll(filepath.Join(backupRoot, "history"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(backupDir, rangeFiles[1]), 0o755))
+
+	moved, err := convertPhase3(dirs.SnapAccessors, backupDir, []commitmentHistoryRange{{fromStep: 0, toStep: 32}})
+	require.Error(t, err)
+	require.Equal(t, 1, moved)
+	require.FileExists(t, filepath.Join(backupDir, rangeFiles[0]))
+	require.FileExists(t, filepath.Join(dirs.SnapAccessors, rangeFiles[1]))
+	require.NoError(t, dir.RemoveFile(filepath.Join(backupDir, rangeFiles[1])))
+
+	_, err = RestoreCommitmentFiles(t.Context(), dirs, log.New())
+	require.NoError(t, err)
+	for _, name := range rangeFiles {
+		require.Equal(t, original[name], readFileBytesForTest(t, filepath.Join(dirs.SnapAccessors, name)))
+	}
+}
+
+func readFileBytesForTest(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return data
 }

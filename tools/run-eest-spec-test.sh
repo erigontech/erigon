@@ -125,17 +125,18 @@ shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '
 	.[] | select(.shard == $s)
 	| if (."commitment-parallel" | type) != "boolean"
 		then error("shard \($s) must define boolean commitment-parallel")
-		else "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel")\t\(."no-ramdisk" // false)\t\(."expected-tests" // 0)\t\(."evm-timeout-minutes" // 0)\t\(.run // "")"
+		else "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel")\t\(."commitment-v3" // false)\t\(."no-ramdisk" // false)\t\(."expected-tests" // 0)\t\(."evm-timeout-minutes" // 0)\t\(.run // "")"
 	end')
 if [[ -z "$shard_row" ]]; then
 	echo "shard $shard not found in $manifest" >&2
 	exit 2
 fi
-IFS=$'\t' read -r default_workers default_max commitment_parallel shard_no_ramdisk expected_tests evm_timeout_minutes run_regex <<<"$shard_row"
+IFS=$'\t' read -r default_workers default_max commitment_parallel commitment_v3 shard_no_ramdisk expected_tests evm_timeout_minutes run_regex <<<"$shard_row"
 # Always set ERIGON_COMMITMENT_PARALLEL explicitly (true or false) so the shard's
 # commitment mode is pinned to the manifest, independent of whatever
 # statecfg.ExperimentalParallelCommitment defaults to at runtime.
 export ERIGON_COMMITMENT_PARALLEL="$commitment_parallel"
+export ERIGON_COMMITMENT_V3="$commitment_v3"
 
 # Strip "-parallel" / "-sequential" suffix for case-arm routing — both variants
 # share the same fixture path / regex as the parent shard; only the

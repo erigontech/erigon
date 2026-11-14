@@ -172,6 +172,7 @@ func TestCacheViewWithoutOverlayUsesSnapshotBoundedCache(t *testing.T) {
 		tx, sd := temporaltest.NewTestTxSD(t, db)
 		sd.BindStateCache(stateCache)
 		sd.SetTxNum(txNum)
+		sd.SetDisableInlineTouchKey(true)
 		require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, key, value, txNum, previous))
 		require.NoError(t, sd.Commit(ctx, tx))
 	}
@@ -186,6 +187,7 @@ func TestCacheViewWithoutOverlayUsesSnapshotBoundedCache(t *testing.T) {
 	require.NoError(t, err)
 	defer liveDomains.Close()
 	liveDomains.SetTxNum(20)
+	liveDomains.SetDisableInlineTouchKey(true)
 	require.NoError(t, liveDomains.DomainPut(kv.AccountsDomain, tx, key, []byte{3}, 20, []byte{1}))
 	rpcCache := &Cache{execModule: &ExecModule{stateCache: stateCache, currentContext: liveDomains}}
 	rpcCache.SetPublishedSD(func() *execctx.SharedDomains {

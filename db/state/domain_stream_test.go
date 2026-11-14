@@ -240,7 +240,6 @@ func TestDomainLatestIterFile_PrefersFilesOverDB(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	t.Parallel()
 
 	logger := log.New()
 	ctx := context.Background()

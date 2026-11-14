@@ -67,6 +67,7 @@ func runWriteCommitBatch(t *testing.T, sd *execctx.SharedDomains, rwTx kv.Tempor
 }
 
 func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -113,6 +114,7 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 // wiring: selecting the parallel trie and supplying the DB it needs happen in one
 // expression, so there is no second call left to forget.
 func TestSharedDomains_WithParaTrieDB_SelectsParallelTrie(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	// No t.Parallel: mutates process-global statecfg flags.
 	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
 
@@ -133,6 +135,7 @@ func TestSharedDomains_WithParaTrieDB_SelectsParallelTrie(t *testing.T) {
 // leaves the context on the sequential trie, which is the intended escape hatch
 // for DB-less RPC and integrity contexts and a bug for anything computing a root.
 func TestSharedDomains_ParallelTrieNotWired_IsLoudOnComputeCommitment(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	// No t.Parallel: mutates process-global statecfg, dbg and root-logger state.
 	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
 	defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
@@ -186,6 +189,7 @@ func captureRootLog(t *testing.T) *bytes.Buffer {
 // pin controller's cache-miss callback, as the EnableParaTrieDB wrapper does.
 // Skipping it leaves roots correct and silently stops all pinning.
 func TestSharedDomains_WithParaTrieDB_BindsPinController(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	// No t.Parallel: mutates process-global statecfg and dbg flags.
 	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
 	defer func(v bool) { dbg.DisableAdaptivePin = v }(dbg.DisableAdaptivePin)

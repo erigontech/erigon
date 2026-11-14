@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -76,12 +77,13 @@ func TestPlainGetLatestDoesNotPassNilRequestMetrics(t *testing.T) {
 	_, _, err = sd.GetLatest(kv.AccountsDomain, tx, key)
 	require.NoError(t, err)
 	require.False(t, tx.sawMetrics)
-	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, key, []byte{1}, 1, nil))
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, key, accounts.SerialiseV3(&accounts.Account{Nonce: 1}), 1, nil))
 	_, _, err = sd.GetLatest(kv.AccountsDomain, tx, key)
 	require.NoError(t, err)
 }
 
 func TestStateGetterUsesSharedBranchCacheForCommitment(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db := newTestDb(t, 16)
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)

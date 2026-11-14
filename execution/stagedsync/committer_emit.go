@@ -19,7 +19,10 @@ package stagedsync
 import (
 	"slices"
 
+	keccak "github.com/erigontech/fastkeccak"
+
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -80,14 +83,25 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, bas
 			address, slot := a.Value(), k.Value()
 			plainKey := slices.Concat(address[:], slot[:])
 			m[k] = cc.touchHash(plainKey)
-			if cc.prefetchFn != nil {
-				cc.prefetchFn(plainKey)
+			if cc.branchPrefetch == nil {
+				if cc.prefetchFn != nil {
+					cc.prefetchFn(plainKey)
+				}
+			} else if !cc.balBlock {
+				cc.queueBranch(cc.touchedAccounts[a], m[k])
 			}
 		}
 	}
 }
 
 func (cc *commitmentCalculator) touchHash(plainKey []byte) []byte {
+	if cc.branchPrefetch != nil {
+		if len(plainKey) > length.Addr {
+			plainKey = plainKey[length.Addr:]
+		}
+		hash := keccak.Sum256(plainKey)
+		return hash[:]
+	}
 	if cc.hashAtFold {
 		return nil
 	}
@@ -107,9 +121,21 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 			cc.baseErr = err
 		}
 	}
-	if cc.prefetchFn != nil {
-		cc.prefetchFn(address[:])
+	if cc.branchPrefetch == nil {
+		if cc.prefetchFn != nil {
+			cc.prefetchFn(address[:])
+		}
+	} else if !cc.balBlock {
+		cc.queueBranch(cc.touchedAccounts[a], nil)
 	}
+}
+
+func (cc *commitmentCalculator) queueBranch(account, slot []byte) {
+	it := prefetchItem{account: [32]byte(account)}
+	if slot != nil {
+		it.slot, it.storage = [32]byte(slot), true
+	}
+	cc.branchPrefetch.add(it)
 }
 
 // emitTouched writes one commitment Update per touched key, reading each final value
@@ -123,31 +149,7 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 	}
 	for addr, hashed := range cc.touchedAccounts {
 		address := addr.Value()
-		var u commitment.Update
-		acc, ok, wasDeleted := view.GetAccount(addr)
-		if ok {
-			u = commitment.Update{
-				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-				Balance:  acc.Balance,
-				Nonce:    acc.Nonce,
-				CodeHash: acc.CodeHash.Value(),
-			}
-			if acc.CodeHash.IsEmpty() {
-				u.CodeHash = empty.CodeHash
-			}
-		} else {
-			u = commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash, DeleteStorageSubtree: true}
-		}
-		if _, ok := cc.destructed[addr]; ok {
-			u.DeleteStorageSubtree = true
-		}
-		if wasDeleted {
-			at, _ := view.DestroyedAt(addr)
-			if wiped, ok := cc.wipedAt[addr]; !ok || wiped != at {
-				u.DeleteStorageSubtree = true
-			}
-			cc.wipedAt[addr] = at
-		}
+		u := cc.accountUpdate(view, addr)
 		updates.TouchPlainKeyDirectHashed(string(address[:]), hashed, &u)
 	}
 	for addr, slots := range cc.touchedStorage {
@@ -168,6 +170,33 @@ func (cc *commitmentCalculator) emitTouched(view *state.VersionMapView, updates 
 		}
 	}
 	return view.Err()
+}
+
+func (cc *commitmentCalculator) accountUpdate(view *state.VersionMapView, addr accounts.Address) commitment.Update {
+	u := commitment.Update{Flags: commitment.DeleteUpdate, CodeHash: empty.CodeHash, DeleteStorageSubtree: true}
+	acc, ok, wasDeleted := view.GetAccount(addr)
+	if ok {
+		u = commitment.Update{
+			Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
+			Balance:  acc.Balance,
+			Nonce:    acc.Nonce,
+			CodeHash: acc.CodeHash.Value(),
+		}
+		if acc.CodeHash.IsEmpty() {
+			u.CodeHash = empty.CodeHash
+		}
+	}
+	if _, ok := cc.destructed[addr]; ok {
+		u.DeleteStorageSubtree = true
+	}
+	if wasDeleted {
+		at, _ := view.DestroyedAt(addr)
+		if wiped, ok := cc.wipedAt[addr]; !ok || wiped != at {
+			u.DeleteStorageSubtree = true
+		}
+		cc.wipedAt[addr] = at
+	}
+	return u
 }
 
 func (cc *commitmentCalculator) setBlockBase(vm *state.VersionMap, base state.StateReader) {

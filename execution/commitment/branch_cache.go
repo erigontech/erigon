@@ -17,7 +17,6 @@
 package commitment
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -32,13 +31,6 @@ import (
 // k is already a maphash.Hash output, spread uniformly across all 64 bits, so
 // the low 32 bits suffice for shard routing.
 func u64ident(k uint64) uint32 { return uint32(k) }
-
-// KeyCommitmentState must never enter the BranchCache: it changes every block.
-var KeyCommitmentState = []byte("state")
-
-func isCommitmentStateKey(prefix []byte) bool {
-	return bytes.Equal(prefix, KeyCommitmentState)
-}
 
 // BranchCache: writer stripes only make stamped publications atomic with
 // Clear; callers must still ensure one logical mutation per prefix.
@@ -509,7 +501,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 
 // PinEntry copies data; safe to mutate the input after the call.
 func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
-	if isCommitmentStateKey(prefix) {
+	if IsCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))
@@ -580,7 +572,7 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 
 // GetBefore rejects newer entries without evicting them from other readers.
 func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bool) {
-	if isCommitmentStateKey(prefix) {
+	if IsCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
 	coh := c.coh.Snapshot()
@@ -602,7 +594,7 @@ func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bo
 
 // Put copies the input data.
 func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
-	if isCommitmentStateKey(prefix) {
+	if IsCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))
@@ -624,7 +616,7 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 // committed publication or unwind, or if an Unwind or Clear ran during the read.
 func (c *BranchCache) Fill(prefix []byte, data []byte, step, txN, viewID uint64) {
 	epoch := c.coh.Epoch()
-	if viewID < c.committedView.Load() || isCommitmentStateKey(prefix) {
+	if viewID < c.committedView.Load() || IsCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))

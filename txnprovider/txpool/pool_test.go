@@ -907,6 +907,7 @@ func writeTestSenderState(t *testing.T, ctx context.Context, coreDB kv.TemporalR
 
 	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 	require.NoError(t, err)
+	sd.SetDisableInlineTouchKey(true)
 
 	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr[:], value, txNum, nil))
 	require.NoError(t, sd.Flush(ctx, tx))

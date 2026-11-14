@@ -23,12 +23,14 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -265,6 +267,7 @@ type SharedDomains struct {
 	cacheApplier     cache.Applier
 	cacheUnwind      cacheUnwindState
 	localCacheUnwind bool
+	commitmentV3     bool
 
 	// Backing frontiers stay fixed while writes and staged unwinds remain in
 	// mem; both reach the transaction during flush, which resets the memo.
@@ -319,6 +322,9 @@ type cacheUnwindState struct {
 // entry points instead of leaving Variant unset and relying on an implicit
 // fallback inside the trie constructor.
 func PickTrieVariant() commitment.TrieVariant {
+	if statecfg.ExperimentalCommitmentV3 {
+		return commitment.VariantCommitmentV3
+	}
 	if statecfg.ExperimentalParallelCommitment {
 		return commitment.VariantParallelHexPatricia
 	}
@@ -333,6 +339,9 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	o.trieCfg.Variant = PickTrieVariant()
 	for _, opt := range opts {
 		opt(&o)
+	}
+	if o.trieCfg.Variant == commitment.VariantCommitmentV3 {
+		o.useSharedBranchCache = false
 	}
 	trieCfg := o.trieCfg
 
@@ -353,6 +362,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		baseTxWritable:   kv.UnderlyingTxIsWritable(generationTx),
 		baseStateVersion: stateVersion,
 		localCacheUnwind: o.localCacheUnwind,
+		commitmentV3:     trieCfg.Variant == commitment.VariantCommitmentV3,
 	}
 
 	if o.mem != nil {
@@ -516,11 +526,28 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 		return nil
 	}
 	defer upd.Clear()
+	if upd.Deltas != nil {
+		return sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, nil)
+	}
 	putBranch := func(prefix, data, prevData []byte) error {
 		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, nil)
 	}
 	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
 	return err
+}
+
+func (sd *SharedDomains) PutCommitmentBranches(roTx kv.TemporalTx, parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
+	if batch, ok := sd.mem.(commitmentBranchBatchWriter); ok {
+		return batch.PutOwnedCommitmentBranches(parts, txNum, diff)
+	}
+	for _, part := range parts {
+		for i := range part {
+			if err := sd.DomainPutCommitmentDiff(roTx, part[i].Key, part[i].Data, txNum, part[i].Prev, diff); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) error {
@@ -533,6 +560,13 @@ func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) er
 	putBranch := func(prefix, data, prevData []byte) error {
 		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
 	}
+	apply := func() error {
+		if upd.Deltas != nil {
+			return sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, sd.mem.(commitmentDiffSwapper).CommitmentDiff())
+		}
+		_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
+		return err
+	}
 
 	if !lockHeld {
 		sd.changesetMu.Lock()
@@ -541,8 +575,7 @@ func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) er
 
 	switcher, ok := sd.mem.(changesetSwitcher)
 	if !ok {
-		_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
-		return err
+		return apply()
 	}
 
 	// Hash-aware lookup when the pending update carries a BlockHash. This
@@ -565,7 +598,7 @@ func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) er
 		// see concurrency contract on the wrappers above.
 		defer sd.SwapCommitmentDiffLocked(cs)()
 
-		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics); err != nil {
+		if err := apply(); err != nil {
 			return err
 		}
 
@@ -574,8 +607,7 @@ func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) er
 	}
 
 	// No past changeset found — write into whatever is current.
-	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
-	return err
+	return apply()
 }
 
 // AsStateGetter returns an execution-aware getter with optimized code reads.
@@ -726,6 +758,10 @@ func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte
 	return sd.mem.(commitmentBranchDiffWriter).PutCommitmentBranchDiff(ks, v, txNum, prevVal, diff)
 }
 
+type commitmentBranchBatchWriter interface {
+	PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error
+}
+
 // commitmentDiffPutDel implements kv.TemporalPutDel, routing commitment-domain
 // writes through an explicit diff (DomainPutCommitmentDiff) instead of the
 // shared, lockable target SetChangesetAccumulator installs. Non-commitment
@@ -833,6 +869,7 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 // Unwind drops [txNumUnwindTo, ∞)
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
+	sd.unwindCollectedTouches(changeset)
 	if !sd.localCacheUnwind {
 		sd.invalidateCaches(txNumUnwindTo)
 		if sd.branchCache != nil && changeset != nil {
@@ -842,6 +879,36 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 		}
 	}
 	sd.stageCacheUnwind(txNumUnwindTo)
+}
+
+func (sd *SharedDomains) unwindCollectedTouches(diffs *[kv.DomainLen][]kv.DomainEntryDiff) {
+	updates := sd.sdCtx.GetUpdates()
+	if updates.Mode() != commitment.ModeCollect {
+		return
+	}
+	retouch := func(key string) {
+		domain := kv.StorageDomain
+		if len(key) == length.Addr {
+			domain = kv.AccountsDomain
+		}
+		if v, _, _, ok := sd.latestFromMem(domain, []byte(key)); ok {
+			sd.sdCtx.TouchKey(domain, key, v)
+		}
+	}
+	if diffs == nil {
+		for _, key := range updates.UntouchAll() {
+			retouch(key)
+		}
+		return
+	}
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		for _, diff := range diffs[d] {
+			key := diff.Key[:len(diff.Key)-8]
+			if updates.Untouch(key) {
+				retouch(strings.Clone(key))
+			}
+		}
+	}
 }
 
 func (sd *SharedDomains) invalidateCaches(txNum uint64) {
@@ -1478,6 +1545,9 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
+	if domain == kv.CommitmentDomain && sd.commitmentV3 {
+		v = bytes.Clone(v)
+	}
 
 	// A bounded read observes a staged unwind, not stable committed state.
 	if willFill {
@@ -1987,7 +2057,6 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 }
 
 // ComputeCommitment evaluates commitment for gathered updates.
-// If trieWarmup toggle was enabled via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
 	// Flush any pending deferred commitment updates from the previous block
 	// into the CORRECT block's changeset (via the hash-aware lookup in
@@ -1997,12 +2066,6 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 		return nil, err
 	}
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
-}
-
-// EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
-// It requires a DB to be enabled via EnableParaTrieDB.
-func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
-	sd.sdCtx.EnableTrieWarmup(trieWarmup)
 }
 
 func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
@@ -2017,6 +2080,10 @@ func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 // instead of being applied inline, and must be flushed later via FlushPendingUpdates.
 func (sd *SharedDomains) SetDeferCommitmentUpdates(defer_ bool) {
 	sd.sdCtx.SetDeferCommitmentUpdates(defer_)
+}
+
+func (sd *SharedDomains) SetStorageFanOutMin(n int) {
+	sd.sdCtx.SetStorageFanOutMin(n)
 }
 
 // TouchChangedKeysFromHistory touches the changed keys in the commitment trie by reading the historical updates.
@@ -2043,14 +2110,23 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 		return changes, err
 	}
 	defer it.Close()
-	var k []byte
+	var k, prev []byte
 	for it.HasNext() {
 		k, _, err = it.Next()
 		if err != nil {
 			return changes, err
 		}
+		if sd.commitmentV3 {
+			if bytes.Equal(k, prev) {
+				changes++
+				continue
+			}
+			prev = append(prev[:0], k...)
+		}
 		if !sd.disableInlineTouchKey {
-			sd.GetCommitmentContext().TouchKey(d, string(k), nil)
+			if err := sd.GetCommitmentContext().TouchKeyFromState(tx, k); err != nil {
+				return changes, err
+			}
 		}
 		changes++
 	}

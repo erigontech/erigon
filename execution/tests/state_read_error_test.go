@@ -94,6 +94,7 @@ func corruptAccountRecord(t *testing.T, m *execmoduletester.ExecModuleTester, ad
 			return err
 		}
 		defer doms.Close()
+		doms.SetDisableInlineTouchKey(true)
 		if err := doms.AsPutDel(tx).DomainPut(kv.AccountsDomain, addr[:], []byte{0, 0, 0}, 0, nil); err != nil {
 			return err
 		}

@@ -67,11 +67,16 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 		return err
 	}
 
-	a.AddDependencyBtwnDomains(kv.AccountsDomain, kv.CommitmentDomain)
-	a.AddDependencyBtwnDomains(kv.StorageDomain, kv.CommitmentDomain)
+	for _, pair := range DomainDependencies() {
+		a.AddDependencyBtwnDomains(pair[0], pair[1])
+	}
 
 	a.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(100_000) // ~1k blocks of history
 	return nil
+}
+
+func DomainDependencies() [2][2]kv.Domain {
+	return [2][2]kv.Domain{{kv.AccountsDomain, kv.CommitmentDomain}, {kv.StorageDomain, kv.CommitmentDomain}}
 }
 
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
@@ -83,6 +88,23 @@ func init() {
 		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
 	}
 	InitSchemas()
+	legacyCommitmentDomain = Schema.CommitmentDomain
+	if ExperimentalCommitmentV3 {
+		EnableCommitmentV3Records(&Schema.CommitmentDomain)
+	}
+}
+
+var legacyCommitmentDomain DomainCfg
+
+func SetCommitmentV3(on bool) (restore func()) {
+	schema, v3 := Schema, ExperimentalCommitmentV3
+	ExperimentalCommitmentV3 = on
+	if on {
+		EnableCommitmentV3Records(&Schema.CommitmentDomain)
+	} else {
+		Schema.CommitmentDomain = legacyCommitmentDomain
+	}
+	return func() { Schema, ExperimentalCommitmentV3 = schema, v3 }
 }
 
 type SchemaGen struct {
@@ -190,6 +212,9 @@ func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
 // commitmentKVWriteVersion stamps v2.1 on referenced commitment files (matching main's referenced
 // default) and v2.2 on plain ones; the read ceiling (DataKV.Current = v2.2) accepts both.
 func commitmentKVWriteVersion(c *DomainCfg) version.Version {
+	if c.CommitmentV3Records {
+		return version.V3_0
+	}
 	if c.ReferencesInCommitmentBranches {
 		return version.V2_1
 	}
@@ -199,6 +224,10 @@ func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 const DefaultParallelCommitment = true
 
 var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", DefaultParallelCommitment)
+
+const DefaultCommitmentV3 = false
+
+var ExperimentalCommitmentV3 = dbg.EnvBool("COMMITMENT_V3", DefaultCommitmentV3)
 
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
@@ -378,6 +407,17 @@ var Schema = SchemaGen{
 		Name:        kv.TracesToIdx,
 		Accessors:   AccessorHashMap,
 	},
+}
+
+const CommitmentV3Accessors = AccessorBTree | AccessorExistence
+
+func EnableCommitmentV3Records(c *DomainCfg) {
+	c.CommitmentV3Records = true
+	c.Accessors = CommitmentV3Accessors
+	c.FileVersion.DataKV = version.Versions{Current: version.V3_0, MinSupported: version.V3_0}
+	c.FileVersion.AccessorBT = version.Versions{Current: version.V2_0, MinSupported: version.V1_0}
+	c.FileVersion.AccessorKVEI = version.Versions{Current: version.V1_2, MinSupported: version.V1_0}
+	c.Hist.FileVersion.DataV = version.Versions{Current: version.V3_0, MinSupported: version.V3_0}
 }
 
 func EnableHistoricalCommitment() {

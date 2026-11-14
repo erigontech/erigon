@@ -505,6 +505,28 @@ func TestSetParallelCommitment(t *testing.T) {
 	}
 }
 
+func TestSetCommitmentV3Flag(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	run := func(args ...string) bool {
+		flag := ExperimentalCommitmentV3Flag
+		app := &cli.Command{
+			Flags: []cli.Flag{&flag},
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				setParallelCommitment(cmd)
+				return nil
+			},
+		}
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		return statecfg.ExperimentalCommitmentV3
+	}
+
+	require.False(t, run(), "unset flag must leave COMMITMENT_V3 in charge")
+	require.False(t, run("--"+ExperimentalCommitmentV3Flag.Name+"=false"))
+	require.False(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
+	require.True(t, run("--"+ExperimentalCommitmentV3Flag.Name))
+	require.True(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records, "the flag must switch the commitment schema too")
+}
+
 func TestDisableBoolFlags_ExplicitFalse(t *testing.T) {
 	run := func(args ...string) (ethconfig.Config, buildercfg.BuilderConfig) {
 		txpoolDisable, proposingDisable, fakePoW := TxPoolDisableFlag, ProposingDisableFlag, FakePoWFlag

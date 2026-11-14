@@ -1435,6 +1435,7 @@ func seedResumeTestDB(t *testing.T, db kv.TemporalRwDB, seed func(putter kv.Temp
 			return err
 		}
 		defer domains.Close()
+		domains.SetDisableInlineTouchKey(true)
 		if err := seed(domains.AsPutDel(rwTx)); err != nil {
 			return err
 		}

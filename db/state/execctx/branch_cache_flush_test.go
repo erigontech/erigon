@@ -22,12 +22,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	_ "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
 type commitmentWrite struct {
@@ -85,11 +88,20 @@ func mergedCommitmentFileFixture(t *testing.T, stepSize uint64) (kv.TemporalRwDB
 	stepOneValue := []byte{0, 0, 0, 0, 2}
 	writeCommitmentRows(t, db, key, nil, commitmentWrite{txNum: 5, value: stepZeroValue})
 	writeCommitmentRows(t, db, key, stepZeroValue, commitmentWrite{txNum: 20, value: stepOneValue})
-	trieState, err := commitment.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig()).EncodeCurrentState(nil)
-	require.NoError(t, err)
-	commitmentState, err := commitmentdb.NewCommitmentState(20, 0, trieState).Encode()
-	require.NoError(t, err)
-	writeCommitmentRows(t, db, commitmentdb.KeyCommitmentState, nil, commitmentWrite{txNum: 20, value: commitmentState})
+	stateKey := commitment.KeyCommitmentState
+	var commitmentState []byte
+	if statecfg.ExperimentalCommitmentV3 {
+		stateKey = commitment.KeyCommitmentV3State
+		var err error
+		commitmentState, err = commitment.EncodeCommitmentV3State(empty.RootHash[:], 0, 20)
+		require.NoError(t, err)
+	} else {
+		trieState, err := commitment.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig()).EncodeCurrentState(nil)
+		require.NoError(t, err)
+		commitmentState, err = commitmentdb.NewCommitmentState(20, 0, trieState).Encode()
+		require.NoError(t, err)
+	}
+	writeCommitmentRows(t, db, stateKey, nil, commitmentWrite{txNum: 20, value: commitmentState})
 	writeAggregationGuard(t, db, 40)
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	require.NoError(t, agg.BuildFiles(db, 2*stepSize, unboundedFinalityCtx))
@@ -176,6 +188,7 @@ func TestBoundedGetLatestDoesNotPopulateBranchCache(t *testing.T) {
 }
 
 func TestSnapshotBranchCacheEntrySurvivesLegalUnwind(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(16)
 	db, key, frozenValue := commitmentFileFixture(t, stepSize)
 	roTx, err := db.BeginTemporalRo(t.Context())
@@ -256,6 +269,32 @@ func TestLocalCacheUnwindDoesNotPopulateBranchCache(t *testing.T) {
 	require.NoError(t, err)
 	_, _, ok := branchCache.Get(key)
 	require.False(t, ok, "a speculative session must not seed the shared branch cache")
+}
+
+func TestV3SharedDomainsLeaveBranchCacheEmpty(t *testing.T) {
+	db, key, value := commitmentFileFixture(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	branchCache := rwTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache.Clear()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantCommitmentV3
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), execctx.WithTrieConfig(cfg))
+	require.NoError(t, err)
+	defer sd.Close()
+
+	got, _, err := sd.GetLatest(kv.CommitmentDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	written := []byte{0x0b, 0x0c}
+	require.NoError(t, sd.DomainPut(kv.CommitmentDomain, rwTx, written, []byte{0, 0, 0, 0, 2}, 30, nil))
+	require.NoError(t, sd.Commit(t.Context(), rwTx))
+
+	_, _, ok := branchCache.Get(key)
+	require.False(t, ok, "read-through filled the cache")
+	_, _, ok = branchCache.Get(written)
+	require.False(t, ok, "commit wrote through to the cache")
 }
 
 // unwindDeadFork commits an unwind of the step-2 branch written at txNum 40. during runs after the unwind is

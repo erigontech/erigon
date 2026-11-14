@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -495,17 +496,19 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		return balCommitmentWarmupKeys(bal)
 	})
 	var group errgroup.Group
-	if dbg.TrieBALWarmupers > 0 {
+	if dbg.TrieBALWarmupers > 0 && !statecfg.ExperimentalCommitmentV3 {
 		group.Go(func() error {
 			return warmBALCommitment(ctx, db, trieKeys(), dbg.TrieBALWarmupers)
 		})
 	}
 	var cold coldState
 	if mmap.NewProbe() != nil {
-		group.Go(func() error {
-			prefetchBALCommitment(ctx, db, trieKeys())
-			return nil
-		})
+		if !statecfg.ExperimentalCommitmentV3 {
+			group.Go(func() error {
+				prefetchBALCommitment(ctx, db, trieKeys())
+				return nil
+			})
+		}
 		cold = stateKeysCold(ctx, db, bal)
 	}
 	group.Go(func() error {

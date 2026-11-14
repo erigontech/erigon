@@ -22,6 +22,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -37,8 +39,11 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 func beginTestRoTx(t *testing.T) kv.Tx {
@@ -293,6 +298,76 @@ func TestBlackListForPruning_ChainHistoryExpiry(t *testing.T) {
 	if !sawPreMergeTx {
 		t.Error("expected at least one pre-merge tx segment to be blacklisted; got none")
 	}
+}
+
+func TestLegacyCommitmentFiles(t *testing.T) {
+	items := snapcfg.PreverifiedItems{
+		{Name: "domain/v2.2-commitment.0-16.kv"},
+		{Name: "domain/v2.0-commitment.0-16.kvi"},
+		{Name: "domain/v2.2-commitment.16-32.kv"},
+		{Name: "domain/v3.0-commitment.16-32.kv"},
+		{Name: "domain/v2.0-commitment.16-32.bt"},
+		{Name: "domain/v3.0-commitment.32-48.kv"},
+		{Name: "domain/v2.0-commitment.32-48.bt"},
+		{Name: "history/v2.0-commitment.0-16.v"},
+		{Name: "idx/v2.0-commitment.0-16.ef"},
+		{Name: "accessor/v2.0-commitment.0-16.vi"},
+		{Name: "history/v2.0-commitment.16-32.v"},
+		{Name: "history/v3.0-commitment.16-32.v"},
+		{Name: "idx/v2.0-commitment.16-32.ef"},
+		{Name: "history/v3.0-commitment.32-48.v"},
+		{Name: "idx/v2.0-commitment.32-48.ef"},
+		{Name: "idx/v2.0-commitment.48-64.ef"},
+		{Name: "domain/v2.0-accounts.0-16.kv"},
+		{Name: "domain/v2.0-accounts.0-16.bt"},
+		{Name: "domain/v2.0-storage.0-16.kv"},
+		{Name: "domain/v2.0-storage.0-16.kvei"},
+		{Name: "domain/v2.0-code.0-16.kv"},
+		{Name: "domain/v2.0-accounts.16-32.kv"},
+		{Name: "history/v2.0-accounts.0-16.v"},
+		{Name: "idx/v2.0-storage.0-16.ef"},
+		{Name: "accessor/v2.0-accounts.0-16.vi"},
+		{Name: "v1.0-000000-000100-transactions.seg"},
+	}
+	for _, v3 := range []bool{true, false} {
+		for _, reverse := range []bool{false, true} {
+			t.Run(fmt.Sprintf("v3=%t/reverse=%t", v3, reverse), func(t *testing.T) {
+				t.Cleanup(statecfg.SetCommitmentV3(v3))
+				ordered := slices.Clone(items)
+				if reverse {
+					slices.Reverse(ordered)
+				}
+				want := map[string]bool{}
+				var names []string
+				if v3 {
+					names = []string{"domain/v2.2-commitment.0-16.kv", "domain/v2.0-commitment.0-16.kvi", "domain/v2.2-commitment.16-32.kv", "history/v2.0-commitment.0-16.v", "idx/v2.0-commitment.0-16.ef", "accessor/v2.0-commitment.0-16.vi", "history/v2.0-commitment.16-32.v", "idx/v2.0-commitment.48-64.ef", "domain/v2.0-accounts.0-16.kv", "domain/v2.0-accounts.0-16.bt", "domain/v2.0-storage.0-16.kv", "domain/v2.0-storage.0-16.kvei"}
+				} else {
+					names = []string{"domain/v3.0-commitment.16-32.kv", "domain/v3.0-commitment.32-48.kv", "domain/v2.0-commitment.32-48.bt", "history/v3.0-commitment.16-32.v", "history/v3.0-commitment.32-48.v", "idx/v2.0-commitment.32-48.ef"}
+				}
+				for _, name := range names {
+					want[name] = false
+				}
+				if v3 {
+					want["domain/v2.2-commitment.0-16.kv"] = true
+					want["domain/v2.0-accounts.0-16.kv"] = true
+					want["domain/v2.0-accounts.0-16.bt"] = true
+					want["domain/v2.0-storage.0-16.kv"] = true
+					want["domain/v2.0-storage.0-16.kvei"] = true
+				}
+				require.Equal(t, want, incompatibleCommitmentFiles(ordered, 0))
+			})
+		}
+	}
+}
+
+func TestCommitmentFilterKeepsARealManifestWithV3Off(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	cfg, ok := snapcfg.KnownCfg(networkname.Mainnet)
+	require.True(t, ok)
+	require.True(t, slices.ContainsFunc(cfg.Preverified.Items, func(p snapcfg.PreverifiedItem) bool {
+		return strings.Contains(p.Name, "commitment.")
+	}))
+	require.Empty(t, incompatibleCommitmentFiles(cfg.Preverified.Items, 0))
 }
 
 // TestBuildBlackListForPruning_CommitmentHistory locks down the commitment
@@ -654,6 +729,174 @@ func TestReceiptsSegmentRetentionCutoff_FollowsHistoryWindow(t *testing.T) {
 	require.Equal(t, uint64(head-config3.MinimalPruneDistance),
 		receiptsSegmentRetentionCutoff(prune.MinimalMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
 	require.Zero(t, receiptsSegmentRetentionCutoff(prune.ArchiveMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
+}
+
+type requestListBlockReader struct {
+	fakeBlockReader
+	freezing ethconfig.BlocksFreezing
+}
+
+func (r *requestListBlockReader) FreezingCfg() ethconfig.BlocksFreezing {
+	return r.freezing
+}
+
+func (*requestListBlockReader) TxnumReader() rawdbv3.TxNumsReader { return rawdbv3.TxNumsReader{} }
+
+type requestListDownloader struct {
+	dbservices.DownloaderClient
+	names []string
+}
+
+func (d *requestListDownloader) Download(_ context.Context, req *downloaderproto.DownloadRequest) error {
+	for _, item := range req.Items {
+		d.names = append(d.names, item.Path)
+	}
+	return nil
+}
+
+func TestSyncSnapshotsCommitmentRequestList(t *testing.T) {
+	files := []struct {
+		name       string
+		v3, legacy bool
+	}{
+		{"domain/v2.2-commitment.0-16.kv", false, true},
+		{"domain/v3.0-commitment.0-16.kv", true, false},
+		{"domain/v2.0-commitment.0-16.bt", true, true},
+		{"domain/v2.0-accounts.0-16.kv", true, true},
+		{"domain/v2.0-accounts.0-16.bt", true, true},
+		{"domain/v2.0-storage.0-16.kv", true, true},
+		{"domain/v2.0-code.0-16.kv", true, true},
+		{"domain/v2.2-commitment.16-32.kv", false, true},
+		{"domain/v3.0-commitment.16-32.kv", true, false},
+		{"domain/v2.0-commitment.16-32.bt", true, true},
+		{"domain/v2.0-accounts.16-32.kv", true, true},
+		{"domain/v3.0-commitment.32-48.kv", true, false},
+		{"domain/v2.0-commitment.32-48.bt", true, false},
+		{"history/v2.0-commitment.0-16.v", false, true},
+		{"idx/v2.0-commitment.0-16.ef", false, true},
+		{"history/v3.0-commitment.32-48.v", true, false},
+		{"idx/v2.0-commitment.32-48.ef", true, false},
+		{"history/v2.0-accounts.0-16.v", true, true},
+		{"accessor/v2.0-accounts.0-16.vi", true, true},
+	}
+	cfg, ok := snapcfg.KnownCfg(networkname.Mainnet)
+	require.True(t, ok)
+	previous := *cfg
+	t.Cleanup(func() { *cfg = previous })
+	cfg.Local = false
+	cfg.Preverified.Items = nil
+	for _, file := range files {
+		cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: file.name, Hash: strings.Repeat("0", 40)})
+	}
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%v", v3), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(v3))
+			dirs := datadir.New(t.TempDir())
+			downloader := &requestListDownloader{}
+			err := SyncSnapshots(t.Context(), "test", "test", false, false, false, BlobRetention{}, prune.ArchiveMode, NoCaplin, nil, &requestListBlockReader{}, &chain.Config{ChainName: networkname.Mainnet}, downloader, ethconfig.Sync{KeepExecutionProofs: true}, 16, dirs)
+			require.NoError(t, err)
+			var want []string
+			for _, file := range files {
+				if v3 && file.v3 || !v3 && file.legacy {
+					want = append(want, file.name)
+				}
+			}
+			require.ElementsMatch(t, want, downloader.names)
+		})
+	}
+}
+
+func TestSyncSnapshotsCommitmentV3StateTip(t *testing.T) {
+	legacyFiles := []string{
+		"domain/v2.2-commitment.0-16.kv",
+		"domain/v2.0-commitment.0-16.bt",
+		"domain/v2.0-accounts.0-16.kv",
+		"domain/v2.0-storage.0-16.kv",
+		"domain/v2.0-code.0-16.kv",
+		"domain/v2.2-commitment.16-32.kv",
+		"domain/v2.0-commitment.16-32.bt",
+		"domain/v2.0-accounts.16-32.kv",
+		"domain/v2.0-storage.16-32.kv",
+		"domain/v2.0-code.16-32.kv",
+	}
+	cfg, ok := snapcfg.KnownCfg(networkname.Mainnet)
+	require.True(t, ok)
+	previous := *cfg
+	t.Cleanup(func() { *cfg = previous })
+	cfg.Local = false
+	for _, tc := range []struct {
+		name       string
+		v3         bool
+		disableE3  bool
+		extraFiles []string
+		localFiles []string
+		wantFile   string
+	}{
+		{name: "v3 on legacy only", v3: true, wantFile: ".0-16."},
+		{name: "v3 on legacy only with state downloads disabled", v3: true, disableE3: true},
+		{name: "v3 below state tip", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv"}, wantFile: ".16-32."},
+		{name: "v3 above a legacy-only range", v3: true, extraFiles: []string{"domain/v3.0-commitment.16-32.kv"}, wantFile: ".0-16."},
+		{name: "v3 commitment split across one accounts range", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.0-accounts.0-32.kv"}, wantFile: ".0-32."},
+		{name: "v3 legacy commitment at the code tip", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.2-commitment.32-48.kv", "domain/v2.0-code.32-48.kv"}, wantFile: ".32-48."},
+		{name: "v3 code above every commitment", v3: true, extraFiles: []string{"domain/v3.0-commitment.0-16.kv", "domain/v3.0-commitment.16-32.kv", "domain/v2.0-code.32-48.kv"}, wantFile: "steps 32-48"},
+		{name: "v3 on a converted datadir", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv", "v3.0-commitment.16-32.kv"}},
+		{name: "v3 on a datadir converted below the state tip", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv"}, wantFile: ".16-32."},
+		{name: "v3 code above a converted datadir", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv", "v3.0-commitment.16-32.kv"}, extraFiles: []string{"domain/v2.0-code.32-48.kv"}, wantFile: "steps 32-48"},
+		{name: "v3 on a datadir converted only above step 0", v3: true, localFiles: []string{"v3.0-commitment.16-32.kv"}, wantFile: ".0-16."},
+		{name: "v3 on a datadir with a gap in its converted commitment", v3: true, localFiles: []string{"v3.0-commitment.0-16.kv", "v3.0-commitment.32-48.kv"}, wantFile: ".16-32."},
+		{name: "v3 off legacy only"},
+		{name: "v3 off with a v3-only range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v2.0-accounts.32-48.kv"}, wantFile: ".32-48."},
+		{name: "v3 off with a v3-only range below a legacy range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v2.0-accounts.32-48.kv", "domain/v2.2-commitment.48-64.kv", "domain/v2.0-accounts.48-64.kv"}, wantFile: ".32-48."},
+		{name: "v3 off with v3 commitment split across one accounts range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v3.0-commitment.48-64.kv", "domain/v2.0-accounts.32-64.kv"}, wantFile: ".32-64."},
+		{name: "v3 off with v3 commitment split across one accounts range below a legacy range", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v3.0-commitment.48-64.kv", "domain/v2.0-accounts.32-64.kv", "domain/v2.2-commitment.64-80.kv", "domain/v2.0-accounts.64-80.kv"}, wantFile: ".32-64."},
+		{name: "v3 off with code above every legacy commitment", extraFiles: []string{"domain/v3.0-commitment.32-48.kv", "domain/v2.0-code.32-48.kv"}, wantFile: "steps 32-48"},
+		{name: "v3 off with a commitment index past every history file", extraFiles: []string{"idx/v2.0-commitment.32-48.ef"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(tc.v3))
+			cfg.Preverified.Items = nil
+			for _, name := range legacyFiles {
+				cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: name, Hash: strings.Repeat("0", 40)})
+			}
+			for _, name := range tc.extraFiles {
+				cfg.Preverified.Items = append(cfg.Preverified.Items, snapcfg.PreverifiedItem{Name: name, Hash: strings.Repeat("0", 40)})
+			}
+			dirs := datadir.New(t.TempDir())
+			for _, name := range tc.localFiles {
+				require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), nil, 0o644))
+			}
+			downloader := &requestListDownloader{}
+			err := SyncSnapshots(t.Context(), "test", "test", false, false, false, BlobRetention{}, prune.ArchiveMode, NoCaplin, nil, &requestListBlockReader{freezing: ethconfig.BlocksFreezing{DisableDownloadE3: tc.disableE3}}, &chain.Config{ChainName: networkname.Mainnet}, downloader, ethconfig.Sync{KeepExecutionProofs: true}, 16, dirs)
+			if tc.disableE3 {
+				require.NoError(t, err)
+				for _, name := range downloader.names {
+					require.False(t, strings.HasPrefix(name, "domain/"), name)
+				}
+				return
+			}
+			if tc.wantFile != "" {
+				remedy := "commitment convert --v3"
+				if len(tc.localFiles) > 0 {
+					remedy = "--snap.skip-state-snapshot-download"
+				}
+				if !tc.v3 {
+					remedy = "run with `--experimental.commitment-v3`"
+				}
+				require.ErrorContains(t, err, remedy)
+				require.ErrorContains(t, err, tc.wantFile)
+				require.Empty(t, downloader.names)
+				return
+			}
+			require.NoError(t, err)
+			want := append(slices.Clone(legacyFiles), tc.extraFiles...)
+			if tc.v3 {
+				want = slices.DeleteFunc(want, func(name string) bool {
+					return strings.Contains(name, kv.CommitmentDomain.String())
+				})
+			}
+			require.ElementsMatch(t, want, downloader.names)
+		})
+	}
 }
 
 func TestBlobSidecarDownloadFilter(t *testing.T) {
