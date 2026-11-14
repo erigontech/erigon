@@ -18,7 +18,6 @@ package engineapi
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -74,12 +73,6 @@ type JsonRpcClient struct {
 }
 
 type RetryableErrChecker func(err error) bool
-
-func ErrIsRetryableErrChecker(target error) RetryableErrChecker {
-	return func(err error) bool {
-		return errors.Is(err, target)
-	}
-}
 
 func ErrContainsRetryableErrChecker(sub string) RetryableErrChecker {
 	return func(err error) bool {
@@ -278,39 +271,6 @@ func (c *JsonRpcClient) ForkchoiceUpdatedV4(
 	}, c.backOff(ctx))
 }
 
-func (c *JsonRpcClient) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*enginetypes.ExecutionPayload, error) {
-	return backoff.RetryWithData(func() (*enginetypes.ExecutionPayload, error) {
-		var result enginetypes.ExecutionPayload
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadV1", payloadID)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return &result, nil
-	}, c.backOff(ctx))
-}
-
-func (c *JsonRpcClient) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*enginetypes.GetPayloadResponse, error) {
-	return backoff.RetryWithData(func() (*enginetypes.GetPayloadResponse, error) {
-		var result enginetypes.GetPayloadResponse
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadV2", payloadID)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return &result, nil
-	}, c.backOff(ctx))
-}
-
-func (c *JsonRpcClient) GetPayloadV3(ctx context.Context, payloadID hexutil.Bytes) (*enginetypes.GetPayloadResponse, error) {
-	return backoff.RetryWithData(func() (*enginetypes.GetPayloadResponse, error) {
-		var result enginetypes.GetPayloadResponse
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadV3", payloadID)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return &result, nil
-	}, c.backOff(ctx))
-}
-
 func (c *JsonRpcClient) GetPayloadV4(ctx context.Context, payloadID hexutil.Bytes) (*enginetypes.GetPayloadResponse, error) {
 	return backoff.RetryWithData(func() (*enginetypes.GetPayloadResponse, error) {
 		var result enginetypes.GetPayloadResponse
@@ -341,105 +301,6 @@ func (c *JsonRpcClient) GetPayloadV6(ctx context.Context, payloadID hexutil.Byte
 			return nil, c.maybeMakePermanent(err)
 		}
 		return &result, nil
-	}, c.backOff(ctx))
-}
-
-func (c *JsonRpcClient) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) (enginetypes.ExecutionPayloadBodies, error) {
-	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBody, error) {
-		var result []*enginetypes.ExecutionPayloadBody
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByHashV1", hashes)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return result, nil
-	}, c.backOff(ctx))
-}
-
-func (c *JsonRpcClient) GetPayloadBodiesByHashV2(ctx context.Context, hashes []common.Hash) (enginetypes.ExecutionPayloadBodiesV2, error) {
-	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBodyV2, error) {
-		var result []*enginetypes.ExecutionPayloadBodyV2
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByHashV2", hashes)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return result, nil
-	}, c.backOff(ctx))
-}
-
-func (c *JsonRpcClient) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) (enginetypes.ExecutionPayloadBodies, error) {
-	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBody, error) {
-		var result []*enginetypes.ExecutionPayloadBody
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByRangeV1", start, count)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return result, nil
-	}, c.backOff(ctx))
-}
-
-func (c *JsonRpcClient) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) (enginetypes.ExecutionPayloadBodiesV2, error) {
-	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBodyV2, error) {
-		var result []*enginetypes.ExecutionPayloadBodyV2
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByRangeV2", start, count)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return result, nil
-	}, c.backOff(ctx))
-}
-
-func (c *JsonRpcClient) GetClientVersionV1(ctx context.Context, callerVersion *enginetypes.ClientVersionV1) ([]enginetypes.ClientVersionV1, error) {
-	return backoff.RetryWithData(func() ([]enginetypes.ClientVersionV1, error) {
-		var result []enginetypes.ClientVersionV1
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getClientVersionV1", callerVersion)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return result, nil
-	}, c.backOff(ctx))
-}
-
-func (c *JsonRpcClient) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*enginetypes.BlobAndProofV1, error) {
-	return backoff.RetryWithData(func() ([]*enginetypes.BlobAndProofV1, error) {
-		var result []*enginetypes.BlobAndProofV1
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getBlobsV1", blobHashes)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return result, nil
-	}, c.backOff(ctx))
-}
-
-func (c *JsonRpcClient) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) ([]*enginetypes.BlobAndProofV2, error) {
-	return backoff.RetryWithData(func() ([]*enginetypes.BlobAndProofV2, error) {
-		var result []*enginetypes.BlobAndProofV2
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getBlobsV2", blobHashes)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return result, nil
-	}, c.backOff(ctx))
-}
-
-func (c *JsonRpcClient) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) ([]*enginetypes.BlobAndProofV2, error) {
-	return backoff.RetryWithData(func() ([]*enginetypes.BlobAndProofV2, error) {
-		var result []*enginetypes.BlobAndProofV2
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getBlobsV3", blobHashes)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return result, nil
-	}, c.backOff(ctx))
-}
-
-func (c *JsonRpcClient) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellMask hexutil.Bytes) ([]*enginetypes.BlobCellsAndProofsV1, error) {
-	return backoff.RetryWithData(func() ([]*enginetypes.BlobCellsAndProofsV1, error) {
-		var result []*enginetypes.BlobCellsAndProofsV1
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getBlobsV4", blobHashes, cellMask)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return result, nil
 	}, c.backOff(ctx))
 }
 
