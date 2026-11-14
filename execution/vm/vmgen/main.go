@@ -47,6 +47,8 @@ import (
 type fastOp struct {
 	name       string
 	execute    string // jump-table execute func, inlined as the case body; "" for the makeDup and makePush closures
+	inline     string // func inlined instead of execute, for the words guard admits
+	guard      string // condition for taking the fast path with inline
 	gas        string
 	pop, push  int
 	memorySize string // set for memory ops, which take the fast path only when memory need not grow
@@ -127,7 +129,7 @@ func coldOps() []fastOp {
 		op("ORIGIN", "opOrigin"),
 		op("CALLER", "opCaller"),
 		op("CALLDATASIZE", "opCallDataSize"),
-		alu("CALLDATALOAD", "opCallDataLoad", 1),
+		{name: "CALLDATALOAD", execute: "opCallDataLoad", inline: "opCallDataLoadWhole", guard: "callDataLoadWhole(stack.peek(), callContext.input)", gas: "GasFastestStep", pop: 1, push: 1},
 		op("CODESIZE", "opCodeSize"),
 		op("GASPRICE", "opGasprice"),
 		forked(op("RETURNDATASIZE", "opReturnDataSize")),
@@ -197,7 +199,7 @@ func inlineBody(srcs map[string][]byte, o fastOp) string {
 		fn, ok := d.(*ast.FuncDecl)
 		switch {
 		case !ok:
-		case fn.Name.Name == o.execute:
+		case fn.Name.Name == cmp.Or(o.inline, o.execute):
 			typ, body = fn.Type, fn.Body
 		case o.execute == "" && strings.HasPrefix(o.name, "DUP") && fn.Name.Name == "makeDup":
 			// The DUP closure reads depth, which makeDup derives from the DUP number.
@@ -426,6 +428,9 @@ func fastSwitch(srcs map[string][]byte, ops []fastOp) string {
 		}
 		if o.allocated != "" {
 			cond = append(cond, o.allocated)
+		}
+		if o.guard != "" {
+			cond = append(cond, o.guard)
 		}
 		gas := o.gas
 		if o.copyLen != "" {

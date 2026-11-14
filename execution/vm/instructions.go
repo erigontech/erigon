@@ -502,24 +502,30 @@ func opCallValue(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 
 func opCallDataLoad(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x := scope.Stack.peek()
+	if callDataLoadWhole(x, scope.input) {
+		return opCallDataLoadWhole(pc, evm, scope)
+	}
+	x.SetBytes(getData(scope.input, x.Uint64(), 32))
+	return pc, nil, nil
+}
+
+// callDataLoadWhole reports that the word at x is entirely inside the calldata or entirely past its end.
+func callDataLoadWhole(x *uint256.Int, input []byte) bool {
 	offset, overflow := x.Uint64WithOverflow()
-	if overflow {
-		x.Clear()
+	end := offset + 32
+	return overflow || offset >= uint64(len(input)) || (end >= offset && end <= uint64(len(input)))
+}
+
+// opCallDataLoadWhole is opCallDataLoad for callDataLoadWhole words; run inlines only this part, because a call in run
+// slows the other ops on its loop.
+func opCallDataLoadWhole(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	x := scope.Stack.peek()
+	offset, overflow := x.Uint64WithOverflow()
+	if !overflow && offset < uint64(len(scope.input)) {
+		x.SetBytes32(scope.input[offset : offset+32])
 		return pc, nil, nil
 	}
-	// Common case: 32 bytes are in range, so skip getData's bounds checks and
-	// RightPadBytes' allocation.
-	if end := offset + 32; end >= offset && end <= uint64(len(scope.input)) {
-		x.SetBytes32(scope.input[offset:end])
-		return pc, nil, nil
-	}
-	// Past the end of calldata the word is all zeros; Clear avoids the 32-byte
-	// allocation RightPadBytes would make on every op.
-	if offset >= uint64(len(scope.input)) {
-		x.Clear()
-		return pc, nil, nil
-	}
-	x.SetBytes(getData(scope.input, offset, 32))
+	x.Clear()
 	return pc, nil, nil
 }
 
