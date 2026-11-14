@@ -19,6 +19,7 @@ package recsplit
 import (
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"unsafe"
 
@@ -75,6 +76,9 @@ func TestForceHashInRAM(t *testing.T) {
 		TmpDir:     tmpDir,
 		IndexFile:  indexFile,
 		LeafSize:   8,
+		// the production layout: offsets and existence filter come before the hash part
+		Enums:              true,
+		LessFalsePositives: true,
 	}, log.New())
 	require.NoError(t, err)
 	defer rs.Close()
@@ -89,14 +93,15 @@ func TestForceHashInRAM(t *testing.T) {
 
 	mapStart := uintptr(unsafe.Pointer(&idx.mmapHandle1[0]))
 	mapEnd := mapStart + uintptr(len(idx.mmapHandle1))
-	gr := uintptr(unsafe.Pointer(&idx.grData[0]))
-	require.False(t, gr >= mapStart && gr < mapEnd, "Golomb-Rice codes still read from the mapped file")
+	mapped := func(p uintptr) bool { return p >= mapStart && p < mapEnd }
+	require.False(t, mapped(uintptr(unsafe.Pointer(&idx.grData[0]))), "Golomb-Rice codes still read from the mapped file")
+	require.False(t, mapped(reflect.ValueOf(&idx.ef).Elem().FieldByName("data").Pointer()), "bucket directory still read from the mapped file")
 
 	reader := NewIndexReader(idx)
 	for i := range keys {
-		offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
+		ordinal, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 		require.True(t, ok)
-		require.Equal(t, uint64(i*17), offset)
+		require.Equal(t, uint64(i*17), idx.OrdinalLookup(ordinal))
 	}
 }
 
