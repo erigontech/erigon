@@ -240,7 +240,7 @@ func ExecV3(ctx context.Context,
 		workerCount: cfg.syncCfg.ExecWorkerCount,
 	}
 	if isApplyingBlocks && (!initialCycle || dbg.ReadAheadInitial) {
-		readAhead, clean = exec.BlocksReadAhead(ctx, dbg.ReadAheadBlocksWorkers, cfg.db, cfg.engine, cfg.blockReader, cfg.chainConfig, dbg.ReadAheadExec, dbg.ReadAheadExecCommitment, &pe.execBlockNum, dbg.ReadAheadDistance)
+		readAhead, clean = exec.BlocksReadAhead(ctx, dbg.ReadAheadBlocksWorkers, cfg.db, cfg.engine, cfg.blockReader, cfg.chainConfig, dbg.ReadAheadExec, &pe.execBlockNum, dbg.ReadAheadDistance, dbg.ReadAheadExecCommitment)
 		defer clean()
 	}
 	pe.lastCommittedTxNum.Store(inputTxNum)

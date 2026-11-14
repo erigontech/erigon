@@ -1434,7 +1434,7 @@ func TestReviewReadAheadCleanupStopsQueuedExecution(t *testing.T) {
 				<-release
 			}
 		}
-		input, clean := BlocksReadAhead(t.Context(), 1, &singleTxRoDB{tx: tx}, ethash.NewFaker(), readAheadBlockReader{block: block}, chain.TestChainOsakaConfig, true, false, nil, 500)
+		input, clean := BlocksReadAhead(t.Context(), 1, &singleTxRoDB{tx: tx}, ethash.NewFaker(), readAheadBlockReader{block: block}, chain.TestChainOsakaConfig, true, nil, 500)
 		input <- 0
 		<-entered
 		input <- 1
@@ -1498,4 +1498,14 @@ func TestReviewReadAheadDoesNotCacheStaleAuRaCertifier(t *testing.T) {
 	observed = common.Address{}
 	isService := engine.IsServiceTransaction(sender, currentStateCall)
 	require.True(t, isService, "real execution must use current certifier %s; called %s, service = %t", currentCertifier, observed, isService)
+}
+
+func TestReadAheadNegativeDistanceDoesNotPanic(t *testing.T) {
+	var observed any
+	func() {
+		defer func() { observed = recover() }()
+		_, clean := BlocksReadAhead(t.Context(), 2, nil, nil, nil, nil, false, nil, -1)
+		clean()
+	}()
+	require.Nil(t, observed, "READ_AHEAD_DISTANCE=-1 must not crash execution; observed panic: %v", observed)
 }

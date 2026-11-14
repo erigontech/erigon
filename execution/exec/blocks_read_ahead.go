@@ -801,7 +801,11 @@ var (
 	readAheadPrefetchCommitment = prefetchCommitmentWithTx
 )
 
-func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute, executeCommitment bool, execBlock *atomic.Uint64, distance int) (chan uint64, context.CancelFunc) {
+func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute bool, execBlock *atomic.Uint64, distance int, commitmentSwitch ...bool) (chan uint64, context.CancelFunc) {
+	if workers <= 0 || distance <= 0 {
+		return nil, func() {}
+	}
+	executeCommitment := len(commitmentSwitch) > 0 && commitmentSwitch[0]
 	readAhead := make(chan uint64, distance)
 	workerCtx, cancel := context.WithCancel(ctx)
 	g, gCtx := errgroup.WithContext(workerCtx)
