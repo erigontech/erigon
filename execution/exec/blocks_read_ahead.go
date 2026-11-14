@@ -762,11 +762,10 @@ func (w *readAheadRecordingWriter) DeleteAccount(addr accounts.Address, original
 }
 
 func (w *readAheadRecordingWriter) WriteAccountStorage(addr accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
-	if original == value {
-		return w.StateWriter.WriteAccountStorage(addr, incarnation, key, original, value)
+	if original != value {
+		w.stats.StorageWritten++
+		w.stats.StorageWrittenKeys[ReadAheadStorageKey{Address: addr, Slot: key}] = struct{}{}
 	}
-	w.stats.StorageWritten++
-	w.stats.StorageWrittenKeys[ReadAheadStorageKey{Address: addr, Slot: key}] = struct{}{}
 	return w.StateWriter.WriteAccountStorage(addr, incarnation, key, original, value)
 }
 

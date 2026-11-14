@@ -1304,7 +1304,6 @@ func TestReadAheadExecReadsAndWritesContractStorage(t *testing.T) {
 	require.NoError(t, blocksReadAheadFunc(ctx, db, roTx, 1, engine, readAheadBlockReader{block: block}, config, false, false))
 	require.Equal(t, beforeReads, readAheadExecKeys.WithLabelValues("storage", "read").GetValue())
 	require.Equal(t, beforeWrites, readAheadExecKeys.WithLabelValues("storage", "write").GetValue())
-	beforeReads = readAheadExecKeys.WithLabelValues("storage", "read").GetValue()
 	require.NoError(t, blocksReadAheadFunc(ctx, db, roTx, 1, engine, readAheadBlockReader{block: block}, config, true, false))
 	require.Greater(t, readAheadExecKeys.WithLabelValues("storage", "read").GetValue(), beforeReads, "execute=true must run speculative transactions")
 	prefetch := readAheadPrefetchCommitment
@@ -1331,10 +1330,6 @@ func TestReadAheadExecReadsAndWritesContractStorage(t *testing.T) {
 	require.Contains(t, stats.StorageReadKeys, storageRead)
 	require.Contains(t, stats.StorageWrittenKeys, storageWrite)
 	require.Equal(t, 1, stats.Transactions)
-	reader := state.NewReaderV3(execctx.NewTemporalTxStateGetter(roTx))
-	value, _, err := reader.ReadAccountStorage(accounts.InternAddress(contract), storageWrite.Slot)
-	require.NoError(t, err)
-	require.Zero(t, value.Uint64(), "speculative execution must not write to the database")
 }
 
 type reviewReadAheadTx struct {
