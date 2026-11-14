@@ -53,7 +53,7 @@ func allForksConfig() *chain.Config {
 }
 
 func newTestEngineServer(cfg *chain.Config, consuming bool) *EngineServer {
-	return NewEngineServer(log.New(), cfg, nil, nil, false, true, false, consuming, nil, nil, 0, 0)
+	return NewEngineServer(log.New(), cfg, &stubExecutionModule{}, nil, false, true, false, consuming, nil, nil, 0, 0)
 }
 
 func newBodiesTestEngineServer(t *testing.T, module execmodule.ExecutionModule) *EngineServer {
