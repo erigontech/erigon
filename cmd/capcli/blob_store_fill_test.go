@@ -44,10 +44,12 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
@@ -244,14 +246,23 @@ func TestBlobArchiveStoreFillReportsASlotWithoutCanonicalRoot(t *testing.T) {
 	require.ErrorContains(t, err, fmt.Sprint(fillTestSlot))
 }
 
-func TestBlobArchiveStoreFillDryRunFetchesAndWritesNothing(t *testing.T) {
+func TestBlobArchiveStoreFillDryRunWritesNothing(t *testing.T) {
 	f := newFillFixture(t)
 	root := f.addBlock(fillTestSlot, 1)
+	url, _ := f.endpoint(false)
+
+	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot, DryRun: true}, nil))
+	require.False(t, f.storedValid(fillTestSlot, root))
+}
+
+func TestBlobArchiveStoreFillDryRunAsksNothingOfAStoredRange(t *testing.T) {
+	f := newFillFixture(t)
+	root := f.addBlock(fillTestSlot, 1)
+	f.storeValid(root)
 	url, requests := f.endpoint(false)
 
 	require.NoError(t, f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot, DryRun: true}, nil))
 	require.Zero(t, requestsFor(requests, root))
-	require.False(t, f.storedValid(fillTestSlot, root))
 }
 
 func TestBlobArchiveStoreFillFallsBackToTheNextEndpoint(t *testing.T) {
@@ -490,6 +501,85 @@ func TestBlobArchiveStoreFillDoesNotRetryABadRequest(t *testing.T) {
 	require.EqualValues(t, 1, calls.Load())
 }
 
+const windowTestSlots, windowTestServedFrom = 32, 24
+
+var notServedAnswers = map[string]http.HandlerFunc{
+	"400":   func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadRequest) },
+	"404":   func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) },
+	"empty": func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"data":[]}`)) },
+}
+
+func (f *fillFixture) prunedChain(notServed http.HandlerFunc) (url string, roots []common.Hash, prunedRequests, allRequests *atomic.Int32) {
+	pruned := map[common.Hash]bool{}
+	for i := range uint64(windowTestSlots) {
+		roots = append(roots, f.addBlock(fillTestSlot+i, 1))
+		pruned[roots[i]] = i < windowTestServedFrom
+	}
+	good, _ := f.endpoint(false)
+	prunedRequests, allRequests = &atomic.Int32{}, &atomic.Int32{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		allRequests.Add(1)
+		if pruned[common.HexToHash(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:])] {
+			prunedRequests.Add(1)
+			notServed(w, r)
+			return
+		}
+		http.Redirect(w, r, good+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	f.t.Cleanup(srv.Close)
+	return srv.URL, roots, prunedRequests, allRequests
+}
+
+func TestBlobArchiveStoreFillSkipsSlotsBelowTheFirstSlotAnEndpointServes(t *testing.T) {
+	for name, notServed := range notServedAnswers {
+		t.Run(name, func(t *testing.T) {
+			f := newFillFixture(t)
+			url, roots, prunedRequests, _ := f.prunedChain(notServed)
+
+			err := f.fill(&BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + windowTestSlots - 1}, nil)
+			require.LessOrEqual(t, prunedRequests.Load(), int32(fillWorkers+5), "every pruned slot was requested")
+			require.ErrorContains(t, err, fmt.Sprintf("%d slots with blobs are not served by any endpoint", windowTestServedFrom))
+			for i := windowTestServedFrom; i < windowTestSlots; i++ {
+				require.True(t, f.storedValid(fillTestSlot+uint64(i), roots[i]))
+			}
+		})
+	}
+}
+
+func TestBlobArchiveStoreFillDryRunFindsTheFirstSlotAnEndpointServes(t *testing.T) {
+	for name, notServed := range notServedAnswers {
+		t.Run(name, func(t *testing.T) {
+			f := newFillFixture(t)
+			url, roots, _, allRequests := f.prunedChain(notServed)
+
+			cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + windowTestSlots - 1, DryRun: true}
+			require.NoError(t, f.fill(cmd, nil))
+			require.EqualValues(t, fillTestSlot+windowTestServedFrom, cmd.windows[0].from.Load())
+			require.LessOrEqual(t, allRequests.Load(), int32(6), "more requests than a binary search over the range")
+			for i, root := range roots {
+				require.False(t, f.storedValid(fillTestSlot+uint64(i), root))
+			}
+		})
+	}
+}
+
+func TestBlobArchiveStoreFillDryRunLogsSlotsBelowTheFirstSlotAnEndpointServes(t *testing.T) {
+	f := newFillFixture(t)
+	url, _, _, _ := f.prunedChain(notServedAnswers["400"])
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + windowTestSlots - 1, DryRun: true}
+	var logs bytes.Buffer
+	oldHandler := log.Root().GetHandler()
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.SyncHandler(log.StreamHandler(&logs, log.LogfmtFormat()))))
+	t.Cleanup(func() { log.Root().SetHandler(oldHandler) })
+
+	require.NoError(t, f.fill(cmd, nil))
+	output := logs.String()
+	for i := range windowTestServedFrom {
+		require.Contains(t, output, fmt.Sprintf("msg=\"Slot needs its sidecars\" slot=%d", fillTestSlot+uint64(i)))
+	}
+	require.Equal(t, windowTestServedFrom, strings.Count(output, "served=false"))
+}
+
 // Providers that authenticate with a query-string key must get the block id in the path.
 func TestBlobArchiveStoreFillKeepsTheEndpointQuery(t *testing.T) {
 	f := newFillFixture(t)
@@ -618,4 +708,102 @@ func TestBlobArchiveStoreFillRefusesALockedDatadir(t *testing.T) {
 		DryRun:       true,
 	}
 	require.ErrorIs(t, cmd.Run(t.Context()), datadir.ErrDataDirLocked)
+}
+
+type fillReadCounter struct {
+	freezeblocks.BeaconSnapshotReader
+	reads atomic.Uint64
+}
+
+func (r *fillReadCounter) ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	r.reads.Add(1)
+	return r.BeaconSnapshotReader.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
+}
+
+type failingFillReader struct {
+	freezeblocks.BeaconSnapshotReader
+	calls  atomic.Uint64
+	failAt uint64
+	err    error
+}
+
+func (r *failingFillReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	if r.calls.Add(1) == r.failAt {
+		return nil, r.err
+	}
+	return r.BeaconSnapshotReader.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
+}
+
+func TestBlobArchiveStoreFillStopsWhenWindowReadFails(t *testing.T) {
+	for _, dryRun := range []bool{true, false} {
+		t.Run(fmt.Sprint(dryRun), func(t *testing.T) {
+			f := newFillFixture(t)
+			f.addBlock(fillTestSlot, 1)
+			toSlot := fillTestSlot
+			if !dryRun {
+				f.addBlock(fillTestSlot+1, 1)
+				toSlot++
+			}
+			url, _ := f.endpoint(true)
+			readErr := errors.New("window read failed")
+			reader := &failingFillReader{BeaconSnapshotReader: f.blocks, failAt: 2, err: readErr}
+			cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: toSlot, DryRun: dryRun, windows: make([]endpointWindow, 1)}
+
+			err := cmd.fillSlot(t.Context(), f.db, reader, &writeErrRecorder{BlobStorage: f.store}, fillTestSlot, &fillReport{})
+			require.ErrorIs(t, err, readErr)
+			require.ErrorContains(t, err, "find the window of endpoint 1")
+		})
+	}
+}
+
+func TestBlobArchiveStoreFillSparseWindowReads(t *testing.T) {
+	const slots = uint64(65_536)
+	f := newFillFixture(t)
+	f.addBlock(fillTestSlot-1, 0)
+	f.addBlock(fillTestSlot+slots-1, 1)
+	url, _ := f.endpoint(false)
+	reader := &fillReadCounter{BeaconSnapshotReader: f.blocks}
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + slots - 1, DryRun: true}
+	require.NoError(t, cmd.fill(t.Context(), f.db, reader, f.store, 0))
+	t.Logf("sparse slots=%d reads=%d", slots, reader.reads.Load())
+	require.LessOrEqual(t, reader.reads.Load(), 2*slots+64, "the window search scanned a blob-free interval more than once")
+}
+
+func TestBlobArchiveStoreFillSparseWindowBoundary(t *testing.T) {
+	for _, served := range []bool{true, false} {
+		t.Run(fmt.Sprint(served), func(t *testing.T) {
+			f := newFillFixture(t)
+			pruned := f.addBlock(fillTestSlot, 1)
+			f.addBlock(fillTestSlot+24, 1)
+			f.addBlock(fillTestSlot+32, 0)
+			good, _ := f.endpoint(false)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				root := common.HexToHash(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:])
+				if !served || root == pruned {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				http.Redirect(w, r, good+r.URL.Path, http.StatusTemporaryRedirect)
+			}))
+			t.Cleanup(srv.Close)
+			cmd := &BlobArchiveStoreFill{Endpoints: []string{srv.URL}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + 31, DryRun: true}
+			require.NoError(t, f.fill(cmd, nil))
+			want := cmd.ToSlot + 1
+			if served {
+				want = fillTestSlot + 24
+			}
+			require.Equal(t, want, cmd.windows[0].from.Load())
+		})
+	}
+}
+
+func TestBlobArchiveStoreFillDenseWindowReads(t *testing.T) {
+	f := newFillFixture(t)
+	url, _, _, requests := f.prunedChain(notServedAnswers["400"])
+	reader := &fillReadCounter{BeaconSnapshotReader: f.blocks}
+	cmd := &BlobArchiveStoreFill{Endpoints: []string{url}, FromSlot: fillTestSlot, ToSlot: fillTestSlot + windowTestSlots - 1, DryRun: true}
+	require.NoError(t, cmd.fill(t.Context(), f.db, reader, f.store, 0))
+	t.Logf("dense slots=%d reads=%d requests=%d", windowTestSlots, reader.reads.Load(), requests.Load())
+	require.EqualValues(t, fillTestSlot+windowTestServedFrom, cmd.windows[0].from.Load())
+	require.LessOrEqual(t, reader.reads.Load(), uint64(windowTestSlots+64))
 }
