@@ -1026,6 +1026,31 @@ func TestDecodeBlockAccessListChangeArenaReservesNoMoreThanTheBudget(t *testing.
 	}
 }
 
+// The kinds of a BAL share one decode budget, so a malformed list that fills several kinds reserves no more than a
+// valid list could hold in total.
+func TestDecodeBlockAccessListArenaKindsShareTheBudget(t *testing.T) {
+	const items = 100_000
+	list := func(body []byte) []byte {
+		prefix := make([]byte, rlp.ListPrefixLen(len(body)))
+		rlp.EncodeListPrefixToBuf(len(body), prefix)
+		return bytes.Join([][]byte{prefix, body}, nil)
+	}
+	full := list(bytes.Repeat([]byte{0xc0}, items))
+	entry := list(bytes.Join([][]byte{{0x94}, make([]byte, 20), {0xc0, 0xc0}, full, full, full}, nil))
+	enc := list(entry)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err := DecodeBlockAccessListSidecarForHeader(enc, items*BalItemCost)
+	runtime.ReadMemStats(&after)
+	if err == nil {
+		t.Fatal("decoded a malformed change list")
+	}
+	perItem := uint64(max(unsafe.Sizeof(BalanceChange{}), unsafe.Sizeof(NonceChange{}), unsafe.Sizeof(CodeChange{})) + unsafe.Sizeof(uintptr(0)))
+	if grew, limit := after.TotalAlloc-before.TotalAlloc, items*perItem+64*1024; grew > limit {
+		t.Fatalf("a %d-item budget reserved %d bytes over three kinds, more than one budget of items (%d)", items, grew, limit)
+	}
+}
+
 // A decoded BAL's arenas are freed with the BAL, while the bytecode that the state cache keeps stays alive.
 func TestDecodedBlockAccessListArenasAreFreedWithTheBAL(t *testing.T) {
 	arenas, code := decodeBudgetBALKeepingCode(t)
@@ -1038,6 +1063,7 @@ func TestDecodedBlockAccessListArenasAreFreedWithTheBAL(t *testing.T) {
 	if len(code) != 64 {
 		t.Fatal("the kept bytecode changed")
 	}
+	runtime.KeepAlive(code)
 }
 
 // decodeBudgetBALKeepingCode decodes a budget-size BAL and returns weak checks on its arenas and the bytecode a

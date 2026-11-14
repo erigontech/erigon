@@ -838,7 +838,7 @@ type blockAccessListArena struct {
 }
 
 // newBlockAccessListArena sizes each kind from a walk of the list body. The walk only counts items present in the body,
-// at most maxIndex+1 per change list (its indices strictly increase), and the budget caps every kind, so a malformed
+// at most maxIndex+1 per change list (its indices strictly increase), and all kinds share the budget, so a malformed
 // list cannot reserve more than a valid one could hold.
 func newBlockAccessListArena(body []byte, size uint64, budget *blockAccessListDecodeBudget) blockAccessListArena {
 	if uint64(len(body)) < size {
@@ -849,23 +849,27 @@ func newBlockAccessListArena(body []byte, size uint64, budget *blockAccessListDe
 		changesPerList = int(min(budget.maxIndex+1, math.MaxInt))
 	}
 	c := countBlockAccessListItems(body[:size], changesPerList)
-	limit := func(n int) int {
-		if budget != nil {
-			return int(min(uint64(n), budget.remaining))
-		}
-		return n
+	remaining := uint64(math.MaxUint64)
+	if budget != nil {
+		remaining = budget.remaining
 	}
+	take := func(n int) int {
+		k := min(uint64(n), remaining)
+		remaining -= k
+		return int(k)
+	}
+	slots, reads, storage, balances, nonces, codes := take(c.slots), take(c.reads), take(c.storage), take(c.balances), take(c.nonces), take(c.codes)
 	return blockAccessListArena{
-		slots:       make([]SlotChanges, 0, limit(c.slots)),
-		reads:       make([]common.Hash, 0, limit(c.reads)),
-		storage:     make([]StorageChange, 0, limit(c.storage)),
-		storagePtrs: make([]*StorageChange, 0, limit(c.storage)),
-		balances:    make([]BalanceChange, 0, limit(c.balances)),
-		balancePtrs: make([]*BalanceChange, 0, limit(c.balances)),
-		nonces:      make([]NonceChange, 0, limit(c.nonces)),
-		noncePtrs:   make([]*NonceChange, 0, limit(c.nonces)),
-		codes:       make([]CodeChange, 0, limit(c.codes)),
-		codePtrs:    make([]*CodeChange, 0, limit(c.codes)),
+		slots:       make([]SlotChanges, 0, slots),
+		reads:       make([]common.Hash, 0, reads),
+		storage:     make([]StorageChange, 0, storage),
+		storagePtrs: make([]*StorageChange, 0, storage),
+		balances:    make([]BalanceChange, 0, balances),
+		balancePtrs: make([]*BalanceChange, 0, balances),
+		nonces:      make([]NonceChange, 0, nonces),
+		noncePtrs:   make([]*NonceChange, 0, nonces),
+		codes:       make([]CodeChange, 0, codes),
+		codePtrs:    make([]*CodeChange, 0, codes),
 	}
 }
 
