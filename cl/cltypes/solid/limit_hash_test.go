@@ -149,3 +149,30 @@ func TestRawUint64ListHashSSZRejectsOverLimitWithCachedHash(t *testing.T) {
 	_, err = target.HashSSZ()
 	require.Error(t, err, "CopyTo")
 }
+
+func TestHashListHashSSZRejectsOverLimit(t *testing.T) {
+	list := solid.NewHashList(2)
+	for i := range 3 {
+		list.Append(common.Hash{byte(i)})
+	}
+	_, err := list.HashSSZ()
+	require.Error(t, err)
+}
+
+func TestValidatorSetHashSSZRejectsOverLimit(t *testing.T) {
+	set := solid.NewValidatorSet(2)
+	for range 3 {
+		set.Append(solid.NewValidator())
+	}
+	_, err := set.HashSSZ()
+	require.Error(t, err)
+}
+
+func TestUint64ListHashSSZRejectsOverLimit(t *testing.T) {
+	list := solid.NewUint64ListSSZ(2)
+	for i := range 3 {
+		list.Append(uint64(i))
+	}
+	_, err := list.HashSSZ()
+	require.Error(t, err)
+}

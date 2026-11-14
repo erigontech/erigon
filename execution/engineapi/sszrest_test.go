@@ -416,7 +416,7 @@ func TestSSZRESTPayloadStatusRejectsMultipleLatestValidHashes(t *testing.T) {
 	binary.LittleEndian.PutUint32(encoded[validationErrorOffsetPosition:], uint32(len(encoded)))
 
 	var decoded engine_types.PayloadStatus
-	require.ErrorContains(t, decoded.DecodeSSZ(encoded, 0), "latest_valid_hash")
+	require.ErrorContains(t, decoded.DecodeSSZ(encoded, 0), "hash list length exceeds limit: 2 > 1")
 }
 
 func TestSSZRESTForkchoiceResponseRoundTrip(t *testing.T) {

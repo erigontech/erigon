@@ -22,7 +22,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -63,37 +62,4 @@ func TestUint64ListDecodeSSZAcceptsLimit(t *testing.T) {
 	list := solid.NewUint64ListSSZ(2)
 	require.NoError(t, list.DecodeSSZ(make([]byte, 2*8), 0))
 	require.Equal(t, 2, list.Length())
-}
-
-func TestHashListHashSSZRejectsOverLimit(t *testing.T) {
-	list := solid.NewHashList(2)
-	for i := range 3 {
-		list.Append(common.Hash{byte(i)})
-	}
-	require.NotPanics(t, func() {
-		_, err := list.HashSSZ()
-		require.Error(t, err)
-	})
-}
-
-func TestValidatorSetHashSSZRejectsOverLimit(t *testing.T) {
-	set := solid.NewValidatorSet(2)
-	for range 3 {
-		set.Append(solid.NewValidator())
-	}
-	require.NotPanics(t, func() {
-		_, err := set.HashSSZ()
-		require.Error(t, err)
-	})
-}
-
-func TestUint64ListHashSSZRejectsOverLimit(t *testing.T) {
-	list := solid.NewUint64ListSSZ(2)
-	for i := range 3 {
-		list.Append(uint64(i))
-	}
-	require.NotPanics(t, func() {
-		_, err := list.HashSSZ()
-		require.Error(t, err)
-	})
 }
