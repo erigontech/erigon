@@ -35,6 +35,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -85,7 +86,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 			logger.Warn("WebSocket upgrade failed", "err", err)
 			return
 		}
-		codec := newWebsocketCodec(conn, hw.conn, &s.ingress, r.Host, r.Header, r.RemoteAddr)
+		codec := newWebsocketCodec(conn, hw.conn, &s.ingress, s.batchLimit, r.Host, r.Header, r.RemoteAddr)
 		// Tag the connection context so BeginRo fails fast (ErrReadTxLimitExceeded)
 		// instead of blocking indefinitely when the DB semaphore is full.
 		// r.Context() remains valid for the lifetime of the WebSocket session because
@@ -298,6 +299,10 @@ type wsConnAdapter struct {
 	budget   *ingressBudget // the server's, nil on the client side
 	mu       sync.Mutex
 	deadline time.Time
+
+	callSlots chan struct{} // one per message being handled, nil when not limited
+	closed    <-chan any
+	slotWaits atomic.Uint64 // odd while the read loop waits for a call slot
 }
 
 // hijackRecorder keeps the socket websocket.Accept hijacks, so writes can bound it directly.
@@ -451,14 +456,19 @@ func (a *wsConnAdapter) readFrame() ([]byte, func(), error) {
 		_, data, err := a.conn.Read(context.Background())
 		return data, nil, err
 	}
+	if err := a.acquireCallSlot(); err != nil {
+		return nil, nil, err
+	}
 	_, r, err := a.conn.Reader(context.Background())
 	if err != nil {
+		a.releaseCallSlot()
 		return nil, nil, err
 	}
 	body := a.budget.reader(r)
 	data, err := readAllBody(body, 0)
 	if err != nil {
 		body.release()
+		a.releaseCallSlot()
 		if errors.Is(err, errServerOverloaded) {
 			// A graceful close drains the rest of the refused frame with no read
 			// deadline, which a peer withholding it can stall; drop the socket instead.
@@ -466,13 +476,44 @@ func (a *wsConnAdapter) readFrame() ([]byte, func(), error) {
 		}
 		return nil, nil, err
 	}
-	return data, body.release, nil
+	return data, func() {
+		body.release()
+		a.releaseCallSlot()
+	}, nil
+}
+
+// acquireCallSlot holds the read loop until the connection has a free call slot. Nothing reads pongs meanwhile,
+// so slotWaits tells the ping not to take the silence for a dead peer.
+func (a *wsConnAdapter) acquireCallSlot() error {
+	if a.callSlots == nil {
+		return nil
+	}
+	select {
+	case a.callSlots <- struct{}{}:
+		return nil
+	default:
+	}
+	a.slotWaits.Add(1)
+	defer a.slotWaits.Add(1)
+	select {
+	case a.callSlots <- struct{}{}:
+		return nil
+	case <-a.closed:
+		return net.ErrClosed
+	}
+}
+
+func (a *wsConnAdapter) releaseCallSlot() {
+	if a.callSlots != nil {
+		<-a.callSlots
+	}
 }
 
 type websocketCodec struct {
 	*jsonCodec
-	conn *websocket.Conn
-	info PeerInfo
+	conn    *websocket.Conn
+	adapter *wsConnAdapter
+	info    PeerInfo
 
 	pingTimer *time.Timer
 }
@@ -480,21 +521,26 @@ type websocketCodec struct {
 // NewWebsocketCodec wraps a coder websocket connection as a ServerCodec.
 // remoteAddr should be r.RemoteAddr on the server side, or the endpoint URL on the client side.
 func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remoteAddr string) ServerCodec {
-	return newWebsocketCodec(conn, nil, nil, host, req, remoteAddr)
+	return newWebsocketCodec(conn, nil, nil, 0, host, req, remoteAddr)
 }
 
 // newWebsocketCodec is NewWebsocketCodec with the hijacked socket, which bounds and coalesces
-// server writes, and the server's ingress budget.
-func newWebsocketCodec(conn *websocket.Conn, netConn *heldConn, budget *ingressBudget, host string, req http.Header, remoteAddr string) *websocketCodec {
+// server writes, the server's ingress budget, and the limit of messages handled at once (0 for none).
+func newWebsocketCodec(conn *websocket.Conn, netConn *heldConn, budget *ingressBudget, callLimit int, host string, req http.Header, remoteAddr string) *websocketCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
 	adapter := &wsConnAdapter{conn: conn, netConn: netConn, budget: budget}
 	wc := &websocketCodec{
 		jsonCodec: newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame),
 		conn:      conn,
+		adapter:   adapter,
 		info: PeerInfo{
 			Transport:  "ws",
 			RemoteAddr: remoteAddr,
 		},
+	}
+	adapter.closed = wc.closed()
+	if callLimit > 0 {
+		adapter.callSlots = make(chan struct{}, callLimit)
 	}
 	wc.held = netConn
 	wc.writeTimeout = wsPingInterval
@@ -531,10 +577,15 @@ func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
 
 // ping sends a ping frame once the connection has been idle for wsPingInterval.
 func (wc *websocketCodec) ping() {
+	slotWaits := wc.adapter.slotWaits.Load()
+	if slotWaits%2 == 1 {
+		wc.resetPing()
+		return
+	}
 	pingCtx, cancel := context.WithTimeout(context.Background(), wsPingWriteTimeout)
 	err := wc.conn.Ping(pingCtx)
 	cancel()
-	if err != nil {
+	if err != nil && wc.adapter.slotWaits.Load() == slotWaits {
 		// coder/websocket leaves the connection open when the pong does not arrive in time.
 		_ = wc.conn.CloseNow()
 		return
