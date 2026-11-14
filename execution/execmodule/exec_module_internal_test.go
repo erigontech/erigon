@@ -239,7 +239,7 @@ func TestForkValidatorSuspendsReadAheadBeforeItsOwnUnwind(t *testing.T) {
 	// Stop at the suspension boundary; this test needs no execution pipeline to
 	// prove that suspension failure aborts before the validator stages its unwind.
 	suspendErr := errors.New("read-ahead suspension cancelled")
-	_, _, _, criticalErr := fv.ValidatePayload(t.Context(), nil, nil, payloadHeader, &types.RawBody{}, func() error {
+	_, _, _, criticalErr := fv.ValidatePayload(t.Context(), nil, nil, payloadHeader, &types.Body{}, func() error {
 		return suspendErr
 	}, log.New())
 	require.ErrorIs(t, criticalErr, suspendErr)
@@ -269,7 +269,7 @@ func TestRecordBlockMetricsTakesCommitmentTimeFromSharedDomains(t *testing.T) {
 	hash := header.Hash()
 
 	sd.AddCommitmentTime(5 * time.Millisecond)
-	fv.recordBlockMetrics(sd, header, &types.RawBody{}, hash, &blockmetrics.Sample{}, 1, 20*time.Millisecond, 12*time.Millisecond)
+	fv.recordBlockMetrics(sd, header, &types.Body{}, hash, &blockmetrics.Sample{}, 1, 20*time.Millisecond, 12*time.Millisecond)
 
 	rec := fv.TakeBlockMetrics(hash)
 	require.NotNil(t, rec)

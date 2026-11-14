@@ -353,11 +353,6 @@ func (c *RwCursorPseudoDupSort) CountDuplicates() (uint64, error) {
 
 const Unlim int = -1 // const Unbounded/EOF/EndOfTable []byte = nil
 
-type StatelessRwTx interface {
-	Getter
-	Putter
-}
-
 type GetPut interface {
 	Getter
 	Putter
@@ -790,16 +785,6 @@ type BucketMigrator interface {
 	CreateTable(string) error
 	ExistsTable(string) (bool, error)
 	ClearTable(string) error
-}
-
-// PendingMutations in-memory storage of changes
-// Later they can either be flushed to the database or abandon
-type PendingMutations interface {
-	Putter
-	// Flush all in-memory data into `tx`
-	Flush(ctx context.Context, tx RwTx) error
-	Close()
-	BatchSize() int
 }
 
 type (

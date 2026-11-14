@@ -250,8 +250,8 @@ func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Blo
 	return c.InsertBlocks(ctx, []*types.Block{block})
 }
 
-func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Hash, number uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {
-	result, err := c.executionModule.ValidateChain(ctx, hash, number)
+func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, block *types.Block) (execmodule.ExecutionStatus, *string, common.Hash, error) {
+	result, err := c.executionModule.ValidateChain(ctx, block)
 	if err != nil {
 		return 0, nil, common.Hash{}, err
 	}

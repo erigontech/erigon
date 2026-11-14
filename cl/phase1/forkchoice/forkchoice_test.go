@@ -1172,6 +1172,7 @@ func TestLightClientEventsTakeTheAttestedHeaderFork(t *testing.T) {
 	store := &ForkChoiceStore{
 		forkGraph: &getFinalizedExecutionHashForkGraph{
 			afterUpdate:           update,
+			afterFinalityUpdate:   update,
 			addChainSegmentStatus: fork_graph.Success,
 		},
 		emitters: beaconevents.NewEventEmitter(),
@@ -1192,6 +1193,30 @@ func TestLightClientEventsTakeTheAttestedHeaderFork(t *testing.T) {
 	require.Equal(t, clparams.DenebVersion.String(), optimistic.Version)
 }
 
+// An update without finality is only an optimistic update: no finality event is sent for it.
+func TestLightClientUpdateWithoutFinalitySendsOnlyTheOptimisticEvent(t *testing.T) {
+	update := cltypes.NewLightClientUpdate(clparams.DenebVersion, &clparams.MainnetBeaconConfig)
+	store := &ForkChoiceStore{
+		forkGraph: &getFinalizedExecutionHashForkGraph{
+			afterUpdate:           update,
+			addChainSegmentStatus: fork_graph.Success,
+		},
+		emitters: beaconevents.NewEventEmitter(),
+	}
+	events := make(chan *beaconevents.EventStream, 2)
+	subscription := store.emitters.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.ElectraVersion)
+
+	_, _, err := store.addChainSegmentAndQueueLightClientEvents(block, true)
+	require.NoError(t, err)
+	require.Len(t, store.queuedEmits, 1)
+	store.queuedEmits[0]()
+
+	require.IsType(t, &beaconevents.LightClientOptimisticUpdateData{}, (<-events).Data)
+	require.Empty(t, events)
+}
+
 // A newer finalized checkpoint settles the fork graph's light client update candidates, once.
 func TestUpdateCheckpointsKeepsFinalizedLightClientUpdates(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
@@ -1205,6 +1230,18 @@ func TestUpdateCheckpointsKeepsFinalizedLightClientUpdates(t *testing.T) {
 	store.updateCheckpoints(solid.Checkpoint{}, solid.Checkpoint{Epoch: 2, Root: finalizedRoot})
 
 	require.Equal(t, []common.Hash{finalizedRoot}, graph.keptLightClientRoots)
+}
+
+// The updates are looked up on the selected head's chain, and only among settled updates without a selected head.
+func TestGetLightClientUpdatesUsesTheSelectedHead(t *testing.T) {
+	graph := &getFinalizedExecutionHashForkGraph{}
+	store := &ForkChoiceStore{forkGraph: graph}
+
+	store.GetLightClientUpdates(1, 3)
+	store.selectedHead.Store(&ForkChoiceNode{Root: common.Hash{0x61}})
+	store.GetLightClientUpdates(1, 3)
+
+	require.Equal(t, []common.Hash{{}, {0x61}}, graph.lightClientHeads)
 }
 
 func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) {
@@ -2083,6 +2120,8 @@ type getFinalizedExecutionHashForkGraph struct {
 	currentStateRelease   chan struct{}
 	beforeUpdate          *cltypes.LightClientUpdate
 	afterUpdate           *cltypes.LightClientUpdate
+	afterFinalityUpdate   *cltypes.LightClientUpdate
+	lightClientHeads      []common.Hash
 	addChainSegmentStatus fork_graph.ChainSegmentInsertionResult
 	addChainSegmentErr    error
 	addChainSegmentCalled bool
@@ -2121,7 +2160,7 @@ func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeac
 	return nil, g.addChainSegmentStatus, g.addChainSegmentErr
 }
 
-func (g *getFinalizedExecutionHashForkGraph) BeginChainSegment(*cltypes.SignedBeaconBlock, bool) (*fork_graph.ChainSegment, fork_graph.ChainSegmentInsertionResult, error) {
+func (g *getFinalizedExecutionHashForkGraph) BeginChainSegment(*cltypes.SignedBeaconBlock, common.Hash, bool) (*fork_graph.ChainSegment, fork_graph.ChainSegmentInsertionResult, error) {
 	return nil, fork_graph.ReplayRequired, nil
 }
 
@@ -2259,6 +2298,13 @@ func (g *getFinalizedExecutionHashForkGraph) GetLightClientBootstrap(common.Hash
 	panic("not used")
 }
 
+func (g *getFinalizedExecutionHashForkGraph) NewestLightClientFinalityUpdate() *cltypes.LightClientUpdate {
+	if g.addChainSegmentCalled {
+		return g.afterFinalityUpdate
+	}
+	return nil
+}
+
 func (g *getFinalizedExecutionHashForkGraph) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 	if g.addChainSegmentCalled {
 		return g.afterUpdate
@@ -2266,8 +2312,9 @@ func (g *getFinalizedExecutionHashForkGraph) NewestLightClientUpdate() *cltypes.
 	return g.beforeUpdate
 }
 
-func (g *getFinalizedExecutionHashForkGraph) GetLightClientUpdate(uint64) (*cltypes.LightClientUpdate, bool) {
-	panic("not used")
+func (g *getFinalizedExecutionHashForkGraph) GetLightClientUpdates(_, _ uint64, head common.Hash) []*cltypes.LightClientUpdate {
+	g.lightClientHeads = append(g.lightClientHeads, head)
+	return nil
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetBalances(common.Hash) (solid.Uint64ListSSZ, error) {

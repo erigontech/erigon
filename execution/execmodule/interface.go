@@ -138,9 +138,8 @@ type ExecutionModule interface {
 
 	// --- Chain validation -------------------------------------------------
 
-	// ValidateChain validates the chain ending at the block identified by
-	// blockHash and blockNumber.
-	ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error)
+	// ValidateChain validates the chain ending at block.
+	ValidateChain(ctx context.Context, block *types.Block) (ValidationResult, error)
 
 	// --- Fork choice ------------------------------------------------------
 

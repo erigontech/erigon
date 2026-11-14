@@ -373,3 +373,31 @@ func TestNoMaterialize_RevivedAccountDropsDestroyedNonce(t *testing.T) {
 	require.Zero(t, acc.Nonce)
 	require.Equal(t, *uint256.NewInt(5), acc.Balance)
 }
+
+// A reverted CREATE of an absent address records its base balance and incarnation reads with UnknownVersion. While
+// no tx wrote a cell of the address they are not validated; a write below the reader still invalidates them.
+func TestRevertedCreateOfAbsentAddressSkipsQuietBaseReads(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc0, 0x44})
+	reads := func() ReadSet {
+		ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
+		ibs.SetTxContext(0, 3)
+		ibs.SetVersion(0)
+		snap := ibs.PushSnapshot()
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		ibs.RevertToSnapshot(snap, nil)
+		return ibs.VersionedReads()
+	}
+
+	checks := 0
+	countChecks := func(read, write Version) VersionValidity {
+		checks++
+		return validateEqualVersion(read, write)
+	}
+	require.Equal(t, VersionValid, NewVersionMap(nil).ValidateReadSet(3, reads(), countChecks, false, ""))
+	require.Zero(t, checks, "the base reads of a quiet address are not validated")
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 1}, *uint256.NewInt(5), true)
+	require.Equal(t, VersionInvalid, vm.ValidateReadSet(3, reads(), validateEqualVersion, false, ""))
+}

@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -42,9 +41,6 @@ import (
 // A redeploy keeps the nonce and code it wrote. Parallel execution must accept the
 // block built by the serial generator.
 func TestCreditRevivesDestroyedContract(t *testing.T) {
-	prev := dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prev })
-
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
@@ -61,6 +57,7 @@ func TestCreditRevivesDestroyedContract(t *testing.T) {
 		name       string
 		burnt      bool
 		redeployed bool
+		observed   bool
 		fill       func(b *blockgen.BlockGen, send func(to common.Address))
 	}{
 		{name: "withdrawal", fill: func(b *blockgen.BlockGen, send func(common.Address)) {
@@ -74,7 +71,7 @@ func TestCreditRevivesDestroyedContract(t *testing.T) {
 			send(contract)
 			send(common.HexToAddress("0xbbbb"))
 		}},
-		{name: "coinbase-tip-extcodehash", fill: func(b *blockgen.BlockGen, send func(common.Address)) {
+		{name: "coinbase-tip-extcodehash", observed: true, fill: func(b *blockgen.BlockGen, send func(common.Address)) {
 			b.SetCoinbase(contract)
 			send(factory)
 			send(contract)
@@ -93,7 +90,6 @@ func TestCreditRevivesDestroyedContract(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dbg.Exec3Parallel = false
 			cfg := config
 			if tc.burnt {
 				cfg = config.Copy()
@@ -113,8 +109,6 @@ func TestCreditRevivesDestroyedContract(t *testing.T) {
 				})
 			})
 			require.NoError(t, err)
-
-			dbg.Exec3Parallel = true
 			require.NoError(t, m.InsertChain(chainPack))
 			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 				st := state.New(m.NewStateReader(tx))
@@ -130,6 +124,10 @@ func TestCreditRevivesDestroyedContract(t *testing.T) {
 				hash, err := st.GetCodeHash(addr)
 				require.NoError(t, err)
 				require.Equal(t, wantHash, hash)
+				if tc.observed {
+					emptyCodeHash := crypto.Keccak256Hash(nil)
+					require.Equal(t, *new(uint256.Int).SetBytes(emptyCodeHash[:]), storageAt(t, st, observer, 0))
+				}
 				return nil
 			}))
 		})

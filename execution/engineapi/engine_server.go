@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -276,6 +277,70 @@ func (e *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 	return nil
 }
 
+var errTypedTxnAsRlpString = errors.New("typed txn marshalled as RLP string")
+
+const payloadDecodeChunk = 64
+
+func (e *EngineServer) decodePayloadTransactions(raw []hexutil.Bytes, gasLimit uint64, amsterdam, deriveBlobHashes bool, expectedBlobHashes []common.Hash) ([][]byte, []types.Transaction, []common.Hash, *engine_types.PayloadStatus) {
+	txs := make([][]byte, len(raw))
+	for i, transaction := range raw {
+		txs[i] = transaction
+	}
+	transactions := make([]types.Transaction, len(raw))
+	decodeErrs := make([]error, len(raw))
+	gasErrs := make([]error, len(raw))
+	decode := func(i int) {
+		if types.TypedTransactionMarshalledAsRlpString(raw[i]) {
+			decodeErrs[i] = errTypedTxnAsRlpString
+			return
+		}
+		if transactions[i], decodeErrs[i] = types.UnmarshalTransactionFromBinary(raw[i], false /* blobTxnsAreWrappedWithBlobs */); decodeErrs[i] != nil {
+			return
+		}
+		limits, gasErr := protocol.TransactionGasLimits(transactions[i], amsterdam)
+		if gasErr == nil && (limits.Execution > gasLimit || limits.State > gasLimit) {
+			gasErr = protocol.ErrGasLimitReached
+		}
+		gasErrs[i] = gasErr
+	}
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), (len(raw)+payloadDecodeChunk-1)/payloadDecodeChunk) {
+		wg.Go(func() {
+			for start := int(next.Add(payloadDecodeChunk) - payloadDecodeChunk); start < len(raw); start = int(next.Add(payloadDecodeChunk) - payloadDecodeChunk) {
+				for i := start; i < min(start+payloadDecodeChunk, len(raw)); i++ {
+					decode(i)
+				}
+			}
+		})
+	}
+	wg.Wait()
+	invalid := func(err error) *engine_types.PayloadStatus {
+		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, ValidationError: engine_types.NewStringifiedError(err)}
+	}
+	for i, transaction := range raw {
+		if err := decodeErrs[i]; err != nil {
+			if errors.Is(err, errTypedTxnAsRlpString) {
+				e.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(transaction))
+			} else {
+				e.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
+			}
+			return txs, transactions, expectedBlobHashes, invalid(err)
+		}
+		if deriveBlobHashes {
+			// ValidateBlobs rejects excess blobs before comparing hashes, so retaining
+			// more than the block limit would only add an unnecessary copy.
+			hashes := transactions[i].GetBlobHashes()
+			remaining := cap(expectedBlobHashes) - len(expectedBlobHashes)
+			expectedBlobHashes = append(expectedBlobHashes, hashes[:min(len(hashes), remaining)]...)
+		}
+		if gasErrs[i] != nil {
+			return txs, transactions, expectedBlobHashes, invalid(gasErrs[i])
+		}
+	}
+	return txs, transactions, expectedBlobHashes, nil
+}
+
 // newPayload validates and may execute a payload.
 func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
@@ -436,57 +501,29 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}, nil
 	}
 
+	// A header error only skips the early sender recovery, as the block validation rejects the header
+	// before it needs the senders. It is not answered here, because only the block validation removes
+	// a block that a download stores meanwhile. The header checks assume a valid parent, so a parent
+	// that is not validated gets only the gas limit check. An L2 rules engine has its own header rules.
+	var headerErr error
+	parent := e.chainRW.GetHeaderByHash(ctx, req.ParentHash)
+	if parent != nil && e.config.L2 == nil {
+		if e.chainRW.IsValidated(req.ParentHash) {
+			headerErr = merge.VerifyHeaderWithParent(e.config, &header, parent)
+		} else {
+			headerErr = misc.VerifyParentGasLimit(e.config, parent, &header)
+		}
+	}
+
 	// The SSZ envelope omits blob hashes. Derive them during transaction decoding,
 	// after the transaction-count gas guard, to avoid decoding the payload twice.
 	if deriveBlobHashes {
 		expectedBlobHashes = make([]common.Hash, 0, e.config.GetMaxBlobsPerBlock(header.Time))
 	}
-	txs := make([][]byte, len(req.Transactions))
-	transactions := make([]types.Transaction, len(req.Transactions))
-	var invalidTransactionStatus *engine_types.PayloadStatus
-	for i, transaction := range req.Transactions {
-		txs[i] = transaction
-		if invalidTransactionStatus != nil {
-			continue
-		}
-		if types.TypedTransactionMarshalledAsRlpString(transaction) {
-			e.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(transaction))
-			invalidTransactionStatus = &engine_types.PayloadStatus{
-				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
-			}
-			continue
-		}
-		transactions[i], err = types.UnmarshalTransactionFromBinary(transaction, false /* blobTxnsAreWrappedWithBlobs */)
-		if err != nil {
-			e.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
-			invalidTransactionStatus = &engine_types.PayloadStatus{
-				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedError(err),
-			}
-			continue
-		}
-		if deriveBlobHashes {
-			// ValidateBlobs rejects excess blobs before comparing hashes, so retaining
-			// more than the block limit would only add an unnecessary copy.
-			hashes := transactions[i].GetBlobHashes()
-			remaining := cap(expectedBlobHashes) - len(expectedBlobHashes)
-			expectedBlobHashes = append(expectedBlobHashes, hashes[:min(len(hashes), remaining)]...)
-		}
-		limits, gasErr := protocol.TransactionGasLimits(transactions[i], e.config.IsAmsterdam(uint64(req.Timestamp)))
-		if gasErr == nil && (limits.Execution > uint64(req.GasLimit) || limits.State > uint64(req.GasLimit)) {
-			gasErr = protocol.ErrGasLimitReached
-		}
-		if gasErr != nil {
-			invalidTransactionStatus = &engine_types.PayloadStatus{
-				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedError(gasErr),
-			}
-		}
-	}
+	txs, transactions, expectedBlobHashes, invalidTransactionStatus := e.decodePayloadTransactions(req.Transactions, uint64(req.GasLimit), e.config.IsAmsterdam(uint64(req.Timestamp)), deriveBlobHashes, expectedBlobHashes)
 
 	var sendersRecovery *exec.SendersRecovery
-	if invalidTransactionStatus == nil && len(transactions) > 0 {
+	if headerErr == nil && invalidTransactionStatus == nil && len(transactions) > 0 {
 		sendersRecovery = exec.StartSendersRecovery(ctx, types.MakeSigner(e.config, req.BlockNumber.Uint64(), uint64(req.Timestamp)), transactions)
 	}
 	header.TxHash = types.DeriveSha(types.BinaryTransactions(txs))
@@ -547,7 +584,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true, defaultReadinessWait)
+	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, parent, nil, true, defaultReadinessWait)
 	if err != nil {
 		return nil, err
 	}
@@ -603,8 +640,9 @@ func attributesReadinessWait(secondsPerSlot uint64) time.Duration {
 	return min(time.Duration(secondsPerSlot)*time.Second, maxAttributesReadinessWait)
 }
 
-// Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
-func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool, readinessWait time.Duration) (*engine_types.PayloadStatus, error) {
+// Check if we can quickly determine the status of a newPayload or forkchoiceUpdated. For a
+// newPayload, parent is the stored parent header, or nil.
+func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, parent *types.Header, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool, readinessWait time.Duration) (*engine_types.PayloadStatus, error) {
 	// Determine which prefix to use for logs
 	var prefix string
 	if newPayload {
@@ -640,11 +678,8 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		header = e.chainRW.GetHeaderByHash(ctx, blockHash)
 	}
 
-	// Retrieve parent and total difficulty.
-	var parent *types.Header
 	var td *uint256.Int
 	if newPayload {
-		parent = e.chainRW.GetHeaderByHash(ctx, parentHash)
 		td = e.chainRW.GetTd(ctx, parentHash, blockNumber-1)
 	} else {
 		td = e.chainRW.GetTd(ctx, blockHash, blockNumber)
@@ -867,7 +902,7 @@ func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		// long-slot chain can't turn this into a client-side timeout instead of a clean SYNCING.
 		readinessWait = attributesReadinessWait(e.config.SecondsPerSlot())
 	}
-	status, err := e.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, forkchoiceState, false, readinessWait)
+	status, err := e.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, nil, forkchoiceState, false, readinessWait)
 	if err != nil {
 		return nil, err
 	}
@@ -1106,7 +1141,7 @@ func (e *EngineServer) HandleNewPayload(
 			}); respondSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-			status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
+			status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, block)
 			if err != nil {
 				missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
 				if isMissingChainErr {
@@ -1148,7 +1183,7 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
-	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, headerHash, headerNumber)
+	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, block)
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
 		missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
@@ -1474,6 +1509,10 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 }
 
 func (e *EngineServer) getInclusionList(ctx context.Context) ([]hexutil.Bytes, error) {
+	if !e.config.IsBogota(uint64(time.Now().Unix())) {
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+
 	if e.caplin {
 		e.logger.Crit(caplinEnabledLog)
 		return nil, errCaplinEnabled

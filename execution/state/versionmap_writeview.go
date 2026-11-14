@@ -174,6 +174,10 @@ func (v *versionMapWriteView) StorageChanges() iter.Seq2[accounts.Address, map[a
 		var scratch []VersionedWrite[uint256.Int]
 		for addr, inner := range v.keys.Storages() {
 			clear(out)
+			// A creation earlier in the block clears storage without writing its slots, so a
+			// later tx's read can predate the clear and its origin is not the slot's prev value.
+			created, res, ok := v.vm.ReadCreateContract(addr, v.txIdx)
+			createdEarlier := ok && created && res.resolved()
 			if cap(scratch) < len(inner) {
 				scratch = make([]VersionedWrite[uint256.Int], len(inner))
 			}
@@ -184,6 +188,9 @@ func (v *versionMapWriteView) StorageChanges() iter.Seq2[accounts.Address, map[a
 					continue
 				}
 				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: kw.Val}
+				if !createdEarlier {
+					scratch[i].valStatus, scratch[i].orig = kw.valStatus, kw.orig
+				}
 				out[key] = &scratch[i]
 				i++
 			}

@@ -28,7 +28,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -46,7 +45,7 @@ import (
 // then re-created at the same CREATE2 address in block 3. Pre-Cancun (no
 // EIP-6780) the self-destruct fully removes the account, so the re-created
 // contract must observe EMPTY storage — the block-1 slot must not survive the
-// cross-block destruct+recreate. Runs both serial and parallel executors.
+// cross-block destruct+recreate.
 func TestRecreateStorageClearedAcrossBlocks(t *testing.T) {
 	// creator: CALLDATACOPY(0,0,CALLDATASIZE); CREATE2(0,0,CALLDATASIZE,0)
 	creatorCode := common.FromHex("0x36600060003760003660006000f5")
@@ -55,92 +54,78 @@ func TestRecreateStorageClearedAcrossBlocks(t *testing.T) {
 	// initcode returning deploy_code
 	initcode := common.FromHex("0x6010600c60003960106000f334600014600c5734600055005b6000ff")
 
-	for _, mode := range []struct {
-		name     string
-		parallel bool
-	}{
-		{"serial", false},
-		{"parallel", true},
-	} {
-		t.Run(mode.name, func(t *testing.T) {
-			prev := dbg.Exec3Parallel
-			dbg.Exec3Parallel = mode.parallel
-			t.Cleanup(func() { dbg.Exec3Parallel = prev })
+	shanghaiConfig := new(chain.Config)
+	require.NoError(t, copier.CopyWithOption(shanghaiConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
+	shanghaiConfig.CancunTime = nil
+	shanghaiConfig.PragueTime = nil
+	shanghaiConfig.OsakaTime = nil
 
-			shanghaiConfig := new(chain.Config)
-			require.NoError(t, copier.CopyWithOption(shanghaiConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
-			shanghaiConfig.CancunTime = nil
-			shanghaiConfig.PragueTime = nil
-			shanghaiConfig.OsakaTime = nil
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(senderKey.PublicKey)
+	creatorAddr := common.HexToAddress("0x00000000000000000000000000000000c0dec0de")
 
-			senderKey, err := crypto.GenerateKey()
-			require.NoError(t, err)
-			sender := crypto.PubkeyToAddress(senderKey.PublicKey)
-			creatorAddr := common.HexToAddress("0x00000000000000000000000000000000c0dec0de")
-
-			gspec := &types.Genesis{
-				Config: shanghaiConfig,
-				Alloc: types.GenesisAlloc{
-					sender:      {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(19), nil)},
-					creatorAddr: {Code: creatorCode, Balance: big.NewInt(0)},
-				},
-			}
-			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(senderKey))
-
-			var salt [32]byte
-			created := types.CreateAddress2(creatorAddr, salt, accounts.InternCodeHash(crypto.Keccak256Hash(initcode)))
-
-			signer := types.LatestSignerForChainID(shanghaiConfig.ChainID)
-			gasPrice := uint256.NewInt(10_000_000_000)
-			mkTx := func(nonce uint64, to common.Address, value uint64, data []byte) types.Transaction {
-				txn, err := types.SignTx(types.NewTransaction(nonce, to, uint256.NewInt(value), 200_000, gasPrice, data), *signer, senderKey)
-				require.NoError(t, err)
-				return txn
-			}
-
-			chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, b *blockgen.BlockGen) {
-				b.SetCoinbase(common.Address{1})
-				switch i {
-				case 0: // create + set storage[0]=1
-					b.AddTx(mkTx(b.TxNonce(sender), creatorAddr, 0, initcode))
-					b.AddTx(mkTx(b.TxNonce(sender), created, 1, nil))
-				case 1: // self-destruct + send funds (revive balance-only)
-					b.AddTx(mkTx(b.TxNonce(sender), created, 0, nil))
-					b.AddTx(mkTx(b.TxNonce(sender), created, 1, nil))
-				case 2: // recreate at the same address
-					b.AddTx(mkTx(b.TxNonce(sender), creatorAddr, 0, initcode))
-				}
-			})
-			require.NoError(t, err)
-
-			for blk := range 3 {
-				require.NoErrorf(t, m.InsertChain(chainPack.Slice(blk, blk+1)), "insert block %d", blk+1)
-			}
-
-			require.NoError(t, m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-				st := state.New(m.NewStateReader(tx))
-				defer st.Close()
-				addr := accounts.InternAddress(created)
-
-				code, err := st.GetCode(addr)
-				require.NoError(t, err)
-				require.Equal(t, deployCode, code, "recreated contract must carry deploy_code")
-
-				nonce, err := st.GetNonce(addr)
-				require.NoError(t, err)
-				require.Equal(t, uint64(1), nonce, "recreated contract nonce")
-
-				bal, err := st.GetBalance(addr)
-				require.NoError(t, err)
-				require.Equal(t, uint64(1), bal.Uint64(), "recreated contract balance")
-
-				slot0, err := st.GetState(addr, accounts.InternKey(common.Hash{}))
-				require.NoError(t, err)
-				require.True(t, slot0.IsZero(), "storage slot 0 must be cleared on recreate, got %s", slot0.String())
-				return nil
-			}))
-		})
+	gspec := &types.Genesis{
+		Config: shanghaiConfig,
+		Alloc: types.GenesisAlloc{
+			sender:      {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(19), nil)},
+			creatorAddr: {Code: creatorCode, Balance: big.NewInt(0)},
+		},
 	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(senderKey))
+
+	var salt [32]byte
+	created := types.CreateAddress2(creatorAddr, salt, accounts.InternCodeHash(crypto.Keccak256Hash(initcode)))
+
+	signer := types.LatestSignerForChainID(shanghaiConfig.ChainID)
+	gasPrice := uint256.NewInt(10_000_000_000)
+	mkTx := func(nonce uint64, to common.Address, value uint64, data []byte) types.Transaction {
+		txn, err := types.SignTx(types.NewTransaction(nonce, to, uint256.NewInt(value), 200_000, gasPrice, data), *signer, senderKey)
+		require.NoError(t, err)
+		return txn
+	}
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, b *blockgen.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+		switch i {
+		case 0: // create + set storage[0]=1
+			b.AddTx(mkTx(b.TxNonce(sender), creatorAddr, 0, initcode))
+			b.AddTx(mkTx(b.TxNonce(sender), created, 1, nil))
+		case 1: // self-destruct + send funds (revive balance-only)
+			b.AddTx(mkTx(b.TxNonce(sender), created, 0, nil))
+			b.AddTx(mkTx(b.TxNonce(sender), created, 1, nil))
+		case 2: // recreate at the same address
+			b.AddTx(mkTx(b.TxNonce(sender), creatorAddr, 0, initcode))
+		}
+	})
+	require.NoError(t, err)
+
+	for blk := range 3 {
+		require.NoErrorf(t, m.InsertChain(chainPack.Slice(blk, blk+1)), "insert block %d", blk+1)
+	}
+
+	require.NoError(t, m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		addr := accounts.InternAddress(created)
+
+		code, err := st.GetCode(addr)
+		require.NoError(t, err)
+		require.Equal(t, deployCode, code, "recreated contract must carry deploy_code")
+
+		nonce, err := st.GetNonce(addr)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), nonce, "recreated contract nonce")
+
+		bal, err := st.GetBalance(addr)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), bal.Uint64(), "recreated contract balance")
+
+		slot0, err := st.GetState(addr, accounts.InternKey(common.Hash{}))
+		require.NoError(t, err)
+		require.True(t, slot0.IsZero(), "storage slot 0 must be cleared on recreate, got %s", slot0.String())
+		return nil
+	}))
 }
 
 // A contract destroyed and re-created at its CREATE2 address may get a slot
@@ -172,13 +157,14 @@ func TestParallelStorageRewriteAfterDestroyAndRecreate(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		committed bool
+		readAfter bool
 		blocks    [][]revivalCall
 	}{
-		{"committed", true, [][]revivalCall{{destroy, create, write}}},
-		{"committed, read after", true, [][]revivalCall{{write, destroy, create, write, read}}},
-		{"created in block", false, [][]revivalCall{{create, write, destroy, create, write}}},
-		{"created in block, read after", false, [][]revivalCall{{create, write, destroy, create, write, read}}},
-		{"created in previous block", false, [][]revivalCall{{create, write}, {destroy, create, write}}},
+		{"committed", true, false, [][]revivalCall{{destroy, create, write}}},
+		{"committed, read after", true, true, [][]revivalCall{{write, destroy, create, write, read}}},
+		{"created in block", false, false, [][]revivalCall{{create, write, destroy, create, write}}},
+		{"created in block, read after", false, true, [][]revivalCall{{create, write, destroy, create, write, read}}},
+		{"created in previous block", false, false, [][]revivalCall{{create, write}, {destroy, create, write}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			alloc := types.GenesisAlloc{
@@ -194,8 +180,6 @@ func TestParallelStorageRewriteAfterDestroyAndRecreate(t *testing.T) {
 			keys := revivalKeys(t, alloc, 6)
 			gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 
-			prevParallel := dbg.Exec3Parallel
-			dbg.Exec3Parallel = false
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
 			signer := types.LatestSignerForChainID(config.ChainID)
 			chainPack, err := m.GenerateChain(len(tc.blocks), func(i int, b *blockgen.BlockGen) {
@@ -206,14 +190,15 @@ func TestParallelStorageRewriteAfterDestroyAndRecreate(t *testing.T) {
 					b.AddTx(txn)
 				}
 			})
-			dbg.Exec3Parallel = prevParallel
 			require.NoError(t, err)
 
 			check := func(t *testing.T, st *state.IntraBlockState) {
 				require.Equal(t, *uint256.NewInt(7), storageAt(t, st, victim, 0))
 				require.Equal(t, *uint256.NewInt(0x593d), storageAt(t, st, victim, 0x32))
+				if tc.readAfter {
+					require.Equal(t, *uint256.NewInt(0x593d), storageAt(t, st, reader, 0))
+				}
 			}
-			importSerially(t, gspec, keys[0], chainPack, check)
 			for range 25 {
 				importInParallel(t, gspec, keys[0], chainPack, check)
 			}
