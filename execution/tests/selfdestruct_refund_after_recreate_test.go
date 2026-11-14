@@ -17,6 +17,7 @@
 package executiontests
 
 import (
+	"bytes"
 	"math/big"
 	"testing"
 
@@ -119,6 +120,58 @@ func TestSelfdestructRefundInTxAfterRecreate(t *testing.T) {
 			})
 			receipts := chainPack.Receipts[0]
 			require.Equal(t, receipts[1].GasUsed, receipts[4].GasUsed, "the re-created X earns the SELFDESTRUCT refund")
+			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				exists, err := st.Exist(accounts.InternAddress(x))
+				require.NoError(t, err)
+				require.False(t, exists)
+			})
+		})
+	}
+}
+
+// Before London, one block: X destroys itself twice in one tx, another
+// contract's SELFDESTRUCT sends 3 wei to X, and the same CREATE2 deploys X
+// again. In the next tx X's first SELFDESTRUCT runs in a reverted call, and X
+// is then deployed again and destroys itself twice in one tx. Each tx earns
+// one SELFDESTRUCT refund; its calldata lifts the refund cap above two.
+func TestSelfdestructRefundOncePerTx(t *testing.T) {
+	runtime := program.New().Op(vm.CALLER, vm.SELFDESTRUCT).Bytes()
+	init := program.New().ReturnViaCodeCopy(runtime)
+	factory := common.HexToAddress("0xfac7")
+	x := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(init.Bytes())))
+	donor := common.HexToAddress("0xd040")
+	twice := common.HexToAddress("0x7e1ce")
+	reverter := common.HexToAddress("0x2e7e2")
+	afterRevert := common.HexToAddress("0xaf7e2")
+	burn := bytes.Repeat([]byte{0xff}, 6000)
+
+	petersburg := chain.TestChainBerlinConfig.Copy()
+	petersburg.IstanbulBlock, petersburg.MuirGlacierBlock, petersburg.BerlinBlock = nil, nil, nil
+	for _, fork := range []struct {
+		name   string
+		config *chain.Config
+	}{{"petersburg", petersburg}, {"berlin", chain.TestChainBerlinConfig}} {
+		t.Run(fork.name, func(t *testing.T) {
+			alloc := types.GenesisAlloc{
+				factory:     {Code: program.New().Create2(init.Bytes(), 0).Op(vm.STOP).Bytes()},
+				donor:       {Code: program.New().Selfdestruct(x).Bytes(), Balance: big.NewInt(3)},
+				twice:       {Code: program.New().Call(nil, x, 0, 0, 0, 0, 0).Op(vm.POP).Call(nil, x, 0, 0, 0, 0, 0).Op(vm.STOP).Bytes()},
+				reverter:    {Code: program.New().Call(nil, x, 0, 0, 0, 0, 0).Push(0).Push(0).Op(vm.REVERT).Bytes()},
+				afterRevert: {Code: program.New().Call(nil, reverter, 0, 0, 0, 0, 0).Op(vm.POP).Call(nil, x, 0, 0, 0, 0, 0).Op(vm.STOP).Bytes()},
+			}
+			keys := revivalKeys(t, alloc, 7)
+			gspec := &types.Genesis{Config: fork.config, GasLimit: 30_000_000, Alloc: alloc}
+			chainPack := buildBlockSerially(t, gspec, keys, common.Address{1}, 10_000_000_000, []revivalCall{
+				{to: factory},
+				{to: twice, data: burn},
+				{to: donor},
+				{to: factory},
+				{to: afterRevert, data: burn},
+				{to: factory},
+				{to: twice, data: burn},
+			})
+			receipts := chainPack.Receipts[0]
+			require.Equal(t, receipts[1].GasUsed, receipts[6].GasUsed, "the re-created X earns one refund, as the first did")
 			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
 				exists, err := st.Exist(accounts.InternAddress(x))
 				require.NoError(t, err)
