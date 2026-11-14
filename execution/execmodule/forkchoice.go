@@ -254,7 +254,7 @@ func (e *ExecModule) unwindIfNeeded(
 			return nil, nil, err
 		}
 		for !isCanonicalHash {
-			if currentParentNumber < finalisedBlockNum {
+			if currentParentNumber <= finalisedBlockNum {
 				return &ForkChoiceResult{
 					LatestValidHash: common.Hash{},
 					Status:          ExecutionStatusInvalidForkchoice,
@@ -428,11 +428,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 	// InsertBlocks may have staged block data, but it does not change
 	// canonical hashes, forkchoice markers, or stage progress.
-	var hasOverlay bool
-	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-		hasOverlay = true
-	}
-
 	// Create SharedDomains on the raw RO tx. Domain state (accounts,
 	// storage, code, commitment) is read from the committed DB state.
 	var isDomainAheadOfBlocks bool
@@ -482,13 +477,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 	var tx kv.TemporalRwTx = currentContext.BlockOverlay()
 
-	// If InsertBlocks wrote block data, flush it into the block overlay
-	// so the pipeline can see it. The InsertBlocks overlay retains its data.
-	if hasOverlay {
-		e.currentContext.BlockOverlay().UpdateTxn(roTx)
-		if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("updateForkChoice: flush block overlay: %w", err), false)
-		}
+	headPath, err := e.copyPendingChain(roTx, tx, originalBlockHash)
+	if err != nil {
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("updateForkChoice: copy pending blocks: %w", err), false)
 	}
 
 	blockHash := originalBlockHash
@@ -617,7 +608,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
-	mergeExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash()
+	mergeExtendingFork := e.forkValidator.HasValidatedState(blockHash)
 	stateFlushingInParallel := mergeExtendingFork && e.syncCfg.ParallelStateFlushing
 	if mergeExtendingFork {
 		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
@@ -639,7 +630,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}, false)
 			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", false)
 		}
-		if err := e.forkValidator.MergeExtendingFork(ctx, tx, currentContext, e.accum); err != nil {
+		if err := e.forkValidator.MergeExtendingFork(ctx, tx, currentContext, blockHash, e.accum); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 		rawdb.WriteHeadBlockHash(tx, blockHash)
@@ -703,13 +694,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return nil, nil, fmt.Errorf("updateForkChoice: init overlay after hasMore: %w", err)
 			}
 			newTx := freshSD.BlockOverlay()
-			// Re-flush InsertBlocks data into the fresh overlay.
-			if hasOverlay {
-				e.currentContext.BlockOverlay().UpdateTxn(roTx)
-				if err := e.currentContext.BlockOverlay().Flush(ctx, newTx); err != nil {
-					freshSD.Close()
-					return nil, nil, fmt.Errorf("updateForkChoice: re-flush overlay after hasMore: %w", err)
-				}
+			if _, err := e.copyPendingChain(roTx, newTx, originalBlockHash); err != nil {
+				freshSD.Close()
+				return nil, nil, fmt.Errorf("updateForkChoice: re-copy pending blocks after hasMore: %w", err)
 			}
 			return newTx, freshSD, nil
 		},
@@ -788,11 +775,13 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 		e.logHeadUpdated(blockHash, fcuHeader, txnum, "head updated", stateFlushingInParallel)
 
-		// Close the persistent SD (overlay was already flushed into rwTx at
-		// the start of updateForkChoice). Clear e.currentContext so InsertBlocks
-		// creates a fresh overlay for the next block cycle.
-		if hasOverlay {
-			e.closeModuleContext()
+		finalizedNumber, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
+		if err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		}
+		side, retained, err := e.prepareSideBlocks(roTx, tx, headPath, common.Deref(finalizedNumber), *headNumber)
+		if err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 
 		// Dispatch notifications from the SD overlay (before flush/commit).
@@ -804,12 +793,31 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if prevUnwindPoint == nil {
 			prevUnwindPoint = e.pipelineExecutor.Sync().PrevUnwindPoint()
 		}
-		published, dispatchErr := e.dispatchNotificationsFromOverlay(ctx, currentContext, finishProgressBefore, prevUnwindPoint)
+		var oldSideBlocks sideBlocksState
+		sideBlocksSwapped := false
+		swapSideBlocks := func() {
+			if sideBlocksSwapped {
+				return
+			}
+			oldSideBlocks = e.swapSideBlocksForForkChoice(side, retained)
+			sideBlocksSwapped = true
+		}
+		restoreSideBlocks := func() {
+			if !sideBlocksSwapped {
+				return
+			}
+			e.restoreSideBlocksForForkChoice(oldSideBlocks)
+			sideBlocksSwapped = false
+		}
+		published, dispatchErr := e.dispatchNotificationsFromOverlay(ctx, currentContext, finishProgressBefore, prevUnwindPoint, swapSideBlocks)
 		overlayPublished = published
 		if dispatchErr != nil {
+			restoreSideBlocks()
+			if retained != nil {
+				retained.Close()
+			}
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", dispatchErr), stateFlushingInParallel)
 		}
-
 		// Hand the semaphore to a background goroutine: FCU cleanup runs first,
 		// so the next acquirer observes settled state whenever it gets in.
 		handOffSemaphore := func(work func() error) {
@@ -822,14 +830,20 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				}
 			}()
 		}
+		swapSideBlocks()
 
 		// Flush + commit: pass the outer roTx so it gets released between
 		// Flush and Commit, so the commit sees openTxs=1 in MDBX.
 		persistStart := time.Now()
 		commitTimings, err := e.runForkchoiceFlushCommit(currentContext, roTx)
 		if err != nil {
+			restoreSideBlocks()
+			if retained != nil {
+				retained.Close()
+			}
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
+		oldSideBlocks.close()
 		restoreRecentReceipts = nil
 		// Update head and announce block range (notifications already dispatched).
 		if e.hook != nil {
@@ -899,7 +913,7 @@ func (e *ExecModule) logTimings(msg string, timings []any) {
 // Dispatch must finish before the execution semaphore is released so the next
 // FCU cannot overtake these notifications. The result reports whether
 // publication happened, including when the later notification dispatch fails.
-func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *execctx.SharedDomains, finishProgressBefore uint64, prevUnwindPoint *uint64) (bool, error) {
+func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *execctx.SharedDomains, finishProgressBefore uint64, prevUnwindPoint *uint64, onPublished func()) (bool, error) {
 	dispatcher := e.pipelineExecutor.Dispatcher()
 	if dispatcher == nil || e.accum == nil {
 		e.logger.Debug("[dispatchNotifications] skipped: dispatcher or accum nil", "dispatcherNil", dispatcher == nil, "accumNil", e.accum == nil)
@@ -923,6 +937,9 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *e
 	// before any StateChangeBatch arrives, so it can buffer events properly.
 	e.logger.Debug("[dispatchNotifications] publishing SD")
 	dispatcher.PublishOverlay(sd)
+	if onPublished != nil {
+		onPublished()
+	}
 	// Overlay publication is drop-tolerant; the observer supplies the blocking
 	// boundary required by deterministic integration tests.
 	e.observeStateTransition(ctx, StateTransitionOverlayPublished)

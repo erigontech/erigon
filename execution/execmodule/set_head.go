@@ -115,6 +115,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// and the next FCU re-execution reads them and computes a stale state root
 	// (BadBlock). Mirrors ValidateChain/forkchoice.
 	sd.SetStateCache(e.stateCache)
+	e.forkValidator.ClearWithUnwind()
 
 	// Set the unwind point and run the unwind
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {

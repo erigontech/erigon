@@ -215,9 +215,9 @@ func runReorg(t *testing.T, tc reorgCase) (oldHead *types.Block, forkBlocks []*t
 		validation, err := m.ValidateChain(t.Context(), newHead)
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
-		require.Equal(t, newHead.Hash(), m.ExecModule.ForkValidator().ExtendingForkHeadHash())
+		require.True(t, m.ExecModule.ForkValidator().HasValidatedState(newHead.Hash()))
 	} else {
-		require.NotEqual(t, newHead.Hash(), m.ExecModule.ForkValidator().ExtendingForkHeadHash())
+		require.False(t, m.ExecModule.ForkValidator().HasValidatedState(newHead.Hash()))
 	}
 	fcu, err := m.UpdateForkChoice(t.Context(), newHead.Header())
 	require.NoError(t, err)

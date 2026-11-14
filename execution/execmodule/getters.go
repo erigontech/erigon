@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -36,8 +37,6 @@ import (
 
 var errNotFound = errors.New("notfound")
 
-// beginOverlayOrRo returns a tx that reads from the block overlay (if a
-// persistent SharedDomains with an active overlay exists) or a plain DB RO tx.
 // When an overlay is active, the returned tx is an OverlayReadView backed by a
 // fresh RO tx — each caller gets its own independent DB snapshot, so concurrent
 // getters never share MDBX internal state.
@@ -54,7 +53,6 @@ func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.TemporalTx, func(
 	return tx, func() { tx.Rollback() }, nil
 }
 
-// beginOverlayView returns a nil cleanup when no overlay is active.
 func (e *ExecModule) beginOverlayView(ctx context.Context) (kv.TemporalTx, func(), error) {
 	e.lock.RLock()
 	defer e.lock.RUnlock()
@@ -63,11 +61,12 @@ func (e *ExecModule) beginOverlayView(ctx context.Context) (kv.TemporalTx, func(
 	if sd == nil && e.publishedSD != nil {
 		sd = e.publishedSD()
 	}
-	if sd == nil {
-		return nil, nil, nil
+	var overlay *membatchwithdb.MemoryMutation
+	if sd != nil {
+		overlay = sd.BlockOverlay()
 	}
-	overlay := sd.BlockOverlay()
-	if overlay == nil {
+	retained := e.retainedBlocks
+	if overlay == nil && retained == nil {
 		return nil, nil, nil
 	}
 	// Open a fresh RO tx while still holding the read lock so that
@@ -79,7 +78,13 @@ func (e *ExecModule) beginOverlayView(ctx context.Context) (kv.TemporalTx, func(
 	}
 	ok := false
 	defer kv.RollbackUnless(&ok, roTx)
-	view := overlay.NewReadView(roTx)
+	var view kv.TemporalTx = roTx
+	if retained != nil {
+		view = retained.NewReadView(view)
+	}
+	if overlay != nil {
+		view = overlay.NewReadView(view)
+	}
 	ok = true
 	return view, func() { roTx.Rollback() }, nil
 }

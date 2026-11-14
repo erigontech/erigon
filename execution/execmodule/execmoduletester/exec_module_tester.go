@@ -303,6 +303,12 @@ func WithStepSize(stepSize uint64) Option {
 	}
 }
 
+func WithRwDBWrapper(wrapper func(kv.RwDB) kv.RwDB) Option {
+	return func(opts *options) {
+		opts.rwDBWrapper = wrapper
+	}
+}
+
 func WithE2RetireStep(e2RetireStep uint64) Option {
 	return func(opts *options) {
 		opts.e2RetireStep = &e2RetireStep
@@ -442,6 +448,7 @@ func WithStateTransitionObserver(observer execmodule.StateTransitionObserver) Op
 
 type options struct {
 	stepSize                 *uint64
+	rwDBWrapper              func(kv.RwDB) kv.RwDB
 	e2RetireStep             *uint64
 	experimentalBAL          bool
 	genesis                  *types.Genesis
@@ -608,6 +615,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	var dbOpts []temporaltest.Option
 	if opt.stepSize != nil {
 		dbOpts = append(dbOpts, temporaltest.WithStepSize(*opt.stepSize))
+	}
+	if opt.rwDBWrapper != nil {
+		dbOpts = append(dbOpts, temporaltest.WithRwDBWrapper(opt.rwDBWrapper))
 	}
 	db := temporaltest.NewTestDB(tb, dirs, dbOpts...)
 

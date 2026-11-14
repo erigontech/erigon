@@ -66,7 +66,6 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 	}
 	defer e.semaphore.Release(1)
 	e.logger.Debug("ethereumExecutionModule.InsertBlocks: semaphore acquired", "wait", time.Since(start))
-	e.forkValidator.ClearWithUnwind()
 	frozenBlocks := e.blockReader.FrozenBlocks()
 
 	// Open a read-only tx for the base data; writes accumulate in the
@@ -79,7 +78,8 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 
 	// Ensure currentContext has a block overlay for accumulating writes.
 	sd := e.currentContext
-	if sd == nil {
+	fresh := sd == nil
+	if fresh {
 		sd, err = execctx.NewSharedDomains(ctx, roTx, e.logger)
 		// ErrBehindCommitment is tolerated: sd is usable, catch-up drives txNums forward.
 		if err != nil {
@@ -88,14 +88,15 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			}
 			e.logger.Info("ethereumExecutionModule.InsertBlocks: state ahead of blocks, proceeding with catch-up", "err", err)
 		}
-		e.lock.Lock()
-		e.currentContext = sd
-		e.lock.Unlock()
 	}
 	if sd.BlockOverlay() == nil {
-		if err := sd.InitBlockOverlay(roTx); err != nil {
+		if err := e.initSeededOverlay(roTx, sd); err != nil {
+			if fresh {
+				sd.Close()
+			}
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
 		}
+		e.publishSeededContext(sd)
 	} else {
 		sd.BlockOverlay().UpdateTxn(roTx)
 	}
@@ -173,6 +174,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			}
 			e.readAheader.AddBlockAccessList(blockHash, blockAccessList)
 		}
+		e.addPendingBlock(blockHash, height, header.ParentHash)
 		e.logger.Trace("Inserted block", "hash", blockHash, "number", header.Number)
 	}
 
@@ -182,6 +184,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		if err := e.flushBlockOverlayToDB(ctx, sd); err != nil {
 			return 0, err
 		}
+		e.dropPendingBlocks()
 	}
 	return ExecutionStatusSuccess, nil
 }
