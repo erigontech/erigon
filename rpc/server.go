@@ -63,6 +63,7 @@ type Server struct {
 	traceRequests       bool // Whether to print requests at INFO level
 	debugSingleRequest  bool // Whether to print requests at INFO level
 	batchLimit          int  // Maximum number of requests in a batch
+	batchResponseLimit  int  // Answer bytes in a batch past which the remaining calls are refused; 0 = unlimited
 	subscriptionLimit   int  // Maximum number of concurrent subscriptions per connection; 0 = unlimited
 	logger              log.Logger
 	rpcSlowLogThreshold time.Duration
@@ -77,8 +78,9 @@ func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disable
 	server := &Server{
 		services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet[ServerCodec](), batchConcurrency: batchConcurrency,
 		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold,
-		subscriptionLimit: rpccfg.DefaultSubscriptionLimit,
-		ingress:           ingressBudget{limit: defaultIngressBudget},
+		subscriptionLimit:  rpccfg.DefaultSubscriptionLimit,
+		ingress:            ingressBudget{limit: defaultIngressBudget},
+		batchResponseLimit: rpccfg.DefaultBatchResponseLimit,
 	}
 	server.run.Store(true)
 	// Register the default service providing meta information about the RPC service such
@@ -98,6 +100,11 @@ func (s *Server) SetAllowList(allowList AllowList) {
 // SetBatchLimit sets limit of number of requests in a batch
 func (s *Server) SetBatchLimit(limit int) {
 	s.batchLimit = limit
+}
+
+// SetBatchResponseLimit sets the answer bytes of a batch past which the remaining calls are refused; 0 removes the limit.
+func (s *Server) SetBatchResponseLimit(limit int) {
+	s.batchResponseLimit = limit
 }
 
 // SetSubscriptionLimit sets how many subscriptions one connection may hold at a time; 0 removes the limit.
@@ -167,7 +174,9 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 // newConnHandler builds the handler of one connection, so every transport applies the
 // server's allow list and limits.
 func (s *Server) newConnHandler(ctx context.Context, conn jsonWriter) *handler {
-	return newHandler(ctx, conn, s.idgen, &s.services, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	h := newHandler(ctx, conn, s.idgen, &s.services, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	h.batchResponseLimit = s.batchResponseLimit
+	return h
 }
 
 // serveSingleRequest reads and processes a single RPC request from the given codec. This

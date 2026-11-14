@@ -177,6 +177,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().IntVar(&cfg.LogQueryLimit, utils.RpcLogQueryLimit.Name, utils.RpcLogQueryLimit.Value, utils.RpcLogQueryLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.BatchLimit, utils.RpcBatchLimit.Name, utils.RpcBatchLimit.Value, utils.RpcBatchLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.SubscriptionLimit, utils.RpcSubscriptionLimit.Name, utils.RpcSubscriptionLimit.Value, utils.RpcSubscriptionLimit.Usage)
+	rootCmd.PersistentFlags().IntVar(&cfg.BatchResponseLimit, utils.RpcBatchResponseMaxSize.Name, utils.RpcBatchResponseMaxSize.Value, utils.RpcBatchResponseMaxSize.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.ReturnDataLimit, utils.RpcReturnDataLimit.Name, utils.RpcReturnDataLimit.Value, utils.RpcReturnDataLimit.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.AllowUnprotectedTxs, utils.AllowUnprotectedTxs.Name, utils.AllowUnprotectedTxs.Value, utils.AllowUnprotectedTxs.Usage)
 	rootCmd.PersistentFlags().Uint64Var(&cfg.OtsMaxPageSize, utils.OtsSearchMaxCapFlag.Name, utils.OtsSearchMaxCapFlag.Value, utils.OtsSearchMaxCapFlag.Usage)
@@ -639,6 +640,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 
 	srv.SetBatchLimit(cfg.BatchLimit)
 	srv.SetSubscriptionLimit(cfg.SubscriptionLimit)
+	srv.SetBatchResponseLimit(cfg.BatchResponseLimit)
 
 	defer srv.Stop()
 
@@ -963,6 +965,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, true, logger, cfg.RPCSlowLogThreshold)
 	engineSrv.SetBatchLimit(cfg.BatchLimit)
 	engineSrv.SetSubscriptionLimit(cfg.SubscriptionLimit)
+	engineSrv.SetBatchResponseLimit(rpccfg.EngineBatchResponseLimit)
 
 	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true, logger); err != nil {
 		return nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
