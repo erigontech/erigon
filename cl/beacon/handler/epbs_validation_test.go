@@ -29,6 +29,7 @@ import (
 )
 
 func TestEnvelopeContentsAuthenticateBeforeBlobProcessing(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, _, handler, _, _, forkchoice, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	want := errors.New("invalid envelope signature")
 	forkchoice.ValidateExecutionPayloadEnvelopeErr = want

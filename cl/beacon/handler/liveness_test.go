@@ -54,6 +54,7 @@ func (r *consensusBodyOnlyReader) ReadBeaconBlockBodyBySlot(_ context.Context, _
 }
 
 func TestUpdateLivenessWithBlock_ProposerIsLive(t *testing.T) {
+	t.Parallel()
 	bcfg := clparams.MainnetBeaconConfig
 	block := cltypes.NewSignedBeaconBlock(&bcfg, clparams.Phase0Version)
 	block.Block.Slot = 100
@@ -71,6 +72,7 @@ func TestUpdateLivenessWithBlock_ProposerIsLive(t *testing.T) {
 }
 
 func TestUpdateLivenessWithBlock_VoluntaryExit(t *testing.T) {
+	t.Parallel()
 	bcfg := clparams.MainnetBeaconConfig
 	block := cltypes.NewSignedBeaconBlock(&bcfg, clparams.Phase0Version)
 	block.Block.Slot = 100
@@ -93,6 +95,7 @@ func TestUpdateLivenessWithBlock_VoluntaryExit(t *testing.T) {
 }
 
 func TestUpdateLivenessWithBlock_ExecutionChange(t *testing.T) {
+	t.Parallel()
 	bcfg := clparams.MainnetBeaconConfig
 	block := cltypes.NewSignedBeaconBlock(&bcfg, clparams.BellatrixVersion)
 	block.Block.Slot = 100
@@ -114,6 +117,7 @@ func TestUpdateLivenessWithBlock_ExecutionChange(t *testing.T) {
 }
 
 func TestUpdateLivenessWithBlock_UntrackedValidatorUnchanged(t *testing.T) {
+	t.Parallel()
 	bcfg := clparams.MainnetBeaconConfig
 	block := cltypes.NewSignedBeaconBlock(&bcfg, clparams.Phase0Version)
 	block.Block.Slot = 100
@@ -129,6 +133,7 @@ func TestUpdateLivenessWithBlock_UntrackedValidatorUnchanged(t *testing.T) {
 }
 
 func TestUpdateLivenessWithBlock_LastSlotOfEpoch(t *testing.T) {
+	t.Parallel()
 	bcfg := clparams.MainnetBeaconConfig
 	slotsPerEpoch := bcfg.SlotsPerEpoch
 	epoch := uint64(5)
@@ -151,6 +156,7 @@ func TestUpdateLivenessWithBlock_LastSlotOfEpoch(t *testing.T) {
 }
 
 func TestLivenessEndpoint_ValidatorLiveViaParticipation(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
 	var err error
@@ -203,6 +209,7 @@ func TestLivenessEndpoint_ValidatorLiveViaParticipation(t *testing.T) {
 }
 
 func TestLivenessEndpointReadsConsensusBodyWithoutExecutionData(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	block := blocks[len(blocks)-1]
 	block.Block.ProposerIndex = 0
@@ -221,6 +228,7 @@ func TestLivenessEndpointReadsConsensusBodyWithoutExecutionData(t *testing.T) {
 }
 
 func TestLivenessEndpoint_NoParticipationNotLive(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
 	var err error
@@ -273,6 +281,7 @@ func TestLivenessEndpoint_NoParticipationNotLive(t *testing.T) {
 }
 
 func TestLivenessEndpoint_FutureEpochReturnsError(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 
 	var err error

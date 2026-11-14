@@ -55,6 +55,7 @@ import (
 )
 
 func TestPoolAttesterSlashings(t *testing.T) {
+	t.Parallel()
 	attesterSlashing := cltypes.NewAttesterSlashing(clparams.DenebVersion)
 	attesterSlashing.Attestation_1.AttestingIndices = solid.NewRawUint64List(2048, []uint64{2, 3, 4, 5, 6})
 	attesterSlashing.Attestation_2.AttestingIndices = solid.NewRawUint64List(2048, []uint64{2, 3, 4, 1, 6})
@@ -104,6 +105,7 @@ func TestPoolAttesterSlashings(t *testing.T) {
 }
 
 func TestPoolProposerSlashings(t *testing.T) {
+	t.Parallel()
 	proposerSlashing := &cltypes.ProposerSlashing{
 		Header1: &cltypes.SignedBeaconBlockHeader{
 			Header: &cltypes.BeaconBlockHeader{
@@ -162,6 +164,7 @@ func TestPoolProposerSlashings(t *testing.T) {
 }
 
 func TestPoolProposerSlashingDoesNotPublishIgnored(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	service := services_mock.NewMockProposerSlashingService(ctrl)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
@@ -237,6 +240,7 @@ func TestPoolVoluntaryExitRepublishesPooledExitWhenIgnored(t *testing.T) {
 }
 
 func TestPoolVoluntaryExits(t *testing.T) {
+	t.Parallel()
 	voluntaryExit := &cltypes.SignedVoluntaryExit{
 		VoluntaryExit: &cltypes.VoluntaryExit{
 			Epoch:          1,
@@ -286,6 +290,7 @@ func TestPoolVoluntaryExits(t *testing.T) {
 }
 
 func TestPoolBlsToExecutionChainges(t *testing.T) {
+	t.Parallel()
 	msg := []*cltypes.SignedBLSToExecutionChange{
 		{
 			Message: &cltypes.BLSToExecutionChange{
@@ -344,6 +349,7 @@ func TestPoolBlsToExecutionChainges(t *testing.T) {
 }
 
 func TestPoolAggregatesAndProofs(t *testing.T) {
+	t.Parallel()
 	msg := []*cltypes.SignedAggregateAndProof{
 		{
 			Message: &cltypes.AggregateAndProof{
@@ -412,6 +418,7 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 }
 
 func TestPoolV1AttestationsPublishesOnMessageEpochForkDigest(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	service := services_mock.NewMockAttestationService(ctrl)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
@@ -473,6 +480,7 @@ func TestPoolV1AttestationsPublishesOnMessageEpochForkDigest(t *testing.T) {
 }
 
 func TestPoolV2AttestationsPublishesOnMessageEpochForkDigest(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	service := services_mock.NewMockAttestationService(ctrl)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
@@ -540,6 +548,7 @@ func TestPoolV2AttestationsPublishesOnMessageEpochForkDigest(t *testing.T) {
 }
 
 func TestPoolAggregatesAndProofsDoesNotPublishIgnoredAggregate(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	service := services_mock.NewMockAggregateAndProofService(ctrl)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
@@ -594,6 +603,7 @@ func TestPoolAggregatesAndProofsDoesNotPublishIgnoredAggregate(t *testing.T) {
 }
 
 func TestPoolAggregatesAndProofsDoesNotPublishKnownAggregate(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	service := services_mock.NewMockAggregateAndProofService(ctrl)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
@@ -638,6 +648,7 @@ func TestPoolAggregatesAndProofsDoesNotPublishKnownAggregate(t *testing.T) {
 }
 
 func TestPoolAggregatesAndProofsPublishesOnMessageEpochForkDigest(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	service := services_mock.NewMockAggregateAndProofService(ctrl)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
@@ -704,6 +715,7 @@ func TestPoolAggregatesAndProofsPublishesOnMessageEpochForkDigest(t *testing.T) 
 }
 
 func TestPoolAggregatesAndProofsRetriesAfterPublishFailure(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	service := services_mock.NewMockAggregateAndProofService(ctrl)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
@@ -777,6 +789,7 @@ func TestPoolAggregatesAndProofsRetriesAfterPublishFailure(t *testing.T) {
 }
 
 func TestPoolAggregatesAndProofsReportsRequestIndex(t *testing.T) {
+	t.Parallel()
 	msg := []*cltypes.SignedAggregateAndProof{
 		{
 			Message: &cltypes.AggregateAndProof{
@@ -814,6 +827,7 @@ func TestPoolAggregatesAndProofsReportsRequestIndex(t *testing.T) {
 }
 
 func TestPoolSyncCommittees(t *testing.T) {
+	t.Parallel()
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
 			Slot:            1,
@@ -866,6 +880,7 @@ func TestPoolSyncCommittees(t *testing.T) {
 // PublishBackground, never the blocking Publish, and must not depend on the
 // publish completing before writing the HTTP response.
 func TestPoolSyncCommitteesPublishesInBackground(t *testing.T) {
+	t.Parallel()
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
 			Slot:            1,
@@ -914,6 +929,7 @@ func TestPoolSyncCommitteesPublishesInBackground(t *testing.T) {
 // A validator outside the sync committee has no subnet, so its message is neither validated nor published, and the
 // Beacon API requires a 400 with the failing index.
 func TestPoolSyncCommitteesRejectsValidatorOutsideCommittee(t *testing.T) {
+	t.Parallel()
 	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	// Every fixture validator sits in the committee, so fill both committees with validator 0 alone.
 	member, err := s.ValidatorPublicKey(0)
@@ -956,6 +972,7 @@ func TestPoolSyncCommitteesRejectsValidatorOutsideCommittee(t *testing.T) {
 
 // A head state from before Altair has zero-filled sync committees, so the failure must name the head, not the validator.
 func TestPoolSyncCommitteesReportsPreAltairHead(t *testing.T) {
+	t.Parallel()
 	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	require.NoError(t, sd.OnHeadState(s))
 	ctrl := gomock.NewController(t)
@@ -977,6 +994,7 @@ func TestPoolSyncCommitteesReportsPreAltairHead(t *testing.T) {
 }
 
 func TestPoolSyncCommitteesIsUnavailableWhileSyncing(t *testing.T) {
+	t.Parallel()
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
 			Slot:            1,
@@ -1001,6 +1019,7 @@ func TestPoolSyncCommitteesIsUnavailableWhileSyncing(t *testing.T) {
 // otherwise-valid batch, rather than hidden behind a 200 the way a
 // fire-and-forget PublishBackground would.
 func TestPoolSyncCommitteesReturns500OnAdmissionFailure(t *testing.T) {
+	t.Parallel()
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
 			Slot:            1,
@@ -1100,6 +1119,7 @@ func TestPoolSyncCommitteesLogsAdmissionFailuresOncePerRequest(t *testing.T) {
 // passed ProcessMessage (so it wasn't ErrIgnore'd) but its own deadline
 // passed by the time PublishBackground was reached.
 func TestPoolSyncCommitteesDoesNotSurface500ForExpiredAdmission(t *testing.T) {
+	t.Parallel()
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
 			Slot:            1,
@@ -1139,6 +1159,7 @@ func TestPoolSyncCommitteesDoesNotSurface500ForExpiredAdmission(t *testing.T) {
 // those must not surface as a 500 either when ProcessMessage already said
 // there is nothing to do for this message.
 func TestPoolSyncCommitteesSkipsPublishForIgnoredMessage(t *testing.T) {
+	t.Parallel()
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
 			Slot:            1,
@@ -1181,6 +1202,7 @@ func TestPoolSyncCommitteesSkipsPublishForIgnoredMessage(t *testing.T) {
 // ProcessMessage genuinely returns ErrIgnore, independent of the handler's
 // own control flow.
 func TestPoolSyncCommitteesSkipsPublishForRealServiceIgnoredSlot(t *testing.T) {
+	t.Parallel()
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
 			Slot:            1,
@@ -1226,6 +1248,7 @@ func TestPoolSyncCommitteesSkipsPublishForRealServiceIgnoredSlot(t *testing.T) {
 // logging/counting for it still happens regardless of which response is
 // written.
 func TestPoolSyncCommitteesValidationFailurePrecedesAdmissionFailure(t *testing.T) {
+	t.Parallel()
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
 			Slot:            1,
@@ -1268,6 +1291,7 @@ func TestPoolSyncCommitteesValidationFailurePrecedesAdmissionFailure(t *testing.
 // matches the expiry argument with gomock.Any(), so an off-by-one on
 // slot+1 or a wrong disparity conversion would not be caught anywhere else.
 func TestSyncCommitteeMessageExpiry(t *testing.T) {
+	t.Parallel()
 	bcfg := clparams.MainnetBeaconConfig
 	bcfg.InitializeForkSchedule()
 	genesis, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
@@ -1290,6 +1314,7 @@ func TestSyncCommitteeMessageExpiry(t *testing.T) {
 // timestamp - including one that is not obviously in the past, which a
 // weaker "not equal to genesis" assertion would not rule out.
 func TestSyncCommitteeMessageExpiryDoesNotWrapAtMaxSlot(t *testing.T) {
+	t.Parallel()
 	bcfg := clparams.MainnetBeaconConfig
 	bcfg.InitializeForkSchedule()
 	genesis, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
@@ -1308,6 +1333,7 @@ func TestSyncCommitteeMessageExpiryDoesNotWrapAtMaxSlot(t *testing.T) {
 // invalid - the failure mode a bound targeting only slot == MaxUint64
 // would miss.
 func TestSyncCommitteeMessageExpiryDoesNotAliasToFutureForHugeSlot(t *testing.T) {
+	t.Parallel()
 	bcfg := clparams.MainnetBeaconConfig
 	bcfg.InitializeForkSchedule()
 	genesis, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
@@ -1329,6 +1355,7 @@ func TestSyncCommitteeMessageExpiryDoesNotAliasToFutureForHugeSlot(t *testing.T)
 // wires syncCommitteeMessageExpiry's result into PublishBackground for the
 // message's own slot, not just that it calls PublishBackground at all.
 func TestPoolSyncCommitteesUsesCalculatedExpiry(t *testing.T) {
+	t.Parallel()
 	const msgSlot = 1
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
@@ -1382,6 +1409,7 @@ func TestPoolSyncCommitteesUsesCalculatedExpiry(t *testing.T) {
 // sync-committee service, with the message's own content, so a later
 // duplicate submission can be recognized as already published.
 func TestPoolSyncCommitteesMarksMessagePublishedOnSuccessfulAdmission(t *testing.T) {
+	t.Parallel()
 	msg := &cltypes.SyncCommitteeMessage{
 		Slot:            1,
 		BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
@@ -1435,6 +1463,7 @@ func TestPoolSyncCommitteesMarksMessagePublishedOnSuccessfulAdmission(t *testing
 // itself failed, so a retry of the same content still gets a real chance to
 // publish instead of being ignored as already-done.
 func TestPoolSyncCommitteesDoesNotMarkPublishedOnAdmissionFailure(t *testing.T) {
+	t.Parallel()
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
 			Slot:            1,
@@ -1470,6 +1499,7 @@ func TestPoolSyncCommitteesDoesNotMarkPublishedOnAdmissionFailure(t *testing.T) 
 }
 
 func TestPoolSyncContributionAndProofs(t *testing.T) {
+	t.Parallel()
 	aggrBits := make([]byte, cltypes.DefaultSyncCommitteeAggregationBitsSize)
 	aggrBits[0] = 1
 	msgs := []*cltypes.SignedContributionAndProof{
@@ -1563,6 +1593,7 @@ func servePoolAttestations(t *testing.T, handler *ApiHandler, tt poolAttestation
 }
 
 func TestPoolAttestationsDoNotPublishIgnored(t *testing.T) {
+	t.Parallel()
 	requests := poolAttestationRequests(t, 1)
 	outcomes := []struct {
 		name   string
@@ -1615,6 +1646,7 @@ func (s *arrivingHeaderStore) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader
 // A validator client may attest before the node imports the block it votes for, e.g. while blob data is still
 // awaited. The submission waits for the block, then is processed again and published.
 func TestPoolAttestationsWaitForUnseenBlock(t *testing.T) {
+	t.Parallel()
 	blockNotSeen := fmt.Errorf("%w: %w: %v", services.ErrIgnore, services.ErrBlockNotSeen, common.Hash{})
 	for _, tt := range poolAttestationRequests(t, 1) {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1648,6 +1680,7 @@ func TestPoolAttestationsWaitForUnseenBlock(t *testing.T) {
 
 // The wait is bounded by one slot for the whole request, not per attestation.
 func TestPoolAttestationsFailWhenBlockDoesNotArrive(t *testing.T) {
+	t.Parallel()
 	blockNotSeen := fmt.Errorf("%w: %w: %v", services.ErrIgnore, services.ErrBlockNotSeen, common.Hash{})
 	for _, tt := range poolAttestationRequests(t, 3) {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1685,6 +1718,7 @@ func TestPoolAttestationsFailWhenBlockDoesNotArrive(t *testing.T) {
 }
 
 func TestWritePoolingFailuresDeclaresJSON(t *testing.T) {
+	t.Parallel()
 	rec := httptest.NewRecorder()
 	(&ApiHandler{}).writePoolingFailures(rec, []poolingFailure{{Index: 0, Message: "invalid"}})
 	require.Equal(t, http.StatusBadRequest, rec.Code)
@@ -1692,6 +1726,7 @@ func TestWritePoolingFailuresDeclaresJSON(t *testing.T) {
 }
 
 func TestPoolAggregatesAndProofsAcceptsSSZ(t *testing.T) {
+	t.Parallel()
 	ctrl := gomock.NewController(t)
 	service := services_mock.NewMockAggregateAndProofService(ctrl)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
@@ -1758,6 +1793,7 @@ func TestPoolAggregatesAndProofsAcceptsSSZ(t *testing.T) {
 // or one whose committee the head state does not hold, so the handler must report it instead of
 // publishing it.
 func TestPoolContributionsAndProofsReportsIgnoredContributions(t *testing.T) {
+	t.Parallel()
 	for _, ignored := range []error{
 		services.ErrIgnore,
 		fmt.Errorf("%w: %w", services.ErrIgnore, state.ErrSyncCommitteeNotInState),
@@ -1799,6 +1835,7 @@ func testPoolContributionIsReported(t *testing.T, ignored error) {
 // The next committee signs for the last slot of a period, so a message for that slot goes to the
 // validator's subnet in the next committee even while the head is one slot behind.
 func TestPoolSyncCommitteesPublishesTheLastSlotOfAPeriodOnTheNextCommitteeSubnet(t *testing.T) {
+	t.Parallel()
 	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	cfg := s.BeaconConfig()
 	nextPeriod := cfg.RoundSlotToSyncCommitteePeriod(s.Slot()) + cfg.SlotsPerEpoch*cfg.EpochsPerSyncCommitteePeriod

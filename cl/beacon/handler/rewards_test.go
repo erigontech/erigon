@@ -34,6 +34,7 @@ import (
 )
 
 func TestGetBlockRewards(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 	var err error
 	fcu.HeadVal, err = blocks[len(blocks)-5].Block.HashSSZ()
@@ -91,6 +92,7 @@ func TestGetBlockRewards(t *testing.T) {
 }
 
 func TestPostSyncCommitteeRewards(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	var err error
 	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()

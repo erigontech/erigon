@@ -57,6 +57,7 @@ const (
 )
 
 func TestSelectAttestationsSkipsVotesAlreadyCovered(t *testing.T) {
+	t.Parallel()
 	wide := newTestCandidate(1, true, sourceFlag, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
 	overlapping := newTestCandidate(2, true, sourceFlag, 0, 1, 2, 3, 4, 5, 6, 7, 8)
 	disjoint := newTestCandidate(3, true, sourceFlag, 10, 11)
@@ -67,6 +68,7 @@ func TestSelectAttestationsSkipsVotesAlreadyCovered(t *testing.T) {
 }
 
 func TestSelectAttestationsDropsCandidatesWithoutNewReward(t *testing.T) {
+	t.Parallel()
 	wide := newTestCandidate(1, true, sourceFlag, 0, 1, 2, 3)
 	subset := newTestCandidate(2, true, sourceFlag, 0, 1)
 
@@ -76,6 +78,7 @@ func TestSelectAttestationsDropsCandidatesWithoutNewReward(t *testing.T) {
 }
 
 func TestSelectAttestationsCountsNewFlagsOfCoveredValidators(t *testing.T) {
+	t.Parallel()
 	// sourceAndTarget wins first; afterwards only the head flags of allFlagsSameValidators
 	// are new, and they are still worth more than otherValidators.
 	sourceAndTarget := newTestCandidate(1, true, 0b011, 0, 1, 2, 3, 4, 5)
@@ -88,6 +91,7 @@ func TestSelectAttestationsCountsNewFlagsOfCoveredValidators(t *testing.T) {
 }
 
 func TestSelectAttestationsTracksEpochsSeparately(t *testing.T) {
+	t.Parallel()
 	previousEpoch := newTestCandidate(1, false, allFlags, 0, 1)
 	currentEpoch := newTestCandidate(2, true, allFlags, 0, 1)
 
@@ -97,6 +101,7 @@ func TestSelectAttestationsTracksEpochsSeparately(t *testing.T) {
 }
 
 func TestSelectAttestationsDropsCandidatesWorthLessThanOneGwei(t *testing.T) {
+	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	worthless := newTestCandidate(1, true, sourceFlag, 1)
 	valuable := newTestCandidate(2, true, sourceFlag, 2)
@@ -108,6 +113,7 @@ func TestSelectAttestationsDropsCandidatesWorthLessThanOneGwei(t *testing.T) {
 }
 
 func TestSelectAttestationsBreaksTiesIndependentlyOfInputOrder(t *testing.T) {
+	t.Parallel()
 	first := newTestCandidate(1, true, sourceFlag, 1)
 	first.attestation.Signature = [96]byte{2}
 	second := newTestCandidate(2, true, sourceFlag, 2)
@@ -120,6 +126,7 @@ func TestSelectAttestationsBreaksTiesIndependentlyOfInputOrder(t *testing.T) {
 }
 
 func TestSelectAttestationsKeepsEpochFlagsApartForAnyFlagCount(t *testing.T) {
+	t.Parallel()
 	weights := []uint64{1, 1, 1, 1, 1}
 	previousEpochFlag4 := newTestCandidate(1, false, 1<<4, 0)
 	currentEpochFlag0 := newTestCandidate(2, true, 1<<0, 0)
@@ -130,6 +137,7 @@ func TestSelectAttestationsKeepsEpochFlagsApartForAnyFlagCount(t *testing.T) {
 }
 
 func TestBlockInclusionAttestationsIncludesLocalAggregates(t *testing.T) {
+	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	opPool := pool.NewOperationsPool(&cfg)
 	gossipAggregate := &solid.Attestation{Data: &solid.AttestationData{Slot: 1}, Signature: [96]byte{1}}

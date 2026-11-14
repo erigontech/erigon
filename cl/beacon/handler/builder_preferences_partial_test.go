@@ -33,6 +33,7 @@ import (
 )
 
 func TestBuilderPreferencesIsolatesSemanticallyInvalidEntry(t *testing.T) {
+	t.Parallel()
 	for _, contentType := range []string{"application/json", "application/octet-stream"} {
 		t.Run(contentType, func(t *testing.T) {
 			ctrl := gomock.NewController(t)

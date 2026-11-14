@@ -130,6 +130,7 @@ func requireNotCached(t *testing.T, h *ApiHandler, blobs ...testBlob) {
 }
 
 func TestRequestBlobBundlesVerifiesRequestBlobs(t *testing.T) {
+	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			h := newRequestBlobsHandler(t, version)
@@ -156,6 +157,7 @@ func TestRequestBlobBundlesVerifiesRequestBlobs(t *testing.T) {
 // TestRequestBlobBundlesUsesCachedBundles proves the producing node uses the bundle it got from the
 // execution layer: the request's copy of that blob is neither verified nor used.
 func TestRequestBlobBundlesUsesCachedBundles(t *testing.T) {
+	t.Parallel()
 	h := newRequestBlobsHandler(t, clparams.ElectraVersion)
 	b := newTestBlob(t, 1, clparams.ElectraVersion)
 	h.blobBundles.Add(common.Bytes48(b.commitment), BlobBundle{
@@ -176,6 +178,7 @@ func TestRequestBlobBundlesUsesCachedBundles(t *testing.T) {
 // count does not fit the block's fork is not used: the request's copy is verified and used instead,
 // so the column build never indexes cell proofs the bundle does not have.
 func TestRequestBlobBundlesVerifiesCachedBundleWithWrongProofCount(t *testing.T) {
+	t.Parallel()
 	h := newRequestBlobsHandler(t, clparams.FuluVersion)
 	electraBlob, fuluBlob := newTestBlob(t, 1, clparams.ElectraVersion), newTestBlob(t, 1, clparams.FuluVersion)
 	h.blobBundles.Add(common.Bytes48(electraBlob.commitment), BlobBundle{
@@ -191,6 +194,7 @@ func TestRequestBlobBundlesVerifiesCachedBundleWithWrongProofCount(t *testing.T)
 }
 
 func TestRequestBlobBundlesRejectsForkThatDoesNotMatchSlot(t *testing.T) {
+	t.Parallel()
 	h := newRequestBlobsHandler(t, clparams.FuluVersion)
 	b := newTestBlob(t, 1, clparams.ElectraVersion)
 
@@ -203,6 +207,7 @@ func TestRequestBlobBundlesRejectsForkThatDoesNotMatchSlot(t *testing.T) {
 // blob limit at the slots where they change: the last Electra slot and the first Fulu slot, and the
 // last slot before and the first slot of a blob schedule entry.
 func TestRequestBlobBundlesChecksAtForkAndBlobScheduleBoundaries(t *testing.T) {
+	t.Parallel()
 	const fuluEpoch, bpoEpoch = 2, 3
 	h := newRequestBlobsHandler(t, clparams.ElectraVersion)
 	h.beaconChainCfg.FuluForkEpoch = fuluEpoch
@@ -244,6 +249,7 @@ func TestRequestBlobBundlesChecksAtForkAndBlobScheduleBoundaries(t *testing.T) {
 }
 
 func TestRequestBlobBundlesRejectsBlobsWithoutCommitmentList(t *testing.T) {
+	t.Parallel()
 	h := newRequestBlobsHandler(t, clparams.ElectraVersion)
 	block := newRequestBlock(h.beaconChainCfg, clparams.ElectraVersion, 0, newTestBlob(t, 1, clparams.ElectraVersion))
 	block.SignedBlock.Block.Body.BlobKzgCommitments = nil
@@ -256,6 +262,7 @@ func TestRequestBlobBundlesRejectsBlobsWithoutCommitmentList(t *testing.T) {
 // TestRequestBlobBundlesRejectsTooManyBlobsBeforeVerifying proves the gossip blob limit is checked
 // before any KZG work: the proofs here are invalid, yet the limit is what the request fails on.
 func TestRequestBlobBundlesRejectsTooManyBlobsBeforeVerifying(t *testing.T) {
+	t.Parallel()
 	h := newRequestBlobsHandler(t, clparams.ElectraVersion)
 	limit := int(h.beaconChainCfg.MaxBlobsPerBlockElectra)
 	blobs := make([]testBlob, limit+1)
@@ -280,6 +287,7 @@ func TestRequestBlobBundlesRejectsTooManyBlobsBeforeVerifying(t *testing.T) {
 }
 
 func TestRequestBlobBundlesRejectsMismatchedCounts(t *testing.T) {
+	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			h := newRequestBlobsHandler(t, version)
@@ -303,6 +311,7 @@ func TestRequestBlobBundlesRejectsMismatchedCounts(t *testing.T) {
 }
 
 func TestRequestBlobBundlesRejectsInvalidProof(t *testing.T) {
+	t.Parallel()
 	for _, version := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion} {
 		t.Run(version.String(), func(t *testing.T) {
 			h := newRequestBlobsHandler(t, version)
@@ -321,6 +330,7 @@ func TestRequestBlobBundlesRejectsInvalidProof(t *testing.T) {
 // TestRequestBlobBundlesLeavesMissingBlockToValidation proves a request without a block, such as
 // JSON with "signed_block": null, is left to block validation instead of dereferencing nil.
 func TestRequestBlobBundlesLeavesMissingBlockToValidation(t *testing.T) {
+	t.Parallel()
 	h := newRequestBlobsHandler(t, clparams.ElectraVersion)
 	b := newTestBlob(t, 1, clparams.ElectraVersion)
 
@@ -347,6 +357,7 @@ func newCellProofBundles(t testing.TB, n int) []BlobBundle {
 }
 
 func TestVerifyBlobBundlesRejectsBadProofInLastBlob(t *testing.T) {
+	t.Parallel()
 	bundles := newCellProofBundles(t, 4)
 	require.NoError(t, verifyBlobBundles(bundles, true))
 
@@ -356,6 +367,7 @@ func TestVerifyBlobBundlesRejectsBadProofInLastBlob(t *testing.T) {
 }
 
 func TestVerifyBlobBundlesKeepsCellsOnEveryBundle(t *testing.T) {
+	t.Parallel()
 	bundles := newCellProofBundles(t, 4)
 
 	require.NoError(t, verifyBlobBundles(bundles, true))
@@ -368,6 +380,7 @@ func TestVerifyBlobBundlesKeepsCellsOnEveryBundle(t *testing.T) {
 }
 
 func TestVerifyBlobBundlesRejectsInvalidBlobInLaterBundle(t *testing.T) {
+	t.Parallel()
 	bundles := newCellProofBundles(t, 4)
 	bundles[2].Blob = &cltypes.Blob{0xff} // not a canonical field element
 
@@ -387,6 +400,7 @@ func TestVerifyBlobBundlesSkipsUnstartedBlobsAfterFailure(t *testing.T) {
 }
 
 func TestVerifyBlobBundlesRejectsProofCountOtherThanCellCount(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		resize func([]common.Bytes48) []common.Bytes48
@@ -405,6 +419,7 @@ func TestVerifyBlobBundlesRejectsProofCountOtherThanCellCount(t *testing.T) {
 }
 
 func TestCollectPublishedPayloadDataReusesCachedCells(t *testing.T) {
+	t.Parallel()
 	commitment := cltypes.KZGCommitment{1}
 	commitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](1, 48)
 	commitments.Append(&commitment)
@@ -425,6 +440,7 @@ func TestCollectPublishedPayloadDataReusesCachedCells(t *testing.T) {
 // TestBlobBundleCacheSizeHoldsTwoBlocksAtScheduledLimit proves the cache fits two full blocks at
 // the highest blob limit in the schedule, so a block cannot evict its own bundles.
 func TestBlobBundleCacheSizeHoldsTwoBlocksAtScheduledLimit(t *testing.T) {
+	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	require.Equal(t, minBlobBundleCacheSize, blobBundleCacheSize(&cfg))
 
@@ -502,6 +518,7 @@ func requireStatus(t *testing.T, err error, status int) {
 // not produce a block, and so has no cached blob bundles for it, publishes the block's blob
 // sidecars from the blobs sent with the request, in both request encodings.
 func TestPostEthV2BeaconBlocksPublishesRequestBlobsOnNonProducingNode(t *testing.T) {
+	t.Parallel()
 	for _, asJSON := range []bool{false, true} {
 		t.Run(map[bool]string{false: "ssz", true: "json"}[asJSON], func(t *testing.T) {
 			handler, published := newPublishingHandler(t, clparams.ElectraVersion, nil)
@@ -524,6 +541,7 @@ func TestPostEthV2BeaconBlocksPublishesRequestBlobsOnNonProducingNode(t *testing
 // TestPostEthV2BeaconBlocksPublishesRequestColumnsOnNonProducingNode is the Fulu counterpart: the
 // node builds and publishes every data column from the request's blobs and cell proofs.
 func TestPostEthV2BeaconBlocksPublishesRequestColumnsOnNonProducingNode(t *testing.T) {
+	t.Parallel()
 	if clparams.GetBeaconConfig() == nil {
 		cfg := clparams.MainnetBeaconConfig
 		clparams.InitGlobalStaticConfig(&cfg)
@@ -556,6 +574,7 @@ func TestPostEthV2BeaconBlocksPublishesRequestColumnsOnNonProducingNode(t *testi
 // TestPostEthV2BeaconBlocksRejectedBlockLeavesNoBlobData proves blobs from a request whose block
 // fails validation are neither published nor cached.
 func TestPostEthV2BeaconBlocksRejectedBlockLeavesNoBlobData(t *testing.T) {
+	t.Parallel()
 	handler, published := newPublishingHandler(t, clparams.ElectraVersion, errors.New("block is invalid"))
 	b := newTestBlob(t, 1, clparams.ElectraVersion)
 	block := newRequestBlock(handler.beaconChainCfg, clparams.ElectraVersion, handler.beaconChainCfg.SlotsPerEpoch, b)
@@ -569,6 +588,7 @@ func TestPostEthV2BeaconBlocksRejectedBlockLeavesNoBlobData(t *testing.T) {
 // TestPostEthV2BeaconBlocksRejectsBlobsLabelledWithAnotherFork proves a Fulu-slot block labelled
 // electra is rejected before any blob work, so its single blob proofs never reach the column build.
 func TestPostEthV2BeaconBlocksRejectsBlobsLabelledWithAnotherFork(t *testing.T) {
+	t.Parallel()
 	handler, published := newPublishingHandler(t, clparams.FuluVersion, nil)
 	b := newTestBlob(t, 1, clparams.ElectraVersion)
 	block := newRequestBlock(handler.beaconChainCfg, clparams.ElectraVersion, handler.beaconChainCfg.SlotsPerEpoch, b)

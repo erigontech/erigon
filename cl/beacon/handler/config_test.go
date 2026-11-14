@@ -29,6 +29,7 @@ import (
 )
 
 func TestGetSpecIncludesGasLimitSchedule(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name         string
 		network      clparams.NetworkType

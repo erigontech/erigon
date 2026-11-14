@@ -48,6 +48,7 @@ func (s overwriteAfterViewSyncedData) ViewHeadStateWithIdentity(fn synced_data.V
 }
 
 func TestValidatorIdentitiesAtHeadAreReadInsideTheView(t *testing.T) {
+	t.Parallel()
 	_, _, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	next := state.New(postState.BeaconConfig())

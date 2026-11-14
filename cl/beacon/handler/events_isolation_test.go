@@ -37,6 +37,7 @@ import (
 // A stream that asked only for state topics is not subscribed to the operation feed, so gossip traffic never reaches
 // its buffer.
 func TestEventStreamSubscribesOnlyTheFeedsOfItsTopics(t *testing.T) {
+	t.Parallel()
 	emitters := beaconevents.NewEventEmitter()
 	sub := subscribeEventStream(emitters, mapset.NewSet(beaconevents.StateHead, beaconevents.StateBlock))
 	defer sub.unsubscribe()
@@ -50,6 +51,7 @@ func TestEventStreamSubscribesOnlyTheFeedsOfItsTopics(t *testing.T) {
 // State and operation events have separate buffers: a full operation buffer does not make the stream miss a head event,
 // which is sent without waiting for subscribers.
 func TestEventStreamHeadIsNotCrowdedOutByOperationEvents(t *testing.T) {
+	t.Parallel()
 	emitters := beaconevents.NewEventEmitter()
 	sub := subscribeEventStream(emitters, mapset.NewSet(beaconevents.StateHead, beaconevents.OpSingleAttestation))
 	defer sub.unsubscribe()
@@ -65,6 +67,7 @@ func TestEventStreamHeadIsNotCrowdedOutByOperationEvents(t *testing.T) {
 // Every topic a feed emits is listed under that feed: a stream subscribes only the feeds of its topics, so a topic
 // listed under the wrong feed would never reach it.
 func TestEventStreamTopicsAreListedUnderTheFeedThatEmitsThem(t *testing.T) {
+	t.Parallel()
 	emitters := beaconevents.NewEventEmitter()
 	emitted := map[beaconevents.EventTopic]eventFeed{}
 	for feed, sender := range map[eventFeed]any{stateFeed: emitters.State(), operationFeed: emitters.Operation()} {
@@ -121,6 +124,7 @@ func (w *collectingStreamWriter) count(topic beaconevents.EventTopic) int {
 // A stream of state and operation topics delivers both: its operation buffer is drained, so more operation events than
 // the buffer holds reach the client without blocking the emitter, and the head event arrives with them.
 func TestEventStreamDeliversStateAndOperationTopics(t *testing.T) {
+	t.Parallel()
 	cfg := clparams.MainnetBeaconConfig
 	a := &ApiHandler{emitters: beaconevents.NewEventEmitter(), beaconChainCfg: &cfg}
 	w := &collectingStreamWriter{header: http.Header{}}
@@ -187,6 +191,7 @@ func floodUntilLagged(t *testing.T, send func() int, subscribers, limit int) {
 
 // A stream that cannot take a head event is closed, so the client reconnects instead of missing the head silently.
 func TestEventStreamClosesWhenItMissesAHeadEvent(t *testing.T) {
+	t.Parallel()
 	a, _, handlerDone := startTopicStream(t, "head")
 	require.Eventually(t, func() bool {
 		return a.emitters.State().SendHead(&beaconevents.HeadData{}) == 1
@@ -230,6 +235,7 @@ func startTopicStream(t *testing.T, topics string) (*ApiHandler, *collectingStre
 // A stream is closed only for a dropped event of a topic it asked for. A block stream does not ask for head, and a head
 // stream does not ask for head_v2, so a flood of those must not close them.
 func TestEventStreamStaysOpenWhenAnUnrequestedHeadIsDropped(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		topics string
 		flood  func(*beaconevents.EventEmitter)
@@ -267,6 +273,7 @@ func TestEventStreamStaysOpenWhenAnUnrequestedHeadIsDropped(t *testing.T) {
 
 // A stream with head and another state topic takes head from the head feed only, not again from the state feed.
 func TestEventStreamDeliversAHeadEventOnce(t *testing.T) {
+	t.Parallel()
 	a, w, _ := startTopicStream(t, "head,block")
 	require.Eventually(t, func() bool { return a.emitters.State().SendBlock(&beaconevents.BlockData{}) > 0 }, 5*time.Second, 10*time.Millisecond, "event stream never subscribed")
 	require.Eventually(t, func() bool { return w.count(beaconevents.StateBlock) == 1 }, 5*time.Second, 10*time.Millisecond)

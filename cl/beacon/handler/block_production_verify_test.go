@@ -32,6 +32,7 @@ import (
 // validators than the ones that signed it. Packing it would make the block invalid, so production
 // verifies the selected attestations against the proposal state and drops the ones that fail.
 func TestFindBestAttestationsDropsAttestationsThatFailAgainstTheProposalState(t *testing.T) {
+	t.Parallel()
 	f := newVerifyingPackingFixture(t)
 	otherHead := *f.data
 	otherHead.BeaconBlockRoot = [32]byte{4}
@@ -48,6 +49,7 @@ func TestFindBestAttestationsDropsAttestationsThatFailAgainstTheProposalState(t 
 // Aggregates of one data from several committees are merged into one attestation, so a committee
 // that fails takes the merged attestation with it. The block stays valid.
 func TestFindBestAttestationsDropsAMergedAttestationWithAFailingCommittee(t *testing.T) {
+	t.Parallel()
 	f := newVerifyingPackingFixture(t)
 
 	f.signedGossip(f.data, 0, 0, 1, 2)
@@ -59,6 +61,7 @@ func TestFindBestAttestationsDropsAMergedAttestationWithAFailingCommittee(t *tes
 
 // Every attestation that the proposal state maps to its signers is kept.
 func TestFindBestAttestationsKeepsAttestationsThatVerify(t *testing.T) {
+	t.Parallel()
 	f := newVerifyingPackingFixture(t)
 
 	f.signedGossip(f.data, 0, 0, 1, 2)

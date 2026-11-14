@@ -162,12 +162,14 @@ func (f *packingFixture) packed() []map[int][]int {
 }
 
 func TestPackedLocalAggregateAlone(t *testing.T) {
+	t.Parallel()
 	f := newPackingFixture(t)
 	f.singles(0, 1, 2, 5)
 	require.Equal(t, []map[int][]int{{0: {1, 2, 5}}}, f.packed())
 }
 
 func TestPackedLocalAggregateDisjointFromGossip(t *testing.T) {
+	t.Parallel()
 	f := newPackingFixture(t)
 	f.gossip(0, 0, 1)
 	f.singles(0, 4, 6)
@@ -175,6 +177,7 @@ func TestPackedLocalAggregateDisjointFromGossip(t *testing.T) {
 }
 
 func TestPackedLocalAggregateOverlappingGossip(t *testing.T) {
+	t.Parallel()
 	f := newPackingFixture(t)
 	f.gossip(0, 0, 1, 2)
 	f.singles(0, 2, 3, 7)
@@ -182,6 +185,7 @@ func TestPackedLocalAggregateOverlappingGossip(t *testing.T) {
 }
 
 func TestPackedLocalAggregatesAcrossCommittees(t *testing.T) {
+	t.Parallel()
 	f := newPackingFixture(t)
 	f.gossip(0, 0, 1)
 	f.singles(1, 3, 5)
@@ -190,6 +194,7 @@ func TestPackedLocalAggregatesAcrossCommittees(t *testing.T) {
 
 // process_attestation asserts the source; a candidate with another source can never be included.
 func TestPackingDropsCandidatesWithForeignSource(t *testing.T) {
+	t.Parallel()
 	f := newPackingFixture(t)
 	foreign := *f.data
 	foreign.Source = solid.Checkpoint{Epoch: 0, Root: [32]byte{9}}
@@ -204,6 +209,7 @@ func TestPackingDropsCandidatesWithForeignSource(t *testing.T) {
 // A vote of the current epoch needs the current justified checkpoint as its source, a vote of the
 // previous epoch the previous one.
 func TestPackingUsesJustifiedCheckpointOfTargetEpoch(t *testing.T) {
+	t.Parallel()
 	f := newPackingFixture(t)
 	previousEpoch := &solid.AttestationData{
 		Slot:            5,
@@ -222,6 +228,7 @@ func TestPackingUsesJustifiedCheckpointOfTargetEpoch(t *testing.T) {
 }
 
 func TestDenebPackingDropsCandidatesWithForeignSource(t *testing.T) {
+	t.Parallel()
 	f := newPackingFixture(t)
 	f.cfg.ElectraForkEpoch = 100
 	foreign := *f.data
@@ -238,6 +245,7 @@ func TestDenebPackingDropsCandidatesWithForeignSource(t *testing.T) {
 }
 
 func TestPackedLocalAggregateReplacesGossipSubset(t *testing.T) {
+	t.Parallel()
 	f := newPackingFixture(t)
 	f.gossip(0, 1, 2)
 	f.singles(0, 1, 2, 3)
@@ -245,6 +253,7 @@ func TestPackedLocalAggregateReplacesGossipSubset(t *testing.T) {
 }
 
 func TestPackedGossipSupersetCoversLocalAggregate(t *testing.T) {
+	t.Parallel()
 	f := newPackingFixture(t)
 	f.gossip(0, 1, 2, 3)
 	f.singles(0, 1, 2)

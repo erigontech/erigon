@@ -46,6 +46,7 @@ func (r *gatedBeaconBlockReader) ReadBlockByRoot(context.Context, kv.Tx, common.
 }
 
 func TestGetBeaconBlockByRootUsesImportedBlockBeforePersistence(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	block := blocks[len(blocks)-1].Clone().(*cltypes.SignedBeaconBlock)
 	block.Block.Slot++
@@ -68,6 +69,7 @@ func TestGetBeaconBlockByRootUsesImportedBlockBeforePersistence(t *testing.T) {
 }
 
 func TestGetBeaconBlockByRootSamplesOptimisticStatusAfterFallback(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	block := blocks[len(blocks)-1].Clone().(*cltypes.SignedBeaconBlock)
 	block.Block.Slot++
@@ -100,6 +102,7 @@ func TestGetBeaconBlockByRootSamplesOptimisticStatusAfterFallback(t *testing.T) 
 }
 
 func TestGetBeaconBlockByRootKeepsPersistedBlockFastPath(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	block := blocks[len(blocks)-1]
 	root, err := block.Block.HashSSZ()
@@ -119,6 +122,7 @@ func TestGetBeaconBlockByRootKeepsPersistedBlockFastPath(t *testing.T) {
 }
 
 func TestGetBeaconBlockByRootRejectsUnvalidatedForkchoiceBlock(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	block := blocks[len(blocks)-1].Clone().(*cltypes.SignedBeaconBlock)
 	block.Block.Slot++
@@ -139,6 +143,7 @@ func TestGetBeaconBlockByRootRejectsUnvalidatedForkchoiceBlock(t *testing.T) {
 }
 
 func TestGetBeaconBlockByRootRejectsUnavailableForkchoiceBlock(t *testing.T) {
+	t.Parallel()
 	_, blocks, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	block := blocks[len(blocks)-1].Clone().(*cltypes.SignedBeaconBlock)
 	block.Block.Slot++
