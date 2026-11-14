@@ -56,11 +56,6 @@ func Bytes4ToUint32(bytes4 [4]byte) uint32 {
 	return binary.BigEndian.Uint32(bytes4[:])
 }
 
-func BytesToBytes4(b []byte) (ret [4]byte) {
-	copy(ret[:], b)
-	return
-}
-
 func Uint64ToLE(i uint64) []byte {
 	buf := make([]byte, 8)
 	binary.LittleEndian.PutUint64(buf, i)
