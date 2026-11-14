@@ -2019,6 +2019,63 @@ func TestDomain_GetAsOfEveryTxNum(t *testing.T) {
 	}
 }
 
+// Past 256 visible files the latest value of a key can sit in a file whose position does not fit a byte; a cached read
+// of it must still report that file's step, or GetAsOf takes the newer latest value for an older txNum.
+func TestDomain_GetAsOfPastByteManyFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	const stepSize, steps = 2, 300
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
+	ctx := t.Context()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	key := make([]byte, length.Addr)
+	key[0] = 0x01
+	old, newest := []byte("old"), []byte("newest")
+	domainRoTx := d.beginForTests()
+	writer := domainRoTx.NewWriter(db)
+	for step := range uint64(steps) {
+		filler := make([]byte, length.Addr)
+		binary.BigEndian.PutUint64(filler[length.Addr-8:], step+1)
+		require.NoError(t, writer.PutWithPrev(filler, []byte{1}, step*stepSize, nil))
+	}
+	require.NoError(t, writer.PutWithPrev(key, old, 10*stepSize, nil))
+	require.NoError(t, writer.PutWithPrev(key, newest, (steps-1)*stepSize, old))
+	require.NoError(t, writer.Flush(ctx, tx))
+	writer.Close()
+	domainRoTx.Close()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	for step := range kv.Step(steps) {
+		require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+		pruneTx := d.beginForTests()
+		_, err := pruneTx.Prune(ctx, tx, step, step.ToTxNum(stepSize), (step + 1).ToTxNum(stepSize), math.MaxUint64, logEvery)
+		pruneTx.Close()
+		require.NoError(t, err)
+	}
+
+	dt := d.beginForTests()
+	defer dt.Close()
+	require.Greater(t, len(dt.files), 256)
+	var readSteps [2]kv.Step
+	for i := range readSteps { // the second read comes from the file cache
+		v, step, ok, err := dt.GetLatest(key, tx)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, newest, v)
+		readSteps[i] = step
+	}
+	require.Equal(t, readSteps[0], readSteps[1], "a cached read reports the step of another file")
+	v, ok, err := dt.GetAsOf(key, 100*stepSize, tx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, old, v)
+}
+
 // A collated range whose DB rows are pruned only in part leaves older rows next to the files; GetAsOf must still
 // return the last write before every txNum. "odd steps" keeps a key's step-8 row while its step-9 row is gone;
 // "interrupted" is what a time-limited prune of [0, files end) leaves: keys before the stop are pruned, later keys
