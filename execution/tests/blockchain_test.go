@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -2626,4 +2627,77 @@ func TestParallelStepEdgeKeepsRevivedStorage(t *testing.T) {
 	}
 	dbg.Exec3Parallel = true
 	require.NoError(t, m.InsertChain(chainPack))
+}
+
+// TestParallelSameBlockDeployCallFuzz builds BAL blocks that deploy contracts and call them later in the same
+// block, in random orders; a call to a self-destruct contract sends its balance back to the caller (EIP-6780).
+// The parallel executor must reproduce the roots and receipts the serial block generator computed.
+func TestParallelSameBlockDeployCallFuzz(t *testing.T) {
+	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+
+	counter := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
+	destruct := []byte{byte(vm.CALLER), byte(vm.SELFDESTRUCT)}
+	config := libchain.AllProtocolChanges
+	gasPrice := uint256.NewInt(10_000_000_000)
+	for seed := range 8 {
+		t.Run(fmt.Sprint("seed=", seed), func(t *testing.T) {
+			rng := rand.New(rand.NewPCG(uint64(seed), 25694))
+			keys := make([]*ecdsa.PrivateKey, 6)
+			alloc := types.GenesisAlloc{}
+			for i := range keys {
+				var kb [32]byte
+				for j := range kb {
+					kb[j] = byte(rng.IntN(256))
+				}
+				kb[0] |= 1
+				key, err := crypto.ToECDSA(kb[:])
+				require.NoError(t, err)
+				keys[i] = key
+				alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(common.Ether)}
+			}
+			dbg.Exec3Parallel = false
+			ethconfig.Defaults.Sync.ExecWorkerCount = 4
+			m := execmoduletester.New(t, execmoduletester.WithKey(keys[0]), execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc}), execmoduletester.WithExperimentalBAL())
+			signer := types.LatestSignerForChainID(config.ChainID)
+			nonces := make([]uint64, len(keys))
+			var deployed []common.Address
+			chainPack, err := m.GenerateChain(3, func(_ int, b *blockgen.BlockGen) {
+				for range 16 {
+					s := rng.IntN(len(keys))
+					from := crypto.PubkeyToAddress(keys[s].PublicKey)
+					var txn types.Transaction
+					if len(deployed) == 0 || rng.IntN(3) == 0 {
+						runtime := counter
+						if rng.IntN(3) == 0 {
+							runtime = destruct
+						}
+						deployed = append(deployed, types.CreateAddress(from, nonces[s]))
+						txn = types.NewContractCreation(nonces[s], uint256.NewInt(0), 500_000, gasPrice, program.New().ReturnViaCodeCopy(runtime).Bytes())
+					} else {
+						txn = types.NewTransaction(nonces[s], deployed[rng.IntN(len(deployed))], uint256.NewInt(uint64(rng.IntN(2))), 300_000, gasPrice, nil)
+					}
+					signed, err := types.SignTx(txn, *signer, keys[s])
+					require.NoError(t, err)
+					b.AddTx(signed)
+					nonces[s]++
+				}
+			})
+			require.NoError(t, err)
+			for i, blk := range chainPack.Blocks {
+				require.Equal(t, 16, blk.Transactions().Len())
+				require.NotNil(t, blk.Header().BlockAccessListHash, "every block carries a BAL")
+				for _, r := range chainPack.Receipts[i] {
+					require.Equal(t, types.ReceiptStatusSuccessful, r.Status, "every deploy and call succeeds")
+				}
+			}
+			dbg.Exec3Parallel = true
+			require.NoError(t, m.InsertChain(chainPack))
+			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+				head := rawdb.ReadCurrentHeader(tx)
+				require.Equal(t, uint64(3), head.Number.Uint64())
+				return nil
+			}))
+		})
+	}
 }
