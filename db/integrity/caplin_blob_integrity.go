@@ -101,11 +101,12 @@ func CheckCaplinBlobSidecars(ctx context.Context, db kv.RoDB, snapshots *freezeb
 		logger.Error("[integrity] CaplinBlobSidecars", "err", err)
 		return err
 	}
+	reader := freezeblocks.NewBeaconSnapshotReader(snapshots, nil, beaconCfg)
 	return db.View(ctx, func(tx kv.Tx) error {
 		for _, segment := range view.BlobSidecars() {
 			from, to := segment.Src().GetRange()
 			for slot := from; slot < to; slot++ {
-				if slotErr := checkCaplinBlobSnapshotSlot(ctx, tx, snapshots, slot); slotErr != nil {
+				if slotErr := checkCaplinBlobSnapshotSlot(ctx, tx, snapshots, reader, slot); slotErr != nil {
 					if errors.Is(slotErr, context.Canceled) || errors.Is(slotErr, context.DeadlineExceeded) {
 						return slotErr
 					}
@@ -204,7 +205,7 @@ func checkCaplinSnapshotSegment(ctx context.Context, name string, segment *snaps
 	return nil
 }
 
-func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freezeblocks.CaplinSnapshots, slot uint64) error {
+func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, slot uint64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -257,6 +258,15 @@ func checkCaplinBlobSnapshotSlot(ctx context.Context, tx kv.Tx, snapshots *freez
 	expected := 0
 	if commitments != nil {
 		expected = commitments.Len()
+	}
+	if expected > 0 && len(sidecars) == 0 && block.Version() >= clparams.GloasVersion {
+		skipped, err := freezeblocks.PayloadSkipped(ctx, tx, snapshots, reader, block, canonicalRoot)
+		if err != nil {
+			return fmt.Errorf("blob snapshot slot %d: payload status: %w", slot, err)
+		}
+		if skipped {
+			expected = 0
+		}
 	}
 	if len(sidecars) != expected {
 		return fmt.Errorf("blob snapshot slot %d: expected %d sidecars, got %d", slot, expected, len(sidecars))

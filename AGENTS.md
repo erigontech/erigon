@@ -16,14 +16,32 @@ Explicit task requirements and Erigon's guidelines take precedence, including TD
 
 ```bash
 make erigon              # Build main binary (./build/bin/erigon)
-make integration         # Build integration test binary
-make lint                # Run golangci-lint + mod tidy check
+make integration         # Build integration command (does not run tests)
+make lintci              # Full configured lint + mod tidy check
+make lint                # Fast lint pass, full lint, and mod tidy check
 make test-short          # Quick unit tests (-short -failfast)
 make test-all            # Full test suite with coverage
 make gen                 # Generate all auto-generated code (mocks, grpc, etc.)
 ```
 
-Before committing, always verify changes with: `make lint && make erigon integration`
+### Local verification
+
+Before committing, pushing, or opening/updating a PR, select checks for the change:
+
+- **Go changes:** run relevant tests and full configured lint on affected packages. Include affected callers when APIs or shared behavior change. Pass package paths to limit lint work while retaining the repository's configured checks. Comment-only edits to Go files are Go changes.
+- **Imports or dependencies:** also run `go mod tidy -diff` in each affected module and resolve any reported changes.
+- **Command wiring, build configuration, native code, or runtime testing:** build the affected executable with its Makefile target. Build `integration` when that command is affected or needed for validation.
+- **Broad changes or linter configuration/rules:** run `make lintci` for full repository lint and the module check.
+- **Documentation-only changes (no `.go` files):** check the diff and relevant links or document tooling; Go lint and builds are not required.
+
+For example, from the repository root, replace `./execution/types` with the affected package paths:
+
+```bash
+GOEXPERIMENT=jsonv2 go tool -modfile=golangci-lint.mod golangci-lint run --config .golangci.yml ./execution/types
+GOEXPERIMENT=jsonv2 go test -short ./execution/types
+```
+
+Run affected long tests without `-short`. Fix findings from the selected checks. Reuse successful checks while their relevant inputs remain unchanged, and keep shared Go and lint caches across checkouts. Full repository lint, builds, and test suites remain CI gates.
 
 ## Architecture Overview
 
@@ -141,7 +159,7 @@ Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace co
 
 Don't sign commits, pr's, issues, comments.
 
-Run `make lint` before every commit and push and fix every finding; it is non-deterministic, so run it until clean. PRs must pass it before being opened or updated.
+Follow [Local verification](#local-verification) before commits, pushes, and PR updates.
 
 ## Code Style
 
