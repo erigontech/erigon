@@ -6,6 +6,7 @@
 - cli: removed the `--vmdebug` flag. Nothing read it, so it had no effect. Remove it from startup arguments and configuration files, or startup will fail (#25788) — by @awskii
 - cli: removed the experimental `--aa` flag and `aa` configuration key. Remove them from startup arguments and configuration files, including `aa: false`, or startup will fail. EIP-8141 frame transactions replace RIP-7560 account abstraction and activate at the chain's Bogota fork (#25243).
 - rpc, txpool: the private ETHBACKEND API is now version 5.0.0, replacing `AAValidation` with `FrameValidation`. Upgrade standalone `rpcdaemon` and `txpool` together with `erigon` (#25243).
+- rpc, txpool: the private KV API is now version 7.4.0. State notifications include block slots and completeness; upgrade standalone `rpcdaemon` and `txpool` together with `erigon` (#25515).
 - chain: timestamp-based fork schedules now reject missing required predecessors. Update affected custom genesis configurations and fork overrides before startup; Bogota requires Amsterdam at the same or an earlier timestamp (#25243).
 - rpc: `debug_accountAt`, `debug_storageRangeAt`, `debug_traceCall`, and `debug_traceCallMany` validate transaction positions before checking history retention. Out-of-range positions return an invalid-parameters error instead of reading another block's state. The position after the last user transaction remains valid, and `debug_traceCallMany` keeps `-1` for post-block state. This can be a breaking change (#24388) — by @yperbasis
 - rpc: `vmTrace` operations no longer carry the Erigon-only `idx` member, a `<transaction>-<operation>-...` path string; before Amsterdam and outside `--trace.compat` each operation now has exactly `pc`, `cost`, `op`, `ex` and `sub`. The operation part of the path follows from each operation's position in `ops` and its nesting under `sub`; the transaction part is the envelope's position in a block replay. This can be a breaking change (#25030) — by @banteg
@@ -18,6 +19,7 @@
 
 ### Added
 
+- txpool: support EIP-8272 recent-root verifier prefixes for frame transactions at the Bogota devnet-1 spec level, with dependency revalidation and root expiry (#25515).
 - engine: the authenticated Engine port supports cleartext HTTP/2 (h2c) with prior knowledge alongside HTTP/1.1. JWT authentication applies to both protocols (#21729) — by @yperbasis
 - caplin: add `--caplin.blobs-archive-from-slot` to bound the blob archive; it implies `--caplin.blobs-archive` and cannot be combined with `--caplin.snapgen` (#25879) — by @awskii
 

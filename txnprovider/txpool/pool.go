@@ -36,6 +36,7 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
@@ -71,6 +72,12 @@ import (
 // by the peer.
 const txMaxBroadcastSize = 4 * 1024
 
+// Bound deferred admission work and retained network payloads independently of pool capacity.
+const (
+	remoteTxnQueueLimit     = maxTransactionsPerPacket
+	remoteTxnQueueByteLimit = 32 * 1024 * 1024
+)
+
 // Pool is interface for the transaction pool
 // This interface exists for the convenience of testing, and not yet because
 // there are multiple implementations
@@ -81,6 +88,8 @@ type Pool interface {
 	AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error
+	MarkStateStale()
+	RetainBogotaActivation(changes *remoteproto.StateChangeBatch)
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
@@ -131,8 +140,9 @@ type TxPool struct {
 	//   - batch notifications about new txns (reduced P2P spam to other nodes about txns propagation)
 	//   - and as a result reducing lock contention
 	unprocessedRemoteTxns   *TxnSlots
-	unprocessedRemotePeers  []remoteSource                                  // index-aligned with unprocessedRemoteTxns
-	unprocessedRemoteByHash map[string]*TxnSlot                             // to reject duplicates
+	unprocessedRemotePeers  []remoteSource      // index-aligned with unprocessedRemoteTxns
+	unprocessedRemoteByHash map[string]*TxnSlot // to reject duplicates
+	unprocessedRemoteBytes  uint64
 	byHash                  map[string]*metaTxn                             // All pooled transactions by hash, including parked frames
 	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // txn_hash => discard_reason : non-persisted
 	pending                 *PendingPool
@@ -148,7 +158,10 @@ type TxPool struct {
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
 	stateGeneration         uint64
-	stateBlockHash          common.Hash // Head of the pool's state view; pins frame validation to the same block
+	stateViewStale          bool
+	stateBlockHash          common.Hash       // Head of the pool's state view; pins frame validation to the same block
+	headIsBogota            bool              // Last completed update's activation, independent of pending-block time
+	pendingActivation       *bogotaActivation // Activation observations from skipped batches, retained until an update succeeds
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -308,32 +321,108 @@ func (p *TxPool) start(ctx context.Context) error {
 		return nil
 	}
 
-	return p.poolDB.View(ctx, func(tx kv.Tx) error {
-		if err := p.fromDB(ctx, tx); err != nil {
-			return fmt.Errorf("loading pool from DB: %w", err)
-		}
-
-		if p.started.CompareAndSwap(false, true) {
-			p.logger.Info("[txpool] Started")
-		}
-
-		return nil
-	})
+	if err := p.fromDB(ctx); err != nil {
+		return fmt.Errorf("loading pool from DB: %w", err)
+	}
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	if p.started.CompareAndSwap(false, true) {
+		p.logger.Info("[txpool] Started")
+		p.lastSeenCond.Broadcast()
+	}
+	return nil
 }
 
-func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
+// MarkStateStale invalidates simulations and blocks selection and admission until
+// a notification restores a usable state view.
+func (p *TxPool) MarkStateStale() {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	p.markStateStaleLocked()
+}
+
+func (p *TxPool) markStateStaleLocked() {
+	if p.stateViewStale {
+		return
+	}
+	p.stateViewStale = true
+	p.stateGeneration++
+	for _, mt := range p.all.senderIDFrameTxn {
+		p.parkFrameLocked(mt, "state recovery pending")
+	}
+	p.lastSeenCond.Broadcast()
+	p.publishDepthMetrics()
+}
+
+var errStateViewSuperseded = errors.New("announced state version has been superseded")
+
+// Incomplete notifications require their exact committed state: combining their
+// account changes with a newer snapshot can restore values from an orphaned block.
+// Wait without holding the pool lock or a database snapshot.
+func beginBlockState(ctx context.Context, db kv.TemporalRoDB, changes *remoteproto.StateChangeBatch) (kv.TemporalTx, error) {
+	if !changes.StateChangesIncomplete {
+		return db.BeginTemporalRo(ctx)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for {
+		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // caller owns the returned transaction; stale snapshots are rolled back below
+		if err != nil {
+			return nil, err
+		}
+		version, err := rawdb.GetStateVersion(tx)
+		if err == nil && version == changes.StateVersionId {
+			return tx, nil
+		}
+		tx.Rollback()
+		if err != nil {
+			return nil, err
+		}
+		if version > changes.StateVersionId {
+			return nil, fmt.Errorf("%w: announced=%d committed=%d", errStateViewSuperseded, changes.StateVersionId, version)
+		}
+		if err := common.Sleep(waitCtx, 10*time.Millisecond); err != nil {
+			return nil, fmt.Errorf("wait for announced state version %d: %w", changes.StateVersionId, err)
+		}
+	}
+}
+
+func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) (err error) {
 	defer newBlockTimer.ObserveDuration(time.Now())
+	defer func() {
+		if err != nil {
+			p.lock.Lock()
+			defer p.lock.Unlock()
+			p.markStateStaleLocked()
+			if errors.Is(err, errStateViewSuperseded) {
+				activation := p.bogotaActivationAfter(stateChanges)
+				p.pendingActivation = &activation
+			}
+		}
+	}()
+	p.lock.Lock()
+	stateStale := p.stateViewStale
+	if stateChanges.StateChangesIncomplete {
+		p.markStateStaleLocked()
+	}
+	p.lock.Unlock()
+	// A complete notification cannot repair a failed update on its own. The pool
+	// needs a full refresh, without changing the batch shared with other consumers.
+	if stateStale && !stateChanges.StateChangesIncomplete {
+		stateChanges = proto.Clone(stateChanges).(*remoteproto.StateChangeBatch)
+		stateChanges.StateChangesIncomplete = true
+	}
 	for _, txn := range unwindTxns.Txns {
 		p.recoverAuthorizations(txn)
 	}
 
 	coreDB, cache := p.chainDB()
-	cache.OnNewBlock(stateChanges)
-	coreTx, err := coreDB.BeginTemporalRo(ctx)
+	coreTx, err := beginBlockState(ctx, coreDB, stateChanges)
 	if err != nil {
 		return err
 	}
 	defer coreTx.Rollback()
+	cache.OnNewBlock(stateChanges)
 
 	var poolTx kv.Tx
 	if p.poolDB != nil {
@@ -343,21 +432,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		}
 		defer poolTx.Rollback()
 	}
-
-	// Update EWMA block time (α=0.1) using wall-clock measurements between consecutive blocks.
-	// Gaps >10 min are ignored: they indicate the node was paused, restarted, or fast-syncing
-	// (during fast-sync the txpool receives block batches with large wall-clock gaps between
-	// them, so individual inter-block deltas are not meaningful). As a result the EWMA only
-	// tracks real-time block arrivals at chain tip. Seeded at 12 s (Ethereum mainnet slot time);
-	// converges to actual observed block time (~13 s on mainnet due to missed slots) after ~30
-	// chain-tip blocks. Done outside the lock — atomics only.
-	nowMs := time.Now().UnixMilli()
-	if prev := p.lastBlockTimestampMs.Load(); prev > 0 {
-		if delta := nowMs - prev; delta > 0 && delta < 600_000 {
-			p.avgBlockTimeMs.Store((9*p.avgBlockTimeMs.Load() + delta) / 10)
-		}
-	}
-	p.lastBlockTimestampMs.Store(nowMs)
 
 	if err := minedTxns.Valid(); err != nil {
 		return err
@@ -372,7 +446,17 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	if err != nil {
 		return err
 	}
-	return p.revalidateFrames(ctx, frames.parked, frames.generation, frames.blockHash)
+	if err := p.revalidateFrames(ctx, frames.parked, frames.generation, frames.blockHash); err != nil {
+		return err
+	}
+	// Retained activation transitions must survive failed or superseded updates.
+	p.lock.Lock()
+	if frames.generation == p.stateGeneration {
+		p.headIsBogota = p.chainConfig.IsBogota(stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockTime)
+		p.pendingActivation = nil
+	}
+	p.lock.Unlock()
+	return nil
 }
 
 // applyBlockUpdate applies the announced state under the pool lock and returns
@@ -393,7 +477,14 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	}
 	frames.blockHash = p.stateBlockHash
 	defer func() {
-		if err == nil {
+		if err != nil {
+			// Selection must not observe a partially applied update after the lock is released.
+			p.markStateStaleLocked()
+		} else {
+			p.stateViewStale = false
+			if block > p.lastSeenBlock.Load() {
+				p.recordBlockTime(stateChanges.StateChangesIncomplete)
+			}
 			p.lastSeenBlock.Store(block)
 		}
 		p.lastSeenCond.Broadcast()
@@ -426,6 +517,19 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 		})
 	}
 
+	if err := p.senders.registerNewSenders(&minedTxns, p.logger); err != nil {
+		return frames, err
+	}
+	defer p.forgetUnusedSenders(senderIDsOf(&minedTxns))
+	if stateChanges.StateChangesIncomplete {
+		// A missed unwind can leave an orphaned transaction marked as mined.
+		// Check the recovered nonce state before removing pooled replacements.
+		// An unused nonce alone does not establish an unwind or restore pool membership.
+		minedTxns, _, err = p.partitionByNonceState(minedTxns, cacheView)
+		if err != nil {
+			return frames, err
+		}
+	}
 	unwindCells := make(blobCells)
 	for i, txn := range unwindBlobTxns.Txns {
 		if txn.HasBlobs() {
@@ -441,8 +545,21 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 			}
 		}
 	}
-	if err := p.senders.onNewBlock(unwindTxns, minedTxns, p.logger); err != nil {
+	if err := p.senders.registerNewSenders(&unwindTxns, p.logger); err != nil {
 		return frames, err
+	}
+	if stateChanges.StateChangesIncomplete {
+		// A retained unwind may have been re-mined in an omitted block. Reconcile
+		// its nonce before parking it, even when frame validation is unavailable.
+		defer p.forgetUnusedSenders(senderIDsOf(&unwindTxns))
+		var consumed TxnSlots
+		consumed, unwindTxns, err = p.partitionByNonceState(unwindTxns, cacheView)
+		if err != nil {
+			return frames, err
+		}
+		for i, txn := range consumed.Txns {
+			minedTxns.Append(txn, consumed.Senders.At(i), false)
+		}
 	}
 	unwindTxns, unwindFrames := p.splitRestoredTxns(unwindTxns)
 
@@ -465,9 +582,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 		}
 	}
 
-	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, block, stateChanges.FinalizedBlock); err != nil {
-		return frames, err
-	}
+	p.processMinedFinalizedBlobs(minedTxns.Txns, block, stateChanges.FinalizedBlock)
 
 	if err := p.removeMined(p.all, minedTxns.Txns); err != nil {
 		return frames, err
@@ -479,7 +594,6 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	if err != nil {
 		return frames, err
 	}
-	p.forgetUnusedSenders(senderIDsOf(&minedTxns))
 	frames.parked = p.invalidateFrames(stateChanges)
 
 	p.pending.EnforceWorstInvariants()
@@ -492,6 +606,58 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 
 	p.publishDepthMetrics()
 	return frames, nil
+}
+
+func (p *TxPool) partitionByNonceState(txns TxnSlots, view kvcache.CacheView) (consumed, unconsumed TxnSlots, err error) {
+	for i, txn := range txns.Txns {
+		used, err := p.nonceConsumed(txn, view)
+		if err != nil {
+			return consumed, unconsumed, err
+		}
+		if used {
+			consumed.Append(txn, txns.Senders.At(i), false)
+		} else {
+			unconsumed.Append(txn, txns.Senders.At(i), false)
+		}
+	}
+	return consumed, unconsumed, nil
+}
+
+func (p *TxPool) nonceConsumed(txn *TxnSlot, view kvcache.CacheView) (bool, error) {
+	if !txn.hasKeyedNonce() {
+		nonce, _, _, err := p.senders.info(view, txn.SenderID)
+		return nonce > txn.Nonce, err
+	}
+	frame := txn.Txn.(*types.FrameTransaction)
+	var storageKey [length.Addr + length.Hash]byte
+	copy(storageKey[:length.Addr], types.FrameNonceManager[:])
+	for _, key := range frame.NonceKeys {
+		slot := types.FrameNonceSlot(frame.SenderAddress, key)
+		copy(storageKey[length.Addr:], slot[:])
+		value, err := view.Get(storageKey[:])
+		if err != nil {
+			return false, err
+		}
+		var sequence uint256.Int
+		sequence.SetBytes(value)
+		if sequence.GtUint64(txn.Nonce) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// Record only successful head advances, so retries and subscription resets do not
+// become block-time samples. Incomplete batches restart the clock after catch-up.
+func (p *TxPool) recordBlockTime(incomplete bool) {
+	nowMs := time.Now().UnixMilli()
+	if prev := p.lastBlockTimestampMs.Load(); prev > 0 && !incomplete {
+		// Ignore pauses over ten minutes; the EWMA (alpha=0.1) tracks arrivals at the tip.
+		if delta := nowMs - prev; delta > 0 && delta < 600_000 {
+			p.avgBlockTimeMs.Store((9*p.avgBlockTimeMs.Load() + delta) / 10)
+		}
+	}
+	p.lastBlockTimestampMs.Store(nowMs)
 }
 
 // Publish at block cadence, including parked frames as queued, as in RPC.
@@ -551,9 +717,11 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 func (p *TxPool) removeProcessedRemoteTxns(n int) {
 	if n == len(p.unprocessedRemoteTxns.Txns) {
 		p.unprocessedRemoteByHash = make(map[string]*TxnSlot)
+		p.unprocessedRemoteBytes = 0
 	} else {
 		for _, txn := range p.unprocessedRemoteTxns.Txns[:n] {
 			delete(p.unprocessedRemoteByHash, string(txn.IDHash[:]))
+			p.unprocessedRemoteBytes -= uint64(txn.Size)
 		}
 	}
 	p.unprocessedRemoteTxns.Txns = slices.Delete(p.unprocessedRemoteTxns.Txns, 0, n)
@@ -855,6 +1023,10 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
+	if p.stateViewStale {
+		return false, 0, nil
+	}
+
 	best := p.pending.best
 
 	isEIP3860 := p.isShanghai()
@@ -1089,6 +1261,9 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 	src := remoteSource{peerID: peerID, sentry: sentry}
 	now := time.Now()
 	for i, txn := range newTxns.Txns {
+		if len(p.unprocessedRemoteTxns.Txns) >= remoteTxnQueueLimit {
+			break
+		}
 		hashS := string(txn.IDHash[:])
 		if _, ok := p.remoteFrames.pending[hashS]; ok {
 			continue
@@ -1097,10 +1272,19 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		if ok {
 			continue
 		}
+		if uint64(txn.Size) > remoteTxnQueueByteLimit-p.unprocessedRemoteBytes {
+			continue
+		}
 		if txn.TxType() == FrameTxnType && !p.remoteFrames.reserve(txn, src, now) {
 			continue
 		}
+		// Blob bundles already reference an owned copy. Other RLP slices may
+		// retain an entire network packet outside the queue's byte budget.
+		if len(txn.BlobBundles) == 0 {
+			txn.Rlp = bytes.Clone(txn.Rlp)
+		}
 		p.unprocessedRemoteByHash[hashS] = txn
+		p.unprocessedRemoteBytes += uint64(txn.Size)
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
 		p.unprocessedRemotePeers = append(p.unprocessedRemotePeers, src)
 	}
@@ -1544,11 +1728,26 @@ func (p *TxPool) recoverAuthorizations(tx *TxnSlot) {
 	tx.AuthAndNonces = authorities
 }
 
-func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.TemporalTx, kvcache.CacheView) error) error {
+var (
+	errStateViewStale = errors.New("pool state recovery pending")
+	errPoolNotReady   = errors.New("transaction pool is not ready; retry later")
+)
+
+func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, waitForRecovery bool, f func(kv.TemporalTx, kvcache.CacheView) error) error {
 	for {
 		p.lock.Lock()
 		coreDB, cache, generation := p._chainDB, p._stateCache, p.stateGeneration
+		stale := p.stateViewStale
 		p.lock.Unlock()
+		if stale {
+			if !waitForRecovery {
+				return errStateViewStale
+			}
+			if !p.waitForStateChange(ctx, generation) {
+				return ctx.Err()
+			}
+			continue
+		}
 
 		var retry bool
 		// The cache may wait for a block update, so open the view outside the pool lock.
@@ -1559,7 +1758,7 @@ func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.
 			}
 			p.lock.Lock()
 			defer p.lock.Unlock()
-			if generation != p.stateGeneration {
+			if generation != p.stateGeneration || p.stateViewStale {
 				retry = true
 				return nil
 			}
@@ -1580,7 +1779,7 @@ func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.
 // Precheck SetCode and blob transactions under the pool lock, then recover
 // authorization signers and verify blob sidecars without it. The caller must
 // validate the surviving transactions again with a fresh state view before inserting them.
-func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remoteSource) ([]txpoolcfg.DiscardReason, blobCells, error) {
+func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remoteSource, waitForRecovery bool) ([]txpoolcfg.DiscardReason, blobCells, error) {
 	if err := txns.Valid(); err != nil {
 		return nil, nil, err
 	}
@@ -1600,7 +1799,7 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 
 	var precheckReasons []txpoolcfg.DiscardReason
 	var goodTxns TxnSlots
-	err := p.withLockedState(ctx, &prechecked, func(_ kv.TemporalTx, view kvcache.CacheView) error {
+	err := p.withLockedState(ctx, &prechecked, waitForRecovery, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var err error
 		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil)
 		if err != nil || p.cfg.MaxNonceGap == 0 || hasFrames {
@@ -1769,12 +1968,66 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 	return reasons
 }
 
+const localAdmissionTimeout = 30 * time.Second
+
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
-	return p.addNewTxns(ctx, newTxns, nil)
+	ctx, cancel := context.WithTimeout(ctx, localAdmissionTimeout)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// The first state batch can arrive before persisted transactions are restored.
+	// Admission must see those transactions for nonce and replacement checks.
+	if !p.Started() {
+		return nil, errPoolNotReady
+	}
+	reasons, err := p.addNewTxns(ctx, newTxns, nil, false)
+	if errors.Is(err, errStateViewStale) {
+		return nil, errPoolNotReady
+	}
+	return reasons, err
 }
 
-func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource) ([]txpoolcfg.DiscardReason, error) {
-	reasons, preparedCells, err := p.prepareTxns(ctx, newTxns, sources)
+func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource, waitForRecovery bool) ([]txpoolcfg.DiscardReason, error) {
+	for {
+		reasons, err := p.tryAddNewTxns(ctx, newTxns, sources, waitForRecovery)
+		if !waitForRecovery || !errors.Is(err, errStateViewStale) {
+			return reasons, err
+		}
+		if err := p.waitForStateRecovery(ctx); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func (p *TxPool) waitForStateRecovery(ctx context.Context) error {
+	if p.waitForCondition(ctx, func() bool { return !p.stateViewStale }) {
+		return nil
+	}
+	return ctx.Err()
+}
+
+// The condition is evaluated with the pool lock held.
+func (p *TxPool) waitForCondition(ctx context.Context, ready func() bool) bool {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	// Serialize cancellation with Wait so its wakeup cannot be lost.
+	stop := context.AfterFunc(ctx, func() {
+		p.lock.Lock()
+		p.lastSeenCond.Broadcast()
+		p.lock.Unlock()
+	})
+	defer stop()
+	for !ready() && ctx.Err() == nil {
+		p.lastSeenCond.Wait()
+	}
+	return ready()
+}
+
+// Head-change retries share one simulation deadline. Frame admission returns
+// errStateViewStale so recovery can wait outside that budget and restart admission.
+func (p *TxPool) tryAddNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource, waitForRecovery bool) ([]txpoolcfg.DiscardReason, error) {
+	reasons, preparedCells, err := p.prepareTxns(ctx, newTxns, sources, waitForRecovery)
 	if err != nil {
 		return nil, err
 	}
@@ -1789,9 +2042,15 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 	for {
 		var frames frameValidationBatch
 		if hasFrames {
+			p.lock.Lock()
+			stale := p.stateViewStale
+			p.lock.Unlock()
+			if stale {
+				return nil, errStateViewStale
+			}
 			frames = p.prepareFrames(simulationCtx, newTxns)
 		}
-		err = p.withLockedState(ctx, &newTxns, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
+		err = p.withLockedState(ctx, &newTxns, waitForRecovery && !hasFrames, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
 			preparedReasons, err := p.applyFrameValidation(simulationCtx, newTxns, frames, precheckReasons, cacheView)
 			if err != nil {
 				return err
@@ -1925,7 +2184,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	for _, changesList := range stateChanges.ChangeBatch {
 		for _, change := range changesList.Changes {
 			switch change.Action {
-			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE:
+			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE, remoteproto.Action_REMOVE:
 				if change.Incarnation > 0 {
 					continue
 				}
@@ -1946,16 +2205,20 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// queued forever, since the only re-evaluation trigger is the sender
 	// appearing in a block's stateChanges, which doesn't happen if the
 	// queued tx is the sender's only outstanding tx.
-	queuedSenders := map[uint64]struct{}{}
-	for _, mt := range p.queued.best.ms {
-		senderID := mt.TxnSlot.SenderID
-		if _, alreadyCovered := sendersWithChangedState[senderID]; alreadyCovered {
-			continue
+	sendersToRefresh := map[uint64]struct{}{}
+	if stateChanges.StateChangesIncomplete {
+		// Missing account changes can leave mined transactions spending a frame payer's balance.
+		for senderID := range p.all.senderIDTxnCount {
+			sendersToRefresh[senderID] = struct{}{}
 		}
-		queuedSenders[senderID] = struct{}{}
+	} else {
+		for _, mt := range p.queued.best.ms {
+			sendersToRefresh[mt.TxnSlot.SenderID] = struct{}{}
+		}
 	}
 
 	for senderID := range sendersWithChangedState {
+		delete(sendersToRefresh, senderID)
 		// Reset the dormancy timer: this sender had a real on-chain state change.
 		p.senderLastActivity[senderID] = blockNum
 		if err := p.refreshSender(cacheView, senderID); err != nil {
@@ -1963,9 +2226,8 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		}
 	}
 
-	// Don't touch senderLastActivity for queuedSenders — these senders did not
-	// change state on-chain, so the dormancy timer should not be reset.
-	for senderID := range queuedSenders {
+	// Refreshing eligibility without an announced account change must not extend the dormancy timer.
+	for senderID := range sendersToRefresh {
 		if err := p.refreshSender(cacheView, senderID); err != nil {
 			return announcements, err
 		}
@@ -2309,9 +2571,10 @@ func (p *TxPool) GetBlobs(blobHashes []common.Hash) []PoolBlobBundle {
 }
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
-func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, minedBlock, finalizedBlock uint64) error {
+func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, minedBlock, finalizedBlock uint64) {
 	p.lastFinalizedBlock.Store(finalizedBlock)
-	// Add mined blobs
+	// A retry may repeat already-applied transaction changes. Keep each cached
+	// blob transaction in only one block bucket.
 	for _, txn := range minedTxns {
 		if !txn.HasBlobs() {
 			continue
@@ -2341,7 +2604,6 @@ func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, minedBlock, fi
 			delete(p.minedBlobTxnsByBlock, b)
 		}
 	}
-	return nil
 }
 
 // Delete individual hash entries from minedBlobTxns cache
@@ -3075,15 +3337,28 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 	return nil
 }
 
-func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
+func (p *TxPool) fromDB(ctx context.Context) error {
 	var frames frameRevalidationBatch
-	err := p.withLockedState(ctx, nil, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
-		err := p.fromDBLocked(tx, coreTx, cacheView, &frames.parked)
-		frames.generation, frames.blockHash = p.stateGeneration, p.stateBlockHash
-		return err
-	})
-	if err != nil {
-		return err
+	for {
+		if err := p.waitForStateRecovery(ctx); err != nil {
+			return err
+		}
+		// Recovery also needs database readers. If the view goes stale after the
+		// wait, release this reader before retrying; simulation opens its own reads.
+		err := p.poolDB.View(ctx, func(tx kv.Tx) error {
+			return p.withLockedState(ctx, nil, false, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
+				err := p.fromDBLocked(tx, coreTx, cacheView, &frames.parked)
+				frames.generation, frames.blockHash = p.stateGeneration, p.stateBlockHash
+				return err
+			})
+		})
+		if errors.Is(err, errStateViewStale) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		break
 	}
 	// Each restored frame gets its own initial budget. Retryable failures leave
 	// the indexed entry parked for the next block update.
@@ -3096,33 +3371,9 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx) error {
 }
 
 func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.CacheView, parked *[]*metaTxn) error {
-	if p.stateBlockHash == (common.Hash{}) {
-		// Header sync can run ahead of execution, so pin validation to the executed head.
-		p.stateBlockHash = rawdb.ReadHeadBlockHash(coreTx)
-	}
-	if p.lastSeenBlock.Load() == 0 {
-		lastSeenBlock, err := LastSeenBlock(tx)
-		if err != nil {
-			return err
-		}
-
-		p.lastSeenBlock.Store(lastSeenBlock)
-	}
-
-	// this is necessary as otherwise best - which waits for sync events
-	// may wait for ever if blocks have been process before the txpool
-	// starts with an empty db
-	lastSeenProgress, err := getExecutionProgress(coreTx)
+	header, err := rawdb.ReadHeaderByHash(coreTx, p.stateBlockHash)
 	if err != nil {
 		return err
-	}
-
-	if p.lastSeenBlock.Load() < lastSeenProgress {
-		// TODO we need to process the blocks since the
-		// last seen to make sure that the txn pool is in
-		// sync with the processed blocks
-
-		p.lastSeenBlock.Store(lastSeenProgress)
 	}
 
 	it, err := tx.Range(kv.RecentLocalTransaction, nil, nil, order.Asc, kv.Unlim)
@@ -3137,50 +3388,55 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		p.isLocalLRU.Add(string(v), struct{}{})
 	}
 
-	var pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit uint64
+	pendingBaseFee, pendingBlobFee := p.pendingBaseFee.Load(), p.pendingBlobFee.Load()
+	// A state reset supplies fees and gas limits for the restored state. Only fall
+	// back to the database when startup has not received a block notification.
+	if p.blockGasLimit.Load() == 0 {
+		var minBlobGasPrice, blockGasLimit uint64
 
-	if p.feeCalculator != nil {
-		pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(p.chainConfig, coreTx)
-		if err != nil {
-			return err
+		if p.feeCalculator != nil {
+			pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(p.chainConfig, coreTx)
+			if err != nil {
+				return err
+			}
 		}
-	}
 
-	if pendingBaseFee == 0 {
-		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBaseFeeKey)
-		if err != nil {
-			return err
+		if pendingBaseFee == 0 {
+			v, err := tx.GetOne(kv.PoolInfo, PoolPendingBaseFeeKey)
+			if err != nil {
+				return err
+			}
+			if len(v) > 0 {
+				pendingBaseFee = binary.BigEndian.Uint64(v)
+			}
 		}
-		if len(v) > 0 {
-			pendingBaseFee = binary.BigEndian.Uint64(v)
+
+		if pendingBlobFee == 0 {
+			v, err := tx.GetOne(kv.PoolInfo, PoolPendingBlobFeeKey)
+			if err != nil {
+				return err
+			}
+			if len(v) > 0 {
+				pendingBlobFee = binary.BigEndian.Uint64(v)
+			}
 		}
-	}
 
-	if pendingBlobFee == 0 {
-		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBlobFeeKey)
-		if err != nil {
-			return err
+		if pendingBlobFee == 0 {
+			pendingBlobFee = minBlobGasPrice
 		}
-		if len(v) > 0 {
-			pendingBlobFee = binary.BigEndian.Uint64(v)
+
+		if blockGasLimit == 0 {
+			blockGasLimit = ethconfig.DefaultBlockGasLimitByChain(p.chainConfig)
 		}
-	}
 
-	if pendingBlobFee == 0 {
-		pendingBlobFee = minBlobGasPrice
+		// The validation and insertion below read these from p, so publish them first.
+		var pendingBaseFee256 uint256.Int
+		pendingBaseFee256.SetUint64(pendingBaseFee)
+		p.setPendingBaseFeeOnQueues(pendingBaseFee256)
+		p.pendingBaseFee.Store(pendingBaseFee)
+		p.pendingBlobFee.Store(pendingBlobFee)
+		p.blockGasLimit.Store(blockGasLimit)
 	}
-
-	if blockGasLimit == 0 {
-		blockGasLimit = ethconfig.DefaultBlockGasLimitByChain(p.chainConfig)
-	}
-
-	// The validation and insertion below read these from p, so publish them first.
-	var pendingBaseFee256 uint256.Int
-	pendingBaseFee256.SetUint64(pendingBaseFee)
-	p.setPendingBaseFeeOnQueues(pendingBaseFee256)
-	p.pendingBaseFee.Store(pendingBaseFee)
-	p.pendingBlobFee.Store(pendingBlobFee)
-	p.blockGasLimit.Store(blockGasLimit)
 
 	var restored TxnSlots
 	parseCtx := NewTxnParseContext(p.chainID)
@@ -3213,6 +3469,20 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 
 	immediate, frames := p.splitRestoredTxns(restored)
 	*parked = p.restoreFramesLocked(p.lastSeenBlock.Load(), frames)
+	if header != nil {
+		// Expired roots must not occupy a sender's frame slot while validation is unavailable.
+		pendingSlot := protocol.FrameValidationSlot(header.SlotNumber)
+		*parked = slices.DeleteFunc(*parked, func(mt *metaTxn) bool {
+			roots := protocol.FrameTransactionRecentRoots(mt.TxnSlot.Txn.(*types.FrameTransaction))
+			invalidRoots := slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
+				return !ref.ValidAt(pendingSlot)
+			})
+			if invalidRoots {
+				p.discardLocked(mt, txpoolcfg.FrameStateChanged)
+			}
+			return invalidRoots
+		})
+	}
 	var txns TxnSlots
 	cells := make(blobCells)
 	for i, txn := range immediate.Txns {

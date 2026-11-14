@@ -49,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -489,20 +488,10 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 		return nil
 	}
 
-	if err := e.hook.BeforeRun(tx, true); err != nil {
-		return err
-	}
-
 	if err := ensureReadAheadSuspended(); err != nil {
 		return fmt.Errorf("suspend read-ahead: %w", err)
 	}
-	if err := e.pipelineExecutor.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
-		return err
-	}
-	if err := e.pipelineExecutor.RunUnwind(sd, tx); err != nil {
-		return err
-	}
-	return nil
+	return e.pipelineExecutor.UnwindForValidation(sd, tx, unwindPoint)
 }
 
 const nextForkBanner = `

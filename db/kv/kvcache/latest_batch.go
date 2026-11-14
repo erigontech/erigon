@@ -64,15 +64,17 @@ func (c *LatestBatchCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 	for _, change := range sc.ChangeBatch {
 		for i := range change.Changes {
 			switch change.Changes[i].Action {
-			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE:
+			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE, remoteproto.Action_REMOVE:
 				addr := gointerfaces.ConvertH160toAddress(change.Changes[i].Address)
 				if c.accounts == nil {
 					c.accounts = make(map[common.Address][]byte)
 				}
-				c.accounts[addr] = bytes.Clone(change.Changes[i].Data)
-			case remoteproto.Action_REMOVE:
-				addr := gointerfaces.ConvertH160toAddress(change.Changes[i].Address)
-				delete(c.accounts, addr)
+				if change.Changes[i].Action == remoteproto.Action_REMOVE {
+					// The reader's database snapshot may still contain the deleted account.
+					c.accounts[addr] = nil
+				} else {
+					c.accounts[addr] = bytes.Clone(change.Changes[i].Data)
+				}
 			}
 		}
 	}

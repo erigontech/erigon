@@ -312,6 +312,9 @@ func (dkp *DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
 
 func (dkp *DecryptionKeysProcessor) processBlockEventCleanup(blockEvent BlockEvent) error {
 	slot, err := dkp.slotCalculator.CalcSlot(blockEvent.LatestBlockTime)
+	if errors.Is(err, ErrTimestampBeforeGenesis) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

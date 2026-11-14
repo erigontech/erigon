@@ -6,11 +6,9 @@ execution pipeline to downstream consumers (TxPool, RPC daemon, P2P).
 
 ## Architecture
 
-Two paths exist for each notification type:
-
-- **Local path**: in-process consumers receive native Go types directly. No protobuf.
-- **Remote path**: gRPC consumers receive protobuf messages. Conversion from native
-  types happens at the gRPC boundary (`node/privateapi/`), not in the execution layer.
+State changes use protobuf messages for both in-process and remote consumers.
+The dispatcher prepares the batch in native Go types and converts it before sending.
+Logs and receipts use native types in-process and are converted at the gRPC boundary.
 
 ## Flow 1: State Changes
 
@@ -28,53 +26,74 @@ exec3 block execution (execution/stagedsync/exec3_serial.go, exec3_parallel.go)
   → Accumulator.DeleteAccount(addr)
 
 Dispatcher.Dispatch()  (execution/execmodule/notification_dispatcher.go)
-  → Accumulator.SendAndReset(ctx, consumers, baseFee, blobFee, gasLimit, finalized)
+  → prepareStateChanges()
+    → Accumulator.Batch(executedHeader)
+    → set state version, pending fees, gas limit and finalized height
+    → BlockBatchNotification.RefreshAccounts(state)
+  → publish headers, receipts and logs
+  → StateChangeConsumer.SendStateChanges(batch.ToProtoBatch())
+  → Accumulator.Reset()
 ```
 
-### Local Path (TxPool)
+Normal dispatch uses the header at Finish stage progress so the announced head
+matches the supplied state. Stored head markers can be ahead of execution.
+
+Preparation keeps recorded execution changes intact. Synthetic head entries and
+final account values are added only to the output batch. A preparation failure
+leaves the accumulator available for retry and publishes no events.
+
+### Prepared Batch
 
 ```
-BlockBatchConsumer.OnNewBlock(BlockBatchNotification)
-
 BlockBatchNotification contains:
   - StateVersionID      uint64
+  - StateChangesIncomplete bool
   - Changes             []StateChange  (native types)
     - Direction          (Forward/Unwind)
     - BlockHeight        uint64
-    - Txs                [][]byte       ← TxPool's primary interest
-    - Changes            []AccountChange (TxPool ignores these)
+    - Txs                [][]byte
+    - Changes            []AccountChange
   - PendingBlockBaseFee  uint64
   - PendingBlobFee       uint64
   - BlockGasLimit        uint64
   - FinalizedBlock       uint64
 ```
 
-TxPool only reads: `Direction`, `Txs` (to track mined/unwound transactions),
-`PendingBlockBaseFee`, `BlockGasLimit`, `FinalizedBlock`. It ignores all
-account/storage change data.
-
-### Remote Path (gRPC → remote rpcdaemon)
+### Delivery
 
 ```
 StateChangeConsumer.SendStateChanges(StateChangeBatch)  [protobuf]
   → KvServer (db/kv/remotedbserver/)
     → StateChangePubSub.Pub()
-      → gRPC stream to remote rpcdaemon
-        → kvcache.Coherent.OnNewBlock()  (updates remote state cache)
+      → StateChanges stream
+        → TxPool Fetch.handleStateChanges()
+        → rpcdaemon state cache
 ```
 
-Protobuf `StateChangeBatch` contains the full `AccountChange` list with
-`H160`/`H256` types, needed by remote `kvcache` to update its state cache.
-In embedded mode, `execmodule.Cache` replaces `kvcache` and its `OnNewBlock`
-is a no-op.
+TxPool uses transaction directions to track mined and unwound transactions, and
+account/storage/code changes to refresh sender state and invalidate frame validations.
+
+On subscription, the KV server reads a reset at committed Execution stage progress.
+Under the publication lock, it selects the newer of this reset and the latest published
+head, keeping the head and state version together. It sends that reset before later
+batches, including when the latest publication is still awaiting commit.
+
+For incomplete batches, `RefreshAccounts` appends final values for addresses with
+recorded account changes. This keeps older entries from overwriting current values
+in the RPC state cache, but it does not reconstruct omitted changes.
+
+When the batch is incomplete or the pool's state view is stale, the pool waits for
+committed state matching the announced version before refreshing all pooled senders
+and revalidating frames. If that version has been superseded, transaction membership
+changes are retained for a newer batch; obsolete account values are not applied.
+Complete batches can be applied before commit while the pool has a usable state view.
 
 ### Consumer Summary
 
-| Consumer | Mode | Reads | Ignores |
-|----------|------|-------|---------|
-| TxPool | local | Txs, Direction, fees | AccountChange, StorageChange |
-| kvcache.Coherent | remote | AccountChange, StorageChange, Code | Txs |
-| execmodule.Cache | local | nothing (no-op) | everything |
+| Consumer | Reads |
+|----------|-------|
+| TxPool | Head, state version, transactions, fees, account/storage/code changes, completeness |
+| kvcache.Coherent | State version, account/storage/code changes, completeness |
 
 ---
 
@@ -205,6 +224,7 @@ node/privateapi/ethbackend.go
 | `execution/execmodule/notification_dispatcher.go` | Dispatcher: orchestrates dispatch of all notification types |
 | `execution/notifications/accumulation.go` | Accumulation: groups Accumulator + RecentReceipts |
 | `execution/notifications/accumulator.go` | Accumulator: state change collection (native types) |
+| `execution/notifications/batch.go` | Final account values for incomplete output batches |
 | `execution/notifications/recent_receipts.go` | RecentReceipts cache |
 | `node/shards/events.go` | Events pub/sub (header, log, receipt channels) |
 | `execution/stagedsync/stage_finish.go` | NotifyNewHeaders (header RLP dispatch) |

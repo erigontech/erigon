@@ -56,7 +56,7 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	c.add([]byte{1}, nil, c.roots[2], 2)
 	require.Zero(c.stateEvict.Len())
 
-	c.advanceRoot(2)
+	c.advanceRoot(2, false)
 	require.Len(c.roots, 1)
 	require.Equal(2, int(c.latestStateVersionID))
 	require.True(c.roots[2].isCanonical)
@@ -79,12 +79,12 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	require.Equal(2, int(c.latestStateVersionID))
 	require.False(c.roots[6].isCanonical) // parrent exists, but parent has isCanonical=false
 
-	c.advanceRoot(3)
+	c.advanceRoot(3, false)
 	require.Len(c.roots, 4)
 	require.Equal(3, int(c.latestStateVersionID))
 	require.True(c.roots[3].isCanonical)
 
-	c.advanceRoot(4)
+	c.advanceRoot(4, false)
 	require.Len(c.roots, 5)
 	require.Equal(4, int(c.latestStateVersionID))
 	require.True(c.roots[4].isCanonical)
@@ -94,12 +94,12 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 	require.Equal(4, int(c.latestStateVersionID))
 	require.False(c.roots[5].isCanonical)
 
-	c.advanceRoot(5)
+	c.advanceRoot(5, false)
 	require.Len(c.roots, 5)
 	require.Equal(5, int(c.latestStateVersionID))
 	require.True(c.roots[5].isCanonical)
 
-	c.advanceRoot(100)
+	c.advanceRoot(100, false)
 	require.Len(c.roots, 6)
 	require.Equal(100, int(c.latestStateVersionID))
 	require.True(c.roots[100].isCanonical)
@@ -451,6 +451,70 @@ func TestAPI(t *testing.T) {
 		// All goroutines completed successfully
 	case <-ctx.Done():
 		t.Error("Test timed out waiting for goroutines to complete")
+	}
+}
+
+func TestOnNewBlockIncompleteChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		version uint64
+	}{
+		{name: "consecutive version", version: 8},
+		{name: "repeated version", version: 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			c := New(DefaultCoherentConfig)
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			omitted, announced := common.Address{1}, common.Address{2}
+			oldAccount := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(100), CodeHash: accounts.EmptyCodeHash}
+			newAccount := accounts.Account{Nonce: 2, Balance: *uint256.NewInt(25), CodeHash: accounts.EmptyCodeHash}
+			currentValue := accounts.SerialiseV3(&newAccount)
+			require.NoError(t, db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+				d, err := execctx.NewSharedDomains(ctx, tx, log.New())
+				if err != nil {
+					return err
+				}
+				defer d.Close()
+				if err := d.DomainPut(kv.AccountsDomain, tx, omitted[:], currentValue, 1, nil); err != nil {
+					return err
+				}
+				if err := d.Flush(ctx, tx); err != nil {
+					return err
+				}
+				return tx.Put(kv.Sequence, kv.PlainStateVersion, binary.BigEndian.AppendUint64(nil, tc.version))
+			}))
+
+			c.OnNewBlock(&remoteproto.StateChangeBatch{StateVersionId: 7, ChangeBatch: []*remoteproto.StateChange{{
+				Changes: []*remoteproto.AccountChange{{
+					Address: gointerfaces.ConvertAddressToH160(omitted), Action: remoteproto.Action_UPSERT,
+					Data: accounts.SerialiseV3(&oldAccount),
+				}},
+			}}})
+			ready := c.selectOrCreateRoot(tc.version).ready
+			c.OnNewBlock(&remoteproto.StateChangeBatch{
+				StateVersionId: tc.version, StateChangesIncomplete: true,
+				ChangeBatch: []*remoteproto.StateChange{{Changes: []*remoteproto.AccountChange{{
+					Address: gointerfaces.ConvertAddressToH160(announced), Action: remoteproto.Action_UPSERT, Data: currentValue,
+				}}}},
+			})
+			select {
+			case <-ready:
+			default:
+				t.Fatal("readers waiting for the state version were not notified")
+			}
+			require.NoError(t, db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+				view, err := c.View(ctx, tx)
+				require.NoError(t, err)
+				value, err := view.Get(omitted[:])
+				require.NoError(t, err)
+				require.Equal(t, currentValue, value, "omitted accounts must be read from the database")
+				value, err = view.Get(announced[:])
+				require.NoError(t, err)
+				require.Equal(t, currentValue, value, "announced accounts must still be applied")
+				return nil
+			}))
+		})
 	}
 }
 

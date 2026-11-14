@@ -17,6 +17,8 @@
 package execmoduletester
 
 import (
+	"bytes"
+	"context"
 	"math/big"
 	"testing"
 	"time"
@@ -27,25 +29,38 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/notifications"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/privateapi"
+	"github.com/erigontech/erigon/txnprovider/txpool"
+	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // Every block above genesis calls logEmitter once, so each block has exactly one log.
 var logEmitter = common.Address{0xbb}
 
 type reorgSubscriptions struct {
-	headers  [][]byte
-	logs     []*notifications.LogNotification
-	receipts []*notifications.ReceiptNotification
+	headers      [][]byte
+	logs         []*notifications.LogNotification
+	receipts     []*notifications.ReceiptNotification
+	stateChanges *remoteproto.StateChangeBatch
 }
 
 func collectReorgSubscriptions(headers <-chan [][]byte, logs <-chan []*notifications.LogNotification, receipts <-chan []*notifications.ReceiptNotification) *reorgSubscriptions {
@@ -111,17 +126,17 @@ var reorgCases = []reorgCase{
 	{name: "NineBlockForkViaForkchoiceOnly", forkLen: 9, newPayload: false},
 }
 
-func newReorgChains(t *testing.T, canonicalLen, sideLen int) (*ExecModuleTester, *blockgen.ChainPack, *blockgen.ChainPack) {
+func newReorgChains(t *testing.T, canonicalLen, sideLen int, opts ...Option) (*ExecModuleTester, *blockgen.ChainPack, *blockgen.ChainPack) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
-	m := New(t, WithGenesisSpec(&types.Genesis{
+	m := New(t, append([]Option{WithGenesisSpec(&types.Genesis{
 		Config: chain.AllProtocolChanges,
 		Alloc: types.GenesisAlloc{
 			sender:     {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 			logEmitter: {Code: []byte{0x60, 0x00, 0x60, 0x00, 0xa0, 0x00}}, // PUSH1 0 PUSH1 0 LOG0 STOP
 		},
-	}), WithKey(key))
+	}), WithKey(key)}, opts...)...)
 	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
 	sign := func(txn types.Transaction) types.Transaction {
@@ -149,7 +164,7 @@ func newReorgChains(t *testing.T, canonicalLen, sideLen int) (*ExecModuleTester,
 	return m, canonical, side
 }
 
-func subscribeStateChangeHeads(t *testing.T, m *ExecModuleTester) func(common.Hash) {
+func subscribeStateChangeHeads(t *testing.T, m *ExecModuleTester) func(common.Hash) *remoteproto.StateChangeBatch {
 	batches := make(chan *remoteproto.StateChangeBatch, 16)
 	stream, err := m.stateChangesClient.StateChanges(t.Context(), &remoteproto.StateChangeRequest{}, grpc.WaitForReady(true))
 	require.NoError(t, err)
@@ -162,7 +177,7 @@ func subscribeStateChangeHeads(t *testing.T, m *ExecModuleTester) func(common.Ha
 			batches <- batch
 		}
 	}()
-	return func(head common.Hash) {
+	return func(head common.Hash) *remoteproto.StateChangeBatch {
 		t.Helper()
 		deadline := time.After(10 * time.Second)
 		for {
@@ -170,7 +185,7 @@ func subscribeStateChangeHeads(t *testing.T, m *ExecModuleTester) func(common.Ha
 			case batch := <-batches:
 				last := batch.ChangeBatch[len(batch.ChangeBatch)-1]
 				if gointerfaces.ConvertH256ToHash(last.BlockHash) == head {
-					return
+					return batch
 				}
 			case <-deadline:
 				t.Fatalf("no state-change batch announced head %x", head)
@@ -223,9 +238,252 @@ func runReorg(t *testing.T, tc reorgCase) (oldHead *types.Block, forkBlocks []*t
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
 	m.ExecModule.WaitIdle(t.Context())
-	waitForBatchWithHead(newHead.Hash())
+	batch := waitForBatchWithHead(newHead.Hash())
 
-	return oldHead, forkBlocks, collectReorgSubscriptions(headers, logs, receipts)
+	got = collectReorgSubscriptions(headers, logs, receipts)
+	got.stateChanges = batch
+	return oldHead, forkBlocks, got
+}
+
+func TestReorgPreservesUnwindStateChanges(t *testing.T) {
+	for _, tc := range reorgCases {
+		t.Run(tc.name, func(t *testing.T) {
+			oldHead, forkBlocks, got := runReorg(t, tc)
+			require.False(t, got.stateChanges.StateChangesIncomplete)
+			changes := got.stateChanges.ChangeBatch
+			require.Len(t, changes, 1+len(forkBlocks))
+			require.Equal(t, remoteproto.Direction_UNWIND, changes[0].Direction)
+			require.Equal(t, oldHead.ParentHash(), common.Hash(gointerfaces.ConvertH256ToHash(changes[0].BlockHash)))
+			var unwound []common.Hash
+			for _, raw := range changes[0].Txs {
+				txn, err := types.DecodeTransaction(raw)
+				require.NoError(t, err)
+				unwound = append(unwound, txn.Hash())
+			}
+			var want []common.Hash
+			for _, txn := range oldHead.Transactions() {
+				want = append(want, txn.Hash())
+			}
+			require.ElementsMatch(t, want, unwound, "only transactions above the common ancestor may be restored")
+			for i, block := range forkBlocks {
+				require.Equal(t, remoteproto.Direction_FORWARD, changes[i+1].Direction)
+				require.Equal(t, block.Hash(), common.Hash(gointerfaces.ConvertH256ToHash(changes[i+1].BlockHash)))
+			}
+		})
+	}
+}
+
+func TestReorgAccountNotificationAcrossSteps(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	recipient := common.Address{0xaa}
+	m := New(t, WithStepSize(8), WithKey(key), WithGenesisSpec(&types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			sender:    {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+			recipient: {Balance: big.NewInt(1)},
+		},
+	}))
+	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+	generate := func(canonical bool) func(int, *blockgen.BlockGen) {
+		return func(i int, b *blockgen.BlockGen) {
+			to := common.Address{0xbb}
+			if canonical && i > 0 {
+				to = recipient
+			}
+			txn, err := types.SignTx(types.NewTransaction(uint64(i), to, uint256.NewInt(1), 21_000, gasPrice, nil), signer, key)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	}
+	canonical, err := m.GenerateChain(4, generate(true))
+	require.NoError(t, err)
+	side, err := m.GenerateChain(4, generate(false))
+	require.NoError(t, err)
+	require.Equal(t, canonical.Blocks[0].Hash(), side.Blocks[0].Hash())
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(canonical.TopBlock.Hash())
+
+	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		first, err := m.BlockReader.TxnumReader().Min(t.Context(), tx, 2)
+		require.NoError(t, err)
+		last, err := m.BlockReader.TxnumReader().Min(t.Context(), tx, 4)
+		require.NoError(t, err)
+		require.Less(t, first/tx.Debug().StepSize(), last/tx.Debug().StepSize())
+		return nil
+	}))
+	status, err := m.InsertBlocks(t.Context(), side.Blocks[1:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	result, err := m.UpdateForkChoice(t.Context(), side.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	batch := waitForBatchWithHead(side.TopBlock.Hash())
+	require.False(t, batch.StateChangesIncomplete)
+	cache := kvcache.NewLatestBatchCache()
+	cache.OnNewBlock(batch)
+	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		want, _, err := tx.GetLatest(kv.AccountsDomain, recipient[:], kv.GetLatestOptions{})
+		require.NoError(t, err)
+		view, err := cache.View(t.Context(), tx)
+		require.NoError(t, err)
+		got, err := view.Get(recipient[:])
+		require.NoError(t, err)
+		require.Equal(t, want, got, "the replacement branch leaves the recipient untouched, so its unwind notification must contain the restored account")
+		return nil
+	}))
+}
+
+func TestReorgCodeRollbackPreservesRecentRoots(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	contract := types.CreateAddress(sender, 1)
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(1)
+	frameSender := common.Address{0xcc}
+	data := make([]byte, 72)
+	data[0], data[39], data[71] = 1, 1, 2
+	frame := &types.FrameTransaction{
+		NonceKeys: []uint256.Int{{}}, ChainID: *cfg.ChainID, SenderAddress: frameSender,
+		Frames: []types.Frame{
+			{Mode: types.FrameVerify, Target: &types.FrameRecentRootVerifier, Data: data, Limits: mdgas.MdGas{Execution: 20_000}},
+			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+		},
+		Fees: types.FrameFees{FeeCap: *uint256.NewInt(10_000_000_000)},
+	}
+	refs := protocol.FrameTransactionRecentRoots(frame)
+	require.Len(t, refs, 1)
+	m := New(t, WithKey(key), WithGenesisSpec(&types.Genesis{
+		Config: cfg, SlotNumber: common.NewUint64(0),
+		Alloc: types.GenesisAlloc{
+			sender:      {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+			contract:    {Balance: big.NewInt(1)},
+			frameSender: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: []byte{0x60, 3, 0x5f, 0x5f, 0xaa}},
+			types.FrameRecentRootVerifier: {Code: protocol.RecentRootCode, Storage: map[common.Hash]common.Hash{
+				refs[0].StorageKey: refs[0].EntryHash,
+			}},
+		},
+	}))
+	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+	generate := func(deploy bool) func(int, *blockgen.BlockGen) {
+		return func(i int, b *blockgen.BlockGen) {
+			var txn types.Transaction = types.NewTransaction(uint64(i), common.Address{0xbb}, uint256.NewInt(0), 21_000, gasPrice, nil)
+			if deploy && i == 1 {
+				txn = types.NewContractCreation(1, uint256.NewInt(0), 100_000, gasPrice, common.FromHex("60016000f3"))
+			}
+			txn, err := types.SignTx(txn, signer, key)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		}
+	}
+	canonical, err := m.GenerateChain(2, generate(true))
+	require.NoError(t, err)
+	side, err := m.GenerateChain(2, generate(false))
+	require.NoError(t, err)
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+	m.ExecModule.WaitIdle(t.Context())
+	initial := waitForBatchWithHead(canonical.TopBlock.Hash())
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	logger := log.New()
+	backend := privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications, m.BlockReader, logger, nil, cfg)
+	poolDB := mdbxtest.NewTestPoolDB(t)
+	startupStateChanges := remotedbserver.NewKvServer(ctx, m.DB, nil, nil, logger)
+	startupStateChanges.SendStateChanges(ctx, initial)
+	pool, err := txpool.New(ctx, make(chan txpool.Announcements, 1), poolDB, m.DB, txpoolcfg.DefaultConfig,
+		kvcache.NewLatestBatchCache(), cfg, nil, direct.NewStateDiffClientDirect(startupStateChanges), func() {}, nil, direct.NewEthBackendClientDirect(backend), logger, txpool.WithFeeCalculator(nil))
+	require.NoError(t, err)
+	runDone := make(chan error, 1)
+	go func() { runDone <- pool.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		require.ErrorIs(t, <-runDone, context.Canceled)
+	})
+	require.Eventually(t, pool.Started, 5*time.Second, time.Millisecond)
+	var encoded bytes.Buffer
+	require.NoError(t, frame.MarshalBinary(&encoded))
+	server := txpool.NewGrpcServer(ctx, pool, poolDB, nil, *cfg.ChainID, logger)
+	reply, err := server.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encoded.Bytes()}})
+	require.NoError(t, err)
+	require.Equal(t, []txpoolproto.ImportResult{txpoolproto.ImportResult_SUCCESS}, reply.Imported, "%v", reply.Errors)
+	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		code, _, err := tx.GetLatest(kv.CodeDomain, contract[:], kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.Equal(t, []byte{0}, code)
+		return nil
+	}))
+	status, err := m.InsertBlocks(t.Context(), side.Blocks[1:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	result, err := m.UpdateForkChoice(t.Context(), side.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	batch := waitForBatchWithHead(side.TopBlock.Hash())
+	require.NoError(t, pool.OnNewBlock(ctx, batch, txpool.TxnSlots{}, txpool.TxnSlots{}, txpool.TxnSlots{}))
+	hash := frame.Hash()
+	require.Equal(t, txpoolcfg.AlreadyKnown, pool.KnownTxnReason(hash[:]), "the unrelated deployment rollback must keep the recent-root transaction pooled")
+	require.False(t, batch.StateChangesIncomplete, "a streamed code rollback must preserve unrelated frame validations")
+	var restored *remoteproto.AccountChange
+	for _, change := range batch.ChangeBatch {
+		if change.Direction != remoteproto.Direction_UNWIND {
+			continue
+		}
+		for _, account := range change.Changes {
+			if gointerfaces.ConvertH160toAddress(account.Address) == contract {
+				restored = account
+			}
+		}
+	}
+	require.NotNil(t, restored)
+	require.Equal(t, remoteproto.Action_UPSERT_CODE, restored.Action)
+	require.Empty(t, restored.Code)
+	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		code, _, err := tx.GetLatest(kv.CodeDomain, contract[:], kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.Empty(t, code)
+		account, _, err := tx.GetLatest(kv.AccountsDomain, contract[:], kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.NotEmpty(t, account, "the funded account survives the code rollback")
+		return nil
+	}))
+}
+
+func TestPayloadValidationDoesNotAnnounceUnwind(t *testing.T) {
+	m, canonical, side := newReorgChains(t, 3, 2)
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks[:2]))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(canonical.Blocks[1].Hash())
+	require.Empty(t, m.Notifications.Accumulator.Changes())
+
+	status, err := m.InsertBlocks(t.Context(), side.Blocks[1:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	validation, err := m.ValidateChain(t.Context(), side.Blocks[1])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.Empty(t, m.Notifications.Accumulator.Changes(), "validation must not announce a canonical unwind")
+
+	status, err = m.InsertBlocks(t.Context(), canonical.Blocks[2:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	fcu, err := m.UpdateForkChoice(t.Context(), canonical.Blocks[2].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	batch := waitForBatchWithHead(canonical.Blocks[2].Hash())
+	require.False(t, batch.StateChangesIncomplete)
+	require.Len(t, batch.ChangeBatch, 1)
+	require.Equal(t, remoteproto.Direction_FORWARD, batch.ChangeBatch[0].Direction)
 }
 
 func TestReorgAnnouncesNewCanonicalHeaders(t *testing.T) {
@@ -442,7 +700,7 @@ func TestMissingSegmentForkchoicePreservesCanonicalRemovedLogs(t *testing.T) {
 	require.Equal(t, 1, got.logCount(a3.Hash(), true))
 }
 
-func TestRejectedUnwindingForkchoicePreservesCanonicalRemovedLogs(t *testing.T) {
+func TestRejectedUnwindingForkchoicePreservesCanonicalNotifications(t *testing.T) {
 	m, canonical, side := newReorgChains(t, 2, 2)
 	b1, a2 := canonical.Blocks[0], canonical.Blocks[1]
 	b2 := side.Blocks[1]
@@ -467,14 +725,19 @@ func TestRejectedUnwindingForkchoicePreservesCanonicalRemovedLogs(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
 	m.ExecModule.WaitIdle(t.Context())
-	waitForBatchWithHead(b2.Hash())
+	batch := waitForBatchWithHead(b2.Hash())
+	require.Equal(t, 2, len(batch.ChangeBatch), "only the accepted reorg's changes must be announced")
+	require.Equal(t, remoteproto.Direction_UNWIND, batch.ChangeBatch[0].Direction)
+	require.Equal(t, b1.Hash(), common.Hash(gointerfaces.ConvertH256ToHash(batch.ChangeBatch[0].BlockHash)))
+	require.Equal(t, remoteproto.Direction_FORWARD, batch.ChangeBatch[1].Direction)
+	require.Equal(t, b2.Hash(), common.Hash(gointerfaces.ConvertH256ToHash(batch.ChangeBatch[1].BlockHash)))
 
 	got := collectReorgSubscriptions(nil, logs, nil)
 	require.Equal(t, 1, got.logCount(b2.Hash(), false))
 	require.Equal(t, 1, got.logCount(a2.Hash(), true), "replaced canonical block's log was not reported as removed")
 }
 
-func TestRejectedUnwindingForkchoiceDoesNotReportCanonicalLogsRemoved(t *testing.T) {
+func TestRejectedUnwindingForkchoiceDoesNotAnnounceCanonicalUnwind(t *testing.T) {
 	m, canonical, _ := newReorgChains(t, 3, 3)
 	b1, a2, a3 := canonical.Blocks[0], canonical.Blocks[1], canonical.Blocks[2]
 	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
@@ -493,9 +756,288 @@ func TestRejectedUnwindingForkchoiceDoesNotReportCanonicalLogsRemoved(t *testing
 	m.Notifications.Events.EmptyLogSubscription(false)
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{a3}))
 	m.ExecModule.WaitIdle(t.Context())
-	waitForBatchWithHead(a3.Hash())
+	batch := waitForBatchWithHead(a3.Hash())
+	require.Equal(t, 1, len(batch.ChangeBatch), "the rejected forkchoice must not leave changes for the next extension")
+	require.Equal(t, remoteproto.Direction_FORWARD, batch.ChangeBatch[0].Direction)
 
 	got := collectReorgSubscriptions(nil, logs, nil)
 	require.Equal(t, 1, got.logCount(a3.Hash(), false))
 	require.Zero(t, got.logCount(a2.Hash(), true), "canonical block's log was reported as removed")
+}
+
+func TestRepeatedForkchoiceDeliversIncompleteChanges(t *testing.T) {
+	m, canonical, _ := newReorgChains(t, 2, 2)
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(canonical.TopBlock.Hash())
+
+	m.Notifications.Accumulator.MarkIncomplete()
+	fcu, err := m.UpdateForkChoice(t.Context(), canonical.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	batch := waitForBatchWithHead(canonical.TopBlock.Hash())
+	require.True(t, batch.StateChangesIncomplete)
+	require.Len(t, batch.ChangeBatch, 1)
+}
+
+func TestStateChangesResetAfterUnpublishedCommit(t *testing.T) {
+	m := New(t, WithAlwaysGenerateChangesets(true))
+	blocks, err := m.GenerateChain(2, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(blocks))
+	m.ExecModule.WaitIdle(t.Context())
+	require.NoError(t, m.ExecModule.SetHead(t.Context(), 1))
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	stream, err := m.stateChangesClient.StateChanges(ctx, &remoteproto.StateChangeRequest{})
+	require.NoError(t, err)
+	batch, err := stream.Recv()
+	require.NoError(t, err)
+	require.True(t, batch.StateChangesIncomplete)
+	require.Len(t, batch.ChangeBatch, 1)
+	require.Equal(t, gointerfaces.ConvertHashToH256(blocks.Blocks[0].Hash()), batch.ChangeBatch[0].BlockHash)
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		version, err := rawdb.GetStateVersion(tx)
+		require.NoError(t, err)
+		require.Equal(t, version, batch.StateVersionId)
+		return nil
+	}))
+}
+
+func TestStateChangesResetBeforeFirstPublication(t *testing.T) {
+	m := New(t)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	server := remotedbserver.NewKvServer(ctx, m.DB, nil, nil, m.Log)
+	dispatcher := execmodule.NewDispatcher(m.ChainConfig, m.BlockReader, nil, nil, nil, m.Log)
+	server.SetStateChangesSnapshot(func(ctx context.Context) (*remoteproto.StateChangeBatch, error) {
+		return dispatcher.StateChangesSnapshot(ctx, m.DB)
+	})
+	stream, err := direct.NewStateDiffClientDirect(server).StateChanges(ctx, &remoteproto.StateChangeRequest{})
+	require.NoError(t, err)
+	batch, err := stream.Recv()
+	require.NoError(t, err, "a subscription must not need another block to learn the committed head")
+	require.True(t, batch.StateChangesIncomplete)
+	require.Len(t, batch.ChangeBatch, 1)
+	require.Equal(t, gointerfaces.ConvertHashToH256(m.Genesis.Hash()), batch.ChangeBatch[0].BlockHash)
+}
+
+func TestSuccessiveSetHeadAnnouncesDeepUnwindTarget(t *testing.T) {
+	m := New(t, WithStepSize(10_000), WithAlwaysGenerateChangesets(true))
+	chain, err := m.GenerateChain(1_003, nil)
+	require.NoError(t, err)
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+	status, err := m.InsertBlocks(t.Context(), chain.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	result, err := m.UpdateForkChoice(t.Context(), chain.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(chain.TopBlock.Hash())
+
+	require.NoError(t, m.ExecModule.SetHead(t.Context(), 1_002))
+	require.NoError(t, m.ExecModule.SetHead(t.Context(), 1))
+	target := chain.Blocks[0].Header()
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		require.Equal(t, target.Hash(), rawdb.ReadHeadBlockHash(tx))
+		return nil
+	}))
+	pending := m.Notifications.Accumulator.Changes()
+	require.NotEmpty(t, pending)
+	require.Equal(t, target.Hash(), pending[len(pending)-1].BlockHash, "an omitted unwind must still record its committed target")
+
+	result, err = m.UpdateForkChoice(t.Context(), target)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	batch := waitForBatchWithHead(target.Hash())
+	require.True(t, batch.StateChangesIncomplete)
+	last := batch.ChangeBatch[len(batch.ChangeBatch)-1]
+	require.Equal(t, target.Number.Uint64(), last.BlockHeight)
+	require.Equal(t, target.Time, last.BlockTime)
+	require.Equal(t, target.SlotNumber, last.SlotNumber)
+}
+
+func TestBelowFinalityForkchoiceKeepsPendingNotifications(t *testing.T) {
+	m := New(t, WithStepSize(16), WithLoopBlockLimit(8))
+	chain, err := m.GenerateChain(27, nil)
+	require.NoError(t, err)
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks[:2]))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(chain.Blocks[1].Hash())
+	fcu, err := m.UpdateForkChoice(t.Context(), chain.Blocks[1].Header(), WithFinalisedHash(chain.Blocks[1].Hash()))
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+
+	header := types.CopyHeader(chain.TopBlock.HeaderNoCopy())
+	header.Root[0] ^= 1
+	badTip := types.NewBlockFromNetwork(header, chain.TopBlock.Body(), chain.TopBlock.BlockAccessListSidecar())
+	blocks := append([]*types.Block(nil), chain.Blocks[2:]...)
+	blocks[len(blocks)-1] = badTip
+	status, err := m.InsertBlocks(t.Context(), blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	fcu, err = m.UpdateForkChoice(t.Context(), badTip.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+
+	retained := append([]notifications.StateChange(nil), m.Notifications.Accumulator.Changes()...)
+	require.NotEmpty(t, retained)
+	var committed uint64
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		committed, err = stages.GetStageProgress(tx, stages.Finish)
+		require.Equal(t, badTip.Hash(), rawdb.ReadCurrentHeader(tx).Hash(), "the rejected catch-up left its requested head marker")
+		return err
+	}))
+	require.Greater(t, committed, uint64(2))
+	require.Less(t, committed, badTip.NumberU64())
+	fcu, err = m.UpdateForkChoice(t.Context(), chain.Blocks[0].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	require.Equal(t, retained, m.Notifications.Accumulator.Changes(), "an ignored head must not dispatch retained changes using the stale head marker")
+
+	accepted := chain.Blocks[committed-1]
+	fcu, err = m.UpdateForkChoice(t.Context(), accepted.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	batch := waitForBatchWithHead(accepted.Hash())
+	for _, change := range batch.ChangeBatch {
+		require.LessOrEqual(t, change.BlockHeight, committed)
+	}
+	require.Empty(t, m.Notifications.Accumulator.Changes())
+}
+
+func TestRejectedHeadOnlyCatchupRetainsHeaderRange(t *testing.T) {
+	m := New(t, WithStepSize(16), WithLoopBlockLimit(8))
+	chain, err := m.GenerateChain(100, nil)
+	require.NoError(t, err)
+	waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks[:2]))
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(chain.Blocks[1].Hash())
+
+	header := types.CopyHeader(chain.TopBlock.HeaderNoCopy())
+	header.Root[0] ^= 1
+	badTip := types.NewBlockFromNetwork(header, chain.TopBlock.Body(), chain.TopBlock.BlockAccessListSidecar())
+	blocks := append([]*types.Block(nil), chain.Blocks[2:]...)
+	blocks[len(blocks)-1] = badTip
+	status, err := m.InsertBlocks(t.Context(), blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	fcu, err := m.UpdateForkChoice(t.Context(), badTip.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+
+	var committed uint64
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		committed, err = stages.GetStageProgress(tx, stages.Finish)
+		return err
+	}))
+	require.Greater(t, committed, uint64(10))
+	require.Greater(t, m.Notifications.Accumulator.Changes()[0].BlockHeight, uint64(3), "catch-up must omit individual block changes")
+	headers, unsubscribe := m.Notifications.Events.AddHeaderSubscription()
+	t.Cleanup(unsubscribe)
+	accepted := chain.Blocks[committed-1]
+	fcu, err = m.UpdateForkChoice(t.Context(), accepted.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	m.ExecModule.WaitIdle(t.Context())
+	waitForBatchWithHead(accepted.Hash())
+	var want []common.Hash
+	for _, block := range chain.Blocks[2:committed] {
+		want = append(want, block.Hash())
+	}
+	require.Equal(t, want, collectReorgSubscriptions(headers, nil, nil).headerHashes(t), "all committed catch-up headers must be announced")
+}
+
+func TestRejectedCatchupForkchoiceKeepsCommittedNotifications(t *testing.T) {
+	for _, name := range []string{"committed head", "new head"} {
+		t.Run(name, func(t *testing.T) {
+			sameHead := name == "committed head"
+			m, canonical, side := newReorgChains(t, 2, 27, WithStepSize(16), WithLoopBlockLimit(8))
+			waitForBatchWithHead := subscribeStateChangeHeads(t, m)
+			require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks))
+			m.ExecModule.WaitIdle(t.Context())
+			waitForBatchWithHead(canonical.TopBlock.Hash())
+
+			header := types.CopyHeader(side.TopBlock.HeaderNoCopy())
+			header.Root[0] ^= 1
+			badTip := types.NewBlockFromNetwork(header, side.TopBlock.Body(), side.TopBlock.BlockAccessListSidecar())
+			blocks := append([]*types.Block(nil), side.Blocks[1:]...)
+			blocks[len(blocks)-1] = badTip
+			status, err := m.InsertBlocks(t.Context(), blocks)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			fcu, err := m.UpdateForkChoice(t.Context(), badTip.Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusBadBlock, fcu.Status)
+			m.ExecModule.WaitIdle(t.Context())
+
+			var committed uint64
+			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+				var err error
+				committed, err = stages.GetStageProgress(tx, stages.Finish)
+				return err
+			}))
+			require.Greater(t, committed, canonical.TopBlock.NumberU64(), "catch-up must commit before the rejected cycle")
+			require.Less(t, committed, side.TopBlock.NumberU64()-1, "the failed cycle must also contain a valid, uncommitted block")
+			changes := m.Notifications.Accumulator.Changes()
+			require.Equal(t, int(committed), len(changes), "retain the canonical unwind and committed blocks, without the failed cycle")
+			require.Equal(t, notifications.DirectionUnwind, changes[0].Direction)
+			require.Equal(t, side.Blocks[0].Hash(), changes[0].BlockHash)
+			for i, change := range changes[1:] {
+				require.Equal(t, notifications.DirectionForward, change.Direction)
+				require.Equal(t, side.Blocks[i+1].Hash(), change.BlockHash)
+			}
+
+			headers, unsubscribe := m.Notifications.Events.AddHeaderSubscription()
+			t.Cleanup(unsubscribe)
+			newHead := side.TopBlock
+			if sameHead {
+				newHead = side.Blocks[committed-1]
+			} else {
+				status, err = m.InsertBlocks(t.Context(), []*types.Block{newHead})
+				require.NoError(t, err)
+				require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			}
+			fcu, err = m.UpdateForkChoice(t.Context(), newHead.Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+			m.ExecModule.WaitIdle(t.Context())
+			require.Empty(t, m.Notifications.Accumulator.Changes(), "successful forkchoice must dispatch retained changes")
+			batch := waitForBatchWithHead(newHead.Hash())
+			require.Equal(t, int(newHead.NumberU64()), len(batch.ChangeBatch), "committed and retried changes must be delivered once")
+			require.Equal(t, remoteproto.Direction_UNWIND, batch.ChangeBatch[0].Direction)
+			for i, change := range batch.ChangeBatch {
+				require.Equal(t, side.Blocks[i].Hash(), common.Hash(gointerfaces.ConvertH256ToHash(change.BlockHash)))
+				if i > 0 {
+					require.Equal(t, remoteproto.Direction_FORWARD, change.Direction)
+				}
+			}
+			var wantHeaders []common.Hash
+			for _, block := range side.Blocks[1:newHead.NumberU64()] {
+				wantHeaders = append(wantHeaders, block.Hash())
+			}
+			got := collectReorgSubscriptions(headers, nil, nil)
+			require.Equal(t, wantHeaders, got.headerHashes(t), "headers from committed catch-up cycles must also be delivered")
+
+			fcu, err = m.UpdateForkChoice(t.Context(), newHead.Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+			m.ExecModule.WaitIdle(t.Context())
+			require.Empty(t, m.Notifications.Accumulator.Changes())
+			require.Empty(t, collectReorgSubscriptions(headers, nil, nil).headers, "repeated forkchoice must not repeat delivered headers")
+		})
+	}
 }

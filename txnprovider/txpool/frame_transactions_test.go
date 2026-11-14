@@ -47,7 +47,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -95,6 +97,9 @@ func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remot
 			expiry = binary.BigEndian.Uint64(first.Data)
 			dependencies = append(dependencies, gointerfaces.ConvertAddressToH160(types.FrameExpiryVerifier))
 		}
+		if len(protocol.FrameTransactionRecentRoots(frame)) > 0 {
+			dependencies = append(dependencies, gointerfaces.ConvertAddressToH160(types.FrameRecentRootVerifier))
+		}
 	}
 	cost := new(uint256.Int).Mul(uint256.NewInt(tx.GetGasLimit()), tx.GetFeeCap())
 	return &remoteproto.FrameValidationReply{
@@ -121,9 +126,14 @@ func framePoolSlotWithNonce(t *testing.T, sender common.Address, nonce, tip, fee
 		Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}}},
 		Fees:   types.FrameFees{TipCap: *uint256.NewInt(tip), FeeCap: *uint256.NewInt(fee)},
 	}
+	return framePoolSlotFromTransaction(t, tx)
+}
+
+func framePoolSlotFromTransaction(t *testing.T, tx *types.FrameTransaction) *TxnSlot {
+	t.Helper()
 	var data bytes.Buffer
 	require.NoError(t, tx.MarshalBinary(&data))
-	return &TxnSlot{Txn: tx, Nonce: nonce, Rlp: data.Bytes(), IDHash: tx.Hash(), Size: uint32(data.Len())}
+	return &TxnSlot{Txn: tx, Nonce: tx.Nonce, Rlp: data.Bytes(), IDHash: tx.Hash(), Size: uint32(data.Len())}
 }
 
 func TestFramePoolBogotaActivation(t *testing.T) {
@@ -480,6 +490,83 @@ func TestFramePoolSharesOrdinaryBalance(t *testing.T) {
 					require.Equal(t, 1, pool.pending.Len(), "the payer cannot fund both transactions")
 				})
 			}
+		})
+	}
+}
+
+type stateCommitOnReadDB struct {
+	kv.TemporalRoDB
+	commit func()
+}
+
+func (db *stateCommitOnReadDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic // the returned transaction is owned by the caller
+	if err == nil && db.commit != nil {
+		commit := db.commit
+		db.commit = nil
+		commit()
+	}
+	return tx, err
+}
+
+func TestFramePoolRecoveryRefreshesOrdinaryPayer(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		beforeCommit bool
+		failedUpdate bool
+	}{
+		{"incomplete batch", false, false},
+		{"incomplete batch before commit", true, false},
+		{"failed update", false, true},
+		{"failed update before commit", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, payer := keyedFramePoolEnv(t)
+			backend := pool.ethBackend.(*frameValidationBackend)
+			backend.balance = common.Ether
+			ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
+			ordinary.Txn.GetValue().SetUint64(common.Ether / 2)
+			ordinary.IDHash = ordinary.Txn.Hash()
+			frame := framePoolSlot(t, payer, 1, 2, uint256.Int{1})
+			var txns TxnSlots
+			txns.Append(ordinary, payer[:], true)
+			txns.Append(frame, payer[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, txpoolcfg.Success}, reasons)
+			require.Equal(t, 2, pool.pending.Len())
+
+			backend.balance = 500_000
+			account := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(backend.balance), CodeHash: accounts.EmptyCodeHash}
+			coreDB := pool._chainDB.(kv.TemporalRwDB)
+			change := newBlockChangeForAccounts(common.Hash{1}, 0)
+			change.StateChangesIncomplete = !tc.failedUpdate
+			require.NoError(t, coreDB.View(ctx, func(tx kv.Tx) error {
+				var err error
+				change.StateVersionId, err = rawdb.GetStateVersion(tx)
+				return err
+			}))
+			change.StateVersionId++
+			if tc.failedUpdate {
+				readErr := errors.New("state read failed")
+				pool._chainDB = stateReadHookDB{coreDB, func() error { return readErr }}
+				require.ErrorIs(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}), readErr)
+				pool._chainDB = coreDB
+			}
+			commit := func() {
+				writeTestSenderState(t, ctx, coreDB, pool.logger, payer, accounts.SerialiseV3(&account), 1)
+			}
+			if tc.beforeCommit {
+				pool._chainDB = &stateCommitOnReadDB{TemporalRoDB: coreDB, commit: commit}
+			} else {
+				commit()
+			}
+			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			require.Contains(t, pool.byHash, string(frame.IDHash[:]), "a mined ordinary transaction must not consume the frame payer's remaining balance")
+			require.NotContains(t, pool.byHash, string(ordinary.IDHash[:]))
+			require.Equal(t, PendingSubPool, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+			require.Equal(t, frame.frameValidation.MaxCost, pool.frameReservations[payer].cost)
+			require.Equal(t, !tc.failedUpdate, change.StateChangesIncomplete, "a shared batch must not be modified")
 		})
 	}
 }
@@ -1010,7 +1097,7 @@ func TestFramePoolFailedBlockUpdateWakesWaiters(t *testing.T) {
 		defer cancel()
 		generation, height := pool.stateGeneration, pool.lastSeenBlock.Load()
 		done := make(chan bool, 1)
-		go func() { done <- pool.waitForFrameStateChange(ctx, generation) }()
+		go func() { done <- pool.waitForStateChange(ctx, generation) }()
 		synctest.Wait()
 		readErr := errors.New("state read failed")
 		change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
@@ -1827,6 +1914,7 @@ func TestFramePoolReloadValidationBudgets(t *testing.T) {
 				return nil, ctx.Err()
 			}
 		}}
+		pool.started.Store(false)
 		require.NoError(t, pool.start(t.Context()))
 		for _, frame := range frames {
 			mt := pool.byHash[string(frame.IDHash[:])]
@@ -1855,6 +1943,7 @@ func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {
 				require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
 					return tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...))
 				}))
+				pool.started.Store(false)
 				require.NoError(t, pool.start(ctx))
 			}
 			require.Contains(t, pool.byHash, string(frame.IDHash[:]))
@@ -1863,18 +1952,36 @@ func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {
 	}
 }
 
-func TestFramePoolStartupUsesExecutedHead(t *testing.T) {
+func TestFramePoolStartupUsesAnnouncedHead(t *testing.T) {
 	for _, mode := range []string{"new local transaction", "restored local transaction"} {
 		t.Run(mode, func(t *testing.T) {
 			chainConfig := chain.AllProtocolChanges.Copy()
 			chainConfig.BogotaTime = common.NewUint64(0)
 			ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, chainConfig)
 			pool.chainID.SetUint64(1)
-			executedHead, headerHead := common.Hash{1}, common.Hash{2}
+			executed := &types.Header{Number: uint256.Int{20}, Time: 20}
+			ahead := &types.Header{Number: uint256.Int{22}, Time: 44}
+			executedHead := executed.Hash()
 			require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-				rawdb.WriteHeadBlockHash(tx, executedHead)
-				return rawdb.WriteHeadHeaderHash(tx, headerHead)
+				for _, header := range []*types.Header{executed, ahead} {
+					if err := rawdb.WriteHeader(tx, header); err != nil {
+						return err
+					}
+					if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+						return err
+					}
+				}
+				rawdb.WriteHeadBlockHash(tx, ahead.Hash())
+				if err := rawdb.WriteHeadHeaderHash(tx, ahead.Hash()); err != nil {
+					return err
+				}
+				return stages.SaveStageProgress(tx, stages.Execution, executed.Number.Uint64())
 			}))
+			reset := newBlockChangeForAccounts(executedHead, 0, sender)
+			reset.StateChangesIncomplete = true
+			reset.ChangeBatch[0].BlockHeight = executed.Number.Uint64()
+			reset.ChangeBatch[0].BlockTime = executed.Time
+			require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 			backend := &frameValidationBackend{payer: sender, balance: 1_000_000, valid: true}
 			pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
 				if req.ExpectedBlockHash == nil || gointerfaces.ConvertH256ToHash(req.ExpectedBlockHash) != executedHead {
@@ -1891,7 +1998,9 @@ func TestFramePoolStartupUsesExecutedHead(t *testing.T) {
 					return tx.Put(kv.RecentLocalTransaction, make([]byte, 8), frame.IDHash[:])
 				}))
 			}
+			pool.started.Store(false)
 			require.NoError(t, pool.start(ctx))
+			require.Equal(t, executedHead, pool.stateBlockHash)
 			if mode == "new local transaction" {
 				var txns TxnSlots
 				txns.Append(frame, sender[:], true)
@@ -1943,6 +2052,7 @@ func TestFramePoolReloadDeletesRejectedRows(t *testing.T) {
 			backend.valid, backend.err = tc.valid, tc.backendErr
 			backend.calls = nil
 
+			pool.started.Store(false)
 			require.NoError(t, pool.start(ctx))
 			if tc.alreadyPooled {
 				require.Empty(t, backend.calls)
@@ -1999,6 +2109,7 @@ func TestFramePoolReloadDeletesRejectedNonceSuccessor(t *testing.T) {
 		return nil
 	}))
 
+	pool.started.Store(false)
 	require.NoError(t, pool.start(ctx))
 	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
 	require.NotContains(t, pool.byHash, string(ordinary.IDHash[:]))
@@ -2023,6 +2134,7 @@ func TestFramePoolReloadErrorRetainsTransaction(t *testing.T) {
 		return tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...))
 	}))
 	backend.err = errors.New("validation backend unavailable")
+	pool.started.Store(false)
 	require.NoError(t, pool.start(ctx))
 	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
 	require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
@@ -2155,7 +2267,7 @@ func TestFramePoolParkedEvictionPriority(t *testing.T) {
 				frame := framePoolSlot(t, sender, 1, frameFee, key)
 				var frames TxnSlots
 				frames.Append(frame, sender[:], false)
-				reasons, err := pool.addNewTxns(ctx, frames, nil)
+				reasons, err := pool.addNewTxns(ctx, frames, nil, true)
 				require.NoError(t, err)
 				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 
@@ -2168,7 +2280,7 @@ func TestFramePoolParkedEvictionPriority(t *testing.T) {
 				ordinary.IDHash[0] = 1
 				var txns TxnSlots
 				txns.Append(ordinary, ordinarySender[:], false)
-				reasons, err = pool.addNewTxns(ctx, txns, nil)
+				reasons, err = pool.addNewTxns(ctx, txns, nil, true)
 				require.NoError(t, err)
 				require.Len(t, pool.byHash, 1)
 				if frameFee > 5 {
@@ -2202,7 +2314,7 @@ func TestFramePoolParkedCapacity(t *testing.T) {
 		frames = append(frames, frame)
 		var txns TxnSlots
 		txns.Append(frame, sender[:], false)
-		reasons, err := pool.addNewTxns(ctx, txns, nil)
+		reasons, err := pool.addNewTxns(ctx, txns, nil, true)
 		require.NoError(t, err)
 		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 		require.Equal(t, 1, pool.pending.Len())
@@ -2349,6 +2461,34 @@ func TestFramePoolRevalidationAllowsResubmission(t *testing.T) {
 			require.Equal(t, frame.frameValidation.MaxCost, pool.frameReservations[sender].cost)
 		})
 	}
+}
+
+func TestFramePoolIncompleteNotifications(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Empty(t, frame.frameValidation.RecentRoots)
+
+	backend.valid, backend.calls = false, nil
+	backend.onValidate = func() {
+		require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool, "park before simulation")
+	}
+	change := newBlockChangeForAccounts(common.Hash{1}, 0)
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Empty(t, backend.calls)
+	require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+
+	change = newBlockChangeForAccounts(common.Hash{2}, 0)
+	change.StateChangesIncomplete = true
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, []common.Hash{frame.IDHash}, backend.calls)
+	require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+	require.Empty(t, pool.frameReservations)
 }
 
 func TestFramePoolKeyedNonceIsNotAccountNonce(t *testing.T) {

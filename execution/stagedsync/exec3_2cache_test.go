@@ -383,7 +383,7 @@ func BenchmarkNotifyAccumulator(b *testing.B) {
 			hdr.Number.SetUint64(1)
 			b.ReportAllocs()
 			for b.Loop() {
-				accumulator.Reset(0)
+				accumulator.Reset()
 				accumulator.StartChange(&hdr, nil, false)
 				require.NoError(b, rs.NotifyAccumulator(accumulator, tx, writes))
 			}

@@ -83,10 +83,8 @@ func NewPipelineExecutor(
 	}
 }
 
-// ValidationNotifications returns the notifications object used by the
-// validation pipeline. The ForkValidator uses this as extendingForkNotifications
-// so that state changes accumulated during ValidateBlock are available for
-// MergeExtendingFork to copy to the main accumulator.
+// ValidationNotifications returns notifications collected during fork validation.
+// On adoption, state changes are appended after pending canonical unwind changes.
 func (pe *PipelineExecutor) ValidationNotifications() *shards.Notifications {
 	return pe.validationNotifications
 }
@@ -110,6 +108,14 @@ func (pe *PipelineExecutor) UnwindTo(unwindPoint uint64, reason stagedsync.Unwin
 // RunUnwind executes a pending unwind on the main pipeline.
 func (pe *PipelineExecutor) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	return pe.sync.RunUnwind(sd, tx)
+}
+
+// UnwindForValidation keeps speculative progress and notifications off the main pipeline.
+func (pe *PipelineExecutor) UnwindForValidation(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64) error {
+	if err := pe.validationSync.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
+		return err
+	}
+	return pe.validationSync.RunUnwind(sd, tx)
 }
 
 // RunPrune executes pruning on the main pipeline.
@@ -209,6 +215,15 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	// to roll back the current value at function exit, not the original.
 	defer func() { tx.Rollback() }()
 
+	// Notifications follow database commit boundaries. Earlier committed cycles
+	// must survive a later failure.
+	restoreStateChanges := hook.CheckpointStateChanges()
+	defer func() {
+		if restoreStateChanges != nil {
+			restoreStateChanges()
+		}
+	}()
+
 	// Drop the snapshots stage's download-completion pin on every exit (see
 	// Notifications.ClearSnapshotDownloadPin for its lifecycle). Registered
 	// before the stage so a failure inside it, after the pin is published, is
@@ -242,7 +257,11 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 
 	// If domains are ahead of block files, nothing to execute.
 	if execctx.IsDomainAheadOfBlocks(ctx, tx, pe.logger) {
-		return tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		restoreStateChanges = nil
+		return nil
 	}
 
 	doms, err := execctx.NewSharedDomains(ctx, tx, pe.logger)
@@ -258,9 +277,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		if err != nil {
 			return err
 		}
-		if err := hook.BeforeRun(tx, false); err != nil {
-			return err
-		}
+		hook.NotifySyncState(tx)
 	}
 
 	var finalityCtx kv.FinalityContext
@@ -276,6 +293,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			if err := sd.Commit(ctx, tx); err != nil {
 				return nil, nil, fmt.Errorf("ProcessFrozenBlocks: flush+commit: %w", err)
 			}
+			restoreStateChanges = hook.CheckpointStateChanges()
 			// Prune runs via PruneFn (sync.RunPrune); kick file building so
 			// snapshot files advance as PFB processes frozen blocks.
 			pe.db.BuildFilesInBackground(finalityCtx)
@@ -313,7 +331,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	}
 
 	if hook != nil {
-		if err := pe.db.View(ctx, func(tx kv.Tx) error {
+		if err := pe.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 			headersProgress, err := stages.GetStageProgress(tx, stages.Headers)
 			if err != nil {
 				return err
@@ -323,6 +341,8 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			if err := hook.SendNotifications(tx, finishStageBeforeSync); err != nil {
 				return err
 			}
+			// Restoring after publication would send the same changes again.
+			restoreStateChanges = nil
 			if err := hook.UpdateHead(tx, finishStageBeforeSync, false); err != nil {
 				return err
 			}

@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -32,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -481,4 +484,24 @@ func TestSnapshotDownloadProgressReporterNoopWithoutKnownTarget(t *testing.T) {
 	require.Zero(t, h.downloader.resetCount())
 	h.requireNoEvent(t)
 	require.Zero(t, h.currentBlock(t))
+}
+
+func TestSnapshotAdvanceInvalidatesStateChanges(t *testing.T) {
+	for _, target := range []uint64{0, 1, 2} {
+		t.Run(fmt.Sprint(target), func(t *testing.T) {
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			notifier := shards.NewNotifications(nil)
+			cfg := SnapshotsCfg{notifier: notifier}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 1))
+				require.NoError(t, cfg.advanceExecutionToSnapshot(tx, target))
+				progress, err := stages.GetStageProgress(tx, stages.Execution)
+				require.NoError(t, err)
+				require.Equal(t, max(uint64(1), target), progress)
+				return nil
+			}))
+			batch := notifier.Accumulator.Batch(&types.Header{})
+			require.Equal(t, target > 1, batch.StateChangesIncomplete)
+		})
+	}
 }

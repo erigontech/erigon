@@ -52,7 +52,7 @@ import (
 // an implementation defined in another package (e.g. execmodule.Dispatcher)
 // without creating a circular import.
 type NotificationSender interface {
-	Dispatch(ctx context.Context, tx kv.Tx, stateVersion uint64, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64, committedTx kv.TemporalTx) error
+	Dispatch(ctx context.Context, tx kv.Tx, state kv.TemporalGetter, stateVersion uint64, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64, committedTx kv.TemporalTx) error
 }
 
 type FrozenBlocksReader interface {
@@ -100,18 +100,6 @@ func NewHook(
 	}
 }
 
-func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
-	notifications := h.notifications
-	if notifications != nil && notifications.Accumulator != nil && inSync {
-		stateVersion, err := rawdb.GetStateVersion(tx)
-		if err != nil {
-			h.logger.Error("problem reading plain state version", "err", err)
-		}
-		notifications.Accumulator.Reset(stateVersion)
-	}
-	return nil
-}
-
 func (h *Hook) LastNewBlockSeen(n uint64) {
 	if h == nil || h.notifications == nil {
 		return
@@ -119,25 +107,21 @@ func (h *Hook) LastNewBlockSeen(n uint64) {
 	h.notifications.NewLastBlockSeen(n)
 }
 
-func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
-	if h == nil {
+func (h *Hook) CheckpointStateChanges() func() {
+	if h == nil || h.notifications == nil || h.notifications.Accumulator == nil {
 		return nil
 	}
-	// Cycle start is where a node that fell behind first sees it; waiting for
-	// a cycle to end while still behind would miss fast catch-ups entirely.
-	h.NotifySyncState(tx)
-	return h.beforeRun(tx, inSync)
+	return h.notifications.Accumulator.Checkpoint()
 }
 
 // SendNotifications dispatches all pending notifications (state changes,
-// headers, logs, receipts) via the Dispatcher. The tx is the data source —
-// either the SD's blockOverlay (pre-commit) or a committed DB tx.
+// headers, logs, receipts) via the Dispatcher using committed state.
 //
 // All call sites follow the same pattern:
 //
 //	hook.SendNotifications(tx, finishProgressBefore)
 //	hook.UpdateHead(tx, finishProgressBefore, isSynced)
-func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
+func (h *Hook) SendNotifications(tx kv.TemporalTx, finishProgressBefore uint64) error {
 	if h == nil {
 		return nil
 	}
@@ -155,15 +139,14 @@ func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
 			return err
 		}
 	}
-	committedTx, _ := tx.(kv.TemporalTx) // notifications are sent after the run's commit
 	return h.dispatcher.Dispatch(
-		h.ctx, tx, stateVersion,
+		h.ctx, tx, tx, stateVersion,
 		h.notifications.Accumulator,
 		h.notifications.RecentReceipts,
 		finishProgressBefore,
 		finishStageAfterSync,
 		h.sync.PrevUnwindPoint(),
-		committedTx,
+		tx,
 	)
 }
 
@@ -196,6 +179,8 @@ func (h *Hook) ClearSnapshotDownloadPin() bool {
 
 // NotifySyncState publishes the sync status on the event bus if it changed;
 // dedup and ordering live in Notifications.PublishSyncState.
+// Publishing before execution starts exposes the transition to syncing even
+// when catch-up finishes within one cycle.
 func (h *Hook) NotifySyncState(tx kv.Tx) {
 	if h == nil || h.notifications == nil || h.notifications.Events == nil || h.frozenBlocksReader == nil {
 		return

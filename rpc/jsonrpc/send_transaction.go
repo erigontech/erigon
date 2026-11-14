@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -39,16 +40,15 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
 
-	// this has been moved to prior to adding of transactions to capture the
-	// pre-state of the db - which is used for logging in the messages below
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	defer tx.Rollback()
-
-	cc, err := api.chainConfig(ctx, tx)
+	// Admission opens its own state view; release this database reader before calling it.
+	cc, err := func() (*chain.Config, error) {
+		tx, err := api.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		return api.chainConfig(ctx, tx)
+	}()
 	if err != nil {
 		return common.Hash{}, err
 	}
