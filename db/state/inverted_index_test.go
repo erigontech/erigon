@@ -2154,3 +2154,10 @@ func requireSeekEvery(t *testing.T, it stream.U64, want []uint64, asc order.By, 
 	}
 	require.Equal(t, len(want), i)
 }
+
+func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
+	iv := ii.calcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+	iit := &InvertedIndexRoTx{}
+	ii.initFilesRo(iit, iv)
+	return iit
+}

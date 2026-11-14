@@ -598,10 +598,10 @@ func TestE2Schema_FileNamingRoundTrip(t *testing.T) {
 	ver := NewE2SnapSchemaVersion(version.V1_0_standart, version.V1_0_standart)
 	stepSize := uint64(1000)
 
-	bodies := NewE2SnapSchemaWithStep(dirs, "bodies", []string{"bodies"}, stepSize, ver)
-	headers := NewE2SnapSchemaWithStep(dirs, "headers", []string{"headers"}, stepSize, ver)
-	txns := NewE2SnapSchemaWithIndexTag(dirs, "transactions",
-		[]string{"transactions", "transactions-to-block"}, ver)
+	bodies := NewE2SnapSchemaWithStepAndDir(dirs.Snap, "bodies", []string{"bodies"}, stepSize, ver)
+	headers := NewE2SnapSchemaWithStepAndDir(dirs.Snap, "headers", []string{"headers"}, stepSize, ver)
+	txns := NewE2SnapSchemaWithStepAndDir(dirs.Snap, "transactions",
+		[]string{"transactions", "transactions-to-block"}, 1000, ver)
 
 	cases := []struct {
 		schema   SnapNameSchema

@@ -503,17 +503,6 @@ func (iit *InvertedIndexRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool)
 	return w
 }
 
-func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
-	iv := ii.calcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
-	return ii.beginFilesRo(iv)
-}
-
-func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
-	iit := &InvertedIndexRoTx{}
-	ii.initFilesRo(iit, iv)
-	return iit
-}
-
 // initFilesRo fills a zero iit field by field: assigning a whole literal would zero it again and
 // copy it with bulk write barriers, on every read tx.
 func (ii *InvertedIndex) initFilesRo(iit *InvertedIndexRoTx, iv *iiVisible) {

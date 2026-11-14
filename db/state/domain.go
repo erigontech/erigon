@@ -849,21 +849,6 @@ func (dt *DomainRoTx) getLatestFromFileValSize(i int, filekey []byte, hi, lo uin
 	return 0, false, errors.New("no index defined")
 }
 
-// beginForTests recomputes visible files from dirtyFiles directly instead of
-// using Aggregator's published snapshot. Unsafe to mix with an Aggregator,
-// because it can observe an unsynchronized/torn view of dirtyFiles across
-// entities. Production code goes through Aggregator.BeginFilesRo.
-func (d *Domain) beginForTests() *DomainRoTx {
-	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
-	return d.beginFilesRo(dv, hv, iv)
-}
-
-func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
-	dt := &DomainRoTx{}
-	d.initFilesRo(dt, &HistoryRoTx{}, &InvertedIndexRoTx{}, dv, hf, hiv)
-	return dt
-}
-
 // initFilesRo builds into caller-provided storage, letting Aggregator.BeginFilesRo back a
 // whole tx from one allocation. dv/hf/hiv must come from a single aggregatorVisible
 // generation, else the read is torn across entities.
@@ -2165,11 +2150,6 @@ func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 	canDomain, _ := dt.canScanPruneDomainTables(tx, untilTx)
 	canHistory, _ := dt.ht.canPruneUntil(tx, untilTx)
 	return canHistory || canDomain
-}
-
-func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
-	maxStepInFiles := kv.Step(dt.files.EndTxNum() / dt.stepSize)
-	return maxStepInFiles < dt.d.maxStepInDB(dbtx)
 }
 
 func (dt *DomainRoTx) checkFilesDBGap(tx kv.Tx) error {
