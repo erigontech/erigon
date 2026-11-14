@@ -162,8 +162,7 @@ Only replace these values when the user explicitly requests another release.
 6b. **EngineX client configuration:**
    Mirror the selected row from `.github/workflows/test-hive-eest.yml`. For every
    stable or devnet EngineX run, patch `clients/erigon/erigon.sh` with
-   `--fcu.background.prune=false --fcu.timeout=0`. Devnet runs also bake
-   `ERIGON_EXEC3_PARALLEL=true` into the client image. Add `--experimental.bal`
+   `--fcu.background.prune=false --fcu.timeout=0`. Add `--experimental.bal`
    only for the Amsterdam family; use a separate client image when running it
    alongside other EngineX families.
 

@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -49,12 +48,12 @@ func TestApplyStateWritesPreservesEarlierNonce(t *testing.T) {
 		bal(addr, state.Version{}, *uint256.NewInt(900)).
 		nonce(addr, state.Version{}, 6).
 		build()
-	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 100, first, nil, &chain.Rules{}))
+	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 100, first))
 
 	second := newWS().
 		bal(addr, state.Version{}, *uint256.NewInt(1100)).
 		build()
-	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 200, second, nil, &chain.Rules{}))
+	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 200, second))
 
 	encoded, _, err := domains.GetLatest(kv.AccountsDomain, tx, addrVal[:])
 	require.NoError(t, err)
@@ -83,13 +82,13 @@ func TestApplyStateWritesPreservesNonceAcrossBalanceWrites(t *testing.T) {
 		bal(addr, state.Version{}, *uint256.NewInt(4800)).
 		nonce(addr, state.Version{}, 11).
 		build()
-	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 10, first, nil, &chain.Rules{}))
+	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 10, first))
 
 	for i := range 4 {
 		writes := newWS().
 			bal(addr, state.Version{}, *uint256.NewInt(uint64(4900 + i*100))).
 			build()
-		require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, uint64(11+i), writes, nil, &chain.Rules{}))
+		require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, uint64(11+i), writes))
 	}
 
 	encoded, _, err := domains.GetLatest(kv.AccountsDomain, tx, addrVal[:])
@@ -114,7 +113,7 @@ func TestApplyStateWritesInitializesNewAccountCodeHash(t *testing.T) {
 	writes := newWS().
 		bal(addr, state.Version{}, *uint256.NewInt(1000)).
 		build()
-	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 1, writes, nil, &chain.Rules{}))
+	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 1, writes))
 
 	encoded, _, err := domains.GetLatest(kv.AccountsDomain, tx, addrVal[:])
 	require.NoError(t, err)
@@ -149,12 +148,12 @@ func TestApplyStateWritesRestoresStorageOrigin(t *testing.T) {
 	first := newWS().
 		stor(contract, slot, state.Version{}, *uint256.NewInt(2)).
 		build()
-	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 10, first, nil, &chain.Rules{}))
+	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 10, first))
 
 	second := newWS().
 		stor(contract, slot, state.Version{}, *uint256.NewInt(1)).
 		build()
-	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 11, second, nil, &chain.Rules{}))
+	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 11, second))
 
 	value, _, err := domains.GetLatest(kv.StorageDomain, tx, composite)
 	require.NoError(t, err)
@@ -185,7 +184,7 @@ func TestApplyStateWritesPreservesUnchangedStorage(t *testing.T) {
 		stor(contract, guardSlot, state.Version{}, *uint256.NewInt(1)).
 		stor(contract, changedSlot, state.Version{}, *uint256.NewInt(42)).
 		build()
-	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 10, writes, nil, &chain.Rules{}))
+	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 10, writes))
 
 	guardValue, _, err := domains.GetLatest(kv.StorageDomain, tx, guardKey)
 	require.NoError(t, err)
@@ -216,7 +215,7 @@ func TestApplyStateWritesClearsCodeDomain(t *testing.T) {
 		codeHash(addr, state.Version{}, accounts.EmptyCodeHash).
 		code(addr, state.Version{}, accounts.EmptyCode).
 		build()
-	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 100, writes, nil, &chain.Rules{}))
+	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 100, writes))
 
 	got, _, err := domains.GetLatest(kv.CodeDomain, tx, addrVal[:])
 	require.NoError(t, err)
@@ -258,7 +257,7 @@ func TestApplyStateWritesCreateContractWipesCommittedStorage(t *testing.T) {
 		createContract(addr, state.Version{}, true).
 		nonce(addr, state.Version{}, 1).
 		build()
-	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 100, writes, nil, &chain.Rules{}))
+	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 100, writes))
 
 	require.Zero(t, countSlots(), "CREATE over an existing account must clear its committed storage")
 }
