@@ -455,66 +455,86 @@ func TestForkChoicePersistsSideBlockBeyondReorgDepth(t *testing.T) {
 }
 
 func TestValidateChainPurgesPersistedSideAncestor(t *testing.T) {
-	const maxReorgDepth = 4
-	m, _, _ := newMetricsTester(t,
-		execmoduletester.WithMaxReorgDepth(maxReorgDepth),
-		execmoduletester.WithAlwaysGenerateChangesets(true),
-	)
-	prefixPack, err := m.GenerateChain(6, func(i int, block *blockgen.BlockGen) {
-		block.SetExtra([]byte{0x01, byte(i)})
-	})
-	require.NoError(t, err)
-	for _, block := range prefixPack.Blocks {
-		insertAndValidateBlocks(t, m, block)
-		updateForkChoiceTo(t, m, block)
+	for _, test := range []struct {
+		name     string
+		reinsert bool
+	}{
+		{name: "persisted-only"},
+		{name: "pending-and-persisted", reinsert: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			const maxReorgDepth = 4
+			m, _, _ := newMetricsTester(t,
+				execmoduletester.WithMaxReorgDepth(maxReorgDepth),
+				execmoduletester.WithAlwaysGenerateChangesets(true),
+			)
+			prefixPack, err := m.GenerateChain(6, func(i int, block *blockgen.BlockGen) {
+				block.SetExtra([]byte{0x01, byte(i)})
+			})
+			require.NoError(t, err)
+			for _, block := range prefixPack.Blocks {
+				insertAndValidateBlocks(t, m, block)
+				updateForkChoiceTo(t, m, block)
+			}
+
+			sidePack, err := m.GenerateChainFrom(prefixPack.Blocks[3], 2, func(i int, block *blockgen.BlockGen) {
+				block.SetExtra([]byte{0x0b, byte(i)})
+			})
+			require.NoError(t, err)
+			persisted := tamperBlockGasUsed(t, sidePack.Blocks[0], 21_000)
+			childHeader := types.CopyHeader(sidePack.Blocks[1].HeaderNoCopy())
+			childHeader.ParentHash = persisted.Hash()
+			badChild := types.NewBlockFromNetwork(childHeader, sidePack.Blocks[1].Body(), sidePack.Blocks[1].BlockAccessListSidecar())
+			alternatePack, err := m.GenerateChainFrom(prefixPack.Blocks[5], 1, func(_ int, block *blockgen.BlockGen) {
+				block.SetExtra([]byte{0x0c})
+			})
+			require.NoError(t, err)
+			canonicalPack, err := m.GenerateChainFrom(prefixPack.Blocks[5], maxReorgDepth, func(i int, block *blockgen.BlockGen) {
+				block.SetExtra([]byte{0x0a, byte(i)})
+			})
+			require.NoError(t, err)
+
+			blocks := []*types.Block{persisted, badChild, alternatePack.Blocks[0]}
+			blocks = append(blocks, canonicalPack.Blocks...)
+			_, err = m.InsertBlocks(t.Context(), blocks)
+			require.NoError(t, err)
+			canonicalHead := canonicalPack.Blocks[len(canonicalPack.Blocks)-1]
+			updateForkChoiceTo(t, m, canonicalHead)
+
+			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+				require.NotNil(t, rawdb.ReadHeaderNumber(tx, persisted.Hash()))
+				require.Nil(t, rawdb.ReadHeaderNumber(tx, badChild.Hash()))
+				return nil
+			}))
+			updateForkChoiceTo(t, m, alternatePack.Blocks[0])
+			if test.reinsert {
+				_, err = m.InsertBlocks(t.Context(), []*types.Block{persisted})
+				require.NoError(t, err)
+			}
+			require.Equal(t, test.reinsert, m.ExecModule.IsRetainedSideBlock(persisted.Hash()))
+
+			result, err := m.ValidateChain(t.Context(), badChild)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
+			for _, block := range []*types.Block{persisted, badChild} {
+				require.False(t, m.ExecModule.IsRetainedSideBlock(block.Hash()))
+			}
+			updateForkChoiceTo(t, m, canonicalHead)
+
+			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+				for _, block := range []*types.Block{persisted, badChild} {
+					require.Nil(t, rawdb.ReadHeaderNumber(tx, block.Hash()))
+				}
+				return nil
+			}))
+			bodies, err := m.ExecModule.GetPayloadBodiesByHash(t.Context(), []common.Hash{persisted.Hash(), badChild.Hash()})
+			require.NoError(t, err)
+			require.Len(t, bodies, 2)
+			for _, body := range bodies {
+				require.Nil(t, body)
+			}
+		})
 	}
-
-	sidePack, err := m.GenerateChainFrom(prefixPack.Blocks[3], 2, func(i int, block *blockgen.BlockGen) {
-		block.SetExtra([]byte{0x0b, byte(i)})
-	})
-	require.NoError(t, err)
-	persisted := tamperBlockGasUsed(t, sidePack.Blocks[0], 21_000)
-	childHeader := types.CopyHeader(sidePack.Blocks[1].HeaderNoCopy())
-	childHeader.ParentHash = persisted.Hash()
-	badChild := types.NewBlockFromNetwork(childHeader, sidePack.Blocks[1].Body(), sidePack.Blocks[1].BlockAccessListSidecar())
-	alternatePack, err := m.GenerateChainFrom(prefixPack.Blocks[5], 1, func(_ int, block *blockgen.BlockGen) {
-		block.SetExtra([]byte{0x0c})
-	})
-	require.NoError(t, err)
-	canonicalPack, err := m.GenerateChainFrom(prefixPack.Blocks[5], maxReorgDepth, func(i int, block *blockgen.BlockGen) {
-		block.SetExtra([]byte{0x0a, byte(i)})
-	})
-	require.NoError(t, err)
-
-	blocks := []*types.Block{persisted, badChild, alternatePack.Blocks[0]}
-	blocks = append(blocks, canonicalPack.Blocks...)
-	_, err = m.InsertBlocks(t.Context(), blocks)
-	require.NoError(t, err)
-	canonicalHead := canonicalPack.Blocks[len(canonicalPack.Blocks)-1]
-	updateForkChoiceTo(t, m, canonicalHead)
-
-	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-		require.NotNil(t, rawdb.ReadHeaderNumber(tx, persisted.Hash()))
-		require.Nil(t, rawdb.ReadHeaderNumber(tx, badChild.Hash()))
-		return nil
-	}))
-	updateForkChoiceTo(t, m, alternatePack.Blocks[0])
-
-	result, err := m.ValidateChain(t.Context(), badChild)
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)
-	updateForkChoiceTo(t, m, canonicalHead)
-
-	for _, block := range []*types.Block{persisted, badChild} {
-		hash := block.Hash()
-		has, err := m.ExecModule.HasBlock(t.Context(), &hash, nil)
-		require.NoError(t, err)
-		require.False(t, has)
-	}
-	bodies, err := m.ExecModule.GetPayloadBodiesByHash(t.Context(), []common.Hash{persisted.Hash()})
-	require.NoError(t, err)
-	require.Len(t, bodies, 1)
-	require.Nil(t, bodies[0])
 }
 
 func TestForkChoiceBoundsRetainedSideBlocks(t *testing.T) {
