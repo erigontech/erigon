@@ -504,11 +504,13 @@
   run: 'fork_(Amsterdam|BPO2ToAmsterdam)'
 - shard: blocktests-devnet-race-amsterdam-sequential
   workers: 12
+  expected-tests: 26306
   max-allowed-failures: 0
   commitment-parallel: false
   run: 'fork_Amsterdam'
 - shard: blocktests-devnet-race-amsterdam-parallel
   workers: 12
+  expected-tests: 26306
   max-allowed-failures: 0
   commitment-parallel: true
   run: 'fork_Amsterdam'

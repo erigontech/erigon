@@ -162,6 +162,9 @@ case "$shard_route" in
 		cmd=transactiontest;   paths=("$base/TransactionTests") ;;
 	difficultytests-legacy-*)
 		cmd=difficultytest;   paths=("$base/DifficultyTests") ;;
+	blocktests-devnet-race-amsterdam)
+		cmd=blocktest
+		paths=("$base/blockchain_tests/for_amsterdam" "$base/blockchain_tests/for_amsterdamtobogotaattime15k") ;;
 	# race shards reuse this arm; each one's per-fork --run regex comes from the
 	# manifest `run` key (appended after this case), not from a per-shard arm.
 	blocktests-stable | blocktests-devnet | blocktests-stable-race-* | blocktests-devnet-race-*)
@@ -217,9 +220,16 @@ if [[ ! -x "$evm_bin" ]]; then
 	exit 2
 fi
 
+fixture_options=()
+if [[ "$shard_route" == blocktests-devnet-race-amsterdam ]]; then
+	for path in "${paths[@]}"; do
+		fixture_options+=(--include "${path#test-fixtures-cache/"${fixture_sets[0]}"/}")
+	done
+fi
+
 # Provision only this shard's fixture sets (no-op when already available).
 for fixture_set in "${fixture_sets[@]}"; do
-	bash tools/test-fixtures.sh test-fixtures.json test-fixtures-cache "$fixture_set"
+	bash tools/test-fixtures.sh ${fixture_options[@]+"${fixture_options[@]}"} test-fixtures.json test-fixtures-cache "$fixture_set"
 done
 
 for path in "${paths[@]}"; do
