@@ -29,7 +29,6 @@ jobs:
       max-parallel: 1
       matrix:
         commitment_mode:
-          - serial
           - parallel
     env:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa

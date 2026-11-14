@@ -63,7 +63,7 @@ permissions:
 
 jobs:
   # Build the erigon image once for the whole matrix. The matrix below has
-  # grown to suite × {serial, parallel} entries — having every entry run its
+  # grown to many suites — having every entry run its
   # own buildx with `cache-to: type=gha,mode=max,scope=kurtosis-erigon-build`
   # means ~a dozen jobs hammering the same GHA cache key concurrently, which
   # the cache backend answers with 504s ("failed to parse error response 504"
@@ -396,40 +396,18 @@ jobs:
         # pass but pathological hangs (e.g. a node that silently stops proposing)
         # fail in reasonable time instead of burning hours.
         #
-        # Each suite runs twice — once with serial commitment
-        # (ERIGON_COMMITMENT_PARALLEL=false) and once with parallel — so
-        # divergence is caught on the PR. Execution is parallel in both legs
-        # (default). Matrix entries spawn separate hosted runners and run
-        # concurrently — wall-clock unchanged, runner-minutes doubled.
         # All entries share the single erigon image built by build-erigon-image.
         include:
           - suite: regular
             package_args: .github/workflows/kurtosis/regular-assertoor.io
             ethereum_package_branch: "5.0.1"
             test_timeout_minutes: 50
-            commitment_mode: serial
-          - suite: regular
-            package_args: .github/workflows/kurtosis/regular-assertoor.io
-            ethereum_package_branch: "5.0.1"
-            test_timeout_minutes: 50
             commitment_mode: parallel
           - suite: pectra
             package_args: .github/workflows/kurtosis/pectra.io
             ethereum_package_branch: "5.0.1"
             test_timeout_minutes: 45
-            commitment_mode: serial
-          - suite: pectra
-            package_args: .github/workflows/kurtosis/pectra.io
-            ethereum_package_branch: "5.0.1"
-            test_timeout_minutes: 45
             commitment_mode: parallel
-          - suite: glamsterdam
-            package_args: .github/workflows/kurtosis/glamsterdam.io
-            # Pinned to 6.1.0 rather than main to keep the suite reproducible;
-            # the CLI >=1.18.1 requirement that forced the pin is now satisfied.
-            ethereum_package_branch: "6.1.0"
-            test_timeout_minutes: 20
-            commitment_mode: serial
           - suite: glamsterdam
             package_args: .github/workflows/kurtosis/glamsterdam.io
             # Pinned to 6.1.0 rather than main to keep the suite reproducible;
@@ -442,18 +420,7 @@ jobs:
             ethereum_package_url: "github.com/erigontech/ethereum-package"
             ethereum_package_branch: "erigontech/fix-caplin-launcher"
             test_timeout_minutes: 20
-            commitment_mode: serial
-          - suite: caplin-minimal
-            package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
-            ethereum_package_url: "github.com/erigontech/ethereum-package"
-            ethereum_package_branch: "erigontech/fix-caplin-launcher"
-            test_timeout_minutes: 20
             commitment_mode: parallel
-          - suite: glamsterdam-caplin
-            package_args: .github/workflows/kurtosis/glamsterdam-caplin.io
-            ethereum_package_branch: "6.1.0"
-            test_timeout_minutes: 20
-            commitment_mode: serial
           - suite: glamsterdam-caplin
             package_args: .github/workflows/kurtosis/glamsterdam-caplin.io
             ethereum_package_branch: "6.1.0"
