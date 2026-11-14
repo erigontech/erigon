@@ -579,3 +579,98 @@ func TestVersionedReaderServesBALMarkedAccountFromOrigin(t *testing.T) {
 	}
 	require.Zero(t, reader.reads, "the stored origin answers every tx")
 }
+
+// TestAbsentAddressReadInvalidatedWhenDestructWithdrawn pins #26285: an absent AddressPath
+// MapRead recorded at a destruct's version stays valid only while that destruct holds and
+// nothing revives the account above it, even if a BAL existence marker remains at that version.
+func TestAbsentAddressReadInvalidatedWhenDestructWithdrawn(t *testing.T) {
+	t.Parallel()
+	t.Run("withdrawn", func(t *testing.T) {
+		t.Parallel()
+		x, reader, vm := seededRemovalOfPrefundedAccount(t)
+		ibs := NewWithVersionMap(reader, vm)
+		defer ibs.Close()
+		ibs.SetTxContext(1, 1)
+		_, err := ibs.GetBalance(x)
+		require.NoError(t, err)
+
+		removal := &WriteSet{}
+		removal.SetContractRemoval(x, Version{TxIndex: 0})
+		vm.FlushVersionedWrites(removal, false)
+
+		exists, err := ibs.Exist(x)
+		require.NoError(t, err)
+		require.False(t, exists)
+
+		reads := ibs.VersionedReads()
+		addrRead, ok := reads.GetAddress(x)
+		require.True(t, ok)
+		require.Equal(t, MapRead, addrRead.Source)
+		require.Equal(t, Version{TxIndex: 0}, addrRead.Version)
+		require.True(t, addrRead.Val == nil || addrRead.Val.IsNil())
+
+		var onlyAddr ReadSet
+		onlyAddr.SetAddress(x, addrRead)
+		vm.MarkWritesValidated(removal, nil)
+		require.Equal(t, VersionValid, vm.ValidateReadSet(1, onlyAddr, validateEqualVersion, false, ""))
+
+		for _, path := range []AccountPath{SelfDestructPath, BalancePath, CodeHashPath} {
+			vm.Delete(x, path, accounts.NilKey, 0, false)
+		}
+		require.Equal(t, VersionInvalid, vm.ValidateReadSet(1, onlyAddr, validateEqualVersion, false, ""),
+			"an absent AddressPath read must invalidate once the destruct at its version is withdrawn")
+	})
+
+	t.Run("replaced_with_false", func(t *testing.T) {
+		t.Parallel()
+		x, reader, vm := seededRemovalOfPrefundedAccount(t)
+		ibs := NewWithVersionMap(reader, vm)
+		defer ibs.Close()
+		ibs.SetTxContext(1, 1)
+		exists, err := ibs.Exist(x)
+		require.NoError(t, err)
+		require.False(t, exists)
+
+		reads := ibs.VersionedReads()
+		addrRead, ok := reads.GetAddress(x)
+		require.True(t, ok)
+		var onlyAddr ReadSet
+		onlyAddr.SetAddress(x, addrRead)
+		require.Equal(t, VersionValid, vm.ValidateReadSet(1, onlyAddr, validateEqualVersion, false, ""))
+
+		vm.WriteSelfDestruct(x, Version{TxIndex: 0, Incarnation: 1}, false, true)
+		require.Equal(t, VersionInvalid, vm.ValidateReadSet(1, onlyAddr, validateEqualVersion, false, ""))
+	})
+
+	t.Run("revived", func(t *testing.T) {
+		t.Parallel()
+		x := accounts.InternAddress(common.HexToAddress("0x5a1f"))
+		baseAcc := accounts.NewAccount()
+		baseAcc.Balance = *uint256.NewInt(5)
+		reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &baseAcc}}
+		vm := NewVersionMap(types.BlockAccessList{{
+			Address:        x.Value(),
+			BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}},
+		}})
+		vm.SeedAddresses()
+		require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+
+		ibs := NewWithVersionMap(reader, vm)
+		defer ibs.Close()
+		ibs.SetTxContext(1, 2)
+		exists, err := ibs.Exist(x)
+		require.NoError(t, err)
+		require.False(t, exists)
+
+		reads := ibs.VersionedReads()
+		addrRead, ok := reads.GetAddress(x)
+		require.True(t, ok)
+		var onlyAddr ReadSet
+		onlyAddr.SetAddress(x, addrRead)
+		require.Equal(t, VersionValid, vm.ValidateReadSet(2, onlyAddr, validateEqualVersion, false, ""))
+
+		vm.WriteBalance(x, Version{TxIndex: 1}, *uint256.NewInt(1), true)
+		require.Equal(t, VersionInvalid, vm.ValidateReadSet(2, onlyAddr, validateEqualVersion, false, ""),
+			"a later revival must invalidate an absent AddressPath read")
+	})
+}
