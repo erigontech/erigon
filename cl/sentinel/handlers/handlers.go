@@ -60,6 +60,7 @@ type ConsensusHandlers struct {
 	dataColumnStorage  blob_storage.DataColumnStorage
 	peerdasStateReader peerdasstate.PeerDasStateReader
 	enableBlocks       bool
+	now                func() time.Time
 }
 
 const (
@@ -102,6 +103,7 @@ func NewConsensusHandlers(
 		blobsStorage:       blobsStorage,
 		dataColumnStorage:  dataColumnStorage,
 		peerdasStateReader: peerDasStateReader,
+		now:                time.Now,
 	}
 
 	hm := map[string]func(s network.Stream) error{
@@ -158,6 +160,14 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 			}
 		}()
 
+		// SetDeadline covers both directions, including the admission error responses below.
+		if err := s.SetDeadline(time.Now().Add(StreamDeadline)); err != nil {
+			log.Trace("failed to set stream deadline", "err", err)
+			_ = s.Reset()
+			_ = s.Close()
+			return
+		}
+
 		peerID := s.Conn().RemotePeer().String()
 
 		// Enforce per-peer concurrent stream cap.
@@ -185,14 +195,6 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 			if str, ok := rawVer.(string); ok {
 				l["agent"] = str
 			}
-		}
-
-		// SetDeadline covers both directions.
-		if err := s.SetDeadline(time.Now().Add(StreamDeadline)); err != nil {
-			log.Trace("failed to set stream deadline", "err", err)
-			_ = s.Reset()
-			_ = s.Close()
-			return
 		}
 
 		if err := fn(s); err != nil {
