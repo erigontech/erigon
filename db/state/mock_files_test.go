@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/datastruct/posidx"
 	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -70,17 +71,34 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, step
 func populateFiles(t *testing.T, dirs datadir.Dirs, allFiles []string) {
 	t.Helper()
 
-	fileGen := func(filename string) {
-		if strings.HasSuffix(filename, ".ef") || strings.HasSuffix(filename, ".v") || strings.HasSuffix(filename, ".kv") {
-			seg, err := seg.NewCompressor(t.Context(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
-			require.NoError(t, err)
-			defer seg.Close()
-			seg.DisableFsync()
-			if err = seg.AddWord([]byte("word")); err != nil {
-				t.Fatal(err)
-			}
-			require.NoError(t, seg.Compress())
+	writeSegFile := func(filename string, words ...[]byte) {
+		comp, err := seg.NewCompressor(t.Context(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+		require.NoError(t, err)
+		defer comp.Close()
+		comp.DisableFsync()
+		for _, w := range words {
+			require.NoError(t, comp.AddUncompressedWord(w))
+		}
+		require.NoError(t, comp.Compress())
+	}
 
+	fileGen := func(filename string) {
+		switch {
+		case strings.HasSuffix(filename, ".ef"):
+			// Inverted index .ef stores 2 words per entry: key and multiencseq txNum list.
+			var seq multiencseq.SequenceBuilder
+			seq.Reset(0, 1, 0)
+			seq.AddOffset(0)
+			seq.Build()
+			writeSegFile(filename, []byte("key"), seq.AppendBytes(nil))
+			return
+		case strings.HasSuffix(filename, ".kv"):
+			// Domain .kv stores 2 words per entry: key and value.
+			writeSegFile(filename, []byte("key"), []byte("value"))
+			return
+		case strings.HasSuffix(filename, ".v"):
+			// Unpaged history .v (seg.DefaultCfg) stores 1 value word per txNum in .ef.
+			writeSegFile(filename, []byte("value"))
 			return
 		}
 
