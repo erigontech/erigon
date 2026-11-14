@@ -330,7 +330,8 @@ func (m *savedColumnsStore) WriteStream(_ io.Writer, _ uint64, _ common.Hash, co
 
 type discardStream struct{ network.Stream }
 
-func (discardStream) Write(p []byte) (int, error) { return len(p), nil }
+func (discardStream) Write(p []byte) (int, error)      { return len(p), nil }
+func (discardStream) SetWriteDeadline(time.Time) error { return nil }
 
 func serveColumnsByRange(t *testing.T, ctx context.Context, limit, slots uint64, saved func(slot uint64) []uint64) *savedColumnsStore {
 	t.Helper()
@@ -354,13 +355,13 @@ func serveRequestedColumns(t *testing.T, ctx context.Context, limit, slots uint6
 		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, common.Hash{byte(slot + 1)}))
 	}
 	store := &savedColumnsStore{saved: saved}
-	c := &ConsensusHandlers{ctx: t.Context(), beaconConfig: &cfg, dataColumnStorage: store, ethClock: eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)}
+	c := &ConsensusHandlers{ctx: t.Context(), beaconConfig: &cfg, dataColumnStorage: store, ethClock: eth_clock.NewEthereumClock(0, common.Hash{}, &cfg), now: time.Now}
 	req := &cltypes.ColumnSidecarsByRangeRequest{Columns: solid.NewUint64ListSSZ(int(cfg.NumberOfColumns))}
 	for _, column := range columns {
 		req.Columns.Append(column)
 	}
 
-	return store, c.writeColumnsByRange(ctx, discardStream{}, tx, req, 0, slots, slots)
+	return store, c.writeColumnsByRange(ctx, discardStream{}, tx, req, c.now(), 0, slots, slots)
 }
 
 func TestDataColumnSidecarsByRangeServesAfterBloblessBlocks(t *testing.T) {
