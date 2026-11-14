@@ -1737,7 +1737,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		}
 
 		if dt.getFromFileCache != nil && useCache {
-			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
+			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: i, v: v})
 		}
 		return v, true, f.startTxNum, f.endTxNum, nil
 	}
@@ -1825,6 +1825,17 @@ func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	if !dt.d.Enabled {
 		return nil, false, nil
+	}
+	if roTx != nil && dt.name != kv.CommitmentDomain {
+		// If the newest value of the key was written in a step before txNum's step, nothing changed it at or after txNum,
+		// so it is also the value as of txNum.
+		latest, step, ok, err := dt.GetLatest(key, roTx)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) {
+			return latest, true, nil
+		}
 	}
 
 	v, hOk, err := dt.ht.HistorySeek(key, txNum, roTx)
