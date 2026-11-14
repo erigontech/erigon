@@ -179,8 +179,7 @@ func TestLoopStatesReconstructsFinalizedSlot(t *testing.T) {
 	require.Equal(t, finalized, progress)
 }
 
-func newElectraAntiquaryForFinality(t *testing.T) (*Antiquary, kv.RwDB, []*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState, freezeblocks.BeaconSnapshotReader, synced_data.SyncedData) {
-	t.Helper()
+func TestIncrementToFinalizedOverAMissedEpochStart(t *testing.T) {
 	blocks, preState, postState := tests.GetElectraRandom()
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	reader := tests.LoadChain(blocks, db, t)
@@ -189,11 +188,6 @@ func newElectraAntiquaryForFinality(t *testing.T) (*Antiquary, kv.RwDB, []*cltyp
 	genesis, err := preState.Copy()
 	require.NoError(t, err)
 	a := NewAntiquary(context.Background(), nil, preState, state_accessors.NewStaticValidatorTable(), &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, reader, sn, log.New(), true, true, true, false, nil)
-	return a, db, blocks, genesis, postState, reader, sn
-}
-
-func TestIncrementToFinalizedOverAMissedEpochStart(t *testing.T) {
-	a, db, blocks, genesis, postState, reader, sn := newElectraAntiquaryForFinality(t)
 	const missed = 8288
 	require.Equal(t, uint64(8258), blocks[len(blocks)-2].Block.Slot)
 	require.Equal(t, uint64(8290), blocks[len(blocks)-1].Block.Slot)
