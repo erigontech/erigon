@@ -21,8 +21,7 @@ concurrency:
       format('{0}-{1}', github.workflow, github.head_ref) ||
       format('{0}-{1}', github.workflow, github.run_id)
     }}
-  # Only a new commit cancels a running set; ready_for_review waits for it.
-  cancel-in-progress: ${{ github.event.action != 'ready_for_review' }}
+  cancel-in-progress: true
 
 # actions: write lets merge-queue runs call `gh run cancel` on a leaf
 # failure so the gate doesn't stall waiting for still-running siblings.

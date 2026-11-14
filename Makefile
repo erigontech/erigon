@@ -245,7 +245,7 @@ test-filtered:
 			echo "ramdisk: $$_rd"; \
 		fi; \
 	fi; \
-	(set -o pipefail && $(GOTEST) | ./tools/filter-test-output | tee run.log)
+	(set -o pipefail && $(GOTEST) 2>&1 | ./tools/filter-test-output | tee run.log)
 
 test-short: override GO_FLAGS += -short -failfast
 test-short: test-filtered
