@@ -1850,20 +1850,7 @@ type aggregatorVisible struct {
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
-	toTxNum := a.dirtyFilesEndTxNumMinimax()
-	next := &aggregatorVisible{}
-	for id, d := range a.d {
-		if d == nil {
-			continue
-		}
-		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
-	}
-	for id, ii := range a.standaloneIIs() {
-		if ii == nil {
-			continue
-		}
-		next.iis[id] = ii.calcVisibleFiles(toTxNum)
-	}
+	next := a.alignedVisibleFiles(false)
 	next.minimaxTxNum = next.stateMinimaxTxNum()
 
 	if a.visibilityLoweringForbidden.Load() {
@@ -1897,6 +1884,75 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
 	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
 	reclaimFiles(a.reclaimRetiredLocked())
+}
+
+// alignedVisibleFiles aligns every visible list to the lowest visible end: a list cut at a gap ends below the dirty
+// ceiling, and commitment past an accounts or storage cut would reference hidden files. With accessorsBuilt it gives
+// the view BuildMissedAccessors leads to. The caller holds dirtyFilesLock.
+func (a *Aggregator) alignedVisibleFiles(accessorsBuilt bool) *aggregatorVisible {
+	toTxNum := a.dirtyFilesEndTxNumMinimax()
+	next := a.calcVisibleFiles(toTxNum, accessorsBuilt)
+	for end := a.alignedVisibleEndTxNum(next); end > 0 && end < toTxNum; end = a.alignedVisibleEndTxNum(next) {
+		toTxNum = end
+		next = a.calcVisibleFiles(toTxNum, accessorsBuilt)
+	}
+	return next
+}
+
+// repairedVisibleFiles is the aligned view once every missing accessor is built.
+func (a *Aggregator) repairedVisibleFiles() *aggregatorVisible {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	return a.alignedVisibleFiles(true)
+}
+
+func (a *Aggregator) calcVisibleFiles(toTxNum uint64, accessorsBuilt bool) *aggregatorVisible {
+	next := &aggregatorVisible{}
+	for id, d := range a.d {
+		if d == nil {
+			continue
+		}
+		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFilesFor(toTxNum, accessorsBuilt)
+	}
+	for id, ii := range a.standaloneIIs() {
+		if ii == nil {
+			continue
+		}
+		next.iis[id] = ii.calcVisibleFilesFor(toTxNum, accessorsBuilt)
+	}
+	return next
+}
+
+// alignedVisibleEndTxNum is dirtyFilesEndTxNumMinimax over the visible lists.
+func (a *Aggregator) alignedVisibleEndTxNum(v *aggregatorVisible) uint64 {
+	ceiling := uint64(math.MaxUint64)
+	lower := func(end uint64) {
+		if end > 0 {
+			ceiling = min(ceiling, end)
+		}
+	}
+	for id, d := range a.d {
+		if d == nil || !d.Enabled || a.unalignedDomain[id] || v.d[id] == nil {
+			continue
+		}
+		lower(visibleFiles(v.d[id].files).EndTxNum())
+		if !d.History.SnapshotsDisabled {
+			lower(v.dh[id].EndTxNum())
+			if v.dhii[id] != nil {
+				lower(v.dhii[id].files.EndTxNum())
+			}
+		}
+	}
+	for id, ii := range a.standaloneIIs() {
+		if ii == nil || !ii.Enabled || a.unalignedIdx[id] || v.iis[id] == nil {
+			continue
+		}
+		lower(v.iis[id].files.EndTxNum())
+	}
+	if ceiling == math.MaxUint64 {
+		return 0
+	}
+	return ceiling
 }
 
 // stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
@@ -2481,19 +2537,20 @@ func (at *AggregatorRoTx) Generation() uint64 { return at.visible.generation }
 // snapshot/DB management operations — e.g. `seg rm-state --latest` and then starting
 // erigon without `integration stage_exec --reset`. Meant to run once at startup.
 func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
+	repaired := at.a.repairedVisibleFiles()
 	for _, dt := range at.d {
 		if dt == nil || !dt.d.Enabled {
 			continue
 		}
-		if err := dt.checkFilesDBGap(tx); err != nil {
+		if err := dt.checkFilesDBGap(tx, repaired); err != nil {
 			return err
 		}
 	}
-	for _, iit := range at.iis {
+	for id, iit := range at.iis {
 		if iit == nil || !iit.ii.Enabled {
 			continue
 		}
-		if err := iit.checkFilesDBGap(tx); err != nil {
+		if err := iit.checkFilesDBGap(tx, repaired.iis[id]); err != nil {
 			return err
 		}
 	}

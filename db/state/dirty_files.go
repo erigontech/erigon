@@ -639,18 +639,38 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 		newVisibleFiles = visibleFiles{}
 	}
 
-	// Check for gaps in visible files and warn if found
+	// a latest read cannot tell that a key's value was in the hole, so nothing after it is visible
 	for i := 1; i < len(newVisibleFiles); i++ {
 		prev := newVisibleFiles[i-1]
 		curr := newVisibleFiles[i]
-		if prev.endTxNum != curr.startTxNum {
+		if prev.endTxNum < curr.startTxNum {
 			log.Warn("[agg] gap in visible files", "prev", prev.src.decompressor.FileName(),
 				"prevEnd", prev.endTxNum, "curr", curr.src.decompressor.FileName(), "currStart", curr.startTxNum,
 				"gap", curr.startTxNum-prev.endTxNum)
+			return newVisibleFiles[:i]
 		}
 	}
 
 	return newVisibleFiles
+}
+
+// checkFilesDBGap refuses a datadir whose DB was pruned past the files that hold the data: reads in between would
+// return stale values. repairedEnd is where the aligned visible files end once every missing accessor is built; up to
+// it the data is in files, so a prune point there only warns.
+func checkFilesDBGap(tx kv.Tx, pruneTable, what string, visibleEnd, repairedEnd uint64, hint string) error {
+	prg, err := GetPruneValProgress(tx, []byte(pruneTable))
+	if err != nil {
+		return err
+	}
+	if prg.TxTo <= visibleEnd {
+		return nil
+	}
+	if prg.TxTo > repairedEnd {
+		return fmt.Errorf("gap between snapshot files and DB for %s: files end at txNum %d but the DB was pruned up to %d — [%d, %d) is in neither. Maybe you removed snapshot files (e.g. `snapshots rm-state --latest`) but forgot to run %s?",
+			what, repairedEnd, prg.TxTo, repairedEnd, prg.TxTo, hint)
+	}
+	log.Warn("[snapshots] files up to the DB prune point stay hidden until their accessors are built", "files", what, "visibleEnd", visibleEnd, "prunedTo", prg.TxTo)
+	return nil
 }
 
 func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canBeVisible bool) {

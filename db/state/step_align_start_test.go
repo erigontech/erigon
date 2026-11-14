@@ -44,7 +44,7 @@ func TestStepAlignedEndRefusesListStartingOffBoundary(t *testing.T) {
 	require.ErrorContains(t, err, "starts at txNum 40")
 }
 
-func TestStepAlignedEndRefusesHiddenFiles(t *testing.T) {
+func TestStepAlignedEndStopsAtHiddenFiles(t *testing.T) {
 	t.Parallel()
 	db, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
@@ -53,8 +53,9 @@ func TestStepAlignedEndRefusesHiddenFiles(t *testing.T) {
 	generateStorageFile(t, dirs, split)
 	generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 4}, {4, 8}, {8, 12}})
 	require.NoError(t, agg.OpenFolder(db))
-	_, err := agg.StepAlignedEnd(30)
-	require.ErrorContains(t, err, "no visible file for txNum 40-80")
+	end, err := agg.StepAlignedEnd(20)
+	require.NoError(t, err)
+	require.EqualValues(t, 40, end)
 }
 
 func TestAlignFilesToStepSizeRefusesCommitmentRangeMismatch(t *testing.T) {
@@ -127,4 +128,13 @@ func generatePlainCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testF
 	for _, path := range paths {
 		require.NoError(t, os.Rename(path, filepath.Join(dirs.SnapDomain, "v2.2-"+strings.TrimPrefix(filepath.Base(path), "v1.0-"))))
 	}
+}
+
+func TestStepAlignedEndRefusesOverlappingFiles(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), []testFileRange{{0, 2}, {1, 3}, {2, 4}})
+	require.NoError(t, agg.OpenFolder(db))
+	_, err := agg.StepAlignedEnd(20)
+	require.ErrorContains(t, err, "overlaps the file before it at txNum 10-20")
 }

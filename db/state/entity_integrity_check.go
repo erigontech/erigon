@@ -124,6 +124,16 @@ func (d *DependencyIntegrityChecker) EnableInterDomain() {
 // - if no (or !checkVisibility), don't use it for visibleFiles.
 // - Also don't consider it for "consuming" (deleting) the smaller files commitment.0-1, 1-2
 func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency UniversalEntity, allOrAny Quantifier, startTxNum, endTxNum uint64) (isPresent bool) {
+	return d.checkDependentPresent(dependency, allOrAny, startTxNum, endTxNum, false)
+}
+
+// CheckDependentFilesPresent is CheckDependentPresent(All) once every accessor is built: the dependent data files must
+// be present, their accessors need not.
+func (d *DependencyIntegrityChecker) CheckDependentFilesPresent(dependency UniversalEntity, startTxNum, endTxNum uint64) bool {
+	return d.checkDependentPresent(dependency, All, startTxNum, endTxNum, true)
+}
+
+func (d *DependencyIntegrityChecker) checkDependentPresent(dependency UniversalEntity, allOrAny Quantifier, startTxNum, endTxNum uint64, accessorsBuilt bool) (isPresent bool) {
 	arr, ok := d.dependencyMap[dependency]
 	if !ok || d.disable || (d.disableInterDomain && dependency.category() == domainCategory) {
 		return true
@@ -140,21 +150,23 @@ func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency UniversalE
 		if allOrAny.All() {
 			// ALL: used for visibleFilesCalc
 			// all dependent (e.g. commitment) file should be present as well as visible-able
-			if !found || !checkForVisibility(file, dependent.accessors, d.trace) {
+			accessors := dependent.accessors
+			if accessorsBuilt {
+				accessors = 0
+			}
+			if !found || !checkForVisibility(file, accessors, d.trace) {
 				if d.trace {
 					d.logger.Warn("[dbg: Depic]", "dependent", dependent.entity.String(), "startTxNum", startTxNum, "endTxNum", endTxNum, "found", found)
 				}
 				return false
 			}
-		} else {
+		} else if found {
 			// Any: used for garbage collection
 			// any dependent (e.g. commiment) file is present => dependency file can't be deleted
-			if found {
-				if d.trace {
-					d.logger.Warn("[dbg: Depic]", "dependent", dependent.entity.String(), "startTxNum", startTxNum, "endTxNum", endTxNum, "found", true)
-				}
-				return true
+			if d.trace {
+				d.logger.Warn("[dbg: Depic]", "dependent", dependent.entity.String(), "startTxNum", startTxNum, "endTxNum", endTxNum, "found", true)
 			}
+			return true
 		}
 	}
 

@@ -123,6 +123,9 @@ func (at *AggregatorRoTx) stepAlignedFileLists() []visibleFiles {
 }
 
 func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
+	if err := at.refuseAccessorHiddenFiles(); err != nil {
+		return 0, err
+	}
 	lists := at.stepAlignedFileLists()
 	end := uint64(math.MaxUint64)
 	for _, files := range lists {
@@ -155,7 +158,7 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 	for _, files := range lists {
 		for i := 1; i < len(files) && files[i].startTxNum < end; i++ {
 			if prev := files[i-1].endTxNum; files[i].startTxNum != prev {
-				return 0, fmt.Errorf("%s: no visible file for txNum %d-%d", files[i].Fullpath(), prev, files[i].startTxNum)
+				return 0, fmt.Errorf("%s overlaps the file before it at txNum %d-%d", files[i].Fullpath(), files[i].startTxNum, prev)
 			}
 		}
 	}
@@ -167,6 +170,39 @@ func (at *AggregatorRoTx) stepAlignedEnd(stepSize uint64) (uint64, error) {
 		}
 	}
 	return end, nil
+}
+
+// refuseAccessorHiddenFiles stops step alignment while a missing accessor hides files: they would join the tail it
+// deletes, though building the accessor is all they need.
+func (at *AggregatorRoTx) refuseAccessorHiddenFiles() error {
+	repaired := at.a.repairedVisibleFiles()
+	type list struct {
+		name           string
+		visible, built uint64
+	}
+	var lists []list
+	for id, d := range at.d {
+		if d == nil || !d.d.Enabled || repaired.d[id] == nil {
+			continue
+		}
+		name := d.d.FilenameBase
+		lists = append(lists, list{"domain " + name, d.files.EndTxNum(), visibleFiles(repaired.d[id].files).EndTxNum()},
+			list{"history " + name, d.ht.files.EndTxNum(), repaired.dh[id].EndTxNum()})
+		if repaired.dhii[id] != nil {
+			lists = append(lists, list{"history index " + name, d.ht.iit.files.EndTxNum(), repaired.dhii[id].files.EndTxNum()})
+		}
+	}
+	for id, ii := range at.iis {
+		if ii != nil && ii.ii.Enabled && repaired.iis[id] != nil {
+			lists = append(lists, list{"index " + ii.ii.FilenameBase, ii.files.EndTxNum(), repaired.iis[id].files.EndTxNum()})
+		}
+	}
+	for _, l := range lists {
+		if l.built > l.visible {
+			return fmt.Errorf("%s files after txNum %d are hidden by a missing accessor; build the accessors first", l.name, l.visible)
+		}
+	}
+	return nil
 }
 
 func fileRangesUpTo(files visibleFiles, end uint64) (ranges [][2]uint64) {
