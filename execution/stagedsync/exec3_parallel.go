@@ -111,6 +111,7 @@ type parallelExecutor struct {
 	// coalesce block.
 	cancelWorkers context.CancelFunc
 	pool          *taskPool
+	ffMoved       int // exec-loop goroutine only: results taken ahead of an older one (FRONTIER_FIRST)
 	runWG         sync.WaitGroup
 	workersCtx    context.Context
 	// results carries finished tasks from dispatchRunSelfLoop to the exec loop.
@@ -1014,6 +1015,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	var npWait, npProc time.Duration
 	var npWaitStart, npProcStart time.Time
 
+	var resBuf []*exec.TxResult
+	closedCh := make(chan struct{})
+	close(closedCh)
+
 	if pe.enableChaosMonkey && pe.chaosFaults.ExecLoopPanic != nil {
 		panic(pe.chaosFaults.ExecLoopPanic)
 	}
@@ -1039,7 +1044,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		if logNpPhases {
 			npWaitStart = time.Now()
 		}
+		resultsCh, bufCh := pe.results, (<-chan struct{})(nil)
+		if len(resBuf) > 0 {
+			resultsCh, bufCh = nil, closedCh
+		}
 		var blockResult *blockResult
+		var txResult *exec.TxResult
 		select {
 		case exec := <-pendingCh:
 			if err := pe.processRequest(ctx, exec, applyTx); err != nil {
@@ -1048,49 +1058,63 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			continue
 		case <-ctx.Done():
 			for {
-				select {
-				case txResult, ok := <-pe.results:
-					if !ok {
-						return pe.execLoopExitCheck(ctx, "ctx-done-drain: results closed")
+				var txResult *exec.TxResult
+				if len(resBuf) > 0 {
+					txResult, resBuf = resBuf[0], resBuf[1:]
+				} else {
+					var ok bool
+					select {
+					case txResult, ok = <-pe.results:
+						if !ok {
+							return pe.execLoopExitCheck(ctx, "ctx-done-drain: results closed")
+						}
+					default:
+						return pe.execLoopExitCheck(ctx, "ctx-done-drain: no more results")
 					}
-					br, e := pe.processSingleResult(ctx, applyTx, txResult)
-					if e != nil {
-						return e
-					}
-					if br != nil {
-						pe.RLock()
-						blockExecutor, exists := pe.blockExecutors[br.BlockNum]
-						pe.RUnlock()
-						if exists {
-							pe.lastExecutedBlockNum.Store(int64(br.BlockNum))
-							if err := blockExecutor.sendResult(ctx, br, false); err != nil {
-								return err
-							}
-							if br.Err != nil {
-								return nil
-							}
-							pe.Lock()
-							delete(pe.blockExecutors, br.BlockNum)
-							pe.Unlock()
-							if err := pe.scheduleNextPending(ctx); err != nil {
-								return err
-							}
+				}
+				br, e := pe.processSingleResult(ctx, applyTx, txResult)
+				if e != nil {
+					return e
+				}
+				if br != nil {
+					pe.RLock()
+					blockExecutor, exists := pe.blockExecutors[br.BlockNum]
+					pe.RUnlock()
+					if exists {
+						pe.lastExecutedBlockNum.Store(int64(br.BlockNum))
+						if err := blockExecutor.sendResult(ctx, br, false); err != nil {
+							return err
+						}
+						if br.Err != nil {
+							return nil
+						}
+						pe.Lock()
+						delete(pe.blockExecutors, br.BlockNum)
+						pe.Unlock()
+						if err := pe.scheduleNextPending(ctx); err != nil {
+							return err
 						}
 					}
-				default:
-					return pe.execLoopExitCheck(ctx, "ctx-done-drain: no more results")
 				}
 			}
-		case txResult, ok := <-pe.results:
+		case r, ok := <-resultsCh:
 			if !ok {
 				return pe.execLoopExitCheck(ctx, "main-select: results closed")
 			}
-			if logNpPhases {
-				npWait += time.Since(npWaitStart)
-				npProcStart = time.Now()
-			}
-			blockResult, err = pe.processSingleResult(ctx, applyTx, txResult)
+			txResult = r
+		case <-bufCh:
 		}
+		if logNpPhases {
+			npWait += time.Since(npWaitStart)
+			npProcStart = time.Now()
+		}
+		if probeFrontierFirst {
+			if txResult != nil {
+				resBuf = append(resBuf, txResult)
+			}
+			txResult, resBuf = pe.takeFrontierFirst(resBuf)
+		}
+		blockResult, err = pe.processSingleResult(ctx, applyTx, txResult)
 		if logNpPhases {
 			npProc += time.Since(npProcStart)
 		}
@@ -1125,8 +1149,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
 						"spec", blockExecutor.cntSpecExec,
 						"valFail", blockExecutor.cntValidationFail,
-						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
-					npWait, npProc = 0, 0
+						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3),
+						"ffMoved", pe.ffMoved)
+					npWait, npProc, pe.ffMoved = 0, 0, 0
 				}
 				// Covers an empty block that created no accumulator via a tx-result; the
 				// save must land before the blockResult, else the calculator races ahead,
@@ -1590,6 +1615,40 @@ func (pe *parallelExecutor) processSingleResult(ctx context.Context, applyTx kv.
 	pe.ensureChangesetAccumulator(txResult.Version().BlockNum, blockExecutor.blockHash)
 
 	return blockExecutor.nextResult(ctx, pe, txResult, applyTx)
+}
+
+var probeFrontierFirst = dbg.EnvBool("FRONTIER_FIRST", false)
+
+// takeFrontierFirst drains the ready results into buf and takes the oldest one for
+// a block's commit frontier (committedFrontier+1), else the oldest one.
+func (pe *parallelExecutor) takeFrontierFirst(buf []*exec.TxResult) (*exec.TxResult, []*exec.TxResult) {
+drain:
+	for {
+		select {
+		case r, ok := <-pe.results:
+			if !ok {
+				break drain
+			}
+			buf = append(buf, r)
+		default:
+			break drain
+		}
+	}
+	pick := 0
+	pe.RLock()
+	for i, r := range buf {
+		be := pe.blockExecutors[r.Version().BlockNum]
+		if tv, ok := r.Task.(*taskVersion); ok && be != nil && int64(tv.index) == be.committedFrontier.Load()+1 {
+			pick = i
+			break
+		}
+	}
+	pe.RUnlock()
+	if pick > 0 {
+		pe.ffMoved++
+	}
+	r := buf[pick]
+	return r, slices.Delete(buf, pick, pick+1)
 }
 
 func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelCauseFunc, error) {
