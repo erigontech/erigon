@@ -26,6 +26,7 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
@@ -68,6 +69,13 @@ type TemporalMemBatch struct {
 
 	latest  [kv.DomainLen][latestShards]latestShard
 	storage *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
+
+	// published serves GetLatest without a lock: the latest value of every key, as a copy of
+	// the domain's copy-on-write tree. It is nil while an unwind changeset is pending.
+	published       [kv.DomainLen]atomic.Pointer[btree2.Map[string, dataWithTxNum]]
+	publishMu       [kv.DomainLen]sync.Mutex
+	publishTree     [kv.DomainLen]*btree2.Map[string, dataWithTxNum]
+	publishDeferred atomic.Bool
 
 	domainWriters [kv.DomainLen]*DomainBufferedWriter
 	iiWriters     []*InvertedIndexBufferedWriter
@@ -253,6 +261,7 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 	sh := sd.shard(domain, key)
 	sh.Lock()
 	defer sh.Unlock()
+	sd.publish(domain, key, valWithStep)
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Get(key); ok {
 			switch {
@@ -327,6 +336,51 @@ func (sd *TemporalMemBatch) updatePutMetrics(domain kv.Domain, putKeySize int, p
 	}
 }
 
+// GetLatestPublished reads the published view without a lock. Inside a deferred batch it lags the
+// writer by that batch; GetLatest sees every write at once.
+func (sd *TemporalMemBatch) GetLatestPublished(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
+	if latest := sd.published[domain].Load(); latest != nil {
+		if e, ok := latest.Get(common.ToStringZeroCopy(key)); ok {
+			return e.data, kv.Step(e.txNum / sd.stepSize), true
+		}
+		return nil, kv.NoStepBound, false
+	}
+	return sd.GetLatest(domain, key)
+}
+
+// DeferPublish holds back publishing the account and storage writes until Publish. A domain
+// with no published view yet gets one, so readers do not fall back to the writer's lock meanwhile.
+func (sd *TemporalMemBatch) DeferPublish() {
+	sd.publishDeferred.Store(true)
+	for _, d := range deferrableDomains {
+		sd.publishMu[d].Lock()
+		if sd.published[d].Load() == nil && sd.unwindChangeset == nil {
+			if sd.publishTree[d] == nil {
+				sd.publishTree[d] = btree2.NewMap[string, dataWithTxNum](publishTreeDegree)
+			}
+			sd.published[d].Store(sd.publishTree[d].Copy())
+		}
+		sd.publishMu[d].Unlock()
+	}
+}
+
+// Publish publishes every write held back since DeferPublish. Copy is O(1); the next write clones its path.
+// A nil tree means an unwind changeset is pending, and readers stay on the locked maps.
+func (sd *TemporalMemBatch) Publish() {
+	sd.publishDeferred.Store(false)
+	for _, d := range deferrableDomains {
+		sd.publishMu[d].Lock()
+		if sd.publishTree[d] != nil {
+			sd.published[d].Store(sd.publishTree[d].Copy())
+		}
+		sd.publishMu[d].Unlock()
+	}
+}
+
+// deferrableDomains are the domains exec workers read through the published view (code goes through the
+// locked maps). Only they get a view, so the commitment fold pays no tree copy per branch write.
+var deferrableDomains = [...]kv.Domain{kv.AccountsDomain, kv.StorageDomain}
+
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
 	sh := sd.shard(domain, common.ToStringZeroCopy(key))
 	sh.RLock()
@@ -364,6 +418,94 @@ func (sd *TemporalMemBatch) getLatest(sh *latestShard, domain kv.Domain, key []b
 		return latest.data, kv.Step(latest.txNum / sd.stepSize), true
 	}
 	return unwoundLatest(domain, common.ToStringZeroCopy(key))
+}
+
+// publishTreeDegree keeps nodes small: each write after a Copy clones its path, and the cloned bytes
+// grow with node size times depth, (2d-1)*log(n)/log(d), which is about 7x smaller at 8 than at 128.
+const publishTreeDegree = 8
+
+// publish sets key in the domain's tree. Outside DeferPublish it turns the view off instead of copying the
+// tree, which would clone the written path on every later write; readers use the locked maps until the next
+// DeferPublish. The caller holds key's shard lock.
+func (sd *TemporalMemBatch) publish(domain kv.Domain, key string, v dataWithTxNum) {
+	if sd.unwindChangeset != nil || !slices.Contains(deferrableDomains[:], domain) {
+		return
+	}
+	sd.publishMu[domain].Lock()
+	defer sd.publishMu[domain].Unlock()
+	if sd.publishTree[domain] == nil {
+		sd.publishTree[domain] = btree2.NewMap[string, dataWithTxNum](publishTreeDegree)
+	}
+	sd.publishTree[domain].Set(key, v)
+	if !sd.publishDeferred.Load() {
+		sd.published[domain].Store(nil)
+	}
+}
+
+// republishAll rebuilds every domain's tree from the latest maps, or stops serving lock-free reads
+// while an unwind changeset is pending. The caller excludes all writers.
+func (sd *TemporalMemBatch) republishAll() {
+	for d := range sd.latest {
+		if !slices.Contains(deferrableDomains[:], kv.Domain(d)) {
+			continue
+		}
+		sd.publishMu[d].Lock()
+		if sd.unwindChangeset != nil {
+			sd.publishTree[d] = nil
+			sd.published[d].Store(nil)
+			sd.publishMu[d].Unlock()
+			continue
+		}
+		t := btree2.NewMap[string, dataWithTxNum](publishTreeDegree)
+		if kv.Domain(d) == kv.StorageDomain {
+			sd.storage.Scan(func(k string, entries []dataWithTxNum) bool {
+				t.Set(k, entries[len(entries)-1])
+				return true
+			})
+		} else {
+			for i := range sd.latest[d] {
+				for k, entries := range sd.latest[d][i].m {
+					t.Set(k, entries[len(entries)-1])
+				}
+			}
+		}
+		sd.publishTree[d] = t
+		sd.published[d].Store(t.Copy())
+		sd.publishMu[d].Unlock()
+	}
+}
+
+// publishMerged adds the latest values of a merged batch to the published trees. The caller excludes all writers.
+func (sd *TemporalMemBatch) publishMerged(other *TemporalMemBatch) {
+	if sd.unwindChangeset != nil {
+		sd.republishAll()
+		return
+	}
+	for d := range other.latest {
+		if !slices.Contains(deferrableDomains[:], kv.Domain(d)) {
+			continue
+		}
+		sd.publishMu[d].Lock()
+		t := sd.publishTree[d]
+		if t == nil {
+			t = btree2.NewMap[string, dataWithTxNum](publishTreeDegree)
+			sd.publishTree[d] = t
+		}
+		if kv.Domain(d) == kv.StorageDomain {
+			other.storage.Scan(func(k string, entries []dataWithTxNum) bool {
+				t.Set(k, entries[len(entries)-1])
+				return true
+			})
+		} else {
+			for i := range other.latest[d] {
+				for k, entries := range other.latest[d][i].m {
+					t.Set(k, entries[len(entries)-1])
+				}
+			}
+		}
+		sd.published[d].Store(t.Copy())
+		sd.publishMu[d].Unlock()
+	}
 }
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -598,6 +740,10 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.lockAllDomains()
 	defer sd.unlockAllDomains()
+	for d := range sd.published {
+		sd.published[d].Store(nil)
+	}
+	defer sd.republishAll()
 
 	sd.unwindToTxNum = unwindToTxNum
 	sd.detachPreUnwindWriters()
@@ -851,6 +997,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		}
 	}
 
+	sd.publishMerged(other)
 	other.Close()
 	return nil
 }

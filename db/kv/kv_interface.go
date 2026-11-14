@@ -673,6 +673,11 @@ type TemporalMemBatch interface {
 	// the key's in-flight-unwind bound — NoStepBound when none — so callers
 	// can bound their fall-through read.
 	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
+	// GetLatestPublished is GetLatest without the writer's lock; inside a DeferPublish batch it
+	// does not see that batch's writes yet.
+	GetLatestPublished(domain Domain, key []byte) (v []byte, step Step, ok bool)
+	DeferPublish()
+	Publish()
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)

@@ -18,7 +18,9 @@ package execmodule_test
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/binary"
+	"fmt"
 	"math/big"
 	"slices"
 	"testing"
@@ -248,4 +250,214 @@ func phantomReadFixture(tb testing.TB, workload string, workers int) (*execmodul
 		block = types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(bal))
 	}
 	return m, block
+}
+
+// Each block's tx adds 1 to a slot the previous block wrote. Imported as one chain, the next block reads that slot
+// across the block boundary, so the previous block's write must be visible to it, with and without access lists.
+func TestNextBlockReadsThePreviousBlockWrite(t *testing.T) {
+	t.Run("pre_amsterdam", func(t *testing.T) { testNextBlockReadsThePreviousBlockWrite(t, false) })
+	t.Run("amsterdam", func(t *testing.T) { testNextBlockReadsThePreviousBlockWrite(t, true) })
+}
+
+func testNextBlockReadsThePreviousBlockWrite(t *testing.T, amsterdam bool) {
+	prevParallel := dbg.Exec3Parallel
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+
+	config := chain.AllProtocolChanges.Copy()
+	if !amsterdam {
+		config.CancunTime = nil
+		config.PragueTime = nil
+		config.OsakaTime = nil
+		config.AmsterdamTime = nil
+	}
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	counter := common.Address{0x77}
+	code := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
+	genesis := &types.Genesis{Config: config, Alloc: types.GenesisAlloc{
+		sender:  {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		counter: {Code: code},
+	}}
+
+	gen := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
+	signer := types.LatestSignerForChainID(config.ChainID)
+	blocks, err := gen.GenerateChain(16, func(i int, b *blockgen.BlockGen) {
+		gasPrice := new(uint256.Int).Add(b.GetHeader().BaseFee, uint256.NewInt(1_000))
+		txn, err := types.SignTx(types.NewTransaction(uint64(i), counter, uint256.NewInt(0), 1_000_000, gasPrice, nil), *signer, key)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+
+	dbg.Exec3Parallel = true
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
+	require.NoError(t, m.InsertChain(blocks))
+}
+
+// counterChain is a chain whose every tx adds 1 to slot 0 of one contract, so the slot equals the height of the
+// block that last wrote it and a block that reads a stale value writes a wrong state root.
+type counterChain struct {
+	m       *execmoduletester.ExecModuleTester
+	key     *ecdsa.PrivateKey
+	signer  *types.Signer
+	counter common.Address
+}
+
+func newCounterChain(t *testing.T, amsterdam bool) *counterChain {
+	prevParallel := dbg.Exec3Parallel
+	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
+	dbg.Exec3Parallel = true
+
+	config := chain.AllProtocolChanges.Copy()
+	if !amsterdam {
+		config.CancunTime = nil
+		config.PragueTime = nil
+		config.OsakaTime = nil
+		config.AmsterdamTime = nil
+	}
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	counter := common.Address{0x77}
+	code := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
+	genesis := &types.Genesis{Config: config, Alloc: types.GenesisAlloc{
+		crypto.PubkeyToAddress(key.PublicKey): {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		counter:                               {Code: code},
+	}}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
+	return &counterChain{m: m, key: key, signer: types.LatestSignerForChainID(config.ChainID), counter: counter}
+}
+
+// extend generates n blocks on parent; the tx of block i has nonce firstNonce+i, and tip tells sibling chains apart.
+func (c *counterChain) extend(t *testing.T, parent *types.Block, n int, firstNonce, tip uint64) []*types.Block {
+	pack, err := c.m.GenerateChainFrom(parent, n, func(i int, b *blockgen.BlockGen) {
+		gasPrice := new(uint256.Int).Add(b.GetHeader().BaseFee, uint256.NewInt(tip))
+		txn, err := types.SignTx(types.NewTransaction(firstNonce+uint64(i), c.counter, uint256.NewInt(0), 1_000_000, gasPrice, nil), *c.signer, c.key)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	return pack.Blocks
+}
+
+func (c *counterChain) requireCounter(t *testing.T, want uint64) {
+	var got uint256.Int
+	require.NoError(t, c.m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		v, _, err := tx.GetLatest(kv.StorageDomain, append(c.counter[:], make([]byte, 32)...), kv.GetLatestOptions{})
+		got.SetBytes(v)
+		return err
+	}))
+	require.Equal(t, want, got.Uint64(), "counter slot")
+}
+
+func (c *counterChain) requireValid(t *testing.T, block *types.Block) {
+	vr, err := c.m.ValidateChain(t.Context(), block)
+	require.NoError(t, err)
+	require.Equalf(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "block %d: %s", block.NumberU64(), vr.ValidationError)
+}
+
+func (c *counterChain) requireHead(t *testing.T, block *types.Block) {
+	for range 2 { // the second FCU settles a commit the first one may finish in the background
+		res, err := c.m.UpdateForkChoice(t.Context(), block.Header())
+		require.NoError(t, err)
+		require.Equalf(t, execmodule.ExecutionStatusSuccess, res.Status, "block %d: %s", block.NumberU64(), res.ValidationError)
+	}
+}
+
+// The first block after an unwind reads a slot that the unwound blocks wrote: it must see the value from before
+// those blocks, whether newPayload or the forkchoice unwinds them, with and without access lists.
+func TestFirstBlockAfterUnwindReadsThePreUnwindValue(t *testing.T) {
+	for _, amsterdam := range []bool{false, true} {
+		for _, viaNewPayload := range []bool{true, false} {
+			for _, canonicalInMemory := range []bool{false, true} {
+				name := fmt.Sprintf("amsterdam=%t/newPayload=%t/canonicalInMemory=%t", amsterdam, viaNewPayload, canonicalInMemory)
+				t.Run(name, func(t *testing.T) { testFirstBlockAfterUnwind(t, amsterdam, viaNewPayload, canonicalInMemory) })
+			}
+		}
+	}
+}
+
+// canonicalInMemory validates the canonical blocks without a forkchoice, so their writes stay in the fork
+// validator's batch when the fork arrives; otherwise they are committed first.
+func testFirstBlockAfterUnwind(t *testing.T, amsterdam, viaNewPayload, canonicalInMemory bool) {
+	c := newCounterChain(t, amsterdam)
+	prefix := c.extend(t, c.m.Genesis, 2, 0, 1_000)
+	require.NoError(t, c.m.InsertValidateAndUfc1By1(t.Context(), prefix))
+	// blockgen reads the committed head, so both continuations of block 2 are generated before either is inserted.
+	canonical := c.extend(t, prefix[1], 3, 2, 1_000)
+	fork := c.extend(t, prefix[1], 4, 2, 2_000)
+	if canonicalInMemory {
+		status, err := c.m.InsertBlocks(t.Context(), canonical)
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+		for _, b := range canonical {
+			c.requireValid(t, b)
+		}
+	} else {
+		require.NoError(t, c.m.InsertValidateAndUfc1By1(t.Context(), canonical))
+		c.requireCounter(t, 5)
+	}
+
+	status, err := c.m.InsertBlocks(t.Context(), fork)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	if viaNewPayload {
+		for _, b := range fork {
+			c.requireValid(t, b)
+			c.requireHead(t, b)
+		}
+	} else {
+		c.requireHead(t, fork[len(fork)-1])
+	}
+	c.requireCounter(t, 6)
+}
+
+// A block executed again after a failed attempt must not see that attempt's writes: by newPayload, the failed
+// sibling at the same height ran the same tx on a parent that is still in memory; by forkchoice, the good block ran
+// in the same batch as a failing child and runs again. A leftover slot value makes the good block write a wrong root.
+func TestBlockExecutedAgainDoesNotSeeItsEarlierAttempt(t *testing.T) {
+	for _, amsterdam := range []bool{false, true} {
+		for _, viaNewPayload := range []bool{true, false} {
+			name := fmt.Sprintf("amsterdam=%t/newPayload=%t", amsterdam, viaNewPayload)
+			t.Run(name, func(t *testing.T) { testBlockExecutedAgain(t, amsterdam, viaNewPayload) })
+		}
+	}
+}
+
+func testBlockExecutedAgain(t *testing.T, amsterdam, viaNewPayload bool) {
+	c := newCounterChain(t, amsterdam)
+	blocks := c.extend(t, c.m.Genesis, 6, 0, 1_000)
+	require.NoError(t, c.m.InsertValidateAndUfc1By1(t.Context(), blocks[:2]))
+	for i := 2; i < len(blocks); i += 2 {
+		good, next := blocks[i], blocks[i+1]
+		if viaNewPayload {
+			// good is validated without a forkchoice, so the attempts at next read it from the fork validator's batch.
+			status, err := c.m.InsertBlocks(t.Context(), []*types.Block{good})
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			c.requireValid(t, good)
+			badNext := tamperBlockGasUsed(t, next, 21_000)
+			status, err = c.m.InsertBlocks(t.Context(), []*types.Block{badNext, next})
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			vr, err := c.m.ValidateChain(t.Context(), badNext)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusBadBlock, vr.ValidationStatus, "tampered block %d", badNext.NumberU64())
+			c.requireValid(t, next)
+			c.requireHead(t, next)
+			continue
+		}
+		badNext := tamperBlockGasUsed(t, next, 21_000)
+		status, err := c.m.InsertBlocks(t.Context(), []*types.Block{good, badNext})
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+		res, err := c.m.UpdateForkChoice(t.Context(), badNext.Header())
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusBadBlock, res.Status, "tampered block %d", badNext.NumberU64())
+		status, err = c.m.InsertBlocks(t.Context(), []*types.Block{next})
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+		c.requireHead(t, next)
+	}
+	c.requireCounter(t, uint64(len(blocks)))
 }

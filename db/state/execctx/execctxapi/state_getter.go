@@ -19,8 +19,20 @@ package execctxapi
 import "github.com/erigontech/erigon/db/kv"
 
 type StateGetterOptions struct {
-	metrics kv.GetLatestMetrics
-	codeBuf *[]byte
+	metrics   kv.GetLatestMetrics
+	codeBuf   *[]byte
+	published bool
+}
+
+// WithPublishedView reads the memBatch's published view without the writer's lock. Inside a deferred-publish
+// window that view lags the writer, so only readers that resolve the window's writes elsewhere may use it.
+func (opts StateGetterOptions) WithPublishedView() StateGetterOptions {
+	opts.published = true
+	return opts
+}
+
+func (opts StateGetterOptions) PublishedView() bool {
+	return opts.published
 }
 
 func (opts StateGetterOptions) WithMetrics(metrics kv.GetLatestMetrics) StateGetterOptions {

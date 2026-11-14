@@ -115,8 +115,8 @@ func newResumeBALFixture(t *testing.T) *resumeBALFixture {
 	observer := common.HexToAddress("0x0000000000000000000000000000000000000b22")
 	observerCode := append([]byte{byte(vm.PUSH20)}, target[:]...)
 	observerCode = append(observerCode, byte(vm.BALANCE), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP))
-	// Stands in for the EIP-4788 contract: the block-start system call stores 1 in slot 0.
-	beaconRootsCode := []byte{byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
+	// Stands in for the EIP-4788 contract: every call, the block-start system call included, adds 1 to slot 0.
+	beaconRootsCode := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
 	alloc := types.GenesisAlloc{
 		sender:                            {Balance: big.NewInt(1_000_000_000_000_000_000)},
 		target:                            {Balance: big.NewInt(7)},
@@ -618,6 +618,35 @@ func TestResumedBlockWithWrongRequestsHashIsInvalid(t *testing.T) {
 		require.NoError(t, err, "resume point %d", point)
 		require.NotNil(t, verdict, "resume point %d", point)
 		require.ErrorIs(t, verdict.err, rules.ErrInvalidBlock, "resume point %d", point)
+	}
+}
+
+// A later tx that calls the beacon-roots stub reads slot 0 in the block whose start wrote it, so it must see that write
+// whether or not the block carries its access list: a stale read stores 1 instead of 2 and breaks the state root.
+func TestBlockStartWriteIsVisibleToTheSameBlock(t *testing.T) {
+	fx := newResumeBALFixture(t)
+	beaconRoots := params.BeaconRootsAddress.Value()
+	signer := types.LatestSignerForChainID(fx.config.ChainID)
+	target := common.HexToAddress("0x0000000000000000000000000000000000000a11")
+	var txs types.Transactions
+	for _, txn := range []*types.LegacyTx{
+		{CommonTx: types.CommonTx{Nonce: 0, To: &target, Value: *uint256.NewInt(1), GasLimit: 21_000}, GasPrice: *uint256.NewInt(1_000_000_000)},
+		{CommonTx: types.CommonTx{Nonce: 1, To: &beaconRoots, GasLimit: 100_000}, GasPrice: *uint256.NewInt(1_000_000_000)},
+	} {
+		signed, err := types.SignTx(txn, *signer, senderIsCoinbaseKey.key)
+		require.NoError(t, err)
+		txs = append(txs, signed)
+	}
+	fx.senders = []common.Address{senderIsCoinbaseKey.rawAddress, senderIsCoinbaseKey.rawAddress}
+	block := fx.assembleBlock(t, txs, common.HexToAddress("0x000000000000000000000000000000000000c01b"))
+	for name, b := range map[string]*types.Block{"with access list": block, "no sidecar": block.WithBlockAccessListSidecar(nil)} {
+		t.Run(name, func(t *testing.T) {
+			verdict, err := fx.exec(t, b, fromBlockStart)
+			require.NoError(t, err)
+			if verdict != nil {
+				t.Fatal(verdict.err)
+			}
+		})
 	}
 }
 

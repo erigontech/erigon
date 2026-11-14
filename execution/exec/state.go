@@ -221,7 +221,7 @@ func (rw *WorkerContext) Close() {
 }
 
 func (rw *WorkerContext) getter(tx kv.TemporalTx) execctxapi.StateGetter {
-	return rw.rs.Domains().AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithMetrics(rw.readMetrics).WithCodeBuf(&rw.codeBuf))
+	return rw.rs.Domains().AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithMetrics(rw.readMetrics).WithCodeBuf(&rw.codeBuf).WithPublishedView())
 }
 
 func (rw *WorkerContext) ResetTx(chainTx kv.TemporalTx) error {

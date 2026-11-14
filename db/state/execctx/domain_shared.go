@@ -584,7 +584,7 @@ func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGe
 	if !dbg.KVReadLevelledMetrics {
 		metrics = nil
 	}
-	g := &stateGetter{sd: sd, tx: tx, m: metrics, view: sd.cacheViewFor(tx), codeBuf: opts.CodeBuf()}
+	g := &stateGetter{sd: sd, tx: tx, m: metrics, view: sd.cacheViewFor(tx), codeBuf: opts.CodeBuf(), published: opts.PublishedView()}
 	if g.codeBuf == nil {
 		g.codeBuf = &g.ownCodeBuf
 	}
@@ -883,6 +883,12 @@ func (sd *SharedDomains) GetLatestFromMemory(domain kv.Domain, key []byte) (v []
 // that miss in the local mem batch will check the parent's mem batch before
 // falling through to the underlying tx/aggregator.
 func (sd *SharedDomains) SetParent(parent *SharedDomains) { sd.parent = parent }
+
+// DeferPublish holds back the exec-side view of this batch's account and storage writes until Publish.
+func (sd *SharedDomains) DeferPublish() { sd.mem.DeferPublish() }
+
+// Publish shows the writes held back since DeferPublish to exec-side readers.
+func (sd *SharedDomains) Publish() { sd.mem.Publish() }
 
 // BlockOverlay returns the in-memory overlay for block-level metadata (headers, bodies,
 // canonical hashes, TD, stage progress, forkchoice markers). Callers can use this
@@ -1341,8 +1347,13 @@ func servableUnderBound(cStep, maxStep kv.Step) bool {
 // latestFromMem carries a child's staged-unwind bound into its parent lookup.
 // A parent value above that bound belongs to the discarded fork and is skipped.
 func (sd *SharedDomains) latestFromMem(domain kv.Domain, key []byte) (v []byte, step, maxStep kv.Step, ok bool) {
+	return sd.latestFromMemVia(domain, key, kv.TemporalMemBatch.GetLatest)
+}
+
+// latestFromMemVia is latestFromMem through get, which is the locked or the published memBatch read.
+func (sd *SharedDomains) latestFromMemVia(domain kv.Domain, key []byte, get func(kv.TemporalMemBatch, kv.Domain, []byte) ([]byte, kv.Step, bool)) (v []byte, step, maxStep kv.Step, ok bool) {
 	maxStep = kv.NoStepBound
-	v, step, ok = sd.mem.GetLatest(domain, key)
+	v, step, ok = get(sd.mem, domain, key)
 	if ok {
 		return v, step, maxStep, true
 	}
@@ -1351,7 +1362,7 @@ func (sd *SharedDomains) latestFromMem(domain kv.Domain, key []byte) (v []byte, 
 	if sd.parent == nil {
 		return nil, 0, maxStep, false
 	}
-	v, step, ok = sd.parent.mem.GetLatest(domain, key)
+	v, step, ok = get(sd.parent.mem, domain, key)
 	if ok {
 		if servableUnderBound(step, maxStep) {
 			return v, step, maxStep, true
@@ -1365,6 +1376,8 @@ type getLatestOptions struct {
 	codeHash    []byte
 	buf         []byte
 	hashFromMem bool
+	// published reads the memBatch's published view without its lock (exec-side readers).
+	published bool
 }
 
 // getLatest is the read implementation. wm is the caller's lock-free
@@ -1390,7 +1403,11 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	}
 	// Mem batches hold the current transaction's uncommitted state, so a hit
 	// needs no shared-cache fill. Parent hits also obey any bound from the child.
-	v, step, stagedMaxStep, ok := sd.latestFromMem(domain, k)
+	memGet := kv.TemporalMemBatch.GetLatest
+	if opts.published {
+		memGet = kv.TemporalMemBatch.GetLatestPublished
+	}
+	v, step, stagedMaxStep, ok := sd.latestFromMemVia(domain, k, memGet)
 	maxStep := min(stagedMaxStep, stepBound)
 	if ok && servableUnderBound(step, maxStep) {
 		if wm != nil {
