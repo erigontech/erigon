@@ -610,9 +610,6 @@ func (w *DomainBufferedWriter) DeleteWithPrevDiff(k []byte, txNum uint64, prev [
 	return w.addValue(k, nil, step)
 }
 
-func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
-func (w *DomainBufferedWriter) Diff() *kv.DomainDiff        { return w.diff }
-
 func (dt *DomainRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *DomainBufferedWriter {
 	discardHistory := discard || dt.d.HistoryDisabled
 

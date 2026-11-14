@@ -40,14 +40,14 @@ func TestApplyTxIndexesSkipsReceiptCache(t *testing.T) {
 	tx, domains := temporaltest.NewTestTxSD(t, db)
 	rs := NewStateV3(domains, true, log.New())
 	receipt := &types.Receipt{Status: types.ReceiptStatusSuccessful, CumulativeGasUsed: 21000, GasUsed: 21000}
-	require.NoError(t, rs.ApplyTxIndexes(tx, 100, receipt, 0, nil, nil, nil))
+	require.NoError(t, rs.ApplyTxIndexes(tx, nil, 100, receipt, 0, nil, nil, nil))
 	cachedReceipt, _, err := domains.GetLatest(kv.RCacheDomain, tx, rawtemporaldb.ReceiptCacheKey)
 	require.NoError(t, err)
 	require.NotEmpty(t, cachedReceipt)
 
 	logs := []*types.Log{{Address: common.Address{19: 1}, Topics: []common.Hash{{31: 2}}}}
 	const skipReceiptCache = true
-	require.NoError(t, rs.ApplyTxIndexes(tx, 101, nil, 0, logs, nil, nil, skipReceiptCache))
+	require.NoError(t, rs.ApplyTxIndexes(tx, nil, 101, nil, 0, logs, nil, nil, skipReceiptCache))
 	require.NoError(t, domains.Flush(t.Context(), tx))
 
 	got, _, err := tx.GetLatest(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, kv.GetLatestOptions{})

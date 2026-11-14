@@ -17,7 +17,9 @@
 package stagedsync
 
 import (
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -28,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -295,4 +298,149 @@ func TestChargedTxKeepsOneCopyOfItsWrites(t *testing.T) {
 	_, kept := recorded.GetNonce(created)
 	require.True(t, kept, "the worker's writes must be recorded")
 	require.Equal(t, 1, workerWrites.Count(), "the worker's write-set must stay as the worker left it")
+}
+
+// blockingCommitmentMemBatch parks the first commitment write after armed is set
+// until release is closed.
+type blockingCommitmentMemBatch struct {
+	*dbstate.TemporalMemBatch
+	armed            atomic.Bool
+	entered, release chan struct{}
+}
+
+func (m *blockingCommitmentMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error {
+	if domain == kv.CommitmentDomain && m.armed.CompareAndSwap(true, false) {
+		close(m.entered)
+		<-m.release
+	}
+	return m.TemporalMemBatch.DomainPut(domain, k, v, txNum, preval, diff)
+}
+
+// The commitment calculator flushes the previous block's branch updates while
+// the apply loop folds the next block, and the fold must not wait for it.
+func TestFoldTxDoesNotWaitForCommitmentFlush(t *testing.T) {
+	db := newResumeTestDB(t)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(rwTx.Rollback)
+	mem := &blockingCommitmentMemBatch{
+		TemporalMemBatch: dbstate.NewTemporalMemBatch(rwTx, db, kvmetrics.NewDomainMetrics()),
+		entered:          make(chan struct{}),
+		release:          make(chan struct{}),
+	}
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), execctx.WithMemBatch(mem))
+	require.NoError(t, err)
+	t.Cleanup(domains.Close)
+	pe := newParallelLogIndexTestExec(db, domains, 0)
+	cs1, cs2 := &changeset.StateChangeSet{}, &changeset.StateChangeSet{}
+	domains.SavePastChangesetAccumulator(common.Hash{1}, 1, cs1)
+	domains.SavePastChangesetAccumulator(common.Hash{2}, 2, cs2)
+
+	domains.SetDeferCommitmentUpdates(true)
+	for i := byte(1); i <= 16; i++ {
+		acc := accounts.Account{Nonce: uint64(i), Balance: *uint256.NewInt(uint64(i)), CodeHash: accounts.EmptyCodeHash}
+		addr := common.Address{i, i}
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, addr[:], accounts.SerialiseV3(&acc), 1, nil))
+	}
+	_, err = domains.ComputeCommitment(t.Context(), rwTx, true, 1, 1, "", nil)
+	require.NoError(t, err)
+	require.True(t, domains.GetCommitmentContext().HasPendingUpdate())
+	domains.SetDisableInlineTouchKey(true)
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	mem.armed.Store(true)
+	flushed := make(chan error, 1)
+	go func() { flushed <- domains.FlushPendingUpdates(roTx) }()
+	<-mem.entered
+
+	var waited atomic.Bool
+	watchdog := time.AfterFunc(5*time.Second, func() {
+		waited.Store(true)
+		close(mem.release)
+	})
+	addr := accounts.InternAddress(common.Address{0xee})
+	foldErr := pe.foldTx(t.Context(), rwTx, recordTx(newRawViewVM(20), 2, common.Hash{2}, 20, &chain.Rules{}, nonceBalanceWrites(addr, 1, *uint256.NewInt(1))))
+	if watchdog.Stop() {
+		close(mem.release)
+	}
+	require.NoError(t, <-flushed)
+	require.NoError(t, foldErr)
+	require.False(t, waited.Load(), "the fold waited for the commitment flush")
+	require.Equal(t, 1, cs2.Diffs[kv.AccountsDomain].Len(), "the fold records into its block's changeset")
+	require.Zero(t, cs2.Diffs[kv.CommitmentDomain].Len(), "the flush records into its own block's changeset")
+	require.Positive(t, cs1.Diffs[kv.CommitmentDomain].Len(), "the flush records into its own block's changeset")
+}
+
+// The commitment calculator flushes earlier blocks' branch updates into their
+// own changesets while the fold writes each block's state into its changeset.
+func TestFoldRacesCommitmentFlush(t *testing.T) {
+	db := newResumeTestDB(t)
+	rwTx, domains := temporaltest.NewTestTxSD(t, db)
+	domains.SetDisableInlineTouchKey(true)
+	pe := newParallelLogIndexTestExec(db, domains, 0)
+	const blocks, txsPerBlock = 64, 3
+	css := make([]*changeset.StateChangeSet, blocks+1)
+	for b := 1; b <= blocks; b++ {
+		css[b] = &changeset.StateChangeSet{}
+		domains.SavePastChangesetAccumulator(common.Hash{byte(b)}, uint64(b), css[b])
+	}
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	folded := make(chan struct{})
+	flushed := make(chan error, 1)
+	stopped := false
+	stopFlusher := func() error {
+		if stopped {
+			return nil
+		}
+		stopped = true
+		close(folded)
+		return <-flushed
+	}
+	defer func() { _ = stopFlusher() }()
+	go func() {
+		for {
+			for b := 1; b < blocks; b++ {
+				diff := &css[b].Diffs[kv.CommitmentDomain]
+				if err := domains.DomainPutCommitmentDiff(roTx, []byte{byte(b)}, []byte{1}, uint64(b)*10+txsPerBlock, nil, diff); err != nil {
+					flushed <- err
+					return
+				}
+			}
+			select {
+			case <-folded:
+				flushed <- nil
+				return
+			default:
+			}
+		}
+	}()
+
+	for b := 2; b <= blocks; b++ {
+		vm := newRawViewVM(uint64(b) * 10)
+		for i := range txsPerBlock {
+			txNum := uint64(b)*10 + uint64(i)
+			addr := accounts.InternAddress(common.Address{byte(b), byte(i)})
+			r := recordTx(vm, uint64(b), common.Hash{byte(b)}, txNum, &chain.Rules{}, nonceBalanceWrites(addr, txNum, *uint256.NewInt(txNum)))
+			require.NoError(t, pe.foldTx(t.Context(), rwTx, r))
+		}
+	}
+	require.NoError(t, stopFlusher())
+
+	for b := 1; b <= blocks; b++ {
+		wantAccounts, wantCommitment := txsPerBlock, 1
+		if b == 1 {
+			wantAccounts = 0
+		}
+		if b == blocks {
+			wantCommitment = 0
+		}
+		require.Equal(t, wantAccounts, css[b].Diffs[kv.AccountsDomain].Len(), "block %d account diffs", b)
+		require.Equal(t, wantCommitment, css[b].Diffs[kv.CommitmentDomain].Len(), "block %d commitment diffs", b)
+	}
+	require.Nil(t, domains.GetChangesetAccumulator())
 }
