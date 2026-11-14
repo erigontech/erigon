@@ -48,10 +48,10 @@ func (w *witnessMemBatch) recordWrite(domain kv.Domain, k string) {
 	m[k] = struct{}{}
 }
 
-func (w *witnessMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
+func (w *witnessMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error {
 	if w.sealed {
 		w.recordWrite(domain, k)
-		return w.TemporalMemBatch.DomainPut(domain, k, v, txNum, preval)
+		return w.TemporalMemBatch.DomainPut(domain, k, v, txNum, preval, diff)
 	}
 	m := w.witness[domain]
 	if m == nil {
@@ -62,10 +62,10 @@ func (w *witnessMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum 
 	return nil
 }
 
-func (w *witnessMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte) error {
+func (w *witnessMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte, diff *kv.DomainDiff) error {
 	if w.sealed {
 		w.recordWrite(domain, k)
-		return w.TemporalMemBatch.DomainDel(domain, k, txNum, preval)
+		return w.TemporalMemBatch.DomainDel(domain, k, txNum, preval, diff)
 	}
 	if m := w.witness[domain]; m != nil {
 		delete(m, k)
@@ -211,10 +211,6 @@ type changesetHolder interface {
 	GetChangesetAccumulator() *changeset.StateChangeSet
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
-	SetCommitmentDiff(acc *changeset.StateChangeSet)
-	SetCommitmentDiffRaw(d *kv.DomainDiff)
-	CommitmentDiff() *kv.DomainDiff
-	PutCommitmentBranchDiff(k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error
 }
 
 func (w *witnessMemBatch) GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet) {
@@ -235,20 +231,4 @@ func (w *witnessMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSet)
 
 func (w *witnessMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
 	w.TemporalMemBatch.(changesetHolder).SavePastChangesetAccumulator(blockHash, blockNumber, acc)
-}
-
-func (w *witnessMemBatch) SetCommitmentDiff(acc *changeset.StateChangeSet) {
-	w.TemporalMemBatch.(changesetHolder).SetCommitmentDiff(acc)
-}
-
-func (w *witnessMemBatch) SetCommitmentDiffRaw(d *kv.DomainDiff) {
-	w.TemporalMemBatch.(changesetHolder).SetCommitmentDiffRaw(d)
-}
-
-func (w *witnessMemBatch) CommitmentDiff() *kv.DomainDiff {
-	return w.TemporalMemBatch.(changesetHolder).CommitmentDiff()
-}
-
-func (w *witnessMemBatch) PutCommitmentBranchDiff(k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error {
-	return w.TemporalMemBatch.(changesetHolder).PutCommitmentBranchDiff(k, v, txNum, preval, diff)
 }

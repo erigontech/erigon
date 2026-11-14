@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -48,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execfinality"
-	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -328,13 +328,11 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 	assembled, err := ba.AssembleBlock(ibs, tx, logger)
 	require.NoError(t, err)
 
-	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), fx.engine, accounts.NilAddress, fx.config)
-	blockRules := blockContext.Rules(fx.config)
 	for _, ws := range ba.WriteSets() {
 		if ws == nil || ws.IsEmpty() {
 			continue
 		}
-		require.NoError(t, state.ApplyWrites(ws, domains, tx, 1, txNum, nil, blockRules, false))
+		require.NoError(t, state.ApplyWrites(ws, domains, tx, nil, 1, txNum, false))
 	}
 	root, err := domains.ComputeCommitment(ctx, tx, false, 1, txNum, "resume-bal", nil)
 	require.NoError(t, err)
@@ -431,20 +429,6 @@ func (fx *resumeBALFixture) moveToStateFiles(t *testing.T, db kv.TemporalRwDB, d
 // invalid-block verdict and the operational error, at most one of them set.
 func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumePoint) (*blockVerdict, error) {
 	t.Helper()
-	return fx.prepare(t, block, point).run(context.Background(), t)
-}
-
-// resumeBALRun is a block execution seeded by prepare and not yet started.
-type resumeBALRun struct {
-	cfg     ExecuteBlockCfg
-	domains *execctx.SharedDomains
-	tx      kv.TemporalRwTx
-	rng     execRange
-	src     *singleBlockSource
-}
-
-func (fx *resumeBALFixture) prepare(t *testing.T, block *types.Block, point resumePoint) *resumeBALRun {
-	t.Helper()
 	ctx := context.Background()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
@@ -508,12 +492,7 @@ func (fx *resumeBALFixture) prepare(t *testing.T, block *types.Block, point resu
 		rng.initialTxNum = resumeBALBlockStartTxNum + uint64(point)
 	}
 	src := &singleBlockSource{block: block, num: 1, parent: fx.genesis.Header(), bal: block.BlockAccessList()}
-	return &resumeBALRun{cfg: cfg, domains: domains, tx: rwTx, rng: rng, src: src}
-}
-
-func (r *resumeBALRun) run(ctx context.Context, t *testing.T) (*blockVerdict, error) {
-	t.Helper()
-	out, err := ExecV3(ctx, r.cfg, r.domains, r.tx, stages.ModeForkValidation, false, "resume-bal", r.rng, r.src, log.New())
+	out, err := ExecV3(ctx, cfg, domains, rwTx, stages.ModeForkValidation, false, "resume-bal", rng, src, logger)
 	if err != nil {
 		require.Nil(t, out.verdict)
 		return nil, err
@@ -637,4 +616,26 @@ func TestResumedBlockWithWrongRequestsHashIsInvalid(t *testing.T) {
 		require.NotNil(t, verdict, "resume point %d", point)
 		require.ErrorIs(t, verdict.err, rules.ErrInvalidBlock, "resume point %d", point)
 	}
+}
+
+// panicFinalizeEngine panics the exec loop at block end, after the apply loop
+// has had time to take the block's tx results.
+type panicFinalizeEngine struct{ rules.Engine }
+
+func (panicFinalizeEngine) Finalize(*chain.Config, *types.Header, *state.IntraBlockState, []*types.Header,
+	types.Receipts, []*types.Withdrawal, rules.ChainReader, rules.SystemCall, bool, log.Logger,
+) (types.FlatRequests, error) {
+	time.Sleep(50 * time.Millisecond)
+	panic("finalize failed")
+}
+
+// TestExecLoopPanicMidBlockIsNotInvalidBlock pins that an exec-loop panic after
+// the block's tx results reached the apply loop is an internal error, not a verdict.
+func TestExecLoopPanicMidBlockIsNotInvalidBlock(t *testing.T) {
+	fx := newResumeBALFixture(t)
+	fx.engine = panicFinalizeEngine{Engine: fx.engine}
+	verdict, err := fx.exec(t, fx.block, fromBlockStart)
+	require.Nil(t, verdict)
+	require.ErrorContains(t, err, "finalize failed")
+	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 }

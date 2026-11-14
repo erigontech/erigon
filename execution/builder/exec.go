@@ -251,13 +251,11 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	// executor and block generation use (rw_v3 handles the self-destruct delete,
 	// EIP-161 removal and storage-subtree cascade). Each recorded phase
 	// (init/txs/finalize) is applied in order.
-	blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
-	blockRules := blockCtx.Rules(cfg.chainConfig)
 	for _, ws := range ba.WriteSets() {
 		if ws == nil || ws.IsEmpty() {
 			continue
 		}
-		if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, nil, blockRules, false); err != nil {
+		if err := state.ApplyWrites(ws, sd, tx, nil, blockHeight, txNum, false); err != nil {
 			return fmt.Errorf("apply versioned block writes: %w", err)
 		}
 	}

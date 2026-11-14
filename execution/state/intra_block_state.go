@@ -1426,6 +1426,17 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				if preserved != nil {
 					return preserved, MapRead, Version{TxIndex: destructTxIndex}, nil
 				}
+				// A destruct this attempt has read stays in force even if its cell becomes an
+				// estimate again, so the committed record must not revive the account, here or
+				// in a later load of it. Only a re-creation by the destroying tx itself is left to
+				// the committed reader.
+				if _, res, _ := ibs.versionMap.ReadAddress(addr, destructTxIndex+1); res.DepIdx() != destructTxIndex || res.accSource() == AccountFromBAL {
+					destructVersion := sdRes.Version()
+					if _, ok := ibs.versionedReads.GetAddress(addr); !ok {
+						ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: destructVersion}})
+					}
+					return nil, MapRead, destructVersion, nil
+				}
 			}
 		}
 	}
@@ -1451,8 +1462,13 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		// stale nonce/codeHash flows through the per-field refresh (which
 		// only overwrites fields a versionMap cell exists for), so Empty()
 		// returns false and the EVM misses CallNewAccountGas.
-		if ibs.versionMap.IsNetAbsent(addr, ibs.txIndex) {
+		state, destructDep := ibs.versionMap.AccountLifecycleWithDestructDep(addr, ibs.txIndex)
+		if state == LifecycleAbsent {
 			return nil, StorageRead, UnknownVersion, nil
+		}
+		// An in-flight destruct below is not net-absent yet, but the committed record predates it.
+		if destructDep != UnknownDep {
+			ibs.dep = max(ibs.dep, destructDep)
 		}
 	}
 
@@ -2743,16 +2759,6 @@ func (ibs *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 		}
 	}
 	return ibs.MakeWriteSet(chainRules, stateWriter)
-}
-
-func (ibs *IntraBlockState) BalanceIncreaseSet() map[accounts.Address]uint256.Int {
-	s := make(map[accounts.Address]uint256.Int, len(ibs.balanceInc))
-	for addr, bi := range ibs.balanceInc {
-		if !bi.transferred {
-			s[addr] = bi.increase
-		}
-	}
-	return s
 }
 
 func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter StateWriter) error {

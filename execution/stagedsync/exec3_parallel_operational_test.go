@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -195,7 +196,7 @@ func TestParallelFinalizeClassifiesRulesEngineError(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			require.ErrorIs(t, result.Err, rules.ErrInvalidBlock)
-			require.ErrorContains(t, result.Err, cause.Error())
+			require.ErrorIs(t, result.Err, cause)
 			require.False(t, result.Operational)
 		})
 	}
@@ -345,3 +346,33 @@ func TestNextResultDropsAResultForAPublishedTx(t *testing.T) {
 	require.Nil(t, result)
 	require.Same(t, sealed, be.blockIO.WriteSet(0))
 }
+
+type rulesEngineWithErrors struct {
+	rules.Engine
+	finalizeErr error
+}
+
+func (e rulesEngineWithErrors) Finalize(config *chain.Config, header *types.Header, ibs *state.IntraBlockState,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	chainReader rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
+) (types.FlatRequests, error) {
+	return nil, e.finalizeErr
+}
+
+// failingAccountTemporalTx fails GetLatest for one account in the Accounts domain and
+// passes everything else through, so a finalize-time beneficiary read surfaces as a
+// state-read error rather than a block verdict.
+type failingAccountTemporalTx struct {
+	kv.TemporalTx
+	address common.Address
+	err     error
+}
+
+func (tx failingAccountTemporalTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if domain == kv.AccountsDomain && common.BytesToAddress(key) == tx.address {
+		return nil, 0, tx.err
+	}
+	return tx.TemporalTx.GetLatest(domain, key, opts)
+}
+
+func (tx failingAccountTemporalTx) AggTx() any { return nil }

@@ -610,9 +610,6 @@ func (w *DomainBufferedWriter) DeleteWithPrevDiff(k []byte, txNum uint64, prev [
 	return w.addValue(k, nil, step)
 }
 
-func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
-func (w *DomainBufferedWriter) Diff() *kv.DomainDiff        { return w.diff }
-
 func (dt *DomainRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *DomainBufferedWriter {
 	discardHistory := discard || dt.d.HistoryDisabled
 
@@ -653,6 +650,13 @@ func (w *DomainBufferedWriter) Close() {
 	}
 }
 
+func (w *DomainBufferedWriter) detach() *DomainBufferedWriter {
+	detached := *w
+	detached.h = w.h.detach()
+	w.values = nil
+	return &detached
+}
+
 func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
@@ -660,6 +664,10 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
 	}
+	return w.flushValues(ctx, tx)
+}
+
+func (w *DomainBufferedWriter) flushValues(ctx context.Context, tx kv.RwTx) error {
 	if w.values == nil {
 		w.Close()
 		return nil

@@ -171,13 +171,14 @@ func TestWaitForResponseReturnsPromptlyOnContextCancellation(t *testing.T) {
 func TestWaitForResponseBoundsTotalWaitByElapsedTime(t *testing.T) {
 	t.Parallel()
 
-	start := time.Now()
+	calls := 0
 	_, err := waitForResponse(context.Background(), 100*time.Millisecond, func() (bool, error) {
+		calls++
 		time.Sleep(100 * time.Millisecond)
 		return true, nil
 	})
 	require.NoError(t, err)
-	require.Less(t, time.Since(start), 160*time.Millisecond, "the budget must cover callback time, including the first call")
+	require.Equal(t, 1, calls, "the budget must cover callback time, including the first call")
 }
 
 // snapshotsNotReadyModule mimics ExecModule.Ready while snapshots are unavailable: each call blocks
