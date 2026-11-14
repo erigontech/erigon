@@ -142,6 +142,12 @@ jobs:
       CLIENT: ${{ matrix.client }}
       REMOTES: ${{ matrix.remotes }}
       RPC_TEST: ${{ needs.setup.outputs.rpc_test }}
+      # The rpc-latest-* runners have 16 cores with 2 threads each (CPU n and n+16 share core n).
+      # rpc_perf gets cores 12-15, the client and its CL the other 12, so the load generator
+      # never takes CPU from the client. Geth, Nethermind and Reth are pinned to CLIENT_CPUS
+      # by their services on the runners.
+      CLIENT_CPUS: 0-11,16-27
+      RPC_PERF_CPUS: 12-15,28-31
 
     steps:
       - name: Set reference data dir based on branch
@@ -247,7 +253,7 @@ jobs:
           set +e # Disable exit on error
           echo "Starting Erigon..."
 
-          ./erigon --prune.mode=minimal --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
+          taskset -c "$CLIENT_CPUS" ./erigon --prune.mode=minimal --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
           ERIGON_PID=$!
           echo "ERIGON_PID=$ERIGON_PID" >> $GITHUB_ENV
@@ -280,6 +286,15 @@ jobs:
             echo "::error::Error detected during tests: Port 8545 did not open in time"
             exit 1
           fi
+
+      - name: Show CPU affinity and frequency governor
+        run: |
+          echo "Expected: client on $CLIENT_CPUS, rpc_perf on $RPC_PERF_CPUS"
+          # Match the process name, not the command line: the runner's own paths contain the client name.
+          for pid in $(pgrep -i "$CLIENT"); do
+            echo "$(taskset -cp "$pid" 2>/dev/null) $(ps -o comm= -p "$pid")"
+          done
+          echo "governor: $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo unknown)"
 
       - name: Wait for Erigon to reach the tip
         if: matrix.client == 'erigon'
