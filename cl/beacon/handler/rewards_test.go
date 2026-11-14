@@ -29,9 +29,82 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
+
+func TestFindEpochRootEmptyEpochZero(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	a := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
+	var root common.Hash
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		root, err = a.findEpochRoot(tx, 0)
+		return err
+	}))
+	require.Zero(t, root, "findEpochRoot on empty epoch zero must return the zero hash")
+}
+
+func TestFindEpochRootBoundsEpoch(t *testing.T) {
+	root := common.Hash{1}
+	for _, tt := range []struct {
+		name string
+		slot uint64
+		want common.Hash
+	}{
+		{name: "first slot", slot: 32, want: root},
+		{name: "last slot", slot: 63, want: root},
+		{name: "previous epoch", slot: 31},
+		{name: "next epoch", slot: 64},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			a := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				return beacon_indicies.MarkRootCanonical(tx, tt.slot, root)
+			}))
+
+			var got common.Hash
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				var err error
+				got, err = a.findEpochRoot(tx, 1)
+				return err
+			}))
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetLighthouseValidatorInclusionRejectsOverflow(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	var lowestAvailableSlot uint64 = math.MaxUint64
+	fcu.LowestAvailableSlotVal = &lowestAvailableSlot
+	for _, path := range []string{
+		"/lighthouse/validator_inclusion/576460752303423492/global",
+		"/lighthouse/validator_inclusion/576460752303423492/0",
+	} {
+		t.Run(path, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody)
+			handler.mux.ServeHTTP(recorder, request)
+			require.Equal(t, http.StatusNotFound, recorder.Code)
+			require.Contains(t, recorder.Body.String(), "epoch slot range overflows")
+		})
+	}
+}
+
+func TestPostAttestationRewardsRejectsMaxEpoch(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/rewards/attestations/18446744073709551615", http.NoBody)
+	handler.mux.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusNotFound, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "epoch is in the future")
+}
 
 func TestGetBlockRewards(t *testing.T) {
 	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)

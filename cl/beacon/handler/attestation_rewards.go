@@ -67,10 +67,6 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	defer tx.Rollback()
 
 	epoch, err := beaconhttp.EpochFromRequest(r)
-
-	// attestation rewards are always delayed by 1 extra epoch compared to other rewards
-	epoch += 1
-
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
@@ -97,9 +93,10 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
 	headEpoch := headSlot / a.beaconChainCfg.SlotsPerEpoch
-	if epoch > headEpoch {
+	if epoch >= headEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch is in the future"))
 	}
+	epoch++
 	// Few cases to handle:
 	// 1) finalized data
 	// 2) not finalized data
