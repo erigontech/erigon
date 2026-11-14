@@ -10,7 +10,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -164,7 +163,7 @@ func TestApplyWrites_SelfDestructedAddressIsPureDelete(t *testing.T) {
 	ws.SetStorage(addr, kRaw, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: kRaw, Version: ver}, Val: *uint256.NewInt(42)})
 
 	domains.SetTxNum(2)
-	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, nil, &chain.Rules{IsSpuriousDragon: true}, false))
+	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, false))
 
 	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, av[:])
 	require.NoError(t, err)
@@ -204,7 +203,7 @@ func TestApplyWrites_SelfDestructWithoutCommittedAccountSkipsStorageWalk(t *test
 	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: uint256.Int{}})
 
 	domains.SetTxNum(2)
-	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, nil, &chain.Rules{IsSpuriousDragon: true}, false))
+	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, false))
 
 	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, av[:])
 	require.NoError(t, err)
@@ -235,7 +234,7 @@ func TestApplyWrites_SelfDestructWithoutCommittedAccountKeepsPreservedBalance(t 
 	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: *uint256.NewInt(5)})
 
 	domains.SetTxNum(2)
-	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, nil, &chain.Rules{IsSpuriousDragon: true}, false))
+	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, false))
 
 	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, av[:])
 	require.NoError(t, err)
@@ -275,7 +274,7 @@ func TestApplyWrites_SelfDestructPreservedBalanceDeletesCommittedStorage(t *test
 	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: ver}, Val: *uint256.NewInt(9)})
 
 	domains.SetTxNum(2)
-	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, nil, &chain.Rules{IsSpuriousDragon: true}, false))
+	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, false))
 
 	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, av[:])
 	require.NoError(t, err)
@@ -307,7 +306,7 @@ func TestApplyWrites_SelfDestructWithoutCommittedAccountDeletesCode(t *testing.T
 	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: ver}, Val: true})
 
 	domains.SetTxNum(2)
-	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, nil, &chain.Rules{IsSpuriousDragon: true}, false))
+	require.NoError(t, ApplyWrites(ws, domains, tx, 1, 2, false))
 
 	c, _, err := domains.GetLatest(kv.CodeDomain, tx, av[:])
 	require.NoError(t, err)

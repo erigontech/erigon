@@ -2577,6 +2577,135 @@ func TestMarkWritesValidatedMarksACellRecreatedAtTheSameIncarnation(t *testing.T
 	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
 }
 
+// A read of the base skips validation only while no tx wrote a storage, lifecycle or address cell of the account;
+// each such cell below the reader makes the read stale.
+func TestValidateReadSet_BaseReadOfQuietAccountSkipsValidation(t *testing.T) {
+	t.Parallel()
+	base := ReadHeader{Source: StorageRead, Version: Version{TxIndex: originIndex}}
+	for _, tc := range []struct {
+		name  string
+		path  AccountPath
+		value any
+		read  ReadHeader
+		want  VersionValidity
+		quiet bool // a base read of an account with no storage, lifecycle or address cell
+	}{
+		{"no cells", 0, nil, base, VersionValid, true},
+		{"balance write", BalancePath, *uint256.NewInt(5), base, VersionValid, true},
+		{"storage write", StoragePath, *uint256.NewInt(8), base, VersionInvalid, false},
+		{"self-destruct", SelfDestructPath, true, base, VersionInvalid, false},
+		{"address write", AddressPath, &accounts.Account{Incarnation: 1}, base, VersionValid, false},
+		{"incarnation write", IncarnationPath, uint64(1), base, VersionInvalid, false},
+		{"create contract", CreateContractPath, true, base, VersionValid, false},
+		{"read of a removed write", 0, nil, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, VersionInvalid, false},
+		{"read of an aborted write", StoragePath, *uint256.NewInt(8), ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, VersionInvalid, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := getAddress(91)
+			key := accounts.InternKey(common.Hash{0x07})
+			vm := NewVersionMap(nil)
+			if tc.value != nil {
+				writeFor(vm, addr, tc.path, key, Version{TxIndex: 1}, tc.value, true)
+			}
+
+			rs := ReadSet{}
+			rs.SetStorage(addr, key, VersionedRead[uint256.Int]{
+				ReadHeader: tc.read,
+				Val:        *uint256.NewInt(7),
+			})
+			checks := 0
+			countChecks := func(read, write Version) VersionValidity {
+				checks++
+				return validateEqualVersion(read, write)
+			}
+			require.Equal(t, tc.want, vm.ValidateReadSet(3, rs, countChecks, false, ""))
+			if tc.read == base {
+				require.Equal(t, !tc.quiet, checks > 0, "only a quiet account skips the version checks")
+			}
+		})
+	}
+}
+
+// A base read of an account path skips validation only while no tx wrote a cell of that path, a lifecycle cell or an
+// address cell; a write on another path does not stop the skip.
+func TestValidateReadSet_BaseReadOfQuietAccountPathSkipsValidation(t *testing.T) {
+	t.Parallel()
+	field := ReadHeader{Source: MapRead, Version: Version{TxIndex: originIndex}}
+	stored := ReadHeader{Source: StorageRead, Version: UnknownVersion}
+	balance := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: hdr})
+	}
+	nonce := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetNonce(addr, VersionedRead[uint64]{ReadHeader: hdr})
+	}
+	incarnation := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader: hdr})
+	}
+	codeHash := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{ReadHeader: hdr})
+	}
+	codeSize := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
+	}
+	code := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: hdr, Val: accounts.NewCode([]byte{0x01})})
+	}
+	exists := func(rs *ReadSet, addr accounts.Address, hdr ReadHeader) {
+		rs.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr})
+	}
+	hash := accounts.InternCodeHash(common.Hash{0x01})
+	for _, tc := range []struct {
+		name  string
+		read  func(rs *ReadSet, addr accounts.Address, hdr ReadHeader)
+		path  AccountPath
+		value any
+		hdr   ReadHeader
+		want  VersionValidity
+	}{
+		{"balance read, no cells", balance, 0, nil, field, VersionValid},
+		{"balance read, code hash written", balance, CodeHashPath, hash, field, VersionValid},
+		{"balance read, balance written", balance, BalancePath, *uint256.NewInt(1), field, VersionInvalid},
+		{"balance read, address written", balance, AddressPath, &accounts.Account{Incarnation: 1}, field, VersionInvalid},
+		{"nonce read, nonce written", nonce, NoncePath, uint64(1), field, VersionInvalid},
+		{"nonce read, created", nonce, IncarnationPath, uint64(1), field, VersionInvalid},
+		{"incarnation read, nonce written", incarnation, NoncePath, uint64(1), field, VersionValid},
+		{"existence read, balance written", exists, BalancePath, *uint256.NewInt(1), field, VersionValid},
+		{"existence read, created", exists, IncarnationPath, uint64(1), field, VersionInvalid},
+		{"absent account read, balance written", exists, BalancePath, *uint256.NewInt(1), stored, VersionValid},
+		{"code hash read, code hash written", codeHash, CodeHashPath, hash, field, VersionInvalid},
+		{"code size read, code size written", codeSize, CodeSizePath, 3, stored, VersionInvalid},
+		{"code read, balance written", code, BalancePath, *uint256.NewInt(1), stored, VersionValid},
+		{"code read, code written", code, CodePath, accounts.NewCode([]byte{0x02}), stored, VersionInvalid},
+		{"code read, destructed", code, SelfDestructPath, true, stored, VersionInvalid},
+		{"balance read of a removed write", balance, 0, nil, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, VersionInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			addr := getAddress(92)
+			vm := NewVersionMap(nil)
+			if tc.hdr == field {
+				vm.StoreOriginAccount(addr, &accounts.Account{})
+			}
+			if tc.value != nil {
+				writeFor(vm, addr, tc.path, accounts.NilKey, Version{TxIndex: 1}, tc.value, true)
+			}
+
+			rs := ReadSet{}
+			tc.read(&rs, addr, tc.hdr)
+			checks := 0
+			countChecks := func(read, write Version) VersionValidity {
+				checks++
+				return validateEqualVersion(read, write)
+			}
+			require.Equal(t, tc.want, vm.ValidateReadSet(3, rs, countChecks, false, ""))
+			if tc.want == VersionValid {
+				require.Zero(t, checks, "a base read of a quiet path is not validated")
+			}
+		})
+	}
+}
+
 // A net-zero storage write has no BAL cell, so it must not count as already seeded.
 func TestWritesAlreadySeededRefusesANetZeroStorageWrite(t *testing.T) {
 	vm := NewVersionMap(nil)

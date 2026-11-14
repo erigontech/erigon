@@ -172,6 +172,26 @@ func TestAddChainSegmentInvalidBlockLeavesNoLightClientUpdate(t *testing.T) {
 	require.Equal(t, invalid.Block.Slot, g.highestTransitionSlot)
 }
 
+// A block's light-client update reaches its period store only once the block is finalized.
+func TestAddChainSegmentLightClientUpdateReachesPeriodStoreAtFinalization(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	for _, block := range blocks {
+		_, result, err := g.AddChainSegment(block, true)
+		require.NoError(t, err)
+		require.Equal(t, Success, result)
+	}
+	update := g.NewestLightClientUpdate()
+	require.NotNil(t, update)
+	period := g.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot)
+	head := common.Hash(mustBlockRoot(t, blocks[len(blocks)-1]))
+	require.Nil(t, g.GetLightClientUpdates(period, period+1, common.Hash{})[0], "served before finalization")
+	require.Same(t, update, g.GetLightClientUpdates(period, period+1, head)[0])
+
+	g.KeepFinalizedLightClientUpdates(head)
+
+	require.Same(t, update, g.GetLightClientUpdates(period, period+1, common.Hash{})[0])
+}
+
 func TestCommitChainSegmentLogisticErrorStoresNoLightClientUpdate(t *testing.T) {
 	g, blocks := newLightClientGraph(t)
 	_, result, err := g.AddChainSegment(blocks[0], true)
@@ -381,6 +401,23 @@ func TestCommitChainSegmentWithoutTransitionStoresNothing(t *testing.T) {
 	require.Nil(t, g.currentState)
 }
 
+// A prepare failure drops the block that AddChainSegment stored before the transition, and does not mark it bad.
+func TestCommitChainSegmentPrepareErrorDeletesBlock(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	seg := beginStartedSegment(t, g, blocks[0])
+	g.blocks.Store(seg.blockRoot, blocks[0])
+	seg.Transition()
+	prepareErr := errors.New("prepare failed")
+	seg.err = prepareErr
+
+	post, result, err := g.CommitChainSegment(seg)
+	require.ErrorIs(t, err, prepareErr)
+	require.Equal(t, LogisticError, result)
+	require.Nil(t, post)
+	require.Equal(t, importArtifacts{result: LogisticError, failed: true}, readImportArtifacts(t, g, blocks[0], post, result, err))
+	require.Nil(t, g.currentState)
+}
+
 func TestCommitChainSegmentMarksInvalidBlockBad(t *testing.T) {
 	g, blocks := newLightClientGraph(t)
 	blocks[0].Block.ProposerIndex = unknownProposerIndex
@@ -454,6 +491,8 @@ func TestAddChainSegmentTransitionPanicPropagates(t *testing.T) {
 	g.blocks.Store(parentRoot, &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: blocks[0].Block.Slot}})
 
 	require.Panics(t, func() { _, _, _ = g.AddChainSegment(blocks[1], true) })
+	_, stored := g.blocks.Load(blockRoot)
+	require.True(t, stored, "the block is stored before its transition runs")
 
 	g.blocks.Store(parentRoot, blocks[0])
 	post, result, err := g.AddChainSegment(blocks[1], true)

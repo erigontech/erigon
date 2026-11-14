@@ -315,15 +315,6 @@ func WithExperimentalBAL() Option {
 	}
 }
 
-// WithoutExperimentalBAL disables experimental BAL (and the parallel executor
-// it forces) for tests that exercise patterns the parallel executor doesn't
-// yet handle correctly (e.g. intra-block SELFDESTRUCT + CREATE2 reincarnation).
-func WithoutExperimentalBAL() Option {
-	return func(opts *options) {
-		opts.experimentalBAL = false
-	}
-}
-
 func WithGenesisSpec(gspec *types.Genesis) Option {
 	return func(opts *options) {
 		opts.genesis = gspec
@@ -874,7 +865,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		logger,
 		engine,
 		cfg.Sync,
-		cfg.ExperimentalBAL,
 		cfg.FcuBackgroundPrune,
 		false, /* onlySnapDownloadOnStart */
 		readAheader,

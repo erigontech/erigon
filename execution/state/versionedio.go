@@ -2904,7 +2904,13 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 			if addr.IsNil() {
 				continue
 			}
-			ensureAccountState(ac, addr).applyWriteCode(w.Val, w.Version.blockAccessIndex())
+			account := ensureAccountState(ac, addr)
+			// An account absent or destroyed at the tx start had no code before the block: an account
+			// that had code before the block is never removed within it (EIP-161, EIP-6780).
+			if tr, ok := rs.address[addr]; ok && (tr.Val == nil || tr.Val.IsNil()) || rs.selfDestruct[addr].Val {
+				account.initialCodeEmpty = true
+			}
+			account.applyWriteCode(w.Val, w.Version.blockAccessIndex())
 		}
 		for addr, byKey := range writes.Storages() {
 			if addr.IsNil() {
@@ -3027,7 +3033,7 @@ type accountState struct {
 	slotWrites          map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
 	storageReads        []accounts.StorageKey               // copied into changes.StorageReads by finalize
 	slotReads           map[accounts.StorageKey]int         // slot -> index into storageReads, built with slotWrites
-	initialCodeEmpty    bool                                // pre-block code was empty (created contract or empty-codehash read)
+	initialCodeEmpty    bool                                // pre-block code was empty (created contract, empty code-hash read, or the account read absent or destroyed)
 }
 
 // matches compares the account with a sidecar entry without building and sorting its lists.
