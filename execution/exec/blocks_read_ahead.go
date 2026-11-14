@@ -779,7 +779,8 @@ var (
 
 func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute bool, execBlock *atomic.Uint64, distance int) (chan uint64, context.CancelFunc) {
 	readAhead := make(chan uint64, distance)
-	g, gCtx := errgroup.WithContext(ctx)
+	workerCtx, cancel := context.WithCancel(ctx)
+	g, gCtx := errgroup.WithContext(workerCtx)
 	for range workers {
 		g.Go(func() (err error) {
 			var bn uint64
@@ -799,6 +800,10 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 				case <-gCtx.Done():
 					return gCtx.Err()
 				}
+				if gCtx.Err() != nil {
+					return gCtx.Err()
+				}
+
 				if i%100 == 0 {
 					if tx != nil {
 						tx.Rollback()
@@ -819,7 +824,11 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 			}
 		})
 	}
-	return readAhead, func() { close(readAhead); _ = g.Wait() }
+	return readAhead, func() {
+		cancel()
+		close(readAhead)
+		_ = g.Wait()
+	}
 }
 
 func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute bool) error {
@@ -831,43 +840,57 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 	if block == nil {
 		return nil
 	}
-	_, _ = engine.Author(block.HeaderNoCopy())
+	_, _ = engine.Author(block.HeaderNoCopy()) // heavy on some engines and cached
+
 	ttx, ok := tx.(kv.TemporalTx)
 	if !ok {
 		return nil
 	}
+
 	stateReader := state.NewReaderV3(execctx.NewTemporalTxStateGetter(ttx))
 	senders := block.Body().SendersFromTxs()
+
 	for _, sender := range senders {
 		a, _ := stateReader.ReadAccountData(accounts.InternAddress(sender))
-		if a != nil {
-			// Code domain using .bt index - means no false-positives
-			if code, _ := stateReader.ReadAccountCode(accounts.InternAddress(sender)); len(code) > 0 {
-				_, _ = code[0], code[len(code)-1]
-			}
-		}
-	}
-	for _, txn := range block.Transactions() {
-		toaddr := txn.GetTo()
-		if toaddr == nil {
-			continue
-		}
-		to := accounts.InternAddress(*toaddr)
-		a, _ := stateReader.ReadAccountData(to)
 		if a == nil {
 			continue
 		}
-		if code, _ := stateReader.ReadAccountCode(to); len(code) > 0 {
+
+		// Code domain using .bt index - means no false-positives
+		if code, _ := stateReader.ReadAccountCode(accounts.InternAddress(sender)); len(code) > 0 {
 			_, _ = code[0], code[len(code)-1]
 		}
-		for _, list := range txn.GetAccessList() {
-			_, _ = stateReader.ReadAccountData(accounts.InternAddress(list.Address))
-			for _, slot := range list.StorageKeys {
-				_, _, _ = stateReader.ReadAccountStorageByPlainKey(accounts.InternAddress(list.Address), slot)
+	}
+
+	for _, txn := range block.Transactions() {
+		toaddr := txn.GetTo()
+		if toaddr != nil {
+			to := accounts.InternAddress(*toaddr)
+			a, _ := stateReader.ReadAccountData(to)
+			if a == nil {
+				continue
 			}
+			//if account != nil && !bytes.Equal(account.CodeHash, types.EmptyCodeHash.Bytes()) {
+			//	reader.Code(*tx.To(), common.BytesToHash(account.CodeHash))
+			//}
+			if code, _ := stateReader.ReadAccountCode(to); len(code) > 0 {
+				_, _ = code[0], code[len(code)-1]
+			}
+
+			for _, list := range txn.GetAccessList() {
+				_, _ = stateReader.ReadAccountData(accounts.InternAddress(list.Address))
+				if len(list.StorageKeys) > 0 {
+					for _, slot := range list.StorageKeys {
+						_, _, _ = stateReader.ReadAccountStorageByPlainKey(accounts.InternAddress(list.Address), slot)
+					}
+				}
+			}
+			// TODO: exec txn and pre-fetch commitment keys. see also: `func (p *statePrefetcher) Prefetch` in geth
 		}
+
 	}
 	_, _ = stateReader.ReadAccountData(accounts.InternAddress(block.Coinbase()))
+
 	if execute {
 		started := time.Now()
 		stats := runReadAheadBlock(ctx, tx, block, engine, blockReader, chainConfig)
@@ -908,6 +931,13 @@ func runReadAheadBlock(ctx context.Context, tx kv.Tx, block *types.Block, engine
 	}
 	bc := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, chainConfig)
 	evm := vm.NewEVM(bc, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
+	var cancelMu sync.Mutex
+	stopCancel := context.AfterFunc(ctx, func() {
+		cancelMu.Lock()
+		evm.Cancel()
+		cancelMu.Unlock()
+	})
+	defer stopCancel()
 	writer := &readAheadRecordingWriter{StateWriter: state.NewNoopWriter(), stats: &stats, accounts: make(map[accounts.Address]struct{}), storage: make(map[accounts.Address]map[accounts.StorageKey]struct{})}
 	for _, txn := range block.Transactions() {
 		if ctx.Err() != nil {
@@ -919,9 +949,14 @@ func runReadAheadBlock(ctx context.Context, tx kv.Tx, block *types.Block, engine
 		}
 		msg.SetCheckNonce(false)
 		msg.SetCheckTransaction(false)
+		cancelMu.Lock()
 		evm.Reset(protocol.NewEVMTxContext(msg), ibs)
+		if ctx.Err() != nil {
+			evm.Cancel()
+		}
+		cancelMu.Unlock()
 		stats.Transactions++
-		_, err = protocol.ApplyMessage(evm, msg, protocol.NewGasPool(header.GasLimit, ^uint64(0)), true, true, engine)
+		_, err = protocol.ApplyMessage(evm, msg, protocol.NewGasPool(header.GasLimit, ^uint64(0)), true, true, nil)
 		if err != nil {
 			continue
 		}

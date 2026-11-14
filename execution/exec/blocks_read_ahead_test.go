@@ -22,6 +22,7 @@ import (
 	"errors"
 	"sort"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -42,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/aura"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -1289,6 +1291,9 @@ func TestReadAheadExecReadsAndWritesContractStorage(t *testing.T) {
 	require.NoError(t, blocksReadAheadFunc(ctx, roTx, 1, engine, readAheadBlockReader{block: block}, config, false))
 	require.Equal(t, beforeReads, readAheadExecKeys.WithLabelValues("storage", "read").GetValue())
 	require.Equal(t, beforeWrites, readAheadExecKeys.WithLabelValues("storage", "write").GetValue())
+	beforeReads = readAheadExecKeys.WithLabelValues("storage", "read").GetValue()
+	require.NoError(t, blocksReadAheadFunc(ctx, roTx, 1, engine, readAheadBlockReader{block: block}, config, true))
+	require.Greater(t, readAheadExecKeys.WithLabelValues("storage", "read").GetValue(), beforeReads, "execute=true must run speculative transactions")
 	beforeDump := readAheadTableDump(t, db)
 	stats := runReadAheadBlock(ctx, roTx, block, engine, nil, config)
 	require.Equal(t, beforeDump, readAheadTableDump(t, db), "speculative execution must leave every database table unchanged")
@@ -1340,4 +1345,141 @@ func TestReadAheadExecSkipsStaleNonceCheck(t *testing.T) {
 	stats := runReadAheadBlock(ctx, roTx, block, engine, nil, config)
 	require.Contains(t, stats.StorageReadKeys, ReadAheadStorageKey{Address: accounts.InternAddress(contract), Slot: accounts.InternKey(common.Hash{})})
 	require.Equal(t, 1, stats.Transactions)
+}
+
+type reviewReadAheadTx struct {
+	kv.TemporalTx
+	values    map[kv.Domain]map[string][]byte
+	onStorage func()
+}
+
+func (tx *reviewReadAheadTx) GetLatest(d kv.Domain, k []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if d == kv.StorageDomain && tx.onStorage != nil {
+		tx.onStorage()
+	}
+	return tx.values[d][string(k)], 0, nil
+}
+
+func (tx *reviewReadAheadTx) GetLatestValSize(d kv.Domain, k []byte) (int, bool, error) {
+	v, _, err := tx.GetLatest(d, k, kv.GetLatestOptions{})
+	return len(v), len(v) > 0, err
+}
+
+func (*reviewReadAheadTx) Rollback() {}
+
+func reviewReadAheadFixture(t *testing.T, code []byte) (*reviewReadAheadTx, *types.Block) {
+	t.Helper()
+	contract := common.Address{19: 0xc0}
+	acc := accounts.NewAccount()
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	tx := &reviewReadAheadTx{values: map[kv.Domain]map[string][]byte{
+		kv.AccountsDomain: {string(contract[:]): accounts.SerialiseV3(&acc)},
+		kv.CodeDomain:     {string(contract[:]): code},
+	}}
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	txn, err := types.SignTx(&types.LegacyTx{CommonTx: types.CommonTx{To: &contract, GasLimit: 100_000}, GasPrice: *uint256.NewInt(1)}, *types.MakeSigner(chain.TestChainOsakaConfig, 1, 1), key)
+	require.NoError(t, err)
+	header := &types.Header{Number: *uint256.NewInt(1), Time: 1, GasLimit: 30_000_000}
+	return tx, types.NewBlock(header, []types.Transaction{txn}, nil, nil, nil, nil)
+}
+
+func TestReviewReadAheadCancellationStopsEVM(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		code := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.POP), byte(vm.PUSH1), 8, byte(vm.JUMP), byte(vm.STOP), byte(vm.JUMPDEST), byte(vm.PUSH1), 1, byte(vm.SLOAD), byte(vm.POP), byte(vm.STOP)}
+		tx, block := reviewReadAheadFixture(t, code)
+		storageReads := 0
+		tx.onStorage = func() {
+			storageReads++
+			if storageReads == 1 {
+				cancel()
+				synctest.Wait()
+			}
+		}
+		stats := runReadAheadBlock(ctx, tx, block, ethash.NewFaker(), nil, chain.TestChainOsakaConfig)
+		require.ErrorIs(t, ctx.Err(), context.Canceled)
+		require.False(t, stats.Errored)
+		require.Equal(t, 1, stats.Transactions)
+		require.Equal(t, 1, stats.StorageRead, "cancelled read-ahead must stop the EVM at the next jump; storage reads = %d", stats.StorageRead)
+	})
+}
+
+func TestReviewReadAheadCleanupStopsQueuedExecution(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		tx, block := reviewReadAheadFixture(t, []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.STOP)})
+		entered, release := make(chan struct{}), make(chan struct{})
+		executions := 0
+		tx.onStorage = func() {
+			executions++
+			if executions == 1 {
+				close(entered)
+				<-release
+			}
+		}
+		input, clean := BlocksReadAhead(t.Context(), 1, &singleTxRoDB{tx: tx}, ethash.NewFaker(), readAheadBlockReader{block: block}, chain.TestChainOsakaConfig, true, nil, 500)
+		input <- 0
+		<-entered
+		input <- 1
+		finished := make(chan struct{})
+		go func() { clean(); close(finished) }()
+		synctest.Wait()
+		close(release)
+		<-finished
+		require.Equal(t, 1, executions, "cleanup must discard queued speculative blocks; executed blocks = %d", executions)
+	})
+}
+
+func TestReviewReadAheadDoesNotCacheStaleAuRaCertifier(t *testing.T) {
+	registrar, staleCertifier, currentCertifier := common.Address{19: 0xa0}, common.Address{19: 0xa1}, common.Address{19: 0xa2}
+	duration, start := uint64(1), uint64(0)
+	config := &chain.AuRaConfig{StepDuration: &duration, StartStep: &start, Validators: &chain.ValidatorSetJson{List: []common.Address{{19: 1}}}, Registrar: &registrar}
+	chainConfig := *chain.TestChainOsakaConfig
+	chainConfig.Aura = config
+	chainConfig.Ethash = nil
+	chainConfig.Rules = chain.AuRaRules
+	engine, err := aura.NewAuRa(config, nil)
+	require.NoError(t, err)
+	baseline, err := aura.NewAuRa(config, nil)
+	require.NoError(t, err)
+	sender := accounts.InternAddress(common.Address{19: 0xf0})
+	var observed common.Address
+	currentStateCall := func(addr accounts.Address, _ []byte) ([]byte, error) {
+		if addr.Value() == registrar {
+			return common.LeftPadBytes(currentCertifier[:], 32), nil
+		}
+		observed = addr.Value()
+		if observed == currentCertifier {
+			return common.LeftPadBytes([]byte{1}, 32), nil
+		}
+		return make([]byte, 32), nil
+	}
+	require.True(t, baseline.IsServiceTransaction(sender, currentStateCall))
+	require.Equal(t, currentCertifier, observed)
+	tx, original := reviewReadAheadFixture(t, []byte{byte(vm.STOP)})
+	registrarCode := append([]byte{byte(vm.PUSH20)}, staleCertifier[:]...)
+	registrarCode = append(registrarCode, byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN))
+	certifiedCode := []byte{byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN)}
+	for _, item := range []struct {
+		address common.Address
+		code    []byte
+	}{{registrar, registrarCode}, {staleCertifier, certifiedCode}} {
+		acc := accounts.NewAccount()
+		acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(item.code))
+		tx.values[kv.AccountsDomain][string(item.address[:])] = accounts.SerialiseV3(&acc)
+		tx.values[kv.CodeDomain][string(item.address[:])] = item.code
+	}
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	to := original.Transactions()[0].GetTo()
+	txn, err := types.SignTx(&types.LegacyTx{CommonTx: types.CommonTx{To: to, GasLimit: 100_000}}, *types.MakeSigner(&chainConfig, 1, 1), key)
+	require.NoError(t, err)
+	block := types.NewBlock(original.HeaderNoCopy(), []types.Transaction{txn}, nil, nil, nil, nil)
+	stats := runReadAheadBlock(t.Context(), tx, block, engine, nil, &chainConfig)
+	require.False(t, stats.Errored)
+	require.Equal(t, 1, stats.Transactions)
+	observed = common.Address{}
+	isService := engine.IsServiceTransaction(sender, currentStateCall)
+	require.True(t, isService, "real execution must use current certifier %s; called %s, service = %t", currentCertifier, observed, isService)
 }
