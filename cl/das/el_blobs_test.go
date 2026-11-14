@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -17,13 +16,11 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
-	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -43,16 +40,10 @@ func elBlobsFixtureOfVersion(t testing.TB, cfg *clparams.BeaconChainConfig, vers
 	blobs := make([][]byte, n)
 	proofs := make([][][]byte, n)
 	for i := range blobs {
-		blob := &goethkzg.Blob{}
-		for j := 0; j < len(blob); j += 32 {
-			blob[j+31], blob[j+30] = byte(i+1), byte(j/32+i)
-		}
-		commitment, err := kzg.Ctx().BlobToKZGCommitment(blob, 0)
-		require.NoError(t, err)
-		block.GetBlobKzgCommitments().Append((*cltypes.KZGCommitment)(&commitment))
-		_, cellProofs, err := peerdasutils.ComputeCellsAndKZGProofs(blob[:])
-		require.NoError(t, err)
-		blobs[i] = blob[:]
+		data := testBlobData(t, i, true)
+		block.GetBlobKzgCommitments().Append((*cltypes.KZGCommitment)(&data.commitment))
+		cellProofs := data.cellProofs
+		blobs[i] = data.blob[:]
 		for j := range cellProofs {
 			proofs[i] = append(proofs[i], cellProofs[j][:])
 		}

@@ -21,6 +21,7 @@ import (
 	"slices"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -377,23 +378,27 @@ func unservedRootWorker(t *testing.T, canonicalAtSlot func(root common.Hash) com
 // A round that leaves columns missing ends at its deadline. Once the backoff reaches its cap, the
 // canonical check must still read the indices, so an orphaned root nobody serves is given up.
 func TestSyncColumnDataWorkerGivesUpAnOrphanAfterATimedOutRound(t *testing.T) {
-	d, root := unservedRootWorker(t, func(common.Hash) common.Hash { return common.Hash{0xaa} })
+	synctest.Test(t, func(t *testing.T) {
+		d, root := unservedRootWorker(t, func(common.Hash) common.Hash { return common.Hash{0xaa} })
 
-	go d.syncColumnDataWorker(t.Context())
-	require.Eventually(t, func() bool {
-		return !queued(&d.blocksToCheckSync, root)
-	}, 8*time.Second, 50*time.Millisecond)
+		go d.syncColumnDataWorker(t.Context())
+		require.Eventually(t, func() bool {
+			return !queued(&d.blocksToCheckSync, root)
+		}, 8*time.Second, 50*time.Millisecond)
+	})
 }
 
 // A canonical root at the backoff cap is kept and tried again. failed counts an attempt before the
 // canonical check, so only a second attempt shows that the root was kept.
 func TestSyncColumnDataWorkerKeepsACanonicalRootAtTheBackoffCap(t *testing.T) {
-	d, root := unservedRootWorker(t, func(root common.Hash) common.Hash { return root })
+	synctest.Test(t, func(t *testing.T) {
+		d, root := unservedRootWorker(t, func(root common.Hash) common.Hash { return root })
 
-	go d.syncColumnDataWorker(t.Context())
-	require.Eventually(t, func() bool {
-		return attempts(&d.blocksToCheckSync, root) >= 2
-	}, 10*time.Second, 50*time.Millisecond)
+		go d.syncColumnDataWorker(t.Context())
+		require.Eventually(t, func() bool {
+			return attempts(&d.blocksToCheckSync, root) >= 2
+		}, 10*time.Second, 50*time.Millisecond)
+	})
 }
 
 // With five-second slots the worker picks a due root up within its tick, well before a one-second

@@ -27,6 +27,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
@@ -218,6 +219,54 @@ func (s *writeNotifyingBlobStorage) WriteBlobSidecars(ctx context.Context, block
 	return nil
 }
 
+type testKZGKey struct {
+	index int
+	dense bool
+}
+
+type testKZGData struct {
+	blob       goethkzg.Blob
+	commitment goethkzg.KZGCommitment
+	blobProof  goethkzg.KZGProof
+	cells      []cltypes.Cell
+	cellProofs []cltypes.KZGProof
+}
+
+var testKZGCache = struct {
+	sync.Mutex
+	data map[testKZGKey]testKZGData
+}{data: make(map[testKZGKey]testKZGData)}
+
+func testBlobData(t testing.TB, index int, dense bool) testKZGData {
+	t.Helper()
+	testKZGCache.Lock()
+	defer testKZGCache.Unlock()
+	key := testKZGKey{index: index, dense: dense}
+	data, ok := testKZGCache.data[key]
+	if !ok {
+		if dense {
+			for j := 0; j < len(data.blob); j += 32 {
+				data.blob[j+31], data.blob[j+30] = byte(index+1), byte(j/32+index)
+			}
+		} else {
+			data.blob[0] = byte(index + 1)
+		}
+		var err error
+		data.commitment, err = kzg.Ctx().BlobToKZGCommitment(&data.blob, 0)
+		require.NoError(t, err)
+		data.cells, data.cellProofs, err = peerdasutils.ComputeCellsAndKZGProofs(data.blob[:])
+		require.NoError(t, err)
+		if !dense {
+			data.blobProof, err = kzg.Ctx().ComputeBlobKZGProof(&data.blob, data.commitment, 0)
+			require.NoError(t, err)
+		}
+		testKZGCache.data[key] = data
+	}
+	data.cells = slices.Clone(data.cells)
+	data.cellProofs = slices.Clone(data.cellProofs)
+	return data
+}
+
 func recoverableFuluData(t *testing.T, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, common.Hash, []*cltypes.BlobSidecar, []*cltypes.DataColumnSidecar) {
 	return recoverableFuluDataAtSlot(t, cfg, 100)
 }
@@ -233,15 +282,15 @@ func recoverableFuluDataAtSlotWithExecutionBlockHash(t *testing.T, cfg *clparams
 	block.Block.Body.ExecutionPayload.BlockHash = executionBlockHash
 	blobs := []goethkzg.Blob{{1}, {2}}
 	commitments := make([]goethkzg.KZGCommitment, len(blobs))
+	blobProofs := make([]goethkzg.KZGProof, len(blobs))
 	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, len(blobs))
 	for i := range blobs {
-		commitment, err := kzg.Ctx().BlobToKZGCommitment(&blobs[i], 0)
-		require.NoError(t, err)
+		data := testBlobData(t, i, false)
+		commitment := data.commitment
 		commitments[i] = commitment
+		blobProofs[i] = data.blobProof
 		block.GetBlobKzgCommitments().Append((*cltypes.KZGCommitment)(&commitment))
-		cells, proofs, err := peerdasutils.ComputeCellsAndKZGProofs(blobs[i][:])
-		require.NoError(t, err)
-		cellsAndProofs[i] = peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: proofs}
+		cellsAndProofs[i] = peerdasutils.CellsAndKZGProofs{Blobs: data.cells, Proofs: data.cellProofs}
 	}
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
@@ -256,8 +305,7 @@ func recoverableFuluDataAtSlotWithExecutionBlockHash(t *testing.T, cfg *clparams
 
 	sidecars := make([]*cltypes.BlobSidecar, len(blobs))
 	for i := range blobs {
-		proof, err := kzg.Ctx().ComputeBlobKZGProof(&blobs[i], commitments[i], 0)
-		require.NoError(t, err)
+		proof := blobProofs[i]
 		branch, err := block.Block.Body.KzgCommitmentMerkleProof(i)
 		require.NoError(t, err)
 		inclusionProof := solid.NewHashVector(cltypes.CommitmentBranchSize)
@@ -276,12 +324,10 @@ func recoverableGloasColumns(t *testing.T, cfg *clparams.BeaconChainConfig, slot
 	blobs := []goethkzg.Blob{{1}, {2}}
 	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, len(blobs))
 	for i := range blobs {
-		commitment, err := kzg.Ctx().BlobToKZGCommitment(&blobs[i], 0)
-		require.NoError(t, err)
+		data := testBlobData(t, i, false)
+		commitment := data.commitment
 		block.GetBlobKzgCommitments().Append((*cltypes.KZGCommitment)(&commitment))
-		cells, proofs, err := peerdasutils.ComputeCellsAndKZGProofs(blobs[i][:])
-		require.NoError(t, err)
-		cellsAndProofs[i] = peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: proofs}
+		cellsAndProofs[i] = peerdasutils.CellsAndKZGProofs{Blobs: data.cells, Proofs: data.cellProofs}
 	}
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
@@ -2702,12 +2748,14 @@ const (
 )
 
 func TestBlobRecoveryWaitsForGossipToGoQuietBeforeReadingColumns(t *testing.T) {
-	g := startGossipRecovery(t, false)
+	synctest.Test(t, func(t *testing.T) {
+		g := startGossipRecovery(t, false)
 
-	call := g.schedule(t)
-	started := g.awaitFirstRead(t)
+		call := g.schedule(t)
+		started := g.awaitFirstRead(t)
 
-	require.GreaterOrEqual(t, started.Sub(call.begin), wantQuietPeriod)
+		require.GreaterOrEqual(t, started.Sub(call.begin), wantQuietPeriod)
+	})
 }
 
 // Every column stored while the worker waits restarts the wait.
@@ -2761,20 +2809,22 @@ func earliestQuietEnd(calls []scheduleCall) time.Time {
 
 // A block whose remaining columns never arrive is recovered once gossip has gone quiet.
 func TestBlobRecoveryRecoversMissingColumnsOnceGossipIsQuiet(t *testing.T) {
-	g := startGossipRecovery(t, false)
-	g.storeColumnsUpTo(t, 100, nil)
+	synctest.Test(t, func(t *testing.T) {
+		g := startGossipRecovery(t, false)
+		g.storeColumnsUpTo(t, 100, nil)
 
-	scheduled := g.schedule(t)
-	started := g.awaitFirstRead(t)
-	call := receiveRecoveredColumnsPublish(t, g.published)
+		scheduled := g.schedule(t)
+		started := g.awaitFirstRead(t)
+		call := receiveRecoveredColumnsPublish(t, g.published)
 
-	require.Less(t, started.Sub(scheduled.end), wantQuietPeriod+startSlack)
-	requireBlobRecoveryReleased(t, g.d, g.root)
-	g.requireBlobsRecovered(t)
-	missing := publishedColumnIndices(g.unstoredColumns())
-	require.Len(t, missing, 28)
-	require.ElementsMatch(t, missing, publishedColumnIndices(call.sidecars))
-	require.Equal(t, int32(len(missing)), g.workerWrites.writes.Load(), "column writes by the worker")
+		require.Less(t, started.Sub(scheduled.end), wantQuietPeriod+startSlack)
+		requireBlobRecoveryReleased(t, g.d, g.root)
+		g.requireBlobsRecovered(t)
+		missing := publishedColumnIndices(g.unstoredColumns())
+		require.Len(t, missing, 28)
+		require.ElementsMatch(t, missing, publishedColumnIndices(call.sidecars))
+		require.Equal(t, int32(len(missing)), g.workerWrites.writes.Load(), "column writes by the worker")
+	})
 }
 
 // When gossip delivers the remaining columns before the worker decides to start, the matrix is complete: the worker
@@ -2819,44 +2869,46 @@ func TestBlobRecoveryStartsAtSlotDeadlineWhileColumnsKeepArriving(t *testing.T) 
 		{"gloas deadline passed", slotEpoch, gloasDeadline, gloasDeadline + time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			g := startGossipRecovery(t, false, func(r *recoveryRun) { forkToGloasAt(t, r, tc.gloasForkEpoch) })
-			scheduled := time.Now()
-			slotStart := scheduled.Add(-tc.slotAge)
-			g.slotStart.Store(slotStart.UnixNano())
-			var calls []scheduleCall
-			stop, stopped := make(chan struct{}), make(chan struct{})
-			stopProducer := sync.OnceFunc(func() { close(stop); <-stopped })
-			t.Cleanup(stopProducer)
-			go func() {
-				defer close(stopped)
-				for {
-					call, err := g.timedSchedule()
-					if err != nil {
-						t.Error(err)
+			synctest.Test(t, func(t *testing.T) {
+				g := startGossipRecovery(t, false, func(r *recoveryRun) { forkToGloasAt(t, r, tc.gloasForkEpoch) })
+				scheduled := time.Now()
+				slotStart := scheduled.Add(-tc.slotAge)
+				g.slotStart.Store(slotStart.UnixNano())
+				var calls []scheduleCall
+				stop, stopped := make(chan struct{}), make(chan struct{})
+				stopProducer := sync.OnceFunc(func() { close(stop); <-stopped })
+				t.Cleanup(stopProducer)
+				go func() {
+					defer close(stopped)
+					for {
+						call, err := g.timedSchedule()
+						if err != nil {
+							t.Error(err)
+						}
+						calls = append(calls, call)
+						select {
+						case <-stop:
+							return
+						case <-time.After(wantQuietPeriod / 10):
+						}
 					}
-					calls = append(calls, call)
-					select {
-					case <-stop:
-						return
-					case <-time.After(wantQuietPeriod / 10):
-					}
+				}()
+
+				started := g.awaitFirstRead(t)
+				stopProducer()
+
+				deadline := slotStart.Add(tc.deadline)
+				startNotBefore := deadline
+				if quietEnd := earliestQuietEnd(calls); quietEnd.Before(startNotBefore) {
+					startNotBefore = quietEnd
 				}
-			}()
-
-			started := g.awaitFirstRead(t)
-			stopProducer()
-
-			deadline := slotStart.Add(tc.deadline)
-			startNotBefore := deadline
-			if quietEnd := earliestQuietEnd(calls); quietEnd.Before(startNotBefore) {
-				startNotBefore = quietEnd
-			}
-			require.False(t, started.Before(startNotBefore), "the worker started before the slot deadline or the end of the quiet period")
-			slackFrom := scheduled
-			if deadline.After(slackFrom) {
-				slackFrom = deadline
-			}
-			require.Less(t, started.Sub(slackFrom), startSlack)
+				require.False(t, started.Before(startNotBefore), "the worker started before the slot deadline or the end of the quiet period")
+				slackFrom := scheduled
+				if deadline.After(slackFrom) {
+					slackFrom = deadline
+				}
+				require.Less(t, started.Sub(slackFrom), startSlack)
+			})
 		})
 	}
 }
