@@ -80,24 +80,24 @@ func TestDomain_MultiStepUnwindMatchesGroundTruth(t *testing.T) {
 	var wantSum int
 
 	for txn := uint64(1); txn <= nBlocks; txn++ {
-		w.diff = &kv.DomainDiff{}
+		diff := &kv.DomainDiff{}
 
 		rk := ringKey(int(txn) % ring)
 		rkS := string(rk)
 		newVal := int((txn*7 + 3) % 3) // pseudo-random in {0,1,2}, hits 0 often
 		if newVal == 0 {
-			require.NoError(t, w.DeleteWithPrev(rk, txn, enc(cur[rkS])))
+			require.NoError(t, w.DeleteWithPrevDiff(rk, txn, enc(cur[rkS]), diff))
 		} else {
-			require.NoError(t, w.PutWithPrev(rk, enc(newVal), txn, enc(cur[rkS])))
+			require.NoError(t, w.PutWithPrevDiff(rk, enc(newVal), txn, enc(cur[rkS]), diff))
 		}
 		sum += newVal - cur[rkS]
 		cur[rkS] = newVal
 
-		require.NoError(t, w.PutWithPrev(sumKey, enc(sum), txn, enc(cur["SUM"])))
+		require.NoError(t, w.PutWithPrevDiff(sumKey, enc(sum), txn, enc(cur["SUM"]), diff))
 		cur["SUM"] = sum
 
 		// Round-trip through (de)serialization to match the production diff path.
-		blockDiffs[txn] = changeset.DeserializeDiffSet(changeset.SerializeDiffSet(w.diff.GetDiffSet(), nil))
+		blockDiffs[txn] = changeset.DeserializeDiffSet(changeset.SerializeDiffSet(diff.GetDiffSet(), nil))
 
 		if txn == target {
 			wantVal = maps.Clone(cur)
