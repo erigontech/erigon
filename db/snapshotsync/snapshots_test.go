@@ -34,6 +34,7 @@ import (
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
@@ -2034,4 +2035,37 @@ func TestMergeAbortKeepsTheIndexOfASameRangeInput(t *testing.T) {
 	exists, err := dir2.FileExist(headersIdx)
 	require.NoError(err)
 	require.True(exists, "%s: the input's index must stay on disk", filepath.Base(headersIdx))
+}
+
+// A merge that fails and a later merge of the same ranges, with a reader open across both, must leave no
+// mapping of a deleted file once the reader is gone: such mappings hold disk space until restart.
+func TestMergeCyclesLeaveNoDeletedFileMapped(t *testing.T) {
+	logger := log.New()
+	require := require.New(t)
+	dir, err := filepath.EvalSymlinks(t.TempDir()) // /proc shows resolved paths
+	require.NoError(err)
+	for i := range uint64(4) {
+		for _, snT := range snaptype2.BlockSnapshotTypes {
+			createTestSegmentFile(t, i*10_000, (i+1)*10_000, snT.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+	ranges := []Range{NewRange(0, 20_000), NewRange(20_000, 40_000)}
+	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
+	merger.DisableFsync()
+
+	reader := s.View()
+	errFailed := errors.New("merge failed")
+	require.ErrorIs(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, s.Dir(), false, func([]string) error { return errFailed }, nil), errFailed)
+	require.NoError(merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil))
+	reader.Close()
+
+	paths, _, err := mmap.DeletedMappings(dir)
+	if errors.Is(err, errors.ErrUnsupported) {
+		return // no /proc/self/maps on this platform
+	}
+	require.NoError(err)
+	require.Empty(paths, "deleted files are still mapped")
 }

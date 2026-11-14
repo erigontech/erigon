@@ -17,6 +17,8 @@
 package dir
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,4 +62,33 @@ func Test_CreateTempWithExt(t *testing.T) {
 	base1 := filepath.Base(tmpfile.Name())
 	base2 := filepath.Base(ogfile)
 	require.True(t, strings.HasPrefix(base1, base2))
+}
+
+func TestDeletedOpenFilesListsADeletedFileUntilClose(t *testing.T) {
+	d, err := filepath.EvalSymlinks(t.TempDir()) // /proc shows resolved paths
+	require.NoError(t, err)
+	p := filepath.Join(d, "f.seg")
+	require.NoError(t, os.WriteFile(p, []byte{1}, 0o600))
+	f, err := os.Open(p)
+	require.NoError(t, err)
+	paths, err := DeletedOpenFiles(d)
+	if errors.Is(err, errors.ErrUnsupported) {
+		_ = f.Close()
+		return // no /proc/self/fd on this platform
+	}
+	require.NoError(t, err)
+	require.Empty(t, paths, "an open file that still exists is not listed")
+
+	require.NoError(t, RemoveFile(p))
+	paths, err = DeletedOpenFiles(d)
+	require.NoError(t, err)
+	require.Equal(t, []string{p}, paths)
+	paths, err = DeletedOpenFiles(d[:len(d)-1])
+	require.NoError(t, err)
+	require.Empty(t, paths, "a sibling directory with the same prefix is not listed")
+
+	require.NoError(t, f.Close())
+	paths, err = DeletedOpenFiles(d)
+	require.NoError(t, err)
+	require.Empty(t, paths)
 }

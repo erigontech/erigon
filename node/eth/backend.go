@@ -1093,6 +1093,11 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	}
 
 	s.bgComponentsEg.Go(func() error {
+		watchDeletedMappings(ctx, config.Dirs, s.logger)
+		return nil
+	})
+
+	s.bgComponentsEg.Go(func() error {
 		err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			s.logger.Error("cli.StartRpcServer error", "err", err)
