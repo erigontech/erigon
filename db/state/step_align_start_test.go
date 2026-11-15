@@ -34,6 +34,7 @@ func TestStepAlignedEndRefusesUnindexedTail(t *testing.T) {
 	for _, path := range []string{
 		"domain/v1.0-accounts.6-8.bt",
 		"accessor/v2.0-accounts.6-8.vi",
+		"accessor/v1.0-accounts.6-8.efi",
 		"accessor/v1.0-logaddrs.6-8.efi",
 	} {
 		t.Run(path, func(t *testing.T) {
