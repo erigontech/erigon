@@ -202,6 +202,9 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		if attributes != nil {
 			return nil, ErrForkChoiceUpdateNoPayloadID
 		}
+		if resp.PayloadStatus != nil && resp.PayloadStatus.Status == engine_types.SyncingStatus {
+			return nil, ErrForkChoiceUpdateSyncing
+		}
 		return []byte{}, nil
 	}
 	return *resp.PayloadId, checkPayloadStatus(resp.PayloadStatus)

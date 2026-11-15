@@ -341,14 +341,14 @@ func TestFastConfirmationWakePublishesDuringMissedSlot(t *testing.T) {
 			require.Equal(t, ChainTipSync, graph.Stages[stage].TransitionFunc(cfg, args, nil))
 			cfg.pendingBlockWrite = nil
 			synctest.Test(t, func(t *testing.T) {
-				for range 2 {
+				for _, responseErr := range []error{execution_client.ErrForkChoiceUpdateBusy, execution_client.ErrForkChoiceUpdateSyncing, execution_client.ErrForkChoiceUpdateBusy} {
 					require.Equal(t, ForkChoice, graph.Stages[stage].TransitionFunc(cfg, args, nil), "safe-only changes must publish without another block")
-					engine.EXPECT().ForkChoiceUpdate(gomock.Any(), hash, hash, hash, nil, clparams.Phase0Version).Return(nil, execution_client.ErrForkChoiceUpdateBusy)
+					engine.EXPECT().ForkChoiceUpdate(gomock.Any(), hash, hash, hash, nil, clparams.Phase0Version).Return(nil, responseErr)
 					started := time.Now()
 					_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.Root(), cfg)
 					require.NoError(t, err)
-					require.True(t, cfg.safeUpdatePending, "a busy response must preserve the update")
-					require.GreaterOrEqual(t, time.Since(started), sleepForSlotRewakeInterval, "busy retries must be throttled")
+					require.True(t, cfg.safeUpdatePending, "a deferred update must remain pending")
+					require.GreaterOrEqual(t, time.Since(started), sleepForSlotRewakeInterval, "retries must be throttled")
 				}
 				ctx, cancel := context.WithCancel(t.Context())
 				cancel()

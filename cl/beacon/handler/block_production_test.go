@@ -2570,7 +2570,7 @@ func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testin
 	require.Equal(t, 1, installing.onBlockCalls)
 }
 
-func TestStoreBlockAndBlobsToleratesBusyForkchoice(t *testing.T) {
+func TestStoreBlockAndBlobsToleratesDeferredForkchoice(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	block := blocks[1]
@@ -2583,20 +2583,19 @@ func TestStoreBlockAndBlobsToleratesBusyForkchoice(t *testing.T) {
 	fcu.HeadSlotVal = block.Block.Slot
 	fcu.OnTickFn = func(uint64) {}
 	engine := execution_client.NewMockExecutionEngine(ctrl)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, gomock.Any()).
-		Return(nil, execution_client.ErrForkChoiceUpdateBusy)
 	handler.engine = engine
 	handler.attestationProducer = attestation_producer.New(handler.beaconChainCfg)
 	handler.emitters = beaconevents.NewEventEmitter()
-	indicesChanged := handler.emitters.BlockIndicesChanged()
-
-	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus, func() {})
-
-	require.NoError(t, err)
-	select {
-	case <-indicesChanged:
-	default:
-		t.Fatal("the committed block indices must notify readers even if fork choice is busy")
+	for _, responseErr := range []error{execution_client.ErrForkChoiceUpdateBusy, execution_client.ErrForkChoiceUpdateSyncing} {
+		engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, gomock.Any()).Return(nil, responseErr)
+		indicesChanged := handler.emitters.BlockIndicesChanged()
+		err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus, func() {})
+		require.NoError(t, err)
+		select {
+		case <-indicesChanged:
+		default:
+			t.Fatal("the committed block indices must notify readers even if fork choice is deferred")
+		}
 	}
 }
 

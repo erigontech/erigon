@@ -389,8 +389,25 @@ func TestAggregateAndProofSuccess(t *testing.T) {
 	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
 	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
 	fcu.Ancestors[agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = forkchoice.ForkChoiceNode{Root: agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root}
-	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
-	require.NoError(t, aggService.ProcessMessage(context.Background(), nil, agg))
+	data := agg.SignedAggregateAndProof.Message.Aggregate.Data
+	for _, tc := range []struct {
+		name string
+		slot uint64
+	}{
+		{"older block", data.Slot - 1},
+		{"same slot", data.Slot},
+		{"newer block", data.Slot + 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fcu.Headers[data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{Slot: tc.slot}
+			err := aggService.ProcessMessage(t.Context(), nil, agg)
+			if tc.slot > data.Slot {
+				require.ErrorContains(t, err, "aggregate votes for a block newer than its slot")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 type captureAttestingIndicesForkChoice struct {

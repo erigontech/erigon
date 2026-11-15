@@ -292,6 +292,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		}
 		return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
 	}
+	if blockHeader.Slot > slot {
+		return errors.New("aggregate votes for a block newer than its slot")
+	}
 	committee, committeesPerSlot, err := beaconCommittee(
 		a.forkchoiceStore, a.syncedDataManager, target, aggregateData.BeaconBlockRoot, slot, committeeIndex,
 		a.beaconCfg.SlotsPerEpoch, func() error { return a.verifyAggregateBeforeBuild(aggregateAndProof) },

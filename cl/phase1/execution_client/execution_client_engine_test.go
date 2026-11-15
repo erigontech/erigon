@@ -279,21 +279,23 @@ func TestForkChoiceUpdateRejectsMissingPayloadIDForPayloadBuild(t *testing.T) {
 	require.Nil(t, id)
 }
 
-func TestForkChoiceUpdateAllowsMissingPayloadIDWithoutPayloadBuild(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	cc := &ExecutionClientEngine{
-		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
-			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
-		}},
-		beaconCfg: &cfg,
+func TestForkChoiceUpdateWithoutPayloadBuild(t *testing.T) {
+	for _, status := range []engine_types.EngineStatus{engine_types.ValidStatus, engine_types.SyncingStatus} {
+		t.Run(string(status), func(t *testing.T) {
+			cc := &ExecutionClientEngine{
+				engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
+					PayloadStatus: &engine_types.PayloadStatus{Status: status},
+				}},
+			}
+			id, err := cc.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion)
+			if status == engine_types.SyncingStatus {
+				require.ErrorIs(t, err, ErrForkChoiceUpdateSyncing)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Empty(t, id)
+		})
 	}
-
-	id, err := cc.ForkChoiceUpdate(
-		t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion,
-	)
-
-	require.NoError(t, err)
-	require.Empty(t, id)
 }
 
 func TestExecutionPayloadFromSSZBlock_BlockAccessListGloasOnly(t *testing.T) {
