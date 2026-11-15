@@ -38,7 +38,7 @@ jobs:
           matrix=$(yq -o=json '.' tools/eest-spec-shards.yml | jq -c '[.[] | select(env.SKIP_DEVNET_SHARDS != "true" or (.shard | contains("-devnet") | not))]')
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
-  # Build evm and evm.race once per run and ship them as an artifact, so the 75
+  # Build evm and evm.race once per run and ship them as an artifact, so the
   # shard jobs below skip Go installation, module download, the ~3GB GOCACHE
   # restore and the redundant per-shard rebuild (~14m of overhead each). Runs in
   # warming mode build nothing new except caches: this job is also what keeps
@@ -58,7 +58,6 @@ jobs:
           persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
-        id: erigon
         with:
           cache-namespace: test-eest-spec
 
