@@ -76,8 +76,9 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 		return err
 	}
 	if bn != nil {
-		// Cached replay and the database read can each be ahead of the other.
-		// Merge them only at startup; queued live events still apply unwinds.
+		// Notifications can arrive before commit, while cached replay can lag a
+		// newer committed head. Use the higher startup hint; live events must still
+		// apply lower heights on unwind.
 		initialBlockNum = max(initialBlockNum, *bn)
 	}
 	bt.logger.Debug("block tracker setting initial block num", "blockNum", initialBlockNum)

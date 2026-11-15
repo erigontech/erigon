@@ -74,9 +74,15 @@ TxPool uses transaction directions to track mined and unwound transactions, and
 account/storage/code changes to refresh sender state and invalidate frame validations.
 
 On subscription, the KV server reads a reset at committed Execution stage progress.
-Under the publication lock, it selects the newer of this reset and the latest published
-head, keeping the head and state version together. It sends that reset before later
-batches, including when the latest publication is still awaiting commit.
+Under the publication lock, it compares this reset with the latest published head
+and selects the one with the higher state version, keeping head metadata and state
+version together. At equal versions it uses the committed snapshot, unless a
+publication raced that snapshot read. Finality can change without advancing the
+state version, so this race requires another committed read outside the publication
+lock.
+
+It sends the selected reset before later batches, including when the selected
+publication is still awaiting commit.
 
 For incomplete batches, `RefreshAccounts` appends final values for addresses with
 recorded account changes. This keeps older entries from overwriting current values

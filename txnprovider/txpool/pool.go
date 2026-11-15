@@ -2204,20 +2204,16 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		}
 	}
 
-	// Senders with queued txns that didn't appear in stateChanges still need
-	// re-evaluation: a tx misclassified into queued at AddLocalTxns time —
-	// e.g. because senders.info returned a stale sender nonce due to the
-	// pre-commit dispatch race introduced in #20195 — would otherwise stay
-	// queued forever, since the only re-evaluation trigger is the sender
-	// appearing in a block's stateChanges, which doesn't happen if the
-	// queued tx is the sender's only outstanding tx.
 	sendersToRefresh := map[uint64]struct{}{}
 	if stateChanges.StateChangesIncomplete {
-		// Missing account changes can leave mined transactions spending a frame payer's balance.
+		// Omitted account changes can leave mined transactions in the pool,
+		// so stale pooled costs can block frame payer reservations.
 		for senderID := range p.all.senderIDTxnCount {
 			sendersToRefresh[senderID] = struct{}{}
 		}
 	} else {
+		// Recheck queued senders even without announced changes: stale state at
+		// admission can otherwise leave their transactions queued indefinitely.
 		for _, mt := range p.queued.best.ms {
 			sendersToRefresh[mt.TxnSlot.SenderID] = struct{}{}
 		}
@@ -2225,14 +2221,14 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 
 	for senderID := range sendersWithChangedState {
 		delete(sendersToRefresh, senderID)
-		// Reset the dormancy timer: this sender had a real on-chain state change.
+		// Restored transactions and announced account changes both count as sender activity.
 		p.senderLastActivity[senderID] = blockNum
 		if err := p.refreshSender(cacheView, senderID); err != nil {
 			return announcements, err
 		}
 	}
 
-	// Refreshing eligibility without an announced account change must not extend the dormancy timer.
+	// Rechecking eligibility alone must not extend the dormancy timer.
 	for senderID := range sendersToRefresh {
 		if err := p.refreshSender(cacheView, senderID); err != nil {
 			return announcements, err

@@ -578,8 +578,9 @@ func (s *StateChangePubSub) Sub(reset *remoteproto.StateChangeBatch, snapshotSeq
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	published := s.reset.batch
-	// A raced publication with the same state version leaves finality ordering
-	// ambiguous. Read a fresh committed snapshot before registering the subscriber.
+	// Finality can change without advancing the state version. If a publication
+	// races a snapshot read at the same version, read a fresh committed snapshot
+	// before choosing the subscription reset.
 	if reset != nil && published != nil && published.StateVersionId == reset.StateVersionId && s.reset.sequence > snapshotSequence {
 		return nil, nil, true
 	}
