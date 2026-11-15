@@ -168,7 +168,7 @@ With `--eez.sequencer` the node also produces the chain ahead of settlement, fro
   --http.api=eth,debug,eez --eez.sync.l1only --nodiscover --trustedpeers=enode://<follower>@<host>:30303
 ```
 
-`--eez.proof.time` and `--eez.submission.slack` size the Future blocks, ceil((proof + slack) / L2 block time) − 1 of them, so that a slot's proof reaches L1 the slack before the next L1 block; the node refuses a timing that leaves no room for it. Produced blocks carry the beneficiary `--eez.sequencer.feerecipient`, else the chain's fee collector, and empty extra data. Transactions enter the pool as on any node, but blocks leave out blob transactions, EEZ system transactions and transactions from the system address, and each block's transactions stay within what lets a slot settle in one batch. Until a composer exists the Sync block holds pool transactions too, and nothing settles. `--eez.sequencer.maxdepth` pauses steady slots once the head is that many blocks past the latest settlement.
+`--eez.proof.time` and `--eez.submission.slack` size the Future blocks, ceil((proof + slack) / L2 block time) − 1 of them, so that a slot's proof reaches L1 the slack before the next L1 block; the node refuses a timing that leaves no room for it. Produced blocks carry the beneficiary `--eez.sequencer.feerecipient`, else the chain's fee collector, and empty extra data. Transactions reach the pool only through the sequencer node's own JSON-RPC or private API, as its txpool gossips none and followers run none. Blocks leave out blob transactions, EEZ system transactions and transactions from the system address, and each block's transactions stay within what lets a slot settle in one batch. Until a composer exists the Sync block holds pool transactions too, and nothing settles. `--eez.sequencer.maxdepth` pauses a steady slot once the head is that many blocks past the latest settlement. The trigger after a pause is a catch-up, which ignores the cap so that a slot whose settlement failed can be produced again; through a settlement stall the head therefore runs past the cap, every other trigger catching up to its Sync block.
 
 Every produced block's execution witness is kept in `<datadir>/eez/witnesses` until L1 finality covers the block. It has the shape of `debug_executionWitness`, plus the trie nodes that removing each accessed account or slot collapses onto, so that a prover can compute state roots inside the block, not only at its end. A block left without one logs `[eez] produced block without a witness` at error level.
 
@@ -201,7 +201,7 @@ The sequencer keeps the txpool, without gossip, and serves its blocks to its [L2
 | `--eez.sequencer` | | Produce the chain from the transaction pool; see [Producing the chain](#producing-the-chain). |
 | `--eez.proof.time` | | Worst-case time the prover takes for a slot; required with `--eez.sequencer`. |
 | `--eez.submission.slack` | `100ms` | How early a slot's batch must reach L1 before the next L1 block. |
-| `--eez.sequencer.maxdepth` | `64` | Most blocks the head runs ahead of the latest settlement; `0` for no cap. |
+| `--eez.sequencer.maxdepth` | `64` | Blocks past the latest settlement at which a steady slot pauses; the catch-up that follows ignores it; `0` for no cap. |
 | `--eez.sequencer.feerecipient` | | Beneficiary of produced blocks; the chain's fee collector when unset. |
 | `--eez.l1.chainid`, `--eez.registry`, `--eez.registry.deployblock`, `--eez.rollupid`, `--eez.l1.blocktime`, `--eez.l2.blocktime` | | The `l2` section of the chain config, written by `init`. |
 

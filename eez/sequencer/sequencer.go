@@ -33,8 +33,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider"
 )
 
-// DefaultMaxDepth is the default cap on the blocks the head runs ahead of
-// the latest settlement.
+// DefaultMaxDepth is the default MaxDepth.
 const DefaultMaxDepth = 64
 
 // offGridStall is the number of consecutive Sync blocks skipped off the grid
@@ -89,8 +88,10 @@ type Config struct {
 	// FeeRecipient is the beneficiary of produced blocks; zero selects the
 	// chain's fee collector.
 	FeeRecipient common.Address
-	// MaxDepth caps the blocks the head runs ahead of the latest settlement
-	// in a steady slot; zero disables the cap.
+	// MaxDepth pauses a steady slot once the head runs that many blocks past
+	// the latest settlement; zero disables it. The next trigger is a catch-up,
+	// which ignores it: pausing that too would stop a slot whose settlement
+	// failed from being produced again. It bounds no depth through a stall.
 	MaxDepth uint64
 	// DABudget bounds the DA bytes of each block's transactions; zero is
 	// DABudget(K).

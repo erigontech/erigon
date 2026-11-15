@@ -28,8 +28,8 @@ import (
 // ErrTiming reports a timing that cannot lay out a Sync slot.
 var ErrTiming = errors.New("invalid sequencer timing")
 
-// MaxCatchup bounds the blocks one Catchup trigger produces, so that its
-// range fits one batch.
+// MaxCatchup bounds the blocks one Catchup trigger produces. The range
+// settles over several batches, each ending at a Sync position of its grid.
 const MaxCatchup = 300
 
 // Timing is the wall-clock layout of a rollup's blocks. Every L1 block spans
@@ -48,7 +48,7 @@ type Timing struct {
 
 // Validate reports a timing without a layout: L2 not whole seconds, K not an
 // integer of at least 2, or no room for the proof and the slack before the
-// next L1 block and within the Future blocks.
+// next L1 block and within the K-1 blocks before the Sync block.
 func (t Timing) Validate() error {
 	invalid := func(format string, args ...any) error {
 		return fmt.Errorf("%w: %s", ErrTiming, fmt.Sprintf(format, args...))

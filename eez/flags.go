@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/overlay"
+	"github.com/erigontech/erigon/eez/sequencer"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -136,8 +137,8 @@ var (
 	}
 	SequencerMaxDepthFlag = cli.Uint64Flag{
 		Name:  "eez.sequencer.maxdepth",
-		Usage: "Most blocks the head runs ahead of the latest settlement, 0 for no cap",
-		Value: 64,
+		Usage: "Blocks past the latest settlement at which a steady slot pauses, 0 for no cap; the catch-up that follows ignores it",
+		Value: sequencer.DefaultMaxDepth,
 	}
 	SequencerFeeRecipientFlag = cli.StringFlag{
 		Name:  "eez.sequencer.feerecipient",
