@@ -48,6 +48,17 @@ func (o *once) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]typ
 	return txs, nil
 }
 
+// cancelling ends its caller's context at its first request, while Run
+// builds.
+type cancelling struct {
+	cancel context.CancelFunc
+}
+
+func (c cancelling) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	c.cancel()
+	return nil, nil
+}
+
 // provide returns a provider of the transactions encoded, their senders
 // recovered as a pool's are.
 func provide(t *testing.T, encoded ...[]byte) *once {
@@ -126,4 +137,23 @@ func TestCommands(t *testing.T) {
 	fc, err := n.m.ExecModule.GetForkChoice(ctx)
 	require.NoError(t, err)
 	require.Equal(t, b1.Block.Hash(), fc.SafeHash)
+}
+
+// TestProduceOutlivesItsCaller: a caller whose context ends after Run took
+// its block gets the block, which is the head; leaving earlier it would miss
+// the head move.
+func TestProduceOutlivesItsCaller(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	n := newNode(t, c.L1)
+	n.run(t)
+	genesis, err := n.chain.Head(t.Context())
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	built, err := n.follower.Produce(ctx, inputs(genesis), cancelling{cancel})
+	require.NoError(t, err)
+	head, err := n.chain.Head(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, head.Hash(), built.Block.Hash())
+	require.Equal(t, uint64(1), head.Number.Uint64())
 }

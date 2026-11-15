@@ -41,8 +41,10 @@ type command struct {
 	done chan error
 }
 
-// do has Run perform fn and returns its error. It waits while Run derives
-// or boots; ctx bounds the wait, after which fn may still run.
+// do has Run perform fn and returns its error. ctx bounds the wait while Run
+// derives or boots. Once Run takes fn, do waits for it, which Run's context
+// bounds: a caller leaving earlier would miss a head fn moved and share fn's
+// writes with it.
 func (f *Follower) do(ctx context.Context, fn func(ctx context.Context) error) error {
 	c := command{run: fn, done: make(chan error, 1)}
 	select {
@@ -50,12 +52,7 @@ func (f *Follower) do(ctx context.Context, fn func(ctx context.Context) error) e
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	select {
-	case err := <-c.done:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return <-c.done
 }
 
 // perform runs c; the head moves it makes are the sequencer's.
