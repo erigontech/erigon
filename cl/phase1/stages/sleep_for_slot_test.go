@@ -858,6 +858,16 @@ func TestSleepForSlotColumnWakeSurvivesAHeadChangeReturn(t *testing.T) {
 	})
 }
 
+type cancellingSleepForSlotClock struct {
+	sleepForSlotClockFake
+	cancel context.CancelFunc
+}
+
+func (c cancellingSleepForSlotClock) GetCurrentSlot() uint64 {
+	c.cancel()
+	return c.sleepForSlotClockFake.GetCurrentSlot()
+}
+
 func TestSleepForSlotColumnWakeStopsOnCancel(t *testing.T) {
 	t.Run("cancelled while a pass runs", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
@@ -899,6 +909,30 @@ func TestSleepForSlotColumnWakeStopsOnCancel(t *testing.T) {
 				require.ErrorIs(t, err, context.Canceled)
 			}
 			require.Empty(t, retries.passes(), "a cancelled wait must not start a pass")
+		})
+	})
+	t.Run("cancelled after the wake", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			emitter := beaconevents.NewEventEmitter()
+			emitter.NotifyDataColumnStored(common.Hash{0xff})
+			var prunes, headReads int
+			forkChoice := sleepForSlotForkChoiceFake{
+				head: common.Hash{1}, calls: &headReads, emitter: emitter,
+				parkedRoot: func(common.Hash, uint64) bool { prunes++; return true },
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			clock := cancellingSleepForSlotClock{
+				sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(time.Minute)}, cancel,
+			}
+
+			_, _, err := waitForNextSlotOrHeadChange(
+				ctx, 11, sleepForSlotConfig(10), forkChoice,
+				sleepForSlotSyncedDataFake{head: common.Hash{1}}, clock, sleepForSlotWake{}, common.Hash{},
+			)
+
+			require.ErrorIs(t, err, context.Canceled)
+			require.Zero(t, prunes, "a cancelled wait must not check the availability of the woken roots")
+			require.Zero(t, headReads, "a cancelled wait must not read the head")
 		})
 	})
 }

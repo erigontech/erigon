@@ -113,9 +113,14 @@ func waitForNextSlotOrHeadChange(
 		}
 		currentSlot := clock.GetCurrentSlot()
 		columnFloor := max(currentSlot, 1) - 1
-		if columnsWoke && !forkChoice.PrunePendingEnvelopeRetryRoots(columnFloor) {
-			columnWakeUnserved = false
-			continue
+		if columnsWoke {
+			if err := ctx.Err(); err != nil {
+				return sleepForSlotWake{}, false, err
+			}
+			if !forkChoice.PrunePendingEnvelopeRetryRoots(columnFloor) {
+				columnWakeUnserved = false
+				continue
+			}
 		}
 		head, headSlot, err := forkChoice.GetHeadNode()
 		select {
