@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/internal/stateless"
@@ -294,4 +295,50 @@ func TestCaptureWhileStopping(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, block.Transactions(), 1)
 	replay(t, st, m.Engine, block)
+}
+
+// replaced has each produced block replaced as soon as the command that
+// committed it ends, as derivation can replace it.
+type replaced struct {
+	*follower.Follower
+}
+
+func (r replaced) Produce(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider, committed func(*types.Header)) (*types.BlockWithReceipts, error) {
+	built, err := r.Follower.Produce(ctx, in, txs, committed)
+	if err != nil {
+		return nil, err
+	}
+	return built, r.HeadTo(ctx, in.ParentHash)
+}
+
+// TestCaptureBeforeDerivation: a produced block's witness is kept before
+// derivation can replace the block, after which nothing builds it.
+func TestCaptureBeforeDerivation(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	m, chain := derivertest.NewL2(t)
+	f, err := follower.New(c.L1, chain, derivertest.Config(), follower.DefaultConfig, log.New())
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() { _ = f.Run(ctx) }()
+
+	st, err := witness.Open(t.Context(), t.TempDir(), log.New())
+	require.NoError(t, err)
+	defer st.Close()
+	capture := witness.NewCapture(jsonrpc.NewHeadWitnesses(m.DB, m.BlockReader, m.Engine), st, func() uint64 { return 0 })
+	u := &user{t: t}
+	p := &pool{txs: []types.Transaction{u.tx(&common.Address{1}, nil)}}
+	timing := sequencer.Timing{L1: 12 * time.Second, L2: 2 * time.Second, Proof: 4 * time.Second, Slack: 1500 * time.Millisecond}
+	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: timing, Witnesses: capture}, replaced{f}, p, log.New())
+	require.NoError(t, err)
+
+	require.NoError(t, s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 1_000}))
+	produced := s.Status().Last
+	require.NotNil(t, produced)
+	head, err := f.Head(t.Context())
+	require.NoError(t, err)
+	require.NotEqual(t, produced.Hash(), head.Hash(), "the produced block was replaced")
+	raw, err := st.Get(t.Context(), produced.Number.Uint64(), produced.Hash())
+	require.NoError(t, err)
+	require.NotNil(t, raw, "the replaced block has no witness")
 }

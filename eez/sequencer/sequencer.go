@@ -68,8 +68,10 @@ type Committer interface {
 	// Head returns the header of the head block.
 	Head(ctx context.Context) (*types.Header, error)
 	// Produce builds the block of inputs in on the head from txs and makes
-	// it the head; follower.ErrStaleParent reports a head that has moved.
-	Produce(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider) (*types.BlockWithReceipts, error)
+	// it the head; committed, when set, takes its header before derivation
+	// can move the head again. follower.ErrStaleParent reports a head that
+	// has moved.
+	Produce(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider, committed func(*types.Header)) (*types.BlockWithReceipts, error)
 	// Settled returns the block the latest settlement ended at.
 	Settled() uint64
 }
@@ -318,19 +320,22 @@ func (s *Sequencer) build(ctx context.Context, kind Kind, parent *types.Header, 
 			defer pin.Close()
 		}
 	}
-	built, err := s.committer.Produce(ctx, in, txs)
+	// Before derivation resumes: a block it replaces has no witness to build.
+	record := func(h *types.Header) {
+		switch {
+		case pinErr != nil:
+			s.witnessFailed(in.Number, pinErr)
+		case pin != nil:
+			if err := s.cfg.Witnesses.Record(wctx, pin, h); err != nil {
+				s.witnessFailed(in.Number, err)
+			}
+		}
+	}
+	built, err := s.committer.Produce(ctx, in, txs, record)
 	if err != nil {
 		return nil, err
 	}
 	h := built.Block.Header()
-	switch {
-	case pinErr != nil:
-		s.witnessFailed(in.Number, pinErr)
-	case pin != nil:
-		if err := s.cfg.Witnesses.Record(wctx, pin, h); err != nil {
-			s.witnessFailed(in.Number, err)
-		}
-	}
 	s.logger.Info("[eez] produced block", "event", "eez.sequencer.block.produced", "kind", kind, "number", h.Number.Uint64(),
 		"hash", h.Hash(), "time", h.Time, "txs", len(built.Block.Transactions()))
 	s.statusMu.Lock()

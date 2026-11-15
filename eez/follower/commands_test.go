@@ -97,14 +97,14 @@ func TestCommands(t *testing.T) {
 
 	tx := c.Transfer(bob, 1)
 	genesis := head()
-	b1, err := n.follower.Produce(ctx, inputs(genesis), provide(t, tx))
+	b1, err := n.follower.Produce(ctx, inputs(genesis), provide(t, tx), nil)
 	require.NoError(t, err)
 	require.Len(t, b1.Block.Transactions(), 1)
 	require.Equal(t, alice, b1.Block.Coinbase())
 	require.Equal(t, b1.Block.Hash(), head().Hash())
 	require.Equal(t, follower.HeadSequencer, n.follower.Status().HeadSource)
 
-	_, err = n.follower.Produce(ctx, inputs(genesis), provide(t))
+	_, err = n.follower.Produce(ctx, inputs(genesis), provide(t), nil)
 	require.ErrorIs(t, err, follower.ErrStaleParent)
 
 	// The settlement of the produced block keeps it.
@@ -115,9 +115,9 @@ func TestCommands(t *testing.T) {
 	require.Zero(t, n.chain.Built(), "derivation rebuilt a produced block")
 	require.Equal(t, follower.HeadSequencer, n.follower.Status().HeadSource, "the settlement moved no head")
 
-	b2, err := n.follower.Produce(ctx, inputs(b1.Block.Header()), provide(t))
+	b2, err := n.follower.Produce(ctx, inputs(b1.Block.Header()), provide(t), nil)
 	require.NoError(t, err)
-	b3, err := n.follower.Produce(ctx, inputs(b2.Block.Header()), provide(t))
+	b3, err := n.follower.Produce(ctx, inputs(b2.Block.Header()), provide(t), nil)
 	require.NoError(t, err)
 
 	require.NoError(t, n.follower.HeadTo(ctx, b2.Block.Hash()))
@@ -150,7 +150,7 @@ func TestProduceOutlivesItsCaller(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(t.Context())
-	built, err := n.follower.Produce(ctx, inputs(genesis), cancelling{cancel})
+	built, err := n.follower.Produce(ctx, inputs(genesis), cancelling{cancel}, nil)
 	require.NoError(t, err)
 	head, err := n.chain.Head(t.Context())
 	require.NoError(t, err)

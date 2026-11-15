@@ -42,9 +42,8 @@ type command struct {
 }
 
 // do has Run perform fn and returns its error. ctx bounds the wait while Run
-// derives or boots. Once Run takes fn, do waits for it, which Run's context
-// bounds: a caller leaving earlier would miss a head fn moved and share fn's
-// writes with it.
+// derives or boots. Once Run takes fn, do waits for it: a caller leaving
+// earlier would miss a head fn moved and share fn's writes with it.
 func (f *Follower) do(ctx context.Context, fn func(ctx context.Context) error) error {
 	c := command{run: fn, done: make(chan error, 1)}
 	select {
@@ -62,9 +61,10 @@ func (f *Follower) perform(ctx context.Context, c command) {
 }
 
 // Produce builds the block of inputs in on the head, with the transactions
-// of txs that fit, and makes it the head. A head other than in.ParentHash
+// of txs that fit, and makes it the head; committed, when set, takes the
+// block's header before derivation resumes. A head other than in.ParentHash
 // fails it with ErrStaleParent.
-func (f *Follower) Produce(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider) (*types.BlockWithReceipts, error) {
+func (f *Follower) Produce(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider, committed func(*types.Header)) (*types.BlockWithReceipts, error) {
 	var built *types.BlockWithReceipts
 	err := f.do(ctx, func(ctx context.Context) error {
 		if err := f.requireHead(ctx, in.ParentHash); err != nil {
@@ -74,7 +74,9 @@ func (f *Follower) Produce(ctx context.Context, in deriver.HeaderInputs, txs txn
 		if err != nil {
 			return err
 		}
-		built, err = f.chain.Build(ctx, in, txs, safe, finalized)
+		if built, err = f.chain.Build(ctx, in, txs, safe, finalized); err == nil && committed != nil {
+			committed(built.Block.Header())
+		}
 		return err
 	})
 	return built, err
