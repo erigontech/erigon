@@ -44,7 +44,8 @@ type Parameters struct {
 	RequireAllTransactions bool
 	// RunToCompletion adds transactions until the provider runs dry or the gas
 	// runs out, ignoring a request to stop, for a producer whose block time
-	// does not bound its build.
+	// does not bound its build. Its wait for the provider to see the parent
+	// block ends with the request's context only.
 	RunToCompletion bool
 	// ExtraData overrides the builder's configured extra data when non-nil.
 	ExtraData []byte

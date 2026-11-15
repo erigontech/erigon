@@ -244,3 +244,45 @@ func TestBuildDrainsThePool(t *testing.T) {
 	built := b.produce(t, func(e *eezrules.Engine) rules.Engine { return headerless{e} }, pool)
 	require.Len(t, built.Block.Transactions(), 6)
 }
+
+// lagging is a pool that sees the parent block only after ready: until then
+// a request waits, and returns nothing once the caller stops the wait, as
+// the txpool does.
+type lagging struct {
+	tx    types.Transaction
+	ready chan struct{}
+	mu    sync.Mutex
+	given bool
+}
+
+func newLagging(tx types.Transaction, after time.Duration) *lagging {
+	l := &lagging{tx: tx, ready: make(chan struct{})}
+	time.AfterFunc(after, func() { close(l.ready) })
+	return l
+}
+
+func (l *lagging) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	select {
+	case <-l.ready:
+	case <-txnprovider.ApplyProvideOptions(opts...).ParentBlockWaitStop:
+		return nil, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.given {
+		return nil, nil
+	}
+	l.given = true
+	return []types.Transaction{l.tx}, nil
+}
+
+// TestBuildWaitsForThePoolToSeeTheParent: a produced block waits for a pool
+// that has not yet seen its parent, instead of leaving its transactions out.
+func TestBuildWaitsForThePoolToSeeTheParent(t *testing.T) {
+	b := newStateGasBlock(t, 1, false)
+	tx := b.drip(t, 0, 1).batches[0][0]
+	built := b.produce(t, func(e *eezrules.Engine) rules.Engine { return headerless{e} }, newLagging(tx, 1500*time.Millisecond))
+	require.Len(t, built.Block.Transactions(), 1)
+}

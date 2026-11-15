@@ -317,10 +317,15 @@ func getNextTransactions(
 		remainingBlobGas = maxBlobs*params.GasPerBlob - *header.BlobGasUsed
 	}
 
+	parentBlockWaitStop := stopSignalsOf(ctx).parentBlockWaitStopped
+	if cfg.runToCompletion {
+		// Stopped, the wait yields nothing, which this build takes for a dry pool.
+		parentBlockWaitStop = nil
+	}
 	provideOpts := []txnprovider.ProvideOption{
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
-		txnprovider.WithParentBlockWaitStop(stopSignalsOf(ctx).parentBlockWaitStopped),
+		txnprovider.WithParentBlockWaitStop(parentBlockWaitStop),
 		txnprovider.WithBlockTime(header.Time),
 		// EIP-8037: runtime state gas is enforced by post-execution rollback
 		// in the block assembler.
