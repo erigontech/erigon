@@ -39,11 +39,12 @@ type LighthouseValidatorInclusionGlobal struct {
 
 // the block root hash of the highest numbered slot that actually exists
 func (a *ApiHandler) findEpochRoot(tx kv.Tx, epoch uint64) (common.Hash, error) {
+	firstSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	var currentBlockRoot common.Hash
 	var err error
-	for i := (epoch+1)*a.beaconChainCfg.SlotsPerEpoch - 1; i >= epoch*a.beaconChainCfg.SlotsPerEpoch; i-- {
+	for remaining := a.beaconChainCfg.SlotsPerEpoch; remaining > 0; remaining-- {
 		// read the block roots from the back
-		currentBlockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, i)
+		currentBlockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, firstSlot+remaining-1)
 		if err != nil {
 			return common.Hash{}, err
 		}
@@ -60,6 +61,9 @@ func (a *ApiHandler) GetLighthouseValidatorInclusionGlobal(w http.ResponseWriter
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	if epochSlotOverflows(epoch, a.beaconChainCfg.SlotsPerEpoch) {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch slot range overflows"))
 	}
 	ret, ok := a.lighthouseInclusionCache.Load(epoch)
 	if ok {
@@ -216,6 +220,9 @@ func (a *ApiHandler) GetLighthouseValidatorInclusion(w http.ResponseWriter, r *h
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	if epochSlotOverflows(epoch, a.beaconChainCfg.SlotsPerEpoch) {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch slot range overflows"))
 	}
 	tx, err := a.indiciesDB.BeginRo(r.Context())
 	if err != nil {
