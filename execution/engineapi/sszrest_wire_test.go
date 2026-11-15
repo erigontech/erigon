@@ -5,6 +5,7 @@ package engineapi
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/holiman/uint256"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
 
 func encodeHashListRequest(hashes []common.Hash, limit int) ([]byte, error) {
@@ -58,6 +60,29 @@ func decodeForkchoiceResponse(buf []byte) (*engine_types.ForkChoiceUpdatedRespon
 		resp.PayloadId = &id
 	}
 	return resp, nil
+}
+
+// decodePayloadStatusWithWitness returns a nil witness when the optional is absent.
+func decodePayloadStatusWithWitness(buf []byte) (*engine_types.PayloadStatus, *jsonrpc.ExecutionWitnessResult, error) {
+	status := &engine_types.PayloadStatus{}
+	optional := solid.NewTransactionsSSZWithLimits(1, math.MaxUint32)
+	if err := ssz2.UnmarshalSSZStrict(buf, 0, status, optional); err != nil {
+		return nil, nil, err
+	}
+	if optional.Len() == 0 {
+		return status, nil, nil
+	}
+	state := solid.NewTransactionsSSZWithLimits(sszMaxWitnessItems, sszMaxBytesPerWitnessNode)
+	codes := solid.NewTransactionsSSZWithLimits(sszMaxWitnessItems, sszMaxBytesPerCode)
+	headers := solid.NewTransactionsSSZWithLimits(sszMaxWitnessHeaders, sszMaxBytesPerHeader)
+	if err := ssz2.UnmarshalSSZStrict(optional.UnderlyngReference()[0], 0, state, codes, headers); err != nil {
+		return nil, nil, err
+	}
+	return status, &jsonrpc.ExecutionWitnessResult{
+		State:   transactionsBytes(state),
+		Codes:   transactionsBytes(codes),
+		Headers: transactionsBytes(headers),
+	}, nil
 }
 
 func decodeBlockValue(v common.Hash) *hexutil.U256 {

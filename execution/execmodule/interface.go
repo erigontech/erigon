@@ -19,10 +19,12 @@ package execmodule
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/types"
@@ -69,6 +71,9 @@ type ValidationResult struct {
 	LatestValidHash  common.Hash
 	ValidationError  string
 }
+
+// BlockStateView reads a block: blockTx holds the block and its executed state, parentState the latest state of its parent.
+type BlockStateView func(blockTx kv.TemporalTx, parentState kv.TemporalGetter) error
 
 // ForkChoiceResult is the native return type for UpdateForkChoice.
 type ForkChoiceResult struct {
@@ -140,6 +145,12 @@ type ExecutionModule interface {
 
 	// ValidateChain validates the chain ending at block.
 	ValidateChain(ctx context.Context, block *types.Block) (ValidationResult, error)
+
+	// ValidateChainAndView is ValidateChain that, for a VALID block, also calls fn with the block's state before it
+	// releases the module, so no other module call can drop that state first. It reads a committed block without
+	// the module, waits up to wait for a busy module, and executes again a block whose state is no longer held.
+	// It does not call fn for a committed block whose changesets are pruned.
+	ValidateChainAndView(ctx context.Context, block *types.Block, wait time.Duration, fn BlockStateView) (ValidationResult, error)
 
 	// --- Fork choice ------------------------------------------------------
 

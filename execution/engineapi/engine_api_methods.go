@@ -164,13 +164,13 @@ func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_newpayloadv1
 func (e *EngineServer) NewPayloadV1(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, nil, nil, nil, nil, clparams.BellatrixVersion, false)
+	return e.newPayload(ctx, payload, nil, nil, nil, nil, clparams.BellatrixVersion, false, nil)
 }
 
 // NewPayloadV2 processes new payloads (blocks) from the beacon chain with withdrawals.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_newpayloadv2
 func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, nil, nil, nil, nil, clparams.CapellaVersion, false)
+	return e.newPayload(ctx, payload, nil, nil, nil, nil, clparams.CapellaVersion, false, nil)
 }
 
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
@@ -178,7 +178,7 @@ func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.E
 func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
 ) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, nil, nil, clparams.DenebVersion, false)
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, nil, nil, clparams.DenebVersion, false, nil)
 }
 
 // NewPayloadV4 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas and requests.
@@ -186,7 +186,7 @@ func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.E
 func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes,
 ) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, nil, clparams.ElectraVersion, false)
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, nil, clparams.ElectraVersion, false, nil)
 }
 
 // NewPayloadV5 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas, requests and block access list.
@@ -194,7 +194,7 @@ func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.E
 func (e *EngineServer) NewPayloadV5(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes,
 ) (*engine_types.PayloadStatus, error) {
-	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, nil, clparams.GloasVersion, false)
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, nil, clparams.GloasVersion, false, nil)
 }
 
 // NewPayloadV6 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas, requests, block access list and inclusion list.
@@ -202,7 +202,7 @@ func (e *EngineServer) NewPayloadV5(ctx context.Context, payload *engine_types.E
 func (e *EngineServer) NewPayloadV6(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList []hexutil.Bytes,
 ) (*engine_types.PayloadStatus, error) {
-	resp, err := e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, inclusionList, clparams.HezeVersion, false)
+	resp, err := e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, inclusionList, clparams.HezeVersion, false, nil)
 	if resp != nil {
 		resp.SSZVersion = clparams.HezeVersion
 	}

@@ -30,6 +30,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/c2h5oh/datasize"
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
 
@@ -100,7 +101,17 @@ type EngineServer struct {
 
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
 	maxReorgDepth   uint64
+
+	witnessBuilder   *jsonrpc.DebugAPIImpl
+	payloadWitnesses *jsonrpc.WitnessResultCache
 }
+
+// Bounds for the witnesses kept for payloads resubmitted after their state was committed.
+// One witness can reach hundreds of MB, so the byte bound is the one that matters.
+const (
+	payloadWitnessCacheSize  = 8
+	payloadWitnessCacheBytes = int(256 * datasize.MB)
+)
 
 func NewEngineServer(
 	logger log.Logger,
@@ -130,6 +141,7 @@ func NewEngineServer(
 		txpool:           txPool,
 		blobGetter:       blobGetter,
 		maxReorgDepth:    maxReorgDepth,
+		payloadWitnesses: jsonrpc.NewWitnessResultCache(payloadWitnessCacheSize, payloadWitnessCacheBytes),
 	}
 
 	srv.consuming.Store(consuming)
@@ -173,6 +185,7 @@ func (e *EngineServer) Start(
 	}
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, engine, jsonrpc.NewBaseApiConfig(httpConfig))
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
+	e.witnessBuilder = jsonrpc.NewPrivateDebugAPI(base, db, eth, jsonrpc.NewDebugApiConfig(httpConfig))
 
 	apiList := []rpc.API{
 		{
@@ -341,10 +354,14 @@ func (e *EngineServer) decodePayloadTransactions(raw []hexutil.Bytes, gasLimit u
 	return txs, transactions, expectedBlobHashes, nil
 }
 
-// newPayload validates and may execute a payload.
+// newPayload validates and may execute a payload. A non-nil onValid runs for a VALID payload in the same engine-lock
+// section that decided the status, so no other engine call replaces or commits the validated state before onValid reads it.
+// For a non-nil onValid the execution module builds and caches the payload witness before it is released, also for
+// a known VALID payload whose witness is not cached.
 func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
 	executionRequests []hexutil.Bytes, inclusionList []hexutil.Bytes, version clparams.StateVersion, deriveBlobHashes bool,
+	onValid func(blockHash common.Hash),
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if req == nil {
@@ -608,29 +625,16 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if err != nil {
 		return nil, err
 	}
-	if possibleStatus != nil {
+	if possibleStatus != nil && (onValid == nil || possibleStatus.Status != engine_types.ValidStatus) {
 		e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
-		quickValid := possibleStatus.Status == engine_types.ValidStatus
-		if err := e.resolveInclusionListSatisfied(ctx, possibleStatus, blockHash, uint64(req.BlockNumber), il); err != nil {
-			return nil, err
+		if possibleStatus, err = e.quickInclusionListStatus(ctx, possibleStatus, blockHash, uint64(req.BlockNumber), il); err != nil || possibleStatus != nil {
+			return possibleStatus, err
 		}
-		if !quickValid || possibleStatus.Status != engine_types.SyncingStatus {
-			return possibleStatus, nil
-		}
-		canonical, err := e.chainRW.IsCanonicalHash(ctx, blockHash)
-		if err != nil {
-			return nil, err
-		}
-		if canonical {
-			return possibleStatus, nil
-		}
-		e.logger.Debug("[NewPayload] re-executing validated side block for an unchecked inclusion list", "hash", blockHash)
 	}
 
 	e.lock.Lock()
 	defer e.lock.Unlock()
 
-	e.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	// Pass `txs` (the binary tx encodings from the CL) through as the Block's
 	// binaryTransactions cache so the downstream Block.RawBody() invocation
 	// inside InsertBlocks doesn't re-encode every tx
@@ -638,7 +642,39 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
 	block = block.WithInclusionList(il)
-	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block)
+	if possibleStatus != nil {
+		// Decided without the lock: a forkchoice update or another payload may have changed the validated state since.
+		if possibleStatus, err = e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, parent, nil, true, defaultReadinessWait); err != nil {
+			return nil, err
+		}
+		if possibleStatus != nil {
+			e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
+			if possibleStatus.Status != engine_types.ValidStatus {
+				return possibleStatus, nil
+			}
+			if _, cached := e.payloadWitnesses.Get(blockHash); !cached {
+				status, validationErr, latestValidHash, err := e.validateChain(ctx, block, true)
+				if err != nil {
+					return nil, err
+				}
+				if possibleStatus = e.validatedPayloadStatus(block, status, validationErr, latestValidHash); possibleStatus.Status != engine_types.ValidStatus {
+					return possibleStatus, nil
+				}
+			}
+			if possibleStatus, err = e.quickInclusionListStatus(ctx, possibleStatus, blockHash, uint64(req.BlockNumber), il); err != nil {
+				return nil, err
+			}
+			if possibleStatus != nil {
+				if possibleStatus.Status == engine_types.ValidStatus {
+					onValid(blockHash)
+				}
+				return possibleStatus, nil
+			}
+		}
+	}
+
+	e.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
+	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block, onValid != nil)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -655,6 +691,9 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	if err := e.resolveInclusionListSatisfied(ctx, payloadStatus, blockHash, uint64(req.BlockNumber), il); err != nil {
 		return nil, err
+	}
+	if onValid != nil && payloadStatus.Status == engine_types.ValidStatus {
+		onValid(blockHash)
 	}
 	return payloadStatus, nil
 }
@@ -1136,6 +1175,7 @@ func (e *EngineServer) HandleNewPayload(
 	ctx context.Context,
 	logPrefix string,
 	block *types.Block,
+	captureWitness bool,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
 
@@ -1180,7 +1220,7 @@ func (e *EngineServer) HandleNewPayload(
 			}); respondSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-			status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, block)
+			status, validationErr, latestValidHash, err := e.validateChain(ctx, block, captureWitness)
 			if err != nil {
 				missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
 				if isMissingChainErr {
@@ -1221,7 +1261,7 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
-	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, block)
+	status, validationErr, latestValidHash, err := e.validateChain(ctx, block, captureWitness)
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
 		missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
@@ -1239,6 +1279,32 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	return e.validatedPayloadStatus(block, status, validationErr, latestValidHash), nil
+}
+
+// validateChain validates block. With captureWitness, the witness of a VALID block is built and cached before the
+// execution module is released, as a block insertion that takes the module next drops the validated state.
+func (e *EngineServer) validateChain(ctx context.Context, block *types.Block, captureWitness bool) (execmodule.ExecutionStatus, *string, common.Hash, error) {
+	if !captureWitness {
+		return e.chainRW.ValidateChain(ctx, block)
+	}
+	blockHash := block.Hash()
+	result, err := e.executionService.ValidateChainAndView(ctx, block, defaultReadinessWait, func(blockTx kv.TemporalTx, parentState kv.TemporalGetter) error {
+		witness, err := e.witnessBuilder.ValidatedBlockWitness(ctx, blockTx, parentState, blockHash)
+		if err != nil {
+			e.logger.Warn("[NewPayload] could not build the payload witness", "hash", blockHash, "err", err)
+			return nil
+		}
+		e.payloadWitnesses.AddPayloadWitness(blockHash, witness)
+		return nil
+	})
+	if err != nil {
+		return 0, nil, common.Hash{}, err
+	}
+	var validationErr *string
+	if len(result.ValidationError) > 0 {
+		validationErr = &result.ValidationError
+	}
+	return result.ValidationStatus, validationErr, result.LatestValidHash, nil
 }
 
 func (e *EngineServer) validatedPayloadStatus(block *types.Block, status execmodule.ExecutionStatus, validationErr *string, latestValidHash common.Hash) *engine_types.PayloadStatus {
@@ -1280,6 +1346,27 @@ func (e *EngineServer) resolveInclusionListSatisfied(ctx context.Context, resp *
 	}
 	resp.InclusionListSatisfied = satisfied
 	return nil
+}
+
+// quickInclusionListStatus resolves the inclusion list of a quick status. It returns nil when the block is a validated
+// side block whose inclusion list was not checked, so it must be executed again.
+func (e *EngineServer) quickInclusionListStatus(ctx context.Context, status *engine_types.PayloadStatus, blockHash common.Hash, blockNumber uint64, il types.Transactions) (*engine_types.PayloadStatus, error) {
+	quickValid := status.Status == engine_types.ValidStatus
+	if err := e.resolveInclusionListSatisfied(ctx, status, blockHash, blockNumber, il); err != nil {
+		return nil, err
+	}
+	if !quickValid || status.Status != engine_types.SyncingStatus {
+		return status, nil
+	}
+	canonical, err := e.chainRW.IsCanonicalHash(ctx, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	if canonical {
+		return status, nil
+	}
+	e.logger.Debug("[NewPayload] re-executing validated side block for an unchecked inclusion list", "hash", blockHash)
+	return nil, nil
 }
 
 // ancestorRejected is the validation error of a block whose ancestor is in the bad-block cache.
