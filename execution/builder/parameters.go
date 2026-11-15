@@ -42,6 +42,10 @@ type Parameters struct {
 	// RequireAllTransactions includes every supplied transaction in order.
 	// If any transaction cannot be included, the build fails.
 	RequireAllTransactions bool
+	// RunToCompletion adds transactions until the provider runs dry or the gas
+	// runs out, ignoring a request to stop, for a producer whose block time
+	// does not bound its build.
+	RunToCompletion bool
 	// ExtraData overrides the builder's configured extra data when non-nil.
 	ExtraData []byte
 }

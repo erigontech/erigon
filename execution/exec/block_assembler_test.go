@@ -204,13 +204,16 @@ func TestBlockAssemblerExplicitListLimits(t *testing.T) {
 
 func TestBlockAssemblerInterrupt(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		requireAll  bool
-		cancel      bool
-		wantPacked  int
-		wantStopped bool
+		name            string
+		requireAll      bool
+		runToCompletion bool
+		cancel          bool
+		wantPacked      int
+		wantStopped     bool
 	}{
 		{name: "explicit list finishes", requireAll: true, wantPacked: 2},
+		{name: "build run to completion finishes", runToCompletion: true, wantPacked: 2},
+		{name: "build run to completion honors cancellation", runToCompletion: true, cancel: true, wantPacked: 1, wantStopped: true},
 		{name: "explicit list honors cancellation", requireAll: true, cancel: true, wantPacked: 1, wantStopped: true},
 		{name: "pool selection honors stop", wantPacked: 1, wantStopped: true},
 	} {
@@ -223,7 +226,7 @@ func TestBlockAssemblerInterrupt(t *testing.T) {
 				engine := merge.NewFaker(ethash.NewFaker())
 				defer engine.Close()
 				ba := NewBlockAssembler(AssemblerCfg{
-					ChainConfig: config, Engine: engine, RequireAllTransactions: tc.requireAll,
+					ChainConfig: config, Engine: engine, RequireAllTransactions: tc.requireAll, RunToCompletion: tc.runToCompletion,
 				}, &AssembledBlock{Header: header})
 				key, err := crypto.GenerateKey()
 				require.NoError(t, err)
