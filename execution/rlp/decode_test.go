@@ -96,6 +96,7 @@ func TestStreamErrors(t *testing.T) {
 		{"80", calls{"List"}, nil, ErrExpectedList},
 		{"C0", calls{"List", "Uint64"}, nil, EOL},
 		{"C8C9010101010101010101", calls{"List", "Kind"}, nil, ErrElemTooLarge},
+		{"C2B805", calls{"List", "Kind"}, nil, ErrCanonSize},
 		{"C3C2010201", calls{"List", "List", "Uint64", "Uint64", "ListEnd", "Uint64"}, nil, EOL},
 		{"00", calls{"ListEnd"}, nil, errNotInList},
 		{"C401020304", calls{"List", "Uint64", "ListEnd"}, nil, errNotAtEOL},
@@ -212,6 +213,187 @@ testfor:
 				continue testfor
 			}
 		}
+	}
+}
+
+// TestBytesStreamMatchesReader pins the slice-backed fast paths to the regular
+// reader path: every call must return the same value, error and Remaining.
+func TestBytesStreamMatchesReader(t *testing.T) {
+	ops := map[string]func(*Stream) (any, error){
+		"Kind": func(s *Stream) (any, error) {
+			k, size, err := s.Kind()
+			return [2]any{k, size}, err
+		},
+		"List":    func(s *Stream) (any, error) { return s.List() },
+		"ListEnd": func(s *Stream) (any, error) { return nil, s.ListEnd() },
+		"More":    func(s *Stream) (any, error) { return s.MoreDataInList(), nil },
+		"Uint64":  func(s *Stream) (any, error) { return s.Uint64() },
+		"Uint8":   func(s *Stream) (any, error) { return s.Uint8() },
+		"Bytes":   func(s *Stream) (any, error) { return s.Bytes() },
+		"View":    func(s *Stream) (any, error) { return s.ViewBytes() },
+		"Append":  func(s *Stream) (any, error) { return s.AppendBytes([]byte{0xEE}) },
+		"Raw":     func(s *Stream) (any, error) { return s.Raw() },
+		"Bool":    func(s *Stream) (any, error) { return s.Bool() },
+		"Uint16":  func(s *Stream) (any, error) { return s.Uint16() },
+		"U256B":   func(s *Stream) (any, error) { return s.Uint256Bytes() },
+		"Read2": func(s *Stream) (any, error) {
+			var b [2]byte
+			err := s.ReadBytes(b[:])
+			return b, err
+		},
+		"Addr": func(s *Stream) (any, error) { return s.Addr() },
+		"Hash": func(s *Stream) (any, error) { return s.ReadHash() },
+		"U256": func(s *Stream) (any, error) {
+			var v uint256.Int
+			err := s.ReadUint256(&v)
+			return v, err
+		},
+	}
+	h := func(n int, b byte) string { return strings.Repeat(fmt.Sprintf("%02X", b), n) }
+	tests := []struct {
+		input string
+		calls []string
+	}{
+		{"C0", []string{"List", "More", "Uint64", "ListEnd", "List"}},
+		{"C0", []string{"Kind", "List", "ListEnd"}},
+		{"C3C2010201", []string{"List", "List", "Uint64", "Uint64", "ListEnd", "Uint64", "ListEnd", "Uint64"}},
+		{"C8C9010101010101010101", []string{"List", "List"}},
+		{"C801", []string{"List", "Uint64", "Uint64"}},
+		{"C1C0", []string{"List", "List", "ListEnd", "ListEnd"}},
+		{"C201C0", []string{"List", "Uint64", "List"}},
+		{"C3800102", []string{"List", "Uint64", "Uint8", "Uint64", "More", "ListEnd"}},
+		{"00", []string{"Uint64"}},
+		{"7F", []string{"Uint64"}},
+		{"8100", []string{"Uint64"}},
+		{"8180", []string{"Uint64", "Uint64"}},
+		{"820001", []string{"Uint64"}},
+		{"820100", []string{"Uint8"}},
+		{"88FFFFFFFFFFFFFFFF", []string{"Uint64"}},
+		{"89000000000000000001", []string{"Uint64"}},
+		{"C2820102", []string{"List", "Uint64"}},
+		{"94" + h(20, 0xAB), []string{"Addr", "Addr"}},
+		{"94" + h(19, 0xAB), []string{"Addr"}},
+		{"C5" + "94" + h(20, 0xAB), []string{"List", "Addr"}},
+		{"D5" + "94" + h(20, 0xAB), []string{"List", "Addr", "ListEnd"}},
+		{"93" + h(19, 0xAB), []string{"Addr"}},
+		{"A0" + h(32, 0xCD), []string{"Hash"}},
+		{"A0" + h(31, 0xCD), []string{"Hash"}},
+		{"9F" + h(31, 0xCD), []string{"Hash"}},
+		{"00", []string{"U256"}},
+		{"7F", []string{"U256"}},
+		{"80", []string{"U256"}},
+		{"8100", []string{"U256"}},
+		{"8180", []string{"U256"}},
+		{"A0" + h(32, 0xFF), []string{"U256"}},
+		{"A0" + "00" + h(31, 0xFF), []string{"U256"}},
+		{"A1" + h(33, 0xFF), []string{"U256"}},
+		{"C3" + "A0" + h(32, 0xFF), []string{"List", "U256"}},
+		{"F800", []string{"List"}},
+		{"F838" + h(56, 0x01), []string{"List", "Uint64", "More"}},
+		{"C483010203", []string{"List", "Bytes", "ListEnd"}},
+		{"C483010203", []string{"List", "View", "ListEnd"}},
+		{"C483010203", []string{"List", "Append", "ListEnd"}},
+		{"C483010203", []string{"Raw", "Raw"}},
+		{"C483010203", []string{"List", "Raw", "More", "ListEnd"}},
+		{"C483010203", []string{"Bytes"}},
+		{"C483010203", []string{"Kind", "List", "Kind", "Bytes", "Kind"}},
+		{"C3820102", []string{"List", "Kind", "Read2", "ListEnd"}},
+		{"820102", []string{"Read2", "Read2"}},
+		{"83010203", []string{"Read2"}},
+		{"05", []string{"Read2"}},
+		{"05", []string{"Bytes", "Bytes"}},
+		{"05", []string{"View"}},
+		{"05", []string{"Append"}},
+		{"05", []string{"Raw"}},
+		{"05", []string{"Kind", "Raw"}},
+		{"80", []string{"Bytes"}},
+		{"80", []string{"View"}},
+		{"80", []string{"Append"}},
+		{"80", []string{"Raw"}},
+		{"8105", []string{"Bytes"}},
+		{"8105", []string{"View"}},
+		{"8105", []string{"Append"}},
+		{"8105", []string{"Raw"}},
+		{"8105", []string{"Kind", "Kind"}},
+		{"B838" + h(56, 0x11), []string{"Bytes"}},
+		{"B838" + h(56, 0x11), []string{"View"}},
+		{"B838" + h(56, 0x11), []string{"Raw"}},
+		{"B838" + h(56, 0x11), []string{"Kind"}},
+		{"B838" + h(55, 0x11), []string{"Bytes"}},
+		{"B837" + h(55, 0x11), []string{"Bytes"}},
+		{"B837" + h(55, 0x11), []string{"Raw"}},
+		{"B90038" + h(56, 0x11), []string{"View"}},
+		{"B90038" + h(56, 0x11), []string{"Raw"}},
+		{"B9", []string{"Bytes"}},
+		{"B8", []string{"Kind"}},
+		{"BF" + "01" + h(7, 0), []string{"Bytes"}},
+		{"BFFFFFFFFFFFFFFFFF", []string{"Bytes"}},
+		{"C5" + "B838" + h(3, 0x11), []string{"List", "Bytes"}},
+		{"F83B" + "B838" + h(56, 0x11) + "01", []string{"List", "View", "Uint64", "ListEnd"}},
+		{"F83B" + "B839" + h(57, 0x11), []string{"List", "View"}},
+		{"F83A" + "B838" + h(56, 0x11), []string{"List", "Kind", "Bytes", "ListEnd"}},
+		{"F90038" + h(56, 0x01), []string{"List"}},
+		{"F837" + h(55, 0x01), []string{"List"}},
+		{"F838" + h(55, 0x01), []string{"List"}},
+		{"F9", []string{"List"}},
+		{"C201C0", []string{"List", "Uint64", "Raw"}},
+		{"C101", []string{"List", "Uint64", "Bytes", "View", "Raw", "Kind", "Read2", "Append"}},
+		{"C0", []string{"Bytes"}},
+		{"C0", []string{"View"}},
+		{"C0", []string{"Append"}},
+		{"C0", []string{"Read2"}},
+		{"C0", []string{"Uint64"}},
+		{"C0", []string{"Bool"}},
+		{"C0", []string{"U256B"}},
+		{"C0", []string{"Addr"}},
+		{"C0", []string{"Hash"}},
+		{"C0", []string{"U256"}},
+		{"C0", []string{"Raw"}},
+		{"80", []string{"List"}},
+		{"01", []string{"List"}},
+		{"00", []string{"Bool"}},
+		{"01", []string{"Bool"}},
+		{"02", []string{"Bool"}},
+		{"80", []string{"Bool"}},
+		{"8201", []string{"Bool"}},
+		{"820100", []string{"Uint16"}},
+		{"83010000", []string{"Uint16"}},
+		{"820001", []string{"Uint16"}},
+		{"00", []string{"Uint64", "Uint64"}},
+		{"00", []string{"U256B"}},
+		{"7F", []string{"U256B"}},
+		{"80", []string{"U256B"}},
+		{"8100", []string{"U256B"}},
+		{"820001", []string{"U256B"}},
+		{"820100", []string{"U256B"}},
+		{"A0" + h(32, 0xFF), []string{"U256B"}},
+		{"A1" + h(33, 0xFF), []string{"U256B"}},
+		{"A0" + "00" + h(31, 0xFF), []string{"U256"}},
+		{"B838" + h(56, 0x11), []string{"U256"}},
+		{"B838" + h(56, 0x11), []string{"Uint64"}},
+		{"B838" + h(56, 0x11), []string{"Addr"}},
+		{"C3" + "820102", []string{"Hash"}},
+		{"D6" + "94" + h(20, 0xAB) + "01", []string{"List", "Addr", "More", "Uint64", "More", "ListEnd"}},
+		{"E2" + "A0" + h(32, 0xCD), []string{"List", "Hash"}},
+		{"E1" + "A0" + h(32, 0xCD), []string{"List", "Hash", "ListEnd"}},
+		{"94" + h(20, 0xAB), []string{"Kind", "Addr"}},
+		{"0102", []string{"Uint64", "Uint64", "Uint64"}},
+		{"", []string{"Kind", "Bytes", "List", "Uint64", "Raw"}},
+	}
+	for _, tt := range tests {
+		input := unhex(tt.input)
+		got := NewBytesStream(input)
+		want := NewStream(newPlainReader(input), uint64(len(input)))
+		for j, call := range tt.calls {
+			gv, gerr := ops[call](got)
+			wv, werr := ops[call](want)
+			if !reflect.DeepEqual(gv, wv) || fmt.Sprint(gerr) != fmt.Sprint(werr) || got.Remaining() != want.Remaining() {
+				t.Errorf("%s: call %d (%s): got (%v, %v, rem %d), want (%v, %v, rem %d)",
+					tt.input, j, call, gv, gerr, got.Remaining(), wv, werr, want.Remaining())
+				break
+			}
+		}
+		PutStream(got)
 	}
 }
 
@@ -1454,5 +1636,23 @@ func TestSliceHintOnCorruptInput(t *testing.T) {
 				require.Equal(t, control, hinted, "byte %d = %#x", i, b)
 			}
 		}
+	}
+}
+
+func TestKindReadErrorIsSticky(t *testing.T) {
+	s := NewStream(newPlainReader(unhex("C301")), 10)
+	if _, err := s.List(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Uint64(); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		if _, _, err := s.Kind(); !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("Kind call %d: got %v, want %v", i, err, io.ErrUnexpectedEOF)
+		}
+	}
+	if err := s.ListEnd(); err == nil {
+		t.Fatal("ListEnd accepted a truncated list")
 	}
 }

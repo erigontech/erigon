@@ -19,6 +19,7 @@ package executiontests
 import (
 	"crypto/ecdsa"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -186,6 +187,82 @@ func TestTouchedEmptyAuthorityIsAbsentForLaterTx(t *testing.T) {
 				importEIP161TouchBlock(t, gspec, keys[0], chainPack)
 			})
 		}
+	}
+}
+
+// A transaction touches an absent or empty account, which is absent after it (EIP-161). A later
+// transaction delegates the account as an EIP-7702 authority and clears the delegation in the same
+// authorization list. The account has no code before and after the block, so its block access
+// list entry has a nonce change and no code change.
+func TestTouchedEmptyAuthoritySetAndClearedHasNoCodeChange(t *testing.T) {
+	// This test changes the worker count and cannot run in parallel.
+	setExecWorkers(t, 4)
+
+	keys, senders := eip161TouchKeys(t, 2)
+	authorityKey, err := crypto.HexToECDSA("9a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+	require.NoError(t, err)
+	authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
+	toucher := common.HexToAddress("0x7007")
+	delegate := common.HexToAddress("0xcafe")
+	to := common.HexToAddress("0xbeef")
+	config := eip161TouchForks[1].config
+	signer := types.LatestSignerForChainID(config.ChainID)
+	set, err := types.SignAuthorization(authorityKey, *config.ChainID, delegate, 0)
+	require.NoError(t, err)
+	clear, err := types.SignAuthorization(authorityKey, *config.ChainID, common.Address{}, 1)
+	require.NoError(t, err)
+	feeCap := uint256.NewInt(10_000_000_000)
+
+	for _, tc := range []struct {
+		name           string
+		coinbase       common.Address
+		tip            uint64
+		code           []byte
+		emptyAuthority bool
+	}{
+		{"self-destruct beneficiary", common.Address{1}, 1, append(append([]byte{byte(vm.PUSH20)}, authority[:]...), byte(vm.SELFDESTRUCT)), false},
+		{"zero tip", authority, 0, []byte{byte(vm.STOP)}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			alloc := types.GenesisAlloc{toucher: {Code: tc.code}, delegate: {Code: []byte{byte(vm.STOP)}}}
+			for _, sender := range senders {
+				alloc[sender] = types.GenesisAccount{Balance: big.NewInt(1_000_000_000_000_000_000)}
+			}
+			if tc.emptyAuthority {
+				alloc[authority] = types.GenesisAccount{Balance: big.NewInt(0)}
+			}
+			gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
+			fill := func(b *blockgen.BlockGen) {
+				b.SetCoinbase(tc.coinbase)
+				touch, err := types.SignTx(&types.DynamicFeeTransaction{
+					CommonTx: types.CommonTx{Nonce: b.TxNonce(senders[0]), GasLimit: 200_000, To: &toucher},
+					ChainID:  *config.ChainID,
+					TipCap:   *uint256.NewInt(tc.tip),
+					FeeCap:   *feeCap,
+				}, *signer, keys[0])
+				require.NoError(t, err)
+				b.AddTx(touch)
+				setAndClear, err := types.SignTx(&types.SetCodeTransaction{
+					DynamicFeeTransaction: types.DynamicFeeTransaction{
+						CommonTx: types.CommonTx{Nonce: b.TxNonce(senders[1]), GasLimit: 500_000, To: &to},
+						ChainID:  *config.ChainID,
+						TipCap:   *uint256.NewInt(tc.tip),
+						FeeCap:   *feeCap,
+					},
+					Authorizations: []types.Authorization{set, clear},
+				}, *signer, keys[1])
+				require.NoError(t, err)
+				b.AddTx(setAndClear)
+			}
+
+			chainPack := generateEIP161TouchBlock(t, gspec, keys[0], fill)
+			idx := slices.IndexFunc(chainPack.Blocks[0].BlockAccessList(), func(ac types.AccountChanges) bool { return ac.Address == authority })
+			require.GreaterOrEqual(t, idx, 0, "the authority is in the block access list")
+			changes := chainPack.Blocks[0].BlockAccessList()[idx]
+			require.Equal(t, []*types.NonceChange{{Index: 2, Value: 2}}, changes.NonceChanges)
+			require.Empty(t, changes.CodeChanges)
+			importEIP161TouchBlock(t, gspec, keys[0], chainPack)
+		})
 	}
 }
 

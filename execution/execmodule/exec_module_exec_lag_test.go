@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -83,10 +82,6 @@ func TestValidateChainExecutesLagWithinLoopBlockLimit(t *testing.T) {
 }
 
 func TestValidateChainAcceptsPayloadBeyondBatchSize(t *testing.T) {
-	prevParallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
-
 	m, payload := newExecLagTester(t, 12, execmoduletester.WithBatchSize(1))
 
 	result, err := m.ValidateChain(t.Context(), payload)
