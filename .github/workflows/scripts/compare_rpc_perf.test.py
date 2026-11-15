@@ -236,8 +236,8 @@ with tempfile.TemporaryDirectory() as tmp:
         {"qps": "5", "testRepetitions": [rep(1, 2, 3)], "error": DEAD},
     ])
     res = mod.load_results(tmp)
-    check("a level with an error and no repetition is dead", res["trace_block_struct_log"]["reth"]["5"] == {"error": DEAD}, res)
-    check("a level with an error after some repetitions is dead", res["trace_block_struct_log"]["geth"]["5"] == {"error": DEAD}, res)
+    check("a level with an error and no repetition is dead", res["trace_block_struct_log"]["reth"]["5"] == {"failed": "dead", "error": DEAD}, res)
+    check("a level with an error after some repetitions is dead", res["trace_block_struct_log"]["geth"]["5"] == {"failed": "dead", "error": DEAD}, res)
     md = mod.render(res)
     check("the detail table shows the error of a dead level", f"| 5 | reth | dead: {DEAD} |" in md, md)
 
@@ -269,6 +269,43 @@ with tempfile.TemporaryDirectory() as tmp:
     check("main with a dead level exits 0", code in (0, None), code)
     check("main with a dead level prints all the overviews",
           all(f"status on {p}" in out for p in ("p50", "p90", "p95", "max")), out)
+
+# --- excluded: a client left out at a barrier, so its later patterns did not run ---
+
+
+def write_excluded(root, client, label):
+    path = os.path.join(root, f"{client}-{label}-result.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"configuration": {"testingDaemon": client}, "excluded": True, "results": []}, fh)
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_call_gen", [
+        {"qps": "100", "testRepetitions": [rep(1, 2.0, 3)]},
+        {"qps": "1000", "testRepetitions": [rep(1, 2.0, 3)]},
+    ])
+    write_result(tmp, "reth", "eth_call_gen", [
+        {"qps": "100", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "1000", "testRepetitions": [rep(1, 1.0, 3)]},
+    ])
+    write_excluded(tmp, "geth", "eth_call_gen")
+    write_excluded(tmp, "erigon", "mixed")
+    write_result(tmp, "reth", "mixed", [{"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]}])
+    res = mod.load_results(tmp)
+    check("an excluded client has every qps step of the pattern, excluded",
+          res["eth_call_gen"]["geth"] == {"100": {"failed": "excluded"}, "1000": {"failed": "excluded"}}, res)
+    md = mod.render_overview(res, "p95")
+    row = overview_row(md, "eth_call_gen", "1000")
+    check("an excluded client is excluded in the overview",
+          row == ["eth_call_gen", "1000", "2.00", "excluded", "1.00*", "🔴"], row)
+    row = overview_row(md, "mixed", "1")
+    check("an excluded erigon is red", row == ["mixed", "1", "excluded", "-", "1.00*", "🔴"], row)
+    check("legend explains excluded", "excluded left out at a barrier" in md, md)
+    md = mod.render(res)
+    check("the detail table shows an excluded client", "| 100 | geth | excluded | | | | |" in md, md)
+    code, out = run_main(["--results-dir", tmp])
+    check("main with an excluded client prints all the overviews",
+          code in (0, None) and all(f"status on {p}" in out for p in ("p50", "p90", "p95", "max")), out)
 
 # --- main ---------------------------------------------------------------------
 
