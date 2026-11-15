@@ -2025,11 +2025,10 @@ type Update struct {
 	Nonce      uint64
 
 	// DeleteStorageSubtree is a transient (never-serialized) signal that this
-	// account was self-destructed in the block: its whole storage subtree must be
-	// pruned before this account's update is applied, so a same-block recreate
-	// rebuilds from empty storage. Set by the commitment calculator from the SD
-	// marker; consumed by the trie during Process. Not a Flags bit because Flags
-	// is serialized and merged.
+	// account was self-destructed or created as a contract in the block: its whole
+	// storage subtree must be pruned before this account's update is applied, so the
+	// account rebuilds from empty storage. Set by the commitment calculator; consumed
+	// by the trie during Process. Not a Flags bit because Flags is serialized and merged.
 	DeleteStorageSubtree bool
 }
 

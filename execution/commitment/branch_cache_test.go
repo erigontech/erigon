@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"runtime"
 	"strings"
@@ -755,8 +756,13 @@ func TestBranchCache_ReadFillHasNoKnownWriteTime(t *testing.T) {
 	got, _, ok := c.Get(filled)
 	require.True(t, ok)
 	require.Equal(t, []byte("observed"), got)
-	_, _, ok = c.GetBefore(filled, 18)
-	require.False(t, ok)
+	for _, bound := range []uint64{0, 18, math.MaxUint64 - 1} {
+		_, _, ok = c.GetBefore(filled, bound)
+		require.False(t, ok, "a read fill has no known write time for bound %d", bound)
+	}
+	got, _, ok = c.Get(filled)
+	require.True(t, ok, "a bounded miss must leave the fill available to unbounded reads")
+	require.Equal(t, []byte("observed"), got)
 	c.Unwind(18)
 	_, _, ok = c.Get(filled)
 	require.False(t, ok)

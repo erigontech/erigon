@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -81,14 +82,15 @@ type BranchCache struct {
 	committedView atomic.Uint64 // MDBX txn that committed the latest published branches or unwind
 }
 
+// Read fills have no known write time. Stamping just below the unbounded-read
+// limit makes them miss every bounded read and become stale after an unwind.
+const branchReadFillTxNum uint64 = math.MaxUint64 - 1
+
 type branchCacheEntry struct {
 	data  []byte
 	step  uint64 // MDBX row step or snapshot file's exclusive end step; 0 also represents untracked
-	txN   uint64 // validity bound for published or pinned entries
+	txN   uint64 // validity bound
 	epoch uint32
-	// Read fills have no logical txNum bound: an unwind can reuse an older row.
-	// They are valid only within their unwind epoch and for unbounded reads.
-	readFilled bool
 }
 
 // MissCallback runs on the hot read path when lookup misses every tier that
@@ -578,12 +580,12 @@ func (c *BranchCache) UnpinContract(contractHash []byte) {
 }
 
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
-	return c.GetBefore(prefix, ^uint64(0))
+	return c.GetBefore(prefix, math.MaxUint64)
 }
 
 // GetBefore rejects entries at or above txNum, leaving otherwise valid entries cached.
 // It also rejects read fills, whose write time is unknown, unless txNum is
-// ^uint64(0) (unbounded).
+// math.MaxUint64 (unbounded).
 func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bool) {
 	if isCommitmentStateKey(prefix) {
 		return nil, 0, false
@@ -593,12 +595,12 @@ func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bo
 	if !ok {
 		return nil, 0, false
 	}
-	if (entry.readFilled && !coh.IsCurrent(entry.epoch)) || coh.IsStale(entry.txN, entry.epoch) {
+	if coh.IsStale(entry.txN, entry.epoch) {
 		c.evict(prefix)
 		c.staleEvicted.Add(1)
 		return nil, 0, false
 	}
-	if entry.txN >= txNum || (entry.readFilled && txNum != ^uint64(0)) {
+	if entry.txN >= txNum {
 		return nil, 0, false
 	}
 	c.bytesServed.Add(uint64(len(entry.data)))
@@ -645,10 +647,10 @@ func (c *BranchCache) Fill(prefix []byte, data []byte, step, viewID uint64) {
 		return
 	}
 	c.store(prefix, &branchCacheEntry{
-		data:       dataCopy,
-		step:       step,
-		epoch:      epoch,
-		readFilled: true,
+		data:  dataCopy,
+		step:  step,
+		txN:   branchReadFillTxNum,
+		epoch: epoch,
 	})
 }
 

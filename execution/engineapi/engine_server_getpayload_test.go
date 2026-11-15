@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -321,7 +322,7 @@ func (s *getPayloadStubModule) InsertBlocks(_ context.Context, _ []*types.Block)
 	panic("not implemented")
 }
 
-func (s *getPayloadStubModule) ValidateChain(_ context.Context, _ common.Hash, _ uint64) (execmodule.ValidationResult, error) {
+func (s *getPayloadStubModule) ValidateChain(_ context.Context, _ *types.Block) (execmodule.ValidationResult, error) {
 	panic("not implemented")
 }
 
@@ -334,6 +335,10 @@ func (s *getPayloadStubModule) GetForkChoice(_ context.Context) (execmodule.Fork
 }
 
 func (s *getPayloadStubModule) AssembleBlock(_ context.Context, _ *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+	panic("not implemented")
+}
+
+func (s *getPayloadStubModule) ValidateChainAndView(context.Context, *types.Block, time.Duration, execmodule.BlockStateView) (execmodule.ValidationResult, error) {
 	panic("not implemented")
 }
 
