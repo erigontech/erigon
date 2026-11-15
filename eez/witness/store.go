@@ -46,10 +46,12 @@ type Store struct {
 	db kv.RwDB
 }
 
-// Open opens the store in dir/witnesses.
+// Open opens the store in dir/witnesses. Its commits are durable: a witness
+// needs a pin of its block's parent taken before the block commits, so one
+// lost in a crash cannot be rebuilt.
 func Open(ctx context.Context, dir string, logger log.Logger) (*Store, error) {
 	db, err := mdbx.New(dbcfg.TemporaryDB, logger).Path(filepath.Join(dir, "witnesses")).
-		GrowthStep(16 * datasize.MB).MapSize(datasize.GB).
+		Durable().GrowthStep(16 * datasize.MB).MapSize(datasize.GB).
 		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.TableCfg{table: {}} }).
 		Open(ctx)
 	if err != nil {
