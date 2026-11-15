@@ -2385,7 +2385,10 @@ func (at *AggregatorRoTx) checkStateFilesBuildGap(tx kv.Tx) error {
 		}
 	}
 	if firstInDB > nextStateStep {
-		return fmt.Errorf("gap between state snapshots and MDBX: files end at step %d, history starts at step %d; refusing to build files", nextStateStep, firstInDB)
+		return fmt.Errorf("gap between state snapshots and MDBX: files end at step %d, history starts at step %d; refusing to build files. "+
+			"For a clean reset, stop Erigon, remove both state snapshots and the chaindata directory, then re-sync. "+
+			"Removing only snapshots may leave values previously read from corrupt files in chaindata",
+			nextStateStep, firstInDB)
 	}
 	return nil
 }
