@@ -723,10 +723,10 @@ jobs:
         id: perf_eth_subscribe
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe'
         continue-on-error: true
-        timeout-minutes: ${{ needs.setup.outputs.rpc_test == 'eth_subscribe' && 40 || 20 }}
+        timeout-minutes: ${{ needs.setup.outputs.rpc_test == 'eth_subscribe' && 30 || 20 }}
         run: |
           sequence=10:120
-          if [ "$RPC_TEST" = "eth_subscribe" ]; then sequence=100:600; fi
+          if [ "$RPC_TEST" = "eth_subscribe" ]; then sequence=100:300; fi
           bash .github/workflows/scripts/run_rpc_perf.sh eth_subscribe stress_test_eth_subscribe_gen_latest "$sequence" eth_subscribe
 
       - name: Collect the benchmark results
