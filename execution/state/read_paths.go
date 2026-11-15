@@ -1290,8 +1290,9 @@ type codeSegment struct {
 	copied bool // the read copied the segment into dst and returned the code without bytes
 }
 
-// readCodeSegment is readCode; with seg, a storage read that misses every cache copies the
-// segment into seg.dst and records the read without the code bytes.
+// readCodeSegment is readCode; with seg, a read that reaches the state reader copies the segment
+// into seg.dst and records the read without the code bytes. That includes a state-cache hit and a
+// read-set hit whose bytes were dropped.
 func readCodeSegment(s *IntraBlockState, addr accounts.Address, seg *codeSegment) (accounts.Code, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
@@ -1376,7 +1377,10 @@ type codeSegmentReader interface {
 	ReadAccountCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (bool, error)
 }
 
-var _ codeSegmentReader = (*ReaderV3)(nil)
+var (
+	_ codeSegmentReader = (*ReaderV3)(nil)
+	_ codeSegmentReader = (*PrevBlockReader)(nil)
+)
 
 // recordedCode returns a recorded read's code, re-reading bytes the record dropped.
 func (ibs *IntraBlockState) recordedCode(addr accounts.Address, tr VersionedRead[accounts.Code]) (accounts.Code, error) {
@@ -1412,7 +1416,7 @@ func (ibs *IntraBlockState) measureCodeRead(addr accounts.Address, read func() (
 }
 
 // readOriginCodeSegmentTo copies a segment of the committed code of addr into dst. Not copied
-// when the code is already on a state object, absent, or held by a cache.
+// when the code is already on a state object, absent, or in the shared code cache.
 func (ibs *IntraBlockState) readOriginCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) (accounts.CodeHash, bool, error) {
 	segmentReader, ok := ibs.stateReader.(codeSegmentReader)
 	if !ok || ibs.stateObjects[addr] != nil {
@@ -1432,7 +1436,7 @@ func (ibs *IntraBlockState) readOriginCodeSegmentTo(addr accounts.Address, from 
 	err = ibs.measureCodeRead(addr, func() (bool, error) {
 		var err error
 		copied, err = segmentReader.ReadAccountCodeSegmentTo(addr, from, dst)
-		return copied, err
+		return copied || err != nil, err
 	})
 	ibs.RecordStateReadError(err)
 	if err != nil || !copied {

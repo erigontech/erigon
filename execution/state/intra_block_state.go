@@ -826,7 +826,8 @@ func (ibs *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 
 // ReadCodeSegmentTo copies the code of addr from offset from into dst, zero-padded past its
 // end. On a code-cache miss a reader that serves segments copies without caching the code; any
-// other reader reads the whole code, which fills the cache.
+// other reader reads the whole code, which fills the cache. Without a version map, or with a
+// code-access hook, it always reads the whole code.
 func (ibs *IntraBlockState) ReadCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) error {
 	if ibs.versionMap == nil || ibs.codeAccess != nil {
 		code, err := ibs.GetCode(addr)

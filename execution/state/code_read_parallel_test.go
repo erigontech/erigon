@@ -242,6 +242,20 @@ func TestCodeSegment_DeclinedReadCountsOnce(t *testing.T) {
 	require.Equal(t, int64(1), ibs.CodeReadCount())
 }
 
+// A copied segment read is one code read.
+func TestCodeSegment_CopiedReadCountsOnce(t *testing.T) {
+	prev := dbg.KVReadLevelledMetrics
+	dbg.KVReadLevelledMetrics = true
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prev })
+	ibs, reader, addr, code := newSegmentRead(t, NewVersionMap(nil))
+
+	got, err := segmentOf(ibs, addr, len(code))
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+	require.Equal(t, 1, reader.segmentReads)
+	require.Equal(t, int64(1), ibs.CodeReadCount())
+}
+
 func segmentOf(ibs *IntraBlockState, addr accounts.Address, n int) ([]byte, error) {
 	dst := make([]byte, n)
 	err := ibs.ReadCodeSegmentTo(addr, 0, dst)
