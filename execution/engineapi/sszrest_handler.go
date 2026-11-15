@@ -318,12 +318,13 @@ func (e *EngineServer) payloadWitness(ctx context.Context, blockHash common.Hash
 		return witness, nil
 	}
 	// Without the payload's state held or its changesets kept, only commitment history can rebuild the witness.
-	mode := "canonical"
-	witness, err := e.witnessBuilder.ExecutionWitness(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), &mode)
+	witness, err := e.payloadWitnesses.BuildPayloadWitness(ctx, blockHash, func(ctx context.Context) (*jsonrpc.ExecutionWitnessResult, error) {
+		mode := "canonical"
+		return e.witnessBuilder.ExecutionWitness(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), &mode)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("payload witness unavailable: the payload's state is no longer held: %w", err)
 	}
-	e.payloadWitnesses.AddPayloadWitness(blockHash, witness)
 	return witness, nil
 }
 
