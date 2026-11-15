@@ -24,9 +24,44 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 )
+
+func TestStepAlignedEndRefusesUnindexedTail(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{
+		"domain/v1.0-accounts.6-8.bt",
+		"accessor/v2.0-accounts.6-8.vi",
+		"accessor/v1.0-logaddrs.6-8.efi",
+	} {
+		t.Run(path, func(t *testing.T) {
+			db, agg := testDbAndAggregatorv3(t, 10)
+			ranges := []testFileRange{{0, 2}, {2, 4}, {4, 6}, {6, 8}}
+			if !strings.Contains(path, "logaddrs") {
+				generateStateFiles(t, agg.Dirs(), ranges)
+				generateCommitmentFile(t, agg.Dirs(), ranges)
+			}
+			generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+			require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().Snap, filepath.FromSlash(path))))
+			require.NoError(t, agg.OpenFolder(db))
+			_, err := agg.StepAlignedEnd(20)
+			require.ErrorContains(t, err, "accessor")
+		})
+	}
+}
+
+func TestStepAlignedEndAllowsCoveredUnindexedMerge(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), []testFileRange{{0, 2}, {2, 4}, {0, 4}})
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v1.0-logaddrs.0-4.efi")))
+	require.NoError(t, agg.OpenFolder(db))
+	end, err := agg.StepAlignedEnd(20)
+	require.NoError(t, err)
+	require.EqualValues(t, 40, end)
+}
 
 func TestStepAlignedEndRefusesListStartingOffBoundary(t *testing.T) {
 	t.Parallel()

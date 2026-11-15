@@ -29,9 +29,44 @@ import (
 
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func (a *Aggregator) StepAlignedEnd(stepSize uint64) (uint64, error) {
+	dirty := a.DebugBeginDirtyFilesRo()
+	defer dirty.Close()
+	check := func(name string, files []*FilesItem, accessors statecfg.Accessors) error {
+		for _, item := range files {
+			if item.canDelete.Load() || checkForVisibility(item, accessors, false) {
+				continue
+			}
+			covered := slices.ContainsFunc(files, func(other *FilesItem) bool {
+				return item.isProperSubsetOf(other) && checkForVisibility(other, accessors, false)
+			})
+			if !covered && !coveredByVisibleFiles(item, files, accessors) {
+				return fmt.Errorf("%s snapshot [%d,%d) is not indexed; build or repair its accessors before rebasing", name, item.startTxNum, item.endTxNum)
+			}
+		}
+		return nil
+	}
+	for _, d := range dirty.domain {
+		if err := check(d.d.FilenameBase, d.files, d.d.Accessors); err != nil {
+			return 0, err
+		}
+		if err := check(d.d.FilenameBase+" history", d.history.files, d.history.h.Accessors); err != nil {
+			return 0, err
+		}
+		if err := check(d.d.FilenameBase+" history index", d.history.ii.files, d.history.ii.ii.Accessors); err != nil {
+			return 0, err
+		}
+	}
+	for _, ii := range dirty.ii {
+		if ii != nil {
+			if err := check(ii.ii.FilenameBase, ii.files, ii.ii.Accessors); err != nil {
+				return 0, err
+			}
+		}
+	}
 	at := a.BeginFilesRo()
 	defer at.Close()
 	return at.stepAlignedEnd(stepSize)
