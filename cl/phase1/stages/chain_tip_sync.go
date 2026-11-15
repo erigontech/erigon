@@ -1655,9 +1655,6 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	if err := retryPendingBlockWrite(ctx, cfg); err != nil {
 		return err
 	}
-	if cfg.safeUpdatePending {
-		return nil
-	}
 	cfg.chainTipRejections.logIfDue(chainTipHeadSlot(cfg))
 	if shouldRecoverMissingEnvelopes(cfg.beaconCfg, args.targetSlot) {
 		recoverMissingEnvelopes(ctx, cfg)
@@ -1692,7 +1689,8 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 		}
 	}
 
-	if args.seenSlot >= args.targetSlot {
+	// Pending safe updates need execution recovery, but must not wait for another block.
+	if args.seenSlot >= args.targetSlot || cfg.safeUpdatePending {
 		// [GLOAS] Wait for the head's execution payload envelope before proceeding to ForkChoice.
 		// The block was already processed by gossip during SleepForSlot, but the envelope
 		// may still be in-flight. Without this, FCU sends the parent's execution hash.

@@ -536,10 +536,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 				Description: `sleep until the next slot`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
 					if cfg.safeUpdatePending {
-						if cfg.pendingBlockWrite != nil {
-							return ChainTipSync
-						}
-						return ForkChoice
+						return ChainTipSync
 					}
 					if cfg.forkChoiceWaitingForIndices {
 						return ForkChoice

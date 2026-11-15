@@ -403,6 +403,39 @@ func TestChainTipSyncVerifiesStoredGloasPayloadWhileBehind(t *testing.T) {
 	require.True(t, cfg.forkChoice.IsPayloadVerified(headRoot))
 }
 
+func TestChainTipSyncRecoversExecutionWhileSafeUpdatePending(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	headBlock := graph.parents[headRoot]
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+
+	selectedRoot, _, err := cfg.forkChoice.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, headRoot, selectedRoot)
+	require.True(t, cfg.forkChoice.HasEnvelope(headRoot))
+	_, found := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(headRoot)
+	require.False(t, found)
+
+	cfg.safeUpdatePending = true
+	engine.supportInsertion = true
+	collector := &gloasCollectorTest{}
+	cfg.blockCollector = collector
+	args := Args{seenSlot: headBlock.Block.Slot, targetSlot: headBlock.Block.Slot + 1}
+	for i, status := range []execution_client.PayloadStatus{execution_client.PayloadStatusNone, execution_client.PayloadStatusValidated} {
+		engine.payloadStatus = status
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		err := chainTipSync(ctx, log.Root(), cfg, args)
+		cancel()
+
+		require.NoError(t, err, "retry publication without waiting for another block")
+		require.Equal(t, i+1, engine.newPayloadCalls)
+		require.Equal(t, i+1, collector.flushCalls)
+		require.True(t, cfg.safeUpdatePending, "only an accepted fork-choice update clears the pending wake")
+		require.Equal(t, status == execution_client.PayloadStatusValidated, cfg.forkChoice.IsPayloadVerified(headRoot))
+	}
+}
+
 func TestForwardSyncReplayMakesGloasPayloadAvailableForHeadSelection(t *testing.T) {
 	cfg, graph, parentRoot, fullChild, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
 	engine.supportInsertion = true
