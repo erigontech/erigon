@@ -382,10 +382,9 @@ func filterDirtyFiles(fileNames []string, stepSize uint64, filenameBase, ext str
 	return res
 }
 
-// retire removes outs from dirtyFiles; the caller still owns outs and must attach it
-// to the outgoing visible generation itself. Physical reclaim happens once the last
-// reader of that generation closes — so readers still pinning these files are never
-// surprised.
+// retire detaches matching entries from dirtyFiles. The caller must attach the
+// returned files to the outgoing visible generation; reclaim waits until readers
+// of that generation and all earlier generations finish.
 func retire(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) (detached []*FilesItem) {
 	// canDelete decides whether reclaim also deletes the file from disk, or only closes it.
 	var canDelete bool

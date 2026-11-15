@@ -274,8 +274,8 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					}
 				}
 				if filename == kv.ReceiptDomain.String() {
-					require.Zero(t, agg.d[kv.ReceiptDomain].History.dirtyFiles.Len(), "incomplete receipt history must be closed before rebuilding")
-					require.Zero(t, agg.d[kv.ReceiptDomain].History.InvertedIndex.dirtyFiles.Len(), "incomplete receipt indices must be closed before rebuilding")
+					require.Zero(t, agg.d[kv.ReceiptDomain].History.dirtyFiles.Len(), "incomplete receipt history must be detached before rebuilding")
+					require.Zero(t, agg.d[kv.ReceiptDomain].History.InvertedIndex.dirtyFiles.Len(), "incomplete receipt indices must be detached before rebuilding")
 				}
 				require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
 					at := agg.BeginFilesRo()

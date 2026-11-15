@@ -1216,7 +1216,8 @@ Loop:
 	return nil
 }
 
-// [from, to)
+// BuildFiles2 schedules builds for [fromStep, toStep), extending the start backward
+// when pending data needs recovery.
 func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
@@ -2244,13 +2245,16 @@ func (a *Aggregator) BuildFilesInBackground(db kv.TemporalRoDB, txNum uint64, fi
 }
 
 type fileBuildPlan struct {
+	// A lagging entity can move firstStep before the state-file boundary.
+	// nextStateStep preserves that boundary for gap detection.
 	firstStep     kv.Step
 	nextStateStep kv.Step
 	// A job may start earlier for another entity, but even an empty file must
 	// respect its entity's lower bound to avoid lowering the shared ceiling.
 	domainFirstStep [kv.DomainLen]kv.Step
 	indexFirstStep  [kv.StandaloneIdxLen]kv.Step
-	// Entities enabled after planning must wait for a fresh plan to check their pending data.
+	// Defer unsafe backfills and entities disabled when planning. A later enable
+	// must not bypass the check of pending MDBX data.
 	deferredDomains [kv.DomainLen]bool
 	deferredIndices [kv.StandaloneIdxLen]bool
 }

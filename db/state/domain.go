@@ -504,9 +504,9 @@ func (dt *DomainRoTx) NewWriter(db kv.RoDB) *DomainBufferedWriter {
 	return dt.newWriter(db, dt.d.dirs.Tmp, !dt.d.Enabled.Load())
 }
 
-// openList - main method to open list of files.
-// It's ok if some files was open earlier.
-// An already-open file not in the provided list is retired (detached) and returned for deferred reclaim.
+// openList opens scanned files and detaches missing or incomplete ranges.
+// Returned files must be reclaimed after existing readers finish, even when
+// opening fails.
 func (d *Domain) openList(ctx context.Context, scanResult ScanDirsResult) (retiredFiles, error) {
 	retired, err := d.History.openList(ctx, scanResult.iiFiles, scanResult.historyFiles, scanResult.accessorFiles)
 	if err != nil {
