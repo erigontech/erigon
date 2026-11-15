@@ -169,6 +169,12 @@ func (c *buildPlanningCursor) Next() ([]byte, []byte, error) {
 func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 	const stepSize = uint64(10)
 	for _, target := range []string{"receipt", "receipt_without_history", "rcache", "logaddrs"} {
+		targetDomain := kv.ReceiptDomain
+		if target == "rcache" {
+			targetDomain = kv.RCacheDomain
+		}
+		isIndex := target == "logaddrs"
+		withoutHistory := target == "receipt_without_history"
 		for _, test := range []struct {
 			name                   string
 			resumeStep, stateSteps kv.Step
@@ -194,7 +200,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 				ctx := t.Context()
 				configure := func(agg *Aggregator) {
 					agg.EnableDomain(kv.RCacheDomain)
-					agg.d[kv.ReceiptDomain].HistoryDisabled = target == "receipt_without_history"
+					agg.d[kv.ReceiptDomain].HistoryDisabled = withoutHistory
 					agg.KeepRecentTxnsOfHistoriesWithDisabledSnapshots(0)
 					agg.ForbidVisibilityLowering()
 				}
@@ -245,11 +251,8 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 
 				dirs := agg.Dirs()
 				agg.Close()
-				folder, filename := dirs.SnapDomain, kv.ReceiptDomain.String()
-				if target == "rcache" {
-					filename = kv.RCacheDomain.String()
-				}
-				if target == "logaddrs" {
+				folder, filename := dirs.SnapDomain, targetDomain.String()
+				if isIndex {
 					folder, filename = dirs.SnapIdx, kv.FileLogAddressIdx
 				}
 				paths, err := filepath.Glob(filepath.Join(folder, "*-"+filename+".*"))
@@ -264,16 +267,13 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 				require.NoError(t, agg.OpenFolder(db))
 				var realign func()
 				if test.unaligned {
-					switch target {
-					case "rcache":
-						realign = agg.Unalign(kv.RCacheDomain)
-					case "logaddrs":
+					if isIndex {
 						realign = agg.UnalignIdx(kv.LogAddrIdx)
-					default:
-						realign = agg.Unalign(kv.ReceiptDomain)
+					} else {
+						realign = agg.Unalign(targetDomain)
 					}
 				}
-				if filename == kv.ReceiptDomain.String() {
+				if !isIndex && targetDomain == kv.ReceiptDomain {
 					require.Zero(t, agg.d[kv.ReceiptDomain].History.dirtyFiles.Len(), "incomplete receipt history must be detached before rebuilding")
 					require.Zero(t, agg.d[kv.ReceiptDomain].History.InvertedIndex.dirtyFiles.Len(), "incomplete receipt indices must be detached before rebuilding")
 				}
@@ -285,15 +285,15 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					if test.explicit {
 						return nil
 					}
-					counted := &buildPlanningTx{Tx: tx, table: agg.d[kv.ReceiptDomain].ValuesTable}
-					if target == "rcache" {
-						counted.table = agg.d[kv.RCacheDomain].ValuesTable
+					counted := &buildPlanningTx{Tx: tx}
+					if !isIndex {
+						counted.table = agg.d[targetDomain].ValuesTable
 					}
 					plan, err := at.planFileBuild(counted)
 					require.NoError(t, err)
 					if deferred {
 						require.Equal(t, test.stateSteps, plan.firstStep, "an unsafe backfill must not block healthy entities")
-						if target == "receipt_without_history" || target == "rcache" {
+						if withoutHistory || targetDomain == kv.RCacheDomain {
 							require.Equal(t, 1, counted.scans)
 							require.Zero(t, counted.nextCalls, "the first row already requires deferring this entity")
 						}
@@ -315,13 +315,10 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					defer at.Close()
 					require.Equal(t, lastTxNum, at.TxNumsInFiles(kv.StateDomains...), "healthy snapshots must keep advancing")
 					if !deferred {
-						switch target {
-						case "rcache":
-							require.Equal(t, lastTxNum, at.TxNumsInFiles(kv.RCacheDomain), "rcache files must catch up")
-						case "logaddrs":
+						if isIndex {
 							require.Equal(t, lastTxNum, at.searchII(kv.LogAddrIdx).files.EndTxNum(), "log address files must catch up")
-						default:
-							require.Equal(t, lastTxNum, at.TxNumsInFiles(kv.ReceiptDomain), "receipt files must catch up")
+						} else {
+							require.Equal(t, lastTxNum, at.TxNumsInFiles(targetDomain), "%s files must catch up", targetDomain)
 						}
 					}
 					_, err := at.prune(ctx, tx, 0, true, nil)

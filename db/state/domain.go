@@ -466,13 +466,13 @@ func (d *Domain) minStepInDB(tx kv.Tx) uint64 {
 	return uint64(first)
 }
 
-// firstStepToBuild returns the earliest pending step, clamped to filesEnd.
+// firstStepToBuild returns the earliest pending step, clamped to filesEndStep.
 // A result below minResumeStep need not be the earliest: it already proves that
 // the build must be deferred, so the values scan can stop early.
-func (d *Domain) firstStepToBuild(tx kv.Tx, filesEnd, minResumeStep kv.Step) (kv.Step, bool, error) {
+func (d *Domain) firstStepToBuild(tx kv.Tx, filesEndStep, minResumeStep kv.Step) (kv.Step, bool, error) {
 	if !d.HistoryDisabled && !d.SnapshotsDisabled {
 		first, found, err := d.InvertedIndex.firstStepInDB(tx)
-		return max(filesEnd, first), found, err
+		return max(filesEndStep, first), found, err
 	}
 	// History can be absent or pruned independently of the pending values.
 	cursor, err := tx.Cursor(d.ValuesTable)
@@ -493,11 +493,11 @@ func (d *Domain) firstStepToBuild(tx kv.Tx, filesEnd, minResumeStep kv.Step) (kv
 		} else {
 			first = min(first, kv.Step(^binary.BigEndian.Uint64(value[:8])))
 		}
-		if first <= filesEnd || first < minResumeStep {
+		if first <= filesEndStep || first < minResumeStep {
 			break
 		}
 	}
-	return max(filesEnd, first), first != kv.Step(math.MaxUint64), nil
+	return max(filesEndStep, first), first != kv.Step(math.MaxUint64), nil
 }
 
 func (dt *DomainRoTx) NewWriter(db kv.RoDB) *DomainBufferedWriter {

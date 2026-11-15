@@ -2249,10 +2249,12 @@ type fileBuildPlan struct {
 	// nextStateStep preserves that boundary for gap detection.
 	firstStep     kv.Step
 	nextStateStep kv.Step
+
 	// A job may start earlier for another entity, but even an empty file must
 	// respect its entity's lower bound to avoid lowering the shared ceiling.
 	domainFirstStep [kv.DomainLen]kv.Step
 	indexFirstStep  [kv.StandaloneIdxLen]kv.Step
+
 	// Defer unsafe backfills and entities disabled when planning. A later enable
 	// must not bypass the check of pending MDBX data.
 	deferredDomains [kv.DomainLen]bool
@@ -2284,17 +2286,17 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 			plan.deferredDomains[id] = true
 			continue
 		}
-		filesEnd := d.FirstStepNotInFiles()
-		plan.domainFirstStep[id] = filesEnd
-		if filesEnd >= ceilingStep {
+		filesEndStep := d.FirstStepNotInFiles()
+		plan.domainFirstStep[id] = filesEndStep
+		if filesEndStep >= ceilingStep {
 			continue
 		}
 		domainMinResumeStep := minResumeStep
 		if at.visible.unalignedDomain[id] {
 			domainMinResumeStep = 0
 		}
-		plan.domainFirstStep[id] = max(filesEnd, domainMinResumeStep)
-		first, found, err := d.d.firstStepToBuild(tx, filesEnd, domainMinResumeStep)
+		plan.domainFirstStep[id] = max(filesEndStep, domainMinResumeStep)
+		first, found, err := d.d.firstStepToBuild(tx, filesEndStep, domainMinResumeStep)
 		if err != nil {
 			return plan, err
 		}
@@ -2304,7 +2306,9 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 		if first < domainMinResumeStep {
 			plan.deferredDomains[id] = true
 			at.a.deferredDomainWarnings[id].Do(func() {
-				at.a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume", "entity", d.d.Name, "pendingStep", first, "ceilingStep", ceilingStep, "retainedIn", "MDBX")
+				at.a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume",
+					"entity", d.d.Name, "pendingStep", first,
+					"ceilingStep", ceilingStep, "retainedIn", "MDBX")
 			})
 			continue
 		}
@@ -2316,16 +2320,16 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 			plan.deferredIndices[id] = true
 			continue
 		}
-		filesEnd := ii.FirstStepNotInFiles()
-		plan.indexFirstStep[id] = filesEnd
-		if filesEnd >= ceilingStep {
+		filesEndStep := ii.FirstStepNotInFiles()
+		plan.indexFirstStep[id] = filesEndStep
+		if filesEndStep >= ceilingStep {
 			continue
 		}
 		indexMinResumeStep := minResumeStep
 		if at.visible.unalignedIdx[id] {
 			indexMinResumeStep = 0
 		}
-		plan.indexFirstStep[id] = max(filesEnd, indexMinResumeStep)
+		plan.indexFirstStep[id] = max(filesEndStep, indexMinResumeStep)
 		first, found, err := ii.ii.firstStepInDB(tx)
 		if err != nil {
 			return plan, err
@@ -2333,11 +2337,13 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 		if !found {
 			continue
 		}
-		first = max(filesEnd, first)
+		first = max(filesEndStep, first)
 		if first < indexMinResumeStep {
 			plan.deferredIndices[id] = true
 			at.a.deferredIndexWarnings[id].Do(func() {
-				at.a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume", "entity", ii.ii.Name, "pendingStep", first, "ceilingStep", ceilingStep, "retainedIn", "MDBX")
+				at.a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume",
+					"entity", ii.ii.Name, "pendingStep", first,
+					"ceilingStep", ceilingStep, "retainedIn", "MDBX")
 			})
 			continue
 		}
