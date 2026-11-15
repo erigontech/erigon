@@ -439,6 +439,16 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		HasBAL: len(changes) > 0,
 		bal:    changes,
 	}
+	if vm.HasBAL {
+		slots := 0
+		for i := range changes {
+			slots += len(changes[i].StorageChanges) + len(changes[i].StorageReads)
+		}
+		// The BAL names every account and slot the block touches, so the maps never grow during the block.
+		vm.s.Store(xsync.NewMap[accounts.Address, *AddressEntry](xsync.WithPresize(len(changes))))
+		vm.originAccounts.Store(xsync.NewMap[accounts.Address, *accounts.Account](xsync.WithPresize(len(changes))))
+		vm.originStorage.Store(xsync.NewMap[originStorageKey, uint256.Int](xsync.WithPresize(slots)))
+	}
 	vm.WriteChanges(changes)
 	return vm
 }
