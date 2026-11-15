@@ -102,7 +102,6 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 // wiring: selecting the parallel trie and supplying the DB it needs happen in one
 // expression, so there is no second call left to forget.
 func TestSharedDomains_WithParaTrieDB_SelectsParallelTrie(t *testing.T) {
-
 	db := newTestDb(t, 16)
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)

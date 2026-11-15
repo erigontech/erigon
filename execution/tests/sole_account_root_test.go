@@ -50,7 +50,6 @@ func TestSoleAccountRootAfterDeleteCollapse(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("parallelCommitment", func(t *testing.T) {
-
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
 		cp, err := m.GenerateChain(2, func(i int, bg *blockgen.BlockGen) {
 			if i == 0 {

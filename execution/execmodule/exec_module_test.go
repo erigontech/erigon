@@ -1284,7 +1284,6 @@ func TestBuildDoesNotWaitBetweenFullBatchesOfNonceTooHighTxns(t *testing.T) {
 // The 256 recipients must exceed commitment.minForkGrain (currently 128)
 // to exercise parallel commitment worker reads.
 func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
-
 	t.Run("without_concurrent_commit", func(t *testing.T) {
 		testAssembleBlockWithSiblingCommit(t, false)
 	})

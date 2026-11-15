@@ -63,7 +63,6 @@ func TestGetTransactionRejectsUnsupportedType(t *testing.T) {
 // rest of the binary uses. The variant is only upgraded once a DB is wired in, so
 // a construction that skips that step computes the state root sequentially.
 func TestT8nSharedDomainsUsesParallelTrie(t *testing.T) {
-
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
