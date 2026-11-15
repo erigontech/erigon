@@ -1077,7 +1077,7 @@ func (ht *HistoryRoTx) checkFilesDBGap(tx kv.Tx) error {
 		return err
 	}
 	if end := min(ht.files.EndTxNum(), ht.iit.files.EndTxNum()); prg.TxTo > end {
-		return fmt.Errorf("gap between snapshot files and DB for history %s: readable files end at txNum %d but the DB was pruned up to %d; rebuild missing accessors or restore missing snapshot files before restarting", ht.h.FilenameBase, end, prg.TxTo)
+		return fmt.Errorf("gap between snapshot files and DB for history %s: readable files end at txNum %d but the DB was pruned up to %d; run `erigon snapshots reset --datadir <datadir>` to reset and rebuild the datadir", ht.h.FilenameBase, end, prg.TxTo)
 	}
 	return nil
 }
