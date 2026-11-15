@@ -182,6 +182,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 			{name: "defer_from_step_0", resumeStep: 0, stateSteps: 3},
 			{name: "defer_from_step_1", resumeStep: 1, stateSteps: 4},
 			{name: "explicit_resume_before_requested_range", resumeStep: 1, stateSteps: 2, explicit: true, fromStep: 2},
+			{name: "explicit_resume_after_requested_start", resumeStep: 2, stateSteps: 3, explicit: true},
 			{name: "explicit_defer_from_tip", resumeStep: 0, stateSteps: 2, explicit: true, fromStep: 2},
 			{name: "explicit_defer_below_tip", resumeStep: 0, stateSteps: 2, explicit: true},
 			{name: "explicit_unaligned_backfill", resumeStep: 0, stateSteps: 3, explicit: true, fromStep: 3, unaligned: true},
@@ -353,6 +354,73 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestAggregatorBuildKeepsAlignedEntitiesAheadOfBackfill(t *testing.T) {
+	const stepSize = uint64(10)
+	for _, test := range []struct {
+		name    string
+		pending bool
+	}{
+		{name: "pending", pending: true},
+		{name: "empty"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			ctx := t.Context()
+			agg.EnableDomain(kv.RCacheDomain)
+			generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 3}})
+			generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 3}})
+			require.NoError(t, agg.OpenFolder(db))
+			agg.ForbidVisibilityLowering()
+			realign := agg.Unalign(kv.ReceiptDomain)
+			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+				at := agg.BeginFilesRo()
+				defer at.Close()
+				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.ReceiptDomain, kv.RCacheDomain} {
+					txNums := []uint64{1}
+					switch domain {
+					case kv.AccountsDomain:
+						txNums = []uint64{3 * stepSize, 4 * stepSize}
+					case kv.RCacheDomain:
+						if !test.pending {
+							continue
+						}
+						txNums = []uint64{2*stepSize + 1}
+					}
+					writer := at.d[domain].NewWriter(db)
+					t.Cleanup(writer.Close)
+					for _, txNum := range txNums {
+						require.NoError(t, writer.PutWithPrev([]byte{byte(txNum)}, []byte{7}, txNum, nil))
+					}
+					require.NoError(t, writer.Flush(ctx, tx))
+					writer.Close()
+				}
+				if test.pending {
+					writer := at.searchII(kv.LogAddrIdx).newWriter(db, agg.dirs.Tmp, false)
+					defer writer.close()
+					require.NoError(t, writer.Add([]byte{1}, 2*stepSize+1))
+					return writer.Flush(ctx, tx)
+				}
+				return nil
+			}))
+
+			finished, started := agg.buildFilesInBackground(asTemporalRoDB(db), 4*stepSize, false, unboundedFinalityCtx)
+			require.True(t, started)
+			<-finished
+			requireVisibleEnd(t, agg, 4*stepSize)
+			at := agg.BeginFilesRo()
+			defer at.Close()
+			for _, files := range []visibleFiles{at.d[kv.RCacheDomain].files, at.searchII(kv.LogAddrIdx).files} {
+				require.NotEmpty(t, files)
+				require.GreaterOrEqual(t, files[0].startTxNum, 2*stepSize, "aligned entities must not start at the backfill's earlier step")
+				require.Equal(t, 4*stepSize, files.EndTxNum())
+			}
+			require.NotEmpty(t, at.d[kv.ReceiptDomain].files)
+			require.Zero(t, at.d[kv.ReceiptDomain].files[0].startTxNum, "unaligned backfill must still start at its pending step")
+			realign()
+		})
 	}
 }
 
