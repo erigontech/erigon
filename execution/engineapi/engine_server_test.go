@@ -271,22 +271,34 @@ func newValidPayloadServer(t *testing.T) (*EngineServer, *stubExecutionModule, *
 	return srv, stub, payload
 }
 
-// onValid runs after the engine lock is released, so a slow witness build delays no other engine call.
-func TestNewPayloadRunsOnValidAfterTheEngineLock(t *testing.T) {
-	srv, _, payload := newValidPayloadServer(t)
+// The witness view and onValid run after the engine lock is released, so a slow witness build delays no other
+// engine call.
+func TestNewPayloadBuildsTheWitnessAfterTheEngineLock(t *testing.T) {
+	srv, stub, payload := newValidPayloadServer(t)
+	engineLockFree := func() bool {
+		if srv.lock.TryLock() {
+			srv.lock.Unlock()
+			return true
+		}
+		return false
+	}
+	var viewRan, freeInView bool
+	stub.witnessView = func() error {
+		viewRan, freeInView = true, engineLockFree()
+		return nil
+	}
 
 	var validHash common.Hash
-	var lockFree bool
+	var freeInOnValid bool
 	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash, _ *jsonrpc.ExecutionWitnessResult) {
-		validHash = blockHash
-		if lockFree = srv.lock.TryLock(); lockFree {
-			srv.lock.Unlock()
-		}
+		validHash, freeInOnValid = blockHash, engineLockFree()
 	})
 	require.NoError(t, err)
 	require.Equal(t, engine_types.ValidStatus, status.Status)
 	require.Equal(t, payload.BlockHash, validHash)
-	require.True(t, lockFree)
+	require.True(t, viewRan)
+	require.True(t, freeInView)
+	require.True(t, freeInOnValid)
 }
 
 // The readiness wait of the witness route runs before the engine lock is taken, so a busy module does not stall a
