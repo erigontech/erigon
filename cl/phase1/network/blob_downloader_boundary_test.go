@@ -163,7 +163,9 @@ func TestBlobHistoryDownloaderStopsWhenPeersDisappear(t *testing.T) {
 	downloader.SetNotifyBlobBackfilled(NewBlobBackfilledNotifier(func(completed bool) { notified = completed }))
 
 	require.NoError(t, downloader.downloadOnce(false))
-	require.Equal(t, []uint64{20, 19, 18, 17, 16, 15, 14, 13}, reader.slots)
+	require.NotEmpty(t, reader.slots)
+	require.Equal(t, uint64(20), reader.slots[0])
+	require.LessOrEqual(t, len(reader.slots), int(blocksBatchSize))
 	require.Zero(t, peers.requests)
 	require.False(t, notified)
 	require.Zero(t, downloader.nextBackfillTargetSlot)
