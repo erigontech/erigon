@@ -38,6 +38,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -106,6 +107,9 @@ type Aggregator struct {
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
 
+	deferredDomainWarnings [kv.DomainLen]rate.Sometimes
+	deferredIndexWarnings  [kv.StandaloneIdxLen]rate.Sometimes
+
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
@@ -157,6 +161,12 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*
 		workers:            workersCfg{merge: dbg.MergeWorkers, collateAndBuild: dbg.CollateWorkers},
 
 		produce: true,
+	}
+	for id := range a.deferredDomainWarnings {
+		a.deferredDomainWarnings[id].Interval = time.Minute
+	}
+	for id := range a.deferredIndexWarnings {
+		a.deferredIndexWarnings[id].Interval = time.Minute
 	}
 	empty := &aggregatorVisible{}
 	a.visible.Store(empty)
@@ -2277,7 +2287,9 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 		}
 		if first < domainMinResumeStep {
 			plan.deferredDomains[id] = true
-			at.a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume", "entity", d.d.Name, "pendingStep", first, "ceilingStep", ceilingStep, "retainedIn", "MDBX")
+			at.a.deferredDomainWarnings[id].Do(func() {
+				at.a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume", "entity", d.d.Name, "pendingStep", first, "ceilingStep", ceilingStep, "retainedIn", "MDBX")
+			})
 			continue
 		}
 		plan.domainFirstStep[id] = first
@@ -2308,7 +2320,9 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 		first = max(filesEnd, first)
 		if first < indexMinResumeStep {
 			plan.deferredIndices[id] = true
-			at.a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume", "entity", ii.ii.Name, "pendingStep", first, "ceilingStep", ceilingStep, "retainedIn", "MDBX")
+			at.a.deferredIndexWarnings[id].Do(func() {
+				at.a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume", "entity", ii.ii.Name, "pendingStep", first, "ceilingStep", ceilingStep, "retainedIn", "MDBX")
+			})
 			continue
 		}
 		plan.indexFirstStep[id] = first
