@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/spf13/afero"
@@ -339,11 +340,29 @@ func TestFastConfirmationWakePublishesDuringMissedSlot(t *testing.T) {
 			cfg.pendingBlockWrite = &pendingBlockWrite{}
 			require.Equal(t, ChainTipSync, graph.Stages[stage].TransitionFunc(cfg, args, nil))
 			cfg.pendingBlockWrite = nil
-			require.Equal(t, ForkChoice, graph.Stages[stage].TransitionFunc(cfg, args, nil), "safe-only changes must publish without another block")
-			engine.EXPECT().ForkChoiceUpdate(gomock.Any(), hash, hash, hash, nil, clparams.Phase0Version).Return(nil, nil)
-			_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.Root(), cfg)
-			require.NoError(t, err)
-			require.Equal(t, ChainTipSync, graph.Stages[stage].TransitionFunc(cfg, args, nil), "publication consumes the pending wake")
+			synctest.Test(t, func(t *testing.T) {
+				for range 2 {
+					require.Equal(t, ForkChoice, graph.Stages[stage].TransitionFunc(cfg, args, nil), "safe-only changes must publish without another block")
+					engine.EXPECT().ForkChoiceUpdate(gomock.Any(), hash, hash, hash, nil, clparams.Phase0Version).Return(nil, execution_client.ErrForkChoiceUpdateBusy)
+					started := time.Now()
+					_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.Root(), cfg)
+					require.NoError(t, err)
+					require.True(t, cfg.safeUpdatePending, "a busy response must preserve the update")
+					require.GreaterOrEqual(t, time.Since(started), sleepForSlotRewakeInterval, "busy retries must be throttled")
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				engine.EXPECT().ForkChoiceUpdate(gomock.Any(), hash, hash, hash, nil, clparams.Phase0Version).Return(nil, execution_client.ErrForkChoiceUpdateBusy)
+				_, _, err := computeAndNotifyServicesOfNewForkChoice(ctx, log.Root(), cfg)
+				require.ErrorIs(t, err, context.Canceled)
+				require.True(t, cfg.safeUpdatePending)
+				require.Equal(t, ForkChoice, graph.Stages[stage].TransitionFunc(cfg, args, nil))
+				engine.EXPECT().ForkChoiceUpdate(gomock.Any(), hash, hash, hash, nil, clparams.Phase0Version).Return(nil, nil)
+				_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.Root(), cfg)
+				require.NoError(t, err)
+				require.False(t, cfg.safeUpdatePending)
+				require.Equal(t, ChainTipSync, graph.Stages[stage].TransitionFunc(cfg, args, nil), "publication consumes the pending wake")
+			})
 		})
 	}
 }

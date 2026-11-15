@@ -472,7 +472,6 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 						return ChainTipSync
 					}
 					if cfg.safeUpdatePending {
-						cfg.safeUpdatePending = false
 						return ForkChoice
 					}
 					if x := catchUpPublishingHead(args); x != "" {
@@ -540,7 +539,6 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 						if cfg.pendingBlockWrite != nil {
 							return ChainTipSync
 						}
-						cfg.safeUpdatePending = false
 						return ForkChoice
 					}
 					if cfg.forkChoiceWaitingForIndices {

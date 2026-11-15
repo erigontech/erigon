@@ -102,7 +102,20 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 			default:
 				return fmt.Errorf("failed to run forkchoice: %w", err)
 			}
+			if cfg.safeUpdatePending {
+				timer := time.NewTimer(sleepForSlotRewakeInterval)
+				defer timer.Stop()
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-timer.C:
+				}
+			}
+		} else {
+			cfg.safeUpdatePending = false
 		}
+	} else {
+		cfg.safeUpdatePending = false
 	}
 	if recordExecutionHead {
 		cfg.executionHead = executionHead
