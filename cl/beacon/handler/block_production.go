@@ -3211,6 +3211,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	}); err != nil {
 		return err
 	}
+	a.emitters.NotifyBlockIndicesChanged()
 
 	headRoot, headSlot, headState, err := a.selectedHeadState(blockRoot)
 	if err != nil {
