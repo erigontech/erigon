@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -517,8 +518,14 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	group.Go(func() error {
 		warm, warmTasks, warmWorkers := bal, tasks, balWorkers
 		if cold.any() {
+			var getter func(kv.TemporalTx) execctxapi.StateGetter
+			multiGet := dbg.BALMultiGet && bra.stateCache != nil
+			if multiGet {
+				readsCode := codeMode != balCodeWarmupNone
+				getter = func(tx kv.TemporalTx) execctxapi.StateGetter { return readAheadGetter(tx, bra.stateCache, readsCode) }
+			}
 			var stripped bool
-			if warm, stripped = perKeyWarmupBAL(bal, cold, prefetchBALState(ctx, db, bal, cold)); stripped {
+			if warm, stripped = perKeyWarmupBAL(bal, prefetchBALState(ctx, db, bal, cold, getter), multiGet && codeMode == balCodeWarmupNone); stripped {
 				warmTasks, warmWorkers = makeBALWarmupPlan(warm, workers)
 			}
 		}
@@ -537,14 +544,25 @@ func balAccounts(bal types.BlockAccessList) types.BlockAccessList {
 	return accs
 }
 
-// perKeyWarmupBAL is the part of the BAL the per-key warmup reads after the batch. The batch only reads pages, so the
-// per-key warmup still fills the state cache, but not with the slots the batch read: a per-key read of them that
-// starts after the batch only competes with exec.
-func perKeyWarmupBAL(bal types.BlockAccessList, cold coldState, storageRead bool) (warm types.BlockAccessList, stripped bool) {
-	if cold.storage && storageRead {
-		return balAccounts(bal), true
+// perKeyWarmupBAL is the part of the BAL the per-key warmup reads after the batch read the domains in read. It drops
+// the slots the batch read: a per-key read of them that starts after the batch only competes with exec. With
+// accountsFilled the batch also filled the state cache with the accounts, so accounts without slots are dropped too.
+func perKeyWarmupBAL(bal types.BlockAccessList, read coldState, accountsFilled bool) (warm types.BlockAccessList, stripped bool) {
+	warm = bal
+	if read.storage {
+		warm, stripped = balAccounts(bal), true
 	}
-	return bal, false
+	if read.accounts && accountsFilled {
+		warm, stripped = balWithStorage(warm), true
+	}
+	return warm, stripped
+}
+
+// balWithStorage returns the accounts of bal that have storage changes or reads.
+func balWithStorage(bal types.BlockAccessList) types.BlockAccessList {
+	return slices.DeleteFunc(slices.Clone(bal), func(a types.AccountChanges) bool {
+		return len(a.StorageChanges)+len(a.StorageReads) == 0
+	})
 }
 
 func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, tasks []balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}, workers int) error {

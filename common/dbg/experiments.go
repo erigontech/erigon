@@ -145,6 +145,7 @@ var (
 	ReadAheadWait                 = EnvBool("READ_AHEAD_WAIT", false)
 	ReadAheadBALCode              = EnvBool("READ_AHEAD_BAL_CODE", false)
 	ReadAheadTxCode               = EnvBool("READ_AHEAD_TX_CODE", false)
+	BALMultiGet                   = EnvBool("BAL_MULTIGET", false)
 	FilesBlockingAsyncIO          = EnvBool("FILES_BLOCKING_ASYNC_IO", false)
 	FilesBlockingAsyncIOMultiPage = EnvBool("FILES_BLOCKING_ASYNC_IO_MULTI_PAGE", true)
 

@@ -519,8 +519,8 @@ func TestPrefetchKeysKeepsTheFirstReadError(t *testing.T) {
 	}
 	parent := prefetcherTx{p: coldPagesPrefetcher{}}
 	failing := prefetcherDB{p: domainErrPrefetcher{failing: kv.CommitmentDomain}}
-	require.Error(t, prefetchKeys(context.Background(), failing, parent, kv.CommitmentDomain, keys), "an error from a planner's own tx")
-	require.NoError(t, prefetchKeys(context.Background(), prefetcherDB{p: coldPagesPrefetcher{}}, parent, kv.CommitmentDomain, keys))
+	require.Error(t, prefetchKeys(context.Background(), failing, parent, kv.CommitmentDomain, keys, nil), "an error from a planner's own tx")
+	require.NoError(t, prefetchKeys(context.Background(), prefetcherDB{p: coldPagesPrefetcher{}}, parent, kv.CommitmentDomain, keys, nil))
 }
 
 // branchTx serves raw commitment branches from a small trie: compact prefix -> child bitmap.

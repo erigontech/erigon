@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types"
@@ -315,8 +316,9 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 	return next
 }
 
-// prefetchKeys spreads keys over prefetchPar read txs and returns the first read failure (see firstFailure).
-func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.Domain, keys [][]byte) error {
+// prefetchKeys spreads keys over prefetchPar read txs and returns the first read failure (see firstFailure). With a
+// getter, each tx then reads its keys' latest values through it.
+func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.Domain, keys [][]byte, getter func(kv.TemporalTx) execctxapi.StateGetter) error {
 	par := prefetchPar
 	if len(keys) < 2*prefetchPar {
 		par = 1
@@ -324,14 +326,30 @@ func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.
 	var mu sync.Mutex
 	var first error
 	inChunks(ctx, db, ttx, len(keys), par, func(tx kv.TemporalTx, from, to int) {
+		var err error
 		if p, ok := tx.AggTx().(latestPrefetcher); ok {
-			_, err := p.PrefetchLatest(ctx, domain, keys[from:to])
-			mu.Lock()
-			first = firstFailure(first, err)
-			mu.Unlock()
+			_, err = p.PrefetchLatest(ctx, domain, keys[from:to])
 		}
+		if getter != nil {
+			err = firstFailure(err, getLatest(ctx, getter(tx), domain, keys[from:to]))
+		}
+		mu.Lock()
+		first = firstFailure(first, err)
+		mu.Unlock()
 	})
 	return first
+}
+
+func getLatest(ctx context.Context, getter execctxapi.StateGetter, domain kv.Domain, keys [][]byte) error {
+	for _, k := range keys {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if _, _, err := getter.GetLatest(domain, k, kv.GetLatestOptions{}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // firstFailure returns the first error that is a real read failure (not an incomplete batch or a cancellation),
@@ -376,8 +394,9 @@ func logSampleFailure(domain kv.Domain, err error) {
 }
 
 // prefetchBALState reads into the page cache, in io_uring batches, the file pages of the BAL's accounts and storage
-// in the domains that cold marks, and reports whether the storage batch read without error.
-func prefetchBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, cold coldState) (storageRead bool) {
+// in the domains that cold marks, then reads their values through getter if set, and reports the domains it read
+// without error.
+func prefetchBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, cold coldState, getter func(kv.TemporalTx) execctxapi.StateGetter) (read coldState) {
 	started := time.Now()
 	var accs, slots [][]byte
 	if cold.storage {
@@ -393,15 +412,15 @@ func prefetchBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList
 	keys := 0
 	if cold.accounts {
 		keys += len(accs)
-		wg.Go(func() { accErr = prefetchDomain(ctx, db, kv.AccountsDomain, accs) })
+		wg.Go(func() { accErr = prefetchDomain(ctx, db, kv.AccountsDomain, accs, getter) })
 	}
 	if cold.storage {
 		keys += len(slots)
-		wg.Go(func() { slotErr = prefetchDomain(ctx, db, kv.StorageDomain, slots) })
+		wg.Go(func() { slotErr = prefetchDomain(ctx, db, kv.StorageDomain, slots, getter) })
 	}
 	wg.Wait()
 	logBatchPrefetch(ctx, "state", keys, started, firstFailure(accErr, slotErr))
-	return cold.storage && slotErr == nil
+	return coldState{accounts: cold.accounts && accErr == nil, storage: cold.storage && slotErr == nil}
 }
 
 // prefetchBALCommitment reads into the page cache, in io_uring batches, the file pages of the BAL's commitment trie,
@@ -411,9 +430,9 @@ func prefetchBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte) {
 	logBatchPrefetch(ctx, "trie", len(keys), started, prefetchCommitment(ctx, db, keys))
 }
 
-func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte) error {
+func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte, getter func(kv.TemporalTx) execctxapi.StateGetter) error {
 	var err error
-	if txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) { err = prefetchKeys(ctx, db, ttx, domain, keys) }); txErr != nil {
+	if txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) { err = prefetchKeys(ctx, db, ttx, domain, keys, getter) }); txErr != nil {
 		return txErr
 	}
 	return err
@@ -453,7 +472,7 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) er
 		if !ok || trieMostlyResident(ctx, p, hashedKeys) {
 			return
 		}
-		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys, 0)); err != nil {
+		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys, 0), nil); err != nil {
 			return
 		}
 		// The account trie walk loses a storage key at the extension above its account, so storage tries start again at their root.
@@ -481,7 +500,7 @@ func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [
 	active := keys
 	for depth := start; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
 		if depth > prefetchFlatDepth {
-			if err := prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, compactPrefixes(active, depth)); err != nil {
+			if err := prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, compactPrefixes(active, depth), nil); err != nil {
 				return err
 			}
 		}

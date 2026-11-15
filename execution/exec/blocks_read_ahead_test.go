@@ -17,6 +17,7 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -1118,15 +1120,29 @@ func TestBlockReadAheaderWaitForRunningWarmupWaitsForBodyWarmup(t *testing.T) {
 
 func TestPerKeyWarmupKeepsSlotsTheBatchDidNotRead(t *testing.T) {
 	bal := types.BlockAccessList{{Address: common.Address{19: 1}, StorageReads: []common.Hash{{}}}}
-	warm, stripped := perKeyWarmupBAL(bal, coldState{storage: true}, true)
+	warm, stripped := perKeyWarmupBAL(bal, coldState{storage: true}, false)
 	require.True(t, stripped)
 	require.Equal(t, balAccounts(bal), warm, "slots the batch read are dropped")
-	warm, stripped = perKeyWarmupBAL(bal, coldState{storage: true}, false)
+	warm, stripped = perKeyWarmupBAL(bal, coldState{}, false)
 	require.False(t, stripped)
 	require.Equal(t, bal, warm, "a failed storage batch leaves the slots to the per-key warmup")
 	warm, stripped = perKeyWarmupBAL(bal, coldState{accounts: true}, false)
 	require.False(t, stripped)
 	require.Equal(t, bal, warm, "a warm storage domain keeps the slots")
+}
+
+func TestPerKeyWarmupDropsAccountsTheBatchFilled(t *testing.T) {
+	withSlot := types.AccountChanges{Address: common.Address{19: 1}, StorageReads: []common.Hash{{}}}
+	bal := types.BlockAccessList{withSlot, {Address: common.Address{19: 2}}}
+	warm, stripped := perKeyWarmupBAL(bal, coldState{accounts: true}, true)
+	require.True(t, stripped)
+	require.Equal(t, types.BlockAccessList{withSlot}, warm, "an account the batch filled is read only for its slots")
+	warm, _ = perKeyWarmupBAL(bal, coldState{accounts: true, storage: true}, true)
+	require.Empty(t, warm, "nothing is left once both domains are filled")
+	warm, stripped = perKeyWarmupBAL(bal, coldState{accounts: true}, false)
+	require.False(t, stripped)
+	require.Equal(t, bal, warm, "accounts whose pages the batch read but did not cache stay")
+	require.Len(t, bal, 2, "the BAL itself is not changed")
 }
 
 func TestBALAccountsKeepsAccountChangesWithoutStorage(t *testing.T) {
@@ -1214,4 +1230,43 @@ func TestCachePopulatingGetterBoundedReadSkipsAVisibleEntry(t *testing.T) {
 	got, _, err := cpg.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{}.WithMaxStep(0))
 	require.NoError(t, err)
 	require.Equal(t, historical, got)
+}
+
+func TestPrefetchKeysFillsTheStateCacheWithLatestValues(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
+	rwTx, domains := temporaltest.NewTestTxSD(t, db)
+	domains.BindStateCache(stateCache)
+	domains.SetTxNum(10)
+	var accs, slots [][]byte
+	for i := range 3 * prefetchPar {
+		address := common.Address{18: 1, 19: byte(i)}
+		slot := append(address[:], make([]byte, 31)...)
+		slot = append(slot, byte(i))
+		accs, slots = append(accs, address[:]), append(slots, slot)
+		if i == 0 {
+			continue // absent from state
+		}
+		account := accounts.SerialiseV3(&accounts.Account{Nonce: uint64(i), CodeHash: accounts.EmptyCodeHash})
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, address[:], account, 10, nil))
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, slot, []byte{byte(i)}, 10, nil))
+	}
+	require.NoError(t, domains.Commit(t.Context(), rwTx))
+	stateCache.Applier().Clear()
+
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	getter := func(tx kv.TemporalTx) execctxapi.StateGetter { return readAheadGetter(tx, stateCache, false) }
+	for domain, keys := range map[kv.Domain][][]byte{kv.AccountsDomain: accs, kv.StorageDomain: slots} {
+		require.NoError(t, prefetchKeys(t.Context(), db, tx, domain, keys, getter))
+		for _, k := range keys {
+			want, _, err := tx.GetLatest(domain, k, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			cached, hit := stateCache.View(nil).Get(domain, k)
+			require.True(t, hit, "%s %x", domain, k)
+			require.True(t, bytes.Equal(want, cached), "%s %x: cached %x, latest %x", domain, k, cached, want)
+		}
+	}
 }
