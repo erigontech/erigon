@@ -54,8 +54,10 @@
 #                                              (canonical) per block.
 #   zkevm-witness-race                         race-detector variant of the above over
 #                                              the whole corpus (run via evm.race).
-#   Every shard runs with parallel commitment; the manifest pins it through
-#   commitment-parallel. Execution is parallel in every shard.
+#   zkevm-witness-v3                           zkevm-witness on serial commitment v3.
+#   Every other shard runs with parallel commitment; the manifest pins the mode
+#   through commitment-parallel and commitment-v3. Execution is parallel in
+#   every shard.
 #
 # Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
 # is decided here (not by the binary, which always exits 0): the shard fails
