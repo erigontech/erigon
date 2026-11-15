@@ -10,6 +10,9 @@ import (
 // Sized for every column of two blocks.
 const dataColumnStoredBufferSize = 256
 
+// One envelope per slot, so 64 rides out a loop stall of two epochs. A dropped root only skips its retry.
+const envelopeArrivedBufferSize = 64
+
 type EventEmitter struct {
 	stateFeed                    *stateFeed     // block state feed
 	operationFeed                *operationFeed // block operation feed
@@ -18,6 +21,7 @@ type EventEmitter struct {
 	blockIndicesMu               sync.Mutex
 	blockIndicesChanged          chan struct{}
 	dataColumnStored             chan common.Hash
+	envelopeArrived              chan common.Hash
 }
 
 // BlockIndicesChanged returns a channel that closes when an import commits block
@@ -68,6 +72,7 @@ func NewEventEmitter() *EventEmitter {
 		operationFeed:    newOpFeed(),
 		stateFeed:        newStateFeed(),
 		dataColumnStored: make(chan common.Hash, dataColumnStoredBufferSize),
+		envelopeArrived:  make(chan common.Hash, envelopeArrivedBufferSize),
 	}
 }
 
@@ -84,6 +89,23 @@ func (e *EventEmitter) NotifyDataColumnStored(blockRoot common.Hash) {
 	}
 	select {
 	case e.dataColumnStored <- blockRoot:
+	default:
+	}
+}
+
+func (e *EventEmitter) EnvelopeArrived() <-chan common.Hash {
+	if e == nil {
+		return nil
+	}
+	return e.envelopeArrived
+}
+
+func (e *EventEmitter) NotifyEnvelopeArrived(blockRoot common.Hash) {
+	if e == nil {
+		return
+	}
+	select {
+	case e.envelopeArrived <- blockRoot:
 	default:
 	}
 }

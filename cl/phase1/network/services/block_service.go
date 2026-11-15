@@ -231,6 +231,8 @@ type blockService struct {
 	validationSlots chan struct{}
 
 	elImportsStarted *lru.Cache[proposerIndexAndSlot, struct{}]
+	// roots of Gloas blocks whose first EL import found blobs missing, claimed by the one retry at envelope arrival.
+	elBlobsMissing *lru.Cache[common.Hash, struct{}]
 
 	// blocks that should be scheduled for later execution (e.g missing blobs).
 	emitter                          *beaconevents.EventEmitter
@@ -281,6 +283,10 @@ func newBlockService(
 	if err != nil {
 		panic(err)
 	}
+	elBlobsMissing, err := lru.New[common.Hash, struct{}]("el_blobs_missing", seenBlockCacheSize)
+	if err != nil {
+		panic(err)
+	}
 	b := &blockService{
 		forkchoiceStore:  forkchoiceStore,
 		syncedData:       syncedData,
@@ -292,6 +298,7 @@ func newBlockService(
 		validationCalls:  make(map[blockValidationContextKey]*blockValidationContextCall),
 		validationSlots:  make(chan struct{}, maxConcurrentBlockValidationContexts),
 		elImportsStarted: elImportsStarted,
+		elBlobsMissing:   elBlobsMissing,
 		emitter:          emitter,
 		db:               db,
 	}
@@ -398,10 +405,33 @@ func (b *blockService) blobCountOutOfRange(block *cltypes.SignedBeaconBlock) boo
 	return blobs == 0 || blobs > b.beaconCfg.GetBlobParameters(block.Block.Slot/b.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock
 }
 
-// importColumnsFromELBlobs builds the data columns of a Fulu or Gloas block from the blobs in the EL's pool
-// (engine_getBlobsV2), stores the ones this node keeps and publishes those on its subscribed subnets, so the block need
-// not wait for them on gossip.
+// importColumnsFromELBlobs imports the block's columns from the EL and, for a Gloas block, records its root for one
+// retry at envelope arrival when the EL lacked blobs.
 func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock) {
+	elLackedBlobs := b.importColumnsFromELBlobsCore(ctx, block)
+	if !elLackedBlobs || !startsELColumnsImportAfterAdmission(block) {
+		return
+	}
+	if root, err := block.Block.HashSSZ(); err == nil {
+		b.elBlobsMissing.Add(common.Hash(root), struct{}{})
+	}
+}
+
+// retryELColumnsImport runs the EL import once more for a block whose first import found blobs missing, if the block is
+// still in fork choice and its columns are still missing.
+func (b *blockService) retryELColumnsImport(ctx context.Context, blockRoot common.Hash) {
+	if !b.elBlobsMissing.Remove(blockRoot) {
+		return
+	}
+	if block, ok := b.forkchoiceStore.GetBlock(blockRoot); ok && block != nil {
+		b.importColumnsFromELBlobsCore(ctx, block)
+	}
+}
+
+// importColumnsFromELBlobsCore builds the data columns of a Fulu or Gloas block from the blobs in the EL's pool
+// (engine_getBlobsV2), stores the ones this node keeps and publishes those on its subscribed subnets, so the block need
+// not wait for them on gossip. It reports whether the EL lacked a blob of the block.
+func (b *blockService) importColumnsFromELBlobsCore(ctx context.Context, block *cltypes.SignedBeaconBlock) (elLackedBlobs bool) {
 	if block.Version() < clparams.FuluVersion || b.engine == nil || b.blobCountOutOfRange(block) {
 		return
 	}
@@ -430,7 +460,17 @@ func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *clty
 	blobs, proofs, err := b.engine.GetBlobs(ctx, versionedHashes, block.Version())
 	if err != nil {
 		log.Debug("[blockService] engine_getBlobsV2 failed", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "err", err)
-		return
+		return true
+	}
+	nonEmptyBlobs := 0
+	for _, blob := range blobs {
+		if len(blob) > 0 {
+			nonEmptyBlobs++
+		}
+	}
+	if len(blobs) != len(versionedHashes) || nonEmptyBlobs != len(blobs) {
+		log.Debug("[blockService] EL lacks some blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "expected", len(versionedHashes), "nonEmptyBlobs", nonEmptyBlobs)
+		return true
 	}
 	toPublish, err := peerDas.ImportColumnsFromBlobs(ctx, block, blobs, proofs)
 	if err != nil {
@@ -440,6 +480,7 @@ func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *clty
 	// The EL wait may have used up the import deadline, but the columns must still be published.
 	b.dataColumns.PublishColumns(context.WithoutCancel(ctx), toPublish)
 	log.Debug("[blockService] imported columns from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "blobs", len(blobs))
+	return false
 }
 
 func waitsForBlockDependency(err error) bool {
@@ -1219,6 +1260,7 @@ func (b *blockService) loop(ctx context.Context) {
 	ticker := time.NewTicker(blockJobsIntervalTick)
 	defer ticker.Stop()
 	dataColumnStored := b.emitter.DataColumnStored()
+	envelopeArrived := b.emitter.EnvelopeArrived()
 	var storageRetryAfter time.Time
 	var storageRetryDelay time.Duration
 	updateStorageBackoff := func(attempt *blockJobAttempt) {
@@ -1258,6 +1300,8 @@ func (b *blockService) loop(ctx context.Context) {
 				updateStorageBackoff(attempt)
 				return true
 			})
+		case root := <-envelopeArrived:
+			go b.retryELColumnsImport(ctx, root)
 		case root := <-dataColumnStored:
 			roots := drainDataColumnStored(dataColumnStored, root)
 			for root := range roots {

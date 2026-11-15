@@ -86,6 +86,31 @@ func TestNotifyDataColumnStoredIsNilSafe(t *testing.T) {
 	emitter.NotifyDataColumnStored(common.Hash{1})
 }
 
+func TestNotifyEnvelopeArrivedDoesNotBlockWhenFull(t *testing.T) {
+	emitter := NewEventEmitter()
+	for range envelopeArrivedBufferSize {
+		emitter.NotifyEnvelopeArrived(common.Hash{1})
+	}
+
+	done := make(chan struct{})
+	go func() {
+		emitter.NotifyEnvelopeArrived(common.Hash{2})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("notification blocked on a full buffer")
+	}
+}
+
+func TestNotifyEnvelopeArrivedIsNilSafe(t *testing.T) {
+	var emitter *EventEmitter
+	require.Nil(t, emitter.EnvelopeArrived())
+	emitter.NotifyEnvelopeArrived(common.Hash{1})
+}
+
 // head and head_v2 report a dropped event only on their own feeds, to subscribers of that topic. The state feed, which
 // carries every topic, drops them silently: its subscribers may not have asked for them.
 func TestHeadEventsReportAFullSubscriberOnlyOnTheirOwnFeed(t *testing.T) {
