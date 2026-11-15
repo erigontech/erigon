@@ -2373,13 +2373,15 @@ func (at *AggregatorRoTx) checkStateFilesBuildGap(tx kv.Tx) error {
 		return nil
 	}
 	var firstInDB kv.Step
+	foundHistory := false
 	for _, domain := range domains {
-		first, _, err := at.d[domain].d.InvertedIndex.firstStepInDB(tx)
+		first, found, err := at.d[domain].d.InvertedIndex.firstStepInDB(tx)
 		if err != nil {
 			return err
 		}
-		if first > 0 && (firstInDB == 0 || first < firstInDB) {
+		if found && (!foundHistory || first < firstInDB) {
 			firstInDB = first
+			foundHistory = true
 		}
 	}
 	if firstInDB > nextStateStep {
