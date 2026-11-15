@@ -39,6 +39,12 @@ const (
 	// txOverhead is what a transaction adds to the DA payload besides its
 	// encoding: its length as a uvarint32.
 	txOverhead = 5
+	// minTxDA is below the smallest ECDSA-signed transaction: r and s alone
+	// take about 66 bytes.
+	minTxDA = 64
+	// maxEmptiedPages bounds the walk of a pool whose pending transactions
+	// all exceed the budget left.
+	maxEmptiedPages = 8
 )
 
 // DABudget is the DA bytes of transactions one block may carry, so that a
@@ -61,10 +67,24 @@ func newPoolTxns(pool txnprovider.TxnProvider, budget int, logger log.Logger) *p
 }
 
 func (p *poolTxns) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
-	txs, err := p.pool.ProvideTxns(ctx, opts...)
-	if err != nil {
-		return nil, err
+	// The pool marks what it yields in the caller's filter, so a page this
+	// provider empties is not the pool running dry: the next holds others.
+	pages := txnprovider.ApplyProvideOptions(opts...).TxnIdsFilter != nil
+	for emptied := 1; ; emptied++ {
+		txs, err := p.pool.ProvideTxns(ctx, opts...)
+		if err != nil {
+			return nil, err
+		}
+		kept := p.keep(txs)
+		if len(kept) > 0 || len(txs) == 0 || !pages || p.budget < minTxDA || emptied == maxEmptiedPages {
+			return kept, nil
+		}
 	}
+}
+
+// keep returns the transactions of txs a block may carry, within the budget
+// left, which it takes from.
+func (p *poolTxns) keep(txs []types.Transaction) []types.Transaction {
 	kept := txs[:0]
 	for _, tx := range txs {
 		if reason := refused(tx); reason != "" {
@@ -78,7 +98,7 @@ func (p *poolTxns) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideO
 			kept = append(kept, tx)
 		}
 	}
-	return kept, nil
+	return kept
 }
 
 // noTxns provides no transactions.

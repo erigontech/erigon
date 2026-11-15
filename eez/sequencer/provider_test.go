@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -74,4 +75,68 @@ func TestDABudget(t *testing.T) {
 	// A 6-block slot of full blocks fits one batch at the floor price.
 	require.Equal(t, 65_738, DABudget(6))
 	require.LessOrEqual(t, uint64(6*DABudget(6))*floorGasPerByte+batchReserve, uint64(maxBatchGas))
+}
+
+// paged is a pool yielding pages of n transactions it has not yielded,
+// marking each in the caller's filter as the txpool does.
+type paged struct {
+	txs   []types.Transaction
+	n     int
+	pages int
+}
+
+func (p *paged) ProvideTxns(_ context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	p.pages++
+	yielded := txnprovider.ApplyProvideOptions(opts...).TxnIdsFilter
+	var page []types.Transaction
+	for _, tx := range p.txs {
+		if len(page) == p.n {
+			break
+		}
+		if yielded != nil {
+			if yielded.Contains(tx.Hash()) {
+				continue
+			}
+			yielded.Add(tx.Hash())
+		}
+		page = append(page, tx)
+	}
+	return page, nil
+}
+
+// TestPoolTxnsPagesPastAnEmptiedPage: a page whose transactions the budget
+// all leaves out is not the pool running dry; the next pages still fill the
+// block, until no transaction can fit.
+func TestPoolTxnsPagesPastAnEmptiedPage(t *testing.T) {
+	user := common.HexToAddress("0xa11ce")
+	var txs []types.Transaction
+	for i := range 3 {
+		txs = append(txs, transfer(t, uint64(i), 900, user))
+	}
+	small := transfer(t, 3, 100, user)
+	txs = append(txs, small)
+	filter := func() txnprovider.ProvideOption { return txnprovider.WithTxnIdsFilter(mapset.NewSet[[32]byte]()) }
+
+	pool := &paged{txs: txs, n: 3}
+	got, err := newPoolTxns(pool, small.EncodingSize()+txOverhead, log.New()).ProvideTxns(t.Context(), filter())
+	require.NoError(t, err)
+	require.Equal(t, []types.Transaction{small}, got)
+
+	pool = &paged{txs: txs, n: 3}
+	got, err = newPoolTxns(pool, minTxDA-1, log.New()).ProvideTxns(t.Context(), filter())
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.Equal(t, 1, pool.pages, "paged on with no room for any transaction")
+
+	// Room for a transaction, but less than each pending one takes: paging
+	// stops short of walking the pool.
+	var large []types.Transaction
+	for i := range 150 {
+		large = append(large, transfer(t, uint64(i), 900, user))
+	}
+	pool = &paged{txs: large, n: 3}
+	got, err = newPoolTxns(pool, minTxDA, log.New()).ProvideTxns(t.Context(), filter())
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.Equal(t, maxEmptiedPages, pool.pages)
 }
