@@ -120,6 +120,23 @@ func TestWitnessResultCacheBuildPayloadWitnessSharesOneBuild(t *testing.T) {
 	})
 }
 
+// A request that missed the cache before an earlier build finished takes the cached result instead of building again.
+func TestWitnessResultCacheBuildPayloadWitnessAfterAFinishedBuild(t *testing.T) {
+	c := newWitnessResultCache(96, 0, false, false)
+	hash, want := hashN(1), mkResult()
+	var builds atomic.Int32
+	build := func(context.Context) (*ExecutionWitnessResult, error) {
+		builds.Add(1)
+		return want, nil
+	}
+	for range 2 {
+		got, err := c.BuildPayloadWitness(t.Context(), hash, build)
+		require.NoError(t, err)
+		require.Same(t, want, got)
+	}
+	require.Equal(t, int32(1), builds.Load())
+}
+
 func TestWitnessResultCacheBuildOnceStoresBeforeRelease(t *testing.T) {
 	c := newWitnessResultCache(96, 0, true, true)
 	hash, want := hashN(1), mkResult()

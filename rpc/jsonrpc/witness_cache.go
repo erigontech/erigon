@@ -152,7 +152,14 @@ func (c *witnessResultCache) AddPayloadWitness(hash common.Hash, r *ExecutionWit
 
 // BuildPayloadWitness runs one build per hash for all concurrent callers and caches its result as AddPayloadWitness does.
 func (c *witnessResultCache) BuildPayloadWitness(ctx context.Context, hash common.Hash, build func(context.Context) (*ExecutionWitnessResult, error)) (*ExecutionWitnessResult, error) {
-	return c.buildOnce(ctx, hash, build, func(r *ExecutionWitnessResult, _ time.Duration) { c.AddPayloadWitness(hash, r) })
+	// A caller that missed the cache before an earlier build stored its result leads the next build.
+	cachedOrBuild := func(ctx context.Context) (*ExecutionWitnessResult, error) {
+		if r, ok := c.Get(hash); ok {
+			return r, nil
+		}
+		return build(ctx)
+	}
+	return c.buildOnce(ctx, hash, cachedOrBuild, func(r *ExecutionWitnessResult, _ time.Duration) { c.AddPayloadWitness(hash, r) })
 }
 
 type witnessStoreFunc func(r *ExecutionWitnessResult, took time.Duration)
