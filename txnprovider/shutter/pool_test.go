@@ -660,7 +660,7 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 		ctrl := gomock.NewController(t)
 		contractBackend := NewMockContractBackend(ctrl, logger)
 		stateChangesClient := NewMockStateChangesClient(ctrl, logger)
-		currentBlockNumReader := func(context.Context) (*uint64, error) { return nil, nil }
+		currentBlockReader := func(context.Context) (shutter.BlockState, error) { return shutter.BlockState{}, nil }
 		slotCalculator := NewMockSlotCalculator(ctrl, config)
 		keySenderFactory := NewMockDecryptionKeysSourceFactory(logger)
 		pool := shutter.NewPool(
@@ -670,7 +670,7 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 			baseTxnProvider,
 			contractBackend,
 			stateChangesClient,
-			currentBlockNumReader,
+			currentBlockReader,
 			shutter.WithSlotCalculator(slotCalculator),
 			shutter.WithDecryptionKeysSourceFactory(keySenderFactory.NewDecryptionKeysSource),
 		)

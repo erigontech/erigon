@@ -42,12 +42,11 @@ func TestBlockTracker(t *testing.T) {
 	bl := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(ctx, recvC))
 	btInitialisationWg := &sync.WaitGroup{}
 	btInitialisationWg.Add(1)
-	bnReader := func(ctx context.Context) (*uint64, error) {
-		start := uint64(10)
+	blockReader := func(ctx context.Context) (shutter.BlockState, error) {
 		btInitialisationWg.Done()
-		return &start, nil
+		return shutter.BlockState{BlockNum: 10}, nil
 	}
-	bt := shutter.NewBlockTracker(logger, bl, bnReader)
+	bt := shutter.NewBlockTracker(logger, bl, blockReader)
 	eg, egCtx := errgroup.WithContext(ctx)
 	defer func(eg *errgroup.Group) {
 		cancel()
@@ -72,15 +71,18 @@ func TestBlockTracker(t *testing.T) {
 
 func TestBlockTrackerInitialHead(t *testing.T) {
 	for _, tc := range []struct {
-		name         string
-		replayedHead uint64
-		currentHead  uint64
-		unwind       bool
-		wantHead     uint64
+		name            string
+		replayedHead    uint64
+		currentHead     uint64
+		replayedVersion uint64
+		currentVersion  uint64
+		unwind          bool
+		wantHead        uint64
 	}{
-		{"database ahead of replay", 42, 43, false, 43},
-		{"database ahead of replayed unwind", 42, 43, true, 43},
-		{"replay ahead of database", 44, 43, false, 44},
+		{"database ahead of replay", 42, 43, 1, 2, false, 43},
+		{"database ahead of replayed unwind", 42, 43, 1, 2, true, 43},
+		{"replay ahead of database", 44, 43, 2, 1, false, 44},
+		{"database rewind after replay", 42, 40, 1, 2, false, 40},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -98,12 +100,12 @@ func TestBlockTrackerInitialHead(t *testing.T) {
 				if tc.unwind {
 					direction = remoteproto.Direction_UNWIND
 				}
-				batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{
+				batches <- &remoteproto.StateChangeBatch{StateVersionId: tc.replayedVersion, ChangeBatch: []*remoteproto.StateChange{{
 					BlockHeight: tc.replayedHead, Direction: direction,
 				}}}
 				synctest.Wait()
-				tracker := shutter.NewBlockTracker(logger, listener, func(context.Context) (*uint64, error) {
-					return &tc.currentHead, nil
+				tracker := shutter.NewBlockTracker(logger, listener, func(context.Context) (shutter.BlockState, error) {
+					return shutter.BlockState{BlockNum: tc.currentHead, StateVersionID: tc.currentVersion}, nil
 				})
 				eg.Go(func() error { return tracker.Run(egCtx) })
 				synctest.Wait()
@@ -111,9 +113,43 @@ func TestBlockTrackerInitialHead(t *testing.T) {
 				waitCtx, cancelWait := context.WithTimeout(egCtx, time.Second)
 				defer cancelWait()
 				require.NoError(t, tracker.Wait(waitCtx, tc.wantHead))
+				require.ErrorIs(t, tracker.Wait(waitCtx, tc.wantHead+1), context.DeadlineExceeded)
 			})
 		})
 	}
+}
+
+func TestBlockTrackerIgnoresEventsBeforeSnapshot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		eg, egCtx := errgroup.WithContext(ctx)
+		defer func() {
+			cancel()
+			require.ErrorIs(t, eg.Wait(), context.Canceled)
+		}()
+		logger := testlog.Logger(t, log.LvlTrace)
+		batches := make(chan *remoteproto.StateChangeBatch)
+		listener := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(egCtx, batches))
+		eg.Go(func() error { return listener.Run(egCtx) })
+
+		readStarted, finishRead := make(chan struct{}), make(chan struct{})
+		tracker := shutter.NewBlockTracker(logger, listener, func(context.Context) (shutter.BlockState, error) {
+			close(readStarted)
+			<-finishRead
+			return shutter.BlockState{BlockNum: 40, StateVersionID: 2}, nil
+		})
+		eg.Go(func() error { return tracker.Run(egCtx) })
+		<-readStarted
+		batches <- &remoteproto.StateChangeBatch{StateVersionId: 1, ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 42}}}
+		synctest.Wait()
+		close(finishRead)
+		synctest.Wait()
+
+		waitCtx, cancelWait := context.WithTimeout(egCtx, time.Second)
+		defer cancelWait()
+		require.NoError(t, tracker.Wait(waitCtx, 40))
+		require.ErrorIs(t, tracker.Wait(waitCtx, 41), context.DeadlineExceeded)
+	})
 }
 
 func TestBlockTrackerAppliesUnwindDuringInitialization(t *testing.T) {
@@ -128,23 +164,22 @@ func TestBlockTrackerAppliesUnwindDuringInitialization(t *testing.T) {
 		batches := make(chan *remoteproto.StateChangeBatch)
 		listener := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(egCtx, batches))
 		eg.Go(func() error { return listener.Run(egCtx) })
-		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 42}}}
+		batches <- &remoteproto.StateChangeBatch{StateVersionId: 1, ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 42}}}
 		synctest.Wait()
 
 		readStarted, finishRead := make(chan struct{}), make(chan struct{})
-		tracker := shutter.NewBlockTracker(logger, listener, func(ctx context.Context) (*uint64, error) {
+		tracker := shutter.NewBlockTracker(logger, listener, func(ctx context.Context) (shutter.BlockState, error) {
 			close(readStarted)
 			select {
 			case <-finishRead:
-				head := uint64(43)
-				return &head, nil
+				return shutter.BlockState{BlockNum: 43, StateVersionID: 2}, nil
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return shutter.BlockState{}, ctx.Err()
 			}
 		})
 		eg.Go(func() error { return tracker.Run(egCtx) })
 		<-readStarted
-		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{
+		batches <- &remoteproto.StateChangeBatch{StateVersionId: 3, ChangeBatch: []*remoteproto.StateChange{{
 			BlockHeight: 40, Direction: remoteproto.Direction_UNWIND,
 		}}}
 		synctest.Wait()
@@ -184,7 +219,7 @@ func TestBlockTrackerWaitReportsCancellationAfterTheTrackerStops(t *testing.T) {
 	cancel()
 	logger := testlog.Logger(t, log.LvlTrace)
 	bl := shutter.NewBlockListener(logger, nil)
-	bt := shutter.NewBlockTracker(logger, bl, func(ctx context.Context) (*uint64, error) { return nil, ctx.Err() })
+	bt := shutter.NewBlockTracker(logger, bl, func(ctx context.Context) (shutter.BlockState, error) { return shutter.BlockState{}, ctx.Err() })
 	require.ErrorIs(t, bt.Run(ctx), context.Canceled)
 
 	waitCtx, cancelWait := context.WithCancel(t.Context())

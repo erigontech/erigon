@@ -32,6 +32,7 @@ import (
 type BlockEvent struct {
 	LatestBlockNum  uint64
 	LatestBlockTime uint64
+	StateVersionID  uint64
 	Unwind          bool
 }
 
@@ -113,6 +114,7 @@ func (bl *BlockListener) listen(ctx context.Context) error {
 		blockEvent := BlockEvent{
 			LatestBlockNum:  latestChange.BlockHeight,
 			LatestBlockTime: latestChange.BlockTime,
+			StateVersionID:  batch.StateVersionId,
 			Unwind:          latestChange.Direction == remoteproto.Direction_UNWIND,
 		}
 		bl.eventsMu.Lock()
