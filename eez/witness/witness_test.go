@@ -252,3 +252,46 @@ func TestCaptureUnexecutedGenesis(t *testing.T) {
 	require.Len(t, block.Transactions(), 1)
 	replay(t, st, m.Engine, block)
 }
+
+// stopping ends the sequencer's context at its first request, as a node
+// stopping while the sequencer builds does.
+type stopping struct {
+	stop context.CancelFunc
+	txs  []types.Transaction
+}
+
+func (s *stopping) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	s.stop()
+	txs := s.txs
+	s.txs = nil
+	return txs, nil
+}
+
+// TestCaptureWhileStopping: a block that commits while the sequencer stops
+// keeps its witness; nothing can build it later.
+func TestCaptureWhileStopping(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	m, chain := derivertest.NewL2(t)
+	f, err := follower.New(c.L1, chain, derivertest.Config(), follower.DefaultConfig, log.New())
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() { _ = f.Run(ctx) }()
+
+	st, err := witness.Open(t.Context(), t.TempDir(), log.New())
+	require.NoError(t, err)
+	defer st.Close()
+	capture := witness.NewCapture(jsonrpc.NewHeadWitnesses(m.DB, m.BlockReader, m.Engine), st, func() uint64 { return 0 })
+	seqCtx, stop := context.WithCancel(t.Context())
+	u := &user{t: t}
+	p := &stopping{stop: stop, txs: []types.Transaction{u.tx(&common.Address{1}, nil)}}
+	timing := sequencer.Timing{L1: 12 * time.Second, L2: 2 * time.Second, Proof: 4 * time.Second, Slack: 1500 * time.Millisecond}
+	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: timing, Witnesses: capture}, f, p, log.New())
+	require.NoError(t, err)
+
+	require.NoError(t, s.Handle(seqCtx, sequencer.LiveTick{SyncHeight: 1_000}))
+	block, err := chain.BlockByNumber(t.Context(), 1)
+	require.NoError(t, err)
+	require.Len(t, block.Transactions(), 1)
+	replay(t, st, m.Engine, block)
+}
