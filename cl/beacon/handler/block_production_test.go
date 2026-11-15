@@ -449,6 +449,24 @@ func TestStoreDataColumnSidecarsRejectsInvalidInput(t *testing.T) {
 	))
 }
 
+func TestStoreDataColumnSidecarsWritesNothingWhenALaterSidecarIsInvalid(t *testing.T) {
+	root := common.Hash{1}
+	valid := &cltypes.DataColumnSidecar{Index: 7}
+	for name, invalid := range map[string]*cltypes.DataColumnSidecar{
+		"nil":                  nil,
+		"index above MaxInt64": {Index: math.MaxInt64 + 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			noWritesExpected := blob_storage_mock.NewMockDataColumnStorage(gomock.NewController(t))
+			handler := &ApiHandler{columnStorage: noWritesExpected}
+
+			err := handler.storeDataColumnSidecars(t.Context(), 1, root, []*cltypes.DataColumnSidecar{valid, invalid})
+
+			require.Error(t, err)
+		})
+	}
+}
+
 var errInjectedColumnFsFailure = errors.New("injected column filesystem failure")
 
 // faultyColumnFs fails the failRenameAt-th Rename once, and every Create of a path ending in
