@@ -94,6 +94,14 @@ type preverifiedAppendListsSizes struct {
 	historicalSummariesLength uint64
 }
 
+// pendingEnvelopeRetryBooking holds back the next retry of a pending envelope until at. A probe booking paces reads of
+// column storage; an attempt booking (attempt) paces applying the envelope. A caller that has news of new columns
+// retries through a probe booking (ignoreProbe) but never through an attempt booking.
+type pendingEnvelopeRetryBooking struct {
+	at      time.Time
+	attempt bool
+}
+
 type ForkChoiceStore struct {
 	timeMs                 atomic.Uint64
 	highestSeen            atomic.Uint64
@@ -230,9 +238,9 @@ type ForkChoiceStore struct {
 	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
 	pendingEnvelopes         *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
 	envelopeGossipAdmissions ExecutionPayloadEnvelopeAdmissions
-	// Earliest time a retry of a pending envelope may run again, by block root. The background retry and
+	// Booking that holds back the next retry of a pending envelope, by block root. The background retry and
 	// a proposal's retry of its parent share it.
-	dataAvailableEnvelopeRetryAt *lru.Cache[common.Hash, time.Time]
+	dataAvailableEnvelopeRetryAt *lru.Cache[common.Hash, *pendingEnvelopeRetryBooking]
 	dataAvailableEnvelopeRetryMu sync.Mutex // makes the due check and the booking of a retry one step
 
 	// [New in Gloas:EIP7732] Locally-produced self-build envelopes waiting for their block.
@@ -407,7 +415,7 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
-	dataAvailableEnvelopeRetryAt, err := lru.New[common.Hash, time.Time](queueCacheSize)
+	dataAvailableEnvelopeRetryAt, err := lru.New[common.Hash, *pendingEnvelopeRetryBooking](queueCacheSize)
 	if err != nil {
 		return nil, err
 	}
