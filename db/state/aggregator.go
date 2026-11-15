@@ -1865,6 +1865,10 @@ type aggregatorVisible struct {
 	unalignedDomain [kv.DomainLen]bool
 	unalignedIdx    [kv.StandaloneIdxLen]bool
 
+	// Includes files hidden by missing accessors.
+	domainHasFiles [kv.DomainLen]bool
+	indexHasFiles  [kv.StandaloneIdxLen]bool
+
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
 	next    *aggregatorVisible // oldest→newest linked-list link (set under dirtyFilesLock)
@@ -1888,12 +1892,14 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			continue
 		}
 		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
+		next.domainHasFiles[id] = d.dirtyFiles.EndTxNumMax() != 0
 	}
 	for id, ii := range a.standaloneIIs() {
 		if ii == nil {
 			continue
 		}
 		next.iis[id] = ii.calcVisibleFiles(toTxNum)
+		next.indexHasFiles[id] = ii.dirtyFiles.EndTxNumMax() != 0
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
 
@@ -2245,13 +2251,11 @@ func (a *Aggregator) BuildFilesInBackground(db kv.TemporalRoDB, txNum uint64, fi
 }
 
 type fileBuildPlan struct {
-	// A lagging entity can move firstStep before the state-file boundary.
-	// nextStateStep preserves that boundary for gap detection.
-	firstStep     kv.Step
-	nextStateStep kv.Step
+	firstStep kv.Step
 
 	// A job may start earlier for another entity, but even an empty file must
 	// respect its entity's lower bound to avoid lowering the shared ceiling.
+	// Unaligned rebuilds can include requested empty steps before pending data.
 	domainFirstStep [kv.DomainLen]kv.Step
 	indexFirstStep  [kv.StandaloneIdxLen]kv.Step
 
@@ -2272,11 +2276,14 @@ func (a *Aggregator) readFileBuildPlan(ctx context.Context, db kv.RoDB) (plan fi
 }
 
 func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
+	if err := at.checkStateFilesBuildGap(tx); err != nil {
+		return fileBuildPlan{}, err
+	}
 	stateStep := kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
 	ceilingStep := kv.Step(at.visible.ceilingTxNum / at.StepSize())
-	plan := fileBuildPlan{firstStep: stateStep, nextStateStep: stateStep}
-	// Each step is published separately. Its end must reach the shared ceiling:
-	// the state minimum can be lower when a state file lacks its accessor.
+	plan := fileBuildPlan{firstStep: stateStep}
+	// A fileless entity's first published step must reach the shared ceiling.
+	// Existing files already contribute to that ceiling, even without accessors.
 	var minResumeStep kv.Step
 	if ceilingStep > 0 {
 		minResumeStep = ceilingStep - 1
@@ -2292,7 +2299,7 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 			continue
 		}
 		domainMinResumeStep := minResumeStep
-		if at.visible.unalignedDomain[id] {
+		if at.visible.unalignedDomain[id] || at.visible.domainHasFiles[id] {
 			domainMinResumeStep = 0
 		}
 		plan.domainFirstStep[id] = max(filesEndStep, domainMinResumeStep)
@@ -2312,7 +2319,9 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 			})
 			continue
 		}
-		plan.domainFirstStep[id] = first
+		if !at.visible.unalignedDomain[id] {
+			plan.domainFirstStep[id] = first
+		}
 		plan.firstStep = min(plan.firstStep, first)
 	}
 	for id, ii := range at.standaloneIIs() {
@@ -2326,7 +2335,7 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 			continue
 		}
 		indexMinResumeStep := minResumeStep
-		if at.visible.unalignedIdx[id] {
+		if at.visible.unalignedIdx[id] || at.visible.indexHasFiles[id] {
 			indexMinResumeStep = 0
 		}
 		plan.indexFirstStep[id] = max(filesEndStep, indexMinResumeStep)
@@ -2347,10 +2356,36 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 			})
 			continue
 		}
-		plan.indexFirstStep[id] = first
+		if !at.visible.unalignedIdx[id] {
+			plan.indexFirstStep[id] = first
+		}
 		plan.firstStep = min(plan.firstStep, first)
 	}
 	return plan, nil
+}
+
+func (at *AggregatorRoTx) checkStateFilesBuildGap(tx kv.Tx) error {
+	// Commitment rebuilds read existing state files, so a lower commitment file
+	// end does not imply missing account, storage or code history.
+	domains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+	nextStateStep := kv.Step(at.TxNumsInFiles(domains...) / at.StepSize())
+	if nextStateStep == 0 {
+		return nil
+	}
+	var firstInDB kv.Step
+	for _, domain := range domains {
+		first, _, err := at.d[domain].d.InvertedIndex.firstStepInDB(tx)
+		if err != nil {
+			return err
+		}
+		if first > 0 && (firstInDB == 0 || first < firstInDB) {
+			firstInDB = first
+		}
+	}
+	if firstInDB > nextStateStep {
+		return fmt.Errorf("gap between state snapshots and MDBX: files end at step %d, history starts at step %d; refusing to build files", nextStateStep, firstInDB)
+	}
+	return nil
 }
 
 // Returns a channel which is closed when aggregation is done and whether it started.
@@ -2442,33 +2477,6 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		if !hasData {
 			close(fin)
 			return
-		}
-
-		// Check the state-file boundary, even when a lagging domain resumes earlier.
-		// A gap here would produce empty files that falsely claim state coverage;
-		// an empty initial step is allowed when no state files exist.
-		if plan.nextStateStep > 0 {
-			var firstInDB kv.Step
-			if err := db.View(a.ctx, func(tx kv.Tx) error {
-				for _, d := range []*Domain{a.d[kv.AccountsDomain], a.d[kv.StorageDomain], a.d[kv.CodeDomain]} {
-					s := kv.Step(d.minStepInDB(tx))
-					if s > 0 && (firstInDB == 0 || s < firstInDB) {
-						firstInDB = s
-					}
-				}
-				return nil
-			}); err != nil {
-				a.logger.Warn("[snapshots] gap-detection", "err", err)
-			}
-			if firstInDB > plan.nextStateStep {
-				a.logger.Error("[snapshots] gap between snapshots and MDBX — refusing to build files",
-					"step", step, "nextStateStep", plan.nextStateStep, "firstInDB", firstInDB, "lastInDB", lastInDB,
-					"hint", "MDBX history starts above the end of the state snapshots; building here would create empty step files and a merge would silently drop state. "+
-						"To recover, stop erigon and delete BOTH the state snapshots (e.g. `erigon snapshots reset`) AND the chaindata/ directory, then re-sync. "+
-						"Removing only the snapshots is not enough: an earlier build may have already populated chaindata with values read from a corrupt snapshot file.")
-				close(fin)
-				return
-			}
 		}
 
 		// Build complete steps below the sampled lastInDB before starting merges.

@@ -37,6 +37,105 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	return a.buildFilesWithPlan(ctx, db, step, finalityCtx, filesDone, fileBuildPlan{})
 }
 
+func TestAggregatorBuildRecoversUnindexedFiles(t *testing.T) {
+	const stepSize = uint64(10)
+	for _, test := range []struct {
+		name, pattern string
+		accessorDir   bool
+	}{
+		{name: "commitment", pattern: "*-commitment.[23]-[34].kvi"},
+		{name: "logaddrs", pattern: "*-logaddrs.[23]-[34].efi", accessorDir: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			ctx := t.Context()
+			lastTxNum := 6*stepSize + 1
+			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+				at := agg.BeginFilesRo()
+				defer at.Close()
+				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CommitmentDomain} {
+					writer := at.d[domain].NewWriter(db)
+					t.Cleanup(writer.Close)
+					for txNum := uint64(1); txNum <= lastTxNum; txNum += stepSize {
+						require.NoError(t, writer.PutWithPrev([]byte{byte(txNum)}, []byte{7}, txNum, nil))
+					}
+					require.NoError(t, writer.Flush(ctx, tx))
+					writer.Close()
+				}
+				writer := at.searchII(kv.LogAddrIdx).newWriter(db, agg.dirs.Tmp, false)
+				defer writer.close()
+				for txNum := uint64(1); txNum <= lastTxNum; txNum += stepSize {
+					require.NoError(t, writer.Add([]byte{1}, txNum))
+				}
+				return writer.Flush(ctx, tx)
+			}))
+			for step := range kv.Step(4) {
+				require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil))
+			}
+			dirs := agg.Dirs()
+			agg.Close()
+			folder := dirs.SnapDomain
+			if test.accessorDir {
+				folder = dirs.SnapAccessors
+			}
+			paths, err := filepath.Glob(filepath.Join(folder, test.pattern))
+			require.NoError(t, err)
+			require.Len(t, paths, 2)
+			for _, path := range paths {
+				require.NoError(t, dir.RemoveFile(path))
+			}
+			agg = NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
+			t.Cleanup(agg.Close)
+			require.NoError(t, agg.OpenFolder(db))
+			agg.ForbidVisibilityLowering()
+
+			finished, started := agg.buildFilesInBackground(asTemporalRoDB(db), lastTxNum, false, unboundedFinalityCtx)
+			require.True(t, started)
+			<-finished
+			requireVisibleEnd(t, agg, 6*stepSize)
+		})
+	}
+}
+
+func TestAggregatorBuildResumesCommitmentBehindState(t *testing.T) {
+	const stepSize = uint64(10)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	ctx := t.Context()
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 5}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder(db))
+	agg.DisableInterDomainDependencies()
+	realign := agg.Unalign(kv.CommitmentDomain)
+	agg.ForbidVisibilityLowering()
+
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		require.Equal(t, 5*stepSize, at.TxNumsInFiles(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain))
+		require.Equal(t, stepSize, at.TxNumsInFiles(kv.CommitmentDomain))
+		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CommitmentDomain} {
+			firstStep := uint64(5)
+			if domain == kv.CommitmentDomain {
+				firstStep = 1
+			}
+			writer := at.d[domain].NewWriter(db)
+			t.Cleanup(writer.Close)
+			for txNum := firstStep*stepSize + 1; txNum <= 6*stepSize+1; txNum += stepSize {
+				require.NoError(t, writer.PutWithPrev([]byte{byte(txNum)}, []byte{7}, txNum, nil))
+			}
+			require.NoError(t, writer.Flush(ctx, tx))
+			writer.Close()
+		}
+		return nil
+	}))
+
+	// Existing state files cover the history pruned from MDBX during a commitment rebuild.
+	require.NoError(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), 1, 5, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	requireVisibleEnd(t, agg, 5*stepSize)
+	realign()
+}
+
 func TestAggregatorEnableDomainDuringFilePlanning(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, 10)
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
@@ -192,6 +291,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 			{name: "explicit_defer_from_tip", resumeStep: 0, stateSteps: 2, explicit: true, fromStep: 2},
 			{name: "explicit_defer_below_tip", resumeStep: 0, stateSteps: 2, explicit: true},
 			{name: "explicit_unaligned_backfill", resumeStep: 0, stateSteps: 3, explicit: true, fromStep: 3, unaligned: true},
+			{name: "explicit_unaligned_leading_empty_steps", resumeStep: 2, stateSteps: 3, explicit: true, unaligned: true},
 		} {
 			resumeStep := test.resumeStep
 			t.Run(target+"/"+test.name, func(t *testing.T) {
@@ -217,7 +317,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 						require.NoError(t, writer.PutWithPrev(key, value, uint64(resumeStep)*stepSize+1, nil))
 						if test.unaligned {
 							// Key order must not let the resume skip an older pending step.
-							require.NoError(t, writer.PutWithPrev([]byte{0}, value, stepSize+1, nil))
+							require.NoError(t, writer.PutWithPrev([]byte{0}, value, uint64(resumeStep+1)*stepSize+1, nil))
 						}
 						if domain == kv.AccountsDomain || domain == kv.RCacheDomain {
 							require.NoError(t, writer.PutWithPrev([]byte{2}, value, stateFilesEnd, nil))
@@ -315,10 +415,14 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					defer at.Close()
 					require.Equal(t, lastTxNum, at.TxNumsInFiles(kv.StateDomains...), "healthy snapshots must keep advancing")
 					if !deferred {
+						files := at.d[targetDomain].files
 						if isIndex {
-							require.Equal(t, lastTxNum, at.searchII(kv.LogAddrIdx).files.EndTxNum(), "log address files must catch up")
-						} else {
-							require.Equal(t, lastTxNum, at.TxNumsInFiles(targetDomain), "%s files must catch up", targetDomain)
+							files = at.searchII(kv.LogAddrIdx).files
+						}
+						require.Equal(t, lastTxNum, files.EndTxNum(), "%s files must catch up", target)
+						if test.unaligned {
+							require.NotEmpty(t, files)
+							require.Zero(t, files[0].startTxNum, "the rebuilt range must include its leading empty steps")
 						}
 					}
 					_, err := at.prune(ctx, tx, 0, true, nil)
