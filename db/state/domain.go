@@ -777,6 +777,7 @@ type DomainRoTx struct {
 	lookupFullKey []byte // scratch buffer for lookupByShortenedKey
 
 	valsC      kv.Cursor
+	valsCOdd   kv.Cursor
 	valCViewID uint64 // to make sure that valsC reading from the same view with given kv.Tx
 
 	getFromFileCache *DomainGetFromFileCache
@@ -1955,21 +1956,27 @@ func (dt *DomainRoTx) statelessBtree(i int) *btindex.BtIndex {
 var errSdTxImmutabilityInvariant = errors.New("tx passed into ShredDomains is immutable")
 
 func (dt *DomainRoTx) closeValsCursor() {
-	if dt.valsC != nil {
-		dt.valsC.Close()
-		dt.valCViewID = 0
-		dt.valsC = nil
-		// dt.vcParentPtr.Store(0)
+	for _, c := range []*kv.Cursor{&dt.valsC, &dt.valsCOdd} {
+		if *c != nil {
+			(*c).Close()
+			*c = nil
+		}
 	}
+	dt.valCViewID = 0
 }
 
-func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
-	if dt.valsC != nil { // run in assert mode only
+func (dt *DomainRoTx) valsCursor(tx kv.Tx, key []byte) (c kv.Cursor, err error) {
+	valsC := &dt.valsC
+	// Odd- and even-length compact branch prefixes sort apart, so one cursor would leave its leaf page on every trie level.
+	if dt.name == kv.CommitmentDomain && len(key) > 0 && key[0]&0x10 != 0 {
+		valsC = &dt.valsCOdd
+	}
+	if *valsC != nil { // run in assert mode only
 		if asserts {
 			if tx.ViewID() != dt.valCViewID {
 				panic(fmt.Errorf("%w: DomainRoTx=%s cursor ViewID=%d; given tx.ViewID=%d", errSdTxImmutabilityInvariant, dt.d.FilenameBase, dt.valCViewID, tx.ViewID())) // cursor opened by different tx, invariant broken
 			}
-			if mc, ok := dt.valsC.(interface{ IsClosed() bool }); ok && mc.IsClosed() {
+			if mc, ok := (*valsC).(interface{ IsClosed() bool }); ok && mc.IsClosed() {
 				panic(fmt.Sprintf("domainRoTx=%s cursor lives longer than Cursor (=> than tx opened that cursor)", dt.d.FilenameBase))
 			}
 			// if dt.d.largeValues {
@@ -1982,18 +1989,18 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 			// 	}
 			// }
 		}
-		return dt.valsC, nil
+		return *valsC, nil
 	}
 
 	if asserts {
 		dt.valCViewID = tx.ViewID()
 	}
 	if dt.d.LargeValues {
-		dt.valsC, err = tx.Cursor(dt.d.ValuesTable)
-		return dt.valsC, err
+		*valsC, err = tx.Cursor(dt.d.ValuesTable)
+		return *valsC, err
 	}
-	dt.valsC, err = tx.CursorDupSort(dt.d.ValuesTable)
-	return dt.valsC, err
+	*valsC, err = tx.CursorDupSort(dt.d.ValuesTable)
+	return *valsC, err
 }
 
 func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx, maxStep kv.Step) ([]byte, kv.Step, bool, error) {
@@ -2001,7 +2008,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx, maxStep kv.Step) (
 		return nil, 0, false, nil
 	}
 
-	valsC, err := dt.valsCursor(roTx)
+	valsC, err := dt.valsCursor(roTx, key)
 	if err != nil {
 		return nil, 0, false, err
 	}

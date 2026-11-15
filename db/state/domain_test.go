@@ -1012,7 +1012,7 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 	_, _, _, err = domainRoTx.GetLatest([]byte("key1"), tx)
 	require.NoError(err)
 
-	cursor, err := domainRoTx.valsCursor(tx)
+	cursor, err := domainRoTx.valsCursor(tx, []byte("key1"))
 	require.NoError(err)
 	require.NotNil(cursor)
 	tx.Rollback()
@@ -4414,4 +4414,37 @@ func TestDomainCloseFilesAfterStep(t *testing.T) {
 	for _, df := range all {
 		require.Equal(t, []string{"0-2"}, stepRanges(t, df.Items(), d.stepSize))
 	}
+}
+
+func TestDomain_CommitmentPrefixParitiesKeepOwnCursors(t *testing.T) {
+	t.Parallel()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, log.New())
+	ctx := t.Context()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	domainRoTx := d.beginForTests()
+	defer domainRoTx.Close()
+	writer := domainRoTx.NewWriter(db)
+	defer writer.Close()
+	even, odd := []byte{0x00, 0xab}, []byte{0x1a, 0xbc}
+	require.NoError(t, writer.PutWithPrev(even, []byte("even"), 1, nil))
+	require.NoError(t, writer.PutWithPrev(odd, []byte("odd"), 1, nil))
+	require.NoError(t, writer.Flush(ctx, tx))
+
+	v, _, ok, err := domainRoTx.getLatestFromDb(even, tx, kv.NoStepBound)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, []byte("even"), v)
+	v, _, ok, err = domainRoTx.getLatestFromDb(odd, tx, kv.NoStepBound)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, []byte("odd"), v)
+
+	c, err := domainRoTx.valsCursor(tx, even)
+	require.NoError(t, err)
+	k, _, err := c.Current()
+	require.NoError(t, err)
+	require.Equal(t, even, k[:len(even)], "an odd-length prefix read must not move the even-length prefix cursor")
 }
