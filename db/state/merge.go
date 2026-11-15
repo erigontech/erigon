@@ -361,6 +361,10 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 			return nil, nil, walkErr
 		}
 
+		if haveSelected && prevEnd != r.history.to {
+			return nil, nil, fmt.Errorf("History.staticFilesInRange: source files end at %d before merge range [%d,%d)", prevEnd, r.history.from, r.history.to)
+		}
+
 		for _, f := range historyFiles {
 			if f == nil {
 				panic("must not happen")
