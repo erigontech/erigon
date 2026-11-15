@@ -103,7 +103,7 @@ const (
 const (
 	minPayloadPollingWindow     = 100 * time.Millisecond
 	builderHandoffRetryInterval = 500 * time.Millisecond
-	// A published block is normally imported within one block service tick (50 ms) plus OnBlock; the bound caps how
+	// A published block is normally imported as soon as the block service is woken for it, plus OnBlock; the bound caps how
 	// long a stalled store can delay the block's data columns and a publish response without the integration wait.
 	publishedBlockStoreWaitBeforeColumns = time.Second
 )
