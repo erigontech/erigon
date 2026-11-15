@@ -39,6 +39,14 @@ touch "$work/cache/example/marker"
 run --include fixtures/keep
 [[ -f "$work/cache/example/marker" ]]
 
+# Cached full extraction: reuse must still reject include paths that are not
+# in the archive, and must not re-extract.
+if run --include fixtures/missing; then
+	echo 'cached full extraction accepted a missing archive path' >&2
+	exit 1
+fi
+[[ -f "$work/cache/example/marker" ]]
+
 rm -rf "$work/cache/example"
 if run --include fixtures/missing; then
 	echo 'missing archive path was accepted' >&2

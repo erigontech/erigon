@@ -113,9 +113,28 @@ while IFS=$'\t' read -r name url want; do
 		continue
 	fi
 
-	if [[ -f "$sentinel" ]] && { [[ "$(cat "$sentinel")" == "$want" ]] || [[ "$(cat "$sentinel")" == "$signature" ]]; }; then
-		echo "$name: cached (sha256 ${want:0:12})"
-		continue
+	if [[ -f "$sentinel" ]]; then
+		cached=$(cat "$sentinel")
+		if [[ "$cached" == "$signature" ]]; then
+			# A partial extraction with the same selection: tar validated every
+			# requested path when it was created.
+			echo "$name: cached (sha256 ${want:0:12})"
+			continue
+		fi
+		if [[ "$cached" == "$want" ]]; then
+			# Full extraction covers every archive path, but that tells nothing
+			# about paths that were never IN the archive. Stat the extracted
+			# tree so a bogus --include fails the same way it does on a cold
+			# cache (tar would reject it) instead of silently passing.
+			for inc in ${includes[@]+"${includes[@]}"}; do
+				if [[ ! -e "$out_dir/$inc" ]]; then
+					echo "test-fixtures: $name: requested path '$inc' is not in the archive" >&2
+					exit 1
+				fi
+			done
+			echo "$name: cached (sha256 ${want:0:12})"
+			continue
+		fi
 	fi
 
 	ensure_tarball "$name" "$url" "$want"
