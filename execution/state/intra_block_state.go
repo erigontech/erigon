@@ -2761,16 +2761,6 @@ func (ibs *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 	return ibs.MakeWriteSet(chainRules, stateWriter)
 }
 
-func (ibs *IntraBlockState) BalanceIncreaseSet() map[accounts.Address]uint256.Int {
-	s := make(map[accounts.Address]uint256.Int, len(ibs.balanceInc))
-	for addr, bi := range ibs.balanceInc {
-		if !bi.transferred {
-			s[addr] = bi.increase
-		}
-	}
-	return s
-}
-
 func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter StateWriter) error {
 	for addr := range ibs.journal.dirties {
 		ibs.stateObjectsDirty[addr] = struct{}{}

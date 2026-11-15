@@ -245,7 +245,7 @@ test-filtered:
 			echo "ramdisk: $$_rd"; \
 		fi; \
 	fi; \
-	(set -o pipefail && $(GOTEST) | ./tools/filter-test-output | tee run.log)
+	(set -o pipefail && $(GOTEST) 2>&1 | ./tools/filter-test-output | tee run.log)
 
 test-short: override GO_FLAGS += -short -failfast
 test-short: test-filtered
@@ -404,7 +404,6 @@ eest-devnet:
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
 		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile && \
-		echo "ENV ERIGON_EXEC3_PARALLEL=true" >> clients/erigon/Dockerfile && \
 		sed -i'' -e '/^echo "Running erigon/i\FLAGS="$$FLAGS $(EEST_GLAMSTERDAM_ERIGON_FLAGS)"' clients/erigon/erigon.sh && \
 		grep -qF -- '$(EEST_GLAMSTERDAM_ERIGON_FLAGS)' clients/erigon/erigon.sh
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log

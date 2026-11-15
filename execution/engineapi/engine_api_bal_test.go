@@ -29,7 +29,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
@@ -52,9 +51,6 @@ import (
 // assembler's BAL (sequential) and the parallel executor's BAL surfaces as a
 // BAL hash mismatch returned by bal.Process.
 func TestEngineApiBALMultiSenderBlock(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	const numSenders = 10
@@ -118,9 +114,6 @@ func TestEngineApiBALMultiSenderBlock(t *testing.T) {
 }
 
 func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -190,9 +183,6 @@ func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 }
 
 func TestEngineApiBALContractCreation(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -245,9 +235,6 @@ func TestEngineApiBALContractCreation(t *testing.T) {
 }
 
 func TestEngineApiBALStorageWrites(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -318,9 +305,6 @@ func TestEngineApiBALStorageWrites(t *testing.T) {
 // reaching the access list. Called twice in one block, the second call is a
 // no-op whose write must be excluded.
 func TestEngineApiBALStorageNoOpWriteOmitted(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -391,9 +375,6 @@ func TestEngineApiBALStorageNoOpWriteOmitted(t *testing.T) {
 }
 
 func TestEngineApiBALMultiTxBlock(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -649,9 +630,6 @@ func TestEngineApiBALMixedBlock(t *testing.T) {
 // assertoor suite fail. Runs under -race should eventually expose non-
 // determinism sources that survive a single execution.
 func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlInfo)
 	const (
@@ -776,9 +754,6 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 // There is no deployed code (no `f3` RETURN), so the create returns no
 // bytecode — the only output the test needs is the BAL agreement.
 func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -837,9 +812,6 @@ func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
 // TestEngineApiBALSelfDestruct tests BAL tracking when a contract self-destructs.
 // Exercises storage writes followed by self-destruct in the same block.
 func TestEngineApiBALSelfDestruct(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -896,9 +868,6 @@ func TestEngineApiBALSelfDestruct(t *testing.T) {
 // so the entry is present even with no value transferred and every change-set
 // empty.
 func TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 
@@ -943,9 +912,6 @@ func TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance(t *t
 // guards the non-zero variant: the SystemAddress beneficiary records a balance
 // change in addition to the access already recorded by the SELFDESTRUCT.
 func TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithNonZeroBalance(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 
@@ -983,9 +949,6 @@ func TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithNonZeroBalance(t
 // when the amount is zero: the withdrawal is a state access, and SystemAddress
 // is excluded only as the caller of system calls (ethereum/execution-specs#3681).
 func TestEngineApiBALIncludesSystemAddressOnZeroAmountWithdrawal(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 
@@ -1019,9 +982,6 @@ func TestEngineApiBALIncludesSystemAddressOnZeroAmountWithdrawal(t *testing.T) {
 // SystemAddress in the BAL: resolving the delegation loads the target's code,
 // which is a state access (ethereum/execution-specs#3681).
 func TestEngineApiBALIncludesSystemAddressAsDelegationTarget(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 
@@ -1079,9 +1039,6 @@ func TestEngineApiBALIncludesSystemAddressAsDelegationTarget(t *testing.T) {
 // guards that ordinary EOA beneficiaries also appear in the BAL on a
 // zero-balance SELFDESTRUCT.
 func TestEngineApiBALIncludesOrdinaryBeneficiaryOnSelfdestructWithZeroBalance(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 
@@ -1234,9 +1191,6 @@ func findStorageChange(sc *types.SlotChanges, index uint32) *types.StorageChange
 // TestEngineApiNewPayloadBALInvalid pins that both an undecodable blockAccessList
 // and a decodable one violating EIP-7928 make the block invalid.
 func TestEngineApiNewPayloadBALInvalid(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -1368,7 +1322,6 @@ func TestEngineApiNewPayloadBALInvalid(t *testing.T) {
 // TestEngineApiBALUnchangedClaimLieInvalid pins that a BAL listing a written account with reads and no changes makes
 // the block invalid, also when a later tx of the block reads what an earlier one wrote.
 func TestEngineApiBALUnchangedClaimLieInvalid(t *testing.T) {
-	forceParallelExec(t)
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -1410,7 +1363,6 @@ func TestEngineApiBALUnchangedClaimLieInvalid(t *testing.T) {
 // TestEngineApiBALUnchangedClaimLieShapesInvalid pins that a BAL hiding a committed storage write makes the block
 // invalid in each shape of the lie, and that a net-zero write inside one tx is an honest read.
 func TestEngineApiBALUnchangedClaimLieShapesInvalid(t *testing.T) {
-	forceParallelExec(t)
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -1621,7 +1573,6 @@ func requireBALMismatch(t *testing.T, status *enginetypes.PayloadStatus) {
 // self-destruct, the second one reading the slot the first wrote, and that claiming the account unchanged while a tx
 // changes it makes the block invalid.
 func TestEngineApiBALSameTxSelfdestructLieInvalid(t *testing.T) {
-	forceParallelExec(t)
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -1712,7 +1663,6 @@ func requireOnlyStorageReadsAndBalances(t *testing.T, c *types.AccountChanges, r
 // TestEngineApiBALUnchangedAccountLieInvalid pins that a BAL listing an account with no change while a tx changes it
 // makes the block invalid when a later tx of the block reads that account.
 func TestEngineApiBALUnchangedAccountLieInvalid(t *testing.T) {
-	forceParallelExec(t)
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
@@ -1801,10 +1751,4 @@ func requireUnchanged(t *testing.T, c *types.AccountChanges) {
 	require.Empty(t, c.BalanceChanges)
 	require.Empty(t, c.NonceChanges)
 	require.Empty(t, c.CodeChanges)
-}
-
-func forceParallelExec(t *testing.T) {
-	prev := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = prev })
 }
