@@ -2260,7 +2260,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		if !ok(validatePath(a, CodePath, tr.ReadHeader)) {
 			return
 		}
-		if len(tr.Val.Bytes) != 0 && !ok(wipedCommitted(a, tr.ReadHeader)) {
+		if (len(tr.Val.Bytes) != 0 || codeBytesDropped(tr.Val)) && !ok(wipedCommitted(a, tr.ReadHeader)) {
 			return
 		}
 	}
