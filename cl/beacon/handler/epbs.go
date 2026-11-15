@@ -1630,10 +1630,8 @@ func (a *ApiHandler) publishAndStoreExecutionPayloadEnvelopeColumns(storeCtx, pu
 	if len(columns) != 0 && a.columnStorage == nil {
 		return errors.Join(publishErr, fmt.Errorf("%w: data column storage unavailable", errExecutionPayloadEnvelopeIntegration))
 	}
-	for _, column := range columns {
-		if err := a.columnStorage.WriteColumnSidecars(storeCtx, work.blockRoot, int64(column.Index), column); err != nil {
-			return errors.Join(publishErr, fmt.Errorf("%w: %w", errExecutionPayloadEnvelopeIntegration, err))
-		}
+	if err := a.writeColumnSidecarsBatched(storeCtx, work.slot, work.blockRoot, columns); err != nil {
+		return errors.Join(publishErr, fmt.Errorf("%w: %w", errExecutionPayloadEnvelopeIntegration, err))
 	}
 	for _, bundle := range work.bundles {
 		a.blobBundles.Add(bundle.Commitment, bundle)
