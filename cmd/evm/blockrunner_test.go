@@ -46,12 +46,15 @@ func TestRunBlockTestDecodesOnlySelectedCases(t *testing.T) {
 }
 
 func TestRunBlockTestsParallelKeepsFileAndCaseOrder(t *testing.T) {
+	// Distinct network names per file: with identical files, reversing the file
+	// order would produce identical results and the serial/parallel comparison
+	// below would not detect it.
 	var files []string
 	for _, name := range []string{"second", "first"} {
 		path := filepath.Join(t.TempDir(), name+".json")
 		require.NoError(t, os.WriteFile(path, []byte(`{
-			"z": {"network": "unsupported-z"},
-			"a": {"network": "unsupported-a"}
+			"z": {"network": "unsupported-`+name+`"},
+			"a": {"network": "unsupported-`+name+`"}
 		}`), 0o600))
 		files = append(files, path)
 	}
