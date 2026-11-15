@@ -552,7 +552,7 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
+	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum, false))
 	hv, hiv := d.History.calcVisibleFiles(toTxNum)
 	return dv, hv, hiv
 }

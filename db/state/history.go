@@ -849,7 +849,7 @@ func (sf HistoryFiles) CleanupOnError() {
 }
 
 func (h *History) calcVisibleFiles(toTxNum uint64) (visibleFiles, *iiVisible) {
-	hv := calcVisibleFiles(h.dirtyFiles, h.Accessors, nil, false, toTxNum)
+	hv := calcVisibleFiles(h.dirtyFiles, h.Accessors, nil, false, toTxNum, true)
 	hiv := h.InvertedIndex.calcVisibleFiles(toTxNum)
 	return hv, hiv
 }

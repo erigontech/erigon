@@ -594,9 +594,10 @@ func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 
-func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems visibleFiles) {
+func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64, allowRetiredPrefix bool) (roItems visibleFiles) {
 	newVisibleFiles := make(visibleFiles, 0, files.Len())
 	firstStart := uint64(math.MaxUint64)
+	var firstFile *FilesItem
 	// trace = true
 	if trace {
 		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len(), "toTxNum", toTxNum)
@@ -606,6 +607,9 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 	for ok := iter.First(); ok; ok = iter.Next() {
 		item := iter.Item()
 		if item.decompressor != nil && !item.canDelete.Load() {
+			if firstFile == nil {
+				firstFile = item
+			}
 			firstStart = min(firstStart, item.startTxNum)
 		}
 		if item.endTxNum > toTxNum {
@@ -645,7 +649,10 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 	}
 
 	if len(newVisibleFiles) > 0 && newVisibleFiles[0].startTxNum > firstStart {
-		return visibleFiles{}
+		// Hidden merge outputs can overlap an already-retired history prefix.
+		if !allowRetiredPrefix || firstFile.endTxNum <= newVisibleFiles[0].startTxNum {
+			return visibleFiles{}
+		}
 	}
 	for i := 1; i < len(newVisibleFiles); i++ {
 		prev := newVisibleFiles[i-1]

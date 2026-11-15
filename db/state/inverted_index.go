@@ -240,7 +240,7 @@ func (ii *InvertedIndex) calcVisibleFiles(toTxNum uint64) *iiVisible {
 			return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	return newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
+	return newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum, true))
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {

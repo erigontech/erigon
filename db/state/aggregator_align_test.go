@@ -31,6 +31,20 @@ import (
 // generateStandaloneIIFile writes files with a hardcoded step size of 10.
 const alignStepSize = 10
 
+func TestVisibleFilesAligned_RequiresLeadingValuesCoverage(t *testing.T) {
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+	ranges := []testFileRange{{0, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 4}})
+	for _, name := range []string{"v1.0-accounts.0-2.kv", "v1.0-accounts.0-4.bt"} {
+		require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, name)))
+	}
+	require.NoError(t, agg.OpenFolder(db))
+	requireVisibleEnd(t, agg, 0)
+}
+
 func TestVisibleFilesAligned_ContiguousPrefix(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

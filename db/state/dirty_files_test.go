@@ -130,6 +130,7 @@ func TestCalcVisibleFilesContiguous(t *testing.T) {
 		{"gap", [][2]uint64{{0, 10}, {20, 30}}, -1, [][2]uint64{{0, 10}}},
 		{"unindexed middle", [][2]uint64{{0, 10}, {10, 20}, {20, 30}}, 1, [][2]uint64{{0, 10}}},
 		{"unindexed first", [][2]uint64{{0, 10}, {10, 20}}, 0, nil},
+		{"unindexed covering prefix", [][2]uint64{{0, 40}, {20, 30}}, 0, nil},
 		{"partial overlap", [][2]uint64{{0, 20}, {10, 30}, {20, 40}}, -1, [][2]uint64{{0, 20}}},
 		{"covering merge", [][2]uint64{{0, 10}, {20, 30}, {0, 30}}, -1, [][2]uint64{{0, 30}}},
 		{"retained history", [][2]uint64{{10, 20}, {20, 30}}, -1, [][2]uint64{{10, 20}, {20, 30}}},
@@ -145,7 +146,7 @@ func TestCalcVisibleFilesContiguous(t *testing.T) {
 				files.Set(item)
 			}
 			var got [][2]uint64
-			for _, f := range calcVisibleFiles(files, statecfg.AccessorHashMap, nil, false, 40) {
+			for _, f := range calcVisibleFiles(files, statecfg.AccessorHashMap, nil, false, 40, false) {
 				got = append(got, [2]uint64{f.startTxNum, f.endTxNum})
 			}
 			require.Equal(t, tc.visible, got)
