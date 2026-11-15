@@ -19,6 +19,7 @@ package witness
 import (
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -40,4 +41,17 @@ func TestPutIsDurable(t *testing.T) {
 	info, err := s.db.(*mdbx.MdbxKV).Env().Info(nil)
 	require.NoError(t, err)
 	require.Zero(t, info.UnsyncedBytes, "a kept witness waits for a deferred sync")
+}
+
+// TestStoreHoldsUnsettledHistory: the store grows far past 1 GB. It prunes
+// only behind L1 finality, so a settlement stall leaves every witness since
+// in it.
+func TestStoreHoldsUnsettledHistory(t *testing.T) {
+	s, err := Open(t.Context(), t.TempDir(), log.New())
+	require.NoError(t, err)
+	t.Cleanup(s.Close)
+
+	info, err := s.db.(*mdbx.MdbxKV).Env().Info(nil)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, info.Geo.Upper, uint64(100*datasize.GB))
 }
