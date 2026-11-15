@@ -1416,6 +1416,15 @@ func flushCell[T any](vm *VersionMap, e *AddressEntry, cells *btree.Map[int, *Wr
 	return cells
 }
 
+// doneDestruct reports whether cells hold a Done destruct at txIdx.
+func doneDestruct(cells *btree.Map[int, *WriteCell[bool]], txIdx int) bool {
+	if cells == nil {
+		return false
+	}
+	c, ok := cells.Get(txIdx)
+	return ok && c.Value && c.loadFlag() == FlagDone
+}
+
 // noOpBind reports whether flushing vw would leave its cell unchanged — flushCell would take
 // its no-bump branch and the in-place flag/valStatus update would itself be a no-op — and binds
 // vw to that cell. Caller holds the entry's read lock. Mirrors flushCell so skipping the flush
@@ -1535,10 +1544,14 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 		e.mu.Lock()
 		defer e.mu.Unlock()
 		// CreateAccount also writes SelfDestruct=false for a fresh address, which is no removal.
-		destructed := false
+		// On a BAL block the access list seeds a removal as a Done destruct. A flush of the same
+		// removal does not cross a removal, so the equal cells keep their version and stay Done.
+		destructed, reseeded := false, false
 		if sd, ok := writes.selfDestruct[addr]; ok {
-			destructed = sd.Val
-			if !destructed {
+			if sd.Val {
+				reseeded = vm.HasBAL && doneDestruct(e.SelfDestruct, sd.Version.TxIndex)
+				destructed = !reseeded
+			} else {
 				state, _, _, _ := accountLifecycleLocked(e, sd.Version.TxIndex, false)
 				destructed = state != LifecycleLive
 			}
@@ -1547,9 +1560,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 			e.Address = flushCell(vm, e, e.Address, addr, AddressPath, vw, flag, eqAccount, destructed)
 		}
 		if vw, ok := writes.selfDestruct[addr]; ok {
-			cells, cell := putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, vw.valStatus)
-			e.SelfDestruct = cells
-			vw.bind(e, cell)
+			e.SelfDestruct = flushCell(vm, e, e.SelfDestruct, addr, SelfDestructPath, vw, flag, eqBool, !reseeded)
 			if vw.Val {
 				e.destructed.Store(true)
 			}
@@ -1986,6 +1997,7 @@ func eqCodeHash(a, b accounts.CodeHash) bool {
 }
 func eqCode(a, b accounts.Code) bool { return a.Hash == b.Hash && bytes.Equal(a.Bytes, b.Bytes) }
 func eqInt(a, b int) bool            { return a == b }
+func eqBool(a, b bool) bool          { return a == b }
 
 func eqAccount(a, b *accounts.Account) bool {
 	return a != nil && b != nil && a.Equals(b)
@@ -2260,7 +2272,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		if !ok(validatePath(a, CodePath, tr.ReadHeader)) {
 			return
 		}
-		if len(tr.Val.Bytes) != 0 && !ok(wipedCommitted(a, tr.ReadHeader)) {
+		if (len(tr.Val.Bytes) != 0 || codeBytesDropped(tr.Val)) && !ok(wipedCommitted(a, tr.ReadHeader)) {
 			return
 		}
 	}

@@ -179,6 +179,7 @@ func TestNewForkChoiceStoreAnchorCheckpointEpoch(t *testing.T) {
 			want := solid.Checkpoint{Epoch: tc.wantEpoch, Root: anchorRoot}
 			require.Equal(t, want, store.FinalizedCheckpoint())
 			require.Equal(t, want, store.JustifiedCheckpoint())
+			require.Equal(t, tc.wantEpoch*cfg.SlotsPerEpoch, store.FinalizedSlot())
 		})
 	}
 }

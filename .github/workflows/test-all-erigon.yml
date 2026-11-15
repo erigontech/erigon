@@ -70,9 +70,10 @@ jobs:
           ERIGON_COMMITMENT_V3: ${{ matrix.commitment_mode == 'v3' && 'true' || 'false' }}
         run: |
           if ! make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"; then
-            # A failed test binary is a real result: a cold rerun only repeats it or hides a flake. A full disk or
-            # a build failure in the same run still takes the cache clear below.
-            if grep -qE '^FAIL[[:space:]]+[^[:space:]]+[[:space:]]+[0-9.]+s' run.log && ! grep -q -e 'no space left on device' -e '\[build failed\]' run.log; then
+            # A failed test binary is a real result: a cold rerun only repeats it or hides a flake. A build failure,
+            # or a full disk the log reports, still takes the cache clear below; a disk failure that prints nothing
+            # (a SIGBUS on a sparse mmap) does not.
+            if grep -qE '^FAIL[[:space:]]+[^[:space:]]+[[:space:]]+[0-9.]+s' run.log && ! grep -q -e 'no space left on device' -e 'not enough space on the disk' -e '\[build failed\]' run.log; then
               exit 1
             fi
             # Retry after clearing the Go build cache. Low disk space can cause
