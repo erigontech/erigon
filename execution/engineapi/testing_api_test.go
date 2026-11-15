@@ -211,8 +211,9 @@ func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, err
 	return 0, false, nil
 }
 
-func (s *stubExecutionModule) ValidateChainAndView(ctx context.Context, block *types.Block, _ time.Duration, _ execmodule.BlockStateView) (execmodule.ValidationResult, error) {
-	return s.ValidateChain(ctx, block)
+func (s *stubExecutionModule) ValidateChainAndView(ctx context.Context, block *types.Block, _ time.Duration, _ execmodule.BlockStateView) (execmodule.ValidationResult, func() error, error) {
+	result, err := s.ValidateChain(ctx, block)
+	return result, nil, err
 }
 
 func (s *stubExecutionModule) InclusionList(ctx context.Context) (types.Transactions, error) {

@@ -72,6 +72,14 @@ type sideForkReader struct {
 // viewedBlock is a block the tests' databases and block readers do not hold until a test commits it.
 var viewedBlock = types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(1)}, nil)
 
+func (e *ExecModule) ModuleFree() bool {
+	if !e.semaphore.TryAcquire(1) {
+		return false
+	}
+	e.semaphore.Release(1)
+	return true
+}
+
 // The payload witness view runs under the engine lock, so a module that stays busy must not make it wait longer than its wait.
 func TestValidateChainAndViewGivesUpOnABusyModule(t *testing.T) {
 	module := &ExecModule{db: temporaltest.NewTestDB(t, datadir.New(t.TempDir())), semaphore: semaphore.NewWeighted(1), logger: log.New()}
@@ -80,7 +88,7 @@ func TestValidateChainAndViewGivesUpOnABusyModule(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	result, err := module.ValidateChainAndView(ctx, viewedBlock, 10*time.Millisecond, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
+	result, _, err := module.ValidateChainAndView(ctx, viewedBlock, 10*time.Millisecond, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
 	require.NoError(t, err)
 	require.Equal(t, ExecutionStatusBusy, result.ValidationStatus)
 }
@@ -97,7 +105,7 @@ func TestValidateChainAndViewWaitsForTheModule(t *testing.T) {
 			module.semaphore.Release(1)
 		})
 
-		result, err := module.ValidateChainAndView(t.Context(), viewedBlock, time.Second, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
+		result, _, err := module.ValidateChainAndView(t.Context(), viewedBlock, time.Second, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
 		require.NoError(t, err)
 		require.True(t, released.Load())
 		require.Equal(t, ExecutionStatusMissingSegment, result.ValidationStatus)
@@ -133,7 +141,7 @@ func TestValidateChainAndViewFindsABlockCommittedWhileItWaits(t *testing.T) {
 					}
 				}()
 
-				result, err := module.ValidateChainAndView(t.Context(), viewedBlock, time.Second, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
+				result, _, err := module.ValidateChainAndView(t.Context(), viewedBlock, time.Second, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
 				require.NoError(t, err)
 				require.NoError(t, <-committed)
 				if !tc.releaseModule {

@@ -269,24 +269,22 @@ func newValidPayloadServer(t *testing.T) (*EngineServer, *stubExecutionModule, *
 	return srv, stub, payload
 }
 
-// onValid reads the validated state in the engine-lock section of the validation, so no forkchoice update or other
-// payload replaces or commits that state first.
-func TestNewPayloadRunsOnValidUnderTheEngineLock(t *testing.T) {
+// onValid runs after the engine lock is released, so a slow witness build delays no other engine call.
+func TestNewPayloadRunsOnValidAfterTheEngineLock(t *testing.T) {
 	srv, _, payload := newValidPayloadServer(t)
 
 	var validHash common.Hash
-	var lockHeld bool
+	var lockFree bool
 	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash) {
 		validHash = blockHash
-		lockHeld = !srv.lock.TryLock()
-		if !lockHeld {
+		if lockFree = srv.lock.TryLock(); lockFree {
 			srv.lock.Unlock()
 		}
 	})
 	require.NoError(t, err)
 	require.Equal(t, engine_types.ValidStatus, status.Status)
 	require.Equal(t, payload.BlockHash, validHash)
-	require.True(t, lockHeld)
+	require.True(t, lockFree)
 }
 
 // The readiness wait of the witness route runs before the engine lock is taken, so a busy module does not stall a
@@ -1220,10 +1218,10 @@ func (m *storingAfterValidation) ValidateChain(ctx context.Context, block *types
 	return result, err
 }
 
-func (m *storingAfterValidation) ValidateChainAndView(ctx context.Context, block *types.Block, wait time.Duration, fn execmodule.BlockStateView) (execmodule.ValidationResult, error) {
-	result, err := m.ExecutionModule.ValidateChainAndView(ctx, block, wait, fn)
+func (m *storingAfterValidation) ValidateChainAndView(ctx context.Context, block *types.Block, wait time.Duration, fn execmodule.BlockStateView) (execmodule.ValidationResult, func() error, error) {
+	result, view, err := m.ExecutionModule.ValidateChainAndView(ctx, block, wait, fn)
 	m.storeAfterFirstValidation(ctx, block)
-	return result, err
+	return result, view, err
 }
 
 func (m *storingAfterValidation) storeAfterFirstValidation(ctx context.Context, block *types.Block) {

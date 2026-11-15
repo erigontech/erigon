@@ -34,26 +34,32 @@ func TestValidateChainAndView(t *testing.T) {
 	requireValid(t, m, a.Blocks[0])
 	updateForkChoice(t, m, a.Blocks[0].Hash(), common.Hash{}, common.Hash{})
 
+	// A view that reads only a copy of the state runs after the module is released.
 	for _, tc := range []struct {
-		name  string
-		block *types.Block
+		name       string
+		block      *types.Block
+		moduleFree bool
 	}{
-		{"the committed head", a.Blocks[0]},
-		{"extends the committed head", a.Blocks[1]},
-		{"extends an uncommitted block", a.Blocks[2]},
-		{"sibling of the committed head", b.Blocks[0]},
-		{"extends a side fork at the head height", b.Blocks[1]},
+		{"the committed head", a.Blocks[0], true},
+		{"extends the committed head", a.Blocks[1], true},
+		{"extends an uncommitted block", a.Blocks[2], false},
+		{"sibling of the committed head", b.Blocks[0], false},
+		{"extends a side fork at the head height", b.Blocks[1], false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			requireValid(t, m, tc.block)
-			called := false
-			result, err := m.ExecModule.ValidateChainAndView(t.Context(), tc.block, time.Second, func(kv.TemporalTx, kv.TemporalGetter) error {
-				called = true
+			called, moduleFree := false, false
+			result, view, err := m.ExecModule.ValidateChainAndView(t.Context(), tc.block, time.Second, func(kv.TemporalTx, kv.TemporalGetter) error {
+				called, moduleFree = true, m.ExecModule.ModuleFree()
 				return nil
 			})
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
+			if view != nil {
+				require.NoError(t, view())
+			}
 			require.True(t, called)
+			require.Equal(t, tc.moduleFree, moduleFree)
 		})
 	}
 }
