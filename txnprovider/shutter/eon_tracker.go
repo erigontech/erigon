@@ -20,6 +20,7 @@ package shutter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -206,6 +207,10 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (_ Eon, _ bool,
 	if et.currentEon == nil {
 		var numKeyperSets uint64
 		numKeyperSets, err = et.ksmContract.GetNumKeyperSets(callOpts)
+		if errors.Is(err, bind.ErrNoCode) {
+			// Initial state resets can precede deployment of the keyper set manager.
+			return Eon{}, false, nil
+		}
 		if err != nil {
 			return Eon{}, false, fmt.Errorf("get num keyper sets: %w", err)
 		}

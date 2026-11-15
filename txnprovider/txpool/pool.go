@@ -324,11 +324,8 @@ func (p *TxPool) start(ctx context.Context) error {
 	if err := p.fromDB(ctx); err != nil {
 		return fmt.Errorf("loading pool from DB: %w", err)
 	}
-	p.lock.Lock()
-	defer p.lock.Unlock()
 	if p.started.CompareAndSwap(false, true) {
 		p.logger.Info("[txpool] Started")
-		p.lastSeenCond.Broadcast()
 	}
 	return nil
 }
