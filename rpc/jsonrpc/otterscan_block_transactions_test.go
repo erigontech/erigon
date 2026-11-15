@@ -67,7 +67,7 @@ func TestOtsGetBlockTransactionsPageContent(t *testing.T) {
 	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
 
 	for _, block := range chain.Blocks {
-		want := ethapi.RPCMarshalBlock(block, true, true).Transactions.([]*ethapi.RPCTransaction)
+		want := ethapi.RPCMarshalBlock(block, true, true, nil, nil).Transactions.([]*ethapi.RPCTransaction)
 		for _, rpcTx := range want {
 			if len(rpcTx.Input) >= 4 {
 				rpcTx.Input = rpcTx.Input[:4]

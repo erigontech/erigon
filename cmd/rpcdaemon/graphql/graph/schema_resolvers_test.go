@@ -980,7 +980,7 @@ func TestQueryResolver_BlockTransactionsBySelection(t *testing.T) {
 	receipt := &types.Receipt{Status: types.ReceiptStatusSuccessful, TxHash: txn.Hash(), GasUsed: 21000, BlockNumber: uint256.NewInt(7)}
 	mock := &mockGraphQLAPI{
 		blockDetails: map[string]any{
-			"block":    ethapi.RPCMarshalBlock(block, false, false),
+			"block":    ethapi.RPCMarshalBlock(block, false, false, nil, nil),
 			"receipts": []*jsonrpc.GraphQLReceipt{jsonrpc.NewGraphQLReceipt(receipt, txn, chain.TestChainOsakaConfig, header)},
 		},
 		txBlockNum: 7,
@@ -1027,7 +1027,7 @@ func (m *countingBlocksAPI) GetBlockDetails(_ context.Context, number rpc.BlockN
 	}
 	header := &types.Header{Number: *uint256.NewInt(uint64(number))}
 	block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, nil, nil)
-	return map[string]any{"block": ethapi.RPCMarshalBlock(block, false, false)}, nil
+	return map[string]any{"block": ethapi.RPCMarshalBlock(block, false, false, nil, nil)}, nil
 }
 
 func TestQueryResolver_Blocks_RangeCapCannotWrap(t *testing.T) {
@@ -1055,7 +1055,7 @@ func (m *chainBlocksAPI) details(b *types.Block) map[string]any {
 	if b == nil {
 		return nil
 	}
-	return map[string]any{"block": ethapi.RPCMarshalBlock(b, false, false), "receipts": []*jsonrpc.GraphQLReceipt{}}
+	return map[string]any{"block": ethapi.RPCMarshalBlock(b, false, false, nil, nil), "receipts": []*jsonrpc.GraphQLReceipt{}}
 }
 
 func (m *chainBlocksAPI) GetBlockDetails(_ context.Context, number rpc.BlockNumber, _ *bool) (map[string]any, error) {
@@ -1111,7 +1111,7 @@ func TestLogResolver_TransactionIsTheEmittingTransaction(t *testing.T) {
 	receipt := &types.Receipt{Status: types.ReceiptStatusSuccessful, TxHash: txn.Hash(), GasUsed: 30000, CumulativeGasUsed: 30000, BlockNumber: uint256.NewInt(7), Logs: types.Logs{log}}
 	mock := &mockGraphQLAPI{
 		blockDetails: map[string]any{
-			"block":    ethapi.RPCMarshalBlock(block, false, false),
+			"block":    ethapi.RPCMarshalBlock(block, false, false, nil, nil),
 			"receipts": []*jsonrpc.GraphQLReceipt{jsonrpc.NewGraphQLReceipt(receipt, txn, chain.TestChainOsakaConfig, header)},
 		},
 		getLogsResult: types.Logs{log},
@@ -1175,7 +1175,7 @@ func TestLogResolver_TransactionLoadsEachBlockOnce(t *testing.T) {
 		receipts = append(receipts, jsonrpc.NewGraphQLReceipt(receipt, txn, chain.TestChainOsakaConfig, header))
 	}
 	mock := &countingByHashAPI{mockGraphQLAPI: &mockGraphQLAPI{
-		blockDetails:  map[string]any{"block": ethapi.RPCMarshalBlock(block, false, false), "receipts": receipts},
+		blockDetails:  map[string]any{"block": ethapi.RPCMarshalBlock(block, false, false, nil, nil), "receipts": receipts},
 		getLogsResult: logs,
 	}}
 	srv := handler.New(NewExecutableSchema(Config{Resolvers: &Resolver{GraphQLAPI: mock}}))

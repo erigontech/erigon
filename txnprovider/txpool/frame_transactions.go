@@ -762,7 +762,8 @@ func (p *TxPool) revalidateFrames(ctx context.Context, parked []*metaTxn, genera
 			p.reserveFrame(mt.TxnSlot)
 			p.queued.Add(mt, "frame revalidated", p.logger)
 			frame := mt.TxnSlot.Txn.(*types.FrameTransaction)
-			if frame.UsesLegacyNonce() {
+			// Blob fees change the sender's fee classification even when another account pays.
+			if frame.UsesLegacyNonce() || frame.GetBlobGas() != 0 {
 				p.frameAccountsToRefresh[frame.SenderAddress] = struct{}{}
 			}
 		} else {

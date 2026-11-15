@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -185,7 +186,19 @@ func (oracle *Oracle) processBlock(bf *blockFees, chainconfig *chain.Config) {
 		baseFee.Set(bf.block.BaseFee())
 	}
 	for i, txn := range bf.block.Transactions() {
-		sorter[i] = txGasAndReward{gasUsed: bf.receipts[i].GasUsed, reward: txn.GetEffectiveGasTip(baseFee)}
+		gasUsed := bf.receipts[i].GasUsed
+		var reward uint256.Int
+		if txn.Type() == types.FrameTxType {
+			paid, err := ethutils.GasTipPaid(txn, gasUsed, baseFee, (*uint256.Int)(&bf.results.blobBaseFee))
+			if err != nil {
+				bf.err = err
+				return
+			}
+			reward.Div(&paid, uint256.NewInt(gasUsed))
+		} else {
+			reward = txn.GetEffectiveGasTip(baseFee)
+		}
+		sorter[i] = txGasAndReward{gasUsed: gasUsed, reward: reward}
 	}
 	sort.Sort(sorter)
 	var sumGasUsed uint64

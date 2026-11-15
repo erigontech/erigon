@@ -1332,7 +1332,7 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
 func newRPCPendingTransaction(txn types.Transaction) *ethapi.RPCTransaction {
-	return ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, 0, nil)
+	return ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, 0, nil, nil, 0)
 }
 
 // newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.

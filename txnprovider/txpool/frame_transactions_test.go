@@ -49,6 +49,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -1481,31 +1483,74 @@ func TestFramePoolRevalidationReleasesLock(t *testing.T) {
 	require.Equal(t, 1, pool.pending.Len())
 }
 
+func framePoolSlotWithBlob(t *testing.T, frame *types.FrameTransaction) *TxnSlot {
+	t.Helper()
+	wrapped, err := types.DecodeWrappedTransaction(makeWrappedBlobTxnRlpWithCellProofs(t, &frame.ChainID, 1))
+	require.NoError(t, err)
+	blob := wrapped.(*types.BlobTxWrapper)
+	frame.BlobVersionedHashes = blob.Tx.BlobVersionedHashes
+	wrapper := &types.FrameTxWrapper{
+		FrameTransaction: frame, WrapperVersion: 1,
+		Blobs: blob.Blobs, Commitments: blob.Commitments, Proofs: blob.Proofs,
+	}
+	var encoded bytes.Buffer
+	require.NoError(t, wrapper.MarshalBinaryWrapped(&encoded))
+	slot := &TxnSlot{}
+	parser := NewTxnParseContext(frame.ChainID)
+	parser.WithSender(false)
+	_, err = parser.ParseTransaction(encoded.Bytes(), 0, slot, nil, false, true, nil)
+	require.NoError(t, err)
+	return slot
+}
+
+func TestFramePoolBlobFeeFloor(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.pendingBlobFee.Store(1)
+	frame := framePoolSlot(t, sender, 0, pool.cfg.MinFeeCap, uint256.Int{1}).Txn.(*types.FrameTransaction)
+	slot := framePoolSlotWithBlob(t, frame)
+	require.True(t, frame.Fees.MaxFee.LtUint64(frame.GetBlobGas()))
+	var txns TxnSlots
+	txns.Append(slot, sender[:], false)
+	reasons, err := pool.addNewTxns(ctx, txns, nil, true)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.FeeTooLow}, reasons)
+	require.Zero(t, pool.totalBlobsInPool.Load())
+	require.Empty(t, pool.frameReservations)
+}
+
+func TestFramePoolSponsoredBlobFeeFalls(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	backend.payer, backend.balance = common.Address{9}, common.Ether
+	change := newBlockChangeForAccounts(common.Hash{1}, 0, sender, backend.payer)
+	change.PendingBlockBaseFee, change.PendingBlobFeePerGas = 10, 2
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	frame := framePoolSlot(t, sender, 1, 1, uint256.Int{1}).Txn.(*types.FrameTransaction)
+	frame.Fees.MaxFee.SetUint64(frame.GetGasLimit()*10 + params.GasPerBlob)
+	slot := framePoolSlotWithBlob(t, frame)
+	var txns TxnSlots
+	txns.Append(slot, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Equal(t, BaseFeeSubPool, pool.byHash[string(slot.IDHash[:])].currentSubPool)
+
+	change = newBlockChangeForAccounts(common.Hash{2}, 0)
+	change.PendingBlockBaseFee, change.PendingBlobFeePerGas = 10, 1
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, PendingSubPool, pool.byHash[string(slot.IDHash[:])].currentSubPool)
+	require.Equal(t, uint256.NewInt(10), &pool.byHash[string(slot.IDHash[:])].minFeeCap)
+}
+
 func TestFramePoolUnwindPooledBlobPreservesReservation(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
 	backend := pool.ethBackend.(*frameValidationBackend)
 	backend.balance = common.Ether
 	pool.pendingBlobFee.Store(1)
 
-	blobTxn, err := types.DecodeWrappedTransaction(makeWrappedBlobTxnRlpWithCellProofs(t, uint256.NewInt(1), 1))
-	require.NoError(t, err)
-	blob := blobTxn.(*types.BlobTxWrapper)
-	wrapper := &types.FrameTxWrapper{
-		FrameTransaction: &types.FrameTransaction{
-			ChainID: *uint256.NewInt(1), NonceKeys: []uint256.Int{{1}}, SenderAddress: sender,
-			Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 100}}},
-			Fees:                types.FrameFees{TipCap: *uint256.NewInt(1), MaxFee: *uint256.NewInt(2)},
-			BlobVersionedHashes: blob.Tx.BlobVersionedHashes,
-		},
-		WrapperVersion: 1, Blobs: blob.Blobs, Commitments: blob.Commitments, Proofs: blob.Proofs,
-	}
-	var encoded bytes.Buffer
-	require.NoError(t, wrapper.MarshalBinaryWrapped(&encoded))
-	frame := &TxnSlot{}
-	parser := NewTxnParseContext(*uint256.NewInt(1))
-	parser.WithSender(false)
-	_, err = parser.ParseTransaction(encoded.Bytes(), 0, frame, nil, false, true, nil)
-	require.NoError(t, err)
+	frameTx := framePoolSlot(t, sender, 1, 2, uint256.Int{1}).Txn.(*types.FrameTransaction)
+	frameTx.Fees.MaxFee.SetUint64(2*frameTx.GetGasLimit() + 2*params.GasPerBlob)
+	frame := framePoolSlotWithBlob(t, frameTx)
 
 	failRevalidation := false
 	pool.ethBackend = &frameValidationFuncBackend{validate: func(ctx context.Context, req *remoteproto.FrameValidationRequest) (*remoteproto.FrameValidationReply, error) {
@@ -1517,9 +1562,11 @@ func TestFramePoolUnwindPooledBlobPreservesReservation(t *testing.T) {
 		if validationErr != nil {
 			return nil, validationErr
 		}
-		cost := gointerfaces.ConvertH256ToUint256Int(reply.MaxCost)
-		cost.AddUint64(cost, frame.Txn.GetBlobGas()*pool.pendingBlobFee.Load())
-		reply.MaxCost = gointerfaces.ConvertUint256IntToH256(cost)
+		budget, err := frameTx.Fees.Budget(frameTx.GetGasLimit(), frameTx.GetBlobGas(), uint256.NewInt(pool.pendingBaseFee.Load()), uint256.NewInt(pool.pendingBlobFee.Load()))
+		if err != nil {
+			return nil, err
+		}
+		reply.MaxCost = gointerfaces.ConvertUint256IntToH256(&budget.MaxCost)
 		return reply, nil
 	}}
 	ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
@@ -2024,6 +2071,35 @@ func TestFramePoolStartupUsesAnnouncedHead(t *testing.T) {
 	}
 }
 
+func TestFramePoolReloadDeletesInvalidEncoding(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.chainID.SetUint64(1)
+	frame := framePoolSlot(t, sender, 1, 2)
+	var fields []rlp.RawValue
+	require.NoError(t, rlp.DecodeBytes(frame.Rlp[1:], &fields))
+	oldFees, err := rlp.EncodeToBytes([]uint64{1, 2, 3})
+	require.NoError(t, err)
+	fields[len(fields)-2] = oldFees
+	payload, err := rlp.EncodeToBytes(fields)
+	require.NoError(t, err)
+	encoded := append([]byte{types.FrameTxType}, payload...)
+	hash := crypto.Keccak256Hash(encoded)
+	require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded...))
+	}))
+	pool.started.Store(false)
+	require.NoError(t, pool.start(ctx))
+	require.Empty(t, pool.byHash)
+	_, err = pool.flushNoFsync(ctx)
+	require.NoError(t, err)
+	require.NoError(t, pool.poolDB.View(ctx, func(tx kv.Tx) error {
+		present, err := tx.Has(kv.PoolTransaction, hash[:])
+		require.NoError(t, err)
+		require.False(t, present, "undecodable rows must not survive every restart")
+		return nil
+	}))
+}
+
 func TestFramePoolReloadDeletesRejectedRows(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -2270,11 +2346,11 @@ func TestFramePoolParkedEvictionPriority(t *testing.T) {
 				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 				pool.pending.limit, pool.baseFee.limit, pool.queued.limit = 1, 0, 0
 
-				key := uint256.Int{}
+				var keys []uint256.Int
 				if nonceMode == "keyed" {
-					key.SetUint64(1)
+					keys = []uint256.Int{{1}}
 				}
-				frame := framePoolSlot(t, sender, 1, frameFee, key)
+				frame := framePoolSlot(t, sender, 1, frameFee, keys...)
 				var frames TxnSlots
 				frames.Append(frame, sender[:], false)
 				reasons, err := pool.addNewTxns(ctx, frames, nil, true)
@@ -2801,6 +2877,27 @@ func TestFramePoolReplacementNeedsFeeIncrease(t *testing.T) {
 	require.Equal(t, txpoolcfg.NotReplaced, reasons[0])
 }
 
+func TestFramePoolReplacementIncreasesGasBudget(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.ethBackend.(*frameValidationBackend).balance = common.Ether
+	first := framePoolSlot(t, sender, 10, 100)
+	var txns TxnSlots
+	txns.Append(first, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	replacement := framePoolSlot(t, sender, 15, 150).Txn.(*types.FrameTransaction)
+	replacement.Frames[0].Limits.Execution += first.GetGas()
+	txns.Txns[0] = framePoolSlotFromTransaction(t, replacement)
+	require.Equal(t, 2*first.GetGas(), txns.Txns[0].GetGas())
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Contains(t, pool.byHash, string(txns.Txns[0].IDHash[:]))
+	require.NotContains(t, pool.byHash, string(first.IDHash[:]))
+}
+
 func TestFramePoolReplacementRequiresSameKeys(t *testing.T) {
 	chainConfig := chain.AllProtocolChanges.Copy()
 	chainConfig.BogotaTime = common.NewUint64(0)
@@ -2824,23 +2921,23 @@ func TestFramePoolReplacementRequiresSameKeys(t *testing.T) {
 func TestFramePoolMinedNonceDomains(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
-		pending, mined uint64
+		pending, mined []uint256.Int
 		remaining      int
 	}{
-		{"same key", 1, 1, 0},
-		{"different keys", 1, 2, 1},
-		{"keyed pending, legacy mined", 1, 0, 1},
-		{"legacy pending, keyed mined", 0, 1, 1},
+		{"same key", []uint256.Int{{1}}, []uint256.Int{{1}}, 0},
+		{"different keys", []uint256.Int{{1}}, []uint256.Int{{2}}, 1},
+		{"keyed pending, legacy mined", []uint256.Int{{0}}, nil, 1},
+		{"legacy pending, keyed mined", nil, []uint256.Int{{0}}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
-			slot := framePoolSlot(t, sender, 1, 2, *uint256.NewInt(tc.pending))
+			slot := framePoolSlot(t, sender, 1, 2, tc.pending...)
 			var txns TxnSlots
 			txns.Append(slot, sender[:], true)
 			reasons, err := pool.AddLocalTxns(ctx, txns)
 			require.NoError(t, err)
 			require.Equal(t, txpoolcfg.Success, reasons[0])
-			mined := framePoolSlot(t, sender, 1, 2, *uint256.NewInt(tc.mined))
+			mined := framePoolSlot(t, sender, 1, 2, tc.mined...)
 			mined.SenderID = slot.SenderID
 			require.NoError(t, pool.removeMined(pool.all, []*TxnSlot{mined}))
 			require.Equal(t, tc.remaining, pool.pending.Len())

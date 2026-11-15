@@ -57,7 +57,6 @@ type GraphQLReceipt struct {
 	Data                 []byte           `json:"data"`
 	Gas                  uint64           `json:"gas"`
 	MaxFeePerGas         *uint256.Int     `json:"maxFeePerGas,omitempty"`
-	MaxFee               *uint256.Int     `json:"maxFee,omitempty"`
 	MaxPriorityFeePerGas *uint256.Int     `json:"maxPriorityFeePerGas,omitempty"`
 	MaxFeePerBlobGas     *hexutil.U256    `json:"maxFeePerBlobGas,omitempty"`
 	AccessList           types.AccessList `json:"accessList"`
@@ -89,9 +88,8 @@ func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfi
 	txn = txn.Unwrap()
 	if blobTx, ok := txn.(*types.BlobTx); ok {
 		transaction.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
-	} else if frame, ok := txn.(*types.FrameTransaction); ok {
+	} else if txn.Type() == types.FrameTxType {
 		transaction.MaxFeePerGas = nil
-		transaction.MaxFee = &frame.Fees.MaxFee
 	}
 	return transaction
 }
@@ -411,7 +409,7 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 }
 
 func (api *GraphQLAPIImpl) delegateGetBlockByNumber(b *types.Block, number rpc.BlockNumber, inclTx bool) (*ethapi.RPCBlock, error) {
-	response := ethapi.RPCMarshalBlock(b, inclTx, inclTx)
+	response := ethapi.RPCMarshalBlock(b, inclTx, inclTx, nil, nil)
 	if !inclTx {
 		response.Transactions = nil // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}

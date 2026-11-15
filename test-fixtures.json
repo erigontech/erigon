@@ -9,7 +9,7 @@
     "sha256": "ce07656975fdd80bd2308453ab0910487ec452e380f2562b54aec2cff988c441",
     "size": 1541726145,
     "ref": "tests-bogota-devnet@v2.0.0",
-    "consumer_ref": "a74f8e6df5d1666073d9e2f14e974ece43a79340"
+    "consumer_ref": "0036f8cf6ed10f3ae27b91ae527ad1f581dbd4a1"
   },
   "eest_stable": {
     "url": "https://github.com/ethereum/execution-specs/releases/download/tests%40v21.0.2/fixtures.tar.gz",

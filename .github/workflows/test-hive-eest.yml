@@ -222,7 +222,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 69 # Bogota transitions need EIPs 4758, 8151, 8253, 8298
+              max-failures: 69 # Bogota transitions need EIPs 4758, 8151, 8253, 8298: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -231,7 +231,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 69 # Bogota transitions need EIPs 4758, 8151, 8253, 8298
+              max-failures: 69 # Bogota transitions need EIPs 4758, 8151, 8253, 8298: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -258,7 +258,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 861 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298
+              max-failures: 861 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -267,7 +267,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 861 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298
+              max-failures: 861 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -454,11 +454,14 @@ jobs:
             # Keep fixtures compressed in the image to avoid a large Docker layer.
             # Hive extracts only this simulator's tests when the container starts.
             sim_dir='hive/simulators/ethereum/eels/${{ matrix.sim }}'
+            # The source consumer requires a newer uv than Hive's base image supplies.
+            sed 's/^RUN uv sync$/RUN uv pip install --system uv==0.13.4 \&\& uv sync/' \
+              "$sim_dir/Dockerfile.git" > "$sim_dir/Dockerfile.erigon"
             bash erigon-full/tools/test-fixtures.sh --download-only \
               erigon-full/test-fixtures.json "$sim_dir" '${{ matrix.fixtures-tarball }}'
             mv "$sim_dir/${{ matrix.fixtures-tarball }}.tar.gz" "$sim_dir/fixtures.tar.gz"
             jq -n --arg sim 'ethereum/eels/${{ matrix.sim }}' --arg ref "$consumer_ref" --arg fixtures /fixtures \
-              '[{simulator: $sim, dockerfile: "git", build_args: {branch: $ref, fixtures: $fixtures}}]' > hive/eels-config.json
+              '[{simulator: $sim, dockerfile: "erigon", build_args: {branch: $ref, fixtures: $fixtures}}]' > hive/eels-config.json
             eels_args=(--config eels-config.json)
           fi
           cd hive

@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -171,18 +172,22 @@ func TestLocalAdmissionRejectsBeforeStartupRestore(t *testing.T) {
 func TestFramePoolReconcilesMinedKeyedNonces(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
+		nonce    uint64
 		key      uint256.Int
 		sequence uint256.Int
 		consumed bool
 	}{
-		{"unused", uint256.Int{5}, uint256.Int{}, false},
-		{"first key consumed", uint256.Int{5}, uint256.Int{1}, true},
-		{"second key consumed", uint256.Int{7}, uint256.Int{1}, true},
-		{"full width sequence", uint256.Int{5}, uint256.Int{0, 1}, true},
+		{"unused", 0, uint256.Int{5}, uint256.Int{}, false},
+		{"first key consumed", 0, uint256.Int{5}, uint256.Int{1}, true},
+		{"second key consumed", 0, uint256.Int{7}, uint256.Int{1}, true},
+		{"full width sequence", 0, uint256.Int{5}, uint256.Int{0, 1}, true},
+		{"single-use unused", math.MaxUint64, uint256.Int{5}, uint256.Int{}, false},
+		{"single-use consumed", math.MaxUint64, uint256.Int{5}, uint256.Int{math.MaxUint64}, true},
+		{"single-use previously sequential", math.MaxUint64, uint256.Int{7}, uint256.Int{1}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, pool, sender := keyedFramePoolEnv(t)
-			frame := framePoolSlot(t, sender, 1, 2, uint256.Int{5}, uint256.Int{7})
+			frame := framePoolSlotWithNonce(t, sender, tc.nonce, 1, 2, uint256.Int{5}, uint256.Int{7})
 			var txns TxnSlots
 			txns.Append(frame, sender[:], true)
 			reasons, err := pool.AddLocalTxns(ctx, txns)

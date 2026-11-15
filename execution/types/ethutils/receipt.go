@@ -343,6 +343,24 @@ func GasFeePaid(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uin
 	return *price.Mul(&price, uint256.NewInt(gasUsed)), nil
 }
 
+// GasTipPaid is the proposer payment after settlement, excluding all base fees.
+func GasTipPaid(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) (uint256.Int, error) {
+	if txn.Type() != types.FrameTxType {
+		tip := txn.GetEffectiveGasTip(baseFee)
+		return *tip.Mul(&tip, uint256.NewInt(gasUsed)), nil
+	}
+	paid, err := GasFeePaid(txn, gasUsed, baseFee, blobBaseFee)
+	if err != nil {
+		return uint256.Int{}, err
+	}
+	if baseFee != nil {
+		var burned uint256.Int
+		burned.Mul(baseFee, uint256.NewInt(gasUsed))
+		paid.Sub(&paid, &burned)
+	}
+	return paid, nil
+}
+
 func ReceiptGasPrice(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) *uint256.Int {
 	if txn.Type() != types.FrameTxType {
 		if baseFee == nil {

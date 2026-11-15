@@ -247,7 +247,15 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if b == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
-	response := ethapi.RPCMarshalBlock(b, true, fullTx)
+	blobFee, err := api.blobBaseFee(ctx, tx, b.HeaderNoCopy())
+	if err != nil {
+		return nil, err
+	}
+	receipts, err := api.frameReceiptsGasUsed(ctx, tx, b, fullTx && number != rpc.PendingBlockNumber)
+	if err != nil {
+		return nil, err
+	}
+	response := ethapi.RPCMarshalBlock(b, true, fullTx, blobFee, receipts)
 	if number == rpc.PendingBlockNumber {
 		response.MarkPending()
 	}
@@ -337,7 +345,15 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 	number := block.NumberU64()
 
-	response := ethapi.RPCMarshalBlock(block, true, fullTx)
+	blobFee, err := api.blobBaseFee(ctx, tx, block.HeaderNoCopy())
+	if err != nil {
+		return nil, err
+	}
+	receipts, err := api.frameReceiptsGasUsed(ctx, tx, block, fullTx)
+	if err != nil {
+		return nil, err
+	}
+	response := ethapi.RPCMarshalBlock(block, true, fullTx, blobFee, receipts)
 	if int64(number) == rpc.PendingBlockNumber.Int64() {
 		response.MarkPending()
 	}

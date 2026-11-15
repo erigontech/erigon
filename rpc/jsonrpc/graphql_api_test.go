@@ -140,7 +140,7 @@ func TestGraphQLReceiptFeeCapsMatchRPCTransaction(t *testing.T) {
 			header := &types.Header{Number: *uint256.NewInt(1)}
 			receipt := &types.Receipt{Type: tt.txn.Type(), BlockNumber: uint256.NewInt(1)}
 
-			want := ethapi.NewRPCTransaction(tt.txn, header.Hash(), 0, 1, 0, nil)
+			want := ethapi.NewRPCTransaction(tt.txn, header.Hash(), 0, 1, 0, nil, nil, 0)
 			got := NewGraphQLReceipt(receipt, tt.txn, chainConfig, header)
 
 			assert.Equal(t, (*uint256.Int)(want.MaxFeePerGas), got.MaxFeePerGas, "maxFeePerGas")

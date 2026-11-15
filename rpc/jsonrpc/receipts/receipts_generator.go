@@ -728,6 +728,36 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt, tx
 	}
 }
 
+// GetReceiptGasUsed reads gas usage for a canonical transaction, or zero if its
+// block has not been executed.
+func (g *Generator) GetReceiptGasUsed(ctx context.Context, tx kv.TemporalTx, header *types.Header, index int) (uint64, error) {
+	tx = g.filters.WithTemporalOverlay(tx)
+	if receipts, ok := g.receiptsCache.Get(header.Hash()); ok {
+		return receipts[index].GasUsed, nil
+	}
+	executed, err := rpchelper.GetLatestExecutedBlockNumber(tx)
+	if err != nil || header.Number.Uint64() > executed {
+		return 0, err
+	}
+	startTxNum, err := g.txNumReader.Min(ctx, tx, header.Number.Uint64())
+	if err != nil {
+		return 0, err
+	}
+	txNum := startTxNum + 1 + uint64(index)
+	cumulative, _, _, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
+	if err != nil {
+		return 0, err
+	}
+	var previous uint64
+	if index > 0 {
+		previous, _, _, err = rawtemporaldb.ReceiptAsOf(tx, txNum)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return cumulative - previous, nil
+}
+
 func (g *Generator) GetReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, txNumsReader rawdbv3.TxNumsReader) (types.Receipts, error) {
 	tx = g.filters.WithTemporalOverlay(tx)
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {

@@ -40,6 +40,10 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 	if oldTxn.HasBlobs() && !newTxn.HasBlobs() {
 		return replacementDecision{reason: txpoolcfg.BlobTxReplace}
 	}
+	if newTxn.TxType() == FrameTxnType && oldTxn.TxType() == FrameTxnType {
+		// Frame replacements compare total budgets, not derived per-gas caps.
+		return replacementDecision{}
+	}
 	priceBump := p.cfg.PriceBump
 
 	if newTxn.HasBlobs() {

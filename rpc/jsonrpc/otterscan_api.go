@@ -298,7 +298,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 }
 
 func delegateGetBlockByNumber(b *types.Block, number rpc.BlockNumber, inclTx bool) (*ethapi.RPCBlock, error) {
-	response := ethapi.RPCMarshalBlock(b, inclTx, inclTx)
+	response := ethapi.RPCMarshalBlock(b, inclTx, inclTx, nil, nil)
 	if !inclTx {
 		response.Transactions = nil // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
@@ -439,13 +439,17 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, fmt.Errorf("receipts count mismatch: got %d, need %d", len(receipts), pageEnd)
 	}
 
+	blobFee, err := api.blobBaseFee(ctx, tx, b.HeaderNoCopy())
+	if err != nil {
+		return nil, err
+	}
 	blockHash, baseFee := b.Hash(), b.BaseFee()
 	txs := make([]*ethapi.RPCTransaction, 0, pageEnd-pageStart)
 	result := make([]*ethutils.RPCReceipt, 0, pageEnd-pageStart)
 	for _, receipt := range receipts[pageStart:pageEnd] {
 		txn := b.Transactions()[receipt.TransactionIndex]
 
-		rpcTx := ethapi.NewRPCTransaction(txn, blockHash, b.Time(), b.NumberU64(), uint64(receipt.TransactionIndex), baseFee)
+		rpcTx := ethapi.NewRPCTransaction(txn, blockHash, b.Time(), b.NumberU64(), uint64(receipt.TransactionIndex), baseFee, blobFee, receipt.GasUsed)
 		if len(rpcTx.Input) >= 4 {
 			rpcTx.Input = rpcTx.Input[:4]
 		}

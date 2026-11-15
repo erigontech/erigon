@@ -640,7 +640,8 @@ func (p *TxPool) nonceConsumed(txn *TxnSlot, view kvcache.CacheView) (bool, erro
 		}
 		var sequence uint256.Int
 		sequence.SetBytes(value)
-		if sequence.GtUint64(txn.Nonce) {
+		// Any nonzero sequence consumes a single-use key.
+		if txn.Nonce == math.MaxUint64 && !sequence.IsZero() || sequence.GtUint64(txn.Nonce) {
 			return true, nil
 		}
 	}
@@ -2306,7 +2307,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 	}
 
 	// Don't add blob txn to queued if it's less than current pending blob base fee
-	if mt.TxnSlot.TxType() != FrameTxnType && mt.TxnSlot.HasBlobs() && mt.TxnSlot.GetBlobFeeCap().LtUint64(p.pendingBlobFee.Load()) {
+	if mt.TxnSlot.HasBlobs() && mt.TxnSlot.GetBlobFeeCap().LtUint64(p.pendingBlobFee.Load()) {
 		return txpoolcfg.FeeTooLow
 	}
 
@@ -3456,7 +3457,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		return err
 	}
 	for it.HasNext() {
-		_, v, err := it.Next()
+		key, v, err := it.Next()
 		if err != nil {
 			return err
 		}
@@ -3466,8 +3467,10 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		// TODO(eip-4844) ensure wrappedWithBlobs when transactions are saved to the DB
 		_, err = parseCtx.ParseTransaction(txnRlp, 0, txn, nil, false /* hasEnvelope */, true /*wrappedWithBlobs*/, nil)
 		if err != nil {
-			err = fmt.Errorf("err: %w, rlp: %x", err, txnRlp)
-			p.logger.Warn("[txpool] fromDB: parseTransaction", "err", err)
+			var hash [32]byte
+			copy(hash[:], key)
+			p.deletedTxns = append(p.deletedTxns, newMetaTxn(&TxnSlot{IDHash: hash}, false, 0))
+			p.logger.Warn("[txpool] discarding undecodable stored transaction", "hash", fmt.Sprintf("%x", key), "err", err)
 			continue
 		}
 		if !txn.HasBlobs() {

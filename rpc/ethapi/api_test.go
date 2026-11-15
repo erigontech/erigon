@@ -26,7 +26,7 @@ func TestNewRPCTransaction_NullSignature(t *testing.T) {
 			To:       &to,
 		},
 	}
-	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)
 	require.Nil(t, result.V)
 	require.Nil(t, result.R)
 	require.Nil(t, result.S)
@@ -45,7 +45,7 @@ func TestNewRPCTransaction_SignedLegacy(t *testing.T) {
 			S:        *uint256.NewInt(2),
 		},
 	}
-	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)
 	require.NotNil(t, result.V)
 	require.NotNil(t, result.R)
 	require.NotNil(t, result.S)
@@ -59,7 +59,7 @@ func TestNewRPCTransaction_SignedLegacyEIP155(t *testing.T) {
 	chainID := uint256.NewInt(1)
 	tx, err := types.SignTx(types.NewTransaction(1, to, uint256.NewInt(0), 21000, uint256.NewInt(1), nil), *types.LatestSignerForChainID(chainID), key)
 	require.NoError(t, err)
-	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)
 	// from is recovered with the chain id derived from the EIP-155 v value.
 	require.Equal(t, from, result.From)
 	require.NotNil(t, result.ChainID)
@@ -81,7 +81,7 @@ func TestNewRPCTransaction_EIP1559_YParityZero(t *testing.T) {
 		},
 		ChainID: *chainID,
 	}
-	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)
 	require.NotNil(t, result.V)
 	require.NotNil(t, result.R)
 	require.NotNil(t, result.S)
@@ -100,7 +100,7 @@ func TestNewRPCTransaction_EIP1559_AllZeroSig(t *testing.T) {
 		},
 		ChainID: *chainID,
 	}
-	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)
 	require.NotNil(t, result.V)
 	require.NotNil(t, result.R)
 	require.NotNil(t, result.S)
@@ -126,7 +126,7 @@ func TestRPCMarshalBlockAllocsPerTransaction(t *testing.T) {
 		}
 		block := types.NewBlock(&types.Header{Number: *uint256.NewInt(7), BaseFee: uint256.NewInt(7)}, txs, nil, nil, nil, nil)
 		block.Hash()
-		return testing.AllocsPerRun(100, func() { RPCMarshalBlock(block, true, true) })
+		return testing.AllocsPerRun(100, func() { RPCMarshalBlock(block, true, true, nil, nil) })
 	}
 	require.Equal(t, 1.0, blockAllocs(2)-blockAllocs(1))
 }
@@ -160,7 +160,7 @@ func TestSignTransactionResultMarshalJSON_EIP1559(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, tx.MarshalBinary(&buf))
 
-	fields := txFields(t, SignTransactionResult{Raw: buf.Bytes(), Tx: NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)})
+	fields := txFields(t, SignTransactionResult{Raw: buf.Bytes(), Tx: NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)})
 
 	// EIP-1559 without known baseFee: gasPrice is null (matching Geth).
 	require.Equal(t, "null", string(fields["gasPrice"]), "gasPrice must be null when baseFee is unknown")
@@ -194,7 +194,7 @@ func TestSignTransactionResultMarshalJSON_Legacy(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, tx.MarshalBinary(&buf))
 
-	fields := txFields(t, SignTransactionResult{Raw: buf.Bytes(), Tx: NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)})
+	fields := txFields(t, SignTransactionResult{Raw: buf.Bytes(), Tx: NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)})
 
 	// Legacy: gasPrice must be set.
 	gasPrice, ok := fields["gasPrice"]
@@ -231,7 +231,7 @@ func TestNewRPCTransaction_AccessList_AllZeroSig(t *testing.T) {
 		},
 		ChainID: *chainID,
 	}
-	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil, nil, 0)
 	require.NotNil(t, result.V)
 	require.NotNil(t, result.R)
 	require.NotNil(t, result.S)
@@ -273,7 +273,7 @@ func TestRPCMarshalBlockDoesNotAliasBlockHeader(t *testing.T) {
 	wantHash := block.Hash()
 	wantMiner := block.Coinbase()
 
-	fields := RPCMarshalBlock(block, false, false)
+	fields := RPCMarshalBlock(block, false, false, nil, nil)
 
 	(*uint256.Int)(fields.Number).SetUint64(99)
 	(*uint256.Int)(fields.Difficulty).SetUint64(99)
@@ -311,7 +311,7 @@ func TestRPCMarshalBlockTransactionsJSON(t *testing.T) {
 	block := types.NewBlock(header, []types.Transaction{txn}, nil, nil, nil, nil)
 
 	field := func(inclTx, fullTx bool) string {
-		b, err := json.Marshal(RPCMarshalBlock(block, inclTx, fullTx))
+		b, err := json.Marshal(RPCMarshalBlock(block, inclTx, fullTx, nil, nil))
 		require.NoError(t, err)
 		var m map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(b, &m))
@@ -337,10 +337,10 @@ func TestRPCMarshalBlockEmptyKeepsElementType(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(7), Difficulty: *uint256.NewInt(11)}
 	block := types.NewBlock(header, nil, nil, nil, nil, nil)
 
-	_, ok := RPCMarshalBlock(block, true, true).Transactions.([]*RPCTransaction)
+	_, ok := RPCMarshalBlock(block, true, true, nil, nil).Transactions.([]*RPCTransaction)
 	require.True(t, ok, "inclTx+fullTx on an empty block must hold []*RPCTransaction")
 
-	_, ok = RPCMarshalBlock(block, true, false).Transactions.([]common.Hash)
+	_, ok = RPCMarshalBlock(block, true, false, nil, nil).Transactions.([]common.Hash)
 	require.True(t, ok, "inclTx without fullTx on an empty block must hold []common.Hash")
 }
 
@@ -443,48 +443,48 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 		name string
 		b    *RPCBlock
 	}{
-		{"hashes", RPCMarshalBlock(withTx, true, false)},
-		{"full transactions", RPCMarshalBlock(withTx, true, true)},
-		{"no transactions", RPCMarshalBlock(empty, true, false)},
-		{"uncle form", RPCMarshalBlock(empty, false, false)},
-		{"pending", func() *RPCBlock { b := RPCMarshalBlock(withTx, true, false); b.MarkPending(); return b }()},
+		{"hashes", RPCMarshalBlock(withTx, true, false, nil, nil)},
+		{"full transactions", RPCMarshalBlock(withTx, true, true, nil, nil)},
+		{"no transactions", RPCMarshalBlock(empty, true, false, nil, nil)},
+		{"uncle form", RPCMarshalBlock(empty, false, false, nil, nil)},
+		{"pending", func() *RPCBlock { b := RPCMarshalBlock(withTx, true, false, nil, nil); b.MarkPending(); return b }()},
 		{"with withdrawals", func() *RPCBlock {
 			wb := types.NewBlock(header, []types.Transaction{txn}, nil, nil, types.Withdrawals{
 				{Index: 1, Validator: 2, Address: to, Amount: 3},
 				{Index: 0, Validator: 0, Address: common.Address{}, Amount: 0},
 			}, nil)
-			return RPCMarshalBlock(wb, true, false)
+			return RPCMarshalBlock(wb, true, false, nil, nil)
 		}()},
 		{"withdrawals pointer to nil slice", func() *RPCBlock {
-			b := RPCMarshalBlock(withTx, true, false)
+			b := RPCMarshalBlock(withTx, true, false, nil, nil)
 			var none types.Withdrawals // non-nil pointer, nil slice: renders null, not []
 			b.Withdrawals = &none
 			return b
 		}()},
 		{"nil withdrawals", func() *RPCBlock {
-			b := RPCMarshalBlock(withTx, true, false)
+			b := RPCMarshalBlock(withTx, true, false, nil, nil)
 			b.Withdrawals = nil
 			return b
 		}()},
 		{"typed nil hash slice", func() *RPCBlock {
-			b := RPCMarshalBlock(withTx, true, false)
+			b := RPCMarshalBlock(withTx, true, false, nil, nil)
 			var none []common.Hash
 			b.Transactions = none // typed nil: a non-nil any that json renders as null
 			return b
 		}()},
 		{"nil uncles", func() *RPCBlock {
-			b := RPCMarshalBlock(withTx, true, false)
+			b := RPCMarshalBlock(withTx, true, false, nil, nil)
 			b.Uncles = nil
 			return b
 		}()},
 		{"otterscan shape", func() *RPCBlock {
-			b := RPCMarshalBlock(withTx, true, false)
+			b := RPCMarshalBlock(withTx, true, false, nil, nil)
 			b.TransactionCount = &count
 			b.LogsBloom = nil
 			return b
 		}()},
 		{"simulate shape", func() *RPCBlock {
-			b := RPCMarshalBlock(withTx, true, false)
+			b := RPCMarshalBlock(withTx, true, false, nil, nil)
 			b.Calls = []CallResult{
 				{ReturnData: "0x01", Logs: []*types.Log{{Topics: []common.Hash{{1}}, Data: []byte{2}}}, GasUsed: 0x5208, MaxUsedGas: 0x5300, Status: 1},
 				{ReturnData: "0x", Logs: []*types.Log{}, Error: map[string]any{"code": 3, "message": "execution reverted", "data": "0x<&>"}},
@@ -492,14 +492,14 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 			return b
 		}()},
 		{"simulate shape, no calls", func() *RPCBlock {
-			b := RPCMarshalBlock(empty, true, false)
+			b := RPCMarshalBlock(empty, true, false, nil, nil)
 			b.Calls = []CallResult{}
 			return b
 		}()},
-		{"no transactions, full shape", RPCMarshalBlock(empty, true, true)},
-		{"transactions excluded, full shape", RPCMarshalBlock(withTx, false, true)},
+		{"no transactions, full shape", RPCMarshalBlock(empty, true, true, nil, nil)},
+		{"transactions excluded, full shape", RPCMarshalBlock(withTx, false, true, nil, nil)},
 		{"typed nil full tx slice", func() *RPCBlock {
-			b := RPCMarshalBlock(withTx, true, true)
+			b := RPCMarshalBlock(withTx, true, true, nil, nil)
 			b.Transactions = []*RPCTransaction(nil)
 			return b
 		}()},
