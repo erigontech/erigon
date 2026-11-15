@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -312,17 +311,9 @@ type cacheUnwindState struct {
 	pending bool
 }
 
-// PickTrieVariant returns the commitment trie variant selected by the
-// process-wide statecfg experimental-commitment flags. Callers that
-// build a commitment.TrieConfig inline (e.g. short-lived RPC/builder/integrity
-// SharedDomains) should use this so the flags are honored consistently across
-// entry points instead of leaving Variant unset and relying on an implicit
-// fallback inside the trie constructor.
+// PickTrieVariant returns the commitment trie variant for a commitment.TrieConfig built inline.
 func PickTrieVariant() commitment.TrieVariant {
-	if statecfg.ExperimentalParallelCommitment {
-		return commitment.VariantParallelHexPatricia
-	}
-	return commitment.VariantHexPatriciaTrie
+	return commitment.VariantParallelHexPatricia
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...SharedDomainOption) (*SharedDomains, error) {

@@ -58,7 +58,6 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -462,7 +461,7 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers when --experimental.parallel-commitment is on, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead",
+		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead",
 		Value: httpcfg.DefaultDBReadConcurrency(),
 	}
 	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
@@ -1180,9 +1179,10 @@ var (
 		Usage: "Use to override the default p2p listen port (defaults to 23102)",
 	}
 	ExperimentalParallelCommitmentFlag = cli.BoolFlag{
-		Name:  "experimental.parallel-commitment",
-		Usage: "Compute commitment on the parallel trie (ParallelPatriciaHashed). Pass =false for the sequential trie.",
-		Value: statecfg.DefaultParallelCommitment,
+		Name:   "experimental.parallel-commitment",
+		Usage:  "(DEPRECATED: No longer has any effect) Commitment always runs on the parallel trie.",
+		Value:  true,
+		Hidden: true,
 	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
@@ -1974,9 +1974,9 @@ func CheckExclusive(ctx *cli.Command, args ...any) {
 	}
 }
 
-func setParallelCommitment(ctx *cli.Command) {
+func warnParallelCommitmentDeprecated(ctx *cli.Command, logger log.Logger) {
 	if ctx.IsSet(ExperimentalParallelCommitmentFlag.Name) {
-		statecfg.ExperimentalParallelCommitment = ctx.Bool(ExperimentalParallelCommitmentFlag.Name)
+		logger.Warn("[DEPRECATED] --experimental.parallel-commitment has no effect; commitment always runs on the parallel trie")
 	}
 }
 
@@ -2080,7 +2080,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
-	setParallelCommitment(ctx)
+	warnParallelCommitmentDeprecated(ctx, logger)
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
@@ -2121,10 +2121,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
 		warmupWorkers := dbg.BALCommitmentWarmupReaders()
 		blockReadAheadWorkers := dbg.ReadAheadWorkerReaders()
-		parallelCommitmentReaders := 0
-		if statecfg.ExperimentalParallelCommitment {
-			parallelCommitmentReaders = commitment.ParallelCommitmentReadTxs()
-		}
+		parallelCommitmentReaders := commitment.ParallelCommitmentReadTxs()
 		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers); int64(c) < limit {
 			logger.Warn("db.read.concurrency below the exec read-tx floor; raising to avoid a parallel-exec deadlock",
 				"configured", c, "using", limit, "execWorkers", cfg.ExecWorkerCount,

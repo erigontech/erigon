@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diskutils"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -311,9 +310,6 @@ func execWorkerCount(config *nodecfg.Config) int {
 }
 
 func parallelCommitmentReaders() int {
-	if !statecfg.ExperimentalParallelCommitment {
-		return 0
-	}
 	return commitment.ParallelCommitmentReadTxs()
 }
 
