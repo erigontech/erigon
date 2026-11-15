@@ -59,11 +59,14 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	blockEventC := make(chan BlockEvent, 1)
-	unregisterBlockEventObserver := bt.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
+	var initialBlockNum uint64
+	unregisterBlockEventObserver := bt.blockListener.registerObserver(func(blockEvent BlockEvent) {
 		select {
 		case <-ctx.Done(): // no-op
 		case blockEventC <- blockEvent:
 		}
+	}, func(replay BlockEvent) {
+		initialBlockNum = replay.LatestBlockNum
 	})
 	defer unregisterBlockEventObserver()
 	defer cancel() // make sure we release the observer before unregistering to avoid leaks/deadlocks
@@ -73,12 +76,15 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 		return err
 	}
 	if bn != nil {
-		bt.logger.Debug("block tracker setting initial block num", "blockNum", *bn)
-		bt.blockChangeCond.L.Lock()
-		bt.currentBlockNum = *bn
-		bt.blockChangeCond.Broadcast()
-		bt.blockChangeCond.L.Unlock()
+		// Cached replay and the database read can each be ahead of the other.
+		// Merge them only at startup; queued live events still apply unwinds.
+		initialBlockNum = max(initialBlockNum, *bn)
 	}
+	bt.logger.Debug("block tracker setting initial block num", "blockNum", initialBlockNum)
+	bt.blockChangeCond.L.Lock()
+	bt.currentBlockNum = initialBlockNum
+	bt.blockChangeCond.Broadcast()
+	bt.blockChangeCond.L.Unlock()
 
 	for {
 		select {

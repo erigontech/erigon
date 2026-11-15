@@ -70,6 +70,94 @@ func TestBlockTracker(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestBlockTrackerInitialHead(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		replayedHead uint64
+		currentHead  uint64
+		unwind       bool
+		wantHead     uint64
+	}{
+		{"database ahead of replay", 42, 43, false, 43},
+		{"database ahead of replayed unwind", 42, 43, true, 43},
+		{"replay ahead of database", 44, 43, false, 44},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				eg, egCtx := errgroup.WithContext(ctx)
+				defer func() {
+					cancel()
+					require.ErrorIs(t, eg.Wait(), context.Canceled)
+				}()
+				logger := testlog.Logger(t, log.LvlTrace)
+				batches := make(chan *remoteproto.StateChangeBatch)
+				listener := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(egCtx, batches))
+				eg.Go(func() error { return listener.Run(egCtx) })
+				direction := remoteproto.Direction_FORWARD
+				if tc.unwind {
+					direction = remoteproto.Direction_UNWIND
+				}
+				batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{
+					BlockHeight: tc.replayedHead, Direction: direction,
+				}}}
+				synctest.Wait()
+				tracker := shutter.NewBlockTracker(logger, listener, func(context.Context) (*uint64, error) {
+					return &tc.currentHead, nil
+				})
+				eg.Go(func() error { return tracker.Run(egCtx) })
+				synctest.Wait()
+
+				waitCtx, cancelWait := context.WithTimeout(egCtx, time.Second)
+				defer cancelWait()
+				require.NoError(t, tracker.Wait(waitCtx, tc.wantHead))
+			})
+		})
+	}
+}
+
+func TestBlockTrackerAppliesUnwindDuringInitialization(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		eg, egCtx := errgroup.WithContext(ctx)
+		defer func() {
+			cancel()
+			require.ErrorIs(t, eg.Wait(), context.Canceled)
+		}()
+		logger := testlog.Logger(t, log.LvlTrace)
+		batches := make(chan *remoteproto.StateChangeBatch)
+		listener := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(egCtx, batches))
+		eg.Go(func() error { return listener.Run(egCtx) })
+		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 42}}}
+		synctest.Wait()
+
+		readStarted, finishRead := make(chan struct{}), make(chan struct{})
+		tracker := shutter.NewBlockTracker(logger, listener, func(ctx context.Context) (*uint64, error) {
+			close(readStarted)
+			select {
+			case <-finishRead:
+				head := uint64(43)
+				return &head, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		})
+		eg.Go(func() error { return tracker.Run(egCtx) })
+		<-readStarted
+		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: 40, Direction: remoteproto.Direction_UNWIND,
+		}}}
+		synctest.Wait()
+		close(finishRead)
+		synctest.Wait()
+
+		waitCtx, cancelWait := context.WithTimeout(egCtx, time.Second)
+		defer cancelWait()
+		require.NoError(t, tracker.Wait(waitCtx, 40))
+		require.ErrorIs(t, tracker.Wait(waitCtx, 41), context.DeadlineExceeded)
+	})
+}
+
 // settlingContext lets every other goroutine in the bubble block or exit before it reports done.
 type settlingContext struct{ context.Context }
 
