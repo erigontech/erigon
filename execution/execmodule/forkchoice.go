@@ -396,7 +396,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	var restoreStateChanges func()
 	// Roll back only uncommitted changes; earlier catch-up commits still need delivery.
 	checkpointStateChanges := func() {
-		if e.accum != nil && e.accum.Accumulator != nil {
+		if e.accum != nil {
 			restoreStateChanges = e.accum.Accumulator.Checkpoint()
 		}
 	}

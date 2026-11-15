@@ -21,6 +21,9 @@ import (
 	"context"
 	"fmt"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -130,7 +133,7 @@ func (d *Dispatcher) StateChangesSnapshot(ctx context.Context, db kv.TemporalRoD
 			return err
 		}
 		if batch == nil {
-			return fmt.Errorf("executed header %d unavailable for state snapshot", height)
+			return status.Errorf(codes.Unavailable, "executed header %d unavailable for state snapshot", height)
 		}
 		result = batch.ToProtoBatch()
 		return nil

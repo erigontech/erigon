@@ -62,20 +62,20 @@ func (c *LatestBatchCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 	// previous batch should be visible to new RO transactions.
 	c.accounts = nil
 	for _, change := range sc.ChangeBatch {
-		for i := range change.Changes {
-			switch change.Changes[i].Action {
-			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE, remoteproto.Action_REMOVE:
-				addr := gointerfaces.ConvertH160toAddress(change.Changes[i].Address)
-				if c.accounts == nil {
-					c.accounts = make(map[common.Address][]byte)
-				}
-				if change.Changes[i].Action == remoteproto.Action_REMOVE {
-					// The reader's database snapshot may still contain the deleted account.
-					c.accounts[addr] = nil
-				} else {
-					c.accounts[addr] = bytes.Clone(change.Changes[i].Data)
-				}
+		for _, account := range change.Changes {
+			var data []byte
+			switch account.Action {
+			case remoteproto.Action_UPSERT, remoteproto.Action_UPSERT_CODE:
+				data = bytes.Clone(account.Data)
+			case remoteproto.Action_REMOVE:
+				// Retain a nil entry: the database snapshot may still contain the deleted account.
+			default:
+				continue
 			}
+			if c.accounts == nil {
+				c.accounts = make(map[common.Address][]byte)
+			}
+			c.accounts[gointerfaces.ConvertH160toAddress(account.Address)] = data
 		}
 	}
 }

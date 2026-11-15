@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
@@ -60,7 +61,9 @@ func (bl *BlockListener) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		bl.logger.Warn("block listener subscription failed", "err", err)
+		if !grpcutil.IsRetryLater(err) {
+			bl.logger.Warn("block listener subscription failed", "err", err)
+		}
 		if err := common.Sleep(ctx, 3*time.Second); err != nil {
 			return err
 		}

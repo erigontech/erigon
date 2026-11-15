@@ -17,6 +17,7 @@
 package shutter
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -25,6 +26,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -46,12 +49,18 @@ type blockEventStream struct {
 func (s blockEventStream) Recv() (*remoteproto.StateChangeBatch, error) { return s.recv() }
 
 func TestBlockListenerRetriesStateChanges(t *testing.T) {
-	for _, setupError := range []bool{true, false} {
-		name := "receive"
-		if setupError {
-			name = "subscribe"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		setupError bool
+		err        error
+		warn       bool
+	}{
+		{"subscribe failure", true, errors.New("snapshot read failed"), true},
+		{"receive failure", false, errors.New("snapshot read failed"), true},
+		{"subscribe unavailable", true, status.Error(codes.Unavailable, "executed header unavailable"), false},
+		{"receive unavailable", false, status.Error(codes.Unavailable, "executed header unavailable"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
@@ -59,11 +68,10 @@ func TestBlockListenerRetriesStateChanges(t *testing.T) {
 				client := retryStateChangesClient{subscribe: func(streamCtx context.Context) (remoteproto.KV_StateChangesClient, error) {
 					attempts = append(attempts, time.Now())
 					if len(attempts) == 1 {
-						err := errors.New("snapshot read failed")
-						if setupError {
-							return nil, err
+						if tc.setupError {
+							return nil, tc.err
 						}
-						return blockEventStream{recv: func() (*remoteproto.StateChangeBatch, error) { return nil, err }}, nil
+						return blockEventStream{recv: func() (*remoteproto.StateChangeBatch, error) { return nil, tc.err }}, nil
 					}
 					sent := false
 					return blockEventStream{recv: func() (*remoteproto.StateChangeBatch, error) {
@@ -75,7 +83,10 @@ func TestBlockListenerRetriesStateChanges(t *testing.T) {
 						return &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 42}}}, nil
 					}}, nil
 				}}
-				listener := NewBlockListener(log.New(), client)
+				var logs bytes.Buffer
+				logger := log.New()
+				logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+				listener := NewBlockListener(logger, client)
 				var events []BlockEvent
 				listener.RegisterObserver(func(e BlockEvent) {
 					events = append(events, e)
@@ -85,6 +96,7 @@ func TestBlockListenerRetriesStateChanges(t *testing.T) {
 				require.Equal(t, []BlockEvent{{LatestBlockNum: 42}}, events)
 				require.Len(t, attempts, 2)
 				require.Equal(t, 3*time.Second, attempts[1].Sub(attempts[0]))
+				require.Equal(t, tc.warn, bytes.Contains(logs.Bytes(), []byte("block listener subscription failed")))
 			})
 		})
 	}

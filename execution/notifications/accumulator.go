@@ -55,6 +55,9 @@ func (a *Accumulator) Reset() {
 // Checkpoint returns a rollback to completed block changes. Later writes must
 // start with StartChange so the saved changes remain immutable.
 func (a *Accumulator) Checkpoint() (restore func()) {
+	if a == nil {
+		return func() {}
+	}
 	a.latestChange = nil
 	a.accountChangeIndex = nil
 	a.storageChangeIndex = nil

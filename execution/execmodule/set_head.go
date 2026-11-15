@@ -118,7 +118,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 
 	// Pending notifications must follow the unwind's database commit outcome.
 	var restoreStateChanges func()
-	if e.accum != nil && e.accum.Accumulator != nil {
+	if e.accum != nil {
 		restoreStateChanges = e.accum.Accumulator.Checkpoint()
 	}
 	defer func() {

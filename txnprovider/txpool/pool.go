@@ -1254,6 +1254,20 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 
 	defer addRemoteTxnsTimer.ObserveDuration(time.Now())
 	p.lock.Lock()
+	full := len(p.unprocessedRemoteTxns.Txns) >= remoteTxnQueueLimit || p.unprocessedRemoteBytes >= remoteTxnQueueByteLimit
+	p.lock.Unlock()
+	if full {
+		return
+	}
+	// Blob bundles already own their payload. Copy other RLP outside the lock
+	// so queued slices do not retain network packets outside the byte budget.
+	rlps := make([][]byte, len(newTxns.Txns))
+	for i, txn := range newTxns.Txns {
+		if len(txn.BlobBundles) == 0 {
+			rlps[i] = bytes.Clone(txn.Rlp)
+		}
+	}
+	p.lock.Lock()
 	defer p.lock.Unlock()
 	src := remoteSource{peerID: peerID, sentry: sentry}
 	now := time.Now()
@@ -1275,10 +1289,8 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		if txn.TxType() == FrameTxnType && !p.remoteFrames.reserve(txn, src, now) {
 			continue
 		}
-		// Blob bundles already reference an owned copy. Other RLP slices may
-		// retain an entire network packet outside the queue's byte budget.
 		if len(txn.BlobBundles) == 0 {
-			txn.Rlp = bytes.Clone(txn.Rlp)
+			txn.Rlp = rlps[i]
 		}
 		p.unprocessedRemoteByHash[hashS] = txn
 		p.unprocessedRemoteBytes += uint64(txn.Size)
@@ -1970,9 +1982,6 @@ const localAdmissionTimeout = 30 * time.Second
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
 	ctx, cancel := context.WithTimeout(ctx, localAdmissionTimeout)
 	defer cancel()
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
 	// The first state batch can arrive before persisted transactions are restored.
 	// Admission must see those transactions for nonce and replacement checks.
 	if !p.Started() {
@@ -3471,9 +3480,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		pendingSlot := protocol.FrameValidationSlot(header.SlotNumber)
 		*parked = slices.DeleteFunc(*parked, func(mt *metaTxn) bool {
 			roots := protocol.FrameTransactionRecentRoots(mt.TxnSlot.Txn.(*types.FrameTransaction))
-			invalidRoots := slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
-				return !ref.ValidAt(pendingSlot)
-			})
+			invalidRoots := recentRootsUnusable(roots, pendingSlot)
 			if invalidRoots {
 				p.discardLocked(mt, txpoolcfg.FrameStateChanged)
 			}

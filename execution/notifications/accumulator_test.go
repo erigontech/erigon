@@ -75,6 +75,12 @@ func TestAccumulatorAppendIncompleteChanges(t *testing.T) {
 	}
 }
 
+func TestNilAccumulatorCheckpoint(t *testing.T) {
+	var acc *Accumulator
+	restore := acc.Checkpoint()
+	restore()
+}
+
 func TestAccumulatorCheckpoint(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

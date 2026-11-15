@@ -610,6 +610,12 @@ func (p *TxPool) bogotaActivationAfter(changes *remoteproto.StateChangeBatch) bo
 	return activation
 }
 
+func recentRootsUnusable(roots []protocol.RecentRootReference, slot uint64) bool {
+	return slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
+		return !ref.ValidAt(slot)
+	})
+}
+
 // invalidateFrames drops expired transactions and parks those whose validation may be stale.
 // The caller holds the pool lock; revalidateFrames performs the EVM work later.
 func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*metaTxn {
@@ -661,9 +667,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			// Root age and activation are independent of simulation results.
 			roots = protocol.FrameTransactionRecentRoots(frame)
 		}
-		invalidRoots := slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
-			return activationCrossedBack || !ref.ValidAt(pendingSlot)
-		})
+		invalidRoots := (activationCrossedBack && len(roots) > 0) || recentRootsUnusable(roots, pendingSlot)
 		if invalidRoots {
 			p.removeFromSubPool(mt, "recent root no longer usable")
 			p.discardLocked(mt, txpoolcfg.FrameStateChanged)
@@ -675,7 +679,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		}
 		// Blob costs can change with the block context even when none
 		// of the validation's account dependencies changed.
-		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0 || changes.StateChangesIncomplete
+		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
 		// code still trigger validation through its recorded dependency below.
 		if frame.Frames[0].IsExpiryVerifier() && previous.Deadline < pendingTime {
