@@ -436,6 +436,74 @@ func TestRetire_DetachesCoveredSourcesWithCoveringFile(t *testing.T) {
 	}
 }
 
+func TestRetire_DetachesHiddenOutputCoveredByRetiredSources(t *testing.T) {
+	db, agg := testDbAndAggregatorSmallFrozen(t, 10, 2)
+	ranges := []testFileRange{{0, 1}, {1, 2}, {0, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	for _, name := range []string{"v2.0-accounts.0-2.vi", "v1.0-accounts.0-2.efi"} {
+		require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, name)))
+	}
+	require.NoError(t, agg.OpenFolder(db))
+	agg.ForbidVisibilityLowering()
+	require.NotPanics(t, func() {
+		_, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 20})
+		require.NoError(t, err)
+	})
+	require.Equal(t, 1, agg.d[kv.AccountsDomain].History.dirtyFiles.Len())
+	require.Equal(t, 1, agg.d[kv.AccountsDomain].InvertedIndex.dirtyFiles.Len())
+	requireVisibleEnd(t, agg, 30)
+}
+
+func TestRetire_PreservesTailBelowHiddenCoveringFile(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		tailEnd   uint64
+		outputEnd uint64
+		unindexed bool
+	}{
+		{"above ceiling", 3, 4, false},
+		{"overlapping unindexed output", 4, 3, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, agg := testDbAndAggregatorSmallFrozen(t, 10, 2)
+			ranges := []testFileRange{{0, 2}, {2, tc.tailEnd}}
+			generateStateFiles(t, agg.Dirs(), ranges)
+			generateCommitmentFile(t, agg.Dirs(), ranges)
+			generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+			generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, tc.outputEnd}})
+			if tc.unindexed {
+				for _, name := range []string{"vi", "efi"} {
+					ver := "v1.0"
+					if name == "vi" {
+						ver = "v2.0"
+					}
+					require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, fmt.Sprintf("%s-accounts.0-%d.%s", ver, tc.outputEnd, name))))
+				}
+			}
+			require.NoError(t, agg.OpenFolder(db))
+			agg.ForbidVisibilityLowering()
+			require.NotPanics(t, func() {
+				_, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 20})
+				require.NoError(t, err)
+			})
+			for i := range 2 {
+				if i > 0 {
+					require.NoError(t, agg.OpenFolder(db))
+				}
+				at := agg.BeginFilesRo()
+				require.EqualValues(t, 20, at.d[kv.AccountsDomain].ht.files.StartTxNum())
+				require.EqualValues(t, tc.tailEnd*10, at.d[kv.AccountsDomain].ht.files.EndTxNum())
+				at.Close()
+				requireVisibleEnd(t, agg, tc.tailEnd*10)
+				require.Equal(t, 2, agg.d[kv.AccountsDomain].History.dirtyFiles.Len())
+				require.Equal(t, 2, agg.d[kv.AccountsDomain].InvertedIndex.dirtyFiles.Len())
+			}
+		})
+	}
+}
+
 // A cutoff reaching the visible tip would retire every file. That happens benignly when the
 // unfrozen head outruns the prune distance, so Retire skips the entity (keeping its files) and
 // retries once the tip advances — it must not error and poison retirement of the healthy ones.

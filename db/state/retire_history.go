@@ -62,8 +62,8 @@ func (ht *HistoryRoTx) filesBeforeStep(cutoff kv.Step) []agedFiles {
 	return []agedFiles{ht.iit.filesBeforeStep(cutoff), {ht.h.dirtyFiles, ht.h.FilenameBase, entirelyBeforeStep(ht.files, ht.stepSize, cutoff)}}
 }
 
-// Retire drops old visible History+InvertedIndex files and their covered sources below
-// their per-domain cutoff. Physical deletion waits until readers release the retired generation.
+// Retire drops the dirty history/index prefix ending at the last aged visible file.
+// Physical deletion waits until readers release the retired generation.
 func (at *AggregatorRoTx) Retire(cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
 	if dbg.NoRetire() || cutoffs.IsNoop() {
 		return 0, nil
@@ -111,21 +111,24 @@ func (at *AggregatorRoTx) Retire(cutoffs kv.RetireCutoffs) (retiredCount int, er
 	defer at.a.dirtyFilesLock.Unlock()
 	var retired []*FilesItem
 	for _, agedList := range aged {
-		outs := agedList.files
+		var retireTo uint64
 		for _, covering := range agedList.files {
 			if current, ok := agedList.dirtyFiles.Get(covering); !ok || current != covering {
 				continue
 			}
-			agedList.dirtyFiles.Ascend(newFilesItem(0, covering.startTxNum), func(item *FilesItem) bool {
-				if item.endTxNum > covering.endTxNum {
-					return false
-				}
-				if item.isProperSubsetOf(covering) {
-					outs = append(outs, item)
-				}
-				return true
-			})
+			retireTo = max(retireTo, covering.endTxNum)
 		}
+		if retireTo == 0 {
+			continue
+		}
+		var outs []*FilesItem
+		agedList.dirtyFiles.Scan(func(item *FilesItem) bool {
+			if item.endTxNum > retireTo {
+				return false
+			}
+			outs = append(outs, item)
+			return true
+		})
 		retired = append(retired, retire(mvcc.RetireReasonAged, agedList.dirtyFiles, outs, agedList.filenameBase, at.a.logger)...)
 	}
 	if len(retired) == 0 {
