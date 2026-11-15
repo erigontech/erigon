@@ -52,7 +52,7 @@ import (
 // an implementation defined in another package (e.g. execmodule.Dispatcher)
 // without creating a circular import.
 type NotificationSender interface {
-	Dispatch(ctx context.Context, tx kv.Tx, stateVersion uint64, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
+	Dispatch(ctx context.Context, tx kv.Tx, stateVersion uint64, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64, committedTx kv.TemporalTx) error
 }
 
 type FrozenBlocksReader interface {
@@ -155,6 +155,7 @@ func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
 			return err
 		}
 	}
+	committedTx, _ := tx.(kv.TemporalTx) // notifications are sent after the run's commit
 	return h.dispatcher.Dispatch(
 		h.ctx, tx, stateVersion,
 		h.notifications.Accumulator,
@@ -162,6 +163,7 @@ func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
 		finishProgressBefore,
 		finishStageAfterSync,
 		h.sync.PrevUnwindPoint(),
+		committedTx,
 	)
 }
 
@@ -217,23 +219,24 @@ func (h *Hook) NotifyStateRetirementDone() {
 	h.notifications.Events.OnStateRetirementDone()
 }
 
+// blockRangeAnnounceDue reports whether to announce BlockRangeUpdate:
+//   - after initialization
+//   - during sync: every 1 minute. A time limit is used to prevent excessive announcements in
+//     case of fast execution due to empty blocks or small SyncLoopBlockLimit
+//   - after sync: every 32 blocks or on unwind of any depth
+func (h *Hook) blockRangeAnnounceDue(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) bool {
+	hadUnwind := h.sync != nil && h.sync.PrevUnwindPoint() != nil && *h.sync.PrevUnwindPoint() < finishStageBeforeSync
+	isInitialAnnouncement := h.lastAnnouncedBlockRangeLatestNumber == 0
+	progressed := isSynced && finishStageAfterSync >= h.lastAnnouncedBlockRangeLatestNumber+32
+	shouldPublishByTime := !isSynced && time.Since(h.lastAnnouncedBlockRangeTime) >= 1*time.Minute
+	return hadUnwind || isInitialAnnouncement || progressed || shouldPublishByTime
+}
+
 func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) {
 	if h.blockRangePublisher == nil || h.statusDataGetter == nil {
 		return
 	}
-
-	// we want to announce BlockRangeUpdate
-	// - after initialization
-	// - during sync: every 1 minute. A time limit is used to prevent excessive announcements in
-	//									case of fast execution due to empty blocks or small SyncLoopBlockLimit
-	// - after sync: every 32 blocks or on unwind of any depth
-	hadUnwind := h.sync != nil && h.sync.PrevUnwindPoint() != nil && *h.sync.PrevUnwindPoint() < finishStageBeforeSync
-	isInitialAnnouncement := h.lastAnnouncedBlockRangeLatestNumber == 0
-	progressed := finishStageAfterSync >= h.lastAnnouncedBlockRangeLatestNumber+32
-	timeElapsed := time.Since(h.lastAnnouncedBlockRangeTime)
-	shouldPublishByTime := !isSynced && timeElapsed >= 1*time.Minute
-
-	if !hadUnwind && !isInitialAnnouncement && !progressed && !shouldPublishByTime {
+	if !h.blockRangeAnnounceDue(finishStageBeforeSync, finishStageAfterSync, isSynced) {
 		return
 	}
 
@@ -254,13 +257,13 @@ func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSy
 		return
 	}
 
-	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "hadUnwind", hadUnwind, "isSynced", isSynced, "timeElapsed", timeElapsed)
+	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "isSynced", isSynced)
 	h.blockRangePublisher.PublishBlockRangeUpdate(packet)
 	h.lastAnnouncedBlockRangeLatestNumber = packet.Latest
 	h.lastAnnouncedBlockRangeTime = time.Now()
 }
 
-func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules.ChainReader, currentHeader *types.Header, currentBody *types.RawBody) error {
+func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules.ChainReader, currentHeader *types.Header, currentBody *types.Body) error {
 	currentHeight := currentHeader.Number.Uint64()
 	currentHash := currentHeader.Hash()
 	if chainReader != nil {
@@ -285,9 +288,6 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules
 		return err
 	}
 	if err := rawdb.WriteHeadHeaderHash(batch, currentHash); err != nil {
-		return err
-	}
-	if _, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
 		return err
 	}
 	if prevHash != currentHash {
@@ -325,7 +325,7 @@ func cleanupProgressIfNeeded(batch kv.RwTx, header *types.Header) error {
 
 var ErrStateStepHasMoreWork = errors.New("state step has more work")
 
-func StateStep(chainReader rules.ChainReader, engine rules.Engine, sd *execctx.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
+func StateStep(chainReader rules.ChainReader, engine rules.Engine, sd *execctx.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.Body) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -389,7 +389,7 @@ func NewDefaultStages(ctx context.Context,
 	blockWriter := blockio.NewBlockWriter()
 	return stagedsync.DefaultStages(
 		ctx,
-		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
+		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.SnapshotBlobsFromSlot(), cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
 		stagedsync.StageHeadersCfg(blockReader),
 		stagedsync.StageBodiesCfg(blockReader, blockWriter),
 		stagedsync.StageSendersCfg(controlServer.ChainConfig, dbg.BadBlockHalt, dirs.Tmp, blockReader, readAheader),
@@ -425,7 +425,7 @@ func NewPipelineStages(ctx context.Context,
 
 	return stagedsync.PipelineStages(
 		ctx,
-		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
+		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.SnapshotBlobsFromSlot(), cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
 		stagedsync.StageSendersCfg(controlServer.ChainConfig, dbg.BadBlockHalt, dirs.Tmp, blockReader, readAheader),
 		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
 		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),

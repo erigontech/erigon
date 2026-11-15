@@ -16,7 +16,7 @@ import os
 import statistics
 
 CLIENT_ORDER = ["erigon", "geth", "nethermind", "reth"]
-YELLOW_RATIO = 1.3
+STATUS_RATIO = 1.3
 RPC_TOLERANCE = 0.01
 
 
@@ -50,14 +50,14 @@ def all_succeeded(step, best_rpc):
     return step["success"] >= 1 and step["rpc_success"] >= best_rpc - RPC_TOLERANCE
 
 
-def erigon_status(erigon, best, best_rpc, percentile):
+def erigon_status(erigon, best, next_best, best_rpc, percentile):
     if erigon is None:
         return "⚪"
     if not all_succeeded(erigon, best_rpc) or best is None:
         return "🔴"
     if erigon[percentile] == best:
-        return "🟢"
-    return "🟡" if erigon[percentile] < best * YELLOW_RATIO else "🔴"
+        return "🟢🟢" if next_best is not None and next_best >= best * STATUS_RATIO else "🟢"
+    return "🟡" if erigon[percentile] < best * STATUS_RATIO else "🔴"
 
 
 def latency_cell(step, best, best_rpc, percentile):
@@ -80,10 +80,12 @@ def render_overview(results, percentile):
         for qps in sorted({q for c in results[label] for q in results[label][c]}, key=float):
             steps = {c: results[label][c].get(qps) for c in clients if c in results[label]}
             best_rpc = max(s["rpc_success"] for s in steps.values() if s)
-            ok = [s[percentile] for s in steps.values() if s and all_succeeded(s, best_rpc)]
-            best = min(ok) if ok else None
+            ok = {c: s[percentile] for c, s in steps.items() if s and all_succeeded(s, best_rpc)}
+            best = min(ok.values()) if ok else None
+            next_best = min((v for c, v in ok.items() if c != "erigon"), default=None)
             cells = [latency_cell(steps.get(c), best, best_rpc, percentile) for c in clients]
-            rows.append((erigon_status(steps.get("erigon"), best, best_rpc, percentile), [label, qps] + cells))
+            status = erigon_status(steps.get("erigon"), best, next_best, best_rpc, percentile)
+            rows.append((status, [label, qps] + cells))
     header = ["Test", "QPS"] + [c + " " for c in clients]
     widths = [max(len(r[i]) for r in [header] + [cells for _, cells in rows]) for i in range(len(header))]
 
@@ -93,7 +95,8 @@ def render_overview(results, percentile):
     lines = ["```",
              f"{percentile} latency in ms, lower is better. * fastest, - no result,",
              "err HTTP errors or RPC errors > 1% above the best client.",
-             f"Erigon status on {percentile}, at the end of the row: 🟢 fastest, 🟡 < 1.3x the fastest, 🔴 >= 1.3x or errors.",
+             f"Erigon status on {percentile}, at the end of the row: 🟢🟢 fastest by >= 1.3x, 🟢 fastest,",
+             "🟡 < 1.3x the fastest, 🔴 >= 1.3x or errors, ⚪ no Erigon result.",
              "",
              line(header)]
     lines += [f"{line(cells)} {status}" for status, cells in rows]

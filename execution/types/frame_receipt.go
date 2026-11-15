@@ -36,12 +36,20 @@ type frameReceiptRLP struct {
 }
 
 func (r *Receipt) deriveFrameFields() {
-	r.Logs = nil
+	numLogs := 0
 	r.Status = ReceiptStatusSuccessful
 	for _, frame := range r.FrameReceipts {
-		r.Logs = append(r.Logs, frame.Logs...)
+		numLogs += len(frame.Logs)
 		if frame.Status != ReceiptStatusSuccessful {
 			r.Status = ReceiptStatusFailed
+		}
+	}
+	r.Logs = nil
+	if numLogs > 0 {
+		r.Logs = make(Logs, numLogs)
+		off := 0
+		for _, frame := range r.FrameReceipts {
+			off += copy(r.Logs[off:], frame.Logs)
 		}
 	}
 	r.PostState = nil

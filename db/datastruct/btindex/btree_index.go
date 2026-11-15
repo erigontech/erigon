@@ -81,8 +81,7 @@ func (c *Cursor) Close() {
 	if c == nil {
 		return
 	}
-	c.key = c.key[:0]
-	c.value = c.value[:0]
+	c.key, c.value = nil, nil
 	c.d = 0
 	c.getter = nil
 	if c.returnInto != nil {

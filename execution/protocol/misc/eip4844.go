@@ -167,7 +167,7 @@ func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBl
 	if expectedBlobHashes == nil {
 		return ErrNilBlobHashes
 	}
-	actualBlobHashes := []common.Hash{}
+	actualBlobHashes := make([]common.Hash, 0, min(len(expectedBlobHashes), int(maxBlobsPerBlock)))
 	for _, txn := range *transactions {
 		for _, h := range txn.GetBlobHashes() {
 			if h[0] != kzg.BlobCommitmentVersionKZG {

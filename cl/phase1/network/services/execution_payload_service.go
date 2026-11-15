@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"golang.org/x/sync/semaphore"
 )
 
 // seenEnvelopeKey tracks validated envelopes per (beaconBlockRoot, builderIndex).
@@ -59,8 +60,8 @@ type pendingEnvelopeJob struct {
 }
 
 type pendingEnvelopeLookupRetry struct {
-	owner   *pendingEnvelopeJob
-	retryAt int64
+	retryAt     int64
+	stateReplay bool
 }
 
 const (
@@ -70,6 +71,7 @@ const (
 	pendingEnvelopeLookupRetryInterval = 5 * time.Second
 	maxPendingEnvelopes                = 1024
 	maxPendingEnvelopeBytes            = 4 * clparams.MaxChunkSize
+	maxBackgroundImportBytes           = maxPendingEnvelopeBytes
 	// Bounds the context-aware waits of one import, such as the payload-validation admission and the
 	// EL call. It equals the remote Engine API client's NewPayload timeout, which the embedded EL lacks.
 	executionPayloadImportTimeout = execution_client.DefaultRPCHTTPTimeout
@@ -88,11 +90,12 @@ type executionPayloadService struct {
 	seenEnvelopesCache *lru.Cache[seenEnvelopeKey, struct{}]
 
 	// Pending envelopes waiting for block to arrive
-	pending              *pendingJobQueue[pendingEnvelopeKey, *pendingEnvelopeJob]
-	pendingBytes         atomic.Uint64
-	pendingMu            sync.Mutex
-	pendingLookupRetryAt sync.Map
-	now                  func() time.Time
+	pending               *pendingJobQueue[pendingEnvelopeKey, *pendingEnvelopeJob]
+	pendingBytes          atomic.Uint64
+	pendingMu             sync.Mutex
+	pendingLookupRetryAt  sync.Map
+	backgroundImportBytes *semaphore.Weighted
+	now                   func() time.Time
 }
 
 // NewExecutionPayloadService creates a new execution payload service
@@ -108,13 +111,14 @@ func NewExecutionPayloadService(
 		panic(err)
 	}
 	s := &executionPayloadService{
-		ctx:                ctx,
-		forkchoiceStore:    forkchoiceStore,
-		beaconCfg:          beaconCfg,
-		emitters:           emitters,
-		gossipManager:      gossipManager,
-		seenEnvelopesCache: seenEnvelopesCache,
-		now:                time.Now,
+		ctx:                   ctx,
+		forkchoiceStore:       forkchoiceStore,
+		beaconCfg:             beaconCfg,
+		emitters:              emitters,
+		gossipManager:         gossipManager,
+		seenEnvelopesCache:    seenEnvelopesCache,
+		backgroundImportBytes: semaphore.NewWeighted(int64(maxBackgroundImportBytes)),
+		now:                   time.Now,
 	}
 	s.pending = s.newPendingQueue(ctx)
 	return s
@@ -128,20 +132,20 @@ func (s *executionPayloadService) newPendingQueue(ctx context.Context) *pendingJ
 		checkInterval: pendingEnvelopeCheckInterval,
 	},
 		s.tryProcessPendingEnvelope,
-		func(_ context.Context, _ pendingEnvelopeKey, job *pendingEnvelopeJob) {
-			s.releasePendingEnvelope(job)
+		func(_ context.Context, key pendingEnvelopeKey, job *pendingEnvelopeJob) {
+			s.releaseRemovedPendingEnvelope(key, job)
 		},
 		func(key pendingEnvelopeKey, job *pendingEnvelopeJob) {
-			s.releasePendingEnvelope(job)
-			if job.envelope != nil && job.envelope.Message != nil {
-				seenKey := seenEnvelopeKey{key.blockRoot, job.envelope.Message.BuilderIndex}
-				s.clearPendingLookupRetryIfUnused(seenKey)
-			}
+			s.releaseRemovedPendingEnvelope(key, job)
 			log.Trace("Pending envelope expired", "blockRoot", key.blockRoot)
 		})
 }
 
 func (s *executionPayloadService) clearPendingLookupRetryIfUnused(seenKey seenEnvelopeKey) {
+	retry, ok := s.pendingLookupRetryAt.Load(seenKey)
+	if !ok {
+		return
+	}
 	s.pendingMu.Lock()
 	defer s.pendingMu.Unlock()
 	identityPending := false
@@ -155,10 +159,7 @@ func (s *executionPayloadService) clearPendingLookupRetryIfUnused(seenKey seenEn
 		}
 		return true
 	})
-	if identityPending {
-		return
-	}
-	if retry, ok := s.pendingLookupRetryAt.Load(seenKey); ok {
+	if !identityPending {
 		s.pendingLookupRetryAt.CompareAndDelete(seenKey, retry)
 	}
 }
@@ -326,7 +327,25 @@ func (s *executionPayloadService) processMessage(
 		return fmt.Errorf("%w: %w", forkchoice.ErrInvalidExecutionPayloadEnvelope, err)
 	}
 	s.forkchoiceStore.RecordExecutionPayloadArrival(beaconBlockRoot, envelope.Payload.SlotNumber, receivedAt)
-	finishPendingEnvelope := s.forkchoiceStore.BeginPendingPayloadEnvelope(beaconBlockRoot)
+	var importBytes int64
+	if preclaimedAdmission == nil {
+		importBytes = int64(signedEnvelope.EncodingSizeSSZ())
+		if !s.backgroundImportBytes.TryAcquire(importBytes) {
+			queued, queueErr := s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope, receivedAt, true)
+			if queueErr != nil {
+				return fmt.Errorf("%w: %w", ErrIgnore, queueErr)
+			}
+			if !queued {
+				return fmt.Errorf("%w: execution payload envelope already queued", ErrIgnore)
+			}
+			return fmt.Errorf("%w: background import byte capacity reached", ErrIgnore)
+		}
+	}
+	finishHold := s.forkchoiceStore.BeginPendingPayloadEnvelope(beaconBlockRoot)
+	finishPendingEnvelope := func() {
+		s.backgroundImportBytes.Release(importBytes)
+		finishHold()
+	}
 	s.seenEnvelopesCache.Add(seenKey, struct{}{})
 	handedOff := false
 	defer func() {
@@ -469,6 +488,14 @@ func (s *executionPayloadService) releasePendingEnvelope(job *pendingEnvelopeJob
 	s.releasePendingEnvelopeBytes(job.ownedBytes)
 }
 
+func (s *executionPayloadService) releaseRemovedPendingEnvelope(key pendingEnvelopeKey, job *pendingEnvelopeJob) {
+	s.releasePendingEnvelope(job)
+	if job.envelope != nil && job.envelope.Message != nil {
+		seenKey := seenEnvelopeKey{key.blockRoot, job.envelope.Message.BuilderIndex}
+		s.clearPendingLookupRetryIfUnused(seenKey)
+	}
+}
+
 func (s *executionPayloadService) releasePendingEnvelopeBytes(ownedBytes uint64) {
 	s.pendingMu.Lock()
 	defer s.pendingMu.Unlock()
@@ -501,7 +528,8 @@ func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context,
 		return pendingJobRemoveThenProcess
 	}
 	if retryAt, ok := s.pendingLookupRetryAt.Load(seenKey); ok {
-		if retryAt.(pendingEnvelopeLookupRetry).retryAt > time.Now().UnixNano() && s.forkchoiceStore.HasEnvelope(key.blockRoot) {
+		retry := retryAt.(pendingEnvelopeLookupRetry)
+		if retry.retryAt > time.Now().UnixNano() && (retry.stateReplay || s.forkchoiceStore.HasEnvelope(key.blockRoot)) {
 			job.processing.Store(false)
 			return pendingJobKeep
 		}
@@ -525,7 +553,6 @@ func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context,
 			}
 			s.forkchoiceStore.ForgetExecutionPayloadEnvelopeForGossip(key.blockRoot, job.envelope.Message.BuilderIndex)
 			s.pendingLookupRetryAt.Store(seenKey, pendingEnvelopeLookupRetry{
-				owner:   job,
 				retryAt: time.Now().Add(pendingEnvelopeLookupRetryInterval).UnixNano(),
 			})
 			job.processing.Store(false)
@@ -536,9 +563,16 @@ func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context,
 	err = s.processMessage(ctx, job.envelope, job.receivedAt, &admissionToken)
 	if err != nil {
 		log.Trace("Failed to process pending envelope", "blockRoot", key.blockRoot, "err", err)
-		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeStateReplayFailed) ||
-			(!errors.Is(err, ErrIgnore) && !errors.Is(err, forkchoice.ErrIgnore) &&
-				!errors.Is(err, forkchoice.ErrInvalidExecutionPayloadEnvelope)) {
+		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeStateReplayFailed) {
+			s.pendingLookupRetryAt.Store(seenKey, pendingEnvelopeLookupRetry{
+				retryAt:     time.Now().Add(pendingEnvelopeLookupRetryInterval).UnixNano(),
+				stateReplay: true,
+			})
+			job.processing.Store(false)
+			return pendingJobKeep
+		}
+		if !errors.Is(err, ErrIgnore) && !errors.Is(err, forkchoice.ErrIgnore) &&
+			!errors.Is(err, forkchoice.ErrInvalidExecutionPayloadEnvelope) {
 			job.processing.Store(false)
 			return pendingJobKeep
 		}

@@ -50,7 +50,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	// Use current epoch's version for decoding
 	version := c.beaconConfig.GetCurrentStateVersion(curEpoch)
 	req := &cltypes.ExecutionPayloadEnvelopesByRangeRequest{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
+	if err := ssz_snappy.DecodeAndReadFixedSizeNoForkDigest(s, req, version); err != nil {
 		return err
 	}
 
@@ -243,7 +243,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 				log.Debug("failed to read envelope from disk", "blockRoot", candidate.root, "error", err)
 			}
 		}
-		if envelope == nil && err == nil && candidate.child != nil && c.envelopeRebuilder != nil {
+		if envelope == nil && err == nil && candidate.child != nil && c.envelopeRebuilder != nil && !c.forkChoiceReader.IsEnvelopeRejected(candidate.root) {
 			prepared, prepareErr := c.envelopeRebuilder.PrepareFromBlocks(tx, candidate.slot, candidate.root, candidate.block, candidate.childSlot, candidate.child)
 			err = prepareErr
 			if err == nil && prepared != nil {
@@ -253,7 +253,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 				log.Debug("failed to rebuild execution payload envelope", "blockRoot", candidate.root, "error", err)
 			}
 		}
-		if err != nil || envelope == nil {
+		if err != nil || envelope == nil || c.forkChoiceReader.IsEnvelopeRejected(candidate.root) {
 			if wroteResponse {
 				break
 			}
@@ -329,6 +329,9 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 
 	count := 0
 	writeEnvelope := func(envelope *cltypes.SignedExecutionPayloadEnvelope, epoch uint64) bool {
+		if c.forkChoiceReader.IsEnvelopeRejected(envelope.Message.BeaconBlockRoot) {
+			return true
+		}
 		forkDigest, err := c.ethClock.ComputeForkDigest(epoch)
 		if err != nil {
 			log.Debug("failed to compute fork digest", "error", err)
@@ -350,10 +353,18 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 	}
 
 	rebuildCandidates := make([]rebuildCandidate, 0, req.Length())
+	seen := make(map[common.Hash]struct{}, req.Length())
 	stopped := false
 	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
 		if count >= int(maxPayloads) {
 			return false
+		}
+		if _, ok := seen[blockRoot]; ok {
+			return true
+		}
+		seen[blockRoot] = struct{}{}
+		if c.forkChoiceReader.IsEnvelopeRejected(blockRoot) {
+			return true
 		}
 
 		slot, readErr := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
@@ -404,6 +415,9 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 	for _, candidate := range rebuildCandidates {
 		if count >= int(maxPayloads) {
 			break
+		}
+		if c.forkChoiceReader.IsEnvelopeRejected(candidate.blockRoot) {
+			continue
 		}
 
 		prepared, err := c.envelopeRebuilder.Prepare(requestCtx, tx, candidate.slot, candidate.blockRoot)

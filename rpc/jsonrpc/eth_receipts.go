@@ -186,9 +186,12 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 	end = latest
 	if crit.ToBlock != nil {
 		toBlock := crit.ToBlock.Int64()
-		if toBlock > 0 {
+		switch {
+		case toBlock > 0:
 			end = uint64(toBlock)
-		} else {
+		case crit.FromBlock != nil && crit.FromBlock.Int64() == toBlock:
+			end = begin
+		default:
 			blockNum := rpc.BlockNumber(toBlock)
 			end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader)
 			if err != nil {
@@ -327,7 +330,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return nil, err
 	}
 
-	it := rawdbv3.TxNums2BlockNums(ctx, tx, api._txNumReader, txNumbers, order.Asc)
+	it := rawdbv3.TxNums2BlockNumsFrom(ctx, tx, api._txNumReader, txNumbers, order.Asc, begin)
 	defer it.Close()
 
 	for it.HasNext() {
@@ -507,7 +510,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true, true), nil
+	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -556,7 +559,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	result := make(ethutils.RPCReceipts, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), true, true))
+		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), true))
 	}
 
 	return result, nil

@@ -14,6 +14,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/exec"
@@ -341,6 +342,9 @@ func TestPoolStepPanicIsOperational(t *testing.T) {
 }
 
 func TestPoolBALSeededBlockMatchesUnseeded(t *testing.T) {
+	prevAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = prevAssert })
 	fx := loadPoolFixture(t)
 	require.NotNil(t, fx.Outputs)
 	t.Setenv("EPHEMERAL_WORKERS", "4")

@@ -40,4 +40,8 @@ func TestAttachedValidatorsAreIndependentFromFeeRecipients(t *testing.T) {
 
 	require.ElementsMatch(t, []uint64{7, 8, 9}, params.GetValidators())
 	require.Equal(t, uint64(2), params.Generation())
+	for _, index := range []uint64{7, 8, 9} {
+		require.True(t, params.HasAttachedValidator(index))
+	}
+	require.False(t, params.HasAttachedValidator(10))
 }

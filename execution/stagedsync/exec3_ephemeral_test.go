@@ -55,7 +55,7 @@ func (s *singleBlockSource) header(ctx context.Context, hash common.Hash, number
 	if s.parent != nil && number == s.parent.Number.Uint64() {
 		return s.parent, nil
 	}
-	return &types.Header{}, nil
+	return nil, nil
 }
 
 func fixturePath(tb testing.TB) string {

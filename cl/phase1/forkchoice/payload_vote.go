@@ -222,46 +222,54 @@ func (f *ForkChoiceStore) PayloadVotesRuleOutFull(root common.Hash) bool {
 // Compares current block's parent_block_hash with parent block's block_hash from their bids.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) getParentPayloadStatus(block *cltypes.BeaconBlock) cltypes.PayloadStatus {
-	parentBlock, ok := f.forkGraph.GetBlock(block.ParentRoot)
-	if !ok || parentBlock == nil {
-		return cltypes.PayloadStatusEmpty
+	return parentPayloadStatusFromBid(f.executionPayloadBid(block.ParentRoot), block)
+}
+
+func (f *ForkChoiceStore) executionPayloadBid(root common.Hash) *cltypes.ExecutionPayloadBid {
+	block, ok := f.forkGraph.GetBlock(root)
+	if !ok || block == nil || block.Block == nil || block.Block.Body == nil {
+		// The checkpoint anchor has no stored block. Its state may be newer than its last block.
+		if bid := f.anchorExecutionPayloadBid; bid != nil && root == f.forkGraph.AnchorRoot() {
+			if f.computeEpochAtSlot(bid.Slot) >= f.beaconCfg.GloasForkEpoch {
+				return bid
+			}
+		}
+		return nil
 	}
-	return ParentPayloadStatusFromBids(parentBlock, block)
+	if block.Version() < clparams.GloasVersion {
+		return nil
+	}
+	if bid := block.Block.Body.GetSignedExecutionPayloadBid(); bid != nil {
+		return bid.Message
+	}
+	return nil
 }
 
 // ParentPayloadStatusFromBids derives the parent's canonical payload status from its child.
 func ParentPayloadStatusFromBids(parentBlock *cltypes.SignedBeaconBlock, block *cltypes.BeaconBlock) cltypes.PayloadStatus {
-	if parentBlock == nil || parentBlock.Block == nil || parentBlock.Block.Body == nil || block == nil || block.Body == nil {
+	if parentBlock == nil || parentBlock.Block == nil || parentBlock.Block.Body == nil {
 		return cltypes.PayloadStatusEmpty
 	}
-	// Pre-GLOAS parent blocks have no bid field. From the GLOAS fork choice
-	// perspective they are treated as EMPTY: they always carried their execution
-	// payload inline (no separate envelope), so the PENDING → EMPTY/FULL
-	// traversal in getNodeChildren produces only an EMPTY child for them
-	// (HasEnvelope returns false). Returning EMPTY here lets the next
-	// generation of blocks (whose parent is pre-GLOAS) be found by the
-	// EMPTY branch, unblocking the fork-choice head from advancing past the
-	// GLOAS fork boundary.
-	if parentBlock.Block.Body.Version < clparams.GloasVersion {
+	// Pre-Gloas payloads are inline, so there is no separate FULL variant.
+	if parentBlock.Version() < clparams.GloasVersion {
 		return cltypes.PayloadStatusEmpty
 	}
+	parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
+	if parentBid == nil {
+		return cltypes.PayloadStatusEmpty
+	}
+	return parentPayloadStatusFromBid(parentBid.Message, block)
+}
 
-	// Get parent_block_hash from current block's signed_execution_payload_bid
+func parentPayloadStatusFromBid(parentBid *cltypes.ExecutionPayloadBid, block *cltypes.BeaconBlock) cltypes.PayloadStatus {
+	if parentBid == nil || block == nil || block.Body == nil {
+		return cltypes.PayloadStatusEmpty
+	}
 	currentBid := block.Body.GetSignedExecutionPayloadBid()
 	if currentBid == nil || currentBid.Message == nil {
 		return cltypes.PayloadStatusEmpty
 	}
-	parentBlockHash := currentBid.Message.ParentBlockHash
-
-	// Get message_block_hash from parent block's signed_execution_payload_bid
-	parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
-	if parentBid == nil || parentBid.Message == nil {
-		return cltypes.PayloadStatusEmpty
-	}
-	messageBlockHash := parentBid.Message.BlockHash
-
-	// Compare parent_block_hash with message_block_hash
-	if parentBlockHash == messageBlockHash {
+	if currentBid.Message.ParentBlockHash == parentBid.BlockHash {
 		return cltypes.PayloadStatusFull
 	}
 	return cltypes.PayloadStatusEmpty
@@ -465,39 +473,24 @@ func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock, 
 	}
 
 	parentBlockHash := currentBid.Message.ParentBlockHash
-	if status, ok := f.executionPayloadStatus.Get(parentBlockHash); ok {
-		if status == execution_client.PayloadStatusInvalidated {
-			return errors.New("parent execution payload is invalid")
-		}
+	if f.executionHashMarkedInvalid(parentBlockHash) {
+		return errors.New("parent execution payload is invalid")
 	}
 
-	if f.isParentNodeFull(block) {
+	parentBid := f.executionPayloadBid(block.ParentRoot)
+	if parentPayloadStatusFromBid(parentBid, block) == cltypes.PayloadStatusFull {
+		if f.IsBlockInvalid(block.ParentRoot) {
+			return errors.New("parent execution payload is invalid")
+		}
+		if f.IsEnvelopeRejected(block.ParentRoot) {
+			return errors.New("parent execution payload envelope is rejected")
+		}
 		// Missing local data is retryable because sync may persist the envelope later.
 		if !f.isPayloadLocallyAvailable(block.ParentRoot) || requireEngineAcceptance && !f.isPayloadAvailable(block.ParentRoot) {
 			return ErrParentEnvelopePending
 		}
-	} else {
-		// Parent is EMPTY - verify bid.parent_block_hash == parent_bid.parent_block_hash
-		parentBlock, ok := f.forkGraph.GetBlock(block.ParentRoot)
-		if !ok || parentBlock == nil {
-			// Parent block was pruned from the fork graph or is the anchor block.
-			// Spec assumes store.blocks contains all blocks (no pruning), but Erigon
-			// prunes old blocks to save memory. Pruned blocks were already validated
-			// when they were processed, so skip this validation.
-			return nil
-		}
-
-		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
-
-		if parentBid == nil || parentBid.Message == nil {
-			// Parent might be pre-GLOAS, skip this check
-			return nil
-		}
-
-		// Verify parent_block_hash matches
-		if currentBid.Message.ParentBlockHash != parentBid.Message.ParentBlockHash {
-			return errors.New("bid parent_block_hash mismatch with parent bid")
-		}
+	} else if parentBid != nil && parentBlockHash != parentBid.ParentBlockHash {
+		return errors.New("bid parent_block_hash mismatch with parent bid")
 	}
 	return nil
 }

@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/iouring"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
@@ -1092,8 +1093,13 @@ var (
 	}
 	CaplinArchiveBlobsFlag = cli.BoolFlag{
 		Name:  "caplin.blobs-archive",
-		Usage: "sets whether backfilling is enabled for caplin",
+		Usage: "sets whether backfilling is enabled for caplin; changing an existing datadir from a bounded archive to plain --caplin.blobs-archive, or removing the bound, does not fetch dropped history: backfill stops at FrozenBlobs and SyncSnapshots is skipped once snapshots are local, so the range from Deneb to the first local blob segment remains unavailable",
 		Value: false,
+	}
+	CaplinArchiveBlobsFromSlotFlag = cli.Uint64Flag{
+		Name:  "caplin.blobs-archive-from-slot",
+		Usage: "keep blob sidecars from this beacon slot (implies --caplin.blobs-archive); also enables ArchiveBlocks, so every beacon block since genesis is downloaded and kept and only blob sidecars are bounded; first sync filters snapshots by slot and spec serving window; with --caplin.custom-config or --caplin.custom-genesis downloads all, then prunes; newest blob snapshot always kept; 0 keeps all since Deneb; changing an existing datadir from a bounded archive to plain --caplin.blobs-archive, or removing the bound, does not fetch dropped history: backfill stops at FrozenBlobs and SyncSnapshots is skipped once snapshots are local, so the range from Deneb to the first local blob segment remains unavailable",
+		Value: 0,
 	}
 	CaplinImmediateBlobBackfillFlag = cli.BoolFlag{
 		Name:  "caplin.blobs-immediate-backfill",
@@ -1886,8 +1892,11 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 
 	// Caplin's block's backfilling is enabled if any of the following flags are set
 	if !cfg.CaplinConfig.EnableEngineAPI {
-		cfg.CaplinConfig.ArchiveBlocks = ctx.Bool(CaplinArchiveBlocksFlag.Name) || ctx.Bool(CaplinArchiveStatesFlag.Name) || ctx.Bool(CaplinArchiveBlobsFlag.Name)
-		cfg.CaplinConfig.ArchiveBlobs = ctx.Bool(CaplinArchiveBlobsFlag.Name)
+		blobsFromSlot := ctx.Uint64(CaplinArchiveBlobsFromSlotFlag.Name)
+		archiveBlobs := ctx.Bool(CaplinArchiveBlobsFlag.Name) || ctx.IsSet(CaplinArchiveBlobsFromSlotFlag.Name)
+		cfg.CaplinConfig.ArchiveBlocks = ctx.Bool(CaplinArchiveBlocksFlag.Name) || ctx.Bool(CaplinArchiveStatesFlag.Name) || archiveBlobs
+		cfg.CaplinConfig.ArchiveBlobs = archiveBlobs
+		cfg.CaplinConfig.BlobsArchiveFromSlot = blobsFromSlot
 		cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
 		cfg.CaplinConfig.ArchiveStates = ctx.Bool(CaplinArchiveStatesFlag.Name)
 	} else {
@@ -1897,7 +1906,7 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 		if ctx.IsSet(CaplinArchiveStatesFlag.Name) {
 			log.Warn("Caplin's state backfilling is disabled when engine API is enabled")
 		}
-		if ctx.IsSet(CaplinArchiveBlobsFlag.Name) {
+		if ctx.IsSet(CaplinArchiveBlobsFlag.Name) || ctx.IsSet(CaplinArchiveBlobsFromSlotFlag.Name) {
 			log.Warn("Caplin's blob backfilling is disabled when engine API is enabled")
 		}
 		if ctx.IsSet(CaplinImmediateBlobBackfillFlag.Name) {
@@ -1907,6 +1916,9 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
+	if cfg.CaplinConfig.SnapshotGenerationEnabled && cfg.CaplinConfig.BlobsArchiveFromSlot > 0 {
+		Fatalf("Option %s cannot be combined with %s: blob snapshots are built contiguously from Deneb", CaplinArchiveBlobsFromSlotFlag.Name, CaplinEnableSnapshotGeneration.Name)
+	}
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
 	cfg.CaplinConfig.ResumeMaxStalenessEpochs = ctx.Uint64(CaplinResumeMaxStalenessEpochsFlag.Name)
 	cfg.CaplinConfig.ColumnKeepSlots = ctx.Uint64(CaplinColumnKeepSlotsFlag.Name)
@@ -2105,9 +2117,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		dbg.FilesBlockingAsyncIO = false
 		dbg.FilesBlockingAsyncIOMultiPage = false
 	}
-	if dbg.BALBatchPrefetch && runtime.GOOS == "linux" && !iouring.Available() {
-		log.Warn("BAL batch prefetch is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); it reads nothing")
-	}
+	disableBALBatchPrefetchWithoutIOUring(iouring.Available())
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
 		warmupWorkers := dbg.BALCommitmentWarmupReaders()
 		blockReadAheadWorkers := dbg.ReadAheadWorkerReaders()
@@ -2501,4 +2511,17 @@ func CobraFlags(cmd *cobra.Command, urfaveCliFlagsLists ...[]cli.Flag) {
 			}
 		}
 	}
+}
+
+// disableBALBatchPrefetchWithoutIOUring turns the BAL batch prefetch off on every platform where io_uring cannot run
+// its reads, so the exec-side planner does not walk the BAL keys for nothing.
+func disableBALBatchPrefetchWithoutIOUring(ioUring bool) {
+	if !dbg.BALBatchPrefetch || ioUring {
+		return
+	}
+	if runtime.GOOS == "linux" {
+		log.Info("BAL batch prefetch needs io_uring, which is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it")
+	}
+	dbg.BALBatchPrefetch = false
+	mmap.BatchPrefetch = false
 }

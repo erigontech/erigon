@@ -60,6 +60,9 @@ func (f *ForkChoiceStore) accountWeights(votes, weights map[common.Hash]uint64, 
 		accumulated += votes[curr]
 		votes[curr] = 0 // make sure we don't double count
 		weights[curr] += accumulated
+		if f.cutOffByInvalidation(curr) {
+			accumulated = 0
+		}
 		header, has := f.forkGraph.GetHeader(curr)
 		if !has {
 			return
@@ -562,37 +565,8 @@ func (f *ForkChoiceStore) publishSelectedHead(root common.Hash, slot uint64) {
 func (f *ForkChoiceStore) getFilteredBlockTree(base common.Hash, justifiedCheckpoint solid.Checkpoint, currentSlot uint64) map[common.Hash]*cltypes.BeaconBlockHeader {
 	blocks := make(map[common.Hash]*cltypes.BeaconBlockHeader)
 	currentEpoch := f.computeEpochAtSlot(currentSlot)
-	f.getFilterBlockTree(base, blocks, currentEpoch, justifiedCheckpoint)
+	f.markViableUncutBlocks(base, blocks, currentEpoch, justifiedCheckpoint)
 	return blocks
-}
-
-// getFilterBlockTree recursively traverses the block tree to identify viable blocks.
-// It takes a block hash and a map of viable blocks as input parameters, and returns a boolean value indicating
-// whether the current block is viable.
-func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader, currentEpoch uint64, justifiedCheckpoint solid.Checkpoint) bool {
-	header, has := f.forkGraph.GetHeader(blockRoot)
-	if !has {
-		return false
-	}
-	children := f.children(blockRoot)
-	// If there are children iterate down recursively and see which branches are viable.
-	if len(children) > 0 {
-		isAnyViable := false
-		for _, child := range children {
-			if f.getFilterBlockTree(child, blocks, currentEpoch, justifiedCheckpoint) {
-				isAnyViable = true
-			}
-		}
-		if isAnyViable {
-			blocks[blockRoot] = header
-		}
-		return isAnyViable
-	}
-	if f.isViableLeaf(blockRoot, header, currentEpoch, justifiedCheckpoint) {
-		blocks[blockRoot] = header
-		return true
-	}
-	return false
 }
 
 func (f *ForkChoiceStore) isViableLeaf(blockRoot common.Hash, header *cltypes.BeaconBlockHeader, currentEpoch uint64, justifiedCheckpoint solid.Checkpoint) bool {

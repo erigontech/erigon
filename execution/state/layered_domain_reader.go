@@ -13,8 +13,8 @@ import (
 // versionMap window over the shared domain (sd.mem, state cache, domain files), so a value
 // written by a prior block not yet flushed to sd.mem is served from its
 // versionMap instead of a stale domain read. The window is selected by txNum
-// (matching the per-tx apply). Only account/storage are layered; the commitment /
-// code domains and history read the base directly.
+// (matching the per-tx apply). Account/storage/code are layered; the commitment
+// domain and history read the base directly.
 //
 // The base read is bound to one tx: clone with CloneWithTx per concurrent user
 // rather than sharing one.
@@ -47,9 +47,9 @@ func (l *LayeredDomainReader) baseGetAsOf(name kv.Domain, k []byte, ts uint64) (
 }
 
 // ReadDomain resolves a domain read for the commitment calculator: account/
-// storage layer the window over the base; everything else reads the base.
+// storage/code layer the window over the base; everything else reads the base.
 func (l *LayeredDomainReader) ReadDomain(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
-	if l.prevBlocks != nil && (name == kv.AccountsDomain || name == kv.StorageDomain) {
+	if l.prevBlocks != nil && (name == kv.AccountsDomain || name == kv.StorageDomain || name == kv.CodeDomain) {
 		return l.readLayered(name, k, ts)
 	}
 	return l.baseGetAsOf(name, k, ts)
@@ -79,6 +79,12 @@ func (l *LayeredDomainReader) readLayered(name kv.Domain, k []byte, ts uint64) (
 			return nil, false, err
 		}
 		return val.Bytes(), true, nil
+	case kv.CodeDomain:
+		code, err := layered.ReadAccountCode(accounts.InternAddress(common.BytesToAddress(k)))
+		if err != nil || len(code) == 0 {
+			return nil, false, err
+		}
+		return code, true, nil
 	}
 	return l.baseGetAsOf(name, k, ts)
 }

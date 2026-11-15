@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
@@ -39,6 +40,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
@@ -76,6 +79,7 @@ type chainTipBatchForkGraph struct {
 	parentState *state2.CachingBeaconState
 	envelopesMu sync.RWMutex
 	envelopes   map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	rejected    map[common.Hash]bool
 	added       map[common.Hash]int
 	insertOnAdd bool
 	envReads    map[common.Hash]int
@@ -150,10 +154,34 @@ func (g *chainTipBatchForkGraph) GetCurrentJustifiedCheckpoint(root common.Hash)
 }
 
 func (g *chainTipBatchForkGraph) HasEnvelope(root common.Hash) bool {
+	if g.IsEnvelopeRejected(root) {
+		return false
+	}
 	g.envelopesMu.RLock()
 	defer g.envelopesMu.RUnlock()
 	_, ok := g.envelopes[root]
 	return ok || g.ForkGraph.HasEnvelope(root)
+}
+
+func (g *chainTipBatchForkGraph) RejectEnvelope(root common.Hash) bool {
+	if !g.IsBlockRetained(root) {
+		return false
+	}
+	g.envelopesMu.Lock()
+	defer g.envelopesMu.Unlock()
+	if g.rejected == nil {
+		g.rejected = make(map[common.Hash]bool)
+	}
+	g.rejected[root] = true
+	g.ClearPayloadAccepted(root)
+	g.MarkPayloadUnavailable(root)
+	return true
+}
+
+func (g *chainTipBatchForkGraph) IsEnvelopeRejected(root common.Hash) bool {
+	g.envelopesMu.RLock()
+	defer g.envelopesMu.RUnlock()
+	return g.rejected[root] || g.ForkGraph.IsEnvelopeRejected(root)
 }
 
 func (g *chainTipBatchForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
@@ -194,6 +222,8 @@ func (g *chainTipBatchForkGraph) WithRetainedBlock(root common.Hash, fn func(fun
 
 func (s *storedParentPayloadTestStore) HasEnvelope(common.Hash) bool { return s.has }
 
+func (s *storedParentPayloadTestStore) RejectEnvelope(common.Hash) { s.has = false }
+
 func (s *storedParentPayloadTestStore) GetRecentExecutionPayloadStatusByRoot(common.Hash) (execution_client.PayloadStatus, bool) {
 	return s.status, s.statusFound
 }
@@ -217,6 +247,10 @@ func newChainTipBatchFixture(t *testing.T, replayStatus execution_client.Payload
 }
 
 func newChainTipBatchFixtureWithRecordedStatus(t *testing.T, replayStatus execution_client.PayloadStatus, recordStatus bool) (*Cfg, *chainTipBatchForkGraph, common.Hash, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock, *testExecutionEngine) {
+	return newChainTipBatchFixtureWithBlob(t, replayStatus, recordStatus, false)
+}
+
+func newChainTipBatchFixtureWithBlob(t *testing.T, replayStatus execution_client.PayloadStatus, recordStatus, withBlob bool) (*Cfg, *chainTipBatchForkGraph, common.Hash, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock, *testExecutionEngine) {
 	t.Helper()
 
 	beaconCfg, anchorState, parentBid, envelope, _ := validAnchorEnvelopeFixture(t, 0)
@@ -228,6 +262,10 @@ func newChainTipBatchFixtureWithRecordedStatus(t *testing.T, replayStatus execut
 	beaconCfg.FuluForkEpoch = 0
 	beaconCfg.InitializeForkSchedule()
 	require.NoError(t, anchorState.SetSlot(63))
+	anchorBid := anchorState.GetLatestExecutionPayloadBid().Copy()
+	anchorBid.ParentBlockHash = parentBid.ParentBlockHash
+	anchorState.SetLatestExecutionPayloadBid(anchorBid)
+	anchorState.SetLatestBlockHash(parentBid.ParentBlockHash)
 	anchorRoot, err := anchorState.BlockRoot()
 	require.NoError(t, err)
 
@@ -243,10 +281,26 @@ func newChainTipBatchFixtureWithRecordedStatus(t *testing.T, replayStatus execut
 		parentState.SetFinalizedCheckpoint(anchorCheckpoint)
 	}
 	parentBid.ParentBlockRoot = anchorRoot
+	if withBlob {
+		commitment := new(cltypes.KZGCommitment)
+		versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*commitment))
+		require.NoError(t, err)
+		txn := &types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{GasLimit: 21_000, To: &common.Address{1}}},
+			BlobVersionedHashes:   []common.Hash{versionedHash},
+		}
+		raw, err := types.MarshalTransactionsBinary(types.Transactions{txn})
+		require.NoError(t, err)
+		envelope.Message.Payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions(raw)
+		envelope.Message.Payload.BlobGasUsed = misc.GetBlobGasUsed(1)
+		parentBid.BlobKzgCommitments.EnsureStaticProgressive(cltypes.MaxBlobsCommittmentsPerBlock, 48)
+		parentBid.BlobKzgCommitments.Append(commitment)
+	}
 	envelope.Message.ParentBeaconBlockRoot = anchorRoot
 	envelope.Message.Payload.Time = state2.ComputeTimestampAtSlot(parentState, parentState.Slot())
 	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(beaconCfg, envelope.Message.ExecutionRequests))
-	envelope.Message.Payload.BlockHash = anchorPayloadHeaderHash(t, envelope.Message.Payload, anchorRoot, requestsHash)
+	envelope.Message.Payload.BlockHash, err = envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+	require.NoError(t, err)
 	parentBid.BlockHash = envelope.Message.Payload.BlockHash
 	parentState.SetLatestExecutionPayloadBid(parentBid)
 	parentState.SetLatestBlockHash(envelope.Message.Payload.ParentHash)
@@ -368,6 +422,7 @@ func TestForwardSyncReplayMakesGloasPayloadAvailableForHeadSelection(t *testing.
 		envelope,
 		true,
 		shouldValidateForwardSyncPayload(cfg, true),
+		false,
 	))
 	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), fullChild, false, false, false))
 	fullChildRoot, err := fullChild.Block.HashSSZ()
@@ -428,6 +483,34 @@ func TestVerifyUnverifiedGloasPayloadsDoesNotRecordInterruptedCallAsVerdict(t *t
 	require.Equal(t, 2, engine.newPayloadCalls)
 	require.True(t, cfg.forkChoice.IsPayloadVerified(headRoot))
 	require.Zero(t, cfg.gloasVerificationCursor)
+}
+
+func TestVerifyUnverifiedGloasPayloadsRejectsBlobMismatch(t *testing.T) {
+	cfg, graph, headRoot, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	headBlock := graph.parents[headRoot]
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	engine.newPayloadFn = func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		return execution_client.PayloadStatusInvalidated, misc.ErrMismatchBlobHashes
+	}
+	pending := forkchoice.PendingELPayload{Block: headBlock, Envelope: graph.envelopes[headRoot]}
+	cfg.forkChoice.RequeuePendingELPayload(pending)
+
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+	drainPendingGloasPayloads(t.Context(), cfg)
+
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.False(t, cfg.forkChoice.HasEnvelope(headRoot))
+	require.False(t, graph.IsBlockInvalid(headRoot))
+	require.True(t, graph.IsPayloadUnavailable(headRoot))
+	_, found := cfg.forkChoice.GetRecentExecutionPayloadStatus(pending.Envelope.Message.Payload.BlockHash)
+	require.False(t, found)
+	cfg.forkChoice.RequeuePendingELPayload(pending)
+	require.Empty(t, cfg.forkChoice.DrainPendingELPayloads())
+	roots, _ := determineParentEnvelopeRoots(cfg, []*cltypes.SignedBeaconBlock{child})
+	require.Empty(t, roots)
 }
 
 // Below the EL's validation depth the sweep still sends the payload to the EL, which inserts it, and
@@ -798,6 +881,63 @@ func TestChainTipBatchReplayBudgetStopsAtTarget(t *testing.T) {
 	require.Zero(t, graph.added[common.Hash(childBRoot)])
 }
 
+func TestChainTipBatchRejectsFullChildOfRejectedAnchor(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		alreadyRejected bool
+		wantRequests    int
+	}{
+		{name: "already rejected", alreadyRejected: true},
+		{name: "rejected during recovery", wantRequests: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg, graph, parentRoot, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+			anchor := graph.parentState
+			bid := anchor.GetLatestExecutionPayloadBid().Copy()
+			bid.BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
+			anchor.SetLatestExecutionPayloadBid(bid)
+			store := newAnchorForkChoiceStore(t, cfg.beaconCfg, anchor, engine)
+			anchorRoot := store.AnchorRoot()
+			child.Block.ParentRoot = anchorRoot
+			store.OnTick((child.Block.Slot + 1) * cfg.beaconCfg.SecondsPerSlot * 1000)
+			if test.alreadyRejected {
+				store.RejectEnvelope(anchorRoot)
+			}
+			envelope := graph.envelopes[parentRoot]
+			envelope.Message.BeaconBlockRoot = anchorRoot
+			key, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+			require.NoError(t, err)
+			signAnchorEnvelope(t, anchor, key, envelope, bid.Slot)
+			peerRPC, sentinel := newChainTipBatchEnvelopeRPC(t, cfg.beaconCfg, envelope)
+			cfg.rpc = peerRPC
+			cfg.caplinConfig.DisabledCheckpointSync = true
+			cfg.forkChoice = store
+			cfg.chainTipRejections = newChainTipRejections(time.Hour, nil)
+			cfg.chainTipRejections.lastLog = time.Now()
+			root, err := child.Block.HashSSZ()
+			require.NoError(t, err)
+			seen := make(map[common.Hash]struct{})
+			rejected := make(map[common.Hash]error)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			for range 2 {
+				reachedTarget := processChainTipBatch(ctx, cfg, Args{targetSlot: child.Block.Slot}, []*cltypes.SignedBeaconBlock{child}, seen, rejected)
+
+				require.False(t, reachedTarget)
+				require.True(t, store.IsEnvelopeRejected(anchorRoot))
+				require.ErrorIs(t, rejected[root], forkchoice.ErrBlockInvalid)
+				require.ErrorContains(t, rejected[root], "parent execution payload envelope is rejected")
+				require.Contains(t, seen, common.Hash(root))
+				_, imported := store.GetHeader(root)
+				require.False(t, imported)
+				require.Zero(t, engine.newPayloadCalls)
+				require.Equal(t, test.wantRequests, sentinel.calls)
+			}
+			require.Equal(t, 1, cfg.chainTipRejections.reasons["process block failed"].attempts)
+		})
+	}
+}
+
 func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 	t.Run("peer-fetched unavailable parent leaves full child unpersisted", func(t *testing.T) {
 		cfg, graph, parentRoot, fullChild, _, engine := newChainTipBatchFixture(t, execution_client.PayloadStatusNone)
@@ -1069,6 +1209,37 @@ func TestEnsureStoredParentPayloadAcceptedReplaysMissingVerdict(t *testing.T) {
 	require.Len(t, store.requeued, 1)
 }
 
+func TestEnsureStoredParentPayloadAcceptedDoesNotCacheBlobMismatch(t *testing.T) {
+	root := common.Hash{1}
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	payload.BlockHash = common.Hash{2}
+	payload.GasLimit = 36_000_000
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		BeaconBlockRoot: root,
+		Payload:         payload,
+	}}
+	store := &storedParentPayloadTestStore{
+		has:          true,
+		block:        cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion),
+		markRetained: true,
+	}
+	engine := &testExecutionEngine{newPayloadFn: func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		return execution_client.PayloadStatusInvalidated, misc.ErrMismatchBlobHashes
+	}}
+	cfg := &Cfg{
+		beaconCfg:             &clparams.MainnetBeaconConfig,
+		executionClient:       engine,
+		gloasPayloadValidator: engine,
+	}
+
+	require.ErrorIs(t, ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope), misc.ErrMismatchBlobHashes)
+	require.Error(t, ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope))
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.Zero(t, store.markedGas)
+	require.Zero(t, store.marked)
+	require.Empty(t, store.requeued)
+}
+
 func TestEnsureStoredParentPayloadAcceptedRejectsInvalidVerdict(t *testing.T) {
 	root := common.Hash{1}
 	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
@@ -1222,6 +1393,7 @@ func TestStoredParentPayloadReplayWithoutVerdictKeepsStatus(t *testing.T) {
 	const unchanged = execution_client.PayloadStatus(99)
 	root := common.Hash{1}
 	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions(nil)
 	payload.BlockHash = common.Hash{2}
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
 		BeaconBlockRoot: root,
@@ -1332,6 +1504,53 @@ func TestChainTipBatchPassesARejectionToDescendants(t *testing.T) {
 	require.Equal(t, 2, missing.attempts)
 	require.Equal(t, greatGrandchildRoot, missing.lastRoot)
 	require.ErrorIs(t, missing.lastErr, reason)
+}
+
+func TestChainTipBatchPreservesTerminalParentError(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		rejectEnvelope bool
+		wantError      string
+	}{
+		{name: "rejected envelope", rejectEnvelope: true, wantError: "parent execution payload envelope is rejected"},
+		{name: "invalid payload", wantError: "parent execution payload is invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, graph, parentRoot, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+			payloadHash := graph.envelopes[parentRoot].Message.Payload.BlockHash
+			delete(graph.envelopes, parentRoot)
+			if tc.rejectEnvelope {
+				cfg.forkChoice.RejectEnvelope(parentRoot)
+			} else {
+				cfg.forkChoice.MarkPayloadInvalid(parentRoot, payloadHash)
+			}
+			childRoot, err := child.Block.HashSSZ()
+			require.NoError(t, err)
+			grandchild, grandchildRoot := newChildOnEmptyParent(t, cfg.beaconCfg, child, child.Block.Slot+1)
+			cfg.chainTipRejections = newChainTipRejections(time.Hour, nil)
+			cfg.chainTipRejections.lastLog = time.Now()
+			seen := make(map[common.Hash]struct{})
+			rejected := make(map[common.Hash]error)
+
+			reachedTarget := processChainTipBatch(t.Context(), cfg, Args{targetSlot: grandchild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{child, grandchild}, seen, rejected)
+
+			require.False(t, reachedTarget)
+			cause := rejected[childRoot]
+			require.ErrorIs(t, cause, forkchoice.ErrBlockInvalid)
+			require.ErrorContains(t, cause, tc.wantError)
+			require.Equal(t, cause, rejected[grandchildRoot])
+			require.Contains(t, seen, common.Hash(childRoot))
+			_, imported := cfg.forkChoice.GetHeader(childRoot)
+			require.False(t, imported)
+			require.NotContains(t, cfg.chainTipRejections.reasons, errParentEnvelopeUnavailable.Error())
+			for _, reason := range []string{"process block failed", "parent not in fork graph"} {
+				summary := cfg.chainTipRejections.reasons[reason]
+				require.NotNil(t, summary)
+				require.ErrorIs(t, summary.lastErr, cause)
+			}
+			require.Zero(t, engine.newPayloadCalls)
+		})
+	}
 }
 
 // The fetched envelope of a FULL parent that is only in the batch is validated against that batch block.
@@ -1740,7 +1959,7 @@ func TestChainTipAncestorLookupDropsAResponseOutsideTheRange(t *testing.T) {
 
 			f.process(tip.Block.Slot, rejected, tip)
 
-			require.Equal(t, []ancestorRequest{{pid: ancestorPeer, start: 136, count: 64}}, f.sentinel.requests)
+			require.Equal(t, []ancestorRequest{{pid: ancestorPeer, start: 136, count: maxChainTipRequestCount}}, f.sentinel.requests)
 			require.NotContains(t, f.graph.added, servedRoot)
 			require.NotContains(t, f.graph.added, tipRoot)
 			require.Contains(t, rejected, tipRoot)
@@ -1849,6 +2068,45 @@ func TestChainTipAncestorLookupStopsWhenAResponseEndsRightBelowTheOrphan(t *test
 
 // A peer that keeps answering with one block that does not reach the orphan's parent costs
 // at most four requests, the first of them for the whole 64 slot window.
+func TestChainTipAncestorLookupCrossesAnEmptyPage(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	missing, _ := f.child(f.parent, 199)
+	tip, tipRoot := f.child(missing, 200)
+	f.sentinel.serve = func(_ int, start, count uint64) []*cltypes.SignedBeaconBlock {
+		if start <= 199 && 199 < start+count {
+			return []*cltypes.SignedBeaconBlock{missing}
+		}
+		return nil
+	}
+	f.tickTo(tip.Block.Slot)
+	currentSlot := tip.Block.Slot
+	f.pinCurrentSlot(&currentSlot)
+	rejected := make(map[common.Hash]error)
+
+	f.process(tip.Block.Slot, rejected, tip)
+
+	require.NotContains(t, rejected, tipRoot)
+	require.Contains(t, f.graph.added, tipRoot)
+}
+
+func TestChainTipAncestorLookupRejectsABlockPastThePage(t *testing.T) {
+	f := newAncestorLookupFixture(t)
+	missing, _ := f.child(f.parent, 199)
+	tip, tipRoot := f.child(missing, 200)
+	f.sentinel.serve = func(int, uint64, uint64) []*cltypes.SignedBeaconBlock {
+		return []*cltypes.SignedBeaconBlock{missing}
+	}
+	f.tickTo(tip.Block.Slot)
+	currentSlot := tip.Block.Slot
+	f.pinCurrentSlot(&currentSlot)
+	rejected := make(map[common.Hash]error)
+
+	f.process(tip.Block.Slot, rejected, tip)
+
+	require.Len(t, f.sentinel.requests, 1, "a block outside the requested page fails the lookup")
+	require.NotContains(t, f.graph.added, tipRoot)
+}
+
 func TestChainTipAncestorLookupStopsAfterFourRequests(t *testing.T) {
 	f := newAncestorLookupFixture(t)
 	unknownParent, _ := f.child(f.parent, 150)
@@ -1867,10 +2125,10 @@ func TestChainTipAncestorLookupStopsAfterFourRequests(t *testing.T) {
 	f.process(tip.Block.Slot, rejected, tip)
 
 	require.Equal(t, []ancestorRequest{
-		{pid: ancestorPeer, start: 136, count: 64},
-		{pid: ancestorPeer, start: 137, count: 63},
-		{pid: ancestorPeer, start: 138, count: 62},
-		{pid: ancestorPeer, start: 139, count: 61},
+		{pid: ancestorPeer, start: 136, count: maxChainTipRequestCount},
+		{pid: ancestorPeer, start: 137, count: maxChainTipRequestCount},
+		{pid: ancestorPeer, start: 138, count: maxChainTipRequestCount},
+		{pid: ancestorPeer, start: 139, count: maxChainTipRequestCount},
 	}, f.sentinel.requests)
 	require.Contains(t, rejected, tipRoot)
 	require.NotContains(t, f.graph.added, tipRoot)
@@ -1956,14 +2214,15 @@ func TestChainTipAncestorLookupWaitsASlotAfterAFailure(t *testing.T) {
 			f.pinCurrentSlot(&currentSlot)
 
 			f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+			failedRequests := len(f.sentinel.requests)
 			rejected := make(map[common.Hash]error)
 			f.process(tip.Block.Slot, rejected, tip)
-			require.Len(t, f.sentinel.requests, 1)
+			require.Len(t, f.sentinel.requests, failedRequests)
 			require.Contains(t, rejected, tipRoot)
 
 			currentSlot++
 			f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
-			require.Len(t, f.sentinel.requests, 2)
+			require.Greater(t, len(f.sentinel.requests), failedRequests)
 		})
 	}
 }
@@ -2015,9 +2274,10 @@ func TestChainTipAncestorLookupThrottlesTheSlotItFailedIn(t *testing.T) {
 	f.sentinel.onRequest = func(context.Context) { currentSlot++ }
 
 	f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
+	failedRequests := len(f.sentinel.requests)
 	f.process(tip.Block.Slot, make(map[common.Hash]error), tip)
 
-	require.Len(t, f.sentinel.requests, 1)
+	require.Len(t, f.sentinel.requests, failedRequests)
 }
 
 // Sending nothing is not a failed lookup, so it must not hold back the next orphan of the slot.

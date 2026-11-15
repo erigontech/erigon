@@ -17,7 +17,9 @@
 package das
 
 import (
+	"bytes"
 	"context"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -58,11 +60,22 @@ func (r bodyReader) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.Tx, slot u
 	return r.blocks[slot], nil
 }
 
+type forkChoiceBlocks map[common.Hash]*cltypes.SignedBeaconBlock
+
+func (f forkChoiceBlocks) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	block, ok := f[root]
+	return block, ok
+}
+
+func (forkChoiceBlocks) Slot() uint64 { return 0 }
+
 // backfillFixture is an archive node at currentSlot whose canonical chain holds the given blocks.
-// complete holds the slots whose columns are already stored.
+// complete holds the slots whose columns are already stored. held holds the blocks fork choice
+// still has.
 type backfillFixture struct {
 	d     *peerdas
 	roots map[uint64]common.Hash
+	held  forkChoiceBlocks
 }
 
 func newBackfillFixture(t *testing.T, currentSlot uint64, blocks map[uint64]*cltypes.SignedBeaconBlock, complete map[uint64]bool) *backfillFixture {
@@ -104,6 +117,7 @@ func newBackfillFixture(t *testing.T, currentSlot uint64, blocks map[uint64]*clt
 		}).AnyTimes()
 	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+	held := forkChoiceBlocks{}
 	return &backfillFixture{d: &peerdas{
 		beaconConfig:  &cfg,
 		ethClock:      clock,
@@ -112,7 +126,21 @@ func newBackfillFixture(t *testing.T, currentSlot uint64, blocks map[uint64]*clt
 		blobStorage:   blobStorage,
 		indiciesDB:    db,
 		blockReader:   bodyReader{blocks: blocks, read: &[]uint64{}},
-	}, roots: roots}
+		forkChoice:    held,
+	}, roots: roots, held: held}
+}
+
+// storeSideBranchBlock stores block as an accepted, non-canonical block held by the fork choice. It
+// returns the root of the block.
+func (f *backfillFixture) storeSideBranchBlock(t *testing.T, block *cltypes.SignedBeaconBlock) common.Hash {
+	t.Helper()
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, f.d.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
+	}))
+	f.held[root] = block
+	return root
 }
 
 func (f *backfillFixture) queuedSlots() []uint64 {
@@ -124,6 +152,12 @@ func (f *backfillFixture) queuedSlots() []uint64 {
 	}
 	slices.Sort(slots)
 	return slots
+}
+
+func (f *backfillFixture) queuedRoots() []common.Hash {
+	f.d.blocksToCheckSync.mu.Lock()
+	defer f.d.blocksToCheckSync.mu.Unlock()
+	return slices.Collect(maps.Keys(f.d.blocksToCheckSync.entries))
 }
 
 func blockWithBlobs(t *testing.T, slot uint64, blobs bool) *cltypes.SignedBeaconBlock {
@@ -178,7 +212,8 @@ func TestBackfillCustodyColumnsQueuesNewestFirstWithinItsBound(t *testing.T) {
 	require.Equal(t, uint64(10+maxBackfillQueued), queued[0], "the newest slots are queued first")
 }
 
-// Blocks below the column serve range are no longer requested by peers, so they are skipped.
+// Blocks below the column serve range, canonical or not, are no longer requested by peers, so they
+// are skipped.
 func TestBackfillCustodyColumnsSkipsSlotsBelowTheServeRange(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.FuluForkEpoch = 0 // as in the fixture
@@ -189,6 +224,9 @@ func TestBackfillCustodyColumnsSkipsSlotsBelowTheServeRange(t *testing.T) {
 		serveStart - 1: blockWithBlobs(t, serveStart-1, true),
 		serveStart:     blockWithBlobs(t, serveStart, true),
 	}, nil)
+	side := blockWithBlobs(t, serveStart-1, true)
+	side.Block.ProposerIndex = 1
+	f.storeSideBranchBlock(t, side)
 
 	f.d.backfillCustodyColumns(t.Context(), serveStart-1, serveStart)
 
@@ -267,6 +305,305 @@ func TestBackfillCustodyColumnsSkipsGloasBlocksWithoutAnEnvelope(t *testing.T) {
 	require.Equal(t, []uint64{10}, f.queuedSlots())
 }
 
+// The walk reads a side-branch block from fork choice, so it skips a stored root that fork choice
+// does not hold, such as a branch that was pruned.
+func TestBackfillCustodyColumnsSkipsSideBranchBlocksForkChoiceDoesNotHold(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		12: blockWithBlobs(t, 12, true),
+	}, nil)
+	held := blockWithBlobs(t, 12, true)
+	held.Block.ProposerIndex = 1
+	heldRoot := f.storeSideBranchBlock(t, held)
+	pruned := blockWithBlobs(t, 12, true)
+	pruned.Block.ProposerIndex = 2
+	delete(f.held, f.storeSideBranchBlock(t, pruned))
+
+	f.d.backfillCustodyColumns(t.Context(), 12, 12)
+
+	require.ElementsMatch(t, []common.Hash{f.roots[12], heldRoot}, f.queuedRoots())
+}
+
+func TestBackfillCustodyColumnsWithoutForkChoiceQueuesOnlyCanonicalBlocks(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		12: blockWithBlobs(t, 12, true),
+	}, nil)
+	side := blockWithBlobs(t, 12, true)
+	side.Block.ProposerIndex = 1
+	f.storeSideBranchBlock(t, side)
+	f.d.forkChoice = nil
+
+	f.d.backfillCustodyColumns(t.Context(), 12, 12)
+
+	require.Equal(t, []common.Hash{f.roots[12]}, f.queuedRoots())
+}
+
+// As for canonical blocks, the side-branch blocks queued are those that commit to blobs and miss
+// columns, and nothing else.
+func TestBackfillCustodyColumnsQueuesSideBranchBlocksMissingColumns(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		14: blockWithBlobs(t, 14, true),
+	}, map[uint64]bool{12: true})
+	missingRoot := f.storeSideBranchBlock(t, blockWithBlobs(t, 10, true))
+	f.storeSideBranchBlock(t, blockWithBlobs(t, 11, false))
+	f.storeSideBranchBlock(t, blockWithBlobs(t, 12, true))
+
+	f.d.backfillCustodyColumns(t.Context(), 10, 14)
+
+	require.ElementsMatch(t, []common.Hash{missingRoot, f.roots[14]}, f.queuedRoots())
+}
+
+// A side-branch Gloas block, like a canonical one, has columns only once its payload was revealed.
+func TestBackfillCustodyColumnsQueuesSideBranchGloasBlocksOnlyWithAnEnvelope(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		10: gloasBlockWithBlobs(t, 10),
+	}, nil)
+	revealed := gloasBlockWithBlobs(t, 10)
+	revealed.Block.ProposerIndex = 1
+	revealedRoot := f.storeSideBranchBlock(t, revealed)
+	withheld := gloasBlockWithBlobs(t, 10)
+	withheld.Block.ProposerIndex = 2
+	f.storeSideBranchBlock(t, withheld)
+	require.NoError(t, f.d.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteExecutionBlockHash(tx, revealedRoot, common.Hash{0x10})
+	}))
+
+	f.d.backfillCustodyColumns(t.Context(), 10, 10)
+
+	require.Equal(t, []common.Hash{revealedRoot}, f.queuedRoots())
+	f.d.blocksToCheckSync.mu.Lock()
+	entry := f.d.blocksToCheckSync.entries[revealedRoot]
+	f.d.blocksToCheckSync.mu.Unlock()
+	require.Equal(t, clparams.GloasVersion, entry.block.Version())
+}
+
+// A side-branch root is queued like a canonical one: compact, and given up at the maximum backoff.
+func TestBackfillCustodyColumnsQueuesSideBranchBlocksAsBackfillRoots(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		12: blockWithBlobs(t, 12, true),
+	}, nil)
+	side := blockWithBlobs(t, 12, true)
+	side.Block.ProposerIndex = 1
+	sideRoot := f.storeSideBranchBlock(t, side)
+
+	f.d.backfillCustodyColumns(t.Context(), 12, 12)
+
+	f.d.blocksToCheckSync.mu.Lock()
+	entry := f.d.blocksToCheckSync.entries[sideRoot]
+	f.d.blocksToCheckSync.mu.Unlock()
+	require.NotNil(t, entry)
+	queuedBlock, ok := entry.block.(*backfillColumnBlock)
+	require.True(t, ok, "the entry is a compact backfill block")
+	require.Equal(t, sideRoot, queuedBlock.root)
+	require.Equal(t, uint64(12), queuedBlock.GetSlot())
+	require.Equal(t, 1, queuedBlock.GetBlobKzgCommitments().Len())
+	require.True(t, f.d.blocksToCheckSync.isBackfill(sideRoot))
+	require.False(t, entry.nextAttempt.After(time.Now()), "a backfilled root is due at once")
+}
+
+// Fork choice holds the canonical block too, but the canonical walk owns that root: a root that is
+// canonical when the side pass reads its slot is not queued by it.
+func TestBackfillCustodyColumnsSideBranchPassLeavesTheCanonicalRoot(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{}, nil)
+	block := blockWithBlobs(t, 12, true)
+	root := f.storeSideBranchBlock(t, block)
+	require.NoError(t, f.d.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(tx, 12, root)
+	}))
+
+	f.d.backfillCustodyColumns(t.Context(), 12, 12) // the body reader holds no block for the canonical walk
+
+	require.Empty(t, f.queuedRoots())
+}
+
+// A root that is canonical when the first side pass reads its slot and is reorged out while the
+// walk waits for the canonical chain is queued by the second side pass.
+func TestBackfillCustodyColumnsQueuesTheRootReorgedOutWhileWaitingForTheCanonicalChain(t *testing.T) {
+	newCanonical := blockWithBlobs(t, 12, true)
+	newCanonical.Block.ProposerIndex = 2
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{12: newCanonical}, nil)
+	reorgedOut := blockWithBlobs(t, 12, true)
+	reorgedOut.Block.ProposerIndex = 1
+	reorgedOutRoot := f.storeSideBranchBlock(t, reorgedOut)
+	newCanonicalRoot := f.storeSideBranchBlock(t, newCanonical)
+	markCanonical := func(root common.Hash) {
+		require.NoError(t, f.d.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
+			return beacon_indicies.MarkRootCanonical(tx, 12, root)
+		}))
+	}
+	markCanonical(reorgedOutRoot)
+	views := &countingDB{RwDB: f.d.indiciesDB}
+	f.d.indiciesDB = views
+	views.onView = func() {
+		if views.views == 2 { // the side pass read slot 12 in the first view, the wait starts in the second
+			markCanonical(newCanonicalRoot)
+		}
+	}
+
+	f.d.backfillCustodyColumns(t.Context(), 12, 12)
+
+	require.ElementsMatch(t, []common.Hash{reorgedOutRoot, newCanonicalRoot}, f.queuedRoots())
+}
+
+// Once the side pass has its quota it ends, instead of walking the older slots of the range.
+func TestBackfillCustodyColumnsSideBranchPassEndsOnceItsQuotaIsReached(t *testing.T) {
+	const toSlot = 1 << 30
+	f := newBackfillFixture(t, 100, nil, nil)
+	for i := range maxBackfillQueued / 2 {
+		f.storeSideBranchBlock(t, blockWithBlobs(t, toSlot-uint64(i), true))
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	f.d.backfillSideBranchBlocks(ctx, 0, toSlot)
+
+	require.NoError(t, ctx.Err(), "the pass ended on its own")
+	require.Len(t, f.queuedRoots(), maxBackfillQueued/2)
+}
+
+// The walk down to slot 0 ends there instead of wrapping around.
+func TestBackfillCustodyColumnsEndsAtSlotZero(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		0: blockWithBlobs(t, 0, true),
+		2: blockWithBlobs(t, 2, true),
+	}, nil)
+	side := blockWithBlobs(t, 0, true)
+	side.Block.ProposerIndex = 1
+	sideRoot := f.storeSideBranchBlock(t, side)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+
+	f.d.backfillCustodyColumns(ctx, 0, 2)
+
+	require.NoError(t, ctx.Err(), "the walk ended on its own")
+	require.ElementsMatch(t, []common.Hash{f.roots[0], f.roots[2], sideRoot}, f.queuedRoots())
+}
+
+// Right after a partition heals, a side branch can end above the canonical head. Its roots are
+// queued at once, not once the canonical head has reached the end of the range.
+func TestBackfillCustodyColumnsQueuesSideBranchBlocksWithoutWaitingForTheCanonicalHead(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		10: blockWithBlobs(t, 10, true),
+	}, nil)
+	side := blockWithBlobs(t, 12, true)
+	sideRoot := f.storeSideBranchBlock(t, side)
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+
+	f.d.backfillCustodyColumns(ctx, 10, 12)
+
+	require.Equal(t, []common.Hash{sideRoot}, f.queuedRoots())
+}
+
+// Side-branch roots are best effort: the side pass takes at most half of the queue, newest roots
+// first, and never waits for room, so roots that peers cannot serve do not stall the canonical
+// blocks.
+func TestBackfillCustodyColumnsSideBranchBlocksDoNotStallCanonicalBlocks(t *testing.T) {
+	const slots, sideBranches = 50, 3
+	blocks := map[uint64]*cltypes.SignedBeaconBlock{}
+	for slot := uint64(10); slot < 10+slots; slot++ {
+		blocks[slot] = blockWithBlobs(t, slot, true)
+	}
+	f := newBackfillFixture(t, 100, blocks, nil)
+	sideSlots := map[common.Hash]uint64{}
+	for slot := uint64(10); slot < 10+slots; slot++ {
+		for proposer := uint64(1); proposer <= sideBranches; proposer++ {
+			side := blockWithBlobs(t, slot, true)
+			side.Block.ProposerIndex = proposer
+			sideSlots[f.storeSideBranchBlock(t, side)] = slot
+		}
+	}
+	served := map[common.Hash]bool{}
+	serveCanonicalRoots := func() {
+		for _, root := range f.queuedRoots() {
+			if _, isSide := sideSlots[root]; !isSide {
+				served[root] = true
+				f.d.blocksToCheckSync.forget(root)
+			}
+		}
+	}
+	reader := f.d.blockReader.(bodyReader)
+	reader.onRead = serveCanonicalRoots
+	f.d.blockReader = reader
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+
+	f.d.backfillCustodyColumns(ctx, 10, 10+slots-1)
+	serveCanonicalRoots()
+
+	require.Len(t, served, slots)
+	var queuedSideSlots []uint64
+	for _, root := range f.queuedRoots() {
+		queuedSideSlots = append(queuedSideSlots, sideSlots[root])
+	}
+	slices.Sort(queuedSideSlots)
+	newestFirst := make([]uint64, maxBackfillQueued/2)
+	for i := range newestFirst {
+		newestFirst[i] = 10 + slots - 1 - uint64(i/sideBranches)
+	}
+	slices.Sort(newestFirst)
+	require.Equal(t, newestFirst, queuedSideSlots,
+		"only side-branch roots are left: half of the bound, from the newest slots")
+}
+
+func TestBackfillCustodyColumnsTakesTheSideBranchSignatureFromTheStoredHeader(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		12: blockWithBlobs(t, 12, true),
+	}, nil)
+	side := blockWithBlobs(t, 12, true)
+	side.Block.ProposerIndex = 1
+	stored := common.Bytes96{1, 2, 3}
+	side.Signature = stored
+	sideRoot := f.storeSideBranchBlock(t, side)
+	side.Signature = common.Bytes96{9, 9, 9} // the fork graph holds a copy that was not checked
+
+	f.d.backfillCustodyColumns(t.Context(), 12, 12)
+
+	f.d.blocksToCheckSync.mu.Lock()
+	entry := f.d.blocksToCheckSync.entries[sideRoot]
+	f.d.blocksToCheckSync.mu.Unlock()
+	require.NotNil(t, entry)
+	require.Equal(t, stored, entry.block.BlockSignature())
+}
+
+// An error on one side-branch root skips that root only.
+func TestBackfillCustodyColumnsSkipsOnlyTheSideBranchBlockThatCannotBeRead(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+		12: blockWithBlobs(t, 12, true),
+	}, nil)
+	var sideRoots []common.Hash
+	for proposer := uint64(1); proposer <= 2; proposer++ {
+		side := blockWithBlobs(t, 12, true)
+		side.Block.ProposerIndex = proposer
+		sideRoots = append(sideRoots, f.storeSideBranchBlock(t, side))
+	}
+	slices.SortFunc(sideRoots, func(a, b common.Hash) int { return bytes.Compare(a[:], b[:]) })
+	unreadable, readable := sideRoots[0], sideRoots[1] // the walk reads roots in key order
+	require.NoError(t, f.d.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.BeaconBlockHeaders, unreadable[:], []byte{1})
+	}))
+
+	f.d.backfillCustodyColumns(t.Context(), 12, 12)
+
+	require.ElementsMatch(t, []common.Hash{f.roots[12], readable}, f.queuedRoots())
+}
+
+// Once the queue holds its half of the room, the side pass reads no slot.
+func TestBackfillCustodyColumnsSideBranchPassReadsNothingWhenTheQueueIsHalfFull(t *testing.T) {
+	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{}, nil)
+	f.storeSideBranchBlock(t, blockWithBlobs(t, 12, true))
+	cfg := clparams.MainnetBeaconConfig
+	for i := range maxBackfillQueued / 2 {
+		queuedBlock, root := fuluColumnBlock(t, &cfg, uint64(200+i))
+		f.d.blocksToCheckSync.add(root, queuedBlock, time.Now())
+	}
+	views := &countingDB{RwDB: f.d.indiciesDB}
+	f.d.indiciesDB = views
+
+	f.d.backfillSideBranchBlocks(t.Context(), 10, 14)
+
+	require.Zero(t, views.views)
+}
+
 // A root at the maximum backoff is retried once an epoch and may never complete. Such roots do not
 // count toward the backfill's bound, so they cannot stall the walk.
 func TestBackfillCustodyColumnsIsNotStalledByRootsAtTheMaximumBackoff(t *testing.T) {
@@ -302,31 +639,52 @@ func TestBackfillCustodyColumnsDoesNothingBeforeFulu(t *testing.T) {
 	require.Empty(t, *f.d.blockReader.(bodyReader).read)
 }
 
-// A cancelled walk stops at once instead of trying every remaining slot.
+// A cancelled walk stops at once instead of trying every remaining slot, in the side pass as well
+// as in the canonical walk.
 func TestBackfillCustodyColumnsStopsWhenCancelled(t *testing.T) {
-	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
-		50: blockWithBlobs(t, 50, true),
-	}, nil)
-	ctx, cancel := context.WithCancel(t.Context())
-	reader := f.d.blockReader.(bodyReader)
-	reader.onRead = cancel
-	f.d.blockReader = reader
-	views := &countingDB{RwDB: f.d.indiciesDB}
-	f.d.indiciesDB = views
+	for _, tc := range []struct {
+		name      string
+		inWalk    bool
+		wantReads []uint64
+	}{
+		{name: "side pass"},
+		{name: "canonical walk", inWalk: true, wantReads: []uint64{50}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+				50: blockWithBlobs(t, 50, true),
+			}, nil)
+			ctx, cancel := context.WithCancel(t.Context())
+			views := &countingDB{RwDB: f.d.indiciesDB}
+			f.d.indiciesDB = views
+			reader := f.d.blockReader.(bodyReader)
+			if tc.inWalk {
+				f.d.forkChoice = nil
+				reader.onRead = cancel
+				f.d.blockReader = reader
+			} else {
+				views.onView = cancel
+			}
 
-	f.d.backfillCustodyColumns(ctx, 10, 50)
+			f.d.backfillCustodyColumns(ctx, 10, 50)
 
-	require.Equal(t, []uint64{50}, *reader.read)
-	require.LessOrEqual(t, views.views, 2, "one view to find the canonical head and one per slot read")
+			require.ElementsMatch(t, tc.wantReads, *reader.read)
+			require.LessOrEqual(t, views.views, 2, "at most two views: the cancel stops the walk")
+		})
+	}
 }
 
 type countingDB struct {
 	kv.RwDB
-	views int
+	views  int
+	onView func()
 }
 
 func (c *countingDB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	c.views++
+	if c.onView != nil {
+		c.onView()
+	}
 	return c.RwDB.View(ctx, f)
 }
 

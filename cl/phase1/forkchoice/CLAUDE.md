@@ -26,7 +26,7 @@ verified against the Go code in this repository.
 | `types.go`: `LatestMessage`, `ForkChoiceNode` | Phase0 `LatestMessage`; Gloas modified `LatestMessage`, `ForkChoiceNode` |
 | `get_head.go`: `accountWeights`, `computeVotes`, `getHead`, `GetHead` | Phase0 `get_attestation_score`, `get_weight`, `get_head`; Gloas dispatch boundary for modified `get_head` |
 | `get_head.go`: `getHeadGloas`, `computeHeadGloas` | Gloas `get_head`, `get_node_children`, `get_weight`, `get_payload_status_tiebreaker` |
-| `get_head.go`: `getFilteredBlockTree`, `getFilterBlockTree`, `isViableLeaf`, `hasCorrectJustification` | Phase0 `get_filtered_node_tree`, `filter_node_tree`, `get_voting_source`, `get_checkpoint_block` |
+| `get_head.go`: `getFilteredBlockTree`, `isViableLeaf`, `hasCorrectJustification` | Phase0 `get_filtered_node_tree`, `filter_node_tree` (via `markViableUncutBlocks` in `forkchoice.go`), `get_voting_source`, `get_checkpoint_block` |
 | `get_head.go`: `getFilteredNodeTree`, `hasCorrectJustification` | Gloas modified `get_filtered_node_tree`, `get_checkpoint_block`; inherited `filter_node_tree`, `get_voting_source` |
 | `utils.go`: `getUnslashedActiveBalance` | Phase0 `calculate_committee_fraction` |
 | `weight_store.go`, `gloas_weight_tree.go`: `GetWeight`, `GetAttestationScore`, `GetProposerScore`, `ShouldApplyProposerBoost` | Phase0 `get_weight`, `get_attestation_score`, `get_proposer_score`; Gloas modified `get_weight`, `get_attestation_score`, delta-maintained `LatestMessage` weights; delegates Gloas proposer-boost checks to `timing.go` |

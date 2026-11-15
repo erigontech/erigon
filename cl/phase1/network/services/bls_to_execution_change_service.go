@@ -89,7 +89,7 @@ func (s *blsToExecutionChangeService) DecodeGossipMessage(pid peer.ID, data []by
 		Receiver:                   &sentinelproto.Peer{Pid: pid.String()},
 		SignedBLSToExecutionChange: &cltypes.SignedBLSToExecutionChange{},
 	}
-	if err := obj.SignedBLSToExecutionChange.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj.SignedBLSToExecutionChange, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil

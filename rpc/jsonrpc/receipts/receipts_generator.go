@@ -250,6 +250,9 @@ func (g *Generator) addToCacheReceipts(ctx context.Context, tx kv.TemporalTx, he
 	if rpcDisableRLRU || !g.canonicalInView(ctx, tx, header) {
 		return
 	}
+	for _, r := range receipts {
+		r.Logs.SetBlockTimestamp(header.Time)
+	}
 	//g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
 	g.receiptsCache.Add(header.Hash(), receipts)
 }
@@ -262,6 +265,7 @@ func (g *Generator) addToCacheReceipt(ctx context.Context, tx kv.TemporalTx, hea
 	if rpcDisableRLRU || !g.canonicalInView(ctx, tx, header) {
 		return
 	}
+	receipt.Logs.SetBlockTimestamp(header.Time)
 	g.receiptCache.Add(txNum, receipt)
 }
 
@@ -471,11 +475,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		receipt.Logs[i].Index = hexutil.Uint(firstLogIndex + uint32(i))
 	}
 
-	g.addToCacheReceipt(ctx, tx, header, txNum, receipt)
-
 	if dbg.AssertEnabled && receiptFromDB != nil {
 		g.assertEqualReceipts(receipt, receiptFromDB, txn)
 	}
+
+	g.addToCacheReceipt(ctx, tx, header, txNum, receipt)
 	return receipt, nil
 }
 

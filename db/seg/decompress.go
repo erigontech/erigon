@@ -153,6 +153,9 @@ func countHuffmanArena(depths []uint64, bits int, depth, maxDepth uint64) (consu
 	if depth == depths[0] {
 		return 1, 0, 0
 	}
+	if depth > depths[0] {
+		return
+	}
 	if bits == 9 {
 		c, s, nt := countHuffmanArena(depths, 0, depth, maxDepth)
 		return c, s + (1 << min(int(maxDepth), 9)), nt + 1
@@ -328,6 +331,9 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (_
 
 	for dictPos < dictSize {
 		depth, ns := binary.Uvarint(data[dictPos:])
+		if ns <= 0 {
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("invalid pattern depth varint at %d", dictPos)}
+		}
 		if depth > maxAllowedDepth {
 			return nil, &ErrCompressedFileCorrupted{
 				FileName: fName,
@@ -340,6 +346,9 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (_
 		}
 		dictPos += uint64(ns)
 		l, n := binary.Uvarint(data[dictPos:])
+		if n <= 0 {
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("invalid pattern length varint at %d", dictPos)}
+		}
 		dictPos += uint64(n)
 		patterns = append(patterns, data[dictPos:dictPos+l])
 		//fmt.Printf("depth = %d, pattern = [%x]\n", depth, data[dictPos:dictPos+l])
@@ -394,6 +403,9 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (_
 	dictPos = 0
 	for dictPos < dictSize {
 		depth, ns := binary.Uvarint(data[dictPos:])
+		if ns <= 0 {
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("invalid position depth varint at %d", dictPos)}
+		}
 		if depth > maxAllowedDepth {
 			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("posMaxDepth=%d", depth)}
 		}
@@ -403,6 +415,9 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (_
 		}
 		dictPos += uint64(ns)
 		dp, n := binary.Uvarint(data[dictPos:])
+		if n <= 0 {
+			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: fmt.Sprintf("invalid position varint at %d", dictPos)}
+		}
 		dictPos += uint64(n)
 		poss = append(poss, dp)
 	}
@@ -448,6 +463,9 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 	if len(depths) == 0 {
 		return 0, nil
 	}
+	if depth > depths[0] {
+		return 0, fmt.Errorf("buildCondensedPatternTable: leaf depth=%d is shallower than node depth=%d", depths[0], depth)
+	}
 	if depth == depths[0] {
 		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pattern=[%x]\n", depth, maxDepth, code, bits, pattern)
 		idx, cw := arena.allocCW(code, word(patterns[0]), byte(bits), nil)
@@ -483,6 +501,9 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 	}
 	if len(depths) == 0 {
 		return 0, nil
+	}
+	if depth > depths[0] {
+		return 0, fmt.Errorf("buildPosTable: leaf depth=%d is shallower than node depth=%d", depths[0], depth)
 	}
 	if depth == depths[0] {
 		p := poss[0]

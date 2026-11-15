@@ -478,3 +478,102 @@ func TestFeedUnsubscribeFromInbox(t *testing.T) {
 		t.Errorf("sendCases is non-empty after unsubscribe")
 	}
 }
+
+func TestFeedTrySendOrFailReportsSlowSubscribers(t *testing.T) {
+	var feed Feed
+	slow := make(chan int)
+	slowSub := feed.Subscribe(slow)
+	defer slowSub.Unsubscribe()
+	ready := make(chan int, 1)
+	readySub := feed.Subscribe(ready)
+	defer readySub.Unsubscribe()
+
+	completed := make(chan int, 1)
+	go func() { completed <- feed.TrySendOrFail(1) }()
+	select {
+	case delivered := <-completed:
+		if delivered != 1 {
+			t.Fatalf("TrySendOrFail delivered %d times, want 1", delivered)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("TrySendOrFail waited for a slow subscriber")
+	}
+	if value := <-ready; value != 1 {
+		t.Fatalf("received %d, want 1", value)
+	}
+	select {
+	case err := <-slowSub.Err():
+		if !errors.Is(err, ErrSubscriberLagged) {
+			t.Fatalf("slow subscriber got %v, want ErrSubscriberLagged", err)
+		}
+	default:
+		t.Fatal("slow subscriber was not told about the dropped value")
+	}
+	select {
+	case err := <-readySub.Err():
+		t.Fatalf("ready subscriber got %v", err)
+	default:
+	}
+
+	// The subscription stays active: the subscriber decides whether to stop.
+	go func() { completed <- feed.Send(2) }()
+	if value := <-slow; value != 2 {
+		t.Fatalf("received %d, want 2", value)
+	}
+	if value := <-ready; value != 2 {
+		t.Fatalf("received %d, want 2", value)
+	}
+	<-completed
+}
+
+func TestFeedTrySendOrFailRacesUnsubscribe(t *testing.T) {
+	var feed Feed
+	for range 1000 {
+		sub := feed.Subscribe(make(chan int))
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			feed.TrySendOrFail(1)
+		}()
+		sub.Unsubscribe()
+		<-done
+	}
+}
+
+func TestFeedTrySendOrFailReportsEveryLagButKeepsOnePending(t *testing.T) {
+	var feed Feed
+	sub := feed.Subscribe(make(chan int))
+	defer sub.Unsubscribe()
+
+	feed.TrySendOrFail(1)
+	if err := <-sub.Err(); !errors.Is(err, ErrSubscriberLagged) {
+		t.Fatalf("first lag: got %v", err)
+	}
+	feed.TrySendOrFail(2)
+	select {
+	case err := <-sub.Err():
+		if !errors.Is(err, ErrSubscriberLagged) {
+			t.Fatalf("second lag: got %v", err)
+		}
+	default:
+		t.Fatal("a lag after the first one was read is not reported")
+	}
+
+	completed := make(chan struct{})
+	go func() {
+		feed.TrySendOrFail(3)
+		feed.TrySendOrFail(4)
+		close(completed)
+	}()
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("a pending lag report blocked the send")
+	}
+	<-sub.Err()
+	select {
+	case err := <-sub.Err():
+		t.Fatalf("two misses left two reports: %v", err)
+	default:
+	}
+}
