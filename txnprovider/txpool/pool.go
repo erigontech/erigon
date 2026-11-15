@@ -1788,7 +1788,7 @@ func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, waitForRec
 // Precheck SetCode and blob transactions under the pool lock, then recover
 // authorization signers and verify blob sidecars without it. The caller must
 // validate the surviving transactions again with a fresh state view before inserting them.
-func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remoteSource, waitForRecovery bool) ([]txpoolcfg.DiscardReason, blobCells, error) {
+func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remoteSource) ([]txpoolcfg.DiscardReason, blobCells, error) {
 	if err := txns.Valid(); err != nil {
 		return nil, nil, err
 	}
@@ -1808,7 +1808,7 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 
 	var precheckReasons []txpoolcfg.DiscardReason
 	var goodTxns TxnSlots
-	err := p.withLockedState(ctx, &prechecked, waitForRecovery, func(_ kv.TemporalTx, view kvcache.CacheView) error {
+	err := p.withLockedState(ctx, &prechecked, false, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var err error
 		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil)
 		if err != nil || p.cfg.MaxNonceGap == 0 || hasFrames {
@@ -1996,7 +1996,7 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 
 func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource, waitForRecovery bool) ([]txpoolcfg.DiscardReason, error) {
 	for {
-		reasons, err := p.tryAddNewTxns(ctx, newTxns, sources, waitForRecovery)
+		reasons, err := p.tryAddNewTxns(ctx, newTxns, sources)
 		if !waitForRecovery || !errors.Is(err, errStateViewStale) {
 			return reasons, err
 		}
@@ -2030,10 +2030,10 @@ func (p *TxPool) waitForCondition(ctx context.Context, ready func() bool) bool {
 	return ready()
 }
 
-// Head-change retries share one simulation deadline. Frame admission returns
+// Head-change retries share one simulation deadline. Admission returns
 // errStateViewStale so recovery can wait outside that budget and restart admission.
-func (p *TxPool) tryAddNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource, waitForRecovery bool) ([]txpoolcfg.DiscardReason, error) {
-	reasons, preparedCells, err := p.prepareTxns(ctx, newTxns, sources, waitForRecovery)
+func (p *TxPool) tryAddNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource) ([]txpoolcfg.DiscardReason, error) {
+	reasons, preparedCells, err := p.prepareTxns(ctx, newTxns, sources)
 	if err != nil {
 		return nil, err
 	}
@@ -2056,7 +2056,7 @@ func (p *TxPool) tryAddNewTxns(ctx context.Context, newTxns TxnSlots, sources []
 			}
 			frames = p.prepareFrames(simulationCtx, newTxns)
 		}
-		err = p.withLockedState(ctx, &newTxns, waitForRecovery && !hasFrames, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
+		err = p.withLockedState(ctx, &newTxns, false, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
 			preparedReasons, err := p.applyFrameValidation(simulationCtx, newTxns, frames, precheckReasons, cacheView)
 			if err != nil {
 				return err

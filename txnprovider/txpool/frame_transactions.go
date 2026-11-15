@@ -644,15 +644,17 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			if change.Action == remoteproto.Action_UPSERT || change.Action == remoteproto.Action_UPSERT_CODE {
 				accountChanges[address] = change.Data
 			}
-			if address == types.FrameNonceManager {
-				for _, storage := range change.StorageChanges {
-					nonceSlots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
-				}
+			var slots map[common.Hash]struct{}
+			switch {
+			case address == types.FrameNonceManager:
+				slots = nonceSlots
+			case address == types.FrameRecentRootVerifier:
+				slots = rootSlots
+			default:
+				continue
 			}
-			if address == types.FrameRecentRootVerifier {
-				for _, storage := range change.StorageChanges {
-					rootSlots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
-				}
+			for _, storage := range change.StorageChanges {
+				slots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
 			}
 		}
 	}
