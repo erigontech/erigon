@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/l1"
+	"github.com/erigontech/erigon/eez/protocol/da"
 	"github.com/erigontech/erigon/eez/sequencer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
@@ -237,4 +239,114 @@ func TestWitnessFailureNeedsABlock(t *testing.T) {
 	require.NoError(t, s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 6}))
 	require.Equal(t, uint64(1), h.head(t).Number.Uint64())
 	require.Equal(t, 1, reports())
+}
+
+// full is a pool that never runs dry: each block's first request returns
+// every transaction from the sender's next nonce on.
+type full struct {
+	chain *deriver.ExecChain
+	txs   []types.Transaction
+	mu    sync.Mutex
+	last  uint64
+}
+
+func (f *full) ProvideTxns(ctx context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	head, err := f.chain.Head(ctx)
+	if err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := head.Number.Uint64() + 1
+	if n == f.last {
+		return nil, nil
+	}
+	f.last = n
+	nonce, err := f.chain.Nonce(ctx, head.Number.Uint64(), derivertest.UserAddress())
+	if err != nil {
+		return nil, err
+	}
+	return f.txs[min(nonce, uint64(len(f.txs))):], nil
+}
+
+// TestFullCatchupSettlesPerSlot: on a pool that never runs dry, each block of
+// a catch-up fills its DA budget, and the K blocks ending at each Sync
+// position fit one posting while K+1 do not: consecutive catch-up anchors
+// settle the range.
+func TestFullCatchupSettlesPerSlot(t *testing.T) {
+	const (
+		maxPostingGas = 16_777_216 // EIP-7825 transaction gas cap
+		batchReserve  = 1_000_000  // the batch's own entries, proofs and encoding
+		txOverhead    = 5          // a transaction's length prefix in the span
+	)
+	h := newHarness(t)
+	cc := derivertest.Config()
+	signer := types.LatestSignerForChainID(cc.ChainID)
+	to := common.HexToAddress("0xb0b")
+	data := bytes.Repeat([]byte{0xff}, 1_000)
+	pool := &full{chain: h.chain}
+	for nonce := range uint64(2_000) {
+		tx, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 70_000, To: &to, Data: data},
+			ChainID:  *cc.ChainID,
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(10 * common.GWei),
+		}, *signer, derivertest.UserKey)
+		require.NoError(t, err)
+		sender, err := signer.Sender(tx)
+		require.NoError(t, err)
+		tx.SetSender(sender)
+		pool.txs = append(pool.txs, tx)
+	}
+	s, err := sequencer.New(cc, sequencer.Config{Timing: devnet()}, h.follower, pool, log.New())
+	require.NoError(t, err)
+
+	const sync = 24
+	require.NoError(t, s.Handle(t.Context(), sequencer.SyncSlot{Height: sync, Time: h.genesis.Time + 2*sync, L1Head: 4}))
+	require.Equal(t, uint64(sync), h.head(t).Number.Uint64())
+
+	k := devnet().K()
+	budget := sequencer.DABudget(k)
+	txDA := pool.txs[0].EncodingSize() + txOverhead
+	for n := uint64(1); n <= sync; n++ {
+		size := 0
+		for _, tx := range h.block(t, n).Transactions() {
+			size += tx.EncodingSize() + txOverhead
+		}
+		require.LessOrEqual(t, size, budget, "block %d", n)
+		require.Greater(t, size, budget-txDA, "block %d leaves room for another transaction", n)
+	}
+
+	// floorGas is the EIP-7623 floor of a posting carrying the DA of blocks
+	// from..to.
+	floorGas := func(from, to uint64) uint64 {
+		span := &da.Span{}
+		for n := from; n <= to; n++ {
+			b := h.block(t, n)
+			span.TxCounts = append(span.TxCounts, uint32(len(b.Transactions())))
+			span.Beneficiaries = append(span.Beneficiaries, b.Coinbase())
+			span.ExtraData = append(span.ExtraData, b.Extra())
+			for _, tx := range b.Transactions() {
+				var buf bytes.Buffer
+				require.NoError(t, tx.MarshalBinary(&buf))
+				span.Transactions = append(span.Transactions, buf.Bytes())
+			}
+		}
+		payload := &da.Payload{RollupID: cc.L2.(*config.L2Config).RollupID, Operations: span.Encode()}
+		var tokens uint64
+		for _, b := range da.Encode(payload.Messages()...) {
+			if b == 0 {
+				tokens++
+			} else {
+				tokens += 4
+			}
+		}
+		return 21_000 + 10*tokens
+	}
+	for end := k; end <= sync; end += k {
+		require.LessOrEqual(t, floorGas(end-k+1, end), uint64(maxPostingGas-batchReserve), "blocks %d..%d", end-k+1, end)
+		if end > k {
+			require.Greater(t, floorGas(end-k, end), uint64(maxPostingGas-batchReserve), "blocks %d..%d", end-k, end)
+		}
+	}
 }
