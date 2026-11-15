@@ -16,7 +16,14 @@
 
 package sequencer
 
-import "github.com/erigontech/erigon/eez/l1"
+import (
+	"time"
+
+	"github.com/erigontech/erigon/eez/l1"
+)
 
 // PendingHead takes the head waiting for the schedule.
 func (s *Service) PendingHead() l1.Header { return <-s.heads }
+
+// SetClock makes now the sequencer's clock.
+func (s *Sequencer) SetClock(now func() time.Time) { s.now = now }

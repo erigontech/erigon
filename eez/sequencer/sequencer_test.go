@@ -50,6 +50,15 @@ type queue struct {
 
 func (q *queue) add(t *testing.T, encoded ...[]byte) {
 	t.Helper()
+	txs := q.decode(t, encoded...)
+	q.mu.Lock()
+	q.txs = append(q.txs, txs...)
+	q.mu.Unlock()
+}
+
+// decode decodes encoded, senders recovered as a pool's are.
+func (q *queue) decode(t *testing.T, encoded ...[]byte) []types.Transaction {
+	t.Helper()
 	txs, err := deriver.DecodeTxs(encoded)
 	require.NoError(t, err)
 	signer := types.LatestSignerForChainID(derivertest.Config().ChainID)
@@ -58,9 +67,7 @@ func (q *queue) add(t *testing.T, encoded ...[]byte) {
 		require.NoError(t, err)
 		tx.SetSender(sender)
 	}
-	q.mu.Lock()
-	q.txs = append(q.txs, txs...)
-	q.mu.Unlock()
+	return txs
 }
 
 func (q *queue) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
@@ -122,6 +129,8 @@ func TestSequencer(t *testing.T) {
 	s := h.sequencer(t, 0)
 	ctx := t.Context()
 	g := h.genesis.Time
+	// Every slot is on time.
+	s.SetClock(func() time.Time { return time.Unix(int64(g), 0) })
 	l2 := derivertest.Config().L2.(*config.L2Config)
 	collector := *derivertest.Config().FeeCollector
 
@@ -180,6 +189,7 @@ func (h *harness) block(t *testing.T, n uint64) *types.Block {
 func TestSequencerCap(t *testing.T) {
 	h := newHarness(t)
 	s := h.sequencer(t, 4)
+	s.SetClock(func() time.Time { return time.Unix(int64(h.genesis.Time), 0) })
 	require.NoError(t, s.Handle(t.Context(), sequencer.SyncSlot{Height: 6, Time: h.genesis.Time + 12, L1Head: 1}))
 	require.Equal(t, uint64(4), h.head(t).Number.Uint64())
 	require.NoError(t, s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 12}))
@@ -347,6 +357,66 @@ func TestFullCatchupSettlesPerSlot(t *testing.T) {
 		require.LessOrEqual(t, floorGas(end-k+1, end), uint64(maxPostingGas-batchReserve), "blocks %d..%d", end-k+1, end)
 		if end > k {
 			require.Greater(t, floorGas(end-k, end), uint64(maxPostingGas-batchReserve), "blocks %d..%d", end-k, end)
+		}
+	}
+}
+
+// oneEach is a pool yielding one transaction per block, the sender's next.
+type oneEach struct {
+	chain *deriver.ExecChain
+	txs   []types.Transaction
+	mu    sync.Mutex
+	last  uint64
+}
+
+func (o *oneEach) ProvideTxns(ctx context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	head, err := o.chain.Head(ctx)
+	if err != nil {
+		return nil, err
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	n := head.Number.Uint64() + 1
+	if n == o.last {
+		return nil, nil
+	}
+	o.last = n
+	nonce, err := o.chain.Nonce(ctx, head.Number.Uint64(), derivertest.UserAddress())
+	if err != nil || nonce >= uint64(len(o.txs)) {
+		return nil, err
+	}
+	return o.txs[nonce : nonce+1], nil
+}
+
+// TestLateSyncBlockIsEmpty: a Sync block whose proof would reach L1 after
+// its timestamp less the slack is built empty; on time it takes the pool's
+// transactions.
+func TestLateSyncBlockIsEmpty(t *testing.T) {
+	for _, late := range []bool{false, true} {
+		h := newHarness(t)
+		pool := &oneEach{chain: h.chain}
+		for range 10 {
+			pool.txs = append(pool.txs, h.pool.decode(t, h.c.Transfer(common.HexToAddress("0xb0b"), 1))...)
+		}
+		s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet()}, h.follower, pool, log.New())
+		require.NoError(t, err)
+		sync := h.genesis.Time + 12
+		deadline := time.Unix(int64(sync), 0).Add(-devnet().Slack - devnet().Proof)
+		now := deadline.Add(-time.Second)
+		if late {
+			now = deadline.Add(time.Second)
+		}
+		s.SetClock(func() time.Time { return now })
+
+		require.NoError(t, s.Handle(t.Context(), sequencer.SyncSlot{Height: 6, Time: sync, L1Head: 1}))
+		require.Equal(t, uint64(6), h.head(t).Number.Uint64())
+		for n := uint64(1); n < 6; n++ {
+			require.Len(t, h.block(t, n).Transactions(), 1, "late %v, block %d", late, n)
+		}
+		if late {
+			require.Empty(t, h.block(t, 6).Transactions())
+		} else {
+			require.Len(t, h.block(t, 6).Transactions(), 1)
 		}
 	}
 }

@@ -109,6 +109,7 @@ type Sequencer struct {
 	committer   Committer
 	pool        txnprovider.TxnProvider
 	logger      log.Logger
+	now         func() time.Time
 	// offGrid counts consecutive Sync blocks skipped off the grid.
 	offGrid int
 
@@ -151,7 +152,7 @@ func New(cc *chain.Config, cfg Config, committer Committer, pool txnprovider.Txn
 	if beneficiary == (common.Address{}) && cc.FeeCollector != nil {
 		beneficiary = *cc.FeeCollector
 	}
-	return &Sequencer{cfg: cfg, l2: l2, beneficiary: beneficiary, committer: committer, pool: pool, logger: logger}, nil
+	return &Sequencer{cfg: cfg, l2: l2, beneficiary: beneficiary, committer: committer, pool: pool, logger: logger, now: time.Now}, nil
 }
 
 // Status returns the sequencer's production so far. It is safe to call
@@ -251,6 +252,15 @@ func (s *Sequencer) syncSlot(ctx context.Context, slot SyncSlot) error {
 			s.offGridSkip("parent + L2 block time is not the slot's timestamp", "head", head.Number.Uint64(), "expected", next, "time", slot.Time)
 			return nil
 		}
+		if s.late(slot.Time) {
+			s.logger.Warn("[eez] Sync slot too late for the next L1 block", "event", "eez.sequencer.sync_slot.deferred_late",
+				"height", slot.Height, "time", slot.Time, "l1Head", slot.L1Head)
+			if _, err := s.build(ctx, Sync, head, noTxns{}); err != nil {
+				return err
+			}
+			s.setOffGrid(0)
+			return nil
+		}
 	default:
 		return nil
 	}
@@ -276,8 +286,20 @@ func (s *Sequencer) produceN(ctx context.Context, kind Kind, head *types.Header,
 	return head, nil
 }
 
+// late reports whether a proof started now reaches L1 after the submission
+// deadline of the Sync block at ts.
+func (s *Sequencer) late(ts uint64) bool {
+	deadline := time.Unix(int64(ts), 0).Add(-s.cfg.Timing.Slack)
+	return s.now().Add(s.cfg.Timing.Proof).After(deadline)
+}
+
 // produce builds the block of kind after parent from the pool.
 func (s *Sequencer) produce(ctx context.Context, kind Kind, parent *types.Header) (*types.Header, error) {
+	return s.build(ctx, kind, parent, newPoolTxns(s.pool, s.cfg.DABudget, s.logger))
+}
+
+// build builds the block of kind after parent from txs.
+func (s *Sequencer) build(ctx context.Context, kind Kind, parent *types.Header, txs txnprovider.TxnProvider) (*types.Header, error) {
 	in := deriver.HeaderInputs{
 		Number:     parent.Number.Uint64() + 1,
 		ParentHash: parent.Hash(),
@@ -296,7 +318,7 @@ func (s *Sequencer) produce(ctx context.Context, kind Kind, parent *types.Header
 			defer pin.Close()
 		}
 	}
-	built, err := s.committer.Produce(ctx, in, newPoolTxns(s.pool, s.cfg.DABudget, s.logger))
+	built, err := s.committer.Produce(ctx, in, txs)
 	if err != nil {
 		return nil, err
 	}

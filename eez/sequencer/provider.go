@@ -81,6 +81,13 @@ func (p *poolTxns) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideO
 	return kept, nil
 }
 
+// noTxns provides no transactions.
+type noTxns struct{}
+
+func (noTxns) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	return nil, nil
+}
+
 var systemAddress = accounts.InternAddress(protocol.SystemAddress)
 
 // refused returns why EEZ refuses tx from a block, empty when it does not:
