@@ -19,6 +19,7 @@ package sequencer
 import (
 	"context"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/types"
@@ -58,12 +59,15 @@ func DABudget(k uint64) int {
 type poolTxns struct {
 	pool   txnprovider.TxnProvider
 	budget int
-	logger log.Logger
+	// charged holds the transactions the budget paid for: the builder has
+	// the pool yield again one it set aside for its nonce.
+	charged map[common.Hash]struct{}
+	logger  log.Logger
 }
 
 // newPoolTxns returns a provider of one block of pool transactions.
 func newPoolTxns(pool txnprovider.TxnProvider, budget int, logger log.Logger) *poolTxns {
-	return &poolTxns{pool: pool, budget: budget, logger: logger}
+	return &poolTxns{pool: pool, budget: budget, charged: map[common.Hash]struct{}{}, logger: logger}
 }
 
 func (p *poolTxns) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
@@ -91,10 +95,15 @@ func (p *poolTxns) keep(txs []types.Transaction) []types.Transaction {
 			p.logger.Debug("[eez] pool transaction refused", "event", "eez.sequencer.pool.refused", "tx", tx.Hash(), "reason", reason)
 			continue
 		}
+		if _, ok := p.charged[tx.Hash()]; ok {
+			kept = append(kept, tx)
+			continue
+		}
 		// A transaction over the remaining budget leaves room for smaller ones
 		// after it.
 		if size := tx.EncodingSize() + txOverhead; size <= p.budget {
 			p.budget -= size
+			p.charged[tx.Hash()] = struct{}{}
 			kept = append(kept, tx)
 		}
 	}

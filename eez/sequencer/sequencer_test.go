@@ -438,3 +438,43 @@ func TestServiceHaltsOffTheL1Grid(t *testing.T) {
 	}
 	require.ErrorIs(t, svc.Err(), sequencer.ErrTiming, "the node's exit status reads it")
 }
+
+// inOrder is a pool yielding, one per request, the first of its
+// transactions the caller has not marked yielded, marking it as the txpool
+// does.
+type inOrder struct {
+	mu  sync.Mutex
+	txs []types.Transaction
+}
+
+func (o *inOrder) ProvideTxns(_ context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	yielded := txnprovider.ApplyProvideOptions(opts...).TxnIdsFilter
+	for _, tx := range o.txs {
+		if !yielded.Contains(tx.Hash()) {
+			yielded.Add(tx.Hash())
+			return []types.Transaction{tx}, nil
+		}
+	}
+	return nil, nil
+}
+
+// TestBlockBudgetChargesARetryOnce: a transaction the builder sets aside for
+// its nonce and takes again later counts once against the block's DA budget.
+func TestBlockBudgetChargesARetryOnce(t *testing.T) {
+	for _, exact := range []bool{false, true} {
+		h := newHarness(t)
+		txs := h.pool.decode(t, h.c.Transfer(common.HexToAddress("0xb0b"), 1), h.c.Transfer(common.HexToAddress("0xb0b"), 2))
+		budget := 0
+		if exact {
+			budget = txs[0].EncodingSize() + txs[1].EncodingSize() + 2*5
+		}
+		// Nonce 1 first: the builder sets it aside until nonce 0 executes.
+		pool := &inOrder{txs: []types.Transaction{txs[1], txs[0]}}
+		s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet(), DABudget: budget}, h.follower, pool, log.New())
+		require.NoError(t, err)
+		require.NoError(t, s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 6}))
+		require.Len(t, h.block(t, 1).Transactions(), 2, "exact budget %v", exact)
+	}
+}

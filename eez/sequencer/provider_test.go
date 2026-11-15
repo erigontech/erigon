@@ -140,3 +140,26 @@ func TestPoolTxnsPagesPastAnEmptiedPage(t *testing.T) {
 	require.Empty(t, got)
 	require.Equal(t, maxEmptiedPages, pool.pages)
 }
+
+// TestPoolTxnsChargesATransactionOnce: a transaction yielded again, as the
+// builder has the pool do for one it set aside for its nonce, does not take
+// from the budget a second time.
+func TestPoolTxnsChargesATransactionOnce(t *testing.T) {
+	user := common.HexToAddress("0xa11ce")
+	first, second := transfer(t, 1, 100, user), transfer(t, 0, 100, user)
+	yielded := mapset.NewSet[[32]byte]()
+	pool := &paged{txs: []types.Transaction{first, second}, n: 1}
+	p := newPoolTxns(pool, first.EncodingSize()+second.EncodingSize()+2*txOverhead, log.New())
+
+	got, err := p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(yielded))
+	require.NoError(t, err)
+	require.Equal(t, []types.Transaction{first}, got)
+	got, err = p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(yielded))
+	require.NoError(t, err)
+	require.Equal(t, []types.Transaction{second}, got)
+
+	yielded.Remove(first.Hash())
+	got, err = p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(yielded))
+	require.NoError(t, err)
+	require.Equal(t, []types.Transaction{first}, got)
+}
