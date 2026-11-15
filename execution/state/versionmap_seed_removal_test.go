@@ -567,6 +567,47 @@ func TestDestructObservedBeforeItsInFlightFlushKeepsTheAccountAbsent(t *testing.
 	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 1))
 }
 
+// Tx 1 reads x as absent while the seeded destruct of tx 0 holds. The read is anchored on that
+// destruct, so it is invalid once the destruct is withdrawn or replaced, also when it is the
+// only read: the existence marker the access list seeded at the same version records an
+// account that exists.
+func TestAbsentAccountReadIsInvalidOnceItsDestructIsGone(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		change func(*VersionMap, accounts.Address)
+	}{
+		{"withdrawn", func(vm *VersionMap, x accounts.Address) {
+			for _, path := range []AccountPath{SelfDestructPath, BalancePath, CodeHashPath} {
+				vm.Delete(x, path, accounts.NilKey, 0, false)
+			}
+		}},
+		{"replaced", func(vm *VersionMap, x accounts.Address) {
+			vm.MarkWritesValidated(redestruct(vm, x, 0), nil)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			x, reader, vm := seededRemovalOfPrefundedAccount(t)
+			ibs := NewWithVersionMap(reader, vm)
+			defer ibs.Close()
+			ibs.SetTxContext(1, 1)
+			exists, err := ibs.Exist(x)
+			require.NoError(t, err)
+			require.False(t, exists)
+			reads := ibs.VersionedReads()
+			read, ok := reads.GetAddress(x)
+			require.True(t, ok)
+			require.True(t, read.Val == nil || read.Val.IsNil())
+			absentRead := ReadSet{address: map[accounts.Address]VersionedRead[AccountView]{x: read}}
+			require.Equal(t, VersionValid, vm.ValidateReadSet(1, absentRead, validateEqualVersion, false, ""))
+
+			tc.change(vm, x)
+			require.Equal(t, VersionInvalid, vm.ValidateReadSet(1, absentRead, validateEqualVersion, false, ""))
+		})
+	}
+}
+
 // As above, but tx 1 credits x in the window: the credit creates a fresh account instead of
 // reloading the pre-block one.
 func TestCreditAfterObservedDestructCreatesAFreshAccount(t *testing.T) {

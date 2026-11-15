@@ -2193,6 +2193,19 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	return vm.ValidateReadSet(txIdx, lastIO.ReadSet(txIdx), checkVersion, traceInvalid, tracePrefix)
 }
 
+// validateAbsentAccount rejects an absent account read whose destruct is gone while the BAL
+// existence marker is the account's cell. The read is recorded at the destruct, and the marker
+// can have the same version, but it records an account that exists.
+func (vm *VersionMap) validateAbsentAccount(addr accounts.Address, v Version, txIdx int) VersionValidity {
+	if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIdx); ok && sdRR.resolved() && destructed && sdRR.Version() == v {
+		return VersionValid
+	}
+	if rr := vm.ReadStatus(addr, AddressPath, accounts.NilKey, txIdx); rr.accSource() == AccountFromBAL {
+		return VersionInvalid
+	}
+	return VersionValid
+}
+
 // ValidateReadSet validates rs (a tx's read-set) against the current versionMap at
 // txIdx. Split out of ValidateVersion so a worker can validate its own freshly-produced
 // read-set in parallel, before the exec loop commits.
@@ -2214,6 +2227,9 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 
 	for a, tr := range rs.address {
 		if !ok(validatePath(a, AddressPath, tr.ReadHeader)) {
+			return
+		}
+		if vm.HasBAL && (tr.Val == nil || tr.Val.IsNil()) && !ok(vm.validateAbsentAccount(a, tr.Version, txIdx)) {
 			return
 		}
 	}
