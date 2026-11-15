@@ -231,8 +231,8 @@ type blockService struct {
 	validationSlots chan struct{}
 
 	elImportsStarted *lru.Cache[proposerIndexAndSlot, struct{}]
-	// roots of Gloas blocks whose first EL import found blobs missing, claimed by the one retry at envelope arrival.
-	elBlobsMissing *lru.Cache[common.Hash, struct{}]
+	// Roots eligible for one retry on envelope arrival. The retry claims a root with Remove and never re-adds it.
+	elBlobRetryRoots *lru.Cache[common.Hash, struct{}]
 
 	// blocks that should be scheduled for later execution (e.g missing blobs).
 	emitter                          *beaconevents.EventEmitter
@@ -283,7 +283,7 @@ func newBlockService(
 	if err != nil {
 		panic(err)
 	}
-	elBlobsMissing, err := lru.New[common.Hash, struct{}]("el_blobs_missing", seenBlockCacheSize)
+	elBlobRetryRoots, err := lru.New[common.Hash, struct{}]("el_blob_retry_roots", seenBlockCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -298,7 +298,7 @@ func newBlockService(
 		validationCalls:  make(map[blockValidationContextKey]*blockValidationContextCall),
 		validationSlots:  make(chan struct{}, maxConcurrentBlockValidationContexts),
 		elImportsStarted: elImportsStarted,
-		elBlobsMissing:   elBlobsMissing,
+		elBlobRetryRoots: elBlobRetryRoots,
 		emitter:          emitter,
 		db:               db,
 	}
@@ -405,22 +405,18 @@ func (b *blockService) blobCountOutOfRange(block *cltypes.SignedBeaconBlock) boo
 	return blobs == 0 || blobs > b.beaconCfg.GetBlobParameters(block.Block.Slot/b.beaconCfg.SlotsPerEpoch).MaxBlobsPerBlock
 }
 
-// importColumnsFromELBlobs imports the block's columns from the EL and, for a Gloas block, records its root for one
-// retry at envelope arrival when the EL lacked blobs.
 func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock) {
-	elLackedBlobs := b.importColumnsFromELBlobsCore(ctx, block)
-	if !elLackedBlobs || !startsELColumnsImportAfterAdmission(block) {
+	needsRetry := b.importColumnsFromELBlobsCore(ctx, block)
+	if !needsRetry || !startsELColumnsImportAfterAdmission(block) {
 		return
 	}
 	if root, err := block.Block.HashSSZ(); err == nil {
-		b.elBlobsMissing.Add(common.Hash(root), struct{}{})
+		b.elBlobRetryRoots.Add(common.Hash(root), struct{}{})
 	}
 }
 
-// retryELColumnsImport runs the EL import once more for a block whose first import found blobs missing, if the block is
-// still in fork choice and its columns are still missing.
 func (b *blockService) retryELColumnsImport(ctx context.Context, blockRoot common.Hash) {
-	if !b.elBlobsMissing.Remove(blockRoot) {
+	if !b.elBlobRetryRoots.Remove(blockRoot) {
 		return
 	}
 	if block, ok := b.forkchoiceStore.GetBlock(blockRoot); ok && block != nil {
@@ -430,8 +426,8 @@ func (b *blockService) retryELColumnsImport(ctx context.Context, blockRoot commo
 
 // importColumnsFromELBlobsCore builds the data columns of a Fulu or Gloas block from the blobs in the EL's pool
 // (engine_getBlobsV2), stores the ones this node keeps and publishes those on its subscribed subnets, so the block need
-// not wait for them on gossip. It reports whether the EL lacked a blob of the block.
-func (b *blockService) importColumnsFromELBlobsCore(ctx context.Context, block *cltypes.SignedBeaconBlock) (elLackedBlobs bool) {
+// not wait for them on gossip.
+func (b *blockService) importColumnsFromELBlobsCore(ctx context.Context, block *cltypes.SignedBeaconBlock) (needsRetry bool) {
 	if block.Version() < clparams.FuluVersion || b.engine == nil || b.blobCountOutOfRange(block) {
 		return
 	}

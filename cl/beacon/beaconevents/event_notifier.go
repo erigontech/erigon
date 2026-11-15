@@ -10,7 +10,7 @@ import (
 // Sized for every column of two blocks.
 const dataColumnStoredBufferSize = 256
 
-// One envelope per slot, so 64 rides out a loop stall of two epochs. A dropped root only skips its retry.
+// A full buffer drops the notification, which only skips that block's retry.
 const envelopeArrivedBufferSize = 64
 
 type EventEmitter struct {

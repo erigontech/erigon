@@ -198,16 +198,18 @@ func admitToForkChoice(b *blockService, block *cltypes.SignedBeaconBlock, root c
 	b.forkchoiceStore.(*mock_services.ForkChoiceStorageMock).Blocks[root] = block
 }
 
-func TestEnvelopeRetriesGloasELColumnsImportWhenTheELHadNoBlobs(t *testing.T) {
+func TestEnvelopeRetriesGloasELColumnsImportWhenTheELGaveNoUsableBlobs(t *testing.T) {
 	blobs := [][]byte{{1}, {2}}
 	proofs := [][][]byte{{{1}}, {{2}}}
 	for name, tc := range map[string]struct {
 		firstBlobs  [][]byte
 		firstProofs [][][]byte
+		firstErr    error
 	}{
 		"no response":             {},
 		"empty entry in response": {firstBlobs: [][]byte{{1}, {}}, firstProofs: [][][]byte{{{1}}, {}}},
 		"fewer blobs than asked":  {firstBlobs: [][]byte{{1}}, firstProofs: [][][]byte{{{1}}}},
+		"call failed":             {firstErr: errors.New("el down")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			b, engine, peerDas, columns := setupELBlobsBlockService(t)
@@ -216,7 +218,7 @@ func TestEnvelopeRetriesGloasELColumnsImportWhenTheELHadNoBlobs(t *testing.T) {
 			stored := []*cltypes.DataColumnSidecar{cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)}
 			gomock.InOrder(
 				peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil),
-				engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.GloasVersion).Return(tc.firstBlobs, tc.firstProofs, nil),
+				engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.GloasVersion).Return(tc.firstBlobs, tc.firstProofs, tc.firstErr),
 				peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil),
 				engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.GloasVersion).Return(blobs, proofs, nil),
 				peerDas.EXPECT().ImportColumnsFromBlobs(gomock.Any(), block, blobs, proofs).Return(stored, nil),
@@ -230,29 +232,6 @@ func TestEnvelopeRetriesGloasELColumnsImportWhenTheELHadNoBlobs(t *testing.T) {
 			require.Equal(t, [][]*cltypes.DataColumnSidecar{stored}, columns.published)
 		})
 	}
-}
-
-func TestEnvelopeRetriesGloasELColumnsImportWhenTheELFailed(t *testing.T) {
-	b, engine, peerDas, columns := setupELBlobsBlockService(t)
-	block, root, hashes := elBlobsTestBlock(t, clparams.GloasVersion, 2)
-	admitToForkChoice(b, block, root)
-	blobs := [][]byte{{1}, {2}}
-	proofs := [][][]byte{{{1}}, {{2}}}
-	stored := []*cltypes.DataColumnSidecar{cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)}
-	gomock.InOrder(
-		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil),
-		engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.GloasVersion).Return(nil, nil, errors.New("el down")),
-		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil),
-		engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.GloasVersion).Return(blobs, proofs, nil),
-		peerDas.EXPECT().ImportColumnsFromBlobs(gomock.Any(), block, blobs, proofs).Return(stored, nil),
-	)
-
-	b.importColumnsFromELBlobs(t.Context(), block)
-	require.Empty(t, columns.published)
-
-	b.retryELColumnsImport(t.Context(), root)
-
-	require.Equal(t, [][]*cltypes.DataColumnSidecar{stored}, columns.published)
 }
 
 func TestEnvelopeDoesNotRetryELColumnsImportOfABlockThatLeftForkChoice(t *testing.T) {
