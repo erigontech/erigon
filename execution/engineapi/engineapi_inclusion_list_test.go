@@ -19,6 +19,7 @@ package engineapi
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -27,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
@@ -34,7 +36,7 @@ import (
 
 func newGetInclusionListClient(t *testing.T, inclusionList func(context.Context) (types.Transactions, error)) *rpc.Client {
 	t.Helper()
-	return newEngineInProcClient(t, &EngineServer{logger: log.New(), executionService: &stubExecutionModule{inclusionListFunc: inclusionList}})
+	return newEngineInProcClient(t, &EngineServer{logger: log.New(), config: &chain.Config{BogotaTime: common.NewUint64(0)}, executionService: &stubExecutionModule{inclusionListFunc: inclusionList}})
 }
 
 func TestGetInclusionListV1(t *testing.T) {
@@ -98,4 +100,25 @@ func TestGetInclusionListV1JSONRPCClient(t *testing.T) {
 	want, err := types.MarshalTransactionsBinary(txns)
 	require.NoError(t, err)
 	require.Equal(t, []hexutil.Bytes{want[0]}, result)
+}
+
+func TestGetInclusionListV1RejectsBeforeBogota(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	srv := &EngineServer{
+		logger: log.New(),
+		config: &chain.Config{BogotaTime: common.NewUint64(math.MaxUint64)},
+		executionService: &stubExecutionModule{inclusionListFunc: func(context.Context) (types.Transactions, error) {
+			called = true
+			return nil, nil
+		}},
+	}
+
+	result, err := srv.GetInclusionListV1(t.Context())
+
+	require.Nil(t, result)
+	var unsupported *rpc.UnsupportedForkError
+	require.ErrorAs(t, err, &unsupported)
+	require.False(t, called)
 }

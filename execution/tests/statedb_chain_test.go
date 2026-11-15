@@ -22,9 +22,11 @@ package executiontests
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -32,7 +34,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
@@ -177,27 +178,15 @@ func TestSelfDestructReceive(t *testing.T) {
 // account: GetCode resolves separately and can report empty while a stale code
 // hash survives on the record. A pre-block deploy leaves no in-block CodeHash
 // cell to floor the destruct scan on, so both placements run.
-//
-// The block is built by the serial or the versioned generator and imported in
-// each mode. Clearing experimentalBAL alone leaves the parallel executor running,
-// so the driver sets dbg.Exec3Parallel — which rules out t.Parallel.
 func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
-		parallelImport bool
 		preBlockDeploy bool
-		parallelGen    bool
 	}{
-		{"serial/same-block-deploy", false, false, false},
-		{"parallel/same-block-deploy", true, false, false},
-		{"serial/pre-block-deploy", false, true, false},
-		{"parallel/pre-block-deploy", true, true, false},
-		{"versioned-gen/same-block-deploy", false, false, true},
+		{"same-block-deploy", false},
+		{"pre-block-deploy", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			prev := dbg.Exec3Parallel
-			dbg.Exec3Parallel = tc.parallelGen
-			t.Cleanup(func() { dbg.Exec3Parallel = prev })
 			var (
 				key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 				address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
@@ -253,7 +242,6 @@ func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 				contractBackend.Commit()
 			})
 			require.NoError(t, err)
-			dbg.Exec3Parallel = tc.parallelImport
 			require.NoError(t, m.InsertChain(chain.Slice(0, 3)))
 
 			require.NoError(t, m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
@@ -288,25 +276,24 @@ func shanghaiConfig() *chain.Config {
 	return c
 }
 
-// importSerialThenParallel builds n blocks with serial execution and imports
-// them into a serial node. Then, for each worker count, it imports the blocks as
+// importSerialThenParallel builds n blocks and imports them into a one-worker
+// node. Then, for each worker count, it imports the blocks as
 // one batch into a fresh parallel node.
 func importSerialThenParallel(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, n int, workerCounts []int, gen func(i int, b *blockgen.BlockGen)) (*execmoduletester.ExecModuleTester, []*execmoduletester.ExecModuleTester) {
 	t.Helper()
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
 	t.Cleanup(func() {
-		dbg.Exec3Parallel = prevParallel
 		ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers
 	})
-	dbg.Exec3Parallel = false
+	ethconfig.Defaults.Sync.ExecWorkerCount = 1
 	serial := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	chainPack, err := serial.GenerateChain(n, gen)
 	require.NoError(t, err)
+	requireGeneratedBlock(t, chainPack)
 	require.NoError(t, serial.InsertChain(chainPack))
 
 	var parallels []*execmoduletester.ExecModuleTester
 	for _, workers := range workerCounts {
-		dbg.Exec3Parallel = true
 		ethconfig.Defaults.Sync.ExecWorkerCount = workers
 		p := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 		require.NoErrorf(t, p.InsertChain(chainPack), "workers=%d: parallel import", workers)
@@ -403,7 +390,7 @@ func TestParallelBatchStorageAndHistoryMatchSerial(t *testing.T) {
 			b.AddTx(txn)
 		}
 	}
-	serial, parallels := importSerialThenParallel(t, gspec, keys[0], len(plan), []int{1, 4}, gen)
+	serial, parallels := importSerialThenParallel(t, gspec, keys[0], len(plan), []int{4}, gen)
 
 	slots := []uint64{1, 2}
 	for s := uint64(1000); s < obs; s++ {
@@ -416,9 +403,27 @@ func TestParallelBatchStorageAndHistoryMatchSerial(t *testing.T) {
 	}
 	sender := crypto.PubkeyToAddress(keys[0].PublicKey)
 	accountKeys := [][]byte{coinbase[:], sender[:]}
-	want := storageValues(t, serial, toggler, slots...)
+	want := make([]uint64, len(slots))
+	current1, current2 := uint64(0), uint64(5)
+	next := 2
+	for _, block := range plan {
+		for _, w := range block {
+			want[next], want[next+1] = current1+1, current2+1
+			next += 2
+			current1, current2 = w[0], w[1]
+		}
+	}
+	want[0], want[1] = current1, current2
+	require.Equal(t, want, storageValues(t, serial, toggler, slots...))
 	wantStorageHistory := domainHistory(t, serial, kv.StorageDomain, storageKeys, 1, uint64(len(plan)))
 	wantAccountHistory := domainHistory(t, serial, kv.AccountsDomain, accountKeys, 1, uint64(len(plan)))
+	// Pinned from a serial-executor run: every worker count shares the code path these histories come from.
+	digest := func(lines []string) string {
+		sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+		return hex.EncodeToString(sum[:])
+	}
+	require.Equal(t, "60362a675faf85d4a1482362d6391ce8ea3313a96bfc356152b8bd1820510b77", digest(wantStorageHistory))
+	require.Equal(t, "47a90e51ee80e1d7d3b6972b5e5bfca7cb8a4255a6539584d76cb9a00d1f6aa8", digest(wantAccountHistory))
 	for i, p := range parallels {
 		require.Equalf(t, want, storageValues(t, p, toggler, slots...), "parallel #%d: storage", i)
 		require.Equalf(t, wantStorageHistory, domainHistory(t, p, kv.StorageDomain, storageKeys, 1, uint64(len(plan))), "parallel #%d: per-tx storage history", i)

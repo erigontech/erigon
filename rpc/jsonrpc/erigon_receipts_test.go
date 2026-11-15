@@ -525,6 +525,28 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// Logs in erigon_getBlockReceiptsByBlockHash carry blockTimestamp, as in eth_getBlockReceipts.
+func TestGetBlockReceiptsByBlockHashLogsHaveBlockTimestamp(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	var header *types.Header
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		header = rawdb.ReadHeaderByNumber(tx, 10)
+		return nil
+	}))
+
+	receipts, err := api.GetBlockReceiptsByBlockHash(m.Ctx, header.Hash())
+	require.NoError(t, err)
+	var n int
+	for _, r := range receipts {
+		for _, l := range r.Logs {
+			require.Equal(t, new(hexutil.Uint64(header.Time)), l.BlockTimestamp)
+			n++
+		}
+	}
+	require.NotZero(t, n, "the block must have logs")
+}
+
 // TestGetLogs_RangeLimitExceeded verifies that eth_getLogs returns an error when the
 // requested block range exceeds rangeLimit.
 func TestGetLogs_RangeLimitExceeded(t *testing.T) {
