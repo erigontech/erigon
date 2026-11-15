@@ -47,8 +47,8 @@ type Timing struct {
 }
 
 // Validate reports a timing without a layout: L2 not whole seconds, K not an
-// integer of at least 2, or no room for the proof and the slack before the
-// next L1 block and within the K-1 blocks before the Sync block.
+// integer from 2 to MaxCatchup, or no room for the proof and the slack before
+// the next L1 block and within the K-1 blocks before the Sync block.
 func (t Timing) Validate() error {
 	invalid := func(format string, args ...any) error {
 		return fmt.Errorf("%w: %s", ErrTiming, fmt.Sprintf(format, args...))
@@ -65,6 +65,10 @@ func (t Timing) Validate() error {
 		return invalid("L1 block time %s is not a multiple of L2 block time %s", t.L1, t.L2)
 	case t.K() < 2:
 		return invalid("K = %d; the Sync block needs Live blocks before it", t.K())
+	case t.K() > MaxCatchup:
+		// A catch-up steps back from its target by whole slots; with more than
+		// MaxCatchup blocks in one it cannot reach a Sync block.
+		return invalid("K = %d; a catch-up of at most %d blocks cannot reach a Sync block", t.K(), MaxCatchup)
 	case t.Proof+t.Slack >= t.L1:
 		return invalid("proof time %s plus slack %s must be below L1 block time %s", t.Proof, t.Slack, t.L1)
 	case t.Proof+t.Slack > time.Duration(t.K()-1)*t.L2:

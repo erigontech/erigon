@@ -82,6 +82,7 @@ func TestTimingRejected(t *testing.T) {
 		"zero L1":                 {timing(0, 2_000, 4_000, 100), "positive"},
 		"zero L2":                 {timing(12_000, 0, 4_000, 100), "positive"},
 		"zero proof":              {timing(12_000, 2_000, 0, 100), "positive"},
+		"K past MaxCatchup":       {timing(600_000, 1_000, 1_000, 100), "K = 600"},
 	} {
 		err := tc.t.Validate()
 		require.ErrorIs(t, err, sequencer.ErrTiming, name)
