@@ -419,15 +419,7 @@ func TestDumpStepRangeToPath(t *testing.T) {
 	require.NoError(t, writer.PutWithPrev([]byte("k1"), []byte("v1"), 2, nil))
 	require.NoError(t, writer.PutWithPrev([]byte("k2"), []byte("v2"), 3, nil))
 
-	countDirty := func() int {
-		n := 0
-		d.dirtyFiles.Walk(func(items []*FilesItem) bool {
-			n += len(items)
-			return true
-		})
-		return n
-	}
-	beforeDirty := countDirty()
+	beforeDirty := d.dirtyFiles.Len()
 
 	dstDir := t.TempDir()
 	batch := &TemporalMemBatch{}
@@ -461,7 +453,7 @@ func TestDumpStepRangeToPath(t *testing.T) {
 	require.ErrorIsf(t, err, fs.ErrNotExist,
 		"unexpected file in SnapDomain at %s (err=%v)", snapKV, err)
 
-	require.Equal(t, beforeDirty, countDirty(), "dumping files must not publish them")
+	require.Equal(t, beforeDirty, d.dirtyFiles.Len(), "dumping files must not publish them")
 }
 
 func TestDomain_AfterPrune(t *testing.T) {

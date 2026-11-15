@@ -1159,9 +1159,7 @@ func TestMergeReplacementClosesAfterReaders(t *testing.T) {
 	const stepSize = uint64(10)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	ranges := []testFileRange{{0, 2}}
-	generateAccountsFile(t, agg.Dirs(), ranges)
-	generateStorageFile(t, agg.Dirs(), ranges)
-	generateCodeFile(t, agg.Dirs(), ranges)
+	generateStateFiles(t, agg.Dirs(), ranges)
 	generateCommitmentFile(t, agg.Dirs(), ranges)
 	require.NoError(t, agg.OpenFolder(db))
 

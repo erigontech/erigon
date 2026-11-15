@@ -1225,12 +1225,9 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 		defer a.buildingFiles.Store(false)
 		var plan fileBuildPlan
 		if toStep > fromStep {
-			if err := db.View(ctx, func(tx kv.Tx) (err error) {
-				at := a.BeginFilesRo()
-				defer at.Close()
-				plan, err = at.planFileBuild(tx)
-				return err
-			}); err != nil {
+			var err error
+			plan, err = a.readFileBuildPlan(ctx, db)
+			if err != nil {
 				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
 					a.logger.Warn("[snapshots] first step to build", "err", err)
 				}
@@ -1363,7 +1360,7 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
-	retired := make(retiredFiles, 0, 3*len(a.d)+len(a.iis))
+	var retired retiredFiles //nolint:prealloc // Most builds replace no files.
 	for id, d := range a.d {
 		retired = append(retired, d.integrateDirtyFiles(sf.d[id], txNumFrom, txNumTo)...)
 	}
@@ -2247,7 +2244,8 @@ func (a *Aggregator) BuildFilesInBackground(db kv.TemporalRoDB, txNum uint64, fi
 }
 
 type fileBuildPlan struct {
-	firstStep kv.Step
+	firstStep     kv.Step
+	nextStateStep kv.Step
 	// A job may start earlier for another entity, but even an empty file must
 	// respect its entity's lower bound to avoid lowering the shared ceiling.
 	domainFirstStep [kv.DomainLen]kv.Step
@@ -2257,10 +2255,20 @@ type fileBuildPlan struct {
 	deferredIndices [kv.StandaloneIdxLen]bool
 }
 
+func (a *Aggregator) readFileBuildPlan(ctx context.Context, db kv.RoDB) (plan fileBuildPlan, err error) {
+	err = db.View(ctx, func(tx kv.Tx) (err error) {
+		at := a.BeginFilesRo()
+		defer at.Close()
+		plan, err = at.planFileBuild(tx)
+		return err
+	})
+	return plan, err
+}
+
 func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 	stateStep := kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
 	ceilingStep := kv.Step(at.visible.ceilingTxNum / at.StepSize())
-	plan := fileBuildPlan{firstStep: stateStep}
+	plan := fileBuildPlan{firstStep: stateStep, nextStateStep: stateStep}
 	// Each step is published separately. Its end must reach the shared ceiling:
 	// the state minimum can be lower when a state file lacks its accessor.
 	var minResumeStep kv.Step
@@ -2378,15 +2386,8 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			defer a.snapshotBuildSema.Release(1)
 		}
 
-		var plan fileBuildPlan
-		var nextStateStep kv.Step
-		if err := db.View(a.ctx, func(tx kv.Tx) (err error) {
-			at := a.BeginFilesRo()
-			defer at.Close()
-			nextStateStep = kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
-			plan, err = at.planFileBuild(tx)
-			return err
-		}); err != nil {
+		plan, err := a.readFileBuildPlan(a.ctx, db)
+		if err != nil {
 			if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
 				a.logger.Warn("[snapshots] first step to build", "err", err)
 			}
@@ -2436,7 +2437,7 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		// Check the state-file boundary, even when a lagging domain resumes earlier.
 		// A gap here would produce empty files that falsely claim state coverage;
 		// an empty initial step is allowed when no state files exist.
-		if nextStateStep > 0 {
+		if plan.nextStateStep > 0 {
 			var firstInDB kv.Step
 			if err := db.View(a.ctx, func(tx kv.Tx) error {
 				for _, d := range []*Domain{a.d[kv.AccountsDomain], a.d[kv.StorageDomain], a.d[kv.CodeDomain]} {
@@ -2449,9 +2450,9 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			}); err != nil {
 				a.logger.Warn("[snapshots] gap-detection", "err", err)
 			}
-			if firstInDB > nextStateStep {
+			if firstInDB > plan.nextStateStep {
 				a.logger.Error("[snapshots] gap between snapshots and MDBX — refusing to build files",
-					"step", step, "nextStateStep", nextStateStep, "firstInDB", firstInDB, "lastInDB", lastInDB,
+					"step", step, "nextStateStep", plan.nextStateStep, "firstInDB", firstInDB, "lastInDB", lastInDB,
 					"hint", "MDBX history starts above the end of the state snapshots; building here would create empty step files and a merge would silently drop state. "+
 						"To recover, stop erigon and delete BOTH the state snapshots (e.g. `erigon snapshots reset`) AND the chaindata/ directory, then re-sync. "+
 						"Removing only the snapshots is not enough: an earlier build may have already populated chaindata with values read from a corrupt snapshot file.")
