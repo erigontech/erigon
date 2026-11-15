@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/erigontech/erigon/common"
 )
@@ -42,6 +43,7 @@ func TestAttestationDataMatchesProducer(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	sources := make(map[solid.Checkpoint]struct{})
 	var sawHeadTarget, sawAncestorTarget bool
+	var sawPreviousEpochSource bool
 	for _, block := range blocks {
 		root, err := block.Block.HashSSZ()
 		require.NoError(t, err)
@@ -50,6 +52,19 @@ func TestAttestationDataMatchesProducer(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, headState)
 		headEpoch := block.Block.Slot / cfg.SlotsPerEpoch
+		producer := attestation_producer.New(cfg)
+		firstSlot := max(state.PreviousEpoch(headState)*cfg.SlotsPerEpoch, blocks[0].Block.Slot)
+		for slot := firstSlot; slot < block.Block.Slot; slot++ {
+			ancestor := store.Ancestor(headRoot, slot)
+			want, ok := store.AttestationData(ancestor.Root, slot)
+			require.True(t, ok, "head slot %d, requested slot %d", block.Block.Slot, slot)
+			got, err := producer.ProduceAndCacheAttestationData(headState, headRoot, slot)
+			require.NoError(t, err)
+			require.Equal(t, want, got, "head slot %d, requested slot %d", block.Block.Slot, slot)
+			if slot/cfg.SlotsPerEpoch < headEpoch && headState.CurrentJustifiedCheckpoint() != headState.PreviousJustifiedCheckpoint() {
+				sawPreviousEpochSource = true
+			}
+		}
 		for _, slot := range []uint64{
 			block.Block.Slot,
 			(headEpoch+1)*cfg.SlotsPerEpoch - 1,
@@ -64,7 +79,7 @@ func TestAttestationDataMatchesProducer(t *testing.T) {
 			}
 
 			require.True(t, ok, "head slot %d, requested slot %d", block.Block.Slot, slot)
-			want, err := attestation_producer.New(cfg).ProduceAndCacheAttestationData(nil, headState, headRoot, slot)
+			want, err := attestation_producer.New(cfg).ProduceAndCacheAttestationData(headState, headRoot, slot)
 			require.NoError(t, err)
 			require.Equal(t, want, got)
 
@@ -80,4 +95,5 @@ func TestAttestationDataMatchesProducer(t *testing.T) {
 	require.GreaterOrEqual(t, len(sources), 2)
 	require.True(t, sawHeadTarget)
 	require.True(t, sawAncestorTarget)
+	require.True(t, sawPreviousEpochSource)
 }

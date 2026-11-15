@@ -293,6 +293,8 @@ var (
 
 	StatesProcessingKey          = []byte("StatesProcessing")
 	MinimumPrunableStepDomainKey = []byte("MinimumPrunableStepDomainKey")
+
+	CaplinBlobsArchiveFromSlotKey = []byte("caplinBlobsArchiveFromSlot")
 )
 
 // Vals

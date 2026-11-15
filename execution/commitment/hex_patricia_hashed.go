@@ -1355,16 +1355,6 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 		if hph.traceW != nil {
 			fmt.Fprintf(hph.traceW, "needUnfolding root, rootChecked = %t\n", hph.rootChecked)
 		}
-		if hph.root.hashedExtLen == 64 && hph.root.accountAddrLen > 0 && hph.root.storageAddrLen > 0 {
-			// in case if root is a leaf node with storage and account, we need to derive storage part of a key
-			if err := hph.root.deriveHashedKeys(depth, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
-				log.Warn("deriveHashedKeys for root with storage", "err", err, "cell", hph.root.FullString())
-				return 0
-			}
-			if hph.traceW != nil {
-				fmt.Fprintf(hph.traceW, "derived prefix %x\n", hph.currentKey[:hph.currentKeyLen])
-			}
-		}
 		if hph.root.hashedExtLen == 0 && hph.root.hashLen == 0 {
 			if hph.rootChecked {
 				return 0 // Previously checked, empty root, no unfolding needed
@@ -2005,6 +1995,11 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 	}
 	// propagate cell into parent row
 	upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], childNibble)
+	if row == 0 {
+		if err := hph.deriveRootLeafPath(); err != nil {
+			return err
+		}
+	}
 
 	if err := hph.collectDeleteUpdate(updateKey, row); err != nil {
 		return err
@@ -2306,10 +2301,10 @@ func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 	hph.collapseTracer(siblingPath, bytes.Clone(hph.currentKey[:depth]))
 }
 
-// deleteStorageSubtreeBranches tombstones every persisted commitment branch under
-// a self-destructed account's storage subtree, so a later recreate at the same
-// address cannot fold in stale branches. It uses bounded point reads rather than a
-// domain range scan, which on the step-sharded commitment domain would map every file.
+// deleteStorageSubtreeBranches tombstones every persisted commitment branch under the
+// storage subtree of an account that was self-destructed or created as a contract, so
+// its new storage cannot fold in stale branches. It uses bounded point reads rather than
+// a domain range scan, which on the step-sharded commitment domain would map every file.
 func (hph *HexPatriciaHashed) deleteStorageSubtreeBranches(prefix []byte) error {
 	branch, err := hph.branchFromCacheOrDB(nibbles.HexToCompact(prefix))
 	if err != nil {
@@ -2359,9 +2354,10 @@ func (hph *HexPatriciaHashed) deleteStorageSubtreeBranches(prefix []byte) error 
 	return hph.branchEncoder.CollectTombstone(hph.ctx, nibbles.HexToCompact(prefix), maps.Bitmap, branch)
 }
 
-// resetAccountStorageRoot clears the in-grid account cell's storage-root reference
-// so a self-destructed account rebuilds from empty storage rather than re-mounting
-// its old subtree (persisted branches are tombstoned by deleteStorageSubtreeBranches).
+// resetAccountStorageRoot clears the in-grid account cell's storage-root reference so
+// a self-destructed or created account rebuilds from empty storage rather than
+// re-mounting its old subtree (persisted branches are tombstoned by
+// deleteStorageSubtreeBranches).
 func (hph *HexPatriciaHashed) resetAccountStorageRoot(hashedKey []byte) {
 	if hph.activeRows == 0 {
 		return
@@ -2446,6 +2442,9 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 
 func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	hph.root.stateHashLen = 0
+	if _, err := hph.loadStateIfNeeded(&hph.root, skipStat{}); err != nil {
+		return nil, err
+	}
 	rootHash, err := hph.computeCellHash(&hph.root, 0, nil)
 	if err != nil {
 		return nil, err
@@ -2503,9 +2502,9 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			}
 		}
 	}
-	// A self-destruct that recreates the account carries the transient
-	// DeleteStorageSubtree marker: tombstone the persisted storage branches and
-	// reset the in-grid storage root before applying the recreate, so no stale
+	// An account self-destructed or created as a contract in the block carries the
+	// transient DeleteStorageSubtree marker: tombstone the persisted storage branches
+	// and reset the in-grid storage root before applying the update, so no stale
 	// slot folds back in. The path is unfolded above, so the account cell is reachable.
 	if stateUpdate != nil && stateUpdate.DeleteStorageSubtree && int16(len(plainKey)) == hph.accountKeyLen {
 		// A storage root shared by every slot is an extension: its first branch is below it.
@@ -3236,13 +3235,8 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		hph.root.setFromUpdate(update)
 		hph.root.loaded = hph.root.loaded.addFlag(cellLoadStorage)
 	}
-	// A leaf root's navigation path is derivable but not reliably persisted: without it a
-	// wall probe sees an unfoldable root and the mount paths overwrite the leaf in place.
-	if hph.root.accountAddrLen > 0 || hph.root.storageAddrLen > 0 {
-		hph.root.hashedExtLen = 0
-		if err := hph.root.deriveHashedKeys(0, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
-			return err
-		}
+	if err := hph.deriveRootLeafPath(); err != nil {
+		return err
 	}
 	// Blobs written before propagate folds set rootPresent carry false for non-empty
 	// roots; a non-empty root is present by definition.
@@ -3251,6 +3245,17 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	}
 
 	return nil
+}
+
+// deriveRootLeafPath rebuilds a leaf root's navigation path from its keys. The root is the
+// only cell that outlives a Process call, and neither a propagate fold nor a state blob
+// leaves it a path the next unfold can trust.
+func (hph *HexPatriciaHashed) deriveRootLeafPath() error {
+	if hph.root.accountAddrLen == 0 && hph.root.storageAddrLen == 0 {
+		return nil
+	}
+	hph.root.hashedExtLen = 0
+	return hph.root.deriveHashedKeys(0, hph.accountKeyLen, hph.cellHashBuf[:])
 }
 
 func HexTrieExtractStateRoot(enc []byte) ([]byte, uint64, uint64, error) {

@@ -173,14 +173,6 @@ func ResetBadBlockCache(tx kv.Tx, limit int) error {
 
 /* latest bad blocks end */
 
-func IsCanonicalHash(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
-	canonicalHash, err := ReadCanonicalHash(db, number)
-	if err != nil {
-		return false, err
-	}
-	return canonicalHash != (common.Hash{}) && canonicalHash == hash, nil
-}
-
 // ReadHeaderNumber returns the header number assigned to a hash.
 func ReadHeaderNumber(db kv.Getter, hash common.Hash) *uint64 {
 	data, err := db.GetOne(kv.HeaderNumber, hash[:])
@@ -440,19 +432,6 @@ func WriteHeader(db kv.RwTx, header *types.Header) error {
 	return nil
 }
 
-func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash common.Hash, headerRlp []byte, skipIndexing bool) error {
-	if err := db.Put(kv.Headers, dbutils.HeaderKey(number, hash), headerRlp); err != nil {
-		return err
-	}
-	if skipIndexing {
-		return nil
-	}
-	if err := WriteHeaderNumber(db, hash, number); err != nil {
-		return err
-	}
-	return nil
-}
-
 // DeleteHeader - dangerous, use PruneBlocks/TruncateBlocks methods
 func DeleteHeader(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.Headers, dbutils.HeaderKey(number, hash)); err != nil {
@@ -470,18 +449,6 @@ func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVa
 		log.Error("ReadStorageBodyRLP failed", "err", err)
 	}
 	return bodyRlp
-}
-
-func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, bool, error) {
-	txnRlp, err := TxnRlpByIdxInBlock(db, blockHash, blockNum, txIdxInBlock)
-	if err != nil || txnRlp == nil {
-		return nil, false, err
-	}
-	txn, err := types.DecodeTransaction(txnRlp)
-	if err != nil {
-		return nil, false, err
-	}
-	return txn, true, nil
 }
 
 // TxnRlpByIdxInBlock returns the stored encoding of the i-th transaction of a block, or nil when it does not exist.
@@ -752,9 +719,6 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 }
 
 func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (err error) {
-	// Pre-processing
-	body.SendersFromTxs()
-
 	baseTxnID, err := db.IncrementSequence(kv.EthTx, uint64(types.TxCountToTxAmount(len(body.Transactions))))
 	if err != nil {
 		return err
@@ -1290,6 +1254,34 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 	}
 	if err := tx.Put(kv.DatabaseInfo, kv.CommitmentLayoutFlagKey, value); err != nil {
 		return fmt.Errorf("writing DB commitment history enabled flag: %w", err)
+	}
+	return nil
+}
+
+func ReadCaplinBlobsArchiveFromSlot(tx kv.Getter) (uint64, error) {
+	v, err := tx.GetOne(kv.DatabaseInfo, kv.CaplinBlobsArchiveFromSlotKey)
+	if err != nil {
+		return 0, fmt.Errorf("reading caplin blobs archive from-slot: %w", err)
+	}
+	if len(v) == 0 {
+		return 0, nil
+	}
+	if len(v) != 8 {
+		return 0, fmt.Errorf("incorrect length of caplin blobs archive from-slot: %d", len(v))
+	}
+	return binary.BigEndian.Uint64(v), nil
+}
+
+func RaiseCaplinBlobsArchiveFromSlot(tx kv.RwTx, slot uint64) error {
+	stored, err := ReadCaplinBlobsArchiveFromSlot(tx)
+	if err != nil {
+		return err
+	}
+	if slot <= stored {
+		return nil
+	}
+	if err := tx.Put(kv.DatabaseInfo, kv.CaplinBlobsArchiveFromSlotKey, binary.BigEndian.AppendUint64(nil, slot)); err != nil {
+		return fmt.Errorf("writing caplin blobs archive from-slot: %w", err)
 	}
 	return nil
 }

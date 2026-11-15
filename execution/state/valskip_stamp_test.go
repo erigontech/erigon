@@ -315,6 +315,26 @@ func TestQuietBelow_NoOpBALFlushDoesNotBump(t *testing.T) {
 	require.True(t, vm.QuietBelow(5, stamp), "a flush that changes no cell must not stamp")
 }
 
+func TestQuietBelow_NoOpBALCodeFlushDoesNotBump(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x09"))
+	code := accounts.NewCode([]byte{0x60, 0x00})
+	version := Version{TxIndex: 3}
+	vm := NewVersionMap(nil)
+	vm.WriteCode(addr, version, code, true)
+	vm.WriteCodeHash(addr, version, code.Hash, true)
+	vm.WriteCodeSize(addr, version, code.Len(), true)
+	vm.HasBAL = true
+	vm.InitStamps(32)
+	stamp := vm.WriteSeq()
+	ws := &WriteSet{}
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: version}, Val: code})
+	ws.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: version}, Val: code.Hash})
+	ws.SetCodeSize(addr, &VersionedWrite[int]{WriteHeader: WriteHeader{Address: addr, Path: CodeSizePath, Version: version}, Val: code.Len()})
+	vm.FlushVersionedWrites(ws, false)
+	require.True(t, vm.QuietBelow(5, stamp), "an equal code flush must not stamp")
+}
+
 func TestQuietBelow_WriterOutsideLayoutPanics(t *testing.T) {
 	t.Parallel()
 	const last = 7

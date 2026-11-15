@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
@@ -53,7 +54,13 @@ func allForksConfig() *chain.Config {
 }
 
 func newTestEngineServer(cfg *chain.Config, consuming bool) *EngineServer {
-	return NewEngineServer(log.New(), cfg, nil, nil, false, true, false, consuming, nil, nil, 0, 0)
+	return NewEngineServer(log.New(), cfg, &stubExecutionModule{}, nil, false, true, false, consuming, nil, nil, 0, 0)
+}
+
+func newBodiesTestEngineServer(t *testing.T, module execmodule.ExecutionModule) *EngineServer {
+	cfg := allForksConfig()
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), module, nil, nil, cfg, ethconfig.Sync{}, nil)
+	return NewEngineServer(log.New(), cfg, module, downloader, false, true, false, true, nil, nil, 0, 0)
 }
 
 type bodiesExecutionModule struct {
@@ -362,6 +369,70 @@ func TestSSZRESTPayloadStatusSpecExample(t *testing.T) {
 	require.Equal(t, []byte("bad state root"), encB[13:27])
 }
 
+// sszByteLists encodes List[ByteList[N], M] by hand: one offset per item, then the items.
+func sszByteLists(items []hexutil.Bytes) []byte {
+	var out []byte
+	offset := 4 * len(items)
+	for _, item := range items {
+		out = binary.LittleEndian.AppendUint32(out, uint32(offset))
+		offset += len(item)
+	}
+	for _, item := range items {
+		out = append(out, item...)
+	}
+	return out
+}
+
+func TestSSZRESTPayloadStatusWithWitnessByteLayout(t *testing.T) {
+	latest := common.HexToHash("0xcd")
+	status := &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latest}
+	statusEnc, err := status.EncodeSSZ(nil)
+	require.NoError(t, err)
+	witness := &jsonrpc.ExecutionWitnessResult{
+		State:   []hexutil.Bytes{{0x01, 0x02}, {0x03}},
+		Codes:   []hexutil.Bytes{{0x60, 0x00}},
+		Headers: []hexutil.Bytes{{0xf9, 0x01, 0x02}},
+	}
+	state, codes, headers := sszByteLists(witness.State), sszByteLists(witness.Codes), sszByteLists(witness.Headers)
+	witnessEnc := binary.LittleEndian.AppendUint32(nil, 12)
+	witnessEnc = binary.LittleEndian.AppendUint32(witnessEnc, uint32(12+len(state)))
+	witnessEnc = binary.LittleEndian.AppendUint32(witnessEnc, uint32(12+len(state)+len(codes)))
+	witnessEnc = slices.Concat(witnessEnc, state, codes, headers)
+	prefix := binary.LittleEndian.AppendUint32(nil, 8)
+	prefix = binary.LittleEndian.AppendUint32(prefix, uint32(8+len(statusEnc)))
+
+	enc, err := encodePayloadStatusWithWitness(status, witness)
+	require.NoError(t, err)
+	// Optional[ExecutionWitness] is List[ExecutionWitness, 1]: one element offset, then the element.
+	require.Equal(t, slices.Concat(prefix, statusEnc, []byte{4, 0, 0, 0}, witnessEnc), enc)
+	decodedStatus, decodedWitness, err := decodePayloadStatusWithWitness(enc)
+	require.NoError(t, err)
+	require.Equal(t, status, decodedStatus)
+	require.Equal(t, witness, decodedWitness)
+
+	enc, err = encodePayloadStatusWithWitness(status, nil)
+	require.NoError(t, err)
+	require.Equal(t, slices.Concat(prefix, statusEnc), enc)
+	_, decodedWitness, err = decodePayloadStatusWithWitness(enc)
+	require.NoError(t, err)
+	require.Nil(t, decodedWitness)
+}
+
+func TestSSZRESTPayloadStatusWithWitnessRejectsOversizedItems(t *testing.T) {
+	status := &engine_types.PayloadStatus{Status: engine_types.ValidStatus}
+	for name, witness := range map[string]*jsonrpc.ExecutionWitnessResult{
+		"state node": {State: []hexutil.Bytes{make(hexutil.Bytes, sszMaxBytesPerWitnessNode+1)}},
+		"code":       {Codes: []hexutil.Bytes{make(hexutil.Bytes, sszMaxBytesPerCode+1)}},
+		"header":     {Headers: []hexutil.Bytes{make(hexutil.Bytes, sszMaxBytesPerHeader+1)}},
+		"headers":    {Headers: make([]hexutil.Bytes, sszMaxWitnessHeaders+1)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := encodePayloadStatusWithWitness(status, witness)
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestSSZRESTPayloadStatusEnumRoundTrip(t *testing.T) {
 	latest := common.HexToHash("0x1234")
 	wire := &engine_types.PayloadStatus{
@@ -586,7 +657,7 @@ func TestSSZRESTBodiesRequestLimit(t *testing.T) {
 					32: {Number: *uint256.NewInt(32), Time: 200},
 				},
 			}
-			srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+			srv := newBodiesTestEngineServer(t, module)
 			rec := httptest.NewRecorder()
 			srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), tc.method, tc.path, "cancun", tc.body))
 
@@ -622,7 +693,7 @@ func TestSSZRESTBodiesExcludePoW(t *testing.T) {
 					pos.Hash(): {Transactions: [][]byte{{0x02}}},
 				},
 			}
-			srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+			srv := newBodiesTestEngineServer(t, module)
 			rec := httptest.NewRecorder()
 			srv.SSZRESTHandler().ServeHTTP(rec,
 				newSSZRequest(t.Context(), tc.method, tc.path, "paris", tc.body))
@@ -656,7 +727,7 @@ func TestSSZRESTBodiesByHashFiltersForkEra(t *testing.T) {
 			prague.Hash():   prague,
 		},
 	}
-	srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+	srv := newBodiesTestEngineServer(t, module)
 	hashes := []common.Hash{prague.Hash(), cancun.Hash(), shanghai.Hash(), {0xff}}
 	body, err := encodeHashListRequest(hashes, sszMaxBodiesRequest)
 	require.NoError(t, err)
@@ -678,6 +749,33 @@ func TestSSZRESTBodiesByHashFiltersForkEra(t *testing.T) {
 			require.Empty(t, entries[i].Withdrawals)
 			require.Empty(t, entries[i].BlockAccessList)
 		}
+	}
+}
+
+func TestSSZRESTBodiesByHashOmitsAKnownBadBlock(t *testing.T) {
+	valid := &types.Header{Time: 200}
+	invalid := &types.Header{Time: 201}
+	module := &bodiesExecutionModule{
+		bodies: map[common.Hash]*execmodule.PayloadBody{
+			valid.Hash():   {Transactions: [][]byte{{0x01}}},
+			invalid.Hash(): {Transactions: [][]byte{{0x02}}},
+		},
+		headersByHash: map[common.Hash]*types.Header{valid.Hash(): valid, invalid.Hash(): invalid},
+	}
+	srv := newBodiesTestEngineServer(t, module)
+	srv.blockDownloader.ReportBadHeader(invalid.Hash(), common.Hash{}, "invalid block")
+	body, err := encodeHashListRequest([]common.Hash{valid.Hash(), invalid.Hash(), valid.Hash()}, sszMaxBodiesRequest)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec,
+		newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/bodies/hash", "cancun", body))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	entries, err := decodeBodiesResponse(rec.Body.Bytes(), clparams.DenebVersion)
+	require.NoError(t, err)
+	require.Len(t, entries, 3)
+	for i, available := range []bool{true, false, true} {
+		require.Equal(t, available, entries[i].Available, "entry %d", i)
 	}
 }
 
@@ -751,7 +849,7 @@ func TestSSZRESTBodiesRejectHeaderReadErrors(t *testing.T) {
 					return make([]*execmodule.PayloadBody, len(hashes)), nil
 				},
 			}
-			srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+			srv := newBodiesTestEngineServer(t, module)
 			rec := httptest.NewRecorder()
 			srv.SSZRESTHandler().ServeHTTP(rec,
 				newSSZRequest(t.Context(), tc.method, tc.path, "cancun", tc.body))
@@ -793,7 +891,7 @@ func TestSSZRESTBodiesSkipRetrievalOutsideForkEra(t *testing.T) {
 					headers[11].Hash(): headers[11],
 				},
 			}
-			srv := NewEngineServer(log.New(), allForksConfig(), module, nil, false, true, false, true, nil, nil, 0, 0)
+			srv := newBodiesTestEngineServer(t, module)
 			rec := httptest.NewRecorder()
 			srv.SSZRESTHandler().ServeHTTP(rec,
 				newSSZRequest(t.Context(), tc.method, tc.path, "cancun", tc.body))
@@ -1086,7 +1184,7 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &caps))
 	require.Equal(t, []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"}, caps.SupportedForks)
-	require.Equal(t, []string{"payloads", "forkchoice", "bodies"}, caps.ForkScopedEndpoints)
+	require.Equal(t, []string{"payloads", "payloads/witness", "forkchoice", "bodies"}, caps.ForkScopedEndpoints)
 	require.Equal(t, []string{"v1", "v2", "v3", "v4"}, caps.IndependentlyVersioned["blobs"])
 	require.Equal(t, []string{"capabilities", "identity", "inclusion-list"}, caps.UnscopedEndpoints)
 	// pin the spec's MAX_* values: MAX_BODIES_REQUEST, MAX_VERSIONED_HASHES_PER_REQUEST,
@@ -1257,6 +1355,36 @@ func TestSSZRESTNewPayloadForkMatching(t *testing.T) {
 			require.ErrorContains(t, status.ValidationError.Error(), "invalid block hash")
 		})
 	}
+}
+
+func TestSSZRESTPayloadWitnessRequiresAmsterdam(t *testing.T) {
+	srv := newTestEngineServer(allForksConfig(), true)
+	for _, fork := range []string{"paris", "shanghai", "cancun", "prague", "osaka"} {
+		t.Run(fork, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads/witness", fork, nil))
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Equal(t, problemUnsupportedFork, problemType(t, rec))
+		})
+	}
+}
+
+func TestSSZRESTPayloadWitnessOmittedWhenNotValid(t *testing.T) {
+	payload := engine_types.NewExecutionPayloadSSZ(clparams.GloasVersion)
+	payload.Timestamp = 500
+	payload.BlockAccessList = &hexutil.Bytes{0xc0}
+	body, err := encodeNewPayloadEnvelope(clparams.GloasVersion, payload, common.Hash{}, nil)
+	require.NoError(t, err)
+	srv := newTestEngineServer(allForksConfig(), true)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads/witness", "amsterdam", body))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
+	status, witness, err := decodePayloadStatusWithWitness(rec.Body.Bytes())
+	require.NoError(t, err)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.Nil(t, witness)
 }
 
 func TestSSZRESTNewPayloadRejectsExcessTransactionsBeforeDecoding(t *testing.T) {
@@ -1901,7 +2029,7 @@ func TestSSZRESTMaximalForkchoiceUpdateFitsBodyLimit(t *testing.T) {
 
 func TestSSZRESTGetInclusionListRoute(t *testing.T) {
 	txns := types.Transactions{types.NewTransaction(0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), nil)}
-	srv := NewEngineServer(log.New(), &chain.Config{}, &stubExecutionModule{
+	srv := NewEngineServer(log.New(), &chain.Config{BogotaTime: common.NewUint64(0)}, &stubExecutionModule{
 		inclusionListFunc: func(context.Context) (types.Transactions, error) { return txns, nil },
 	}, nil, false, true, false, false, nil, nil, 0, 0)
 

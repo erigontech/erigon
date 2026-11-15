@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
@@ -231,9 +230,6 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 // the per-request regeneration budget and retries of the unserved suffix.
 func TestGetBlockAccessListsResponseMatrix(t *testing.T) {
 	t.Parallel()
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	const (
 		chainLength    = 45
 		emptyBlockNum  = 42
@@ -437,5 +433,50 @@ func TestGetBlockAccessListsResponseMatrix(t *testing.T) {
 			}
 			require.Equal(t, tt.expect, received)
 		})
+	}
+}
+
+func TestReceiptsLoaderRegeneratesCommittedBlockReceipts(t *testing.T) {
+	m, privKey, senderAddr := newMetricsTester(t)
+	chainResult, err := m.GenerateChain(2, sendThenDeploy(t, m, privKey, senderAddr, 1_000))
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainResult.Blocks))
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	load := execmodule.NewReceiptsLoader(m.ChainConfig, m.BlockReader, receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute))
+
+	for i, block := range chainResult.Blocks {
+		got, err := load(m.Ctx, tx, block.NumberU64())
+		require.NoError(t, err)
+		require.Equal(t, block.Hash(), got.Header.Hash())
+		require.Len(t, got.Txs, len(block.Transactions()))
+		require.Len(t, got.Receipts, len(chainResult.Receipts[i]))
+		for j, r := range got.Receipts {
+			require.Equal(t, chainResult.Receipts[i][j].CumulativeGasUsed, r.CumulativeGasUsed)
+			require.Equal(t, block.Hash(), r.BlockHash)
+		}
+	}
+}
+
+func TestForwardForkchoiceJumpDeliversReceipts(t *testing.T) {
+	m, privKey, senderAddr := newMetricsTester(t)
+	chainResult, err := m.GenerateChain(20, sendThenDeploy(t, m, privKey, senderAddr, 1_000))
+	require.NoError(t, err)
+	want := 0
+	for _, blockReceipts := range chainResult.Receipts {
+		want += len(blockReceipts)
+	}
+	receipts, unsubscribe := m.Notifications.Events.AddReceiptsSubscription()
+	t.Cleanup(unsubscribe)
+	m.Notifications.Events.EmptyReceiptSubscription(false)
+
+	require.NoError(t, m.InsertChain(chainResult))
+
+	select {
+	case got := <-receipts:
+		require.Len(t, got, want)
+	case <-time.After(10 * time.Second):
+		t.Fatal("a forward forkchoice jump delivered no receipts")
 	}
 }

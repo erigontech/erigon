@@ -1,12 +1,14 @@
 package stages
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"math"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -19,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -50,42 +53,137 @@ func (*failingRequestSentinel) PeersInfo(context.Context, *sentinelproto.PeersIn
 // TestFetchBlocksFromReqRespPacesRetriesAfterRequestErrors checks that a failed block request is retried
 // after a pause. Retrying at once floods the peers with requests until the stage deadline.
 func TestFetchBlocksFromReqRespPacesRetriesAfterRequestErrors(t *testing.T) {
-	beaconCfg := clparams.MainnetBeaconConfig
-	sentinel := &failingRequestSentinel{}
-	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &beaconCfg)
-	cfg := &Cfg{rpc: rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock)}
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		beaconCfg := clparams.MainnetBeaconConfig
+		sentinel := &failingRequestSentinel{}
+		clock := eth_clock.NewEthereumClock(0, common.Hash{}, &beaconCfg)
+		cfg := &Cfg{rpc: rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock)}
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
 
-	_, err := fetchBlocksFromReqResp(ctx, cfg, 100, 10)
+		_, err := fetchBlocksFromReqResp(ctx, cfg, 100, 10)
 
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Less(t, sentinel.calls.Load(), int64(10), "one second of failures must not turn into a request flood")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Less(t, sentinel.calls.Load(), int64(10), "one second of failures must not turn into a request flood")
+	})
 }
 
 func TestStartFetchingBlocksMissedByGossipPacesSuccessfulPolls(t *testing.T) {
-	beaconCfg := clparams.MainnetBeaconConfig
-	beaconCfg.SecondsPerSlot = 1
-	sentinel := &chainTipBatchEnvelopeSentinel{}
-	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-100, common.Hash{}, &beaconCfg)
-	cfg := &Cfg{
-		beaconCfg:  &beaconCfg,
-		ethClock:   clock,
-		forkChoice: &forkchoice.ForkChoiceStore{},
-		rpc:        rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock),
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
-	defer cancel()
-	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1024)
-	go func() {
-		for range respCh {
+	synctest.Test(t, func(t *testing.T) {
+		beaconCfg := clparams.MainnetBeaconConfig
+		beaconCfg.SecondsPerSlot = 1
+		sentinel := &chainTipBatchEnvelopeSentinel{}
+		clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-100, common.Hash{}, &beaconCfg)
+		cfg := &Cfg{
+			beaconCfg:  &beaconCfg,
+			ethClock:   clock,
+			forkChoice: &forkchoice.ForkChoiceStore{},
+			rpc:        rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock),
 		}
-	}()
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1024)
+		go func() {
+			for range respCh {
+			}
+		}()
 
-	startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, respCh, make(chan error, 1))
-	close(respCh)
+		startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, respCh, make(chan error, 1))
+		close(respCh)
 
-	require.LessOrEqual(t, sentinel.calls, 3, "polls that return no new block must be paced")
+		require.LessOrEqual(t, sentinel.calls, 3, "polls that return no new block must be paced")
+	})
+}
+
+type rangeStartSentinel struct {
+	chainTipBatchEnvelopeSentinel
+	starts []uint64
+}
+
+func (s *rangeStartSentinel) SendRequest(ctx context.Context, req *sentinelproto.RequestData, opts ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	r := &cltypes.BeaconBlocksByRangeRequest{}
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(req.Data), r, clparams.Phase0Version); err == nil {
+		s.starts = append(s.starts, r.StartSlot)
+	}
+	return s.chainTipBatchEnvelopeSentinel.SendRequest(ctx, req, opts...)
+}
+
+// A run of skipped slots longer than one request must not make every poll ask for the same empty window.
+func TestStartFetchingBlocksMissedByGossipCrossesSkippedSlots(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		beaconCfg := clparams.MainnetBeaconConfig
+		beaconCfg.SecondsPerSlot = 1
+		sentinel := &rangeStartSentinel{}
+		clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-200, common.Hash{}, &beaconCfg)
+		cfg := &Cfg{
+			beaconCfg:  &beaconCfg,
+			ethClock:   clock,
+			forkChoice: &forkchoice.ForkChoiceStore{},
+			rpc:        rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock),
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 2700*time.Millisecond)
+		defer cancel()
+		respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1024)
+		go func() {
+			for range respCh {
+			}
+		}()
+
+		startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, respCh, make(chan error, 1))
+		close(respCh)
+
+		require.GreaterOrEqual(t, len(sentinel.starts), 2)
+		require.Equal(t, sentinel.starts[0]+maxChainTipRequestCount, sentinel.starts[1], "the next poll must start after the empty window")
+	})
+}
+
+func TestStartFetchingBlocksMissedByGossipResumesAcrossAttempts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		beaconCfg := clparams.MainnetBeaconConfig
+		beaconCfg.SecondsPerSlot = 1
+		sentinel := &rangeStartSentinel{}
+		clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-200, common.Hash{}, &beaconCfg)
+		cfg := &Cfg{
+			beaconCfg:  &beaconCfg,
+			ethClock:   clock,
+			forkChoice: &forkchoice.ForkChoiceStore{},
+			rpc:        rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock),
+		}
+		respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1024)
+		attempt := func() {
+			ctx, cancel := context.WithTimeout(t.Context(), 1200*time.Millisecond)
+			defer cancel()
+			startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, respCh, make(chan error, 1))
+		}
+
+		attempt()
+		last := len(sentinel.starts) - 1
+		require.GreaterOrEqual(t, last, 0)
+		attempt()
+
+		require.Greater(t, len(sentinel.starts), last+1)
+		require.Equal(t, sentinel.starts[last]+maxChainTipRequestCount, sentinel.starts[last+1], "a new attempt must continue past the empty windows")
+	})
+}
+
+func TestStartFetchingBlocksMissedByGossipKeepsAnUnfetchedWindow(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		beaconCfg := clparams.MainnetBeaconConfig
+		beaconCfg.SecondsPerSlot = 1
+		clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-100, common.Hash{}, &beaconCfg)
+		cfg := &Cfg{
+			beaconCfg:  &beaconCfg,
+			ethClock:   clock,
+			forkChoice: &forkchoice.ForkChoiceStore{},
+			rpc:        rpc.NewBeaconRpcP2P(t.Context(), &failingRequestSentinel{}, &beaconCfg, clock),
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 800*time.Millisecond)
+		defer cancel()
+
+		startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1), make(chan error, 1))
+
+		require.Zero(t, cfg.chainTipResumeSlot.Load(), "a window that was never fetched must be asked for again")
+	})
 }
 
 func TestStartFetchingBlocksMissedByGossipReturnsAfterCancelWithoutErrorReader(t *testing.T) {
@@ -137,6 +235,10 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 	atTipPublished.headUnpublished = false
 	epochsBehind := unpublished
 	epochsBehind.seenSlot, epochsBehind.seenEpoch, epochsBehind.targetEpoch = 3, 0, 1
+	epochsBehindAtTip := epochsBehind
+	epochsBehindAtTip.atForwardSyncTip = true
+	epochsBehindAtTipPublished := epochsBehindAtTip
+	epochsBehindAtTipPublished.headUnpublished = false
 
 	tests := []struct {
 		name              string
@@ -151,12 +253,16 @@ func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
 		{name: "forward sync reached the target, head unpublished", stage: ForwardSync, args: atTip, want: ChainTipSync},
 		{name: "forward sync, head published", stage: ForwardSync, args: behind, want: ChainTipSync},
 		{name: "forward sync, epochs behind", stage: ForwardSync, args: epochsBehind, want: ForwardSync},
+		{name: "forward sync, epochs behind at tip", stage: ForwardSync, args: epochsBehindAtTip, want: ForkChoice},
+		{name: "forward sync, epochs behind at tip, head published", stage: ForwardSync, args: epochsBehindAtTipPublished, want: ForkChoice},
 		{name: "chain tip timeout, head unpublished", stage: ChainTipSync, args: unpublished, err: context.DeadlineExceeded, want: ForkChoice},
 		{name: "chain tip timeout, head published", stage: ChainTipSync, args: behind, err: context.DeadlineExceeded, want: ChainTipSync},
+		{name: "chain tip timeout, head published at forward sync tip", stage: ChainTipSync, args: epochsBehindAtTipPublished, err: context.DeadlineExceeded, want: ForkChoice},
 		{name: "chain tip reached the target", stage: ChainTipSync, args: atTip, want: ForkChoice},
 		{name: "sleep ended at the slot start, head unpublished", stage: SleepForSlot, args: unpublished, want: ForkChoice},
 		// ForkChoice may fail to publish; going straight back to ForkChoice would stop fetching blocks.
 		{name: "fork choice, head still unpublished", stage: ForkChoice, args: unpublished, want: ChainTipSync},
+		{name: "fork choice, epochs behind at forward sync tip", stage: ForkChoice, args: epochsBehindAtTip, want: CleanupAndPruning},
 		// CleanupAndPruning reruns ForkChoice for a block that gossip imported during either stage.
 		{name: "fork choice at tip, head unpublished", stage: ForkChoice, args: atTip, want: CleanupAndPruning},
 		{name: "cleanup and pruning at tip, head unpublished", stage: CleanupAndPruning, args: atTip, want: ForkChoice},

@@ -212,7 +212,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	stateReader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	statedb = state.New(stateReader)
 	// The dump commits the state, which the versioned path does not materialize.
-	if dbg.CallNoMaterialize && !ctx.Bool(DumpFlag.Name) {
+	if !ctx.Bool(DumpFlag.Name) {
 		statedb.SetVersionMap(state.NewVersionMap(nil))
 		statedb.SetTxContext(0, 0)
 		statedb.SetNoConflictDetection()

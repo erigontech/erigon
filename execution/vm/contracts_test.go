@@ -822,3 +822,32 @@ func TestModExpKeySkipsZeroModulus(t *testing.T) {
 	_, ok := modExpKey(append(header(1, 1, 1), 2, 3, 5))
 	require.True(t, ok)
 }
+
+// FuzzModExpMatchesBigInt checks every MODEXP backend route against math/big.
+func FuzzModExpMatchesBigInt(f *testing.F) {
+	full := func(n int, b byte) []byte { return bytes.Repeat([]byte{b}, n) }
+	for _, n := range []int{1, 24, 25, 32, 33, 64, 96, 97, 128, 256} {
+		f.Add(full(n, 0xa7), []byte{3}, full(n, 0xc5))
+		f.Add(full(n, 0xa7), full(n, 0x9b), full(n, 0xc4))
+		f.Add(full(n, 0xa7), []byte{1, 0, 1}, append([]byte{0x80}, make([]byte, n-1)...))
+	}
+	p := &bigModExp{eip2565: true, osaka: true}
+	f.Fuzz(func(t *testing.T, base, exp, mod []byte) {
+		if len(base) > 512 || len(exp) > 512 || len(mod) > 512 {
+			return
+		}
+		input := make([]byte, 96, 96+len(base)+len(exp)+len(mod))
+		binary.BigEndian.PutUint64(input[24:32], uint64(len(base)))
+		binary.BigEndian.PutUint64(input[56:64], uint64(len(exp)))
+		binary.BigEndian.PutUint64(input[88:96], uint64(len(mod)))
+		input = append(append(append(input, base...), exp...), mod...)
+		got, err := p.Run(input)
+		require.NoError(t, err)
+		want := make([]byte, len(mod))
+		if m := new(big.Int).SetBytes(mod); m.Sign() > 0 {
+			r := new(big.Int).Exp(new(big.Int).SetBytes(base), new(big.Int).SetBytes(exp), m)
+			r.Mod(r, m).FillBytes(want)
+		}
+		require.Equal(t, want, got, "base %x exp %x mod %x", base, exp, mod)
+	})
+}

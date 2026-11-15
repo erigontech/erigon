@@ -18,7 +18,11 @@ package main
 
 import (
 	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/spf13/afero"
@@ -195,7 +199,7 @@ func TestStoreBlobsForBlockRejectsFewerIdentifiersThanCommitments(t *testing.T) 
 	}
 
 	endpoint := &ChainEndpoint{Blobs: true}
-	err := endpoint.storeBlobsForBlock(t.Context(), nil, beaconConfig, "", block)
+	err := endpoint.storeBlobsForBlock(t.Context(), nil, beaconConfig, block)
 
 	require.Error(t, err, "a block whose commitments exceed the request cap must not pass silently")
 	require.ErrorContains(t, err, "identifier")
@@ -302,4 +306,46 @@ func TestStoreRemoteBlobsRejectsAPreGloasSidecarWithABadInclusionProof(t *testin
 
 	require.Error(t, err, "a pre-Gloas sidecar with a zero inclusion proof must be rejected")
 	require.ErrorContains(t, err, "inclusion proof")
+}
+
+// An empty JSON entry is a few bytes on the wire but a whole blob once decoded, so the entry count
+// is checked against the block's commitments before anything is decoded.
+func TestRetrieveBlobsRefusesMoreSidecarsThanCommitments(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{},{},{}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := retrieveBlobsFromRemoteEndpoint(t.Context(), srv.URL, common.Hash{1}, 2)
+	require.ErrorContains(t, err, "3 sidecars")
+}
+
+// Beacon API providers put the key in the path, the query or the user info, so errors and logs carry only the
+// scheme and host of an endpoint.
+func TestRetrieveBlobsKeepsTheEndpointSecretOutOfErrors(t *testing.T) {
+	defer func(wait time.Duration) { fillRetryWait = wait }(fillRetryWait)
+	fillRetryWait = time.Millisecond
+	closed, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	host := closed.Addr().String()
+	require.NoError(t, closed.Close())
+
+	_, err = retrieveBlobsFromRemoteEndpoint(t.Context(), "http://user:pw-secret@"+host+"/path-secret/?apikey=query-secret", common.Hash{1}, 1)
+	require.Error(t, err)
+	for _, secret := range []string{"pw-secret", "path-secret", "query-secret", "user"} {
+		require.NotContains(t, err.Error(), secret)
+	}
+	require.Contains(t, err.Error(), host)
+
+	for _, malformed := range []string{"http://h/%zz?apikey=query-secret", "http://user:Ab3x/query-secret@h/"} {
+		_, err = retrieveBlobsFromRemoteEndpoint(t.Context(), malformed, common.Hash{1}, 1)
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "query-secret")
+		require.NotContains(t, err.Error(), "Ab3x")
+	}
+}
+
+func TestRedactEndpointKeepsSchemeAndHost(t *testing.T) {
+	require.Equal(t, "https://beacon.example:5052", redactEndpoint("https://u:p@beacon.example:5052/key/eth?apikey=k"))
+	require.Equal(t, "<invalid endpoint>", redactEndpoint("http://h/%zz"))
 }

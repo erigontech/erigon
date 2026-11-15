@@ -90,14 +90,14 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 	return
 }
 
-// removeMergedFiles removes a merge output's files, except an index an input still uses: a same-range input with an
-// older segment version resolves to the output's index names.
-func removeMergedFiles(sn snaptype.FileInfo, inputs []*DirtySegment) {
+// removeMergedFiles removes a merge output's files. A same-range input with an older segment version resolves to the
+// output's index names, so its index is kept unless the output's index was built: that replaced the file.
+func removeMergedFiles(sn snaptype.FileInfo, inputs []*DirtySegment, indexBuilt bool) {
 	_ = dir.RemoveFile(sn.Path)
 	_ = dir.RemoveFile(sn.Path + ".torrent")
 	for _, idx := range sn.Type.IdxFileNames(sn.From, sn.To) {
 		idxPath := filepath.Join(filepath.Dir(sn.Path), idx)
-		if slices.ContainsFunc(inputs, func(in *DirtySegment) bool {
+		if !indexBuilt && slices.ContainsFunc(inputs, func(in *DirtySegment) bool {
 			return slices.ContainsFunc(in.indexes, func(x *recsplit.Index) bool { return x != nil && x.FilePath() == idxPath })
 		}) {
 			continue
@@ -115,6 +115,7 @@ func (m *Merger) mergeSubSegment(
 	doIndex bool,
 	indexBuilder snaptype.IndexBuilder,
 ) (newDirtySegment *DirtySegment, err error) {
+	indexBuilt := false
 	defer func() {
 		if err == nil {
 			if rec := recover(); rec != nil {
@@ -123,7 +124,7 @@ func (m *Merger) mergeSubSegment(
 		}
 		if err != nil {
 			newDirtySegment.close()
-			removeMergedFiles(sn, toMerge)
+			removeMergedFiles(sn, toMerge, indexBuilt)
 		}
 	}()
 	if len(toMerge) == 0 {
@@ -137,6 +138,7 @@ func (m *Merger) mergeSubSegment(
 	// new way to build index
 	if doIndex {
 		p := &background.Progress{}
+		indexBuilt = true // a partial build may already have replaced an index file
 		if err = buildIdx(ctx, sn, indexBuilder, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
 			return
 		}
@@ -248,7 +250,7 @@ func (m *Merger) Merge(
 				_ = onDelete(ctx, slices.Clone(builtFileNames))
 			}
 			for i := range outputs {
-				removeMergedFiles(outputs[i], inputs)
+				removeMergedFiles(outputs[i], inputs, doIndex)
 			}
 		}
 		for _, t := range snapTypes {
@@ -309,7 +311,7 @@ func (m *Merger) Merge(
 		m.integrateMergedDirtyFiles(snapshots, in, out)
 		in = nil
 	}
-	m.logger.Log(m.lvl, "[snapshots] Merge done", "from", mergeRanges[0].from, "to", mergeRanges[0].to)
+	m.logger.Log(m.lvl, "[snapshots] Merge done", "ranges", len(mergeRanges), "from", mergeRanges[0].from, "to", mergeRanges[len(mergeRanges)-1].to)
 	return nil
 }
 

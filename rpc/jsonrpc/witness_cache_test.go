@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -217,6 +218,23 @@ func TestNewWitnessResultCacheClampsBlocks(t *testing.T) {
 	c1.Add(hashN(1), mkResult())
 	c1.Add(hashN(2), mkResult())
 	require.Equal(t, 1, c1.Len(), "a sub-cap size is honored, not clamped up")
+}
+
+// The payload-witness route never serves Keys, so they must not count against the byte cap.
+func TestWitnessResultCacheAddPayloadWitnessDropsUnservedFields(t *testing.T) {
+	c := NewWitnessResultCache(4, 0)
+	r := &ExecutionWitnessResult{
+		State:          []hexutil.Bytes{{0x01}},
+		Keys:           []hexutil.Bytes{make(hexutil.Bytes, 32)},
+		headerByNumber: map[uint64]*types.Header{1: {}},
+	}
+	c.AddPayloadWitness(hashN(1), r)
+
+	got, ok := c.Get(hashN(1))
+	require.True(t, ok)
+	require.Nil(t, got.Keys)
+	require.Nil(t, got.headerByNumber)
+	require.Equal(t, 1+sliceHeaderBytes, c.ResidentBytes())
 }
 
 // TestWitnessResultCacheModeFieldsRoundTrip pins that the serving-mode flags set at

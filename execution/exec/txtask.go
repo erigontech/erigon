@@ -60,7 +60,6 @@ type Task interface {
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
 	VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
-	ResetGasPool(*protocol.GasPool)
 
 	Tx() types.Transaction
 	TxType() uint8
@@ -206,19 +205,16 @@ type BlockResult struct {
 
 type ApplyMessage func(evm *vm.EVM, msg protocol.Message, gp *protocol.GasPool, refunds bool, gasBailout bool) (*evmtypes.ExecutionResult, error)
 
-// ReadWriteSet contains ReadSet, WriteSet and BalanceIncrease of a transaction,
-// which is processed by a single thread that writes into the ReconState1 and
-// flushes to the database
+// TxTask is one transaction, or the init or end of a block, run by an execution worker.
 type TxTask struct {
-	TxNum              uint64
-	TxIndex            int // -1 for block initialisation
-	Header             *types.Header
-	Txs                types.Transactions
-	Uncles             []*types.Header
-	Withdrawals        types.Withdrawals
-	EvmBlockContext    evmtypes.BlockContext
-	HistoryExecution   bool // use history reader for that txn instead of state reader
-	BalanceIncreaseSet map[accounts.Address]uint256.Int
+	TxNum            uint64
+	TxIndex          int // -1 for block initialisation
+	Header           *types.Header
+	Txs              types.Transactions
+	Uncles           []*types.Header
+	Withdrawals      types.Withdrawals
+	EvmBlockContext  evmtypes.BlockContext
+	HistoryExecution bool // use history reader for that txn instead of state reader
 
 	Tracer *calltracer.CallTracer
 	Hooks  *tracing.Hooks
@@ -227,8 +223,6 @@ type TxTask struct {
 	Logger log.Logger
 	Trace  bool
 
-	gasPool      *protocol.GasPool
-	sender       accounts.Address
 	message      *types.Message
 	signer       *types.Signer
 	dependencies []int
@@ -269,15 +263,11 @@ func (t *TxTask) TxHash() common.Hash {
 }
 
 func (t *TxTask) TxSender() (accounts.Address, error) {
-	if !t.sender.IsNil() {
-		return t.sender, nil
-	}
 	if t.TxIndex < 0 || t.TxIndex >= len(t.Txs) {
 		return accounts.NilAddress, nil
 	}
 	if sender, ok := t.Tx().GetSender(); ok {
-		t.sender = sender
-		return t.sender, nil
+		return sender, nil
 	}
 	if t.signer == nil {
 		t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
@@ -286,12 +276,8 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 	if err != nil {
 		return accounts.NilAddress, fmt.Errorf("%w: error recovering sender for tx=%x, %w", rules.ErrInvalidBlock, t.TxHash(), err)
 	}
-	t.sender = sender
-	if RecoversSenders(t.Header) {
-		return t.sender, nil
-	}
 	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNumber(), "txIdx", t.TxIndex)
-	return t.sender, nil
+	return sender, nil
 }
 
 // ChargesSenderAtValidation reports whether this run skips the sender charge (nonce, gas, value) and validation applies it.
@@ -392,30 +378,22 @@ func (t *TxTask) Rules() *chain.Rules {
 func (t *TxTask) ResetTx(txNum uint64, txIndex int) {
 	t.TxNum = txNum
 	t.TxIndex = txIndex
-	t.sender = accounts.NilAddress
 	t.message = nil
 	t.signer = nil
 	t.dependencies = nil
 }
 
 func (t *TxTask) GasPool() *protocol.GasPool {
-	if t.gasPool != nil {
-		return t.gasPool
-	}
 	// Workers can't share the block gas pool (SubGas races on speculative
 	// depletion), so hand out a fresh per-invocation pool sized to the block
 	// limit. Returning nil would make preCheck's CheckBlockGasInclusion no-op,
 	// letting a tx that alone exceeds the block limit slip past and fail later
-	// with the wrong error variant (serial returns ErrGasLimitReached). Cross-tx
+	// with the wrong error variant. Cross-tx
 	// depletion is still caught post-execution against the shared pool.
 	if t.Header == nil || t.Config == nil {
 		return nil
 	}
 	return protocol.NewGasPool(t.Header.GasLimit, t.Config.GetMaxBlobGasPerBlock(t.Header.Time))
-}
-
-func (t *TxTask) ResetGasPool(gasPool *protocol.GasPool) {
-	t.gasPool = gasPool
 }
 
 func (t *TxTask) Version() state.Version {
@@ -459,7 +437,6 @@ func (t *TxTask) IsHistoric() bool {
 }
 
 func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
-	t.BalanceIncreaseSet = nil
 	ibs.Reset()
 	ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
 
@@ -535,7 +512,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, t.Logger, nil)
 		if result.Err == nil && !ibs.IsVersioned() {
 			// The versionMap path finalizes from the write-set after the switch;
-			// the serial path commits the init writes here.
+			// a non-versioned IBS commits the init writes here.
 			result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
 	case t.IsBlockEnd():
@@ -585,7 +562,7 @@ func (t *TxTask) Execute(evm *vm.EVM,
 
 		if result.Err == nil {
 			// The versionMap path produces its write-set from the recorded IO
-			// after the switch; only the serial path clears pending changes here.
+			// after the switch; a non-versioned IBS clears pending changes here.
 			if !ibs.IsVersioned() {
 				ibs.SoftFinalise()
 			}
@@ -603,9 +580,8 @@ func (t *TxTask) Execute(evm *vm.EVM,
 		result.Operational = true
 		result.Err = stateErr
 	}
-	// Prepare read set, write set and balanceIncrease set and send for serialisation
+	// Prepare the read and write sets.
 	if result.Err == nil {
-		t.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
 		// Genesis (block 0, txIndex -1) resolves `ibs` to the throwaway versioned
 		// IBS that GenesisToBlock builds, whatever the executor. Its writes reach
 		// the executor only through MakeWriteSet(stateWriter); the FinalizedWrites
@@ -615,7 +591,9 @@ func (t *TxTask) Execute(evm *vm.EVM,
 			result.TxOut, _ = ibs.FinalizedWrites(rules) // the read error is checked below for both branches
 		} else {
 			if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
-				panic(err)
+				result.Operational = true
+				result.Err = err
+				return &result
 			}
 			result.TxOut = t.VersionedWrites(ibs)
 		}

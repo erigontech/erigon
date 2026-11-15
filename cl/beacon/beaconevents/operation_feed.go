@@ -3,13 +3,11 @@ package beaconevents
 import ethevent "github.com/erigontech/erigon/common/event"
 
 type operationFeed struct {
-	feed *ethevent.Feed
+	feed ethevent.Feed
 }
 
 func newOpFeed() *operationFeed {
-	return &operationFeed{
-		feed: &ethevent.Feed{},
-	}
+	return &operationFeed{}
 }
 
 func (f *operationFeed) Subscribe(channel chan *EventStream) ethevent.Subscription {

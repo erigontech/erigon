@@ -62,9 +62,10 @@ import (
 )
 
 const (
-	minBlobBundleCacheSize             = 48
-	maxPendingBuilderPayloads          = 4
-	maxExecutionPayloadEnvelopeRetries = 1024
+	minBlobBundleCacheSize                = 48
+	maxPendingBuilderPayloads             = 4
+	maxExecutionPayloadEnvelopeRetries    = 1024
+	maxExecutionPayloadEnvelopeBroadcasts = 4096
 )
 
 // BlobBundle holds a blob with its commitment and KZG proofs: one blob proof before Fulu, one proof
@@ -200,8 +201,9 @@ type executionPayloadEnvelopeGossipKey struct {
 }
 
 type executionPayloadEnvelopeRetry struct {
-	EnvelopeRoot   [32]byte
-	GossipRequired bool
+	EnvelopeRoot     [32]byte
+	GossipRequired   bool
+	ContentsRequired bool
 }
 
 type ApiHandler struct {
@@ -290,6 +292,8 @@ type ApiHandler struct {
 	executionPayloadEnvelopeRetries         *lru.Cache[executionPayloadEnvelopeGossipKey, executionPayloadEnvelopeRetry]
 	executionPayloadEnvelopeRetriesInFlight map[executionPayloadEnvelopeGossipKey]struct{}
 	builderRoutes                           *builderRouteStore
+	// Keyed by envelope root: it covers the block root and builder index, so a second envelope for the same block and builder does not hide the first.
+	executionPayloadEnvelopeBroadcasts *lru.Cache[[32]byte, struct{}]
 }
 
 type envelopeRebuilder interface {
@@ -365,6 +369,10 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
+	executionPayloadEnvelopeBroadcasts, err := lru.New[[32]byte, struct{}]("executionPayloadEnvelopeBroadcasts", maxExecutionPayloadEnvelopeBroadcasts)
+	if err != nil {
+		panic(err)
+	}
 	builderRoutes := newBuilderRouteStore(builderRouteCapacity, builderRouteTTL, time.Now)
 	parentExecutionRequests := commonlru.NewCache[common.Hash, *cltypes.ExecutionRequests](maxCachedParentExecutionRequests)
 	return &ApiHandler{
@@ -387,41 +395,42 @@ func NewApiHandler(
 		randaoMixesPool: sync.Pool{New: func() any {
 			return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 		}},
-		sentinel:                         sentinel,
-		version:                          version,
-		routerCfg:                        routerCfg,
-		emitters:                         emitters,
-		blobStoage:                       blobStoage,
-		columnStorage:                    columnStorage,
-		caplinSnapshots:                  blobSnapshots,
-		attestationProducer:              attestationProducer,
-		attestationDataImportWait:        defaultAttestationDataImportWait,
-		blobBundles:                      blobBundles,
-		engine:                           engine,
-		syncMessagePool:                  syncMessagePool,
-		committeeSub:                     committeeSub,
-		aggregatePool:                    aggregatePool,
-		syncCommitteeMessagesService:     syncCommitteeMessagesService,
-		syncContributionAndProofsService: syncContributionAndProofs,
-		aggregateAndProofsService:        aggregateAndProofs,
-		attestationService:               attestationService,
-		voluntaryExitService:             voluntaryExitService,
-		blsToExecutionChangeService:      blsToExecutionChangeService,
-		proposerSlashingService:          proposerSlashingService,
-		blockService:                     blockService,
-		builderClient:                    builderClient,
-		gossipManager:                    gossipManager,
-		enableMemoizedHeadState:          enableMemoizedHeadState,
-		epbsPool:                         epbsPool,
-		executionPayloadBidService:       executionPayloadBidService,
-		payloadAttestationService:        payloadAttestationService,
-		proposerPreferencesService:       proposerPreferencesService,
-		selfBuildPayloads:                selfBuildPayloads,
-		pendingBuilderPayloads:           newPendingBuilderPayloadStore(maxPendingBuilderPayloads),
-		selfBuildEnvelopes:               selfBuildEnvelopes,
-		executionPayloadEnvelopeRetries:  executionPayloadEnvelopeRetries,
-		builderRoutes:                    builderRoutes,
-		parentExecutionRequests:          parentExecutionRequests,
+		sentinel:                           sentinel,
+		version:                            version,
+		routerCfg:                          routerCfg,
+		emitters:                           emitters,
+		blobStoage:                         blobStoage,
+		columnStorage:                      columnStorage,
+		caplinSnapshots:                    blobSnapshots,
+		attestationProducer:                attestationProducer,
+		attestationDataImportWait:          defaultAttestationDataImportWait,
+		blobBundles:                        blobBundles,
+		engine:                             engine,
+		syncMessagePool:                    syncMessagePool,
+		committeeSub:                       committeeSub,
+		aggregatePool:                      aggregatePool,
+		syncCommitteeMessagesService:       syncCommitteeMessagesService,
+		syncContributionAndProofsService:   syncContributionAndProofs,
+		aggregateAndProofsService:          aggregateAndProofs,
+		attestationService:                 attestationService,
+		voluntaryExitService:               voluntaryExitService,
+		blsToExecutionChangeService:        blsToExecutionChangeService,
+		proposerSlashingService:            proposerSlashingService,
+		blockService:                       blockService,
+		builderClient:                      builderClient,
+		gossipManager:                      gossipManager,
+		enableMemoizedHeadState:            enableMemoizedHeadState,
+		epbsPool:                           epbsPool,
+		executionPayloadBidService:         executionPayloadBidService,
+		payloadAttestationService:          payloadAttestationService,
+		proposerPreferencesService:         proposerPreferencesService,
+		selfBuildPayloads:                  selfBuildPayloads,
+		pendingBuilderPayloads:             newPendingBuilderPayloadStore(maxPendingBuilderPayloads),
+		selfBuildEnvelopes:                 selfBuildEnvelopes,
+		executionPayloadEnvelopeRetries:    executionPayloadEnvelopeRetries,
+		builderRoutes:                      builderRoutes,
+		parentExecutionRequests:            parentExecutionRequests,
+		executionPayloadEnvelopeBroadcasts: executionPayloadEnvelopeBroadcasts,
 	}
 }
 
@@ -445,6 +454,28 @@ func (a *ApiHandler) claimExecutionPayloadEnvelopeRetry(
 	return retry, true, true
 }
 
+func (a *ApiHandler) executionPayloadEnvelopeContentsRequired(key executionPayloadEnvelopeGossipKey, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	a.executionPayloadEnvelopeRetryMu.Lock()
+	retry, ok := a.executionPayloadEnvelopeRetries.Peek(key)
+	a.executionPayloadEnvelopeRetryMu.Unlock()
+	if !ok || !retry.ContentsRequired {
+		return false
+	}
+	envelopeRoot, err := envelope.HashSSZ()
+	return err == nil && envelopeRoot == retry.EnvelopeRoot
+}
+
+func (a *ApiHandler) executionPayloadEnvelopeBroadcastOnly(key executionPayloadEnvelopeGossipKey, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	envelopeRoot, err := envelope.HashSSZ()
+	if err != nil || !a.executionPayloadEnvelopeBroadcasts.Contains(envelopeRoot) {
+		return false
+	}
+	a.executionPayloadEnvelopeRetryMu.Lock()
+	retry, ok := a.executionPayloadEnvelopeRetries.Peek(key)
+	a.executionPayloadEnvelopeRetryMu.Unlock()
+	return !ok || retry.EnvelopeRoot != envelopeRoot
+}
+
 func (a *ApiHandler) finishExecutionPayloadEnvelopeRetry(key executionPayloadEnvelopeGossipKey) {
 	a.executionPayloadEnvelopeRetryMu.Lock()
 	defer a.executionPayloadEnvelopeRetryMu.Unlock()
@@ -455,6 +486,15 @@ func (a *ApiHandler) recordExecutionPayloadEnvelopeRetry(key executionPayloadEnv
 	a.executionPayloadEnvelopeRetryMu.Lock()
 	defer a.executionPayloadEnvelopeRetryMu.Unlock()
 	a.executionPayloadEnvelopeRetries.Add(key, retry)
+}
+
+func (a *ApiHandler) clearExecutionPayloadEnvelopeContentsRequired(key executionPayloadEnvelopeGossipKey) {
+	a.executionPayloadEnvelopeRetryMu.Lock()
+	defer a.executionPayloadEnvelopeRetryMu.Unlock()
+	if retry, ok := a.executionPayloadEnvelopeRetries.Peek(key); ok && retry.ContentsRequired {
+		retry.ContentsRequired = false
+		a.executionPayloadEnvelopeRetries.Add(key, retry)
+	}
 }
 
 func (a *ApiHandler) clearExecutionPayloadEnvelopeRetry(key executionPayloadEnvelopeGossipKey) {

@@ -146,19 +146,43 @@ func (view *VersionMapView) DestroyedAt(addr accounts.Address) (txIdx int, destr
 	return destroyedAt, state != LifecycleLive
 }
 
+// HasAmbiguousBaseAccount reports whether the BAL lists an account whose change the BAL may not
+// show. A 0-value touch removes an account that is EIP-161 empty in base. A create replaces the
+// storage of an account with no nonce and no code, and such an account can hold storage only with
+// a contract incarnation.
+func (vm *VersionMap) HasAmbiguousBaseAccount(eip161Enabled, isAura bool, base StateReader) (bool, error) {
+	for i := range vm.bal {
+		addr := accounts.InternAddress(vm.bal[i].Address)
+		acc, err := base.ReadAccountData(addr)
+		if err != nil {
+			return false, err
+		}
+		if acc == nil {
+			continue
+		}
+		if acc.Empty() && EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
+			return true, nil
+		}
+		if acc.Nonce == 0 && acc.IsEmptyCodeHash() && acc.Incarnation > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {
 	var stamps []*WriteSet
 	var candidates []uint32
 	for i := range vm.bal {
 		ac := &vm.bal[i]
-		addr := accounts.InternAddress(ac.Address)
-		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
-			continue
-		}
 		var maxIdx uint32
 		balChangeIndexes(ac, func(idx uint32) { maxIdx = max(maxIdx, idx) })
 		if maxIdx == 0 {
 			continue // only reads, no field change — not a removal candidate
+		}
+		addr := accounts.InternAddress(ac.Address)
+		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
+			continue
 		}
 		if len(ac.BalanceChanges) == 0 && len(ac.NonceChanges) == 0 && len(ac.CodeChanges) == 0 {
 			continue

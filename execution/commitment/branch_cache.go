@@ -193,7 +193,7 @@ func (t *trunk) slot(path *[4]byte, n int, forWrite bool) *atomic.Pointer[branch
 	return nil
 }
 
-const DefaultBranchCacheTailCapacity = 50000 // ~50k * ~500B = ~25MB at mainnet branch sizes
+const DefaultBranchCacheTailCapacity = 125000 // ~125k * ~500B = ~62MB at mainnet branch sizes
 
 // BranchCacheProvider: returning nil means no shared cache; callers must
 // treat that as disabled, not panic.

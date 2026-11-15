@@ -412,16 +412,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	if to < s.BlockNumber {
 		return nil
 	}
-	from := s.BlockNumber + 1
-	defer func() {
-		// A loop-exhausted batch still advanced progress past these blocks.
-		if err == nil || IsOnlyLoopExhausted(err) {
-			if werr := writeSendersRecoveredByExec(ctx, rwTx, cfg, from, s.BlockNumber); werr != nil {
-				err = werr
-			}
-		}
-	}()
-
 	// Stage coordination hoisted out of the exec core: resolve the start point
 	// and exec window from committed domains + the txNum index before handing a
 	// resolved execRange to ExecV3.
@@ -466,10 +456,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		inputTxNum:               inputTxNum,
 		offsetFromBlockBeginning: offsetFromBlockBeginning,
 		maxBlockNum:              to,
-	}
-
-	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
-		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
 	}
 
 	out, execErr := ExecV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)
