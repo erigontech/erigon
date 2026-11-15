@@ -104,18 +104,17 @@ func (s *Store) Prune(ctx context.Context, number uint64) error {
 			return err
 		}
 		defer c.Close()
-		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		for k, _, err := c.First(); ; k, _, err = c.Next() {
 			if err != nil {
 				return err
 			}
-			if binary.BigEndian.Uint64(k) >= number {
+			if k == nil || binary.BigEndian.Uint64(k) >= number {
 				return nil
 			}
 			if err := c.DeleteCurrent(); err != nil {
 				return err
 			}
 		}
-		return nil
 	})
 }
 
