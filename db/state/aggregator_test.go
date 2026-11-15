@@ -549,7 +549,6 @@ func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
 			}
 			after, err := dir.ListFiles(dirs.SnapDomain, ".kv")
 			require.NoError(t, err)
-			require.Len(t, after, len(before), "a gap must prevent new state files")
 			require.ElementsMatch(t, before, after, "a gap must prevent new state files")
 		})
 	}

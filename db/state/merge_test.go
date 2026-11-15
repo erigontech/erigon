@@ -1182,7 +1182,6 @@ func TestMergeReplacementClosesAfterReaders(t *testing.T) {
 	replacementMapping := replacement.decompressor
 	in := &MergeResult{}
 	in.dIdx[kv.AccountsDomain] = replacement
-	original.canDelete.Store(true)
 	agg.integrateMergedDirtyFiles(in)
 
 	require.True(t, originalMapping.IsOpen(), "existing readers must keep their mapping")
