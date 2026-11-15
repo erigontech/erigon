@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"time"
 
@@ -372,6 +373,68 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter,
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
+	a.submitAttesterSlashing(w, r, req)
+}
+
+func (a *ApiHandler) PostEthV2BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) {
+	version, err := clparams.StringToClVersion(r.Header.Get("Eth-Consensus-Version"))
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid Eth-Consensus-Version header: %w", err)).WriteTo(w)
+		return
+	}
+	const jsonOverhead = 4 << 10
+	const bytesPerIndexPair = 2 * 32
+	maxIndices := a.beaconChainCfg.MaxValidatorsPerCommittee
+	committees := uint64(1)
+	if version >= clparams.ElectraVersion {
+		committees = a.beaconChainCfg.MaxCommitteesPerSlot
+	}
+	maxSupportedIndices := min(uint64(math.MaxInt), uint64((math.MaxInt64-jsonOverhead)/bytesPerIndexPair))
+	if committees != 0 && maxIndices > maxSupportedIndices/committees {
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("attester slashing limits exceed supported range")).WriteTo(w)
+		return
+	}
+	maxIndices *= committees
+	bodyLimit := jsonOverhead + int64(maxIndices)*bytesPerIndexPair
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, bodyLimit))
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	var raw struct {
+		Attestation1 *json.RawMessage `json:"attestation_1"`
+		Attestation2 *json.RawMessage `json:"attestation_2"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	if raw.Attestation1 == nil || raw.Attestation2 == nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation_1 and attestation_2 are required")).WriteTo(w)
+		return
+	}
+	req := cltypes.NewAttesterSlashing(version)
+	for _, input := range []struct {
+		body        *json.RawMessage
+		attestation *cltypes.IndexedAttestation
+	}{
+		{raw.Attestation1, req.Attestation_1},
+		{raw.Attestation2, req.Attestation_2},
+	} {
+		input.attestation.AttestingIndices.SetCap(int(maxIndices))
+		if err := json.Unmarshal(*input.body, input.attestation); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+		if input.attestation.AttestingIndices.Length() > int(maxIndices) {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attesting indices exceed limit")).WriteTo(w)
+			return
+		}
+	}
+	a.submitAttesterSlashing(w, r, req)
+}
+
+func (a *ApiHandler) submitAttesterSlashing(w http.ResponseWriter, r *http.Request, req *cltypes.AttesterSlashing) {
 	if err := a.forkchoiceStore.OnAttesterSlashing(req, false); err != nil && !errors.Is(err, forkchoice.ErrIgnore) {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
