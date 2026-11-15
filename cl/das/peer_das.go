@@ -1919,6 +1919,10 @@ func (d *peerdas) publishFetchedColumns(ctx context.Context, sidecars []*cltypes
 		}
 	}
 	for block, blockSidecars := range byBlock {
+		// Publishing marks the columns as seen, so gossip copies no longer reach the recovery trigger.
+		if err := d.TryScheduleRecover(block.slot, block.blockRoot); err != nil {
+			log.Warn("failed to schedule blob recovery after the column sync", "slot", block.slot, "blockRoot", block.blockRoot, "err", err)
+		}
 		log.Debug("scheduled publication of columns fetched by root", "slot", block.slot, "blockRoot", block.blockRoot, "columns", len(blockSidecars))
 		d.publishInBackground(ctx, blockSidecars)
 	}

@@ -1887,3 +1887,64 @@ func TestRunDownloadDoesNotPublishABackfilledRoot(t *testing.T) {
 		require.Empty(t, published)
 	})
 }
+
+// halfStoredRecoveryRound is a by-root round for block whose columns 2 to 63 are stored already, so that the two
+// columns the round stores bring the block to half of its columns.
+func halfStoredRecoveryRound(t *testing.T, cfg *clparams.BeaconChainConfig, currentSlot uint64, block fetchedBlock, supernode bool) *byRootRound {
+	t.Helper()
+	store := newPublishTestStore(cfg)
+	for _, column := range block.columns[2 : cfg.NumberOfColumns/2] {
+		require.NoError(t, store.WriteColumnSidecars(t.Context(), block.root, int64(column.Index), column))
+	}
+	r := newByRootRound(t, cfg, currentSlot, store, []fetchedBlock{block}, block.columns[0], block.columns[1])
+	r.d.state.SetLocalNodeID(newCgcTestLocalNode(t))
+	if supernode {
+		r.d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups, func() uint64 { return 0 })
+	}
+	require.Equal(t, supernode, r.d.state.IsSupernode())
+	blobStorage := blob_storage_mock_services.NewMockBlobStorage(gomock.NewController(t))
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), block.root).Return(uint32(0), nil).AnyTimes()
+	r.d.blobStorage = blobStorage
+	r.d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
+	return r
+}
+
+func TestRunDownloadSchedulesRecoveryOfAPublishedRoot(t *testing.T) {
+	const currentSlot = 40
+	for _, test := range []struct {
+		name      string
+		slot      uint64
+		supernode bool
+		backfill  bool
+		scheduled bool
+	}{
+		{name: "supernode", slot: currentSlot, supernode: true, scheduled: true},
+		{name: "custody node", slot: currentSlot},
+		{name: "supernode, old root", slot: currentSlot - 2, supernode: true},
+		{name: "supernode, backfilled root", slot: currentSlot, supernode: true, backfill: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cfg := publishTestConfig()
+				block := fuluFetchedBlock(t, &cfg, test.slot)
+				r := halfStoredRecoveryRound(t, &cfg, currentSlot, block, test.supernode)
+				if test.backfill {
+					r.d.blocksToCheckSync.add(block.root, &backfillColumnBlock{version: clparams.FuluVersion, slot: block.slot, root: block.root}, time.Time{})
+				}
+
+				r.run(t)
+
+				r.requireStored(t, block, 0, 1)
+				if !test.scheduled {
+					require.Empty(t, r.d.recoverBlobsQueue)
+					require.NotContains(t, r.d.isRecovering, block.root)
+					return
+				}
+				require.Len(t, r.d.recoverBlobsQueue, 1)
+				request := <-r.d.recoverBlobsQueue
+				require.Equal(t, block.root, request.blockRoot)
+				require.Equal(t, block.slot, request.slot)
+			})
+		})
+	}
+}
