@@ -399,9 +399,6 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	// Call NewPayload to validate execution payload with EL
 	parentBlockRoot := block.Block.ParentRoot
 	payloadStatus, err := f.newPayloadWhileYieldingForkChoiceLock(ctx, envelope.Payload, &parentBlockRoot, versionedHashes, executionRequestsList)
-	if errors.Is(err, misc.ErrMismatchBlobHashes) {
-		f.rejectEnvelopeLocked(beaconBlockRoot)
-	}
 	log.Trace("[validatePayloadWithEL] NewPayload", "status", payloadStatus, "beaconBlockRoot", beaconBlockRoot)
 	return payloadStatus, err
 }
@@ -472,10 +469,15 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	parentBlockRoot *common.Hash,
 	versionedHashes []common.Hash,
 	executionRequestsList []hexutil.Bytes,
+	join func(),
 ) (execution_client.PayloadStatus, common.Hash, error) {
 	var publishedInvalidHash common.Hash
 	f.mu.Unlock()
 	defer f.mu.Lock()
+	if join != nil {
+		// This defer runs first, so waiting for prepare never holds f.mu.
+		defer join()
+	}
 	status, err := f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
 		// The wait for the token can be long enough for the block to go stale. The check
 		// needs f.mu, but this owns the global token, so never wait for it: whoever holds
@@ -624,7 +626,8 @@ func (f *ForkChoiceStore) NewPayloadWithAdmission(
 		defer finishImport()
 	}
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
-		// Detect blob mismatches locally because remote Engine API responses lose Go error identity.
+		// Stored envelopes may predate local blob validation. Detect mismatches here
+		// because remote Engine API responses lose Go error identity.
 		if payload != nil && payload.Version() >= clparams.GloasVersion && versionedHashes != nil {
 			blobErr := ValidatePayloadBlobHashes(payload, versionedHashes)
 			if errors.Is(blobErr, misc.ErrMismatchBlobHashes) {
@@ -771,9 +774,6 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 }
 
 func validatePayloadValidationResult(payloadStatus execution_client.PayloadStatus, validationErr error) error {
-	if errors.Is(validationErr, misc.ErrMismatchBlobHashes) {
-		return fmt.Errorf("%w: %w", ErrInvalidExecutionPayloadEnvelope, validationErr)
-	}
 	if validationErr != nil && payloadStatus != execution_client.PayloadStatusNone && payloadStatus != execution_client.PayloadStatusInvalidated {
 		return fmt.Errorf("validatePayloadWithEL: newPayload failed: %w", validationErr)
 	}
