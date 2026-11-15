@@ -229,15 +229,10 @@ func (s *Sequencer) syncSlot(ctx context.Context, slot SyncSlot) error {
 	s.statusMu.Unlock()
 	switch c.Shape {
 	case Catchup:
-		// The Sync block targets a height, not a count: a head moved by
-		// derivation would land a counted one off the grid.
-		terminal := head.Number.Uint64() + c.Live + 1
+		// Each block commits on the one before it, so the Sync block keeps its
+		// height; a head moved by derivation fails the next with ErrStaleParent.
 		if head, err = s.produceN(ctx, Live, head, c.Live, false); err != nil {
 			return err
-		}
-		if head.Number.Uint64()+1 != terminal {
-			s.offGridSkip("head moved during the catch-up", "head", head.Number.Uint64(), "terminal", terminal)
-			return nil
 		}
 	case Slot:
 		if head, err = s.produceN(ctx, Live, head, c.Live, true); err != nil || head == nil {
