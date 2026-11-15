@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
@@ -186,7 +185,10 @@ func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) 
 }
 
 func (s *stubExecutionModule) IsValidated(hash common.Hash) bool {
-	return s.isValidatedFunc != nil && s.isValidatedFunc(hash)
+	if s.isValidatedFunc != nil {
+		return s.isValidatedFunc(hash)
+	}
+	return false
 }
 
 func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash common.Hash) (*uint64, error) {
@@ -1835,10 +1837,6 @@ func TestNewPayloadRegistersSendersRecovery(t *testing.T) {
 }
 
 func TestNewPayloadRegistersSendersRecoveryForBALPayload(t *testing.T) {
-	parallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
-
 	config := allForksChainConfig()
 	config.TerminalTotalDifficulty = nil
 	key, err := crypto.GenerateKey()

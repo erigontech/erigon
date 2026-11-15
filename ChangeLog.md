@@ -23,6 +23,7 @@
 
 ### Changed
 
+- execution: the serial executor is removed, and the `EXEC3_PARALLEL` environment variable is no longer read. `EXEC3_PARALLEL=false`, documented through v3.8 as the way back to single-threaded execution, is now ignored and the node runs with the default worker count; use `--exec.serial` instead. `--exec.serial` does not bring back `OnTxEnd` for a `--vmtrace` tracer or the `TRACE_BLOCKS` commitment trace: both are gone with the serial executor (#26239, #26240) — by @AskAlexSharov
 - engine: testing block-building APIs require every supplied transaction in the requested order. If a transaction cannot be included, the request fails with its index, hash and cause instead of returning an incomplete block (#25752).
 - caplin: nodes without `--caplin.blobs-archive` no longer download blob sidecar indexes (`*-blocksidecars.idx`) (#25879) — by @awskii
 - cmd/utils: `--exec.no-prune` is renamed to `--debug.exec.no-prune`, and Erigon logs a warning at startup while pruning is disabled by this flag or `NO_PRUNE`. The setting is for diagnostics only: chaindata grows without bound and `--prune.mode` is not enforced. `--exec.no-prune` still works as a deprecated alias and will be removed in the next release (#25772) — by @awskii

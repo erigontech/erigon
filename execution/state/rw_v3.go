@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
@@ -79,7 +78,7 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 // domains — the single write-set commit path shared by the parallel executor and
 // block production. Writes carry complete account state, so no domain reads are
 // needed to reconstruct the serialised account.
-func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, trace bool) error {
+func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, trace bool) error {
 	if writes != nil && !writes.IsEmpty() {
 		// One buffer for every storage key this call writes: consumers copy what they keep.
 		// Made on the first slot, since an array here escapes even when unused.
@@ -320,31 +319,6 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		}
 	}
 
-	var acc accounts.Account
-	for addr, increase := range balanceIncreases {
-		addrValue := addr.Value()
-		enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, addrValue[:])
-		if err != nil {
-			return err
-		}
-		acc.Reset()
-		if len(enc0) > 0 {
-			if err := accounts.DeserialiseV3(&acc, enc0); err != nil {
-				return err
-			}
-		}
-		acc.Balance.Add(&acc.Balance, &increase)
-		if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
-			if err := domains.DomainDel(kv.AccountsDomain, roTx, addrValue[:], txNum, enc0); err != nil {
-				return err
-			}
-		} else {
-			enc1 := accounts.SerialiseV3(&acc)
-			if err := domains.DomainPut(kv.AccountsDomain, roTx, addrValue[:], enc1, txNum, enc0); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
@@ -355,13 +329,11 @@ func (rs *StateV3) ApplyStateWrites(_ context.Context,
 	blockNum uint64,
 	txNum uint64,
 	writes WriteSetView,
-	balanceIncreases map[accounts.Address]uint256.Int,
-	rules *chain.Rules,
 ) error {
-	if (writes == nil || writes.IsEmpty()) && len(balanceIncreases) == 0 {
+	if writes == nil || writes.IsEmpty() {
 		return nil
 	}
-	if err := ApplyWrites(writes, rs.domains, roTx, blockNum, txNum, balanceIncreases, rules, rs.trace.Load()); err != nil {
+	if err := ApplyWrites(writes, rs.domains, roTx, blockNum, txNum, rs.trace.Load()); err != nil {
 		return fmt.Errorf("StateV3.ApplyStateWrites: %w", err)
 	}
 	return nil
@@ -383,21 +355,6 @@ func (rs *StateV3) ApplyTxIndexes(
 	skip := len(skipReceiptCache) > 0 && skipReceiptCache[0]
 	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, cummulativeBlobGas, logs, traceFroms, traceTos, false, skip); err != nil {
 		return fmt.Errorf("StateV3.ApplyTxIndexes: %w", err)
-	}
-	return nil
-}
-
-// CommitStepBoundary computes and persists a trie commitment when txNum falls
-// on an aggregation step boundary. This ensures commitment domain snapshots
-// contain a commitment state at each step end, even when the boundary falls
-// mid-block.
-func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, blockNum, txNum uint64) error {
-	if rs.domains.IsUnfrozenStepEdge(roTx, txNum) && !rs.domains.InlineTouchKeyDisabled() {
-		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum,
-			fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
-		if err != nil {
-			return fmt.Errorf("StateV3.CommitStepBoundary: %w", err)
-		}
 	}
 	return nil
 }

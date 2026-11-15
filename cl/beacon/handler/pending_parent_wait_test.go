@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -54,34 +55,40 @@ func parkedFor(n int) func() bool {
 }
 
 func TestAwaitParkedEnvelopeEndsOnceTheEnvelopeIsNoLongerParked(t *testing.T) {
-	start := time.Now()
-	require.NoError(t, awaitParkedEnvelope(t.Context(), start.Add(5*time.Second), time.Millisecond, parkedFor(3), noHeadChange, noRetry))
-	require.Less(t, time.Since(start), time.Second)
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		require.NoError(t, awaitParkedEnvelope(t.Context(), start.Add(5*time.Second), time.Millisecond, parkedFor(3), noHeadChange, noRetry))
+		require.Less(t, time.Since(start), time.Second)
+	})
 }
 
 func TestAwaitParkedEnvelopeEndsAtTheDeadline(t *testing.T) {
-	start := time.Now()
-	deadline := start.Add(50 * time.Millisecond)
-	// A poll interval far longer than the deadline: the deadline itself must end the wait.
-	require.NoError(t, awaitParkedEnvelope(t.Context(), deadline, time.Hour, func() bool { return true }, noHeadChange, noRetry))
-	require.False(t, time.Now().Before(deadline), "the wait ended before the deadline")
-	require.Less(t, time.Since(start), time.Second)
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		deadline := start.Add(50 * time.Millisecond)
+		// A poll interval far longer than the deadline: the deadline itself must end the wait.
+		require.NoError(t, awaitParkedEnvelope(t.Context(), deadline, time.Hour, func() bool { return true }, noHeadChange, noRetry))
+		require.False(t, time.Now().Before(deadline), "the wait ended before the deadline")
+		require.Less(t, time.Since(start), time.Second)
+	})
 }
 
 // A block that becomes head during the wait ends it at once instead of at the deadline.
 func TestAwaitParkedEnvelopeReturnsAHeadChangeMidWait(t *testing.T) {
-	checks := 0
-	headErr := func() error {
-		checks++
-		if checks < 3 {
-			return nil
+	synctest.Test(t, func(t *testing.T) {
+		checks := 0
+		headErr := func() error {
+			checks++
+			if checks < 3 {
+				return nil
+			}
+			return fmt.Errorf("%w: proposal parent a, current head b", errForkChoiceHeadChanged)
 		}
-		return fmt.Errorf("%w: proposal parent a, current head b", errForkChoiceHeadChanged)
-	}
-	start := time.Now()
-	err := awaitParkedEnvelope(t.Context(), start.Add(5*time.Second), time.Millisecond, func() bool { return true }, headErr, noRetry)
-	require.ErrorIs(t, err, errForkChoiceHeadChanged)
-	require.Less(t, time.Since(start), time.Second)
+		start := time.Now()
+		err := awaitParkedEnvelope(t.Context(), start.Add(5*time.Second), time.Millisecond, func() bool { return true }, headErr, noRetry)
+		require.ErrorIs(t, err, errForkChoiceHeadChanged)
+		require.Less(t, time.Since(start), time.Second)
+	})
 }
 
 func TestAwaitParkedEnvelopeReturnsTheCallerCancellation(t *testing.T) {

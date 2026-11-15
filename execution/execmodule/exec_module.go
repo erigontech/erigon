@@ -236,9 +236,8 @@ type ExecModule struct {
 	accum *Accumulation
 
 	// configuration
-	config          *chain.Config
-	syncCfg         ethconfig.Sync
-	experimentalBAL bool
+	config  *chain.Config
+	syncCfg ethconfig.Sync
 	// rules engine
 	engine         rules.Engine
 	balRegenerator *bal.Regenerator
@@ -292,7 +291,6 @@ func NewExecModule(
 	logger log.Logger,
 	engine rules.Engine,
 	syncCfg ethconfig.Sync,
-	experimentalBAL bool,
 	fcuBackgroundPrune bool,
 	onlySnapDownloadOnStart bool,
 	readAheader *exec.BlockReadAheader,
@@ -320,7 +318,6 @@ func NewExecModule(
 		engine:                  engine,
 		balRegenerator:          bal.NewRegenerator(blockReader, engine, logger),
 		syncCfg:                 syncCfg,
-		experimentalBAL:         experimentalBAL,
 		backgroundCtx:           ctx,
 		fcuBackgroundPrune:      fcuBackgroundPrune,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
@@ -925,11 +922,9 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 }
 
 // haltOnInitialSyncFailure reports whether a non-routine initial-sync failure
-// must stop the process when parallel or experimental BAL execution is selected.
-// Post-sync publication errors do not halt; serial execution stays up.
-func haltOnInitialSyncFailure(err error, exec3Parallel, experimentalBAL bool) bool {
-	return err != nil && !isRoutineInitialSyncStop(err) && !isInitialSyncPublicationError(err) &&
-		(exec3Parallel || experimentalBAL)
+// must stop the process. Post-sync publication errors do not halt.
+func haltOnInitialSyncFailure(err error) bool {
+	return err != nil && !isRoutineInitialSyncStop(err) && !isInitialSyncPublicationError(err)
 }
 
 // gRPC client cancellation does not unwrap to context.Canceled, but errors.Is
@@ -975,8 +970,8 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 				e.logger.Error("Could not start execution service", "err", err)
 			}
 		}
-		if haltOnInitialSyncFailure(err, dbg.Exec3Parallel, e.experimentalBAL) {
-			e.logger.Error("Initial sync failed during parallel execution — halting process")
+		if haltOnInitialSyncFailure(err) {
+			e.logger.Error("Initial sync failed — halting process")
 			go func() {
 				if stopErr := e.stopNode(); stopErr != nil {
 					e.logger.Error("Could not stop node on initial sync failure", "err", stopErr)
