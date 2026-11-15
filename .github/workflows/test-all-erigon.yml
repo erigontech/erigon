@@ -25,10 +25,6 @@ jobs:
           - ubuntu-24.04
           - macos-15
           - windows-2025
-        # Run both the v3 and the parallel commitment paths every time so
-        # divergence is caught on the PR rather than after a release. The matrix
-        # entries spawn separate runners and run concurrently — wall-clock
-        # unchanged, runner-minutes doubled.
         commitment_mode:
           - v3
           - parallel
@@ -63,10 +59,6 @@ jobs:
           cleanup-space: true
           ramdisk: true
           cache-namespace: test-all-erigon
-          # Go's test cache can't see ERIGON_COMMITMENT_PARALLEL or
-          # ERIGON_COMMITMENT_V3 (read at package init), so v3 and parallel
-          # results only stay mode-pure if each commitment mode keeps its own
-          # cache lineage.
           build-cache-extra-key: commitment-${{ matrix.commitment_mode }}
 
       - name: Run all tests on ${{ matrix.os }} (${{ matrix.commitment_mode }} commitment)
@@ -78,8 +70,9 @@ jobs:
           ERIGON_COMMITMENT_V3: ${{ matrix.commitment_mode == 'v3' && 'true' || 'false' }}
         run: |
           if ! make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"; then
-            # A failed or timed-out test is a real result: a cold rerun only repeats it or hides a flake.
-            if grep -q -e '^--- FAIL' -e '^panic: ' run.log; then
+            # A failed test binary is a real result: a cold rerun only repeats it or hides a flake. A full disk or
+            # a build failure in the same run still takes the cache clear below.
+            if grep -qE '^FAIL[[:space:]]+[^[:space:]]+[[:space:]]+[0-9.]+s' run.log && ! grep -q -e 'no space left on device' -e '\[build failed\]' run.log; then
               exit 1
             fi
             # Retry after clearing the Go build cache. Low disk space can cause
