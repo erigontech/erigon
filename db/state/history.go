@@ -1068,6 +1068,20 @@ func (ht *HistoryRoTx) pagedGetter(i, pageSize int) *seg.PagedReader {
 	return ht.pagedGetters[i]
 }
 
+func (ht *HistoryRoTx) checkFilesDBGap(tx kv.Tx) error {
+	if ht.h.HistoryDisabled || ht.h.SnapshotsDisabled {
+		return nil
+	}
+	prg, err := GetPruneValProgress(tx, []byte(ht.h.ValuesTable))
+	if err != nil {
+		return err
+	}
+	if end := min(ht.files.EndTxNum(), ht.iit.files.EndTxNum()); prg.TxTo > end {
+		return fmt.Errorf("gap between snapshot files and DB for history %s: readable files end at txNum %d but the DB was pruned up to %d; rebuild missing accessors or restore missing snapshot files before restarting", ht.h.FilenameBase, end, prg.TxTo)
+	}
+	return nil
+}
+
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
 	minIdxTx, _ := ht.iit.ii.minTxNumInDB(tx)
 	maxIdxTx := ht.iit.ii.maxTxNumInDB(tx)
