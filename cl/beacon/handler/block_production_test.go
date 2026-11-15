@@ -450,8 +450,10 @@ func TestStoreDataColumnSidecarsRejectsInvalidInput(t *testing.T) {
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
-		SecondsPerSlot:   12,
-		IntervalsPerSlot: 3,
+		SecondsPerSlot:         12,
+		IntervalsPerSlot:       3,
+		AttestationDueBps:      clparams.AttestationDueBps,
+		AttestationDueBpsGloas: clparams.AttestationDueBpsGloas,
 	}
 	slotStart := time.Unix(100, 0)
 	now := slotStart
@@ -465,8 +467,10 @@ func TestBlockBuilderWindowPreGloas(t *testing.T) {
 
 func TestBlockBuilderWindowGloas(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
-		SecondsPerSlot:   12,
-		IntervalsPerSlot: 3,
+		SecondsPerSlot:         12,
+		IntervalsPerSlot:       3,
+		AttestationDueBps:      clparams.AttestationDueBps,
+		AttestationDueBpsGloas: clparams.AttestationDueBpsGloas,
 	}
 	slotStart := time.Unix(100, 0)
 	now := slotStart
@@ -3386,8 +3390,10 @@ func TestValidateBuilderExecutionRequestsPreservesOtherProtocolLimits(t *testing
 
 func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
-		SecondsPerSlot:   12,
-		IntervalsPerSlot: 3,
+		SecondsPerSlot:         12,
+		IntervalsPerSlot:       3,
+		AttestationDueBps:      clparams.AttestationDueBps,
+		AttestationDueBpsGloas: clparams.AttestationDueBpsGloas,
 	}
 	slotStart := time.Unix(100, 0)
 	now := slotStart.Add(2950 * time.Millisecond)
@@ -3401,8 +3407,10 @@ func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
 
 func TestBlockBuilderWindowLateRequestGrabsImmediately(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
-		SecondsPerSlot:   12,
-		IntervalsPerSlot: 3,
+		SecondsPerSlot:         12,
+		IntervalsPerSlot:       3,
+		AttestationDueBps:      clparams.AttestationDueBps,
+		AttestationDueBpsGloas: clparams.AttestationDueBpsGloas,
 	}
 	slotStart := time.Unix(100, 0)
 	now := slotStart.Add(5 * time.Second)
@@ -3415,8 +3423,10 @@ func TestBlockBuilderWindowLateRequestGrabsImmediately(t *testing.T) {
 
 func TestBlockBuilderWindowReservesPublicationMargin(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
-		SecondsPerSlot:   12,
-		IntervalsPerSlot: 3,
+		SecondsPerSlot:         12,
+		IntervalsPerSlot:       3,
+		AttestationDueBps:      clparams.AttestationDueBps,
+		AttestationDueBpsGloas: clparams.AttestationDueBpsGloas,
 	}
 	slotStart := time.Unix(100, 0)
 
