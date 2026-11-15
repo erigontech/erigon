@@ -19,6 +19,7 @@ package shutter
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -38,6 +39,8 @@ type BlockListener struct {
 	logger             log.Logger
 	stateChangesClient stateChangesClient
 	events             *event.Observers[BlockEvent]
+	eventsMu           sync.Mutex
+	lastEvent          *BlockEvent
 }
 
 func NewBlockListener(logger log.Logger, stateChangesClient stateChangesClient) *BlockListener {
@@ -48,8 +51,16 @@ func NewBlockListener(logger log.Logger, stateChangesClient stateChangesClient) 
 	}
 }
 
+// RegisterObserver replays the last known head, if any, before returning.
+// The observer must accept that event without waiting for registration to finish.
 func (bl *BlockListener) RegisterObserver(o event.Observer[BlockEvent]) event.UnregisterFunc {
-	return bl.events.Register(o)
+	bl.eventsMu.Lock()
+	defer bl.eventsMu.Unlock()
+	unregister := bl.events.Register(o)
+	if bl.lastEvent != nil {
+		o(*bl.lastEvent)
+	}
+	return unregister
 }
 
 func (bl *BlockListener) Run(ctx context.Context) error {
@@ -95,10 +106,14 @@ func (bl *BlockListener) listen(ctx context.Context) error {
 		}
 
 		latestChange := batch.ChangeBatch[len(batch.ChangeBatch)-1]
-		bl.events.NotifySync(BlockEvent{
+		blockEvent := BlockEvent{
 			LatestBlockNum:  latestChange.BlockHeight,
 			LatestBlockTime: latestChange.BlockTime,
 			Unwind:          latestChange.Direction == remoteproto.Direction_UNWIND,
-		})
+		}
+		bl.eventsMu.Lock()
+		bl.lastEvent = &blockEvent
+		bl.events.NotifySync(blockEvent)
+		bl.eventsMu.Unlock()
 	}
 }

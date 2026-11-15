@@ -58,7 +58,7 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 	}()
 
 	ctx, cancel := context.WithCancel(ctx)
-	blockEventC := make(chan BlockEvent)
+	blockEventC := make(chan BlockEvent, 1)
 	unregisterBlockEventObserver := bt.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
 		select {
 		case <-ctx.Done(): // no-op

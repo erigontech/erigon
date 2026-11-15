@@ -101,3 +101,46 @@ func TestBlockListenerRetriesStateChanges(t *testing.T) {
 		})
 	}
 }
+
+func TestBlockListenerReplaysHeadToLateObserver(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		batches := make(chan *remoteproto.StateChangeBatch)
+		client := retryStateChangesClient{subscribe: func(streamCtx context.Context) (remoteproto.KV_StateChangesClient, error) {
+			return blockEventStream{recv: func() (*remoteproto.StateChangeBatch, error) {
+				select {
+				case batch := <-batches:
+					return batch, nil
+				case <-streamCtx.Done():
+					return nil, streamCtx.Err()
+				}
+			}}, nil
+		}}
+		listener := NewBlockListener(log.New(), client)
+		stopped := make(chan error, 1)
+		go func() { stopped <- listener.Run(ctx) }()
+		defer func() {
+			cancel()
+			require.ErrorIs(t, <-stopped, context.Canceled)
+		}()
+
+		batches <- &remoteproto.StateChangeBatch{
+			StateChangesIncomplete: true,
+			ChangeBatch:            []*remoteproto.StateChange{{BlockHeight: 42, BlockTime: 100}},
+		}
+		synctest.Wait()
+		events := make(chan BlockEvent, 1)
+		unregister := listener.RegisterObserver(func(e BlockEvent) { events <- e })
+		defer unregister()
+		select {
+		case e := <-events:
+			require.Equal(t, BlockEvent{LatestBlockNum: 42, LatestBlockTime: 100}, e)
+		default:
+			t.Fatal("late observer missed the subscription reset")
+		}
+
+		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 43, BlockTime: 105}}}
+		synctest.Wait()
+		require.Equal(t, BlockEvent{LatestBlockNum: 43, LatestBlockTime: 105}, <-events)
+	})
+}
