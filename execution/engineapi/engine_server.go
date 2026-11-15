@@ -360,7 +360,7 @@ func (e *EngineServer) decodePayloadTransactions(raw []hexutil.Bytes, gasLimit u
 func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
 	executionRequests []hexutil.Bytes, version clparams.StateVersion, deriveBlobHashes bool,
-	onValid func(blockHash common.Hash),
+	onValid func(blockHash common.Hash, witness *jsonrpc.ExecutionWitnessResult),
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if req == nil {
@@ -609,16 +609,16 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return possibleStatus, nil
 	}
 
-	var witnessView func() error
+	var witness payloadWitnessJob
 	var validated bool
 	defer func() {
-		if witnessView != nil {
-			if err := witnessView(); err != nil {
+		if witness.view != nil {
+			if err := witness.view(); err != nil {
 				e.logger.Warn("[NewPayload] could not view the payload state", "hash", blockHash, "err", err)
 			}
 		}
 		if validated {
-			onValid(blockHash)
+			onValid(blockHash, witness.result)
 		}
 	}()
 	e.lock.Lock()
@@ -640,8 +640,10 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			if possibleStatus.Status != engine_types.ValidStatus {
 				return possibleStatus, nil
 			}
-			if _, cached := e.payloadWitnesses.Get(blockHash); !cached {
-				status, validationErr, latestValidHash, err := e.validateChain(ctx, block, &witnessView)
+			if cached, ok := e.payloadWitnesses.Get(blockHash); ok {
+				witness.result = cached
+			} else {
+				status, validationErr, latestValidHash, err := e.validateChain(ctx, block, &witness)
 				if err != nil {
 					return nil, err
 				}
@@ -655,11 +657,11 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	e.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	var witnessViewOut *func() error
+	var witnessOut *payloadWitnessJob
 	if onValid != nil {
-		witnessViewOut = &witnessView
+		witnessOut = &witness
 	}
-	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block, witnessViewOut)
+	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block, witnessOut)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -1153,7 +1155,7 @@ func (e *EngineServer) HandleNewPayload(
 	ctx context.Context,
 	logPrefix string,
 	block *types.Block,
-	witnessView *func() error,
+	witness *payloadWitnessJob,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
 
@@ -1198,7 +1200,7 @@ func (e *EngineServer) HandleNewPayload(
 			}); respondSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-			status, validationErr, latestValidHash, err := e.validateChain(ctx, block, witnessView)
+			status, validationErr, latestValidHash, err := e.validateChain(ctx, block, witness)
 			if err != nil {
 				missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
 				if isMissingChainErr {
@@ -1240,7 +1242,7 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
-	status, validationErr, latestValidHash, err := e.validateChain(ctx, block, witnessView)
+	status, validationErr, latestValidHash, err := e.validateChain(ctx, block, witness)
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
 		missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
@@ -1260,23 +1262,30 @@ func (e *EngineServer) HandleNewPayload(
 	return e.validatedPayloadStatus(block, status, validationErr, latestValidHash), nil
 }
 
-// validateChain validates block. A non-nil witnessView is set to a view that builds and caches the witness of a VALID
-// block; it reads a copy of the validated state, so the caller may call it after releasing its locks.
-func (e *EngineServer) validateChain(ctx context.Context, block *types.Block, witnessView *func() error) (execmodule.ExecutionStatus, *string, common.Hash, error) {
-	if witnessView == nil {
+// payloadWitnessJob carries the witness of a VALID payload out of the engine lock.
+type payloadWitnessJob struct {
+	view   func() error // builds result from a copy of the validated state, after the locks are released
+	result *jsonrpc.ExecutionWitnessResult
+}
+
+// validateChain validates block. With a non-nil witness, a VALID block also gets the view that builds its witness.
+func (e *EngineServer) validateChain(ctx context.Context, block *types.Block, witness *payloadWitnessJob) (execmodule.ExecutionStatus, *string, common.Hash, error) {
+	if witness == nil {
 		return e.chainRW.ValidateChain(ctx, block)
 	}
 	blockHash := block.Hash()
 	result, view, err := e.executionService.ValidateChainAndView(ctx, block, defaultReadinessWait, func(blockTx kv.TemporalTx, parentState kv.TemporalGetter) error {
-		witness, err := e.witnessBuilder.ValidatedBlockWitness(ctx, blockTx, parentState, blockHash)
+		result, err := e.payloadWitnesses.BuildPayloadWitness(ctx, blockHash, func(ctx context.Context) (*jsonrpc.ExecutionWitnessResult, error) {
+			return e.witnessBuilder.ValidatedBlockWitness(ctx, blockTx, parentState, blockHash)
+		})
 		if err != nil {
 			e.logger.Warn("[NewPayload] could not build the payload witness", "hash", blockHash, "err", err)
 			return nil
 		}
-		e.payloadWitnesses.AddPayloadWitness(blockHash, witness)
+		witness.result = result
 		return nil
 	})
-	*witnessView = view
+	witness.view = view
 	if err != nil {
 		return 0, nil, common.Hash{}, err
 	}

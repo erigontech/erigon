@@ -277,7 +277,7 @@ func TestNewPayloadRunsOnValidAfterTheEngineLock(t *testing.T) {
 
 	var validHash common.Hash
 	var lockFree bool
-	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash) {
+	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash, _ *jsonrpc.ExecutionWitnessResult) {
 		validHash = blockHash
 		if lockFree = srv.lock.TryLock(); lockFree {
 			srv.lock.Unlock()
@@ -303,7 +303,7 @@ func TestNewPayloadWaitsForReadinessWithoutTheEngineLock(t *testing.T) {
 		return true, nil
 	}
 
-	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(common.Hash) {})
+	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(common.Hash, *jsonrpc.ExecutionWitnessResult) {})
 	require.NoError(t, err)
 	require.Equal(t, engine_types.ValidStatus, status.Status)
 	require.False(t, lockHeldInReady)
@@ -1507,8 +1507,8 @@ func (c *witnessChain) witness(block *types.Block) (*engine_types.PayloadStatus,
 	require.NoError(c.t, err)
 	var witness *jsonrpc.ExecutionWitnessResult
 	var witnessErr error
-	status, err := c.srv.newPayload(c.t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash) {
-		witness, witnessErr = c.srv.payloadWitness(c.t.Context(), blockHash)
+	status, err := c.srv.newPayload(c.t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash, built *jsonrpc.ExecutionWitnessResult) {
+		witness, witnessErr = c.srv.payloadWitness(c.t.Context(), blockHash, built)
 	})
 	require.NoError(c.t, err)
 	return status, witness, witnessErr
@@ -1571,6 +1571,23 @@ func TestNewPayloadWitnessForAValidPayloadWhoseStateWasDropped(t *testing.T) {
 	require.Equal(t, engine_types.ValidStatus, newPayloadV2(t, c.srv, c.blocks[0]).Status)
 
 	c.requireWitness(c.blocks[0])
+}
+
+// onValid gets the witness the validation built, so an eviction from the shared cache before onValid loses nothing.
+func TestNewPayloadWitnessSurvivesAnEvictionBeforeOnValid(t *testing.T) {
+	c := newWitnessChain(t, nil)
+	payload, err := engine_types.ExecutionPayloadFromBlock(c.blocks[0])
+	require.NoError(t, err)
+	var witness *jsonrpc.ExecutionWitnessResult
+	var witnessErr error
+	status, err := c.srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(blockHash common.Hash, built *jsonrpc.ExecutionWitnessResult) {
+		c.dropCachedWitnesses()
+		witness, witnessErr = c.srv.payloadWitness(t.Context(), blockHash, built)
+	})
+	require.NoError(t, err)
+	require.Equal(t, engine_types.ValidStatus, status.Status)
+	require.NoError(t, witnessErr)
+	require.NotEmpty(t, witness.State)
 }
 
 func TestNewPayloadWitnessForAValidPayloadThatIsNoLongerTheRetainedTip(t *testing.T) {
@@ -1660,7 +1677,7 @@ func TestNewPayloadWitnessAnswersSyncingWhenTheModuleIsBusy(t *testing.T) {
 	}
 
 	onValidCalled := false
-	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(common.Hash) { onValidCalled = true })
+	status, err := srv.newPayload(t.Context(), payload, nil, nil, nil, clparams.CapellaVersion, false, func(common.Hash, *jsonrpc.ExecutionWitnessResult) { onValidCalled = true })
 	require.NoError(t, err)
 	require.Equal(t, engine_types.SyncingStatus, status.Status)
 	require.False(t, onValidCalled)

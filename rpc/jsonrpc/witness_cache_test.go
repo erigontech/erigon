@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -83,6 +84,39 @@ func TestWitnessResultCacheBuildOnceSharesRunningBuild(t *testing.T) {
 		}
 		require.Equal(t, int32(1), started, "concurrent callers for one hash must share one build")
 		require.Empty(t, c.building, "a finished build must leave the in-flight map")
+	})
+}
+
+// Concurrent payload-witness requests for one hash share one build, which the cache then holds.
+func TestWitnessResultCacheBuildPayloadWitnessSharesOneBuild(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := newWitnessResultCache(96, 0, false, false)
+		hash, want := hashN(1), mkResult()
+		release := make(chan struct{})
+		var builds atomic.Int32
+		build := func(context.Context) (*ExecutionWitnessResult, error) {
+			builds.Add(1)
+			<-release
+			return want, nil
+		}
+		results := make(chan *ExecutionWitnessResult, 2)
+		for range 2 {
+			go func() {
+				r, err := c.BuildPayloadWitness(t.Context(), hash, build)
+				if err != nil {
+					t.Error(err)
+				}
+				results <- r
+			}()
+		}
+		synctest.Wait()
+		close(release)
+		require.Same(t, want, <-results)
+		require.Same(t, want, <-results)
+		require.Equal(t, int32(1), builds.Load())
+		got, ok := c.Get(hash)
+		require.True(t, ok)
+		require.Same(t, want, got)
 	})
 }
 
@@ -302,6 +336,20 @@ func TestWitnessResultCacheReAddRefreshesRecency(t *testing.T) {
 
 // TestWitnessResultCacheSingleOversizedEntryKept: an entry alone larger than the byte
 // cap is retained (the cache never evicts its last entry down to empty).
+// Concurrent additions of one hash count its bytes once.
+func TestWitnessResultCacheConcurrentAddsCountOnce(t *testing.T) {
+	r := mkSized(1000)
+	for range 200 {
+		c := newWitnessResultCache(8, 0, false, false)
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Go(func() { c.Add(hashN(1), r) })
+		}
+		wg.Wait()
+		require.Equal(t, witnessResultSize(r), c.ResidentBytes())
+	}
+}
+
 func TestWitnessResultCacheSingleOversizedEntryKept(t *testing.T) {
 	c := newWitnessResultCache(10, 300, false, false)
 	c.Add(hashN(1), mkSized(1000))
