@@ -639,7 +639,12 @@ var balSeedChunkHook func(onWorker bool)
 func forEachBALChunk(n int, cellsOf func(i int) int, fn func(lo, hi int)) {
 	bounds := []int{0}
 	for i, w := 0, 0; i < n; i++ {
-		if w += cellsOf(i); w >= balSeedChunkCells || i == n-1 {
+		c := cellsOf(i)
+		if w > 0 && c >= balSeedChunkCells {
+			bounds = append(bounds, i)
+			w = 0
+		}
+		if w += c; w >= balSeedChunkCells || i == n-1 {
 			bounds = append(bounds, i+1)
 			w = 0
 		}

@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"reflect"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -2671,6 +2672,25 @@ func TestForEachBALChunkWaitsForWorkersWhenTheCallerPanics(t *testing.T) {
 		})
 	})
 	require.True(t, workerDone.Load(), "the caller returned while a worker was still running")
+}
+
+// An account heavier than a chunk gets its own range, so the light accounts before it still seed alongside it.
+func TestForEachBALChunkGivesAnOversizedAccountItsOwnRange(t *testing.T) {
+	withOneSeedWorker(t)
+	var mu sync.Mutex
+	var ranges [][2]int
+	forEachBALChunk(512, func(i int) int {
+		if i == 511 {
+			return 3000
+		}
+		return 1
+	}, func(lo, hi int) {
+		mu.Lock()
+		defer mu.Unlock()
+		ranges = append(ranges, [2]int{lo, hi})
+	})
+	slices.SortFunc(ranges, func(a, b [2]int) int { return a[0] - b[0] })
+	require.Equal(t, [][2]int{{0, 511}, {511, 512}}, ranges)
 }
 
 // Seeding many small accounts in parallel allocates no more per account than the serial seed did: 12.1 allocations
