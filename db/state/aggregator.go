@@ -1294,11 +1294,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 		in.Close()
 		return true, err
 	}
-	a.observeMaintenance(ctx, MaintenanceEvent{Point: MaintenanceMergeFilesBuilt})
 	a.integrateMergedDirtyFiles(in)
-	a.observeMaintenance(ctx, MaintenanceEvent{Point: MaintenanceMergeFilesPublished})
-	aggTx.Close()
-	a.observeMaintenance(ctx, MaintenanceEvent{Point: MaintenanceMergeComplete})
 	return true, nil
 }
 
