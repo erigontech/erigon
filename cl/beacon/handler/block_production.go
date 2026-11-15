@@ -2260,6 +2260,8 @@ AttLoop:
 		if err := normalized.DecodeSSZWithConfig(encoded, int(targetVersion), a.beaconChainCfg); err != nil {
 			continue
 		}
+		// Nested attestation decoders reset the limits to mainnet defaults.
+		normalized.SetVersionWithConfig(targetVersion, a.beaconChainCfg)
 		slashedIndicies = append(slashedIndicies, rawIdxs...)
 		attesterSlashings.Append(normalized)
 		if attesterSlashings.Len() >= int(maxAttesterSlashings) {

@@ -31,17 +31,24 @@ import (
 
 func TestGetBlockOperationsAttesterSlashingsFork(t *testing.T) {
 	for _, tc := range []struct {
-		name             string
-		submittedVersion clparams.StateVersion
-		blockVersion     clparams.StateVersion
-		epoch            uint64
+		name                 string
+		submittedVersion     clparams.StateVersion
+		blockVersion         clparams.StateVersion
+		epoch                uint64
+		maxCommitteesPerSlot uint64
 	}{
-		{"Deneb into Electra", clparams.DenebVersion, clparams.ElectraVersion, 1},
-		{"Deneb into Fulu", clparams.DenebVersion, clparams.FuluVersion, 2},
-		{"Electra into Gloas", clparams.ElectraVersion, clparams.GloasVersion, 3},
+		{"Deneb into Electra", clparams.DenebVersion, clparams.ElectraVersion, 1, 0},
+		{"Deneb into Fulu", clparams.DenebVersion, clparams.FuluVersion, 2, 0},
+		{"Electra into Gloas", clparams.ElectraVersion, clparams.GloasVersion, 3, 0},
+		{"Deneb into Electra with configured limits", clparams.DenebVersion, clparams.ElectraVersion, 1, 4},
+		{"Deneb into Fulu with configured limits", clparams.DenebVersion, clparams.FuluVersion, 2, 4},
+		{"Electra into Gloas with configured limits", clparams.ElectraVersion, clparams.GloasVersion, 3, 4},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := clparams.MainnetBeaconConfig
+			if tc.maxCommitteesPerSlot != 0 {
+				cfg.MaxCommitteesPerSlot = tc.maxCommitteesPerSlot
+			}
 			cfg.AltairForkEpoch = 0
 			cfg.BellatrixForkEpoch = 0
 			cfg.CapellaForkEpoch = 0
@@ -55,6 +62,7 @@ func TestGetBlockOperationsAttesterSlashingsFork(t *testing.T) {
 			require.NoError(t, s.AddValidator(validator, cfg.MaxEffectiveBalance))
 			opPool := pool.NewOperationsPool(&cfg)
 			submitted := cltypes.NewAttesterSlashing(tc.submittedVersion)
+			submitted.SetVersionWithConfig(tc.submittedVersion, &cfg)
 			submitted.Attestation_1.AttestingIndices.Append(0)
 			submitted.Attestation_2.AttestingIndices.Append(0)
 			submitted.Attestation_1.Data.BeaconBlockRoot = common.Hash{1}
@@ -83,6 +91,9 @@ func TestGetBlockOperationsAttesterSlashingsFork(t *testing.T) {
 			actualSlashingRoot, err := slashings.Get(0).HashSSZ()
 			require.NoError(t, err)
 			require.Equal(t, expectedSlashingRoot, actualSlashingRoot)
+			expectedCap := int(cfg.MaxValidatorsPerCommittee * cfg.MaxCommitteesPerSlot)
+			require.Equal(t, expectedCap, slashings.Get(0).Attestation_1.AttestingIndices.Cap())
+			require.Equal(t, expectedCap, slashings.Get(0).Attestation_2.AttestingIndices.Cap())
 
 			require.Equal(t, originalCap, submitted.Attestation_1.AttestingIndices.Cap())
 			require.Equal(t, originalCap, submitted.Attestation_2.AttestingIndices.Cap())
