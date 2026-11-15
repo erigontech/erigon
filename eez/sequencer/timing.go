@@ -73,6 +73,17 @@ func (t Timing) Validate() error {
 	return nil
 }
 
+// CheckGenesis reports an L2 genesis timestamp off the slot grid of L1, which
+// the timestamp l1 of an L1 block lies on: every K-th block from genesis is a
+// Sync position, and each must fall on an L1 slot.
+func (t Timing) CheckGenesis(genesis, l1 uint64) error {
+	d := max(genesis, l1) - min(genesis, l1)
+	if slot := uint64(t.L1 / time.Second); d%slot != 0 {
+		return fmt.Errorf("%w: L2 genesis timestamp %d is off the L1 slot grid of L1 block timestamp %d", ErrTiming, genesis, l1)
+	}
+	return nil
+}
+
 // K is the number of L2 blocks per L1 block.
 func (t Timing) K() uint64 { return uint64(t.L1 / t.L2) }
 

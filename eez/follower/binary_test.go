@@ -750,8 +750,10 @@ func TestSequencerBinary(t *testing.T) {
 		server.ServeHTTP(w, r)
 	}))
 	t.Cleanup(l1Server.Close)
-	// Each head's slot fires at once: its timestamp is the proof window
-	// past.
+	l2 := networks.Devnet.Config.L2.(*config.L2Config)
+	genesisTime := uint64(time.Now().Unix() - 20)
+	// Each head's slot fires at once: its timestamp, on the L1 slot grid of
+	// the genesis, is the proof window past.
 	go func() {
 		for {
 			head, err := c.L1.Head(context.Background())
@@ -760,7 +762,9 @@ func TestSequencerBinary(t *testing.T) {
 			}
 			n := head.Number + 1
 			hash := common.BigToHash(new(big.Int).SetUint64(1<<32 + n))
-			if c.L1.Append(&recording.Block{Header: l1.Header{Number: n, Hash: hash, ParentHash: head.Hash, Time: uint64(time.Now().Unix()) - 8}}) != nil {
+			ts := uint64(time.Now().Unix()) - 8
+			ts -= (ts - genesisTime) % l2.L1BlockTime
+			if c.L1.Append(&recording.Block{Header: l1.Header{Number: n, Hash: hash, ParentHash: head.Hash, Time: ts}}) != nil {
 				return
 			}
 			select {
@@ -771,12 +775,11 @@ func TestSequencerBinary(t *testing.T) {
 		}
 	}()
 
-	l2 := networks.Devnet.Config.L2.(*config.L2Config)
 	raw, err := os.ReadFile(filepath.Join("..", "networks", "devnet-genesis.json"))
 	require.NoError(t, err)
 	var genesis map[string]any
 	require.NoError(t, json.Unmarshal(raw, &genesis))
-	genesis["timestamp"] = hexutil.Uint64(time.Now().Unix() - 20).String()
+	genesis["timestamp"] = hexutil.Uint64(genesisTime).String()
 	raw, err = json.Marshal(genesis)
 	require.NoError(t, err)
 	genesisFile := filepath.Join(t.TempDir(), "genesis.json")
@@ -865,4 +868,68 @@ func TestSequencerBinary(t *testing.T) {
 	case <-time.After(2 * time.Minute):
 		t.Fatal("the sequencer did not stop")
 	}
+}
+
+// TestSequencerBinaryHaltsOffTheL1Grid: a sequencer whose L1 heads are off the
+// slot grid of its genesis stops the node with a failure exit status.
+func TestSequencerBinaryHaltsOffTheL1Grid(t *testing.T) {
+	bin := os.Getenv("EEZ_ERIGON")
+	if bin == "" {
+		t.Skip("EEZ_ERIGON names no erigon binary")
+	}
+	c := derivertest.NewComposer(t)
+	server, err := l1test.NewServer(c.L1, log.New())
+	require.NoError(t, err)
+	t.Cleanup(server.Stop)
+	l1Server := httptest.NewServer(server)
+	t.Cleanup(l1Server.Close)
+	l2 := networks.Devnet.Config.L2.(*config.L2Config)
+	genesisTime := uint64(time.Now().Unix() - 20)
+	// New L1 heads, each a second off the slot grid of the genesis.
+	go func() {
+		for {
+			head, err := c.L1.Head(context.Background())
+			if err != nil {
+				return
+			}
+			n := head.Number + 1
+			ts := uint64(time.Now().Unix()) - 8
+			ts -= (ts-genesisTime)%l2.L1BlockTime - 1
+			if c.L1.Append(&recording.Block{Header: l1.Header{Number: n, Hash: common.BigToHash(new(big.Int).SetUint64(1<<32 + n)), ParentHash: head.Hash, Time: ts}}) != nil {
+				return
+			}
+			select {
+			case <-t.Context().Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
+		}
+	}()
+
+	raw, err := os.ReadFile(filepath.Join("..", "networks", "devnet-genesis.json"))
+	require.NoError(t, err)
+	var genesis map[string]any
+	require.NoError(t, json.Unmarshal(raw, &genesis))
+	genesis["timestamp"] = hexutil.Uint64(genesisTime).String()
+	raw, err = json.Marshal(genesis)
+	require.NoError(t, err)
+	genesisFile := filepath.Join(t.TempDir(), "genesis.json")
+	require.NoError(t, os.WriteFile(genesisFile, raw, 0o644))
+	dir := t.TempDir()
+	out, err := exec.CommandContext(t.Context(), bin, "init", "--eez.enabled", "--datadir", dir,
+		"--eez.l1.chainid", strconv.FormatUint(l2.L1ChainID, 10), "--eez.registry", l2.Registry.Hex(),
+		"--eez.registry.deployblock", strconv.FormatUint(l2.RegistryDeployBlock, 10), "--eez.rollupid", strconv.FormatUint(l2.RollupID, 10),
+		"--eez.l1.blocktime=12s", "--eez.l2.blocktime=2s", genesisFile).CombinedOutput()
+	require.NoError(t, err, "%s", out)
+
+	s := start(t, bin, freePort(t), "--eez.enabled", "--chain=eez-devnet", "--datadir", dir, "--eez.l1.rpc", l1Server.URL,
+		"--eez.l1.poll=200ms", "--eez.sync.l1only=true", "--eez.sequencer", "--eez.proof.time=4s", "--eez.submission.slack=1500ms",
+		"--port", freePort(t), "--nat=none", "--nodiscover")
+	select {
+	case err := <-s.exited:
+		require.Error(t, err, "the node exited with status 0")
+	case <-time.After(60 * time.Second):
+		t.Fatal("the node did not halt")
+	}
+	require.Contains(t, s.output.String(), "sequencer halted")
 }

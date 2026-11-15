@@ -29,15 +29,19 @@ type Service struct {
 	seq      *Sequencer
 	schedule *Schedule
 	heads    chan l1.Header
+	halt     func(error)
+	mu       sync.Mutex
+	err      error
 	logger   log.Logger
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 }
 
 // NewService returns a service producing with seq on the triggers of
-// schedule, which the L1 heads given to Head drive.
-func NewService(seq *Sequencer, schedule *Schedule, logger log.Logger) *Service {
-	return &Service{seq: seq, schedule: schedule, heads: make(chan l1.Header, 1), logger: logger}
+// schedule, which the L1 heads given to Head drive. halt takes the error that
+// stops the schedule.
+func NewService(seq *Sequencer, schedule *Schedule, halt func(error), logger log.Logger) *Service {
+	return &Service{seq: seq, schedule: schedule, heads: make(chan l1.Header, 1), halt: halt, logger: logger}
 }
 
 // Sequencer is the service's sequencer.
@@ -67,13 +71,25 @@ func (s *Service) Start() error {
 	s.wg.Add(2)
 	go func() {
 		defer s.wg.Done()
-		s.schedule.Run(ctx, s.heads, events, s.logger)
+		if err := s.schedule.Run(ctx, s.heads, events, s.logger); err != nil {
+			s.mu.Lock()
+			s.err = err
+			s.mu.Unlock()
+			s.halt(err)
+		}
 	}()
 	go func() {
 		defer s.wg.Done()
 		s.seq.Run(ctx, events)
 	}()
 	return nil
+}
+
+// Err returns the error that stopped the schedule, if one did.
+func (s *Service) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.err
 }
 
 // Stop stops the sequencer and waits for it.

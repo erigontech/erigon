@@ -91,8 +91,9 @@ func (s *Schedule) Tick() (LiveTick, bool) { return LiveTick{SyncHeight: s.heigh
 // Run feeds the L1 heads of heads to s and sends its triggers to out until
 // ctx ends or heads closes: each Sync slot when its instant passes, and a
 // Live tick every L2 interval once anchored. A Live tick is dropped while
-// out is full; the next one nudges again.
-func (s *Schedule) Run(ctx context.Context, heads <-chan l1.Header, out chan<- Event, logger log.Logger) {
+// out is full; the next one nudges again. A head off the slot grid of the
+// genesis stops it with ErrTiming.
+func (s *Schedule) Run(ctx context.Context, heads <-chan l1.Header, out chan<- Event, logger log.Logger) error {
 	ticker := time.NewTicker(s.timing.L2)
 	defer ticker.Stop()
 	timer := time.NewTimer(0)
@@ -106,11 +107,14 @@ func (s *Schedule) Run(ctx context.Context, heads <-chan l1.Header, out chan<- E
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case h, ok := <-heads:
 			if !ok {
 				logger.Error("[eez] L1 head source closed, sequencer schedule stops", "event", "eez.slot.l1_anchored.source_closed")
-				return
+				return nil
+			}
+			if err := s.timing.CheckGenesis(s.genesis, h.Time); err != nil {
+				return err
 			}
 			if stale := s.Head(h); stale != nil {
 				logger.Warn("[eez] L1 head before the armed Sync slot fired, superseding it", "event", "eez.slot.l1_anchored.trigger_superseded",
@@ -122,7 +126,7 @@ func (s *Schedule) Run(ctx context.Context, heads <-chan l1.Header, out chan<- E
 			select {
 			case out <- slot:
 			case <-ctx.Done():
-				return
+				return nil
 			}
 		case <-ticker.C:
 			tick, ok := s.Tick()

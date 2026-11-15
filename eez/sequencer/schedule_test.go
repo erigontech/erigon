@@ -17,6 +17,7 @@
 package sequencer_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -71,7 +72,7 @@ func TestScheduleRun(t *testing.T) {
 	s := sequencer.NewSchedule(tm, now-100)
 	heads := make(chan l1.Header, 1)
 	out := make(chan sequencer.Event, 4)
-	go s.Run(t.Context(), heads, out, log.New())
+	go func() { _ = s.Run(t.Context(), heads, out, log.New()) }()
 
 	heads <- l1.Header{Number: 3, Time: now - 10}
 	next := func() sequencer.Event {
@@ -85,4 +86,35 @@ func TestScheduleRun(t *testing.T) {
 	}
 	require.Equal(t, sequencer.SyncSlot{Height: 92, Time: now - 8, L1Head: 3}, next())
 	require.Equal(t, sequencer.LiveTick{SyncHeight: 92}, next())
+}
+
+// TestScheduleRefusesGenesisOffTheL1Grid: an L1 head off the slot grid of the
+// genesis stops the schedule, whose Sync blocks would miss the L1 slots; one
+// on it arms a trigger.
+func TestScheduleRefusesGenesisOffTheL1Grid(t *testing.T) {
+	const genesis = 1_000
+	for _, c := range []struct {
+		time uint64
+		ok   bool
+	}{{genesis + 120, true}, {genesis + 122, false}} {
+		ctx, cancel := context.WithCancel(t.Context())
+		heads := make(chan l1.Header, 1)
+		heads <- l1.Header{Number: 7, Time: c.time}
+		out := make(chan sequencer.Event, 4)
+		done := make(chan error, 1)
+		go func() { done <- sequencer.NewSchedule(mainnet(), genesis).Run(ctx, heads, out, log.New()) }()
+		if c.ok {
+			select {
+			case e := <-out:
+				require.IsType(t, sequencer.SyncSlot{}, e)
+			case <-time.After(5 * time.Second):
+				t.Fatal("no trigger")
+			}
+			cancel()
+			require.NoError(t, <-done)
+		} else {
+			require.ErrorIs(t, <-done, sequencer.ErrTiming)
+			cancel()
+		}
+	}
 }

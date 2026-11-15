@@ -209,7 +209,7 @@ func TestSequencerRejects(t *testing.T) {
 // TestServiceHead: the latest L1 head replaces one the schedule has not
 // taken.
 func TestServiceHead(t *testing.T) {
-	svc := sequencer.NewService(nil, nil, log.New())
+	svc := sequencer.NewService(nil, nil, nil, log.New())
 	svc.Head(l1.Header{Number: 1})
 	svc.Head(l1.Header{Number: 2})
 	require.Equal(t, uint64(2), svc.PendingHead().Number)
@@ -419,4 +419,22 @@ func TestLateSyncBlockIsEmpty(t *testing.T) {
 			require.Len(t, h.block(t, 6).Transactions(), 1)
 		}
 	}
+}
+
+// TestServiceHaltsOffTheL1Grid: a schedule stopped by an L1 head off the
+// grid of the genesis halts the service.
+func TestServiceHaltsOffTheL1Grid(t *testing.T) {
+	h := newHarness(t)
+	halted := make(chan error, 1)
+	svc := sequencer.NewService(h.sequencer(t, 0), sequencer.NewSchedule(devnet(), h.genesis.Time), func(err error) { halted <- err }, log.New())
+	require.NoError(t, svc.Start())
+	defer func() { _ = svc.Stop() }()
+	svc.Head(l1.Header{Number: 1, Time: h.genesis.Time + 13})
+	select {
+	case err := <-halted:
+		require.ErrorIs(t, err, sequencer.ErrTiming)
+	case <-time.After(10 * time.Second):
+		t.Fatal("not halted")
+	}
+	require.ErrorIs(t, svc.Err(), sequencer.ErrTiming, "the node's exit status reads it")
 }

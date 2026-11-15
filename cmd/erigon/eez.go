@@ -172,7 +172,7 @@ func allInOneConfigs(ctx context.Context, l1Node *nodecfg.Config, l1Eth *ethconf
 // startStandalone registers on n, the node of an EEZ chain, its follower,
 // which reads the L1 node of cfg and syncs from L2 peers loopBlockLimit
 // blocks at a time; debug serves the debug-only eez methods.
-func startStandalone(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, loopBlockLimit uint, debug bool, logger log.Logger) (*follower.Service, error) {
+func startStandalone(ctx context.Context, n *node.ErigonNode, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, loopBlockLimit uint, debug bool, logger log.Logger) (halting, error) {
 	reader, err := dialL1(ctx, cfg, dirs, logger)
 	if err != nil {
 		return nil, err
@@ -192,7 +192,7 @@ func allInOneTracer(cmd *cli.Command) (*tracers.Tracer, error) {
 // layer stores in place, and its own --vmtrace tracer of cmd, and registers
 // it on l1Node, which then starts it after and stops it before the L1
 // services.
-func startAllInOne(ctx context.Context, l1Node *node.ErigonNode, l1Dirs datadir.Dirs, nodeCfg *nodecfg.Config, ethCfg *ethconfig.Config, cfg *eez.Config, api *eezrpc.API, logger log.Logger, cmd *cli.Command) (*follower.Service, error) {
+func startAllInOne(ctx context.Context, l1Node *node.ErigonNode, l1Dirs datadir.Dirs, nodeCfg *nodecfg.Config, ethCfg *ethconfig.Config, cfg *eez.Config, api *eezrpc.API, logger log.Logger, cmd *cli.Command) (halting, error) {
 	tracer, err := allInOneTracer(cmd)
 	if err != nil {
 		return nil, err
@@ -201,7 +201,7 @@ func startAllInOne(ctx context.Context, l1Node *node.ErigonNode, l1Dirs datadir.
 	if err != nil {
 		return nil, err
 	}
-	var svc *follower.Service
+	var svc halting
 	reader, err := localL1(ctx, l1Node.Backend(), l1Dirs, logger)
 	if err == nil {
 		svc, err = startFollower(ctx, l2Node, l1Node, reader, caplinBlobs(l1Node.Backend()), cfg, api, nodeCfg.Dirs, nodeCfg.Dirs.DataDir, ethCfg.Sync.LoopBlockLimit, false, logger)
@@ -243,9 +243,24 @@ func sentryPeers(backend *eth.Ethereum) func(context.Context) (uint64, error) {
 	}
 }
 
+// halting is a service that can stop the node on its own; Err returns why.
+type halting interface{ Err() error }
+
+// firstHalt reports the first error among services that stopped the node.
+type firstHalt []halting
+
+func (h firstHalt) Err() error {
+	for _, s := range h {
+		if err := s.Err(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // newSequencer returns the sequencer of the chain of backend, producing on
-// f from the backend's txpool.
-func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.ExecChain, f *follower.Follower, cfg *eez.SequencerConfig, witnesses sequencer.Witnesses, logger log.Logger) (*sequencer.Service, error) {
+// f from the backend's txpool; one that halts closes stop.
+func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.ExecChain, f *follower.Follower, stop interface{ Close() }, cfg *eez.SequencerConfig, witnesses sequencer.Witnesses, logger log.Logger) (*sequencer.Service, error) {
 	pool := backend.TxPool()
 	if pool == nil {
 		return nil, errors.New("the sequencer needs the txpool")
@@ -266,7 +281,11 @@ func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.Exe
 	if err != nil {
 		return nil, err
 	}
-	return sequencer.NewService(s, sequencer.NewSchedule(timing, genesis.Time), logger), nil
+	halt := func(err error) {
+		logger.Crit("[eez] sequencer halted, stopping the node", "err", err)
+		go stop.Close()
+	}
+	return sequencer.NewService(s, sequencer.NewSchedule(timing, genesis.Time), halt, logger), nil
 }
 
 // onStop is a lifecycle that runs a function when stopped.
@@ -313,9 +332,9 @@ func caplinBlobs(backend *eth.Ethereum) l1.BeaconStore {
 // startFollower registers on n the follower of its EEZ chain, reading L1
 // from reader, blobs also from local when not nil, and keeping its stores in
 // dir, and its sequencer when cfg has one, whose witnesses api serves with
-// debug. When the follower halts on its own it closes stop, the node whose
-// exit ends the process.
-func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Close() }, reader l1.ChainReader, local l1.BeaconStore, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, dir string, loopBlockLimit uint, debug bool, logger log.Logger) (*follower.Service, error) {
+// debug. When the follower or the sequencer halts on its own it closes stop,
+// the node whose exit ends the process.
+func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Close() }, reader l1.ChainReader, local l1.BeaconStore, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, dir string, loopBlockLimit uint, debug bool, logger log.Logger) (halting, error) {
 	backend := n.Backend()
 	chainConfig := backend.ChainConfig()
 	if err := cfg.L2.Check(chainConfig); err != nil {
@@ -374,7 +393,7 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 			return nil, err
 		}
 		capture := witness.NewCapture(jsonrpc.NewHeadWitnesses(db, blockReader, engine), witnesses, func() uint64 { return f.Status().Finalized })
-		if seq, err = newSequencer(ctx, backend, chain, f, cfg.Sequencer, capture, logger); err != nil {
+		if seq, err = newSequencer(ctx, backend, chain, f, stop, cfg.Sequencer, capture, logger); err != nil {
 			witnesses.Close()
 			return nil, err
 		}
@@ -404,5 +423,8 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		l1Source = "in-process"
 	}
 	logger.Info("[eez] follower mode", "chaindata", dirs.Chaindata, "l1", l1Source, "l1Only", l1Only)
+	if seq != nil {
+		return firstHalt{svc, seq}, nil
+	}
 	return svc, nil
 }

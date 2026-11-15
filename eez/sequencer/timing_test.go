@@ -235,3 +235,26 @@ func TestTimingChunkBoundary(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, uint64(102), b)
 }
+
+// TestTimingGenesisOnTheL1Grid: a genesis must sit on the slot grid of L1,
+// which places a Sync position every K blocks on an L1 slot.
+func TestTimingGenesisOnTheL1Grid(t *testing.T) {
+	tm := mainnet()
+	for _, c := range []struct {
+		genesis, l1 uint64
+		ok          bool
+	}{
+		{1_000, 1_000, true},
+		{1_000, 1_036, true},
+		{1_036, 1_000, true},
+		{1_002, 1_000, false},
+		{1_000, 1_030, false},
+	} {
+		err := tm.CheckGenesis(c.genesis, c.l1)
+		if c.ok {
+			require.NoError(t, err, "genesis %d, L1 %d", c.genesis, c.l1)
+		} else {
+			require.ErrorIs(t, err, sequencer.ErrTiming, "genesis %d, L1 %d", c.genesis, c.l1)
+		}
+	}
+}
