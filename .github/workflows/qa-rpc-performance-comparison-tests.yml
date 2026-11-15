@@ -484,7 +484,7 @@ jobs:
           echo "  RUN_ID=${RUN_ID}"
           echo "  NETWORK=${NETWORK}"
           # Wait for an agreement between all the clients
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID" --chain "$NETWORK" --deadline-timeout $TOTAL_TIME_SECONDS
+          python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" --deadline-timeout $TOTAL_TIME_SECONDS
 
       - name: Prepare the benchmark result directories
         id: prepare_perf
@@ -524,7 +524,8 @@ jobs:
             echo "RUNNER_WS=$RUNNER_WS"
           } >> "$GITHUB_ENV"
 
-      # A failed load pattern does not stop the next ones; a failed sync between clients stops the benchmark.
+      # A failed load pattern does not stop the next ones; a failed sync between clients stops the benchmark of that client,
+      # and the other clients go on without it (--drop-lost-remotes): ALIGNED_REMOTES holds the clients still running.
       # Each pattern starts on the same block in all clients, otherwise a saturated client runs the later patterns on a newer chain head.
       - name: Run mixed
         id: perf_mixed
@@ -536,7 +537,7 @@ jobs:
       - name: Sync clients before trace_block_call_tracer
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'trace_block_call_tracer')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-trace_block_call_tracer" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-trace_block_call_tracer" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV"
 
       # The traces (blocks=32) follow mixed at a low rate, while their blocks are still inside the recent state.
       - name: Run trace_block_call_tracer
@@ -549,7 +550,7 @@ jobs:
       - name: Sync clients before trace_block_struct_log
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'trace_block_struct_log')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-trace_block_struct_log" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-trace_block_struct_log" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV"
 
       - name: Run trace_block_struct_log
         id: perf_trace_block_struct_log
@@ -561,7 +562,7 @@ jobs:
       - name: Sync clients before eth_call_gen
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_call_gen')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_call_gen" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_call_gen" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV"
 
       - name: Run eth_call_gen
         id: perf_eth_call_gen
@@ -573,7 +574,7 @@ jobs:
       - name: Sync clients before eth_createAccessList_gen
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_createAccessList_gen')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_createAccessList_gen" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_createAccessList_gen" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV"
 
       - name: Run eth_createAccessList_gen
         id: perf_eth_createAccessList_gen
@@ -585,7 +586,7 @@ jobs:
       - name: Sync clients before eth_getLogs_gen
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_gen')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_gen" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getLogs_gen" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV"
 
       - name: Run eth_getLogs_gen
         id: perf_eth_getLogs_gen
@@ -597,7 +598,7 @@ jobs:
       - name: Sync clients before eth_getLogs_head
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_head')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_head" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getLogs_head" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV"
 
       - name: Run eth_getLogs_head
         id: perf_eth_getLogs_head
@@ -609,7 +610,7 @@ jobs:
       - name: Sync clients before eth_getLogs_topics
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_topics')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_topics" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getLogs_topics" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV"
 
       - name: Run eth_getLogs_topics
         id: perf_eth_getLogs_topics
@@ -621,7 +622,7 @@ jobs:
       - name: Sync clients before eth_getLogs_wide
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_wide')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_wide" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getLogs_wide" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV"
 
       - name: Run eth_getLogs_wide
         id: perf_eth_getLogs_wide
@@ -633,7 +634,7 @@ jobs:
       - name: Sync clients before eth_getLogs_latest
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_latest')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_latest" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getLogs_latest" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV"
 
       - name: Run eth_getLogs_latest
         id: perf_eth_getLogs_latest
@@ -645,7 +646,7 @@ jobs:
       - name: Sync clients before eth_getBlockReceipts_latest
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_latest')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockReceipts_latest" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getBlockReceipts_latest" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV"
 
       - name: Run eth_getBlockReceipts_latest
         id: perf_eth_getBlockReceipts_latest
@@ -657,7 +658,7 @@ jobs:
       - name: Sync clients before eth_getBlockByNumber_latest
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_latest')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockByNumber_latest" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getBlockByNumber_latest" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV"
 
       - name: Run eth_getBlockByNumber_latest
         id: perf_eth_getBlockByNumber_latest
@@ -669,7 +670,7 @@ jobs:
       - name: Sync clients before eth_getBlockReceipts_gen
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_gen')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockReceipts_gen" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getBlockReceipts_gen" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV"
 
       - name: Run eth_getBlockReceipts_gen
         id: perf_eth_getBlockReceipts_gen
@@ -681,7 +682,7 @@ jobs:
       - name: Sync clients before eth_getBlockByNumber_gen
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_gen')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockByNumber_gen" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getBlockByNumber_gen" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV"
 
       - name: Run eth_getBlockByNumber_gen
         id: perf_eth_getBlockByNumber_gen
