@@ -179,6 +179,7 @@ func TestNewForkChoiceStoreAnchorCheckpointEpoch(t *testing.T) {
 			want := solid.Checkpoint{Epoch: tc.wantEpoch, Root: anchorRoot}
 			require.Equal(t, want, store.FinalizedCheckpoint())
 			require.Equal(t, want, store.JustifiedCheckpoint())
+			require.Equal(t, tc.wantEpoch*cfg.SlotsPerEpoch, store.FinalizedSlot())
 		})
 	}
 }
@@ -2160,7 +2161,7 @@ func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeac
 	return nil, g.addChainSegmentStatus, g.addChainSegmentErr
 }
 
-func (g *getFinalizedExecutionHashForkGraph) BeginChainSegment(*cltypes.SignedBeaconBlock, bool) (*fork_graph.ChainSegment, fork_graph.ChainSegmentInsertionResult, error) {
+func (g *getFinalizedExecutionHashForkGraph) BeginChainSegment(*cltypes.SignedBeaconBlock, common.Hash, bool) (*fork_graph.ChainSegment, fork_graph.ChainSegmentInsertionResult, error) {
 	return nil, fork_graph.ReplayRequired, nil
 }
 

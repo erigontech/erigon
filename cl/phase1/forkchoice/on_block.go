@@ -286,6 +286,9 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	// These fields are handled separately in OnExecutionPayload when the envelope arrives.
 	startEngine := time.Now()
 	isVerifiedExecutionPayload := f.IsPayloadVerified(blockRoot)
+	var overlap *blockImportOverlap
+	overlapResult := ""
+	overlapSettled := false
 	if blockVersion < clparams.GloasVersion {
 		// Find the versioned hashes from blob commitments
 		var versionedHashes []common.Hash
@@ -333,7 +336,21 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 					return invalidKzgCommitmentsError(err)
 				}
 			}
+			overlap = f.startBlockImportOverlapLocked(block, blockRoot, fullValidation)
+			if overlap != nil {
+				overlapResult = "abandoned"
+				defer func() {
+					if !overlapSettled {
+						f.settleBlockImportOverlapLocked(blockRoot, overlap)
+					}
+					blockImportOverlapCounter.WithLabelValues(overlapResult).Inc()
+				}()
+			}
 			var admissionErr error
+			var join func()
+			if overlap != nil {
+				join = overlap.join
+			}
 			payloadStatus, publishedInvalidHash, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(ctx, blockRoot, func() error {
 				_, _, admissionErr = f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload)
 				return admissionErr
@@ -344,7 +361,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 				}
 				executionHash, hashErr := block.Block.Body.ExecutionPayload.ComputeBlockHash(&block.Block.ParentRoot, requestsHash, nil)
 				return executionHash, hashErr == nil
-			}, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+			}, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList, join)
 			if publishedInvalidHash != (common.Hash{}) {
 				// Only the caller that published the verdict may retract it, and only once
 				// its own durable write below has happened.
@@ -441,12 +458,64 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	// not via a separate execution_payload_state. We still validate that the parent's
 	// payload was received (store.payloads check) via validateParentPayloadPath above.
 
-	lastProcessedState, status, err := f.addChainSegmentAndQueueLightClientEvents(block, fullValidation)
+	importedBlock := block.Block
+	var lastProcessedState *state.CachingBeaconState
+	var status fork_graph.ChainSegmentInsertionResult
+	if overlap != nil {
+		if overlap.err != nil {
+			overlapResult = "prepare_failed"
+			return overlap.err
+		}
+		lastProcessedState, status, err = f.insertAndQueueLightClientEvents(func() (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
+			postState, result, commitErr := f.forkGraph.CommitChainSegment(overlap.segment)
+			f.settleBlockImportOverlapLocked(blockRoot, overlap)
+			overlapSettled = true
+			return postState, result, commitErr
+		})
+		if err == nil && status == fork_graph.Success {
+			overlapResult = "committed"
+		} else {
+			overlapResult = "commit_failed"
+		}
+		importedBlock = overlap.block.Block
+	} else {
+		waited := false
+		for {
+			settled, ok := f.blockImportsInFlight[blockRoot]
+			if !ok {
+				break
+			}
+			waited = true
+			// A same-root import must not overtake an open segment.
+			f.mu.Unlock()
+			select {
+			case <-settled:
+			case <-ctx.Done():
+				f.mu.Lock()
+				return fmt.Errorf("%w: %w", ErrPayloadValidationInterrupted, ctx.Err())
+			}
+			f.mu.Lock()
+		}
+		if waited {
+			f.invalidateCachedHead()
+			if _, _, recheckErr := f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload); recheckErr != nil {
+				if errors.Is(recheckErr, errBlockAtFinalizedHorizon) {
+					return nil
+				}
+				return recheckErr
+			}
+			startStateProcess = time.Now()
+		}
+		lastProcessedState, status, err = f.addChainSegmentAndQueueLightClientEvents(block, fullValidation)
+	}
 	if err != nil {
 		if status == fork_graph.InvalidBlock {
 			return invalidBlockError(err)
 		}
 		return err
+	}
+	if overlap != nil {
+		startStateProcess = time.Now().Add(-overlap.transitionDuration)
 	}
 	monitor.ObserveFullBlockProcessingTime(startStateProcess)
 	if status != fork_graph.Success {
@@ -468,9 +537,14 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		return fmt.Errorf("replay block, status %+v", status)
 	}
 	storeTimeMs := f.timeMs.Load()
-	prepared := preparePostState(lastProcessedState, block.Block)
+	var prepared *preparedPostState
+	if overlap != nil {
+		prepared = overlap.prepared
+	} else {
+		prepared = preparePostState(lastProcessedState, importedBlock)
+	}
 	pendingEnvelopeFound, err := f.applyBlockImportLocked(
-		block.Block,
+		importedBlock,
 		blockRoot,
 		headBeforeBlock,
 		storeTimeMs,
@@ -1013,8 +1087,14 @@ func (f *ForkChoiceStore) retryPendingEnvelopeError(err error, pending *cltypes.
 }
 
 func (f *ForkChoiceStore) addChainSegmentAndQueueLightClientEvents(block *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
+	return f.insertAndQueueLightClientEvents(func() (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
+		return f.forkGraph.AddChainSegment(block, fullValidation)
+	})
+}
+
+func (f *ForkChoiceStore) insertAndQueueLightClientEvents(insert func() (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error)) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
 	lcUpdateBefore := f.forkGraph.NewestLightClientUpdate()
-	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
+	lastProcessedState, status, err := insert()
 	if err != nil {
 		return nil, status, err
 	}
@@ -1023,7 +1103,7 @@ func (f *ForkChoiceStore) addChainSegmentAndQueueLightClientEvents(block *cltype
 }
 
 // queueLightClientEvents emits the light client events for an update stored by
-// AddChainSegment. The fork graph runs under f.mu and must not send events
+// a chain segment insertion. The fork graph runs under f.mu and must not send events
 // itself, so OnBlock detects a freshly stored update and queues the sends.
 func (f *ForkChoiceStore) queueLightClientEvents(before *cltypes.LightClientUpdate) {
 	lcUpdate := f.forkGraph.NewestLightClientUpdate()
