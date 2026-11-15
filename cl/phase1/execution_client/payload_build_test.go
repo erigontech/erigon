@@ -81,55 +81,81 @@ func TestDirectStartPayloadBuildDoesNotUpdateForkChoice(t *testing.T) {
 	require.Zero(t, module.forkChoiceCalls)
 }
 
-func TestDirectForkChoiceUpdateReportsBusyWhenUpdateWasNotStarted(t *testing.T) {
-	module := &payloadBuildModuleStub{
-		forkChoiceResult: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy},
+func TestDirectForkChoiceUpdateWithoutPayloadBuild(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result execmodule.ForkChoiceResult
+		want   error
+	}{
+		{"success", execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess}, nil},
+		{"busy", execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}, ErrForkChoiceUpdateBusy},
+		{"in progress", execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy, UpdateInProgress: true}, ErrForkChoiceUpdateTimeout},
+		{"missing segment", execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusMissingSegment}, ErrForkChoiceUpdateSyncing},
+		{"too far away", execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusTooFarAway}, ErrForkChoiceUpdateSyncing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			module := &payloadBuildModuleStub{forkChoiceResult: tc.result}
+			client, err := NewExecutionClientDirect(
+				chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
+			)
+			require.NoError(t, err)
+
+			id, err := client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.ElectraVersion)
+
+			require.ErrorIs(t, err, tc.want)
+			require.Nil(t, id)
+			require.Zero(t, module.assembleCalls)
+		})
 	}
-	client, err := NewExecutionClientDirect(
-		chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
-	)
-	require.NoError(t, err)
-
-	_, err = client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.ElectraVersion)
-
-	require.ErrorIs(t, err, ErrForkChoiceUpdateBusy)
 }
 
-func TestDirectForkChoiceUpdateAllowsBusyUpdateInProgress(t *testing.T) {
-	module := &payloadBuildModuleStub{
-		forkChoiceResult: execmodule.ForkChoiceResult{
-			Status:           execmodule.ExecutionStatusBusy,
-			UpdateInProgress: true,
-		},
+func TestDirectForkChoiceUpdateRejectsFailedStatuses(t *testing.T) {
+	for _, status := range []execmodule.ExecutionStatus{
+		execmodule.ExecutionStatusInvalidForkchoice,
+		execmodule.ExecutionStatusBadBlock,
+		execmodule.ExecutionStatusReorgTooDeep,
+		execmodule.ExecutionStatus(-1),
+	} {
+		t.Run(status.String(), func(t *testing.T) {
+			module := &payloadBuildModuleStub{forkChoiceResult: execmodule.ForkChoiceResult{Status: status}}
+			client, err := NewExecutionClientDirect(
+				chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
+			)
+			require.NoError(t, err)
+			_, err = client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.ElectraVersion)
+			require.Error(t, err)
+			require.Zero(t, module.assembleCalls)
+		})
 	}
-	client, err := NewExecutionClientDirect(
-		chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
-	)
-	require.NoError(t, err)
-
-	id, err := client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.ElectraVersion)
-
-	require.NoError(t, err)
-	require.Nil(t, id)
 }
 
-func TestDirectForkChoiceUpdateKeepsBuildingAfterBusyWithAttributes(t *testing.T) {
-	module := &payloadBuildModuleStub{
-		forkChoiceResult: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy},
-		assembled:        execmodule.AssembleBlockResult{PayloadID: 42},
+func TestDirectForkChoiceUpdateKeepsBuildingWithAttributes(t *testing.T) {
+	for _, result := range []execmodule.ForkChoiceResult{
+		{Status: execmodule.ExecutionStatusSuccess},
+		{Status: execmodule.ExecutionStatusBusy},
+		{Status: execmodule.ExecutionStatusBusy, UpdateInProgress: true},
+		{Status: execmodule.ExecutionStatusMissingSegment},
+		{Status: execmodule.ExecutionStatusTooFarAway},
+	} {
+		t.Run(result.Status.String(), func(t *testing.T) {
+			module := &payloadBuildModuleStub{
+				forkChoiceResult: result,
+				assembled:        execmodule.AssembleBlockResult{PayloadID: 42},
+			}
+			client, err := NewExecutionClientDirect(
+				chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
+			)
+			require.NoError(t, err)
+
+			id, err := client.ForkChoiceUpdate(
+				t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.ElectraVersion,
+			)
+
+			require.NoError(t, err)
+			require.Equal(t, encodeDirectPayloadID(42), id)
+			require.Equal(t, 1, module.assembleCalls)
+		})
 	}
-	client, err := NewExecutionClientDirect(
-		chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
-	)
-	require.NoError(t, err)
-
-	id, err := client.ForkChoiceUpdate(
-		t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.ElectraVersion,
-	)
-
-	require.NoError(t, err)
-	require.Equal(t, encodeDirectPayloadID(42), id)
-	require.Equal(t, 1, module.assembleCalls)
 }
 
 func TestStartPayloadBuildRequiresMatchingExecutionHead(t *testing.T) {

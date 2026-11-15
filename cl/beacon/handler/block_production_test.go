@@ -2586,7 +2586,7 @@ func TestStoreBlockAndBlobsToleratesDeferredForkchoice(t *testing.T) {
 	handler.engine = engine
 	handler.attestationProducer = attestation_producer.New(handler.beaconChainCfg)
 	handler.emitters = beaconevents.NewEventEmitter()
-	for _, responseErr := range []error{execution_client.ErrForkChoiceUpdateBusy, execution_client.ErrForkChoiceUpdateSyncing} {
+	for _, responseErr := range []error{execution_client.ErrForkChoiceUpdateBusy, execution_client.ErrForkChoiceUpdateSyncing, execution_client.ErrForkChoiceUpdateTimeout} {
 		engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, gomock.Any()).Return(nil, responseErr)
 		indicesChanged := handler.emitters.BlockIndicesChanged()
 		err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus, func() {})

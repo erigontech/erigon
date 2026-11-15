@@ -157,10 +157,19 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
-		if result.Status == execmodule.ExecutionStatusBusy && !result.UpdateInProgress {
+		switch result.Status {
+		case execmodule.ExecutionStatusSuccess:
+			return nil, nil
+		case execmodule.ExecutionStatusBusy:
+			if result.UpdateInProgress {
+				return nil, ErrForkChoiceUpdateTimeout
+			}
 			return nil, ErrForkChoiceUpdateBusy
+		case execmodule.ExecutionStatusMissingSegment, execmodule.ExecutionStatusTooFarAway:
+			return nil, ErrForkChoiceUpdateSyncing
+		default:
+			return nil, fmt.Errorf("forkchoice update failed: %s", result.Status)
 		}
-		return nil, nil
 	}
 	// The forkchoice update answers before its commit releases the execution semaphore, so the
 	// build that follows it is usually busy for tens of milliseconds.
