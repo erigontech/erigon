@@ -17,6 +17,7 @@
 package state
 
 import (
+	"context"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -25,10 +26,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
+
+// Fixture construction chooses individual steps without recovery planning.
+func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}) error {
+	return a.buildFilesWithPlan(ctx, db, step, finalityCtx, filesDone, fileBuildPlan{})
+}
 
 func TestAggregatorEnableDomainDuringFilePlanning(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, 10)
@@ -165,15 +172,23 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 		for _, test := range []struct {
 			name                   string
 			resumeStep, stateSteps kv.Step
+			explicit               bool
+			fromStep               kv.Step
+			unaligned              bool
 		}{
 			{name: "resume_from_step_0", resumeStep: 0, stateSteps: 1},
 			{name: "resume_from_step_1", resumeStep: 1, stateSteps: 2},
+			{name: "defer_two_steps_behind", resumeStep: 0, stateSteps: 2},
 			{name: "defer_from_step_0", resumeStep: 0, stateSteps: 3},
 			{name: "defer_from_step_1", resumeStep: 1, stateSteps: 4},
+			{name: "explicit_resume_before_requested_range", resumeStep: 1, stateSteps: 2, explicit: true, fromStep: 2},
+			{name: "explicit_defer_from_tip", resumeStep: 0, stateSteps: 2, explicit: true, fromStep: 2},
+			{name: "explicit_defer_below_tip", resumeStep: 0, stateSteps: 2, explicit: true},
+			{name: "explicit_unaligned_backfill", resumeStep: 0, stateSteps: 3, explicit: true, fromStep: 3, unaligned: true},
 		} {
 			resumeStep := test.resumeStep
 			t.Run(target+"/"+test.name, func(t *testing.T) {
-				deferred := test.stateSteps > resumeStep+1
+				deferred := test.stateSteps > resumeStep+1 && !test.unaligned
 				db, agg := testDbAndAggregatorv3(t, stepSize)
 				ctx := t.Context()
 				configure := func(agg *Aggregator) {
@@ -193,6 +208,10 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 						writer := at.d[domain].NewWriter(db)
 						t.Cleanup(writer.Close)
 						require.NoError(t, writer.PutWithPrev(key, value, uint64(resumeStep)*stepSize+1, nil))
+						if test.unaligned {
+							// Key order must not let the resume skip an older pending step.
+							require.NoError(t, writer.PutWithPrev([]byte{0}, value, stepSize+1, nil))
+						}
 						if domain == kv.AccountsDomain || domain == kv.RCacheDomain {
 							require.NoError(t, writer.PutWithPrev([]byte{2}, value, stateFilesEnd, nil))
 							require.NoError(t, writer.PutWithPrev([]byte{3}, value, lastTxNum, nil))
@@ -242,6 +261,17 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 				configure(agg)
 				t.Cleanup(agg.Close)
 				require.NoError(t, agg.OpenFolder(db))
+				var realign func()
+				if test.unaligned {
+					switch target {
+					case "rcache":
+						realign = agg.Unalign(kv.RCacheDomain)
+					case "logaddrs":
+						realign = agg.UnalignIdx(kv.LogAddrIdx)
+					default:
+						realign = agg.Unalign(kv.ReceiptDomain)
+					}
+				}
 				if filename == kv.ReceiptDomain.String() {
 					require.Zero(t, agg.d[kv.ReceiptDomain].History.dirtyFiles.Len(), "incomplete receipt history must be closed before rebuilding")
 					require.Zero(t, agg.d[kv.ReceiptDomain].History.InvertedIndex.dirtyFiles.Len(), "incomplete receipt indices must be closed before rebuilding")
@@ -251,6 +281,9 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					defer at.Close()
 					require.NoError(t, at.CheckFilesDBGap(tx))
 					require.Equal(t, stateFilesEnd, at.TxNumsInFiles(kv.StateDomains...))
+					if test.explicit {
+						return nil
+					}
 					counted := &buildPlanningTx{Tx: tx, table: agg.d[kv.ReceiptDomain].ValuesTable}
 					if target == "rcache" {
 						counted.table = agg.d[kv.RCacheDomain].ValuesTable
@@ -268,15 +301,27 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					}
 					return nil
 				}))
-				finished, started := agg.buildFilesInBackground(asTemporalRoDB(db), lastTxNum, false, unboundedFinalityCtx)
-				require.True(t, started)
-				<-finished
+				if test.explicit {
+					require.NoError(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), test.fromStep, kv.Step(lastTxNum/stepSize), unboundedFinalityCtx, false))
+					agg.WaitForFiles()
+				} else {
+					finished, started := agg.buildFilesInBackground(asTemporalRoDB(db), lastTxNum, false, unboundedFinalityCtx)
+					require.True(t, started)
+					<-finished
+				}
 				require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 					at := agg.BeginFilesRo()
 					defer at.Close()
 					require.Equal(t, lastTxNum, at.TxNumsInFiles(kv.StateDomains...), "healthy snapshots must keep advancing")
 					if !deferred {
-						require.Equal(t, lastTxNum, at.TxNumsInFiles(kv.ReceiptDomain), "receipt files must catch up")
+						switch target {
+						case "rcache":
+							require.Equal(t, lastTxNum, at.TxNumsInFiles(kv.RCacheDomain), "rcache files must catch up")
+						case "logaddrs":
+							require.Equal(t, lastTxNum, at.searchII(kv.LogAddrIdx).files.EndTxNum(), "log address files must catch up")
+						default:
+							require.Equal(t, lastTxNum, at.TxNumsInFiles(kv.ReceiptDomain), "receipt files must catch up")
+						}
 					}
 					_, err := at.prune(ctx, tx, 0, true, nil)
 					require.NoError(t, err)
@@ -303,7 +348,157 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					}
 					return nil
 				}))
+				if realign != nil {
+					realign()
+				}
 			})
 		}
+	}
+}
+
+func TestAggregatorBuildRespectsSharedCeiling(t *testing.T) {
+	const stepSize = uint64(10)
+	for _, test := range []struct {
+		name, accessors   string
+		visibleStateSteps uint64
+	}{
+		{name: "missing_last_accessor", accessors: "*-commitment.2-3.kvi", visibleStateSteps: 2},
+		{name: "missing_all_accessors", accessors: "*-commitment.*.kvi", visibleStateSteps: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			ctx := t.Context()
+			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+				at := agg.BeginFilesRo()
+				defer at.Close()
+				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CommitmentDomain} {
+					writer := at.d[domain].NewWriter(db)
+					t.Cleanup(writer.Close)
+					for txNum := uint64(1); txNum <= 41; txNum += stepSize {
+						require.NoError(t, writer.PutWithPrev([]byte{byte(txNum)}, []byte{7}, txNum, nil))
+					}
+					require.NoError(t, writer.Flush(ctx, tx))
+					writer.Close()
+				}
+				writer := at.searchII(kv.LogAddrIdx).newWriter(db, agg.dirs.Tmp, false)
+				defer writer.close()
+				require.NoError(t, writer.Add([]byte{1}, stepSize+1))
+				return writer.Flush(ctx, tx)
+			}))
+			for step := range kv.Step(3) {
+				require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil))
+			}
+			dirs := agg.Dirs()
+			agg.Close()
+			for _, pattern := range []string{
+				filepath.Join(dirs.SnapIdx, "*-"+kv.FileLogAddressIdx+".*"),
+				filepath.Join(dirs.SnapAccessors, "*-"+kv.FileLogAddressIdx+".*"),
+				filepath.Join(dirs.SnapDomain, test.accessors),
+			} {
+				paths, err := filepath.Glob(pattern)
+				require.NoError(t, err)
+				require.NotEmpty(t, paths)
+				for _, path := range paths {
+					require.NoError(t, dir.RemoveFile(path))
+				}
+			}
+			agg = NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
+			t.Cleanup(agg.Close)
+			require.NoError(t, agg.OpenFolder(db))
+			agg.ForbidVisibilityLowering()
+			require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+				at := agg.BeginFilesRo()
+				defer at.Close()
+				// An unindexed state file lowers the state minimum, but other entities
+				// remain visible up to the shared ceiling.
+				require.Equal(t, test.visibleStateSteps*stepSize, at.TxNumsInFiles(kv.StateDomains...))
+				require.Equal(t, 3*stepSize, at.TxNumsInFiles(kv.CodeDomain))
+				plan, err := at.planFileBuild(tx)
+				require.NoError(t, err)
+				require.Equal(t, kv.Step(test.visibleStateSteps), plan.firstStep)
+				for id, ii := range at.standaloneIIs() {
+					if ii.ii.Name == kv.LogAddrIdx {
+						require.True(t, plan.deferredIndices[id], "publishing step 1 would lower the shared ceiling")
+					}
+				}
+				return nil
+			}))
+		})
+	}
+}
+
+func TestAggregatorBuildRetiresReplacedFiles(t *testing.T) {
+	const stepSize = uint64(10)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	ctx := t.Context()
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.ReceiptDomain} {
+			writer := at.d[domain].NewWriter(db)
+			t.Cleanup(writer.Close)
+			for _, txNum := range []uint64{1, stepSize + 1} {
+				require.NoError(t, writer.PutWithPrev([]byte{byte(txNum)}, []byte{7}, txNum, nil))
+			}
+			require.NoError(t, writer.Flush(ctx, tx))
+			writer.Close()
+		}
+		writer := at.searchII(kv.LogAddrIdx).newWriter(db, agg.dirs.Tmp, false)
+		defer writer.close()
+		require.NoError(t, writer.Add([]byte{1}, 1))
+		return writer.Flush(ctx, tx)
+	}))
+	require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), 0, unboundedFinalityCtx, nil))
+	reader := agg.BeginFilesRo()
+	defer reader.Close()
+	domain := agg.d[kv.ReceiptDomain]
+	files := []*DirtyFiles{domain.dirtyFiles, domain.History.dirtyFiles, domain.InvertedIndex.dirtyFiles, agg.searchII(kv.LogAddrIdx).dirtyFiles}
+	var replaced []*FilesItem
+	for _, dirty := range files {
+		require.Equal(t, 1, dirty.Len())
+		old := dirty.Items()[0]
+		t.Cleanup(old.closeFiles)
+		require.NotNil(t, old.decompressor)
+		replaced = append(replaced, old)
+	}
+
+	// Build elsewhere so this checks publication without overwriting mapped files.
+	builder := NewTest(datadir.New(t.TempDir())).StepSize(stepSize).MustOpen(ctx)
+	defer builder.Close()
+	static := &AggV3StaticFiles{}
+	defer static.CleanupOnError()
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		domain := builder.d[kv.ReceiptDomain]
+		collation, err := domain.collate(ctx, 0, 0, stepSize, tx)
+		require.NoError(t, err)
+		defer collation.Close()
+		static.d[kv.ReceiptDomain], err = domain.buildFiles(ctx, 0, collation, builder.backgroundProgress)
+		require.NoError(t, err)
+		for id, ii := range builder.standaloneIIs() {
+			if ii.Name != kv.LogAddrIdx {
+				continue
+			}
+			indexCollation, err := ii.collate(ctx, 0, tx)
+			require.NoError(t, err)
+			static.ivfs[id], err = ii.buildFiles(ctx, 0, indexCollation, builder.backgroundProgress)
+			indexCollation.Close()
+			require.NoError(t, err)
+		}
+		return nil
+	}))
+	agg.IntegrateDirtyFiles(static, 0, stepSize)
+	for i, old := range replaced {
+		require.NotSame(t, old, files[i].Items()[0])
+		require.NotNil(t, old.decompressor, "a pinned reader must keep its mappings")
+		require.True(t, old.decompressor.IsOpen())
+	}
+	reader.Close()
+	for i, old := range replaced {
+		require.Nil(t, old.decompressor, "replaced mappings must close with their last reader")
+		require.Nil(t, old.index)
+		require.Nil(t, old.vAccessor)
+		replacement := files[i].Items()[0]
+		require.True(t, replacement.decompressor.IsOpen())
+		require.FileExists(t, replacement.decompressor.FilePath())
 	}
 }

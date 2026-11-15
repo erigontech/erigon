@@ -1027,10 +1027,6 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 
 var errStepNotReady = errors.New("step not ready")
 
-func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}) error {
-	return a.buildFilesWithPlan(ctx, db, step, finalityCtx, filesDone, fileBuildPlan{})
-}
-
 func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}, plan fileBuildPlan) error {
 	// Pin worker counts while collation and building read compressor settings.
 	a.LockWorkersEditing()
@@ -1217,11 +1213,26 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 	}
 	started := a.background.TryGo(func() {
 		defer a.buildingFiles.Store(false)
+		var plan fileBuildPlan
 		if toStep > fromStep {
+			if err := db.View(ctx, func(tx kv.Tx) (err error) {
+				at := a.BeginFilesRo()
+				defer at.Close()
+				plan, err = at.planFileBuild(tx)
+				return err
+			}); err != nil {
+				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
+					a.logger.Warn("[snapshots] first step to build", "err", err)
+				}
+				return
+			}
+			// Include pending steps before the requested range so later pruning
+			// cannot delete data that this build would otherwise skip.
+			fromStep = min(fromStep, plan.firstStep)
 			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
 		}
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(ctx, db, step, finalityCtx, nil); err != nil {
+			if err := a.buildFilesWithPlan(ctx, db, step, finalityCtx, nil, plan); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
@@ -1346,14 +1357,15 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
+	retired := make(retiredFiles, 0, 3*len(a.d)+len(a.iis))
 	for id, d := range a.d {
-		d.integrateDirtyFiles(sf.d[id], txNumFrom, txNumTo)
+		retired = append(retired, d.integrateDirtyFiles(sf.d[id], txNumFrom, txNumTo)...)
 	}
 	for id, ii := range a.standaloneIIs() {
-		ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)
+		retired = append(retired, ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)...)
 	}
 
-	a.recalcVisibleFiles(nil)
+	a.recalcVisibleFiles(retired)
 }
 
 func (a *Aggregator) DomainTables(names ...kv.Domain) (tables []string) {
@@ -1839,12 +1851,15 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 // FilesDelete flow: Merge/Prune can mark old files as "ready for delete". Then last reader traversing linked-list of aggregatorVisible objects and perform real FileDelete
 // See: docs/plans/20260525-lockfree-file-reclamation-spec.md
 type aggregatorVisible struct {
-	generation   uint64
-	d            [kv.DomainLen]*domainVisible
-	dh           [kv.DomainLen]visibleFiles      // per-domain History visible files
-	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
-	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
-	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
+	generation      uint64
+	d               [kv.DomainLen]*domainVisible
+	dh              [kv.DomainLen]visibleFiles      // per-domain History visible files
+	dhii            [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
+	iis             [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
+	minimaxTxNum    uint64                          // min of domain file EndTxNum across kv.StateDomains
+	ceilingTxNum    uint64                          // shared cap before filtering out unindexed files
+	unalignedDomain [kv.DomainLen]bool
+	unalignedIdx    [kv.StandaloneIdxLen]bool
 
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
@@ -1859,7 +1874,11 @@ type aggregatorVisible struct {
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
-	next := &aggregatorVisible{}
+	next := &aggregatorVisible{
+		ceilingTxNum:    toTxNum,
+		unalignedDomain: a.unalignedDomain,
+		unalignedIdx:    a.unalignedIdx,
+	}
 	for id, d := range a.d {
 		if d == nil {
 			continue
@@ -2222,13 +2241,13 @@ type fileBuildPlan struct {
 
 func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 	stateStep := kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
+	ceilingStep := kv.Step(at.visible.ceilingTxNum / at.StepSize())
 	plan := fileBuildPlan{firstStep: stateStep}
-	// Each step is published separately. Resuming more than one step behind would
-	// first publish a file ending below the state-file boundary, lowering shared
-	// visibility. Retain those entities' MDBX data while healthy entities advance.
+	// Each step is published separately. Its end must reach the shared ceiling:
+	// the state minimum can be lower when a state file lacks its accessor.
 	var minResumeStep kv.Step
-	if stateStep > 0 {
-		minResumeStep = stateStep - 1
+	if ceilingStep > 0 {
+		minResumeStep = ceilingStep - 1
 	}
 	for id, d := range at.d {
 		if d == nil || !d.d.Enabled.Load() {
@@ -2236,19 +2255,23 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 			continue
 		}
 		filesEnd := d.FirstStepNotInFiles()
-		if filesEnd >= stateStep {
+		if filesEnd >= ceilingStep {
 			continue
 		}
-		first, found, err := d.d.firstStepToBuild(tx, filesEnd, minResumeStep)
+		domainMinResumeStep := minResumeStep
+		if at.visible.unalignedDomain[id] {
+			domainMinResumeStep = 0
+		}
+		first, found, err := d.d.firstStepToBuild(tx, filesEnd, domainMinResumeStep)
 		if err != nil {
 			return plan, err
 		}
 		if !found {
 			continue
 		}
-		if first < minResumeStep {
+		if first < domainMinResumeStep {
 			plan.deferredDomains[id] = true
-			at.a.logger.Warn("[snapshots] missing files require rebuilding; keeping pending data in MDBX", "domain", d.d.Name, "pendingStep", first, "stateStep", stateStep)
+			at.a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume", "entity", d.d.Name, "pendingStep", first, "ceilingStep", ceilingStep, "retainedIn", "MDBX")
 			continue
 		}
 		plan.firstStep = min(plan.firstStep, first)
@@ -2259,7 +2282,7 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 			continue
 		}
 		filesEnd := ii.FirstStepNotInFiles()
-		if filesEnd >= stateStep {
+		if filesEnd >= ceilingStep {
 			continue
 		}
 		first, found, err := ii.ii.firstStepInDB(tx)
@@ -2270,9 +2293,9 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 			continue
 		}
 		first = max(filesEnd, first)
-		if first < minResumeStep {
+		if first < minResumeStep && !at.visible.unalignedIdx[id] {
 			plan.deferredIndices[id] = true
-			at.a.logger.Warn("[snapshots] missing files require rebuilding; keeping pending data in MDBX", "index", ii.ii.Name, "fromStep", first, "stateStep", stateStep)
+			at.a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume", "entity", ii.ii.Name, "pendingStep", first, "ceilingStep", ceilingStep, "retainedIn", "MDBX")
 			continue
 		}
 		plan.firstStep = min(plan.firstStep, first)
@@ -2332,7 +2355,9 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			plan, err = at.planFileBuild(tx)
 			return err
 		}); err != nil {
-			a.logger.Warn("[snapshots] first step to build", "err", err)
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
+				a.logger.Warn("[snapshots] first step to build", "err", err)
+			}
 			close(fin)
 			return
 		}

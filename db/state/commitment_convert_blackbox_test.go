@@ -169,7 +169,7 @@ func TestConvertCommitmentFile_V1ToV2_KeysOnly(t *testing.T) {
 	// Aggregator view of snapshots/domain/ must be untouched.
 	for _, vf := range at.Files(kv.CommitmentDomain) {
 		require.NotEqual(t, dstDir, filepath.Dir(vf.Fullpath()),
-			"aggregator view must not include dstDir files (integrate=false)")
+			"aggregator view must not include unpublished dstDir files")
 	}
 
 	// Every non-state key in the new file must decode canonically as V2.

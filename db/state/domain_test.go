@@ -374,7 +374,9 @@ func TestDumpStepRangeToPathWithoutWrites(t *testing.T) {
 
 	batch := &TemporalMemBatch{}
 	batch.domainWriters[d.Name] = writer
-	require.NoError(t, d.dumpStepRangeToPath(t.Context(), 0, 1, batch, nil, t.TempDir(), false))
+	files, err := d.dumpStepRangeToPath(t.Context(), 0, 1, batch, nil, t.TempDir())
+	require.NoError(t, err)
+	files.CleanupOnError()
 }
 
 func TestDomain_CollateETLClosesCompressorOnError(t *testing.T) {
@@ -394,9 +396,7 @@ func TestDomain_CollateETLClosesCompressorOnError(t *testing.T) {
 	require.Empty(t, leftovers, "the values compressor is closed when collateETL fails")
 }
 
-// TestDumpStepRangeToPath verifies the dstDir + integrate=false escape hatch on
-// dumpStepRangeOnDisk's body: the .kv plus accessor outputs land in the override
-// directory and the aggregator's view (Domain.dirtyFiles) is not mutated.
+// Dumping to another directory must not change the domain's live files.
 func TestDumpStepRangeToPath(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -419,7 +419,6 @@ func TestDumpStepRangeToPath(t *testing.T) {
 	require.NoError(t, writer.PutWithPrev([]byte("k1"), []byte("v1"), 2, nil))
 	require.NoError(t, writer.PutWithPrev([]byte("k2"), []byte("v2"), 3, nil))
 
-	// Snapshot dirtyFiles count before invoking; integrate=false must leave it unchanged.
 	countDirty := func() int {
 		n := 0
 		d.dirtyFiles.Walk(func(items []*FilesItem) bool {
@@ -434,7 +433,9 @@ func TestDumpStepRangeToPath(t *testing.T) {
 	batch := &TemporalMemBatch{}
 	batch.domainWriters[d.Name] = writer
 
-	require.NoError(t, d.dumpStepRangeToPath(ctx, 0, 1, batch, nil, dstDir, false))
+	files, err := d.dumpStepRangeToPath(ctx, 0, 1, batch, nil, dstDir)
+	require.NoError(t, err)
+	files.CleanupOnError()
 
 	// .kv must land in dstDir, not in d.dirs.SnapDomain.
 	expectedKV := d.kvNewFilePathIn(dstDir, 0, 1)
@@ -454,15 +455,13 @@ func TestDumpStepRangeToPath(t *testing.T) {
 		require.NoError(t, err, "expected .kvi at %s", kviPath)
 	}
 
-	// SnapDomain must be free of the new step file because integrate=false skips
-	// integrateDirtyFiles and dstDir overrides the write path.
+	// The output directory must not change the live snapshots directory.
 	snapKV := d.kvNewFilePath(0, 1)
 	_, err = os.Stat(snapKV)
 	require.ErrorIsf(t, err, fs.ErrNotExist,
 		"unexpected file in SnapDomain at %s (err=%v)", snapKV, err)
 
-	// dirtyFiles count is unchanged: integrate=false skips integration.
-	require.Equal(t, beforeDirty, countDirty(), "dirtyFiles must not grow when integrate=false")
+	require.Equal(t, beforeDirty, countDirty(), "dumping files must not publish them")
 }
 
 func TestDomain_AfterPrune(t *testing.T) {
@@ -798,7 +797,7 @@ func (d *Domain) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv.
 	if err != nil {
 		return err
 	}
-	d.integrateDirtyFiles(sf, txFrom, txTo)
+	reclaimFiles(d.integrateDirtyFiles(sf, txFrom, txTo))
 	return nil
 }
 
@@ -3033,7 +3032,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(t, err)
 		c.Close()
-		d.integrateDirtyFiles(sf, pruneFrom, pruneTo)
+		reclaimFiles(d.integrateDirtyFiles(sf, pruneFrom, pruneTo))
 		rotx.Rollback()
 
 		domainRoTx = d.beginForTests()
@@ -3604,7 +3603,7 @@ func TestDomain_IntegrateDirtyFilesNilGuard(t *testing.T) {
 	require.NotNil(t, sf.valuesDecomp, "buildFiles must produce a non-nil decompressor")
 
 	// -- integrate the good files --
-	d.integrateDirtyFiles(sf, 0, d.stepSize)
+	reclaimFiles(d.integrateDirtyFiles(sf, 0, d.stepSize))
 
 	// verify the dirty file has a non-nil decompressor
 	var foundGood *FilesItem
@@ -3622,7 +3621,7 @@ func TestDomain_IntegrateDirtyFilesNilGuard(t *testing.T) {
 
 	// -- simulate the second BuildFilesInBackground that skipped this domain --
 	// A zero-value StaticFiles (all nil) must NOT overwrite the good entry.
-	d.integrateDirtyFiles(StaticFiles{}, 0, d.stepSize)
+	reclaimFiles(d.integrateDirtyFiles(StaticFiles{}, 0, d.stepSize))
 
 	// regression check: dirty file must still have its non-nil decompressor
 	var foundAfter *FilesItem

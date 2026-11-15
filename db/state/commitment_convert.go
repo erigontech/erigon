@@ -334,8 +334,8 @@ func formatRate(ki uint64, elapsed time.Duration) string {
 //
 // dstDir must exist; the resulting `.kv` plus per-domain index files (.bt /
 // .kvi / .kvei depending on the commitment-domain config) are written there.
-// The aggregator's view of `snapshots/domain/` is not touched: dumpStepRangeToPath
-// is called with `integrate=false`, so originals remain readable for the entire
+// The aggregator's view of `snapshots/domain/` is not touched: output is not
+// published, so originals remain readable for the entire
 // duration of Phase 1 and a crashed run is recoverable by just deleting dstDir.
 //
 // If the detected state already matches `opts`, returns `errSkip` (a sentinel
@@ -507,9 +507,11 @@ func convertCommitmentFile(
 	}
 
 	// vt was applied per-pair above; pass nil so collateETL doesn't double-transform.
-	if err := commitmentRo.d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, nil, dstDir, false); err != nil {
+	files, err := commitmentRo.d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, nil, dstDir)
+	if err != nil {
 		return 0, 0, ki, fmt.Errorf("convertCommitmentFile %q: dumpStepRangeToPath: %w", file.Fullpath(), err)
 	}
+	files.CleanupOnError()
 
 	newKVPath := commitmentRo.d.kvNewFilePathIn(dstDir, stepFrom, stepTo)
 	delta, pct, err := commitmentFileSizeDelta(file.Fullpath(), newKVPath)
