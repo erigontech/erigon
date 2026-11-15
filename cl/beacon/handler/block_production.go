@@ -2216,8 +2216,7 @@ func (a *ApiHandler) payloadBuildFinalityHashes(baseState *state.CachingBeaconSt
 	if safeHash == (common.Hash{}) {
 		safeHash = parentHash
 	}
-	safeHash = a.forkchoiceStore.GetSafeExecutionHash(headRoot, safeHash)
-	return finalizedHash, safeHash
+	return a.forkchoiceStore.GetExecutionFinalityHashes(headRoot, finalizedHash, safeHash)
 }
 
 func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot uint64) (
@@ -3321,7 +3320,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.FinalizedCheckpoint().Root)
 	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
 	headVersion := a.beaconChainCfg.GetCurrentStateVersion(headSlot / a.beaconChainCfg.SlotsPerEpoch)
-	safeHash = a.forkchoiceStore.GetSafeExecutionHash(headRoot, safeHash)
+	finalizedHash, safeHash = a.forkchoiceStore.GetExecutionFinalityHashes(headRoot, finalizedHash, safeHash)
 	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
 		// Storing the block does not depend on the execution layer acknowledging the head in time,
 		// and the next head sends another update.

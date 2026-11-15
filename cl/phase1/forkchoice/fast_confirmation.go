@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 )
@@ -45,13 +46,14 @@ type fastConfirmationTracker struct {
 	anchorVotingSource solid.Checkpoint
 }
 
-func (f *ForkChoiceStore) GetSafeExecutionHash(head, fallback common.Hash) common.Hash {
+func (f *ForkChoiceStore) GetExecutionFinalityHashes(head, finalizedFallback, safeFallback common.Hash) (common.Hash, common.Hash) {
 	if f.fastConfirmation == nil {
-		return fallback
+		return finalizedFallback, safeFallback
 	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	root := f.finalizedCheckpoint.Load().(solid.Checkpoint).Root
+	finalized := f.finalizedExecutionHashLocked(root)
 	if confirmed := f.fastConfirmation.result.Load(); confirmed != nil && f.isAncestor(ForkChoiceNode{Root: head, PayloadStatus: cltypes.PayloadStatusPending}, ForkChoiceNode{Root: *confirmed, PayloadStatus: cltypes.PayloadStatusPending}) {
 		confirmedHeader, hasConfirmed := f.forkGraph.GetHeader(*confirmed)
 		finalizedHeader, hasFinalized := f.forkGraph.GetHeader(root)
@@ -59,7 +61,7 @@ func (f *ForkChoiceStore) GetSafeExecutionHash(head, fallback common.Hash) commo
 			root = *confirmed
 		}
 	}
-	return f.finalizedExecutionHashLocked(root)
+	return finalized, f.finalizedExecutionHashLocked(root)
 }
 
 func (f *ForkChoiceStore) EnableFastConfirmation(anchorVotingSource solid.Checkpoint) {
@@ -237,6 +239,7 @@ func (f *ForkChoiceStore) fastConfirmationView(slot uint64) (*fcrView, error) {
 		blocks: make(map[common.Hash]fcrBlock), gloas: f.beaconCfg.GetCurrentStateVersion(epoch) >= clparams.GloasVersion,
 	}
 	var metadataErr error
+	var validatedRoots []common.Hash
 	addChain := func(root common.Hash) {
 		for root != (common.Hash{}) {
 			if _, has := v.blocks[root]; has {
@@ -271,8 +274,18 @@ func (f *ForkChoiceStore) fastConfirmationView(slot uint64) (*fcrView, error) {
 					block.parentStatus = f.getParentPayloadStatus(signed.Block)
 				}
 				block.valid = block.valid && (bid.ParentBlockHash == f.finalizedExecutionHashLocked(v.finalized.Root) || f.payloadValidatedLocked(common.Hash{}, bid.ParentBlockHash))
-			} else if f.optimisticStore != nil {
-				block.valid = block.valid && !f.optimisticStore.IsOptimistic(root)
+			} else {
+				version := f.beaconCfg.GetCurrentStateVersion(header.Slot / v.slotsPerEpoch)
+				if signed, ok := f.forkGraph.GetBlock(root); ok {
+					version = signed.Version()
+				}
+				if version >= clparams.BellatrixVersion {
+					status, known := f.payloadStatusAuthority(root)
+					block.valid = block.valid && known && status == execution_client.PayloadStatusValidated
+					if block.valid {
+						validatedRoots = append(validatedRoots, root)
+					}
+				}
 			}
 			v.blocks[root] = block
 			root = header.ParentRoot
@@ -286,8 +299,9 @@ func (f *ForkChoiceStore) fastConfirmationView(slot uint64) (*fcrView, error) {
 	defer f.latestMessages.mu.RUnlock()
 	v.votes = make([]fcrVote, len(f.latestMessages.latestMessages))
 	for i, message := range f.latestMessages.latestMessages {
-		vote := fcrVote{root: message.Root, epoch: message.Epoch, status: cltypes.PayloadStatusPending, equivocating: f.isUnequivocating(uint64(i))}
-		if message.Root != (common.Hash{}) {
+		vote := fcrVote{equivocating: f.isUnequivocating(uint64(i))}
+		if message.Root != (common.Hash{}) && message.Slot < slot {
+			vote.root, vote.epoch, vote.status = message.Root, message.Epoch, cltypes.PayloadStatusPending
 			addChain(message.Root)
 			if v.gloas {
 				vote.epoch = message.Slot / v.slotsPerEpoch
@@ -298,6 +312,17 @@ func (f *ForkChoiceStore) fastConfirmationView(slot uint64) (*fcrView, error) {
 	}
 	if metadataErr != nil {
 		return nil, metadataErr
+	}
+	for _, root := range validatedRoots {
+		for parent := v.blocks[root].parent; parent != (common.Hash{}); {
+			block, ok := v.blocks[parent]
+			if !ok || block.valid || f.forkGraph.IsBlockInvalid(parent) {
+				break
+			}
+			block.valid = true
+			v.blocks[parent] = block
+			parent = block.parent
+		}
 	}
 	return v, nil
 }

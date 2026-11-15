@@ -51,6 +51,7 @@ type sleepForSlotWake struct {
 	root          common.Hash
 	executionHead common.Hash
 	at            time.Time
+	safeChanged   bool
 }
 
 // A head that the ForkChoice stage did not materialize (it failed, or the head moved away and back) may wake the
@@ -67,6 +68,7 @@ func waitForNextSlotOrHeadChange(
 	lastWake sleepForSlotWake,
 	lastExecutionHead common.Hash,
 ) (sleepForSlotWake, bool, error) {
+	lastWake.safeChanged = false
 	nextSlotTime := clock.GetSlotTime(nextSlot)
 	timer := time.NewTimer(time.Until(nextSlotTime))
 	defer timer.Stop()
@@ -83,6 +85,7 @@ func waitForNextSlotOrHeadChange(
 		case <-ctx.Done():
 			return sleepForSlotWake{}, false, ctx.Err()
 		case <-forkChoice.FastConfirmationChanged():
+			lastWake.safeChanged = true
 			return lastWake, true, nil
 		case <-timer.C:
 			return sleepForSlotWake{}, false, nil

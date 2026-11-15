@@ -83,13 +83,13 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 	if engine := cfg.forkChoice.Engine(); engine != nil {
 		finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
 		justifiedCheckpoint := cfg.forkChoice.JustifiedCheckpoint()
+		finalizedHash, safeHash := cfg.forkChoice.GetExecutionFinalityHashes(headRoot,
+			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
+			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root))
 		logger.Debug("Caplin is sending forkchoice")
 
 		if _, err := engine.ForkChoiceUpdate(
-			ctx,
-			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
-			cfg.forkChoice.GetSafeExecutionHash(headRoot, cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root)),
-			executionHead, nil, headVersion,
+			ctx, finalizedHash, safeHash, executionHead, nil, headVersion,
 		); err != nil {
 			switch {
 			case errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout):

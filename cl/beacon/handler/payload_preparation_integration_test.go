@@ -849,3 +849,26 @@ func TestPayloadPreparationCollectionWithExecutionModule(t *testing.T) {
 		}
 	}
 }
+
+func TestPayloadBuildFinalityHashesAfterCheckpointSync(t *testing.T) {
+	anchor, handler, _, _, _ := setupGloasPreparationTest(t)
+	anchorHash, parentHash := common.Hash{1}, common.Hash{2}
+	anchor.SetLatestBlockHash(anchorHash)
+	anchor.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{ParentBlockHash: anchorHash})
+	synced := synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
+	graph, err := fork_graph.NewForkGraphDisk(anchor, synced, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	clock := eth_clock.NewEthereumClock(anchor.GenesisTime(), anchor.GenesisValidatorsRoot(), handler.beaconChainCfg)
+	store, err := forkchoice.NewForkChoiceStore(clock, anchor, nil, pool.NewOperationsPool(handler.beaconChainCfg), graph, handler.emitters, synced, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(), handler.validatorParams, false, nil)
+	require.NoError(t, err)
+	handler.forkchoiceStore = store
+	require.Empty(t, store.GetFinalizedExecutionHash(anchor.FinalizedCheckpoint().Root))
+
+	finalized, safe := handler.payloadBuildFinalityHashes(anchor, store.AnchorRoot(), parentHash)
+	require.Equal(t, parentHash, finalized, "disabled FCR preserves the existing fallback")
+	require.Equal(t, parentHash, safe)
+	store.EnableFastConfirmation(anchor.CurrentJustifiedCheckpoint())
+	finalized, safe = handler.payloadBuildFinalityHashes(anchor, store.AnchorRoot(), parentHash)
+	require.Equal(t, anchorHash, finalized)
+	require.Equal(t, anchorHash, safe)
+}

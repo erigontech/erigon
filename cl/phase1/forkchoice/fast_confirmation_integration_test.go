@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
@@ -32,11 +33,15 @@ import (
 func TestFastConfirmationSafeHashOptIn(t *testing.T) {
 	store, graph, head := executionHeadFixture(t)
 	legacy := common.Hash{99}
-	require.Equal(t, legacy, store.GetSafeExecutionHash(head.Root, legacy))
+	finalized, safe := store.GetExecutionFinalityHashes(head.Root, common.Hash{98}, legacy)
+	require.Equal(t, common.Hash{98}, finalized)
+	require.Equal(t, legacy, safe)
 	graph.headers = map[common.Hash]*cltypes.BeaconBlockHeader{head.Root: {Slot: 0}}
 	store.finalizedCheckpoint.Store(solid.Checkpoint{Root: head.Root})
 	store.fastConfirmation = &fastConfirmationTracker{}
-	require.Equal(t, common.Hash{2}, store.GetSafeExecutionHash(head.Root, legacy), "enabled startup exposes finalized parent payload, not justified")
+	finalized, safe = store.GetExecutionFinalityHashes(head.Root, common.Hash{98}, legacy)
+	require.Equal(t, common.Hash{2}, finalized)
+	require.Equal(t, finalized, safe, "enabled startup exposes finalized parent payload, not justified")
 }
 
 func TestFastConfirmationMissedDeadlineResetsToFinalized(t *testing.T) {
@@ -166,7 +171,9 @@ func TestFastConfirmationSafeHashNeverPrecedesFinalized(t *testing.T) {
 	store.finalizedCheckpoint.Store(solid.Checkpoint{Root: newer})
 	store.EnableFastConfirmation(store.FinalizedCheckpoint())
 	store.fastConfirmation.result.Store(&old.Root)
-	require.Equal(t, common.Hash{20}, store.GetSafeExecutionHash(newer, common.Hash{99}))
+	finalized, safe := store.GetExecutionFinalityHashes(newer, common.Hash{98}, common.Hash{99})
+	require.Equal(t, common.Hash{20}, finalized)
+	require.Equal(t, finalized, safe)
 }
 
 func TestFastConfirmationAcrossImportedEpochs(t *testing.T) {
@@ -188,7 +195,7 @@ func TestFastConfirmationAcrossImportedEpochs(t *testing.T) {
 			require.NoError(t, err)
 			store.ProcessAttestingIndicies(&solid.Attestation{Data: &solid.AttestationData{Slot: previousSlot, BeaconBlockRoot: previousRoot, Target: solid.Checkpoint{Epoch: epoch, Root: store.Ancestor(previousRoot, epoch*anchor.BeaconConfig().SlotsPerEpoch).Root}}}, indices)
 		}
-		require.NoError(t, store.OnBlock(t.Context(), block, false, true, false))
+		require.NoError(t, store.OnBlock(t.Context(), block, true, true, false))
 		if i == 1 {
 			root, err := block.Block.HashSSZ()
 			require.NoError(t, err)
@@ -206,7 +213,8 @@ func TestFastConfirmationAcrossImportedEpochs(t *testing.T) {
 		require.True(t, ok)
 		if header.Slot > store.FinalizedSlot() {
 			advanced = true
-			require.Equal(t, store.GetFinalizedExecutionHash(confirmed), store.GetSafeExecutionHash(previousRoot, common.Hash{99}))
+			_, safe := store.GetExecutionFinalityHashes(previousRoot, common.Hash{}, common.Hash{99})
+			require.Equal(t, store.GetFinalizedExecutionHash(confirmed), safe)
 		}
 	}
 	require.True(t, advanced, "FCR never advanced beyond finalized across three imported epochs")
@@ -228,12 +236,60 @@ func TestFastConfirmationConcurrentReaders(t *testing.T) {
 					results <- err
 					return
 				}
-				_ = store.GetSafeExecutionHash(root, common.Hash{})
+				_, _ = store.GetExecutionFinalityHashes(root, common.Hash{}, common.Hash{})
 			}
 			results <- nil
 		}()
 	}
 	for range 4 {
 		require.NoError(t, <-results)
+	}
+}
+
+func TestFastConfirmationRequiresExecutionValidation(t *testing.T) {
+	blocks, anchor, _ := tests.GetBellatrixRandom()
+	store := newOverlapTestStore(t, anchor, nil, false).store
+	store.EnableFastConfirmation(anchor.CurrentJustifiedCheckpoint())
+	roots := make([]common.Hash, 3)
+	for i, block := range blocks[:3] {
+		store.OnTick((anchor.GenesisTime() + block.Block.Slot*anchor.BeaconConfig().SecondsPerSlot) * 1000)
+		require.NoError(t, store.OnBlock(t.Context(), block, false, true, false))
+		var err error
+		roots[i], err = block.Block.HashSSZ()
+		require.NoError(t, err)
+	}
+	view, err := store.fastConfirmationView(store.Slot())
+	require.NoError(t, err)
+	for _, root := range roots {
+		require.False(t, view.blocks[root].valid, "unvalidated forward-sync block must not be confirmed")
+	}
+	store.MarkPayloadVerified(roots[2], blocks[2].Block.Body.ExecutionPayload.BlockHash)
+	view, err = store.fastConfirmationView(store.Slot())
+	require.NoError(t, err)
+	for _, root := range roots {
+		require.True(t, view.blocks[root].valid, "a validated descendant validates its execution ancestors")
+	}
+}
+
+func TestFastConfirmationExcludesEarlyVotes(t *testing.T) {
+	for _, offset := range []uint64{0, 1} {
+		t.Run(fmt.Sprint(offset), func(t *testing.T) {
+			_, anchor, _ := tests.GetBellatrixRandom()
+			store := newOverlapTestStore(t, anchor, nil, false).store
+			store.EnableFastConfirmation(anchor.CurrentJustifiedCheckpoint())
+			slot := anchor.Slot() + 1
+			store.OnTick((anchor.GenesisTime() + slot*anchor.BeaconConfig().SecondsPerSlot) * 1000)
+			root := store.AnchorRoot()
+			store.ProcessAttestingIndicies(&solid.Attestation{Data: &solid.AttestationData{
+				Slot: slot + offset, BeaconBlockRoot: root,
+				Target: solid.Checkpoint{Epoch: (slot + offset) / store.beaconCfg.SlotsPerEpoch, Root: root},
+			}}, []uint64{0, 1})
+			store.setUnequivocating(1)
+			view, err := store.fastConfirmationView(slot)
+			require.NoError(t, err)
+			require.Empty(t, view.votes[0].root, "early gossip votes must not contribute to FCR")
+			require.Empty(t, view.votes[1].root)
+			require.True(t, view.votes[1].equivocating, "vote filtering must preserve equivocation evidence")
+		})
 	}
 }

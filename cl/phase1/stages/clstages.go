@@ -90,6 +90,7 @@ type Cfg struct {
 	gloasSkippedAnchorValidation skippedAnchorValidation
 	sleepForSlotLastWake         sleepForSlotWake
 	sleepForSlotHeadChanged      bool
+	safeUpdatePending            bool
 	// executionHead tracks the canonical execution-head decision for wake detection, not confirmed
 	// EL adoption. Tolerated FCU timeouts still update it; an FCU the EL turned away as busy does not.
 	executionHead               common.Hash
@@ -470,6 +471,10 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					if cfg.pendingBlockWrite != nil {
 						return ChainTipSync
 					}
+					if cfg.safeUpdatePending {
+						cfg.safeUpdatePending = false
+						return ForkChoice
+					}
 					if x := catchUpPublishingHead(args); x != "" {
 						return x
 					}
@@ -531,6 +536,13 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 			SleepForSlot: {
 				Description: `sleep until the next slot`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if cfg.safeUpdatePending {
+						if cfg.pendingBlockWrite != nil {
+							return ChainTipSync
+						}
+						cfg.safeUpdatePending = false
+						return ForkChoice
+					}
 					if cfg.forkChoiceWaitingForIndices {
 						return ForkChoice
 					}
@@ -554,10 +566,14 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 						}
 						return nil
 					}
+					if cfg.safeUpdatePending {
+						return nil
+					}
 					nextSlot := args.seenSlot + 1
 					wake, headChanged, err := waitForNextSlotOrHeadChange(
 						ctx, nextSlot, cfg.beaconCfg, cfg.forkChoice, cfg.syncedData, cfg.ethClock, cfg.sleepForSlotLastWake, cfg.executionHead,
 					)
+					cfg.safeUpdatePending = cfg.safeUpdatePending || wake.safeChanged
 					cfg.sleepForSlotHeadChanged = headChanged
 					if headChanged {
 						cfg.sleepForSlotLastWake = wake

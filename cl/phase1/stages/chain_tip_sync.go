@@ -221,6 +221,7 @@ MainLoop:
 		}
 		select {
 		case <-cfg.forkChoice.FastConfirmationChanged():
+			cfg.safeUpdatePending = true
 			break MainLoop
 		case <-presenceTicker.C:
 			// Check if the highest seen block is greater than or equal to the target slot
@@ -1653,6 +1654,9 @@ func runGloasPayloadRetryPhases(ctx context.Context, budget time.Duration, offse
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	if err := retryPendingBlockWrite(ctx, cfg); err != nil {
 		return err
+	}
+	if cfg.safeUpdatePending {
+		return nil
 	}
 	cfg.chainTipRejections.logIfDue(chainTipHeadSlot(cfg))
 	if shouldRecoverMissingEnvelopes(cfg.beaconCfg, args.targetSlot) {
