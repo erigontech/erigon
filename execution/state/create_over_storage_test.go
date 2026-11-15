@@ -101,8 +101,8 @@ func TestCreatingTxReadsOldSlotAsZero(t *testing.T) {
 	require.Equal(t, VersionValid, validateReads(vm, ibs, 0))
 }
 
-// A slot written between a destruct and a creation reads zero, as the read path and the
-// validator both see the creation.
+// A slot written between a destruct and a creation reads zero, as the read path, the
+// validator and the versioned reader all see the creation.
 func TestSlotWrittenBetweenADestructAndACreationReadsZero(t *testing.T) {
 	t.Parallel()
 	x := accounts.InternAddress([20]byte{0x61})
@@ -120,4 +120,9 @@ func TestSlotWrittenBetweenADestructAndACreationReadsZero(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, v.IsZero())
 	require.Equal(t, VersionValid, validateReads(vm, ibs, 3))
+
+	v, found, err := NewVersionedStateReader(3, ReadSet{}, vm, &emptyReader{}).ReadAccountStorage(x, k)
+	require.NoError(t, err)
+	require.True(t, v.IsZero())
+	require.False(t, found)
 }

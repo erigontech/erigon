@@ -1985,22 +1985,24 @@ func wipedByDestruct(path AccountPath) bool {
 // validates on the plain ReadStatus result (version + status, no value), so ValidateReadSet
 // uses ReadStatus directly for them.
 func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) ReadResult {
-	_, rr, _ := liveStorageValue(vm, a, k, tx)
+	_, rr, _, _ := liveStorageValue(vm, a, k, tx)
 	return rr
 }
 
-func liveStorageValue(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
+// liveStorageValue reads a slot as liveStorage validates it; wiped reports that a destruct or a
+// creation below the read replaced the slot's value.
+func liveStorageValue(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (val uint256.Int, res ReadResult, ok bool, wiped bool) {
 	val, res, ok, life := vm.ReadStorageLife(a, k, tx)
 	// Wipe-aware: a slot of a destructed account reads zero unless a post-destruct write
 	// revived it, anchored on the destruct ({destroyedAt, wipeInc}) so it validates by
 	// version alone — a later store above the destruct resolves here and version-mismatches.
 	if life.state != LifecycleLive && !(ok && res.resolved() && res.DepIdx() > life.destroyedAt) {
-		return uint256.Int{}, ReadResult{depIdx: life.destroyedAt, incarnation: life.wipeInc}, true
+		return uint256.Int{}, ReadResult{depIdx: life.destroyedAt, incarnation: life.wipeInc}, true, true
 	}
 	if storageClearedByCreate(life, ok, res.DepIdx()) {
-		return uint256.Int{}, ReadResult{depIdx: life.createdAt, incarnation: life.createInc}, true
+		return uint256.Int{}, ReadResult{depIdx: life.createdAt, incarnation: life.createInc}, true, true
 	}
-	return val, res, ok
+	return val, res, ok, false
 }
 
 // storageClearedByCreate reports whether a contract creation replaced the slot after its floor
