@@ -28,11 +28,6 @@ jobs:
       - id: load
         env:
           SHARDS: |
-            # Each shard runs twice — once with serial commitment
-            # (ERIGON_COMMITMENT_PARALLEL=false) and once with parallel — so
-            # divergence between the two paths is caught on the PR. Execution is
-            # parallel in both legs (default). Matrix entries spawn separate runners
-            # and run concurrently — wall-clock unchanged, runner-minutes doubled.
             # Stable consume-enginex: split by fork.
             # Engine API tests only exist from Paris (The Merge) onwards; the
             # osaka shard also carries the BPO fork-transition fixtures.
@@ -45,23 +40,7 @@ jobs:
               fixtures-tarball: eest_stable
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
               max-failures: 4 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
-              commitment_mode: serial
-            - sim: consume-enginex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_(Paris|Shanghai)"
-              shard: paris+shanghai
-              fixtures-tarball: eest_stable
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 4 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
               commitment_mode: parallel
-            - sim: consume-enginex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_Cancun"
-              shard: cancun
-              fixtures-tarball: eest_stable
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 2 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
-              commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
               sim-limit: ".*/.*fork_Cancun"
@@ -77,14 +56,6 @@ jobs:
               fixtures-tarball: eest_stable
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
               max-failures: 2 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
-              commitment_mode: serial
-            - sim: consume-enginex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_Prague"
-              shard: prague
-              fixtures-tarball: eest_stable
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 2 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -93,24 +64,7 @@ jobs:
               fixtures-tarball: eest_stable
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
               max-failures: 2 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
-              commitment_mode: serial
-            - sim: consume-enginex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_(Osaka|BPO[12]-|BPO1ToBPO2)"
-              shard: osaka
-              fixtures-tarball: eest_stable
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 2 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
               commitment_mode: parallel
-            - sim: consume-enginex
-              runner: ubuntu-latest
-              sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_(Amsterdam|BPO2ToAmsterdam)"
-              shard: glamsterdam-prague+
-              fixtures-tarball: eest_stable
-              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
-              commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
               sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_(Amsterdam|BPO2ToAmsterdam)"
@@ -128,38 +82,14 @@ jobs:
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
               max-failures: 2 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
-              commitment_mode: serial
-            - sim: consume-enginex
-              runner: ubuntu-latest
-              sim-limit: ".*tests/(?!(amsterdam|prague|osaka|bogota)/).*fork_(Amsterdam|BPO2ToAmsterdam)"
-              shard: glamsterdam-pre-prague
-              fixtures-tarball: eest_stable
-              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 2 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
               commitment_mode: parallel
-            - sim: consume-rlp
-              sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
-              shard: rlp
-              fixtures-tarball: eest_stable
-              max-failures: 0
-              commitment_mode: serial
             - sim: consume-rlp
               sim-limit: ".*(eip2930_access_list|eip4844_blobs).*"
               shard: rlp
               fixtures-tarball: eest_stable
               max-failures: 0
               commitment_mode: parallel
-            # Devnet consume-enginex: split by fork. Each runs twice —
-            # serial and parallel commitment.
-            - sim: consume-enginex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_(Paris|Shanghai)"
-              shard: paris+shanghai-devnet
-              fixtures-tarball: eest_devnet
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 4 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
-              commitment_mode: serial
+            # Devnet consume-enginex: split by fork.
             - sim: consume-enginex
               runner: ubuntu-latest
               sim-limit: ".*/.*fork_(Paris|Shanghai)"
@@ -175,23 +105,7 @@ jobs:
               fixtures-tarball: eest_devnet
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
               max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
-              commitment_mode: serial
-            - sim: consume-enginex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_Cancun"
-              shard: cancun-devnet
-              fixtures-tarball: eest_devnet
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
-            - sim: consume-enginex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_Prague"
-              shard: prague-devnet
-              fixtures-tarball: eest_devnet
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
-              commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
               sim-limit: ".*/.*fork_Prague"
@@ -208,24 +122,7 @@ jobs:
               fixtures-tarball: eest_devnet
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
               max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
-              commitment_mode: serial
-            - sim: consume-enginex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_(Osaka|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)"
-              shard: osaka-devnet
-              fixtures-tarball: eest_devnet
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
-            - sim: consume-enginex
-              runner: ubuntu-latest
-              sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_(Amsterdam|BPO2ToAmsterdam)"
-              shard: glamsterdam-devnet-prague+
-              fixtures-tarball: eest_devnet
-              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
-              commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
               sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_(Amsterdam|BPO2ToAmsterdam)"
@@ -243,25 +140,7 @@ jobs:
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
               max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
-              commitment_mode: serial
-            - sim: consume-enginex
-              runner: ubuntu-latest
-              sim-limit: ".*tests/(?!(amsterdam|prague|osaka|bogota)/).*fork_(Amsterdam|BPO2ToAmsterdam)"
-              shard: glamsterdam-devnet-pre-prague
-              fixtures-tarball: eest_devnet
-              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
-            - sim: consume-enginex
-              runner: ubuntu-latest
-              sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_Bogota"
-              shard: bogota-devnet-prague+
-              fixtures-tarball: eest_devnet
-              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 280 # EIP-7906
-              commitment_mode: serial
             - sim: consume-enginex
               runner: ubuntu-latest
               sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_Bogota"
@@ -279,24 +158,7 @@ jobs:
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
               max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
-              commitment_mode: serial
-            - sim: consume-enginex
-              runner: ubuntu-latest
-              sim-limit: ".*tests/(?!(amsterdam|prague|osaka|bogota)/).*fork_Bogota"
-              shard: bogota-devnet-pre-prague
-              fixtures-tarball: eest_devnet
-              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 2 # Legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
-            - sim: consume-wirex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_(Paris|Shanghai)"
-              shard: wirex-paris+shanghai
-              fixtures-tarball: eest_stable
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
-              commitment_mode: serial
             - sim: consume-wirex
               runner: ubuntu-latest
               sim-limit: ".*/.*fork_(Paris|Shanghai)"
@@ -312,23 +174,7 @@ jobs:
               fixtures-tarball: eest_stable
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
               max-failures: 0
-              commitment_mode: serial
-            - sim: consume-wirex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_Cancun"
-              shard: wirex-cancun
-              fixtures-tarball: eest_stable
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
               commitment_mode: parallel
-            - sim: consume-wirex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_Prague"
-              shard: wirex-prague
-              fixtures-tarball: eest_stable
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
-              commitment_mode: serial
             - sim: consume-wirex
               runner: ubuntu-latest
               sim-limit: ".*/.*fork_Prague"
@@ -344,24 +190,7 @@ jobs:
               fixtures-tarball: eest_stable
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
               max-failures: 0
-              commitment_mode: serial
-            - sim: consume-wirex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_(Osaka|BPO[12]-|BPO1ToBPO2)"
-              shard: wirex-osaka
-              fixtures-tarball: eest_stable
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
               commitment_mode: parallel
-            - sim: consume-wirex
-              runner: ubuntu-latest
-              sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_(Amsterdam|BPO2ToAmsterdam)"
-              shard: wirex-glamsterdam-prague+
-              fixtures-tarball: eest_stable
-              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
-              commitment_mode: serial
             - sim: consume-wirex
               runner: ubuntu-latest
               sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_(Amsterdam|BPO2ToAmsterdam)"
@@ -379,24 +208,7 @@ jobs:
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
               max-failures: 0
-              commitment_mode: serial
-            - sim: consume-wirex
-              runner: ubuntu-latest
-              sim-limit: ".*tests/(?!(amsterdam|prague|osaka|bogota)/).*fork_(Amsterdam|BPO2ToAmsterdam)"
-              shard: wirex-glamsterdam-pre-prague
-              fixtures-tarball: eest_stable
-              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
               commitment_mode: parallel
-            - sim: consume-wirex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_(Paris|Shanghai)"
-              shard: wirex-paris+shanghai-devnet
-              fixtures-tarball: eest_devnet
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
-              commitment_mode: serial
             - sim: consume-wirex
               runner: ubuntu-latest
               sim-limit: ".*/.*fork_(Paris|Shanghai)"
@@ -412,23 +224,7 @@ jobs:
               fixtures-tarball: eest_devnet
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
               max-failures: 0
-              commitment_mode: serial
-            - sim: consume-wirex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_Cancun"
-              shard: wirex-cancun-devnet
-              fixtures-tarball: eest_devnet
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
               commitment_mode: parallel
-            - sim: consume-wirex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_Prague"
-              shard: wirex-prague-devnet
-              fixtures-tarball: eest_devnet
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
-              commitment_mode: serial
             - sim: consume-wirex
               runner: ubuntu-latest
               sim-limit: ".*/.*fork_Prague"
@@ -444,24 +240,7 @@ jobs:
               fixtures-tarball: eest_devnet
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
               max-failures: 0
-              commitment_mode: serial
-            - sim: consume-wirex
-              runner: ubuntu-latest
-              sim-limit: ".*/.*fork_(Osaka|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)"
-              shard: wirex-osaka-devnet
-              fixtures-tarball: eest_devnet
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
-              max-failures: 0
               commitment_mode: parallel
-            - sim: consume-wirex
-              runner: ubuntu-latest
-              sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_(Amsterdam|BPO2ToAmsterdam)"
-              shard: wirex-glamsterdam-devnet-prague+
-              fixtures-tarball: eest_devnet
-              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
-              commitment_mode: serial
             - sim: consume-wirex
               runner: ubuntu-latest
               sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_(Amsterdam|BPO2ToAmsterdam)"
@@ -479,15 +258,6 @@ jobs:
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
               max-failures: 0
-              commitment_mode: serial
-            - sim: consume-wirex
-              runner: ubuntu-latest
-              sim-limit: ".*tests/(?!(amsterdam|prague|osaka|bogota)/).*fork_(Amsterdam|BPO2ToAmsterdam)"
-              shard: wirex-glamsterdam-devnet-pre-prague
-              fixtures-tarball: eest_devnet
-              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
               commitment_mode: parallel
             - sim: consume-wirex
               runner: ubuntu-latest
@@ -497,25 +267,7 @@ jobs:
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
               max-failures: 0
-              commitment_mode: serial
-            - sim: consume-wirex
-              runner: ubuntu-latest
-              sim-limit: ".*tests/(amsterdam|prague|osaka|bogota)/.*fork_Bogota"
-              shard: wirex-bogota-devnet-prague+
-              fixtures-tarball: eest_devnet
-              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
               commitment_mode: parallel
-            - sim: consume-wirex
-              runner: ubuntu-latest
-              sim-limit: ".*tests/(?!(amsterdam|prague|osaka|bogota)/).*fork_Bogota"
-              shard: wirex-bogota-devnet-pre-prague
-              fixtures-tarball: eest_devnet
-              extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
-              erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
-              commitment_mode: serial
             - sim: consume-wirex
               runner: ubuntu-latest
               sim-limit: ".*tests/(?!(amsterdam|prague|osaka|bogota)/).*fork_Bogota"
@@ -689,6 +441,7 @@ jobs:
           consumer_ref=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].consumer_ref // empty' erigon-full/test-fixtures.json)
           if [ '${{ matrix.sim }}' = consume-wirex ]; then
             consumer_ref=$(jq -r .wirex_consumer_ref erigon-full/.github/workflows/hive-versions.json)
+            sed -i 's|^FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim$|FROM ghcr.io/astral-sh/uv:0.13.8-python3.12-trixie-slim|' hive/simulators/ethereum/eels/consume-wirex/Dockerfile.git
           fi
           if [ -n "$consumer_ref" ]; then
             # Consumer fixes require a source build independent of the fixture release.

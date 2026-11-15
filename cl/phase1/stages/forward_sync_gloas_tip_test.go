@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -159,15 +160,17 @@ func TestForwardSyncEndsAtGloasTipWithoutSuccessor(t *testing.T) {
 	for _, tipInForkChoice := range []bool{true, false} {
 		for _, slotsAfterTip := range []uint64{1, 2, 33, 40} {
 			t.Run(fmt.Sprintf("known=%t/%d", tipInForkChoice, slotsAfterTip), func(t *testing.T) {
-				f := newForwardSyncTipFixture(t, slotsAfterTip, tipInForkChoice)
-				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-				defer cancel()
+				synctest.Test(t, func(t *testing.T) {
+					f := newForwardSyncTipFixture(t, slotsAfterTip, tipInForkChoice)
+					ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+					defer cancel()
 
-				require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
-				require.Equal(t, f.tipRoot, f.cfg.forwardSyncTipRoot)
-				require.Equal(t, f.currentSlot, f.cfg.forwardSyncTipSlot)
-				require.True(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
-				require.Equal(t, f.tipRoot, f.head(t))
+					require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
+					require.Equal(t, f.tipRoot, f.cfg.forwardSyncTipRoot)
+					require.Equal(t, f.currentSlot, f.cfg.forwardSyncTipSlot)
+					require.True(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
+					require.Equal(t, f.tipRoot, f.head(t))
+				})
 			})
 		}
 	}
@@ -289,23 +292,25 @@ func TestForwardSyncRecordsTipEnvelopeArrivalWithInsertion(t *testing.T) {
 	})
 	for _, withBlob := range []bool{false, true} {
 		t.Run(fmt.Sprintf("bad signature/blob=%t", withBlob), func(t *testing.T) {
-			f := newForwardSyncTipFixtureWithBlob(t, 0, false, withBlob)
-			f.cfg.executionClient.(*testExecutionEngine).supportInsertion = true
-			f.cfg.blockCollector = &gloasCollectorTest{}
-			if withBlob {
-				missingDataPeerDas(t, f.cfg)
-			}
-			badEnvelope := *f.envelope
-			badEnvelope.Signature[0] ^= 0xff
-			f.sentinel.envelopeResponse = f.encode(t, &badEnvelope)
-			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-			defer cancel()
+			synctest.Test(t, func(t *testing.T) {
+				f := newForwardSyncTipFixtureWithBlob(t, 0, false, withBlob)
+				f.cfg.executionClient.(*testExecutionEngine).supportInsertion = true
+				f.cfg.blockCollector = &gloasCollectorTest{}
+				if withBlob {
+					missingDataPeerDas(t, f.cfg)
+				}
+				badEnvelope := *f.envelope
+				badEnvelope.Signature[0] ^= 0xff
+				f.sentinel.envelopeResponse = f.encode(t, &badEnvelope)
+				ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+				defer cancel()
 
-			require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
-			require.Zero(t, f.cfg.forwardSyncTipRoot)
-			require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
-			require.False(t, f.cfg.forkChoice.HasPendingExecutionPayloadEnvelope(f.tipRoot))
-			require.False(t, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, time.Now()))
+				require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
+				require.Zero(t, f.cfg.forwardSyncTipRoot)
+				require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
+				require.False(t, f.cfg.forkChoice.HasPendingExecutionPayloadEnvelope(f.tipRoot))
+				require.False(t, f.cfg.forkChoice.ExecutionPayloadReceivedBefore(f.tipRoot, time.Now()))
+			})
 		})
 	}
 }
@@ -321,17 +326,19 @@ func missingDataPeerDas(t *testing.T, cfg *Cfg) {
 
 // The answer that brings the tip covers no slot after it, so ForwardSync asks again and finds the successor.
 func TestForwardSyncAsksForSuccessorAfterAnswerWithTip(t *testing.T) {
-	f := newForwardSyncTipFixture(t, 1, false)
-	f.sentinel.laterBlocks = f.encode(t, f.successor)
-	successorRoot, err := f.successor.Block.HashSSZ()
-	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		f := newForwardSyncTipFixture(t, 1, false)
+		f.sentinel.laterBlocks = f.encode(t, f.successor)
+		successorRoot, err := f.successor.Block.HashSSZ()
+		require.NoError(t, err)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
 
-	require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
-	require.Equal(t, common.Hash(successorRoot), f.cfg.forwardSyncTipRoot)
-	require.Equal(t, common.Hash(successorRoot), f.head(t))
-	require.True(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
+		require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
+		require.Equal(t, common.Hash(successorRoot), f.cfg.forwardSyncTipRoot)
+		require.Equal(t, common.Hash(successorRoot), f.head(t))
+		require.True(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
+	})
 }
 
 // Processing skips a tip that is not on the finalized chain without an error, even when the tip is in the chain tip
@@ -339,31 +346,35 @@ func TestForwardSyncAsksForSuccessorAfterAnswerWithTip(t *testing.T) {
 func TestForwardSyncKeepsSyncingWhenForkChoiceRejectsGloasTip(t *testing.T) {
 	for _, slotsAfterTip := range []uint64{0, 2} {
 		t.Run(fmt.Sprint(slotsAfterTip), func(t *testing.T) {
-			f := newForwardSyncTipFixture(t, slotsAfterTip, false)
-			orphan := cltypes.NewSignedBeaconBlock(f.cfg.beaconCfg, clparams.GloasVersion)
-			orphan.Block.Slot = f.tip.Block.Slot
-			orphan.Block.ParentRoot = common.HexToHash("0x01")
-			f.sentinel.firstBlocks = f.encode(t, orphan)
-			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-			defer cancel()
+			synctest.Test(t, func(t *testing.T) {
+				f := newForwardSyncTipFixture(t, slotsAfterTip, false)
+				orphan := cltypes.NewSignedBeaconBlock(f.cfg.beaconCfg, clparams.GloasVersion)
+				orphan.Block.Slot = f.tip.Block.Slot
+				orphan.Block.ParentRoot = common.HexToHash("0x01")
+				f.sentinel.firstBlocks = f.encode(t, orphan)
+				ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+				defer cancel()
 
-			require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
-			require.Zero(t, f.cfg.forwardSyncTipRoot)
+				require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
+				require.Zero(t, f.cfg.forwardSyncTipRoot)
+			})
 		})
 	}
 }
 
 func TestForwardSyncKeepsSyncingWhenTipEnvelopeIsRejected(t *testing.T) {
-	f := newForwardSyncTipFixture(t, 2, false)
-	badEnvelope := *f.envelope
-	badEnvelope.Signature[0] ^= 0xff
-	f.sentinel.envelopeResponse = f.encode(t, &badEnvelope)
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		f := newForwardSyncTipFixture(t, 2, false)
+		badEnvelope := *f.envelope
+		badEnvelope.Signature[0] ^= 0xff
+		f.sentinel.envelopeResponse = f.encode(t, &badEnvelope)
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
 
-	require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
-	require.Zero(t, f.cfg.forwardSyncTipRoot)
-	require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
+		require.ErrorIs(t, forwardSync(ctx, log.Root(), f.cfg, Args{}), context.DeadlineExceeded)
+		require.Zero(t, f.cfg.forwardSyncTipRoot)
+		require.False(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot))
+	})
 }
 
 // The marker holds for less than an epoch after it was recorded, and only while no newer block is seen.

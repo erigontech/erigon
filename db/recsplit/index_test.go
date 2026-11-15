@@ -19,12 +19,15 @@ package recsplit
 import (
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func TestExtractOffsets(t *testing.T) {
@@ -59,6 +62,51 @@ func TestExtractOffsets(t *testing.T) {
 	for i := range 100 {
 		_, ok := offsets[uint64(i*17)]
 		require.True(t, ok)
+	}
+}
+
+func TestForceHashInRAM(t *testing.T) {
+	// the commitment .kvi layout: no enums, existence filter, version 0 for v1.0 files and the current version after
+	for _, v := range []version.DataStructureVersion{0, ExistenceFilterVersion} {
+		t.Run(fmt.Sprintf("version %d", v), func(t *testing.T) {
+			tmpDir := t.TempDir()
+			indexFile := filepath.Join(tmpDir, "index")
+			salt := uint32(1)
+			const keys = 1000
+			rs, err := NewRecSplit(RecSplitArgs{
+				KeyCount:           keys,
+				BucketSize:         100,
+				Salt:               &salt,
+				TmpDir:             tmpDir,
+				IndexFile:          indexFile,
+				LeafSize:           8,
+				Version:            v,
+				LessFalsePositives: true,
+			}, log.New())
+			require.NoError(t, err)
+			defer rs.Close()
+			for i := range keys {
+				require.NoError(t, rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)))
+			}
+			require.NoError(t, rs.Build(t.Context()))
+
+			idx := MustOpen(indexFile)
+			defer idx.Close()
+			require.Positive(t, idx.ForceHashInRAM())
+
+			mapStart := uintptr(unsafe.Pointer(&idx.mmapHandle1[0]))
+			mapEnd := mapStart + uintptr(len(idx.mmapHandle1))
+			mapped := func(p uintptr) bool { return p >= mapStart && p < mapEnd }
+			require.False(t, mapped(uintptr(unsafe.Pointer(&idx.grData[0]))), "Golomb-Rice codes still read from the mapped file")
+			require.False(t, mapped(reflect.ValueOf(&idx.ef).Elem().FieldByName("data").Pointer()), "bucket directory still read from the mapped file")
+
+			reader := NewIndexReader(idx)
+			for i := range keys {
+				offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
+				require.True(t, ok)
+				require.Equal(t, uint64(i*17), offset)
+			}
+		})
 	}
 }
 

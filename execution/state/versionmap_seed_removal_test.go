@@ -384,14 +384,21 @@ func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 	require.Equal(t, uint64(1), acc.Nonce)
 }
 
-func TestHasEmptyBaseAccount(t *testing.T) {
+func TestHasAmbiguousBaseAccount(t *testing.T) {
 	t.Parallel()
 	addr := func(s string) accounts.Address { return accounts.InternAddress(common.HexToAddress(s)) }
-	empty, absent, funded := addr("0xe1"), addr("0xa1"), addr("0xf1")
+	empty, absent, funded, storageHolder, contract := addr("0xe1"), addr("0xa1"), addr("0xf1"), addr("0x51"), addr("0xc1")
 	emptyAcc, systemAcc, fundedAcc := accounts.NewAccount(), accounts.NewAccount(), accounts.NewAccount()
 	fundedAcc.Balance = *uint256.NewInt(1)
+	storageHolderAcc := fundedAcc
+	storageHolderAcc.Incarnation = FirstContractIncarnation
+	contractAcc := storageHolderAcc
+	contractAcc.CodeHash = accounts.InternCodeHash(common.HexToHash("0xc0de"))
+	codeless := addr("0xec")
+	codelessAcc := storageHolderAcc
+	codelessAcc.Nonce = 1
 	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{
-		empty: &emptyAcc, params.SystemAddress: &systemAcc, funded: &fundedAcc,
+		empty: &emptyAcc, params.SystemAddress: &systemAcc, funded: &fundedAcc, storageHolder: &storageHolderAcc, contract: &contractAcc, codeless: &codelessAcc,
 	}}
 	listed := func(a accounts.Address) types.AccountChanges { return types.AccountChanges{Address: a.Value()} }
 	changed := listed(empty)
@@ -408,8 +415,12 @@ func TestHasEmptyBaseAccount(t *testing.T) {
 		{"before EIP-161", false, false, types.BlockAccessList{listed(empty)}, false},
 		{"Aura system address", true, true, types.BlockAccessList{listed(params.SystemAddress)}, false},
 		{"system address", true, false, types.BlockAccessList{listed(params.SystemAddress)}, true},
+		{"no nonce and no code with a contract incarnation", true, false, types.BlockAccessList{listed(storageHolder)}, true},
+		{"contract with no nonce", true, false, types.BlockAccessList{listed(contract)}, false},
+		{"before EIP-161, no nonce and no code with a contract incarnation", false, false, types.BlockAccessList{listed(storageHolder)}, true},
+		{"a nonce and no code with a contract incarnation", true, false, types.BlockAccessList{listed(codeless)}, false},
 	} {
-		got, err := NewVersionMap(tc.bal).HasEmptyBaseAccount(tc.eip161, tc.aura, reader)
+		got, err := NewVersionMap(tc.bal).HasAmbiguousBaseAccount(tc.eip161, tc.aura, reader)
 		require.NoError(t, err)
 		require.Equal(t, tc.want, got, tc.name)
 	}
