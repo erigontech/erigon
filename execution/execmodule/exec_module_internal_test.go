@@ -82,7 +82,7 @@ func (e *ExecModule) ModuleFree() bool {
 
 // The payload witness view runs under the engine lock, so a module that stays busy must not make it wait longer than its wait.
 func TestValidateChainAndViewGivesUpOnABusyModule(t *testing.T) {
-	module := &ExecModule{db: temporaltest.NewTestDB(t, datadir.New(t.TempDir())), semaphore: semaphore.NewWeighted(1), logger: log.New()}
+	module := &ExecModule{db: temporaltest.NewTestDB(t, datadir.New(t.TempDir())), semaphore: semaphore.NewWeighted(1), blockReader: sideForkReader{}, logger: log.New()}
 	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
 	t.Cleanup(func() { module.semaphore.Release(1) })
 
@@ -124,7 +124,7 @@ func TestValidateChainAndViewFindsABlockCommittedWhileItWaits(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 			synctest.Test(t, func(t *testing.T) {
-				module := &ExecModule{db: db, semaphore: semaphore.NewWeighted(1), forkValidator: &ForkValidator{}, blockReader: sideForkReader{forkHeader: &types.Header{}}, logger: log.New()}
+				module := &ExecModule{db: db, semaphore: semaphore.NewWeighted(1), forkValidator: &ForkValidator{}, blockReader: sideForkReader{canonicalHash: viewedBlock.Hash(), forkHeader: &types.Header{}}, logger: log.New()}
 				require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
 				committed := make(chan error, 1)
 				go func() {
@@ -152,6 +152,40 @@ func TestValidateChainAndViewFindsABlockCommittedWhileItWaits(t *testing.T) {
 			})
 		})
 	}
+}
+
+// frozenBlockReader serves viewedBlock as a canonical block from snapshots, whose database entries are pruned.
+type frozenBlockReader struct {
+	dbservices.FullBlockReader
+}
+
+func (frozenBlockReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
+	if hash != viewedBlock.Hash() {
+		return nil, nil
+	}
+	number := viewedBlock.NumberU64()
+	return &number, nil
+}
+
+func (frozenBlockReader) IsCanonical(_ context.Context, _ kv.Getter, hash common.Hash, number uint64) (bool, error) {
+	return hash == viewedBlock.Hash() && number == viewedBlock.NumberU64(), nil
+}
+
+// A committed block in snapshots is VALID without the module, so a payload witness falls back to commitment history.
+func TestValidateChainAndViewFindsACommittedBlockInSnapshots(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return stages.SaveStageProgress(tx, stages.Execution, 1000)
+	}))
+	module := &ExecModule{db: db, semaphore: semaphore.NewWeighted(1), blockReader: frozenBlockReader{}, logger: log.New()}
+	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+	t.Cleanup(func() { module.semaphore.Release(1) })
+
+	result, view, err := module.ValidateChainAndView(t.Context(), viewedBlock, 10*time.Millisecond, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
+	require.NoError(t, err)
+	require.Nil(t, view)
+	require.Equal(t, ExecutionStatusSuccess, result.ValidationStatus)
+	require.Equal(t, viewedBlock.Hash(), result.LatestValidHash)
 }
 
 func TestDrainWaitsForInFlightExecution(t *testing.T) {
@@ -204,6 +238,10 @@ func TestPruneWaitsForExecution(t *testing.T) {
 		cancel()
 		require.ErrorIs(t, <-result, context.Canceled)
 	})
+}
+
+func (r sideForkReader) HeaderNumber(_ context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
+	return rawdb.ReadHeaderNumber(tx, hash), nil
 }
 
 func (r sideForkReader) IsCanonical(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (bool, error) {

@@ -929,12 +929,11 @@ func (e *ExecModule) viewCommittedBlock(ctx context.Context, blockHash common.Ha
 	if err != nil {
 		return false, nil, err
 	}
-	number := rawdb.ReadHeaderNumber(tx, blockHash)
-	if number == nil || *number == 0 || *number > executedTo {
-		return false, nil, nil
+	number, err := e.blockReader.HeaderNumber(ctx, tx, blockHash)
+	if err != nil || number == nil || *number == 0 || *number > executedTo {
+		return false, nil, err
 	}
-	canonical, err := rawdb.ReadCanonicalHash(tx, *number)
-	if err != nil || canonical != blockHash {
+	if canonical, err := e.blockReader.IsCanonical(ctx, tx, blockHash, *number); err != nil || !canonical {
 		return false, nil, err
 	}
 	var unwind *[kv.DomainLen][]kv.DomainEntryDiff
