@@ -118,6 +118,42 @@ func TestVisibleFileVersion(t *testing.T) {
 	require.Equal(t, version.V2_1, vf.Version())
 }
 
+func TestCalcVisibleFilesContiguous(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		ranges  [][2]uint64
+		hidden  int
+		visible [][2]uint64
+	}{
+		{"adjacent", [][2]uint64{{0, 10}, {10, 20}}, -1, [][2]uint64{{0, 10}, {10, 20}}},
+		{"gap", [][2]uint64{{0, 10}, {20, 30}}, -1, [][2]uint64{{0, 10}}},
+		{"unindexed middle", [][2]uint64{{0, 10}, {10, 20}, {20, 30}}, 1, [][2]uint64{{0, 10}}},
+		{"unindexed first", [][2]uint64{{0, 10}, {10, 20}}, 0, nil},
+		{"partial overlap", [][2]uint64{{0, 20}, {10, 30}, {20, 40}}, -1, [][2]uint64{{0, 20}}},
+		{"covering merge", [][2]uint64{{0, 10}, {20, 30}, {0, 30}}, -1, [][2]uint64{{0, 30}}},
+		{"retained history", [][2]uint64{{10, 20}, {20, 30}}, -1, [][2]uint64{{10, 20}, {20, 30}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := newDirtyFiles()
+			for i, r := range tc.ranges {
+				item := newFilesItem(r[0], r[1])
+				item.decompressor = &seg.Decompressor{}
+				if i != tc.hidden {
+					item.index = &recsplit.Index{}
+				}
+				files.Set(item)
+			}
+			var got [][2]uint64
+			for _, f := range calcVisibleFiles(files, statecfg.AccessorHashMap, nil, false, 40) {
+				got = append(got, [2]uint64{f.startTxNum, f.endTxNum})
+			}
+			require.Equal(t, tc.visible, got)
+			require.Equal(t, len(tc.ranges), files.Len())
+		})
+	}
+}
+
 func TestOpenDirtyFileHelpersLogInvalidMask(t *testing.T) {
 	t.Parallel()
 	const mask = "[invalid"

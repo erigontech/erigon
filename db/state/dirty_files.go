@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -595,6 +596,7 @@ func (i visibleFile) EndRootNum() uint64 {
 
 func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems visibleFiles) {
 	newVisibleFiles := make(visibleFiles, 0, files.Len())
+	firstStart := uint64(math.MaxUint64)
 	// trace = true
 	if trace {
 		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len(), "toTxNum", toTxNum)
@@ -603,6 +605,9 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 	defer iter.Release()
 	for ok := iter.First(); ok; ok = iter.Next() {
 		item := iter.Item()
+		if item.decompressor != nil && !item.canDelete.Load() {
+			firstStart = min(firstStart, item.startTxNum)
+		}
 		if item.endTxNum > toTxNum {
 			if trace {
 				log.Warn("[dbg] calcVisibleFiles: ends after limit", "f", item.decompressor.FileName(), "limitTxNum", toTxNum)
@@ -639,14 +644,17 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 		newVisibleFiles = visibleFiles{}
 	}
 
-	// Check for gaps in visible files and warn if found
+	if len(newVisibleFiles) > 0 && newVisibleFiles[0].startTxNum > firstStart {
+		return visibleFiles{}
+	}
 	for i := 1; i < len(newVisibleFiles); i++ {
 		prev := newVisibleFiles[i-1]
 		curr := newVisibleFiles[i]
 		if prev.endTxNum != curr.startTxNum {
 			log.Warn("[agg] gap in visible files", "prev", prev.src.decompressor.FileName(),
 				"prevEnd", prev.endTxNum, "curr", curr.src.decompressor.FileName(), "currStart", curr.startTxNum,
-				"gap", curr.startTxNum-prev.endTxNum)
+				"gap", int64(curr.startTxNum)-int64(prev.endTxNum))
+			return newVisibleFiles[:i]
 		}
 	}
 

@@ -1063,16 +1063,13 @@ func TestCtxFiles(t *testing.T) {
 			require.Failf(t, "overlaping files", "%d-%d, %d-%d", item.startTxNum, item.endTxNum, visibleFiles[i-1].startTxNum, visibleFiles[i-1].endTxNum)
 		}
 	}
-	require.Len(t, visibleFiles, 3)
+	require.Len(t, visibleFiles, 2)
 
 	require.Equal(t, 0, int(visibleFiles[0].startTxNum))
 	require.Equal(t, 4, int(visibleFiles[0].endTxNum))
 
 	require.Equal(t, 4, int(visibleFiles[1].startTxNum))
 	require.Equal(t, 5, int(visibleFiles[1].endTxNum))
-
-	require.Equal(t, 480, int(visibleFiles[2].startTxNum))
-	require.Equal(t, 512, int(visibleFiles[2].endTxNum))
 }
 
 func TestIsSubset(t *testing.T) {

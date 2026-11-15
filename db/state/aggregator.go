@@ -1851,18 +1851,42 @@ type aggregatorVisible struct {
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
-	next := &aggregatorVisible{}
-	for id, d := range a.d {
-		if d == nil {
-			continue
+	var next *aggregatorVisible
+	for {
+		next = &aggregatorVisible{}
+		end := toTxNum
+		lower := func(dirty *DirtyFiles, visible visibleFiles) {
+			if dirty.Len() > 0 {
+				end = min(end, visible.EndTxNum())
+			}
 		}
-		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
-	}
-	for id, ii := range a.standaloneIIs() {
-		if ii == nil {
-			continue
+		for id, d := range a.d {
+			if d == nil {
+				continue
+			}
+			next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
+			if !d.Enabled || a.unalignedDomain[id] {
+				continue
+			}
+			lower(d.dirtyFiles, next.d[id].files)
+			if !d.HistCfg.SnapshotsDisabled && !d.HistCfg.HistoryDisabled {
+				lower(d.History.dirtyFiles, next.dh[id])
+				lower(d.InvertedIndex.dirtyFiles, next.dhii[id].files)
+			}
 		}
-		next.iis[id] = ii.calcVisibleFiles(toTxNum)
+		for id, ii := range a.standaloneIIs() {
+			if ii == nil {
+				continue
+			}
+			next.iis[id] = ii.calcVisibleFiles(toTxNum)
+			if ii.Enabled && !a.unalignedIdx[id] {
+				lower(ii.dirtyFiles, next.iis[id].files)
+			}
+		}
+		if end == toTxNum {
+			break
+		}
+		toTxNum = end
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
 

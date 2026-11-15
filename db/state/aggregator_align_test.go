@@ -18,16 +18,51 @@ package state
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 )
 
 // generateStandaloneIIFile writes files with a hardcoded step size of 10.
 const alignStepSize = 10
+
+func TestVisibleFilesAligned_ContiguousPrefix(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		path string
+		end  uint64
+	}{
+		{"domain/v1.0-accounts.1-2.bt", 10},
+		{"domain/v1.0-accounts.0-1.bt", 0},
+		{"domain/v1.0-accounts.1-2.kv", 10},
+		{"accessor/v2.0-accounts.0-1.vi", 0},
+		{"accessor/v1.0-logaddrs.0-1.efi", 0},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			db, agg := testDbAndAggregatorv3(t, alignStepSize)
+			ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+			generateStateFiles(t, agg.Dirs(), ranges)
+			generateCommitmentFile(t, agg.Dirs(), ranges)
+			generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+			require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().Snap, filepath.FromSlash(tc.path))))
+			require.NoError(t, agg.OpenFolder(db))
+			requireVisibleEnd(t, agg, tc.end)
+			at := agg.BeginFilesRo()
+			defer at.Close()
+			for _, d := range kv.StateDomains {
+				if !agg.d[d].HistCfg.SnapshotsDisabled {
+					require.EqualValues(t, tc.end, at.d[d].ht.files.EndTxNum(), "history %s", d)
+					require.EqualValues(t, tc.end, at.d[d].ht.iit.files.EndTxNum(), "history index %s", d)
+				}
+			}
+		})
+	}
+}
 
 func generateStateFiles(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()

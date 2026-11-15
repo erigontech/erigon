@@ -86,6 +86,7 @@ func TestRetire_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T) {
 	generateAccountsFile(t, agg.Dirs(), ranges)
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
 	require.NoError(t, agg.OpenFolder(db))
 
 	oldHistory := filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-2.v")
@@ -131,6 +132,7 @@ func TestRetire_StaleViewReportsOnlyDetachedFiles(t *testing.T) {
 	generateAccountsFile(t, agg.Dirs(), ranges)
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
 	require.NoError(t, agg.OpenFolder(db))
 
 	var deleted []string
@@ -184,6 +186,7 @@ func TestRetire_RetiresCommitmentAtOwnCutoff(t *testing.T) {
 	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	generateCodeFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	generateCommitmentHistoryAndIndexFiles(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	require.NoError(t, agg.OpenFolder(db))
 	enableCommitmentHistory(agg)
@@ -211,6 +214,7 @@ func TestRetire_KeepsDomainWhenCutoffZero(t *testing.T) {
 	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	generateCodeFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	generateCommitmentHistoryAndIndexFiles(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	require.NoError(t, agg.OpenFolder(db))
 	enableCommitmentHistory(agg)
@@ -235,6 +239,7 @@ func TestRetire_SubStepTxNumKeepsFiles(t *testing.T) {
 	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 2}})
 	generateCodeFile(t, agg.Dirs(), []testFileRange{{0, 2}})
 	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 2}})
 	require.NoError(t, agg.OpenFolder(db))
 
 	n, err := aggRetire(t, agg, kv.RetireCutoffs{Default: stepSize - 1})
@@ -254,6 +259,7 @@ func TestRetire_StandaloneII(t *testing.T) {
 	generateAccountsFile(t, agg.Dirs(), ranges)
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
 	generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), ranges)
 	require.NoError(t, agg.OpenFolder(db))
 
@@ -279,6 +285,7 @@ func TestRetire_IndexAndHistoryPartitionsCanDiffer(t *testing.T) {
 	generateAccountsFile(t, agg.Dirs(), historyRanges)
 	generateCodeFile(t, agg.Dirs(), historyRanges)
 	generateStorageFile(t, agg.Dirs(), historyRanges)
+	generateCommitmentFile(t, agg.Dirs(), historyRanges)
 	indices := []kv.InvertedIdx{kv.TracesFromIdx, kv.TracesToIdx, kv.LogAddrIdx, kv.LogTopicIdx}
 	for _, idx := range indices {
 		generateStandaloneIIFile(t, idx, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {2, 3}})
@@ -312,6 +319,7 @@ func TestRetire_ReclaimConcurrent(t *testing.T) {
 	generateAccountsFile(t, agg.Dirs(), ranges)
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
 	require.NoError(t, agg.OpenFolder(db))
 
 	var wg sync.WaitGroup
@@ -349,6 +357,7 @@ func TestRetire_DetachesFromDirtyFiles(t *testing.T) {
 	generateAccountsFile(t, agg.Dirs(), ranges)
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
 	require.NoError(t, agg.OpenFolder(db))
 
 	accountsHist := agg.d[kv.AccountsDomain].History
@@ -378,6 +387,7 @@ func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 	generateAccountsFile(t, agg.Dirs(), ranges)
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
 	require.NoError(t, agg.OpenFolder(db))
 
 	accountsHist := agg.d[kv.AccountsDomain].History
@@ -515,6 +525,7 @@ func TestRetire_SkipsWindowTooSmall(t *testing.T) {
 	generateAccountsFile(t, agg.Dirs(), ranges)
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
 	require.NoError(t, agg.OpenFolder(db))
 
 	accountsHist := agg.d[kv.AccountsDomain].History
