@@ -19,6 +19,7 @@ package p2p
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"io"
 	"testing"
 	"time"
@@ -32,6 +33,8 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
@@ -67,9 +70,11 @@ func sendRawRPC(t *testing.T, rpc []byte) bool {
 
 	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
 	require.NoError(t, err)
-	manager := &p2pManager{cfg: &P2PConfig{NetworkConfig: networkConfig, BeaconConfig: beaconConfig}}
+	manager := &p2pManager{cfg: &P2PConfig{NetworkConfig: networkConfig, BeaconConfig: beaconConfig}, ethClock: eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)}
 	tracer := &rpcReceiveTracer{received: make(chan struct{}, 1)}
-	opts := append(manager.pubsubOptions(beaconConfig), pubsub.WithEventTracer(tracer))
+	opts, err := manager.pubsubOptions(beaconConfig)
+	require.NoError(t, err)
+	opts = append(opts, pubsub.WithEventTracer(tracer))
 	_, err = pubsub.NewGossipSub(ctx, target, opts...)
 	require.NoError(t, err)
 	require.NoError(t, mn.LinkAll())
@@ -143,9 +148,18 @@ func TestPubsubFrameLimitFollowsMaxGossipMessageSize(t *testing.T) {
 
 func TestGossipSubscriptionFilter(t *testing.T) {
 	t.Parallel()
-	filter := gossipSubscriptionFilter()
+	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	filter := gossipSubscriptionFilter([]string{"4a26c58b"}, gossipTopicNames(networkConfig, beaconConfig))
 	require.True(t, filter.CanSubscribe("/eth2/4a26c58b/beacon_block/ssz_snappy"))
 	require.True(t, filter.CanSubscribe("/eth2/4a26c58b/data_column_sidecar_127/ssz_snappy"))
+	require.True(t, filter.CanSubscribe("/eth2/4a26c58b/beacon_attestation_63/ssz_snappy"))
+	require.True(t, filter.CanSubscribe("/eth2/4a26c58b/sync_committee_contribution_and_proof/ssz_snappy"))
+	require.True(t, filter.CanSubscribe("/eth2/4a26c58b/proposer_preferences/ssz_snappy"))
+	require.False(t, filter.CanSubscribe("/eth2/deadbeef/beacon_block/ssz_snappy"), "a digest outside the schedule")
+	require.False(t, filter.CanSubscribe("/eth2/4a26c58b/made_up_topic/ssz_snappy"), "a name that is not a gossip topic")
+	require.False(t, filter.CanSubscribe("/eth2/4a26c58b/beacon_attestation_64/ssz_snappy"), "a subnet past the count")
+	require.False(t, filter.CanSubscribe("/eth2/4a26c58b/beacon_attestation_007/ssz_snappy"), "a zero-padded subnet")
 	require.False(t, filter.CanSubscribe("/eth2/4a26c58b/beacon_block/ssz"))
 	require.False(t, filter.CanSubscribe("/junk/topic"))
 
@@ -154,7 +168,7 @@ func TestGossipSubscriptionFilter(t *testing.T) {
 	for i := range subs {
 		subs[i] = &pb.RPC_SubOpts{Subscribe: &subscribe, Topicid: &topic}
 	}
-	_, err := filter.FilterIncomingSubscriptions(peer.ID("p"), subs)
+	_, err = filter.FilterIncomingSubscriptions(peer.ID("p"), subs)
 	require.ErrorIs(t, err, pubsub.ErrTooManySubscriptions)
 }
 
@@ -166,10 +180,33 @@ func TestPubsubOptionsRefuseNonGossipTopics(t *testing.T) {
 	require.NoError(t, err)
 	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
 	require.NoError(t, err)
-	manager := &p2pManager{cfg: &P2PConfig{NetworkConfig: networkConfig, BeaconConfig: beaconConfig}}
-	ps, err := pubsub.NewGossipSub(t.Context(), host, manager.pubsubOptions(beaconConfig)...)
+	manager := &p2pManager{cfg: &P2PConfig{NetworkConfig: networkConfig, BeaconConfig: beaconConfig}, ethClock: eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)}
+	psOpts, err := manager.pubsubOptions(beaconConfig)
+	require.NoError(t, err)
+	ps, err := pubsub.NewGossipSub(t.Context(), host, psOpts...)
 	require.NoError(t, err)
 
 	_, err = ps.Join("/junk/topic")
 	require.ErrorContains(t, err, "subscription filter")
+}
+
+func TestScheduledForkDigestsFollowForksAndBlobParameters(t *testing.T) {
+	t.Parallel()
+	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
+	manager := &p2pManager{ethClock: clock}
+
+	digests, err := manager.scheduledForkDigests(beaconConfig)
+	require.NoError(t, err)
+
+	epochs := []uint64{0, beaconConfig.AltairForkEpoch, beaconConfig.ElectraForkEpoch, beaconConfig.FuluForkEpoch}
+	for _, blobParameters := range beaconConfig.BlobSchedule {
+		epochs = append(epochs, blobParameters.Epoch)
+	}
+	for _, epoch := range epochs {
+		digest, err := clock.ComputeForkDigest(epoch)
+		require.NoError(t, err)
+		require.Contains(t, digests, hex.EncodeToString(digest[:]), "epoch %d", epoch)
+	}
 }

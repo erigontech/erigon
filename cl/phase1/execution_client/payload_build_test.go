@@ -241,7 +241,7 @@ func TestDirectNewPayloadReportsAnEndedContextAsNoVerdict(t *testing.T) {
 	payload.BlockHash, err = payload.ComputeBlockHash(&parentRoot, cltypes.ComputeExecutionRequestHash(nil), nil)
 	require.NoError(t, err)
 
-	status, err := client.NewPayload(ctx, payload, &parentRoot, nil, nil)
+	status, err := client.NewPayload(ctx, payload, &parentRoot, []common.Hash{}, nil)
 
 	require.ErrorIs(t, err, context.Canceled)
 	require.EqualValues(t, PayloadStatusNone, status)

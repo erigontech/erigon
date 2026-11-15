@@ -62,7 +62,7 @@ func BenchmarkBALPhantomReads(b *testing.B) {
 						require.Equal(b, execmodule.ExecutionStatusSuccess, status)
 						runtime.GC()
 						b.StartTimer()
-						result, err := m.ValidateChain(b.Context(), block.Header())
+						result, err := m.ValidateChain(b.Context(), block)
 						require.NoError(b, err)
 						if workload == "attack" {
 							require.Equal(b, execmodule.ExecutionStatusBadBlock, result.ValidationStatus)

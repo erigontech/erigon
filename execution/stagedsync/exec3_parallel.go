@@ -274,7 +274,7 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *txResult) error {
 	restoreCS := pe.bindBlockChangesetForFold(r.blockNum, r.blockHash)
 	defer restoreCS()
-	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
+	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes); err != nil {
 		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
 	if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
@@ -793,8 +793,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						}
 					}
 
-					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && !initialCycle && applyResult.Header != nil &&
-						pe.cfg.notifications != nil && pe.cfg.notifications.RecentReceipts != nil {
+					if applyResult.BlockNum > 0 && applyResult.receiptsComplete && applyResult.Header != nil &&
+						pe.cfg.notifications != nil && pe.cfg.notifications.RecentReceipts != nil &&
+						(!initialCycle || pe.cfg.notifications.Events.HasReceiptOrLogSubscribers()) {
 						pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, applyResult.Txs, applyResult.Header)
 					}
 
@@ -996,6 +997,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop error", "err", err)
 		} else {
 			pe.logger.Debug("[" + pe.logPrefix + "] exec loop exit")
+		}
+		// The errgroup cancels with err only after closeApplyChannels; publish it first
+		// so the apply loop does not read the leftover tx results as an invalid block.
+		if err != nil && !errors.Is(err, rules.ErrInvalidBlock) {
+			pe.cancelOperational(0, err)
 		}
 	}()
 
@@ -1318,6 +1324,11 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 					executor.coinbase, *tx.GetValue(), txTask.Hooks, txTask.Rules(), blockStart) {
 					// Credited at validation: a later user of the recipient still waits for it.
 					prevAccountTx[to] = i
+				} else if ok && precompileCallRunsOutOfGas(txTask, accounts.InternAddress(to)) {
+					// The failed frame still reads the recipient: wait for its last writer, without becoming one.
+					if prev, ok := prevAccountTx[to]; ok && executor.execTasks.addDependency(prev, i) {
+						executor.execTasks.clearPending(i)
+					}
 				} else {
 					addresses = append(addresses, to)
 				}
@@ -2346,6 +2357,14 @@ func touchedSenderAccount(txTask *exec.TxTask, result *exec.TxResult) bool {
 	return readBalance || readNonce || wroteBalance || wroteNonce
 }
 
+func precompileCallRunsOutOfGas(txTask *exec.TxTask, to accounts.Address) bool {
+	if _, ok := vm.Precompiles(txTask.Rules())[to]; !ok {
+		return false
+	}
+	msg, err := txTask.TxMessage()
+	return err == nil && protocol.PrecompileCallRunsOutOfGas(msg, txTask.Rules())
+}
+
 // chargeSenderAtValidation returns the sender charge writes and the account it charged, or nil when the sender's nonce or balance after prior txs rejects the tx.
 func chargeSenderAtValidation(txTask *exec.TxTask, result *execResult, version state.Version, vm *state.VersionMap, stateReader state.StateReader) (*state.WriteSet, *accounts.Account, error) {
 	msg, err := txTask.TxMessage()
@@ -2712,8 +2731,8 @@ func pathBit(p state.AccountPath) uint16 { return 1 << p }
 
 func cmpReaderTx(r addrReader, tx int) int { return cmp.Compare(r.tx, tx) }
 
-// balDispatchWindow bounds how far past the commit frontier a BAL block dispatches tasks.
-const balDispatchWindow = 32
+// dispatchWindow bounds how far past the commit frontier a block dispatches tasks.
+const dispatchWindow = 32
 
 // readersAbove returns the readers in the ascending list l that are > tx.
 func readersAbove(l []addrReader, tx int) []addrReader {
@@ -2739,7 +2758,11 @@ func (be *blockExecutor) markReadersDirty(writerTx int, ws *state.WriteSet) {
 		}
 	}
 	for addr, paths := range written {
-		for _, r := range readersAbove(be.readerByAddr[addr], writerTx) {
+		readers := readersAbove(be.readerByAddr[addr], writerTx)
+		if len(readers) == 0 || be.versionMap.WritesAlreadySeeded(addr, ws) {
+			continue
+		}
+		for _, r := range readers {
 			if r.paths&paths != 0 && !be.revalidate[r.tx] && be.blockIO.ReadSet(be.tasks[r.tx].Task.Version().TxIndex).DependsOnAt(ws, addr) {
 				be.revalidate[r.tx] = true
 			}
@@ -2943,6 +2966,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 					*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
 				}
 			}
+			var ownedWrites *state.WriteSet // a copy this loop made, so it can be extended in place, unlike the worker's TxOut
 			if chainTx, ok := txTask.(*exec.TxTask); ok && chainTx.ChargesSenderAtValidation(int(txVersion.Incarnation)) {
 				senderWrites, charged, err := chargeSenderAtValidation(chainTx, txResult, txVersion, be.versionMap, *stateReader)
 				if err != nil {
@@ -2962,12 +2986,13 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				}
 				be.blockIO.RecordReads(txVersion, reads)
 				be.versionMap.FlushVersionedWrites(senderWrites, false)
-				be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites))
+				ownedWrites = be.blockIO.WriteSet(txVersion.TxIndex).Merge(senderWrites)
+				be.blockIO.RecordWrites(txVersion, ownedWrites)
 				be.markReadersDirty(tx, senderWrites)
 				// A charge-at-validation sender's gas debit is not in the worker's TxOut, so
 				// calcFees' coinbase/burnt override (which reads TxOut) would miss it and credit
 				// the fee onto the stale pre-charge balance when the sender is the fee recipient.
-				txResult.TxOut = txResult.TxOut.Merge(senderWrites)
+				txResult.TxOut = ownedWrites
 			}
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
 			if err != nil {
@@ -2977,9 +3002,11 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				// Flush the tip as an Estimate; the whole tx is promoted to Done at the
 				// seal point below.
 				be.versionMap.FlushVersionedWrites(tipWrites, false)
-				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-				merged := existingWrites.Merge(tipWrites)
-				be.blockIO.RecordWrites(txVersion, merged)
+				if ownedWrites != nil {
+					ownedWrites.MergeFrom(tipWrites)
+				} else {
+					be.blockIO.RecordWrites(txVersion, be.blockIO.WriteSet(txVersion.TxIndex).Merge(tipWrites))
+				}
 				be.markReadersDirty(tx, tipWrites)
 			}
 		}
@@ -3049,6 +3076,13 @@ func (be *blockExecutor) finishTask(tx int) {
 
 func (be *blockExecutor) frontier() int {
 	return int(be.committedFrontier.Load())
+}
+
+// dispatchLimit is the last task that dispatch may enqueue now. It is at most window tasks past
+// the commit frontier, so results arrive close to block order and the per-result reader scans
+// stay short.
+func (be *blockExecutor) dispatchLimit() int {
+	return min(len(be.tasks)-1, be.frontier()+dispatchWindow)
 }
 
 // requeueAt registers pt to be re-queued when the frontier reaches target. Returns
@@ -3636,12 +3670,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			return 0
 		}
 		budget := len(be.tasks)
-		// Dispatch at most window tasks past the commit frontier, so results arrive
-		// close to block order and the per-result reader scans stay short.
-		lastTx := len(be.tasks) - 1
-		if be.versionMap.HasBAL {
-			lastTx = min(lastTx, be.frontier()+balDispatchWindow)
-		}
+		lastTx := be.dispatchLimit()
 		for {
 			nextTx := be.execTasks.minPending()
 			if nextTx < 0 || nextTx > lastTx {

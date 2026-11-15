@@ -50,13 +50,11 @@ type GraphQLCallResult struct {
 }
 
 // GraphQLReceipt is a receipt with the transaction fields the GraphQL resolver reads.
-// Its Logs replaces the RPC logs with the receipt's own.
 type GraphQLReceipt struct {
 	*ethutils.RPCReceipt
 	Nonce                uint64           `json:"nonce"`
 	Value                *uint256.Int     `json:"value"`
 	Data                 []byte           `json:"data"`
-	Logs                 types.Logs       `json:"logs"`
 	Gas                  uint64           `json:"gas"`
 	MaxFeePerGas         *uint256.Int     `json:"maxFeePerGas,omitempty"`
 	MaxPriorityFeePerGas *uint256.Int     `json:"maxPriorityFeePerGas,omitempty"`
@@ -71,13 +69,15 @@ func (r GraphQLReceipt) MarshalFastJSONTo(s *jsonstream.Stream) error {
 
 func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header) *GraphQLReceipt {
 	transaction := &GraphQLReceipt{
-		RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true, false),
+		RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true),
 		Nonce:      txn.GetNonce(),
 		Value:      txn.GetValue(),
 		Data:       txn.GetData(),
-		Logs:       receipt.Logs,
 		Gas:        txn.GetGasLimit(),
 		AccessList: txn.GetAccessList(),
+	}
+	if receipt.Logs == nil {
+		transaction.Logs = nil
 	}
 	// Exclusion, as in ethapi.NewRPCTransaction: a type registered outside this
 	// package is fee-capped too.

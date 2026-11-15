@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/lightclient_utils"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/transition"
@@ -57,19 +58,23 @@ type validatedChildren struct {
 
 var ErrStateNotFound = errors.New("state not found")
 
-var nextEpochStateOutcomes = metrics.GetOrCreateCounterVec("caplin_next_epoch_state_outcomes_total", []string{"outcome"})
+var (
+	nextEpochStateOutcomes          = metrics.GetOrCreateCounterVec("caplin_next_epoch_state_outcomes_total", []string{"outcome"})
+	replaySyncedHeadFallbackCounter = metrics.GetOrCreateCounter("caplin_forkchoice_replay_synced_head_total")
+)
 
 type ChainSegmentInsertionResult uint
 
 const (
-	Success        ChainSegmentInsertionResult = 0
-	InvalidBlock   ChainSegmentInsertionResult = 1
-	MissingSegment ChainSegmentInsertionResult = 2
-	BelowAnchor    ChainSegmentInsertionResult = 3
-	LogisticError  ChainSegmentInsertionResult = 4
-	PreValidated   ChainSegmentInsertionResult = 5
-	Started        ChainSegmentInsertionResult = 6
-	ReplayRequired ChainSegmentInsertionResult = 7
+	Success                        ChainSegmentInsertionResult = 0
+	InvalidBlock                   ChainSegmentInsertionResult = 1
+	MissingSegment                 ChainSegmentInsertionResult = 2
+	BelowAnchor                    ChainSegmentInsertionResult = 3
+	LogisticError                  ChainSegmentInsertionResult = 4
+	PreValidated                   ChainSegmentInsertionResult = 5
+	Started                        ChainSegmentInsertionResult = 6
+	ReplayRequired                 ChainSegmentInsertionResult = 7
+	PrecomputedEpochStateAvailable ChainSegmentInsertionResult = 8
 )
 
 func (r ChainSegmentInsertionResult) String() string {
@@ -90,6 +95,8 @@ func (r ChainSegmentInsertionResult) String() string {
 		return "segment started"
 	case ReplayRequired:
 		return "parent state needs a replay"
+	case PrecomputedEpochStateAvailable:
+		return "precomputed epoch state available"
 	default:
 		return fmt.Sprintf("%d <unknown>", r)
 	}
@@ -129,6 +136,7 @@ type forkGraphDisk struct {
 
 	currentState          *state.CachingBeaconState
 	currentStateBlockRoot common.Hash // block root of the last processed block (avoids BlockRoot() zeroed-StateRoot issue)
+	replayedStates        replayStateCache
 	nextEpochParentRoot   common.Hash
 	nextEpochState        *state.CachingBeaconState
 	highestTransitionSlot uint64
@@ -154,13 +162,25 @@ type forkGraphDisk struct {
 	lowestAvailableBlock atomic.Uint64
 
 	newestLightClientUpdate atomic.Value
+	// newestLightClientFinalityUpdate is the newest recorded update that has finality (is_finality_update).
+	newestLightClientFinalityUpdate atomic.Pointer[cltypes.LightClientUpdate]
 	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
 	lightClientUpdates sync.Map // period -> lightclientupdate
+	// lightClientUpdateCandidates holds the updates of blocks that are not finalized yet, by period and signature block
+	// root. Finalization moves the canonical ones into lightClientUpdates.
+	lightClientUpdateCandidates   map[uint64]map[common.Hash]*cltypes.LightClientUpdate
+	lightClientUpdateCandidatesMu sync.RWMutex
+	// lightClientFinalized is the block the last KeepFinalizedLightClientUpdates settled, guarded by
+	// lightClientUpdateCandidatesMu: a head whose chain does not hold it serves no candidates.
+	lightClientFinalized     common.Hash
+	lightClientFinalizedSlot uint64
 
-	// in-memory cache of block roots that have envelopes on disk [Optimization for Gloas:EIP7732]
-	envelopeExists   sync.Map // common.Hash -> struct{}
-	envelopeMissing  sync.Map // common.Hash -> struct{}
-	invalidEnvelopes sync.Map // common.Hash -> struct{}
+	// Envelope state is tracked in memory by beacon block root.
+	// Corrupt files in invalidEnvelopes can be replaced; rejectedEnvelopes blocks redelivery until pruning.
+	envelopeExists    sync.Map // common.Hash -> struct{}
+	envelopeMissing   sync.Map // common.Hash -> struct{}
+	invalidEnvelopes  sync.Map // common.Hash -> struct{}
+	rejectedEnvelopes sync.Map // common.Hash -> struct{}
 
 	// stateDumpLock guards the reusable state buffer and the key of the last state dump
 	stateDumpLock  sync.Mutex
@@ -400,10 +420,25 @@ func (f *forkGraphDisk) CurrentStateLocked(blockRoot common.Hash) *state.Caching
 }
 
 func (f *forkGraphDisk) ReplayState(blockRoot common.Hash) (*state.CachingBeaconState, error) {
-	return f.replayState(blockRoot, false)
+	replayed, _, err := f.ReplayStateWithOwnership(blockRoot)
+	return replayed, err
 }
 
-func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *state.CachingBeaconState) (out *state.CachingBeaconState, ok bool, err error) {
+func (f *forkGraphDisk) ReplayStateWithOwnership(blockRoot common.Hash) (*state.CachingBeaconState, bool, error) {
+	if _, ok := f.GetHeader(blockRoot); !ok {
+		return nil, false, nil
+	}
+	if state, ok, err := f.useHeadStateIfPossible(blockRoot, nil); ok || err != nil {
+		if ok {
+			replaySyncedHeadFallbackCounter.Inc()
+		}
+		return state, ok, err
+	}
+	replayed, err := f.replayState(blockRoot, false)
+	return replayed, false, err
+}
+
+func (f *forkGraphDisk) useHeadStateIfPossible(blockRoot common.Hash, in *state.CachingBeaconState) (out *state.CachingBeaconState, ok bool, err error) {
 	if f.syncedData == nil {
 		return
 	}
@@ -429,9 +464,16 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 		if errors.Is(err, synced_data.ErrNotSynced) {
 			err = nil
 		}
-		if ok || err != nil {
-			return
-		}
+	}
+	return
+}
+
+func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *state.CachingBeaconState) (out *state.CachingBeaconState, ok bool, err error) {
+	if out, ok, err = f.useHeadStateIfPossible(blockRoot, in); ok || err != nil {
+		return
+	}
+	if f.syncedData == nil {
+		return
 	}
 
 	// check if the state is in the cache
@@ -470,6 +512,22 @@ func (f *forkGraphDisk) replayState(blockRoot common.Hash, addChainSegment bool)
 			return state, err
 		}
 	} else {
+		var cached *state.CachingBeaconState
+		f.lifecycleMu.RLock()
+		if f.retainedBlock(blockRoot) {
+			cached, _ = f.replayedStates.get(blockRoot)
+		}
+		f.lifecycleMu.RUnlock()
+		if cached != nil {
+			if cachedCopy, copyErr := cached.Copy(); copyErr == nil {
+				f.lifecycleMu.RLock()
+				retained := f.retainedBlock(blockRoot)
+				f.lifecycleMu.RUnlock()
+				if retained {
+					return cachedCopy, nil
+				}
+			}
+		}
 		if _, ok := f.GetHeader(blockRoot); !ok {
 			return nil, nil
 		}
@@ -525,12 +583,28 @@ func (f *forkGraphDisk) replayState(blockRoot common.Hash, addChainSegment bool)
 
 	// Traverse the blocks from top to bottom.
 	for _, b := range slices.Backward(blocksInTheWay) {
-		if err := transition.TransitionState(copyReferencedState, b, nil, false); err != nil {
+		var transitionErr error
+		if addChainSegment {
+			transitionErr = transition.TransitionState(copyReferencedState, b, nil, false)
+		} else {
+			transitionErr = transition.TransitionStateForReplay(copyReferencedState, b, nil)
+		}
+		if transitionErr != nil {
 			if addChainSegment {
 				f.currentState = nil
 				f.currentStateBlockRoot = common.Hash{}
 			}
-			return nil, err
+			return nil, transitionErr
+		}
+	}
+	if !addChainSegment {
+		cacheCopy, copyErr := copyReferencedState.Copy()
+		if copyErr == nil {
+			f.lifecycleMu.RLock()
+			if f.retainedBlock(blockRoot) {
+				f.replayedStates.add(blockRoot, cacheCopy)
+			}
+			f.lifecycleMu.RUnlock()
 		}
 	}
 	return copyReferencedState, nil
@@ -671,6 +745,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.previousIndicies.deleteKeys(previousIndexKeys)
 	}
 	f.addPruneMu.Unlock()
+	f.replayedStates.clear()
 	if f.pruneBoundaryHook != nil {
 		f.pruneBoundaryHook()
 	}
@@ -701,6 +776,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 			f.envelopeExists.Delete(root)
 			f.envelopeMissing.Delete(root)
 			f.invalidEnvelopes.Delete(root)
+			f.rejectedEnvelopes.Delete(root)
 			f.unavailablePayloads.Delete(root)
 			f.acceptedPayloads.Delete(root)
 			f.badBlocks.Delete(root)
@@ -759,6 +835,10 @@ func (f *forkGraphDisk) GetLightClientBootstrap(blockRoot common.Hash) (*cltypes
 	return obj.(*cltypes.LightClientBootstrap), true
 }
 
+func (f *forkGraphDisk) NewestLightClientFinalityUpdate() *cltypes.LightClientUpdate {
+	return f.newestLightClientFinalityUpdate.Load()
+}
+
 func (f *forkGraphDisk) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 	if f.newestLightClientUpdate.Load() == nil {
 		return nil
@@ -766,12 +846,136 @@ func (f *forkGraphDisk) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 	return f.newestLightClientUpdate.Load().(*cltypes.LightClientUpdate)
 }
 
-func (f *forkGraphDisk) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
-	obj, has := f.lightClientUpdates.Load(period)
-	if !has {
-		return nil, false
+// recordLightClientUpdateLocked takes the update of a block whose transition succeeded as the newest update, and as a
+// candidate of its period if it is signed in the period of its attested header. The caller holds addPruneMu.
+func (f *forkGraphDisk) recordLightClientUpdateLocked(signatureBlock common.Hash, update *cltypes.LightClientUpdate) {
+	f.newestLightClientUpdate.Store(update)
+	if lightclient_utils.IsFinalityUpdate(update) {
+		f.newestLightClientFinalityUpdate.Store(update)
 	}
-	return obj.(*cltypes.LightClientUpdate), true
+	if f.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot) != f.beaconCfg.SyncCommitteePeriod(update.SignatureSlot) {
+		return
+	}
+	f.lightClientUpdateCandidatesMu.Lock()
+	defer f.lightClientUpdateCandidatesMu.Unlock()
+	if f.lightClientUpdateCandidates == nil {
+		f.lightClientUpdateCandidates = make(map[uint64]map[common.Hash]*cltypes.LightClientUpdate)
+	}
+	period := f.beaconCfg.SyncCommitteePeriod(update.SignatureSlot)
+	if f.lightClientUpdateCandidates[period] == nil {
+		f.lightClientUpdateCandidates[period] = make(map[common.Hash]*cltypes.LightClientUpdate)
+	}
+	f.lightClientUpdateCandidates[period][signatureBlock] = update
+}
+
+// KeepFinalizedLightClientUpdates moves the candidates whose signature block is on the finalized block's chain into
+// the period store, and drops the other candidates at or below the finalized slot: they can no longer be canonical.
+func (f *forkGraphDisk) KeepFinalizedLightClientUpdates(finalized common.Hash) {
+	f.addPruneMu.Lock()
+	defer f.addPruneMu.Unlock()
+	f.lightClientUpdateCandidatesMu.Lock()
+	defer f.lightClientUpdateCandidatesMu.Unlock()
+	header, ok := f.GetHeader(finalized)
+	if !ok {
+		return
+	}
+	finalizedSlot, lowest := header.Slot, header.Slot
+	f.lightClientFinalized, f.lightClientFinalizedSlot = finalized, finalizedSlot
+	for _, candidates := range f.lightClientUpdateCandidates {
+		lowest = min(lowest, lowestSignatureSlot(candidates))
+	}
+	for root := finalized; ok && header.Slot >= lowest; header, ok = f.GetHeader(root) {
+		if update, isCandidate := f.lightClientUpdateCandidates[f.beaconCfg.SyncCommitteePeriod(header.Slot)][root]; isCandidate {
+			f.storeLightClientUpdate(update)
+		}
+		root = header.ParentRoot
+	}
+	for period, candidates := range f.lightClientUpdateCandidates {
+		for root, update := range candidates {
+			if update.SignatureSlot <= finalizedSlot {
+				delete(candidates, root)
+			}
+		}
+		if len(candidates) == 0 {
+			delete(f.lightClientUpdateCandidates, period)
+		}
+	}
+}
+
+func lowestSignatureSlot(candidates map[common.Hash]*cltypes.LightClientUpdate) uint64 {
+	lowest := uint64(math.MaxUint64)
+	for _, update := range candidates {
+		lowest = min(lowest, update.SignatureSlot)
+	}
+	return lowest
+}
+
+// storeLightClientUpdate keeps the best update of its attested header's sync committee period.
+func (f *forkGraphDisk) storeLightClientUpdate(update *cltypes.LightClientUpdate) {
+	period := f.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot)
+	if best, ok := f.lightClientUpdates.Load(period); ok && !lightclient_utils.IsBetterUpdate(f.beaconCfg, update, best.(*cltypes.LightClientUpdate)) {
+		return
+	}
+	f.lightClientUpdates.Store(period, update)
+}
+
+// GetLightClientUpdates returns the best update of each sync committee period in [startPeriod, endPeriod), nil for a
+// period without one: the update finalization settled, or a better candidate whose signature block is on head's chain.
+// A zero head, or a head whose chain does not hold the last finalized block, gives the settled updates only, even when
+// that chain holds a better candidate. One walk down head's chain serves every period of the range.
+func (f *forkGraphDisk) GetLightClientUpdates(startPeriod, endPeriod uint64, head common.Hash) []*cltypes.LightClientUpdate {
+	if endPeriod <= startPeriod {
+		return nil
+	}
+	// Finalization moves candidates into the period store under the write lock, so both are read in one state.
+	f.lightClientUpdateCandidatesMu.RLock()
+	defer f.lightClientUpdateCandidatesMu.RUnlock()
+	updates := make([]*cltypes.LightClientUpdate, endPeriod-startPeriod)
+	for i := range updates {
+		if obj, ok := f.lightClientUpdates.Load(startPeriod + uint64(i)); ok {
+			updates[i] = obj.(*cltypes.LightClientUpdate)
+		}
+	}
+	lowest := uint64(math.MaxUint64)
+	for period, candidates := range f.lightClientUpdateCandidates {
+		if period >= startPeriod && period < endPeriod {
+			lowest = min(lowest, lowestSignatureSlot(candidates))
+		}
+	}
+	if lowest == math.MaxUint64 {
+		return updates
+	}
+	found := make([]*cltypes.LightClientUpdate, len(updates))
+	onFinalizedChain := f.lightClientFinalized == (common.Hash{})
+	for {
+		// The finalized root is recognised before its header is read: pruning can hide that header.
+		if !onFinalizedChain && head == f.lightClientFinalized {
+			onFinalizedChain = true
+		}
+		header, ok := f.GetHeader(head)
+		if !ok || (onFinalizedChain && header.Slot < lowest) {
+			break
+		}
+		if !onFinalizedChain && header.Slot <= f.lightClientFinalizedSlot {
+			return updates // past the finalized slot on another branch
+		}
+		period := f.beaconCfg.SyncCommitteePeriod(header.Slot)
+		if update, isCandidate := f.lightClientUpdateCandidates[period][head]; isCandidate && period >= startPeriod && period < endPeriod {
+			if best := found[period-startPeriod]; best == nil || lightclient_utils.IsBetterUpdate(f.beaconCfg, update, best) {
+				found[period-startPeriod] = update
+			}
+		}
+		head = header.ParentRoot
+	}
+	if !onFinalizedChain {
+		return updates
+	}
+	for i, update := range found {
+		if update != nil && (updates[i] == nil || lightclient_utils.IsBetterUpdate(f.beaconCfg, update, updates[i])) {
+			updates[i] = update
+		}
+	}
+	return updates
 }
 
 func (f *forkGraphDisk) GetPreviousParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error) {
