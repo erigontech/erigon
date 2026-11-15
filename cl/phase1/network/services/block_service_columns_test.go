@@ -207,7 +207,7 @@ func newFuluColumnGossipFixture(t *testing.T) (*blockService, *cltypes.SignedBea
 	return service, block, processing, peerDas
 }
 
-func TestDrainDataColumnStoredBoundsConcurrentRefill(t *testing.T) {
+func TestDrainBlockRootsBoundsConcurrentRefill(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		stored := make(chan common.Hash, 256)
 		for i := range cap(stored) {
@@ -219,7 +219,7 @@ func TestDrainDataColumnStoredBoundsConcurrentRefill(t *testing.T) {
 		}
 		synctest.Wait()
 
-		roots := drainDataColumnStored(stored, first)
+		roots := drainBlockRoots(stored, first)
 		synctest.Wait()
 
 		require.Contains(t, roots, [32]byte(first))
