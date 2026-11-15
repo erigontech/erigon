@@ -154,17 +154,10 @@ func TestValidateChainAndViewFindsABlockCommittedWhileItWaits(t *testing.T) {
 	}
 }
 
-// frozenBlockReader serves viewedBlock as a canonical block from snapshots, whose database entries are pruned.
+// frozenBlockReader serves viewedBlock as a canonical block from snapshots, whose database entries are pruned. A
+// lookup by hash alone panics: it would search every snapshot file.
 type frozenBlockReader struct {
 	dbservices.FullBlockReader
-}
-
-func (frozenBlockReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
-	if hash != viewedBlock.Hash() {
-		return nil, nil
-	}
-	number := viewedBlock.NumberU64()
-	return &number, nil
 }
 
 func (frozenBlockReader) IsCanonical(_ context.Context, _ kv.Getter, hash common.Hash, number uint64) (bool, error) {
@@ -238,10 +231,6 @@ func TestPruneWaitsForExecution(t *testing.T) {
 		cancel()
 		require.ErrorIs(t, <-result, context.Canceled)
 	})
-}
-
-func (r sideForkReader) HeaderNumber(_ context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
-	return rawdb.ReadHeaderNumber(tx, hash), nil
 }
 
 func (r sideForkReader) IsCanonical(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (bool, error) {

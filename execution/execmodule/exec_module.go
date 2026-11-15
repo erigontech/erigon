@@ -531,7 +531,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 func (e *ExecModule) ValidateChainAndView(ctx context.Context, block *types.Block, wait time.Duration, fn BlockStateView) (ValidationResult, func() error, error) {
 	blockHash := block.Hash()
 	valid := ValidationResult{ValidationStatus: ExecutionStatusSuccess, LatestValidHash: blockHash}
-	if committed, view, err := e.viewCommittedBlock(ctx, blockHash, fn); err != nil || committed {
+	if committed, view, err := e.viewCommittedBlock(ctx, blockHash, block.NumberU64(), fn); err != nil || committed {
 		return valid, view, err
 	}
 	acquireCtx, cancel := context.WithTimeout(ctx, wait)
@@ -539,7 +539,7 @@ func (e *ExecModule) ValidateChainAndView(ctx context.Context, block *types.Bloc
 	cancel()
 	if err != nil {
 		// A forkchoice update is answered before its commit, which can land while the module stays busy.
-		if committed, view, err := e.viewCommittedBlock(ctx, blockHash, fn); err != nil || committed {
+		if committed, view, err := e.viewCommittedBlock(ctx, blockHash, block.NumberU64(), fn); err != nil || committed {
 			return valid, view, err
 		}
 		e.logger.Trace("ethereumExecutionModule.ValidateChainAndView: ExecutionStatus_Busy")
@@ -549,7 +549,7 @@ func (e *ExecModule) ValidateChainAndView(ctx context.Context, block *types.Bloc
 	if held, view, err := e.viewRetainedTip(ctx, blockHash, fn); err != nil || held {
 		return valid, view, err
 	}
-	if committed, view, err := e.viewCommittedBlock(ctx, blockHash, fn); err != nil || committed {
+	if committed, view, err := e.viewCommittedBlock(ctx, blockHash, block.NumberU64(), fn); err != nil || committed {
 		return valid, view, err
 	}
 	start := time.Now()
@@ -916,7 +916,7 @@ func (s *blockEndState) HistorySeek(kv.Domain, []byte, uint64) ([]byte, bool, er
 // viewCommittedBlock reports whether blockHash is committed. It returns a view only when the changesets of the blocks from
 // blockHash to the committed head are still kept for reorgs, and reads the parent state by unwinding them in memory.
 // It reads one database snapshot, so it needs no module semaphore.
-func (e *ExecModule) viewCommittedBlock(ctx context.Context, blockHash common.Hash, fn BlockStateView) (committed bool, view func() error, err error) {
+func (e *ExecModule) viewCommittedBlock(ctx context.Context, blockHash common.Hash, number uint64, fn BlockStateView) (committed bool, view func() error, err error) {
 	tx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return false, nil, err
@@ -926,15 +926,14 @@ func (e *ExecModule) viewCommittedBlock(ctx context.Context, blockHash common.Ha
 	if err != nil {
 		return false, nil, err
 	}
-	number, err := e.blockReader.HeaderNumber(ctx, tx, blockHash)
-	if err != nil || number == nil || *number == 0 || *number > executedTo {
-		return false, nil, err
+	if number == 0 || number > executedTo {
+		return false, nil, nil
 	}
-	if canonical, err := e.blockReader.IsCanonical(ctx, tx, blockHash, *number); err != nil || !canonical {
+	if canonical, err := e.blockReader.IsCanonical(ctx, tx, blockHash, number); err != nil || !canonical {
 		return false, nil, err
 	}
 	var unwind *[kv.DomainLen][]kv.DomainEntryDiff
-	for n := executedTo; n >= *number; n-- {
+	for n := executedTo; n >= number; n-- {
 		hash, err := rawdb.ReadCanonicalHash(tx, n)
 		if err != nil {
 			return false, nil, err
@@ -951,7 +950,7 @@ func (e *ExecModule) viewCommittedBlock(ctx context.Context, blockHash common.Ha
 			unwind[d] = changeset.MergeDiffSets(unwind[d], diffs[d])
 		}
 	}
-	unwindFrom, err := e.blockReader.TxnumReader().Min(ctx, tx, *number)
+	unwindFrom, err := e.blockReader.TxnumReader().Min(ctx, tx, number)
 	if err != nil {
 		return false, nil, err
 	}
