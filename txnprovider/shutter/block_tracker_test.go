@@ -42,11 +42,11 @@ func TestBlockTracker(t *testing.T) {
 	bl := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(ctx, recvC))
 	btInitialisationWg := &sync.WaitGroup{}
 	btInitialisationWg.Add(1)
-	blockReader := func(ctx context.Context) (shutter.BlockState, error) {
+	readCommittedState := func(ctx context.Context) (shutter.BlockState, error) {
 		btInitialisationWg.Done()
 		return shutter.BlockState{BlockNum: 10}, nil
 	}
-	bt := shutter.NewBlockTracker(logger, bl, blockReader)
+	bt := shutter.NewBlockTracker(logger, bl, readCommittedState)
 	eg, egCtx := errgroup.WithContext(ctx)
 	defer func(eg *errgroup.Group) {
 		cancel()
@@ -71,18 +71,37 @@ func TestBlockTracker(t *testing.T) {
 
 func TestBlockTrackerInitialHead(t *testing.T) {
 	for _, tc := range []struct {
-		name            string
-		replayedHead    uint64
-		currentHead     uint64
-		replayedVersion uint64
-		currentVersion  uint64
-		unwind          bool
-		wantHead        uint64
+		name      string
+		replay    shutter.BlockState
+		committed shutter.BlockState
+		unwind    bool
+		wantHead  uint64
 	}{
-		{"database ahead of replay", 42, 43, 1, 2, false, 43},
-		{"database ahead of replayed unwind", 42, 43, 1, 2, true, 43},
-		{"replay ahead of database", 44, 43, 2, 1, false, 44},
-		{"database rewind after replay", 42, 40, 1, 2, false, 40},
+		{
+			name:      "database ahead of replay",
+			replay:    shutter.BlockState{BlockNum: 42, StateVersionID: 1},
+			committed: shutter.BlockState{BlockNum: 43, StateVersionID: 2},
+			wantHead:  43,
+		},
+		{
+			name:      "database ahead of replayed unwind",
+			replay:    shutter.BlockState{BlockNum: 42, StateVersionID: 1},
+			committed: shutter.BlockState{BlockNum: 43, StateVersionID: 2},
+			unwind:    true,
+			wantHead:  43,
+		},
+		{
+			name:      "replay ahead of database",
+			replay:    shutter.BlockState{BlockNum: 44, StateVersionID: 2},
+			committed: shutter.BlockState{BlockNum: 43, StateVersionID: 1},
+			wantHead:  44,
+		},
+		{
+			name:      "database rewind after replay",
+			replay:    shutter.BlockState{BlockNum: 42, StateVersionID: 1},
+			committed: shutter.BlockState{BlockNum: 40, StateVersionID: 2},
+			wantHead:  40,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -100,12 +119,12 @@ func TestBlockTrackerInitialHead(t *testing.T) {
 				if tc.unwind {
 					direction = remoteproto.Direction_UNWIND
 				}
-				batches <- &remoteproto.StateChangeBatch{StateVersionId: tc.replayedVersion, ChangeBatch: []*remoteproto.StateChange{{
-					BlockHeight: tc.replayedHead, Direction: direction,
+				batches <- &remoteproto.StateChangeBatch{StateVersionId: tc.replay.StateVersionID, ChangeBatch: []*remoteproto.StateChange{{
+					BlockHeight: tc.replay.BlockNum, Direction: direction,
 				}}}
 				synctest.Wait()
 				tracker := shutter.NewBlockTracker(logger, listener, func(context.Context) (shutter.BlockState, error) {
-					return shutter.BlockState{BlockNum: tc.currentHead, StateVersionID: tc.currentVersion}, nil
+					return tc.committed, nil
 				})
 				eg.Go(func() error { return tracker.Run(egCtx) })
 				synctest.Wait()

@@ -2173,7 +2173,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// When a block that was deemed "the best" of its height, is no longer deemed "the best", the
 	// transactions contained in it, are now viable for inclusion in other blocks, and therefore should
 	// be returned into the transaction pool.
-	sendersWithChangedState := map[uint64]struct{}{}
+	sendersWithActivity := map[uint64]struct{}{}
 	announcements := Announcements{}
 	for i, txn := range newTxns.Txns {
 		if _, ok := p.byHash[string(txn.IDHash[:])]; ok {
@@ -2184,9 +2184,8 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 			p.deletedTxns = append(p.deletedTxns, mt)
 			continue
 		}
-		sendersWithChangedState[mt.TxnSlot.SenderID] = struct{}{}
+		sendersWithActivity[mt.TxnSlot.SenderID] = struct{}{}
 	}
-	// add senders changed in state to `sendersWithChangedState` list
 	for _, changesList := range stateChanges.ChangeBatch {
 		for _, change := range changesList.Changes {
 			switch change.Action {
@@ -2199,7 +2198,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 				if !ok {
 					continue
 				}
-				sendersWithChangedState[id] = struct{}{}
+				sendersWithActivity[id] = struct{}{}
 			}
 		}
 	}
@@ -2219,7 +2218,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		}
 	}
 
-	for senderID := range sendersWithChangedState {
+	for senderID := range sendersWithActivity {
 		delete(sendersToRefresh, senderID)
 		// Restored transactions and announced account changes both count as sender activity.
 		p.senderLastActivity[senderID] = blockNum

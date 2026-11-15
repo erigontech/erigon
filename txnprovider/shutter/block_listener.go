@@ -54,16 +54,16 @@ func NewBlockListener(logger log.Logger, stateChangesClient stateChangesClient) 
 
 // RegisterObserver replays the last known head, if any, before returning.
 // The observer must accept that event without waiting for registration to finish.
-func (bl *BlockListener) RegisterObserver(o event.Observer[BlockEvent]) event.UnregisterFunc {
-	return bl.registerObserver(o, o)
+func (bl *BlockListener) RegisterObserver(observer event.Observer[BlockEvent]) event.UnregisterFunc {
+	return bl.registerObserver(observer, observer)
 }
 
-func (bl *BlockListener) registerObserver(o, replay event.Observer[BlockEvent]) event.UnregisterFunc {
+func (bl *BlockListener) registerObserver(onLive, onReplay event.Observer[BlockEvent]) event.UnregisterFunc {
 	bl.eventsMu.Lock()
 	defer bl.eventsMu.Unlock()
-	unregister := bl.events.Register(o)
+	unregister := bl.events.Register(onLive)
 	if bl.lastEvent != nil {
-		replay(*bl.lastEvent)
+		onReplay(*bl.lastEvent)
 	}
 	return unregister
 }

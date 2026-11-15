@@ -30,7 +30,7 @@ type BlockState struct {
 	StateVersionID uint64
 }
 
-type currentBlockReader func(ctx context.Context) (BlockState, error)
+type committedStateReader func(ctx context.Context) (BlockState, error)
 
 type BlockTracker struct {
 	logger             log.Logger
@@ -38,16 +38,16 @@ type BlockTracker struct {
 	blockChangeCond    *sync.Cond
 	currentBlockNum    uint64
 	stopped            bool
-	currentBlockReader currentBlockReader
+	readCommittedState committedStateReader
 }
 
-func NewBlockTracker(logger log.Logger, blockListener *BlockListener, blockReader currentBlockReader) *BlockTracker {
+func NewBlockTracker(logger log.Logger, blockListener *BlockListener, readCommittedState committedStateReader) *BlockTracker {
 	var blockChangeMu sync.Mutex
 	return &BlockTracker{
 		logger:             logger,
 		blockListener:      blockListener,
 		blockChangeCond:    sync.NewCond(&blockChangeMu),
-		currentBlockReader: blockReader,
+		readCommittedState: readCommittedState,
 	}
 }
 
@@ -66,18 +66,20 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	blockEventC := make(chan BlockEvent, 1)
 	var initialState BlockState
-	unregisterBlockEventObserver := bt.blockListener.registerObserver(func(blockEvent BlockEvent) {
+	onLive := func(blockEvent BlockEvent) {
 		select {
 		case <-ctx.Done(): // no-op
 		case blockEventC <- blockEvent:
 		}
-	}, func(replay BlockEvent) {
+	}
+	onReplay := func(replay BlockEvent) {
 		initialState = BlockState{BlockNum: replay.LatestBlockNum, StateVersionID: replay.StateVersionID}
-	})
+	}
+	unregisterBlockEventObserver := bt.blockListener.registerObserver(onLive, onReplay)
 	defer unregisterBlockEventObserver()
 	defer cancel() // make sure we release the observer before unregistering to avoid leaks/deadlocks
 
-	committedState, err := bt.currentBlockReader(ctx)
+	committedState, err := bt.readCommittedState(ctx)
 	if err != nil {
 		return err
 	}
