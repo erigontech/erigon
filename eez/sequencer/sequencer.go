@@ -293,12 +293,10 @@ func (s *Sequencer) produce(ctx context.Context, kind Kind, parent *types.Header
 	// The witness belongs to the block, which can commit after ctx ends.
 	wctx := context.WithoutCancel(ctx)
 	var pin interface{ Close() }
+	var pinErr error
 	if w := s.cfg.Witnesses; w != nil {
 		// The pin must hold the parent's state: taken before the block commits.
-		var err error
-		if pin, err = w.Pin(wctx); err != nil {
-			s.witnessFailed(in.Number, err)
-		} else {
+		if pin, pinErr = w.Pin(wctx); pinErr == nil {
 			defer pin.Close()
 		}
 	}
@@ -307,7 +305,10 @@ func (s *Sequencer) produce(ctx context.Context, kind Kind, parent *types.Header
 		return nil, err
 	}
 	h := built.Block.Header()
-	if pin != nil {
+	switch {
+	case pinErr != nil:
+		s.witnessFailed(in.Number, pinErr)
+	case pin != nil:
 		if err := s.cfg.Witnesses.Record(wctx, pin, h); err != nil {
 			s.witnessFailed(in.Number, err)
 		}

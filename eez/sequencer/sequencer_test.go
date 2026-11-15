@@ -17,7 +17,10 @@
 package sequencer_test
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -198,4 +201,40 @@ func TestServiceHead(t *testing.T) {
 	svc.Head(l1.Header{Number: 1})
 	svc.Head(l1.Header{Number: 2})
 	require.Equal(t, uint64(2), svc.PendingHead().Number)
+}
+
+// pinless fails every pin.
+type pinless struct{}
+
+func (pinless) Pin(context.Context) (interface{ Close() }, error) { return nil, errors.New("no pin") }
+
+func (pinless) Record(context.Context, interface{ Close() }, *types.Header) error { return nil }
+
+// down is a pool whose requests fail while err is set.
+type down struct{ err error }
+
+func (d *down) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	return nil, d.err
+}
+
+// TestWitnessFailureNeedsABlock: a block left without a witness is reported
+// once it commits; a build that fails leaves no block to report.
+func TestWitnessFailureNeedsABlock(t *testing.T) {
+	h := newHarness(t)
+	var out bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&out, log.LogfmtFormat()))
+	pool := &down{err: errors.New("pool down")}
+	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet(), Witnesses: pinless{}}, h.follower, pool, logger)
+	require.NoError(t, err)
+	reports := func() int { return strings.Count(out.String(), "produced block without a witness") }
+
+	require.Error(t, s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 6}))
+	require.Zero(t, h.head(t).Number.Uint64())
+	require.Zero(t, reports(), "a failed build reported a block without a witness")
+
+	pool.err = nil
+	require.NoError(t, s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 6}))
+	require.Equal(t, uint64(1), h.head(t).Number.Uint64())
+	require.Equal(t, 1, reports())
 }
