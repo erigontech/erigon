@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -72,7 +73,8 @@ func TestStateChangesSubscriptionStartsIncomplete(t *testing.T) {
 
 func TestStateChangesReconnectReceivesCurrentHead(t *testing.T) {
 	server := NewKvServer(t.Context(), nil, nil, nil, log.New())
-	first, remove := server.stateChangeStreams.Sub(nil, 0)
+	first, remove, retry := server.stateChangeStreams.Sub(nil, 0)
+	require.False(t, retry)
 	server.SendStateChanges(t.Context(), &remoteproto.StateChangeBatch{
 		StateVersionId: 1,
 		ChangeBatch: []*remoteproto.StateChange{{
@@ -98,7 +100,8 @@ func TestStateChangesReconnectReceivesCurrentHead(t *testing.T) {
 		},
 	}
 	server.SendStateChanges(t.Context(), batch)
-	second, remove := server.stateChangeStreams.Sub(nil, 0)
+	second, remove, retry := server.stateChangeStreams.Sub(nil, 0)
+	require.False(t, retry)
 	defer remove()
 	select {
 	case event := <-second:
@@ -154,40 +157,48 @@ func TestStateChangesKeepsPublicationDuringSnapshot(t *testing.T) {
 
 func TestStateChangesSnapshotFinality(t *testing.T) {
 	for _, tc := range []struct {
-		name              string
-		publishDuringRead bool
-		snapshotVersion   uint64
-		wantFinalized     uint64
+		name               string
+		publishDuringRead  bool
+		snapshotVersion    uint64
+		snapshotFinalized  uint64
+		committedFinalized uint64
 	}{
-		{"publication races snapshot", true, 2, 4},
-		{"publication precedes snapshot", false, 2, 3},
-		{"committed snapshot is newer", true, 3, 3},
+		{"publication races snapshot", true, 2, 3, 4},
+		{"publication precedes snapshot", false, 2, 3, 3},
+		{"committed snapshot is newer", true, 3, 3, 3},
+		{"committed finality is newer", true, 2, 5, 5},
+		{"publication lowers finality", true, 2, 5, 4},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			server := NewKvServer(t.Context(), nil, nil, nil, log.New())
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			server := NewKvServer(ctx, nil, nil, nil, log.New())
 			head := &remoteproto.StateChange{BlockHeight: 5}
-			publish := func() {
+			publish := sync.OnceFunc(func() {
 				server.SendStateChanges(t.Context(), &remoteproto.StateChangeBatch{
 					StateVersionId: 2, FinalizedBlock: 4, ChangeBatch: []*remoteproto.StateChange{head},
 				})
-			}
+			})
 			if !tc.publishDuringRead {
 				publish()
 			}
+			finalized := tc.snapshotFinalized
 			server.SetStateChangesSnapshot(func(context.Context) (*remoteproto.StateChangeBatch, error) {
+				reset := &remoteproto.StateChangeBatch{
+					StateVersionId: tc.snapshotVersion, FinalizedBlock: finalized, ChangeBatch: []*remoteproto.StateChange{head},
+				}
 				if tc.publishDuringRead {
 					publish()
 				}
-				return &remoteproto.StateChangeBatch{
-					StateVersionId: tc.snapshotVersion, FinalizedBlock: 3, ChangeBatch: []*remoteproto.StateChange{head},
-				}, nil
+				finalized = tc.committedFinalized
+				return reset, nil
 			})
 			stream := &stateChangesTestStream{
-				ctx:          t.Context(),
+				ctx:          ctx,
 				onSubscribed: func() {},
 				onSend: func(batch *remoteproto.StateChangeBatch) error {
 					require.Equal(t, tc.snapshotVersion, batch.StateVersionId)
-					require.Equal(t, tc.wantFinalized, batch.FinalizedBlock)
+					require.Equal(t, tc.committedFinalized, batch.FinalizedBlock)
 					return io.EOF
 				},
 			}
