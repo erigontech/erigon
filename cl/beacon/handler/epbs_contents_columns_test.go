@@ -104,16 +104,22 @@ type loggingColumnStorage struct {
 	f *envelopeContentsFixture
 }
 
-func (s *loggingColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
+func (s *loggingColumnStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
 	var err error
 	if s.f.failWrite != nil {
-		err = s.f.failWrite(uint64(columnIndex))
+		for _, sidecar := range sidecars {
+			if err = s.f.failWrite(sidecar.Index); err != nil {
+				break
+			}
+		}
 	}
 	if err == nil {
-		err = s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
+		err = s.DataColumnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars)
 	}
 	deadline, _ := ctx.Deadline()
-	s.f.record(contentsEvent{kind: eventColumnWrite, index: uint64(columnIndex), err: err, ctxErr: ctx.Err(), deadline: deadline})
+	for _, sidecar := range sidecars {
+		s.f.record(contentsEvent{kind: eventColumnWrite, index: sidecar.Index, err: err, ctxErr: ctx.Err(), deadline: deadline})
+	}
 	return err
 }
 

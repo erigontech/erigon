@@ -57,7 +57,9 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
+	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
+	das_state_mock "github.com/erigontech/erigon/cl/das/state/mock_services"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
@@ -434,8 +436,58 @@ func TestStoreDataColumnSidecars(t *testing.T) {
 	root := common.Hash{1}
 	column := &cltypes.DataColumnSidecar{Index: 7}
 
-	storage.EXPECT().WriteColumnSidecars(gomock.Any(), root, int64(7), column).Return(nil)
+	storage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), root, []*cltypes.DataColumnSidecar{column}).Return(nil)
 	require.NoError(t, handler.storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{column}))
+}
+
+func TestStoreDataColumnSidecarsWritesCustodySubsetInOneBatch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stateReader := das_state_mock.NewMockPeerDasStateReader(ctrl)
+	stateReader.EXPECT().GetMyCustodyColumns().Return(map[cltypes.CustodyIndex]bool{1: true, 4: true, 6: true}, nil).AnyTimes()
+	peerDas := das_mock.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().IsArchivedMode().Return(false).AnyTimes()
+	peerDas.EXPECT().StateReader().Return(stateReader).AnyTimes()
+	storage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
+	handler := &ApiHandler{columnStorage: storage, peerDas: peerDas}
+	root := common.Hash{1}
+	sidecars := make([]*cltypes.DataColumnSidecar, 8)
+	for i := range sidecars {
+		sidecars[i] = &cltypes.DataColumnSidecar{Index: uint64(i)}
+	}
+
+	var written []*cltypes.DataColumnSidecar
+	storage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), root, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ common.Hash, batch []*cltypes.DataColumnSidecar) error {
+			written = batch
+			return nil
+		}).Times(1)
+
+	require.NoError(t, handler.storeDataColumnSidecars(context.Background(), root, sidecars))
+	require.Equal(t, []*cltypes.DataColumnSidecar{sidecars[1], sidecars[4], sidecars[6]}, written)
+}
+
+func TestStoreDataColumnSidecarsReturnsBatchError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	storage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
+	handler := &ApiHandler{columnStorage: storage}
+	root := common.Hash{1}
+	column := &cltypes.DataColumnSidecar{Index: 3}
+	batchErr := errors.New("batch failed")
+
+	storage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), root, []*cltypes.DataColumnSidecar{column}).Return(batchErr)
+	require.ErrorIs(t, handler.storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{column}), batchErr)
+}
+
+func TestStoreDataColumnSidecarsSkipsBatchWhenNoColumnIsStored(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stateReader := das_state_mock.NewMockPeerDasStateReader(ctrl)
+	stateReader.EXPECT().GetMyCustodyColumns().Return(map[cltypes.CustodyIndex]bool{1: true}, nil).AnyTimes()
+	peerDas := das_mock.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().IsArchivedMode().Return(false).AnyTimes()
+	peerDas.EXPECT().StateReader().Return(stateReader).AnyTimes()
+	handler := &ApiHandler{columnStorage: blob_storage_mock.NewMockDataColumnStorage(ctrl), peerDas: peerDas}
+
+	require.NoError(t, handler.storeDataColumnSidecars(context.Background(), common.Hash{1}, []*cltypes.DataColumnSidecar{{Index: 0}, {Index: 2}}))
 }
 
 func TestStoreDataColumnSidecarsRejectsInvalidInput(t *testing.T) {
@@ -2664,9 +2716,9 @@ type hookedColumnStorage struct {
 	hook func(write func() error) error
 }
 
-func (s *hookedColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
+func (s *hookedColumnStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
 	write := func() error {
-		return s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
+		return s.DataColumnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars)
 	}
 	if s.hook == nil {
 		return write()
@@ -3068,7 +3120,7 @@ func TestBroadcastBlockExactReplayCompletesMissingDataSidecars(t *testing.T) {
 				handler.blobStoage = blobStorage
 			} else {
 				columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
-				columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage unavailable")).AnyTimes()
+				columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage unavailable")).AnyTimes()
 				handler.columnStorage = columnStorage
 			}
 

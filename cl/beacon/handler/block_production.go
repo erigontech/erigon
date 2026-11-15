@@ -3352,6 +3352,7 @@ func (a *ApiHandler) storeDataColumnSidecars(ctx context.Context, blockRoot comm
 		return errors.New("data column storage unavailable")
 	}
 	store := das.ColumnsToStore(a.peerDas)
+	custody := make([]*cltypes.DataColumnSidecar, 0, len(sidecars))
 	for _, sidecar := range sidecars {
 		if sidecar == nil {
 			return errors.New("nil data column sidecar")
@@ -3362,11 +3363,12 @@ func (a *ApiHandler) storeDataColumnSidecars(ctx context.Context, blockRoot comm
 		if sidecar.Index > math.MaxInt64 {
 			return fmt.Errorf("data column index %d exceeds storage range", sidecar.Index)
 		}
-		if err := a.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(sidecar.Index), sidecar); err != nil {
-			return err
-		}
+		custody = append(custody, sidecar)
 	}
-	return nil
+	if len(custody) == 0 {
+		return nil
+	}
+	return a.columnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, custody)
 }
 
 func (a *ApiHandler) selectedHeadState(auxiliaryRoot common.Hash) (common.Hash, uint64, *state.CachingBeaconState, error) {

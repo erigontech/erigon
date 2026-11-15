@@ -102,16 +102,18 @@ func TestImportedEnvelopeEventsSurvivePartialColumnStorage(t *testing.T) {
 	failed := false
 	imports := 0
 	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
-	columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), common.Hash(blockRoot), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ common.Hash, _ int64, column *cltypes.DataColumnSidecar) error {
-			columnsWritten.Add(1)
-			if !failed && column.Index == handler.beaconChainCfg.NumberOfColumns-1 {
-				failed = true
-				return errors.New("injected final column write failure")
+	columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), common.Hash(blockRoot), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ common.Hash, columns []*cltypes.DataColumnSidecar) error {
+			for _, column := range columns {
+				columnsWritten.Add(1)
+				if !failed && column.Index == handler.beaconChainCfg.NumberOfColumns-1 {
+					failed = true
+					return errors.New("injected final column write failure")
+				}
+				stored[column.Index] = true
 			}
-			stored[column.Index] = true
 			return nil
-		}).Times(2 * int(handler.beaconChainCfg.NumberOfColumns))
+		}).Times(2)
 	handler.columnStorage = columnStorage
 	fcu.OnExecutionPayloadFn = func(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
 		for i := range uint64(4) {

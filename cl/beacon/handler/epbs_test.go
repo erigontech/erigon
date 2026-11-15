@@ -1699,12 +1699,14 @@ func testPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T, 
 	fcu.Blocks[common.Hash(blockRoot)] = block
 
 	var columnsWritten atomic.Int32
+	var written []*cltypes.DataColumnSidecar
 	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
-	columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), common.Hash(blockRoot), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error {
-			columnsWritten.Add(1)
+	columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), common.Hash(blockRoot), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+			written = sidecars
+			columnsWritten.Add(int32(len(sidecars)))
 			return nil
-		}).Times(int(handler.beaconChainCfg.NumberOfColumns))
+		}).Times(1)
 	handler.columnStorage = columnStorage
 	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
 		if columnsWritten.Load() != int32(handler.beaconChainCfg.NumberOfColumns) {
@@ -1736,6 +1738,9 @@ func testPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T, 
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.Equal(t, int32(handler.beaconChainCfg.NumberOfColumns), columnsWritten.Load())
+	for i, sidecar := range written {
+		require.Equal(t, uint64(i), sidecar.Index)
+	}
 	require.True(t, fcu.OnExecutionPayloadCheckBlobData)
 }
 
