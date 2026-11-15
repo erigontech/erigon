@@ -169,9 +169,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	yielded := mapset.NewSet[[32]byte]()
 	nonceTooHigh := map[accounts.Address][]nonceTooHighTxn{}
 	readNonce := func(sender accounts.Address) (uint64, error) {
-		if !ibs.IsVersioned() {
-			return ibs.GetNonce(sender)
-		}
 		// Filtering must observe executed writes without adding reads to the BAL.
 		view := state.NewVersionedAccountView(sender, len(ba.Txns), ibs.VersionMap(), stateReader)
 		nonce := view.GetNonce()
