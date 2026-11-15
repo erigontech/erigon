@@ -714,13 +714,24 @@ jobs:
         run: |
           mv "$OUTPUT_LOG" "$RESULT_DIR/"
 
+          # A peer client that died during a pattern is a result, not a failure, once rpc_perf recorded it in the report
+          died_in_report() {
+            [ "$CLIENT" != "erigon" ] && python3 -c 'import json, sys; sys.exit(not any(s.get("error") for s in json.load(open(sys.argv[1]))["results"]))' \
+              "$RESULT_DIR/$CLIENT-$1-result.json" 2>/dev/null
+          }
+
           result=success
           for entry in $OUTCOMES; do
             if [ "$RPC_TEST" != "all" ] && [ "${entry%%=*}" != "$RPC_TEST" ]; then continue; fi
             echo "$entry"
             case "${entry#*=}" in
               success) ;;
-              failure) result=failure ;;
+              failure)
+                if died_in_report "${entry%%=*}"; then
+                  echo "::warning::$CLIENT died during ${entry%%=*}, recorded in its report"
+                else
+                  result=failure
+                fi ;;
               *) if [ "$result" = "success" ]; then result=incomplete; fi ;;
             esac
           done

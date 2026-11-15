@@ -222,6 +222,54 @@ with tempfile.TemporaryDirectory() as tmp:
     check("erigon tied with another client is green", row[-1:] == ["🟢"], row)
     check("legend explains double green", "🟢🟢 fastest by >= 1.3x" in text, text)
 
+# --- dead: a level that rpc_perf recorded with an error -------------------------
+
+DEAD = "server died during test"
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "reth", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 2, 3)]},
+        {"qps": "5", "testRepetitions": [], "error": DEAD},
+    ])
+    write_result(tmp, "geth", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 2, 3)]},
+        {"qps": "5", "testRepetitions": [rep(1, 2, 3)], "error": DEAD},
+    ])
+    res = mod.load_results(tmp)
+    check("a level with an error and no repetition is dead", res["trace_block_struct_log"]["reth"]["5"] == {"error": DEAD}, res)
+    check("a level with an error after some repetitions is dead", res["trace_block_struct_log"]["geth"]["5"] == {"error": DEAD}, res)
+    md = mod.render(res)
+    check("the detail table shows the error of a dead level", f"| 5 | reth | dead: {DEAD} |" in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 2.0, 3)]},
+        {"qps": "5", "testRepetitions": [rep(1, 2.0, 3)]},
+    ])
+    write_result(tmp, "reth", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "5", "testRepetitions": [], "error": DEAD},
+    ])
+    write_result(tmp, "erigon", "mixed", [{"qps": "1", "testRepetitions": [], "error": DEAD}])
+    write_result(tmp, "geth", "mixed", [{"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]}])
+    md = mod.render_overview(mod.load_results(tmp), "p95")
+    row = overview_row(md, "trace_block_struct_log", "5")
+    check("a dead client is dead in the overview and erigon is the fastest",
+          row == ["trace_block_struct_log", "5", "2.00*", "-", "dead", "🟢"], row)
+    row = overview_row(md, "mixed", "1")
+    check("a dead erigon is red", row == ["mixed", "1", "dead", "1.00*", "-", "🔴"], row)
+    check("legend explains dead", "dead the client died" in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "reth", "mixed", [
+        {"qps": "1", "testRepetitions": [rep(1, 2, 3)]},
+        {"qps": "2", "testRepetitions": [], "error": DEAD},
+    ])
+    code, out = run_main(["--results-dir", tmp])
+    check("main with a dead level exits 0", code in (0, None), code)
+    check("main with a dead level prints all the overviews",
+          all(f"status on {p}" in out for p in ("p50", "p90", "p95", "max")), out)
+
 # --- main ---------------------------------------------------------------------
 
 with tempfile.TemporaryDirectory() as tmp:
