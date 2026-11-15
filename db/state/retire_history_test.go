@@ -17,6 +17,7 @@
 package state
 
 import (
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -24,6 +25,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -393,6 +395,45 @@ func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, n)
 	require.Equal(t, 2, accountsHist.dirtyFiles.Len(), "invisible subsumed file must not be retired")
+}
+
+func TestRetire_DetachesCoveredSourcesWithCoveringFile(t *testing.T) {
+	for _, unindexed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unindexed=%v", unindexed), func(t *testing.T) {
+			db, agg := testDbAndAggregatorSmallFrozen(t, 10, 2)
+			ranges := []testFileRange{{0, 1}, {0, 2}, {2, 3}}
+			generateStateFiles(t, agg.Dirs(), ranges)
+			generateCommitmentFile(t, agg.Dirs(), ranges)
+			generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+			if unindexed {
+				for _, name := range []string{"v2.0-accounts.0-1.vi", "v1.0-accounts.0-1.efi"} {
+					require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, name)))
+				}
+			}
+			require.NoError(t, agg.OpenFolder(db))
+			agg.ForbidVisibilityLowering()
+			old := agg.BeginFilesRo()
+			defer old.Close()
+			require.NotPanics(t, func() {
+				n, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 20})
+				require.NoError(t, err)
+				require.Positive(t, n)
+			})
+			at := agg.BeginFilesRo()
+			defer at.Close()
+			requireVisibleEnd(t, agg, 30)
+			for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+				require.Equal(t, 1, agg.d[d].History.dirtyFiles.Len())
+				require.Equal(t, 1, agg.d[d].InvertedIndex.dirtyFiles.Len())
+				require.EqualValues(t, 20, at.d[d].ht.files.StartTxNum())
+				require.EqualValues(t, 30, at.d[d].ht.files.EndTxNum())
+			}
+			path := filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-1.v")
+			mustExist(t, path, true)
+			old.Close()
+			mustExist(t, path, false)
+		})
+	}
 }
 
 // A cutoff reaching the visible tip would retire every file. That happens benignly when the
