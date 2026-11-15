@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -48,6 +49,47 @@ import (
 type headerNumberErrorReader struct {
 	dbservices.FullBlockReader
 	err error
+}
+
+func TestBlockEndStateWithoutHistory(t *testing.T) {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		t.Run(domain.String(), func(t *testing.T) {
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			tx, err := db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+			require.NoError(t, err)
+			defer sd.Close()
+			sd.SetInMemHistoryReads(false)
+			changes := &changeset.StateChangeSet{}
+			sd.SetChangesetAccumulator(changes)
+			key := make([]byte, 20)
+			if domain == kv.StorageDomain {
+				key = make([]byte, 52)
+			}
+			sd.SetTxNum(1)
+			require.NoError(t, sd.DomainPut(domain, tx, key, []byte{1}, 1, nil))
+			sd.SetTxNum(2)
+			require.NoError(t, sd.DomainPut(domain, tx, key, []byte{2}, 2, []byte{1}))
+
+			copied, err := newBlockEndState(sd, changes, 3)
+			require.NoError(t, err)
+			value, ok, err := copied.GetAsOf(domain, key, 3)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Equal(t, []byte{2}, value)
+
+			sd.SetTxNum(3)
+			require.NoError(t, sd.DomainDel(domain, tx, key, 3, []byte{2}))
+			deleted, err := newBlockEndState(sd, changes, 4)
+			require.NoError(t, err)
+			value, ok, err = deleted.GetAsOf(domain, key, 4)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Empty(t, value)
+		})
+	}
 }
 
 func (r headerNumberErrorReader) HeaderNumber(context.Context, kv.Getter, common.Hash) (*uint64, error) {

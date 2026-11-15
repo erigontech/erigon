@@ -890,7 +890,9 @@ func newBlockEndState(sd *execctx.SharedDomains, changes *changeset.StateChangeS
 		for _, diff := range diffs {
 			k := diff.Key[:len(diff.Key)-8]
 			v, ok, err := sd.GetAsOf(kv.Domain(d), []byte(k), end)
-			if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
+			if errors.Is(err, kv.ErrInMemHistoryDisabled) {
+				v, _, ok = sd.GetLatestFromMemory(kv.Domain(d), []byte(k))
+			} else if err != nil {
 				return nil, err
 			}
 			if ok {
