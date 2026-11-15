@@ -77,7 +77,6 @@ func TestEventStreamPayloadAvailableIsNotCrowdedOutByOperationEvents(t *testing.
 	require.Equal(t, beaconevents.OpExecutionPayloadAvailable, e.Event)
 }
 
-// A stream that asked for both payload topics gets both events.
 func TestEventStreamDeliversBothPayloadTopics(t *testing.T) {
 	emitters := beaconevents.NewEventEmitter()
 	sub := subscribeEventStream(emitters, mapset.NewSet(beaconevents.OpExecutionPayload, beaconevents.OpExecutionPayloadAvailable))
@@ -88,7 +87,6 @@ func TestEventStreamDeliversBothPayloadTopics(t *testing.T) {
 	require.Len(t, sub.payload, 2)
 }
 
-// A stream that has been unsubscribed no longer takes the payload events.
 func TestEventStreamUnsubscribeStopsPayloadEvents(t *testing.T) {
 	emitters := beaconevents.NewEventEmitter()
 	sub := subscribeEventStream(emitters, mapset.NewSet(beaconevents.OpExecutionPayload, beaconevents.OpExecutionPayloadAvailable))
@@ -287,8 +285,8 @@ func startTopicStream(t *testing.T, topics string) (*ApiHandler, *collectingStre
 }
 
 // A stream is closed only for a dropped event of a topic it asked for. A block stream does not ask for head, a head
-// stream does not ask for head_v2 and an execution_payload stream does not ask for execution_payload_available, so a
-// flood of those must not close them.
+// stream does not ask for head_v2 and a payload stream does not ask for the other payload topic, so a flood of those
+// must not close them.
 func TestEventStreamStaysOpenWhenAnUnrequestedEventIsDropped(t *testing.T) {
 	for _, tc := range []struct {
 		topics string
@@ -317,6 +315,16 @@ func TestEventStreamStaysOpenWhenAnUnrequestedEventIsDropped(t *testing.T) {
 				return e.Operation().SendExecutionPayload(&beaconevents.ExecutionPayloadData{})
 			},
 			topic: beaconevents.OpExecutionPayload,
+		},
+		{
+			topics: "execution_payload_available",
+			flood: func(e *beaconevents.EventEmitter) {
+				e.Operation().SendExecutionPayload(&beaconevents.ExecutionPayloadData{})
+			},
+			own: func(e *beaconevents.EventEmitter) int {
+				return e.Operation().SendExecutionPayloadAvailable(&beaconevents.ExecutionPayloadAvailableData{})
+			},
+			topic: beaconevents.OpExecutionPayloadAvailable,
 		},
 	} {
 		t.Run(tc.topics, func(t *testing.T) {
