@@ -559,6 +559,61 @@ func TestQueuedGloasBlockInForkChoiceStartsELColumnsImportOnceWhenBlockWriteFail
 	require.Len(t, *starts, 1)
 }
 
+func TestProcessMessageStartsGloasELColumnsImportOnceWhenRetryAdmitsBlockAfterBlockWriteFails(t *testing.T) {
+	f := newGloasELImport(t, 2)
+	db := &blockDBError{RwDB: f.service.db, updateErr: errors.New("database unavailable")}
+	f.service.db = db
+	starts := recordELColumnsImportStarts(t, f.service, f.processing)
+
+	require.ErrorIs(t, f.service.ProcessMessage(t.Context(), nil, f.child), errBlockStorage)
+	require.Zero(t, f.processing.calls.Load())
+	require.Empty(t, *starts)
+
+	db.updateErr = nil
+	job := serviceJob(t, f.service, f.root)
+	f.service.processScheduledBlock(t.Context(), f.root, job, time.Now())
+	require.NoError(t, job.lastAttempt.err)
+	require.Equal(t, []elImportStart{{root: f.root, admitted: true}}, *starts)
+}
+
+func TestProcessMessageStartsGloasELColumnsImportOnceWhenRetryAdmitsBlockAfterCallerCancelsDuringBlockWrite(t *testing.T) {
+	f := newGloasELImport(t, 2)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	db := &blockDBError{RwDB: f.service.db, beforeUpdate: cancel}
+	f.service.db = db
+	starts := recordELColumnsImportStarts(t, f.service, f.processing)
+
+	require.ErrorIs(t, f.service.ProcessMessage(ctx, nil, f.child), context.Canceled)
+	require.Zero(t, f.processing.calls.Load())
+	require.Empty(t, *starts)
+
+	db.beforeUpdate = nil
+	job := serviceJob(t, f.service, f.root)
+	f.service.processScheduledBlock(t.Context(), f.root, job, time.Now())
+	require.NoError(t, job.lastAttempt.err)
+	require.Equal(t, []elImportStart{{root: f.root, admitted: true}}, *starts)
+}
+
+func TestQueuedGloasBlockStartsELColumnsImportOnceWhenRetryAdmitsBlockAfterBlockWriteFails(t *testing.T) {
+	service, _, store, root, job := parkUnknownParentBlockWithBlobsForRetry(t, true, 2)
+	processing := &onBlockErrorStore{ForkChoiceStorage: store}
+	service.forkchoiceStore = processing
+	db := &blockDBError{RwDB: service.db, updateErr: errors.New("database unavailable")}
+	service.db = db
+	starts := recordELColumnsImportStarts(t, service, processing)
+
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+	require.ErrorIs(t, job.lastAttempt.err, errBlockStorage)
+	require.Zero(t, processing.calls.Load())
+	require.Empty(t, *starts)
+
+	db.updateErr = nil
+	service.processScheduledBlock(t.Context(), root, job, job.retryAfter)
+	require.NoError(t, job.lastAttempt.err)
+	require.Equal(t, []elImportStart{{root: root, admitted: true}}, *starts)
+}
+
 func TestGloasBlockRejectedByForkChoiceStartsNoELColumnsImport(t *testing.T) {
 	for _, rejection := range []error{forkchoice.ErrBlockInvalid, errors.New("transient")} {
 		t.Run("gossip/"+rejection.Error(), func(t *testing.T) {
