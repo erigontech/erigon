@@ -77,16 +77,17 @@ func (a *Aggregator) StepAlignedEnd(stepSize uint64) (uint64, error) {
 	return at.stepAlignedEnd(stepSize)
 }
 
-// refuseFilesPastHoles refuses a rebase that would delete indexed files past a hole in their own list: the
-// rebase deletes everything past the aligned end, and the shared ceiling puts that end at the hole.
+// refuseFilesPastHoles refuses a rebase that would delete indexed data past where its own list stops being
+// visible (a hole or a partial overlap): the rebase deletes everything past the aligned end, and the shared
+// ceiling puts that end there.
 func (a *Aggregator) refuseFilesPastHoles(dirty *aggDirtyFilesRoTx) error {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	pastHole := func(name string, files []*FilesItem, own visibleFiles, accessors statecfg.Accessors) error {
 		end := own.EndTxNum()
 		for _, item := range files {
-			if !item.canDelete.Load() && item.startTxNum >= end && checkForVisibility(item, accessors, false) {
-				return fmt.Errorf("%s snapshot [%d,%d) lies past a hole at txNum %d; restore the missing file before rebasing", name, item.startTxNum, item.endTxNum, end)
+			if !item.canDelete.Load() && item.endTxNum > end && checkForVisibility(item, accessors, false) {
+				return fmt.Errorf("%s snapshot [%d,%d) reaches past txNum %d, where its visible files stop; restore the missing file or merge before rebasing", name, item.startTxNum, item.endTxNum, end)
 			}
 		}
 		return nil
