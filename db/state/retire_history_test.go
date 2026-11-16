@@ -17,6 +17,7 @@
 package state
 
 import (
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -24,6 +25,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -366,8 +368,8 @@ func TestRetire_DetachesFromDirtyFiles(t *testing.T) {
 	require.Equal(t, uint64(2), hf[0].startTxNum/stepSize)
 }
 
-// Retire selects over visible files, so a subsumed (dirty-but-not-visible) file below the
-// cutoff is covered garbage left to the merge clean-up, not retired here.
+// Retire takes its boundary from aged visible files, so a subsumed (dirty-but-not-visible) file
+// below the cutoff stays while no visible file is aged.
 func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
@@ -387,12 +389,119 @@ func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 	require.Equal(t, uint64(4), at.d[kv.AccountsDomain].ht.files[0].endTxNum/stepSize)
 	at.Close()
 
-	// cutoff step 2: the only visible accounts file is [0,4] (endStep 4 > 2), so nothing is
-	// retired. The invisible [0,2] is left for the merge clean-up, not swept by Retire.
+	// cutoff step 2: the only visible accounts file is [0,4] (endStep 4 > 2), so no visible file is
+	// aged and nothing is retired, not even the invisible [0,2].
 	n, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	require.Zero(t, n)
-	require.Equal(t, 2, accountsHist.dirtyFiles.Len(), "invisible subsumed file must not be retired")
+	require.Equal(t, 2, accountsHist.dirtyFiles.Len(), "with no aged visible file, nothing is retired")
+}
+
+func TestRetire_DetachesCoveredSourcesWithCoveringFile(t *testing.T) {
+	for _, unindexed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unindexed=%v", unindexed), func(t *testing.T) {
+			db, agg := testDbAndAggregatorSmallFrozen(t, 10, 2)
+			ranges := []testFileRange{{0, 1}, {0, 2}, {2, 3}}
+			generateStateFiles(t, agg.Dirs(), ranges)
+			generateCommitmentFile(t, agg.Dirs(), ranges)
+			generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+			if unindexed {
+				for _, name := range []string{"v2.0-accounts.0-1.vi", "v1.0-accounts.0-1.efi"} {
+					require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, name)))
+				}
+			}
+			require.NoError(t, agg.OpenFolder(db))
+			agg.ForbidVisibilityLowering()
+			old := agg.BeginFilesRo()
+			defer old.Close()
+			require.NotPanics(t, func() {
+				n, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 20})
+				require.NoError(t, err)
+				require.Positive(t, n)
+			})
+			at := agg.BeginFilesRo()
+			defer at.Close()
+			requireVisibleEnd(t, agg, 30)
+			for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+				require.Equal(t, 1, agg.d[d].History.dirtyFiles.Len())
+				require.Equal(t, 1, agg.d[d].InvertedIndex.dirtyFiles.Len())
+				require.EqualValues(t, 20, at.d[d].ht.files.StartTxNum())
+				require.EqualValues(t, 30, at.d[d].ht.files.EndTxNum())
+			}
+			path := filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-1.v")
+			mustExist(t, path, true)
+			old.Close()
+			mustExist(t, path, false)
+		})
+	}
+}
+
+func TestRetire_DetachesHiddenOutputCoveredByRetiredSources(t *testing.T) {
+	db, agg := testDbAndAggregatorSmallFrozen(t, 10, 2)
+	ranges := []testFileRange{{0, 1}, {1, 2}, {0, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	for _, name := range []string{"v2.0-accounts.0-2.vi", "v1.0-accounts.0-2.efi"} {
+		require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, name)))
+	}
+	require.NoError(t, agg.OpenFolder(db))
+	agg.ForbidVisibilityLowering()
+	require.NotPanics(t, func() {
+		_, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 20})
+		require.NoError(t, err)
+	})
+	require.Equal(t, 1, agg.d[kv.AccountsDomain].History.dirtyFiles.Len())
+	require.Equal(t, 1, agg.d[kv.AccountsDomain].InvertedIndex.dirtyFiles.Len())
+	requireVisibleEnd(t, agg, 30)
+}
+
+func TestRetire_PreservesTailBelowHiddenCoveringFile(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		tailEnd   uint64
+		outputEnd uint64
+		unindexed bool
+	}{
+		{"above ceiling", 3, 4, false},
+		{"overlapping unindexed output", 4, 3, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, agg := testDbAndAggregatorSmallFrozen(t, 10, 2)
+			ranges := []testFileRange{{0, 2}, {2, tc.tailEnd}}
+			generateStateFiles(t, agg.Dirs(), ranges)
+			generateCommitmentFile(t, agg.Dirs(), ranges)
+			generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+			generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, tc.outputEnd}})
+			if tc.unindexed {
+				for _, name := range []string{"vi", "efi"} {
+					ver := "v1.0"
+					if name == "vi" {
+						ver = "v2.0"
+					}
+					require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, fmt.Sprintf("%s-accounts.0-%d.%s", ver, tc.outputEnd, name))))
+				}
+			}
+			require.NoError(t, agg.OpenFolder(db))
+			agg.ForbidVisibilityLowering()
+			require.NotPanics(t, func() {
+				_, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 20})
+				require.NoError(t, err)
+			})
+			for i := range 2 {
+				if i > 0 {
+					require.NoError(t, agg.OpenFolder(db))
+				}
+				at := agg.BeginFilesRo()
+				require.EqualValues(t, 20, at.d[kv.AccountsDomain].ht.files.StartTxNum())
+				require.EqualValues(t, tc.tailEnd*10, at.d[kv.AccountsDomain].ht.files.EndTxNum())
+				at.Close()
+				requireVisibleEnd(t, agg, tc.tailEnd*10)
+				require.Equal(t, 2, agg.d[kv.AccountsDomain].History.dirtyFiles.Len())
+				require.Equal(t, 2, agg.d[kv.AccountsDomain].InvertedIndex.dirtyFiles.Len())
+			}
+		})
+	}
 }
 
 // A cutoff reaching the visible tip would retire every file. That happens benignly when the
