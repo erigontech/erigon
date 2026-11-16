@@ -84,13 +84,22 @@ func (c *balCommitmentContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	}
 	c.cacheStats.misses.Add(1)
 	c.cacheStats.fillRequests.Add(1)
-	return c.tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{}.WithBranchCache())
+	if _, dup := c.cacheStats.missed.LoadOrStore(string(prefix), struct{}{}); dup {
+		c.cacheStats.dupMisses.Add(1)
+	}
+	start := time.Now()
+	v, vstep, err := c.tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{}.WithBranchCache())
+	c.cacheStats.missNanos.Add(uint64(time.Since(start)))
+	return v, vstep, err
 }
 
 type balCommitmentCacheStats struct {
 	hits         atomic.Uint64
 	misses       atomic.Uint64
 	fillRequests atomic.Uint64
+	dupMisses    atomic.Uint64
+	missNanos    atomic.Uint64
+	missed       sync.Map
 }
 
 func (*balCommitmentContext) PutBranch([]byte, []byte, []byte) error {
@@ -171,6 +180,8 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte, workers i
 		"cacheHits", cacheStats.hits.Load(),
 		"cacheMisses", cacheStats.misses.Load(),
 		"cacheFillRequests", cacheStats.fillRequests.Load(),
+		"dupMisses", cacheStats.dupMisses.Load(),
+		"missMs", cacheStats.missNanos.Load()/1e6,
 		"elapsed", time.Since(started),
 		"err", err,
 	)
