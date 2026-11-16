@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -578,7 +579,7 @@ func TestAbsentAccountReadIsInvalidOnceItsDestructIsGone(t *testing.T) {
 		change func(*VersionMap, accounts.Address)
 	}{
 		{"withdrawn", func(vm *VersionMap, x accounts.Address) {
-			for _, path := range []AccountPath{SelfDestructPath, BalancePath, CodeHashPath} {
+			for _, path := range []AccountPath{SelfDestructPath, BalancePath} {
 				vm.Delete(x, path, accounts.NilKey, 0, false)
 			}
 		}},
@@ -589,23 +590,78 @@ func TestAbsentAccountReadIsInvalidOnceItsDestructIsGone(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			x, reader, vm := seededRemovalOfPrefundedAccount(t)
-			ibs := NewWithVersionMap(reader, vm)
-			defer ibs.Close()
-			ibs.SetTxContext(1, 1)
-			exists, err := ibs.Exist(x)
-			require.NoError(t, err)
+			exists, absentRead := existenceReadOfTx1(t, reader, vm, x)
 			require.False(t, exists)
-			reads := ibs.VersionedReads()
-			read, ok := reads.GetAddress(x)
-			require.True(t, ok)
-			require.True(t, read.Val == nil || read.Val.IsNil())
-			absentRead := ReadSet{address: map[accounts.Address]VersionedRead[AccountView]{x: read}}
 			require.Equal(t, VersionValid, vm.ValidateReadSet(1, absentRead, validateEqualVersion, false, ""))
 
 			tc.change(vm, x)
 			require.Equal(t, VersionInvalid, vm.ValidateReadSet(1, absentRead, validateEqualVersion, false, ""))
 		})
 	}
+}
+
+// Tx 1 reads x as present from the existence marker while the seeded destruct of tx 0 is
+// withdrawn. The marker has the version of that destruct, so the read is invalid once a run of
+// tx 0 removes x again, also when it is the only read. A destruct that keeps the balance
+// (EIP-8246) leaves x alive, so the read stays valid.
+func TestPresentAccountReadFromTheMarkerIsInvalidOnceItsDestructReturns(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name        string
+		keepBalance bool
+	}{
+		{"balance moved out", false},
+		{"balance kept", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			x, reader, vm := seededRemovalOfPrefundedAccount(t)
+			for _, path := range []AccountPath{SelfDestructPath, BalancePath} {
+				vm.Delete(x, path, accounts.NilKey, 0, false)
+			}
+			exists, presentRead := existenceReadOfTx1(t, reader, vm, x)
+			require.True(t, exists)
+			require.Equal(t, VersionValid, vm.ValidateReadSet(1, presentRead, validateEqualVersion, false, ""))
+
+			createAndDestroyInTx0(t, reader, vm, x, tc.keepBalance)
+			existsOnRerun, _ := existenceReadOfTx1(t, reader, vm, x)
+			require.Equal(t, tc.keepBalance, existsOnRerun)
+			valid := vm.ValidateReadSet(1, presentRead, validateEqualVersion, false, "") == VersionValid
+			require.Equal(t, existsOnRerun, valid, "the read stays valid only while a re-run still finds x")
+		})
+	}
+}
+
+// existenceReadOfTx1 runs Exist(x) in tx 1 and returns its result with the read it recorded.
+func existenceReadOfTx1(t *testing.T, reader StateReader, vm *VersionMap, x accounts.Address) (bool, ReadSet) {
+	t.Helper()
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	exists, err := ibs.Exist(x)
+	require.NoError(t, err)
+	reads := ibs.VersionedReads()
+	read, ok := reads.GetAddress(x)
+	require.True(t, ok)
+	return exists, ReadSet{address: map[accounts.Address]VersionedRead[AccountView]{x: read}}
+}
+
+// createAndDestroyInTx0 is a later run of tx 0 that deploys a contract at x and self-destructs it.
+func createAndDestroyInTx0(t *testing.T, reader StateReader, vm *VersionMap, x accounts.Address, keepBalance bool) {
+	t.Helper()
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 0)
+	ibs.SetVersion(2)
+	require.NoError(t, ibs.CreateAccount(x, true))
+	if !keepBalance {
+		require.NoError(t, ibs.SetBalance(x, uint256.Int{}, tracing.BalanceChangeUnspecified))
+	}
+	_, err := ibs.Selfdestruct(x, true)
+	require.NoError(t, err)
+	require.NoError(t, ibs.MakeWriteSet(&chain.Rules{IsAmsterdam: true}, NewNoopWriter()))
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), false)
+	vm.MarkWritesValidated(ibs.VersionedWrites(), nil)
 }
 
 // As above, but tx 1 credits x in the window: the credit creates a fresh account instead of

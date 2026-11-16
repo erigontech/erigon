@@ -2193,11 +2193,19 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	return vm.ValidateReadSet(txIdx, lastIO.ReadSet(txIdx), checkVersion, traceInvalid, tracePrefix)
 }
 
-// validateAbsentAccount rejects an absent account read whose destruct is gone while the BAL
-// existence marker is the account's cell. The read is recorded at the destruct, and the marker
-// can have the same version, but it records an account that exists.
-func (vm *VersionMap) validateAbsentAccount(addr accounts.Address, v Version, txIdx int) VersionValidity {
-	if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIdx); ok && sdRR.resolved() && destructed && sdRR.Version() == v {
+// validateAccountAtMarker rejects an account read that matches the version of the BAL existence
+// marker but not the account's existence. A destruct seeded for the marker's tx can have the
+// same version, but the marker records an account that exists: an absent read is valid only
+// while its destruct holds, and a present read from the marker only while no destruct removes
+// the account.
+func (vm *VersionMap) validateAccountAtMarker(addr accounts.Address, tr VersionedRead[AccountView], txIdx int) VersionValidity {
+	if tr.Val != nil && !tr.Val.IsNil() {
+		if tr.accSource == AccountFromBAL && vm.netAbsentDestruct(addr, txIdx) {
+			return VersionInvalid
+		}
+		return VersionValid
+	}
+	if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIdx); ok && sdRR.resolved() && destructed && sdRR.Version() == tr.Version {
 		return VersionValid
 	}
 	if rr := vm.ReadStatus(addr, AddressPath, accounts.NilKey, txIdx); rr.accSource() == AccountFromBAL {
@@ -2229,7 +2237,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		if !ok(validatePath(a, AddressPath, tr.ReadHeader)) {
 			return
 		}
-		if vm.HasBAL && (tr.Val == nil || tr.Val.IsNil()) && !ok(vm.validateAbsentAccount(a, tr.Version, txIdx)) {
+		if vm.HasBAL && !ok(vm.validateAccountAtMarker(a, tr, txIdx)) {
 			return
 		}
 	}
