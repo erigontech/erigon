@@ -1097,6 +1097,22 @@ func (l *triggers) HasTransaction(_ context.Context, h common.Hash) (bool, error
 	return l.landed[h], l.failed
 }
 
+// TestComposerChargeEvictsTheChain: a transaction out of attempts takes
+// the rest of its chain in the batch with it.
+func TestComposerChargeEvictsTheChain(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 8), 8, &triggers{landed: map[common.Hash]bool{}})
+	pool := NewHeldPool()
+	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+	root := held(addr(0xa), 0, Inbound, 1)
+	root.Attempts = 2
+	require.NoError(t, pool.Push(root, 0))
+	require.NoError(t, pool.Push(held(addr(0xa), 1, Inbound, 2), 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: pool.PopN(2)})
+	h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
+	h.c.RecoverFailed(t.Context())
+	require.Empty(t, pool.PopN(math.MaxInt))
+}
+
 func TestComposerRecoversHeldTransactions(t *testing.T) {
 	a, b := addr(0xa), addr(0xb)
 	for _, c := range []struct {
@@ -1116,6 +1132,9 @@ func TestComposerRecoversHeldTransactions(t *testing.T) {
 		{name: "a landed trigger is released", landed: true, queued: map[common.Hash]uint32{{2}: 0, {3}: 1}, replaced: true},
 		{name: "the third failure evicts the chain", attempts: 2, queued: map[common.Hash]uint32{{3}: 1}, replaced: true},
 		{name: "a height L1 settled", substitute: follower.ErrBelowSafe, queued: map[common.Hash]uint32{{2}: 0}},
+		{name: "a block no longer canonical", substitute: follower.ErrNotCanonical, queued: map[common.Hash]uint32{{1}: 1, {2}: 0, {3}: 1}, replaced: true},
+		{name: "a stale parent", substitute: follower.ErrStaleParent, queued: map[common.Hash]uint32{{1}: 1, {2}: 0, {3}: 1}, replaced: true},
+		{name: "a substitution failing", substitute: errors.New("chain busy"), queued: map[common.Hash]uint32{{2}: 0}, kept: true},
 		{name: "a lookup failing", lookup: errors.New("node down"), queued: map[common.Hash]uint32{{2}: 0}, kept: true},
 	} {
 		t.Run(c.name, func(t *testing.T) {

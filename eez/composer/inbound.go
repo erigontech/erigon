@@ -110,10 +110,8 @@ func (in *Deliveries) Dispatch(c *Call) ([]byte, error) {
 	if err != nil {
 		return nil, refuse(err)
 	}
+	// The probe passed the same gas check on the same block.
 	receipt, err := in.fork.Apply(d.Tx, nil)
-	if errors.Is(err, core.ErrGasLimitReached) {
-		return nil, ErrFull
-	}
 	if err != nil {
 		return nil, refuse(fmt.Errorf("delivery to %s: %w", c.Target, err))
 	}

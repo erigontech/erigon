@@ -215,6 +215,8 @@ func TestDraftTakesAFailedReadForTransient(t *testing.T) {
 	d, err := NewDraft(w.config, w.engine, w.sync.Header(), pre)
 	require.NoError(t, err)
 	r.armed = true
+	_, err = NewDraft(w.config, w.engine, w.sync.Header(), PreState{Reader: &failing{StateReader: w.pre.Reader, addr: anyAddress, armed: true}, Headers: w.pre.Headers, BlockHash: w.pre.BlockHash})
+	require.ErrorIs(t, err, ErrStateRead, "opening the block")
 	_, err = d.Nonce(protocol.SystemAddress)
 	require.ErrorIs(t, err, ErrStateRead)
 	_, err = d.Apply(w.sync.Transactions()[0], nil)
@@ -268,6 +270,33 @@ func TestDeliveriesTakeAFailedReadForTransient(t *testing.T) {
 	require.ErrorIs(t, err, ErrStateRead)
 	require.ErrorIs(t, err, errDown)
 	require.False(t, IsPoison(err), err)
+	require.Empty(t, ds.Delivered)
+}
+
+// TestDeliveriesRefuseATargetAnsweringOtherwise: a target whose answer to
+// the delivery is not its answer to the probe, here the gas it got, fails
+// its delivery: the call is refused.
+func TestDeliveriesRefuseATargetAnsweringOtherwise(t *testing.T) {
+	w := loadSyncWindow(t)
+	_, call, _ := recordedDelivery(t, w)
+	m := newMemState()
+	gasEcho := common.HexToAddress("0xc0000000000000000000000000000000000000ac")
+	m.deploy(gasEcho, []byte{0x5a, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3})
+	pre := w.pre
+	pre.Reader = &overlay{StateReader: w.pre.Reader, m: m}
+	d, err := NewDraft(w.config, w.engine, w.sync.Header(), pre)
+	require.NoError(t, err)
+	for _, tx := range w.sync.Transactions()[:4] {
+		_, err := d.Apply(tx, nil)
+		require.NoError(t, err)
+	}
+	ds, err := NewDeliveries(w.ctx(), d)
+	require.NoError(t, err)
+	c := *call
+	c.Target = gasEcho
+	_, err = ds.Dispatch(&c)
+	require.True(t, IsPoison(err), err)
+	require.ErrorContains(t, err, "with its probed output failed")
 	require.Empty(t, ds.Delivered)
 }
 

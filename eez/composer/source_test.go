@@ -118,8 +118,11 @@ type failing struct {
 
 var errDown = errors.New("state unavailable")
 
+// anyAddress has failing fail the reads of every address.
+var anyAddress = common.HexToAddress("0xffffffffffffffffffffffffffffffffffffffff")
+
 func (f *failing) fail(a common.Address, kind string) error {
-	if f.armed && a == f.addr && (f.only == "" || f.only == kind) {
+	if f.armed && (a == f.addr || f.addr == anyAddress) && (f.only == "" || f.only == kind) {
 		return errDown
 	}
 	return nil
@@ -358,6 +361,14 @@ func TestSourceRefuses(t *testing.T) {
 		f := newSourceFixture(t)
 		_, err := f.src.Run(f.tx(t, 5, forwarder, 0, nil), (&echo{}).dispatch, nil)
 		require.True(t, IsPoison(err), err)
+	})
+	t.Run("a failed dispatch ends the dispatching", func(t *testing.T) {
+		f := newSourceFixture(t)
+		down := errors.New("rollup unavailable")
+		dispatched := 0
+		_, err := f.src.Run(f.tx(t, 0, twice, 0, nil), func(*Call) ([]byte, error) { dispatched++; return nil, down }, nil)
+		require.ErrorIs(t, err, down)
+		require.Equal(t, 1, dispatched)
 	})
 	t.Run("a dispatch failure is the dispatcher's", func(t *testing.T) {
 		f := newSourceFixture(t)

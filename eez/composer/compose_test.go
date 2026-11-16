@@ -216,6 +216,48 @@ func TestComposeBoundsThePostingGas(t *testing.T) {
 	})
 }
 
+// TestComposeFillsTheBlock: inbound deliveries compose while the Sync
+// block has gas for them; the rest waits, and a transaction whose delivery
+// an empty Sync block cannot hold is evicted.
+func TestComposeFillsTheBlock(t *testing.T) {
+	limit := func(f *crossFixture, gas uint64) {
+		f.c.x.Header = func(*types.Header, rules.ChainHeaderReader) (*types.Header, error) {
+			h := types.CopyHeader(f.w.sync.Header())
+			h.GasLimit = gas
+			return h, nil
+		}
+	}
+	t.Run("two in one block", func(t *testing.T) {
+		f := newCrossFixture(t)
+		first := f.hold(t, 0, f.call.Source, f.call.Data)
+		second := f.hold(t, 1, f.call.Source, f.call.Data)
+		fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+		require.NotNil(t, fx)
+		require.Equal(t, []*Held{first, second}, fx.held)
+		require.Len(t, fx.deliveries, 2)
+		require.Len(t, fx.txs, 2)
+		require.Equal(t, fx.deliveries[1].Tx.Hash(), fx.txs[1].Hash())
+	})
+	t.Run("the rest waits", func(t *testing.T) {
+		f := newCrossFixture(t)
+		first := f.hold(t, 0, f.call.Source, f.call.Data)
+		second := f.hold(t, 1, f.call.Source, f.call.Data)
+		// Room for one delivery's declared gas, not two.
+		limit(f, protocol.SystemTxGasLimit)
+		fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+		require.NotNil(t, fx)
+		require.Equal(t, []*Held{first}, fx.held)
+		require.Equal(t, []*Held{second}, f.pool.PopN(math.MaxInt))
+	})
+	t.Run("one an empty block cannot hold", func(t *testing.T) {
+		f := newCrossFixture(t)
+		f.hold(t, 0, f.call.Source, f.call.Data)
+		limit(f, protocol.SystemTxGasLimit-1)
+		require.Nil(t, f.c.compose(t.Context(), f.w.sync.Header(), 101))
+		require.Zero(t, f.pool.Len())
+	})
+}
+
 // TestUncommittedCompositionRequeues: the held transactions of a composed
 // Sync block that never committed go back to the pool, in the next slot or
 // when another block commits instead.
@@ -440,6 +482,8 @@ func TestComposedSyncBlockPosts(t *testing.T) {
 	require.Equal(t, uint64(protocol.LiveBlockNumber), p.batch.BlockNumber)
 	require.Equal(t, common.Hash{0x1, 100}, p.l1Parent, "the anchor the triggers ran on")
 	require.Equal(t, sync.Time(), p.time)
+	require.Equal(t, time.Unix(int64(ts), 0).Add(-c.cfg.Slack-c.cfg.Proof), p.start, "proven in time for the slot")
+	require.Equal(t, c.cfg.Proof, p.per)
 	require.Len(t, p.batch.Entries, 2)
 	require.Equal(t, sync.Hash(), p.batch.Entries[1].RollupUpdates[0].NewRoot)
 	require.Equal(t, f.output, p.batch.Entries[1].ReturnData)

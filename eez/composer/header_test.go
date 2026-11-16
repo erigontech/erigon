@@ -18,6 +18,7 @@ package composer_test
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -37,20 +38,20 @@ import (
 // executes under the header the builder then gives it, to the receipts the
 // built block gets.
 func TestDraftMatchesTheBuilder(t *testing.T) {
-	_, chain := derivertest.NewL2(t)
-	c := derivertest.NewComposer(t)
-	ctx := t.Context()
 	cfg := derivertest.Config()
+	l2 := cfg.L2.(*config.L2Config)
+	_, chain := derivertest.NewL2(t)
+	comp := derivertest.NewComposer(t)
+	ctx := t.Context()
 	engine, err := eezrules.New(cfg)
 	require.NoError(t, err)
-	l2 := cfg.L2.(*config.L2Config)
 	genesis, err := chain.Head(ctx)
 	require.NoError(t, err)
 	in := deriver.HeaderInputs{
 		Number: 1, ParentHash: genesis.Hash(), Time: genesis.Time + l2.BlockInterval,
 		Coinbase: common.HexToAddress("0xa11ce"), Extra: []byte{}, GasLimit: l2.BlockGasLimit,
 	}
-	txs, err := deriver.DecodeTxs([][]byte{c.Transfer(common.HexToAddress("0xb0b"), 1), c.Transfer(common.HexToAddress("0xb0b"), 2)})
+	txs, err := deriver.DecodeTxs([][]byte{comp.Transfer(common.HexToAddress("0xb0b"), 1), comp.Transfer(common.HexToAddress("0xb0b"), 2)})
 	require.NoError(t, err)
 
 	var header *types.Header
@@ -86,8 +87,8 @@ func TestDraftMatchesTheBuilder(t *testing.T) {
 		"base fee":     header.BaseFee.Eq(b.BaseFee),
 		"difficulty":   header.Difficulty.Eq(&b.Difficulty),
 		"mix digest":   header.MixDigest == b.MixDigest,
-		"beacon root":  (header.ParentBeaconBlockRoot == nil) == (b.ParentBeaconBlockRoot == nil),
-		"excess blobs": (header.ExcessBlobGas == nil) == (b.ExcessBlobGas == nil),
+		"beacon root":  reflect.DeepEqual(header.ParentBeaconBlockRoot, b.ParentBeaconBlockRoot),
+		"excess blobs": reflect.DeepEqual(header.ExcessBlobGas, b.ExcessBlobGas),
 	} {
 		require.True(t, eq, name)
 	}

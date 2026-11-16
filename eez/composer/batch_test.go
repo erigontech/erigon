@@ -257,6 +257,16 @@ func TestBatchMovesEther(t *testing.T) {
 
 // TestBatchRefuses: a batch whose effects do not match its terminal block
 // or the blocks it settles is not built.
+func twoCalls(e protocol.ExecutionEntry) protocol.ExecutionEntry {
+	e.L2ToL1Calls = []protocol.CrossChainCall{e.L2ToL1Calls[0], e.L2ToL1Calls[0]}
+	return e
+}
+
+func noCall(e protocol.ExecutionEntry) protocol.ExecutionEntry {
+	e.L2ToL1Calls = nil
+	return e
+}
+
 func TestBatchRefuses(t *testing.T) {
 	blocks, mined, _ := window(t, "captured-devnet-window-468")
 	bt := devnetBatcher(mined.ProofSystems[0])
@@ -273,6 +283,8 @@ func TestBatchRefuses(t *testing.T) {
 		{"another terminal", fx, append(slices.Clone(candidates[:3]), common.Hash{1}), "terminal"},
 		{"an outbound effect missing", Effects{Outbound: fx.Outbound[:1], Inbound: fx.Inbound}, append(slices.Clone(candidates[:2]), candidates[3]), "user transactions"},
 		{"no effects", Effects{}, candidates[3:], "user transactions"},
+		{"an outbound effect of two calls", Effects{Outbound: []protocol.ExecutionEntry{twoCalls(fx.Outbound[0]), fx.Outbound[1]}, Inbound: fx.Inbound}, candidates, "outbound effect 0"},
+		{"an inbound effect of no call", Effects{Outbound: fx.Outbound, Inbound: []protocol.ExecutionEntry{noCall(fx.Inbound[0])}}, candidates, "inbound effect 0"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := bt.Batch(cursor, blocks, c.fx, c.candidates, false)

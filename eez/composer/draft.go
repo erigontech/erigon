@@ -74,8 +74,10 @@ func NewDraft(config *chain.Config, engine rules.Engine, header *types.Header, p
 	sysCall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return core.SysCallContract(contract, data, config, ibs, header, engine, constCall, vm.Config{})
 	}
-	if err := engine.Initialize(config, pre.Headers, d.header, d.ibs, sysCall, log.Root(), nil); err != nil {
-		return nil, fmt.Errorf("open block %d: %w", header.Number.Uint64(), errors.Join(r.failed(), err))
+	err := engine.Initialize(config, pre.Headers, d.header, d.ibs, sysCall, log.Root(), nil)
+	// A system call that failed to read is not reported by the engine.
+	if err = errors.Join(r.failed(), err); err != nil {
+		return nil, fmt.Errorf("open block %d: %w", header.Number.Uint64(), err)
 	}
 	if err := d.ibs.FinalizeTx(d.rules(), state.NewNoopWriter()); err != nil {
 		return nil, err
@@ -91,9 +93,6 @@ func (d *Draft) rules() *chain.Rules { return d.chainRules }
 // draft unusable.
 func (d *Draft) Apply(tx types.Transaction, tracer *tracing.Hooks) (*types.Receipt, error) {
 	i := len(d.txs)
-	if err := core.CheckTxGas(d.engine, d.rules().IsAmsterdam, tx, d.gp); err != nil {
-		return nil, err
-	}
 	d.ibs.SetTxContext(d.header.Number.Uint64(), i)
 	evm := core.CreateEVM(d.config, d.blockHash, d.engine, accounts.InternAddress(d.header.Coinbase), d.ibs, d.header, vm.Config{Tracer: tracer})
 	txs := append(slices.Clone(d.txs), tx)

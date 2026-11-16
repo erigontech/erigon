@@ -21,7 +21,6 @@ import (
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -31,9 +30,6 @@ import (
 func SyncHeader(config *chain.Config, engine rules.Engine, headers rules.ChainHeaderReader, parent *types.Header, in deriver.HeaderInputs) (*types.Header, error) {
 	gasLimit := in.GasLimit
 	h := builder.MakeEmptyHeader(parent, config, in.Time, &gasLimit)
-	if err := misc.VerifyGaslimit(parent.GasLimit, h.GasLimit); err != nil {
-		h.GasLimit = parent.GasLimit
-	}
 	h.Coinbase = in.Coinbase
 	h.Extra = in.Extra
 	if h.Extra == nil {
