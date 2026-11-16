@@ -19,6 +19,7 @@ package sequencer
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"testing"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -156,4 +157,15 @@ func TestPoolTxnsNeedsAStartedPool(t *testing.T) {
 	user := common.HexToAddress("0xa11ce")
 	_, err := newPoolTxns(notStarted{fixed{transfer(t, 0, 10, user)}}, 1<<20, log.New()).ProvideTxns(t.Context())
 	require.ErrorIs(t, err, errPoolNotStarted)
+}
+
+// TestMaxTxnSize: for every slot of up to MaxCatchup blocks, the largest
+// encoding whose span size fits a block's budget.
+func TestMaxTxnSize(t *testing.T) {
+	spanSize := func(n uint64) int { return int(n) + len(binary.AppendUvarint(nil, n)) }
+	for k := uint64(1); k <= MaxCatchup; k++ {
+		size := MaxTxnSize(k)
+		require.LessOrEqual(t, spanSize(size), DABudget(k), "K %d", k)
+		require.Greater(t, spanSize(size+1), DABudget(k), "K %d", k)
+	}
 }

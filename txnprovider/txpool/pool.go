@@ -156,6 +156,7 @@ type TxPool struct {
 	pendingBaseFee          atomic.Uint64
 	pendingBlobFee          atomic.Uint64 // For gas accounting for blobs, which has its own dimension
 	blockGasLimit           atomic.Uint64
+	maxTxnSize              atomic.Uint64
 	totalBlobsInPool        atomic.Uint64
 	shanghaiTime            *uint64
 	isPostShanghai          atomic.Bool
@@ -780,6 +781,13 @@ func (p *TxPool) Started() bool {
 	return p.started.Load()
 }
 
+// SetMaxTxnSize sets the largest transaction encoding the pool admits, zero
+// for the protocol's limit alone. Set before the pool starts, it applies to
+// the transactions it reloads too.
+func (p *TxPool) SetMaxTxnSize(size uint64) {
+	p.maxTxnSize.Store(size)
+}
+
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	parentBlockWaitStop <-chan struct{},
@@ -1120,6 +1128,9 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 }
 
 func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView, cells blobCells) (txpoolcfg.DiscardReason, error) {
+	if limit := p.maxTxnSize.Load(); limit != 0 && uint64(txn.Size) > limit {
+		return txpoolcfg.RLPTooLong, nil
+	}
 	isEIP3860 := p.isShanghai()
 	isPrague := p.isPrague()
 	isAmsterdam := p.isAmsterdam()

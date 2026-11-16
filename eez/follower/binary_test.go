@@ -37,6 +37,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/libp2p/go-libp2p/core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
@@ -55,6 +56,8 @@ import (
 	"github.com/erigontech/erigon/eez/networks"
 	"github.com/erigontech/erigon/eez/overlay"
 	"github.com/erigontech/erigon/eez/seqsig"
+	seqpkg "github.com/erigontech/erigon/eez/sequencer"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
@@ -807,6 +810,17 @@ func TestSequencerBinary(t *testing.T) {
 		var hash common.Hash
 		return call(t.Context(), s.url, "eth_sendRawTransaction", &hash, tx) == nil
 	})
+	// The pool refuses a transaction too large for any block's DA budget.
+	oversized, err := types.SignTx(&types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{Nonce: 1, GasLimit: 2_000_000, To: &bob, Data: make([]byte, seqpkg.MaxTxnSize(l2.L1BlockTime/l2.BlockInterval))},
+		ChainID:  *c.L2.ChainConfig.ChainID,
+		TipCap:   *uint256.NewInt(1),
+		FeeCap:   *uint256.NewInt(10 * common.GWei),
+	}, *types.LatestSignerForChainID(c.L2.ChainConfig.ChainID), derivertest.UserKey)
+	require.NoError(t, err)
+	var encoded bytes.Buffer
+	require.NoError(t, oversized.MarshalBinary(&encoded))
+	require.ErrorContains(t, call(t.Context(), s.url, "eth_sendRawTransaction", new(common.Hash), hexutil.Bytes(encoded.Bytes())), "RLPTooLong")
 	l1Up.Store(true)
 	var receipt *struct {
 		BlockNumber hexutil.Uint64 `json:"blockNumber"`

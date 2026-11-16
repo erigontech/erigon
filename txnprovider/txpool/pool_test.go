@@ -3929,3 +3929,63 @@ func TestBlobNonceRetryNonceBounds(t *testing.T) {
 		})
 	}
 }
+
+// A transaction larger than the pool's size limit is refused when added and
+// dropped when reloaded; one at the limit is kept, as both are without one.
+func TestSetMaxTxnSize(t *testing.T) {
+	slot := func(nonce uint64, data int) *TxnSlot {
+		s := newTestTxnSlot(nonce, 0, 1, 2, 100_000)
+		s.Txn.(*types.DynamicFeeTransaction).Data = make([]byte, data)
+		var encoded bytes.Buffer
+		require.NoError(t, s.Txn.MarshalBinary(&encoded))
+		s.Rlp, s.Size, s.IDHash = encoded.Bytes(), uint32(encoded.Len()), s.Txn.Hash()
+		return s
+	}
+	small, large := slot(0, 0), slot(1, 2)
+	require.Greater(t, large.Size, small.Size)
+	limit := uint64(small.Size)
+
+	for _, limited := range []bool{false, true} {
+		ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+		if limited {
+			pool.SetMaxTxnSize(limit)
+		}
+		var txns TxnSlots
+		txns.Append(small, sender[:], true)
+		txns.Append(large, sender[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txns)
+		require.NoError(t, err)
+		want := txpoolcfg.Success
+		if limited {
+			want = txpoolcfg.RLPTooLong
+		}
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, want}, reasons, "limited %v", limited)
+	}
+
+	for _, limited := range []bool{false, true} {
+		ctx, pool, poolDB, coreDB := newTestPool(t)
+		sender := common.Address{1}
+		account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+		writeTestSenderState(t, ctx, coreDB, log.New(), sender, accounts.SerialiseV3(&account), 1)
+		require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+			for _, s := range []*TxnSlot{small, large} {
+				if err := tx.Put(kv.PoolTransaction, s.IDHash[:], append(sender[:], s.Rlp...)); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+		if limited {
+			pool.SetMaxTxnSize(limit)
+		}
+		require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
+			return pool.fromDB(ctx, poolTx)
+		}))
+		require.Contains(t, pool.byHash, string(small.IDHash[:]), "limited %v", limited)
+		if limited {
+			require.NotContains(t, pool.byHash, string(large.IDHash[:]))
+		} else {
+			require.Contains(t, pool.byHash, string(large.IDHash[:]))
+		}
+	}
+}

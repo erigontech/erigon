@@ -48,6 +48,17 @@ func DABudget(k uint64) int {
 	return int((maxBatchGas - batchReserve) / floorGasPerByte / k)
 }
 
+// MaxTxnSize is the largest transaction encoding a block of a slot of k
+// blocks can carry.
+func MaxTxnSize(k uint64) uint64 {
+	budget := DABudget(k)
+	size := budget
+	for size+uvarintLen(uint64(size)) > budget {
+		size--
+	}
+	return uint64(size)
+}
+
 // daSize is the bytes tx adds to a span: its encoding and that encoding's
 // length as a uvarint.
 func daSize(tx types.Transaction) int {

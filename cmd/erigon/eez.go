@@ -280,6 +280,9 @@ func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.Exe
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", eez.ErrConfig, err)
 	}
+	// The node has yet to start the pool, so the limit applies to the
+	// transactions it reloads too.
+	pool.SetMaxTxnSize(sequencer.MaxTxnSize(timing.K()))
 	genesis, err := chain.HeaderByNumber(ctx, 0)
 	if err != nil {
 		return nil, err
