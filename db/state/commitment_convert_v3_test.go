@@ -200,20 +200,23 @@ func keyWithHashPrefix(size int, prefix []byte, next *uint64) []byte {
 }
 
 func convertTestDomains(t *testing.T, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator, kv.TemporalRwTx, *execctx.SharedDomains) {
-	return convertTestDomainsWithParallel(t, stepSize, statecfg.ExperimentalParallelCommitment)
+	return convertTestDomainsWithParallel(t, stepSize, true)
 }
 
 func convertTestDomainsWithParallel(t *testing.T, stepSize uint64, parallel bool) (kv.TemporalRwDB, *state.Aggregator, kv.TemporalRwTx, *execctx.SharedDomains) {
 	t.Helper()
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	statecfg.ExperimentalParallelCommitment = parallel
-	t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = previousParallel })
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(rwTx.Rollback) //nolint:gocritic
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), execctx.WithParaTrieDB(db))
+	opts := []execctx.SharedDomainOption{execctx.WithParaTrieDB(db)}
+	if !parallel {
+		trieCfg := commitment.DefaultTrieConfig()
+		trieCfg.Variant = commitment.VariantHexPatriciaTrie
+		opts = append(opts, execctx.WithTrieConfig(trieCfg))
+	}
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), opts...)
 	require.NoError(t, err)
 	t.Cleanup(domains.Close)
 	return db, agg, rwTx, domains
@@ -307,7 +310,7 @@ func buildRecreatedOwnerFilesWithParallel(t *testing.T, stepSize, steps uint64, 
 }
 
 func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 bool) {
-	db, agg, owner := buildRecreatedOwnerFilesWithParallel(t, 4, 2, 2, false, statecfg.ExperimentalParallelCommitment)
+	db, agg, owner := buildRecreatedOwnerFilesWithParallel(t, 4, 2, 2, false, true)
 	ctx := t.Context()
 
 	roTx, err := db.BeginTemporalRo(ctx)

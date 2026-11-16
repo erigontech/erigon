@@ -144,6 +144,31 @@ func TestBlobArchiveStoreCheckFailsWhenASlotHasNoCanonicalRoot(t *testing.T) {
 	require.Zero(t, mismatched, "an unchecked slot is not a mismatch")
 }
 
+func TestBlobArchiveStoreCheckFailsWhenAGloasPayloadIsUnresolved(t *testing.T) {
+	const slot = uint64(1_000)
+	ctrl := gomock.NewController(t)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	block.Block.Slot = slot
+	block.Block.Body.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	canonical := common.HexToHash("0xc0ffee")
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(tx, slot, canonical)
+	}))
+	reader := &storeCheckReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: block}}
+	storage := blob_mock_services.NewMockBlobStorage(ctrl)
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), canonical).Return(uint32(0), nil)
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	mismatched, unresolved, err := checkBlobStore(t.Context(), tx, reader, storage, slot, slot, false)
+	require.Error(t, err)
+	require.Zero(t, mismatched)
+	require.Equal(t, uint64(1), unresolved)
+}
+
 // The opt-in delete flag has to exist on the command the CLI actually builds, and be assigned when
 // parsed: a struct tag alone leaves --remove-mismatched undefined at the command line.
 func TestBlobArchiveStoreCheckExposesTheRemoveFlag(t *testing.T) {

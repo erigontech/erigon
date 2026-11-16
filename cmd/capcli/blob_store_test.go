@@ -317,7 +317,7 @@ func TestRetrieveBlobsRefusesMoreSidecarsThanCommitments(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	_, err := retrieveBlobsFromRemoteEndpoint(t.Context(), srv.URL, common.Hash{1}, 2)
-	require.ErrorContains(t, err, "3 sidecars")
+	require.ErrorContains(t, err, "blob response has 3 entries, the block has 2 commitments")
 }
 
 // Beacon API providers put the key in the path, the query or the user info, so errors and logs carry only the

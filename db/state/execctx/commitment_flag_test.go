@@ -33,15 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func withCommitmentFlag(t *testing.T, variant commitment.TrieVariant) {
-	t.Helper()
-	origPar := statecfg.ExperimentalParallelCommitment
-	t.Cleanup(func() {
-		statecfg.ExperimentalParallelCommitment = origPar
-	})
-	statecfg.ExperimentalParallelCommitment = variant == commitment.VariantParallelHexPatricia
-}
-
 // Update set is identical across calls so the returned roots can be compared.
 func runWriteCommitBatch(t *testing.T, sd *execctx.SharedDomains, rwTx kv.TemporalRwTx) []byte {
 	t.Helper()
@@ -71,7 +62,6 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	// No t.Parallel: mutates process-global statecfg flags.
 
 	stepSize := uint64(16)
 
@@ -81,8 +71,6 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 		if parallel {
 			variant = commitment.VariantParallelHexPatricia
 		}
-		withCommitmentFlag(t, variant)
-
 		db := newTestDb(t, stepSize)
 
 		ctx := t.Context()
@@ -90,7 +78,9 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 		require.NoError(t, err)
 		defer rwTx.Rollback()
 
-		sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+		trieCfg := commitment.DefaultTrieConfig()
+		trieCfg.Variant = variant
+		sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithTrieConfig(trieCfg))
 		require.NoError(t, err)
 		defer sd.Close()
 
@@ -116,7 +106,6 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 func TestSharedDomains_WithParaTrieDB_SelectsParallelTrie(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	// No t.Parallel: mutates process-global statecfg flags.
-	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
 
 	db := newTestDb(t, 16)
 	rwTx, err := db.BeginTemporalRw(t.Context())
@@ -137,7 +126,6 @@ func TestSharedDomains_WithParaTrieDB_SelectsParallelTrie(t *testing.T) {
 func TestSharedDomains_ParallelTrieNotWired_IsLoudOnComputeCommitment(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	// No t.Parallel: mutates process-global statecfg, dbg and root-logger state.
-	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
 	defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
 
 	compute := func(t *testing.T) ([]byte, error) {
@@ -191,7 +179,6 @@ func captureRootLog(t *testing.T) *bytes.Buffer {
 func TestSharedDomains_WithParaTrieDB_BindsPinController(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	// No t.Parallel: mutates process-global statecfg and dbg flags.
-	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
 	defer func(v bool) { dbg.DisableAdaptivePin = v }(dbg.DisableAdaptivePin)
 	dbg.DisableAdaptivePin = false
 

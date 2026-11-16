@@ -325,10 +325,7 @@ func PickTrieVariant() commitment.TrieVariant {
 	if statecfg.ExperimentalCommitmentV3 {
 		return commitment.VariantCommitmentV3
 	}
-	if statecfg.ExperimentalParallelCommitment {
-		return commitment.VariantParallelHexPatricia
-	}
-	return commitment.VariantHexPatriciaTrie
+	return commitment.VariantParallelHexPatricia
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...SharedDomainOption) (*SharedDomains, error) {

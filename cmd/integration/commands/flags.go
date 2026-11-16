@@ -21,7 +21,6 @@ import (
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -168,8 +167,8 @@ func withDataDir(cmd *cobra.Command) {
 }
 
 func withExperimentalCommitment(cmd *cobra.Command) {
-	def := statecfg.ExperimentalParallelCommitment
-	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, def, utils.ExperimentalParallelCommitmentFlag.Usage)
+	cmd.Flags().Bool(utils.ExperimentalParallelCommitmentFlag.Name, true, utils.ExperimentalParallelCommitmentFlag.Usage)
+	must(cmd.Flags().MarkDeprecated(utils.ExperimentalParallelCommitmentFlag.Name, "commitment always runs on the parallel trie"))
 }
 
 func withBatchSize(cmd *cobra.Command) {

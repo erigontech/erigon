@@ -4415,3 +4415,19 @@ func TestDomainCloseFilesAfterStep(t *testing.T) {
 		require.Equal(t, []string{"0-2"}, stepRanges(t, df.Items(), d.stepSize))
 	}
 }
+
+// beginForTests recomputes visible files from dirtyFiles directly instead of
+// using Aggregator's published snapshot. Unsafe to mix with an Aggregator,
+// because it can observe an unsynchronized/torn view of dirtyFiles across
+// entities. Production code goes through Aggregator.BeginFilesRo.
+func (d *Domain) beginForTests() *DomainRoTx {
+	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	dt := &DomainRoTx{}
+	d.initFilesRo(dt, &HistoryRoTx{}, &InvertedIndexRoTx{}, dv, hv, iv)
+	return dt
+}
+
+func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
+	maxStepInFiles := kv.Step(dt.files.EndTxNum() / dt.stepSize)
+	return maxStepInFiles < dt.d.maxStepInDB(dbtx)
+}

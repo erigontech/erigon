@@ -221,10 +221,6 @@ func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 	return version.V2_2
 }
 
-const DefaultParallelCommitment = true
-
-var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", DefaultParallelCommitment)
-
 const DefaultCommitmentV3 = false
 
 var ExperimentalCommitmentV3 = dbg.EnvBool("COMMITMENT_V3", DefaultCommitmentV3)
