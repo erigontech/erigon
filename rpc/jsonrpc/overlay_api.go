@@ -482,13 +482,9 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	log.Debug("[replayBlock] replayTx", "length", len(replayTransactions))
 
 	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
-	// Without overrides, changing gas limits can change the replayed state.
-	// Frame budgets are signed and must stay unchanged even with overrides.
 	for _, txn := range replayTransactions {
-		if !hasStateOverrides || txn.Type() == types.FrameTxType {
-			if err := checkTransactionGasCap(txn, api.GasCap); err != nil {
-				return nil, err
-			}
+		if err := checkTransactionGasCap(txn, api.GasCap); err != nil {
+			return nil, err
 		}
 	}
 
@@ -532,21 +528,12 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			log.Error(err.Error())
 			return nil, err
 		}
-		if hasStateOverrides {
-			// Gas bailout can charge the full RPC budget, which applies per transaction.
-			gp.Reset(math.MaxUint64, math.MaxUint64)
-			api.applyGasBudget(msg)
-		}
 
 		statedb.SetTxContext(blockNum, firstTxIndex+idx)
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm.TxContext = txCtx
 
-		// Without overrides, later transactions must observe canonical fee effects,
-		// even when an earlier transaction failed. Frame assertions also depend on
-		// fee debits, so their replays keep fee accounting under overrides.
-		gasBailout := hasStateOverrides && msg.FrameTransaction() == nil
-		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout, api.engine())
+		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
 			log.Error(err.Error())
 			return nil, err

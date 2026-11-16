@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"encoding/json"
 	"math/big"
 	"testing"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -39,6 +41,102 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
+
+func newMixedFrameReplayChain(t *testing.T, ordinaryReverts bool) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	t.Helper()
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	ordinaryTarget, frameTarget, assertion := common.HexToAddress("0x2000"), common.HexToAddress("0x3000"), common.HexToAddress("0x4000")
+	ordinaryCode := []byte{byte(vm.STOP)}
+	if ordinaryReverts {
+		ordinaryCode = program.New().Push0().Push0().Op(vm.REVERT).Bytes()
+	}
+	balanceLog := program.New().Push(sender).Op(vm.BALANCE).Push0().Op(vm.MSTORE).
+		Push(32).Push0().Op(vm.LOG0).Bytes()
+	// Enough to fund the original gas budgets, but not an enlarged RPC allowance.
+	const initialBalance = 200_000
+	// Revert if the preceding transaction's fee debit is missing from the prestate.
+	assertionCode := program.New().Push0().Push(sender).Push(2).Op(vm.TXDIFF).
+		Push(initialBalance).Op(vm.EQ)
+	revertJump := assertionCode.Size()
+	assertionCode.Push(0).Op(vm.JUMPI, vm.STOP)
+	_, revertPC := assertionCode.Jumpdest()
+	require.Less(t, revertPC, uint64(256))
+	assertionCode.Bytes()[revertJump+1] = byte(revertPC)
+	assertionCode.Push0().Push0().Op(vm.REVERT)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			sender:         {Balance: big.NewInt(initialBalance)},
+			ordinaryTarget: {Code: ordinaryCode},
+			frameTarget:    {Code: balanceLog},
+			assertion:      {Code: assertionCode.Bytes()},
+		},
+	}), execmoduletester.WithKey(key))
+	ordinaryTx, err := types.SignTx(types.NewTransaction(
+		0, ordinaryTarget, new(uint256.Int), 40_000, uint256.NewInt(2), nil,
+	), *types.LatestSigner(cfg), key)
+	require.NoError(t, err)
+	frameTx := &types.FrameTransaction{
+		ChainID: *cfg.ChainID, Nonce: 1, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+		Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+		Frames: []types.Frame{
+			{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+			{Mode: types.FrameSender, Target: &frameTarget, Limits: mdgas.MdGas{Execution: 10_000}},
+			{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
+		},
+		Signatures: []types.FrameSignature{{Scheme: types.FrameSignatureSecp256k1}},
+	}
+	hash := frameTx.SigningHash(nil)
+	sig, err := crypto.Sign(hash[:], key)
+	require.NoError(t, err)
+	frameTx.Signatures[0].Signature = append([]byte{sig[64]}, sig[:64]...)
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		if ordinaryReverts {
+			b.AddFailedTx(ordinaryTx)
+		} else {
+			b.AddTx(ordinaryTx)
+		}
+		b.AddTx(frameTx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][1].FrameReceipts[2].Status)
+	require.Len(t, pack.Receipts[0][1].Logs, 1)
+	return m, pack
+}
+
+func TestReplayBlockPreservesOrdinaryFeesBeforeFrame(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		failed bool
+	}{
+		{name: "successful"},
+		{name: "reverted", failed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := newMixedFrameReplayChain(t, tc.failed)
+			api := newTraceApiForTest(m)
+			block := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(1))
+			for _, traceTypes := range [][]string{{TraceTypeTrace}, {TraceTypeTrace, TraceTypeStateDiff}, {TraceTypeTrace, TraceTypeVmTrace}} {
+				t.Run(traceTypes[len(traceTypes)-1], func(t *testing.T) {
+					got, err := api.ReplayBlockTransactions(m.Ctx, block, traceTypes, nil)
+					require.NoError(t, err)
+					require.Len(t, got, 2)
+					require.NotEmpty(t, got[1].Trace)
+					for _, trace := range got[1].Trace {
+						require.Empty(t, trace.Error)
+					}
+					last := got[1].Trace[len(got[1].Trace)-1]
+					require.Equal(t, common.HexToAddress("0x4000"), last.Action.(*CallTraceAction).To)
+				})
+			}
+		})
+	}
+}
 
 func TestPostTxReplayPreservesFeeAccounting(t *testing.T) {
 	cfg := chain.AllProtocolChanges.Copy()
@@ -87,32 +185,33 @@ func TestPostTxReplayPreservesFeeAccounting(t *testing.T) {
 	hash := pack.Blocks[0].Transactions()[0].Hash()
 	for _, tc := range []struct {
 		name string
-		call func(bool) (any, error)
+		call func() (any, error)
 	}{
-		{"transaction", func(bailout bool) (any, error) {
-			return api.Transaction(m.Ctx, hash, &bailout, nil)
+		{"transaction", func() (any, error) {
+			return api.Transaction(m.Ctx, hash, nil)
 		}},
-		{"block", func(bailout bool) (any, error) {
-			return api.Block(m.Ctx, number, &bailout, nil)
+		{"block", func() (any, error) {
+			return api.Block(m.Ctx, number, nil)
 		}},
-		{"replay transaction", func(bailout bool) (any, error) {
-			return api.ReplayTransaction(m.Ctx, hash, []string{TraceTypeTrace, TraceTypeStateDiff}, &bailout, nil)
+		{"replay transaction", func() (any, error) {
+			return api.ReplayTransaction(m.Ctx, hash, []string{TraceTypeTrace, TraceTypeStateDiff}, nil)
 		}},
-		{"replay block", func(bailout bool) (any, error) {
-			return api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithNumber(number), []string{TraceTypeTrace, TraceTypeStateDiff}, &bailout, nil)
+		{"replay block", func() (any, error) {
+			return api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithNumber(number), []string{TraceTypeTrace, TraceTypeStateDiff}, nil)
 		}},
-		{"filter", func(bailout bool) (any, error) {
+		{"filter", func() (any, error) {
 			stream := jsonstream.New(nil)
-			err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &number, ToBlock: &number}, &bailout, nil, stream)
-			return string(stream.Buffer()), err
+			err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &number, ToBlock: &number}, nil, stream)
+			return json.RawMessage(stream.Buffer()), err
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			want, err := tc.call(false)
+			got, err := tc.call()
 			require.NoError(t, err)
-			got, err := tc.call(true)
+			encoded, err := json.Marshal(got)
 			require.NoError(t, err)
-			require.Equal(t, want, got)
+			require.Contains(t, string(encoded), assertion.Hex())
+			require.NotContains(t, string(encoded), `"error":`)
 		})
 	}
 

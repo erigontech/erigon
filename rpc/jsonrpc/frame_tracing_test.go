@@ -576,7 +576,7 @@ func TestFrameTraceFilterSyntheticRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(pack))
 	api := newTraceApiForTest(m)
-	traces, err := api.Transaction(m.Ctx, frameTx.Hash(), nil, nil)
+	traces, err := api.Transaction(m.Ctx, frameTx.Hash(), nil)
 	require.NoError(t, err)
 	require.Len(t, traces, 3)
 	entryPoint := vm.FrameEntryPoint.Value()
@@ -589,7 +589,7 @@ func TestFrameTraceFilterSyntheticRoot(t *testing.T) {
 	require.NoError(t, api.Filter(m.Ctx, TraceFilterRequest{
 		FromBlock: &blockNumber, ToBlock: &blockNumber,
 		ToAddress: []*common.Address{&entryPoint},
-	}, nil, nil, stream))
+	}, nil, stream))
 	want, err := jsonstream.Marshal(ParityTraces{traces[0]})
 	require.NoError(t, err)
 	require.JSONEq(t, string(want), string(stream.Buffer()))

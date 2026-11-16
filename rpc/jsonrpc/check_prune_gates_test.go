@@ -300,7 +300,7 @@ func TestReplayGateMatchesReaderAtHistoryStart(t *testing.T) {
 
 			apis.trace.kv = historyFloorDB{TemporalRoDB: apis.trace.kv, startTxNum: startTxNum}
 			block := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(tc.firstBlock))
-			traces, err := apis.trace.ReplayBlockTransactions(ctx, block, []string{TraceTypeTrace}, nil, &tracersConfig.TraceConfig{})
+			traces, err := apis.trace.ReplayBlockTransactions(ctx, block, []string{TraceTypeTrace}, &tracersConfig.TraceConfig{})
 			require.NoError(t, err, "replay must accept the oldest block supported by its reader")
 			require.NotEmpty(t, traces)
 
@@ -1286,7 +1286,7 @@ func TestGenesisRangesRequireContiguousBlocks(t *testing.T) {
 				ToBlock:   new(rpc.BlockNumber(to)),
 			}
 			return streamedResult(func(stream *jsonstream.Stream) error {
-				return apis.trace.Filter(ctx, req, new(bool), nil, stream)
+				return apis.trace.Filter(ctx, req, nil, stream)
 			})
 		}},
 	} {
@@ -2287,7 +2287,7 @@ func TestLogsByBlockHashNamesThePruneBoundary(t *testing.T) {
 			return apis.overlay.GetLogs(ctx, filters.FilterCriteria{BlockHash: &hash}, nil, nil)
 		}},
 		{"trace_filter", func() (any, error) {
-			return nil, apis.trace.Filter(ctx, TraceFilterRequest{BlockHash: &hash}, new(bool), nil, jsonstream.New(io.Discard))
+			return nil, apis.trace.Filter(ctx, TraceFilterRequest{BlockHash: &hash}, nil, jsonstream.New(io.Discard))
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
