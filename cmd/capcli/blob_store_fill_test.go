@@ -306,6 +306,32 @@ func TestExpectedBlobsInTxTreatsAMissingGloasChildBodyAsUnresolved(t *testing.T)
 	require.True(t, unresolved)
 }
 
+func TestExpectedBlobsInTxTreatsANonCanonicalGloasSuccessorBodyAsUnresolved(t *testing.T) {
+	for _, canonical := range []bool{true, false} {
+		t.Run(fmt.Sprint(canonical), func(t *testing.T) {
+			f := newFillFixture(t)
+			f.version = clparams.GloasVersion
+			root := f.addBlock(fillTestSlot, 1)
+			f.addBlock(fillTestSlot+1, 1)
+			if !canonical {
+				require.NoError(t, f.db.Update(t.Context(), func(tx kv.RwTx) error {
+					return beacon_indicies.MarkRootCanonical(tx, fillTestSlot+1, common.HexToHash("0xcafe"))
+				}))
+			}
+
+			var got int
+			var unresolved bool
+			require.NoError(t, f.db.View(t.Context(), func(tx kv.Tx) error {
+				var err error
+				got, unresolved, err = expectedBlobsInTx(t.Context(), tx, f.blocks, root, f.blocks.blocks[fillTestSlot])
+				return err
+			}))
+			require.Equal(t, 1, got)
+			require.Equal(t, !canonical, unresolved)
+		})
+	}
+}
+
 func TestBlobArchiveStoreFillKeepsAGloasBlockWhoseSuccessorIsNotItsChild(t *testing.T) {
 	f := newFillFixture(t)
 	f.version = clparams.GloasVersion

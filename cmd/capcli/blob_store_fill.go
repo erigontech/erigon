@@ -421,6 +421,11 @@ func expectedBlobsInTx(ctx context.Context, tx kv.Tx, blocks freezeblocks.Beacon
 	if child == nil || child.Block.ParentRoot != root {
 		return n, true, nil
 	}
+	if gotRoot, err := child.Block.HashSSZ(); err != nil {
+		return 0, false, err
+	} else if gotRoot != childRoot {
+		return n, true, nil
+	}
 	if forkchoice.ParentPayloadStatusFromBids(block, child.Block) == cltypes.PayloadStatusFull {
 		return n, false, nil
 	}
