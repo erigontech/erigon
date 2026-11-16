@@ -27,10 +27,6 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
-// minPrefetchTxs is the smallest block the prefetch reads: below it the second read tx and the
-// goroutine hand-off cost more than the overlap saves.
-const minPrefetchTxs = 8
-
 // ReceiptsPrefetch reads the persisted receipts of one block on its own read tx,
 // while the caller reads the block on its tx.
 type ReceiptsPrefetch struct {
@@ -41,21 +37,11 @@ type ReceiptsPrefetch struct {
 
 // PrefetchReceipts starts the read of the persisted receipts of the block blockNum/blockHash.
 // It returns nil when the receipts would not be served from the persistent cache.
-func (g *Generator) PrefetchReceipts(ctx context.Context, cfg *chain.Config, db kv.TemporalRoDB, tx kv.TemporalTx, blockNum uint64, blockHash common.Hash, opts eth.ReceiptsOpts) *ReceiptsPrefetch {
+func (g *Generator) PrefetchReceipts(ctx context.Context, cfg *chain.Config, db kv.TemporalRoDB, blockNum uint64, blockHash common.Hash, opts eth.ReceiptsOpts) *ReceiptsPrefetch {
 	if !PersistedReceiptsServed() || PostStateCalculated(cfg, blockNum, opts.CommitmentHistoryEnabled, g.blockReader) ||
 		g.receiptsCache.Contains(blockHash) {
 		return nil
 	}
-	view := g.filters.WithTemporalOverlay(tx)
-	minTxNum, err := g.txNumReader.Min(ctx, view, blockNum)
-	if err != nil {
-		return nil
-	}
-	maxTxNum, err := g.txNumReader.Max(ctx, view, blockNum)
-	if err != nil || maxTxNum < minTxNum+1+minPrefetchTxs {
-		return nil
-	}
-
 	ctx, cancel := context.WithCancel(ctx)
 	p := &ReceiptsPrefetch{cancel: cancel, done: make(chan struct{})}
 	go func() {

@@ -139,16 +139,6 @@ type overlayAheadHarness struct {
 // receipts' gas.
 func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarness {
 	t.Helper()
-	var tips []uint64
-	if withOverlayTxs {
-		tips = []uint64{overlayRaceLowTip, overlayRaceHighTip}
-	}
-	return newOverlayAheadHarnessWithTips(t, tips)
-}
-
-// newOverlayAheadHarnessWithTips is newOverlayAheadHarness with one overlay transaction per tip.
-func newOverlayAheadHarnessWithTips(t *testing.T, tips []uint64) *overlayAheadHarness {
-	t.Helper()
 
 	cfg := chain.TestChainBerlinConfig.Copy()
 	cfg.LondonBlock = common.NewUint64(0)
@@ -162,9 +152,10 @@ func newOverlayAheadHarnessWithTips(t *testing.T, tips []uint64) *overlayAheadHa
 
 	var overlayTxs types.Transactions
 	overlayGasUsed := uint64(overlayGasLimit / params.ElasticityMultiplier) // == target: CalcBaseFee leaves BaseFee unchanged
-	if len(tips) > 0 {
-		for nonce, tip := range tips {
-			overlayTxs = append(overlayTxs, signOverlayRaceTestTxWithTip(t, m, uint64(nonce), tip))
+	if withOverlayTxs {
+		overlayTxs = types.Transactions{
+			signOverlayRaceTestTxWithTip(t, m, 0, overlayRaceLowTip),
+			signOverlayRaceTestTxWithTip(t, m, 1, overlayRaceHighTip),
 		}
 		overlayGasUsed = uint64(len(overlayTxs)) * params.TxGas
 	}
@@ -183,7 +174,7 @@ func newOverlayAheadHarnessWithTips(t *testing.T, tips []uint64) *overlayAheadHa
 	overlay := doms.BlockOverlay()
 	writeHeadBlockMarkers(t, overlay, overlayHeader, overlayBody)
 
-	if len(tips) > 0 {
+	if withOverlayTxs {
 		senders := slices.Repeat([]common.Address{m.Address}, len(overlayTxs))
 		require.NoError(t, rawdb.WriteSenders(overlay, hash, overlayNumber, senders))
 		// Receipt-domain entries go through the SharedDomains (like execution writes

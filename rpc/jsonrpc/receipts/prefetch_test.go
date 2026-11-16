@@ -87,7 +87,7 @@ func TestPrefetchReceiptsMatchesPersistedReceipts(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, want, prefetchTestTxs)
 
-	p := gen.PrefetchReceipts(m.Ctx, m.ChainConfig, m.DB, tx, 1, block.Hash(), eth.ReceiptsOpts{})
+	p := gen.PrefetchReceipts(m.Ctx, m.ChainConfig, m.DB, 1, block.Hash(), eth.ReceiptsOpts{})
 	defer p.Close()
 	got := p.Receipts(block)
 	require.Equal(t, want, got)
@@ -117,7 +117,7 @@ func TestPrefetchReceiptsDoesNotWaitForAReadTxSlot(t *testing.T) {
 	block := readBlock(t, m, tx, 1)
 
 	db := &fullReadTxLimiterDB{TemporalRoDB: m.DB}
-	p := gen.PrefetchReceipts(m.Ctx, m.ChainConfig, db, tx, 1, block.Hash(), eth.ReceiptsOpts{})
+	p := gen.PrefetchReceipts(m.Ctx, m.ChainConfig, db, 1, block.Hash(), eth.ReceiptsOpts{})
 	defer p.Close()
 	require.Nil(t, p.Receipts(block))
 	require.Equal(t, []bool{true}, db.nonBlocking)
@@ -137,7 +137,7 @@ func TestPrefetchReceiptsRejectsAnotherCanonicalBlock(t *testing.T) {
 	block := readBlock(t, m, tx, 1)
 
 	reorgedHash := common.Hash{0x01}
-	p := gen.PrefetchReceipts(m.Ctx, m.ChainConfig, m.DB, tx, 1, reorgedHash, eth.ReceiptsOpts{})
+	p := gen.PrefetchReceipts(m.Ctx, m.ChainConfig, m.DB, 1, reorgedHash, eth.ReceiptsOpts{})
 	defer p.Close()
 	got := p.Receipts(block)
 	require.Nil(t, got)
@@ -184,7 +184,7 @@ func TestPrefetchReceiptsSkipsReceiptsNotReadFromThePersistentCache(t *testing.T
 			cfg, opts := tc.setup(t, m, gen, tx, block)
 
 			db := &countingDB{TemporalRoDB: m.DB}
-			p := gen.PrefetchReceipts(m.Ctx, cfg, db, tx, 1, block.Hash(), opts)
+			p := gen.PrefetchReceipts(m.Ctx, cfg, db, 1, block.Hash(), opts)
 			defer p.Close()
 			require.Nil(t, p)
 			require.Zero(t, db.begins)
@@ -243,28 +243,11 @@ func TestPrefetchReceiptsCloseStopsTheRead(t *testing.T) {
 	block := readBlock(t, m, tx, 1)
 
 	db := &cancelOnlySeekDB{TemporalRoDB: m.DB, opened: make(chan *cancelOnlySeekTx, 1)}
-	p := gen.PrefetchReceipts(m.Ctx, m.ChainConfig, db, tx, 1, block.Hash(), eth.ReceiptsOpts{})
+	p := gen.PrefetchReceipts(m.Ctx, m.ChainConfig, db, 1, block.Hash(), eth.ReceiptsOpts{})
 	require.NotNil(t, p)
 	prefetchTx := <-db.opened
 	<-prefetchTx.started
 	p.Close()
 	require.True(t, prefetchTx.rolledBack)
 	require.Equal(t, 1, prefetchTx.seeks)
-}
-
-func TestPrefetchReceiptsSkipsSmallBlocks(t *testing.T) {
-	servePersistedReceipts(t)
-	m := mockForPrefetch(t, 2)
-	gen := newPrefetchGenerator(m, shards.NewEvents())
-
-	tx, err := m.DB.BeginTemporalRo(m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	block := readBlock(t, m, tx, 1)
-
-	db := &countingDB{TemporalRoDB: m.DB}
-	p := gen.PrefetchReceipts(m.Ctx, m.ChainConfig, db, tx, 1, block.Hash(), eth.ReceiptsOpts{})
-	defer p.Close()
-	require.Nil(t, p)
-	require.Zero(t, db.begins)
 }

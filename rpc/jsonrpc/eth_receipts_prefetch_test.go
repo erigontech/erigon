@@ -17,7 +17,6 @@
 package jsonrpc
 
 import (
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,7 +35,7 @@ func TestPrefetchReceiptsServesAnOverlayBlock(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = false // assertions re-execute instead of serving the persistent cache
 
-	h := newOverlayAheadHarnessWithTips(t, slices.Repeat([]uint64{overlayRaceLowTip}, 16))
+	h := newOverlayAheadHarness(t, true)
 	num, hash := h.overlayHeader.Number.Uint64(), h.overlayHeader.Hash()
 
 	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
@@ -67,7 +66,7 @@ func TestPrefetchReceiptsServesAnOverlayBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, want, len(h.overlayBody.Transactions), "fixture: the request tx must serve the receipts through the overlay")
 
-	p := h.base.receiptsGenerator.PrefetchReceipts(h.m.Ctx, h.m.ChainConfig, h.m.DB, tx, num, hash, eth.ReceiptsOpts{})
+	p := h.base.receiptsGenerator.PrefetchReceipts(h.m.Ctx, h.m.ChainConfig, h.m.DB, num, hash, eth.ReceiptsOpts{})
 	defer p.Close()
 	got := p.Receipts(block)
 	require.Equal(t, want, got)
