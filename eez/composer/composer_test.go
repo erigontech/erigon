@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/l1/post"
 	"github.com/erigontech/erigon/eez/protocol"
@@ -953,4 +955,91 @@ func TestComposerAuditsFinality(t *testing.T) {
 	h.c.RecoverFailed(t.Context())
 	require.Empty(t, h.c.ledger.entries)
 	require.Eventually(t, func() bool { return node.asked.Load() > before }, 5*time.Second, time.Millisecond)
+}
+
+// triggers is an L1 on which the held transactions in landed have receipts.
+type triggers struct {
+	landed map[common.Hash]bool
+	failed error
+}
+
+func (l *triggers) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1}, nil }
+
+func (l *triggers) Receipt(_ context.Context, h common.Hash) (*l1.Receipt, error) {
+	if l.failed != nil {
+		return nil, l.failed
+	}
+	if l.landed[h] {
+		return &l1.Receipt{Status: 1}, nil
+	}
+	return nil, nil
+}
+
+func (l *triggers) HasTransaction(_ context.Context, h common.Hash) (bool, error) {
+	return l.landed[h], l.failed
+}
+
+func TestComposerRecoversHeldTransactions(t *testing.T) {
+	a, b := addr(0xa), addr(0xb)
+	for _, c := range []struct {
+		name       string
+		attempts   uint32 // of a's transaction
+		skipped    bool
+		landed     bool // a's transaction
+		substitute error
+		lookup     error
+		// queued are the transactions back in the pool, with their attempts.
+		queued   map[common.Hash]uint32
+		replaced bool
+		kept     bool // the failure stays for the next trigger
+	}{
+		{name: "requeued, charged", queued: map[common.Hash]uint32{{1}: 1, {2}: 0, {3}: 1}, replaced: true},
+		{name: "a skipped slot is free", skipped: true, queued: map[common.Hash]uint32{{1}: 0, {2}: 0, {3}: 0}, replaced: true},
+		{name: "a landed trigger is released", landed: true, queued: map[common.Hash]uint32{{2}: 0, {3}: 1}, replaced: true},
+		{name: "the third failure evicts the chain", attempts: 2, queued: map[common.Hash]uint32{{3}: 1}, replaced: true},
+		{name: "a height L1 settled", substitute: follower.ErrBelowSafe, queued: map[common.Hash]uint32{{2}: 0}},
+		{name: "a lookup failing", lookup: errors.New("node down"), queued: map[common.Hash]uint32{{2}: 0}, kept: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			node := &triggers{landed: map[common.Hash]bool{}, failed: c.lookup}
+			h := newHarness(t, newTestChain(t, 8), 8, node)
+			pool := NewHeldPool()
+			var replaced []common.Hash
+			h.c.Recover(pool, func(_ context.Context, failed *types.Header) (*types.Header, error) {
+				replaced = append(replaced, failed.Hash())
+				return nil, c.substitute
+			})
+			txA := held(a, 0, Inbound, 1)
+			txA.Attempts = c.attempts
+			require.NoError(t, pool.Push(txA, 0))
+			require.NoError(t, pool.Push(held(a, 1, Inbound, 2), 0))
+			require.NoError(t, pool.Push(held(b, 0, Inbound, 3), 0))
+			drained := pool.PopN(3)
+			// a's second transaction did not make the batch: it waits in the pool.
+			inBatch := []*Held{drained[0], drained[2]}
+			pool.PushFront([]*Held{drained[1]})
+			if c.landed {
+				node.landed[txA.Hash] = true
+			}
+			h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: inBatch})
+			h.c.ledger.MarkFailed(8, common.Hash{0xf}, c.skipped)
+
+			h.c.RecoverFailed(t.Context())
+			if c.replaced {
+				require.Equal(t, []common.Hash{h.chain.blocks[8].Hash()}, replaced)
+			}
+			_, failing := h.c.ledger.Blocking(0)
+			require.Equal(t, c.kept, failing)
+			got := map[common.Hash]uint32{}
+			for _, tx := range pool.PopN(math.MaxInt) {
+				got[tx.Hash] = tx.Attempts
+			}
+			require.Equal(t, c.queued, got)
+			if !c.kept {
+				pool.mu.Lock()
+				require.Len(t, pool.inFlight, len(got), "only the requeued, now drained, are reserved")
+				pool.mu.Unlock()
+			}
+		})
+	}
 }
