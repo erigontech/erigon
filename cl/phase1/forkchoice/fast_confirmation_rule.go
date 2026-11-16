@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"cmp"
 	"slices"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -154,13 +155,7 @@ func (v *fcrView) attestationScores(b *fcrBalances) map[common.Hash]uint64 {
 		roots = append(roots, root)
 	}
 	slices.SortFunc(roots, func(a, b common.Hash) int {
-		if v.blocks[a].slot > v.blocks[b].slot {
-			return -1
-		}
-		if v.blocks[a].slot < v.blocks[b].slot {
-			return 1
-		}
-		return 0
+		return cmp.Compare(v.blocks[b].slot, v.blocks[a].slot)
 	})
 	for _, root := range roots {
 		if parent := v.blocks[root].parent; parent != (common.Hash{}) {

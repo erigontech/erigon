@@ -568,7 +568,7 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					wake, headChanged, err := waitForNextSlotOrHeadChange(
 						ctx, nextSlot, cfg.beaconCfg, cfg.forkChoice, cfg.syncedData, cfg.ethClock, cfg.sleepForSlotLastWake, cfg.executionHead,
 					)
-					cfg.safeUpdatePending = cfg.safeUpdatePending || wake.safeChanged
+					cfg.safeUpdatePending = wake.safeChanged
 					cfg.sleepForSlotHeadChanged = headChanged
 					if headChanged {
 						cfg.sleepForSlotLastWake = wake

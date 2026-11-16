@@ -280,22 +280,27 @@ func TestForkChoiceUpdateRejectsMissingPayloadIDForPayloadBuild(t *testing.T) {
 }
 
 func TestForkChoiceUpdateWithoutPayloadBuild(t *testing.T) {
-	for _, status := range []engine_types.EngineStatus{engine_types.ValidStatus, engine_types.SyncingStatus} {
-		t.Run(string(status), func(t *testing.T) {
-			cc := &ExecutionClientEngine{
-				EnableFastConfirmation: true,
-				engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
-					PayloadStatus: &engine_types.PayloadStatus{Status: status},
-				}},
-			}
-			id, err := cc.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion)
-			if status == engine_types.SyncingStatus {
-				require.ErrorIs(t, err, ErrForkChoiceUpdateSyncing)
-			} else {
-				require.NoError(t, err)
-			}
-			require.Empty(t, id)
-		})
+	for _, enabled := range []bool{false, true} {
+		for _, status := range []engine_types.EngineStatus{engine_types.ValidStatus, engine_types.SyncingStatus, engine_types.InvalidStatus} {
+			t.Run(fmt.Sprintf("%s/fcr=%t", status, enabled), func(t *testing.T) {
+				cc := &ExecutionClientEngine{
+					EnableFastConfirmation: enabled,
+					engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
+						PayloadStatus: &engine_types.PayloadStatus{Status: status},
+					}},
+				}
+				id, err := cc.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion)
+				switch {
+				case !enabled || status == engine_types.ValidStatus:
+					require.NoError(t, err)
+				case status == engine_types.SyncingStatus:
+					require.ErrorIs(t, err, ErrForkChoiceUpdateSyncing)
+				default:
+					require.ErrorContains(t, err, "INVALID")
+				}
+				require.Empty(t, id)
+			})
+		}
 	}
 }
 
@@ -481,16 +486,4 @@ func TestValidationInterrupted(t *testing.T) {
 	require.False(t, ValidationInterrupted(t.Context(), PayloadStatusNone, errors.New("connection refused")))
 	require.False(t, ValidationInterrupted(cancelled, PayloadStatusInvalidated, context.Canceled))
 	require.False(t, ValidationInterrupted(cancelled, PayloadStatusNone, nil))
-}
-
-func TestEngineForkChoiceWithoutFastConfirmation(t *testing.T) {
-	cc := &ExecutionClientEngine{engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}}}}
-	_, err := cc.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion)
-	require.NoError(t, err)
-}
-
-func TestFastConfirmationRejectsInvalidWithoutValidationError(t *testing.T) {
-	cc := &ExecutionClientEngine{EnableFastConfirmation: true, engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.InvalidStatus}}}}
-	_, err := cc.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion)
-	require.Error(t, err)
 }

@@ -2547,6 +2547,7 @@ func TestPendingSafeUpdateBoundsMissedBlockWait(t *testing.T) {
 		err := chainTipSync(ctx, log.Root(), f.cfg, Args{seenSlot: f.parent.Block.Slot, targetSlot: targetSlot})
 
 		require.NoError(t, err)
+		synctest.Wait()
 		require.Positive(t, f.sentinel.calls, "try fetching even while a safe update is pending")
 		require.LessOrEqual(t, time.Since(started), 2*time.Second, "retry publication even if no block arrives")
 		require.True(t, f.cfg.safeUpdatePending)

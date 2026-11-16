@@ -332,11 +332,13 @@ func TestFastConfirmationWakePublishesDuringMissedSlot(t *testing.T) {
 				require.NoError(t, store.OnFastConfirmation(t.Context(), now, nil))
 				args := Args{hasDownloaded: true, peers: 1, targetSlot: 1}
 				graph := ConsensusClStages()
+				started := time.Now()
 				if stage == ChainTipSync {
 					require.NoError(t, listenToIncomingBlocksUntilANewBlockIsReceived(t.Context(), log.Root(), cfg, args, nil, nil))
 				} else {
 					require.NoError(t, graph.Stages[stage].ActionFunc(t.Context(), log.Root(), cfg, args))
 				}
+				require.Equal(t, started, time.Now(), "safe changes must wake publication immediately")
 				require.Empty(t, store.FastConfirmationChanged(), "the wake was consumed")
 				cfg.pendingBlockWrite = &pendingBlockWrite{}
 				require.Equal(t, ChainTipSync, graph.Stages[stage].TransitionFunc(cfg, args, nil))
