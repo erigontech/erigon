@@ -76,6 +76,12 @@ func TestEventStreamSubscribesToEveryTopicsValue(t *testing.T) {
 					seen[topic]++
 				}
 			}
+			// The loop also stops when the stream ends or the context expires, so check that it
+			// stopped because every wanted topic was seen twice.
+			require.NoError(t, scanner.Err())
+			for _, topic := range tc.want {
+				require.GreaterOrEqual(t, seen[topic], 2, "topic %s", topic)
+			}
 			require.Equal(t, tc.want, slices.Sorted(maps.Keys(seen)))
 		})
 	}
