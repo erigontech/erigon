@@ -113,6 +113,24 @@ func (s *loggingColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoo
 	return err
 }
 
+func (s *loggingColumnStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	if s.f.failWrite != nil {
+		for _, sidecar := range sidecars {
+			if err := s.f.failWrite(sidecar.Index); err != nil {
+				return err
+			}
+		}
+	}
+	if err := s.DataColumnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars); err != nil {
+		return err
+	}
+	deadline, _ := ctx.Deadline()
+	for _, sidecar := range sidecars {
+		s.f.record(contentsEvent{kind: eventColumnWrite, index: sidecar.Index, ctxErr: ctx.Err(), deadline: deadline})
+	}
+	return nil
+}
+
 // dataAvailabilityForkchoice makes the consensus-mode validation run the same data availability
 // check that the real fork choice runs.
 type dataAvailabilityForkchoice struct {
