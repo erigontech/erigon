@@ -541,7 +541,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	var domains *execctx.SharedDomains
 	openDomains := func() (err error) {
 		cfg := commitment.DefaultTrieConfig()
-		cfg.Variant = commitment.VariantParallelHexPatricia
+		cfg.Variant = execctx.PickTrieVariant()
 		if domains, err = execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithTrieConfig(cfg), execctx.WithoutSharedBranchCache()); err != nil {
 			return err
 		}
