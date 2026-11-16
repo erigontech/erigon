@@ -163,7 +163,11 @@ func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState 
 // Successor of [ForkchoiceUpdatedV4] post Bogota, with inclusion list
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md#engine_forkchoiceupdatedv5
 func (e *EngineServer) ForkChoiceUpdatedV5(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, custodyColumns *engine_types.CustodyColumns) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.HezeVersion)
+	resp, err := e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.HezeVersion)
+	if resp != nil && resp.PayloadStatus != nil {
+		resp.PayloadStatus.SSZVersion = clparams.HezeVersion
+	}
+	return resp, err
 }
 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
