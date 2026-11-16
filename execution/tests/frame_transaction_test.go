@@ -33,7 +33,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
@@ -55,11 +54,9 @@ import (
 )
 
 func TestFrameTransactionInsertChain(t *testing.T) {
-	for _, parallel := range []bool{false, true} {
-		t.Run(fmt.Sprint(parallel), func(t *testing.T) {
-			previous := dbg.Exec3Parallel
-			dbg.Exec3Parallel = parallel
-			t.Cleanup(func() { dbg.Exec3Parallel = previous })
+	for _, workers := range []int{1, 4} {
+		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
+			setExecWorkers(t, workers)
 			cfg := chain.TestChainOsakaConfig.Copy()
 			cfg.AmsterdamTime, cfg.BogotaTime = common.NewUint64(0), common.NewUint64(0)
 			sender, target := common.HexToAddress("0x1000"), common.HexToAddress("0x2000")

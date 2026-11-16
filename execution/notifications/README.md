@@ -20,7 +20,7 @@ block execution, dispatched after the pipeline run.
 ### Sender
 
 ```
-exec3 block execution (execution/stagedsync/exec3_serial.go, exec3_parallel.go)
+exec3 block execution (execution/stagedsync/exec3_parallel.go)
   → Accumulator.StartChange(header, txs, unwind)     per block
   → Accumulator.ChangeAccount(addr, incarnation, data)
   → Accumulator.ChangeStorage(addr, incarnation, loc, data)
