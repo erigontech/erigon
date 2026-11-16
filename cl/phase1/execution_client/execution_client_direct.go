@@ -43,8 +43,9 @@ import (
 const reorgTooDeepDepth = 3
 
 type ExecutionClientDirect struct {
-	chainRW chainreader.ChainReaderWriterEth1
-	txpool  txpoolproto.TxpoolClient
+	EnableFastConfirmation bool
+	chainRW                chainreader.ChainReaderWriterEth1
+	txpool                 txpoolproto.TxpoolClient
 }
 
 func NewExecutionClientDirect(chainRW chainreader.ChainReaderWriterEth1, txpool txpoolproto.TxpoolClient) (*ExecutionClientDirect, error) {
@@ -157,6 +158,12 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
+		if !cc.EnableFastConfirmation {
+			if result.Status == execmodule.ExecutionStatusBusy && !result.UpdateInProgress {
+				return nil, ErrForkChoiceUpdateBusy
+			}
+			return nil, nil
+		}
 		switch result.Status {
 		case execmodule.ExecutionStatusSuccess:
 			return nil, nil

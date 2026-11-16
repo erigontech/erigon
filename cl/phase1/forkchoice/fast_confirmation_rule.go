@@ -24,6 +24,8 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
+const confirmationByzantineThreshold = 25
+
 type fastConfirmation struct {
 	confirmedRoot      common.Hash
 	previousSlotHead   common.Hash
@@ -134,7 +136,7 @@ func (v *fcrView) committeeWeight(b *fcrBalances, start, end uint64) uint64 {
 
 func (v *fcrView) adversarialWeight(b *fcrBalances, start, end uint64) uint64 {
 	weights := v.rangeWeights(b, start, end)
-	return fcrSaturatingSub(weights.total/100*25, weights.equivocating)
+	return fcrSaturatingSub(weights.total/100*confirmationByzantineThreshold, weights.equivocating)
 }
 
 func (v *fcrView) attestationScores(b *fcrBalances) map[common.Hash]uint64 {
@@ -222,7 +224,7 @@ func (v *fcrView) emptySlotDiscount(b *fcrBalances, root common.Hash) uint64 {
 	if v.gloas && block.parentStatus != cltypes.PayloadStatusPending {
 		support += weights.support[fcrSupportedNode{block.parent, block.parentStatus}]
 	}
-	return fcrSaturatingSub(support, fcrSaturatingSub(weights.total/100*25, weights.equivocating))
+	return fcrSaturatingSub(support, fcrSaturatingSub(weights.total/100*confirmationByzantineThreshold, weights.equivocating))
 }
 
 func (v *fcrView) ancestor(root common.Hash, slot uint64) common.Hash {
@@ -285,7 +287,7 @@ func (v *fcrView) honestFFGSupport() uint64 {
 		weight = v.committeeWeight(b, epoch*v.slotsPerEpoch, v.slot-1)
 		adversarial = v.adversarialWeight(b, epoch*v.slotsPerEpoch, v.slot-1)
 	}
-	return fcrSaturatingSub(support, adversarial) + (b.total-weight)/100*75
+	return fcrSaturatingSub(support, adversarial) + (b.total-weight)/100*(100-confirmationByzantineThreshold)
 }
 
 func (v *fcrView) noConflictingJustification() bool {

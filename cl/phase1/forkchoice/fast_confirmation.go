@@ -65,6 +65,12 @@ func (f *ForkChoiceStore) GetExecutionFinalityHashes(head, finalizedFallback, sa
 }
 
 func (f *ForkChoiceStore) EnableFastConfirmation(anchorVotingSource solid.Checkpoint) {
+	switch engine := f.engine.(type) {
+	case *execution_client.ExecutionClientDirect:
+		engine.EnableFastConfirmation = true
+	case *execution_client.ExecutionClientEngine:
+		engine.EnableFastConfirmation = true
+	}
 	f.fastConfirmation = &fastConfirmationTracker{rule: newFastConfirmation(f.FinalizedCheckpoint()), changed: make(chan struct{}, 1), anchorVotingSource: anchorVotingSource}
 }
 

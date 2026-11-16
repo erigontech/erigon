@@ -767,6 +767,7 @@ func TestDirectSafeUpdateRetriesUntilAccepted(t *testing.T) {
 			module := &deferredOnceExecutionModule{firstResult: result}
 			direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
 			require.NoError(t, err)
+			direct.EnableFastConfirmation = true
 			engine.forkChoiceFn = direct.ForkChoiceUpdate
 			cfg.executionHead = headBlock.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash
 			cfg.safeUpdatePending = true
@@ -2062,4 +2063,44 @@ func TestPostForkchoiceHighestFinalizedFailureDoesNotPublish(t *testing.T) {
 
 	f.requireCopiesAndPublishes(t, 0)
 	require.Equal(t, f.headSlot, f.cfg.blobDownloader.HeadSlot())
+}
+
+func TestPendingSafeUpdatePacesFatalErrors(t *testing.T) {
+	cfg, _, _, _, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+	want := errors.New("execution unavailable")
+	engine.forkChoiceErr = want
+	cfg.safeUpdatePending = true
+	synctest.Test(t, func(t *testing.T) {
+		for range 3 {
+			started := time.Now()
+			_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+			require.ErrorIs(t, err, want)
+			require.True(t, cfg.safeUpdatePending)
+			require.GreaterOrEqual(t, time.Since(started), sleepForSlotRewakeInterval)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		_, _, err := computeAndNotifyServicesOfNewForkChoice(ctx, log.New(), cfg)
+		require.ErrorIs(t, err, context.Canceled)
+		require.True(t, cfg.safeUpdatePending)
+	})
+}
+
+func TestDirectForkChoiceFlagOffRecordsDeferredHead(t *testing.T) {
+	for _, result := range []execmodule.ForkChoiceResult{
+		{Status: execmodule.ExecutionStatusMissingSegment},
+		{Status: execmodule.ExecutionStatusTooFarAway},
+		{Status: execmodule.ExecutionStatusReorgTooDeep},
+		{Status: execmodule.ExecutionStatusBusy, UpdateInProgress: true},
+	} {
+		t.Run(result.Status.String(), func(t *testing.T) {
+			cfg, _, _, block, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+			direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, &deferredOnceExecutionModule{firstResult: result}, time.Second), nil)
+			require.NoError(t, err)
+			engine.forkChoiceFn = direct.ForkChoiceUpdate
+			_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+			require.NoError(t, err)
+			require.Equal(t, block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash, cfg.executionHead)
+		})
+	}
 }

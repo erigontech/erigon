@@ -99,6 +99,7 @@ func TestDirectForkChoiceUpdateWithoutPayloadBuild(t *testing.T) {
 				chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
 			)
 			require.NoError(t, err)
+			client.EnableFastConfirmation = true
 
 			id, err := client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.ElectraVersion)
 
@@ -122,6 +123,7 @@ func TestDirectForkChoiceUpdateRejectsFailedStatuses(t *testing.T) {
 				chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
 			)
 			require.NoError(t, err)
+			client.EnableFastConfirmation = true
 			_, err = client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.ElectraVersion)
 			require.Error(t, err)
 			require.Zero(t, module.assembleCalls)
@@ -272,4 +274,20 @@ func TestDirectNewPayloadReportsAnEndedContextAsNoVerdict(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.EqualValues(t, PayloadStatusNone, status)
 	require.True(t, ValidationInterrupted(ctx, status, err))
+}
+
+func TestDirectForkChoiceWithoutFastConfirmation(t *testing.T) {
+	for _, result := range []execmodule.ForkChoiceResult{
+		{Status: execmodule.ExecutionStatusMissingSegment},
+		{Status: execmodule.ExecutionStatusTooFarAway},
+		{Status: execmodule.ExecutionStatusReorgTooDeep},
+		{Status: execmodule.ExecutionStatusBusy, UpdateInProgress: true},
+	} {
+		t.Run(result.Status.String(), func(t *testing.T) {
+			client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, &payloadBuildModuleStub{forkChoiceResult: result}, time.Second), nil)
+			require.NoError(t, err)
+			_, err = client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.ElectraVersion)
+			require.NoError(t, err)
+		})
+	}
 }

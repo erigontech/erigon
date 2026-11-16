@@ -59,11 +59,12 @@ func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 // directly; remote mode uses authenticated HTTP JSON-RPC for Engine API and
 // eth_* calls.
 type ExecutionClientEngine struct {
-	engine    engineapi.EngineAPI
-	chainRW   *chainreader.ChainReaderWriterEth1 // non-nil for local mode
-	rpcClient *rpc.Client                        // non-nil for remote mode (eth_* calls)
-	txpool    txpoolproto.TxpoolClient           // non-nil for local mode
-	beaconCfg *clparams.BeaconChainConfig
+	EnableFastConfirmation bool
+	engine                 engineapi.EngineAPI
+	chainRW                *chainreader.ChainReaderWriterEth1 // non-nil for local mode
+	rpcClient              *rpc.Client                        // non-nil for remote mode (eth_* calls)
+	txpool                 txpoolproto.TxpoolClient           // non-nil for local mode
+	beaconCfg              *clparams.BeaconChainConfig
 }
 
 // NewExecutionClientEngineLocal creates an in-process client with direct chain
@@ -195,6 +196,9 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		return nil, fmt.Errorf("engine ForkchoiceUpdated failed: %w", err)
 	}
 
+	if cc.EnableFastConfirmation && attributes == nil && resp.PayloadStatus != nil && resp.PayloadStatus.Status == engine_types.InvalidStatus {
+		return nil, fmt.Errorf("engine forkchoice status: %s", resp.PayloadStatus.Status)
+	}
 	if resp.PayloadId == nil {
 		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
 			return nil, err
@@ -202,7 +206,7 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		if attributes != nil {
 			return nil, ErrForkChoiceUpdateNoPayloadID
 		}
-		if resp.PayloadStatus != nil && resp.PayloadStatus.Status == engine_types.SyncingStatus {
+		if cc.EnableFastConfirmation && resp.PayloadStatus != nil && resp.PayloadStatus.Status == engine_types.SyncingStatus {
 			return nil, ErrForkChoiceUpdateSyncing
 		}
 		return []byte{}, nil

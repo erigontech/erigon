@@ -293,3 +293,19 @@ func TestFastConfirmationExcludesEarlyVotes(t *testing.T) {
 		})
 	}
 }
+
+func TestFastConfirmationEnablesExecutionStatusReporting(t *testing.T) {
+	direct := &execution_client.ExecutionClientDirect{}
+	remote := &execution_client.ExecutionClientEngine{}
+	for _, tc := range []struct {
+		engine  execution_client.ExecutionEngine
+		enabled *bool
+	}{{direct, &direct.EnableFastConfirmation}, {remote, &remote.EnableFastConfirmation}} {
+		store, _, head := executionHeadFixture(t)
+		store.finalizedCheckpoint.Store(solid.Checkpoint{Root: head.Root})
+		store.engine = tc.engine
+		require.False(t, *tc.enabled)
+		store.EnableFastConfirmation(store.FinalizedCheckpoint())
+		require.True(t, *tc.enabled)
+	}
+}

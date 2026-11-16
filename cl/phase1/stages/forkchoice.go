@@ -91,6 +91,15 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 		if _, err := engine.ForkChoiceUpdate(
 			ctx, finalizedHash, safeHash, executionHead, nil, headVersion,
 		); err != nil {
+			if cfg.safeUpdatePending {
+				timer := time.NewTimer(sleepForSlotRewakeInterval)
+				defer timer.Stop()
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-timer.C:
+				}
+			}
 			switch {
 			case errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout):
 				// A forkchoice update that ran out of time is not a rejection, and sync has no payload
@@ -101,15 +110,6 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 				recordExecutionHead = false
 			default:
 				return fmt.Errorf("failed to run forkchoice: %w", err)
-			}
-			if cfg.safeUpdatePending {
-				timer := time.NewTimer(sleepForSlotRewakeInterval)
-				defer timer.Stop()
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-timer.C:
-				}
 			}
 		} else {
 			cfg.safeUpdatePending = false
