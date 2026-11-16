@@ -4026,20 +4026,33 @@ func TestProvideTxnsWaitsForTheParentHash(t *testing.T) {
 }
 
 // beginHook is a pool database that, once armed, runs moved before opening
-// its next read transaction, and fails the read with moved's error.
+// its next read transaction, or once it is open when opened is set, and keeps
+// moved's error in err.
 type beginHook struct {
 	kv.RwDB
-	armed atomic.Bool
-	moved func() error
+	armed  atomic.Bool
+	opened bool
+	moved  func() error
+	err    error
 }
 
 func (h *beginHook) BeginRo(ctx context.Context) (kv.Tx, error) {
-	if h.armed.CompareAndSwap(true, false) {
-		if err := h.moved(); err != nil {
-			return nil, err
-		}
+	if !h.armed.CompareAndSwap(true, false) {
+		return h.RwDB.BeginRo(ctx)
 	}
-	return h.RwDB.BeginRo(ctx)
+	if !h.opened {
+		h.err = h.moved()
+		return h.RwDB.BeginRo(ctx)
+	}
+	return h.after(h.RwDB.BeginRo(ctx))
+}
+
+// after runs moved on the open read.
+func (h *beginHook) after(tx kv.Tx, err error) (kv.Tx, error) {
+	if err == nil {
+		h.err = h.moved()
+	}
+	return tx, err
 }
 
 // TestProvideTxnsKeepsTheParentAcrossTheRead: the pool's view moving off
@@ -4096,6 +4109,7 @@ func TestProvideTxnsKeepsTheParentAcrossTheRead(t *testing.T) {
 		defer cancel()
 		require.ErrorIs(t, byHash(short), context.DeadlineExceeded, "provided from the view of another block")
 		require.False(t, hook.armed.Load())
+		require.NoError(t, hook.err)
 	})
 	t.Run("moved back", func(t *testing.T) {
 		require.NoError(t, on(a)())
@@ -4103,6 +4117,7 @@ func TestProvideTxnsKeepsTheParentAcrossTheRead(t *testing.T) {
 		hook.armed.Store(true)
 		start := later(t, on(a))
 		require.NoError(t, byHash(t.Context()))
+		require.NoError(t, hook.err)
 		require.GreaterOrEqual(t, time.Since(start), back, "provided before the view came back")
 	})
 	t.Run("lowered", func(t *testing.T) {
@@ -4113,8 +4128,28 @@ func TestProvideTxnsKeepsTheParentAcrossTheRead(t *testing.T) {
 		start := later(t, func() error { return apply(block(2, c)) })
 		_, err := pool.ProvideTxns(t.Context(), txnprovider.WithParentBlockNum(2))
 		require.NoError(t, err)
+		require.NoError(t, hook.err)
 		require.GreaterOrEqual(t, time.Since(start), back, "provided below the parent's height")
 	})
+}
+
+// TestProvideTxnsAcrossAFlush: a flush while a provider opens its read of the
+// pool moves the RLP of the freshest transactions to rows that read does not
+// see; the provider reads again and still yields them.
+func TestProvideTxnsAcrossAFlush(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 21_000)
+	hook := &beginHook{RwDB: pool.poolDB, opened: true}
+	pool.poolDB = hook
+	hook.moved = func() error {
+		_, err := pool.flush(t.Context())
+		return err
+	}
+	hook.armed.Store(true)
+	txns, err := pool.ProvideTxns(t.Context())
+	require.NoError(t, err)
+	require.False(t, hook.armed.Load(), "no flush ran")
+	require.NoError(t, hook.err)
+	require.Len(t, txns, 1, "the flushed transaction was skipped")
 }
 
 // TestProvideTxnsOnTheHeadAfterStart: a pool started from its database, no

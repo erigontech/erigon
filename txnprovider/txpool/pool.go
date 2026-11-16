@@ -151,6 +151,7 @@ type TxPool struct {
 	stateBlockHash          common.Hash // Head of the pool's state view; pins frame validation to the same block
 	lastSeenBlock           atomic.Uint64
 	lastSeenHash            common.Hash // Hash of lastSeenBlock; set with it, under lock
+	flushes                 uint64      // Flushes committed, under lock: each moves RLP out of memory
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
 	started                 atomic.Bool
@@ -871,17 +872,19 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		// won't work well if we wait in the "Waiting for block" loop for a while since our RoTx will then see stale data.
 		// Instead, we can release p.lock once we're past "Waiting for block" -> try to acquire RoTx -> try to acquire
 		// p.lock again as everywhere else.
+		flushes := p.flushes
 		p.lock.Unlock()
 		var err error
 		if tx, err = p.poolDB.BeginRo(ctx); err != nil {
 			return false, 0, err
 		}
 		p.lock.Lock()
-		if p.seenLocked(onTopOf, parentHash) {
+		// A block update while the lock was free moved the view off the one
+		// the wait accepted: select from no other. A flush moved RLP out of
+		// memory to rows the read predates: read again.
+		if p.seenLocked(onTopOf, parentHash) && p.flushes == flushes {
 			break
 		}
-		// A block update while the lock was free moved the view off the one
-		// the wait accepted: select from no other.
 		p.lock.Unlock()
 		tx.Rollback()
 	}
@@ -960,8 +963,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			return false, count, err
 		}
 		if len(rlpTxn) == 0 {
-			// The snapshot was taken before the pool lock was retaken; a flush in between moved the RLP to a row it does
-			// not see. The next call reads it.
+			// Neither in memory nor in the read: a flush released the RLP and failed to commit it.
 			continue
 		}
 
@@ -2990,6 +2992,7 @@ func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	}); err != nil {
 		return 0, err
 	}
+	p.flushes++
 	return written, nil
 }
 
