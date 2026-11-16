@@ -57,14 +57,14 @@ func TestDecide(t *testing.T) {
 		inFlight     bool
 		want         emission
 	}{
-		{"steady", 0, 8, sequencer.ModeSteady, target, false, emission{emitAnchor, 0, 8, post.Target{Block: target, Time: ts}}},
-		{"catch-up", 0, 8, sequencer.ModeCatchup, target, false, emission{emitAnchor, 0, 8, post.Target{}}},
+		{"steady", 0, 8, sequencer.ModeSteady, target, false, emission{kind: emitAnchor, cursor: 0, sync: 8, target: post.Target{Block: target, Time: ts}}},
+		{"catch-up", 0, 8, sequencer.ModeCatchup, target, false, emission{kind: emitAnchor, cursor: 0, sync: 8}},
 		{"empty", 0, 8, sequencer.ModeEmpty, 0, false, emission{}},
 		{"in flight", 0, 8, sequencer.ModeSteady, target, true, emission{}},
-		{"cap", 4, 12, sequencer.ModeSteady, target, false, emission{emitAnchor, 4, 12, post.Target{Block: target, Time: ts}}},
-		{"backlog", 0, 12, sequencer.ModeSteady, target, false, emission{emitChunk, 0, 12, post.Target{Block: target}}},
-		{"backlog in catch-up", 0, 12, sequencer.ModeCatchup, target, false, emission{emitChunk, 0, 12, post.Target{Block: target}}},
-		{"backlog of an empty slot", 0, 12, sequencer.ModeEmpty, 0, false, emission{emitChunk, 0, 12, post.Target{}}},
+		{"cap", 4, 12, sequencer.ModeSteady, target, false, emission{kind: emitAnchor, cursor: 4, sync: 12, target: post.Target{Block: target, Time: ts}}},
+		{"backlog", 0, 12, sequencer.ModeSteady, target, false, emission{kind: emitChunk, cursor: 0, sync: 12, target: post.Target{Block: target}}},
+		{"backlog in catch-up", 0, 12, sequencer.ModeCatchup, target, false, emission{kind: emitChunk, cursor: 0, sync: 12, target: post.Target{Block: target}}},
+		{"backlog of an empty slot", 0, 12, sequencer.ModeEmpty, 0, false, emission{kind: emitChunk, cursor: 0, sync: 12}},
 		{"backlog in flight", 0, 12, sequencer.ModeSteady, target, true, emission{}},
 	} {
 		t.Run(r.name, func(t *testing.T) {
@@ -139,6 +139,8 @@ func (w witnessStore) Get(_ context.Context, n uint64, _ common.Hash) (json.RawM
 var testProof = bytes.Repeat([]byte{0x11}, 65)
 
 type proven struct {
+	l1Parent   common.Hash
+	time       uint64
 	from, to   uint64
 	batch      *protocol.ProofSystemBatch
 	start      time.Time
@@ -159,7 +161,7 @@ func (p *testProver) ProveBy(ctx context.Context, w *prove.Window, start time.Ti
 	if p.before != nil {
 		p.before()
 	}
-	got := proven{from: w.From, to: w.To, batch: w.Batch, start: start, per: per}
+	got := proven{l1Parent: w.L1Parent, time: w.Time, from: w.From, to: w.To, batch: w.Batch, start: start, per: per}
 	if w.Anchor == nil || w.Anchor.Number.Uint64()+1 != w.From {
 		return nil, errors.New("window without its anchor")
 	}
@@ -183,14 +185,15 @@ func (p *testProver) ProveBy(ctx context.Context, w *prove.Window, start time.Ti
 }
 
 type testPoster struct {
-	key    *ecdsa.PrivateKey
-	mu     sync.Mutex
-	inputs [][]byte
-	gas    []uint64
-	txs    []types.Transaction
-	sent   []post.Target
-	sends  int
-	err    error
+	key     *ecdsa.PrivateKey
+	mu      sync.Mutex
+	inputs  [][]byte
+	gas     []uint64
+	txs     []types.Transaction
+	sent    []post.Target
+	bundles [][]common.Hash
+	sends   int
+	err     error
 	// pooled has the postings sent through the mempool.
 	pooled bool
 	// hang has Sign wait for its context.
@@ -218,6 +221,11 @@ func (p *testPoster) Send(_ context.Context, txs []types.Transaction, target pos
 	defer p.mu.Unlock()
 	p.sends++
 	p.sent = append(p.sent, target)
+	var hashes []common.Hash
+	for _, tx := range txs {
+		hashes = append(hashes, tx.Hash())
+	}
+	p.bundles = append(p.bundles, hashes)
 	if errors.Is(p.err, post.ErrUnsure) {
 		return post.Sent{Block: max(target.Block, 99), Pooled: true}, p.err
 	}

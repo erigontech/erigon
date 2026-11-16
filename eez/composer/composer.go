@@ -101,7 +101,9 @@ type Composer struct {
 	// Sync block with an empty one.
 	pool       *HeldPool
 	substitute func(ctx context.Context, failed *types.Header) (*types.Header, error)
-	logger     log.Logger
+	// x, when set, composes cross-chain effects in steady slots.
+	x      *CrossChain
+	logger log.Logger
 
 	ledger *Ledger[*Held]
 	// pending is the posting ComposeSyncSlot decided for SyncCommitted.
@@ -152,6 +154,8 @@ const (
 	emitAnchor
 	// emitChunk settles cursor+1 to an empty grid block below sync.
 	emitChunk
+	// emitEffects settles cursor+1..sync, a Sync block with effects.
+	emitEffects
 )
 
 // emission is what a Sync slot posts once its block commits.
@@ -160,6 +164,8 @@ type emission struct {
 	cursor, sync uint64
 	// target is the L1 block of the bundle; time pins a steady slot's.
 	target post.Target
+	// fx, with emitEffects, is the Sync block's composition.
+	fx *effects
 }
 
 // decide returns the posting of the Sync slot at sync on cursor: none while
@@ -171,13 +177,13 @@ func (c *Composer) decide(cursor, sync, ts, target uint64, mode sequencer.Mode, 
 	case inFlight:
 		return emission{}
 	case sync-cursor > c.cfg.MaxBlocks:
-		return emission{emitChunk, cursor, sync, post.Target{Block: target}}
+		return emission{kind: emitChunk, cursor: cursor, sync: sync, target: post.Target{Block: target}}
 	case mode == sequencer.ModeEmpty:
 		return emission{}
 	case mode == sequencer.ModeCatchup:
-		return emission{emitAnchor, cursor, sync, post.Target{}}
+		return emission{kind: emitAnchor, cursor: cursor, sync: sync}
 	}
-	return emission{emitAnchor, cursor, sync, post.Target{Block: target, Time: ts}}
+	return emission{kind: emitAnchor, cursor: cursor, sync: sync, target: post.Target{Block: target, Time: ts}}
 }
 
 // ComposeSyncSlot always answers an empty Sync block: an anchor-only batch
@@ -195,6 +201,16 @@ func (c *Composer) ComposeSyncSlot(ctx context.Context, parent *types.Header, ts
 			"sync", sync, "cursor", cursor, "inFlight", at)
 	}
 	c.pending = c.decide(cursor, sync, ts, target, mode, inFlight)
+	if e := &c.pending; c.x != nil && e.kind == emitAnchor && e.target.Time != 0 {
+		// Its L1 reads end when the slot's proof must start.
+		cctx, cancel := context.WithDeadline(ctx, time.Unix(int64(ts), 0).Add(-c.cfg.Slack-c.cfg.Proof))
+		fx := c.compose(cctx, parent, target)
+		cancel()
+		if fx != nil {
+			e.kind, e.fx = emitEffects, fx
+			return sequencer.Composed{Txs: fx.txs}
+		}
+	}
 	return sequencer.Composed{Empty: true}
 }
 
@@ -207,6 +223,10 @@ func (c *Composer) SyncCommitted(ctx context.Context, sync *types.Header) {
 	}
 	if n := sync.Number.Uint64(); n != e.sync {
 		c.logger.Warn("[eez] committed Sync block is not the composed one", "event", "eez.composer.sync.mismatch", "number", n, "composed", e.sync)
+		return
+	}
+	if e.kind == emitEffects {
+		c.postEffects(ctx, e, sync)
 		return
 	}
 	var unproven *missingWitness
@@ -338,12 +358,9 @@ func (c *Composer) postBlocks(ctx context.Context, cursor uint64, blocks []*type
 	if gas > c.cfg.MaxGas {
 		return fmt.Errorf("%w: %d over %d", errOverBudget, gas, c.cfg.MaxGas)
 	}
-	anchor, err := c.header(ctx, cursor)
+	anchor, err := c.anchor(ctx, blocks[0])
 	if err != nil {
 		return err
-	}
-	if anchor.Hash() != blocks[0].ParentHash() {
-		return fmt.Errorf("block %d is not the parent %x of block %d", cursor, blocks[0].ParentHash(), cursor+1)
 	}
 	w := &prove.Window{RollupID: c.cfg.Batcher.RollupID, Batch: batch, Anchor: anchor, From: cursor + 1, To: to, Block: c.windowBlock}
 	sig, err := c.prover.ProveBy(ctx, w, start, per)
@@ -364,13 +381,20 @@ func (c *Composer) postBlocks(ctx context.Context, cursor uint64, blocks []*type
 	if err != nil {
 		return err
 	}
-	hash := tx.Hash()
+	c.send(cursor, terminal, batch, []types.Transaction{tx}, target, nil)
+	return nil
+}
+
+// send records the posting bundle[0] of batch, cursor+1..terminal, carrying
+// held, then sends bundle for target and watches it, off the sequencer's
+// goroutine: a builder that hangs holds the verdict, not the chain.
+func (c *Composer) send(cursor uint64, terminal *types.Header, batch *protocol.ProofSystemBatch, bundle []types.Transaction, target post.Target, held []*Held) {
+	to, hash := terminal.Number.Uint64(), bundle[0].Hash()
 	judged := *batch
 	judged.CallData, judged.Proofs = nil, nil
-	watch := c.ledger.Begin(Posted[*Held]{Height: to, Post: hash, Terminal: terminal, Batch: &judged})
-	// A builder that hangs holds the bundle's verdict, not the chain.
+	watch := c.ledger.Begin(Posted[*Held]{Height: to, Post: hash, Terminal: terminal, Batch: &judged, Txs: held})
 	c.wg.Go(func() {
-		sent, err := c.poster.Send(c.ctx, []types.Transaction{tx}, target)
+		sent, err := c.poster.Send(c.ctx, bundle, target)
 		switch {
 		case errors.Is(err, post.ErrUnsure):
 			// Failing it would have the next posting take the following nonce
@@ -383,11 +407,24 @@ func (c *Composer) postBlocks(ctx context.Context, cursor uint64, blocks []*type
 			return
 		default:
 			c.logger.Info("[eez] batch posted", "event", "eez.composer.batch.posted", "from", cursor+1, "to", to, "post", hash,
-				"l1Block", sent.Block, "pinned", sent.Time != 0)
+				"l1Block", sent.Block, "pinned", sent.Time != 0, "triggers", len(held))
 		}
 		c.observe(to, hash, watch, batch, terminal, sent)
 	})
-	return nil
+}
+
+// anchor returns the header of first's parent, the block a window
+// starting at first settles from.
+func (c *Composer) anchor(ctx context.Context, first *types.Block) (*types.Header, error) {
+	n := first.NumberU64() - 1
+	h, err := c.header(ctx, n)
+	if err != nil {
+		return nil, err
+	}
+	if h.Hash() != first.ParentHash() {
+		return nil, fmt.Errorf("block %d is not the parent %x of block %d", n, first.ParentHash(), n+1)
+	}
+	return h, nil
 }
 
 // observe records the verdict of watch, a watch of hash, the posting of

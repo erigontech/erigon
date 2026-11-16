@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/eez/protocol"
+	core "github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -34,6 +35,9 @@ import (
 // executeOnBehalf is the selector of CrossChainProxy.executeOnBehalf, the
 // call EEZL2 delivers through.
 var executeOnBehalf = crypto.Keccak256([]byte("executeOnBehalf(address,uint64,bytes)"))[:4]
+
+// ErrFull reports a Sync block without the gas for one more delivery.
+var ErrFull = errors.New("the Sync block is full")
 
 // Delivery is an incoming call delivered on a Sync block draft.
 type Delivery struct {
@@ -86,7 +90,9 @@ func (in *Deliveries) Dispatch(c *Call) ([]byte, error) {
 		return nil, err
 	}
 	t := &probeTracer{eezl2: accounts.InternAddress(in.ctx.EEZL2)}
-	if _, err := fork.Apply(probe.Tx, t.hooks()); err != nil {
+	if _, err := fork.Apply(probe.Tx, t.hooks()); errors.Is(err, core.ErrGasLimitReached) {
+		return nil, ErrFull
+	} else if err != nil {
 		return nil, Poison(fmt.Errorf("probe of the delivery to %s: %w", c.Target, err))
 	}
 	if call.ReturnData, err = probed(t.captures); err != nil {
@@ -97,6 +103,9 @@ func (in *Deliveries) Dispatch(c *Call) ([]byte, error) {
 		return nil, Poison(err)
 	}
 	receipt, err := in.fork.Apply(d.Tx, nil)
+	if errors.Is(err, core.ErrGasLimitReached) {
+		return nil, ErrFull
+	}
 	if err != nil {
 		return nil, Poison(fmt.Errorf("delivery to %s: %w", c.Target, err))
 	}

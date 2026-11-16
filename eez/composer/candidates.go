@@ -54,6 +54,12 @@ func Candidates(config *chain.Config, engine rules.Engine, sync *types.Block, w 
 	if full.StateRoot != sync.Root() {
 		return nil, fmt.Errorf("%w: sync block %d", stateless.ErrStateRoot, sync.NumberU64())
 	}
+	// A failed effect is no effect a batch could claim.
+	for i, r := range full.Receipts {
+		if r.Status != types.ReceiptStatusSuccessful {
+			return nil, fmt.Errorf("sync block %d transaction %d failed", sync.NumberU64(), i)
+		}
+	}
 	txs := sync.Transactions()
 	out := make([]common.Hash, 0, len(ends)+1)
 	for _, n := range append([]int{0}, ends...) {
