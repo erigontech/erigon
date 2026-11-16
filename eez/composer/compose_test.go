@@ -26,8 +26,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/eez/prove"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -71,6 +74,10 @@ type crossFixture struct {
 	key    *ecdsa.PrivateKey
 	pool   *HeldPool
 	c      *Composer
+	// witnesses, when set, replaces the window's store; rewound records
+	// the heads the composer moves back to.
+	witnesses Witnesses
+	rewound   []common.Hash
 }
 
 func newCrossFixture(t *testing.T) *crossFixture {
@@ -209,6 +216,115 @@ func TestComposeBoundsThePostingGas(t *testing.T) {
 	})
 }
 
+// TestUncommittedCompositionRequeues: the held transactions of a composed
+// Sync block that never committed go back to the pool, in the next slot or
+// when another block commits instead.
+func TestUncommittedCompositionRequeues(t *testing.T) {
+	t.Run("the next slot", func(t *testing.T) {
+		f := newCrossFixture(t)
+		trigger := f.hold(t, 0, f.call.Source, f.call.Data)
+		c, _, _, chain := f.poster(t, nil)
+		ts := f.w.sync.Time()
+		require.Len(t, c.ComposeSyncSlot(t.Context(), chain[467].Header(), ts, 101, sequencer.ModeSteady).Txs, 1)
+		composed := c.ComposeSyncSlot(t.Context(), chain[467].Header(), ts, 101, sequencer.ModeSteady)
+		require.Len(t, composed.Txs, 1, "composed again")
+		require.Equal(t, []*Held{trigger}, c.pending.fx.held)
+	})
+	t.Run("another block", func(t *testing.T) {
+		f := newCrossFixture(t)
+		trigger := f.hold(t, 0, f.call.Source, f.call.Data)
+		c, _, _, chain := f.poster(t, nil)
+		require.Len(t, c.ComposeSyncSlot(t.Context(), chain[467].Header(), f.w.sync.Time(), 101, sequencer.ModeSteady).Txs, 1)
+		c.SyncCommitted(t.Context(), chain[467].Header())
+		require.Equal(t, []*Held{trigger}, f.pool.PopN(math.MaxInt))
+	})
+}
+
+// TestComposeLeavesTheEvictedChains: a composition stopped after an
+// eviction requeues no later nonce of the evicted chain.
+func TestComposeLeavesTheEvictedChains(t *testing.T) {
+	f := newCrossFixture(t)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	f.l1.m.fund(crypto.PubkeyToAddress(key.PublicKey), 1e18)
+	f.hold(t, 0, unproxied, nil)
+	other := *f
+	other.key = key
+	first := other.hold(t, 0, f.call.Source, f.call.Data)
+	second := other.hold(t, 1, f.call.Source, f.call.Data)
+	f.hold(t, 1, f.call.Source, f.call.Data)
+	f.c.cfg.MaxGas = drainMargin + 551_000 + 2*postBatchEntryGas - 1
+	fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+	require.NotNil(t, fx)
+	require.Equal(t, []*Held{first}, fx.held)
+	require.Equal(t, []*Held{second}, f.pool.PopN(math.MaxInt))
+}
+
+// missingAt is a witness store without the witness of block at.
+type missingAt struct {
+	syncWitness
+	at uint64
+}
+
+func (m missingAt) Get(ctx context.Context, n uint64, hash common.Hash) (json.RawMessage, error) {
+	if n == m.at {
+		return nil, nil
+	}
+	return m.syncWitness.Get(ctx, n, hash)
+}
+
+// TestComposedSyncBlockWithoutAWitness: a composed Sync block missing its
+// witness fails uncharged and has its head moved back to rebuild it.
+func TestComposedSyncBlockWithoutAWitness(t *testing.T) {
+	f := newCrossFixture(t)
+	f.hold(t, 0, f.call.Source, f.call.Data)
+	f.witnesses = missingAt{syncWitness{f.w.witness}, 468}
+	c, prover, _, chain := f.poster(t, nil)
+	composed := c.ComposeSyncSlot(t.Context(), chain[467].Header(), f.w.sync.Time(), 101, sequencer.ModeSteady)
+	sync := f.sealed(t, composed.Txs)
+	chain[sync.NumberU64()] = sync
+	c.SyncCommitted(t.Context(), sync.Header())
+	require.Empty(t, prover.proven)
+	require.Equal(t, []common.Hash{sync.ParentHash()}, f.rewound)
+	p, ok := c.ledger.TakeFailed(0)
+	require.True(t, ok)
+	require.True(t, p.SlotSkipped)
+}
+
+// TestComposedSyncBlockFailureCharges: a composition the prover refuses
+// fails charged; one it cannot reach fails uncharged.
+func TestComposedSyncBlockFailureCharges(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		err     error
+		maxGas  uint64 // of the posting, once composed
+		skipped bool
+	}{
+		{name: "a refused proof", err: status.Error(codes.InvalidArgument, "window refused")},
+		{name: "a posting over its gas", maxGas: 900_000},
+		{name: "an unreachable prover", err: status.Error(codes.Unavailable, "down"), skipped: true},
+		{name: "a cancelled proof", err: status.Error(codes.Canceled, "stopping"), skipped: true},
+		{name: "a malformed attestation", err: prove.ErrAttestation, skipped: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newCrossFixture(t)
+			f.hold(t, 0, f.call.Source, f.call.Data)
+			comp, prover, _, chain := f.poster(t, nil)
+			prover.err = c.err
+			composed := comp.ComposeSyncSlot(t.Context(), chain[467].Header(), f.w.sync.Time(), 101, sequencer.ModeSteady)
+			if c.maxGas != 0 {
+				comp.cfg.MaxGas = c.maxGas
+			}
+			sync := f.sealed(t, composed.Txs)
+			chain[sync.NumberU64()] = sync
+			comp.SyncCommitted(t.Context(), sync.Header())
+			p, ok := comp.ledger.TakeFailed(0)
+			require.True(t, ok)
+			require.Equal(t, c.skipped, p.SlotSkipped)
+		})
+	}
+}
+
 // windowChain serves recorded blocks by number.
 type windowChain map[uint64]*types.Block
 
@@ -291,7 +407,15 @@ func (f *crossFixture) poster(t *testing.T, sync *types.Block) (*Composer, *test
 	prover, poster := &testProver{}, &testPoster{key: key}
 	cfg := Config{Batcher: devnetBatcher(f.w.batch.ProofSystems[0]), K: 6, MaxBlocks: 300, MaxGas: MaxPostBatchGas, Proof: time.Second, Slack: 100 * time.Millisecond}
 	obs := &Observer{Node: quiet{}, RollupID: 1, EEZ: eezL1, Every: time.Millisecond, Logger: log.New()}
-	c := New(cfg, chain, syncWitness{f.w.witness}, prover, poster, obs, func() uint64 { return 462 }, func() uint64 { return 0 }, nil, log.New())
+	var witnesses Witnesses = syncWitness{f.w.witness}
+	if f.witnesses != nil {
+		witnesses = f.witnesses
+	}
+	headTo := func(_ context.Context, hash common.Hash) error {
+		f.rewound = append(f.rewound, hash)
+		return nil
+	}
+	c := New(cfg, chain, witnesses, prover, poster, obs, func() uint64 { return 462 }, func() uint64 { return 0 }, headTo, log.New())
 	t.Cleanup(c.Close)
 	c.CrossChain(f.c.x)
 	return c, prover, poster, chain
@@ -423,8 +547,9 @@ func TestComposedSyncBlockWithAFailedDelivery(t *testing.T) {
 	c.pending.fx.txs = []types.Transaction{bad.Tx}
 	c.SyncCommitted(t.Context(), sync.Header())
 	require.Empty(t, prover.proven)
-	_, ok := c.ledger.TakeFailed(0)
+	p, ok := c.ledger.TakeFailed(0)
 	require.True(t, ok)
+	require.False(t, p.SlotSkipped, "owed to the effect")
 }
 
 func mustDraft(t *testing.T, f *crossFixture) *Draft {

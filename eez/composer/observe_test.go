@@ -120,6 +120,10 @@ func (c *scripted) HasTransaction(context.Context, common.Hash) (bool, error) {
 	return c.has, c.lookupFailed
 }
 
+func (c *scripted) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
+	return &l1.Header{Number: n}, nil
+}
+
 func (c *scripted) Head(context.Context) (*l1.Header, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -147,6 +151,10 @@ type stalling struct {
 }
 
 func (*stalling) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 100}, nil }
+
+func (*stalling) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
+	return &l1.Header{Number: n}, nil
+}
 
 func (s *stalling) Receipt(ctx context.Context, _ common.Hash) (*l1.Receipt, error) {
 	if s.reads.Add(1) == 1 {

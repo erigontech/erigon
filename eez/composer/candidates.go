@@ -17,6 +17,7 @@
 package composer
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
@@ -26,6 +27,9 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 )
+
+// ErrFailedEffect refuses a Sync block one of whose effects failed.
+var ErrFailedEffect = errors.New("a Sync block effect failed")
 
 // PairEnds returns the lengths of the prefixes of txs that end a
 // cross-chain effect: after each user transaction, and after each system
@@ -57,7 +61,7 @@ func Candidates(config *chain.Config, engine rules.Engine, sync *types.Block, w 
 	// A failed effect is no effect a batch could claim.
 	for i, r := range full.Receipts {
 		if r.Status != types.ReceiptStatusSuccessful {
-			return nil, fmt.Errorf("sync block %d transaction %d failed", sync.NumberU64(), i)
+			return nil, fmt.Errorf("%w: sync block %d transaction %d", ErrFailedEffect, sync.NumberU64(), i)
 		}
 	}
 	txs := sync.Transactions()

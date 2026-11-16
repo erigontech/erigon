@@ -69,6 +69,9 @@ var errNoBundles = errors.New("builder has no eth_sendBundle")
 // posting may have reached L1 all the same.
 var ErrUnsure = errors.New("posting may have reached L1")
 
+// ErrBundleRefused reports a bundle the builder answered with an error.
+var ErrBundleRefused = errors.New("eth_sendBundle refused")
+
 // L1 is the L1 node a poster reads from and sends to.
 type L1 interface {
 	ChainID(ctx context.Context) (uint64, error)
@@ -371,5 +374,5 @@ func (p *Poster) bundle(ctx context.Context, raw [][]byte, block, time uint64) e
 	case answer.Error.Code == methodNotFound:
 		return errNoBundles
 	}
-	return fmt.Errorf("eth_sendBundle: %s (%d)", answer.Error.Message, answer.Error.Code)
+	return fmt.Errorf("%w: %s (%d)", ErrBundleRefused, answer.Error.Message, answer.Error.Code)
 }

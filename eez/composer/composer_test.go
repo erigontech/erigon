@@ -269,6 +269,10 @@ func (h *harness) resolution(height uint64) (Resolution, bool) {
 // quiet is an L1 on which no posting lands before the observers stop.
 type quiet struct{}
 
+func (quiet) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
+	return &l1.Header{Number: n}, nil
+}
+
 func (quiet) Head(context.Context) (*l1.Header, error)                  { return &l1.Header{Number: 1}, nil }
 func (quiet) Receipt(context.Context, common.Hash) (*l1.Receipt, error) { return nil, nil }
 func (quiet) HasTransaction(context.Context, common.Hash) (bool, error) { return false, nil }
@@ -533,6 +537,10 @@ type settling struct {
 	t        *testing.T
 }
 
+func (s settling) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
+	return &l1.Header{Number: n}, nil
+}
+
 func (s settling) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1}, nil }
 
 func (settling) HasTransaction(context.Context, common.Hash) (bool, error) { return true, nil }
@@ -666,6 +674,11 @@ func (hung) Head(ctx context.Context) (*l1.Header, error) {
 	return nil, ctx.Err()
 }
 
+func (hung) HeaderByNumber(ctx context.Context, _ uint64) (*l1.Header, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 func (hung) Receipt(ctx context.Context, _ common.Hash) (*l1.Receipt, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()
@@ -735,6 +748,13 @@ func (r *rolling) Head(context.Context) (*l1.Header, error) {
 		return nil, errors.New("node down")
 	}
 	return &l1.Header{Number: r.head.Load()}, nil
+}
+
+func (r *rolling) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
+	if r.down.Load() {
+		return nil, errors.New("node down")
+	}
+	return &l1.Header{Number: n}, nil
 }
 
 func (r *rolling) Receipt(context.Context, common.Hash) (*l1.Receipt, error) {
@@ -814,6 +834,65 @@ func TestComposerFallsBackFromAFreshCursor(t *testing.T) {
 	require.Equal(t, [2]uint64{5, 8}, [2]uint64{h.prover.proven[1].from, h.prover.proven[1].to})
 }
 
+// slotted is an L1 on which no posting lands, its block of number n having
+// time times[n].
+type slotted struct{ times map[uint64]uint64 }
+
+func (slotted) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1 << 20}, nil }
+
+func (s slotted) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
+	return &l1.Header{Number: n, Time: s.times[n]}, nil
+}
+
+func (slotted) Receipt(context.Context, common.Hash) (*l1.Receipt, error) { return nil, nil }
+func (slotted) HasTransaction(context.Context, common.Hash) (bool, error) { return false, nil }
+
+// TestComposerChargesOnlyItsOwnFailures: a batch that failed in its L1 slot,
+// or that the builder refused, failed for what it holds; one whose slot no
+// block took, or that never reached the builder, did not.
+func TestComposerChargesOnlyItsOwnFailures(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		shift   uint64 // of the time of the target block from the pin
+		send    error
+		skipped bool
+	}{
+		{name: "a failure in its slot"},
+		{name: "a missed slot", shift: 12, skipped: true},
+		{name: "a refused bundle", send: fmt.Errorf("%w: simulation reverted (-32000)", post.ErrBundleRefused)},
+		{name: "a transport failure", send: errors.New("connection refused"), skipped: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			chain := newTestChain(t, 8)
+			ts := chain.header(8).Time
+			h := newHarness(t, chain, 8, slotted{times: map[uint64]uint64{100: ts + c.shift}})
+			h.poster.err = c.send
+			h.slot(t, 8, 100, sequencer.ModeSteady)
+			require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Failed }, 5*time.Second, time.Millisecond)
+			h.c.ledger.mu.Lock()
+			defer h.c.ledger.mu.Unlock()
+			require.Equal(t, c.skipped, h.c.ledger.entries[8].SlotSkipped)
+		})
+	}
+}
+
+// TestComposerReleasesSettledTransactions: once derivation passes a
+// settled batch, its held transactions are no longer reserved.
+func TestComposerReleasesSettledTransactions(t *testing.T) {
+	h := newHarness(t, newTestChain(t, 8), 8, nil)
+	pool := NewHeldPool()
+	h.c.Recover(pool, nil)
+	tx := held(addr(0xa), 0, Inbound, 1)
+	require.NoError(t, pool.Push(tx, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Txs: pool.PopN(1)})
+	h.c.ledger.MarkSettled(8, common.Hash{0xf})
+	h.cursor.Store(8)
+	h.c.RecoverFailed(t.Context())
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	require.Empty(t, pool.inFlight)
+}
+
 // TestComposerChunkWithinTheGasLimit: a candidate over the gas limit gives
 // way to the next one down the grid.
 func TestComposerChunkWithinTheGasLimit(t *testing.T) {
@@ -848,6 +927,10 @@ func (l *landing) Head(context.Context) (*l1.Header, error) {
 
 func (l *landing) HasTransaction(context.Context, common.Hash) (bool, error) {
 	return !l.gone.Load() || l.pooled.Load(), nil
+}
+
+func (l *landing) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
+	return &l1.Header{Number: n}, nil
 }
 
 func (l *landing) Receipt(context.Context, common.Hash) (*l1.Receipt, error) {
@@ -992,6 +1075,10 @@ func TestComposerAuditsFinality(t *testing.T) {
 type triggers struct {
 	landed map[common.Hash]bool
 	failed error
+}
+
+func (l *triggers) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
+	return &l1.Header{Number: n}, nil
 }
 
 func (l *triggers) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1}, nil }

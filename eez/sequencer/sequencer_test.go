@@ -1142,7 +1142,10 @@ func (*chunkPoster) Send(context.Context, []types.Transaction, post.Target) (pos
 // idleL1 is an L1 on which no posting lands.
 type idleL1 struct{}
 
-func (idleL1) Head(context.Context) (*l1.Header, error)                  { return &l1.Header{}, nil }
+func (idleL1) Head(context.Context) (*l1.Header, error) { return &l1.Header{}, nil }
+func (idleL1) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
+	return &l1.Header{Number: n}, nil
+}
 func (idleL1) Receipt(context.Context, common.Hash) (*l1.Receipt, error) { return nil, nil }
 func (idleL1) HasTransaction(context.Context, common.Hash) (bool, error) { return false, nil }
 

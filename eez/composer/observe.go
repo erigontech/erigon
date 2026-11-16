@@ -32,6 +32,7 @@ import (
 // Receipts is the L1 an observer reads.
 type Receipts interface {
 	Head(ctx context.Context) (*l1.Header, error)
+	HeaderByNumber(ctx context.Context, number uint64) (*l1.Header, error)
 	Receipt(ctx context.Context, hash common.Hash) (*l1.Receipt, error)
 	// HasTransaction reports whether the node has the transaction, pooled
 	// or in a block.

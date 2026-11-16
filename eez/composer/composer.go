@@ -186,9 +186,12 @@ func (c *Composer) decide(cursor, sync, ts, target uint64, mode sequencer.Mode, 
 	return emission{kind: emitAnchor, cursor: cursor, sync: sync, target: post.Target{Block: target, Time: ts}}
 }
 
-// ComposeSyncSlot always answers an empty Sync block: an anchor-only batch
-// carries no actions, from which derivation would rebuild its transactions.
+// ComposeSyncSlot answers the Sync block's transactions in a steady slot
+// that composes held transactions, else an empty Sync block: an
+// anchor-only batch carries no actions, from which derivation would rebuild
+// its transactions.
 func (c *Composer) ComposeSyncSlot(ctx context.Context, parent *types.Header, ts, target uint64, mode sequencer.Mode) sequencer.Composed {
+	c.abandon()
 	cursor := c.settle(ctx)
 	sync := parent.Number.Uint64() + 1
 	at, inFlight := c.ledger.Blocking(cursor)
@@ -223,6 +226,8 @@ func (c *Composer) SyncCommitted(ctx context.Context, sync *types.Header) {
 	}
 	if n := sync.Number.Uint64(); n != e.sync {
 		c.logger.Warn("[eez] committed Sync block is not the composed one", "event", "eez.composer.sync.mismatch", "number", n, "composed", e.sync)
+		c.pending = e
+		c.abandon()
 		return
 	}
 	if e.kind == emitEffects {
@@ -257,6 +262,19 @@ func (c *Composer) SyncCommitted(ctx context.Context, sync *types.Header) {
 		c.logger.Error("[eez] block has no witness, head moved back to rebuild it", "event", "eez.composer.witness.missing",
 			"number", unproven.number, "err", err)
 	}
+}
+
+// abandon returns the transactions of a composition whose Sync block never
+// committed to the pool.
+func (c *Composer) abandon() {
+	e := c.pending
+	c.pending = emission{}
+	if e.fx == nil {
+		return
+	}
+	c.logger.Warn("[eez] composed Sync block not committed, its transactions wait", "event", "eez.composer.sync.uncommitted",
+		"sync", e.sync, "held", len(e.fx.held))
+	c.x.Pool.PushFront(e.fx.held)
 }
 
 // missingWitness reports a block whose witness the store lacks.
@@ -402,7 +420,8 @@ func (c *Composer) send(cursor uint64, terminal *types.Header, batch *protocol.P
 			c.logger.Warn("[eez] batch may have been sent, watching it", "event", "eez.composer.batch.unsure", "to", to, "post", hash,
 				"l1Block", sent.Block, "err", err)
 		case err != nil:
-			c.ledger.Report(to, hash, watch, Failed, true)
+			// A bundle the builder refused may be refused for what it holds.
+			c.ledger.Report(to, hash, watch, Failed, !errors.Is(err, post.ErrBundleRefused))
 			c.logger.Warn("[eez] batch not sent", "event", "eez.composer.batch.unsent", "to", to, "post", hash, "err", err)
 			return
 		default:
@@ -434,7 +453,7 @@ func (c *Composer) observe(to uint64, hash common.Hash, watch uint64, batch *pro
 	if err != nil {
 		return
 	}
-	c.ledger.Report(to, hash, watch, verdict, false)
+	c.ledger.Report(to, hash, watch, verdict, verdict == Failed && c.missed(sent))
 	c.logger.Info("[eez] batch verdict", "event", "eez.composer.batch.verdict", "to", to, "post", hash, "verdict", verdict)
 }
 
@@ -455,6 +474,18 @@ func (c *Composer) header(ctx context.Context, n uint64) (*types.Header, error) 
 		err = fmt.Errorf("no canonical block %d", n)
 	}
 	return h, err
+}
+
+// missed reports a posting pinned to an L1 slot no block took: the block
+// of its number has another time, or reads none.
+func (c *Composer) missed(sent post.Sent) bool {
+	if sent.Time == 0 {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, c.cfg.L1Read)
+	defer cancel()
+	h, err := c.observer.Node.HeaderByNumber(ctx, sent.Block)
+	return err != nil || h == nil || h.Time != sent.Time
 }
 
 // windowBlock returns block n with its witness from the store.
@@ -611,7 +642,7 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 			}
 		}
 	}
-	c.ledger.ResolveBelowCursor(cursor)
+	c.release(c.ledger.ResolveBelowCursor(cursor))
 	for {
 		p, ok := c.ledger.PartialToDispose(cursor)
 		if !ok {
@@ -654,6 +685,13 @@ func (c *Composer) head() (uint64, bool) {
 			return 0, false
 		case <-time.After(c.observer.Every):
 		}
+	}
+}
+
+// release ends the reservations of txs, which a batch settled.
+func (c *Composer) release(txs []*Held) {
+	if c.pool != nil && len(txs) > 0 {
+		c.pool.Release(txs)
 	}
 }
 

@@ -23,6 +23,9 @@ import (
 	"slices"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/eez/internal/stateless"
 	"github.com/erigontech/erigon/eez/l1"
@@ -90,6 +93,7 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 	}
 	fx := &effects{}
 	rest := held
+	var evicted []*Held
 	err := func() error {
 		var err error
 		if fx.anchor, err = c.x.L1Hash(ctx, target-1); err != nil {
@@ -108,7 +112,6 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 					return err
 				}
 				gas := newBudget(c.cfg.MaxGas)
-				var evicted []*Held
 				for len(rest) > 0 {
 					h := rest[0]
 					if slices.ContainsFunc(evicted, func(e *Held) bool { return e.chainKey() == h.chainKey() && h.Nonce > e.Nonce }) {
@@ -179,6 +182,10 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 		c.logger.Warn("[eez] composition stopped, the rest waits for the next slot", "event", "eez.composer.compose.stopped",
 			"composed", len(fx.held), "waiting", len(rest), "err", err)
 	}
+	// Evict took the chains of the evicted out of the pool.
+	rest = slices.DeleteFunc(rest, func(h *Held) bool {
+		return slices.ContainsFunc(evicted, func(e *Held) bool { return e.chainKey() == h.chainKey() && h.Nonce > e.Nonce })
+	})
 	c.x.Pool.PushFront(rest)
 	if len(fx.held) == 0 {
 		return nil
@@ -203,7 +210,27 @@ func (c *Composer) postEffects(ctx context.Context, e emission, sync *types.Head
 	c.logger.Warn("[eez] composed Sync block not posted, it will be replaced", "event", "eez.composer.effects.failed",
 		"sync", e.sync, "err", err)
 	watch := c.ledger.Begin(Posted[*Held]{Height: e.sync, Terminal: sync, Txs: e.fx.held})
-	c.ledger.Report(e.sync, common.Hash{}, watch, Failed, true)
+	c.ledger.Report(e.sync, common.Hash{}, watch, Failed, !owed(err))
+	if unproven := (*missingWitness)(nil); errors.As(err, &unproven) {
+		// Rebuilt, the block's witness is captured again.
+		err := c.headTo(ctx, unproven.parent)
+		c.logger.Error("[eez] block has no witness, head moved back to rebuild it", "event", "eez.composer.witness.missing",
+			"number", unproven.number, "err", err)
+	}
+}
+
+// owed reports a failure to post a composition that lies with what it
+// composed, which the same composition meets again: an effect that failed,
+// a posting over its gas, a proof the prover refused.
+func owed(err error) bool {
+	if errors.Is(err, ErrFailedEffect) || errors.Is(err, errOverBudget) {
+		return true
+	}
+	switch status.Code(err) {
+	case codes.OK, codes.Unknown, codes.Canceled:
+		return false
+	}
+	return !prove.Retryable(err)
 }
 
 func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.Header) error {
