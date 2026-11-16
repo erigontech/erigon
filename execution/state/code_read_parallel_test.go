@@ -300,7 +300,7 @@ func TestCodeSegment_RecordsTheSameHeaderWithoutBytes(t *testing.T) {
 }
 
 // A repeated segment read of one address reads the whole code once and copies the rest from it.
-func TestCodeSegment_RepeatedReadDecodesOnce(t *testing.T) {
+func TestCodeSegment_RepeatedReadCopiesFromTheRecord(t *testing.T) {
 	ibs, reader, addr, code := newSegmentRead(t, NewVersionMap(nil))
 	for range 4 {
 		got, err := segmentOf(ibs, addr, len(code))
@@ -309,6 +309,9 @@ func TestCodeSegment_RepeatedReadDecodesOnce(t *testing.T) {
 	}
 	require.Equal(t, 1, reader.segmentReads)
 	require.Equal(t, 1, reader.fullReads)
+	read, ok := ibs.versionedReads.GetCode(addr)
+	require.True(t, ok)
+	require.Equal(t, code, read.Val.Bytes, "the record keeps the code for later copies")
 }
 
 func TestCodeSegment_LaterReadSeesFullCode(t *testing.T) {

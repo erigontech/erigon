@@ -1292,7 +1292,7 @@ type codeSegment struct {
 
 // readCodeSegment is readCode; with seg, a first read that reaches the state reader copies the segment
 // into seg.dst and records the read without the code bytes. A repeated read of the same address reads
-// the whole code once and keeps it in the record, so later copies do not decode it again.
+// the whole code once and keeps it in the record, so later copies skip the state reader.
 func readCodeSegment(s *IntraBlockState, addr accounts.Address, seg *codeSegment) (accounts.Code, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
