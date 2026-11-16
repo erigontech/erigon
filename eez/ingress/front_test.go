@@ -52,10 +52,20 @@ var (
 // source is a chain where target has code, every sender a balance and nonce.
 type source struct {
 	mu      sync.Mutex
+	chainID uint64
 	balance uint64
 	nonce   uint64
 	failed  error
 	reads   int
+	// ids counts the chain id reads.
+	ids int
+}
+
+func (s *source) ChainID(context.Context) (uint64, error) {
+	s.mu.Lock()
+	s.ids++
+	s.mu.Unlock()
+	return s.chainID, s.read()
 }
 
 func (s *source) read() error {
@@ -109,7 +119,7 @@ func newFront(t *testing.T, direction composer.Direction) *harness {
 	t.Helper()
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	h := &harness{src: &source{balance: math.MaxUint64}, up: &upstream{}, key: key, cap: 16_777_216, capped: true}
+	h := &harness{src: &source{chainID: chainID, balance: math.MaxUint64}, up: &upstream{}, key: key, cap: 16_777_216, capped: true}
 	up := httptest.NewServer(h.up)
 	t.Cleanup(up.Close)
 	h.front = &Front{
@@ -302,6 +312,10 @@ func TestFrontRefuses(t *testing.T) {
 			setup: func(h *harness) { h.src.failed = down }, want: []string{"node down"}, reads: true,
 		},
 		{
+			name: "a source on another chain", tx: func(h *harness) []byte { return h.sign(t, dynamic(0, 100_000, ptr(target)), chainID) },
+			setup: func(h *harness) { h.src.chainID = 99 }, want: []string{"reads chain 99"}, reads: true,
+		},
+		{
 			name: "rules unknown", tx: func(h *harness) []byte { return h.sign(t, dynamic(0, 100_000, ptr(target)), chainID) },
 			setup: func(h *harness) { h.capError = down }, want: []string{"gas limit lookup failed"},
 		},
@@ -354,6 +368,15 @@ func TestFrontFundsTheChain(t *testing.T) {
 
 // TestFrontReservations: a nonce drained for a batch is not taken again, and
 // the chain continues above it.
+// TestFrontBindsOnce: the source's chain id is read for the first
+// transaction held, not for the next.
+func TestFrontBindsOnce(t *testing.T) {
+	h := newFront(t, composer.Inbound)
+	require.Nil(t, h.send(t, h.sign(t, dynamic(0, 100_000, ptr(target)), chainID)).Error)
+	require.Nil(t, h.send(t, h.sign(t, dynamic(1, 100_000, ptr(target)), chainID)).Error)
+	require.Equal(t, 1, h.src.ids)
+}
+
 func TestFrontReservations(t *testing.T) {
 	h := newFront(t, composer.Inbound)
 	require.Nil(t, h.send(t, h.sign(t, dynamic(0, 100_000, ptr(target)), chainID)).Error)
