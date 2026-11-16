@@ -189,6 +189,7 @@ func TestBoundedGetLatestDoesNotPopulateBranchCache(t *testing.T) {
 }
 
 func TestBoundedGetLatestIgnoresBranchCache(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(16)
 	for _, source := range []string{"read_fill", "committed_write"} {
 		t.Run(source, func(t *testing.T) {
