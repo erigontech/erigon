@@ -51,3 +51,29 @@ func TestProxyKey(t *testing.T) {
 	require.Equal(t, crypto.Keccak256Hash(preimage[:]), ProxyKey(proxy))
 	require.NotEqual(t, ProxyKey(proxy), ProxyKey(common.HexToAddress("0x11")))
 }
+
+// TestProxyCalls: the manager's and the proxy's entrypoints, selectors
+// pinned to the protocol's.
+func TestProxyCalls(t *testing.T) {
+	original := common.HexToAddress("0x277aF7Ba0CFBD9455Aa0401528f4BcEC683EA27E")
+	args := "000000000000000000000000277af7ba0cfbd9455aa0401528f4bcec683ea27e" +
+		"0000000000000000000000000000000000000000000000000000000000000001"
+	require.Equal(t, common.FromHex("0xeb20c0aa"+args), EncodeComputeCrossChainProxyAddress(original, 1))
+	require.Equal(t, common.FromHex("0xa7587c62"+args), EncodeCreateCrossChainProxy(original, 1))
+
+	target := common.HexToAddress("0x2E983A1Ba5e8b38AAAeC4B440B9dDcFBf72E15d1")
+	enc, err := EncodeExecuteOnBehalf(target, 0, []byte{0x55, 0x24, 0x10, 0x77, 0x01})
+	require.NoError(t, err)
+	require.Equal(t, common.FromHex("0x8205f3e1"+
+		"0000000000000000000000002e983a1ba5e8b38aaaec4b440b9ddcfbf72e15d1"+
+		"0000000000000000000000000000000000000000000000000000000000000000"+
+		"0000000000000000000000000000000000000000000000000000000000000060"+
+		"0000000000000000000000000000000000000000000000000000000000000005"+
+		"5524107701000000000000000000000000000000000000000000000000000000"), enc)
+
+	a, err := DecodeAddressReturn(common.FromHex("0x0000000000000000000000001fc99e43b3dbecfe7dfe20ae0acbd58deea30cf7"))
+	require.NoError(t, err)
+	require.Equal(t, common.HexToAddress("0x1Fc99E43B3DBECFe7dFe20Ae0ACbD58dEea30cf7"), a)
+	_, err = DecodeAddressReturn([]byte{1})
+	require.Error(t, err)
+}

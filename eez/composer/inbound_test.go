@@ -303,7 +303,7 @@ func TestDeliveriesRefuseATargetAnsweringOtherwise(t *testing.T) {
 
 func TestProbeTracer(t *testing.T) {
 	eezl2, other := accounts.InternAddress(protocol.EEZL2Address), accounts.InternAddress(common.HexToAddress("0x5"))
-	deliver := append(slices.Clone(executeOnBehalf), 1, 2)
+	deliver := append(slices.Clone(protocol.ExecuteOnBehalfSelector[:]), 1, 2)
 	p := &probeTracer{eezl2: eezl2}
 	h := p.hooks()
 	enter := func(op vm.OpCode, from accounts.Address, input []byte) {

@@ -24,7 +24,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/eez/protocol"
 	core "github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -32,10 +31,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
-
-// executeOnBehalf is the selector of CrossChainProxy.executeOnBehalf, the
-// call EEZL2 delivers through.
-var executeOnBehalf = crypto.Keccak256([]byte("executeOnBehalf(address,uint64,bytes)"))[:4]
 
 // ErrFull reports a Sync block without the gas for one more delivery.
 var ErrFull = errors.New("the Sync block is full")
@@ -177,7 +172,7 @@ type probeTracer struct {
 func (p *probeTracer) hooks() *tracing.Hooks {
 	return &tracing.Hooks{
 		OnEnter: func(_ int, typ byte, from, _ accounts.Address, _ bool, input []byte, _ uint64, _ uint256.Int, _ []byte) {
-			p.frames = append(p.frames, vm.OpCode(typ) == vm.CALL && from == p.eezl2 && bytes.HasPrefix(input, executeOnBehalf))
+			p.frames = append(p.frames, vm.OpCode(typ) == vm.CALL && from == p.eezl2 && bytes.HasPrefix(input, protocol.ExecuteOnBehalfSelector[:]))
 		},
 		OnExit: func(_ int, output []byte, _ uint64, err error, reverted bool) {
 			matched := p.frames[len(p.frames)-1]
