@@ -278,7 +278,9 @@ func Store(
 			return fmt.Errorf("blob sidecar at index %d carries a commitment the block does not reference", sidecar.Index)
 		}
 		if sidecar.KzgProof == common.Bytes48(goethkzg.PointAtInfinity) {
-			proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(&sidecar.Blob), goethkzg.KZGCommitment(sidecar.KzgCommitment), 0)
+			// One goroutine: callers bound concurrency by their worker count, and spreading one proof over every CPU
+			// costs more CPU time in total.
+			proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(&sidecar.Blob), goethkzg.KZGCommitment(sidecar.KzgCommitment), 1)
 			if err != nil {
 				return fmt.Errorf("blob sidecar at index %d: compute its KZG proof: %w", sidecar.Index, err)
 			}
