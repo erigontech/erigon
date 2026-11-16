@@ -18,6 +18,7 @@ package sentinel
 
 import (
 	"context"
+	"net"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +27,13 @@ import (
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/p2p/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/p2p/discover"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 	libp2p "github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -320,4 +328,90 @@ func TestGoRoutinesOpeningPeerConnectionsConst(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, 4, goRoutinesOpeningPeerConnections,
 		"goRoutinesOpeningPeerConnections must be 4; changing this affects concurrency bounds")
+}
+
+// A discv5 walk that finds no node blocks in Next; the search must still end when its context does.
+func TestFindPeersForSubnetsEndsWithItsContext(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	db, err := enode.OpenDBEx(t.Context(), "", t.TempDir(), log.Root())
+	require.NoError(t, err)
+	defer db.Close()
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	require.NoError(t, err)
+	listener, err := discover.ListenV5(t.Context(), conn, enode.NewLocalNode(db, key), discover.Config{PrivateKey: key, Log: log.Root()})
+	require.NoError(t, err)
+	defer listener.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	s := &Sentinel{ctx: ctx, listener: listener, cfg: &SentinelConfig{}}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.findPeersForSubnets([]subnetSearchState{{idx: 0, wanted: 1}})
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the search outlived its context")
+	}
+}
+
+func newTestDiscoveryListener(t *testing.T, bootnodes []*enode.Node) *discover.UDPv5 {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	listener, err := p2p.NewUDPv5Listener(t.Context(), &p2p.P2PConfig{IpAddr: "127.0.0.1", TmpDir: t.TempDir()},
+		discover.Config{PrivateKey: key, Bootnodes: bootnodes, Log: log.Root()}, log.Root())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		listener.Close()
+		listener.LocalNode().Database().Close() // Close does not close it, and Windows cannot remove an open file
+	})
+	return listener
+}
+
+// When discovery offers only nodes of another fork, the filter keeps rejecting them inside Next; peer discovery must
+// still end with the sentinel's context.
+func TestListenForPeersEndsWithItsContextWhileTheFilterRejectsEveryNode(t *testing.T) {
+	offFork := newTestDiscoveryListener(t, nil)
+	offFork.LocalNode().Set(enr.WithEntry("eth2", []byte{9, 9, 9, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}))
+	listener := newTestDiscoveryListener(t, []*enode.Node{offFork.Self()})
+
+	rejected := make(chan struct{}, 1)
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().CurrentForkDigest().DoAndReturn(func() (common.Bytes4, error) {
+		select {
+		case rejected <- struct{}{}:
+		default:
+		}
+		return common.Bytes4{1, 2, 3, 4}, nil
+	}).AnyTimes()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	s := &Sentinel{
+		ctx:      ctx,
+		listener: listener,
+		ethClock: clock,
+		cfg:      &SentinelConfig{P2PConfig: p2p.P2PConfig{NetworkConfig: &clparams.NetworkConfig{Eth2key: "eth2"}}},
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.listenForPeers()
+	}()
+	select {
+	case <-rejected:
+	case <-time.After(10 * time.Second):
+		t.Fatal("discovery never offered the node of another fork")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("peer discovery outlived its context")
+	}
 }
