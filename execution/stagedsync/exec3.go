@@ -279,7 +279,7 @@ func ExecV3(ctx context.Context,
 		return out, nil
 	}
 
-	execErr = execV3Finalize(ctx, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
+	execErr = execV3Finalize(ctx, cfg, doms, startBlockNum, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
 		lastHeader, shouldReportToTxPool, logPrefix, logger)
 	return finalizeExecV3Outcome(out, execErr)
 }
@@ -295,7 +295,7 @@ func finalizeExecV3Outcome(out execV3Outcome, err error) (execV3Outcome, error) 
 // execV3Finalize runs the post-exec tail of ExecV3: the frozen-step commitment guard and the
 // tx-pool block-progress notification. It never unwinds — that is the caller's job.
 func execV3Finalize(ctx context.Context, cfg ExecuteBlockCfg, doms *execctx.SharedDomains,
-	lastCommittedTxNum, lastCommittedBlockNum uint64, lastHeader *types.Header,
+	firstBlockNum, lastCommittedTxNum, lastCommittedBlockNum uint64, lastHeader *types.Header,
 	shouldReportToTxPool bool, logPrefix string, logger log.Logger,
 ) error {
 	lastCommittedStep := kv.Step(lastCommittedTxNum / doms.StepSize())
@@ -320,7 +320,7 @@ func execV3Finalize(ctx context.Context, cfg ExecuteBlockCfg, doms *execctx.Shar
 		// However, we should still at the very least report the last block number to it, so it can update its block progress.
 		// Otherwise, we can get in a deadlock situation when there is a block building request in environments where
 		// the Erigon process is the only block builder (e.g. some Hive tests, kurtosis testnets with one erigon block builder, etc.)
-		cfg.notifications.Accumulator.StartChange(lastHeader, nil, false /* unwind */)
+		cfg.notifications.Accumulator.StartIncompleteRange(firstBlockNum, lastHeader)
 	}
 
 	return nil
