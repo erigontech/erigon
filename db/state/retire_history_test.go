@@ -400,6 +400,7 @@ func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 }
 
 func TestRetire_DetachesCoveredSourcesWithCoveringFile(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, unindexed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("unindexed=%v", unindexed), func(t *testing.T) {
 			db, agg := testDbAndAggregatorSmallFrozen(t, 10, 2)
@@ -439,6 +440,7 @@ func TestRetire_DetachesCoveredSourcesWithCoveringFile(t *testing.T) {
 }
 
 func TestRetire_DetachesHiddenOutputCoveredByRetiredSources(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorSmallFrozen(t, 10, 2)
 	ranges := []testFileRange{{0, 1}, {1, 2}, {0, 2}, {2, 3}}
 	generateStateFiles(t, agg.Dirs(), ranges)
@@ -459,6 +461,7 @@ func TestRetire_DetachesHiddenOutputCoveredByRetiredSources(t *testing.T) {
 }
 
 func TestRetire_PreservesTailBelowHiddenCoveringFile(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, tc := range []struct {
 		name      string
 		tailEnd   uint64

@@ -31,7 +31,7 @@ import (
 )
 
 func TestStepAlignedEndRefusesUnindexedTail(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, path := range []string{
 		"domain/v1.0-accounts.6-8.bt",
 		"accessor/v2.0-accounts.6-8.vi",
@@ -79,7 +79,7 @@ func TestStepAlignedEndAllowsUnindexedFileUnderIndexedMerge(t *testing.T) {
 // Indexed files cover an unindexed one only while they are visible: index 0-2 is hidden because history 0-2 has
 // no accessor, so index 0-4 without its accessor is not covered.
 func TestStepAlignedEndRefusesUnindexedFileUnderHiddenMerge(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	ranges := []testFileRange{{0, 2}, {2, 4}, {0, 4}}
 	generateStateFiles(t, agg.Dirs(), ranges)
