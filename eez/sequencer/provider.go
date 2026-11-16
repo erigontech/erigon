@@ -20,7 +20,9 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/protocol"
@@ -28,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/txnprovider"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 const (
@@ -102,10 +105,38 @@ func (p *poolTxns) TxnsBudget() *exec.TxnsBudget {
 	return &exec.TxnsBudget{Size: daSize, Limit: p.budget}
 }
 
+// poolWait bounds the wait for the pool to see a block's parent.
+var poolWait = time.Minute
+
+// poolView is a pool that tells when its view of the chain reaches a block.
+type poolView interface {
+	PeekBest(ctx context.Context, n int, txns *txpool.TxnsRlp, onTopOf uint64) (bool, error)
+}
+
+// await returns once the pool has seen block parent. The build waits for it
+// too, but on the goroutine derivation shares.
+func (p *poolTxns) await(ctx context.Context, parent uint64) error {
+	v, ok := p.pool.(poolView)
+	if !ok || !p.started() {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, poolWait)
+	defer cancel()
+	if _, err := v.PeekBest(ctx, 0, &txpool.TxnsRlp{}, parent); err != nil {
+		return fmt.Errorf("txpool has not seen block %d: %w", parent, err)
+	}
+	return nil
+}
+
+// started reports whether the pool runs. One yet to start yields nothing,
+// which the block would take for a dry pool.
+func (p *poolTxns) started() bool {
+	s, ok := p.pool.(interface{ Started() bool })
+	return !ok || s.Started()
+}
+
 func (p *poolTxns) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
-	// A pool yet to start yields nothing, which the block would take for a
-	// dry pool.
-	if s, ok := p.pool.(interface{ Started() bool }); ok && !s.Started() {
+	if !p.started() {
 		return nil, errPoolNotStarted
 	}
 	// The pool marks what it yields in the caller's filter, so a page this

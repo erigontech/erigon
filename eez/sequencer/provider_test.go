@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"testing"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
@@ -35,7 +36,10 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/txnprovider"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
+
+var _ poolView = (*txpool.TxPool)(nil)
 
 type fixed []types.Transaction
 
@@ -157,6 +161,40 @@ func TestPoolTxnsNeedsAStartedPool(t *testing.T) {
 	user := common.HexToAddress("0xa11ce")
 	_, err := newPoolTxns(notStarted{fixed{transfer(t, 0, 10, user)}}, 1<<20, log.New()).ProvideTxns(t.Context())
 	require.ErrorIs(t, err, errPoolNotStarted)
+}
+
+// lagging is a pool that never sees a block, started or not.
+type lagging struct {
+	fixed
+	running bool
+	peeks   int
+}
+
+func (l *lagging) Started() bool { return l.running }
+
+func (l *lagging) PeekBest(ctx context.Context, _ int, _ *txpool.TxnsRlp, _ uint64) (bool, error) {
+	l.peeks++
+	<-ctx.Done()
+	return false, ctx.Err()
+}
+
+// TestAwait: a pool that has not seen the parent within poolWait fails the
+// wait, which names the block; one yet to start is left to the provider,
+// which fails at once.
+func TestAwait(t *testing.T) {
+	defer func(d time.Duration) { poolWait = d }(poolWait)
+	poolWait = 50 * time.Millisecond
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	start := time.Now()
+	err := newPoolTxns(&lagging{running: true}, 1<<20, log.New()).await(ctx, 7)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorContains(t, err, "txpool has not seen block 7")
+	require.Less(t, time.Since(start), time.Second, "the wait outlasted poolWait")
+
+	idle := &lagging{}
+	require.NoError(t, newPoolTxns(idle, 1<<20, log.New()).await(t.Context(), 7))
+	require.Zero(t, idle.peeks)
 }
 
 // TestMaxTxnSize: for every slot of up to MaxCatchup blocks, the largest

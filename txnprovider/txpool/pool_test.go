@@ -3930,6 +3930,34 @@ func TestBlobNonceRetryNonceBounds(t *testing.T) {
 	}
 }
 
+// TestPeekBestOfNoneWaitsForTheBlock: a peek at no transactions returns once
+// the pool has seen the block, and leaves the pool as it was.
+func TestPeekBestOfNoneWaitsForTheBlock(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 21_000)
+	short, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	_, err := pool.PeekBest(short, 0, &TxnsRlp{}, 1)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := pool.PeekBest(t.Context(), 0, &TxnsRlp{}, 1)
+		done <- err
+	}()
+	require.NoError(t, pool.OnNewBlock(t.Context(), &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 200_000,
+		BlockGasLimit:       40_000_000,
+		ChangeBatch:         []*remoteproto.StateChange{{BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1})}},
+	}, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the peek did not return once the pool saw the block")
+	}
+	require.Equal(t, 1, pool.pending.Len())
+}
+
 // A transaction larger than the pool's size limit is refused when added and
 // dropped when reloaded; one at the limit is kept, as both are without one.
 func TestSetMaxTxnSize(t *testing.T) {

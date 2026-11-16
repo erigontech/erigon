@@ -297,7 +297,11 @@ func (s *Sequencer) late(ts uint64) bool {
 
 // produce builds the block of kind after parent from the pool.
 func (s *Sequencer) produce(ctx context.Context, kind Kind, parent *types.Header) (*types.Header, error) {
-	return s.build(ctx, kind, parent, newPoolTxns(s.pool, s.cfg.DABudget, s.logger))
+	txs := newPoolTxns(s.pool, s.cfg.DABudget, s.logger)
+	if err := txs.await(ctx, parent.Number.Uint64()); err != nil {
+		return nil, err
+	}
+	return s.build(ctx, kind, parent, txs)
 }
 
 // build builds the block of kind after parent from txs.
