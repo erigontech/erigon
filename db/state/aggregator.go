@@ -1850,15 +1850,12 @@ type aggregatorVisible struct {
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
-	dirtyEnd := a.dirtyFilesEndTxNumMinimax()
-	toTxNum := dirtyEnd
-	var next *aggregatorVisible
-	for {
-		next = &aggregatorVisible{}
-		end := toTxNum
+	// buildVisible builds every list up to toTxNum and returns the lowest end among the lists that have files.
+	buildVisible := func(toTxNum uint64) (next *aggregatorVisible, lowestEnd uint64) {
+		next, lowestEnd = &aggregatorVisible{}, toTxNum
 		lower := func(dirty *DirtyFiles, visible visibleFiles) {
 			if dirty.Len() > 0 {
-				end = min(end, visible.EndTxNum())
+				lowestEnd = min(lowestEnd, visible.EndTxNum())
 			}
 		}
 		for id, d := range a.d {
@@ -1884,10 +1881,16 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 				lower(ii.dirtyFiles, next.iis[id].files)
 			}
 		}
-		if end == toTxNum {
-			break
-		}
+		return next, lowestEnd
+	}
+
+	dirtyEnd := a.dirtyFilesEndTxNumMinimax()
+	toTxNum := dirtyEnd
+	next, end := buildVisible(toTxNum)
+	// A list that stops early stops every list there; cutting there can drop a merged file that crosses it, so repeat.
+	for end < toTxNum {
 		toTxNum = end
+		next, end = buildVisible(toTxNum)
 	}
 	if toTxNum < dirtyEnd {
 		a.logger.Warn("[agg] a gap in files: every list stops at the first one that stops", "visibleEnd", toTxNum, "filesEnd", dirtyEnd)
