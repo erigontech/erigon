@@ -100,23 +100,15 @@ type Client struct {
 // https://host:port, whose attestations recover to attester; vkey is the
 // proof system's verification key in the public inputs.
 func Dial(rawURL string, attester common.Address, vkey common.Hash) (*Client, error) {
-	u, err := url.Parse(rawURL)
+	target, secure, err := Target(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("prover url: %w", err)
+		return nil, err
 	}
-	if _, port, err := net.SplitHostPort(u.Host); err != nil || port == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
-		return nil, fmt.Errorf("prover url %q: want scheme://host:port", rawURL)
-	}
-	var creds credentials.TransportCredentials
-	switch u.Scheme {
-	case "http":
-		creds = insecure.NewCredentials()
-	case "https":
+	creds := insecure.NewCredentials()
+	if secure {
 		creds = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
-	default:
-		return nil, fmt.Errorf("prover url %q: want http or https", rawURL)
 	}
-	conn, err := grpc.NewClient(u.Host, grpc.WithTransportCredentials(creds),
+	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(creds),
 		grpc.WithDefaultCallOptions(grpc.MaxCallSendMsgSize(maxMessage), grpc.MaxCallRecvMsgSize(maxReply)),
 		// A slot's budget is seconds: a prover back from an outage is
 		// redialled at once, not after a backoff grown over the outage.
@@ -127,6 +119,25 @@ func Dial(rawURL string, attester common.Address, vkey common.Hash) (*Client, er
 		return nil, fmt.Errorf("prover url %q: %w", rawURL, err)
 	}
 	return &Client{conn: conn, prover: provepb.NewProverClient(conn), attester: attester, vkey: vkey}, nil
+}
+
+// Target returns the host:port of a prover's URL, http://host:port or
+// https://host:port, and whether it takes TLS.
+func Target(rawURL string) (string, bool, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", false, fmt.Errorf("prover url: %w", err)
+	}
+	if _, port, err := net.SplitHostPort(u.Host); err != nil || port == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
+		return "", false, fmt.Errorf("prover url %q: want scheme://host:port", rawURL)
+	}
+	switch u.Scheme {
+	case "http":
+		return u.Host, false, nil
+	case "https":
+		return u.Host, true, nil
+	}
+	return "", false, fmt.Errorf("prover url %q: want http or https", rawURL)
 }
 
 // Close releases the connection.

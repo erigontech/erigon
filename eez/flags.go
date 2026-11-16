@@ -20,6 +20,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -31,9 +32,12 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/eez/composer"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/l1"
+	"github.com/erigontech/erigon/eez/l1/post"
 	"github.com/erigontech/erigon/eez/overlay"
+	"github.com/erigontech/erigon/eez/prove"
 	"github.com/erigontech/erigon/eez/sequencer"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -153,6 +157,46 @@ var (
 		Usage: "File holding the sequencer's private key, 64 hex characters, accessible to its owner only; the key signs the sequencer's heads",
 	}
 
+	ComposerFlag = cli.BoolFlag{
+		Name:  "eez.composer",
+		Usage: "Settle the sequencer's blocks on L1 with anchor-only batches",
+	}
+	PosterKeyFileFlag = cli.StringFlag{
+		Name:  "eez.poster.keyfile",
+		Usage: "File holding the private key that posts the batches on L1, 64 hex characters, accessible to its owner only",
+	}
+	AttestersFlag = cli.StringFlag{
+		Name:  "eez.attesters",
+		Usage: "URL of the prover attesting the batches, http://host:port or https://host:port",
+	}
+	AttesterAddressFlag = cli.StringFlag{
+		Name:  "eez.attester.address",
+		Usage: "Address whose signature attests the batches",
+	}
+	ProofSystemFlag = cli.StringFlag{
+		Name:  "eez.proofsystem",
+		Usage: "L1 address of the proof system verifying the batches",
+	}
+	L1BuilderFlag = cli.StringFlag{
+		Name:  "eez.l1.builder",
+		Usage: "eth_sendBundle endpoint the batches are sent to; --eez.l1.rpc when unset, whose pool takes them when it has no bundles",
+	}
+	L1PriorityFeeFlag = cli.Uint64Flag{
+		Name:  "eez.l1.priorityfee",
+		Usage: "Priority fee of a batch's L1 transaction, in wei",
+		Value: post.DefaultPriorityFee,
+	}
+	BatchMaxBlocksFlag = cli.Uint64Flag{
+		Name:  "eez.batch.maxblocks",
+		Usage: "Most blocks a batch settles, rounded down to a multiple of the Sync interval",
+		Value: 300,
+	}
+	BatchMaxGasFlag = cli.Uint64Flag{
+		Name:  "eez.batch.maxgas",
+		Usage: "Gas limit of a batch's L1 transaction, between 1,521,000 and 16,777,216 (EIP-7825)",
+		Value: composer.MaxPostBatchGas,
+	}
+
 	// The l2 section of the chain config; init writes them into the
 	// section, a running node checks them against it.
 	L1ChainIDFlag = cli.Uint64Flag{
@@ -187,6 +231,8 @@ var Flags = []cli.Flag{
 	&P2PListenFlag, &P2PPeersFlag, &SequencerAddressFlag,
 	&ChainFlag, &HTTPPortFlag, &HTTPAPIFlag, &PortFlag, &BootnodesFlag, &StaticPeersFlag, &TrustedPeersFlag,
 	&SequencerFlag, &ProofTimeFlag, &SubmissionSlackFlag, &SequencerMaxDepthFlag, &SequencerFeeRecipientFlag, &SequencerKeyFileFlag,
+	&ComposerFlag, &PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag, &L1BuilderFlag, &L1PriorityFeeFlag,
+	&BatchMaxBlocksFlag, &BatchMaxGasFlag,
 	&L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
 }
 
@@ -236,6 +282,25 @@ type SequencerConfig struct {
 	// Key, when set, signs the sequencer's heads or, where the rule set has
 	// them, its unsafe-block announcements instead.
 	Key *ecdsa.PrivateKey
+	// Composer, when set, settles the produced blocks.
+	Composer *ComposerConfig
+}
+
+// ComposerConfig is the configuration of a sequencer's composer.
+type ComposerConfig struct {
+	// L1 is the URL of the L1 node the composer reads and posts through.
+	L1        string
+	PosterKey *ecdsa.PrivateKey
+	// Prover is the URL of the prover; Attester the address of its
+	// attestations, for the proof system ProofSystem.
+	Prover      string
+	Attester    common.Address
+	ProofSystem common.Address
+	// Builder takes the bundles; PriorityFee is a posting's tip in wei.
+	Builder     string
+	PriorityFee uint64
+	MaxBlocks   uint64
+	MaxGas      uint64
 }
 
 // L2Flags are the l2 section fields set on the command line.
@@ -401,7 +466,7 @@ func (c *Config) readOverlay(cmd *cli.Command) error {
 // sequencerConfig reads the sequencer flags, nil without --eez.sequencer.
 func sequencerConfig(cmd *cli.Command) (*SequencerConfig, error) {
 	if !cmd.Bool(SequencerFlag.Name) {
-		for _, f := range []cli.Flag{&ProofTimeFlag, &SubmissionSlackFlag, &SequencerMaxDepthFlag, &SequencerFeeRecipientFlag, &SequencerKeyFileFlag} {
+		for _, f := range append([]cli.Flag{&ProofTimeFlag, &SubmissionSlackFlag, &SequencerMaxDepthFlag, &SequencerFeeRecipientFlag, &SequencerKeyFileFlag, &ComposerFlag}, composerFlags...) {
 			if name := f.Names()[0]; cmd.IsSet(name) {
 				return nil, fmt.Errorf("%w: --%s requires --%s", ErrConfig, name, SequencerFlag.Name)
 			}
@@ -429,7 +494,79 @@ func sequencerConfig(cmd *cli.Command) (*SequencerConfig, error) {
 		}
 		s.Key = key
 	}
+	composer, err := composerConfig(cmd)
+	if err != nil {
+		return nil, err
+	}
+	s.Composer = composer
 	return s, nil
+}
+
+var composerFlags = []cli.Flag{&PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag, &L1BuilderFlag, &L1PriorityFeeFlag, &BatchMaxBlocksFlag, &BatchMaxGasFlag}
+
+// composerConfig reads the composer flags, nil without --eez.composer.
+func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
+	if !cmd.Bool(ComposerFlag.Name) {
+		for _, f := range composerFlags {
+			if name := f.Names()[0]; cmd.IsSet(name) {
+				return nil, fmt.Errorf("%w: --%s requires --%s", ErrConfig, name, ComposerFlag.Name)
+			}
+		}
+		return nil, nil
+	}
+	l1 := cmd.String(L1RPCFlag.Name)
+	if l1 == "" {
+		return nil, fmt.Errorf("%w: --%s posts through the L1 node of --%s", ErrConfig, ComposerFlag.Name, L1RPCFlag.Name)
+	}
+	c := &ComposerConfig{
+		L1:          l1,
+		Prover:      cmd.String(AttestersFlag.Name),
+		Builder:     cmd.String(L1BuilderFlag.Name),
+		PriorityFee: cmd.Uint64(L1PriorityFeeFlag.Name),
+		MaxBlocks:   cmd.Uint64(BatchMaxBlocksFlag.Name),
+	}
+	if c.Builder == "" {
+		c.Builder = l1
+	}
+	// eth_sendBundle goes over HTTP.
+	if u, err := url.Parse(c.Builder); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, fmt.Errorf("%w: --%s %q is not an http(s) URL; set it beside a websocket --%s", ErrConfig, L1BuilderFlag.Name, c.Builder, L1RPCFlag.Name)
+	}
+	for _, f := range []*cli.StringFlag{&PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag} {
+		if !cmd.IsSet(f.Name) {
+			return nil, fmt.Errorf("%w: --%s requires --%s", ErrConfig, ComposerFlag.Name, f.Name)
+		}
+	}
+	if _, _, err := prove.Target(c.Prover); err != nil {
+		return nil, fmt.Errorf("%w: --%s: %w", ErrConfig, AttestersFlag.Name, err)
+	}
+	for _, a := range []struct {
+		flag *cli.StringFlag
+		out  *common.Address
+	}{{&AttesterAddressFlag, &c.Attester}, {&ProofSystemFlag, &c.ProofSystem}} {
+		v := cmd.String(a.flag.Name)
+		if !common.IsHexAddress(v) {
+			return nil, fmt.Errorf("%w: --%s %q is not an address", ErrConfig, a.flag.Name, v)
+		}
+		*a.out = common.HexToAddress(v)
+	}
+	key, err := loadKey(cmd.String(PosterKeyFileFlag.Name))
+	if err != nil {
+		return nil, fmt.Errorf("%w: --%s: %w", ErrConfig, PosterKeyFileFlag.Name, err)
+	}
+	if crypto.PubkeyToAddress(key.PublicKey) == c.Attester {
+		return nil, fmt.Errorf("%w: --%s holds the attester's key; posting and attesting are separate authorities", ErrConfig, PosterKeyFileFlag.Name)
+	}
+	c.PosterKey = key
+	if c.MaxBlocks == 0 {
+		return nil, fmt.Errorf("%w: --%s must be positive", ErrConfig, BatchMaxBlocksFlag.Name)
+	}
+	var ok bool
+	if c.MaxGas, ok = composer.PostBatchGasCeiling(cmd.Uint64(BatchMaxGasFlag.Name)); !ok {
+		return nil, fmt.Errorf("%w: --%s %d is not between %d and %d", ErrConfig, BatchMaxGasFlag.Name, cmd.Uint64(BatchMaxGasFlag.Name),
+			composer.MinPostBatchGas, composer.MaxPostBatchGas)
+	}
+	return c, nil
 }
 
 // loadKey reads the hex private key in file, which other users must not be

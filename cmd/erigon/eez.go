@@ -33,10 +33,13 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/eez"
 	"github.com/erigontech/erigon/eez/announce"
+	"github.com/erigontech/erigon/eez/composer"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/l1"
+	"github.com/erigontech/erigon/eez/l1/post"
+	"github.com/erigontech/erigon/eez/prove"
 	eezrpc "github.com/erigontech/erigon/eez/rpc"
 	eezrules "github.com/erigontech/erigon/eez/rules"
 	"github.com/erigontech/erigon/eez/sequencer"
@@ -44,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -265,20 +269,14 @@ func (h firstHalt) Err() error {
 
 // newSequencer returns the sequencer of the chain of backend, producing on
 // f from the backend's txpool; one that halts closes stop.
-func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.ExecChain, f *follower.Follower, stop interface{ Close() }, cfg *eez.SequencerConfig, witnesses sequencer.Witnesses, announcements sequencer.Announcements, logger log.Logger) (*sequencer.Service, error) {
+func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.ExecChain, f *follower.Follower, stop interface{ Close() }, cfg *eez.SequencerConfig, witnesses sequencer.Witnesses, announcements sequencer.Announcements, composer sequencer.SyncSlotComposer, logger log.Logger) (*sequencer.Service, error) {
 	pool := backend.TxPool()
 	if pool == nil {
 		return nil, errors.New("the sequencer needs the txpool")
 	}
 	chainConfig := backend.ChainConfig()
-	l2 := chainConfig.L2.(*config.L2Config)
-	timing := sequencer.Timing{
-		L1:    time.Duration(l2.L1BlockTime) * time.Second,
-		L2:    time.Duration(l2.BlockInterval) * time.Second,
-		Proof: cfg.ProofTime,
-		Slack: cfg.SubmissionSlack,
-	}
-	s, err := sequencer.New(chainConfig, sequencer.Config{Timing: timing, FeeRecipient: cfg.FeeRecipient, MaxDepth: cfg.MaxDepth, Witnesses: witnesses, Announcements: announcements}, f, pool, logger)
+	timing := sequencerTiming(chainConfig.L2.(*config.L2Config), cfg)
+	s, err := sequencer.New(chainConfig, sequencer.Config{Timing: timing, FeeRecipient: cfg.FeeRecipient, MaxDepth: cfg.MaxDepth, Witnesses: witnesses, Announcements: announcements, Composer: composer}, f, pool, logger)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", eez.ErrConfig, err)
 	}
@@ -294,6 +292,65 @@ func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.Exe
 		go stop.Close()
 	}
 	return sequencer.NewService(s, sequencer.NewSchedule(timing, genesis.Time), halt, logger), nil
+}
+
+func sequencerTiming(l2 *config.L2Config, cfg *eez.SequencerConfig) sequencer.Timing {
+	return sequencer.Timing{
+		L1:    time.Duration(l2.L1BlockTime) * time.Second,
+		L2:    time.Duration(l2.BlockInterval) * time.Second,
+		Proof: cfg.ProofTime,
+		Slack: cfg.SubmissionSlack,
+	}
+}
+
+// newComposer returns the composer settling the blocks of chain, whose
+// witnesses are in witnesses, from the derivation state of f; stop releases
+// it once the sequencer has stopped.
+func newComposer(ctx context.Context, chainConfig *chain.Config, cfg *eez.SequencerConfig, chain *deriver.ExecChain, witnesses *witness.Store, f *follower.Follower, logger log.Logger) (comp *composer.Composer, stop func(), err error) {
+	c := cfg.Composer
+	l2 := chainConfig.L2.(*config.L2Config)
+	node, err := l1.DialRPC(ctx, c.L1, logger)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		if err != nil {
+			node.Close()
+		}
+	}()
+	if id, err := node.ChainID(ctx); err != nil {
+		return nil, nil, err
+	} else if id != l2.L1ChainID {
+		return nil, nil, fmt.Errorf("%w: --%s is chain %d, not the L1 %d", eez.ErrConfig, eez.L1RPCFlag.Name, id, l2.L1ChainID)
+	}
+	poster, err := post.New(ctx, c.PosterKey, l2.Registry, c.PriorityFee, c.Builder, node, logger)
+	if err != nil {
+		return nil, nil, err
+	}
+	// The ECDSA proof system registers its attester's address as its key.
+	prover, err := prove.Dial(c.Prover, c.Attester, common.BytesToHash(c.Attester[:]))
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: %w", eez.ErrConfig, err)
+	}
+	timing := sequencerTiming(l2, cfg)
+	k := timing.K()
+	comp = composer.New(composer.Config{
+		Batcher:   &composer.Batcher{RollupID: l2.RollupID, ProofSystem: c.ProofSystem, Signer: types.LatestSignerForChainID(chainConfig.ChainID)},
+		K:         k,
+		MaxBlocks: composer.GridCap(c.MaxBlocks, k),
+		MaxGas:    c.MaxGas,
+		Proof:     timing.Proof,
+		Slack:     timing.Slack,
+	}, chain, witnesses, prover, poster,
+		&composer.Observer{Node: node, RollupID: l2.RollupID, EEZ: l2.Registry, Every: 500 * time.Millisecond, Logger: logger},
+		f.Settled, func() uint64 { return f.Status().Finalized }, f.HeadTo, logger)
+	logger.Info("[eez] composer mode", "poster", poster.From(), "attester", c.Attester, "proofSystem", c.ProofSystem,
+		"maxBlocks", composer.GridCap(c.MaxBlocks, k), "maxGas", c.MaxGas, "priorityFee", c.PriorityFee)
+	return comp, func() {
+		comp.Close()
+		_ = prover.Close()
+		node.Close()
+	}, nil
 }
 
 // newHeadSigner returns the signer of the heads of the chain of chainConfig,
@@ -447,6 +504,7 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		fc.Announcements = announcements
 	}
 	var witnesses *witness.Store
+	var stopComposer func()
 	closeStores := func() {
 		if witnesses != nil {
 			witnesses.Close()
@@ -474,7 +532,19 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		} else if announces(chainConfig) {
 			logger.Warn("[eez] sequencer signs no unsafe-block announcements: --"+eez.SequencerKeyFileFlag.Name+" is not set", "event", "eez.node.announcer.disabled")
 		}
-		if seq, err = newSequencer(ctx, backend, chain, f, stop, cfg.Sequencer, capture, announcer, logger); err != nil {
+		var comp sequencer.SyncSlotComposer
+		if cfg.Sequencer.Composer != nil {
+			var c *composer.Composer
+			if c, stopComposer, err = newComposer(ctx, chainConfig, cfg.Sequencer, chain, witnesses, f, logger); err != nil {
+				closeStores()
+				return nil, err
+			}
+			comp = c
+		}
+		if seq, err = newSequencer(ctx, backend, chain, f, stop, cfg.Sequencer, capture, announcer, comp, logger); err != nil {
+			if stopComposer != nil {
+				stopComposer()
+			}
 			closeStores()
 			return nil, err
 		}
@@ -497,6 +567,11 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 	// its heads, then the stores they write.
 	if witnesses != nil || announcements != nil {
 		n.RegisterLifecycle(onStop(closeStores))
+	}
+	if stopComposer != nil {
+		// Stops after the sequencer, which hands it the Sync blocks, and
+		// before the witness store it proves from.
+		n.RegisterLifecycle(onStop(stopComposer))
 	}
 	if signer != nil {
 		// Stops after the follower, the writer of the heads it signs, and
