@@ -1339,7 +1339,7 @@ func TestAttesterSlashingRejectsDisjointIndices(t *testing.T) {
 
 	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
 
-	require.EqualError(t, err, "no slashable validators in intersection")
+	require.ErrorIs(t, err, ErrAttesterSlashingEmptyIntersection)
 	require.NotErrorIs(t, err, ErrIgnore)
 }
 

@@ -31,6 +31,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 )
 
+var ErrAttesterSlashingEmptyIntersection = errors.New("no slashable validators in intersection")
+
 func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error {
 	if attesterSlashing == nil ||
 		attesterSlashing.Attestation_1 == nil ||
@@ -69,7 +71,7 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	}
 	intersection := intersectAttestingIndices(attestation1.AttestingIndices, attestation2.AttestingIndices)
 	if len(intersection) == 0 {
-		return errors.New("no slashable validators in intersection")
+		return ErrAttesterSlashingEmptyIntersection
 	}
 	if f.allAttesterSlashingIndicesSeen(intersection) {
 		return ErrIgnore
