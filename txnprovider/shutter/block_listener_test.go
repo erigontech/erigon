@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -59,6 +60,8 @@ func TestBlockListenerRetriesStateChanges(t *testing.T) {
 		{"receive failure", false, errors.New("snapshot read failed"), true},
 		{"subscribe unavailable", true, status.Error(codes.Unavailable, "executed header unavailable"), false},
 		{"receive unavailable", false, status.Error(codes.Unavailable, "executed header unavailable"), false},
+		{"subscribe closed", true, io.EOF, false},
+		{"receive closed", false, io.EOF, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {

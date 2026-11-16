@@ -19,6 +19,7 @@ package txpool
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -151,25 +152,44 @@ func BenchmarkStateChangeCatchup(b *testing.B) {
 			server.SetStateChangesSnapshot(func(context.Context) (*remoteproto.StateChangeBatch, error) { return head, nil })
 			client := direct.NewStateDiffClientDirect(server)
 			var recovery time.Duration
-			var received, resets int
+			var received, resets, superseded int
 			for b.Loop() {
 				ctx, cancel := context.WithTimeout(b.Context(), 30*time.Second)
 				stream, err := client.StateChanges(ctx, &remoteproto.StateChangeRequest{})
 				require.NoError(b, err)
 				first := head.ChangeBatch[0].BlockHeight
-				version, fee, gasLimit := head.StateVersionId, head.PendingBlockBaseFee, head.BlockGasLimit
-				sent := make(chan time.Time, 1)
+				fee, gasLimit := head.PendingBlockBaseFee, head.BlockGasLimit
+				published := make(chan error, 1)
+				var lastPublication time.Time
 				go func() {
 					for i := uint64(1); i <= blocks; i++ {
-						if interval != 0 && common.Sleep(ctx, interval) != nil {
+						if err := common.Sleep(ctx, interval); err != nil {
+							published <- err
 							return
 						}
-						server.SendStateChanges(ctx, &remoteproto.StateChangeBatch{
-							StateVersionId: version, PendingBlockBaseFee: fee, BlockGasLimit: gasLimit,
-							ChangeBatch: []*remoteproto.StateChange{{BlockHeight: first + i, BlockTime: (first + i) * 12, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1})}},
+						// Execution publishes the projected state version before committing it.
+						err := db.Update(ctx, func(tx kv.RwTx) error {
+							if _, err := rawdb.IncrementStateVersion(tx); err != nil {
+								return err
+							}
+							version, err := rawdb.GetStateVersion(tx)
+							if err != nil {
+								return err
+							}
+							server.SendStateChanges(ctx, &remoteproto.StateChangeBatch{
+								StateVersionId: version, PendingBlockBaseFee: fee, BlockGasLimit: gasLimit,
+								ChangeBatch: []*remoteproto.StateChange{{BlockHeight: first + i, BlockTime: (first + i) * 12, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1})}},
+							})
+							lastPublication = time.Now()
+							return nil
 						})
+						if err != nil {
+							published <- err
+							cancel()
+							return
+						}
 					}
-					sent <- time.Now()
+					published <- nil
 				}()
 				for {
 					batch, err := stream.Recv()
@@ -178,17 +198,25 @@ func BenchmarkStateChangeCatchup(b *testing.B) {
 					if batch.StateChangesIncomplete {
 						resets++
 					}
-					require.NoError(b, pool.p2pFetcher.handleStateChangesRequest(ctx, batch))
+					if err := pool.p2pFetcher.handleStateChangesRequest(ctx, batch); errors.Is(err, errStateViewSuperseded) {
+						superseded++
+						continue
+					} else {
+						require.NoError(b, err)
+					}
 					if batch.ChangeBatch[len(batch.ChangeBatch)-1].BlockHeight == first+blocks {
 						head = batch
 						break
 					}
 				}
-				recovery += max(time.Duration(0), time.Since(<-sent))
+				require.NoError(b, <-published)
+				require.Equal(b, first+blocks, pool.lastSeenBlock.Load())
+				recovery += max(time.Duration(0), time.Since(lastPublication))
 				cancel()
 			}
 			b.ReportMetric(float64(recovery)/float64(time.Millisecond)/float64(b.N), "recovery-ms/burst")
 			b.ReportMetric(float64(resets)/float64(b.N), "resets/burst")
+			b.ReportMetric(float64(superseded)/float64(b.N), "superseded/burst")
 			b.ReportMetric(float64(blocks+1)-float64(received)/float64(b.N), "dropped/burst")
 		})
 	}

@@ -42,6 +42,7 @@ func TestEonTrackerRecoversBeforeManagerDeployment(t *testing.T) {
 		backend := NewMockContractBackend(gomock.NewController(t), logger)
 		backend.PrepareMocks()
 		config := shuttercfg.ConfigByChainName(networkname.Chiado)
+		config.ReorgDepthAwareness = 5
 		batches := make(chan *remoteproto.StateChangeBatch)
 		listener := shutter.NewBlockListener(logger, testhelpers.NewStateChangesClientMock(ctx, batches))
 		tracker := shutter.NewKsmEonTracker(logger, config, listener, backend)
@@ -58,7 +59,7 @@ func TestEonTrackerRecoversBeforeManagerDeployment(t *testing.T) {
 		initial, err := testhelpers.MockEonKeyGeneration(0, 1, 2, 1)
 		require.NoError(t, err)
 		handle.SimulateInitialEonRead(t, initial)
-		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1}}}
+		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 100}}}
 		synctest.Wait()
 		eon, ok := tracker.CurrentEon()
 		require.True(t, ok)
@@ -85,5 +86,18 @@ func TestEonTrackerRecoversBeforeManagerDeployment(t *testing.T) {
 		eon, ok = tracker.CurrentEon()
 		require.True(t, ok)
 		require.Equal(t, redeployed.Eon(), eon)
+
+		next, err := testhelpers.MockEonKeyGeneration(1, 1, 2, 3)
+		require.NoError(t, err)
+		handle.SimulateNewEonRead(t, next)
+		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 10}}}
+		synctest.Wait()
+		handle.SimulateCachedEonRead(t, next)
+		batches <- &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 16}}}
+		synctest.Wait()
+		_, ok = tracker.RecentEon(redeployed.EonIndex)
+		require.False(t, ok, "cleanup must resume without reaching the height of the old deployment")
+		_, ok = tracker.RecentEon(next.EonIndex)
+		require.True(t, ok)
 	})
 }

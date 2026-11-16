@@ -92,7 +92,11 @@ When the batch is incomplete or the pool's state view is stale, the pool waits f
 committed state matching the announced version before refreshing all pooled senders
 and revalidating frames. If that version has been superseded, transaction membership
 changes are retained for a newer batch; obsolete account values are not applied.
-Complete batches can be applied before commit while the pool has a usable state view.
+Complete batches retain the pre-commit path. The embedded pool's latest-batch cache
+overlays notified account values on its database read. The standalone pool's coherent
+cache can still select an older committed view, delaying sender updates or losing an
+unwound transaction; matching those reads to the announced view is tracked in
+[issue 26013](https://github.com/erigontech/erigon/issues/26013).
 
 ### Consumer Summary
 

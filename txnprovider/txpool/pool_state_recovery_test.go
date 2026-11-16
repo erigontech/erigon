@@ -168,6 +168,40 @@ func TestLocalAdmissionRejectsBeforeStartupRestore(t *testing.T) {
 	})
 }
 
+type blockedStateReadDB struct{ kv.TemporalRoDB }
+
+func (db blockedStateReadDB) ViewTemporal(ctx context.Context, _ func(kv.TemporalTx) error) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestLocalAdmissionDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		callerTimeout time.Duration
+		wantElapsed   time.Duration
+	}{
+		{"pool deadline", time.Minute, 30 * time.Second},
+		{"caller deadline", 5 * time.Second, 5 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, pool, _, _ := newTestPool(t)
+			pool._chainDB = blockedStateReadDB{pool._chainDB}
+			var txns TxnSlots
+			sender := common.Address{1}
+			txns.Append(newTestTxnSlot(0, 0, 1, 2, 21_000), sender[:], true)
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), tc.callerTimeout)
+				defer cancel()
+				started := time.Now()
+				_, err := pool.AddLocalTxns(ctx, txns)
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+				require.Equal(t, tc.wantElapsed, time.Since(started))
+			})
+		})
+	}
+}
+
 func TestFramePoolReconcilesMinedKeyedNonces(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

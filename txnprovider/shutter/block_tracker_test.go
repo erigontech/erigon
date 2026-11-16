@@ -102,6 +102,12 @@ func TestBlockTrackerInitialHead(t *testing.T) {
 			committed: shutter.BlockState{BlockNum: 40, StateVersionID: 2},
 			wantHead:  40,
 		},
+		{
+			name:      "committed snapshot wins at equal versions",
+			replay:    shutter.BlockState{BlockNum: 42, StateVersionID: 2},
+			committed: shutter.BlockState{BlockNum: 40, StateVersionID: 2},
+			wantHead:  40,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {

@@ -899,7 +899,7 @@ func (p *TxPool) HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (held, queued Has
 }
 
 func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTxn, error) {
-	if mt, ok := p.minedBlobTxnsByHash[string(hash)]; ok {
+	if mt, ok := p.minedBlobTxnsByHash[string(hash)]; ok && len(mt.TxnSlot.BlobBundles) != 0 {
 		return mt, nil
 	}
 	if txn, ok := p.unprocessedRemoteByHash[string(hash)]; ok {
@@ -1254,20 +1254,6 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 
 	defer addRemoteTxnsTimer.ObserveDuration(time.Now())
 	p.lock.Lock()
-	full := len(p.unprocessedRemoteTxns.Txns) >= remoteTxnQueueLimit || p.unprocessedRemoteBytes >= remoteTxnQueueByteLimit
-	p.lock.Unlock()
-	if full {
-		return
-	}
-	// Blob bundles already own their payload. Copy other RLP outside the lock
-	// so queued slices do not retain network packets outside the byte budget.
-	rlps := make([][]byte, len(newTxns.Txns))
-	for i, txn := range newTxns.Txns {
-		if len(txn.BlobBundles) == 0 {
-			rlps[i] = bytes.Clone(txn.Rlp)
-		}
-	}
-	p.lock.Lock()
 	defer p.lock.Unlock()
 	src := remoteSource{peerID: peerID, sentry: sentry}
 	now := time.Now()
@@ -1290,7 +1276,9 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 			continue
 		}
 		if len(txn.BlobBundles) == 0 {
-			txn.Rlp = rlps[i]
+			// Queued slices must not retain network packets outside the byte budget.
+			// Blob bundles already own their payload.
+			txn.Rlp = bytes.Clone(txn.Rlp)
 		}
 		p.unprocessedRemoteByHash[hashS] = txn
 		p.unprocessedRemoteBytes += uint64(txn.Size)
@@ -3464,6 +3452,10 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		}
 		if !txn.HasBlobs() {
 			txn.Rlp = nil // means that we don't need store it in db anymore
+		} else if cached := p.minedBlobTxnsByHash[string(txn.IDHash[:])]; cached != nil && len(cached.TxnSlot.BlobBundles) == 0 {
+			// Mining can precede startup restoration. Preserve the sidecar before
+			// nonce validation discards the persisted row.
+			cached.TxnSlot = txn
 		}
 		restored.Append(txn, addr[:], false)
 	}

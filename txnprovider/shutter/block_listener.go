@@ -77,7 +77,7 @@ func (bl *BlockListener) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if !grpcutil.IsRetryLater(err) {
+		if !grpcutil.IsRetryLater(err) && !grpcutil.IsEndOfStream(err) {
 			bl.logger.Warn("block listener subscription failed", "err", err)
 		}
 		if err := common.Sleep(ctx, 3*time.Second); err != nil {
