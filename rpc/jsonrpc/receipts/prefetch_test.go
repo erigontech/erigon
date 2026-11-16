@@ -42,6 +42,10 @@ import (
 const prefetchTestTxs = 16
 
 func mockForPrefetch(t *testing.T, txsPerBlock int) *execmoduletester.ExecModuleTester {
+	return mockWithTxs(t, txsPerBlock, execmoduletester.WithEnableDomain(kv.RCacheDomain))
+}
+
+func mockWithTxs(t *testing.T, txsPerBlock int, opts ...execmoduletester.Option) *execmoduletester.ExecModuleTester {
 	signer := types.LatestSignerForChainID(nil)
 	return mockWithGenerator(t, 1, func(i int, block *blockgen.BlockGen) {
 		for range txsPerBlock {
@@ -52,7 +56,7 @@ func mockForPrefetch(t *testing.T, txsPerBlock int) *execmoduletester.ExecModule
 			require.NoError(t, err)
 			block.AddTx(txn)
 		}
-	}, execmoduletester.WithEnableDomain(kv.RCacheDomain))
+	}, opts...)
 }
 
 func newPrefetchGenerator(m *execmoduletester.ExecModuleTester, events *shards.Events) *receipts.Generator {
@@ -250,4 +254,86 @@ func TestPrefetchReceiptsCloseStopsTheRead(t *testing.T) {
 	p.Close()
 	require.True(t, prefetchTx.rolledBack)
 	require.Equal(t, 1, prefetchTx.seeks)
+}
+
+type missingReceiptDB struct {
+	kv.TemporalRoDB
+	missingTxNum uint64
+}
+
+func (db *missingReceiptDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic // the prefetch owns and closes the tx
+	if err != nil {
+		return nil, err
+	}
+	return &missingReceiptTx{TemporalTx: tx, missingTxNum: db.missingTxNum}, nil
+}
+
+// missingReceiptTx hides the persisted receipt of one transaction.
+type missingReceiptTx struct {
+	kv.TemporalTx
+	missingTxNum uint64
+}
+
+func (tx *missingReceiptTx) HistorySeek(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	if domain == kv.RCacheDomain && ts == tx.missingTxNum+1 {
+		return nil, false, nil
+	}
+	return tx.TemporalTx.HistorySeek(domain, key, ts)
+}
+
+// TestPrefetchReceiptsServesNoPartialBlock pins that the prefetch serves a block only with every
+// receipt: without one, all transactions are re-executed, so a partial set must not be served.
+func TestPrefetchReceiptsServesNoPartialBlock(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		missing uint64
+	}{
+		{"middle transaction", 5},
+		{"last transaction", prefetchTestTxs - 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			servePersistedReceipts(t)
+			m := mockForPrefetch(t, prefetchTestTxs)
+			gen := newPrefetchGenerator(m, shards.NewEvents())
+
+			tx, err := m.DB.BeginTemporalRo(m.Ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+			block := readBlock(t, m, tx, 1)
+			minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, 1)
+			require.NoError(t, err)
+
+			db := &missingReceiptDB{TemporalRoDB: m.DB, missingTxNum: minTxNum + 1 + tc.missing}
+			p := gen.PrefetchReceipts(m.Ctx, m.ChainConfig, db, 1, block.Hash(), eth.ReceiptsOpts{})
+			defer p.Close()
+			require.Nil(t, p.Receipts(block))
+		})
+	}
+}
+
+// TestPrefetchReceiptsLeavesReExecutionUnchanged pins that a block without persisted receipts
+// gets the same re-executed receipts with and without the prefetch.
+func TestPrefetchReceiptsLeavesReExecutionUnchanged(t *testing.T) {
+	servePersistedReceipts(t)
+	noCache := mockWithTxs(t, prefetchTestTxs)
+
+	tx, err := noCache.DB.BeginTemporalRo(noCache.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	block := readBlock(t, noCache, tx, 1)
+	cached, err := rawdb.ReadReceiptsCacheV2(tx, block, noCache.BlockReader.TxnumReader())
+	require.NoError(t, err)
+	require.Nil(t, cached, "fixture: the block must have no persisted receipts")
+
+	want, err := newPrefetchGenerator(noCache, shards.NewEvents()).GetReceipts(noCache.Ctx, noCache.ChainConfig, tx, block, eth.ReceiptsOpts{})
+	require.NoError(t, err)
+	require.Len(t, want, prefetchTestTxs)
+
+	gen := newPrefetchGenerator(noCache, shards.NewEvents())
+	p := gen.PrefetchReceipts(noCache.Ctx, noCache.ChainConfig, noCache.DB, 1, block.Hash(), eth.ReceiptsOpts{})
+	defer p.Close()
+	got, err := gen.GetReceipts(noCache.Ctx, noCache.ChainConfig, tx, block, eth.ReceiptsOpts{ReadCached: p.Receipts})
+	require.NoError(t, err)
+	require.Equal(t, want, got)
 }
