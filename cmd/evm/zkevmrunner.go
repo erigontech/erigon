@@ -91,9 +91,12 @@ func zkevmTestCmd(_ context.Context, ctx *cli.Command) error {
 	// workers below only ever read it.
 	statecfg.EnableHistoricalCommitment()
 
-	tm := newZkevmFailMatcher()
 	files := collectFiles(path)
-	results, err := runZkevmTestsParallel(path, files, re, tm, workers)
+	witnesses, err := loadZkevmWitnesses(files)
+	if err != nil {
+		return err
+	}
+	results, err := runZkevmTestsParallel(path, files, re, witnesses, workers)
 	if err != nil {
 		return err
 	}
@@ -121,11 +124,73 @@ func newZkevmFailMatcher() *testutil.TestMatcher {
 	return tm
 }
 
-func runZkevmTestsParallel(root string, files []string, re *regexp.Regexp, tm *testutil.TestMatcher, workers uint64) ([]testResult, error) {
+type zkevmWitnessKey struct {
+	network string
+	hash    common.Hash
+}
+
+func loadZkevmWitnesses(files []string) (map[zkevmWitnessKey]*testutil.ExpectedWitness, error) {
+	witnesses := make(map[zkevmWitnessKey]*testutil.ExpectedWitness)
+	ambiguous := make(map[zkevmWitnessKey]bool)
+	tm := newZkevmFailMatcher()
+	for _, fname := range files {
+		src, err := os.ReadFile(fname)
+		if err != nil {
+			return nil, err
+		}
+		var tests map[string]struct {
+			Network string
+			Blocks  []struct {
+				BlockHeader     struct{ Hash common.Hash }
+				ExpectException string
+				Output          hexutil.Bytes             `json:"statelessOutputBytes"`
+				Witness         *testutil.ExpectedWitness `json:"executionWitness"`
+			}
+		}
+		if err := json.Unmarshal(src, &tests); err != nil {
+			return nil, fmt.Errorf("unmarshal %s: %w", fname, err)
+		}
+		for name, test := range tests {
+			if tm.CheckFailureForName(filepath.ToSlash(fname)+"/"+name, nil) != nil {
+				continue
+			}
+			for _, block := range test.Blocks {
+				if block.Witness == nil || block.ExpectException != "" {
+					continue
+				}
+				if len(block.Output) != 43 || block.Output[32] > 1 {
+					return nil, fmt.Errorf("invalid stateless validation result in %s", fname)
+				}
+				if block.Output[32] == 0 {
+					continue
+				}
+				key := zkevmWitnessKey{test.Network, block.BlockHeader.Hash}
+				candidate, previous := block.Witness, witnesses[key]
+				count := len(candidate.State) + len(candidate.Codes) + len(candidate.Headers)
+				previousCount := 0
+				if previous != nil {
+					previousCount = len(previous.State) + len(previous.Codes) + len(previous.Headers)
+				}
+				if previous == nil || count < previousCount {
+					witnesses[key] = candidate
+					delete(ambiguous, key)
+				} else if count == previousCount && (!equalMultiset(candidate.State, previous.State) || !equalMultiset(candidate.Codes, previous.Codes) || !equalMultiset(candidate.Headers, previous.Headers)) {
+					ambiguous[key] = true
+				}
+			}
+		}
+	}
+	for key := range ambiguous {
+		return nil, fmt.Errorf("ambiguous canonical witness for %s block %s", key.network, key.hash)
+	}
+	return witnesses, nil
+}
+
+func runZkevmTestsParallel(root string, files []string, re *regexp.Regexp, witnesses map[zkevmWitnessKey]*testutil.ExpectedWitness, workers uint64) ([]testResult, error) {
 	if workers == 1 {
 		results := make([]testResult, 0, len(files)*4)
 		for _, fname := range files {
-			r, err := runZkevmTestFile(root, fname, re, tm)
+			r, err := runZkevmTestFile(root, fname, re, witnesses)
 			if err != nil {
 				return nil, err
 			}
@@ -153,7 +218,7 @@ func runZkevmTestsParallel(root string, files []string, re *regexp.Regexp, tm *t
 	for range workers {
 		wg.Go(func() {
 			for item := range fileCh {
-				r, err := runZkevmTestFile(root, item.fname, re, tm)
+				r, err := runZkevmTestFile(root, item.fname, re, witnesses)
 				resultCh <- fileResult{index: item.index, results: r, err: err}
 			}
 		})
@@ -181,7 +246,7 @@ func runZkevmTestsParallel(root string, files []string, re *regexp.Regexp, tm *t
 	return results, nil
 }
 
-func runZkevmTestFile(root, fname string, re *regexp.Regexp, tm *testutil.TestMatcher) ([]testResult, error) {
+func runZkevmTestFile(root, fname string, re *regexp.Regexp, witnesses map[zkevmWitnessKey]*testutil.ExpectedWitness) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
@@ -200,7 +265,7 @@ func runZkevmTestFile(root, fname string, re *regexp.Regexp, tm *testutil.TestMa
 			continue
 		}
 		result := testResult{Name: name, Pass: true}
-		if err := tm.CheckFailureForName(name, runWitnessTest(tests[key])); err != nil {
+		if err := runWitnessTest(tests[key], witnesses, name); err != nil {
 			result.Pass = false
 			result.Error = err.Error()
 		}
@@ -223,7 +288,7 @@ func relName(root, fname string) string {
 // runWitnessTest imports the fixture chain and compares debug_executionWitness
 // (canonical mode) against the per-block executionWitness, returning a non-nil
 // error on block-import failure or witness divergence.
-func runWitnessTest(test *testutil.WitnessBlockTest) error {
+func runWitnessTest(test *testutil.WitnessBlockTest, witnesses map[zkevmWitnessKey]*testutil.ExpectedWitness, name string) error {
 	// Every zkevm block carries a blockAccessList, so the BAL (parallel) executor
 	// must be enabled.
 	test.ExperimentalBAL = true
@@ -251,6 +316,8 @@ func runWitnessTest(test *testutil.WitnessBlockTest) error {
 	baseApi := jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	debugApi := jsonrpc.NewPrivateDebugAPI(baseApi, m.DB, nil, rpccfg.DefaultDebugApiConfig())
 	canonicalMode := "canonical"
+	var fallbackErr error
+	hasFallback := false
 
 	for i := 0; i < test.NumBlocks(); i++ {
 		expected := test.ExpectedWitnessForBlock(i)
@@ -266,6 +333,10 @@ func runWitnessTest(test *testutil.WitnessBlockTest) error {
 		if !ok {
 			return fmt.Errorf("block index %d has a witness but no parseable block number", i)
 		}
+		reference := witnesses[zkevmWitnessKey{test.Network(), test.BlockHashForBlock(i)}]
+		if reference != nil {
+			expected = reference
+		}
 
 		res, err := debugApi.ExecutionWitness(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum)), &canonicalMode)
 		if err != nil {
@@ -275,9 +346,18 @@ func runWitnessTest(test *testutil.WitnessBlockTest) error {
 			return fmt.Errorf("ExecutionWitness(block %d): nil result", blockNum)
 		}
 
-		if err := compareWitness(blockNum, expected, res); err != nil {
+		err = compareWitness(blockNum, expected, res)
+		if reference == nil {
+			hasFallback = true
+			if fallbackErr == nil {
+				fallbackErr = err
+			}
+		} else if err != nil {
 			return err
 		}
+	}
+	if hasFallback {
+		return newZkevmFailMatcher().CheckFailureForName(name, fallbackErr)
 	}
 	return nil
 }

@@ -346,7 +346,7 @@ func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, pro
 	if err != nil {
 		return nil, nil, err
 	}
-	lean, err := trie.WitnessNodesForKeysByHash(byHash, rootHash, provedKeys)
+	lean, err := trie.WitnessNodesForKeysByHash(byHash, rootHash, provedKeys, produceExclusionProofs)
 	if err != nil {
 		return nil, nil, fmt.Errorf("prune witness nodes: %w", err)
 	}
