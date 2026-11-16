@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/eez/protocol"
 )
@@ -105,4 +107,22 @@ func FinalizedCommitment(ctx context.Context, r ChainReader, registry common.Add
 		return Commitment{}, fmt.Errorf("%w: rollup %d at L1 block %d", ErrZeroRoot, rollupID, f.Number)
 	}
 	return Commitment{Outcome: CommitmentAnchor, Finalized: *f, Root: record.Root}, nil
+}
+
+// Escrow returns the ether the rollup of rollupID holds in registry at
+// blockHash.
+func Escrow(ctx context.Context, sr StateReader, registry common.Address, rollupID uint64, blockHash common.Hash) (*uint256.Int, error) {
+	out, err := sr.CallAt(ctx, Call{To: registry, Data: protocol.EncodeRollups(rollupID)}, blockHash)
+	if err != nil {
+		return nil, fmt.Errorf("rollups(%d) at L1 block %x: %w", rollupID, blockHash, err)
+	}
+	record, err := protocol.DecodeRollupsReturn(out)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %x answered rollups(%d) at L1 block %x: %w", ErrNotRollups, registry, rollupID, blockHash, err)
+	}
+	balance, overflow := uint256.FromBig(record.EtherBalance)
+	if overflow {
+		return nil, fmt.Errorf("%w: rollup %d escrow %s", ErrNotRollups, rollupID, record.EtherBalance)
+	}
+	return balance, nil
 }

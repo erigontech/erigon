@@ -416,6 +416,36 @@ func TestCheckChainRefusesOverlay(t *testing.T) {
 	require.NoError(t, plain.checkRuleSet(config.SpecProduction), "spec production")
 }
 
+// composerArgs are the flags of a composer whose poster key is in dir.
+func composerArgs(t *testing.T, dir string) []string {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	keyFile := filepath.Join(dir, "poster")
+	require.NoError(t, os.WriteFile(keyFile, []byte(hex.EncodeToString(crypto.FromECDSA(key))), 0o600))
+	return []string{
+		"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.sequencer", "--eez.proof.time=5s", "--eez.composer", "--eez.poster.keyfile=" + keyFile,
+		"--eez.attesters=http://127.0.0.1:50061", "--eez.attester.address=0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+		"--eez.proofsystem=0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+	}
+}
+
+// TestCheckChainRefusesOutbound: an L2 front composes calls from the chain
+// to L1, which only the rollup0 rule set has.
+func TestCheckChainRefusesOutbound(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := parse(t, append(composerArgs(t, dir), "--eez.composer.l2front=127.0.0.1:8548", "--eez.composer.l2rpc=http://127.0.0.1:8545")...)
+	require.NoError(t, err)
+	rollup0 := networks.Devnet.Genesis.Config
+	require.NoError(t, cfg.CheckChain(rollup0))
+	l2 := *rollup0.L2.(*config.L2Config)
+	l2.RollupX = &config.RollupXConfig{FeeCollector: &common.Address{1}}
+	cc := *rollup0
+	cc.L2 = &l2
+	require.ErrorIs(t, cfg.CheckChain(&cc), ErrConfig)
+	require.ErrorContains(t, cfg.CheckChain(&cc), "--eez.composer.l2front")
+}
+
 // initGenesis runs InitGenesis on genesis under the flags args.
 func initGenesis(t *testing.T, genesis *types.Genesis, args ...string) error {
 	t.Helper()
@@ -528,6 +558,12 @@ func TestComposerFlags(t *testing.T) {
 	cfg, err = parse(t, append(slices.Clone(composer), "--eez.composer.l1front=127.0.0.1:8547")...)
 	require.NoError(t, err)
 	require.Equal(t, "127.0.0.1:8547", cfg.Sequencer.Composer.L1Front)
+	require.Empty(t, cfg.Sequencer.Composer.L2Front)
+
+	cfg, err = parse(t, append(slices.Clone(composer), "--eez.composer.l2front=127.0.0.1:8548", "--eez.composer.l2rpc=http://127.0.0.1:8545")...)
+	require.NoError(t, err)
+	require.Equal(t, "127.0.0.1:8548", cfg.Sequencer.Composer.L2Front)
+	require.Equal(t, "http://127.0.0.1:8545", cfg.Sequencer.Composer.L2RPC)
 
 	cfg, err = parse(t, sequencer...)
 	require.NoError(t, err)
@@ -574,6 +610,11 @@ func TestComposerFlags(t *testing.T) {
 		"front without composer":    {append(slices.Clone(sequencer), "--eez.composer.l1front=127.0.0.1:8547"), "--eez.composer.l1front requires --eez.composer"},
 		"front over a websocket L1": {append([]string{"--eez.enabled", "--eez.l1.rpc=ws://l1:8546", "--eez.l1.builder=http://builder", "--eez.composer.l1front=127.0.0.1:8547"}, without("--eez.enabled", "--eez.l1.rpc")...), "--eez.composer.l1front forwards to --eez.l1.rpc over http(s)"},
 		"front over a hostless L1":  {append([]string{"--eez.enabled", "--eez.l1.rpc=http:l1", "--eez.l1.builder=http://builder", "--eez.composer.l1front=127.0.0.1:8547"}, without("--eez.enabled", "--eez.l1.rpc")...), "--eez.composer.l1front forwards to --eez.l1.rpc over http(s)"},
+		"bad L2 front":              {append(slices.Clone(composer), "--eez.composer.l2front=8548", "--eez.composer.l2rpc=http://127.0.0.1:8545"), "--eez.composer.l2front"},
+		"L2 front without RPC":      {append(slices.Clone(composer), "--eez.composer.l2front=127.0.0.1:8548"), "--eez.composer.l2rpc"},
+		"L2 RPC without front":      {append(slices.Clone(composer), "--eez.composer.l2rpc=http://127.0.0.1:8545"), "--eez.composer.l2front"},
+		"bad L2 RPC":                {append(slices.Clone(composer), "--eez.composer.l2front=127.0.0.1:8548", "--eez.composer.l2rpc=ws://127.0.0.1:8546"), "--eez.composer.l2rpc"},
+		"L2 front without composer": {append(slices.Clone(sequencer), "--eez.composer.l2front=127.0.0.1:8548"), "--eez.composer.l2front requires --eez.composer"},
 	} {
 		_, err := parse(t, c.args...)
 		require.ErrorIs(t, err, ErrConfig, name)
@@ -589,6 +630,7 @@ func TestComposerFlags(t *testing.T) {
 		"bad builder":       append(slices.Clone(composer), "--eez.l1.builder=ftp://user:secret@builder.example/KEY?key=KEY"),
 		"bad prover":        append(without("--eez.attesters"), "--eez.attesters=ftp://user:secret@prover.example:1/KEY"),
 		"unparsable prover": append(without("--eez.attesters"), "--eez.attesters=http://user:secret@[prover/KEY"),
+		"bad L2 RPC":        append(slices.Clone(composer), "--eez.composer.l2front=127.0.0.1:8548", "--eez.composer.l2rpc=wss://user:secret@l2.example/KEY"),
 	} {
 		_, err := parse(t, args...)
 		require.ErrorIs(t, err, ErrConfig, name)

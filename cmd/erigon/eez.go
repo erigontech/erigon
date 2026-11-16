@@ -26,6 +26,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
@@ -278,7 +279,7 @@ func (h firstHalt) Err() error {
 
 // newSequencer returns the sequencer of the chain of backend, producing on
 // f from the backend's txpool; one that halts closes stop.
-func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.ExecChain, f *follower.Follower, stop interface{ Close() }, cfg *eez.SequencerConfig, witnesses sequencer.Witnesses, announcements sequencer.Announcements, composer sequencer.SyncSlotComposer, logger log.Logger) (*sequencer.Service, error) {
+func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.ExecChain, f *follower.Follower, stop interface{ Close() }, cfg *eez.SequencerConfig, witnesses sequencer.Witnesses, announcements sequencer.Announcements, composer sequencer.SyncSlotComposer, held func(common.Hash) bool, logger log.Logger) (*sequencer.Service, error) {
 	pool := backend.TxPool()
 	if pool == nil {
 		return nil, errors.New("the sequencer needs the txpool")
@@ -286,7 +287,7 @@ func newSequencer(ctx context.Context, backend *eth.Ethereum, chain *deriver.Exe
 	chainConfig := backend.ChainConfig()
 	timing := sequencerTiming(chainConfig.L2.(*config.L2Config), cfg)
 	budget := daBudget(cfg, timing.K())
-	s, err := sequencer.New(chainConfig, sequencer.Config{Timing: timing, FeeRecipient: cfg.FeeRecipient, MaxDepth: cfg.MaxDepth, DABudget: budget, Witnesses: witnesses, Announcements: announcements, Composer: composer}, f, pool, logger)
+	s, err := sequencer.New(chainConfig, sequencer.Config{Timing: timing, FeeRecipient: cfg.FeeRecipient, MaxDepth: cfg.MaxDepth, DABudget: budget, Witnesses: witnesses, Announcements: announcements, Composer: composer, Held: held}, f, pool, logger)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", eez.ErrConfig, err)
 	}
@@ -326,12 +327,12 @@ func sequencerTiming(l2 *config.L2Config, cfg *eez.SequencerConfig) sequencer.Ti
 // newComposer returns the composer settling the blocks of chain, whose
 // witnesses are in witnesses, from the derivation state of f; stop releases
 // it once the sequencer has stopped.
-func newComposer(ctx context.Context, chainConfig *chain.Config, cfg *eez.SequencerConfig, chain *deriver.ExecChain, witnesses *witness.Store, f *follower.Follower, logger log.Logger) (comp *composer.Composer, stop func(), cross func(*sequencer.Sequencer) (*ingress.Front, error), err error) {
+func newComposer(ctx context.Context, chainConfig *chain.Config, cfg *eez.SequencerConfig, chain *deriver.ExecChain, witnesses *witness.Store, f *follower.Follower, logger log.Logger) (comp *composer.Composer, stop func(), cross func(*sequencer.Sequencer) ([]front, error), pool *composer.HeldPool, err error) {
 	c := cfg.Composer
 	l2 := chainConfig.L2.(*config.L2Config)
 	node, err := l1.DialRPC(ctx, c.L1, logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	defer func() {
 		if err != nil {
@@ -340,32 +341,33 @@ func newComposer(ctx context.Context, chainConfig *chain.Config, cfg *eez.Sequen
 	}()
 	poster, err := post.New(ctx, c.PosterKey, l2.Registry, c.PriorityFee, c.Builder, node, logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if id := poster.ChainID(); id != l2.L1ChainID {
-		return nil, nil, nil, fmt.Errorf("%w: --%s is chain %d, not the L1 %d", eez.ErrConfig, eez.L1RPCFlag.Name, id, l2.L1ChainID)
+		return nil, nil, nil, nil, fmt.Errorf("%w: --%s is chain %d, not the L1 %d", eez.ErrConfig, eez.L1RPCFlag.Name, id, l2.L1ChainID)
 	}
 	// The ECDSA proof system registers its attester's address as its key.
 	prover, err := prove.Dial(c.Prover, c.Attester, common.BytesToHash(c.Attester[:]))
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%w: %w", eez.ErrConfig, err)
+		return nil, nil, nil, nil, fmt.Errorf("%w: %w", eez.ErrConfig, err)
 	}
 	timing := sequencerTiming(l2, cfg)
 	k := timing.K()
 	observer := &composer.Observer{Node: node, RollupID: l2.RollupID, EEZ: l2.Registry, Every: 500 * time.Millisecond, Logger: logger}
-	if c.L1Front != "" {
+	if c.L1Front != "" || c.L2Front != "" {
 		engine, err := eezrules.New(chainConfig)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
+		pool = composer.NewHeldPool()
 		// Inbound entries settle in their triggers, after the posting.
 		scanner := l1.NewScanner(node, l2.Registry, l2.RollupID)
 		observer.Scan = func(ctx context.Context, block uint64) ([]l1.ScannedBatch, error) {
 			batches, _, err := scanner.Scan(ctx, block, block)
 			return batches, err
 		}
-		cross = func(seq *sequencer.Sequencer) (*ingress.Front, error) {
-			return crossChain(ctx, comp, seq, c, chainConfig, engine, chain, node, logger)
+		cross = func(seq *sequencer.Sequencer) ([]front, error) {
+			return crossChain(ctx, comp, seq, pool, c, chainConfig, engine, chain, node, logger)
 		}
 	}
 	comp = composer.New(composer.Config{
@@ -383,17 +385,17 @@ func newComposer(ctx context.Context, chainConfig *chain.Config, cfg *eez.Sequen
 		comp.Close()
 		_ = prover.Close()
 		node.Close()
-	}, cross, nil
+	}, cross, pool, nil
 }
 
-// crossChain has comp compose the effects of the L1 transactions sent to its
-// L1 front, which it returns, on the Sync blocks of seq.
-func crossChain(ctx context.Context, comp *composer.Composer, seq *sequencer.Sequencer, c *eez.ComposerConfig, chainConfig *chain.Config, engine rules.Engine,
+// crossChain has comp compose the transactions pool holds on the Sync
+// blocks of seq, and returns the fronts holding them: the L1 front, whose
+// transactions call into the chain, and the L2 front, whose call L1.
+func crossChain(ctx context.Context, comp *composer.Composer, seq *sequencer.Sequencer, pool *composer.HeldPool, c *eez.ComposerConfig, chainConfig *chain.Config, engine rules.Engine,
 	l2chain *deriver.ExecChain, node *l1.RPC, logger log.Logger,
-) (*ingress.Front, error) {
+) ([]front, error) {
 	l2 := chainConfig.L2.(*config.L2Config)
 	l1Config := l1.ChainConfig(l2.L1ChainID)
-	pool := composer.NewHeldPool()
 	comp.CrossChain(&composer.CrossChain{
 		Pool: pool, L1: node, L1Config: l1Config, Manager: l2.Registry,
 		L1Hash: func(ctx context.Context, n uint64) (common.Hash, error) {
@@ -413,22 +415,45 @@ func crossChain(ctx context.Context, comp *composer.Composer, seq *sequencer.Seq
 		},
 		L2Config: chainConfig, Engine: engine,
 		Sync: protocol.SyncTxContext{ChainID: chainConfig.ChainID.Uint64(), RollupID: l2.RollupID, EEZL2: protocol.EEZL2Address},
+		Escrow: func(ctx context.Context, block common.Hash) (*uint256.Int, error) {
+			return l1.Escrow(ctx, node, l2.Registry, l2.RollupID, block)
+		},
 	})
 	comp.Recover(pool, seq.Substitute)
 	info, err := ingress.Info(l2.Registry, protocol.EEZL2Address, l2.L1ChainID, chainConfig.ChainID.Uint64(), version.VersionWithCommit(version.GitCommit))
 	if err != nil {
 		return nil, err
 	}
-	return &ingress.Front{
-		Direction: composer.Inbound, ChainID: l2.L1ChainID, Pool: pool, Source: node, Upstream: c.L1, Info: info, Logger: logger,
-		GasCap: func() (uint64, bool, error) {
-			head, err := node.Head(ctx)
-			if err != nil {
-				return 0, false, err
-			}
-			return params.MaxTxnGasLimit, l1Config.IsOsaka(head.Time), nil
-		},
-	}, nil
+	var fronts []front
+	if c.L1Front != "" {
+		fronts = append(fronts, front{name: "L1", addr: c.L1Front, Front: &ingress.Front{
+			Direction: composer.Inbound, ChainID: l2.L1ChainID, Pool: pool, Source: node, Upstream: c.L1, Info: info, Logger: logger,
+			GasCap: gasCap(ctx, node, l1Config),
+		}})
+	}
+	if c.L2Front != "" {
+		l2rpc, err := l1.DialRPC(ctx, c.L2RPC, logger)
+		if err != nil {
+			return nil, err
+		}
+		fronts = append(fronts, front{name: "L2", addr: c.L2Front, close: l2rpc.Close, Front: &ingress.Front{
+			Direction: composer.Outbound, ChainID: chainConfig.ChainID.Uint64(), Pool: pool, Source: l2rpc, Upstream: c.L2RPC, Info: info, Logger: logger,
+			GasCap: gasCap(ctx, l2rpc, chainConfig),
+		}})
+	}
+	return fronts, nil
+}
+
+// gasCap returns the EIP-7825 transaction gas limit of the chain of config,
+// whose head node reads.
+func gasCap(ctx context.Context, node *l1.RPC, config *chain.Config) func() (uint64, bool, error) {
+	return func() (uint64, bool, error) {
+		head, err := node.Head(ctx)
+		if err != nil {
+			return 0, false, err
+		}
+		return params.MaxTxnGasLimit, config.IsOsaka(head.Time), nil
+	}
 }
 
 // newHeadSigner returns the signer of the heads of the chain of chainConfig,
@@ -459,20 +484,29 @@ func announces(chainConfig *chain.Config) bool {
 	return ok && config.Announces(l2.RuleSet())
 }
 
-// frontServer serves the composer's L1 front.
+// front is a cross-chain front of the composer, served at addr.
+type front struct {
+	*ingress.Front
+	name, addr string
+	// close, when set, releases the front's source chain client.
+	close func()
+}
+
+// frontServer serves a cross-chain front.
 type frontServer struct {
 	srv    *http.Server
+	front  front
 	logger log.Logger
 }
 
-// newFrontServer serves h on addr with the timeouts of the node's RPC
-// listener: a request's body read is bounded, not only its headers.
-func newFrontServer(addr string, h http.Handler, logger log.Logger) *frontServer {
+// newFrontServer serves f at its address with the timeouts of the node's
+// RPC listener: a request's body read is bounded, not only its headers.
+func newFrontServer(f front, logger log.Logger) *frontServer {
 	t := rpccfg.DefaultHTTPTimeouts
 	return &frontServer{srv: &http.Server{
-		Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second,
+		Addr: f.addr, Handler: f.Front, ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout: t.ReadTimeout, WriteTimeout: t.WriteTimeout, IdleTimeout: t.IdleTimeout,
-	}, logger: logger}
+	}, front: f, logger: logger}
 }
 
 func (f *frontServer) Start() error {
@@ -482,17 +516,21 @@ func (f *frontServer) Start() error {
 	}
 	go func() {
 		if err := f.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			f.logger.Error("[eez] L1 front stopped", "err", err)
+			f.logger.Error("[eez] cross-chain front stopped", "front", f.front.name, "err", err)
 		}
 	}()
-	f.logger.Info("[eez] L1 front listening", "addr", ln.Addr())
+	f.logger.Info("[eez] cross-chain front listening", "front", f.front.name, "addr", ln.Addr())
 	return nil
 }
 
 func (f *frontServer) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return f.srv.Shutdown(ctx)
+	err := f.srv.Shutdown(ctx)
+	if f.front.close != nil {
+		f.front.close()
+	}
+	return err
 }
 
 // onStop is a lifecycle that runs f when stopped; a pointer, as the node
@@ -598,13 +636,13 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 	}
 	var seq *sequencer.Service
 	var signer *sequencer.HeadSigner
-	var front *ingress.Front
+	var fronts []front
 	if cfg.Sequencer != nil {
 		// Run hands heads only once started, after seq is set.
 		fc.OnHead = func(h l1.Header) {
-			// Boot is over: the front may hold transactions for the slots.
-			if front != nil {
-				front.Ready()
+			// Boot is over: the fronts may hold transactions for the slots.
+			for _, f := range fronts {
+				f.Ready()
 			}
 			seq.Head(h)
 		}
@@ -656,17 +694,22 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 			logger.Warn("[eez] sequencer signs no unsafe-block announcements: --"+eez.SequencerKeyFileFlag.Name+" is not set", "event", "eez.node.announcer.disabled")
 		}
 		var comp sequencer.SyncSlotComposer
-		var cross func(*sequencer.Sequencer) (*ingress.Front, error)
+		var cross func(*sequencer.Sequencer) ([]front, error)
+		var held func(common.Hash) bool
 		if cfg.Sequencer.Composer != nil {
 			var c *composer.Composer
-			if c, stopComposer, cross, err = newComposer(ctx, chainConfig, cfg.Sequencer, chain, witnesses, f, logger); err != nil {
+			var pool *composer.HeldPool
+			if c, stopComposer, cross, pool, err = newComposer(ctx, chainConfig, cfg.Sequencer, chain, witnesses, f, logger); err != nil {
 				closeStores()
 				return nil, err
 			}
 			comp = c
+			if pool != nil {
+				held = pool.Holds
+			}
 		}
-		if seq, err = newSequencer(ctx, backend, chain, f, stop, cfg.Sequencer, capture, announcer, comp, logger); err == nil && cross != nil {
-			front, err = cross(seq.Sequencer())
+		if seq, err = newSequencer(ctx, backend, chain, f, stop, cfg.Sequencer, capture, announcer, comp, held, logger); err == nil && cross != nil {
+			fronts, err = cross(seq.Sequencer())
 		}
 		if err != nil {
 			if stopComposer != nil {
@@ -700,8 +743,8 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		// before the witness store it proves from.
 		n.RegisterLifecycle(&onStop{stopComposer})
 	}
-	if front != nil {
-		n.RegisterLifecycle(newFrontServer(cfg.Sequencer.Composer.L1Front, front, logger))
+	for _, f := range fronts {
+		n.RegisterLifecycle(newFrontServer(f, logger))
 	}
 	if signer != nil {
 		// Stops after the follower, the writer of the heads it signs, and
