@@ -3010,6 +3010,9 @@ func removeAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger) error {
 	return nil
 }
 
+// indexAggOpts skip the startup gap check: `snapshots index` rebuilds the accessors whose absence makes it refuse.
+var indexAggOpts = []func(state.AggOpts) state.AggOpts{state.AggOpts.SkipFilesDBGapCheck}
+
 func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	logger := log.Root()
 	defer logger.Info("Done")
@@ -3031,8 +3034,7 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	// The command rebuilds the accessors whose absence makes the startup gap check refuse the datadir.
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger, state.AggOpts.SkipFilesDBGapCheck)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger, indexAggOpts...)
 	caplinSnaps, caplinStateSnaps, br, agg := res.CaplinSnaps, res.CaplinStateSnaps, res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
