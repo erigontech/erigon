@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -4022,6 +4023,98 @@ func TestProvideTxnsWaitsForTheParentHash(t *testing.T) {
 	waits(done)
 	see(unwind(1, b))
 	provided(done)
+}
+
+// beginHook is a pool database that, once armed, runs moved before opening
+// its next read transaction, and fails the read with moved's error.
+type beginHook struct {
+	kv.RwDB
+	armed atomic.Bool
+	moved func() error
+}
+
+func (h *beginHook) BeginRo(ctx context.Context) (kv.Tx, error) {
+	if h.armed.CompareAndSwap(true, false) {
+		if err := h.moved(); err != nil {
+			return nil, err
+		}
+	}
+	return h.RwDB.BeginRo(ctx)
+}
+
+// TestProvideTxnsKeepsTheParentAcrossTheRead: the pool's view moving off
+// what the wait accepted while a provider opens its read of the pool sends
+// the provider back to waiting: it selects only from that view, the
+// parent's hash or, without one, its height.
+func TestProvideTxnsKeepsTheParentAcrossTheRead(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 21_000)
+	apply := func(changes ...*remoteproto.StateChange) error {
+		return pool.OnNewBlock(t.Context(), &remoteproto.StateChangeBatch{
+			PendingBlockBaseFee: 200_000,
+			BlockGasLimit:       40_000_000,
+			ChangeBatch:         changes,
+		}, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	}
+	block := func(n uint64, hash common.Hash) *remoteproto.StateChange {
+		return &remoteproto.StateChange{BlockHeight: n, BlockHash: gointerfaces.ConvertHashToH256(hash)}
+	}
+	unwind := func(n uint64, hash common.Hash) *remoteproto.StateChange {
+		c := block(n, hash)
+		c.Direction = remoteproto.Direction_UNWIND
+		return c
+	}
+	a, b, c := common.Hash{0xa}, common.Hash{0xb}, common.Hash{0xc}
+	on := func(hash common.Hash) func() error {
+		return func() error { return apply(unwind(0, common.Hash{}), block(1, hash)) }
+	}
+	hook := &beginHook{RwDB: pool.poolDB}
+	pool.poolDB = hook
+	byHash := func(ctx context.Context) error {
+		_, err := pool.ProvideTxns(ctx, txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockHash(a))
+		return err
+	}
+	const back = 200 * time.Millisecond
+	// later applies view after back, off the test's goroutine, joined at
+	// cleanup, and returns the instant before it starts.
+	later := func(t *testing.T, view func() error) time.Time {
+		done := make(chan struct{})
+		t.Cleanup(func() { <-done })
+		start := time.Now()
+		go func() {
+			defer close(done)
+			time.Sleep(back)
+			assert.NoError(t, view())
+		}()
+		return start
+	}
+
+	t.Run("moved off", func(t *testing.T) {
+		require.NoError(t, on(a)())
+		hook.moved = on(b)
+		hook.armed.Store(true)
+		short, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+		defer cancel()
+		require.ErrorIs(t, byHash(short), context.DeadlineExceeded, "provided from the view of another block")
+		require.False(t, hook.armed.Load())
+	})
+	t.Run("moved back", func(t *testing.T) {
+		require.NoError(t, on(a)())
+		hook.moved = on(b)
+		hook.armed.Store(true)
+		start := later(t, on(a))
+		require.NoError(t, byHash(t.Context()))
+		require.GreaterOrEqual(t, time.Since(start), back, "provided before the view came back")
+	})
+	t.Run("lowered", func(t *testing.T) {
+		require.NoError(t, on(a)())
+		require.NoError(t, apply(block(2, c)))
+		hook.moved = func() error { return apply(unwind(1, a)) }
+		hook.armed.Store(true)
+		start := later(t, func() error { return apply(block(2, c)) })
+		_, err := pool.ProvideTxns(t.Context(), txnprovider.WithParentBlockNum(2))
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, time.Since(start), back, "provided below the parent's height")
+	})
 }
 
 // TestProvideTxnsOnTheHeadAfterStart: a pool started from its database, no

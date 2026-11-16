@@ -835,41 +835,51 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		<-watcherDone
 	}()
 
-	p.lock.Lock()
-	for last := p.lastSeenBlock.Load(); !p.seenLocked(onTopOf, parentHash); last = p.lastSeenBlock.Load() {
-		select {
-		case <-ctx.Done():
-			// Leaving with the lock held would stop every later pool operation, not just this one.
-			p.lock.Unlock()
-			return false, 0, ctx.Err()
-		case <-parentBlockWaitStop:
-			lastHash := p.lastSeenHash
-			p.lock.Unlock()
-			p.logger.Debug("[txpool] Parent block wait stopped", "expecting", onTopOf, "expectingHash", parentHash, "lastSeen", last, "lastSeenHash", lastHash)
-			return false, 0, ctx.Err()
-		default:
-			// continue
+	var tx kv.Tx
+	for {
+		p.lock.Lock()
+		for last := p.lastSeenBlock.Load(); !p.seenLocked(onTopOf, parentHash); last = p.lastSeenBlock.Load() {
+			select {
+			case <-ctx.Done():
+				// Leaving with the lock held would stop every later pool operation, not just this one.
+				p.lock.Unlock()
+				return false, 0, ctx.Err()
+			case <-parentBlockWaitStop:
+				lastHash := p.lastSeenHash
+				p.lock.Unlock()
+				p.logger.Debug("[txpool] Parent block wait stopped", "expecting", onTopOf, "expectingHash", parentHash, "lastSeen", last, "lastSeenHash", lastHash)
+				return false, 0, ctx.Err()
+			default:
+				// continue
+			}
+			p.logger.Trace("[txpool] Waiting for block", "expecting", onTopOf, "expectingHash", parentHash, "lastSeen", last, "lastSeenHash", p.lastSeenHash, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
+			p.lastSeenCond.Wait()
 		}
-		p.logger.Trace("[txpool] Waiting for block", "expecting", onTopOf, "expectingHash", parentHash, "lastSeen", last, "lastSeenHash", p.lastSeenHash, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
-		p.lastSeenCond.Wait()
-	}
-	// Important: poolDB.BeginRo has a RoTxsLimiter which is implemented using a weighted semaphore object. This means
-	// that we are dealing with 2 locks at a time. All other usages in the pool that use both p.lock and poolDB.BeginRo
-	// first acquire the RoTx and then acquire p.lock. However, here we do the opposite - we first acquire p.lock and
-	// then try to acquire a RoTx. This creates an opportunity for a deadlock if we've acquired p.lock but at the same
-	// time there has been a burst of goroutines (N=roTxsLimit) that have all acquired a RoTx and are now trying to
-	// acquire p.lock which we've acquired here (the goroutines processing announcements := <-p.newPendingTxns in p.Run
-	// are one example). One solution is to first acquire a RoTx here and then p.lock as everywhere else. However, this
-	// won't work well if we wait in the "Waiting for block" loop for a while since our RoTx will then see stale data.
-	// Instead, we can release p.lock once we're past "Waiting for block" -> try to acquire RoTx -> try to acquire
-	// p.lock again as everywhere else.
-	p.lock.Unlock()
-	tx, err := p.poolDB.BeginRo(ctx)
-	if err != nil {
-		return false, 0, err
+		// Important: poolDB.BeginRo has a RoTxsLimiter which is implemented using a weighted semaphore object. This means
+		// that we are dealing with 2 locks at a time. All other usages in the pool that use both p.lock and poolDB.BeginRo
+		// first acquire the RoTx and then acquire p.lock. However, here we do the opposite - we first acquire p.lock and
+		// then try to acquire a RoTx. This creates an opportunity for a deadlock if we've acquired p.lock but at the same
+		// time there has been a burst of goroutines (N=roTxsLimit) that have all acquired a RoTx and are now trying to
+		// acquire p.lock which we've acquired here (the goroutines processing announcements := <-p.newPendingTxns in p.Run
+		// are one example). One solution is to first acquire a RoTx here and then p.lock as everywhere else. However, this
+		// won't work well if we wait in the "Waiting for block" loop for a while since our RoTx will then see stale data.
+		// Instead, we can release p.lock once we're past "Waiting for block" -> try to acquire RoTx -> try to acquire
+		// p.lock again as everywhere else.
+		p.lock.Unlock()
+		var err error
+		if tx, err = p.poolDB.BeginRo(ctx); err != nil {
+			return false, 0, err
+		}
+		p.lock.Lock()
+		if p.seenLocked(onTopOf, parentHash) {
+			break
+		}
+		// A block update while the lock was free moved the view off the one
+		// the wait accepted: select from no other.
+		p.lock.Unlock()
+		tx.Rollback()
 	}
 	defer tx.Rollback()
-	p.lock.Lock()
 	defer p.lock.Unlock()
 
 	best := p.pending.best
