@@ -24,16 +24,18 @@ import (
 	"context"
 	"net/netip"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/common/log/v3"
+
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/node/direct"
@@ -475,36 +477,6 @@ func TestCommitmentPlainValuesFromCtx(t *testing.T) {
 	require.False(t, *gotFalse)
 }
 
-func TestSetParallelCommitment(t *testing.T) {
-	orig := statecfg.ExperimentalParallelCommitment
-	t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = orig })
-
-	require.True(t, statecfg.DefaultParallelCommitment, "parallel commitment must be on by default")
-	require.Equal(t, statecfg.DefaultParallelCommitment, ExperimentalParallelCommitmentFlag.Value,
-		"advertised flag default drifted from the effective default")
-
-	run := func(seed bool, args ...string) bool {
-		statecfg.ExperimentalParallelCommitment = seed
-		flag := ExperimentalParallelCommitmentFlag
-		app := &cli.Command{
-			Flags: []cli.Flag{&flag},
-			Action: func(_ context.Context, cmd *cli.Command) error {
-				setParallelCommitment(cmd)
-				return nil
-			},
-		}
-		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
-		return statecfg.ExperimentalParallelCommitment
-	}
-
-	for _, seed := range []bool{true, false} {
-		require.Equal(t, seed, run(seed), "unset flag must leave COMMITMENT_PARALLEL in charge")
-		require.False(t, run(seed, "--"+ExperimentalParallelCommitmentFlag.Name+"=false"),
-			"explicit =false must select the sequential trie")
-		require.True(t, run(seed, "--"+ExperimentalParallelCommitmentFlag.Name+"=true"))
-	}
-}
-
 func TestDisableBoolFlags_ExplicitFalse(t *testing.T) {
 	run := func(args ...string) (ethconfig.Config, buildercfg.BuilderConfig) {
 		txpoolDisable, proposingDisable, fakePoW := TxPoolDisableFlag, ProposingDisableFlag, FakePoWFlag
@@ -549,4 +521,14 @@ func TestBALBatchPrefetchOffWithoutIOUring(t *testing.T) {
 
 	disableBALBatchPrefetchWithoutIOUring(false)
 	require.False(t, dbg.BALBatchPrefetch || mmap.BatchPrefetch, "no io_uring, on any platform: both flags go off")
+}
+
+// COMMITMENT_PARALLEL=false was the documented way back to the sequential trie, so setting it now warns too.
+func TestWarnParallelCommitmentDeprecatedOnEnv(t *testing.T) {
+	t.Setenv("COMMITMENT_PARALLEL", "false")
+	var out strings.Builder
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&out, log.LogfmtFormat()))
+	warnParallelCommitmentDeprecated(&cli.Command{}, logger)
+	require.Contains(t, out.String(), "COMMITMENT_PARALLEL")
 }
