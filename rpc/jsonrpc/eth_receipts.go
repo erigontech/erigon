@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/RoaringBitmap/roaring/v2"
 
@@ -553,7 +554,9 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	prefetch := api.receiptsGenerator.PrefetchReceipts(ctx, chainConfig, api.db, blockNum, blockHash, opts)
 	defer prefetch.Close()
 
+	tBlock := time.Now()
 	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
+	receipts.DbgBlockNs.Add(int64(time.Since(tBlock)))
 	if err != nil {
 		return nil, err
 	}

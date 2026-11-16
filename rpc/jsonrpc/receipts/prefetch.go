@@ -31,26 +31,36 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
-// DEBUG ONLY: prefetch outcome counters, logged every dbgEvery Receipts calls.
+// DEBUG ONLY: prefetch outcome counters and timings, logged per window of dbgEvery Receipts calls.
 var (
-	dbgNotServed, dbgInLRU, dbgStarted, dbgBeginFail, dbgCanonErr, dbgCanonMissing, dbgCanonMismatch atomic.Int64
-	dbgReadErr, dbgIncomplete, dbgServed, dbgCalls, dbgWaitNs, dbgWaitZero, dbgHashNs, dbgPrefetchNs atomic.Int64
-	dbgCtxDone                                                                                       atomic.Int64
+	dbgStarted, dbgBeginFail, dbgCanonFail, dbgReadErr, dbgIncomplete, dbgServed, dbgCalls          atomic.Int64
+	dbgWaitZero, dbgSchedNs, dbgBeginNs, dbgCanonNs, dbgReadNs, dbgPrefetchNs, dbgHashNs, dbgWaitNs atomic.Int64
+	// DbgBlockNs is the blockWithSenders time of GetBlockReceipts.
+	DbgBlockNs atomic.Int64
+	dbgPrev    [16]int64
 )
 
-const dbgEvery = 5000
+const dbgEvery = 2000
 
 func dbgLog() {
 	n := dbgCalls.Add(1)
 	if n%dbgEvery != 0 {
 		return
 	}
-	log.Info("[dbg] receipts prefetch", "calls", n, "notServed", dbgNotServed.Load(), "inLRU", dbgInLRU.Load(),
-		"started", dbgStarted.Load(), "beginFail", dbgBeginFail.Load(), "canonErr", dbgCanonErr.Load(),
-		"canonMissing", dbgCanonMissing.Load(), "canonMismatch", dbgCanonMismatch.Load(), "readErr", dbgReadErr.Load(),
-		"ctxDone", dbgCtxDone.Load(), "incomplete", dbgIncomplete.Load(), "served", dbgServed.Load(),
-		"avgWaitUs", dbgWaitNs.Load()/n/1000, "waitZero", dbgWaitZero.Load(),
-		"avgHashUs", dbgHashNs.Load()/n/1000, "avgPrefetchUs", dbgPrefetchNs.Load()/max(dbgStarted.Load(), 1)/1000)
+	cur := [16]int64{n, dbgStarted.Load(), dbgBeginFail.Load(), dbgCanonFail.Load(), dbgReadErr.Load(), dbgIncomplete.Load(),
+		dbgServed.Load(), dbgWaitZero.Load(), dbgSchedNs.Load(), dbgBeginNs.Load(), dbgCanonNs.Load(), dbgReadNs.Load(),
+		dbgPrefetchNs.Load(), dbgHashNs.Load(), dbgWaitNs.Load(), DbgBlockNs.Load()}
+	var d [16]int64
+	for i := range cur {
+		d[i] = cur[i] - dbgPrev[i]
+	}
+	dbgPrev = cur
+	calls, started := max(d[0], 1), max(d[1], 1)
+	us := func(ns, cnt int64) int64 { return ns / cnt / 1000 }
+	log.Info("[dbg] receipts prefetch window", "calls", n, "started", d[1], "beginFail", d[2], "canonFail", d[3],
+		"readErr", d[4], "incomplete", d[5], "served", d[6], "waitZero", d[7],
+		"schedUs", us(d[8], started), "beginUs", us(d[9], started), "canonUs", us(d[10], started), "readUs", us(d[11], started),
+		"prefetchUs", us(d[12], started), "blockUs", us(d[15], calls), "hashUs", us(d[13], calls), "waitUs", us(d[14], calls))
 }
 
 // ReceiptsPrefetch reads the persisted receipts of one block on its own read tx,
@@ -65,22 +75,23 @@ type ReceiptsPrefetch struct {
 // It returns nil when the receipts would not be served from the persistent cache.
 func (g *Generator) PrefetchReceipts(ctx context.Context, cfg *chain.Config, db kv.TemporalRoDB, blockNum uint64, blockHash common.Hash, opts eth.ReceiptsOpts) *ReceiptsPrefetch {
 	if !PersistedReceiptsServed() || PostStateCalculated(cfg, blockNum, opts.CommitmentHistoryEnabled, g.blockReader) {
-		dbgNotServed.Add(1)
 		return nil
 	}
 	if g.receiptsCache.Contains(blockHash) {
-		dbgInLRU.Add(1)
 		return nil
 	}
 	dbgStarted.Add(1)
+	created := time.Now()
 	ctx, cancel := context.WithCancel(ctx)
 	p := &ReceiptsPrefetch{cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(p.done)
 		start := time.Now()
+		dbgSchedNs.Add(int64(start.Sub(created)))
 		defer func() { dbgPrefetchNs.Add(int64(time.Since(start))) }()
 		// The request already holds a read-tx slot: waiting for a second one can deadlock.
 		prefetchTx, err := db.BeginTemporalRo(kv.WithNonBlockingAcquire(ctx))
+		dbgBeginNs.Add(int64(time.Since(start)))
 		if err != nil {
 			dbgBeginFail.Add(1)
 			return
@@ -88,23 +99,17 @@ func (g *Generator) PrefetchReceipts(ctx context.Context, cfg *chain.Config, db 
 		defer prefetchTx.Rollback()
 		view := g.filters.WithTemporalOverlay(prefetchTx)
 		// The prefetch tx opens after the request tx: serve only the block the request resolved.
+		tc := time.Now()
 		canonical, ok, err := g.blockReader.CanonicalHash(ctx, view, blockNum)
+		dbgCanonNs.Add(int64(time.Since(tc)))
 		if err != nil || !ok || canonical != blockHash {
-			switch {
-			case err != nil:
-				dbgCanonErr.Add(1)
-			case !ok:
-				dbgCanonMissing.Add(1)
-			default:
-				dbgCanonMismatch.Add(1)
-			}
+			dbgCanonFail.Add(1)
 			return
 		}
+		tr := time.Now()
 		receipts, err := rawdb.ReadBlockReceiptsCacheV2(ctx, view, blockNum, g.txNumReader)
+		dbgReadNs.Add(int64(time.Since(tr)))
 		if err != nil {
-			if ctx.Err() != nil {
-				dbgCtxDone.Add(1)
-			}
 			dbgReadErr.Add(1)
 			return
 		}
