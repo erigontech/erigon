@@ -1820,8 +1820,8 @@ func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
 	return max(dt.ht.files[0].startTxNum, dt.ht.iit.files[0].startTxNum)
 }
 
-// GetAsOf does not always require usage of roTx. If it is possible to determine
-// historical value based only on static files, roTx will not be used.
+// GetAsOf returns the value of key as of txNum. With roTx it reads latest state first: a key last written in a step
+// before txNum's step still has that value at txNum. Otherwise it seeks history, then latest state.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	if !dt.d.Enabled {
 		return nil, false, nil
@@ -1834,6 +1834,9 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 			return nil, false, err
 		}
 		if ok && len(latest) > 0 && step < kv.Step(txNum/dt.stepSize) {
+			if traceGetAsOf == dt.d.FilenameBase {
+				fmt.Printf("DomainGetAsOf(%s, %x, %d) -> found in latest state, unchanged since step %d\n", dt.d.FilenameBase, key, txNum, step)
+			}
 			return latest, true, nil
 		}
 	}
