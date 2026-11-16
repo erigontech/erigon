@@ -17,8 +17,8 @@
 package sequencer
 
 import (
+	"bytes"
 	"context"
-	"math/big"
 	"testing"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -26,8 +26,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/protocol"
+	"github.com/erigontech/erigon/eez/protocol/da"
 	"github.com/erigontech/erigon/eez/systemtx"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -49,8 +51,7 @@ func transfer(t *testing.T, nonce uint64, data int, sender common.Address) types
 }
 
 // TestPoolTxns is T-SEQ-2 for the pool: no blob transaction, no EEZ system
-// type or sender, and the block's DA within the budget, a large transaction
-// leaving room for smaller ones after it.
+// type or sender. The block, not the provider, applies the DA budget.
 func TestPoolTxns(t *testing.T) {
 	user := common.HexToAddress("0xa11ce")
 	system, err := systemtx.New(protocol.SystemTx{ChainID: 6290, To: protocol.EEZL2Address})
@@ -62,14 +63,13 @@ func TestPoolTxns(t *testing.T) {
 		transfer(t, 0, 0, protocol.SystemAddress),
 		small, large, last,
 	}
-	budget := small.EncodingSize() + last.EncodingSize() + 2*txOverhead
-	got, err := newPoolTxns(pool, budget, log.New()).ProvideTxns(t.Context())
-	require.NoError(t, err)
-	require.Equal(t, []types.Transaction{small, last}, got)
-
-	got, err = newPoolTxns(pool, 1<<20, log.New()).ProvideTxns(t.Context())
+	p := newPoolTxns(pool, 1, log.New())
+	got, err := p.ProvideTxns(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, []types.Transaction{small, large, last}, got)
+	budget := p.TxnsBudget()
+	require.Equal(t, 1, budget.Limit)
+	require.Equal(t, daSize(large), budget.Size(large))
 }
 
 func TestDABudget(t *testing.T) {
@@ -105,104 +105,43 @@ func (p *paged) ProvideTxns(_ context.Context, opts ...txnprovider.ProvideOption
 	return page, nil
 }
 
-// TestPoolTxnsPagesPastAnEmptiedPage: a page whose transactions the budget
-// all leaves out is not the pool running dry; the next pages still fill the
-// block, until no transaction can fit.
-func TestPoolTxnsPagesPastAnEmptiedPage(t *testing.T) {
-	user := common.HexToAddress("0xa11ce")
+// TestPoolTxnsPagesPastRefusedTransactions: a page whose transactions EEZ
+// all refuses is not the pool running dry; the next pages hold others.
+func TestPoolTxnsPagesPastRefusedTransactions(t *testing.T) {
 	var txs []types.Transaction
-	for i := range 3 {
-		txs = append(txs, transfer(t, uint64(i), 900, user))
+	for i := range 9 {
+		txs = append(txs, transfer(t, uint64(i), 0, protocol.SystemAddress))
 	}
-	small := transfer(t, 0, 100, common.HexToAddress("0xb0b0"))
-	txs = append(txs, small)
-	filter := func() txnprovider.ProvideOption { return txnprovider.WithTxnIdsFilter(mapset.NewSet[[32]byte]()) }
-
-	pool := &paged{txs: txs, n: 3}
-	got, err := newPoolTxns(pool, small.EncodingSize()+txOverhead, log.New()).ProvideTxns(t.Context(), filter())
+	theirs := transfer(t, 0, 10, common.HexToAddress("0xb0b0"))
+	pool := &paged{txs: append(txs, theirs), n: 3}
+	got, err := newPoolTxns(pool, 1, log.New()).ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(mapset.NewSet[[32]byte]()))
 	require.NoError(t, err)
-	require.Equal(t, []types.Transaction{small}, got)
-
-	pool = &paged{txs: txs, n: 3}
-	got, err = newPoolTxns(pool, minTxDA-1, log.New()).ProvideTxns(t.Context(), filter())
-	require.NoError(t, err)
-	require.Empty(t, got)
-	require.Equal(t, 1, pool.pages, "paged on with no room for any transaction")
-
-	// Room for a transaction, but less than each pending one takes, each of
-	// which an emptier block would carry: paging stops short of walking the
-	// pool.
-	first := transfer(t, 0, 1_800, common.HexToAddress("0xf125"))
-	budget := first.EncodingSize() + txOverhead + 100
-	pending := []types.Transaction{first}
-	for i := range 150 {
-		pending = append(pending, transfer(t, uint64(i), 900, common.BigToAddress(new(big.Int).SetUint64(uint64(0x5e0000+i)))))
-	}
-	pool = &paged{txs: pending, n: 3}
-	p := newPoolTxns(pool, budget, log.New())
-	f := filter()
-	got, err = p.ProvideTxns(t.Context(), f)
-	require.NoError(t, err)
-	require.Equal(t, []types.Transaction{first}, got)
-	got, err = p.ProvideTxns(t.Context(), f)
-	require.NoError(t, err)
-	require.Empty(t, got)
-	require.Equal(t, 1+maxEmptiedPages, pool.pages)
-
-	// Transactions no block can carry do not end the walk: the one behind
-	// them is kept.
-	var never []types.Transaction
-	for i := range 150 {
-		never = append(never, transfer(t, uint64(i), 900, user))
-	}
-	never = append(never, small)
-	pool = &paged{txs: never, n: 3}
-	got, err = newPoolTxns(pool, small.EncodingSize()+txOverhead, log.New()).ProvideTxns(t.Context(), filter())
-	require.NoError(t, err)
-	require.Equal(t, []types.Transaction{small}, got)
+	require.Equal(t, []types.Transaction{theirs}, got)
+	require.Equal(t, 4, pool.pages)
 }
 
-// TestPoolTxnsChargesATransactionOnce: a transaction yielded again, as the
-// builder has the pool do for one it set aside for its nonce, does not take
-// from the budget a second time.
-func TestPoolTxnsChargesATransactionOnce(t *testing.T) {
-	user := common.HexToAddress("0xa11ce")
-	first, second := transfer(t, 1, 100, user), transfer(t, 0, 100, user)
-	yielded := mapset.NewSet[[32]byte]()
-	pool := &paged{txs: []types.Transaction{first, second}, n: 1}
-	p := newPoolTxns(pool, first.EncodingSize()+second.EncodingSize()+2*txOverhead, log.New())
-
-	got, err := p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(yielded))
+// TestDASize: a transaction's DA size is what it adds to a span, under
+// either encoding, for typed and legacy transactions across the widths of
+// the span's uvarint and of the RLP length prefixes.
+func TestDASize(t *testing.T) {
+	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	require.Equal(t, []types.Transaction{first}, got)
-	got, err = p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(yielded))
-	require.NoError(t, err)
-	require.Equal(t, []types.Transaction{second}, got)
-
-	yielded.Remove(first.Hash())
-	got, err = p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(yielded))
-	require.NoError(t, err)
-	require.Equal(t, []types.Transaction{first}, got)
-}
-
-// TestPoolTxnsSkipsAStalledSender: once a sender's transaction is left out,
-// its later nonces cannot execute in the block, so they take nothing from
-// the budget another sender's transaction can use.
-func TestPoolTxnsSkipsAStalledSender(t *testing.T) {
-	user, other := common.HexToAddress("0xa11ce"), common.HexToAddress("0xb0b0")
-	theirs := transfer(t, 0, 100, other)
-	budget := theirs.EncodingSize() + txOverhead
-	blob := &types.BlobTx{DynamicFeeTransaction: types.DynamicFeeTransaction{ChainID: *uint256.NewInt(6290)}}
-	blob.SetSender(accounts.InternAddress(user))
-	for name, first := range map[string]types.Transaction{
-		"over the budget":   transfer(t, 0, 900, user),
-		"refused":           blob,
-		"over every budget": transfer(t, 0, 2*budget, user),
-	} {
-		next := transfer(t, 1, 10, user)
-		got, err := newPoolTxns(fixed{first, next, theirs}, budget, log.New()).ProvideTxns(t.Context())
-		require.NoError(t, err, name)
-		require.Equal(t, []types.Transaction{theirs}, got, name)
+	signer := types.LatestSignerForChainID(uint256.NewInt(6290))
+	to := common.HexToAddress("0xb0b")
+	for _, data := range []int{0, 40, 100, 200, 16_300, 16_400, 65_400, 65_600} {
+		for _, unsigned := range []types.Transaction{
+			&types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 21_000, To: &to, Data: make([]byte, data)}},
+			&types.DynamicFeeTransaction{CommonTx: types.CommonTx{GasLimit: 21_000, To: &to, Data: make([]byte, data)}, ChainID: *uint256.NewInt(6290)},
+		} {
+			tx, err := types.SignTx(unsigned, *signer, key)
+			require.NoError(t, err)
+			var buf bytes.Buffer
+			require.NoError(t, tx.MarshalBinary(&buf))
+			with := &da.Span{TxCounts: []uint32{1}, Beneficiaries: []common.Address{{}}, ExtraData: [][]byte{nil}, Transactions: [][]byte{buf.Bytes()}}
+			without := &da.Span{TxCounts: []uint32{0}, Beneficiaries: []common.Address{{}}, ExtraData: [][]byte{nil}}
+			require.Equal(t, len(with.Encode())-len(without.Encode()), daSize(tx), "type %d, %d bytes of data", tx.Type(), data)
+			require.Equal(t, len(with.EncodeRollupX())-len(without.EncodeRollupX()), daSize(tx), "type %d, %d bytes of data", tx.Type(), data)
+		}
 	}
 }
 

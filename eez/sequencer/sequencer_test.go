@@ -289,7 +289,6 @@ func TestFullCatchupSettlesPerSlot(t *testing.T) {
 	const (
 		maxPostingGas = 16_777_216 // EIP-7825 transaction gas cap
 		batchReserve  = 1_000_000  // the batch's own entries, proofs and encoding
-		txOverhead    = 5          // a transaction's length prefix in the span
 	)
 	h := newHarness(t)
 	cc := derivertest.Config()
@@ -319,12 +318,9 @@ func TestFullCatchupSettlesPerSlot(t *testing.T) {
 
 	k := devnet().K()
 	budget := sequencer.DABudget(k)
-	txDA := pool.txs[0].EncodingSize() + txOverhead
+	txDA := spanSize(pool.txs[0])
 	for n := uint64(1); n <= sync; n++ {
-		size := 0
-		for _, tx := range h.block(t, n).Transactions() {
-			size += tx.EncodingSize() + txOverhead
-		}
+		size := sized(t, h.block(t, n).Transactions()...)
 		require.LessOrEqual(t, size, budget, "block %d", n)
 		require.Greater(t, size, budget-txDA, "block %d leaves room for another transaction", n)
 	}
@@ -470,7 +466,7 @@ func TestBlockBudgetChargesARetryOnce(t *testing.T) {
 		txs := h.pool.decode(t, h.c.Transfer(common.HexToAddress("0xb0b"), 1), h.c.Transfer(common.HexToAddress("0xb0b"), 2))
 		budget := 0
 		if exact {
-			budget = txs[0].EncodingSize() + txs[1].EncodingSize() + 2*5
+			budget = sized(t, txs...)
 		}
 		// Nonce 1 first: the builder sets it aside until nonce 0 executes.
 		pool := &inOrder{txs: []types.Transaction{txs[1], txs[0]}}
@@ -529,24 +525,24 @@ func signedTransfer(t *testing.T, key *ecdsa.PrivateKey, nonce uint64, data int)
 // otherKey funds the devnet's first prefunded account.
 var otherKey, _ = crypto.HexToECDSA("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
 
-// TestBlockBudgetSkipsAStalledSender: an account whose first transaction no
-// block can carry cannot spend the budget on its later ones, which the
-// builder would set aside for their nonce; another account's transfer is
+// TestBlockBudgetIgnoresTheFollowersOfAnOversizedTransaction: an account
+// whose first transaction no block can carry spends none of the budget on
+// its later ones, which cannot execute; another account's transfer is
 // produced.
-func TestBlockBudgetSkipsAStalledSender(t *testing.T) {
+func TestBlockBudgetIgnoresTheFollowersOfAnOversizedTransaction(t *testing.T) {
 	h := newHarness(t)
 	budget := sequencer.DABudget(devnet().K())
 	txs := []types.Transaction{signedTransfer(t, derivertest.UserKey, 0, budget)}
 	left := budget
 	for n := uint64(1); n <= 14; n++ {
 		tx := signedTransfer(t, derivertest.UserKey, n, 4_400)
-		left -= tx.EncodingSize() + 5
+		left -= spanSize(tx)
 		txs = append(txs, tx)
 	}
 	last := signedTransfer(t, derivertest.UserKey, 15, left-200)
-	left -= last.EncodingSize() + 5
+	left -= spanSize(last)
 	transfer := signedTransfer(t, otherKey, 0, 0)
-	require.Greater(t, transfer.EncodingSize()+5, left, "the stalled account's transactions fill the budget")
+	require.Greater(t, spanSize(transfer), left, "the account's later transactions fill the budget")
 	pool := &byPrice{txs: append(txs, last, transfer)}
 	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet()}, h.follower, pool, log.New())
 	require.NoError(t, err)

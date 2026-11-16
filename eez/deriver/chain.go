@@ -246,6 +246,12 @@ func (c *ExecChain) Extend(ctx context.Context, parent *types.Header, in HeaderI
 	return built, nil
 }
 
+// Budgeted is a transaction provider whose block takes its transactions
+// within a budget.
+type Budgeted interface {
+	TxnsBudget() *exec.TxnsBudget
+}
+
 func (c *ExecChain) Build(ctx context.Context, in HeaderInputs, txs txnprovider.TxnProvider, safe, finalized common.Hash) (*types.BlockWithReceipts, error) {
 	head, err := c.Head(ctx)
 	if err != nil {
@@ -254,10 +260,13 @@ func (c *ExecChain) Build(ctx context.Context, in HeaderInputs, txs txnprovider.
 	if head.Hash() != in.ParentHash {
 		return nil, fmt.Errorf("build block %d on %x: the head is %x", in.Number, in.ParentHash, head.Hash())
 	}
-	// Bounded by gas and the provider alone: the sequencer, not the build,
-	// answers to the slot's clock.
+	// Bounded by gas, the provider and its budget: the sequencer, not the
+	// build, answers to the slot's clock.
 	params := c.parameters(in, txs, false)
 	params.RunToCompletion = true
+	if b, ok := txs.(Budgeted); ok {
+		params.TxnsBudget = b.TxnsBudget()
+	}
 	built, err := c.assemble(ctx, in.Number, params)
 	if err != nil {
 		return nil, err
