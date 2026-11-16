@@ -877,5 +877,6 @@ jobs:
       - name: Generate the comparison summary
         env:
           RESULTS_DIR: ${{ runner.temp }}/perf-results
+          CLIENTS: ${{ join(fromJSON(needs.setup.outputs.matrix).include.*.client, ',') }}
         run: |
-          python3 .github/workflows/scripts/compare_rpc_perf.py --results-dir "$RESULTS_DIR" | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 .github/workflows/scripts/compare_rpc_perf.py --results-dir "$RESULTS_DIR" --clients "$CLIENTS" | tee -a "$GITHUB_STEP_SUMMARY"

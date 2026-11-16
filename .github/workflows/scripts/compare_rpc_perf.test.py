@@ -307,6 +307,31 @@ with tempfile.TemporaryDirectory() as tmp:
     check("main with an excluded client prints all the overviews",
           code in (0, None) and all(f"status on {p}" in out for p in ("p50", "p90", "p95", "max")), out)
 
+# --- lost: a client of the run whose job uploaded no report -------------------
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "reth", "mixed", [
+        {"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "2", "testRepetitions": [rep(1, 1.0, 3)]},
+    ])
+    write_excluded(tmp, "geth", "mixed")
+    res = mod.load_results(tmp)
+    check("add_lost returns the clients with no report", mod.add_lost(res, ["erigon", "geth", "reth"]) == ["erigon"], res)
+    check("a client with no report is lost on every qps step",
+          res["mixed"]["erigon"] == {"1": {"failed": "lost"}, "2": {"failed": "lost"}}, res)
+    check("a client with an excluded report is not lost", res["mixed"]["geth"]["1"] == {"failed": "excluded"}, res)
+    md = mod.render_overview(res, "p50")
+    row = overview_row(md, "mixed", "1")
+    check("a lost erigon is lost and red in the overview", row == ["mixed", "1", "lost", "excluded", "1.00*", "🔴"], row)
+    check("legend explains lost", "lost no results from the client's job" in md, md)
+    md = mod.render(res)
+    check("the detail table shows a lost client", "| 1 | erigon | lost | | | | |" in md, md)
+    code, out = run_main(["--results-dir", tmp, "--clients", "erigon,geth,reth"])
+    check("main warns about a lost client", "⚠️ erigon: no results" in out, out)
+    check("main does not warn about a client with a report", "⚠️ geth" not in out and "⚠️ reth" not in out, out)
+    code, out = run_main(["--results-dir", tmp])
+    check("main without --clients has no lost client", "⚠️" not in out and "| erigon |" not in out, out)
+
 # --- main ---------------------------------------------------------------------
 
 with tempfile.TemporaryDirectory() as tmp:

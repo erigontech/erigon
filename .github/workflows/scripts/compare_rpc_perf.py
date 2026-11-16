@@ -9,7 +9,9 @@ p50, p90 and p95 are the median over the repetitions, max is the worst one.
 HTTP is the share of requests answered with HTTP 200, RPC the share of requests
 answered with a result and no JSON-RPC error; both are the worst over the repetitions.
 A QPS step that rpc_perf recorded with an error (the client died) is dead; every QPS step
-of a pattern that a client did not run because it was left out at a barrier is excluded.
+of a pattern that a client did not run because it was left out at a barrier is excluded;
+every QPS step of a client of ``--clients`` with no report at all (its job ended before
+uploading them) is lost.
 """
 import argparse
 import glob
@@ -51,6 +53,16 @@ def load_results(root):
         steps = {q for c in results.get(label, {}).values() for q in c}
         results.setdefault(label, {})[client] = {q: {"failed": "excluded"} for q in steps}
     return results
+
+
+def add_lost(results, clients):
+    """Mark every qps step of the clients with no report at all as lost, and return them."""
+    lost = [c for c in clients if not any(c in label for label in results.values())]
+    for label in results:
+        steps = {q for c in results[label].values() for q in c}
+        for client in lost:
+            results[label][client] = {q: {"failed": "lost"} for q in steps}
+    return lost
 
 
 def is_failed(step):
@@ -114,7 +126,7 @@ def render_overview(results, percentile):
     lines = ["```",
              f"{percentile} latency in ms, lower is better. * fastest, - no result,",
              "err HTTP errors or RPC errors > 1% above the best client, dead the client died,",
-             "excluded left out at a barrier.",
+             "excluded left out at a barrier, lost no results from the client's job.",
              f"Erigon status on {percentile}, at the end of the row: 🟢🟢 fastest by >= 1.3x, 🟢 fastest,",
              "🟡 < 1.3x the fastest, 🔴 >= 1.3x or errors, ⚪ no Erigon result.",
              "",
@@ -148,9 +160,13 @@ def render(results):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-dir", required=True)
+    parser.add_argument("--clients", default="", help="comma-separated clients of the run")
     args = parser.parse_args()
+    clients = [c for c in args.clients.split(",") if c]
     results = load_results(args.results_dir)
     print("## RPC Performance Comparison (latest block)\n")
+    for client in add_lost(results, clients):
+        print(f"⚠️ {client}: no results, its job ended before uploading them (e.g. the runner was lost).\n")
     steps = [s for clients in results.values() for qps in clients.values() for s in qps.values()]
     overviews = [render_overview(results, percentile) for percentile in ("p50", "p90", "p95", "max")
                  if all(percentile in s for s in steps if not is_failed(s))]
