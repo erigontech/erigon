@@ -179,7 +179,7 @@ type composer struct {
 	built    []common.Hash
 }
 
-func (c *composer) ComposeSyncSlot(ctx context.Context, parent *types.Header, ts, _ uint64, _ sequencer.Mode) *types.Block {
+func (c *composer) ComposeSyncSlot(ctx context.Context, parent *types.Header, ts, _ uint64, _ sequencer.Mode) sequencer.Composed {
 	var blocks []*types.Block
 	for n := uint64(1); n <= parent.Number.Uint64(); n++ {
 		b, err := c.chain.BlockByNumber(ctx, n)
@@ -199,8 +199,10 @@ func (c *composer) ComposeSyncSlot(ctx context.Context, parent *types.Header, ts
 	built, err := c.mirror.Extend(ctx, parent, in, nil, common.Hash{}, common.Hash{})
 	require.NoError(c.t, err)
 	c.built = append(c.built, built.Block.Hash())
-	return built.Block
+	return sequencer.Composed{Block: built.Block}
 }
+
+func (c *composer) SyncCommitted(context.Context, *types.Header) {}
 
 func (*composer) RecoverFailed(context.Context) {}
 

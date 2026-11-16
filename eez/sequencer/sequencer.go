@@ -88,12 +88,27 @@ func (m Mode) String() string {
 	return "steady"
 }
 
+// Composed is a composer's answer for a Sync slot.
+type Composed struct {
+	// Block, when set, is the Sync block.
+	Block *types.Block
+	// Empty, without Block, has the sequencer build an empty Sync block;
+	// with neither, it fills the block from the pool, empty in a late slot.
+	Empty bool
+}
+
 // SyncSlotComposer composes the Sync blocks of a sequencer's slots.
 type SyncSlotComposer interface {
-	// ComposeSyncSlot returns the Sync block on parent with timestamp ts, its
-	// batch aimed at L1 block target, zero for the next one available; nil
-	// has the sequencer fill the block from the pool.
-	ComposeSyncSlot(ctx context.Context, parent *types.Header, ts, target uint64, mode Mode) *types.Block
+	// ComposeSyncSlot answers for the Sync block on parent with timestamp
+	// ts, its batch aimed at L1 block target, zero for the next one
+	// available.
+	ComposeSyncSlot(ctx context.Context, parent *types.Header, ts, target uint64, mode Mode) Composed
+	// SyncCommitted takes the Sync block committed for the slot composed
+	// last, on the sequencer's goroutine before its next trigger and outside
+	// the follower's loop; the composer posts its batch here. The block's
+	// witness may be missing, its capture having failed. A block of
+	// Substitute is not handed back.
+	SyncCommitted(ctx context.Context, sync *types.Header)
 	// RecoverFailed handles the bundles that failed on L1, replacing each
 	// failed Sync block through Sequencer.Substitute. It runs before every
 	// trigger reads the head, which it may move.
@@ -409,25 +424,33 @@ func (s *Sequencer) late(ts uint64) bool {
 }
 
 // syncBlock commits the Sync block on parent: the composer's, else one from
-// the pool, empty for a slot too late.
+// the pool, empty when the composer asks or for a slot too late, and hands it
+// to the composer.
 func (s *Sequencer) syncBlock(ctx context.Context, parent *types.Header, ts, target uint64, mode Mode) error {
-	var composed *types.Block
-	if c := s.cfg.Composer; c != nil {
-		composed = c.ComposeSyncSlot(ctx, parent, ts, target, mode)
+	var answer Composed
+	c := s.cfg.Composer
+	if c != nil {
+		answer = c.ComposeSyncSlot(ctx, parent, ts, target, mode)
 	}
-	var err error
+	var (
+		sync *types.Header
+		err  error
+	)
 	switch {
-	case composed != nil:
-		_, err = s.insert(ctx, Sync, composed)
-	case mode == ModeEmpty:
-		_, err = s.build(ctx, Sync, parent, noTxns{})
+	case answer.Block != nil:
+		sync, err = s.insert(ctx, Sync, answer.Block)
+	case answer.Empty || mode == ModeEmpty:
+		sync, err = s.build(ctx, Sync, parent, noTxns{})
 	default:
-		_, err = s.produce(ctx, Sync, parent)
+		sync, err = s.produce(ctx, Sync, parent)
 	}
 	if err != nil {
 		return err
 	}
 	s.setOffGrid(0)
+	if c != nil {
+		c.SyncCommitted(ctx, sync)
+	}
 	return nil
 }
 

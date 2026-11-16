@@ -45,10 +45,18 @@ import (
 )
 
 // queue is a pool that yields its transactions once each, senders
-// recovered.
+// recovered, to the blocks on a parent from from on.
 type queue struct {
-	mu  sync.Mutex
-	txs []types.Transaction
+	mu   sync.Mutex
+	txs  []types.Transaction
+	from uint64
+}
+
+// hold withholds the transactions from the blocks on a parent below from.
+func (q *queue) hold(from uint64) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.from = from
 }
 
 func (q *queue) add(t *testing.T, encoded ...[]byte) {
@@ -73,9 +81,12 @@ func (q *queue) decode(t *testing.T, encoded ...[]byte) []types.Transaction {
 	return txs
 }
 
-func (q *queue) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+func (q *queue) ProvideTxns(_ context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if txnprovider.ApplyProvideOptions(opts...).ParentBlockNum < q.from {
+		return nil, nil
+	}
 	txs := q.txs
 	q.txs = nil
 	return txs, nil
@@ -192,21 +203,27 @@ type composed struct {
 	mode       sequencer.Mode
 }
 
-// slotComposer records the Sync slots it is asked for and answers with
-// answer's block, nil without one.
+// slotComposer records the Sync slots it is asked for and the Sync blocks
+// committed for them, and answers with answer's block, else with empty.
 type slotComposer struct {
 	calls     []composed
 	answer    func(parent *types.Header) *types.Block
+	empty     bool
+	committed []common.Hash
 	recover   func(ctx context.Context)
 	recovered int
 }
 
-func (c *slotComposer) ComposeSyncSlot(_ context.Context, parent *types.Header, ts, target uint64, mode sequencer.Mode) *types.Block {
+func (c *slotComposer) ComposeSyncSlot(_ context.Context, parent *types.Header, ts, target uint64, mode sequencer.Mode) sequencer.Composed {
 	c.calls = append(c.calls, composed{parent: parent.Hash(), ts: ts, target: target, mode: mode})
 	if c.answer == nil {
-		return nil
+		return sequencer.Composed{Empty: c.empty}
 	}
-	return c.answer(parent)
+	return sequencer.Composed{Block: c.answer(parent)}
+}
+
+func (c *slotComposer) SyncCommitted(_ context.Context, sync *types.Header) {
+	c.committed = append(c.committed, sync.Hash())
 }
 
 func (c *slotComposer) RecoverFailed(ctx context.Context) {
@@ -273,6 +290,7 @@ func TestComposer(t *testing.T) {
 	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 6, Time: g + 12, L1Head: 1}))
 	require.Equal(t, uint64(6), h.head(t).Number.Uint64(), "the pool fills the Sync block the composer leaves")
 	require.Equal(t, composed{parent: hash(5), ts: g + 12, target: 2, mode: sequencer.ModeSteady}, call(0))
+	require.Equal(t, []common.Hash{hash(6)}, c.committed)
 
 	// Recovery that moves the head back is seen by the Sync slot it precedes.
 	for range 3 {
@@ -316,6 +334,7 @@ func TestComposer(t *testing.T) {
 	require.Equal(t, composed{parent: hash(53), ts: g + 108, target: 10, mode: sequencer.ModeSteady}, call(4))
 	require.Equal(t, uint64(53), h.head(t).Number.Uint64())
 	require.Equal(t, 9, c.recovered)
+	require.Equal(t, []common.Hash{hash(6), hash(12), hash(18), hash(48)}, c.committed, "a Sync block not committed is not reported")
 
 	// Recovery that moves the head back is seen by the Live tick it precedes.
 	fifty := moveBack(50)
@@ -330,6 +349,19 @@ func TestComposer(t *testing.T) {
 	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 396, Time: g + 792, L1Head: 66}))
 	require.Equal(t, uint64(348), h.head(t).Number.Uint64())
 	require.Equal(t, composed{parent: hash(347), ts: g + 696, target: 67, mode: sequencer.ModeCatchup}, call(5))
+
+	// An empty answer leaves the pool's transactions to the next block.
+	h.pool.add(t, h.c.Transfer(common.HexToAddress("0xb0b"), 1))
+	h.pool.hold(353)
+	c.empty = true
+	s.SetClock(func() time.Time { return onTime(g + 708) })
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 354, Time: g + 708, L1Head: 67}))
+	require.Equal(t, uint64(354), h.head(t).Number.Uint64())
+	require.Equal(t, sequencer.ModeSteady, call(6).mode)
+	require.Empty(t, h.block(t, 354).Transactions(), "the pool filled an empty Sync block")
+	require.Equal(t, hash(354), c.committed[len(c.committed)-1])
+	require.NoError(t, s.Handle(ctx, sequencer.LiveTick{SyncHeight: 360}))
+	require.Len(t, h.block(t, 355).Transactions(), 1)
 }
 
 // settle posts the batch that settles the local blocks from..to as they are,
