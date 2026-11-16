@@ -20,6 +20,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"runtime"
@@ -191,6 +192,10 @@ var (
 		Usage: "Most blocks a batch settles, rounded down to a multiple of the Sync interval",
 		Value: 300,
 	}
+	ComposerL1FrontFlag = cli.StringFlag{
+		Name:  "eez.composer.l1front",
+		Usage: "host:port of the L1 front, where wallets send the L1 transactions that call into the chain; set, steady Sync blocks carry their effects",
+	}
 	BatchMaxGasFlag = cli.Uint64Flag{
 		Name:  "eez.batch.maxgas",
 		Usage: "Gas limit of a batch's L1 transaction, between 1,521,000 and 16,777,216 (EIP-7825)",
@@ -232,7 +237,7 @@ var Flags = []cli.Flag{
 	&ChainFlag, &HTTPPortFlag, &HTTPAPIFlag, &PortFlag, &BootnodesFlag, &StaticPeersFlag, &TrustedPeersFlag,
 	&SequencerFlag, &ProofTimeFlag, &SubmissionSlackFlag, &SequencerMaxDepthFlag, &SequencerFeeRecipientFlag, &SequencerKeyFileFlag,
 	&ComposerFlag, &PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag, &L1BuilderFlag, &L1PriorityFeeFlag,
-	&BatchMaxBlocksFlag, &BatchMaxGasFlag,
+	&BatchMaxBlocksFlag, &BatchMaxGasFlag, &ComposerL1FrontFlag,
 	&L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
 }
 
@@ -301,6 +306,8 @@ type ComposerConfig struct {
 	PriorityFee uint64
 	MaxBlocks   uint64
 	MaxGas      uint64
+	// L1Front, when set, is where the L1 front listens.
+	L1Front string
 }
 
 // L2Flags are the l2 section fields set on the command line.
@@ -502,7 +509,7 @@ func sequencerConfig(cmd *cli.Command) (*SequencerConfig, error) {
 	return s, nil
 }
 
-var composerFlags = []cli.Flag{&PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag, &L1BuilderFlag, &L1PriorityFeeFlag, &BatchMaxBlocksFlag, &BatchMaxGasFlag}
+var composerFlags = []cli.Flag{&PosterKeyFileFlag, &AttestersFlag, &AttesterAddressFlag, &ProofSystemFlag, &L1BuilderFlag, &L1PriorityFeeFlag, &BatchMaxBlocksFlag, &BatchMaxGasFlag, &ComposerL1FrontFlag}
 
 // composerConfig reads the composer flags, nil without --eez.composer.
 func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
@@ -524,6 +531,12 @@ func composerConfig(cmd *cli.Command) (*ComposerConfig, error) {
 		Builder:     cmd.String(L1BuilderFlag.Name),
 		PriorityFee: cmd.Uint64(L1PriorityFeeFlag.Name),
 		MaxBlocks:   cmd.Uint64(BatchMaxBlocksFlag.Name),
+		L1Front:     cmd.String(ComposerL1FrontFlag.Name),
+	}
+	if c.L1Front != "" {
+		if _, _, err := net.SplitHostPort(c.L1Front); err != nil {
+			return nil, fmt.Errorf("%w: --%s %q is not host:port", ErrConfig, ComposerL1FrontFlag.Name, c.L1Front)
+		}
 	}
 	if c.Builder == "" {
 		c.Builder = node

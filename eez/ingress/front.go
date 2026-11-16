@@ -299,3 +299,13 @@ func (f *Front) forward(w http.ResponseWriter, ctx context.Context, body []byte)
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
 }
+
+// Info returns eez_composerInfo's answer: the EEZ contracts on each side and
+// the chain ids of the networks the composer bridges.
+func Info(registry, l2 common.Address, l1ChainID, l2ChainID uint64, version string) (json.RawMessage, error) {
+	return json.Marshal(map[string]any{
+		"eezContracts":      map[string]common.Address{"eezRegistryAddress": registry, "eezL2Address": l2},
+		"supportedNetworks": map[string]uint64{"eezL1": l1ChainID, "eezL2": l2ChainID},
+		"version":           version,
+	})
+}

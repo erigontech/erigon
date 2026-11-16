@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/eez/sequencer"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -89,9 +90,11 @@ func newCrossFixture(t *testing.T) *crossFixture {
 	t.Cleanup(f.c.Close)
 	f.c.CrossChain(&CrossChain{
 		Pool: f.pool, L1: f.l1, L1Config: chain.TestChainOsakaConfig, Manager: manager,
-		L1Hash:   func(_ context.Context, n uint64) (common.Hash, error) { return common.Hash{0x1, byte(n)}, nil },
-		L2:       func(_ context.Context, _ *types.Header, read func(PreState) error) error { return read(w.pre) },
-		Header:   func(*types.Header) (*types.Header, error) { return types.CopyHeader(w.sync.Header()), nil },
+		L1Hash: func(_ context.Context, n uint64) (common.Hash, error) { return common.Hash{0x1, byte(n)}, nil },
+		L2:     func(_ context.Context, _ *types.Header, read func(PreState) error) error { return read(w.pre) },
+		Header: func(*types.Header, rules.ChainHeaderReader) (*types.Header, error) {
+			return types.CopyHeader(w.sync.Header()), nil
+		},
 		L2Config: w.config, Engine: w.engine, Sync: w.ctx(),
 	})
 	return f

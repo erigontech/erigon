@@ -412,3 +412,9 @@ func TestFrontRouting(t *testing.T) {
 		require.Equal(t, http.StatusRequestEntityTooLarge, status)
 	})
 }
+
+func TestInfo(t *testing.T) {
+	info, err := Info(common.HexToAddress("0x01"), common.HexToAddress("0x4200000000000000000000000000000000000007"), 3151908, 6290, "v1")
+	require.NoError(t, err)
+	require.JSONEq(t, `{"eezContracts":{"eezRegistryAddress":"0x0000000000000000000000000000000000000001","eezL2Address":"0x4200000000000000000000000000000000000007"},"supportedNetworks":{"eezL1":3151908,"eezL2":6290},"version":"v1"}`, string(info))
+}

@@ -512,7 +512,7 @@ func (s *Sequencer) produce(ctx context.Context, kind Kind, parent *types.Header
 
 // build builds the block of kind after parent from txs.
 func (s *Sequencer) build(ctx context.Context, kind Kind, parent *types.Header, txs txnprovider.TxnProvider) (*types.Header, error) {
-	in := s.inputs(parent)
+	in := s.Inputs(parent)
 	return s.commit(ctx, kind, in.Number, func(ctx context.Context, hook follower.CommitHook) (*types.Block, error) {
 		built, err := s.committer.Produce(ctx, in, txs, hook)
 		if err != nil {
@@ -524,7 +524,7 @@ func (s *Sequencer) build(ctx context.Context, kind Kind, parent *types.Header, 
 
 // extend builds the block of kind after parent from exactly txs.
 func (s *Sequencer) extend(ctx context.Context, kind Kind, parent *types.Header, txs []types.Transaction) (*types.Header, error) {
-	in := s.inputs(parent)
+	in := s.Inputs(parent)
 	return s.commit(ctx, kind, in.Number, func(ctx context.Context, hook follower.CommitHook) (*types.Block, error) {
 		built, err := s.committer.Extend(ctx, in, txs, hook)
 		if err != nil {
@@ -547,9 +547,9 @@ func (s *Sequencer) insert(ctx context.Context, kind Kind, block *types.Block) (
 	})
 }
 
-// inputs returns the header inputs of the block the sequencer builds on
+// Inputs returns the header inputs of the block the sequencer builds on
 // parent.
-func (s *Sequencer) inputs(parent *types.Header) deriver.HeaderInputs {
+func (s *Sequencer) Inputs(parent *types.Header) deriver.HeaderInputs {
 	return deriver.HeaderInputs{
 		Number:     parent.Number.Uint64() + 1,
 		ParentHash: parent.Hash(),

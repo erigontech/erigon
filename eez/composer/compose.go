@@ -49,7 +49,7 @@ type CrossChain struct {
 	// returns the header the sequencer's Sync block on parent gets, roots
 	// aside.
 	L2       func(ctx context.Context, parent *types.Header, read func(PreState) error) error
-	Header   func(parent *types.Header) (*types.Header, error)
+	Header   func(parent *types.Header, headers rules.ChainHeaderReader) (*types.Header, error)
 	L2Config *chain.Config
 	Engine   rules.Engine
 	Sync     protocol.SyncTxContext
@@ -96,7 +96,7 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 			blockHash := func(n uint64) (common.Hash, error) { return c.x.L1Hash(ctx, n) }
 			src := NewSource(c.x.L1Config, anchor, reader, blockHash, c.x.Manager, protocol.MainnetRollupID)
 			return c.x.L2(ctx, parent, func(pre PreState) error {
-				header, err := c.x.Header(parent)
+				header, err := c.x.Header(parent, pre.Headers)
 				if err != nil {
 					return err
 				}
