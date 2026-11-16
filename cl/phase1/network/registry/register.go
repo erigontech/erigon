@@ -51,7 +51,7 @@ func RegisterGossipServices(
 	add(gossip.RegisterGossipService(gm, blockService, withRateLimiterByPeer(1, 2)))
 	add(gossip.RegisterGossipService(gm, syncContributionService, waitReady, withRateLimiterByPeer(8, 16)))
 	add(gossip.RegisterGossipService(gm, aggregateAndProofService, waitReady, withAggregateAndProofRateLimiter(beaconCfg)))
-	add(gossip.RegisterGossipService(gm, syncCommitteeMessagesService, waitReady, withRateLimiterByPeer(8, 16)))
+	add(gossip.RegisterGossipService(gm, syncCommitteeMessagesService, waitReady, withSyncCommitteeMessageRateLimiter(beaconCfg)))
 	add(gossip.RegisterGossipService(gm, attesterSlashingService, waitReady, withRateLimiterByPeer(2, 8)))
 	add(gossip.RegisterGossipService(gm, voluntaryExitService, waitReady, withRateLimiterByPeer(2, 8)))
 	add(gossip.RegisterGossipService(gm, blsToExecutionChangeService, waitReady, withRateLimiterByPeer(2, 8)))
@@ -121,6 +121,24 @@ func withAggregateAndProofRateLimiter(beaconCfg *clparams.BeaconChainConfig) gos
 // redelivered by another peer.
 func withProposerPreferencesRateLimiter(beaconCfg *clparams.BeaconChainConfig) gossip.ConditionFunc {
 	return withRateLimiterByPeer(2, int((beaconCfg.MinSeedLookahead+1)*beaconCfg.SlotsPerEpoch))
+}
+
+// withSyncCommitteeMessageRateLimiter lets one peer forward a whole slot of each sync subnet it serves in one burst,
+// refilled over the slot. Members sign at the same point in the slot.
+func withSyncCommitteeMessageRateLimiter(beaconCfg *clparams.BeaconChainConfig) gossip.ConditionFunc {
+	return syncCommitteeMessageCondition(newSyncCommitteeMessageRateLimiter(beaconCfg))
+}
+
+// newSyncCommitteeMessageRateLimiter lets a peer relay a slot's messages of each sync subnet in one burst.
+func newSyncCommitteeMessageRateLimiter(beaconCfg *clparams.BeaconChainConfig) *tokenBucketRateLimiter {
+	perSubnetSlot := beaconCfg.SyncCommitteeSize / beaconCfg.SyncCommitteeSubnetCount
+	return newTokenBucketRateLimiter(float64(perSubnetSlot)/float64(beaconCfg.SecondsPerSlot), int(perSubnetSlot))
+}
+
+func syncCommitteeMessageCondition(limiter *tokenBucketRateLimiter) gossip.ConditionFunc {
+	return func(pid peer.ID, msg *pubsub.Message, curVersion clparams.StateVersion) bool {
+		return limiter.acquire(pid.String() + msg.GetTopic())
+	}
 }
 
 // withRateLimiterByPeer returns a condition that checks if the message can be processed based on the token bucket rate limiter

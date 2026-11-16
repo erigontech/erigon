@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 	"testing"
@@ -195,7 +196,9 @@ func TestAggregateAndProofInvalidEpoch(t *testing.T) {
 	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = 999999
-	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.ErrorContains(t, err, "invalid target epoch in aggregate and proof")
+	require.NotErrorIs(t, err, ErrIgnore)
 }
 
 func TestAggregateAndProofInvalidCommittee(t *testing.T) {
@@ -210,7 +213,25 @@ func TestAggregateAndProofInvalidCommittee(t *testing.T) {
 	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	agg.SignedAggregateAndProof.Message.AggregatorIndex = 12453224
-	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.ErrorContains(t, err, "committee index not in committee")
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+func TestAggregateAndProofRejectsCommitteeRangeBeforeFinalizedAncestor(t *testing.T) {
+	agg, s := getAggregateAndProofAndState()
+
+	aggService, sd, fcu := setupAggregateAndProofTest(t)
+	require.NoError(t, sd.OnHeadState(s))
+	data := agg.SignedAggregateAndProof.Message.Aggregate.Data
+	data.CommitteeIndex = s.CommitteeCount(data.Target.Epoch)
+	fcu.Headers[data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*clparams.MainnetBeaconConfig.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: common.Hash{0xff}}
+
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.EqualError(t, err, "invalid committee index in aggregate and proof")
+	require.NotErrorIs(t, err, ErrIgnore)
 }
 
 func TestAggregateAndProofAllowsNextEpochWhenForkchoiceHasSeenIt(t *testing.T) {
@@ -333,7 +354,28 @@ func TestAggregateAndProofAncestorMissing(t *testing.T) {
 	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
 	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
-	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.ErrorContains(t, err, "invalid target block")
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+func TestAggregateAndProofAlreadySeenBeforeTargetAncestor(t *testing.T) {
+	agg, s := getAggregateAndProofAndState()
+
+	aggService, sd, fcu := setupAggregateAndProofTest(t)
+	require.NoError(t, sd.OnHeadState(s))
+	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*clparams.MainnetBeaconConfig.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+	message := agg.SignedAggregateAndProof.Message
+	aggService.(*aggregateAndProofServiceImpl).seenAggreatorIndexes.Add(seenAggregateIndex{
+		epoch: message.Aggregate.Data.Target.Epoch,
+		index: message.AggregatorIndex,
+	}, common.Hash{0x81})
+
+	err := aggService.ProcessMessage(context.Background(), nil, agg)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, ErrAggregatorAlreadyKnown)
 }
 
 func TestAggregateAndProofSuccess(t *testing.T) {
@@ -349,6 +391,358 @@ func TestAggregateAndProofSuccess(t *testing.T) {
 	fcu.Ancestors[agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = forkchoice.ForkChoiceNode{Root: agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root}
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	require.NoError(t, aggService.ProcessMessage(context.Background(), nil, agg))
+}
+
+type captureAttestingIndicesForkChoice struct {
+	*mock_services.ForkChoiceStorageMock
+	attestingIndices []uint64
+}
+
+func (f *captureAttestingIndicesForkChoice) ProcessAttestingIndicies(_ *solid.Attestation, indices []uint64) {
+	f.attestingIndices = append([]uint64(nil), indices...)
+}
+
+func targetCommitteeOutsideHead(t *testing.T, s *state.CachingBeaconState, committee []uint64, count int) []uint64 {
+	t.Helper()
+	target := make([]uint64, 0, count)
+	for index := range s.ValidatorLength() {
+		if !slices.Contains(committee, uint64(index)) {
+			target = append(target, uint64(index))
+			if len(target) == count {
+				return target
+			}
+		}
+	}
+	t.Fatalf("only found %d validators outside the head committee", len(target))
+	return nil
+}
+
+func prepareTargetShufflingAggregate(
+	t *testing.T,
+	s *state.CachingBeaconState,
+	fc *mock_services.ForkChoiceStorageMock,
+	aggregate *SignedAggregateAndProofForGossip,
+	targetCommittee []uint64,
+	includeHeader bool,
+) {
+	t.Helper()
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) { return true, nil }
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	epoch := data.Slot / clparams.MainnetBeaconConfig.SlotsPerEpoch
+	expectedCommitteeIndex := data.CommitteeIndex
+	if committeeBits := aggregate.SignedAggregateAndProof.Message.Aggregate.CommitteeBits; committeeBits != nil {
+		indices := committeeBits.GetOnIndices()
+		require.Len(t, indices, 1)
+		expectedCommitteeIndex = uint64(indices[0])
+	}
+	fc.HeadLacksTargetShuffling = true
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
+		require.Equal(t, data.Target, target)
+		require.Equal(t, data.Slot, slot)
+		require.Equal(t, expectedCommitteeIndex, committeeIndex)
+		return targetCommittee, s.CommitteeCount(epoch), nil
+	}
+	fc.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	fc.Ancestors[s.FinalizedCheckpoint().Epoch*clparams.MainnetBeaconConfig.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	fc.Ancestors[epoch*clparams.MainnetBeaconConfig.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: data.Target.Root}
+	if includeHeader {
+		fc.Headers[data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{Slot: data.Slot}
+	}
+}
+
+func TestAggregateAndProofUsesTargetShuffling(t *testing.T) {
+	aggregate, s := getAggregateAndProofAndState()
+	service, syncedDataManager, fc := setupAggregateAndProofGossipTestWithConfig(t, &clparams.MainnetBeaconConfig)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	headCommittee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+	require.NoError(t, err)
+	require.NotEmpty(t, headCommittee)
+	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
+	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	var callOrder []string
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+		callOrder = append(callOrder, "bls")
+		return true, nil
+	}
+	targetCommitteeFn := fc.TargetBeaconCommitteeFn
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error) {
+		require.Equal(t, []string{"bls"}, callOrder)
+		callOrder = append(callOrder, "target")
+		return targetCommitteeFn(target, slot, committeeIndex, claimBuild)
+	}
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
+	aggregate.ImmediateProcess = true
+	for i := range 256 {
+		aggregate.SignedAggregateAndProof.Message.SelectionProof[0] = byte(i)
+		if state.IsAggregator(&clparams.MainnetBeaconConfig, uint64(len(targetCommittee)), aggregate.SignedAggregateAndProof.Message.SelectionProof) {
+			break
+		}
+	}
+	capture := &captureAttestingIndicesForkChoice{ForkChoiceStorageMock: fc}
+	service.(*aggregateAndProofServiceImpl).forkchoiceStore = capture
+
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, aggregate))
+	require.Equal(t, targetCommittee, capture.attestingIndices)
+	require.Equal(t, []string{"bls", "target", "bls"}, callOrder)
+}
+
+func TestAggregateAndProofRejectsInvalidSignatureBeforeTargetShuffling(t *testing.T) {
+	aggregate, s := getAggregateAndProofAndState()
+	service, syncedDataManager, fc := setupAggregateAndProofTest(t)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	headCommittee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+	require.NoError(t, err)
+	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
+	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	targetCalls := 0
+	targetCommitteeFn := fc.TargetBeaconCommitteeFn
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error) {
+		targetCalls++
+		return targetCommitteeFn(target, slot, committeeIndex, claimBuild)
+	}
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) { return false, nil }
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
+
+	err = service.ProcessMessage(context.Background(), nil, aggregate)
+	require.ErrorIs(t, err, ErrInvalidBlsSignature)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.Zero(t, targetCalls)
+}
+
+func TestAggregateAndProofAlreadySeenBeforeTargetShuffling(t *testing.T) {
+	aggregate, s := getAggregateAndProofAndState()
+	service, syncedDataManager, fc := setupAggregateAndProofTest(t)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	headCommittee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+	require.NoError(t, err)
+	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
+	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	targetCalls := 0
+	targetCommitteeFn := fc.TargetBeaconCommitteeFn
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error) {
+		targetCalls++
+		return targetCommitteeFn(target, slot, committeeIndex, claimBuild)
+	}
+	aggregatorIndex := targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = aggregatorIndex
+	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
+	aggregate.ImmediateProcess = true
+	aggregateRoot, err := aggregate.SignedAggregateAndProof.HashSSZ()
+	require.NoError(t, err)
+	service.(*aggregateAndProofServiceImpl).seenAggreatorIndexes.Add(seenAggregateIndex{
+		epoch: data.Target.Epoch,
+		index: aggregatorIndex,
+	}, aggregateRoot)
+
+	err = service.ProcessMessage(context.Background(), nil, aggregate)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, ErrAggregatorAlreadySeen)
+	require.Zero(t, targetCalls)
+}
+
+func TestAggregateAndProofBuildsUncachedTargetOncePerAggregatorAndEpoch(t *testing.T) {
+	aggregate, s := getAggregateAndProofAndState()
+	service, syncedDataManager, fc := setupAggregateAndProofTest(t)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	headCommittee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+	require.NoError(t, err)
+	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
+	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	builds := 0
+	fc.TargetBeaconCommitteeFn = cachingTargetBeaconCommittee(targetCommittee, s.CommitteeCount(data.Target.Epoch), &builds)
+	secondBlockRoot, secondTargetRoot := common.Hash{0x83}, common.Hash{0x84}
+	fc.Headers[secondBlockRoot] = &cltypes.BeaconBlockHeader{Slot: data.Slot}
+	targetSlot := data.Target.Epoch * clparams.MainnetBeaconConfig.SlotsPerEpoch
+	fc.AncestorFn = func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+		if root == secondBlockRoot && slot == targetSlot {
+			return forkchoice.ForkChoiceNode{Root: secondTargetRoot}
+		}
+		return fc.Ancestors[slot]
+	}
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b1111}, 2048)
+
+	err = service.ProcessMessage(context.Background(), nil, aggregate)
+	require.ErrorContains(t, err, "aggregation bits length")
+	require.NotErrorIs(t, err, ErrIgnore)
+
+	data.BeaconBlockRoot, data.Target.Root = secondBlockRoot, secondTargetRoot
+	err = service.ProcessMessage(context.Background(), nil, aggregate)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Equal(t, 1, builds)
+}
+
+func TestAggregateAndProofRejectsAggregatorOutsideTargetCommittee(t *testing.T) {
+	aggregate, s := getAggregateAndProofAndState()
+	service, syncedDataManager, fc := setupAggregateAndProofTest(t)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	headCommittee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+	require.NoError(t, err)
+	require.NotEmpty(t, headCommittee)
+	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
+	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = headCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
+
+	err = service.ProcessMessage(context.Background(), nil, aggregate)
+	require.ErrorContains(t, err, "committee index not in committee")
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+func TestAggregateAndProofElectraUsesCommitteeBitsIndexForTargetShuffling(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = cfg.FarFutureEpoch
+	cfg.GloasForkEpoch = cfg.FarFutureEpoch
+	cfg.TargetCommitteeSize = 1
+	aggregate, fixtureState := getAggregateAndProofAndStateForVersion(t, clparams.ElectraVersion)
+	encodedState, err := fixtureState.EncodeSSZ(nil)
+	require.NoError(t, err)
+	s := state.New(&cfg)
+	require.NoError(t, s.DecodeSSZ(encodedState, int(clparams.BellatrixVersion)))
+	committeeBits := solid.NewBitVector(64)
+	require.NoError(t, committeeBits.SetBitAt(1, true))
+	aggregate.SignedAggregateAndProof.Message.Aggregate.CommitteeBits = committeeBits
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	require.Zero(t, data.CommitteeIndex)
+	require.Greater(t, s.CommitteeCount(data.Target.Epoch), uint64(1))
+
+	service, syncedDataManager, fc := setupAggregateAndProofTestWithConfig(t, &cfg)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	headCommittee, err := s.GetBeaconCommitee(data.Slot, 1)
+	require.NoError(t, err)
+	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
+	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
+
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, aggregate))
+}
+
+func TestAggregateAndProofBuildsVotedBlockTargetBeforeRejectingMessageTarget(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = cfg.FarFutureEpoch
+	cfg.GloasForkEpoch = cfg.FarFutureEpoch
+	aggregate, s := getAggregateAndProofAndStateForVersion(t, clparams.ElectraVersion)
+	service, syncedDataManager, fc := setupAggregateAndProofTestWithConfig(t, &cfg)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	committeeIndex := uint64(aggregate.SignedAggregateAndProof.Message.Aggregate.CommitteeBits.GetOnIndices()[0])
+	headCommittee, err := s.GetBeaconCommitee(data.Slot, committeeIndex)
+	require.NoError(t, err)
+	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
+	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	derivedRoot := common.Hash{0x82}
+	fc.AncestorFn = func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+		if root == data.BeaconBlockRoot && slot == data.Target.Epoch*cfg.SlotsPerEpoch {
+			return forkchoice.ForkChoiceNode{Root: derivedRoot}
+		}
+		return fc.Ancestors[slot]
+	}
+	var gotTarget solid.Checkpoint
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, gotCommitteeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
+		gotTarget = target
+		require.Equal(t, data.Slot, slot)
+		require.Equal(t, committeeIndex, gotCommitteeIndex)
+		return targetCommittee, s.CommitteeCount(data.Target.Epoch), nil
+	}
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
+
+	err = service.ProcessMessage(context.Background(), nil, aggregate)
+	require.Equal(t, solid.Checkpoint{Epoch: data.Target.Epoch, Root: derivedRoot}, gotTarget)
+	require.ErrorContains(t, err, "invalid target block")
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+func TestAggregateAndProofUnseenBlockIsIgnoredBeforeCommitteeRange(t *testing.T) {
+	aggregate, s := getAggregateAndProofAndState()
+	service, syncedDataManager, fc := setupAggregateAndProofTest(t)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	data.CommitteeIndex = s.CommitteeCount(data.Target.Epoch)
+	prepareTargetShufflingAggregate(t, s, fc, aggregate, nil, false)
+
+	err := service.ProcessMessage(context.Background(), nil, aggregate)
+	require.ErrorIs(t, err, ErrIgnore)
+}
+
+func TestAggregateAndProofIgnoresUnknownVotedBlockTargetAncestor(t *testing.T) {
+	aggregate, s := getAggregateAndProofAndState()
+	service, syncedDataManager, fc := setupAggregateAndProofTest(t)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	headCommittee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+	require.NoError(t, err)
+	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
+	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	blsCalls := 0
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+		blsCalls++
+		return true, nil
+	}
+	targetCalls := 0
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
+		targetCalls++
+		require.Equal(t, data.Target, target)
+		require.Equal(t, data.Slot, slot)
+		require.Equal(t, data.CommitteeIndex, committeeIndex)
+		return nil, 0, errors.New("target state unavailable")
+	}
+	delete(fc.Ancestors, data.Target.Epoch*clparams.MainnetBeaconConfig.SlotsPerEpoch)
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
+
+	err = service.ProcessMessage(context.Background(), nil, aggregate)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Equal(t, []int{0, 0}, []int{blsCalls, targetCalls})
+}
+
+func TestAggregateAndProofIgnoresUnavailableTargetCheckpointState(t *testing.T) {
+	aggregate, s := getAggregateAndProofAndState()
+	service, syncedDataManager, fc := setupAggregateAndProofTest(t)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+	headCommittee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+	require.NoError(t, err)
+	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
+	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
+	blsCalls := 0
+	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+		blsCalls++
+		return true, nil
+	}
+	targetCalls := 0
+	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
+		targetCalls++
+		require.Equal(t, data.Target, target)
+		require.Equal(t, data.Slot, slot)
+		require.Equal(t, data.CommitteeIndex, committeeIndex)
+		return nil, 0, errors.New("target state unavailable")
+	}
+	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
+	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
+
+	err = service.ProcessMessage(context.Background(), nil, aggregate)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Equal(t, []int{1, 1}, []int{blsCalls, targetCalls})
 }
 
 func TestAggregateAndProofGossipDoesNotAcceptBeforeBLSVerification(t *testing.T) {

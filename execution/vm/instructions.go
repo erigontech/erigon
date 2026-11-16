@@ -20,8 +20,11 @@
 package vm
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"math"
+	"math/bits"
 	"slices"
 
 	"github.com/c2h5oh/datasize"
@@ -74,8 +77,28 @@ func stMul(_ uint64, scope *CallContext) string {
 
 func opDiv(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
+	if y[0]&(y[0]-1) == 0 {
+		if n, ok := log2Exact(y); ok {
+			y.Rsh(x, n)
+			return pc, nil, nil
+		}
+	}
 	y.Div(x, y)
 	return pc, nil, nil
+}
+
+// log2Exact returns n and true when y == 2^n. Contracts compiled before SHR
+// divide by 2^n, and uint256.Div runs the full long division for them.
+func log2Exact(y *uint256.Int) (uint, bool) {
+	switch {
+	case y[3] != 0:
+		return 192 + uint(bits.TrailingZeros64(y[3])), y[0]|y[1]|y[2]|y[3]&(y[3]-1) == 0
+	case y[2] != 0:
+		return 128 + uint(bits.TrailingZeros64(y[2])), y[0]|y[1]|y[2]&(y[2]-1) == 0
+	case y[1] != 0:
+		return 64 + uint(bits.TrailingZeros64(y[1])), y[0]|y[1]&(y[1]-1) == 0
+	}
+	return uint(bits.TrailingZeros64(y[0])), y[0] != 0 && y[0]&(y[0]-1) == 0
 }
 
 func stDiv(_ uint64, scope *CallContext) string {
@@ -145,6 +168,8 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		} else {
 			exponent.SetAllOne()
 		}
+	case base[0]&1 != 0 && !exponent.IsUint64():
+		expOdd(exponent, base, exponent)
 	default:
 		if base.IsUint64() && exponent.LtUint64(64) && uint64(base.BitLen())*exponent.Uint64() <= 64 {
 			result, factor, power := uint64(1), base.Uint64(), exponent.Uint64()
@@ -161,6 +186,32 @@ func opExp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		}
 	}
 	return pc, nil, nil
+}
+
+// expOdd sets z = b**e mod 2**256 for odd b. Then p = b**(2**62) = 1 + u with u = 0 mod 2**64,
+// so p**h = 1 + h*u + C(h,2)*u**2 + C(h,3)*u**3 replaces the remaining squarings.
+func expOdd(z, b, e *uint256.Int) {
+	res, p := uint256.Int{1}, *b
+	for i := range 62 {
+		if e[0]>>i&1 != 0 {
+			res.Mul(&res, &p)
+		}
+		p.Mul(&p, &p)
+	}
+	var h, u, h1, h2, c2, poly uint256.Int
+	h.Rsh(e, 62)
+	u.SubUint64(&p, 1)
+	h1.SubUint64(&h, 1)
+	h2.SubUint64(&h, 2)
+	c2.Mul(&h, &h1)
+	poly.Mul(&c2, &h2)
+	c3 := poly.Rsh(&poly, 1)[0] * 0xaaaaaaaaaaaaaaab // C(h,3) mod 2**64; 0xaa..ab = 3**-1 mod 2**64
+	c2.Rsh(&c2, 1)
+	poly = uint256.Int{c3}
+	poly.Mul(&poly, &u).Add(&poly, &c2)
+	poly.Mul(&poly, &u).Add(&poly, &h)
+	poly.Mul(&poly, &u).AddUint64(&poly, 1)
+	z.Mul(&res, &poly)
 }
 
 func opSignExtend(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
@@ -322,7 +373,18 @@ func stAddmod(_ uint64, scope *CallContext) string {
 
 func opMulmod(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y, z := scope.Stack.pop2Peek1()
-	z.MulMod(x, y, z)
+	if z[3] == 0 {
+		z.MulMod(x, y, z)
+		return pc, nil, nil
+	}
+	if *z != scope.mulmodModulus {
+		if x.IsZero() || y.IsZero() {
+			z.Clear()
+			return pc, nil, nil
+		}
+		scope.mulmodModulus, scope.mulmodReciprocal = *z, uint256.Reciprocal(z)
+	}
+	z.MulModWithReciprocal(x, y, z, &scope.mulmodReciprocal)
 	return pc, nil, nil
 }
 
@@ -440,12 +502,24 @@ func opCallValue(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 
 func opCallDataLoad(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x := scope.Stack.peek()
-	if offset, overflow := x.Uint64WithOverflow(); !overflow {
-		data := getData(scope.input, offset, 32)
-		x.SetBytes(data)
-	} else {
+	offset, overflow := x.Uint64WithOverflow()
+	if overflow {
 		x.Clear()
+		return pc, nil, nil
 	}
+	// Common case: 32 bytes are in range, so skip getData's bounds checks and
+	// RightPadBytes' allocation.
+	if end := offset + 32; end >= offset && end <= uint64(len(scope.input)) {
+		x.SetBytes32(scope.input[offset:end])
+		return pc, nil, nil
+	}
+	// Past the end of calldata the word is all zeros; Clear avoids the 32-byte
+	// allocation RightPadBytes would make on every op.
+	if offset >= uint64(len(scope.input)) {
+		x.Clear()
+		return pc, nil, nil
+	}
+	x.SetBytes(getData(scope.input, offset, 32))
 	return pc, nil, nil
 }
 
@@ -585,16 +659,13 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	len64 := length.Uint64()
 
-	code, err := evm.IntraBlockState().GetCode(addr)
-	if err != nil {
-		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-	}
-
 	codeOffset64, overflow := codeOffset.Uint64WithOverflow()
 	if overflow {
 		codeOffset64 = math.MaxUint64
 	}
-	scope.Memory.SetFromData(memOffset.Uint64(), len64, codeOffset64, code)
+	if err := evm.IntraBlockState().ReadCodeSegmentTo(addr, codeOffset64, scope.Memory.GetPtr(memOffset.Uint64(), len64)); err != nil {
+		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
 	return pc, nil, nil
 }
 
@@ -685,6 +756,7 @@ func opBlockhash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	if arg64 >= lower && arg64 < upper {
 		hash, err := evm.Context.GetHash(arg64)
 		if err != nil {
+			evm.IntraBlockState().RecordStateReadError(err)
 			arg.Clear()
 			return pc, nil, err
 		}
@@ -1137,7 +1209,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	addr, value := stack.pop2()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
@@ -1198,7 +1270,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	addr, value := stack.pop2()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
@@ -1237,7 +1309,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	addr := stack.pop()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
@@ -1282,7 +1354,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	addr := stack.pop()
 	inOffset, inSize := stack.pop2Uint64()
 	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
+	toAddr := evm.intraBlockState.InternAddress(addr)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
@@ -1302,6 +1374,10 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
+	}
+	if evm.FrameContext != nil {
+		// APPROVE can debit the payer even inside a static call.
+		scope.Contract.selfBalanceCached = false
 	}
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1384,8 +1460,9 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		return pc, nil, err
 	}
 	tracer := evm.Config().Tracer
-	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
-	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
+	depth := evm.callTraceDepth(evm.depth)
+	tracer.EmitEnter(depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 
@@ -1451,8 +1528,9 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 	}
 	tracer := evm.Config().Tracer
-	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
-	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
+	depth := evm.callTraceDepth(evm.depth)
+	tracer.EmitEnter(depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 
@@ -1621,11 +1699,30 @@ func opPush2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	return pc, nil, nil
 }
 
+var pushMasks = func() (m [33]uint256.Int) {
+	for n := range m {
+		m[n].SetBytes(bytes.Repeat([]byte{0xff}, n))
+	}
+	return m
+}()
+
+func setBytes32Masked(z *uint256.Int, w *[32]byte, mask *uint256.Int) {
+	z[3] = binary.BigEndian.Uint64(w[0:8]) & mask[3]
+	z[2] = binary.BigEndian.Uint64(w[8:16]) & mask[2]
+	z[1] = binary.BigEndian.Uint64(w[16:24]) & mask[1]
+	z[0] = binary.BigEndian.Uint64(w[24:32]) & mask[0]
+}
+
 // make push instruction function
 func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-		if end := pc + 1 + size; end <= uint64(len(scope.Contract.Code)) {
-			scope.Stack.pushRef().SetBytes(scope.Contract.Code[pc+1 : end])
+		code := scope.Contract.Code
+		if end := pc + 1 + size; end <= uint64(len(code)) {
+			if end < 32 {
+				scope.Stack.pushRef().SetBytes(code[pc+1 : end])
+				return pc + size, nil, nil
+			}
+			setBytes32Masked(scope.Stack.pushRef(), (*[32]byte)(code[end-32:end]), &pushMasks[size])
 			return pc + size, nil, nil
 		}
 		codeLen := len(scope.Contract.Code)

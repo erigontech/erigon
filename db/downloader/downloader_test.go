@@ -1416,3 +1416,58 @@ func TestAddTorrentsFromDiskSkipsMalformedTorrent(t *testing.T) {
 	require.Len(torrents, 1)
 	require.Equal(segName, torrents[0].Name())
 }
+
+func TestGrpcServerRejectsNonLocalNames(t *testing.T) {
+	test := newDownloaderTest(t)
+	grpcServer, err := NewGrpcServer(test.downloader)
+	require.NoError(t, err)
+
+	for _, name := range []string{"v1.0-000000-000500-headers.seg", "domain/v1.0-accounts.0-32.kv"} {
+		require.NoError(t, grpcServer.checkNamesAndLogCall([]string{name}, "Test"), name)
+	}
+	for _, name := range []string{"", "/abs/a.seg", "../a.seg", "domain/v1.0-a/../../../../x"} {
+		require.Error(t, grpcServer.checkNamesAndLogCall([]string{name}, "Test"), name)
+	}
+}
+
+func TestGrpcServerDeleteKeepsFilesOutsideSnapDir(t *testing.T) {
+	test := newDownloaderTest(t)
+	grpcServer, err := NewGrpcServer(test.downloader)
+	require.NoError(t, err)
+	victim := filepath.Join(filepath.Dir(test.dirs.Snap), "victim.seg.torrent")
+	require.NoError(t, os.WriteFile(victim, []byte("x"), 0o644))
+
+	_, err = grpcServer.Delete(t.Context(), &downloaderproto.DeleteRequest{Paths: []string{"../victim.seg"}})
+	require.Error(t, err)
+	require.FileExists(t, victim)
+}
+
+func TestVerifyDataFailFastDetectsTrailingBytes(t *testing.T) {
+	require := require.New(t)
+	test := newDownloaderTest(t)
+	path := filepath.Join(test.dirs.Snap, "a")
+	require.NoError(os.WriteFile(path, bytes.Repeat([]byte{1}, 4096), 0o644))
+	require.NoError(test.downloader.AddNewSeedableFile(t.Context(), "a"))
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	require.NoError(err)
+	_, err = f.Write([]byte{2})
+	require.NoError(err)
+	require.NoError(f.Close())
+
+	require.ErrorContains(test.downloader.VerifyData(test.downloader.ctx, nil, true), "size mismatch")
+}
+
+func TestDownloadRequestsCountIsReadUnderLock(t *testing.T) {
+	d := &Downloader{}
+	d.zeroActiveDownloadRequests.L = &d.activeDownloadRequestsLock
+	var wg sync.WaitGroup
+	for range 64 {
+		wg.Go(func() {
+			d.incDownloadRequests()
+			d.decDownloadRequests()
+		})
+	}
+	wg.Wait()
+	require.Zero(t, d.activeDownloadRequests)
+}

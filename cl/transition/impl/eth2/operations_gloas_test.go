@@ -391,22 +391,3 @@ func TestProcessVoluntaryExitRejectsBuilderIndex(t *testing.T) {
 
 	require.Error(t, err)
 }
-
-func newTestProposerSlashing(slot, proposerIndex uint64) *cltypes.ProposerSlashing {
-	return &cltypes.ProposerSlashing{
-		Header1: &cltypes.SignedBeaconBlockHeader{
-			Header: &cltypes.BeaconBlockHeader{
-				Slot:          slot,
-				ProposerIndex: proposerIndex,
-				BodyRoot:      common.HexToHash("0x01"),
-			},
-		},
-		Header2: &cltypes.SignedBeaconBlockHeader{
-			Header: &cltypes.BeaconBlockHeader{
-				Slot:          slot,
-				ProposerIndex: proposerIndex,
-				BodyRoot:      common.HexToHash("0x02"),
-			},
-		},
-	}
-}

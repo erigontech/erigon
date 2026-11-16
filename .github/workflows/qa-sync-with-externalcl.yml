@@ -156,6 +156,14 @@ jobs:
           name: fd-leak-analysis-${{ matrix.client }}-${{ matrix.chain }}
           path: ${{ github.workspace }}/fd-leak-analysis-${{ matrix.chain }}.md
 
+      - name: Upload goroutine stacks
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: goroutine-stacks-${{ matrix.client }}-${{ matrix.chain }}
+          path: ${{ github.workspace }}/goroutine-stacks.txt
+          if-no-files-found: ignore
+
       - name: Clean up Erigon data directory
         if: always()
         run: |

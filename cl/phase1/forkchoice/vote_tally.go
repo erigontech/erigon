@@ -27,28 +27,24 @@ type voteTally struct {
 	ids        map[common.Hash]uint32
 	weights    []uint64
 	applied    []uint32
-	dirty      map[uint64]struct{}
 }
 
-func (t *voteTally) markDirty(validatorIndex uint64) {
+// update recounts one validator's vote. Before the first rebuild there is nothing to update.
+func (t *voteTally) update(f *ForkChoiceStore, validatorIndex uint64) {
 	if t.state == nil {
 		return
 	}
-	t.dirty[validatorIndex] = struct{}{}
-	if len(t.dirty) > len(t.applied)/2 {
-		*t = voteTally{}
-	}
+	t.apply(f, int(validatorIndex))
 }
 
 func (t *voteTally) votes(f *ForkChoiceStore, justified solid.Checkpoint, cs *checkpointState) map[common.Hash]uint64 {
 	if t.state != cs || t.checkpoint != justified {
 		t.rebuild(f, justified, cs)
-	} else {
-		for vi := range t.dirty {
-			t.apply(f, int(vi))
-		}
-		clear(t.dirty)
 	}
+	return t.weightsByRoot()
+}
+
+func (t *voteTally) weightsByRoot() map[common.Hash]uint64 {
 	votes := make(map[common.Hash]uint64, len(t.ids))
 	for root, id := range t.ids {
 		if w := t.weights[id]; w > 0 {
@@ -61,11 +57,9 @@ func (t *voteTally) votes(f *ForkChoiceStore, justified solid.Checkpoint, cs *ch
 func (t *voteTally) rebuild(f *ForkChoiceStore, justified solid.Checkpoint, cs *checkpointState) {
 	if t.ids == nil {
 		t.ids = make(map[common.Hash]uint32)
-		t.dirty = make(map[uint64]struct{})
 	}
 	t.state, t.checkpoint = cs, justified
 	clear(t.ids)
-	clear(t.dirty)
 	t.weights = append(t.weights[:0], 0)
 	t.applied = make([]uint32, f.latestMessages.latestMessagesCount())
 	for vi := range t.applied {

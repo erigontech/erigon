@@ -63,7 +63,7 @@ func NewPool(
 	baseTxnProvider txnprovider.TxnProvider,
 	contractBackend bind.ContractBackend,
 	stateChangesClient stateChangesClient,
-	currentBlockNumReader currentBlockNumReader,
+	readCommittedState committedStateReader,
 	opts ...Option,
 ) *Pool {
 	logger = logger.New("component", "shutter")
@@ -73,7 +73,7 @@ func NewPool(
 	}
 
 	blockListener := NewBlockListener(logger, stateChangesClient)
-	blockTracker := NewBlockTracker(logger, blockListener, currentBlockNumReader)
+	blockTracker := NewBlockTracker(logger, blockListener, readCommittedState)
 	eonTracker := NewKsmEonTracker(logger, config, blockListener, contractBackend)
 
 	var slotCalculator SlotCalculator
@@ -320,7 +320,11 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		if txnsIdFilter != nil && txnsIdFilter.Contains(txn.Hash()) {
 			continue
 		}
-		executionGas, stateGas := protocol.InclusionContributions(txn.GetGasLimit(), isAmsterdam, false)
+		limits, gasErr := protocol.TransactionGasLimits(txn, isAmsterdam)
+		if gasErr != nil {
+			continue
+		}
+		executionGas, stateGas := limits.Execution, limits.State
 		if executionGas > availableGas.Execution {
 			sender, _ := txn.GetSender()
 			p.logger.Warn(
@@ -346,7 +350,6 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			continue
 		}
 		accessList := txn.GetAccessList()
-		isAATxn := txn.Type() == types.AccountAbstractionTxType
 		to := txn.GetTo()
 		txnSender, senderOk := txn.GetSender()
 		intrinsicGasResult, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
@@ -364,8 +367,11 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			IsEIP7976:          isAmsterdam,
 			IsEIP7981:          isAmsterdam,
 			IsEIP2780:          isAmsterdam,
-			IsAATxn:            isAATxn,
 		})
+		if frame, ok := txn.Unwrap().(*types.FrameTransaction); ok {
+			intrinsicGasResult.ExecutionGas, intrinsicGasResult.FloorGasCost, _, err = frame.GasLimits()
+			overflow = err != nil
+		}
 		if overflow {
 			sender, _ := txn.GetSender()
 			p.logger.Warn(

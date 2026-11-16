@@ -254,7 +254,7 @@ func TestRunEmptyCodeReturnsBeforeTraceChoice(t *testing.T) {
 // not in the measured cost, so the full budget is always run as well.
 func TestRunMatchesRunTraced(t *testing.T) {
 	t.Parallel()
-	runOnce := func(code []byte, gas uint64, traced bool) (string, uint64) {
+	runOnce := func(code, input []byte, gas uint64, traced bool) (string, []byte, uint64) {
 		// A fresh state per run: a shared one leaves the first run's cold accesses warm.
 		ibs := state.New(state.NewNoopReader())
 		defer ibs.Close()
@@ -275,9 +275,49 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		if traced {
 			f = evm.runTraced
 		}
-		ret, left, used, err := f(*c, mdgas.MdGas{Execution: gas}, nil, false, false, false)
-		return fmt.Sprintf("ret=%x left=%d used=%+v err=%v", ret, left.Execution, used, err), gas - left.Execution
+		ret, left, used, err := f(*c, mdgas.MdGas{Execution: gas}, input, false, false, false)
+		return fmt.Sprintf("ret=%x left=%d used=%+v err=%v", ret, left.Execution, used, err), ret, gas - left.Execution
 	}
+	t.Run("calldataload", func(t *testing.T) {
+		calldata := make([]byte, 40)
+		for i := range calldata {
+			calldata[i] = byte(i + 1)
+		}
+		callDataLoad := func(offset *uint256.Int) []byte {
+			offsetBytes := offset.Bytes()
+			if len(offsetBytes) == 0 {
+				offsetBytes = []byte{0}
+			}
+			code := append([]byte{byte(PUSH1) + byte(len(offsetBytes)-1)}, offsetBytes...)
+			return append(code, byte(CALLDATALOAD), byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 32, byte(PUSH1), 0, byte(RETURN))
+		}
+		wantCallDataLoad := func(offset *uint256.Int) []byte {
+			want := make([]byte, 32)
+			if offset.IsUint64() && offset.Uint64() < uint64(len(calldata)) {
+				copy(want, calldata[offset.Uint64():])
+			}
+			return want
+		}
+		callDataLoadOffsets := []struct {
+			name   string
+			offset *uint256.Int
+		}{
+			{name: "0", offset: new(uint256.Int)},
+			{name: "L-32", offset: uint256.NewInt(uint64(len(calldata) - 32))},
+			{name: "L-31", offset: uint256.NewInt(uint64(len(calldata) - 31))},
+			{name: "L-1", offset: uint256.NewInt(uint64(len(calldata) - 1))},
+			{name: "L", offset: uint256.NewInt(uint64(len(calldata)))},
+			{name: "L+1", offset: uint256.NewInt(uint64(len(calldata) + 1))},
+			{name: "2^64-1", offset: new(uint256.Int).SetUint64(^uint64(0))},
+			{name: "2^64", offset: new(uint256.Int).Lsh(uint256.NewInt(1), 64)},
+		}
+		for _, tc := range callDataLoadOffsets {
+			for _, traced := range []bool{false, true} {
+				_, got, _ := runOnce(callDataLoad(tc.offset), calldata, 100, traced)
+				require.Equal(t, wantCallDataLoad(tc.offset), got, "%s traced=%v", tc.name, traced)
+			}
+		}
+	})
 	prog := func(parts ...any) []byte {
 		var b []byte
 		for _, p := range parts {
@@ -312,8 +352,9 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"callthenbadjump": {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL), byte(PUSH1), 0, byte(JUMP)},
 		"callthenend":     {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL)},
 	}
-	// MCOPY dst src len over 64 distinct bytes, returning all of memory.
-	mcopy := func(dst, src, length []byte) []byte {
+	// A copy op's dst src len over 64 distinct bytes, returning all of memory. RETURNDATACOPY
+	// copies the 32 bytes the identity precompile returns.
+	copyOp := func(op OpCode, dst, src, length []byte) []byte {
 		lo, hi := make([]byte, 32), make([]byte, 32)
 		for i := range 32 {
 			lo[i], hi[i] = byte(i+1), byte(i+33)
@@ -324,11 +365,14 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		b = append(b, byte(PUSH1), 0, byte(MSTORE), byte(PUSH32))
 		b = append(b, hi...)
 		b = append(b, byte(PUSH1), 32, byte(MSTORE))
+		if op == RETURNDATACOPY {
+			b = append(b, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL), byte(POP))
+		}
 		for _, w := range [][]byte{length, src, dst} {
 			b = append(b, byte(PUSH1)+byte(len(w)-1))
 			b = append(b, w...)
 		}
-		return append(b, byte(MCOPY), byte(MSIZE), byte(PUSH1), 0, byte(RETURN))
+		return append(b, byte(op), byte(MSIZE), byte(PUSH1), 0, byte(RETURN))
 	}
 	n := func(v int) []byte { return []byte{byte(v)} }
 	// 2^bits + low, as a big-endian push operand.
@@ -338,26 +382,30 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		return b
 	}
 	for name, args := range map[string][3][]byte{
-		"mcopydstend":      {n(32), n(0), n(32)},
-		"mcopydstpastend":  {n(33), n(0), n(32)},
-		"mcopysrcend":      {n(0), n(32), n(32)},
-		"mcopysrcpastend":  {n(0), n(33), n(32)},
-		"mcopyall":         {n(0), n(0), n(64)},
-		"mcopyzeroatend":   {n(64), n(64), n(0)},
-		"mcopyzeropastend": {n(65), n(65), n(0)},
-		"mcopyoverlapup":   {n(1), n(0), n(40)},
-		"mcopyoverlapdown": {n(0), n(1), n(40)},
-		"mcopydsthuge":     {{1, 0, 0, 0, 0, 0, 0, 0, 0}, n(0), n(1)},
-		"mcopysrchuge":     {n(0), {1, 0, 0, 0, 0, 0, 0, 0, 0}, n(1)},
-		"mcopylenhuge":     {n(0), n(0), {1, 0, 0, 0, 0, 0, 0, 0, 32}},
-		"mcopydst2pow128":  {pow2(128, 0), n(0), n(1)},
-		"mcopydst2pow192":  {pow2(192, 0), n(0), n(1)},
-		"mcopysrc2pow128":  {n(0), pow2(128, 0), n(1)},
-		"mcopysrc2pow192":  {n(0), pow2(192, 0), n(1)},
-		"mcopylen2pow128":  {n(0), n(0), pow2(128, 32)},
-		"mcopylen2pow192":  {n(0), n(0), pow2(192, 32)},
+		"dstend":      {n(32), n(0), n(32)},
+		"dstpastend":  {n(33), n(0), n(32)},
+		"srcend":      {n(0), n(32), n(32)},
+		"srcpastend":  {n(0), n(33), n(32)},
+		"srcfar":      {n(0), n(250), n(16)},
+		"all":         {n(0), n(0), n(64)},
+		"zeroatend":   {n(64), n(64), n(0)},
+		"zeropastend": {n(65), n(65), n(0)},
+		"overlapup":   {n(1), n(0), n(40)},
+		"overlapdown": {n(0), n(1), n(40)},
+		"dsthuge":     {{1, 0, 0, 0, 0, 0, 0, 0, 0}, n(0), n(1)},
+		"srchuge":     {n(0), {1, 0, 0, 0, 0, 0, 0, 0, 0}, n(1)},
+		"srchugezero": {n(0), {1, 0, 0, 0, 0, 0, 0, 0, 0}, n(0)},
+		"lenhuge":     {n(0), n(0), {1, 0, 0, 0, 0, 0, 0, 0, 32}},
+		"dst2pow128":  {pow2(128, 0), n(0), n(1)},
+		"dst2pow192":  {pow2(192, 0), n(0), n(1)},
+		"src2pow128":  {n(0), pow2(128, 0), n(1)},
+		"src2pow192":  {n(0), pow2(192, 0), n(1)},
+		"len2pow128":  {n(0), n(0), pow2(128, 32)},
+		"len2pow192":  {n(0), n(0), pow2(192, 32)},
 	} {
-		programs[name] = mcopy(args[0], args[1], args[2])
+		for _, op := range []OpCode{MCOPY, CODECOPY, CALLDATACOPY, RETURNDATACOPY} {
+			programs[strings.ToLower(op.String())+name] = copyOp(op, args[0], args[1], args[2])
+		}
 	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {
@@ -399,49 +447,57 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		}
 		programs[fmt.Sprintf("random%d", i)] = prog(b)
 	}
-	for name, code := range programs {
-		const plenty = 1_000_000
-		_, cost := runOnce(code, plenty, true)
-		budgets := []uint64{plenty, cost / 2, cost - 1, cost, cost + 1}
-		if cost < 2000 {
-			for gas := range cost + 2 {
-				budgets = append(budgets, gas)
+	t.Run("existing", func(t *testing.T) {
+		for name, code := range programs {
+			const plenty = 1_000_000
+			_, _, cost := runOnce(code, nil, plenty, true)
+			budgets := []uint64{plenty, cost / 2, cost - 1, cost, cost + 1}
+			if cost < 2000 {
+				for gas := range cost + 2 {
+					budgets = append(budgets, gas)
+				}
+			}
+			for _, gas := range budgets {
+				want, _, _ := runOnce(code, nil, gas, true)
+				got, _, _ := runOnce(code, nil, gas, false)
+				require.Equal(t, want, got, "%s at gas %d", name, gas)
 			}
 		}
-		for _, gas := range budgets {
-			want, _ := runOnce(code, gas, true)
-			got, _ := runOnce(code, gas, false)
-			require.Equal(t, want, got, "%s at gas %d", name, gas)
-		}
-	}
+	})
 }
 
-// TestRunTakesMcopyFastPath fails when an allocated MCOPY falls back to the
+// TestRunTakesCopyFastPath fails when an allocated copy falls back to the
 // jump table, which the result comparison above cannot see.
-func TestRunTakesMcopyFastPath(t *testing.T) {
+func TestRunTakesCopyFastPath(t *testing.T) {
 	t.Parallel()
-	errJumpTable := errors.New("jump table MCOPY")
-	for _, traced := range []bool{false, true} {
-		t.Run(fmt.Sprintf("traced=%v", traced), func(t *testing.T) {
-			ibs := state.New(state.NewNoopReader())
-			defer ibs.Close()
-			evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-			jt := *evm.jt
-			jt[MCOPY].execute = func(uint64, *EVM, *CallContext) (uint64, []byte, error) { return 0, nil, errJumpTable }
-			evm.jt = &jt
-			c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
-			c.Code = []byte{byte(PUSH1), 32, byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 8, byte(PUSH1), 0, byte(PUSH1), 1, byte(MCOPY)}
-			f := evm.run
-			if traced {
-				f = evm.runTraced
-			}
-			_, _, _, err := f(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
-			if traced {
-				require.ErrorIs(t, err, errJumpTable)
-			} else {
-				require.NoError(t, err)
-			}
-		})
+	errJumpTable := errors.New("jump table copy")
+	for _, op := range []OpCode{MCOPY, CODECOPY, CALLDATACOPY, RETURNDATACOPY} {
+		for _, traced := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/traced=%v", op, traced), func(t *testing.T) {
+				ibs := state.New(state.NewNoopReader())
+				defer ibs.Close()
+				evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+				jt := *evm.jt
+				jt[op].execute = func(uint64, *EVM, *CallContext) (uint64, []byte, error) { return 0, nil, errJumpTable }
+				evm.jt = &jt
+				length := byte(8)
+				if op == RETURNDATACOPY {
+					length = 0 // there is no return data
+				}
+				c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+				c.Code = []byte{byte(PUSH1), 32, byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), length, byte(PUSH1), 0, byte(PUSH1), 1, byte(op)}
+				f := evm.run
+				if traced {
+					f = evm.runTraced
+				}
+				_, _, _, err := f(*c, mdgas.MdGas{Execution: 100_000}, nil, false, false, false)
+				if traced {
+					require.ErrorIs(t, err, errJumpTable)
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
 	}
 }
 

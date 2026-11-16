@@ -48,7 +48,7 @@ Usage:
 
 Flags:
       --datadir string                              path to Erigon working directory
-      --db.read.concurrency int                     Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers when --experimental.parallel-commitment is on, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead
+      --db.read.concurrency int                     Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead
       --graphql                                     enables graphql endpoint (disabled by default)
       --grpc                                        Enable GRPC server
       --grpc.addr string                            GRPC server listening interface (default "localhost")
@@ -58,6 +58,7 @@ Flags:
       --http.addr string                            HTTP server listening interface (default "localhost")
       --http.api strings                            API's offered over the RPC interface: eth,erigon,web3,net,debug,trace,txpool,db. Supported methods: https://github.com/erigontech/erigon/tree/main/cmd/rpcdaemon (default [eth,erigon])
       --http.compression                            Disable http compression (default true)
+      --http.compression.loopback                   Also compress HTTP-RPC responses to loopback clients (default false)
       --http.corsdomain strings                     Comma separated list of domains from which to accept cross origin requests (browser enforced)
       --http.dbg.single                             Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed
       --http.enabled                                enable http server (default true)

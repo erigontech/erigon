@@ -257,9 +257,9 @@ func (r *CreateTraceResult) marshalFastJSONTo(s *jsonstream.Stream) {
 // TraceResult A parity formatted trace result
 type TraceResult struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	GasUsed      *hexutil.U256  `json:"gasUsed"` // execution gas for the root frame and each child frame.
+	GasUsed      *hexutil.U256  `json:"gasUsed"` // execution gas; the synthetic transaction root reports receipt gas.
 	Output       hexutil.Bytes  `json:"output"`
-	StateGasUsed *hexutil.Int64 `json:"stateGasUsed,omitempty"` // amsterdam: signed net state usage for the root frame and each child frame.
+	StateGasUsed *hexutil.Int64 `json:"stateGasUsed,omitempty"` // amsterdam: signed net state usage; the synthetic transaction root reports block state gas.
 }
 
 func (r *TraceResult) marshalFastJSONTo(s *jsonstream.Stream) {

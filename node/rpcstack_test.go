@@ -210,7 +210,7 @@ func startHTTPServer(t *testing.T, allowList rpc.AllowList, cors, vhosts []strin
 
 	srv := newTestRPCServer(t)
 	srv.SetAllowList(allowList)
-	ts := httptest.NewServer(NewHTTPHandlerStack(srv, cors, vhosts, false, 1000, true))
+	ts := httptest.NewServer(NewHTTPHandlerStack(srv, cors, vhosts, false, false, 1000, true))
 	t.Cleanup(ts.Close)
 	return ts.URL
 }
@@ -307,7 +307,7 @@ func rpcRequest(t *testing.T, url string, extraHeaders ...string) *http.Response
 func TestGzipBatchKeepsBody(t *testing.T) {
 	srv := rpc.NewServer(50, false /* traceRequests */, false /* debugSingleRequest */, false /* disableStreaming */, testlog.Logger(t, log.LvlError), 0)
 	t.Cleanup(srv.Stop)
-	ts := httptest.NewServer(NewHTTPHandlerStack(srv, nil, nil, true, 1000, true))
+	ts := httptest.NewServer(NewHTTPHandlerStack(srv, nil, nil, true, true, 1000, true))
 	t.Cleanup(ts.Close)
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL, strings.NewReader(`[{"jsonrpc":"2.0","id":1,"method":"rpc_modules"}]`))
@@ -325,7 +325,7 @@ func TestGzipBatchKeepsBody(t *testing.T) {
 // reach it only by prior knowledge and Nethermind refuses it too.
 func TestHTTP2CleartextNotServed(t *testing.T) {
 	srv := newTestRPCServer(t)
-	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
+	handler := NewHTTPHandlerStack(srv, nil, nil, false, false, 1000, true)
 	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = httpSrv.Shutdown(context.Background()) })
@@ -350,7 +350,7 @@ func TestHTTP2CleartextNotServed(t *testing.T) {
 // is answered on HTTP/1.1 instead of being switched, so it keeps working.
 func TestHTTP1UpgradeToH2CIsIgnored(t *testing.T) {
 	srv := newTestRPCServer(t)
-	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
+	handler := NewHTTPHandlerStack(srv, nil, nil, false, false, 1000, true)
 	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = httpSrv.Shutdown(context.Background()) })
@@ -378,7 +378,7 @@ func TestHTTP1UpgradeToH2CIsIgnored(t *testing.T) {
 func TestHTTPSEndpoint(t *testing.T) {
 	certFile, keyFile, roots := newSelfSignedCert(t)
 	srv := newTestRPCServer(t)
-	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
+	handler := NewHTTPHandlerStack(srv, nil, nil, false, false, 1000, true)
 	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{
 		Timeouts: rpccfg.DefaultHTTPTimeouts,
 		HTTPS:    true,

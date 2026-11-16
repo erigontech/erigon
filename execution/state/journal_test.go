@@ -7,6 +7,8 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -36,9 +38,9 @@ func TestJournalDirtySymmetry(t *testing.T) {
 		{"resetObjectChange", kindResetObject, func(j *journal) { j.resetObjectChange(addr, nil, nil) }},
 		{"selfdestructChange", kindSelfdestruct, func(j *journal) { j.selfdestructChange(addr, false, val, false) }},
 		{"selfdestructChangeVersioned", kindSelfdestruct, func(j *journal) {
-			j.selfdestructChangeVersioned(addr, false, val, false, false, 0, false, val)
+			j.selfdestructChangeVersioned(addr, false, val, false, false, 0, false, val, false)
 		}},
-		{"balanceChange", kindBalance, func(j *journal) { j.balanceChange(addr, val, false) }},
+		{"balanceChange", kindBalance, func(j *journal) { j.balanceChange(addr, val, false, false) }},
 		{"balanceIncrease", kindBalanceIncrease, func(j *journal) { j.balanceIncrease(addr, val) }},
 		{"balanceIncreaseTransfer", kindBalanceIncreaseTransfer, func(j *journal) {
 			j.balanceIncreaseTransfer(&BalanceIncrease{})
@@ -48,11 +50,26 @@ func TestJournalDirtySymmetry(t *testing.T) {
 		{"fakeStorageChange", kindFakeStorage, func(j *journal) { j.fakeStorageChange(addr, key, val) }},
 		{"codeChange", kindCode, func(j *journal) { j.codeChange(addr, nil, accounts.CodeHash{}, false) }},
 		{"refundChange", kindRefund, func(j *journal) { j.refundChange(7) }},
-		{"addLogChange", kindAddLog, func(j *journal) { j.addLogChange(3) }},
 		{"touchAccount", kindTouch, func(j *journal) { j.touchAccount(addr, false, val) }},
 		{"accessListAddAccountChange", kindAccessListAddAccount, func(j *journal) { j.accessListAddAccountChange(addr) }},
 		{"accessListAddSlotChange", kindAccessListAddSlot, func(j *journal) { j.accessListAddSlotChange(addr, key) }},
 		{"transientStorageChange", kindTransientStorage, func(j *journal) { j.transientStorageChange(addr, 0, val) }},
+		{"frameApproval", kindFrameApproval, func(j *journal) {
+			ctx := (&IntraBlockState{journal: j}).NewFrameContext(&types.FrameTransaction{}, uint256.Int{})
+			ctx.SetApproval(true, addr)
+		}},
+		{"frameStateGas", kindFrameStateGas, func(j *journal) {
+			ctx := (&IntraBlockState{journal: j}).NewFrameContext(&types.FrameTransaction{Frames: []types.Frame{{Limits: mdgas.MdGas{State: 1}}}}, uint256.Int{})
+			ctx.ChargeStateGas(1)
+		}},
+		{"frameStorageOwner", kindFrameStorageOwner, func(j *journal) {
+			ctx := (&IntraBlockState{journal: j}).NewFrameContext(&types.FrameTransaction{}, uint256.Int{})
+			ctx.RecordStorageCharge(addr, key)
+		}},
+		{"frameTransient", kindFrameTransient, func(j *journal) {
+			ibs := &IntraBlockState{journal: j, transientStorage: transientStorage{addr: &transientSlots{}}}
+			ibs.ResetFrameTransientStorage()
+		}},
 	}
 
 	covered := map[entryKind]bool{}
@@ -94,10 +111,33 @@ func TestJournalDirtySymmetry(t *testing.T) {
 	}
 }
 
-// Reset reslices entries to zero, so anything left in the backing array stays
-// reachable for as long as the journal is reused — and a kindCode entry's extra
-// holds a whole contract's bytecode. The journal outlives the transaction, so
-// that is a block's worth of dead code pinned by a pooled object.
+// BenchmarkJournalStorageChange measures the hot append path; it must stay at
+// zero allocs per op once the entries slice has warmed up.
+func BenchmarkJournalStorageChange(b *testing.B) {
+	j := newJournal()
+	defer j.release()
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	prev := uint256.NewInt(42)
+
+	for range 1 << 16 {
+		j.storageChange(addr, key, *prev, false)
+	}
+	j.Reset()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		j.storageChange(addr, key, *prev, false)
+		if len(j.entries) == 1<<16 {
+			j.Reset()
+		}
+	}
+}
+
+// TestJournalResetDropsEntriesItReslicesPast pins that Reset clears the journalExtra
+// pointers in the capacity tail it reslices past, so a large prevcode payload cannot be
+// pinned alive by a stale entry after the journal is reused.
 func TestJournalResetDropsEntriesItReslicesPast(t *testing.T) {
 	j := newJournal()
 	t.Cleanup(j.release)
@@ -120,8 +160,8 @@ func TestJournalResetDropsEntriesItReslicesPast(t *testing.T) {
 	}
 }
 
-// revert truncates to a snapshot, so the entries it drops outlive it; a Reset
-// that clears only [0:len] would leave that stretch holding its bytecode.
+// TestJournalRevertDropsTheEntriesItTruncates pins the same for revert: the entries a
+// revert truncates must not keep their journalExtra pinned after a following Reset.
 func TestJournalRevertDropsTheEntriesItTruncates(t *testing.T) {
 	ibs := New(NewVersionedStateReader(0, ReadSet{}, nil, nil))
 	addr := accounts.InternAddress(common.Address{1})

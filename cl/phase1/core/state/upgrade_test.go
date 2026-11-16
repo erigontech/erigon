@@ -46,6 +46,46 @@ func TestUpgradeAndExpectedWithdrawals(t *testing.T) {
 	assert.Empty(t, w.Withdrawals)
 }
 
+func TestUpgradeToAltairClearsPhase0ValidatorData(t *testing.T) {
+	s := New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(s, stateEncoded, int(clparams.Phase0Version)))
+
+	hasPhase0Data := false
+	for i := range s.ValidatorLength() {
+		current, err := s.ValidatorMinCurrentInclusionDelayAttestation(i)
+		require.NoError(t, err)
+		previous, err := s.ValidatorMinPreviousInclusionDelayAttestation(i)
+		require.NoError(t, err)
+		hasPhase0Data = hasPhase0Data || current != nil || previous != nil
+	}
+	require.True(t, hasPhase0Data)
+
+	require.NoError(t, s.UpgradeToAltair())
+	requireNoPhase0ValidatorData(t, s)
+}
+
+func TestReinitCachesInitializesValidatorPhase0DataOnlyAtPhase0(t *testing.T) {
+	s := New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(s, stateEncoded, int(clparams.Phase0Version)))
+	s.ValidatorSet().ClearPhase0Data()
+	s.SetVersion(clparams.AltairVersion)
+
+	require.NoError(t, s.reinitCaches(nil))
+	requireNoPhase0ValidatorData(t, s)
+}
+
+func requireNoPhase0ValidatorData(t *testing.T, s *CachingBeaconState) {
+	t.Helper()
+	for i := range s.ValidatorLength() {
+		current, err := s.ValidatorMinCurrentInclusionDelayAttestation(i)
+		require.NoError(t, err)
+		require.Nil(t, current)
+		previous, err := s.ValidatorMinPreviousInclusionDelayAttestation(i)
+		require.NoError(t, err)
+		require.Nil(t, previous)
+	}
+}
+
 func TestUpgradeToGloasStateRootMatchesDecodedState(t *testing.T) {
 	s := New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(s, stateEncoded, int(clparams.Phase0Version)))

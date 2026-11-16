@@ -17,11 +17,15 @@
 package raw
 
 import (
+	"encoding/binary"
+	"math"
+	"math/rand"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 )
 
 func newStateWithQueues(version clparams.StateVersion) *BeaconState {
@@ -68,6 +72,70 @@ func BenchmarkHashSSZAfterCopyInto(b *testing.B) {
 					b.Fatal(err)
 				}
 				if _, err := dst.HashSSZ(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func newMainnetSizedState(b *testing.B, validators int) *BeaconState {
+	b.Helper()
+	s := newTestState(clparams.FuluVersion)
+	for i := range validators {
+		var publicKey [48]byte
+		binary.LittleEndian.PutUint32(publicKey[:], uint32(i))
+		validator := solid.NewValidatorFromParameters(publicKey, [32]byte{1}, 32e9, false, 0, 0, math.MaxUint64, math.MaxUint64)
+		if err := s.AddValidator(validator, 32e9+uint64(i)); err != nil {
+			b.Fatal(err)
+		}
+		s.AddCurrentEpochParticipationFlags(0)
+		s.AddPreviousEpochParticipationFlags(7)
+		s.AddInactivityScore(0)
+	}
+	if _, err := s.HashSSZ(); err != nil {
+		b.Fatal(err)
+	}
+	return s
+}
+
+// BenchmarkHashSSZAfterBlock hashes a mainnet-sized Fulu state after the field updates of one normal block.
+func BenchmarkHashSSZAfterBlock(b *testing.B) {
+	if testing.Short() {
+		b.Skip("resource-heavy benchmark: builds a 2.1M-validator state")
+	}
+	const validators, attestersPerBlock, withdrawalsPerBlock = 2_100_001, 25_000, 16
+	for _, tc := range []struct {
+		name               string
+		previousEpochShare int // out of 4 attestations
+	}{
+		{"current_epoch_attestations", 0},
+		{"half_previous_epoch_attestations", 2},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			s := newMainnetSizedState(b, validators)
+			rng := rand.New(rand.NewSource(1))
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				slot := s.Slot() + 1
+				if err := s.SetSlot(slot); err != nil {
+					b.Fatal(err)
+				}
+				s.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: slot})
+				if err := s.SetRandaoMixAt(int(slot%s.BeaconConfig().EpochsPerHistoricalVector), common.Hash{byte(slot)}); err != nil {
+					b.Fatal(err)
+				}
+				for range withdrawalsPerBlock + 1 {
+					if err := s.SetValidatorBalance(rng.Intn(validators), slot); err != nil {
+						b.Fatal(err)
+					}
+				}
+				for i := range attestersPerBlock {
+					s.SetEpochParticipationForValidatorIndex(i%4 >= tc.previousEpochShare, rng.Intn(validators), 3)
+				}
+				b.StartTimer()
+				if _, err := s.HashSSZ(); err != nil {
 					b.Fatal(err)
 				}
 			}

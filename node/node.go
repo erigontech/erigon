@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diskutils"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -254,6 +253,10 @@ func (n *Node) openDataDir(ctx context.Context) error {
 		n.dirLock = l
 		break
 	}
+	if err := n.config.Dirs.RenameOldVersions(false); err != nil {
+		n.closeDataDir()
+		return fmt.Errorf("failed to rename old versions: %w", err)
+	}
 
 	diskutils.CheckFilesystem(n.logger, n.config.Dirs.All()...)
 	return nil
@@ -306,13 +309,6 @@ func execWorkerCount(config *nodecfg.Config) int {
 	return cmp.Or(config.ExecWorkerCount, dbg.Exec3Workers)
 }
 
-func parallelCommitmentReaders() int {
-	if !statecfg.ExperimentalParallelCommitment {
-		return 0
-	}
-	return commitment.ParallelCommitmentReadTxs()
-}
-
 func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
 	switch label {
 	case dbcfg.ChainDB:
@@ -340,7 +336,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		roTxsLimiter := semaphore.NewWeighted(httpcfg.RoTxsLimit(
 			config.Http.DBReadConcurrency,
 			execWorkerCount(config),
-			parallelCommitmentReaders(),
+			commitment.ParallelCommitmentReadTxs(),
 			dbg.BALCommitmentWarmupReaders(),
 			dbg.ReadAheadWorkerReaders(),
 		))
@@ -395,7 +391,8 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		defer migrationsDB.Close()
 
 		migrator := migrations.NewMigrator(label)
-		if err := migrator.VerifyVersion(db, dbPath); err != nil {
+		err = migrator.VerifyVersion(db, dbPath)
+		if err != nil {
 			return nil, err
 		}
 		has, err := migrator.HasPendingMigrations(migrationsDB)
@@ -409,7 +406,8 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			if err != nil {
 				return nil, err
 			}
-			if err := migrator.Apply(db, migrationsDB, config.Dirs.DataDir, dbPath, logger); err != nil {
+			err = migrator.Apply(db, migrationsDB, config.Dirs.DataDir, dbPath, logger)
+			if err != nil {
 				return nil, err
 			}
 			db.Close()
@@ -417,6 +415,9 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			if err != nil {
 				return nil, err
 			}
+		}
+		if err := migrator.StampVersion(db, dbPath); err != nil {
+			return nil, err
 		}
 		if err := db.Update(context.Background(), func(tx kv.RwTx) (err error) {
 			return rawdb.SetErigonVersion(tx, version.VersionKeyCreated)

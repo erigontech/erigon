@@ -366,8 +366,6 @@ func TestOnLogValueSurvivesBufferReuse(t *testing.T) {
 	require.Equal(t, hexutil.Bytes{1, 2, 3}, retained.Data)
 }
 
-var sinkLog *types.Log
-
 // TestAddLogOnLogHookCopyContract pins the OnLog contract on the AddLog path:
 // the hook sees the emitted contents during the callback, and a copy taken then
 // stays intact after the buffer entry is reused by later blocks.
@@ -469,6 +467,15 @@ func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
 	ibs.AddLog(&types.Log{Address: common.Address{0xff}})
 	require.Len(t, ibs.logs.entries, 1)
 	require.Equal(t, capBefore, cap(ibs.logs.entries), "the array survives revert+relog")
+}
+
+func TestLogTakesNoJournalEntry(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	ibs.SetTxContext(1, 0)
+	ibs.AddLog(&types.Log{Address: common.Address{0x01}})
+	require.Zero(t, ibs.journal.length())
 }
 
 // TestLogIndexIsBlockWide pins that AddLog stamps a block-wide log index:

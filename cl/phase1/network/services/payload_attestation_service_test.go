@@ -1532,3 +1532,31 @@ func TestPayloadAttestationServiceDecodeGossipMessageStrict(t *testing.T) {
 	_, err = service.DecodeGossipMessage("peer123", nonCanonicalBool, clparams.GloasVersion)
 	require.Error(t, err)
 }
+
+func TestPayloadAttestationServiceRejectsInvalidBlock(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.InvalidBlocks = map[common.Hash]struct{}{blockRoot: {}}
+
+	err := service.ProcessMessage(t.Context(), nil, newTestPayloadAttestationMessage(100, 1, blockRoot))
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	err = service.ProcessRESTMessage(t.Context(), newTestPayloadAttestationMessage(100, 2, blockRoot), func() error { return nil })
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.Zero(t, service.pending.count.Load())
+}
+
+func TestPayloadAttestationServiceDropsPendingAttestationWhenBlockIsInvalid(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	blockRoot := common.HexToHash("0x1234")
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, newTestPayloadAttestationMessage(100, 1, blockRoot)), ErrAttestationQueued)
+	require.Equal(t, int32(1), service.pending.count.Load())
+
+	fcu.InvalidBlocks = map[common.Hash]struct{}{blockRoot: {}}
+	service.pending.processPending(t.Context())
+
+	require.Zero(t, service.pending.count.Load())
+}

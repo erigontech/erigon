@@ -387,7 +387,7 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrTooManyBodies(t *t
 
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
-	headers := []*types.Header{{Number: *uint256.NewInt(1)}}
+	headers := []*types.Header{newMockHeaderForBody(1, &types.Body{})}
 	hashes := []common.Hash{headers[0].Hash()}
 	mockInboundMessages := []*sentryproto.InboundMessage{
 		{
@@ -417,6 +417,38 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrTooManyBodies(t *t
 	})
 }
 
+func TestPenalizingFetcherFetchBodiesRejectsMismatchBeforeNextPage(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	headers := newMockBlockHeaders(2)
+	body := &types.Body{Transactions: types.Transactions{
+		types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 21_000, uint256.NewInt(0), nil),
+	}}
+	mockResponse := requestResponseMock{
+		requestId: requestId,
+		mockResponseInboundMessages: []*sentryproto.InboundMessage{
+			{
+				Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+				PeerId: peerId.H512(),
+				Data:   newMockBlockBodiesPacketBytes(t, requestId, body),
+			},
+		},
+		wantRequestPeerId: peerId,
+		wantRequestHashes: []common.Hash{headers[0].Hash(), headers[1].Hash()},
+	}
+
+	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId, requestId+1))
+	test.mockSentryStreams(mockResponse)
+	mockExpectPenalizePeer(t, test.sentryClient, peerId)
+	test.run(func(ctx context.Context, t *testing.T) {
+		bodies, err := test.penalizingFetcher.FetchBodies(ctx, headers, peerId)
+		require.ErrorIs(t, err, ErrBodyDoesNotMatchHeader)
+		require.Nil(t, bodies.Data)
+	})
+}
+
 func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenInvalidBodyRLP(t *testing.T) {
 	t.Parallel()
 
@@ -440,6 +472,7 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenInvalidBodyRLP(t *tes
 	test.run(func(ctx context.Context, t *testing.T) {
 		bodies, err := test.penalizingFetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
 		require.ErrorIs(t, err, rlp.ErrExpectedList)
+		require.ErrorIs(t, err, ErrInvalidBodyRLP)
 		require.Nil(t, bodies.Data)
 	})
 }

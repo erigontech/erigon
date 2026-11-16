@@ -654,10 +654,10 @@ func seedGloasHistoricalState(t *testing.T, cfg *clparams.BeaconChainConfig, slo
 	}
 
 	var slotDataBuf bytes.Buffer
-	require.NoError(t, slotData.WriteTo(&slotDataBuf))
+	require.NoError(t, slotData.Serialize(&slotDataBuf))
 
 	var epochDataBuf bytes.Buffer
-	require.NoError(t, epochData.WriteTo(&epochDataBuf))
+	require.NoError(t, epochData.Serialize(&epochDataBuf))
 
 	slotKey := base_encoding.Encode64ToBytes4(slot)
 	roundedSlot := cfg.RoundSlotToEpoch(slot)

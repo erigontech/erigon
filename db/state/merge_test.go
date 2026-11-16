@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -151,6 +152,14 @@ func TestHistoryStaticFilesInRange_DetectsGapInSourceFiles(t *testing.T) {
 	r := NewHistoryRanges(*NewMergeRange("accounts", true, 0, 3), MergeRange{})
 	_, _, err := hc.staticFilesInRange(r)
 	require.Error(t, err, "staticFilesInRange must reject a merge range with a gap in source files")
+
+	hc.files = hc.files[:1]
+	_, _, err = hc.staticFilesInRange(r)
+	require.ErrorContains(t, err, "accounts", "staticFilesInRange must reject a merge range beyond its source files")
+
+	hc.files = nil
+	_, _, err = hc.staticFilesInRange(r)
+	require.ErrorContains(t, err, "accounts", "staticFilesInRange must reject a merge range with no source files")
 }
 
 func emptyTestInvertedIndex(t testing.TB, aggStep uint64) *InvertedIndex {
@@ -866,6 +875,16 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 		assert.False(t, mr.needMerge)
 	})
 
+	t.Run("window_start_clamped_to_first_file", func(t *testing.T) {
+		// [1036, 1038), [1038, 1039), [1039, 1040) ->
+		// [1036, 1040)   (older files were retired; 1040's window would start at 1024)
+		files := visibleFiles{f(1036, 1038), f(1038, 1039), f(1039, 1040)}
+		mr := findMergeRangeInFiles(files, stepSize, 1040, bigSpan, true)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, uint64(1036), mr.from)
+		assert.Equal(t, uint64(1040), mr.to)
+	})
+
 	// --- Hand-traced scenarios ---
 
 	t.Run("non_canonical_all_self_aligned_no_merge", func(t *testing.T) {
@@ -1269,7 +1288,7 @@ func TestHistoryMergeCancellationRemovesOutputs(t *testing.T) {
 			case "index":
 				h.InvertedIndex._testBuildAccessorHook = cancelBuild
 			case "history":
-				h._testBuildVIHook = cancelBuild
+				h._testBuildVIHook = func() { cancelBuild(nil) }
 			}
 			index, history, err := ht.mergeFiles(ctx, indexFiles, historyFiles, r, ps)
 			require.ErrorIs(t, err, context.Canceled)
@@ -1669,4 +1688,15 @@ func TestInvIndexMergeFiles_SharedKey(t *testing.T) {
 		want = append(want, txNum)
 	}
 	require.Equal(t, want, got)
+}
+
+func TestMergeResultFilePathsIncludesHistory(t *testing.T) {
+	t.Parallel()
+	item := func(path string) *FilesItem {
+		return &FilesItem{existence: &existence.Filter{FilePath: path}}
+	}
+	var mf MergeResult
+	mf.dHist[kv.AccountsDomain] = item("/snap/history/v1.0-accounts.0-2.v")
+	mf.dIdx[kv.AccountsDomain] = item("/snap/idx/v1.0-accounts.0-2.ef")
+	require.Equal(t, []string{"history/v1.0-accounts.0-2.v", "idx/v1.0-accounts.0-2.ef"}, mf.FilePaths("/snap"))
 }

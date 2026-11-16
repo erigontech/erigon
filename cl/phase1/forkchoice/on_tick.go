@@ -80,3 +80,14 @@ func (f *ForkChoiceStore) onTickPerSlot(timeMs uint64) {
 func (f *ForkChoiceStore) nearChainTip(slot uint64) bool {
 	return f.highestSeen.Load()+2*f.beaconCfg.SlotsPerEpoch >= slot
 }
+
+// SetTimeForSpecTest sets the store time without the monotonic guard of OnTick, because spec test
+// fixtures may move time backwards. Production code must use OnTick.
+func (f *ForkChoiceStore) SetTimeForSpecTest(timeMs uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.timeMs.Store(timeMs)
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.proposerBoostRoot.Store(common.Hash{})
+}

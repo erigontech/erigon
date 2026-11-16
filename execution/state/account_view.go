@@ -51,6 +51,14 @@ func (v *VersionedAccountView) ensureBase() {
 	}
 }
 
+// Err reports an error from the lazily-loaded base read. It forces the base
+// load so callers can bail before trusting the composed (zeroed-on-error)
+// fields.
+func (v *VersionedAccountView) Err() error {
+	v.ensureBase()
+	return v.baseErr
+}
+
 func (v *VersionedAccountView) GetBalance() uint256.Int {
 	if v.destroyed() {
 		return uint256.Int{}
@@ -123,7 +131,7 @@ func (v *VersionedAccountView) GetCode() ([]byte, error) {
 	}
 	if v.vm != nil {
 		if code, ok := versionedUpdateCode(v.vm, v.addr, v.txIdx); ok {
-			return code, nil
+			return code.Bytes, nil
 		}
 	}
 	if v.base != nil {
@@ -173,7 +181,8 @@ func (v *VersionedAccountView) Empty() bool {
 
 // Account composes the whole account at txIdx from the versionMap (seeded origin
 // base plus field cells below txIdx), or nil if it does not exist there. Correct
-// only when every account written this block has its origin seeded.
+// only when every account written this block has its origin seeded. A field with
+// no cell keeps the base value, or NewAccount's default (EmptyCodeHash for codeless).
 func (v *VersionedAccountView) Account() *accounts.Account {
 	if !v.exists() {
 		return nil
@@ -183,10 +192,20 @@ func (v *VersionedAccountView) Account() *accounts.Account {
 	if v.baseAcc != nil {
 		acc = *v.baseAcc
 	}
-	acc.Balance = v.GetBalance()
-	acc.Nonce = v.GetNonce()
-	acc.Incarnation = v.GetIncarnation()
-	acc.CodeHash = v.GetCodeHash()
+	if v.vm != nil {
+		if u, _, ok := v.vm.ReadBalance(v.addr, v.txIdx); ok {
+			acc.Balance = u
+		}
+		if u, _, ok := v.vm.ReadNonce(v.addr, v.txIdx); ok {
+			acc.Nonce = u
+		}
+		if u, _, ok := v.vm.ReadIncarnation(v.addr, v.txIdx); ok {
+			acc.Incarnation = u
+		}
+		if ch, _, ok := v.vm.ReadCodeHash(v.addr, v.txIdx); ok {
+			acc.CodeHash = ch
+		}
+	}
 	return &acc
 }
 

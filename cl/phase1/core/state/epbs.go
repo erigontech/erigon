@@ -135,16 +135,22 @@ func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount u
 		return false
 	}
 
-	builderBalance := builder.Balance
-	pendingWithdrawalsAmount := GetPendingBalanceToWithdrawForBuilder(s, builderIndex)
-	if pendingWithdrawalsAmount > math.MaxUint64-s.BeaconConfig().MinDepositAmount {
-		return false
+	minDepositAmount := s.BeaconConfig().MinDepositAmount
+	pendingWithdrawals := GetPendingBalanceToWithdrawForBuilder(s, builderIndex)
+	capacity, ok := BuilderBidCapacity(builder.Balance, minDepositAmount, pendingWithdrawals)
+	return ok && bidAmount <= capacity
+}
+
+// BuilderBidCapacity returns the largest bid the builder can cover; ok is false when it cannot cover any bid.
+func BuilderBidCapacity(balance, minDepositAmount, pendingWithdrawals uint64) (capacity uint64, ok bool) {
+	if pendingWithdrawals > math.MaxUint64-minDepositAmount {
+		return 0, false
 	}
-	minBalance := s.BeaconConfig().MinDepositAmount + pendingWithdrawalsAmount
-	if builderBalance < minBalance {
-		return false
+	minimumBalance := minDepositAmount + pendingWithdrawals
+	if balance < minimumBalance {
+		return 0, false
 	}
-	return builderBalance-minBalance >= bidAmount
+	return balance - minimumBalance, true
 }
 
 func GetProposerDependentRoot(s abstract.BeaconState, epoch uint64) (common.Hash, error) {
@@ -159,23 +165,13 @@ func GetProposerDependentRoot(s abstract.BeaconState, epoch uint64) (common.Hash
 	return s.GetBlockRootAtSlot(dependentSlot)
 }
 
-// GetPendingBalanceToWithdrawForBuilder returns the total pending balance to withdraw for a builder.
-// This includes:
-// - Amounts from builder_pending_withdrawals (direct withdrawal requests)
-// - Amounts from builder_pending_payments (payments that include withdrawals)
-func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex uint64) uint64 {
-	var total uint64
-
-	// Sum from builder_pending_withdrawals
+// ForEachPendingBuilderWithdrawal calls fn for every pending builder withdrawal and pending payment withdrawal.
+func ForEachPendingBuilderWithdrawal(s abstract.BeaconState, fn func(builderIndex, amount uint64)) {
 	pendingWithdrawals := s.GetBuilderPendingWithdrawals()
 	if pendingWithdrawals != nil {
 		pendingWithdrawals.Range(func(_ int, withdrawal *cltypes.BuilderPendingWithdrawal, _ int) bool {
-			if withdrawal != nil && withdrawal.BuilderIndex == builderIndex {
-				if withdrawal.Amount > math.MaxUint64-total {
-					total = math.MaxUint64
-					return false
-				}
-				total += withdrawal.Amount
+			if withdrawal != nil {
+				fn(withdrawal.BuilderIndex, withdrawal.Amount)
 			}
 			return true
 		})
@@ -183,22 +179,32 @@ func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex 
 		log.Debug("builder_pending_withdrawals is nil")
 	}
 
-	// Sum from builder_pending_payments
 	pendingPayments := s.GetBuilderPendingPayments()
 	if pendingPayments != nil {
 		pendingPayments.Range(func(_ int, payment *cltypes.BuilderPendingPayment, _ int) bool {
-			if payment != nil && payment.Withdrawal != nil && payment.Withdrawal.BuilderIndex == builderIndex {
-				if payment.Withdrawal.Amount > math.MaxUint64-total {
-					total = math.MaxUint64
-					return false
-				}
-				total += payment.Withdrawal.Amount
+			if payment != nil && payment.Withdrawal != nil {
+				fn(payment.Withdrawal.BuilderIndex, payment.Withdrawal.Amount)
 			}
 			return true
 		})
 	} else {
 		log.Debug("builder_pending_payments is nil")
 	}
+}
+
+// GetPendingBalanceToWithdrawForBuilder returns the total pending balance to withdraw for a builder.
+func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex uint64) uint64 {
+	var total uint64
+	ForEachPendingBuilderWithdrawal(s, func(index, amount uint64) {
+		if index != builderIndex {
+			return
+		}
+		if amount > math.MaxUint64-total {
+			total = math.MaxUint64
+			return
+		}
+		total += amount
+	})
 
 	return total
 }

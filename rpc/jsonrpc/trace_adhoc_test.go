@@ -636,6 +636,45 @@ func TestTraceCallUnknownBlockIsResourceNotFound(t *testing.T) {
 	}
 }
 
+func TestTraceNonCanonicalHash(t *testing.T) {
+	m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	calls := json.RawMessage(`[[{}, ["trace"]]]`)
+	orphaned := orphanedChain[0].Blocks[0].Hash()
+
+	required := rpc.BlockNumberOrHashWithHash(orphaned, true)
+	t.Run("trace_call requireCanonical", func(t *testing.T) {
+		_, err := api.Call(m.Ctx, TraceCallParam{}, []string{TraceTypeTrace}, &required, nil)
+		requireResourceNotFound(t, err, "is not currently canonical")
+	})
+	t.Run("trace_callMany requireCanonical", func(t *testing.T) {
+		_, err := api.CallMany(m.Ctx, calls, &required, nil)
+		requireResourceNotFound(t, err, "is not currently canonical")
+	})
+
+	selected := rpc.BlockNumberOrHashWithHash(orphaned, false)
+	t.Run("trace_call", func(t *testing.T) {
+		_, err := api.Call(m.Ctx, TraceCallParam{}, []string{TraceTypeTrace}, &selected, nil)
+		requireStateUnavailable(t, err)
+	})
+	t.Run("trace_callMany", func(t *testing.T) {
+		_, err := api.CallMany(m.Ctx, calls, &selected, nil)
+		requireStateUnavailable(t, err)
+	})
+	t.Run("trace_replayBlockTransactions", func(t *testing.T) {
+		_, err := api.ReplayBlockTransactions(m.Ctx, selected, []string{TraceTypeTrace}, nil, nil)
+		requireResourceNotFound(t, err, "is not currently canonical")
+	})
+}
+
+func requireStateUnavailable(t *testing.T, err error) {
+	t.Helper()
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, 4444, rpcErr.ErrorCode())
+	require.ErrorContains(t, err, "is not currently canonical")
+}
+
 func TestTraceUnavailableTagIsResourceNotFound(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
@@ -2817,7 +2856,9 @@ func (c *vmTraceOpContext) Gas() mdgas.MdGas         { return mdgas.MdGas{Execut
 // TestOeTracerCoversInstructionSet fails when an opcode of the latest fork
 // pushes or writes memory but vmTrace does not report it.
 func TestOeTracerCoversInstructionSet(t *testing.T) {
-	jt := vm.LookupInstructionSet((&evmtypes.BlockContext{}).Rules(chain.AllProtocolChanges))
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+	jt := vm.LookupInstructionSet((&evmtypes.BlockContext{}).Rules(cfg))
 	scope := &vmTraceOpContext{stack: make([]uint256.Int, 17), memory: make([]byte, 64), code: make([]byte, 3)}
 	for i := range scope.stack {
 		scope.stack[i].SetOne()
@@ -2836,7 +2877,7 @@ func TestOeTracerCoversInstructionSet(t *testing.T) {
 			ex := tracer.r.VmTrace.Ops[1].Ex
 			require.Len(t, ex.Push, jt[op].NumPush())
 			switch op {
-			case vm.KECCAK256, vm.LOG0, vm.LOG1, vm.LOG2, vm.LOG3, vm.LOG4, vm.RETURN, vm.REVERT:
+			case vm.KECCAK256, vm.LOG0, vm.LOG1, vm.LOG2, vm.LOG3, vm.LOG4, vm.RETURN, vm.REVERT, vm.APPROVE:
 				require.Nil(t, ex.Mem)
 			default:
 				require.Equal(t, jt[op].UsesMemory(), ex.Mem != nil)

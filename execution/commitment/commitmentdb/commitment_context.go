@@ -223,10 +223,6 @@ func (sdc *SharedDomainsCommitmentContext) SetUpdates(updates *commitment.Update
 	sdc.updates = updates
 }
 
-func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
-	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
-}
-
 func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
 	variant := cfg.Variant
 	if variant == "" {

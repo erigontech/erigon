@@ -56,9 +56,9 @@ run-name: "Docs cutover${{ inputs.dry_run && ' (dry run)' || '' }}"
 
 on:
   schedule:
-    # 06:50 UTC — after docs-deploy-cron (06:20) so a cutover lands on a site
+    # 06:51 UTC — after docs-deploy-cron (06:20) so a cutover lands on a site
     # that has already refreshed, and clear of the 04:00 QA cron block.
-    - cron: '50 6 * * *'
+    - cron: '51 6 * * *'
   workflow_dispatch:
     inputs:
       dry_run:

@@ -400,6 +400,7 @@ func SecondKeyC(c kv.Cursor) ([]byte, error) {
 //   - blockNum
 //   - txIndex in block: -1 means first system tx
 //   - isFinalTxn: last system-txn. BlockRewards and similar things - are attribute to this virtual txn.
+//   - isSystemTxn: first or last system-txn, independent of the order
 //   - blockNumChanged: means this and previous txNum belongs to different blockNumbers
 //
 // Expect: `it` to return sorted txNums, then blockNum will not change until `it.Next() < maxTxNumInBlock`
@@ -414,12 +415,21 @@ type MapTxNum2BlockNumIter struct {
 
 	blockNum                         uint64
 	minTxNumInBlock, maxTxNumInBlock uint64
+	startBlock                       uint64
+	hasStartBlock                    bool
 
 	txNumsReader TxNumsReader
 }
 
 func TxNums2BlockNums(ctx context.Context, tx kv.Tx, txNumsReader TxNumsReader, it stream.U64, by order.By) *MapTxNum2BlockNumIter {
 	return &MapTxNum2BlockNumIter{ctx: ctx, tx: tx, txNumsReader: txNumsReader, it: it, orderAscend: bool(by)}
+}
+
+// TxNums2BlockNumsFrom is TxNums2BlockNums for txNums expected to start at or near startBlock.
+func TxNums2BlockNumsFrom(ctx context.Context, tx kv.Tx, txNumsReader TxNumsReader, it stream.U64, by order.By, startBlock uint64) *MapTxNum2BlockNumIter {
+	i := TxNums2BlockNums(ctx, tx, txNumsReader, it, by)
+	i.startBlock, i.hasStartBlock = startBlock, true
+	return i
 }
 
 func (i *MapTxNum2BlockNumIter) Close() {
@@ -433,10 +443,10 @@ func (i *MapTxNum2BlockNumIter) Close() {
 	}
 }
 func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }
-func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isFinalTxn, blockNumChanged bool, err error) {
+func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isFinalTxn, isSystemTxn, blockNumChanged bool, err error) {
 	txNum, err = i.it.Next()
 	if err != nil {
-		return txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err
+		return txNum, blockNum, txIndex, isFinalTxn, isSystemTxn, blockNumChanged, err
 	}
 
 	if i.maxTxNumInBlock == 0 || txNum > i.maxTxNumInBlock || txNum < i.minTxNumInBlock {
@@ -446,16 +456,8 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 				return
 			}
 		}
-		moved := false
-		if i.maxTxNumInBlock != 0 {
-			if moved, err = i.searchFrom(txNum); err != nil {
-				return
-			}
-		}
-		if !moved {
-			if err = i.find(txNum); err != nil {
-				return
-			}
+		if err = i.moveTo(txNum); err != nil {
+			return
 		}
 	}
 	blockNum = i.blockNum
@@ -466,7 +468,37 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 	} else {
 		isFinalTxn = txNum == i.minTxNumInBlock
 	}
+	isSystemTxn = txNum == i.minTxNumInBlock || txNum == i.maxTxNumInBlock
 	return
+}
+
+func (i *MapTxNum2BlockNumIter) moveTo(txNum uint64) error {
+	if i.hasStartBlock {
+		i.hasStartBlock = false
+		if err := i.loadStartBlock(); err != nil {
+			return err
+		}
+	}
+	if i.maxTxNumInBlock != 0 {
+		if moved, err := i.searchFrom(txNum); err != nil || moved {
+			return err
+		}
+	}
+	return i.find(txNum)
+}
+
+// loadStartBlock makes startBlock the current block, or leaves no current block when it is not in the index.
+func (i *MapTxNum2BlockNumIter) loadStartBlock() error {
+	minTxNum, ok, err := i.txNumsReader.MinExact(i.ctx, i.tx, i.cursor, i.startBlock)
+	if err != nil || !ok {
+		return err
+	}
+	maxTxNum, ok, err := i.txNumsReader.MaxExact(i.ctx, i.tx, i.cursor, i.startBlock)
+	if err != nil || !ok {
+		return err
+	}
+	i.blockNum, i.minTxNumInBlock, i.maxTxNumInBlock = i.startBlock, minTxNum, maxTxNum
+	return nil
 }
 
 func (i *MapTxNum2BlockNumIter) find(txNum uint64) (err error) {

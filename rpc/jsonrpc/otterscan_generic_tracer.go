@@ -60,7 +60,7 @@ func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context
 	if !ok {
 		return fmt.Errorf("txn not found at block %d, index %d", blockNum, txIndex)
 	}
-	err = executor.ExecTxn(txnID, txIndex, txn, false)
+	err = executor.ExecTxn(txnID, txIndex, txn)
 	if err != nil {
 		return err
 	}

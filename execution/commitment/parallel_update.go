@@ -138,6 +138,42 @@ func (pu *parallelUpdate) Close() {
 	pu.keyArena.reset()
 }
 
+// foldTombstones keeps, for a prefix a self-destruct tombstoned and the same Process
+// rebuilt, only the rebuilt branch: a forked child checks it in before the parent's
+// tombstone, and merged it onto the old stored branch. Written raw, it carries the
+// tombstone's prev, so the domain diff still restores the old branch on unwind.
+func (pu *parallelUpdate) foldTombstones() {
+	pu.deferredMu.Lock()
+	defer pu.deferredMu.Unlock()
+	var tombs map[string]*DeferredBranchUpdate
+	for _, u := range pu.deferredCombined {
+		if u.rawWrite {
+			if tombs == nil {
+				tombs = map[string]*DeferredBranchUpdate{}
+			}
+			tombs[string(u.prefix)] = u
+		}
+	}
+	if tombs == nil {
+		return
+	}
+	folded := map[*DeferredBranchUpdate]bool{}
+	for _, u := range pu.deferredCombined {
+		if t, ok := tombs[string(u.prefix)]; ok && !u.rawWrite {
+			u.rawWrite = true
+			u.prev = reuseBytes(u.prev, t.prev)
+			folded[t] = true
+		}
+	}
+	pu.deferredCombined = slices.DeleteFunc(pu.deferredCombined, func(u *DeferredBranchUpdate) bool {
+		if folded[u] {
+			putDeferredUpdate(u)
+			return true
+		}
+		return false
+	})
+}
+
 func (pu *parallelUpdate) appendDeferred(updates []*DeferredBranchUpdate) {
 	if len(updates) == 0 {
 		return

@@ -16,6 +16,13 @@
 
 package state
 
+import (
+	"context"
+
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
+)
+
 // Test-only bridge: convertCommitmentFile and its sentinels are package-private,
 // but the full-aggregator round-trip tests live in package state_test (the
 // aggregator-setup helpers — testDbAggregatorWithFiles, etc. — are defined
@@ -25,7 +32,16 @@ package state
 var (
 	ConvertCommitmentFileForTest = convertCommitmentFile
 	ErrSkipForTest               = errSkip
+	DumpCommitmentStepForTest    = dumpCommitmentStep
 )
+
+func RebuildCommitmentShardKeysForTest(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte)) (uint64, error) {
+	rebuilt, err := rebuildCommitmentShard(ctx, sd, tx, next, &rebuiltCommitment{StepTo: 1})
+	if err != nil {
+		return 0, err
+	}
+	return rebuilt.Keys, nil
+}
 
 // SetConvertPhase1AfterFileHookForTest installs (or clears, via nil) the
 // after-file hook called by convertPhase1 once per loop iteration. Used by the

@@ -93,16 +93,10 @@ func frontierAtStateVersion(t *testing.T, tx kv.Tx, frontier cache.Frontier) cac
 	return cache.FrontierWithStateVersion(frontier, stateVersion)
 }
 
-// seed places an entry with an exact txNum stamp through the public fill API
-// without moving the applied frontier. A positive passes admission at any
-// applied end; a negative is stamped frontier-1 by the fill path, so it must
-// be seeded while the applied end is at most txNum+1.
+// seed fills from a view through txNum without moving the applied frontier.
 func seed(t *testing.T, sc *cache.StateCache, tx kv.Tx, domain kv.Domain, k, v []byte, txNum uint64) {
 	t.Helper()
-	end := uint64(math.MaxUint64)
-	if len(v) == 0 {
-		end = txNum + 1
-	}
+	end := txNum + 1
 	sc.View(frontierAtStateVersion(t, tx, frontierAt(end))).Fill(domain, k, v, txNum)
 }
 
@@ -269,6 +263,123 @@ func TestStateCache_MergedUnwindPublishesInvalidation(t *testing.T) {
 	require.False(t, ok, "the merged unwind must invalidate entries from the discarded range")
 }
 
+func TestReadFill_CurrentStepIsVisibleToSnapshotGetter(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDb(t, 16)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	addr := make([]byte, 20)
+	addr[0] = 1
+	storageKey := make([]byte, 52)
+	copy(storageKey, addr)
+	code := []byte{0x60, 0x01}
+	account := accounts.SerialiseV3(&accounts.Account{
+		Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code)),
+	})
+	cases := []struct {
+		name       string
+		domain     kv.Domain
+		key, value []byte
+		overlay    bool
+	}{
+		{"account", kv.AccountsDomain, addr, account, false},
+		{"storage", kv.StorageDomain, storageKey, []byte{1}, false},
+		{"code", kv.CodeDomain, addr, code, false},
+		{"owning overlay/account", kv.AccountsDomain, addr, account, true},
+		{"owning overlay/storage", kv.StorageDomain, storageKey, []byte{1}, true},
+		{"owning overlay/code", kv.CodeDomain, addr, code, true},
+	}
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	written, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer written.Close()
+	written.BindStateCache(stateCache)
+	written.SetTxNum(10)
+	for _, tc := range cases {
+		if tc.overlay {
+			continue
+		}
+		require.NoError(t, written.DomainPut(tc.domain, rwTx, tc.key, tc.value, 10, nil))
+	}
+	require.NoError(t, written.Commit(t.Context(), rwTx))
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	domains, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	domains.BindStateCache(stateCache)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stateCache.Applier().Clear()
+			tx := &countingLatestTx{TemporalTx: roTx}
+			var readTx kv.TemporalTx = tx
+			if tc.overlay {
+				require.NoError(t, domains.InitBlockOverlay(tx))
+				readTx = domains.BlockOverlay()
+			}
+			reader := domains.AsStateGetter(readTx, execctxapi.StateGetterOptions{})
+			if tc.domain == kv.CodeDomain {
+				_, _, err = reader.GetCode(tc.key, 10)
+			} else {
+				_, _, err = reader.GetLatest(tc.domain, tc.key, kv.GetLatestOptions{})
+			}
+			require.NoError(t, err)
+			reads := tx.reads
+			getter := domains.AsSnapshotGetter(tx)
+			for range 2 {
+				got, _, err := getter.GetLatest(tc.domain, tc.key, kv.GetLatestOptions{})
+				require.NoError(t, err)
+				require.Equal(t, tc.value, got)
+			}
+			require.Equal(t, reads, tx.reads, "an SD read-fill must be visible to a getter on the same snapshot")
+
+			end, ok := roTx.Debug().DomainVisibleEnd(tc.domain)
+			require.True(t, ok)
+			stateCache.Applier().Unwind(end)
+			_, hit := stateCache.View(nil).Get(tc.domain, tc.key)
+			require.True(t, hit, "an unwind after the snapshot must preserve the fill")
+			stateCache.Applier().Unwind(end - 1)
+			_, hit = stateCache.View(nil).Get(tc.domain, tc.key)
+			require.False(t, hit, "an unwind into the snapshot must invalidate the fill")
+		})
+	}
+}
+
+func TestReadFill_WritableKeepsStepEndStamp(t *testing.T) {
+	t.Parallel()
+
+	const stepSize = uint64(16)
+	db := newTestDb(t, stepSize)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	key, _, value, _ := twoStepRows(t, db, stateCache)
+	stateCache.Applier().Clear()
+
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	domains.BindStateCache(stateCache)
+
+	got, step, err := domains.AsGetter(tx).GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	end, ok := tx.Debug().DomainVisibleEnd(kv.AccountsDomain)
+	require.True(t, ok)
+	require.Less(t, end-1, step.LastTxNum(stepSize), "the fixture must distinguish the visible end from the step end")
+	cached, stamp, hit := stateCache.View(nil).GetWithTxNum(kv.AccountsDomain, key)
+	require.True(t, hit)
+	require.Equal(t, value, cached)
+	require.Equal(t, step.LastTxNum(stepSize), stamp, "a writable read must keep the conservative step-end stamp")
+}
+
 func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 	t.Parallel()
 
@@ -341,7 +452,7 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwind(t *testing.T) {
 	sd.Unwind(10, &diffs) // in-flight: mem publishes maxStep=1; MDBX still holds the step-1 row
 	// A live cache entry below the unwind floor: the restored (correct) value,
 	// as a post-unwind fill would insert it.
-	seed(t, sc, roTx, kv.AccountsDomain, key, v1, 5)
+	seed(t, sc, roTx, kv.AccountsDomain, key, v1, 9)
 
 	old := dbg.AssertStateCache
 	dbg.AssertStateCache = true
@@ -470,12 +581,22 @@ func TestReadFill_SkipsInFlightUnwindRow(t *testing.T) {
 	sd.BindStateCache(sc)
 	sd.Unwind(10, &diffs)
 
-	got, _, err := sd.GetLatest(kv.AccountsDomain, roTx, key)
-	require.NoError(t, err)
-	require.Equal(t, v2, got)
+	tx := &latestOptionsCaptureTx{TemporalTx: roTx}
+	for name, getter := range map[string]kv.TemporalGetter{
+		"shared":   sd.AsGetter(tx),
+		"snapshot": sd.AsSnapshotGetter(tx),
+	} {
+		t.Run(name, func(t *testing.T) {
+			tx.opts = kv.GetLatestOptions{}
+			got, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Equal(t, v2, got)
+			require.Equal(t, kv.Step(1), tx.opts.MaxStep(), "the staged bound must reach the backing transaction")
 
-	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
-	require.False(t, ok, "a bounded in-flight unwind read must not populate the shared cache")
+			_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+			require.False(t, ok, "a bounded in-flight unwind read must not populate the shared cache")
+		})
+	}
 }
 
 func TestGetLatest_RejectsParentMemHitAboveStagedUnwindBound(t *testing.T) {

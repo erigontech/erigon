@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -83,6 +85,56 @@ func TestWitnessResultCacheBuildOnceSharesRunningBuild(t *testing.T) {
 		require.Equal(t, int32(1), started, "concurrent callers for one hash must share one build")
 		require.Empty(t, c.building, "a finished build must leave the in-flight map")
 	})
+}
+
+// Concurrent payload-witness requests for one hash share one build, which the cache then holds.
+func TestWitnessResultCacheBuildPayloadWitnessSharesOneBuild(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := newWitnessResultCache(96, 0, false, false)
+		hash, want := hashN(1), mkResult()
+		release := make(chan struct{})
+		var builds atomic.Int32
+		build := func(context.Context) (*ExecutionWitnessResult, error) {
+			builds.Add(1)
+			<-release
+			return want, nil
+		}
+		results := make(chan *ExecutionWitnessResult, 2)
+		for range 2 {
+			go func() {
+				r, err := c.BuildPayloadWitness(t.Context(), hash, build)
+				if err != nil {
+					t.Error(err)
+				}
+				results <- r
+			}()
+		}
+		synctest.Wait()
+		close(release)
+		require.Same(t, want, <-results)
+		require.Same(t, want, <-results)
+		require.Equal(t, int32(1), builds.Load())
+		got, ok := c.Get(hash)
+		require.True(t, ok)
+		require.Same(t, want, got)
+	})
+}
+
+// A request that missed the cache before an earlier build finished takes the cached result instead of building again.
+func TestWitnessResultCacheBuildPayloadWitnessAfterAFinishedBuild(t *testing.T) {
+	c := newWitnessResultCache(96, 0, false, false)
+	hash, want := hashN(1), mkResult()
+	var builds atomic.Int32
+	build := func(context.Context) (*ExecutionWitnessResult, error) {
+		builds.Add(1)
+		return want, nil
+	}
+	for range 2 {
+		got, err := c.BuildPayloadWitness(t.Context(), hash, build)
+		require.NoError(t, err)
+		require.Same(t, want, got)
+	}
+	require.Equal(t, int32(1), builds.Load())
 }
 
 func TestWitnessResultCacheBuildOnceStoresBeforeRelease(t *testing.T) {
@@ -219,6 +271,23 @@ func TestNewWitnessResultCacheClampsBlocks(t *testing.T) {
 	require.Equal(t, 1, c1.Len(), "a sub-cap size is honored, not clamped up")
 }
 
+// The payload-witness route never serves Keys, so they must not count against the byte cap.
+func TestWitnessResultCacheAddPayloadWitnessDropsUnservedFields(t *testing.T) {
+	c := NewWitnessResultCache(4, 0)
+	r := &ExecutionWitnessResult{
+		State:          []hexutil.Bytes{{0x01}},
+		Keys:           []hexutil.Bytes{make(hexutil.Bytes, 32)},
+		headerByNumber: map[uint64]*types.Header{1: {}},
+	}
+	c.AddPayloadWitness(hashN(1), r)
+
+	got, ok := c.Get(hashN(1))
+	require.True(t, ok)
+	require.Nil(t, got.Keys)
+	require.Nil(t, got.headerByNumber)
+	require.Equal(t, 1+sliceHeaderBytes, c.ResidentBytes())
+}
+
 // TestWitnessResultCacheModeFieldsRoundTrip pins that the serving-mode flags set at
 // construction are exactly what the accessors report back.
 func TestWitnessResultCacheModeFieldsRoundTrip(t *testing.T) {
@@ -284,6 +353,20 @@ func TestWitnessResultCacheReAddRefreshesRecency(t *testing.T) {
 
 // TestWitnessResultCacheSingleOversizedEntryKept: an entry alone larger than the byte
 // cap is retained (the cache never evicts its last entry down to empty).
+// Concurrent additions of one hash count its bytes once.
+func TestWitnessResultCacheConcurrentAddsCountOnce(t *testing.T) {
+	r := mkSized(1000)
+	for range 200 {
+		c := newWitnessResultCache(8, 0, false, false)
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Go(func() { c.Add(hashN(1), r) })
+		}
+		wg.Wait()
+		require.Equal(t, witnessResultSize(r), c.ResidentBytes())
+	}
+}
+
 func TestWitnessResultCacheSingleOversizedEntryKept(t *testing.T) {
 	c := newWitnessResultCache(10, 300, false, false)
 	c.Add(hashN(1), mkSized(1000))

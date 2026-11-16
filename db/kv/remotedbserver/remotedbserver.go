@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -67,16 +68,19 @@ const MaxTxTTL = 60 * time.Second
 // 7.2.0 - Add MaxPrunableStepsBacklog
 // 7.3.0 - Remove HasPrefix from the remote KV service
 // 7.3.1 - Include pinned history-file generations in transaction replies
-var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 3, Patch: 1}
+// 7.3.2 - Add IndexJoin
+// 7.4.0 - Include block slots and completeness in state-change notifications
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 4, Patch: 0}
 
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.
 
-	kv                 kv.TemporalRoDB
-	stateChangeStreams *StateChangePubSub
-	blockSnapshots     Snapshots
-	historySnapshots   Snapshots
-	ctx                context.Context
+	kv                   kv.TemporalRoDB
+	stateChangeStreams   *StateChangePubSub
+	stateChangesSnapshot func(context.Context) (*remoteproto.StateChangeBatch, error)
+	blockSnapshots       Snapshots
+	historySnapshots     Snapshots
+	ctx                  context.Context
 
 	// v3 fields
 	txIdGen    atomic.Uint64
@@ -448,14 +452,45 @@ type SubscriptionReadyNotifier interface {
 }
 
 func (s *KvServer) StateChanges(_ *remoteproto.StateChangeRequest, server remoteproto.KV_StateChangesServer) error {
-	ch, remove := s.stateChangeStreams.Sub()
+	var ch chan stateChangeEvent
+	var remove func()
+	for {
+		if err := server.Context().Err(); err != nil {
+			return err
+		}
+		snapshotSequence := s.stateChangeStreams.Sequence()
+		var reset *remoteproto.StateChangeBatch
+		if s.stateChangesSnapshot != nil {
+			var err error
+			reset, err = s.stateChangesSnapshot(server.Context())
+			if err != nil {
+				return err
+			}
+		}
+		var retry bool
+		ch, remove, retry = s.stateChangeStreams.Sub(reset, snapshotSequence)
+		if !retry {
+			break
+		}
+	}
 	defer remove()
+	var lastSequence uint64
+	first := true
 	if n, ok := server.(SubscriptionReadyNotifier); ok {
 		n.NotifySubscribed()
 	}
 	for {
 		select {
-		case reply := <-ch:
+		case event := <-ch:
+			reply := event.batch
+			// A new subscription or a queue gap may leave earlier changes unseen.
+			// Batches are shared, so mark only this subscriber's response incomplete.
+			if !reply.StateChangesIncomplete && (first || event.sequence != lastSequence+1) {
+				reply = proto.Clone(reply).(*remoteproto.StateChangeBatch)
+				reply.StateChangesIncomplete = true
+			}
+			lastSequence = event.sequence
+			first = false
 			if err := server.Send(reply); err != nil {
 				return err
 			}
@@ -465,6 +500,11 @@ func (s *KvServer) StateChanges(_ *remoteproto.StateChangeRequest, server remote
 			return nil
 		}
 	}
+}
+
+// SetStateChangesSnapshot installs the committed-head reader before serving subscriptions.
+func (s *KvServer) SetStateChangesSnapshot(snapshot func(context.Context) (*remoteproto.StateChangeBatch, error)) {
+	s.stateChangesSnapshot = snapshot
 }
 
 func (s *KvServer) SendStateChanges(_ context.Context, sc *remoteproto.StateChangeBatch) {
@@ -510,34 +550,83 @@ func (s *KvServer) Sequence(_ context.Context, req *remoteproto.SequenceReq) (re
 	return reply, nil
 }
 
+// Sequence numbers detect queue drops; block heights and state versions can repeat.
+type stateChangeEvent struct {
+	sequence uint64
+	batch    *remoteproto.StateChangeBatch
+}
+
 type StateChangePubSub struct {
-	chans map[uint]chan *remoteproto.StateChangeBatch
-	id    uint
-	mu    sync.RWMutex
+	chans    map[uint]chan stateChangeEvent
+	id       uint
+	sequence uint64
+	reset    stateChangeEvent
+	mu       sync.RWMutex
 }
 
 func newStateChangeStreams() *StateChangePubSub {
 	return &StateChangePubSub{}
 }
 
-func (s *StateChangePubSub) Sub() (ch chan *remoteproto.StateChangeBatch, remove func()) {
+func (s *StateChangePubSub) Sequence() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sequence
+}
+
+func (s *StateChangePubSub) Sub(reset *remoteproto.StateChangeBatch, snapshotSequence uint64) (ch chan stateChangeEvent, remove func(), retry bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	published := s.reset.batch
+	// Finality can change without advancing the state version. If a publication
+	// races a snapshot read at the same version, read a fresh committed snapshot
+	// before choosing the subscription reset.
+	if reset != nil && published != nil && published.StateVersionId == reset.StateVersionId && s.reset.sequence > snapshotSequence {
+		return nil, nil, true
+	}
 	if s.chans == nil {
-		s.chans = make(map[uint]chan *remoteproto.StateChangeBatch)
+		s.chans = make(map[uint]chan stateChangeEvent)
 	}
 	s.id++
 	id := s.id
-	ch = make(chan *remoteproto.StateChangeBatch, 8)
+	ch = make(chan stateChangeEvent, 8)
+	if published != nil && (reset == nil || published.StateVersionId > reset.StateVersionId) {
+		reset = published
+	}
+	if reset != nil {
+		ch <- stateChangeEvent{sequence: s.sequence, batch: reset}
+	}
 	s.chans[id] = ch
-	return ch, func() { s.remove(id) }
+	return ch, func() { s.remove(id) }, false
 }
 
 func (s *StateChangePubSub) Pub(reply *remoteproto.StateChangeBatch) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sequence++
+	if len(reply.ChangeBatch) > 0 {
+		head := reply.ChangeBatch[len(reply.ChangeBatch)-1]
+		// Retain only head metadata: replaying old deltas could restore orphaned
+		// transactions or overwrite state that has already been committed.
+		reset := &remoteproto.StateChangeBatch{
+			StateVersionId:         reply.StateVersionId,
+			StateChangesIncomplete: true,
+			PendingBlockBaseFee:    reply.PendingBlockBaseFee,
+			PendingBlobFeePerGas:   reply.PendingBlobFeePerGas,
+			BlockGasLimit:          reply.BlockGasLimit,
+			FinalizedBlock:         reply.FinalizedBlock,
+			ChangeBatch: []*remoteproto.StateChange{{
+				BlockHeight: head.BlockHeight,
+				BlockHash:   head.BlockHash,
+				BlockTime:   head.BlockTime,
+				SlotNumber:  head.SlotNumber,
+			}},
+		}
+		s.reset = stateChangeEvent{sequence: s.sequence, batch: reset}
+	}
+	event := stateChangeEvent{sequence: s.sequence, batch: reply}
 	for _, ch := range s.chans {
-		common.PrioritizedSend(ch, reply)
+		common.PrioritizedSend(ch, event)
 	}
 }
 
@@ -648,7 +737,11 @@ func (s *KvServer) IndexRange(_ context.Context, req *remoteproto.IndexRangeReq)
 			limit--
 
 			if len(reply.Timestamps) == int(req.PageSize) && it.HasNext() {
-				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(v), Limit: int64(limit)})
+				next, err := it.Next()
+				if err != nil {
+					return err
+				}
+				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(next), Limit: int64(limit)})
 				if err != nil {
 					return err
 				}
@@ -660,6 +753,82 @@ func (s *KvServer) IndexRange(_ context.Context, req *remoteproto.IndexRangeReq)
 		return nil, err
 	}
 	return reply, nil
+}
+
+func (s *KvServer) IndexJoin(ctx context.Context, req *remoteproto.IndexJoinReq) (*remoteproto.IndexRangeReply, error) {
+	q := kv.IndexQuery{Clauses: make([][]kv.IndexKey, len(req.Clauses)), FromTs: int(req.FromTs), ToTs: int(req.ToTs), Asc: order.By(req.OrderAscend)}
+	for i, clause := range req.Clauses {
+		q.Clauses[i] = make([]kv.IndexKey, len(clause.Keys))
+		for j, k := range clause.Keys {
+			ii, err := kv.String2InvertedIdx(k.Table)
+			if err != nil {
+				return nil, err
+			}
+			q.Clauses[i][j] = kv.IndexKey{Idx: ii, Key: k.K}
+		}
+	}
+	if req.PageToken != "" {
+		var pagination remoteproto.IndexPagination
+		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
+			return nil, err
+		}
+		q.FromTs = int(pagination.NextTimeStamp)
+	}
+	if req.PageSize <= 0 || req.PageSize > PageSizeLimit {
+		req.PageSize = PageSizeLimit
+	}
+
+	reply := &remoteproto.IndexRangeReply{}
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		it, err := kv.JoinIndexRanges(q, func(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (stream.U64, error) {
+			it, err := tx.IndexRange(name, k, fromTs, toTs, asc, limit)
+			return &ctxU64{U64: it, ctx: ctx}, err
+		})
+		if err != nil {
+			return err
+		}
+		defer it.Close()
+		for it.HasNext() {
+			v, err := it.Next()
+			if err != nil {
+				return err
+			}
+			if len(reply.Timestamps) == int(req.PageSize) {
+				reply.NextPageToken, err = marshalPagination(&remoteproto.IndexPagination{NextTimeStamp: int64(v)})
+				return err
+			}
+			reply.Timestamps = append(reply.Timestamps, v)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return reply, nil
+}
+
+// ctxU64 stops a stream once ctx is done: a join can scan far more entries than it returns.
+type ctxU64 struct {
+	stream.U64
+	ctx context.Context
+}
+
+func (it *ctxU64) Next() (uint64, error) {
+	if err := it.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return it.U64.Next()
+}
+
+func (it *ctxU64) CanSeek() bool {
+	s, ok := it.U64.(stream.Seeker[uint64])
+	return ok && s.CanSeek()
+}
+
+func (it *ctxU64) Seek(v uint64) error {
+	if err := it.ctx.Err(); err != nil {
+		return err
+	}
+	return it.U64.(stream.Seeker[uint64]).Seek(v)
 }
 
 func (s *KvServer) HistoryRange(_ context.Context, req *remoteproto.HistoryRangeReq) (*remoteproto.Pairs, error) {
@@ -728,7 +897,11 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remoteproto.RangeAsOfReq) (
 			limit--
 
 			if len(reply.Keys) == int(req.PageSize) && it.HasNext() {
-				reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: k, Limit: int64(limit)})
+				nextK, _, err := it.Next()
+				if err != nil {
+					return err
+				}
+				reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: nextK, Limit: int64(limit)})
 				if err != nil {
 					return err
 				}
@@ -743,42 +916,20 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remoteproto.RangeAsOfReq) (
 }
 
 func (s *KvServer) Range(_ context.Context, req *remoteproto.RangeReq) (*remoteproto.Pairs, error) {
-	from, limit := req.FromPrefix, int(req.Limit)
-	if req.PageToken != "" {
-		var pagination remoteproto.PairsPagination
-		if err := unmarshalPagination(req.PageToken, &pagination); err != nil {
-			return nil, err
-		}
-		from, limit = pagination.NextKey, int(pagination.Limit)
-	}
-	if req.PageSize <= 0 || req.PageSize > PageSizeLimit {
-		req.PageSize = PageSizeLimit
-	}
-
 	reply := &remoteproto.Pairs{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
-		it, err := tx.Range(req.Table, from, req.ToPrefix, order.FromBool(req.OrderAscend), limit)
+		it, err := tx.Range(req.Table, req.FromPrefix, req.ToPrefix, order.FromBool(req.OrderAscend), int(req.Limit))
 		if err != nil {
 			return err
 		}
+		defer it.Close()
 		for it.HasNext() {
 			k, v, err := it.Next()
 			if err != nil {
 				return err
 			}
-			reply.Keys = append(reply.Keys, k)
-			reply.Values = append(reply.Values, v)
-			limit--
-		}
-		if len(reply.Keys) == PageSizeLimit && it.HasNext() {
-			nextK, _, err := it.Next()
-			if err != nil {
-				return err
-			}
-			reply.NextPageToken, err = marshalPagination(&remoteproto.PairsPagination{NextKey: nextK, Limit: int64(limit)})
-			if err != nil {
-				return err
-			}
+			reply.Keys = append(reply.Keys, bytes.Clone(k))
+			reply.Values = append(reply.Values, bytes.Clone(v))
 		}
 		return nil
 	}); err != nil {

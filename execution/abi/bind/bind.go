@@ -481,10 +481,10 @@ func bindStructTypeGo(kind abi.Type, structs map[string]*tmplStruct) string {
 		if s, exist := structs[id]; exist {
 			return s.Name
 		}
-		var fields []*tmplField
+		fields := make([]*tmplField, len(kind.TupleElems))
 		for i, elem := range kind.TupleElems {
 			field := bindStructTypeGo(*elem, structs)
-			fields = append(fields, &tmplField{Type: field, Name: capitalise(kind.TupleRawNames[i]), SolKind: *elem})
+			fields[i] = &tmplField{Type: field, Name: capitalise(kind.TupleRawNames[i]), SolKind: *elem}
 		}
 		name := kind.TupleRawName
 		if name == "" {
@@ -520,10 +520,10 @@ func bindStructTypeJava(kind abi.Type, structs map[string]*tmplStruct) string {
 		if s, exist := structs[id]; exist {
 			return s.Name
 		}
-		var fields []*tmplField
+		fields := make([]*tmplField, len(kind.TupleElems))
 		for i, elem := range kind.TupleElems {
 			field := bindStructTypeJava(*elem, structs)
-			fields = append(fields, &tmplField{Type: field, Name: decapitalise(kind.TupleRawNames[i]), SolKind: *elem})
+			fields[i] = &tmplField{Type: field, Name: decapitalise(kind.TupleRawNames[i]), SolKind: *elem}
 		}
 		name := kind.TupleRawName
 		if name == "" {

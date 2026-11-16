@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -109,9 +110,11 @@ func TestTemporalMemBatchPrefetchReuse(t *testing.T) {
 		err := batch.Flush(ctx, tx)
 		cancel()
 		require.NoError(t, err)
-		n, err := tx.Count(kv.TblTracesToIdx)
+		it, err := tx.IndexRange(kv.TracesToIdx, []byte("key"), -1, -1, order.Asc, -1)
 		require.NoError(t, err)
-		require.Equal(t, txNum+1, n)
+		txNums, err := stream.ToArrayU64(it)
+		require.NoError(t, err)
+		require.Len(t, txNums, int(txNum+1))
 	}
 }
 

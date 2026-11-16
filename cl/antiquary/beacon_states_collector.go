@@ -258,7 +258,7 @@ func (i *beaconStatesCollector) storeEpochData(st *state.CachingBeaconState) err
 	i.buf.Reset()
 	epochData := state_accessors.EpochDataFromBeaconState(st)
 
-	if err := epochData.WriteTo(i.buf); err != nil {
+	if err := epochData.Serialize(i.buf); err != nil {
 		return err
 	}
 	roundedSlot := i.beaconCfg.RoundSlotToEpoch(st.Slot())
@@ -274,7 +274,7 @@ func (i *beaconStatesCollector) storeSlotData(st *state.CachingBeaconState, rewa
 		slotData.AttesterSlashings = rewardsCollector.AttesterSlashings
 		slotData.ProposerSlashings = rewardsCollector.ProposerSlashings
 	}
-	if err := slotData.WriteTo(i.buf); err != nil {
+	if err := slotData.Serialize(i.buf); err != nil {
 		return err
 	}
 	return i.slotDataCollector.Collect(base_encoding.Encode64ToBytes4(st.Slot()), i.buf.Bytes())

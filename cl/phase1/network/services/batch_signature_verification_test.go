@@ -372,8 +372,8 @@ func TestBatchSignatureVerifierUsesPayloadAttestationFlushInterval(t *testing.T)
 		verify("bls to execution change", verifier.VerifyBlsToExecutionChange)
 		verify("voluntary exit", verifier.VerifyVoluntaryExit)
 		verify("payload attestation", verifier.VerifyPayloadAttestation)
+		verify("sync committee message", verifier.VerifySyncCommitteeMessage)
 		verifyAsync("sync contribution", verifier.AsyncVerifySyncContribution)
-		verifyAsync("sync committee message", verifier.AsyncVerifySyncCommitteeMessage)
 		synctest.Wait()
 
 		time.Sleep(payloadAttestationBatchCheckInterval)
@@ -460,7 +460,7 @@ func TestBatchSignatureVerifierContinuesAfterBlockingBan(t *testing.T) {
 		release: releaseBan,
 	})
 
-	verifier.AsyncVerifySyncCommitteeMessage(&AggregateVerificationData{
+	verifier.AsyncVerifySyncContribution(&AggregateVerificationData{
 		Signatures:  [][]byte{{2}},
 		SignRoots:   [][]byte{{2}},
 		Pks:         [][]byte{{2}},
@@ -514,7 +514,7 @@ func TestBatchSignatureVerifierBoundsBlockingBans(t *testing.T) {
 
 	queueInvalidBatch := func() {
 		for range batchSignatureVerificationThreshold {
-			verifier.AsyncVerifySyncCommitteeMessage(&AggregateVerificationData{
+			verifier.AsyncVerifySyncContribution(&AggregateVerificationData{
 				Signatures:  [][]byte{{2}},
 				SignRoots:   [][]byte{{2}},
 				Pks:         [][]byte{{2}},
@@ -536,7 +536,7 @@ func TestBatchSignatureVerifierBoundsBlockingBans(t *testing.T) {
 	}
 
 	validResult := make(chan error, 1)
-	verifier.AsyncVerifySyncCommitteeMessage(&AggregateVerificationData{
+	verifier.AsyncVerifySyncContribution(&AggregateVerificationData{
 		Signatures: [][]byte{{1}},
 		SignRoots:  [][]byte{{1}},
 		Pks:        [][]byte{{1}},

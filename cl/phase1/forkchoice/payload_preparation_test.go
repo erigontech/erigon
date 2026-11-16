@@ -48,6 +48,24 @@ func TestPayloadPreparationYieldsToRelevantImports(t *testing.T) {
 	}
 }
 
+func TestPayloadImportInProgress(t *testing.T) {
+	var imports PayloadPreparationImports
+	finishFirst := imports.BeginImport(10)
+	finishSecond := imports.BeginImport(10)
+	finishOther := imports.BeginImport(11)
+
+	require.True(t, imports.ImportInProgress(10))
+	require.True(t, imports.ImportInProgress(11))
+	require.False(t, imports.ImportInProgress(12))
+
+	finishFirst()
+	require.True(t, imports.ImportInProgress(10))
+	finishSecond()
+	require.False(t, imports.ImportInProgress(10))
+	finishOther()
+	require.False(t, imports.ImportInProgress(11))
+}
+
 func TestOnBlockCancelsPayloadPreparationBeforeStoreLock(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	f := &ForkChoiceStore{beaconCfg: &cfg}
@@ -164,6 +182,82 @@ func TestPayloadPreparationUsesKnownBlockSlotForParkedEnvelopes(t *testing.T) {
 	defer finishPending()
 	_, _, ok = f.TryBeginPayloadPreparation(t.Context(), 10, 11)
 	require.False(t, ok)
+}
+
+func TestRejectEnvelopeClearsPendingCopies(t *testing.T) {
+	root, sibling := common.Hash{1}, common.Hash{2}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	block.Block.Slot = 11
+	f := newPayloadVoteTestStore(t, root, false, false)
+	f.forkGraph = payloadVoteForkGraph{
+		ForkGraph:         ptcVoteForkGraph{blocks: map[common.Hash]*cltypes.SignedBeaconBlock{root: block}},
+		rejectedEnvelopes: make(map[common.Hash]bool),
+	}
+	var err error
+	f.pendingEnvelopes, err = lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](2)
+	require.NoError(t, err)
+	f.pendingLocalSelfBuildEnvelopes, err = lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](2)
+	require.NoError(t, err)
+	f.dataAvailableEnvelopeRetryAt, err = lru.New[common.Hash, time.Time](2)
+	require.NoError(t, err)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}}
+	f.QueuePendingExecutionPayloadEnvelope(envelope, time.Now())
+	f.pendingLocalSelfBuildEnvelopes.Add(root, envelope)
+	f.pendingEnvelopes.Add(sibling, &cltypes.SignedExecutionPayloadEnvelope{})
+	f.dataAvailableEnvelopeRetryAt.Add(root, time.Now().Add(time.Minute))
+	_, _, started := f.TryBeginPayloadPreparation(t.Context(), 10, 12)
+	require.False(t, started)
+
+	f.RejectEnvelope(root)
+
+	require.False(t, f.HasPendingExecutionPayloadEnvelope(root))
+	require.False(t, f.pendingEnvelopes.Contains(root))
+	require.False(t, f.pendingLocalSelfBuildEnvelopes.Contains(root))
+	require.True(t, f.HasPendingExecutionPayloadEnvelope(sibling))
+	require.False(t, f.dataAvailableEnvelopeRetryAt.Contains(root))
+	require.True(t, f.pendingEnvelopeReceivedAt(envelope, time.Time{}).IsZero())
+	_, finish, started := f.TryBeginPayloadPreparation(t.Context(), 10, 12)
+	require.True(t, started)
+	finish()
+}
+
+func TestRejectedEnvelopeDoesNotHoldPayloadPreparation(t *testing.T) {
+	for _, source := range []string{"gossip", "gossip index repair", "local index repair", "pending registration"} {
+		t.Run(source, func(t *testing.T) {
+			root := common.Hash{1}
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+			block.Block.Slot = 11
+			f := newPayloadVoteTestStore(t, root, false, false)
+			f.forkGraph = payloadVoteForkGraph{
+				ForkGraph:         ptcVoteForkGraph{blocks: map[common.Hash]*cltypes.SignedBeaconBlock{root: block}},
+				rejectedEnvelopes: make(map[common.Hash]bool),
+			}
+			var err error
+			f.pendingEnvelopes, err = lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+			require.NoError(t, err)
+			f.pendingLocalSelfBuildEnvelopes, err = lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+			require.NoError(t, err)
+			f.RejectEnvelope(root)
+			envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}}
+			switch source {
+			case "gossip":
+				f.QueuePendingExecutionPayloadEnvelope(envelope, time.Now())
+				require.False(t, f.pendingEnvelopes.Contains(root))
+			case "gossip index repair":
+				f.pendingEnvelopes.Add(root, envelope)
+			case "local index repair":
+				f.pendingLocalSelfBuildEnvelopes.Add(root, envelope)
+			case "pending registration":
+				defer f.BeginPendingPayloadEnvelope(root)()
+			}
+			require.False(t, f.HasPendingExecutionPayloadEnvelope(root))
+
+			_, finish, started := f.TryBeginPayloadPreparation(t.Context(), 10, 12)
+
+			require.True(t, started)
+			finish()
+		})
+	}
 }
 
 func TestPersistedPendingEnvelopeDoesNotHoldPayloadPreparation(t *testing.T) {

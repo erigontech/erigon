@@ -139,7 +139,7 @@ func TestUnpadding(t *testing.T) {
 		}
 
 		_, err := UnpadMessage(bs)
-		assert.NotEqual(t, err, nil)
+		assert.Error(t, err)
 	}
 
 	testCases := []struct {
@@ -276,7 +276,7 @@ func TestC1Malleability(t *testing.T) {
 	message := []byte("secret message")
 	eonPublicKey, decryptionKey, epochIDPoint := makeKeys(t)
 	originalSigma, err := RandomSigma(rand.Reader)
-	assert.Equal(t, err, nil, "Could not get random sigma")
+	assert.NoError(t, err, "Could not get random sigma")
 	encryptedMessage := Encrypt(
 		message,
 		eonPublicKey,
@@ -298,17 +298,17 @@ func TestC1Malleability(t *testing.T) {
 	}
 	msg, err := encryptedMessage.Decrypt(decryptionKey)
 	assert.False(t, bytes.Equal(message, msg), "decryption successful, in spite of tampered C1")
-	assert.NotEqual(t, err, nil, "decryption successful, in spite of tampered C1")
+	assert.Error(t, err, "decryption successful, in spite of tampered C1")
 }
 
 func TestMessageMalleability(t *testing.T) {
 	messageBlock, err := RandomSigma(rand.Reader)
-	assert.Equal(t, err, nil, "could not get random message")
+	assert.NoError(t, err, "could not get random message")
 	originalMessage := messageBlock[:]
 
 	eonPublicKey, decryptionKey, epochIDPoint := makeKeys(t)
 	sigma, err := RandomSigma(rand.Reader)
-	assert.Equal(t, err, nil, "could not get random sigma")
+	assert.NoError(t, err, "could not get random sigma")
 	encryptedMessage := Encrypt(
 		originalMessage,
 		eonPublicKey,
@@ -329,5 +329,5 @@ func TestMessageMalleability(t *testing.T) {
 
 	decryptedMessage, err := encryptedMessage.Decrypt(decryptionKey)
 	assert.False(t, bytes.Equal(decryptedMessage, malleatedMessage), "message was successfully malleated")
-	assert.NotEqual(t, err, nil, "decryption successful, in spite of tampered message")
+	assert.Error(t, err, "decryption successful, in spite of tampered message")
 }

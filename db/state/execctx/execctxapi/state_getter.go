@@ -20,6 +20,7 @@ import "github.com/erigontech/erigon/db/kv"
 
 type StateGetterOptions struct {
 	metrics kv.GetLatestMetrics
+	codeBuf *[]byte
 }
 
 func (opts StateGetterOptions) WithMetrics(metrics kv.GetLatestMetrics) StateGetterOptions {
@@ -29,6 +30,20 @@ func (opts StateGetterOptions) WithMetrics(metrics kv.GetLatestMetrics) StateGet
 
 func (opts StateGetterOptions) Metrics() kv.GetLatestMetrics {
 	return opts.metrics
+}
+
+func (opts StateGetterOptions) WithCodeBuf(buf *[]byte) StateGetterOptions {
+	opts.codeBuf = buf
+	return opts
+}
+
+func (opts StateGetterOptions) CodeBuf() *[]byte {
+	return opts.codeBuf
+}
+
+// CodeSegmentGetter copies a segment of an address's code; ok is false when the caller must read the code normally.
+type CodeSegmentGetter interface {
+	ReadCodeSegmentTo(addr []byte, txNum, from uint64, dst []byte) (ok bool, err error)
 }
 
 // StateGetter provides execution-aware reads over temporal state.

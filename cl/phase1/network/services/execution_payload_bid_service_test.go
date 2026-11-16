@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -24,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	forkchoice_mock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 )
@@ -178,18 +180,393 @@ func TestExecutionPayloadBidServiceNames(t *testing.T) {
 	require.Equal(t, "execution_payload_bid", names[0])
 }
 
-func TestBidValidationStateCachesTargetSlotState(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
-	parentRoot := common.HexToHash("0xbbbb")
+func TestBidValidationStateUsesSingleForkchoiceView(t *testing.T) {
+	t.Run("same epoch builds view directly", func(t *testing.T) {
+		service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+		parentRoot := common.HexToHash("0xbbbb")
+		parentState := fc.StateAtBlockRootVal[parentRoot]
+		var viewCalls int
+		fc.ViewStateAtBlockRootFn = func(root common.Hash, fn func(*state2.CachingBeaconState) error) error {
+			viewCalls++
+			require.Equal(t, parentRoot, root)
+			return fn(parentState)
+		}
 
-	entry, err := service.bidValidationState(parentRoot, 100)
+		entry, err := service.bidValidationState(parentRoot, 100)
+		require.NoError(t, err)
+		require.NotNil(t, entry.view)
+		second, err := service.bidValidationState(parentRoot, 100)
+		require.NoError(t, err)
+		require.Same(t, entry, second)
+		require.Equal(t, 1, viewCalls)
+	})
+
+	t.Run("view failure", func(t *testing.T) {
+		service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+		parentRoot := common.HexToHash("0xbbbb")
+		viewErr := errors.New("view failed")
+		fc.ViewStateAtBlockRootFn = func(common.Hash, func(*state2.CachingBeaconState) error) error {
+			return viewErr
+		}
+
+		_, err := service.bidValidationState(parentRoot, 100)
+		require.EqualError(t, err, "ignore: bid dependency unavailable: state for parent_block_root 0x000000000000000000000000000000000000000000000000000000000000bbbb not available")
+		require.ErrorIs(t, err, errBidDependencyUnavailable)
+		require.Zero(t, service.validationStateCache.Len())
+	})
+
+	t.Run("parent check failure", func(t *testing.T) {
+		service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+		parentRoot := common.HexToHash("0xbbbb")
+		parentState := fc.StateAtBlockRootVal[parentRoot]
+		require.NoError(t, parentState.SetSlot(101))
+		fc.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state2.CachingBeaconState) error) error {
+			return fn(parentState)
+		}
+
+		_, err := service.bidValidationState(parentRoot, 100)
+		require.ErrorContains(t, err, "parent state slot 101 is after bid slot 100")
+		require.NotErrorIs(t, err, ErrIgnore)
+		require.Zero(t, service.validationStateCache.Len())
+	})
+}
+
+func TestBidValidationStateAdvancesPendingPaymentsAcrossEpoch(t *testing.T) {
+	service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	parentRoot := common.HexToHash("0xbbbb")
+	parent := newBidValidationEpochBoundaryState(t, service.beaconCfg)
+	builder := parent.GetBuilders().Get(0)
+	builder.Balance = service.beaconCfg.MinDepositAmount + 300
+	parent.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: 1})
+	parent.SetCurrentJustifiedCheckpoint(solid.Checkpoint{Epoch: 2})
+	parent.SetJustificationBits(cltypes.JustificationBits{true})
+	currentParticipation := make(cltypes.ParticipationFlagsList, parent.ValidatorLength())
+	for index := range currentParticipation {
+		currentParticipation[index] = currentParticipation[index].Add(int(service.beaconCfg.TimelyTargetFlagIndex))
+	}
+	parent.SetCurrentEpochParticipationFlags(currentParticipation)
+	require.False(t, state2.IsActiveBuilder(parent, 0))
+	pendingPayments := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * service.beaconCfg.SlotsPerEpoch))
+	pendingPayments.Set(0, &cltypes.BuilderPendingPayment{Withdrawal: &cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: 100}})
+	pendingPayments.Set(1, &cltypes.BuilderPendingPayment{Weight: math.MaxUint64, Withdrawal: &cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: 50}})
+	pendingPayments.Set(int(service.beaconCfg.SlotsPerEpoch), &cltypes.BuilderPendingPayment{Withdrawal: &cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: 100}})
+	parent.SetBuilderPendingPayments(pendingPayments)
+
+	var viewCalls int
+	fc.ViewStateAtBlockRootFn = func(root common.Hash, fn func(*state2.CachingBeaconState) error) error {
+		viewCalls++
+		require.Equal(t, parentRoot, root)
+		return fn(parent)
+	}
+
+	expected, err := parent.Copy()
 	require.NoError(t, err)
-	require.Equal(t, uint64(100), entry.state.Slot())
-	second, err := service.bidValidationState(parentRoot, 100)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(expected, 128))
+	require.Equal(t, 1, expected.GetBuilderPendingWithdrawals().Len())
+	require.Equal(t, uint64(100), expected.GetBuilderPendingPayments().Get(0).Withdrawal.Amount)
+	require.Equal(t, uint64(2), expected.FinalizedCheckpoint().Epoch)
+	require.True(t, state2.IsActiveBuilder(expected, 0))
+	require.Equal(t, uint64(150), state2.GetPendingBalanceToWithdrawForBuilder(expected, 0))
+	bid := newTestSignedExecutionPayloadBid(128, 0, 100).Message
+	wantBuilder := expected.GetBuilders().Get(int(bid.BuilderIndex))
+
+	entry, err := service.bidValidationState(parentRoot, bid.Slot)
 	require.NoError(t, err)
-	require.Same(t, entry, second)
+	gotBuilder, gotErr := entry.view.builderForBid(bid, service.beaconCfg)
+	require.NoError(t, gotErr)
+	require.Equal(t, wantBuilder.Pubkey, gotBuilder.pubkey)
+	require.Equal(t, wantBuilder.ExecutionAddress, gotBuilder.executionAddress)
+	require.Equal(t, wantBuilder.Version, gotBuilder.version)
+	wantCapacity, ok := state2.BuilderBidCapacity(wantBuilder.Balance, service.beaconCfg.MinDepositAmount, state2.GetPendingBalanceToWithdrawForBuilder(expected, bid.BuilderIndex))
+	require.True(t, ok)
+	require.Equal(t, uint64(150), wantCapacity)
+	require.Equal(t, wantCapacity, gotBuilder.bidCapacity)
+	require.Equal(t, 1, viewCalls)
+	require.Equal(t, uint64(127), parent.Slot())
+}
+
+func newBidValidationEpochBoundaryState(t *testing.T, cfg *clparams.BeaconChainConfig) *state2.CachingBeaconState {
+	t.Helper()
+	parent := newBidParentState(cfg, testDependentRoot)
+	require.NoError(t, parent.SetSlot(127))
+	for index := 8; index < 64; index++ {
+		validator := solid.NewValidatorFromParameters(common.Bytes48{byte(index)}, common.Hash{}, cfg.MaxEffectiveBalance, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch)
+		require.NoError(t, parent.AddValidator(validator, cfg.MaxEffectiveBalance))
+	}
+	parent.SetPreviousEpochParticipationFlags(make(cltypes.ParticipationFlagsList, parent.ValidatorLength()))
+	parent.SetCurrentEpochParticipationFlags(make(cltypes.ParticipationFlagsList, parent.ValidatorLength()))
+	parent.SetInactivityScores(make([]uint64, parent.ValidatorLength()))
+	for index := range parent.ValidatorLength() {
+		require.NoError(t, parent.SetEffectiveBalanceForValidatorAtIndex(index, cfg.MaxEffectiveBalance))
+		require.NoError(t, parent.SetValidatorBalance(index, cfg.MaxEffectiveBalance))
+	}
+	return parent
+}
+
+func TestBidValidationStateConcurrentSameKeyLoadsOnce(t *testing.T) {
+	service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	parentRoot := common.HexToHash("0xbbbb")
+	parent := fc.StateAtBlockRootVal[parentRoot]
+	var loads, started atomic.Int32
+	release := make(chan struct{})
+	fc.ViewStateAtBlockRootFn = func(root common.Hash, fn func(*state2.CachingBeaconState) error) error {
+		if root != parentRoot {
+			return fmt.Errorf("unexpected root %v", root)
+		}
+		if loads.Add(1) == 1 {
+			<-release
+		}
+		return fn(parent)
+	}
+
+	const goroutines = 16
+	start := make(chan struct{})
+	errs := make(chan error, goroutines)
+	var wg sync.WaitGroup
+	for range goroutines {
+		wg.Go(func() {
+			<-start
+			started.Add(1)
+			entry, err := service.bidValidationState(parentRoot, 100)
+			if err == nil {
+				_, err = entry.view.builderForBid(newTestSignedExecutionPayloadBid(100, 0, 1).Message, service.beaconCfg)
+			}
+			errs <- err
+		})
+	}
+	close(start)
+	require.Eventually(t, func() bool { return started.Load() == goroutines && loads.Load() == 1 }, 5*time.Second, time.Millisecond)
+	time.Sleep(20 * time.Millisecond) // let the other goroutines reach the entry lock while the first load is blocked
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	require.Equal(t, int32(1), loads.Load())
+}
+
+func TestBidValidationViewMatchesState(t *testing.T) {
+	type testCase struct {
+		name         string
+		setup        func(*testing.T, *clparams.BeaconChainConfig) (*state2.CachingBeaconState, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid)
+		wantErr      string
+		wantIgnore   bool
+		wantCapacity uint64
+	}
+	tests := []testCase{
+		{
+			name: "same epoch with missed slots",
+			setup: func(t *testing.T, cfg *clparams.BeaconChainConfig) (*state2.CachingBeaconState, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid) {
+				parent := newBidParentState(cfg, testDependentRoot)
+				require.NoError(t, parent.SetSlot(96))
+				parent.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{BlockHash: common.Hash{0x31}})
+				advanced, err := parent.Copy()
+				require.NoError(t, err)
+				require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, 100))
+				return parent, advanced, newTestSignedExecutionPayloadBid(100, 0, 1).Message
+			},
+		},
+		{
+			name:    "builder index out of range",
+			wantErr: "builder index 1 out of range (max: 1)",
+			setup: func(t *testing.T, cfg *clparams.BeaconChainConfig) (*state2.CachingBeaconState, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid) {
+				s := newBidValidationViewTestState(t, cfg, 100)
+				return s, nil, newTestSignedExecutionPayloadBid(100, 1, 1).Message
+			},
+		},
+		{
+			name:    "nil builder",
+			wantErr: "builder 0 is not active",
+			setup: func(t *testing.T, cfg *clparams.BeaconChainConfig) (*state2.CachingBeaconState, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid) {
+				s := newBidValidationViewTestState(t, cfg, 100)
+				s.GetBuilders().Set(0, nil)
+				return s, nil, newTestSignedExecutionPayloadBid(100, 0, 1).Message
+			},
+		},
+		{
+			name:    "builders list unavailable",
+			wantErr: "builders list not available",
+			setup: func(t *testing.T, cfg *clparams.BeaconChainConfig) (*state2.CachingBeaconState, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid) {
+				s := newBidValidationViewTestState(t, cfg, 100)
+				s.SetBuilders(nil)
+				return s, nil, newTestSignedExecutionPayloadBid(100, 0, 1).Message
+			},
+		},
+		{
+			name:    "wrong version",
+			wantErr: "builder 0 has unsupported version 1",
+			setup: func(t *testing.T, cfg *clparams.BeaconChainConfig) (*state2.CachingBeaconState, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid) {
+				s := newBidValidationViewTestState(t, cfg, 100)
+				s.GetBuilders().Get(0).Version++
+				return s, nil, newTestSignedExecutionPayloadBid(100, 0, 1).Message
+			},
+		},
+		{
+			name:    "inactive builder",
+			wantErr: "builder 0 is not active",
+			setup: func(t *testing.T, cfg *clparams.BeaconChainConfig) (*state2.CachingBeaconState, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid) {
+				s := newBidValidationViewTestState(t, cfg, 100)
+				s.GetBuilders().Get(0).WithdrawableEpoch = 3
+				return s, nil, newTestSignedExecutionPayloadBid(100, 0, 1).Message
+			},
+		},
+		{
+			name:         "exact capacity",
+			wantCapacity: 100,
+			setup: func(t *testing.T, cfg *clparams.BeaconChainConfig) (*state2.CachingBeaconState, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid) {
+				s := newBidValidationViewTestState(t, cfg, 100)
+				s.GetBuilders().Get(0).Balance = cfg.MinDepositAmount + 100
+				s.GetBuilderPendingWithdrawals().Append(nil)
+				return s, nil, newTestSignedExecutionPayloadBid(100, 0, 100).Message
+			},
+		},
+		{
+			name:         "pending withdrawals and payments reduce capacity",
+			wantCapacity: 250,
+			setup: func(t *testing.T, cfg *clparams.BeaconChainConfig) (*state2.CachingBeaconState, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid) {
+				s := newBidValidationViewTestState(t, cfg, 100)
+				s.GetBuilders().Get(0).Balance = cfg.MinDepositAmount + 500
+				s.GetBuilders().Append(&cltypes.Builder{
+					Pubkey:            common.Bytes48{0x21},
+					Version:           cfg.PayloadBuilderVersion,
+					ExecutionAddress:  common.Address{0x22},
+					Balance:           cfg.MinDepositAmount + 500,
+					DepositEpoch:      1,
+					WithdrawableEpoch: cfg.FarFutureEpoch,
+				})
+				s.GetBuilderPendingWithdrawals().Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 1, Amount: 100})
+				s.GetBuilderPendingWithdrawals().Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: 70})
+				s.GetBuilderPendingPayments().Set(0, &cltypes.BuilderPendingPayment{Withdrawal: &cltypes.BuilderPendingWithdrawal{BuilderIndex: 1, Amount: 150}})
+				s.GetBuilderPendingPayments().Set(1, &cltypes.BuilderPendingPayment{Withdrawal: &cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: 80}})
+				return s, nil, newTestSignedExecutionPayloadBid(100, 1, 250).Message
+			},
+		},
+		{
+			name: "valid zero capacity",
+			setup: func(t *testing.T, cfg *clparams.BeaconChainConfig) (*state2.CachingBeaconState, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid) {
+				s := newBidValidationViewTestState(t, cfg, 100)
+				s.GetBuilders().Get(0).Balance = cfg.MinDepositAmount
+				return s, nil, newTestSignedExecutionPayloadBid(100, 0, 0).Message
+			},
+		},
+		{
+			name:       "one over capacity",
+			wantErr:    fmt.Sprintf("%v: builder 0 cannot cover bid value 101", ErrIgnore),
+			wantIgnore: true,
+			setup: func(t *testing.T, cfg *clparams.BeaconChainConfig) (*state2.CachingBeaconState, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid) {
+				s := newBidValidationViewTestState(t, cfg, 100)
+				s.GetBuilders().Get(0).Balance = cfg.MinDepositAmount + 100
+				return s, nil, newTestSignedExecutionPayloadBid(100, 0, 101).Message
+			},
+		},
+		{
+			name:       "zero bid below minimum",
+			wantErr:    fmt.Sprintf("%v: builder 0 cannot cover bid value 0", ErrIgnore),
+			wantIgnore: true,
+			setup: func(t *testing.T, cfg *clparams.BeaconChainConfig) (*state2.CachingBeaconState, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid) {
+				s := newBidValidationViewTestState(t, cfg, 100)
+				s.GetBuilders().Get(0).Balance = cfg.MinDepositAmount - 1
+				return s, nil, newTestSignedExecutionPayloadBid(100, 0, 0).Message
+			},
+		},
+		{
+			name:       "maximum bid",
+			wantErr:    fmt.Sprintf("%v: builder 0 cannot cover bid value %d", ErrIgnore, uint64(math.MaxUint64)),
+			wantIgnore: true,
+			setup: func(t *testing.T, cfg *clparams.BeaconChainConfig) (*state2.CachingBeaconState, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid) {
+				s := newBidValidationViewTestState(t, cfg, 100)
+				s.GetBuilders().Get(0).Balance = math.MaxUint64
+				return s, nil, newTestSignedExecutionPayloadBid(100, 0, math.MaxUint64).Message
+			},
+		},
+		{
+			name:       "zero bid with pending sum overflow",
+			wantErr:    fmt.Sprintf("%v: builder 0 cannot cover bid value 0", ErrIgnore),
+			wantIgnore: true,
+			setup: func(t *testing.T, cfg *clparams.BeaconChainConfig) (*state2.CachingBeaconState, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid) {
+				s := newBidValidationViewTestState(t, cfg, 100)
+				s.GetBuilders().Get(0).Balance = math.MaxUint64
+				withdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](64, new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
+				withdrawals.Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: math.MaxUint64})
+				s.SetBuilderPendingWithdrawals(withdrawals)
+				payments := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * cfg.SlotsPerEpoch))
+				payments.Set(0, &cltypes.BuilderPendingPayment{Withdrawal: &cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: 1}})
+				s.SetBuilderPendingPayments(payments)
+				return s, nil, newTestSignedExecutionPayloadBid(100, 0, 0).Message
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.SlotsPerEpoch = 32
+			cfg.SlotsPerHistoricalRoot = 8192
+			viewState, advancedState, bid := test.setup(t, &cfg)
+			bidEpoch := state2.GetEpochAtSlot(&cfg, bid.Slot)
+			view, err := newBidValidationView(viewState, &cfg, bidEpoch)
+			require.NoError(t, err)
+
+			gotBuilder, gotErr := view.builderForBid(bid, &cfg)
+			if test.wantErr != "" {
+				require.EqualError(t, gotErr, test.wantErr)
+				require.Equal(t, test.wantIgnore, errors.Is(gotErr, ErrIgnore))
+			} else {
+				require.NoError(t, gotErr)
+				if advancedState != nil {
+					wantBuilder := advancedState.GetBuilders().Get(int(bid.BuilderIndex))
+					require.Equal(t, wantBuilder.Pubkey, gotBuilder.pubkey)
+					require.Equal(t, wantBuilder.ExecutionAddress, gotBuilder.executionAddress)
+					require.Equal(t, wantBuilder.Version, gotBuilder.version)
+					wantCapacity, ok := state2.BuilderBidCapacity(wantBuilder.Balance, cfg.MinDepositAmount, state2.GetPendingBalanceToWithdrawForBuilder(advancedState, bid.BuilderIndex))
+					require.True(t, ok)
+					require.Equal(t, wantCapacity, gotBuilder.bidCapacity)
+				} else {
+					require.Equal(t, common.Bytes48{0x21}, gotBuilder.pubkey)
+					require.Equal(t, common.Address{0x22}, gotBuilder.executionAddress)
+					require.Equal(t, cfg.PayloadBuilderVersion, gotBuilder.version)
+					require.Equal(t, test.wantCapacity, gotBuilder.bidCapacity)
+				}
+			}
+
+			expectedState := viewState
+			if advancedState != nil {
+				expectedState = advancedState
+			}
+			domain, err := expectedState.GetDomain(cfg.DomainBeaconBuilder, bidEpoch)
+			require.NoError(t, err)
+			require.Equal(t, common.Hash(domain), view.domain)
+			latestBid := expectedState.GetLatestExecutionPayloadBid()
+			require.Equal(t, latestBid != nil, view.hasLatestBid)
+			if latestBid != nil {
+				require.Equal(t, latestBid.BlockHash, view.latestBidBlockHash)
+			}
+		})
+	}
+}
+
+func newBidValidationViewTestState(t *testing.T, cfg *clparams.BeaconChainConfig, slot uint64) *state2.CachingBeaconState {
+	t.Helper()
+	s := state2.New(cfg)
+	s.SetVersion(clparams.GloasVersion)
+	require.NoError(t, s.SetSlot(slot))
+	s.SetFork(&cltypes.Fork{CurrentVersion: common.Bytes4{0x12}})
+	s.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: 3})
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, new(cltypes.Builder).EncodingSizeSSZ())
+	builders.Append(&cltypes.Builder{
+		Pubkey:            common.Bytes48{0x21},
+		Version:           cfg.PayloadBuilderVersion,
+		ExecutionAddress:  common.Address{0x22},
+		Balance:           cfg.MinDepositAmount + 1_000,
+		DepositEpoch:      1,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	s.SetBuilders(builders)
+	s.SetBuilderPendingWithdrawals(solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](64, new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ()))
+	s.SetBuilderPendingPayments(solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * cfg.SlotsPerEpoch)))
+	s.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{BlockHash: common.Hash{0x23}})
+	return s
 }
 
 func TestExecutionPayloadBidServiceNilMessage(t *testing.T) {
@@ -1189,8 +1566,10 @@ func TestExecutionPayloadBidServicePreGloasParentDoesNotReadLatestBid(t *testing
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
 	parent := fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot]
 	parent.SetLatestExecutionPayloadBid(nil)
+	view, err := newBidValidationView(parent, service.beaconCfg, state2.GetEpochAtSlot(service.beaconCfg, msg.Message.Slot))
+	require.NoError(t, err)
 	entry := &bidValidationStateEntry{
-		state:         parent,
+		view:          view,
 		parentSlot:    99,
 		parentVersion: clparams.FuluVersion,
 		parentRandao:  msg.Message.PrevRandao,
@@ -1206,8 +1585,10 @@ func TestExecutionPayloadBidServiceGloasParentRejectsMissingLatestBid(t *testing
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
 	parent := fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot]
 	parent.SetLatestExecutionPayloadBid(nil)
+	view, err := newBidValidationView(parent, service.beaconCfg, state2.GetEpochAtSlot(service.beaconCfg, msg.Message.Slot))
+	require.NoError(t, err)
 	entry := &bidValidationStateEntry{
-		state:         parent,
+		view:          view,
 		parentSlot:    99,
 		parentVersion: clparams.GloasVersion,
 		parentRandao:  msg.Message.PrevRandao,

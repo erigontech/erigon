@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unsafe"
+	"weak"
 
 	"github.com/holiman/uint256"
 
@@ -454,49 +456,23 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 	}
 }
 
-func TestBlockAccessListRLPSizeLimit(t *testing.T) {
-	const limit = 10 << 20
-	code := make([]byte, limit)
+// EIP-7928 bounds the BAL by the block gas limit only, not by its encoded size.
+func TestBlockAccessListAbove10MiB(t *testing.T) {
+	code := make([]byte, 10<<20)
 	bal := BlockAccessList{{CodeChanges: []*CodeChange{{Index: 1, Bytecode: code}}}}
 	raw, err := EncodeBlockAccessListBytes(bal)
 	if err != nil {
 		t.Fatalf("encode BAL: %v", err)
 	}
-	overhead := len(raw) - len(code)
-	for _, tt := range []struct {
-		name string
-		size int
-	}{
-		{name: "below limit", size: limit - 1},
-		{name: "at limit", size: limit},
-		{name: "above limit", size: limit + 1},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			bal[0].CodeChanges[0].Bytecode = code[:tt.size-overhead]
-			raw, err := EncodeBlockAccessListBytes(bal)
-			if err != nil {
-				t.Fatalf("encode BAL: %v", err)
-			}
-			if len(raw) != tt.size {
-				t.Fatalf("RLP size = %d, want %d", len(raw), tt.size)
-			}
-			sidecar, err := DecodeBlockAccessListSidecarForBlock(raw, 10_000_000_000, len(bal))
-			if tt.size > limit {
-				if err == nil || !strings.Contains(err.Error(), "block access list RLP exceeds maximum size") {
-					t.Fatalf("decode BAL: got %v, want RLP size error", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("decode BAL: %v", err)
-			}
-			if err := sidecar.ValidateForBlock(10_000_000_000, len(bal)); err != nil {
-				t.Fatalf("validate BAL: %v", err)
-			}
-			if !reflect.DeepEqual(sidecar.BlockAccessList(), bal) {
-				t.Fatal("decoded BAL differs")
-			}
-		})
+	sidecar, err := DecodeBlockAccessListSidecarForBlock(raw, 60_000_000, len(bal))
+	if err != nil {
+		t.Fatalf("decode BAL: %v", err)
+	}
+	if err := sidecar.ValidateForBlock(60_000_000, len(bal)); err != nil {
+		t.Fatalf("validate BAL: %v", err)
+	}
+	if !reflect.DeepEqual(sidecar.BlockAccessList(), bal) {
+		t.Fatal("decoded BAL differs")
 	}
 }
 
@@ -849,4 +825,321 @@ func TestAccountChangesDecodeRLPClearsStorageChanges(t *testing.T) {
 	if len(ac.StorageChanges) != 0 {
 		t.Fatalf("decode kept %d storage changes from the previous payload", len(ac.StorageChanges))
 	}
+}
+
+func TestAccountChangesEqualComparesAddressAndCode(t *testing.T) {
+	base := func() *AccountChanges {
+		return &AccountChanges{
+			Address:        common.Address{1},
+			StorageChanges: []SlotChanges{{Slot: accounts.InternKey(common.Hash{1}), Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(7)}}}},
+			NonceChanges:   []*NonceChange{{Index: 1, Value: 7}},
+			CodeChanges:    []*CodeChange{{Index: 1, Bytecode: []byte{0x60}}},
+		}
+	}
+	if !base().Equal(base()) {
+		t.Fatal("identical changes must be equal")
+	}
+	for name, change := range map[string]func(*AccountChanges){
+		"address":              func(ac *AccountChanges) { ac.Address = common.Address{2} },
+		"storage change index": func(ac *AccountChanges) { ac.StorageChanges[0].Changes[0].Index = 2 },
+		"nonce change index":   func(ac *AccountChanges) { ac.NonceChanges[0].Index = 2 },
+		"code change index":    func(ac *AccountChanges) { ac.CodeChanges[0].Index = 2 },
+		"code bytes":           func(ac *AccountChanges) { ac.CodeChanges[0].Bytecode = []byte{0x61} },
+	} {
+		other := base()
+		change(other)
+		if base().Equal(other) {
+			t.Fatalf("a different %s must not be equal", name)
+		}
+	}
+}
+
+func TestBlockAccessListDecodeAcceptsOnlyCanonicalEncoding(t *testing.T) {
+	encode := func(v any) rlp.RawValue {
+		raw, err := rlp.EncodeToBytes(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	one := encode(uint64(1))
+	build := func(extraIn string) []byte {
+		list := func(name string, items ...rlp.RawValue) rlp.RawValue {
+			if name == extraIn {
+				items = append(items, one)
+			}
+			return encode(items)
+		}
+		slot := list("slot", one, list("", list("storage change", one, one)))
+		account := list("account", encode(common.Address{1}), list("", slot), list("", encode(uint64(2))),
+			list("", list("balance change", one, one)),
+			list("", list("nonce change", one, one)),
+			list("", list("code change", one, encode([]byte{0x60}))))
+		return list("", account)
+	}
+
+	canonical := build("none")
+	decoded, err := DecodeBlockAccessListBytes(canonical)
+	if err != nil {
+		t.Fatalf("canonical list: %v", err)
+	}
+	reencoded, err := EncodeBlockAccessListBytes(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := decoded.Validate(); err != nil {
+		t.Fatalf("the fixture is not a valid list: %v", err)
+	}
+	if !bytes.Equal(reencoded, canonical) {
+		t.Fatalf("the fixture is not canonical: %x re-encodes to %x", canonical, reencoded)
+	}
+	if canonical[0] >= 0xf8 {
+		t.Fatalf("the fixture outgrew a short list: %x", canonical)
+	}
+	if _, err := DecodeBlockAccessListBytes(append([]byte{0xf8, canonical[0] - 0xc0}, canonical[1:]...)); err == nil {
+		t.Fatal("a list length in long form must be rejected")
+	}
+	for _, name := range []string{"account", "slot", "storage change", "balance change", "nonce change", "code change"} {
+		if _, err := DecodeBlockAccessListBytes(build(name)); err == nil {
+			t.Fatalf("an extra element in a %s list must be rejected", name)
+		}
+	}
+}
+
+func TestAccountChangesCount(t *testing.T) {
+	bal := make(BlockAccessList, 3)
+	for i := range bal {
+		bal[i].Address[0] = byte(i + 1)
+	}
+	bal[0].CodeChanges = []*CodeChange{{Index: 1, Bytecode: make([]byte, 32)}}
+	enc, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, body, _, err := rlp.Split(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uint64(len(body))/minAccountChangesLen <= 3 {
+		t.Fatal("the size limit must exceed the entry count, or the count is never checked")
+	}
+	if got := accountChangesCount(body, uint64(len(body)), nil); got != 3 {
+		t.Fatalf("valid list: got %d entries, want 3", got)
+	}
+	if got := accountChangesCount(nil, uint64(len(body)), nil); got != 0 {
+		t.Fatalf("no slice: got %d entries, want 0", got)
+	}
+	short := bytes.Repeat([]byte{0x01}, 10*minAccountChangesLen)
+	if got := accountChangesCount(short, uint64(len(short)), nil); got != 10 {
+		t.Fatalf("values shorter than an entry: got %d, want 10", got)
+	}
+}
+
+func TestDecodeBlockAccessListAllocatesOnce(t *testing.T) {
+	bal := make(BlockAccessList, 5)
+	for i := range bal {
+		bal[i].Address[0] = byte(i + 1)
+	}
+	enc, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeBlockAccessListBytes(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 5 || cap(got) != 5 {
+		t.Fatalf("decoded len %d cap %d, want 5 and 5", len(got), cap(got))
+	}
+}
+
+func TestDecodeBlockAccessListReservesNoMoreThanTheBudget(t *testing.T) {
+	body := bytes.Repeat([]byte{0x01}, 2_700_000)
+	prefix := make([]byte, rlp.ListPrefixLen(len(body)))
+	rlp.EncodeListPrefixToBuf(len(body), prefix)
+	enc := bytes.Join([][]byte{prefix, body}, nil)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err := DecodeBlockAccessListSidecarForHeader(enc, 0)
+	runtime.ReadMemStats(&after)
+	if err == nil {
+		t.Fatal("decoded a list the budget does not allow")
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 64*1024 {
+		t.Fatalf("a zero budget reserved %d bytes for a malformed list", grew)
+	}
+}
+
+func TestDecodeBlockAccessListAllocatesPerKindNotPerChange(t *testing.T) {
+	bal := make(BlockAccessList, 100)
+	for i := range bal {
+		bal[i].Address[0] = byte(i + 1)
+		bal[i].StorageChanges = []SlotChanges{
+			{Slot: accounts.InternKey(common.Hash{1}), Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(5)}}},
+			{Slot: accounts.InternKey(common.Hash{2}), Changes: []*StorageChange{{Index: 1}, {Index: 2}}},
+		}
+		bal[i].StorageReads = []common.Hash{{3}, {4}}
+		bal[i].BalanceChanges = []*BalanceChange{{Index: 1, Value: *uint256.NewInt(7)}}
+		bal[i].NonceChanges = []*NonceChange{{Index: 1, Value: 1}}
+		bal[i].CodeChanges = []*CodeChange{{Index: 1, Bytecode: []byte{0x60}}}
+	}
+	enc, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got BlockAccessList
+	allocs := testing.AllocsPerRun(10, func() {
+		if got, err = DecodeBlockAccessListBytes(enc); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !reflect.DeepEqual(got, bal) {
+		t.Fatal("decoded BAL differs from the encoded one")
+	}
+	if allocs > float64(2*len(bal)) {
+		t.Fatalf("decoding %d accounts allocated %v times, want per kind, not per change", len(bal), allocs)
+	}
+	got[0].BalanceChanges = append(got[0].BalanceChanges, &BalanceChange{Index: 2})
+	if got[1].BalanceChanges[0].Index != 1 {
+		t.Fatal("appending to one account's changes overwrote the next account")
+	}
+}
+
+func TestDecodeBlockAccessListChangeArenaReservesNoMoreThanTheBudget(t *testing.T) {
+	list := func(body []byte) []byte {
+		prefix := make([]byte, rlp.ListPrefixLen(len(body)))
+		rlp.EncodeListPrefixToBuf(len(body), prefix)
+		return bytes.Join([][]byte{prefix, body}, nil)
+	}
+	balances := list(bytes.Repeat([]byte{0xc0}, 2_700_000))
+	entry := list(bytes.Join([][]byte{{0x94}, make([]byte, 20), {0xc0, 0xc0}, balances, {0xc0, 0xc0}}, nil))
+	enc := list(entry)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err := DecodeBlockAccessListSidecarForHeader(enc, BalItemCost)
+	runtime.ReadMemStats(&after)
+	if err == nil {
+		t.Fatal("decoded a malformed balance change")
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 64*1024 {
+		t.Fatalf("a one-item budget reserved %d bytes for a malformed change list", grew)
+	}
+}
+
+// Slots and storage reads are charged to one decode budget, so a malformed list that fills both reserves no more
+// than a valid list could hold in total.
+func TestDecodeBlockAccessListArenaSlotsAndReadsShareTheBudget(t *testing.T) {
+	const items = 100_000
+	list := func(body []byte) []byte {
+		prefix := make([]byte, rlp.ListPrefixLen(len(body)))
+		rlp.EncodeListPrefixToBuf(len(body), prefix)
+		return bytes.Join([][]byte{prefix, body}, nil)
+	}
+	slots := list(bytes.Repeat([]byte{0xc3, 0x80, 0xc1, 0xc0}, items)) // an empty slot key with one change each
+	reads := list(bytes.Repeat([]byte{0xc0}, items))
+	entry := list(bytes.Join([][]byte{{0x94}, make([]byte, 20), slots, reads, {0xc0, 0xc0, 0xc0}}, nil))
+	enc := list(entry)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	_, err := DecodeBlockAccessListSidecarForHeader(enc, items*BalItemCost)
+	runtime.ReadMemStats(&after)
+	if err == nil {
+		t.Fatal("decoded a malformed slot list")
+	}
+	charged := uint64(max(unsafe.Sizeof(SlotChanges{}), unsafe.Sizeof(common.Hash{})))
+	storage := uint64(unsafe.Sizeof(StorageChange{}) + unsafe.Sizeof(uintptr(0)))
+	if grew, limit := after.TotalAlloc-before.TotalAlloc, items*(charged+storage)+64*1024; grew > limit {
+		t.Fatalf("a %d-item budget reserved %d bytes for slots and reads, more than one budget of items (%d)", items, grew, limit)
+	}
+}
+
+// A BAL at the budget limit gets every arena sized up front: change records are not charged to the budget, so the
+// charged slots and reads must not use up the capacity of the balance and nonce changes.
+func TestBlockAccessListArenaAtTheBudgetLimitHoldsEveryChange(t *testing.T) {
+	const gasLimit = 60_000_000
+	bal, txCount := budgetBlockAccessList(gasLimit)
+	enc, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _, err := rlp.SplitList(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var slots, reads, storage, balances, nonces int
+	for _, a := range bal {
+		slots += len(a.StorageChanges)
+		reads += len(a.StorageReads)
+		for _, sc := range a.StorageChanges {
+			storage += len(sc.Changes)
+		}
+		balances += len(a.BalanceChanges)
+		nonces += len(a.NonceChanges)
+	}
+	arena := newBlockAccessListArena(body, uint64(len(body)), &blockAccessListDecodeBudget{remaining: gasLimit / BalItemCost, maxIndex: uint64(txCount) + 1})
+	for _, kind := range []struct {
+		name      string
+		have, got int
+	}{
+		{"slots", slots, cap(arena.slots)},
+		{"reads", reads, cap(arena.reads)},
+		{"storage changes", storage, cap(arena.storage)},
+		{"balance changes", balances, cap(arena.balances)},
+		{"nonce changes", nonces, cap(arena.nonces)},
+	} {
+		if kind.got < kind.have {
+			t.Errorf("the arena holds %d of %d %s", kind.got, kind.have, kind.name)
+		}
+	}
+}
+
+// A decoded BAL's arenas are freed with the BAL, while the bytecode that the state cache keeps stays alive.
+func TestDecodedBlockAccessListArenasAreFreedWithTheBAL(t *testing.T) {
+	arenas, code := decodeBudgetBALKeepingCode(t)
+	runtime.GC()
+	for name, alive := range arenas {
+		if alive() {
+			t.Errorf("the %s arena outlives its BAL", name)
+		}
+	}
+	if len(code) != 64 {
+		t.Fatal("the kept bytecode changed")
+	}
+	runtime.KeepAlive(code)
+}
+
+// decodeBudgetBALKeepingCode decodes a budget-size BAL and returns weak checks on its arenas and the bytecode a
+// consumer keeps; nothing else of the BAL outlives the call.
+func decodeBudgetBALKeepingCode(t *testing.T) (map[string]func() bool, []byte) {
+	const gasLimit = 60_000_000
+	bal, txCount := budgetBlockAccessList(gasLimit)
+	bal[0].CodeChanges = []*CodeChange{{Index: 1, Bytecode: bytes.Repeat([]byte{0x60}, 64)}}
+	enc, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sidecar, err := DecodeBlockAccessListSidecarForBlock(enc, gasLimit, txCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded := sidecar.BlockAccessList()
+	first := &decoded[0]
+	return map[string]func() bool{
+		"accounts":     weakAlive(unsafe.SliceData(decoded)),
+		"slots":        weakAlive(unsafe.SliceData(first.StorageChanges)),
+		"storage":      weakAlive(first.StorageChanges[0].Changes[0]),
+		"storage ptrs": weakAlive(unsafe.SliceData(first.StorageChanges[0].Changes)),
+		"reads":        weakAlive(unsafe.SliceData(first.StorageReads)),
+		"balances":     weakAlive(first.BalanceChanges[0]),
+		"balance ptrs": weakAlive(unsafe.SliceData(first.BalanceChanges)),
+		"nonces":       weakAlive(first.NonceChanges[0]),
+		"nonce ptrs":   weakAlive(unsafe.SliceData(first.NonceChanges)),
+		"codes":        weakAlive(first.CodeChanges[0]),
+		"code ptrs":    weakAlive(unsafe.SliceData(first.CodeChanges)),
+	}, first.CodeChanges[0].Bytecode
+}
+
+func weakAlive[T any](p *T) func() bool {
+	w := weak.Make(p)
+	return func() bool { return w.Value() != nil }
 }

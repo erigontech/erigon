@@ -41,11 +41,9 @@ var backtestCommitmentCommand = cli.Command{
 		&cli.Uint64Flag{Name: "from", Value: 1, Usage: "block number to start historical backtesting from. Defaults to first block."},
 		&cli.Uint64Flag{Name: "to", Value: math.MaxUint64, Usage: "block number to end historical backtesting at. Defaults to latest block with historical data in files."},
 		&cli.Int64Flag{Name: "tMinusN", Value: -1, Usage: "number of blocks to backtest starting from latest block minus N. Alternative to [from,to). Defaults to -1, i.e. by default use [from,to)"},
-		&cli.StringFlag{Name: "output-dir", Usage: "directory to store all backtesting result artefacts such as graphs, metrics, profiling, etc."},
+		&cli.StringFlag{Name: "output-dir", Usage: "directory to store all backtesting result artefacts such as cpu profiles"},
 		&cli.BoolFlag{Name: "para-trie", Value: false, Usage: "use para trie, defaults to false"},
 		&cli.BoolFlag{Name: "trie-warmup", Value: false, Usage: "enable trie warmup, defaults to false"},
-		&cli.Uint64Flag{Name: "metrics-top-n", Usage: "override the number of top blocks to show in the overview metrics page"},
-		&cli.Uint64Flag{Name: "metrics-page-size", Usage: "override the number of blocks to show in the detailed block range metrics page"},
 	}),
 	Action: func(ctx context.Context, cliCtx *cli.Command) error {
 		logger, err := debug.SetupSimple(ctx, cliCtx, true /* root logger */)
@@ -67,14 +65,6 @@ var backtestCommitmentCommand = cli.Command{
 		if args.outputDir == "" {
 			return fmt.Errorf("output-dir must be specified")
 		}
-		if cliCtx.IsSet("metrics-top-n") {
-			v := cliCtx.Uint64("metrics-top-n")
-			args.metricsTopN = &v
-		}
-		if cliCtx.IsSet("metrics-page-size") {
-			v := cliCtx.Uint64("metrics-page-size")
-			args.metricsPageSize = &v
-		}
 		err = doBacktestCommitment(ctx, args, logger)
 		if err != nil {
 			logger.Error("encountered an issue while backtesting", "err", err)
@@ -82,41 +72,16 @@ var backtestCommitmentCommand = cli.Command{
 		}
 		return nil
 	},
-	Commands: []*cli.Command{
-		{
-			Name: "compare-runs",
-			Flags: joinFlags([]cli.Flag{
-				&cli.StringSliceFlag{Name: "run-output-dirs", Required: true, Usage: "comma separated list of directories containing output of backtest-commitment runs to compare"},
-				&cli.StringFlag{Name: "output-dir", Required: true, Usage: "directory to store comparison.html file"},
-			}),
-			Action: func(ctx context.Context, cliCtx *cli.Command) error {
-				logger, err := debug.SetupSimple(ctx, cliCtx, true /* root logger */)
-				if err != nil {
-					panic(fmt.Errorf("backtest-commitment: compare-runs: could not setup logger: %w", err))
-				}
-				runOutputDirs := cliCtx.StringSlice("run-output-dirs")
-				outputDir := cliCtx.String("output-dir")
-				err = backtester.CompareRuns(runOutputDirs, outputDir, logger)
-				if err != nil {
-					logger.Error("encountered an issue while comparing backtest runs", "err", err)
-					return err
-				}
-				return nil
-			},
-		},
-	},
 }
 
 type backtestCommitmentArgs struct {
-	from            uint64
-	to              uint64
-	tMinusN         int64
-	dataDir         string
-	outputDir       string
-	paraTrie        bool
-	trieWarmup      bool
-	metricsTopN     *uint64
-	metricsPageSize *uint64
+	from       uint64
+	to         uint64
+	tMinusN    int64
+	dataDir    string
+	outputDir  string
+	paraTrie   bool
+	trieWarmup bool
 }
 
 func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logger log.Logger) error {
@@ -143,12 +108,6 @@ func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logg
 	}
 	if args.trieWarmup {
 		opts = append(opts, backtester.WithTrieWarmup(true))
-	}
-	if args.metricsTopN != nil {
-		opts = append(opts, backtester.WithChartsTopN(*args.metricsTopN))
-	}
-	if args.metricsPageSize != nil {
-		opts = append(opts, backtester.WithChartsPageSize(*args.metricsPageSize))
 	}
 	bt := backtester.New(logger, db, blockReader, args.outputDir, opts...)
 	if args.tMinusN >= 0 {

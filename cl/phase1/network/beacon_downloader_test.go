@@ -64,22 +64,16 @@ func linkBeaconBlocks(t *testing.T, blocks ...*cltypes.SignedBeaconBlock) {
 	}
 }
 
-func TestForwardBeaconDownloaderEmptyGloasRangeStopsAtForkBoundary(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
+func TestForwardBeaconDownloaderEmptyGloasScanCrossesForkBoundary(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
 	cfg.SlotsPerEpoch = 10
-	cfg.AltairForkEpoch = math.MaxUint64
-	cfg.BellatrixForkEpoch = math.MaxUint64
-	cfg.CapellaForkEpoch = math.MaxUint64
-	cfg.DenebForkEpoch = math.MaxUint64
-	cfg.ElectraForkEpoch = math.MaxUint64
-	cfg.FuluForkEpoch = math.MaxUint64
 	cfg.GloasForkEpoch = 11
 
 	requests := make(chan cltypes.BeaconBlocksByRangeRequest, 1)
 	downloader := &ForwardBeaconDownloader{
-		beaconCfg:          &cfg,
-		gloasLookahead:     makeGloasBlock(98, hash(0xaa), common.Hash{}),
-		gloasNextUnscanned: 98,
+		beaconCfg:          cfg,
+		gloasLookahead:     makeFuluBlock(98),
+		gloasNextUnscanned: 99,
 		requestBlocksByRange: func(_ context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 			requests <- cltypes.BeaconBlocksByRangeRequest{StartSlot: start, Count: count}
 			return []*cltypes.SignedBeaconBlock{}, "block-peer", nil
@@ -94,15 +88,65 @@ func TestForwardBeaconDownloaderEmptyGloasRangeStopsAtForkBoundary(t *testing.T)
 		downloader.RequestMore(ctx)
 	}()
 	request := <-requests
+	require.Equal(t, cltypes.BeaconBlocksByRangeRequest{StartSlot: 99, Count: 33}, request)
 	require.Eventually(t, func() bool {
 		start, pending := downloader.nextRequestStart(false)
-		return pending && start == 110
+		return pending && start == 132
 	}, time.Second, 10*time.Millisecond)
 	cancel()
 	<-done
 
-	require.Equal(t, cltypes.BeaconBlocksByRangeRequest{StartSlot: 98, Count: 12}, request)
 	require.Equal(t, uint64(97), downloader.GetHighestProcessedSlot())
+}
+
+func TestForwardBeaconDownloaderCrossesForkBoundaryAfterEmptySlot(t *testing.T) {
+	previous := forwardBeaconRequestInterval
+	forwardBeaconRequestInterval = time.Millisecond
+	t.Cleanup(func() { forwardBeaconRequestInterval = previous })
+
+	cfg := gloasFromGenesisConfig()
+	cfg.GloasForkEpoch = 6
+	chain := []*cltypes.SignedBeaconBlock{
+		makeFuluBlock(188), makeFuluBlock(189), makeFuluBlock(190),
+		makeGloasBlock(193, hash(0xaa), common.Hash{}), makeGloasBlock(194, hash(0xbb), hash(0xcc)),
+	}
+	linkBeaconBlocks(t, chain...)
+	var mu sync.Mutex
+	var requests []cltypes.BeaconBlocksByRangeRequest
+	downloader := &ForwardBeaconDownloader{
+		beaconCfg: cfg,
+		requestBlocksByRange: func(_ context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			requests = append(requests, cltypes.BeaconBlocksByRangeRequest{StartSlot: start, Count: count})
+			blocks := []*cltypes.SignedBeaconBlock{}
+			for _, block := range chain {
+				if block.Block.Slot >= start && block.Block.Slot-start < count {
+					blocks = append(blocks, block)
+				}
+			}
+			return blocks, "peer", nil
+		},
+	}
+	downloader.SetCurrentSlotSampler(func() uint64 { return 200 })
+	downloader.SetHighestProcessedSlot(189)
+	var processed []uint64
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		for _, block := range blocks {
+			if block.Block.Slot > highest {
+				processed = append(processed, block.Block.Slot)
+				highest = block.Block.Slot
+			}
+		}
+		return highest, nil
+	})
+
+	for i := 0; i < 3 && downloader.GetHighestProcessedSlot() < 193; i++ {
+		downloader.RequestMore(t.Context())
+	}
+
+	require.Equal(t, uint64(193), downloader.GetHighestProcessedSlot(), "requests: %v", requests)
+	require.Equal(t, []uint64{190, 193}, processed, "requests: %v", requests)
 }
 
 type countingBlockingSentinel struct {

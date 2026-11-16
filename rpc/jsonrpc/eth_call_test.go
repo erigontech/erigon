@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -642,11 +641,10 @@ func TestEthCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", result.String())
 }
 
-// TestEthCallNoMaterializeParity pins that suppressing the stateObject cache
-// does not change what eth_call returns. The override code writes a slot and
-// reads it back in the same call, so the read must come from this call's own
-// write and not from committed state.
-func TestEthCallNoMaterializeParity(t *testing.T) {
+// TestEthCallReadsItsOwnWrite pins that eth_call reads a slot back from its own write.
+// The override code writes a slot and reads it back in the same call, so the read must
+// come from this call's own write and not from committed state.
+func TestEthCallReadsItsOwnWrite(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
 	}
@@ -657,31 +655,23 @@ func TestEthCallNoMaterializeParity(t *testing.T) {
 	writeThenRead := hexutil.Bytes(hexutil.MustDecode("0x602a60005560005460005260206000f3"))
 	storeCall := hexutil.Bytes(contractInvocationData(7))
 
-	for _, noMaterialize := range []bool{false, true} {
-		t.Run(fmt.Sprintf("noMaterialize=%v", noMaterialize), func(t *testing.T) {
-			prev := dbg.CallNoMaterialize
-			dbg.CallNoMaterialize = noMaterialize
-			defer func() { dbg.CallNoMaterialize = prev }()
+	result, err := api.Call(context.Background(), ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &contractAddr,
+		Data: &writeThenRead,
+	}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(contractAddr): {Code: &writeThenRead},
+	}, nil)
+	require.NoError(t, err)
+	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000002a", result.String())
 
-			result, err := api.Call(context.Background(), ethapi.CallArgs{
-				From: &bankAddr,
-				To:   &contractAddr,
-				Data: &writeThenRead,
-			}, nil, &ethapi.StateOverrides{
-				accounts.InternAddress(contractAddr): {Code: &writeThenRead},
-			}, nil)
-			require.NoError(t, err)
-			require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000002a", result.String())
-
-			result, err = api.Call(context.Background(), ethapi.CallArgs{
-				From: &bankAddr,
-				To:   &contractAddr,
-				Data: &storeCall,
-			}, nil, nil, nil)
-			require.NoError(t, err)
-			require.Equal(t, "0x", result.String())
-		})
-	}
+	result, err = api.Call(context.Background(), ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &contractAddr,
+		Data: &storeCall,
+	}, nil, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, "0x", result.String())
 }
 
 func newTestEthAPIWithFilters(t *testing.T, m *execmoduletester.ExecModuleTester) *APIImpl {
@@ -913,6 +903,46 @@ func TestCreateAccessListStateOverridePrecompile(t *testing.T) {
 	})
 }
 
+func TestCreateAccessListTimeoutCoversEveryRun(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.AmsterdamTime = nil // Amsterdam caps execution gas, and each new slot must stay affordable
+	m, _, bankAddr := fundedBankGenesis(t, cfg)
+	base := newBaseApiForTest(m)
+	base.evmCallTimeout = 200 * time.Millisecond
+	api := newEthApiForTest(base, m.DB, nil, nil)
+	api.GasCap = 10_000_000_000
+	gas := hexutil.Uint64(api.GasCap)
+	reader := common.HexToAddress("0x00000000000000000000000000000000000000cc")
+	sloadGas := hexutil.Bytes(hexutil.MustDecode("0x5a5450")) // SLOAD(GAS): every run reads a new slot
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	_, err := api.CreateAccessList(ctx, ethapi.CallArgs{From: &bankAddr, To: &reader, Gas: &gas}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(reader): {Code: &sloadGas},
+	}, nil)
+	require.ErrorContains(t, err, "execution aborted")
+	require.Less(t, time.Since(start), 10*time.Second, "the timeout must cover all runs of the request")
+}
+
+func TestCreateAccessListHonoursTheEVMTimeout(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.AmsterdamTime = nil // Amsterdam caps execution gas, and the loop must outlast the timeout
+	m, _, bankAddr := fundedBankGenesis(t, cfg)
+	base := newBaseApiForTest(m)
+	base.evmCallTimeout = time.Second
+	api := newEthApiForTest(base, m.DB, nil, nil)
+	api.GasCap = 10_000_000_000
+	gas := hexutil.Uint64(api.GasCap)
+	loop := common.HexToAddress("0x00000000000000000000000000000000000000cd")
+	jumpToStart := hexutil.Bytes(hexutil.MustDecode("0x5b600056"))
+
+	_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{From: &bankAddr, To: &loop, Gas: &gas}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(loop): {Code: &jumpToStart},
+	}, nil)
+	require.ErrorContains(t, err, "execution aborted")
+}
+
 // Init code that reads slot 0 of the contract being created and returns that contract's
 // address, so the access list and eth_call both reveal the nonce the creation used.
 const createdAddressProbe = "0x600054503060005260206000f3"
@@ -1092,6 +1122,9 @@ func TestGetProof(t *testing.T) {
 	maxGetProofRewindBlockCount := 1      // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 	statecfg.EnableHistoricalCommitment() // enable commitment history to test historical proofs
 	m, bankAddr, contractAddr, receiverAddress := chainWithDeployedContract(t)
+	require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
 	cfg := &rpccfg.EthApiConfig{
 		GasCap:                      5000000,
 		FeeCap:                      ethconfig.Defaults.RPCTxFeeCap,
@@ -1396,7 +1429,7 @@ func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
-	require.ErrorIs(t, err, state.ErrPruned)
+	requirePrunedProofError(t, err)
 	require.Nil(t, proof)
 
 	caps, err := api.Capabilities(ctx)
@@ -1409,7 +1442,60 @@ func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 	require.NoError(t, err, "the advertised proof boundary must be readable")
 	require.NotNil(t, proof)
 	_, err = api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(oldest-1))))
+	requirePrunedProofError(t, err)
+}
+
+func requirePrunedProofError(t *testing.T, err error) {
+	t.Helper()
 	require.ErrorIs(t, err, state.ErrPruned)
+	var coded rpc.Error
+	require.ErrorAs(t, err, &coded)
+	require.Equal(t, 4444, coded.ErrorCode())
+
+	encoded, err := json.Marshal(rpc.NewJsonErrorFromErr(err))
+	require.NoError(t, err)
+	var wire map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &wire))
+	require.InDelta(t, 4444, wire["code"], 0)
+	require.NotContains(t, wire, "data")
+}
+
+func TestGetProofWithoutCommitmentHistory(t *testing.T) {
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, false)
+	}))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(1)))
+	requirePrunedProofError(t, err)
+	require.Nil(t, proof)
+
+	proof, err = api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)))
+	require.NoError(t, err)
+	require.NotNil(t, proof)
+}
+
+func TestGetProofCommitmentNotAtRequestedBlock(t *testing.T) {
+	previousSchema := statecfg.Schema
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	cfg := statecfg.Schema.CommitmentDomain
+	cfg.Hist.HistoryDisabled = true
+	cfg.Hist.SnapshotsDisabled = true
+	statecfg.Schema.CommitmentDomain = cfg
+
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(1)))
+	requirePrunedProofError(t, err)
+	require.ErrorContains(t, err, "commitment trie for block 1")
+	require.Nil(t, proof)
 }
 
 // TestGetProofStorageKeyEncoding pins the storage-key echo format eth_getProof shares
@@ -1491,8 +1577,11 @@ func TestGetProofRequestShapes(t *testing.T) {
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	m, bankAddr, contractAddr, _ := chainWithDeployedContract(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	head := bnhPtr(rpc.BlockNumberOrHashWithNumber(6))
 
 	key := func(b byte) hexutil.Bytes {
@@ -2618,6 +2707,9 @@ func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
 	ch, err := m.GenerateChain(3, func(int, *blockgen.BlockGen) {})
 	require.NoError(t, err)
+	require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
 	require.NoError(t, m.InsertChain(ch))
 	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5000000}, log.New())
 

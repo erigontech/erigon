@@ -516,6 +516,38 @@ func TestGasPriceAddsHeadBaseFee(t *testing.T) {
 	require.Equal(t, want, (*uint256.Int)(price))
 }
 
+// The base fee must come from the head the tip was sampled at, not from a head header
+// marker that lags the forkchoice head.
+func TestGasPriceBaseFeeFromTipHead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m := createGasPriceTestKV(t, chain.TestChainOsakaConfig, 30)
+	defer m.DB.Close()
+	eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := t.Context()
+
+	rwTx, err := m.DB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	latest, err := rpchelper.GetLatestBlockNumber(rwTx)
+	require.NoError(t, err)
+	head, err := m.BlockReader.HeaderByNumber(ctx, rwTx, latest)
+	require.NoError(t, err)
+	stale, err := m.BlockReader.HeaderByNumber(ctx, rwTx, latest-10)
+	require.NoError(t, err)
+	require.NotEqual(t, head.BaseFee, stale.BaseFee)
+	require.NoError(t, rawdb.WriteHeadHeaderHash(rwTx, stale.Hash()))
+	require.NoError(t, rwTx.Commit())
+
+	tip, err := eth.MaxPriorityFeePerGas(ctx)
+	require.NoError(t, err)
+	price, err := eth.GasPrice(ctx)
+	require.NoError(t, err)
+	want := new(uint256.Int).Add((*uint256.Int)(tip), head.BaseFee)
+	require.Equal(t, want, (*uint256.Int)(price))
+}
+
 func TestEthConfig(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")

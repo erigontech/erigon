@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -48,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execfinality"
-	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -301,7 +301,7 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 	tx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 	txNum, _, err := domains.SeekCommitment(ctx, tx)
@@ -328,16 +328,11 @@ func (fx *resumeBALFixture) assembleBlock(t *testing.T, txs types.Transactions, 
 	assembled, err := ba.AssembleBlock(ibs, tx, logger)
 	require.NoError(t, err)
 
-	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), fx.engine, accounts.NilAddress, fx.config)
-	blockRules := blockContext.Rules(fx.config)
-	domainStorageKeys := state.CommittedStorageKeysFn(domains, tx)
-	for i, ws := range ba.BalIO().Outputs() {
+	for _, ws := range ba.WriteSets() {
 		if ws == nil || ws.IsEmpty() {
 			continue
 		}
-		normalized, err := ws.Normalize(ibs.VersionMap(), i-1, 0, stateReader, domainStorageKeys, fx.config.IsEIP161Enabled(1), fx.config.Aura != nil, blockRules.IsAmsterdam)
-		require.NoError(t, err)
-		require.NoError(t, normalized.Apply(domains, tx, 1, txNum, nil, blockRules, nil, false))
+		require.NoError(t, state.ApplyWrites(ws, domains, tx, 1, txNum, false))
 	}
 	root, err := domains.ComputeCommitment(ctx, tx, false, 1, txNum, "resume-bal", nil)
 	require.NoError(t, err)
@@ -465,14 +460,12 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	require.NoError(t, err)
 	parentRLP, err := rlp.EncodeToBytes(fx.genesis.Header())
 	require.NoError(t, err)
-	balBytes, err := types.EncodeBlockAccessListBytes(block.BlockAccessList())
-	require.NoError(t, err)
 	senders := make([][20]byte, len(fx.senders))
 	for i, sender := range fx.senders {
 		senders[i] = sender
 	}
 	blockReader, err := blockreplay.NewMemBlockReader(&blockreplay.Fixture{
-		BlockRLP: blockRLP, ParentHeaderRLP: parentRLP, Senders: senders, BALBytes: balBytes,
+		BlockRLP: blockRLP, ParentHeaderRLP: parentRLP, Senders: senders,
 	})
 	require.NoError(t, err)
 
@@ -483,7 +476,7 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(rwTx.Rollback)
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger, execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	t.Cleanup(domains.Close)
 	if fx.fromStateFiles {
@@ -499,7 +492,7 @@ func (fx *resumeBALFixture) exec(t *testing.T, block *types.Block, point resumeP
 		rng.initialTxNum = resumeBALBlockStartTxNum + uint64(point)
 	}
 	src := &singleBlockSource{block: block, num: 1, parent: fx.genesis.Header(), bal: block.BlockAccessList()}
-	out, err := execV3(ctx, cfg, domains, rwTx, stages.ModeForkValidation, false, "resume-bal", rng, src, logger)
+	out, err := ExecV3(ctx, cfg, domains, rwTx, stages.ModeForkValidation, false, "resume-bal", rng, src, logger)
 	if err != nil {
 		require.Nil(t, out.verdict)
 		return nil, err
@@ -520,11 +513,15 @@ func TestResumedBlockValidatesBlockAccessList(t *testing.T) {
 		point        resumePoint
 		wantMismatch bool
 	}{
+		{"full/no sidecar, valid", fx.block.WithBlockAccessListSidecar(nil), fromBlockStart, false},
+		{"full/no sidecar, phantom account", phantom.WithBlockAccessListSidecar(nil), fromBlockStart, true},
 		{"full/valid", fx.block, fromBlockStart, false},
 		{"full/phantom account", phantom, fromBlockStart, true},
 		{"full/dropped block-start writes", droppedInit, fromBlockStart, true},
 		{"after tx0/valid", fx.block, afterTx0, false},
 		{"after tx0/phantom account", phantom, afterTx0, true},
+		{"after tx0/no sidecar, valid", fx.block.WithBlockAccessListSidecar(nil), afterTx0, false},
+		{"after tx0/no sidecar, phantom account", phantom.WithBlockAccessListSidecar(nil), afterTx0, true},
 		{"after block start/valid", fx.block, afterBlockInit, false},
 		{"after block start/dropped block-start writes", droppedInit, afterBlockInit, true},
 		{"before block end/valid", fx.block, beforeBlockEnd, false},
@@ -619,4 +616,26 @@ func TestResumedBlockWithWrongRequestsHashIsInvalid(t *testing.T) {
 		require.NotNil(t, verdict, "resume point %d", point)
 		require.ErrorIs(t, verdict.err, rules.ErrInvalidBlock, "resume point %d", point)
 	}
+}
+
+// panicFinalizeEngine panics the exec loop at block end, after the apply loop
+// has had time to take the block's tx results.
+type panicFinalizeEngine struct{ rules.Engine }
+
+func (panicFinalizeEngine) Finalize(*chain.Config, *types.Header, *state.IntraBlockState, []*types.Header,
+	types.Receipts, []*types.Withdrawal, rules.ChainReader, rules.SystemCall, bool, log.Logger,
+) (types.FlatRequests, error) {
+	time.Sleep(50 * time.Millisecond)
+	panic("finalize failed")
+}
+
+// TestExecLoopPanicMidBlockIsNotInvalidBlock pins that an exec-loop panic after
+// the block's tx results reached the apply loop is an internal error, not a verdict.
+func TestExecLoopPanicMidBlockIsNotInvalidBlock(t *testing.T) {
+	fx := newResumeBALFixture(t)
+	fx.engine = panicFinalizeEngine{Engine: fx.engine}
+	verdict, err := fx.exec(t, fx.block, fromBlockStart)
+	require.Nil(t, verdict)
+	require.ErrorContains(t, err, "finalize failed")
+	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
 }
