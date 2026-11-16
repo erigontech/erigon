@@ -893,8 +893,11 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 	return a.validatorIdentities(r, nil)
 }
 
+// maxValidatorIdsRequestSize is the body limit of the id-list endpoints in builder.go and epbs.go.
+const maxValidatorIdsRequestSize = 1 << 20
+
 func (a *ApiHandler) PostEthV1ValidatorIdentities(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxValidatorIdsRequestSize))
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
@@ -995,23 +998,15 @@ func parseValidatorIdentityFilter(ids []string) (*validatorIdentityFilter, error
 		pubkeys: make(map[common.Bytes48]struct{}),
 	}
 	for _, id := range ids {
-		isPublicKey, err := checkValidValidatorId(id)
-		if err != nil {
-			return nil, err
-		}
-		if isPublicKey {
-			var b48 common.Bytes48
-			if err := b48.UnmarshalText([]byte(id)); err != nil {
-				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
-			}
-			f.pubkeys[b48] = struct{}{}
+		if idx, err := strconv.ParseUint(id, 10, 64); err == nil {
+			f.indices[idx] = struct{}{}
 			continue
 		}
-		idx, err := strconv.ParseUint(id, 10, 64)
-		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+		var b48 common.Bytes48
+		if err := b48.UnmarshalText([]byte(id)); err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid validator id %q: %w", id, err))
 		}
-		f.indices[idx] = struct{}{}
+		f.pubkeys[b48] = struct{}{}
 	}
 	return f, nil
 }

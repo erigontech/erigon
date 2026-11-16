@@ -150,8 +150,9 @@ func TestPostStateValidatorIdentities(t *testing.T) {
 			})
 		}
 	}
-	for _, body := range []string{`["abc"]`, `[1]`, `{}`} {
-		t.Run("bad/"+body, func(t *testing.T) {
+	tooLarge := `[` + strings.Repeat(" ", maxValidatorIdsRequestSize) + `]`
+	for i, body := range []string{`["abc"]`, `[1]`, `{}`, `["0x01"]`, tooLarge} {
+		t.Run("bad/"+strconv.Itoa(i), func(t *testing.T) {
 			code, _ := postValidatorIdentities(t, server, "head", body)
 			require.Equal(t, http.StatusBadRequest, code)
 		})
