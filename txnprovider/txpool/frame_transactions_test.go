@@ -614,7 +614,7 @@ func TestFramePoolRevalidationRefreshesSenderNonceChain(t *testing.T) {
 				require.Zero(t, mt.subPool&NoNonceGaps)
 			}
 			var selected TxnsRlp
-			_, count, err := pool.best(ctx, 10, &selected, 1, nil,
+			_, count, err := pool.best(ctx, 10, &selected, 1, common.Hash{}, nil,
 				mdgas.FullMdGas{MdGas: mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}}, nil, 1_000_000)
 			require.NoError(t, err)
 			require.Equal(t, wantSelected, count)

@@ -19,7 +19,6 @@ package sequencer_test
 import (
 	"context"
 	"errors"
-	"math"
 	"sync"
 	"testing"
 	"time"
@@ -40,10 +39,13 @@ import (
 )
 
 // behind is a pool whose view of the chain stays at a block until see moves
-// it; a wait for a later block reports itself on waiting.
+// it; a wait for another block reports itself on waiting. Its provider waits
+// for the parent's hash too, when asked; its peek, for the height alone.
 type behind struct {
 	mu      sync.Mutex
 	seen    uint64
+	hash    common.Hash
+	free    bool
 	moved   chan struct{}
 	waiting chan uint64
 }
@@ -52,20 +54,30 @@ func newBehind() *behind {
 	return &behind{moved: make(chan struct{}), waiting: make(chan uint64, 16)}
 }
 
-func (b *behind) see(n uint64) {
+func (b *behind) see(n uint64, hash common.Hash) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.seen = n
+	b.seen, b.hash = n, hash
 	close(b.moved)
 	b.moved = make(chan struct{})
 }
 
-func (b *behind) wait(ctx context.Context, n uint64) error {
+// release ends every wait.
+func (b *behind) release() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.free = true
+	close(b.moved)
+	b.moved = make(chan struct{})
+}
+
+func (b *behind) wait(ctx context.Context, n uint64, hash common.Hash) error {
 	for reported := false; ; reported = true {
 		b.mu.Lock()
-		seen, moved := b.seen, b.moved
+		ready := b.free || b.seen >= n && (hash == (common.Hash{}) || b.hash == hash)
+		moved := b.moved
 		b.mu.Unlock()
-		if seen >= n {
+		if ready {
 			return nil
 		}
 		if !reported {
@@ -80,11 +92,12 @@ func (b *behind) wait(ctx context.Context, n uint64) error {
 }
 
 func (b *behind) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
-	return nil, b.wait(ctx, txnprovider.ApplyProvideOptions(opts...).ParentBlockNum)
+	o := txnprovider.ApplyProvideOptions(opts...)
+	return nil, b.wait(ctx, o.ParentBlockNum, o.ParentBlockHash)
 }
 
 func (b *behind) PeekBest(ctx context.Context, _ int, _ *txpool.TxnsRlp, onTopOf uint64) (bool, error) {
-	return true, b.wait(ctx, onTopOf)
+	return true, b.wait(ctx, onTopOf, common.Hash{})
 }
 
 // TestStalePoolLeavesTheFollowerFree: a build waits for the pool to see its
@@ -95,12 +108,13 @@ func TestStalePoolLeavesTheFollowerFree(t *testing.T) {
 	h := newHarness(t)
 	pool := newBehind()
 	// Releases a build left waiting, before the follower stops.
-	t.Cleanup(func() { pool.see(math.MaxUint64) })
+	t.Cleanup(pool.release)
 	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet()}, h.follower, pool, log.New())
 	require.NoError(t, err)
 	ctx := t.Context()
 
 	// The pool has seen genesis, the parent of block 1.
+	pool.see(0, h.genesis.Hash())
 	require.NoError(t, s.Handle(ctx, sequencer.LiveTick{SyncHeight: 12}))
 	head := h.head(t)
 	require.Equal(t, uint64(1), head.Number.Uint64())
@@ -117,9 +131,42 @@ func TestStalePoolLeavesTheFollowerFree(t *testing.T) {
 	defer cancel()
 	require.NoError(t, h.follower.HeadTo(wctx, head.Hash()), "another writer's command waits for the pool")
 
-	pool.see(1)
+	pool.see(1, head.Hash())
 	require.NoError(t, <-done)
 	require.Equal(t, uint64(2), h.head(t).Number.Uint64())
+}
+
+// TestBuildWaitsForThePoolOnTheParent: with the head moved back under the
+// pool's view, the build waits for the pool to see the parent, though the
+// pool has seen a block of its height.
+func TestBuildWaitsForThePoolOnTheParent(t *testing.T) {
+	h := newHarness(t)
+	pool := newBehind()
+	t.Cleanup(pool.release)
+	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet()}, h.follower, pool, log.New())
+	require.NoError(t, err)
+	ctx := t.Context()
+
+	pool.see(0, h.genesis.Hash())
+	require.NoError(t, s.Handle(ctx, sequencer.LiveTick{SyncHeight: 12}))
+	first := h.head(t)
+	require.Equal(t, uint64(1), first.Number.Uint64())
+	pool.see(1, first.Hash())
+	require.NoError(t, h.follower.HeadTo(ctx, h.genesis.Hash()))
+
+	done := make(chan error, 1)
+	go func() { done <- s.Handle(ctx, sequencer.LiveTick{SyncHeight: 12}) }()
+	select {
+	case n := <-pool.waiting:
+		require.Equal(t, uint64(0), n)
+	case err := <-done:
+		t.Fatalf("built on the pool's view of the block moved off: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the build did not wait for the pool")
+	}
+	pool.see(0, h.genesis.Hash())
+	require.NoError(t, <-done)
+	require.Equal(t, uint64(1), h.head(t).Number.Uint64())
 }
 
 // pins is a witness capture that counts its open pins and keeps the head each

@@ -68,7 +68,7 @@ func TestPoolTxns(t *testing.T) {
 		transfer(t, 0, 0, protocol.SystemAddress),
 		small, large, last,
 	}
-	p := newPoolTxns(pool, 1, log.New())
+	p := newPoolTxns(pool, common.Hash{}, 1, log.New())
 	got, err := p.ProvideTxns(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, []types.Transaction{small, large, last}, got)
@@ -119,7 +119,7 @@ func TestPoolTxnsPagesPastRefusedTransactions(t *testing.T) {
 	}
 	theirs := transfer(t, 0, 10, common.HexToAddress("0xb0b0"))
 	pool := &paged{txs: append(txs, theirs), n: 3}
-	got, err := newPoolTxns(pool, 1, log.New()).ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(mapset.NewSet[[32]byte]()))
+	got, err := newPoolTxns(pool, common.Hash{}, 1, log.New()).ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(mapset.NewSet[[32]byte]()))
 	require.NoError(t, err)
 	require.Equal(t, []types.Transaction{theirs}, got)
 	require.Equal(t, 4, pool.pages)
@@ -159,8 +159,30 @@ func (notStarted) Started() bool { return false }
 // block would take for a dry pool; the provider fails instead.
 func TestPoolTxnsNeedsAStartedPool(t *testing.T) {
 	user := common.HexToAddress("0xa11ce")
-	_, err := newPoolTxns(notStarted{fixed{transfer(t, 0, 10, user)}}, 1<<20, log.New()).ProvideTxns(t.Context())
+	_, err := newPoolTxns(notStarted{fixed{transfer(t, 0, 10, user)}}, common.Hash{}, 1<<20, log.New()).ProvideTxns(t.Context())
 	require.ErrorIs(t, err, errPoolNotStarted)
+}
+
+// asked is a pool that keeps the options of its last request.
+type asked struct {
+	fixed
+	opts txnprovider.ProvideOptions
+}
+
+func (a *asked) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	a.opts = txnprovider.ApplyProvideOptions(opts...)
+	return a.fixed.ProvideTxns(ctx, opts...)
+}
+
+// TestPoolTxnsAsksForTheParent: the pool is asked for the transactions on the
+// parent's hash, not only its number, which a block of another branch shares.
+func TestPoolTxnsAsksForTheParent(t *testing.T) {
+	pool := &asked{}
+	parent := common.Hash{0xa}
+	_, err := newPoolTxns(pool, parent, 1<<20, log.New()).ProvideTxns(t.Context(), txnprovider.WithParentBlockNum(4))
+	require.NoError(t, err)
+	require.Equal(t, uint64(4), pool.opts.ParentBlockNum)
+	require.Equal(t, parent, pool.opts.ParentBlockHash)
 }
 
 // lagging is a pool that never sees a block, started or not.
@@ -178,6 +200,11 @@ func (l *lagging) PeekBest(ctx context.Context, _ int, _ *txpool.TxnsRlp, _ uint
 	return false, ctx.Err()
 }
 
+func (l *lagging) ProvideTxns(ctx context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 // TestAwait: a pool that has not seen the parent within poolWait fails the
 // wait, which names the block; one yet to start is left to the provider,
 // which fails at once.
@@ -187,14 +214,28 @@ func TestAwait(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	start := time.Now()
-	err := newPoolTxns(&lagging{running: true}, 1<<20, log.New()).await(ctx, 7)
+	err := newPoolTxns(&lagging{running: true}, common.Hash{}, 1<<20, log.New()).await(ctx, 7)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.ErrorContains(t, err, "txpool has not seen block 7")
 	require.Less(t, time.Since(start), time.Second, "the wait outlasted poolWait")
 
 	idle := &lagging{}
-	require.NoError(t, newPoolTxns(idle, 1<<20, log.New()).await(t.Context(), 7))
+	require.NoError(t, newPoolTxns(idle, common.Hash{}, 1<<20, log.New()).await(t.Context(), 7))
 	require.Zero(t, idle.peeks)
+}
+
+// TestProvideTxnsBoundsTheWait: a pool that has not seen the parent within
+// viewWait fails the build, which holds the follower's goroutine.
+func TestProvideTxnsBoundsTheWait(t *testing.T) {
+	defer func(d time.Duration) { viewWait = d }(viewWait)
+	viewWait = 50 * time.Millisecond
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err := newPoolTxns(&lagging{running: true}, common.Hash{0xa}, 1<<20, log.New()).ProvideTxns(ctx, txnprovider.WithParentBlockNum(7))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorContains(t, err, "txpool has not seen block 0x0a")
+	require.Less(t, time.Since(start), time.Second, "the wait outlasted viewWait")
 }
 
 // TestMaxTxnSize: for every slot of up to MaxCatchup blocks, the largest

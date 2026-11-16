@@ -150,6 +150,7 @@ type TxPool struct {
 	stateGeneration         uint64
 	stateBlockHash          common.Hash // Head of the pool's state view; pins frame validation to the same block
 	lastSeenBlock           atomic.Uint64
+	lastSeenHash            common.Hash // Hash of lastSeenBlock; set with it, under lock
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
 	started                 atomic.Bool
@@ -396,6 +397,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	defer func() {
 		if err == nil {
 			p.lastSeenBlock.Store(block)
+			p.lastSeenHash = frames.blockHash
 		}
 		p.lastSeenCond.Broadcast()
 	}()
@@ -788,8 +790,14 @@ func (p *TxPool) SetMaxTxnSize(size uint64) {
 	p.maxTxnSize.Store(size)
 }
 
+// seenLocked reports whether the pool's view has reached block number, and is
+// the block of hash when one is given.
+func (p *TxPool) seenLocked(number uint64, hash common.Hash) bool {
+	return p.lastSeenBlock.Load() >= number && (hash == (common.Hash{}) || p.lastSeenHash == hash)
+}
+
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
-func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
+func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64, parentHash common.Hash,
 	parentBlockWaitStop <-chan struct{},
 	availableGas mdgas.FullMdGas,
 	yielded mapset.Set[[32]byte], availableRlpSpace int,
@@ -828,20 +836,21 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	}()
 
 	p.lock.Lock()
-	for last := p.lastSeenBlock.Load(); last < onTopOf; last = p.lastSeenBlock.Load() {
+	for last := p.lastSeenBlock.Load(); !p.seenLocked(onTopOf, parentHash); last = p.lastSeenBlock.Load() {
 		select {
 		case <-ctx.Done():
 			// Leaving with the lock held would stop every later pool operation, not just this one.
 			p.lock.Unlock()
 			return false, 0, ctx.Err()
 		case <-parentBlockWaitStop:
+			lastHash := p.lastSeenHash
 			p.lock.Unlock()
-			p.logger.Debug("[txpool] Parent block wait stopped", "expecting", onTopOf, "lastSeen", last)
+			p.logger.Debug("[txpool] Parent block wait stopped", "expecting", onTopOf, "expectingHash", parentHash, "lastSeen", last, "lastSeenHash", lastHash)
 			return false, 0, ctx.Err()
 		default:
 			// continue
 		}
-		p.logger.Trace("[txpool] Waiting for block", "expecting", onTopOf, "lastSeen", last, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
+		p.logger.Trace("[txpool] Waiting for block", "expecting", onTopOf, "expectingHash", parentHash, "lastSeen", last, "lastSeenHash", p.lastSeenHash, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
 		p.lastSeenCond.Wait()
 	}
 	// Important: poolDB.BeginRo has a RoTxsLimiter which is implemented using a weighted semaphore object. This means
@@ -1033,6 +1042,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 		provideOptions.Amount,
 		&txnsRlp,
 		provideOptions.ParentBlockNum,
+		provideOptions.ParentBlockHash,
 		provideOptions.ParentBlockWaitStop,
 		provideOptions.GasTarget,
 		provideOptions.TxnIdsFilter,
@@ -1064,7 +1074,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 
 func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error) {
 	set := mapset.NewThreadUnsafeSet[[32]byte]()
-	onTime, _, err := p.best(ctx, n, txns, onTopOf, nil,
+	onTime, _, err := p.best(ctx, n, txns, onTopOf, common.Hash{}, nil,
 		mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, math.MaxUint64), set, math.MaxInt)
 	return onTime, err
 }
@@ -3129,6 +3139,10 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		// sync with the processed blocks
 
 		p.lastSeenBlock.Store(lastSeenProgress)
+		p.lastSeenHash = common.Hash{}
+	}
+	if p.lastSeenHash == (common.Hash{}) {
+		p.lastSeenHash = rawdb.ReadHeadBlockHash(coreTx)
 	}
 
 	it, err := tx.Range(kv.RecentLocalTransaction, nil, nil, order.Asc, kv.Unlim)

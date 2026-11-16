@@ -42,10 +42,12 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -862,6 +864,7 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 		1,
 		&selected,
 		0,
+		common.Hash{},
 		nil,
 		mdgas.NewFullMdGas(gasLimit, gasLimit-1, math.MaxUint64),
 		nil,
@@ -891,6 +894,7 @@ func TestBestYieldsTxnBelowLegacyMinGasPostAmsterdam(t *testing.T) {
 		1,
 		&selected,
 		0,
+		common.Hash{},
 		nil,
 		mdgas.NewFullMdGas(gasLimit, gasLimit, math.MaxUint64),
 		nil,
@@ -3956,6 +3960,84 @@ func TestPeekBestOfNoneWaitsForTheBlock(t *testing.T) {
 		t.Fatal("the peek did not return once the pool saw the block")
 	}
 	require.Equal(t, 1, pool.pending.Len())
+}
+
+// TestProvideTxnsWaitsForTheParentHash: a provider asked for the parent's
+// hash waits until the pool's view is that block, not only its height: after
+// a replacement at the parent's height, and after a retreat below the view.
+func TestProvideTxnsWaitsForTheParentHash(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 21_000)
+	see := func(changes ...*remoteproto.StateChange) {
+		t.Helper()
+		require.NoError(t, pool.OnNewBlock(t.Context(), &remoteproto.StateChangeBatch{
+			PendingBlockBaseFee: 200_000,
+			BlockGasLimit:       40_000_000,
+			ChangeBatch:         changes,
+		}, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	}
+	block := func(n uint64, hash common.Hash) *remoteproto.StateChange {
+		return &remoteproto.StateChange{BlockHeight: n, BlockHash: gointerfaces.ConvertHashToH256(hash)}
+	}
+	unwind := func(n uint64, hash common.Hash) *remoteproto.StateChange {
+		c := block(n, hash)
+		c.Direction = remoteproto.Direction_UNWIND
+		return c
+	}
+	provide := func(n uint64, hash common.Hash) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			txns, err := pool.ProvideTxns(t.Context(), txnprovider.WithParentBlockNum(n), txnprovider.WithParentBlockHash(hash))
+			if err == nil && len(txns) != 1 {
+				err = fmt.Errorf("%d transactions provided", len(txns))
+			}
+			done <- err
+		}()
+		return done
+	}
+	provided := func(done <-chan error) {
+		t.Helper()
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("the provider did not return once the pool saw the parent")
+		}
+	}
+	waits := func(done <-chan error) {
+		t.Helper()
+		require.Never(t, func() bool { return len(done) > 0 }, 300*time.Millisecond, 10*time.Millisecond, "provided on a view of another block")
+	}
+	a, b, c := common.Hash{0xa}, common.Hash{0xb}, common.Hash{0xc}
+
+	see(block(1, a))
+	provided(provide(1, a))
+
+	done := provide(1, b)
+	waits(done)
+	see(unwind(0, common.Hash{}), block(1, b))
+	provided(done)
+
+	see(block(2, c))
+	done = provide(1, b)
+	waits(done)
+	see(unwind(1, b))
+	provided(done)
+}
+
+// TestProvideTxnsOnTheHeadAfterStart: a pool started from its database, no
+// block seen since, takes the executed head for its view.
+func TestProvideTxnsOnTheHeadAfterStart(t *testing.T) {
+	ctx, pool, _, coreDB := newTestPool(t)
+	head := common.Hash{0xd}
+	require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		rawdb.WriteHeadBlockHash(tx, head)
+		return stages.SaveStageProgress(tx, stages.Execution, 3)
+	}))
+	require.NoError(t, pool.start(ctx))
+	short, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	_, err := pool.ProvideTxns(short, txnprovider.WithParentBlockNum(3), txnprovider.WithParentBlockHash(head))
+	require.NoError(t, err)
 }
 
 // A transaction larger than the pool's size limit is refused when added and

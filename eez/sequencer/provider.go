@@ -22,8 +22,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/exec"
@@ -89,13 +91,15 @@ func (c *counter) Write(p []byte) (int, error) {
 // refuses, for a block that takes them within budget bytes of DA.
 type poolTxns struct {
 	pool   txnprovider.TxnProvider
+	parent common.Hash
 	budget int
 	logger log.Logger
 }
 
-// newPoolTxns returns a provider of one block of pool transactions.
-func newPoolTxns(pool txnprovider.TxnProvider, budget int, logger log.Logger) *poolTxns {
-	return &poolTxns{pool: pool, budget: budget, logger: logger}
+// newPoolTxns returns a provider of pool transactions for one block on
+// parent.
+func newPoolTxns(pool txnprovider.TxnProvider, parent common.Hash, budget int, logger log.Logger) *poolTxns {
+	return &poolTxns{pool: pool, parent: parent, budget: budget, logger: logger}
 }
 
 // TxnsBudget bounds the DA of the transactions the block takes, not of those
@@ -108,13 +112,20 @@ func (p *poolTxns) TxnsBudget() *exec.TxnsBudget {
 // poolWait bounds the wait for the pool to see a block's parent.
 var poolWait = time.Minute
 
+// viewWait bounds the build's wait for the pool to see the parent's hash. By
+// then the pool has seen its height and has only to apply the head changes
+// made before the build, which takes milliseconds.
+var viewWait = 5 * time.Second
+
 // poolView is a pool that tells when its view of the chain reaches a block.
 type poolView interface {
 	PeekBest(ctx context.Context, n int, txns *txpool.TxnsRlp, onTopOf uint64) (bool, error)
 }
 
-// await returns once the pool has seen block parent. The build waits for it
-// too, but on the goroutine derivation shares.
+// await returns once the pool has seen block parent's height. The build
+// waits for it too, but on the goroutine derivation shares, where it also
+// waits for the parent's hash, within viewWait: there the head stays at the
+// parent, while here it may move on, past a view the pool would never reach.
 func (p *poolTxns) await(ctx context.Context, parent uint64) error {
 	v, ok := p.pool.(poolView)
 	if !ok || !p.started() {
@@ -142,8 +153,10 @@ func (p *poolTxns) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideO
 	// The pool marks what it yields in the caller's filter, so a page this
 	// provider empties is not the pool running dry: the next holds others.
 	pages := txnprovider.ApplyProvideOptions(opts...).TxnIdsFilter != nil
+	// A pool that has seen the parent's height may hold another branch.
+	opts = append(slices.Clip(opts), txnprovider.WithParentBlockHash(p.parent))
 	for {
-		txs, err := p.pool.ProvideTxns(ctx, opts...)
+		txs, err := p.provide(ctx, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -152,6 +165,17 @@ func (p *poolTxns) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideO
 			return kept, nil
 		}
 	}
+}
+
+// provide asks the pool for a page of transactions, within viewWait.
+func (p *poolTxns) provide(ctx context.Context, opts []txnprovider.ProvideOption) ([]types.Transaction, error) {
+	wctx, cancel := context.WithTimeout(ctx, viewWait)
+	defer cancel()
+	txs, err := p.pool.ProvideTxns(wctx, opts...)
+	if err != nil && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+		return nil, fmt.Errorf("txpool has not seen block %s: %w", p.parent, err)
+	}
+	return txs, err
 }
 
 // keep returns the transactions of txs a block may carry.

@@ -35,7 +35,7 @@ import (
 func bestOf(t *testing.T, pool *TxPool) int {
 	t.Helper()
 	var selected TxnsRlp
-	_, count, err := pool.best(t.Context(), 10, &selected, 0, nil, mdgas.NewFullMdGas(30_000_000, 30_000_000, math.MaxUint64), nil, math.MaxInt)
+	_, count, err := pool.best(t.Context(), 10, &selected, 0, common.Hash{}, nil, mdgas.NewFullMdGas(30_000_000, 30_000_000, math.MaxUint64), nil, math.MaxInt)
 	require.NoError(t, err)
 	return count
 }
@@ -164,7 +164,7 @@ func TestBestSkipsATxnOverTheSpaceLeft(t *testing.T) {
 
 	yielded := mapset.NewSet[[32]byte]()
 	var selected TxnsRlp
-	_, count, err := pool.best(t.Context(), 10, &selected, 0, nil, mdgas.NewFullMdGas(30_000_000, 30_000_000, math.MaxUint64), yielded, space)
+	_, count, err := pool.best(t.Context(), 10, &selected, 0, common.Hash{}, nil, mdgas.NewFullMdGas(30_000_000, 30_000_000, math.MaxUint64), yielded, space)
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 	require.True(t, yielded.Contains(second.TxnSlot.IDHash))
