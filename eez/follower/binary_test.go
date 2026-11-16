@@ -19,6 +19,7 @@ package follower_test
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -810,17 +811,30 @@ func TestSequencerBinary(t *testing.T) {
 		var hash common.Hash
 		return call(t.Context(), s.url, "eth_sendRawTransaction", &hash, tx) == nil
 	})
+	k := l2.L1BlockTime / l2.BlockInterval
+	sign := func(nonce uint64, data uint64) hexutil.Bytes {
+		signed, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 21_000 + 10*data, To: &bob, Data: make([]byte, data)},
+			ChainID:  *c.L2.ChainConfig.ChainID,
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(10 * common.GWei),
+		}, *types.LatestSignerForChainID(c.L2.ChainConfig.ChainID), derivertest.UserKey)
+		require.NoError(t, err)
+		var encoded bytes.Buffer
+		require.NoError(t, signed.MarshalBinary(&encoded))
+		return encoded.Bytes()
+	}
 	// The pool refuses a transaction too large for any block's DA budget.
-	oversized, err := types.SignTx(&types.DynamicFeeTransaction{
-		CommonTx: types.CommonTx{Nonce: 1, GasLimit: 2_000_000, To: &bob, Data: make([]byte, seqpkg.MaxTxnSize(l2.L1BlockTime/l2.BlockInterval))},
-		ChainID:  *c.L2.ChainConfig.ChainID,
-		TipCap:   *uint256.NewInt(1),
-		FeeCap:   *uint256.NewInt(10 * common.GWei),
-	}, *types.LatestSignerForChainID(c.L2.ChainConfig.ChainID), derivertest.UserKey)
-	require.NoError(t, err)
-	var encoded bytes.Buffer
-	require.NoError(t, oversized.MarshalBinary(&encoded))
-	require.ErrorContains(t, call(t.Context(), s.url, "eth_sendRawTransaction", new(common.Hash), hexutil.Bytes(encoded.Bytes())), "RLPTooLong")
+	require.ErrorContains(t, call(t.Context(), s.url, "eth_sendRawTransaction", new(common.Hash), sign(1, seqpkg.MaxTxnSize(k))), "RLPTooLong")
+	// Block 1 takes the transfer and two of three transactions of 30 KB, as
+	// many as its DA budget carries; a later block takes the third.
+	spanSize := func(tx hexutil.Bytes) int { return len(tx) + len(binary.AppendUvarint(nil, uint64(len(tx)))) }
+	fill := []hexutil.Bytes{sign(1, 30_000), sign(2, 30_000), sign(3, 30_000)}
+	two := spanSize(tx) + spanSize(fill[0]) + spanSize(fill[1])
+	require.True(t, two <= seqpkg.DABudget(k) && two+spanSize(fill[2]) > seqpkg.DABudget(k), "two fill the budget")
+	for _, raw := range fill {
+		require.NoError(t, call(t.Context(), s.url, "eth_sendRawTransaction", new(common.Hash), raw))
+	}
 	l1Up.Store(true)
 	var receipt *struct {
 		BlockNumber hexutil.Uint64 `json:"blockNumber"`
@@ -831,6 +845,19 @@ func TestSequencerBinary(t *testing.T) {
 		return call(t.Context(), s.url, "eth_getTransactionReceipt", &receipt, txHash) == nil && receipt != nil
 	})
 	require.Equal(t, hexutil.Uint64(1), receipt.BlockNumber, "block 1 holds the transaction")
+	for i, raw := range fill {
+		var r *struct {
+			BlockNumber hexutil.Uint64 `json:"blockNumber"`
+		}
+		s.waitFor("a produced block holds the 30 KB transaction", func() bool {
+			return call(t.Context(), s.url, "eth_getTransactionReceipt", &r, crypto.Keccak256Hash(raw)) == nil && r != nil
+		})
+		if i < 2 {
+			require.Equal(t, hexutil.Uint64(1), r.BlockNumber, "block 1 holds 30 KB transaction %d", i)
+		} else {
+			require.Greater(t, r.BlockNumber, hexutil.Uint64(1), "the budget leaves out the third")
+		}
+	}
 	f.waitFor("the follower takes the sequencer's block", func() bool {
 		h, err := blockHash(t.Context(), f.url, hexutil.Uint64(receipt.BlockNumber).String())
 		return err == nil && h == receipt.BlockHash
