@@ -275,7 +275,7 @@ func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db k
 type ReceiptsOpts struct {
 	CommitmentHistoryEnabled bool
 	// ReadCached, when set, replaces the RCacheV2 read of the block receipts.
-	ReadCached func(block *types.Block) (types.Receipts, error)
+	ReadCached func(block *types.Block) types.Receipts
 }
 
 type ReceiptsGetter interface {

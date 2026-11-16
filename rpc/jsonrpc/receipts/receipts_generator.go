@@ -541,9 +541,9 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	// this check on `calculatePostState` should be removed to utilize the stored receipt.
 	if !rpcDisableRCache && !calculatePostState {
 		if opts.ReadCached != nil {
-			receiptsFromDB, err = opts.ReadCached(block)
+			receiptsFromDB = opts.ReadCached(block)
 		}
-		if err == nil && len(receiptsFromDB) == 0 {
+		if len(receiptsFromDB) == 0 {
 			receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
 		}
 		if err != nil {
