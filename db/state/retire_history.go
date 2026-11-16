@@ -109,16 +109,10 @@ func (at *AggregatorRoTx) Retire(cutoffs kv.RetireCutoffs) (retiredCount int, er
 	defer at.a.dirtyFilesLock.Unlock()
 	var retired []*FilesItem
 	for _, agedList := range aged {
-		var retireTo uint64
-		for _, covering := range agedList.files {
-			if current, ok := agedList.dirtyFiles.Get(covering); !ok || current != covering {
-				continue
-			}
-			retireTo = max(retireTo, covering.endTxNum)
-		}
-		if retireTo == 0 {
+		if len(agedList.files) == 0 {
 			continue
 		}
+		retireTo := agedList.files[len(agedList.files)-1].endTxNum
 		var outs []*FilesItem
 		agedList.dirtyFiles.Scan(func(item *FilesItem) bool {
 			if item.endTxNum > retireTo {
