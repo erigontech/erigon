@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"encoding/binary"
+	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -226,4 +227,36 @@ func TestInboundCost(t *testing.T) {
 	cost, err = inboundCost([]*Delivery{{Call: in, Sidecar: sidecar}, {Call: in, Sidecar: sidecar}})
 	require.NoError(t, err)
 	require.Equal(t, l1Cost{entries: 2, calldata: 2 * one.calldata, tokens: 2 * one.tokens}, cost)
+}
+
+// TestBudgetCutsTheDrain: held transactions of one outbound entry, 180
+// bytes and 47,763 gas on L1 each, fill a cap of 16,177,216 below 50.
+func TestBudgetCutsTheDrain(t *testing.T) {
+	e := &protocol.ExecutionEntry{
+		L2ToL1Calls: []protocol.CrossChainCall{{
+			SourceAddress: common.HexToAddress("0x1111111111111111111111111111111111111111"), SourceRollupID: 1,
+			TargetAddress: common.HexToAddress("0x2222222222222222222222222222222222222222"), Value: new(big.Int),
+			Data: bytes.Repeat([]byte{0x55}, 68),
+		}},
+		DestinationRollupID: 1, Success: true, ReturnData: []byte{},
+	}
+	raw := bytes.Repeat([]byte{0x77}, 180)
+	cost, err := outboundCost(e, raw, 47_763)
+	require.NoError(t, err)
+	enc, err := protocol.EncodeExecutionEntry(e)
+	require.NoError(t, err)
+	require.Equal(t, l1Cost{entries: 1, calldata: 2*calldataGas(enc) + calldataGas(raw), tokens: 2*floorTokens(enc) + floorTokens(raw), target: 47_763}, cost)
+	b := newBudget(MaxPostBatchGas, 0)
+	accepted := uint64(0)
+	for range 50 {
+		if !b.fits(cost) {
+			break
+		}
+		b.take(cost)
+		accepted++
+	}
+	per := postBatchEntryGas + cost.calldata + cost.target
+	require.Equal(t, (MaxPostBatchGas-drainMargin-551_000)/per, accepted)
+	require.Less(t, accepted, uint64(50))
+	require.Equal(t, 551_000+accepted*per, b.projected)
 }

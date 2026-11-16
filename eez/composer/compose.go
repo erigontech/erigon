@@ -20,9 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
+	"github.com/holiman/uint256"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -66,6 +66,9 @@ type CrossChain struct {
 	L2Config *chain.Config
 	Engine   rules.Engine
 	Sync     protocol.SyncTxContext
+	// Escrow returns the rollup's ether held by the manager at an L1 block,
+	// what its outbound calls can carry.
+	Escrow func(ctx context.Context, block common.Hash) (*uint256.Int, error)
 	// MaxTxs bounds the held transactions one Sync block takes.
 	MaxTxs int
 }
@@ -82,34 +85,35 @@ func (c *Composer) CrossChain(x *CrossChain) {
 // their deliveries and its transactions.
 type effects struct {
 	held       []*Held
+	outbound   []protocol.ExecutionEntry
 	deliveries []*Delivery
 	txs        []types.Transaction
 	// anchor is the L1 block the transactions were simulated on, the parent
 	// of the one the bundle aims at.
 	anchor common.Hash
+	// projected is the posting's gas as the drain projected it.
+	projected uint64
 }
 
 // compose simulates held transactions on L1 state at block target-1, in the
-// context of block target at ts, and delivers their calls on a draft of the
-// Sync block on parent, while the block and
-// the gas of the posting settling the window from cursor hold them. A poison
+// context of block target at ts, and composes their effects into a draft of
+// the Sync block on parent, outbound before inbound, while the block and the
+// gas of the posting settling the window from cursor hold them. A poison
 // transaction, or one an empty block or a posting of the Sync block alone
-// cannot hold, is evicted with the rest of its nonce chain; a transient
-// failure or a full block or posting returns the rest to the pool. Up to
-// maxDeferrals compositions, a transaction whose nonce is ahead of its
-// sender's on L1 waits with the rest of its chain, out of the drain's count,
-// and so does one only a lighter window has room for, in the count, while
-// others behind it compose. Nil when none composes.
+// cannot hold, is evicted with the rest of its nonce chain; one whose nonce
+// is spent is dropped; one whose value the manager cannot pay waits with the
+// rest of its chain until its attempts run out. A transient failure or a
+// full block or posting returns the rest to the pool. Up to maxDeferrals
+// compositions, a transaction whose nonce is ahead of its sender's waits
+// with the rest of its chain, out of the drain's count, and so does one only
+// a lighter window has room for, in the count, while others behind it
+// compose. Nil when none composes.
 func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Header, target, ts uint64) *effects {
-	rest := c.x.Pool.PopN(c.x.MaxTxs)
-	if len(rest) == 0 {
+	k := &composition{c: c, ctx: ctx, fx: &effects{}}
+	if !k.pop(c.x.MaxTxs) {
 		return nil
 	}
-	fx := &effects{}
-	// unroomed counts those deferred after a simulation: they take from the
-	// drain as the others do.
-	popped, unroomed := len(rest), 0
-	var deferred []*Held
+	fx := k.fx
 	err := func() error {
 		// Read ahead of the state views, which hold the chain's read
 		// transactions.
@@ -122,17 +126,16 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 		}
 		return c.x.L1.ViewState(ctx, fx.anchor, func(anchor *types.Header, reader state.StateReader) error {
 			blockHash := func(n uint64) (common.Hash, error) { return c.x.L1Hash(ctx, n) }
-			src := NewSource(c.x.L1Config, child(c.x.L1Config, anchor, ts), reader, blockHash, c.x.Manager, protocol.MainnetRollupID)
+			k.src = NewSource(c.x.L1Config, child(c.x.L1Config, anchor, ts), reader, blockHash, c.x.Manager, protocol.MainnetRollupID)
 			return c.x.L2(ctx, parent, func(pre PreState) error {
 				header, err := c.x.Header(parent, pre.Headers)
 				if err != nil {
 					return err
 				}
-				draft, err := NewDraft(c.x.L2Config, c.x.Engine, header, pre)
-				if err != nil {
+				if k.draft, err = NewDraft(c.x.L2Config, c.x.Engine, header, pre); err != nil {
 					return err
 				}
-				draft.ctx = ctx
+				k.draft.ctx = ctx
 				// The posting carries the window's blocks before any effect; the
 				// bundle's block may have 1/1024 less gas than the anchor.
 				block := anchor.GasLimit - anchor.GasLimit/1024
@@ -141,139 +144,28 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 					return fmt.Errorf("posting gas limit %d over the L1 block's %d", c.cfg.MaxGas, block)
 				}
 				sync := types.NewBlockWithHeader(header, nil)
-				gas, err := windowBudget(c.cfg.Batcher, c.cfg.MaxGas, block, append(window, sync))
-				if err != nil {
+				if k.gas, err = windowBudget(c.cfg.Batcher, c.cfg.MaxGas, block, append(window, sync)); err != nil {
 					return err
 				}
 				// The lightest window a posting of effects settles.
-				alone, err := windowBudget(c.cfg.Batcher, c.cfg.MaxGas, block, []*types.Block{sync})
-				if err != nil {
+				if k.alone, err = windowBudget(c.cfg.Batcher, c.cfg.MaxGas, block, []*types.Block{sync}); err != nil {
 					return err
 				}
-				evict := func(h *Held, err error) {
-					c.logger.Warn("[eez] held transaction evicted: it cannot compose", "event", "eez.composer.poison",
-						"hash", h.Hash, "sender", h.Sender, "nonce", h.Nonce, "err", err)
-					c.x.Pool.Evict(h.Sender, h.Direction, h.Nonce)
-					// Evict ended the reservations of the chain drained so far; one
-					// the front admits after it is a new chain.
-					behind := func(t *Held) bool { return t.chainKey() == h.chainKey() && t.Nonce > h.Nonce }
-					rest, deferred = slices.DeleteFunc(rest, behind), slices.DeleteFunc(deferred, behind)
-				}
-				for {
-					if len(rest) == 0 {
-						// Those waiting on L1 or on the one ahead leave the drain room
-						// for others.
-						want := c.x.MaxTxs - (popped - len(deferred) + unroomed)
-						if want <= 0 {
-							break
-						}
-						if rest = c.x.Pool.PopN(want); len(rest) == 0 {
-							break
-						}
-						popped += len(rest)
-					}
-					if err := ctx.Err(); err != nil {
-						return err
-					}
-					h := rest[0]
-					if slices.ContainsFunc(deferred, func(d *Held) bool { return d.chainKey() == h.chainKey() && h.Nonce > d.Nonce }) {
-						// It waits on the one of its chain ahead.
-						deferred = append(deferred, h)
-						rest = rest[1:]
-						continue
-					}
-					onChain, err := src.Nonce(h.Sender)
-					if err != nil {
-						return err
-					}
-					switch {
-					case h.Nonce < onChain:
-						c.logger.Info("[eez] held transaction dropped: its nonce is spent", "event", "eez.composer.stale",
-							"hash", h.Hash, "sender", h.Sender, "nonce", h.Nonce, "onChain", onChain)
-						c.x.Pool.Release([]*Held{h})
-						rest = rest[1:]
-						continue
-					case h.Nonce > onChain:
-						// Admitted on a pending nonce: a predecessor sent elsewhere
-						// has yet to land.
-						if h.Deferred++; h.Deferred >= maxDeferrals {
-							evict(h, Poison(fmt.Errorf("nonce %d still ahead of the sender's %d on L1", h.Nonce, onChain)))
-						} else {
-							if h.Deferred == 1 {
-								c.logger.Info("[eez] held transaction waits: its nonce is ahead of the sender's on L1", "event", "eez.composer.nonce_gap",
-									"hash", h.Hash, "sender", h.Sender, "nonce", h.Nonce, "onChain", onChain)
-							}
-							deferred = append(deferred, h)
-						}
-						rest = rest[1:]
-						continue
-					}
-					tx, err := types.DecodeTransaction(h.Raw)
-					if err != nil {
-						return err
-					}
-					ds, err := NewDeliveries(c.x.Sync, draft)
-					if err != nil {
-						return err
-					}
-					var cost l1Cost
-					_, err = src.Run(ctx, tx, ds.Dispatch, func([]*Call) error {
-						var err error
-						if cost, err = inboundCost(ds.Delivered); err != nil {
-							return err
-						}
-						cost.trigger = tx.GetGasLimit()
-						switch {
-						case gas.fits(cost):
-							return nil
-						case !alone.fits(cost):
-							return Poison(fmt.Errorf("alone: %w", errOverBudget))
-						case len(fx.held) > 0:
-							return errOverBudget
-						}
-						if h.Deferred++; h.Deferred >= maxDeferrals {
-							return Poison(fmt.Errorf("no window left room in %d compositions: %w", maxDeferrals, errOverBudget))
-						}
-						return errNoRoom
-					})
-					if errors.Is(err, errNoRoom) {
-						deferred = append(deferred, h)
-						unroomed++
-						rest = rest[1:]
-						continue
-					}
-					if errors.Is(err, ErrFull) && len(fx.held) == 0 {
-						err = Poison(fmt.Errorf("alone: %w", err))
-					}
-					if err != nil {
-						if !IsPoison(err) {
-							return err
-						}
-						evict(h, err)
-						rest = rest[1:]
-						continue
-					}
-					gas.take(cost)
-					h.Deferred = 0
-					draft = ds.fork
-					fx.held = append(fx.held, h)
-					fx.deliveries = append(fx.deliveries, ds.Delivered...)
-					fx.txs = draft.Txs()
-					rest = rest[1:]
-				}
-				return nil
+				return k.drain()
 			})
 		})
 	}()
+	waiting := len(k.deferred) + len(k.rest)
 	switch {
 	case err == nil:
 	case full(err):
 		c.logger.Info("[eez] Sync block full, the rest waits for the next slot", "event", "eez.composer.compose.full",
-			"composed", len(fx.held), "waiting", len(rest), "reason", err)
+			"composed", len(fx.held), "waiting", waiting, "reason", err)
 	default:
 		c.logger.Warn("[eez] composition stopped, the rest waits for the next slot", "event", "eez.composer.compose.stopped",
-			"composed", len(fx.held), "waiting", len(rest), "err", err)
+			"composed", len(fx.held), "waiting", waiting, "err", err)
 	}
+	deferred := k.deferred
 	if len(fx.held) > 0 && ctx.Err() != nil {
 		// Committed past its deadline, the Sync block could not be proven in
 		// time; each chain keeps its nonce order with the composed first.
@@ -281,10 +173,15 @@ func (c *Composer) compose(ctx context.Context, cursor uint64, parent *types.Hea
 			"composed", len(fx.held))
 		deferred, fx.held = append(fx.held, deferred...), nil
 	}
-	c.x.Pool.PushFront(append(deferred, rest...))
+	c.x.Pool.PushFront(append(deferred, k.rest...))
 	if len(fx.held) == 0 {
 		return nil
 	}
+	if k.gas != nil {
+		fx.projected = k.gas.projected
+	}
+	c.logger.Info("[eez] Sync block composed", "event", "eez.composer.composed", "held", len(fx.held), "outbound", len(fx.outbound),
+		"inbound", len(fx.deliveries), "txs", len(fx.txs), "waiting", waiting, "postingGas", fx.projected)
 	return fx
 }
 
@@ -385,7 +282,7 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 	if last := blocks[len(blocks)-1]; last.Hash() != sync.Hash() {
 		return nodeFault(fmt.Errorf("block %d is %x, no longer the committed %x", e.sync, last.Hash(), sync.Hash()))
 	}
-	fx := Effects{}
+	fx := Effects{Outbound: e.fx.outbound}
 	for _, d := range e.fx.deliveries {
 		fx.Inbound = append(fx.Inbound, *d.Sidecar)
 	}
@@ -429,6 +326,10 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 	}
 	bundle := []types.Transaction{tx}
 	for _, h := range e.fx.held {
+		// An outbound transaction is the rollup's, in the Sync block.
+		if h.Direction == Outbound {
+			continue
+		}
 		trigger, err := types.DecodeTransaction(h.Raw)
 		if err != nil {
 			return err

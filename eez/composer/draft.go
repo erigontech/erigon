@@ -139,6 +139,19 @@ func (d *Draft) Fork() (*Draft, error) {
 	return f, nil
 }
 
+// Simulation returns a simulation of the draft's chain on a fork of it,
+// whose proxies manager registers; rollup is the chain's rollup id.
+func (d *Draft) Simulation(manager common.Address, rollup uint64) (*Source, error) {
+	f, err := d.Fork()
+	if err != nil {
+		return nil, err
+	}
+	return &Source{
+		config: d.config, header: f.header, ibs: f.ibs, reads: f.reads, blockHash: f.blockHash,
+		manager: accounts.InternAddress(manager), rollup: rollup, rules: f.chainRules, index: len(f.txs),
+	}, nil
+}
+
 // Nonce returns addr's nonce in the draft.
 func (d *Draft) Nonce(addr common.Address) (uint64, error) {
 	n, err := d.ibs.GetNonce(accounts.InternAddress(addr))

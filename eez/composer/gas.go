@@ -169,3 +169,13 @@ func inboundCost(ds []*Delivery) (l1Cost, error) {
 	}
 	return c, nil
 }
+
+// outboundCost is what an outbound entry adds: itself in the batch and in
+// its DA, its transaction in the DA, and its target call's gas.
+func outboundCost(e *protocol.ExecutionEntry, raw []byte, target uint64) (l1Cost, error) {
+	enc, err := protocol.EncodeExecutionEntry(e)
+	if err != nil {
+		return l1Cost{}, err
+	}
+	return l1Cost{entries: 1, calldata: 2*calldataGas(enc) + calldataGas(raw), tokens: 2*floorTokens(enc) + floorTokens(raw), target: target}, nil
+}

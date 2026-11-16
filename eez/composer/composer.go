@@ -550,7 +550,8 @@ const maxAttempts = 3
 // block is replaced by an empty one, the triggers that landed on L1 are let
 // go, the rest go back to the front of the pool.
 func (c *Composer) recoverHeld(ctx context.Context, p Posted[*Held]) {
-	landed, err := c.landed(ctx, p.Txs)
+	// An outbound transaction lands in the Sync block replaced.
+	landed, err := c.landed(ctx, bundled(p.Txs))
 	if err != nil {
 		c.ledger.ReinsertFailed(p)
 		return
@@ -576,15 +577,15 @@ func (c *Composer) recoverHeld(ctx context.Context, p Posted[*Held]) {
 	}
 	c.pool.Release(spent)
 	if !p.SlotSkipped {
-		keep = c.charge(keep)
+		keep = c.charge(c.pool, keep)
 	}
 	c.pool.PushFront(keep)
 }
 
-// charge counts a failed bundle against each of charged, by default all of
-// txs, and returns those of txs left: one at maxAttempts is evicted with the
-// rest of its nonce chain.
-func (c *Composer) charge(txs []*Held, charged ...*Held) []*Held {
+// charge counts a failed attempt against each of charged, by default all
+// of txs, and returns those of txs left: one at maxAttempts is evicted from
+// pool with the rest of its nonce chain.
+func (c *Composer) charge(pool *HeldPool, txs []*Held, charged ...*Held) []*Held {
 	type root struct {
 		sender    common.Address
 		direction Direction
@@ -609,7 +610,7 @@ func (c *Composer) charge(txs []*Held, charged ...*Held) []*Held {
 		}
 	}
 	for _, r := range roots {
-		evicted := c.pool.Evict(r.sender, r.direction, r.nonce)
+		evicted := pool.Evict(r.sender, r.direction, r.nonce)
 		c.logger.Error("[eez] held transaction evicted after failed bundles", "event", "eez.composer.recovery.evicted",
 			"sender", r.sender, "direction", r.direction, "nonce", r.nonce, "queued", len(evicted))
 	}
@@ -750,6 +751,18 @@ func (c *Composer) landed(ctx context.Context, txs []*Held) (map[common.Hash]boo
 	return out, nil
 }
 
+// bundled returns the transactions of txs a bundle carries to L1: an
+// outbound one is the rollup's, in the Sync block.
+func bundled(txs []*Held) []*Held {
+	var out []*Held
+	for _, tx := range txs {
+		if tx.Direction != Outbound {
+			out = append(out, tx)
+		}
+	}
+	return out
+}
+
 // partialCulprit returns the transaction where L1 stopped a partial batch of
 // txs, given those spent: its first one when unspent, as one behind a spent
 // trigger may only be stuck behind it. Nil names none.
@@ -765,13 +778,15 @@ func partialCulprit(txs []*Held, spent map[common.Hash]bool) *Held {
 // rest return to the pool, the one where L1 stopped charged. False leaves p
 // for the next call, a read having failed.
 func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
-	spent, err := c.landed(ctx, p.Txs)
+	in := bundled(p.Txs)
+	spent, err := c.landed(ctx, in)
 	if err != nil {
 		return false
 	}
 	var ran, rest []*Held
 	for _, tx := range p.Txs {
-		if spent[tx.Hash] {
+		// An outbound entry is immediate: the posting that landed ran it.
+		if tx.Direction == Outbound || spent[tx.Hash] {
 			ran = append(ran, tx)
 		} else {
 			rest = append(rest, tx)
@@ -781,7 +796,7 @@ func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
 	if !c.ledger.ClaimPartial(p.Height, p.Post, ran) {
 		return true
 	}
-	culprit, charged := partialCulprit(p.Txs, spent), common.Hash{}
+	culprit, charged := partialCulprit(in, spent), common.Hash{}
 	if culprit != nil {
 		charged = culprit.Hash
 	}
@@ -789,7 +804,7 @@ func (c *Composer) disposePartial(ctx context.Context, p Posted[*Held]) bool {
 		"to", p.Height, "post", p.Post, "txs", len(p.Txs), "spent", len(ran), "charged", charged)
 	c.release(ran)
 	if culprit != nil {
-		rest = c.charge(rest, culprit)
+		rest = c.charge(c.pool, rest, culprit)
 	}
 	if len(rest) > 0 {
 		c.pool.PushFront(rest)

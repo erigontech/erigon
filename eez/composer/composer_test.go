@@ -1254,6 +1254,7 @@ func TestComposerAuditsFinality(t *testing.T) {
 type triggers struct {
 	landed map[common.Hash]bool
 	failed error
+	asked  []common.Hash
 }
 
 func (l *triggers) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, error) {
@@ -1263,6 +1264,7 @@ func (l *triggers) HeaderByNumber(_ context.Context, n uint64) (*l1.Header, erro
 func (l *triggers) Head(context.Context) (*l1.Header, error) { return &l1.Header{Number: 1}, nil }
 
 func (l *triggers) Receipt(_ context.Context, h common.Hash) (*l1.Receipt, error) {
+	l.asked = append(l.asked, h)
 	if l.failed != nil {
 		return nil, l.failed
 	}
@@ -1348,6 +1350,24 @@ func TestComposerChargeEvictsTheChain(t *testing.T) {
 	h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
 	h.c.RecoverFailed(t.Context())
 	require.Empty(t, pool.PopN(math.MaxInt))
+}
+
+// TestComposerRecoversOutboundTransactions: an outbound transaction of a
+// failed batch is the rollup's, never on L1: it is requeued, charged,
+// without a lookup.
+func TestComposerRecoversOutboundTransactions(t *testing.T) {
+	out := held(addr(0xa), 0, Outbound, 1)
+	node := &triggers{landed: map[common.Hash]bool{out.Hash: true}}
+	h := newHarness(t, newTestChain(t, 8), 8, node)
+	pool := NewHeldPool()
+	h.c.Recover(pool, func(context.Context, *types.Header) (*types.Header, error) { return nil, nil })
+	require.NoError(t, pool.Push(out, 0))
+	h.c.ledger.Begin(Posted[*Held]{Height: 8, Post: common.Hash{0xf}, Terminal: h.chain.header(8), Txs: pool.PopN(1)})
+	h.c.ledger.MarkFailed(8, common.Hash{0xf}, false)
+	h.c.RecoverFailed(t.Context())
+	require.Equal(t, []*Held{out}, pool.PopN(math.MaxInt))
+	require.Equal(t, uint32(1), out.Attempts)
+	require.NotContains(t, node.asked, out.Hash)
 }
 
 func TestComposerRecoversHeldTransactions(t *testing.T) {

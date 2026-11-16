@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
@@ -73,13 +75,23 @@ func (l *memL1) ViewState(_ context.Context, hash common.Hash, read func(*types.
 	return read(h, l.m)
 }
 
-var crossProxy = common.HexToAddress("0xaaaa0000000000000000000000000000000000ff")
+var (
+	crossProxy = common.HexToAddress("0xaaaa0000000000000000000000000000000000ff")
+	// The window's outbound calls go through the rollup's proxies of
+	// outboundTargets, and arrive through senderProxy, l2Sender's on L1.
+	outboundProxies = []common.Address{common.HexToAddress("0x1Fc99E43B3DBECFe7dFe20Ae0ACbD58dEea30cf7"), common.HexToAddress("0x7A9dc1EC60AcB39eEb90A470Ab014C5998998582")}
+	outboundTargets = []common.Address{common.HexToAddress("0x2E983A1Ba5e8b38AAAeC4B440B9dDcFBf72E15d1"), common.HexToAddress("0x8438Ad1C834623CfF278AB6829a248E37C2D7E3f")}
+	senderProxy     = common.HexToAddress("0x7ed95b38a527a21e90176b4b441b15f1725872b7")
+)
 
 // targetTime is the time of block 101, the one after every memL1 block.
 const targetTime = 1_800_000_012
 
 // crossFixture composes on window 468's Sync block parent, with an L1 on
-// which the window's recorded inbound call is one held transaction away.
+// which the window's recorded calls are held transactions away: its manager
+// runs EEZL2's code at EEZL2's address, where the rollup's proxies, copied,
+// take its calls; the outbound sender's proxy is registered, and the
+// outbound targets answer as recorded.
 type crossFixture struct {
 	w      *syncWindow
 	call   *Call
@@ -94,6 +106,10 @@ type crossFixture struct {
 	rewound   []common.Hash
 	// gas is the gas limit of the transactions held, 1,000,000 when zero.
 	gas uint64
+	// l2 overlays the rollup's state; l2Key is a rollup account in it.
+	l2     *memState
+	l2Key  *ecdsa.PrivateKey
+	escrow *uint256.Int
 }
 
 func newCrossFixture(t *testing.T) *crossFixture {
@@ -104,21 +120,54 @@ func newCrossFixture(t *testing.T) *crossFixture {
 	require.NoError(t, err)
 	m := newMemState()
 	m.fund(crypto.PubkeyToAddress(key.PublicKey), 1e18)
-	m.deploy(manager, []byte{0x00})
-	m.set(manager, protocol.ProxyKey(crossProxy), proxyWord(call.Target, 1))
+	eezl2, err := w.pre.Reader.ReadAccountCode(accounts.InternAddress(protocol.EEZL2Address))
+	require.NoError(t, err)
+	proxyCode, err := w.pre.Reader.ReadAccountCode(accounts.InternAddress(outboundProxies[0]))
+	require.NoError(t, err)
+	m.deploy(protocol.EEZL2Address, eezl2)
+	m.set(protocol.EEZL2Address, protocol.ProxyKey(crossProxy), proxyWord(call.Target, 1))
+	m.deploy(senderProxy, proxyCode)
+	m.set(protocol.EEZL2Address, protocol.ProxyKey(senderProxy), proxyWord(l2Sender, 1))
+	m.deploy(outboundTargets[0], []byte{0x60, 0x01, 0x60, 0x00, 0x52, 0x60, 0x04, 0x35, 0x60, 0x20, 0x52, 0x60, 0x40, 0x60, 0x00, 0xf3})
+	m.deploy(outboundTargets[1], []byte{0x00})
 	m.deploy(call.Source, forward(crossProxy, false))
 	m.deploy(unproxied, append(callTo(nobody), 0x00))
-	f := &crossFixture{w: w, call: call, output: output, l1: &memL1{m: m}, key: key, pool: NewHeldPool()}
+	m.deploy(revertTarget, []byte{0x61, 0xde, 0xad, 0x60, 0x00, 0x52, 0x60, 0x02, 0x60, 0x1e, 0xfd})
+	l2Key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	f := &crossFixture{w: w, call: call, output: output, l1: &memL1{m: m}, key: key, pool: NewHeldPool(), l2: newMemState(), l2Key: l2Key}
+	f.l2.fund(crypto.PubkeyToAddress(l2Key.PublicKey), 1e18)
+	f.l2.deploy(l2Twice, slices.Concat(callTo(outboundProxies[1]), callTo(outboundProxies[1]), []byte{0x00}))
+	for p, target := range map[common.Address]common.Address{otherProxy: outboundTargets[1], revertProxy: revertTarget} {
+		f.l2.deploy(p, proxyCode)
+		rollup := uint64(0)
+		if p == otherProxy {
+			rollup = 2
+		}
+		f.l2.set(protocol.EEZL2Address, protocol.ProxyKey(p), proxyWord(target, rollup))
+	}
+	f.registerL1Proxy(t, crypto.PubkeyToAddress(l2Key.PublicKey))
+	f.registerL1Proxy(t, l2Twice)
+	f.l2.deploy(l2Stingy, slices.Concat([]byte{0x5f, 0x5f, 0x5f, 0x5f, 0x5f}, push20(outboundProxies[1]), []byte{0x61, 0x75, 0x30, 0xf1, 0x50, 0x00}))
+	f.registerL1Proxy(t, l2Stingy)
+	pre := w.pre
+	pre.Reader = &overlay{StateReader: w.pre.Reader, m: f.l2}
 	f.c = New(Config{MaxGas: MaxPostBatchGas, Batcher: devnetBatcher(w.batch.ProofSystems[0])}, nil, nil, nil, nil, nil, nil, nil, nil, log.New())
 	t.Cleanup(f.c.Close)
 	f.c.CrossChain(&CrossChain{
-		Pool: f.pool, L1: f.l1, L1Config: chain.TestChainOsakaConfig, Manager: manager,
+		Pool: f.pool, L1: f.l1, L1Config: chain.TestChainOsakaConfig, Manager: protocol.EEZL2Address,
 		L1Hash: func(_ context.Context, n uint64) (common.Hash, error) { return common.Hash{0x1, byte(n)}, nil },
-		L2:     func(_ context.Context, _ *types.Header, read func(PreState) error) error { return read(w.pre) },
+		L2:     func(_ context.Context, _ *types.Header, read func(PreState) error) error { return read(pre) },
 		Header: func(*types.Header, rules.ChainHeaderReader) (*types.Header, error) {
 			return types.CopyHeader(w.sync.Header()), nil
 		},
 		L2Config: w.config, Engine: w.engine, Sync: w.ctx(),
+		Escrow: func(context.Context, common.Hash) (*uint256.Int, error) {
+			if f.escrow == nil {
+				return nil, errDown
+			}
+			return f.escrow, nil
+		},
 	})
 	return f
 }
@@ -154,6 +203,56 @@ func (f *crossFixture) deliveryCost(t *testing.T) uint64 {
 	encDeferred, err := protocol.EncodeExecutionEntry(&protocol.ExecutionEntry{ProxyEntryHash: sidecar.ProxyEntryHash, ReturnData: f.output, Success: true})
 	require.NoError(t, err)
 	return postBatchEntryGas + calldataGas(encSidecar) + calldataGas(encDeferred)
+}
+
+var (
+	// l2Twice calls the second outbound proxy twice.
+	l2Twice = common.HexToAddress("0xb000000000000000000000000000000000000001")
+	// l2Stingy calls the second outbound proxy with 30,000 gas, too little
+	// for EEZL2 to serve the call, and ignores the failure.
+	l2Stingy = common.HexToAddress("0xb000000000000000000000000000000000000002")
+	// otherProxy stands on the rollup for a contract of rollup 2;
+	// revertProxy for revertTarget on L1.
+	otherProxy  = common.HexToAddress("0xb0000000000000000000000000000000000000f1")
+	revertProxy = common.HexToAddress("0xb0000000000000000000000000000000000000f2")
+)
+
+// registerL1Proxy deploys and registers on L1 the proxy of a, a rollup
+// account: EEZL2's code, the manager's here, refuses to create it.
+func (f *crossFixture) registerL1Proxy(t *testing.T, a common.Address) {
+	t.Helper()
+	header := &types.Header{Number: *uint256.NewInt(100), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Extra: []byte{}}
+	src := NewSource(chain.TestChainOsakaConfig, header, f.l1.m, func(uint64) (common.Hash, error) { return common.Hash{}, nil }, protocol.EEZL2Address, 0)
+	out, err := src.view(protocol.EncodeComputeCrossChainProxyAddress(a, 1))
+	require.NoError(t, err)
+	p, err := protocol.DecodeAddressReturn(out)
+	require.NoError(t, err)
+	f.l1.m.deploy(p, f.l1.m.code[senderProxy])
+	f.l1.m.set(protocol.EEZL2Address, protocol.ProxyKey(p), proxyWord(a, 1))
+}
+
+// holdOut holds a rollup transaction of l2Key's, of nonce, calling to.
+func (f *crossFixture) holdOut(t *testing.T, nonce uint64, to common.Address, value uint64, data []byte) *Held {
+	t.Helper()
+	return f.holdOutGas(t, nonce, to, value, data, 600_000)
+}
+
+func (f *crossFixture) holdOutGas(t *testing.T, nonce uint64, to common.Address, value uint64, data []byte, gas uint64) *Held {
+	t.Helper()
+	sender := crypto.PubkeyToAddress(f.l2Key.PublicKey)
+	tx := &types.DynamicFeeTransaction{CommonTx: types.CommonTx{Nonce: nonce, GasLimit: gas, To: &to, Data: data}, ChainID: *uint256.MustFromBig(f.w.config.ChainID.ToBig())}
+	tx.Value.SetUint64(value)
+	tx.FeeCap.Mul(f.w.sync.BaseFee(), uint256.NewInt(2))
+	tx.TipCap.SetUint64(1)
+	signed, err := types.SignTx(tx, *types.LatestSignerForChainID(&tx.ChainID), f.l2Key)
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	require.NoError(t, signed.MarshalBinary(&buf))
+	h := &Held{Raw: buf.Bytes(), Hash: signed.Hash(), Sender: sender, Nonce: nonce, Direction: Outbound}
+	h.MaxFee.Set(&tx.FeeCap)
+	h.Tip.Set(&tx.TipCap)
+	require.NoError(t, f.pool.Push(h, f.l2.accounts[sender].Nonce))
+	return h
 }
 
 // hold holds the L1 transaction of nonce calling to with data.
@@ -794,6 +893,217 @@ func TestComposedSyncBlockFailureCharges(t *testing.T) {
 			require.Equal(t, c.skipped, p.SlotSkipped)
 		})
 	}
+}
+
+// holdOutbound holds the window's recorded outbound transaction i.
+func (f *crossFixture) holdOutbound(t *testing.T, i int) *Held {
+	t.Helper()
+	tx := f.w.sync.Transactions()[1+2*i]
+	var buf bytes.Buffer
+	require.NoError(t, tx.MarshalBinary(&buf))
+	h := &Held{Raw: buf.Bytes(), Hash: tx.Hash(), Sender: l2Sender, Nonce: tx.GetNonce(), Direction: Outbound}
+	h.MaxFee.Set(tx.GetFeeCap())
+	h.Tip.Set(tx.GetTipCap())
+	require.NoError(t, f.pool.Push(h, 8))
+	return h
+}
+
+// TestComposeTheWindow: the window's held transactions, inbound first in
+// the pool, compose into its Sync block: each outbound call loaded ahead
+// of its transaction, then the inbound delivery.
+func TestComposeTheWindow(t *testing.T) {
+	f := newCrossFixture(t)
+	trigger := f.hold(t, 0, f.call.Source, f.call.Data)
+	first, second := f.holdOutbound(t, 0), f.holdOutbound(t, 1)
+	fx := f.compose(t)
+	require.NotNil(t, fx)
+	require.Equal(t, []*Held{first, second, trigger}, fx.held)
+	want := f.w.sync.Transactions()
+	require.Len(t, fx.txs, len(want))
+	for i := range want {
+		require.Equal(t, want[i].Hash(), fx.txs[i].Hash(), "transaction %d", i)
+	}
+	require.Len(t, fx.outbound, 2)
+	for i, e := range fx.outbound {
+		mined := f.w.batch.Entries[1+i].L2ToL1Calls[0]
+		got := e.L2ToL1Calls[0]
+		require.Equal(t, mined.SourceAddress, got.SourceAddress)
+		require.Equal(t, mined.SourceRollupID, got.SourceRollupID)
+		require.Equal(t, mined.TargetAddress, got.TargetAddress)
+		require.Zero(t, mined.Value.Cmp(got.Value))
+		require.Equal(t, mined.Data, got.Data)
+	}
+	require.Len(t, fx.deliveries, 1)
+	require.Zero(t, f.pool.Len())
+	require.Greater(t, fx.projected, uint64(551_000+3*postBatchEntryGas), "every entry charged")
+}
+
+// TestComposedWindowPosts: the composed window settles as the mined batch,
+// live, in a bundle whose only trigger is the inbound transaction.
+func TestComposedWindowPosts(t *testing.T) {
+	f := newCrossFixture(t)
+	trigger := f.hold(t, 0, f.call.Source, f.call.Data)
+	first, second := f.holdOutbound(t, 0), f.holdOutbound(t, 1)
+	c, prover, poster, chain := f.poster(t, nil)
+	composed := c.ComposeSyncSlot(t.Context(), chain[467].Header(), f.w.sync.Time(), 101, sequencer.ModeSteady)
+	require.Len(t, composed.Txs, 5)
+	sync := f.sealed(t, composed.Txs)
+	require.Equal(t, f.w.sync.Hash(), sync.Hash())
+	chain[sync.NumberU64()] = sync
+	c.SyncCommitted(t.Context(), sync.Header())
+
+	require.Len(t, prover.proven, 1)
+	got := *prover.proven[0].batch
+	require.Equal(t, uint64(3), got.ImmediateEntryCount.Uint64())
+	mined := *f.w.batch
+	mined.BlockNumber, mined.Proofs = protocol.LiveBlockNumber, nil
+	got.Proofs = nil
+	wantEnc, err := protocol.EncodePostAndVerifyBatch(&mined)
+	require.NoError(t, err)
+	gotEnc, err := protocol.EncodePostAndVerifyBatch(&got)
+	require.NoError(t, err)
+	require.Equal(t, wantEnc, gotEnc)
+
+	bundles := func() [][]common.Hash {
+		poster.mu.Lock()
+		defer poster.mu.Unlock()
+		return poster.bundles
+	}
+	require.Eventually(t, func() bool { return len(bundles()) == 1 }, 5*time.Second, time.Millisecond)
+	require.Equal(t, []common.Hash{poster.txs[0].Hash(), trigger.Hash}, bundles()[0])
+	c.ledger.mu.Lock()
+	e := c.ledger.entries[sync.NumberU64()]
+	c.ledger.mu.Unlock()
+	require.NotNil(t, e)
+	require.Equal(t, []*Held{first, second, trigger}, e.Txs)
+}
+
+// TestComposeOutboundRefuses: an outbound transaction that cannot compose
+// is evicted with its chain, its L1 frames undone; one whose nonce is spent
+// is dropped alone.
+func TestComposeOutboundRefuses(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		to   common.Address
+		err  string
+	}{
+		{"several L1 calls", l2Twice, ErrMultiCall.Error()},
+		{"a call to another rollup", otherProxy, "call to rollup 2"},
+		{"a failing L1 call", revertProxy, ErrCallFailed.Error()},
+		{"a transaction failing with its call loaded", outboundProxies[1], "the transaction fails with its L1 call loaded"},
+		{"a transaction not consuming its call", l2Stingy, "outbound entry without a matching L2 call"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newCrossFixture(t)
+			gas := uint64(600_000)
+			if c.to == outboundProxies[1] {
+				// Enough for the simulation, where the proxy runs no code.
+				gas = 30_000
+			}
+			f.holdOutGas(t, 0, c.to, 0, nil, gas)
+			f.holdOut(t, 1, outboundProxies[1], 0, nil)
+			var buf bytes.Buffer
+			f.c.logger = log.New()
+			f.c.logger.SetHandler(log.StreamHandler(&buf, log.TerminalFormatNoColor()))
+			require.Nil(t, f.compose(t))
+			require.Contains(t, buf.String(), c.err)
+			require.Equal(t, 1, strings.Count(buf.String(), "eez.composer.poison"), "evicted once, with its chain")
+			require.Zero(t, f.pool.Len())
+			f.pool.mu.Lock()
+			defer f.pool.mu.Unlock()
+			require.Empty(t, f.pool.inFlight)
+		})
+	}
+	t.Run("a spent nonce", func(t *testing.T) {
+		f := newCrossFixture(t)
+		f.holdOut(t, 0, outboundProxies[1], 0, nil)
+		next := f.holdOut(t, 1, outboundProxies[1], 0, nil)
+		f.l2.accounts[crypto.PubkeyToAddress(f.l2Key.PublicKey)].Nonce = 1
+		fx := f.compose(t)
+		require.NotNil(t, fx)
+		require.Equal(t, []*Held{next}, fx.held)
+		require.Len(t, fx.txs, 2)
+	})
+}
+
+// TestComposeOutboundBoundsThePostingGas: an outbound entry is charged to
+// the posting's gas; one over it alone is evicted.
+func TestComposeOutboundBoundsThePostingGas(t *testing.T) {
+	f := newCrossFixture(t)
+	f.holdOutbound(t, 0)
+	f.c.cfg.MaxGas = drainMargin + 551_000 + postBatchEntryGas
+	require.Nil(t, f.compose(t))
+	require.Zero(t, f.pool.Len())
+}
+
+// TestComposeOutboundValue: an outbound call's value comes out of the
+// rollup's escrow, read once at the anchor, and the manager's balance; a
+// call they cannot pay waits with its chain, uncomposed, until its third
+// attempt evicts it.
+func TestComposeOutboundValue(t *testing.T) {
+	t.Run("the escrow pays one", func(t *testing.T) {
+		f := newCrossFixture(t)
+		f.escrow = uint256.NewInt(10)
+		f.l1.m.accounts[protocol.EEZL2Address].Balance.SetUint64(100)
+		first := f.holdOut(t, 0, outboundProxies[1], 7, nil)
+		second := f.holdOut(t, 1, outboundProxies[1], 7, nil)
+		fx := f.compose(t)
+		require.NotNil(t, fx)
+		require.Equal(t, []*Held{first}, fx.held)
+		require.Len(t, fx.outbound, 1)
+		require.Equal(t, uint64(7), fx.outbound[0].L2ToL1Calls[0].Value.Uint64())
+		require.Equal(t, uint64(10), f.escrow.Uint64(), "the escrow read is not spent")
+		require.Equal(t, []*Held{second}, f.pool.PopN(math.MaxInt))
+		require.Equal(t, uint32(1), second.Attempts)
+	})
+	t.Run("the manager's balance pays none", func(t *testing.T) {
+		f := newCrossFixture(t)
+		f.escrow = uint256.NewInt(100)
+		h := f.holdOut(t, 0, outboundProxies[1], 7, nil)
+		require.Nil(t, f.compose(t))
+		require.Equal(t, []*Held{h}, f.pool.PopN(math.MaxInt))
+		require.Equal(t, uint32(1), h.Attempts)
+	})
+	t.Run("a third attempt evicts", func(t *testing.T) {
+		f := newCrossFixture(t)
+		f.escrow = uint256.NewInt(5)
+		f.l1.m.accounts[protocol.EEZL2Address].Balance.SetUint64(100)
+		f.holdOut(t, 0, outboundProxies[1], 7, nil)
+		f.holdOut(t, 1, outboundProxies[1], 0, nil)
+		for range 2 {
+			require.Nil(t, f.compose(t))
+			require.Equal(t, 2, f.pool.Len())
+		}
+		require.Nil(t, f.compose(t))
+		require.Zero(t, f.pool.Len())
+	})
+	t.Run("an unread escrow waits uncharged", func(t *testing.T) {
+		f := newCrossFixture(t)
+		f.l1.m.accounts[protocol.EEZL2Address].Balance.SetUint64(100)
+		h := f.holdOut(t, 0, outboundProxies[1], 7, nil)
+		require.Nil(t, f.compose(t))
+		require.Equal(t, []*Held{h}, f.pool.PopN(math.MaxInt))
+		require.Zero(t, h.Attempts)
+	})
+}
+
+// TestComposeOutboundFillsTheBlock: an outbound pair the Sync block cannot
+// hold stops the composition; the rest, inbound included, waits in the
+// drain's order, outbound first.
+func TestComposeOutboundFillsTheBlock(t *testing.T) {
+	f := newCrossFixture(t)
+	trigger := f.hold(t, 0, f.call.Source, f.call.Data)
+	first, second := f.holdOutbound(t, 0), f.holdOutbound(t, 1)
+	// After the first pair uses its gas, no room for the second's load.
+	f.c.x.Header = func(*types.Header, rules.ChainHeaderReader) (*types.Header, error) {
+		h := types.CopyHeader(f.w.sync.Header())
+		h.GasLimit = 127_241 + 82_521 + protocol.SystemTxGasLimit - 1
+		return h, nil
+	}
+	fx := f.compose(t)
+	require.NotNil(t, fx)
+	require.Equal(t, []*Held{first}, fx.held)
+	require.Equal(t, []*Held{second, trigger}, f.pool.PopN(math.MaxInt))
 }
 
 // windowChain serves recorded blocks by number.
