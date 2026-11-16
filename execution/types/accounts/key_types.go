@@ -19,8 +19,13 @@ package accounts
 import (
 	"encoding/binary"
 	"fmt"
+	"runtime"
 	"sync/atomic"
 	"unique"
+	"unsafe"
+	"weak"
+
+	"github.com/puzpuzpuz/xsync/v4"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -152,14 +157,58 @@ func keySlot(k common.Hash) *atomic.Value {
 	return &keyTable[(binary.BigEndian.Uint32(k[:4])^binary.BigEndian.Uint32(k[28:]))&(keyTableSize-1)]
 }
 
+// keyCanon replaces unique.Make for storage keys: unique.Make runs weak.Make and runtime.AddCleanup under its map
+// lock, so workers that read the same fresh slots at once queue on it. Here both run outside the map lock.
+var keyCanon = xsync.NewMap[common.Hash, weak.Pointer[common.Hash]]()
+
+func keyHandle(p *common.Hash) StorageKey {
+	return *(*StorageKey)(unsafe.Pointer(&p))
+}
+
 func InternKey(k common.Hash) StorageKey {
 	slot := keySlot(k)
 	if h, ok := slot.Load().(StorageKey); ok && h.Value() == k {
 		return h
 	}
-	h := StorageKey(unique.Make(k))
+	h := internKeyCanon(k)
 	slot.Store(h)
 	return h
+}
+
+func internKeyCanon(k common.Hash) StorageKey {
+	if wp, ok := keyCanon.Load(k); ok {
+		if p := wp.Value(); p != nil {
+			return keyHandle(p)
+		}
+	}
+	p := new(common.Hash)
+	*p = k
+	wp := weak.Make(p)
+	var live *common.Hash
+	keyCanon.Compute(k, func(old weak.Pointer[common.Hash], loaded bool) (weak.Pointer[common.Hash], xsync.ComputeOp) {
+		if loaded {
+			// A nil Value means no handle of old is reachable, so replacing it keeps handles unique.
+			if live = old.Value(); live != nil {
+				return old, xsync.CancelOp
+			}
+		}
+		return wp, xsync.UpdateOp
+	})
+	if live != nil {
+		return keyHandle(live)
+	}
+	runtime.AddCleanup(p, func(k common.Hash) { releaseKey(k, wp) }, k)
+	return keyHandle(p)
+}
+
+// releaseKey deletes k only while it still maps to wp: a concurrent intern may have replaced the dead entry.
+func releaseKey(k common.Hash, wp weak.Pointer[common.Hash]) {
+	keyCanon.Compute(k, func(old weak.Pointer[common.Hash], loaded bool) (weak.Pointer[common.Hash], xsync.ComputeOp) {
+		if loaded && old == wp {
+			return old, xsync.DeleteOp
+		}
+		return old, xsync.CancelOp
+	})
 }
 
 func (k StorageKey) IsNil() bool {

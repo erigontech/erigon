@@ -19,7 +19,10 @@ package accounts
 import (
 	"bytes"
 	"encoding/json"
+	"runtime"
+	"sync"
 	"testing"
+	"time"
 	"unique"
 
 	"github.com/holiman/uint256"
@@ -412,9 +415,11 @@ func TestInternSlotCollision(t *testing.T) {
 	a1, a2 := common.Address{1}, common.Address{2}
 	require.Same(t, keySlot(k1), keySlot(k2))
 	require.Same(t, addressSlot(a1), addressSlot(a2))
+	canon := map[common.Hash]StorageKey{k1: InternKey(k1), k2: InternKey(k2)}
+	require.NotEqual(t, canon[k1], canon[k2])
 	for range 2 {
 		for _, k := range []common.Hash{k1, k2} {
-			require.Equal(t, StorageKey(unique.Make(k)), InternKey(k))
+			require.Equal(t, canon[k], InternKey(k))
 			require.Equal(t, k, InternKey(k).Value())
 		}
 		for _, a := range []common.Address{a1, a2} {
@@ -422,6 +427,64 @@ func TestInternSlotCollision(t *testing.T) {
 			require.Equal(t, a, InternAddress(a).Value())
 		}
 	}
+}
+
+func requireCanonKey(t *testing.T, k common.Hash, h StorageKey) {
+	t.Helper()
+	wp, ok := keyCanon.Load(k)
+	require.True(t, ok)
+	require.Equal(t, keyHandle(wp.Value()), h)
+	require.Equal(t, k, h.Value())
+}
+
+func TestInternKeyConcurrentFirstUse(t *testing.T) {
+	k := common.HexToHash("0x9f3c1b7e5a2d4c6b8e0f1a3c5e7d9b2f4a6c8e0d2b4f6a8c0e2d4b6f8a0c2e4d")
+	got := make([]StorageKey, 16)
+	var wg sync.WaitGroup
+	for i := range got {
+		wg.Go(func() { got[i] = InternKey(k) })
+	}
+	wg.Wait()
+	for _, h := range got {
+		require.Equal(t, got[0], h)
+	}
+	requireCanonKey(t, k, got[0])
+}
+
+// internAndEvict leaves no reachable handle of k: a colliding key takes k's intern-table slot.
+func internAndEvict(t *testing.T, k common.Hash) {
+	t.Helper()
+	requireCanonKey(t, k, InternKey(k))
+	other := k
+	other[10]++
+	require.Same(t, keySlot(k), keySlot(other))
+	InternKey(other)
+}
+
+func requireKeyReleased(t *testing.T, k common.Hash) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		runtime.GC()
+		_, ok := keyCanon.Load(k)
+		return !ok
+	}, 10*time.Second, time.Millisecond)
+}
+
+func TestInternKeyReleasedWhenUnreachable(t *testing.T) {
+	k := common.HexToHash("0x51d2c8a4e6f0b3d5a7c9e1f3b5d7a9c1e3f5a7b9d1c3e5f7a9b1d3f5a7c9e1b3")
+	internAndEvict(t, k)
+	requireKeyReleased(t, k)
+}
+
+func TestInternKeyAfterRelease(t *testing.T) {
+	k := common.HexToHash("0x7a1e3c5b9d2f4a6c8e0b1d3f5a7c9e2b4d6f8a0c1e3b5d7f9a2c4e6b8d0f1a3c")
+	internAndEvict(t, k)
+	requireKeyReleased(t, k)
+	h := InternKey(k)
+	requireCanonKey(t, k, h)
+	require.Equal(t, h, InternKey(k))
+	internAndEvict(t, k)
+	requireKeyReleased(t, k)
 }
 
 // Precompiles and small scalar storage slots differ only in their last bytes; they must not share a slot.
