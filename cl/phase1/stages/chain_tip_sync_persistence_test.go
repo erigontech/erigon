@@ -320,37 +320,37 @@ func newForwardSyncPersistenceFixture(t *testing.T) (*Cfg, *chainTipBatchForkGra
 func TestFastConfirmationWakePublishesDuringMissedSlot(t *testing.T) {
 	for _, stage := range []StageName{ChainTipSync, SleepForSlot} {
 		t.Run(stage, func(t *testing.T) {
-			hash := common.Hash{0x41}
-			engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
-			fixture := newLockOrderFixtureWithConfig(t, 0, engine, hash, false, nil)
-			cfg := fixture.cfg
-			store := cfg.forkChoice
-			store.EnableFastConfirmation(store.FinalizedCheckpoint())
-			now := (store.GenesisTime()+cfg.beaconCfg.SecondsPerSlot)*1000 - 1
-			store.OnTick(now)
-			require.NoError(t, store.OnFastConfirmation(t.Context(), now, nil))
-			args := Args{hasDownloaded: true, peers: 1, targetSlot: 1}
-			graph := ConsensusClStages()
-			if stage == ChainTipSync {
-				require.NoError(t, listenToIncomingBlocksUntilANewBlockIsReceived(t.Context(), log.Root(), cfg, args, nil, nil))
-			} else {
-				require.NoError(t, graph.Stages[stage].ActionFunc(t.Context(), log.Root(), cfg, args))
-			}
-			require.Empty(t, store.FastConfirmationChanged(), "the wake was consumed")
-			cfg.pendingBlockWrite = &pendingBlockWrite{}
-			require.Equal(t, ChainTipSync, graph.Stages[stage].TransitionFunc(cfg, args, nil))
-			cfg.pendingBlockWrite = nil
-			publishPending := func(t *testing.T) {
-				t.Helper()
-				next := graph.Stages[stage].TransitionFunc(cfg, args, nil)
-				if stage == SleepForSlot {
-					require.Equal(t, ChainTipSync, next, "retry execution recovery before publishing again")
-					require.NoError(t, graph.Stages[next].ActionFunc(t.Context(), log.Root(), cfg, args))
-					next = graph.Stages[next].TransitionFunc(cfg, args, nil)
-				}
-				require.Equal(t, ForkChoice, next, "safe-only changes must publish without another block")
-			}
 			synctest.Test(t, func(t *testing.T) {
+				hash := common.Hash{0x41}
+				engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+				fixture := newLockOrderFixtureWithConfig(t, 0, engine, hash, false, nil)
+				cfg := fixture.cfg
+				store := cfg.forkChoice
+				store.EnableFastConfirmation(store.FinalizedCheckpoint())
+				now := (store.GenesisTime()+cfg.beaconCfg.SecondsPerSlot)*1000 - 1
+				store.OnTick(now)
+				require.NoError(t, store.OnFastConfirmation(t.Context(), now, nil))
+				args := Args{hasDownloaded: true, peers: 1, targetSlot: 1}
+				graph := ConsensusClStages()
+				if stage == ChainTipSync {
+					require.NoError(t, listenToIncomingBlocksUntilANewBlockIsReceived(t.Context(), log.Root(), cfg, args, nil, nil))
+				} else {
+					require.NoError(t, graph.Stages[stage].ActionFunc(t.Context(), log.Root(), cfg, args))
+				}
+				require.Empty(t, store.FastConfirmationChanged(), "the wake was consumed")
+				cfg.pendingBlockWrite = &pendingBlockWrite{}
+				require.Equal(t, ChainTipSync, graph.Stages[stage].TransitionFunc(cfg, args, nil))
+				cfg.pendingBlockWrite = nil
+				publishPending := func(t *testing.T) {
+					t.Helper()
+					next := graph.Stages[stage].TransitionFunc(cfg, args, nil)
+					if stage == SleepForSlot {
+						require.Equal(t, ChainTipSync, next, "retry execution recovery before publishing again")
+						require.NoError(t, graph.Stages[next].ActionFunc(t.Context(), log.Root(), cfg, args))
+						next = graph.Stages[next].TransitionFunc(cfg, args, nil)
+					}
+					require.Equal(t, ForkChoice, next, "safe-only changes must publish without another block")
+				}
 				for _, responseErr := range []error{execution_client.ErrForkChoiceUpdateBusy, execution_client.ErrForkChoiceUpdateSyncing, execution_client.ErrForkChoiceUpdateBusy} {
 					publishPending(t)
 					engine.EXPECT().ForkChoiceUpdate(gomock.Any(), hash, hash, hash, nil, clparams.Phase0Version).Return(nil, responseErr)

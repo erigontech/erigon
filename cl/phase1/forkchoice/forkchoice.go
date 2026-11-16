@@ -220,7 +220,6 @@ type ForkChoiceStore struct {
 	// [New in Gloas:EIP7732] Block timeliness tracking.
 	// Pre-GLOAS: stores [block_timely, false] (only index 0 is meaningful).
 	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.
-	// Used by is_head_late and proposer boost reorg logic.
 	blockTimeliness sync.Map // map[common.Hash][clparams.NumBlockTimelinessDeadlines]bool
 	// [New in Gloas:EIP7732]
 	gloasWeightTree *gloasWeightTree
@@ -794,9 +793,9 @@ func (f *ForkChoiceStore) FinalizedCheckpoint() solid.Checkpoint {
 	return f.finalizedCheckpoint.Load().(solid.Checkpoint)
 }
 
-// FinalizedCheckpoint returns justified checkpoint
+// FinalizedSlot returns the start slot of the finalized checkpoint epoch.
 func (f *ForkChoiceStore) FinalizedSlot() uint64 {
-	return f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch) + (f.beaconCfg.SlotsPerEpoch - 1)
+	return f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch)
 }
 
 // FinalizedCheckpoint returns justified checkpoint

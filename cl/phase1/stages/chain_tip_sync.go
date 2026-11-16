@@ -10,6 +10,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -19,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 )
 
@@ -33,6 +35,7 @@ const (
 	chainTipRequestRetryInterval = 300 * time.Millisecond
 	chainTipNoPeersRetryInterval = 2 * time.Second
 	chainTipPollInterval         = time.Second
+	chainTipPresenceInterval     = 20 * time.Millisecond
 )
 
 func validPendingGloasPayload(p forkchoice.PendingELPayload) bool {
@@ -140,10 +143,9 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 
 // startFetchingBlocksMissedByGossipAfterSomeTime starts fetching blocks that might have been missed by gossip after a delay.
 // It periodically fetches blocks from the highest seen block up to the current slot and sends the results or errors to the provided channels.
-func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cfg, args Args, respCh chan<- *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) {
-	// Wait for half the duration of SecondsPerSlot or until the context is done
+func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cfg, args Args, delay time.Duration, respCh chan<- *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) {
 	select {
-	case <-time.After((time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second) / 2):
+	case <-time.After(delay):
 	case <-ctx.Done():
 		return
 	}
@@ -206,14 +208,18 @@ func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger 
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()
 
-	// Timer to check block presence every 20 milliseconds
-	presenceTicker := time.NewTicker(20 * time.Millisecond)
+	presenceTicker := time.NewTicker(chainTipPresenceInterval)
 	defer presenceTicker.Stop()
 
 	// Map to keep track of seen block roots
 	seenBlockRoots := make(map[common.Hash]struct{})
 	// Why a block was not imported, so its children report the cause instead of a missing parent.
 	rejected := make(map[common.Hash]error)
+	// An index commit wakes the loop, which returns once the highest seen block is indexed.
+	indicesChanged := cfg.emitter.BlockIndicesChanged()
+	if highestSeenBlockIndexed(ctx, cfg, args.targetSlot) {
+		return nil
+	}
 MainLoop:
 	for {
 		if err := retryPendingBlockWrite(ctx, cfg); err != nil {
@@ -221,11 +227,18 @@ MainLoop:
 		}
 		select {
 		case <-cfg.forkChoice.FastConfirmationChanged():
-			cfg.safeUpdatePending = true
-			break MainLoop
+			if !cfg.safeUpdatePending {
+				cfg.safeUpdatePending = true
+				break MainLoop
+			}
 		case <-presenceTicker.C:
 			// Check if the highest seen block is greater than or equal to the target slot
 			if cfg.forkChoice.HighestSeen() >= args.targetSlot {
+				break MainLoop
+			}
+		case <-indicesChanged:
+			indicesChanged = cfg.emitter.BlockIndicesChanged()
+			if highestSeenBlockIndexed(ctx, cfg, args.targetSlot) {
 				break MainLoop
 			}
 		case <-ctx.Done():
@@ -247,6 +260,19 @@ MainLoop:
 		}
 	}
 	return nil
+}
+
+func highestSeenBlockIndexed(ctx context.Context, cfg *Cfg, targetSlot uint64) bool {
+	if cfg.forkChoice.HighestSeen() < targetSlot {
+		return false
+	}
+	root := cfg.forkChoice.HighestSeenRoot()
+	var slot *uint64
+	err := cfg.indiciesDB.View(ctx, func(tx kv.Tx) (err error) {
+		slot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
+		return err
+	})
+	return err == nil && slot != nil && *slot >= targetSlot
 }
 
 // withMissingAncestors puts the ancestors of a batch's first block with an unknown parent before the
@@ -1689,8 +1715,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 		}
 	}
 
-	// Pending safe updates need execution recovery, but must not wait for another block.
-	if args.seenSlot >= args.targetSlot || cfg.safeUpdatePending {
+	if args.seenSlot >= args.targetSlot {
 		// [GLOAS] Wait for the head's execution payload envelope before proceeding to ForkChoice.
 		// The block was already processed by gossip during SleepForSlot, but the envelope
 		// may still be in-flight. Without this, FCU sends the parent's execution hash.
@@ -1746,11 +1771,20 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1024)
 	errCh := make(chan error)
 
-	// 25 seconds is a good timeout for this
-	ctx, cn := context.WithTimeout(ctx, 25*time.Second)
-	defer cn()
+	delay := time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second / 2
+	timeout := 25 * time.Second
+	if cfg.safeUpdatePending {
+		delay = 0
+		timeout = sleepForSlotRewakeInterval
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
-	go startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, args, respCh, errCh)
+	go startFetchingBlocksMissedByGossipAfterSomeTime(waitCtx, cfg, args, delay, respCh, errCh)
 
-	return listenToIncomingBlocksUntilANewBlockIsReceived(ctx, logger, cfg, args, respCh, errCh)
+	err = listenToIncomingBlocksUntilANewBlockIsReceived(waitCtx, logger, cfg, args, respCh, errCh)
+	if cfg.safeUpdatePending && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		return nil
+	}
+	return err
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/spf13/afero"
@@ -418,13 +419,15 @@ func TestChainTipSyncRecoversExecutionWhileSafeUpdatePending(t *testing.T) {
 	require.False(t, found)
 
 	cfg.safeUpdatePending = true
+	cfg.ethClock = eth_clock.NewEthereumClock(0, common.Hash{}, cfg.beaconCfg)
+	cfg.rpc = rpc.NewBeaconRpcP2P(t.Context(), &chainTipBatchEnvelopeSentinel{}, cfg.beaconCfg, cfg.ethClock)
 	engine.supportInsertion = true
 	collector := &gloasCollectorTest{}
 	cfg.blockCollector = collector
 	args := Args{seenSlot: headBlock.Block.Slot, targetSlot: headBlock.Block.Slot + 1}
 	for i, status := range []execution_client.PayloadStatus{execution_client.PayloadStatusNone, execution_client.PayloadStatusValidated} {
 		engine.payloadStatus = status
-		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 		err := chainTipSync(ctx, log.Root(), cfg, args)
 		cancel()
 
@@ -2492,4 +2495,65 @@ func TestChainTipPollBatchCarriesThePeerThatServedIt(t *testing.T) {
 			require.Equal(t, pollPeer, batch.Peer)
 		})
 	}
+}
+
+func TestPendingSafeUpdateFetchesMissedParent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newAncestorLookupFixture(t)
+		middle, middleRoot := f.child(f.parent, 65)
+		tip, tipRoot := f.child(middle, 66)
+		f.tickTo(tip.Block.Slot)
+		f.pinCurrentSlot(&tip.Block.Slot)
+		f.cfg.emitter = beaconevents.NewEventEmitter()
+		f.cfg.safeUpdatePending = true
+		digest, err := f.sentinel.clock.ComputeForkDigest(tip.Block.Slot / f.cfg.beaconCfg.SlotsPerEpoch)
+		require.NoError(t, err)
+		var response bytes.Buffer
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, middle, digest[:]...))
+		require.NoError(t, response.WriteByte(0))
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, tip, digest[:]...))
+		f.sentinel.response = response.Bytes()
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+
+		err = chainTipSync(ctx, log.Root(), f.cfg, Args{seenSlot: f.parent.Block.Slot, targetSlot: tip.Block.Slot})
+
+		require.NoError(t, err)
+		require.Equal(t, 1, f.graph.added[middleRoot], "fetch the parent missed by gossip")
+		require.Equal(t, 1, f.graph.added[tipRoot], "import its child after recovery")
+		head, _, err := f.cfg.forkChoice.GetHead(nil)
+		require.NoError(t, err)
+		require.Equal(t, tipRoot, head)
+		require.True(t, f.cfg.safeUpdatePending)
+	})
+}
+
+func TestPendingSafeUpdateBoundsMissedBlockWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newAncestorLookupFixture(t)
+		targetSlot := f.parent.Block.Slot + 1
+		f.pinCurrentSlot(&targetSlot)
+		f.cfg.emitter = beaconevents.NewEventEmitter()
+		f.cfg.safeUpdatePending = true
+		f.cfg.forkChoice.EnableFastConfirmation(f.cfg.forkChoice.FinalizedCheckpoint())
+		now := (targetSlot+1)*f.cfg.beaconCfg.SecondsPerSlot*1000 - 1
+		f.cfg.forkChoice.OnTick(now)
+		require.NoError(t, f.cfg.forkChoice.OnFastConfirmation(t.Context(), now, nil))
+		require.Len(t, f.cfg.forkChoice.FastConfirmationChanged(), 1)
+		started := time.Now()
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+
+		err := chainTipSync(ctx, log.Root(), f.cfg, Args{seenSlot: f.parent.Block.Slot, targetSlot: targetSlot})
+
+		require.NoError(t, err)
+		require.Positive(t, f.sentinel.calls, "try fetching even while a safe update is pending")
+		require.LessOrEqual(t, time.Since(started), 2*time.Second, "retry publication even if no block arrives")
+		require.True(t, f.cfg.safeUpdatePending)
+		require.Empty(t, f.cfg.forkChoice.FastConfirmationChanged())
+
+		stopped, stop := context.WithCancel(t.Context())
+		stop()
+		require.ErrorIs(t, chainTipSync(stopped, log.Root(), f.cfg, Args{seenSlot: f.parent.Block.Slot, targetSlot: targetSlot}), context.Canceled)
+	})
 }
