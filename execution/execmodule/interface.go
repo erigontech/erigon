@@ -19,10 +19,12 @@ package execmodule
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/types"
@@ -69,6 +71,9 @@ type ValidationResult struct {
 	LatestValidHash  common.Hash
 	ValidationError  string
 }
+
+// BlockStateView reads a block: blockTx holds the block and its executed state, parentState the latest state of its parent.
+type BlockStateView func(blockTx kv.TemporalTx, parentState kv.TemporalGetter) error
 
 // ForkChoiceResult is the native return type for UpdateForkChoice.
 type ForkChoiceResult struct {
@@ -140,6 +145,13 @@ type ExecutionModule interface {
 
 	// ValidateChain validates the chain ending at block.
 	ValidateChain(ctx context.Context, block *types.Block) (ValidationResult, error)
+
+	// ValidateChainAndView is ValidateChain that, for a VALID block, also returns a view that calls fn with the
+	// block's state. The view holds no module lock and must be called once; the caller may first release its own
+	// locks. A nil view means fn already ran, for a tip on a side fork whose state the module drops once released,
+	// or that there is no state: a committed block whose changesets are pruned. It reads a committed block without
+	// the module, waits up to wait for a busy module, and executes again a block whose state is no longer held.
+	ValidateChainAndView(ctx context.Context, block *types.Block, wait time.Duration, fn BlockStateView) (ValidationResult, func() error, error)
 
 	// --- Fork choice ------------------------------------------------------
 

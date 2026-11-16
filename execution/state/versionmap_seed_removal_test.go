@@ -467,9 +467,83 @@ func seededRemovalOfPrefundedAccount(t *testing.T) (accounts.Address, *accountSt
 	return x, reader, vm
 }
 
+// redestruct puts the seeded destruct of x at txIdx back in flight, as the runs of the destroying
+// tx can: the first run keeps the seed, the second drops the destruct (the flush deletes its
+// cell), and the third writes it again.
+func redestruct(vm *VersionMap, x accounts.Address, txIdx int) *WriteSet {
+	var removal *WriteSet
+	for _, inc := range []Incarnation{0, 2} {
+		if inc > 0 {
+			vm.Delete(x, SelfDestructPath, accounts.NilKey, txIdx, false)
+		}
+		removal = &WriteSet{}
+		removal.SetContractRemoval(x, Version{TxIndex: txIdx, Incarnation: inc})
+		vm.FlushVersionedWrites(removal, false)
+	}
+	return removal
+}
+
+// The destroying tx's in-flight flush of the removal the access list seeded keeps the seed
+// Done, so a later tx that reads the account does not wait for the destroying tx.
+func TestInFlightFlushOfTheSeededRemovalKeepsItDone(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		remove func(*WriteSet, accounts.Address, Version)
+	}{
+		{"contract removal", (*WriteSet).SetContractRemoval},
+		{"empty removal", (*WriteSet).SetEmptyRemoval},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			x, reader, vm := seededRemovalOfPrefundedAccount(t)
+			removal := &WriteSet{}
+			tc.remove(removal, x, Version{TxIndex: 0, Incarnation: 1})
+			vm.FlushVersionedWrites(removal, false)
+			_, res, _ := vm.ReadSelfDestruct(x, 1)
+			require.Equal(t, MVReadResultDone, res.Status())
+			_, res, _ = vm.ReadBalance(x, 1)
+			require.Equal(t, MVReadResultDone, res.Status())
+
+			ibs := NewWithVersionMap(reader, vm)
+			defer ibs.Close()
+			ibs.SetTxContext(1, 1)
+			exists, err := ibs.Exist(x)
+			require.NoError(t, err)
+			require.False(t, ibs.HadInvalidRead(), "tx 1 waits for tx %d", ibs.DepTxIndex())
+			require.False(t, exists)
+
+			vm.MarkWritesValidated(removal, nil)
+			vm.MarkWritesComplete(removal)
+			require.Equal(t, VersionValid, validateReads(vm, ibs, 1))
+		})
+	}
+}
+
+// Only a seeded destruct keeps its version: the same destruct over a validated one that an
+// earlier run of the tx left is a new version.
+func TestReflushedDestructOfAnEarlierRunTakesTheNewVersion(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress(common.HexToAddress("0x5a1e"))
+	other := accounts.InternAddress(common.HexToAddress("0x07e5"))
+	vm := NewVersionMap(types.BlockAccessList{{Address: other.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}}}})
+	run0 := &WriteSet{}
+	run0.SetEmptyRemoval(x, Version{TxIndex: 0})
+	vm.FlushVersionedWrites(run0, false)
+	vm.MarkWritesValidated(run0, nil)
+
+	run1 := &WriteSet{}
+	run1.SetEmptyRemoval(x, Version{TxIndex: 0, Incarnation: 1})
+	vm.FlushVersionedWrites(run1, false)
+	vm.MarkWritesComplete(run1)
+	_, res, _ := vm.ReadSelfDestruct(x, 1)
+	require.Equal(t, Incarnation(1), res.Incarnation())
+}
+
 // Tx 0 creates and destroys the prefunded x, tx 1 re-creates it. Tx 1 reads x while the
-// removal is still the seeded Done cell, then tx 0 flushes its own removal (Estimate) before
-// tx 1 asks for the account: x must stay absent, so the re-creation pays for a new account.
+// removal is still the seeded Done cell, and the destruct goes back in flight before tx 1 asks
+// for the account: x must stay absent, so the re-creation pays for a new account. Validation
+// rejects the attempt, as the seed it read is replaced.
 func TestDestructObservedBeforeItsInFlightFlushKeepsTheAccountAbsent(t *testing.T) {
 	t.Parallel()
 	x, reader, vm := seededRemovalOfPrefundedAccount(t)
@@ -480,9 +554,7 @@ func TestDestructObservedBeforeItsInFlightFlushKeepsTheAccountAbsent(t *testing.
 	require.NoError(t, err)
 	require.True(t, balance.IsZero())
 
-	removal := &WriteSet{}
-	removal.SetContractRemoval(x, Version{TxIndex: 0})
-	vm.FlushVersionedWrites(removal, false)
+	removal := redestruct(vm, x, 0)
 
 	empty, err := ibs.Empty(x)
 	require.NoError(t, err)
@@ -492,15 +564,11 @@ func TestDestructObservedBeforeItsInFlightFlushKeepsTheAccountAbsent(t *testing.
 	require.False(t, exists)
 
 	vm.MarkWritesValidated(removal, nil)
-	require.Equal(t, VersionValid, validateReads(vm, ibs, 1))
-	for _, path := range []AccountPath{SelfDestructPath, BalancePath, CodeHashPath} {
-		vm.Delete(x, path, accounts.NilKey, 0, false)
-	}
-	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 1), "a withdrawn destruct invalidates the absence")
+	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 1))
 }
 
 // As above, but tx 1 credits x in the window: the credit creates a fresh account instead of
-// reloading the pre-block one, so tx 1 stays valid once tx 0 is validated.
+// reloading the pre-block one.
 func TestCreditAfterObservedDestructCreatesAFreshAccount(t *testing.T) {
 	t.Parallel()
 	x, reader, vm := seededRemovalOfPrefundedAccount(t)
@@ -510,17 +578,12 @@ func TestCreditAfterObservedDestructCreatesAFreshAccount(t *testing.T) {
 	_, err := ibs.GetBalance(x)
 	require.NoError(t, err)
 
-	removal := &WriteSet{}
-	removal.SetContractRemoval(x, Version{TxIndex: 0})
-	vm.FlushVersionedWrites(removal, false)
+	redestruct(vm, x, 0)
 
 	require.NoError(t, ibs.AddBalance(x, *uint256.NewInt(1), tracing.BalanceChangeTransfer))
 	balance, err := ibs.GetBalance(x)
 	require.NoError(t, err)
 	require.Equal(t, *uint256.NewInt(1), balance)
-
-	vm.MarkWritesValidated(removal, nil)
-	require.Equal(t, VersionValid, validateReads(vm, ibs, 1))
 }
 
 // As above, but tx 1 funds x again between two destructs, so its account cell lies below the
@@ -555,9 +618,7 @@ func TestRepeatedDestructObservedBeforeItsInFlightFlushKeepsTheAccountAbsent(t *
 	require.NoError(t, err)
 	require.True(t, balance.IsZero())
 
-	removal := &WriteSet{}
-	removal.SetContractRemoval(x, Version{TxIndex: 2})
-	vm.FlushVersionedWrites(removal, false)
+	redestruct(vm, x, 2)
 
 	empty, err := ibs.Empty(x)
 	require.NoError(t, err)

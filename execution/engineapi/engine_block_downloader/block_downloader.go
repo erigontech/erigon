@@ -224,13 +224,17 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 		return err
 	}
 
+	var batches batchFeed = feed
+	if req.Trigger == FcuTrigger {
+		batches = newBatchPrefetcher(ctx, feed, int64(e.syncCfg.BodyCacheLimit))
+	}
 	logProgressTicker := time.NewTicker(30 * time.Second)
 	defer logProgressTicker.Stop()
 
 	var batch p2p.BlockBatchResult
 	var insertedBlocksWithoutExec int
 	var lastTip *types.Block
-	for batch, err = feed.Next(ctx); err == nil && len(batch.Blocks) > 0; batch, err = feed.Next(ctx) {
+	for batch, err = batches.Next(ctx); err == nil && len(batch.Blocks) > 0; batch, err = batches.Next(ctx) {
 		blocks := batch.Blocks
 		progressLogArgs := []any{
 			"from", blocks[0].NumberU64(),
