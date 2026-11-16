@@ -54,18 +54,18 @@ func engineTestCmd(_ context.Context, ctx *cli.Command) error {
 	}
 
 	if !ctx.Args().Present() {
-		return errors.New("path argument required")
+		return exitIncomplete(errors.New("path argument required"))
 	}
 	workers := ctx.Uint64(WorkersFlag.Name)
 	if workers == 0 {
-		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
+		return exitIncomplete(fmt.Errorf("--%s must be >= 1", WorkersFlag.Name))
 	}
 	if ctx.Duration(SyncingTimeoutFlag.Name) <= 0 {
-		return fmt.Errorf("--%s must be positive", SyncingTimeoutFlag.Name)
+		return exitIncomplete(fmt.Errorf("--%s must be positive", SyncingTimeoutFlag.Name))
 	}
 	filter, err := compileTestFilter(ctx.String(RunFlag.Name), ctx.StringSlice(ExcludeFlag.Name))
 	if err != nil {
-		return err
+		return exitIncomplete(err)
 	}
 
 	reportPath := runnerExecutionPathReporter(ctx)

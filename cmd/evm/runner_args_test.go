@@ -117,6 +117,40 @@ func TestRunnersRejectNullFixtureFile(t *testing.T) {
 	}
 }
 
+// An argument the runner cannot run with exits 2 before any fixture runs.
+func TestRunnersRejectBadArguments(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+	const (
+		blockFixture  = "../../execution/tests/testdata/delivered_access_list/valid.json"
+		engineFixture = "../../execution/tests/testdata/engine/bal_cross_block_ripemd160_state_leak.json"
+	)
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		stderr string
+	}{
+		{"blocktest no workers", []string{"blocktest", "--workers", "0", blockFixture}, "--workers must be >= 1"},
+		{"blocktest bad run regex", []string{"blocktest", "--run", "(", blockFixture}, "invalid regex --run"},
+		{"blocktest bad exclude regex", []string{"blocktest", "--exclude", "(", blockFixture}, "invalid regex --exclude"},
+		{"enginetest no path", []string{"enginetest"}, "path argument required"},
+		{"enginetest no workers", []string{"enginetest", "--workers", "0", engineFixture}, "--workers must be >= 1"},
+		{"enginetest zero syncing timeout", []string{"enginetest", "--syncing-timeout", "0s", engineFixture}, "--syncing-timeout must be positive"},
+		{"enginetest bad run regex", []string{"enginetest", "--run", "(", engineFixture}, "invalid regex --run"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tt := cmdtest.NewTestCmd(t, nil)
+			tt.Run("evm-test", append([]string{tc.args[0], "--jsonout"}, tc.args[1:]...)...)
+			stdout := tt.Output()
+			tt.WaitExit()
+			require.Equal(t, exitIncompleteRun, tt.ExitStatus())
+			require.Empty(t, stdout)
+			require.Contains(t, tt.StderrText(), tc.stderr)
+		})
+	}
+}
+
 // A fixture that cannot be decoded fails on its own with the decoder's error,
 // also on stderr; the other fixtures in its file run as usual, and the run
 // exits 2.

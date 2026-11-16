@@ -68,11 +68,11 @@ func blockTestCmd(_ context.Context, ctx *cli.Command) error {
 
 	workers := ctx.Uint64(WorkersFlag.Name)
 	if workers == 0 {
-		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
+		return exitIncomplete(fmt.Errorf("--%s must be >= 1", WorkersFlag.Name))
 	}
 	filter, err := compileTestFilter(ctx.String(RunFlag.Name), ctx.StringSlice(ExcludeFlag.Name))
 	if err != nil {
-		return err
+		return exitIncomplete(err)
 	}
 
 	if ctx.Bool(BALWithholdFlag.Name) {
