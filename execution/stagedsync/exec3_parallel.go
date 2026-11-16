@@ -1738,8 +1738,8 @@ type txResult struct {
 // A read that observes an in-flight estimate aborts the run (result.Dep); the task
 // is re-queued once the commit frontier reaches its predecessor.
 
-// selfLoopFlush publishes tv's writes to the versionMap, plus deletion of any key
-// the previous incarnation wrote that this one dropped.
+// selfLoopFlush publishes the writes of the run at version to the versionMap, after dropping the
+// writes of the previous run that this run no longer makes.
 func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxResult, prevWrites *state.WriteSet) {
 	if prevWrites != nil {
 		be.dropUnwritten(version, prevWrites, result.TxOut)
@@ -1749,9 +1749,9 @@ func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxRes
 	be.versionMap.FlushVersionedWrites(result.TxOut, false)
 }
 
-// dropUnwritten removes the writes that an earlier run made and the run at version does not, and
-// reports whether there were any. A net-zero storage write was never materialized, so removing it
-// is a no-op.
+// dropUnwritten drops the writes that an earlier run made and the run at version does not (see
+// VersionMap.DropWrite), and reports whether there were any. A net-zero storage write was never
+// materialized, so dropping it is a no-op.
 func (be *blockExecutor) dropUnwritten(version state.Version, prev, cur *state.WriteSet) (dropped bool) {
 	for h := range prev.AllHeaders() {
 		if !cur.Has(h) {
