@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -44,9 +43,6 @@ import (
 func TestSelfDestructedContractCreatesAfterRevert(t *testing.T) {
 	for _, eip8246 := range []bool{false, true} {
 		t.Run(fmt.Sprintf("eip8246=%v", eip8246), func(t *testing.T) {
-			prev := dbg.Exec3Parallel
-			t.Cleanup(func() { dbg.Exec3Parallel = prev })
-
 			key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 			require.NoError(t, err)
 			sender := crypto.PubkeyToAddress(key.PublicKey)
@@ -82,8 +78,6 @@ func TestSelfDestructedContractCreatesAfterRevert(t *testing.T) {
 				b.AddTx(txn)
 			})
 			require.NoError(t, err)
-
-			dbg.Exec3Parallel = true
 			require.NoError(t, m.InsertChain(chainPack))
 			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 				st := state.New(m.NewStateReader(tx))

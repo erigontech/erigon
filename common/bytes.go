@@ -40,6 +40,15 @@ func ByteCount(b uint64) string {
 //go:fix inline
 func Copy(b []byte) []byte { return bytes.Clone(b) }
 
+// CopySegment copies src[from:] into dst and zeroes the part of dst past the end of src.
+func CopySegment(dst, src []byte, from uint64) {
+	n := 0
+	if from < uint64(len(src)) {
+		n = copy(dst, src[from:])
+	}
+	clear(dst[n:])
+}
+
 func EnsureEnoughSize(in []byte, size int) []byte {
 	if cap(in) < size {
 		newBuf := make([]byte, size)

@@ -3,9 +3,13 @@
     "allow": [
       "Bash(make test-all:*)",
       "Bash(go test:*)",
+      "Bash(GOEXPERIMENT=jsonv2 go test:*)",
       "Bash(go get:*)",
       "Bash(go vet:*)",
       "Bash(make lint:*)",
+      "Bash(make lintci:*)",
+      "Bash(go tool -modfile=golangci-lint.mod golangci-lint run:*)",
+      "Bash(GOEXPERIMENT=jsonv2 go tool -modfile=golangci-lint.mod golangci-lint run:*)",
       "Bash(git fetch:*)",
       "Bash(go mod tidy:*)",
       "WebFetch(domain:github.com)",
