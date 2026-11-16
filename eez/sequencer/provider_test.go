@@ -18,6 +18,7 @@ package sequencer
 
 import (
 	"context"
+	"math/big"
 	"testing"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -54,7 +55,7 @@ func TestPoolTxns(t *testing.T) {
 	user := common.HexToAddress("0xa11ce")
 	system, err := systemtx.New(protocol.SystemTx{ChainID: 6290, To: protocol.EEZL2Address})
 	require.NoError(t, err)
-	small, large, last := transfer(t, 0, 10, user), transfer(t, 1, 900, user), transfer(t, 2, 10, user)
+	small, large, last := transfer(t, 0, 10, user), transfer(t, 1, 900, user), transfer(t, 0, 10, common.HexToAddress("0xb0b0"))
 	pool := fixed{
 		&types.BlobTx{DynamicFeeTransaction: types.DynamicFeeTransaction{ChainID: *uint256.NewInt(6290)}},
 		system,
@@ -113,7 +114,7 @@ func TestPoolTxnsPagesPastAnEmptiedPage(t *testing.T) {
 	for i := range 3 {
 		txs = append(txs, transfer(t, uint64(i), 900, user))
 	}
-	small := transfer(t, 3, 100, user)
+	small := transfer(t, 0, 100, common.HexToAddress("0xb0b0"))
 	txs = append(txs, small)
 	filter := func() txnprovider.ProvideOption { return txnprovider.WithTxnIdsFilter(mapset.NewSet[[32]byte]()) }
 
@@ -128,17 +129,37 @@ func TestPoolTxnsPagesPastAnEmptiedPage(t *testing.T) {
 	require.Empty(t, got)
 	require.Equal(t, 1, pool.pages, "paged on with no room for any transaction")
 
-	// Room for a transaction, but less than each pending one takes: paging
-	// stops short of walking the pool.
-	var large []types.Transaction
+	// Room for a transaction, but less than each pending one takes, each of
+	// which an emptier block would carry: paging stops short of walking the
+	// pool.
+	first := transfer(t, 0, 1_800, common.HexToAddress("0xf125"))
+	budget := first.EncodingSize() + txOverhead + 100
+	pending := []types.Transaction{first}
 	for i := range 150 {
-		large = append(large, transfer(t, uint64(i), 900, user))
+		pending = append(pending, transfer(t, uint64(i), 900, common.BigToAddress(new(big.Int).SetUint64(uint64(0x5e0000+i)))))
 	}
-	pool = &paged{txs: large, n: 3}
-	got, err = newPoolTxns(pool, minTxDA, log.New()).ProvideTxns(t.Context(), filter())
+	pool = &paged{txs: pending, n: 3}
+	p := newPoolTxns(pool, budget, log.New())
+	f := filter()
+	got, err = p.ProvideTxns(t.Context(), f)
+	require.NoError(t, err)
+	require.Equal(t, []types.Transaction{first}, got)
+	got, err = p.ProvideTxns(t.Context(), f)
 	require.NoError(t, err)
 	require.Empty(t, got)
-	require.Equal(t, maxEmptiedPages, pool.pages)
+	require.Equal(t, 1+maxEmptiedPages, pool.pages)
+
+	// Transactions no block can carry do not end the walk: the one behind
+	// them is kept.
+	var never []types.Transaction
+	for i := range 150 {
+		never = append(never, transfer(t, uint64(i), 900, user))
+	}
+	never = append(never, small)
+	pool = &paged{txs: never, n: 3}
+	got, err = newPoolTxns(pool, small.EncodingSize()+txOverhead, log.New()).ProvideTxns(t.Context(), filter())
+	require.NoError(t, err)
+	require.Equal(t, []types.Transaction{small}, got)
 }
 
 // TestPoolTxnsChargesATransactionOnce: a transaction yielded again, as the
@@ -162,4 +183,25 @@ func TestPoolTxnsChargesATransactionOnce(t *testing.T) {
 	got, err = p.ProvideTxns(t.Context(), txnprovider.WithTxnIdsFilter(yielded))
 	require.NoError(t, err)
 	require.Equal(t, []types.Transaction{first}, got)
+}
+
+// TestPoolTxnsSkipsAStalledSender: once a sender's transaction is left out,
+// its later nonces cannot execute in the block, so they take nothing from
+// the budget another sender's transaction can use.
+func TestPoolTxnsSkipsAStalledSender(t *testing.T) {
+	user, other := common.HexToAddress("0xa11ce"), common.HexToAddress("0xb0b0")
+	theirs := transfer(t, 0, 100, other)
+	budget := theirs.EncodingSize() + txOverhead
+	blob := &types.BlobTx{DynamicFeeTransaction: types.DynamicFeeTransaction{ChainID: *uint256.NewInt(6290)}}
+	blob.SetSender(accounts.InternAddress(user))
+	for name, first := range map[string]types.Transaction{
+		"over the budget":   transfer(t, 0, 900, user),
+		"refused":           blob,
+		"over every budget": transfer(t, 0, 2*budget, user),
+	} {
+		next := transfer(t, 1, 10, user)
+		got, err := newPoolTxns(fixed{first, next, theirs}, budget, log.New()).ProvideTxns(t.Context())
+		require.NoError(t, err, name)
+		require.Equal(t, []types.Transaction{theirs}, got, name)
+	}
 }

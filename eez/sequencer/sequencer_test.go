@@ -19,6 +19,7 @@ package sequencer_test
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"errors"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/deriver"
@@ -477,4 +479,102 @@ func TestBlockBudgetChargesARetryOnce(t *testing.T) {
 		require.NoError(t, s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 6}))
 		require.Len(t, h.block(t, 1).Transactions(), 2, "exact budget %v", exact)
 	}
+}
+
+// byPrice is a pool yielding, as the txpool does, up to the requested amount
+// of its transactions in order, skipping and marking those in the caller's
+// filter.
+type byPrice struct {
+	mu  sync.Mutex
+	txs []types.Transaction
+}
+
+func (b *byPrice) ProvideTxns(_ context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	o := txnprovider.ApplyProvideOptions(opts...)
+	var page []types.Transaction
+	for _, tx := range b.txs {
+		if len(page) == o.Amount {
+			break
+		}
+		if o.TxnIdsFilter.Contains(tx.Hash()) {
+			continue
+		}
+		o.TxnIdsFilter.Add(tx.Hash())
+		page = append(page, tx)
+	}
+	return page, nil
+}
+
+// signedTransfer is key's transfer at nonce carrying data bytes of calldata.
+func signedTransfer(t *testing.T, key *ecdsa.PrivateKey, nonce uint64, data int) types.Transaction {
+	t.Helper()
+	cc := derivertest.Config()
+	signer := types.LatestSignerForChainID(cc.ChainID)
+	to := common.HexToAddress("0xb0b")
+	tx, err := types.SignTx(&types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 21_000 + 40*uint64(data), To: &to, Value: *uint256.NewInt(1), Data: make([]byte, data)},
+		ChainID:  *cc.ChainID,
+		TipCap:   *uint256.NewInt(1),
+		FeeCap:   *uint256.NewInt(10 * common.GWei),
+	}, *signer, key)
+	require.NoError(t, err)
+	sender, err := signer.Sender(tx)
+	require.NoError(t, err)
+	tx.SetSender(sender)
+	return tx
+}
+
+// otherKey funds the devnet's first prefunded account.
+var otherKey, _ = crypto.HexToECDSA("ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+
+// TestBlockBudgetSkipsAStalledSender: an account whose first transaction no
+// block can carry cannot spend the budget on its later ones, which the
+// builder would set aside for their nonce; another account's transfer is
+// produced.
+func TestBlockBudgetSkipsAStalledSender(t *testing.T) {
+	h := newHarness(t)
+	budget := sequencer.DABudget(devnet().K())
+	txs := []types.Transaction{signedTransfer(t, derivertest.UserKey, 0, budget)}
+	left := budget
+	for n := uint64(1); n <= 14; n++ {
+		tx := signedTransfer(t, derivertest.UserKey, n, 4_400)
+		left -= tx.EncodingSize() + 5
+		txs = append(txs, tx)
+	}
+	last := signedTransfer(t, derivertest.UserKey, 15, left-200)
+	left -= last.EncodingSize() + 5
+	transfer := signedTransfer(t, otherKey, 0, 0)
+	require.Greater(t, transfer.EncodingSize()+5, left, "the stalled account's transactions fill the budget")
+	pool := &byPrice{txs: append(txs, last, transfer)}
+	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet()}, h.follower, pool, log.New())
+	require.NoError(t, err)
+	require.NoError(t, s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 6}))
+	require.Equal(t, []common.Hash{transfer.Hash()}, hashes(h.block(t, 1).Transactions()))
+}
+
+// TestNeverIncludableTransactionsDoNotStarve: transactions no block can
+// carry, ahead of an includable one in the pool, do not end the block.
+func TestNeverIncludableTransactionsDoNotStarve(t *testing.T) {
+	h := newHarness(t)
+	const budget = 2_000
+	var txs []types.Transaction
+	for n := range uint64(400) {
+		txs = append(txs, signedTransfer(t, derivertest.UserKey, n, budget))
+	}
+	transfer := signedTransfer(t, otherKey, 0, 0)
+	pool := &byPrice{txs: append(txs, transfer)}
+	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet(), DABudget: budget}, h.follower, pool, log.New())
+	require.NoError(t, err)
+	require.NoError(t, s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 6}))
+	require.Equal(t, []common.Hash{transfer.Hash()}, hashes(h.block(t, 1).Transactions()))
+}
+
+func hashes(txs types.Transactions) []common.Hash {
+	var out []common.Hash
+	for _, tx := range txs {
+		out = append(out, tx.Hash())
+	}
+	return out
 }
