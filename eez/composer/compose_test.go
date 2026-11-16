@@ -145,6 +145,20 @@ func TestComposeRefuses(t *testing.T) {
 		defer f.pool.mu.Unlock()
 		require.Empty(t, f.pool.inFlight)
 	})
+	t.Run("a spent nonce is dropped, not its chain", func(t *testing.T) {
+		f := newCrossFixture(t)
+		f.hold(t, 0, f.call.Source, f.call.Data)
+		next := f.hold(t, 1, f.call.Source, f.call.Data)
+		f.l1.m.accounts[crypto.PubkeyToAddress(f.key.PublicKey)].Nonce = 1
+		fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+		require.NotNil(t, fx)
+		require.Equal(t, []*Held{next}, fx.held)
+		require.Zero(t, f.pool.Len())
+		f.pool.mu.Lock()
+		defer f.pool.mu.Unlock()
+		require.Len(t, f.pool.inFlight, 1)
+		require.Contains(t, f.pool.inFlight, next.Hash)
+	})
 	t.Run("an L1 failure waits for the next slot", func(t *testing.T) {
 		f := newCrossFixture(t)
 		trigger := f.hold(t, 0, f.call.Source, f.call.Data)

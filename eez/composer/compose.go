@@ -115,6 +115,17 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 						rest = rest[1:]
 						continue
 					}
+					onChain, err := src.Nonce(h.Sender)
+					if err != nil {
+						return err
+					}
+					if h.Nonce < onChain {
+						c.logger.Info("[eez] held transaction dropped: its nonce is spent", "event", "eez.composer.stale",
+							"hash", h.Hash, "sender", h.Sender, "nonce", h.Nonce, "onChain", onChain)
+						c.x.Pool.Release([]*Held{h})
+						rest = rest[1:]
+						continue
+					}
 					tx, err := types.DecodeTransaction(h.Raw)
 					if err != nil {
 						return err

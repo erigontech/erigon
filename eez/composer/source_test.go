@@ -341,6 +341,8 @@ func TestSourceRefuses(t *testing.T) {
 			require.ErrorIs(t, err, ErrStateRead)
 			require.ErrorIs(t, err, errDown)
 			require.False(t, IsPoison(err), err)
+			_, err = src.Nonce(addr)
+			require.ErrorIs(t, err, ErrStateRead)
 		})
 	}
 	t.Run("a transaction its caller refuses leaves no trace", func(t *testing.T) {

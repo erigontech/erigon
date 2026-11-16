@@ -98,6 +98,15 @@ func NewSource(config *chain.Config, header *types.Header, reader state.StateRea
 	return &Source{config: config, header: header, ibs: state.New(r), reads: r, blockHash: blockHash, manager: accounts.InternAddress(manager), rollup: rollup}
 }
 
+// Nonce returns addr's nonce in the simulation.
+func (s *Source) Nonce(addr common.Address) (uint64, error) {
+	n, err := s.ibs.GetNonce(accounts.InternAddress(addr))
+	if failed := s.reads.failed(); failed != nil {
+		return 0, failed
+	}
+	return n, err
+}
+
 // Run simulates tx, dispatching each proxy call it makes, and returns the
 // calls in order. It keeps tx's writes when accept, if set, takes the calls,
 // and returns accept's error otherwise. Errors from the dispatcher come back
