@@ -137,3 +137,11 @@ func TestBlobHistoryDownloaderStopsAskingAnEndpointBelowASlotItDoesNotServe(t *t
 	downloader.processBatch([]incompleteBlock{{block: older.block, root: older.root}})
 	require.Equal(t, int32(2), requests.Load(), "a new pass asks the endpoint again")
 }
+
+func TestBlobEndpointWorkersDefaultToAQuarterOfTheCPUs(t *testing.T) {
+	for _, tc := range []struct{ configured, cpus, want int }{
+		{0, 1, 1}, {0, 2, 1}, {0, 4, 1}, {0, 8, 2}, {0, 16, 4}, {0, 32, 8}, {3, 16, 3}, {64, 16, 64},
+	} {
+		require.Equal(t, tc.want, blobEndpointWorkers(tc.configured, tc.cpus), "configured %d, %d cores", tc.configured, tc.cpus)
+	}
+}

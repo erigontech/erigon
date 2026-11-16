@@ -232,22 +232,32 @@ func NewBlobHistoryDownloader(
 	}
 }
 
+// blobEndpointWorkers returns the configured worker count, or for 0 a quarter of cpus and at least one: each worker
+// keeps about one CPU busy while it verifies blobs.
+func blobEndpointWorkers(configured, cpus int) int {
+	if configured > 0 {
+		return configured
+	}
+	return max(1, cpus/4)
+}
+
 // SetBlobEndpoints makes the backfill ask the beacon API endpoints for a block's blobs before peers, workers blocks at
-// a time.
+// a time; 0 workers picks the count from GOMAXPROCS, which unlike NumCPU follows a container's CPU limit.
 func (b *BlobHistoryDownloader) SetBlobEndpoints(endpoints []string, workers int) {
 	b.endpoints = endpoints
-	b.endpointWorkers = max(workers, 1)
+	cpus := runtime.GOMAXPROCS(0)
+	b.endpointWorkers = blobEndpointWorkers(workers, cpus)
 	b.endpointUnservedAt = make([]uint64, len(endpoints))
 	hosts := make([]string, len(endpoints))
 	for i, endpoint := range endpoints {
 		hosts[i] = blobfetch.RedactEndpoint(endpoint)
 	}
 	b.logger.Info("[BlobHistoryDownloader] Blob backfill asks beacon API endpoints before peers", "endpoints", strings.Join(hosts, ","),
-		"workers", b.endpointWorkers, "cpuCores", runtime.NumCPU(),
-		"tuning", "each worker uses about one CPU core while it verifies blobs; set --caplin.blobs-backfill-endpoint-workers to the cores the node can spare")
-	if b.endpointWorkers > runtime.NumCPU() {
-		b.logger.Warn("[BlobHistoryDownloader] More blob backfill workers than CPU cores: the backfill competes with chain-tip work",
-			"workers", b.endpointWorkers, "cpuCores", runtime.NumCPU())
+		"workers", b.endpointWorkers, "auto", workers <= 0, "usableCPUs", cpus,
+		"tuning", "each worker uses about one CPU while it verifies blobs; the default is a quarter of the usable CPUs, set --caplin.blobs-backfill-endpoint-workers to the CPUs the node can spare")
+	if b.endpointWorkers > cpus {
+		b.logger.Warn("[BlobHistoryDownloader] More blob backfill workers than usable CPUs: the backfill competes with chain-tip work",
+			"workers", b.endpointWorkers, "usableCPUs", cpus)
 	}
 }
 
