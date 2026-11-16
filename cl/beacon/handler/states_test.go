@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -45,7 +46,7 @@ import (
 
 func TestGetStateFork(t *testing.T) {
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -54,26 +55,53 @@ func TestGetStateFork(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	finalizedEpoch := blocks[len(blocks)-1].Block.Slot / handler.beaconChainCfg.SlotsPerEpoch
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: finalizedEpoch}
+	fcu.FinalizedSlotVal = (finalizedEpoch+1)*handler.beaconChainCfg.SlotsPerEpoch - 1
+
+	nonCanonicalBlock := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.Phase0Version)
+	nonCanonicalBlock.Block.Slot = blocks[0].Block.Slot
+	nonCanonicalBlock.Block.ParentRoot = blocks[0].Block.ParentRoot
+	nonCanonicalBlock.Block.StateRoot = common.Hash{0xca, 0xfe}
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(tx, nonCanonicalBlock, false))
+	require.NoError(t, tx.Commit())
 
 	cases := []struct {
-		blockID string
-		code    int
+		blockID   string
+		code      int
+		finalized bool
 	}{
 		{
-			blockID: "0x" + common.Bytes2Hex(postRoot[:]),
-			code:    http.StatusOK,
+			blockID:   "0x" + common.Bytes2Hex(postRoot[:]),
+			code:      http.StatusOK,
+			finalized: false,
 		},
 		{
-			blockID: "head",
-			code:    http.StatusOK,
+			blockID:   "head",
+			code:      http.StatusOK,
+			finalized: false,
+		},
+		{
+			blockID:   strconv.FormatInt(int64(blocks[0].Block.Slot), 10),
+			code:      http.StatusOK,
+			finalized: true,
+		},
+		{
+			blockID:   strconv.FormatInt(int64(blocks[len(blocks)-1].Block.Slot), 10),
+			code:      http.StatusOK,
+			finalized: false,
+		},
+		{
+			blockID:   "0x" + common.Bytes2Hex(nonCanonicalBlock.Block.StateRoot[:]),
+			code:      http.StatusOK,
+			finalized: false,
 		},
 		{
 			blockID: "0x" + common.Bytes2Hex(make([]byte, 32)),
 			code:    http.StatusNotFound,
-		},
-		{
-			blockID: strconv.FormatInt(int64(postState.Slot()), 10),
-			code:    http.StatusOK,
 		},
 	}
 
@@ -94,6 +122,7 @@ func TestGetStateFork(t *testing.T) {
 			jsonVal := make(map[string]any)
 			// unmarshal the json
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(&jsonVal))
+			require.Equal(t, c.finalized, jsonVal["finalized"])
 			data := jsonVal["data"].(map[string]any)
 			require.Equal(t, "0x00000000", data["current_version"])
 			require.Equal(t, "0x00000000", data["previous_version"])
@@ -366,6 +395,55 @@ func TestGetStateFullSkipsForkchoiceStateAtLaterSlot(t *testing.T) {
 	}
 }
 
+// An invalid block or state id is answered 400 by every endpoint, also by those that return the parser's error as is.
+func TestInvalidIdsAreBadRequests(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	for _, path := range []string{
+		"/eth/v2/beacon/blocks/18446744073709551616",
+		"/eth/v2/beacon/blocks/not-an-id",
+		"/eth/v1/beacon/blob_sidecars/18446744073709551616",
+		"/eth/v1/beacon/states/18446744073709551616/root",
+		"/eth/v2/debug/beacon/states/not-an-id",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+path, nil)
+			require.NoError(t, err)
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+			var body struct{ Message string }
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+			require.True(t, strings.HasPrefix(body.Message, "invalid path variable"), body.Message)
+		})
+	}
+}
+
+// A fork choice failure while reading a valid state id is an internal error, not an invalid id.
+func TestGetStateFullForkchoiceErrorIsInternal(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	fcu.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
+		return nil, errors.New("fork graph read failed")
+	}
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/head", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+}
+
 // TestGetStateFullFinalizedServesAdvancedForkchoiceState pins that a named
 // state_id still gets the fork choice state when it was advanced past its
 // block, as the anchor checkpoint state can be.
@@ -591,7 +669,7 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 
 func TestGetRandao(t *testing.T) {
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -645,6 +723,75 @@ func TestGetRandao(t *testing.T) {
 			require.Equal(t, expected, string(out))
 		})
 	}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(postState.Slot()))
+	}))
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+strconv.FormatInt(int64(postState.Slot()), 10)+"/randao", nil)
+	require.NoError(t, err)
+	resp, err := server.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(postState.Slot()), make([]byte, 31))
+	}))
+	req, err = http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+strconv.FormatInt(int64(postState.Slot()), 10)+"/randao", nil)
+	require.NoError(t, err)
+	resp, err = server.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+}
+
+func TestGetRandaoMissingPreviousEpochMix(t *testing.T) {
+	db, _, _, pre, post, h, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	epoch := post.Slot() / h.beaconChainCfg.SlotsPerEpoch
+	require.Greater(t, epoch, pre.Slot()/h.beaconChainCfg.SlotsPerEpoch)
+	queryEpoch := epoch - 1
+	path := fmt.Sprintf("/eth/v1/beacon/states/%d/randao?epoch=%d", post.Slot(), queryEpoch)
+	available := httptest.NewRecorder()
+	h.mux.ServeHTTP(available, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+	require.Equal(t, http.StatusOK, available.Code, available.Body.String())
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.RandaoMixes, base_encoding.Encode64ToBytes4(queryEpoch*h.beaconChainCfg.SlotsPerEpoch))
+	}))
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+	require.Equal(t, http.StatusNotFound, rec.Code, "unavailable previous-epoch mix must return 404: GET %s returned %d: %s", path, rec.Code, rec.Body.String())
+}
+
+func TestGetCommitteesMissingRandaoMixReturns404(t *testing.T) {
+	db, _, _, _, post, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.FinalizedSlotVal = post.Slot() + 1
+	epoch := post.Slot()/h.beaconChainCfg.SlotsPerEpoch - 1
+	path := fmt.Sprintf("/eth/v1/beacon/states/%d/committees?epoch=%d", post.Slot(), epoch)
+	request := func() *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+		return rec
+	}
+	available := request()
+	require.Equal(t, http.StatusOK, available.Code, available.Body.String())
+	mixEpoch := epoch - h.beaconChainCfg.MinSeedLookahead - 1
+	key := base_encoding.Encode64ToBytes4(mixEpoch * h.beaconChainCfg.SlotsPerEpoch)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		mix, err := tx.GetOne(kv.RandaoMixes, key)
+		if err != nil {
+			return err
+		}
+		require.Len(t, mix, 32)
+		return tx.Delete(kv.RandaoMixes, key)
+	}))
+	missing := request()
+	require.Equal(t, http.StatusNotFound, missing.Code, missing.Body.String())
+	var response struct {
+		Message string `json:"message"`
+	}
+	require.NoError(t, json.Unmarshal(missing.Body.Bytes(), &response))
+	require.Contains(t, response.Message, "randao mix")
 }
 
 func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
