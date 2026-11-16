@@ -361,6 +361,7 @@ func TestPoolBALSeededBlockMatchesUnseeded(t *testing.T) {
 		defer doms.Close()
 		require.NoError(t, r.execSeeded(tx, doms, seed))
 		require.NoError(t, r.verify(tx, doms, ws, fx.Outputs))
+		require.ErrorContains(t, r.verify(tx, doms, ws, &blockreplay.Outputs{}), "write-set has extra writes")
 		require.NotNil(t, captured, "no BAL derived")
 		return captured
 	}
