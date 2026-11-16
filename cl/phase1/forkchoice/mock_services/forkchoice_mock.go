@@ -90,6 +90,7 @@ type ForkChoiceStorageMock struct {
 	WeightsMock                                        []forkchoice.ForkNode
 	LightClientBootstraps                              map[common.Hash]*cltypes.LightClientBootstrap
 	NewestLCUpdate                                     *cltypes.LightClientUpdate
+	NewestLCFinalityUpdate                             *cltypes.LightClientUpdate
 	LCUpdates                                          map[uint64]*cltypes.LightClientUpdate
 	SyncContributionPool                               sync_contribution_pool.SyncContributionPool
 	Headers                                            map[common.Hash]*cltypes.BeaconBlockHeader
@@ -750,14 +751,20 @@ func (f *ForkChoiceStorageMock) GetLightClientBootstrap(
 	return f.LightClientBootstraps[blockRoot], f.LightClientBootstraps[blockRoot] != nil
 }
 
+func (f *ForkChoiceStorageMock) NewestLightClientFinalityUpdate() *cltypes.LightClientUpdate {
+	return f.NewestLCFinalityUpdate
+}
+
 func (f *ForkChoiceStorageMock) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 	return f.NewestLCUpdate
 }
 
-func (f *ForkChoiceStorageMock) GetLightClientUpdate(
-	period uint64,
-) (*cltypes.LightClientUpdate, bool) {
-	return f.LCUpdates[period], f.LCUpdates[period] != nil
+func (f *ForkChoiceStorageMock) GetLightClientUpdates(startPeriod, endPeriod uint64) []*cltypes.LightClientUpdate {
+	var updates []*cltypes.LightClientUpdate
+	for period := startPeriod; period < endPeriod; period++ {
+		updates = append(updates, f.LCUpdates[period])
+	}
+	return updates
 }
 
 func (f *ForkChoiceStorageMock) GetHeader(

@@ -13,8 +13,11 @@ import (
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
+	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
+	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -278,4 +281,141 @@ func TestRetireSkipsAlreadyDetachedItems(t *testing.T) {
 	require.Empty(t, retire(mvcc.RetireReasonAged, dirty, []*FilesItem{item}, "test", log.New()))
 	_, ok := dirty.Get(reopened)
 	require.True(t, ok, "a stale item must not detach the reopened file of the same range")
+}
+
+func TestCheckForVisibilityRequiresAccessors(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		acc  statecfg.Accessors
+		open func(*FilesItem)
+	}{
+		{"btree", statecfg.AccessorBTree, func(it *FilesItem) { it.bindex = &btindex.BtIndex{} }},
+		{"hashmap", statecfg.AccessorHashMap, func(it *FilesItem) { it.index = &recsplit.Index{} }},
+		{"existence", statecfg.AccessorExistence, func(it *FilesItem) { it.existence = &existence.Filter{} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			it := visibleItem(0, 16)
+			require.False(t, checkForVisibility(it, tc.acc, false))
+			tc.open(it)
+			require.True(t, checkForVisibility(it, tc.acc, false))
+		})
+	}
+}
+
+func TestScanDirtyFilesIgnoresUnrelatedNames(t *testing.T) {
+	t.Parallel()
+	ii := emptyTestInvertedIndex(t, 1)
+	ii.scanDirtyFiles([]string{
+		"v1.0-accounts.0-1.ef",
+		"v1.0-accounts.1-2.efi",
+		"v1.0-accounts.1-2.wrongext",
+		"v1.0-storage.1-2.ef",
+		"accounts.1-2.ef",
+		"README.txt",
+	})
+	require.Equal(t, 1, ii.dirtyFiles.Len())
+}
+
+func TestDirtyFilesEndTxNumMinimax(t *testing.T) {
+	t.Parallel()
+	ii := emptyTestInvertedIndex(t, 1)
+	require.Zero(t, ii.dirtyFilesEndTxNumMinimax())
+	ii.scanDirtyFiles([]string{"v1.0-accounts.0-1.ef", "v1.0-accounts.1-2.ef", "v1.0-accounts.2-4.ef"})
+	require.Equal(t, uint64(4), ii.dirtyFilesEndTxNumMinimax())
+}
+
+func TestOpenDirtyFilesKeepsDataOnlyFile(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
+	names := []string{"v1.0-accounts.0-1.kv"}
+	writeTestKVFile(t, filepath.Join(d.dirs.SnapDomain, names[0]), t.TempDir(), logger)
+
+	d.scanDirtyFiles(names)
+	require.NoError(t, d.openDirtyFiles(t.Context(), names))
+
+	require.Equal(t, 1, d.dirtyFiles.Len())
+	d.dirtyFiles.Scan(func(it *FilesItem) bool {
+		require.NotNil(t, it.decompressor)
+		require.Nil(t, it.bindex)
+		require.Nil(t, it.existence)
+		return true
+	})
+}
+
+func TestOpenDirtyFilesDropsEmptyDataFile(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, logger)
+	names := []string{"v1.0-accounts.0-1.kv", "v1.0-accounts.1-2.kv"}
+	writeTestKVFile(t, filepath.Join(d.dirs.SnapDomain, names[0]), t.TempDir(), logger)
+	require.NoError(t, os.WriteFile(filepath.Join(d.dirs.SnapDomain, names[1]), nil, 0o644))
+
+	d.scanDirtyFiles(names)
+	require.NoError(t, d.openDirtyFiles(t.Context(), names))
+
+	require.Equal(t, 1, d.dirtyFiles.Len())
+	_, found := d.dirtyFiles.Get(&FilesItem{startTxNum: 16, endTxNum: 32})
+	require.False(t, found)
+}
+
+func touchFiles(t *testing.T, dir string, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0o644))
+	}
+}
+
+func stepRanges(t *testing.T, items []*FilesItem, stepSize uint64) []string {
+	t.Helper()
+	res := make([]string, len(items))
+	for i, it := range items {
+		from, to := it.StepRange(stepSize)
+		res[i] = fmt.Sprintf("%d-%d", from, to)
+	}
+	return res
+}
+
+func TestDomainMissedBtreeAccessorsNeedsBtAndExistence(t *testing.T) {
+	t.Parallel()
+	d := emptyTestDomain(t, 1)
+	require.True(t, d.Accessors.Has(statecfg.AccessorBTree))
+	d.scanDirtyFiles([]string{"v1.0-accounts.0-1.kv", "v1.0-accounts.1-2.kv", "v1.0-accounts.2-3.kv"})
+	touchFiles(t, d.dirs.SnapDomain,
+		"v1.0-accounts.0-1.bt", "v1.0-accounts.0-1.kvei",
+		"v1.0-accounts.1-2.bt",
+		"v1.0-accounts.2-3.kvei",
+	)
+
+	missed := d.missedBtreeAccessors(d.dirtyFiles.Items(), readDirNames(d.dirs.SnapDomain))
+	require.Equal(t, []string{"1-2", "2-3"}, stepRanges(t, missed, d.stepSize))
+}
+
+func TestMissedMapAccessors(t *testing.T) {
+	t.Parallel()
+	t.Run("domain kvi", func(t *testing.T) {
+		d := emptyTestDomain(t, 1)
+		d.Accessors = statecfg.AccessorHashMap
+		d.scanDirtyFiles([]string{"v1.0-accounts.0-1.kv", "v1.0-accounts.1-2.kv"})
+		touchFiles(t, d.dirs.SnapDomain, "v1.0-accounts.0-1.kvi")
+		missed := d.missedMapAccessors(d.dirtyFiles.Items(), readDirNames(d.dirs.SnapDomain))
+		require.Equal(t, []string{"1-2"}, stepRanges(t, missed, d.stepSize))
+	})
+	t.Run("history vi", func(t *testing.T) {
+		h := emptyTestDomain(t, 1).History
+		h.Accessors = statecfg.AccessorHashMap
+		h.scanDirtyFiles([]string{"v1.0-accounts.0-1.v", "v1.0-accounts.1-2.v"})
+		touchFiles(t, h.dirs.SnapAccessors, "v1.0-accounts.0-1.vi")
+		missed := h.missedMapAccessors(h.dirtyFiles.Items(), readDirNames(h.dirs.SnapAccessors))
+		require.Equal(t, []string{"1-2"}, stepRanges(t, missed, h.stepSize))
+	})
+	t.Run("inverted index efi", func(t *testing.T) {
+		ii := emptyTestInvertedIndex(t, 1)
+		ii.Accessors = statecfg.AccessorHashMap
+		ii.scanDirtyFiles([]string{"v1.0-accounts.0-1.ef", "v1.0-accounts.1-2.ef"})
+		touchFiles(t, ii.dirs.SnapAccessors, "v1.0-accounts.0-1.efi")
+		missed := ii.missedMapAccessors(ii.dirtyFiles.Items(), readDirNames(ii.dirs.SnapAccessors))
+		require.Equal(t, []string{"1-2"}, stepRanges(t, missed, ii.stepSize))
+	})
 }

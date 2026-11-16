@@ -4,6 +4,7 @@ import "math"
 
 const (
 	MaxSupportedCommitteesPerSlot = 64
+	AttestationSubnetExtraBits    = uint64(0)
 
 	// non-configurable constants
 	// For Gloas
@@ -27,11 +28,20 @@ const (
 
 	// BPS (basis points) timing constants.
 	// These define slot-relative deadlines as basis points (1/10000 of a slot).
-	BpsFactor                = uint64(10000) // Denominator for BPS calculations
-	AttestationDueBps        = uint64(3333)
-	AttestationDueBpsGloas   = uint64(2500) // 25% of slot — attestation deadline
-	AggregateDueBpsGloas     = uint64(5000) // 50% of slot — aggregate deadline
-	PayloadAttestationDueBps = uint64(7500) // 75% of slot — PTC payload attestation deadline
+	BpsFactor                       = uint64(10000) // Denominator for BPS calculations
+	AttestationDueBps               = uint64(3333)
+	AggregateDueBps                 = uint64(6667)
+	SyncMessageDueBps               = uint64(3333)
+	ContributionDueBps              = uint64(6667)
+	AttestationDueBpsGloas          = uint64(2500) // 25% of slot — attestation deadline
+	AggregateDueBpsGloas            = uint64(5000) // 50% of slot — aggregate deadline
+	SyncMessageDueBpsGloas          = uint64(2500)
+	ContributionDueBpsGloas         = uint64(5000)
+	PayloadAttestationDueBps        = uint64(7500) // 75% of slot — PTC payload attestation deadline
+	ProposerReorgCutoffBps          = uint64(1667)
+	ReorgMaxEpochsSinceFinalization = uint64(2)
+	EpochsPerSubnetSubscription     = uint64(256)
+	ConfirmationByzantineThreshold  = uint64(25)
 
 	// Proposer boost reorg constants.
 	// REORG_HEAD_WEIGHT_THRESHOLD is the percentage of committee weight below which
