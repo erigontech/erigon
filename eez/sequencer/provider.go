@@ -104,7 +104,9 @@ func (p *poolTxns) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideO
 
 // keep returns the transactions of txs a block may carry, within the budget
 // left, which it takes from, and whether one an emptier block would carry
-// exceeded it.
+// exceeded it. The pool yields a sender's transactions in nonce order and
+// withholds one only for the gas or space the block lacks, so a sender left
+// out is one keep has seen.
 func (p *poolTxns) keep(txs []types.Transaction) (kept []types.Transaction, overBudget bool) {
 	kept = txs[:0]
 	for _, tx := range txs {

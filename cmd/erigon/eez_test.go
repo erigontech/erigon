@@ -189,7 +189,8 @@ func TestAllInOneConfigs(t *testing.T) {
 
 // TestConfigureFollower: a follower turns off the chain's other drivers and
 // sources, and refuses head moves on request; a sequencer keeps a txpool
-// without gossip or blobs.
+// without gossip, whose blocks carry no blobs and which admits no blob
+// transaction.
 func TestConfigureFollower(t *testing.T) {
 	for _, sequencer := range []bool{false, true} {
 		n, e := l1Configs(t, 1)
@@ -205,6 +206,7 @@ func TestConfigureFollower(t *testing.T) {
 		}
 		require.True(t, e.TxPool.NoGossip)
 		require.Equal(t, uint64(0), *e.Builder.MaxBlobsPerBlock)
+		require.Zero(t, e.TxPool.TotalBlobPoolLimit, "a blob transaction no block yields would hold back its sender's later ones")
 	}
 	n, _ := l1Configs(t, 1)
 	n.Http.API = append(n.Http.API, "testing")

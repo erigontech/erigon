@@ -102,6 +102,9 @@ func configureFollowerEth(cfg *ethconfig.Config, sequencer bool) {
 	if sequencer {
 		cfg.TxPool.NoGossip = true
 		cfg.Builder.MaxBlobsPerBlock = new(uint64(0))
+		// The pool would never yield a blob transaction to a block without
+		// blob gas, yet yield its sender's later ones, which wait on it.
+		cfg.TxPool.TotalBlobPoolLimit = 0
 	}
 }
 
