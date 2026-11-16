@@ -155,7 +155,11 @@ func TestHistoryStaticFilesInRange_DetectsGapInSourceFiles(t *testing.T) {
 
 	hc.files = hc.files[:1]
 	_, _, err = hc.staticFilesInRange(r)
-	require.Error(t, err, "staticFilesInRange must reject a merge range beyond its source files")
+	require.ErrorContains(t, err, "accounts", "staticFilesInRange must reject a merge range beyond its source files")
+
+	hc.files = nil
+	_, _, err = hc.staticFilesInRange(r)
+	require.ErrorContains(t, err, "accounts", "staticFilesInRange must reject a merge range with no source files")
 }
 
 func emptyTestInvertedIndex(t testing.TB, aggStep uint64) *InvertedIndex {
