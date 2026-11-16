@@ -2125,11 +2125,11 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		if statecfg.ExperimentalParallelCommitment {
 			parallelCommitmentReaders = commitment.ParallelCommitmentReadTxs()
 		}
-		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers); int64(c) < limit {
+		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers, dbg.ReadAheadBlocksWorkers); int64(c) < limit {
 			logger.Warn("db.read.concurrency below the exec read-tx floor; raising to avoid a parallel-exec deadlock",
 				"configured", c, "using", limit, "execWorkers", cfg.ExecWorkerCount,
 				"parallelCommitmentReaders", parallelCommitmentReaders, "warmupWorkers", warmupWorkers,
-				"blockReadAheadWorkers", blockReadAheadWorkers)
+				"blockReadAheadWorkers", blockReadAheadWorkers, "readAheadExecWorkers", dbg.ReadAheadBlocksWorkers)
 		}
 	}
 	if ctx.IsSet(ExecNoMergeFlag.Name) {

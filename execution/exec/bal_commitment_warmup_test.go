@@ -519,8 +519,8 @@ func TestPrefetchKeysKeepsTheFirstReadError(t *testing.T) {
 	}
 	parent := prefetcherTx{p: coldPagesPrefetcher{}}
 	failing := prefetcherDB{p: domainErrPrefetcher{failing: kv.CommitmentDomain}}
-	require.Error(t, prefetchKeys(context.Background(), failing, parent, kv.CommitmentDomain, keys), "an error from a planner's own tx")
-	require.NoError(t, prefetchKeys(context.Background(), prefetcherDB{p: coldPagesPrefetcher{}}, parent, kv.CommitmentDomain, keys))
+	require.Error(t, prefetchKeys(context.Background(), failing, parent, kv.CommitmentDomain, keys, prefetchPar), "an error from a planner's own tx")
+	require.NoError(t, prefetchKeys(context.Background(), prefetcherDB{p: coldPagesPrefetcher{}}, parent, kv.CommitmentDomain, keys, prefetchPar))
 }
 
 // branchTx serves raw commitment branches from a small trie: compact prefix -> child bitmap.
@@ -545,7 +545,7 @@ func TestKeysWithChildKeepsKeysWhoseBranchHasTheirNextNibble(t *testing.T) {
 		compact(1): 1 << 2, // branch 1 has only child 2
 	}}
 	keys := [][]byte{{1, 2, 0}, {1, 5, 0}, {3, 0, 0}, {4}}
-	got := keysWithChild(context.Background(), nil, tx, keys, 1)
+	got := keysWithChild(context.Background(), nil, tx, keys, 1, prefetchPar)
 	require.Equal(t, [][]byte{{1, 2, 0}}, got, "1-5 has no child at branch 1, 3 has no branch, 4 ends above depth 1")
 }
 

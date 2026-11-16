@@ -39,11 +39,6 @@ func DefaultDBReadConcurrency() int {
 // apply-loop txs, the block-loader tx and the commitment-calculator tx.
 const execPermanentReadTxs = 5
 
-// execReadAheadTxs counts the block read-ahead txs held on non-initial applying
-// cycles — the steady tip-following mode — so they are counted with the fixed
-// holders rather than eating into the reserve.
-const execReadAheadTxs = 2
-
 // dbReadTxsReserved is read-tx headroom kept above parallel exec's permanent
 // holders. Without it a transient commitment/RPC reader can take the last slot
 // a blocked permanent holder needs, deadlocking the pipeline.
@@ -51,13 +46,13 @@ const dbReadTxsReserved = 16
 
 // RoTxsLimit sizes the MDBX read-tx semaphore for concurrent worker pools and
 // reserved readers.
-func RoTxsLimit(dbReadConcurrency, execWorkers, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers int) int64 {
+func RoTxsLimit(dbReadConcurrency, execWorkers, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers, execReadAheadWorkers int) int64 {
 	limit := DefaultDBReadConcurrency()
 	if dbReadConcurrency > 0 {
 		limit = dbReadConcurrency
 	}
-	workerReaders := max(execWorkers, 0) + max(parallelCommitmentReaders, 0) + max(warmupWorkers, 0) + max(blockReadAheadWorkers, 0)
-	return int64(max(limit, workerReaders+execPermanentReadTxs+execReadAheadTxs+dbReadTxsReserved))
+	workerReaders := max(execWorkers, 0) + max(parallelCommitmentReaders, 0) + max(warmupWorkers, 0) + max(blockReadAheadWorkers, 0) + max(execReadAheadWorkers, 0)
+	return int64(max(limit, workerReaders+execPermanentReadTxs+dbReadTxsReserved))
 }
 
 type HttpCfg struct {

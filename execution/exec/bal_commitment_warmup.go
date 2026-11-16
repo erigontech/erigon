@@ -38,6 +38,10 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+func commitmentStateKey(address, slot []byte) []byte {
+	return commitment.KeyToHexNibbleHash(slices.Concat(address, slot))
+}
+
 func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
 	keyCount := 0
 	for i := range bal {
@@ -52,14 +56,11 @@ func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
 		account := &bal[i]
 		address := account.Address
 		if len(account.BalanceChanges)+len(account.NonceChanges)+len(account.CodeChanges) > 0 {
-			keys = append(keys, commitment.KeyToHexNibbleHash(address[:]))
+			keys = append(keys, commitmentStateKey(address[:], nil))
 		}
 		for _, storage := range account.StorageChanges {
 			slot := storage.Slot.Value()
-			plainKey := make([]byte, len(address)+len(slot))
-			copy(plainKey, address[:])
-			copy(plainKey[len(address):], slot[:])
-			keys = append(keys, commitment.KeyToHexNibbleHash(plainKey))
+			keys = append(keys, commitmentStateKey(address[:], slot[:]))
 		}
 	}
 	slices.SortFunc(keys, bytes.Compare)
@@ -274,9 +275,9 @@ func withTemporalTx(ctx context.Context, db kv.RoDB, fn func(ttx kv.TemporalTx))
 
 // keysWithChild keeps the keys whose branch at depth has their next nibble.
 // A key whose path ends above depth has no branch there, so checks at shallower depths can be skipped.
-func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, depth int) [][]byte {
+func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, depth, par int) [][]byte {
 	keep := make([]bool, len(keys))
-	inChunks(ctx, db, ttx, len(keys), max(1, min(prefetchPar, len(keys)/256)), func(tx kv.TemporalTx, from, to int) {
+	inChunks(ctx, db, ttx, len(keys), max(1, min(par, len(keys)/256)), func(tx kv.TemporalTx, from, to int) {
 		// Only the child bitmap is needed: a raw branch skips the reads that resolve shortened keys.
 		raw, rawOK := tx.AggTx().(rawBranchReader)
 		compact := make([]byte, 0, 128)
@@ -316,9 +317,8 @@ func keysWithChild(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]
 }
 
 // prefetchKeys spreads keys over prefetchPar read txs and returns the first read failure (see firstFailure).
-func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.Domain, keys [][]byte) error {
-	par := prefetchPar
-	if len(keys) < 2*prefetchPar {
+func prefetchKeys(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, domain kv.Domain, keys [][]byte, par int) error {
+	if len(keys) < 2*par {
 		par = 1
 	}
 	var mu sync.Mutex
@@ -413,7 +413,7 @@ func prefetchBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte) {
 
 func prefetchDomain(ctx context.Context, db kv.RoDB, domain kv.Domain, keys [][]byte) error {
 	var err error
-	if txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) { err = prefetchKeys(ctx, db, ttx, domain, keys) }); txErr != nil {
+	if txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) { err = prefetchKeys(ctx, db, ttx, domain, keys, prefetchPar) }); txErr != nil {
 		return txErr
 	}
 	return err
@@ -449,19 +449,24 @@ func flatPrefixes(keys [][]byte, start int) [][]byte {
 func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) error {
 	var err error
 	txErr := withTemporalTx(ctx, db, func(ttx kv.TemporalTx) {
-		p, ok := ttx.AggTx().(latestPrefetcher)
-		if !ok || trieMostlyResident(ctx, p, hashedKeys) {
-			return
-		}
-		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys, 0)); err != nil {
-			return
-		}
-		// The account trie walk loses a storage key at the extension above its account, so storage tries start again at their root.
-		if err = walkTriePrefixes(ctx, db, ttx, hashedKeys, 0); err == nil {
-			err = walkTriePrefixes(ctx, db, ttx, storageKeysOf(hashedKeys), storageTrieDepth)
-		}
+		err = prefetchCommitmentWithTx(ctx, db, ttx, hashedKeys, prefetchPar)
 	})
 	return cmp.Or(txErr, err)
+}
+
+func prefetchCommitmentWithTx(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, hashedKeys [][]byte, par int) error {
+	p, ok := ttx.AggTx().(latestPrefetcher)
+	if !ok || trieMostlyResident(ctx, p, hashedKeys) {
+		return nil
+	}
+	if err := prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys, 0), par); err != nil {
+		return err
+	}
+	// The account trie walk loses a storage key at the extension above its account, so storage tries start again at their root.
+	if err := walkTriePrefixes(ctx, db, ttx, hashedKeys, 0, par); err != nil {
+		return err
+	}
+	return walkTriePrefixes(ctx, db, ttx, storageKeysOf(hashedKeys), storageTrieDepth, par)
 }
 
 const storageTrieDepth = 64
@@ -477,16 +482,16 @@ func storageKeysOf(hashedKeys [][]byte) [][]byte {
 }
 
 // walkTriePrefixes prefetches the trie levels below the flat depth and stops at the first read error.
-func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, start int) error {
+func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, start, par int) error {
 	active := keys
 	for depth := start; len(active) > 0 && depth <= commitment.WarmupMaxDepth; depth++ {
 		if depth > prefetchFlatDepth {
-			if err := prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, compactPrefixes(active, depth)); err != nil {
+			if err := prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, compactPrefixes(active, depth), par); err != nil {
 				return err
 			}
 		}
 		if depth >= prefetchFlatDepth {
-			active = keysWithChild(ctx, db, ttx, active, depth)
+			active = keysWithChild(ctx, db, ttx, active, depth, par)
 		}
 	}
 	return nil

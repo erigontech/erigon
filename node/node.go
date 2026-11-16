@@ -347,6 +347,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			parallelCommitmentReaders(),
 			dbg.BALCommitmentWarmupReaders(),
 			dbg.ReadAheadWorkerReaders(),
+			dbg.ReadAheadBlocksWorkers,
 		))
 		opts := mdbx.New(label, logger).
 			Path(dbPath).
