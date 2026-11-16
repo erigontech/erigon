@@ -20,7 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -236,6 +238,17 @@ func (b *BlobHistoryDownloader) SetBlobEndpoints(endpoints []string, workers int
 	b.endpoints = endpoints
 	b.endpointWorkers = max(workers, 1)
 	b.endpointUnservedAt = make([]uint64, len(endpoints))
+	hosts := make([]string, len(endpoints))
+	for i, endpoint := range endpoints {
+		hosts[i] = blobfetch.RedactEndpoint(endpoint)
+	}
+	b.logger.Info("[BlobHistoryDownloader] Blob backfill asks beacon API endpoints before peers", "endpoints", strings.Join(hosts, ","),
+		"workers", b.endpointWorkers, "cpuCores", runtime.NumCPU(),
+		"tuning", "each worker uses about one CPU core while it verifies blobs; set --caplin.blobs-backfill-endpoint-workers to the cores the node can spare")
+	if b.endpointWorkers > runtime.NumCPU() {
+		b.logger.Warn("[BlobHistoryDownloader] More blob backfill workers than CPU cores: the backfill competes with chain-tip work",
+			"workers", b.endpointWorkers, "cpuCores", runtime.NumCPU())
+	}
 }
 
 func (b *BlobHistoryDownloader) resetEndpointWindows() {

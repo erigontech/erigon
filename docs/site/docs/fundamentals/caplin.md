@@ -32,7 +32,7 @@ In addition, Caplin can backfill recent blobs for an op-node or other uses with 
 The blob backfill can also ask a beacon API endpoint first, which is much faster than peers and covers slots that peers no longer serve:
 
 * `--caplin.blobs-backfill-endpoint <url>`: Beacon API endpoint asked for a block's blobs before peers; repeat it for fallback endpoints. The blobs are verified against the block before they are stored, so the endpoint does not need to be trusted. Slots older than about 18 days need an archive-capable endpoint.
-* `--caplin.blobs-backfill-endpoint-workers <n>`: Blocks fetched and verified at a time (default `2`).
+* `--caplin.blobs-backfill-endpoint-workers <n>`: Blocks fetched and verified at a time (default `2`). Each worker uses about one CPU core while it verifies blobs. Keep the default on a validator node so the backfill does not compete with attestation and block processing; on a dedicated archive node, set it to the cores you can spare, for example `8` on a 16-core machine. At startup the node logs the endpoints (host only), the worker count and the number of CPU cores, and warns when there are more workers than cores.
 
 With state archival enabled, Caplin's indexing database (`<datadir>/caplin/indexing`) is pruned automatically: state rows already frozen into snapshots are deleted on the antiquary cadence, so the database holds only the un-frozen tail. The `mdbx.dat` file does not shrink when rows are pruned — freed pages are reused, bounding future growth. Set `CAPLIN_STATE_PRUNE_DISABLE=true` to turn pruning off.
 
