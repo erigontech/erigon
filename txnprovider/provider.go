@@ -77,6 +77,9 @@ func WithTxnIdsFilter(txnIdsFilter mapset.Set[[32]byte]) ProvideOption {
 	}
 }
 
+// WithAvailableRlpSpace bounds the encoded size of the transactions provided:
+// the block's RLP space left, or less when the builder bounds its
+// transactions more tightly.
 func WithAvailableRlpSpace(size int) ProvideOption {
 	return func(opt *ProvideOptions) {
 		opt.AvailableRlpSpace = size

@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -45,6 +46,7 @@ func TestParametersCopyKeepsNothingShared(t *testing.T) {
 		ParentBeaconBlockRoot: &root,
 		SlotNumber:            &slot,
 		TargetGasLimit:        &gasLimit,
+		TxnsBudget:            &exec.TxnsBudget{Limit: 6},
 		ExtraData:             []byte{5},
 	}
 	copied := params.Copy()
@@ -53,6 +55,7 @@ func TestParametersCopyKeepsNothingShared(t *testing.T) {
 	root[0] = 10
 	slot = 20
 	gasLimit = 30
+	params.TxnsBudget.Limit = 60
 	params.ExtraData[0] = 50
 
 	require.Nil(t, copied.Withdrawals[0])
@@ -60,6 +63,7 @@ func TestParametersCopyKeepsNothingShared(t *testing.T) {
 	require.Equal(t, common.Hash{0x01}, *copied.ParentBeaconBlockRoot)
 	require.Equal(t, uint64(2), *copied.SlotNumber)
 	require.Equal(t, uint64(3), *copied.TargetGasLimit)
+	require.Equal(t, 6, copied.TxnsBudget.Limit)
 	require.Equal(t, byte(5), copied.ExtraData[0])
 }
 
@@ -68,6 +72,6 @@ func TestParametersCopyCoversEveryField(t *testing.T) {
 
 	// Copy has to be revisited whenever a reference-typed field is added, and nothing else will say
 	// so: a shallow copy of a new slice or pointer compiles and silently shares it.
-	require.Equal(t, 13, reflect.TypeFor[Parameters]().NumField(),
+	require.Equal(t, 14, reflect.TypeFor[Parameters]().NumField(),
 		"Parameters gained or lost a field; check whether Copy has to copy it")
 }

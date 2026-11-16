@@ -91,6 +91,9 @@ func createBlock(tx kv.TemporalTx, executionAt uint64, cfg BuilderCreateBlockCfg
 	*current = exec.AssembledBlock{}    // always start with a clean state
 	var txPoolLocals []accounts.Address // txPoolV2 has no concept of local addresses (yet?)
 	coinbase := accounts.InternAddress(cfg.builder.BuilderConfig.Etherbase)
+	if cfg.blockBuilderParameters != nil {
+		current.Budget = cfg.blockBuilderParameters.TxnsBudget
+	}
 
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
