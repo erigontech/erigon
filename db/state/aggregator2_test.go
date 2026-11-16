@@ -151,5 +151,5 @@ func TestOpenRefusesPendingRestoreReset(t *testing.T) {
 	if err == nil {
 		agg.Close()
 	}
-	require.ErrorContains(t, err, "convert --restore")
+	require.ErrorContains(t, err, "commitment restore has not reset the execution state")
 }
