@@ -33,7 +33,6 @@ func cutoffInRetireWindow(files visibleFiles, cutoffTxNum uint64) bool {
 	return cutoffTxNum > files.StartTxNum() && cutoffTxNum < files.EndTxNum()
 }
 
-// entirelyBeforeStep selects the visible source files entirely below cutoff step.
 func entirelyBeforeStep(files visibleFiles, stepSize uint64, cutoff kv.Step) (outs []*FilesItem) {
 	for _, f := range files {
 		if _, endStep := f.src.StepRange(stepSize); endStep <= cutoff {
