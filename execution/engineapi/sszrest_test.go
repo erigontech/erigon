@@ -50,6 +50,7 @@ func allForksConfig() *chain.Config {
 		PragueTime:    common.NewUint64(300),
 		OsakaTime:     common.NewUint64(400),
 		AmsterdamTime: common.NewUint64(500),
+		BogotaTime:    common.NewUint64(600),
 	}
 }
 
@@ -133,6 +134,7 @@ func TestSSZRESTForkRegistry(t *testing.T) {
 		"prague":    clparams.ElectraVersion,
 		"osaka":     clparams.FuluVersion,
 		"amsterdam": clparams.GloasVersion,
+		"bogota":    clparams.HezeVersion,
 	} {
 		got, ok := engineForkVersion(name)
 		require.True(t, ok, name)
@@ -152,7 +154,9 @@ func TestSSZRESTForkNameAtTime(t *testing.T) {
 		350: "prague",
 		450: "osaka",
 		500: "amsterdam",
-		999: "amsterdam",
+		599: "amsterdam",
+		600: "bogota",
+		999: "bogota",
 	} {
 		require.Equal(t, want, forkNameAtTime(cfg, ts), "ts=%d", ts)
 	}
@@ -166,7 +170,7 @@ func TestSSZRESTCapabilitiesIndependentOfForkSchedule(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code)
 		var caps sszRestCapabilities
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &caps))
-		require.Equal(t, []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"}, caps.SupportedForks)
+		require.Equal(t, []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam", "bogota"}, caps.SupportedForks)
 	}
 }
 
@@ -493,7 +497,7 @@ func TestSSZRESTForkchoiceResponseRoundTrip(t *testing.T) {
 	}
 	enc, err := encodeForkchoiceResponse(resp)
 	require.NoError(t, err)
-	out, err := decodeForkchoiceResponse(enc)
+	out, err := decodeForkchoiceResponse(enc, clparams.Phase0Version)
 	require.NoError(t, err)
 	require.Equal(t, engine_types.ValidStatus, out.PayloadStatus.Status)
 	require.Equal(t, latest, *out.PayloadStatus.LatestValidHash)
@@ -503,7 +507,7 @@ func TestSSZRESTForkchoiceResponseRoundTrip(t *testing.T) {
 	resp.PayloadStatus = &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}
 	enc, err = encodeForkchoiceResponse(resp)
 	require.NoError(t, err)
-	out, err = decodeForkchoiceResponse(enc)
+	out, err = decodeForkchoiceResponse(enc, clparams.Phase0Version)
 	require.NoError(t, err)
 	require.Equal(t, engine_types.SyncingStatus, out.PayloadStatus.Status)
 	require.Nil(t, out.PayloadId)
@@ -1167,6 +1171,127 @@ func TestSSZRESTPayloadStatusDecodeResetsOptionals(t *testing.T) {
 	require.Nil(t, reused.ValidationError)
 }
 
+func TestSSZRESTPayloadStatusInclusionListSatisfiedRoundTrip(t *testing.T) {
+	satisfied, unsatisfied := true, false
+	for _, tc := range []struct {
+		name        string
+		ilSatisfied *bool
+	}{
+		{"satisfied", &satisfied},
+		{"unsatisfied", &unsatisfied},
+		{"null", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			latest := common.HexToHash("0x1234")
+			wire := &engine_types.PayloadStatus{
+				Status:                 engine_types.ValidStatus,
+				LatestValidHash:        &latest,
+				InclusionListSatisfied: tc.ilSatisfied,
+				SSZVersion:             clparams.HezeVersion,
+			}
+			enc, err := wire.EncodeSSZ(nil)
+			require.NoError(t, err)
+
+			var out engine_types.PayloadStatus
+			require.NoError(t, out.DecodeSSZ(enc, int(clparams.HezeVersion)))
+			require.Equal(t, engine_types.ValidStatus, out.Status)
+			require.NotNil(t, out.LatestValidHash)
+			require.Equal(t, latest, *out.LatestValidHash)
+			require.Equal(t, tc.ilSatisfied, out.InclusionListSatisfied)
+		})
+	}
+}
+
+func TestSSZRESTPayloadStatusDecodeResetsInclusionListSatisfied(t *testing.T) {
+	latest := common.HexToHash("0x1234")
+	satisfied := true
+	valid, err := (&engine_types.PayloadStatus{
+		Status:                 engine_types.ValidStatus,
+		LatestValidHash:        &latest,
+		ValidationError:        engine_types.NewStringifiedErrorFromString("stale"),
+		InclusionListSatisfied: &satisfied,
+		SSZVersion:             clparams.HezeVersion,
+	}).EncodeSSZ(nil)
+	require.NoError(t, err)
+	syncing, err := (&engine_types.PayloadStatus{Status: engine_types.SyncingStatus, SSZVersion: clparams.HezeVersion}).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	var out engine_types.PayloadStatus
+	require.NoError(t, out.DecodeSSZ(valid, int(clparams.HezeVersion)))
+	require.NoError(t, out.DecodeSSZ(syncing, int(clparams.HezeVersion)))
+	require.Equal(t, engine_types.SyncingStatus, out.Status)
+	require.Nil(t, out.LatestValidHash)
+	require.Nil(t, out.ValidationError)
+	require.Nil(t, out.InclusionListSatisfied)
+}
+
+func TestSSZRESTPayloadStatusRejectsNonBooleanInclusionListSatisfied(t *testing.T) {
+	satisfied := true
+	enc, err := (&engine_types.PayloadStatus{Status: engine_types.ValidStatus, InclusionListSatisfied: &satisfied, SSZVersion: clparams.HezeVersion}).EncodeSSZ(nil)
+	require.NoError(t, err)
+	enc[len(enc)-1] = 2
+
+	var out engine_types.PayloadStatus
+	require.Error(t, out.DecodeSSZ(enc, int(clparams.HezeVersion)))
+}
+
+func TestSSZRESTPayloadStatusPreHezeIgnoresInclusionListSatisfied(t *testing.T) {
+	latest := common.HexToHash("0x1234")
+	satisfied := true
+	want, err := (&engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latest}).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	for _, version := range []clparams.StateVersion{
+		clparams.Phase0Version,
+		clparams.BellatrixVersion,
+		clparams.CapellaVersion,
+		clparams.DenebVersion,
+		clparams.ElectraVersion,
+		clparams.FuluVersion,
+		clparams.GloasVersion,
+	} {
+		t.Run(version.String(), func(t *testing.T) {
+			enc, err := (&engine_types.PayloadStatus{
+				Status:                 engine_types.ValidStatus,
+				LatestValidHash:        &latest,
+				InclusionListSatisfied: &satisfied,
+				SSZVersion:             version,
+			}).EncodeSSZ(nil)
+			require.NoError(t, err)
+			require.Equal(t, want, enc)
+
+			var out engine_types.PayloadStatus
+			require.NoError(t, out.DecodeSSZ(enc, int(version)))
+			require.Equal(t, version, out.SSZVersion)
+			require.Nil(t, out.InclusionListSatisfied)
+		})
+	}
+}
+
+func TestSSZRESTPayloadStatusHezeAppendsInclusionListSatisfied(t *testing.T) {
+	satisfied := true
+	pre, err := (&engine_types.PayloadStatus{Status: engine_types.ValidStatus, SSZVersion: clparams.GloasVersion}).EncodeSSZ(nil)
+	require.NoError(t, err)
+	null, err := (&engine_types.PayloadStatus{Status: engine_types.ValidStatus, SSZVersion: clparams.HezeVersion}).EncodeSSZ(nil)
+	require.NoError(t, err)
+	set, err := (&engine_types.PayloadStatus{Status: engine_types.ValidStatus, InclusionListSatisfied: &satisfied, SSZVersion: clparams.HezeVersion}).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	require.Len(t, null, len(pre)+4)
+	require.Len(t, set, len(pre)+5)
+	require.Equal(t, byte(1), set[len(set)-1])
+}
+
+func TestSSZRESTPayloadStatusClonePreservesVersion(t *testing.T) {
+	heze, ok := (&engine_types.PayloadStatus{SSZVersion: clparams.HezeVersion}).Clone().(*engine_types.PayloadStatus)
+	require.True(t, ok)
+	require.Equal(t, clparams.HezeVersion, heze.SSZVersion)
+
+	untagged, ok := (&engine_types.PayloadStatus{}).Clone().(*engine_types.PayloadStatus)
+	require.True(t, ok)
+	require.Equal(t, clparams.BellatrixVersion, untagged.SSZVersion)
+}
+
 func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 	srv := newTestEngineServer(allForksConfig(), false)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/engine/v1/capabilities", nil)
@@ -1183,7 +1308,7 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 		Limits                 map[string]uint64   `json:"limits"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &caps))
-	require.Equal(t, []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"}, caps.SupportedForks)
+	require.Equal(t, []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam", "bogota"}, caps.SupportedForks)
 	require.Equal(t, []string{"payloads", "payloads/witness", "forkchoice", "bodies"}, caps.ForkScopedEndpoints)
 	require.Equal(t, []string{"v1", "v2", "v3", "v4"}, caps.IndependentlyVersioned["blobs"])
 	require.Equal(t, []string{"capabilities", "identity", "inclusion-list"}, caps.UnscopedEndpoints)
@@ -1296,7 +1421,7 @@ func TestSSZRESTRoutingErrors(t *testing.T) {
 
 func TestSSZRESTUnscheduledForkSchema(t *testing.T) {
 	srv := newTestEngineServer(&chain.Config{}, false)
-	for _, fork := range []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"} {
+	for _, fork := range []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam", "bogota"} {
 		t.Run(fork, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads", fork, nil))
@@ -1479,7 +1604,7 @@ func TestSSZRESTNewPayloadBlobValidation(t *testing.T) {
 			if tc.frame {
 				cfg = allForksChainConfig()
 				cfg.BogotaTime = common.NewUint64(0)
-				version, fork = clparams.GloasVersion, "amsterdam"
+				version, fork = clparams.HezeVersion, "bogota"
 				txs[0] = &types.FrameTransaction{
 					ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: common.Address{0x01},
 					Frames:              []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 21_000}}},
@@ -1597,13 +1722,53 @@ func TestSSZRESTForkchoiceStartsPayloadBuild(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
-	response, err := decodeForkchoiceResponse(rec.Body.Bytes())
+	response, err := decodeForkchoiceResponse(rec.Body.Bytes(), clparams.GloasVersion)
 	require.NoError(t, err)
 	require.Equal(t, engine_types.ValidStatus, response.PayloadStatus.Status)
 	require.Equal(t, &state.HeadHash, response.PayloadStatus.LatestValidHash)
 	require.Nil(t, response.PayloadStatus.ValidationError)
 	require.NotNil(t, response.PayloadId)
 	require.Equal(t, hexutil.Bytes{1, 2, 3, 4, 5, 6, 7, 8}, *response.PayloadId)
+}
+
+func TestSSZRESTForkchoiceBogotaReturnsInclusionListSatisfied(t *testing.T) {
+	cfg := allForksConfig()
+	cfg.TerminalTotalDifficulty = uint256.NewInt(0)
+	state := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x01},
+		SafeBlockHash:      common.Hash{0x02},
+		FinalizedBlockHash: common.Hash{0x03},
+	}
+	headNumber := uint64(1)
+	module := &stubExecutionModule{
+		getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
+			return execmodule.ForkChoiceState{
+				HeadHash:      state.HeadHash,
+				SafeHash:      state.SafeBlockHash,
+				FinalizedHash: state.FinalizedBlockHash,
+			}, nil
+		},
+		headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+			return &headNumber, nil
+		},
+		retainedILSatisfied: func(context.Context, common.Hash, uint64) (*bool, error) {
+			satisfied := true
+			return &satisfied, nil
+		},
+	}
+	srv := newProposingEngineServerWithConfig(cfg, module)
+	body, err := encodeForkchoiceUpdate(clparams.HezeVersion, state, nil, nil)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec,
+		newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/forkchoice", "bogota", body))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	response, err := decodeForkchoiceResponse(rec.Body.Bytes(), clparams.HezeVersion)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.ValidStatus, response.PayloadStatus.Status)
+	require.NotNil(t, response.PayloadStatus.InclusionListSatisfied)
+	require.True(t, *response.PayloadStatus.InclusionListSatisfied)
 }
 
 // REST treats a mismatch between Eth-Execution-Version and the fork determined by

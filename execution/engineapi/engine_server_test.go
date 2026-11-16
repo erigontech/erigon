@@ -88,6 +88,7 @@ func TestEngineRejectsMissingRequiredObjects(t *testing.T) {
 		{"engine_forkchoiceUpdatedV2", []any{nil, nil}},
 		{"engine_forkchoiceUpdatedV3", []any{nil, nil}},
 		{"engine_forkchoiceUpdatedV4", []any{nil, nil, nil}},
+		{"engine_forkchoiceUpdatedV5", []any{nil, nil, nil}},
 	} {
 		t.Run(test.method, func(t *testing.T) {
 			for _, params := range []struct {

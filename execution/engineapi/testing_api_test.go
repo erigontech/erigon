@@ -2190,7 +2190,7 @@ func TestForkchoiceUpdatedV5AlwaysEncodesInclusionListSatisfied(t *testing.T) {
 	cfg.BogotaTime = common.NewUint64(0)
 	srv := NewEngineServer(log.New(), cfg, stub, nil, false, false, false, true, nil, nil, 0, 0)
 
-	v5, err := srv.ForkChoiceUpdatedV5(context.Background(), forkchoiceState, nil, nil)
+	v5, err := srv.ForkchoiceUpdatedV5(context.Background(), forkchoiceState, nil, nil)
 	require.NoError(t, err)
 	encoded, err := json.Marshal(v5)
 	require.NoError(t, err)

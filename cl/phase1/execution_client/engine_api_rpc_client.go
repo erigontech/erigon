@@ -110,6 +110,10 @@ func (c *EngineAPIRPCClient) ForkchoiceUpdatedV4(ctx context.Context, forkChoice
 	return call[engine_types.ForkChoiceUpdatedResponse](ctx, c.client, rpc_helper.ForkChoiceUpdatedV4, forkChoiceState, payloadAttributes, custodyColumns)
 }
 
+func (c *EngineAPIRPCClient) ForkchoiceUpdatedV5(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, custodyColumns *engine_types.CustodyColumns) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	return call[engine_types.ForkChoiceUpdatedResponse](ctx, c.client, rpc_helper.ForkChoiceUpdatedV5, forkChoiceState, payloadAttributes, custodyColumns)
+}
+
 func (c *EngineAPIRPCClient) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.ExecutionPayload, error) {
 	return call[engine_types.ExecutionPayload](ctx, c.client, rpc_helper.EngineGetPayloadV1, payloadID)
 }

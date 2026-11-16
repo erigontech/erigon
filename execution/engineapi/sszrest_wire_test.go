@@ -45,10 +45,10 @@ func encodeForkchoiceUpdate(version clparams.StateVersion, state *engine_types.F
 	return ssz2.MarshalSSZ(nil, forkchoiceUpdateSchema(version, state, attrsList, custodyList)...)
 }
 
-func decodeForkchoiceResponse(buf []byte) (*engine_types.ForkChoiceUpdatedResponse, error) {
+func decodeForkchoiceResponse(buf []byte, version clparams.StateVersion) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	status := &engine_types.PayloadStatus{}
 	payloadID := solid.NewByteListSSZ(8)
-	if err := ssz2.UnmarshalSSZ(buf, 0, status, payloadID); err != nil {
+	if err := ssz2.UnmarshalSSZ(buf, int(version), status, payloadID); err != nil {
 		return nil, err
 	}
 	resp := &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}

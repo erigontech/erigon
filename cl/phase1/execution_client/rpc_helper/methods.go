@@ -29,6 +29,7 @@ const (
 	ForkChoiceUpdatedV2 = "engine_forkchoiceUpdatedV2"
 	ForkChoiceUpdatedV3 = "engine_forkchoiceUpdatedV3"
 	ForkChoiceUpdatedV4 = "engine_forkchoiceUpdatedV4"
+	ForkChoiceUpdatedV5 = "engine_forkchoiceUpdatedV5"
 )
 
 const (

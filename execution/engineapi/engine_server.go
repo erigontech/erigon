@@ -1347,49 +1347,6 @@ func (e *EngineServer) setRetainedInclusionListSatisfied(ctx context.Context, st
 	return nil
 }
 
-func (e *EngineServer) resolveInclusionListSatisfied(ctx context.Context, resp *engine_types.PayloadStatus, blockHash common.Hash, blockNumber uint64, il types.Transactions) error {
-	if il == nil || resp.Status != engine_types.ValidStatus {
-		return nil
-	}
-	if len(il) == 0 {
-		satisfied := true
-		resp.InclusionListSatisfied = &satisfied
-		return nil
-	}
-	satisfied, err := e.executionService.InclusionListSatisfied(ctx, blockHash, blockNumber, il)
-	if err != nil {
-		return err
-	}
-	if satisfied == nil {
-		resp.Status = engine_types.SyncingStatus
-		resp.LatestValidHash = nil
-		return nil
-	}
-	resp.InclusionListSatisfied = satisfied
-	return nil
-}
-
-// quickInclusionListStatus resolves the inclusion list of a quick status. It returns nil when the block is a validated
-// side block whose inclusion list was not checked, so it must be executed again.
-func (e *EngineServer) quickInclusionListStatus(ctx context.Context, status *engine_types.PayloadStatus, blockHash common.Hash, blockNumber uint64, il types.Transactions) (*engine_types.PayloadStatus, error) {
-	quickValid := status.Status == engine_types.ValidStatus
-	if err := e.resolveInclusionListSatisfied(ctx, status, blockHash, blockNumber, il); err != nil {
-		return nil, err
-	}
-	if !quickValid || status.Status != engine_types.SyncingStatus {
-		return status, nil
-	}
-	canonical, err := e.chainRW.IsCanonicalHash(ctx, blockHash)
-	if err != nil {
-		return nil, err
-	}
-	if canonical {
-		return status, nil
-	}
-	e.logger.Debug("[NewPayload] re-executing validated side block for an unchecked inclusion list", "hash", blockHash)
-	return nil, nil
-}
-
 func decodeInclusionList(inclusionList []hexutil.Bytes) types.Transactions {
 	il := make(types.Transactions, 0, len(inclusionList))
 	for _, enc := range inclusionList {
