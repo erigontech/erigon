@@ -2905,10 +2905,6 @@ func readBoundedBody(body io.Reader, limit int64) ([]byte, error) {
 	return b, nil
 }
 
-func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock, validation BlockPublishingValidation) error {
-	return a.broadcastBlockWithIntegrationWait(ctx, blk, validation, true)
-}
-
 func (a *ApiHandler) broadcastBlockWithIntegrationWait(ctx context.Context, blk *cltypes.SignedBeaconBlock, validation BlockPublishingValidation, waitForIntegration bool) error {
 	return a.broadcastBlockWithIntegrationWaitAndPublication(ctx, blk, nil, validation, waitForIntegration, nil)
 }
