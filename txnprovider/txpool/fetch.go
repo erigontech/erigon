@@ -1207,8 +1207,8 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 }
 
 // frameTxnBodyFields is the number of fields in a bare frame transaction body:
-// chain id, nonce, sender, frames, max priority fee, max fee, max fee per blob
-// gas and blob versioned hashes.
+// chain id, nonce keys, nonce, sender, frames, signatures, fees and blob
+// versioned hashes.
 const frameTxnBodyFields = 8
 
 // hasBlobTxn reports whether a Transactions payload contains a blob transaction
