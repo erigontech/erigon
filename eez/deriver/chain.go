@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -30,7 +32,9 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -232,6 +236,38 @@ func (c *ExecChain) Storage(ctx context.Context, number uint64, addr common.Addr
 		return err
 	})
 	return value, err
+}
+
+// ViewPreState runs read on what the child of parent, the executed head,
+// executes on: parent's state, the chain's headers and its canonical
+// hashes, for BLOCKHASH.
+func (c *ExecChain) ViewPreState(ctx context.Context, parent *types.Header, read func(state.StateReader, rules.ChainHeaderReader, func(uint64) (common.Hash, error)) error) error {
+	return c.db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		number := parent.Number.Uint64()
+		executed, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
+		if number != executed {
+			return fmt.Errorf("state after block %d: executed up to %d", number, executed)
+		}
+		hash, ok, err := c.reader.CanonicalHash(ctx, tx, number)
+		if err != nil {
+			return err
+		}
+		if !ok || hash != parent.Hash() {
+			return fmt.Errorf("block %d (%x) is not the canonical head", number, parent.Hash())
+		}
+		r, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, number, true, -1, c.reader.TxnumReader())
+		if err != nil {
+			return err
+		}
+		blockHash := func(n uint64) (common.Hash, error) {
+			h, _, err := c.reader.CanonicalHash(ctx, tx, n)
+			return h, err
+		}
+		return read(r, consensuschain.NewReader(c.config, tx, c.reader, log.Root()), blockHash)
+	})
 }
 
 func (c *ExecChain) Receipts(ctx context.Context, block *types.Block) (rs types.Receipts, err error) {
