@@ -205,3 +205,16 @@ func TestPoolTxnsSkipsAStalledSender(t *testing.T) {
 		require.Equal(t, []types.Transaction{theirs}, got, name)
 	}
 }
+
+// notStarted is a pool that has not started.
+type notStarted struct{ fixed }
+
+func (notStarted) Started() bool { return false }
+
+// TestPoolTxnsNeedsAStartedPool: a pool yet to start yields nothing, which a
+// block would take for a dry pool; the provider fails instead.
+func TestPoolTxnsNeedsAStartedPool(t *testing.T) {
+	user := common.HexToAddress("0xa11ce")
+	_, err := newPoolTxns(notStarted{fixed{transfer(t, 0, 10, user)}}, 1<<20, log.New()).ProvideTxns(t.Context())
+	require.ErrorIs(t, err, errPoolNotStarted)
+}

@@ -18,6 +18,7 @@ package sequencer
 
 import (
 	"context"
+	"errors"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -77,6 +78,11 @@ func newPoolTxns(pool txnprovider.TxnProvider, budget int, logger log.Logger) *p
 }
 
 func (p *poolTxns) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	// A pool yet to start yields nothing, which the block would take for a
+	// dry pool.
+	if s, ok := p.pool.(interface{ Started() bool }); ok && !s.Started() {
+		return nil, errPoolNotStarted
+	}
 	// The pool marks what it yields in the caller's filter, so a page this
 	// provider empties is not the pool running dry: the next holds others.
 	pages := txnprovider.ApplyProvideOptions(opts...).TxnIdsFilter != nil
@@ -150,6 +156,8 @@ type noTxns struct{}
 func (noTxns) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
 	return nil, nil
 }
+
+var errPoolNotStarted = errors.New("txpool not started")
 
 var systemAddress = accounts.InternAddress(protocol.SystemAddress)
 
