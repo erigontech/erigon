@@ -115,12 +115,12 @@ func (et *EngineTest) deliver(m *execmoduletester.ExecModuleTester) error {
 // for a valid payload, engine_forkchoiceUpdatedV<n>.
 func (et *EngineTest) sendPayload(ctx context.Context, client *rpc.Client, chain chainreader.ChainReaderWriterEth1, i int, p EngineXTestNewPayload) error {
 	var payload struct {
-		BlockHash  common.Hash `json:"blockHash"`
-		ParentHash common.Hash `json:"parentHash"`
+		BlockHash  *common.Hash `json:"blockHash"` // nil when the payload has none
+		ParentHash common.Hash  `json:"parentHash"`
 	}
 	var hash *common.Hash
 	if len(p.Params) > 0 && json.Unmarshal(p.Params[0], &payload) == nil {
-		hash = &payload.BlockHash
+		hash = payload.BlockHash
 	}
 	params := make([]any, len(p.Params))
 	for i, param := range p.Params {
@@ -159,7 +159,10 @@ func (et *EngineTest) sendPayload(ctx context.Context, client *rpc.Client, chain
 	case expectInvalid:
 		return fmt.Errorf("payload is valid, expected %s%s", p.ValidationError, p.ErrorCode)
 	}
-	return forkchoiceUpdated(ctx, client, payload.BlockHash, p.FcuVersion, et.SyncingTimeout)
+	if hash == nil {
+		return errors.New("valid payload has no block hash")
+	}
+	return forkchoiceUpdated(ctx, client, *hash, p.FcuVersion, et.SyncingTimeout)
 }
 
 func forkchoiceUpdated(ctx context.Context, client *rpc.Client, head common.Hash, version string, timeout time.Duration) error {

@@ -120,6 +120,16 @@ func TestRunnersReportRejections(t *testing.T) {
 				fixture["engineNewPayloads"].([]any)[1].(map[string]any)["newPayloadVersion"] = "4"
 			})
 		}, 1, "-32602: unexpected slotNumber before engine_newPayloadV5", false},
+		// A null payload decodes to no fields, so the rejection has no hash.
+		{"engine payload that is null", "enginetest", func(t *testing.T) string {
+			return writeEditedFixture(t, engineFixture, func(fixture map[string]any) {
+				expectPayload1Invalid("")(fixture)
+				payload := fixture["engineNewPayloads"].([]any)[1].(map[string]any)
+				delete(payload, "validationError")
+				payload["errorCode"] = "-32602"
+				payload["params"].([]any)[0] = nil
+			})
+		}, 1, "-32602", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tt := cmdtest.NewTestCmd(t, nil)
