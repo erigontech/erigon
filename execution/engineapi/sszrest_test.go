@@ -417,7 +417,7 @@ func TestSSZRESTPayloadStatusWithWitnessByteLayout(t *testing.T) {
 	require.NoError(t, err)
 	// Optional[ExecutionWitness] is List[ExecutionWitness, 1]: one element offset, then the element.
 	require.Equal(t, slices.Concat(prefix, statusEnc, []byte{4, 0, 0, 0}, witnessEnc), enc)
-	decodedStatus, decodedWitness, err := decodePayloadStatusWithWitness(enc)
+	decodedStatus, decodedWitness, err := decodePayloadStatusWithWitness(enc, status.SSZVersion)
 	require.NoError(t, err)
 	require.Equal(t, status, decodedStatus)
 	require.Equal(t, witness, decodedWitness)
@@ -425,7 +425,7 @@ func TestSSZRESTPayloadStatusWithWitnessByteLayout(t *testing.T) {
 	enc, err = encodePayloadStatusWithWitness(status, nil)
 	require.NoError(t, err)
 	require.Equal(t, slices.Concat(prefix, statusEnc), enc)
-	_, decodedWitness, err = decodePayloadStatusWithWitness(enc)
+	_, decodedWitness, err = decodePayloadStatusWithWitness(enc, status.SSZVersion)
 	require.NoError(t, err)
 	require.Nil(t, decodedWitness)
 }
@@ -1542,7 +1542,7 @@ func TestSSZRESTPayloadWitnessOmittedWhenNotValid(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
-	status, witness, err := decodePayloadStatusWithWitness(rec.Body.Bytes())
+	status, witness, err := decodePayloadStatusWithWitness(rec.Body.Bytes(), clparams.GloasVersion)
 	require.NoError(t, err)
 	require.Equal(t, engine_types.InvalidStatus, status.Status)
 	require.Nil(t, witness)

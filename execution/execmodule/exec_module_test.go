@@ -1227,6 +1227,35 @@ func TestValidateChainKeepsInclusionListResultForValidatedSideFork(t *testing.T)
 	}
 }
 
+func TestValidateChainAndViewChecksNewInclusionListForRetainedTip(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	block := chainPack.TopBlock
+	insertAndValidate(t, m, block)
+
+	il := types.Transactions{signedInclusionListTxn(t, m)}
+	block = block.WithInclusionList(il)
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	var viewed bool
+	validation, view, err := m.ExecModule.ValidateChainAndView(t.Context(), block, time.Second, func(kv.TemporalTx, kv.TemporalGetter) error {
+		viewed = true
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.NotNil(t, view)
+	require.NoError(t, view())
+	require.True(t, viewed)
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), il)
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	require.False(t, *satisfied)
+}
+
 type receiptCollector struct {
 	notifications.ChainEventNotifier
 	receipts []*notifications.ReceiptNotification

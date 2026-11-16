@@ -663,22 +663,24 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			if possibleStatus.Status != engine_types.ValidStatus {
 				return possibleStatus, nil
 			}
-			if cached, ok := e.payloadWitnesses.Get(blockHash); ok {
-				witness.result = cached
-			} else {
-				status, validationErr, latestValidHash, err := e.validateChain(ctx, block, &witness)
-				if err != nil {
-					return nil, err
-				}
-				if possibleStatus = e.validatedPayloadStatus(block, status, validationErr, latestValidHash); possibleStatus.Status != engine_types.ValidStatus {
-					return possibleStatus, nil
-				}
-			}
 			if possibleStatus, err = e.quickInclusionListStatus(ctx, possibleStatus, blockHash, uint64(req.BlockNumber), il); err != nil {
 				return nil, err
 			}
+			if possibleStatus != nil && possibleStatus.Status == engine_types.ValidStatus {
+				if cached, ok := e.payloadWitnesses.Get(blockHash); ok {
+					witness.result = cached
+				} else {
+					status, validationErr, latestValidHash, err := e.validateChain(ctx, block, &witness)
+					if err != nil {
+						return nil, err
+					}
+					if validatedStatus := e.validatedPayloadStatus(block, status, validationErr, latestValidHash); validatedStatus.Status != engine_types.ValidStatus {
+						return validatedStatus, nil
+					}
+				}
+				validated = true
+			}
 			if possibleStatus != nil {
-				validated = possibleStatus.Status == engine_types.ValidStatus
 				return possibleStatus, nil
 			}
 		}

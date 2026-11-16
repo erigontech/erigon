@@ -533,8 +533,10 @@ func (e *ExecModule) ValidateChainAndView(ctx context.Context, block *types.Bloc
 		return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil, nil
 	}
 	defer e.semaphore.Release(1)
-	if held, view, err := e.viewRetainedTip(ctx, blockHash, fn); err != nil || held {
-		return valid, view, err
+	if !e.inclusionListPending(blockHash) {
+		if held, view, err := e.viewRetainedTip(ctx, blockHash, fn); err != nil || held {
+			return valid, view, err
+		}
 	}
 	if committed, view, err := e.viewCommittedBlock(ctx, blockHash, block.NumberU64(), fn); err != nil || committed {
 		return valid, view, err
@@ -639,11 +641,11 @@ func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, reva
 			LatestValidHash:  common.Hash{},
 		}, nil
 	}
-	var foundInvalid bool
+	var isInvalidChain bool
 	if e.inclusionListPending(blockHash) && e.forkValidator.ForgetValidHash(blockHash) {
 		// Re-execution cannot change validity, so a re-check that gives no verdict keeps the old one.
 		defer func() {
-			if !foundInvalid && !e.forkValidator.IsValidated(blockHash) {
+			if !isInvalidChain && !e.forkValidator.IsValidated(blockHash) {
 				e.forkValidator.markValidated(blockHash)
 			}
 		}()
@@ -742,8 +744,7 @@ func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, reva
 	if status == engine_types.AcceptedStatus {
 		validationStatus = ExecutionStatusMissingSegment
 	}
-	isInvalidChain := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
-	foundInvalid = isInvalidChain
+	isInvalidChain = status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
 	// Only open a second tx when we actually need to write (bad-chain purge).
 	// On the valid-chain path (the common case at tip) opening + empty-committing
 	// a second RwTx just produces no-op commits with openTxs>=2, pinning freelist
