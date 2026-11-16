@@ -18,16 +18,49 @@ package state
 
 import (
 	"math"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
+
+func TestCheckFilesDBGapChecksHistory(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{
+		"history/v1.0-accounts.2-3.v",
+		"idx/v1.0-accounts.2-3.ef",
+		"accessor/v2.0-accounts.2-3.vi",
+		"history/v1.0-accounts.1-2.v",
+		"idx/v1.0-accounts.1-2.ef",
+		"accessor/v2.0-accounts.1-2.vi",
+	} {
+		t.Run(path, func(t *testing.T) {
+			db, agg := testDbAndAggregatorv3(t, 10)
+			ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+			generateStateFiles(t, agg.Dirs(), ranges)
+			generateCommitmentFile(t, agg.Dirs(), ranges)
+			require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().Snap, filepath.FromSlash(path))))
+			require.NoError(t, agg.OpenFolder(db))
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			require.NoError(t, SavePruneValProgress(tx, agg.d[kv.AccountsDomain].History.ValuesTable, &prune.Stat{TxTo: 30}))
+			at := agg.BeginFilesRo()
+			defer at.Close()
+			err = at.CheckFilesDBGap(tx)
+			require.ErrorContains(t, err, "history accounts")
+			require.ErrorContains(t, err, "snapshots index", "a lost accessor is rebuilt, not a reason to reset the datadir")
+		})
+	}
+}
 
 // TestDomain_RmStateLatestHole reproduces the silent files<->DB gap that
 // `snapshots rm-state --latest` opens when run without `stage_exec --reset`:

@@ -18,14 +18,17 @@ package jsonrpc
 
 import (
 	"bytes"
+	"math/big"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/rpc/filters"
 )
 
 func newMockBackwardChunkLocator(chunks [][]byte) ChunkLocator {
@@ -211,4 +214,29 @@ func TestSearchTransactionsBefore(t *testing.T) {
 		require.Equal(common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"), *results.Receipts[1].From)
 		require.Nil(results.Receipts[1].To)
 	})
+}
+
+// Logs in ots_searchTransactions* receipts carry blockTimestamp, as in eth_getTransactionReceipt.
+func TestSearchTransactionsLogsHaveBlockTimestamp(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
+	logs, err := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(10), ToBlock: big.NewInt(10)})
+	require.NoError(t, err)
+	require.NotEmpty(t, logs)
+	addr := logs[0].Address
+
+	before, err := api.SearchTransactionsBefore(m.Ctx, addr, 0, 25)
+	require.NoError(t, err)
+	after, err := api.SearchTransactionsAfter(m.Ctx, addr, 0, 25)
+	require.NoError(t, err)
+	for _, results := range []*TransactionsWithReceipts{before, after} {
+		var n int
+		for _, r := range results.Receipts {
+			for _, l := range r.Logs {
+				require.Equal(t, new(hexutil.Uint64(r.Timestamp)), l.BlockTimestamp)
+				n++
+			}
+		}
+		require.NotZero(t, n, "the search must return logs")
+	}
 }

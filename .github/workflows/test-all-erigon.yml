@@ -25,13 +25,7 @@ jobs:
           - ubuntu-24.04
           - macos-15
           - windows-2025
-        # Run both serial and parallel commitment paths every time so
-        # divergence is caught on the PR rather than after a release. Execution
-        # is parallel in both legs (dbg.Exec3Parallel defaults true). The matrix
-        # entries spawn separate runners and run concurrently — wall-clock
-        # unchanged, runner-minutes doubled.
         commitment_mode:
-          - serial
           - parallel
         include:
           # Windows GitHub-hosted runners run noticeably slower than Linux for
@@ -64,9 +58,6 @@ jobs:
           cleanup-space: true
           ramdisk: true
           cache-namespace: test-all-erigon
-          # Go's test cache can't see ERIGON_COMMITMENT_PARALLEL (read at package
-          # init), so serial and parallel results only stay mode-pure if each
-          # commitment mode keeps its own cache lineage.
           build-cache-extra-key: commitment-${{ matrix.commitment_mode }}
 
       - name: Run all tests on ${{ matrix.os }} (${{ matrix.commitment_mode }} commitment)
@@ -77,6 +68,12 @@ jobs:
           ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
         run: |
           if ! make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"; then
+            # A failed test binary is a real result: a cold rerun only repeats it or hides a flake. A build failure,
+            # or a full disk the log reports, still takes the cache clear below; a disk failure that prints nothing
+            # (a SIGBUS on a sparse mmap) does not.
+            if grep -qE '^FAIL[[:space:]]+[^[:space:]]+[[:space:]]+[0-9.]+s' run.log && ! grep -q -e 'no space left on device' -e 'not enough space on the disk' -e '\[build failed\]' run.log; then
+              exit 1
+            fi
             # Retry after clearing the Go build cache. Low disk space can cause
             # severe, non-obvious build/test failures that don't surface a clear
             # "no space left" message. Tuning a cache size limit is too fragile;

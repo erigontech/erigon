@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -65,7 +66,7 @@ func newSharedDomainsBench(b *testing.B, db kv.TemporalRoDB, tx kv.TemporalTx) *
 	domains, err := execctx.NewSharedDomains(b.Context(), tx, log.New())
 	require.NoError(b, err)
 	domains.EnableParaTrieDB(db)
-	require.Equal(b, execctx.PickTrieVariant(), domains.GetCommitmentCtx().Trie().Variant())
+	require.Equal(b, commitment.VariantParallelHexPatricia, domains.GetCommitmentCtx().Trie().Variant())
 	return domains
 }
 

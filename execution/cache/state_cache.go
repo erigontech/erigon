@@ -227,7 +227,7 @@ func (c *StateCache) seedAddrCodeHash(addr []byte, h [32]byte, txNum, visibleEnd
 		visibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
-	cc.PutAddrCodeHash(addr, h, txNum)
+	cc.PutAddrCodeHash(addr, h, readFillStamp(txNum, visibleEnd))
 }
 
 func (c *StateCache) deleteAddrCodeHash(addr []byte) {
@@ -238,9 +238,15 @@ func (c *StateCache) deleteAddrCodeHash(addr []byte) {
 	cc.DeleteAddrCodeHash(addr)
 }
 
+func readFillStamp(readTxNum, visibleEnd uint64) uint64 {
+	if visibleEnd > 0 {
+		return max(readTxNum, visibleEnd-1)
+	}
+	return readTxNum
+}
+
 // fillIfFresh conditionally inserts an accounts or storage value read from a
-// read view without replacing an authoritative entry. Negatives use the view's
-// last included txNum. Code goes through fillCodeIfFresh.
+// read view without replacing an authoritative entry. Code goes through fillCodeIfFresh.
 func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, readTxNum, visibleEnd,
 	viewEpoch uint64,
 ) {
@@ -250,9 +256,6 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	}
 	if len(value) == 0 {
 		readTxNum = 0
-		if visibleEnd > 0 {
-			readTxNum = visibleEnd - 1
-		}
 	}
 	value = bytes.Clone(value)
 	c.admissionMu.RLock()
@@ -262,7 +265,7 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 		visibleEnd < c.appliedEnd[domain] {
 		return
 	}
-	cache.PutIfAbsent(key, value, readTxNum)
+	cache.PutIfAbsent(key, value, readFillStamp(readTxNum, visibleEnd))
 }
 
 // fillCodeIfFresh is fillIfFresh for the code domain. An addr-keyed code entry
@@ -299,7 +302,9 @@ func (c *StateCache) fillCodeWithHashIfFresh(key, value, codeHash []byte, readTx
 		accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
-	codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, readTxNum)
+	// The accounts frontier gates admission, but code read fills use the code frontier.
+	// A binding derived from an account already carries its bound in readTxNum.
+	codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, readFillStamp(readTxNum, visibleEnd))
 }
 
 // deleteKey removes the data for the given domain and key. The authoritative
