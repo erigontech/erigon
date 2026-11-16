@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -42,7 +43,9 @@ import (
 	clgossip "github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	mock_services2 "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/phase1/network/gossip"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
@@ -53,6 +56,58 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
+
+func TestPoolAttesterSlashingRejectsDisjointIndices(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.ElectraVersion} {
+		for _, route := range []string{"v1", "v2"} {
+			t.Run(fmt.Sprintf("%s/%s", version, route), func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				cfg := clparams.MainnetBeaconConfig
+				epoch := uint64(0)
+				if version == clparams.ElectraVersion {
+					epoch = cfg.ElectraForkEpoch
+				}
+				clock := eth_clock.NewMockEthereumClock(ctrl)
+				clock.EXPECT().GetCurrentEpoch().Return(epoch)
+				anchor := state.New(&cfg)
+				anchor.SetVersion(version)
+				synced := synced_data.NewSyncedDataManager(&cfg, true)
+				opPool := pool.NewOperationsPool(&cfg)
+				store, err := forkchoice.NewForkChoiceStore(clock, anchor, nil, opPool, nil, nil, synced, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(), nil, false, nil)
+				require.NoError(t, err)
+				anchorRoot, err := anchor.BlockRoot()
+				require.NoError(t, err)
+				require.NoError(t, synced.OnHeadStateWithBlockRoot(anchor, anchorRoot))
+				publisher := gossip_mock.NewMockGossip(ctrl)
+				publisher.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+				handler := &ApiHandler{
+					logger:          log.Root(),
+					beaconChainCfg:  &cfg,
+					ethClock:        clock,
+					forkchoiceStore: store,
+					operationsPool:  opPool,
+					sentinel:        &nonNilSentinelClient{},
+					gossipManager:   publisher,
+					routerCfg:       &beacon_router_configuration.RouterConfiguration{Beacon: true},
+				}
+				handler.init()
+				slashing := cltypes.NewAttesterSlashing(version)
+				slashing.Attestation_1.AttestingIndices.Append(1)
+				slashing.Attestation_2.AttestingIndices.Append(2)
+				slashing.Attestation_1.Data.BeaconBlockRoot = common.Hash{1}
+				slashing.Attestation_2.Data.BeaconBlockRoot = common.Hash{2}
+				body, err := json.Marshal(slashing)
+				require.NoError(t, err)
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/"+route+"/beacon/pool/attester_slashings", bytes.NewReader(body))
+				recorder := httptest.NewRecorder()
+				handler.mux.ServeHTTP(recorder, request)
+				require.Equal(t, http.StatusBadRequest, recorder.Code)
+				require.Contains(t, recorder.Body.String(), "no slashable validators in intersection")
+				require.Empty(t, opPool.AttesterSlashingsPool.Raw())
+			})
+		}
+	}
+}
 
 func TestPoolAttesterSlashings(t *testing.T) {
 	attesterSlashing := cltypes.NewAttesterSlashing(clparams.DenebVersion)

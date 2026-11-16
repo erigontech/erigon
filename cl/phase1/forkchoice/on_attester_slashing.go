@@ -68,6 +68,9 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 		return errors.New("attesting indices exceed limit")
 	}
 	intersection := intersectAttestingIndices(attestation1.AttestingIndices, attestation2.AttestingIndices)
+	if len(intersection) == 0 {
+		return errors.New("no slashable validators in intersection")
+	}
 	if f.allAttesterSlashingIndicesSeen(intersection) {
 		return ErrIgnore
 	}
