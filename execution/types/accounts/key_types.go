@@ -21,6 +21,9 @@ import (
 	"fmt"
 	"sync/atomic"
 	"unique"
+	"unsafe"
+
+	"github.com/puzpuzpuz/xsync/v4"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -152,12 +155,20 @@ func keySlot(k common.Hash) *atomic.Value {
 	return &keyTable[(binary.BigEndian.Uint32(k[:4])^binary.BigEndian.Uint32(k[28:]))&(keyTableSize-1)]
 }
 
+// keyCanon replaces unique.Make for storage keys: its insert of a new value serializes workers that read the same
+// fresh slots at once. shortcut: entries are never dropped, so memory grows with every distinct key; probe only.
+var keyCanon = xsync.NewMap[common.Hash, *common.Hash]()
+
 func InternKey(k common.Hash) StorageKey {
 	slot := keySlot(k)
 	if h, ok := slot.Load().(StorageKey); ok && h.Value() == k {
 		return h
 	}
-	h := StorageKey(unique.Make(k))
+	p, ok := keyCanon.Load(k)
+	if !ok {
+		p, _ = keyCanon.LoadOrStore(k, &k)
+	}
+	h := *(*StorageKey)(unsafe.Pointer(&p))
 	slot.Store(h)
 	return h
 }

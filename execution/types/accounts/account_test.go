@@ -19,6 +19,7 @@ package accounts
 import (
 	"bytes"
 	"encoding/json"
+	"sync"
 	"testing"
 	"unique"
 
@@ -412,9 +413,11 @@ func TestInternSlotCollision(t *testing.T) {
 	a1, a2 := common.Address{1}, common.Address{2}
 	require.Same(t, keySlot(k1), keySlot(k2))
 	require.Same(t, addressSlot(a1), addressSlot(a2))
+	canon := map[common.Hash]StorageKey{k1: InternKey(k1), k2: InternKey(k2)}
+	require.NotEqual(t, canon[k1], canon[k2])
 	for range 2 {
 		for _, k := range []common.Hash{k1, k2} {
-			require.Equal(t, StorageKey(unique.Make(k)), InternKey(k))
+			require.True(t, canon[k] == InternKey(k))
 			require.Equal(t, k, InternKey(k).Value())
 		}
 		for _, a := range []common.Address{a1, a2} {
@@ -422,6 +425,22 @@ func TestInternSlotCollision(t *testing.T) {
 			require.Equal(t, a, InternAddress(a).Value())
 		}
 	}
+}
+
+// A burst of first reads of one storage key must agree on one handle without touching the unique package.
+func TestInternKeyConcurrentFirstUseBypassesUnique(t *testing.T) {
+	k := common.HexToHash("0x9f3c1b7e5a2d4c6b8e0f1a3c5e7d9b2f4a6c8e0d2b4f6a8c0e2d4b6f8a0c2e4d")
+	got := make([]StorageKey, 16)
+	var wg sync.WaitGroup
+	for i := range got {
+		wg.Go(func() { got[i] = InternKey(k) })
+	}
+	wg.Wait()
+	for _, h := range got {
+		require.True(t, got[0] == h)
+	}
+	require.Equal(t, k, got[0].Value())
+	require.True(t, StorageKey(unique.Make(k)) != got[0])
 }
 
 // Precompiles and small scalar storage slots differ only in their last bytes; they must not share a slot.
