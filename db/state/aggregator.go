@@ -607,10 +607,7 @@ func (a *Aggregator) checkFilesDBGap(db kv.RoDB) error {
 	if a.skipFilesDBGapCheck || db == nil {
 		return nil
 	}
-	dirty := a.DebugBeginDirtyFilesRo()
-	missedAccessors := !dirty.FilesWithMissedAccessors().IsEmpty()
-	dirty.Close()
-	if missedAccessors { // BuildMissedAccessors re-opens the folder and runs this check
+	if a.hasAccessorsToBuild() { // BuildMissedAccessors re-opens the folder and runs this check
 		return nil
 	}
 	return db.View(context.Background(), func(tx kv.Tx) error {
@@ -624,6 +621,14 @@ func (a *Aggregator) checkFilesDBGap(db kv.RoDB) error {
 		}
 		return nil
 	})
+}
+
+func (a *Aggregator) hasAccessorsToBuild() bool {
+	dirty := a.DebugBeginDirtyFilesRo()
+	defer dirty.Close()
+	missed := dirty.FilesWithMissedAccessors()
+	dirty.dropCovered(missed) // startup builds with kv.SkipCoveredAccessors
+	return !missed.IsEmpty()
 }
 
 func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {

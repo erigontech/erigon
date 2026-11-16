@@ -281,3 +281,17 @@ func TestOpenFolderLetsMissedAccessorsBuildBeforeGapCheck(t *testing.T) {
 	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
 	requireVisibleEnd(t, agg, 2*alignStepSize)
 }
+
+func TestOpenFolderChecksGapWhenOnlyCoveredAccessorsAreMissing(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}, {0, 2}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.0-2.bt")))
+	require.NoError(t, agg.OpenFolder(nil))
+
+	require.False(t, agg.hasAccessorsToBuild(), "startup builds no accessor for a file covered by indexed files")
+}
