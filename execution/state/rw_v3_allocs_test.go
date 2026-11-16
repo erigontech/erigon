@@ -342,14 +342,15 @@ func TestApplyWritesAccountFieldsDoNotAllocatePerField(t *testing.T) {
 		"three more account fields cost %v allocations per account; holding them by value costs none", perAccount)
 }
 
-// storageLatestReads counts the storage reads ApplyWrites sends to the database.
-type storageLatestReads struct {
+// latestReads counts the reads of one domain ApplyWrites sends to the database.
+type latestReads struct {
 	kv.TemporalTx
-	count int
+	domain kv.Domain
+	count  int
 }
 
-func (s *storageLatestReads) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
-	if name == kv.StorageDomain {
+func (s *latestReads) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if name == s.domain {
 		s.count++
 	}
 	return s.TemporalTx.GetLatest(name, k, opts)
@@ -383,7 +384,7 @@ func TestApplyWritesFoldTakesPrevFromRecordedOrigin(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, tx, domains := NewTestRwTx(t)
-			reads := &storageLatestReads{TemporalTx: tx}
+			reads := &latestReads{TemporalTx: tx, domain: kv.StorageDomain}
 			changes := &changeset.StateChangeSet{}
 			domains.SetChangesetAccumulator(changes)
 			view := storageFoldView(addr, key, &VersionedWrite[uint256.Int]{
@@ -403,6 +404,32 @@ func TestApplyWritesFoldTakesPrevFromRecordedOrigin(t *testing.T) {
 			require.True(t, bytes.Equal(uint256.NewInt(tc.orig).Bytes(), diff[0].Value), "the changeset keeps the origin as prev, got %x", diff[0].Value)
 		})
 	}
+}
+
+// An account without code has no code to be the prev value, so the fold of an EIP-7702
+// delegation write to a new authority must not read the code domain.
+func TestApplyWritesFoldCodeOfCodelessAccountReadsNoPrevCode(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	reads := &latestReads{TemporalTx: tx, domain: kv.CodeDomain}
+	changes := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(changes)
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	addrValue := addr.Value()
+	delegate := common.HexToAddress("0x02")
+	code := accounts.NewCode(slices.Concat([]byte{0xef, 0x01, 0x00}, delegate[:]))
+	ws := &WriteSet{}
+	ws.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: 1})
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath}, Val: code})
+
+	require.NoError(t, ApplyWrites(NewVersionMapWriteView(ws, NewVersionMap(nil), 0), domains, reads, 1, 1, false))
+
+	require.Zero(t, reads.count, "an account without code has no prev code to read")
+	got, _, ok := domains.GetLatestFromMemory(kv.CodeDomain, addrValue[:])
+	require.True(t, ok)
+	require.Equal(t, code.Bytes, got)
+	diff := changes.Diffs[kv.CodeDomain].GetDiffSet()
+	require.Len(t, diff, 1)
+	require.Empty(t, diff[0].Value, "the prev code is empty")
 }
 
 // A write without a recorded origin (zero origin, default status) must still read the
