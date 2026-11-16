@@ -1620,14 +1620,8 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 					if cells := e.Storage[key]; cells != nil {
 						if c, ok := cells.Get(vw.Version.TxIndex); ok && c.loadFlag() != FlagDone {
 							if seed, seeded := vm.seededStorage(addr, key, vw.Version.TxIndex); seeded {
-								// As in flushCell, a changed value needs a new version, so that the
-								// readers of the earlier value are invalidated.
-								inc := c.loadInc()
-								if !c.Value.Eq(&seed) {
-									inc = vw.Version.Incarnation
-								}
-								c.Value, c.valStatus = seed, ValueChanged
-								c.setState(inc, FlagDone)
+								stamped := true // the flush is stamped already
+								resetCell(vm, cells, vw.Version, seed, eqUint256, &stamped)
 							} else if c.setFlagUnlessDone(flagDeleted) {
 								cells.Delete(vw.Version.TxIndex)
 							}
