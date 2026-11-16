@@ -107,56 +107,103 @@ func (m *memState) SetTrace(bool, string) {}
 func (m *memState) Trace() bool           { return false }
 func (m *memState) TracePrefix() string   { return "" }
 
-// failing fails every read of addr once armed.
+// failing fails the reads of addr once armed: of only's kind when set,
+// "account", "storage", "code" or "size", else all.
 type failing struct {
 	state.StateReader
 	addr  common.Address
 	armed bool
+	only  string
 }
 
 var errDown = errors.New("state unavailable")
 
-func (f *failing) fail(a common.Address) error {
-	if f.armed && a == f.addr {
+func (f *failing) fail(a common.Address, kind string) error {
+	if f.armed && a == f.addr && (f.only == "" || f.only == kind) {
 		return errDown
 	}
 	return nil
 }
 
 func (f *failing) ReadAccountData(a accounts.Address) (*accounts.Account, error) {
-	if err := f.fail(a.Value()); err != nil {
+	if err := f.fail(a.Value(), "account"); err != nil {
 		return nil, err
 	}
 	return f.StateReader.ReadAccountData(a)
 }
 
 func (f *failing) ReadAccountStorage(a accounts.Address, k accounts.StorageKey) (uint256.Int, bool, error) {
-	if err := f.fail(a.Value()); err != nil {
+	if err := f.fail(a.Value(), "storage"); err != nil {
 		return uint256.Int{}, false, err
 	}
 	return f.StateReader.ReadAccountStorage(a, k)
 }
 
 func (f *failing) ReadAccountCode(a accounts.Address) ([]byte, error) {
-	if err := f.fail(a.Value()); err != nil {
+	if err := f.fail(a.Value(), "code"); err != nil {
 		return nil, err
 	}
 	return f.StateReader.ReadAccountCode(a)
 }
 
 func (f *failing) ReadAccountCodeSize(a accounts.Address) (int, error) {
-	if err := f.fail(a.Value()); err != nil {
+	if err := f.fail(a.Value(), "size"); err != nil {
 		return 0, err
 	}
 	return f.StateReader.ReadAccountCodeSize(a)
 }
 
 func (f *failing) ReadAccountIncarnation(a accounts.Address) (uint64, error) {
-	if err := f.fail(a.Value()); err != nil {
+	if err := f.fail(a.Value(), "account"); err != nil {
 		return 0, err
 	}
 	return f.StateReader.ReadAccountIncarnation(a)
 }
+
+// overlay reads m's accounts, code and storage over base's.
+type overlay struct {
+	state.StateReader
+	m *memState
+}
+
+func (o *overlay) ReadAccountData(a accounts.Address) (*accounts.Account, error) {
+	if o.m.accounts[a.Value()] != nil {
+		return o.m.ReadAccountData(a)
+	}
+	return o.StateReader.ReadAccountData(a)
+}
+
+func (o *overlay) ReadAccountStorage(a accounts.Address, k accounts.StorageKey) (uint256.Int, bool, error) {
+	addr := a.Value()
+	if v, ok := o.m.storage[[2]common.Hash{common.BytesToHash(addr[:]), k.Value()}]; ok {
+		return v, true, nil
+	}
+	return o.StateReader.ReadAccountStorage(a, k)
+}
+
+func (o *overlay) ReadAccountCode(a accounts.Address) ([]byte, error) {
+	if code, ok := o.m.code[a.Value()]; ok {
+		return code, nil
+	}
+	return o.StateReader.ReadAccountCode(a)
+}
+
+func (o *overlay) ReadAccountCodeSize(a accounts.Address) (int, error) {
+	if code, ok := o.m.code[a.Value()]; ok {
+		return len(code), nil
+	}
+	return o.StateReader.ReadAccountCodeSize(a)
+}
+
+func (o *overlay) ReadAccountIncarnation(a accounts.Address) (uint64, error) {
+	if o.m.accounts[a.Value()] != nil {
+		return o.m.ReadAccountIncarnation(a)
+	}
+	return o.StateReader.ReadAccountIncarnation(a)
+}
+
+// lastHash reads BLOCKHASH(NUMBER-1).
+var lastHash = []byte{0x43, 0x60, 0x01, 0x90, 0x03, 0x40, 0x50}
 
 // proxyWord is authorizedProxies' word of a proxy for target on rollup.
 func proxyWord(target common.Address, rollup uint64) common.Hash {
@@ -330,14 +377,28 @@ func TestSourceRefuses(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uint64(2), f.nonce(t))
 	})
-	for name, addr := range map[string]common.Address{"the sender": {}, "the called contract": forwarder, "the manager": manager} {
-		t.Run("a failed read of "+name+" is transient", func(t *testing.T) {
+	sizer := common.HexToAddress("0xc0000000000000000000000000000000000000ab")
+	for _, c := range []struct {
+		name string
+		addr common.Address
+		only string
+		to   common.Address
+	}{
+		{"the sender", common.Address{}, "", forwarder},
+		{"the called contract's code", forwarder, "code", forwarder},
+		{"the manager's storage", manager, "storage", forwarder},
+		{"a contract's code size", static, "size", sizer},
+	} {
+		t.Run("a failed read of "+c.name+" is transient", func(t *testing.T) {
 			f := newSourceFixture(t)
+			// EXTCODESIZE(static), then the forwarder's call.
+			f.state.deploy(sizer, slices.Concat(push20(static), []byte{0x3b, 0x50}, forward(proxy, false)))
+			addr := c.addr
 			if addr == (common.Address{}) {
 				addr = f.sender
 			}
-			src := NewSource(chain.TestChainOsakaConfig, f.src.header, &failing{StateReader: f.state, addr: addr, armed: true}, f.src.blockHash, manager, 0)
-			_, err := src.Run(f.tx(t, 0, forwarder, 0, nil), (&echo{}).dispatch, nil)
+			src := NewSource(chain.TestChainOsakaConfig, f.src.header, &failing{StateReader: f.state, addr: addr, armed: true, only: c.only}, f.src.blockHash, manager, 0)
+			_, err := src.Run(f.tx(t, 0, c.to, 0, nil), (&echo{}).dispatch, nil)
 			require.ErrorIs(t, err, ErrStateRead)
 			require.ErrorIs(t, err, errDown)
 			require.False(t, IsPoison(err), err)
@@ -345,6 +406,16 @@ func TestSourceRefuses(t *testing.T) {
 			require.ErrorIs(t, err, ErrStateRead)
 		})
 	}
+	t.Run("a failed block hash lookup is transient", func(t *testing.T) {
+		f := newSourceFixture(t)
+		hasher := common.HexToAddress("0xc0000000000000000000000000000000000000aa")
+		f.state.deploy(hasher, append(slices.Clone(lastHash), forward(proxy, false)...))
+		src := NewSource(chain.TestChainOsakaConfig, f.src.header, f.state, func(uint64) (common.Hash, error) { return common.Hash{}, errDown }, manager, 0)
+		_, err := src.Run(f.tx(t, 0, hasher, 0, nil), (&echo{}).dispatch, nil)
+		require.ErrorIs(t, err, ErrStateRead)
+		require.ErrorIs(t, err, errDown)
+		require.False(t, IsPoison(err), err)
+	})
 	t.Run("a transaction its caller refuses leaves no trace", func(t *testing.T) {
 		f := newSourceFixture(t)
 		full := errors.New("full")

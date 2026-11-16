@@ -95,7 +95,7 @@ type Source struct {
 // blockHash returns; rollup is the chain's rollup id.
 func NewSource(config *chain.Config, header *types.Header, reader state.StateReader, blockHash func(uint64) (common.Hash, error), manager common.Address, rollup uint64) *Source {
 	r := &reads{StateReader: reader}
-	return &Source{config: config, header: header, ibs: state.New(r), reads: r, blockHash: blockHash, manager: accounts.InternAddress(manager), rollup: rollup}
+	return &Source{config: config, header: header, ibs: state.New(r), reads: r, blockHash: r.blockHash(blockHash), manager: accounts.InternAddress(manager), rollup: rollup}
 }
 
 // Nonce returns addr's nonce in the simulation.

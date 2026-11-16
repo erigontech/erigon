@@ -48,6 +48,14 @@ func (r *reads) failed() error {
 	return fmt.Errorf("%w: %w", ErrStateRead, r.err)
 }
 
+// blockHash returns lookup, keeping its errors as failed reads.
+func (r *reads) blockHash(lookup func(uint64) (common.Hash, error)) func(uint64) (common.Hash, error) {
+	return func(n uint64) (common.Hash, error) {
+		h, err := lookup(n)
+		return h, r.keep(err)
+	}
+}
+
 func (r *reads) ReadAccountData(a accounts.Address) (*accounts.Account, error) {
 	acc, err := r.StateReader.ReadAccountData(a)
 	return acc, r.keep(err)

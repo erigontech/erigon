@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/internal/stateless"
@@ -220,6 +221,30 @@ func TestDraftTakesAFailedReadForTransient(t *testing.T) {
 	require.ErrorIs(t, err, ErrStateRead)
 	require.ErrorIs(t, err, errDown)
 	require.Empty(t, d.Txs())
+}
+
+// TestDraftTakesAFailedBlockHashForTransient: a draft that cannot look up
+// a block hash reports ErrStateRead, not a failed transaction.
+func TestDraftTakesAFailedBlockHashForTransient(t *testing.T) {
+	w := loadSyncWindow(t)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	m := newMemState()
+	m.fund(crypto.PubkeyToAddress(key.PublicKey), 1e18)
+	hasher := common.HexToAddress("0xc0000000000000000000000000000000000000aa")
+	m.deploy(hasher, append(slices.Clone(lastHash), 0x00))
+	pre := w.pre
+	pre.Reader = &overlay{StateReader: w.pre.Reader, m: m}
+	pre.BlockHash = func(uint64) (common.Hash, error) { return common.Hash{}, errDown }
+	d, err := NewDraft(w.config, w.engine, w.sync.Header(), pre)
+	require.NoError(t, err)
+	tx := &types.DynamicFeeTransaction{CommonTx: types.CommonTx{GasLimit: 100_000, To: &hasher}, ChainID: *uint256.MustFromBig(w.config.ChainID.ToBig())}
+	tx.FeeCap.Mul(w.sync.BaseFee(), uint256.NewInt(2))
+	signed, err := types.SignTx(tx, *types.LatestSignerForChainID(&tx.ChainID), key)
+	require.NoError(t, err)
+	_, err = d.Apply(signed, nil)
+	require.ErrorIs(t, err, ErrStateRead)
+	require.ErrorIs(t, err, errDown)
 }
 
 // TestDeliveriesTakeAFailedReadForTransient: a delivery whose target's

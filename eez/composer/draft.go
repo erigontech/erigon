@@ -54,6 +54,7 @@ type Draft struct {
 	header     *types.Header
 	pre        PreState
 	reads      *reads
+	blockHash  func(uint64) (common.Hash, error)
 	chainRules *chain.Rules
 	ibs        *state.IntraBlockState
 	gp         *core.GasPool
@@ -66,8 +67,8 @@ type Draft struct {
 // calls on pre.
 func NewDraft(config *chain.Config, engine rules.Engine, header *types.Header, pre PreState) (*Draft, error) {
 	r := &reads{StateReader: pre.Reader}
-	d := &Draft{config: config, engine: engine, header: types.CopyHeader(header), pre: pre, reads: r, ibs: state.New(r)}
-	blockCtx := core.NewEVMBlockContext(d.header, pre.BlockHash, engine, accounts.InternAddress(d.header.Coinbase), config)
+	d := &Draft{config: config, engine: engine, header: types.CopyHeader(header), pre: pre, reads: r, blockHash: r.blockHash(pre.BlockHash), ibs: state.New(r)}
+	blockCtx := core.NewEVMBlockContext(d.header, d.blockHash, engine, accounts.InternAddress(d.header.Coinbase), config)
 	d.chainRules = blockCtx.Rules(config)
 	d.gp = new(core.GasPool).AddGas(header.GasLimit).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
 	sysCall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
@@ -94,7 +95,7 @@ func (d *Draft) Apply(tx types.Transaction, tracer *tracing.Hooks) (*types.Recei
 		return nil, err
 	}
 	d.ibs.SetTxContext(d.header.Number.Uint64(), i)
-	evm := core.CreateEVM(d.config, d.pre.BlockHash, d.engine, accounts.InternAddress(d.header.Coinbase), d.ibs, d.header, vm.Config{Tracer: tracer})
+	evm := core.CreateEVM(d.config, d.blockHash, d.engine, accounts.InternAddress(d.header.Coinbase), d.ibs, d.header, vm.Config{Tracer: tracer})
 	txs := append(slices.Clone(d.txs), tx)
 	receipt, err := core.ApplyTransactionWithEVMPostProcessed(d.config, d.engine, d.gp, d.ibs, state.NewNoopWriter(), d.header, tx, &d.gasUsed,
 		vm.Config{Tracer: tracer}, evm, core.TxPostProcess(d.engine, d.config, d.ibs, txs, i))
