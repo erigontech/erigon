@@ -319,6 +319,11 @@ func (l *ListSSZ[T]) Clone() clonable.Clonable {
 	return NewDynamicListSSZ[T](l.limit)
 }
 
+func (l *ListSSZ[T]) CloneTo(dst *ListSSZ[T]) {
+	*dst = *l.Clone().(*ListSSZ[T])
+	dst.invalidateRoots()
+}
+
 func (l *ListSSZ[T]) Get(index int) T {
 	return l.list[index]
 }
@@ -403,19 +408,26 @@ func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
 }
 
 func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
-	cpy := &ListSSZ[T]{
-		list:            make([]T, len(l.list), cap(l.list)),
-		limit:           l.limit,
-		configured:      l.configured,
-		static:          l.static,
-		bytesPerElement: l.bytesPerElement,
-		progressive:     l.progressive,
-		root:            common.Hash(bytes.Clone(l.root[:])),
+	cpy := new(ListSSZ[T])
+	l.ShallowCopyTo(cpy)
+	return cpy
+}
+
+func (l *ListSSZ[T]) ShallowCopyTo(cpy *ListSSZ[T]) {
+	cache := l.ownedProgressiveRoot()
+	source := *l
+	*cpy = ListSSZ[T]{
+		list:            make([]T, len(source.list), cap(source.list)),
+		limit:           source.limit,
+		configured:      source.configured,
+		static:          source.static,
+		bytesPerElement: source.bytesPerElement,
+		progressive:     source.progressive,
+		root:            common.Hash(bytes.Clone(source.root[:])),
 	}
 	cpy.progressiveRoot = &progressiveRootCache[T]{owner: cpy}
-	if cache := l.ownedProgressiveRoot(); cache != nil {
+	if cache != nil {
 		cpy.progressiveRoot.root.Store(cache.root.Load())
 	}
-	copy(cpy.list, l.list)
-	return cpy
+	copy(cpy.list, source.list)
 }
