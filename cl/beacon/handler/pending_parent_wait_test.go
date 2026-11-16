@@ -173,21 +173,23 @@ func TestAwaitPendingParentPayloadRetriesUntilTheEnvelopeIsApplied(t *testing.T)
 
 // An apply that keeps failing is retried at its pace until the cutoff, and no longer after it.
 func TestAwaitPendingParentPayloadRetriesAFailingApplyUntilTheCutoff(t *testing.T) {
-	handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, 300*time.Millisecond)
-	var retries atomic.Int32
-	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
-		retries.Add(1)
-		return time.Now().Add(50 * time.Millisecond)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		handler, forkchoiceStore, postState, baseBlockRoot, _ := pendingParentWaitFixture(t, 300*time.Millisecond)
+		var retries atomic.Int32
+		forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
+			retries.Add(1)
+			return time.Now().Add(50 * time.Millisecond)
+		}
 
-	start := time.Now()
-	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
-	require.GreaterOrEqual(t, time.Since(start), 250*time.Millisecond)
-	atCutoff := retries.Load()
-	require.GreaterOrEqual(t, atCutoff, int32(3))
-	require.LessOrEqual(t, atCutoff, int32(8), "the retries keep their pace")
-	time.Sleep(150 * time.Millisecond)
-	require.LessOrEqual(t, retries.Load(), atCutoff+1, "the retries stop with the wait")
+		start := time.Now()
+		require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
+		require.GreaterOrEqual(t, time.Since(start), 250*time.Millisecond)
+		atCutoff := retries.Load()
+		require.GreaterOrEqual(t, atCutoff, int32(3))
+		require.LessOrEqual(t, atCutoff, int32(8), "the retries keep their pace")
+		time.Sleep(150 * time.Millisecond)
+		require.LessOrEqual(t, retries.Load(), atCutoff+1, "the retries stop with the wait")
+	})
 }
 
 // At or after the cutoff a proposal does not wait at all.
@@ -232,22 +234,24 @@ func TestAwaitPendingParentPayloadLetsTheApplyOutliveTheWait(t *testing.T) {
 // An apply in flight when the wait starts can park the envelope later in the wait: the wait keeps
 // retrying, so it applies the envelope once it is parked.
 func TestAwaitPendingParentPayloadRetriesAnEnvelopeParkedDuringTheWait(t *testing.T) {
-	handler, forkchoiceStore, postState, baseBlockRoot, applied := pendingParentWaitFixture(t, 5*time.Second)
-	forkchoiceStore.PendingEnvelopeRoots = nil
-	forkchoiceStore.ApplyInFlightRoots = map[common.Hash]struct{}{baseBlockRoot: {}}
-	parkedAt := time.Now().Add(50 * time.Millisecond)
-	forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
-		if time.Now().Before(parkedAt) {
-			return time.Time{} // nothing is parked yet
+	synctest.Test(t, func(t *testing.T) {
+		handler, forkchoiceStore, postState, baseBlockRoot, applied := pendingParentWaitFixture(t, 5*time.Second)
+		forkchoiceStore.PendingEnvelopeRoots = nil
+		forkchoiceStore.ApplyInFlightRoots = map[common.Hash]struct{}{baseBlockRoot: {}}
+		parkedAt := time.Now().Add(50 * time.Millisecond)
+		forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) time.Time {
+			if time.Now().Before(parkedAt) {
+				return time.Time{} // nothing is parked yet
+			}
+			applied.Store(true)
+			return time.Time{}
 		}
-		applied.Store(true)
-		return time.Time{}
-	}
 
-	start := time.Now()
-	require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
-	require.True(t, applied.Load())
-	require.Less(t, time.Since(start), time.Second)
+		start := time.Now()
+		require.NoError(t, handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion))
+		require.True(t, applied.Load())
+		require.Less(t, time.Since(start), time.Second)
+	})
 }
 
 // When the PTC votes for a parent from the previous slot already rule out FULL, the proposal
@@ -327,21 +331,23 @@ func TestEnvelopeParkedFlagsOnlyAnUnpersistedParkedEnvelope(t *testing.T) {
 // After a head change, production is retried only once the new head's state is published:
 // the state it failed on would fail the same way.
 func TestAwaitHeadStateAfterChangeWaitsForTheNewHeadState(t *testing.T) {
-	handler, forkchoiceStore, postState, staleRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
-	handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
-	require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, staleRoot))
-	newRoot := common.Hash{0x42}
-	forkchoiceStore.HeadVal = newRoot
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		_ = handler.syncedData.OnHeadStateWithBlockRoot(postState, newRoot)
-	}()
+	synctest.Test(t, func(t *testing.T) {
+		handler, forkchoiceStore, postState, staleRoot, _ := pendingParentWaitFixture(t, 5*time.Second)
+		handler.syncedData = synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
+		require.NoError(t, handler.syncedData.OnHeadStateWithBlockRoot(postState, staleRoot))
+		newRoot := common.Hash{0x42}
+		forkchoiceStore.HeadVal = newRoot
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			_ = handler.syncedData.OnHeadStateWithBlockRoot(postState, newRoot)
+		}()
 
-	start := time.Now()
-	require.True(t, handler.awaitHeadStateAfterChange(t.Context(), postState.Slot()+1))
-	require.GreaterOrEqual(t, time.Since(start), 40*time.Millisecond)
-	root, _, _ := handler.syncedData.StateHead()
-	require.Equal(t, newRoot, root)
+		start := time.Now()
+		require.True(t, handler.awaitHeadStateAfterChange(t.Context(), postState.Slot()+1))
+		require.GreaterOrEqual(t, time.Since(start), 40*time.Millisecond)
+		root, _, _ := handler.syncedData.StateHead()
+		require.Equal(t, newRoot, root)
+	})
 }
 
 func TestAwaitHeadStateAfterChangeGivesUpAtTheCutoff(t *testing.T) {
