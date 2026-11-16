@@ -3010,9 +3010,6 @@ func removeAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger) error {
 	return nil
 }
 
-// indexAggOpts skip the startup gap check: `snapshots index` rebuilds the accessors whose absence makes it refuse.
-var indexAggOpts = []func(state.AggOpts) state.AggOpts{state.AggOpts.SkipFilesDBGapCheck}
-
 func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	logger := log.Root()
 	defer logger.Info("Done")
@@ -3034,7 +3031,7 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger, indexAggOpts...)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	caplinSnaps, caplinStateSnaps, br, agg := res.CaplinSnaps, res.CaplinStateSnaps, res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
@@ -3129,7 +3126,7 @@ type OpenSnapsResult struct {
 	TemporalDB *temporal.DB
 }
 
-func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger, aggOpts ...func(state.AggOpts) state.AggOpts) (
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
 	res OpenSnapsResult,
 	clean func(),
 	err error,
@@ -3180,7 +3177,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	blockWriter := blockio.NewBlockWriter()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 
-	res.Aggregator = openAgg(ctx, dirs, chainDB, logger, aggOpts...)
+	res.Aggregator = openAgg(ctx, dirs, chainDB, logger)
 	res.Aggregator.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	res.TemporalDB, err = temporal.New(chainDB, res.Aggregator, res.BlockSnaps)
@@ -3725,24 +3722,20 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 
-func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger, aggOpts ...func(state.AggOpts) state.AggOpts) *state.Aggregator {
-	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger, aggOpts...)
+func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
+	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
 	if err != nil {
 		panic(err)
 	}
 	return agg
 }
 
-func tryOpenAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger, aggOpts ...func(state.AggOpts) state.AggOpts) (*state.Aggregator, error) {
+func tryOpenAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (*state.Aggregator, error) {
 	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {
 		return nil, err
 	}
-	opts := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings)
-	for _, o := range aggOpts {
-		opts = o(opts)
-	}
-	agg, err := opts.Open(ctx)
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx)
 	if err != nil {
 		return nil, err
 	}
