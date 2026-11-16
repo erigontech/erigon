@@ -1855,7 +1855,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 		next, lowestEnd = &aggregatorVisible{}, toTxNum
 		lower := func(dirty *DirtyFiles, visible visibleFiles) {
 			if dirty.Len() > 0 {
-				lowestEnd = min(lowestEnd, visible.EndTxNum())
+				lowestEnd = min(lowestEnd, contiguousEnd(visible))
 			}
 		}
 		for id, d := range a.d {
