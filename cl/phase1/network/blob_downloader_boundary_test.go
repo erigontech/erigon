@@ -662,7 +662,7 @@ func TestBlobHistoryDownloaderRetriesThirtyThreeSparseFailuresWithoutDenseFallba
 	downloader.blobStorage = blobStorage
 
 	require.Len(t, downloader.retryRanges, 1)
-	require.Equal(t, failureCount, downloader.retryRanges[0].intervalCount())
+	require.Equal(t, failureCount, downloader.retryRanges[0].intervals.Len())
 	for range (failureCount + int(blocksBatchSize) - 1) / int(blocksBatchSize) {
 		require.NoError(t, downloader.retryFailedRecoveries(0, 0))
 	}

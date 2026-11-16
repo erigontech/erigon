@@ -60,14 +60,14 @@ type RPCReceipt struct {
 	BlobGasUsed  *hexutil.Uint64 `json:"blobGasUsed,omitempty" ethjson:"quantity"`
 }
 
-// logsWithTimestamp returns the receipt's logs, and its frame receipts that share them, as the RPC
-// renders them: each log carrying timestamp, or none when timestamp is nil. Logs already in that
-// state are returned as they are; otherwise all are copied, so the cached receipt is never changed.
-func logsWithTimestamp(receipt *types.Receipt, timestamp *hexutil.Uint64) (types.Logs, []types.FrameReceipt) {
+// logsWithTimestamp returns the receipt's logs, and its frame receipts that share them, each log
+// carrying timestamp. Logs already stamped with it are returned as they are; otherwise all are
+// copied, so the cached receipt is never changed.
+func logsWithTimestamp(receipt *types.Receipt, timestamp hexutil.Uint64) (types.Logs, []types.FrameReceipt) {
 	if receipt.Logs == nil {
 		return types.Logs{}, receipt.FrameReceipts
 	}
-	if !slices.ContainsFunc(receipt.Logs, func(l *types.Log) bool { return !sameTimestamp(l.BlockTimestamp, timestamp) }) {
+	if !slices.ContainsFunc(receipt.Logs, func(l *types.Log) bool { return l.BlockTimestamp == nil || *l.BlockTimestamp != timestamp }) {
 		return receipt.Logs, receipt.FrameReceipts
 	}
 	copies := make([]struct {
@@ -77,11 +77,8 @@ func logsWithTimestamp(receipt *types.Receipt, timestamp *hexutil.Uint64) (types
 	logs := make(types.Logs, len(receipt.Logs))
 	for i, log := range receipt.Logs {
 		copies[i].log = *log
-		copies[i].log.BlockTimestamp = nil
-		if timestamp != nil {
-			copies[i].timestamp = *timestamp
-			copies[i].log.BlockTimestamp = &copies[i].timestamp
-		}
+		copies[i].timestamp = timestamp
+		copies[i].log.BlockTimestamp = &copies[i].timestamp
 		logs[i] = &copies[i].log
 	}
 	frames := receipt.FrameReceipts
@@ -93,24 +90,14 @@ func logsWithTimestamp(receipt *types.Receipt, timestamp *hexutil.Uint64) (types
 	return logs, frames
 }
 
-func sameTimestamp(a, b *hexutil.Uint64) bool {
-	return a == nil && b == nil || a != nil && b != nil && *a == *b
-}
-
 func MarshalReceipt(
 	receipt *types.Receipt,
 	txn types.Transaction,
 	chainConfig *chain.Config,
 	header *types.Header,
 	signed bool,
-	withBlockTimestamp bool,
 ) *RPCReceipt {
-	var timestamp *hexutil.Uint64
-	if withBlockTimestamp {
-		at := hexutil.Uint64(header.Time)
-		timestamp = &at
-	}
-	logs, frames := logsWithTimestamp(receipt, timestamp)
+	logs, frames := logsWithTimestamp(receipt, hexutil.Uint64(header.Time))
 	result := marshalReceipt(receipt, txn, chainConfig, header, signed, frames)
 	result.Logs, result.LogsBloom = logs, receipt.LogsBloom()
 	return result
@@ -120,7 +107,7 @@ func MarshalReceipt(
 func MarshalReceiptWithoutLogs(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header) *RPCReceipt {
 	frames := receipt.FrameReceipts
 	if len(frames) > 0 {
-		_, frames = logsWithTimestamp(receipt, nil)
+		_, frames = logsWithTimestamp(receipt, hexutil.Uint64(header.Time))
 	}
 	return marshalReceipt(receipt, txn, chainConfig, header, true, frames)
 }
@@ -303,7 +290,7 @@ func LogReceipts(level log.Lvl, msg string, receipts types.Receipts, txns types.
 	marshalled := make([]*RPCReceipt, 0, len(receipts))
 	for i, receipt := range receipts {
 		txn := txns[i]
-		marshalled = append(marshalled, MarshalReceipt(receipt, txn, cc, header, true, false))
+		marshalled = append(marshalled, MarshalReceipt(receipt, txn, cc, header, true))
 	}
 
 	result, err := json.Marshal(marshalled)
