@@ -928,7 +928,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenAlreadySeen_Ret
 
 	// Setup block in forkChoice
 	block := createMockGloasBlock(testSlot)
-	t.mockForkChoice.Blocks[testBlockRoot] = block
+	t.importBlock(testBlockRoot, block)
 
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
@@ -972,17 +972,157 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenIncorrectSubnet
 	t.Contains(err.Error(), "incorrect subnet")
 }
 
-// TestGloasProcessMessage_WhenSlotFinalized_ReturnsErrIgnore tests GLOAS finalized slot handling
-func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenSlotFinalized_ReturnsErrIgnore() {
+// finalizeGloasEpochAfterTestSlot finalizes the epoch after testSlot's epoch, so testSlot is below the finalized
+// checkpoint start slot and FinalizedSlot().
+func (t *dataColumnSidecarTestSuite) finalizeGloasEpochAfterTestSlot() {
+	t.activateGloas()
+	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{Epoch: testEpoch + 1}
+	t.mockForkChoice.FinalizedSlotVal = (testEpoch+2)*testSlotsPerEpoch - 1
+}
+
+// The Gloas gossip rules have no finality condition: a sidecar of a known block is validated at any slot.
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenSlotFinalizedAndBlockKnown_StoresSidecar() {
+	t.finalizeGloasEpochAfterTestSlot()
+	t.expectGloasSidecarStored(testSlot, 0)
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot))
+
+	t.NoError(err)
+}
+
+// Fork choice imports no block at or below the finalized checkpoint start slot, so a sidecar of an unknown block
+// there is ignored without being queued.
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenBlockUnknownAtFinalizedEpochStart_DoesNotQueue() {
+	t.activateGloas()
+	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{Epoch: testEpoch}
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testEpoch*testSlotsPerEpoch, 0, testBlockRoot))
+
+	t.ErrorIs(err, ErrIgnore)
+	t.Zero(t.dataColumnSidecarService.(*dataColumnSidecarService).pendingGloasSidecars.count.Load())
+}
+
+// The block of a slot after the finalized checkpoint start slot can still be imported, even when FinalizedSlot() is
+// the last slot of the finalized epoch.
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenBlockUnknownAfterFinalizedEpochStart_Queues() {
+	t.activateGloas()
+	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{Epoch: testEpoch}
+	t.mockForkChoice.FinalizedSlotVal = (testEpoch+1)*testSlotsPerEpoch - 1
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testEpoch*testSlotsPerEpoch+1, 0, testBlockRoot))
+
+	t.ErrorIs(err, ErrIgnore)
+	t.Equal(int32(1), t.dataColumnSidecarService.(*dataColumnSidecarService).pendingGloasSidecars.count.Load())
+}
+
+// The anchor block bounds fork choice like the finalized checkpoint does.
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenBlockUnknownAtAnchorSlot_DoesNotQueue() {
+	t.activateGloas()
+	t.mockForkChoice.AnchorSlotVal = testSlot
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot))
+
+	t.ErrorIs(err, ErrIgnore)
+	t.Zero(t.dataColumnSidecarService.(*dataColumnSidecarService).pendingGloasSidecars.count.Load())
+}
+
+// importBlock makes fork choice hold block with its header, as after a successful import.
+func (t *dataColumnSidecarTestSuite) importBlock(root common.Hash, block *cltypes.SignedBeaconBlock) {
+	t.mockForkChoice.Blocks[root] = block
+	t.mockForkChoice.Headers[root] = &cltypes.BeaconBlockHeader{Slot: block.Block.Slot}
+}
+
+// Fork choice holds a block while its state transition runs and publishes its header only after the transition
+// succeeds. Until then the block is not seen, so the sidecar is queued instead of validated against it.
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenBlockIsStillImporting_Queues() {
 	t.activateGloas()
 	t.mockSyncedData.EXPECT().Syncing().Return(false)
-	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot + 200).AnyTimes()
-	t.mockForkChoice.FinalizedSlotVal = testSlot + 100 // Finalized slot is ahead of sidecar slot
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
 
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot))
+
+	t.ErrorIs(err, ErrIgnore)
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	t.Equal(int32(1), service.pendingGloasSidecars.count.Load())
+	service.pendingGloasSidecars.processPending(t.T().Context())
+	t.Equal(int32(1), service.pendingGloasSidecars.count.Load(), "the queue keeps the sidecar until the block is imported")
+}
+
+// importingWhileFinalizing imports a block when finality is read, as when fork choice imports the block and finality
+// moves past its slot between the block lookup and the importability check.
+type importingWhileFinalizing struct {
+	*forkchoice_mock.ForkChoiceStorageMock
+	importBlock func()
+}
+
+func (f *importingWhileFinalizing) FinalizedCheckpoint() solid.Checkpoint {
+	f.importBlock()
+	return f.ForkChoiceStorageMock.FinalizedCheckpoint()
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueProcessesSidecarWhenBlockIsImportedAsFinalityMoves() {
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
-	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
+	service.scheduleSidecarForLaterProcessing(sidecar)
+	t.Require().Equal(int32(1), service.pendingGloasSidecars.count.Load())
+	t.finalizeGloasEpochAfterTestSlot()
+	t.expectGloasSidecarStored(testSlot, 0)
+	service.forkChoice = &importingWhileFinalizing{
+		ForkChoiceStorageMock: t.mockForkChoice,
+		importBlock:           func() { t.importBlock(testBlockRoot, createMockGloasBlock(testSlot)) },
+	}
 
-	t.Equal(ErrIgnore, err)
+	service.pendingGloasSidecars.processPending(t.T().Context())
+
+	t.Zero(service.pendingGloasSidecars.count.Load())
+}
+
+// importingWhileReadingAnchor imports a block when the anchor slot is read, as when the importability check waits
+// for fork choice to finish importing the block.
+type importingWhileReadingAnchor struct {
+	*forkchoice_mock.ForkChoiceStorageMock
+	importBlock func()
+}
+
+func (f *importingWhileReadingAnchor) AnchorSlot() uint64 {
+	f.importBlock()
+	return f.ForkChoiceStorageMock.AnchorSlot()
+}
+
+// A sidecar whose first lookup misses a block being imported is validated against it once the import finishes, so a
+// sidecar outside custody is accepted and relayed instead of ignored.
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenBlockIsImportedDuringLookup_AcceptsSidecarOutsideCustody() {
+	t.expectGloasSidecarOutsideCustody(true)
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	service.forkChoice = &importingWhileReadingAnchor{
+		ForkChoiceStorageMock: t.mockForkChoice,
+		importBlock:           func() { t.importBlock(testBlockRoot, createMockGloasBlock(testSlot)) },
+	}
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot))
+
+	t.NoError(err)
+	t.Zero(service.pendingGloasSidecars.count.Load())
+}
+
+func (t *dataColumnSidecarTestSuite) expectGloasSidecarStored(slot, index uint64) {
+	verifyDataColumnSidecarWithCommitments = t.mockFuncs.VerifyDataColumnSidecarWithCommitments
+	verifyDataColumnSidecarKZGProofsWithCommitments = t.mockFuncs.VerifyDataColumnSidecarKZGProofsWithCommitments
+	t.mockSyncedData.EXPECT().Syncing().Return(false).AnyTimes()
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), testBlockRoot, int64(index), gomock.Any()).Return(nil).Times(1)
+	t.mockPeerDas.EXPECT().TryScheduleRecover(slot, testBlockRoot).Return(nil).Times(1)
 }
 
 // TestGloasProcessMessage_WhenBlockNotFound_SchedulesForLater tests deferred processing
@@ -1077,6 +1217,21 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueKeepsDistinctContentFo
 	t.Equal(int32(2), service.pendingGloasSidecars.count.Load())
 }
 
+// blockGoneAfterFirstRead finds a block on the first read only, as when the block disappears from fork choice
+// between the queue's lookup and validation.
+type blockGoneAfterFirstRead struct {
+	forkchoice.ForkChoiceStorage
+	reads int
+}
+
+func (s *blockGoneAfterFirstRead) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	s.reads++
+	if s.reads > 1 {
+		return nil, false
+	}
+	return s.ForkChoiceStorage.GetBlock(root)
+}
+
 func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueKeepsOriginalAgeWhenBlockDisappears() {
 	t.activateGloas()
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
@@ -1089,8 +1244,8 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueKeepsOriginalAgeWhenBl
 	rejectionsBeforeRetry := service.pendingGloasSidecars.fullCounter.GetValueUint64()
 
 	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
-	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
-	service.forkChoice = &disappearingEnvelopeBlockStore{ForkChoiceStorage: t.mockForkChoice}
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
+	service.forkChoice = &blockGoneAfterFirstRead{ForkChoiceStorage: t.mockForkChoice}
 	service.pendingGloasSidecars.processPending(t.T().Context())
 
 	stored, exists := service.pendingGloasSidecars.jobs.Load(common.Hash(root))
@@ -1101,12 +1256,26 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueKeepsOriginalAgeWhenBl
 	t.Equal(rejectionsBeforeRetry, service.pendingGloasSidecars.fullCounter.GetValueUint64())
 }
 
-func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDropsFinalizedSidecar() {
+func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDropsSidecarWhoseBlockCannotBeImported() {
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
-	t.mockForkChoice.FinalizedSlotVal = testSlot
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	service.scheduleSidecarForLaterProcessing(sidecar)
-	t.Equal(int32(1), service.pendingGloasSidecars.count.Load())
+	t.Require().Equal(int32(1), service.pendingGloasSidecars.count.Load())
+	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{Epoch: testEpoch + 1}
+
+	service.pendingGloasSidecars.processPending(t.T().Context())
+
+	t.Zero(service.pendingGloasSidecars.count.Load())
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueProcessesFinalizedSidecarWhenBlockArrives() {
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
+	service.scheduleSidecarForLaterProcessing(sidecar)
+	t.Require().Equal(int32(1), service.pendingGloasSidecars.count.Load())
+	t.finalizeGloasEpochAfterTestSlot()
+	t.expectGloasSidecarStored(testSlot, 0)
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
 
 	service.pendingGloasSidecars.processPending(t.T().Context())
 
@@ -1120,7 +1289,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDropsSeenSidecar() {
 	service.scheduleSidecarForLaterProcessing(sidecar)
 	t.Require().Equal(int32(1), service.pendingGloasSidecars.count.Load())
 	service.seenGloasSidecar.Add(seenGloasSidecarKey{testBlockRoot, sidecar.Index}, struct{}{})
-	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
 
 	service.pendingGloasSidecars.processPending(t.T().Context())
 
@@ -1160,7 +1329,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueProcessesSidecarAtBlob
 
 	block := createMockGloasBlock(testSlot)
 	block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
-	t.mockForkChoice.Blocks[testBlockRoot] = block
+	t.importBlock(testBlockRoot, block)
 	service.pendingGloasSidecars.processPending(t.T().Context())
 
 	t.Zero(service.pendingGloasSidecars.count.Load())
@@ -1179,7 +1348,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenSlotMismatch_Re
 
 	// Block has different slot than sidecar
 	block := createMockGloasBlock(testSlot + 10)
-	t.mockForkChoice.Blocks[testBlockRoot] = block
+	t.importBlock(testBlockRoot, block)
 
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
@@ -1198,7 +1367,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenInvalidSidecar_
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(false).AnyTimes()
 
 	block := createMockGloasBlock(testSlot)
-	t.mockForkChoice.Blocks[testBlockRoot] = block
+	t.importBlock(testBlockRoot, block)
 
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
@@ -1237,7 +1406,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenInvalidKZGProof
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(false).AnyTimes()
 
 	block := createMockGloasBlock(testSlot)
-	t.mockForkChoice.Blocks[testBlockRoot] = block
+	t.importBlock(testBlockRoot, block)
 
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
@@ -1258,7 +1427,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenValid_StoresSuc
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
 
 	block := createMockGloasBlock(testSlot)
-	t.mockForkChoice.Blocks[testBlockRoot] = block
+	t.importBlock(testBlockRoot, block)
 
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), testBlockRoot, int64(0), gomock.Any()).Return(nil).Times(1)
 	t.mockPeerDas.EXPECT().TryScheduleRecover(testSlot, testBlockRoot).Return(nil).Times(1)
@@ -1281,7 +1450,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenStorageFails_Re
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
 
 	block := createMockGloasBlock(testSlot)
-	t.mockForkChoice.Blocks[testBlockRoot] = block
+	t.importBlock(testBlockRoot, block)
 
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage error"))
 
@@ -1304,7 +1473,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenCustodyLookupFa
 	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot)
 	peerDas.EXPECT().StateReader().Return(stateReader)
 	stateReader.EXPECT().GetMyCustodyColumns().Return(nil, errors.New("custody unavailable"))
-	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot))
 
@@ -1333,7 +1502,7 @@ func (t *dataColumnSidecarTestSuite) expectGloasSidecarOutsideCustody(kzgProofsV
 
 func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenValidSidecarOutsideCustody_AcceptsWithoutStoring() {
 	t.expectGloasSidecarOutsideCustody(true)
-	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot))
 
@@ -1347,7 +1516,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenValidSidecarOut
 	subscription := t.emitters.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 	t.expectGloasSidecarOutsideCustody(true)
-	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
 
 	t.Require().NoError(t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot)))
 
@@ -1366,7 +1535,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenInvalidSidecarO
 	subscription := t.emitters.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 	t.expectGloasSidecarOutsideCustody(false)
-	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot))
 
@@ -1390,7 +1559,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenSidecarOutsideC
 	subscription := t.emitters.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 	t.expectGloasSidecarOutsideCustody(true)
-	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot)
 	t.Require().NoError(t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar))
 
@@ -1403,7 +1572,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenSidecarOutsideC
 func (t *dataColumnSidecarTestSuite) assertGloasArchiveSidecar(blobsRecovered, kzgProofsValid bool) {
 	t.expectGloasSidecarOutsideCustody(kzgProofsValid)
 	t.mockForkChoice.MockPeerDas = t.archivePeerDas(blobsRecovered)
-	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot))
 
@@ -1452,14 +1621,29 @@ func (t *dataColumnSidecarTestSuite) TestGloasPublishColumns_MarksColumnSeenSoGo
 	verifyDataColumnSidecarKZGProofsWithCommitments = t.mockFuncs.VerifyDataColumnSidecarKZGProofsWithCommitments
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Times(0)
 	t.mockSyncedData.EXPECT().Syncing().Return(false)
-	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
 	t.Equal(ErrIgnore, t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar))
 }
 
-func (t *dataColumnSidecarTestSuite) TestGloasPublishColumns_WhenSlotFinalized_PublishesNothing() {
-	t.activateGloas()
-	t.dataColumnSidecarService.(*dataColumnSidecarService).gossipManager = gossipmock.NewMockGossip(t.gomockCtrl)
-	t.mockForkChoice.FinalizedSlotVal = testSlot
+func (t *dataColumnSidecarTestSuite) TestGloasPublishColumns_WhenSlotFinalizedAndBlockImported_PublishesColumns() {
+	t.finalizeGloasEpochAfterTestSlot()
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
+	publisher := gossipmock.NewMockGossip(t.gomockCtrl)
+	t.dataColumnSidecarService.(*dataColumnSidecarService).gossipManager = publisher
+	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return index }
+	t.mockEthClock.EXPECT().ComputeForkDigest(testSlot/testSlotsPerEpoch).Return(common.Bytes4{1, 2, 3, 4}, nil)
+	publisher.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gossip.TopicNameDataColumnSidecar(1), gomock.Any()).Return(nil).Times(1)
+
+	t.dataColumnSidecarService.PublishColumns(t.T().Context(), []*cltypes.DataColumnSidecar{createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot)})
+}
+
+// Recovery also runs for blocks backfilled below finality, which fork choice never imports; peers no longer need their
+// columns.
+func (t *dataColumnSidecarTestSuite) TestGloasPublishColumns_WhenBlockCannotBeImported_DoesNotPublish() {
+	t.finalizeGloasEpochAfterTestSlot()
+	publisher := gossipmock.NewMockGossip(t.gomockCtrl)
+	t.dataColumnSidecarService.(*dataColumnSidecarService).gossipManager = publisher
+	publisher.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 
 	t.dataColumnSidecarService.PublishColumns(t.T().Context(), []*cltypes.DataColumnSidecar{createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot)})
 
@@ -1490,7 +1674,7 @@ func (t *dataColumnSidecarTestSuite) assertGloasArchiveStoresSidecar(peerDas *da
 	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
-	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), testBlockRoot, int64(index), gomock.Any()).Return(nil).Times(1)
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, index, testBlockRoot))

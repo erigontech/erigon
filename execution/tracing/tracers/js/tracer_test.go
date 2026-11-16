@@ -21,6 +21,7 @@ package js
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -456,6 +457,32 @@ func TestGetCodeBufferDoesNotAliasState(t *testing.T) {
 	got, err := ibs.GetCode(addr)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+}
+
+func TestConstructorStopsWhenCancelled(t *testing.T) {
+	t.Parallel()
+	for name, code := range map[string]string{
+		"tracer body": "(function(){ while (true) {} })()",
+		"setup":       "{result: function() {}, fault: function() {}, setup: function() { while (true) {} }}",
+		"getter":      "{get result() { while (true) {} }, fault: function() {}}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond) // long enough to reach the loop
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				_, err := newJsTracer(code, &tracers.Context{Ctx: ctx}, nil)
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				require.Error(t, err)
+			case <-time.After(10 * time.Second):
+				t.Fatal("the tracer constructor did not stop")
+			}
+		})
+	}
 }
 
 func TestTracerInterfaceErrors(t *testing.T) {

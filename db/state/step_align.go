@@ -29,12 +29,88 @@ import (
 
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func (a *Aggregator) StepAlignedEnd(stepSize uint64) (uint64, error) {
+	dirty := a.DebugBeginDirtyFilesRo()
+	defer dirty.Close()
 	at := a.BeginFilesRo()
 	defer at.Close()
+	check := func(name string, files []*FilesItem, visible visibleFiles, accessors statecfg.Accessors) error {
+		srcs := make([]*FilesItem, 0, len(visible))
+		for _, f := range visible {
+			srcs = append(srcs, f.src)
+		}
+		for _, item := range files {
+			if item.canDelete.Load() || checkForVisibility(item, accessors, false) {
+				continue
+			}
+			if !slices.ContainsFunc(srcs, item.isProperSubsetOf) && !coveredByVisibleFiles(item, srcs, accessors) {
+				return fmt.Errorf("%s snapshot [%d,%d) is not indexed; build or repair its accessors before rebasing", name, item.startTxNum, item.endTxNum)
+			}
+		}
+		return nil
+	}
+	for i, d := range dirty.domain {
+		dt := at.d[i]
+		if err := check(d.d.FilenameBase, d.files, dt.files, d.d.Accessors); err != nil {
+			return 0, err
+		}
+		if err := check(d.d.FilenameBase+" history", d.history.files, dt.ht.files, d.history.h.Accessors); err != nil {
+			return 0, err
+		}
+		if err := check(d.d.FilenameBase+" history index", d.history.ii.files, dt.ht.iit.files, d.history.ii.ii.Accessors); err != nil {
+			return 0, err
+		}
+	}
+	for i, ii := range dirty.ii {
+		if ii != nil {
+			if err := check(ii.ii.FilenameBase, ii.files, at.iis[i].files, ii.ii.Accessors); err != nil {
+				return 0, err
+			}
+		}
+	}
+	if err := a.refuseFilesPastHoles(dirty); err != nil {
+		return 0, err
+	}
 	return at.stepAlignedEnd(stepSize)
+}
+
+// refuseFilesPastHoles refuses a rebase that would delete indexed files past a hole in their own list: the
+// rebase deletes everything past the aligned end, and the shared ceiling puts that end at the hole.
+func (a *Aggregator) refuseFilesPastHoles(dirty *aggDirtyFilesRoTx) error {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	pastHole := func(name string, files []*FilesItem, own visibleFiles, accessors statecfg.Accessors) error {
+		end := own.EndTxNum()
+		for _, item := range files {
+			if !item.canDelete.Load() && item.startTxNum >= end && checkForVisibility(item, accessors, false) {
+				return fmt.Errorf("%s snapshot [%d,%d) lies past a hole at txNum %d; restore the missing file before rebasing", name, item.startTxNum, item.endTxNum, end)
+			}
+		}
+		return nil
+	}
+	for _, d := range dirty.domain {
+		dv, hv, hiv := d.d.calcVisibleFiles(math.MaxUint64)
+		if err := pastHole(d.d.FilenameBase, d.files, dv.files, d.d.Accessors); err != nil {
+			return err
+		}
+		if err := pastHole(d.d.FilenameBase+" history", d.history.files, hv, d.history.h.Accessors); err != nil {
+			return err
+		}
+		if err := pastHole(d.d.FilenameBase+" history index", d.history.ii.files, hiv.files, d.history.ii.ii.Accessors); err != nil {
+			return err
+		}
+	}
+	for _, ii := range dirty.ii {
+		if ii != nil {
+			if err := pastHole(ii.ii.FilenameBase, ii.files, ii.ii.calcVisibleFiles(math.MaxUint64).files, ii.ii.Accessors); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (a *Aggregator) AlignFilesToStepSize(ctx context.Context, stepSize uint64) (uint64, error) {

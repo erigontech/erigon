@@ -379,6 +379,9 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	switch mode {
 	case statecfg.ExistenceFilterInMem:
 		accessor.ForceExistenceFilterInRAM()
+		if d.Name == kv.CommitmentDomain { // the trie fold looks up every branch it reads in this index
+			accessor.ForceHashInRAM()
+		}
 	case statecfg.ExistenceFilterNormal:
 		accessor.ForceExistenceFilterNormal()
 	case statecfg.ExistenceFilterWillNeed:
@@ -549,7 +552,7 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
+	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum, false))
 	hv, hiv := d.History.calcVisibleFiles(toTxNum)
 	return dv, hv, hiv
 }
@@ -653,6 +656,13 @@ func (w *DomainBufferedWriter) Close() {
 	}
 }
 
+func (w *DomainBufferedWriter) detach() *DomainBufferedWriter {
+	detached := *w
+	detached.h = w.h.detach()
+	w.values = nil
+	return &detached
+}
+
 func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
@@ -660,6 +670,10 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
 	}
+	return w.flushValues(ctx, tx)
+}
+
+func (w *DomainBufferedWriter) flushValues(ctx context.Context, tx kv.RwTx) error {
 	if w.values == nil {
 		w.Close()
 		return nil

@@ -469,10 +469,15 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	parentBlockRoot *common.Hash,
 	versionedHashes []common.Hash,
 	executionRequestsList []hexutil.Bytes,
+	join func(),
 ) (execution_client.PayloadStatus, common.Hash, error) {
 	var publishedInvalidHash common.Hash
 	f.mu.Unlock()
 	defer f.mu.Lock()
+	if join != nil {
+		// This defer runs first, so waiting for prepare never holds f.mu.
+		defer join()
+	}
 	status, err := f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
 		// The wait for the token can be long enough for the block to go stale. The check
 		// needs f.mu, but this owns the global token, so never wait for it: whoever holds

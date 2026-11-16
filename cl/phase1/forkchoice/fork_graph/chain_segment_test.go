@@ -17,6 +17,7 @@
 package fork_graph
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -163,10 +164,52 @@ func TestAddChainSegmentInvalidBlockLeavesNoLightClientUpdate(t *testing.T) {
 		bad:           true,
 		participation: before.participation,
 	}, got)
+	require.Zero(t, before.lcUpdate)
+	require.Zero(t, got.lcUpdate)
 	require.Empty(t, g.lightClientUpdateCandidates)
 	require.Nil(t, g.CurrentStateLocked(parentRoot))
 	require.Nil(t, g.currentState)
 	require.Equal(t, invalid.Block.Slot, g.highestTransitionSlot)
+}
+
+// A block's light-client update reaches its period store only once the block is finalized.
+func TestAddChainSegmentLightClientUpdateReachesPeriodStoreAtFinalization(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	for _, block := range blocks {
+		_, result, err := g.AddChainSegment(block, true)
+		require.NoError(t, err)
+		require.Equal(t, Success, result)
+	}
+	update := g.NewestLightClientUpdate()
+	require.NotNil(t, update)
+	period := g.beaconCfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot)
+	head := common.Hash(mustBlockRoot(t, blocks[len(blocks)-1]))
+	require.Nil(t, g.GetLightClientUpdates(period, period+1, common.Hash{})[0], "served before finalization")
+	require.Same(t, update, g.GetLightClientUpdates(period, period+1, head)[0])
+
+	g.KeepFinalizedLightClientUpdates(head)
+
+	require.Same(t, update, g.GetLightClientUpdates(period, period+1, common.Hash{})[0])
+}
+
+func TestCommitChainSegmentLogisticErrorStoresNoLightClientUpdate(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	_, result, err := g.AddChainSegment(blocks[0], true)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+
+	seg := beginStartedSegment(t, g, blocks[1])
+	seg.Transition()
+	require.NotNil(t, seg.lcUpdate)
+	prepareErr := errors.New("prepare failed")
+	seg.err = prepareErr
+
+	post, result, err := g.CommitChainSegment(seg)
+	require.ErrorIs(t, err, prepareErr)
+	require.Nil(t, post)
+	require.Equal(t, LogisticError, result)
+	require.Nil(t, g.NewestLightClientUpdate())
+	require.Empty(t, g.lightClientUpdateCandidates)
 }
 
 func TestAddChainSegmentMissingSegmentLeavesGraphUnchanged(t *testing.T) {
@@ -203,7 +246,9 @@ func TestAddChainSegmentReplaysParentThatIsNotCurrent(t *testing.T) {
 
 func beginStartedSegment(t *testing.T, g *forkGraphDisk, block *cltypes.SignedBeaconBlock) *ChainSegment {
 	t.Helper()
-	seg, result, err := g.BeginChainSegment(block, true)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	seg, result, err := g.BeginChainSegment(block, blockRoot, true)
 	require.NoError(t, err)
 	require.Equal(t, Started, result)
 	require.NotNil(t, seg)
@@ -356,6 +401,23 @@ func TestCommitChainSegmentWithoutTransitionStoresNothing(t *testing.T) {
 	require.Nil(t, g.currentState)
 }
 
+// A prepare failure drops the block that AddChainSegment stored before the transition, and does not mark it bad.
+func TestCommitChainSegmentPrepareErrorDeletesBlock(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	seg := beginStartedSegment(t, g, blocks[0])
+	g.blocks.Store(seg.blockRoot, blocks[0])
+	seg.Transition()
+	prepareErr := errors.New("prepare failed")
+	seg.err = prepareErr
+
+	post, result, err := g.CommitChainSegment(seg)
+	require.ErrorIs(t, err, prepareErr)
+	require.Equal(t, LogisticError, result)
+	require.Nil(t, post)
+	require.Equal(t, importArtifacts{result: LogisticError, failed: true}, readImportArtifacts(t, g, blocks[0], post, result, err))
+	require.Nil(t, g.currentState)
+}
+
 func TestCommitChainSegmentMarksInvalidBlockBad(t *testing.T) {
 	g, blocks := newLightClientGraph(t)
 	blocks[0].Block.ProposerIndex = unknownProposerIndex
@@ -388,6 +450,20 @@ func TestCommitChainSegmentKeepsRootValidForBadProposerSignature(t *testing.T) {
 	require.Same(t, post, g.CurrentStateLocked(seg.blockRoot))
 }
 
+func TestChainSegmentPostStateRequiresCompletedValidTransition(t *testing.T) {
+	g, blocks := newLightClientGraph(t)
+	seg := beginStartedSegment(t, g, blocks[0])
+	require.Nil(t, seg.PostState())
+	seg.Transition()
+	require.NotNil(t, seg.PostState())
+
+	g, blocks = newLightClientGraph(t)
+	blocks[0].Block.StateRoot[0] ^= 0xff
+	seg = beginStartedSegment(t, g, blocks[0])
+	seg.Transition()
+	require.Nil(t, seg.PostState())
+}
+
 func TestChainSegmentTransitionPanicPropagates(t *testing.T) {
 	g, blocks := newLightClientGraph(t)
 	seg := beginStartedSegment(t, g, blocks[0])
@@ -415,6 +491,8 @@ func TestAddChainSegmentTransitionPanicPropagates(t *testing.T) {
 	g.blocks.Store(parentRoot, &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: blocks[0].Block.Slot}})
 
 	require.Panics(t, func() { _, _, _ = g.AddChainSegment(blocks[1], true) })
+	_, stored := g.blocks.Load(blockRoot)
+	require.True(t, stored, "the block is stored before its transition runs")
 
 	g.blocks.Store(parentRoot, blocks[0])
 	post, result, err := g.AddChainSegment(blocks[1], true)
@@ -426,8 +504,10 @@ func TestAddChainSegmentTransitionPanicPropagates(t *testing.T) {
 func TestBeginChainSegmentWithoutReplayRequiresCurrentParent(t *testing.T) {
 	g, blocks := newLightClientGraph(t)
 	current := g.currentState
+	blockRoot, err := blocks[1].Block.HashSSZ()
+	require.NoError(t, err)
 
-	seg, result, err := g.BeginChainSegment(blocks[1], true)
+	seg, result, err := g.BeginChainSegment(blocks[1], blockRoot, true)
 	require.NoError(t, err)
 	require.Equal(t, ReplayRequired, result)
 	require.Nil(t, seg)
@@ -436,18 +516,57 @@ func TestBeginChainSegmentWithoutReplayRequiresCurrentParent(t *testing.T) {
 	require.Equal(t, importArtifacts{result: ReplayRequired}, readImportArtifacts(t, g, blocks[1], nil, result, err))
 }
 
-func TestBeginChainSegmentMovesStatesIntoSegment(t *testing.T) {
+func TestBeginChainSegmentUsesSuppliedRoot(t *testing.T) {
+	t.Run("prevalidated", func(t *testing.T) {
+		g, blocks := newLightClientGraph(t)
+
+		seg, result, err := g.BeginChainSegment(blocks[0], g.anchorRoot, true)
+		require.NoError(t, err)
+		require.Equal(t, PreValidated, result)
+		require.Nil(t, seg)
+	})
+	t.Run("started", func(t *testing.T) {
+		g, blocks := newLightClientGraph(t)
+		computedRoot, err := blocks[0].Block.HashSSZ()
+		require.NoError(t, err)
+		suppliedRoot := common.Hash(computedRoot)
+		suppliedRoot[0] ^= 0xff
+
+		seg, result, err := g.BeginChainSegment(blocks[0], suppliedRoot, true)
+		require.NoError(t, err)
+		require.Equal(t, Started, result)
+		require.Equal(t, suppliedRoot, seg.blockRoot)
+
+		seg.Transition()
+		_, result, err = g.CommitChainSegment(seg)
+		require.NoError(t, err)
+		require.Equal(t, Success, result)
+		_, hasHeader := g.GetHeader(suppliedRoot)
+		require.True(t, hasHeader)
+		storedBlock, hasBlock := g.GetBlock(suppliedRoot)
+		require.True(t, hasBlock)
+		require.Same(t, blocks[0], storedBlock)
+		_, hasComputedHeader := g.GetHeader(computedRoot)
+		require.False(t, hasComputedHeader)
+	})
+}
+
+func TestBeginChainSegmentKeepsPrecomputedEpochState(t *testing.T) {
 	graph, parent, block := newEpochBoundaryGraph(t, tests.GetBellatrixRandom)
 	advanced := precomputedEpochState(t, parent, block)
 	graph.SetNextEpochState(block.Block.ParentRoot, advanced)
 	parentState := graph.CurrentStateLocked(block.Block.ParentRoot)
 	require.NotNil(t, parentState)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
 
-	seg := beginStartedSegment(t, graph, block)
-	require.Same(t, parentState, seg.parentState)
-	require.Same(t, advanced, seg.precomputedState)
-	require.Nil(t, graph.currentState)
-	require.Nil(t, graph.nextEpochState)
+	seg, result, err := graph.BeginChainSegment(block, blockRoot, true)
+	require.NoError(t, err)
+	require.Equal(t, PrecomputedEpochStateAvailable, result)
+	require.Nil(t, seg)
+	require.Same(t, parentState, graph.currentState)
+	require.Same(t, advanced, graph.nextEpochState)
+	require.Zero(t, graph.highestTransitionSlot)
 }
 
 // A block whose parent state's finalized block is unavailable still records its light client update, without finality.

@@ -1837,6 +1837,8 @@ type aggregatorVisible struct {
 	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
+	cutBy        string                          // the list whose end every other list was lowered to, if any
+	cutAt        uint64
 
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
@@ -1851,20 +1853,48 @@ type aggregatorVisible struct {
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
-	next := &aggregatorVisible{}
-	for id, d := range a.d {
-		if d == nil {
-			continue
+	var next *aggregatorVisible
+	var cutBy string
+	var cutAt uint64
+	for {
+		next = &aggregatorVisible{}
+		end := toTxNum
+		lower := func(name string, dirty *DirtyFiles, visible visibleFiles) {
+			if dirty.Len() > 0 && visible.EndTxNum() < end {
+				end = visible.EndTxNum()
+				cutBy, cutAt = name, end
+			}
 		}
-		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
-	}
-	for id, ii := range a.standaloneIIs() {
-		if ii == nil {
-			continue
+		for id, d := range a.d {
+			if d == nil {
+				continue
+			}
+			next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
+			if !d.Enabled || a.unalignedDomain[id] {
+				continue
+			}
+			lower(d.FilenameBase, d.dirtyFiles, next.d[id].files)
+			if !d.HistCfg.SnapshotsDisabled && !d.HistCfg.HistoryDisabled {
+				lower(d.FilenameBase+" history", d.History.dirtyFiles, next.dh[id])
+				lower(d.FilenameBase+" history index", d.InvertedIndex.dirtyFiles, next.dhii[id].files)
+			}
 		}
-		next.iis[id] = ii.calcVisibleFiles(toTxNum)
+		for id, ii := range a.standaloneIIs() {
+			if ii == nil {
+				continue
+			}
+			next.iis[id] = ii.calcVisibleFiles(toTxNum)
+			if ii.Enabled && !a.unalignedIdx[id] {
+				lower(ii.FilenameBase, ii.dirtyFiles, next.iis[id].files)
+			}
+		}
+		if end == toTxNum {
+			break
+		}
+		toTxNum = end
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
+	next.cutBy, next.cutAt = cutBy, cutAt
 
 	if a.visibilityLoweringForbidden.Load() {
 		prev := a.visible.Load()
@@ -2146,7 +2176,15 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult) 
 	// anything (deferred to reclaimRetired), so it won't re-create a file we delete.
 	var deleted []string
 	var retired []*FilesItem
-	for id, d := range at.d {
+	// Commitment goes first: a domain input is kept while a commitment file of its range is still dirty.
+	order := []kv.Domain{kv.CommitmentDomain}
+	for id := range at.d {
+		if kv.Domain(id) != kv.CommitmentDomain {
+			order = append(order, kv.Domain(id))
+		}
+	}
+	for _, id := range order {
+		d := at.d[id]
 		if !d.d.Enabled {
 			continue
 		}
@@ -2481,12 +2519,21 @@ func (at *AggregatorRoTx) Generation() uint64 { return at.visible.generation }
 // snapshot/DB management operations — e.g. `seg rm-state --latest` and then starting
 // erigon without `integration stage_exec --reset`. Meant to run once at startup.
 func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
+	cut := func(err error) error {
+		if err != nil && at.visible.cutBy != "" {
+			return fmt.Errorf("%s stops at txNum %d, and every list stops there with it: %w", at.visible.cutBy, at.visible.cutAt, err)
+		}
+		return err
+	}
 	for _, dt := range at.d {
 		if dt == nil || !dt.d.Enabled {
 			continue
 		}
 		if err := dt.checkFilesDBGap(tx); err != nil {
-			return err
+			return cut(err)
+		}
+		if err := dt.ht.checkFilesDBGap(tx); err != nil {
+			return cut(err)
 		}
 	}
 	for _, iit := range at.iis {
@@ -2494,7 +2541,7 @@ func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
 			continue
 		}
 		if err := iit.checkFilesDBGap(tx); err != nil {
-			return err
+			return cut(err)
 		}
 	}
 	return nil

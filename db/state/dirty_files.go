@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -593,8 +594,10 @@ func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 
-func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems visibleFiles) {
+func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64, allowRetiredPrefix bool) (roItems visibleFiles) {
 	newVisibleFiles := make(visibleFiles, 0, files.Len())
+	firstStart := uint64(math.MaxUint64)
+	var firstFile *FilesItem
 	// trace = true
 	if trace {
 		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len(), "toTxNum", toTxNum)
@@ -603,6 +606,12 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 	defer iter.Release()
 	for ok := iter.First(); ok; ok = iter.Next() {
 		item := iter.Item()
+		if item.decompressor != nil && !item.canDelete.Load() {
+			if firstFile == nil {
+				firstFile = item
+			}
+			firstStart = min(firstStart, item.startTxNum)
+		}
 		if item.endTxNum > toTxNum {
 			if trace {
 				log.Warn("[dbg] calcVisibleFiles: ends after limit", "f", item.decompressor.FileName(), "limitTxNum", toTxNum)
@@ -639,14 +648,23 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 		newVisibleFiles = visibleFiles{}
 	}
 
-	// a latest read cannot tell that a key's value was in the hole, so nothing after it is visible
+	if len(newVisibleFiles) > 0 && newVisibleFiles[0].startTxNum > firstStart {
+		// History may start later: a read below its first visible file fails instead of skipping data.
+		if !allowRetiredPrefix {
+			log.Warn("[agg] first file is not visible, so its whole list is hidden", "file", firstFile.decompressor.FileName())
+			return visibleFiles{}
+		}
+		if firstFile.endTxNum <= newVisibleFiles[0].startTxNum {
+			log.Warn("[agg] files before the first visible file are not readable", "file", firstFile.decompressor.FileName(), "readableFrom", newVisibleFiles[0].startTxNum)
+		}
+	}
 	for i := 1; i < len(newVisibleFiles); i++ {
 		prev := newVisibleFiles[i-1]
 		curr := newVisibleFiles[i]
-		if prev.endTxNum < curr.startTxNum {
+		if prev.endTxNum != curr.startTxNum {
 			log.Warn("[agg] gap in visible files", "prev", prev.src.decompressor.FileName(),
 				"prevEnd", prev.endTxNum, "curr", curr.src.decompressor.FileName(), "currStart", curr.startTxNum,
-				"gap", curr.startTxNum-prev.endTxNum)
+				"gap", int64(curr.startTxNum)-int64(prev.endTxNum))
 			return newVisibleFiles[:i]
 		}
 	}
