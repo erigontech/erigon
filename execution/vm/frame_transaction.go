@@ -43,7 +43,7 @@ func opApprove(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	if evm.FrameContext == nil {
 		return pc, nil, ErrFrameContext
 	}
-	if evm.FrameContext.Transaction.Frames[evm.FrameContext.Index].Mode == types.FramePostTx {
+	if inPostTx(evm) {
 		return pc, nil, ErrWriteProtection
 	}
 	offset, length := call.Stack.pop2Uint64()

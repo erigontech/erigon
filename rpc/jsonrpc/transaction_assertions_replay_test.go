@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
+	"github.com/erigontech/erigon/execution/vm/testutil"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -61,12 +62,7 @@ func newMixedFrameReplayChain(t *testing.T, ordinaryReverts bool) (*execmodulete
 	// Revert if the preceding transaction's fee debit is missing from the prestate.
 	assertionCode := program.New().Push0().Push(sender).Push(2).Op(vm.TXDIFF).
 		Push(initialBalance).Op(vm.EQ)
-	revertJump := assertionCode.Size()
-	assertionCode.Push(0).Op(vm.JUMPI, vm.STOP)
-	_, revertPC := assertionCode.Jumpdest()
-	require.Less(t, revertPC, uint64(256))
-	assertionCode.Bytes()[revertJump+1] = byte(revertPC)
-	assertionCode.Push0().Push0().Op(vm.REVERT)
+	testutil.AssertStackWord(assertionCode, 0).Op(vm.STOP)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
 		Alloc: types.GenesisAlloc{
@@ -146,9 +142,7 @@ func TestPostTxReplayPreservesFeeAccounting(t *testing.T) {
 	code := program.New().Push0().Push(0x14).Op(vm.TXTRACE).
 		Push0().Push(sender).Push(3).Op(vm.TXDIFF).
 		Push0().Push(sender).Push(2).Op(vm.TXDIFF, vm.SUB, vm.EQ)
-	destination := code.Size() + 7
-	code.Op(vm.PUSH2).Append([]byte{byte(destination >> 8), byte(destination)}).Op(vm.JUMPI).
-		Push0().Push0().Op(vm.REVERT, vm.JUMPDEST, vm.STOP)
+	testutil.AssertStackWord(code, 1).Op(vm.STOP)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
 		Alloc: types.GenesisAlloc{

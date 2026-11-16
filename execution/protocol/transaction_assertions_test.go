@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
+	"github.com/erigontech/erigon/execution/vm/testutil"
 )
 
 func TestPostTxRollback(t *testing.T) {
@@ -108,7 +109,7 @@ func TestPostTxBalanceTrace(t *testing.T) {
 	assertion := common.HexToAddress("0x3000")
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
 	code := program.New().Push0().Push0().Op(vm.TXTRACE)
-	assertStackWord(code, 2)
+	testutil.AssertStackWord(code, 2)
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), code.Bytes(), tracing.CodeChangeUnspecified))
 	tx.Frames = []types.Frame{
 		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
@@ -242,13 +243,6 @@ func TestPostTxStateReadErrorAbortsTransaction(t *testing.T) {
 	}
 }
 
-func assertStackWord(code *program.Program, expected uint64) {
-	code.Push(expected).Op(vm.EQ)
-	destination := code.Size() + 7
-	code.Op(vm.PUSH2).Append([]byte{byte(destination >> 8), byte(destination)}).Op(vm.JUMPI).
-		Push0().Push0().Op(vm.REVERT, vm.JUMPDEST)
-}
-
 func TestTxTraceOmitsRestoredBalance(t *testing.T) {
 	t.Parallel()
 	evm, tx := frameTestEnv(t)
@@ -261,9 +255,9 @@ func TestTxTraceOmitsRestoredBalance(t *testing.T) {
 	// The relay forwards the value it receives, so its own balance ends unchanged.
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(relay), program.New().Call(uint256.NewInt(0), sink, 5, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
 	code := program.New().Push0().Push0().Op(vm.TXTRACE)
-	assertStackWord(code, 2) // payer and sink
+	testutil.AssertStackWord(code, 2) // payer and sink
 	code.Push0().Push(relay).Push(0x0a).Op(vm.TXDIFF)
-	assertStackWord(code, 0)
+	testutil.AssertStackWord(code, 0)
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), code.Op(vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
 	tx.Frames = []types.Frame{
 		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
@@ -289,7 +283,7 @@ func TestTxDiffTopicViewListsEventOnce(t *testing.T) {
 	// One event carries the same value in two indexed positions.
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(body), program.New().Push(topic).Push(topic).Push(1).Push0().Push0().Op(vm.LOG3, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
 	code := program.New().Push0().Push(topic).Push(0x0b).Op(vm.TXDIFF)
-	assertStackWord(code, 1)
+	testutil.AssertStackWord(code, 1)
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), code.Op(vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
 	tx.Frames = []types.Frame{
 		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
