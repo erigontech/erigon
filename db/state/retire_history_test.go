@@ -150,6 +150,39 @@ func TestRetire_StaleViewReportsOnlyDetachedFiles(t *testing.T) {
 	}
 }
 
+// A Retire through an older view whose aged files a merge already replaced
+// still retires the dirty files up to that view's boundary.
+func TestRetire_StaleViewRetiresMergedReplacement(t *testing.T) {
+	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
+	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+	generate := func(ranges []testFileRange) {
+		generateAccountsFile(t, agg.Dirs(), ranges)
+		generateCodeFile(t, agg.Dirs(), ranges)
+		generateStorageFile(t, agg.Dirs(), ranges)
+	}
+	generate([]testFileRange{{0, 2}, {2, 4}, {4, 5}})
+	require.NoError(t, agg.OpenFolder(db))
+
+	stale := agg.BeginFilesRo()
+	defer stale.Close()
+	generate([]testFileRange{{0, 4}})
+	require.NoError(t, agg.OpenFolder(db))
+	agg.cleanAfterMerge(nil)
+
+	_, err := stale.Retire(kv.RetireCutoffs{Default: 4 * stepSize})
+	require.NoError(t, err)
+
+	accountsHist := agg.d[kv.AccountsDomain].History
+	for _, dirty := range []*DirtyFiles{accountsHist.dirtyFiles, accountsHist.InvertedIndex.dirtyFiles} {
+		var starts []uint64
+		dirty.Scan(func(item *FilesItem) bool {
+			starts = append(starts, item.startTxNum/stepSize)
+			return true
+		})
+		require.Equal(t, []uint64{4}, starts)
+	}
+}
+
 // TestEntirelyBeforeStep_BoundaryStraddlingFileKept is a direct unit test of
 // entirelyBeforeStep's selection predicate: a file whose range straddles the
 // cutoff must never be selected.
