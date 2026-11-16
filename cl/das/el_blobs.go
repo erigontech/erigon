@@ -18,8 +18,10 @@ import (
 // is stored. The cell proofs are not verified: the EL verified them when it admitted
 // the blob transaction, and the Fulu p2p spec says to skip verification of blobs
 // retrieved from the local EL. It returns the sidecars to publish: those on the subnets
-// this node subscribes to.
-func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte) ([]*cltypes.DataColumnSidecar, error) {
+// this node subscribes to. A non-nil claim is called before the write with the stored
+// columns that are also in the publication set; the caller publishes them afterwards. With a
+// claim, a failed write still returns the publication set with the error and still schedules recovery.
+func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blobs [][]byte, cellProofs [][][]byte, claim func([]*cltypes.DataColumnSidecar)) ([]*cltypes.DataColumnSidecar, error) {
 	commitments := block.GetBlobKzgCommitments()
 	if commitments == nil {
 		return nil, errors.New("block has no blob kzg commitments")
@@ -72,19 +74,35 @@ func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.Sig
 		}
 		stored = append(stored, sidecar)
 	}
-	if err := d.columnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, stored); err != nil {
-		return nil, err
+	var toPublish []*cltypes.DataColumnSidecar
+	if claim != nil {
+		toPublish = d.columnsToPublish(sidecars, stored)
+		if len(toPublish) > 0 && len(stored) > 0 {
+			claim(stored)
+		}
+	}
+	writeErr := d.columnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, stored)
+	if writeErr != nil && claim == nil {
+		return nil, writeErr
 	}
 	if err := d.TryScheduleRecover(block.Block.Slot, blockRoot); err != nil {
 		log.Warn("[peerdas] failed to schedule blob recovery after EL import", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
 	}
+	if claim == nil {
+		toPublish = d.columnsToPublish(sidecars, stored)
+	}
+	return toPublish, writeErr
+}
+
+// columnsToPublish returns the sidecars on the subnets this node subscribes to.
+func (d *peerdas) columnsToPublish(sidecars, stored []*cltypes.DataColumnSidecar) []*cltypes.DataColumnSidecar {
 	if d.caplinConfig.SubscribeAllTopics || d.IsArchivedMode() {
-		return sidecars, nil
+		return sidecars
 	}
 	if custody, err := d.state.GetMyCustodyColumns(); err != nil || len(custody) == 0 {
-		return nil, nil
+		return nil
 	}
-	return stored, nil
+	return stored
 }
 
 func fuluDataColumnSidecars(block *cltypes.SignedBeaconBlock, commitments *solid.ListSSZ[*cltypes.KZGCommitment], cellsAndProofs []peerdasutils.CellsAndKZGProofs) ([]*cltypes.DataColumnSidecar, error) {

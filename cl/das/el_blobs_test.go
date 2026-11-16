@@ -2,6 +2,7 @@ package das
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync/atomic"
@@ -94,7 +95,7 @@ func TestImportColumnsFromBlobsStoresCustodyColumns(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, available)
 
-	stored, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	stored, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 	require.NoError(t, err)
 
 	available, err = d.IsDataAvailable(block.Block.Slot, root)
@@ -137,7 +138,7 @@ func TestImportColumnsFromBlobsWritesCustodyColumnsInOneBatch(t *testing.T) {
 			return nil
 		}).Times(1)
 
-	stored, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	stored, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 	require.NoError(t, err)
 
 	require.Len(t, written, len(custody))
@@ -173,7 +174,7 @@ func TestIsDataAvailableReadsOnlyCustodyColumns(t *testing.T) {
 	require.False(t, available)
 	require.Equal(t, int32(1), fs.stats.Load(), "the check must stop at the first missing custody column")
 
-	_, err = d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	_, err = d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 	require.NoError(t, err)
 	fs.stats.Store(0)
 	available, err = d.IsDataAvailable(block.Block.Slot, root)
@@ -190,7 +191,7 @@ func TestImportColumnsFromBlobsStoresAllColumnsInArchiveMode(t *testing.T) {
 	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
 	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
 
-	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 	require.NoError(t, err)
 
 	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
@@ -213,7 +214,7 @@ func TestImportColumnsFromBlobsStoresAllColumnsOnCustodyLookupError(t *testing.T
 	d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups+1, func() uint64 { return 0 })
 	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
 
-	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 	require.NoError(t, err)
 
 	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
@@ -234,7 +235,7 @@ func TestImportColumnsFromBlobsPublishesAllColumnsInArchiveModeOnCustodyLookupEr
 	require.Error(t, err)
 	block, _, blobs, proofs := elBlobsFixture(t, &cfg, 2)
 
-	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 	require.NoError(t, err)
 
 	require.Len(t, toPublish, int(cfg.NumberOfColumns))
@@ -248,7 +249,7 @@ func TestImportColumnsFromBlobsStoresAllColumnsWithoutLocalNode(t *testing.T) {
 	d.state = peerdasstate.NewPeerDasState(&cfg, &networkConfig)
 	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
 
-	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 	require.NoError(t, err)
 
 	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
@@ -279,7 +280,9 @@ func TestImportColumnsFromBlobsRejectsUnusableResponses(t *testing.T) {
 				block, root, blobs, proofs := elBlobsFixtureOfVersion(t, cfg, version, 2)
 				blobs, proofs = corrupt(blobs, proofs)
 
-				_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+				_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, func([]*cltypes.DataColumnSidecar) {
+					t.Fatal("claimed the columns of an unusable response")
+				})
 				require.Error(t, err)
 
 				saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
@@ -301,7 +304,7 @@ func TestImportColumnsFromBlobsTrustsELCellProofs(t *testing.T) {
 	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
 	proofs[0][5] = proofs[0][6]
 
-	_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 	require.NoError(t, err)
 
 	sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(t.Context(), block.Block.Slot, root, 5)
@@ -319,7 +322,7 @@ func TestImportColumnsFromBlobsSupernodeSchedulesRecovery(t *testing.T) {
 	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
 	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
 
-	_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 	require.NoError(t, err)
 
 	select {
@@ -336,7 +339,7 @@ func TestImportColumnsFromBlobsPublishesAllColumnsWhenSubscribedToAllTopics(t *t
 	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{SubscribeAllTopics: true})
 	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
 
-	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 	require.NoError(t, err)
 
 	require.Len(t, toPublish, int(cfg.NumberOfColumns))
@@ -356,7 +359,7 @@ func TestImportColumnsFromBlobsBuildsGloasSidecars(t *testing.T) {
 	block, root, blobs, proofs := elBlobsFixtureOfVersion(t, cfg, clparams.GloasVersion, 2)
 	commitments := block.GetBlobKzgCommitments()
 
-	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 	require.NoError(t, err)
 
 	custody, err := d.state.GetMyCustodyColumns()
@@ -415,7 +418,7 @@ func TestImportColumnsFromBlobsBuildsSidecarsOfTheBlockForkAtTheGloasBoundary(t 
 			root, err := block.Block.HashSSZ()
 			require.NoError(t, err)
 
-			toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+			toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 			require.NoError(t, err)
 
 			require.NotEmpty(t, toPublish)
@@ -443,7 +446,7 @@ func TestImportColumnsFromBlobsStoresAndPublishesAllGloasColumnsInArchiveMode(t 
 	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
 	block, root, blobs, proofs := elBlobsFixtureOfVersion(t, cfg, clparams.GloasVersion, 2)
 
-	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 	require.NoError(t, err)
 
 	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
@@ -475,7 +478,7 @@ func TestImportColumnsFromBlobsRejectsBlockWithoutCommitmentList(t *testing.T) {
 			test.strip(block)
 
 			require.NotPanics(t, func() {
-				_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+				_, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 				require.Error(t, err)
 			})
 		})
@@ -498,7 +501,7 @@ func TestImportColumnsFromBlobsGloasRecoveryRunsForBlockInForkChoice(t *testing.
 	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Unix(0, 0)).AnyTimes()
 	d.ethClock = clock
 
-	_, err = d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	_, err = d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
@@ -509,4 +512,194 @@ func TestImportColumnsFromBlobsGloasRecoveryRunsForBlockInForkChoice(t *testing.
 	t.Cleanup(func() { cancel(); <-done })
 
 	require.Eventually(t, func() bool { return d.IsBlobAlreadyRecovered(root) }, 30*time.Second, 20*time.Millisecond)
+}
+
+func requireSameColumns(t testing.TB, expected, actual []*cltypes.DataColumnSidecar) {
+	t.Helper()
+	require.Len(t, actual, len(expected))
+	for i := range expected {
+		require.Same(t, expected[i], actual[i])
+	}
+}
+
+func TestImportColumnsFromBlobsClaimsBeforeTheWrite(t *testing.T) {
+	cfg := elBlobsTestConfig(0)
+	d := newELBlobsTestPeerDas(t, cfg, &clparams.CaplinConfig{})
+	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(gomock.NewController(t))
+	d.columnStorage = columnStorage
+	block, root, blobs, proofs := elBlobsFixtureOfVersion(t, cfg, clparams.GloasVersion, 2)
+	var events []string
+	var claimed, written []*cltypes.DataColumnSidecar
+	columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), root, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+			events = append(events, "write")
+			written = sidecars
+			return nil
+		}).Times(1)
+
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, func(sidecars []*cltypes.DataColumnSidecar) {
+		events = append(events, "claim")
+		claimed = sidecars
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"claim", "write"}, events)
+	require.NotEmpty(t, claimed)
+	requireSameColumns(t, written, claimed)
+	requireSameColumns(t, written, toPublish)
+}
+
+func TestImportColumnsFromBlobsReturnsThePublicationSetWithTheWriteErrorWhenClaiming(t *testing.T) {
+	cfg := elBlobsTestConfig(0)
+	d := newELBlobsTestPeerDas(t, cfg, &clparams.CaplinConfig{})
+	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(gomock.NewController(t))
+	d.columnStorage = columnStorage
+	block, root, blobs, proofs := elBlobsFixtureOfVersion(t, cfg, clparams.GloasVersion, 2)
+	writeErr := errors.New("write failed")
+	var claimed []*cltypes.DataColumnSidecar
+	columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), root, gomock.Any()).Return(writeErr).Times(1)
+
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, func(sidecars []*cltypes.DataColumnSidecar) { claimed = sidecars })
+
+	require.ErrorIs(t, err, writeErr)
+	require.NotEmpty(t, claimed)
+	requireSameColumns(t, claimed, toPublish)
+}
+
+var errRenameFailed = errors.New("rename failed")
+
+// renameFailingFs fails the failAt-th Rename, which leaves the earlier renames durable.
+type renameFailingFs struct {
+	afero.Fs
+	failAt  int32
+	renames atomic.Int32
+}
+
+func (f *renameFailingFs) Rename(oldname, newname string) error {
+	if f.renames.Add(1) == f.failAt {
+		return errRenameFailed
+	}
+	return f.Fs.Rename(oldname, newname)
+}
+
+// newPartialWriteImport returns an archive node whose column write fails after half of the columns are stored.
+func newPartialWriteImport(t *testing.T, version clparams.StateVersion) (*peerdas, importFixture) {
+	t.Helper()
+	cfg := elBlobsTestConfig(0)
+	if version == clparams.FuluVersion {
+		cfg.GloasForkEpoch = cfg.FarFutureEpoch
+	}
+	d := newELBlobsTestPeerDas(t, cfg, &clparams.CaplinConfig{ArchiveBlobs: true})
+	fs := &renameFailingFs{Fs: afero.NewMemMapFs(), failAt: int32(cfg.NumberOfColumns)/2 + 1}
+	d.columnStorage = blob_storage.NewDataColumnStore(fs, cfg, beaconevents.NewEventEmitter())
+	d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
+	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
+	block, root, blobs, proofs := elBlobsFixtureOfVersion(t, cfg, version, 2)
+	return d, importFixture{block: block, root: root, blobs: blobs, proofs: proofs}
+}
+
+type importFixture struct {
+	block  *cltypes.SignedBeaconBlock
+	root   common.Hash
+	blobs  [][]byte
+	proofs [][][]byte
+}
+
+func TestImportColumnsFromBlobsSchedulesRecoveryAfterAPartialWriteWhenClaiming(t *testing.T) {
+	d, f := newPartialWriteImport(t, clparams.GloasVersion)
+
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), f.block, f.blobs, f.proofs, func([]*cltypes.DataColumnSidecar) {})
+
+	require.ErrorIs(t, err, errRenameFailed)
+	require.Len(t, toPublish, int(d.beaconConfig.NumberOfColumns))
+	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), f.block.Block.Slot, f.root)
+	require.NoError(t, err)
+	require.Len(t, saved, int(d.beaconConfig.NumberOfColumns)/2)
+	select {
+	case request := <-d.recoverBlobsQueue:
+		require.Equal(t, f.root, request.blockRoot)
+	default:
+		t.Fatal("blob recovery was not scheduled")
+	}
+	require.Empty(t, d.recoverBlobsQueue)
+}
+
+func TestImportColumnsFromBlobsWithoutClaimKeepsTheWriteErrorResult(t *testing.T) {
+	d, f := newPartialWriteImport(t, clparams.FuluVersion)
+
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), f.block, f.blobs, f.proofs, nil)
+
+	require.ErrorIs(t, err, errRenameFailed)
+	require.Nil(t, toPublish)
+	require.Empty(t, d.recoverBlobsQueue)
+}
+
+func TestImportColumnsFromBlobsWithoutClaimChoosesThePublicationSetAfterTheWrite(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(gomock.NewController(t))
+	d.columnStorage = columnStorage
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
+	columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), root, gomock.Any()).
+		DoAndReturn(func(context.Context, common.Hash, []*cltypes.DataColumnSidecar) error {
+			d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups+1, func() uint64 { return 0 })
+			return nil
+		}).Times(1)
+
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
+	require.NoError(t, err)
+
+	require.Empty(t, toPublish)
+}
+
+func TestImportColumnsFromBlobsClaimsExactlyTheStoredColumnsToPublish(t *testing.T) {
+	cfg := elBlobsTestConfig(0)
+	allColumns := func(map[uint64]bool) map[uint64]bool {
+		all := make(map[uint64]bool, cfg.NumberOfColumns)
+		for index := range cfg.NumberOfColumns {
+			all[index] = true
+		}
+		return all
+	}
+	for name, tc := range map[string]struct {
+		caplinConfig clparams.CaplinConfig
+		custodyError bool
+		expected     func(custody map[uint64]bool) map[uint64]bool
+	}{
+		"custody node":         {expected: func(custody map[uint64]bool) map[uint64]bool { return custody }},
+		"subscribe all topics": {caplinConfig: clparams.CaplinConfig{SubscribeAllTopics: true}, expected: func(custody map[uint64]bool) map[uint64]bool { return custody }},
+		"archive":              {caplinConfig: clparams.CaplinConfig{ArchiveBlobs: true}, expected: allColumns},
+		"custody lookup error": {custodyError: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := newELBlobsTestPeerDas(t, cfg, &tc.caplinConfig)
+			d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
+			d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
+			custody, err := d.state.GetMyCustodyColumns()
+			require.NoError(t, err)
+			require.Less(t, len(custody), int(cfg.NumberOfColumns))
+			if tc.custodyError {
+				d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups+1, func() uint64 { return 0 })
+			}
+			block, _, blobs, proofs := elBlobsFixtureOfVersion(t, cfg, clparams.GloasVersion, 2)
+			claims := 0
+			claimed := map[uint64]bool{}
+
+			_, err = d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, func(sidecars []*cltypes.DataColumnSidecar) {
+				claims++
+				for _, sidecar := range sidecars {
+					claimed[sidecar.Index] = true
+				}
+			})
+			require.NoError(t, err)
+
+			if tc.expected == nil {
+				require.Zero(t, claims)
+				return
+			}
+			require.Equal(t, 1, claims)
+			require.Equal(t, tc.expected(custody), claimed)
+		})
+	}
 }

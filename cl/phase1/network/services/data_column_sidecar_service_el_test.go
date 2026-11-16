@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -21,6 +22,8 @@ import (
 var (
 	elTestParentRoot = common.Hash{0x11}
 	elTestFinalized  = solid.Checkpoint{Epoch: 1, Root: common.Hash{0xf1}}
+	elTestBlockRoot  = common.Hash{0x22}
+	elTestDigest     = common.Bytes4{1, 2, 3, 4}
 )
 
 func elBuiltSidecar(slot, index uint64) *cltypes.DataColumnSidecar {
@@ -28,6 +31,60 @@ func elBuiltSidecar(slot, index uint64) *cltypes.DataColumnSidecar {
 	sidecar.Index = index
 	sidecar.SignedBlockHeader = &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: slot, ProposerIndex: 7, ParentRoot: elTestParentRoot}}
 	return sidecar
+}
+
+func elBuiltGloasSidecar(slot, index uint64) *cltypes.DataColumnSidecar {
+	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+	sidecar.Slot, sidecar.Index, sidecar.BeaconBlockRoot = slot, index, elTestBlockRoot
+	return sidecar
+}
+
+func gloasSeenKey(sidecar *cltypes.DataColumnSidecar) seenGloasSidecarKey {
+	return seenGloasSidecarKey{beaconBlockRoot: sidecar.BeaconBlockRoot, index: sidecar.Index}
+}
+
+// newGloasClaimTestService returns an EL publish test service that maps column indices to subnets modulo the subnet
+// count and answers every fork digest with elTestDigest.
+func newGloasClaimTestService(t *testing.T) (*dataColumnSidecarService, *gossipmock.MockGossip, *eth_clock.MockEthereumClock) {
+	t.Helper()
+	service, publisher, clock, _ := newELPublishTestService(t)
+	original := computeSubnetForDataColumnSidecar
+	t.Cleanup(func() { computeSubnetForDataColumnSidecar = original })
+	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return index % service.cfg.DataColumnSidecarSubnetCount }
+	clock.EXPECT().ComputeForkDigest(gomock.Any()).Return(elTestDigest, nil).AnyTimes()
+	return service, publisher, clock
+}
+
+type publishedColumn struct {
+	topic   string
+	payload []byte
+}
+
+// recordPublishes records every column published to elTestDigest and answers the nth publish with outcomes[n], or nil
+// once the outcomes run out.
+func recordPublishes(publisher *gossipmock.MockGossip, outcomes ...error) *[]publishedColumn {
+	published := &[]publishedColumn{}
+	publisher.EXPECT().PublishToForkDigest(gomock.Any(), elTestDigest, gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, _ common.Bytes4, topic string, payload []byte) error {
+			var outcome error
+			if len(*published) < len(outcomes) {
+				outcome = outcomes[len(*published)]
+			}
+			*published = append(*published, publishedColumn{topic: topic, payload: payload})
+			return outcome
+		}).AnyTimes()
+	return published
+}
+
+func requirePublished(t *testing.T, published []publishedColumn, sidecars ...*cltypes.DataColumnSidecar) {
+	t.Helper()
+	expected := make([]publishedColumn, len(sidecars))
+	for i, sidecar := range sidecars {
+		payload, err := sidecar.EncodeSSZ(nil)
+		require.NoError(t, err)
+		expected[i] = publishedColumn{topic: gossip.TopicNameDataColumnSidecar(computeSubnetForDataColumnSidecar(sidecar.Index)), payload: payload}
+	}
+	require.Equal(t, expected, published)
 }
 
 // newELPublishTestService returns a column service whose finalized checkpoint (epoch 1) is an ancestor of
@@ -112,6 +169,126 @@ func TestPublishColumnsReleasesTheClaimOfAFailedGloasPublish(t *testing.T) {
 
 	service.PublishColumns(t.Context(), []*cltypes.DataColumnSidecar{sidecar})
 
-	_, ok := service.seenGloasSidecar.Get(seenGloasSidecarKey{beaconBlockRoot: sidecar.BeaconBlockRoot, index: 3})
+	ok := service.seenGloas.contains(seenGloasSidecarKey{beaconBlockRoot: sidecar.BeaconBlockRoot, index: 3})
 	require.False(t, ok)
+}
+
+func TestSeenGloasReleaseKeepsANewerMark(t *testing.T) {
+	seen := newSeenGloasSidecars("testSeenGloas", 1)
+	key := seenGloasSidecarKey{beaconBlockRoot: common.Hash{0x31}, index: 1}
+	evictor := seenGloasSidecarKey{beaconBlockRoot: common.Hash{0x31}, index: 2}
+	staleRelease, claimed := seen.claim(key)
+	require.True(t, claimed)
+	_, claimed = seen.claim(evictor)
+	require.True(t, claimed)
+	require.False(t, seen.contains(key))
+	_, claimed = seen.claim(key)
+	require.True(t, claimed)
+
+	staleRelease()
+
+	require.True(t, seen.contains(key))
+}
+
+func TestClaimColumnsMarksWithoutPublishing(t *testing.T) {
+	service, _, _ := newGloasClaimTestService(t)
+	sidecars := []*cltypes.DataColumnSidecar{elBuiltGloasSidecar(100, 3), elBuiltGloasSidecar(100, 5)}
+
+	claimed, _ := service.ClaimColumns(sidecars)
+
+	require.Equal(t, sidecars, claimed)
+	for _, sidecar := range sidecars {
+		require.True(t, service.seenGloas.contains(gloasSeenKey(sidecar)))
+	}
+}
+
+func TestClaimColumnsPublishPublishesTheClaimedColumns(t *testing.T) {
+	service, publisher, _ := newGloasClaimTestService(t)
+	published := recordPublishes(publisher)
+	sidecars := []*cltypes.DataColumnSidecar{elBuiltGloasSidecar(100, 3), elBuiltGloasSidecar(100, 5)}
+
+	claimed, publish := service.ClaimColumns(sidecars)
+	require.Empty(t, *published)
+	publish(t.Context())
+
+	require.Equal(t, sidecars, claimed)
+	requirePublished(t, *published, sidecars...)
+}
+
+func TestClaimColumnsPublishReleasesOnlyAFailedColumn(t *testing.T) {
+	failure := errors.New("topic not found")
+	for name, outcomes := range map[string][]error{
+		"first fails then second succeeds": {failure, nil},
+		"first succeeds then second fails": {nil, failure},
+	} {
+		t.Run(name, func(t *testing.T) {
+			service, publisher, _ := newGloasClaimTestService(t)
+			published := recordPublishes(publisher, outcomes...)
+			sidecars := []*cltypes.DataColumnSidecar{elBuiltGloasSidecar(100, 3), elBuiltGloasSidecar(100, 5)}
+
+			_, publish := service.ClaimColumns(sidecars)
+			publish(t.Context())
+
+			requirePublished(t, *published, sidecars...)
+			for i, sidecar := range sidecars {
+				require.Equal(t, outcomes[i] == nil, service.seenGloas.contains(gloasSeenKey(sidecar)), "column %d", sidecar.Index)
+			}
+		})
+	}
+}
+
+func TestClaimColumnsPublishFailureKeepsAMarkTakenAfterItsClaimWasReleasedAndRetaken(t *testing.T) {
+	service, publisher, _ := newGloasClaimTestService(t)
+	recordPublishes(publisher, errors.New("topic not found"))
+	sidecar := elBuiltGloasSidecar(100, 3)
+	_, publish := service.ClaimColumns([]*cltypes.DataColumnSidecar{sidecar})
+	service.seenGloas.cache.Remove(gloasSeenKey(sidecar))
+	_, retaken := service.seenGloas.claim(gloasSeenKey(sidecar))
+	require.True(t, retaken)
+
+	publish(t.Context())
+
+	require.True(t, service.seenGloas.contains(gloasSeenKey(sidecar)))
+}
+
+func TestClaimColumnsSkipsColumnsSeenBefore(t *testing.T) {
+	service, publisher, _ := newGloasClaimTestService(t)
+	published := recordPublishes(publisher)
+	seen, fresh := elBuiltGloasSidecar(100, 3), elBuiltGloasSidecar(100, 5)
+	_, claimedBefore := service.seenGloas.claim(gloasSeenKey(seen))
+	require.True(t, claimedBefore)
+
+	claimed, publish := service.ClaimColumns([]*cltypes.DataColumnSidecar{seen, fresh})
+	publish(t.Context())
+
+	require.Equal(t, []*cltypes.DataColumnSidecar{fresh}, claimed)
+	requirePublished(t, *published, fresh)
+	require.True(t, service.seenGloas.contains(gloasSeenKey(seen)))
+}
+
+func TestClaimColumnsWithAForkDigestErrorMarksNothing(t *testing.T) {
+	service, publisher, clock, _ := newELPublishTestService(t)
+	clock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{}, errors.New("no fork digest")).Times(1)
+	published := recordPublishes(publisher)
+	sidecar := elBuiltGloasSidecar(100, 3)
+
+	claimed, publish := service.ClaimColumns([]*cltypes.DataColumnSidecar{sidecar})
+	publish(t.Context())
+
+	require.Empty(t, claimed)
+	require.Empty(t, *published)
+	require.False(t, service.seenGloas.contains(gloasSeenKey(sidecar)))
+}
+
+func TestClaimColumnsForANonImportableBlockClaimsNothing(t *testing.T) {
+	service, publisher, _, _ := newELPublishTestService(t)
+	published := recordPublishes(publisher)
+	sidecar := elBuiltGloasSidecar(elTestFinalized.Epoch*service.cfg.SlotsPerEpoch, 3)
+
+	claimed, publish := service.ClaimColumns([]*cltypes.DataColumnSidecar{sidecar})
+	publish(t.Context())
+
+	require.Empty(t, claimed)
+	require.Empty(t, *published)
+	require.False(t, service.seenGloas.contains(gloasSeenKey(sidecar)))
 }
