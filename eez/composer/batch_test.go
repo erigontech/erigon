@@ -18,6 +18,8 @@ package composer
 
 import (
 	"bytes"
+	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -38,6 +40,7 @@ import (
 // for them.
 func window(t *testing.T, name string) ([]*types.Block, *protocol.ProofSystemBatch, []byte) {
 	t.Helper()
+	systemtx.Register()
 	w, err := testfixtures.LoadWindow(name)
 	require.NoError(t, err)
 	blocks := make([]*types.Block, len(w.Blocks))
@@ -185,4 +188,95 @@ func TestAnchorBatchCarriesEachBlock(t *testing.T) {
 	}
 	require.Equal(t, txs, span.Transactions)
 	require.Equal(t, blocks[len(blocks)-1].Hash(), b.Entries[0].RollupUpdates[0].NewRoot)
+}
+
+// effectsOf returns the effects a batch's DA publishes.
+func effectsOf(t *testing.T, b *protocol.ProofSystemBatch) Effects {
+	t.Helper()
+	msgs, err := da.Decode(nil, b.CallData)
+	require.NoError(t, err)
+	p, err := da.ParsePayload(msgs)
+	require.NoError(t, err)
+	var fx Effects
+	for i := range p.Actions {
+		e, err := protocol.EntryFromAction(&p.Actions[i], 1)
+		require.NoError(t, err)
+		if p.Actions[i].SourceRollupID == 1 {
+			fx.Outbound = append(fx.Outbound, *e)
+		} else {
+			fx.Inbound = append(fx.Inbound, *e)
+		}
+	}
+	return fx
+}
+
+func settled(b *protocol.ProofSystemBatch) []common.Hash {
+	var out []common.Hash
+	for i := range b.Entries {
+		out = append(out, b.Entries[i].RollupUpdates[0].NewRoot)
+	}
+	return out
+}
+
+// TestBatchOfWindow468 is T-CMP-4 for a batch with effects: from window
+// 468's blocks, the effects its DA publishes and the blocks its entries
+// settle, the batch is the mined one, less its proof.
+func TestBatchOfWindow468(t *testing.T) {
+	blocks, mined, input := window(t, "captured-devnet-window-468")
+	fx := effectsOf(t, mined)
+	require.Len(t, fx.Outbound, 2)
+	require.Len(t, fx.Inbound, 1)
+	b, err := devnetBatcher(mined.ProofSystems[0]).Batch(blocks[0].ParentHash(), blocks, fx, settled(mined), false)
+	require.NoError(t, err)
+	require.Empty(t, b.Proofs)
+	b.Proofs = mined.Proofs
+	enc, err := protocol.EncodePostAndVerifyBatch(b)
+	require.NoError(t, err)
+	require.Equal(t, input, enc)
+
+	live, err := devnetBatcher(mined.ProofSystems[0]).Batch(blocks[0].ParentHash(), blocks, fx, settled(mined), true)
+	require.NoError(t, err)
+	require.Equal(t, uint64(protocol.LiveBlockNumber), live.BlockNumber)
+}
+
+// TestBatchMovesEther: an outbound effect takes its call's value out of
+// the rollup, an inbound one brings it in.
+func TestBatchMovesEther(t *testing.T) {
+	blocks, mined, _ := window(t, "captured-devnet-window-468")
+	fx := effectsOf(t, mined)
+	fx.Outbound[0].L2ToL1Calls[0].Value = big.NewInt(3)
+	fx.Inbound[0].L2ToL1Calls[0].Value = big.NewInt(5)
+	b, err := devnetBatcher(mined.ProofSystems[0]).Batch(blocks[0].ParentHash(), blocks, fx, settled(mined), false)
+	require.NoError(t, err)
+	var deltas []int64
+	for _, e := range b.Entries {
+		deltas = append(deltas, e.RollupUpdates[0].EtherDelta.Int64())
+	}
+	require.Equal(t, []int64{0, -3, 0, 5}, deltas)
+}
+
+// TestBatchRefuses: a batch whose effects do not match its terminal block
+// or the blocks it settles is not built.
+func TestBatchRefuses(t *testing.T) {
+	blocks, mined, _ := window(t, "captured-devnet-window-468")
+	bt := devnetBatcher(mined.ProofSystems[0])
+	cursor := blocks[0].ParentHash()
+	fx := effectsOf(t, mined)
+	candidates := settled(mined)
+	for _, c := range []struct {
+		name       string
+		fx         Effects
+		candidates []common.Hash
+		want       string
+	}{
+		{"a settled block missing", fx, candidates[:3], "candidates"},
+		{"another terminal", fx, append(slices.Clone(candidates[:3]), common.Hash{1}), "terminal"},
+		{"an outbound effect missing", Effects{Outbound: fx.Outbound[:1], Inbound: fx.Inbound}, append(slices.Clone(candidates[:2]), candidates[3]), "user transactions"},
+		{"no effects", Effects{}, candidates[3:], "user transactions"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := bt.Batch(cursor, blocks, c.fx, c.candidates, false)
+			require.ErrorContains(t, err, c.want)
+		})
+	}
 }
