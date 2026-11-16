@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -27,6 +28,49 @@ import (
 )
 
 var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
+
+// A clone must keep the source's database and file snapshots even when newer
+// commits and files exist, and remain readable after the source closes.
+func TestCloneStateKeepsSourceSnapshot(t *testing.T) {
+	mdbxDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	agg := state.NewTest(datadir.New(t.TempDir())).StepSize(1).MustOpen(t.Context())
+	defer agg.Close()
+	db, err := New(mdbxDB, agg, nil)
+	require.NoError(t, err)
+	defer db.Close()
+	key := make([]byte, length.Addr+length.Hash)
+	put := func(txNum uint64) {
+		require.NoError(t, db.UpdateTemporal(t.Context(), func(tx kv.TemporalRwTx) error {
+			batch := tx.(*RwTx).NewMemBatch(kvmetrics.NewDomainMetrics())
+			defer batch.Close()
+			require.NoError(t, batch.DomainPut(kv.StorageDomain, string(key), []byte{byte(txNum)}, txNum, nil))
+			return batch.Flush(t.Context(), tx)
+		}))
+	}
+	put(1)
+	source, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer source.Rollback()
+	viewID := source.ViewID()
+	filesEnd := source.Debug().TxNumsInFiles(kv.StorageDomain)
+	put(2)
+	put(3)
+	require.NoError(t, db.BuildFiles(3, unboundedFinalityCtx))
+	require.NoError(t, db.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+		require.Greater(t, tx.Debug().TxNumsInFiles(kv.StorageDomain), filesEnd)
+		return nil
+	}))
+
+	worker, err := source.(*Tx).CloneState(t.Context())
+	require.NoError(t, err)
+	defer worker.Rollback()
+	require.Equal(t, viewID, worker.ViewID())
+	require.Equal(t, filesEnd, worker.Debug().TxNumsInFiles(kv.StorageDomain))
+	source.Rollback()
+	v, _, err := worker.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, []byte{1}, v)
+}
 
 type failingHistoryStartTx struct {
 	kv.RwTx
