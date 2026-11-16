@@ -83,7 +83,7 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 		storageBefore:         make(map[frameStorageSlot]uint256.Int),
 		codeBefore:            make(map[accounts.Address]accounts.CodeHash),
 	}
-	nonces := make(map[accounts.Address]uint64)
+	nonceBefore := make(map[accounts.Address]uint64)
 	for _, entry := range ibs.journal.entries[ctx.journalStart:] {
 		switch entry.kind {
 		case kindBalance, kindSelfdestruct:
@@ -91,8 +91,8 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 				trace.balanceBefore[entry.account] = entry.value
 			}
 		case kindNonce:
-			if _, ok := nonces[entry.account]; !ok {
-				nonces[entry.account] = entry.aux
+			if _, ok := nonceBefore[entry.account]; !ok {
+				nonceBefore[entry.account] = entry.aux
 			}
 		case kindStorage, kindFakeStorage:
 			slot := frameStorageSlot{entry.account, entry.key}
@@ -109,43 +109,43 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 			}
 		}
 	}
-	for address, value := range trace.balanceBefore {
+	for address, before := range trace.balanceBefore {
 		after, err := ibs.GetBalance(address)
 		if err != nil {
 			return nil, err
 		}
-		if value != after {
-			trace.Balances = append(trace.Balances, BalanceChange{address, value, after})
+		if before != after {
+			trace.Balances = append(trace.Balances, BalanceChange{address, before, after})
 			trace.AccountFlags[address] |= accountBalanceChanged
 		}
 	}
-	for address, value := range nonces {
+	for address, before := range nonceBefore {
 		after, err := ibs.GetNonce(address)
 		if err != nil {
 			return nil, err
 		}
-		if value != after {
+		if before != after {
 			trace.AccountFlags[address] |= accountNonceChanged
 		}
 	}
-	for slot, value := range trace.storageBefore {
+	for slot, before := range trace.storageBefore {
 		after, err := ibs.GetState(slot.address, slot.key)
 		if err != nil {
 			return nil, err
 		}
-		if value != after {
-			trace.Slots = append(trace.Slots, StorageChange{slot.address, slot.key, value, after})
+		if before != after {
+			trace.Slots = append(trace.Slots, StorageChange{slot.address, slot.key, before, after})
 			trace.AccountFlags[slot.address] |= accountStorageChanged
 		}
 	}
-	for address, value := range trace.codeBefore {
+	for address, before := range trace.codeBefore {
 		after, err := trace.CodeHash(ibs, address, false)
 		if err != nil {
 			return nil, err
 		}
-		if value != after {
+		if before != after {
 			trace.AccountFlags[address] |= accountCodeChanged
-			if value.IsEmpty() && !after.IsEmpty() {
+			if before.IsEmpty() && !after.IsEmpty() {
 				code, err := ibs.GetCode(address)
 				if err != nil {
 					return nil, err
