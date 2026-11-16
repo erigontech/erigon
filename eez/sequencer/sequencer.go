@@ -92,8 +92,11 @@ func (m Mode) String() string {
 type Composed struct {
 	// Block, when set, is the Sync block.
 	Block *types.Block
-	// Empty, without Block, has the sequencer build an empty Sync block;
-	// with neither, it fills the block from the pool, empty in a late slot.
+	// Txs, when set without Block, are the Sync block's transactions.
+	Txs []types.Transaction
+	// Empty, without Block or Txs, has the sequencer build an empty Sync
+	// block; with none, it fills the block from the pool, empty in a late
+	// slot.
 	Empty bool
 }
 
@@ -126,6 +129,10 @@ type Committer interface {
 	// Insert makes blocks, the first a child of the head, the head, running
 	// hook when set. follower.ErrStaleParent reports a head that has moved.
 	Insert(ctx context.Context, blocks []*types.Block, hook follower.CommitHook) error
+	// Extend builds the block of inputs in on the head from exactly txs and
+	// makes it the head, running hook when set. follower.ErrStaleParent
+	// reports a head that has moved.
+	Extend(ctx context.Context, in deriver.HeaderInputs, txs []types.Transaction, hook follower.CommitHook) (*types.BlockWithReceipts, error)
 	// HeadBefore moves the head back to the parent of block and returns it;
 	// follower.ErrBelowSafe reports a block at or below the safe block,
 	// follower.ErrNotCanonical one another block has replaced.
@@ -439,6 +446,8 @@ func (s *Sequencer) syncBlock(ctx context.Context, parent *types.Header, ts, tar
 	switch {
 	case answer.Block != nil:
 		sync, err = s.insert(ctx, Sync, answer.Block)
+	case len(answer.Txs) > 0:
+		sync, err = s.extend(ctx, Sync, parent, answer.Txs)
 	case answer.Empty || mode == ModeEmpty:
 		sync, err = s.build(ctx, Sync, parent, noTxns{})
 	default:
@@ -503,16 +512,21 @@ func (s *Sequencer) produce(ctx context.Context, kind Kind, parent *types.Header
 
 // build builds the block of kind after parent from txs.
 func (s *Sequencer) build(ctx context.Context, kind Kind, parent *types.Header, txs txnprovider.TxnProvider) (*types.Header, error) {
-	in := deriver.HeaderInputs{
-		Number:     parent.Number.Uint64() + 1,
-		ParentHash: parent.Hash(),
-		Time:       parent.Time + s.l2.BlockInterval,
-		Coinbase:   s.beneficiary,
-		Extra:      []byte{},
-		GasLimit:   s.l2.BlockGasLimit,
-	}
+	in := s.inputs(parent)
 	return s.commit(ctx, kind, in.Number, func(ctx context.Context, hook follower.CommitHook) (*types.Block, error) {
 		built, err := s.committer.Produce(ctx, in, txs, hook)
+		if err != nil {
+			return nil, err
+		}
+		return built.Block, nil
+	})
+}
+
+// extend builds the block of kind after parent from exactly txs.
+func (s *Sequencer) extend(ctx context.Context, kind Kind, parent *types.Header, txs []types.Transaction) (*types.Header, error) {
+	in := s.inputs(parent)
+	return s.commit(ctx, kind, in.Number, func(ctx context.Context, hook follower.CommitHook) (*types.Block, error) {
+		built, err := s.committer.Extend(ctx, in, txs, hook)
 		if err != nil {
 			return nil, err
 		}
@@ -531,6 +545,19 @@ func (s *Sequencer) insert(ctx context.Context, kind Kind, block *types.Block) (
 	return s.commit(ctx, kind, block.NumberU64(), func(ctx context.Context, hook follower.CommitHook) (*types.Block, error) {
 		return block, s.committer.Insert(ctx, []*types.Block{block}, hook)
 	})
+}
+
+// inputs returns the header inputs of the block the sequencer builds on
+// parent.
+func (s *Sequencer) inputs(parent *types.Header) deriver.HeaderInputs {
+	return deriver.HeaderInputs{
+		Number:     parent.Number.Uint64() + 1,
+		ParentHash: parent.Hash(),
+		Time:       parent.Time + s.l2.BlockInterval,
+		Coinbase:   s.beneficiary,
+		Extra:      []byte{},
+		GasLimit:   s.l2.BlockGasLimit,
+	}
 }
 
 // commit runs put, which makes block number the head and runs hook, which

@@ -212,6 +212,7 @@ type composed struct {
 type slotComposer struct {
 	calls     []composed
 	answer    func(parent *types.Header) *types.Block
+	txs       []types.Transaction
 	empty     bool
 	committed []common.Hash
 	recover   func(ctx context.Context)
@@ -220,6 +221,9 @@ type slotComposer struct {
 
 func (c *slotComposer) ComposeSyncSlot(_ context.Context, parent *types.Header, ts, target uint64, mode sequencer.Mode) sequencer.Composed {
 	c.calls = append(c.calls, composed{parent: parent.Hash(), ts: ts, target: target, mode: mode})
+	if c.txs != nil {
+		return sequencer.Composed{Txs: c.txs}
+	}
 	if c.answer == nil {
 		return sequencer.Composed{Empty: c.empty}
 	}
@@ -809,6 +813,30 @@ func TestRestartDropsTheTail(t *testing.T) {
 	}
 	require.Eventually(t, func() bool { return h.head(t).Number.Uint64() == 12 }, 10*time.Second, 5*time.Millisecond)
 	require.Equal(t, uint64(6), f.Status().Safe)
+}
+
+// TestComposerTxs: a composer's transactions are the Sync block's, in
+// order, whatever the pool holds, and the block's witness is recorded.
+func TestComposerTxs(t *testing.T) {
+	h := newHarness(t)
+	w := &witnesses{follower: h.follower, pinned: map[common.Hash]common.Hash{}}
+	txs := h.pool.decode(t, h.c.Transfer(common.HexToAddress("0xb0b"), 1), h.c.Transfer(common.HexToAddress("0xb0b"), 2))
+	h.pool.hold(5)
+	h.pool.add(t, h.c.Transfer(common.HexToAddress("0xca1"), 3))
+	c := &slotComposer{txs: txs}
+	s := h.sequencerOf(t, sequencer.Config{Composer: c, Witnesses: w})
+	g := h.genesis.Time
+	s.SetClock(func() time.Time { return onTime(g + 12) })
+	require.NoError(t, s.Handle(t.Context(), sequencer.SyncSlot{Height: 6, Time: g + 12, L1Head: 1}))
+	sync := h.block(t, 6)
+	require.Equal(t, sync.Hash(), h.head(t).Hash())
+	var got []common.Hash
+	for _, tx := range sync.Transactions() {
+		got = append(got, tx.Hash())
+	}
+	require.Equal(t, []common.Hash{txs[0].Hash(), txs[1].Hash()}, got)
+	require.Equal(t, []common.Hash{sync.Hash()}, c.committed)
+	require.Equal(t, h.block(t, 5).Hash(), w.pinned[sync.Hash()])
 }
 
 func (h *harness) head(t *testing.T) *types.Header {
