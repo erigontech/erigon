@@ -17,11 +17,13 @@
 package services
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 // Every validator votes once per epoch, so a node that receives all subnets sees about a thirty-second of the
@@ -65,6 +67,16 @@ func TestValidatorVoteEpochsCoverThePropagationRange(t *testing.T) {
 	minimal := clparams.MainnetBeaconConfig
 	minimal.SlotsPerEpoch = 8
 	require.Equal(t, uint64(5), validatorVoteEpochs(&minimal, &clparams.NetworkConfig{AttestationPropagationSlotRange: 32}))
+	require.Equal(t, uint64(3), validatorVoteEpochs(&minimal, &clparams.NetworkConfig{AttestationPropagationSlotRange: 9}))
+}
+
+func TestAttestationServiceSizesTheVoteWindowFromItsConfigs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	netCfg, beaconCfg := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
+	service := NewAttestationService(ctx, nil, nil, nil, nil, beaconCfg, netCfg, nil, nil).(*attestationService)
+
+	require.Equal(t, uint64(2), service.validatorVotes.epochs)
 }
 
 func TestValidatorVotesKeepTheOldestEpochOfTheWindow(t *testing.T) {
@@ -74,6 +86,7 @@ func TestValidatorVotesKeepTheOldestEpochOfTheWindow(t *testing.T) {
 	require.True(t, votes.claim(1, 10))
 	require.True(t, votes.seen(7, 6))
 	require.False(t, votes.claim(7, 6))
+	require.True(t, votes.claim(8, 6))
 
 	require.True(t, votes.claim(1, 11))
 	require.False(t, votes.seen(7, 6))

@@ -31,8 +31,7 @@ type validatorVotes struct {
 	epochs   uint64
 }
 
-// validatorVoteEpochs is the number of target epochs the propagation range can span, plus one for an epoch that
-// starts before the head reaches it.
+// validatorVoteEpochs is the most target epochs that the slots of the propagation range can span.
 func validatorVoteEpochs(beaconCfg *clparams.BeaconChainConfig, netCfg *clparams.NetworkConfig) uint64 {
 	return (netCfg.AttestationPropagationSlotRange+beaconCfg.SlotsPerEpoch-1)/beaconCfg.SlotsPerEpoch + 1
 }
