@@ -486,6 +486,7 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 	if cfg.Sequencer != nil {
 		// Run hands heads only once started, after seq is set.
 		fc.OnHead = func(h l1.Header) { seq.Head(h) }
+		fc.DropUnsettledTail = cfg.Sequencer.Composer != nil
 		if !announces(chainConfig) {
 			if signer, err = newHeadSigner(cfg.Sequencer, chainConfig, chain, publisher, logger); err != nil {
 				return nil, err

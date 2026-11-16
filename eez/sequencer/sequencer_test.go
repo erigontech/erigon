@@ -744,6 +744,69 @@ func TestRestart(t *testing.T) {
 	require.Equal(t, suffix.Hash(), h.block(t, 10).ParentHash(), "production resumes on the kept suffix")
 }
 
+// TestRestartDropsTheTail: a node that composes drops its unsettled suffix
+// at boot, before the schedule hears of L1, and production resumes on the
+// safe block.
+func TestRestartDropsTheTail(t *testing.T) {
+	h := newHarness(t)
+	s := h.sequencer(t, 0)
+	ctx := t.Context()
+	g := h.genesis.Time
+
+	require.NoError(t, s.Handle(ctx, sequencer.SyncSlot{Height: 6, Time: g + 12, L1Head: 1}))
+	h.pool.add(t, h.c.Transfer(common.HexToAddress("0xb0b"), 1))
+	for range 3 {
+		require.NoError(t, s.Handle(ctx, sequencer.LiveTick{SyncHeight: 12}))
+	}
+	require.Len(t, h.block(t, 7).Transactions(), 1)
+	require.Equal(t, uint64(9), h.head(t).Number.Uint64())
+
+	h.stop()
+	h.post(t, 1, 6)
+	l1Head, err := h.c.L1.Head(ctx)
+	require.NoError(t, err)
+	require.NoError(t, h.c.L1.Append(&recording.Block{Header: l1.Header{Number: l1Head.Number + 1, Hash: common.Hash{0xa1}, ParentHash: l1Head.Hash, Time: g + 12}}))
+
+	var svc *sequencer.Service
+	var f *follower.Follower
+	type seen struct {
+		number uint64
+		err    error
+	}
+	heads := make(chan seen, 1)
+	f = h.followerOf(t, func(cfg *follower.Config) {
+		cfg.DropUnsettledTail = true
+		cfg.OnHead = func(head l1.Header) {
+			var s seen
+			l2, err := f.Head(context.Background())
+			if s.err = err; err == nil {
+				s.number = l2.Number.Uint64()
+			}
+			select {
+			case heads <- s:
+			default:
+			}
+			svc.Head(head)
+		}
+	})
+	restarted, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet()}, f, h.pool, log.New())
+	require.NoError(t, err)
+	svc = sequencer.NewService(restarted, sequencer.NewSchedule(devnet(), g), func(err error) { t.Errorf("sequencer halted: %v", err) }, log.New())
+	require.NoError(t, svc.Start())
+	t.Cleanup(func() { _ = svc.Stop() })
+	h.start(t, f)
+
+	select {
+	case s := <-heads:
+		require.NoError(t, s.err)
+		require.Equal(t, uint64(6), s.number, "the schedule heard of L1 before the tail was dropped")
+	case <-time.After(10 * time.Second):
+		t.Fatal("no L1 head after boot")
+	}
+	require.Eventually(t, func() bool { return h.head(t).Number.Uint64() == 12 }, 10*time.Second, 5*time.Millisecond)
+	require.Equal(t, uint64(6), f.Status().Safe)
+}
+
 func (h *harness) head(t *testing.T) *types.Header {
 	t.Helper()
 	head, err := h.follower.Head(t.Context())
