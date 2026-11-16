@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"math/big"
 	"net"
 	"net/http/httptest"
 	"net/url"
@@ -28,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -233,4 +235,69 @@ func TestRPCURLError(t *testing.T) {
 			}
 		})
 	}
+}
+
+// posting serves what a poster reads from and sends to L1.
+type posting struct {
+	baseFee *hexutil.Big
+	sent    []hexutil.Bytes
+}
+
+var poster = common.HexToAddress("0x5")
+
+func (p *posting) GetTransactionCount(_ context.Context, addr common.Address, block string) (hexutil.Uint64, error) {
+	if addr != poster || block != "pending" {
+		return 0, errors.New("want the poster's pending nonce")
+	}
+	return 7, nil
+}
+
+func (p *posting) GetBlockByNumber(_ context.Context, block string, full bool) (map[string]any, error) {
+	if block != "latest" || full {
+		return nil, errors.New("want the latest header")
+	}
+	h := map[string]any{"number": "0x10", "hash": common.Hash{1}, "parentHash": common.Hash{2}, "timestamp": "0x20"}
+	if p.baseFee != nil {
+		h["baseFeePerGas"] = p.baseFee
+	}
+	return h, nil
+}
+
+func (p *posting) GetBalance(_ context.Context, addr common.Address, block string) (*hexutil.Big, error) {
+	if addr != poster || block != "latest" {
+		return nil, errors.New("want the poster's latest balance")
+	}
+	return (*hexutil.Big)(new(big.Int).Lsh(big.NewInt(1), 70)), nil
+}
+
+func (p *posting) SendRawTransaction(_ context.Context, raw hexutil.Bytes) (common.Hash, error) {
+	if len(raw) == 0 {
+		return common.Hash{}, errors.New("nonce too low")
+	}
+	p.sent = append(p.sent, raw)
+	return common.Hash{3}, nil
+}
+
+func TestRPCPosting(t *testing.T) {
+	p := &posting{baseFee: (*hexutil.Big)(big.NewInt(1_000_000_007))}
+	r := serveRPC(t, p)
+	ctx := t.Context()
+	nonce, err := r.PendingNonce(ctx, poster)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), nonce)
+	fee, err := r.BaseFee(ctx)
+	require.NoError(t, err)
+	require.Equal(t, uint256.NewInt(1_000_000_007), fee)
+	balance, err := r.Balance(ctx, poster)
+	require.NoError(t, err)
+	require.Equal(t, new(uint256.Int).Lsh(uint256.NewInt(1), 70), balance)
+	require.NoError(t, r.SendRawTransaction(ctx, []byte{0x02, 0xc0}))
+	require.Equal(t, []hexutil.Bytes{{0x02, 0xc0}}, p.sent)
+	err = r.SendRawTransaction(ctx, nil)
+	require.ErrorContains(t, err, "nonce too low")
+
+	p.baseFee = nil
+	fee, err = r.BaseFee(ctx)
+	require.NoError(t, err)
+	require.True(t, fee.IsZero())
 }

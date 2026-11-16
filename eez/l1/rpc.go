@@ -26,6 +26,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -184,6 +186,56 @@ func (r *RPC) CallAt(ctx context.Context, call Call, blockHash common.Hash) ([]b
 		return nil, mapError(err, what)
 	}
 	return out, nil
+}
+
+// PendingNonce returns the next nonce of addr, counting its transactions in
+// the node's pool.
+func (r *RPC) PendingNonce(ctx context.Context, addr common.Address) (uint64, error) {
+	var n hexutil.Uint64
+	if err := r.client.CallContext(ctx, &n, "eth_getTransactionCount", addr, "pending"); err != nil {
+		return 0, mapError(err, fmt.Sprintf("pending nonce of %x", addr))
+	}
+	return uint64(n), nil
+}
+
+// BaseFee returns the base fee of the latest block, zero before London.
+func (r *RPC) BaseFee(ctx context.Context) (*uint256.Int, error) {
+	var h *struct {
+		BaseFee *hexutil.Big `json:"baseFeePerGas"`
+	}
+	if err := r.client.CallContext(ctx, &h, "eth_getBlockByNumber", "latest", false); err != nil {
+		return nil, mapError(err, "latest block")
+	}
+	if h == nil {
+		return nil, fmt.Errorf("%w: latest block", ErrNotFound)
+	}
+	fee := new(uint256.Int)
+	if h.BaseFee != nil && fee.SetFromBig(h.BaseFee.ToInt()) {
+		return nil, fmt.Errorf("%w: base fee %s", ErrInconsistent, h.BaseFee)
+	}
+	return fee, nil
+}
+
+// Balance returns the balance of addr at the latest block.
+func (r *RPC) Balance(ctx context.Context, addr common.Address) (*uint256.Int, error) {
+	var b hexutil.Big
+	if err := r.client.CallContext(ctx, &b, "eth_getBalance", addr, "latest"); err != nil {
+		return nil, mapError(err, fmt.Sprintf("balance of %x", addr))
+	}
+	balance := new(uint256.Int)
+	if balance.SetFromBig(b.ToInt()) {
+		return nil, fmt.Errorf("%w: balance %s", ErrInconsistent, &b)
+	}
+	return balance, nil
+}
+
+// SendRawTransaction hands raw, a signed transaction, to the node's pool.
+func (r *RPC) SendRawTransaction(ctx context.Context, raw []byte) error {
+	var hash common.Hash
+	if err := r.client.CallContext(ctx, &hash, "eth_sendRawTransaction", hexutil.Bytes(raw)); err != nil {
+		return mapError(err, "send transaction")
+	}
+	return nil
 }
 
 // revertCode is the JSON-RPC error code of an execution revert (EIP-1474).
