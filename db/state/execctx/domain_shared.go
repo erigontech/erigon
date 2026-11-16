@@ -1468,12 +1468,15 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			v = bytes.Clone(v)
 		case fillsCode:
 			v = fillView.FillCode(k, v, opts.codeHash, readTxNum)
+		case stubNoFillAbsent && len(v) == 0 && domain == kv.AccountsDomain:
 		default:
 			fillView.Fill(domain, k, v, readTxNum)
 		}
 	}
 	return v, step, nil
 }
+
+var stubNoFillAbsent = dbg.EnvBool("STUB_NOFILL_ABSENT", false)
 
 // GetCodeSize returns the length of the contract code at addr, probing a
 // size-only cache before falling through to the
