@@ -65,9 +65,8 @@ func (b *backfillColumnBlock) BlockSignature() common.Bytes96 {
 	return b.signature
 }
 
-// BackfillCustodyColumns queues the custody columns of the blocks imported between fromSlot and
-// toSlot without them, as forward sync imports blocks. It returns at once; a request that comes
-// while another one waits is merged into it.
+// BackfillCustodyColumns queues the custody columns that the stored blocks between fromSlot and
+// toSlot miss. It returns at once; a request that comes while another one waits is merged into it.
 func (d *peerdas) BackfillCustodyColumns(fromSlot, toSlot uint64) {
 	if toSlot < fromSlot {
 		return
