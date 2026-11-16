@@ -196,10 +196,6 @@ func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 	return version.V2_2
 }
 
-const DefaultParallelCommitment = true
-
-var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", DefaultParallelCommitment)
-
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
 		Name: kv.AccountsDomain, ValuesTable: kv.TblAccountVals,

@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
@@ -1286,10 +1285,6 @@ func TestBuildDoesNotWaitBetweenFullBatchesOfNonceTooHighTxns(t *testing.T) {
 // The 256 recipients must exceed commitment.minForkGrain (currently 128)
 // to exercise parallel commitment worker reads.
 func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
-	original := statecfg.ExperimentalParallelCommitment
-	statecfg.ExperimentalParallelCommitment = true
-	t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = original })
-
 	t.Run("without_concurrent_commit", func(t *testing.T) {
 		testAssembleBlockWithSiblingCommit(t, false)
 	})

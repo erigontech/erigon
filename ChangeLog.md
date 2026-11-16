@@ -23,6 +23,7 @@
 
 ### Changed
 
+- db/state: commitment always runs on the parallel trie. `--experimental.parallel-commitment` and the `COMMITMENT_PARALLEL` environment variable no longer select the sequential trie: `=false`, documented as the way back to sequential commitment, is now ignored with a deprecation warning at startup (#26336) — by @AskAlexSharov
 - rpc: `eth_subscribe("transactionReceipts")` now sends the first block after the node or `rpcdaemon` starts, or after `rpcdaemon` reconnects to the node, as one notification with all its receipts, as every later block. Before, that block went out as one notification per receipt (#26362) — by @lupin012
 - rpc: logs in `erigon_getBlockReceiptsByBlockHash`, `ots_searchTransactionsBefore`, `ots_searchTransactionsAfter` and `graphql_getBlockDetails` receipts now carry `blockTimestamp`, as in `eth_getTransactionReceipt`. Frame receipt logs in `ots_getBlockTransactions` carry it too. Receipt logs are no longer copied to remove the field (#26099) — by @lupin012
 - execution: the serial executor is removed, and the `EXEC3_PARALLEL` environment variable is no longer read. `EXEC3_PARALLEL=false`, documented through v3.8 as the way back to single-threaded execution, is now ignored and the node runs with the default worker count; use `--exec.serial` instead. `--exec.serial` does not bring back `OnTxEnd` for a `--vmtrace` tracer or the `TRACE_BLOCKS` commitment trace: both are gone with the serial executor (#26239, #26240) — by @AskAlexSharov
