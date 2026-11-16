@@ -236,6 +236,31 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 	}
 }
 
+func TestSizeEstimateCountsClonedPrev(t *testing.T) {
+	t.Parallel()
+	prev := bytes.Repeat([]byte{0xab}, 24<<10)
+	for _, domain := range []kv.Domain{kv.StorageDomain, kv.AccountsDomain} {
+		t.Run(domain.String(), func(t *testing.T) {
+			sd := &TemporalMemBatch{
+				stepSize: 16,
+				storage:  btree2.NewMap[string, []dataWithTxNum](128),
+				metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+			}
+
+			sd.putLatest(domain, "k", nil, 1, prev)
+			firstTouch := sd.SizeEstimate()
+			require.Equal(t, uint64(len("k")+len(prev)), firstTouch, "first-touch delete")
+
+			sd.putLatest(domain, "k", []byte("v"), 2, prev)
+			differingPrev := sd.SizeEstimate()
+			require.Equal(t, uint64(len("v")+len(prev)), differingPrev-firstTouch, "prev differs from chain head")
+
+			sd.putLatest(domain, "k", []byte("w"), 3, []byte("v"))
+			require.Equal(t, uint64(len("w")), sd.SizeEstimate()-differingPrev, "prev reuses chain head")
+		})
+	}
+}
+
 func TestMergeRejectedBatchKeepsReceiverUnchanged(t *testing.T) {
 	t.Parallel()
 	newBatch := func() *TemporalMemBatch {

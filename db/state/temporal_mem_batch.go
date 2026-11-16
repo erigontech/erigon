@@ -250,6 +250,7 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 					valWithStep.prev = old[len(old)-1].data
 				} else {
 					valWithStep.prev = bytes.Clone(valWithStep.prev)
+					putValueSize += len(valWithStep.prev)
 				}
 				sd.storage.Set(key, append(old, valWithStep))
 				putValueSize += len(val)
@@ -258,7 +259,7 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 			valWithStep.prev = bytes.Clone(valWithStep.prev)
 			sd.storage.Set(key, []dataWithTxNum{valWithStep})
 			putKeySize += len(key)
-			putValueSize += len(val)
+			putValueSize += len(val) + len(valWithStep.prev)
 		}
 
 		return sameTxNumUpdate, putKeySize, putValueSize
@@ -280,6 +281,7 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 				valWithStep.prev = old[len(old)-1].data
 			} else {
 				valWithStep.prev = bytes.Clone(valWithStep.prev)
+				putValueSize += len(valWithStep.prev)
 			}
 			sh.m[key] = append(old, valWithStep)
 			putValueSize += len(val)
@@ -288,7 +290,7 @@ func (sd *TemporalMemBatch) putLatestLocked(domain kv.Domain, key string, valWit
 		valWithStep.prev = bytes.Clone(valWithStep.prev)
 		sh.m[key] = []dataWithTxNum{valWithStep}
 		putKeySize += len(key)
-		putValueSize += len(val)
+		putValueSize += len(val) + len(valWithStep.prev)
 	}
 
 	return sameTxNumUpdate, putKeySize, putValueSize
