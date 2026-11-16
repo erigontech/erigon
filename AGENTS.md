@@ -118,7 +118,7 @@ A comment may be warranted for: a non-obvious invariant the types don't enforce;
 - Concise, but err on the side of clarity: cut comments a sentence or two - if it doesn't harm clarity
 - High-level, not scenario-specific: explain the invariant or gotcha in general terms
 - Free of forensic detail: Strip dates, devnet/branch names, PR/issue/review references, incident anecdotes, callsite lists. That history belongs in the commit message and PR description
-- Stated once: "The Why" lives at its canonical place — the field, type or function it belongs to; other sites refere to source of truth
+- Stated once: "The Why" lives at its canonical place — the field, type or function it belongs to; other sites refer to the source of truth
 - Not a restatement of the code
 
 ## Code Reviews
