@@ -49,6 +49,7 @@ Run affected long tests without `-short`. Fix findings from the selected checks.
 - Data flow: `db -> snapshots`
 - `snapshots` are immutable
 - `Unwind` beyond data in snapshots not allowed
+- Before changing code under `db/`, read [db/agents.md](db/agents.md): it defines dirty vs visible files
 
 ## Key Directories
 
