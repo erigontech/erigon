@@ -182,6 +182,21 @@ func Execute(chainConfig *chain.Config, engine rules.Engine, block *types.Block,
 	return res, nil
 }
 
+// PreState returns what block executes on, taken from w: a reader of its
+// parent's state, the header chain the engine reads, and the hashes BLOCKHASH
+// serves.
+func PreState(chainConfig *chain.Config, block *types.Block, w *Witness) (state.StateReader, rules.ChainHeaderReader, func(uint64) (common.Hash, error), error) {
+	headers, err := newHeaderReader(chainConfig, block, w.Headers)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	ws, err := newWitnessState(w.State, w.Codes, headers.parent.Root)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return ws, headers, headers.blockHash, nil
+}
+
 // headerReader serves the witness headers, the BLOCKHASH sources of a block.
 type headerReader struct {
 	rules.ChainHeaderReader
