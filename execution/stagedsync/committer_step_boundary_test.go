@@ -324,7 +324,7 @@ func TestHandleMessage_BaseReadErrorFailsTheBlock(t *testing.T) {
 
 	addr := accounts.InternAddress([20]byte{0xe1})
 	av := addr.Value()
-	putCorruptAccount(t, doms, tx, av[:])
+	putCorruptAccount(t, doms, tx, av[:], 0)
 	ws := &state.WriteSet{}
 	ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: *uint256.NewInt(7)})
 	cc.handleMessage(ctx, recordTx(newRawViewVM(2), 1, common.Hash{0x01}, 2, &chain.Rules{}, ws))
@@ -352,7 +352,7 @@ func TestComputeAhead_BaseReadErrorFailsTheBlock(t *testing.T) {
 	cc.firstBlockNum = 2
 
 	addr := [20]byte{0xe2}
-	putCorruptAccount(t, doms, tx, addr[:])
+	putCorruptAccount(t, doms, tx, addr[:], 0)
 	cc.handleBlockRequest(ctx, &blockRequest{
 		blockNum:   2,
 		firstTxNum: 11,
@@ -390,11 +390,11 @@ func requireBranchesConsistentWithAccounts(t *testing.T, doms *execctx.SharedDom
 	require.Positive(t, checked, "expected at least one commitment branch to verify at the step edge")
 }
 
-func putCorruptAccount(t *testing.T, doms *execctx.SharedDomains, tx kv.TemporalRwTx, addr []byte) {
+func putCorruptAccount(t *testing.T, doms *execctx.SharedDomains, tx kv.TemporalRwTx, addr []byte, txNum uint64) {
 	t.Helper()
 	defer doms.SetDisableInlineTouchKey(false)
 	doms.SetDisableInlineTouchKey(true)
-	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr, []byte{0, 0, 0}, 0, nil))
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr, []byte{0, 0, 0}, txNum, nil))
 }
 
 func stateTxBlockNums(t *testing.T, blob []byte) (txNum, blockNum uint64) {
@@ -1200,7 +1200,7 @@ func TestComputeAhead_WindowFailureAtEdgePublishedOnce(t *testing.T) {
 			})
 			require.Empty(t, out)
 			av := addr.Value()
-			putCorruptAccount(t, doms, tx, av[:])
+			putCorruptAccount(t, doms, tx, av[:], 15)
 			doms.SavePastChangesetAccumulator(blockHash, 1, cs)
 			pending := &commitment.PendingCommitmentUpdate{BlockNum: pendingBlock}
 			doms.GetCommitmentContext().SetPendingUpdate(pending)
