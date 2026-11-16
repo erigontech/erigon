@@ -236,51 +236,55 @@ func TestSyncColumnDataLaterSchedulesTheFirstAttempt(t *testing.T) {
 }
 
 func TestSyncColumnDataWorkerDropsRootsThatLeftTheServeRange(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	cfg.FuluForkEpoch = 0
-	cfg.InitializeForkSchedule()
-	block, root := fuluColumnBlock(t, &cfg, 1)
-	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
-	currentSlot := (cfg.MinEpochsForDataColumnSidecarsRequests + 1) * cfg.SlotsPerEpoch
-	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
-	// A root still in range would wait for its grace and stay queued.
-	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(time.Hour)).AnyTimes()
-	d := &peerdas{beaconConfig: &cfg, ethClock: clock, caplinConfig: &clparams.CaplinConfig{}}
-	require.NoError(t, d.SyncColumnDataLater(block))
+	synctest.Test(t, func(t *testing.T) {
+		cfg := clparams.MainnetBeaconConfig
+		cfg.FuluForkEpoch = 0
+		cfg.InitializeForkSchedule()
+		block, root := fuluColumnBlock(t, &cfg, 1)
+		clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+		currentSlot := (cfg.MinEpochsForDataColumnSidecarsRequests + 1) * cfg.SlotsPerEpoch
+		clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+		// A root still in range would wait for its grace and stay queued.
+		clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(time.Hour)).AnyTimes()
+		d := &peerdas{beaconConfig: &cfg, ethClock: clock, caplinConfig: &clparams.CaplinConfig{}}
+		require.NoError(t, d.SyncColumnDataLater(block))
 
-	go d.syncColumnDataWorker(t.Context())
-	require.Eventually(t, func() bool {
-		return !queued(&d.blocksToCheckSync, root)
-	}, 5*time.Second, 10*time.Millisecond)
+		go d.syncColumnDataWorker(t.Context())
+		require.Eventually(t, func() bool {
+			return !queued(&d.blocksToCheckSync, root)
+		}, 5*time.Second, 10*time.Millisecond)
+	})
 }
 
 func TestSyncColumnDataWorkerForgetsAnAvailableRoot(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	cfg.FuluForkEpoch = 0
-	cfg.SecondsPerSlot = 1 // an archive node gives gossip one slot from enqueue
-	cfg.InitializeForkSchedule()
-	block, root := fuluColumnBlock(t, &cfg, 1)
-	ctrl := gomock.NewController(t)
-	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetCurrentSlot().Return(uint64(2)).AnyTimes()
-	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(-time.Hour)).AnyTimes()
-	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
-	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), uint64(1), root).Return(nil, nil).AnyTimes()
-	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), root).Return(uint32(1), nil).AnyTimes()
-	d := &peerdas{
-		beaconConfig:  &cfg,
-		ethClock:      clock,
-		caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
-		columnStorage: columnStorage,
-		blobStorage:   blobStorage,
-	}
-	require.NoError(t, d.SyncColumnDataLater(block))
+	synctest.Test(t, func(t *testing.T) {
+		cfg := clparams.MainnetBeaconConfig
+		cfg.FuluForkEpoch = 0
+		cfg.SecondsPerSlot = 1 // an archive node gives gossip one slot from enqueue
+		cfg.InitializeForkSchedule()
+		block, root := fuluColumnBlock(t, &cfg, 1)
+		ctrl := gomock.NewController(t)
+		clock := eth_clock.NewMockEthereumClock(ctrl)
+		clock.EXPECT().GetCurrentSlot().Return(uint64(2)).AnyTimes()
+		clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(-time.Hour)).AnyTimes()
+		columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
+		columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), uint64(1), root).Return(nil, nil).AnyTimes()
+		blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+		blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), root).Return(uint32(1), nil).AnyTimes()
+		d := &peerdas{
+			beaconConfig:  &cfg,
+			ethClock:      clock,
+			caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
+			columnStorage: columnStorage,
+			blobStorage:   blobStorage,
+		}
+		require.NoError(t, d.SyncColumnDataLater(block))
 
-	go d.syncColumnDataWorker(t.Context())
-	require.Eventually(t, func() bool {
-		return !queued(&d.blocksToCheckSync, root)
-	}, 5*time.Second, 10*time.Millisecond)
+		go d.syncColumnDataWorker(t.Context())
+		require.Eventually(t, func() bool {
+			return !queued(&d.blocksToCheckSync, root)
+		}, 5*time.Second, 10*time.Millisecond)
+	})
 }
 
 // peerCountSentinel reports active peers that serve no columns: before Fulu the RPC's column-peer
@@ -298,44 +302,46 @@ func (s *peerCountSentinel) GetPeers(context.Context, *sentinelproto.EmptyMessag
 
 // Without peers no download can run, so the worker does not scan the stored columns either.
 func TestSyncColumnDataWorkerSkipsTheAvailabilityScanWithoutPeers(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	cfg.FuluForkEpoch = 0
-	cfg.SecondsPerSlot = 1
-	cfg.InitializeForkSchedule()
-	block, _ := fuluColumnBlock(t, &cfg, 1)
-	ctrl := gomock.NewController(t)
-	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetCurrentSlot().Return(uint64(2)).AnyTimes()
-	// The RPC's column-peer refresher stays idle before Fulu.
-	clock.EXPECT().GetCurrentEpoch().Return(uint64(0)).AnyTimes()
-	clock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.DenebVersion).AnyTimes()
-	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(-time.Hour)).AnyTimes()
-	var scans atomic.Int32
-	sentinel := &peerCountSentinel{}
-	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
-	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(context.Context, uint64, common.Hash) ([]uint64, error) {
-			scans.Add(1)
-			return nil, nil
-		}).AnyTimes()
-	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
-	d := &peerdas{
-		beaconConfig:  &cfg,
-		ethClock:      clock,
-		caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
-		columnStorage: columnStorage,
-		blobStorage:   blobStorage,
-		rpc:           rpc.NewBeaconRpcP2P(t.Context(), sentinel, &cfg, clock),
-	}
-	require.NoError(t, d.SyncColumnDataLater(block))
+	synctest.Test(t, func(t *testing.T) {
+		cfg := clparams.MainnetBeaconConfig
+		cfg.FuluForkEpoch = 0
+		cfg.SecondsPerSlot = 1
+		cfg.InitializeForkSchedule()
+		block, _ := fuluColumnBlock(t, &cfg, 1)
+		ctrl := gomock.NewController(t)
+		clock := eth_clock.NewMockEthereumClock(ctrl)
+		clock.EXPECT().GetCurrentSlot().Return(uint64(2)).AnyTimes()
+		// The RPC's column-peer refresher stays idle before Fulu.
+		clock.EXPECT().GetCurrentEpoch().Return(uint64(0)).AnyTimes()
+		clock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.DenebVersion).AnyTimes()
+		clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(-time.Hour)).AnyTimes()
+		var scans atomic.Int32
+		sentinel := &peerCountSentinel{}
+		columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
+		columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+			func(context.Context, uint64, common.Hash) ([]uint64, error) {
+				scans.Add(1)
+				return nil, nil
+			}).AnyTimes()
+		blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+		blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+		d := &peerdas{
+			beaconConfig:  &cfg,
+			ethClock:      clock,
+			caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
+			columnStorage: columnStorage,
+			blobStorage:   blobStorage,
+			rpc:           rpc.NewBeaconRpcP2P(t.Context(), sentinel, &cfg, clock),
+		}
+		require.NoError(t, d.SyncColumnDataLater(block))
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	go d.syncColumnDataWorker(ctx)
-	// The worker asks for peers only once the root is due; let it find none a few times.
-	require.Eventually(t, func() bool { return sentinel.calls.Load() >= 3 }, 10*time.Second, 10*time.Millisecond)
-	require.Zero(t, scans.Load())
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go d.syncColumnDataWorker(ctx)
+		// The worker asks for peers only once the root is due; let it find none a few times.
+		require.Eventually(t, func() bool { return sentinel.calls.Load() >= 3 }, 10*time.Second, 10*time.Millisecond)
+		require.Zero(t, scans.Load())
+	})
 }
 
 // unservedRootWorker queues a Fulu root at slot 1 that no peer serves, on an archive node whose
@@ -404,46 +410,48 @@ func TestSyncColumnDataWorkerKeepsACanonicalRootAtTheBackoffCap(t *testing.T) {
 // With five-second slots the worker picks a due root up within its tick, well before a one-second
 // tick would.
 func TestSyncColumnDataWorkerPicksADueRootUpWithinTheTick(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	cfg.FuluForkEpoch = 0
-	cfg.SecondsPerSlot = 5
-	cfg.InitializeForkSchedule()
-	block, root := fuluColumnBlock(t, &cfg, 1)
-	ctrl := gomock.NewController(t)
-	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetCurrentSlot().Return(uint64(2)).AnyTimes()
-	scanned := make(chan struct{}, 1)
-	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
-	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), uint64(1), root).DoAndReturn(
-		func(context.Context, uint64, common.Hash) ([]uint64, error) {
-			select {
-			case scanned <- struct{}{}:
-			default:
-			}
-			// Every column is stored, so no download round starts.
-			columns := make([]uint64, cfg.NumberOfColumns)
-			for i := range columns {
-				columns[i] = uint64(i)
-			}
-			return columns, nil
-		}).AnyTimes()
-	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), root).Return(uint32(1), nil).AnyTimes()
-	d := &peerdas{
-		beaconConfig:  &cfg,
-		ethClock:      clock,
-		caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
-		columnStorage: columnStorage,
-		blobStorage:   blobStorage,
-	}
-	d.blocksToCheckSync.add(root, block, time.Now())
+	synctest.Test(t, func(t *testing.T) {
+		cfg := clparams.MainnetBeaconConfig
+		cfg.FuluForkEpoch = 0
+		cfg.SecondsPerSlot = 5
+		cfg.InitializeForkSchedule()
+		block, root := fuluColumnBlock(t, &cfg, 1)
+		ctrl := gomock.NewController(t)
+		clock := eth_clock.NewMockEthereumClock(ctrl)
+		clock.EXPECT().GetCurrentSlot().Return(uint64(2)).AnyTimes()
+		scanned := make(chan struct{}, 1)
+		columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
+		columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), uint64(1), root).DoAndReturn(
+			func(context.Context, uint64, common.Hash) ([]uint64, error) {
+				select {
+				case scanned <- struct{}{}:
+				default:
+				}
+				// Every column is stored, so no download round starts.
+				columns := make([]uint64, cfg.NumberOfColumns)
+				for i := range columns {
+					columns[i] = uint64(i)
+				}
+				return columns, nil
+			}).AnyTimes()
+		blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+		blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), root).Return(uint32(1), nil).AnyTimes()
+		d := &peerdas{
+			beaconConfig:  &cfg,
+			ethClock:      clock,
+			caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
+			columnStorage: columnStorage,
+			blobStorage:   blobStorage,
+		}
+		d.blocksToCheckSync.add(root, block, time.Now())
 
-	start := time.Now()
-	go d.syncColumnDataWorker(t.Context())
-	select {
-	case <-scanned:
-		require.Less(t, time.Since(start), 600*time.Millisecond)
-	case <-time.After(5 * time.Second):
-		t.Fatal("the due root was not picked up")
-	}
+		start := time.Now()
+		go d.syncColumnDataWorker(t.Context())
+		select {
+		case <-scanned:
+			require.Less(t, time.Since(start), 600*time.Millisecond)
+		case <-time.After(5 * time.Second):
+			t.Fatal("the due root was not picked up")
+		}
+	})
 }

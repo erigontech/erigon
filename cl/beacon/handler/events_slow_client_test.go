@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -159,12 +160,14 @@ func TestEventStreamOverflowClosesStalledStream(t *testing.T) {
 }
 
 func TestEventStreamOverflowDoesNotDrainQueueToSlowClient(t *testing.T) {
-	w := &slowStreamWriter{ResponseRecorder: httptest.NewRecorder(), delay: 10 * time.Millisecond}
-	a, handlerDone := startEventStream(t, w)
+	synctest.Test(t, func(t *testing.T) {
+		w := &slowStreamWriter{ResponseRecorder: httptest.NewRecorder(), delay: 10 * time.Millisecond}
+		a, handlerDone := startEventStream(t, w)
 
-	sendBlocks(t, a, 2*eventStreamWriteQueueSize, "a slow event stream client blocked the event emitter")
-	waitDone(t, handlerDone, "overflowed event stream kept draining its queue to a slow client")
-	require.Less(t, w.writes, eventStreamWriteQueueSize/2)
+		sendBlocks(t, a, 2*eventStreamWriteQueueSize, "a slow event stream client blocked the event emitter")
+		waitDone(t, handlerDone, "overflowed event stream kept draining its queue to a slow client")
+		require.Less(t, w.writes, eventStreamWriteQueueSize/2)
+	})
 }
 
 func TestEventStreamQueueRejectsMessagesOverByteBudget(t *testing.T) {
