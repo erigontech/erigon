@@ -8,7 +8,7 @@ Use [Ponytail](https://github.com/DietrichGebert/ponytail) for coding tasks to k
 
 - Reuse an existing installation. Otherwise, follow the upstream [installation instructions](https://github.com/DietrichGebert/ponytail#install) and [portability guide](https://github.com/DietrichGebert/ponytail/blob/main/docs/agent-portability.md) for your agent and version. Prefer user-local setup, complete prerequisites and activation steps, and verify it is loaded.
 - If native integration is unavailable, clone Ponytail outside the Erigon checkout and read `skills/ponytail/SKILL.md` from that checkout at the start of each coding session. Preserve existing agent configuration and this `AGENTS.md`.
-- Before handing off code changes, use `/ponytail-review` to current diff for: delete (dead code/speculative feature), stdlib (reinvented standard library), native (dependency doing what the platform does), yagni (abstraction with one implementation), shrink (same logic, fewer lines), reuse (duplicates a helper already in this repo), bugs, security, load, tests, speed, bloat
+- Before handing off code changes, invoke `ponytail-review` using your agent's syntax, or read and apply `skills/ponytail-review/SKILL.md` from the Ponytail checkout. Review the current diff for: delete (dead code/speculative feature), stdlib (reinvented standard library), native (dependency doing what the platform does), yagni (abstraction with one implementation), shrink (same logic, fewer lines), reuse (duplicates a helper already in this repo), bugs, security, load, tests, speed, bloat
 
 Explicit task requirements and Erigon's guidelines take precedence, including TDD, test coverage, and comment rules. Keep downloaded files and personal settings out of commits.
 
