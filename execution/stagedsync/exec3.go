@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -107,6 +108,16 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 
 func shouldWaitForReadAhead(isValidatingBlocks bool) bool {
 	return dbg.ReadAheadWait && isValidatingBlocks
+}
+
+// systemTxFlag reports whether the body tx at txIndex is a consensus system
+// transaction (Parlia). Non-body indices and engines without in-block system
+// transactions return false.
+func systemTxFlag(engine rules.Engine, txs types.Transactions, txIndex int, header *types.Header) (bool, error) {
+	if txIndex < 0 || txIndex >= len(txs) {
+		return false, nil
+	}
+	return engine.IsSystemTransaction(txs[txIndex], header)
 }
 
 // execRange is the resolved block/txNum window the executor runs over. The
@@ -641,6 +652,12 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					Hooks:            te.hooks,
 					Logger:           te.logger,
 				}
+
+				sysTx, err := systemTxFlag(te.cfg.engine, txs, txIndex, header)
+				if err != nil {
+					return err
+				}
+				txTask.SetSystemTx(sysTx)
 
 				txTasks = append(txTasks, txTask)
 				inputTxNum++

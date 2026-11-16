@@ -593,6 +593,10 @@ func SeedHash(block uint64) []byte {
 	return seedHash(block)
 }
 
+func (ethash *Ethash) FeePolicy(header *types.Header) evmtypes.FeePolicy {
+	return evmtypes.FeePolicy{}
+}
+
 func (ethash *Ethash) GetTransferFunc() evmtypes.TransferFunc {
 	return misc.Transfer
 }

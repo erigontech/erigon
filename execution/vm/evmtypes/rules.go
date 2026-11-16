@@ -48,6 +48,7 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		IsBogota:           c.IsBogota(bc.Time),
 		DisabledEIPs:       c.DisabledEIPs,
 		IsAura:             c.Aura != nil,
+		IsParlia:           c.Parlia != nil,
 	}
 
 	if c.L2 != nil {

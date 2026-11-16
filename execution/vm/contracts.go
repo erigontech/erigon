@@ -84,6 +84,7 @@ const (
 	forkCancun
 	forkPrague
 	forkOsaka
+	forkIstanbulBSC
 	forkTierCount
 )
 
@@ -95,6 +96,9 @@ type mergedPrecompileSet struct {
 var forkSets [forkTierCount]mergedPrecompileSet
 
 func forkTierFor(chainRules *chain.Rules) forkTier {
+	if chainRules.IsParlia && chainRules.IsIstanbul {
+		return forkIstanbulBSC
+	}
 	switch {
 	case chainRules.IsOsaka:
 		return forkOsaka
@@ -222,6 +226,15 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{eip7951: true},
 }
 
+// PrecompiledContractsIstanbulForBSC is the Istanbul set plus BSC's cross-chain
+// light-client precompiles.
+var PrecompiledContractsIstanbulForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsIstanbul)
+	m[accounts.InternAddress(common.BytesToAddress([]byte{0x64}))] = &tmHeaderValidate{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{0x65}))] = &iavlMerkleProofValidate{}
+	return m
+}()
+
 var (
 	PrecompiledAddressesHomestead []accounts.Address
 	PrecompiledAddressesByzantium []accounts.Address
@@ -244,12 +257,16 @@ func init() {
 		forkCancun:    {PrecompiledContractsCancun, &PrecompiledAddressesCancun},
 		forkPrague:    {PrecompiledContractsPrague, &PrecompiledAddressesPrague},
 		forkOsaka:     {PrecompiledContractsOsaka, &PrecompiledAddressesOsaka},
+
+		forkIstanbulBSC: {PrecompiledContractsIstanbulForBSC, nil},
 	} {
 		for address, p := range tierSet.contracts {
 			tierSet.contracts[address] = cachePrecompile(p, forkTier(tier), address.Value())
 		}
 		forkSets[tier] = mergedPrecompileSet{tierSet.contracts, slices.Collect(maps.Keys(tierSet.contracts))}
-		*tierSet.addresses = forkSets[tier].addresses
+		if tierSet.addresses != nil {
+			*tierSet.addresses = forkSets[tier].addresses
+		}
 	}
 }
 

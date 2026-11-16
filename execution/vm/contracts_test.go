@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -850,4 +851,25 @@ func FuzzModExpMatchesBigInt(f *testing.F) {
 		}
 		require.Equal(t, want, got, "base %x exp %x mod %x", base, exp, mod)
 	})
+}
+
+func TestParliaPrecompilesFromIstanbul(t *testing.T) {
+	tmHeader := accounts.InternAddress(common.BytesToAddress([]byte{0x64}))
+	iavlProof := accounts.InternAddress(common.BytesToAddress([]byte{0x65}))
+	for name, tc := range map[string]struct {
+		rules   chain.Rules
+		wantBSC bool
+	}{
+		"parlia istanbul":  {chain.Rules{IsParlia: true, IsByzantium: true, IsIstanbul: true}, true},
+		"parlia berlin":    {chain.Rules{IsParlia: true, IsByzantium: true, IsIstanbul: true, IsBerlin: true}, true},
+		"parlia byzantium": {chain.Rules{IsParlia: true, IsByzantium: true}, false},
+		"ethash istanbul":  {chain.Rules{IsByzantium: true, IsIstanbul: true}, false},
+	} {
+		contracts := Precompiles(&tc.rules)
+		_, hasTmHeader := contracts[tmHeader]
+		_, hasIavlProof := contracts[iavlProof]
+		require.Equal(t, tc.wantBSC, hasTmHeader, name)
+		require.Equal(t, tc.wantBSC, hasIavlProof, name)
+		require.ElementsMatch(t, slices.Collect(maps.Keys(contracts)), ActivePrecompiles(&tc.rules), name)
+	}
 }
