@@ -522,7 +522,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm.TxContext = txCtx
 
-		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
+		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
 			log.Error(err.Error())
 			return nil, err
@@ -539,19 +539,14 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
 
-		// Frame transactions can retain logs despite a failed frame. Execution has
-		// already removed logs from every reverted frame, batch or POST_TX body.
-		if res.Failed() && txn.Type() != types.FrameTxType {
-			log.Debug("[replayBlock] res result for transaction", "transactionHash", txn.Hash(), "failed", res.Failed(), "revert", res.Revert(), "error", res.Err)
-			log.Debug("[replayBlock] discarding txLogs because txn has status=failed", "transactionHash", txn.Hash())
-		} else {
-			txLogs := statedb.GetLogs(statedb.TxnIndex(), txn.Hash(), blockNum, header.Hash())
-			for _, l := range txLogs {
-				l.TxIndex = hexutil.Uint(idx)
-			}
-			log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
-			blockLogs = append(blockLogs, txLogs...)
+		// Execution has already removed reverted logs. Collect the surviving logs
+		// independently of transaction status, as receipt construction does.
+		txLogs := statedb.GetLogs(statedb.TxnIndex(), txn.Hash(), blockNum, header.Hash())
+		for _, l := range txLogs {
+			l.TxIndex = hexutil.Uint(idx)
 		}
+		log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
+		blockLogs = append(blockLogs, txLogs...)
 	}
 	return blockLogs, nil
 }

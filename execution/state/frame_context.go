@@ -36,7 +36,6 @@ type FrameContext struct {
 	SenderApproved bool
 	MaxCost        uint256.Int
 	LegacyNonce    uint64 // Sender's account nonce before any frame executes, for TXPARAM.
-	GasBailout     bool
 	journal        *journal
 	undo           journalExtra
 	storageOwners  map[frameStorageSlot]uint8 // Charging frame index plus one; zero means no outstanding charge.

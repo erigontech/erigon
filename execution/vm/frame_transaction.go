@@ -80,24 +80,20 @@ func (evm *EVM) approveFrame(address accounts.Address, scope uint64) error {
 		if !payer.IsNil() || !approved {
 			return ErrExecutionReverted
 		}
-		if !ctx.GasBailout {
-			balance, err := evm.intraBlockState.GetBalance(target)
-			if err != nil {
-				return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-			}
-			if balance.Lt(&ctx.MaxCost) {
-				return ErrExecutionReverted
-			}
+		balance, err := evm.intraBlockState.GetBalance(target)
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
+		if balance.Lt(&ctx.MaxCost) {
+			return ErrExecutionReverted
 		}
 		// Payment approval consumes the nonce set exactly once. The state journal
 		// makes the nonce updates, fee debit and approval context revert together.
 		if err := evm.consumeFrameNonce(); err != nil {
 			return err
 		}
-		if !ctx.GasBailout {
-			if err := evm.intraBlockState.SubBalance(target, ctx.MaxCost, tracing.BalanceDecreaseGasBuy); err != nil {
-				return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-			}
+		if err := evm.intraBlockState.SubBalance(target, ctx.MaxCost, tracing.BalanceDecreaseGasBuy); err != nil {
+			return fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		payer = target
 	}
@@ -199,17 +195,13 @@ func (evm *EVM) ExecuteTransactionFrame() (ret []byte, executionLeft uint64, err
 	evm.intraBlockState.AddAddressToAccessList(target)
 	evm.intraBlockState.MarkAddressAccess(target, false)
 	evm.Origin = caller
-	var bailout bool
 	if !frame.Value.IsZero() {
 		canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, frame.Value)
 		if err != nil {
 			return nil, gas.Execution, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		if !canTransfer {
-			if !ctx.GasBailout {
-				return nil, gas.Execution, ErrExecutionReverted
-			}
-			bailout = true
+			return nil, gas.Execution, ErrExecutionReverted
 		}
 		empty, err := evm.intraBlockState.Empty(target)
 		if err != nil {
@@ -268,7 +260,7 @@ func (evm *EVM) ExecuteTransactionFrame() (ret []byte, executionLeft uint64, err
 	if frame.IsStatic() {
 		ret, left, _, err = evm.StaticCall(caller, target, frame.Data, gas)
 	} else {
-		ret, left, _, err = evm.Call(caller, target, frame.Data, gas, frame.Value, bailout)
+		ret, left, _, err = evm.Call(caller, target, frame.Data, gas, frame.Value, false /* bailout */)
 	}
 	return ret, left.Execution, err
 }

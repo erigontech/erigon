@@ -159,8 +159,8 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 // indicates a core error meaning that the message would always fail for that particular
 // state and would never be accepted within a block.
 // `refunds` is false when it is not required to apply gas refunds
-// `gasBailout` is true when it is not required to fail transaction if the balance is not enough to pay gas.
-// for trace_call to replicate OE/Parity behaviour
+// `gasBailout` relaxes balance checks for ordinary transactions. Frames always
+// require normal payment approval and value transfers.
 func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
 	return applyMessage(evm, msg, gp, refunds, gasBailout, false, false, engine)
 }
@@ -447,7 +447,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	if msg, ok := st.msg.(*types.Message); ok && msg.FrameTransaction() != nil {
-		return st.executeFrameTransaction(msg.FrameTransaction(), refunds, gasBailout, nil)
+		return st.executeFrameTransaction(msg.FrameTransaction(), refunds, nil)
 	}
 	coinbase := st.evm.Context.Coinbase
 	msg := st.msg
