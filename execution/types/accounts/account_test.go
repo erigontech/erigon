@@ -18,9 +18,14 @@ package accounts
 
 import (
 	"bytes"
+	crand "crypto/rand"
 	"encoding/json"
+	"runtime"
+	"sync"
 	"testing"
 	"unique"
+	"unsafe"
+	"weak"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -428,4 +433,41 @@ func TestInternSlotCollision(t *testing.T) {
 func TestInternSlotsSpreadLowValues(t *testing.T) {
 	require.NotSame(t, addressSlot(common.BytesToAddress([]byte{1})), addressSlot(common.BytesToAddress([]byte{2})))
 	require.NotSame(t, keySlot(common.BytesToHash([]byte{1})), keySlot(common.BytesToHash([]byte{2})))
+}
+
+func TestInternKeyConcurrentFirstIntern(t *testing.T) {
+	workers := max(runtime.GOMAXPROCS(0), 2)
+	for range 1000 {
+		var k common.Hash
+		_, _ = crand.Read(k[:])
+		start := make(chan struct{})
+		handles := make([]StorageKey, workers)
+		var wg sync.WaitGroup
+		for w := range workers {
+			wg.Go(func() {
+				<-start
+				handles[w] = InternKey(k)
+			})
+		}
+		close(start)
+		wg.Wait()
+		for _, h := range handles {
+			require.Equal(t, handles[0], h)
+			require.Equal(t, k, h.Value())
+		}
+	}
+}
+
+// The intern table must not keep a key alive once its slot is taken by another key and no handle remains.
+func TestInternKeyReleasesHandle(t *testing.T) {
+	var k common.Hash
+	_, _ = crand.Read(k[:])
+	h := InternKey(k)
+	wp := weak.Make(*(**common.Hash)(unsafe.Pointer(&h)))
+	collider := k
+	collider[10]++
+	InternKey(collider)
+	runtime.GC()
+	runtime.GC()
+	require.Nil(t, wp.Value())
 }

@@ -19,6 +19,7 @@ package accounts
 import (
 	"encoding/binary"
 	"fmt"
+	"runtime"
 	"sync/atomic"
 	"unique"
 
@@ -147,19 +148,53 @@ var (
 	NilKey  = StorageKey{}
 )
 
-// keySlot mixes both ends of the key: keccak-derived slots differ everywhere, small scalar slots only at the end.
-func keySlot(k common.Hash) *atomic.Value {
-	return &keyTable[(binary.BigEndian.Uint32(k[:4])^binary.BigEndian.Uint32(k[28:]))&(keyTableSize-1)]
+// keySlotIndex mixes both ends of the key: keccak-derived slots differ everywhere, small scalar slots only at the end.
+func keySlotIndex(k common.Hash) uint32 {
+	return (binary.BigEndian.Uint32(k[:4]) ^ binary.BigEndian.Uint32(k[28:])) & (keyTableSize - 1)
 }
 
+func keySlot(k common.Hash) *atomic.Value {
+	return &keyTable[keySlotIndex(k)]
+}
+
+type keyIntern struct {
+	key  common.Hash
+	h    StorageKey
+	done atomic.Bool
+}
+
+// keyInterns holds the in-flight first intern per keyTable slot: workers that read the same new key at once wait for
+// one unique.Make instead of queueing on its insert lock, whose holder also registers a weak pointer and a cleanup.
+var keyInterns [keyTableSize]atomic.Pointer[keyIntern]
+
 func InternKey(k common.Hash) StorageKey {
-	slot := keySlot(k)
-	if h, ok := slot.Load().(StorageKey); ok && h.Value() == k {
+	i := keySlotIndex(k)
+	if h, ok := keyTable[i].Load().(StorageKey); ok && h.Value() == k {
 		return h
 	}
-	h := StorageKey(unique.Make(k))
-	slot.Store(h)
-	return h
+	for {
+		p := keyInterns[i].Load()
+		if p == nil {
+			p = &keyIntern{key: k}
+			if !keyInterns[i].CompareAndSwap(nil, p) {
+				continue
+			}
+			p.h = StorageKey(unique.Make(k))
+			keyTable[i].Store(p.h)
+			p.done.Store(true)
+			keyInterns[i].Store(nil)
+			return p.h
+		}
+		if p.key != k {
+			h := StorageKey(unique.Make(k))
+			keyTable[i].Store(h)
+			return h
+		}
+		for !p.done.Load() {
+			runtime.Gosched()
+		}
+		return p.h
+	}
 }
 
 func (k StorageKey) IsNil() bool {
