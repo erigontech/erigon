@@ -306,3 +306,17 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
 		"lowering a history-II end while values ends stay put must trip the forbid assert")
 }
+
+func TestVisibleFilesAligned_CutThroughAMergedFileRepeats(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	merged := []testFileRange{{0, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), merged)
+	generateCommitmentFile(t, agg.Dirs(), merged)
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {2, 3}})
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v1.0-tracesto.1-2.efi")))
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, 0)
+}
