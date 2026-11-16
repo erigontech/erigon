@@ -614,8 +614,8 @@ func TestBuildAndCacheHeadCaptureReadsParentRecords(t *testing.T) {
 	wantBytes, err := jsonstream.Marshal(want)
 	require.NoError(t, err)
 
-	build := func(pinTx kv.TemporalTx, get func(k []byte) ([]byte, kv.Step, bool), trace bool) (*ExecutionWitnessResult, bool) {
-		commitmentdb.PublishParentRecords(&commitmentdb.ParentRecords{BlockNum: buildNum, BlockHash: hash, ParentHash: parentHash, TraceCollapses: trace, Get: get})
+	build := func(pinTx kv.TemporalTx, get func(k []byte) ([]byte, kv.Step, bool)) (*ExecutionWitnessResult, bool) {
+		commitmentdb.PublishParentRecords(&commitmentdb.ParentRecords{BlockNum: buildNum, BlockHash: hash, ParentHash: parentHash, Get: get})
 		committedTx, err := m.DB.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		defer committedTx.Rollback()
@@ -632,14 +632,14 @@ func TestBuildAndCacheHeadCaptureReadsParentRecords(t *testing.T) {
 		served++
 		return v, step, true
 	}
-	got, ok := build(pinA, parentGet, true)
+	got, ok := build(pinA, parentGet)
 	require.True(t, ok, "a build over correct parent records is cached")
 	require.NotZero(t, served, "the build reads commitment through the parent records")
 	gotBytes, err := jsonstream.Marshal(got)
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "the witness over parent records matches the durable build")
 
-	_, ok = build(pinB, func(k []byte) ([]byte, kv.Step, bool) { return []byte{0x01, 0x02}, 0, true }, false)
+	_, ok = build(pinB, func(k []byte) ([]byte, kv.Step, bool) { return []byte{0x01, 0x02}, 0, true })
 	require.False(t, ok, "wrong parent records fail a gate and cache nothing")
 }
 
@@ -1057,7 +1057,7 @@ func TestHeadCaptureOverParentRecordsMatchesDurablePerBlock(t *testing.T) {
 		require.NoError(t, m.InsertChain(testChain.Slice(int(n)-1, int(n))), "block %d", n)
 		hash, _ := buildTestChainHeader(t, m, n)
 		parentHash, _ := buildTestChainHeader(t, m, n-1)
-		if r := commitmentdb.ParentRecordsFor(n, hash, parentHash); r != nil && r.TraceCollapses {
+		if r := commitmentdb.ParentRecordsFor(n, hash, parentHash); r != nil {
 			traces++
 		}
 		if n%2 == 1 {

@@ -1470,7 +1470,7 @@ func detectCollapseSiblings(
 	}
 	traced := false
 	var root []byte
-	if mode == witnessModeLegacy && hc != nil && hc.records != nil && hc.records.TraceCollapses {
+	if mode == witnessModeLegacy && hc != nil && hc.records != nil {
 		if traced, root, err = sdCtx.TraceCollapses(ctx, tx, blockNum, firstTxNumInBlock, trace); err != nil {
 			return nil, fmt.Errorf("[debug_executionWitness] collapse detection via TraceCollapses failed: %w", err)
 		}

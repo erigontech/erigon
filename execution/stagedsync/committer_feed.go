@@ -21,7 +21,6 @@ import (
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -74,7 +73,6 @@ func (cc *commitmentCalculator) emitTouchedFeed(view *state.VersionMapView) erro
 	for _, m := range cc.touchedStorage {
 		slots += len(m)
 	}
-	cc.parentReads = commitmentdb.ParentReadsWanted()
 	f.Keys = len(cc.touchedAccounts) + slots
 	f.Accounts = slices.Grow(f.Accounts[:0], len(cc.touchedAccounts))
 	f.updates = slices.Grow(f.updates[:0], len(cc.touchedAccounts))
