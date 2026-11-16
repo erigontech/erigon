@@ -1786,29 +1786,31 @@ func makeDelayedBlobRecoveriesOverdue(d *peerdas) {
 }
 
 func TestNextBlobRecoveryRequestGloballyPacesDelayedRetries(t *testing.T) {
-	d := &peerdas{recoverBlobsQueue: make(chan recoverBlobsRequest, 1)}
-	const retries = 9
-	for i := range retries {
-		request := recoverBlobsRequest{slot: uint64(i + 1), blockRoot: common.Hash{byte(i + 1)}}
-		require.True(t, d.delayBlobRecovery(request))
-	}
-	makeDelayedBlobRecoveriesOverdue(d)
+	synctest.Test(t, func(t *testing.T) {
+		d := &peerdas{recoverBlobsQueue: make(chan recoverBlobsRequest, 1)}
+		const retries = 9
+		for i := range retries {
+			request := recoverBlobsRequest{slot: uint64(i + 1), blockRoot: common.Hash{byte(i + 1)}}
+			require.True(t, d.delayBlobRecovery(request))
+		}
+		makeDelayedBlobRecoveriesOverdue(d)
 
-	started := time.Now()
-	for range retries {
-		_, ok := d.nextBlobRecoveryRequest(t.Context())
-		require.True(t, ok)
-	}
-	require.GreaterOrEqual(t, time.Since(started), blobRecoveryValidationRetryInterval-10*time.Millisecond)
-	require.Len(t, d.isRecovering, retries)
-	require.Empty(t, d.recoveryRetries)
+		started := time.Now()
+		for range retries {
+			_, ok := d.nextBlobRecoveryRequest(t.Context())
+			require.True(t, ok)
+		}
+		require.GreaterOrEqual(t, time.Since(started), blobRecoveryValidationRetryInterval-10*time.Millisecond)
+		require.Len(t, d.isRecovering, retries)
+		require.Empty(t, d.recoveryRetries)
 
-	typeOfPeerDas := reflect.TypeFor[peerdas]()
-	heapField, hasHeap := typeOfPeerDas.FieldByName("recoveryRetryQueue")
-	_, hasLinearOrder := typeOfPeerDas.FieldByName("recoveryRetryOrder")
-	require.True(t, hasHeap)
-	require.True(t, reflect.PointerTo(heapField.Type).Implements(reflect.TypeFor[heap.Interface]()))
-	require.False(t, hasLinearOrder)
+		typeOfPeerDas := reflect.TypeFor[peerdas]()
+		heapField, hasHeap := typeOfPeerDas.FieldByName("recoveryRetryQueue")
+		_, hasLinearOrder := typeOfPeerDas.FieldByName("recoveryRetryOrder")
+		require.True(t, hasHeap)
+		require.True(t, reflect.PointerTo(heapField.Type).Implements(reflect.TypeFor[heap.Interface]()))
+		require.False(t, hasLinearOrder)
+	})
 }
 
 func TestBlobRecoveryMetadataUpgradeRepairsInvalidEqualCountStorage(t *testing.T) {
@@ -2760,36 +2762,40 @@ func TestBlobRecoveryWaitsForGossipToGoQuietBeforeReadingColumns(t *testing.T) {
 
 // Every column stored while the worker waits restarts the wait.
 func TestBlobRecoveryWaitRestartsWithEachStoredColumn(t *testing.T) {
-	g := startGossipRecovery(t, false)
+	synctest.Test(t, func(t *testing.T) {
+		g := startGossipRecovery(t, false)
 
-	calls := []scheduleCall{g.schedule(t)}
-	for range 3 {
-		time.Sleep(wantQuietPeriod / 6)
-		calls = append(calls, g.schedule(t))
-	}
-	started := g.awaitFirstRead(t)
+		calls := []scheduleCall{g.schedule(t)}
+		for range 3 {
+			time.Sleep(wantQuietPeriod / 6)
+			calls = append(calls, g.schedule(t))
+		}
+		started := g.awaitFirstRead(t)
 
-	require.False(t, started.Before(earliestQuietEnd(calls)), "the worker started before the last column restarted the wait")
+		require.False(t, started.Before(earliestQuietEnd(calls)), "the worker started before the last column restarted the wait")
+	})
 }
 
 // A column stored after the worker claimed the request restarts the wait, even when the wait the worker claimed has
 // already passed.
 func TestBlobRecoveryWaitRestartsWithAColumnStoredAfterTheClaim(t *testing.T) {
-	g := startGossipRecovery(t, true)
+	synctest.Test(t, func(t *testing.T) {
+		g := startGossipRecovery(t, true)
 
-	first := g.schedule(t)
-	require.Eventually(t, func() bool {
-		g.d.recoveringMutex.Lock()
-		defer g.d.recoveringMutex.Unlock()
-		return g.d.isRecovering[g.root]
-	}, 30*time.Second, time.Millisecond, "the worker did not claim the recovery")
-	time.Sleep(time.Until(first.end.Add(wantQuietPeriod)))
-	second := g.schedule(t)
-	g.releaseClock()
-	started := g.awaitFirstRead(t)
+		first := g.schedule(t)
+		require.Eventually(t, func() bool {
+			g.d.recoveringMutex.Lock()
+			defer g.d.recoveringMutex.Unlock()
+			return g.d.isRecovering[g.root]
+		}, 30*time.Second, time.Millisecond, "the worker did not claim the recovery")
+		time.Sleep(time.Until(first.end.Add(wantQuietPeriod)))
+		second := g.schedule(t)
+		g.releaseClock()
+		started := g.awaitFirstRead(t)
 
-	require.False(t, started.Before(second.begin.Add(wantQuietPeriod)), "the worker started before the column stored after the claim restarted the wait")
-	require.Less(t, started.Sub(second.end), wantQuietPeriod+startSlack)
+		require.False(t, started.Before(second.begin.Add(wantQuietPeriod)), "the worker started before the column stored after the claim restarted the wait")
+		require.Less(t, started.Sub(second.end), wantQuietPeriod+startSlack)
+	})
 }
 
 // earliestQuietEnd returns the earliest time the worker may start after the calls, which ran one after the other. A
@@ -2830,19 +2836,21 @@ func TestBlobRecoveryRecoversMissingColumnsOnceGossipIsQuiet(t *testing.T) {
 // When gossip delivers the remaining columns before the worker decides to start, the matrix is complete: the worker
 // writes the blob sidecars and no column.
 func TestBlobRecoveryFindsCompleteMatrixWhenGossipDeliversEveryColumn(t *testing.T) {
-	g := startGossipRecovery(t, true)
+	synctest.Test(t, func(t *testing.T) {
+		g := startGossipRecovery(t, true)
 
-	g.schedule(t)
-	g.storeColumnsUpTo(t, int(g.d.beaconConfig.NumberOfColumns), func() { g.schedule(t) })
-	storedLastColumn := time.Now()
-	g.releaseClock()
-	started := g.awaitFirstRead(t)
+		g.schedule(t)
+		g.storeColumnsUpTo(t, int(g.d.beaconConfig.NumberOfColumns), func() { g.schedule(t) })
+		storedLastColumn := time.Now()
+		g.releaseClock()
+		started := g.awaitFirstRead(t)
 
-	require.False(t, started.Before(storedLastColumn), "the worker started before gossip delivered the last column")
-	requireBlobRecoveryReleased(t, g.d, g.root)
-	g.requireBlobsRecovered(t)
-	require.Zero(t, g.workerWrites.writes.Load(), "column writes by the worker")
-	require.Never(t, func() bool { return len(g.published) > 0 }, 100*time.Millisecond, 10*time.Millisecond, "published columns")
+		require.False(t, started.Before(storedLastColumn), "the worker started before gossip delivered the last column")
+		requireBlobRecoveryReleased(t, g.d, g.root)
+		g.requireBlobsRecovered(t)
+		require.Zero(t, g.workerWrites.writes.Load(), "column writes by the worker")
+		require.Never(t, func() bool { return len(g.published) > 0 }, 100*time.Millisecond, 10*time.Millisecond, "published columns")
+	})
 }
 
 // Columns that keep arriving cannot hold the recovery past the deadline: a quarter of the slot before Gloas, and the
