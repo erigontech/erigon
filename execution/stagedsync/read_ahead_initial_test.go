@@ -55,7 +55,7 @@ func TestReadAheadInitialExecMatchesNormalExecution(t *testing.T) {
 		require.NoError(t, err)
 		from := crypto.PubkeyToAddress(key.PublicKey)
 		contract := common.Address{19: 0xc0}
-		code := []byte{0x60, 0, 0x54, 0x50, 0x60, 9, 0x60, 1, 0x55, 0}
+		code := []byte{0x62, 0x01, 0x86, 0xa0, 0x5b, 0x60, 1, 0x90, 0x03, 0x80, 0x60, 4, 0x57, 0x50, 0x60, 0, 0x54, 0x50, 0x60, 9, 0x60, 1, 0x55, 0}
 		genesis := &types.Genesis{
 			Config:     chain.TestChainBerlinConfig,
 			Difficulty: uint256.NewInt(0),
@@ -66,7 +66,7 @@ func TestReadAheadInitialExecMatchesNormalExecution(t *testing.T) {
 		}
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
 		chainPack, err := m.GenerateChain(17, func(_ int, gen *blockgen.BlockGen) {
-			txn, signErr := types.SignTx(types.NewTransaction(gen.TxNonce(from), contract, uint256.NewInt(0), 100_000, uint256.NewInt(1), nil), *types.LatestSignerForChainID(genesis.Config.ChainID), key)
+			txn, signErr := types.SignTx(types.NewTransaction(gen.TxNonce(from), contract, uint256.NewInt(0), 3_000_000, uint256.NewInt(1), nil), *types.LatestSignerForChainID(genesis.Config.ChainID), key)
 			require.NoError(t, signErr)
 			gen.AddTx(txn)
 		})
@@ -97,11 +97,12 @@ func TestReadAheadInitialExecMatchesNormalExecution(t *testing.T) {
 
 	dbg.ReadAheadInitial, dbg.ReadAheadExec, dbg.ReadAheadExecCommitment, dbg.ReadAheadBlocksWorkers, dbg.ReadAheadDistance = false, false, false, 2, 500
 	defaultRoot, defaultReceipts := chainPack(t)
-	dbg.ReadAheadInitial, dbg.ReadAheadExec, dbg.ReadAheadExecCommitment, dbg.ReadAheadBlocksWorkers, dbg.ReadAheadDistance = true, true, false, 2, 1
+	dbg.ReadAheadInitial, dbg.ReadAheadExec, dbg.ReadAheadExecCommitment, dbg.ReadAheadBlocksWorkers, dbg.ReadAheadDistance = true, true, false, 1, 8
 	beforeDone, beforeLate := results()
 	prefetchedRoot, prefetchedReceipts := chainPack(t)
 	afterDone, afterLate := results()
 	require.Equal(t, defaultRoot.Root(), prefetchedRoot.Root())
 	require.Equal(t, defaultReceipts, prefetchedReceipts)
-	require.Greater(t, afterDone+afterLate, beforeDone+beforeLate, "initial-cycle read-ahead must reach the speculative execution branch")
+	require.Equal(t, beforeLate, afterLate, "read-ahead must not skip targets above the last executed block; late = %v", afterLate-beforeLate)
+	require.Greater(t, afterDone, beforeDone, "initial-cycle read-ahead must reach the speculative execution branch")
 }

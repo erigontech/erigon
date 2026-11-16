@@ -240,7 +240,7 @@ func ExecV3(ctx context.Context,
 		workerCount: cfg.syncCfg.ExecWorkerCount,
 	}
 	if isApplyingBlocks && (!initialCycle || dbg.ReadAheadInitial) {
-		readAhead, clean = exec.BlocksReadAhead(ctx, dbg.ReadAheadBlocksWorkers, cfg.db, cfg.engine, cfg.blockReader, cfg.chainConfig, dbg.ReadAheadExec, dbg.ReadAheadExecCommitment, &pe.execBlockNum, dbg.ReadAheadDistance)
+		readAhead, clean = exec.BlocksReadAhead(ctx, dbg.ReadAheadBlocksWorkers, cfg.db, cfg.engine, cfg.blockReader, cfg.chainConfig, dbg.ReadAheadExec, dbg.ReadAheadExecCommitment, &pe.lastExecutedBlockNum, dbg.ReadAheadDistance)
 		defer clean()
 	}
 	pe.lastCommittedTxNum.Store(inputTxNum)
@@ -339,7 +339,6 @@ type txExecutor struct {
 	taskExecMetrics  *exec.WorkerMetrics
 	blockExecMetrics *blockExecMetrics
 	hooks            *tracing.Hooks
-	execBlockNum     atomic.Uint64
 
 	// blockSrc, when non-nil, overrides the default DB-backed block source —
 	// e.g. an ephemeral single-block source with no DB behind it.
@@ -597,7 +596,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 				break
 			}
 
-			te.execBlockNum.Store(blockNum)
 			select {
 			case readAhead <- blockNum:
 			default:

@@ -792,7 +792,7 @@ var (
 	readAheadPrefetchCommitment = prefetchCommitmentWithTx
 )
 
-func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute, executeCommitment bool, execBlock *atomic.Uint64, distance int) (chan uint64, context.CancelFunc) {
+func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, execute, executeCommitment bool, execBlock *atomic.Int64, distance int) (chan uint64, context.CancelFunc) {
 	if workers <= 0 || distance <= 0 {
 		return nil, func() {}
 	}
@@ -832,7 +832,7 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 					}
 				}
 				target := bn + uint64(distance)
-				if execute && execBlock != nil && target <= execBlock.Load() {
+				if execute && execBlock != nil && int64(target) <= execBlock.Load() {
 					readAheadBlocksByResult.WithLabelValues("late").Inc()
 					continue
 				}
@@ -950,6 +950,7 @@ func runReadAheadBlock(ctx context.Context, tx kv.TemporalTx, block *types.Block
 	stats.AccountWrittenKeys = make(map[accounts.Address]struct{})
 	reader := &readAheadCountingReader{StateReader: state.NewReaderV3(execctx.NewTemporalTxStateGetter(tx)), stats: &stats}
 	ibs := state.New(reader)
+	defer ibs.Close()
 	header := block.HeaderNoCopy()
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		return blockReader.Header(ctx, tx, hash, number)
