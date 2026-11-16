@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -791,6 +792,7 @@ func (f *Fetch) ConnectSentries() {
 func (f *Fetch) ConnectCore() {
 	f.pool.MarkStateStale()
 	f.connectWg.Go(func() {
+		retryLogs := rate.NewLimiter(rate.Every(time.Minute), 1)
 		for {
 			select {
 			case <-f.ctx.Done():
@@ -801,7 +803,7 @@ func (f *Fetch) ConnectCore() {
 				if errors.Is(err, errRefreshStateSnapshot) {
 					continue
 				}
-				if !grpcutil.IsRetryLater(err) && !grpcutil.IsEndOfStream(err) {
+				if !grpcutil.IsEndOfStream(err) && (!grpcutil.IsRetryLater(err) || retryLogs.Allow()) {
 					f.logger.Warn("[txpool.handleStateChanges]", "err", err)
 				}
 			}

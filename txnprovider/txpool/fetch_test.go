@@ -38,6 +38,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -398,6 +400,34 @@ func TestFetchSnapshotFailureBackoff(t *testing.T) {
 		fetch.Wait()
 		require.GreaterOrEqual(t, attempts[1].Sub(attempts[0]), 3*time.Second)
 		require.Equal(t, attempts[1], time.Now(), "cancellation must interrupt the reconnect delay")
+	})
+}
+
+func TestFetchLogsUnavailableSnapshotsAtLimitedRate(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		ctrl := gomock.NewController(t)
+		pool := NewMockPool(ctrl)
+		pool.EXPECT().MarkStateStale().AnyTimes()
+		client := remoteproto.NewMockKVClient(ctrl)
+		attempts := 0
+		client.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+			func(context.Context, *remoteproto.StateChangeRequest, ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
+				attempts++
+				if attempts == 22 {
+					cancel()
+					return nil, context.Canceled
+				}
+				return nil, status.Error(codes.Unavailable, "executed header 42 unavailable for state snapshot")
+			}).Times(22)
+		var logs bytes.Buffer
+		logger := log.New()
+		logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+		fetch := NewFetch(ctx, nil, pool, client, nil, u256.N1, logger)
+		fetch.ConnectCore()
+		fetch.Wait()
+		require.Equal(t, 2, bytes.Count(logs.Bytes(), []byte("executed header 42")))
 	})
 }
 

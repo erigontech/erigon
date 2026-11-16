@@ -19,17 +19,21 @@ package shutter
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/cenkalti/backoff/v4"
+
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 type BlockEvent struct {
 	LatestBlockNum  uint64
 	LatestBlockTime uint64
+	StateVersionID  uint64
 	Unwind          bool
 }
 
@@ -37,6 +41,8 @@ type BlockListener struct {
 	logger             log.Logger
 	stateChangesClient stateChangesClient
 	events             *event.Observers[BlockEvent]
+	eventsMu           sync.Mutex
+	lastEvent          *BlockEvent
 }
 
 func NewBlockListener(logger log.Logger, stateChangesClient stateChangesClient) *BlockListener {
@@ -47,25 +53,32 @@ func NewBlockListener(logger log.Logger, stateChangesClient stateChangesClient) 
 	}
 }
 
-func (bl *BlockListener) RegisterObserver(o event.Observer[BlockEvent]) event.UnregisterFunc {
-	return bl.events.Register(o)
+// RegisterObserver replays the last known head, if any, before returning.
+// The observer must accept that event without waiting for registration to finish.
+func (bl *BlockListener) RegisterObserver(observer event.Observer[BlockEvent]) event.UnregisterFunc {
+	return bl.registerObserver(observer, observer)
+}
+
+func (bl *BlockListener) registerObserver(onLive, onReplay event.Observer[BlockEvent]) event.UnregisterFunc {
+	bl.eventsMu.Lock()
+	defer bl.eventsMu.Unlock()
+	unregister := bl.events.Register(onLive)
+	if bl.lastEvent != nil {
+		onReplay(*bl.lastEvent)
+	}
+	return unregister
 }
 
 func (bl *BlockListener) Run(ctx context.Context) error {
 	defer bl.logger.Info("block listener stopped")
 	bl.logger.Info("running block listener")
 
-	for ctx.Err() == nil {
-		err := bl.listen(ctx)
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		bl.logger.Warn("block listener subscription failed", "err", err)
-		if err := common.Sleep(ctx, 3*time.Second); err != nil {
-			return err
+	notify := func(err error, _ time.Duration) {
+		if !grpcutil.IsRetryLater(err) && !grpcutil.IsEndOfStream(err) {
+			bl.logger.Warn("block listener subscription failed", "err", err)
 		}
 	}
-	return ctx.Err()
+	return backoff.RetryNotify(func() error { return bl.listen(ctx) }, backoff.WithContext(backoff.NewConstantBackOff(3*time.Second), ctx), notify)
 }
 
 func (bl *BlockListener) listen(ctx context.Context) error {
@@ -92,10 +105,15 @@ func (bl *BlockListener) listen(ctx context.Context) error {
 		}
 
 		latestChange := batch.ChangeBatch[len(batch.ChangeBatch)-1]
-		bl.events.NotifySync(BlockEvent{
+		blockEvent := BlockEvent{
 			LatestBlockNum:  latestChange.BlockHeight,
 			LatestBlockTime: latestChange.BlockTime,
+			StateVersionID:  batch.StateVersionId,
 			Unwind:          latestChange.Direction == remoteproto.Direction_UNWIND,
-		})
+		}
+		bl.eventsMu.Lock()
+		bl.lastEvent = &blockEvent
+		bl.events.NotifySync(blockEvent)
+		bl.eventsMu.Unlock()
 	}
 }

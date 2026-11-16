@@ -30,9 +30,3 @@ func NewAccumulation() *Accumulation {
 		RecentReceipts: NewRecentReceipts(512),
 	}
 }
-
-// Reset clears both the accumulator and recent receipts.
-func (a *Accumulation) Reset() {
-	a.Accumulator.Reset()
-	a.RecentReceipts.Clear()
-}

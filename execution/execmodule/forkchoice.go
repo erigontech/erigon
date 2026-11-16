@@ -396,7 +396,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	var restoreStateChanges func()
 	// Roll back only uncommitted changes; earlier catch-up commits still need delivery.
 	checkpointStateChanges := func() {
-		if e.accum != nil && e.accum.Accumulator != nil {
+		if e.accum != nil {
 			restoreStateChanges = e.accum.Accumulator.Checkpoint()
 		}
 	}
@@ -453,7 +453,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 	}
 	if currentContext != nil {
-		currentContext.SetInMemHistoryReads(inMemHistoryReads)
 		// Wire the state cache so canonical execution reads benefit from
 		// the per-execution Account/Storage/Code cache. Previously only
 		// ValidateChain (fork validation, exec_module.go) set this, leaving
@@ -721,7 +720,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				roTx.Rollback()
 				return nil, nil, fmt.Errorf("updateForkChoice: new sd after hasMore: %w", err)
 			}
-			freshSD.SetInMemHistoryReads(inMemHistoryReads)
 			freshSD.SetStateCache(e.stateCache)
 			if err := freshSD.InitBlockOverlay(roTx); err != nil {
 				roTx.Rollback()

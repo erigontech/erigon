@@ -168,6 +168,40 @@ func TestLocalAdmissionRejectsBeforeStartupRestore(t *testing.T) {
 	})
 }
 
+type blockedStateReadDB struct{ kv.TemporalRoDB }
+
+func (db blockedStateReadDB) ViewTemporal(ctx context.Context, _ func(kv.TemporalTx) error) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestLocalAdmissionDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		callerTimeout time.Duration
+		wantElapsed   time.Duration
+	}{
+		{"pool deadline", time.Minute, 30 * time.Second},
+		{"caller deadline", 5 * time.Second, 5 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, pool, _, _ := newTestPool(t)
+			pool._chainDB = blockedStateReadDB{pool._chainDB}
+			var txns TxnSlots
+			sender := common.Address{1}
+			txns.Append(newTestTxnSlot(0, 0, 1, 2, 21_000), sender[:], true)
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(t.Context(), tc.callerTimeout)
+				defer cancel()
+				started := time.Now()
+				_, err := pool.AddLocalTxns(ctx, txns)
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+				require.Equal(t, tc.wantElapsed, time.Since(started))
+			})
+		})
+	}
+}
+
 func TestFramePoolReconcilesMinedKeyedNonces(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -485,6 +519,39 @@ func TestFramePoolAdmissionRejectsDuringStateRecovery(t *testing.T) {
 		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 		require.Equal(t, PendingSubPool, pool.byHash[string(frame.IDHash[:])].currentSubPool)
 	})
+}
+
+func TestFramePoolRevalidationDefersDuringStateRecovery(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	reservation := pool.frameReservations[sender]
+
+	backend.onValidate = pool.MarkStateStale
+	backend.err = context.DeadlineExceeded
+	synctest.Test(t, func(t *testing.T) {
+		updateCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+		require.NoError(t, pool.OnNewBlock(updateCtx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		require.NoError(t, updateCtx.Err(), "revalidation must not wait for recovery")
+	})
+	require.True(t, pool.stateViewStale)
+	require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+	require.Equal(t, reservation, pool.frameReservations[sender])
+
+	backend.onValidate, backend.err = nil, nil
+	change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.False(t, pool.stateViewStale)
+	require.Equal(t, PendingSubPool, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+	require.Equal(t, reservation, pool.frameReservations[sender])
+	require.Len(t, backend.calls, 3)
 }
 
 func TestFramePoolRecoveryDuringAdmission(t *testing.T) {

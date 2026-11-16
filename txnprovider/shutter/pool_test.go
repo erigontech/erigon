@@ -617,6 +617,29 @@ func TestPoolWithDecryptionKeysThatDoNotFollowTxnIndexOrder(t *testing.T) {
 	})
 }
 
+func TestPoolStartsBeforeKeyperSetManagerDeployment(t *testing.T) {
+	t.Parallel()
+	pt := PoolTest{t}
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		ksmAddr := common.HexToAddress(handle.config.KeyperSetManagerContractAddress)
+		handle.SimulateCallResult(ksmAddr, nil)
+		handle.contractBackend.EXPECT().CodeAt(gomock.Any(), ksmAddr, uint256.NewInt(0)).Return(nil, nil)
+		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), nil)
+		require.NoError(t, handle.SimulateStateChange(ctx, MockStateChange{
+			batch: &remoteproto.StateChangeBatch{StateChangesIncomplete: true, ChangeBatch: []*remoteproto.StateChange{{}}},
+		}))
+		synctest.Wait()
+		select {
+		case err := <-handle.poolResult:
+			t.Fatalf("Shutter stopped before contract deployment: %v", err)
+		default:
+		}
+
+		handle.DecryptTxns(ctx, t, params.TxGas)
+		require.Len(t, pool.AllDecryptedTxns(), 1)
+	})
+}
+
 type PoolTest struct {
 	*testing.T
 }
@@ -637,7 +660,7 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 		ctrl := gomock.NewController(t)
 		contractBackend := NewMockContractBackend(ctrl, logger)
 		stateChangesClient := NewMockStateChangesClient(ctrl, logger)
-		currentBlockNumReader := func(context.Context) (*uint64, error) { return nil, nil }
+		readCommittedState := func(context.Context) (shutter.BlockState, error) { return shutter.BlockState{}, nil }
 		slotCalculator := NewMockSlotCalculator(ctrl, config)
 		keySenderFactory := NewMockDecryptionKeysSourceFactory(logger)
 		pool := shutter.NewPool(
@@ -647,16 +670,17 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 			baseTxnProvider,
 			contractBackend,
 			stateChangesClient,
-			currentBlockNumReader,
+			readCommittedState,
 			shutter.WithSlotCalculator(slotCalculator),
 			shutter.WithDecryptionKeysSourceFactory(keySenderFactory.NewDecryptionKeysSource),
 		)
 
 		contractBackend.PrepareMocks()
 		slotCalculator.PrepareMocks(t)
-		eg := errgroup.Group{}
-		eg.Go(func() error { return pool.Run(ctx) })
+		poolResult := make(chan error, 1)
+		go func() { poolResult <- pool.Run(ctx) }()
 		handle := PoolTestHandle{
+			poolResult:         poolResult,
 			baseTxnProvider:    baseTxnProvider,
 			chainConfig:        &chainConfig,
 			config:             config,
@@ -672,12 +696,12 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 		synctest.Wait()
 		testCase(ctx, t, pool, handle)
 		cancel()
-		err := eg.Wait()
-		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, <-poolResult, context.Canceled)
 	})
 }
 
 type PoolTestHandle struct {
+	poolResult         <-chan error
 	baseTxnProvider    *TestTxnProvider
 	chainConfig        *chain.Config
 	config             shuttercfg.Config

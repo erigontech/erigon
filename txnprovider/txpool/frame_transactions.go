@@ -583,15 +583,11 @@ type bogotaActivation struct {
 func (p *TxPool) RetainBogotaActivation(changes *remoteproto.StateChangeBatch) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	activation := p.bogotaActivationAfter(changes)
-	p.pendingActivation = &activation
+	p.activation = p.bogotaActivationAfter(changes)
 }
 
 func (p *TxPool) bogotaActivationAfter(changes *remoteproto.StateChangeBatch) bogotaActivation {
-	activation := bogotaActivation{active: p.headIsBogota}
-	if p.pendingActivation != nil {
-		activation = *p.pendingActivation
-	}
+	activation := p.activation
 	activeBefore := activation.active
 	// Forward history can overlap a subscription reset. Intermediate forward entries
 	// do not prove a reorg; an explicit unwind must survive later reactivation.
@@ -608,6 +604,12 @@ func (p *TxPool) bogotaActivationAfter(changes *remoteproto.StateChangeBatch) bo
 		activation.crossedBack = true
 	}
 	return activation
+}
+
+func recentRootsUnusable(roots []protocol.RecentRootReference, slot uint64) bool {
+	return slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
+		return !ref.ValidAt(slot)
+	})
 }
 
 // invalidateFrames drops expired transactions and parks those whose validation may be stale.
@@ -638,15 +640,17 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			if change.Action == remoteproto.Action_UPSERT || change.Action == remoteproto.Action_UPSERT_CODE {
 				accountChanges[address] = change.Data
 			}
-			if address == types.FrameNonceManager {
-				for _, storage := range change.StorageChanges {
-					nonceSlots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
-				}
+			var slots map[common.Hash]struct{}
+			switch {
+			case address == types.FrameNonceManager:
+				slots = nonceSlots
+			case address == types.FrameRecentRootVerifier:
+				slots = rootSlots
+			default:
+				continue
 			}
-			if address == types.FrameRecentRootVerifier {
-				for _, storage := range change.StorageChanges {
-					rootSlots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
-				}
+			for _, storage := range change.StorageChanges {
+				slots[gointerfaces.ConvertH256ToHash(storage.Location)] = struct{}{}
 			}
 		}
 	}
@@ -661,9 +665,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 			// Root age and activation are independent of simulation results.
 			roots = protocol.FrameTransactionRecentRoots(frame)
 		}
-		invalidRoots := slices.ContainsFunc(roots, func(ref protocol.RecentRootReference) bool {
-			return activationCrossedBack || !ref.ValidAt(pendingSlot)
-		})
+		invalidRoots := (activationCrossedBack && len(roots) > 0) || recentRootsUnusable(roots, pendingSlot)
 		if invalidRoots {
 			p.removeFromSubPool(mt, "recent root no longer usable")
 			p.discardLocked(mt, txpoolcfg.FrameStateChanged)
@@ -675,7 +677,7 @@ func (p *TxPool) invalidateFrames(changes *remoteproto.StateChangeBatch) []*meta
 		}
 		// Blob costs can change with the block context even when none
 		// of the validation's account dependencies changed.
-		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0 || changes.StateChangesIncomplete
+		affected := mt.currentSubPool == 0 || frame.GetBlobGas() != 0
 		// The signed deadline needs only a timestamp check. Changes to the verifier's
 		// code still trigger validation through its recorded dependency below.
 		if frame.Frames[0].IsExpiryVerifier() && previous.Deadline < pendingTime {
@@ -771,7 +773,7 @@ func (p *TxPool) revalidateFrames(ctx context.Context, parked []*metaTxn, genera
 		}
 		p.lock.Unlock()
 	}
-	return p.withLockedState(ctx, nil, true, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
+	err := p.withLockedState(ctx, nil, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
 		var announcements Announcements
 		if err := p.promote(cacheView, p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), &announcements); err != nil {
 			return err
@@ -780,4 +782,9 @@ func (p *TxPool) revalidateFrames(ctx context.Context, parked []*metaTxn, genera
 		p.publishDepthMetrics()
 		return nil
 	})
+	if errors.Is(err, errStateViewStale) {
+		// Recovery invalidates this generation; the next block update revalidates and promotes again.
+		return nil
+	}
+	return err
 }

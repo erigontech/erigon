@@ -23,6 +23,8 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -58,6 +60,7 @@ func TestStateChangesSnapshotMissingExecutedHeader(t *testing.T) {
 	dispatcher := NewDispatcher(chain.AllProtocolChanges, freezeblocks.NewBlockReader(nil), nil, nil, nil, log.New())
 	_, err := dispatcher.StateChangesSnapshot(t.Context(), db)
 	require.ErrorContains(t, err, "executed header 1")
+	require.Equal(t, codes.Unavailable, status.Code(err))
 
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1_000_000_000)}
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {

@@ -1370,7 +1370,7 @@ func txnRlpByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf []byte) (send
 	return buf[1 : 1+20], buf[1+20:], buf
 }
 
-func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (types.Transaction, uint64, uint64, bool, error) {
+func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (uint64, uint64, bool, error) {
 	for _, sn := range slices.Backward(segments) {
 		idxTxnHash := sn.Src().Index(snaptype2.Indexes.TxnHash)
 		idxTxnHash2BlockNum := sn.Src().Index(snaptype2.Indexes.TxnHash2BlockNum)
@@ -1392,14 +1392,11 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 			continue
 		}
 		buf, _ = gg.Next(buf[:0])
-		sender, txnRlp := buf[1:1+20], buf[1+20:]
-
-		txn, err := types.DecodeTransaction(txnRlp)
+		txnRlp := buf[1+20:]
+		hash, err := types.TransactionHashFromEncoding(txnRlp)
 		if err != nil {
-			return nil, 0, 0, false, err
+			return 0, 0, false, err
 		}
-
-		txn.SetSender(accounts.InternAddress(*(*common.Address)(sender))) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 
 		reader2 := recsplit.NewIndexReader(idxTxnHash2BlockNum)
 		blockNum, ok := reader2.Lookup(txnHash[:])
@@ -1408,12 +1405,12 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 		}
 
 		// final txnHash check  - completely avoid false-positives
-		if txn.Hash() == txnHash {
-			return txn, blockNum, idxTxnHash.BaseDataID() + txNumInFile, true, nil
+		if hash == txnHash {
+			return blockNum, idxTxnHash.BaseDataID() + txNumInFile, true, nil
 		}
 	}
 
-	return nil, 0, 0, false, nil
+	return 0, 0, false, nil
 }
 
 // TxnByIdxInBlock returns the i-th transaction of the block, excluding the
@@ -1537,11 +1534,7 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 	}
 
 	segments := r.viewType(tx, snaptype2.Transactions)
-	_, blockNum, txNum, ok, err = r.txnByHash(txnHash, segments, nil)
-	if err != nil {
-		return 0, 0, false, err
-	}
-	return blockNum, txNum, ok, nil
+	return r.txnByHash(txnHash, segments, nil)
 }
 
 func (r *BlockReader) FirstTxnNumNotInSnapshots(tx kv.Getter) uint64 {

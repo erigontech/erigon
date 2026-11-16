@@ -210,7 +210,7 @@ func TestFramePoolRecentRootForkBoundary(t *testing.T) {
 					change.ChangeBatch = append(change.ChangeBatch, replacement.ChangeBatch...)
 				}
 				require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
-				require.Equal(t, tc.activeHead, pool.headIsBogota)
+				require.Equal(t, tc.activeHead, pool.activation.active)
 				if tc.incomplete && !tc.evict {
 					require.Equal(t, []common.Hash{slot.IDHash}, backend.calls, "missing history requires revalidation")
 				} else {
@@ -288,7 +288,7 @@ func TestFramePoolRecentRootActivationUnwindRetry(t *testing.T) {
 	require.Empty(t, pool.frameReservations)
 	require.Empty(t, pool.all.senderIDFrameTxn)
 	require.Empty(t, backend.calls)
-	require.False(t, pool.headIsBogota)
+	require.False(t, pool.activation.active)
 }
 
 func TestFramePoolRecentRootRevalidatedAcrossMissingHistory(t *testing.T) {
@@ -461,11 +461,11 @@ func TestFramePoolActivationAfterFailedRevalidation(t *testing.T) {
 	change.ChangeBatch[0].BlockTime = now - 2
 	change.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
 	require.ErrorIs(t, pool.OnNewBlock(updateCtx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}), context.Canceled)
-	require.True(t, pool.headIsBogota, "failed revalidation must not commit the activation change")
+	require.True(t, pool.activation.active, "failed revalidation must not commit the activation change")
 
 	backend.onValidate = nil
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
-	require.False(t, pool.headIsBogota)
+	require.False(t, pool.activation.active)
 }
 
 func TestFramePoolSupersededUpdateKeepsActivation(t *testing.T) {
@@ -494,7 +494,7 @@ func TestFramePoolSupersededUpdateKeepsActivation(t *testing.T) {
 	older.ChangeBatch[0].Direction = remoteproto.Direction_UNWIND
 	require.NoError(t, pool.OnNewBlock(ctx, older, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.Equal(t, common.Hash{3}, pool.stateBlockHash)
-	require.True(t, pool.headIsBogota, "completion of an older update must not overwrite the newer activation")
+	require.True(t, pool.activation.active, "completion of an older update must not overwrite the newer activation")
 }
 
 func recentRootPoolHeader(blockTime, slot uint64) *types.Header {
