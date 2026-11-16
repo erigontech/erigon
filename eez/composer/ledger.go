@@ -41,6 +41,18 @@ const (
 	SettledPartial
 )
 
+func (r Resolution) String() string {
+	switch r {
+	case Settled:
+		return "settled"
+	case Failed:
+		return "failed"
+	case SettledPartial:
+		return "settled partially"
+	}
+	return "pending"
+}
+
 // Posted is a ledger entry handed out for recovery, disposal or audit.
 type Posted[T any] struct {
 	// Height is the batch's terminal block.
