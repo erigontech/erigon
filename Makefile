@@ -623,6 +623,12 @@ grpc: protoc-all $(PROTO_PATH)
 		downloader/downloader.proto execution/execution.proto \
 		txpool/txpool.proto txpool/mining.proto
 
+	PATH="$(GOBIN):$(PATH)" protoc --proto_path=eez/prove/proto --go_out=eez/prove/provepb --go-grpc_out=eez/prove/provepb \
+		--go_opt=paths=source_relative --go-grpc_opt=paths=source_relative \
+		--go_opt=Mprove.proto=github.com/erigontech/erigon/eez/prove/provepb \
+		--go-grpc_opt=Mprove.proto=github.com/erigontech/erigon/eez/prove/provepb \
+		prove.proto
+
 	@cd txnprovider/shutter && $(MAKE) proto
 
 ## stringer:                          generate stringer code
