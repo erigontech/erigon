@@ -35,40 +35,42 @@ import (
 func (a *Aggregator) StepAlignedEnd(stepSize uint64) (uint64, error) {
 	dirty := a.DebugBeginDirtyFilesRo()
 	defer dirty.Close()
-	check := func(name string, files []*FilesItem, accessors statecfg.Accessors) error {
+	at := a.BeginFilesRo()
+	defer at.Close()
+	check := func(name string, files []*FilesItem, visible visibleFiles, accessors statecfg.Accessors) error {
+		srcs := make([]*FilesItem, 0, len(visible))
+		for _, f := range visible {
+			srcs = append(srcs, f.src)
+		}
 		for _, item := range files {
 			if item.canDelete.Load() || checkForVisibility(item, accessors, false) {
 				continue
 			}
-			covered := slices.ContainsFunc(files, func(other *FilesItem) bool {
-				return item.isProperSubsetOf(other) && checkForVisibility(other, accessors, false)
-			})
-			if !covered && !coveredByVisibleFiles(item, files, accessors) {
+			if !slices.ContainsFunc(srcs, item.isProperSubsetOf) && !coveredByVisibleFiles(item, srcs, accessors) {
 				return fmt.Errorf("%s snapshot [%d,%d) is not indexed; build or repair its accessors before rebasing", name, item.startTxNum, item.endTxNum)
 			}
 		}
 		return nil
 	}
-	for _, d := range dirty.domain {
-		if err := check(d.d.FilenameBase, d.files, d.d.Accessors); err != nil {
+	for i, d := range dirty.domain {
+		dt := at.d[i]
+		if err := check(d.d.FilenameBase, d.files, dt.files, d.d.Accessors); err != nil {
 			return 0, err
 		}
-		if err := check(d.d.FilenameBase+" history", d.history.files, d.history.h.Accessors); err != nil {
+		if err := check(d.d.FilenameBase+" history", d.history.files, dt.ht.files, d.history.h.Accessors); err != nil {
 			return 0, err
 		}
-		if err := check(d.d.FilenameBase+" history index", d.history.ii.files, d.history.ii.ii.Accessors); err != nil {
+		if err := check(d.d.FilenameBase+" history index", d.history.ii.files, dt.ht.iit.files, d.history.ii.ii.Accessors); err != nil {
 			return 0, err
 		}
 	}
-	for _, ii := range dirty.ii {
+	for i, ii := range dirty.ii {
 		if ii != nil {
-			if err := check(ii.ii.FilenameBase, ii.files, ii.ii.Accessors); err != nil {
+			if err := check(ii.ii.FilenameBase, ii.files, at.iis[i].files, ii.ii.Accessors); err != nil {
 				return 0, err
 			}
 		}
 	}
-	at := a.BeginFilesRo()
-	defer at.Close()
 	return at.stepAlignedEnd(stepSize)
 }
 
