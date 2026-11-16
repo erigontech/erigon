@@ -57,7 +57,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -181,7 +180,6 @@ type TxPool struct {
 	isPostAmsterdam         atomic.Bool
 	bogotaTime              *uint64
 	isPostBogota            atomic.Bool
-	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
 	newSlotsStreams         *NewSlotsStreams
@@ -208,10 +206,6 @@ type TxPool struct {
 	hasUnprocessedRemoteTxns atomic.Bool // lock-free way to check if pool needs to flush buffered remote txs
 }
 
-type FeeCalculator interface {
-	CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee uint64, blobFee uint64, minBlobGasPrice, blockGasLimit uint64, err error)
-}
-
 func New(
 	ctx context.Context,
 	newTxns chan Announcements,
@@ -228,7 +222,6 @@ func New(
 	logger log.Logger,
 	opts ...Option,
 ) (*TxPool, error) {
-	options := applyOpts(opts...)
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
 		return nil, err
@@ -285,7 +278,6 @@ func New(
 		unprocessedRemoteByHash: map[string]*TxnSlot{},
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
-		feeCalculator:           options.feeCalculator,
 		ethBackend:              ethBackend,
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
@@ -3286,14 +3278,6 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 		}
 	}
 
-	binary.BigEndian.PutUint64(encID, p.pendingBaseFee.Load())
-	if err := tx.Put(kv.PoolInfo, PoolPendingBaseFeeKey, encID); err != nil {
-		return err
-	}
-	binary.BigEndian.PutUint64(encID, p.pendingBlobFee.Load())
-	if err := tx.Put(kv.PoolInfo, PoolPendingBlobFeeKey, encID); err != nil {
-		return err
-	}
 	if err := PutLastSeenBlock(tx, p.lastSeenBlock.Load(), encID); err != nil {
 		return err
 	}
@@ -3354,56 +3338,6 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 			return err
 		}
 		p.isLocalLRU.Add(string(v), struct{}{})
-	}
-
-	pendingBaseFee, pendingBlobFee := p.pendingBaseFee.Load(), p.pendingBlobFee.Load()
-	// A state reset supplies fees and gas limits for the restored state. Only fall
-	// back to the database when startup has not received a block notification.
-	if p.blockGasLimit.Load() == 0 {
-		var minBlobGasPrice, blockGasLimit uint64
-
-		if p.feeCalculator != nil {
-			pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(p.chainConfig, coreTx)
-			if err != nil {
-				return err
-			}
-		}
-
-		if pendingBaseFee == 0 {
-			v, err := tx.GetOne(kv.PoolInfo, PoolPendingBaseFeeKey)
-			if err != nil {
-				return err
-			}
-			if len(v) > 0 {
-				pendingBaseFee = binary.BigEndian.Uint64(v)
-			}
-		}
-
-		if pendingBlobFee == 0 {
-			v, err := tx.GetOne(kv.PoolInfo, PoolPendingBlobFeeKey)
-			if err != nil {
-				return err
-			}
-			if len(v) > 0 {
-				pendingBlobFee = binary.BigEndian.Uint64(v)
-			}
-		}
-
-		if pendingBlobFee == 0 {
-			pendingBlobFee = minBlobGasPrice
-		}
-
-		if blockGasLimit == 0 {
-			blockGasLimit = ethconfig.DefaultBlockGasLimitByChain(p.chainConfig)
-		}
-
-		// The validation and insertion below read these from p, so publish them first.
-		var pendingBaseFee256 uint256.Int
-		pendingBaseFee256.SetUint64(pendingBaseFee)
-		p.setPendingBaseFeeOnQueues(pendingBaseFee256)
-		p.pendingBaseFee.Store(pendingBaseFee)
-		p.pendingBlobFee.Store(pendingBlobFee)
-		p.blockGasLimit.Store(blockGasLimit)
 	}
 
 	var restored TxnSlots
@@ -3481,7 +3415,7 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		return err
 	}
 	if _, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, txns, cells,
-		pendingBaseFee, pendingBlobFee, false); err != nil {
+		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), false); err != nil {
 		return err
 	}
 
