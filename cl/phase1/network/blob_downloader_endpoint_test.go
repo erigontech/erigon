@@ -124,13 +124,14 @@ func TestBlobHistoryDownloaderTriesTheNextEndpoint(t *testing.T) {
 }
 
 // The backfill walks down from the head, and a pruned endpoint serves only the slots above its window, so once it
-// does not serve a slot it is not asked for older slots in the same pass.
+// does not serve a slot it is not asked for older slots in the later batches of the same pass.
 func TestBlobHistoryDownloaderStopsAskingAnEndpointBelowASlotItDoesNotServe(t *testing.T) {
 	newer, older := newEndpointBlock(t, 100), newEndpointBlock(t, 99)
 	url, requests := blobEndpoint(t)
 	downloader := newEndpointDownloader(t, []string{url}, 1, &countingBlobPeerClient{})
 
-	downloader.processBatch([]incompleteBlock{{block: newer.block, root: newer.root}, {block: older.block, root: older.root}})
+	downloader.processBatch([]incompleteBlock{{block: newer.block, root: newer.root}})
+	downloader.processBatch([]incompleteBlock{{block: older.block, root: older.root}})
 	require.Equal(t, int32(1), requests.Load())
 
 	downloader.resetEndpointWindows()

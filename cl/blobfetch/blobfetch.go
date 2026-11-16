@@ -35,6 +35,8 @@ import (
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/hashicorp/go-retryablehttp"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -227,7 +229,9 @@ func getBeaconData(ctx context.Context, endpoint, path string, maxEntries int) (
 }
 
 // FetchAndStore fetches the sidecars of the block at the canonical root from endpoint, verifies them and stores them.
-func FetchAndStore(ctx context.Context, store blob_storage.BlobStorage, endpoint string, root common.Hash, block *cltypes.SignedBeaconBlock) error {
+// With a non-nil cpu, the missing proofs of the block are computed in parallel, one budget slot each; with nil they
+// are computed one after another on the caller's goroutine.
+func FetchAndStore(ctx context.Context, store blob_storage.BlobStorage, endpoint string, root common.Hash, block *cltypes.SignedBeaconBlock, cpu *semaphore.Weighted) error {
 	commitments := block.Block.Body.GetBlobKzgCommitments()
 	sidecars, err := Retrieve(ctx, endpoint, root, block)
 	if err != nil {
@@ -243,7 +247,7 @@ func FetchAndStore(ctx context.Context, store blob_storage.BlobStorage, endpoint
 	for i := range commitments.Len() {
 		ids.Append(&cltypes.BlobIdentifier{BlockRoot: root, Index: uint64(i)})
 	}
-	return Store(ctx, store, ids, sidecars, block)
+	return store_(ctx, store, ids, sidecars, block, cpu)
 }
 
 // Store verifies a remote blob response against the requested identifiers, stores what
@@ -266,6 +270,17 @@ func Store(
 	blobs []*cltypes.BlobSidecar,
 	block *cltypes.SignedBeaconBlock,
 ) error {
+	return store_(ctx, blobDB, ids, blobs, block, nil)
+}
+
+func store_(
+	ctx context.Context,
+	blobDB blob_storage.BlobStorage,
+	ids *solid.ListSSZ[*cltypes.BlobIdentifier],
+	blobs []*cltypes.BlobSidecar,
+	block *cltypes.SignedBeaconBlock,
+	cpu *semaphore.Weighted,
+) error {
 	commitments := block.Block.Body.GetBlobKzgCommitments()
 	for _, sidecar := range blobs {
 		if sidecar == nil {
@@ -277,15 +292,9 @@ func Store(
 		if common.Bytes48(*commitments.Get(int(sidecar.Index))) != sidecar.KzgCommitment {
 			return fmt.Errorf("blob sidecar at index %d carries a commitment the block does not reference", sidecar.Index)
 		}
-		if sidecar.KzgProof == common.Bytes48(goethkzg.PointAtInfinity) {
-			// One goroutine: callers bound concurrency by their worker count, and spreading one proof over every CPU
-			// costs more CPU time in total.
-			proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(&sidecar.Blob), goethkzg.KZGCommitment(sidecar.KzgCommitment), 1)
-			if err != nil {
-				return fmt.Errorf("blob sidecar at index %d: compute its KZG proof: %w", sidecar.Index, err)
-			}
-			sidecar.KzgProof = common.Bytes48(proof)
-		}
+	}
+	if err := computeMissingProofs(ctx, blobs, cpu); err != nil {
+		return err
 	}
 	_, inserted, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, blobDB, ids, blobs,
 		block.Version(),
@@ -313,6 +322,40 @@ func Store(
 		}
 	}
 	return nil
+}
+
+// computeMissingProofs fills the empty KZG proofs of blobs. Each proof runs on one goroutine: spreading one proof over
+// every CPU costs more CPU time in total, so parallelism comes only from the cpu budget, one slot per proof.
+func computeMissingProofs(ctx context.Context, blobs []*cltypes.BlobSidecar, cpu *semaphore.Weighted) error {
+	compute := func(sidecar *cltypes.BlobSidecar) error {
+		proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(&sidecar.Blob), goethkzg.KZGCommitment(sidecar.KzgCommitment), 1)
+		if err != nil {
+			return fmt.Errorf("blob sidecar at index %d: compute its KZG proof: %w", sidecar.Index, err)
+		}
+		sidecar.KzgProof = common.Bytes48(proof)
+		return nil
+	}
+	var g errgroup.Group
+	for _, sidecar := range blobs {
+		if sidecar.KzgProof != common.Bytes48(goethkzg.PointAtInfinity) {
+			continue
+		}
+		if cpu == nil {
+			if err := compute(sidecar); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := cpu.Acquire(ctx, 1); err != nil {
+			_ = g.Wait()
+			return err
+		}
+		g.Go(func() error {
+			defer cpu.Release(1)
+			return compute(sidecar)
+		})
+	}
+	return g.Wait()
 }
 
 // RedactURL keeps only the scheme and host of u for logs and errors: beacon API providers put the API key in the

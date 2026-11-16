@@ -29,6 +29,7 @@ import (
 
 	"github.com/google/btree"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/blobfetch"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -140,6 +141,7 @@ type BlobHistoryDownloader struct {
 	// slots above its window.
 	endpoints          []string
 	endpointWorkers    int
+	endpointCPU        *semaphore.Weighted
 	endpointWindowMu   sync.Mutex
 	endpointUnservedAt []uint64
 
@@ -247,6 +249,7 @@ func (b *BlobHistoryDownloader) SetBlobEndpoints(endpoints []string, workers int
 	b.endpoints = endpoints
 	cpus := runtime.GOMAXPROCS(0)
 	b.endpointWorkers = blobEndpointWorkers(workers, cpus)
+	b.endpointCPU = semaphore.NewWeighted(int64(b.endpointWorkers))
 	b.endpointUnservedAt = make([]uint64, len(endpoints))
 	hosts := make([]string, len(endpoints))
 	for i, endpoint := range endpoints {
@@ -270,8 +273,10 @@ func (b *BlobHistoryDownloader) resetEndpointWindows() {
 // fetchFromEndpoints stores the blobs of every block an endpoint serves and returns the blocks still incomplete.
 func (b *BlobHistoryDownloader) fetchFromEndpoints(batch []incompleteBlock) []incompleteBlock {
 	filled := make([]bool, len(batch))
+	// Requests mostly wait on the network, so twice as many run as there are workers; the CPU work they do is bounded
+	// by endpointCPU, one slot per proof.
 	var g errgroup.Group
-	g.SetLimit(b.endpointWorkers)
+	g.SetLimit(2 * b.endpointWorkers)
 	for i, item := range batch {
 		g.Go(func() error {
 			filled[i] = b.fetchFromEndpoint(item)
@@ -300,7 +305,7 @@ func (b *BlobHistoryDownloader) fetchFromEndpoint(item incompleteBlock) bool {
 		if belowWindow {
 			continue
 		}
-		err := blobfetch.FetchAndStore(b.ctx, b.blobStorage, endpoint, item.root, item.block)
+		err := blobfetch.FetchAndStore(b.ctx, b.blobStorage, endpoint, item.root, item.block, b.endpointCPU)
 		if err == nil {
 			return true
 		}

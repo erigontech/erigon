@@ -319,7 +319,7 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		if slot < b.windows[i].from.Load() {
 			continue
 		}
-		lastErr = blobfetch.FetchAndStore(ctx, store, endpoint, root, block)
+		lastErr = blobfetch.FetchAndStore(ctx, store, endpoint, root, block, nil)
 		if err := store.err(); err != nil {
 			return fmt.Errorf("blob store write failed, stopping: %w", err)
 		}

@@ -20,7 +20,7 @@
 
 - engine: the authenticated Engine port supports cleartext HTTP/2 (h2c) with prior knowledge alongside HTTP/1.1. JWT authentication applies to both protocols (#21729) — by @yperbasis
 - caplin: add `--caplin.blobs-archive-from-slot` to bound the blob archive; it implies `--caplin.blobs-archive` and cannot be combined with `--caplin.snapgen` (#25879) — by @awskii
-- caplin: add `--caplin.blobs-backfill-endpoint`, which makes the blob backfill fetch blobs from beacon API endpoints before peers and verify them before they are stored; repeat it for fallback endpoints. Slots older than about 18 days need an archive-capable endpoint. `--caplin.blobs-backfill-endpoint-workers` sets how many blocks are fetched at a time (default: a quarter of the CPUs the process may use, which follows a container's CPU limit, at least 1); each worker uses about one CPU core, so set it to the cores the node can spare (#26388) — by @lystopad
+- caplin: add `--caplin.blobs-backfill-endpoint`, which makes the blob backfill fetch blobs from beacon API endpoints before peers and verify them before they are stored; repeat it for fallback endpoints. Slots older than about 18 days need an archive-capable endpoint. `--caplin.blobs-backfill-endpoint-workers` sets how many CPUs verify the fetched blobs (default: a quarter of the CPUs the process may use, which follows a container's CPU limit, at least 1); each worker uses about one CPU core, so set it to the cores the node can spare (#26388) — by @lystopad
 
 ### Changed
 
