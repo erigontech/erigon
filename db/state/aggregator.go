@@ -1837,6 +1837,8 @@ type aggregatorVisible struct {
 	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
+	cutBy        string                          // the list whose end every other list was lowered to, if any
+	cutAt        uint64
 
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
@@ -1852,12 +1854,15 @@ type aggregatorVisible struct {
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
 	var next *aggregatorVisible
+	var cutBy string
+	var cutAt uint64
 	for {
 		next = &aggregatorVisible{}
 		end := toTxNum
-		lower := func(dirty *DirtyFiles, visible visibleFiles) {
-			if dirty.Len() > 0 {
-				end = min(end, visible.EndTxNum())
+		lower := func(name string, dirty *DirtyFiles, visible visibleFiles) {
+			if dirty.Len() > 0 && visible.EndTxNum() < end {
+				end = visible.EndTxNum()
+				cutBy, cutAt = name, end
 			}
 		}
 		for id, d := range a.d {
@@ -1868,10 +1873,10 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			if !d.Enabled || a.unalignedDomain[id] {
 				continue
 			}
-			lower(d.dirtyFiles, next.d[id].files)
+			lower(d.FilenameBase, d.dirtyFiles, next.d[id].files)
 			if !d.HistCfg.SnapshotsDisabled && !d.HistCfg.HistoryDisabled {
-				lower(d.History.dirtyFiles, next.dh[id])
-				lower(d.InvertedIndex.dirtyFiles, next.dhii[id].files)
+				lower(d.FilenameBase+" history", d.History.dirtyFiles, next.dh[id])
+				lower(d.FilenameBase+" history index", d.InvertedIndex.dirtyFiles, next.dhii[id].files)
 			}
 		}
 		for id, ii := range a.standaloneIIs() {
@@ -1880,7 +1885,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			}
 			next.iis[id] = ii.calcVisibleFiles(toTxNum)
 			if ii.Enabled && !a.unalignedIdx[id] {
-				lower(ii.dirtyFiles, next.iis[id].files)
+				lower(ii.FilenameBase, ii.dirtyFiles, next.iis[id].files)
 			}
 		}
 		if end == toTxNum {
@@ -1889,6 +1894,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 		toTxNum = end
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
+	next.cutBy, next.cutAt = cutBy, cutAt
 
 	if a.visibilityLoweringForbidden.Load() {
 		prev := a.visible.Load()
@@ -2513,15 +2519,21 @@ func (at *AggregatorRoTx) Generation() uint64 { return at.visible.generation }
 // snapshot/DB management operations — e.g. `seg rm-state --latest` and then starting
 // erigon without `integration stage_exec --reset`. Meant to run once at startup.
 func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
+	cut := func(err error) error {
+		if err != nil && at.visible.cutBy != "" {
+			return fmt.Errorf("%s stops at txNum %d, and every list stops there with it: %w", at.visible.cutBy, at.visible.cutAt, err)
+		}
+		return err
+	}
 	for _, dt := range at.d {
 		if dt == nil || !dt.d.Enabled {
 			continue
 		}
 		if err := dt.checkFilesDBGap(tx); err != nil {
-			return err
+			return cut(err)
 		}
 		if err := dt.ht.checkFilesDBGap(tx); err != nil {
-			return err
+			return cut(err)
 		}
 	}
 	for _, iit := range at.iis {
@@ -2529,7 +2541,7 @@ func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
 			continue
 		}
 		if err := iit.checkFilesDBGap(tx); err != nil {
-			return err
+			return cut(err)
 		}
 	}
 	return nil

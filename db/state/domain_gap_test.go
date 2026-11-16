@@ -32,6 +32,24 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
+// A cut in one list lowers every list, so the gap error names the list that stopped them.
+func TestCheckFilesDBGapNamesTheListThatCut(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v2.0-accounts.1-2.vi")))
+	require.NoError(t, agg.OpenFolder(db))
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, SavePruneValProgress(tx, agg.d[kv.AccountsDomain].ValuesTable, &prune.Stat{TxTo: 30}))
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	require.ErrorContains(t, at.CheckFilesDBGap(tx), "accounts history stops at txNum 10")
+}
+
 func TestCheckFilesDBGapChecksHistory(t *testing.T) {
 	t.Parallel()
 	for _, path := range []string{
