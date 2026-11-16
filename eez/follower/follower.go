@@ -106,6 +106,9 @@ type Config struct {
 	PeerCount        func(ctx context.Context) (uint64, error)
 	PeerRefresh      time.Duration
 	OverlayPeerCount func() int
+	// OnHead, when set, receives from Run the L1 head boot caught up to, then
+	// every new one; it must not block.
+	OnHead func(l1.Header)
 }
 
 // DefaultConfig is the reference client's tuning.
@@ -138,6 +141,8 @@ type Follower struct {
 	heads   *signedHeads
 	peers   *peerCount
 	logger  log.Logger
+	// commands are the other writers' work, which Run performs.
+	commands chan command
 	// scanned is the last L1 block whose batches were reconciled, target
 	// the L1 head to scan to and l1Finalized the latest finalized L1 block.
 	scanned, target, l1Finalized uint64
@@ -252,16 +257,17 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 		scanner.SetChunk(c.LogChunk)
 	}
 	f := &Follower{
-		cfg:     c,
-		l2:      l2,
-		reader:  reader,
-		scanner: scanner,
-		watcher: l1.NewWatcher(reader, c.ReorgDepth, logger),
-		chain:   chain,
-		watch:   watch,
-		deriver: d,
-		logger:  logger,
-		status:  Status{Mode: mode, Phase: PhaseBooting},
+		cfg:      c,
+		l2:       l2,
+		reader:   reader,
+		scanner:  scanner,
+		watcher:  l1.NewWatcher(reader, c.ReorgDepth, logger),
+		chain:    chain,
+		watch:    watch,
+		deriver:  d,
+		logger:   logger,
+		commands: make(chan command),
+		status:   Status{Mode: mode, Phase: PhaseBooting},
 	}
 	watch.f = f
 	publishPhase(PhaseBooting)
@@ -347,7 +353,8 @@ func (f *Follower) Deriver() *deriver.Deriver { return f.deriver }
 
 // Run boots and follows L1 until ctx ends or the follower must halt: on a
 // divergence from canonical L1, an L1 reorg it cannot follow, or a boot
-// that exhausts BootAttempts.
+// that exhausts BootAttempts. Once booted it also performs the commands of
+// the chain's other writers, between its own steps.
 func (f *Follower) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -361,6 +368,9 @@ func (f *Follower) Run(ctx context.Context) error {
 	}
 	if err := f.Boot(ctx); err != nil {
 		return err
+	}
+	if f.cfg.OnHead != nil {
+		f.cfg.OnHead(f.watcher.Tip())
 	}
 	events := make(chan l1.Event, 64)
 	watched := make(chan error, 1)
@@ -410,6 +420,9 @@ func (f *Follower) Run(ctx context.Context) error {
 			continue
 		case <-unsafeTick:
 			f.stepUnsafe(ctx)
+			continue
+		case c := <-f.commands:
+			f.perform(ctx, c)
 			continue
 		}
 		if err = f.recover(ctx, err); err != nil {
@@ -637,6 +650,9 @@ func (f *Follower) Handle(ctx context.Context, e l1.Event) error {
 	switch e := e.(type) {
 	case l1.NewHead:
 		f.target = max(f.target, e.Head.Number)
+		if f.cfg.OnHead != nil {
+			f.cfg.OnHead(e.Head)
+		}
 	case l1.Reorg:
 		f.logger.Info("[eez] L1 reorg", "event", "eez.l1_watcher.reorg.detected", "ancestor", e.Ancestor.Number, "oldHead", e.OldHead.Number)
 		if err := f.rewind(ctx, e.Ancestor.Number); err != nil {

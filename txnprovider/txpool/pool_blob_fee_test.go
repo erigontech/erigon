@@ -21,6 +21,7 @@ import (
 	"sort"
 	"testing"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -34,7 +35,7 @@ import (
 func bestOf(t *testing.T, pool *TxPool) int {
 	t.Helper()
 	var selected TxnsRlp
-	_, count, err := pool.best(t.Context(), 10, &selected, 0, nil, mdgas.NewFullMdGas(30_000_000, 30_000_000, math.MaxUint64), nil, math.MaxInt)
+	_, count, err := pool.best(t.Context(), 10, &selected, 0, common.Hash{}, nil, mdgas.NewFullMdGas(30_000_000, 30_000_000, math.MaxUint64), nil, math.MaxInt)
 	require.NoError(t, err)
 	return count
 }
@@ -150,4 +151,23 @@ func TestBlobFeeCapKeepsTheLowestCap(t *testing.T) {
 	require.Equal(t, uint64(5), blobFeeCap(blob(uint256.NewInt(5)), 7))
 	require.Equal(t, uint64(7), blobFeeCap(blob(uint256.NewInt(9)), 7))
 	require.Equal(t, uint64(math.MaxUint64), blobFeeCap(blob(aboveUint64), math.MaxUint64), "a cap above uint64 never lowers it")
+}
+
+// best skips, without yielding or marking it, a txn larger than the space left
+// and goes on to the txns after it, so a caller offering less space than the
+// block's RLP size still reaches those that fit.
+func TestBestSkipsATxnOverTheSpaceLeft(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 21_000, 21_000)
+	first, second := pool.pending.best.ms[0], pool.pending.best.ms[1]
+	space := int(second.TxnSlot.Size)
+	first.TxnSlot.Size = uint32(space + 1)
+
+	yielded := mapset.NewSet[[32]byte]()
+	var selected TxnsRlp
+	_, count, err := pool.best(t.Context(), 10, &selected, 0, common.Hash{}, nil, mdgas.NewFullMdGas(30_000_000, 30_000_000, math.MaxUint64), yielded, space)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.True(t, yielded.Contains(second.TxnSlot.IDHash))
+	require.False(t, yielded.Contains(first.TxnSlot.IDHash))
+	require.Equal(t, 2, pool.pending.Len())
 }

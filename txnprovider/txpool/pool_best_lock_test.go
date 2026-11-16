@@ -27,6 +27,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	mdgas "github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
@@ -42,7 +43,7 @@ func TestBestReleasesTheLockWhenTheCallerGivesUpWaitingForABlock(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, _, err := p.best(ctx, 1, &TxnsRlp{}, 1, nil, mdgas.FullMdGas{}, mapset.NewSet[[32]byte](), 0)
+	_, _, err := p.best(ctx, 1, &TxnsRlp{}, 1, common.Hash{}, nil, mdgas.FullMdGas{}, mapset.NewSet[[32]byte](), 0)
 	require.ErrorIs(t, err, context.Canceled)
 
 	// Returning with the lock still held blocks every later pool operation, including the block
@@ -93,7 +94,7 @@ func TestBestReturnsWhenItsCallerGoesAwayWhileWaitingForABlock(t *testing.T) {
 
 	returned := make(chan error, 1)
 	go func() {
-		_, _, err := p.best(ctx, 1, &TxnsRlp{}, 1, nil, mdgas.FullMdGas{}, mapset.NewSet[[32]byte](), 0)
+		_, _, err := p.best(ctx, 1, &TxnsRlp{}, 1, common.Hash{}, nil, mdgas.FullMdGas{}, mapset.NewSet[[32]byte](), 0)
 		returned <- err
 	}()
 

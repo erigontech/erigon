@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,10 +43,12 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -862,6 +865,7 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 		1,
 		&selected,
 		0,
+		common.Hash{},
 		nil,
 		mdgas.NewFullMdGas(gasLimit, gasLimit-1, math.MaxUint64),
 		nil,
@@ -891,6 +895,7 @@ func TestBestYieldsTxnBelowLegacyMinGasPostAmsterdam(t *testing.T) {
 		1,
 		&selected,
 		0,
+		common.Hash{},
 		nil,
 		mdgas.NewFullMdGas(gasLimit, gasLimit, math.MaxUint64),
 		nil,
@@ -3927,5 +3932,317 @@ func TestBlobNonceRetryNonceBounds(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{tc.want}, reasons)
 		})
+	}
+}
+
+// TestPeekBestOfNoneWaitsForTheBlock: a peek at no transactions returns once
+// the pool has seen the block, and leaves the pool as it was.
+func TestPeekBestOfNoneWaitsForTheBlock(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 21_000)
+	short, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	_, err := pool.PeekBest(short, 0, &TxnsRlp{}, 1)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := pool.PeekBest(t.Context(), 0, &TxnsRlp{}, 1)
+		done <- err
+	}()
+	require.NoError(t, pool.OnNewBlock(t.Context(), &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 200_000,
+		BlockGasLimit:       40_000_000,
+		ChangeBatch:         []*remoteproto.StateChange{{BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1})}},
+	}, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the peek did not return once the pool saw the block")
+	}
+	require.Equal(t, 1, pool.pending.Len())
+}
+
+// TestProvideTxnsWaitsForTheParentHash: a provider asked for the parent's
+// hash waits until the pool's view is that block, not only its height: after
+// a replacement at the parent's height, and after a retreat below the view.
+func TestProvideTxnsWaitsForTheParentHash(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 21_000)
+	see := func(changes ...*remoteproto.StateChange) {
+		t.Helper()
+		require.NoError(t, pool.OnNewBlock(t.Context(), &remoteproto.StateChangeBatch{
+			PendingBlockBaseFee: 200_000,
+			BlockGasLimit:       40_000_000,
+			ChangeBatch:         changes,
+		}, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	}
+	block := func(n uint64, hash common.Hash) *remoteproto.StateChange {
+		return &remoteproto.StateChange{BlockHeight: n, BlockHash: gointerfaces.ConvertHashToH256(hash)}
+	}
+	unwind := func(n uint64, hash common.Hash) *remoteproto.StateChange {
+		c := block(n, hash)
+		c.Direction = remoteproto.Direction_UNWIND
+		return c
+	}
+	provide := func(n uint64, hash common.Hash) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			txns, err := pool.ProvideTxns(t.Context(), txnprovider.WithParentBlockNum(n), txnprovider.WithParentBlockHash(hash))
+			if err == nil && len(txns) != 1 {
+				err = fmt.Errorf("%d transactions provided", len(txns))
+			}
+			done <- err
+		}()
+		return done
+	}
+	provided := func(done <-chan error) {
+		t.Helper()
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("the provider did not return once the pool saw the parent")
+		}
+	}
+	waits := func(done <-chan error) {
+		t.Helper()
+		require.Never(t, func() bool { return len(done) > 0 }, 300*time.Millisecond, 10*time.Millisecond, "provided on a view of another block")
+	}
+	a, b, c := common.Hash{0xa}, common.Hash{0xb}, common.Hash{0xc}
+
+	see(block(1, a))
+	provided(provide(1, a))
+
+	done := provide(1, b)
+	waits(done)
+	see(unwind(0, common.Hash{}), block(1, b))
+	provided(done)
+
+	see(block(2, c))
+	done = provide(1, b)
+	waits(done)
+	see(unwind(1, b))
+	provided(done)
+}
+
+// beginHook is a pool database that, once armed, runs moved before opening
+// its next read transaction, or once it is open when opened is set, and keeps
+// moved's error in err.
+type beginHook struct {
+	kv.RwDB
+	armed  atomic.Bool
+	opened bool
+	moved  func() error
+	err    error
+}
+
+func (h *beginHook) BeginRo(ctx context.Context) (kv.Tx, error) {
+	if !h.armed.CompareAndSwap(true, false) {
+		return h.RwDB.BeginRo(ctx)
+	}
+	if !h.opened {
+		h.err = h.moved()
+		return h.RwDB.BeginRo(ctx)
+	}
+	return h.after(h.RwDB.BeginRo(ctx))
+}
+
+// after runs moved on the open read.
+func (h *beginHook) after(tx kv.Tx, err error) (kv.Tx, error) {
+	if err == nil {
+		h.err = h.moved()
+	}
+	return tx, err
+}
+
+// TestProvideTxnsKeepsTheParentAcrossTheRead: the pool's view moving off
+// what the wait accepted while a provider opens its read of the pool sends
+// the provider back to waiting: it selects only from that view, the
+// parent's hash or, without one, its height.
+func TestProvideTxnsKeepsTheParentAcrossTheRead(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 21_000)
+	apply := func(changes ...*remoteproto.StateChange) error {
+		return pool.OnNewBlock(t.Context(), &remoteproto.StateChangeBatch{
+			PendingBlockBaseFee: 200_000,
+			BlockGasLimit:       40_000_000,
+			ChangeBatch:         changes,
+		}, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	}
+	block := func(n uint64, hash common.Hash) *remoteproto.StateChange {
+		return &remoteproto.StateChange{BlockHeight: n, BlockHash: gointerfaces.ConvertHashToH256(hash)}
+	}
+	unwind := func(n uint64, hash common.Hash) *remoteproto.StateChange {
+		c := block(n, hash)
+		c.Direction = remoteproto.Direction_UNWIND
+		return c
+	}
+	a, b, c := common.Hash{0xa}, common.Hash{0xb}, common.Hash{0xc}
+	on := func(hash common.Hash) func() error {
+		return func() error { return apply(unwind(0, common.Hash{}), block(1, hash)) }
+	}
+	hook := &beginHook{RwDB: pool.poolDB}
+	pool.poolDB = hook
+	byHash := func(ctx context.Context) error {
+		_, err := pool.ProvideTxns(ctx, txnprovider.WithParentBlockNum(1), txnprovider.WithParentBlockHash(a))
+		return err
+	}
+	const back = 200 * time.Millisecond
+	// later applies view after back, off the test's goroutine, joined at
+	// cleanup, and returns the instant before it starts.
+	later := func(t *testing.T, view func() error) time.Time {
+		done := make(chan struct{})
+		t.Cleanup(func() { <-done })
+		start := time.Now()
+		go func() {
+			defer close(done)
+			time.Sleep(back)
+			assert.NoError(t, view())
+		}()
+		return start
+	}
+
+	t.Run("moved off", func(t *testing.T) {
+		require.NoError(t, on(a)())
+		hook.moved = on(b)
+		hook.armed.Store(true)
+		short, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+		defer cancel()
+		require.ErrorIs(t, byHash(short), context.DeadlineExceeded, "provided from the view of another block")
+		require.False(t, hook.armed.Load())
+		require.NoError(t, hook.err)
+	})
+	t.Run("moved back", func(t *testing.T) {
+		require.NoError(t, on(a)())
+		hook.moved = on(b)
+		hook.armed.Store(true)
+		start := later(t, on(a))
+		require.NoError(t, byHash(t.Context()))
+		require.NoError(t, hook.err)
+		require.GreaterOrEqual(t, time.Since(start), back, "provided before the view came back")
+	})
+	t.Run("lowered", func(t *testing.T) {
+		require.NoError(t, on(a)())
+		require.NoError(t, apply(block(2, c)))
+		hook.moved = func() error { return apply(unwind(1, a)) }
+		hook.armed.Store(true)
+		start := later(t, func() error { return apply(block(2, c)) })
+		_, err := pool.ProvideTxns(t.Context(), txnprovider.WithParentBlockNum(2))
+		require.NoError(t, err)
+		require.NoError(t, hook.err)
+		require.GreaterOrEqual(t, time.Since(start), back, "provided below the parent's height")
+	})
+}
+
+// TestProvideTxnsAcrossAFlush: a flush while a provider opens its read of the
+// pool moves the RLP of the freshest transactions to rows that read does not
+// see; the provider reads again and still yields them.
+func TestProvideTxnsAcrossAFlush(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 21_000)
+	hook := &beginHook{RwDB: pool.poolDB, opened: true}
+	pool.poolDB = hook
+	hook.moved = func() error {
+		_, err := pool.flush(t.Context())
+		return err
+	}
+	hook.armed.Store(true)
+	txns, err := pool.ProvideTxns(t.Context())
+	require.NoError(t, err)
+	require.False(t, hook.armed.Load(), "no flush ran")
+	require.NoError(t, hook.err)
+	require.Len(t, txns, 1, "the flushed transaction was skipped")
+}
+
+// TestProvideTxnsOnTheHeadAfterStart: a pool started from its database, no
+// block seen since, takes the executed head for its view.
+func TestProvideTxnsOnTheHeadAfterStart(t *testing.T) {
+	ctx, pool, _, coreDB := newTestPool(t)
+	head := common.Hash{0xd}
+	require.NoError(t, coreDB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		rawdb.WriteHeadBlockHash(tx, head)
+		return stages.SaveStageProgress(tx, stages.Execution, 3)
+	}))
+	require.NoError(t, pool.start(ctx))
+	short, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	_, err := pool.ProvideTxns(short, txnprovider.WithParentBlockNum(3), txnprovider.WithParentBlockHash(head))
+	require.NoError(t, err)
+}
+
+// A transaction larger than the pool's size limit is refused when added and
+// dropped when reloaded or unwound; one at the limit is kept, as both are
+// without one.
+func TestSetMaxTxnSize(t *testing.T) {
+	slot := func(nonce uint64, data int) *TxnSlot {
+		s := newTestTxnSlot(nonce, 0, 1, 2, 100_000)
+		s.Txn.(*types.DynamicFeeTransaction).Data = make([]byte, data)
+		var encoded bytes.Buffer
+		require.NoError(t, s.Txn.MarshalBinary(&encoded))
+		s.Rlp, s.Size, s.IDHash = encoded.Bytes(), uint32(encoded.Len()), s.Txn.Hash()
+		return s
+	}
+	small, large := slot(0, 0), slot(1, 2)
+	require.Greater(t, large.Size, small.Size)
+	limit := uint64(small.Size)
+
+	for _, limited := range []bool{false, true} {
+		ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+		if limited {
+			pool.SetMaxTxnSize(limit)
+		}
+		var txns TxnSlots
+		txns.Append(small, sender[:], true)
+		txns.Append(large, sender[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txns)
+		require.NoError(t, err)
+		want := txpoolcfg.Success
+		if limited {
+			want = txpoolcfg.RLPTooLong
+		}
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success, want}, reasons, "limited %v", limited)
+	}
+
+	for _, limited := range []bool{false, true} {
+		ctx, pool, poolDB, coreDB := newTestPool(t)
+		sender := common.Address{1}
+		account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+		writeTestSenderState(t, ctx, coreDB, log.New(), sender, accounts.SerialiseV3(&account), 1)
+		require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
+			for _, s := range []*TxnSlot{small, large} {
+				if err := tx.Put(kv.PoolTransaction, s.IDHash[:], append(sender[:], s.Rlp...)); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+		if limited {
+			pool.SetMaxTxnSize(limit)
+		}
+		require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
+			return pool.fromDB(ctx, poolTx)
+		}))
+		require.Contains(t, pool.byHash, string(small.IDHash[:]), "limited %v", limited)
+		if limited {
+			require.NotContains(t, pool.byHash, string(large.IDHash[:]))
+		} else {
+			require.Contains(t, pool.byHash, string(large.IDHash[:]))
+		}
+	}
+
+	// An unwind restores them under the same limit.
+	for _, limited := range []bool{false, true} {
+		ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+		if limited {
+			pool.SetMaxTxnSize(limit)
+		}
+		var txns TxnSlots
+		txns.Append(small, sender[:], true)
+		txns.Append(large, sender[:], true)
+		require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), txns, TxnSlots{}, TxnSlots{}))
+		require.Contains(t, pool.byHash, string(small.IDHash[:]), "limited %v", limited)
+		if limited {
+			require.NotContains(t, pool.byHash, string(large.IDHash[:]))
+		} else {
+			require.Contains(t, pool.byHash, string(large.IDHash[:]))
+		}
 	}
 }

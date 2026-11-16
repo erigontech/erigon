@@ -40,6 +40,7 @@ type AssemblerCfg struct {
 	BlockReader            dbservices.FullBlockReader
 	ExperimentalBAL        bool
 	RequireAllTransactions bool
+	RunToCompletion        bool
 }
 
 type AssembledBlock struct {
@@ -52,12 +53,22 @@ type AssembledBlock struct {
 	Withdrawals      []*types.Withdrawal
 	Requests         types.FlatRequests
 	BlockAccessList  types.BlockAccessList
+	// Budget, when set, bounds the block's transactions beside its RLP size.
+	Budget *TxnsBudget
 
 	headerRlpSize         *int
 	withdrawalsRlpSize    *int
 	unclesRlpSize         *int
 	txnsRlpSize           int
 	txnsRlpSizeCalculated int
+	budgetUsed            int
+}
+
+// TxnsBudget bounds a block's transactions by a measure of the caller's,
+// Size, which must be set: their Size summed stays within Limit.
+type TxnsBudget struct {
+	Size  func(types.Transaction) int
+	Limit int
 }
 
 func (mb *AssembledBlock) AddTxn(txn types.Transaction) {
@@ -66,8 +77,14 @@ func (mb *AssembledBlock) AddTxn(txn types.Transaction) {
 	s += rlp.ListPrefixLen(s)
 	mb.txnsRlpSize += s
 	mb.txnsRlpSizeCalculated++
+	if mb.Budget != nil {
+		mb.budgetUsed += mb.Budget.Size(txn)
+	}
 }
 
+// AvailableRlpSpace returns the bytes left for transactions once
+// withAdditional are added: within the block's RLP size limit and, when set,
+// its Budget.
 func (mb *AssembledBlock) AvailableRlpSpace(chainConfig *chain.Config, withAdditional ...types.Transaction) int {
 	if mb.headerRlpSize == nil {
 		h := types.CopyHeader(mb.Header)
@@ -109,7 +126,15 @@ func (mb *AssembledBlock) AvailableRlpSpace(chainConfig *chain.Config, withAddit
 	blockSize += mb.TxnsRlpSize(withAdditional...)
 	blockSize += rlp.ListPrefixLen(blockSize)
 	maxSize := chainConfig.GetMaxRlpBlockSize(mb.Header.Time)
-	return maxSize - blockSize
+	space := maxSize - blockSize
+	if mb.Budget != nil {
+		left := mb.Budget.Limit - mb.budgetUsed
+		for _, txn := range withAdditional {
+			left -= mb.Budget.Size(txn)
+		}
+		space = min(space, left)
+	}
+	return space
 }
 
 func (mb *AssembledBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
@@ -305,9 +330,10 @@ LOOP:
 			return nil, true, err
 		}
 
-		// Explicit lists must finish before a result can be returned. Their build
-		// context still handles cancellation and the build timeout.
-		if !ba.cfg.RequireAllTransactions && interrupt != nil && interrupt.Load() && stopped == nil {
+		// Explicit lists and builds run to completion must finish before a result
+		// can be returned. Their build context still handles cancellation and the
+		// build timeout.
+		if !ba.cfg.RequireAllTransactions && !ba.cfg.RunToCompletion && interrupt != nil && interrupt.Load() && stopped == nil {
 			logger.Debug("Transaction adding was requested to stop", "payload", ba.PayloadId)
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)
@@ -340,7 +366,7 @@ LOOP:
 			}
 			rlpSpacePreTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig)
 			logger.Debug(
-				fmt.Sprintf("[%s] Skipping transaction since it does not fit in available rlp space", logPrefix),
+				fmt.Sprintf("[%s] Skipping transaction since it does not fit in the space left", logPrefix),
 				"hash", txn.Hash(),
 				"pre", rlpSpacePreTxn,
 				"post", rlpSpacePostTxn,

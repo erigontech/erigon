@@ -150,12 +150,15 @@ type TxPool struct {
 	stateGeneration         uint64
 	stateBlockHash          common.Hash // Head of the pool's state view; pins frame validation to the same block
 	lastSeenBlock           atomic.Uint64
+	lastSeenHash            common.Hash // Hash of lastSeenBlock; set with it, under lock
+	flushes                 uint64      // Flushes committed, under lock: each moves RLP out of memory
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
 	started                 atomic.Bool
 	pendingBaseFee          atomic.Uint64
 	pendingBlobFee          atomic.Uint64 // For gas accounting for blobs, which has its own dimension
 	blockGasLimit           atomic.Uint64
+	maxTxnSize              atomic.Uint64
 	totalBlobsInPool        atomic.Uint64
 	shanghaiTime            *uint64
 	isPostShanghai          atomic.Bool
@@ -395,6 +398,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 	defer func() {
 		if err == nil {
 			p.lastSeenBlock.Store(block)
+			p.lastSeenHash = frames.blockHash
 		}
 		p.lastSeenCond.Broadcast()
 	}()
@@ -780,8 +784,27 @@ func (p *TxPool) Started() bool {
 	return p.started.Load()
 }
 
+// SetMaxTxnSize sets the largest transaction encoding the pool admits, zero
+// for the protocol's limit alone. Set before the pool starts, it applies to
+// the transactions it reloads too, and to those an unwind restores.
+func (p *TxPool) SetMaxTxnSize(size uint64) {
+	p.maxTxnSize.Store(size)
+}
+
+// oversized reports a transaction over the limit of SetMaxTxnSize.
+func (p *TxPool) oversized(txn *TxnSlot) bool {
+	limit := p.maxTxnSize.Load()
+	return limit != 0 && uint64(txn.Size) > limit
+}
+
+// seenLocked reports whether the pool's view has reached block number, and is
+// the block of hash when one is given.
+func (p *TxPool) seenLocked(number uint64, hash common.Hash) bool {
+	return p.lastSeenBlock.Load() >= number && (hash == (common.Hash{}) || p.lastSeenHash == hash)
+}
+
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
-func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
+func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64, parentHash common.Hash,
 	parentBlockWaitStop <-chan struct{},
 	availableGas mdgas.FullMdGas,
 	yielded mapset.Set[[32]byte], availableRlpSpace int,
@@ -819,40 +842,53 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		<-watcherDone
 	}()
 
-	p.lock.Lock()
-	for last := p.lastSeenBlock.Load(); last < onTopOf; last = p.lastSeenBlock.Load() {
-		select {
-		case <-ctx.Done():
-			// Leaving with the lock held would stop every later pool operation, not just this one.
-			p.lock.Unlock()
-			return false, 0, ctx.Err()
-		case <-parentBlockWaitStop:
-			p.lock.Unlock()
-			p.logger.Debug("[txpool] Parent block wait stopped", "expecting", onTopOf, "lastSeen", last)
-			return false, 0, ctx.Err()
-		default:
-			// continue
+	var tx kv.Tx
+	for {
+		p.lock.Lock()
+		for last := p.lastSeenBlock.Load(); !p.seenLocked(onTopOf, parentHash); last = p.lastSeenBlock.Load() {
+			select {
+			case <-ctx.Done():
+				// Leaving with the lock held would stop every later pool operation, not just this one.
+				p.lock.Unlock()
+				return false, 0, ctx.Err()
+			case <-parentBlockWaitStop:
+				lastHash := p.lastSeenHash
+				p.lock.Unlock()
+				p.logger.Debug("[txpool] Parent block wait stopped", "expecting", onTopOf, "expectingHash", parentHash, "lastSeen", last, "lastSeenHash", lastHash)
+				return false, 0, ctx.Err()
+			default:
+				// continue
+			}
+			p.logger.Trace("[txpool] Waiting for block", "expecting", onTopOf, "expectingHash", parentHash, "lastSeen", last, "lastSeenHash", p.lastSeenHash, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
+			p.lastSeenCond.Wait()
 		}
-		p.logger.Trace("[txpool] Waiting for block", "expecting", onTopOf, "lastSeen", last, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
-		p.lastSeenCond.Wait()
-	}
-	// Important: poolDB.BeginRo has a RoTxsLimiter which is implemented using a weighted semaphore object. This means
-	// that we are dealing with 2 locks at a time. All other usages in the pool that use both p.lock and poolDB.BeginRo
-	// first acquire the RoTx and then acquire p.lock. However, here we do the opposite - we first acquire p.lock and
-	// then try to acquire a RoTx. This creates an opportunity for a deadlock if we've acquired p.lock but at the same
-	// time there has been a burst of goroutines (N=roTxsLimit) that have all acquired a RoTx and are now trying to
-	// acquire p.lock which we've acquired here (the goroutines processing announcements := <-p.newPendingTxns in p.Run
-	// are one example). One solution is to first acquire a RoTx here and then p.lock as everywhere else. However, this
-	// won't work well if we wait in the "Waiting for block" loop for a while since our RoTx will then see stale data.
-	// Instead, we can release p.lock once we're past "Waiting for block" -> try to acquire RoTx -> try to acquire
-	// p.lock again as everywhere else.
-	p.lock.Unlock()
-	tx, err := p.poolDB.BeginRo(ctx)
-	if err != nil {
-		return false, 0, err
+		// Important: poolDB.BeginRo has a RoTxsLimiter which is implemented using a weighted semaphore object. This means
+		// that we are dealing with 2 locks at a time. All other usages in the pool that use both p.lock and poolDB.BeginRo
+		// first acquire the RoTx and then acquire p.lock. However, here we do the opposite - we first acquire p.lock and
+		// then try to acquire a RoTx. This creates an opportunity for a deadlock if we've acquired p.lock but at the same
+		// time there has been a burst of goroutines (N=roTxsLimit) that have all acquired a RoTx and are now trying to
+		// acquire p.lock which we've acquired here (the goroutines processing announcements := <-p.newPendingTxns in p.Run
+		// are one example). One solution is to first acquire a RoTx here and then p.lock as everywhere else. However, this
+		// won't work well if we wait in the "Waiting for block" loop for a while since our RoTx will then see stale data.
+		// Instead, we can release p.lock once we're past "Waiting for block" -> try to acquire RoTx -> try to acquire
+		// p.lock again as everywhere else.
+		flushes := p.flushes
+		p.lock.Unlock()
+		var err error
+		if tx, err = p.poolDB.BeginRo(ctx); err != nil {
+			return false, 0, err
+		}
+		p.lock.Lock()
+		// A block update while the lock was free moved the view off the one
+		// the wait accepted: select from no other. A flush moved RLP out of
+		// memory to rows the read predates: read again.
+		if p.seenLocked(onTopOf, parentHash) && p.flushes == flushes {
+			break
+		}
+		p.lock.Unlock()
+		tx.Rollback()
 	}
 	defer tx.Rollback()
-	p.lock.Lock()
 	defer p.lock.Unlock()
 
 	best := p.pending.best
@@ -927,8 +963,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			return false, count, err
 		}
 		if len(rlpTxn) == 0 {
-			// The snapshot was taken before the pool lock was retaken; a flush in between moved the RLP to a row it does
-			// not see. The next call reads it.
+			// Neither in memory nor in the read: a flush released the RLP and failed to commit it.
 			continue
 		}
 
@@ -1025,6 +1060,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 		provideOptions.Amount,
 		&txnsRlp,
 		provideOptions.ParentBlockNum,
+		provideOptions.ParentBlockHash,
 		provideOptions.ParentBlockWaitStop,
 		provideOptions.GasTarget,
 		provideOptions.TxnIdsFilter,
@@ -1056,7 +1092,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 
 func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error) {
 	set := mapset.NewThreadUnsafeSet[[32]byte]()
-	onTime, _, err := p.best(ctx, n, txns, onTopOf, nil,
+	onTime, _, err := p.best(ctx, n, txns, onTopOf, common.Hash{}, nil,
 		mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, math.MaxUint64), set, math.MaxInt)
 	return onTime, err
 }
@@ -1120,6 +1156,9 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 }
 
 func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView, cells blobCells) (txpoolcfg.DiscardReason, error) {
+	if p.oversized(txn) {
+		return txpoolcfg.RLPTooLong, nil
+	}
 	isEIP3860 := p.isShanghai()
 	isPrague := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
@@ -2953,6 +2992,7 @@ func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	}); err != nil {
 		return 0, err
 	}
+	p.flushes++
 	return written, nil
 }
 
@@ -3118,6 +3158,10 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 		// sync with the processed blocks
 
 		p.lastSeenBlock.Store(lastSeenProgress)
+		p.lastSeenHash = common.Hash{}
+	}
+	if p.lastSeenHash == (common.Hash{}) {
+		p.lastSeenHash = rawdb.ReadHeadBlockHash(coreTx)
 	}
 
 	it, err := tx.Range(kv.RecentLocalTransaction, nil, nil, order.Asc, kv.Unlim)

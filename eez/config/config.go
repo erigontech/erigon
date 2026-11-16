@@ -114,10 +114,17 @@ const (
 	RollupXBaseFeeChangeDenominator uint64 = 50
 )
 
-var _ chain.L2Config = (*L2Config)(nil)
+var (
+	_ chain.L2Config    = (*L2Config)(nil)
+	_ chain.L2BlockTime = (*L2Config)(nil)
+)
 
 // Name returns the EEZ stack name.
 func (c *L2Config) Name() string { return Name }
+
+// BlockTime returns the L2 block time, which bounds block building and
+// pruning per block in place of the L1 slot.
+func (c *L2Config) BlockTime() uint64 { return c.BlockInterval }
 
 // ResolveRules sets the rule set. Forks activate by the genesis timestamps;
 // EEZ has no version ladder of its own.

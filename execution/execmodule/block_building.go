@@ -204,8 +204,10 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 
 	secondsPerSlot := e.config.SecondsPerSlot()
 	maxBuildTime := buildDuration(params.Timestamp, time.Now(), secondsPerSlot)
-	// Explicit lists use the request budget, independent of the payload timestamp.
-	if ownedParams.RequireAllTransactions {
+	// Explicit lists and builds run to completion use the request budget,
+	// independent of the payload timestamp.
+	bounded := ownedParams.RequireAllTransactions || ownedParams.RunToCompletion
+	if bounded {
 		if deadline, ok := ctx.Deadline(); ok {
 			maxBuildTime = time.Until(deadline)
 		}
@@ -215,7 +217,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 			maxBuildTime, stopGraceDuration(secondsPerSlot)),
 		params: ownedParams,
 	}
-	if ownedParams.RequireAllTransactions {
+	if bounded {
 		context.AfterFunc(ctx, e.builders[e.nextPayloadId].builder.Discard)
 	}
 	e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId

@@ -20,6 +20,7 @@ import (
 	"bytes"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
 )
@@ -42,6 +43,14 @@ type Parameters struct {
 	// RequireAllTransactions includes every supplied transaction in order.
 	// If any transaction cannot be included, the build fails.
 	RequireAllTransactions bool
+	// RunToCompletion adds transactions until the provider runs dry or the gas
+	// runs out, ignoring a request to stop, for a producer whose block time
+	// does not bound its build. Its wait for the provider to see the parent
+	// block ends with the request's context only.
+	RunToCompletion bool
+	// TxnsBudget, when non-nil, bounds the block's transactions beside its RLP
+	// size: the provider is offered, and the block takes, only what fits.
+	TxnsBudget *exec.TxnsBudget
 	// ExtraData overrides the builder's configured extra data when non-nil.
 	ExtraData []byte
 }
@@ -75,6 +84,10 @@ func (p *Parameters) Copy() *Parameters {
 	if p.TargetGasLimit != nil {
 		limit := *p.TargetGasLimit
 		copied.TargetGasLimit = &limit
+	}
+	if p.TxnsBudget != nil {
+		budget := *p.TxnsBudget
+		copied.TxnsBudget = &budget
 	}
 	return &copied
 }

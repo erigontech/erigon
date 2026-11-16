@@ -22,6 +22,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -29,6 +30,7 @@ import (
 type TxnProvider interface {
 	// ProvideTxns provides transactions ready to be included in a block for block building. Available request options:
 	//   - WithParentBlockNum
+	//   - WithParentBlockHash
 	//   - WithParentBlockWaitStop
 	//   - WithAmount
 	//   - WithGasTarget
@@ -42,6 +44,15 @@ type ProvideOption func(opt *ProvideOptions)
 func WithParentBlockNum(blockNum uint64) ProvideOption {
 	return func(opt *ProvideOptions) {
 		opt.ParentBlockNum = blockNum
+	}
+}
+
+// WithParentBlockHash has the provider wait, as for WithParentBlockNum, until
+// its view is the block of that hash: a block it saw at the same height or
+// above may be another branch's.
+func WithParentBlockHash(hash common.Hash) ProvideOption {
+	return func(opt *ProvideOptions) {
+		opt.ParentBlockHash = hash
 	}
 }
 
@@ -77,6 +88,9 @@ func WithTxnIdsFilter(txnIdsFilter mapset.Set[[32]byte]) ProvideOption {
 	}
 }
 
+// WithAvailableRlpSpace bounds the encoded size of the transactions provided:
+// the block's RLP space left, or less when the builder bounds its
+// transactions more tightly.
 func WithAvailableRlpSpace(size int) ProvideOption {
 	return func(opt *ProvideOptions) {
 		opt.AvailableRlpSpace = size
@@ -86,6 +100,7 @@ func WithAvailableRlpSpace(size int) ProvideOption {
 type ProvideOptions struct {
 	BlockTime           uint64
 	ParentBlockNum      uint64
+	ParentBlockHash     common.Hash
 	ParentBlockWaitStop <-chan struct{}
 	Amount              int
 	GasTarget           mdgas.FullMdGas

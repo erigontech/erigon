@@ -163,6 +163,10 @@ func (p *TxPool) hasParkedLegacyFrame(senderID uint64) bool {
 }
 
 func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReason {
+	// Restored frames skip validateTx.
+	if p.oversized(txn) {
+		return txpoolcfg.RLPTooLong
+	}
 	if !p.isBogota() {
 		return txpoolcfg.TypeNotActivated
 	}

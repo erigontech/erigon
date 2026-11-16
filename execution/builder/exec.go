@@ -59,6 +59,7 @@ type BuilderExecCfg struct {
 	payloadId              uint64
 	txnProvider            txnprovider.TxnProvider
 	requireAllTransactions bool
+	runToCompletion        bool
 }
 
 func StageBuilderExecCfg(
@@ -71,6 +72,7 @@ func StageBuilderExecCfg(
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
 	requireAllTransactions bool,
+	runToCompletion bool,
 	blockReader dbservices.FullBlockReader,
 ) BuilderExecCfg {
 	return BuilderExecCfg{
@@ -84,6 +86,7 @@ func StageBuilderExecCfg(
 		payloadId:              payloadId,
 		txnProvider:            txnProvider,
 		requireAllTransactions: requireAllTransactions,
+		runToCompletion:        runToCompletion,
 	}
 }
 
@@ -147,6 +150,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		BlockReader:            cfg.blockReader,
 		ExperimentalBAL:        execCfg.IsExperimentalBAL(),
 		RequireAllTransactions: cfg.requireAllTransactions,
+		RunToCompletion:        cfg.runToCompletion,
 	}, current)
 
 	ibs.SetVersionMap(state.NewVersionMap(nil))
@@ -205,6 +209,14 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 			}
 		}
 
+		if cfg.runToCompletion {
+			// Filtering shortens a batch; the pool is dry only when it yields
+			// none, which its filter of yielded transactions ensures.
+			if provided == 0 {
+				break
+			}
+			continue
+		}
 		// if we yielded less than the count we wanted, assume the txpool has run dry now
 		if len(txns) < amount {
 			if cfg.requireAllTransactions {
@@ -305,10 +317,15 @@ func getNextTransactions(
 		remainingBlobGas = maxBlobs*params.GasPerBlob - *header.BlobGasUsed
 	}
 
+	parentBlockWaitStop := stopSignalsOf(ctx).parentBlockWaitStopped
+	if cfg.runToCompletion {
+		// Stopped, the wait yields nothing, which this build takes for a dry pool.
+		parentBlockWaitStop = nil
+	}
 	provideOpts := []txnprovider.ProvideOption{
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
-		txnprovider.WithParentBlockWaitStop(stopSignalsOf(ctx).parentBlockWaitStopped),
+		txnprovider.WithParentBlockWaitStop(parentBlockWaitStop),
 		txnprovider.WithBlockTime(header.Time),
 		// EIP-8037: runtime state gas is enforced by post-execution rollback
 		// in the block assembler.

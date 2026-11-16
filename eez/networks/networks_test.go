@@ -77,6 +77,7 @@ func TestDevnetRegistered(t *testing.T) {
 	require.True(t, ok)
 	require.NoError(t, l2.Validate())
 	require.Equal(t, uint64(6), l2.BlocksPerL1Block())
+	require.Equal(t, uint64(2), cfg.SecondsPerSlot())
 	require.Equal(t, cfg.L2.Name(), config.Name)
 	require.Equal(t, l2.BlockGasLimit, spec.Genesis.GasLimit)
 }

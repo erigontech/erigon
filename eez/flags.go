@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/eez/overlay"
+	"github.com/erigontech/erigon/eez/sequencer"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/enode"
@@ -121,6 +122,28 @@ var (
 		Name:  "eez.trustedpeers",
 		Usage: "Comma-separated enode URLs of L2 peers the EEZ chain of --eez.chain keeps connected, even above its peer limit",
 	}
+	SequencerFlag = cli.BoolFlag{
+		Name:  "eez.sequencer",
+		Usage: "Produce the EEZ chain's blocks from the transaction pool ahead of settlement",
+	}
+	ProofTimeFlag = cli.DurationFlag{
+		Name:  "eez.proof.time",
+		Usage: "Worst-case time the prover takes for a slot; it sizes the blocks produced ahead of their timestamps",
+	}
+	SubmissionSlackFlag = cli.DurationFlag{
+		Name:  "eez.submission.slack",
+		Usage: "How early a slot's batch must reach L1 before the next L1 block",
+		Value: 100 * time.Millisecond,
+	}
+	SequencerMaxDepthFlag = cli.Uint64Flag{
+		Name:  "eez.sequencer.maxdepth",
+		Usage: "Blocks past the latest settlement at which a steady slot pauses, 0 for no cap; the catch-up that follows ignores it",
+		Value: sequencer.DefaultMaxDepth,
+	}
+	SequencerFeeRecipientFlag = cli.StringFlag{
+		Name:  "eez.sequencer.feerecipient",
+		Usage: "Beneficiary of the produced blocks; the chain's fee collector when unset",
+	}
 
 	// The l2 section of the chain config; init writes them into the
 	// section, a running node checks them against it.
@@ -154,7 +177,9 @@ var (
 var Flags = []cli.Flag{
 	&EnabledFlag, &L1RPCFlag, &L1KVFlag, &L1BeaconFlag, &L1BlobsFlag, &L1PollFlag, &L1LogChunkFlag, &L1ReorgDepthFlag, &SequencerRPCFlag, &SyncL1OnlyFlag,
 	&P2PListenFlag, &P2PPeersFlag, &SequencerAddressFlag,
-	&ChainFlag, &HTTPPortFlag, &HTTPAPIFlag, &PortFlag, &BootnodesFlag, &StaticPeersFlag, &TrustedPeersFlag, &L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
+	&ChainFlag, &HTTPPortFlag, &HTTPAPIFlag, &PortFlag, &BootnodesFlag, &StaticPeersFlag, &TrustedPeersFlag,
+	&SequencerFlag, &ProofTimeFlag, &SubmissionSlackFlag, &SequencerMaxDepthFlag, &SequencerFeeRecipientFlag,
+	&L1ChainIDFlag, &RegistryFlag, &RegistryDeployBlockFlag, &RollupIDFlag, &L1BlockTimeFlag, &L2BlockTimeFlag,
 }
 
 // Config is a node's EEZ configuration.
@@ -187,8 +212,19 @@ type Config struct {
 	Bootnodes    []*enode.Node
 	StaticPeers  []*enode.Node
 	TrustedPeers []*enode.Node
+	// Sequencer, when set, produces the chain's blocks.
+	Sequencer *SequencerConfig
 	// L2 holds the l2 section fields the flags set.
 	L2 L2Flags
+}
+
+// SequencerConfig is the configuration of a node's sequencer.
+type SequencerConfig struct {
+	ProofTime, SubmissionSlack time.Duration
+	MaxDepth                   uint64
+	// FeeRecipient is the produced blocks' beneficiary; zero selects the
+	// chain's fee collector.
+	FeeRecipient common.Address
 }
 
 // L2Flags are the l2 section fields set on the command line.
@@ -258,6 +294,11 @@ func ConfigFromCLI(cmd *cli.Command) (*Config, error) {
 	if err := c.readOverlay(cmd); err != nil {
 		return nil, err
 	}
+	sequencer, err := sequencerConfig(cmd)
+	if err != nil {
+		return nil, err
+	}
+	c.Sequencer = sequencer
 	uintFlag := func(f *cli.Uint64Flag) *uint64 {
 		if !cmd.IsSet(f.Name) {
 			return nil
@@ -331,6 +372,33 @@ func (c *Config) readOverlay(cmd *cli.Command) error {
 	return nil
 }
 
+// sequencerConfig reads the sequencer flags, nil without --eez.sequencer.
+func sequencerConfig(cmd *cli.Command) (*SequencerConfig, error) {
+	if !cmd.Bool(SequencerFlag.Name) {
+		for _, f := range []cli.Flag{&ProofTimeFlag, &SubmissionSlackFlag, &SequencerMaxDepthFlag, &SequencerFeeRecipientFlag} {
+			if name := f.Names()[0]; cmd.IsSet(name) {
+				return nil, fmt.Errorf("%w: --%s requires --%s", ErrConfig, name, SequencerFlag.Name)
+			}
+		}
+		return nil, nil
+	}
+	s := &SequencerConfig{
+		ProofTime:       cmd.Duration(ProofTimeFlag.Name),
+		SubmissionSlack: cmd.Duration(SubmissionSlackFlag.Name),
+		MaxDepth:        cmd.Uint64(SequencerMaxDepthFlag.Name),
+	}
+	if s.ProofTime <= 0 {
+		return nil, fmt.Errorf("%w: --%s needs a positive --%s", ErrConfig, SequencerFlag.Name, ProofTimeFlag.Name)
+	}
+	if v := cmd.String(SequencerFeeRecipientFlag.Name); v != "" {
+		if !common.IsHexAddress(v) {
+			return nil, fmt.Errorf("%w: --%s %q is not an address", ErrConfig, SequencerFeeRecipientFlag.Name, v)
+		}
+		s.FeeRecipient = common.HexToAddress(v)
+	}
+	return s, nil
+}
+
 // InitGenesis writes the l2 section the EEZ flags set into the genesis init
 // commits, which must then be an EEZ genesis. It requires --eez.enabled.
 func InitGenesis(cmd *cli.Command, genesis *types.Genesis) error {
@@ -361,6 +429,16 @@ func (c *Config) CheckNode() error {
 	}
 	if sources != 1 {
 		return fmt.Errorf("%w: the follower needs one L1 source, --%s, --%s or --%s", ErrConfig, L1RPCFlag.Name, L1KVFlag.Name, ChainFlag.Name)
+	}
+	if c.Sequencer != nil {
+		switch {
+		case c.SequencerRPC != "":
+			return fmt.Errorf("%w: --%s produces the chain --%s would follow", ErrConfig, SequencerFlag.Name, SequencerRPCFlag.Name)
+		case c.P2PListen != nil:
+			return fmt.Errorf("%w: --%s produces the heads --%s would follow", ErrConfig, SequencerFlag.Name, P2PListenFlag.Name)
+		case c.AllInOne():
+			return fmt.Errorf("%w: --%s runs on a node of its own, not beside its L1 (--%s)", ErrConfig, SequencerFlag.Name, ChainFlag.Name)
+		}
 	}
 	return nil
 }

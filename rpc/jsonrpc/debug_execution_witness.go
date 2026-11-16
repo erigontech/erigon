@@ -972,6 +972,13 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	if err != nil {
 		return nil, err
 	}
+	if api.removalClosure {
+		closure, err := removalClosureSiblings(ctx, tx, hc, firstTxNumInBlock, endTxNum, blockNum, parentNum, accessed)
+		if err != nil {
+			return nil, err
+		}
+		siblingPaths = append(siblingPaths, closure...)
+	}
 
 	// Materialize exclusion-proof branches for strict sparse-trie verifiers in legacy/default
 	// mode; canonical mode stays minimal to match the reference witness.

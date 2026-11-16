@@ -123,6 +123,11 @@ func TestExtendsSafe(t *testing.T) {
 	for n := uint64(1); n <= 1025; n++ {
 		deep.known(hn(n), n, hn(n-1))
 	}
+	// h(1) at 1026 off the canonical hn(1)…hn(1025), with safe at hn(0).
+	deepCanonical := newChain().withSafe(0, hn(0)).canon(hn(0), 0, common.Hash{}).known(h(1), 1026, hn(1025))
+	for n := uint64(1); n <= 1025; n++ {
+		deepCanonical.canon(hn(n), n, hn(n-1))
+	}
 	for _, c := range []struct {
 		name   string
 		chain  *localChain
@@ -151,9 +156,16 @@ func TestExtendsSafe(t *testing.T) {
 			newChain().withSafe(10, h(10)).known(h(12), 12, h(11)).known(h(11), 11, h(99)),
 			id(13, h(13)), h(12), "conflicts",
 		},
+		{
+			"known ancestry past canonical blocks, off safe at the safe height",
+			newChain().withSafe(10, h(10)).canon(h(11), 11, h(10)).canon(h(12), 12, h(11)).
+				known(h(0x12), 12, h(0x11)).known(h(0x11), 11, h(99)),
+			id(13, h(13)), h(0x12), "conflicts",
+		},
 		{"missing ancestry", newChain().withSafe(10, h(10)), id(12, h(12)), h(11), "unverifiable"},
 		{"1,024 headers down to safe", deep, id(1025, h(1)), hn(1024), "extends"},
 		{"1,025 headers down to safe", deep, id(1026, h(1)), hn(1025), "unverifiable"},
+		{"known ancestry down to a canonical block 1,025 above safe", deepCanonical, id(1027, h(2)), h(1), "extends"},
 	} {
 		got, err := seqsig.ExtendsSafe(c.chain, c.chain.safe, c.id, c.parent)
 		require.NoError(t, err, c.name)
@@ -223,6 +235,9 @@ type decideCase struct {
 	candidates []*seqsig.VerifiedHead
 	indexed    uint64
 	noPeers    bool
+	// inserts stores each fetch's blocks in the chain, as the follower's
+	// fetch does, rather than handing them to the next decision.
+	inserts bool
 
 	action  seqsig.Action
 	target  *seqsig.VerifiedHead
@@ -254,7 +269,12 @@ func decide(t *testing.T, c decideCase) (seqsig.Decision, []uint64) {
 		}
 		require.NotContains(t, in.Fetched, d.From)
 		counts = append(counts, d.Count)
-		in.Fetched[d.From] = blocksBack(c.source, d.From, d.Count)
+		served := blocksBack(c.source, d.From, d.Count)
+		if c.inserts {
+			c.chain.knownBlocks(served...)
+			served = nil
+		}
+		in.Fetched[d.From] = served
 	}
 	t.Fatal("no decision")
 	return seqsig.Decision{}, nil
@@ -484,6 +504,21 @@ func check(t *testing.T, c decideCase) {
 		skipped = append(skipped, s.Head)
 	}
 	require.Equal(t, c.skipped, skipped)
+}
+
+// TestDecideFarAboveSafe pins that a fetched ancestor the follower stored
+// counts as known ancestry when its parent is canonical, more than
+// MaxAncestryWalk blocks above safe.
+func TestDecideFarAboveSafe(t *testing.T) {
+	c := line(seqsig.MaxAncestryWalk + 2)
+	tip := c[len(c)-1]
+	missed := blk(tip.NumberU64()+1, tip.Hash(), 0)
+	next := signedHead(blk(missed.NumberU64()+1, missed.Hash(), 0), 100, 2, true)
+	check(t, decideCase{
+		chain:  newChain().canonBlocks(c...).withSafe(0, c[0].Hash()),
+		source: serving(missed), candidates: []*seqsig.VerifiedHead{next}, inserts: true,
+		action: seqsig.Adopt, target: next, blocks: []*types.Block{next.Block}, counts: []uint64{1},
+	})
 }
 
 // TestDecideFollowsTrackerOrder pins that the highest version wins whatever

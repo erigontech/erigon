@@ -159,7 +159,8 @@ type ExecutionModule interface {
 
 	// AssembleBlock initiates building a block. Busy reports that the execution module is occupied;
 	// otherwise PayloadID identifies the new build.
-	// Unfinished explicit-list builds (RequireAllTransactions) are discarded when ctx ends.
+	// Unfinished explicit-list builds (RequireAllTransactions) and builds run to completion
+	// (RunToCompletion) are discarded when ctx ends.
 	// Ordinary payload builds remain available for later retrieval after the requesting call ends.
 	AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error)
 

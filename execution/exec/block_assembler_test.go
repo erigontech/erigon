@@ -18,6 +18,7 @@ package exec
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -204,13 +205,16 @@ func TestBlockAssemblerExplicitListLimits(t *testing.T) {
 
 func TestBlockAssemblerInterrupt(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		requireAll  bool
-		cancel      bool
-		wantPacked  int
-		wantStopped bool
+		name            string
+		requireAll      bool
+		runToCompletion bool
+		cancel          bool
+		wantPacked      int
+		wantStopped     bool
 	}{
 		{name: "explicit list finishes", requireAll: true, wantPacked: 2},
+		{name: "build run to completion finishes", runToCompletion: true, wantPacked: 2},
+		{name: "build run to completion honors cancellation", runToCompletion: true, cancel: true, wantPacked: 1, wantStopped: true},
 		{name: "explicit list honors cancellation", requireAll: true, cancel: true, wantPacked: 1, wantStopped: true},
 		{name: "pool selection honors stop", wantPacked: 1, wantStopped: true},
 	} {
@@ -223,7 +227,7 @@ func TestBlockAssemblerInterrupt(t *testing.T) {
 				engine := merge.NewFaker(ethash.NewFaker())
 				defer engine.Close()
 				ba := NewBlockAssembler(AssemblerCfg{
-					ChainConfig: config, Engine: engine, RequireAllTransactions: tc.requireAll,
+					ChainConfig: config, Engine: engine, RequireAllTransactions: tc.requireAll, RunToCompletion: tc.runToCompletion,
 				}, &AssembledBlock{Header: header})
 				key, err := crypto.GenerateKey()
 				require.NoError(t, err)
@@ -426,4 +430,61 @@ func TestAvailableRlpSpaceCoversFinalizedHeader(t *testing.T) {
 			require.NoError(t, rawBlock.ValidateMaxRlpSize(cfg))
 		})
 	}
+}
+
+func TestAvailableRlpSpaceWithinBudget(t *testing.T) {
+	t.Parallel()
+
+	cfg := chain.TestChainOsakaConfig
+	header := &types.Header{Number: *uint256.NewInt(1), Time: 1000, GasLimit: 30_000_000}
+	txn := types.NewTransaction(0, common.Address{2}, uint256.NewInt(0), params.TxGas, uint256.NewInt(0), nil)
+	unbounded := (&AssembledBlock{Header: header}).AvailableRlpSpace(cfg)
+
+	mb := &AssembledBlock{Header: header, Budget: &TxnsBudget{Size: func(types.Transaction) int { return 100 }, Limit: 250}}
+	require.Equal(t, 250, mb.AvailableRlpSpace(cfg))
+	require.Equal(t, 150, mb.AvailableRlpSpace(cfg, txn))
+	mb.AddTxn(txn)
+	mb.AddTxn(txn)
+	require.Equal(t, 50, mb.AvailableRlpSpace(cfg))
+	require.Equal(t, -50, mb.AvailableRlpSpace(cfg, txn))
+
+	mb = &AssembledBlock{Header: header, Budget: &TxnsBudget{Size: func(types.Transaction) int { return 1 }, Limit: unbounded + 1}}
+	require.Equal(t, unbounded, mb.AvailableRlpSpace(cfg), "the RLP size limit when tighter")
+}
+
+// TestBlockAssemblerSkipsTransactionsOverBudget: a transaction over the
+// budget left is skipped, and a later one that fits is taken.
+func TestBlockAssemblerSkipsTransactionsOverBudget(t *testing.T) {
+	config := chain.TestChainOsakaConfig.Copy()
+	header := &types.Header{Number: *uint256.NewInt(1), Time: 1000, GasLimit: 30_000_000}
+	engine := merge.NewFaker(ethash.NewFaker())
+	defer engine.Close()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	signer := types.MakeSigner(config, header.Number.Uint64(), header.Time)
+	sign := func(nonce uint64, data int) (types.Transaction, *ecdsa.PrivateKey) {
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		sender := crypto.PubkeyToAddress(key.PublicKey)
+		require.NoError(t, ibs.AddBalance(accounts.InternAddress(sender), *uint256.NewInt(1_000_000_000_000_000_000), tracing.BalanceChangeUnspecified))
+		txn, err := types.SignTx(types.NewTransaction(nonce, sender, uint256.NewInt(0), 100_000, uint256.NewInt(0), make([]byte, data)), *signer, key)
+		require.NoError(t, err)
+		return txn, key
+	}
+	first, key := sign(0, 0)
+	large, _ := sign(0, 1_000)
+	next, err := types.SignTx(types.NewTransaction(1, crypto.PubkeyToAddress(key.PublicKey), uint256.NewInt(0), 100_000, uint256.NewInt(0), nil), *signer, key)
+	require.NoError(t, err)
+
+	size := func(txn types.Transaction) int { return txn.EncodingSize() }
+	ba := NewBlockAssembler(AssemblerCfg{ChainConfig: config, Engine: engine, RunToCompletion: true}, &AssembledBlock{
+		Header: header,
+		Budget: &TxnsBudget{Size: size, Limit: size(first) + size(next)},
+	})
+	_, done, err := ba.AddTransactions(t.Context(), nil, types.Transactions{first, large, next}, accounts.NilAddress,
+		&vm.Config{NoBaseFee: true}, ibs, nil, "test", log.Root())
+	require.NoError(t, err)
+	require.False(t, done)
+	require.Equal(t, types.Transactions{first, next}, ba.Txns)
+	require.Zero(t, ba.AvailableRlpSpace(config))
 }

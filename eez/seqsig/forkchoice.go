@@ -27,8 +27,8 @@ import (
 
 const (
 	// MaxAncestryWalk bounds every ancestry walk: the blocks fetched back to
-	// a local block, the headers read down to safe, and how far a target may
-	// lead the local head.
+	// a local block, the headers read down to a canonical block or safe, and
+	// how far a target may lead the local head.
 	MaxAncestryWalk = 1024
 	// FetchBatch is the most blocks one Fetch asks for.
 	FetchBatch = 64
@@ -261,7 +261,8 @@ const (
 
 // extendsSafe reports whether block id with the given parent descends from
 // safe. A canonical block does by the fork-choice invariant; any other is
-// walked through the headers the node has, at most MaxAncestryWalk of them.
+// walked through the headers the node has down to a canonical block, at most
+// MaxAncestryWalk of them.
 func extendsSafe(c Chain, safe *BlockID, id BlockID, parent common.Hash) (compat, error) {
 	switch {
 	case safe == nil:
@@ -278,6 +279,11 @@ func extendsSafe(c Chain, safe *BlockID, id BlockID, parent common.Hash) (compat
 	}
 	cursor, number := parent, id.Number-1
 	for reads := 0; number > safe.Number; reads++ {
+		if h, ok, err := c.CanonicalHash(number); err != nil {
+			return 0, err
+		} else if ok && h == cursor {
+			return extends, nil
+		}
 		if reads >= MaxAncestryWalk {
 			return unverifiable, nil
 		}

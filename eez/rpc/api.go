@@ -20,6 +20,7 @@ package rpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -29,6 +30,8 @@ import (
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/follower"
 	"github.com/erigontech/erigon/eez/protocol"
+	"github.com/erigontech/erigon/eez/sequencer"
+	"github.com/erigontech/erigon/eez/witness"
 	"github.com/erigontech/erigon/execution/types"
 	erigonrpc "github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -37,8 +40,15 @@ import (
 // Namespace is the namespace of the EEZ API.
 const Namespace = "eez"
 
-// ErrNoFollower reports a node that runs no follower.
-var ErrNoFollower = errors.New("no EEZ follower runs in this node")
+var (
+	// ErrNoFollower reports a node that runs no follower.
+	ErrNoFollower = errors.New("no EEZ follower runs in this node")
+	// ErrNoSequencer reports a node that runs no sequencer.
+	ErrNoSequencer = errors.New("no EEZ sequencer runs in this node")
+	// ErrNoWitnesses reports a node that serves no witnesses: one without a
+	// sequencer or the debug namespace.
+	ErrNoWitnesses = errors.New("no EEZ witnesses served: they need a sequencer and the debug namespace")
+)
 
 var registerOnce sync.Once
 
@@ -66,7 +76,9 @@ func Register() {
 
 // API serves the eez namespace.
 type API struct {
-	follower atomic.Pointer[follower.Follower]
+	follower  atomic.Pointer[follower.Follower]
+	sequencer atomic.Pointer[sequencer.Sequencer]
+	witnesses atomic.Pointer[witness.Store]
 }
 
 // NewAPI returns an API with no follower attached.
@@ -74,6 +86,12 @@ func NewAPI() *API { return &API{} }
 
 // Attach makes the API report on f.
 func (a *API) Attach(f *follower.Follower) { a.follower.Store(f) }
+
+// AttachSequencer makes the API report on s.
+func (a *API) AttachSequencer(s *sequencer.Sequencer) { a.sequencer.Store(s) }
+
+// AttachWitnesses makes the API serve the witnesses of s.
+func (a *API) AttachWitnesses(s *witness.Store) { a.witnesses.Store(s) }
 
 // API returns the RPC registration of a.
 func (a *API) API() erigonrpc.API {
@@ -194,6 +212,62 @@ func (a *API) Settlement(_ context.Context, number hexutil.Uint64) (*Settlement,
 		return nil, nil
 	}
 	return settlement(r), nil
+}
+
+// BlockRef names a block.
+type BlockRef struct {
+	Number hexutil.Uint64 `json:"number"`
+	Hash   common.Hash    `json:"hash"`
+}
+
+// SequencerStatus is the result of eez_sequencerStatus.
+type SequencerStatus struct {
+	// Live, Future and Sync count the blocks produced since start.
+	Live   hexutil.Uint64 `json:"live"`
+	Future hexutil.Uint64 `json:"future"`
+	Sync   hexutil.Uint64 `json:"sync"`
+	// LastProduced is the latest produced block, null before any.
+	LastProduced *BlockRef `json:"lastProduced"`
+	// SyncHeight is the Sync block of the latest trigger.
+	SyncHeight hexutil.Uint64 `json:"syncHeight"`
+	// OffGridSkips counts the consecutive Sync blocks skipped off the grid.
+	OffGridSkips hexutil.Uint64 `json:"offGridSkips"`
+}
+
+// SequencerStatus is eez_sequencerStatus: what the sequencer produced.
+func (a *API) SequencerStatus(context.Context) (*SequencerStatus, error) {
+	s := a.sequencer.Load()
+	if s == nil {
+		return nil, ErrNoSequencer
+	}
+	st := s.Status()
+	out := &SequencerStatus{
+		Live:         hexutil.Uint64(st.Produced[sequencer.Live]),
+		Future:       hexutil.Uint64(st.Produced[sequencer.Future]),
+		Sync:         hexutil.Uint64(st.Produced[sequencer.Sync]),
+		SyncHeight:   hexutil.Uint64(st.SyncHeight),
+		OffGridSkips: hexutil.Uint64(st.OffGridSkips),
+	}
+	if st.Last != nil {
+		out.LastProduced = &BlockRef{Number: hexutil.Uint64(st.Last.Number.Uint64()), Hash: st.Last.Hash()}
+	}
+	return out, nil
+}
+
+// ExecutionWitnessByNumber is eez_executionWitnessByNumber: the execution
+// witness of the produced canonical block number, in the shape of
+// debug_executionWitness with the removal closure; null when the store holds
+// none for it.
+func (a *API) ExecutionWitnessByNumber(ctx context.Context, number hexutil.Uint64) (json.RawMessage, error) {
+	f, s := a.follower.Load(), a.witnesses.Load()
+	if f == nil || s == nil {
+		return nil, ErrNoWitnesses
+	}
+	hash, ok, err := f.CanonicalHash(ctx, uint64(number))
+	if err != nil || !ok {
+		return nil, err
+	}
+	return s.Get(ctx, uint64(number), hash)
 }
 
 // DecodeBatch is eez_decodeBatch: the batch a postAndVerifyBatch input

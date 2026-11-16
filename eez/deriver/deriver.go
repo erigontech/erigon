@@ -285,7 +285,11 @@ func (d *Deriver) forkChoiceTo(ctx context.Context, head common.Hash) error {
 	return d.chain.ForkChoice(ctx, head, safe, finalized)
 }
 
-// anchors returns the hashes of the safe and finalized blocks.
+// Anchors returns the hashes of the safe and finalized blocks.
+func (d *Deriver) Anchors(ctx context.Context) (safe, finalized common.Hash, err error) {
+	return d.anchors(ctx)
+}
+
 func (d *Deriver) anchors(ctx context.Context) (safe, finalized common.Hash, err error) {
 	if safe, err = d.canonicalHash(ctx, d.safe); err != nil {
 		return

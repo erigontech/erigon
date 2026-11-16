@@ -614,7 +614,7 @@ func TestFramePoolRevalidationRefreshesSenderNonceChain(t *testing.T) {
 				require.Zero(t, mt.subPool&NoNonceGaps)
 			}
 			var selected TxnsRlp
-			_, count, err := pool.best(ctx, 10, &selected, 1, nil,
+			_, count, err := pool.best(ctx, 10, &selected, 1, common.Hash{}, nil,
 				mdgas.FullMdGas{MdGas: mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}}, nil, 1_000_000)
 			require.NoError(t, err)
 			require.Equal(t, wantSelected, count)
@@ -1834,6 +1834,41 @@ func TestFramePoolReloadValidationBudgets(t *testing.T) {
 			require.Equal(t, PendingSubPool, mt.currentSubPool)
 		}
 	})
+}
+
+// TestFramePoolRestoreKeepsTheSizeLimit: a frame transaction larger than the
+// pool's size limit is dropped when an unwind or a reload restores it, as on
+// admission; one at the limit is restored.
+func TestFramePoolRestoreKeepsTheSizeLimit(t *testing.T) {
+	for _, mode := range []string{"unwind", "reload"} {
+		for _, over := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s over %v", mode, over), func(t *testing.T) {
+				ctx, pool, sender := keyedFramePoolEnv(t)
+				pool.chainID.SetUint64(1)
+				frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+				limit := uint64(frame.Size)
+				if over {
+					limit--
+				}
+				pool.SetMaxTxnSize(limit)
+				var txns TxnSlots
+				txns.Append(frame, sender[:], true)
+				if mode == "unwind" {
+					require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 1, sender), txns, TxnSlots{}, TxnSlots{}))
+				} else {
+					require.NoError(t, pool.poolDB.Update(ctx, func(tx kv.RwTx) error {
+						return tx.Put(kv.PoolTransaction, frame.IDHash[:], append(sender[:], frame.Rlp...))
+					}))
+					require.NoError(t, pool.start(ctx))
+				}
+				if over {
+					require.NotContains(t, pool.byHash, string(frame.IDHash[:]))
+				} else {
+					require.Contains(t, pool.byHash, string(frame.IDHash[:]))
+				}
+			})
+		}
+	}
 }
 
 func TestFramePoolRestoredTransactionsReleaseLock(t *testing.T) {

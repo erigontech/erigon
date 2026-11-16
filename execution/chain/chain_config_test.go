@@ -285,6 +285,21 @@ type fakeL2 struct{}
 func (fakeL2) Name() string                                                 { return "fake" }
 func (fakeL2) ResolveRules(l2Version, blockNum, blockTime uint64, r *Rules) {}
 
+type timedL2 struct {
+	fakeL2
+	seconds uint64
+}
+
+func (l timedL2) BlockTime() uint64 { return l.seconds }
+
+func TestSecondsPerSlot(t *testing.T) {
+	require.Equal(t, uint64(12), (&Config{}).SecondsPerSlot())
+	require.Equal(t, uint64(5), (&Config{Aura: &AuRaConfig{}}).SecondsPerSlot())
+	require.Equal(t, uint64(12), (&Config{L2: fakeL2{}}).SecondsPerSlot())
+	require.Equal(t, uint64(12), (&Config{L2: timedL2{}}).SecondsPerSlot())
+	require.Equal(t, uint64(2), (&Config{L2: timedL2{seconds: 2}}).SecondsPerSlot())
+}
+
 func TestBlobParameterDencunAndPectraAtGenesis(t *testing.T) {
 	var c Config
 	c.CancunTime = common.NewUint64(0)
