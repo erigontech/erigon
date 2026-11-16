@@ -161,9 +161,6 @@ func (e *ExecModule) stateHistoryCovers(ctx context.Context, tx kv.TemporalTx, b
 	if !errors.Is(err, state.ErrPruned) {
 		return err == nil, err
 	}
-	if !inMemHistoryReads {
-		return false, nil
-	}
 	if overlay, _ := membatchwithdb.ViewOverlay(tx); overlay == nil {
 		return false, nil
 	}

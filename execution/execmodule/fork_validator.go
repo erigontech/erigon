@@ -175,8 +175,8 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
 	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
 	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)
-	fv.extendingForkNotifications.Accumulator.CopyAndReset(target.Accumulator)
-	fv.extendingForkNotifications.RecentReceipts.CopyAndReset(target.RecentReceipts)
+	fv.extendingForkNotifications.Accumulator.AppendAndReset(target.Accumulator)
+	fv.extendingForkNotifications.RecentReceipts.MoveEntriesTo(target.RecentReceipts)
 	// Clean extending fork data
 	fv.sharedDom = nil
 	fv.extendingForkHeadHash = common.Hash{}
@@ -298,7 +298,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	// Reset accumulator and receipts to match main's behaviour of creating
 	// a fresh Sync (and thus fresh notifications) per validation call.
 	fv.extendingForkNotifications = fv.executor.ValidationNotifications()
-	fv.extendingForkNotifications.Accumulator.Reset(0)
+	fv.extendingForkNotifications.Accumulator.Reset()
 	fv.extendingForkNotifications.RecentReceipts.Clear()
 	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain)
 
@@ -355,8 +355,8 @@ func (fv *ForkValidator) detachExtendingFork(hash common.Hash) *extendingFork {
 		number:         fv.extendingForkNumber,
 	}
 	if fv.extendingForkNotifications != nil {
-		fv.extendingForkNotifications.Accumulator.CopyAndReset(f.accumulator)
-		fv.extendingForkNotifications.RecentReceipts.CopyAndReset(f.recentReceipts)
+		fv.extendingForkNotifications.Accumulator.AppendAndReset(f.accumulator)
+		fv.extendingForkNotifications.RecentReceipts.MoveEntriesTo(f.recentReceipts)
 	}
 	fv.sharedDom = nil
 	fv.extendingForkHeadHash = common.Hash{}
@@ -373,10 +373,10 @@ func (fv *ForkValidator) restoreExtendingFork(f *extendingFork) {
 	fv.extendingForkHeadHash = f.headHash
 	fv.extendingForkNumber = f.number
 	fv.extendingForkNotifications = fv.executor.ValidationNotifications()
-	fv.extendingForkNotifications.Accumulator.Reset(0)
+	fv.extendingForkNotifications.Accumulator.Reset()
 	fv.extendingForkNotifications.RecentReceipts.Clear()
-	f.accumulator.CopyAndReset(fv.extendingForkNotifications.Accumulator)
-	f.recentReceipts.CopyAndReset(fv.extendingForkNotifications.RecentReceipts)
+	f.accumulator.AppendAndReset(fv.extendingForkNotifications.Accumulator)
+	f.recentReceipts.MoveEntriesTo(fv.extendingForkNotifications.RecentReceipts)
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.

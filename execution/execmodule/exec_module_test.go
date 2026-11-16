@@ -23,7 +23,6 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"math"
 	"math/big"
 	"sort"
@@ -46,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
@@ -1645,51 +1643,42 @@ func TestInclusionListSatisfiedUsesOverlayOnlyStateHistory(t *testing.T) {
 	release()
 }
 
-// Not parallel: it toggles the global in-mem history flag.
 func TestInclusionListSatisfiedFromOverlayChecksStateAfterBlockTxns(t *testing.T) {
-	for _, inMemHistory := range []bool{true, false} {
-		for _, tc := range []struct {
-			name      string
-			nonce     uint64
-			to        common.Address
-			satisfied bool
-		}{
-			{name: "next nonce txn is missing", nonce: 1, to: common.Address{1}, satisfied: false},
-			{name: "spent nonce txn is invalid", nonce: 0, to: common.Address{2}, satisfied: true},
-		} {
-			t.Run(fmt.Sprintf("inMemHistory=%t/%s", inMemHistory, tc.name), func(t *testing.T) {
-				execmodule.SetInMemHistoryReads(t, inMemHistory)
-				m, pauseFCU := newOverlayPauseTester(t)
-				blockTxn := signedInclusionListTxn(t, m)
-				chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
-					gen.AddTx(blockTxn)
-				})
-				require.NoError(t, err)
-				block := chainPack.Blocks[0]
-				ilTxn, err := types.SignTx(
-					types.NewTransaction(tc.nonce, tc.to, uint256.NewInt(1), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
-					*types.LatestSignerForChainID(m.ChainConfig.ChainID),
-					m.Key,
-				)
-				require.NoError(t, err)
-				il := types.Transactions{ilTxn}
-				insertAndValidate(t, m, block)
-				release := pauseFCU(block.Header())
-
-				satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), il)
-				require.NoError(t, err)
-				if inMemHistory {
-					require.NotNil(t, satisfied)
-					require.Equal(t, tc.satisfied, *satisfied)
-				} else {
-					require.Nil(t, satisfied)
-					_, cached := m.ReadAheader.ReadInclusionListResult(block.Hash(), exec.InclusionListHash(il))
-					require.False(t, cached)
-				}
-
-				release()
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		nonce     uint64
+		to        common.Address
+		satisfied bool
+	}{
+		{name: "next nonce txn is missing", nonce: 1, to: common.Address{1}, satisfied: false},
+		{name: "spent nonce txn is invalid", nonce: 0, to: common.Address{2}, satisfied: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m, pauseFCU := newOverlayPauseTester(t)
+			blockTxn := signedInclusionListTxn(t, m)
+			chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
+				gen.AddTx(blockTxn)
 			})
-		}
+			require.NoError(t, err)
+			block := chainPack.Blocks[0]
+			ilTxn, err := types.SignTx(
+				types.NewTransaction(tc.nonce, tc.to, uint256.NewInt(1), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+				*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+				m.Key,
+			)
+			require.NoError(t, err)
+			insertAndValidate(t, m, block)
+			release := pauseFCU(block.Header())
+
+			satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), block.Hash(), block.NumberU64(), types.Transactions{ilTxn})
+			require.NoError(t, err)
+			require.NotNil(t, satisfied)
+			require.Equal(t, tc.satisfied, *satisfied)
+
+			release()
+		})
 	}
 }
 
@@ -2026,10 +2015,6 @@ func TestBuildDoesNotWaitBetweenFullBatchesOfNonceTooHighTxns(t *testing.T) {
 // The 256 recipients must exceed commitment.minForkGrain (currently 128)
 // to exercise parallel commitment worker reads.
 func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
-	original := statecfg.ExperimentalParallelCommitment
-	statecfg.ExperimentalParallelCommitment = true
-	t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = original })
-
 	t.Run("without_concurrent_commit", func(t *testing.T) {
 		testAssembleBlockWithSiblingCommit(t, false)
 	})

@@ -294,8 +294,8 @@ func (e *EngineServer) handleSSZNewPayloadWithWitness(w http.ResponseWriter, r *
 	}
 	var witness *jsonrpc.ExecutionWitnessResult
 	var witnessErr error
-	status, ok := e.sszNewPayload(w, r, forkName, version, func(blockHash common.Hash) {
-		witness, witnessErr = e.payloadWitness(r.Context(), blockHash)
+	status, ok := e.sszNewPayload(w, r, forkName, version, func(blockHash common.Hash, built *jsonrpc.ExecutionWitnessResult) {
+		witness, witnessErr = e.payloadWitness(r.Context(), blockHash, built)
 	})
 	if !ok {
 		return
@@ -313,22 +313,27 @@ func (e *EngineServer) handleSSZNewPayloadWithWitness(w http.ResponseWriter, r *
 	writeSSZBytes(w, out)
 }
 
-func (e *EngineServer) payloadWitness(ctx context.Context, blockHash common.Hash) (*jsonrpc.ExecutionWitnessResult, error) {
+// payloadWitness returns built when the validation built the witness; a concurrent build may have evicted it from the cache.
+func (e *EngineServer) payloadWitness(ctx context.Context, blockHash common.Hash, built *jsonrpc.ExecutionWitnessResult) (*jsonrpc.ExecutionWitnessResult, error) {
+	if built != nil {
+		return built, nil
+	}
 	if witness, ok := e.payloadWitnesses.Get(blockHash); ok {
 		return witness, nil
 	}
 	// Without the payload's state held or its changesets kept, only commitment history can rebuild the witness.
-	mode := "canonical"
-	witness, err := e.witnessBuilder.ExecutionWitness(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), &mode)
+	witness, err := e.payloadWitnesses.BuildPayloadWitness(ctx, blockHash, func(ctx context.Context) (*jsonrpc.ExecutionWitnessResult, error) {
+		mode := "canonical"
+		return e.witnessBuilder.ExecutionWitness(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), &mode)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("payload witness unavailable: the payload's state is no longer held: %w", err)
 	}
-	e.payloadWitnesses.AddPayloadWitness(blockHash, witness)
 	return witness, nil
 }
 
 // sszNewPayload returns false once it has written an error response.
-func (e *EngineServer) sszNewPayload(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion, onValid func(blockHash common.Hash)) (*engine_types.PayloadStatus, bool) {
+func (e *EngineServer) sszNewPayload(w http.ResponseWriter, r *http.Request, forkName string, version clparams.StateVersion, onValid func(blockHash common.Hash, witness *jsonrpc.ExecutionWitnessResult)) (*engine_types.PayloadStatus, bool) {
 	if !checkSSZContentType(w, r) {
 		return nil, false
 	}

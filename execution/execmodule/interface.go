@@ -146,11 +146,12 @@ type ExecutionModule interface {
 	// ValidateChain validates the chain ending at block.
 	ValidateChain(ctx context.Context, block *types.Block) (ValidationResult, error)
 
-	// ValidateChainAndView is ValidateChain that, for a VALID block, also calls fn with the block's state before it
-	// releases the module, so no other module call can drop that state first. It reads a committed block without
+	// ValidateChainAndView is ValidateChain that, for a VALID block, also returns a view that calls fn with the
+	// block's state. The view holds no module lock and must be called once; the caller may first release its own
+	// locks. A nil view means fn already ran, for a tip on a side fork whose state the module drops once released,
+	// or that there is no state: a committed block whose changesets are pruned. It reads a committed block without
 	// the module, waits up to wait for a busy module, and executes again a block whose state is no longer held.
-	// It does not call fn for a committed block whose changesets are pruned.
-	ValidateChainAndView(ctx context.Context, block *types.Block, wait time.Duration, fn BlockStateView) (ValidationResult, error)
+	ValidateChainAndView(ctx context.Context, block *types.Block, wait time.Duration, fn BlockStateView) (ValidationResult, func() error, error)
 
 	// --- Fork choice ------------------------------------------------------
 

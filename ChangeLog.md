@@ -2,10 +2,12 @@
 
 ### Breaking Changes
 
+- rpc, txpool: transaction submissions return `transaction pool is not ready; retry later` during startup or state recovery. Clients should retry these temporary failures (#25515).
 - engine: REST-SSZ clients must migrate from the v3.8 draft API to the routes and wire formats in [execution-apis#793](https://github.com/ethereum/execution-apis/pull/793). Fork-scoped requests now use `/engine/v1/...` with the required `Eth-Execution-Version` header. Blob requests use `POST /engine/v1/blobs/v1` through `/engine/v1/blobs/v4`, replacing `/engine/v{1..3}/blobs`. Capabilities change from `POST` to `GET /engine/v1/capabilities`, returning a JSON object with supported forks, endpoint groups and request limits instead of an SSZ list. `engine_exchangeCapabilities` no longer advertises REST endpoints. Client identity moves from `POST /engine/v1/client/version` to `GET /engine/v1/identity`, and errors use `application/problem+json` (#21729) — by @yperbasis
 - cli: removed the `--vmdebug` flag. Nothing read it, so it had no effect. Remove it from startup arguments and configuration files, or startup will fail (#25788) — by @awskii
 - cli: removed the experimental `--aa` flag and `aa` configuration key. Remove them from startup arguments and configuration files, including `aa: false`, or startup will fail. EIP-8141 frame transactions replace RIP-7560 account abstraction and activate at the chain's Bogota fork (#25243).
 - rpc, txpool: the private ETHBACKEND API is now version 5.0.0, replacing `AAValidation` with `FrameValidation`. Upgrade standalone `rpcdaemon` and `txpool` together with `erigon` (#25243).
+- rpc, txpool: the private KV API is now version 7.4.0. State notifications include block slots and completeness; upgrade standalone `rpcdaemon` and `txpool` together with `erigon` (#25515).
 - chain: timestamp-based fork schedules now reject missing required predecessors. Update affected custom genesis configurations and fork overrides before startup; Bogota requires Amsterdam at the same or an earlier timestamp (#25243).
 - rpc: `debug_accountAt`, `debug_storageRangeAt`, `debug_traceCall`, and `debug_traceCallMany` validate transaction positions before checking history retention. Out-of-range positions return an invalid-parameters error instead of reading another block's state. The position after the last user transaction remains valid, and `debug_traceCallMany` keeps `-1` for post-block state. This can be a breaking change (#24388) — by @yperbasis
 - rpc: `vmTrace` operations no longer carry the Erigon-only `idx` member, a `<transaction>-<operation>-...` path string; before Amsterdam and outside `--trace.compat` each operation now has exactly `pc`, `cost`, `op`, `ex` and `sub`. The operation part of the path follows from each operation's position in `ops` and its nesting under `sub`; the transaction part is the envelope's position in a block replay. This can be a breaking change (#25030) — by @banteg
@@ -18,11 +20,14 @@
 
 ### Added
 
+- txpool: support EIP-8272 recent-root verifier prefixes for frame transactions at the Bogota devnet-1 spec level, with dependency revalidation and root expiry (#25515).
 - engine: the authenticated Engine port supports cleartext HTTP/2 (h2c) with prior knowledge alongside HTTP/1.1. JWT authentication applies to both protocols (#21729) — by @yperbasis
 - caplin: add `--caplin.blobs-archive-from-slot` to bound the blob archive; it implies `--caplin.blobs-archive` and cannot be combined with `--caplin.snapgen` (#25879) — by @awskii
 
 ### Changed
 
+- db/state: commitment always runs on the parallel trie. `--experimental.parallel-commitment` and the `COMMITMENT_PARALLEL` environment variable no longer select the sequential trie: `=false`, documented as the way back to sequential commitment, is now ignored with a deprecation warning at startup (#26336) — by @AskAlexSharov
+- rpc: `eth_subscribe("transactionReceipts")` now sends the first block after the node or `rpcdaemon` starts, or after `rpcdaemon` reconnects to the node, as one notification with all its receipts, as every later block. Before, that block went out as one notification per receipt (#26362) — by @lupin012
 - rpc: logs in `erigon_getBlockReceiptsByBlockHash`, `ots_searchTransactionsBefore`, `ots_searchTransactionsAfter` and `graphql_getBlockDetails` receipts now carry `blockTimestamp`, as in `eth_getTransactionReceipt`. Frame receipt logs in `ots_getBlockTransactions` carry it too. Receipt logs are no longer copied to remove the field (#26099) — by @lupin012
 - execution: the serial executor is removed, and the `EXEC3_PARALLEL` environment variable is no longer read. `EXEC3_PARALLEL=false`, documented through v3.8 as the way back to single-threaded execution, is now ignored and the node runs with the default worker count; use `--exec.serial` instead. `--exec.serial` does not bring back `OnTxEnd` for a `--vmtrace` tracer or the `TRACE_BLOCKS` commitment trace: both are gone with the serial executor (#26239, #26240) — by @AskAlexSharov
 - engine: testing block-building APIs require every supplied transaction in the requested order. If a transaction cannot be included, the request fails with its index, hash and cause instead of returning an incomplete block (#25752).

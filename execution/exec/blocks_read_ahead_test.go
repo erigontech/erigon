@@ -1246,8 +1246,7 @@ func TestCachePopulatingGetterSeedsCodeHashOnACachedAccount(t *testing.T) {
 	require.Equal(t, 1, source.codeReads, "a cached account must still map its address to the cached code")
 }
 
-// A cached-account hit stamps its address-to-code-hash mapping with the account's txNum, so an unwind to that txNum drops it.
-func TestCachePopulatingGetterStampsTheSeededCodeHashWithTheAccountTxNum(t *testing.T) {
+func TestCachePopulatingGetterSeedsCodeHashAtReadFrontier(t *testing.T) {
 	account := accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xaa, 0x01}))}
 	value := accounts.SerialiseV3(&account)
 	stateCache := newTestStateCache()
@@ -1260,12 +1259,12 @@ func TestCachePopulatingGetterStampsTheSeededCodeHashWithTheAccountTxNum(t *test
 	_, ok := stateCache.View(nil).GetAddrCodeHash(addr[:])
 	require.True(t, ok)
 
-	stateCache.Applier().Unwind(6)
+	stateCache.Applier().Unwind(16)
 	_, ok = stateCache.View(nil).GetAddrCodeHash(addr[:])
-	require.True(t, ok, "an unwind above the account's txNum keeps the mapping")
-	stateCache.Applier().Unwind(5)
+	require.True(t, ok, "an unwind after the observed state keeps the mapping")
+	stateCache.Applier().Unwind(15)
 	_, ok = stateCache.View(nil).GetAddrCodeHash(addr[:])
-	require.False(t, ok, "an unwind to the account's txNum drops the mapping")
+	require.False(t, ok, "an unwind into the observed state drops the mapping")
 }
 
 // A bounded read skips the cache, because the cached value can be newer than the bound.
