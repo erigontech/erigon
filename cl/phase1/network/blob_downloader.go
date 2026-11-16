@@ -26,7 +26,9 @@ import (
 	"time"
 
 	"github.com/google/btree"
+	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/cl/blobfetch"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -85,6 +87,9 @@ type blobRetryInterval struct {
 type incompleteBlock struct {
 	block *cltypes.SignedBeaconBlock
 	root  common.Hash
+	// payloadUnresolved marks a Gloas block whose canonical child is not indexed yet, so whether it has blobs on the
+	// network is not known.
+	payloadUnresolved bool
 }
 
 // rootedColumnBlock supplies the canonical root to the PeerDAS column request, which otherwise
@@ -127,6 +132,14 @@ type BlobHistoryDownloader struct {
 	blobStorage blob_storage.BlobStorage
 	blockReader freezeblocks.BeaconSnapshotReader
 	sn          blobSnapshotReader
+
+	// Beacon API endpoints asked for a block's blobs before peers. endpointUnservedAt holds, per endpoint, the
+	// highest slot it did not serve in the current pass: the pass walks down and a pruned endpoint serves only the
+	// slots above its window.
+	endpoints          []string
+	endpointWorkers    int
+	endpointWindowMu   sync.Mutex
+	endpointUnservedAt []uint64
 
 	syncedChecker SyncedChecker
 	peerDasGetter PeerDasGetter
@@ -215,6 +228,67 @@ func NewBlobHistoryDownloader(
 		verifyBlobSidecars:        blob_storage.VerifyBlobSidecars,
 		logger:                    logger,
 	}
+}
+
+// SetBlobEndpoints makes the backfill ask the beacon API endpoints for a block's blobs before peers, workers blocks at
+// a time.
+func (b *BlobHistoryDownloader) SetBlobEndpoints(endpoints []string, workers int) {
+	b.endpoints = endpoints
+	b.endpointWorkers = max(workers, 1)
+	b.endpointUnservedAt = make([]uint64, len(endpoints))
+}
+
+func (b *BlobHistoryDownloader) resetEndpointWindows() {
+	b.endpointWindowMu.Lock()
+	defer b.endpointWindowMu.Unlock()
+	clear(b.endpointUnservedAt)
+}
+
+// fetchFromEndpoints stores the blobs of every block an endpoint serves and returns the blocks still incomplete.
+func (b *BlobHistoryDownloader) fetchFromEndpoints(batch []incompleteBlock) []incompleteBlock {
+	filled := make([]bool, len(batch))
+	var g errgroup.Group
+	g.SetLimit(b.endpointWorkers)
+	for i, item := range batch {
+		g.Go(func() error {
+			filled[i] = b.fetchFromEndpoint(item)
+			return nil
+		})
+	}
+	_ = g.Wait()
+	remaining := make([]incompleteBlock, 0, len(batch))
+	for i, item := range batch {
+		if !filled[i] {
+			remaining = append(remaining, item)
+		}
+	}
+	return remaining
+}
+
+func (b *BlobHistoryDownloader) fetchFromEndpoint(item incompleteBlock) bool {
+	slot := item.block.Block.Slot
+	for i, endpoint := range b.endpoints {
+		if b.ctx.Err() != nil {
+			return false
+		}
+		b.endpointWindowMu.Lock()
+		belowWindow := slot <= b.endpointUnservedAt[i]
+		b.endpointWindowMu.Unlock()
+		if belowWindow {
+			continue
+		}
+		err := blobfetch.FetchAndStore(b.ctx, b.blobStorage, endpoint, item.root, item.block)
+		if err == nil {
+			return true
+		}
+		if blobfetch.NotServed(err) && !item.payloadUnresolved {
+			b.endpointWindowMu.Lock()
+			b.endpointUnservedAt[i] = max(b.endpointUnservedAt[i], slot)
+			b.endpointWindowMu.Unlock()
+		}
+		b.logger.Debug("[BlobHistoryDownloader] Endpoint did not fill block", "slot", slot, "endpoint", blobfetch.RedactEndpoint(endpoint), "err", err)
+	}
+	return false
 }
 
 // SetHeadSlot sets the head slot to download from (should be currentSlot + 1)
@@ -371,6 +445,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	if currentSlot == 0 {
 		return nil // not initialized yet
 	}
+	b.resetEndpointWindows()
 	startSlot := currentSlot
 
 	if !b.peersAvailable() {
@@ -970,6 +1045,13 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot,
 			b.logger.Warn("[BlobHistoryDownloader] skipping block with nil kzg commitments", "slot", block.Block.Slot, "version", block.Version())
 			continue
 		}
+		expected, payloadUnresolved, err := blobfetch.ExpectedBlobs(b.ctx, tx, b.blockReader, blockRoot, block)
+		if err != nil {
+			return nil, 0, err
+		}
+		if expected == 0 && commitments.Len() > 0 {
+			continue
+		}
 		blobsCount, err := b.blobStorage.KzgCommitmentsCount(b.ctx, blockRoot)
 		if err != nil {
 			return nil, 0, err
@@ -983,7 +1065,7 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot,
 				continue
 			}
 		}
-		batch = append(batch, incompleteBlock{block: block, root: blockRoot})
+		batch = append(batch, incompleteBlock{block: block, root: blockRoot, payloadUnresolved: payloadUnresolved})
 	}
 	return batch, visited, nil
 }
@@ -1008,6 +1090,11 @@ func (b *BlobHistoryDownloader) storedSidecarsAvailable(blockRoot common.Hash, s
 }
 
 func (b *BlobHistoryDownloader) processBatch(batch []incompleteBlock) bool {
+	if len(b.endpoints) > 0 {
+		if batch = b.fetchFromEndpoints(batch); len(batch) == 0 {
+			return true
+		}
+	}
 	fuluBlocks := make([]incompleteBlock, 0, len(batch))
 	denebBlocks := make([]incompleteBlock, 0, len(batch))
 	for _, item := range batch {

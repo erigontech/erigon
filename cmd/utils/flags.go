@@ -25,6 +25,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1105,6 +1106,15 @@ var (
 		Usage: "sets whether caplin should immediately backfill blobs (4096 epochs)",
 		Value: false,
 	}
+	CaplinBlobsBackfillEndpointFlag = cli.StringSliceFlag{
+		Name:  "caplin.blobs-backfill-endpoint",
+		Usage: "beacon API endpoint that the blob backfill asks for a block's blobs before peers; repeat for fallback endpoints. Blobs are verified against the block before they are stored",
+	}
+	CaplinBlobsBackfillEndpointWorkersFlag = cli.IntFlag{
+		Name:  "caplin.blobs-backfill-endpoint-workers",
+		Usage: "number of blocks fetched and verified from --caplin.blobs-backfill-endpoint at a time",
+		Value: 2,
+	}
 	CaplinDisableBlobPruningFlag = cli.BoolFlag{
 		Name:  "caplin.blobs-no-pruning",
 		Usage: "disable blob pruning in caplin",
@@ -1915,6 +1925,14 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	}
 
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
+	for i, endpoint := range ctx.StringSlice(CaplinBlobsBackfillEndpointFlag.Name) {
+		if u, err := url.Parse(endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+			// The value is not echoed: it can carry an API key.
+			Fatalf("Option %s: value %d is not an http or https URL", CaplinBlobsBackfillEndpointFlag.Name, i+1)
+		}
+		cfg.CaplinConfig.BlobsBackfillEndpoints = append(cfg.CaplinConfig.BlobsBackfillEndpoints, endpoint)
+	}
+	cfg.CaplinConfig.BlobsBackfillEndpointWorkers = ctx.Int(CaplinBlobsBackfillEndpointWorkersFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	if cfg.CaplinConfig.SnapshotGenerationEnabled && cfg.CaplinConfig.BlobsArchiveFromSlot > 0 {
 		Fatalf("Option %s cannot be combined with %s: blob snapshots are built contiguously from Deneb", CaplinArchiveBlobsFromSlotFlag.Name, CaplinEnableSnapshotGeneration.Name)

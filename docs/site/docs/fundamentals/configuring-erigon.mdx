@@ -591,6 +591,9 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `false`
 * `--caplin.blobs-immediate-backfill`: Tells Caplin to immediately backfill blobs.
   * Default: `false`
+* `--caplin.blobs-backfill-endpoint value`: Beacon API endpoint that the blob backfill asks for a block's blobs before peers. Repeat it for fallback endpoints. The blobs are verified against the block before they are stored. Use an archive-capable endpoint for slots older than the peer retention window (about 18 days on mainnet).
+* `--caplin.blobs-backfill-endpoint-workers value`: Number of blocks fetched and verified from `--caplin.blobs-backfill-endpoint` at a time. Verification is CPU-bound, so keep it low on a validator node.
+  * Default: `2`
 * `--caplin.blobs-no-pruning`: Disables blob pruning.
   * Default: `false`
 * `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for data availability (DA) oracle or rollup nodes that need longer column history.

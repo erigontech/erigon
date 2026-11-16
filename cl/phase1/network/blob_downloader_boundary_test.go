@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	blobstoragemock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -1145,4 +1146,27 @@ func TestBlobHistoryDownloaderDoesNotCompleteWhileASlotIsUnindexed(t *testing.T)
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Contains(t, reader.slots, head, "the slot was not revisited after its index row appeared")
 	require.True(t, downloader.backfillCompleted.Load(), "a fully indexed and stored range must complete")
+}
+
+// A Gloas block's blobs ship with its payload, so a block whose payload the child skipped has none on the network.
+func TestCollectIncompleteBlocksSkipsAGloasBlockWhosePayloadTheChildSkipped(t *testing.T) {
+	const slot = 100
+	parent := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	parent.Block.Slot = slot
+	parent.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = common.Hash{0xaa}
+	parent.Block.Body.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{0xc0})
+	parentRoot, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+	child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	child.Block.Slot, child.Block.ParentRoot = slot+1, parentRoot
+	child.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = common.Hash{0xbb}
+
+	downloader := newBoundaryDownloader(t, slot+1, 0, slot, &boundaryBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: parent, slot + 1: child}})
+	blobStorage := blobstoragemock.NewMockBlobStorage(gomock.NewController(t))
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+	downloader.blobStorage = blobStorage
+
+	batch, _, err := downloader.collectIncompleteBlocks(slot+1, slot, 0)
+	require.NoError(t, err)
+	require.Empty(t, batch)
 }
