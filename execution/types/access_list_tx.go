@@ -499,7 +499,7 @@ func (tx *AccessListTx) GetChainID() *uint256.Int {
 }
 
 func (tx *AccessListTx) cachedSender() (sender accounts.Address, ok bool) {
-	s := tx.from
+	s := tx.sender()
 	if s.IsNil() {
 		return sender, false
 	}
@@ -507,7 +507,7 @@ func (tx *AccessListTx) cachedSender() (sender accounts.Address, ok bool) {
 }
 
 func (tx *AccessListTx) Sender(signer Signer) (accounts.Address, error) {
-	if from := tx.from; !from.IsNil() {
+	if from := tx.sender(); !from.IsNil() {
 		if !from.IsZero() { // Sender address can never be zero in a transaction with a valid signer
 			return from, nil
 		}

@@ -93,6 +93,9 @@ type Transaction interface {
 	cachedSender() (accounts.Address, bool)
 	GetSender() (accounts.Address, bool)
 	SetSender(accounts.Address)
+	// SetRawSender sets the sender without interning it; GetSender and Sender intern it on each read.
+	SetRawSender(common.Address)
+	RawSender() (common.Address, bool)
 	IsContractDeploy() bool
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
 }
@@ -101,15 +104,36 @@ type Transaction interface {
 // implementations of different transaction types
 type TransactionMisc struct {
 	// caches
-	hash atomic.Pointer[common.Hash]
-	from accounts.Address
+	hash       atomic.Pointer[common.Hash]
+	from       accounts.Address
+	rawFrom    common.Address
+	hasRawFrom bool
+}
+
+// sender is not cached when it comes from rawFrom, so reads never write to a transaction shared by readers.
+func (t *TransactionMisc) sender() accounts.Address {
+	if t.from.IsNil() && t.hasRawFrom {
+		return accounts.InternAddress(t.rawFrom)
+	}
+	return t.from
+}
+
+func (t *TransactionMisc) SetRawSender(addr common.Address) {
+	t.rawFrom, t.hasRawFrom = addr, true
+}
+
+func (t *TransactionMisc) RawSender() (common.Address, bool) {
+	if !t.from.IsNil() {
+		return t.from.Value(), true
+	}
+	return t.rawFrom, t.hasRawFrom
 }
 
 // The sender-cache trio is promoted from the embedding type when it doesn't
 // define its own; cachedSender being unexported, this is what lets a
 // transaction type outside this package satisfy the Transaction interface.
 func (t *TransactionMisc) cachedSender() (sender accounts.Address, ok bool) {
-	s := t.from
+	s := t.sender()
 	if s.IsNil() {
 		return sender, false
 	}

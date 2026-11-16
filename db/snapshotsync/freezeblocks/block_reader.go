@@ -46,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -1268,7 +1267,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 		if txs[i], err = types.DecodeTransaction(txRlp); err != nil {
 			return err
 		}
-		txs[i].SetSender(accounts.InternAddress(senders[i]))
+		txs[i].SetRawSender(senders[i])
 		return nil
 	})
 	if err != nil || !ok {
@@ -1366,7 +1365,7 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 			return nil, 0, 0, false, err
 		}
 
-		txn.SetSender(accounts.InternAddress(*(*common.Address)(sender))) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
+		txn.SetRawSender(*(*common.Address)(sender)) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 
 		reader2 := recsplit.NewIndexReader(idxTxnHash2BlockNum)
 		blockNum, ok := reader2.Lookup(txnHash[:])
@@ -1396,7 +1395,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 		return nil, false, err
 	}
 	if sender != nil {
-		txn.SetSender(accounts.InternAddress(*(*common.Address)(sender))) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
+		txn.SetRawSender(*(*common.Address)(sender)) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 	}
 	return txn, true, nil
 }

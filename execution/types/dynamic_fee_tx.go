@@ -368,7 +368,7 @@ func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
 }
 
 func (tx *DynamicFeeTransaction) cachedSender() (sender accounts.Address, ok bool) {
-	s := tx.from
+	s := tx.sender()
 	if s.IsNil() {
 		return sender, false
 	}
@@ -376,7 +376,7 @@ func (tx *DynamicFeeTransaction) cachedSender() (sender accounts.Address, ok boo
 }
 
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (accounts.Address, error) {
-	if from := tx.from; !from.IsNil() && !from.IsZero() {
+	if from := tx.sender(); !from.IsNil() && !from.IsZero() {
 		// Sender address can never be zero in a transaction with a valid signer
 		return from, nil
 	}

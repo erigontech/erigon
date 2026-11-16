@@ -129,7 +129,7 @@ func (btx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules)
 }
 
 func (btx *BlobTx) cachedSender() (sender accounts.Address, ok bool) {
-	s := btx.from
+	s := btx.sender()
 	if s.IsNil() {
 		return sender, false
 	}
@@ -137,7 +137,7 @@ func (btx *BlobTx) cachedSender() (sender accounts.Address, ok bool) {
 }
 
 func (btx *BlobTx) Sender(signer Signer) (accounts.Address, error) {
-	if from := btx.from; !from.IsNil() && !from.IsZero() {
+	if from := btx.sender(); !from.IsNil() && !from.IsZero() {
 		// Sender address can never be zero in a transaction with a valid signer
 		return from, nil
 	}

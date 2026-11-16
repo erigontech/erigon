@@ -391,6 +391,10 @@ func (txw *BlobTxWrapper) GetSender() (accounts.Address, bool) { return txw.Tx.G
 
 func (txw *BlobTxWrapper) SetSender(address accounts.Address) { txw.Tx.SetSender(address) }
 
+func (txw *BlobTxWrapper) SetRawSender(address common.Address) { txw.Tx.SetRawSender(address) }
+
+func (txw *BlobTxWrapper) RawSender() (common.Address, bool) { return txw.Tx.RawSender() }
+
 func (txw *BlobTxWrapper) IsContractDeploy() bool { return txw.Tx.IsContractDeploy() }
 
 func (txw *BlobTxWrapper) Unwrap() Transaction { return &txw.Tx }

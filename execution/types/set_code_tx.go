@@ -181,7 +181,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *c
 }
 
 func (tx *SetCodeTransaction) Sender(signer Signer) (accounts.Address, error) {
-	if from := tx.from; !from.IsNil() && !from.IsZero() {
+	if from := tx.sender(); !from.IsNil() && !from.IsZero() {
 		// Sender address can never be zero in a transaction with a valid signer
 		return from, nil
 	}

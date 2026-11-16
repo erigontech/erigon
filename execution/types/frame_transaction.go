@@ -448,6 +448,10 @@ func (tx *FrameTransaction) GetSender() (accounts.Address, bool) { return tx.cac
 
 func (tx *FrameTransaction) SetSender(accounts.Address) {}
 
+func (tx *FrameTransaction) SetRawSender(common.Address) {}
+
+func (tx *FrameTransaction) RawSender() (common.Address, bool) { return tx.SenderAddress, true }
+
 func (tx *FrameTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return new(uint256.Int), new(uint256.Int), new(uint256.Int)
 }

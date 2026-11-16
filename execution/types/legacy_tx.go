@@ -85,7 +85,7 @@ func (ct *CommonTx) GetData() []byte {
 }
 
 func (ct *CommonTx) GetSender() (accounts.Address, bool) {
-	if sc := ct.from; !sc.IsNil() {
+	if sc := ct.sender(); !sc.IsNil() {
 		return sc, true
 	}
 	return accounts.NilAddress, false
@@ -412,7 +412,7 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 }
 
 func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {
-	s := tx.from
+	s := tx.sender()
 	if s.IsNil() {
 		return sender, false
 	}
@@ -420,7 +420,7 @@ func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {
 }
 
 func (tx *LegacyTx) Sender(signer Signer) (accounts.Address, error) {
-	if from := tx.from; !from.IsNil() && !from.IsZero() {
+	if from := tx.sender(); !from.IsNil() && !from.IsZero() {
 		// Sender address can never be zero in a transaction with a valid signer
 		return from, nil
 	}

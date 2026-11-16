@@ -958,8 +958,8 @@ func newRPCTransaction(txn types.Transaction, baseFee *uint256.Int) *RPCTransact
 		}
 	}
 
-	if from, ok := txn.GetSender(); ok && !from.IsZero() {
-		result.From = from.Value()
+	if from, ok := txn.RawSender(); ok && from != (common.Address{}) {
+		result.From = from
 	} else {
 		// For replay-protected transactions, use the most permissive signer, because we assume
 		// that signers are backwards-compatible with old transactions. For non-protected
