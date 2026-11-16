@@ -401,35 +401,16 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttesterSlashings(w http.ResponseWriter,
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
-	var raw struct {
-		Attestation1 *json.RawMessage `json:"attestation_1"`
-		Attestation2 *json.RawMessage `json:"attestation_2"`
-	}
-	if err := json.Unmarshal(body, &raw); err != nil {
+	req := cltypes.NewAttesterSlashing(version)
+	req.Attestation_1.AttestingIndices.SetCap(int(maxIndices))
+	req.Attestation_2.AttestingIndices.SetCap(int(maxIndices))
+	if err := json.Unmarshal(body, req); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
-	if raw.Attestation1 == nil || raw.Attestation2 == nil {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation_1 and attestation_2 are required")).WriteTo(w)
+	if req.Attestation_1.AttestingIndices.Length() > int(maxIndices) || req.Attestation_2.AttestingIndices.Length() > int(maxIndices) {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attesting indices exceed limit")).WriteTo(w)
 		return
-	}
-	req := cltypes.NewAttesterSlashing(version)
-	for _, input := range []struct {
-		body        *json.RawMessage
-		attestation *cltypes.IndexedAttestation
-	}{
-		{raw.Attestation1, req.Attestation_1},
-		{raw.Attestation2, req.Attestation_2},
-	} {
-		input.attestation.AttestingIndices.SetCap(int(maxIndices))
-		if err := json.Unmarshal(*input.body, input.attestation); err != nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-			return
-		}
-		if input.attestation.AttestingIndices.Length() > int(maxIndices) {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attesting indices exceed limit")).WriteTo(w)
-			return
-		}
 	}
 	a.submitAttesterSlashing(w, r, req)
 }
