@@ -54,6 +54,12 @@ func (f *Follower) do(ctx context.Context, fn func(ctx context.Context) error) e
 	return <-c.done
 }
 
+// CommitHook runs on Run's goroutine once the head is the parent of the
+// block a command commits, before the block commits. The function it
+// returns, when set, takes the block's header once it is the head, before
+// derivation resumes.
+type CommitHook func() func(*types.Header)
+
 // perform runs c; the head moves it makes are the sequencer's.
 func (f *Follower) perform(ctx context.Context, c command) {
 	defer f.moving(HeadSequencer)()
@@ -61,10 +67,9 @@ func (f *Follower) perform(ctx context.Context, c command) {
 }
 
 // Produce builds the block of inputs in on the head, with the transactions
-// of txs that fit, and makes it the head; committed, when set, takes the
-// block's header before derivation resumes. A head other than in.ParentHash
-// fails it with ErrStaleParent.
-func (f *Follower) Produce(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider, committed func(*types.Header)) (*types.BlockWithReceipts, error) {
+// of txs that fit, and makes it the head, running hook when set. A head
+// other than in.ParentHash fails it with ErrStaleParent.
+func (f *Follower) Produce(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider, hook CommitHook) (*types.BlockWithReceipts, error) {
 	var built *types.BlockWithReceipts
 	err := f.do(ctx, func(ctx context.Context) error {
 		if err := f.requireHead(ctx, in.ParentHash); err != nil {
@@ -73,6 +78,10 @@ func (f *Follower) Produce(ctx context.Context, in deriver.HeaderInputs, txs txn
 		safe, finalized, err := f.deriver.Anchors(ctx)
 		if err != nil {
 			return err
+		}
+		var committed func(*types.Header)
+		if hook != nil {
+			committed = hook()
 		}
 		if built, err = f.chain.Build(ctx, in, txs, safe, finalized); err == nil && committed != nil {
 			committed(built.Block.Header())

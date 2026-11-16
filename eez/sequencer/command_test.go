@@ -18,6 +18,7 @@ package sequencer_test
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sync"
 	"testing"
@@ -25,8 +26,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/eez/config"
+	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/deriver/derivertest"
+	"github.com/erigontech/erigon/eez/follower"
+	"github.com/erigontech/erigon/eez/protocol/da"
 	"github.com/erigontech/erigon/eez/sequencer"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
@@ -114,4 +120,160 @@ func TestStalePoolLeavesTheFollowerFree(t *testing.T) {
 	pool.see(1)
 	require.NoError(t, <-done)
 	require.Equal(t, uint64(2), h.head(t).Number.Uint64())
+}
+
+// pins is a witness capture that counts its open pins and keeps the head each
+// was taken at and the blocks it recorded.
+type pins struct {
+	head func() (*types.Header, error)
+
+	mu       sync.Mutex
+	open     int
+	at       []common.Hash
+	recorded []common.Hash
+}
+
+func (p *pins) Pin(context.Context) (interface{ Close() }, error) {
+	head, err := p.head()
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.open++
+	p.at = append(p.at, head.Hash())
+	return closer{p}, nil
+}
+
+func (p *pins) Record(_ context.Context, _ interface{ Close() }, h *types.Header) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.recorded = append(p.recorded, h.Hash())
+	return nil
+}
+
+func (p *pins) opened() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.open
+}
+
+type closer struct{ p *pins }
+
+func (c closer) Close() {
+	c.p.mu.Lock()
+	defer c.p.mu.Unlock()
+	c.p.open--
+}
+
+var errHeld = errors.New("held")
+
+// held holds a build, and the follower's goroutine with it, until released,
+// then ends it with err: no block, or an empty one.
+type held struct {
+	entered chan struct{}
+	release <-chan struct{}
+	err     error
+}
+
+func (h held) ProvideTxns(ctx context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	close(h.entered)
+	select {
+	case <-h.release:
+	case <-ctx.Done():
+	}
+	return nil, h.err
+}
+
+// queuing is the follower, telling queued when a build is handed to it.
+type queuing struct {
+	*follower.Follower
+	queued chan struct{}
+}
+
+func (q queuing) Produce(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider, hook follower.CommitHook) (*types.BlockWithReceipts, error) {
+	q.queued <- struct{}{}
+	return q.Follower.Produce(ctx, in, txs, hook)
+}
+
+// wait waits for a build handed to q.
+func (q queuing) wait(t *testing.T) {
+	t.Helper()
+	select {
+	case <-q.queued:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the trigger handed no build to the follower")
+	}
+}
+
+// holdFollower has the follower build block 1 on genesis from a held
+// provider ending with err, and returns the build's result and its release.
+func holdFollower(t *testing.T, h *harness, err error) (<-chan error, func()) {
+	t.Helper()
+	release := make(chan struct{})
+	free := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(free)
+	busy := held{entered: make(chan struct{}), release: release, err: err}
+	l2 := derivertest.Config().L2.(*config.L2Config)
+	in := deriver.DeriveInputs(l2, h.genesis, &da.Span{Beneficiaries: []common.Address{{}}, ExtraData: [][]byte{{}}}, 0)
+	other := make(chan error, 1)
+	go func() {
+		_, err := h.follower.Produce(t.Context(), in, busy, nil)
+		other <- err
+	}()
+	select {
+	case <-busy.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the follower did not take the other build")
+	}
+	return other, free
+}
+
+// TestWitnessPinWaitsForTheCommand: a block's witness pin, a read transaction
+// on the chain, is taken once the follower takes the block's build, at its
+// parent, not while the build waits behind the follower's other work.
+func TestWitnessPinWaitsForTheCommand(t *testing.T) {
+	h := newHarness(t)
+	w := &pins{head: func() (*types.Header, error) { return h.follower.Head(context.Background()) }}
+	q := queuing{Follower: h.follower, queued: make(chan struct{}, 1)}
+	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet(), Witnesses: w}, q, h.pool, log.New())
+	require.NoError(t, err)
+	ctx := t.Context()
+
+	other, free := holdFollower(t, h, errHeld)
+	done := make(chan error, 1)
+	go func() { done <- s.Handle(ctx, sequencer.LiveTick{SyncHeight: 12}) }()
+	q.wait(t)
+	require.Never(t, func() bool { return w.opened() > 0 }, 300*time.Millisecond, 10*time.Millisecond, "a pin is open while the build waits")
+
+	free()
+	require.ErrorIs(t, <-other, errHeld)
+	require.NoError(t, <-done)
+	head := h.head(t)
+	require.Equal(t, uint64(1), head.Number.Uint64())
+	require.Zero(t, w.opened())
+	require.Equal(t, []common.Hash{h.genesis.Hash()}, w.at, "pinned at the block's parent")
+	require.Equal(t, []common.Hash{head.Hash()}, w.recorded)
+}
+
+// TestWitnessPinNeedsTheParent: a build whose parent another writer replaced
+// while it waited takes no pin.
+func TestWitnessPinNeedsTheParent(t *testing.T) {
+	h := newHarness(t)
+	w := &pins{head: func() (*types.Header, error) { return h.follower.Head(context.Background()) }}
+	q := queuing{Follower: h.follower, queued: make(chan struct{}, 1)}
+	s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet(), Witnesses: w}, q, h.pool, log.New())
+	require.NoError(t, err)
+
+	other, free := holdFollower(t, h, nil)
+	done := make(chan error, 1)
+	go func() { done <- s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 12}) }()
+	// The trigger read genesis as the head.
+	q.wait(t)
+	free()
+	require.NoError(t, <-other)
+	require.NoError(t, <-done, "a moved head ends the trigger quietly")
+	require.Equal(t, uint64(1), h.head(t).Number.Uint64())
+	require.Empty(t, w.at)
+	require.Empty(t, w.recorded)
 }

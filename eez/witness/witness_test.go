@@ -303,8 +303,8 @@ type replaced struct {
 	*follower.Follower
 }
 
-func (r replaced) Produce(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider, committed func(*types.Header)) (*types.BlockWithReceipts, error) {
-	built, err := r.Follower.Produce(ctx, in, txs, committed)
+func (r replaced) Produce(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider, hook follower.CommitHook) (*types.BlockWithReceipts, error) {
+	built, err := r.Follower.Produce(ctx, in, txs, hook)
 	if err != nil {
 		return nil, err
 	}

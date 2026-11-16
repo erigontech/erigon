@@ -68,10 +68,9 @@ type Committer interface {
 	// Head returns the header of the head block.
 	Head(ctx context.Context) (*types.Header, error)
 	// Produce builds the block of inputs in on the head from txs and makes
-	// it the head; committed, when set, takes its header before derivation
-	// can move the head again. follower.ErrStaleParent reports a head that
-	// has moved.
-	Produce(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider, committed func(*types.Header)) (*types.BlockWithReceipts, error)
+	// it the head, running hook when set. follower.ErrStaleParent reports a
+	// head that has moved.
+	Produce(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider, hook follower.CommitHook) (*types.BlockWithReceipts, error)
 	// Settled returns the block the latest settlement ended at.
 	Settled() uint64
 }
@@ -318,12 +317,11 @@ func (s *Sequencer) build(ctx context.Context, kind Kind, parent *types.Header, 
 	wctx := context.WithoutCancel(ctx)
 	var pin interface{ Close() }
 	var pinErr error
-	if w := s.cfg.Witnesses; w != nil {
-		// The pin must hold the parent's state: taken before the block commits.
-		if pin, pinErr = w.Pin(wctx); pinErr == nil {
-			defer pin.Close()
+	defer func() {
+		if pin != nil {
+			pin.Close()
 		}
-	}
+	}()
 	// Before derivation resumes: a block it replaces has no witness to build.
 	record := func(h *types.Header) {
 		switch {
@@ -335,7 +333,15 @@ func (s *Sequencer) build(ctx context.Context, kind Kind, parent *types.Header, 
 			}
 		}
 	}
-	built, err := s.committer.Produce(ctx, in, txs, record)
+	// The pin must hold the parent's state: taken in the command, on the
+	// parent before the block commits, so no read transaction waits for it.
+	hook := func() func(*types.Header) {
+		if w := s.cfg.Witnesses; w != nil {
+			pin, pinErr = w.Pin(wctx)
+		}
+		return record
+	}
+	built, err := s.committer.Produce(ctx, in, txs, hook)
 	if err != nil {
 		return nil, err
 	}

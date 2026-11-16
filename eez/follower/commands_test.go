@@ -97,14 +97,24 @@ func TestCommands(t *testing.T) {
 
 	tx := c.Transfer(bob, 1)
 	genesis := head()
-	b1, err := n.follower.Produce(ctx, inputs(genesis), provide(t, tx), nil)
+	// The hook runs on the parent, and its function takes the block.
+	var hookHead, committed common.Hash
+	b1, err := n.follower.Produce(ctx, inputs(genesis), provide(t, tx), func() func(*types.Header) {
+		hookHead = head().Hash()
+		return func(h *types.Header) { committed = h.Hash() }
+	})
 	require.NoError(t, err)
+	require.Equal(t, genesis.Hash(), hookHead)
+	require.Equal(t, b1.Block.Hash(), committed)
 	require.Len(t, b1.Block.Transactions(), 1)
 	require.Equal(t, alice, b1.Block.Coinbase())
 	require.Equal(t, b1.Block.Hash(), head().Hash())
 	require.Equal(t, follower.HeadSequencer, n.follower.Status().HeadSource)
 
-	_, err = n.follower.Produce(ctx, inputs(genesis), provide(t), nil)
+	_, err = n.follower.Produce(ctx, inputs(genesis), provide(t), func() func(*types.Header) {
+		t.Error("the hook ran on a moved head")
+		return nil
+	})
 	require.ErrorIs(t, err, follower.ErrStaleParent)
 
 	// The settlement of the produced block keeps it.
