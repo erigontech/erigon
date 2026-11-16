@@ -272,6 +272,46 @@ func (c *MockPoolGetRlpCall) DoAndReturn(f func(kv.Tx, []byte) ([]byte, error)) 
 	return c
 }
 
+// HeldOrQueuedIdHashes mocks base method.
+func (m *MockPool) HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (Hashes, Hashes, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HeldOrQueuedIdHashes", tx, hashes)
+	ret0, _ := ret[0].(Hashes)
+	ret1, _ := ret[1].(Hashes)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// HeldOrQueuedIdHashes indicates an expected call of HeldOrQueuedIdHashes.
+func (mr *MockPoolMockRecorder) HeldOrQueuedIdHashes(tx, hashes any) *MockPoolHeldOrQueuedIdHashesCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HeldOrQueuedIdHashes", reflect.TypeOf((*MockPool)(nil).HeldOrQueuedIdHashes), tx, hashes)
+	return &MockPoolHeldOrQueuedIdHashesCall{Call: call}
+}
+
+// MockPoolHeldOrQueuedIdHashesCall wrap *gomock.Call
+type MockPoolHeldOrQueuedIdHashesCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPoolHeldOrQueuedIdHashesCall) Return(held, queued Hashes, err error) *MockPoolHeldOrQueuedIdHashesCall {
+	c.Call = c.Call.Return(held, queued, err)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPoolHeldOrQueuedIdHashesCall) Do(f func(kv.Tx, Hashes) (Hashes, Hashes, error)) *MockPoolHeldOrQueuedIdHashesCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPoolHeldOrQueuedIdHashesCall) DoAndReturn(f func(kv.Tx, Hashes) (Hashes, Hashes, error)) *MockPoolHeldOrQueuedIdHashesCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // IdHashKnown mocks base method.
 func (m *MockPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 	m.ctrl.T.Helper()
@@ -345,6 +385,42 @@ func (c *MockPoolOnNewBlockCall) Do(f func(context.Context, *remoteproto.StateCh
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockPoolOnNewBlockCall) DoAndReturn(f func(context.Context, *remoteproto.StateChangeBatch, TxnSlots, TxnSlots, TxnSlots) error) *MockPoolOnNewBlockCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// RejectFramePrefix mocks base method.
+func (m *MockPool) RejectFramePrefix(hash common.Hash) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "RejectFramePrefix", hash)
+}
+
+// RejectFramePrefix indicates an expected call of RejectFramePrefix.
+func (mr *MockPoolMockRecorder) RejectFramePrefix(hash any) *MockPoolRejectFramePrefixCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RejectFramePrefix", reflect.TypeOf((*MockPool)(nil).RejectFramePrefix), hash)
+	return &MockPoolRejectFramePrefixCall{Call: call}
+}
+
+// MockPoolRejectFramePrefixCall wrap *gomock.Call
+type MockPoolRejectFramePrefixCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPoolRejectFramePrefixCall) Return() *MockPoolRejectFramePrefixCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPoolRejectFramePrefixCall) Do(f func(common.Hash)) *MockPoolRejectFramePrefixCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPoolRejectFramePrefixCall) DoAndReturn(f func(common.Hash)) *MockPoolRejectFramePrefixCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

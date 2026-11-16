@@ -109,6 +109,9 @@ type PatriciaContext interface {
 	Branch(prefix []byte) ([]byte, kv.Step, error)
 	// Implementations must copy prefix and data rather than retain them: callers may pass
 	// pooled buffers that are recycled for a later, unrelated update.
+	// A nil prevData asks the writer to read the previous value.
+	// A non-nil empty slice means the branch was absent from the trie,
+	// even if an unreachable record remains in storage.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	Account(plainKey []byte) (*Update, error)
 	Storage(plainKey []byte) (*Update, error)
@@ -231,7 +234,7 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 
 // reuseBytes copies src into dst's backing array, matching bytes.Clone's nil handling:
 // a nil src yields nil, so pool history cannot change the result's nil-ness. Callers
-// distinguish a nil prev ("look it up") from an empty one ("known absent").
+// distinguish a nil prev ("look it up") from an empty one ("absent from the trie").
 func reuseBytes(dst, src []byte) []byte {
 	if src == nil {
 		return nil
@@ -448,8 +451,8 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
-// prev is the record stored at prefix, empty when the branch is new. The caller
-// supplies it because the trie already read it while unfolding the row.
+// prev is the branch read during unfold, empty when the branch is new.
+// A nil prev is passed to PutBranch as a non-nil empty slice to avoid a storage read.
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -487,7 +490,7 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
-// prev is the record stored at prefix, empty when the branch is new; see CollectUpdate.
+// See CollectUpdate for the meaning of prev.
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -2022,11 +2025,10 @@ type Update struct {
 	Nonce      uint64
 
 	// DeleteStorageSubtree is a transient (never-serialized) signal that this
-	// account was self-destructed in the block: its whole storage subtree must be
-	// pruned before this account's update is applied, so a same-block recreate
-	// rebuilds from empty storage. Set by the commitment calculator from the SD
-	// marker; consumed by the trie during Process. Not a Flags bit because Flags
-	// is serialized and merged.
+	// account was self-destructed or created as a contract in the block: its whole
+	// storage subtree must be pruned before this account's update is applied, so the
+	// account rebuilds from empty storage. Set by the commitment calculator; consumed
+	// by the trie during Process. Not a Flags bit because Flags is serialized and merged.
 	DeleteStorageSubtree bool
 }
 

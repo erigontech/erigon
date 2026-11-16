@@ -379,6 +379,16 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 	}
 	defer f.Close()
 
+	stat, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if stat.Size() != info.TotalLength() {
+		err := fmt.Errorf("size mismatch, file: %s, got %d, torrent expects %d", t.Name(), stat.Size(), info.TotalLength())
+		log.Warn("[verify.failfast] ", "err", err)
+		return err
+	}
+
 	hasher := sha1.New()
 	for i := 0; i < info.NumPieces(); i++ {
 		p := info.Piece(i)

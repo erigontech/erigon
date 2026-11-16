@@ -1,0 +1,30 @@
+{
+  "case": "gloas",
+  "mode": "catchup",
+  "blocks": [
+    {
+      "slot": 33,
+      "block_root": "0xc770dcb3b6a351e0637492abc76deeea43214929ebf891db691800cd17d9f45f",
+      "snapshot_sha256": "a899945ff80b3e03d74ccdf84137f192b3389cdc9b814589276d37621318a729",
+      "latest_message_count": 8,
+      "epoch_first": false,
+      "randao_vector_present": false,
+      "proposer_boost_root": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "head": "0xc770dcb3b6a351e0637492abc76deeea43214929ebf891db691800cd17d9f45f",
+      "head_slot": 33,
+      "event_count": 1
+    },
+    {
+      "slot": 65,
+      "block_root": "0x24bfd27eb74c1a8fc5803d66d49b895c40da9ead6cd3dbb9c7e5f6bbb36ece32",
+      "snapshot_sha256": "8b4d5daf51295e2916b18cdc6fcccd2642fb1acd90fc0aace0c9951506d14cbb",
+      "latest_message_count": 8,
+      "epoch_first": false,
+      "randao_vector_present": false,
+      "proposer_boost_root": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "head": "0x24bfd27eb74c1a8fc5803d66d49b895c40da9ead6cd3dbb9c7e5f6bbb36ece32",
+      "head_slot": 65,
+      "event_count": 1
+    }
+  ]
+}

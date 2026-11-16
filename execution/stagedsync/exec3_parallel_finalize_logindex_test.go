@@ -19,8 +19,10 @@ package stagedsync
 import (
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -227,4 +229,70 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 
 	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogAddrIdx, logIndexContract[:]))
 	require.Equal(t, []uint64{logIndexFinalTxNum}, indexedTxNums(t, rwTx, kv.LogTopicIdx, logIndexTopic[:]))
+}
+
+// A tx charged at validation records one copy of its writes, kept by TxOut as well, and
+// the worker's own write-set stays free of the sender charge and the tip.
+func TestChargedTxKeepsOneCopyOfItsWrites(t *testing.T) {
+	db := newResumeTestDB(t)
+	sender := senderIsCoinbaseKey.rawAddress
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(1_000_000_000)
+		return putter.DomainPut(kv.AccountsDomain, sender[:], accounts.SerialiseV3(&acc), 0, nil)
+	})
+	rwTx, domains := temporaltest.NewTestTxSD(t, db)
+	pe := newParallelLogIndexTestExec(db, domains, 0)
+
+	coinbase := common.HexToAddress("0xc01b")
+	recipient := common.HexToAddress("0xa11ce")
+	tasks := newLogIndexTestTasks(pe.cfg.chainConfig)
+	signed, err := types.SignTx(&types.LegacyTx{
+		CommonTx: types.CommonTx{To: &recipient, GasLimit: 21_000},
+		GasPrice: *uint256.NewInt(1),
+	}, *types.MakeSigner(pe.cfg.chainConfig, 1, 0), senderIsCoinbaseKey.key)
+	require.NoError(t, err)
+	for i, task := range tasks {
+		txTask := task.(*exec.TxTask)
+		txTask.TxIndex = i
+		txTask.Txs = types.Transactions{signed}
+		txTask.Header.Coinbase = coinbase
+	}
+	be, _ := newLogIndexTestBlock(tasks)
+	regular := be.tasks[0]
+
+	created := accounts.InternAddress(recipient)
+	workerWrites := &state.WriteSet{}
+	workerWrites.SetNonce(created, &state.VersionedWrite[uint64]{
+		WriteHeader: state.WriteHeader{Address: created, Path: state.NoncePath, Version: regular.Version()},
+		Val:         1,
+	})
+	be.versionMap.FlushVersionedWrites(workerWrites, false)
+
+	be.execTasks.setInProgress(0)
+	res, err := be.nextResult(t.Context(), pe, &exec.TxResult{
+		Task:     &taskVersion{execTask: regular, version: regular.Version()},
+		TxOut:    workerWrites,
+		Coinbase: accounts.InternAddress(coinbase),
+		ExecutionResult: evmtypes.ExecutionResult{
+			ReceiptGasUsed: 21_000,
+			FeeTipped:      *uint256.NewInt(21_000),
+			TxnGasUsage:    mdgas.TxnGasUsage{BlockExecutionGasUsed: 21_000},
+		},
+	}, rwTx)
+	require.NoError(t, err)
+	require.Nil(t, res)
+
+	finalized := be.finalizedResults[0]
+	require.NotNil(t, finalized, "the tx must reach the finalize tail")
+	recorded := be.blockIO.WriteSet(regular.Version().TxIndex)
+	require.Same(t, recorded, finalized.TxOut)
+
+	_, charged := recorded.GetBalance(accounts.InternAddress(sender))
+	require.True(t, charged, "the sender charge must be recorded")
+	_, tipped := recorded.GetBalance(accounts.InternAddress(coinbase))
+	require.True(t, tipped, "the tip must be recorded")
+	_, kept := recorded.GetNonce(created)
+	require.True(t, kept, "the worker's writes must be recorded")
+	require.Equal(t, 1, workerWrites.Count(), "the worker's write-set must stay as the worker left it")
 }
