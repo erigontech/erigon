@@ -251,7 +251,8 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 							return err
 						}
 					}
-					if acc.IsEmptyCodeHash() {
+					// An EIP-7702 authority comes from a signature, so it is never a predeploy whose code has no account record.
+					if _, isDelegation := types.ParseDelegation(d.code); isDelegation && acc.IsEmptyCodeHash() {
 						prevCode = []byte{}
 					}
 				}

@@ -432,6 +432,22 @@ func TestApplyWritesFoldCodeOfCodelessAccountReadsNoPrevCode(t *testing.T) {
 	require.Empty(t, diff[0].Value, "the prev code is empty")
 }
 
+// Code without an account record (a system-contract predeploy) must stay the prev value of a
+// non-delegation code write, so that an unwind restores it.
+func TestApplyWritesFoldNonDelegationCodeReadsPrevCode(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	reads := &latestReads{TemporalTx: tx, domain: kv.CodeDomain}
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	code := accounts.NewCode([]byte{0x60, 0x00})
+	ws := &WriteSet{}
+	ws.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: 1})
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath}, Val: code})
+
+	require.NoError(t, ApplyWrites(NewVersionMapWriteView(ws, NewVersionMap(nil), 0), domains, reads, 1, 1, false))
+
+	require.Equal(t, 1, reads.count, "a code write that is not a delegation reads its prev code")
+}
+
 // A write without a recorded origin (zero origin, default status) must still read the
 // previous value: a zero prev would turn a real delete into a no-op.
 func TestApplyWritesFoldReadsPrevWithoutRecordedOrigin(t *testing.T) {
