@@ -243,11 +243,9 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	blockHeight := block.NumberU64()
 
-	// FinalizeBlockExecution skipped the so.data CommitBlock of the versioned state; commit the accumulated per-phase write-sets to the
-	// domains via ApplyWrites instead — the same domain apply the parallel
-	// executor and block generation use (rw_v3 handles the self-destruct delete,
-	// EIP-161 removal and storage-subtree cascade). Each recorded phase
-	// (init/txs/finalize) is applied in order.
+	// The versioned state holds the block's writes as per-phase write-sets (init/txs/finalize). Apply them to the
+	// domains in order with ApplyWrites, as the parallel executor and block generation do (rw_v3 handles the
+	// self-destruct delete, EIP-161 removal and storage-subtree cascade).
 	for _, ws := range ba.WriteSets() {
 		if ws == nil || ws.IsEmpty() {
 			continue
@@ -257,9 +255,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		}
 	}
 
-	// Compute state root directly from the domain writes accumulated during
-	// block assembly. All state changes flow through CommitBlock in
-	// AssembleBlock — no re-execution needed.
+	// The domains now hold every write of the block, so the state root needs no re-execution.
 	rh, err := sd.ComputeCommitment(ctx, tx, false, blockHeight, txNum, logPrefix, nil)
 	if err != nil {
 		return fmt.Errorf("compute commitment failed: %w", err)
