@@ -22,17 +22,20 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -919,4 +922,93 @@ func TestRebuildBeaconSnapshotIndexIsIdempotentAtAStaticTip(t *testing.T) {
 		require.Equal(t, tip+1, progress)
 		return nil
 	}))
+}
+
+func TestBlobSegmentCompleteRejectsACountAboveTheBlock(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, beacon_indicies.MarkRootCanonical(tx, 3, common.Hash{3}))
+	storage := mock_services.NewMockBlobStorage(gomock.NewController(t))
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(3), nil).AnyTimes()
+	storage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
+	a := &Antiquary{ctx: t.Context(), logger: log.New(), blobStorage: storage, blobBackfilled: &atomic.Bool{}}
+
+	for _, want := range []uint64{2, 0} {
+		complete, err := a.blobSegmentComplete(tx, 3, 4, func(kv.Tx, uint64) (uint64, bool, error) { return want, false, nil })
+		require.NoError(t, err)
+		require.False(t, complete, "the dump requires the counts to be equal, want %d", want)
+	}
+}
+
+// A count row stays after its sidecar file is lost, so the scan must check the files. It rescans from the gap.
+func TestBlobSegmentCompleteScansFilesAndResumesAtTheGap(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	wants := map[uint64]uint64{3: 2, 5: 2}
+	for slot := range wants {
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, common.Hash{byte(slot)}))
+	}
+	fileLost := true
+	storage := mock_services.NewMockBlobStorage(gomock.NewController(t))
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, root common.Hash) (uint32, error) {
+		return uint32(wants[uint64(root[0])]), nil
+	}).AnyTimes()
+	storage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, slot uint64, _ common.Hash, idx uint64) (bool, error) {
+		return slot != 5 || idx != 1 || !fileLost, nil
+	}).AnyTimes()
+	a := &Antiquary{ctx: t.Context(), logger: log.New(), blobStorage: storage, blobBackfilled: &atomic.Bool{}}
+	var asked []uint64
+	blobCount := func(_ kv.Tx, slot uint64) (uint64, bool, error) {
+		asked = append(asked, slot)
+		return wants[slot], false, nil
+	}
+
+	complete, err := a.blobSegmentComplete(tx, 0, 5, blobCount)
+	require.NoError(t, err)
+	require.True(t, complete, "the segment below the gap is complete")
+
+	complete, err = a.blobSegmentComplete(tx, 0, 8, blobCount)
+	require.NoError(t, err)
+	require.False(t, complete, "the sidecar file of slot 5 is lost")
+	require.Equal(t, uint64(5), a.blobCheckedTo)
+	require.Equal(t, uint64(5), mxBlobRetirementGapSlot.GetValueUint64())
+
+	fileLost, asked = false, nil
+	complete, err = a.blobSegmentComplete(tx, 0, 8, blobCount)
+	require.NoError(t, err)
+	require.True(t, complete)
+	require.Equal(t, uint64(5), asked[0], "the scan resumes at the last known gap")
+	require.Zero(t, mxBlobRetirementGapSlot.GetValueUint64())
+
+	asked = nil
+	complete, err = a.blobSegmentComplete(tx, 8, 9, blobCount)
+	require.NoError(t, err)
+	require.True(t, complete)
+	require.Equal(t, uint64(8), asked[0], "the next segment starts above a gap that has retired")
+
+	a.blobBackfilled.Store(true)
+	fileLost, asked = true, nil
+	complete, err = a.blobSegmentComplete(tx, 0, 8, blobCount)
+	require.NoError(t, err)
+	require.True(t, complete)
+	require.Empty(t, asked, "a finished backfill skips the scan")
+}
+
+func TestBlobRetirementGapIsReported(t *testing.T) {
+	var buf bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&buf, log.LogfmtFormat()))
+	a := &Antiquary{logger: logger}
+
+	a.reportBlobRetirementGap(10_000, 12_345, time.Unix(1_000, 0))
+	a.reportBlobRetirementGap(10_000, 12_346, time.Unix(1_060, 0))
+	require.Equal(t, uint64(12_346), mxBlobRetirementGapSlot.GetValueUint64(), "the rate limit covers only the log")
+	require.Equal(t, 1, strings.Count(buf.String(), "gapSlot="), "the log is rate limited")
+
+	a.reportBlobRetirementGap(10_000, 12_345, time.Unix(1_000, 0).Add(blobRetirementGapLogInterval))
+	require.Equal(t, 2, strings.Count(buf.String(), "gapSlot="))
 }

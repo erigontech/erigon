@@ -919,6 +919,10 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 		finalizedSlot := a.forkchoiceStore.FinalizedCheckpoint().Epoch * a.beaconChainCfg.SlotsPerEpoch
 		isFinalized = blockRoot == canonicalRoot && slot <= finalizedSlot
 	}
+	if a.forkchoiceStore.IsEnvelopeRejected(blockRoot) {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+			fmt.Errorf("execution payload envelope not found for block %v", blockRoot))
+	}
 	return newBeaconResponse(envelope).
 		WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
 		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
@@ -926,11 +930,17 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 }
 
 func (a *ApiHandler) executionPayloadEnvelopeForRoot(ctx context.Context, blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, uint64, bool, error) {
+	if a.forkchoiceStore.IsEnvelopeRejected(blockRoot) {
+		return nil, 0, false, nil
+	}
 	var envelope *cltypes.SignedExecutionPayloadEnvelope
 	var err error
 	if a.forkchoiceStore.HasEnvelope(blockRoot) {
 		envelope, err = a.forkchoiceStore.ReadEnvelopeFromDisk(blockRoot)
 		if err != nil {
+			if a.forkchoiceStore.IsEnvelopeRejected(blockRoot) {
+				return nil, 0, false, nil
+			}
 			return nil, 0, false, err
 		}
 	}
@@ -1447,13 +1457,13 @@ func (a *ApiHandler) emitFullHeadV2(block *cltypes.SignedBeaconBlock, blockRoot 
 	if err != nil || event == nil {
 		return
 	}
-	a.emitters.WithHeadEventLock(func() {
+	a.emitters.EmitHeadV2IfCurrent(event, func() bool {
 		currentHead, currentSlot, err := a.forkchoiceStore.GetHeadNode()
 		if err != nil || currentHead != head || currentSlot != headSlot ||
 			a.forkchoiceStore.IsRootOptimistic(currentHead.Root) != optimistic {
-			return
+			return false
 		}
-		a.emitters.State().SendHeadV2(event)
+		return true
 	})
 }
 

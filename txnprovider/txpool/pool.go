@@ -84,6 +84,7 @@ type Pool interface {
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Hashes, err error)
+	HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (held, queued Hashes, err error)
 	RejectFramePrefix(hash common.Hash)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
@@ -464,7 +465,7 @@ func (p *TxPool) applyBlockUpdate(stateChanges *remoteproto.StateChangeBatch, un
 		}
 	}
 
-	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, stateChanges.FinalizedBlock); err != nil {
+	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, block, stateChanges.FinalizedBlock); err != nil {
 		return frames, err
 	}
 
@@ -649,13 +650,7 @@ func (p *TxPool) idHashKnown(tx kv.Tx, hash []byte, hashS string) (bool, error) 
 		return rejection.applies(p, p.stateGeneration), nil
 	}
 	if reason, ok := p.discardReasonsLRU.Get(hashS); ok {
-		// Retryable failures may clear before the discarded pool row is removed.
-		switch reason {
-		case txpoolcfg.NonceTooDistant, txpoolcfg.BlobNonceGap, txpoolcfg.FrameValidationUnavailable, txpoolcfg.FrameStateChanged:
-			return false, nil
-		default:
-			return true, nil
-		}
+		return !refetchableDiscard(reason), nil
 	}
 	return tx.Has(kv.PoolTransaction, hash)
 }
@@ -700,6 +695,42 @@ func (p *TxPool) FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Has
 		}
 	}
 	return unknownHashes, err
+}
+
+// refetchableDiscard reports a discard another body can undo: a retryable failure (a nonce gap, frame validation) can
+// clear before the discarded pool row is removed, and a blob txn's hash does not cover its sidecar, so one peer's bad
+// sidecar says nothing about the txn.
+func refetchableDiscard(reason txpoolcfg.DiscardReason) bool {
+	switch reason {
+	case txpoolcfg.NonceTooDistant, txpoolcfg.BlobNonceGap, txpoolcfg.FrameValidationUnavailable, txpoolcfg.FrameStateChanged,
+		txpoolcfg.UnequalBlobTxExt, txpoolcfg.BlobHashCheckFail, txpoolcfg.UnmatchedBlobTxExt:
+		return true
+	}
+	return false
+}
+
+// HeldOrQueuedIdHashes splits hashes into the ones the pool holds and the ones queued for its validation.
+// A discarded txn that a refetch would drop as known counts as held; one a refetch can fix is neither.
+func (p *TxPool) HeldOrQueuedIdHashes(tx kv.Tx, hashes Hashes) (held, queued Hashes, err error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	for i := 0; i < len(hashes); i += 32 {
+		hash, hashS := hashes[i:i+32], string(hashes[i:i+32])
+		_, inQueue := p.unprocessedRemoteByHash[hashS]
+		_, simulating := p.remoteFrames.pending[hashS] // a frame leaves the queue before its simulation ends
+		if inQueue || simulating {
+			queued = append(queued, hash...)
+			continue
+		}
+		known, err := p.idHashKnown(tx, hash, hashS)
+		if err != nil {
+			return held, queued, err
+		}
+		if known {
+			held = append(held, hash...)
+		}
+	}
+	return held, queued, nil
 }
 
 func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTxn, error) {
@@ -2278,32 +2309,36 @@ func (p *TxPool) GetBlobs(blobHashes []common.Hash) []PoolBlobBundle {
 }
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
-func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, finalizedBlock uint64) error {
+func (p *TxPool) processMinedFinalizedBlobs(minedTxns []*TxnSlot, minedBlock, finalizedBlock uint64) error {
 	p.lastFinalizedBlock.Store(finalizedBlock)
-	// Remove blobs in the finalized block and older, loop through all entries
-	for l := len(p.minedBlobTxnsByBlock); l > 0 && finalizedBlock > 0; l-- {
-		// delete individual hashes
-		for _, mt := range p.minedBlobTxnsByBlock[finalizedBlock] {
-			delete(p.minedBlobTxnsByHash, string(mt.TxnSlot.IDHash[:]))
+	// Add mined blobs
+	for _, txn := range minedTxns {
+		if !txn.HasBlobs() {
+			continue
 		}
-		// delete the map entry for this block num
-		delete(p.minedBlobTxnsByBlock, finalizedBlock)
-		// move on to older blocks, if present
-		finalizedBlock--
+		hash := string(txn.IDHash[:])
+		// Mined txns arrive without blobs; the pooled or an earlier cached copy still has them.
+		if pooled, ok := p.byHash[hash]; ok {
+			txn = pooled.TxnSlot
+		} else if queued, ok := p.unprocessedRemoteByHash[hash]; ok {
+			full := *queued
+			txn = &full
+		} else if cached, ok := p.minedBlobTxnsByHash[hash]; ok {
+			txn = cached.TxnSlot
+		}
+		p.deleteMinedBlobTxn(hash)
+		mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock, bestIndex: len(p.minedBlobTxnsByBlock[minedBlock])}
+		p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
+		p.minedBlobTxnsByHash[hash] = mt
 	}
 
-	// Add mined blobs
-	minedBlock := p.lastSeenBlock.Load()
-	if p.minedBlobTxnsByBlock[minedBlock] == nil {
-		p.minedBlobTxnsByBlock[minedBlock] = make([]*metaTxn, 0) // a same-height reorg reuses the block number, and its entries stay indexed
-	}
-	for _, txn := range minedTxns {
-		if txn.HasBlobs() {
-			p.deleteMinedBlobTxn(string(txn.IDHash[:])) // a txn mined again: finalizing its old block must not drop the new entry
-			mt := &metaTxn{TxnSlot: txn, minedBlockNum: minedBlock}
-			p.minedBlobTxnsByBlock[minedBlock] = append(p.minedBlobTxnsByBlock[minedBlock], mt)
-			mt.bestIndex = len(p.minedBlobTxnsByBlock[minedBlock]) - 1
-			p.minedBlobTxnsByHash[string(txn.IDHash[:])] = mt
+	// Remove blobs of finalized blocks, and of blocks too deep to reorg, after the re-mined txns took their copies.
+	for b, mts := range p.minedBlobTxnsByBlock {
+		if (finalizedBlock > 0 && b <= finalizedBlock) || b+dbg.MaxReorgDepth < minedBlock {
+			for _, mt := range mts {
+				delete(p.minedBlobTxnsByHash, string(mt.TxnSlot.IDHash[:]))
+			}
+			delete(p.minedBlobTxnsByBlock, b)
 		}
 	}
 	return nil
@@ -2997,27 +3032,28 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 		if metaTx.TxnSlot.Rlp == nil {
 			continue
 		}
-		v = common.EnsureEnoughSize(v, 20+len(metaTx.TxnSlot.Rlp))
-
 		addr, ok := p.senders.senderID2Addr[metaTx.TxnSlot.SenderID]
 		if !ok {
 			p.logger.Warn("[txpool] flush: sender address not found by ID", "senderID", metaTx.TxnSlot.SenderID)
 			continue
 		}
 
-		copy(v[:20], addr[:])
-		copy(v[20:], metaTx.TxnSlot.Rlp)
-
 		has, err := tx.Has(kv.PoolTransaction, []byte(txHash))
 		if err != nil {
 			return err
 		}
 		if !has {
+			v = common.EnsureEnoughSize(v, 20+len(metaTx.TxnSlot.Rlp))
+			copy(v[:20], addr[:])
+			copy(v[20:], metaTx.TxnSlot.Rlp)
 			if err := tx.Put(kv.PoolTransaction, []byte(txHash), v); err != nil {
 				return err
 			}
 		}
-		metaTx.TxnSlot.Rlp = nil
+		// Blobs alias Rlp, so keeping it costs no memory and lets a mined blob txn return on unwind.
+		if !metaTx.TxnSlot.HasBlobs() {
+			metaTx.TxnSlot.Rlp = nil
+		}
 	}
 
 	binary.BigEndian.PutUint64(encID, p.pendingBaseFee.Load())
@@ -3169,7 +3205,9 @@ func (p *TxPool) fromDBLocked(tx kv.Tx, coreTx kv.TemporalTx, cacheView kvcache.
 			p.logger.Warn("[txpool] fromDB: parseTransaction", "err", err)
 			continue
 		}
-		txn.Rlp = nil // means that we don't need store it in db anymore
+		if !txn.HasBlobs() {
+			txn.Rlp = nil // means that we don't need store it in db anymore
+		}
 		restored.Append(txn, addr[:], false)
 	}
 

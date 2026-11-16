@@ -52,7 +52,7 @@ import (
 // an implementation defined in another package (e.g. execmodule.Dispatcher)
 // without creating a circular import.
 type NotificationSender interface {
-	Dispatch(ctx context.Context, tx kv.Tx, stateVersion uint64, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
+	Dispatch(ctx context.Context, tx kv.Tx, stateVersion uint64, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64, committedTx kv.TemporalTx) error
 }
 
 type FrozenBlocksReader interface {
@@ -155,6 +155,7 @@ func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
 			return err
 		}
 	}
+	committedTx, _ := tx.(kv.TemporalTx) // notifications are sent after the run's commit
 	return h.dispatcher.Dispatch(
 		h.ctx, tx, stateVersion,
 		h.notifications.Accumulator,
@@ -162,6 +163,7 @@ func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
 		finishProgressBefore,
 		finishStageAfterSync,
 		h.sync.PrevUnwindPoint(),
+		committedTx,
 	)
 }
 
@@ -261,7 +263,7 @@ func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSy
 	h.lastAnnouncedBlockRangeTime = time.Now()
 }
 
-func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules.ChainReader, currentHeader *types.Header, currentBody *types.RawBody) error {
+func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules.ChainReader, currentHeader *types.Header, currentBody *types.Body) error {
 	currentHeight := currentHeader.Number.Uint64()
 	currentHash := currentHeader.Hash()
 	if chainReader != nil {
@@ -286,9 +288,6 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules
 		return err
 	}
 	if err := rawdb.WriteHeadHeaderHash(batch, currentHash); err != nil {
-		return err
-	}
-	if _, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
 		return err
 	}
 	if prevHash != currentHash {
@@ -326,7 +325,7 @@ func cleanupProgressIfNeeded(batch kv.RwTx, header *types.Header) error {
 
 var ErrStateStepHasMoreWork = errors.New("state step has more work")
 
-func StateStep(chainReader rules.ChainReader, engine rules.Engine, sd *execctx.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
+func StateStep(chainReader rules.ChainReader, engine rules.Engine, sd *execctx.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.Body) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
