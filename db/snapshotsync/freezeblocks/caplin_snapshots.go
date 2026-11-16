@@ -448,19 +448,15 @@ func readCanonicalBlock(ctx context.Context, tx kv.Tx, r BeaconSnapshotReader, s
 	if err := ctx.Err(); err != nil {
 		return nil, common.Hash{}, err
 	}
-	if tx == nil {
-		return nil, common.Hash{}, fmt.Errorf("no mdbx transaction provided for slot %d", slot)
-	}
 	block, err = r.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
 	if err != nil {
 		return nil, common.Hash{}, err
 	}
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	if err != nil {
+		return nil, common.Hash{}, err
+	}
 	if block == nil {
-		var canonicalRoot common.Hash
-		canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
-		if err != nil {
-			return nil, common.Hash{}, err
-		}
 		if canonicalRoot != (common.Hash{}) {
 			return nil, common.Hash{}, fmt.Errorf("canonical block at slot %d is missing", slot)
 		}
@@ -470,10 +466,6 @@ func readCanonicalBlock(ctx context.Context, tx kv.Tx, r BeaconSnapshotReader, s
 		return block, common.Hash{}, nil
 	}
 	root, err = block.Block.HashSSZ()
-	if err != nil {
-		return nil, common.Hash{}, err
-	}
-	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 	if err != nil {
 		return nil, common.Hash{}, err
 	}
