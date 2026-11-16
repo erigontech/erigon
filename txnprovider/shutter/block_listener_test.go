@@ -55,13 +55,15 @@ func TestBlockListenerRetriesStateChanges(t *testing.T) {
 		setupError bool
 		err        error
 		warn       bool
+		streamAge  time.Duration
 	}{
-		{"subscribe failure", true, errors.New("snapshot read failed"), true},
-		{"receive failure", false, errors.New("snapshot read failed"), true},
-		{"subscribe unavailable", true, status.Error(codes.Unavailable, "executed header unavailable"), false},
-		{"receive unavailable", false, status.Error(codes.Unavailable, "executed header unavailable"), false},
-		{"subscribe closed", true, io.EOF, false},
-		{"receive closed", false, io.EOF, false},
+		{"subscribe failure", true, errors.New("snapshot read failed"), true, 0},
+		{"receive failure", false, errors.New("snapshot read failed"), true, 0},
+		{"subscribe unavailable", true, status.Error(codes.Unavailable, "executed header unavailable"), false, 0},
+		{"receive unavailable", false, status.Error(codes.Unavailable, "executed header unavailable"), false, 0},
+		{"subscribe closed", true, io.EOF, false, 0},
+		{"receive closed", false, io.EOF, false, 0},
+		{"receive closed after a long stream", false, io.EOF, false, 20 * time.Minute},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -74,7 +76,10 @@ func TestBlockListenerRetriesStateChanges(t *testing.T) {
 						if tc.setupError {
 							return nil, tc.err
 						}
-						return blockEventStream{recv: func() (*remoteproto.StateChangeBatch, error) { return nil, tc.err }}, nil
+						return blockEventStream{recv: func() (*remoteproto.StateChangeBatch, error) {
+							time.Sleep(tc.streamAge)
+							return nil, tc.err
+						}}, nil
 					}
 					sent := false
 					return blockEventStream{recv: func() (*remoteproto.StateChangeBatch, error) {
@@ -98,7 +103,7 @@ func TestBlockListenerRetriesStateChanges(t *testing.T) {
 				require.ErrorIs(t, listener.Run(ctx), context.Canceled)
 				require.Equal(t, []BlockEvent{{LatestBlockNum: 42}}, events)
 				require.Len(t, attempts, 2)
-				require.Equal(t, 3*time.Second, attempts[1].Sub(attempts[0]))
+				require.Equal(t, tc.streamAge+3*time.Second, attempts[1].Sub(attempts[0]))
 				require.Equal(t, tc.warn, bytes.Contains(logs.Bytes(), []byte("block listener subscription failed")))
 			})
 		})
