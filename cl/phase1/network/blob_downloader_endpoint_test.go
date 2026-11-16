@@ -17,17 +17,21 @@
 package network
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/blobfetch"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -67,6 +71,35 @@ func blobEndpoint(t *testing.T, served ...endpointBlock) (string, *atomic.Int32)
 	}))
 	t.Cleanup(srv.Close)
 	return srv.URL, requests
+}
+
+// servingPeer answers every request with the sidecars of the requested root, so blocks the endpoint leaves to peers
+// are filled at once instead of waiting out the peer request deadline.
+type servingPeer struct {
+	sidecars map[common.Hash][]*cltypes.BlobSidecar
+}
+
+func (servingPeer) Peers() (uint64, error) { return 1, nil }
+
+func (p servingPeer) SendBlobsSidecarByIdentifierReq(_ context.Context, ids *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+	var out []*cltypes.BlobSidecar
+	for i := 0; i < ids.Len(); i++ {
+		if ids.Get(i).Index == 0 {
+			out = append(out, p.sidecars[ids.Get(i).BlockRoot]...)
+		}
+	}
+	return out, "peer", nil
+}
+
+func endpointBlocks(t *testing.T, slots ...uint64) ([]endpointBlock, servingPeer) {
+	t.Helper()
+	peer := servingPeer{sidecars: map[common.Hash][]*cltypes.BlobSidecar{}}
+	blocks := make([]endpointBlock, len(slots))
+	for i, slot := range slots {
+		blocks[i] = newEndpointBlock(t, slot)
+		peer.sidecars[blocks[i].root] = blocks[i].sidecars
+	}
+	return blocks, peer
 }
 
 func newEndpointDownloader(t *testing.T, endpoints []string, workers int, peer blobPeerClient) *BlobHistoryDownloader {
@@ -124,19 +157,79 @@ func TestBlobHistoryDownloaderTriesTheNextEndpoint(t *testing.T) {
 }
 
 // The backfill walks down from the head, and a pruned endpoint serves only the slots above its window, so once it
-// does not serve a slot it is not asked for older slots in the later batches of the same pass.
-func TestBlobHistoryDownloaderStopsAskingAnEndpointBelowASlotItDoesNotServe(t *testing.T) {
-	newer, older := newEndpointBlock(t, 100), newEndpointBlock(t, 99)
+// has not served several slots in a row it is not asked for older slots in the later batches of the same pass.
+func TestBlobHistoryDownloaderStopsAskingAnEndpointBelowTheSlotsItDoesNotServe(t *testing.T) {
+	slots := make([]uint64, endpointMissesBeforeCutoff+1)
+	for i := range slots {
+		slots[i] = uint64(100 - i)
+	}
+	blocks, peer := endpointBlocks(t, slots...)
 	url, requests := blobEndpoint(t)
-	downloader := newEndpointDownloader(t, []string{url}, 1, &countingBlobPeerClient{})
+	downloader := newEndpointDownloader(t, []string{url}, 1, peer)
 
-	downloader.processBatch([]incompleteBlock{{block: newer.block, root: newer.root}})
+	for _, b := range blocks[:endpointMissesBeforeCutoff] {
+		downloader.processBatch([]incompleteBlock{{block: b.block, root: b.root}})
+	}
+	older := blocks[endpointMissesBeforeCutoff]
 	downloader.processBatch([]incompleteBlock{{block: older.block, root: older.root}})
-	require.Equal(t, int32(1), requests.Load())
+	require.Equal(t, int32(endpointMissesBeforeCutoff), requests.Load())
 
 	downloader.resetEndpointWindows()
 	downloader.processBatch([]incompleteBlock{{block: older.block, root: older.root}})
-	require.Equal(t, int32(2), requests.Load(), "a new pass asks the endpoint again")
+	require.Equal(t, int32(endpointMissesBeforeCutoff+1), requests.Load(), "a new pass asks the endpoint again")
+}
+
+// Misses only end the window when they come in a row: a served slot in between starts the count again.
+func TestBlobHistoryDownloaderKeepsAskingAnEndpointAfterMissedSlots(t *testing.T) {
+	// served, then endpointMissesBeforeCutoff-1 misses, served, one more miss, served
+	slots := make([]uint64, endpointMissesBeforeCutoff+4)
+	for i := range slots {
+		slots[i] = uint64(100 - i)
+	}
+	blocks, peer := endpointBlocks(t, slots...)
+	last := len(blocks) - 1
+	url, requests := blobEndpoint(t, blocks[0], blocks[endpointMissesBeforeCutoff], blocks[last])
+	downloader := newEndpointDownloader(t, []string{url}, 1, peer)
+
+	for _, b := range blocks {
+		downloader.processBatch([]incompleteBlock{{block: b.block, root: b.root}})
+	}
+	require.Equal(t, int32(len(blocks)), requests.Load())
+	require.Equal(t, 1, storedSidecars(t, downloader, blocks[last]))
+}
+
+// An endpoint that is down, times out or rate-limits costs a full retry cycle per block, so after a few failures in a
+// row it is paused for a while.
+func TestBlobHistoryDownloaderPausesAnEndpointThatKeepsFailing(t *testing.T) {
+	retryWait := blobfetch.RetryWait
+	blobfetch.RetryWait = time.Millisecond
+	t.Cleanup(func() { blobfetch.RetryWait = retryWait })
+	requests := &atomic.Int32{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+	slots := make([]uint64, endpointFailuresBeforePause+2)
+	for i := range slots {
+		slots[i] = uint64(100 - i)
+	}
+	blocks, peer := endpointBlocks(t, slots...)
+	downloader := newEndpointDownloader(t, []string{srv.URL}, 1, peer)
+	now := time.Now()
+	downloader.endpointNow = func() time.Time { return now }
+
+	ask := func(b endpointBlock) { downloader.processBatch([]incompleteBlock{{block: b.block, root: b.root}}) }
+	for _, b := range blocks[:endpointFailuresBeforePause] {
+		ask(b)
+	}
+	asked := requests.Load()
+	ask(blocks[endpointFailuresBeforePause])
+	require.Equal(t, asked, requests.Load(), "a paused endpoint is not asked")
+
+	now = now.Add(endpointPause)
+	ask(blocks[endpointFailuresBeforePause+1])
+	require.Greater(t, requests.Load(), asked, "the endpoint is asked again after the pause")
 }
 
 func TestBlobEndpointWorkersDefaultToAQuarterOfTheCPUs(t *testing.T) {

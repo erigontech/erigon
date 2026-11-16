@@ -136,14 +136,13 @@ type BlobHistoryDownloader struct {
 	blockReader freezeblocks.BeaconSnapshotReader
 	sn          blobSnapshotReader
 
-	// Beacon API endpoints asked for a block's blobs before peers. endpointUnservedAt holds, per endpoint, the
-	// highest slot it did not serve in the current pass: the pass walks down and a pruned endpoint serves only the
-	// slots above its window.
-	endpoints          []string
-	endpointWorkers    int
-	endpointCPU        *semaphore.Weighted
-	endpointWindowMu   sync.Mutex
-	endpointUnservedAt []uint64
+	// Beacon API endpoints asked for a block's blobs before peers.
+	endpoints       []string
+	endpointWorkers int
+	endpointCPU     *semaphore.Weighted
+	endpointMu      sync.Mutex
+	endpointStates  []endpointState
+	endpointNow     func() time.Time
 
 	syncedChecker SyncedChecker
 	peerDasGetter PeerDasGetter
@@ -234,6 +233,24 @@ func NewBlobHistoryDownloader(
 	}
 }
 
+const (
+	endpointMissesBeforeCutoff  = 4
+	endpointFailuresBeforePause = 3
+	endpointPause               = 5 * time.Minute
+)
+
+// endpointState tracks one endpoint. The pass walks down from the head and a pruned endpoint serves only the slots
+// above its window, so after endpointMissesBeforeCutoff slots in a row it did not serve, slots at or below the highest
+// of them are not asked for again in this pass; a single gap does not end the window. An endpoint that fails in other
+// ways (down, timing out, rate-limiting) costs a full retry cycle per block, so it is paused after a few failures.
+type endpointState struct {
+	unservedAt  uint64
+	misses      int
+	highestMiss uint64
+	failures    int
+	pausedUntil time.Time
+}
+
 // blobEndpointWorkers returns the configured worker count, or for 0 a quarter of cpus and at least one: each worker
 // keeps about one CPU busy while it verifies blobs.
 func blobEndpointWorkers(configured, cpus int) int {
@@ -250,7 +267,8 @@ func (b *BlobHistoryDownloader) SetBlobEndpoints(endpoints []string, workers int
 	cpus := runtime.GOMAXPROCS(0)
 	b.endpointWorkers = blobEndpointWorkers(workers, cpus)
 	b.endpointCPU = semaphore.NewWeighted(int64(b.endpointWorkers))
-	b.endpointUnservedAt = make([]uint64, len(endpoints))
+	b.endpointStates = make([]endpointState, len(endpoints))
+	b.endpointNow = time.Now
 	hosts := make([]string, len(endpoints))
 	for i, endpoint := range endpoints {
 		hosts[i] = blobfetch.RedactEndpoint(endpoint)
@@ -265,9 +283,48 @@ func (b *BlobHistoryDownloader) SetBlobEndpoints(endpoints []string, workers int
 }
 
 func (b *BlobHistoryDownloader) resetEndpointWindows() {
-	b.endpointWindowMu.Lock()
-	defer b.endpointWindowMu.Unlock()
-	clear(b.endpointUnservedAt)
+	b.endpointMu.Lock()
+	defer b.endpointMu.Unlock()
+	for i := range b.endpointStates {
+		state := &b.endpointStates[i]
+		state.unservedAt, state.misses, state.highestMiss = 0, 0, 0
+	}
+}
+
+func (b *BlobHistoryDownloader) endpointUsable(i int, slot uint64) bool {
+	b.endpointMu.Lock()
+	defer b.endpointMu.Unlock()
+	state := &b.endpointStates[i]
+	return slot > state.unservedAt && !b.endpointNow().Before(state.pausedUntil)
+}
+
+func (b *BlobHistoryDownloader) recordEndpointResult(i int, item incompleteBlock, err error) {
+	b.endpointMu.Lock()
+	defer b.endpointMu.Unlock()
+	state := &b.endpointStates[i]
+	switch {
+	case err == nil:
+		state.misses, state.highestMiss, state.failures = 0, 0, 0
+	case b.ctx.Err() != nil:
+	case blobfetch.NotServed(err):
+		state.failures = 0
+		if item.payloadUnresolved {
+			return
+		}
+		state.misses++
+		state.highestMiss = max(state.highestMiss, item.block.Block.Slot)
+		if state.misses >= endpointMissesBeforeCutoff {
+			state.unservedAt = max(state.unservedAt, state.highestMiss)
+		}
+	default:
+		state.failures++
+		if state.failures >= endpointFailuresBeforePause {
+			state.failures = 0
+			state.pausedUntil = b.endpointNow().Add(endpointPause)
+			b.logger.Warn("[BlobHistoryDownloader] Blob backfill endpoint keeps failing, pausing it", "endpoint",
+				blobfetch.RedactEndpoint(b.endpoints[i]), "pause", endpointPause, "err", err)
+		}
+	}
 }
 
 // fetchFromEndpoints stores the blobs of every block an endpoint serves and returns the blocks still incomplete.
@@ -299,20 +356,13 @@ func (b *BlobHistoryDownloader) fetchFromEndpoint(item incompleteBlock) bool {
 		if b.ctx.Err() != nil {
 			return false
 		}
-		b.endpointWindowMu.Lock()
-		belowWindow := slot <= b.endpointUnservedAt[i]
-		b.endpointWindowMu.Unlock()
-		if belowWindow {
+		if !b.endpointUsable(i, slot) {
 			continue
 		}
 		err := blobfetch.FetchAndStore(b.ctx, b.blobStorage, endpoint, item.root, item.block, b.endpointCPU)
+		b.recordEndpointResult(i, item, err)
 		if err == nil {
 			return true
-		}
-		if blobfetch.NotServed(err) && !item.payloadUnresolved {
-			b.endpointWindowMu.Lock()
-			b.endpointUnservedAt[i] = max(b.endpointUnservedAt[i], slot)
-			b.endpointWindowMu.Unlock()
 		}
 		b.logger.Debug("[BlobHistoryDownloader] Endpoint did not fill block", "slot", slot, "endpoint", blobfetch.RedactEndpoint(endpoint), "err", err)
 	}
@@ -625,7 +675,8 @@ func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor, fuluRetentionF
 			break
 		}
 
-		block, blockRoot, err := b.readRetryBlock(slot)
+		item, expectsBlobs, err := b.readRetryBlock(slot)
+		block, blockRoot := item.block, item.root
 		if err != nil {
 			if b.ctx.Err() != nil {
 				return nil
@@ -652,7 +703,11 @@ func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor, fuluRetentionF
 			b.logger.Warn("[BlobHistoryDownloader] Retry slot has no canonical root", "slot", slot)
 			continue
 		}
-		complete, err := b.retryBlock(incompleteBlock{block: block, root: blockRoot})
+		if !expectsBlobs {
+			b.resolveRetrySlot(slot)
+			continue
+		}
+		complete, err := b.retryBlock(item)
 		if err != nil {
 			if b.ctx.Err() != nil {
 				return nil
@@ -670,18 +725,24 @@ func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor, fuluRetentionF
 	return nil
 }
 
-func (b *BlobHistoryDownloader) readRetryBlock(slot uint64) (*cltypes.SignedBeaconBlock, common.Hash, error) {
+// readRetryBlock reads the block at slot with its canonical root; expectsBlobs is false for a block with no blobs on
+// the network.
+func (b *BlobHistoryDownloader) readRetryBlock(slot uint64) (item incompleteBlock, expectsBlobs bool, err error) {
 	tx, err := b.indiciesDB.BeginRo(b.ctx)
 	if err != nil {
-		return nil, common.Hash{}, err
+		return item, false, err
 	}
 	defer tx.Rollback()
-	block, err := b.blockReader.ReadBeaconBlockBodyBySlot(b.ctx, tx, slot)
-	if err != nil || block == nil {
-		return block, common.Hash{}, err
+	item.block, err = b.blockReader.ReadBeaconBlockBodyBySlot(b.ctx, tx, slot)
+	if err != nil || item.block == nil {
+		return item, false, err
 	}
-	root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
-	return block, root, err
+	if item.root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, slot); err != nil || item.root == (common.Hash{}) {
+		return item, true, err
+	}
+	expected, unresolved, err := blobfetch.ExpectedBlobs(b.ctx, tx, b.blockReader, item.root, item.block)
+	item.payloadUnresolved = unresolved
+	return item, expected > 0, err
 }
 
 func (b *BlobHistoryDownloader) retryBlock(item incompleteBlock) (bool, error) {

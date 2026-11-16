@@ -1170,3 +1170,26 @@ func TestCollectIncompleteBlocksSkipsAGloasBlockWhosePayloadTheChildSkipped(t *t
 	require.NoError(t, err)
 	require.Empty(t, batch)
 }
+
+func TestRetryResolvesAGloasBlockWhosePayloadTheChildSkipped(t *testing.T) {
+	const slot = 100
+	parent := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	parent.Block.Slot = slot
+	parent.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = common.Hash{0xaa}
+	parent.Block.Body.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{0xc0})
+	parentRoot, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+	child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	child.Block.Slot, child.Block.ParentRoot = slot+1, parentRoot
+	child.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = common.Hash{0xbb}
+
+	downloader := newBoundaryDownloader(t, slot+1, 0, slot, &boundaryBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: parent, slot + 1: child}})
+	blobStorage := blobstoragemock.NewMockBlobStorage(gomock.NewController(t))
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+	downloader.blobStorage = blobStorage
+
+	downloader.addRetrySlot(slot)
+
+	require.NoError(t, downloader.retryFailedRecoveries(0, 0))
+	require.Empty(t, downloader.retryRanges)
+}

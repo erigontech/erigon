@@ -1108,11 +1108,11 @@ var (
 	}
 	CaplinBlobsBackfillEndpointFlag = cli.StringSliceFlag{
 		Name:  "caplin.blobs-backfill-endpoint",
-		Usage: "beacon API endpoint that the blob backfill asks for a block's blobs before peers; repeat for fallback endpoints. Blobs are verified against the block before they are stored",
+		Usage: "beacon API endpoint that the blob backfill asks for a block's blobs before peers; repeat for fallback endpoints. Blobs are verified against the block before they are stored. Without --caplin.blobs-archive only the blob retention window is backfilled",
 	}
 	CaplinBlobsBackfillEndpointWorkersFlag = cli.IntFlag{
 		Name:  "caplin.blobs-backfill-endpoint-workers",
-		Usage: "number of CPUs the blob backfill uses to verify blobs from --caplin.blobs-backfill-endpoint (up to twice as many blocks are fetched at a time). 0 picks a quarter of the CPUs the process may use (GOMAXPROCS, which follows a container's CPU limit), at least 1; set it to the CPUs the node can spare (lower keeps a validator node responsive, a dedicated archive node can use more)",
+		Usage: "number of CPUs the blob backfill uses for blobs from --caplin.blobs-backfill-endpoint (up to twice as many blocks are fetched at a time). 0 picks a quarter of the CPUs the process may use (GOMAXPROCS, which follows a container's CPU limit), at least 1; set it to the CPUs the node can spare (lower keeps a validator node responsive, a dedicated archive node can use more)",
 		Value: 0,
 	}
 	CaplinDisableBlobPruningFlag = cli.BoolFlag{

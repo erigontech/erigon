@@ -1380,9 +1380,10 @@ func TestReadRetryBlockReturnsTheCanonicalRoot(t *testing.T) {
 		return beacon_indicies.MarkRootCanonical(tx, slot, canonical)
 	}))
 
-	got, root, err := downloader.readRetryBlock(slot)
+	got, _, err := downloader.readRetryBlock(slot)
 	require.NoError(t, err)
-	require.NotNil(t, got)
+	require.NotNil(t, got.block)
+	root := got.root
 	require.Equal(t, canonical, root, "the retry must carry the indexed root, not the block's own hash")
 	require.NotEqual(t, common.Hash(selfHash), root)
 }
