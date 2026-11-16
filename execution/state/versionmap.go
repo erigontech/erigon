@@ -2197,11 +2197,14 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 // marker but not the account's existence. A destruct seeded for the marker's tx can have the
 // same version, but the marker records an account that exists: an absent read is valid only
 // while its destruct holds, and a present read from the marker only while no destruct removes
-// the account.
+// the account. Only a sealed write revives the account here: a withdrawn credit does not
+// re-validate a tx that read only the account's existence.
 func (vm *VersionMap) validateAccountAtMarker(addr accounts.Address, tr VersionedRead[AccountView], txIdx int) VersionValidity {
 	if tr.Val != nil && !tr.Val.IsNil() {
-		if tr.accSource == AccountFromBAL && vm.netAbsentDestruct(addr, txIdx) {
-			return VersionInvalid
+		if tr.accSource == AccountFromBAL {
+			if st, _, destroyedAt, _ := vm.ResolvedAccountLifecycleAt(addr, txIdx); st == LifecycleAbsent && !vm.destructKeptBalance(addr, destroyedAt) {
+				return VersionInvalid
+			}
 		}
 		return VersionValid
 	}

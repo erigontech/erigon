@@ -590,7 +590,7 @@ func TestAbsentAccountReadIsInvalidOnceItsDestructIsGone(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			x, reader, vm := seededRemovalOfPrefundedAccount(t)
-			exists, absentRead := existenceReadOfTx1(t, reader, vm, x)
+			exists, absentRead := existenceRead(t, reader, vm, x, 1)
 			require.False(t, exists)
 			require.Equal(t, VersionValid, vm.ValidateReadSet(1, absentRead, validateEqualVersion, false, ""))
 
@@ -619,12 +619,12 @@ func TestPresentAccountReadFromTheMarkerIsInvalidOnceItsDestructReturns(t *testi
 			for _, path := range []AccountPath{SelfDestructPath, BalancePath} {
 				vm.Delete(x, path, accounts.NilKey, 0, false)
 			}
-			exists, presentRead := existenceReadOfTx1(t, reader, vm, x)
+			exists, presentRead := existenceRead(t, reader, vm, x, 1)
 			require.True(t, exists)
 			require.Equal(t, VersionValid, vm.ValidateReadSet(1, presentRead, validateEqualVersion, false, ""))
 
 			createAndDestroyInTx0(t, reader, vm, x, tc.keepBalance)
-			existsOnRerun, _ := existenceReadOfTx1(t, reader, vm, x)
+			existsOnRerun, _ := existenceRead(t, reader, vm, x, 1)
 			require.Equal(t, tc.keepBalance, existsOnRerun)
 			valid := vm.ValidateReadSet(1, presentRead, validateEqualVersion, false, "") == VersionValid
 			require.Equal(t, existsOnRerun, valid, "the read stays valid only while a re-run still finds x")
@@ -632,12 +632,56 @@ func TestPresentAccountReadFromTheMarkerIsInvalidOnceItsDestructReturns(t *testi
 	}
 }
 
-// existenceReadOfTx1 runs Exist(x) in tx 1 and returns its result with the read it recorded.
-func existenceReadOfTx1(t *testing.T, reader StateReader, vm *VersionMap, x accounts.Address) (bool, ReadSet) {
+// A credit of x by tx 1, written after tx 0 removed x again, revives x for a read from the
+// marker only once it is sealed: until then it can be withdrawn, and a withdrawn credit does not
+// re-validate a tx that read only the account's existence.
+func TestPresentAccountReadFromTheMarkerNeedsASealedRevival(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress(common.HexToAddress("0x5a1e"))
+	baseAcc := accounts.NewAccount()
+	baseAcc.Balance = *uint256.NewInt(5)
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &baseAcc}}
+	vm := NewVersionMap(types.BlockAccessList{{
+		Address:        x.Value(),
+		BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}},
+	}})
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+	for _, path := range []AccountPath{SelfDestructPath, BalancePath} {
+		vm.Delete(x, path, accounts.NilKey, 0, false)
+	}
+	exists, presentRead := existenceRead(t, reader, vm, x, 2)
+	require.True(t, exists)
+	require.Equal(t, VersionValid, vm.ValidateReadSet(2, presentRead, validateEqualVersion, false, ""))
+
+	createAndDestroyInTx0(t, reader, vm, x, false)
+	credit := &WriteSet{}
+	credit.SetBalance(x, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: Version{TxIndex: 1, Incarnation: 1}},
+		Val:         *uint256.NewInt(7),
+	})
+	vm.FlushVersionedWrites(credit, false)
+	vm.MarkWritesValidated(credit, nil)
+	require.False(t, presentRead.DependsOn(WriteHeader{Address: x, Path: BalancePath}))
+	require.Equal(t, VersionInvalid, vm.ValidateReadSet(2, presentRead, validateEqualVersion, false, ""))
+	rerun := NewWithVersionMap(reader, vm)
+	defer rerun.Close()
+	rerun.SetTxContext(1, 2)
+	existsOnRerun, err := rerun.Exist(x)
+	require.NoError(t, err)
+	require.True(t, existsOnRerun)
+	require.Equal(t, VersionValid, vm.ValidateReadSet(2, rerun.VersionedReads(), validateEqualVersion, false, ""), "a re-run validates, so the rule does not loop")
+
+	vm.MarkWritesComplete(credit)
+	require.Equal(t, VersionValid, vm.ValidateReadSet(2, presentRead, validateEqualVersion, false, ""))
+}
+
+// existenceRead runs Exist(x) in tx txIdx and returns its result with the read it recorded.
+func existenceRead(t *testing.T, reader StateReader, vm *VersionMap, x accounts.Address, txIdx int) (bool, ReadSet) {
 	t.Helper()
 	ibs := NewWithVersionMap(reader, vm)
 	defer ibs.Close()
-	ibs.SetTxContext(1, 1)
+	ibs.SetTxContext(1, txIdx)
 	exists, err := ibs.Exist(x)
 	require.NoError(t, err)
 	reads := ibs.VersionedReads()
