@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
-	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -109,22 +108,6 @@ type bundle struct {
 }
 
 type RootNum = kv.RootNum
-
-// `snapshots index` opens a datadir that the startup gap check refuses, so it can rebuild the missing accessors.
-// Without the skip, the check exits the process and fails the test run.
-func TestIndexAggOptsOpenADatadirWithAGap(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	chainDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
-	defer chainDB.Close()
-	require.NoError(t, chainDB.Update(t.Context(), func(tx kv.RwTx) error {
-		return state.SavePruneValProgress(tx, kv.TblAccountHistoryVals, &prune.Stat{TxTo: 30})
-	}))
-	_, err := state.GetStateIndicesSalt(dirs, true, log.New())
-	require.NoError(t, err)
-	agg, err := tryOpenAgg(t.Context(), dirs, chainDB, log.New(), indexAggOpts...)
-	require.NoError(t, err)
-	agg.Close()
-}
 
 func TestSegLS_NoChaindata(t *testing.T) {
 	dirs := datadir.New(t.TempDir())

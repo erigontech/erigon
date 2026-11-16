@@ -854,7 +854,7 @@ var (
 // witness build. Direct tx.GetLatest reads keep it independent of the build's
 // in-memory commitment fold.
 type headCaptureSource struct {
-	pinnedParentTx kv.TemporalTx
+	pinnedParentTx kv.TemporalGetter
 }
 
 // collapseReaderFor selects the collapse-detection state reader: plain state at block
@@ -884,9 +884,19 @@ func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock ui
 // state is read from committedTx's history exactly as the durable path does; only the
 // commitment source changes. Direct tx.GetLatest reads keep the pinned commitment
 // state independent of the build's in-memory commitment fold.
-func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx, pinnedParentTx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
+func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx kv.TemporalTx, pinnedParentTx kv.TemporalGetter, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
 	hc := &headCaptureSource{pinnedParentTx: pinnedParentTx}
 	return api.buildWitnessResult(ctx, committedTx, hc, info, mode)
+}
+
+// ValidatedBlockWitness builds the canonical-mode witness of blockHash from blockTx, a view
+// that holds the block and its executed state, reading the parent commitment from parentState.
+func (api *DebugAPIImpl) ValidatedBlockWitness(ctx context.Context, blockTx kv.TemporalTx, parentState kv.TemporalGetter, blockHash common.Hash) (*ExecutionWitnessResult, error) {
+	info, err := api.resolveWitnessBlock(ctx, blockTx, rpc.BlockNumberOrHashWithHash(blockHash, false))
+	if err != nil {
+		return nil, err
+	}
+	return api.buildWitnessResultHeadCapture(ctx, blockTx, parentState, info, witnessModeCanonical)
 }
 
 // buildWitnessResult runs the witness-building pipeline for an already-resolved block
@@ -926,11 +936,15 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Use the proof infrastructure from the commitment context.
 	// Witness generation requires the sequential HexPatriciaHashed (Witness()
 	// type-asserts it); the parallel trie cannot serve it.
-	domains, err := newSnapshotCommitmentDomains(ctx, tx, log.New())
-	if err != nil {
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
+	if domains != nil {
+		defer domains.Close()
+	}
+	// A side-fork view has TxNums only up to its tip, below the committed commitment. Head-capture seeks the
+	// commitment on the pinned parent instead.
+	if err != nil && (hc == nil || !errors.Is(err, commitmentdb.ErrBehindCommitment)) {
 		return nil, err
 	}
-	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 
 	// Get the expected parent state root for verification

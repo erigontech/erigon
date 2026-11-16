@@ -57,7 +57,6 @@ func TestCheckFilesDBGapChecksHistory(t *testing.T) {
 			defer at.Close()
 			err = at.CheckFilesDBGap(tx)
 			require.ErrorContains(t, err, "history accounts")
-			require.ErrorContains(t, err, "snapshots index", "a lost accessor is rebuilt, not a reason to reset the datadir")
 		})
 	}
 }

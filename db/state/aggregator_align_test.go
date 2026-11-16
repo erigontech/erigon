@@ -84,6 +84,36 @@ func TestVisibleFilesAligned_GapInOneListLowersEveryList(t *testing.T) {
 	requireVisibleEnd(t, agg, alignStepSize)
 }
 
+// a gap in the middle of one domain's files lowers every list's visible end to the gap
+func TestVisibleFilesAligned_MiddleGapInOneListLowersEveryList(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.1-2.bt")))
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, alignStepSize)
+}
+
+// a values list whose first file is unreadable lowers every list to that file's start
+func TestVisibleFilesAligned_LeadingGapInOneListLowersEveryList(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.0-1.bt")))
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, 0)
+}
+
 // domains visible past the log/trace indexes answer eth_getLogs from blocks no index saw
 func TestVisibleFilesAligned_LaggingStandaloneIdxClampsEveryone(t *testing.T) {
 	t.Parallel()
@@ -275,4 +305,18 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 
 	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
 		"lowering a history-II end while values ends stay put must trip the forbid assert")
+}
+
+func TestVisibleFilesAligned_CutThroughAMergedFileRepeats(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	merged := []testFileRange{{0, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), merged)
+	generateCommitmentFile(t, agg.Dirs(), merged)
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}, {2, 3}})
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v1.0-tracesto.1-2.efi")))
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, 0)
 }

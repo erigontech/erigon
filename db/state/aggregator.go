@@ -1850,15 +1850,25 @@ type aggregatorVisible struct {
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
-	dirtyEnd := a.dirtyFilesEndTxNumMinimax()
-	toTxNum := dirtyEnd
-	var next *aggregatorVisible
-	for {
-		next = &aggregatorVisible{}
-		end := toTxNum
+	// buildVisible builds every list up to toTxNum and returns the lowest end among the lists that have files.
+	buildVisible := func(toTxNum uint64) (next *aggregatorVisible, lowestEnd uint64) {
+		next, lowestEnd = &aggregatorVisible{}, toTxNum
 		lower := func(dirty *DirtyFiles, visible visibleFiles) {
 			if dirty.Len() > 0 {
-				end = min(end, visible.EndTxNum())
+				lowestEnd = min(lowestEnd, contiguousEnd(visible))
+			}
+		}
+		// values files are never retired, so a values list must start at its first file on disk
+		lowerToFirstFile := func(dirty *DirtyFiles, visible visibleFiles) {
+			firstStart := uint64(math.MaxUint64)
+			dirty.Scan(func(f *FilesItem) bool {
+				if !f.canDelete.Load() {
+					firstStart = min(firstStart, f.startTxNum)
+				}
+				return true
+			})
+			if len(visible) > 0 && visible[0].startTxNum > firstStart {
+				lowestEnd = min(lowestEnd, firstStart)
 			}
 		}
 		for id, d := range a.d {
@@ -1870,6 +1880,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 				continue
 			}
 			lower(d.dirtyFiles, next.d[id].files)
+			lowerToFirstFile(d.dirtyFiles, next.d[id].files)
 			if !d.HistCfg.SnapshotsDisabled && !d.HistCfg.HistoryDisabled {
 				lower(d.History.dirtyFiles, next.dh[id])
 				lower(d.InvertedIndex.dirtyFiles, next.dhii[id].files)
@@ -1884,10 +1895,16 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 				lower(ii.dirtyFiles, next.iis[id].files)
 			}
 		}
-		if end == toTxNum {
-			break
-		}
+		return next, lowestEnd
+	}
+
+	dirtyEnd := a.dirtyFilesEndTxNumMinimax()
+	toTxNum := dirtyEnd
+	next, end := buildVisible(toTxNum)
+	// A list that stops early stops every list there; cutting there can drop a merged file that crosses it, so repeat.
+	for end < toTxNum {
 		toTxNum = end
+		next, end = buildVisible(toTxNum)
 	}
 	if toTxNum < dirtyEnd {
 		a.logger.Warn("[agg] a gap in files: every list stops at the first one that stops", "visibleEnd", toTxNum, "filesEnd", dirtyEnd)
@@ -2752,12 +2769,12 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 	return v, ok, err
 }
 
-func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.Step, txNum uint64, tx kv.Tx) {
+func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.Step, tx kv.Tx) {
 	if !enabled || len(v) == 0 {
 		return
 	}
 	if branchCache := at.BranchCache(); branchCache != nil {
-		branchCache.Fill(k, v, uint64(step), txNum, tx.ViewID())
+		branchCache.Fill(k, v, uint64(step), tx.ViewID())
 	}
 }
 
@@ -2861,7 +2878,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(domain, start)
 		}
-		at.cacheLatestBranch(cacheBranch, k, v, step, step.LastTxNum(at.StepSize()), tx)
+		at.cacheLatestBranch(cacheBranch, k, v, step, tx)
 		return v, step, true, nil
 	}
 	var found bool
@@ -2876,7 +2893,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	step = kv.Step(fileEndTxNum / at.StepSize())
 	if err == nil {
-		at.cacheLatestBranch(cacheBranch, k, v, step, fileEndTxNum, tx)
+		at.cacheLatestBranch(cacheBranch, k, v, step, tx)
 	}
 	return v, step, found, err
 }
@@ -2914,9 +2931,12 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	step := txNumUnwindTo / at.StepSize()
 	for idx, d := range at.d {
-		if err := d.unwind(ctx, tx, step, txNumUnwindTo, changeset[idx]); err != nil {
+		var expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error)
+		if kv.Domain(idx) == kv.CommitmentDomain {
+			expandBranch = at.replaceShortenedKeysInBranch
+		}
+		if err := d.unwind(ctx, tx, txNumUnwindTo, changeset[idx], expandBranch); err != nil {
 			return err
 		}
 	}
