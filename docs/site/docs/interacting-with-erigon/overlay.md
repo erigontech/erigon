@@ -69,7 +69,7 @@ curl -X POST http://localhost:8545 \
 
 Blocks in the requested range are replayed concurrently (up to `runtime.NumCPU()` workers). Each block is independently replayed from the state at `blockNumber - 1`.
 
-Replay preserves the original gas budgets and charges fees normally for all transaction types, including frame transactions. State overrides do not increase the gas available to the replayed code. The RPC gas cap is an upper bound on the original transaction budgets, not a replacement budget.
+Replay preserves the original gas budgets and charges fees normally for all transaction types, including frame transactions. State overrides do not increase the gas available to the replayed code. The RPC gas cap does not apply to log replay.
 
 ---
 

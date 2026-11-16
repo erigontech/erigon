@@ -481,13 +481,6 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	replayTransactions = block.Transactions()
 	log.Debug("[replayBlock] replayTx", "length", len(replayTransactions))
 
-	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
-	for _, txn := range replayTransactions {
-		if err := checkTransactionGasCap(txn, api.GasCap); err != nil {
-			return nil, err
-		}
-	}
-
 	header := block.HeaderNoCopy()
 
 	if header == nil {
@@ -505,7 +498,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := blockCtx.Rules(chainConfig)
 
-	if hasStateOverrides {
+	if stateOverride != nil && len(*stateOverride) > 0 {
 		if err := stateOverride.Override(statedb, nil, rules); err != nil {
 			return nil, err
 		}

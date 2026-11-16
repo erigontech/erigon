@@ -254,11 +254,15 @@ func TestOverlayGetLogsKeepsSuccessfulFrameLogs(t *testing.T) {
 		wantErr   string
 	}{
 		{name: "within cap", gasCap: 1_000_000},
-		{name: "below consumed gas", gasCap: receipt.GasUsed - 1, wantErr: "exceeds the RPC gas cap"},
-		{name: "below execution budget", gasCap: limits.Execution - 1, wantErr: "exceeds the RPC gas cap"},
+		{name: "below consumed gas", gasCap: receipt.GasUsed - 1},
+		{name: "below execution budget", gasCap: limits.Execution - 1},
 		{name: "at execution budget", gasCap: limits.Execution},
 		{name: "unlimited", gasCap: 0},
 		{name: "empty overrides", gasCap: limits.Execution, overrides: &ethapi.StateOverrides{}},
+		{
+			name: "state override below consumed gas", gasCap: receipt.GasUsed - 1,
+			overrides: &ethapi.StateOverrides{accounts.InternAddress(successfulTarget): {Balance: &overrideBalance}},
+		},
 		{
 			name: "underfunded balance override", gasCap: limits.Execution,
 			overrides: &ethapi.StateOverrides{accounts.InternAddress(sender): {Balance: &overrideBalance}},
@@ -323,42 +327,36 @@ func newOverlayGetLogsSingleLogSetup(t *testing.T) (overlayGetLogsTestSetup, fil
 	return setup, filters.FilterCriteria{FromBlock: setup.blockNumber, ToBlock: setup.blockNumber, Addresses: []common.Address{target}}
 }
 
-func TestOverlayGetLogsOrdinaryGasCap(t *testing.T) {
+func TestOverlayGetLogsIgnoresRPCGasCap(t *testing.T) {
 	setup, crit := newOverlayGetLogsSingleLogSetup(t)
 	balance := (*hexutil.U256)(uint256.NewInt(1))
 	for _, tc := range []struct {
 		name      string
 		gasCap    uint64
 		overrides *ethapi.StateOverrides
-		wantLogs  int
-		wantErr   bool
 	}{
-		{name: "below declared limit", gasCap: 99_999, wantErr: true},
-		{name: "at declared limit", gasCap: 100_000, wantLogs: 1},
-		{name: "unlimited", gasCap: 0, wantLogs: 1},
-		{name: "empty overrides", gasCap: 99_999, overrides: &ethapi.StateOverrides{}, wantErr: true},
+		{name: "below declared limit", gasCap: 99_999},
+		{name: "at declared limit", gasCap: 100_000},
+		{name: "unlimited", gasCap: 0},
+		{name: "empty overrides", gasCap: 99_999, overrides: &ethapi.StateOverrides{}},
 		{
-			name: "state override below declared limit", gasCap: 99_999, wantErr: true,
+			name: "state override below declared limit", gasCap: 99_999,
 			overrides: &ethapi.StateOverrides{accounts.InternAddress(crit.Addresses[0]): {Balance: &balance}},
 		},
 		{
-			name: "state override at declared limit", gasCap: 100_000, wantLogs: 1,
+			name: "state override at declared limit", gasCap: 100_000,
 			overrides: &ethapi.StateOverrides{accounts.InternAddress(crit.Addresses[0]): {Balance: &balance}},
 		},
 		{
-			name: "unlimited with state override", wantLogs: 1,
+			name:      "unlimited with state override",
 			overrides: &ethapi.StateOverrides{accounts.InternAddress(crit.Addresses[0]): {Balance: &balance}},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setup.api.GasCap = tc.gasCap
 			logs, err := setup.api.GetLogs(setup.m.Ctx, crit, tc.overrides, nil)
-			if tc.wantErr {
-				require.ErrorContains(t, err, "exceeds the RPC gas cap")
-			} else {
-				require.NoError(t, err)
-			}
-			require.Len(t, logs, tc.wantLogs)
+			require.NoError(t, err)
+			require.Len(t, logs, 1)
 		})
 	}
 }
@@ -427,21 +425,16 @@ func TestOverlayGetLogsOverrideExecutionGasCap(t *testing.T) {
 		name      string
 		gasCap    uint64
 		overrides *ethapi.StateOverrides
-		wantErr   bool
 	}{
 		{name: "canonical replay", gasCap: 50_000_000},
+		{name: "canonical replay below declared limit", gasCap: 1_000_000},
 		{name: "at declared limit", gasCap: 50_000_000, overrides: &overrides},
-		{name: "below declared limit", gasCap: 1_000_000, overrides: &overrides, wantErr: true},
+		{name: "below declared limit", gasCap: 1_000_000, overrides: &overrides},
 		{name: "unlimited", overrides: &overrides},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: tc.gasCap}, NewOtterscanAPI(base, m.DB, 25))
 			logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: blockNumber, ToBlock: blockNumber}, tc.overrides, nil)
-			if tc.wantErr {
-				require.ErrorContains(t, err, "exceeds the RPC gas cap")
-				require.Empty(t, logs)
-				return
-			}
 			require.NoError(t, err)
 			require.Len(t, logs, 1)
 			gasLeft := new(uint256.Int).SetBytes(logs[0].Data).Uint64()
