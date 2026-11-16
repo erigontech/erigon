@@ -434,6 +434,8 @@ func TestComposerRecovers(t *testing.T) {
 	t.Run("an L1 reorg rolls a settlement out", func(t *testing.T) {
 		h := newHarness(t, newTestChain(t, 12), 12, nil)
 		h.slot(t, 8, 50, sequencer.ModeSteady)
+		// Sends run off the slot: the first is sent before the second.
+		h.targets(t)
 		h.c.ledger.MarkSettled(8, h.poster.txs[0].Hash())
 		h.cursor.Store(8)
 		h.c.RecoverFailed(t.Context())
