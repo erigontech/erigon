@@ -1858,6 +1858,19 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 				lowestEnd = min(lowestEnd, contiguousEnd(visible))
 			}
 		}
+		// values files are never retired, so a values list must start at its first file on disk
+		lowerToFirstFile := func(dirty *DirtyFiles, visible visibleFiles) {
+			firstStart := uint64(math.MaxUint64)
+			dirty.Scan(func(f *FilesItem) bool {
+				if !f.canDelete.Load() {
+					firstStart = min(firstStart, f.startTxNum)
+				}
+				return true
+			})
+			if len(visible) > 0 && visible[0].startTxNum > firstStart {
+				lowestEnd = min(lowestEnd, firstStart)
+			}
+		}
 		for id, d := range a.d {
 			if d == nil {
 				continue
@@ -1867,6 +1880,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 				continue
 			}
 			lower(d.dirtyFiles, next.d[id].files)
+			lowerToFirstFile(d.dirtyFiles, next.d[id].files)
 			if !d.HistCfg.SnapshotsDisabled && !d.HistCfg.HistoryDisabled {
 				lower(d.History.dirtyFiles, next.dh[id])
 				lower(d.InvertedIndex.dirtyFiles, next.dhii[id].files)
