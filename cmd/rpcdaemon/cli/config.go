@@ -717,7 +717,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 			node.NewWSOriginHandler(cfg.HttpCORSDomain,
 				srv.WebsocketHandler(wsOrigins, nil, cfg.WebsocketCompression, logger)))
 	}
-	graphQLHandler := newGraphQLHandler(cfg, graphql.CreateHandler(defaultAPIList), rpcConcurrencyLimit)
+	graphQLHandler := newGraphQLHandler(cfg, graphql.CreateHandler(defaultAPIList, cfg.BatchLimit), rpcConcurrencyLimit)
 	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)
 	if err != nil {
 		return err
