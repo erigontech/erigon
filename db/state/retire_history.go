@@ -61,8 +61,7 @@ func (ht *HistoryRoTx) filesBeforeStep(cutoff kv.Step) []agedFiles {
 	return []agedFiles{ht.iit.filesBeforeStep(cutoff), {ht.h.dirtyFiles, ht.h.FilenameBase, entirelyBeforeStep(ht.files, ht.stepSize, cutoff)}}
 }
 
-// Retire drops the dirty history/index prefix ending at the last aged visible file.
-// Physical deletion waits until readers release the retired generation.
+// Retire drops History+InvertedIndex files below their per-domain cutoff, dirty ones too.
 func (at *AggregatorRoTx) Retire(cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
 	if dbg.NoRetire() || cutoffs.IsNoop() {
 		return 0, nil
