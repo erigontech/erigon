@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -27,7 +28,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -124,11 +127,19 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		return err
 	}
 
-	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, nil, api._txNumReader, tx, 0)
+	ibs, blockCtx, stateReader, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, nil, api._txNumReader, tx, 0)
 	if err != nil {
 		return err
 	}
 	defer ibs.Close()
+	if hsr, ok := stateReader.(state.HistoricalStateReader); ok && canTraceTxnsInParallel(config) && !api.remoteBlocks {
+		if workers := debugTraceBlockWorkers(block.Transactions().Len()); workers > 1 {
+			err := api.traceBlockParallel(ctx, tx, block, hsr.GetTxNum(), config, chainConfig, rules, signer, stream, workers)
+			if !errors.Is(err, errNoReplayReadTx) {
+				return err
+			}
+		}
+	}
 	transactions.VersionedCallState(ibs)
 	api.shareCodeByHash(ibs)
 
@@ -152,37 +163,14 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	firstTxIndex := ibs.TxnIndex()
 
 	var gasUsed protocol.GasUsed
-	for txnIndex, txn := range txns {
-		txnHash := txn.Hash()
-
-		stream.WriteObjectStart()
-		ethjson.Data(stream, "txHash", txnHash[:])
-		select {
-		default:
-		case <-ctx.Done():
-			return ctx.Err()
+	for txnIndex := range txns {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		ibs.SetTxContext(blockCtx.BlockNumber, firstTxIndex+txnIndex)
-
-		// A transaction's error is answered inside its own object; the block trace goes on.
-		_ = rpc.WriteFieldOrError(stream, "result", func(s *jsonstream.Stream) error {
-			msg, asMessageErr := txn.AsMessage(*signer, block.BaseFee(), rules)
-			if asMessageErr != nil {
-				return fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
-			}
-			txCtx := evmtypes.TxContext{
-				TxHash:     txnHash,
-				Origin:     msg.From(),
-				GasPrice:   *msg.GasPrice(),
-				BlobHashes: msg.BlobHashes(),
-			}
-			txnGasUsage, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, s, api.evmCallTimeout, precompiles)
-			gasUsed.BlockExecution += txnGasUsage.BlockExecutionGasUsed
-			gasUsed.BlockState += txnGasUsage.BlockStateGasUsed
-			return traceErr
-		})
-
-		stream.WriteObjectEnd()
+		usage := api.writeTxnTrace(ctx, stream, block, txnIndex, ibs, blockCtx, rules, signer, config, chainConfig, precompiles)
+		gasUsed.BlockExecution += usage.BlockExecutionGasUsed
+		gasUsed.BlockState += usage.BlockStateGasUsed
 
 		// Trace output can fail after execution. Finalize even then so the next
 		// transaction starts with its own storage originals, journal and refunds.
@@ -195,20 +183,54 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		}
 	}
 
-	if dbg.AssertEnabled {
-		refunds := true
-		if config.NoRefunds != nil && *config.NoRefunds {
-			refunds = false
-		}
-
-		blockGasUsed := gasUsed.BlockGasUsed()
-		if refunds && block.GasUsed() != blockGasUsed {
-			panic(fmt.Errorf("assert: block.GasUsed() %d != gasUsed %d. blockNum=%d", block.GasUsed(), blockGasUsed, blockNumber))
-		}
-	}
-
+	assertTracedBlockGas(block, config, &gasUsed)
 	stream.WriteArrayEnd()
 	return nil
+}
+
+// writeTxnTrace writes the {txHash, result} object of the txn at txnIndex and returns its gas.
+// A transaction's error is answered inside its own object; the block trace goes on.
+func (api *DebugAPIImpl) writeTxnTrace(ctx context.Context, s *jsonstream.Stream, block *types.Block, txnIndex int, ibs *state.IntraBlockState,
+	blockCtx evmtypes.BlockContext, rules *chain.Rules, signer *types.Signer, config *tracersConfig.TraceConfig, chainConfig *chain.Config,
+	precompiles vm.PrecompiledContracts,
+) (usage mdgas.TxnGasUsage) {
+	txn := block.Transactions()[txnIndex]
+	txnHash := txn.Hash()
+	s.WriteObjectStart()
+	ethjson.Data(s, "txHash", txnHash[:])
+	_ = rpc.WriteFieldOrError(s, "result", func(s *jsonstream.Stream) error {
+		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
+		if err != nil {
+			return fmt.Errorf("convert transaction %s to message: %w", txnHash, err)
+		}
+		txCtx := evmtypes.TxContext{
+			TxHash:     txnHash,
+			Origin:     msg.From(),
+			GasPrice:   *msg.GasPrice(),
+			BlobHashes: msg.BlobHashes(),
+		}
+		usage, err = transactions.TraceTx(ctx, api.engine(), txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, s, api.evmCallTimeout, precompiles)
+		return err
+	})
+	s.WriteObjectEnd()
+	return usage
+}
+
+// canTraceTxnsInParallel reports whether config lets every txn be traced on the canonical
+// history state before it: the options that change the state one txn leaves to the next
+// need a replay on one state.
+func canTraceTxnsInParallel(config *tracersConfig.TraceConfig) bool {
+	return config.Tracer != nil && config.StateOverrides == nil && config.BlockOverrides == nil &&
+		(config.NoRefunds == nil || !*config.NoRefunds)
+}
+
+func assertTracedBlockGas(block *types.Block, config *tracersConfig.TraceConfig, gasUsed *protocol.GasUsed) {
+	if !dbg.AssertEnabled || (config.NoRefunds != nil && *config.NoRefunds) {
+		return
+	}
+	if blockGasUsed := gasUsed.BlockGasUsed(); block.GasUsed() != blockGasUsed {
+		panic(fmt.Errorf("assert: block.GasUsed() %d != gasUsed %d. blockNum=%d", block.GasUsed(), blockGasUsed, block.NumberU64()))
+	}
 }
 
 // TraceTransaction implements debug_traceTransaction. Returns Geth style transaction traces.

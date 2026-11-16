@@ -17,6 +17,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -33,6 +34,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/go-retryablehttp"
 	"github.com/pelletier/go-toml/v2"
 	"google.golang.org/grpc"
 
@@ -132,6 +134,7 @@ func (c *Chain) Run(ctx context.Context) error {
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = c.Chain
 	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
+	defer csn.Close()
 	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, networkType).GetLatestBeaconState(ctx)
 	if err != nil {
 		return err
@@ -233,6 +236,12 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 // maxBlobSidecarJSONSize bounds one sidecar in a JSON response: the hex blob is 256 KiB.
 const maxBlobSidecarJSONSize = 512 << 10
 
+type blobStatusError int
+
+func (e blobStatusError) Error() string {
+	return fmt.Sprintf("blob retrieval failed, bad status code %d", int(e))
+}
+
 // retrieveBlobsFromRemoteEndpoint fetches the blob sidecars of root from a beacon API base URL, which
 // may carry a query such as an API key. A response with more than maxSidecars entries is refused
 // before they are decoded: an empty entry is a few bytes on the wire but a whole blob in memory.
@@ -244,31 +253,50 @@ func retrieveBlobsFromRemoteEndpoint(ctx context.Context, endpoint string, root 
 	blobUri := base.JoinPath("eth/v1/beacon/blob_sidecars", fmt.Sprintf("0x%x", root))
 	log.Debug("[Blob Retrieval] Requesting blob sidecars", "endpoint", redactURL(base), "blockRoot", root)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, blobUri.String(), nil)
+	req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, blobUri.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
 
-	r, err := http.DefaultClient.Do(req)
+	client := &retryablehttp.Client{
+		HTTPClient:   &http.Client{Timeout: fillRequestTimeout},
+		RetryWaitMin: fillRetryWait,
+		RetryWaitMax: 30 * time.Second,
+		RetryMax:     2,
+		CheckRetry:   retryablehttp.DefaultRetryPolicy,
+		Backoff: func(lo, hi time.Duration, attempt int, resp *http.Response) time.Duration {
+			return min(retryablehttp.DefaultBackoff(lo, hi, attempt, resp), hi)
+		},
+		ErrorHandler: retryablehttp.PassthroughErrorHandler,
+	}
+	var raw []byte
+	req.SetResponseHandler(func(r *http.Response) (err error) {
+		if r.StatusCode == http.StatusOK {
+			raw, err = io.ReadAll(io.LimitReader(r.Body, int64(maxSidecars+1)*maxBlobSidecarJSONSize))
+		}
+		return err
+	})
+	r, err := client.Do(req)
+	if r != nil {
+		defer r.Body.Close()
+	}
 	if err != nil {
 		return nil, redactURLError(err)
 	}
-	defer r.Body.Close()
 
 	if r.StatusCode == http.StatusNotFound {
 		// No blobs for this block (pre-Deneb or no blob transactions)
 		return nil, nil
 	}
 	if r.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("blob retrieval failed, bad status code %d", r.StatusCode)
+		return nil, blobStatusError(r.StatusCode)
 	}
 
 	var blobsResponse struct {
 		Data []json.RawMessage `json:"data"`
 	}
-	body := io.LimitReader(r.Body, int64(maxSidecars+1)*maxBlobSidecarJSONSize)
-	if err := json.NewDecoder(body).Decode(&blobsResponse); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&blobsResponse); err != nil {
 		return nil, fmt.Errorf("blob retrieval decode failed %w", err)
 	}
 	if len(blobsResponse.Data) > maxSidecars {
@@ -405,7 +433,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 				if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
 					kzgCommitments = c.Len()
 				}
-				stored, err := localBlobsStored(ctx, blobDB, *slot, currentRoot, kzgCommitments)
+				stored, err := blob_storage.BlobsStored(ctx, blobDB, *slot, currentRoot, kzgCommitments)
 				if err != nil {
 					return false, err
 				}
@@ -464,6 +492,7 @@ func (c *DumpSnapshots) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	var to uint64
 	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
@@ -506,6 +535,7 @@ func (c *CheckSnapshots) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	var to uint64
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -526,6 +556,7 @@ func (c *CheckSnapshots) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 
 	genesisHeader, _, _, err := csn.ReadHeader(0, nil)
 	if err != nil {
@@ -593,6 +624,7 @@ func (c *LoopSnapshots) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	var to uint64
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -613,6 +645,7 @@ func (c *LoopSnapshots) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 
 	br := &snapshot_format.MockBlockReader{}
 	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconConfig)
@@ -646,6 +679,7 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	tx, err := db.BeginRo(ctx)
@@ -660,6 +694,7 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
 	}
+	defer allSnapshots.Close()
 	if err := state_accessors.ReadValidatorsTable(tx, vt); err != nil {
 		return err
 	}
@@ -694,6 +729,7 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
 	gSpot, err := initial_state.GetGenesisState(ctx, t)
 	if err != nil {
@@ -705,6 +741,7 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
+	defer stateSn.Close()
 	if _, err := antiquary.FillStaticValidatorsTableIfNeeded(log.Root(), stateSn, vt); err != nil {
 		return err
 	}
@@ -1071,6 +1108,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
 
 	targetSlot := storeCheckFloor(beaconConfig, csn.FrozenBlobs())
@@ -1191,6 +1229,7 @@ func (c *DumpBlobsSnapshots) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	var to uint64
 	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
@@ -1333,6 +1372,7 @@ func (c *CheckBlobsSnapshots) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1345,6 +1385,7 @@ func (c *CheckBlobsSnapshots) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 	to := csn.FrozenBlobs()
 
 	for i := beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch + 1; i < to; i++ {
@@ -1396,6 +1437,7 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1408,8 +1450,10 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 	to := csn.FrozenBlobs()
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
+	blobCountFn := freezeblocks.BlobCountFromBlocks(ctx, csn, snr)
 	start := max(beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch+1, c.From)
 	slotsToRegen := map[uint64]struct{}{}
 	for i := start; i < to; i++ {
@@ -1428,6 +1472,15 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx context.Context) error {
 		wantCommitments := 0
 		if c := bBlock.Block.Body.GetBlobKzgCommitments(); c != nil {
 			wantCommitments = c.Len()
+		}
+		if wantCommitments > 0 && len(sds) == 0 {
+			count, payloadSkipped, err := blobCountFn(tx, i)
+			if err != nil {
+				return err
+			}
+			if payloadSkipped {
+				wantCommitments = int(count)
+			}
 		}
 		if len(sds) != wantCommitments {
 			if !c.CheckNeedRegen {
@@ -1469,6 +1522,7 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1481,6 +1535,7 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx context.Context) error {
 	if err := csn.OpenFolder(); err != nil {
 		return err
 	}
+	defer csn.Close()
 	to := csn.FrozenBlobs()
 	start := max(beaconConfig.SlotsPerEpoch * beaconConfig.DenebForkEpoch)
 	for i := start; i < to; i++ {
@@ -1528,6 +1583,7 @@ func (c *DumpStateSnapshots) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 	var to uint64
 	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
@@ -1552,6 +1608,7 @@ func (c *DumpStateSnapshots) Run(ctx context.Context) error {
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
+	defer stateSn.Close()
 	r, _ := stateSn.Get(kv.BlockRoot, 999424)
 	fmt.Printf("%x\n", r)
 

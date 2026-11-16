@@ -33,7 +33,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
@@ -63,10 +62,6 @@ func TestEngineApiClearsFreshTouchedEmptyAccount(t *testing.T) {
 }
 
 func testEngineApiClearsFreshTouchedEmptyAccount(t *testing.T, experimentalBAL bool) {
-	parallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
-
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlError)
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
@@ -139,10 +134,6 @@ func testEngineApiClearsFreshTouchedEmptyAccount(t *testing.T, experimentalBAL b
 }
 
 func TestEngineApiClearsFreshZeroAmountWithdrawal(t *testing.T) {
-	parallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = parallel })
-
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlError)
 	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
@@ -750,9 +741,6 @@ func TestEngineApiBuiltBlockWithWithdrawalRequest(t *testing.T) {
 // mismatch. Independent senders let the parallel executor race each credit against
 // its reincarnation.
 func TestEngineApiBALGlamsterdamCreate2OntoFundedAddress(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlInfo)
 	const numProxies = 12
@@ -826,9 +814,6 @@ func TestEngineApiBALGlamsterdamCreate2OntoFundedAddress(t *testing.T) {
 // block: newPayload validation (fresh state per tx) computes the preserved sum
 // and rejects the assembled root.
 func TestEngineApiEIP8246PreservedBalanceSurvivesCreate2Recreate(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlDebug)
 	senderKey, err := crypto.GenerateKey()

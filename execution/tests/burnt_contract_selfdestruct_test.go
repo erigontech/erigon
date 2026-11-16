@@ -32,7 +32,7 @@ import (
 )
 
 // The chain sends the base fee to a burnt contract B, and the only tx of the
-// block destroys B. Serial execution credits the base fee to the destroyed B,
+// block destroys B. The base fee is credited to the destroyed B,
 // which is then removed with it, so B is absent after the block.
 func TestBurntContractDestroyedByItsTx(t *testing.T) {
 	selfdestruct := program.New().Selfdestruct(0xdead).Bytes()
