@@ -239,3 +239,49 @@ func TestBlobEndpointWorkersDefaultToAQuarterOfTheCPUs(t *testing.T) {
 		require.Equal(t, tc.want, blobEndpointWorkers(tc.configured, tc.cpus), "configured %d, %d cores", tc.configured, tc.cpus)
 	}
 }
+
+// Requests of a batch finish in any order: a slow served slot between fast misses must still break the run of misses.
+func TestBlobHistoryDownloaderCountsMissesInSlotOrder(t *testing.T) {
+	blocks, peer := endpointBlocks(t, 100, 99, 98, 97, 96, 95)
+	slow, older := blocks[2], blocks[5]
+	requests := &atomic.Int32{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		id := common.HexToHash(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:])
+		for _, b := range []endpointBlock{slow, older} {
+			if b.root == id {
+				if b.root == slow.root {
+					time.Sleep(300 * time.Millisecond)
+				}
+				if err := json.NewEncoder(w).Encode(map[string]any{"data": b.sidecars}); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				return
+			}
+		}
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	t.Cleanup(srv.Close)
+	downloader := newEndpointDownloader(t, []string{srv.URL}, 4, peer)
+
+	batch := make([]incompleteBlock, 0, 5)
+	for _, b := range blocks[:5] {
+		batch = append(batch, incompleteBlock{block: b.block, root: b.root})
+	}
+	downloader.processBatch(batch)
+	downloader.processBatch([]incompleteBlock{{block: older.block, root: older.root}})
+	require.Equal(t, int32(6), requests.Load(), "two misses on each side of a served slot do not end the window")
+}
+
+// The endpoint does not need peers, so a pass runs without them.
+func TestBlobHistoryDownloaderFillsFromTheEndpointWithoutPeers(t *testing.T) {
+	b := newEndpointBlock(t, 100)
+	url, _ := blobEndpoint(t, b)
+	downloader := newBoundaryDownloader(t, 100, 0, 100, &boundaryBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{100: b.block}})
+	downloader.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
+	downloader.rpc = boundaryPeerCounter(0)
+	downloader.SetBlobEndpoints([]string{url}, 1)
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Equal(t, 1, storedSidecars(t, downloader, b))
+}

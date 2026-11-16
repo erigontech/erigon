@@ -17,10 +17,12 @@
 package network
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -330,17 +332,31 @@ func (b *BlobHistoryDownloader) recordEndpointResult(i int, item incompleteBlock
 // fetchFromEndpoints stores the blobs of every block an endpoint serves and returns the blocks still incomplete.
 func (b *BlobHistoryDownloader) fetchFromEndpoints(batch []incompleteBlock) []incompleteBlock {
 	filled := make([]bool, len(batch))
+	var resultsMu sync.Mutex
+	var results []endpointResult
+	record := func(r endpointResult) {
+		resultsMu.Lock()
+		defer resultsMu.Unlock()
+		results = append(results, r)
+	}
 	// Requests mostly wait on the network, so twice as many run as there are workers; the CPU work they do is bounded
 	// by endpointCPU, one slot per proof.
 	var g errgroup.Group
 	g.SetLimit(2 * b.endpointWorkers)
 	for i, item := range batch {
 		g.Go(func() error {
-			filled[i] = b.fetchFromEndpoint(item)
+			filled[i] = b.fetchFromEndpoint(item, record)
 			return nil
 		})
 	}
 	_ = g.Wait()
+	// Requests finish in any order, but a run of misses is a run of slots, so results apply from the newest slot down.
+	slices.SortStableFunc(results, func(x, y endpointResult) int {
+		return cmp.Compare(y.item.block.Block.Slot, x.item.block.Block.Slot)
+	})
+	for _, r := range results {
+		b.recordEndpointResult(r.endpoint, r.item, r.err)
+	}
 	remaining := make([]incompleteBlock, 0, len(batch))
 	for i, item := range batch {
 		if !filled[i] {
@@ -350,7 +366,13 @@ func (b *BlobHistoryDownloader) fetchFromEndpoints(batch []incompleteBlock) []in
 	return remaining
 }
 
-func (b *BlobHistoryDownloader) fetchFromEndpoint(item incompleteBlock) bool {
+type endpointResult struct {
+	endpoint int
+	item     incompleteBlock
+	err      error
+}
+
+func (b *BlobHistoryDownloader) fetchFromEndpoint(item incompleteBlock, record func(endpointResult)) bool {
 	slot := item.block.Block.Slot
 	for i, endpoint := range b.endpoints {
 		if b.ctx.Err() != nil {
@@ -360,7 +382,7 @@ func (b *BlobHistoryDownloader) fetchFromEndpoint(item incompleteBlock) bool {
 			continue
 		}
 		err := blobfetch.FetchAndStore(b.ctx, b.blobStorage, endpoint, item.root, item.block, b.endpointCPU)
-		b.recordEndpointResult(i, item, err)
+		record(endpointResult{endpoint: i, item: item, err: err})
 		if err == nil {
 			return true
 		}
@@ -526,7 +548,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	b.resetEndpointWindows()
 	startSlot := currentSlot
 
-	if !b.peersAvailable() {
+	if !b.sourcesAvailable() {
 		return nil
 	}
 
@@ -612,7 +634,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 				}
 			default:
 			}
-			if !b.peersAvailable() {
+			if !b.sourcesAvailable() {
 				return nil
 			}
 			if b.processBatch(batch) {
@@ -1070,6 +1092,12 @@ func (r *blobRetryRange) trimBefore(floor uint64) {
 	if r.intervals.Len() > 0 {
 		r.refreshBounds()
 	}
+}
+
+// sourcesAvailable reports whether a pass can fetch anything: endpoints do not need peers, and the peer steps check
+// for peers themselves.
+func (b *BlobHistoryDownloader) sourcesAvailable() bool {
+	return len(b.endpoints) > 0 || b.peersAvailable()
 }
 
 func (b *BlobHistoryDownloader) peersAvailable() bool {
