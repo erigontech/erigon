@@ -390,7 +390,7 @@ func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 	at.Close()
 
 	// cutoff step 2: the only visible accounts file is [0,4] (endStep 4 > 2), so no visible file is
-	// aged and nothing is retired, not even the invisible [0,2].
+	// aged and nothing is retired, not even the dirty [0,2].
 	n, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	require.Zero(t, n)

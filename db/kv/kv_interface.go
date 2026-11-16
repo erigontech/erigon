@@ -59,7 +59,7 @@ Methods Naming:
  BuildFiles: write (and index) collated steps into new immutable files
  Merge: fold adjacent visible files into a bigger one - only produces a new file; the small inputs become garbage
  Retire: drop old visible files past the prune window; unlink deferred until no reader references them
-   Merge reads and deletes only visible files. Retire also detaches invisible files that end at or before its
+   Merge reads and deletes only visible files. Retire also detaches dirty files that end at or before its
    boundary. Other invisible garbage (subsumed/overlapping) is dropped by a separate clean-up:
    RemoveOverlaps / cleanAfterMerge (also the "clean garbage" CLI tools).
  Get: exact match of criteria
