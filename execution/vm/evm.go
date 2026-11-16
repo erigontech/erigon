@@ -102,6 +102,8 @@ type EVM struct {
 	config Config
 	// abort is used to abort the EVM calling operations
 	abort atomic.Bool
+	// readOnly fills abort's padding, keeping EVM in its size class.
+	readOnly bool // Whether to throw on stateful modifications
 	// callGasTemp holds the gas available for the current call. This is needed because the
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
@@ -110,7 +112,6 @@ type EVM struct {
 	// replaced wholesale by SetPrecompiles for state-override RPC calls.
 	precompiles PrecompiledContracts
 
-	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
 	spareFrame *CallContext // a finished nested frame's context, see putCallContext
@@ -303,6 +304,15 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 
 	// BAL: record address access even if call fails due to gas/call depth/insufficient balance
 	evm.intraBlockState.MarkAddressAccess(addr, false)
+
+	if hook := evm.config.CallOverride; hook != nil && !evm.readOnly {
+		if out, ok, herr := hook(evm, depth, caller, addr, input, value); ok {
+			if herr != nil && herr != ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
+				out = nil
+			}
+			return out, gasRemaining, mdgas.MdGasUsage{}, herr
+		}
+	}
 
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, gasRemaining, mdgas.MdGasUsage{}, nil

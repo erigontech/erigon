@@ -50,6 +50,8 @@ type Config struct {
 	StatelessExec bool // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
+	CallOverride CallOverride // nil in consensus execution
+
 	ExtraEips []int // Additional EIPS that are to be enabled
 
 	// OverrideInitCode selects replacement initcode by deployment address during RPC replay.
@@ -63,6 +65,13 @@ type Config struct {
 	// nested constructor frame opens. The receiver filters by deployment address.
 	OnInitCodeOverrideError func(address accounts.Address, err error)
 }
+
+// CallOverride replaces the outcome of a CALL outside a static context, at any
+// depth including the top frame. ok == false runs the call unchanged.
+// An overridden call runs no code, moves no value and returns all of its gas;
+// err is nil or ErrExecutionReverted. Writes made through
+// evm.IntraBlockState() are not reverted by ErrExecutionReverted.
+type CallOverride func(evm *EVM, depth int, caller, addr accounts.Address, input []byte, value uint256.Int) (ret []byte, ok bool, err error)
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 	return slices.Contains(vmConfig.ExtraEips, 3860) || rules.IsShanghai
