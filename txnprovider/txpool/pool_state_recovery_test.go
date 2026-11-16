@@ -521,6 +521,39 @@ func TestFramePoolAdmissionRejectsDuringStateRecovery(t *testing.T) {
 	})
 }
 
+func TestFramePoolRevalidationDefersDuringStateRecovery(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	backend := pool.ethBackend.(*frameValidationBackend)
+	frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
+	var txns TxnSlots
+	txns.Append(frame, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	reservation := pool.frameReservations[sender]
+
+	backend.onValidate = pool.MarkStateStale
+	backend.err = context.DeadlineExceeded
+	synctest.Test(t, func(t *testing.T) {
+		updateCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+		require.NoError(t, pool.OnNewBlock(updateCtx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+		require.NoError(t, updateCtx.Err(), "revalidation must not wait for recovery")
+	})
+	require.True(t, pool.stateViewStale)
+	require.Zero(t, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+	require.Equal(t, reservation, pool.frameReservations[sender])
+
+	backend.onValidate, backend.err = nil, nil
+	change := newBlockChangeForAccounts(common.Hash{2}, 0, sender)
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.False(t, pool.stateViewStale)
+	require.Equal(t, PendingSubPool, pool.byHash[string(frame.IDHash[:])].currentSubPool)
+	require.Equal(t, reservation, pool.frameReservations[sender])
+	require.Len(t, backend.calls, 3)
+}
+
 func TestFramePoolRecoveryDuringAdmission(t *testing.T) {
 	for _, local := range []bool{true, false} {
 		name := "remote"

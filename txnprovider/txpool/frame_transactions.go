@@ -583,15 +583,11 @@ type bogotaActivation struct {
 func (p *TxPool) RetainBogotaActivation(changes *remoteproto.StateChangeBatch) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	activation := p.bogotaActivationAfter(changes)
-	p.pendingActivation = &activation
+	p.activation = p.bogotaActivationAfter(changes)
 }
 
 func (p *TxPool) bogotaActivationAfter(changes *remoteproto.StateChangeBatch) bogotaActivation {
-	activation := bogotaActivation{active: p.headIsBogota}
-	if p.pendingActivation != nil {
-		activation = *p.pendingActivation
-	}
+	activation := p.activation
 	activeBefore := activation.active
 	// Forward history can overlap a subscription reset. Intermediate forward entries
 	// do not prove a reorg; an explicit unwind must survive later reactivation.
@@ -777,7 +773,7 @@ func (p *TxPool) revalidateFrames(ctx context.Context, parked []*metaTxn, genera
 		}
 		p.lock.Unlock()
 	}
-	return p.withLockedState(ctx, nil, true, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
+	err := p.withLockedState(ctx, nil, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
 		var announcements Announcements
 		if err := p.promote(cacheView, p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), &announcements); err != nil {
 			return err
@@ -786,4 +782,9 @@ func (p *TxPool) revalidateFrames(ctx context.Context, parked []*metaTxn, genera
 		p.publishDepthMetrics()
 		return nil
 	})
+	if errors.Is(err, errStateViewStale) {
+		// Recovery invalidates this generation; the next block update revalidates and promotes again.
+		return nil
+	}
+	return err
 }

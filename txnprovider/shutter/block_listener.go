@@ -73,18 +73,12 @@ func (bl *BlockListener) Run(ctx context.Context) error {
 	defer bl.logger.Info("block listener stopped")
 	bl.logger.Info("running block listener")
 
-	listen := func() error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		return bl.listen(ctx)
-	}
 	notify := func(err error, _ time.Duration) {
 		if !grpcutil.IsRetryLater(err) && !grpcutil.IsEndOfStream(err) {
 			bl.logger.Warn("block listener subscription failed", "err", err)
 		}
 	}
-	return backoff.RetryNotify(listen, backoff.WithContext(backoff.NewConstantBackOff(3*time.Second), ctx), notify)
+	return backoff.RetryNotify(func() error { return bl.listen(ctx) }, backoff.WithContext(backoff.NewConstantBackOff(3*time.Second), ctx), notify)
 }
 
 func (bl *BlockListener) listen(ctx context.Context) error {

@@ -159,9 +159,8 @@ type TxPool struct {
 	chainConfig             *chain.Config
 	stateGeneration         uint64
 	stateViewStale          bool
-	stateBlockHash          common.Hash       // Head of the pool's state view; pins frame validation to the same block
-	headIsBogota            bool              // Last completed update's activation, independent of pending-block time
-	pendingActivation       *bogotaActivation // Activation observations from skipped batches, retained until an update succeeds
+	stateBlockHash          common.Hash      // Head of the pool's state view; pins frame validation to the same block
+	activation              bogotaActivation // Canonical-head activation, with crossings retained until an update succeeds
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -392,8 +391,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 			defer p.lock.Unlock()
 			p.markStateStaleLocked()
 			if errors.Is(err, errStateViewSuperseded) {
-				activation := p.bogotaActivationAfter(stateChanges)
-				p.pendingActivation = &activation
+				p.activation = p.bogotaActivationAfter(stateChanges)
 			}
 		}
 	}()
@@ -449,8 +447,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	// Retained activation transitions must survive failed or superseded updates.
 	p.lock.Lock()
 	if frames.generation == p.stateGeneration {
-		p.headIsBogota = p.chainConfig.IsBogota(stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockTime)
-		p.pendingActivation = nil
+		p.activation = bogotaActivation{active: p.chainConfig.IsBogota(stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockTime)}
 	}
 	p.lock.Unlock()
 	return nil
@@ -1730,20 +1727,14 @@ var (
 	errPoolNotReady   = errors.New("transaction pool is not ready; retry later")
 )
 
-func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, waitForRecovery bool, f func(kv.TemporalTx, kvcache.CacheView) error) error {
+func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kv.TemporalTx, kvcache.CacheView) error) error {
 	for {
 		p.lock.Lock()
 		coreDB, cache, generation := p._chainDB, p._stateCache, p.stateGeneration
 		stale := p.stateViewStale
 		p.lock.Unlock()
 		if stale {
-			if !waitForRecovery {
-				return errStateViewStale
-			}
-			if !p.waitForStateChange(ctx, generation) {
-				return ctx.Err()
-			}
-			continue
+			return errStateViewStale
 		}
 
 		var retry bool
@@ -1796,7 +1787,7 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 
 	var precheckReasons []txpoolcfg.DiscardReason
 	var goodTxns TxnSlots
-	err := p.withLockedState(ctx, &prechecked, false, func(_ kv.TemporalTx, view kvcache.CacheView) error {
+	err := p.withLockedState(ctx, &prechecked, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var err error
 		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil)
 		if err != nil || p.cfg.MaxNonceGap == 0 || hasFrames {
@@ -1975,23 +1966,11 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 	if !p.Started() {
 		return nil, errPoolNotReady
 	}
-	reasons, err := p.addNewTxns(ctx, newTxns, nil, false)
+	reasons, err := p.addNewTxns(ctx, newTxns, nil)
 	if errors.Is(err, errStateViewStale) {
 		return nil, errPoolNotReady
 	}
 	return reasons, err
-}
-
-func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource, waitForRecovery bool) ([]txpoolcfg.DiscardReason, error) {
-	for {
-		reasons, err := p.tryAddNewTxns(ctx, newTxns, sources)
-		if !waitForRecovery || !errors.Is(err, errStateViewStale) {
-			return reasons, err
-		}
-		if err := p.waitForStateRecovery(ctx); err != nil {
-			return nil, err
-		}
-	}
 }
 
 func (p *TxPool) waitForStateRecovery(ctx context.Context) error {
@@ -2020,7 +1999,7 @@ func (p *TxPool) waitForCondition(ctx context.Context, ready func() bool) bool {
 
 // Head-change retries share one simulation deadline. Admission returns
 // errStateViewStale so recovery can wait outside that budget and restart admission.
-func (p *TxPool) tryAddNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource) ([]txpoolcfg.DiscardReason, error) {
+func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []remoteSource) ([]txpoolcfg.DiscardReason, error) {
 	reasons, preparedCells, err := p.prepareTxns(ctx, newTxns, sources)
 	if err != nil {
 		return nil, err
@@ -2044,7 +2023,7 @@ func (p *TxPool) tryAddNewTxns(ctx context.Context, newTxns TxnSlots, sources []
 			}
 			frames = p.prepareFrames(simulationCtx, newTxns)
 		}
-		err = p.withLockedState(ctx, &newTxns, false, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
+		err = p.withLockedState(ctx, &newTxns, func(_ kv.TemporalTx, cacheView kvcache.CacheView) error {
 			preparedReasons, err := p.applyFrameValidation(simulationCtx, newTxns, frames, precheckReasons, cacheView)
 			if err != nil {
 				return err
@@ -3335,7 +3314,7 @@ func (p *TxPool) fromDB(ctx context.Context) error {
 		// Recovery also needs database readers. If the view goes stale after the
 		// wait, release this reader before retrying; simulation opens its own reads.
 		err := p.poolDB.View(ctx, func(tx kv.Tx) error {
-			return p.withLockedState(ctx, nil, false, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
+			return p.withLockedState(ctx, nil, func(coreTx kv.TemporalTx, cacheView kvcache.CacheView) error {
 				err := p.fromDBLocked(tx, coreTx, cacheView, &frames.parked)
 				frames.generation, frames.blockHash = p.stateGeneration, p.stateBlockHash
 				return err

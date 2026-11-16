@@ -126,7 +126,7 @@ func (p *TxPool) processRemoteBatch(ctx context.Context) ([]txpoolcfg.DiscardRea
 		var err error
 		// Admission runs on the maintenance loop. Leave the batch queued during
 		// state recovery so flushing and peer work can continue.
-		reasons, err = p.addNewTxns(ctx, ordinary, ordinarySources, false)
+		reasons, err = p.addNewTxns(ctx, ordinary, ordinarySources)
 		if errors.Is(err, errStateViewStale) {
 			return nil, nil
 		}
@@ -184,8 +184,17 @@ func (p *TxPool) processRemoteFrame(ctx context.Context, frame remoteFrameTxn) {
 	}()
 	var txns TxnSlots
 	txns.Append(frame.txn, frame.sender[:], false)
-	_, err := p.addNewTxns(ctx, txns, []remoteSource{frame.source}, true)
-	if err != nil && ctx.Err() == nil {
-		p.logger.Warn("[txpool] remote frame admission failed", "hash", frame.txn.IDHash, "err", err)
+	sources := []remoteSource{frame.source}
+	for {
+		_, err := p.addNewTxns(ctx, txns, sources)
+		if !errors.Is(err, errStateViewStale) {
+			if err != nil && ctx.Err() == nil {
+				p.logger.Warn("[txpool] remote frame admission failed", "hash", frame.txn.IDHash, "err", err)
+			}
+			return
+		}
+		if err := p.waitForStateRecovery(ctx); err != nil {
+			return
+		}
 	}
 }
