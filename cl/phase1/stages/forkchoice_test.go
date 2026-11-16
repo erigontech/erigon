@@ -1443,3 +1443,40 @@ func TestEmitHeadEventsPreGloasEmitsHeadV2AsFull(t *testing.T) {
 		t.Fatal("head_v2 event was not emitted")
 	}
 }
+
+func TestEmitHeadEventSendsHeadOncePerRoot(t *testing.T) {
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.AltairForkEpoch = 0
+	beaconCfg.BellatrixForkEpoch = 0
+	beaconCfg.CapellaForkEpoch = 0
+	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.ElectraForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
+	beaconCfg.GloasForkEpoch = 0
+	headState := state.New(&beaconCfg)
+	headState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, headState.SetSlot(1))
+	store := &mock_services.ForkChoiceStorageMock{HeadVal: common.Hash{2}, HeadSlotVal: 1, HeadPayloadStatusVal: cltypes.PayloadStatusEmpty}
+	emitter := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 16)
+	subscription := emitter.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+
+	require.NoError(t, emitHeadEvent(&beaconCfg, store, emitter, store.HeadSlotVal, store.HeadVal, headState))
+	require.NoError(t, emitHeadEvent(&beaconCfg, store, emitter, store.HeadSlotVal, store.HeadVal, headState))
+	store.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	require.NoError(t, emitHeadEvent(&beaconCfg, store, emitter, store.HeadSlotVal, store.HeadVal, headState))
+
+	var headEvents int
+	var headV2Statuses []string
+	for len(events) > 0 {
+		switch event := <-events; event.Event {
+		case beaconevents.StateHead:
+			headEvents++
+		case beaconevents.StateHeadV2:
+			headV2Statuses = append(headV2Statuses, event.Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+		}
+	}
+	require.Equal(t, 1, headEvents)
+	require.Equal(t, []string{"empty", "full"}, headV2Statuses)
+}
