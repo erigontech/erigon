@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
@@ -62,6 +63,10 @@ const (
 
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
+	return api.getReceiptsWith(ctx, tx, block, nil)
+}
+
+func (api *BaseAPI) getReceiptsWith(ctx context.Context, tx kv.TemporalTx, block *types.Block, readCached func(*types.Block) (types.Receipts, error)) (types.Receipts, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -71,7 +76,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *ty
 	if err != nil {
 		return nil, err
 	}
-	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled})
+	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled, ReadCached: readCached})
 }
 
 func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *receipts.PostStateInfo) (*types.Receipt, error) {
@@ -541,6 +546,10 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 
+	var readCached func(*types.Block) (types.Receipts, error)
+	if _, cached := api.getCachedReceipts(ctx, blockHash); !cached {
+		readCached = rawdb.PrefetchReceiptsCacheV2(api.db, blockNum, api._txNumReader).Receipts
+	}
 	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
@@ -552,7 +561,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := api.getReceipts(ctx, tx, block)
+	receipts, err := api.getReceiptsWith(ctx, tx, block, readCached)
 	if err != nil {
 		return nil, err
 	}

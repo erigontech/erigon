@@ -1407,3 +1407,80 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uin
 	var w rawtemporaldb.ReceiptWriter
 	return w.Append(tx, receipt, txNum)
 }
+
+// ReceiptsPrefetch reads the RCacheV2 receipts of one block on its own read transaction,
+// so the caller can load the block at the same time.
+type ReceiptsPrefetch struct {
+	done     chan struct{}
+	receipts types.Receipts
+	err      error
+}
+
+func PrefetchReceiptsCacheV2(db kv.TemporalRoDB, blockNum uint64, txNumReader rawdbv3.TxNumsReader) *ReceiptsPrefetch {
+	p := &ReceiptsPrefetch{done: make(chan struct{})}
+	go func() {
+		defer close(p.done)
+		tx, err := db.BeginTemporalRo(context.Background())
+		if err != nil {
+			p.err = err
+			return
+		}
+		defer tx.Rollback()
+		p.receipts, p.err = readReceiptsCacheV2NoBlock(tx, blockNum, txNumReader)
+	}()
+	return p
+}
+
+func readReceiptsCacheV2NoBlock(tx kv.TemporalTx, blockNum uint64, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
+	minTxNum, err := txNumReader.Min(context.Background(), tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	maxTxNum, err := txNumReader.Max(context.Background(), tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	for txNum := minTxNum; txNum < maxTxNum+1; txNum++ {
+		v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, txNum+1)
+		if err != nil {
+			return nil, err
+		}
+		if !ok || len(v) == 0 {
+			continue
+		}
+		receipt := &types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(v, receipt); err != nil {
+			return nil, fmt.Errorf("ReadReceiptsCacheV2: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
+		}
+		x := (*types.Receipt)(receipt)
+		if int(x.TransactionIndex) != len(res) {
+			return nil, nil
+		}
+		x.Bloom = types.CreateBloom(types.Receipts{x})
+		res = append(res, x)
+	}
+	return res, nil
+}
+
+// Receipts waits for the prefetch and completes the receipts with the fields taken from block.
+// It returns nil when the cache does not hold the full receipt set of block.
+func (p *ReceiptsPrefetch) Receipts(block *types.Block) (types.Receipts, error) {
+	transactions := block.Transactions()
+	hashed := make(chan struct{})
+	go func() {
+		defer close(hashed)
+		for _, txn := range transactions {
+			txn.Hash()
+		}
+	}()
+	<-p.done
+	<-hashed
+	if p.err != nil || len(p.receipts) != len(transactions) {
+		return nil, p.err
+	}
+	blockHash, blockNum := block.Hash(), block.NumberU64()
+	for i, x := range p.receipts {
+		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, transactions[i].Hash(), false)
+	}
+	return p.receipts, nil
+}

@@ -274,6 +274,8 @@ func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db k
 // Using a struct keeps the ReceiptsGetter interface stable when new options are added.
 type ReceiptsOpts struct {
 	CommitmentHistoryEnabled bool
+	// ReadCached, when set, replaces the RCacheV2 read of the block receipts.
+	ReadCached func(block *types.Block) (types.Receipts, error)
 }
 
 type ReceiptsGetter interface {
