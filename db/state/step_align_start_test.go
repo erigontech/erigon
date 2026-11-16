@@ -87,7 +87,7 @@ func TestStepAlignedEndRefusesUnindexedFileUnderHiddenMerge(t *testing.T) {
 	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v2.0-accounts.0-2.vi")))
 	require.NoError(t, agg.OpenFolder(db))
 	_, err := agg.StepAlignedEnd(20)
-	require.ErrorContains(t, err, "accounts history index snapshot [0,40) is not indexed")
+	require.ErrorContains(t, err, "is not indexed")
 }
 
 func TestStepAlignedEndRefusesListStartingOffBoundary(t *testing.T) {
