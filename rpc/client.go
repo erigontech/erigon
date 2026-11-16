@@ -149,6 +149,7 @@ func (op *requestOp) wait(ctx context.Context, c *Client) ([]*jsonrpcMessage, er
 		if !c.isHTTP {
 			select {
 			case c.reqTimeout <- op:
+			case <-op.resp: // closed when the connection is torn down, which can wait for this call
 			case <-c.closing:
 			}
 		}

@@ -1166,3 +1166,44 @@ func TestClientCancelCallsOnDisconnect(t *testing.T) {
 	svc.awaitDone(t)
 	client.Close()
 }
+
+type nestedCallService struct {
+	started chan struct{}
+	done    chan error
+}
+
+func (s *nestedCallService) Call(ctx context.Context) error {
+	client, _ := ClientFromContext(ctx)
+	close(s.started)
+	err := client.CallContext(ctx, nil, "remote_method")
+	s.done <- err
+	return err
+}
+
+// A call the remote end made to the client, waiting on its own call back to the remote end, returns
+// when the connection is closed: closing the connection waits for it.
+func TestClientCancelNestedCallOnDisconnect(t *testing.T) {
+	t.Parallel()
+	clientConn, remoteConn := net.Pipe()
+	defer remoteConn.Close()
+	client := initClient(NewCodec(clientConn), log.New())
+	svc := &nestedCallService{started: make(chan struct{}), done: make(chan error, 1)}
+	require.NoError(t, client.RegisterName("test", svc))
+
+	go func() {
+		_, _ = remoteConn.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"test_call"}`))
+	}()
+	<-svc.started
+	var nested jsonrpcMessage
+	require.NoError(t, json.NewDecoder(remoteConn).Decode(&nested))
+	require.Equal(t, "remote_method", nested.Method)
+	remoteConn.Close()
+
+	select {
+	case err := <-svc.done:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("nested call still waiting after the connection was closed")
+	}
+	client.Close()
+}
