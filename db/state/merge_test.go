@@ -153,6 +153,9 @@ func TestHistoryStaticFilesInRange_DetectsGapInSourceFiles(t *testing.T) {
 	_, _, err := hc.staticFilesInRange(r)
 	require.Error(t, err, "staticFilesInRange must reject a merge range with a gap in source files")
 
+	_, _, err = hc.staticFilesInRange(NewHistoryRanges(*NewMergeRange("accounts", true, 1, 3), MergeRange{}))
+	require.Error(t, err, "staticFilesInRange must reject a merge range whose source files start late")
+
 	hc.files = hc.files[:1]
 	_, _, err = hc.staticFilesInRange(r)
 	require.ErrorContains(t, err, "accounts", "staticFilesInRange must reject a merge range beyond its source files")
