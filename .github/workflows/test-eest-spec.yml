@@ -71,6 +71,8 @@ jobs:
           # Long enough to cover "re-run failed jobs" on a red run; the shard
           # jobs cannot rebuild the binaries themselves.
           retention-days: 3
+          # "Re-run all jobs" keeps the run ID, and with it the artifact name.
+          overwrite: true
 
       # In the merge queue, cancel the run on first failure so the gate
       # doesn't stall waiting for still-running shards (which are skipped
