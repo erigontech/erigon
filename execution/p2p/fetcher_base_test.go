@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
@@ -603,6 +604,38 @@ func TestFetcherFetchBodies(t *testing.T) {
 			require.NotNil(t, body)
 			require.NoError(t, body.MatchesHeader(mockHeaders[i]))
 		}
+	})
+}
+
+func TestFetcherFetchBodiesPreservesEmptyBlobHashesForValidation(t *testing.T) {
+	peerID := PeerIdFromUint64(1)
+	const requestID = uint64(1234)
+	to := common.Address{1}
+	body := &types.Body{
+		Transactions: []types.Transaction{&types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{To: &to}},
+		}},
+		Withdrawals: []*types.Withdrawal{},
+	}
+	header := newMockHeaderForBody(1, body)
+	test := newFetcherTest(t, newMockRequestGenerator(requestID))
+	test.mockSentryStreams(requestResponseMock{
+		requestId: requestID,
+		mockResponseInboundMessages: []*sentryproto.InboundMessage{{
+			Id: sentryproto.MessageId_BLOCK_BODIES_66, PeerId: peerID.H512(),
+			Data: newMockBlockBodiesPacketBytes(t, requestID, body),
+		}},
+		wantRequestPeerId: peerID,
+		wantRequestHashes: []common.Hash{header.Hash()},
+	})
+	test.run(func(ctx context.Context, t *testing.T) {
+		result, err := test.fetcher.FetchBodies(ctx, []*types.Header{header}, peerID)
+		require.NoError(t, err)
+		require.Len(t, result.Data, 1)
+		require.NoError(t, result.Data[0].MatchesHeader(header))
+		require.Len(t, result.Data[0].Transactions, 1)
+		_, err = result.Data[0].Transactions[0].AsMessage(*types.LatestSignerForChainID(nil), nil, &chain.Rules{IsCancun: true})
+		require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
 	})
 }
 
