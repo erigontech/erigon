@@ -408,6 +408,15 @@ func (p *HeldPool) PopN(n int) []*Held {
 	return drained
 }
 
+// Holds reports whether the pool holds the transaction of hash, queued or
+// in flight.
+func (p *HeldPool) Holds(hash common.Hash) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, inFlight := p.inFlight[hash]
+	return inFlight || p.byHash[hash]
+}
+
 // Len is the number of queued transactions.
 func (p *HeldPool) Len() int {
 	p.mu.Lock()

@@ -460,3 +460,19 @@ func hasDup(s []uint64) bool {
 	}
 	return false
 }
+
+// TestHeldPoolHolds: a transaction is held while queued or in flight.
+func TestHeldPoolHolds(t *testing.T) {
+	p := NewHeldPool()
+	a, b := held(addr(0xa), 0, Outbound, 1), held(addr(0xa), 1, Outbound, 2)
+	require.False(t, p.Holds(a.Hash))
+	require.NoError(t, p.Push(a, 0))
+	require.NoError(t, p.Push(b, 0))
+	require.True(t, p.Holds(a.Hash))
+	p.PopN(1)
+	require.True(t, p.Holds(a.Hash), "in flight")
+	p.Release([]*Held{a})
+	require.False(t, p.Holds(a.Hash))
+	p.Evict(b.Sender, b.Direction, b.Nonce)
+	require.False(t, p.Holds(b.Hash))
+}
