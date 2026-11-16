@@ -95,6 +95,9 @@ type incompleteBlock struct {
 	// payloadUnresolved marks a Gloas block whose canonical child is not indexed yet, so whether it has blobs on the
 	// network is not known.
 	payloadUnresolved bool
+	// retry marks a slot from the retry list: retries visit scattered slots in their own order, so they do not count
+	// toward an endpoint's window, which assumes the scan's descending order.
+	retry bool
 }
 
 // rootedColumnBlock supplies the canonical root to the PeerDAS column request, which otherwise
@@ -300,24 +303,15 @@ func (b *BlobHistoryDownloader) endpointUsable(i int, slot uint64) bool {
 	return slot > state.unservedAt && !b.endpointNow().Before(state.pausedUntil)
 }
 
-func (b *BlobHistoryDownloader) recordEndpointResult(i int, item incompleteBlock, err error) {
+// recordEndpointHealth counts failures as requests finish, so requests that start after a pause see it.
+func (b *BlobHistoryDownloader) recordEndpointHealth(i int, err error) {
 	b.endpointMu.Lock()
 	defer b.endpointMu.Unlock()
 	state := &b.endpointStates[i]
 	switch {
-	case err == nil:
-		state.misses, state.highestMiss, state.failures = 0, 0, 0
-	case b.ctx.Err() != nil:
-	case blobfetch.NotServed(err):
+	case err == nil || blobfetch.NotServed(err):
 		state.failures = 0
-		if item.payloadUnresolved {
-			return
-		}
-		state.misses++
-		state.highestMiss = max(state.highestMiss, item.block.Block.Slot)
-		if state.misses >= endpointMissesBeforeCutoff {
-			state.unservedAt = max(state.unservedAt, state.highestMiss)
-		}
+	case b.ctx.Err() != nil:
 	default:
 		state.failures++
 		if state.failures >= endpointFailuresBeforePause {
@@ -325,6 +319,26 @@ func (b *BlobHistoryDownloader) recordEndpointResult(i int, item incompleteBlock
 			state.pausedUntil = b.endpointNow().Add(endpointPause)
 			b.logger.Warn("[BlobHistoryDownloader] Blob backfill endpoint keeps failing, pausing it", "endpoint",
 				blobfetch.RedactEndpoint(b.endpoints[i]), "pause", endpointPause, "err", err)
+		}
+	}
+}
+
+// recordEndpointWindow counts served and unserved scan slots; the caller applies them from the newest slot down.
+func (b *BlobHistoryDownloader) recordEndpointWindow(i int, item incompleteBlock, err error) {
+	if item.retry || item.payloadUnresolved {
+		return
+	}
+	b.endpointMu.Lock()
+	defer b.endpointMu.Unlock()
+	state := &b.endpointStates[i]
+	switch {
+	case err == nil:
+		state.misses, state.highestMiss = 0, 0
+	case blobfetch.NotServed(err) && b.ctx.Err() == nil:
+		state.misses++
+		state.highestMiss = max(state.highestMiss, item.block.Block.Slot)
+		if state.misses >= endpointMissesBeforeCutoff {
+			state.unservedAt = max(state.unservedAt, state.highestMiss)
 		}
 	}
 }
@@ -355,7 +369,7 @@ func (b *BlobHistoryDownloader) fetchFromEndpoints(batch []incompleteBlock) []in
 		return cmp.Compare(y.item.block.Block.Slot, x.item.block.Block.Slot)
 	})
 	for _, r := range results {
-		b.recordEndpointResult(r.endpoint, r.item, r.err)
+		b.recordEndpointWindow(r.endpoint, r.item, r.err)
 	}
 	remaining := make([]incompleteBlock, 0, len(batch))
 	for i, item := range batch {
@@ -382,6 +396,7 @@ func (b *BlobHistoryDownloader) fetchFromEndpoint(item incompleteBlock, record f
 			continue
 		}
 		err := blobfetch.FetchAndStore(b.ctx, b.blobStorage, endpoint, item.root, item.block, b.endpointCPU)
+		b.recordEndpointHealth(i, err)
 		record(endpointResult{endpoint: i, item: item, err: err})
 		if err == nil {
 			return true
@@ -729,6 +744,7 @@ func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor, fuluRetentionF
 			b.resolveRetrySlot(slot)
 			continue
 		}
+		item.retry = true
 		complete, err := b.retryBlock(item)
 		if err != nil {
 			if b.ctx.Err() != nil {

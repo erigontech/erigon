@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -284,4 +285,63 @@ func TestBlobHistoryDownloaderFillsFromTheEndpointWithoutPeers(t *testing.T) {
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, 1, storedSidecars(t, downloader, b))
+}
+
+func failingEndpoint(t *testing.T) (string, *atomic.Int32) {
+	t.Helper()
+	retryWait := blobfetch.RetryWait
+	blobfetch.RetryWait = time.Millisecond
+	t.Cleanup(func() { blobfetch.RetryWait = retryWait })
+	requests := &atomic.Int32{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, requests
+}
+
+// Within one batch, requests that start after the pause see it.
+func TestBlobHistoryDownloaderPausesAFailingEndpointWithinABatch(t *testing.T) {
+	slots := make([]uint64, 8)
+	for i := range slots {
+		slots[i] = uint64(100 - i)
+	}
+	blocks, peer := endpointBlocks(t, slots...)
+	url, requests := failingEndpoint(t)
+	downloader := newEndpointDownloader(t, []string{url}, 1, peer)
+
+	batch := make([]incompleteBlock, 0, len(blocks))
+	for _, b := range blocks {
+		batch = append(batch, incompleteBlock{block: b.block, root: b.root})
+	}
+	downloader.processBatch(batch)
+	attemptsPerBlock := int32(3)
+	require.LessOrEqual(t, requests.Load(), attemptsPerBlock*(endpointFailuresBeforePause+1),
+		"at most the blocks in flight when the pause starts are asked after it")
+}
+
+// Retries visit scattered slots in their own order, so their misses must not end the window of the scan.
+func TestBlobHistoryDownloaderRetryMissesDoNotEndTheScanWindow(t *testing.T) {
+	retrySlots := []uint64{90, 300, 150, 200, 120}
+	blocks, peer := endpointBlocks(t, append(slices.Clone(retrySlots), 60)...)
+	scanned := blocks[len(blocks)-1]
+	url, requests := blobEndpoint(t, scanned)
+	reader := &boundaryBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{}}
+	for _, b := range blocks {
+		reader.blocks[b.block.Block.Slot] = b.block
+	}
+	downloader := newBoundaryDownloader(t, 300, 0, 0, reader)
+	downloader.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
+	downloader.rpc = peer
+	downloader.SetBlobEndpoints([]string{url}, 1)
+	for _, slot := range retrySlots {
+		downloader.addRetrySlot(slot)
+	}
+
+	require.NoError(t, downloader.retryFailedRecoveries(0, 0))
+	asked := requests.Load()
+	require.Equal(t, int32(len(retrySlots)), asked)
+	downloader.processBatch([]incompleteBlock{{block: scanned.block, root: scanned.root}})
+	require.Equal(t, asked+1, requests.Load(), "the scan still asks the endpoint below the retried slots")
 }
