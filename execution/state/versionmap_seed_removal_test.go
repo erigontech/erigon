@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -383,14 +384,21 @@ func TestSeedEmptyRemovals_DrainThenRefund(t *testing.T) {
 	require.Equal(t, uint64(1), acc.Nonce)
 }
 
-func TestHasEmptyBaseAccount(t *testing.T) {
+func TestHasAmbiguousBaseAccount(t *testing.T) {
 	t.Parallel()
 	addr := func(s string) accounts.Address { return accounts.InternAddress(common.HexToAddress(s)) }
-	empty, absent, funded := addr("0xe1"), addr("0xa1"), addr("0xf1")
+	empty, absent, funded, storageHolder, contract := addr("0xe1"), addr("0xa1"), addr("0xf1"), addr("0x51"), addr("0xc1")
 	emptyAcc, systemAcc, fundedAcc := accounts.NewAccount(), accounts.NewAccount(), accounts.NewAccount()
 	fundedAcc.Balance = *uint256.NewInt(1)
+	storageHolderAcc := fundedAcc
+	storageHolderAcc.Incarnation = FirstContractIncarnation
+	contractAcc := storageHolderAcc
+	contractAcc.CodeHash = accounts.InternCodeHash(common.HexToHash("0xc0de"))
+	codeless := addr("0xec")
+	codelessAcc := storageHolderAcc
+	codelessAcc.Nonce = 1
 	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{
-		empty: &emptyAcc, params.SystemAddress: &systemAcc, funded: &fundedAcc,
+		empty: &emptyAcc, params.SystemAddress: &systemAcc, funded: &fundedAcc, storageHolder: &storageHolderAcc, contract: &contractAcc, codeless: &codelessAcc,
 	}}
 	listed := func(a accounts.Address) types.AccountChanges { return types.AccountChanges{Address: a.Value()} }
 	changed := listed(empty)
@@ -407,8 +415,12 @@ func TestHasEmptyBaseAccount(t *testing.T) {
 		{"before EIP-161", false, false, types.BlockAccessList{listed(empty)}, false},
 		{"Aura system address", true, true, types.BlockAccessList{listed(params.SystemAddress)}, false},
 		{"system address", true, false, types.BlockAccessList{listed(params.SystemAddress)}, true},
+		{"no nonce and no code with a contract incarnation", true, false, types.BlockAccessList{listed(storageHolder)}, true},
+		{"contract with no nonce", true, false, types.BlockAccessList{listed(contract)}, false},
+		{"before EIP-161, no nonce and no code with a contract incarnation", false, false, types.BlockAccessList{listed(storageHolder)}, true},
+		{"a nonce and no code with a contract incarnation", true, false, types.BlockAccessList{listed(codeless)}, false},
 	} {
-		got, err := NewVersionMap(tc.bal).HasEmptyBaseAccount(tc.eip161, tc.aura, reader)
+		got, err := NewVersionMap(tc.bal).HasAmbiguousBaseAccount(tc.eip161, tc.aura, reader)
 		require.NoError(t, err)
 		require.Equal(t, tc.want, got, tc.name)
 	}
@@ -431,6 +443,186 @@ func TestSeededRemovalAtMarkerIndexStaysAbsent(t *testing.T) {
 	ibs := NewWithVersionMap(reader, vm)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 1)
+	exists, err := ibs.Exist(x)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+// seededRemovalOfPrefundedAccount returns a version map seeded with the access list of a block in
+// which tx 0 creates and destroys the prefunded x and tx 1 re-creates it.
+func seededRemovalOfPrefundedAccount(t *testing.T) (accounts.Address, *accountStateReader, *VersionMap) {
+	t.Helper()
+	x := accounts.InternAddress(common.HexToAddress("0x5a1e"))
+	baseAcc := accounts.NewAccount()
+	baseAcc.Balance = *uint256.NewInt(5)
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &baseAcc}}
+	vm := NewVersionMap(types.BlockAccessList{{
+		Address:        x.Value(),
+		BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}},
+		NonceChanges:   []*types.NonceChange{{Index: 2, Value: 1}},
+		CodeChanges:    []*types.CodeChange{{Index: 2, Bytecode: []byte{0x00}}},
+	}})
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+	return x, reader, vm
+}
+
+// redestruct puts the seeded destruct of x at txIdx back in flight, as the runs of the destroying
+// tx can: the first run keeps the seed, the second drops the destruct (the flush deletes its
+// cell), and the third writes it again.
+func redestruct(vm *VersionMap, x accounts.Address, txIdx int) *WriteSet {
+	var removal *WriteSet
+	for _, inc := range []Incarnation{0, 2} {
+		if inc > 0 {
+			vm.Delete(x, SelfDestructPath, accounts.NilKey, txIdx, false)
+		}
+		removal = &WriteSet{}
+		removal.SetContractRemoval(x, Version{TxIndex: txIdx, Incarnation: inc})
+		vm.FlushVersionedWrites(removal, false)
+	}
+	return removal
+}
+
+// The destroying tx's in-flight flush of the removal the access list seeded keeps the seed
+// Done, so a later tx that reads the account does not wait for the destroying tx.
+func TestInFlightFlushOfTheSeededRemovalKeepsItDone(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		remove func(*WriteSet, accounts.Address, Version)
+	}{
+		{"contract removal", (*WriteSet).SetContractRemoval},
+		{"empty removal", (*WriteSet).SetEmptyRemoval},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			x, reader, vm := seededRemovalOfPrefundedAccount(t)
+			removal := &WriteSet{}
+			tc.remove(removal, x, Version{TxIndex: 0, Incarnation: 1})
+			vm.FlushVersionedWrites(removal, false)
+			_, res, _ := vm.ReadSelfDestruct(x, 1)
+			require.Equal(t, MVReadResultDone, res.Status())
+			_, res, _ = vm.ReadBalance(x, 1)
+			require.Equal(t, MVReadResultDone, res.Status())
+
+			ibs := NewWithVersionMap(reader, vm)
+			defer ibs.Close()
+			ibs.SetTxContext(1, 1)
+			exists, err := ibs.Exist(x)
+			require.NoError(t, err)
+			require.False(t, ibs.HadInvalidRead(), "tx 1 waits for tx %d", ibs.DepTxIndex())
+			require.False(t, exists)
+
+			vm.MarkWritesValidated(removal, nil)
+			vm.MarkWritesComplete(removal)
+			require.Equal(t, VersionValid, validateReads(vm, ibs, 1))
+		})
+	}
+}
+
+// Only a seeded destruct keeps its version: the same destruct over a validated one that an
+// earlier run of the tx left is a new version.
+func TestReflushedDestructOfAnEarlierRunTakesTheNewVersion(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress(common.HexToAddress("0x5a1e"))
+	other := accounts.InternAddress(common.HexToAddress("0x07e5"))
+	vm := NewVersionMap(types.BlockAccessList{{Address: other.Value(), NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}}}})
+	run0 := &WriteSet{}
+	run0.SetEmptyRemoval(x, Version{TxIndex: 0})
+	vm.FlushVersionedWrites(run0, false)
+	vm.MarkWritesValidated(run0, nil)
+
+	run1 := &WriteSet{}
+	run1.SetEmptyRemoval(x, Version{TxIndex: 0, Incarnation: 1})
+	vm.FlushVersionedWrites(run1, false)
+	vm.MarkWritesComplete(run1)
+	_, res, _ := vm.ReadSelfDestruct(x, 1)
+	require.Equal(t, Incarnation(1), res.Incarnation())
+}
+
+// Tx 0 creates and destroys the prefunded x, tx 1 re-creates it. Tx 1 reads x while the
+// removal is still the seeded Done cell, and the destruct goes back in flight before tx 1 asks
+// for the account: x must stay absent, so the re-creation pays for a new account. Validation
+// rejects the attempt, as the seed it read is replaced.
+func TestDestructObservedBeforeItsInFlightFlushKeepsTheAccountAbsent(t *testing.T) {
+	t.Parallel()
+	x, reader, vm := seededRemovalOfPrefundedAccount(t)
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	balance, err := ibs.GetBalance(x)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero())
+
+	removal := redestruct(vm, x, 0)
+
+	empty, err := ibs.Empty(x)
+	require.NoError(t, err)
+	require.True(t, empty)
+	exists, err := ibs.Exist(x)
+	require.NoError(t, err)
+	require.False(t, exists)
+
+	vm.MarkWritesValidated(removal, nil)
+	require.Equal(t, VersionInvalid, validateReads(vm, ibs, 1))
+}
+
+// As above, but tx 1 credits x in the window: the credit creates a fresh account instead of
+// reloading the pre-block one.
+func TestCreditAfterObservedDestructCreatesAFreshAccount(t *testing.T) {
+	t.Parallel()
+	x, reader, vm := seededRemovalOfPrefundedAccount(t)
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	_, err := ibs.GetBalance(x)
+	require.NoError(t, err)
+
+	redestruct(vm, x, 0)
+
+	require.NoError(t, ibs.AddBalance(x, *uint256.NewInt(1), tracing.BalanceChangeTransfer))
+	balance, err := ibs.GetBalance(x)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(1), balance)
+}
+
+// As above, but tx 1 funds x again between two destructs, so its account cell lies below the
+// destruct of tx 2 that tx 3 reads; it is not a re-creation by the destroying tx.
+func TestRepeatedDestructObservedBeforeItsInFlightFlushKeepsTheAccountAbsent(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress(common.HexToAddress("0x5a1f"))
+	baseAcc := accounts.NewAccount()
+	baseAcc.Balance = *uint256.NewInt(5)
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &baseAcc}}
+	bal := types.BlockAccessList{{
+		Address: x.Value(),
+		BalanceChanges: []*types.BalanceChange{
+			{Index: 1, Value: uint256.Int{}},
+			{Index: 2, Value: *uint256.NewInt(1)},
+			{Index: 3, Value: uint256.Int{}},
+		},
+		NonceChanges: []*types.NonceChange{{Index: 4, Value: 1}},
+		CodeChanges:  []*types.CodeChange{{Index: 4, Bytecode: []byte{0x00}}},
+	}}
+	vm := NewVersionMap(bal)
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+	funded := accounts.NewAccount()
+	funded.Balance = *uint256.NewInt(1)
+	vm.WriteAddress(x, Version{TxIndex: 1}, &funded, true)
+
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 3)
+	balance, err := ibs.GetBalance(x)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero())
+
+	redestruct(vm, x, 2)
+
+	empty, err := ibs.Empty(x)
+	require.NoError(t, err)
+	require.True(t, empty)
 	exists, err := ibs.Exist(x)
 	require.NoError(t, err)
 	require.False(t, exists)

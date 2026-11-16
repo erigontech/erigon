@@ -151,13 +151,16 @@ jobs:
             | python3 -c 'import json, sys; print(next(e["total_bytes"] for e in json.load(sys.stdin)["estimates"] if e["mode"] == sys.argv[1]))' "$MODE")
           echo "Disk usage for $CHAIN $MODE: ${BYTES} bytes"
           echo "$BYTES" > "$GITHUB_WORKSPACE/disk-usage-$CHAIN-$MODE.txt"
+          echo "seg-du" > "$GITHUB_WORKSPACE/disk-usage-$CHAIN-$MODE.method"
 
       - name: Upload disk usage
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: disk-usage-${{ env.CHAIN }}-${{ env.MODE }}
-          path: ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-${{ env.MODE }}.txt
+          path: |
+            ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-${{ env.MODE }}.txt
+            ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-${{ env.MODE }}.method
 
       # Restart the datadir just synced as a *minimal* node. EnsureNotChanged accepts
       # the switch because full and minimal differ only in the size of finite

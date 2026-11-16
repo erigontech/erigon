@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -832,10 +831,11 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	var traces []*TraceCallResult
-	var cmErr error
-	if isHistoricalStateReader && !hasStateDiff && !hasVmTrace && len(txs) > 1 {
+	cmErr := errNoReplayReadTx
+	if isHistoricalStateReader && !hasStateDiff && !hasVmTrace && len(txs) > 1 && !api.remoteBlocks {
 		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
-	} else {
+	}
+	if errors.Is(cmErr, errNoReplayReadTx) {
 		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
 			header, true /* requireCanonical */, gasBailOut /* gasBailout */, true /* advanceTxNum */, false /* noBaseFee */, traceConfig, nil /* overrides */)
 	}
@@ -886,19 +886,8 @@ func (api *TraceAPIImpl) callBlock(
 	return traces, wdiffs, nil
 }
 
-type blockTraceTxJob struct {
-	txIndex   int
-	txn       types.Transaction
-	msg       *types.Message
-	callParam TraceCallParam
-}
-
-// doCallBlockParallel traces all transactions in a block concurrently using a
-// worker pool of size min(GOMAXPROCS, len(txns)).  Each worker opens its own
-// read-only temporal transaction so that the underlying MDBX transaction is
-// never accessed from more than one goroutine.  Because the temporal DB stores
-// the exact pre-state for every txNum, each transaction can be replayed
-// independently without conflict detection or state forwarding.
+// doCallBlockParallel traces all transactions in a block concurrently, each on the
+// history state before it.
 //
 // Preconditions (checked by the caller):
 //   - stateReader is a HistoricalStateReader (historical block, not latest)
@@ -930,116 +919,71 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 	results := make([]*TraceCallResult, len(txns))
 
-	// Cap at 32 to bound memory from concurrent IntraBlockState instances and
-	// MDBX read transactions even on high-core-count machines.
-	const maxParallelWorkers = 32
-	numWorkers := min(runtime.GOMAXPROCS(0), len(txns), maxParallelWorkers)
+	replay, err := replayTxnsParallel(ctx, api.kv, dbtx, header.Number.Uint64(), baseTxNum, len(txns), replayWorkerCount(runtime.GOMAXPROCS(0), len(txns)), len(txns), func(_ context.Context, workerTx kv.TemporalTx) (func(int) error, error) {
+		// blockCtx captures workerTx in its GetHash closure, so it cannot
+		// be shared across workers (each needs its own copy).
+		blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)
+		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
+			return nil, err
+		}
+		chainRules := blockCtx.Rules(chainConfig)
+		oeConfig, err := parseOeTracerConfig(traceConfig)
+		if err != nil {
+			return nil, err
+		}
 
-	// Pre-fill a buffered channel so the main goroutine never blocks.
-	jobs := make(chan blockTraceTxJob, len(txns))
-	for txIndex, msg := range msgs {
-		jobs <- blockTraceTxJob{txIndex: txIndex, txn: txns[txIndex], msg: msg, callParam: callParams[txIndex]}
-	}
-	close(jobs)
+		return func(txIndex int) error {
+			msg := msgs[txIndex]
+			workerIbs := state.New(state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(txIndex)))
+			defer workerIbs.Close()
+			transactions.VersionedCallState(workerIbs)
 
-	g, ctx := errgroup.WithContext(ctx)
+			traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: callParams[txIndex].txHash}
 
-	for range numWorkers {
-		g.Go(func() error {
-			workerTx, err := api.kv.BeginTemporalRo(ctx)
-			if err != nil {
+			var ot OeTracer
+			ot.config = oeConfig
+			ot.compat = api.compatibility
+			ot.r = traceResult
+			// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
+			ot.traceAddr = []int{}
+
+			tracer := ot.Tracer()
+			vmConfig := vm.Config{Tracer: tracer.Hooks}
+
+			workerIbs.SetTxContext(blockCtx.BlockNumber, txIndex)
+			workerIbs.SetHooks(tracer.Hooks)
+
+			txCtx := protocol.NewEVMTxContext(msg)
+			evm := vm.NewEVM(blockCtx, txCtx, workerIbs, chainConfig, vmConfig)
+			gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+
+			if tracer.Hooks.OnTxStart != nil {
+				tracer.Hooks.OnTxStart(evm.GetVMContext(), txns[txIndex], msg.From())
+			}
+
+			execResult, execErr := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout, engine)
+			if execErr != nil {
+				tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, execErr)
+				return fmt.Errorf("txIndex %d: %w", txIndex, execErr)
+			}
+
+			if tracer.Hooks.HasTxEndHook() {
+				tracer.Hooks.EmitTxEnd(execResult.ReceiptForTracing(), execResult.TxnGasUsage, nil)
+			}
+
+			if err := ethapi.FinalizeCallTx(workerIbs, chainRules); err != nil {
 				return err
 			}
-			defer workerTx.Rollback()
 
-			// Workers pin their own history view. Check the first replay position
-			// here; all jobs in this block read at or after it.
-			startTxNum, err := state.StateHistoryStartTxNum(workerTx)
-			if err != nil {
-				return err
-			}
-			if baseTxNum < startTxNum {
-				return fmt.Errorf("%w: requested block %d, history is available from txNum %d", state.ErrPruned, header.Number.Uint64(), startTxNum)
-			}
-
-			// Per-worker constants: same for every job this worker processes.
-			// blockCtx captures workerTx in its GetHash closure, so it cannot
-			// be shared across workers (each needs its own copy).
-			blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)
-			if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
-				return err
-			}
-			chainRules := blockCtx.Rules(chainConfig)
-			oeConfig, err := parseOeTracerConfig(traceConfig)
-			if err != nil {
-				return err
-			}
-
-			// traceTxnJob traces one job's transaction, closing its state on every
-			// exit path. A non-nil error aborts this worker and cancels the rest.
-			traceTxnJob := func(job blockTraceTxJob) error {
-				// Copy is needed since each worker has its own independent state.
-				// workerReader reads state up to but not including the current transaction.
-				workerReader := state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(job.txIndex))
-				workerIbs := state.New(workerReader)
-				defer workerIbs.Close()
-				transactions.VersionedCallState(workerIbs)
-
-				traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: job.callParam.txHash}
-
-				var ot OeTracer
-				ot.config = oeConfig
-				ot.compat = api.compatibility
-				ot.r = traceResult
-				// TraceTypeTrace is always active here; initialise traceAddr unconditionally.
-				ot.traceAddr = []int{}
-
-				tracer := ot.Tracer()
-				vmConfig := vm.Config{Tracer: tracer.Hooks}
-
-				workerIbs.SetTxContext(blockCtx.BlockNumber, job.txIndex)
-				workerIbs.SetHooks(tracer.Hooks)
-
-				txCtx := protocol.NewEVMTxContext(job.msg)
-				evm := vm.NewEVM(blockCtx, txCtx, workerIbs, chainConfig, vmConfig)
-				gp := new(protocol.GasPool).AddGas(job.msg.Gas()).AddBlobGas(job.msg.BlobGas())
-
-				if tracer.Hooks.OnTxStart != nil {
-					tracer.Hooks.OnTxStart(evm.GetVMContext(), job.txn, job.msg.From())
-				}
-
-				execResult, execErr := protocol.ApplyMessage(evm, job.msg, gp, true /* refunds */, gasBailout, engine)
-				if execErr != nil {
-					tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, execErr)
-					return fmt.Errorf("txIndex %d: %w", job.txIndex, execErr)
-				}
-
-				if tracer.Hooks.HasTxEndHook() {
-					tracer.Hooks.EmitTxEnd(execResult.ReceiptForTracing(), execResult.TxnGasUsage, nil)
-				}
-
-				if err := ethapi.FinalizeCallTx(workerIbs, chainRules); err != nil {
-					return err
-				}
-
-				traceResult.Output = bytes.Clone(execResult.ReturnData)
-				results[job.txIndex] = traceResult
-				return nil
-			}
-
-			for job := range jobs {
-				if err := common.Stopped(ctx.Done()); err != nil {
-					return err
-				}
-				if err := traceTxnJob(job); err != nil {
-					return err
-				}
-			}
+			traceResult.Output = bytes.Clone(execResult.ReturnData)
+			results[txIndex] = traceResult
 			return nil
-		})
+		}, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	if err := g.Wait(); err != nil {
+	if err := replay.Wait(); err != nil {
 		return nil, err
 	}
 	return results, nil

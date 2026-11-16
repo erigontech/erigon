@@ -103,7 +103,7 @@ const (
 const (
 	minPayloadPollingWindow     = 100 * time.Millisecond
 	builderHandoffRetryInterval = 500 * time.Millisecond
-	// A published block is normally imported within one block service tick (50 ms) plus OnBlock; the bound caps how
+	// A published block is normally imported as soon as the block service is woken for it, plus OnBlock; the bound caps how
 	// long a stalled store can delay the block's data columns and a publish response without the integration wait.
 	publishedBlockStoreWaitBeforeColumns = time.Second
 )
@@ -1235,7 +1235,7 @@ func (a *ApiHandler) produceBlock(
 		ParentRoot:    baseBlockRoot,
 		Cfg:           a.beaconChainCfg,
 	}
-	if builderHeader == nil || !a.routerCfg.Builder || builderErr != nil || stateVersion.AfterOrEqual(clparams.GloasVersion) {
+	if builderHeader == nil || !a.builderRelayEnabled() || builderErr != nil || stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		// Gloas compares P2P and configured builder bids against the local value.
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 			selfBid := beaconBody.SignedExecutionPayloadBid.Message
@@ -1665,7 +1665,7 @@ func (a *ApiHandler) getBuilderPayload(
 	baseState *state.CachingBeaconState,
 	targetSlot uint64,
 ) (*builder.ExecutionHeader, *big.Int, error) {
-	if !a.routerCfg.Builder || a.builderClient == nil {
+	if !a.builderRelayEnabled() {
 		return nil, nil, errBuilderNotEnabled
 	}
 
