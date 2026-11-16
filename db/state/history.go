@@ -1089,7 +1089,7 @@ func (ht *HistoryRoTx) checkFilesDBGap(tx kv.Tx) error {
 		return err
 	}
 	if end := min(contiguousEnd(ht.files), contiguousEnd(ht.iit.files)); prg.TxTo > end {
-		return fmt.Errorf("gap between snapshot files and DB for history %s: readable files end at txNum %d but the DB was pruned up to %d; run `erigon snapshots reset --datadir <datadir>` to reset and rebuild the datadir", ht.h.FilenameBase, end, prg.TxTo)
+		return fmt.Errorf("gap between snapshot files and DB for history %s: readable files end at txNum %d but the DB was pruned up to %d; if only accessor files are missing, run `erigon snapshots index --datadir <datadir>` to rebuild them, otherwise run `erigon snapshots reset --datadir <datadir>` to reset and rebuild the datadir", ht.h.FilenameBase, end, prg.TxTo)
 	}
 	return nil
 }
