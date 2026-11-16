@@ -898,6 +898,29 @@ func TestComposerSettlementLeftL1(t *testing.T) {
 	}
 }
 
+// TestComposerRejudgesFromTheBlockScan: a settlement derivation has yet to
+// see is judged again from the scan of its block, which shows the entries its
+// triggers applied after the posting's own logs.
+func TestComposerRejudgesFromTheBlockScan(t *testing.T) {
+	chain := newTestChain(t, 12)
+	terminal := chain.blocks[8].Hash()
+	node := newLanding(t, terminal)
+	h := newHarness(t, chain, 12, node)
+	h.c.observer.Scan = func(context.Context, uint64) ([]l1.ScannedBatch, error) {
+		h.poster.mu.Lock()
+		defer h.poster.mu.Unlock()
+		return []l1.ScannedBatch{{TxHash: h.poster.txs[0].Hash(), Settlement: protocol.Settlement{Applied: []protocol.AppliedEntry{{}}, FinalState: terminal}}}, nil
+	}
+	h.slot(t, 8, 50, sequencer.ModeSteady)
+	require.Eventually(t, func() bool { r, _ := h.resolution(8); return r == Settled }, 5*time.Second, time.Millisecond)
+	posted := func() *l1.Receipt { return receipt(1, batchPosted(t, eezL1)) }
+	node.again.Store(&posted)
+	h.c.RecoverFailed(t.Context())
+	r, ok := h.resolution(8)
+	require.True(t, ok)
+	require.Equal(t, Settled, r, "the posting's own logs show no settlement, its block's scan does")
+}
+
 // TestComposerSettlementBackInThePool: a settlement whose posting an L1 reorg
 // returned to the node's pool holds the gate, its nonce taken, until it
 // lands again.

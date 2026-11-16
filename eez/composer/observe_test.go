@@ -285,3 +285,53 @@ func TestWatch(t *testing.T) {
 		require.Equal(t, Pending, got)
 	})
 }
+
+// TestWatchScansTheBlock: with a scanner, a posting's settlement is read
+// from its whole block, where the triggers that consume its entries log.
+func TestWatchScansTheBlock(t *testing.T) {
+	b, terminal := anchorBatch(t)
+	posting := common.Hash{1}
+	landed := receipt(1, batchPosted(t, eezL1))
+	for _, c := range []struct {
+		name    string
+		scanned []l1.ScannedBatch
+		failed  error
+		want    Resolution
+	}{
+		{"settled by its triggers", []l1.ScannedBatch{{TxHash: posting, Settlement: protocol.Settlement{Applied: []protocol.AppliedEntry{{}}, FinalState: terminal}}}, nil, Settled},
+		{"part of it", []l1.ScannedBatch{{TxHash: posting, Settlement: protocol.Settlement{Applied: []protocol.AppliedEntry{{}}, FinalState: common.Hash{7}}}}, nil, SettledPartial},
+		{"another posting's", []l1.ScannedBatch{{TxHash: common.Hash{2}, Settlement: protocol.Settlement{Applied: []protocol.AppliedEntry{{}}, FinalState: terminal}}}, nil, Failed},
+		{"nothing applied", nil, nil, Failed},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var asked []uint64
+			o := &Observer{
+				Node: &scripted{head: 100, got: landed}, RollupID: 1, EEZ: eezL1, Every: time.Millisecond, Logger: log.New(),
+				Scan: func(_ context.Context, block uint64) ([]l1.ScannedBatch, error) {
+					asked = append(asked, block)
+					return c.scanned, nil
+				},
+			}
+			got, err := o.Watch(t.Context(), posting, b, terminal, post.Sent{Block: 101})
+			require.NoError(t, err)
+			require.Equal(t, c.want, got)
+			require.Equal(t, []uint64{landed.BlockNumber}, asked)
+		})
+	}
+	t.Run("a failed scan is no verdict", func(t *testing.T) {
+		scans := 0
+		o := &Observer{
+			Node: &scripted{head: 100, got: landed}, RollupID: 1, EEZ: eezL1, Every: time.Millisecond, Logger: log.New(),
+			Scan: func(context.Context, uint64) ([]l1.ScannedBatch, error) {
+				if scans++; scans < 3 {
+					return nil, errors.New("node down")
+				}
+				return []l1.ScannedBatch{{TxHash: posting, Settlement: protocol.Settlement{Applied: []protocol.AppliedEntry{{}}, FinalState: terminal}}}, nil
+			},
+		}
+		got, err := o.Watch(t.Context(), posting, b, terminal, post.Sent{Block: 101})
+		require.NoError(t, err)
+		require.Equal(t, Settled, got)
+		require.Equal(t, 3, scans)
+	})
+}

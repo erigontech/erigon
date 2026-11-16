@@ -567,9 +567,11 @@ func (c *Composer) settle(ctx context.Context) uint64 {
 		case err != nil:
 		case r == nil:
 			c.rewatch(p)
-		case c.observer.judge(r, p.Batch, p.Terminal.Hash()) == Failed && c.ledger.Unsettle(p.Height, p.Post):
-			c.logger.Warn("[eez] settled batch's posting is on L1 again without the settlement", "event", "eez.composer.batch.unsettled",
-				"to", p.Height, "post", p.Post)
+		default:
+			if v, ok := c.observer.verdict(rctx, r, p.Post, p.Batch, p.Terminal.Hash()); ok && v == Failed && c.ledger.Unsettle(p.Height, p.Post) {
+				c.logger.Warn("[eez] settled batch's posting is on L1 again without the settlement", "event", "eez.composer.batch.unsettled",
+					"to", p.Height, "post", p.Post)
+			}
 		}
 	}
 	c.ledger.ResolveBelowCursor(cursor)
