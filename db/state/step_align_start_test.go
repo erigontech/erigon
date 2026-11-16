@@ -118,7 +118,14 @@ func TestStepAlignedEndRefusesFilesPastAHole(t *testing.T) {
 		generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 4}, {4, 8}, {8, 12}})
 		require.NoError(t, agg.OpenFolder(db))
 		_, err := agg.StepAlignedEnd(20)
-		require.ErrorContains(t, err, "past a hole at txNum 40")
+		require.ErrorContains(t, err, "reaches past txNum 40")
+	})
+	t.Run("partially overlapping index files", func(t *testing.T) {
+		db, agg := testDbAndAggregatorv3(t, 10)
+		generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), []testFileRange{{0, 2}, {1, 3}})
+		require.NoError(t, agg.OpenFolder(db))
+		_, err := agg.StepAlignedEnd(20)
+		require.ErrorContains(t, err, "logaddrs snapshot [10,30) reaches past txNum 20")
 	})
 	t.Run("missing history file", func(t *testing.T) {
 		db, agg := testDbAndAggregatorv3(t, 10)
@@ -128,7 +135,7 @@ func TestStepAlignedEndRefusesFilesPastAHole(t *testing.T) {
 		require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.2-4.v")))
 		require.NoError(t, agg.OpenFolder(db))
 		_, err := agg.StepAlignedEnd(20)
-		require.ErrorContains(t, err, "past a hole at txNum 20")
+		require.ErrorContains(t, err, "reaches past txNum 20")
 	})
 }
 
