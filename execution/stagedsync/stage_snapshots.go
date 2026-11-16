@@ -482,16 +482,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// Plain assignment: the deferred stopReporter reads this variable, and a
 	// := here would shadow it and silently disable the handoff pin.
 	commitBlock = readCommitmentBlockFromDB(ctx, cfg.db)
-	if commitBlock > 0 {
-		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
-		if err != nil {
-			return fmt.Errorf("get Execution stage progress: %w", err)
-		}
-		if execProgress < commitBlock {
-			if err := stages.SaveStageProgress(tx, stages.Execution, commitBlock); err != nil {
-				return fmt.Errorf("advance Execution stage to snapshot commitment block: %w", err)
-			}
-		}
+	if err := cfg.advanceExecutionToSnapshot(tx, commitBlock); err != nil {
+		return err
 	}
 
 	{
@@ -504,6 +496,25 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		})
 	}
 
+	return nil
+}
+
+func (me *SnapshotsCfg) advanceExecutionToSnapshot(tx kv.RwTx, commitBlock uint64) error {
+	if commitBlock == 0 {
+		return nil
+	}
+	execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return fmt.Errorf("get Execution stage progress: %w", err)
+	}
+	if execProgress >= commitBlock {
+		return nil
+	}
+	if err := stages.SaveStageProgress(tx, stages.Execution, commitBlock); err != nil {
+		return fmt.Errorf("advance Execution stage to snapshot commitment block: %w", err)
+	}
+	// Installing snapshot state bypasses execution and its change notifications.
+	me.notifier.Accumulator.MarkIncomplete()
 	return nil
 }
 

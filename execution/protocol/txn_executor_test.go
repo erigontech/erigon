@@ -809,7 +809,7 @@ func TestEIP8037IntrinsicGasCapWithoutCheckGas(t *testing.T) {
 				msg.SetSkipExecutionGasCap(skipExecutionGasCap)
 				gp := NewGasPool(gasLimit, 0)
 				executor := NewTxnExecutor(newTestEVM(ibs, chain.AllProtocolChanges, gasLimit), msg, gp)
-				intrinsic, overflow := executor.calcIntrinsicGas(false, nil, test.accessList)
+				intrinsic, overflow := intrinsicGas(msg, executor.evm.ChainRules(), false)
 				require.False(t, overflow)
 				require.Equal(t, test.wantErr, max(intrinsic.ExecutionGas, intrinsic.FloorGasCost) > params.MaxTxnGasLimit)
 
@@ -1853,4 +1853,33 @@ func TestApplyTransactionTxEndSeesTxWrites(t *testing.T) {
 			require.Equal(t, uint64(1), nonce)
 		})
 	}
+}
+
+// A precompile frame that cannot pay the precompile gas fails and reverts the transfer, so the
+// call writes nothing to the recipient.
+func TestPrecompileCallRunsOutOfGas(t *testing.T) {
+	rules := &chain.Rules{IsHomestead: true, IsIstanbul: true, IsBerlin: true, IsPrague: true, IsOsaka: true}
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	ecrecover := accounts.InternAddress(common.BytesToAddress([]byte{1}))
+	plain := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	call := func(to accounts.Address, gas uint64) Message {
+		return types.NewMessage(sender, to, 0, uint256.NewInt(1), gas, uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+			nil, nil, false, false, true, false, nil)
+	}
+	require.True(t, PrecompileCallRunsOutOfGas(call(ecrecover, params.TxGas), rules))
+	require.True(t, PrecompileCallRunsOutOfGas(call(ecrecover, params.TxGas+params.EcrecoverGas-1), rules))
+	require.False(t, PrecompileCallRunsOutOfGas(call(ecrecover, params.TxGas+params.EcrecoverGas), rules))
+	require.False(t, PrecompileCallRunsOutOfGas(call(plain, params.TxGas), rules))
+
+	sha256 := accounts.InternAddress(common.BytesToAddress([]byte{2}))
+	words := make([]byte, 64)
+	hash := func(gas uint64) Message {
+		return types.NewMessage(sender, sha256, 0, uint256.NewInt(1), gas, uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+			words, nil, false, false, true, false, nil)
+	}
+	// From Prague the calldata floor leaves execution more gas than this precompile price, so the boundary needs earlier rules.
+	beforeFloor := &chain.Rules{IsHomestead: true, IsIstanbul: true, IsBerlin: true}
+	need := params.TxGas + uint64(len(words))*params.TxDataZeroGas + params.Sha256BaseGas + 2*params.Sha256PerWordGas
+	require.True(t, PrecompileCallRunsOutOfGas(hash(need-1), beforeFloor), "the per-word price counts")
+	require.False(t, PrecompileCallRunsOutOfGas(hash(need), beforeFloor))
 }

@@ -943,6 +943,7 @@ func TestComputedReceiptsNeedCommitmentHistory(t *testing.T) {
 	}{
 		{"block_start", 8, 0, true, 8},
 		{"inside_block", 8, 1, true, 9},
+		{"inside_genesis", 0, 1, true, 0},
 		{"beyond_byzantium", pruneGatingByzantiumHeight + 1, 0, true, pruneGatingByzantiumHeight},
 		{"not_retired", 0, 0, true, 0},
 		{"disabled", 8, 1, false, 0},
@@ -1004,6 +1005,46 @@ func TestComputedReceiptsNeedCommitmentHistory(t *testing.T) {
 			require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, view, pruneGatingByzantiumHeight))
 		})
 	}
+}
+
+// TestGenesisReceiptsWithCommitmentHistory pins the receipt endpoints at genesis when
+// commitment history starts at the genesis write, inside block 0.
+func TestGenesisReceiptsWithCommitmentHistory(t *testing.T) {
+	t.Parallel()
+
+	mode := prune.ArchiveMode
+	mode.CommitmentHistory = prune.Distance(5)
+	apis, _ := setupPruneGating(t, pruneGatingConfig{
+		mode:        mode,
+		chainConfig: byzantiumChainConfig(pruneGatingByzantiumHeight),
+	})
+	ctx := t.Context()
+	rwTx, err := apis.rwDB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(rwTx, true))
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	genesisStart, err := apis.eth._txNumReader.Min(ctx, tx, 0)
+	require.NoError(t, err)
+	starts := map[kv.Domain]uint64{kv.CommitmentDomain: genesisStart + 1}
+	apis.eth.db = historyFloorDB{TemporalRoDB: apis.eth.db, starts: starts}
+	apis.debug.db = historyFloorDB{TemporalRoDB: apis.debug.db, starts: starts}
+
+	genesis := rpc.BlockNumberOrHashWithNumber(rpc.EarliestBlockNumber)
+
+	receipts, err := apis.eth.GetBlockReceipts(ctx, genesis)
+	require.NoError(t, err)
+	require.NotNil(t, receipts)
+	require.Empty(t, receipts)
+
+	raw, err := apis.debug.GetRawReceipts(ctx, genesis)
+	require.NoError(t, err)
+	require.NotNil(t, raw)
+	require.Empty(t, raw)
 }
 
 func TestLogsGateSkipsInitialSystemHistory(t *testing.T) {

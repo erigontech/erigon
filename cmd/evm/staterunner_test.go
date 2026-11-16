@@ -29,35 +29,16 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-func TestNewStateTestSharedDomainsUsesSelectedCommitment(t *testing.T) {
-	originalParallel := statecfg.ExperimentalParallelCommitment
-	t.Cleanup(func() {
-		statecfg.ExperimentalParallelCommitment = originalParallel
-	})
+func TestNewStateTestSharedDomainsUsesParallelCommitment(t *testing.T) {
+	db, tx := temporaltest.NewTestTx(t)
+	sd, err := newStateTestSharedDomains(db, tx)
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
 
-	for _, tc := range []struct {
-		name     string
-		parallel bool
-		variant  commitment.TrieVariant
-	}{
-		{name: "serial", variant: commitment.VariantHexPatriciaTrie},
-		{name: "parallel", parallel: true, variant: commitment.VariantParallelHexPatricia},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			statecfg.ExperimentalParallelCommitment = tc.parallel
-
-			db, tx := temporaltest.NewTestTx(t)
-			sd, err := newStateTestSharedDomains(db, tx)
-			require.NoError(t, err)
-			t.Cleanup(sd.Close)
-
-			require.Equal(t, tc.variant, sd.GetCommitmentCtx().Trie().Variant())
-		})
-	}
+	require.Equal(t, commitment.VariantParallelHexPatricia, sd.GetCommitmentCtx().Trie().Variant())
 }
 
 // Batch mode reuses one scratch DB for every file on stdin, so a subtest's

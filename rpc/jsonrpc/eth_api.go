@@ -173,6 +173,9 @@ type BaseAPI struct {
 	_blocksPruneFloor     pruneFloorCache[uint64]
 
 	_blockReader dbservices.FullBlockReader
+	// remoteBlocks is set when block lookups go to the backend over gRPC (rpcdaemon without
+	// --datadir): each one opens a backend read tx.
+	remoteBlocks bool
 	_txNumReader rawdbv3.TxNumsReader
 	_txnReader   dbservices.TxnReader
 	_engine      rules.EngineReader
@@ -220,6 +223,18 @@ func (api *BaseAPI) shareCodeByHash(ibs *state.IntraBlockState) {
 	}
 }
 
+// blockReaderWrapper is a block reader that wraps another one, such as the rpcdaemon's RemoteBackend.
+type blockReaderWrapper interface {
+	BlockReader() dbservices.FullBlockReader
+}
+
+func unwrapBlockReader(r dbservices.FullBlockReader) dbservices.FullBlockReader {
+	if w, ok := r.(blockReaderWrapper); ok {
+		return w.BlockReader()
+	}
+	return r
+}
+
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, conf *rpccfg.BaseApiConfig) *BaseAPI {
 	if conf == nil {
 		conf = &rpccfg.BaseApiConfig{}
@@ -249,6 +264,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		getLogsMaxResults: conf.GetLogsMaxResults,
 		logQueryLimit:     conf.LogQueryLimit,
 	}
+	_, api.remoteBlocks = unwrapBlockReader(blockReader).(*freezeblocks.RemoteBlockReader)
 	api._preMergeData.SetTTL(defaultPreMergeDataTTL)
 	api._preMergeUnsettledTTL = defaultUnsettledPreMergeTTL
 	return api
@@ -825,6 +841,11 @@ func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, h
 			replay:             head,
 		}, nil
 	}
+	// Genesis writes its state at a system txNum inside block 0, and nothing precedes
+	// it, so a history starting in block 0 is complete.
+	if containingBlock == 0 {
+		return historyPruneFloors{}, nil
+	}
 	blockStartTxNum, hasStart, err := api._txNumReader.MinExact(ctx, tx, nil, containingBlock)
 	if err != nil {
 		return historyPruneFloors{}, err
@@ -840,12 +861,12 @@ func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, h
 	}
 	if !hasStart || startTxNum > blockStartTxNum {
 		floors.wholeBlock = min(containingBlock+1, head)
-	} else if containingBlock > 0 {
+	} else {
 		floors.postState = containingBlock - 1
 	}
 	if !hasStart || startTxNum > blockStartTxNum+1 {
 		floors.replay = min(containingBlock+1, head)
-	} else if containingBlock > 0 {
+	} else {
 		floors.stateAfterSystemTx = containingBlock - 1
 	}
 	return floors, nil

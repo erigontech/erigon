@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
@@ -71,7 +72,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	require.NoError(b, err)
 	defer domains.Close()
 	domains.EnableParaTrieDB(db)
-	require.Equal(b, execctx.PickTrieVariant(), domains.GetCommitmentCtx().Trie().Variant())
+	require.Equal(b, commitment.VariantParallelHexPatricia, domains.GetCommitmentCtx().Trie().Variant())
 
 	b.ReportAllocs()
 
