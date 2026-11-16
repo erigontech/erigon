@@ -639,11 +639,12 @@ func (p *Progress) LogExecution(rs *state.StateV3, pe *parallelExecutor) {
 	mxTaskMgasSec.Set(float64(curTaskGasPerSec / 1e6))
 	mxExecCPUs.Set(float64(curTaskDur) / float64(interval))
 
-	execVals := []any{
+	execVals := make([]any, 0, 34)
+	execVals = append(execVals,
 		"exec", common.PrettyCounter(execDiff),
 		"repeat%", fmt.Sprintf("%.2f", repeatRatio),
 		"abort", common.PrettyCounter(curReruns[rerunAbort]),
-		"invalid", common.PrettyCounter(curReruns[rerunInvalid] + curReruns[rerunPoolInvalid]),
+		"invalid", common.PrettyCounter(curReruns[rerunInvalid]+curReruns[rerunPoolInvalid]),
 		"wasted", fmt.Sprintf("%v(%s)", common.Round(wasted, 0), strings.Join(wastedByReason, ",")),
 		"voidtail", common.Round(curVoidTail, 0).String(),
 		"tgas/s", common.PrettyCounter(curTaskGasPerSec),
@@ -657,7 +658,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, pe *parallelExecutor) {
 		"rd/s", common.PrettyCounter(curReadRate),
 		"wrt/s", common.PrettyCounter(curWriteRate),
 		"buf", fmt.Sprintf("%s/%s", common.ByteCount(uint64(sizeEstimate)), common.ByteCount(p.commitThreshold)),
-	}
+	)
 
 	mxExecRepeats.SetInt(repeats)
 	mxExecTriggers.SetInt(int(execCount))
