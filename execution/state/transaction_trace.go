@@ -38,8 +38,9 @@ type BalanceChange struct {
 	Before, After uint256.Int
 }
 
-// TransactionTrace exposes surviving transaction changes to POST_TX, including
-// payment escrow and nonce consumption, before final fee settlement.
+// TransactionTrace exposes net changes from transaction prestate to POST_TX,
+// including payment escrow and nonce consumption, before final fee settlement.
+// State tables are sorted by address (then key for storage); events keep emission order.
 type TransactionTrace struct {
 	Balances              []BalanceChange
 	Slots                 []StorageChange
@@ -174,6 +175,7 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 	for i, event := range trace.Events {
 		address := accounts.InternAddress(event.Address)
 		trace.EventIndicesByAddress[address] = append(trace.EventIndicesByAddress[address], i)
+		// Topic views exclude topic 0 and list each event once per matching topic.
 		for j := 1; j < len(event.Topics); j++ {
 			topic := event.Topics[j]
 			if !slices.Contains(event.Topics[1:j], topic) {

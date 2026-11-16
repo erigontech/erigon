@@ -292,16 +292,12 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, _ *chain.Rules) ([]*types.Log, error) {
 	timeout := api.OverlayGetLogsTimeout
-	// Setup context so it may be cancelled the call has completed
-	// or, in case of unmetered gas, setup a context with a timeout.
 	var cancel context.CancelFunc
 	if timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 	} else {
 		ctx, cancel = context.WithCancel(ctx)
 	}
-	// Make sure the context is cancelled when the call has completed
-	// this makes sure resources are cleaned up.
 	defer cancel()
 
 	tx, err := api.db.BeginTemporalRo(ctx)
@@ -504,8 +500,8 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		}
 	}
 
-	// Setup the gas pool (also for unmetered requests)
-	// and apply the message.
+	// Overrides may increase aggregate gas use, so the block gas pool is unrestricted.
+	// Each transaction still uses its original gas budgets.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	evm = vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chainConfig, vm.Config{})
 	storeEVM(evm)
@@ -543,8 +539,8 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
 
-		// Frame transactions can keep logs even if a frame fails. Rollback has
-		// already removed logs from reverted frames and atomic batches.
+		// Frame transactions can retain logs despite a failed frame. Execution has
+		// already removed logs from every reverted frame, batch or POST_TX body.
 		if res.Failed() && txn.Type() != types.FrameTxType {
 			log.Debug("[replayBlock] res result for transaction", "transactionHash", txn.Hash(), "failed", res.Failed(), "revert", res.Revert(), "error", res.Err)
 			log.Debug("[replayBlock] discarding txLogs because txn has status=failed", "transactionHash", txn.Hash())
