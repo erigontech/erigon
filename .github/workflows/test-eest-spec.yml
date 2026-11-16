@@ -65,6 +65,7 @@ jobs:
         run: make evm evm.race
 
       - uses: actions/upload-artifact@v7
+        if: ${{ !inputs.cache-warming-only }}
         with:
           name: evm-binaries
           path: build/bin

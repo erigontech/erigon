@@ -9,8 +9,8 @@ runs:
     # class (workflow|job|matrix) per ISO week, so a probe hit means an earlier
     # run already saved this week's entry and saving again is neither possible
     # nor useful. Two runs finishing at the same time can both miss the probe
-    # and race the save; the loser's reserve-conflict failure is swallowed
-    # below — a lost cache save only costs the next run a rebuild.
+    # and race the save; the loser's reserve-conflict failure is only a
+    # warning below — a lost cache save only costs the next run a rebuild.
     - name: Check for existing build cache entry
       id: gocache-probe
       if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_GOCACHE_PATH != '' && env.ERIGON_CI_GOCACHE_KEY != '' }}
@@ -27,6 +27,7 @@ runs:
       run: python3 tools/prune-gocache "$ERIGON_CI_GOCACHE_PATH"
 
     - uses: ./.github/actions/save-build-cache
+      id: gocache-save
       if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_GOCACHE_PATH != '' && env.ERIGON_CI_GOCACHE_KEY != '' && steps.gocache-probe.outputs.cache-hit != 'true' }}
       continue-on-error: true
       with:
@@ -44,11 +45,17 @@ runs:
         lookup-only: true
 
     - uses: ./.github/actions/save-mod-cache
+      id: modcache-save
       if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_MODCACHE_COMPLETE == 'true' && env.ERIGON_CI_MODCACHE != '' && env.ERIGON_CI_MODCACHE_KEY != '' && steps.modcache-probe.outputs.cache-hit != 'true' }}
       continue-on-error: true
       with:
         modcache-path: ${{ env.ERIGON_CI_MODCACHE }}
         key: ${{ env.ERIGON_CI_MODCACHE_KEY }}
+
+    - name: Warn on failed cache save
+      if: ${{ always() && (steps.gocache-save.outcome == 'failure' || steps.modcache-save.outcome == 'failure') }}
+      shell: bash
+      run: echo "::warning::Go cache save failed (gocache=${{ steps.gocache-save.outcome }}, modcache=${{ steps.modcache-save.outcome }})"
 
     - name: Report uncached test packages
       if: always()
