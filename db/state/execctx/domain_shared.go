@@ -1352,7 +1352,6 @@ type getLatestOptions struct {
 	codeHash    []byte
 	buf         []byte
 	hashFromMem bool
-	noFill      bool // decode the code into buf and leave the cache as it is
 }
 
 // getLatest is the read implementation. wm is the caller's lock-free
@@ -1453,9 +1452,9 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if useBranchCache && !sd.hasLocalCacheUnwind() {
 		getOpts = getOpts.WithBranchCache()
 	}
-	willFill := !opts.noFill && !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
+	willFill := !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
 	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
-	if fillsCode || opts.noFill {
+	if fillsCode {
 		getOpts = getOpts.WithBuf(opts.buf)
 	}
 
@@ -1632,7 +1631,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 }
 
 // codeForSegment returns the code of addr for a segment copy: the code-cache bytes on a hit, else a
-// decode into buf that does not fill the cache. ok is false when the in-memory batch holds the code
+// decode into buf that fills the cache. ok is false when the in-memory batch holds the code
 // or the account has none.
 func (sd *SharedDomains) codeForSegment(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, buf []byte, memo *accounts.Code) (code []byte, ok bool, err error) {
 	if tx == nil {
@@ -1649,7 +1648,7 @@ func (sd *SharedDomains) codeForSegment(tx kv.TemporalTx, view cache.ReadView, a
 		return memo.Bytes, true, nil
 	}
 	memo.Bytes = nil // a failed decode may leave buf half written
-	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf, noFill: true})
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf})
 	if err != nil || len(v) == 0 {
 		return nil, false, err
 	}

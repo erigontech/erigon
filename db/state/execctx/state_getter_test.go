@@ -175,7 +175,7 @@ func (tx codeBufTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOpt
 	return append(opts.Buf()[:0], tx.code[string(key)]...), 0, nil
 }
 
-// Identical code at many addresses is decoded once; any other read into the buffer ends the reuse.
+// Without a state cache, identical code at many addresses is decoded once; any other read into the buffer ends the reuse.
 func TestStateGetterCodeSegmentReusesTheLastDecode(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
@@ -192,12 +192,9 @@ func TestStateGetterCodeSegmentReusesTheLastDecode(t *testing.T) {
 	defer roTx.Rollback()
 	var bufCaps []int
 	tx := codeBufTx{TemporalTx: roTx, code: byAddr, bufCaps: &bufCaps}
-	sc := newSmallStateCache()
-	t.Cleanup(sc.Close)
 	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.BindStateCache(sc)
 	var buf []byte
 	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithCodeBuf(&buf))
 	segmentGetter := getter.(execctxapi.CodeSegmentGetter)
@@ -770,7 +767,7 @@ func TestAsOfGetterServesCommittedValueFromStateCache(t *testing.T) {
 	require.Equal(t, 1, tx.reads, "a value committed at txNum 5 is not the value as of 5")
 }
 
-func TestStateGetterCodeSegmentLeavesTheCacheEmpty(t *testing.T) {
+func TestStateGetterCodeSegmentFillsTheCodeCache(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
 	addr := make([]byte, 20)
@@ -805,8 +802,9 @@ func TestStateGetterCodeSegmentLeavesTheCacheEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, copied)
 	require.Equal(t, code, got)
-	_, cached := sc.View(nil).GetCodeByHash(codeHash[:])
-	require.False(t, cached, "a segment read must not fill the code cache")
+	cachedCode, cached := sc.View(nil).GetCodeByHash(codeHash[:])
+	require.True(t, cached, "a segment read that misses fills the code cache, like a whole-code read")
+	require.Equal(t, code, cachedCode)
 
 	got = make([]byte, len(code2))
 	copied, err = segmentGetter.ReadCodeSegmentTo(addr2, 5, 0, got)
@@ -815,10 +813,6 @@ func TestStateGetterCodeSegmentLeavesTheCacheEmpty(t *testing.T) {
 	require.Equal(t, code2, got)
 	require.GreaterOrEqual(t, bufCaps[1], len(code2), "the second segment read must decode into the grown buffer")
 
-	got, ok, err := getter.GetCode(addr, 5)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, code, got)
 	decodes := len(bufCaps)
 	got = make([]byte, len(code))
 	copied, err = segmentGetter.ReadCodeSegmentTo(addr, 5, 0, got)
