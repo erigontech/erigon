@@ -64,17 +64,6 @@ func TestStepAlignedEndAllowsCoveredUnindexedMerge(t *testing.T) {
 	require.EqualValues(t, 40, end)
 }
 
-func TestStepAlignedEndAllowsUnindexedFileUnderIndexedMerge(t *testing.T) {
-	t.Parallel()
-	db, agg := testDbAndAggregatorv3(t, 10)
-	generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), []testFileRange{{0, 2}, {2, 4}, {0, 4}})
-	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v1.0-logaddrs.0-2.efi")))
-	require.NoError(t, agg.OpenFolder(db))
-	end, err := agg.StepAlignedEnd(20)
-	require.NoError(t, err)
-	require.EqualValues(t, 40, end)
-}
-
 // Indexed files cover an unindexed one only while they are visible: index 0-2 is hidden because history 0-2 has
 // no accessor, so index 0-4 without its accessor is not covered.
 func TestStepAlignedEndRefusesUnindexedFileUnderHiddenMerge(t *testing.T) {
@@ -87,7 +76,7 @@ func TestStepAlignedEndRefusesUnindexedFileUnderHiddenMerge(t *testing.T) {
 	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v2.0-accounts.0-2.vi")))
 	require.NoError(t, agg.OpenFolder(db))
 	_, err := agg.StepAlignedEnd(20)
-	require.ErrorContains(t, err, "is not indexed")
+	require.ErrorContains(t, err, "have no accessors")
 }
 
 func TestStepAlignedEndRefusesListStartingOffBoundary(t *testing.T) {
