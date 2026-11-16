@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -36,8 +37,11 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/blockmetrics"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -45,6 +49,47 @@ import (
 type headerNumberErrorReader struct {
 	dbservices.FullBlockReader
 	err error
+}
+
+func TestBlockEndStateWithoutHistory(t *testing.T) {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		t.Run(domain.String(), func(t *testing.T) {
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			tx, err := db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+			require.NoError(t, err)
+			defer sd.Close()
+			sd.SetInMemHistoryReads(false)
+			changes := &changeset.StateChangeSet{}
+			sd.SetChangesetAccumulator(changes)
+			key := make([]byte, 20)
+			if domain == kv.StorageDomain {
+				key = make([]byte, 52)
+			}
+			sd.SetTxNum(1)
+			require.NoError(t, sd.DomainPut(domain, tx, key, []byte{1}, 1, nil))
+			sd.SetTxNum(2)
+			require.NoError(t, sd.DomainPut(domain, tx, key, []byte{2}, 2, []byte{1}))
+
+			copied, err := newBlockEndState(sd, changes, 3)
+			require.NoError(t, err)
+			value, ok, err := copied.GetAsOf(domain, key, 3)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Equal(t, []byte{2}, value)
+
+			sd.SetTxNum(3)
+			require.NoError(t, sd.DomainDel(domain, tx, key, 3, []byte{2}))
+			deleted, err := newBlockEndState(sd, changes, 4)
+			require.NoError(t, err)
+			value, ok, err = deleted.GetAsOf(domain, key, 4)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Empty(t, value)
+		})
+	}
 }
 
 func (r headerNumberErrorReader) HeaderNumber(context.Context, kv.Getter, common.Hash) (*uint64, error) {
@@ -64,6 +109,118 @@ type sideForkReader struct {
 	canonicalHash common.Hash
 	forkHeader    *types.Header
 	forkBody      *types.Body
+}
+
+// viewedBlock is a block the tests' databases and block readers do not hold until a test commits it.
+var viewedBlock = types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(1)}, nil)
+
+func (e *ExecModule) ModuleFree() bool {
+	if !e.semaphore.TryAcquire(1) {
+		return false
+	}
+	e.semaphore.Release(1)
+	return true
+}
+
+// The payload witness view runs under the engine lock, so a module that stays busy must not make it wait longer than its wait.
+func TestValidateChainAndViewGivesUpOnABusyModule(t *testing.T) {
+	module := &ExecModule{db: temporaltest.NewTestDB(t, datadir.New(t.TempDir())), semaphore: semaphore.NewWeighted(1), blockReader: sideForkReader{}, logger: log.New()}
+	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+	t.Cleanup(func() { module.semaphore.Release(1) })
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	result, _, err := module.ValidateChainAndView(ctx, viewedBlock, 10*time.Millisecond, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
+	require.NoError(t, err)
+	require.Equal(t, ExecutionStatusBusy, result.ValidationStatus)
+}
+
+// A Ready probe or a background commit holds the module only briefly, so the view waits for it.
+func TestValidateChainAndViewWaitsForTheModule(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	synctest.Test(t, func(t *testing.T) {
+		module := &ExecModule{db: db, semaphore: semaphore.NewWeighted(1), forkValidator: &ForkValidator{}, blockReader: sideForkReader{forkHeader: &types.Header{}}, logger: log.New()}
+		require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+		var released atomic.Bool
+		time.AfterFunc(10*time.Millisecond, func() {
+			released.Store(true)
+			module.semaphore.Release(1)
+		})
+
+		result, _, err := module.ValidateChainAndView(t.Context(), viewedBlock, time.Second, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
+		require.NoError(t, err)
+		require.True(t, released.Load())
+		require.Equal(t, ExecutionStatusMissingSegment, result.ValidationStatus)
+	})
+}
+
+// A forkchoice update is answered before its commit, which can land while the view waits for the module.
+func TestValidateChainAndViewFindsABlockCommittedWhileItWaits(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		releaseModule bool
+	}{
+		{"the module stays busy", false},
+		{"the module is released after the commit", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			synctest.Test(t, func(t *testing.T) {
+				module := &ExecModule{db: db, semaphore: semaphore.NewWeighted(1), forkValidator: &ForkValidator{}, blockReader: sideForkReader{canonicalHash: viewedBlock.Hash(), forkHeader: &types.Header{}}, logger: log.New()}
+				require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+				committed := make(chan error, 1)
+				go func() {
+					time.Sleep(10 * time.Millisecond)
+					committed <- db.Update(t.Context(), func(tx kv.RwTx) error {
+						return errors.Join(
+							rawdb.WriteHeaderNumber(tx, viewedBlock.Hash(), 1),
+							rawdb.WriteCanonicalHash(tx, viewedBlock.Hash(), 1),
+							stages.SaveStageProgress(tx, stages.Execution, 1),
+						)
+					})
+					if tc.releaseModule {
+						module.semaphore.Release(1)
+					}
+				}()
+
+				result, _, err := module.ValidateChainAndView(t.Context(), viewedBlock, time.Second, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
+				require.NoError(t, err)
+				require.NoError(t, <-committed)
+				if !tc.releaseModule {
+					module.semaphore.Release(1)
+				}
+				require.Equal(t, ExecutionStatusSuccess, result.ValidationStatus)
+				require.Equal(t, viewedBlock.Hash(), result.LatestValidHash)
+			})
+		})
+	}
+}
+
+// frozenBlockReader serves viewedBlock as a canonical block from snapshots, whose database entries are pruned. A
+// lookup by hash alone panics: it would search every snapshot file.
+type frozenBlockReader struct {
+	dbservices.FullBlockReader
+}
+
+func (frozenBlockReader) IsCanonical(_ context.Context, _ kv.Getter, hash common.Hash, number uint64) (bool, error) {
+	return hash == viewedBlock.Hash() && number == viewedBlock.NumberU64(), nil
+}
+
+// A committed block in snapshots is VALID without the module, so a payload witness falls back to commitment history.
+func TestValidateChainAndViewFindsACommittedBlockInSnapshots(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return stages.SaveStageProgress(tx, stages.Execution, 1000)
+	}))
+	module := &ExecModule{db: db, semaphore: semaphore.NewWeighted(1), blockReader: frozenBlockReader{}, logger: log.New()}
+	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+	t.Cleanup(func() { module.semaphore.Release(1) })
+
+	result, view, err := module.ValidateChainAndView(t.Context(), viewedBlock, 10*time.Millisecond, func(kv.TemporalTx, kv.TemporalGetter) error { return nil })
+	require.NoError(t, err)
+	require.Nil(t, view)
+	require.Equal(t, ExecutionStatusSuccess, result.ValidationStatus)
+	require.Equal(t, viewedBlock.Hash(), result.LatestValidHash)
 }
 
 func TestDrainWaitsForInFlightExecution(t *testing.T) {
@@ -239,7 +396,7 @@ func TestForkValidatorSuspendsReadAheadBeforeItsOwnUnwind(t *testing.T) {
 	// Stop at the suspension boundary; this test needs no execution pipeline to
 	// prove that suspension failure aborts before the validator stages its unwind.
 	suspendErr := errors.New("read-ahead suspension cancelled")
-	_, _, _, criticalErr := fv.ValidatePayload(t.Context(), nil, nil, payloadHeader, &types.RawBody{}, func() error {
+	_, _, _, criticalErr := fv.ValidatePayload(t.Context(), nil, nil, payloadHeader, &types.Body{}, false, func() error {
 		return suspendErr
 	}, log.New())
 	require.ErrorIs(t, criticalErr, suspendErr)
@@ -269,7 +426,7 @@ func TestRecordBlockMetricsTakesCommitmentTimeFromSharedDomains(t *testing.T) {
 	hash := header.Hash()
 
 	sd.AddCommitmentTime(5 * time.Millisecond)
-	fv.recordBlockMetrics(sd, header, &types.RawBody{}, hash, &blockmetrics.Sample{}, 1, 20*time.Millisecond, 12*time.Millisecond)
+	fv.recordBlockMetrics(sd, header, &types.Body{}, hash, &blockmetrics.Sample{}, 1, 20*time.Millisecond, 12*time.Millisecond)
 
 	rec := fv.TakeBlockMetrics(hash)
 	require.NotNil(t, rec)

@@ -17,6 +17,7 @@
 package state
 
 import (
+	"math/rand/v2"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -105,6 +106,26 @@ func TestBlockAccessListBuilderMatchesAgreesWithHash(t *testing.T) {
 			bal[3].StorageReads[0] = bal[3].StorageChanges[0].Slot.Value()
 			return bal
 		},
+		"read for a slot read then written": func(bal types.BlockAccessList) types.BlockAccessList {
+			bal[2].StorageReads[1] = bal[2].StorageChanges[0].Slot.Value()
+			return bal
+		},
+		"duplicate read": func(bal types.BlockAccessList) types.BlockAccessList {
+			bal[3].StorageReads[1] = bal[3].StorageReads[0]
+			return bal
+		},
+		"unordered reads": func(bal types.BlockAccessList) types.BlockAccessList {
+			bal[3].StorageReads[0], bal[3].StorageReads[1] = bal[3].StorageReads[1], bal[3].StorageReads[0]
+			return bal
+		},
+		"duplicate slot": func(bal types.BlockAccessList) types.BlockAccessList {
+			bal[3].StorageChanges[1] = bal[3].StorageChanges[0]
+			return bal
+		},
+		"unordered slots": func(bal types.BlockAccessList) types.BlockAccessList {
+			bal[3].StorageChanges[0], bal[3].StorageChanges[1] = bal[3].StorageChanges[1], bal[3].StorageChanges[0]
+			return bal
+		},
 		"empty storage entry": func(bal types.BlockAccessList) types.BlockAccessList {
 			bal[0].StorageChanges = []types.SlotChanges{{Slot: key}}
 			return bal
@@ -161,4 +182,60 @@ func TestBlockAccessListBuilderMatchesAcrossWorkers(t *testing.T) {
 	step := (len(want) + 2) / 3
 	duplicated[0], duplicated[step+1] = want[len(want)-1], want[len(want)-1]
 	require.False(t, build().Matches(duplicated))
+}
+
+func TestBlockAccessListBuilderMatchesDoesNotFinalize(t *testing.T) {
+	want := matchTestBuilder().Build()
+	b := matchTestBuilder()
+	require.True(t, b.Matches(want))
+	for _, account := range b.ac {
+		require.Nil(t, account.changes.StorageReads)
+		require.Nil(t, account.changes.BalanceChanges)
+	}
+	require.Equal(t, want.Hash(), b.Build().Hash())
+}
+
+func TestBlockAccessListBuilderMatchesRandomHistories(t *testing.T) {
+	r := rand.New(rand.NewPCG(1, 2))
+	addr := accounts.InternAddress(common.Address{19: 1})
+	key := func(n int) accounts.StorageKey { return accounts.InternKey(common.Hash{31: byte(n)}) }
+	for range 500 {
+		type op struct {
+			write     bool
+			slot      int
+			value     uint64
+			accessIdx uint32
+		}
+		ops := make([]op, r.IntN(80))
+		for i := range ops {
+			ops[i] = op{write: r.IntN(2) == 0, slot: r.IntN(40), value: uint64(r.IntN(3)), accessIdx: uint32(i + 1)}
+		}
+		build := func() *BlockAccessListBuilder {
+			b := NewBlockAccessListBuilder()
+			account := ensureAccountState(b.ac, addr)
+			for _, o := range ops {
+				if o.write {
+					account.applyWriteStorage(key(o.slot), *uint256.NewInt(o.value), o.accessIdx)
+				} else {
+					account.updateReadStorage(key(o.slot), *uint256.NewInt(o.value))
+				}
+			}
+			return b
+		}
+		want := build().Build()
+		require.NoError(t, want.Validate())
+		require.True(t, build().Matches(want))
+
+		other := want.Copy()
+		switch {
+		case len(other[0].StorageReads) > 0 && r.IntN(2) == 0:
+			other[0].StorageReads[len(other[0].StorageReads)-1] = key(200).Value()
+		case len(other[0].StorageChanges) > 0:
+			other[0].StorageChanges[0].Changes[0].Value.AddUint64(&other[0].StorageChanges[0].Changes[0].Value, 7)
+		default:
+			continue
+		}
+		require.NotEqual(t, want.Hash(), other.Hash())
+		require.False(t, build().Matches(other))
+	}
 }
