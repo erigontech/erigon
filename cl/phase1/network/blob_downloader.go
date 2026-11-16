@@ -49,10 +49,14 @@ const (
 	blobLogInterval             = 30 * time.Second
 	blobBackfillWarningInterval = 4 * time.Minute
 	// PeerDAS batches four blocks per recovery task and has eight workers.
-	blocksBatchSize     = uint64(32)
-	blobRetryShardBits  = 10
-	maxBlobRetryRanges  = 1 << blobRetryShardBits
-	blobRetryShardShift = 64 - blobRetryShardBits
+	blocksBatchSize = uint64(32)
+	// Retry attempts are serial, so keep their per-cycle budget independent of
+	// the larger concurrent scan batch.
+	blobRetryBatchSize    = uint64(4)
+	blobRetryCheckTimeout = time.Second
+	blobRetryShardBits    = 10
+	maxBlobRetryRanges    = 1 << blobRetryShardBits
+	blobRetryShardShift   = 64 - blobRetryShardBits
 	// bounds a fulu block's column recovery; columns past the custody window are
 	// unfetchable and would otherwise block forever.
 	blobColumnBackfillTimeout  = 30 * time.Second
@@ -500,8 +504,8 @@ func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor, fuluRetentionF
 	}
 	firstUnfrozenSlot := max(retryFloor, b.sn.FrozenBlobs())
 	b.trimRetryRanges(firstUnfrozenSlot)
-	attemptedSlots := make(map[uint64]struct{}, blocksBatchSize)
-	for range blocksBatchSize {
+	attemptedSlots := make(map[uint64]struct{}, blobRetryBatchSize)
+	for range blobRetryBatchSize {
 		var slot uint64
 		found := false
 		for range len(b.retryRanges) {
@@ -1307,6 +1311,14 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []incompleteBlock) boo
 	completeBatch := true
 	for _, item := range candidates {
 		stored, complete, err := b.waitForStoredBlobSidecars(ctx, item.block, item.root)
+		if err != nil && ctx.Err() != nil && b.ctx.Err() == nil {
+			// The batch deadline may expire while a sidecar is being committed.
+			// Read once with a fresh, short context so an already-durable block
+			// is not retried just because another candidate consumed the deadline.
+			checkCtx, checkCancel := context.WithTimeout(b.ctx, blobRetryCheckTimeout)
+			stored, complete, err = b.storedBlobSidecarsComplete(checkCtx, item.block, item.root)
+			checkCancel()
+		}
 		if err != nil || !complete {
 			b.addRetrySlot(item.block.GetSlot())
 			completeBatch = false
