@@ -232,7 +232,7 @@ func TestBlobHistoryDownloaderIncompleteFuluRecoveryWithholdsCompletionUntilRetr
 	var countReads atomic.Int32
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(context.Context, common.Hash) (uint32, error) {
-			if countReads.Add(1) >= 4 {
+			if countReads.Add(1) >= 5 {
 				return 1, nil
 			}
 			return 0, nil
@@ -435,13 +435,101 @@ func TestBlobHistoryDownloaderFuluRecoveryWaitsForAsyncPersistence(t *testing.T)
 	require.GreaterOrEqual(t, reads.Load(), int32(3))
 }
 
+func TestBlobHistoryDownloaderPrecheckErrorRequeuesOnlyIncompleteWork(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	peerDas := mock_services.NewMockPeerDas(ctrl)
+	blockA := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	blockA.Block.Slot = 103
+	blockA.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	blockB := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	blockB.Block.Slot = 102
+	blockB.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	blockC := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	blockC.Block.Slot = 101
+	blockC.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	blocks := rootedBlocks(t, blockA, blockB, blockC)
+	storage := blobstoragemock.NewMockBlobStorage(ctrl)
+	wantErr := errors.New("temporary storage read failure")
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), blocks[0].root).Return(uint32(0), nil)
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), blocks[1].root).Return(uint32(1), nil)
+	storage.EXPECT().ReadBlobSidecars(gomock.Any(), blockB.GetSlot(), blocks[1].root).
+		Return([]*cltypes.BlobSidecar{storedFuluSidecar(blockB, 0)}, true, nil)
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), blocks[2].root).Return(uint32(0), wantErr)
+
+	downloader := &BlobHistoryDownloader{
+		ctx:           t.Context(),
+		blobStorage:   storage,
+		peerDasGetter: staticPeerDasGetter{pd: peerDas},
+		verifyBlobSidecars: func([]*cltypes.BlobSidecar, clparams.StateVersion, func(*cltypes.SignedBeaconBlockHeader) error) error {
+			return nil
+		},
+		logger: log.New(),
+	}
+
+	require.False(t, downloader.recoverFuluColumns(blocks))
+	require.Len(t, downloader.retryRanges, 1)
+	require.True(t, downloader.retryRanges[0].contains(blockA.GetSlot()))
+	require.True(t, downloader.retryRanges[0].contains(blockC.GetSlot()))
+	require.False(t, downloader.retryRanges[0].contains(blockB.GetSlot()))
+	require.Equal(t, uint64(2), downloader.retryRanges[0].workCount())
+}
+
+func TestBlobHistoryDownloaderFinalDurabilityCheckUsesFreshContextPerCandidate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	peerDas := mock_services.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error {
+			require.Len(t, blocks, 2)
+			<-ctx.Done()
+			return nil
+		},
+	)
+
+	blockA := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	blockA.Block.Slot = 101
+	blockA.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	blockB := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	blockB.Block.Slot = 100
+	blockB.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	blocks := rootedBlocks(t, blockA, blockB)
+	completeRoot := blocks[1].root
+	reads := make(map[common.Hash]int)
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, root common.Hash) (uint32, error) {
+			reads[root]++
+			if root == completeRoot && reads[root] >= 3 {
+				return 1, nil
+			}
+			return 0, nil
+		},
+	).AnyTimes()
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), completeRoot).
+		Return([]*cltypes.BlobSidecar{storedFuluSidecar(blockB, 0)}, true, nil).AnyTimes()
+
+	downloader := &BlobHistoryDownloader{
+		ctx:                   t.Context(),
+		rpc:                   boundaryPeerCounter(1),
+		blobStorage:           blobStorage,
+		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
+		columnBackfillTimeout: 5 * time.Millisecond,
+		verifyBlobSidecars: func([]*cltypes.BlobSidecar, clparams.StateVersion, func(*cltypes.SignedBeaconBlockHeader) error) error {
+			return nil
+		},
+		logger: log.New(),
+	}
+
+	require.False(t, downloader.recoverFuluColumns(blocks))
+	require.Equal(t, []blobRetryRange{{start: blockA.GetSlot(), end: blockA.GetSlot(), cursor: blockA.GetSlot()}}, downloader.retryRanges)
+}
+
 func TestBlobHistoryDownloaderFuluRecoveryRejectsStaleCommitmentCount(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	peerDas := mock_services.NewMockPeerDas(ctrl)
 	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(nil)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).Times(2)
-	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, false, nil).Times(2)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, false, nil).AnyTimes()
 
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 	block.Block.Slot = 100
@@ -584,7 +672,7 @@ func TestBlobHistoryDownloaderRetriesRecoveryAfterDurablePostcheckFailure(t *tes
 	readCalls := 0
 	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), block.Block.Slot, gomock.Any()).DoAndReturn(func(context.Context, uint64, common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
 		readCalls++
-		if readCalls <= 2 {
+		if readCalls <= 4 {
 			return []*cltypes.BlobSidecar{invalidSidecar}, true, nil
 		}
 		return []*cltypes.BlobSidecar{validSidecar}, true, nil
@@ -601,7 +689,7 @@ func TestBlobHistoryDownloaderRetriesRecoveryAfterDurablePostcheckFailure(t *tes
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.NoError(t, downloader.downloadOnce(false))
-	require.Equal(t, 3, readCalls)
+	require.Equal(t, 5, readCalls)
 }
 
 func TestBlobHistoryDownloaderConservesEveryIncompleteFuluBlockAcrossPasses(t *testing.T) {
@@ -755,8 +843,8 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsInvalidStoredSidecars(t *testin
 			sidecar := storedFuluSidecar(block, 0)
 			mutate(sidecar)
 			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
-			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil)
-			blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return([]*cltypes.BlobSidecar{sidecar}, true, nil)
+			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+			blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return([]*cltypes.BlobSidecar{sidecar}, true, nil).AnyTimes()
 			downloader := &BlobHistoryDownloader{
 				ctx:                   t.Context(),
 				rpc:                   boundaryPeerCounter(1),
@@ -783,8 +871,8 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsFailedStoredSidecarVerification
 	block.Block.Slot = 100
 	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil)
-	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return([]*cltypes.BlobSidecar{storedFuluSidecar(block, 0)}, true, nil)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return([]*cltypes.BlobSidecar{storedFuluSidecar(block, 0)}, true, nil).AnyTimes()
 	downloader := &BlobHistoryDownloader{
 		ctx:                   t.Context(),
 		rpc:                   boundaryPeerCounter(1),

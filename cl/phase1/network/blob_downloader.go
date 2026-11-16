@@ -52,7 +52,7 @@ const (
 	blocksBatchSize = uint64(32)
 	// Retry attempts are serial, so keep their per-cycle budget independent of
 	// the larger concurrent scan batch.
-	blobRetryBatchSize    = uint64(4)
+	blobRetryBatchSize    = uint64(8)
 	blobRetryCheckTimeout = time.Second
 	blobRetryShardBits    = 10
 	maxBlobRetryRanges    = 1 << blobRetryShardBits
@@ -448,20 +448,21 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			case <-b.ctx.Done():
 				return b.ctx.Err()
 			case <-logInterval.C:
-				if shouldLog {
-					slotSec := float64(prevLogSlot-currentSlot) / time.Since(prevTime).Seconds()
-					prevLogSlot = currentSlot
-					prevTime = time.Now()
-					progress := 0.0
-					if startSlot > targetSlot {
-						progress = float64(startSlot-currentSlot) / float64(startSlot-targetSlot) * 100
-					}
-					b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards",
-						"slot", currentSlot, "to", targetSlot,
-						"slots/sec", fmt.Sprintf("%.2f", slotSec),
-						"progress", fmt.Sprintf("%.1f%%", progress),
-						"eta", utils.ETA(currentSlot-targetSlot, slotSec))
+				slotSec := float64(prevLogSlot-currentSlot) / time.Since(prevTime).Seconds()
+				prevLogSlot = currentSlot
+				prevTime = time.Now()
+				progressFloor := max(targetSlot, b.sn.FrozenBlobs())
+				progress := 0.0
+				if startSlot > progressFloor {
+					processed := startSlot - min(currentSlot, startSlot)
+					progress = float64(processed) / float64(startSlot-progressFloor) * 100
 				}
+				remaining := currentSlot - min(currentSlot, progressFloor)
+				b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards",
+					"slot", currentSlot, "to", progressFloor,
+					"slots/sec", fmt.Sprintf("%.2f", slotSec),
+					"progress", fmt.Sprintf("%.1f%%", progress),
+					"eta", utils.ETA(remaining, slotSec))
 			default:
 			}
 			if !b.peersAvailable() {
@@ -1264,7 +1265,7 @@ func (b *denebRecoveryBatch) remaining() *solid.ListSSZ[*cltypes.BlobIdentifier]
 // backfill indefinitely.
 func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []incompleteBlock) bool {
 	candidates := make([]incompleteBlock, 0, len(blocks))
-	for _, item := range blocks {
+	for i, item := range blocks {
 		block, blockRoot := item.block, item.root
 		commitments := block.GetBlobKzgCommitments()
 		if commitments == nil {
@@ -1279,7 +1280,7 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []incompleteBlock) boo
 		_, complete, err := b.storedBlobSidecarsComplete(ctx, block, blockRoot)
 		cancel()
 		if err != nil {
-			b.addRetryBlocks(blocks)
+			b.addRetryBlocks(append(candidates, blocks[i:]...))
 			b.logger.Warn("[BlobHistoryDownloader] Failed to read stored blobs", "err", err, "slot", block.GetSlot())
 			return false
 		}
@@ -1312,9 +1313,8 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []incompleteBlock) boo
 	for _, item := range candidates {
 		stored, complete, err := b.waitForStoredBlobSidecars(ctx, item.block, item.root)
 		if err != nil && ctx.Err() != nil && b.ctx.Err() == nil {
-			// The batch deadline may expire while a sidecar is being committed.
-			// Read once with a fresh, short context so an already-durable block
-			// is not retried just because another candidate consumed the deadline.
+			// Re-check with a fresh context: the shared batch deadline must not
+			// fail a block that is already durable.
 			checkCtx, checkCancel := context.WithTimeout(b.ctx, blobRetryCheckTimeout)
 			stored, complete, err = b.storedBlobSidecarsComplete(checkCtx, item.block, item.root)
 			checkCancel()
