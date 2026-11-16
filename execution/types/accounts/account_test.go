@@ -433,7 +433,7 @@ func requireCanonKey(t *testing.T, k common.Hash, h StorageKey) {
 	t.Helper()
 	wp, ok := keyCanon.Load(k)
 	require.True(t, ok)
-	require.Equal(t, keyHandle(wp.Value()), h)
+	require.Equal(t, StorageKey{wp.Value()}, h)
 	require.Equal(t, k, h.Value())
 }
 

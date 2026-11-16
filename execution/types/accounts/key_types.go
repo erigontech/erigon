@@ -22,7 +22,6 @@ import (
 	"runtime"
 	"sync/atomic"
 	"unique"
-	"unsafe"
 	"weak"
 
 	"github.com/puzpuzpuz/xsync/v4"
@@ -145,7 +144,7 @@ func (a Address) Cmp(o Address) int {
 	return a.Value().Cmp(o.Value())
 }
 
-type StorageKey unique.Handle[common.Hash]
+type StorageKey struct{ p *common.Hash }
 
 var (
 	ZeroKey = InternKey(common.Hash{})
@@ -161,10 +160,6 @@ func keySlot(k common.Hash) *atomic.Value {
 // lock, so workers that read the same fresh slots at once queue on it. Here both run outside the map lock.
 var keyCanon = xsync.NewMap[common.Hash, weak.Pointer[common.Hash]]()
 
-func keyHandle(p *common.Hash) StorageKey {
-	return *(*StorageKey)(unsafe.Pointer(&p))
-}
-
 func InternKey(k common.Hash) StorageKey {
 	slot := keySlot(k)
 	if h, ok := slot.Load().(StorageKey); ok && h.Value() == k {
@@ -178,7 +173,7 @@ func InternKey(k common.Hash) StorageKey {
 func internKeyCanon(k common.Hash) StorageKey {
 	if wp, ok := keyCanon.Load(k); ok {
 		if p := wp.Value(); p != nil {
-			return keyHandle(p)
+			return StorageKey{p}
 		}
 	}
 	p := new(common.Hash)
@@ -195,10 +190,10 @@ func internKeyCanon(k common.Hash) StorageKey {
 		return wp, xsync.UpdateOp
 	})
 	if live != nil {
-		return keyHandle(live)
+		return StorageKey{live}
 	}
 	runtime.AddCleanup(p, func(k common.Hash) { releaseKey(k, wp) }, k)
-	return keyHandle(p)
+	return StorageKey{p}
 }
 
 // releaseKey deletes k only while it still maps to wp: a concurrent intern may have replaced the dead entry.
@@ -219,7 +214,7 @@ func (k StorageKey) Value() common.Hash {
 	if k == NilKey {
 		return common.Hash{}
 	}
-	return unique.Handle[common.Hash](k).Value()
+	return *k.p
 }
 
 func (k StorageKey) String() string {
