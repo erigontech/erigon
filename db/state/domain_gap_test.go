@@ -38,6 +38,9 @@ func TestCheckFilesDBGapChecksHistory(t *testing.T) {
 		"history/v1.0-accounts.2-3.v",
 		"idx/v1.0-accounts.2-3.ef",
 		"accessor/v2.0-accounts.2-3.vi",
+		"history/v1.0-accounts.1-2.v",
+		"idx/v1.0-accounts.1-2.ef",
+		"accessor/v2.0-accounts.1-2.vi",
 	} {
 		t.Run(path, func(t *testing.T) {
 			db, agg := testDbAndAggregatorv3(t, 10)
