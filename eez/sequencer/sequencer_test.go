@@ -473,6 +473,120 @@ func TestSubstituteRace(t *testing.T) {
 	require.Equal(t, failed.Hash(), h.head(t).Hash())
 }
 
+// failingBuild fails the next failures block builds, leaving the head.
+type failingBuild struct {
+	*follower.Follower
+	err      error
+	failures int
+}
+
+func (f *failingBuild) Produce(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider, hook follower.CommitHook) (*types.BlockWithReceipts, error) {
+	if f.failures > 0 {
+		f.failures--
+		return nil, f.err
+	}
+	return f.Follower.Produce(ctx, in, txs, hook)
+}
+
+// TestSubstituteRetries: a sibling that fails to build leaves the head on
+// the failed block's parent, where a retry of the substitution builds it
+// and the triggers fail with the pending substitution until then; one L1
+// overtook, by settling the height, is not retried.
+func TestSubstituteRetries(t *testing.T) {
+	assembly := errors.New("assembly failed")
+	// failedSync commits Sync block 6 of a composed transaction, whose
+	// bundle fails, and puts the transaction back in the pool.
+	failedSync := func(t *testing.T) (*harness, *slotComposer, *failingBuild, *sequencer.Sequencer, *types.Block) {
+		h := newHarness(t)
+		c := &slotComposer{}
+		fb := &failingBuild{Follower: h.follower, err: assembly}
+		s, err := sequencer.New(derivertest.Config(), sequencer.Config{Timing: devnet(), Composer: c}, fb, h.pool, log.New())
+		require.NoError(t, err)
+		g := h.genesis.Time
+		c.answer = func(parent *types.Header) *types.Block {
+			return h.prebuilt(t, parent, h.c.Transfer(common.HexToAddress("0xb0b"), 1))
+		}
+		s.SetClock(func() time.Time { return onTime(g + 12) })
+		require.NoError(t, s.Handle(t.Context(), sequencer.SyncSlot{Height: 6, Time: g + 12, L1Head: 1}))
+		c.answer = nil
+		failed := h.block(t, 6)
+		require.Len(t, failed.Transactions(), 1)
+		var buf bytes.Buffer
+		require.NoError(t, failed.Transactions()[0].MarshalBinary(&buf))
+		h.pool.add(t, buf.Bytes())
+		return h, c, fb, s, failed
+	}
+	requireSibling := func(t *testing.T, h *harness, sibling *types.Header, failed *types.Block) {
+		t.Helper()
+		six := h.block(t, 6)
+		require.Equal(t, sibling.Hash(), six.Hash())
+		require.Equal(t, failed.ParentHash(), six.ParentHash())
+		require.Empty(t, six.Transactions())
+		require.Equal(t, failed.Time(), six.Time())
+	}
+	t.Run("a direct retry", func(t *testing.T) {
+		h, _, fb, s, failed := failedSync(t)
+		fb.failures = 1
+		_, err := s.Substitute(t.Context(), failed.Header())
+		require.ErrorIs(t, err, assembly)
+		require.Equal(t, failed.ParentHash(), h.head(t).Hash())
+		sibling, err := s.Substitute(t.Context(), failed.Header())
+		require.NoError(t, err)
+		requireSibling(t, h, sibling, failed)
+	})
+	t.Run("triggers wait for the retry", func(t *testing.T) {
+		h, c, fb, s, failed := failedSync(t)
+		fb.failures = 1
+		c.recover = func(ctx context.Context) {
+			_, err := s.Substitute(ctx, failed.Header())
+			require.ErrorIs(t, err, assembly)
+			c.recover = nil
+		}
+		for range 2 {
+			err := s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 12})
+			require.ErrorIs(t, err, sequencer.ErrSubstitutionPending)
+			require.ErrorIs(t, err, assembly, "the build's error")
+			require.Equal(t, failed.ParentHash(), h.head(t).Hash(), "nothing produced on the parent")
+		}
+		// Another block's substitution leaves this one pending.
+		other := types.CopyHeader(failed.Header())
+		other.Extra = []byte{1}
+		_, err := s.Substitute(t.Context(), other)
+		require.ErrorIs(t, err, follower.ErrNotCanonical)
+		require.ErrorIs(t, s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 12}), sequencer.ErrSubstitutionPending)
+		var sibling *types.Header
+		c.recover = func(ctx context.Context) {
+			var err error
+			sibling, err = s.Substitute(ctx, failed.Header())
+			require.NoError(t, err)
+			c.recover = nil
+		}
+		require.NoError(t, s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 12}))
+		require.NotNil(t, sibling)
+		requireSibling(t, h, sibling, failed)
+		require.Equal(t, sibling.Hash(), h.block(t, 7).ParentHash(), "the tick builds on the sibling")
+		require.Len(t, h.block(t, 7).Transactions(), 1)
+	})
+	t.Run("L1 settles the height first", func(t *testing.T) {
+		h, _, fb, s, failed := failedSync(t)
+		fb.failures = 1
+		_, err := s.Substitute(t.Context(), failed.Header())
+		require.ErrorIs(t, err, assembly)
+		var blocks []derivertest.Block
+		for range 6 {
+			blocks = append(blocks, derivertest.Block{Coinbase: common.HexToAddress("0xa11ce"), Extra: []byte{}, Txs: [][]byte{}})
+		}
+		rival := h.c.Compose(nil, blocks...)
+		h.c.Post(derivertest.Posting{Batch: rival})
+		require.Eventually(t, func() bool { return h.follower.Status().Safe == 6 }, 10*time.Second, 5*time.Millisecond)
+		_, err = s.Substitute(t.Context(), failed.Header())
+		require.ErrorIs(t, err, follower.ErrBelowSafe, "the retry does not build on the moved head")
+		require.Equal(t, rival.Blocks[5].Hash(), h.head(t).Hash())
+		require.NoError(t, s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 12}))
+		require.Equal(t, uint64(7), h.head(t).Number.Uint64(), "production resumes on L1's block")
+	})
+}
+
 // TestSettledRival is T-SEQ-5 for a rival batch: the blocks L1 settles
 // replace the speculative ones, and production resumes on them.
 func TestSettledRival(t *testing.T) {

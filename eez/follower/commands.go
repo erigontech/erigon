@@ -158,11 +158,14 @@ func (f *Follower) HeadBefore(ctx context.Context, block *types.Header) (*types.
 		if !ok || hash != block.Hash() {
 			return fmt.Errorf("head before block %d (%x): %w", n, block.Hash(), ErrNotCanonical)
 		}
-		if err := f.deriver.ForkChoiceTo(ctx, block.ParentHash); err != nil {
+		// Read first: nothing fails once the head has moved.
+		if parent, err = f.chain.HeaderByHash(ctx, block.ParentHash); err != nil {
 			return err
 		}
-		parent, err = f.chain.Head(ctx)
-		return err
+		if parent == nil {
+			return fmt.Errorf("parent %x of block %d: %w", block.ParentHash, n, ErrNotCanonical)
+		}
+		return f.deriver.ForkChoiceTo(ctx, block.ParentHash)
 	})
 	return parent, err
 }

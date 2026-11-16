@@ -159,6 +159,9 @@ type Sequencer struct {
 	now         func() time.Time
 	// offGrid counts consecutive Sync blocks skipped off the grid.
 	offGrid int
+	// replacing is a substitution whose sibling failed to build, kept in
+	// memory as the composer's recovery is.
+	replacing *replacement
 
 	statusMu sync.Mutex
 	status   Status
@@ -234,6 +237,9 @@ func (s *Sequencer) Run(ctx context.Context, events <-chan Event) {
 func (s *Sequencer) Handle(ctx context.Context, e Event) error {
 	if c := s.cfg.Composer; c != nil {
 		c.RecoverFailed(ctx)
+	}
+	if err := s.pending(ctx); err != nil {
+		return err
 	}
 	var err error
 	switch e := e.(type) {
@@ -319,19 +325,67 @@ func (s *Sequencer) syncSlot(ctx context.Context, slot SyncSlot) error {
 // fails with follower.ErrBelowSafe once L1 settled that height,
 // follower.ErrNotCanonical once another block replaced failed, and
 // follower.ErrStaleParent when derivation moves the head between the
-// rollback and the sibling.
+// rollback and the sibling. A sibling that fails to build leaves the head on
+// the parent, where the triggers produce nothing until a retry builds it.
 func (s *Sequencer) Substitute(ctx context.Context, failed *types.Header) (*types.Header, error) {
-	parent, err := s.committer.HeadBefore(ctx, failed)
+	parent, err := s.parentOf(ctx, failed)
 	if err != nil {
 		return nil, err
 	}
 	h, err := s.build(ctx, Sync, parent, noTxns{})
 	if err != nil {
+		s.replacing = &replacement{failed: failed.Hash(), parent: parent.Hash(), err: err}
 		return nil, err
 	}
+	s.replacing = nil
 	s.logger.Warn("[eez] failed Sync block substituted with its empty sibling", "event", "eez.composer.recovery.substituted",
 		"number", h.Number.Uint64(), "hash", h.Hash())
 	return h, nil
+}
+
+// replacement is a substitution of the block failed whose sibling failed to
+// build on parent with err.
+type replacement struct {
+	failed, parent common.Hash
+	err            error
+}
+
+// ErrSubstitutionPending fails a trigger while a failed Sync block's sibling
+// has yet to build on the head.
+var ErrSubstitutionPending = errors.New("failed Sync block's sibling not built yet")
+
+// parentOf moves the head back to the parent of failed and returns it. A
+// substitution of failed whose sibling failed to build left it there.
+func (s *Sequencer) parentOf(ctx context.Context, failed *types.Header) (*types.Header, error) {
+	if r := s.replacing; r != nil && r.failed == failed.Hash() {
+		head, err := s.committer.Head(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if head.Hash() == r.parent {
+			return head, nil
+		}
+	}
+	return s.committer.HeadBefore(ctx, failed)
+}
+
+// pending fails with ErrSubstitutionPending while a substitution's sibling
+// has yet to build on the head, where the trigger produces nothing until a
+// retry builds it; one the head moved away from is dropped.
+func (s *Sequencer) pending(ctx context.Context) error {
+	r := s.replacing
+	if r == nil {
+		return nil
+	}
+	head, err := s.committer.Head(ctx)
+	if err != nil {
+		return err
+	}
+	if head.Hash() != r.parent {
+		s.replacing = nil
+		return nil
+	}
+	return fmt.Errorf("%w: block %d replacing %x: %w", ErrSubstitutionPending, head.Number.Uint64()+1, r.failed, r.err)
 }
 
 // late reports whether a proof started now reaches L1 after the submission
