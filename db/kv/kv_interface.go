@@ -59,9 +59,8 @@ Methods Naming:
  BuildFiles: write (and index) collated steps into new immutable files
  Merge: fold adjacent visible files into a bigger one - only produces a new file; the small inputs become garbage
  Retire: drop old visible files past the prune window; unlink deferred until no reader references them
-   Merge reads and deletes only visible files. Retire also detaches dirty files that end at or before its
-   boundary. Other invisible garbage (subsumed/overlapping) is dropped by a separate clean-up:
-   RemoveOverlaps / cleanAfterMerge (also the "clean garbage" CLI tools).
+   Merge and Retire read/delete only visible files. Invisible garbage (subsumed/overlapping) is dropped by a
+   separate clean-up: RemoveOverlaps / cleanAfterMerge (also the "clean garbage" CLI tools).
  Get: exact match of criteria
  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
      Range is analog of SQL's: SELECT * FROM Table WHERE k>=from AND k<to ORDER BY k ASC/DESC LIMIT n
