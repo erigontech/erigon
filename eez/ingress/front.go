@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/composer"
+	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -115,6 +116,7 @@ func reply(w http.ResponseWriter, id json.RawMessage, result any, e *rpcError) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	_, _ = w.Write(enc)
 }
 
@@ -215,6 +217,11 @@ func (f *Front) intercept(w http.ResponseWriter, ctx context.Context, req reques
 // admit holds tx, raw as received, when its envelope, sender and target can
 // make a cross-chain call.
 func (f *Front) admit(ctx context.Context, raw []byte, tx types.Transaction) (common.Hash, error) {
+	// The hash the sender is answered is the transaction's.
+	var canonical bytes.Buffer
+	if err := tx.MarshalBinary(&canonical); err != nil || !bytes.Equal(canonical.Bytes(), raw) {
+		return common.Hash{}, errors.New("non-canonical transaction encoding: send the EIP-2718 envelope")
+	}
 	switch tx.Type() {
 	case types.LegacyTxType, types.AccessListTxType, types.DynamicFeeTxType:
 	default:
@@ -289,7 +296,7 @@ func (f *Front) forward(w http.ResponseWriter, ctx context.Context, body []byte)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := f.client.Do(req)
 	if err != nil {
-		f.Logger.Warn("[eez] cross-chain front upstream failed", "event", "eez.ingress.upstream", "err", err)
+		f.Logger.Warn("[eez] cross-chain front upstream failed", "event", "eez.ingress.upstream", "err", l1.RedactTransport(err))
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
 	}

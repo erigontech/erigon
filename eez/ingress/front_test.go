@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/eez/composer"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -193,24 +194,32 @@ func TestFrontHolds(t *testing.T) {
 		{"EIP-2930", &types.AccessListTx{LegacyTx: *legacy(0, 100, ptr(target)), ChainID: *uint256.NewInt(chainID)}},
 		{"gas at the cap", dynamic(0, 16_777_216, ptr(target))},
 	} {
-		t.Run(c.name, func(t *testing.T) {
-			h := newFront(t, composer.Inbound)
-			raw := h.sign(t, c.tx, chainID)
-			a := h.send(t, raw)
-			require.Nil(t, a.Error)
-			var hash common.Hash
-			require.NoError(t, json.Unmarshal(a.Result, &hash))
-			require.Equal(t, crypto.Keccak256Hash(raw), hash)
-			held := h.front.Pool.PopN(math.MaxInt)
-			require.Len(t, held, 1)
-			require.Equal(t, raw, held[0].Raw)
-			require.Equal(t, crypto.PubkeyToAddress(h.key.PublicKey), held[0].Sender)
-			require.Equal(t, c.tx.GetFeeCap(), &held[0].MaxFee)
-			require.Equal(t, c.tx.GetTipCap(), &held[0].Tip)
-			require.Equal(t, composer.Inbound, held[0].Direction)
-			require.Empty(t, h.up.bodies)
-		})
+		for _, direction := range []composer.Direction{composer.Inbound, composer.Outbound} {
+			t.Run(c.name+" "+direction.String(), func(t *testing.T) {
+				h := newFront(t, direction)
+				raw := h.sign(t, c.tx, chainID)
+				a := h.send(t, raw)
+				require.Nil(t, a.Error)
+				var hash common.Hash
+				require.NoError(t, json.Unmarshal(a.Result, &hash))
+				require.Equal(t, crypto.Keccak256Hash(raw), hash)
+				held := h.front.Pool.PopN(math.MaxInt)
+				require.Len(t, held, 1)
+				require.Equal(t, raw, held[0].Raw)
+				require.Equal(t, crypto.PubkeyToAddress(h.key.PublicKey), held[0].Sender)
+				require.Equal(t, c.tx.GetFeeCap(), &held[0].MaxFee)
+				require.Equal(t, c.tx.GetTipCap(), &held[0].Tip)
+				require.Equal(t, direction, held[0].Direction)
+				require.Empty(t, h.up.bodies)
+			})
+		}
 	}
+	t.Run("an uncapped source takes any gas", func(t *testing.T) {
+		h := newFront(t, composer.Inbound)
+		h.capped = false
+		require.Nil(t, h.send(t, h.sign(t, dynamic(0, 30_000_000, ptr(target)), chainID)).Error)
+		require.Equal(t, 1, h.front.Pool.Len())
+	})
 	t.Run("the same transaction twice", func(t *testing.T) {
 		h := newFront(t, composer.Outbound)
 		raw := h.sign(t, dynamic(0, 100_000, ptr(target)), chainID)
@@ -266,6 +275,11 @@ func TestFrontRefuses(t *testing.T) {
 			tx.Value.SetAllOne()
 			return h.sign(t, tx, chainID)
 		}, want: []string{"overflow"}},
+		{name: "a non-canonical encoding", tx: func(h *harness) []byte {
+			wrapped, err := rlp.EncodeToBytes(h.sign(t, dynamic(0, 100_000, ptr(target)), chainID))
+			require.NoError(t, err)
+			return wrapped
+		}, want: []string{"canonical"}},
 		{
 			name: "codeless target", tx: func(h *harness) []byte { return h.sign(t, dynamic(0, 100_000, ptr(codeless)), chainID) },
 			want: []string{"has no code", "createCrossChainProxy"}, reads: true,
@@ -411,6 +425,41 @@ func TestFrontRouting(t *testing.T) {
 		status, _, _ := h.post(t, `{"x":"`+strings.Repeat("a", maxBody)+`"}`)
 		require.Equal(t, http.StatusRequestEntityTooLarge, status)
 	})
+}
+
+// TestFrontAnswersCrossOrigin: an answer the front gives itself is
+// readable cross-origin, as a forwarded one is.
+func TestFrontAnswersCrossOrigin(t *testing.T) {
+	h := newFront(t, composer.Inbound)
+	for _, body := range []string{
+		`{"jsonrpc":"2.0","id":1,"method":"eez_composerInfo"}`,
+		`{"jsonrpc":"2.0","id":1,"method":"net_version"}`,
+		`[]`,
+	} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.url, strings.NewReader(body))
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, "*", resp.Header.Get("Access-Control-Allow-Origin"), body)
+	}
+	_, a, _ := h.post(t, `[]`)
+	require.NotNil(t, a.Error)
+	require.Equal(t, -32600, a.Error.Code)
+}
+
+// TestFrontRedactsItsUpstream: a failed forward logs no part of the
+// upstream's URL past its host.
+func TestFrontRedactsItsUpstream(t *testing.T) {
+	h := newFront(t, composer.Inbound)
+	var logs bytes.Buffer
+	h.front.Logger = log.New()
+	h.front.Logger.SetHandler(log.StreamHandler(&logs, log.TerminalFormatNoColor()))
+	h.front.Upstream = "http://127.0.0.1:1/v1/secret-key"
+	status, _, _ := h.post(t, `{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber"}`)
+	require.Equal(t, http.StatusBadGateway, status)
+	require.Contains(t, logs.String(), "eez.ingress.upstream")
+	require.NotContains(t, logs.String(), "secret-key")
 }
 
 func TestInfo(t *testing.T) {
