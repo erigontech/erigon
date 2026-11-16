@@ -71,7 +71,46 @@ func (a *Aggregator) StepAlignedEnd(stepSize uint64) (uint64, error) {
 			}
 		}
 	}
+	if err := a.refuseFilesPastHoles(dirty); err != nil {
+		return 0, err
+	}
 	return at.stepAlignedEnd(stepSize)
+}
+
+// refuseFilesPastHoles refuses a rebase that would delete indexed files past a hole in their own list: the
+// rebase deletes everything past the aligned end, and the shared ceiling puts that end at the hole.
+func (a *Aggregator) refuseFilesPastHoles(dirty *aggDirtyFilesRoTx) error {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	pastHole := func(name string, files []*FilesItem, own visibleFiles, accessors statecfg.Accessors) error {
+		end := own.EndTxNum()
+		for _, item := range files {
+			if !item.canDelete.Load() && item.startTxNum >= end && checkForVisibility(item, accessors, false) {
+				return fmt.Errorf("%s snapshot [%d,%d) lies past a hole at txNum %d; restore the missing file before rebasing", name, item.startTxNum, item.endTxNum, end)
+			}
+		}
+		return nil
+	}
+	for _, d := range dirty.domain {
+		dv, hv, hiv := d.d.calcVisibleFiles(math.MaxUint64)
+		if err := pastHole(d.d.FilenameBase, d.files, dv.files, d.d.Accessors); err != nil {
+			return err
+		}
+		if err := pastHole(d.d.FilenameBase+" history", d.history.files, hv, d.history.h.Accessors); err != nil {
+			return err
+		}
+		if err := pastHole(d.d.FilenameBase+" history index", d.history.ii.files, hiv.files, d.history.ii.ii.Accessors); err != nil {
+			return err
+		}
+	}
+	for _, ii := range dirty.ii {
+		if ii != nil {
+			if err := pastHole(ii.ii.FilenameBase, ii.files, ii.ii.calcVisibleFiles(math.MaxUint64).files, ii.ii.Accessors); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (a *Aggregator) AlignFilesToStepSize(ctx context.Context, stepSize uint64) (uint64, error) {

@@ -106,18 +106,30 @@ func TestStepAlignedEndRefusesListStartingOffBoundary(t *testing.T) {
 	require.ErrorContains(t, err, "starts at txNum 40")
 }
 
-func TestStepAlignedEndStopsAtHiddenFiles(t *testing.T) {
+// A rebase deletes every file past the aligned end, so a hole in one list, with intact files after it, refuses it.
+func TestStepAlignedEndRefusesFilesPastAHole(t *testing.T) {
 	t.Parallel()
-	db, agg := testDbAndAggregatorv3(t, 10)
-	dirs := agg.Dirs()
-	split := []testFileRange{{0, 4}, {4, 6}, {6, 8}, {8, 12}}
-	generateAccountsFile(t, dirs, split)
-	generateStorageFile(t, dirs, split)
-	generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 4}, {4, 8}, {8, 12}})
-	require.NoError(t, agg.OpenFolder(db))
-	end, err := agg.StepAlignedEnd(20)
-	require.NoError(t, err)
-	require.EqualValues(t, 40, end)
+	t.Run("files hidden by the dependency checker", func(t *testing.T) {
+		db, agg := testDbAndAggregatorv3(t, 10)
+		dirs := agg.Dirs()
+		split := []testFileRange{{0, 4}, {4, 6}, {6, 8}, {8, 12}}
+		generateAccountsFile(t, dirs, split)
+		generateStorageFile(t, dirs, split)
+		generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 4}, {4, 8}, {8, 12}})
+		require.NoError(t, agg.OpenFolder(db))
+		_, err := agg.StepAlignedEnd(20)
+		require.ErrorContains(t, err, "past a hole at txNum 40")
+	})
+	t.Run("missing history file", func(t *testing.T) {
+		db, agg := testDbAndAggregatorv3(t, 10)
+		ranges := []testFileRange{{0, 2}, {2, 4}, {4, 6}, {6, 8}}
+		generateStateFiles(t, agg.Dirs(), ranges)
+		generateCommitmentFile(t, agg.Dirs(), ranges)
+		require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.2-4.v")))
+		require.NoError(t, agg.OpenFolder(db))
+		_, err := agg.StepAlignedEnd(20)
+		require.ErrorContains(t, err, "past a hole at txNum 20")
+	})
 }
 
 func TestAlignFilesToStepSizeRefusesCommitmentRangeMismatch(t *testing.T) {
