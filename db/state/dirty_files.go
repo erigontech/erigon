@@ -649,9 +649,13 @@ func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(star
 	}
 
 	if len(newVisibleFiles) > 0 && newVisibleFiles[0].startTxNum > firstStart {
-		// Hidden merge outputs can overlap an already-retired history prefix.
-		if !allowRetiredPrefix || firstFile.endTxNum <= newVisibleFiles[0].startTxNum {
+		// History may start later: a read below its first visible file fails instead of skipping data.
+		if !allowRetiredPrefix {
+			log.Warn("[agg] first file is not visible, so its whole list is hidden", "file", firstFile.decompressor.FileName())
 			return visibleFiles{}
+		}
+		if firstFile.endTxNum <= newVisibleFiles[0].startTxNum {
+			log.Warn("[agg] files before the first visible file are not readable", "file", firstFile.decompressor.FileName(), "readableFrom", newVisibleFiles[0].startTxNum)
 		}
 	}
 	for i := 1; i < len(newVisibleFiles); i++ {

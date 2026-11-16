@@ -54,8 +54,8 @@ func TestVisibleFilesAligned_ContiguousPrefix(t *testing.T) {
 		{"domain/v1.0-accounts.1-2.bt", 10},
 		{"domain/v1.0-accounts.0-1.bt", 0},
 		{"domain/v1.0-accounts.1-2.kv", 10},
-		{"accessor/v2.0-accounts.0-1.vi", 0},
-		{"accessor/v1.0-logaddrs.0-1.efi", 0},
+		{"accessor/v2.0-accounts.0-1.vi", 30},
+		{"accessor/v1.0-logaddrs.0-1.efi", 30},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			db, agg := testDbAndAggregatorv3(t, alignStepSize)
