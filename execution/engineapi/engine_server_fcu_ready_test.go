@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -171,13 +172,14 @@ func TestWaitForResponseReturnsPromptlyOnContextCancellation(t *testing.T) {
 func TestWaitForResponseBoundsTotalWaitByElapsedTime(t *testing.T) {
 	t.Parallel()
 
-	start := time.Now()
+	calls := 0
 	_, err := waitForResponse(context.Background(), 100*time.Millisecond, func() (bool, error) {
+		calls++
 		time.Sleep(100 * time.Millisecond)
 		return true, nil
 	})
 	require.NoError(t, err)
-	require.Less(t, time.Since(start), 160*time.Millisecond, "the budget must cover callback time, including the first call")
+	require.Equal(t, 1, calls, "the budget must cover callback time, including the first call")
 }
 
 // snapshotsNotReadyModule mimics ExecModule.Ready while snapshots are unavailable: each call blocks
@@ -215,16 +217,18 @@ func TestReadinessWaitIsBoundedWhenReadyBlocks(t *testing.T) {
 	module := &snapshotsNotReadyModule{stubExecutionModule: stub}
 
 	cfg := preCancunChainConfig()
-	ctx := context.Background()
-	downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), module, nil, nil, cfg, ethconfig.Sync{}, nil)
-	srv := NewEngineServer(log.New(), cfg, module, downloader, false, false, true, true, nil, nil, 0, 0)
+	synctest.Test(t, func(t *testing.T) {
+		ctx := context.Background()
+		downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), module, nil, nil, cfg, ethconfig.Sync{}, nil)
+		srv := NewEngineServer(log.New(), cfg, module, downloader, false, false, true, true, nil, nil, 0, 0)
 
-	start := time.Now()
-	status, err := srv.getQuickPayloadStatusIfPossible(ctx, headHash, 0, common.Hash{}, &engine_types.ForkChoiceState{HeadHash: headHash}, false, 200*time.Millisecond)
-	require.NoError(t, err)
-	require.NotNil(t, status)
-	require.Equal(t, engine_types.SyncingStatus, status.Status)
-	require.Less(t, time.Since(start), 500*time.Millisecond, "a blocking Ready must not stretch the wait past its budget")
+		start := time.Now()
+		status, err := srv.getQuickPayloadStatusIfPossible(ctx, headHash, 0, common.Hash{}, &engine_types.ForkChoiceState{HeadHash: headHash}, false, 200*time.Millisecond)
+		require.NoError(t, err)
+		require.NotNil(t, status)
+		require.Equal(t, engine_types.SyncingStatus, status.Status)
+		require.Less(t, time.Since(start), 500*time.Millisecond, "a blocking Ready must not stretch the wait past its budget")
+	})
 }
 
 // TestWaitForResponseDoesNotCallBackAfterDeadline proves no callback starts once the budget is
@@ -232,19 +236,21 @@ func TestReadinessWaitIsBoundedWhenReadyBlocks(t *testing.T) {
 func TestWaitForResponseDoesNotCallBackAfterDeadline(t *testing.T) {
 	t.Parallel()
 
-	calls := 0
-	start := time.Now()
-	busy, err := waitForResponse(context.Background(), 5*time.Millisecond, func() (bool, error) {
-		calls++
-		if calls > 1 {
-			time.Sleep(time.Second)
-		}
-		return true, nil
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		start := time.Now()
+		busy, err := waitForResponse(context.Background(), 5*time.Millisecond, func() (bool, error) {
+			calls++
+			if calls > 1 {
+				time.Sleep(time.Second)
+			}
+			return true, nil
+		})
+		require.NoError(t, err)
+		require.True(t, busy)
+		require.Equal(t, 1, calls, "a callback must not start after the deadline")
+		require.Less(t, time.Since(start), 100*time.Millisecond)
 	})
-	require.NoError(t, err)
-	require.True(t, busy)
-	require.Equal(t, 1, calls, "a callback must not start after the deadline")
-	require.Less(t, time.Since(start), 100*time.Millisecond)
 }
 
 // TestWaitForResponseDoesNotCallBackAfterCancellation proves no callback starts once the context
