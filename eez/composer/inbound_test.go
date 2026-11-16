@@ -204,6 +204,48 @@ func TestDeliveriesRefuse(t *testing.T) {
 	}
 }
 
+// TestDraftTakesAFailedReadForTransient: a draft whose state cannot be read
+// reports ErrStateRead, not a failed transaction.
+func TestDraftTakesAFailedReadForTransient(t *testing.T) {
+	w := loadSyncWindow(t)
+	r := &failing{StateReader: w.pre.Reader, addr: protocol.SystemAddress}
+	pre := w.pre
+	pre.Reader = r
+	d, err := NewDraft(w.config, w.engine, w.sync.Header(), pre)
+	require.NoError(t, err)
+	r.armed = true
+	_, err = d.Nonce(protocol.SystemAddress)
+	require.ErrorIs(t, err, ErrStateRead)
+	_, err = d.Apply(w.sync.Transactions()[0], nil)
+	require.ErrorIs(t, err, ErrStateRead)
+	require.ErrorIs(t, err, errDown)
+	require.Empty(t, d.Txs())
+}
+
+// TestDeliveriesTakeAFailedReadForTransient: a delivery whose target's
+// state cannot be read waits; the call is not refused.
+func TestDeliveriesTakeAFailedReadForTransient(t *testing.T) {
+	w := loadSyncWindow(t)
+	_, call, _ := recordedDelivery(t, w)
+	r := &failing{StateReader: w.pre.Reader, addr: call.Target}
+	pre := w.pre
+	pre.Reader = r
+	d, err := NewDraft(w.config, w.engine, w.sync.Header(), pre)
+	require.NoError(t, err)
+	for _, tx := range w.sync.Transactions()[:4] {
+		_, err := d.Apply(tx, nil)
+		require.NoError(t, err)
+	}
+	ds, err := NewDeliveries(w.ctx(), d)
+	require.NoError(t, err)
+	r.armed = true
+	_, err = ds.Dispatch(call)
+	require.ErrorIs(t, err, ErrStateRead)
+	require.ErrorIs(t, err, errDown)
+	require.False(t, IsPoison(err), err)
+	require.Empty(t, ds.Delivered)
+}
+
 func TestProbeTracer(t *testing.T) {
 	eezl2, other := accounts.InternAddress(protocol.EEZL2Address), accounts.InternAddress(common.HexToAddress("0x5"))
 	deliver := append(slices.Clone(executeOnBehalf), 1, 2)

@@ -69,7 +69,8 @@ func NewDeliveries(ctx protocol.SyncTxContext, draft *Draft) (*Deliveries, error
 	return &Deliveries{ctx: ctx, fork: fork}, nil
 }
 
-// Dispatch delivers c, returning the target's output.
+// Dispatch delivers c, returning the target's output. A failed state read
+// returns ErrStateRead.
 func (in *Deliveries) Dispatch(c *Call) ([]byte, error) {
 	switch {
 	case c.RollupID != in.ctx.RollupID:
@@ -77,13 +78,20 @@ func (in *Deliveries) Dispatch(c *Call) ([]byte, error) {
 	case c.Target == in.ctx.EEZL2:
 		return nil, Poison(errors.New("a call to EEZL2 is not deliverable"))
 	}
+	// refuse marks err final unless a state read failed.
+	refuse := func(err error) error {
+		if errors.Is(err, ErrStateRead) {
+			return err
+		}
+		return Poison(err)
+	}
 	call := &protocol.IncomingCall{
 		SourceAddress: c.Source, SourceRollupID: c.SourceRollup, TargetAddress: c.Target, RollupID: c.RollupID,
 		Value: c.Value.ToBig(), Data: c.Data,
 	}
 	probe, err := in.delivery(call)
 	if err != nil {
-		return nil, Poison(err)
+		return nil, refuse(err)
 	}
 	fork, err := in.fork.Fork()
 	if err != nil {
@@ -93,21 +101,21 @@ func (in *Deliveries) Dispatch(c *Call) ([]byte, error) {
 	if _, err := fork.Apply(probe.Tx, t.hooks()); errors.Is(err, core.ErrGasLimitReached) {
 		return nil, ErrFull
 	} else if err != nil {
-		return nil, Poison(fmt.Errorf("probe of the delivery to %s: %w", c.Target, err))
+		return nil, refuse(fmt.Errorf("probe of the delivery to %s: %w", c.Target, err))
 	}
 	if call.ReturnData, err = probed(t.captures); err != nil {
 		return nil, Poison(fmt.Errorf("delivery to %s: %w", c.Target, err))
 	}
 	d, err := in.delivery(call)
 	if err != nil {
-		return nil, Poison(err)
+		return nil, refuse(err)
 	}
 	receipt, err := in.fork.Apply(d.Tx, nil)
 	if errors.Is(err, core.ErrGasLimitReached) {
 		return nil, ErrFull
 	}
 	if err != nil {
-		return nil, Poison(fmt.Errorf("delivery to %s: %w", c.Target, err))
+		return nil, refuse(fmt.Errorf("delivery to %s: %w", c.Target, err))
 	}
 	if receipt.Status != types.ReceiptStatusSuccessful {
 		return nil, Poison(fmt.Errorf("delivery to %s with its probed output failed", c.Target))

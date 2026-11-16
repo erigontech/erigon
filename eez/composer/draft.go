@@ -17,6 +17,7 @@
 package composer
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 
@@ -31,6 +32,10 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
+
+// ErrStateRead reports a failed state read: the node's failure, not the
+// transaction's, so the transaction waits.
+var ErrStateRead = errors.New("state read failed")
 
 // PreState is what a block executes on: its parent's state, the header
 // chain the engine reads, and the hashes BLOCKHASH serves.
@@ -48,6 +53,7 @@ type Draft struct {
 	engine     rules.Engine
 	header     *types.Header
 	pre        PreState
+	reads      *reads
 	chainRules *chain.Rules
 	ibs        *state.IntraBlockState
 	gp         *core.GasPool
@@ -59,7 +65,8 @@ type Draft struct {
 // NewDraft opens the block of header, running the engine's opening system
 // calls on pre.
 func NewDraft(config *chain.Config, engine rules.Engine, header *types.Header, pre PreState) (*Draft, error) {
-	d := &Draft{config: config, engine: engine, header: types.CopyHeader(header), pre: pre, ibs: state.New(pre.Reader)}
+	r := &reads{StateReader: pre.Reader}
+	d := &Draft{config: config, engine: engine, header: types.CopyHeader(header), pre: pre, reads: r, ibs: state.New(r)}
 	blockCtx := core.NewEVMBlockContext(d.header, pre.BlockHash, engine, accounts.InternAddress(d.header.Coinbase), config)
 	d.chainRules = blockCtx.Rules(config)
 	d.gp = new(core.GasPool).AddGas(header.GasLimit).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
@@ -67,7 +74,7 @@ func NewDraft(config *chain.Config, engine rules.Engine, header *types.Header, p
 		return core.SysCallContract(contract, data, config, ibs, header, engine, constCall, vm.Config{})
 	}
 	if err := engine.Initialize(config, pre.Headers, d.header, d.ibs, sysCall, log.Root(), nil); err != nil {
-		return nil, fmt.Errorf("open block %d: %w", header.Number.Uint64(), err)
+		return nil, fmt.Errorf("open block %d: %w", header.Number.Uint64(), errors.Join(r.failed(), err))
 	}
 	if err := d.ibs.FinalizeTx(d.rules(), state.NewNoopWriter()); err != nil {
 		return nil, err
@@ -79,7 +86,8 @@ func (d *Draft) rules() *chain.Rules { return d.chainRules }
 
 // Apply executes tx at the end of the draft, observed by tracer when set.
 // A transaction the block cannot hold fails Apply and leaves the draft as
-// it was.
+// it was. A failed state read fails it with ErrStateRead, and leaves the
+// draft unusable.
 func (d *Draft) Apply(tx types.Transaction, tracer *tracing.Hooks) (*types.Receipt, error) {
 	i := len(d.txs)
 	if err := core.CheckTxGas(d.engine, d.rules().IsAmsterdam, tx, d.gp); err != nil {
@@ -90,6 +98,9 @@ func (d *Draft) Apply(tx types.Transaction, tracer *tracing.Hooks) (*types.Recei
 	txs := append(slices.Clone(d.txs), tx)
 	receipt, err := core.ApplyTransactionWithEVMPostProcessed(d.config, d.engine, d.gp, d.ibs, state.NewNoopWriter(), d.header, tx, &d.gasUsed,
 		vm.Config{Tracer: tracer}, evm, core.TxPostProcess(d.engine, d.config, d.ibs, txs, i))
+	if failed := d.reads.failed(); failed != nil {
+		return nil, failed
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +124,11 @@ func (d *Draft) Fork() (*Draft, error) {
 
 // Nonce returns addr's nonce in the draft.
 func (d *Draft) Nonce(addr common.Address) (uint64, error) {
-	return d.ibs.GetNonce(accounts.InternAddress(addr))
+	n, err := d.ibs.GetNonce(accounts.InternAddress(addr))
+	if failed := d.reads.failed(); failed != nil {
+		return 0, failed
+	}
+	return n, err
 }
 
 // Txs returns the draft's transactions.

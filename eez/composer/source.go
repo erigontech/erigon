@@ -83,6 +83,7 @@ type Source struct {
 	config    *chain.Config
 	header    *types.Header
 	ibs       *state.IntraBlockState
+	reads     *reads
 	blockHash func(uint64) (common.Hash, error)
 	manager   accounts.Address
 	rollup    uint64
@@ -93,14 +94,15 @@ type Source struct {
 // the block of header, on the state reader reads and the block hashes
 // blockHash returns; rollup is the chain's rollup id.
 func NewSource(config *chain.Config, header *types.Header, reader state.StateReader, blockHash func(uint64) (common.Hash, error), manager common.Address, rollup uint64) *Source {
-	return &Source{config: config, header: header, ibs: state.New(reader), blockHash: blockHash, manager: accounts.InternAddress(manager), rollup: rollup}
+	r := &reads{StateReader: reader}
+	return &Source{config: config, header: header, ibs: state.New(r), reads: r, blockHash: blockHash, manager: accounts.InternAddress(manager), rollup: rollup}
 }
 
 // Run simulates tx, dispatching each proxy call it makes, and returns the
 // calls in order. It keeps tx's writes when accept, if set, takes the calls,
 // and returns accept's error otherwise. Errors from the dispatcher come back
-// as they are; a transaction without calls or with a failed frame around one
-// is poison.
+// as they are, and a failed state read as ErrStateRead; a transaction
+// without calls or with a failed frame around one is poison.
 func (s *Source) Run(tx types.Transaction, dispatch Dispatcher, accept func([]*Call) error) ([]*Call, error) {
 	var (
 		calls   []*Call
@@ -155,6 +157,8 @@ func (s *Source) Run(tx types.Transaction, dispatch Dispatcher, accept func([]*C
 	gp := new(core.GasPool).AddGas(s.header.GasLimit).AddBlobGas(s.config.GetMaxBlobGasPerBlock(s.header.Time))
 	_, err = core.ApplyMessage(evm, msg, gp, true, false, nil)
 	switch {
+	case s.reads.failed() != nil:
+		err = s.reads.failed()
 	case failure != nil:
 		err = failure
 	case err != nil:

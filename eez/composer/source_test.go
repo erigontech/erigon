@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -105,6 +106,57 @@ func (m *memState) ReadAccountIncarnation(a accounts.Address) (uint64, error) {
 func (m *memState) SetTrace(bool, string) {}
 func (m *memState) Trace() bool           { return false }
 func (m *memState) TracePrefix() string   { return "" }
+
+// failing fails every read of addr once armed.
+type failing struct {
+	state.StateReader
+	addr  common.Address
+	armed bool
+}
+
+var errDown = errors.New("state unavailable")
+
+func (f *failing) fail(a common.Address) error {
+	if f.armed && a == f.addr {
+		return errDown
+	}
+	return nil
+}
+
+func (f *failing) ReadAccountData(a accounts.Address) (*accounts.Account, error) {
+	if err := f.fail(a.Value()); err != nil {
+		return nil, err
+	}
+	return f.StateReader.ReadAccountData(a)
+}
+
+func (f *failing) ReadAccountStorage(a accounts.Address, k accounts.StorageKey) (uint256.Int, bool, error) {
+	if err := f.fail(a.Value()); err != nil {
+		return uint256.Int{}, false, err
+	}
+	return f.StateReader.ReadAccountStorage(a, k)
+}
+
+func (f *failing) ReadAccountCode(a accounts.Address) ([]byte, error) {
+	if err := f.fail(a.Value()); err != nil {
+		return nil, err
+	}
+	return f.StateReader.ReadAccountCode(a)
+}
+
+func (f *failing) ReadAccountCodeSize(a accounts.Address) (int, error) {
+	if err := f.fail(a.Value()); err != nil {
+		return 0, err
+	}
+	return f.StateReader.ReadAccountCodeSize(a)
+}
+
+func (f *failing) ReadAccountIncarnation(a accounts.Address) (uint64, error) {
+	if err := f.fail(a.Value()); err != nil {
+		return 0, err
+	}
+	return f.StateReader.ReadAccountIncarnation(a)
+}
 
 // proxyWord is authorizedProxies' word of a proxy for target on rollup.
 func proxyWord(target common.Address, rollup uint64) common.Hash {
@@ -278,6 +330,19 @@ func TestSourceRefuses(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uint64(2), f.nonce(t))
 	})
+	for name, addr := range map[string]common.Address{"the sender": {}, "the called contract": forwarder, "the manager": manager} {
+		t.Run("a failed read of "+name+" is transient", func(t *testing.T) {
+			f := newSourceFixture(t)
+			if addr == (common.Address{}) {
+				addr = f.sender
+			}
+			src := NewSource(chain.TestChainOsakaConfig, f.src.header, &failing{StateReader: f.state, addr: addr, armed: true}, f.src.blockHash, manager, 0)
+			_, err := src.Run(f.tx(t, 0, forwarder, 0, nil), (&echo{}).dispatch, nil)
+			require.ErrorIs(t, err, ErrStateRead)
+			require.ErrorIs(t, err, errDown)
+			require.False(t, IsPoison(err), err)
+		})
+	}
 	t.Run("a transaction its caller refuses leaves no trace", func(t *testing.T) {
 		f := newSourceFixture(t)
 		full := errors.New("full")
