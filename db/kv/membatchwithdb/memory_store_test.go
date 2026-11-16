@@ -477,6 +477,45 @@ func TestMemStore_DeleteCurrent(t *testing.T) {
 	v, err := s.GetOne("test", []byte("B"))
 	require.NoError(t, err)
 	assert.Nil(t, v)
+
+	k, v, err := c.Next()
+	require.NoError(t, err)
+	require.Equal(t, []byte("C"), k)
+	require.Equal(t, []byte("3"), v)
+}
+
+func TestMemStore_MoveAfterDelete(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		key       string
+		value     string
+		move      func(*memStoreCursor) ([]byte, []byte, error)
+		wantKey   string
+		wantValue string
+	}{
+		{"next duplicate", "A", "2", (*memStoreCursor).NextDup, "A", "3"},
+		{"next distinct key", "A", "2", (*memStoreCursor).NextNoDup, "B", "1"},
+		{"previous", "A", "2", (*memStoreCursor).Prev, "A", "1"},
+		{"previous from last", "B", "1", (*memStoreCursor).Prev, "A", "3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newMemStore()
+			for _, pair := range [][2]string{{"A", "1"}, {"A", "2"}, {"A", "3"}, {"B", "1"}} {
+				require.NoError(t, s.Put(kv.TblAccountVals, []byte(pair[0]), []byte(pair[1])))
+			}
+			c := s.newCursor(kv.TblAccountVals)
+			defer c.Close()
+			k, v, err := c.SeekBothExact([]byte(tc.key), []byte(tc.value))
+			require.NoError(t, err)
+			require.Equal(t, []byte(tc.key), k)
+			require.Equal(t, []byte(tc.value), v)
+			require.NoError(t, c.DeleteCurrent())
+			k, v, err = tc.move(c)
+			require.NoError(t, err)
+			require.Equal(t, []byte(tc.wantKey), k)
+			require.Equal(t, []byte(tc.wantValue), v)
+		})
+	}
 }
 
 func TestMemStore_DeleteExact(t *testing.T) {
