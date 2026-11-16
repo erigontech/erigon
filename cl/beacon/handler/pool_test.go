@@ -70,20 +70,36 @@ func TestPoolAttesterSlashingPublication(t *testing.T) {
 		err          error
 		status       int
 		publishCalls int
+		pooled       bool
+		tampered     bool
 	}{
 		{name: "validated", status: http.StatusOK, publishCalls: 1},
 		{name: "ignored", err: forkchoice.ErrIgnore, status: http.StatusOK},
 		{name: "wrapped ignore", err: fmt.Errorf("already seen: %w", forkchoice.ErrIgnore), status: http.StatusOK},
 		{name: "invalid", err: errors.New("invalid attester slashing"), status: http.StatusBadRequest},
+		{name: "pooled ignore", err: forkchoice.ErrIgnore, status: http.StatusOK, publishCalls: 1, pooled: true},
+		{name: "pooled wrapped ignore", err: fmt.Errorf("already seen: %w", forkchoice.ErrIgnore), status: http.StatusOK, publishCalls: 1, pooled: true},
+		{name: "tampered pooled request", err: forkchoice.ErrIgnore, status: http.StatusOK, publishCalls: 1, pooled: true, tampered: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			clock := eth_clock.NewMockEthereumClock(ctrl)
 			clock.EXPECT().GetCurrentEpoch().Return(uint64(0)).Times(1)
 			slashing := cltypes.NewAttesterSlashing(clparams.Phase0Version)
-			body, err := json.Marshal(slashing)
-			require.NoError(t, err)
+			opPool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
+			if tc.pooled {
+				opPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(slashing), slashing)
+			}
 			encoded, err := slashing.EncodeSSZ(nil)
+			require.NoError(t, err)
+			if tc.tampered {
+				slashing = cltypes.NewAttesterSlashing(clparams.Phase0Version)
+				slashing.Attestation_1.Data.Slot = 123
+				tamperedSSZ, err := slashing.EncodeSSZ(nil)
+				require.NoError(t, err)
+				require.NotEqual(t, encoded, tamperedSSZ)
+			}
+			body, err := json.Marshal(slashing)
 			require.NoError(t, err)
 			publisher := gossip_mock.NewMockGossip(ctrl)
 			publisher.EXPECT().Publish(gomock.Any(), clgossip.TopicNameAttesterSlashing, encoded).Return(nil).Times(tc.publishCalls)
@@ -99,6 +115,7 @@ func TestPoolAttesterSlashingPublication(t *testing.T) {
 				beaconChainCfg:  &clparams.MainnetBeaconConfig,
 				ethClock:        clock,
 				forkchoiceStore: store,
+				operationsPool:  opPool,
 				sentinel:        &nonNilSentinelClient{},
 				gossipManager:   publisher,
 			}
@@ -109,6 +126,50 @@ func TestPoolAttesterSlashingPublication(t *testing.T) {
 			require.Equal(t, 1, calls)
 		})
 	}
+}
+
+func TestPoolAttesterSlashingRetriesFailedPublication(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentEpoch().Return(uint64(0)).Times(2)
+	opPool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
+	slashing := cltypes.NewAttesterSlashing(clparams.Phase0Version)
+	body, err := json.Marshal(slashing)
+	require.NoError(t, err)
+	encoded, err := slashing.EncodeSSZ(nil)
+	require.NoError(t, err)
+	calls := 0
+	store := &attesterSlashingStore{onAttesterSlashing: func(req *cltypes.AttesterSlashing, test bool) error {
+		calls++
+		require.False(t, test)
+		key := pool.ComputeKeyForAttesterSlashing(req)
+		if opPool.AttesterSlashingsPool.Has(key) {
+			return forkchoice.ErrIgnore
+		}
+		opPool.AttesterSlashingsPool.Insert(key, req)
+		return nil
+	}}
+	publisher := gossip_mock.NewMockGossip(ctrl)
+	gomock.InOrder(
+		publisher.EXPECT().Publish(gomock.Any(), clgossip.TopicNameAttesterSlashing, encoded).Return(errors.New("topic not found")),
+		publisher.EXPECT().Publish(gomock.Any(), clgossip.TopicNameAttesterSlashing, encoded).Return(nil),
+	)
+	handler := &ApiHandler{
+		logger:          log.Root(),
+		beaconChainCfg:  &clparams.MainnetBeaconConfig,
+		ethClock:        clock,
+		forkchoiceStore: store,
+		operationsPool:  opPool,
+		sentinel:        &nonNilSentinelClient{},
+		gossipManager:   publisher,
+	}
+	for range 2 {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/attester_slashings", bytes.NewReader(body))
+		handler.PostEthV1BeaconPoolAttesterSlashings(recorder, request)
+		require.Equal(t, http.StatusOK, recorder.Code)
+	}
+	require.Equal(t, 2, calls)
 }
 
 func TestPoolAttesterSlashings(t *testing.T) {
