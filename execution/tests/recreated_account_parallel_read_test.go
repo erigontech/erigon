@@ -195,7 +195,7 @@ func testParallelBlockPastDispatchWindow(t *testing.T, withBAL bool) {
 	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
 	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 
-	const txs = 80
+	const txs = 300
 	counter := common.HexToAddress("0xc0c0")
 	config := chain.TestChainOsakaConfig.Copy()
 	if withBAL {
@@ -210,7 +210,7 @@ func testParallelBlockPastDispatchWindow(t *testing.T, withBAL bool) {
 		sender:  {Balance: big.NewInt(1_000_000_000_000_000_000)},
 	}
 
-	ethconfig.Defaults.Sync.ExecWorkerCount = 4
+	ethconfig.Defaults.Sync.ExecWorkerCount = 16
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
