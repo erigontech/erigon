@@ -1341,13 +1341,8 @@ func TestExecutionPayloadServiceRollsBackSeenAfterTransientImportFailure(t *test
 
 		require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
 		require.Equal(t, 1, receiveWithTimeout(t, imports, "first payload import did not run"))
-		for {
-			if err := service.ProcessMessage(t.Context(), nil, envelope); err == nil {
-				break
-			} else {
-				require.ErrorIs(t, err, ErrIgnore)
-			}
-		}
+		synctest.Wait() // the import's rollback must finish before the retry can claim the envelope
+		require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
 		require.Equal(t, 2, receiveWithTimeout(t, imports, "second payload import did not run"))
 		requireEnvelopeImportKeptSeen(t, fcu, blockRoot, 1)
 	})
