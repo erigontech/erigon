@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
@@ -366,6 +367,70 @@ func TestSSZRESTPayloadStatusSpecExample(t *testing.T) {
 	require.Equal(t, uint32(9), binary.LittleEndian.Uint32(encB[5:9]))  // offset[validation_error]
 	require.Equal(t, uint32(4), binary.LittleEndian.Uint32(encB[9:13])) // inner String offset
 	require.Equal(t, []byte("bad state root"), encB[13:27])
+}
+
+// sszByteLists encodes List[ByteList[N], M] by hand: one offset per item, then the items.
+func sszByteLists(items []hexutil.Bytes) []byte {
+	var out []byte
+	offset := 4 * len(items)
+	for _, item := range items {
+		out = binary.LittleEndian.AppendUint32(out, uint32(offset))
+		offset += len(item)
+	}
+	for _, item := range items {
+		out = append(out, item...)
+	}
+	return out
+}
+
+func TestSSZRESTPayloadStatusWithWitnessByteLayout(t *testing.T) {
+	latest := common.HexToHash("0xcd")
+	status := &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &latest}
+	statusEnc, err := status.EncodeSSZ(nil)
+	require.NoError(t, err)
+	witness := &jsonrpc.ExecutionWitnessResult{
+		State:   []hexutil.Bytes{{0x01, 0x02}, {0x03}},
+		Codes:   []hexutil.Bytes{{0x60, 0x00}},
+		Headers: []hexutil.Bytes{{0xf9, 0x01, 0x02}},
+	}
+	state, codes, headers := sszByteLists(witness.State), sszByteLists(witness.Codes), sszByteLists(witness.Headers)
+	witnessEnc := binary.LittleEndian.AppendUint32(nil, 12)
+	witnessEnc = binary.LittleEndian.AppendUint32(witnessEnc, uint32(12+len(state)))
+	witnessEnc = binary.LittleEndian.AppendUint32(witnessEnc, uint32(12+len(state)+len(codes)))
+	witnessEnc = slices.Concat(witnessEnc, state, codes, headers)
+	prefix := binary.LittleEndian.AppendUint32(nil, 8)
+	prefix = binary.LittleEndian.AppendUint32(prefix, uint32(8+len(statusEnc)))
+
+	enc, err := encodePayloadStatusWithWitness(status, witness)
+	require.NoError(t, err)
+	// Optional[ExecutionWitness] is List[ExecutionWitness, 1]: one element offset, then the element.
+	require.Equal(t, slices.Concat(prefix, statusEnc, []byte{4, 0, 0, 0}, witnessEnc), enc)
+	decodedStatus, decodedWitness, err := decodePayloadStatusWithWitness(enc)
+	require.NoError(t, err)
+	require.Equal(t, status, decodedStatus)
+	require.Equal(t, witness, decodedWitness)
+
+	enc, err = encodePayloadStatusWithWitness(status, nil)
+	require.NoError(t, err)
+	require.Equal(t, slices.Concat(prefix, statusEnc), enc)
+	_, decodedWitness, err = decodePayloadStatusWithWitness(enc)
+	require.NoError(t, err)
+	require.Nil(t, decodedWitness)
+}
+
+func TestSSZRESTPayloadStatusWithWitnessRejectsOversizedItems(t *testing.T) {
+	status := &engine_types.PayloadStatus{Status: engine_types.ValidStatus}
+	for name, witness := range map[string]*jsonrpc.ExecutionWitnessResult{
+		"state node": {State: []hexutil.Bytes{make(hexutil.Bytes, sszMaxBytesPerWitnessNode+1)}},
+		"code":       {Codes: []hexutil.Bytes{make(hexutil.Bytes, sszMaxBytesPerCode+1)}},
+		"header":     {Headers: []hexutil.Bytes{make(hexutil.Bytes, sszMaxBytesPerHeader+1)}},
+		"headers":    {Headers: make([]hexutil.Bytes, sszMaxWitnessHeaders+1)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := encodePayloadStatusWithWitness(status, witness)
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestSSZRESTPayloadStatusEnumRoundTrip(t *testing.T) {
@@ -1119,7 +1184,7 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &caps))
 	require.Equal(t, []string{"paris", "shanghai", "cancun", "prague", "osaka", "amsterdam"}, caps.SupportedForks)
-	require.Equal(t, []string{"payloads", "forkchoice", "bodies"}, caps.ForkScopedEndpoints)
+	require.Equal(t, []string{"payloads", "payloads/witness", "forkchoice", "bodies"}, caps.ForkScopedEndpoints)
 	require.Equal(t, []string{"v1", "v2", "v3", "v4"}, caps.IndependentlyVersioned["blobs"])
 	require.Equal(t, []string{"capabilities", "identity", "inclusion-list"}, caps.UnscopedEndpoints)
 	// pin the spec's MAX_* values: MAX_BODIES_REQUEST, MAX_VERSIONED_HASHES_PER_REQUEST,
@@ -1290,6 +1355,36 @@ func TestSSZRESTNewPayloadForkMatching(t *testing.T) {
 			require.ErrorContains(t, status.ValidationError.Error(), "invalid block hash")
 		})
 	}
+}
+
+func TestSSZRESTPayloadWitnessRequiresAmsterdam(t *testing.T) {
+	srv := newTestEngineServer(allForksConfig(), true)
+	for _, fork := range []string{"paris", "shanghai", "cancun", "prague", "osaka"} {
+		t.Run(fork, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads/witness", fork, nil))
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Equal(t, problemUnsupportedFork, problemType(t, rec))
+		})
+	}
+}
+
+func TestSSZRESTPayloadWitnessOmittedWhenNotValid(t *testing.T) {
+	payload := engine_types.NewExecutionPayloadSSZ(clparams.GloasVersion)
+	payload.Timestamp = 500
+	payload.BlockAccessList = &hexutil.Bytes{0xc0}
+	body, err := encodeNewPayloadEnvelope(clparams.GloasVersion, payload, common.Hash{}, nil)
+	require.NoError(t, err)
+	srv := newTestEngineServer(allForksConfig(), true)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec, newSSZRequest(t.Context(), http.MethodPost, "/engine/v1/payloads/witness", "amsterdam", body))
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
+	status, witness, err := decodePayloadStatusWithWitness(rec.Body.Bytes())
+	require.NoError(t, err)
+	require.Equal(t, engine_types.InvalidStatus, status.Status)
+	require.Nil(t, witness)
 }
 
 func TestSSZRESTNewPayloadRejectsExcessTransactionsBeforeDecoding(t *testing.T) {

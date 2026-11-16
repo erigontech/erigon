@@ -63,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider"
@@ -3612,6 +3613,60 @@ func TestBALDrivenComputeAheadRemovesTouchedEmptyAccount(t *testing.T) {
 			require.Positive(t, stagedsync.ComputedAheadCountForTest(), "the block before the touch is computed ahead")
 		})
 	}
+}
+
+// A CREATE2 to an account with storage but no nonce and no code replaces the account's storage,
+// and the block access list does not show that the old storage is dropped. Compute-ahead must not fold such a
+// block from its BAL, or it keeps the old storage and the root differs.
+func TestBALDrivenComputeAheadWipesStorageOfCreatedAccount(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+	stagedsync.ResetComputedAheadForTest()
+
+	ctx := t.Context()
+	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	initCode := program.New().Sstore(2, 1).Op(vm.STOP).Bytes()
+	factory := common.HexToAddress("0xfac7")
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.AllProtocolChanges,
+			Alloc: types.GenesisAlloc{
+				senderAddr: {Balance: big.NewInt(1 * common.Ether)},
+				factory:    {Code: program.New().Create2(initCode, 0).Op(vm.STOP).Bytes()},
+				target:     {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x09")}},
+			},
+		}),
+		execmoduletester.WithExperimentalBAL(),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+		// Blocks 1 and 2 are compute-ahead candidates; block 2 creates the target.
+		execmoduletester.WithMaxReorgDepth(1),
+	)
+	chainPack, err := m.GenerateChain(4, func(i int, b *blockgen.BlockGen) {
+		to := senderAddr
+		if i == 1 {
+			to = factory
+		}
+		tx, err := types.SignTx(types.NewTransaction(b.TxNonce(senderAddr), to, uint256.NewInt(0), 1_000_000, uint256.NewInt(10_000_000_000), nil),
+			*types.LatestSignerForChainID(nil), privKey)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+
+	insRes, err := m.InsertBlocks(ctx, chainPack.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	fcuRes, err := m.UpdateForkChoice(ctx, chainPack.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status, "validationError=%q", fcuRes.ValidationError)
+	require.Positive(t, stagedsync.ComputedAheadCountForTest(), "the block before the create is computed ahead")
 }
 
 type balComputeAheadResult struct {

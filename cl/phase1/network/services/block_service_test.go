@@ -2568,9 +2568,10 @@ func TestPublishedBlockJobShutdownClosesQueuedWaitersAndRejectsNewSchedules(t *t
 	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
 	secondBlock := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
 	secondBlock.Block.Slot = 1
+	transient := errors.New("transient")
 	handles := []PublishedBlockJob{
-		service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil }),
-		service.SchedulePublishedBlockForLaterProcessing(secondBlock, func(context.Context) error { return nil }),
+		service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return transient }),
+		service.SchedulePublishedBlockForLaterProcessing(secondBlock, func(context.Context) error { return transient }),
 	}
 	cancel()
 	waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)

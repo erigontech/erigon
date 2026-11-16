@@ -25,7 +25,6 @@ import (
 	"maps"
 	"os"
 	"slices"
-	"strings"
 
 	"github.com/holiman/uint256"
 
@@ -351,99 +350,4 @@ func WriteLogs(writer io.Writer, logs []*types.Log) {
 		fmt.Fprint(writer, hex.Dump(log.Data))
 		fmt.Fprintln(writer)
 	}
-}
-
-type mdLogger struct {
-	out io.Writer
-	cfg *LogConfig
-	env *tracing.VMContext
-}
-
-// NewMarkdownLogger creates a logger which outputs information in a format adapted
-// for human readability, and is also a valid markdown table
-func NewMarkdownLogger(cfg *LogConfig, writer io.Writer) *mdLogger {
-	l := &mdLogger{writer, cfg, nil}
-	if l.cfg == nil {
-		l.cfg = &LogConfig{}
-	}
-	return l
-}
-
-func (t *mdLogger) Hooks() *tracing.Hooks {
-	return &tracing.Hooks{
-		OnTxStart:           t.OnTxStart,
-		OnSystemCallStartV2: t.OnSystemCallStartV2,
-		OnEnterV2:           t.OnEnterV2,
-		OnExitV2:            t.OnExitV2,
-		OnOpcodeV2:          t.OnOpcodeV2,
-		OnFaultV2:           t.OnFaultV2,
-	}
-}
-
-func (t *mdLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
-	t.env = env
-}
-
-func (t *mdLogger) OnSystemCallStartV2(env *tracing.VMContext) {
-	t.env = env
-}
-
-func (t *mdLogger) captureStartOrEnter(from, to accounts.Address, create bool, input []byte, gas mdgas.MdGas, value *uint256.Int) {
-	if !create {
-		fmt.Fprintf(t.out, "From: `%v`\nTo: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
-			from.String(), to.String(),
-			input, gas.Execution, value)
-	} else {
-		fmt.Fprintf(t.out, "From: `%v`\nCreate at: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
-			from.String(), to.String(),
-			input, gas.Execution, value)
-	}
-	fmt.Fprintf(t.out, `
-|  Pc   |      Op     | Cost | State cost |   Stack   |   RStack  |  Refund |
-|-------|-------------|------|------------|-----------|-----------|---------|
-`)
-}
-
-func (t *mdLogger) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
-	if depth != 0 {
-		return
-	}
-	create := vm.OpCode(typ) == vm.CREATE
-	t.captureStartOrEnter(from, to, create, input, gas, &value)
-}
-
-func (t *mdLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
-	if depth == 0 {
-		fmt.Fprintf(t.out, "\nOutput: `%#x`\nConsumed gas: `%d`\n", output, gasUsed.Execution)
-		if t.env.Rules.IsAmsterdam {
-			fmt.Fprintf(t.out, "Consumed state gas: `%d`\n", gasUsed.State)
-		}
-		fmt.Fprintf(t.out, "Error: `%v`\n", err)
-	}
-}
-
-// OnOpcodeV2 also tracks SLOAD/SSTORE ops to track storage change.
-func (t *mdLogger) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
-	stack := scope.StackData()
-
-	fmt.Fprintf(t.out, "| %4d  | %10v  |  %3d | %3d |", pc, op, cost.Execution, cost.State)
-
-	if !t.cfg.DisableStack {
-		// format stack
-		a := make([]string, 0, len(stack))
-		for _, elem := range stack {
-			a = append(a, elem.String())
-		}
-		b := fmt.Sprintf("[%v]", strings.Join(a, ","))
-		fmt.Fprintf(t.out, "%10v |", b)
-	}
-	fmt.Fprintf(t.out, "%10v |", t.env.IntraBlockState.GetRefund())
-	fmt.Fprintln(t.out, "")
-	if err != nil {
-		fmt.Fprintf(t.out, "Error: %v\n", err)
-	}
-}
-
-func (t *mdLogger) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, depth int, err error) {
-	fmt.Fprintf(t.out, "\nError: at pc=%d, op=%v: %v\n", pc, op, err)
 }
