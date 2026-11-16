@@ -70,7 +70,7 @@ func TestUnwindCodeNotificationsUseRestoredState(t *testing.T) {
 			accumulator := shards.NewAccumulator()
 			header := makeHeader(1, common.Hash{})
 			accumulator.StartChange(header, nil, true)
-			require.NoError(t, stateChangesStreamAtUnwind(ctx, tx, doms.AsSnapshotGetter(tx), 1, 0, accumulator, &diffs, logger))
+			require.NoError(t, stateChangesStreamAtUnwind(ctx, doms.AsSnapshotGetter(tx), 1, 0, accumulator, &diffs, logger))
 			batch := accumulator.Batch(header).ToProtoBatch()
 			require.False(t, batch.StateChangesIncomplete)
 			require.Len(t, batch.ChangeBatch[0].Changes, 1)
