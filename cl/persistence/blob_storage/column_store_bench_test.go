@@ -53,8 +53,8 @@ func benchRoot(n int) common.Hash {
 // a --caplin.blobs-archive node does, onto a real on-disk fs.
 func BenchmarkColumnWriteBlock(b *testing.B) {
 	for _, blobs := range []int{6, 21} {
-		for _, parallel := range []bool{false, true} {
-			b.Run(fmt.Sprintf("blobs=%d/parallel=%v", blobs, parallel), func(b *testing.B) {
+		for _, mode := range []string{"parallel=false", "parallel=true", "batch=true"} {
+			b.Run(fmt.Sprintf("blobs=%d/%s", blobs, mode), func(b *testing.B) {
 				fs := afero.NewBasePathFs(afero.NewOsFs(), b.TempDir())
 				store := newBenchColumnStore(b, fs, benchColumnConfig())
 				sidecars := benchColumnSidecars(b, blobs)
@@ -65,11 +65,17 @@ func BenchmarkColumnWriteBlock(b *testing.B) {
 					for _, s := range sidecars {
 						s.SignedBlockHeader.Header.Slot = slot
 					}
-					if !parallel {
+					switch mode {
+					case "parallel=false":
 						for c, s := range sidecars {
 							if err := store.WriteColumnSidecars(b.Context(), root, int64(c), s); err != nil {
 								b.Fatal(err)
 							}
+						}
+						continue
+					case "batch=true":
+						if err := store.WriteColumnSidecarsBatch(b.Context(), root, sidecars); err != nil {
+							b.Fatal(err)
 						}
 						continue
 					}
