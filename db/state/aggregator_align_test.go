@@ -18,12 +18,15 @@ package state
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
 )
 
 // generateStandaloneIIFile writes files with a hardcoded step size of 10.
@@ -259,4 +262,22 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 
 	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
 		"lowering a history-II end while values ends stay put must trip the forbid assert")
+}
+
+func TestOpenFolderLetsMissedAccessorsBuildBeforeGapCheck(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.1-2.bt")))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return SavePruneValProgress(tx, agg.d[kv.AccountsDomain].ValuesTable, &prune.Stat{TxTo: 2 * alignStepSize})
+	}))
+
+	require.NoError(t, agg.OpenFolder(db))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
+	requireVisibleEnd(t, agg, 2*alignStepSize)
 }
