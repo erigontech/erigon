@@ -238,6 +238,37 @@ func (r *RPC) SendRawTransaction(ctx context.Context, raw []byte) error {
 	return nil
 }
 
+// Receipt is what the poster reads of a transaction's receipt.
+type Receipt struct {
+	// Status is 1 for a transaction that succeeded.
+	Status      uint64
+	BlockNumber uint64
+	TxIndex     uint64
+	Logs        []*types.Log
+}
+
+// Receipt returns the receipt of the transaction with hash, nil when the
+// node has none.
+func (r *RPC) Receipt(ctx context.Context, hash common.Hash) (*Receipt, error) {
+	var raw *struct {
+		Status      *hexutil.Uint64 `json:"status"`
+		BlockNumber *hexutil.Uint64 `json:"blockNumber"`
+		TxIndex     *hexutil.Uint64 `json:"transactionIndex"`
+		Logs        []*types.Log    `json:"logs"`
+	}
+	what := fmt.Sprintf("receipt of %x", hash)
+	if err := r.client.CallContext(ctx, &raw, "eth_getTransactionReceipt", hash); err != nil {
+		return nil, mapError(err, what)
+	}
+	if raw == nil {
+		return nil, nil
+	}
+	if raw.Status == nil || raw.BlockNumber == nil || raw.TxIndex == nil {
+		return nil, fmt.Errorf("%w: %s lacks status, blockNumber or transactionIndex", ErrInconsistent, what)
+	}
+	return &Receipt{Status: uint64(*raw.Status), BlockNumber: uint64(*raw.BlockNumber), TxIndex: uint64(*raw.TxIndex), Logs: raw.Logs}, nil
+}
+
 // revertCode is the JSON-RPC error code of an execution revert (EIP-1474).
 const revertCode = 3
 
