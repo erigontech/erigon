@@ -311,17 +311,12 @@ type cacheUnwindState struct {
 	pending bool
 }
 
-// PickTrieVariant returns the commitment trie variant for a commitment.TrieConfig built inline.
-func PickTrieVariant() commitment.TrieVariant {
-	return commitment.VariantParallelHexPatricia
-}
-
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, opts ...SharedDomainOption) (*SharedDomains, error) {
 	o := sharedDomainOptions{
 		trieCfg:              commitment.DefaultTrieConfig(),
 		useSharedBranchCache: true,
 	}
-	o.trieCfg.Variant = PickTrieVariant()
+	o.trieCfg.Variant = commitment.VariantParallelHexPatricia
 	for _, opt := range opts {
 		opt(&o)
 	}

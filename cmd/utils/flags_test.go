@@ -24,11 +24,14 @@ import (
 	"context"
 	"net/netip"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+
+	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/mmap"
@@ -518,4 +521,14 @@ func TestBALBatchPrefetchOffWithoutIOUring(t *testing.T) {
 
 	disableBALBatchPrefetchWithoutIOUring(false)
 	require.False(t, dbg.BALBatchPrefetch || mmap.BatchPrefetch, "no io_uring, on any platform: both flags go off")
+}
+
+// COMMITMENT_PARALLEL=false was the documented way back to the sequential trie, so setting it now warns too.
+func TestWarnParallelCommitmentDeprecatedOnEnv(t *testing.T) {
+	t.Setenv("COMMITMENT_PARALLEL", "false")
+	var out strings.Builder
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&out, log.LogfmtFormat()))
+	warnParallelCommitmentDeprecated(&cli.Command{}, logger)
+	require.Contains(t, out.String(), "COMMITMENT_PARALLEL")
 }

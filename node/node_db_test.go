@@ -22,7 +22,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/node/nodecfg"
 )
 
@@ -36,8 +35,4 @@ func TestExecWorkerCountPrefersNodeConfig(t *testing.T) {
 
 	require.Equal(t, 64, execWorkerCount(&nodecfg.Config{ExecWorkerCount: 64}))
 	require.Equal(t, 8, execWorkerCount(&nodecfg.Config{}))
-}
-
-func TestParallelCommitmentReaders(t *testing.T) {
-	require.Equal(t, commitment.ParallelCommitmentReadTxs(), parallelCommitmentReaders())
 }

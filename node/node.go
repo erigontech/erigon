@@ -309,10 +309,6 @@ func execWorkerCount(config *nodecfg.Config) int {
 	return cmp.Or(config.ExecWorkerCount, dbg.Exec3Workers)
 }
 
-func parallelCommitmentReaders() int {
-	return commitment.ParallelCommitmentReadTxs()
-}
-
 func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
 	switch label {
 	case dbcfg.ChainDB:
@@ -340,7 +336,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		roTxsLimiter := semaphore.NewWeighted(httpcfg.RoTxsLimit(
 			config.Http.DBReadConcurrency,
 			execWorkerCount(config),
-			parallelCommitmentReaders(),
+			commitment.ParallelCommitmentReadTxs(),
 			dbg.BALCommitmentWarmupReaders(),
 			dbg.ReadAheadWorkerReaders(),
 		))

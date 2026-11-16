@@ -1978,6 +1978,11 @@ func warnParallelCommitmentDeprecated(ctx *cli.Command, logger log.Logger) {
 	if ctx.IsSet(ExperimentalParallelCommitmentFlag.Name) {
 		logger.Warn("[DEPRECATED] --experimental.parallel-commitment has no effect; commitment always runs on the parallel trie")
 	}
+	for _, name := range []string{"COMMITMENT_PARALLEL", dbg.ErigonEnvPrefix + "COMMITMENT_PARALLEL"} {
+		if _, ok := os.LookupEnv(name); ok {
+			logger.Warn("[DEPRECATED] " + name + " has no effect; commitment always runs on the parallel trie")
+		}
+	}
 }
 
 // RpcGasCap reads the rpc.gascap flag; the accessor must match its registered UintFlag type.
