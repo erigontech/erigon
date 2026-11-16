@@ -18,10 +18,12 @@ package state
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -63,6 +65,20 @@ func TestVisibleFilesAligned_LaggingCommitmentClampsEveryone(t *testing.T) {
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, alignStepSize)
+}
+
+// a gap in one domain's files lowers every list's visible end
+func TestVisibleFilesAligned_GapInOneListLowersEveryList(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.1-2.bt")))
 	require.NoError(t, agg.OpenFolder(db))
 
 	requireVisibleEnd(t, agg, alignStepSize)
