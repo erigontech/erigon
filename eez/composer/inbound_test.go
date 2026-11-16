@@ -44,11 +44,13 @@ import (
 // syncWindow is a recorded window ending at a Sync block with cross-chain
 // transactions.
 type syncWindow struct {
-	config *chain.Config
-	engine rules.Engine
-	sync   *types.Block
-	pre    PreState
-	exec   *stateless.Result
+	config  *chain.Config
+	engine  rules.Engine
+	sync    *types.Block
+	pre     PreState
+	exec    *stateless.Result
+	witness *stateless.Witness
+	batch   *protocol.ProofSystemBatch
 }
 
 func loadSyncWindow(t *testing.T) *syncWindow {
@@ -76,6 +78,9 @@ func loadSyncWindow(t *testing.T) *syncWindow {
 	require.NoError(t, err)
 	w.pre = PreState{Reader: reader, Headers: headers, BlockHash: blockHash}
 	w.exec, err = stateless.Execute(w.config, w.engine, w.sync, witness)
+	require.NoError(t, err)
+	w.witness = witness
+	w.batch, err = protocol.DecodePostAndVerifyBatch(fw.PostBatch)
 	require.NoError(t, err)
 	return w
 }
