@@ -377,8 +377,8 @@ func TestRetire_DetachesFromDirtyFiles(t *testing.T) {
 	require.Equal(t, uint64(2), hf[0].startTxNum/stepSize)
 }
 
-// Retire selects over visible files, so a subsumed (dirty-but-not-visible) file below the
-// cutoff is covered garbage left to the merge clean-up, not retired here.
+// Retire takes its boundary from aged visible files, so a subsumed (dirty-but-not-visible) file
+// below the cutoff stays while no visible file is aged.
 func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
@@ -399,12 +399,12 @@ func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 	require.Equal(t, uint64(4), at.d[kv.AccountsDomain].ht.files[0].endTxNum/stepSize)
 	at.Close()
 
-	// cutoff step 2: the only visible accounts file is [0,4] (endStep 4 > 2), so nothing is
-	// retired. The invisible [0,2] is left for the merge clean-up, not swept by Retire.
+	// cutoff step 2: the only visible accounts file is [0,4] (endStep 4 > 2), so no visible file is
+	// aged and nothing is retired, not even the invisible [0,2].
 	n, err := aggRetire(t, agg, kv.RetireCutoffs{Default: 2 * stepSize})
 	require.NoError(t, err)
 	require.Zero(t, n)
-	require.Equal(t, 2, accountsHist.dirtyFiles.Len(), "invisible subsumed file must not be retired")
+	require.Equal(t, 2, accountsHist.dirtyFiles.Len(), "with no aged visible file, nothing is retired")
 }
 
 func TestRetire_DetachesCoveredSourcesWithCoveringFile(t *testing.T) {

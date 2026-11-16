@@ -52,7 +52,9 @@ func TestCheckFilesDBGapChecksHistory(t *testing.T) {
 			require.NoError(t, SavePruneValProgress(tx, agg.d[kv.AccountsDomain].History.ValuesTable, &prune.Stat{TxTo: 30}))
 			at := agg.BeginFilesRo()
 			defer at.Close()
-			require.ErrorContains(t, at.CheckFilesDBGap(tx), "history accounts")
+			err = at.CheckFilesDBGap(tx)
+			require.ErrorContains(t, err, "history accounts")
+			require.ErrorContains(t, err, "snapshots index", "a lost accessor is rebuilt, not a reason to reset the datadir")
 		})
 	}
 }
