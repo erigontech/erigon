@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
-	"testing/synctest"
 	"time"
 )
 
@@ -84,28 +83,28 @@ func TestResubscribe(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
 	}
-	synctest.Test(t, func(t *testing.T) {
-		var i int
-		nfails := 6
-		sub := Resubscribe(100*time.Millisecond, func(ctx context.Context) (Subscription, error) {
-			// fmt.Printf("call #%d @ %v\n", i, time.Now())
-			i++
-			if i == 2 {
-				// Delay the second failure a bit to reset the resubscribe interval.
-				time.Sleep(200 * time.Millisecond)
-			}
-			if i < nfails {
-				return nil, errors.New("oops")
-			}
-			sub := NewSubscription(func(unsubscribed <-chan struct{}) error { return nil })
-			return sub, nil
-		})
+	t.Parallel()
 
-		<-sub.Err()
-		if i != nfails {
-			t.Fatalf("resubscribe function called %d times, want %d times", i, nfails)
+	var i int
+	nfails := 6
+	sub := Resubscribe(100*time.Millisecond, func(ctx context.Context) (Subscription, error) {
+		// fmt.Printf("call #%d @ %v\n", i, time.Now())
+		i++
+		if i == 2 {
+			// Delay the second failure a bit to reset the resubscribe interval.
+			time.Sleep(200 * time.Millisecond)
 		}
+		if i < nfails {
+			return nil, errors.New("oops")
+		}
+		sub := NewSubscription(func(unsubscribed <-chan struct{}) error { return nil })
+		return sub, nil
 	})
+
+	<-sub.Err()
+	if i != nfails {
+		t.Fatalf("resubscribe function called %d times, want %d times", i, nfails)
+	}
 }
 
 func TestResubscribeAbort(t *testing.T) {
