@@ -2411,6 +2411,8 @@ func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domai
 	}
 	defer it.Close()
 	var touches uint64
+	var prev []byte
+	v3 := sd.GetCommitmentCtx().Trie().Variant() == commitment.VariantCommitmentV3
 	for it.HasNext() {
 		k, _, err := it.Next()
 		if err != nil {
@@ -2418,6 +2420,13 @@ func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domai
 		}
 		if visitor != nil {
 			visitor(k)
+		}
+		if v3 {
+			if bytes.Equal(k, prev) {
+				touches++
+				continue
+			}
+			prev = append(prev[:0], k...)
 		}
 		if err := sd.GetCommitmentCtx().TouchKeyFromState(tx, k); err != nil {
 			return 0, err

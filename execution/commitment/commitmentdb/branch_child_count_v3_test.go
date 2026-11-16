@@ -32,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
 
+var _ v3Trie = (*v3.Trie)(nil)
+
 type recordsStateReader struct {
 	testStateReader
 	records map[string][]byte

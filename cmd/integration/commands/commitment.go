@@ -284,7 +284,7 @@ var cmdCommitmentVerify = &cobra.Command{
 
 func commitmentVerify(ctx context.Context, logger log.Logger) error {
 	if !statecfg.ExperimentalCommitmentV3 {
-		return errors.New("verify reads v3 commitment records; run with COMMITMENT_V3=true")
+		return errors.New("verify reads v3 commitment records; run with ERIGON_COMMITMENT_V3=true")
 	}
 	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, logger)
 	if err != nil {
@@ -301,24 +301,19 @@ func commitmentVerify(ctx context.Context, logger log.Logger) error {
 }
 
 var cmdCommitmentRebuild = &cobra.Command{
-	Use:   "rebuild",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "rebuild",
+	Short:        "",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		defer debug.Exit()
 		skipFilesDBGapCheck = statecfg.ExperimentalCommitmentV3
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer db.Close()
-
-		if err := commitmentRebuild(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+		return commitmentRebuild(db, cmd.Context(), logger)
 	},
 }
 
@@ -563,8 +558,8 @@ Examples:
 		if convertRestore && convertContinue {
 			return errors.New("--continue is mutually exclusive with --restore")
 		}
-		if (convertV3 || convertRestore) && statecfg.ExperimentalCommitmentV3 {
-			return errors.New("convert --v3 and --restore open legacy commitment files; run them without COMMITMENT_V3=true")
+		if statecfg.ExperimentalCommitmentV3 {
+			return errors.New("commitment convert opens legacy commitment files; run it without ERIGON_COMMITMENT_V3=true")
 		}
 		if convertRestore {
 			return commitmentRestore(ctx, logger)
@@ -1563,12 +1558,14 @@ func fileContentsMapChart(fileName string, data *visualizeOverallStat) *charts.T
 	}
 
 	keysIndex := 0
-	TreeMap[keysIndex].Children = make([]opts.TreeMapNode, 0)
+	TreeMap[keysIndex].Children = make([]opts.TreeMapNode, len(data.prefixes))
+	i := 0
 	for prefSize, stat := range data.prefixes {
-		TreeMap[keysIndex].Children = append(TreeMap[keysIndex].Children, opts.TreeMapNode{
+		TreeMap[keysIndex].Children[i] = opts.TreeMapNode{
 			Name:  strconv.FormatUint(prefSize, 10),
 			Value: int(stat.KeySize),
-		})
+		}
+		i++
 	}
 
 	valsIndex := 1

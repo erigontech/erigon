@@ -18,6 +18,7 @@ package integrity_test
 
 import (
 	"bytes"
+	"math"
 	"math/rand"
 	"testing"
 
@@ -123,6 +124,10 @@ func checkStateVerifyOnRandomWrites(t *testing.T, v3 bool) {
 	if v3 {
 		require.NoError(t, integrity.CheckCommitmentKvDeref(ctx, db, nil, true, logger))
 		require.NoError(t, integrity.CheckCommitmentKvi(ctx, integrity.SamplerCfg{SampleRatio: 1}, db, nil, true, logger))
+		checks, err := state.FoldCommitmentV3(ctx, agg, []uint64{math.MaxUint64}, nil)
+		require.NoError(t, err)
+		require.NotZero(t, checks[0].Records)
+		require.Equal(t, endTxNum-1, checks[0].TxNum)
 	}
 }
 
@@ -130,7 +135,7 @@ func TestCheckStateVerify(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	checkStateVerifyOnRandomWrites(t, false)
 }
 
@@ -142,7 +147,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	logger := log.New()
 	ctx := t.Context()

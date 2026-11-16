@@ -820,7 +820,8 @@ func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOf []uint64, progres
 	}
 	for j, txNum := range asOf {
 		g.Go(func() error {
-			m := v3.NewRecordMatcher()
+			m := v3.NewRecordMatcher(a.dirs.Tmp)
+			defer m.Close()
 			done := 0
 			for chunks := range orders[j] {
 				for {

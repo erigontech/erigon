@@ -63,6 +63,11 @@ type ConvertOpts struct {
 	BeforeSwap func() error
 }
 
+const (
+	rebuildV3Advice          = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if commitment history was pruned"
+	rebuildV3NoHistoryAdvice = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes --no-history` with ERIGON_COMMITMENT_V3=true"
+)
+
 // fileState describes the detected current encoding of a commitment .kv file.
 type fileState struct {
 	keysV2   bool
@@ -639,7 +644,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 			return fmt.Errorf("[commitment_convert] legacy commitment files are not visible to the aggregator: %s", strings.Join(unindexed, ", "))
 		}
 		if err := checkCommitmentHistoryV3Start(at.d[kv.CommitmentDomain], at.StepSize()); err != nil {
-			return err
+			return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3NoHistoryAdvice)
 		}
 	}
 
@@ -702,6 +707,9 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	// Phase 1: convert all.
 	phaseStart := time.Now()
 	processedFiles, skippedFiles, totalSizeDelta, processedKeys, err := convertPhase1(ctx, at, pendingFiles, rebuildDir, opts, grandTotalKeys, logger)
+	if err != nil && opts.TargetV3 {
+		return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3Advice)
+	}
 	if err != nil {
 		return err
 	}
@@ -716,7 +724,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	historyStage := newCommitmentV3HistoryStage(dirs)
 	if opts.TargetV3 {
 		if historyRanges, err = convertCommitmentHistoryV3(ctx, at, historyStage, opts.Continue, logger); err != nil {
-			return fmt.Errorf("[commitment_convert] phase 1 history: %w", err)
+			return fmt.Errorf("[commitment_convert] phase 1 history: %w; no commitment file was replaced; %s", err, rebuildV3Advice)
 		}
 	}
 
@@ -1246,7 +1254,8 @@ func preflightBackupDir(backupDir string) error {
 	if len(entries) > 0 {
 		return fmt.Errorf(
 			"[commitment_convert] pre-flight: backup dir %s already exists with %d entries; "+
-				"refuse to overwrite a prior conversion's backup (rm -rf %s and retry)",
+				"refuse to overwrite a prior conversion's backup (roll back with `integration commitment convert --restore`, "+
+				"or keep the converted files: rm -rf %s and retry)",
 			backupDir, len(entries), backupDir,
 		)
 	}
@@ -1597,21 +1606,33 @@ func convertPhase3(snapDir, backupDir string, ranges []commitmentHistoryRange) (
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		return 0, fmt.Errorf("[commitment_convert] phase 3 mkdir backup %s: %w", backupDir, err)
 	}
-	moved := 0
+	var matches []string
 	for _, r := range ranges {
 		pattern := filepath.Join(snapDir, fmt.Sprintf("*-commitment.%d-%d.*", r.fromStep, r.toStep))
-		matches, err := dir.Glob(pattern)
+		rangeMatches, err := dir.Glob(pattern)
 		if err != nil {
-			return moved, fmt.Errorf("[commitment_convert] phase 3 glob %s: %w", pattern, err)
+			return 0, fmt.Errorf("[commitment_convert] phase 3 glob %s: %w", pattern, err)
 		}
-		for _, src := range matches {
-			dst := filepath.Join(backupDir, filepath.Base(src))
-			if renameErr := os.Rename(src, dst); renameErr != nil {
-				return moved, fmt.Errorf("[commitment_convert] phase 3 mv %s -> %s: %w",
-					src, dst, renameErr)
-			}
-			moved++
+		matches = append(matches, rangeMatches...)
+	}
+	if len(matches) > 0 {
+		manifest := make([]string, len(matches))
+		for i, src := range matches {
+			manifest[i] = filepath.Base(src)
 		}
+		manifestPath := filepath.Join(backupDir, restoreManifestName)
+		if err := writeRestoreManifestAtomic(manifestPath, manifest); err != nil {
+			return 0, fmt.Errorf("[commitment_convert] phase 3 write manifest %s: %w", manifestPath, err)
+		}
+	}
+	moved := 0
+	for _, src := range matches {
+		dst := filepath.Join(backupDir, filepath.Base(src))
+		if renameErr := os.Rename(src, dst); renameErr != nil {
+			return moved, fmt.Errorf("[commitment_convert] phase 3 mv %s -> %s: %w",
+				src, dst, renameErr)
+		}
+		moved++
 	}
 	return moved, nil
 }

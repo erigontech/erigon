@@ -112,10 +112,11 @@ type commitmentCalculator struct {
 
 	// touched* are the key-only union the commitment path folds over: no
 	// values are retained — emitTouched reads each value from the version map.
-	// destructed carries the self-destruct subtree-reset signal.
+	// storageReset holds the accounts whose storage subtree a self-destruct or a contract
+	// creation resets.
 	touchedAccounts map[accounts.Address][]byte
 	touchedStorage  map[accounts.Address]map[accounts.StorageKey][]byte
-	destructed      map[accounts.Address]struct{}
+	storageReset    map[accounts.Address]struct{}
 	// wipedAt holds, per account, the tx index of the destruct whose subtree reset an
 	// earlier fold of this block emitted; a later fold must not wipe the slots written since.
 	wipedAt      map[accounts.Address]int
@@ -313,8 +314,7 @@ func (cc *commitmentCalculator) Stop() {
 	cc.wg.Wait()
 	if p := cc.branchPrefetch; p != nil {
 		p.close()
-		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(),
-			"hits", p.hits.Load(), "misses", p.misses.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
+		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
 		if commitmentdb.ParentReadsWanted() {
 			if r := cc.parentRecords(); r != nil {
 				commitmentdb.PublishParentRecords(r)
@@ -613,10 +613,17 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	}
 	vm := state.NewVersionMap(req.bal)
 	vm.SetBaseTxNum(req.firstTxNum)
-	if err := vm.SeedEmptyRemovals(
-		req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum),
-		cc.chainConfig.Aura != nil,
-		cc.asOfReader.dr.StateReaderAt(req.firstTxNum)); err != nil {
+	eip161Enabled := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
+	isAura := cc.chainConfig.Aura != nil
+	base := cc.asOfReader.dr.StateReaderAt(req.firstTxNum)
+	if ambiguous, err := vm.HasAmbiguousBaseAccount(eip161Enabled, isAura, base); err != nil {
+		cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d: base read: %w", req.blockNum, err))
+		return
+	} else if ambiguous {
+		pb.mode = calcModeIncremental
+		return
+	}
+	if err := vm.SeedEmptyRemovals(eip161Enabled, isAura, base); err != nil {
 		cc.fail(ctx, br, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	}
@@ -1122,13 +1129,7 @@ func (r *asOfStateReader) prefetchedBranch(key []byte) ([]byte, kv.Step, bool) {
 	if _, maxStep, inMem := r.sd.GetLatestFromMemory(kv.CommitmentDomain, key); inMem || maxStep != kv.NoStepBound {
 		return nil, 0, false
 	}
-	data, step, ok := r.prefetched.get(key)
-	if ok {
-		r.prefetched.hits.Add(1)
-	} else {
-		r.prefetched.misses.Add(1)
-	}
-	return data, step, ok
+	return r.prefetched.get(key)
 }
 
 func (r *asOfStateReader) LeafRefs(key, data []byte) *commitment.LeafRefs {

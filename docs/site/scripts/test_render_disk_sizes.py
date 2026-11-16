@@ -45,6 +45,20 @@ class RenderTextTests(unittest.TestCase):
         self.assertIn("{/* ds:mainnet:minimal */}360 GB{/* ds:end */}", out)
         self.assertIn("{/* ds:gnosis:archive */}605 GB{/* ds:end */}", out)
 
+    def test_marks_seg_du_figures(self):
+        data = {"networks": {"mainnet": dict(DATA["networks"]["mainnet"]), "gnosis": DATA["networks"]["gnosis"]}}
+        data["networks"]["mainnet"]["full"] = {"display": "1.2 TB", "measured_at": "2026-06-02", "method": "seg-du"}
+        out = r.render_text(PAGE, data)
+        self.assertIn("{/* ds:mainnet:full */}1.2 TB†{/* ds:end */}", out)
+        self.assertIn("{/* ds:mainnet:minimal */}360 GB{/* ds:end */}", out)
+        self.assertEqual(r.render_text(out, data), out)
+
+    def test_unknown_method_fails(self):
+        data = {"networks": {"mainnet": dict(DATA["networks"]["mainnet"]), "gnosis": DATA["networks"]["gnosis"]}}
+        data["networks"]["mainnet"]["full"] = {"display": "1.2 TB", "measured_at": "2026-06-02", "method": "du"}
+        with self.assertRaises(SystemExit):
+            r.render_text(PAGE, data)
+
     def test_date_uses_oldest_measured_at(self):
         out = r.render_text(PAGE, DATA)
         # min of 2026-06-02 / 2026-06-02 / 2026-05-01 = 2026-05-01 (honest "as of")

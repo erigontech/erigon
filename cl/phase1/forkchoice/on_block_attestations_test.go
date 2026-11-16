@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 
@@ -34,6 +35,9 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
@@ -49,6 +53,15 @@ var blockAttestationFixtures = []struct {
 }
 
 func newBlockAttestationStore(t *testing.T, blocks []*cltypes.SignedBeaconBlock, anchor *state.CachingBeaconState, synced bool) *ForkChoiceStore {
+	t.Helper()
+	store := newBlockTestStore(t, anchor)
+	store.SetSynced(synced)
+	lastSlot := blocks[len(blocks)-1].Block.Slot
+	store.OnTick((anchor.GenesisTime() + (lastSlot+1)*anchor.BeaconConfig().SecondsPerSlot) * 1000)
+	return store
+}
+
+func newBlockTestStore(t *testing.T, anchor *state.CachingBeaconState) *ForkChoiceStore {
 	t.Helper()
 	cfg := anchor.BeaconConfig()
 	graph, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
@@ -68,13 +81,12 @@ func newBlockAttestationStore(t *testing.T, blocks []*cltypes.SignedBeaconBlock,
 		nil,
 	)
 	require.NoError(t, err)
-	store.SetSynced(synced)
-	lastSlot := blocks[len(blocks)-1].Block.Slot
-	store.OnTick((anchor.GenesisTime() + (lastSlot+1)*cfg.SecondsPerSlot) * 1000)
 	return store
 }
 
 func countLatestMessages(store *ForkChoiceStore) int {
+	store.latestMessages.mu.RLock()
+	defer store.latestMessages.mu.RUnlock()
 	count := 0
 	for _, message := range store.latestMessages.latestMessages {
 		if message != (LatestMessage{}) {
@@ -150,9 +162,15 @@ func TestOnBlockReadsBodyAttestationCommitteesFromBlockState(t *testing.T) {
 
 func TestOnAttestationLockedUsesBlockStateOnlyWithTargetShuffling(t *testing.T) {
 	fixture := newTargetShufflingFixture(t)
+	providerErr := errors.New("attesting indices unavailable")
 	for _, test := range []struct {
 		name            string
 		targetRoot      common.Hash
+		providerIndices []uint64
+		providerErr     error
+		wantErr         string
+		fromBlock       bool
+		keepHeadState   bool
 		wantValidator   uint64
 		rejectValidator uint64
 		wantStateRead   bool
@@ -160,24 +178,44 @@ func TestOnAttestationLockedUsesBlockStateOnlyWithTargetShuffling(t *testing.T) 
 		{
 			name:            "side branch target uses target checkpoint state",
 			targetRoot:      fixture.targetRoot,
+			fromBlock:       true,
 			wantValidator:   fixture.targetValidator,
 			rejectValidator: fixture.headValidator,
 			wantStateRead:   true,
 		},
 		{
-			name:            "block branch target uses block state",
+			name:            "block branch target uses provider indices",
 			targetRoot:      fixture.headTargetRoot,
-			wantValidator:   fixture.headValidator,
-			rejectValidator: fixture.targetValidator,
+			providerIndices: []uint64{fixture.targetValidator},
+			fromBlock:       true,
+			wantValidator:   fixture.targetValidator,
+			rejectValidator: fixture.headValidator,
+		},
+		{
+			name:        "block branch returns provider error",
+			targetRoot:  fixture.headTargetRoot,
+			providerErr: providerErr,
+			wantErr:     providerErr.Error(),
+			fromBlock:   true,
+		},
+		{
+			name:            "gossip ignores block source",
+			targetRoot:      fixture.headTargetRoot,
+			providerIndices: []uint64{fixture.targetValidator},
+			wantErr:         "invalid aggregate signature",
+			keepHeadState:   true,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			graph := fixture.forkGraph(false)
 			graph.states[fixture.targetRoot] = fixture.targetState
 			store := newAttestationTestStore(t, fixture.cfg, fixture.headState, fixture.headRoot, fixture.attestationSlot, graph)
-			store.syncedDataManager.UnsetHeadState()
+			if !test.keepHeadState {
+				store.syncedDataManager.UnsetHeadState()
+			}
 			attestation := &solid.Attestation{
 				AggregationBits: aggregationBits(fixture.committeeSize(t, test.targetRoot), int(fixture.cfg.MaxValidatorsPerCommittee), fixture.committeePosition),
+				Signature:       common.Bytes96(bls.InfiniteSignature),
 				Data: &solid.AttestationData{
 					Slot:            fixture.attestationSlot,
 					CommitteeIndex:  fixture.committeeIndex,
@@ -185,11 +223,21 @@ func TestOnAttestationLockedUsesBlockStateOnlyWithTargetShuffling(t *testing.T) 
 					Target:          solid.Checkpoint{Epoch: fixture.targetEpoch, Root: test.targetRoot},
 				},
 			}
+			source := &blockAttestationSource{
+				state:            fixture.headState,
+				root:             fixture.headRoot,
+				attestingIndices: preparedAttestingIndices{indices: test.providerIndices, err: test.providerErr},
+			}
 
 			store.mu.Lock()
-			err := store.onAttestationLocked(attestation, true, fixture.headState, fixture.headRoot)
+			err := store.onAttestationLocked(attestation, test.fromBlock, source)
 			store.mu.Unlock()
 
+			if test.wantErr != "" {
+				require.EqualError(t, err, test.wantErr)
+				require.Zero(t, countLatestMessages(store))
+				return
+			}
 			require.NoError(t, err)
 			_, credited := store.getLatestMessage(test.wantValidator)
 			require.True(t, credited, "expected validator was not credited")
@@ -201,5 +249,62 @@ func TestOnAttestationLockedUsesBlockStateOnlyWithTargetShuffling(t *testing.T) 
 				require.Empty(t, graph.stateRoots())
 			}
 		})
+	}
+}
+
+func preparePostStateTestFixture(t *testing.T) (*state.CachingBeaconState, *cltypes.BeaconBlock) {
+	t.Helper()
+	blocks, anchor, _ := tests.GetBellatrixRandom()
+	postState, err := anchor.Copy()
+	require.NoError(t, err)
+	for _, block := range blocks {
+		require.NoError(t, transition.TransitionState(postState, block, nil, true))
+		expected, err := postState.Copy()
+		require.NoError(t, err)
+		require.NoError(t, statechange.ProcessJustificationBitsAndFinality(expected, nil))
+		if expected.CurrentJustifiedCheckpoint() != postState.CurrentJustifiedCheckpoint() || expected.FinalizedCheckpoint() != postState.FinalizedCheckpoint() {
+			return postState, block.Block
+		}
+	}
+	t.Fatal("Bellatrix fixture has no post-state whose pull-up changes its checkpoints")
+	return nil, nil
+}
+
+func TestPreparePostStateLeavesPostStateRootUnchanged(t *testing.T) {
+	postState, beaconBlock := preparePostStateTestFixture(t)
+	before, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	preparePostState(postState, beaconBlock)
+
+	after, err := postState.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+}
+
+func TestPreparePostStateMatchesInlineComputation(t *testing.T) {
+	postState, beaconBlock := preparePostStateTestFixture(t)
+	expected, err := postState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, statechange.ProcessJustificationBitsAndFinality(expected, nil))
+
+	wantIndices := make([][]uint64, 0, beaconBlock.Body.Attestations.Len())
+	beaconBlock.Body.Attestations.Range(func(_ int, attestation *solid.Attestation, _ int) bool {
+		indices, err := postState.GetAttestingIndicies(attestation, true)
+		require.NoError(t, err)
+		wantIndices = append(wantIndices, indices)
+		return true
+	})
+	require.NotEmpty(t, wantIndices)
+
+	prepared := preparePostState(postState, beaconBlock)
+
+	require.NoError(t, prepared.pullupErr)
+	require.Equal(t, expected.CurrentJustifiedCheckpoint(), prepared.postPullupJustified)
+	require.Equal(t, expected.FinalizedCheckpoint(), prepared.postPullupFinalized)
+	require.Len(t, prepared.attestingIndices, len(wantIndices))
+	for i, want := range wantIndices {
+		require.NoError(t, prepared.attestingIndices[i].err)
+		require.Equal(t, want, prepared.attestingIndices[i].indices)
 	}
 }

@@ -19,11 +19,9 @@ package v3
 import (
 	"fmt"
 	"math/bits"
-
-	"github.com/erigontech/erigon/execution/commitment"
 )
 
-func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []byte) (*node, error) {
+func unfold(ctx brancher, path []byte, plane byte, addrHash []byte) (*node, error) {
 	if len(path) > 63 {
 		return nil, fmt.Errorf("commitment v3: path depth %d", len(path))
 	}

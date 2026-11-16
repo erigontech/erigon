@@ -40,11 +40,15 @@ func (c *meteredContext) BranchOwned(prefix []byte) ([]byte, kv.Step, error) {
 	return data, step, err
 }
 
+type brancher interface {
+	Branch(prefix []byte) ([]byte, kv.Step, error)
+}
+
 type ownedBrancher interface {
 	BranchOwned(prefix []byte) ([]byte, kv.Step, error)
 }
 
-func branchOwned(ctx commitment.PatriciaContext, prefix []byte) ([]byte, kv.Step, error) {
+func branchOwned(ctx brancher, prefix []byte) ([]byte, kv.Step, error) {
 	if o, ok := ctx.(ownedBrancher); ok {
 		return o.BranchOwned(prefix)
 	}

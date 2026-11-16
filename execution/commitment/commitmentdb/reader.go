@@ -361,10 +361,10 @@ func ParentRecordsFor(blockNum uint64, blockHash, parentHash common.Hash) *Paren
 	return r
 }
 
-// txLatestReader reads directly from a pinned RO transaction, bypassing
-// SharedDomains memory so commitment reads remain on the pinned parent view.
+// txLatestReader reads directly from a pinned parent view, bypassing the
+// build's SharedDomains memory so commitment reads remain on that view.
 type txLatestReader struct {
-	tx   kv.TemporalTx
+	tx   kv.TemporalGetter
 	recs *ParentRecords
 }
 
@@ -405,7 +405,7 @@ func (r *txLatestReader) BindsWorkerTx() bool { return false }
 // while account/storage/code resolve from committedTx's history at plainStateAsOf.
 // withHistory=false so the collapse-detection fold's PutBranch calls accumulate
 // branches in the build's own in-memory batch (discarded on Close, never flushed).
-func NewHeadCaptureStateReader(pinnedParentTx kv.TemporalTx, committedTx kv.TemporalTx, plainStateAsOf uint64) *CommitmentReplayStateReader {
+func NewHeadCaptureStateReader(pinnedParentTx kv.TemporalGetter, committedTx kv.TemporalTx, plainStateAsOf uint64) *CommitmentReplayStateReader {
 	return newHeadCaptureStateReader(pinnedParentTx, committedTx, plainStateAsOf, false)
 }
 
@@ -414,11 +414,11 @@ func NewHeadCaptureStateReader(pinnedParentTx kv.TemporalTx, committedTx kv.Temp
 // the read-only witness-capture fold's PutBranch calls no-op, matching the durable path
 // (whose trie phase uses a history reader). Writing branches during capture would corrupt
 // the captured node set.
-func NewHeadCaptureTrieStateReader(pinnedParentTx kv.TemporalTx, committedTx kv.TemporalTx, plainStateAsOf uint64) *CommitmentReplayStateReader {
+func NewHeadCaptureTrieStateReader(pinnedParentTx kv.TemporalGetter, committedTx kv.TemporalTx, plainStateAsOf uint64) *CommitmentReplayStateReader {
 	return newHeadCaptureStateReader(pinnedParentTx, committedTx, plainStateAsOf, true)
 }
 
-func newHeadCaptureStateReader(pinnedParentTx kv.TemporalTx, committedTx kv.TemporalTx, plainStateAsOf uint64, withHistory bool) *CommitmentReplayStateReader {
+func newHeadCaptureStateReader(pinnedParentTx kv.TemporalGetter, committedTx kv.TemporalTx, plainStateAsOf uint64, withHistory bool) *CommitmentReplayStateReader {
 	return &CommitmentReplayStateReader{
 		NewCommitmentSplitStateReader(
 			&txLatestReader{tx: pinnedParentTx},

@@ -63,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -221,7 +222,7 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	insertRes, err := m.InsertBlocks(ctx, chainPack.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
-	validationReceipt, err := m.ValidateChain(ctx, chainPack.Blocks[0].Header())
+	validationReceipt, err := m.ValidateChain(ctx, chainPack.Blocks[0])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validationReceipt.ValidationStatus)
 	require.Equal(t, "", validationReceipt.ValidationError)
@@ -302,7 +303,7 @@ func TestUpdateForkChoiceParallelFlushingAcceptsAncestorHashes(t *testing.T) {
 	_, err = m.InsertBlocks(t.Context(), chainPack.Blocks)
 	require.NoError(t, err)
 	head := chainPack.Blocks[1]
-	validation, err := m.ValidateChain(t.Context(), head.Header())
+	validation, err := m.ValidateChain(t.Context(), head)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	result, err := m.ExecModule.UpdateForkChoice(t.Context(), head.Hash(), chainPack.Blocks[0].Hash(), m.Genesis.Hash())
@@ -396,17 +397,12 @@ func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
 // With READ_AHEAD_WAIT on, validation that unwinds must not wait for the warmup
 // suspension it holds itself.
 func TestValidateForkPayloadOffNonTipCanonicalBlockWithReadAheadWait(t *testing.T) {
-	prevWait, prevParallel := dbg.ReadAheadWait, dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.ReadAheadWait, dbg.Exec3Parallel = prevWait, prevParallel })
+	prevWait := dbg.ReadAheadWait
+	t.Cleanup(func() { dbg.ReadAheadWait = prevWait })
 	dbg.ReadAheadWait = true
-	for name, parallel := range map[string]bool{"parallel": true, "serial": false} {
-		t.Run(name, func(t *testing.T) {
-			dbg.Exec3Parallel = parallel
-			hang := time.AfterFunc(time.Minute, func() { panic("validation waits for the warmup suspension it holds") })
-			defer hang.Stop()
-			validateForkPayloadOffNonTipCanonicalBlock(t)
-		})
-	}
+	hang := time.AfterFunc(time.Minute, func() { panic("validation waits for the warmup suspension it holds") })
+	defer hang.Stop()
+	validateForkPayloadOffNonTipCanonicalBlock(t)
 }
 
 func validateForkPayloadOffNonTipCanonicalBlock(t *testing.T) {
@@ -466,7 +462,7 @@ func validateForkPayloadOffNonTipCanonicalBlock(t *testing.T) {
 	insertStatus, err := m.InsertBlocks(t.Context(), fork.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
-	validation, err := m.ValidateChain(t.Context(), fork.Blocks[0].Header())
+	validation, err := m.ValidateChain(t.Context(), fork.Blocks[0])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	extendingHash, extendingNumber, extendingDomains := m.ForkValidator.ExtendingFork()
@@ -476,7 +472,7 @@ func validateForkPayloadOffNonTipCanonicalBlock(t *testing.T) {
 	fcuResult, err := m.UpdateForkChoice(t.Context(), fork.Blocks[0].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuResult.Status)
-	validation, err = m.ValidateChain(t.Context(), fork.Blocks[1].Header())
+	validation, err = m.ValidateChain(t.Context(), fork.Blocks[1])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	fcuResult, err = m.UpdateForkChoice(t.Context(), fork.Blocks[1].Header())
@@ -511,7 +507,7 @@ func TestValidateChainAlreadyCanonicalExecutedAfterPrune(t *testing.T) {
 	insertStatus, err := m.InsertBlocks(ctx, []*types.Block{canonical})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
-	validation, err := m.ValidateChain(ctx, canonical.Header())
+	validation, err := m.ValidateChain(ctx, canonical)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	require.Equal(t, canonical.Hash(), validation.LatestValidHash)
@@ -528,7 +524,7 @@ func TestValidateChainAlreadyCanonicalExecutedAfterPrune(t *testing.T) {
 	insertStatus, err = m.InsertBlocks(ctx, []*types.Block{later})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
-	validation, err = m.ValidateChain(ctx, later.Header())
+	validation, err = m.ValidateChain(ctx, later)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	fcuResult, err := m.UpdateForkChoice(ctx, later.Header())
@@ -555,7 +551,7 @@ func TestValidateChainCanonicalNotExecutedAfterPrune(t *testing.T) {
 	insertStatus, err := m.InsertBlocks(ctx, []*types.Block{canonical})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
-	_, err = m.ValidateChain(ctx, canonical.Header())
+	_, err = m.ValidateChain(ctx, canonical)
 	require.ErrorContains(t, err, "too far unwind")
 }
 
@@ -584,7 +580,7 @@ func TestValidateChainResentSideBlockSkipsUnwind(t *testing.T) {
 	insertStatus, err := m.InsertBlocks(ctx, []*types.Block{sideBlock})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
-	validation, err := m.ValidateChain(ctx, sideBlock.Header())
+	validation, err := m.ValidateChain(ctx, sideBlock)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 
@@ -605,7 +601,7 @@ func TestValidateChainResentSideBlockSkipsUnwind(t *testing.T) {
 	insertStatus, err = m.InsertBlocks(ctx, []*types.Block{sideBlock})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
-	validation, err = m.ValidateChain(ctx, sideBlock.Header())
+	validation, err = m.ValidateChain(ctx, sideBlock)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 	require.Equal(t, sideBlock.Hash(), validation.LatestValidHash)
@@ -707,7 +703,7 @@ func TestValidateChainDoesNotTrustCanonicalMarkerAboveFinalized(t *testing.T) {
 		return nil
 	}))
 
-	_, err = m.ValidateChain(ctx, canonicalButUnexecuted.Header())
+	_, err = m.ValidateChain(ctx, canonicalButUnexecuted)
 	require.ErrorContains(t, err, "too far unwind")
 }
 
@@ -1015,7 +1011,7 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 				require.Equalf(t, execmodule.ExecutionStatusSuccess, insRes, "insert block %d", n)
 
 				h := headerAt(n)
-				vr, err := m.ValidateChain(ctx, h)
+				vr, err := m.ValidateChain(ctx, chainPack.Blocks[n-1])
 				require.NoError(t, err)
 				require.Equalf(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "validate block %d", n)
 				ur, err := m.UpdateForkChoice(ctx, h)
@@ -1405,7 +1401,7 @@ func testAssembleBlockWithSiblingCommit(t *testing.T, commitSibling bool) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 	// Check that the built block is valid on its original parent, even if the head changed.
-	validation, err := m.ValidateChain(ctx, built.Header())
+	validation, err := m.ValidateChain(ctx, built)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus, validation.ValidationError)
 }
@@ -3355,7 +3351,7 @@ func TestValidateChainBadBlockIsDroppedFromOverlay(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, inserted, "InsertBlocks must make the header readable through the overlay")
 
-	validation, err := m.ValidateChain(ctx, badBlock.Header())
+	validation, err := m.ValidateChain(ctx, badBlock)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
 
@@ -3380,13 +3376,13 @@ func TestValidateChainBadBlockKeepsValidSiblingInOverlay(t *testing.T) {
 
 	_, err = m.InsertBlocks(ctx, []*types.Block{valid})
 	require.NoError(t, err)
-	validation, err := m.ValidateChain(ctx, valid.Header())
+	validation, err := m.ValidateChain(ctx, valid)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 
 	_, err = m.InsertBlocks(ctx, []*types.Block{badBlock})
 	require.NoError(t, err)
-	validation, err = m.ValidateChain(ctx, badBlock.Header())
+	validation, err = m.ValidateChain(ctx, badBlock)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
 
@@ -3555,6 +3551,129 @@ func TestBALDrivenComputeAheadChangesetIntegrity(t *testing.T) {
 func TestBALShadowCompute_MatchesIncremental(t *testing.T) {
 	res := runBALComputeAheadChangeset(t, true, true)
 	require.Positive(t, res.computedAhead, "compute-ahead must have run so shadow cross-check exercised the match path")
+}
+
+// A 0-value touch removes an account that was EIP-161 empty before the block, but the block
+// access list shows no removal: the account is listed with reads only, or with the balance a later
+// tx gives it. Compute-ahead must not fold such a block from its BAL, or it keeps the account or
+// its storage and the root differs.
+func TestBALDrivenComputeAheadRemovesTouchedEmptyAccount(t *testing.T) {
+	empty := common.HexToAddress("0xe1e1")
+	for _, tc := range []struct {
+		name    string
+		account types.GenesisAccount
+		values  []uint64
+	}{
+		{"touched", types.GenesisAccount{Balance: big.NewInt(0)}, []uint64{0}},
+		{"touched with storage then funded", types.GenesisAccount{
+			Balance: big.NewInt(0),
+			Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x01")},
+		}, []uint64{0, 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+			defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+			dbg.BALDrivenCommitment = true
+			dbg.IgnoreBAL = false
+			stagedsync.ResetComputedAheadForTest()
+
+			ctx := t.Context()
+			privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+			require.NoError(t, err)
+			senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+			m := execmoduletester.New(
+				t,
+				execmoduletester.WithKey(privKey),
+				execmoduletester.WithGenesisSpec(&types.Genesis{
+					Config: chain.AllProtocolChanges,
+					Alloc: types.GenesisAlloc{
+						senderAddr: {Balance: big.NewInt(1 * common.Ether)},
+						empty:      tc.account,
+					},
+				}),
+				execmoduletester.WithExperimentalBAL(),
+				execmoduletester.WithAlwaysGenerateChangesets(false),
+				// Blocks 1 and 2 are compute-ahead candidates; block 2 touches the empty account.
+				execmoduletester.WithMaxReorgDepth(1),
+			)
+			chainPack, err := m.GenerateChain(4, func(i int, b *blockgen.BlockGen) {
+				sends := []uint64{0}
+				to := senderAddr
+				if i == 1 {
+					sends, to = tc.values, empty
+				}
+				for _, value := range sends {
+					tx, err := types.SignTx(types.NewTransaction(b.TxNonce(senderAddr), to, uint256.NewInt(value), 1_000_000, uint256.NewInt(10_000_000_000), nil),
+						*types.LatestSignerForChainID(nil), privKey)
+					require.NoError(t, err)
+					b.AddTx(tx)
+				}
+			})
+			require.NoError(t, err)
+
+			insRes, err := m.InsertBlocks(ctx, chainPack.Blocks)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+			fcuRes, err := m.UpdateForkChoice(ctx, chainPack.TopBlock.Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status, "validationError=%q", fcuRes.ValidationError)
+			require.Positive(t, stagedsync.ComputedAheadCountForTest(), "the block before the touch is computed ahead")
+		})
+	}
+}
+
+// A CREATE2 to an account with storage but no nonce and no code replaces the account's storage,
+// and the block access list does not show that the old storage is dropped. Compute-ahead must not fold such a
+// block from its BAL, or it keeps the old storage and the root differs.
+func TestBALDrivenComputeAheadWipesStorageOfCreatedAccount(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+	stagedsync.ResetComputedAheadForTest()
+
+	ctx := t.Context()
+	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	initCode := program.New().Sstore(2, 1).Op(vm.STOP).Bytes()
+	factory := common.HexToAddress("0xfac7")
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.AllProtocolChanges,
+			Alloc: types.GenesisAlloc{
+				senderAddr: {Balance: big.NewInt(1 * common.Ether)},
+				factory:    {Code: program.New().Create2(initCode, 0).Op(vm.STOP).Bytes()},
+				target:     {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x09")}},
+			},
+		}),
+		execmoduletester.WithExperimentalBAL(),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+		// Blocks 1 and 2 are compute-ahead candidates; block 2 creates the target.
+		execmoduletester.WithMaxReorgDepth(1),
+	)
+	chainPack, err := m.GenerateChain(4, func(i int, b *blockgen.BlockGen) {
+		to := senderAddr
+		if i == 1 {
+			to = factory
+		}
+		tx, err := types.SignTx(types.NewTransaction(b.TxNonce(senderAddr), to, uint256.NewInt(0), 1_000_000, uint256.NewInt(10_000_000_000), nil),
+			*types.LatestSignerForChainID(nil), privKey)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+
+	insRes, err := m.InsertBlocks(ctx, chainPack.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	fcuRes, err := m.UpdateForkChoice(ctx, chainPack.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuRes.Status, "validationError=%q", fcuRes.ValidationError)
+	require.Positive(t, stagedsync.ComputedAheadCountForTest(), "the block before the create is computed ahead")
 }
 
 type balComputeAheadResult struct {
@@ -4188,10 +4307,6 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 // create contracts must reach the state root of serial execution, whether parallel exec
 // charges the sender at validation (zero value) or in the run (value).
 func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
-	prevParallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
-
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
@@ -4239,10 +4354,6 @@ func TestSameSenderSpeculationMatchesSerialExecution(t *testing.T) {
 // Value transfers whose recipient is credited at validation must reach the state root of serial
 // execution, also when the recipient spends, its balance is read, or it gets code in the block.
 func TestRecipientCreditAtValidationMatchesSerialExecution(t *testing.T) {
-	prevParallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
-
 	keys := make([]*ecdsa.PrivateKey, 10)
 	alloc := types.GenesisAlloc{}
 	for i := range keys {
@@ -4296,10 +4407,6 @@ func TestRecipientCreditAtValidationMatchesSerialExecution(t *testing.T) {
 // A tx that serial execution rejects on its sender's nonce or balance must reject the
 // block with the same error when parallel exec charges the sender at validation.
 func TestSameSenderSpeculationRejectsLikeSerialExecution(t *testing.T) {
-	prevParallel := dbg.Exec3Parallel
-	dbg.Exec3Parallel = true
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
-
 	balance := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 	feeCap := *uint256.NewInt(10 * common.GWei)
 	for _, tc := range []struct {
@@ -4360,7 +4467,7 @@ func TestValidateChainAnswersTooFarAwayWhenStateIsAheadOfTxNums(t *testing.T) {
 	_, err = m.InsertBlocks(ctx, []*types.Block{next})
 	require.NoError(t, err)
 
-	validation, err := m.ValidateChain(ctx, next.Header())
+	validation, err := m.ValidateChain(ctx, next)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusTooFarAway, validation.ValidationStatus)
 }

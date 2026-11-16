@@ -170,3 +170,20 @@ func TestRPCReceiptEmbeddersKeepTheirFields(t *testing.T) {
 		})
 	}
 }
+
+// Cached receipts carry logs stamped with the block time; graphql_getBlockDetails renders them
+// as they are, as eth_getTransactionReceipt does.
+func TestGraphQLReceiptLogsHaveBlockTimestamp(t *testing.T) {
+	t.Parallel()
+
+	header := &types.Header{Number: *uint256.NewInt(1), Time: 7}
+	txn := &types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 21_000}}
+	receipt := &types.Receipt{BlockNumber: uint256.NewInt(1), Logs: types.Logs{{Address: common.HexToAddress("0x01")}}}
+	receipt.Logs.SetBlockTimestamp(header.Time)
+
+	got := NewGraphQLReceipt(receipt, txn, &chain.Config{ChainID: uint256.NewInt(1)}, header)
+	require.Same(t, receipt.Logs[0], got.Logs[0], "a stamped log must not be copied")
+	data, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.Contains(t, string(data), `"blockTimestamp":"0x7"`)
+}

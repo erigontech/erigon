@@ -16,11 +16,21 @@ import (
 // newTestForkChoiceStore creates a minimal ForkChoiceStore for timing tests.
 func newTestForkChoiceStore(secondsPerSlot, intervalsPerSlot, slotsPerEpoch, gloasForkEpoch, genesisTime, currentTimeMs uint64) *ForkChoiceStore {
 	cfg := &clparams.BeaconChainConfig{
-		SecondsPerSlot:   secondsPerSlot,
-		IntervalsPerSlot: intervalsPerSlot,
-		SlotsPerEpoch:    slotsPerEpoch,
-		GloasForkEpoch:   gloasForkEpoch,
-		GenesisSlot:      0,
+		SecondsPerSlot:           secondsPerSlot,
+		IntervalsPerSlot:         intervalsPerSlot,
+		SlotsPerEpoch:            slotsPerEpoch,
+		GloasForkEpoch:           gloasForkEpoch,
+		GenesisSlot:              0,
+		AttestationDueBps:        clparams.AttestationDueBps,
+		AggregateDueBps:          clparams.AggregateDueBps,
+		SyncMessageDueBps:        clparams.SyncMessageDueBps,
+		ContributionDueBps:       clparams.ContributionDueBps,
+		AttestationDueBpsGloas:   clparams.AttestationDueBpsGloas,
+		AggregateDueBpsGloas:     clparams.AggregateDueBpsGloas,
+		SyncMessageDueBpsGloas:   clparams.SyncMessageDueBpsGloas,
+		ContributionDueBpsGloas:  clparams.ContributionDueBpsGloas,
+		PayloadAttestationDueBps: clparams.PayloadAttestationDueBps,
+		ReorgHeadWeightThreshold: clparams.ReorgHeadWeightThreshold,
 	}
 	f := &ForkChoiceStore{
 		genesisTime: genesisTime,
@@ -63,14 +73,12 @@ func TestGetAggregateDueMs_PostGloas(t *testing.T) {
 
 func TestGetSyncMessageDueMs(t *testing.T) {
 	f := newTestForkChoiceStore(12, 3, 32, 10, 0, 0)
-	// Should match attestation due
 	require.Equal(t, f.getAttestationDueMs(5), f.getSyncMessageDueMs(5))
 	require.Equal(t, f.getAttestationDueMs(15), f.getSyncMessageDueMs(15))
 }
 
 func TestGetContributionDueMs(t *testing.T) {
 	f := newTestForkChoiceStore(12, 3, 32, 10, 0, 0)
-	// Should match aggregate due
 	require.Equal(t, f.getAggregateDueMs(5), f.getContributionDueMs(5))
 	require.Equal(t, f.getAggregateDueMs(15), f.getContributionDueMs(15))
 }
@@ -79,6 +87,29 @@ func TestGetPayloadAttestationDueMs(t *testing.T) {
 	// 12 * 7500 / 10 = 9000 ms
 	f := newTestForkChoiceStore(12, 3, 32, 10, 0, 0)
 	require.Equal(t, uint64(9000), f.getPayloadAttestationDueMs(10))
+}
+
+func TestGetTimingDueMsUsesConfiguredBps(t *testing.T) {
+	f := newTestForkChoiceStore(12, 3, 32, 10, 0, 0)
+	f.beaconCfg.AttestationDueBps = 2500
+	f.beaconCfg.AttestationDueBpsGloas = 1250
+	f.beaconCfg.AggregateDueBps = 2000
+	f.beaconCfg.AggregateDueBpsGloas = 4000
+	f.beaconCfg.SyncMessageDueBps = 3000
+	f.beaconCfg.SyncMessageDueBpsGloas = 1500
+	f.beaconCfg.ContributionDueBps = 4000
+	f.beaconCfg.ContributionDueBpsGloas = 2500
+	f.beaconCfg.PayloadAttestationDueBps = 6000
+
+	require.Equal(t, uint64(3000), f.getAttestationDueMs(0))
+	require.Equal(t, uint64(1500), f.getAttestationDueMs(10))
+	require.Equal(t, uint64(2400), f.getAggregateDueMs(0))
+	require.Equal(t, uint64(4800), f.getAggregateDueMs(10))
+	require.Equal(t, uint64(3600), f.getSyncMessageDueMs(0))
+	require.Equal(t, uint64(1800), f.getSyncMessageDueMs(10))
+	require.Equal(t, uint64(4800), f.getContributionDueMs(0))
+	require.Equal(t, uint64(3000), f.getContributionDueMs(10))
+	require.Equal(t, uint64(7200), f.getPayloadAttestationDueMs(10))
 }
 
 func TestComputeShufflingDependentSlotUsesGenesisInEarlyEpochs(t *testing.T) {
@@ -172,13 +203,13 @@ func TestRecordBlockTimelinessUsesMilliseconds(t *testing.T) {
 		f := newTestForkChoiceStore(5, 3, 32, math.MaxUint64, 0, 1665)
 		block := &cltypes.BeaconBlock{Slot: 0}
 
-		f.recordBlockTimeliness(block, common.Hash{0x01})
+		f.recordBlockTimeliness(block, common.Hash{0x01}, f.timeMs.Load())
 		timeliness, ok := f.getBlockTimeliness(common.Hash{0x01})
 		require.True(t, ok)
 		require.True(t, timeliness[clparams.AttestationTimelinessIndex])
 
 		f.timeMs.Store(1700)
-		f.recordBlockTimeliness(block, common.Hash{0x02})
+		f.recordBlockTimeliness(block, common.Hash{0x02}, f.timeMs.Load())
 		timeliness, ok = f.getBlockTimeliness(common.Hash{0x02})
 		require.True(t, ok)
 		require.False(t, timeliness[clparams.AttestationTimelinessIndex])
@@ -187,7 +218,7 @@ func TestRecordBlockTimelinessUsesMilliseconds(t *testing.T) {
 	t.Run("Gloas", func(t *testing.T) {
 		f := newTestForkChoiceStore(5, 3, 32, 0, 0, 3800)
 		blockRoot := common.Hash{0x03}
-		f.recordBlockTimeliness(&cltypes.BeaconBlock{Slot: 0}, blockRoot)
+		f.recordBlockTimeliness(&cltypes.BeaconBlock{Slot: 0}, blockRoot, f.timeMs.Load())
 
 		timeliness, ok := f.getBlockTimeliness(blockRoot)
 		require.True(t, ok)
@@ -228,7 +259,7 @@ func TestRecordBlockTimelinessDeadlines(t *testing.T) {
 					f := newTestForkChoiceStore(test.secondsPerSlot, 3, 32, test.gloasForkEpoch, test.genesisTime, timeMs)
 					blockRoot := common.Hash{byte(test.timelinessIndex), byte(check.timeMs), byte(check.timeMs >> 8)}
 
-					f.recordBlockTimeliness(&cltypes.BeaconBlock{Slot: test.slot}, blockRoot)
+					f.recordBlockTimeliness(&cltypes.BeaconBlock{Slot: test.slot}, blockRoot, f.timeMs.Load())
 
 					timeliness, ok := f.getBlockTimeliness(blockRoot)
 					require.True(t, ok)
@@ -261,7 +292,7 @@ func TestRecordBlockTimeliness_PreGloas_Timely(t *testing.T) {
 	block := &cltypes.BeaconBlock{Slot: 0}
 	blockRoot := common.Hash{0x01}
 
-	f.recordBlockTimeliness(block, blockRoot)
+	f.recordBlockTimeliness(block, blockRoot, f.timeMs.Load())
 
 	timeliness, ok := f.getBlockTimeliness(blockRoot)
 	require.True(t, ok)
@@ -276,7 +307,7 @@ func TestRecordBlockTimeliness_PreGloas_Late(t *testing.T) {
 	block := &cltypes.BeaconBlock{Slot: 0}
 	blockRoot := common.Hash{0x02}
 
-	f.recordBlockTimeliness(block, blockRoot)
+	f.recordBlockTimeliness(block, blockRoot, f.timeMs.Load())
 
 	timeliness, ok := f.getBlockTimeliness(blockRoot)
 	require.True(t, ok)
@@ -292,7 +323,7 @@ func TestRecordBlockTimeliness_PostGloas_TwoElementVector(t *testing.T) {
 	block := &cltypes.BeaconBlock{Slot: 0}
 	blockRoot := common.Hash{0x03}
 
-	f.recordBlockTimeliness(block, blockRoot)
+	f.recordBlockTimeliness(block, blockRoot, f.timeMs.Load())
 
 	timeliness, ok := f.getBlockTimeliness(blockRoot)
 	require.True(t, ok)
@@ -311,7 +342,7 @@ func TestRecordBlockTimeliness_PostGloas_AfterPtcDeadline(t *testing.T) {
 	block := &cltypes.BeaconBlock{Slot: 0}
 	blockRoot := common.Hash{0x04}
 
-	f.recordBlockTimeliness(block, blockRoot)
+	f.recordBlockTimeliness(block, blockRoot, f.timeMs.Load())
 
 	timeliness, ok := f.getBlockTimeliness(blockRoot)
 	require.True(t, ok)
@@ -328,7 +359,7 @@ func TestRecordBlockTimeliness_PostGloas_BetweenDeadlines(t *testing.T) {
 	block := &cltypes.BeaconBlock{Slot: 0}
 	blockRoot := common.Hash{0x05}
 
-	f.recordBlockTimeliness(block, blockRoot)
+	f.recordBlockTimeliness(block, blockRoot, f.timeMs.Load())
 
 	timeliness, ok := f.getBlockTimeliness(blockRoot)
 	require.True(t, ok)
@@ -342,7 +373,7 @@ func TestRecordBlockTimeliness_LateKnownBlockRecordsFalseVector(t *testing.T) {
 	block := &cltypes.BeaconBlock{Slot: 0} // block for slot 0
 	blockRoot := common.Hash{0x04}
 
-	f.recordBlockTimeliness(block, blockRoot)
+	f.recordBlockTimeliness(block, blockRoot, f.timeMs.Load())
 
 	timeliness, ok := f.getBlockTimeliness(blockRoot)
 	require.True(t, ok)
@@ -357,7 +388,7 @@ func TestUpdateProposerBoostRoot_TimelyBlock(t *testing.T) {
 	block := &cltypes.BeaconBlock{Slot: 0}
 	blockRoot := common.Hash{0x10}
 
-	f.recordBlockTimeliness(block, blockRoot)
+	f.recordBlockTimeliness(block, blockRoot, f.timeMs.Load())
 	f.updateProposerBoostRoot(common.Hash{}, blockRoot, f.Slot())
 	require.Equal(t, blockRoot, f.proposerBoostRoot.Load().(common.Hash))
 }
@@ -369,7 +400,7 @@ func TestUpdateProposerBoostRoot_LateBlock(t *testing.T) {
 	block := &cltypes.BeaconBlock{Slot: 0}
 	blockRoot := common.Hash{0x11}
 
-	f.recordBlockTimeliness(block, blockRoot)
+	f.recordBlockTimeliness(block, blockRoot, f.timeMs.Load())
 	f.updateProposerBoostRoot(common.Hash{}, blockRoot, f.Slot())
 	require.Equal(t, common.Hash{}, f.proposerBoostRoot.Load().(common.Hash))
 }
@@ -384,11 +415,11 @@ func TestUpdateProposerBoostRoot_NotOverwritten(t *testing.T) {
 	block1 := &cltypes.BeaconBlock{Slot: 0}
 	block2 := &cltypes.BeaconBlock{Slot: 0}
 
-	f.recordBlockTimeliness(block1, firstRoot)
+	f.recordBlockTimeliness(block1, firstRoot, f.timeMs.Load())
 	f.updateProposerBoostRoot(common.Hash{}, firstRoot, f.Slot())
 	require.Equal(t, firstRoot, f.proposerBoostRoot.Load().(common.Hash))
 
-	f.recordBlockTimeliness(block2, secondRoot)
+	f.recordBlockTimeliness(block2, secondRoot, f.timeMs.Load())
 	f.updateProposerBoostRoot(common.Hash{}, secondRoot, f.Slot())
 	require.Equal(t, firstRoot, f.proposerBoostRoot.Load().(common.Hash), "boost root should not be overwritten")
 
@@ -404,7 +435,7 @@ func TestIsHeadLate_Timely(t *testing.T) {
 	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 0)
 	root := common.Hash{0x01}
 	block := &cltypes.BeaconBlock{Slot: 0}
-	f.recordBlockTimeliness(block, root)
+	f.recordBlockTimeliness(block, root, f.timeMs.Load())
 	require.False(t, f.isHeadLate(root), "timely block should not be late")
 }
 
@@ -412,7 +443,7 @@ func TestIsHeadLate_Late(t *testing.T) {
 	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 5*1000)
 	root := common.Hash{0x02}
 	block := &cltypes.BeaconBlock{Slot: 0}
-	f.recordBlockTimeliness(block, root)
+	f.recordBlockTimeliness(block, root, f.timeMs.Load())
 	require.True(t, f.isHeadLate(root), "late block should be late")
 }
 
@@ -504,6 +535,14 @@ func TestIsHeadWeakWithoutEquivocatorsSkipsCommitteeLookup(t *testing.T) {
 	f, headRoot, justifiedState := newHeadWeakCommitteeStore(t, false)
 	f.forkGraph = noAncestorWalkForkGraph{f.forkGraph.(*headSnapshotForkGraph)}
 	require.True(t, f.isHeadWeakWith(headRoot, justifiedState, noAttestations))
+}
+
+func TestIsHeadWeakUsesConfiguredThreshold(t *testing.T) {
+	f, headRoot, justifiedState := newHeadWeakCommitteeStore(t, false)
+	config := *f.beaconCfg
+	config.ReorgHeadWeightThreshold = 1
+	f.beaconCfg = &config
+	require.False(t, f.isHeadWeakWith(headRoot, justifiedState, func(common.Hash) uint64 { return 100 }))
 }
 
 func TestIsHeadWeakUsesHeadEpochShufflingCaches(t *testing.T) {

@@ -30,27 +30,27 @@ func (f *ForkChoiceStore) getAttestationDueMs(epoch uint64) uint64 {
 	return f.beaconCfg.AttestationDueMs(epoch >= f.beaconCfg.GloasForkEpoch)
 }
 
-// getAggregateDueMs returns the aggregate deadline in milliseconds from slot start.
-//
-// Pre-GLOAS:  SecondsPerSlot * 1000 * 2 / IntervalsPerSlot  (2/3 of slot = 8000 ms on mainnet)
-// Post-GLOAS: SecondsPerSlot * AggregateDueBpsGloas / 10    (50% of slot = 6000 ms on mainnet)
 func (f *ForkChoiceStore) getAggregateDueMs(epoch uint64) uint64 {
 	if epoch >= f.beaconCfg.GloasForkEpoch {
-		return f.beaconCfg.SecondsPerSlot * clparams.AggregateDueBpsGloas / (clparams.BpsFactor / 1000)
+		return f.beaconCfg.BpsToMs(f.beaconCfg.AggregateDueBpsGloas)
 	}
-	return f.beaconCfg.SecondsPerSlot * 1000 * 2 / f.beaconCfg.IntervalsPerSlot
+	return f.beaconCfg.BpsToMs(f.beaconCfg.AggregateDueBps)
 }
 
-// getSyncMessageDueMs returns the sync committee message deadline in milliseconds.
-// Same as the attestation deadline in both pre- and post-GLOAS.
 func (f *ForkChoiceStore) getSyncMessageDueMs(epoch uint64) uint64 {
-	return f.getAttestationDueMs(epoch)
+	bps := f.beaconCfg.SyncMessageDueBps
+	if epoch >= f.beaconCfg.GloasForkEpoch {
+		bps = f.beaconCfg.SyncMessageDueBpsGloas
+	}
+	return f.beaconCfg.BpsToMs(bps)
 }
 
-// getContributionDueMs returns the sync committee contribution deadline in milliseconds.
-// Same as the aggregate deadline in both pre- and post-GLOAS.
 func (f *ForkChoiceStore) getContributionDueMs(epoch uint64) uint64 {
-	return f.getAggregateDueMs(epoch)
+	bps := f.beaconCfg.ContributionDueBps
+	if epoch >= f.beaconCfg.GloasForkEpoch {
+		bps = f.beaconCfg.ContributionDueBpsGloas
+	}
+	return f.beaconCfg.BpsToMs(bps)
 }
 
 // getPayloadAttestationDueMs returns the PTC payload attestation deadline in milliseconds.
@@ -93,9 +93,8 @@ func (f *ForkChoiceStore) shouldApplyProposerBoost() bool {
 // NOTE: Both elements are time-based checks on when the *block* was received.
 // PTC_TIMELINESS_INDEX records whether the block arrived before the PTC deadline
 // (75% of slot), NOT whether the PTC has voted the payload present.
-func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, blockRoot common.Hash) uint64 {
+func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, blockRoot common.Hash, timeMs uint64) uint64 {
 	var timeliness [clparams.NumBlockTimelinessDeadlines]bool
-	timeMs := f.timeMs.Load()
 	currentSlot := f.slotAtTimeMs(timeMs)
 	if currentSlot == block.Slot {
 		epoch := f.computeEpochAtSlot(currentSlot)
@@ -286,7 +285,7 @@ func (f *ForkChoiceStore) isHeadWeakWith(root common.Hash, justifiedState *check
 		return false
 	}
 	committeeWeight := justifiedState.unslashedActiveBalance / f.beaconCfg.SlotsPerEpoch
-	reorgThreshold := committeeWeight * clparams.ReorgHeadWeightThreshold / 100
+	reorgThreshold := committeeWeight * f.beaconCfg.ReorgHeadWeightThreshold / 100
 	weight := headWeight(root)
 	headBlock, ok := f.forkGraph.GetBlock(root)
 	if !ok || headBlock == nil {

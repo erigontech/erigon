@@ -68,7 +68,10 @@ func fold(n *node, depth int) ([32]byte, error) {
 	if err != nil {
 		return [32]byte{}, err
 	}
-	branchHash := branchRef(&refs)
+	branchHash, err := branchRef(&refs)
+	if err != nil {
+		return [32]byte{}, err
+	}
 	if depth == 0 && len(n.path) != 0 {
 		return extensionRef(n.path, branchHash[:]), nil
 	}

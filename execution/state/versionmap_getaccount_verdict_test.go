@@ -113,6 +113,31 @@ func TestGetAccountVerdict_SelfDestructAndEmpty(t *testing.T) {
 			"the recreated account carries the new code hash")
 	})
 
+	// The recreating tx runs before the lower tx's removal of the touched account is flushed,
+	// and creates the account from an absent base as an EIP-7702 authority.
+	t.Run("recreate run before a lower tx's EIP-161 removal projects live", func(t *testing.T) {
+		addr := accounts.InternAddress(common.HexToAddress("0x7004c4"))
+		reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
+
+		vm := NewVersionMap(nil)
+
+		recreator := newAmsterdamIBS(reader, vm, 1)
+		t.Cleanup(recreator.Close)
+		require.NoError(t, recreator.SetNonce(addr, 1, tracing.NonceChangeAuthorization))
+		require.NoError(t, recreator.FinalizeTx(sd, NewNoopWriter()))
+		vm.FlushVersionedWrites(finalizedWrites(t, recreator, sd), true)
+
+		toucher := newAmsterdamIBS(reader, vm, 0)
+		t.Cleanup(toucher.Close)
+		require.NoError(t, toucher.AddBalance(addr, uint256.Int{}, tracing.BalanceChangeUnspecified))
+		require.NoError(t, toucher.FinalizeTx(sd, NewNoopWriter()))
+		vm.FlushVersionedWrites(finalizedWrites(t, toucher, sd), true)
+
+		acc, ok, _ := vm.View(2, reader).GetAccount(addr)
+		require.True(t, ok, "the recreated account must project as live")
+		require.Equal(t, uint64(1), acc.Nonce)
+	})
+
 	t.Run("funded account survives as live", func(t *testing.T) {
 		addr := accounts.InternAddress(common.HexToAddress("0xa11e"))
 		reader := newAccountStateReader(addr) // balance 100

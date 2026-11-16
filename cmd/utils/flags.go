@@ -1987,7 +1987,7 @@ func setParallelCommitment(ctx *cli.Command) {
 		if ctx.Bool(ExperimentalCommitmentV3Flag.Name) {
 			statecfg.SetCommitmentV3(true)
 		} else if statecfg.ExperimentalCommitmentV3 {
-			Fatalf("--%s=false conflicts with COMMITMENT_V3=true", ExperimentalCommitmentV3Flag.Name)
+			Fatalf("--%s=false conflicts with ERIGON_COMMITMENT_V3=true", ExperimentalCommitmentV3Flag.Name)
 		}
 	}
 }

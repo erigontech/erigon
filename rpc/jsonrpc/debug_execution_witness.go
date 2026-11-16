@@ -721,7 +721,7 @@ func (api *BaseAPI) buildAccessedState(
 		return nil, nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
 
-	if err = ethapi.CommitCallState(ibs, blockRules, recordingState); err != nil {
+	if err = ethapi.FinalizeCallTxTo(ibs, blockRules, recordingState); err != nil {
 		return nil, nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
@@ -918,7 +918,7 @@ var (
 // witness build. Direct tx.GetLatest reads keep it independent of the build's
 // in-memory commitment fold.
 type headCaptureSource struct {
-	pinnedParentTx kv.TemporalTx
+	pinnedParentTx kv.TemporalGetter
 	warmTxs        []kv.TemporalTx
 	records        *commitmentdb.ParentRecords
 	warm           *sync.Map
@@ -969,7 +969,11 @@ func (hc *headCaptureSource) warmPaths(accessed *accessedState) {
 			paths = append(paths, path{account: account, slot: crypto.Keccak256(slot[:])})
 		}
 	}
-	txs := append([]kv.TemporalTx{hc.pinnedParentTx}, hc.warmTxs...)
+	txs := make([]kv.TemporalGetter, 0, 1+len(hc.warmTxs))
+	txs = append(txs, hc.pinnedParentTx)
+	for _, tx := range hc.warmTxs {
+		txs = append(txs, tx)
+	}
 	hc.warm = &sync.Map{}
 	get := hc.recordReader().Get
 	var wg sync.WaitGroup
@@ -1037,6 +1041,16 @@ func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, comm
 	return api.buildWitnessResult(ctx, committedTx, hc, info, mode)
 }
 
+// ValidatedBlockWitness builds the canonical-mode witness of blockHash from blockTx, a view
+// that holds the block and its executed state, reading the parent commitment from parentState.
+func (api *DebugAPIImpl) ValidatedBlockWitness(ctx context.Context, blockTx kv.TemporalTx, parentState kv.TemporalGetter, blockHash common.Hash) (*ExecutionWitnessResult, error) {
+	info, err := api.resolveWitnessBlock(ctx, blockTx, rpc.BlockNumberOrHashWithHash(blockHash, false))
+	if err != nil {
+		return nil, err
+	}
+	return api.buildWitnessResult(ctx, blockTx, &headCaptureSource{pinnedParentTx: parentState}, info, witnessModeCanonical)
+}
+
 // buildWitnessResult runs the witness-building pipeline for an already-resolved block
 // against an open temporal tx: re-execute to record accesses, fold the commitment trie,
 // collect ancestor headers, verify statelessly, then append the legacy empty-storage node
@@ -1078,11 +1092,15 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Use the proof infrastructure from the commitment context.
 	// Witness generation requires the sequential HexPatriciaHashed (Witness()
 	// type-asserts it); the parallel trie cannot serve it.
-	domains, err := newSnapshotCommitmentDomains(ctx, tx, log.New())
-	if err != nil {
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
+	if domains != nil {
+		defer domains.Close()
+	}
+	// A side-fork view has TxNums only up to its tip, below the committed commitment. Head-capture seeks the
+	// commitment on the pinned parent instead.
+	if err != nil && (hc == nil || !errors.Is(err, commitmentdb.ErrBehindCommitment)) {
 		return nil, err
 	}
-	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 
 	// Get the expected parent state root for verification
@@ -2305,9 +2323,9 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
 
-	err = ethapi.CommitCallState(ibs, blockRules, stateless)
+	err = ethapi.FinalizeCallTxTo(ibs, blockRules, stateless)
 	if err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
+		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] FinalizeCallTxTo failed: %w", err)
 	}
 
 	// Finalize and compute the resulting state root

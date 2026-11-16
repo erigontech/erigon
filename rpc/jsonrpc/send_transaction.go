@@ -90,18 +90,23 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 // SendRawTransactionSync implements eth_sendRawTransactionSync (https://eips.ethereum.org/EIPS/eip-7966).
 // Creates a new message call or contract creation for a previously signed transaction waiting for the transaction to be processed and the receipt to be available.
 func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeoutMs *uint64) (*ethutils.RPCReceipt, error) {
-	// If timeout is not specified or zero, we use the default, otherwise we use the passed one capped by max.
-	timeout := api.RpcTxSyncDefaultTimeout
-	if timeoutMs != nil && *timeoutMs > 0 {
-		reqTimeout := time.Duration(*timeoutMs) * time.Millisecond
-		timeout = min(reqTimeout, api.RpcTxSyncMaxTimeout)
-	}
 	hash, err := api.SendRawTransaction(ctx, encodedTx)
 	if err != nil {
 		return nil, err
 	}
 
-	return api.waitForReceipt(ctx, hash, timeout)
+	return api.waitForReceipt(ctx, hash, api.txSyncTimeout(timeoutMs))
+}
+
+// txSyncTimeout returns the requested timeout capped by the maximum, or the default when none is requested.
+func (api *APIImpl) txSyncTimeout(timeoutMs *uint64) time.Duration {
+	if timeoutMs == nil || *timeoutMs == 0 {
+		return api.RpcTxSyncDefaultTimeout
+	}
+	if *timeoutMs > uint64(api.RpcTxSyncMaxTimeout.Milliseconds()) { // in ms: a huge request overflows a Duration
+		return api.RpcTxSyncMaxTimeout
+	}
+	return time.Duration(*timeoutMs) * time.Millisecond
 }
 
 const receiptPollInterval = time.Second

@@ -48,29 +48,29 @@ const (
 )
 
 const (
-	// maxResponseChunks is MAX_REQUEST_BLOCKS; with MAX_PAYLOAD_SIZE it sets the absolute
-	// multi-chunk ceiling (maxMultiChunkResponse).
-	maxResponseChunks = 1024
+	// MaxResponseChunks is the most blocks or envelopes a request asks for. With MAX_PAYLOAD_SIZE it sets the
+	// byte ceiling (maxMultiChunkResponse) of every multi-chunk response; blobs and columns are small enough to fit.
+	MaxResponseChunks = 64
 	// maxSingleObjectResponse bounds single-chunk protocols (status, ping, metadata,
 	// goodbye, light-client singles), whose responses are at most tens of KiB.
 	maxSingleObjectResponse = 1024 * 1024
 )
 
-// maxMultiChunkResponse is the on-wire MAX_REQUEST_BLOCKS × MAX_PAYLOAD_SIZE ceiling: the backstop a
+// maxMultiChunkResponse is the on-wire MaxResponseChunks × MAX_PAYLOAD_SIZE ceiling: the backstop a
 // caller-supplied multi-chunk budget is clamped to, so a miscomputed or overflowed budget can't make
-// the handler stream more than a spec-maximal response.
-var maxMultiChunkResponse = communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), maxResponseChunks)
+// the handler stream more than that.
+var maxMultiChunkResponse = communication.MaxWireResponseBytes(int(clparams.MaxPayloadSize), MaxResponseChunks)
 
 // ErrResponseTooLarge is surfaced by the response body when a peer's response exceeds the per-topic
 // size cap. Callers treat it as a peer failure rather than a valid (truncated) response.
 var ErrResponseTooLarge = errors.New("reqresp: response exceeds size cap")
 
-// maxResponseBodySize is the byte ceiling the caller may read for a response on the given topic.
+// MaxResponseBodySize is the byte ceiling the caller may read for a response on the given topic.
 // Single-object protocols, and any request that arrives without a caller budget (an empty request,
 // or a multi-chunk caller that failed to size one), get the tight single-object cap — never the
-// multi-GiB ceiling, so a missing budget surfaces as ErrResponseTooLarge rather than an OOM. A
+// multi-chunk ceiling, so a missing budget surfaces as ErrResponseTooLarge rather than an OOM. A
 // multi-chunk caller that does supply a budget gets it, clamped to maxMultiChunkResponse.
-func maxResponseBodySize(topic string, maxBytes uint64) uint64 {
+func MaxResponseBodySize(topic string, maxBytes uint64) uint64 {
 	if maxBytes == 0 || !communication.IsMultiChunkProtocol(topic) {
 		return maxSingleObjectResponse
 	}
@@ -356,7 +356,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// Stream the response through a per-topic size cap instead of buffering it: a compliant
 		// response passes through untouched, a flood is bounded at the cap and the caller sees
 		// ErrResponseTooLarge.
-		limit := int64(maxResponseBodySize(topic, maxBytes))
+		limit := int64(MaxResponseBodySize(topic, maxBytes))
 		cw.setStreamingBody(&streamBody{Reader: newMaxBytesReader(stream, limit), Closer: stream})
 		streamTransferred = true
 	}

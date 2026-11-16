@@ -105,6 +105,10 @@ type FullBlockReader interface {
 	FrozenBlocks() uint64
 	// FrozenBlocksObserved reports the count and whether it was observed rather than defaulted.
 	FrozenBlocksObserved() (uint64, bool)
+	// IsFrozen may use a cached range to confirm a frozen block, but requires a
+	// fresh observation to rule one out. It returns an error if the range cannot
+	// be established.
+	IsFrozen(ctx context.Context, blockNum uint64) (bool, error)
 	FrozenBlocksInView(tx kv.Getter) uint64
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)

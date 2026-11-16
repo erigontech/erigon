@@ -68,7 +68,7 @@ func newPinTestExecutor(t *testing.T, forward stagedsync.ExecFunc) (*PipelineExe
 		nil, nil, logger, stages.ModeApplyingBlocks,
 	)
 
-	dispatcher := NewDispatcher(chainConfig, notifications.Events, notifications.StateChangesConsumer, logger)
+	dispatcher := NewDispatcher(chainConfig, notifications.Events, notifications.StateChangesConsumer, nil, logger)
 	pe := NewPipelineExecutor(sync, db, pinTestBlockReader{}, chainConfig, nil, nil, nil, dispatcher, logger)
 	hook := stageloop.NewHook(t.Context(), notifications, sync, chainConfig, logger, dispatcher, nil, nil, nil, pinTestBlockReader{})
 	return pe, hook, notifications

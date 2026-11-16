@@ -20,8 +20,10 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"maps"
 	"math/rand"
+	"os"
 	"slices"
 	"strconv"
 	"testing"
@@ -262,9 +264,72 @@ func linkedNodeCount(n *node) int {
 	return count
 }
 
+func newTestRecordMatcher(t *testing.T) *RecordMatcher {
+	m := NewRecordMatcher(t.TempDir())
+	t.Cleanup(m.Close)
+	return m
+}
+
+func TestRecordMatcherSpillsStorageRoots(t *testing.T) {
+	addr := func(b byte) (a [32]byte) {
+		a[0] = b
+		return a
+	}
+	roots := map[byte][32]byte{0x10: {0xa1}, 0x20: {0xa2}, 0x30: {0xa3}, 0x40: {0xa4}}
+	expectAll := func(t *testing.T) *RecordMatcher {
+		dir := t.TempDir()
+		m := newRecordMatcher(dir, 1)
+		t.Cleanup(func() {
+			m.Close()
+			left, err := os.ReadDir(dir)
+			require.NoError(t, err)
+			require.Empty(t, left)
+		})
+		for _, b := range []byte{0x30, 0x10, 0x40, 0x20} {
+			root := roots[b]
+			require.NoError(t, m.Expect(StorageNodeKey(addr(b), nil, nil), root[:]))
+		}
+		spilled, err := os.ReadDir(dir)
+		require.NoError(t, err)
+		require.NotEmpty(t, spilled)
+		require.NoError(t, m.Record(AccountNodeKey(nil, nil), [32]byte{1}))
+		return m
+	}
+	t.Run("MatchesGoodRoots", func(t *testing.T) {
+		m := expectAll(t)
+		for _, b := range []byte{0x10, 0x20, 0x30, 0x40} {
+			require.NoError(t, m.Record(StorageNodeKey(addr(b), nil, nil), roots[b]))
+		}
+		root, records, orphans, err := m.Finish()
+		require.NoError(t, err)
+		require.Equal(t, [32]byte{1}, root)
+		require.Equal(t, uint64(5), records)
+		require.Zero(t, orphans)
+	})
+	t.Run("ReportsRootMismatch", func(t *testing.T) {
+		m := expectAll(t)
+		require.NoError(t, m.Record(StorageNodeKey(addr(0x10), nil, nil), roots[0x10]))
+		require.ErrorContains(t, m.Record(StorageNodeKey(addr(0x20), nil, nil), roots[0x30]), "storage trie folds to")
+	})
+	t.Run("ReportsMissingStorageTrie", func(t *testing.T) {
+		m := expectAll(t)
+		require.NoError(t, m.Record(StorageNodeKey(addr(0x10), nil, nil), roots[0x10]))
+		err := m.Record(StorageNodeKey(addr(0x30), nil, nil), roots[0x30])
+		require.ErrorContains(t, err, fmt.Sprintf("account %x has storage root", addr(0x20)))
+	})
+	t.Run("ReportsMissingLastStorageTrie", func(t *testing.T) {
+		m := expectAll(t)
+		for _, b := range []byte{0x10, 0x20, 0x30} {
+			require.NoError(t, m.Record(StorageNodeKey(addr(b), nil, nil), roots[b]))
+		}
+		_, _, _, err := m.Finish()
+		require.ErrorContains(t, err, fmt.Sprintf("account %x has storage root", addr(0x40)))
+	})
+}
+
 func TestRecordGraph(t *testing.T) {
 	t.Run("StorageRootExpectedAfterStoragePlane", func(t *testing.T) {
-		matcher := NewRecordMatcher()
+		matcher := newTestRecordMatcher(t)
 		addr := [32]byte{1}
 		hash := [32]byte{2}
 		require.NoError(t, matcher.Record(StorageNodeKey(addr, []byte{3}, nil), hash))
@@ -293,7 +358,7 @@ func TestRecordGraph(t *testing.T) {
 		child := StorageNodeKey(addrHash, []byte{8, 2}, nil)
 		parent := StorageNodeKey(addrHash, []byte{8}, nil)
 
-		dead := NewRecordMatcher()
+		dead := newTestRecordMatcher(t)
 		require.NoError(t, dead.Record(AccountNodeKey(nil, nil), [32]byte{1}))
 		require.NoError(t, dead.Expect(child, bytes.Repeat([]byte{0x22}, 32)))
 		require.NoError(t, dead.Record(parent, [32]byte{8}))
@@ -303,7 +368,7 @@ func TestRecordGraph(t *testing.T) {
 
 		var root [32]byte
 		copy(root[:], bytes.Repeat([]byte{0x77}, 32))
-		live := NewRecordMatcher()
+		live := newTestRecordMatcher(t)
 		require.NoError(t, live.Expect(StorageNodeKey(addrHash, nil, nil), root[:]))
 		require.NoError(t, live.Record(AccountNodeKey(nil, nil), [32]byte{1}))
 		require.NoError(t, live.Record(StorageNodeKey(addrHash, nil, nil), root))
@@ -313,14 +378,14 @@ func TestRecordGraph(t *testing.T) {
 		require.ErrorContains(t, err, "is referenced but missing")
 	})
 	t.Run("E66/RecordMatcherRejectsHashMismatch", func(t *testing.T) {
-		matcher := NewRecordMatcher()
+		matcher := newTestRecordMatcher(t)
 		key := AccountNodeKey([]byte{1}, nil)
 		h1, h2 := [32]byte{1}, [32]byte{2}
 		require.NoError(t, matcher.Expect(key, h1[:]))
 		require.ErrorContains(t, matcher.Record(key, h2), "folds to")
 	})
 	t.Run("E66/RecordMatcherRejectsStorageRootMismatch", func(t *testing.T) {
-		matcher := NewRecordMatcher()
+		matcher := newTestRecordMatcher(t)
 		var addrHash [32]byte
 		addrHash[0] = 1
 		stored, folded := [32]byte{2}, [32]byte{3}
@@ -329,14 +394,14 @@ func TestRecordGraph(t *testing.T) {
 		require.ErrorContains(t, matcher.Record(StorageNodeKey(addrHash, nil, nil), folded), "storage trie folds to")
 	})
 	t.Run("E66/RecordMatcherRejectsDuplicateRecord", func(t *testing.T) {
-		matcher := NewRecordMatcher()
+		matcher := newTestRecordMatcher(t)
 		key := AccountNodeKey([]byte{1}, nil)
 		hash := [32]byte{1}
 		require.NoError(t, matcher.Record(key, hash))
 		require.ErrorContains(t, matcher.Record(key, hash), "recorded or expected twice")
 	})
 	t.Run("E66/RecordMatcherRejectsMissingStorageRoot", func(t *testing.T) {
-		matcher := NewRecordMatcher()
+		matcher := newTestRecordMatcher(t)
 		var addrHash [32]byte
 		addrHash[0] = 1
 		root := [32]byte{2}
@@ -480,7 +545,7 @@ func (w *legacyWorld) convert(t *testing.T, prevs map[string][]byte, incremental
 			records[key] = value
 		}
 	}
-	hasher, matcher := NewRecordHasher(), NewRecordMatcher()
+	hasher, matcher := NewRecordHasher(), newTestRecordMatcher(t)
 	for _, key := range slices.Sorted(maps.Keys(records)) {
 		if len(records[key]) == 0 || key == string(commitment.KeyCommitmentV3State) {
 			continue
