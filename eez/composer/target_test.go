@@ -180,6 +180,7 @@ func TestExecuteRefuses(t *testing.T) {
 		{"a call to the manager", Call{Target: protocol.EEZL2Address}, 0, ErrToManager, true},
 		{"a reverting target", Call{Target: revertTarget}, 0, ErrCallFailed, true},
 		{"a target calling a proxy", Call{Target: reentrant}, 0, ErrReentry, true},
+		{"a target that is a proxy", Call{Target: l1Proxy}, 0, ErrReentry, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newTargetFixture(t)
@@ -192,6 +193,21 @@ func TestExecuteRefuses(t *testing.T) {
 			require.Equal(t, c.poison, IsPoison(err), err)
 			require.Equal(t, nonce, f.nonce(t, protocol.EEZL2Address), "no proxy kept")
 			require.Equal(t, uint64(1000), f.balance(t, protocol.EEZL2Address))
+		})
+	}
+	t.Run("a proxy the manager does not create", func(t *testing.T) {
+		f := newTargetFixture(t)
+		// EEZL2's code refuses a proxy of its own rollup.
+		_, err := f.execute(&Call{Target: payee, Source: l2Sender, SourceRollup: 1})
+		require.True(t, IsPoison(err), err)
+		require.ErrorContains(t, err, "create the proxy")
+	})
+	for name, manager := range map[string]common.Address{"failing": revertTarget, "answering nothing": payee} {
+		t.Run("a manager's proxy address view "+name, func(t *testing.T) {
+			f := newTargetFixture(t)
+			f.src = NewSource(chain.TestChainOsakaConfig, f.src.header, f.m, f.src.blockHash, manager, protocol.MainnetRollupID)
+			_, err := f.execute(&Call{Target: valueTarget, Source: l2Sender, SourceRollup: l2Rollup})
+			require.True(t, IsPoison(err), err)
 		})
 	}
 	t.Run("a failed state read waits", func(t *testing.T) {

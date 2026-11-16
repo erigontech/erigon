@@ -444,6 +444,9 @@ func TestCheckChainRefusesOutbound(t *testing.T) {
 	cc.L2 = &l2
 	require.ErrorIs(t, cfg.CheckChain(&cc), ErrConfig)
 	require.ErrorContains(t, cfg.CheckChain(&cc), "--eez.composer.l2front")
+	inboundOnly, err := parse(t, composerArgs(t, t.TempDir())...)
+	require.NoError(t, err)
+	require.NoError(t, inboundOnly.CheckChain(&cc), "a composer without an L2 front")
 }
 
 // initGenesis runs InitGenesis on genesis under the flags args.

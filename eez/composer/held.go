@@ -140,6 +140,9 @@ type HeldPool struct {
 	inFlight map[common.Hash]reservation
 	// slots bounds the slots of the queued and in-flight transactions.
 	slots int
+	// evicted are the outbound transactions evicted, which a replaced Sync
+	// block may have returned to the rollup's pool.
+	evicted map[common.Hash]bool
 }
 
 // replaceBump is the percentage a replacement raises both fees by.
@@ -160,7 +163,7 @@ func minReplacement(fee *uint256.Int) uint256.Int {
 
 // NewHeldPool returns an empty pool.
 func NewHeldPool() *HeldPool {
-	return &HeldPool{byHash: map[common.Hash]bool{}, inFlight: map[common.Hash]reservation{}, slots: maxHeldSlots}
+	return &HeldPool{byHash: map[common.Hash]bool{}, inFlight: map[common.Hash]reservation{}, slots: maxHeldSlots, evicted: map[common.Hash]bool{}}
 }
 
 // Push admits tx, whose sender has nonce onChain on its network: the next
@@ -378,6 +381,7 @@ func (p *HeldPool) Evict(sender common.Address, direction Direction, nonce uint6
 		if tx.chainKey() == k && tx.Nonce >= nonce {
 			delete(p.byHash, tx.Hash)
 			evicted = append(evicted, tx)
+			p.tomb(tx.Hash, direction)
 			continue
 		}
 		kept = append(kept, tx)
@@ -387,6 +391,7 @@ func (p *HeldPool) Evict(sender common.Address, direction Direction, nonce uint6
 	for h, r := range p.inFlight {
 		if r.chainKey == k && r.nonce >= nonce {
 			delete(p.inFlight, h)
+			p.tomb(h, direction)
 		}
 	}
 	return evicted
@@ -408,13 +413,21 @@ func (p *HeldPool) PopN(n int) []*Held {
 	return drained
 }
 
+// tomb keeps the hash of an evicted outbound transaction.
+func (p *HeldPool) tomb(hash common.Hash, direction Direction) {
+	if direction == Outbound {
+		p.evicted[hash] = true
+	}
+}
+
 // Holds reports whether the pool holds the transaction of hash, queued or
-// in flight.
+// in flight, or evicted it as outbound: the rollup takes such a transaction
+// from the composer alone, never as a plain one.
 func (p *HeldPool) Holds(hash common.Hash) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	_, inFlight := p.inFlight[hash]
-	return inFlight || p.byHash[hash]
+	return inFlight || p.byHash[hash] || p.evicted[hash]
 }
 
 // Len is the number of queued transactions.

@@ -17,6 +17,7 @@
 package composer
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
@@ -156,5 +157,7 @@ func (s *Source) frame(from, to common.Address, data []byte, value uint256.Int, 
 	evm := core.CreateEVM(s.config, s.blockHash, nil, accounts.InternAddress(s.header.Coinbase), s.ibs, s.header, vm.Config{NoBaseFee: true, CallOverride: override})
 	evm.Reset(evmtypes.TxContext{Origin: accounts.InternAddress(from)}, s.ibs)
 	ret, left, _, err := evm.Call(accounts.InternAddress(from), accounts.InternAddress(to), data, mdgas.MdGas{Execution: gas}, value, false)
-	return ret, gas - left.Total(), err
+	// A top frame's output lives in the state's buffer, which the next one
+	// overwrites.
+	return bytes.Clone(ret), gas - left.Total(), err
 }

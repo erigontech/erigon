@@ -408,6 +408,22 @@ func (h *harness) compose(t *testing.T, from, to uint64) *derivertest.Batch {
 	return batch
 }
 
+// TestBlocksLeaveTheHeld: the sequencer's blocks take from the pool no
+// transaction the composer holds.
+func TestBlocksLeaveTheHeld(t *testing.T) {
+	h := newHarness(t)
+	free, held := h.c.Transfer(common.HexToAddress("0xb0b"), 1), h.c.Transfer(common.HexToAddress("0xb0b"), 2)
+	tx, err := types.DecodeTransaction(held)
+	require.NoError(t, err)
+	h.pool.add(t, free)
+	h.pool.add(t, held)
+	s := h.sequencerOf(t, sequencer.Config{Held: func(hash common.Hash) bool { return hash == tx.Hash() }})
+	require.NoError(t, s.Handle(t.Context(), sequencer.LiveTick{SyncHeight: 12}))
+	b := h.block(t, 1)
+	require.Len(t, b.Transactions(), 1, "the free one alone")
+	require.NotEqual(t, tx.Hash(), b.Transactions()[0].Hash())
+}
+
 // TestSubstitute is T-SEQ-5 for a failed bundle: at the composer's request
 // the head moves back below the failed Sync block and an empty sibling, its
 // witness recorded, takes its place; once L1 settles that height nothing is

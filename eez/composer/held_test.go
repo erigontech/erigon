@@ -461,7 +461,8 @@ func hasDup(s []uint64) bool {
 	return false
 }
 
-// TestHeldPoolHolds: a transaction is held while queued or in flight.
+// TestHeldPoolHolds: a transaction is held while queued or in flight, and
+// an outbound one once evicted.
 func TestHeldPoolHolds(t *testing.T) {
 	p := NewHeldPool()
 	a, b := held(addr(0xa), 0, Outbound, 1), held(addr(0xa), 1, Outbound, 2)
@@ -473,6 +474,17 @@ func TestHeldPoolHolds(t *testing.T) {
 	require.True(t, p.Holds(a.Hash), "in flight")
 	p.Release([]*Held{a})
 	require.False(t, p.Holds(a.Hash))
+	in := held(addr(0xb), 0, Inbound, 3)
+	require.NoError(t, p.Push(in, 0))
+	p.Evict(in.Sender, in.Direction, in.Nonce)
+	require.False(t, p.Holds(in.Hash))
+	// An evicted outbound transaction stays the composer's, queued or in
+	// flight when evicted.
 	p.Evict(b.Sender, b.Direction, b.Nonce)
-	require.False(t, p.Holds(b.Hash))
+	require.True(t, p.Holds(b.Hash))
+	c := held(addr(0xc), 0, Outbound, 4)
+	require.NoError(t, p.Push(c, 0))
+	p.PopN(1)
+	p.Evict(c.Sender, c.Direction, c.Nonce)
+	require.True(t, p.Holds(c.Hash))
 }

@@ -91,8 +91,9 @@ type effects struct {
 	// anchor is the L1 block the transactions were simulated on, the parent
 	// of the one the bundle aims at.
 	anchor common.Hash
-	// projected is the posting's gas as the drain projected it.
-	projected uint64
+	// projected is the posting's gas as the drain projected it; targetGas
+	// is the gas of the outbound calls the posting makes on L1.
+	projected, targetGas uint64
 }
 
 // compose simulates held transactions on L1 state at block target-1, in the
@@ -294,7 +295,7 @@ func (c *Composer) settleEffects(ctx context.Context, e emission, sync *types.He
 	if err != nil {
 		return err
 	}
-	if gas > c.cfg.MaxGas {
+	if gas += e.fx.targetGas; gas > c.cfg.MaxGas {
 		return fmt.Errorf("%w: %d over %d", errOverBudget, gas, c.cfg.MaxGas)
 	}
 	anchor, err := c.anchor(ctx, blocks[0])
