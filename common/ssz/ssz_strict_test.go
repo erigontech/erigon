@@ -126,3 +126,35 @@ func TestDynamicListSingleEmptyElementRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeDynamicListWithDecoderValidatesBeforeCallback(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		encoded []byte
+		limit   uint64
+		want    error
+	}{
+		{"offset past end", []byte{8, 0, 0, 0}, 2, ErrBadOffset},
+		{"unaligned offset", []byte{5, 0, 0, 0, 0}, 2, ErrBadOffset},
+		{"too many elements", []byte{4, 0, 0, 0}, 0, ErrTooBigList},
+		{"element error", []byte{4, 0, 0, 0}, 1, errStrictListTest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			_, err := DecodeDynamicListWithDecoder[*strictListTestElement](tc.encoded, 0, uint32(len(tc.encoded)), tc.limit, 42, true,
+				func(obj *strictListTestElement, buf []byte, version int) error {
+					calls++
+					require.NotNil(t, obj)
+					require.Empty(t, buf)
+					require.Equal(t, 42, version)
+					return errStrictListTest
+				})
+			require.ErrorIs(t, err, tc.want)
+			if tc.want == errStrictListTest {
+				require.Equal(t, 1, calls)
+			} else {
+				require.Zero(t, calls)
+			}
+		})
+	}
+}

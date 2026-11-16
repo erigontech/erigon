@@ -32,6 +32,23 @@ const (
 	attestingIndicesLimitElectra = 2048 * 64 // MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT
 )
 
+// indexedAttestationLimit is shared by construction, version changes and decoding.
+func indexedAttestationLimit(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) int {
+	validators, committees := attestingIndicesLimit, 64
+	if cfg != nil {
+		if cfg.MaxValidatorsPerCommittee > 0 {
+			validators = int(cfg.MaxValidatorsPerCommittee)
+		}
+		if cfg.MaxCommitteesPerSlot > 0 {
+			committees = int(cfg.MaxCommitteesPerSlot)
+		}
+	}
+	if version >= clparams.ElectraVersion {
+		return validators * committees
+	}
+	return validators
+}
+
 /*
  * IndexedAttestation are attestantions sets to prove that someone misbehaved.
  */
@@ -49,17 +66,8 @@ func NewIndexedAttestation(version clparams.StateVersion) *IndexedAttestation {
 // NewIndexedAttestationWithConfig creates a new IndexedAttestation with preset-aware limits.
 // If cfg is nil, mainnet defaults are used.
 func NewIndexedAttestationWithConfig(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *IndexedAttestation {
-	var attLimit int
-	if version.AfterOrEqual(clparams.ElectraVersion) {
-		attLimit = attestingIndicesLimitElectra
-		if cfg != nil && cfg.MaxCommitteesPerSlot > 0 {
-			attLimit = int(cfg.MaxValidatorsPerCommittee) * int(cfg.MaxCommitteesPerSlot)
-		}
-	} else {
-		attLimit = attestingIndicesLimit
-	}
 	return &IndexedAttestation{
-		AttestingIndices: solid.NewRawUint64List(attLimit, []uint64{}),
+		AttestingIndices: solid.NewRawUint64List(indexedAttestationLimit(version, cfg), nil),
 		Data:             &solid.AttestationData{},
 		version:          version,
 	}
@@ -73,15 +81,7 @@ func (i *IndexedAttestation) SetVersion(v clparams.StateVersion) {
 // If cfg is nil, mainnet defaults are used.
 func (i *IndexedAttestation) SetVersionWithConfig(v clparams.StateVersion, cfg *clparams.BeaconChainConfig) {
 	i.version = v
-	if v >= clparams.ElectraVersion {
-		limit := attestingIndicesLimitElectra
-		if cfg != nil && cfg.MaxCommitteesPerSlot > 0 {
-			limit = int(cfg.MaxValidatorsPerCommittee) * int(cfg.MaxCommitteesPerSlot)
-		}
-		i.AttestingIndices.SetCap(limit)
-	} else {
-		i.AttestingIndices.SetCap(attestingIndicesLimit)
-	}
+	i.AttestingIndices.SetCap(indexedAttestationLimit(v, cfg))
 }
 
 func (i *IndexedAttestation) Static() bool {
@@ -140,15 +140,7 @@ func (i *IndexedAttestation) DecodeSSZStrictWithConfig(buf []byte, version int, 
 func (i *IndexedAttestation) decodeSSZWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig, strict bool) error {
 	i.version = clparams.StateVersion(version)
 	i.Data = &solid.AttestationData{}
-	if version >= int(clparams.ElectraVersion) {
-		limit := attestingIndicesLimitElectra
-		if cfg != nil && cfg.MaxCommitteesPerSlot > 0 {
-			limit = int(cfg.MaxValidatorsPerCommittee) * int(cfg.MaxCommitteesPerSlot)
-		}
-		i.AttestingIndices = solid.NewRawUint64List(limit, nil)
-	} else {
-		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimit, nil)
-	}
+	i.AttestingIndices = solid.NewRawUint64List(indexedAttestationLimit(i.version, cfg), nil)
 
 	if strict {
 		return ssz2.UnmarshalSSZStrict(buf, version, i.AttestingIndices, i.Data, i.Signature[:])
