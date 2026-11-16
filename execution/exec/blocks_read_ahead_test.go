@@ -1410,6 +1410,24 @@ func TestReviewReadAheadCleanupStopsQueuedExecution(t *testing.T) {
 	})
 }
 
+func TestReadAheadSkipsTargetsAtOrBelowExecutedBlock(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		tx, block := reviewReadAheadFixture(t, []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.STOP)})
+		var executions atomic.Int32
+		tx.onStorage = func() { executions.Add(1) }
+		var execBlock atomic.Int64
+		execBlock.Store(10)
+		input, clean := BlocksReadAhead(t.Context(), 1, &singleTxRoDB{tx: tx}, ethash.NewFaker(), readAheadBlockReader{block: block}, chain.TestChainOsakaConfig, true, false, &execBlock, 5)
+		defer clean()
+		input <- 5
+		synctest.Wait()
+		require.Equal(t, int32(0), executions.Load(), "target equal to the executed block must be skipped as late")
+		input <- 6
+		synctest.Wait()
+		require.Equal(t, int32(1), executions.Load(), "target above the executed block must be executed")
+	})
+}
+
 func TestReviewReadAheadDoesNotCacheStaleAuRaCertifier(t *testing.T) {
 	registrar, staleCertifier, currentCertifier := common.Address{19: 0xa0}, common.Address{19: 0xa1}, common.Address{19: 0xa2}
 	duration, start := uint64(1), uint64(0)

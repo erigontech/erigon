@@ -46,9 +46,7 @@ func TestReadAheadInitialExecMatchesNormalExecution(t *testing.T) {
 		dbg.ReadAheadDistance = oldDistance
 	})
 	blocks := metrics.GetOrCreateCounterVec("read_ahead_exec_blocks_total", []string{"result"})
-	results := func() (float64, float64) {
-		return blocks.WithLabelValues("done").GetValue(), blocks.WithLabelValues("late").GetValue()
-	}
+	done := blocks.WithLabelValues("done")
 	chainPack := func(t *testing.T) (*types.Block, types.Receipts) {
 		t.Helper()
 		key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f491")
@@ -98,11 +96,10 @@ func TestReadAheadInitialExecMatchesNormalExecution(t *testing.T) {
 	dbg.ReadAheadInitial, dbg.ReadAheadExec, dbg.ReadAheadExecCommitment, dbg.ReadAheadBlocksWorkers, dbg.ReadAheadDistance = false, false, false, 2, 500
 	defaultRoot, defaultReceipts := chainPack(t)
 	dbg.ReadAheadInitial, dbg.ReadAheadExec, dbg.ReadAheadExecCommitment, dbg.ReadAheadBlocksWorkers, dbg.ReadAheadDistance = true, true, false, 1, 8
-	beforeDone, beforeLate := results()
+	beforeDone := done.GetValue()
 	prefetchedRoot, prefetchedReceipts := chainPack(t)
-	afterDone, afterLate := results()
+	afterDone := done.GetValue()
 	require.Equal(t, defaultRoot.Root(), prefetchedRoot.Root())
 	require.Equal(t, defaultReceipts, prefetchedReceipts)
-	require.Equal(t, beforeLate, afterLate, "read-ahead must not skip targets above the last executed block; late = %v", afterLate-beforeLate)
 	require.Greater(t, afterDone, beforeDone, "initial-cycle read-ahead must reach the speculative execution branch")
 }
