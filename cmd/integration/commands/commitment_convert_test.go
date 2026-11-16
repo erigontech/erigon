@@ -312,7 +312,7 @@ func dbWithV3State(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) {
 	require.NoError(t, err)
 	require.NoError(t, db.OpenStateSnapshots(t.Context()))
 	t.Cleanup(db.Close)
-	agg := fillAccountState(t, db, 64)
+	agg, _ := fillAccountState(t, db, 64)
 	require.NoError(t, agg.BuildFiles(db, 48, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
 	return db, dirs
 }

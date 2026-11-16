@@ -659,16 +659,13 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	len64 := length.Uint64()
 
-	code, err := evm.IntraBlockState().GetCode(addr)
-	if err != nil {
-		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-	}
-
 	codeOffset64, overflow := codeOffset.Uint64WithOverflow()
 	if overflow {
 		codeOffset64 = math.MaxUint64
 	}
-	scope.Memory.SetFromData(memOffset.Uint64(), len64, codeOffset64, code)
+	if err := evm.IntraBlockState().ReadCodeSegmentTo(addr, codeOffset64, scope.Memory.GetPtr(memOffset.Uint64(), len64)); err != nil {
+		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
 	return pc, nil, nil
 }
 

@@ -19,8 +19,10 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -394,6 +396,55 @@ func TestGetStateFullSkipsForkchoiceStateAtLaterSlot(t *testing.T) {
 	}
 }
 
+// An invalid block or state id is answered 400 by every endpoint, also by those that return the parser's error as is.
+func TestInvalidIdsAreBadRequests(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	for _, path := range []string{
+		"/eth/v2/beacon/blocks/18446744073709551616",
+		"/eth/v2/beacon/blocks/not-an-id",
+		"/eth/v1/beacon/blob_sidecars/18446744073709551616",
+		"/eth/v1/beacon/states/18446744073709551616/root",
+		"/eth/v2/debug/beacon/states/not-an-id",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+path, nil)
+			require.NoError(t, err)
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+			var body struct{ Message string }
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+			require.True(t, strings.HasPrefix(body.Message, "invalid path variable"), body.Message)
+		})
+	}
+}
+
+// A fork choice failure while reading a valid state id is an internal error, not an invalid id.
+func TestGetStateFullForkchoiceErrorIsInternal(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	fcu.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
+		return nil, errors.New("fork graph read failed")
+	}
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/head", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+}
+
 // TestGetStateFullFinalizedServesAdvancedForkchoiceState pins that a named
 // state_id still gets the fork choice state when it was advanced past its
 // block, as the anchor checkpoint state can be.
@@ -713,6 +764,50 @@ func TestGetRandaoMissingPreviousEpochMix(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, rec.Code, "unavailable previous-epoch mix must return 404: GET %s returned %d: %s", path, rec.Code, rec.Body.String())
 }
 
+func TestGetRandaoEpochOutOfRange(t *testing.T) {
+	_, _, _, _, post, h, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	epoch := post.Slot() / h.beaconChainCfg.SlotsPerEpoch
+	for _, queryEpoch := range []uint64{epoch + 1, math.MaxUint64} {
+		path := fmt.Sprintf("/eth/v1/beacon/states/%d/randao?epoch=%d", post.Slot(), queryEpoch)
+		rec := httptest.NewRecorder()
+		h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetRandaoHistoricalEpochBoundary(t *testing.T) {
+	db, blocks, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	stateEpoch := h.beaconChainCfg.EpochsPerHistoricalVector + 5
+	oldestValidEpoch := stateEpoch - h.beaconChainCfg.EpochsPerHistoricalVector + 1
+	stateSlot := stateEpoch * h.beaconChainCfg.SlotsPerEpoch
+	root, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.WriteHeaderSlot(tx, root, stateSlot); err != nil {
+			return err
+		}
+		if err := beacon_indicies.MarkRootCanonical(tx, stateSlot, root); err != nil {
+			return err
+		}
+		if err := tx.Put(kv.RandaoMixes, base_encoding.Encode64ToBytes4(oldestValidEpoch*h.beaconChainCfg.SlotsPerEpoch), make([]byte, 32)); err != nil {
+			return err
+		}
+		return tx.Put(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(stateSlot), make([]byte, 32))
+	}))
+	for _, tc := range []struct {
+		epoch uint64
+		code  int
+	}{
+		{oldestValidEpoch - 1, http.StatusBadRequest},
+		{oldestValidEpoch, http.StatusOK},
+	} {
+		path := fmt.Sprintf("/eth/v1/beacon/states/%d/randao?epoch=%d", stateSlot, tc.epoch)
+		rec := httptest.NewRecorder()
+		h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+		require.Equal(t, tc.code, rec.Code, rec.Body.String())
+	}
+}
+
 func TestGetCommitteesMissingRandaoMixReturns404(t *testing.T) {
 	db, _, _, _, post, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.FinalizedSlotVal = post.Slot() + 1
@@ -742,6 +837,21 @@ func TestGetCommitteesMissingRandaoMixReturns404(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(missing.Body.Bytes(), &response))
 	require.Contains(t, response.Message, "randao mix")
+}
+
+func TestGetCommitteesMalformedRandaoMixReturns500(t *testing.T) {
+	db, _, _, _, post, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.FinalizedSlotVal = post.Slot() + 1
+	epoch := post.Slot()/h.beaconChainCfg.SlotsPerEpoch - 1
+	path := fmt.Sprintf("/eth/v1/beacon/states/%d/committees?epoch=%d", post.Slot(), epoch)
+	mixEpoch := epoch - h.beaconChainCfg.MinSeedLookahead - 1
+	key := base_encoding.Encode64ToBytes4(mixEpoch * h.beaconChainCfg.SlotsPerEpoch)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.RandaoMixes, key, make([]byte, 31))
+	}))
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
 }
 
 func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {

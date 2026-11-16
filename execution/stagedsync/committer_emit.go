@@ -30,7 +30,8 @@ import (
 
 // The commitment path folds a block's updates straight from the version map instead of
 // accumulating per-field values. accumulateTouched collects the block's key-only touched
-// union (account keys, storage slots, and the self-destruct subtree-reset set);
+// union (account keys, storage slots, and the subtree-reset set of self-destructs and
+// contract creations);
 // emitTouched then reads each final value from the version map view via
 // GetAccount/GetStorage and writes one Update per key. The version map already carries
 // the EIP-161 / self-destruct existence verdict, so this path has no EIP knowledge and
@@ -44,21 +45,22 @@ func (cc *commitmentCalculator) clearTouched() {
 func (cc *commitmentCalculator) clearFoldedKeys() {
 	clear(cc.touchedAccounts)
 	clear(cc.touchedStorage)
-	clear(cc.destructed)
+	clear(cc.storageReset)
 	cc.baseErr = nil
 }
 
 // accumulateTouched folds one write-set view's changed-key set into the touched union.
 // An account is marked touched by any real account-field change
 // and by any real storage change (so its storageRoot refolds); a slot is
-// marked only when it actually changed; a true SelfDestruct marks the subtree reset. A
+// marked only when it actually changed; a true SelfDestruct or CreateContract marks the
+// subtree reset, as a contract created over an account with storage starts empty. A
 // bare touch that changes nothing — a net-zero balance write to an absent account — folds
 // nothing, exactly as the lifecycle/domain read and the canonical trie treat it.
 func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, base state.StateReader) {
 	if cc.touchedAccounts == nil {
 		cc.touchedAccounts = map[accounts.Address][]byte{}
 		cc.touchedStorage = map[accounts.Address]map[accounts.StorageKey][]byte{}
-		cc.destructed = map[accounts.Address]struct{}{}
+		cc.storageReset = map[accounts.Address]struct{}{}
 		cc.wipedAt = map[accounts.Address]int{}
 	}
 	for a := range writes.AccountChanges() {
@@ -66,7 +68,12 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, bas
 	}
 	for a, vw := range writes.SelfDestructs() {
 		if vw.Val {
-			cc.destructed[a] = struct{}{}
+			cc.storageReset[a] = struct{}{}
+		}
+	}
+	for a, vw := range writes.CreateContracts() {
+		if vw.Val {
+			cc.storageReset[a] = struct{}{}
 		}
 	}
 	for a, slots := range writes.StorageChanges() {
@@ -186,7 +193,7 @@ func (cc *commitmentCalculator) accountUpdate(view *state.VersionMapView, addr a
 			u.CodeHash = empty.CodeHash
 		}
 	}
-	if _, ok := cc.destructed[addr]; ok {
+	if _, ok := cc.storageReset[addr]; ok {
 		u.DeleteStorageSubtree = true
 	}
 	if wasDeleted {

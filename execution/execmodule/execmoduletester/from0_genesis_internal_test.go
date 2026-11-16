@@ -28,7 +28,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -48,27 +47,11 @@ import (
 )
 
 // Verifies the bug is fixed on the ResetExec → SeekCommitment → ExecV3
-// skip-block-0 path. Driver sets dbg.Exec3Parallel; not safe to t.Parallel.
+// skip-block-0 path.
 func TestFromZero_GenesisAllocPreservedAfterResetReExec(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	for _, mode := range []struct {
-		name     string
-		parallel bool
-	}{
-		{"parallel", true},
-	} {
-		t.Run(mode.name, func(t *testing.T) {
-			prev := dbg.Exec3Parallel
-			dbg.Exec3Parallel = mode.parallel
-			t.Cleanup(func() { dbg.Exec3Parallel = prev })
-			runFromZeroGenesisAllocPreservedAfterResetReExec(t)
-		})
-	}
-}
-
-func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 	// Untouched-after-genesis address mirroring 0xA1E4380A's role on mainnet.
 	dormantAddr := accounts.InternAddress(common.HexToAddress("0xA1E4380A3B1f749673E270229993eE55F35663b4"))
 	dormantFunds := new(big.Int).Mul(big.NewInt(2000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)) // 2000 ETH
@@ -147,22 +130,6 @@ func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 // zero address. Re-executing from block 0 must keep it, as the genesis runs with
 // EIP-161 disabled; removing it changes every later state root.
 func TestFromZero_AuraGenesisEmptyZeroAddressRetained(t *testing.T) {
-	for _, mode := range []struct {
-		name     string
-		parallel bool
-	}{
-		{"parallel", true},
-	} {
-		t.Run(mode.name, func(t *testing.T) {
-			prev := dbg.Exec3Parallel
-			dbg.Exec3Parallel = mode.parallel
-			t.Cleanup(func() { dbg.Exec3Parallel = prev })
-			runAuraGenesisEmptyZeroAddressRetained(t)
-		})
-	}
-}
-
-func runAuraGenesisEmptyZeroAddressRetained(t *testing.T) {
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	keyAddr := crypto.PubkeyToAddress(key.PublicKey)
@@ -317,22 +284,6 @@ func TestFromZero_BranchCacheCoherentAcrossBatches(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	for _, mode := range []struct {
-		name     string
-		parallel bool
-	}{
-		{"parallel", true},
-	} {
-		t.Run(mode.name, func(t *testing.T) {
-			prev := dbg.Exec3Parallel
-			dbg.Exec3Parallel = mode.parallel
-			t.Cleanup(func() { dbg.Exec3Parallel = prev })
-			runBranchCacheCoherentAcrossBatches(t)
-		})
-	}
-}
-
-func runBranchCacheCoherentAcrossBatches(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	keyAddr := crypto.PubkeyToAddress(key.PublicKey)
 	keyFunds := new(big.Int).Mul(big.NewInt(1_000_000), new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
@@ -376,13 +327,11 @@ func runBranchCacheCoherentAcrossBatches(t *testing.T) {
 }
 
 // TestExec_RestoresCommitmentStateReader checks that an execution batch leaves
-// the commitment state reader as it found it. The exec mode is whatever the
-// suite selects — the serial/parallel CI matrix (and the EXEC3_PARALLEL default)
-// cover both. It bites in parallel: the commitment calculator installs a
+// the commitment state reader as it found it. The commitment calculator installs a
 // GetAsOf-based asOfStateReader on the shared context, and leaving it there
 // makes a later foreground SeekCommitment in the offline re-exec path (in-mem
 // history reads disabled) fail with "GetAsOf called on TemporalMemBatch with
-// inMemHistoryReads disabled". Serial installs no custom reader.
+// inMemHistoryReads disabled".
 func TestExec_RestoresCommitmentStateReader(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	keyAddr := crypto.PubkeyToAddress(key.PublicKey)

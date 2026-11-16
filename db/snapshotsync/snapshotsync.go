@@ -17,11 +17,13 @@
 package snapshotsync
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -166,22 +168,29 @@ func isStateHistory(name string) bool {
 	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
 }
 
-func localV3CommitmentTip(dirs datadir.Dirs) (uint64, error) {
+func localV3CommitmentTip(dirs datadir.Dirs) (tip uint64, found bool, err error) {
 	entries, err := os.ReadDir(dirs.SnapDomain)
 	if errors.Is(err, os.ErrNotExist) {
-		return 0, nil
+		return 0, false, nil
 	}
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	var tip uint64
+	var files []snaptype.FileInfo
 	for _, entry := range entries {
 		info, _, ok := snaptype.ParseFileName("", entry.Name())
 		if ok && info.TypeString == kv.CommitmentDomain.String() && info.Ext == ".kv" && info.Version.Major >= 3 {
-			tip = max(tip, info.To)
+			files = append(files, info)
 		}
 	}
-	return tip, nil
+	slices.SortFunc(files, func(a, b snaptype.FileInfo) int { return cmp.Compare(a.From, b.From) })
+	for i := range files {
+		if files[i].From > tip {
+			break
+		}
+		tip = max(tip, files[i].To)
+	}
+	return tip, len(files) > 0, nil
 }
 
 func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint64) map[string]bool {
@@ -747,15 +756,16 @@ func SyncSnapshots(
 
 		log.Info(fmt.Sprintf("[%s] Preparing snapshots request for %s", logPrefix, task))
 		var localV3Tip uint64
+		var localV3 bool
 		if statecfg.ExperimentalCommitmentV3 {
 			var err error
-			if localV3Tip, err = localV3CommitmentTip(dirs); err != nil {
+			if localV3Tip, localV3, err = localV3CommitmentTip(dirs); err != nil {
 				return err
 			}
 		}
 		incompatibleCommitment := incompatibleCommitmentFiles(snapCfg.Preverified.Items, localV3Tip)
 		v3Remedy := "sync with `--experimental.commitment-v3` off, then convert it with `integration commitment convert --v3` before enabling it"
-		if localV3Tip > 0 {
+		if localV3 {
 			v3Remedy = "run with `--snap.skip-state-snapshot-download`, or restore with `integration commitment convert --restore`, sync with `--experimental.commitment-v3` off and convert again"
 		}
 		legacyRemedy := "run with `--experimental.commitment-v3` or `--snap.skip-state-snapshot-download`"

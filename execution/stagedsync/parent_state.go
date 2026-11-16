@@ -31,7 +31,7 @@ func parentStateFromReads(io *state.VersionedIO) *readSetParentState {
 	for tx := -1; tx < io.Len()-1; tx++ {
 		reads := io.ReadSet(tx)
 		reads.RangeFullHeaders(func(addr accounts.Address, path state.AccountPath, key accounts.StorageKey, hdr state.ReadHeader) bool {
-			if !hdr.PreBlock() {
+			if hdr.Source != state.StorageRead {
 				return true
 			}
 			switch path {

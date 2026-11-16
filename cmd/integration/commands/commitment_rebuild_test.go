@@ -18,6 +18,7 @@ package commands
 
 import (
 	"encoding/binary"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,6 +26,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/utils/app"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -47,7 +51,7 @@ func dbWithState(t *testing.T, buildFiles bool) (kv.TemporalRwDB, datadir.Dirs, 
 	const stepSize, txs, filed = 16, 64, 48
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
-	agg := fillAccountState(t, db, txs)
+	agg, _ := fillAccountState(t, db, txs)
 	ctx := t.Context()
 	if buildFiles {
 		require.NoError(t, agg.BuildFiles(db, filed, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
@@ -69,11 +73,12 @@ func dbWithState(t *testing.T, buildFiles bool) (kv.TemporalRwDB, datadir.Dirs, 
 	return db, dirs, countTail
 }
 
-func fillAccountState(t *testing.T, db kv.TemporalRwDB, txs uint64) *state.Aggregator {
+func fillAccountState(t *testing.T, db kv.TemporalRwDB, txs uint64) (*state.Aggregator, []common.Hash) {
 	t.Helper()
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	tx, domains := temporaltest.NewTestTxSD(t, db)
+	roots := make([]common.Hash, txs)
 	for txNum := range txs {
 		addr := make([]byte, 20)
 		binary.BigEndian.PutUint64(addr[12:], txNum%5+1)
@@ -81,15 +86,16 @@ func fillAccountState(t *testing.T, db kv.TemporalRwDB, txs uint64) *state.Aggre
 		prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, addr)
 		require.NoError(t, err)
 		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, prev))
-		_, err = domains.ComputeCommitment(t.Context(), tx, true, txNum, txNum, "", nil)
+		root, err := domains.ComputeCommitment(t.Context(), tx, true, txNum, txNum, "", nil)
 		require.NoError(t, err)
+		roots[txNum] = common.Hash(root)
 		require.NoError(t, rawdbv3.TxNums.Append(tx, txNum, txNum))
 	}
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, txs-1))
 	require.NoError(t, domains.Flush(t.Context(), tx))
 	domains.Close()
 	require.NoError(t, tx.Commit())
-	return agg
+	return agg, roots
 }
 
 func requireExecutionReset(t *testing.T, db kv.TemporalRwDB, countTail func() uint64) {
@@ -160,4 +166,48 @@ func TestCommitmentClearKeepsTheDBTail(t *testing.T) {
 	tail := countTail()
 	require.NoError(t, commitmentRebuild(db, t.Context(), log.New()))
 	require.Equal(t, tail, countTail(), "--clear-commitment removes commitment only")
+}
+
+func TestCommitmentRebuildWithoutHistoryAfterPrunedHistoryRefusal(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	statecfg.EnableHistoricalCommitment()
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
+	agg, roots := fillAccountState(t, db, 56)
+	require.NoError(t, agg.BuildFiles(db, 56, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
+	agg.CloseFilesNoReopen()
+	for _, d := range []string{dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+		for _, domain := range []string{"commitment", "accounts", "storage", "code"} {
+			files, err := filepath.Glob(filepath.Join(d, "*-"+domain+".0-*"))
+			require.NoError(t, err)
+			for _, f := range files {
+				require.NoError(t, dir.RemoveFile(f))
+			}
+		}
+	}
+	require.NoError(t, agg.ReloadFiles())
+
+	err := commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true})
+	require.ErrorContains(t, err, "then run `integration commitment rebuild --yes --no-history` with ERIGON_COMMITMENT_V3=true")
+
+	agg.CloseFilesNoReopen()
+	require.NoError(t, app.DeleteStateSnapshots(app.DeleteStateSnapshotsArgs{Dirs: dirs, DomainNames: []string{"commitment"}}))
+	require.NoError(t, agg.ReloadFiles())
+	snapCfg := ethconfig.Defaults.Snapshot
+	snapCfg.ChainName = networkname.Test
+	blockSnaps := blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, log.Root())
+	t.Cleanup(blockSnaps.Close)
+	openBlockReaderOnce.Do(func() {
+		_blockReaderSingleton, _blockWriterSingleton = freezeblocks.NewBlockReader(blockSnaps), blockio.NewBlockWriter()
+	})
+	prevDatadir, prevNoHistory, prevYes := datadirCli, noHistory, yes
+	t.Cleanup(func() { datadirCli, noHistory, yes = prevDatadir, prevNoHistory, prevYes })
+	datadirCli, noHistory, yes = dirs.DataDir, true, true
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+
+	require.NoError(t, commitmentRebuild(db, t.Context(), log.New()))
+	c, err := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
+	require.NoError(t, err)
+	require.Equal(t, uint64(47), c.TxNum)
+	require.Equal(t, roots[c.TxNum], common.Hash(c.Root))
 }

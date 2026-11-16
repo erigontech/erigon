@@ -113,10 +113,11 @@ type commitmentCalculator struct {
 
 	// touched* are the key-only union the commitment path folds over: no
 	// values are retained — emitTouched reads each value from the version map.
-	// destructed carries the self-destruct subtree-reset signal.
+	// storageReset holds the accounts whose storage subtree a self-destruct or a contract
+	// creation resets.
 	touchedAccounts map[accounts.Address][]byte
 	touchedStorage  map[accounts.Address]map[accounts.StorageKey][]byte
-	destructed      map[accounts.Address]struct{}
+	storageReset    map[accounts.Address]struct{}
 	// wipedAt holds, per account, the tx index of the destruct whose subtree reset an
 	// earlier fold of this block emitted; a later fold must not wipe the slots written since.
 	wipedAt      map[accounts.Address]int
@@ -631,8 +632,8 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	eip161Enabled := req.blockNum != 0 && cc.chainConfig.IsEIP161Enabled(req.blockNum)
 	isAura := cc.chainConfig.Aura != nil
 	base := cc.asOfReader.dr.StateReaderAt(req.firstTxNum)
-	if ambiguous, err := vm.HasEmptyBaseAccount(eip161Enabled, isAura, base); err != nil {
-		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
+	if ambiguous, err := vm.HasAmbiguousBaseAccount(eip161Enabled, isAura, base); err != nil {
+		fail(fmt.Errorf("BAL-driven compute-ahead block %d: base read: %w", req.blockNum, err))
 		return
 	} else if ambiguous {
 		pb.mode = calcModeIncremental
