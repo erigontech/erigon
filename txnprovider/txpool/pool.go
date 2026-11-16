@@ -785,9 +785,15 @@ func (p *TxPool) Started() bool {
 
 // SetMaxTxnSize sets the largest transaction encoding the pool admits, zero
 // for the protocol's limit alone. Set before the pool starts, it applies to
-// the transactions it reloads too.
+// the transactions it reloads too, and to those an unwind restores.
 func (p *TxPool) SetMaxTxnSize(size uint64) {
 	p.maxTxnSize.Store(size)
+}
+
+// oversized reports a transaction over the limit of SetMaxTxnSize.
+func (p *TxPool) oversized(txn *TxnSlot) bool {
+	limit := p.maxTxnSize.Load()
+	return limit != 0 && uint64(txn.Size) > limit
 }
 
 // seenLocked reports whether the pool's view has reached block number, and is
@@ -1148,7 +1154,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 }
 
 func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView, cells blobCells) (txpoolcfg.DiscardReason, error) {
-	if limit := p.maxTxnSize.Load(); limit != 0 && uint64(txn.Size) > limit {
+	if p.oversized(txn) {
 		return txpoolcfg.RLPTooLong, nil
 	}
 	isEIP3860 := p.isShanghai()

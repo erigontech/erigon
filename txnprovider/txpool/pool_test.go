@@ -4134,7 +4134,8 @@ func TestProvideTxnsOnTheHeadAfterStart(t *testing.T) {
 }
 
 // A transaction larger than the pool's size limit is refused when added and
-// dropped when reloaded; one at the limit is kept, as both are without one.
+// dropped when reloaded or unwound; one at the limit is kept, as both are
+// without one.
 func TestSetMaxTxnSize(t *testing.T) {
 	slot := func(nonce uint64, data int) *TxnSlot {
 		s := newTestTxnSlot(nonce, 0, 1, 2, 100_000)
@@ -4184,6 +4185,24 @@ func TestSetMaxTxnSize(t *testing.T) {
 		require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
 			return pool.fromDB(ctx, poolTx)
 		}))
+		require.Contains(t, pool.byHash, string(small.IDHash[:]), "limited %v", limited)
+		if limited {
+			require.NotContains(t, pool.byHash, string(large.IDHash[:]))
+		} else {
+			require.Contains(t, pool.byHash, string(large.IDHash[:]))
+		}
+	}
+
+	// An unwind restores them under the same limit.
+	for _, limited := range []bool{false, true} {
+		ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+		if limited {
+			pool.SetMaxTxnSize(limit)
+		}
+		var txns TxnSlots
+		txns.Append(small, sender[:], true)
+		txns.Append(large, sender[:], true)
+		require.NoError(t, pool.OnNewBlock(ctx, newBlockChangeForAccounts(common.Hash{1}, 0, sender), txns, TxnSlots{}, TxnSlots{}))
 		require.Contains(t, pool.byHash, string(small.IDHash[:]), "limited %v", limited)
 		if limited {
 			require.NotContains(t, pool.byHash, string(large.IDHash[:]))
