@@ -29,6 +29,7 @@ on:
           - eth_getBlockByNumber_latest
           - eth_getBlockReceipts_gen
           - eth_getBlockByNumber_gen
+          - eth_subscribe_newHeads
           - eth_subscribe
   schedule:
     - cron: '0 2 * * *'   # Run daily at 02:00 UTC
@@ -347,6 +348,10 @@ jobs:
           # Each count covers the largest step of its test, e.g. 30000:20 for eth_call, 4500:20 for mixed.
           selected() { [ "$RPC_TEST" = "all" ] || [ "$RPC_TEST" = "$1" ]; }
           cd "$RUNNER_WS/rpc-tests"
+          if selected eth_subscribe_newHeads; then
+            ./build/bin/rpc_pattern_gen eth_subscribe --newHeads 10 \
+              --out "perf/pattern/$CHAIN/stress_test_eth_subscribe_newHeads_gen_latest.jsonl"
+          fi
           # The subscriptions name no block (logs with no filter), so the pattern does not age before its run.
           if selected eth_subscribe; then
             ./build/bin/rpc_pattern_gen eth_subscribe --url http://localhost:8545 \
@@ -451,6 +456,7 @@ jobs:
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_mixed_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_debug_traceBlockByNumber_callTracer_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_debug_traceBlockByNumber_structLog_gen_latest.jsonl
+            ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_subscribe_newHeads_gen_latest.jsonl
             ${{ runner.workspace }}/rpc-tests/perf/pattern/${{ env.CHAIN }}/stress_test_eth_subscribe_gen_latest.jsonl
           retention-days: 1
 
@@ -712,6 +718,22 @@ jobs:
         timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockByNumber stress_test_eth_getBlockByNumber_gen_latest 1000:20,3000:20 eth_getBlockByNumber_gen
 
+      - name: Sync clients before eth_subscribe_newHeads
+        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_newHeads')
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_subscribe_newHeads" --chain "$NETWORK"
+
+      # Only 10 newHeads subscriptions per connection: the fan-out of the head to every subscriber, with no logs or receipts traffic.
+      - name: Run eth_subscribe_newHeads
+        id: perf_eth_subscribe_newHeads
+        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_newHeads'
+        continue-on-error: true
+        timeout-minutes: ${{ needs.setup.outputs.rpc_test == 'eth_subscribe_newHeads' && 30 || 20 }}
+        run: |
+          sequence=100:120
+          if [ "$RPC_TEST" = "eth_subscribe_newHeads" ]; then sequence=100:300; fi
+          bash .github/workflows/scripts/run_rpc_perf.sh eth_subscribe stress_test_eth_subscribe_newHeads_gen_latest "$sequence" eth_subscribe_newHeads
+
       - name: Sync clients before eth_subscribe
         if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe')
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
@@ -748,6 +770,7 @@ jobs:
             eth_getBlockByNumber_latest=${{ steps.perf_eth_getBlockByNumber_latest.outcome }}
             eth_getBlockReceipts_gen=${{ steps.perf_eth_getBlockReceipts_gen.outcome }}
             eth_getBlockByNumber_gen=${{ steps.perf_eth_getBlockByNumber_gen.outcome }}
+            eth_subscribe_newHeads=${{ steps.perf_eth_subscribe_newHeads.outcome }}
             eth_subscribe=${{ steps.perf_eth_subscribe.outcome }}
           JOB_STATUS: ${{ job.status }}
         run: |
@@ -873,7 +896,7 @@ jobs:
             "$RUN_ID-eth_createAccessList_gen" "$RUN_ID-eth_getLogs_gen" "$RUN_ID-eth_getLogs_head" "$RUN_ID-eth_getLogs_topics" \
             "$RUN_ID-eth_getLogs_wide" "$RUN_ID-eth_getLogs_latest" "$RUN_ID-eth_getBlockReceipts_latest" \
             "$RUN_ID-eth_getBlockByNumber_latest" "$RUN_ID-eth_getBlockReceipts_gen" "$RUN_ID-eth_getBlockByNumber_gen" \
-            "$RUN_ID-eth_subscribe"; do
+            "$RUN_ID-eth_subscribe_newHeads" "$RUN_ID-eth_subscribe"; do
             python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$run_id" --chain "$NETWORK" --signal-error "workflow failed"
           done
 
