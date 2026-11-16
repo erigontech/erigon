@@ -43,8 +43,9 @@ func entirelyBeforeStep(files visibleFiles, stepSize uint64, cutoff kv.Step) (ou
 	return outs
 }
 
-// agedFiles is one entity's dirty files selected for retirement, carried from the lock-free
-// selection pass to the locked detach pass.
+// agedFiles is one entity's aged visible files, carried from the lock-free selection pass to the
+// locked detach pass. They only set the boundary: the detach pass retires every dirty file that
+// ends at or before the last of them.
 type agedFiles struct {
 	dirtyFiles   *DirtyFiles
 	filenameBase string
