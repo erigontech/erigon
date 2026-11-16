@@ -337,7 +337,7 @@ func TestSend(t *testing.T) {
 		},
 		{
 			name: "in order", txs: 2, target: Target{Block: 100}, answer: accepted,
-			params: `{"txs":["%s","%s"],"blockNumber":"0x64"}`, sent: Sent{Block: 100},
+			params: `{"txs":["%s","%s"],"blockNumber":"0x64","revertingTxHashes":["HASH1"]}`, sent: Sent{Block: 100},
 		},
 		{
 			name: "rejected", txs: 1, target: Target{Block: 100}, answer: rejected,
@@ -361,19 +361,19 @@ func TestSend(t *testing.T) {
 		},
 		{
 			name: "mempool", txs: 2, target: Target{Block: 100, Time: 1234}, answer: unsupported,
-			params: `{"txs":["%s","%s"],"blockNumber":"0x64","minTimestamp":1234,"maxTimestamp":1234}`, sent: Sent{Block: 100, Pooled: true}, mempool: 2, tries: 2,
+			params: `{"txs":["%s","%s"],"blockNumber":"0x64","minTimestamp":1234,"maxTimestamp":1234,"revertingTxHashes":["HASH1"]}`, sent: Sent{Block: 100, Pooled: true}, mempool: 2, tries: 2,
 		},
 		{
 			name: "mempool refuses the call", txs: 2, target: Target{Block: 100}, answer: unsupported, refuse: map[int]bool{0: true},
-			params: `{"txs":["%s","%s"],"blockNumber":"0x64"}`, tries: 1, err: "transaction 0 refused",
+			params: `{"txs":["%s","%s"],"blockNumber":"0x64","revertingTxHashes":["HASH1"]}`, tries: 1, err: "transaction 0 refused",
 		},
 		{
 			name: "mempool unreachable", txs: 2, target: Target{Block: 100}, answer: unsupported, down: map[int]bool{0: true},
-			params: `{"txs":["%s","%s"],"blockNumber":"0x64"}`, tries: 1, err: "connection reset", unsure: true, sent: Sent{Block: 100, Pooled: true},
+			params: `{"txs":["%s","%s"],"blockNumber":"0x64","revertingTxHashes":["HASH1"]}`, tries: 1, err: "connection reset", unsure: true, sent: Sent{Block: 100, Pooled: true},
 		},
 		{
 			name: "mempool refuses a later one", txs: 2, target: Target{Block: 100}, answer: unsupported, refuse: map[int]bool{1: true},
-			params: `{"txs":["%s","%s"],"blockNumber":"0x64"}`, sent: Sent{Block: 100, Pooled: true}, mempool: 1, tries: 2,
+			params: `{"txs":["%s","%s"],"blockNumber":"0x64","revertingTxHashes":["HASH1"]}`, sent: Sent{Block: 100, Pooled: true}, mempool: 1, tries: 2,
 		},
 		{
 			name: "a bundle over the pool's limit", txs: 1, input: 128 * 1024, target: Target{Block: 100}, answer: accepted,
@@ -423,7 +423,11 @@ func TestSend(t *testing.T) {
 				require.Empty(t, b.bodies)
 			} else {
 				require.Len(t, b.bodies, 1)
-				requireJSON(t, `{"jsonrpc":"2.0","id":1,"method":"eth_sendBundle","params":[`+fmt.Sprintf(c.params, raw...)+`]}`, b.bodies[0])
+				params := fmt.Sprintf(c.params, raw...)
+				if len(txs) > 1 {
+					params = strings.ReplaceAll(params, "HASH1", txs[1].Hash().Hex())
+				}
+				requireJSON(t, `{"jsonrpc":"2.0","id":1,"method":"eth_sendBundle","params":[`+params+`]}`, b.bodies[0])
 			}
 			if c.err != "" {
 				require.ErrorContains(t, err, c.err)

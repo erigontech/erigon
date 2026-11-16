@@ -250,7 +250,8 @@ type Sent struct {
 	Pooled bool
 }
 
-// Send hands txs, the poster's call first, to the builder for target. A
+// Send hands txs, the poster's call first, to the builder for target, the
+// others allowed to revert. A
 // builder without eth_sendBundle has them sent in order to the L1 node's pool
 // instead, which keeps neither their order nor the target and suits only a
 // development L1: the call refused there, or over the size a pool admits,
@@ -323,6 +324,14 @@ func (p *Poster) bundle(ctx context.Context, raw [][]byte, block, time uint64) e
 		hexes[i] = tx
 	}
 	params := map[string]any{"txs": hexes, "blockNumber": hexutil.Uint64(block)}
+	// A reverting trigger leaves the posting standing; the posting may not revert.
+	if len(raw) > 1 {
+		reverting := make([]common.Hash, len(raw)-1)
+		for i, tx := range raw[1:] {
+			reverting[i] = crypto.Keccak256Hash(tx)
+		}
+		params["revertingTxHashes"] = reverting
+	}
 	if time != 0 {
 		params["minTimestamp"], params["maxTimestamp"] = time, time
 	}
