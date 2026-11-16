@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/eez/protocol"
 	"github.com/erigontech/erigon/eez/sequencer"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -150,4 +151,49 @@ func fullInterval(t *testing.T, key *ecdsa.PrivateKey, k uint64, budget int) []*
 		parent = block.Hash()
 	}
 	return blocks
+}
+
+// TestBudget: the drain's projection starts at a batch of the anchor entry,
+// 551,000, and takes a transaction while it stays within the ceiling less
+// the drain margin; the lowest ceiling holds one more entry of no calldata.
+func TestBudget(t *testing.T) {
+	b := newBudget(MinPostBatchGas)
+	require.Equal(t, uint64(551_000), b.projected)
+	require.False(t, b.fits(l1Cost{entries: 1, calldata: 1}))
+	require.False(t, b.fits(l1Cost{entries: 1, target: 1}))
+	require.Equal(t, uint64(551_000), b.projected, "refused, uncharged")
+	require.True(t, b.fits(l1Cost{entries: 1}))
+	b.take(l1Cost{entries: 1})
+	require.Equal(t, uint64(921_000), b.projected)
+	require.False(t, b.fits(l1Cost{calldata: 1}))
+	require.False(t, newBudget(drainMargin).fits(l1Cost{}), "a ceiling within the margin takes nothing")
+}
+
+// TestInboundCost: an inbound delivery adds its deferred entry to the batch
+// and its sidecar to the DA, and nothing on L1 the posting runs.
+func TestInboundCost(t *testing.T) {
+	w := loadSyncWindow(t)
+	_, call, output := recordedDelivery(t, w)
+	in := &protocol.IncomingCall{
+		SourceAddress: call.Source, SourceRollupID: call.SourceRollup, TargetAddress: call.Target, RollupID: call.RollupID,
+		Value: call.Value.ToBig(), Data: call.Data, ReturnData: output,
+	}
+	sidecar, err := protocol.NewInboundSidecar(in)
+	require.NoError(t, err)
+	deferred := &protocol.ExecutionEntry{ProxyEntryHash: sidecar.ProxyEntryHash, ReturnData: output, Success: true}
+	mined := w.batch.Entries[3]
+	require.Equal(t, mined.ProxyEntryHash, deferred.ProxyEntryHash)
+	require.Equal(t, mined.ReturnData, deferred.ReturnData)
+	require.Empty(t, mined.L2ToL1Calls)
+	encSidecar, err := protocol.EncodeExecutionEntry(sidecar)
+	require.NoError(t, err)
+	encDeferred, err := protocol.EncodeExecutionEntry(deferred)
+	require.NoError(t, err)
+	one := l1Cost{entries: 1, calldata: calldataGas(encSidecar) + calldataGas(encDeferred)}
+	cost, err := inboundCost([]*Delivery{{Call: in, Sidecar: sidecar}})
+	require.NoError(t, err)
+	require.Equal(t, one, cost)
+	cost, err = inboundCost([]*Delivery{{Call: in, Sidecar: sidecar}, {Call: in, Sidecar: sidecar}})
+	require.NoError(t, err)
+	require.Equal(t, l1Cost{entries: 2, calldata: 2 * one.calldata}, cost)
 }

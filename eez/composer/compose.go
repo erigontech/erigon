@@ -18,6 +18,7 @@ package composer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -77,9 +78,11 @@ type effects struct {
 }
 
 // compose simulates held transactions on L1 at block target-1 and delivers
-// their calls on a draft of the Sync block on parent. A poison transaction
-// is evicted with the rest of its nonce chain; a transient failure or a
-// full block returns the rest to the pool. Nil when none composes.
+// their calls on a draft of the Sync block on parent, while the block and
+// the posting's gas hold them. A poison transaction, or one neither holds
+// alone, is evicted with the rest of its nonce chain; a transient failure or
+// a full block or posting returns the rest to the pool. Nil when none
+// composes.
 func (c *Composer) compose(ctx context.Context, parent *types.Header, target uint64) *effects {
 	held := c.x.Pool.PopN(c.x.MaxTxs)
 	if len(held) == 0 {
@@ -104,6 +107,7 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 				if err != nil {
 					return err
 				}
+				gas := newBudget(c.cfg.MaxGas)
 				var evicted []*Held
 				for len(rest) > 0 {
 					h := rest[0]
@@ -119,7 +123,21 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 					if err != nil {
 						return err
 					}
-					if _, err := src.Run(tx, ds.Dispatch); err != nil {
+					var cost l1Cost
+					_, err = src.Run(tx, ds.Dispatch, func([]*Call) error {
+						var err error
+						if cost, err = inboundCost(ds.Delivered); err != nil {
+							return err
+						}
+						if !gas.fits(cost) {
+							return errOverBudget
+						}
+						return nil
+					})
+					if full(err) && len(fx.held) == 0 {
+						err = Poison(fmt.Errorf("alone: %w", err))
+					}
+					if err != nil {
 						if !IsPoison(err) {
 							return err
 						}
@@ -130,17 +148,23 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 						rest = rest[1:]
 						continue
 					}
+					gas.take(cost)
 					draft = ds.fork
 					fx.held = append(fx.held, h)
 					fx.deliveries = append(fx.deliveries, ds.Delivered...)
+					fx.txs = draft.Txs()
 					rest = rest[1:]
 				}
-				fx.txs = draft.Txs()
 				return nil
 			})
 		})
 	}()
-	if err != nil {
+	switch {
+	case err == nil:
+	case full(err):
+		c.logger.Info("[eez] Sync block full, the rest waits for the next slot", "event", "eez.composer.compose.full",
+			"composed", len(fx.held), "waiting", len(rest), "reason", err)
+	default:
 		c.logger.Warn("[eez] composition stopped, the rest waits for the next slot", "event", "eez.composer.compose.stopped",
 			"composed", len(fx.held), "waiting", len(rest), "err", err)
 	}
@@ -150,6 +174,10 @@ func (c *Composer) compose(ctx context.Context, parent *types.Header, target uin
 	}
 	return fx
 }
+
+// full reports a Sync block or a posting without room for one more held
+// transaction.
+func full(err error) bool { return errors.Is(err, ErrFull) || errors.Is(err, errOverBudget) }
 
 // postEffects settles e, the composed Sync block sync: its candidates
 // from its witness, the live batch over its window, proven in time for the

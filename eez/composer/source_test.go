@@ -206,7 +206,7 @@ func (e *echo) dispatch(c *Call) ([]byte, error) {
 func TestSourceDispatchesProxyCalls(t *testing.T) {
 	f := newSourceFixture(t)
 	e := &echo{}
-	calls, err := f.src.Run(f.tx(t, 0, forwarder, 5, []byte{0x12, 0x34}), e.dispatch)
+	calls, err := f.src.Run(f.tx(t, 0, forwarder, 5, []byte{0x12, 0x34}), e.dispatch, nil)
 	require.NoError(t, err)
 	want := &Call{Target: target, RollupID: 1, Source: forwarder, SourceRollup: 0, Data: []byte{0x12, 0x34}, Return: []byte{0xbe, 0xef}}
 	want.Value.SetUint64(5)
@@ -237,7 +237,7 @@ func TestSourceCalls(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newSourceFixture(t)
-			calls, err := f.src.Run(f.tx(t, 0, c.to, 0, nil), (&echo{}).dispatch)
+			calls, err := f.src.Run(f.tx(t, 0, c.to, 0, nil), (&echo{}).dispatch, nil)
 			if c.err != nil {
 				require.ErrorIs(t, err, c.err)
 				require.True(t, IsPoison(err))
@@ -257,25 +257,40 @@ func TestSourceCalls(t *testing.T) {
 func TestSourceRefuses(t *testing.T) {
 	t.Run("an invalid transaction is poison", func(t *testing.T) {
 		f := newSourceFixture(t)
-		_, err := f.src.Run(f.tx(t, 5, forwarder, 0, nil), (&echo{}).dispatch)
+		_, err := f.src.Run(f.tx(t, 5, forwarder, 0, nil), (&echo{}).dispatch, nil)
 		require.True(t, IsPoison(err), err)
 	})
 	t.Run("a dispatch failure is the dispatcher's", func(t *testing.T) {
 		f := newSourceFixture(t)
 		down := errors.New("rollup unavailable")
-		_, err := f.src.Run(f.tx(t, 0, forwarder, 0, nil), func(*Call) ([]byte, error) { return nil, down })
+		_, err := f.src.Run(f.tx(t, 0, forwarder, 0, nil), func(*Call) ([]byte, error) { return nil, down }, nil)
 		require.ErrorIs(t, err, down)
 		require.False(t, IsPoison(err))
 		require.Zero(t, f.nonce(t), "discarded")
 	})
 	t.Run("a refused transaction leaves no trace", func(t *testing.T) {
 		f := newSourceFixture(t)
-		_, err := f.src.Run(f.tx(t, 0, forwarder, 0, nil), (&echo{}).dispatch)
+		_, err := f.src.Run(f.tx(t, 0, forwarder, 0, nil), (&echo{}).dispatch, nil)
 		require.NoError(t, err)
-		_, err = f.src.Run(f.tx(t, 1, reverter, 0, nil), (&echo{}).dispatch)
+		_, err = f.src.Run(f.tx(t, 1, reverter, 0, nil), (&echo{}).dispatch, nil)
 		require.Error(t, err)
-		_, err = f.src.Run(f.tx(t, 1, forwarder, 0, nil), (&echo{}).dispatch)
+		_, err = f.src.Run(f.tx(t, 1, forwarder, 0, nil), (&echo{}).dispatch, nil)
 		require.NoError(t, err)
 		require.Equal(t, uint64(2), f.nonce(t))
+	})
+	t.Run("a transaction its caller refuses leaves no trace", func(t *testing.T) {
+		f := newSourceFixture(t)
+		full := errors.New("full")
+		var seen []*Call
+		_, err := f.src.Run(f.tx(t, 0, forwarder, 0, nil), (&echo{}).dispatch, func(calls []*Call) error {
+			seen = calls
+			return full
+		})
+		require.ErrorIs(t, err, full)
+		require.Len(t, seen, 1)
+		require.Zero(t, f.nonce(t))
+		_, err = f.src.Run(f.tx(t, 0, forwarder, 0, nil), (&echo{}).dispatch, func([]*Call) error { return nil })
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), f.nonce(t))
 	})
 }

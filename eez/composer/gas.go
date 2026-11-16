@@ -80,3 +80,48 @@ func PostBatchGasCeiling(requested uint64) (uint64, bool) {
 	}
 	return requested, true
 }
+
+// l1Cost is what a held transaction adds to its batch's posting: entries,
+// calldata at the standard rate, and the gas of the L1 calls the posting
+// makes for it.
+type l1Cost struct{ entries, calldata, target uint64 }
+
+// budget projects the gas of a batch's posting as held transactions join
+// it, from the anchor entry every batch leads with, against a cap leaving
+// the drain margin under the ceiling.
+type budget struct{ cap, projected uint64 }
+
+func newBudget(maxGas uint64) *budget {
+	b := &budget{projected: txGas + postBatchBaseGas + postBatchEntryGas}
+	if maxGas > drainMargin {
+		b.cap = maxGas - drainMargin
+	}
+	return b
+}
+
+func (b *budget) after(c l1Cost) uint64 {
+	return b.projected + postBatchEntryGas*c.entries + c.calldata + c.target
+}
+
+// fits reports whether c keeps the projection within the cap.
+func (b *budget) fits(c l1Cost) bool { return b.after(c) <= b.cap }
+
+// take charges c.
+func (b *budget) take(c l1Cost) { b.projected = b.after(c) }
+
+// inboundCost is what deliveries add: each a deferred entry in the batch
+// and a sidecar in its DA.
+func inboundCost(ds []*Delivery) (l1Cost, error) {
+	c := l1Cost{entries: uint64(len(ds))}
+	for _, d := range ds {
+		deferred := inboundEntry(d.Sidecar)
+		for _, e := range []*protocol.ExecutionEntry{d.Sidecar, &deferred} {
+			enc, err := protocol.EncodeExecutionEntry(e)
+			if err != nil {
+				return l1Cost{}, err
+			}
+			c.calldata += calldataGas(enc)
+		}
+	}
+	return c, nil
+}

@@ -97,10 +97,11 @@ func NewSource(config *chain.Config, header *types.Header, reader state.StateRea
 }
 
 // Run simulates tx, dispatching each proxy call it makes, and returns the
-// calls in order. It keeps tx's writes when it returns calls. Errors from
-// the dispatcher come back as they are; a transaction without calls or with
-// a failed frame around one is poison.
-func (s *Source) Run(tx types.Transaction, dispatch Dispatcher) ([]*Call, error) {
+// calls in order. It keeps tx's writes when accept, if set, takes the calls,
+// and returns accept's error otherwise. Errors from the dispatcher come back
+// as they are; a transaction without calls or with a failed frame around one
+// is poison.
+func (s *Source) Run(tx types.Transaction, dispatch Dispatcher, accept func([]*Call) error) ([]*Call, error) {
 	var (
 		calls   []*Call
 		failure error
@@ -162,6 +163,8 @@ func (s *Source) Run(tx types.Transaction, dispatch Dispatcher) ([]*Call, error)
 		err = Poison(ErrRevertedCall)
 	case len(calls) == 0:
 		err = Poison(ErrNoCalls)
+	case accept != nil:
+		err = accept(calls)
 	}
 	if err != nil {
 		s.ibs.RevertToSnapshot(snapshot, nil)

@@ -48,6 +48,12 @@ type Effects struct {
 	Inbound  []protocol.ExecutionEntry
 }
 
+// inboundEntry is the batch entry of an inbound sidecar: deferred, it
+// waits for the trigger that consumes it.
+func inboundEntry(sc *protocol.ExecutionEntry) protocol.ExecutionEntry {
+	return protocol.ExecutionEntry{ProxyEntryHash: sc.ProxyEntryHash, ReturnData: bytes.Clone(sc.ReturnData), Success: true}
+}
+
 // AnchorBatch returns the anchor-only batch settling blocks, the local chain
 // from the cursor's child to the terminal block, an empty Sync block or the
 // boundary of a historical chunk: Batch with no effects.
@@ -127,7 +133,7 @@ func (b *Batcher) Batch(cursor common.Hash, blocks []*types.Block, fx Effects, c
 		if len(sc.L2ToL1Calls) != 1 {
 			return nil, fmt.Errorf("inbound effect %d: %w", i, protocol.ErrEntryShape)
 		}
-		entries = append(entries, protocol.ExecutionEntry{ProxyEntryHash: sc.ProxyEntryHash, ReturnData: bytes.Clone(sc.ReturnData), Success: true})
+		entries = append(entries, inboundEntry(sc))
 	}
 	published := append(slices.Clone(fx.Outbound), fx.Inbound...)
 	for i := range published {

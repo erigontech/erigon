@@ -86,7 +86,7 @@ func newCrossFixture(t *testing.T) *crossFixture {
 	m.deploy(call.Source, forward(crossProxy, false))
 	m.deploy(unproxied, append(callTo(nobody), 0x00))
 	f := &crossFixture{w: w, call: call, output: output, l1: &memL1{m: m}, key: key, pool: NewHeldPool()}
-	f.c = New(Config{}, nil, nil, nil, nil, nil, nil, nil, nil, log.New())
+	f.c = New(Config{MaxGas: MaxPostBatchGas}, nil, nil, nil, nil, nil, nil, nil, nil, log.New())
 	t.Cleanup(f.c.Close)
 	f.c.CrossChain(&CrossChain{
 		Pool: f.pool, L1: f.l1, L1Config: chain.TestChainOsakaConfig, Manager: manager,
@@ -151,6 +151,47 @@ func TestComposeRefuses(t *testing.T) {
 		f.l1.failed = errors.New("L1 node down")
 		require.Nil(t, f.c.compose(t.Context(), f.w.sync.Header(), 101))
 		require.Equal(t, []*Held{trigger}, f.pool.PopN(math.MaxInt))
+	})
+}
+
+// TestComposeBoundsThePostingGas: held transactions compose while the
+// posting's projected gas stays within the ceiling less the drain margin;
+// the rest waits, and a transaction over it alone is evicted.
+func TestComposeBoundsThePostingGas(t *testing.T) {
+	// One delivery adds an entry, its deferred form and its sidecar.
+	one := func(t *testing.T, f *crossFixture) uint64 {
+		sidecar, err := protocol.NewInboundSidecar(&protocol.IncomingCall{
+			SourceAddress: f.call.Source, SourceRollupID: f.call.SourceRollup, TargetAddress: f.call.Target, RollupID: f.call.RollupID,
+			Value: f.call.Value.ToBig(), Data: f.call.Data, ReturnData: f.output,
+		})
+		require.NoError(t, err)
+		encSidecar, err := protocol.EncodeExecutionEntry(sidecar)
+		require.NoError(t, err)
+		encDeferred, err := protocol.EncodeExecutionEntry(&protocol.ExecutionEntry{ProxyEntryHash: sidecar.ProxyEntryHash, ReturnData: f.output, Success: true})
+		require.NoError(t, err)
+		return postBatchEntryGas + calldataGas(encSidecar) + calldataGas(encDeferred)
+	}
+	t.Run("the rest waits", func(t *testing.T) {
+		f := newCrossFixture(t)
+		first := f.hold(t, 0, f.call.Source, f.call.Data)
+		second := f.hold(t, 1, f.call.Source, f.call.Data)
+		f.c.cfg.MaxGas = drainMargin + 551_000 + one(t, f)
+		fx := f.c.compose(t.Context(), f.w.sync.Header(), 101)
+		require.NotNil(t, fx)
+		require.Equal(t, []*Held{first}, fx.held)
+		require.Len(t, fx.txs, 1)
+		require.Equal(t, []*Held{second}, f.pool.PopN(math.MaxInt))
+	})
+	t.Run("one over alone is evicted with its chain", func(t *testing.T) {
+		f := newCrossFixture(t)
+		f.hold(t, 0, f.call.Source, f.call.Data)
+		f.hold(t, 1, f.call.Source, f.call.Data)
+		f.c.cfg.MaxGas = drainMargin + 551_000 + one(t, f) - 1
+		require.Nil(t, f.c.compose(t.Context(), f.w.sync.Header(), 101))
+		require.Zero(t, f.pool.Len())
+		f.pool.mu.Lock()
+		defer f.pool.mu.Unlock()
+		require.Empty(t, f.pool.inFlight)
 	})
 }
 
