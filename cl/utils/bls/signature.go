@@ -173,6 +173,9 @@ func VerifyMultipleSignatures(sigs [][]byte, msgs [][]byte, pubKeys [][]byte) (b
 		mulP1Aff[i] = pk
 		rawMsgs[i] = msgs[i]
 	}
+	if groups := groupByMessage(msgs); 2*len(groups) <= length {
+		return rawSigs != nil && verifyGroupedByMessage(sigs, rawSigs, mulP1Aff, groups), nil
+	}
 	// Secure source of RNG
 	randLock := new(sync.Mutex)
 
@@ -190,6 +193,67 @@ func VerifyMultipleSignatures(sigs [][]byte, msgs [][]byte, pubKeys [][]byte) (b
 
 	// Validate signatures since we uncompress them here. Public keys should already be validated.
 	return dummySig.MultipleAggregateVerify(rawSigs, true, mulP1Aff, false, rawMsgs, eth2Curve, randFunc, randBitsEntropy), nil
+}
+
+type messageGroup struct {
+	msg     []byte
+	members []int
+}
+
+func groupByMessage(msgs [][]byte) []messageGroup {
+	var groups []messageGroup
+	index := make(map[string]int)
+	for i, msg := range msgs {
+		g, ok := index[string(msg)]
+		if !ok {
+			g = len(groups)
+			index[string(msg)] = g
+			groups = append(groups, messageGroup{msg: msg})
+		}
+		groups[g].members = append(groups[g].members, i)
+	}
+	return groups
+}
+
+// verifyGroupedByMessage runs the same randomized check as MultipleAggregateVerify, but hashes and pairs each
+// distinct message once: e(sum r_i*S_i, G) == prod_m e(sum_{i in m} r_i*P_i, H(m)). As there, every signature
+// must be in G2 and an infinite signature adds nothing.
+func verifyGroupedByMessage(compressedSigs [][]byte, sigs []*blst.P2Affine, pks []*blst.P1Affine, groups []messageGroup) bool {
+	const scalarLen = randBitsEntropy / 8
+	scalars := make([]byte, len(sigs)*scalarLen)
+	rand.Read(scalars)
+	weightedSigs := make([]*blst.P2Affine, 0, len(sigs))
+	sigScalars := make([]byte, 0, len(scalars))
+	for i, sig := range sigs {
+		scalars[i*scalarLen] |= 1
+		if bytes.Equal(compressedSigs[i], InfiniteSignature[:]) {
+			continue
+		}
+		if !sig.SigValidate(false) {
+			return false
+		}
+		weightedSigs = append(weightedSigs, sig)
+		sigScalars = append(sigScalars, scalars[i*scalarLen:(i+1)*scalarLen]...)
+	}
+
+	groupPks := make([]*blst.P1Affine, len(groups))
+	groupMsgs := make([]blst.Message, len(groups))
+	for g, group := range groups {
+		points := make([]*blst.P1Affine, len(group.members))
+		pointScalars := make([]byte, 0, len(group.members)*scalarLen)
+		for j, i := range group.members {
+			points[j] = pks[i]
+			pointScalars = append(pointScalars, scalars[i*scalarLen:(i+1)*scalarLen]...)
+		}
+		groupPks[g] = blst.P1AffinesMult(points, pointScalars, randBitsEntropy).ToAffine()
+		groupMsgs[g] = group.msg
+	}
+
+	aggregate := new(blst.P2Affine)
+	if len(weightedSigs) > 0 {
+		aggregate = blst.P2AffinesMult(weightedSigs, sigScalars, randBitsEntropy).ToAffine()
+	}
+	return aggregate.AggregateVerify(false, groupPks, false, groupMsgs, eth2Curve)
 }
 
 func AggregateSignatures(sigs [][]byte) ([]byte, error) {

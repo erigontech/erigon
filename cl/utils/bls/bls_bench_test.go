@@ -1,6 +1,7 @@
 package bls_test
 
 import (
+	"encoding/binary"
 	"fmt"
 	"slices"
 	"testing"
@@ -57,6 +58,31 @@ func BenchmarkSignatureVerifyAggregate(b *testing.B) {
 			for b.Loop() {
 				if !signature.VerifyAggregate(message, keys) {
 					b.Fatal("Signature.VerifyAggregate() = false")
+				}
+			}
+		})
+	}
+}
+
+// Gossip batches mostly carry votes for a few attestation data roots; block batches carry distinct messages.
+func BenchmarkVerifyMultipleSignatures(b *testing.B) {
+	const size = 128
+	_, publicKeys, _ := generateAggregateInputs(b, size)
+	for _, distinct := range []int{1, 4, size} {
+		var sigs, msgs [][]byte
+		for i := range size {
+			var ikm [32]byte
+			binary.LittleEndian.PutUint64(ikm[:], uint64(i+1))
+			privateKey, err := bls.NewPrivateKeyFromIKM(ikm[:])
+			require.NoError(b, err)
+			msg := []byte(fmt.Sprintf("message %d", i%distinct))
+			sigs, msgs = append(sigs, privateKey.Sign(msg).Bytes()), append(msgs, msg)
+		}
+		b.Run(fmt.Sprintf("signatures=%d/messages=%d", size, distinct), func(b *testing.B) {
+			for b.Loop() {
+				valid, err := bls.VerifyMultipleSignatures(sigs, msgs, publicKeys)
+				if err != nil || !valid {
+					b.Fatalf("VerifyMultipleSignatures() = %v, %v", valid, err)
 				}
 			}
 		})
