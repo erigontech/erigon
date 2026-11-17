@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -68,20 +69,25 @@ func TestBlockEndStateWithoutHistory(t *testing.T) {
 			if domain == kv.StorageDomain {
 				key = make([]byte, 52)
 			}
+			v1, v2 := []byte{1}, []byte{2}
+			if domain == kv.AccountsDomain {
+				v1 = accounts.SerialiseV3(&accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash})
+				v2 = accounts.SerialiseV3(&accounts.Account{Nonce: 2, CodeHash: accounts.EmptyCodeHash})
+			}
 			sd.SetTxNum(1)
-			require.NoError(t, sd.DomainPut(domain, tx, key, []byte{1}, 1, nil))
+			require.NoError(t, sd.DomainPut(domain, tx, key, v1, 1, nil))
 			sd.SetTxNum(2)
-			require.NoError(t, sd.DomainPut(domain, tx, key, []byte{2}, 2, []byte{1}))
+			require.NoError(t, sd.DomainPut(domain, tx, key, v2, 2, v1))
 
 			copied, err := newBlockEndState(sd, changes, 3)
 			require.NoError(t, err)
 			value, ok, err := copied.GetAsOf(domain, key, 3)
 			require.NoError(t, err)
 			require.True(t, ok)
-			require.Equal(t, []byte{2}, value)
+			require.Equal(t, v2, value)
 
 			sd.SetTxNum(3)
-			require.NoError(t, sd.DomainDel(domain, tx, key, 3, []byte{2}))
+			require.NoError(t, sd.DomainDel(domain, tx, key, 3, v2))
 			deleted, err := newBlockEndState(sd, changes, 4)
 			require.NoError(t, err)
 			value, ok, err = deleted.GetAsOf(domain, key, 4)
@@ -324,6 +330,7 @@ func TestCacheViewWithoutOverlayUsesSnapshotBoundedCache(t *testing.T) {
 		tx, sd := temporaltest.NewTestTxSD(t, db)
 		sd.BindStateCache(stateCache)
 		sd.SetTxNum(txNum)
+		sd.SetDisableInlineTouchKey(true)
 		require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, key, value, txNum, previous))
 		require.NoError(t, sd.Commit(ctx, tx))
 	}
@@ -338,6 +345,7 @@ func TestCacheViewWithoutOverlayUsesSnapshotBoundedCache(t *testing.T) {
 	require.NoError(t, err)
 	defer liveDomains.Close()
 	liveDomains.SetTxNum(20)
+	liveDomains.SetDisableInlineTouchKey(true)
 	require.NoError(t, liveDomains.DomainPut(kv.AccountsDomain, tx, key, []byte{3}, 20, []byte{1}))
 	rpcCache := &Cache{execModule: &ExecModule{stateCache: stateCache, currentContext: liveDomains}}
 	rpcCache.SetPublishedSD(func() *execctx.SharedDomains {
