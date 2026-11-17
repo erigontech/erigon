@@ -499,6 +499,10 @@ type realColumnStoreFixture struct {
 
 func newRealColumnStoreFixture(t *testing.T, fs afero.Fs) *realColumnStoreFixture {
 	t.Helper()
+	if clparams.GetBeaconConfig() == nil {
+		globalCfg := clparams.MainnetBeaconConfig
+		clparams.InitGlobalStaticConfig(&globalCfg)
+	}
 	cfg := clparams.MainnetBeaconConfig
 	emitters := beaconevents.NewEventEmitter()
 	events := make(chan *beaconevents.EventStream, cfg.NumberOfColumns)
