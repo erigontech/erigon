@@ -279,6 +279,7 @@ func TestOpenFolderLetsMissedAccessorsBuildBeforeGapCheck(t *testing.T) {
 		return SavePruneValProgress(tx, agg.d[kv.AccountsDomain].ValuesTable, &prune.Stat{TxTo: 2 * alignStepSize})
 	}))
 
+	agg.buildsMissedAccessorsAfterOpen = true
 	require.NoError(t, agg.OpenFolder(db))
 	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
 	requireVisibleEnd(t, agg, 2*alignStepSize)
@@ -298,15 +299,39 @@ func TestOpenFolderChecksGapWhenOnlyCoveredAccessorsAreMissing(t *testing.T) {
 	require.False(t, agg.hasAccessorsToBuild(), "startup builds no accessor for a file covered by indexed files")
 }
 
-// The gap check exits the process, so the datadir is opened in a child test process.
+// exitedInChildProcess re-runs the test in a child process, because the gap check exits the process.
+func exitedInChildProcess(t *testing.T) bool {
+	t.Helper()
+	if os.Getenv("ERIGON_GAP_CHECK_CHILD") != "" {
+		return false
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$")
+	cmd.Env = append(os.Environ(), "ERIGON_GAP_CHECK_CHILD=1")
+	out, err := cmd.CombinedOutput()
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, err, &exitErr, "the gap check must exit the process:\n%s", out)
+	require.NotContains(t, string(out), "--- FAIL", "the child must exit in the gap check, not fail a check")
+	return true
+}
+
+func TestOpenFolderChecksGapWhenNoAccessorBuildFollows(t *testing.T) {
+	if exitedInChildProcess(t) {
+		return
+	}
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+	ranges := []testFileRange{{0, 1}, {1, 2}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.1-2.bt")))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return SavePruneValProgress(tx, agg.d[kv.AccountsDomain].ValuesTable, &prune.Stat{TxTo: 2 * alignStepSize})
+	}))
+	require.NoError(t, agg.OpenFolder(db))
+}
+
 func TestBuildMissedAccessorsChecksGapWhenAnAccessorCannotBeBuilt(t *testing.T) {
-	if os.Getenv("ERIGON_GAP_CHECK_CHILD") == "" {
-		cmd := exec.Command(os.Args[0], "-test.run=^TestBuildMissedAccessorsChecksGapWhenAnAccessorCannotBeBuilt$")
-		cmd.Env = append(os.Environ(), "ERIGON_GAP_CHECK_CHILD=1")
-		out, err := cmd.CombinedOutput()
-		var exitErr *exec.ExitError
-		require.ErrorAs(t, err, &exitErr, "the gap check must exit the process:\n%s", out)
-		require.NotContains(t, string(out), "--- FAIL", "the child must exit in the gap check, not fail a check")
+	if exitedInChildProcess(t) {
 		return
 	}
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
@@ -319,6 +344,7 @@ func TestBuildMissedAccessorsChecksGapWhenAnAccessorCannotBeBuilt(t *testing.T) 
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		return SavePruneValProgress(tx, agg.d[kv.AccountsDomain].History.ValuesTable, &prune.Stat{TxTo: 3 * alignStepSize})
 	}))
+	agg.buildsMissedAccessorsAfterOpen = true
 	require.NoError(t, agg.OpenFolder(db))
 	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
 }

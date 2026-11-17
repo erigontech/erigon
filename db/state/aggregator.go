@@ -97,9 +97,10 @@ type Aggregator struct {
 	visibilityLoweringForbidden atomic.Bool
 	snapshotBuildSema           *semaphore.Weighted
 
-	branchCacheDisabled bool
-	skipFilesDBGapCheck bool
-	workers             workersCfg
+	branchCacheDisabled            bool
+	skipFilesDBGapCheck            bool
+	buildsMissedAccessorsAfterOpen bool
+	workers                        workersCfg
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -596,7 +597,7 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 	}(); err != nil {
 		return err
 	}
-	if a.hasAccessorsToBuild() { // BuildMissedAccessors re-opens the folder and runs the check
+	if a.buildsMissedAccessorsAfterOpen && a.hasAccessorsToBuild() {
 		return nil
 	}
 	return a.checkFilesDBGap(db)
