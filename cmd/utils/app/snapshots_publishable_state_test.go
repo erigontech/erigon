@@ -952,6 +952,19 @@ func Test_CheckIfBlockSnapshotsPublishable_LastRangeCompanions(t *testing.T) {
 	}
 }
 
+func Test_CheckIfBlockSnapshotsPublishable_LegacyIdxVersion(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"headers.idx", "transactions.idx", "transactions-to-block.idx"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dirs := setupWorkingStateMockDatadir(t)
+			removeMockFile(t, dirs.Snap, "v2.0-000520-000521-"+name)
+			createMockFile(t, dirs.Snap, "v2-000520-000521-"+name)
+			require.NoError(t, checkIfBlockSnapshotsPublishable(dirs.Snap))
+		})
+	}
+}
+
 func Test_DoPublishable_StopsOnExpiredContext(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 0)

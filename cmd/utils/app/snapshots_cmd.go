@@ -2138,11 +2138,21 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	if err := duplicateFileVersions(files, snapDir); err != nil {
 		return err
 	}
-	newest := func(masked string) (version.VersionedFile, bool) {
-		if len(files[masked]) == 0 {
-			return version.VersionedFile{}, false
+	byUnversionedName := map[string][]version.VersionedFile{}
+	for _, group := range files {
+		for _, f := range group {
+			_, unversioned, _ := strings.Cut(f.Name, "-")
+			byUnversionedName[unversioned] = append(byUnversionedName[unversioned], f)
 		}
-		return files[masked][0], true
+	}
+	newest := func(masked string) (best version.VersionedFile, ok bool) {
+		_, unversioned, _ := strings.Cut(masked, "-")
+		for _, f := range byUnversionedName[unversioned] {
+			if !ok || f.Version.Greater(best.Version) {
+				best, ok = f, true
+			}
+		}
+		return best, ok
 	}
 	checkIdx := func(idxName string, minSup version.Version) error {
 		masked, err := version.ReplaceVersionWithMask(idxName)
