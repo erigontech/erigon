@@ -1927,8 +1927,8 @@ func (vm *VersionMap) DropWrite(addr accounts.Address, path AccountPath, key acc
 	vm.Delete(addr, path, key, v.TxIndex, false)
 }
 
-// resetToSeed puts the value the access list seeds for addr's path at v.TxIndex back into the cell
-// there, and reports whether the access list seeds it.
+// resetToSeed puts the value the access list seeds for addr's path at v.TxIndex, or the zero balance
+// that seeding derives there, back into the cell there, and reports whether there is one.
 func (vm *VersionMap) resetToSeed(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version) bool {
 	ac := vm.balAccount(addr)
 	e := vm.load(addr)
