@@ -474,7 +474,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 	a.checker.AddDependency(FromDomain(dependency), &DependentInfo{
 		entity:      FromDomain(dependent),
 		filesGetter: func() *DirtyFiles { return dd.dirtyFiles },
-		accessors:   dd.Accessors,
+		accessors:   &dd.Accessors,
 	})
 	a.d[dependency].SetChecker(a.checker)
 }
@@ -498,7 +498,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 		filesGetter: func() *DirtyFiles {
 			return h.dirtyFiles
 		},
-		accessors: h.Accessors,
+		accessors: &h.Accessors,
 	})
 	h.InvertedIndex.SetChecker(a.checker)
 }
