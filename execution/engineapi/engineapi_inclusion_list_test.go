@@ -122,3 +122,24 @@ func TestGetInclusionListV1RejectsBeforeBogota(t *testing.T) {
 	require.ErrorAs(t, err, &unsupported)
 	require.False(t, called)
 }
+
+func TestGetInclusionListV1RejectsWhenFOCILDisabled(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	srv := &EngineServer{
+		logger: log.New(),
+		config: &chain.Config{BogotaTime: common.NewUint64(0), DisabledEIPs: []int{7805}},
+		executionService: &stubExecutionModule{inclusionListFunc: func(context.Context) (types.Transactions, error) {
+			called = true
+			return nil, nil
+		}},
+	}
+
+	result, err := srv.GetInclusionListV1(t.Context())
+
+	require.Nil(t, result)
+	var unsupported *rpc.UnsupportedForkError
+	require.ErrorAs(t, err, &unsupported)
+	require.False(t, called)
+}

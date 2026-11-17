@@ -374,3 +374,12 @@ func TestIsPostMerge(t *testing.T) {
 	assert.False(t, shanghai.IsPostMerge(0, 999))
 	assert.True(t, shanghai.IsPostMerge(0, 1000))
 }
+
+func TestIsEIPEnabledFOCILFollowsBogota(t *testing.T) {
+	cfg := &Config{BogotaTime: common.NewUint64(1000)}
+	assert.False(t, cfg.IsEIPEnabled(7805, 999))
+	assert.True(t, cfg.IsEIPEnabled(7805, 1000))
+
+	cfg.DisabledEIPs = []int{7805}
+	assert.False(t, cfg.IsEIPEnabled(7805, 1000))
+}

@@ -525,8 +525,8 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		(e.config.IsPrague(header.Time) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
 		(!e.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
 		(e.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) ||
-		(!e.config.IsBogota(header.Time) && version >= clparams.HezeVersion) ||
-		(e.config.IsBogota(header.Time) && version < clparams.HezeVersion) {
+		(!e.config.IsEIPEnabled(7805, header.Time) && version >= clparams.HezeVersion) ||
+		(e.config.IsEIPEnabled(7805, header.Time) && version < clparams.HezeVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -1678,7 +1678,7 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 }
 
 func (e *EngineServer) getInclusionList(ctx context.Context) ([]hexutil.Bytes, error) {
-	if !e.config.IsBogota(uint64(time.Now().Unix())) {
+	if !e.config.IsEIPEnabled(7805, uint64(time.Now().Unix())) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
