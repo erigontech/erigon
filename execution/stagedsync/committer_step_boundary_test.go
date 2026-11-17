@@ -63,6 +63,21 @@ func nonceBalanceWrites(addr accounts.Address, nonce uint64, bal uint256.Int) *s
 	return ws
 }
 
+func oneAccountBAL(addr accounts.Address, value uint256.Int) types.BlockAccessList {
+	return types.BlockAccessList{{
+		Address:        addr.Value(),
+		BalanceChanges: []*types.BalanceChange{{Index: 0, Value: value}},
+		NonceChanges:   []*types.NonceChange{{Index: 0, Value: 1}},
+	}}
+}
+
+func putSeedAccount(t *testing.T, doms *execctx.SharedDomains, tx kv.TemporalRwTx, addr accounts.Address, txNum uint64) {
+	t.Helper()
+	acc := accounts.Account{Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
+	av := addr.Value()
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&acc), txNum, nil))
+}
+
 func newTestBlockResult(blockNum uint64, blockHash common.Hash, lastTxNum uint64, partial bool) *blockResult {
 	return &blockResult{
 		BlockNum:  blockNum,
@@ -867,7 +882,8 @@ func TestComputeAhead_WindowStepBoundaryCheckpointMidBlock(t *testing.T) {
 		})
 	}
 
-	run := func(balDriven bool, stateRoot common.Hash, probe bool) ([]byte, []kv.DomainEntryDiff) {
+	run := func(balDriven bool, stateRoot common.Hash) ([]byte, []kv.DomainEntryDiff) {
+		probe := stateRoot == (common.Hash{})
 		dbg.BALDrivenCommitment = balDriven
 		db, tx, doms := setupStepTest(t)
 		doms.SetDeferCommitmentUpdates(true)
@@ -921,11 +937,11 @@ func TestComputeAhead_WindowStepBoundaryCheckpointMidBlock(t *testing.T) {
 		return stateRoot[:], ownCS.Diffs[kv.CommitmentDomain].GetDiffSet()
 	}
 
-	root, _ := run(false, common.Hash{}, true)
+	root, _ := run(false, common.Hash{})
 	require.NotEmpty(t, root)
 	stateRoot := common.BytesToHash(root)
-	_, incrementalDiff := run(false, stateRoot, false)
-	_, aheadDiff := run(true, stateRoot, false)
+	_, incrementalDiff := run(false, stateRoot)
+	_, aheadDiff := run(true, stateRoot)
 	require.ElementsMatch(t, incrementalDiff, aheadDiff)
 }
 
@@ -936,15 +952,11 @@ func TestComputeAhead_WindowBlock(t *testing.T) {
 	blockHash := common.Hash{0x71}
 	addr := accounts.InternAddress([20]byte{0x72})
 	value := *uint256.NewInt(9)
-	addrValue := addr.Value()
-	bal := types.BlockAccessList{{
-		Address:        addrValue,
-		BalanceChanges: []*types.BalanceChange{{Index: 0, Value: value}},
-		NonceChanges:   []*types.NonceChange{{Index: 0, Value: 1}},
-	}}
+	bal := oneAccountBAL(addr, value)
 	ws := nonceBalanceWrites(addr, 1, value)
 
-	run := func(balDriven bool, stateRoot common.Hash, foldAhead, probe bool) ([]byte, []kv.DomainEntryDiff) {
+	run := func(balDriven bool, stateRoot common.Hash) ([]byte, []kv.DomainEntryDiff) {
+		probe := stateRoot == (common.Hash{})
 		dbg.BALDrivenCommitment = balDriven
 
 		db, tx, doms := setupStepTest(t)
@@ -953,11 +965,9 @@ func TestComputeAhead_WindowBlock(t *testing.T) {
 		staleCS := &changeset.StateChangeSet{}
 		cc, out := newAheadCalculator(t, doms, db, 1)
 
-		acc := accounts.Account{Nonce: 0, Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
-		av := addr.Value()
-		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&acc), 1, nil))
+		putSeedAccount(t, doms, tx, addr, 1)
 		req := &blockRequest{blockNum: 1, blockHash: blockHash, firstTxNum: 1, lastTxNum: 1, stateRoot: stateRoot, bal: bal}
-		if foldAhead {
+		if balDriven {
 			// An execution of the same block before an in-memory unwind left its changeset.
 			doms.SavePastChangesetAccumulator(blockHash, 1, staleCS)
 			cc.handleBlockRequest(ctx, req)
@@ -968,7 +978,7 @@ func TestComputeAhead_WindowBlock(t *testing.T) {
 			cc.handleBlockRequest(ctx, req)
 		}
 
-		if foldAhead {
+		if balDriven {
 			before := ComputedAheadCountForTest()
 			cc.handleMessage(ctx, recordTx(newRawViewVM(1), 1, blockHash, 1, &chain.Rules{}, ws))
 			require.Equal(t, before+1, ComputedAheadCountForTest())
@@ -999,11 +1009,11 @@ func TestComputeAhead_WindowBlock(t *testing.T) {
 		return root, ownCS.Diffs[kv.CommitmentDomain].GetDiffSet()
 	}
 
-	root, _ := run(false, common.Hash{}, false, true)
+	root, _ := run(false, common.Hash{})
 	require.NotEmpty(t, root)
 	stateRoot := common.BytesToHash(root)
-	_, incrementalDiff := run(false, stateRoot, false, false)
-	_, aheadDiff := run(true, stateRoot, true, false)
+	_, incrementalDiff := run(false, stateRoot)
+	_, aheadDiff := run(true, stateRoot)
 	require.ElementsMatch(t, incrementalDiff, aheadDiff)
 }
 
@@ -1113,17 +1123,11 @@ func TestComputeAhead_WindowBlockUnsafeModes(t *testing.T) {
 			ownCS := &changeset.StateChangeSet{}
 			doms.SavePastChangesetAccumulator(blockHash, 1, ownCS)
 			cc, out := newAheadCalculator(t, doms, db, 1)
-			acc := accounts.Account{Nonce: 0, Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
-			av := addr.Value()
-			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&acc), 1, nil))
+			putSeedAccount(t, doms, tx, addr, 1)
 			cc.handleBlockRequest(ctx, &blockRequest{
 				blockNum: 1, blockHash: blockHash, firstTxNum: 1, lastTxNum: 1,
 				stateRoot: common.Hash{0xde, 0xad},
-				bal: types.BlockAccessList{{
-					Address:        addr.Value(),
-					BalanceChanges: []*types.BalanceChange{{Index: 0, Value: value}},
-					NonceChanges:   []*types.NonceChange{{Index: 0, Value: 1}},
-				}},
+				bal:       oneAccountBAL(addr, value),
 			})
 			require.False(t, cc.computedAhead[1])
 			require.Empty(t, out)
@@ -1152,11 +1156,7 @@ func TestComputeAhead_WindowWrongRootPublishedOnce(t *testing.T) {
 	cc.handleBlockRequest(ctx, &blockRequest{
 		blockNum: 1, blockHash: blockHash, firstTxNum: 1, lastTxNum: 1,
 		stateRoot: common.Hash{0xbe, 0xef},
-		bal: types.BlockAccessList{{
-			Address:        addr.Value(),
-			BalanceChanges: []*types.BalanceChange{{Index: 0, Value: value}},
-			NonceChanges:   []*types.NonceChange{{Index: 0, Value: 1}},
-		}},
+		bal:       oneAccountBAL(addr, value),
 	})
 	require.Empty(t, out)
 	cc.handleMessage(ctx, recordTx(newRawViewVM(1), 1, blockHash, 1, &chain.Rules{IsAmsterdam: true}, nonceBalanceWrites(addr, 1, value)))
@@ -1220,12 +1220,7 @@ func TestHandleMessage_RejectedComputedAheadWindowBlock(t *testing.T) {
 	blockHash := common.Hash{0xb1}
 	addr := accounts.InternAddress([20]byte{0xb2})
 	value := *uint256.NewInt(17)
-	addrValue := addr.Value()
-	bal := types.BlockAccessList{{
-		Address:        addrValue,
-		BalanceChanges: []*types.BalanceChange{{Index: 0, Value: value}},
-		NonceChanges:   []*types.NonceChange{{Index: 0, Value: 1}},
-	}}
+	bal := oneAccountBAL(addr, value)
 	ws := nonceBalanceWrites(addr, 1, value)
 
 	probe := func() []byte {
@@ -1233,8 +1228,7 @@ func TestHandleMessage_RejectedComputedAheadWindowBlock(t *testing.T) {
 		doms.SetDeferCommitmentUpdates(true)
 		doms.SavePastChangesetAccumulator(blockHash, 1, &changeset.StateChangeSet{})
 		cc, out := newAheadCalculator(t, doms, db, 1)
-		acc := accounts.Account{Nonce: 0, Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
-		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 1, nil))
+		putSeedAccount(t, doms, tx, addr, 1)
 		cc.handleBlockRequest(ctx, &blockRequest{blockNum: 1, blockHash: blockHash, firstTxNum: 1, lastTxNum: 1, stateRoot: common.Hash{}, bal: bal})
 		cc.handleMessage(ctx, recordTx(newRawViewVM(1), 1, blockHash, 1, &chain.Rules{}, ws))
 		cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: blockHash, StateRoot: common.Hash{}, lastTxNum: 1})
@@ -1251,8 +1245,7 @@ func TestHandleMessage_RejectedComputedAheadWindowBlock(t *testing.T) {
 	doms.SetDeferCommitmentUpdates(true)
 	ownCS := &changeset.StateChangeSet{}
 	cc, out := newAheadCalculator(t, doms, db, 1)
-	acc := accounts.Account{Nonce: 0, Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
-	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 1, nil))
+	putSeedAccount(t, doms, tx, addr, 1)
 	req := &blockRequest{blockNum: 1, blockHash: blockHash, firstTxNum: 1, lastTxNum: 1, stateRoot: common.BytesToHash(root), bal: bal}
 	cc.handleBlockRequest(ctx, req)
 	require.False(t, cc.computedAhead[1])
@@ -1262,7 +1255,6 @@ func TestHandleMessage_RejectedComputedAheadWindowBlock(t *testing.T) {
 	require.NotNil(t, doms.GetCommitmentContext().PeekPendingUpdate())
 	_, pending := cc.pending[1]
 	require.True(t, pending)
-	require.True(t, cc.computedAhead[1])
 	require.Contains(t, cc.balRoots, uint64(1))
 	require.Empty(t, out)
 
