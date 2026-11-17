@@ -36,16 +36,11 @@ var (
 // unique drops a value at the first GC after its last handle dies, so values the next request reads again are
 // allocated and registered again, and unique.Make parks its caller while a GC cycle finishes marking. These
 // direct-mapped tables keep the latest values alive and answer hits without unique.Make; a miss overwrites the slot.
-const (
-	addressTableSize = 256 * 1024
-	keyTableSize     = 1024 * 1024
-)
+const addressTableSize = 256 * 1024
 
 var (
 	addressTable [addressTableSize]atomic.Value // Address
-	keyTable     [keyTableSize]atomic.Value     // StorageKey
 	_            = [1]struct{}{}[addressTableSize&(addressTableSize-1)]
-	_            = [1]struct{}{}[keyTableSize&(keyTableSize-1)]
 )
 
 func addressSlot(a common.Address) *atomic.Value {
@@ -140,26 +135,19 @@ func (a Address) Cmp(o Address) int {
 	return a.Value().Cmp(o.Value())
 }
 
-type StorageKey unique.Handle[common.Hash]
+// StorageKey is a slot key held by value; the zero value is the nil key.
+type StorageKey struct {
+	v   common.Hash
+	set bool
+}
 
 var (
 	ZeroKey = InternKey(common.Hash{})
 	NilKey  = StorageKey{}
 )
 
-// keySlot mixes both ends of the key: keccak-derived slots differ everywhere, small scalar slots only at the end.
-func keySlot(k common.Hash) *atomic.Value {
-	return &keyTable[(binary.BigEndian.Uint32(k[:4])^binary.BigEndian.Uint32(k[28:]))&(keyTableSize-1)]
-}
-
 func InternKey(k common.Hash) StorageKey {
-	slot := keySlot(k)
-	if h, ok := slot.Load().(StorageKey); ok && h.Value() == k {
-		return h
-	}
-	h := StorageKey(unique.Make(k))
-	slot.Store(h)
-	return h
+	return StorageKey{v: k, set: true}
 }
 
 func (k StorageKey) IsNil() bool {
@@ -167,10 +155,7 @@ func (k StorageKey) IsNil() bool {
 }
 
 func (k StorageKey) Value() common.Hash {
-	if k == NilKey {
-		return common.Hash{}
-	}
-	return unique.Handle[common.Hash](k).Value()
+	return k.v
 }
 
 func (k StorageKey) String() string {
