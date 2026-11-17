@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -96,7 +97,7 @@ func listFiles(t testing.TB, fs afero.Fs) []string {
 			return err
 		}
 		if !info.IsDir() {
-			files = append(files, path)
+			files = append(files, filepath.ToSlash(path))
 		}
 		return nil
 	}))

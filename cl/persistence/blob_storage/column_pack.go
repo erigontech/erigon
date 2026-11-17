@@ -287,6 +287,7 @@ func (s *dataColumnStorageImpl) holdsValidPack(dir string) (bool, error) {
 		return false, err
 	}
 	defer f.Close()
+	var firstErr error
 	for {
 		names, readErr := f.Readdirnames(listBatch)
 		for _, name := range names {
@@ -300,7 +301,10 @@ func (s *dataColumnStorageImpl) holdsValidPack(dir string) (bool, error) {
 				continue
 			}
 			if err != nil {
-				return false, err
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
 			}
 			if pk != nil {
 				pk.Close()
@@ -308,7 +312,7 @@ func (s *dataColumnStorageImpl) holdsValidPack(dir string) (bool, error) {
 			}
 		}
 		if errors.Is(readErr, io.EOF) {
-			return false, nil
+			return false, firstErr
 		}
 		if readErr != nil {
 			return false, readErr

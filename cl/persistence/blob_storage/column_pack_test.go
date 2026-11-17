@@ -71,6 +71,11 @@ func packHeaderFor(t testing.TB, lengths []uint32) []byte {
 	return header
 }
 
+func refreshPackHeaderCRC(header []byte) {
+	body := len(header) - packCRCSize
+	binary.LittleEndian.PutUint32(header[body:], crc32.Checksum(header[:body], castagnoli))
+}
+
 func packRowOf(t testing.TB, name string, lengths []uint32) packHeaderRow {
 	t.Helper()
 	size := int64(wantPackHeaderSize(len(lengths)))
@@ -112,8 +117,14 @@ func rejectedPackRows(t testing.TB) []packHeaderRow {
 	return []packHeaderRow{
 		tooLong, trailing, truncated, empty,
 		reject("fewer than 7 bytes", func(row *packHeaderRow) { row.header, row.size = row.header[:6], 6 }),
-		reject("bad magic", func(row *packHeaderRow) { row.header[0] ^= 0xff }),
-		reject("unknown version", func(row *packHeaderRow) { row.header[4] = 2 }),
+		reject("bad magic", func(row *packHeaderRow) {
+			row.header[0] ^= 0xff
+			refreshPackHeaderCRC(row.header)
+		}),
+		reject("unknown version", func(row *packHeaderRow) {
+			row.header[4] = 2
+			refreshPackHeaderCRC(row.header)
+		}),
 		reject("header width differs from the configured width", func(row *packHeaderRow) { row.width++ }),
 		reject("configured width above MaxUint16", func(row *packHeaderRow) {
 			row.header, row.size, row.width = widest.header, widest.size, math.MaxUint16+1
@@ -740,6 +751,21 @@ func TestEarliestStoredSlotSkipsAPackItCannotServe(t *testing.T) {
 		require.ErrorIs(t, err, os.ErrPermission)
 	})
 
+	t.Run("an unreadable pack does not hide a valid pack in the same bucket", func(t *testing.T) {
+		mem := afero.NewMemMapFs()
+		unreadableRoot, validRoot := common.Hash{1}, common.Hash{2}
+		writePack(t, mem, badSlot, unreadableRoot)
+		writePack(t, mem, badSlot, validRoot)
+		infos, err := afero.ReadDir(mem, path.Dir(testPackFile(badSlot, unreadableRoot)))
+		require.NoError(t, err)
+		require.Equal(t, unreadableRoot.String()+packSuffix, infos[0].Name(), "the unreadable pack comes first in directory order")
+
+		earliest, err := newBatchHarness(t, openFailingFs{Fs: mem, name: testPackFile(badSlot, unreadableRoot)}).storage.EarliestStoredSlot()
+
+		require.NoError(t, err)
+		require.Equal(t, uint64(3*subdivisionSlot), earliest)
+	})
+
 	t.Run("a corrupt pack found by the scan drops the cached columns", func(t *testing.T) {
 		mem := afero.NewMemMapFs()
 		require.NoError(t, newBatchHarness(t, mem).storage.WriteColumnSidecarsBatch(t.Context(), badRoot, batchTestSidecars(badSlot, 0, 1, 2, 3)))
@@ -1337,10 +1363,12 @@ func TestReadersSeeACompletePackDuringARewrite(t *testing.T) {
 	}
 
 	stop := make(chan struct{})
-	var readers sync.WaitGroup
+	var readers, firstPass sync.WaitGroup
 	defer readers.Wait()
 	defer close(stop)
+	firstPass.Add(4)
 	for range 4 {
+		firstPassDone := sync.OnceFunc(firstPass.Done)
 		readers.Go(func() {
 			for {
 				select {
@@ -1359,9 +1387,11 @@ func TestReadersSeeACompletePackDuringARewrite(t *testing.T) {
 						}
 					}
 				}
+				firstPassDone()
 			}
 		})
 	}
+	firstPass.Wait()
 	for r := range roots {
 		for c := int64(len(kept)); c < columns; c++ {
 			require.NoError(t, h.storage.RemoveColumnSidecars(t.Context(), slot, rootOf(r), c))
