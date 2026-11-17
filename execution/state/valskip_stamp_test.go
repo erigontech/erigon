@@ -211,17 +211,24 @@ func TestValSkip_StorageOnlyPromotionOnLifecycleEntryBumps(t *testing.T) {
 		"validated": func(vm *VersionMap, ws *WriteSet) { vm.MarkWritesValidated(ws, nil) },
 		"complete":  func(vm *VersionMap, ws *WriteSet) { vm.MarkWritesComplete(ws) },
 	}
+	lifecycle := map[string]AccountPath{
+		"incarnation":    IncarnationPath,
+		"createContract": CreateContractPath,
+		"selfDestruct":   SelfDestructPath,
+	}
 	for name, promote := range promotions {
-		vm := newStampedMap(32)
-		flushPath(vm, addr, 1, SelfDestructPath)
-		ws := newWriteSet(&VersionedWrite[uint256.Int]{
-			WriteHeader: WriteHeader{Address: addr, Key: slot, Version: Version{TxIndex: 3}, Path: StoragePath},
-			Val:         *uint256.NewInt(1),
-		})
-		vm.FlushVersionedWrites(ws, false)
-		stamp := vm.WriteSeq()
-		promote(vm, ws)
-		require.False(t, vm.QuietBelow(5, stamp), "%s: a storage-only promotion on an entry with lifecycle cells must bump", name)
+		for cell, path := range lifecycle {
+			vm := newStampedMap(32)
+			flushPath(vm, addr, 1, path)
+			ws := newWriteSet(&VersionedWrite[uint256.Int]{
+				WriteHeader: WriteHeader{Address: addr, Key: slot, Version: Version{TxIndex: 3}, Path: StoragePath},
+				Val:         *uint256.NewInt(1),
+			})
+			vm.FlushVersionedWrites(ws, false)
+			stamp := vm.WriteSeq()
+			promote(vm, ws)
+			require.False(t, vm.QuietBelow(5, stamp), "%s, %s cell: a storage-only promotion on an entry with lifecycle cells must bump", name, cell)
+		}
 	}
 }
 
