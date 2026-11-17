@@ -260,6 +260,74 @@ func TestHeadSignerSignsReadHead(t *testing.T) {
 	waitSigned(t, s, e.Hash(), 2)
 }
 
+// TestHeadSignerSkipsAHeadReplacedWhileUnreadable: a head whose block was not
+// readable, replaced by a newer head before the next read, is not signed,
+// although its block became readable in between.
+func TestHeadSignerSkipsAHeadReplacedWhileUnreadable(t *testing.T) {
+	a, b := kaBlock(1), kaBlock(2)
+	blocks := newBlockSet(b)
+	var (
+		s    *sequencer.HeadSigner
+		once sync.Once
+	)
+	blocks.onRead = func(h common.Hash) {
+		if h != a.Hash() {
+			return
+		}
+		once.Do(func() {
+			go func() {
+				// Inside the pause after A's first read found no block.
+				for blocks.reads(a.Hash()) == 0 {
+					time.Sleep(time.Millisecond)
+				}
+				time.Sleep(10 * time.Millisecond)
+				s.Moved(b.Hash())
+				blocks.add(a)
+			}()
+		})
+	}
+	s = startSigner(t, sequencer.SignerConfig{Key: kaKey(t), Domain: kaDomain, Blocks: blocks})
+	s.Moved(a.Hash())
+	waitSigned(t, s, b.Hash(), 1)
+}
+
+// hungBlocks is a chain whose read of hung waits for its context to end.
+type hungBlocks struct {
+	*blockSet
+	hung    common.Hash
+	entered chan struct{}
+}
+
+func (c hungBlocks) CanonicalBlock(ctx context.Context, hash common.Hash) (*types.Block, error) {
+	if hash != c.hung {
+		return c.blockSet.CanonicalBlock(ctx, hash)
+	}
+	select {
+	case c.entered <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// TestHeadSignerBoundsTheRead: a read of a head's block that hangs is given
+// up at the read deadline, the head unsigned, and the next head is signed.
+func TestHeadSignerBoundsTheRead(t *testing.T) {
+	a, b := kaBlock(1), kaBlock(2)
+	blocks := hungBlocks{blockSet: newBlockSet(b), hung: a.Hash(), entered: make(chan struct{}, 1)}
+	s := startSigner(t, sequencer.SignerConfig{Key: kaKey(t), Domain: kaDomain, Blocks: blocks})
+	start := time.Now()
+	s.Moved(a.Hash())
+	select {
+	case <-blocks.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("A's block not read")
+	}
+	s.Moved(b.Hash())
+	waitSigned(t, s, b.Hash(), 1)
+	require.Less(t, time.Since(start), 2*time.Second, "B waited past A's read deadline")
+}
+
 // TestHeadSignerEpoch: without a configured epoch, the signer takes the time
 // it is handed its first head, after boot, not its construction time.
 func TestHeadSignerEpoch(t *testing.T) {

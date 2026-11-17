@@ -251,28 +251,31 @@ func (s *HeadSigner) replaced() bool {
 // read failed, a newer head replaced it before the block was readable, or the
 // block stayed unreadable for blockReadDeadline.
 func (s *HeadSigner) block(ctx context.Context, head common.Hash) *types.Block {
-	deadline := time.Now().Add(blockReadDeadline)
+	rctx, cancel := context.WithTimeout(ctx, blockReadDeadline)
+	defer cancel()
 	for {
-		b, err := s.cfg.Blocks.CanonicalBlock(ctx, head)
+		b, err := s.cfg.Blocks.CanonicalBlock(rctx, head)
 		switch {
-		case err != nil:
-			if ctx.Err() == nil {
-				s.logger.Error("[eez] reading the head's block failed, not signing it", "event", "eez.node.head_signer.read_failed", "hash", head, "err", err)
-			}
-			return nil
-		case b != nil:
+		case err == nil && b != nil:
 			return b
-		case s.replaced():
-			s.logger.Info("[eez] head replaced before its block was readable, skipping it", "event", "eez.node.head_signer.superseded", "hash", head)
-			return nil
-		case !time.Now().Before(deadline):
-			s.logger.Warn("[eez] head's block not readable, not signing it", "event", "eez.node.head_signer.block_unreadable", "hash", head)
+		case err != nil && rctx.Err() == nil:
+			s.logger.Error("[eez] reading the head's block failed, not signing it", "event", "eez.node.head_signer.read_failed", "hash", head, "err", err)
 			return nil
 		}
 		select {
-		case <-ctx.Done():
-			return nil
+		case <-rctx.Done():
 		case <-time.After(blockReadRetry):
+		}
+		switch {
+		case ctx.Err() != nil:
+			return nil
+		case rctx.Err() != nil:
+			s.logger.Warn("[eez] head's block not readable, not signing it", "event", "eez.node.head_signer.block_unreadable", "hash", head)
+			return nil
+		case s.replaced():
+			// Checked before the next read, which may find the block.
+			s.logger.Info("[eez] head replaced before its block was readable, skipping it", "event", "eez.node.head_signer.superseded", "hash", head)
+			return nil
 		}
 	}
 }
