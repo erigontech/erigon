@@ -608,6 +608,7 @@ func TestFetcherFetchBodies(t *testing.T) {
 }
 
 func TestFetcherFetchBodiesPreservesEmptyBlobHashesForValidation(t *testing.T) {
+	t.Parallel()
 	peerID := PeerIdFromUint64(1)
 	const requestID = uint64(1234)
 	to := common.Address{1}
