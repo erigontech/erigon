@@ -443,6 +443,36 @@ func TestPruneBlocksRemovesAllBlocksBeforeSlot(t *testing.T) {
 	}
 }
 
+func TestReadBlockRootsAtSlotListsEveryStoredBlockOfTheSlot(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	store := func(slot, proposer uint64) common.Hash {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+		block.Block.Slot = slot
+		block.Block.ProposerIndex = proposer
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		require.NoError(t, WriteBeaconBlock(tx, block))
+		return root
+	}
+	store(3, 0)
+	first, second := store(4, 0), store(4, 1)
+	store(5, 0)
+
+	roots, err := ReadBlockRootsAtSlot(tx, 4)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []common.Hash{first, second}, roots)
+
+	roots, err = ReadBlockRootsAtSlot(tx, 6)
+	require.NoError(t, err)
+	require.Empty(t, roots)
+}
+
 func TestPruneBlocksPrunesExecutionPayloadEnvelopeSignaturesBeforeSlot(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

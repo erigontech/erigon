@@ -226,6 +226,10 @@ type cgcTestForkChoice struct{ slot uint64 }
 
 func (cgcTestForkChoice) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) { return nil, false }
 
+func (cgcTestForkChoice) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	return nil, false
+}
+
 func (f cgcTestForkChoice) Slot() uint64 { return f.slot }
 
 type updateProbeDB struct {
