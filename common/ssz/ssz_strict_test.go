@@ -150,7 +150,7 @@ func TestDecodeDynamicListWithDecoderValidatesBeforeCallback(t *testing.T) {
 					return errStrictListTest
 				})
 			require.ErrorIs(t, err, tc.want)
-			if tc.want == errStrictListTest {
+			if errors.Is(tc.want, errStrictListTest) {
 				require.Equal(t, 1, calls)
 			} else {
 				require.Zero(t, calls)

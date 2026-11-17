@@ -149,11 +149,12 @@ func DecodeDynamicListWithDecoder[T Unmarshaler](bytes []byte, start, end uint32
 		}
 		objs[i] = objs[i].Clone().(T)
 		var err error
-		if decode != nil {
+		switch {
+		case decode != nil:
 			err = decode(objs[i], buf[currentOffset:endOffset], version)
-		} else if strict {
+		case strict:
 			err = decodeObjectStrict(objs[i], buf[currentOffset:endOffset], version)
-		} else {
+		default:
 			err = objs[i].DecodeSSZ(buf[currentOffset:endOffset], version)
 		}
 		if err != nil {
