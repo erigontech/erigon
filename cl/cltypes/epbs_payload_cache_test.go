@@ -46,9 +46,16 @@ func TestExecutionPayloadBidCopyCloneProgressiveCache(t *testing.T) {
 					} else {
 						target = source.Copy()
 					}
-					if warm && !clone {
+					if warm && !clone && mode != "unconfigured" {
+						// AllocsPerRun's warm-up call would fill an empty holder, so hash a fresh copy each run.
+						copies := make([]*ExecutionPayloadBid, 101)
+						for i := range copies {
+							copies[i] = source.Copy()
+						}
+						next := 0
 						allocs := testing.AllocsPerRun(100, func() {
-							_, err = target.BlobKzgCommitments.HashSSZProgressive(nil)
+							_, err = copies[next].BlobKzgCommitments.HashSSZProgressive(nil)
+							next++
 						})
 						require.NoError(t, err)
 						require.Zero(t, allocs, "a warm copy must keep the cached root")
