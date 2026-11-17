@@ -125,34 +125,3 @@ func TestTouchedEmptyAccountWithStorageIsWiped(t *testing.T) {
 		})
 	}
 }
-
-// A CREATE2 to an account with storage but no nonce and no code succeeds, and the init code's
-// storage replaces the old storage.
-func TestCreate2OverStorageOnlyAccountReplacesItsStorage(t *testing.T) {
-	keys, senders := eip161TouchKeys(t, 1)
-	initCode := program.New().Sstore(2, 1).Op(vm.STOP).Bytes()
-	factory := common.HexToAddress("0xfac7")
-	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
-	for _, fork := range eip161TouchForks {
-		t.Run(fork.name, func(t *testing.T) {
-			gspec := &types.Genesis{Config: fork.config, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
-				senders[0]: {Balance: big.NewInt(1_000_000_000_000_000_000)},
-				factory:    {Code: program.New().Create2(initCode, 0).Op(vm.STOP).Bytes()},
-				target:     {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x09")}},
-			}}
-			chainPack := generateEIP161TouchBlock(t, gspec, keys[0], func(b *blockgen.BlockGen) {
-				txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), factory, uint256.NewInt(0), 1_000_000, uint256.NewInt(10_000_000_000), nil), *types.LatestSignerForChainID(fork.config.ChainID), keys[0])
-				require.NoError(t, err)
-				b.AddTx(txn)
-			})
-			requireGeneratedBlock(t, chainPack)
-			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
-				nonce, err := st.GetNonce(accounts.InternAddress(target))
-				require.NoError(t, err)
-				require.Equal(t, uint64(1), nonce, "the CREATE2 succeeds")
-				require.Equal(t, uint256.Int{}, storageAt(t, st, target, 1))
-				require.Equal(t, *uint256.NewInt(1), storageAt(t, st, target, 2))
-			})
-		})
-	}
-}

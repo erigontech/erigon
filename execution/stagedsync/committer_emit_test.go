@@ -52,8 +52,6 @@ func TestEmitTouched_ProducesExpectedUpdates(t *testing.T) {
 
 	wiped := full(3, 1, accounts.EmptyCodeHash)
 	wiped.DeleteStorageSubtree = true
-	created := full(9, 1, codeHash)
-	created.DeleteStorageSubtree = true
 
 	scenarios := []struct {
 		name   string
@@ -87,9 +85,9 @@ func TestEmitTouched_ProducesExpectedUpdates(t *testing.T) {
 			map[string]commitment.Update{acctPlainKey(a(5)): wiped},
 		},
 		{
-			"created contract wipes subtree",
+			"created contract",
 			newWS().createContract(a(7), ver, true).bal(a(7), ver, *uint256.NewInt(9)).nonce(a(7), ver, 1).codeHash(a(7), ver, codeHash).build(),
-			map[string]commitment.Update{acctPlainKey(a(7)): created},
+			map[string]commitment.Update{acctPlainKey(a(7)): full(9, 1, codeHash)},
 		},
 		{
 			"zero-balance live touch (nonce keeps it alive)",

@@ -2300,10 +2300,10 @@ func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 	hph.collapseTracer(siblingPath, bytes.Clone(hph.currentKey[:depth]))
 }
 
-// deleteStorageSubtreeBranches tombstones every persisted commitment branch under the
-// storage subtree of an account that was self-destructed or created as a contract, so
-// its new storage cannot fold in stale branches. It uses bounded point reads rather than
-// a domain range scan, which on the step-sharded commitment domain would map every file.
+// deleteStorageSubtreeBranches tombstones every persisted commitment branch under
+// a self-destructed account's storage subtree, so a later recreate at the same
+// address cannot fold in stale branches. It uses bounded point reads rather than a
+// domain range scan, which on the step-sharded commitment domain would map every file.
 func (hph *HexPatriciaHashed) deleteStorageSubtreeBranches(prefix []byte) error {
 	branch, err := hph.branchFromCacheOrDB(nibbles.HexToCompact(prefix))
 	if err != nil {
@@ -2353,10 +2353,9 @@ func (hph *HexPatriciaHashed) deleteStorageSubtreeBranches(prefix []byte) error 
 	return hph.branchEncoder.CollectTombstone(hph.ctx, nibbles.HexToCompact(prefix), maps.Bitmap, branch)
 }
 
-// resetAccountStorageRoot clears the in-grid account cell's storage-root reference so
-// a self-destructed or created account rebuilds from empty storage rather than
-// re-mounting its old subtree (persisted branches are tombstoned by
-// deleteStorageSubtreeBranches).
+// resetAccountStorageRoot clears the in-grid account cell's storage-root reference
+// so a self-destructed account rebuilds from empty storage rather than re-mounting
+// its old subtree (persisted branches are tombstoned by deleteStorageSubtreeBranches).
 func (hph *HexPatriciaHashed) resetAccountStorageRoot(hashedKey []byte) {
 	if hph.activeRows == 0 {
 		return
@@ -2501,9 +2500,9 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			}
 		}
 	}
-	// An account self-destructed or created as a contract in the block carries the
-	// transient DeleteStorageSubtree marker: tombstone the persisted storage branches
-	// and reset the in-grid storage root before applying the update, so no stale
+	// A self-destruct that recreates the account carries the transient
+	// DeleteStorageSubtree marker: tombstone the persisted storage branches and
+	// reset the in-grid storage root before applying the recreate, so no stale
 	// slot folds back in. The path is unfolded above, so the account cell is reachable.
 	if stateUpdate != nil && stateUpdate.DeleteStorageSubtree && int16(len(plainKey)) == hph.accountKeyLen {
 		// A storage root shared by every slot is an extension: its first branch is below it.
