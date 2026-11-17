@@ -65,8 +65,8 @@ func TestForkchoiceUpdatedSwitchBackDuringCommit(t *testing.T) {
 		headNumber := headerA.Number.Uint64()
 
 		var mu sync.Mutex
-		committed := headA
-		busy := false
+		committedHead := headA
+		commitPending := false
 		var updates []common.Hash
 		module := &stubExecutionModule{
 			getHeaderFunc: func(_ context.Context, hash *common.Hash, _ *uint64) (*types.Header, error) {
@@ -78,24 +78,24 @@ func TestForkchoiceUpdatedSwitchBackDuringCommit(t *testing.T) {
 			getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
 				mu.Lock()
 				defer mu.Unlock()
-				return execmodule.ForkChoiceState{HeadHash: committed}, nil
+				return execmodule.ForkChoiceState{HeadHash: committedHead}, nil
 			},
 			readyFunc: func(context.Context) (bool, error) {
 				mu.Lock()
 				defer mu.Unlock()
-				return !busy, nil
+				return !commitPending, nil
 			},
 			updateForkChoiceFunc: func(_ context.Context, head, _, _ common.Hash) (execmodule.ForkChoiceResult, error) {
 				mu.Lock()
 				defer mu.Unlock()
-				if busy {
+				if commitPending {
 					return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}, nil
 				}
 				updates = append(updates, head)
 				if head == headB {
-					busy = true
+					commitPending = true
 				} else {
-					committed = head
+					committedHead = head
 				}
 				return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: head}, nil
 			},
@@ -109,26 +109,26 @@ func TestForkchoiceUpdatedSwitchBackDuringCommit(t *testing.T) {
 		resp, err := srv.ForkchoiceUpdatedV2(ctx, &engine_types.ForkChoiceState{HeadHash: headB}, nil)
 		require.NoError(t, err)
 		require.Equal(t, engine_types.ValidStatus, resp.PayloadStatus.Status)
-		require.Equal(t, headA, committed)
-		require.True(t, busy)
+		require.Equal(t, headA, committedHead)
+		require.True(t, commitPending)
 
-		done := make(chan struct{})
+		switchBackDone := make(chan struct{})
 		go func() {
-			defer close(done)
+			defer close(switchBackDone)
 			resp, err = srv.ForkchoiceUpdatedV2(ctx, &engine_types.ForkChoiceState{HeadHash: headA}, nil)
 		}()
 		synctest.Wait()
 
 		mu.Lock()
-		committed = headB
-		busy = false
+		committedHead = headB
+		commitPending = false
 		mu.Unlock()
-		<-done
+		<-switchBackDone
 
 		require.NoError(t, err)
 		require.Equal(t, engine_types.ValidStatus, resp.PayloadStatus.Status)
 		require.Equal(t, &headA, resp.PayloadStatus.LatestValidHash)
-		require.Equal(t, headA, committed, "the latest accepted forkchoice must become canonical")
+		require.Equal(t, headA, committedHead, "the latest accepted forkchoice must become canonical")
 		require.Equal(t, []common.Hash{headB, headA}, updates)
 	})
 }

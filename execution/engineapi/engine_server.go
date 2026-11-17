@@ -736,12 +736,12 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 	}
 
 	var isCanonical bool
-	var err error
 	if newPayload && header != nil {
+		var err error
 		isCanonical, err = e.chainRW.IsCanonicalHash(ctx, blockHash)
-	}
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if newPayload && parent != nil && blockNumber != parent.Number.Uint64()+1 {
