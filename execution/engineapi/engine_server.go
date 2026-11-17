@@ -737,7 +737,7 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 
 	var isCanonical bool
 	var err error
-	if header != nil {
+	if newPayload && header != nil {
 		isCanonical, err = e.chainRW.IsCanonicalHash(ctx, blockHash)
 	}
 	if err != nil {

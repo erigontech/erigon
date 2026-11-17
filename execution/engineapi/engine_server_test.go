@@ -21,6 +21,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"runtime"
@@ -1356,6 +1357,45 @@ func TestQuickStatusHeaderLookup(t *testing.T) {
 			_, err := srv.getQuickPayloadStatusIfPossible(ctx, blockHash, test.number, parentHash, knownParent, test.newPayload, defaultReadinessWait)
 			require.NoError(t, err)
 			require.Equal(t, 1, lookups)
+		})
+	}
+}
+
+func TestQuickStatusCanonicalLookup(t *testing.T) {
+	t.Parallel()
+
+	header := makeParentHeader(1000)
+	blockHash := header.Hash()
+	lookupErr := errors.New("canonical hash lookup failed")
+	for _, test := range []struct {
+		name       string
+		newPayload bool
+	}{
+		{name: "newPayload", newPayload: true},
+		{name: "forkchoiceUpdated"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var lookedUp bool
+			module := &stubExecutionModule{
+				getHeaderFunc: getHeaderReturning(blockHash, header),
+				isCanonicalHashFunc: func(context.Context, common.Hash) (bool, error) {
+					lookedUp = true
+					return false, lookupErr
+				},
+			}
+			cfg := preCancunChainConfig()
+			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), module, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, module, downloader, false, false, false, true, nil, nil, 0, 0)
+
+			status, err := srv.getQuickPayloadStatusIfPossible(t.Context(), blockHash, header.Number.Uint64(), header.ParentHash, nil, test.newPayload, defaultReadinessWait)
+			if test.newPayload {
+				require.ErrorIs(t, err, lookupErr)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Nil(t, status)
+			require.Equal(t, test.newPayload, lookedUp)
 		})
 	}
 }

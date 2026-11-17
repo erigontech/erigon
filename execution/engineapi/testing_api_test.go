@@ -75,6 +75,7 @@ type stubExecutionModule struct {
 	witnessView            func() error
 	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
 	readyFunc              func(ctx context.Context) (bool, error)
+	isCanonicalHashFunc    func(ctx context.Context, hash common.Hash) (bool, error)
 	isValidatedFunc        func(hash common.Hash) bool
 
 	getPayloadBodiesByHashFunc func(ctx context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error)
@@ -181,7 +182,10 @@ func (s *stubExecutionModule) GetPayloadBodiesByRange(_ context.Context, _, _ ui
 	return nil, nil
 }
 
-func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {
+func (s *stubExecutionModule) IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error) {
+	if s.isCanonicalHashFunc != nil {
+		return s.isCanonicalHashFunc(ctx, hash)
+	}
 	return false, nil
 }
 

@@ -522,9 +522,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 
 	e.logger.Debug("[execmodule] updating fork choice", "number", fcuHeader.Number.Uint64(), "hash", fcuHeader.Hash())
-	UpdateForkChoiceArrivalDelay(fcuHeader.Time)
-	metrics.UpdateBlockConsumerPreExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
-	defer metrics.UpdateBlockConsumerPostExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 
 	var limitedBigJump bool
 	limitedBigJumpPadding := uint64(2)
@@ -585,6 +582,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		sendForkchoiceResultWithoutWaiting(outcomeCh, result, false)
 		return nil
 	}
+
+	UpdateForkChoiceArrivalDelay(fcuHeader.Time)
+	metrics.UpdateBlockConsumerPreExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
+	defer metrics.UpdateBlockConsumerPostExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 
 	var restoreRecentReceipts func()
 	defer func() {
