@@ -198,13 +198,13 @@ func TestRejectEnvelopeClearsPendingCopies(t *testing.T) {
 	require.NoError(t, err)
 	f.pendingLocalSelfBuildEnvelopes, err = lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](2)
 	require.NoError(t, err)
-	f.dataAvailableEnvelopeRetryAt, err = lru.New[common.Hash, time.Time](2)
+	f.dataAvailableEnvelopeRetryAt, err = lru.New[common.Hash, *pendingEnvelopeRetryBooking](2)
 	require.NoError(t, err)
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}}
 	f.QueuePendingExecutionPayloadEnvelope(envelope, time.Now())
 	f.pendingLocalSelfBuildEnvelopes.Add(root, envelope)
 	f.pendingEnvelopes.Add(sibling, &cltypes.SignedExecutionPayloadEnvelope{})
-	f.dataAvailableEnvelopeRetryAt.Add(root, time.Now().Add(time.Minute))
+	f.dataAvailableEnvelopeRetryAt.Add(root, &pendingEnvelopeRetryBooking{at: time.Now().Add(time.Minute)})
 	_, _, started := f.TryBeginPayloadPreparation(t.Context(), 10, 12)
 	require.False(t, started)
 

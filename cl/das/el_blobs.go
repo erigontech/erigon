@@ -81,7 +81,7 @@ func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.Sig
 			claim(stored)
 		}
 	}
-	writeErr := d.columnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, stored)
+	_, writeErr := d.writeColumnSidecarsBatched(ctx, block.Block.Slot, blockRoot, stored)
 	if writeErr != nil && claim == nil {
 		return nil, writeErr
 	}

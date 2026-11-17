@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -146,6 +148,47 @@ func TestImportColumnsFromBlobsWritesCustodyColumnsInOneBatch(t *testing.T) {
 		require.True(t, custody[sidecar.Index])
 	}
 	require.Equal(t, written, stored)
+}
+
+func TestImportColumnsFromBlobsWritesColumnsOneAtATimeAfterAFailedBatch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+	d.columnStorage = &failingColumnBatch{DataColumnStorage: d.columnStorage}
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
+	custody, err := d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	want := slices.Collect(maps.Keys(custody))
+
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
+	require.NoError(t, err)
+
+	require.ElementsMatch(t, want, publishedColumnIndices(toPublish))
+	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.ElementsMatch(t, want, saved)
+}
+
+func TestImportColumnsFromBlobsReturnsTheErrorOfAFailedSingleWrite(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{ArchiveBlobs: true})
+	const unwritable = 5
+	d.columnStorage = &failingColumnBatch{DataColumnStorage: d.columnStorage, failSingle: map[uint64]bool{unwritable: true}}
+	d.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
+	d.recoverBlobsQueue = make(chan recoverBlobsRequest, 1)
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
+
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, nil)
+
+	require.Nil(t, toPublish)
+	require.ErrorIs(t, err, errColumnBatchFailed)
+	require.ErrorIs(t, err, errColumnSingleFailed)
+	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.NotContains(t, saved, uint64(unwritable))
+	require.Len(t, saved, int(cfg.NumberOfColumns)-1)
+	require.Empty(t, d.recoverBlobsQueue)
 }
 
 type statCountingFs struct {
@@ -557,7 +600,8 @@ func TestImportColumnsFromBlobsReturnsThePublicationSetWithTheWriteErrorWhenClai
 	block, root, blobs, proofs := elBlobsFixtureOfVersion(t, cfg, clparams.GloasVersion, 2)
 	writeErr := errors.New("write failed")
 	var claimed []*cltypes.DataColumnSidecar
-	columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), root, gomock.Any()).Return(writeErr).Times(1)
+	columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), root, gomock.Any()).Return(errors.New("batch write failed")).Times(1)
+	columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), root, gomock.Any(), gomock.Any()).Return(writeErr).MinTimes(1)
 
 	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs, func(sidecars []*cltypes.DataColumnSidecar) { claimed = sidecars })
 
@@ -568,7 +612,7 @@ func TestImportColumnsFromBlobsReturnsThePublicationSetWithTheWriteErrorWhenClai
 
 var errRenameFailed = errors.New("rename failed")
 
-// renameFailingFs fails the failAt-th Rename, which leaves the earlier renames durable.
+// renameFailingFs fails every Rename from the failAt-th on, which leaves the earlier renames durable.
 type renameFailingFs struct {
 	afero.Fs
 	failAt  int32
@@ -576,7 +620,7 @@ type renameFailingFs struct {
 }
 
 func (f *renameFailingFs) Rename(oldname, newname string) error {
-	if f.renames.Add(1) == f.failAt {
+	if f.renames.Add(1) >= f.failAt {
 		return errRenameFailed
 	}
 	return f.Fs.Rename(oldname, newname)
