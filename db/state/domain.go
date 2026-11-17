@@ -28,6 +28,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -1846,14 +1847,23 @@ func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, boo
 		return nil, false, nil
 	}
 	// Every write below the files' end is in the files; above it, an unwind can leave history newer than any row.
+	if dt.name != kv.CommitmentDomain {
+		gafCalls.Add(1)
+	}
 	if dt.name != kv.CommitmentDomain && txNum < dt.files.EndTxNum() {
+		gafBelowEnd.Add(1)
 		latest, ok, _, endTxNum, err := dt.getLatestFromFiles(key, nil, kv.NoStepBound)
 		if err != nil {
 			return nil, false, err
 		}
 		if ok && len(latest) > 0 && endTxNum/dt.stepSize < txNum/dt.stepSize {
+			gafHits.Add(1)
 			return latest, true, nil
 		}
+	}
+	if dt.name != kv.CommitmentDomain {
+		gafSeeks.Add(1)
+		gafFilesEnd.Store(dt.files.EndTxNum())
 	}
 
 	v, hOk, err := dt.ht.HistorySeek(key, txNum, roTx)
@@ -2447,4 +2457,17 @@ func (dt *DomainRoTx) TraceKey(ctx context.Context, key []byte, startTxNum, endT
 		}
 		return txNum, v, nil
 	}), nil
+}
+
+var gafCalls, gafBelowEnd, gafHits, gafSeeks, gafFilesEnd atomic.Uint64
+
+func init() {
+	if os.Getenv("GAF_COUNT") == "" {
+		return
+	}
+	go func() {
+		for range time.Tick(2 * time.Second) {
+			log.Info("[gaf] GetAsOf", "calls", gafCalls.Load(), "belowFilesEnd", gafBelowEnd.Load(), "shortcutHits", gafHits.Load(), "historySeeks", gafSeeks.Load(), "filesEndTxNum", gafFilesEnd.Load())
+		}
+	}()
 }
