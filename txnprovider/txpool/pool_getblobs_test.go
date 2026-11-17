@@ -173,7 +173,7 @@ func newGetBlobsTestPool(tb testing.TB, numAccounts int) (*TxPool, context.Conte
 	ctx, cancel := context.WithCancel(context.Background())
 	tb.Cleanup(cancel)
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New())
 	require.NoError(tb, err)
 	pool.started.Store(true)
 	require.NotNil(tb, pool)

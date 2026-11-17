@@ -260,9 +260,6 @@ func (s *PayloadStatus) DecodeSSZ(buf []byte, version int) error {
 	if err := ssz2.UnmarshalSSZ(buf, version, s.decodeSSZSchema(&fields)...); err != nil {
 		return err
 	}
-	if fields.latestValidHash.Length() > 1 {
-		return fmt.Errorf("latest_valid_hash has %d entries, want at most 1", fields.latestValidHash.Length())
-	}
 	engineStatus, err := payloadStatusFromByte(fields.status[0])
 	if err != nil {
 		return err

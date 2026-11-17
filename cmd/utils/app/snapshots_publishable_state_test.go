@@ -23,6 +23,7 @@ import (
 
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/stretchr/testify/require"
 )
 
@@ -495,14 +496,14 @@ func removeMockFile(t *testing.T, dir string, name string) {
 }
 
 func Test_CheckStateSnapshotFiles_SuccessCase(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	err := checkStateSnapshotFiles(dirs, false, false)
 	require.NoError(t, err)
 }
 
 func Test_CheckStateSnapshotFiles_WithPersistReceiptCache(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	// Add rcache domain files (.kv + .kvi for each range)
 	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.0-128.kv")
@@ -561,7 +562,7 @@ func Test_CheckStateSnapshotFiles_WithPersistReceiptCache(t *testing.T) {
 }
 
 func Test_CheckStateSnapshotFiles_WithCommitmentHistory(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	// Add commitment idx files (.ef)
 	createMockFile(t, dirs.SnapIdx, "v2.0-commitment.0-128.ef")
@@ -699,7 +700,7 @@ func Test_CheckStateSnapshotFiles_MissingDomainKVI(t *testing.T) {
 
 // If a non-account domain file extends beyond the account range, the maxStep check detects the mismatch.
 func Test_CheckStateSnapshotFiles_DomainMaxStepMismatch(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapDomain, "v1.1-storage.202-210.kv")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -710,7 +711,7 @@ func Test_CheckStateSnapshotFiles_DomainMaxStepMismatch(t *testing.T) {
 
 // A file in the idx directory that doesn't match the snapshot naming convention should be rejected.
 func Test_CheckStateSnapshotFiles_IdxUnparseableFile(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapIdx, "garbage.txt")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -719,7 +720,7 @@ func Test_CheckStateSnapshotFiles_IdxUnparseableFile(t *testing.T) {
 
 // When all account .ef files are missing, the check should report that no inverted index files were found.
 func Test_CheckStateSnapshotFiles_IdxNoAccountEF(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.0-128.ef")
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.128-192.ef")
@@ -731,7 +732,7 @@ func Test_CheckStateSnapshotFiles_IdxNoAccountEF(t *testing.T) {
 
 // If the first account .ef range doesn't start at step 0, a gap-at-start error is expected.
 func Test_CheckStateSnapshotFiles_IdxGapAtStart(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.0-128.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -740,7 +741,7 @@ func Test_CheckStateSnapshotFiles_IdxGapAtStart(t *testing.T) {
 
 // Two account .ef files sharing the same From value should be flagged as a possible overlap.
 func Test_CheckStateSnapshotFiles_IdxOverlapSameFrom(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapIdx, "v2.0-accounts.0-64.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -749,7 +750,7 @@ func Test_CheckStateSnapshotFiles_IdxOverlapSameFrom(t *testing.T) {
 
 // An account .ef file whose range overlaps with an existing range should be detected.
 func Test_CheckStateSnapshotFiles_IdxOverlap(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapIdx, "v2.0-accounts.64-200.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -758,7 +759,7 @@ func Test_CheckStateSnapshotFiles_IdxOverlap(t *testing.T) {
 
 // Removing a middle account .ef file creates a gap between consecutive ranges.
 func Test_CheckStateSnapshotFiles_IdxGap(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.128-192.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -803,7 +804,7 @@ func Test_CheckStateSnapshotFiles_MissingHistoryV(t *testing.T) {
 
 // If the account idx range is shorter than the domain maxStep, the cross-directory maxStep check fails.
 func Test_CheckStateSnapshotFiles_IdxDomainMaxStepMismatch(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.200-202.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -870,7 +871,7 @@ func Test_CheckStateSnapshotFiles_DuplicateVersionsTorrent(t *testing.T) {
 
 // A .tmp leftover isn't a published file, so it must not trip the duplicate check.
 func Test_CheckStateSnapshotFiles_TmpFileIsNotDuplicate(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapDomain, "v1.2-storage.0-128.kv.tmp")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -878,7 +879,7 @@ func Test_CheckStateSnapshotFiles_TmpFileIsNotDuplicate(t *testing.T) {
 }
 
 func Test_CheckStateSnapshotFiles_NonSnapshotVersionedFileIsNotDuplicate(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapDomain, "v1.0-storage.0-128.log")
 	createMockFile(t, dirs.SnapDomain, "v1.1-storage.0-128.log")

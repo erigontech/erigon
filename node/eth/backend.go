@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/disk"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
@@ -1295,6 +1296,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			SanityOldNaming().
 			GenSaltIfNeed(createNewSaltFileIfNeeded).
 			WithErigonDBSettings(erigonDBSettings).
+			BuildsMissedAccessorsAfterOpen().
 			BtIndexInMem() // only the node opens here: integration and other tools pass their own *temporal.DB
 		if snConfig.ErigondbDomainStepsInFrozenFile != nil {
 			v := *snConfig.ErigondbDomainStepsInFrozenFile
@@ -1317,6 +1319,9 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		}
 		if allSegmentsDownloadComplete {
 			_ = temporalDb.OpenStateSnapshots(ctx)
+			if err := temporalDb.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil { // before RPC serves state
+				return nil, nil, nil, nil, err
+			}
 		}
 	}
 
