@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"go.uber.org/goleak"
@@ -126,41 +127,43 @@ func TestReuseWorkers(t *testing.T) {
 }
 
 func TestWorkerTimeout(t *testing.T) {
-	defer goleak.VerifyNone(t)
+	synctest.Test(t, func(t *testing.T) {
+		wp := New(maxWorkers)
+		defer wp.Stop()
 
-	wp := New(maxWorkers)
-	defer wp.Stop()
+		// Start workers, and have them all wait on ctx before completing.
+		ctx, cancel := context.WithCancel(t.Context())
+		wp.Pause(ctx)
 
-	// Start workers, and have them all wait on ctx before completing.
-	ctx, cancel := context.WithCancel(t.Context())
-	wp.Pause(ctx)
+		if anyReady(wp) {
+			t.Fatal("number of ready workers should be zero")
+		}
 
-	if anyReady(wp) {
-		t.Fatal("number of ready workers should be zero")
-	}
+		if wp.killIdleWorker() {
+			t.Fatal("should have been no idle workers to kill")
+		}
 
-	if wp.killIdleWorker() {
-		t.Fatal("should have been no idle workers to kill")
-	}
+		// Release workers.
+		cancel()
 
-	// Release workers.
-	cancel()
+		if countReady(wp) != maxWorkers {
+			t.Fatal("Expected", maxWorkers, "ready workers")
+		}
 
-	if countReady(wp) != maxWorkers {
-		t.Fatal("Expected", maxWorkers, "ready workers")
-	}
+		// Advances the fake clock so the pool's idle timer fires; synctest.Wait then lets the
+		// dispatch goroutine finish the kill before the count is read.
+		time.Sleep(idleTimeout*2 + idleTimeout/2)
+		synctest.Wait()
+		if countReady(wp) != maxWorkers-1 {
+			t.Fatal("First worker did not timeout")
+		}
 
-	// Check that a worker timed out.
-	time.Sleep(idleTimeout*2 + idleTimeout/2)
-	if countReady(wp) != maxWorkers-1 {
-		t.Fatal("First worker did not timeout")
-	}
-
-	// Check that another worker timed out.
-	time.Sleep(idleTimeout)
-	if countReady(wp) != maxWorkers-2 {
-		t.Fatal("Second worker did not timeout")
-	}
+		time.Sleep(idleTimeout)
+		synctest.Wait()
+		if countReady(wp) != maxWorkers-2 {
+			t.Fatal("Second worker did not timeout")
+		}
+	})
 }
 
 func TestStop(t *testing.T) {
