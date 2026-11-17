@@ -989,6 +989,45 @@ func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
 	assert.Equal(t, []byte("write-val-0499"), v)
 }
 
+func TestMemoryMutationReadViewCursorObservesNewMarkers(t *testing.T) {
+	for _, operation := range []string{"delete", "clear", "delete duplicate"} {
+		t.Run(operation, func(t *testing.T) {
+			_, rwTx := newTestTx(t)
+			table := kv.HeaderNumber
+			if operation == "delete duplicate" {
+				table = kv.TblAccountVals
+			}
+			key, value := []byte("key"), []byte("value")
+			require.NoError(t, rwTx.Put(table, key, value))
+			batch, err := membatchwithdb.NewMemoryBatch(rwTx)
+			require.NoError(t, err)
+			defer batch.Close()
+			require.NoError(t, batch.Delete(kv.MaxTxNum, []byte("absent")))
+			reader, err := batch.NewReadView(rwTx).Cursor(table)
+			require.NoError(t, err)
+			defer reader.Close()
+			_, got, err := reader.SeekExact(key)
+			require.NoError(t, err)
+			require.Equal(t, value, got)
+
+			switch operation {
+			case "delete":
+				require.NoError(t, batch.Delete(table, key))
+			case "clear":
+				require.NoError(t, batch.ClearTable(table))
+			case "delete duplicate":
+				writer, err := batch.RwCursorDupSort(table)
+				require.NoError(t, err)
+				defer writer.Close()
+				require.NoError(t, writer.DeleteExact(key, value))
+			}
+			_, got, err = reader.SeekExact(key)
+			require.NoError(t, err)
+			require.Nil(t, got)
+		})
+	}
+}
+
 // TestMemoryMutationConcurrentDeleteAndRead verifies that concurrent Delete
 // and OverlayReadView reads don't race.
 func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {

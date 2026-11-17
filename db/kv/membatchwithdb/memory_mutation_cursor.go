@@ -50,15 +50,29 @@ type memoryMutationCursor struct {
 	currentMemEntry cursorEntry
 	isPrevFromDb    bool
 	pureDupSort     bool
+	marked          bool
+}
+
+func (m *memoryMutationCursor) hasMarkers() bool {
+	if !m.marked {
+		_, m.marked = m.mutation.markedTables.Load(m.table)
+	}
+	return m.marked
 }
 
 func (m *memoryMutationCursor) isTableCleared() bool {
+	if !m.hasMarkers() {
+		return false
+	}
 	m.mutation.mu.RLock()
 	defer m.mutation.mu.RUnlock()
 	return m.mutation.isTableCleared(m.table)
 }
 
 func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte) bool {
+	if !m.hasMarkers() {
+		return false
+	}
 	m.mutation.mu.RLock()
 	defer m.mutation.mu.RUnlock()
 	if m.pureDupSort {

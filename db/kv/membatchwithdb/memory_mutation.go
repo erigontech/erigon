@@ -47,7 +47,9 @@ type DomainReader interface {
 type MemoryMutation struct {
 	// mu protects deletion markers and changes to the backing transaction.
 	// Read views share it, but each reader needs its own cursor and backing transaction.
-	mu               *sync.RWMutex
+	mu *sync.RWMutex
+	// Shared by read views; tables are added before their first marker and never removed.
+	markedTables     *sync.Map
 	memTx            kv.RwTx
 	memDb            kv.RwDB
 	deletedEntries   map[string]map[string]struct{}
@@ -75,6 +77,7 @@ func NewMemoryBatch(tx kv.TemporalTx) (*MemoryMutation, error) {
 
 	return &MemoryMutation{
 		mu:             &sync.RWMutex{},
+		markedTables:   &sync.Map{},
 		readTx:         tx,
 		db:             tx,
 		memDb:          memDB,
@@ -101,6 +104,7 @@ func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm 
 	}
 	return &MemoryMutation{
 		mu:             &sync.RWMutex{},
+		markedTables:   &sync.Map{},
 		readTx:         tx,
 		db:             tx,
 		memDb:          tmpDB,
@@ -605,6 +609,7 @@ func (m *MemoryMutation) Delete(table string, k []byte) error {
 	defer m.mu.Unlock()
 	t, ok := m.deletedEntries[table]
 	if !ok {
+		m.markedTables.Store(table, struct{}{})
 		t = make(map[string]struct{})
 		m.deletedEntries[table] = t
 	}
@@ -617,6 +622,7 @@ func (m *MemoryMutation) deleteDup(table string, k, v []byte) {
 	defer m.mu.Unlock()
 	t, ok := m.deletedDups[table]
 	if !ok {
+		m.markedTables.Store(table, struct{}{})
 		t = map[string]map[string]struct{}{}
 		m.deletedDups[table] = t
 	}
@@ -690,7 +696,10 @@ func (m *MemoryMutation) ListTables() ([]string, error) {
 func (m *MemoryMutation) ClearTable(bucket string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.clearedTables[bucket] = struct{}{}
+	if !m.isTableCleared(bucket) {
+		m.markedTables.Store(bucket, struct{}{})
+		m.clearedTables[bucket] = struct{}{}
+	}
 	return m.memTx.ClearTable(bucket)
 }
 
@@ -1190,6 +1199,7 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 	}
 	return &MemoryMutation{
 		mu:             m.mu, // share parent's mutex for synchronization
+		markedTables:   m.markedTables,
 		memTx:          m.memTx,
 		memDb:          nil, // caller doesn't own the memDb
 		deletedEntries: m.deletedEntries,
