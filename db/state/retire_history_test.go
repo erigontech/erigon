@@ -150,6 +150,39 @@ func TestRetire_StaleViewReportsOnlyDetachedFiles(t *testing.T) {
 	}
 }
 
+// A Retire through an older view whose aged files a merge already replaced
+// still retires the dirty files up to that view's boundary.
+func TestRetire_StaleViewRetiresMergedReplacement(t *testing.T) {
+	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
+	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+	generate := func(ranges []testFileRange) {
+		generateAccountsFile(t, agg.Dirs(), ranges)
+		generateCodeFile(t, agg.Dirs(), ranges)
+		generateStorageFile(t, agg.Dirs(), ranges)
+	}
+	generate([]testFileRange{{0, 2}, {2, 4}, {4, 5}})
+	require.NoError(t, agg.OpenFolder(db))
+
+	stale := agg.BeginFilesRo()
+	defer stale.Close()
+	generate([]testFileRange{{0, 4}})
+	require.NoError(t, agg.OpenFolder(db))
+	agg.cleanAfterMerge(nil)
+
+	_, err := stale.Retire(kv.RetireCutoffs{Default: 4 * stepSize})
+	require.NoError(t, err)
+
+	accountsHist := agg.d[kv.AccountsDomain].History
+	for _, dirty := range []*DirtyFiles{accountsHist.dirtyFiles, accountsHist.InvertedIndex.dirtyFiles} {
+		var starts []uint64
+		dirty.Scan(func(item *FilesItem) bool {
+			starts = append(starts, item.startTxNum/stepSize)
+			return true
+		})
+		require.Equal(t, []uint64{4}, starts)
+	}
+}
+
 // TestEntirelyBeforeStep_BoundaryStraddlingFileKept is a direct unit test of
 // entirelyBeforeStep's selection predicate: a file whose range straddles the
 // cutoff must never be selected.
@@ -176,6 +209,7 @@ func enableCommitmentHistory(agg *Aggregator) {
 // TestRetire_RetiresCommitmentAtOwnCutoff pins commitment retirement
 // at its own cutoff, independent of Default (0 here).
 func TestRetire_RetiresCommitmentAtOwnCutoff(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -203,6 +237,7 @@ func TestRetire_RetiresCommitmentAtOwnCutoff(t *testing.T) {
 // per-domain cutoff of 0 keeps the domain even when Default would cover it (how
 // commitment keep-all and the RCacheDomain skip are expressed).
 func TestRetire_KeepsDomainWhenCutoffZero(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -398,6 +433,7 @@ func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 }
 
 func TestRetire_DetachesCoveredSourcesWithCoveringFile(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, unindexed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("unindexed=%v", unindexed), func(t *testing.T) {
 			db, agg := testDbAndAggregatorSmallFrozen(t, 10, 2)
@@ -437,6 +473,7 @@ func TestRetire_DetachesCoveredSourcesWithCoveringFile(t *testing.T) {
 }
 
 func TestRetire_DetachesHiddenOutputCoveredByRetiredSources(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorSmallFrozen(t, 10, 2)
 	ranges := []testFileRange{{0, 1}, {1, 2}, {0, 2}, {2, 3}}
 	generateStateFiles(t, agg.Dirs(), ranges)
@@ -457,6 +494,7 @@ func TestRetire_DetachesHiddenOutputCoveredByRetiredSources(t *testing.T) {
 }
 
 func TestRetire_PreservesTailBelowHiddenCoveringFile(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, tc := range []struct {
 		name      string
 		tailEnd   uint64

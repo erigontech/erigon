@@ -23,6 +23,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"math"
 	"math/big"
 	"sort"
@@ -45,10 +46,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -67,6 +68,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider"
@@ -233,10 +235,10 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	require.Equal(t, uint64(1), extendingNum)
 	var inMemBlockNum, inMemTxNum uint64
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		v, _, err := extendingSd.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+		v, _, err := extendingSd.GetLatest(kv.CommitmentDomain, tx, commitmenttest.StateKey())
 		require.NoError(t, err)
-		inMemTxNum = binary.BigEndian.Uint64(v[:8])
-		inMemBlockNum = binary.BigEndian.Uint64(v[8:16])
+		inMemTxNum, inMemBlockNum, _, err = commitmenttest.DecodeState(v)
+		require.NoError(t, err)
 		return nil
 	})
 	require.NoError(t, err)
@@ -861,10 +863,11 @@ func truncateTxNumsBelowCommitment(t *testing.T, m *execmoduletester.ExecModuleT
 	// "too deep" and the pre-fix code rejects the FCU as ReorgTooDeep.
 	var commitBlock uint64
 	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmenttest.StateKey(), kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(v), 16)
-		commitBlock = binary.BigEndian.Uint64(v[8:16])
+		_, commitBlock, _, err = commitmenttest.DecodeState(v)
+		require.NoError(t, err)
 		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
 		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
 		if !keepChangesets {
@@ -926,10 +929,11 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 	const truncateTo uint64 = 5
 	var commitBlock uint64
 	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmenttest.StateKey(), kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(v), 16)
-		commitBlock = binary.BigEndian.Uint64(v[8:16])
+		_, commitBlock, _, err = commitmenttest.DecodeState(v)
+		require.NoError(t, err)
 		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
 		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
 		require.NoError(t, tx.ClearTable(kv.ChangeSets3))
@@ -4393,11 +4397,23 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 // real count) so a silent degrade-to-incremental can't make the differential pass
 // trivially.
 func TestBALDrivenComputeAheadChangesetIntegrity(t *testing.T) {
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(v3))
+			testBALDrivenComputeAheadChangesetIntegrity(t, v3)
+		})
+	}
+}
+
+func testBALDrivenComputeAheadChangesetIntegrity(t *testing.T, v3 bool) {
 	off := runBALComputeAheadChangeset(t, false, false)
 	on := runBALComputeAheadChangeset(t, true, false)
 
 	require.Zero(t, off.computedAhead, "compute-ahead-off must not compute any block ahead")
 	require.Positive(t, on.computedAhead, "compute-ahead-on must actually compute the pre-window blocks ahead (else the differential is vacuous)")
+	if v3 {
+		require.Equal(t, on.blocks, on.computedAhead, "with v3 the window blocks must fold ahead too")
+	}
 	// Compare the SET OF KEYS each window block's commitment changeset touched,
 	// not the raw diff bytes: per-block compute-ahead and a merged batch transition
 	// legitimately encode the same branches differently (step references), so
@@ -4551,6 +4567,7 @@ type balComputeAheadResult struct {
 	// across modes to catch compute-ahead misrouting deltas into the wrong block.
 	windowCommitmentKeys map[uint64][]string
 	computedAhead        int64
+	blocks               int64
 }
 
 func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balComputeAheadResult {
@@ -4631,6 +4648,7 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 	res := balComputeAheadResult{
 		windowCommitmentKeys: map[uint64][]string{},
 		computedAhead:        stagedsync.ComputedAheadCountForTest(),
+		blocks:               chainLen,
 	}
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		// Confirm blocks carry BALs (checked on the tip, which is inside the

@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -103,6 +104,13 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 	inputTxNum = min
 
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
+}
+
+func storageFanOutMin(initialCycle bool) int {
+	if initialCycle {
+		return 1024
+	}
+	return 128
 }
 
 func shouldWaitForReadAhead(isValidatingBlocks bool) bool {
@@ -206,7 +214,6 @@ func ExecV3(ctx context.Context,
 	// panic on the dropped sequential-buffer keys.
 	if !cfg.discardCommitment {
 		doms.EnableParaTrieDB(cfg.db)
-		doms.EnableTrieWarmup(true)
 		doms.SetDeferCommitmentUpdates(false)
 		// Deferred commitment updates batch commitment to block boundaries rather than
 		// per-transaction, cutting re-org validation overhead.
@@ -214,6 +221,7 @@ func ExecV3(ctx context.Context,
 			doms.SetDeferCommitmentUpdates(true)
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
+		doms.SetStorageFanOutMin(storageFanOutMin(initialCycle))
 	}
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
 		cfg.readAheader.WaitForRunningWarmup(ctx)
@@ -506,6 +514,21 @@ func warmTxsHashes(block *types.Block, chainID *uint256.Int) {
 		}
 	}
 	_ = block.Hash()
+}
+
+// reportExecutionPath skips genesis, which is never executed.
+func (te *txExecutor) reportExecutionPath(number uint64, hash common.Hash, path, reason string, accessList bool) {
+	report := te.cfg.syncCfg.ExecutionPathReporter
+	if report == nil || number == 0 {
+		return
+	}
+	report(ethconfig.BlockExecutionPath{
+		Number:     number,
+		Hash:       hash,
+		Path:       path,
+		Reason:     reason,
+		AccessList: accessList,
+	})
 }
 
 func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64) (types.BlockAccessList, error) {

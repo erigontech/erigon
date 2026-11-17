@@ -224,11 +224,11 @@ func WitnessNodesForKeysFromNodes(nodes, hexKeys [][]byte) ([][]byte, error) {
 		byHash[string(h[:])] = n
 	}
 	rootHash := crypto.Keccak256Hash(nodes[0])
-	return WitnessNodesForKeysByHash(byHash, rootHash[:], hexKeys)
+	return WitnessNodesForKeysByHash(byHash, rootHash[:], hexKeys, true)
 }
 
 // WitnessNodesForKeysByHash is WitnessNodesForKeysFromNodes over nodes already indexed by their hash.
-func WitnessNodesForKeysByHash(byHash map[string][]byte, root []byte, hexKeys [][]byte) ([][]byte, error) {
+func WitnessNodesForKeysByHash(byHash map[string][]byte, root []byte, hexKeys [][]byte, produceExclusionProofs bool) ([][]byte, error) {
 	if len(byHash) == 0 {
 		return nil, nil
 	}
@@ -311,15 +311,21 @@ func WitnessNodesForKeysByHash(byHash map[string][]byte, root []byte, hexKeys []
 				if terminating {
 					nKey = nKey[:len(nKey)-1]
 				}
+				if !produceExclusionProofs && bytes.Equal(nKey, k) {
+					node = nil
+					break
+				}
 				if len(k) < len(nKey) || !bytes.Equal(nKey, k[:len(nKey)]) {
-					behind, behindRLP, err := resolve(n.Val)
-					if err != nil {
-						return nil, err
-					}
-					switch behind.(type) {
-					case *FullNode, *ShortNode:
-						if err := emit(behind, behindRLP); err != nil {
+					if produceExclusionProofs {
+						behind, behindRLP, err := resolve(n.Val)
+						if err != nil {
 							return nil, err
+						}
+						switch behind.(type) {
+						case *FullNode, *ShortNode:
+							if err := emit(behind, behindRLP); err != nil {
+								return nil, err
+							}
 						}
 					}
 					node = nil

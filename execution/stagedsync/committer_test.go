@@ -110,6 +110,10 @@ func TestShouldComputeOnRequest_BlockZeroAfterAdvance(t *testing.T) {
 		"stale block 0 result while we've already computed block 5 — skip")
 }
 
+func TestAsOfStateReaderDoesNotOwnBranchesByDefault(t *testing.T) {
+	require.False(t, (&asOfStateReader{}).OwnsBranches())
+}
+
 // TestHandleBlockRequest_EmptyBALFallsToIncremental pins the empty-BAL gate.
 // A genuine empty BAL (0xc0) decodes to a non-nil empty slice, so a nil check
 // alone selects BAL-driven mode and computes zero changes → parent root →
@@ -164,9 +168,9 @@ func TestContiguityGuard_ChainNeverRecovers(t *testing.T) {
 		firstBlockNum: 5,
 		perBlockFrom:  1 << 62,
 		// Block 5 computed ahead, block 6 had no BAL and never advanced the domain.
-		hasComputedAhead:       true,
-		lastComputedAheadBlock: 5,
-		hasSeenBlockResult:     true,
+		hasComputed:        true,
+		lastComputedBlock:  5,
+		hasSeenBlockResult: true,
 	}
 
 	for n := uint64(7); n <= 12; n++ {
@@ -178,7 +182,7 @@ func TestContiguityGuard_ChainNeverRecovers(t *testing.T) {
 		cc.maybeComputeAhead(ctx, n)
 		assert.False(t, cc.computedAhead[n], "block %d must not compute ahead across the gap at block 6", n)
 	}
-	assert.Equal(t, uint64(5), cc.lastComputedAheadBlock, "the chain must stay anchored at block 5")
+	assert.Equal(t, uint64(5), cc.lastComputedBlock, "the chain must stay anchored at block 5")
 }
 
 // TestComputeAheadCap_StopsComputeAhead pins the orphan guard: once the shared
