@@ -551,7 +551,9 @@ Response
 
 Traces a call to `eth_sendRawTransaction` without making the call, returning the traces.
 
-The transaction runs on the latest state, with the block environment of the latest block. It is validated as it would be for inclusion in a block: the signature and chain ID, a nonce equal to the sender's nonce (too low and too high are both rejected), the balance for the value and the gas, the intrinsic gas, the fees, the sender-code rule of EIP-3607 (with the EIP-7702 delegation exception) and the gas limit cap of EIP-7825. A transaction that fails validation returns an error; a valid transaction that reverts or halts returns its trace. The sender pays for the gas.
+The transaction runs on the latest state, with the block environment of the latest block. It is validated as it would be for inclusion in a block. For ordinary transactions this includes the signature and chain ID, a nonce equal to the sender's nonce (too low and too high are both rejected), the balance for the value and the gas, the intrinsic gas, the fees, the sender-code rule of EIP-3607 (with the EIP-7702 delegation exception) and the gas limit cap of EIP-7825. The sender pays for the gas.
+
+Frame transactions use their own approval, nonce and gas-budget rules. Gas is charged to the approved payer, which can differ from the sender. For either transaction type, a validation failure returns an error; a valid transaction that reverts or halts returns its trace.
 
 #### Parameters
 

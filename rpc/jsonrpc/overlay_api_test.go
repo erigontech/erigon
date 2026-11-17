@@ -327,9 +327,8 @@ func newOverlayGetLogsSingleLogSetup(t *testing.T) (overlayGetLogsTestSetup, fil
 	return setup, filters.FilterCriteria{FromBlock: setup.blockNumber, ToBlock: setup.blockNumber, Addresses: []common.Address{target}}
 }
 
-func TestOverlayGetLogsIgnoresRPCGasCap(t *testing.T) {
+func TestOverlayGetLogsWithoutOverridesIgnoresRPCGasCap(t *testing.T) {
 	setup, crit := newOverlayGetLogsSingleLogSetup(t)
-	balance := (*hexutil.U256)(uint256.NewInt(1))
 	for _, tc := range []struct {
 		name      string
 		gasCap    uint64
@@ -339,18 +338,6 @@ func TestOverlayGetLogsIgnoresRPCGasCap(t *testing.T) {
 		{name: "at declared limit", gasCap: 100_000},
 		{name: "unlimited", gasCap: 0},
 		{name: "empty overrides", gasCap: 99_999, overrides: &ethapi.StateOverrides{}},
-		{
-			name: "state override below declared limit", gasCap: 99_999,
-			overrides: &ethapi.StateOverrides{accounts.InternAddress(crit.Addresses[0]): {Balance: &balance}},
-		},
-		{
-			name: "state override at declared limit", gasCap: 100_000,
-			overrides: &ethapi.StateOverrides{accounts.InternAddress(crit.Addresses[0]): {Balance: &balance}},
-		},
-		{
-			name:      "unlimited with state override",
-			overrides: &ethapi.StateOverrides{accounts.InternAddress(crit.Addresses[0]): {Balance: &balance}},
-		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setup.api.GasCap = tc.gasCap
@@ -361,7 +348,7 @@ func TestOverlayGetLogsIgnoresRPCGasCap(t *testing.T) {
 	}
 }
 
-func TestOverlayGetLogsOverridesPreserveFees(t *testing.T) {
+func TestOverlayGetLogsOverridesSkipOrdinaryFees(t *testing.T) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.AmsterdamTime, cfg.BogotaTime = nil, nil
 	key, err := crypto.GenerateKey()
@@ -393,8 +380,8 @@ func TestOverlayGetLogsOverridesPreserveFees(t *testing.T) {
 		logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: blockNumber, ToBlock: blockNumber}, &overrides, nil)
 		require.NoError(t, err, "gas cap %d", cap)
 		require.Len(t, logs, 3)
-		for i, receipt := range pack.Receipts[0] {
-			require.Equal(t, receipt.Logs[0].Data, logs[i].Data, "gas cap %d, transaction %d", cap, i)
+		for i, log := range logs {
+			require.Equal(t, uint256.NewInt(1_000_000_000_000_000_000), new(uint256.Int).SetBytes(log.Data), "gas cap %d, transaction %d", cap, i)
 		}
 	}
 }
@@ -438,10 +425,113 @@ func TestOverlayGetLogsOverrideExecutionGasCap(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, logs, 1)
 			gasLeft := new(uint256.Int).SetBytes(logs[0].Data).Uint64()
-			require.Less(t, gasLeft, params.MaxTxnGasLimit)
-			require.Equal(t, pack.Receipts[0][0].Logs[0].Data, logs[0].Data)
+			if tc.overrides == nil {
+				require.Less(t, gasLeft, params.MaxTxnGasLimit)
+				require.Equal(t, pack.Receipts[0][0].Logs[0].Data, logs[0].Data)
+			} else {
+				msg := new(types.Message)
+				msg.ChangeGas(tc.gasCap, tc.gasCap)
+				intrinsic := params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780
+				require.Equal(t, msg.Gas()-intrinsic-vm.GasQuickStep, gasLeft)
+			}
 		})
 	}
+}
+
+func TestOverlayGetLogsOverrideNeedsMoreGas(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		bogota bool
+	}{
+		{name: "before Bogota"},
+		{name: "Bogota", bogota: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := chain.AllProtocolChanges.Copy()
+			if !tc.bogota {
+				cfg.AmsterdamTime, cfg.BogotaTime = nil, nil
+			}
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			sender, target := crypto.PubkeyToAddress(key.PublicKey), common.HexToAddress("0x2000")
+			oneLog := program.New().Push0().Push0().Op(vm.LOG0, vm.STOP).Bytes()
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+				Alloc: types.GenesisAlloc{
+					sender: {Balance: big.NewInt(1_000_000_000)},
+					target: {Code: oneLog},
+				},
+			}), execmoduletester.WithKey(key))
+			generate := func(gas uint64) (*blockgen.ChainPack, error) {
+				return m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+					txn, err := types.SignTx(types.NewTransaction(0, target, new(uint256.Int), gas, uint256.NewInt(2), nil), *types.LatestSigner(cfg), key)
+					require.NoError(t, err)
+					b.AddTx(txn)
+				})
+			}
+			probe, err := generate(100_000)
+			require.NoError(t, err)
+			pack, err := generate(probe.Receipts[0][0].GasUsed + 100)
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(pack))
+			require.Len(t, pack.Receipts[0][0].Logs, 1)
+			base := newBaseApiForTest(m)
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: rpccfg.DefaultGasCap}, NewOtterscanAPI(base, m.DB, 25))
+			code := hexutil.Bytes(program.New().Push0().Push0().Op(vm.LOG0).Push0().Push0().Op(vm.LOG0, vm.STOP).Bytes())
+			overrides := ethapi.StateOverrides{accounts.InternAddress(target): {Code: &code}}
+			logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)}, &overrides, nil)
+			require.NoError(t, err)
+			require.Len(t, logs, 2)
+		})
+	}
+}
+
+func TestOverlayGetLogsOverrideRemovesFunding(t *testing.T) {
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.AmsterdamTime, cfg.BogotaTime = nil, nil
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	spendingKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender, recipient := crypto.PubkeyToAddress(key.PublicKey), crypto.PubkeyToAddress(spendingKey.PublicKey)
+	forwarder, target := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			sender: {Balance: big.NewInt(1_000_000_000)},
+			forwarder: {Code: program.New().Push0().Push0().Push0().Push0().Op(vm.CALLVALUE).
+				Push(recipient).Op(vm.GAS, vm.CALL, vm.POP, vm.STOP).Bytes()},
+			target: {Code: program.New().Push0().Push0().Op(vm.LOG0, vm.STOP).Bytes()},
+		},
+	}), execmoduletester.WithKey(key))
+	signer := types.LatestSigner(cfg)
+	pack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		if i == 0 {
+			txn, err := types.SignTx(types.NewTransaction(0, target, new(uint256.Int), 60_000, uint256.NewInt(2), nil), *signer, key)
+			require.NoError(t, err)
+			b.AddTx(txn)
+			return
+		}
+		fund, err := types.SignTx(types.NewTransaction(1, forwarder, uint256.NewInt(1_000_000), 100_000, uint256.NewInt(2), nil), *signer, key)
+		require.NoError(t, err)
+		b.AddTx(fund)
+		spend, err := types.SignTx(types.NewTransaction(0, target, new(uint256.Int), 60_000, uint256.NewInt(2), nil), *signer, spendingKey)
+		require.NoError(t, err)
+		b.AddTx(spend)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: rpccfg.DefaultGasCap}, NewOtterscanAPI(base, m.DB, 25))
+	criteria := filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(2)}
+	canonical, err := api.GetLogs(m.Ctx, criteria, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, canonical, 2)
+	code := hexutil.Bytes{byte(vm.STOP)}
+	overrides := ethapi.StateOverrides{accounts.InternAddress(forwarder): {Code: &code}}
+	logs, err := api.GetLogs(m.Ctx, criteria, &overrides, nil)
+	require.NoError(t, err)
+	require.Len(t, logs, 2)
 }
 
 func TestOverlayGetLogsReturnsBlockReplayError(t *testing.T) {

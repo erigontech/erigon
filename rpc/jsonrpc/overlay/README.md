@@ -42,7 +42,9 @@ It has the same interface as `eth_getLogs` but it also accepts state overrides a
 We can pass the creation bytecode from the call to `overlay_callConstructor` along to `overlay_getLogs` as state overrides.
 The passed block range for the filter defines the initial block range that needs to be replayed with the given state overrides.
 Once all blocks are replayed, the logs are returned to the caller.
-Replay keeps the original gas budgets and normal fee accounting for every transaction type. State overrides do not increase those budgets. The RPC gas cap does not apply to log replay.
+Without state overrides, replay keeps the original gas budgets and normal fee accounting. With state overrides, blocks containing only ordinary transactions use the RPC gas allowance and skip gas-fee debits, so replacement code can use more gas and changes to funding do not stop replay.
+
+If a block contains a frame transaction, every transaction in that block keeps its original gas budgets and normal fee accounting, even with overrides. Frame assertions can observe the fee effects of earlier transactions. An override that leaves a payer underfunded therefore returns an error; code that exceeds its original budget runs out of gas. The RPC gas cap does not apply to these blocks or to replay without overrides.
 
 Example request:
 ```json
