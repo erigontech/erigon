@@ -86,6 +86,30 @@ func TestNotifyDataColumnStoredIsNilSafe(t *testing.T) {
 	emitter.NotifyDataColumnStored(common.Hash{1})
 }
 
+func TestNotifyDataColumnStoredAlsoWakesPendingEnvelopeRetry(t *testing.T) {
+	emitter := NewEventEmitter()
+	roots := []common.Hash{{1}, {2}}
+	for _, root := range roots {
+		emitter.NotifyDataColumnStored(root)
+	}
+
+	for _, want := range roots {
+		select {
+		case got := <-emitter.DataColumnStored():
+			require.Equal(t, want, got)
+		default:
+			t.Fatal("the block service lost a notification")
+		}
+	}
+	require.Len(t, emitter.PendingEnvelopeRetryWake(), 1, "a burst leaves one wake")
+}
+
+func TestPendingEnvelopeRetryWakeIsNilSafe(t *testing.T) {
+	var emitter *EventEmitter
+	require.Nil(t, emitter.PendingEnvelopeRetryWake())
+	emitter.WakePendingEnvelopeRetry()
+}
+
 func TestNotifyEnvelopeArrivedDoesNotBlockWhenFull(t *testing.T) {
 	emitter := NewEventEmitter()
 	for range envelopeArrivedBufferSize {
