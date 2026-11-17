@@ -69,11 +69,10 @@ func engineTestCmd(_ context.Context, ctx *cli.Command) error {
 	}
 
 	reportPath := runnerExecutionPathReporter(ctx)
-	files, err := collectArgFiles(ctx)
+	files, err := collectArgFiles(ctx, filter)
 	if err != nil {
 		return exitIncomplete(err)
 	}
-	files = filter.filterFiles(files)
 	var incomplete incompleteRun
 	results := incomplete.run(files, workers, func(fname string) ([]testResult, error) {
 		return runEngineTest(ctx, fname, filter, reportPath)

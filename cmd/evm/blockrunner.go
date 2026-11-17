@@ -81,11 +81,11 @@ func blockTestCmd(_ context.Context, ctx *cli.Command) error {
 	reportPath := runnerExecutionPathReporter(ctx)
 	var incomplete incompleteRun
 	if ctx.Args().Present() {
-		files, err := collectArgFiles(ctx)
+		files, err := collectArgFiles(ctx, filter)
 		if err != nil {
 			return exitIncomplete(err)
 		}
-		results := incomplete.run(filter.filterFiles(files), workers, func(path string) ([]testResult, error) {
+		results := incomplete.run(files, workers, func(path string) ([]testResult, error) {
 			return runBlockTest(ctx, path, filter, reportPath)
 		})
 		report(ctx, results)
@@ -239,9 +239,9 @@ func exitIncomplete(err error) error {
 	return cli.Exit("", exitIncompleteRun)
 }
 
-// collectArgFiles returns the fixture files under every path argument, or an
-// error for a path that cannot be read.
-func collectArgFiles(ctx *cli.Command) ([]string, error) {
+// collectArgFiles returns the fixture files under every path argument that
+// filter includes, or an error for one that cannot be read.
+func collectArgFiles(ctx *cli.Command, filter testFilter) ([]string, error) {
 	files := make([]string, 0, ctx.Args().Len())
 	for _, path := range ctx.Args().Slice() {
 		found, err := collectFiles(path)
@@ -250,6 +250,7 @@ func collectArgFiles(ctx *cli.Command) ([]string, error) {
 		}
 		files = append(files, found...)
 	}
+	files = filter.filterFiles(files)
 	for _, path := range files {
 		f, err := os.Open(path)
 		if err != nil {

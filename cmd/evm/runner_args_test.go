@@ -315,3 +315,37 @@ func TestCollectFilesKeepsTheGivenPath(t *testing.T) {
 		require.False(t, strings.HasPrefix(rel, ".."), files[0])
 	}
 }
+
+// A file that --exclude drops is never opened, so an unreadable one does not
+// stop the run.
+func TestRunnersSkipAnExcludedUnreadableFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("too slow for testing.Short")
+	}
+	for _, tc := range []struct {
+		command string
+		fixture string
+	}{
+		{"blocktest", "../../execution/tests/testdata/delivered_access_list/valid.json"},
+		{"enginetest", "../../execution/tests/testdata/engine/bal_cross_block_ripemd160_state_leak.json"},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			dir := t.TempDir()
+			data, err := os.ReadFile(tc.fixture)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "fixture.json"), data, 0o644))
+			require.NoError(t, os.Symlink(filepath.Join(dir, "missing"), filepath.Join(dir, "broken.json")))
+
+			tt := cmdtest.NewTestCmd(t, nil)
+			tt.Run("evm-test", tc.command, "--jsonout", "--exclude", "broken", dir)
+			stdout := tt.Output()
+			tt.WaitExit()
+			require.Equal(t, 0, tt.ExitStatus(), tt.StderrText())
+
+			var results []testResult
+			require.NoError(t, json.Unmarshal(stdout, &results))
+			require.Len(t, results, 1)
+			require.True(t, results[0].Pass, results[0].Error)
+		})
+	}
+}
