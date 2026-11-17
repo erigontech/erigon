@@ -84,18 +84,6 @@ func NewE2SnapSchemaVersion(dataVer, accessorVer version.Versions) E2SnapSchemaV
 
 var _ SnapNameSchema = (*E2SnapSchema)(nil)
 
-func NewE2SnapSchema(dirs datadir.Dirs, dataFileTag string, currentVersion E2SnapSchemaVersion) *E2SnapSchema {
-	return NewE2SnapSchemaWithStep(dirs, dataFileTag, []string{dataFileTag}, 1000, currentVersion)
-}
-
-func NewE2SnapSchemaWithIndexTag(dirs datadir.Dirs, dataFileTag string, indexFileTags []string, currentVersion E2SnapSchemaVersion) *E2SnapSchema {
-	return NewE2SnapSchemaWithStep(dirs, dataFileTag, indexFileTags, 1000, currentVersion)
-}
-
-func NewE2SnapSchemaWithStep(dirs datadir.Dirs, dataFileTag string, indexFileTags []string, stepSize uint64, currentVersion E2SnapSchemaVersion) *E2SnapSchema {
-	return NewE2SnapSchemaWithStepAndDir(dirs.Snap, dataFileTag, indexFileTags, stepSize, currentVersion)
-}
-
 func NewE2SnapSchemaWithStepAndDir(dir string, dataFileTag string, indexFileTags []string, stepSize uint64, currentVersion E2SnapSchemaVersion) *E2SnapSchema {
 	return &E2SnapSchema{
 		stepSize:       stepSize,
