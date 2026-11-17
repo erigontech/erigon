@@ -12,6 +12,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -134,7 +135,7 @@ func TestSetUpBlockReaderRebuildsMissedAccessor(t *testing.T) {
 	accessors, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.0-1.bt"))
 	require.NoError(t, err)
 	require.Len(t, accessors, 1)
-	require.NoError(t, os.Remove(accessors[0]))
+	require.NoError(t, dir.RemoveFile(accessors[0]))
 
 	chainDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	require.NoError(t, chainDB.Update(t.Context(), func(tx kv.RwTx) error {

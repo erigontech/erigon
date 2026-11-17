@@ -28,6 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -527,7 +528,7 @@ func TestDownloadAndIndexSnapshotsRebuildsMissedAccessorBeforeSavingHashes(t *te
 	accessors, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.0-1.bt"))
 	require.NoError(t, err)
 	require.Len(t, accessors, 1)
-	require.NoError(t, os.Remove(accessors[0]))
+	require.NoError(t, dir.RemoveFile(accessors[0]))
 
 	db := temporaltest.NewTestDB(t, dirs)
 	notADir := filepath.Join(t.TempDir(), "file")
