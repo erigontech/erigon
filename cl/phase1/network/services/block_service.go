@@ -57,6 +57,19 @@ var publishedBlockJobSequence atomic.Uint64
 
 const maxConcurrentBlockValidationContexts = 4
 
+// AcceptedBlockWriteError is a failed write of a block that fork choice already accepted.
+type AcceptedBlockWriteError struct {
+	Err error
+}
+
+func (e *AcceptedBlockWriteError) Error() string {
+	return fmt.Sprintf("%s: %v", errBlockStorage, e.Err)
+}
+
+func (e *AcceptedBlockWriteError) Unwrap() error { return e.Err }
+
+func (e *AcceptedBlockWriteError) Is(target error) bool { return target == errBlockStorage }
+
 type proposerIndexAndSlot struct {
 	proposerIndex uint64
 	slot          uint64

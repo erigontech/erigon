@@ -1482,6 +1482,33 @@ func TestPublishedBlockJobIsNotDowngradedByBlockOnlyRecovery(t *testing.T) {
 	require.NoError(t, handle.Wait(t.Context()))
 }
 
+func TestPublishedBlockAcceptedWriteFailureBacksOff(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	service := &blockService{forkchoiceStore: mock_services.NewForkChoiceStorageMock(t)}
+	errDiskFull := errors.New("disk full")
+	var failure error = &AcceptedBlockWriteError{Err: errDiskFull}
+	calls := 0
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		calls++
+		return failure
+	})
+	job := serviceJob(t, service, root)
+
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+	require.ErrorIs(t, job.lastAttempt.err, errDiskFull)
+	require.Equal(t, blockRetryInitialDelay, job.retryDelay)
+	require.True(t, job.storageErrorLogged)
+	service.processScheduledBlock(t.Context(), root, job, job.retryAfter.Add(-time.Nanosecond))
+	require.Equal(t, 1, calls, "no retry before the backoff ends")
+
+	failure = nil
+	service.processScheduledBlock(t.Context(), root, job, job.retryAfter)
+	require.Equal(t, 2, calls)
+	require.NoError(t, handle.Wait(t.Context()))
+}
+
 func TestOlderPublishedBlockJobDoesNotReplaceNewerFullStore(t *testing.T) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	root, err := block.Block.HashSSZ()

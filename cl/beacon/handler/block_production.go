@@ -3229,7 +3229,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	markServable()
 	// Columns are chosen after OnBlock, which can raise the custody group count.
 	if err := a.storeDataColumnSidecars(ctx, block.Block.Slot, blockRoot, columnSidecars); err != nil {
-		return fmt.Errorf("%w: %w", errPublishedBlockDataStorage, err)
+		return &clservices.AcceptedBlockWriteError{Err: fmt.Errorf("%w: %w", errPublishedBlockDataStorage, err)}
 	}
 
 	headRoot, headSlot, headState, err := a.selectedHeadState(blockRoot)

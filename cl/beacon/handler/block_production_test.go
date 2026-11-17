@@ -3083,7 +3083,10 @@ func TestBroadcastBlockColumnWriteFailureKeepsImportedBlockAndRetries(t *testing
 				return write()
 			}
 
-			require.ErrorIs(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip), errPublishedBlockDataStorage)
+			err := f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip)
+			require.ErrorIs(t, err, errPublishedBlockDataStorage)
+			var writeErr *clservices.AcceptedBlockWriteError
+			require.ErrorAs(t, err, &writeErr, "the block service must back off the retry of a failed column write")
 
 			indexed, err := f.blockIndexed()
 			require.NoError(t, err)
