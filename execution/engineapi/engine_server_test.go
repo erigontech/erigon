@@ -1325,11 +1325,10 @@ func TestQuickStatusHeaderLookup(t *testing.T) {
 		name       string
 		newPayload bool
 		number     uint64
-		forkchoice *engine_types.ForkChoiceState
 		wantNumber *uint64
 	}{
 		{name: "newPayload", newPayload: true, number: payloadNumber, wantNumber: &payloadNumber},
-		{name: "forkchoiceUpdated", forkchoice: &engine_types.ForkChoiceState{HeadHash: blockHash}},
+		{name: "forkchoiceUpdated"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -1354,7 +1353,7 @@ func TestQuickStatusHeaderLookup(t *testing.T) {
 			if test.newPayload {
 				knownParent = parent
 			}
-			_, err := srv.getQuickPayloadStatusIfPossible(ctx, blockHash, test.number, parentHash, knownParent, test.forkchoice, test.newPayload, defaultReadinessWait)
+			_, err := srv.getQuickPayloadStatusIfPossible(ctx, blockHash, test.number, parentHash, knownParent, test.newPayload, defaultReadinessWait)
 			require.NoError(t, err)
 			require.Equal(t, 1, lookups)
 		})

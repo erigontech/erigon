@@ -1426,12 +1426,12 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 			log.New(),
 			preCancunChainConfig(),
 			&stubExecutionModule{
-				getForkChoiceFunc: func(_ context.Context) (execmodule.ForkChoiceState, error) {
-					return execmodule.ForkChoiceState{
-						HeadHash:      forkchoiceState.HeadHash,
-						SafeHash:      forkchoiceState.SafeBlockHash,
-						FinalizedHash: forkchoiceState.FinalizedBlockHash,
-					}, nil
+				getHeaderFunc: getHeaderReturning(forkchoiceState.HeadHash, makeParentHeader(1000)),
+				headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+					return common.NewUint64(1), nil
+				},
+				updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+					return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: forkchoiceState.HeadHash}, nil
 				},
 			},
 			nil,
@@ -1445,6 +1445,7 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 			0,
 		)
 
+		srv.blockDownloader = engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), srv.executionService, nil, nil, srv.config, ethconfig.Sync{}, nil)
 		resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
 			Timestamp:             hexutil.Uint64(1001),
 			PrevRandao:            common.Hash{0xaa},
@@ -1468,12 +1469,12 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 			log.New(),
 			preShanghaiChainConfig(),
 			&stubExecutionModule{
-				getForkChoiceFunc: func(_ context.Context) (execmodule.ForkChoiceState, error) {
-					return execmodule.ForkChoiceState{
-						HeadHash:      forkchoiceState.HeadHash,
-						SafeHash:      forkchoiceState.SafeBlockHash,
-						FinalizedHash: forkchoiceState.FinalizedBlockHash,
-					}, nil
+				getHeaderFunc: getHeaderReturning(forkchoiceState.HeadHash, makeParentHeader(1000)),
+				headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+					return common.NewUint64(1), nil
+				},
+				updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+					return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: forkchoiceState.HeadHash}, nil
 				},
 			},
 			nil,
@@ -1487,6 +1488,7 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 			0,
 		)
 
+		srv.blockDownloader = engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), srv.executionService, nil, nil, srv.config, ethconfig.Sync{}, nil)
 		resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
 			Timestamp:             hexutil.Uint64(1001),
 			PrevRandao:            common.Hash{0xaa},
@@ -1613,12 +1615,12 @@ func TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid(t *testing.T) {
 		log.New(),
 		preAmsterdamChainConfig(), // V3 is the correct FCU version pre-Amsterdam
 		&stubExecutionModule{
-			getForkChoiceFunc: func(_ context.Context) (execmodule.ForkChoiceState, error) {
-				return execmodule.ForkChoiceState{
-					HeadHash:      forkchoiceState.HeadHash,
-					SafeHash:      forkchoiceState.SafeBlockHash,
-					FinalizedHash: forkchoiceState.FinalizedBlockHash,
-				}, nil
+			getHeaderFunc: getHeaderReturning(forkchoiceState.HeadHash, makeParentHeader(1000)),
+			headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+				return common.NewUint64(1), nil
+			},
+			updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+				return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: forkchoiceState.HeadHash}, nil
 			},
 		},
 		nil,
@@ -1632,6 +1634,7 @@ func TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid(t *testing.T) {
 		0,
 	)
 
+	srv.blockDownloader = engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), srv.executionService, nil, nil, srv.config, ethconfig.Sync{}, nil)
 	resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(1001),
 		PrevRandao:            common.Hash{0xaa},
