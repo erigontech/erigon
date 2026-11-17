@@ -374,7 +374,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasDeferredBudgetIsNotSpentOnSeenOrVa
 	t.importBlock(otherBlockRoot, createMockGloasBlock(testSlot))
 	t.importBlock(goneBlockRoot, createMockGloasBlock(testSlot))
 	service.forkChoice = &blockVanishesBetweenLookups{ForkChoiceStorage: t.mockForkChoice, root: goneBlockRoot}
-	service.seenGloasSidecar.Add(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 0}, struct{}{})
+	service.seenGloas.claim(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 0})
 
 	const spoilers = 2 * maxPendingGloasVerificationsPerPass
 	for i := range spoilers {
@@ -452,7 +452,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasDeferredDoesNotBanForIgnoreOrLocal
 	delete(t.mockForkChoice.Headers, testBlockRoot)
 	seen := deferredCandidate(0, testBlockRoot, 1, false)
 	t.admit(service, peerN(1), seen)
-	service.seenGloasSidecar.Add(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 0}, struct{}{})
+	service.seenGloas.claim(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 0})
 	missingBid := deferredCandidate(1, testBlockRoot, 2, false)
 	t.admit(service, peerN(2), missingBid)
 	unimportable := deferredCandidate(2, otherBlockRoot, 3, false)

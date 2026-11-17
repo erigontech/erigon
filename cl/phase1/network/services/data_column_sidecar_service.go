@@ -102,7 +102,7 @@ type dataColumnSidecarService struct {
 	forkChoice           forkchoice.ForkChoiceStorage
 	syncDataManager      synced_data.SyncedData
 	seenSidecar          *lru.Cache[seenSidecarKey, struct{}]
-	seenGloasSidecar     *lru.Cache[seenGloasSidecarKey, struct{}] // [New in Gloas:EIP7732]
+	seenGloas            *seenGloasSidecars
 	columnSidecarStorage blob_storage.DataColumnStorage
 	emitters             *beaconevents.EventEmitter
 	gossipManager        gossipmgr.Gossip
@@ -133,6 +133,47 @@ type seenGloasSidecarKey struct {
 	index           uint64
 }
 
+// seenGloasSidecars marks Gloas sidecar keys as seen. A release removes a mark only while its token is still current.
+type seenGloasSidecars struct {
+	mu    sync.Mutex
+	cache *lru.Cache[seenGloasSidecarKey, uint64]
+	next  uint64
+}
+
+func newSeenGloasSidecars(metricName string, size int) *seenGloasSidecars {
+	cache, err := lru.New[seenGloasSidecarKey, uint64](metricName, size)
+	if err != nil {
+		panic(err)
+	}
+	return &seenGloasSidecars{cache: cache}
+}
+
+func (s *seenGloasSidecars) contains(k seenGloasSidecarKey) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.cache.Get(k)
+	return ok
+}
+
+// claim marks k as seen unless it is. It returns a function that removes the mark it took.
+func (s *seenGloasSidecars) claim(k seenGloasSidecarKey) (release func(), claimed bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cache.Contains(k) {
+		return nil, false
+	}
+	s.next++
+	token := s.next
+	s.cache.Add(k, token)
+	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if current, ok := s.cache.Peek(k); ok && current == token {
+			s.cache.Remove(k)
+		}
+	}, true
+}
+
 func NewDataColumnSidecarService(
 	ctx context.Context,
 	cfg *clparams.BeaconChainConfig,
@@ -148,17 +189,13 @@ func NewDataColumnSidecarService(
 	if err != nil {
 		panic(err)
 	}
-	seenGloasSidecar, err := lru.New[seenGloasSidecarKey, struct{}]("seenGloasDataColumnSidecar", int(size))
-	if err != nil {
-		panic(err)
-	}
 	s := &dataColumnSidecarService{
 		cfg:                  cfg,
 		ethClock:             ethClock,
 		forkChoice:           forkChoice,
 		syncDataManager:      syncDataManager,
 		seenSidecar:          seenSidecar,
-		seenGloasSidecar:     seenGloasSidecar,
+		seenGloas:            newSeenGloasSidecars("seenGloasDataColumnSidecar", int(size)),
 		columnSidecarStorage: columnSidecarStorage,
 		emitters:             emitters,
 		gossipManager:        gossipManager,
@@ -408,34 +445,46 @@ func (s *dataColumnSidecarService) shouldStore(slot uint64, blockRoot common.Has
 // PublishColumns marks each sidecar of one block as seen and publishes it on its subnet, unless the sidecar was seen
 // already. The sidecars must be on subnets this node subscribes to.
 func (s *dataColumnSidecarService) PublishColumns(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
+	s.ClaimColumns(sidecars)(ctx)
+}
+
+// ClaimColumns marks the unseen sidecars of one block as seen. The returned function publishes the claimed ones and
+// releases the mark of each one it fails to publish.
+func (s *dataColumnSidecarService) ClaimColumns(sidecars []*cltypes.DataColumnSidecar) (publish func(context.Context)) {
 	if len(sidecars) == 0 {
-		return
+		return func(context.Context) {}
 	}
 	// The block may have waited for its parent, the EL or recovery while finality moved on; peers would ignore
 	// or reject its Fulu columns then.
 	slot, ok := s.afterFinality(sidecars[0])
 	if !ok {
 		log.Debug("[dataColumnSidecarService] not publishing local columns below finality", "slot", slot)
-		return
+		return func(context.Context) {}
 	}
 	forkDigest, err := s.ethClock.ComputeForkDigest(slot / s.cfg.SlotsPerEpoch)
 	if err != nil {
 		log.Warn("[dataColumnSidecarService] failed to compute the fork digest of local columns", "slot", slot, "err", err)
-		return
+		return func(context.Context) {}
 	}
+	var claimed []*cltypes.DataColumnSidecar
+	var releases []func()
 	for _, sidecar := range sidecars {
-		release, claimed := s.claimSeen(sidecar)
-		if !claimed {
-			continue
+		if release, ok := s.claimSeen(sidecar); ok {
+			claimed = append(claimed, sidecar)
+			releases = append(releases, release)
 		}
-		encoded, err := sidecar.EncodeSSZ(nil)
-		if err == nil {
-			err = s.gossipManager.PublishToForkDigest(ctx, forkDigest, gossip.TopicNameDataColumnSidecar(computeSubnetForDataColumnSidecar(sidecar.Index)), encoded)
-		}
-		if err != nil {
-			// Unclaimed, a copy from gossip is still processed and relayed.
-			release()
-			log.Debug("[dataColumnSidecarService] failed to publish a local column", "slot", slot, "index", sidecar.Index, "err", err)
+	}
+	return func(ctx context.Context) {
+		for i, sidecar := range claimed {
+			encoded, err := sidecar.EncodeSSZ(nil)
+			if err == nil {
+				err = s.gossipManager.PublishToForkDigest(ctx, forkDigest, gossip.TopicNameDataColumnSidecar(computeSubnetForDataColumnSidecar(sidecar.Index)), encoded)
+			}
+			if err != nil {
+				// Unclaimed, a copy from gossip is still processed and relayed.
+				releases[i]()
+				log.Debug("[dataColumnSidecarService] failed to publish a local column", "slot", slot, "index", sidecar.Index, "err", err)
+			}
 		}
 	}
 }
@@ -463,8 +512,7 @@ func (s *dataColumnSidecarService) afterFinality(sidecar *cltypes.DataColumnSide
 func (s *dataColumnSidecarService) claimSeen(sidecar *cltypes.DataColumnSidecar) (release func(), claimed bool) {
 	if sidecar.Version() >= clparams.GloasVersion {
 		key := seenGloasSidecarKey{beaconBlockRoot: sidecar.BeaconBlockRoot, index: sidecar.Index}
-		seen, _ := s.seenGloasSidecar.ContainsOrAdd(key, struct{}{})
-		return func() { s.seenGloasSidecar.Remove(key) }, !seen
+		return s.seenGloas.claim(key)
 	}
 	header := sidecar.SignedBlockHeader.Header
 	key := seenSidecarKey{slot: header.Slot, proposerIndex: header.ProposerIndex, index: sidecar.Index}
@@ -487,7 +535,7 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	}
 
 	// [IGNORE] The sidecar is the first sidecar for the tuple (sidecar.beacon_block_root, sidecar.index)
-	if _, ok := s.seenGloasSidecar.Get(seenKey); ok {
+	if s.seenGloas.contains(seenKey) {
 		return ErrIgnore
 	}
 
@@ -556,18 +604,26 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return fmt.Errorf("%w: invalid kzg proofs for data column sidecar", errInvalidGloasSidecar)
 	}
 
+	// Another writer may have claimed the key during validation.
+	release, claimed := s.seenGloas.claim(seenKey)
+	if !claimed {
+		return ErrIgnore
+	}
 	if !store {
-		if seen, _ := s.seenGloasSidecar.ContainsOrAdd(seenKey, struct{}{}); seen {
-			return ErrIgnore
-		}
 		msg.BlockRoot = blockRoot
 		s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(msg))
 		return nil
 	}
+	written := false
+	defer func() {
+		if !written {
+			release()
+		}
+	}()
 	if err := s.columnSidecarStorage.WriteColumnSidecars(ctx, blockRoot, int64(msg.Index), msg); err != nil {
 		return fmt.Errorf("%w: failed to write data column sidecar: %w", ErrIgnore, err)
 	}
-	s.seenGloasSidecar.Add(seenKey, struct{}{})
+	written = true
 
 	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(slot, blockRoot); err != nil {
 		log.Warn("failed to schedule recover", "err", err, "slot", slot, "blockRoot", blockRoot.String())
