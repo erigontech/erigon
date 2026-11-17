@@ -42,8 +42,9 @@ func entirelyBeforeStep(files visibleFiles, stepSize uint64, cutoff kv.Step) (ou
 	return outs
 }
 
-// agedFiles is one entity's dirty files selected for retirement, carried from the lock-free
-// selection pass to the locked detach pass.
+// agedFiles is one entity's aged visible files, carried from the lock-free selection pass to the
+// locked detach pass. They only set the boundary: the detach pass retires every dirty file that
+// ends at or before the last of them.
 type agedFiles struct {
 	dirtyFiles   *DirtyFiles
 	filenameBase string
@@ -61,7 +62,8 @@ func (ht *HistoryRoTx) filesBeforeStep(cutoff kv.Step) []agedFiles {
 	return []agedFiles{ht.iit.filesBeforeStep(cutoff), {ht.h.dirtyFiles, ht.h.FilenameBase, entirelyBeforeStep(ht.files, ht.stepSize, cutoff)}}
 }
 
-// Retire drops History+InvertedIndex files below their per-domain cutoff, dirty ones too.
+// Retire drops the dirty history/index prefix ending at the last aged visible file.
+// Physical deletion waits until readers release the retired generation.
 func (at *AggregatorRoTx) Retire(cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
 	if dbg.NoRetire() || cutoffs.IsNoop() {
 		return 0, nil
