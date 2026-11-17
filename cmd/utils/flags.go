@@ -58,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -1184,6 +1185,11 @@ var (
 		Value:  true,
 		Hidden: true,
 	}
+	ExperimentalCommitmentV3Flag = cli.BoolFlag{
+		Name:  "experimental.commitment-v3",
+		Usage: "Compute commitment on the v3 trie.",
+		Value: statecfg.DefaultCommitmentV3,
+	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
 		Usage: "restart erigon under gdb for debug purposes",
@@ -1985,6 +1991,16 @@ func warnParallelCommitmentDeprecated(ctx *cli.Command, logger log.Logger) {
 	}
 }
 
+func setCommitmentV3(ctx *cli.Command) {
+	if ctx.IsSet(ExperimentalCommitmentV3Flag.Name) {
+		if ctx.Bool(ExperimentalCommitmentV3Flag.Name) {
+			statecfg.SetCommitmentV3(true)
+		} else if statecfg.ExperimentalCommitmentV3 {
+			Fatalf("--%s=false conflicts with ERIGON_COMMITMENT_V3=true", ExperimentalCommitmentV3Flag.Name)
+		}
+	}
+}
+
 // RpcGasCap reads the rpc.gascap flag; the accessor must match its registered UintFlag type.
 func RpcGasCap(ctx *cli.Command) uint64 {
 	return uint64(ctx.Uint(RpcGasCapFlag.Name))
@@ -2086,6 +2102,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	warnParallelCommitmentDeprecated(ctx, logger)
+	setCommitmentV3(ctx)
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)

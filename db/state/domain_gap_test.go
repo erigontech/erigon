@@ -33,7 +33,7 @@ import (
 )
 
 func TestCheckFilesDBGapChecksHistory(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, path := range []string{
 		"history/v1.0-accounts.2-3.v",
 		"idx/v1.0-accounts.2-3.ef",
