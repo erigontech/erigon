@@ -19,6 +19,7 @@ package state
 import (
 	"fmt"
 	"math/big"
+	"math/rand"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -190,4 +191,80 @@ func TestBlockAccessListBuilderReplaysEmptyCodeHashReadOfReadOnlyAccount(t *test
 	bal := b.Build()
 	require.Len(t, bal, 1)
 	require.Empty(t, bal[0].CodeChanges)
+}
+
+// TestBlockAccessListBuilderReadOnlyPathMatchesFullState runs random read and write
+// sequences through the builder twice: once as it is, once with a full state for every
+// account from the start. Both must build the same list and give the same match results.
+func TestBlockAccessListBuilderReadOnlyPathMatchesFullState(t *testing.T) {
+	addrs := make([]accounts.Address, 4)
+	for i := range addrs {
+		addrs[i] = accounts.InternAddress(common.Address{19: byte(i + 1)})
+	}
+	keys := []accounts.StorageKey{accounts.InternKey(common.Hash{31: 1}), accounts.InternKey(common.Hash{31: 2})}
+	codeHashes := []accounts.CodeHash{accounts.EmptyCodeHash, accounts.InternCodeHash(common.Hash{31: 0x60})}
+	type tx struct {
+		rs ReadSet
+		ws *WriteSet
+	}
+	for seed := range int64(2000) {
+		rng := rand.New(rand.NewSource(seed))
+		txs := make([]tx, 1+rng.Intn(5))
+		for i := range txs {
+			txs[i].ws = &WriteSet{}
+			version := Version{TxIndex: i - 1}
+			for range 1 + rng.Intn(6) {
+				addr, key := addrs[rng.Intn(len(addrs))], keys[rng.Intn(len(keys))]
+				val := *uint256.NewInt(uint64(rng.Intn(3)))
+				header := func(path AccountPath) WriteHeader {
+					return WriteHeader{Address: addr, Key: key, Version: version, Path: path}
+				}
+				switch rng.Intn(8) {
+				case 0:
+					txs[i].rs.SetBalance(addr, VersionedRead[uint256.Int]{Val: val})
+				case 1:
+					txs[i].rs.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{Val: codeHashes[rng.Intn(len(codeHashes))]})
+				case 2:
+					txs[i].rs.SetNonce(addr, VersionedRead[uint64]{Val: uint64(rng.Intn(2))})
+				case 3:
+					txs[i].rs.SetStorage(addr, key, VersionedRead[uint256.Int]{Val: val})
+				case 4:
+					txs[i].ws.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: header(BalancePath), Val: val})
+				case 5:
+					txs[i].ws.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: header(NoncePath), Val: uint64(rng.Intn(2))})
+				case 6:
+					txs[i].ws.SetStorage(addr, key, &VersionedWrite[uint256.Int]{WriteHeader: header(StoragePath), Val: val})
+				case 7:
+					code := accounts.NewCode([]byte{0x60}[:rng.Intn(2)])
+					txs[i].ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: header(CodePath), Val: code})
+				}
+			}
+		}
+		var touched []accounts.Address
+		build := func(fullState bool) *BlockAccessListBuilder {
+			b := NewBlockAccessListBuilder()
+			if fullState {
+				for _, a := range touched {
+					b.state(a)
+				}
+			}
+			for i, tx := range txs {
+				b.Add(i-1, tx.rs, tx.ws)
+			}
+			return b
+		}
+		got := build(false).Build()
+		for _, a := range got {
+			touched = append(touched, accounts.InternAddress(a.Address))
+		}
+		want := build(true).Build()
+		require.Equal(t, want, got, "seed %d", seed)
+		perturbed := want.Copy()
+		if len(perturbed) > 0 {
+			perturbed[rng.Intn(len(perturbed))].BalanceChanges = []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(9)}}
+		}
+		for _, bal := range []types.BlockAccessList{want, perturbed} {
+			require.Equal(t, build(true).Matches(bal), build(false).Matches(bal), "seed %d", seed)
+		}
+	}
 }
