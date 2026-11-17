@@ -441,7 +441,12 @@ jobs:
           consumer_ref=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].consumer_ref // empty' erigon-full/test-fixtures.json)
           if [ '${{ matrix.sim }}' = consume-wirex ]; then
             consumer_ref=$(jq -r .wirex_consumer_ref erigon-full/.github/workflows/hive-versions.json)
-            sed -i 's|^FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim$|FROM ghcr.io/astral-sh/uv:0.13.8-python3.12-trixie-slim|' hive/simulators/ethereum/eels/consume-wirex/Dockerfile.git
+            dockerfile=hive/simulators/ethereum/eels/consume-wirex/Dockerfile.git
+            if ! grep -qx 'FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim' "$dockerfile"; then
+              echo "ERROR: consume-wirex Dockerfile base image changed; update the uv image override" >&2
+              exit 1
+            fi
+            sed -i 's|^FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim$|FROM ghcr.io/astral-sh/uv:0.13.8-python3.12-trixie-slim|' "$dockerfile"
           fi
           if [ -n "$consumer_ref" ]; then
             # Consumer fixes require a source build independent of the fixture release.
