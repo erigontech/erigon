@@ -1417,6 +1417,21 @@ func TestTestingBlockNonceValidation(t *testing.T) {
 	}
 }
 
+func newValidForkchoiceServer(t *testing.T, cfg *chain.Config, head common.Hash) *EngineServer {
+	t.Helper()
+	module := &stubExecutionModule{
+		getHeaderFunc: getHeaderReturning(head, makeParentHeader(1000)),
+		headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+			return common.NewUint64(1), nil
+		},
+		updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+			return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: head}, nil
+		},
+	}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), module, nil, nil, cfg, ethconfig.Sync{}, nil)
+	return NewEngineServer(log.New(), cfg, module, downloader, false, false, false, true, nil, nil, 0, 0)
+}
+
 func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T) {
 	t.Parallel()
 
@@ -1426,30 +1441,7 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 			SafeBlockHash:      common.Hash{0x2},
 			FinalizedBlockHash: common.Hash{0x3},
 		}
-		srv := NewEngineServer(
-			log.New(),
-			preCancunChainConfig(),
-			&stubExecutionModule{
-				getHeaderFunc: getHeaderReturning(forkchoiceState.HeadHash, makeParentHeader(1000)),
-				headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
-					return common.NewUint64(1), nil
-				},
-				updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
-					return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: forkchoiceState.HeadHash}, nil
-				},
-			},
-			nil,
-			false,
-			false,
-			false,
-			true,
-			nil,
-			nil,
-			0,
-			0,
-		)
-
-		srv.blockDownloader = engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), srv.executionService, nil, nil, srv.config, ethconfig.Sync{}, nil)
+		srv := newValidForkchoiceServer(t, preCancunChainConfig(), forkchoiceState.HeadHash)
 		resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
 			Timestamp:             hexutil.Uint64(1001),
 			PrevRandao:            common.Hash{0xaa},
@@ -1469,30 +1461,7 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 			SafeBlockHash:      common.Hash{0x5},
 			FinalizedBlockHash: common.Hash{0x6},
 		}
-		srv := NewEngineServer(
-			log.New(),
-			preShanghaiChainConfig(),
-			&stubExecutionModule{
-				getHeaderFunc: getHeaderReturning(forkchoiceState.HeadHash, makeParentHeader(1000)),
-				headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
-					return common.NewUint64(1), nil
-				},
-				updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
-					return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: forkchoiceState.HeadHash}, nil
-				},
-			},
-			nil,
-			false,
-			false,
-			false,
-			true,
-			nil,
-			nil,
-			0,
-			0,
-		)
-
-		srv.blockDownloader = engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), srv.executionService, nil, nil, srv.config, ethconfig.Sync{}, nil)
+		srv := newValidForkchoiceServer(t, preShanghaiChainConfig(), forkchoiceState.HeadHash)
 		resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
 			Timestamp:             hexutil.Uint64(1001),
 			PrevRandao:            common.Hash{0xaa},
@@ -1615,30 +1584,7 @@ func TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid(t *testing.T) {
 		SafeBlockHash:      common.Hash{0x2},
 		FinalizedBlockHash: common.Hash{0x3},
 	}
-	srv := NewEngineServer(
-		log.New(),
-		preAmsterdamChainConfig(), // V3 is the correct FCU version pre-Amsterdam
-		&stubExecutionModule{
-			getHeaderFunc: getHeaderReturning(forkchoiceState.HeadHash, makeParentHeader(1000)),
-			headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
-				return common.NewUint64(1), nil
-			},
-			updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
-				return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: forkchoiceState.HeadHash}, nil
-			},
-		},
-		nil,
-		false,
-		false,
-		false,
-		true,
-		nil,
-		nil,
-		0,
-		0,
-	)
-
-	srv.blockDownloader = engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), srv.executionService, nil, nil, srv.config, ethconfig.Sync{}, nil)
+	srv := newValidForkchoiceServer(t, preAmsterdamChainConfig(), forkchoiceState.HeadHash)
 	resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(1001),
 		PrevRandao:            common.Hash{0xaa},
