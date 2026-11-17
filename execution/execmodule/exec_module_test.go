@@ -1369,6 +1369,46 @@ func TestInvalidInclusionListRecheckFailingAfterVerdictDropsValidatedMark(t *tes
 	t.Fatalf("ValidateChain was still cancelled after %d cancellation points", maxCancellationPoints)
 }
 
+func TestValidateChainAndViewOfSideForkWithNewInclusionList(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	canonical, err := m.GenerateChain(2, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	fork, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{2})
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonical.Blocks[:1]))
+	sideBlock := fork.TopBlock
+	insertAndValidate(t, m, sideBlock)
+	next := canonical.Blocks[1]
+	insertAndValidate(t, m, next)
+
+	il := types.Transactions{signedInclusionListTxn(t, m)}
+	sideBlock = sideBlock.WithInclusionList(il)
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{sideBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	var viewed bool
+	validation, view, err := m.ExecModule.ValidateChainAndView(t.Context(), sideBlock, time.Second, func(kv.TemporalTx, kv.TemporalGetter) error {
+		viewed = true
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	if view != nil {
+		require.NoError(t, view())
+	}
+	require.True(t, viewed, "a VALID side block must be viewed")
+	satisfied, err := m.ExecModule.InclusionListSatisfied(t.Context(), sideBlock.Hash(), sideBlock.NumberU64(), il)
+	require.NoError(t, err)
+	require.NotNil(t, satisfied)
+	extendingHash, _, _ := m.ForkValidator.ExtendingFork()
+	require.Equal(t, next.Hash(), extendingHash, "the recheck must keep the head-extending fork")
+}
+
 func TestInclusionListRecheckOfSideForkKeepsExtendingFork(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))

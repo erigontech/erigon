@@ -512,6 +512,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, block *types.Block) (Val
 		}, nil
 	}
 	defer e.semaphore.Release(1)
+	defer e.keepExtendingFork(block.Hash())()
 	return e.validateChain(ctx, block, false)
 }
 
@@ -541,6 +542,7 @@ func (e *ExecModule) ValidateChainAndView(ctx context.Context, block *types.Bloc
 	if committed, view, err := e.viewCommittedBlock(ctx, blockHash, block.NumberU64(), fn); err != nil || committed {
 		return valid, view, err
 	}
+	defer e.keepExtendingFork(blockHash)()
 	start := time.Now()
 	result, err := e.validateChain(ctx, block, true)
 	validateChainDuration.ObserveDuration(start)
@@ -558,6 +560,19 @@ func closeWithoutView(view *func() error, close func()) {
 	}
 }
 
+// keepExtendingFork moves the extending fork aside while a validated block is checked again for a new inclusion list,
+// and returns the function that puts it back. A view of the checked block must be taken before that function runs.
+func (e *ExecModule) keepExtendingFork(blockHash common.Hash) func() {
+	if !e.inclusionListPending(blockHash) || !e.forkValidator.IsValidated(blockHash) {
+		return func() {}
+	}
+	kept := e.forkValidator.detachExtendingFork(blockHash)
+	if kept == nil {
+		return func() {}
+	}
+	return func() { e.forkValidator.restoreExtendingFork(kept) }
+}
+
 // validateChain with revalidate executes again a non-canonical block that passed validation before, so the fork
 // validator holds its state.
 func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, revalidate bool) (ValidationResult, error) {
@@ -567,11 +582,6 @@ func (e *ExecModule) validateChain(ctx context.Context, block *types.Block, reva
 	}
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
-	if e.inclusionListPending(blockHash) && e.forkValidator.IsValidated(blockHash) {
-		if kept := e.forkValidator.detachExtendingFork(blockHash); kept != nil {
-			defer e.forkValidator.restoreExtendingFork(kept)
-		}
-	}
 	e.forkValidator.ClearWithUnwind()
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	header, body := block.HeaderNoCopy(), block.Body()
