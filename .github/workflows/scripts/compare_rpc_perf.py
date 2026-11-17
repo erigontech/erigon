@@ -8,6 +8,10 @@ p50, p95 and max latency of each client.
 p50, p90 and p95 are the median over the repetitions, max is the worst one.
 HTTP is the share of requests answered with HTTP 200, RPC the share of requests
 answered with a result and no JSON-RPC error; both are the worst over the repetitions.
+A QPS step that rpc_perf recorded with an error (the client died) is dead; every QPS step
+of a pattern that a client did not run because it was left out at a barrier is excluded;
+every QPS step of a client of ``--clients`` with no report at all (its job ended before
+uploading them) is lost.
 """
 import argparse
 import glob
@@ -22,12 +26,19 @@ RPC_TOLERANCE = 0.01
 
 def load_results(root):
     results = {}
+    excluded = []
     for path in sorted(glob.glob(os.path.join(root, "**", "*-result.json"), recursive=True)):
         with open(path, encoding="utf-8") as fh:
             report = json.load(fh)
         client = report["configuration"]["testingDaemon"]
         label = os.path.basename(path)[len(client) + 1:-len("-result.json")]
+        if report.get("excluded"):
+            excluded.append((label, client))
+            continue
         for step in report["results"]:
+            if step.get("error"):
+                results.setdefault(label, {}).setdefault(client, {})[step["qps"]] = {"failed": "dead", "error": step["error"]}
+                continue
             reps = [r["vegetaReport"] for r in step["testRepetitions"]]
             stats = results.setdefault(label, {}).setdefault(client, {})[step["qps"]] = {
                 "p50": statistics.median(r["latencies"]["50th"] for r in reps) / 1e6,
@@ -38,7 +49,24 @@ def load_results(root):
             }
             if all("90th" in r["latencies"] for r in reps):
                 stats["p90"] = statistics.median(r["latencies"]["90th"] for r in reps) / 1e6
+    for label, client in excluded:
+        steps = {q for c in results.get(label, {}).values() for q in c}
+        results.setdefault(label, {})[client] = {q: {"failed": "excluded"} for q in steps}
     return results
+
+
+def add_lost(results, clients):
+    """Mark every qps step of the clients with no report at all as lost, and return them."""
+    lost = [c for c in clients if not any(c in label for label in results.values())]
+    for label in results:
+        steps = {q for c in results[label].values() for q in c}
+        for client in lost:
+            results[label][client] = {q: {"failed": "lost"} for q in steps}
+    return lost
+
+
+def is_failed(step):
+    return step is not None and "failed" in step
 
 
 def client_rank(client):
@@ -51,9 +79,7 @@ def all_succeeded(step, best_rpc):
 
 
 def erigon_status(erigon, best, next_best, best_rpc, percentile):
-    if erigon is None:
-        return "⚪"
-    if not all_succeeded(erigon, best_rpc) or best is None:
+    if erigon is None or is_failed(erigon) or not all_succeeded(erigon, best_rpc) or best is None:
         return "🔴"
     if erigon[percentile] == best:
         return "🟢🟢" if next_best is not None and next_best >= best * STATUS_RATIO else "🟢"
@@ -63,6 +89,8 @@ def erigon_status(erigon, best, next_best, best_rpc, percentile):
 def latency_cell(step, best, best_rpc, percentile):
     if step is None:
         return "- "
+    if is_failed(step):
+        return step["failed"] + " "
     if not all_succeeded(step, best_rpc):
         return "err "
     return f"{step[percentile]:.2f}" + ("*" if step[percentile] == best else " ")
@@ -79,8 +107,9 @@ def render_overview(results, percentile):
     for label in sorted(results):
         for qps in sorted({q for c in results[label] for q in results[label][c]}, key=float):
             steps = {c: results[label][c].get(qps) for c in clients if c in results[label]}
-            best_rpc = max(s["rpc_success"] for s in steps.values() if s)
-            ok = {c: s[percentile] for c, s in steps.items() if s and all_succeeded(s, best_rpc)}
+            alive = {c: s for c, s in steps.items() if s and not is_failed(s)}
+            best_rpc = max((s["rpc_success"] for s in alive.values()), default=1)
+            ok = {c: s[percentile] for c, s in alive.items() if all_succeeded(s, best_rpc)}
             best = min(ok.values()) if ok else None
             next_best = min((v for c, v in ok.items() if c != "erigon"), default=None)
             cells = [latency_cell(steps.get(c), best, best_rpc, percentile) for c in clients]
@@ -94,9 +123,10 @@ def render_overview(results, percentile):
 
     lines = ["```",
              f"{percentile} latency in ms, lower is better. * fastest, - no result,",
-             "err HTTP errors or RPC errors > 1% above the best client.",
+             "err HTTP errors or RPC errors > 1% above the best client, dead the client died,",
+             "excluded left out at a barrier, lost no results from the client's job.",
              f"Erigon status on {percentile}, at the end of the row: 🟢🟢 fastest by >= 1.3x, 🟢 fastest,",
-             "🟡 < 1.3x the fastest, 🔴 >= 1.3x or errors, ⚪ no Erigon result.",
+             "🟡 < 1.3x the fastest, 🔴 >= 1.3x, errors or no Erigon result.",
              "",
              line(header)]
     lines += [f"{line(cells)} {status}" for status, cells in rows]
@@ -115,7 +145,10 @@ def render(results):
         for qps in steps:
             for client in clients:
                 s = results[label][client].get(qps)
-                if s:
+                if is_failed(s):
+                    detail = f"{s['failed']}: {s['error']}" if "error" in s else s["failed"]
+                    lines.append(f"| {qps} | {client} | {detail} | | | | |")
+                elif s:
                     lines.append(f"| {qps} | {client} | {s['p50']:.2f} | {s['p95']:.2f} | {s['max']:.2f} "
                                  f"| {s['success']:.2%} | {s['rpc_success']:.2%} |")
         lines += ["", "</details>", ""]
@@ -125,12 +158,16 @@ def render(results):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-dir", required=True)
+    parser.add_argument("--clients", default="", help="comma-separated clients of the run")
     args = parser.parse_args()
+    clients = [c for c in args.clients.split(",") if c]
     results = load_results(args.results_dir)
     print("## RPC Performance Comparison (latest block)\n")
+    for client in add_lost(results, clients):
+        print(f"⚠️ {client}: no results, its job ended before uploading them (e.g. the runner was lost).\n")
     steps = [s for clients in results.values() for qps in clients.values() for s in qps.values()]
     overviews = [render_overview(results, percentile) for percentile in ("p50", "p90", "p95", "max")
-                 if all(percentile in s for s in steps)]
+                 if all(percentile in s for s in steps if not is_failed(s))]
     print("\n".join(overviews + [render(results)]) if results else "No results found.")
     return 0
 

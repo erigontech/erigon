@@ -25,6 +25,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -58,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -1105,6 +1107,15 @@ var (
 		Usage: "sets whether caplin should immediately backfill blobs (4096 epochs)",
 		Value: false,
 	}
+	CaplinBlobsBackfillEndpointFlag = cli.StringSliceFlag{
+		Name:  "caplin.blobs-backfill-endpoint",
+		Usage: "beacon API endpoint that the blob backfill asks for a block's blobs before peers; repeat for fallback endpoints. Blobs are verified against the block before they are stored. Without --caplin.blobs-archive only the blob retention window is backfilled",
+	}
+	CaplinBlobsBackfillEndpointWorkersFlag = cli.IntFlag{
+		Name:  "caplin.blobs-backfill-endpoint-workers",
+		Usage: "number of KZG proofs the blob backfill computes at a time, one CPU each, for blobs from --caplin.blobs-backfill-endpoint whose proof the endpoint left out (up to twice as many blocks are fetched at a time; verifying them costs about 2% of computing proofs and is not limited). 0 picks a quarter of the CPUs the process may use (GOMAXPROCS, which follows a container's CPU limit), at least 1; set it to the CPUs the node can spare (lower keeps a validator node responsive, a dedicated archive node can use more)",
+		Value: 0,
+	}
 	CaplinDisableBlobPruningFlag = cli.BoolFlag{
 		Name:  "caplin.blobs-no-pruning",
 		Usage: "disable blob pruning in caplin",
@@ -1183,6 +1194,11 @@ var (
 		Usage:  "(DEPRECATED: No longer has any effect) Commitment always runs on the parallel trie.",
 		Value:  true,
 		Hidden: true,
+	}
+	ExperimentalCommitmentV3Flag = cli.BoolFlag{
+		Name:  "experimental.commitment-v3",
+		Usage: "Compute commitment on the v3 trie.",
+		Value: statecfg.DefaultCommitmentV3,
 	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
@@ -1915,6 +1931,14 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	}
 
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
+	for i, endpoint := range ctx.StringSlice(CaplinBlobsBackfillEndpointFlag.Name) {
+		if u, err := url.Parse(endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+			// The value is not echoed: it can carry an API key.
+			Fatalf("Option %s: value %d is not an http or https URL", CaplinBlobsBackfillEndpointFlag.Name, i+1)
+		}
+		cfg.CaplinConfig.BlobsBackfillEndpoints = append(cfg.CaplinConfig.BlobsBackfillEndpoints, endpoint)
+	}
+	cfg.CaplinConfig.BlobsBackfillEndpointWorkers = ctx.Int(CaplinBlobsBackfillEndpointWorkersFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	if cfg.CaplinConfig.SnapshotGenerationEnabled && cfg.CaplinConfig.BlobsArchiveFromSlot > 0 {
 		Fatalf("Option %s cannot be combined with %s: blob snapshots are built contiguously from Deneb", CaplinArchiveBlobsFromSlotFlag.Name, CaplinEnableSnapshotGeneration.Name)
@@ -1981,6 +2005,16 @@ func warnParallelCommitmentDeprecated(ctx *cli.Command, logger log.Logger) {
 	for _, name := range []string{"COMMITMENT_PARALLEL", dbg.ErigonEnvPrefix + "COMMITMENT_PARALLEL"} {
 		if _, ok := os.LookupEnv(name); ok {
 			logger.Warn("[DEPRECATED] " + name + " has no effect; commitment always runs on the parallel trie")
+		}
+	}
+}
+
+func setCommitmentV3(ctx *cli.Command) {
+	if ctx.IsSet(ExperimentalCommitmentV3Flag.Name) {
+		if ctx.Bool(ExperimentalCommitmentV3Flag.Name) {
+			statecfg.SetCommitmentV3(true)
+		} else if statecfg.ExperimentalCommitmentV3 {
+			Fatalf("--%s=false conflicts with ERIGON_COMMITMENT_V3=true", ExperimentalCommitmentV3Flag.Name)
 		}
 	}
 }
@@ -2086,6 +2120,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	warnParallelCommitmentDeprecated(ctx, logger)
+	setCommitmentV3(ctx)
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)

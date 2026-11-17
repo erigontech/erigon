@@ -97,9 +97,10 @@ type Aggregator struct {
 	visibilityLoweringForbidden atomic.Bool
 	snapshotBuildSema           *semaphore.Weighted
 
-	branchCacheDisabled bool
-	skipFilesDBGapCheck bool
-	workers             workersCfg
+	branchCacheDisabled            bool
+	skipFilesDBGapCheck            bool
+	buildsMissedAccessorsAfterOpen bool
+	workers                        workersCfg
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -299,7 +300,8 @@ func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v b
 func (a *Aggregator) referencesInCommitmentBranches() bool {
 	a.commitmentRefsMu.RLock()
 	defer a.commitmentRefsMu.RUnlock()
-	return a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches
+	d := a.d[kv.CommitmentDomain]
+	return d.ReferencesInCommitmentBranches && !d.CommitmentV3Records
 }
 
 // applyReferencesInCommitmentBranches stores the resolved flag pre-configure (ConfigureDomains
@@ -596,6 +598,9 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 	}(); err != nil {
 		return err
 	}
+	if a.buildsMissedAccessorsAfterOpen && a.hasAccessorsToBuild() {
+		return nil
+	}
 	return a.checkFilesDBGap(db)
 }
 
@@ -618,6 +623,14 @@ func (a *Aggregator) checkFilesDBGap(db kv.RoDB) error {
 		}
 		return nil
 	})
+}
+
+func (a *Aggregator) hasAccessorsToBuild() bool {
+	dirty := a.DebugBeginDirtyFilesRo()
+	defer dirty.Close()
+	missed := dirty.FilesWithMissedAccessors()
+	dirty.dropCovered(missed) // startup builds with kv.SkipCoveredAccessors
+	return !missed.IsEmpty()
 }
 
 func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
@@ -1006,6 +1019,9 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, db kv.RoDB, worke
 
 	if err := a.OpenFolder(db); err != nil {
 		return err
+	}
+	if a.hasAccessorsToBuild() { // an accessor that could not be built
+		return a.checkFilesDBGap(db)
 	}
 	return nil
 }
@@ -2717,10 +2733,21 @@ func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to [
 }
 
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
-	v, ok, err = at.d[name].GetAsOf(k, ts, tx)
-	if name == kv.CommitmentDomain && !ok {
-		v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
+	if name != kv.CommitmentDomain {
+		return at.d[name].GetAsOf(k, ts, tx)
 	}
+	if at.a.d[kv.CommitmentDomain].CommitmentV3Records {
+		v, ok, err = at.d[name].ht.HistorySeek(k, ts, tx)
+		if ok && len(v) == 0 {
+			return nil, false, err
+		}
+	} else {
+		v, ok, err = at.d[name].GetAsOf(k, ts, tx)
+	}
+	if err != nil || ok {
+		return v, ok, err
+	}
+	v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
 	return v, ok, err
 }
 

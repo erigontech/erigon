@@ -457,6 +457,7 @@ func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, 
 
 // RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
 func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, finalityCtx kv.FinalityContext, timeout time.Duration) error {
+	defer func() { s.currentStage = 0 }()
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
@@ -466,10 +467,6 @@ func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, fina
 			return err
 		}
 	}
-	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return err
-	}
-	s.currentStage = 0
 	return nil
 }
 
