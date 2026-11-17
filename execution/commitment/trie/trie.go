@@ -532,42 +532,6 @@ func (t *Trie) getNode(hex []byte) (Node, Node, bool, uint64) {
 	return nd, parent, true, incarnation
 }
 
-func (t *Trie) touchAll(n Node, hex []byte, del bool, incarnation uint64) {
-	switch n := n.(type) {
-	case *ShortNode:
-		if _, ok := n.Val.(ValueNode); !ok {
-			// Don't need to compute prefix for a leaf
-			h := n.Key
-			// Remove terminator
-			if h[len(h)-1] == 16 {
-				h = h[:len(h)-1]
-			}
-			hexVal := concat(hex, h...)
-			t.touchAll(n.Val, hexVal, del, incarnation)
-		}
-	case *DuoNode:
-		i1, i2 := n.childrenIdx()
-		hex1 := make([]byte, len(hex)+1)
-		copy(hex1, hex)
-		hex1[len(hex)] = i1
-		hex2 := make([]byte, len(hex)+1)
-		copy(hex2, hex)
-		hex2[len(hex)] = i2
-		t.touchAll(n.child1, hex1, del, incarnation)
-		t.touchAll(n.child2, hex2, del, incarnation)
-	case *FullNode:
-		for i, child := range n.Children {
-			if child != nil {
-				t.touchAll(child, concat(hex, byte(i)), del, incarnation)
-			}
-		}
-	case *AccountNode:
-		if n.Storage != nil {
-			t.touchAll(n.Storage, hex, del, n.Incarnation)
-		}
-	}
-}
-
 // Delete removes any existing value for key from the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Delete(key []byte) {
@@ -596,16 +560,13 @@ func (t *Trie) convertToShortNode(child Node, pos uint) Node {
 }
 
 func (t *Trie) delete(origNode Node, key []byte, preserveAccountNode bool) (updated bool, newNode Node) {
-	return t.deleteRecursive(origNode, key, 0, preserveAccountNode, 0)
+	return t.deleteRecursive(origNode, key, 0, preserveAccountNode)
 }
 
 // delete returns the new root of the trie with key deleted.
 // It reduces the trie to minimal form by simplifying
 // nodes on the way up after deleting recursively.
-//
-// can pass incarnation=0 if start from root, method internally will
-// put incarnation from accountNode when pass it by traverse
-func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserveAccountNode bool, incarnation uint64) (updated bool, newNode Node) {
+func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserveAccountNode bool) (updated bool, newNode Node) {
 	var nn Node
 	switch n := origNode.(type) {
 	case *ShortNode:
@@ -619,18 +580,13 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 
 			if removeNodeEntirely {
 				updated = true
-				touchKey := key[:keyStart+matchlen]
-				if touchKey[len(touchKey)-1] == 16 {
-					touchKey = touchKey[:len(touchKey)-1]
-				}
-				t.touchAll(n.Val, touchKey, true, incarnation)
 				newNode = nil
 			} else {
 				// The key is longer than n.Key. Remove the remaining suffix
 				// from the subtrie. Child can never be nil here since the
 				// subtrie must contain at least two other values with keys
 				// longer than n.Key.
-				updated, nn = t.deleteRecursive(n.Val, key, keyStart+matchlen, preserveAccountNode, incarnation)
+				updated, nn = t.deleteRecursive(n.Val, key, keyStart+matchlen, preserveAccountNode)
 				if !updated {
 					newNode = n
 				} else {
@@ -663,7 +619,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 		i1, i2 := n.childrenIdx()
 		switch key[keyStart] {
 		case i1:
-			updated, nn = t.deleteRecursive(n.child1, key, keyStart+1, preserveAccountNode, incarnation)
+			updated, nn = t.deleteRecursive(n.child1, key, keyStart+1, preserveAccountNode)
 			if !updated {
 				newNode = n
 			} else {
@@ -676,7 +632,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 				}
 			}
 		case i2:
-			updated, nn = t.deleteRecursive(n.child2, key, keyStart+1, preserveAccountNode, incarnation)
+			updated, nn = t.deleteRecursive(n.child2, key, keyStart+1, preserveAccountNode)
 			if !updated {
 				newNode = n
 			} else {
@@ -696,7 +652,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 
 	case *FullNode:
 		child := n.Children[key[keyStart]]
-		updated, nn = t.deleteRecursive(child, key, keyStart+1, preserveAccountNode, incarnation)
+		updated, nn = t.deleteRecursive(child, key, keyStart+1, preserveAccountNode)
 		if !updated {
 			newNode = n
 		} else {
@@ -759,14 +715,6 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 	case *AccountNode:
 		if keyStart >= len(key) || key[keyStart] == 16 {
 			// Key terminates here
-			h := key[:keyStart]
-			if h[len(h)-1] == 16 {
-				h = h[:len(h)-1]
-			}
-			if n.Storage != nil {
-				// Mark all the storage nodes as deleted
-				t.touchAll(n.Storage, h, true, n.Incarnation)
-			}
 			if preserveAccountNode {
 				n.Storage = nil
 				n.Code = nil
@@ -777,7 +725,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 
 			return true, nil
 		}
-		updated, nn = t.deleteRecursive(n.Storage, key, keyStart, preserveAccountNode, n.Incarnation)
+		updated, nn = t.deleteRecursive(n.Storage, key, keyStart, preserveAccountNode)
 		if updated {
 			n.Storage = nn
 			n.RootCorrect = false

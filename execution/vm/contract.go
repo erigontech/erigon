@@ -28,19 +28,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// AccountRef is a reference to an account address.
-//
-// Account references are used during EVM initialisation and
-// it's primary use is to fetch addresses. Removing this object
-// proves difficult because of the cached jump destinations which
-// are fetched from the parent contract (i.e. the caller).
-type AccountRef accounts.Address
-
-// Address casts AccountRef to a Address
-func (ar AccountRef) Address() accounts.Address { return accounts.Address(ar) }
-
 // Contract represents an ethereum contract in the state database. It contains
-// the contract code, calling arguments. Contract implements ContractRef
+// the contract code and calling arguments.
 type Contract struct {
 	// caller is the result of the caller which initialised this
 	// contract. However when the "call method" is delegated this value
@@ -69,7 +58,7 @@ func newJumpDestCache() *cache.GenericCache[bitvec] {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
+func NewContract(callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
 	return &Contract{
 		caller: callerAddress,
 		addr:   addr,

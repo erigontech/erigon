@@ -93,7 +93,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 	}
 
 	if dbg.AssertEnabled {
-		err = txnLookupIntegrity(logPrefix, tx, startBlock, endBlock, ctx, cfg, logger)
+		err = txnLookupIntegrity(logPrefix, tx, startBlock, endBlock, logger)
 		if err != nil {
 			return fmt.Errorf("txnLookupIntegrity: %w", err)
 		}
@@ -143,7 +143,7 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 }
 
 // txnLookupTransform - [startKey, endKey)
-func txnLookupIntegrity(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
+func txnLookupIntegrity(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, logger log.Logger) (err error) {
 	for i := blockFrom; i < blockTo; i++ {
 		var blockHeader *types.Header
 		blockHash, err := rawdb.ReadCanonicalHash(tx, i)
