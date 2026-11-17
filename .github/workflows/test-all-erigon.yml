@@ -26,6 +26,7 @@ jobs:
           - macos-15
           - windows-2025
         commitment_mode:
+          - v3
           - parallel
         include:
           # Windows GitHub-hosted runners run noticeably slower than Linux for
@@ -66,6 +67,7 @@ jobs:
           TEST_TIMEOUT: ${{ matrix.test_timeout || '20m' }}
           ERIGON_SKIP_EXECUTION_TESTS: ${{ matrix.skip_execution_tests || '' }}
           ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
+          ERIGON_COMMITMENT_V3: ${{ matrix.commitment_mode == 'v3' && 'true' || 'false' }}
         run: |
           if ! make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"; then
             # A failed test binary is a real result: a cold rerun only repeats it or hides a flake. A build failure,

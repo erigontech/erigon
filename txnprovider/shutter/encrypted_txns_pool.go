@@ -302,7 +302,7 @@ func (etp *EncryptedTxnsPool) fillSubmissionGap(ctx context.Context, last, new E
 
 func (etp *EncryptedTxnsPool) watchFirstBlockAfterInit(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
-	blockEventC := make(chan BlockEvent)
+	blockEventC := make(chan BlockEvent, 1)
 	unregister := etp.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
 		select {
 		case <-ctx.Done():

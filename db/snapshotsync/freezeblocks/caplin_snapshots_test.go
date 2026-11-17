@@ -1103,14 +1103,16 @@ func TestDumpBlobSidecarsRangeStopsWhenTheFrozenWordIsNotTheCanonicalBlock(t *te
 		name      string
 		word      []byte
 		canonical common.Hash
+		stored    bool
 		err       string
 	}{
-		{"canonical block missing from the beacon segment", nil, root, "blob storage count mismatch at slot 7: 0 != 2"},
-		{"frozen block not canonical at its slot", blockSnapshotWord(t, block), common.Hash{0xee}, "block at slot 7 is not canonical"},
-		{"frozen block of another slot", blockSnapshotWord(t, other), otherRoot, "blob storage count mismatch at slot 7: 0 != 2"},
-		{"frozen Gloas block of another slot, canonical by root", blockSnapshotWord(t, gloasOther), gloasOtherRoot, "block at slot 7 is not canonical"},
-		{"frozen blobless Deneb block not canonical at its slot", blockSnapshotWord(t, blobless), common.Hash{0xee}, "blob storage count mismatch at slot 7: 0 != 2"},
-		{"frozen Deneb word whose body lost its commitments", withBodyRoot(t, blockSnapshotWord(t, blobless), denebBodyRoot), denebRoot, "blob storage count mismatch at slot 7: 0 != 2"},
+		{"canonical block missing from the beacon segment", nil, root, true, "canonical block at slot 7 is missing"},
+		{"canonical block missing from the beacon segment without stored commitments", nil, root, false, "canonical block at slot 7 is missing"},
+		{"frozen block not canonical at its slot", blockSnapshotWord(t, block), common.Hash{0xee}, true, "block at slot 7 is not canonical"},
+		{"frozen block of another slot", blockSnapshotWord(t, other), otherRoot, true, "blob storage count mismatch at slot 7: 0 != 2"},
+		{"frozen Gloas block of another slot, canonical by root", blockSnapshotWord(t, gloasOther), gloasOtherRoot, true, "block at slot 7 is not canonical"},
+		{"frozen blobless Deneb block not canonical at its slot", blockSnapshotWord(t, blobless), common.Hash{0xee}, true, "blob storage count mismatch at slot 7: 0 != 2"},
+		{"frozen Deneb word whose body lost its commitments", withBodyRoot(t, blockSnapshotWord(t, blobless), denebBodyRoot), denebRoot, true, "blob storage count mismatch at slot 7: 0 != 2"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dirs := datadir.New(t.TempDir())
@@ -1133,11 +1135,18 @@ func TestDumpBlobSidecarsRangeStopsWhenTheFrozenWordIsNotTheCanonicalBlock(t *te
 				return beacon_indicies.MarkRootCanonical(tx, slot+1, childRoot)
 			}))
 			store := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
-			require.NoError(t, store.WriteBlobSidecars(t.Context(), tc.canonical, []*cltypes.BlobSidecar{blobSidecar(slot, 0), blobSidecar(slot, 1)}))
+			if tc.stored {
+				require.NoError(t, store.WriteBlobSidecars(t.Context(), tc.canonical, []*cltypes.BlobSidecar{blobSidecar(slot, 0), blobSidecar(slot, 1)}))
+			} else {
+				count, countErr := store.KzgCommitmentsCount(t.Context(), tc.canonical)
+				require.NoError(t, countErr)
+				require.Zero(t, count)
+			}
 
 			blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &cfg))
 			err := DumpBlobSidecarsRange(t.Context(), db, store, 0, snaptype.CaplinMergeLimit, 0, dirs, 1, blobCount, log.LvlDebug, log.New())
 			require.ErrorContains(t, err, tc.err)
+			require.NoFileExists(t, filepath.Join(dirs.Snap, snaptype.BlobSidecars.FileName(version.ZeroVersion, 0, snaptype.CaplinMergeLimit)))
 		})
 	}
 }
@@ -1264,4 +1273,51 @@ func TestBlobCountFromBlocksRejectsAPreGloasChildOfAGloasBlock(t *testing.T) {
 		})
 	})
 	require.ErrorContains(t, err, "block at slot 8: pre-Gloas block after a Gloas block")
+}
+
+func TestBlobCountFromBlocksRejectsMissingCanonicalChild(t *testing.T) {
+	const slot = 7
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 0
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	block.Block.Slot = slot
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0x01}
+	for range 2 {
+		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	}
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	child.Block.Slot = slot + 2
+	child.Block.ParentRoot = root
+	child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{0x02}
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+
+	dirs := datadir.New(t.TempDir())
+	writeCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, snaptype.CaplinMergeLimit, true, func(s uint64) []byte {
+		switch s {
+		case slot:
+			return blockSnapshotWord(t, block)
+		case slot + 2:
+			return blockSnapshotWord(t, child)
+		}
+		return nil
+	})
+	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
+	t.Cleanup(sn.Close)
+	require.NoError(t, sn.OpenFolder())
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot+1, common.Hash{0xaa}))
+		return beacon_indicies.MarkRootCanonical(tx, slot+2, childRoot)
+	}))
+
+	blobCount := BlobCountFromBlocks(t.Context(), sn, NewBeaconSnapshotReader(sn, nil, &cfg))
+	err = db.View(t.Context(), func(tx kv.Tx) error {
+		_, _, countErr := blobCount(tx, slot)
+		return countErr
+	})
+	require.ErrorContains(t, err, "canonical block at slot 8 is missing")
 }

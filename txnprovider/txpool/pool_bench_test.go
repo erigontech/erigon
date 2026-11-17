@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync"
 	"testing"
@@ -60,6 +61,35 @@ func BenchmarkCountContent(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
 				pool.CountContent()
+			}
+		})
+	}
+}
+
+func BenchmarkRejectRemoteTxns(b *testing.B) {
+	for _, reason := range []string{"duplicate", "byte budget"} {
+		b.Run(reason, func(b *testing.B) {
+			pool := &TxPool{
+				lock:                    new(sync.Mutex),
+				unprocessedRemoteTxns:   &TxnSlots{},
+				unprocessedRemoteByHash: make(map[string]*TxnSlot),
+			}
+			var packet TxnSlots
+			sender := common.Address{1}
+			for i := range 256 {
+				txn := newTestTxnSlot(uint64(i), 0, 1, 2, 21_000)
+				txn.Rlp, txn.Size = make([]byte, 512), 512
+				binary.BigEndian.PutUint64(txn.IDHash[24:], uint64(i))
+				packet.Append(txn, sender[:], false)
+			}
+			pool.AddRemoteTxns(b.Context(), packet, nil, nil)
+			if reason == "byte budget" {
+				pool.unprocessedRemoteBytes = remoteTxnQueueByteLimit - 1
+				clear(pool.unprocessedRemoteByHash)
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				pool.AddRemoteTxns(b.Context(), packet, nil, nil)
 			}
 		})
 	}

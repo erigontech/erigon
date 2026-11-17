@@ -83,7 +83,7 @@ func TestNewPayloadBeyondLoopBlockLimitIsAccepted(t *testing.T) {
 	const lag = 12
 	srv, chainPack := newExecLagEngineServer(t, 5, lag)
 
-	status, err := srv.HandleNewPayload(t.Context(), "test", chainPack.Blocks[1+lag], false)
+	status, err := srv.HandleNewPayload(t.Context(), "test", chainPack.Blocks[1+lag], nil)
 	require.NoError(t, err)
 	require.Equal(t, engine_types.AcceptedStatus, status.Status)
 	require.Nil(t, status.LatestValidHash)
@@ -93,7 +93,7 @@ func TestNewPayloadWithDownloadedParentBeyondLoopBlockLimitIsAccepted(t *testing
 	const lag = 12
 	srv, chainPack := newExecLagEngineServer(t, 5, lag)
 
-	status, err := srv.HandleNewPayload(t.Context(), "test", chainPack.Blocks[2+lag], false)
+	status, err := srv.HandleNewPayload(t.Context(), "test", chainPack.Blocks[2+lag], nil)
 	require.NoError(t, err)
 	require.Equal(t, engine_types.AcceptedStatus, status.Status)
 	require.Nil(t, status.LatestValidHash)
@@ -116,7 +116,7 @@ func TestNewPayloadWithBadHeaderWhileLaggingIsInvalidWithNullLatestValidHash(t *
 	badHeader.Time = chainPack.Blocks[2].Time()
 	bad := tip.WithSeal(badHeader)
 
-	status, err := srv.HandleNewPayload(t.Context(), "test", bad, false)
+	status, err := srv.HandleNewPayload(t.Context(), "test", bad, nil)
 	require.NoError(t, err)
 	require.Equal(t, engine_types.InvalidStatus, status.Status)
 	require.Nil(t, status.LatestValidHash)
