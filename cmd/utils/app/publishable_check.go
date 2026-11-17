@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
@@ -127,7 +128,9 @@ func isCanonicalSnapName(schema *state.E2SnapSchema, f *state.SnapInfo) bool {
 		}
 		canonical, _ = schema.AccessorIdxFile(f.Version, from, to, uint16(idxPos))
 	}
-	return filepath.Base(canonical) == f.Name
+	_, want, _ := strings.Cut(filepath.Base(canonical), "-")
+	_, got, _ := strings.Cut(f.Name, "-")
+	return want == got
 }
 
 type snapFileKey struct {
