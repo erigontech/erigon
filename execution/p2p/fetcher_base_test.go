@@ -637,6 +637,7 @@ func TestFetcherFetchBodiesPreservesEmptyBlobHashesForValidation(t *testing.T) {
 		require.Len(t, result.Data[0].Transactions, 1)
 		_, err = result.Data[0].Transactions[0].AsMessage(*types.LatestSignerForChainID(nil), nil, &chain.Rules{IsCancun: true})
 		require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
+		require.ErrorContains(t, err, "a blob stx must contain at least one blob")
 	})
 }
 

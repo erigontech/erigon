@@ -95,6 +95,9 @@ func (btx *BlobTx) GetBlobGas() uint64 {
 
 func (btx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	if err := ValidateBlobPrerequisites(btx.BlobVersionedHashes, btx.To == nil, rules.IsCancun); err != nil {
+		if errors.Is(err, ErrBlobTxnEmptyBlobs) {
+			return nil, fmt.Errorf("a blob stx must contain at least one blob: %w", err)
+		}
 		return nil, err
 	}
 	stxTo := accounts.InternAddress(*btx.To)
