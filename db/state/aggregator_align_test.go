@@ -305,7 +305,7 @@ func exitedInChildProcess(t *testing.T) bool {
 	if os.Getenv("ERIGON_GAP_CHECK_CHILD") != "" {
 		return false
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$")
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+t.Name()+"$")
 	cmd.Env = append(os.Environ(), "ERIGON_GAP_CHECK_CHILD=1")
 	out, err := cmd.CombinedOutput()
 	var exitErr *exec.ExitError

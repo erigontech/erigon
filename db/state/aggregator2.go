@@ -134,6 +134,7 @@ func (opts AggOpts) BuildsMissedAccessorsAfterOpen() AggOpts { //nolint:gocritic
 	opts.buildsMissedAccessorsAfterOpen = true
 	return opts
 }
+
 func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
 	return opts
