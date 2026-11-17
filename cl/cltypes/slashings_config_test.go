@@ -97,9 +97,22 @@ func TestAttesterSlashingConfiguredLimits(t *testing.T) {
 									decodeBody = decodedBody.DecodeSSZStrict
 								}
 								bodyErr := decodeBody(bodyBytes, int(version))
+								var blindedBody *BlindedBeaconBody
+								var blindedErr error
+								if version < clparams.GloasVersion && version >= clparams.BellatrixVersion {
+									blinded, err := body.Blinded()
+									require.NoError(t, err)
+									blindedBytes, err := blinded.EncodeSSZ(nil)
+									require.NoError(t, err)
+									blindedBody = NewBlindedBeaconBody(bodyCfg, version)
+									blindedErr = blindedBody.DecodeSSZ(blindedBytes, int(version))
+								}
 								if count > limit {
 									require.Error(t, err)
 									require.Error(t, bodyErr)
+									if blindedBody != nil {
+										require.Error(t, blindedErr)
+									}
 									return
 								}
 								require.NoError(t, err)
@@ -120,14 +133,9 @@ func TestAttesterSlashingConfiguredLimits(t *testing.T) {
 								root, err := decodedBody.HashSSZ()
 								require.NoError(t, err)
 								require.Equal(t, expectedBodyRoot, root)
-								if version < clparams.GloasVersion && version >= clparams.BellatrixVersion {
-									blinded, err := body.Blinded()
-									require.NoError(t, err)
-									encoded, err := blinded.EncodeSSZ(nil)
-									require.NoError(t, err)
-									target := NewBlindedBeaconBody(bodyCfg, version)
-									require.NoError(t, target.DecodeSSZ(encoded, int(version)))
-									root, err := target.AttesterSlashings.Get(0).HashSSZ()
+								if blindedBody != nil {
+									require.NoError(t, blindedErr)
+									root, err := blindedBody.AttesterSlashings.Get(0).HashSSZ()
 									require.NoError(t, err)
 									require.Equal(t, expectedRoot, root)
 								}

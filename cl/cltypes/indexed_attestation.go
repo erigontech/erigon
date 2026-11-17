@@ -32,9 +32,8 @@ const (
 	attestingIndicesLimitElectra = 2048 * 64 // MAX_VALIDATORS_PER_COMMITTEE * MAX_COMMITTEES_PER_SLOT
 )
 
-// indexedAttestationLimit is shared by construction, version changes and decoding.
 func indexedAttestationLimit(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) int {
-	validators, committees := attestingIndicesLimit, 64
+	validators, committees := attestingIndicesLimit, attestingIndicesLimitElectra/attestingIndicesLimit
 	if cfg != nil {
 		if cfg.MaxValidatorsPerCommittee > 0 {
 			validators = int(cfg.MaxValidatorsPerCommittee)
