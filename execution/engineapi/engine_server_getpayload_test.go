@@ -338,7 +338,7 @@ func (s *getPayloadStubModule) AssembleBlock(_ context.Context, _ *builder.Param
 	panic("not implemented")
 }
 
-func (s *getPayloadStubModule) ValidateChainAndView(context.Context, *types.Block, time.Duration, execmodule.BlockStateView) (execmodule.ValidationResult, error) {
+func (s *getPayloadStubModule) ValidateChainAndView(context.Context, *types.Block, time.Duration, execmodule.BlockStateView) (execmodule.ValidationResult, func() error, error) {
 	panic("not implemented")
 }
 

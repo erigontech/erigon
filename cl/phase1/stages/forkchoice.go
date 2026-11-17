@@ -38,16 +38,6 @@ import (
 
 var errBlockIndicesPending = errors.New("block indices are not yet available")
 
-// computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
-// It updates the fork choice if possible and sets the status in the RPC. It returns the head slot, head root, and any error encountered.
-func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
-	head, headSlot, err := selectForkChoiceHead(cfg)
-	if err != nil {
-		return 0, common.Hash{}, err
-	}
-	return headSlot, head.Root, notifyServicesOfHead(ctx, logger, cfg, head, headSlot)
-}
-
 func selectForkChoiceHead(cfg *Cfg) (head forkchoice.ForkChoiceNode, headSlot uint64, err error) {
 	// Advance the forkchoice store's internal clock so that epoch-boundary
 	// checkpoint promotions (unrealized → realized) happen on time.
@@ -331,7 +321,6 @@ func emitHeadEventBeforeStateCopy(beaconCfg *clparams.BeaconChainConfig, store f
 
 func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beaconevents.HeadV2Data, headSlot uint64, headRoot, stateRoot common.Hash, getHead func() (common.Hash, uint64, string, bool, error)) (bool, error) {
 	var validationErr error
-	emitted := false
 	current := func() bool {
 		currentRoot, currentSlot, payloadStatus, executionOptimistic, err := getHead()
 		if err != nil {
@@ -340,22 +329,15 @@ func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beac
 		}
 		return currentRoot == headRoot && currentSlot == headSlot && executionOptimistic == headEvent.Data.ExecutionOptimistic && payloadStatus == headEvent.Data.PayloadStatus
 	}
-	emitter.WithHeadEventLock(func() {
-		if !current() {
-			return
-		}
-		emitter.State().TrySendHead(&beaconevents.HeadData{
-			Slot:                      headSlot,
-			Block:                     headRoot,
-			State:                     stateRoot,
-			EpochTransition:           headEvent.Data.EpochTransition,
-			PreviousDutyDependentRoot: headEvent.Data.CurrentEpochDependentRoot,
-			CurrentDutyDependentRoot:  headEvent.Data.NextEpochDependentRoot,
-			ExecutionOptimistic:       headEvent.Data.ExecutionOptimistic,
-		})
-		emitter.State().SendHeadV2(headEvent)
-		emitted = true
-	})
+	emitted := emitter.EmitHeadEventsIfCurrent(&beaconevents.HeadData{
+		Slot:                      headSlot,
+		Block:                     headRoot,
+		State:                     stateRoot,
+		EpochTransition:           headEvent.Data.EpochTransition,
+		PreviousDutyDependentRoot: headEvent.Data.CurrentEpochDependentRoot,
+		CurrentDutyDependentRoot:  headEvent.Data.NextEpochDependentRoot,
+		ExecutionOptimistic:       headEvent.Data.ExecutionOptimistic,
+	}, headEvent, current)
 	return emitted, validationErr
 }
 

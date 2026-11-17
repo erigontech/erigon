@@ -63,7 +63,7 @@ func NewPool(
 	baseTxnProvider txnprovider.TxnProvider,
 	contractBackend bind.ContractBackend,
 	stateChangesClient stateChangesClient,
-	currentBlockNumReader currentBlockNumReader,
+	readCommittedState committedStateReader,
 	opts ...Option,
 ) *Pool {
 	logger = logger.New("component", "shutter")
@@ -73,7 +73,7 @@ func NewPool(
 	}
 
 	blockListener := NewBlockListener(logger, stateChangesClient)
-	blockTracker := NewBlockTracker(logger, blockListener, currentBlockNumReader)
+	blockTracker := NewBlockTracker(logger, blockListener, readCommittedState)
 	eonTracker := NewKsmEonTracker(logger, config, blockListener, contractBackend)
 
 	var slotCalculator SlotCalculator

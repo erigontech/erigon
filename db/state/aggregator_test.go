@@ -28,7 +28,6 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/background"
@@ -237,6 +236,7 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 }
 
 func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize := uint64(10)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 
@@ -295,6 +295,7 @@ func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
 }
 
 func TestAggregator_CheckDependencyBtwnDomains(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize := uint64(10)
 	// testDbAggregatorWithNoFiles(t,  stepSize * 32, &testAggConfig{
 	// 	stepSize:                         10,
@@ -525,7 +526,7 @@ func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ran
 // empty files for steps S..S+k-1 that the merge later combined with
 // preverified inputs to advertise phantom coverage.
 func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	// generate* helpers hardcode stepSize=10; keep our aggregator consistent.
 	const stepSize = uint64(10)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
@@ -591,6 +592,7 @@ func putHistoryKey(t *testing.T, db kv.RwDB, table string, txNum uint64, k []byt
 }
 
 func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	// Regression: when commitment values are already merged (values.needMerge=false) but history
 	// is not, the old aggregator.mergeFiles called commitmentValTransformDomain with a zero
 	// MergeRange, causing "failed to create commitment value transformer: file
@@ -623,10 +625,44 @@ func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 	// Before fix: mergeFiles returned "failed to create commitment value transformer: file
 	// v2.0-storage.0-0.kv was not found" because the transformer was called with the
 	// zero-value MergeRange from values (needMerge=false, from=0, to=0).
-	_, err := agg.mergeLoopStep(t.Context(), 2*stepSize)
-	if err != nil {
-		assert.NotContains(t, err.Error(), "failed to create commitment value transformer",
-			"transformer must not be called when values.needMerge=false")
+	somethingDone, err := agg.mergeLoopStep(t.Context(), 2*stepSize)
+	require.NoError(t, err)
+	require.True(t, somethingDone)
+
+	aggTx = agg.BeginFilesRo()
+	defer aggTx.Close()
+
+	ht := aggTx.d[kv.CommitmentDomain].ht
+	require.Len(t, ht.files, 1)
+	require.Equal(t, uint64(0), ht.files[0].startTxNum)
+	require.Equal(t, 2*stepSize, ht.files[0].endTxNum)
+	require.Len(t, ht.iit.files, 1)
+	require.Equal(t, uint64(0), ht.iit.files[0].startTxNum)
+	require.Equal(t, 2*stepSize, ht.iit.files[0].endTxNum)
+
+	require.NoError(t, ht.IntegrityHistoryValueAccessor(t.Context(), true, 0))
+	require.NoError(t, ht.iit.IntegrityInvertedIndexAllValuesAreInRange(t.Context(), true, 0))
+
+	for _, tc := range []struct {
+		dirPath string
+		ext     string
+		want    string
+	}{
+		{dirs.SnapHistory, ".v", "commitment.0-2.v"},
+		{dirs.SnapIdx, ".ef", "commitment.0-2.ef"},
+		{dirs.SnapAccessors, ".vi", "commitment.0-2.vi"},
+		{dirs.SnapAccessors, ".efi", "commitment.0-2.efi"},
+	} {
+		files, err := dir.ListFiles(tc.dirPath, tc.ext)
+		require.NoError(t, err)
+		var commitmentFiles []string
+		for _, p := range files {
+			if strings.Contains(filepath.Base(p), "commitment") {
+				commitmentFiles = append(commitmentFiles, p)
+			}
+		}
+		require.Len(t, commitmentFiles, 1)
+		require.Contains(t, commitmentFiles[0], tc.want)
 	}
 }
 
@@ -697,6 +733,7 @@ func TestCommitmentMergeNeedsTransform(t *testing.T) {
 // range-alignment hold. It reads each file's version through the visible-files layer and must
 // report referencing independently of the live write flag (set off here on purpose).
 func TestCommitmentVisibleFilesReferenced(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	check := func(t *testing.T, ver version.Version, want bool) {
 		t.Helper()
 		stepSize := uint64(10)
@@ -826,6 +863,7 @@ func testAggregatorPrune(t *testing.T, db kv.RwDB, agg *Aggregator) {
 }
 
 func TestAggregator_PruneKeepsDomainWithoutFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testAggregatorWithStateFilesOnly(t)
 	tbl := agg.d[kv.ReceiptDomain].ValuesTable
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
@@ -845,6 +883,7 @@ func TestAggregator_PruneKeepsDomainWithoutFiles(t *testing.T) {
 }
 
 func TestAggregator_PruneKeepsInvertedIndexWithoutFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testAggregatorWithStateFilesOnly(t)
 	ii := agg.searchII(kv.LogAddrIdx)
 	var txKey [8]byte
@@ -925,7 +964,7 @@ func TestAggregatorOpenFolderOpensAccessors(t *testing.T) {
 }
 
 func TestAggregatorOpenFolderHidesDataOnlyDomainFile(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
 	generateAccountsFile(t, agg.Dirs(), ranges)

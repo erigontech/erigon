@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -331,6 +332,37 @@ func TestWarmBALPropagatesWorkerCancellation(t *testing.T) {
 	bal := types.BlockAccessList{{Address: common.Address{19: 1}}}
 	err := NewBlockReadAheader().warmBAL(ctx, db, bal, nil, balCodeWarmupNone, 1)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+type prefetchRecordingTx struct {
+	commitmentRecordingTx
+}
+
+func (tx *prefetchRecordingTx) AggTx() any { return tx }
+
+func (tx *prefetchRecordingTx) PrefetchLatest(_ context.Context, domain kv.Domain, _ [][]byte) (int, error) {
+	tx.mu.Lock()
+	tx.domains = append(tx.domains, domain)
+	tx.mu.Unlock()
+	return 0, nil
+}
+
+func TestWarmBALSkipsCommitmentWarmupOnV3(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	defer func(v int) { dbg.TrieBALWarmupers = v }(dbg.TrieBALWarmupers)
+	dbg.TrieBALWarmupers = 2
+
+	tx := new(prefetchRecordingTx)
+	db := &singleTxRoDB{tx: tx}
+	bal := types.BlockAccessList{{
+		Address:        common.Address{19: 2},
+		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
+	}}
+	require.NoError(t, NewBlockReadAheader().warmBAL(t.Context(), db, bal, nil, balCodeWarmupNone, 1))
+
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	require.NotContains(t, tx.domains, kv.CommitmentDomain, "the HPH-keyed BAL commitment warmup finds nothing on a v3 trie")
 }
 
 func TestWarmBALContinuesAfterReadError(t *testing.T) {
@@ -1181,8 +1213,7 @@ func TestCachePopulatingGetterSeedsCodeHashOnACachedAccount(t *testing.T) {
 	require.Equal(t, 1, source.codeReads, "a cached account must still map its address to the cached code")
 }
 
-// A cached-account hit stamps its address-to-code-hash mapping with the account's txNum, so an unwind to that txNum drops it.
-func TestCachePopulatingGetterStampsTheSeededCodeHashWithTheAccountTxNum(t *testing.T) {
+func TestCachePopulatingGetterSeedsCodeHashAtReadFrontier(t *testing.T) {
 	account := accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xaa, 0x01}))}
 	value := accounts.SerialiseV3(&account)
 	stateCache := newTestStateCache()
@@ -1195,12 +1226,12 @@ func TestCachePopulatingGetterStampsTheSeededCodeHashWithTheAccountTxNum(t *test
 	_, ok := stateCache.View(nil).GetAddrCodeHash(addr[:])
 	require.True(t, ok)
 
-	stateCache.Applier().Unwind(6)
+	stateCache.Applier().Unwind(16)
 	_, ok = stateCache.View(nil).GetAddrCodeHash(addr[:])
-	require.True(t, ok, "an unwind above the account's txNum keeps the mapping")
-	stateCache.Applier().Unwind(5)
+	require.True(t, ok, "an unwind after the observed state keeps the mapping")
+	stateCache.Applier().Unwind(15)
 	_, ok = stateCache.View(nil).GetAddrCodeHash(addr[:])
-	require.False(t, ok, "an unwind to the account's txNum drops the mapping")
+	require.False(t, ok, "an unwind into the observed state drops the mapping")
 }
 
 // A bounded read skips the cache, because the cached value can be newer than the bound.

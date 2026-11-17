@@ -17,6 +17,7 @@
 package receipts_test
 
 import (
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -129,7 +130,7 @@ func TestGetReceiptSkipsBloomOfPersistedReceipt(t *testing.T) {
 	require.Len(t, receipt.Logs, 1)
 	require.True(t, receipt.Bloom.IsEmpty(), "a receipt served from the persistent cache must not derive its bloom")
 
-	served := ethutils.MarshalReceipt(receipt, txn, m.ChainConfig, header, true, true)
+	served := ethutils.MarshalReceipt(receipt, txn, m.ChainConfig, header, true)
 	bloom := types.CreateBloom(types.Receipts{receipt})
 	require.Equal(t, &bloom, served.LogsBloom)
 }
@@ -179,6 +180,15 @@ func TestGetReceiptReplayOfStorageWriteAndLog(t *testing.T) {
 // one destroys a contract whose storage predates the block, so each root depends on the
 // replay folding every key the block has changed so far.
 func TestPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(v3))
+			testPreByzantiumPostStateFromCommitmentHistory(t)
+		})
+	}
+}
+
+func testPreByzantiumPostStateFromCommitmentHistory(t *testing.T) {
 	statecfg.EnableHistoricalCommitment()
 	cfg := chain.TestChainBerlinConfig.Copy()
 	cfg.ByzantiumBlock, cfg.ConstantinopleBlock, cfg.PetersburgBlock, cfg.IstanbulBlock, cfg.MuirGlacierBlock, cfg.BerlinBlock = nil, nil, nil, nil, nil, nil

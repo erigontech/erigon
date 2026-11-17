@@ -123,7 +123,7 @@ func RederiveBlockAccessList(
 	}
 	ibs.SetTxContext(blockNum, len(txns))
 	ibs.ResetVersionedIO()
-	_, _, err = protocol.FinalizeBlockExecution(engine, header, txns, uncles, noopWriter, cfg, ibs, receipts, withdrawals, chainReader, false, logger)
+	_, _, err = protocol.FinalizeBlockExecution(engine, header, txns, uncles, cfg, ibs, receipts, withdrawals, chainReader, false, logger)
 	if err = phaseErr(err); err != nil {
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize block %d: %w", blockNum, err)
 	}
