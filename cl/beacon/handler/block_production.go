@@ -2379,8 +2379,7 @@ func (a *ApiHandler) postBeaconBlocks(r *http.Request, apiVersion int) (*beaconh
 	// Decode the block
 	block, err := a.parseRequestBeaconBlock(version, r)
 	if err != nil {
-		var endpointErr *beaconhttp.EndpointError
-		if errors.As(err, &endpointErr) {
+		if _, ok := errors.AsType[*beaconhttp.EndpointError](err); ok {
 			return nil, err
 		}
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
