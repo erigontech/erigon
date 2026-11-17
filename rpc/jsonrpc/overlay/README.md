@@ -44,6 +44,8 @@ The passed block range for the filter defines the initial block range that needs
 Once all blocks are replayed, the logs are returned to the caller.
 Without state overrides, replay keeps the original gas budgets and normal fee accounting. With state overrides, blocks containing only ordinary transactions use the RPC gas allowance and skip gas-fee debits, so replacement code can use more gas and changes to funding do not stop replay.
 
+In this mode, replay can credit the transaction value to its recipient without debiting an underfunded sender. Gas refunds are also skipped, while tips are still credited to the block producer. These balance changes can affect later transactions and their logs.
+
 If a block contains a frame transaction, every transaction in that block keeps its original gas budgets and normal fee accounting, even with overrides. Frame assertions can observe the fee effects of earlier transactions. An override that leaves a payer underfunded therefore returns an error; code that exceeds its original budget runs out of gas. The RPC gas cap does not apply to these blocks or to replay without overrides.
 
 Example request:
