@@ -28,6 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
@@ -44,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -520,7 +522,8 @@ func TestDownloadAndIndexSnapshotsRebuildsMissedAccessorBeforeSavingHashes(t *te
 	dirs := datadir.New(t.TempDir())
 	stateDB := temporaltest.NewTestDB(t, dirs)
 	tx, sd := temporaltest.NewTestTxSD(t, stateDB)
-	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, []byte{1}, []byte{1}, config3.DefaultStepSize, nil))
+	addr := common.Address{1}
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&accounts.Account{Nonce: 1}), config3.DefaultStepSize, nil))
 	require.NoError(t, sd.Flush(t.Context(), tx))
 	require.NoError(t, tx.Commit())
 	require.NoError(t, stateDB.(*temporal.DB).BuildFiles(2*config3.DefaultStepSize, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
