@@ -301,8 +301,7 @@ func (m *MemoryMutation) statelessCursor(table string) (kv.RwCursor, error) {
 }
 
 // GetOne returns the value for a key from the mutation overlay, falling back to the
-// underlying DB transaction. Thread-safe: acquires RLock to allow concurrent reads
-// while writes are serialized by Lock.
+// underlying DB transaction.
 func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -332,7 +331,6 @@ func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
 }
 
 // Has returns whether a key is present in the mutation overlay or underlying DB.
-// Thread-safe: acquires RLock.
 func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
