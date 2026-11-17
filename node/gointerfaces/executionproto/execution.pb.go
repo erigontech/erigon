@@ -1883,9 +1883,9 @@ const file_execution_execution_proto_rawDesc = "" +
 	"\n" +
 	"block_hash\x18\x02 \x01(\v2\v.types.H256H\x01R\tblockHash\x88\x01\x01B\x0f\n" +
 	"\r_block_numberB\r\n" +
-	"\v_block_hash\"?\n" +
+	"\v_block_hash\"Y\n" +
 	"\x13InsertBlocksRequest\x12(\n" +
-	"\x06blocks\x18\x01 \x03(\v2\x10.execution.BlockR\x06blocks\"\x86\x02\n" +
+	"\x06blocks\x18\x01 \x03(\v2\x10.execution.BlockR\x06blocksJ\x04\b\x02\x10\x03R\x12block_access_lists\"\x86\x02\n" +
 	"\n" +
 	"ForkChoice\x123\n" +
 	"\x0fhead_block_hash\x18\x01 \x01(\v2\v.types.H256R\rheadBlockHash\x12\x18\n" +

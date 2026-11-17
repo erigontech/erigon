@@ -77,6 +77,8 @@ message ExecutionPayload {
   repeated Withdrawal withdrawals = 16;
   optional uint64 blob_gas_used = 17;
   optional uint64 excess_blob_gas = 18;
+  reserved 19, 20;
+  reserved "block_access_list_hash", "block_access_list";
   optional uint64 slot_number = 21;                  // added in Amsterdam (EIP-7843)
 }
 
@@ -133,6 +135,8 @@ message PeerInfo {
 message ExecutionPayloadBody {
   repeated bytes transactions = 1;
   repeated Withdrawal withdrawals = 2;
+  reserved 3;
+  reserved "block_access_list";
 }
 
 message Authorization {

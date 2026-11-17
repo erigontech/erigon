@@ -104,6 +104,8 @@ message GetSegmentRequest {
 
 message InsertBlocksRequest {
     repeated Block blocks = 1;
+    reserved 2;
+    reserved "block_access_lists";
 }
 
 
