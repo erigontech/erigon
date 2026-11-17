@@ -50,14 +50,16 @@ func (c *remotePeerConn) RemotePeer() peer.ID { return c.peerID }
 
 type deadlineFailingStream struct {
 	network.Stream
-	conn   network.Conn
-	err    error
-	reset  bool
-	closed bool
+	conn    network.Conn
+	err     error
+	reset   bool
+	closed  bool
+	written int
 }
 
 func (s *deadlineFailingStream) Conn() network.Conn          { return s.conn }
 func (s *deadlineFailingStream) SetDeadline(time.Time) error { return s.err }
+func (s *deadlineFailingStream) Write(p []byte) (int, error) { s.written += len(p); return len(p), nil }
 func (s *deadlineFailingStream) Reset() error                { s.reset = true; return nil }
 func (s *deadlineFailingStream) Close() error                { s.closed = true; return nil }
 
@@ -68,6 +70,7 @@ func TestStreamHandlerStopsWhenDeadlineCannotBeSet(t *testing.T) {
 
 	peerID := peer.ID("deadline-failure-peer")
 	c := &ConsensusHandlers{host: h, rateLimiter: newPeerRateLimiter()}
+	fillConcurrency(c, peerID)
 	stream := &deadlineFailingStream{
 		conn: &remotePeerConn{peerID: peerID},
 		err:  errors.New("deadline unavailable"),
@@ -83,7 +86,58 @@ func TestStreamHandlerStopsWhenDeadlineCannotBeSet(t *testing.T) {
 	require.False(t, handlerCalled)
 	require.True(t, stream.reset)
 	require.True(t, stream.closed)
+	require.Zero(t, stream.written, "the concurrency limiter must not be reached")
 	counter, ok := c.rateLimiter.concurrency.Load(peerID.String())
 	require.True(t, ok)
-	require.Zero(t, counter.(*atomic.Int32).Load())
+	require.Equal(t, int32(maxConcurrentRequestsPerPeer), counter.(*atomic.Int32).Load(), "no slot may be acquired or released")
+}
+
+func fillConcurrency(c *ConsensusHandlers, peerID peer.ID) {
+	counter := &atomic.Int32{}
+	counter.Store(maxConcurrentRequestsPerPeer)
+	c.rateLimiter.concurrency.Store(peerID.String(), counter)
+}
+
+type deadlineRecordingStream struct {
+	deadlineFailingStream
+	deadlineAfterBytes []int
+}
+
+func (s *deadlineRecordingStream) SetDeadline(time.Time) error {
+	s.deadlineAfterBytes = append(s.deadlineAfterBytes, s.written)
+	return nil
+}
+
+func TestStreamHandlerSetsDeadlineBeforeRejectingAdmission(t *testing.T) {
+	peerID := peer.ID("rejected-peer")
+	for _, tc := range []struct {
+		name   string
+		reject func(c *ConsensusHandlers)
+	}{
+		{"concurrency limit", func(c *ConsensusHandlers) {
+			fillConcurrency(c, peerID)
+		}},
+		{"rate limit", func(c *ConsensusHandlers) {
+			key := peerProtocolKey{peerID: peerID.String(), protocol: communication.PingProtocolV1}
+			c.rateLimiter.punished.Store(key, time.Now().Add(time.Hour))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &ConsensusHandlers{rateLimiter: newPeerRateLimiter()}
+			tc.reject(c)
+			stream := &deadlineRecordingStream{
+				deadlineFailingStream: deadlineFailingStream{conn: &remotePeerConn{peerID: peerID}},
+			}
+			handlerCalled := false
+
+			c.wrapStreamHandler(communication.PingProtocolV1, func(network.Stream) error {
+				handlerCalled = true
+				return nil
+			})(stream)
+
+			require.False(t, handlerCalled)
+			require.Equal(t, []int{0}, stream.deadlineAfterBytes, "SetDeadline must run once, before the error response is written")
+			require.NotZero(t, stream.written)
+		})
+	}
 }

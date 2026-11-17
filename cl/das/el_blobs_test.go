@@ -462,4 +462,12 @@ func (f forkChoiceBlocks) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock
 	return block, ok
 }
 
+func (f forkChoiceBlocks) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	block, ok := f[root]
+	if !ok {
+		return nil, false
+	}
+	return &cltypes.BeaconBlockHeader{Slot: block.Block.Slot}, true
+}
+
 func (forkChoiceBlocks) Slot() uint64 { return 0 }
