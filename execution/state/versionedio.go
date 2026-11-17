@@ -2195,8 +2195,8 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 
 	// Check version map for storage written by prior transactions.
 	if vr.versionMap != nil {
-		if val, res, ok, wiped := liveStorageValue(vr.versionMap, address, key, vr.txIndex); ok && res.Status() != MVReadResultNone {
-			return val, !wiped, nil
+		if val, res, ok, wipe := liveStorageValue(vr.versionMap, address, key, vr.txIndex); ok && res.Status() != MVReadResultNone {
+			return val, wipe == wipeNone, nil
 		}
 	}
 

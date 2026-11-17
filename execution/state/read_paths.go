@@ -481,6 +481,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			return
 		}
 	}
+
 	switch res.Status() {
 	case MVReadResultDone, MVReadResultValidated:
 		hdr.Source = MapRead
@@ -647,7 +648,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 
 		// A slot with no cell after an in-block destruct reads post-wipe zero; anchor it as
 		// a MapRead at the wipe version {destroyedAt, wipeInc} so it validates by version
-		// against liveStorage. Mirrors the stale-Done-cell storage branch above.
+		// against liveStorageValue. Mirrors the stale-Done-cell storage branch above.
 		if path == StoragePath && r.life.state != LifecycleLive {
 			if !commited {
 				recordWipedSelfDestruct(s, addr, r.life)
@@ -1271,7 +1272,7 @@ func recordWipedSelfDestruct(s *IntraBlockState, addr accounts.Address, life lif
 }
 
 // readClearedByCreate reads as zero a slot that a contract creation below the read replaced,
-// anchored on the creation, as liveStorage validates it. While the creation is in flight, the
+// anchored on the creation, as liveStorageValue validates it. While the creation is in flight, the
 // read depends on it.
 func readClearedByCreate(s *IntraBlockState, hdr ReadHeader, r *readPathResult) {
 	if r.life.createInc < 0 {
@@ -1288,7 +1289,7 @@ func readClearedByCreate(s *IntraBlockState, hdr ReadHeader, r *readPathResult) 
 }
 
 // recordWipedStorageRead records a zero slot read at the destruct that wiped it,
-// as liveStorage resolves it, so a later store above the destruct invalidates it.
+// as liveStorageValue resolves it, so a later store above the destruct invalidates it.
 func recordWipedStorageRead(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, life lifecycleVerdict) {
 	s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: life.destroyedAt, Incarnation: life.wipeInc}},

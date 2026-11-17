@@ -1980,30 +1980,31 @@ func wipedByDestruct(path AccountPath) bool {
 	return path == AddressPath || path == BalancePath || path == NoncePath || path == CodeSizePath || path == StoragePath
 }
 
-// liveStorage is the one path that needs a dedicated live reader: a slot's wipe after a
-// destruct or a creation is a lifecycle verdict ReadStorage alone does not carry. Every other path
-// validates on the plain ReadStatus result (version + status, no value), so ValidateReadSet
-// uses ReadStatus directly for them.
-func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) ReadResult {
-	_, rr, _, _ := liveStorageValue(vm, a, k, tx)
-	return rr
-}
-
-// liveStorageValue reads a slot as liveStorage validates it; wiped reports that a destruct or a
-// creation below the read replaced the slot's value.
-func liveStorageValue(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (val uint256.Int, res ReadResult, ok bool, wiped bool) {
+// liveStorageValue is the validator's storage reader. Storage is the one path that needs a
+// dedicated live reader: a slot's wipe after a destruct or a creation is a lifecycle verdict
+// ReadStorage alone does not carry. wipe reports whether a destruct or a creation below the
+// read replaced the slot's value. Every other path validates on the plain ReadStatus result.
+func liveStorageValue(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (val uint256.Int, res ReadResult, ok bool, wipe slotWipe) {
 	val, res, ok, life := vm.ReadStorageLife(a, k, tx)
 	// Wipe-aware: a slot of a destructed account reads zero unless a post-destruct write
 	// revived it, anchored on the destruct ({destroyedAt, wipeInc}) so it validates by
 	// version alone — a later store above the destruct resolves here and version-mismatches.
 	if life.state != LifecycleLive && !(ok && res.resolved() && res.DepIdx() > life.destroyedAt) {
-		return uint256.Int{}, ReadResult{depIdx: life.destroyedAt, incarnation: life.wipeInc}, true, true
+		return uint256.Int{}, ReadResult{depIdx: life.destroyedAt, incarnation: life.wipeInc}, true, wipeDestruct
 	}
 	if storageClearedByCreate(life, ok, res.DepIdx()) {
-		return uint256.Int{}, ReadResult{depIdx: life.createdAt, incarnation: life.createInc}, true, true
+		return uint256.Int{}, ReadResult{depIdx: life.createdAt, incarnation: life.createInc}, true, wipeCreate
 	}
-	return val, res, ok, false
+	return val, res, ok, wipeNone
 }
+
+type slotWipe uint8
+
+const (
+	wipeNone slotWipe = iota
+	wipeDestruct
+	wipeCreate
+)
 
 // storageClearedByCreate reports whether a contract creation replaced the slot after its floor
 // value: the slot has no value below the read, or its value is older than the creation.
@@ -2224,7 +2225,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	// validatePath validates any non-storage path on the plain ReadStatus result:
 	// validation never compares the recorded value, so version + status is the
 	// authoritative basis for every path except storage, which needs the wipe-aware
-	// liveStorage reader.
+	// liveStorageValue reader.
 	validatePath := func(addr accounts.Address, path AccountPath, hdr ReadHeader) VersionValidity {
 		if (hdr.Version.TxIndex == originIndex || hdr.Source == StorageRead && hdr.Version == UnknownVersion) && vm.hasNoCells(addr, path) {
 			return VersionValid
@@ -2264,7 +2265,13 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 			if quiet && tr.Version.TxIndex == originIndex {
 				continue
 			}
-			if !ok(vm.validateReadImpl(txIdx, a, StoragePath, k, tr.Source, tr.Version, liveStorage(vm, a, k, txIdx), checkVersion, traceInvalid, tracePrefix, false)) {
+			_, rr, _, wipe := liveStorageValue(vm, a, k, txIdx)
+			// A pre-block zero stays right once a creation clears the slot. Not so after a destruct:
+			// its anchor holds also while a write above it is in flight.
+			if wipe == wipeCreate && rr.resolved() && tr.Version.TxIndex == originIndex && tr.Val.IsZero() {
+				continue
+			}
+			if !ok(vm.validateReadImpl(txIdx, a, StoragePath, k, tr.Source, tr.Version, rr, checkVersion, traceInvalid, tracePrefix, false)) {
 				return
 			}
 		}

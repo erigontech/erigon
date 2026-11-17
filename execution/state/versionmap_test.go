@@ -506,7 +506,7 @@ func TestValidateRead_StoragePath_RemovalUnderBALSubsumed(t *testing.T) {
 
 	// The validator stands on the wipe anchor (tx3), not the origin — so the cold origin
 	// read version-mismatches and is rejected, even with HasBAL set.
-	live := liveStorage(vm, addr, key, 5)
+	_, live, _, _ := liveStorageValue(vm, addr, key, 5)
 	require.Equal(t, 3, live.Version().TxIndex, "the live anchor is the wipe (tx3), not the origin")
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, checkVersionEqual, false, ""),
 		"a cold origin read under a later destruct invalidates by version even under BAL")
