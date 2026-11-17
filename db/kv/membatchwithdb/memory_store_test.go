@@ -479,6 +479,47 @@ func TestMemStore_DeleteCurrent(t *testing.T) {
 	assert.Nil(t, v)
 }
 
+func TestMemStore_CurrentAfterDelete(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		table     string
+		key       string
+		value     string
+		wantKey   []byte
+		wantValue []byte
+	}{
+		{"next entry", kv.TblAccountVals, "A", "2", []byte("A"), []byte("3")},
+		{"next key", kv.TblAccountVals, "A", "3", []byte("B"), []byte("1")},
+		{"last entry", kv.TblAccountVals, "B", "1", nil, nil},
+		{"non-dupsort", kv.HeaderNumber, "A", "3", []byte("B"), []byte("1")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newMemStore()
+			pairs := [][2]string{{"A", "1"}, {"A", "2"}, {"A", "3"}, {"B", "1"}}
+			if tc.table == kv.HeaderNumber {
+				pairs = [][2]string{{"A", "3"}, {"B", "1"}}
+			}
+			for _, pair := range pairs {
+				require.NoError(t, s.Put(tc.table, []byte(pair[0]), []byte(pair[1])))
+			}
+			c := s.newCursor(tc.table)
+			defer c.Close()
+			k, v, err := c.SeekExact([]byte(tc.key))
+			require.NoError(t, err)
+			for err == nil && k != nil && string(v) != tc.value {
+				k, v, err = c.Next()
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.value, string(v))
+			require.NoError(t, c.DeleteCurrent())
+			k, v, err = c.Current()
+			require.NoError(t, err)
+			require.Equal(t, tc.wantKey, k)
+			require.Equal(t, tc.wantValue, v)
+		})
+	}
+}
+
 func TestMemStore_DeleteExact(t *testing.T) {
 	s := newMemStore()
 	table := kv.TblAccountVals // dupsort

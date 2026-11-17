@@ -579,7 +579,15 @@ func (c *memStoreCursor) Current() ([]byte, []byte, error) {
 	if !c.valid {
 		return nil, nil, nil
 	}
-	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
+	c.store.mu.RLock()
+	defer c.store.mu.RUnlock()
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	if !iter.Seek(c.current) {
+		return nil, nil, nil
+	}
+	item := iter.Item()
+	return bytes.Clone(item.k), bytes.Clone(item.v), nil
 }
 
 func (c *memStoreCursor) NextDup() ([]byte, []byte, error) {
