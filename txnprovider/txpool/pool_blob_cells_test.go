@@ -46,7 +46,7 @@ func newPoolWithBlobTxn(t *testing.T, fork string) (context.Context, *TxPool, *T
 	chainConfig := testforks.Forks[fork]
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	pool, err := New(ctx, make(chan Announcements, 5), mdbxtest.NewTestPoolDB(t), coreDB, txpoolcfg.DefaultConfig,
-		kvcache.New(kvcache.DefaultCoherentConfig), chainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		kvcache.New(kvcache.DefaultCoherentConfig), chainConfig, nil, nil, func() {}, nil, nil, log.New())
 	require.NoError(t, err)
 	pool.started.Store(true)
 

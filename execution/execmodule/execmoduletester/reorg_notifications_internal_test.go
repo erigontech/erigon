@@ -399,7 +399,7 @@ func TestReorgCodeRollbackPreservesRecentRoots(t *testing.T) {
 	startupStateChanges := remotedbserver.NewKvServer(ctx, m.DB, nil, nil, logger)
 	startupStateChanges.SendStateChanges(ctx, initial)
 	pool, err := txpool.New(ctx, make(chan txpool.Announcements, 1), poolDB, m.DB, txpoolcfg.DefaultConfig,
-		kvcache.NewLatestBatchCache(), cfg, nil, direct.NewStateDiffClientDirect(startupStateChanges), func() {}, nil, direct.NewEthBackendClientDirect(backend), logger, txpool.WithFeeCalculator(nil))
+		kvcache.NewLatestBatchCache(), cfg, nil, direct.NewStateDiffClientDirect(startupStateChanges), func() {}, nil, direct.NewEthBackendClientDirect(backend), logger)
 	require.NoError(t, err)
 	runDone := make(chan error, 1)
 	go func() { runDone <- pool.Run(ctx) }()

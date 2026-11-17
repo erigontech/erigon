@@ -937,9 +937,9 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			removeLatest = false // --step has higher priority
 		}
 
-		promptExit := func(s string) (exitNow bool) {
+		promptExit := func(s string) (bool, error) {
 			if !promptUserBeforeDelete {
-				return false
+				return false, nil
 			}
 
 		AllowPruneSteps:
@@ -947,14 +947,13 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			var ans uint8
 			_, err := fmt.Scanf("%d\n", &ans)
 			if err != nil {
-				fmt.Printf("err: %v\n", err)
-				return true
+				return false, fmt.Errorf("read snapshot deletion confirmation: %w", err)
 			}
 			switch ans {
 			case 1:
-				return false
+				return false, nil
 			case 4:
-				return true
+				return true, nil
 			default:
 				fmt.Printf("invalid input: %d; Just a number 1 or 4 expected.\n", ans)
 				goto AllowPruneSteps
@@ -1049,7 +1048,9 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 		if hasStateTrie == 0 && len(commitmentFilesWithState) > 0 {
 			fmt.Printf("\nthis will remove ALL commitment files with state trie\n")
 			q := "Do that anyway?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
-			if promptExit(q) {
+			if exitNow, err := promptExit(q); err != nil {
+				return err
+			} else if exitNow {
 				os.Exit(0)
 			}
 		}
@@ -1057,7 +1058,9 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 		// Prompt with file count and estimated deletion size
 		q := fmt.Sprintf("\nremove %d files (~%s)?\n1) RemoveFile\n4) Exit\n (pick number): ",
 			len(toRemove), common.ByteCount(removeSize))
-		if promptExit(q) {
+		if exitNow, err := promptExit(q); err != nil {
+			return err
+		} else if exitNow {
 			os.Exit(0)
 		}
 	} else {

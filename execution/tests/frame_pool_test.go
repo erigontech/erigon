@@ -78,7 +78,7 @@ func TestFramePoolConsumedNonceReply(t *testing.T) {
 			poolDB := mdbxtest.NewTestPoolDB(t)
 			stateChanges := direct.NewStateDiffClientDirect(m.Notifications.StateChangesConsumer.(remoteproto.KVServer))
 			pool, err := txpool.New(ctx, make(chan txpool.Announcements, 1), poolDB, m.DB, txpoolcfg.DefaultConfig,
-				kvcache.NewLatestBatchCache(), cfg, nil, stateChanges, func() {}, nil, direct.NewEthBackendClientDirect(backend), logger, txpool.WithFeeCalculator(nil))
+				kvcache.NewLatestBatchCache(), cfg, nil, stateChanges, func() {}, nil, direct.NewEthBackendClientDirect(backend), logger)
 			require.NoError(t, err)
 			runDone := make(chan error, 1)
 			go func() { runDone <- pool.Run(ctx) }()
