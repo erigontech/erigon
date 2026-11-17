@@ -1220,11 +1220,13 @@ func (ft *fetcherTest) run(f func(ctx context.Context, t *testing.T)) {
 		err := ft.messageListener.Run(ft.ctx)
 		require.ErrorIs(ft.t, err, context.Canceled)
 	}()
+	// Deferred so the shutdown also runs when f fails fatally.
+	defer func() {
+		ft.ctxCancel()
+		require.Eventually(ft.t, done.Load, time.Second, 5*time.Millisecond)
+	}()
 
 	f(ft.ctx, ft.t)
-
-	ft.ctxCancel()
-	require.Eventually(ft.t, done.Load, time.Second, 5*time.Millisecond)
 }
 
 func (ft *fetcherTest) mockSentryStreams(mocks ...requestResponseMock) {

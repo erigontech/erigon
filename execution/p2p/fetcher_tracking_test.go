@@ -290,6 +290,11 @@ func (tft *trackingFetcherTest) run(f func(ctx context.Context, t *testing.T)) {
 		err := eg.Wait()
 		require.ErrorIs(tft.t, err, context.Canceled)
 	}()
+	// Deferred so the shutdown also runs when f fails fatally.
+	defer func() {
+		tft.ctxCancel()
+		require.Eventually(tft.t, done.Load, time.Second, 5*time.Millisecond)
+	}()
 	waitCond := func() bool {
 		// wait for the tracker to be initialised before simulating peer events,
 		// otherwise the tests may be flake-y because simulated test events in each test
@@ -301,7 +306,4 @@ func (tft *trackingFetcherTest) run(f func(ctx context.Context, t *testing.T)) {
 	require.Eventually(tft.t, waitCond, time.Second, 100*time.Millisecond, "expected peer tracker to be initialised")
 
 	f(tft.ctx, tft.t)
-
-	tft.ctxCancel()
-	require.Eventually(tft.t, done.Load, time.Second, 5*time.Millisecond)
 }
