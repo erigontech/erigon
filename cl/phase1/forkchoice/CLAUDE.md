@@ -37,7 +37,7 @@ verified against the Go code in this repository.
 | `payload_vote.go`: `ShouldExtendPayload`, `getPayloadStatusTiebreaker`, `getNodeChildren`, `validateParentPayloadPath` | Gloas `should_extend_payload`, `get_payload_status_tiebreaker`, `get_node_children`, modified `on_block` parent payload path checks |
 | `timing.go`: `getAttestationDueMs`, `getAggregateDueMs`, `getSyncMessageDueMs`, `getContributionDueMs`, `getPayloadAttestationDueMs` | Phase0 timing helpers; Gloas modified timing helpers and `get_payload_attestation_due_ms` |
 | `timing.go`: `recordBlockTimeliness`, `updateProposerBoostRoot`, `shouldApplyProposerBoostGloas` | Phase0 `record_block_timeliness`, `update_proposer_boost_root`; Gloas modified `record_block_timeliness`, `update_proposer_boost_root`, `should_apply_proposer_boost` |
-| `timing.go`: `isHeadLate`, `isHeadWeak`, `isParentStrong` | Phase0 proposer reorg helpers; Gloas modified `is_head_late`, `is_head_weak`, `is_parent_strong` |
+| `timing.go`: `isHeadWeak` | Phase0 proposer reorg helper; Gloas modified `is_head_weak` |
 | `on_tick.go`: `OnTick`, `onTickPerSlot` | Phase0 `on_tick`, `on_tick_per_slot`; Gloas inherits proposer-boost reset and unrealized checkpoint promotion |
 | `on_block.go`: `OnBlock` | Phase0 `on_block`; Bellatrix execution payload validation; Deneb blob availability; Electra execution requests; Gloas deferred payload/envelope processing; Fulu modified `on_block` data availability call |
 | `on_block.go`: `verifyKzgCommitmentsAgainstTransactions` | Deneb execution payload blob versioned-hash checks; Electra/Fulu maximum blob count plumbing |

@@ -57,6 +57,7 @@ jobs:
         test-group: ${{ fromJson(needs.load-matrix.outputs.test-groups) }}
         commitment_mode:
           - parallel
+          - v3
     name: tests-linux (${{ matrix.os }}, ${{ matrix.test-group }}, ${{ matrix.commitment_mode }})
     runs-on: ${{ matrix.os }}
     permissions:
@@ -88,6 +89,7 @@ jobs:
           SKIP_FLAKY_TESTS: 'true'
           CGO_CFLAGS: -D__BLST_PORTABLE__
           ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
+          ERIGON_COMMITMENT_V3: ${{ matrix.commitment_mode == 'v3' && 'true' || 'false' }}
           TEST_GROUP: ${{ matrix.test-group }}
         run: make test-group TEST_GROUP="$TEST_GROUP" GO_FLAGS="-race -timeout=60m"
 

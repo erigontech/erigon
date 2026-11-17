@@ -942,7 +942,7 @@ func TestDomain_ScanFiles(t *testing.T) {
 }
 
 func TestCommitmentKvWriteVersion(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	logger := log.New()
 	_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
 
@@ -964,7 +964,7 @@ func TestNonCommitmentKvWriteVersionUsesCurrent(t *testing.T) {
 }
 
 func TestCommitmentKvVersionAcceptance(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	vers := statecfg.Schema.CommitmentDomain.FileVersion.DataKV
 	require.True(t, vers.Supports(version.V2_0))
 	require.True(t, vers.Supports(version.V2_1))
@@ -2671,7 +2671,7 @@ func TestDomain_Unwind(t *testing.T) {
 			}
 		}
 
-		err = domainRoTx.unwind(ctx, tx, unwindTo/d.stepSize, unwindTo, totalDiff)
+		err = domainRoTx.unwind(ctx, tx, unwindTo, totalDiff, nil)
 		currTx = unwindTo
 		require.NoError(t, err)
 		domainRoTx.Close()
@@ -3851,7 +3851,7 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			defer domainRoTx.Close()
 
 			// diff for txNum 18: prev was empty (key was deleted) → Value=[]byte{}
-			err = domainRoTx.unwind(ctx, tx, 1, 18, txNum18Diff)
+			err = domainRoTx.unwind(ctx, tx, 18, txNum18Diff, nil)
 			require.NoError(err)
 			domainRoTx.Close()
 			require.NoError(tx.Commit())
@@ -4414,4 +4414,20 @@ func TestDomainCloseFilesAfterStep(t *testing.T) {
 	for _, df := range all {
 		require.Equal(t, []string{"0-2"}, stepRanges(t, df.Items(), d.stepSize))
 	}
+}
+
+// beginForTests recomputes visible files from dirtyFiles directly instead of
+// using Aggregator's published snapshot. Unsafe to mix with an Aggregator,
+// because it can observe an unsynchronized/torn view of dirtyFiles across
+// entities. Production code goes through Aggregator.BeginFilesRo.
+func (d *Domain) beginForTests() *DomainRoTx {
+	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	dt := &DomainRoTx{}
+	d.initFilesRo(dt, &HistoryRoTx{}, &InvertedIndexRoTx{}, dv, hv, iv)
+	return dt
+}
+
+func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
+	maxStepInFiles := kv.Step(dt.files.EndTxNum() / dt.stepSize)
+	return maxStepInFiles < dt.d.maxStepInDB(dbtx)
 }

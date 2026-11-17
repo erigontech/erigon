@@ -348,6 +348,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 		agg.StepSize(),
+		cfg.dirs,
 	); err != nil {
 		return err
 	}
@@ -399,6 +400,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 		agg.StepSize(),
+		cfg.dirs,
 	); err != nil {
 		return err
 	}
@@ -482,16 +484,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// Plain assignment: the deferred stopReporter reads this variable, and a
 	// := here would shadow it and silently disable the handoff pin.
 	commitBlock = readCommitmentBlockFromDB(ctx, cfg.db)
-	if commitBlock > 0 {
-		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
-		if err != nil {
-			return fmt.Errorf("get Execution stage progress: %w", err)
-		}
-		if execProgress < commitBlock {
-			if err := stages.SaveStageProgress(tx, stages.Execution, commitBlock); err != nil {
-				return fmt.Errorf("advance Execution stage to snapshot commitment block: %w", err)
-			}
-		}
+	if err := cfg.advanceExecutionToSnapshot(tx, commitBlock); err != nil {
+		return err
 	}
 
 	{
@@ -504,6 +498,25 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		})
 	}
 
+	return nil
+}
+
+func (me *SnapshotsCfg) advanceExecutionToSnapshot(tx kv.RwTx, commitBlock uint64) error {
+	if commitBlock == 0 {
+		return nil
+	}
+	execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return fmt.Errorf("get Execution stage progress: %w", err)
+	}
+	if execProgress >= commitBlock {
+		return nil
+	}
+	if err := stages.SaveStageProgress(tx, stages.Execution, commitBlock); err != nil {
+		return fmt.Errorf("advance Execution stage to snapshot commitment block: %w", err)
+	}
+	// Installing snapshot state bypasses execution and its change notifications.
+	me.notifier.Accumulator.MarkIncomplete()
 	return nil
 }
 
@@ -659,16 +672,12 @@ func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg) (bool, error) {
 // readCommitmentBlockFromDB reads the commitment domain's "state" key via a
 // temporary RO tx. The RwTx from the snapshot stage is not temporal, so we
 // need a separate temporal RO tx to read domain data from snapshot files.
-// The value format: txNum(8 bytes) + blockNum(8 bytes) + trie state.
 func readCommitmentBlockFromDB(ctx context.Context, db kv.TemporalRwDB) uint64 {
 	roTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0
 	}
 	defer roTx.Rollback()
-	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
-	if err != nil || len(v) < 16 {
-		return 0
-	}
-	return binary.BigEndian.Uint64(v[8:16])
+	n, _ := commitmentdb.LatestBlockNumWithCommitment(roTx)
+	return n
 }

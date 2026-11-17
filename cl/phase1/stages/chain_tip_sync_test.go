@@ -14,10 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/rpc"
@@ -323,4 +325,85 @@ func TestCfgCloseClosesBlockCollector(t *testing.T) {
 	require.NoError(t, cfg.Close())
 	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	require.ErrorContains(t, collector.AddBlock(block), "database not initialized")
+}
+
+func newChainTipListenerFixture(t *testing.T) (*Cfg, *cltypes.SignedBeaconBlock) {
+	t.Helper()
+	cfg, graph, _, _, block, _ := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	graph.insertOnAdd = true
+	cfg.emitter = beaconevents.NewEventEmitter()
+	return cfg, block
+}
+
+func listenInBackground(ctx context.Context, cfg *Cfg, targetSlot uint64) <-chan error {
+	done := make(chan error, 1)
+	go func() {
+		done <- listenToIncomingBlocksUntilANewBlockIsReceived(ctx, log.Root(), cfg, Args{targetSlot: targetSlot}, make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]), make(chan error))
+	}()
+	return done
+}
+
+func TestChainTipListenerWakesOnBlockIndicesCommit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg, block := newChainTipListenerFixture(t)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		done := listenInBackground(ctx, cfg, block.Block.Slot)
+		synctest.Wait()
+
+		start := time.Now()
+		require.NoError(t, processBlock(ctx, cfg, block, false))
+
+		require.NoError(t, <-done)
+		require.Less(t, time.Since(start), chainTipPresenceInterval)
+	})
+}
+
+func TestChainTipListenerIgnoresCommitsWhileTargetIsNotIndexed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg, block := newChainTipListenerFixture(t)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		done := listenInBackground(ctx, cfg, block.Block.Slot)
+		synctest.Wait()
+		require.NoError(t, cfg.forkChoice.OnBlock(ctx, block, false, true, false))
+
+		cfg.emitter.NotifyBlockIndicesChanged()
+		synctest.Wait()
+		require.Empty(t, done, "a commit that does not index the target must not end the wait")
+		start := time.Now()
+		require.NoError(t, processBlock(ctx, cfg, block, false))
+
+		require.NoError(t, <-done)
+		require.Less(t, time.Since(start), chainTipPresenceInterval)
+	})
+}
+
+func TestChainTipListenerReturnsWhenTargetWasIndexedBeforeListening(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg, block := newChainTipListenerFixture(t)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		require.NoError(t, processBlock(ctx, cfg, block, false))
+		start := time.Now()
+
+		require.NoError(t, <-listenInBackground(ctx, cfg, block.Block.Slot))
+
+		require.Less(t, time.Since(start), chainTipPresenceInterval)
+	})
+}
+
+func TestChainTipListenerFallsBackToTicker(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg, block := newChainTipListenerFixture(t)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		done := listenInBackground(ctx, cfg, block.Block.Slot)
+		synctest.Wait()
+		start := time.Now()
+		require.NoError(t, cfg.forkChoice.OnBlock(ctx, block, false, true, false))
+
+		require.NoError(t, <-done)
+		require.LessOrEqual(t, time.Since(start), chainTipPresenceInterval)
+	})
 }
