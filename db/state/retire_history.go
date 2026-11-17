@@ -33,6 +33,7 @@ func cutoffInRetireWindow(files visibleFiles, cutoffTxNum uint64) bool {
 	return cutoffTxNum > files.StartTxNum() && cutoffTxNum < files.EndTxNum()
 }
 
+// entirelyBeforeStep selects the visible source files entirely below cutoff step.
 func entirelyBeforeStep(files visibleFiles, stepSize uint64, cutoff kv.Step) (outs []*FilesItem) {
 	for _, f := range files {
 		if _, endStep := f.src.StepRange(stepSize); endStep <= cutoff {
@@ -42,8 +43,9 @@ func entirelyBeforeStep(files visibleFiles, stepSize uint64, cutoff kv.Step) (ou
 	return outs
 }
 
-// agedFiles is one entity's dirty files selected for retirement, carried from the lock-free
-// selection pass to the locked detach pass.
+// agedFiles is one entity's aged visible files, carried from the lock-free selection pass to the
+// locked detach pass. They only set the boundary: the detach pass retires every dirty file that
+// ends at or before the last of them.
 type agedFiles struct {
 	dirtyFiles   *DirtyFiles
 	filenameBase string
@@ -61,7 +63,8 @@ func (ht *HistoryRoTx) filesBeforeStep(cutoff kv.Step) []agedFiles {
 	return []agedFiles{ht.iit.filesBeforeStep(cutoff), {ht.h.dirtyFiles, ht.h.FilenameBase, entirelyBeforeStep(ht.files, ht.stepSize, cutoff)}}
 }
 
-// Retire drops History+InvertedIndex files below their per-domain cutoff, dirty ones too.
+// Retire drops the dirty history/index prefix ending at the last aged visible file.
+// Physical deletion waits until readers release the retired generation.
 func (at *AggregatorRoTx) Retire(cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
 	if dbg.NoRetire() || cutoffs.IsNoop() {
 		return 0, nil
@@ -109,10 +112,16 @@ func (at *AggregatorRoTx) Retire(cutoffs kv.RetireCutoffs) (retiredCount int, er
 	defer at.a.dirtyFilesLock.Unlock()
 	var retired []*FilesItem
 	for _, agedList := range aged {
-		if len(agedList.files) == 0 {
+		var retireTo uint64
+		for _, covering := range agedList.files {
+			if current, ok := agedList.dirtyFiles.Get(covering); !ok || current != covering {
+				continue
+			}
+			retireTo = max(retireTo, covering.endTxNum)
+		}
+		if retireTo == 0 {
 			continue
 		}
-		retireTo := agedList.files[len(agedList.files)-1].endTxNum
 		var outs []*FilesItem
 		agedList.dirtyFiles.Scan(func(item *FilesItem) bool {
 			if item.endTxNum > retireTo {
