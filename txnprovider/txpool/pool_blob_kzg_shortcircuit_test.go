@@ -359,14 +359,15 @@ func TestRemoteBatchOfBlobReplacementsRespectsSenderBlobSlots(t *testing.T) {
 	require.LessOrEqual(t, pool.all.blobCount(senderID), pool.cfg.BlobSlots)
 }
 
-// A batch of fee bumps replaces blobs already counted in the pool, so it must pass where
-// the same bumps one by one pass.
+// A batch of fee bumps replaces blobs already counted in the pool, so it must pass even when
+// the sender and the pool are at their blob limits.
 func TestRemoteBatchOfBlobFeeBumpsCountsOnlyAddedBlobs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	pool := seedBlobKZGTestPool(t, ctx)
 	require.NoError(t, pool.start(ctx))
-	pool.cfg.BlobSlots = 6
+	pool.cfg.BlobSlots = 4
+	pool.cfg.TotalBlobPoolLimit = 4
 	sender := [20]byte{1}
 	nonces := []uint64{0, 1}
 	addRemoteBlobBatch(t, ctx, pool, [][20]byte{sender, sender}, nonces)

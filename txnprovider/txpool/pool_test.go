@@ -3782,6 +3782,36 @@ func TestUnwoundTxnsDoNotCountAgainstSenderSlots(t *testing.T) {
 	}
 }
 
+// An unwound txn was already in a block: a sender at its slot limit keeps it and loses no pooled txn.
+func TestUnwoundTxnAtAccountSlotsLimitIsKept(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.cfg.AccountSlots = 2
+	var all []*TxnSlot
+	unwind := func(height uint64, nonces ...uint64) {
+		var txns TxnSlots
+		for _, n := range nonces {
+			txn := newTestTxnSlot(n, 0, 10, 10, 100_000)
+			txn.IDHash[0] = byte(n + 1)
+			txns.Append(txn, sender[:], false)
+			all = append(all, txn)
+		}
+		change := &remoteproto.StateChangeBatch{
+			PendingBlockBaseFee: 1,
+			BlockGasLimit:       1_000_000,
+			ChangeBatch: []*remoteproto.StateChange{{
+				BlockHeight: height,
+				BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{byte(height)}),
+			}},
+		}
+		require.NoError(t, pool.OnNewBlock(ctx, change, txns, TxnSlots{}, TxnSlots{}))
+	}
+	unwind(2, 1, 2)
+	unwind(1, 0)
+	for _, txn := range all {
+		require.Contains(t, pool.byHash, string(txn.IDHash[:]), "nonce %d dropped", txn.Nonce)
+	}
+}
+
 func nonceRetryBlob(t testing.TB, fork string, nonce uint64) (*TxPool, *TxnSlot) {
 	t.Helper()
 	pool := seedBlobKZGTestPool(t, t.Context())
