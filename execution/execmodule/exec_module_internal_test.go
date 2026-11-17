@@ -224,32 +224,27 @@ func TestValidateChainAndViewFindsACommittedBlockInSnapshots(t *testing.T) {
 }
 
 func TestDrainWaitsForInFlightExecution(t *testing.T) {
-	module := &ExecModule{semaphore: semaphore.NewWeighted(1)}
-	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
-	release := sync.OnceFunc(func() { module.semaphore.Release(1) })
-	t.Cleanup(release)
+	synctest.Test(t, func(t *testing.T) {
+		module := &ExecModule{semaphore: semaphore.NewWeighted(1)}
+		require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+		release := sync.OnceFunc(func() { module.semaphore.Release(1) })
+		defer release()
 
-	started := make(chan struct{})
-	drained := make(chan struct{})
-	go func() {
-		close(started)
-		module.Drain()
-		close(drained)
-	}()
-	<-started
+		drained := make(chan struct{})
+		go func() {
+			module.Drain()
+			close(drained)
+		}()
+		synctest.Wait()
+		select {
+		case <-drained:
+			t.Fatal("drain returned while execution was still active")
+		default:
+		}
 
-	select {
-	case <-drained:
-		t.Fatal("drain returned while execution was still active")
-	case <-time.After(100 * time.Millisecond):
-	}
-
-	release()
-	select {
-	case <-drained:
-	case <-time.After(time.Second):
-		t.Fatal("drain did not return after execution became idle")
-	}
+		release()
+		<-drained
+	})
 }
 
 func TestPruneWaitsForExecution(t *testing.T) {
