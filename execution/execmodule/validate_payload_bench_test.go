@@ -36,7 +36,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -127,7 +126,7 @@ func benchmarkValidatePayload(b *testing.B, w workload, stateSize, blocksPerOp i
 				require.NoError(b, err)
 				require.Equal(b, execmodule.ExecutionStatusSuccess, status)
 
-				result, err := m.ValidateChain(ctx, block.Header())
+				result, err := m.ValidateChain(ctx, block)
 				require.NoError(b, err)
 				require.Equal(b, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
 				newPayload += time.Since(start)
@@ -151,7 +150,6 @@ func benchmarkValidatePayload(b *testing.B, w workload, stateSize, blocksPerOp i
 	if secs := newPayload.Seconds(); secs > 0 {
 		b.ReportMetric((float64(totalGas)/1e6)/secs, "Mgas/s")
 	}
-	b.ReportMetric(boolMetric(dbg.Exec3Parallel), "parallelExec")
 	b.ReportMetric(gogcPercent(), "gogc")
 	b.ReportMetric(float64(blocksPerOp*benchTxsPerBlock)/float64(stateSize), "txPerAccount")
 }
@@ -242,13 +240,6 @@ func startWindowProfile(b *testing.B) func() {
 		pprof.StopCPUProfile()
 		require.NoError(b, f.Close())
 	}
-}
-
-func boolMetric(v bool) float64 {
-	if v {
-		return 1
-	}
-	return 0
 }
 
 // benchChainConfig is AllProtocolChanges without Amsterdam, which is where

@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
@@ -175,7 +176,38 @@ func TestBoundedGetLatestDoesNotPopulateBranchCache(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestSnapshotBranchCacheEntrySurvivesLegalUnwind(t *testing.T) {
+func TestBoundedGetLatestIgnoresBranchCache(t *testing.T) {
+	const stepSize = uint64(16)
+	for _, source := range []string{"read_fill", "committed_write"} {
+		t.Run(source, func(t *testing.T) {
+			db, key, frozenValue := commitmentFileFixture(t, stepSize)
+			latestValue := []byte{0, 0, 0, 0, 2}
+			writeCommitmentRows(t, db, key, frozenValue, commitmentWrite{txNum: 20, value: latestValue})
+			roTx, err := db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer roTx.Rollback()
+			branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+			if source == "read_fill" {
+				branchCache.Clear()
+				_, _, err = roTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
+				require.NoError(t, err)
+			}
+			cached, _, ok := branchCache.Get(key)
+			require.True(t, ok)
+			require.Equal(t, latestValue, cached)
+
+			sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+			require.NoError(t, err)
+			defer sd.Close()
+			getter := sd.AsStateGetter(roTx, execctxapi.StateGetterOptions{})
+			got, _, err := getter.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithMaxStep(0))
+			require.NoError(t, err)
+			require.Equal(t, frozenValue, got)
+		})
+	}
+}
+
+func TestSnapshotBranchReadNeedsRefillAfterUnwind(t *testing.T) {
 	const stepSize = uint64(16)
 	db, key, frozenValue := commitmentFileFixture(t, stepSize)
 	roTx, err := db.BeginTemporalRo(t.Context())
@@ -191,9 +223,14 @@ func TestSnapshotBranchCacheEntrySurvivesLegalUnwind(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, frozenValue, got)
 	require.Equal(t, kv.Step(1), step)
-	branchCache.Unwind(20)
-	got, _, ok := branchCache.Get(key)
+	cached, _, ok := branchCache.Get(key)
 	require.True(t, ok)
+	require.Equal(t, frozenValue, cached)
+	branchCache.Unwind(20)
+	_, _, ok = branchCache.Get(key)
+	require.False(t, ok)
+	got, _, err = sd.GetLatest(kv.CommitmentDomain, roTx, key)
+	require.NoError(t, err)
 	require.Equal(t, frozenValue, got)
 }
 

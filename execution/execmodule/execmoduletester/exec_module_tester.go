@@ -315,18 +315,15 @@ func WithExperimentalBAL() Option {
 	}
 }
 
-// WithoutExperimentalBAL disables experimental BAL (and the parallel executor
-// it forces) for tests that exercise patterns the parallel executor doesn't
-// yet handle correctly (e.g. intra-block SELFDESTRUCT + CREATE2 reincarnation).
-func WithoutExperimentalBAL() Option {
-	return func(opts *options) {
-		opts.experimentalBAL = false
-	}
-}
-
 func WithGenesisSpec(gspec *types.Genesis) Option {
 	return func(opts *options) {
 		opts.genesis = gspec
+	}
+}
+
+func WithBlockReaderWrap(wrap func(dbservices.FullBlockReader) dbservices.FullBlockReader) Option {
+	return func(opts *options) {
+		opts.wrapBlockReader = wrap
 	}
 }
 
@@ -456,6 +453,7 @@ type options struct {
 	sentryProtocol           uint
 	stateTransitionObserver  execmodule.StateTransitionObserver
 	skipSystemContracts      bool
+	wrapBlockReader          func(dbservices.FullBlockReader) dbservices.FullBlockReader
 }
 
 func applyOptions(opts []Option) options {
@@ -620,6 +618,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, logger)
 	allSnapshots := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
 	br := freezeblocks.NewBlockReader(allSnapshots)
+	var blockReader dbservices.FullBlockReader = br
+	if opt.wrapBlockReader != nil {
+		blockReader = opt.wrapBlockReader(br)
+	}
 
 	mock := &ExecModuleTester{
 		Ctx: ctx, Cancel: ctxCancel, DB: db,
@@ -633,7 +635,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		stateChangesClient: direct.NewStateDiffClientDirect(erigonGrpcServer),
 		PeerId:             gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots:     allSnapshots,
-		BlockReader:        br,
+		BlockReader:        blockReader,
 		ReceiptsReader:     receipts.NewGenerator(dirs, br, engine, nil, 5*time.Second),
 		HistoryV3:          true,
 		cfg:                cfg,
@@ -678,6 +680,12 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	mock.SentryClient, err = direct.NewSentryClientDirect(opt.sentryProtocol, mock)
 	require.NoError(tb, err)
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
+
+	notificationReceipts := execmodule.NewReceiptsLoader(mock.ChainConfig, mock.BlockReader, receipts.NewGenerator(mock.Dirs, mock.BlockReader, mock.Engine, nil, time.Minute))
+	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.BlockReader, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, notificationReceipts, logger)
+	erigonGrpcServer.SetStateChangesSnapshot(func(ctx context.Context) (*remoteproto.StateChangeBatch, error) {
+		return dispatcher.StateChangesSnapshot(ctx, db)
+	})
 
 	if !cfg.TxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
@@ -835,8 +843,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
 		validationNotifications, mock.BlockReader, blockWriter, logger, readAheader)
-	notificationReceipts := execmodule.NewReceiptsLoader(mock.ChainConfig, mock.BlockReader, receipts.NewGenerator(mock.Dirs, mock.BlockReader, mock.Engine, nil, time.Minute))
-	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, notificationReceipts, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
 
 	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil, mock.BlockReader)
@@ -863,7 +869,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		logger,
 		engine,
 		cfg.Sync,
-		cfg.ExperimentalBAL,
 		cfg.FcuBackgroundPrune,
 		false, /* onlySnapDownloadOnStart */
 		readAheader,
@@ -949,9 +954,9 @@ func (emt *ExecModuleTester) InsertBlocks(ctx context.Context, blocks []*types.B
 	})
 }
 
-func (emt *ExecModuleTester) ValidateChain(ctx context.Context, header *types.Header) (execmodule.ValidationResult, error) {
+func (emt *ExecModuleTester) ValidateChain(ctx context.Context, block *types.Block) (execmodule.ValidationResult, error) {
 	return retryBusy(ctx, func() (execmodule.ValidationResult, bool, error) {
-		result, err := emt.ExecModule.ValidateChain(ctx, header.Hash(), header.Number.Uint64())
+		result, err := emt.ExecModule.ValidateChain(ctx, block)
 		if err != nil {
 			return execmodule.ValidationResult{}, false, err
 		}
@@ -1020,7 +1025,7 @@ func (emt *ExecModuleTester) InsertValidateAndUfc1By1(ctx context.Context, block
 	}
 	for i, block := range blocks {
 		header := block.Header()
-		validationResult, err := emt.ValidateChain(ctx, header)
+		validationResult, err := emt.ValidateChain(ctx, block)
 		if err != nil {
 			return err
 		}
@@ -1173,6 +1178,9 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 			}
 		}
 	}
+
+	// Notification delivery can precede FCU cleanup of shared execution state.
+	emt.ExecModule.Drain()
 
 	roTx, err := emt.DB.BeginRo(emt.Ctx)
 	if err != nil {

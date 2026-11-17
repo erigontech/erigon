@@ -416,6 +416,10 @@ func New(
 	// execution-layer concern that will move to the execution component.
 	kvRPC := remotedbserver.NewKvServer(ctx, temporalDb, allSnapshots, temporalDb.Debug(), logger)
 	backend.notifications = shards.NewNotifications(kvRPC)
+	dispatcher := execmodule.NewDispatcher(chainConfig, blockReader, backend.notifications.Events, backend.notifications.StateChangesConsumer, nil, logger)
+	kvRPC.SetStateChangesSnapshot(func(ctx context.Context) (*remoteproto.StateChangeBatch, error) {
+		return dispatcher.StateChangesSnapshot(ctx, temporalDb)
+	})
 	backend.kvRPC = kvRPC
 
 	// Storage component: owns DB references, file-change callbacks, block retire.
@@ -718,15 +722,6 @@ func New(
 		)
 		contractBackend := contracts.NewDirectBackend(ethApi)
 		baseTxnProvider := backend.txPool
-		currentBlockNumReader := func(ctx context.Context) (*uint64, error) {
-			tx, err := backend.chainDB.BeginRo(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			defer tx.Rollback()
-			return chain.CurrentBlockNumber(tx)
-		}
 		backend.shutterPool = shutter.NewPool(
 			logger,
 			config.Shutter,
@@ -734,7 +729,7 @@ func New(
 			baseTxnProvider,
 			contractBackend,
 			backend.stateDiffClient,
-			currentBlockNumReader,
+			backend.shutterBlockState,
 		)
 		txnProvider = backend.shutterPool
 	}
@@ -861,7 +856,6 @@ func New(
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,
 		validationNotifications, blockReader, blockWriter, logger, backend.readAheader)
-	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, nil, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
 	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher, blockReader)
@@ -886,7 +880,6 @@ func New(
 		logger,
 		backend.engine,
 		config.Sync,
-		config.ExperimentalBAL,
 		config.FcuBackgroundPrune,
 		false, /* onlySnapDownloadOnStart */
 		backend.readAheader,
@@ -1138,6 +1131,22 @@ func (s *Ethereum) IsMining() bool { return false }
 
 func (s *Ethereum) RegisterMinedBlockObserver(callback func(msg *types.Block)) event.UnregisterFunc {
 	return s.minedBlockObservers.Register(callback)
+}
+
+func (s *Ethereum) shutterBlockState(ctx context.Context) (shutter.BlockState, error) {
+	tx, err := s.chainDB.BeginRo(ctx)
+	if err != nil {
+		return shutter.BlockState{}, err
+	}
+	defer tx.Rollback()
+
+	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return shutter.BlockState{}, err
+	}
+	state := shutter.BlockState{BlockNum: blockNum}
+	state.StateVersionID, err = rawdb.GetStateVersion(tx)
+	return state, err
 }
 
 func (s *Ethereum) ChainKV() kv.RwDB            { return s.chainDB }
@@ -1394,7 +1403,7 @@ func (s *Ethereum) Start() error {
 		return err
 	}
 
-	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, execmodule.NewReceiptsLoader(s.chainConfig, s.blockReader, receipts.NewGenerator(s.config.Dirs, s.blockReader, s.engine, nil, 5*time.Minute)), s.logger)
+	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.blockReader, s.notifications.Events, s.notifications.StateChangesConsumer, execmodule.NewReceiptsLoader(s.chainConfig, s.blockReader, receipts.NewGenerator(s.config.Dirs, s.blockReader, s.engine, nil, 5*time.Minute)), s.logger)
 	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.Client.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher, s.blockReader)
 
 	currentTDProvider := func() *uint256.Int {

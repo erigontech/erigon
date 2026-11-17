@@ -313,6 +313,55 @@ func TestPoolProposerSlashingDoesNotPublishIgnored(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 }
 
+func TestPoolVoluntaryExitDoesNotPublishIgnored(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service := services_mock.NewMockVoluntaryExitService(ctrl)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	requestBody, err := json.Marshal(&cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{}})
+	require.NoError(t, err)
+	service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(services.ErrIgnore).Times(1)
+	gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	handler := &ApiHandler{
+		logger:               log.Root(),
+		operationsPool:       pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
+		voluntaryExitService: service,
+		gossipManager:        gossipManager,
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/voluntary_exits", bytes.NewReader(requestBody))
+
+	handler.PostEthV1BeaconPoolVoluntaryExits(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+}
+
+func TestPoolVoluntaryExitRepublishesPooledExitWhenIgnored(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service := services_mock.NewMockVoluntaryExitService(ctrl)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	opPool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
+	pooled := &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{ValidatorIndex: 7}, Signature: common.Bytes96{1}}
+	opPool.VoluntaryExitsPool.Insert(7, pooled)
+	pooledSSZ, err := pooled.EncodeSSZ(nil)
+	require.NoError(t, err)
+	requestBody, err := json.Marshal(&cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{ValidatorIndex: 7}, Signature: common.Bytes96{2}})
+	require.NoError(t, err)
+	service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(services.ErrIgnore).Times(1)
+	gossipManager.EXPECT().Publish(gomock.Any(), clgossip.TopicNameVoluntaryExit, pooledSSZ).Return(nil).Times(1)
+	handler := &ApiHandler{
+		logger:               log.Root(),
+		operationsPool:       opPool,
+		voluntaryExitService: service,
+		gossipManager:        gossipManager,
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/voluntary_exits", bytes.NewReader(requestBody))
+
+	handler.PostEthV1BeaconPoolVoluntaryExits(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+}
+
 func TestPoolVoluntaryExits(t *testing.T) {
 	voluntaryExit := &cltypes.SignedVoluntaryExit{
 		VoluntaryExit: &cltypes.VoluntaryExit{
