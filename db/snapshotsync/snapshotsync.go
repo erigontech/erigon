@@ -17,14 +17,18 @@
 package snapshotsync
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
@@ -33,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
@@ -161,6 +166,95 @@ func isStateSnapshot(name string) bool {
 
 func isStateHistory(name string) bool {
 	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
+}
+
+func localV3CommitmentTip(dirs datadir.Dirs) (tip uint64, found bool, err error) {
+	entries, err := os.ReadDir(dirs.SnapDomain)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	var files []snaptype.FileInfo
+	for _, entry := range entries {
+		info, _, ok := snaptype.ParseFileName("", entry.Name())
+		if ok && info.TypeString == kv.CommitmentDomain.String() && info.Ext == ".kv" && info.Version.Major >= 3 {
+			files = append(files, info)
+		}
+	}
+	slices.SortFunc(files, func(a, b snaptype.FileInfo) int { return cmp.Compare(a.From, b.From) })
+	for i := range files {
+		if files[i].From > tip {
+			break
+		}
+		tip = max(tip, files[i].To)
+	}
+	return tip, len(files) > 0, nil
+}
+
+func incompatibleCommitmentFiles(items snapcfg.PreverifiedItems, localV3Tip uint64) map[string]bool {
+	type stepRange struct {
+		history  bool
+		from, to uint64
+	}
+	type rangedFile struct {
+		stepRange
+		required bool
+	}
+	v3 := statecfg.ExperimentalCommitmentV3
+	dependents := make(map[string]bool)
+	for _, pair := range statecfg.DomainDependencies() {
+		dependents[pair[0].String()] = true
+	}
+	ranges := make(map[string]rangedFile)
+	compatible := make(map[stepRange]bool)
+	incompatible := make(map[stepRange]bool)
+	skipped := make(map[string]bool)
+	for _, p := range items {
+		info, _, ok := snaptype.ParseFileName("", p.Name)
+		if !ok {
+			continue
+		}
+		r := stepRange{history: isStateHistory(p.Name), from: info.From, to: info.To}
+		if info.TypeString != kv.CommitmentDomain.String() {
+			if !r.history && dependents[info.TypeString] {
+				ranges[p.Name] = rangedFile{stepRange: r, required: true}
+			}
+			continue
+		}
+		if info.Ext == ".kv" || info.Ext == ".v" {
+			if (info.Version.Major >= 3) == v3 {
+				compatible[r] = true
+			} else {
+				incompatible[r] = true
+				skipped[p.Name] = false
+				if v3 && !r.history {
+					ranges[p.Name] = rangedFile{stepRange: r, required: true}
+				}
+			}
+		} else {
+			ranges[p.Name] = rangedFile{stepRange: r}
+		}
+	}
+	hasIncompatible := func(f rangedFile) bool {
+		if !f.required {
+			return incompatible[f.stepRange]
+		}
+		for r := range incompatible {
+			if !r.history && r.from < f.to && f.from < r.to {
+				return true
+			}
+		}
+		return false
+	}
+	for name, f := range ranges {
+		if compatible[f.stepRange] || f.required && f.to <= localV3Tip || !v3 && !hasIncompatible(f) {
+			continue
+		}
+		skipped[name] = f.required
+	}
+	return skipped
 }
 
 func canSnapshotBePruned(name string) bool {
@@ -620,6 +714,7 @@ func SyncSnapshots(
 	snapshotDownloader dbservices.DownloaderClient,
 	syncCfg ethconfig.Sync,
 	stepSize uint64,
+	dirs datadir.Dirs,
 ) error {
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
 		return nil
@@ -660,16 +755,65 @@ func SyncSnapshots(
 		}
 
 		log.Info(fmt.Sprintf("[%s] Preparing snapshots request for %s", logPrefix, task))
+		var localV3Tip uint64
+		var localV3 bool
+		if statecfg.ExperimentalCommitmentV3 {
+			var err error
+			if localV3Tip, localV3, err = localV3CommitmentTip(dirs); err != nil {
+				return err
+			}
+		}
+		incompatibleCommitment := incompatibleCommitmentFiles(snapCfg.Preverified.Items, localV3Tip)
+		v3Remedy := "sync with `--experimental.commitment-v3` off, then convert it with `integration commitment convert --v3` before enabling it"
+		if localV3 {
+			v3Remedy = "run with `--snap.skip-state-snapshot-download`, or restore with `integration commitment convert --restore`, sync with `--experimental.commitment-v3` off and convert again"
+		}
+		legacyRemedy := "run with `--experimental.commitment-v3` or `--snap.skip-state-snapshot-download`"
 		items, err := SnapshotsToDownload(ctx, logPrefix, headerchain, blobs, caplinState, blobRetention, prune, caplin, tx, blockReader, cc, syncCfg, stepSize, snapCfg.Preverified, toBlock, toStep)
 		if err != nil {
 			return err
 		}
 		downloadRequest := make([]dbservices.DownloadRequest, 0, len(items))
+		var skippedTip uint64
 		for _, p := range items {
+			if missing, ok := incompatibleCommitment[p.Name]; ok {
+				if missing && !statecfg.ExperimentalCommitmentV3 {
+					return fmt.Errorf("commitment v3 is disabled, but the snapshot manifest has only v3 commitment for %s: %s", p.Name, legacyRemedy)
+				}
+				if missing {
+					return fmt.Errorf("commitment v3 is enabled, but the snapshot manifest has no v3 commitment for %s: %s", p.Name, v3Remedy)
+				}
+				if info, _, ok := snaptype.ParseFileName("", p.Name); ok && info.TypeString == kv.CommitmentDomain.String() && info.Ext == ".kv" {
+					skippedTip = max(skippedTip, info.To)
+				}
+				continue
+			}
 			downloadRequest = append(downloadRequest, dbservices.DownloadRequest{
 				Path:        p.Name,
 				TorrentHash: p.Hash,
 			})
+		}
+
+		var stateTip uint64
+		commitmentTip := localV3Tip
+		for _, request := range downloadRequest {
+			if !strings.HasPrefix(request.Path, "domain/") {
+				continue
+			}
+			info, _, ok := snaptype.ParseFileName("", request.Path)
+			if !ok {
+				continue
+			}
+			stateTip = max(stateTip, info.To)
+			if info.TypeString == kv.CommitmentDomain.String() && info.Ext == ".kv" {
+				commitmentTip = max(commitmentTip, info.To)
+			}
+		}
+		if stateTip > commitmentTip && statecfg.ExperimentalCommitmentV3 {
+			return fmt.Errorf("commitment v3 is enabled, but the snapshot manifest has no v3 commitment for steps %d-%d of its state: %s", commitmentTip, stateTip, v3Remedy)
+		}
+		if stateTip > commitmentTip && skippedTip > commitmentTip {
+			return fmt.Errorf("commitment v3 is disabled, but the snapshot manifest has only v3 commitment for steps %d-%d of its state: %s", commitmentTip, min(stateTip, skippedTip), legacyRemedy)
 		}
 
 		// Only add the preverified hashes until the initial sync completed for the first time.
