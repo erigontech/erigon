@@ -99,11 +99,12 @@ func BenchmarkMarkWritesValidated(b *testing.B) {
 
 // BenchmarkValidateAccountReads validates 200 account reads of a block with an access list: reads
 // of accounts that the list's existence marker records, reads of accounts that the list does not
-// change, and absent reads of accounts without cells.
+// change, absent reads of accounts without cells, and absent reads of accounts that a later tx
+// creates.
 func BenchmarkValidateAccountReads(b *testing.B) {
 	const n = 200
-	present, unchanged, absent := make([]accounts.Address, n), make([]accounts.Address, n), make([]accounts.Address, n)
-	bal := make(types.BlockAccessList, n)
+	present, unchanged, absent, created := make([]accounts.Address, n), make([]accounts.Address, n), make([]accounts.Address, n), make([]accounts.Address, n)
+	bal := make(types.BlockAccessList, 2*n)
 	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
 	for i := range n {
 		present[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
@@ -114,6 +115,8 @@ func BenchmarkValidateAccountReads(b *testing.B) {
 		reader.accounts[present[i]] = &acc
 		reader.accounts[unchanged[i]] = &acc
 		bal[i] = types.AccountChanges{Address: present[i].Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(2)}}}
+		created[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(3*n + i + 1))))
+		bal[n+i] = types.AccountChanges{Address: created[i].Value(), BalanceChanges: []*types.BalanceChange{{Index: 5, Value: *uint256.NewInt(2)}}}
 	}
 	vm := NewVersionMap(bal)
 	vm.SeedAddresses()
@@ -124,6 +127,7 @@ func BenchmarkValidateAccountReads(b *testing.B) {
 		{"present from the marker", present},
 		{"present from the base", unchanged},
 		{"absent without cells", absent},
+		{"absent with cells", created},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			ibs := NewWithVersionMap(reader, vm)

@@ -2212,11 +2212,14 @@ func (vm *VersionMap) validateAccountAtMarker(addr accounts.Address, tr Versione
 		}
 		return VersionValid
 	}
-	if vm.load(addr) == nil {
+	e := vm.load(addr)
+	if e == nil {
 		return VersionValid
 	}
-	if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIdx); ok && sdRR.resolved() && destructed && sdRR.Version() == tr.Version {
-		return VersionValid
+	if e.destructed.Load() {
+		if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIdx); ok && sdRR.resolved() && destructed && sdRR.Version() == tr.Version {
+			return VersionValid
+		}
 	}
 	if rr := vm.ReadStatus(addr, AddressPath, accounts.NilKey, txIdx); rr.accSource() == AccountFromBAL {
 		return VersionInvalid
