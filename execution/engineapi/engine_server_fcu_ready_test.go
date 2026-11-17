@@ -158,7 +158,7 @@ func TestForkchoiceUpdatedWithAttributesWaitsOutPostForkchoiceWork(t *testing.T)
 			return execmodule.AssembleBlockResult{PayloadID: 7}, nil
 		},
 	}
-	// Longer than the readiness check's current half-second budget, far shorter than a slot.
+	// Exceeds the readiness budget without payload attributes, but fits the budget with them.
 	module := &busyUntilModule{stubExecutionModule: stub, busyFor: 600 * time.Millisecond}
 
 	cfg := preCancunChainConfig()

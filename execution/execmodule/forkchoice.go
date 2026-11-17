@@ -820,10 +820,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			e.closeModuleContext()
 		}
 
-		// Dispatch notifications from the SD overlay (before flush/commit).
-		// After this, all consumers have the data — the semaphore can be
-		// released and flush/commit/prune can proceed without blocking the
-		// next FCU.
+		// Dispatch notifications from the overlay before flush/commit; the semaphore
+		// stays held through commit and prune.
 		e.logger.Debug("[updateForkChoice] dispatching notifications", "head", blockHash)
 		prevUnwindPoint := fcuUnwindPoint
 		if prevUnwindPoint == nil {

@@ -785,7 +785,8 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		}
 	}
 
-	// If header is already validated or has a missing parent, you can either return VALID or SYNCING.
+	// Only newPayload can return VALID here. A pending commit can still change the stored
+	// forkchoice, so forkchoice updates must go through the execution module's serialized path.
 	if newPayload {
 		// A validated non-canonical payload is answered before InsertBlocks,
 		// whose ClearWithUnwind would drop the executed state FCU merges.
@@ -934,10 +935,8 @@ func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	e.logger.Debug("[ForkChoiceUpdated] processing new request", newReqLogInfoArgs...)
 	readinessWait := defaultReadinessWait
 	if payloadAttributes != nil {
-		// The previous head's flush, commit and prune keep the module busy after its forkchoice
-		// update has already answered. Answering SYNCING here drops the payload build - and with
-		// it the proposal - so wait as long as the AssembleBlock step below would, capped so a
-		// long-slot chain can't turn this into a client-side timeout instead of a clean SYNCING.
+		// The module may still be committing or pruning after an earlier VALID response.
+		// A SYNCING response has no payload ID, so allow a longer readiness wait for builds.
 		readinessWait = attributesReadinessWait(e.config.SecondsPerSlot())
 	}
 	status, err := e.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, nil, false, readinessWait)
