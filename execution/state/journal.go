@@ -86,11 +86,10 @@ type journalExtra struct {
 
 // journalEntry is a compact tagged union stored inline in journal.entries.
 // Fields are reused across kinds: value holds the reverted uint256, aux the
-// reverted scalar (nonce/refund/log index/incarnation), flags the booleans,
-// extra only what the infrequent kinds need.
+// reverted scalar (nonce/refund/log index/incarnation) or, for the slot kinds, the slot's index in
+// journal.keys, flags the booleans, extra only what the infrequent kinds need.
 type journalEntry struct {
 	account accounts.Address
-	key     accounts.StorageKey
 	extra   *journalExtra
 	value   uint256.Int
 	aux     uint64
@@ -104,6 +103,7 @@ type journalEntry struct {
 type journal struct {
 	dirties map[accounts.Address]int // Dirty accounts and the number of changes
 	entries []journalEntry           // Current changes tracked by the journal
+	keys    []accounts.StorageKey    // Slots of the slot entries, kept out of journalEntry to keep it small
 	epoch   uint64                   // Moves on every revert, reset and unjournalled state change
 }
 
@@ -122,6 +122,7 @@ func (j *journal) Reset() {
 	j.epoch++
 	clear(j.entries)
 	j.entries = j.entries[:0]
+	j.keys = j.keys[:0]
 	clear(j.dirties)
 }
 
@@ -132,7 +133,7 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 		// Undo the changes made by the operation. A revert error means a
 		// journalled account can no longer be loaded — the state would be left
 		// half-reverted, so fail loudly rather than continue corrupt.
-		if err := j.entries[i].revert(statedb); err != nil {
+		if err := j.entries[i].revert(statedb, j.keys); err != nil {
 			panic(fmt.Sprintf("journal: revert of kind %d failed: %v", j.entries[i].kind, err))
 		}
 
@@ -143,6 +144,15 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 			}
 		}
 	}
+	// Slots are appended in entry order, so the reverted entries own the tail of keys.
+	keep := len(j.keys)
+	for i := snapshot; i < len(j.entries); i++ {
+		if j.entries[i].hasKey() {
+			keep = int(j.entries[i].aux)
+			break
+		}
+	}
+	j.keys = j.keys[:keep]
 	clear(j.entries[snapshot:])
 	j.entries = j.entries[:snapshot]
 	j.epoch++
@@ -243,12 +253,12 @@ func (j *journal) nonceChange(account accounts.Address, prev uint64, wasCommitte
 }
 
 func (j *journal) storageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int, wasCommitted bool) {
-	j.entries = append(j.entries, journalEntry{kind: kindStorage, account: account, key: key, value: prevalue, flags: commitFlag(wasCommitted)})
+	j.entries = append(j.entries, journalEntry{kind: kindStorage, account: account, aux: j.addKey(key), value: prevalue, flags: commitFlag(wasCommitted)})
 	j.dirties[account]++
 }
 
 func (j *journal) fakeStorageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int) {
-	j.entries = append(j.entries, journalEntry{kind: kindFakeStorage, account: account, key: key, value: prevalue})
+	j.entries = append(j.entries, journalEntry{kind: kindFakeStorage, account: account, aux: j.addKey(key), value: prevalue})
 	j.dirties[account]++
 }
 
@@ -259,6 +269,20 @@ func (j *journal) codeChange(account accounts.Address, prevcode []byte, prevhash
 	}
 	j.entries = append(j.entries, journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommitted), extra: extra})
 	j.dirties[account]++
+}
+
+// addKey stores a slot entry's key and returns its index for the entry's aux.
+func (j *journal) addKey(k accounts.StorageKey) uint64 {
+	j.keys = append(j.keys, k)
+	return uint64(len(j.keys) - 1)
+}
+
+func (je *journalEntry) hasKey() bool {
+	switch je.kind {
+	case kindStorage, kindFakeStorage, kindAccessListAddSlot, kindFrameStorageOwner:
+		return true
+	}
+	return false
 }
 
 func (j *journal) refundChange(prev uint64) {
@@ -275,7 +299,7 @@ func (j *journal) accessListAddAccountChange(address accounts.Address) {
 }
 
 func (j *journal) accessListAddSlotChange(address accounts.Address, slot accounts.StorageKey) {
-	j.entries = append(j.entries, journalEntry{kind: kindAccessListAddSlot, account: address, key: slot})
+	j.entries = append(j.entries, journalEntry{kind: kindAccessListAddSlot, account: address, aux: j.addKey(slot)})
 }
 
 func (j *journal) transientStorageChange(account accounts.Address, slot int, prevalue uint256.Int) {
@@ -301,7 +325,7 @@ func (je *journalEntry) dirtied() (accounts.Address, bool) {
 var ripemd = accounts.InternAddress(common.HexToAddress("0000000000000000000000000000000000000003"))
 
 // revert undoes the change recorded by this entry.
-func (je *journalEntry) revert(s *IntraBlockState) error {
+func (je *journalEntry) revert(s *IntraBlockState, keys []accounts.StorageKey) error {
 	switch je.kind {
 	case kindFrameTransient:
 		s.transientStorage = je.extra.prevTransient
@@ -314,7 +338,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		je.extra.frame.Receipts[je.flags].GasUsed.State = je.aux
 		return nil
 	case kindFrameStorageOwner:
-		slot := frameStorageSlot{je.account, je.key}
+		slot := frameStorageSlot{je.account, keys[je.aux]}
 		if je.flags == 0 {
 			delete(je.extra.frame.storageOwners, slot)
 		} else {
@@ -494,20 +518,20 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 	case kindStorage:
 		if s.versionMap != nil {
 			if je.committed() {
-				s.versionedWrites.DelStorage(je.account, je.key)
-			} else if _, ok := s.versionedWrites.GetStorage(je.account, je.key); ok {
-				s.versionedWrites.updateStorage(je.account, je.key, je.value)
+				s.versionedWrites.DelStorage(je.account, keys[je.aux])
+			} else if _, ok := s.versionedWrites.GetStorage(je.account, keys[je.aux]); ok {
+				s.versionedWrites.updateStorage(je.account, keys[je.aux], je.value)
 			}
 		}
 		if so, ok := s.stateObjects[je.account]; ok {
-			so.setState(je.key, je.value)
+			so.setState(keys[je.aux], je.value)
 		} else if s.versionMap == nil {
 			obj, err := s.getStateObject(je.account, false)
 			if err != nil {
 				return err
 			}
 			if obj != nil {
-				obj.setState(je.key, je.value)
+				obj.setState(keys[je.aux], je.value)
 			}
 		}
 		return nil
@@ -517,7 +541,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		if err != nil {
 			return err
 		}
-		obj.fakeStorage[je.key] = je.value
+		obj.fakeStorage[keys[je.aux]] = je.value
 		return nil
 
 	case kindTransientStorage:
@@ -569,7 +593,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindAccessListAddSlot:
-		s.accessList.DeleteSlot(je.account, je.key)
+		s.accessList.DeleteSlot(je.account, keys[je.aux])
 		return nil
 	}
 	panic(fmt.Sprintf("revert: unknown journal entry kind %d", je.kind))

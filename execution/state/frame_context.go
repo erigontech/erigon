@@ -114,7 +114,7 @@ func (ctx *FrameContext) RecordStorageCharge(address accounts.Address, key accou
 
 func (ctx *FrameContext) setStorageOwner(address accounts.Address, key accounts.StorageKey, owner uint8) {
 	slot := frameStorageSlot{address, key}
-	ctx.journal.entries = append(ctx.journal.entries, journalEntry{kind: kindFrameStorageOwner, account: address, key: key, flags: ctx.storageOwners[slot], extra: &ctx.undo})
+	ctx.journal.entries = append(ctx.journal.entries, journalEntry{kind: kindFrameStorageOwner, account: address, aux: ctx.journal.addKey(key), flags: ctx.storageOwners[slot], extra: &ctx.undo})
 	if owner == 0 {
 		delete(ctx.storageOwners, slot)
 	} else {
