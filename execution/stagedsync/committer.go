@@ -666,7 +666,6 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		return
 	}
 	if !bytes.Equal(rh, req.stateRoot[:]) {
-		cc.doms.GetCommitmentContext().ResetPendingUpdates()
 		fail(fmt.Errorf("%w: BAL-driven block %d root %x expected %x",
 			ErrWrongTrieRoot, req.blockNum, rh, req.stateRoot))
 		return
