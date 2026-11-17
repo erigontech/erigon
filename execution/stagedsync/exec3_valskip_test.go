@@ -56,13 +56,13 @@ func TestValidationSkipOracleOnReplayedBlock(t *testing.T) {
 
 	r, closeFn := setupEphemeralReplay(t, fx)
 	defer closeFn()
-	tx, doms := r.newDomains(t, fx)
+	tx, doms, ws := r.newDomains(t, fx)
 	defer tx.Rollback()
 	defer doms.Close()
 
 	require.NoError(t, r.exec(tx, doms))
 	require.Greater(t, skipCount.Load(), int64(0))
-	require.NoError(t, r.verify(tx, doms, fx.Outputs))
+	require.NoError(t, r.verify(tx, doms, ws, fx.Outputs))
 }
 
 const arrivalWriter, arrivalReader = 1, 3
