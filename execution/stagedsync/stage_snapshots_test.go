@@ -20,19 +20,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -504,4 +512,41 @@ func TestSnapshotAdvanceInvalidatesStateChanges(t *testing.T) {
 			require.Equal(t, target > 1, batch.StateChangesIncomplete)
 		})
 	}
+}
+
+// The accessor must be rebuilt before the stage saves snapshot hashes and notifies RPC.
+func TestDownloadAndIndexSnapshotsRebuildsMissedAccessorBeforeSavingHashes(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	stateDB := temporaltest.NewTestDB(t, dirs)
+	tx, sd := temporaltest.NewTestTxSD(t, stateDB)
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, []byte{1}, []byte{1}, config3.DefaultStepSize, nil))
+	require.NoError(t, sd.Flush(t.Context(), tx))
+	require.NoError(t, tx.Commit())
+	require.NoError(t, stateDB.(*temporal.DB).BuildFiles(2*config3.DefaultStepSize, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
+	stateDB.Close()
+	accessors, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.0-1.bt"))
+	require.NoError(t, err)
+	require.Len(t, accessors, 1)
+	require.NoError(t, os.Remove(accessors[0]))
+
+	db := temporaltest.NewTestDB(t, dirs)
+	notADir := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(notADir, nil, 0o600))
+	unsavableDirs := dirs
+	unsavableDirs.Snap = filepath.Join(notADir, "snapshots")
+	cfg := SnapshotsCfg{
+		db:          db,
+		chainConfig: &chain.Config{ChainName: networkname.Test},
+		dirs:        unsavableDirs,
+		blockReader: freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles()),
+		notifier:    shards.NewNotifications(nil),
+	}
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	s := &StageState{CurrentSyncCycle: CurrentSyncCycleInfo{IsFirstCycle: true}}
+	err = DownloadAndIndexSnapshotsIfNeed(s, t.Context(), rwTx, cfg, log.New())
+	require.ErrorContains(t, err, "saving snapshot hashes")
+	require.FileExists(t, accessors[0])
 }
