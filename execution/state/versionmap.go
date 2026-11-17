@@ -2128,6 +2128,8 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			return VersionValid
 		}
 	}
+	// Origin publication writes no stamp, so a published origin must not change this read's
+	// verdict; otherwise the arrival skip would miss the change. Only a lower write may.
 	if path == StoragePath && source == StorageRead && version == UnknownVersion && rr.DepIdx() == originIndex {
 		rr = ReadResult{depIdx: UnknownDep}
 	}

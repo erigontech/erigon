@@ -398,7 +398,7 @@ func originPublishFixture() (*VersionMap, accounts.Address, accounts.StorageKey,
 	return vm, addr, slot, validate
 }
 
-func TestValSkip_OriginPublishKeepsColdStorageReadValid(t *testing.T) {
+func TestValSkip_OriginPublishKeepsUnknownVersionStorageReadValid(t *testing.T) {
 	t.Parallel()
 	vm, addr, slot, validate := originPublishFixture()
 	const i = 5
@@ -412,7 +412,7 @@ func TestValSkip_OriginPublishKeepsColdStorageReadValid(t *testing.T) {
 		"an unstamped origin publication must not turn a validated read stale")
 }
 
-func TestValSkip_LowerWriteAfterOriginInvalidatesColdStorageRead(t *testing.T) {
+func TestValSkip_LowerWriteAfterOriginInvalidatesUnknownVersionStorageRead(t *testing.T) {
 	t.Parallel()
 	vm, addr, slot, validate := originPublishFixture()
 	const k, i = 2, 5
@@ -423,4 +423,35 @@ func TestValSkip_LowerWriteAfterOriginInvalidatesColdStorageRead(t *testing.T) {
 
 	require.False(t, vm.QuietBelow(i, stamp))
 	require.Equal(t, VersionInvalid, validate(i))
+}
+
+// A tx reads a slot of a contract that a lower tx created. Another tx read the same slot
+// while the creation was still in flight, and publishes the slot origin afterwards.
+func TestValSkip_OriginPublishedAfterReadOfCreatedContract(t *testing.T) {
+	t.Parallel()
+	c := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	vm := newStampedMap(4)
+
+	creator := newNoMaterializeTx(vm, 0)
+	require.NoError(t, creator.CreateAccount(c, true))
+	created := creator.VersionedWrites()
+	vm.FlushVersionedWrites(created, false)
+
+	late := newNoMaterializeTx(vm, 2)
+	_, err := late.GetState(c, slot)
+	require.NoError(t, err)
+
+	vm.MarkWritesValidated(created, nil)
+
+	reader := newNoMaterializeTx(vm, 1)
+	_, err = reader.GetState(c, slot)
+	require.NoError(t, err)
+	stamp := vm.WriteSeq()
+	require.Equal(t, VersionValid, validateReads(vm, reader, 1))
+
+	late.PublishOrigins()
+
+	require.True(t, vm.QuietBelow(1, stamp))
+	require.Equal(t, VersionValid, validateReads(vm, reader, 1))
 }
