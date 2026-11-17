@@ -241,7 +241,7 @@ func (e *EngineServer) validatePayloadAttributesPreFCU(version clparams.StateVer
 	if e.config.IsAmsterdam(timestamp) && version < clparams.GloasVersion { // V3 fcu at an Amsterdam timestamp
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
-	if e.config.IsBogota(timestamp) && version < clparams.HezeVersion { // V4 fcu at a Bogota timestamp
+	if e.config.IsEIPEnabled(7805, timestamp) && version < clparams.HezeVersion { // V4 fcu at a FOCIL timestamp
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 	if version >= clparams.CapellaVersion && e.checkWithdrawals(timestamp, payloadAttributes.Withdrawals) != nil {
@@ -267,7 +267,7 @@ func (e *EngineServer) validatePayloadAttributesPostFCU(version clparams.StateVe
 	if !e.config.IsAmsterdam(timestamp) && version >= clparams.GloasVersion { // V4 outside Amsterdam window
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
-	if !e.config.IsBogota(timestamp) && version >= clparams.HezeVersion { // V5 outside Bogota window
+	if !e.config.IsEIPEnabled(7805, timestamp) && version >= clparams.HezeVersion { // V5 outside FOCIL window
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {

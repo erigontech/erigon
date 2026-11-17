@@ -2369,6 +2369,58 @@ func TestForkchoiceUpdatedBogotaAttributesWhenSyncing(t *testing.T) {
 	})
 }
 
+func bogotaWithoutFOCILAtTimestamp(timestamp uint64) *chain.Config {
+	cfg := bogotaAtTimestamp(timestamp)
+	cfg.DisabledEIPs = []int{7805}
+	return cfg
+}
+
+func TestForkchoiceUpdatedV5RejectsBogotaAttributesWithoutFOCIL(t *testing.T) {
+	t.Parallel()
+
+	forkchoiceState := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x1},
+		SafeBlockHash:      common.Hash{0x2},
+		FinalizedBlockHash: common.Hash{0x3},
+	}
+	stub := &stubExecutionModule{
+		getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
+			return execmodule.ForkChoiceState{
+				HeadHash:      forkchoiceState.HeadHash,
+				SafeHash:      forkchoiceState.SafeBlockHash,
+				FinalizedHash: forkchoiceState.FinalizedBlockHash,
+			}, nil
+		},
+	}
+	srv := NewEngineServer(log.New(), bogotaWithoutFOCILAtTimestamp(1000), stub, nil, false, false, false, true, nil, nil, 0, 0)
+
+	resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, gloasPayloadAttributes(1001, []hexutil.Bytes{}), clparams.HezeVersion)
+	require.Nil(t, resp)
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, -38005, rpcErr.ErrorCode())
+}
+
+func TestForkchoiceUpdatedV4AcceptsBogotaAttributesWithoutFOCIL(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubExecutionModule{}
+	cfg := bogotaWithoutFOCILAtTimestamp(1000)
+	srv := NewEngineServer(log.New(), cfg, stub, engine_block_downloader.NewEngineBlockDownloader(
+		context.Background(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil,
+	), false, false, false, true, nil, nil, 0, 0)
+	srv.test = true
+
+	forkchoiceState := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x1},
+		SafeBlockHash:      common.Hash{0x2},
+		FinalizedBlockHash: common.Hash{0x3},
+	}
+	resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, gloasPayloadAttributes(1001, nil), clparams.GloasVersion)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.SyncingStatus, resp.PayloadStatus.Status)
+}
+
 func TestForkchoiceUpdatedReturnsSyncingForIncompleteExecution(t *testing.T) {
 	t.Parallel()
 
