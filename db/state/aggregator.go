@@ -2507,6 +2507,9 @@ func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
 		if err := dt.checkFilesDBGap(tx); err != nil {
 			return err
 		}
+		if err := dt.ht.checkFilesDBGap(tx); err != nil {
+			return err
+		}
 	}
 	for _, iit := range at.iis {
 		if iit == nil || !iit.ii.Enabled {
