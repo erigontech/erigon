@@ -17,6 +17,7 @@
 package das
 
 import (
+	"cmp"
 	"container/heap"
 	"context"
 	"errors"
@@ -276,11 +277,18 @@ func recoverableFuluDataAtSlot(t *testing.T, cfg *clparams.BeaconChainConfig, sl
 }
 
 func recoverableFuluDataAtSlotWithExecutionBlockHash(t *testing.T, cfg *clparams.BeaconChainConfig, slot uint64, executionBlockHash common.Hash) (*cltypes.SignedBeaconBlock, common.Hash, []*cltypes.BlobSidecar, []*cltypes.DataColumnSidecar) {
+	return recoverableFuluDataWithBlobs(t, cfg, slot, executionBlockHash, 2)
+}
+
+func recoverableFuluDataWithBlobs(t *testing.T, cfg *clparams.BeaconChainConfig, slot uint64, executionBlockHash common.Hash, blobCount int) (*cltypes.SignedBeaconBlock, common.Hash, []*cltypes.BlobSidecar, []*cltypes.DataColumnSidecar) {
 	t.Helper()
 	block := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
 	block.Block.Slot = slot
 	block.Block.Body.ExecutionPayload.BlockHash = executionBlockHash
-	blobs := []goethkzg.Blob{{1}, {2}}
+	blobs := make([]goethkzg.Blob, blobCount)
+	for i := range blobs {
+		blobs[i] = goethkzg.Blob{byte(i + 1)}
+	}
 	commitments := make([]goethkzg.KZGCommitment, len(blobs))
 	blobProofs := make([]goethkzg.KZGProof, len(blobs))
 	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, len(blobs))
@@ -1786,29 +1794,31 @@ func makeDelayedBlobRecoveriesOverdue(d *peerdas) {
 }
 
 func TestNextBlobRecoveryRequestGloballyPacesDelayedRetries(t *testing.T) {
-	d := &peerdas{recoverBlobsQueue: make(chan recoverBlobsRequest, 1)}
-	const retries = 9
-	for i := range retries {
-		request := recoverBlobsRequest{slot: uint64(i + 1), blockRoot: common.Hash{byte(i + 1)}}
-		require.True(t, d.delayBlobRecovery(request))
-	}
-	makeDelayedBlobRecoveriesOverdue(d)
+	synctest.Test(t, func(t *testing.T) {
+		d := &peerdas{recoverBlobsQueue: make(chan recoverBlobsRequest, 1)}
+		const retries = 9
+		for i := range retries {
+			request := recoverBlobsRequest{slot: uint64(i + 1), blockRoot: common.Hash{byte(i + 1)}}
+			require.True(t, d.delayBlobRecovery(request))
+		}
+		makeDelayedBlobRecoveriesOverdue(d)
 
-	started := time.Now()
-	for range retries {
-		_, ok := d.nextBlobRecoveryRequest(t.Context())
-		require.True(t, ok)
-	}
-	require.GreaterOrEqual(t, time.Since(started), blobRecoveryValidationRetryInterval-10*time.Millisecond)
-	require.Len(t, d.isRecovering, retries)
-	require.Empty(t, d.recoveryRetries)
+		started := time.Now()
+		for range retries {
+			_, ok := d.nextBlobRecoveryRequest(t.Context())
+			require.True(t, ok)
+		}
+		require.GreaterOrEqual(t, time.Since(started), blobRecoveryValidationRetryInterval-10*time.Millisecond)
+		require.Len(t, d.isRecovering, retries)
+		require.Empty(t, d.recoveryRetries)
 
-	typeOfPeerDas := reflect.TypeFor[peerdas]()
-	heapField, hasHeap := typeOfPeerDas.FieldByName("recoveryRetryQueue")
-	_, hasLinearOrder := typeOfPeerDas.FieldByName("recoveryRetryOrder")
-	require.True(t, hasHeap)
-	require.True(t, reflect.PointerTo(heapField.Type).Implements(reflect.TypeFor[heap.Interface]()))
-	require.False(t, hasLinearOrder)
+		typeOfPeerDas := reflect.TypeFor[peerdas]()
+		heapField, hasHeap := typeOfPeerDas.FieldByName("recoveryRetryQueue")
+		_, hasLinearOrder := typeOfPeerDas.FieldByName("recoveryRetryOrder")
+		require.True(t, hasHeap)
+		require.True(t, reflect.PointerTo(heapField.Type).Implements(reflect.TypeFor[heap.Interface]()))
+		require.False(t, hasLinearOrder)
+	})
 }
 
 func TestBlobRecoveryMetadataUpgradeRepairsInvalidEqualCountStorage(t *testing.T) {
@@ -2264,6 +2274,8 @@ const recoveryTestSlot = uint64(9_999)
 type recoveryOptions struct {
 	caplinConfig *clparams.CaplinConfig
 	supernode    bool
+	// blobs is the blob count of the block; zero means two.
+	blobs int
 	// unscheduled leaves the recovery to the test: the helper starts the worker but enqueues no request.
 	unscheduled bool
 	// instrument runs before the worker starts and may wrap the storages of r.d.
@@ -2272,6 +2284,7 @@ type recoveryOptions struct {
 
 type recoveryRun struct {
 	d          *peerdas
+	block      *cltypes.SignedBeaconBlock
 	root       common.Hash
 	metadata   *blobRecoveryMetadata
 	blobs      []*cltypes.BlobSidecar
@@ -2294,7 +2307,7 @@ func startRecoveryWithPublisher(t *testing.T, opts recoveryOptions) *recoveryRun
 	cfg.FuluForkEpoch = 0
 	cfg.InitializeForkSchedule()
 	initTestBeaconConfig(&cfg)
-	block, root, blobs, columns := recoverableFuluDataAtSlot(t, &cfg, recoveryTestSlot)
+	block, root, blobs, columns := recoverableFuluDataWithBlobs(t, &cfg, recoveryTestSlot, common.Hash{}, cmp.Or(opts.blobs, 2))
 
 	d := newELBlobsTestPeerDas(t, &cfg, opts.caplinConfig)
 	if opts.supernode {
@@ -2323,7 +2336,7 @@ func startRecoveryWithPublisher(t *testing.T, opts recoveryOptions) *recoveryRun
 		calls <- recoveredColumnsPublish{ctx: ctx, sidecars: sidecars}
 		<-unblock
 	})
-	r := &recoveryRun{d: d, root: root, metadata: metadata, blobs: blobs, columns: columns, stored: stored, published: calls}
+	r := &recoveryRun{d: d, block: block, root: root, metadata: metadata, blobs: blobs, columns: columns, stored: stored, published: calls}
 	if opts.instrument != nil {
 		opts.instrument(r)
 	}
@@ -2623,10 +2636,12 @@ type firstColumnReadStorage struct {
 	blob_storage.DataColumnStorage
 	root      common.Hash
 	firstRead chan time.Time
+	reads     atomic.Int32
 }
 
 func (s *firstColumnReadStorage) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
 	if blockRoot == s.root {
+		s.reads.Add(1)
 		select {
 		case s.firstRead <- time.Now():
 		default:
@@ -2641,6 +2656,7 @@ type gossipRecovery struct {
 	*recoveryRun
 	slotStart    atomic.Int64
 	firstRead    chan time.Time
+	columnReads  *firstColumnReadStorage
 	workerWrites *countingColumnStorage
 	releaseClock func()
 }
@@ -2649,6 +2665,13 @@ type gossipRecovery struct {
 // releaseClock is called, so gossip can go on until the worker decides when to start. configure may change the
 // peerdas before the worker starts.
 func startGossipRecovery(t *testing.T, gated bool, configure ...func(*recoveryRun)) *gossipRecovery {
+	t.Helper()
+	return startGossipRecoveryWithBlobs(t, gated, 0, configure...)
+}
+
+// startGossipRecoveryWithBlobs is startGossipRecovery for a block with blobs blobs; zero means two. The deferred column
+// sync has a wake channel but no worker.
+func startGossipRecoveryWithBlobs(t *testing.T, gated bool, blobs int, configure ...func(*recoveryRun)) *gossipRecovery {
 	t.Helper()
 	g := &gossipRecovery{firstRead: make(chan time.Time, 1)}
 	clockGate := make(chan struct{})
@@ -2661,7 +2684,9 @@ func startGossipRecovery(t *testing.T, gated bool, configure ...func(*recoveryRu
 		caplinConfig: &clparams.CaplinConfig{},
 		supernode:    true,
 		unscheduled:  true,
+		blobs:        blobs,
 		instrument: func(r *recoveryRun) {
+			r.d.blocksToCheckSync.wake = make(chan struct{}, 1)
 			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 			clock.EXPECT().GetSlotTime(gomock.Any()).DoAndReturn(func(uint64) time.Time {
 				<-clockGate
@@ -2669,7 +2694,8 @@ func startGossipRecovery(t *testing.T, gated bool, configure ...func(*recoveryRu
 			}).AnyTimes()
 			r.d.ethClock = clock
 			g.workerWrites = r.countColumnWrites()
-			r.d.columnStorage = &firstColumnReadStorage{DataColumnStorage: r.d.columnStorage, root: r.root, firstRead: g.firstRead}
+			g.columnReads = &firstColumnReadStorage{DataColumnStorage: r.d.columnStorage, root: r.root, firstRead: g.firstRead}
+			r.d.columnStorage = g.columnReads
 			for _, apply := range configure {
 				apply(r)
 			}
@@ -2760,36 +2786,40 @@ func TestBlobRecoveryWaitsForGossipToGoQuietBeforeReadingColumns(t *testing.T) {
 
 // Every column stored while the worker waits restarts the wait.
 func TestBlobRecoveryWaitRestartsWithEachStoredColumn(t *testing.T) {
-	g := startGossipRecovery(t, false)
+	synctest.Test(t, func(t *testing.T) {
+		g := startGossipRecovery(t, false)
 
-	calls := []scheduleCall{g.schedule(t)}
-	for range 3 {
-		time.Sleep(wantQuietPeriod / 6)
-		calls = append(calls, g.schedule(t))
-	}
-	started := g.awaitFirstRead(t)
+		calls := []scheduleCall{g.schedule(t)}
+		for range 3 {
+			time.Sleep(wantQuietPeriod / 6)
+			calls = append(calls, g.schedule(t))
+		}
+		started := g.awaitFirstRead(t)
 
-	require.False(t, started.Before(earliestQuietEnd(calls)), "the worker started before the last column restarted the wait")
+		require.False(t, started.Before(earliestQuietEnd(calls)), "the worker started before the last column restarted the wait")
+	})
 }
 
 // A column stored after the worker claimed the request restarts the wait, even when the wait the worker claimed has
 // already passed.
 func TestBlobRecoveryWaitRestartsWithAColumnStoredAfterTheClaim(t *testing.T) {
-	g := startGossipRecovery(t, true)
+	synctest.Test(t, func(t *testing.T) {
+		g := startGossipRecovery(t, true)
 
-	first := g.schedule(t)
-	require.Eventually(t, func() bool {
-		g.d.recoveringMutex.Lock()
-		defer g.d.recoveringMutex.Unlock()
-		return g.d.isRecovering[g.root]
-	}, 30*time.Second, time.Millisecond, "the worker did not claim the recovery")
-	time.Sleep(time.Until(first.end.Add(wantQuietPeriod)))
-	second := g.schedule(t)
-	g.releaseClock()
-	started := g.awaitFirstRead(t)
+		first := g.schedule(t)
+		require.Eventually(t, func() bool {
+			g.d.recoveringMutex.Lock()
+			defer g.d.recoveringMutex.Unlock()
+			return g.d.isRecovering[g.root]
+		}, 30*time.Second, time.Millisecond, "the worker did not claim the recovery")
+		time.Sleep(time.Until(first.end.Add(wantQuietPeriod)))
+		second := g.schedule(t)
+		g.releaseClock()
+		started := g.awaitFirstRead(t)
 
-	require.False(t, started.Before(second.begin.Add(wantQuietPeriod)), "the worker started before the column stored after the claim restarted the wait")
-	require.Less(t, started.Sub(second.end), wantQuietPeriod+startSlack)
+		require.False(t, started.Before(second.begin.Add(wantQuietPeriod)), "the worker started before the column stored after the claim restarted the wait")
+		require.Less(t, started.Sub(second.end), wantQuietPeriod+startSlack)
+	})
 }
 
 // earliestQuietEnd returns the earliest time the worker may start after the calls, which ran one after the other. A
@@ -2830,19 +2860,21 @@ func TestBlobRecoveryRecoversMissingColumnsOnceGossipIsQuiet(t *testing.T) {
 // When gossip delivers the remaining columns before the worker decides to start, the matrix is complete: the worker
 // writes the blob sidecars and no column.
 func TestBlobRecoveryFindsCompleteMatrixWhenGossipDeliversEveryColumn(t *testing.T) {
-	g := startGossipRecovery(t, true)
+	synctest.Test(t, func(t *testing.T) {
+		g := startGossipRecovery(t, true)
 
-	g.schedule(t)
-	g.storeColumnsUpTo(t, int(g.d.beaconConfig.NumberOfColumns), func() { g.schedule(t) })
-	storedLastColumn := time.Now()
-	g.releaseClock()
-	started := g.awaitFirstRead(t)
+		g.schedule(t)
+		g.storeColumnsUpTo(t, int(g.d.beaconConfig.NumberOfColumns), func() { g.schedule(t) })
+		storedLastColumn := time.Now()
+		g.releaseClock()
+		started := g.awaitFirstRead(t)
 
-	require.False(t, started.Before(storedLastColumn), "the worker started before gossip delivered the last column")
-	requireBlobRecoveryReleased(t, g.d, g.root)
-	g.requireBlobsRecovered(t)
-	require.Zero(t, g.workerWrites.writes.Load(), "column writes by the worker")
-	require.Never(t, func() bool { return len(g.published) > 0 }, 100*time.Millisecond, 10*time.Millisecond, "published columns")
+		require.False(t, started.Before(storedLastColumn), "the worker started before gossip delivered the last column")
+		requireBlobRecoveryReleased(t, g.d, g.root)
+		g.requireBlobsRecovered(t)
+		require.Zero(t, g.workerWrites.writes.Load(), "column writes by the worker")
+		require.Never(t, func() bool { return len(g.published) > 0 }, 100*time.Millisecond, 10*time.Millisecond, "published columns")
+	})
 }
 
 // Columns that keep arriving cannot hold the recovery past the deadline: a quarter of the slot before Gloas, and the

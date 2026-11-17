@@ -72,6 +72,7 @@ type stubExecutionModule struct {
 	validateChainFunc      func(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error)
 	updateForkChoiceFunc   func(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error)
 	inclusionListFunc      func(ctx context.Context) (types.Transactions, error)
+	witnessView            func() error
 	addSendersRecoveryFunc func(blockHash common.Hash, recovery *exec.SendersRecovery)
 	readyFunc              func(ctx context.Context) (bool, error)
 	isValidatedFunc        func(hash common.Hash) bool
@@ -213,8 +214,9 @@ func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, err
 	return 0, false, nil
 }
 
-func (s *stubExecutionModule) ValidateChainAndView(ctx context.Context, block *types.Block, _ time.Duration, _ execmodule.BlockStateView) (execmodule.ValidationResult, error) {
-	return s.ValidateChain(ctx, block)
+func (s *stubExecutionModule) ValidateChainAndView(ctx context.Context, block *types.Block, _ time.Duration, _ execmodule.BlockStateView) (execmodule.ValidationResult, func() error, error) {
+	result, err := s.ValidateChain(ctx, block)
+	return result, s.witnessView, err
 }
 
 func (s *stubExecutionModule) InclusionList(ctx context.Context) (types.Transactions, error) {

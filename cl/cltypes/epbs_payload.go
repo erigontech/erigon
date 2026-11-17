@@ -451,11 +451,10 @@ func (e *ExecutionPayloadBid) decodeSSZ(buf []byte, version int, strict bool) er
 }
 
 func (e *ExecutionPayloadBid) Clone() clonable.Clonable {
-	commitments := e.BlobKzgCommitments.Clone().(*solid.ListSSZ[*KZGCommitment])
-	commitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
-	return &ExecutionPayloadBid{
-		BlobKzgCommitments: *commitments,
-	}
+	cloned := new(ExecutionPayloadBid)
+	e.BlobKzgCommitments.CloneTo(&cloned.BlobKzgCommitments)
+	cloned.BlobKzgCommitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
+	return cloned
 }
 
 func (e *ExecutionPayloadBid) UnmarshalJSON(data []byte) error {
@@ -476,7 +475,7 @@ func (e *ExecutionPayloadBid) UnmarshalJSON(data []byte) error {
 }
 
 func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {
-	return &ExecutionPayloadBid{
+	copied := &ExecutionPayloadBid{
 		ParentBlockHash:       e.ParentBlockHash,
 		ParentBlockRoot:       e.ParentBlockRoot,
 		BlockHash:             e.BlockHash,
@@ -487,9 +486,10 @@ func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {
 		Slot:                  e.Slot,
 		Value:                 e.Value,
 		ExecutionPayment:      e.ExecutionPayment,
-		BlobKzgCommitments:    *e.BlobKzgCommitments.ShallowCopy(),
 		ExecutionRequestsRoot: e.ExecutionRequestsRoot,
 	}
+	e.BlobKzgCommitments.ShallowCopyTo(&copied.BlobKzgCommitments)
+	return copied
 }
 
 // SignedExecutionPayloadBid represents a signed execution payload bid.

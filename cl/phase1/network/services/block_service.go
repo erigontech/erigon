@@ -239,6 +239,7 @@ type blockService struct {
 	blocksScheduledForLaterExecution sync.Map
 	blockJobsLifecycleMu             sync.RWMutex
 	blockJobsStopped                 bool
+	publishedBlockScheduled          chan common.Hash
 	// store the block in db
 	db kv.RwDB
 }
@@ -301,6 +302,8 @@ func newBlockService(
 		elBlobRetryRoots: elBlobRetryRoots,
 		emitter:          emitter,
 		db:               db,
+
+		publishedBlockScheduled: make(chan common.Hash, publishedBlockWakeBuffer),
 	}
 	b.startELColumnsImport = func(ctx context.Context, block *cltypes.SignedBeaconBlock) {
 		go b.importColumnsFromELBlobs(context.WithoutCancel(ctx), block)
@@ -1117,12 +1120,24 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 		existingValue, loaded := b.blocksScheduledForLaterExecution.LoadOrStore(blockRoot, job)
 		if !loaded {
 			retained = true
+			b.wakeForPublishedBlock(blockRoot, store)
 			return job, jobGeneration
 		}
 		existing, generation := b.reuseScheduledBlockJob(blockRoot, existingValue.(*blockJob), job, store)
 		if existing != nil {
+			b.wakeForPublishedBlock(blockRoot, store)
 			return existing, generation
 		}
+	}
+}
+
+func (b *blockService) wakeForPublishedBlock(root common.Hash, store func(context.Context) error) {
+	if store == nil {
+		return
+	}
+	select {
+	case b.publishedBlockScheduled <- root:
+	default:
 	}
 }
 
@@ -1236,11 +1251,11 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 	log.Trace("import operations", "time", time.Since(start))
 }
 
-func drainDataColumnStored(stored <-chan common.Hash, first common.Hash) map[[32]byte]struct{} {
+func drainBlockRoots(queued <-chan common.Hash, first common.Hash) map[[32]byte]struct{} {
 	roots := map[[32]byte]struct{}{[32]byte(first): {}}
-	for range len(stored) {
+	for range len(queued) {
 		select {
-		case root := <-stored:
+		case root := <-queued:
 			roots[[32]byte(root)] = struct{}{}
 		default:
 			return roots
@@ -1255,6 +1270,7 @@ func (b *blockService) loop(ctx context.Context) {
 	defer ticker.Stop()
 	dataColumnStored := b.emitter.DataColumnStored()
 	envelopeArrived := b.emitter.EnvelopeArrived()
+	publishedBlockScheduled := b.publishedBlockScheduled
 	var storageRetryAfter time.Time
 	var storageRetryDelay time.Duration
 	updateStorageBackoff := func(attempt *blockJobAttempt) {
@@ -1297,7 +1313,7 @@ func (b *blockService) loop(ctx context.Context) {
 		case root := <-envelopeArrived:
 			go b.retryELColumnsImport(ctx, root)
 		case root := <-dataColumnStored:
-			roots := drainDataColumnStored(dataColumnStored, root)
+			roots := drainBlockRoots(dataColumnStored, root)
 			for root := range roots {
 				if time.Now().Before(storageRetryAfter) {
 					break
@@ -1323,6 +1339,20 @@ func (b *blockService) loop(ctx context.Context) {
 					continue
 				}
 				updateStorageBackoff(b.processScheduledBlock(ctx, root, job, time.Now()))
+			}
+		case root := <-publishedBlockScheduled:
+			for root := range drainBlockRoots(publishedBlockScheduled, root) {
+				value, ok := b.blocksScheduledForLaterExecution.Load(root)
+				if !ok {
+					continue
+				}
+				job := value.(*blockJob)
+				now := time.Now()
+				if now.Before(storageRetryAfter) {
+					log.Debug("Published block waits for storage retry backoff", "slot", job.block.Block.Slot, "root", common.Hash(root), "retryIn", storageRetryAfter.Sub(now))
+					continue
+				}
+				updateStorageBackoff(b.processScheduledBlock(ctx, root, job, now))
 			}
 		}
 	}

@@ -45,8 +45,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -55,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -363,9 +362,9 @@ func readCrashRecoveryTx(t *testing.T, tx kv.TemporalTx) crashRecoveryState {
 		state.StageProgress[stage], err = stages.GetStageProgress(tx, stage)
 		require.NoError(t, err)
 	}
-	encoded, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+	encoded, _, err := tx.GetLatest(kv.CommitmentDomain, commitmenttest.StateKey(), kv.GetLatestOptions{})
 	require.NoError(t, err)
-	root, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(encoded)
+	txNum, blockNum, root, err := commitmenttest.DecodeState(encoded)
 	require.NoError(t, err)
 	state.StateRoot, state.CommitmentBlock, state.CommitmentTx = common.BytesToHash(root), blockNum, txNum
 	require.LessOrEqual(t, blockNum, lastBlock, "commitment must have a canonical block")
