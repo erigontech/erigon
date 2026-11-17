@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -105,12 +106,14 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 				}))
 				require.NoError(t, agg.BuildFiles(db, filesEnd+stepSize, unboundedFinalityCtx))
 				require.NoError(t, agg.MergeLoop(ctx))
-				var shortened int
-				for _, file := range commitmentKVFiles(t, agg.Dirs().SnapDomain) {
-					_, count := branchKeyKinds(t, file.path)
-					shortened += count
+				if !statecfg.ExperimentalCommitmentV3 {
+					var shortened int
+					for _, file := range commitmentKVFiles(t, agg.Dirs().SnapDomain) {
+						_, count := branchKeyKinds(t, file.path)
+						shortened += count
+					}
+					require.Equal(t, references, shortened > 0, "exercise the requested file encoding")
 				}
-				require.Equal(t, references, shortened > 0, "exercise the requested file encoding")
 
 				tx, openErr := db.BeginTemporalRw(ctx)
 				require.NoError(t, openErr)
@@ -121,7 +124,7 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 				if branch == "recreated_db" {
 					write(tx, filesEnd+6, keys[targetIdx], nil)
 				}
-				if branch != "existing" {
+				if branch != "existing" && !statecfg.ExperimentalCommitmentV3 {
 					prefix := nibbles.HexToCompact([]byte{nibble(keys[targetIdx])})
 					emptyBranch, _, err := tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
 					require.NoError(t, err)
@@ -171,6 +174,7 @@ func TestCommitmentFilesRepeatedUnwind(t *testing.T) {
 }
 
 func TestCommitmentStorageBranchRepeatedUnwind(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(16)
 	for _, files := range []bool{false, true} {
 		for _, deferred := range []bool{false, true} {

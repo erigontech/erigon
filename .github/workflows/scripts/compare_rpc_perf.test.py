@@ -222,6 +222,116 @@ with tempfile.TemporaryDirectory() as tmp:
     check("erigon tied with another client is green", row[-1:] == ["🟢"], row)
     check("legend explains double green", "🟢🟢 fastest by >= 1.3x" in text, text)
 
+# --- dead: a level that rpc_perf recorded with an error -------------------------
+
+DEAD = "server died during test"
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "reth", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 2, 3)]},
+        {"qps": "5", "testRepetitions": [], "error": DEAD},
+    ])
+    write_result(tmp, "geth", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 2, 3)]},
+        {"qps": "5", "testRepetitions": [rep(1, 2, 3)], "error": DEAD},
+    ])
+    res = mod.load_results(tmp)
+    check("a level with an error and no repetition is dead", res["trace_block_struct_log"]["reth"]["5"] == {"failed": "dead", "error": DEAD}, res)
+    check("a level with an error after some repetitions is dead", res["trace_block_struct_log"]["geth"]["5"] == {"failed": "dead", "error": DEAD}, res)
+    md = mod.render(res)
+    check("the detail table shows the error of a dead level", f"| 5 | reth | dead: {DEAD} |" in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 2.0, 3)]},
+        {"qps": "5", "testRepetitions": [rep(1, 2.0, 3)]},
+    ])
+    write_result(tmp, "reth", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "5", "testRepetitions": [], "error": DEAD},
+    ])
+    write_result(tmp, "erigon", "mixed", [{"qps": "1", "testRepetitions": [], "error": DEAD}])
+    write_result(tmp, "geth", "mixed", [{"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]}])
+    md = mod.render_overview(mod.load_results(tmp), "p95")
+    row = overview_row(md, "trace_block_struct_log", "5")
+    check("a dead client is dead in the overview and erigon is the fastest",
+          row == ["trace_block_struct_log", "5", "2.00*", "-", "dead", "🟢"], row)
+    row = overview_row(md, "mixed", "1")
+    check("a dead erigon is red", row == ["mixed", "1", "dead", "1.00*", "-", "🔴"], row)
+    check("legend explains dead", "dead the client died" in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "reth", "mixed", [
+        {"qps": "1", "testRepetitions": [rep(1, 2, 3)]},
+        {"qps": "2", "testRepetitions": [], "error": DEAD},
+    ])
+    code, out = run_main(["--results-dir", tmp])
+    check("main with a dead level exits 0", code in (0, None), code)
+    check("main with a dead level prints all the overviews",
+          all(f"status on {p}" in out for p in ("p50", "p90", "p95", "max")), out)
+
+# --- excluded: a client left out at a barrier, so its later patterns did not run ---
+
+
+def write_excluded(root, client, label):
+    path = os.path.join(root, f"{client}-{label}-result.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"configuration": {"testingDaemon": client}, "excluded": True, "results": []}, fh)
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_call_gen", [
+        {"qps": "100", "testRepetitions": [rep(1, 2.0, 3)]},
+        {"qps": "1000", "testRepetitions": [rep(1, 2.0, 3)]},
+    ])
+    write_result(tmp, "reth", "eth_call_gen", [
+        {"qps": "100", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "1000", "testRepetitions": [rep(1, 1.0, 3)]},
+    ])
+    write_excluded(tmp, "geth", "eth_call_gen")
+    write_excluded(tmp, "erigon", "mixed")
+    write_result(tmp, "reth", "mixed", [{"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]}])
+    res = mod.load_results(tmp)
+    check("an excluded client has every qps step of the pattern, excluded",
+          res["eth_call_gen"]["geth"] == {"100": {"failed": "excluded"}, "1000": {"failed": "excluded"}}, res)
+    md = mod.render_overview(res, "p95")
+    row = overview_row(md, "eth_call_gen", "1000")
+    check("an excluded client is excluded in the overview",
+          row == ["eth_call_gen", "1000", "2.00", "excluded", "1.00*", "🔴"], row)
+    row = overview_row(md, "mixed", "1")
+    check("an excluded erigon is red", row == ["mixed", "1", "excluded", "-", "1.00*", "🔴"], row)
+    check("legend explains excluded", "excluded left out at a barrier" in md, md)
+    md = mod.render(res)
+    check("the detail table shows an excluded client", "| 100 | geth | excluded | | | | |" in md, md)
+    code, out = run_main(["--results-dir", tmp])
+    check("main with an excluded client prints all the overviews",
+          code in (0, None) and all(f"status on {p}" in out for p in ("p50", "p90", "p95", "max")), out)
+
+# --- lost: a client of the run whose job uploaded no report -------------------
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "reth", "mixed", [
+        {"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "2", "testRepetitions": [rep(1, 1.0, 3)]},
+    ])
+    write_excluded(tmp, "geth", "mixed")
+    res = mod.load_results(tmp)
+    check("add_lost returns the clients with no report", mod.add_lost(res, ["erigon", "geth", "reth"]) == ["erigon"], res)
+    check("a client with no report is lost on every qps step",
+          res["mixed"]["erigon"] == {"1": {"failed": "lost"}, "2": {"failed": "lost"}}, res)
+    check("a client with an excluded report is not lost", res["mixed"]["geth"]["1"] == {"failed": "excluded"}, res)
+    md = mod.render_overview(res, "p50")
+    row = overview_row(md, "mixed", "1")
+    check("a lost erigon is lost and red in the overview", row == ["mixed", "1", "lost", "excluded", "1.00*", "🔴"], row)
+    check("legend explains lost", "lost no results from the client's job" in md, md)
+    md = mod.render(res)
+    check("the detail table shows a lost client", "| 1 | erigon | lost | | | | |" in md, md)
+    code, out = run_main(["--results-dir", tmp, "--clients", "erigon,geth,reth"])
+    check("main warns about a lost client", "⚠️ erigon: no results" in out, out)
+    check("main does not warn about a client with a report", "⚠️ geth" not in out and "⚠️ reth" not in out, out)
+    code, out = run_main(["--results-dir", tmp])
+    check("main without --clients has no lost client", "⚠️" not in out and "| erigon |" not in out, out)
+
 # --- main ---------------------------------------------------------------------
 
 with tempfile.TemporaryDirectory() as tmp:
