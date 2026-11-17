@@ -861,7 +861,10 @@ func (s *simulator) simulateBlock(
 	systemCallCustom := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, s.chainConfig, ibs, header, engine, constCall, vmConfig)
 	}
-	chainReader := consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger)
+	chainReader := &simulatedChainReader{
+		Reader:  consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger),
+		headers: ancestors,
+	}
 	err = engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
 	if err != nil {
 		return nil, nil, err
@@ -1183,6 +1186,20 @@ func (s *simulator) simulateCall(
 		txn.SetSender(accounts.InternAddress(*call.From))
 	}
 	return &callResult, txn, receipt, nil
+}
+
+type simulatedChainReader struct {
+	*consensuschain.Reader
+	headers []*types.Header
+}
+
+func (s *simulatedChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	for _, header := range s.headers {
+		if header.Number.Uint64() == number && header.Hash() == hash {
+			return header
+		}
+	}
+	return s.Reader.GetHeader(hash, number)
 }
 
 type simulatedCanonicalReader struct {
