@@ -166,6 +166,10 @@ func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomi
 	if param.CustomTxnProvider != nil {
 		txnProvider = param.CustomTxnProvider
 	}
+	if len(param.InclusionList) > 0 {
+		signer := types.MakeSigner(b.chainConfig, executionAt+1, param.Timestamp)
+		txnProvider = newInclusionListTxnProvider(param.InclusionList, signer, txnProvider)
+	}
 	execCfg := StageBuilderExecCfg(state, b.notifier, b.chainConfig, b.engine, b.vmConfig, interrupt, param.PayloadId, txnProvider, param.RequireAllTransactions, b.blockReader)
 	finishCfg := StageBuilderFinishCfg(b.chainConfig, b.engine, state, b.sealCancel, b.blockReader, b.latestBlockBuiltStore)
 

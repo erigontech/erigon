@@ -1074,6 +1074,10 @@ func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		assembleParams.TargetGasLimit = (*uint64)(payloadAttributes.TargetGasLimit)
 	}
 
+	if version >= clparams.HezeVersion {
+		assembleParams.InclusionList = decodeInclusionList(payloadAttributes.InclusionListTransactions)
+	}
+
 	var assembled execmodule.AssembleBlockResult
 	// Wait for the execution service to be ready to assemble a block. Wait a full slot duration (12 seconds) to ensure that the execution service is not busy.
 	// Blocks are important and 0.5 seconds is not enough to wait for the execution service to be ready.
