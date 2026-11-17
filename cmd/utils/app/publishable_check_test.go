@@ -326,6 +326,27 @@ func Test_CheckEmptyFutureForkTablesTolerated(t *testing.T) {
 	}
 }
 
+func Test_SingleFileWithUnsupportedVersion(t *testing.T) {
+	tests := []struct {
+		folder func(datadir.Dirs) string
+		name   string
+	}{
+		{func(d datadir.Dirs) string { return d.Snap }, "000020-000030-beaconblocks.seg"},
+		{func(d datadir.Dirs) string { return d.Snap }, "000020-000030-beaconblocks.idx"},
+		{func(d datadir.Dirs) string { return d.SnapCaplin }, "000020-000030-ActiveValidatorIndicies.seg"},
+		{func(d datadir.Dirs) string { return d.SnapCaplin }, "000020-000030-ActiveValidatorIndicies.idx"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			touchFiles(t, dirs, []snapRange{{0, 10}, {10, 20}, {20, 30}})
+			delFile(t, tt.folder(dirs), "v1.0-"+tt.name)
+			touchFile(t, tt.folder(dirs), "v0.9-"+tt.name)
+			require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
+		})
+	}
+}
+
 type snapRange struct {
 	fromStep, toStep uint64
 }

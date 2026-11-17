@@ -2134,6 +2134,30 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	if err := checkNoDuplicateFileVersions(snapDir); err != nil {
 		return err
 	}
+	files, err := version.GroupByMaskedName(filepath.Join(snapDir, "*"))
+	if err != nil {
+		return err
+	}
+	newest := func(masked string) (version.VersionedFile, bool) {
+		if len(files[masked]) == 0 {
+			return version.VersionedFile{}, false
+		}
+		return slices.MaxFunc(files[masked], func(a, b version.VersionedFile) int { return a.Version.Cmp(b.Version) }), true
+	}
+	checkIdx := func(idxName string, minSup version.Version) error {
+		masked, err := version.ReplaceVersionWithMask(idxName)
+		if err != nil {
+			return err
+		}
+		idx, ok := newest(masked)
+		if !ok {
+			return fmt.Errorf("index file %s: file not found", masked)
+		}
+		if idx.Version.Less(minSup) {
+			return fmt.Errorf("index file %s: version %s is less than supported version %s", idx.Name, idx.Version, minSup)
+		}
+		return nil
+	}
 
 	var sum uint64
 	var maxTo uint64
@@ -2191,34 +2215,19 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 			if err != nil {
 				return err
 			}
-			segName, ver, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(snapDir, segNameMasked))
-			if err != nil {
-				return fmt.Errorf("finding %s: %w", segNameMasked, err)
-			}
+			seg, ok := newest(segNameMasked)
 			if !ok {
 				return fmt.Errorf("missing file-%s", segNameMasked)
 			}
-			if !verMap[snapType]["seg"].Supports(ver) {
-				return fmt.Errorf("expected version %s, filename: %s", verMap[snapType]["seg"].Current.String(), segName)
+			if !verMap[snapType]["seg"].Supports(seg.Version) {
+				return fmt.Errorf("expected version %s, filename: %s", verMap[snapType]["seg"].Current.String(), seg.Name)
 			}
-			// check that the index file exist
-			idxName := strings.Replace(segName, ".seg", ".idx", 1)
-			idxNameMasked, err := version.ReplaceVersionWithMask(idxName)
-			if err != nil {
+			if err := checkIdx(strings.Replace(seg.Name, ".seg", ".idx", 1), verMap[snapType]["idx"].MinSupported); err != nil {
 				return err
 			}
-			if err := version.CheckIsThereFileWithSupportedVersion(idxNameMasked, verMap[snapType]["idx"].MinSupported); err != nil {
-				return fmt.Errorf("index file %s: %w", idxName, err)
-			}
 			if snapType == "transactions" {
-				// check that the tx index file exist
-				txIdxName := strings.Replace(segName, "transactions.seg", "transactions-to-block.idx", 1)
-				txIdxNameMasked, err := version.ReplaceVersionWithMask(txIdxName)
-				if err != nil {
+				if err := checkIdx(strings.Replace(seg.Name, "transactions.seg", "transactions-to-block.idx", 1), verMap["transactions-to-block"]["idx"].MinSupported); err != nil {
 					return err
-				}
-				if err := version.CheckIsThereFileWithSupportedVersion(txIdxNameMasked, verMap["transactions-to-block"]["idx"].MinSupported); err != nil {
-					return fmt.Errorf("index file %s: %w", txIdxName, err)
 				}
 			}
 		}
@@ -2256,9 +2265,9 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	return nil
 }
 
-func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error {
+func checkIfStateSnapshotsPublishable(ctx context.Context, dirs datadir.Dirs, chainDB kv.RoDB) error {
 	var persistReceiptCache, commitmentHistory bool
-	if err := chainDB.View(context.Background(), func(tx kv.Tx) error {
+	if err := chainDB.View(ctx, func(tx kv.Tx) error {
 		var err error
 		persistReceiptCache, err = kvcfg.PersistReceipts.Enabled(tx)
 		if err != nil {
@@ -2616,12 +2625,18 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 		defer chainDB.Close()
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Iterate over all fies in dat.Snap
-	if err := checkIfStateSnapshotsPublishable(dat, chainDB); err != nil {
+	if err := checkIfStateSnapshotsPublishable(ctx, dat, chainDB); err != nil {
 		return err
 	}
 	var chainName string
@@ -2654,6 +2669,9 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := checkIfCaplinSnapshotsPublishable(dat, true, beaconConfig); err != nil {
 		return err
 	}
