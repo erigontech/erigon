@@ -719,14 +719,15 @@ jobs:
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockByNumber stress_test_eth_getBlockByNumber_gen_latest 1000:20,3000:20 eth_getBlockByNumber_gen
 
       - name: Sync clients before eth_subscribe_newHeads
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_newHeads')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_newHeads')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_subscribe_newHeads" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_subscribe_newHeads" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_subscribe_newHeads" >> "$GITHUB_ENV"; exit 1; }
 
       # Only 10 newHeads subscriptions per connection: the fan-out of the head to every subscriber, with no logs or receipts traffic.
       - name: Run eth_subscribe_newHeads
         id: perf_eth_subscribe_newHeads
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_newHeads'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_newHeads')
         continue-on-error: true
         timeout-minutes: ${{ needs.setup.outputs.rpc_test == 'eth_subscribe_newHeads' && 30 || 20 }}
         run: |
@@ -735,15 +736,16 @@ jobs:
           bash .github/workflows/scripts/run_rpc_perf.sh eth_subscribe stress_test_eth_subscribe_newHeads_gen_latest "$sequence" eth_subscribe_newHeads
 
       - name: Sync clients before eth_subscribe
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_subscribe" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_subscribe" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_subscribe" >> "$GITHUB_ENV"; exit 1; }
 
       # The qps of the sequence is the number of WebSocket connections, each with the 30 subscriptions of the pattern.
       # In the full run a short check (about 10 blocks per repetition); alone, a longer and heavier one.
       - name: Run eth_subscribe
         id: perf_eth_subscribe
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe')
         continue-on-error: true
         timeout-minutes: ${{ needs.setup.outputs.rpc_test == 'eth_subscribe' && 30 || 20 }}
         run: |
