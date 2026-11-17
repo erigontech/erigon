@@ -37,6 +37,7 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/blobfetch"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -299,7 +300,7 @@ func TestExpectedBlobsInTxTreatsAMissingGloasChildBodyAsUnresolved(t *testing.T)
 	var unresolved bool
 	require.NoError(t, f.db.View(t.Context(), func(tx kv.Tx) error {
 		var err error
-		got, unresolved, err = expectedBlobsInTx(t.Context(), tx, f.blocks, root, f.blocks.blocks[fillTestSlot])
+		got, unresolved, err = blobfetch.ExpectedBlobs(t.Context(), tx, f.blocks, root, f.blocks.blocks[fillTestSlot])
 		return err
 	}))
 	require.Equal(t, 1, got)
@@ -323,7 +324,7 @@ func TestExpectedBlobsInTxTreatsANonCanonicalGloasSuccessorBodyAsUnresolved(t *t
 			var unresolved bool
 			require.NoError(t, f.db.View(t.Context(), func(tx kv.Tx) error {
 				var err error
-				got, unresolved, err = expectedBlobsInTx(t.Context(), tx, f.blocks, root, f.blocks.blocks[fillTestSlot])
+				got, unresolved, err = blobfetch.ExpectedBlobs(t.Context(), tx, f.blocks, root, f.blocks.blocks[fillTestSlot])
 				return err
 			}))
 			require.Equal(t, 1, got)
@@ -622,8 +623,8 @@ func TestBlobArchiveStoreFillReportsASlotTheResponseDidNotRepair(t *testing.T) {
 // An endpoint that never answers, or answers with a malformed or oversized body, fails like any
 // other, so the next endpoint fills the slot.
 func TestBlobArchiveStoreFillMovesPastABadEndpoint(t *testing.T) {
-	defer func(timeout, wait time.Duration) { fillRequestTimeout, fillRetryWait = timeout, wait }(fillRequestTimeout, fillRetryWait)
-	fillRequestTimeout, fillRetryWait = 200*time.Millisecond, time.Millisecond
+	defer func(timeout, wait time.Duration) { blobfetch.RequestTimeout, blobfetch.RetryWait = timeout, wait }(blobfetch.RequestTimeout, blobfetch.RetryWait)
+	blobfetch.RequestTimeout, blobfetch.RetryWait = 200*time.Millisecond, time.Millisecond
 	for name, respond := range map[string]func(good string) http.HandlerFunc{
 		"stalled": func(string) http.HandlerFunc {
 			return func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }
@@ -649,7 +650,7 @@ func TestBlobArchiveStoreFillMovesPastABadEndpoint(t *testing.T) {
 					return
 				}
 				defer resp.Body.Close()
-				_, _ = w.Write(bytes.Repeat([]byte(" "), 2*maxBlobSidecarJSONSize))
+				_, _ = w.Write(bytes.Repeat([]byte(" "), 2*blobfetch.MaxSidecarJSONSize))
 				_, _ = io.Copy(w, resp.Body)
 			}
 		},
@@ -691,8 +692,8 @@ func failOnce(t *testing.T, good string, fail http.HandlerFunc) (string, *atomic
 }
 
 func TestBlobArchiveStoreFillRetriesATransientFailure(t *testing.T) {
-	defer func(timeout, wait time.Duration) { fillRequestTimeout, fillRetryWait = timeout, wait }(fillRequestTimeout, fillRetryWait)
-	fillRequestTimeout, fillRetryWait = 200*time.Millisecond, time.Millisecond
+	defer func(timeout, wait time.Duration) { blobfetch.RequestTimeout, blobfetch.RetryWait = timeout, wait }(blobfetch.RequestTimeout, blobfetch.RetryWait)
+	blobfetch.RequestTimeout, blobfetch.RetryWait = 200*time.Millisecond, time.Millisecond
 	for name, fail := range map[string]http.HandlerFunc{
 		"503":     func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) },
 		"429":     func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTooManyRequests) },
@@ -717,8 +718,8 @@ func TestBlobArchiveStoreFillRetriesATransientFailure(t *testing.T) {
 }
 
 func TestBlobArchiveStoreFillWaitsForRetryAfter(t *testing.T) {
-	defer func(wait time.Duration) { fillRetryWait = wait }(fillRetryWait)
-	fillRetryWait = time.Millisecond
+	defer func(wait time.Duration) { blobfetch.RetryWait = wait }(blobfetch.RetryWait)
+	blobfetch.RetryWait = time.Millisecond
 	f := newFillFixture(t)
 	root := f.addBlock(fillTestSlot, 1)
 	good, _ := f.endpoint(false)
@@ -733,8 +734,8 @@ func TestBlobArchiveStoreFillWaitsForRetryAfter(t *testing.T) {
 }
 
 func TestBlobArchiveStoreFillDoesNotRetryABadRequest(t *testing.T) {
-	defer func(wait time.Duration) { fillRetryWait = wait }(fillRetryWait)
-	fillRetryWait = time.Millisecond
+	defer func(wait time.Duration) { blobfetch.RetryWait = wait }(blobfetch.RetryWait)
+	blobfetch.RetryWait = time.Millisecond
 	f := newFillFixture(t)
 	root := f.addBlock(fillTestSlot, 1)
 	good, _ := f.endpoint(false)
