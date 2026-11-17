@@ -192,11 +192,9 @@ func TestExpectedProposerStateRebuildsAreBounded(t *testing.T) {
 		cfg := *parentState.BeaconConfig()
 		cfg.SecondsPerSlot = 1
 		firstSlot := state.Epoch(parentState) * cfg.SlotsPerEpoch
-		started, release := make(chan struct{}), make(chan struct{})
+		started, release := make(chan struct{}, 1), make(chan struct{})
 		releaseRebuilds := sync.OnceFunc(func() { close(release) })
 		t.Cleanup(releaseRebuilds)
-		drainDone := make(chan struct{})
-		t.Cleanup(func() { close(drainDone) })
 		var rebuilds atomic.Int32
 		fc := forkchoice_mock.NewForkChoiceStorageMock(t)
 		held := common.Hash{0xfe}
@@ -238,19 +236,9 @@ func TestExpectedProposerStateRebuildsAreBounded(t *testing.T) {
 		require.Equal(t, int32(maxConcurrentSidecarProposerStateRebuilds), rebuilds.Load())
 
 		waiting := get(common.Hash{0xa1})
-		// Lets the read reach the budget; in a bubble the clock only moves once it is blocked there.
-		time.Sleep(100 * time.Millisecond)
+		// Lets the read park on a held rebuild before the release; synctest.Wait returns once it is.
+		synctest.Wait()
 		releaseRebuilds()
-		// Collects the rebuild start signals that no assertion reads anymore, until the bubble ends.
-		go func() {
-			for {
-				select {
-				case <-started:
-				case <-drainDone:
-					return
-				}
-			}
-		}()
 		require.NoError(t, <-waiting, "a read over the budget did not wait for a rebuild to finish")
 		for _, done := range running {
 			require.NoError(t, <-done)
@@ -357,11 +345,11 @@ func TestExpectedProposerSharedReadOutlivesTheFirstWaitersCancellation(t *testin
 
 		firstCtx, cancelFirst := context.WithCancel(t.Context())
 		first := get(firstCtx, shared)
-		// Lets the first read reach the permit wait and the second join it; in a bubble the clock only
-		// moves once both are blocked there.
-		time.Sleep(50 * time.Millisecond)
+		// Lets the first read reach the permit wait before the second joins it; synctest.Wait returns
+		// once every caller is parked there.
+		synctest.Wait()
 		second := get(t.Context(), shared)
-		time.Sleep(50 * time.Millisecond)
+		synctest.Wait()
 		cancelFirst()
 		require.ErrorIs(t, <-first, ErrIgnore)
 

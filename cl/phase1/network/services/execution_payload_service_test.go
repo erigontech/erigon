@@ -1386,9 +1386,7 @@ func TestExecutionPayloadServiceHoldsPayloadPreparationUntilImportEnds(t *testin
 		synctest.Wait()
 		_, finish, available := fcu.TryBeginPayloadPreparation(t.Context(), 100, 100)
 		require.True(t, available)
-		if available {
-			finish()
-		}
+		finish()
 	})
 }
 
@@ -1435,9 +1433,7 @@ func TestExecutionPayloadServiceRecoversPanickingImport(t *testing.T) {
 		synctest.Wait()
 		_, finish, available := fcu.TryBeginPayloadPreparation(t.Context(), 100, 100)
 		require.True(t, available)
-		if available {
-			finish()
-		}
+		finish()
 		require.Contains(t, output.String(), "Recovered from panicking execution payload envelope import")
 		require.Contains(t, output.String(), "payload import panic")
 	})
@@ -1902,9 +1898,7 @@ func TestExecutionPayloadServiceQueuesValidatedEnvelopeWhenBackgroundImportBytes
 		synctest.Wait()
 		_, finish, available := fcu.TryBeginPayloadPreparation(t.Context(), 100, 101)
 		require.True(t, available)
-		if available {
-			finish()
-		}
+		finish()
 		require.NoError(t, service.ProcessMessage(t.Context(), nil, envelopes[5]))
 		receiveWithTimeout(t, importsStarted, "sixth payload import did not start")
 
@@ -2086,9 +2080,7 @@ func TestExecutionPayloadServiceProcessesEnvelopeWhenBlockArrivesBeforeAdmission
 		synctest.Wait()
 		_, finish, available := forkchoiceMock.TryBeginPayloadPreparation(t.Context(), 100, 100)
 		require.True(t, available)
-		if available {
-			finish()
-		}
+		finish()
 		require.Zero(t, service.(*executionPayloadService).pending.count.Load())
 		require.Zero(t, service.(*executionPayloadService).pendingBytes.Load())
 	})

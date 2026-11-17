@@ -364,6 +364,8 @@ func TestPendingJobQueueStopWaitsForInFlightProcessing(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("pending job queue was not cancelled")
 		}
+		// Lets the stop goroutine park waiting for the in-flight job, so the check below is deterministic.
+		synctest.Wait()
 		select {
 		case <-stopped:
 			t.Fatal("pending job queue reported completion while processing was still active")
