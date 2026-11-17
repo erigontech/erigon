@@ -137,6 +137,9 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	return pc, nil, nil
 }
 
+// gasTxDiff adds the cold-access surcharge; the interpreter has already
+// charged the warm access cost. Context and operand checks stay in opTxDiff
+// because the interpreter reports errors from gas functions as out of gas.
 func gasTxDiff(evm *EVM, call *CallContext, _ mdgas.MdGas, _ uint64) (mdgas.MdGasCost, error) {
 	param, key, index := call.Stack.back3(0, 1, 2)
 	ibs := evm.IntraBlockState()

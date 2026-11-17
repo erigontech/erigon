@@ -501,7 +501,8 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	}
 
 	// Assertions can observe earlier transactions' fee effects, so any frame
-	// transaction requires normal fee accounting for the whole block.
+	// transaction requires original gas budgets and normal fee accounting
+	// for the whole block.
 	relaxedReplay := hasStateOverrides && !slices.ContainsFunc(replayTransactions, func(txn types.Transaction) bool {
 		return txn.Type() == types.FrameTxType
 	})
@@ -510,7 +511,8 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	evm = vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chainConfig, vm.Config{})
 	storeEVM(evm)
 
-	// On the versioned state the overrides took tx index 0; the block's txs follow them.
+	// Overrides use transaction index 0 in versioned state, when present.
+	// Replay starts after them so their writes are visible to the first transaction.
 	firstTxIndex := statedb.TxnIndex()
 	// try to replay all transactions in this block
 	for idx, txn := range replayTransactions {

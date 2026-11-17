@@ -151,16 +151,15 @@ func NewTxnExecutor(evm *vm.EVM, msg Message, gp *GasPool) *TxnExecutor {
 	}
 }
 
-// ApplyMessage computes the new state by applying the given message
-// against the old state within the environment.
+// ApplyMessage applies msg to the EVM state and returns its execution result.
+// The result contains return data, gas accounting and any EVM failure of an
+// accepted transaction. A returned error rejects or aborts the transaction.
 //
-// ApplyMessage returns the bytes returned by any EVM execution (if it took place),
-// the gas used (which includes gas refunds) and an error if it failed. An error always
-// indicates a core error meaning that the message would always fail for that particular
-// state and would never be accepted within a block.
-// `refunds` is false when it is not required to apply gas refunds
-// `gasBailout` relaxes balance checks for ordinary transactions. Frames always
-// require normal payment approval and value transfers.
+// refunds enables gas refunds. For ordinary transactions, gasBailout skips
+// sender fee debits and refunds, and allows an underfunded value transfer
+// without debiting the sender; producer tips are still credited.
+// Frame transactions ignore gasBailout and require normal payment approval
+// and value transfers.
 func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
 	return applyMessage(evm, msg, gp, refunds, gasBailout, false, false, engine)
 }
