@@ -45,13 +45,17 @@ import (
 // ErigonNode represents a single node, that runs sync and p2p network.
 // it also can export the private endpoint for RPC daemon, etc.
 type ErigonNode struct {
+	ctx     context.Context
 	stack   *node.Node
 	backend *eth.Ethereum
 }
 
-// Serve runs the node and blocks the execution. It returns when the node is existed.
+// Serve runs the node and blocks until it is closed. The end of ctx, which a shutdown signal brings, closes it, also
+// when the signal arrives while the node is still starting.
 func (eri *ErigonNode) Serve() error {
 	defer eri.Close()
+	stop := context.AfterFunc(eri.ctx, eri.Close)
+	defer stop()
 
 	eri.run()
 
@@ -147,7 +151,7 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	return &ErigonNode{stack: node, backend: ethereum}, nil
+	return &ErigonNode{ctx: ctx, stack: node, backend: ethereum}, nil
 }
 
 func NewNodeConfig(debugMux *http.ServeMux) *nodecfg.Config {

@@ -45,6 +45,7 @@
 - build: the Linux release binaries and docker images are built with GCC 14.2 on Debian 13 instead of GCC 12.2 on Debian 12. They still need glibc 2.34 and the libstdc++ and libgcc_s of GCC 11 or newer, as shipped by RHEL 9, Amazon Linux 2023, Ubuntu 22.04 and Debian 12, and a release build now fails when a binary needs newer versions (#25742) — by @chfast
 
 - rpc: a JSON-RPC call sent over GET (`/?method=...&params=...`) now needs `Content-Type: application/json`, as a POST already does; without it the server answers 415. A cross-site page cannot set this header without a CORS preflight, so this also covers plain-HTTP, non-loopback addresses, where browsers send neither `Origin` nor `Sec-Fetch-Site`. The empty GET health check is unchanged. Callers such as `curl "http://host:8545/?method=..."` must add `-H 'Content-Type: application/json'`. This can be a breaking change (#24969) — by @lupin012
+- node, cl/sentinel: SIGINT shuts Erigon down gracefully again. Once Caplin's sentinel started, SIGINT killed the process at once (Ctrl+C, systemd `KillSignal=SIGINT`, `docker stop` of the official image) or was ignored when Erigon ran as a background job of a script, and a shutdown signal that arrived while the node was starting never stopped it. The Docker image now stops with the default SIGTERM instead of `STOPSIGNAL 2`; give `docker stop`/Compose/Kubernetes enough stop time for a graceful shutdown (#26410) — by @lystopad
 
 ### Changed
 

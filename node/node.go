@@ -48,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diskutils"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/nodecfg"
 )
 
@@ -434,10 +433,9 @@ func (n *Node) ResolvePath(x string) string {
 	return n.config.ResolvePath(x)
 }
 
+// StartNode starts the stack; a stack closed meanwhile by a shutdown is not an error.
 func StartNode(stack *Node) {
-	if err := stack.Start(); err != nil {
+	if err := stack.Start(); err != nil && !errors.Is(err, ErrNodeStopped) {
 		utils.Fatalf("Error starting protocol stack: %v", err)
 	}
-
-	go debug.ListenSignals(func() { stack.Close() }, stack.logger)
 }
