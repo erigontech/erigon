@@ -1110,6 +1110,66 @@ func TestInsertBlocksWithoutInclusionListCachesNothing(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestInsertBlocksForgetsInclusionListOfParent(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	canonical, err := m.GenerateChain(2, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	fork, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{2})
+	})
+	require.NoError(t, err)
+	il := types.Transactions{signedInclusionListTxn(t, m)}
+	parent := canonical.Blocks[0]
+
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{parent.WithInclusionList(il)})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	insertRes, err = m.InsertBlocks(t.Context(), []*types.Block{fork.TopBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	_, _, ok := m.ReadAheader.ReadInclusionList(parent.Hash())
+	require.True(t, ok, "a sibling does not end the parent's branch")
+
+	insertRes, err = m.InsertBlocks(t.Context(), []*types.Block{canonical.Blocks[1]})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	_, _, ok = m.ReadAheader.ReadInclusionList(parent.Hash())
+	require.False(t, ok, "a child ends the parent's time as a branch tip")
+}
+
+func TestUpdateForkChoiceForgetsInclusionListsBelowFinality(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	canonical, err := m.GenerateChain(3, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	fork, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{2})
+	})
+	require.NoError(t, err)
+	il := types.Transactions{signedInclusionListTxn(t, m)}
+	sideTip := fork.TopBlock.WithInclusionList(il)
+	head := canonical.Blocks[2].WithInclusionList(il)
+
+	blocks := append([]*types.Block{sideTip}, canonical.Blocks[:2]...)
+	insertRes, err := m.InsertBlocks(t.Context(), append(blocks, head))
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	result, err := m.ExecModule.UpdateForkChoice(t.Context(), head.Hash(), canonical.Blocks[1].Hash(), canonical.Blocks[1].Hash())
+	require.NoError(t, err)
+	m.ExecModule.WaitIdle(t.Context())
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+
+	_, _, ok := m.ReadAheader.ReadInclusionList(sideTip.Hash())
+	require.False(t, ok, "a tip below the finalized block can no longer become the head")
+	_, _, ok = m.ReadAheader.ReadInclusionList(head.Hash())
+	require.True(t, ok)
+}
+
 func signedInclusionListTxn(t *testing.T, m *execmoduletester.ExecModuleTester) types.Transaction {
 	t.Helper()
 	txn, err := types.SignTx(

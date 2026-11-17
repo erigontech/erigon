@@ -43,8 +43,10 @@ type BlockReadAheader struct {
 	bodies  *lru.Cache[common.Hash, *types.Body]
 	bals    *lru.Cache[common.Hash, *types.BlockAccessListSidecar]
 	// inclusionLists is the only copy of each IL (never persisted), so unlike
-	// the other caches a miss cannot fall back to the DB.
-	inclusionLists *lru.Cache[common.Hash, inclusionListEntry]
+	// the other caches a miss cannot fall back to the DB. An IL is kept until a
+	// child of its block is inserted or the block falls below finality.
+	inclusionListsMu sync.Mutex
+	inclusionLists   map[common.Hash]inclusionListEntry
 	// inclusionListResults is keyed by block and IL so that replacing a
 	// block's IL never hands the old IL's result to the new one.
 	inclusionListResults *lru.Cache[inclusionListKey, bool]
@@ -68,14 +70,12 @@ type BlockReadAheader struct {
 	stateCache *cache.StateCache
 }
 
-const (
-	inclusionListCapacity       = 96
-	inclusionListResultCapacity = 256
-)
+const inclusionListResultCapacity = 256
 
 type inclusionListEntry struct {
-	txns types.Transactions
-	hash common.Hash
+	txns   types.Transactions
+	hash   common.Hash
+	number uint64
 }
 
 type inclusionListKey struct {
@@ -110,10 +110,6 @@ func NewBlockReadAheader() *BlockReadAheader {
 	if err != nil {
 		panic(err)
 	}
-	ils, err := lru.New[common.Hash, inclusionListEntry](inclusionListCapacity)
-	if err != nil {
-		panic(err)
-	}
 	ilResults, err := lru.New[inclusionListKey, bool](inclusionListResultCapacity)
 	if err != nil {
 		panic(err)
@@ -127,7 +123,7 @@ func NewBlockReadAheader() *BlockReadAheader {
 		headers:              headers,
 		bodies:               bodies,
 		bals:                 bals,
-		inclusionLists:       ils,
+		inclusionLists:       map[common.Hash]inclusionListEntry{},
 		inclusionListResults: ilResults,
 		warmupGate:           semaphore.NewWeighted(1),
 	}
@@ -416,11 +412,30 @@ func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal *type
 	bra.bals.Add(blockHash, bal)
 }
 
-func (bra *BlockReadAheader) AddInclusionList(blockHash common.Hash, il types.Transactions) {
+func (bra *BlockReadAheader) AddInclusionList(blockHash common.Hash, blockNumber uint64, il types.Transactions) {
 	if il == nil {
 		return
 	}
-	bra.inclusionLists.Add(blockHash, inclusionListEntry{txns: il, hash: InclusionListHash(il)})
+	entry := inclusionListEntry{txns: il, hash: InclusionListHash(il), number: blockNumber}
+	bra.inclusionListsMu.Lock()
+	defer bra.inclusionListsMu.Unlock()
+	bra.inclusionLists[blockHash] = entry
+}
+
+func (bra *BlockReadAheader) ForgetInclusionList(blockHash common.Hash) {
+	bra.inclusionListsMu.Lock()
+	defer bra.inclusionListsMu.Unlock()
+	delete(bra.inclusionLists, blockHash)
+}
+
+func (bra *BlockReadAheader) ForgetInclusionListsBelow(blockNumber uint64) {
+	bra.inclusionListsMu.Lock()
+	defer bra.inclusionListsMu.Unlock()
+	for blockHash, entry := range bra.inclusionLists {
+		if entry.number < blockNumber {
+			delete(bra.inclusionLists, blockHash)
+		}
+	}
 }
 
 func (bra *BlockReadAheader) SetInclusionListResult(blockHash, ilHash common.Hash, satisfied bool) {
@@ -739,7 +754,9 @@ func (bra *BlockReadAheader) ReadBodyWithTransactions(blockHash common.Hash) (*t
 }
 
 func (bra *BlockReadAheader) ReadInclusionList(blockHash common.Hash) (types.Transactions, common.Hash, bool) {
-	cached, ok := bra.inclusionLists.Get(blockHash)
+	bra.inclusionListsMu.Lock()
+	defer bra.inclusionListsMu.Unlock()
+	cached, ok := bra.inclusionLists[blockHash]
 	return cached.txns, cached.hash, ok
 }
 

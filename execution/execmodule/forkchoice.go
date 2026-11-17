@@ -797,6 +797,15 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}, stateFlushingInParallel)
 			return nil
 		}
+		if e.readAheader != nil && finalizedHash != (common.Hash{}) {
+			finalizedNumber, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
+			if err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			}
+			if finalizedNumber != nil {
+				e.readAheader.ForgetInclusionListsBelow(*finalizedNumber)
+			}
+		}
 		if err := rawdb.TruncateCanonicalChain(tx, *headNumber+1); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}

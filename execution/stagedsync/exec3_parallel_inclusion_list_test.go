@@ -57,7 +57,7 @@ func TestParallelResumedBlockEndLeavesInclusionListUnchecked(t *testing.T) {
 
 	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
 	blockHash := header.Hash()
-	pe.cfg.readAheader.AddInclusionList(blockHash, types.Transactions{omitted})
+	pe.cfg.readAheader.AddInclusionList(blockHash, header.Number.Uint64(), types.Transactions{omitted})
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 	be := newBlockExec(1, blockHash, gasPool, nil, newResultStream(), false, nil)
