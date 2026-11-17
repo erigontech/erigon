@@ -516,6 +516,10 @@ func TestMemStore_CurrentAfterDelete(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tc.wantKey, k)
 			require.Equal(t, tc.wantValue, v)
+			k, v, err = c.Next()
+			require.NoError(t, err)
+			require.Equal(t, tc.wantKey, k)
+			require.Equal(t, tc.wantValue, v)
 		})
 	}
 }
