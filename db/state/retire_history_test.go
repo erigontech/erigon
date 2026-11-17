@@ -163,6 +163,7 @@ func TestRetire_StaleViewRetiresMergedReplacement(t *testing.T) {
 		generateAccountsFile(t, agg.Dirs(), ranges)
 		generateCodeFile(t, agg.Dirs(), ranges)
 		generateStorageFile(t, agg.Dirs(), ranges)
+		generateCommitmentFile(t, agg.Dirs(), ranges)
 	}
 	generate([]testFileRange{{0, 2}, {2, 4}, {4, 5}})
 	require.NoError(t, agg.OpenFolder(db))
