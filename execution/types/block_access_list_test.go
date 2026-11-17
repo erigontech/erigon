@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 	"unsafe"
 	"weak"
 
@@ -1096,11 +1097,21 @@ func TestBlockAccessListArenaAtTheBudgetLimitHoldsEveryChange(t *testing.T) {
 // A decoded BAL's arenas are freed with the BAL, while the bytecode that the state cache keeps stays alive.
 func TestDecodedBlockAccessListArenasAreFreedWithTheBAL(t *testing.T) {
 	arenas, code := decodeBudgetBALKeepingCode(t)
-	runtime.GC()
-	for name, alive := range arenas {
-		if alive() {
-			t.Errorf("the %s arena outlives its BAL", name)
+	// Conservative stack scanning can retain dead pointers for another GC cycle (https://go.dev/issue/67204).
+	deadline := time.Now().Add(5 * time.Second)
+	for len(arenas) > 0 {
+		runtime.GC()
+		for name, alive := range arenas {
+			if !alive() {
+				delete(arenas, name)
+			}
 		}
+		if time.Now().After(deadline) {
+			break
+		}
+	}
+	for name := range arenas {
+		t.Errorf("the %s arena outlives its BAL", name)
 	}
 	if len(code) != 64 {
 		t.Fatal("the kept bytecode changed")
