@@ -143,17 +143,19 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 		if err != nil {
 			return nil, err
 		}
-		if before != after {
-			trace.AccountFlags[address] |= accountCodeChanged
-			if before.IsEmpty() && !after.IsEmpty() {
-				_, delegation, err := ibs.GetDelegatedDesignation(address)
-				if err != nil {
-					return nil, err
-				}
-				if !delegation {
-					trace.Deployed = append(trace.Deployed, CodeChange{address, after})
-				}
-			}
+		if before == after {
+			continue
+		}
+		trace.AccountFlags[address] |= accountCodeChanged
+		if !before.IsEmpty() || after.IsEmpty() {
+			continue
+		}
+		_, delegation, err := ibs.GetDelegatedDesignation(address)
+		if err != nil {
+			return nil, err
+		}
+		if !delegation {
+			trace.Deployed = append(trace.Deployed, CodeChange{address, after})
 		}
 	}
 	slices.SortFunc(trace.Balances, func(a, b BalanceChange) int {

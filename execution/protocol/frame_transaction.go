@@ -148,6 +148,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			tracer.EmitExit(0, nil, gasUsed, vm.VMErrorFromErr(traceErr), err != nil)
 		}()
 	}
+	hasPostTx := len(tx.Frames) > 0 && tx.Frames[len(tx.Frames)-1].Mode == types.FramePostTx
 	var lastErr error
 	batchStart, batchSnapshot := -1, -1
 	bodyStart, bodySnapshot := -1, -1
@@ -250,7 +251,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 				batchStart, batchSnapshot = -1, -1
 			}
 		}
-		if bodySnapshot < 0 && !ctx.Payer.IsNil() && tx.Frames[len(tx.Frames)-1].Mode == types.FramePostTx {
+		if hasPostTx && bodySnapshot < 0 && !ctx.Payer.IsNil() {
 			bodyStart, bodySnapshot = i+1, st.state.PushSnapshot()
 		}
 	}

@@ -206,8 +206,13 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 	switch {
 	case stackLen >= 3 && op == vm.TXDIFF:
 		// The hook runs before TXDIFF rejects its context or reserved operand.
-		if !t.env.Rules.IsBogota || t.frameTx == nil || t.frameIndex < 0 || t.frameIndex >= len(t.frameTx.Frames) ||
-			t.frameTx.Frames[t.frameIndex].Mode != types.FramePostTx {
+		if !t.env.Rules.IsBogota || t.frameTx == nil {
+			return
+		}
+		if t.frameIndex < 0 || t.frameIndex >= len(t.frameTx.Frames) {
+			return
+		}
+		if t.frameTx.Frames[t.frameIndex].Mode != types.FramePostTx {
 			return
 		}
 		param := &stackData[stackLen-1]
