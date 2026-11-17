@@ -1620,7 +1620,7 @@ func (dt *DomainRoTx) unwind(
 		}
 		// A branch absent from the trie may still have unreachable bytes in storage.
 		// Creating an empty version for it would leave a restore no retained update owns.
-		if d.Name == kv.CommitmentDomain && len(diff.Value) == 0 {
+		if d.Name == kv.CommitmentDomain && !d.CommitmentV3Records && len(diff.Value) == 0 {
 			continue
 		}
 		// A value already supplied by an older version needs no new entry.

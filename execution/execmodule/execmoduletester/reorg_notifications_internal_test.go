@@ -1041,3 +1041,63 @@ func TestRejectedCatchupForkchoiceKeepsCommittedNotifications(t *testing.T) {
 		})
 	}
 }
+
+func TestReorgAfterStorageEmptiedAndRefilled(t *testing.T) {
+	const stepSize, clearIdx = 64, 24
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	store := common.HexToAddress("0xaa")
+	slot := func(i byte) (h common.Hash) { h[31] = i; return h }
+	m := New(t, WithStepSize(stepSize), WithKey(key), WithGenesisSpec(&types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			sender: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+			store:  {Code: []byte{0x60, 0x20, 0x35, 0x60, 0x00, 0x35, 0x55, 0x00}, Storage: map[common.Hash]common.Hash{slot(1): slot(1), slot(2): slot(1)}},
+		},
+	}))
+	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+	sign := func(txn types.Transaction) types.Transaction {
+		signed, err := types.SignTx(txn, signer, key)
+		require.NoError(t, err)
+		return signed
+	}
+	sstore := func(nonce uint64, k, v byte) types.Transaction {
+		ks, vs := slot(k), slot(v)
+		return sign(types.NewTransaction(nonce, store, uint256.NewInt(0), 2_000_000, gasPrice, append(ks[:], vs[:]...)))
+	}
+	gen := func(side bool) func(int, *blockgen.BlockGen) {
+		return func(i int, b *blockgen.BlockGen) {
+			nonce := b.TxNonce(sender)
+			switch {
+			case i == clearIdx:
+				b.AddTx(sstore(nonce, 1, 0))
+				b.AddTx(sstore(nonce+1, 2, 0))
+			case i == clearIdx+1 && !side:
+				b.AddTx(sstore(nonce, 1, 7))
+			case i == clearIdx+2:
+				b.AddTx(sstore(nonce, 2, 9))
+			default:
+				b.AddTx(sign(types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(1), 21_000, gasPrice, nil)))
+			}
+		}
+	}
+	canonical, err := m.GenerateChain(clearIdx+2, gen(false))
+	require.NoError(t, err)
+	side, err := m.GenerateChain(clearIdx+3, gen(true))
+	require.NoError(t, err)
+
+	ctx := t.Context()
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, canonical.Blocks))
+	m.ExecModule.WaitIdle(ctx)
+	for _, block := range side.Blocks[clearIdx+1:] {
+		status, err := m.InsertBlocks(ctx, []*types.Block{block})
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+		fcu, err := m.UpdateForkChoice(ctx, block.Header())
+		require.NoError(t, err)
+		require.Equalf(t, execmodule.ExecutionStatusSuccess, fcu.Status, "side block %d: %s", block.NumberU64(), fcu.ValidationError)
+		m.ExecModule.WaitIdle(ctx)
+	}
+}
