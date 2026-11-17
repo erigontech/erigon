@@ -814,6 +814,22 @@ func TestDropWritePutsBackADerivedCell(t *testing.T) {
 		require.NoError(t, vm.SeedEmptyRemovals(true, false, &countingAccountReader{}))
 		return x, vm
 	}
+	// Seeding derives a removal at tx 0, then a zero balance of a revival at tx 1 and a removal at tx 1,
+	// as the code change at index 2 revives the account without a balance change and leaves it empty.
+	removedTwice := func(t *testing.T) (accounts.Address, *VersionMap) {
+		x := accounts.InternAddress(common.HexToAddress("0xc4"))
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(5)
+		reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &acc}}
+		vm := NewVersionMap(types.BlockAccessList{{
+			Address:        x.Value(),
+			BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}},
+			CodeChanges:    []*types.CodeChange{{Index: 2}},
+		}})
+		vm.SeedAddresses()
+		require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+		return x, vm
+	}
 	balance := func(v uint64) func(*WriteSet, accounts.Address, Version) {
 		return func(ws *WriteSet, x accounts.Address, ver Version) {
 			ws.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: ver}, Val: *uint256.NewInt(v)})
@@ -863,6 +879,7 @@ func TestDropWritePutsBackADerivedCell(t *testing.T) {
 		{"removal balance where the access list has no balance", uncoded, BalancePath, 1, balance(5), 2, zeroBalance(ValueDeleted)},
 		{"zero balance of a revival", prefunded, BalancePath, 1, balance(5), 2, zeroBalance(ValueChanged)},
 		{"zero balance of a revival over a removal", prefunded, BalancePath, 1, (*WriteSet).SetEmptyRemoval, 2, zeroBalance(ValueChanged)},
+		{"removal balance at the tx of a revival", removedTwice, BalancePath, 1, balance(5), 2, zeroBalance(ValueDeleted)},
 		{"existence marker", prefunded, AddressPath, 0, address(7), 2, marker},
 		{"existence marker over an equal record", prefunded, AddressPath, 0, address(0), 2, marker},
 	} {
