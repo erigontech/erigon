@@ -2200,8 +2200,12 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 // the account. Only a sealed write revives the account here: a withdrawn credit does not
 // re-validate a tx that read only the account's existence.
 func (vm *VersionMap) validateAccountAtMarker(addr accounts.Address, tr VersionedRead[AccountView], txIdx int) VersionValidity {
+	e := vm.load(addr)
+	if e == nil {
+		return VersionValid
+	}
 	if tr.Val != nil && !tr.Val.IsNil() {
-		if tr.accSource == AccountFromBAL {
+		if tr.accSource == AccountFromBAL && e.destructed.Load() {
 			if st, _, destroyedAt, _ := vm.ResolvedAccountLifecycleAt(addr, txIdx); st == LifecycleAbsent && !vm.destructKeptBalance(addr, destroyedAt) {
 				return VersionInvalid
 			}
