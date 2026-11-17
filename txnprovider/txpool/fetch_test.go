@@ -2428,31 +2428,32 @@ func TestStalledRetrySendKeepsLaterBatchesWithTheirPeer(t *testing.T) {
 }
 
 func TestBlockedFirstSendDoesNotStrandLaterChunks(t *testing.T) {
-	t.Parallel()
-	a := newAnnounceFetchTest(t)
-	peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
-	hashes := make([][32]byte, 257)
-	for i := range hashes {
-		binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
-	}
-	a.blockSend = true
-	announcement := func() []byte {
-		var txTypes []byte
-		var sizes []uint32
-		var concat []byte
-		for _, h := range hashes {
-			txTypes, sizes, concat = append(txTypes, types.BlobTxType), append(sizes, 100), append(concat, h[:]...)
+	synctest.Test(t, func(t *testing.T) {
+		a := newAnnounceFetchTest(t)
+		peerA, peerB := [64]byte{0xa}, [64]byte{0xb}
+		hashes := make([][32]byte, 257)
+		for i := range hashes {
+			binary.BigEndian.PutUint64(hashes[i][:], uint64(i)+1)
 		}
-		buf := make([]byte, announcementsLen(txTypes, sizes, concat))
-		return buf[:encodeAnnouncements(txTypes, sizes, concat, buf)]
-	}()
-	_ = a.fetch.handleInboundMessageWithTx(a.ctx, nil, &sentryproto.InboundMessage{
-		Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: announcement, PeerId: gointerfaces.ConvertHashToH512(peerA),
-	}, a.sentryClient)
-	a.requestedFrom, a.sentHashes = nil, nil
-	a.announce(t, peerB, hashes[256])
-	require.Equal(t, [][64]byte{peerB}, a.requestedFrom, "a hash left reserved for A would only gain B as an alternate")
-	require.Equal(t, []Hashes{hashes[256][:]}, a.sentHashes)
+		a.blockSend = true
+		announcement := func() []byte {
+			var txTypes []byte
+			var sizes []uint32
+			var concat []byte
+			for _, h := range hashes {
+				txTypes, sizes, concat = append(txTypes, types.BlobTxType), append(sizes, 100), append(concat, h[:]...)
+			}
+			buf := make([]byte, announcementsLen(txTypes, sizes, concat))
+			return buf[:encodeAnnouncements(txTypes, sizes, concat, buf)]
+		}()
+		_ = a.fetch.handleInboundMessageWithTx(a.ctx, nil, &sentryproto.InboundMessage{
+			Id: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, Data: announcement, PeerId: gointerfaces.ConvertHashToH512(peerA),
+		}, a.sentryClient)
+		a.requestedFrom, a.sentHashes = nil, nil
+		a.announce(t, peerB, hashes[256])
+		require.Equal(t, [][64]byte{peerB}, a.requestedFrom, "a hash left reserved for A would only gain B as an alternate")
+		require.Equal(t, []Hashes{hashes[256][:]}, a.sentHashes)
+	})
 }
 
 func TestReplyDuringTheRetrySendFreesItsSlot(t *testing.T) {

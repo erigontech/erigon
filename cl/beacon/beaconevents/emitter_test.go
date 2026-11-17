@@ -110,6 +110,31 @@ func TestPendingEnvelopeRetryWakeIsNilSafe(t *testing.T) {
 	emitter.WakePendingEnvelopeRetry()
 }
 
+func TestNotifyEnvelopeArrivedDoesNotBlockWhenFull(t *testing.T) {
+	emitter := NewEventEmitter()
+	for range envelopeArrivedBufferSize {
+		emitter.NotifyEnvelopeArrived(common.Hash{1})
+	}
+
+	done := make(chan struct{})
+	go func() {
+		emitter.NotifyEnvelopeArrived(common.Hash{2})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("notification blocked on a full buffer")
+	}
+}
+
+func TestNotifyEnvelopeArrivedIsNilSafe(t *testing.T) {
+	var emitter *EventEmitter
+	require.Nil(t, emitter.EnvelopeArrived())
+	emitter.NotifyEnvelopeArrived(common.Hash{1})
+}
+
 // head, head_v2, execution_payload and execution_payload_available report a dropped event only on their own feeds, to
 // subscribers of that topic. The state and operation feeds, which carry every topic, drop them silently: their
 // subscribers may not have asked for them.
