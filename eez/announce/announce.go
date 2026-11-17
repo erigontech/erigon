@@ -14,12 +14,15 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package announce signs the unsafe-block announcements of Rollup0 App. D.6
-// and keeps those of a sequencer's blocks until L1 finality covers them.
+// Package announce signs and verifies the unsafe-block announcements of
+// Rollup0 App. D.6, and keeps those of a sequencer's blocks until L1 finality
+// covers them.
 package announce
 
 import (
 	"crypto/ecdsa"
+	"errors"
+	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -30,6 +33,9 @@ import (
 
 // Version is the announcement envelope version.
 const Version = 0
+
+// ErrInvalid reports an announcement that does not authenticate the block.
+var ErrInvalid = errors.New("invalid unsafe-block announcement")
 
 // Tag is the unsafe-block domain tag, keccak256("EEZ_ROLLUP0_UNSAFE_BLOCK_V1").
 var Tag = crypto.Keccak256Hash([]byte("EEZ_ROLLUP0_UNSAFE_BLOCK_V1"))
@@ -66,4 +72,34 @@ func Sign(key *ecdsa.PrivateKey, chainID *uint256.Int, hash common.Hash) ([]byte
 	copy(e.Signature[:], sig)
 	e.Signature[64] += 27
 	return rlp.EncodeToBytes(&e)
+}
+
+// Verify returns the producer that signed env, the announcement of block hash
+// on chain chainID.
+func Verify(env []byte, chainID *uint256.Int, hash common.Hash) (common.Address, error) {
+	var e envelope
+	if err := rlp.DecodeBytes(env, &e); err != nil {
+		return common.Address{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	switch {
+	case e.Version != Version:
+		return common.Address{}, fmt.Errorf("%w: version %d", ErrInvalid, e.Version)
+	case !e.ChainID.Eq(chainID):
+		return common.Address{}, fmt.Errorf("%w: chain %s, not %s", ErrInvalid, &e.ChainID, chainID)
+	case e.BlockHash != hash:
+		return common.Address{}, fmt.Errorf("%w: block %x, not %x", ErrInvalid, e.BlockHash, hash)
+	}
+	sig := e.Signature
+	r, s := new(uint256.Int).SetBytes(sig[:32]), new(uint256.Int).SetBytes(sig[32:64])
+	// v-27 is 0 or 1 only for a v of 27 or 28.
+	if !crypto.TransactionSignatureIsValid(sig[64]-27, r, s, false) {
+		return common.Address{}, fmt.Errorf("%w: signature values out of range or s not low", ErrInvalid)
+	}
+	sig[64] -= 27
+	m := Message(chainID, hash)
+	pub, err := crypto.SigToPub(m[:], sig[:])
+	if err != nil {
+		return common.Address{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	return crypto.PubkeyToAddress(*pub), nil
 }

@@ -45,6 +45,8 @@ type vector struct {
 type vectors struct {
 	DomainTag common.Hash `json:"domainTag"`
 	Valid     []vector    `json:"valid"`
+	// Invalid envelopes each break one rule of App. D.6.
+	Invalid []vector `json:"invalid"`
 }
 
 func load(t *testing.T) vectors {
@@ -82,4 +84,30 @@ func TestSign(t *testing.T) {
 		signed++
 	}
 	require.Equal(t, 3, signed)
+}
+
+// TestVerify is T-SEQ-8 on the follower's side: each valid envelope recovers
+// its producer, whichever key signed it, and each malformed one is rejected,
+// the high-s twin of a valid signature among them.
+func TestVerify(t *testing.T) {
+	v := load(t)
+	for _, x := range v.Valid {
+		producer, err := announce.Verify(x.Envelope, uint256.MustFromBig(x.ChainID.ToInt()), x.BlockHash)
+		require.NoError(t, err, x.Name)
+		require.Equal(t, x.Address, producer, x.Name)
+	}
+	require.Len(t, v.Invalid, 26)
+	for _, x := range v.Invalid {
+		_, err := announce.Verify(x.Envelope, uint256.MustFromBig(x.ChainID.ToInt()), x.BlockHash)
+		require.ErrorIs(t, err, announce.ErrInvalid, x.Name)
+	}
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	chainID, hash := uint256.NewInt(6290), common.Hash{7}
+	env, err := announce.Sign(key, chainID, hash)
+	require.NoError(t, err)
+	producer, err := announce.Verify(env, chainID, hash)
+	require.NoError(t, err)
+	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), producer)
 }

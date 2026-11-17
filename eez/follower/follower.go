@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/eez/announce"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/l1"
@@ -87,6 +88,11 @@ type Config struct {
 	// for the L2 block interval; HeadRequest bounds each peer request that
 	// fetches their missing blocks.
 	HeadRetry, HeadRequest time.Duration
+	// Announcements, when set, has the overlay take only the blocks the
+	// sequencer serves a valid App. D.6 announcement for, and keeps those
+	// announcements until L1 finality covers their blocks, for the node to
+	// serve.
+	Announcements *announce.Store
 	// Blobs serves the blobs of blob-backed batches; without it the
 	// follower cannot derive them.
 	Blobs l1.BlobSource
@@ -288,7 +294,15 @@ func New(reader l1.ChainReader, chain deriver.Chain, cfg *chain.Config, c Config
 		f.peers = &peerCount{count: c.PeerCount, every: cmp.Or(c.PeerRefresh, DefaultConfig.PeerRefresh)}
 	}
 	if c.Sequencer != nil {
-		f.overlay = &overlay{seq: c.Sequencer, chain: chain, deriver: d, limit: overlayLimit, logger: logger}
+		f.overlay = &overlay{
+			seq: c.Sequencer, chain: chain, deriver: d, chainID: cfg.ChainID, store: c.Announcements,
+			limit: overlayLimit, logger: logger,
+		}
+		if c.Announcements != nil {
+			// A previous run may have taken blocks without keeping their
+			// announcements.
+			f.overlay.gap = 1
+		}
 	}
 	if c.Heads != nil {
 		f.heads = &signedHeads{

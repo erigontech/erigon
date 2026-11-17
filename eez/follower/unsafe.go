@@ -22,9 +22,12 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/eez/announce"
 	"github.com/erigontech/erigon/eez/deriver"
 	"github.com/erigontech/erigon/eez/l1"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -42,6 +45,9 @@ type Sequencer interface {
 	Head(ctx context.Context) (uint64, common.Hash, error)
 	// BlockByNumber returns the sequencer's block at number.
 	BlockByNumber(ctx context.Context, number uint64) (*types.Block, error)
+	// Announcement returns the App. D.6 announcement the sequencer serves for
+	// its block at number, nil when it serves none.
+	Announcement(ctx context.Context, number uint64) ([]byte, error)
 }
 
 // RPCSequencer is a Sequencer over JSON-RPC.
@@ -86,6 +92,17 @@ func (s *RPCSequencer) BlockByNumber(ctx context.Context, number uint64) (*types
 	return b, nil
 }
 
+func (s *RPCSequencer) Announcement(ctx context.Context, number uint64) ([]byte, error) {
+	var env *hexutil.Bytes
+	if err := s.client.CallContext(ctx, &env, "eez_getUnsafeBlockAnnouncement", hexutil.Uint64(number)); err != nil {
+		return nil, l1.RedactTransport(err)
+	}
+	if env == nil {
+		return nil, nil
+	}
+	return *env, nil
+}
+
 // overlay makes the sequencer's latest block the local head while the
 // sequencer's chain descends from the safe block. Safe and finalized stay
 // derivation's.
@@ -93,15 +110,26 @@ type overlay struct {
 	seq     Sequencer
 	chain   deriver.Chain
 	deriver *deriver.Deriver
+	// chainID is the chain announcements must name. store, when set, takes
+	// only announced blocks and keeps their announcements.
+	chainID *uint256.Int
+	store   *announce.Store
 	// limit bounds the blocks one step fetches.
-	limit  uint64
-	last   common.Hash
+	limit uint64
+	last  common.Hash
+	// gap is the lowest block taken without its announcement kept, zero for
+	// none.
+	gap    uint64
 	logger log.Logger
 }
+
+// errUnannounced reports a block the sequencer serves no announcement for.
+var errUnannounced = errors.New("sequencer block not announced")
 
 // step moves the head to the sequencer's latest block, or by at most limit
 // blocks toward it.
 func (o *overlay) step(ctx context.Context) error {
+	o.reread(ctx)
 	number, hash, err := o.seq.Head(ctx)
 	if err != nil || hash == o.last {
 		return err
@@ -128,6 +156,25 @@ func (o *overlay) step(ctx context.Context) error {
 		return err
 	}
 	tip := blocks[len(blocks)-1]
+	envs := make([][]byte, len(blocks))
+	var producer common.Address
+	for i, b := range blocks {
+		if o.store == nil {
+			break
+		}
+		if envs[i], err = o.seq.Announcement(ctx, b.NumberU64()); err != nil {
+			return err
+		}
+		if envs[i] == nil {
+			// The sequencer may announce it after it became the head: the
+			// next step reads it again.
+			o.logger.Debug("[eez] sequencer block not announced", "event", "eez.node.follower.head.unannounced", "number", b.NumberU64(), "hash", b.Hash())
+			return nil
+		}
+		if producer, err = announce.Verify(envs[i], o.chainID, b.Hash()); err != nil {
+			return o.reject(ctx, number, hash, fmt.Errorf("sequencer block %d (%x): %w", b.NumberU64(), b.Hash(), err))
+		}
+	}
 	if err := o.chain.Insert(ctx, blocks); err != nil {
 		return o.reject(ctx, number, hash, err)
 	}
@@ -137,8 +184,80 @@ func (o *overlay) step(ctx context.Context) error {
 	if tip.Hash() == hash {
 		o.last = hash
 	}
-	o.logger.Debug("[eez] head follows the sequencer", "event", "eez.node.follower.head.advanced", "number", tip.NumberU64(), "hash", tip.Hash())
+	o.logger.Debug("[eez] head follows the sequencer", "event", "eez.node.follower.head.advanced", "number", tip.NumberU64(), "hash", tip.Hash(),
+		"producer", producer)
+	o.keep(ctx, blocks, envs)
 	return nil
+}
+
+// keep stores envs, the announcements of blocks, now taken, for the node to
+// serve, and drops those L1 finality covers.
+func (o *overlay) keep(ctx context.Context, blocks []*types.Block, envs [][]byte) {
+	if o.store == nil {
+		return
+	}
+	for i, b := range blocks {
+		if err := o.store.Put(ctx, b.NumberU64(), b.Hash(), envs[i]); err != nil {
+			o.logger.Warn("[eez] sequencer announcement not kept", "event", "eez.node.follower.announcement.keep_failed", "number", b.NumberU64(), "err", err)
+			o.missing(b.NumberU64())
+			return
+		}
+	}
+	if err := o.store.Prune(ctx, o.deriver.Finalized()); err != nil {
+		o.logger.Warn("[eez] finalized announcements not pruned", "event", "eez.node.follower.announcement.prune_failed", "err", err)
+	}
+}
+
+// missing records block number as taken without its announcement kept.
+func (o *overlay) missing(number uint64) {
+	if o.gap == 0 || number < o.gap {
+		o.gap = number
+	}
+}
+
+// reread reads again, from gap up, the announcements of the blocks taken
+// without one kept while L1 has not settled them. It keeps those served
+// valid and stops at the first it cannot keep.
+func (o *overlay) reread(ctx context.Context) {
+	if o.gap == 0 {
+		return
+	}
+	for n := max(o.gap, o.deriver.Safe()+1); ; n++ {
+		hash, ok, err := o.chain.CanonicalHash(ctx, n)
+		if err == nil && !ok {
+			o.gap = 0
+			return
+		}
+		if err == nil {
+			err = o.refill(ctx, n, hash)
+		}
+		if err != nil {
+			o.gap = n
+			if ctx.Err() == nil {
+				o.logger.Debug("[eez] sequencer announcement still not kept", "event", "eez.node.follower.announcement.missing", "number", n, "err", err)
+			}
+			return
+		}
+	}
+}
+
+// refill keeps the announcement of block number with hash, taken without
+// its announcement kept, unless kept since.
+func (o *overlay) refill(ctx context.Context, number uint64, hash common.Hash) error {
+	if env, err := o.store.Get(ctx, number, hash); err != nil || env != nil {
+		return err
+	}
+	env, err := o.seq.Announcement(ctx, number)
+	if err != nil {
+		return err
+	}
+	if env == nil {
+		return errUnannounced
+	}
+	if _, err := announce.Verify(env, o.chainID, hash); err != nil {
+		return err
+	}
+	return o.store.Put(ctx, number, hash, env)
 }
 
 // reject keeps the overlay off the sequencer head hash until the sequencer

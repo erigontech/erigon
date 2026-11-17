@@ -368,9 +368,10 @@ func caplinBlobs(backend *eth.Ethereum) l1.BeaconStore {
 // startFollower registers on n the follower of its EEZ chain, reading L1
 // from reader, blobs also from local when not nil, and keeping its stores in
 // dir, and its sequencer when cfg has one, whose witnesses api serves with
-// debug, and whose App. D.6 announcements it serves where the rule set has
-// them. When the follower or the sequencer halts on its own it closes stop,
-// the node whose exit ends the process.
+// debug. Where the rule set has App. D.6 announcements, api serves those the
+// sequencer signs, or those the follower takes from the sequencer it follows.
+// When the follower or the sequencer halts on its own it closes stop, the node
+// whose exit ends the process.
 func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Close() }, reader l1.ChainReader, local l1.BeaconStore, cfg *eez.Config, api *eezrpc.API, dirs datadir.Dirs, dir string, loopBlockLimit uint, debug bool, logger log.Logger) (halting, error) {
 	backend := n.Backend()
 	chainConfig := backend.ChainConfig()
@@ -437,32 +438,41 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 			fc.OnL2Head = signer.Moved
 		}
 	}
-	f, err := follower.New(reader, chain, chainConfig, fc, logger)
-	if err != nil {
-		return nil, err
+	// Those the sequencer signs, or those the follower takes with its blocks.
+	var announcements *announce.Store
+	if announces(chainConfig) && (cfg.SequencerRPC != "" || (cfg.Sequencer != nil && cfg.Sequencer.Key != nil)) {
+		if announcements, err = announce.Open(ctx, dir, logger); err != nil {
+			return nil, err
+		}
+		fc.Announcements = announcements
 	}
 	var witnesses *witness.Store
-	var announcements *announce.Store
 	closeStores := func() {
-		witnesses.Close()
+		if witnesses != nil {
+			witnesses.Close()
+		}
 		if announcements != nil {
 			announcements.Close()
 		}
 	}
+	f, err := follower.New(reader, chain, chainConfig, fc, logger)
+	if err != nil {
+		closeStores()
+		return nil, err
+	}
 	if cfg.Sequencer != nil {
 		if witnesses, err = witness.Open(ctx, dir, logger); err != nil {
+			closeStores()
 			return nil, err
 		}
 		capture := witness.NewCapture(jsonrpc.NewHeadWitnesses(db, blockReader, engine), witnesses, func() uint64 { return f.Status().Finalized })
 		var announcer sequencer.Announcements
-		if key := cfg.Sequencer.Key; key != nil && announces(chainConfig) {
-			if announcements, err = announce.Open(ctx, dir, logger); err != nil {
-				closeStores()
-				return nil, err
-			}
+		if key := cfg.Sequencer.Key; key != nil && announcements != nil {
 			a := announce.NewSigner(key, chainConfig.ChainID, announcements, f, func() uint64 { return f.Status().Finalized }, logger)
 			announcer = a
 			logger.Info("[eez] sequencer signs unsafe-block announcements", "signer", a.Address())
+		} else if announces(chainConfig) {
+			logger.Warn("[eez] sequencer signs no unsafe-block announcements: --"+eez.SequencerKeyFileFlag.Name+" is not set", "event", "eez.node.announcer.disabled")
 		}
 		if seq, err = newSequencer(ctx, backend, chain, f, stop, cfg.Sequencer, capture, announcer, logger); err != nil {
 			closeStores()
@@ -471,9 +481,9 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		if debug {
 			api.AttachWitnesses(witnesses)
 		}
-		if announcements != nil {
-			api.AttachAnnouncements(announcements)
-		}
+	}
+	if announcements != nil {
+		api.AttachAnnouncements(announcements)
 	}
 	api.Attach(f)
 	if seq != nil {
@@ -483,6 +493,11 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 		logger.Crit("[eez] follower halted, stopping the node", "err", err)
 		go stop.Close()
 	})
+	// Lifecycles stop in reverse: the sequencer, the follower, the signer of
+	// its heads, then the stores they write.
+	if witnesses != nil || announcements != nil {
+		n.RegisterLifecycle(onStop(closeStores))
+	}
 	if signer != nil {
 		// Stops after the follower, the writer of the heads it signs, and
 		// before the overlay, whose stop ends a publication in flight.
@@ -490,9 +505,6 @@ func startFollower(ctx context.Context, n *node.ErigonNode, stop interface{ Clos
 	}
 	n.RegisterLifecycle(svc)
 	if seq != nil {
-		// Lifecycles stop in reverse: the sequencer, then the stores, then the
-		// follower.
-		n.RegisterLifecycle(onStop(closeStores))
 		n.RegisterLifecycle(seq)
 		logger.Info("[eez] sequencer mode", "feeRecipient", cfg.Sequencer.FeeRecipient, "proofTime", cfg.Sequencer.ProofTime,
 			"submissionSlack", cfg.Sequencer.SubmissionSlack, "maxDepth", cfg.Sequencer.MaxDepth)
