@@ -76,6 +76,7 @@ func generateStandaloneIIFile(t *testing.T, name kv.InvertedIdx, dirs datadir.Di
 // frozen file entirely below cutoff is retired (deferred until readers
 // drain), while one still at/after cutoff is kept.
 func TestRetire_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -126,6 +127,7 @@ func TestRetire_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T) {
 // A Retire through an older view must report only the files it detached, not
 // the ones another view already retired.
 func TestRetire_StaleViewReportsOnlyDetachedFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 	ranges := []testFileRange{{0, 2}, {2, 4}, {4, 5}}
@@ -235,6 +237,7 @@ func TestRetire_KeepsDomainWhenCutoffZero(t *testing.T) {
 // one full step floors to step 0 and retires nothing (the aggregator owns this
 // txNum→step floor).
 func TestRetire_SubStepTxNumKeepsFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -253,6 +256,7 @@ func TestRetire_SubStepTxNumKeepsFiles(t *testing.T) {
 // TestRetire_StandaloneII exercises the standalone-II loop
 // (LogAddrIdx et al.), separate from the per-domain loop.
 func TestRetire_StandaloneII(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -281,6 +285,7 @@ func TestRetire_StandaloneII(t *testing.T) {
 }
 
 func TestRetire_IndexAndHistoryPartitionsCanDiffer(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	const stepSize = uint64(10)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, 2)
 	historyRanges := []testFileRange{{0, 2}, {2, 3}}
@@ -314,6 +319,7 @@ func TestRetire_IndexAndHistoryPartitionsCanDiffer(t *testing.T) {
 // TestRetire_ReclaimConcurrent stresses BeginFilesRo/Close
 // against concurrent retirement under the race detector.
 func TestRetire_ReclaimConcurrent(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -352,6 +358,7 @@ func TestRetire_ReclaimConcurrent(t *testing.T) {
 // Retire must detach from dirtyFiles, not merely the visible view: a file left in dirty
 // would be rebuilt back into visible by the next recalcVisibleFiles.
 func TestRetire_DetachesFromDirtyFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -382,6 +389,7 @@ func TestRetire_DetachesFromDirtyFiles(t *testing.T) {
 // Retire takes its boundary from aged visible files, so a subsumed (dirty-but-not-visible) file
 // below the cutoff stays while no visible file is aged.
 func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -523,6 +531,7 @@ func TestRetire_PreservesTailBelowHiddenCoveringFile(t *testing.T) {
 // unfrozen head outruns the prune distance, so Retire skips the entity (keeping its files) and
 // retries once the tip advances — it must not error and poison retirement of the healthy ones.
 func TestRetire_SkipsWindowTooSmall(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 

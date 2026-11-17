@@ -73,7 +73,7 @@ func TestVisibleFilesAligned_LaggingCommitmentClampsEveryone(t *testing.T) {
 
 // a gap in one domain's files lowers every list's visible end
 func TestVisibleFilesAligned_GapInOneListLowersEveryList(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
@@ -87,7 +87,7 @@ func TestVisibleFilesAligned_GapInOneListLowersEveryList(t *testing.T) {
 
 // a gap in the middle of one domain's files lowers every list's visible end to the gap
 func TestVisibleFilesAligned_MiddleGapInOneListLowersEveryList(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
@@ -102,7 +102,7 @@ func TestVisibleFilesAligned_MiddleGapInOneListLowersEveryList(t *testing.T) {
 
 // a values list whose first file is unreadable lowers every list to that file's start
 func TestVisibleFilesAligned_LeadingGapInOneListLowersEveryList(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
@@ -308,8 +308,25 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 		"lowering a history-II end while values ends stay put must trip the forbid assert")
 }
 
+func TestVisibleFilesAligned_HistoryGapLowersEveryList(t *testing.T) {
+	for _, path := range []string{"accessor/v2.0-accounts.1-2.vi", "accessor/v1.0-accounts.1-2.efi"} {
+		t.Run(path, func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(false))
+			db, agg := testDbAndAggregatorv3(t, alignStepSize)
+			ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+			generateStateFiles(t, agg.Dirs(), ranges)
+			generateCommitmentFile(t, agg.Dirs(), ranges)
+			generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+			require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().Snap, filepath.FromSlash(path))))
+			require.NoError(t, agg.OpenFolder(db))
+
+			requireVisibleEnd(t, agg, alignStepSize)
+		})
+	}
+}
+
 func TestVisibleFilesAligned_CutThroughAMergedFileRepeats(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	merged := []testFileRange{{0, 2}, {2, 3}}
