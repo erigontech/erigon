@@ -183,6 +183,7 @@ type IntraBlockState struct {
 	versionMap      *VersionMap
 	versionedWrites WriteSet
 	versionedReads  ReadSet
+	storageHints    map[accounts.Address]int // probe: last tx's slot count per address
 	// versionedOrigins collects committed pre-block base cells (at originIndex) that a cold
 	// read resolves this tx. Reads record here (tx-local, lock-free) instead of writing the
 	// shared versionMap mid-execution; the executor publishes them batched at flush, so the
@@ -3762,6 +3763,31 @@ func (ibs *IntraBlockState) Version() Version {
 	}
 }
 
+// probe: pre-size a tx's per-address slot read map from the last tx's count.
+var stubStorageHint = dbg.EnvBool("STUB_STORAGE_HINT", false)
+
+// noteStorageHints keeps each address's slot-read count before the read set is replaced.
+func (ibs *IntraBlockState) noteStorageHints() {
+	if !stubStorageHint || len(ibs.versionedReads.storage) == 0 {
+		return
+	}
+	if ibs.storageHints == nil || len(ibs.storageHints) > 1024 {
+		ibs.storageHints = make(map[accounts.Address]int, len(ibs.versionedReads.storage))
+	}
+	for addr, inner := range ibs.versionedReads.storage {
+		ibs.storageHints[addr] = len(inner)
+	}
+}
+
+func (ibs *IntraBlockState) setStorageRead(addr accounts.Address, key accounts.StorageKey, r VersionedRead[uint256.Int]) {
+	if stubStorageHint {
+		if h := ibs.storageHints[addr]; h > 8 {
+			ibs.versionedReads.ensureStorage(addr, h)
+		}
+	}
+	ibs.versionedReads.SetStorage(addr, key, r)
+}
+
 // VersionedReads returns the in-flight per-path read set.  The returned
 // value shares the underlying maps with the IBS; it is handed over at
 // end of tx (RecordReads / TxIn), after which ResetVersionedIO rebinds
@@ -3771,6 +3797,7 @@ func (ibs *IntraBlockState) VersionedReads() ReadSet {
 }
 
 func (ibs *IntraBlockState) ResetVersionedIO() {
+	ibs.noteStorageHints()
 	ibs.versionedReads = ReadSet{}
 	ibs.versionedWrites.recycle()
 	ibs.dep = UnknownDep
@@ -3780,6 +3807,7 @@ func (ibs *IntraBlockState) ResetVersionedIO() {
 
 // ResetVersionedReads clears tracked versioned reads without affecting writes.
 func (ibs *IntraBlockState) ResetVersionedReads() {
+	ibs.noteStorageHints()
 	ibs.versionedReads = ReadSet{}
 }
 

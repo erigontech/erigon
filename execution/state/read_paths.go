@@ -400,7 +400,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					hdr := ReadHeader{Source: MapRead, Version: sdVersion}
 					switch path {
 					case StoragePath:
-						s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{ReadHeader: hdr})
+						s.setStorageRead(addr, key, VersionedRead[uint256.Int]{ReadHeader: hdr})
 					case BalancePath:
 						s.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: hdr})
 					case NoncePath:
@@ -1260,7 +1260,7 @@ func recordWipedSelfDestruct(s *IntraBlockState, addr accounts.Address, life lif
 // recordWipedStorageRead records a zero slot read at the destruct that wiped it,
 // as liveStorage resolves it, so a later store above the destruct invalidates it.
 func recordWipedStorageRead(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, life lifecycleVerdict) {
-	s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
+	s.setStorageRead(addr, key, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: life.destroyedAt, Incarnation: life.wipeInc}},
 	})
 }
@@ -1660,7 +1660,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 	case outcomeMapDone:
 		v := r.mapStorageVal
 		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			s.setStorageRead(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, false, nil
 	case outcomeStorageRead:
@@ -1682,7 +1682,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 			seedStorageOrigin(s, addr, key, v, &r)
 		}
 		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			s.setStorageRead(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, clean, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
@@ -1716,7 +1716,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 	case outcomeMapDone:
 		v := r.mapStorageVal
 		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			s.setStorageRead(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
@@ -1734,7 +1734,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 		}
 		seedStorageOrigin(s, addr, key, v, &r)
 		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			s.setStorageRead(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:

@@ -229,6 +229,16 @@ func (s *ReadSet) SetCodeSize(addr accounts.Address, tr VersionedRead[int]) {
 	readSetPut(&s.codeSize, addr, tr)
 }
 
+// ensureStorage creates addr's slot map sized for hint slots, if it has none.
+func (s *ReadSet) ensureStorage(addr accounts.Address, hint int) {
+	if s.storage == nil {
+		s.storage = make(map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int])
+	}
+	if s.storage[addr] == nil {
+		s.storage[addr] = make(map[accounts.StorageKey]VersionedRead[uint256.Int], hint)
+	}
+}
+
 func (s *ReadSet) SetStorage(addr accounts.Address, key accounts.StorageKey, tr VersionedRead[uint256.Int]) {
 	if s.storage == nil {
 		s.storage = make(map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int])
