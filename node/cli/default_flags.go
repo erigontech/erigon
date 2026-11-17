@@ -250,6 +250,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinArchiveBlobsFromSlotFlag,
 	&utils.CaplinArchiveStatesFlag,
 	&utils.CaplinImmediateBlobBackfillFlag,
+	&utils.CaplinBlobsBackfillEndpointFlag,
+	&utils.CaplinBlobsBackfillEndpointWorkersFlag,
 
 	&utils.CaplinDisableBlobPruningFlag,
 	&utils.CaplinColumnKeepSlotsFlag,

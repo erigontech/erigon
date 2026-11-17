@@ -147,7 +147,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("overview header has the clients in fixed order",
           any(line.split() == ["Test", "QPS", "erigon", "geth", "reth"] for line in md.splitlines()), md)
     header = next(line for line in md.splitlines() if line.split()[:2] == ["Test", "QPS"])
-    rows = [line.rsplit(" ", 1)[0] for line in md.splitlines() if line[-1:] in ("🟢", "🟡", "🔴", "⚪")]
+    rows = [line.rsplit(" ", 1)[0] for line in md.splitlines() if line[-1:] in ("🟢", "🟡", "🔴")]
     check("overview columns are ASCII and aligned, the status closes each row",
           len(rows) == 6 and all(r.isascii() and len(r) == len(header) for r in rows), md)
     row = overview_row(md, "eth_call", "1")
@@ -163,8 +163,9 @@ with tempfile.TemporaryDirectory() as tmp:
     row = overview_row(md, "eth_call", "5")
     check("erigon below 100% HTTP is red", row == ["eth_call", "5", "err", "-", "1.00*", "🔴"], row)
     row = overview_row(md, "mixed", "1")
-    check("no erigon result, no status", row == ["mixed", "1", "-", "-", "1.00*", "⚪"], row)
-    check("legend explains the white status", "⚪ no Erigon result" in md, md)
+    check("no erigon result where another client has one is red", row == ["mixed", "1", "-", "-", "1.00*", "🔴"], row)
+    check("legend says a missing Erigon result is red", "🔴 >= 1.3x, errors or no Erigon result" in md, md)
+    check("legend has no white status", "⚪" not in md, md)
 
 with tempfile.TemporaryDirectory() as tmp:
     write_result(tmp, "erigon", "mixed", [

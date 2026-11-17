@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 )
@@ -38,6 +39,19 @@ func initializeDbNonDupSort(tb testing.TB, rwTx kv.RwTx) {
 	require.NoError(tb, rwTx.Put(kv.HeaderNumber, []byte("CAAA"), []byte("value1")))
 	require.NoError(tb, rwTx.Put(kv.HeaderNumber, []byte("CBAA"), []byte("value2")))
 	require.NoError(tb, rwTx.Put(kv.HeaderNumber, []byte("CCAA"), []byte("value3")))
+}
+
+func TestTxNumsTruncateMemoryBatch(t *testing.T) {
+	_, tx := newTestTx(t)
+	batch, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer batch.Close()
+
+	for block := uint64(0); block <= 3; block++ {
+		require.NoError(t, rawdbv3.TxNums.Append(batch, block, block*2+1))
+	}
+	require.NoError(t, rawdbv3.TxNums.Truncate(batch, 2))
+	require.NoError(t, rawdbv3.TxNums.Append(batch, 2, 5))
 }
 
 func TestPutAppendHas(t *testing.T) {

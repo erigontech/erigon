@@ -293,6 +293,110 @@ func TestMarkReadersDirtyOnBALSeededAccountPaths(t *testing.T) {
 	}
 }
 
+// A re-run that no longer writes a value the access list seeds at its tx puts the seed back instead
+// of removing the cell. Without the cell, a later tx would read the committed value, and validation
+// accepts a committed read of a seeded path once the seed is back. A value the access list seeds
+// only below the tx is not the tx's write, so the cell is removed.
+func TestSelfLoopFlushKeepsTheSeedOfADroppedWrite(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	earlier := state.Version{TxIndex: 1}
+	seedCode, otherCode := accounts.NewCode([]byte{0x60, 0x01}), accounts.NewCode([]byte{0x60, 0x02})
+	cases := []struct {
+		name    string
+		seed    func(index uint32) types.AccountChanges
+		earlier *state.WriteSet
+		paths   []state.AccountPath
+		value   func(*state.VersionMap) any
+		want    any
+	}{
+		{
+			"balance",
+			func(index uint32) types.AccountChanges {
+				return types.AccountChanges{BalanceChanges: []*types.BalanceChange{{Index: index, Value: *uint256.NewInt(7)}}}
+			},
+			newWS().bal(addr, earlier, *uint256.NewInt(8)).build(),
+			[]state.AccountPath{state.BalancePath},
+			func(vm *state.VersionMap) any { v, _, _ := vm.ReadBalance(addr, 2); return v }, *uint256.NewInt(7),
+		},
+		{
+			"balance of a removed account",
+			func(index uint32) types.AccountChanges {
+				return types.AccountChanges{BalanceChanges: []*types.BalanceChange{{Index: index, Value: *uint256.NewInt(7)}}}
+			},
+			newWS().emptyRemoval(addr, earlier).build(),
+			[]state.AccountPath{state.BalancePath},
+			func(vm *state.VersionMap) any { v, _, _ := vm.ReadBalance(addr, 2); return v }, *uint256.NewInt(7),
+		},
+		{
+			"nonce",
+			func(index uint32) types.AccountChanges {
+				return types.AccountChanges{NonceChanges: []*types.NonceChange{{Index: index, Value: 7}}}
+			},
+			newWS().nonce(addr, earlier, 8).build(),
+			[]state.AccountPath{state.NoncePath},
+			func(vm *state.VersionMap) any { v, _, _ := vm.ReadNonce(addr, 2); return v }, uint64(7),
+		},
+		{
+			"code",
+			func(index uint32) types.AccountChanges {
+				return types.AccountChanges{CodeChanges: []*types.CodeChange{{Index: index, Bytecode: seedCode.Bytes}}}
+			},
+			newWS().code(addr, earlier, otherCode).codeHash(addr, earlier, otherCode.Hash).codeSize(addr, earlier, otherCode.Len()+1).build(),
+			[]state.AccountPath{state.CodePath, state.CodeHashPath, state.CodeSizePath},
+			func(vm *state.VersionMap) any {
+				code, _, _ := vm.ReadCode(addr, 2)
+				hash, _, _ := vm.ReadCodeHash(addr, 2)
+				size, _, _ := vm.ReadCodeSize(addr, 2)
+				return []any{code.Bytes, hash, size}
+			},
+			[]any{seedCode.Bytes, seedCode.Hash, seedCode.Len()},
+		},
+		{
+			"storage",
+			func(index uint32) types.AccountChanges {
+				return types.AccountChanges{StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: index, Value: *uint256.NewInt(7)}}}}}
+			},
+			newWS().stor(addr, slot, earlier, *uint256.NewInt(8)).build(),
+			[]state.AccountPath{state.StoragePath},
+			func(vm *state.VersionMap) any { v, _, _ := vm.ReadStorage(addr, slot, 2); return v }, *uint256.NewInt(7),
+		},
+	}
+	dropping := state.Version{TxIndex: 1, Incarnation: 1}
+	for _, c := range cases {
+		for _, at := range []struct {
+			name  string
+			index uint32
+			want  state.Version
+		}{
+			{"seeded at the tx", 2, dropping},
+			{"seeded below the tx", 1, state.Version{TxIndex: 0}},
+		} {
+			t.Run(c.name+" "+at.name, func(t *testing.T) {
+				be := newDetExecutor(t, 3)
+				seed := c.seed(at.index)
+				seed.Address = addr.Value()
+				be.versionMap = state.NewVersionMap(types.BlockAccessList{seed})
+				run := &exec.TxResult{Task: be.tasks[1].Task, TxOut: c.earlier}
+				be.selfLoopFlush(earlier, run, nil)
+				be.selfLoopFlush(dropping, &exec.TxResult{Task: be.tasks[1].Task, TxOut: &state.WriteSet{}}, run.TxOut)
+
+				key := accounts.NilKey
+				if c.paths[0] == state.StoragePath {
+					key = slot
+				}
+				for _, path := range c.paths {
+					res := be.versionMap.ReadStatus(addr, path, key, 2)
+					require.Equal(t, state.MVReadResultDone, res.Status(), path)
+					require.Equal(t, at.want, res.Version(), path)
+					require.NotEqual(t, state.ValueDeleted, res.ValStatus(), path)
+				}
+				require.Equal(t, c.want, c.value(be.versionMap))
+			})
+		}
+	}
+}
+
 func TestMarkReadersDirty(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
 	slot1 := accounts.InternKey(common.HexToHash("0x01"))
