@@ -129,6 +129,8 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
     runs-on: [self-hosted, qa, Ethereum, "rpc-latest-${{ matrix.client }}"]
+    # Only an Erigon failure fails the run: a failure of another client is a result of the comparison.
+    continue-on-error: ${{ matrix.client != 'erigon' }}
     timeout-minutes: 480
     permissions:
       contents: read
