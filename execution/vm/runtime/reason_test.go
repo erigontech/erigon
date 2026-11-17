@@ -281,24 +281,9 @@ func TestCodeChangeUnspecifiedOnSetup(t *testing.T) {
 		"setup SetCode must use CodeChangeUnspecified, not a deployment reason")
 }
 
-// TestReasonRoundTripThroughIBS verifies that every NonceChangeReason and
-// CodeChangeReason value used by the call sites outside this package
-// (TxnExecutor EoA-call / EIP-7702 paths, account-abstraction exec) plumbs
-// unchanged through IntraBlockState.SetNonce / SetCode into the V2 tracer
-// hook.
-//
-// This is a plumbing guard only. It does NOT lock in which reason a given
-// call site passes — if a future refactor changes
-// `state.SetCode(addr, code, tracing.CodeChangeAuthorization)` in
-// txn_executor.go to `tracing.CodeChangeUnspecified`, this test stays
-// green. What it does catch is the layer it actually exercises:
-//   - IBS.SetNonce / SetCode dropping or coercing the reason argument
-//   - The stateObject -> V2 hook plumbing forwarding the wrong reason
-//   - Stringer indices going out of sync with the constant values
-//
-// A true end-to-end call-site guard for the TxnExecutor and aa_exec emit
-// sites would need a TxnExecutor fixture (message, signer, gas pool,
-// authorization list) — that's a follow-up rather than part of this PR.
+// TestReasonRoundTripThroughIBS checks that nonce and code change reasons reach
+// tracer hooks unchanged through IntraBlockState. The caller's choice of reason
+// is outside this test's scope.
 func TestReasonRoundTripThroughIBS(t *testing.T) {
 	t.Run("nonce reasons", func(t *testing.T) {
 		nonceReasons := []tracing.NonceChangeReason{

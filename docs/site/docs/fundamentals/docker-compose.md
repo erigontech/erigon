@@ -57,7 +57,7 @@ Copy
 
 If not specified, the UID/GID will use the current user.
 
-A good choice for `XDG_DATA_HOME` is to use the `~erigon/.ethereum` directory created by helper targets `make user_linux` or `make user_macos`.
+A good choice for `XDG_DATA_HOME` is to use the `~erigon/.ethereum` directory created by the helper targets `make user_linux` or `make user_macos`.
 
 #### Check: Permissions
 
@@ -67,7 +67,7 @@ If a build or service startup is failing due to permissions, check that all the 
 
 #### Run
 
-Next command starts: `erigon` on port `30303`, `rpcdaemon` on port `8545`, `prometheus` on port `9090`, and `grafana` on port `3000`:
+The next command starts: `erigon` on port `30303`, `rpcdaemon` on port `8545`, `prometheus` on port `9090`, and `grafana` on port `3000`:
 
 ```bash
 #
@@ -103,6 +103,6 @@ ERIGON_USER=erigon
 sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${ERIGON_USER}) XDG_DATA_HOME=~${ERIGON_USER}/.ethereum DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 ```
 
-`Makefile` creates the initial directories for `erigon`, `prometheus` and `grafana`. The PID namespace is shared between Erigon and RPC Daemon which is required to open Erigon's DB from another process (RPC Daemon local-mode). See: [https://github.com/erigontech/erigon/pull/2392/files](https://github.com/erigontech/erigon/pull/2392/files)
+`Makefile` creates the initial directories for `erigon`, `prometheus` and `grafana`. The PID namespace is shared between Erigon and the RPC Daemon, which is required to open Erigon's DB from another process (RPC Daemon local-mode). See: [https://github.com/erigontech/erigon/pull/2392/files](https://github.com/erigontech/erigon/pull/2392/files)
 
 If your Docker installation requires the Docker daemon to run as root (which is by default), you will need to prefix the command above with `sudo`. However, it is sometimes recommended running Docker (and therefore its containers) as a non-root user for security reasons. For more information about how to do this, refer to this [article](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).

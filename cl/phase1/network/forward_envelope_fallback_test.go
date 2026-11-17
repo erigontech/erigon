@@ -53,7 +53,49 @@ func (s *invalidEnvelopeSentinel) PeersInfo(context.Context, *sentinelproto.Peer
 	return &sentinelproto.PeersInfoResponse{}, nil
 }
 
+func TestForwardHTTPEnvelopeRejectsBidMismatch(t *testing.T) {
+	for _, pid := range []string{"http-fallback", "block-peer"} {
+		t.Run(pid, func(t *testing.T) {
+			cfg := gloasFromGenesisConfig()
+			block, envelope, root := makeFullGloasTipAndEnvelope(t, cfg, 10)
+			encoded, err := envelope.EncodeSSZ(nil)
+			require.NoError(t, err)
+			server := newEnvelopeServer(t, root, encoded)
+			downloader := NewForwardBeaconDownloader(t.Context(), nil, cfg)
+			downloader.SetHTTPFallbackURL(server.URL)
+			p2pCtx, cancel := context.WithCancel(t.Context())
+			cancel()
+
+			blocks := []*cltypes.SignedBeaconBlock{block}
+			roots := [][32]byte{root}
+			envelopes := downloader.fetchGloasEnvelopes(t.Context(), p2pCtx, pid, blocks, roots)
+			require.Contains(t, envelopes, root)
+
+			envelope.Message.Payload.BlockHash = hash(0xff)
+			require.ErrorContains(t, ValidateDownloadedGloasEnvelope(cfg, block, envelope), "block hash mismatch")
+			encoded, err = envelope.EncodeSSZ(nil)
+			require.NoError(t, err)
+			server = newEnvelopeServer(t, root, encoded)
+			downloader.SetHTTPFallbackURL(server.URL)
+
+			envelopes = downloader.fetchGloasEnvelopes(t.Context(), p2pCtx, pid, blocks, roots)
+
+			require.Empty(t, envelopes)
+			require.Empty(t, retainBlocksBeforeMissingGloasEnvelope(blocks, roots, envelopes))
+		})
+	}
+}
+
 func TestForwardInvalidEnvelopeUsesAvailableFallback(t *testing.T) {
+	previousExpiration := requestEnvelopeBatchExpiration
+	previousRetryInterval := requestEnvelopeRetryInterval
+	requestEnvelopeBatchExpiration = 10 * time.Millisecond
+	requestEnvelopeRetryInterval = time.Second
+	t.Cleanup(func() {
+		requestEnvelopeBatchExpiration = previousExpiration
+		requestEnvelopeRetryInterval = previousRetryInterval
+	})
+
 	for _, httpAvailable := range []bool{false, true} {
 		t.Run(fmt.Sprint(httpAvailable), func(t *testing.T) {
 			cfg := gloasFromGenesisConfig()
@@ -89,7 +131,7 @@ func TestForwardInvalidEnvelopeUsesAvailableFallback(t *testing.T) {
 			var wire bytes.Buffer
 			require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, bad, digest[:]...))
 			sentinel := &invalidEnvelopeSentinel{response: wire.Bytes()}
-			client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock, nil)
+			client := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock)
 			second := makeGloasBlock(11, hash(2), bid.BlockHash)
 			linkBeaconBlocks(t, first, second)
 			var httpCalls atomic.Int32

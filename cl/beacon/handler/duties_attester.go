@@ -69,7 +69,7 @@ func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (common.Hash,
 	)
 	return dependentRoot, a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
 		dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, attester)
-		if !a.syncedData.Syncing() && dependentRootSlot == a.syncedData.HeadSlot() {
+		if !a.syncedData.Syncing() && dependentRootSlot >= a.syncedData.HeadSlot() {
 			dependentRoot = a.syncedData.HeadRoot()
 			return nil
 		}
@@ -267,7 +267,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) % a.beaconChainCfg.EpochsPerHistoricalVector
 	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, epoch*a.beaconChainCfg.SlotsPerEpoch, mixPosition)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read randao mix: %w", err))
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("could not read randao mix: %w", err))
 	}
 
 	for currSlot := epoch * a.beaconChainCfg.SlotsPerEpoch; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {

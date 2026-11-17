@@ -51,8 +51,6 @@ func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 	}
 	wg.Wait()
 
-	require.Equal(t, codeEntryBytes+int64(len(code)), cc.codeSize.Load(),
-		"hashToCode size must reflect exactly one insert after concurrent same-code Puts")
 	require.Equal(t, codeEntryBytes+int64(len(code)), cc.codeHashCodeSize.Load(),
 		"codeHashToCode size must reflect exactly one insert after concurrent same-code Puts")
 	require.Equal(t, int64(1), cc.codeSizeEntries.Load(),
@@ -108,6 +106,8 @@ func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 		})
 	}
 	wg.Wait()
+	// otter applies evictions on a background drain; settle it before reading the size.
+	cc.codeHashToCode.c.CleanUp()
 
 	// Residency settled far below the 128 distinct puts rather than freezing at
 	// the first. No byte assertion at this size: the layer holds single-digit
@@ -147,15 +147,16 @@ func TestCodeCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	addr := make([]byte, 20)
 	addr[0] = 0xef
 	code := []byte("dead-fork-code")
-	codeID := maphash.Hash(code)
+	codeHash := hash32(crypto.Keccak256(code))
+	codeID := maphash.Hash(codeHash[:])
 	preClearEpoch := cc.coh.Epoch()
 
 	cc.Clear()
 	// Model a writer that sampled the epoch before Clear and published after
 	// the relevant layers were purged.
 	a := common.BytesToAddress(addr)
-	cc.addrToHash.Add(addrSlot(a), versionedAddressID{addr: a, addrID: codeID, txNum: 200, epoch: preClearEpoch})
-	cc.hashToCode.Add(codeID, codeEntry{code: code, txNum: 200, epoch: preClearEpoch})
+	cc.addrToHash.Add(addrSlot(a), versionedAddressID{addr: a, addrID: codeID, codeHash: codeHash, txNum: 200, epoch: preClearEpoch})
+	cc.codeHashToCode.Add(codeID, codeEntry{code: code, keyHash: codeHash, txNum: 200, epoch: preClearEpoch})
 	cc.Unwind(150)
 
 	_, ok := cc.Get(addr)
@@ -206,11 +207,11 @@ func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
 func TestGrowLRU_GrowCopyPreservesOrder(t *testing.T) {
 	key := func(i uint64) uint64 { return i * 0x9E3779B97F4A7C15 }
 
-	g := newGrowLRU[uint64](8*datasize.MB, 16, nil)
+	g := newGrowLRUEntries[uint64](128*1024, 16, nil)
 	defer g.Close()
 	startCap := g.curCap.Load()
 
-	const warmup = genericCacheStartCapacity / 2
+	const warmup = growLRUStartCapacity / 2
 	for i := range uint64(warmup) {
 		g.Add(key(i), i)
 	}
@@ -221,7 +222,7 @@ func TestGrowLRU_GrowCopyPreservesOrder(t *testing.T) {
 	var oldKeys, oldVals []uint64
 	var trigger uint64
 	grew := false
-	for i := uint64(warmup); i < 8*genericCacheStartCapacity && !grew; i++ {
+	for i := uint64(warmup); i < 8*growLRUStartCapacity && !grew; i++ {
 		old := g.cur.Load()
 		if g.curCap.Load() < g.maxCap && old.Len() >= int(g.curCap.Load()) {
 			oldKeys = old.Keys() // snapshot the generation this add is about to retire

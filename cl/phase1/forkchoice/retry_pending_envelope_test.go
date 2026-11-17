@@ -45,6 +45,13 @@ func (g retryPendingForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock
 	return g.block, g.block != nil
 }
 
+func (g retryPendingForkGraph) GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	if g.block == nil || g.block.Block == nil {
+		return nil, false
+	}
+	return &cltypes.BeaconBlockHeader{Slot: g.block.Block.Slot, Root: g.block.Block.StateRoot}, true
+}
+
 // With a gate, HasEnvelope blocks until it opens and then reports the envelope as present, so
 // the apply ends on the already-persisted path without touching a config the stub lacks.
 func (g retryPendingForkGraph) HasEnvelope(common.Hash) bool {
@@ -104,28 +111,8 @@ func TestRetryPendingExecutionPayloadEnvelopeProbesMissingColumnDataOncePerInter
 }
 
 func TestRetryPendingExecutionPayloadEnvelopeAppliesOnceColumnDataBecomesAvailable(t *testing.T) {
-	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
-	payloadHash, err := envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
-	require.NoError(t, err)
-	envelope.Message.Payload.BlockHash = payloadHash
-	parentBid := block.Block.Body.GetSignedExecutionPayloadBid().Message
-	parentBid.BlockHash = payloadHash
-	parentBid.GasLimit = envelope.Message.Payload.GasLimit
-	parentBid.BlobKzgCommitments.Append(&cltypes.KZGCommitment{}) // the apply waits for the columns
-	bodyRoot, err := block.Block.Body.HashSSZ()
-	require.NoError(t, err)
-	blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
-		Slot:          block.Block.Slot,
-		ProposerIndex: block.Block.ProposerIndex,
-		ParentRoot:    block.Block.ParentRoot,
-		BodyRoot:      bodyRoot,
-	})
-	blockRoot, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	root := common.Hash(blockRoot)
-	envelope.Message.BeaconBlockRoot = root
-	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+	cfg, blockState, block, envelope := validBlobEnvelopeFixture(t)
+	root := envelope.Message.BeaconBlockRoot
 
 	f := newPayloadVoteTestStore(t, root, false, false)
 	gasLimits, err := lru.New[common.Hash, uint64](1)

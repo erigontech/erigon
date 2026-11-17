@@ -87,7 +87,6 @@ type Trie interface {
 	RootHash() (hash []byte, err error)
 
 	SetTraceWriter(io.Writer)
-	EnableCsvMetrics(filePathPrefix string)
 
 	Variant() TrieVariant
 
@@ -110,6 +109,9 @@ type PatriciaContext interface {
 	Branch(prefix []byte) ([]byte, kv.Step, error)
 	// Implementations must copy prefix and data rather than retain them: callers may pass
 	// pooled buffers that are recycled for a later, unrelated update.
+	// A nil prevData asks the writer to read the previous value.
+	// A non-nil empty slice means the branch was absent from the trie,
+	// even if an unreachable record remains in storage.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	Account(plainKey []byte) (*Update, error)
 	Storage(plainKey []byte) (*Update, error)
@@ -207,6 +209,9 @@ type DeferredBranchUpdate struct {
 	// Backing store for a merged encoded value. encoded either aliases raw or points
 	// here, so it is never itself reused — this is the buffer that survives pooling.
 	encodedBuf []byte
+	// rawWrite writes raw as-is without merging it against prev, for a tombstone whose
+	// prev is carried only for the domain diff (see CollectTombstone).
+	rawWrite bool
 }
 
 var deferredUpdatePool = &sync.Pool{
@@ -222,13 +227,14 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	upd.raw = reuseBytes(upd.raw, raw)
 	upd.prev = reuseBytes(upd.prev, prev)
 	upd.encoded = nil
+	upd.rawWrite = false
 
 	return upd
 }
 
 // reuseBytes copies src into dst's backing array, matching bytes.Clone's nil handling:
 // a nil src yields nil, so pool history cannot change the result's nil-ness. Callers
-// distinguish a nil prev ("look it up") from an empty one ("known absent").
+// distinguish a nil prev ("look it up") from an empty one ("absent from the trie").
 func reuseBytes(dst, src []byte) []byte {
 	if src == nil {
 		return nil
@@ -265,8 +271,8 @@ type PendingCommitmentUpdate struct {
 	TxNum     uint64
 	Deferred  []*DeferredBranchUpdate
 	// Metrics is the producing trie's, carried so the later apply still reaches
-	// that trie's log and CSV counters. The Prometheus counters do not depend on
-	// it — publishBranchWrites bills those where the write lands.
+	// that trie's log counters. The Prometheus counters do not depend on it —
+	// publishBranchWrites bills those where the write lands.
 	Metrics *Metrics
 }
 
@@ -317,6 +323,10 @@ func (be *BranchEncoder) ClearDeferred() {
 }
 
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
+	if upd.rawWrite {
+		upd.encoded = upd.raw
+		return nil
+	}
 	if len(upd.prev) > 0 {
 		if bytes.Equal(upd.prev, upd.raw) {
 			upd.encoded = nil
@@ -351,7 +361,7 @@ var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512
 // were written. Writes are published to the branch-write counters as they land,
 // not against a round: the caller-owned path applies from SharedDomains after the
 // producing round has already closed, so there is no round left to bill. m, when
-// non-nil, additionally carries them into that trie's log and CSV counters.
+// non-nil, additionally carries them into that trie's log counters.
 //
 // putBranch must copy prefix and data rather than retain them: they are pooled and
 // reused for a later, unrelated update. prevData is cloned per update and carries
@@ -441,8 +451,8 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
-// prev is the record stored at prefix, empty when the branch is new. The caller
-// supplies it because the trie already read it while unfolding the row.
+// prev is the branch read during unfold, empty when the branch is new.
+// A nil prev is passed to PutBranch as a non-nil empty slice to avoid a storage read.
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -480,7 +490,7 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
-// prev is the record stored at prefix, empty when the branch is new; see CollectUpdate.
+// See CollectUpdate for the meaning of prev.
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -507,6 +517,33 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		return err
 	}
 	be.deferred = append(be.deferred, getDeferredUpdate(prefix, raw, prev))
+	return nil
+}
+
+// CollectTombstone writes an empty-branch tombstone at prefix (touchMap present,
+// afterMap zero, no cells) without merging it against prev. The tombstone carries
+// no cells, and a real stored branch can be shorter than its bitmap implies (state
+// hashes, extensions, inlined leaves), so Merge would overrun it. prev is still
+// forwarded to PutBranch so the domain diff records the real previous branch and an
+// unwind across the destruct restores it rather than an empty tombstone.
+func (be *BranchEncoder) CollectTombstone(ctx PatriciaContext, prefix []byte, touchMap uint16, prev []byte) error {
+	if be.deferUpdates {
+		if err := be.CollectDeferredUpdate(ctx, prefix, 0, touchMap, 0, nil, prev); err != nil {
+			return err
+		}
+		be.deferred[len(be.deferred)-1].rawWrite = true
+		return nil
+	}
+	raw, err := be.EncodeBranch(0, touchMap, 0, nil)
+	if err != nil {
+		return err
+	}
+	prefixCopy := bytes.Clone(prefix)
+	updateCopy := bytes.Clone(raw)
+	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
+		return err
+	}
+	publishBranchWrites(1, len(updateCopy), be.metrics)
 	return nil
 }
 
@@ -1407,7 +1444,7 @@ func (t *Updates) initCollector() {
 		t.etl.Close()
 		t.etl = nil
 	}
-	t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("update-tree")).LogLvl(log.LvlDebug)
+	t.etl = etl.NewCollectorWithAllocator("commitment", t.tmpdir, etl.SmallSortableBuffers, log.Root().New("component", "update-tree")).LogLvl(log.LvlDebug)
 	t.etl.SortAndFlushInBackground(true)
 }
 
@@ -1503,7 +1540,20 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	}
 }
 
+func (t *Updates) HashKey(key []byte) []byte { return t.hashKey(key) }
+
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
+	t.TouchPlainKeyDirectHashed(key, nil, update)
+}
+
+func (t *Updates) hashedOr(key string, hashed []byte) []byte {
+	if hashed != nil {
+		return hashed
+	}
+	return t.hashKey(common.ToBytesZeroCopy(key))
+}
+
+func (t *Updates) TouchPlainKeyDirectHashed(key string, hashed []byte, update *Update) {
 	if dbg.TraceTouchKey {
 		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%s nonce=%d codeHash=%x\n",
 			key, update.Flags, update.Balance.String(), update.Nonce, update.CodeHash)
@@ -1511,6 +1561,10 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	switch t.mode {
 	case ModeUpdate:
 		if existing, ok := t.treeIdx[key]; ok {
+			// Merge into existing entry
+			if update.DeleteStorageSubtree {
+				existing.update.DeleteStorageSubtree = true
+			}
 			if update.Flags&DeleteUpdate != 0 {
 				existing.update.Flags = DeleteUpdate
 				existing.update.CodeHash = empty.CodeHash
@@ -1537,7 +1591,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
-				hashedKey: t.hashKey(common.ToBytesZeroCopy(key)),
+				hashedKey: t.hashedOr(key, hashed),
 				update:    new(Update),
 			}
 			*pivot.update = *update
@@ -1546,12 +1600,12 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
-			t.collectDirect(t.hashKey(common.ToBytesZeroCopy(key)), key)
+			t.collectDirect(t.hashedOr(key, hashed), key)
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
 		keyBytes := common.ToBytesZeroCopy(key)
-		hashedKey := t.hashKey(keyBytes)
+		hashedKey := t.hashedOr(key, hashed)
 		u := new(Update)
 		*u = *update
 		ik := keyBytes
@@ -1969,6 +2023,13 @@ type Update struct {
 	Flags      UpdateFlags
 	Balance    uint256.Int
 	Nonce      uint64
+
+	// DeleteStorageSubtree is a transient (never-serialized) signal that this
+	// account was self-destructed or created as a contract in the block: its whole
+	// storage subtree must be pruned before this account's update is applied, so the
+	// account rebuilds from empty storage. Set by the commitment calculator; consumed
+	// by the trie during Process. Not a Flags bit because Flags is serialized and merged.
+	DeleteStorageSubtree bool
 }
 
 func (u *Update) Reset() {
@@ -1977,6 +2038,7 @@ func (u *Update) Reset() {
 	u.Nonce = 0
 	u.StorageLen = 0
 	u.CodeHash = empty.CodeHash
+	u.DeleteStorageSubtree = false
 }
 
 func (u *Update) Copy() *Update {
@@ -1984,17 +2046,21 @@ func (u *Update) Copy() *Update {
 		return nil
 	}
 	c := &Update{
-		CodeHash:   u.CodeHash,
-		Storage:    u.Storage,
-		StorageLen: u.StorageLen,
-		Flags:      u.Flags,
-		Nonce:      u.Nonce,
+		CodeHash:             u.CodeHash,
+		Storage:              u.Storage,
+		StorageLen:           u.StorageLen,
+		Flags:                u.Flags,
+		Nonce:                u.Nonce,
+		DeleteStorageSubtree: u.DeleteStorageSubtree,
 	}
 	c.Balance.Set(&u.Balance)
 	return c
 }
 
 func (u *Update) Merge(b *Update) {
+	if b.DeleteStorageSubtree {
+		u.DeleteStorageSubtree = true
+	}
 	if b.Flags == DeleteUpdate {
 		u.Flags = DeleteUpdate
 		return

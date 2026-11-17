@@ -18,6 +18,7 @@ package freezeblocks_test
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"testing"
 
@@ -80,7 +81,7 @@ func TestDump(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		m := createDumpTestKV(t, test.chainConfig, test.chainSize)
+		m := createDumpTestKV(t, test.chainConfig, test.chainSize, 1)
 		t.Run("txs", func(t *testing.T) {
 			require := require.New(t)
 
@@ -228,13 +229,13 @@ func TestDump(t *testing.T) {
 	}
 }
 
-func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *execmoduletester.ExecModuleTester {
+func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize, txsPerBlock int) *execmoduletester.ExecModuleTester {
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
 		gspec  = &types.Genesis{
 			Config: chainConfig,
-			Alloc:  types.GenesisAlloc{addr: {Balance: (&big.Int{}).Mul(big.NewInt(math.MaxInt64), big.NewInt(int64(chainSize)))}},
+			Alloc:  types.GenesisAlloc{addr: {Balance: (&big.Int{}).Mul(big.NewInt(math.MaxInt64), big.NewInt(int64(chainSize*txsPerBlock)))}},
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
@@ -249,11 +250,13 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *e
 	// Generate testing blocks
 	chain, err := m.GenerateChain(chainSize, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*common.GWei)), nil), *signer, key)
-		if txErr != nil {
-			t.Fatalf("failed to create tx: %v", txErr)
+		for range txsPerBlock {
+			tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*common.GWei)), nil), *signer, key)
+			if txErr != nil {
+				t.Fatalf("failed to create tx: %v", txErr)
+			}
+			b.AddTx(tx)
 		}
-		b.AddTx(tx)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -269,7 +272,7 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *e
 // A record that is not one whole transaction never becomes frozen: the dump decodes every
 // transaction before it writes the segment, so the block files cannot hold a malformed one.
 func TestDumpTxsRejectsMalformedStoredTxn(t *testing.T) {
-	m := createDumpTestKV(t, chain.AllProtocolChanges, 3)
+	m := createDumpTestKV(t, chain.AllProtocolChanges, 3, 1)
 
 	rwTx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
@@ -282,4 +285,27 @@ func TestDumpTxsRejectsMalformedStoredTxn(t *testing.T) {
 
 	_, err = freezeblocks.DumpTxs(m.Ctx, m.DB, m.ChainConfig, 0, 4, nil, func([]byte) error { return nil }, 1, log.LvlInfo, log.New())
 	require.ErrorContains(t, err, "rlp")
+}
+
+// A failed collect, such as a compressor cancelled during shutdown, must not leave the parsers of
+// later transactions waiting for their turn forever.
+func TestDumpTxsCollectsNothingAfterFailedTx(t *testing.T) {
+	m := createDumpTestKV(t, chain.AllProtocolChanges, 1, 64)
+	errFirst := errors.New("first collect failed")
+	errLater := errors.New("later collect failed")
+
+	var txs, afterFailure int
+	_, err := freezeblocks.DumpTxs(m.Ctx, m.DB, m.ChainConfig, 0, 2, nil, func(v []byte) error {
+		if v == nil {
+			return nil
+		}
+		txs++
+		if txs == 1 {
+			return errFirst
+		}
+		afterFailure++
+		return errLater
+	}, 1, log.LvlInfo, log.New())
+	require.ErrorIs(t, err, errFirst)
+	require.Zero(t, afterFailure)
 }

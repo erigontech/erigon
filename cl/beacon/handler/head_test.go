@@ -172,6 +172,7 @@ func TestSelectedHeadStateUsesWinningSideBranch(t *testing.T) {
 	selectedRoot := common.Hash{0xbb}
 	submittedState := state.New(&clparams.MainnetBeaconConfig)
 	selectedState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, selectedState.SetSlot(98))
 	fcu := mock_services2.NewForkChoiceStorageMock(t)
 	fcu.HeadVal = selectedRoot
 	fcu.HeadSlotVal = 99
@@ -183,7 +184,8 @@ func TestSelectedHeadStateUsesWinningSideBranch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, selectedRoot, root)
 	require.Equal(t, uint64(99), slot)
-	require.Same(t, selectedState, headState)
+	require.NotSame(t, selectedState, headState)
+	require.Equal(t, uint64(98), headState.Slot())
 }
 
 func TestSelectedHeadStateReportsMissingAuxiliaryRoot(t *testing.T) {

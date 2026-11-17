@@ -18,7 +18,6 @@ package execution_client
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -105,11 +104,6 @@ func (cc *ExecutionClientEngine) isLocal() bool {
 
 func (cc *ExecutionClientEngine) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
 	cc.beaconCfg = beaconCfg
-	if engineWithCfg, ok := cc.engine.(interface {
-		SetBeaconChainConfig(*clparams.BeaconChainConfig)
-	}); ok {
-		engineWithCfg.SetBeaconChainConfig(beaconCfg)
-	}
 }
 
 func (cc *ExecutionClientEngine) Close() {
@@ -158,7 +152,12 @@ func (cc *ExecutionClientEngine) NewPayload(
 	if payloadStatus.Status == engine_types.AcceptedStatus {
 		log.Info("[ExecutionClientEngine] New block accepted")
 	}
-	return newPayloadStatusByEngineStatus(payloadStatus.Status), checkPayloadStatus(payloadStatus)
+	status := newPayloadStatusByEngineStatus(payloadStatus.Status)
+	err = checkPayloadStatus(payloadStatus)
+	if payloadStatus.Status == engine_types.InvalidStatus && payloadStatus.LatestValidHash != nil && *payloadStatus.LatestValidHash != (common.Hash{}) {
+		err = &InvalidPayloadError{LatestValidHash: *payloadStatus.LatestValidHash, Err: err}
+	}
+	return status, err
 }
 
 func (cc *ExecutionClientEngine) ForkChoiceUpdate(
@@ -237,6 +236,20 @@ func (cc *ExecutionClientEngine) CurrentHeader(ctx context.Context) (*types.Head
 	return header, nil
 }
 
+func (cc *ExecutionClientEngine) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+	if cc.isLocal() {
+		return cc.chainRW.HeaderByHash(ctx, hash)
+	}
+	var header *types.Header
+	if err := cc.rpcClient.CallContext(ctx, &header, "eth_getBlockByHash", hash, false); err != nil {
+		return nil, fmt.Errorf("eth_getBlockByHash failed: %w", err)
+	}
+	if header != nil && header.Hash() != hash {
+		return nil, fmt.Errorf("eth_getBlockByHash returned header %s for requested hash %s", header.Hash(), hash)
+	}
+	return header, nil
+}
+
 func (cc *ExecutionClientEngine) IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error) {
 	if cc.isLocal() {
 		return cc.chainRW.IsCanonicalHash(ctx, hash)
@@ -286,6 +299,20 @@ func (cc *ExecutionClientEngine) GetBodiesByHashes(ctx context.Context, hashes [
 	return payloadBodiesToRawBodies(result), nil
 }
 
+func (cc *ExecutionClientEngine) GetPayloadBodiesByHash(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	if cc.isLocal() {
+		return cc.chainRW.GetPayloadBodiesByHash(ctx, hashes)
+	}
+	bodies, err := cc.engine.GetPayloadBodiesByHashV2(ctx, hashes)
+	if err != nil {
+		return nil, err
+	}
+	if len(bodies) != len(hashes) {
+		return nil, fmt.Errorf("engine_getPayloadBodiesByHashV2 returned %d bodies for %d hashes", len(bodies), len(hashes))
+	}
+	return bodies, nil
+}
+
 func payloadBodiesToRawBodies(bodies []*engine_types.ExecutionPayloadBody) []*types.RawBody {
 	ret := make([]*types.RawBody, len(bodies))
 	for i, body := range bodies {
@@ -323,7 +350,11 @@ func (cc *ExecutionClientEngine) HasBlock(ctx context.Context, hash common.Hash)
 
 func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if cc.isLocal() {
-		return cc.chainRW.GetAssembledBlock(ctx, binary.LittleEndian.Uint64(id))
+		payloadID, err := engine_types.DecodePayloadID(id)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		return cc.chainRW.GetAssembledBlock(ctx, payloadID)
 	}
 
 	// GetPayload versions advance with the response fields introduced by each fork.

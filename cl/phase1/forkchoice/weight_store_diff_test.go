@@ -25,6 +25,7 @@ import (
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -70,7 +72,7 @@ func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	store, bd4 := buildExAnteStorePendingLast(tb, nil)
 	require.NoError(tb, store.OnBlock(context.Background(), bd4, false, true, false))
 	store.SetSynced(true)
-	s0, err := store.GetStateAtBlockRoot(store.ProposerBoostRoot(), true)
+	s0, err := store.GetStateAtBlockRoot(store.ProposerBoostRoot())
 	require.NoError(tb, err)
 	require.NoError(tb, store.syncedDataManager.OnHeadState(s0))
 	att := &solid.Attestation{}
@@ -91,6 +93,19 @@ func buildExAnteStorePendingLast(tb testing.TB, engine execution_client.Executio
 	store.OnTick(36 * 1000)
 	require.NoError(tb, store.OnBlock(ctx, bc2, false, true, false))
 	return store, bd4
+}
+
+func TestOnBlockUpdatesCustodyForAttachedValidatorWithoutFeeRecipient(t *testing.T) {
+	store, block := buildExAnteStorePendingLast(t, nil)
+	store.localValidators.AddAttachedValidator(0)
+	_, found := store.localValidators.GetFeeRecipient(0)
+	require.False(t, found)
+
+	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().UpdateValidatorsCustody(gomock.Any()).Times(1)
+	store.peerDas = peerDas
+
+	require.NoError(t, store.OnBlock(t.Context(), block, false, true, false))
 }
 
 func buildExAnteStoreBeforeBlocks(tb testing.TB, engine execution_client.ExecutionEngine, genesisTime *uint64) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock) {
@@ -137,7 +152,7 @@ func TestGloasWeightTreeMatchesFullScan(t *testing.T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	full := NewWeightStore(f)
+	full := newWeightStoreFromCheckpointState(f, cs)
 	tree := f.gloasWeightTree.prepare(justified, cs)
 
 	blocks := f.getFilteredBlockTree(justified.Root, justified, f.Slot())
@@ -170,7 +185,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	full := NewWeightStore(f)
+	full := newWeightStoreFromCheckpointState(f, cs)
 	f.gloasWeightTree.prepare(justified, cs)
 
 	voters := make([]uint64, 0)

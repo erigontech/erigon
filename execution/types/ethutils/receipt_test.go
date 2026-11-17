@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -60,11 +61,11 @@ func TestMarshalReceiptReusesReceiptBloom(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	config := chain.TestChainBerlinConfig
 
-	fields := MarshalReceipt(receipt, txn, config, header, false, false)
+	fields := MarshalReceipt(receipt, txn, config, header, false)
 	assert.Equal(t, preset, *fields.LogsBloom)
 
 	receipt.Bloom = types.Bloom{}
-	fields = MarshalReceipt(receipt, txn, config, header, false, false)
+	fields = MarshalReceipt(receipt, txn, config, header, false)
 	assert.Equal(t, types.CreateBloom(types.Receipts{receipt}), *fields.LogsBloom)
 }
 
@@ -122,16 +123,13 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(7), Time: 1_750_000_000, BaseFee: uint256.NewInt(50)}
 
 	for _, tc := range []struct {
-		name               string
-		logs               int
-		withBlockTimestamp bool
-		nilLogs            bool
+		name    string
+		logs    int
+		nilLogs bool
 	}{
-		{"no logs", 0, false, false},
-		{"two logs", 2, false, false},
-		{"two logs with timestamp", 2, true, false},
-		{"nil logs", 0, false, true},
-		{"nil logs with timestamp", 0, true, true},
+		{"no logs", 0, false},
+		{"two logs", 2, false},
+		{"nil logs", 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logs := make(types.Logs, tc.logs)
@@ -157,7 +155,7 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 				TransactionIndex:  3,
 			}
 			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-			r := MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, true, tc.withBlockTimestamp)
+			r := MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, true)
 
 			requireFastJSONMatches(t, r)
 		})
@@ -348,4 +346,41 @@ func TestRPCReceiptMatchesItsTags(t *testing.T) {
 func stampedAt(v uint64) *hexutil.Uint64 {
 	h := hexutil.Uint64(v)
 	return &h
+}
+
+func TestMarshalReceiptSenderCacheParity(t *testing.T) {
+	t.Parallel()
+	key, err := crypto.HexToECDSA("0123456789012345678901234567890123456789012345678901234567890123")
+	require.NoError(t, err)
+	want := crypto.PubkeyToAddress(key.PublicKey)
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	receipt := &types.Receipt{BlockNumber: uint256.NewInt(1)}
+	for _, cached := range []bool{false, true} {
+		txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), 21000, uint256.NewInt(1), nil),
+			*types.LatestSignerForChainID(uint256.NewInt(1)), key)
+		require.NoError(t, err)
+		if cached {
+			txn.SetSender(accounts.InternAddress(want))
+		}
+		got := MarshalReceipt(receipt, txn, chain.TestChainBerlinConfig, header, true)
+		require.NotNil(t, got.From)
+		require.Equal(t, want, *got.From)
+		require.Nil(t, MarshalReceipt(receipt, txn, chain.TestChainBerlinConfig, header, false).From)
+	}
+}
+
+func TestMarshalReceiptLogStampsAreIndependent(t *testing.T) {
+	t.Parallel()
+	to := common.Address{1}
+	txn := dynamicFeeTx(&to)
+	receipt := &types.Receipt{BlockNumber: uint256.NewInt(1), Logs: types.Logs{{}, {}}}
+	header := &types.Header{Number: *uint256.NewInt(1), Time: 42}
+	got := MarshalReceipt(receipt, &txn, chain.TestChainBerlinConfig, header, false)
+	for i, log := range got.Logs {
+		require.NotSame(t, receipt.Logs[i], log)
+		require.Nil(t, receipt.Logs[i].BlockTimestamp)
+		require.EqualValues(t, 42, *log.BlockTimestamp)
+	}
+	*got.Logs[0].BlockTimestamp = 0
+	require.EqualValues(t, 42, *got.Logs[1].BlockTimestamp)
 }

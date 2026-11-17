@@ -17,8 +17,12 @@
 package registry
 
 import (
+	"fmt"
 	"testing"
+	"time"
 
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
@@ -33,4 +37,107 @@ func TestPayloadAttestationRateLimiterAdmitsFullCommitteeBurstFromOnePeer(t *tes
 	for i := range int(clparams.MaxPtcSize) {
 		require.True(t, condition(pid, nil, clparams.GloasVersion), "vote %d", i)
 	}
+}
+
+func TestProposerPreferencesRateLimiterAdmitsLookaheadWindowFromOnePeer(t *testing.T) {
+	minimal := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&minimal)
+	longLookahead := clparams.MainnetBeaconConfig
+	longLookahead.MinSeedLookahead = 2
+	for _, test := range []struct {
+		name   string
+		cfg    clparams.BeaconChainConfig
+		window int
+	}{
+		{name: "mainnet", cfg: clparams.MainnetBeaconConfig, window: 64},
+		{name: "minimal", cfg: minimal, window: 16},
+		{name: "long lookahead", cfg: longLookahead, window: 96},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			condition := withProposerPreferencesRateLimiter(&test.cfg)
+			pid := peer.ID("relaying-peer")
+			for i := range test.window {
+				require.True(t, condition(pid, nil, clparams.GloasVersion), "preference %d", i)
+			}
+			require.False(t, condition(pid, nil, clparams.GloasVersion))
+		})
+	}
+}
+
+// Aggregates for a slot are published at one point in the slot, so a single peer can forward
+// every committee's aggregators in one burst.
+func TestAggregateAndProofRateLimiterAdmitsSlotBurstFromOnePeer(t *testing.T) {
+	minimal := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&minimal)
+	for _, test := range []struct {
+		name  string
+		cfg   clparams.BeaconChainConfig
+		burst int
+	}{
+		{name: "mainnet", cfg: clparams.MainnetBeaconConfig, burst: 1024},
+		{name: "minimal", cfg: minimal, burst: 64},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			condition := withAggregateAndProofRateLimiter(&test.cfg)
+			pid := peer.ID("aggregate-peer")
+			for i := range test.burst {
+				require.True(t, condition(pid, nil, clparams.FuluVersion), "aggregate %d", i)
+			}
+		})
+	}
+}
+
+func syncCommitteeGossipMessage(subnet uint64) *pubsub.Message {
+	topic := fmt.Sprintf("/eth2/00000000/sync_committee_%d/ssz_snappy", subnet)
+	return &pubsub.Message{Message: &pb.Message{Topic: &topic}}
+}
+
+// A peer may relay every message of each subnet it serves in one burst, but no more than a subnet carries in a slot.
+func TestSyncCommitteeMessageRateLimiterAdmitsEachSubnetsSlotFromOnePeer(t *testing.T) {
+	minimal := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&minimal)
+	for _, test := range []struct {
+		name      string
+		cfg       clparams.BeaconChainConfig
+		perSubnet int
+	}{
+		{name: "mainnet", cfg: clparams.MainnetBeaconConfig, perSubnet: 128},
+		{name: "minimal", cfg: minimal, perSubnet: 8},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			limiter := newSyncCommitteeMessageRateLimiter(&test.cfg)
+			now := time.Unix(1_700_000_000, 0)
+			limiter.now = func() time.Time { return now }
+			condition := syncCommitteeMessageCondition(limiter)
+			pid := peer.ID("sync-committee-peer")
+			for subnet := range test.cfg.SyncCommitteeSubnetCount {
+				for i := range test.perSubnet {
+					require.True(t, condition(pid, syncCommitteeGossipMessage(subnet), clparams.FuluVersion), "subnet %d message %d", subnet, i)
+				}
+			}
+			require.False(t, condition(pid, syncCommitteeGossipMessage(0), clparams.FuluVersion), "a subnet's next message in the same slot")
+		})
+	}
+}
+
+// A subnet's bucket refills one message per (slot / messages per subnet slot): its next message is rejected until then
+// and admitted after.
+func TestSyncCommitteeMessageRateLimiterRefillsOneMessageAtATime(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	perSubnet := cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount
+	refill := time.Duration(cfg.SecondsPerSlot) * time.Second / time.Duration(perSubnet)
+	limiter := newSyncCommitteeMessageRateLimiter(&cfg)
+	now := time.Unix(1_700_000_000, 0)
+	limiter.now = func() time.Time { return now }
+	condition := syncCommitteeMessageCondition(limiter)
+	pid := peer.ID("sync-committee-peer")
+	for range perSubnet {
+		require.True(t, condition(pid, syncCommitteeGossipMessage(0), clparams.FuluVersion))
+	}
+
+	now = now.Add(refill - time.Millisecond)
+	require.False(t, condition(pid, syncCommitteeGossipMessage(0), clparams.FuluVersion), "a message admitted before a token refilled")
+	now = now.Add(time.Millisecond)
+	require.True(t, condition(pid, syncCommitteeGossipMessage(0), clparams.FuluVersion), "a refilled token was not admitted")
+	require.False(t, condition(pid, syncCommitteeGossipMessage(0), clparams.FuluVersion))
 }

@@ -35,25 +35,29 @@ var (
 	requestEnvelopeRetryInterval   = 300 * time.Millisecond
 )
 
+type EnvelopeValidator func(*cltypes.SignedExecutionPayloadEnvelope) error
+
 // RequestEnvelopesFrantically requests execution payload envelopes from the network for the given beacon block roots.
 // It first tries by-root, then falls back to by-range using the slot range of fullBlocks.
+// Envelopes that fail validation are dropped and requested again within the batch deadline.
+// With banPeer, a peer that serves an invalid response is also banned.
 // EMPTY blocks will not have envelopes on the network, so timeout is non-fatal.
 // Returns a map of beacon block root -> envelope for all received envelopes.
-func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots [][32]byte, fullBlocks ...*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
-	return requestEnvelopesFranticallyWithValidator(ctx, r, roots, nil, fullBlocks...)
-}
-
-type envelopeCandidateValidator func(*cltypes.SignedExecutionPayloadEnvelope) error
-
-func requestEnvelopesFranticallyWithValidator(
+func RequestEnvelopesFrantically(
 	ctx context.Context,
 	r *rpc.BeaconRpcP2P,
 	roots [][32]byte,
-	validate envelopeCandidateValidator,
+	validate EnvelopeValidator,
+	banPeer func(context.Context, string),
 	fullBlocks ...*cltypes.SignedBeaconBlock,
 ) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
 	requestCtx, cancelRequests := context.WithTimeout(ctx, requestEnvelopeBatchExpiration)
 	defer cancelRequests()
+
+	var ban func(string)
+	if banPeer != nil {
+		ban = func(pid string) { banPeer(requestCtx, pid) }
+	}
 
 	received := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(roots))
 	needed := make([][32]byte, len(roots))
@@ -87,11 +91,8 @@ func requestEnvelopesFranticallyWithValidator(
 		if byRootAttempts >= 3 && len(fullBlocks) > 0 && !byRangeAttempted {
 			byRangeAttempted = true
 			rangeCtx, cancelRange := context.WithTimeout(requestCtx, requestEnvelopeAttemptTimeout)
-			rejected := requestEnvelopesByRangeWithValidator(rangeCtx, r, fullBlocks, requestedRoots, received, validate)
+			requestEnvelopesByRangeWithValidator(rangeCtx, r, fullBlocks, requestedRoots, received, validate, ban)
 			cancelRange()
-			if rejected {
-				return received, errors.New("invalid execution payload envelope response")
-			}
 			needed = filterReceived(needed, received)
 			if len(needed) == 0 {
 				break
@@ -99,12 +100,9 @@ func requestEnvelopesFranticallyWithValidator(
 		}
 
 		attemptCtx, cancelAttempt := context.WithTimeout(requestCtx, requestEnvelopeAttemptTimeout)
-		responses, err := requestEnvelopesByRoot(attemptCtx, r, needed)
+		err := requestEnvelopesByRoot(attemptCtx, r, needed, requestedRoots, received, validate, ban)
 		attemptTimedOut := errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && requestCtx.Err() == nil
 		cancelAttempt()
-		if acceptEnvelopeResponsesWithValidator(responses, requestedRoots, received, validate) {
-			return received, errors.New("invalid execution payload envelope response")
-		}
 		needed = filterReceived(needed, received)
 		if len(needed) == 0 {
 			break
@@ -139,30 +137,39 @@ func waitForEnvelopeRetry(ctx context.Context) {
 	}
 }
 
-func requestEnvelopesByRoot(ctx context.Context, r *rpc.BeaconRpcP2P, roots [][32]byte) ([]*cltypes.SignedExecutionPayloadEnvelope, error) {
+func requestEnvelopesByRoot(
+	ctx context.Context,
+	r *rpc.BeaconRpcP2P,
+	roots [][32]byte,
+	requestedRoots map[common.Hash]struct{},
+	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
+	validate EnvelopeValidator,
+	banPeer func(string),
+) error {
 	maxRoots := int(r.MaxRequestPayloads())
 	if maxRoots <= 0 {
-		return nil, errors.New("MAX_REQUEST_PAYLOADS is zero")
+		return errors.New("MAX_REQUEST_PAYLOADS is zero")
 	}
-	var envelopes []*cltypes.SignedExecutionPayloadEnvelope
-	for start := 0; start < len(roots); start += maxRoots {
-		end := min(start+maxRoots, len(roots))
-		responses, _, err := r.SendExecutionPayloadEnvelopesByRootReq(ctx, roots[start:end])
-		envelopes = append(envelopes, responses...)
+	for chunk := range slices.Chunk(roots, maxRoots) {
+		responses, pid, err := r.SendExecutionPayloadEnvelopesByRootReq(ctx, chunk)
+		acceptEnvelopeResponsesWithValidator(responses, err, requestedRoots, received, validate, pid, banPeer)
 		if err != nil {
-			return envelopes, err
+			return err
 		}
 	}
-	return envelopes, nil
+	return nil
 }
 
 func acceptEnvelopeResponsesWithValidator(
 	responses []*cltypes.SignedExecutionPayloadEnvelope,
+	responseErr error,
 	requestedRoots map[common.Hash]struct{},
 	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
-	validate envelopeCandidateValidator,
-) bool {
-	rejected := false
+	validate EnvelopeValidator,
+	pid string,
+	banPeer func(string),
+) {
+	rejected := errors.Is(responseErr, rpc.ErrInvalidResponse)
 	for _, env := range responses {
 		if env == nil || env.Message == nil {
 			continue
@@ -171,16 +178,18 @@ func acceptEnvelopeResponsesWithValidator(
 			log.Debug("RequestEnvelopesFrantically: ignoring unsolicited envelope", "root", env.Message.BeaconBlockRoot)
 			continue
 		}
-		if validate != nil {
-			if err := validate(env); err != nil {
-				log.Debug("RequestEnvelopesFrantically: ignoring invalid envelope", "root", env.Message.BeaconBlockRoot, "err", err)
-				rejected = true
-				continue
-			}
+		if err := validate(env); err != nil {
+			log.Debug("RequestEnvelopesFrantically: ignoring invalid envelope", "root", env.Message.BeaconBlockRoot, "err", err)
+			rejected = true
+			continue
 		}
-		received[env.Message.BeaconBlockRoot] = env
+		if _, ok := received[env.Message.BeaconBlockRoot]; !ok {
+			received[env.Message.BeaconBlockRoot] = env
+		}
 	}
-	return rejected
+	if rejected && banPeer != nil && pid != "" {
+		banPeer(pid)
+	}
 }
 
 func filterReceived(needed [][32]byte, received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) [][32]byte {
@@ -199,32 +208,30 @@ func requestEnvelopesByRangeWithValidator(
 	blocks []*cltypes.SignedBeaconBlock,
 	requestedRoots map[common.Hash]struct{},
 	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
-	validate envelopeCandidateValidator,
-) bool {
+	validate EnvelopeValidator,
+	banPeer func(string),
+) {
 	maxCount := r.MaxRequestPayloads()
 	if maxCount == 0 {
 		log.Debug("envelope fetch: by-range disabled, MAX_REQUEST_PAYLOADS is zero")
-		return false
+		return
 	}
 	ranges := envelopeRequestSlotRanges(blocks, requestedRoots, maxCount)
 	if len(ranges) == 0 {
-		return false
+		return
 	}
 	log.Debug("envelope fetch: falling back to by-range", "ranges", len(ranges))
 	for _, slotRange := range ranges {
 		if ctx.Err() != nil || len(received) == len(requestedRoots) {
-			return false
+			return
 		}
-		envelopes, _, err := r.SendExecutionPayloadEnvelopesByRangeReq(ctx, slotRange.start, slotRange.count)
-		if acceptEnvelopeResponsesWithValidator(envelopes, requestedRoots, received, validate) {
-			return true
-		}
+		envelopes, pid, err := r.SendExecutionPayloadEnvelopesByRangeReq(ctx, slotRange.start, slotRange.count)
+		acceptEnvelopeResponsesWithValidator(envelopes, err, requestedRoots, received, validate, pid, banPeer)
 		if err != nil {
 			log.Debug("envelope fetch: by-range error", "err", err)
-			return false
+			return
 		}
 	}
-	return false
 }
 
 type envelopeSlotRange struct {
@@ -272,7 +279,14 @@ func envelopeRequestSlotRanges(blocks []*cltypes.SignedBeaconBlock, requestedRoo
 	return append(ranges, envelopeSlotRange{start: start, count: end - start + 1})
 }
 
-func newEnvelopeCommitmentValidator(beaconCfg *clparams.BeaconChainConfig, blocks []*cltypes.SignedBeaconBlock) envelopeCandidateValidator {
+func NewEnvelopeBlockValidator(beaconCfg *clparams.BeaconChainConfig, blockByRoot func(common.Hash) (*cltypes.SignedBeaconBlock, bool)) EnvelopeValidator {
+	return func(envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+		block, _ := blockByRoot(envelope.Message.BeaconBlockRoot)
+		return ValidateDownloadedGloasEnvelope(beaconCfg, block, envelope)
+	}
+}
+
+func blockLookup(blocks []*cltypes.SignedBeaconBlock) func(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	blocksByRoot := make(map[common.Hash]*cltypes.SignedBeaconBlock, len(blocks))
 	for _, block := range blocks {
 		if block == nil || block.Block == nil {
@@ -283,7 +297,8 @@ func newEnvelopeCommitmentValidator(beaconCfg *clparams.BeaconChainConfig, block
 			blocksByRoot[root] = block
 		}
 	}
-	return func(envelope *cltypes.SignedExecutionPayloadEnvelope) error {
-		return ValidateDownloadedGloasEnvelope(beaconCfg, blocksByRoot[envelope.Message.BeaconBlockRoot], envelope)
+	return func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+		block, ok := blocksByRoot[root]
+		return block, ok
 	}
 }

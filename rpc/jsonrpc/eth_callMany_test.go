@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"strconv"
 	"testing"
@@ -158,6 +159,71 @@ func TestCallManyHashSelectorMatchesNumber(t *testing.T) {
 
 	require.Equal(t, byNumber, byHash)
 	require.NotContains(t, byNumber[0][0], "error")
+}
+
+func TestCapEVMTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		server   time.Duration
+		clientMs int64
+		want     time.Duration
+	}{
+		{5 * time.Minute, 0, 5 * time.Minute},
+		{5 * time.Minute, -1, 5 * time.Minute},
+		{5 * time.Minute, (24 * time.Hour).Milliseconds(), 5 * time.Minute},
+		{5 * time.Minute, 1000, time.Second},
+		{0, 1000, time.Second},
+		{0, 0, 0},
+		{1500 * time.Microsecond, 1, time.Millisecond},
+		{0, math.MaxInt64, time.Duration(math.MaxInt64/int64(time.Millisecond)) * time.Millisecond},
+	} {
+		require.Equal(t, tc.want, capEVMTimeout(tc.server, tc.clientMs), "server %v, client %d ms", tc.server, tc.clientMs)
+	}
+}
+
+func TestCallManyAppliesTheReturnDataLimit(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api, _ := newCallManyApisForTest(m)
+	api.ReturnDataLimit = 16
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
+	returns32 := common.HexToAddress("0x00000000000000000000000000000000000000ab")
+	code := hexutil.Bytes(hexutil.MustDecode("0x60206000f3"))
+	overrides := ethapi.StateOverrides{accounts.InternAddress(returns32): {Code: &code}}
+
+	_, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{{To: &returns32}}}}, stateCtx, &overrides, nil)
+	require.ErrorContains(t, err, "--rpc.returndata.limit")
+}
+
+func TestCallManySharesTheGasCapAcrossTheRequest(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api, _ := newCallManyApisForTest(m)
+	api.GasCap = 100_000
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
+	burner, cheap := common.HexToAddress("0x00000000000000000000000000000000000000ac"), common.HexToAddress("0x00000000000000000000000000000000000000ad")
+	code := hexutil.Bytes(hexutil.MustDecode("0x5b600056"))
+	overrides := ethapi.StateOverrides{accounts.InternAddress(burner): {Code: &code}}
+
+	aboveBudget := hexutil.Uint64(api.GasCap)
+	for name, gas := range map[string]*hexutil.Uint64{"default gas": nil, "gas above the remaining budget": &aboveBudget} {
+		t.Run(name, func(t *testing.T) {
+			_, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{{To: &cheap}, {To: &burner, Gas: gas}, {To: &burner, Gas: gas}}}}, stateCtx, &overrides, nil)
+			require.ErrorContains(t, err, "--rpc.gascap")
+		})
+	}
+}
+
+func TestCallManyWithoutAGasCapRunsTheCalls(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api, _ := newCallManyApisForTest(m)
+	api.GasCap = 0
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
+	to := common.HexToAddress("0x00000000000000000000000000000000000000ae")
+
+	results, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{{To: &to}}}}, stateCtx, nil, nil)
+	require.NoError(t, err)
+	require.NotContains(t, results[0][0], "error")
 }
 
 func TestCallManyEmptyBundles(t *testing.T) {
@@ -439,4 +505,65 @@ func TestCallManyStateOverridePrecompile(t *testing.T) {
 			}
 		}
 	})
+}
+
+// A bundle that moves the block past a fork has to see that fork's precompiles,
+// with or without a state override.
+func TestCallManyBundleCrossingForkUsesItsPrecompiles(t *testing.T) {
+	const pragueTime = 1 << 40
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.PragueTime = common.NewUint64(pragueTime)
+	cfg.OsakaTime = nil
+	cfg.AmsterdamTime = nil
+	m, _, bankAddr := fundedBankGenesis(t, cfg)
+	api, debugAPI := newCallManyApisForTest(m)
+
+	bls12G1Add := common.HexToAddress("0x0b")
+	input := hexutil.Bytes(make([]byte, 256))
+	bundles := []Bundle{{
+		Transactions: []ethapi.CallArgs{{
+			From:         &bankAddr,
+			To:           &bls12G1Add,
+			Data:         &input,
+			MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(2e9)),
+		}},
+		BlockOverride: ethapi.BlockOverrides{Time: new(hexutil.Uint64(pragueTime))},
+	}}
+	latest := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)}
+	unrelatedBalance := (*hexutil.U256)(uint256.NewInt(1))
+	stateOverride := &ethapi.StateOverrides{
+		accounts.InternAddress(common.HexToAddress("0x2000")): {Balance: &unrelatedBalance},
+	}
+	pointAtInfinity := hex.EncodeToString(make([]byte, 128))
+
+	for _, tc := range []struct {
+		name     string
+		override *ethapi.StateOverrides
+	}{
+		{name: "without state override"},
+		{name: "with state override", override: stateOverride},
+	} {
+		t.Run("eth_callMany "+tc.name, func(t *testing.T) {
+			res, err := api.CallMany(context.Background(), bundles, latest, tc.override, nil)
+			require.NoError(t, err)
+			require.Len(t, res, 1)
+			require.Len(t, res[0], 1)
+			require.NotContains(t, res[0][0], "error")
+			require.Equal(t, pointAtInfinity, res[0][0]["value"])
+		})
+		t.Run("debug_traceCallMany "+tc.name, func(t *testing.T) {
+			tracer := "callTracer"
+			var traces [][]struct {
+				Output hexutil.Bytes `json:"output"`
+				Error  string        `json:"error"`
+			}
+			readGasTrace(t, &traces, func(stream *jsonstream.Stream) error {
+				return debugAPI.TraceCallMany(m.Ctx, bundles, latest, &tracersConfig.TraceConfig{Tracer: &tracer, StateOverrides: tc.override}, stream)
+			})
+			require.Len(t, traces, 1)
+			require.Len(t, traces[0], 1)
+			require.Empty(t, traces[0][0].Error)
+			require.Equal(t, pointAtInfinity, hex.EncodeToString(traces[0][0].Output))
+		})
+	}
 }

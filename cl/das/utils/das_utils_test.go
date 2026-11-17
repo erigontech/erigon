@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 )
 
 // testMatrix builds the full extended matrix of blobCount distinct dense blobs (sparse ones recover
@@ -69,6 +70,63 @@ func TestRecoverMatrixRestoresEveryRowInOrder(t *testing.T) {
 	require.Equal(t, full, recovered)
 }
 
+// A complete row is ordered by column, not recomputed: the zero proofs survive.
+func TestRecoverMatrixOrdersACompleteRowByColumn(t *testing.T) {
+	want, _ := testMatrix(t, 2)
+	for _, row := range want {
+		for i := range row {
+			row[i].KzgProof = cltypes.KZGProof{}
+		}
+	}
+	given := slices.Concat(want...)
+	slices.Reverse(given)
+
+	recovered, err := RecoverMatrix(given, uint64(len(want)))
+
+	require.NoError(t, err)
+	require.Equal(t, want, recovered)
+}
+
+// Only the row with a missing cell is recovered; the complete rows keep their given proofs.
+func TestRecoverMatrixRecoversOnlyTheRowWithAMissingCell(t *testing.T) {
+	full, _ := testMatrix(t, 3)
+	var given []cltypes.MatrixEntry
+	for _, row := range full {
+		for _, entry := range row {
+			if entry.RowIndex != 1 {
+				entry.KzgProof = cltypes.KZGProof{}
+			}
+			given = append(given, entry)
+		}
+	}
+	given = slices.DeleteFunc(given, func(e cltypes.MatrixEntry) bool { return e.RowIndex == 1 && e.ColumnIndex == 5 })
+
+	recovered, err := RecoverMatrix(given, uint64(len(full)))
+
+	require.NoError(t, err)
+	require.Equal(t, full[1], recovered[1])
+	for _, row := range []int{0, 2} {
+		for _, entry := range recovered[row] {
+			require.Equal(t, cltypes.KZGProof{}, entry.KzgProof, "row %d column %d", row, entry.ColumnIndex)
+		}
+	}
+}
+
+// A row of 128 entries that repeats a column is not complete.
+func TestRecoverMatrixDoesNotTreatARepeatedColumnAsComplete(t *testing.T) {
+	full, _ := testMatrix(t, 2)
+	given := slices.Concat(full...)
+	for i := range given {
+		if given[i].RowIndex == 1 && given[i].ColumnIndex == 6 {
+			given[i].ColumnIndex = 5
+		}
+	}
+
+	_, err := RecoverMatrix(given, uint64(len(full)))
+
+	require.ErrorContains(t, err, "blob 1")
+}
+
 func TestRecoverMatrixReportsTheRowThatCannotBeRecovered(t *testing.T) {
 	full, half := testMatrix(t, 3)
 	half = slices.DeleteFunc(half, func(e cltypes.MatrixEntry) bool { return e.RowIndex == 1 && e.ColumnIndex > 10 })
@@ -109,4 +167,61 @@ func TestRecoverMatrixWaitsForAFreeRowSlot(t *testing.T) {
 	require.False(t, returnedWithoutSlot, "a row ran while every slot was taken")
 	require.NoError(t, <-done)
 	require.Zero(t, len(rowRecoverySlots))
+}
+
+func TestComputeBlobsCellsMatchesPerBlobCells(t *testing.T) {
+	blobs := make([][]byte, 5)
+	for i := range blobs {
+		blob := goethkzg.Blob{}
+		blob[31], blob[63] = byte(i+1), byte(i)
+		blobs[i] = blob[:]
+	}
+
+	cells, err := ComputeBlobsCells(blobs)
+
+	require.NoError(t, err)
+	require.Len(t, cells, len(blobs))
+	for i, blob := range blobs {
+		want, _, err := ComputeCellsAndKZGProofs(blob)
+		require.NoError(t, err)
+		require.Equal(t, want, cells[i], "blob %d", i)
+	}
+}
+
+func TestComputeBlobsCellsFailsOnInvalidBlob(t *testing.T) {
+	invalid := goethkzg.Blob{}
+	for i := range invalid {
+		invalid[i] = 0xff // not a canonical field element
+	}
+	valid := goethkzg.Blob{}
+	blobs := [][]byte{valid[:], valid[:], invalid[:], valid[:]}
+
+	_, err := ComputeBlobsCells(blobs)
+
+	require.ErrorContains(t, err, "blob 2")
+}
+
+func TestComputeBlobsCellsDoesNotWaitForRecoverySlots(t *testing.T) {
+	kzg.InitKZGCtx() // the lazy setup is slow, mostly under -race, and must not count against the timeout below
+	for range cap(rowRecoverySlots) {
+		rowRecoverySlots <- struct{}{}
+	}
+	t.Cleanup(func() {
+		for range cap(rowRecoverySlots) {
+			<-rowRecoverySlots
+		}
+	})
+	blob := goethkzg.Blob{}
+	done := make(chan error, 1)
+	go func() {
+		_, err := ComputeBlobsCells([][]byte{blob[:], blob[:]})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("blob cells waited for a recovery slot")
+	}
 }

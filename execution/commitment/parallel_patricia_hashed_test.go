@@ -116,11 +116,6 @@ func TestParallelPatriciaHashedSkeletonPlumbing(t *testing.T) {
 		p.SetTraceWriter(nil)
 		assert.Nil(t, p.template.traceW, "nil writer disables tracing on template")
 	})
-
-	t.Run("EnableCsvMetricsNoPanic", func(t *testing.T) {
-		p := NewParallelPatriciaHashed(nil, length.Addr, DefaultTrieConfig())
-		require.NotPanics(t, func() { p.EnableCsvMetrics("") })
-	})
 }
 
 func TestParallelPatriciaHashedSkeletonReset(t *testing.T) {
@@ -163,7 +158,6 @@ func TestParallelPatriciaHashedSkeletonRelease(t *testing.T) {
 		var buf bytes.Buffer
 		p.SetTraceWriter(&buf)
 		p.SetTraceWriter(nil)
-		p.EnableCsvMetrics("")
 		p.ResetContext(nil)
 	})
 
@@ -871,11 +865,6 @@ func sparseBatch2(keys [][]byte, modN int, deletes bool) (k2 [][]byte, u2 []Upda
 		u2 = append(u2, u)
 	}
 	return k2, u2
-}
-
-func runIncremental(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
-	t.Helper()
-	return incrementalRoot(t, mode, workers, k1, u1, k2, u2)
 }
 
 func requireIncrementalEquiv(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, workers int) {

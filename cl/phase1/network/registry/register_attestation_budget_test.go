@@ -96,7 +96,6 @@ func TestAttestationGossipBudgetScalesWithExpectedTraffic(t *testing.T) {
 			p2pManager.EXPECT().Pubsub().Return(ps).AnyTimes()
 			p2pManager.EXPECT().Host().Return(nil).AnyTimes()
 			p2pManager.EXPECT().BandwidthCounter().Return(metrics.NewBandwidthCounter()).AnyTimes()
-			p2pManager.EXPECT().UpdateENRAttSubnets(gomock.Any(), gomock.Any()).AnyTimes()
 
 			gm := gossip.NewGossipManager(
 				t.Context(), p2pManager, &tt.beaconConfig, &tt.networkConfig, clock, false, 0,
@@ -150,7 +149,7 @@ func TestAttestationGossipBudgetScalesWithExpectedTraffic(t *testing.T) {
 
 			forkChoice := forkchoice_mock.NewForkChoiceStorageMock(t)
 			RegisterGossipServices(
-				gm, forkChoice, clock, func() uint64 { return tt.activeValidators }, blockService,
+				gm, forkChoice, clock, &tt.beaconConfig, func() uint64 { return tt.activeValidators }, blockService,
 				attesterSlashingService, blobService, dataColumnSidecarService, syncCommitteeMessagesService,
 				syncContributionService, aggregateAndProofService, attestationService, voluntaryExitService,
 				blsToExecutionChangeService, proposerSlashingService, executionPayloadService,

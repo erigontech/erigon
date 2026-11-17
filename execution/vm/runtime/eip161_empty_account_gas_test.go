@@ -72,7 +72,6 @@ func runProgram(t *testing.T, code []byte, cfg *chain.Config) (uint64, []byte) {
 	tx, domains := temporaltest.NewTestTxSD(t, db)
 	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
-	statedb.SetNoMaterialize(true)
 	defer statedb.Close()
 
 	contract := accounts.InternAddress(common.HexToAddress("0x2000"))

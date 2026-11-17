@@ -2,10 +2,12 @@ package app
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"testing"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -26,7 +28,133 @@ import (
 
 func Test_CheckEmpty(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, true, nil))
+}
+
+func Test_CheckPtcWindowEpochRequired(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ranges := []snapRange{{0, 10}, {10, 20}}
+	touchFiles(t, dirs, ranges)
+	for _, r := range ranges {
+		delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.seg", r.fromStep, r.toStep, kv.PtcWindowEpochTable))
+		delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.idx", r.fromStep, r.toStep, kv.PtcWindowEpochTable))
+	}
+	err := checkIfCaplinSnapshotsPublishable(dirs, true, nil)
+	require.ErrorContains(t, err, kv.PtcWindowEpochTable)
+}
+
+func Test_CheckPtcWindowEpochReachesCommonEnd(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	touchFiles(t, dirs, []snapRange{{0, 10}, {10, 20}, {20, 30}})
+	delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-000020-000030-%s.seg", kv.PtcWindowEpochTable))
+	delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-000020-000030-%s.idx", kv.PtcWindowEpochTable))
+	err := checkIfCaplinSnapshotsPublishable(dirs, true, nil)
+	require.ErrorContains(t, err, "must end at")
+}
+
+func Test_CheckPtcWindowEpochBeforeUnscheduledFork(t *testing.T) {
+	for _, keepPtcRanges := range [][]snapRange{nil, {{0, 10}, {10, 20}}} {
+		dirs := datadir.New(t.TempDir())
+		ranges := []snapRange{{0, 10}, {10, 20}, {20, 30}}
+		touchFiles(t, dirs, ranges)
+		removePtcWindowEpochFiles(t, dirs, ranges)
+		for _, r := range keepPtcRanges {
+			touchCaplinStateFiles(t, dirs, kv.PtcWindowEpochTable, r)
+		}
+
+		cfg := clparams.MainnetBeaconConfig
+		cfg.SlotsPerEpoch = 32
+		cfg.GloasForkEpoch = math.MaxUint64
+		require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, true, &cfg))
+	}
+}
+
+func Test_CheckPtcWindowEpochBeforeFutureFork(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ranges := []snapRange{{0, 10}, {10, 20}, {20, 30}}
+	touchFiles(t, dirs, ranges)
+	removePtcWindowEpochFiles(t, dirs, ranges)
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SlotsPerEpoch = 32
+	cfg.GloasForkEpoch = 1000
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, true, &cfg))
+}
+
+func Test_CheckPtcWindowEpochRequiredAfterFork(t *testing.T) {
+	tests := []struct {
+		name       string
+		keepRanges []snapRange
+		wantError  string
+	}{
+		{name: "absent", wantError: kv.PtcWindowEpochTable},
+		{name: "short", keepRanges: []snapRange{{0, 10}, {10, 20}}, wantError: "must end at"},
+		{name: "complete", keepRanges: []snapRange{{0, 10}, {10, 20}, {20, 30}}},
+		{name: "past common end", keepRanges: []snapRange{{0, 10}, {10, 20}, {20, 30}, {30, 40}}, wantError: "must end at"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			ranges := []snapRange{{0, 10}, {10, 20}, {20, 30}}
+			touchFiles(t, dirs, ranges)
+			removePtcWindowEpochFiles(t, dirs, ranges)
+			for _, r := range test.keepRanges {
+				touchCaplinStateFiles(t, dirs, kv.PtcWindowEpochTable, r)
+			}
+
+			cfg := clparams.MainnetBeaconConfig
+			cfg.SlotsPerEpoch = 32
+			cfg.GloasForkEpoch = 625
+			err := checkIfCaplinSnapshotsPublishable(dirs, true, &cfg)
+			if test.wantError == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, test.wantError)
+			}
+		})
+	}
+}
+
+func Test_CheckPtcWindowEpochForkBoundary(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		gloasForkEpoch uint64
+		wantError      bool
+	}{
+		{name: "at common end", gloasForkEpoch: 30},
+		{name: "before common end", gloasForkEpoch: 29, wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			ranges := []snapRange{{0, 10}, {10, 20}, {20, 30}}
+			touchFiles(t, dirs, ranges)
+			removePtcWindowEpochFiles(t, dirs, ranges)
+
+			cfg := clparams.MainnetBeaconConfig
+			cfg.SlotsPerEpoch = 1000
+			cfg.GloasForkEpoch = test.gloasForkEpoch
+			err := checkIfCaplinSnapshotsPublishable(dirs, true, &cfg)
+			if test.wantError {
+				require.ErrorContains(t, err, kv.PtcWindowEpochTable)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func Test_CheckPtcWindowEpochGapBeforeUnscheduledFork(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ranges := []snapRange{{0, 10}, {10, 20}, {20, 30}}
+	touchFiles(t, dirs, ranges)
+	delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-000010-000020-%s.seg", kv.PtcWindowEpochTable))
+	delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-000010-000020-%s.idx", kv.PtcWindowEpochTable))
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SlotsPerEpoch = 32
+	cfg.GloasForkEpoch = math.MaxUint64
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, true, &cfg))
 }
 
 func Test_CheckNormal(t *testing.T) {
@@ -34,7 +162,7 @@ func Test_CheckNormal(t *testing.T) {
 	touchFiles(t, dirs, []snapRange{
 		{0, 10}, {10, 20}, {20, 30},
 	})
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 }
 
 func Test_CheckGaps(t *testing.T) {
@@ -42,7 +170,7 @@ func Test_CheckGaps(t *testing.T) {
 	touchFiles(t, dirs, []snapRange{
 		{0, 10}, {20, 30},
 	})
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 }
 
 func Test_CheckStartFrom0(t *testing.T) {
@@ -50,7 +178,7 @@ func Test_CheckStartFrom0(t *testing.T) {
 	touchFiles(t, dirs, []snapRange{
 		{10, 20}, {20, 30},
 	})
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 }
 
 func Test_CheckAllowedNonStartFrom0(t *testing.T) {
@@ -61,12 +189,12 @@ func Test_CheckAllowedNonStartFrom0(t *testing.T) {
 
 	delFile(t, dirs.Snap, "v1.0-000000-000010-blocksidecars.idx") // blobsidecars start at 1942 step on mainnet after dencun upgrade
 	delFile(t, dirs.Snap, "v1.0-000000-000010-blobsidecars.seg")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	// but removing other files should still error
 	delFile(t, dirs.Snap, "v1.0-000000-000010-beaconblocks.idx")
 	delFile(t, dirs.Snap, "v1.0-000000-000010-beaconblocks.seg")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 }
 
 func Test_CheckOverlaps(t *testing.T) {
@@ -74,7 +202,7 @@ func Test_CheckOverlaps(t *testing.T) {
 	touchFiles(t, dirs, []snapRange{
 		{0, 15}, {10, 30},
 	})
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 }
 
 func Test_OneFileMissing(t *testing.T) {
@@ -84,15 +212,15 @@ func Test_OneFileMissing(t *testing.T) {
 	})
 	// delete one idx file
 	delFile(t, dirs.Snap, "v1.0-000010-000020-beaconblocks.idx")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	touchFiles(t, dirs, []snapRange{
 		{0, 10}, {10, 20}, {20, 30},
 	})
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 	// delete seg file
 	delFile(t, dirs.SnapCaplin, "v1.0-000010-000020-ActiveValidatorIndicies.seg")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 }
 
 func Test_LastFileMissingForOneEnum(t *testing.T) {
@@ -103,7 +231,7 @@ func Test_LastFileMissingForOneEnum(t *testing.T) {
 	// delete one idx file
 	delFile(t, dirs.SnapCaplin, "v1.0-000020-000030-BlockRoot.idx")
 	delFile(t, dirs.SnapCaplin, "v1.0-000020-000030-BlockRoot.seg")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 }
 
 func Test_VersionLessThanMin(t *testing.T) {
@@ -115,28 +243,28 @@ func Test_VersionLessThanMin(t *testing.T) {
 		{0, 10}, {10, 20}, {20, 30},
 	})
 	touchFile(t, dirs.Snap, "v0.9-000010-000020-beaconblocks.idx")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	delFile(t, dirs.Snap, "v0.9-000010-000020-beaconblocks.idx")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	touchFile(t, dirs.Snap, "v0.9-000010-000020-beaconblocks.seg")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	delFile(t, dirs.Snap, "v0.9-000010-000020-beaconblocks.seg")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	touchFile(t, dirs.SnapCaplin, "v0.9-000010-000020-ActiveValidatorIndicies.seg")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	delFile(t, dirs.SnapCaplin, "v0.9-000010-000020-ActiveValidatorIndicies.seg")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	touchFile(t, dirs.SnapCaplin, "v0.9-000010-000020-ActiveValidatorIndicies.idx")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	delFile(t, dirs.SnapCaplin, "v0.9-000010-000020-ActiveValidatorIndicies.idx")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 }
 
 func Test_VersionMoreThanCurrent(t *testing.T) {
@@ -148,28 +276,28 @@ func Test_VersionMoreThanCurrent(t *testing.T) {
 		{0, 10}, {10, 20}, {20, 30},
 	})
 	touchFile(t, dirs.Snap, "v20.0-000010-000020-beaconblocks.idx")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	delFile(t, dirs.Snap, "v20.0-000010-000020-beaconblocks.idx")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	touchFile(t, dirs.Snap, "v20.0-000010-000020-beaconblocks.seg")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	delFile(t, dirs.Snap, "v20.0-000010-000020-beaconblocks.seg")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	touchFile(t, dirs.SnapCaplin, "v20.0-000010-000020-ActiveValidatorIndicies.seg")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	delFile(t, dirs.SnapCaplin, "v20.0-000010-000020-ActiveValidatorIndicies.seg")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	touchFile(t, dirs.SnapCaplin, "v20.0-000010-000020-ActiveValidatorIndicies.idx")
-	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 
 	delFile(t, dirs.SnapCaplin, "v20.0-000010-000020-ActiveValidatorIndicies.idx")
-	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false))
+	require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
 }
 
 // A pre-GLOAS datadir registers the GLOAS (EIP-7732) state tables but has no
@@ -182,7 +310,7 @@ func Test_CheckEmptyFutureForkTablesTolerated(t *testing.T) {
 		kv.BuilderPendingWithdrawals, kv.BuilderPendingWithdrawalsDump,
 		kv.PayloadExpectedWithdrawals, kv.PayloadExpectedWithdrawalsDump,
 		kv.ExecutionPayloadAvailabilityTable, kv.BuilderPendingPaymentsTable,
-		kv.PtcWindowTable, kv.LatestExecutionPayloadBidTable,
+		kv.LatestExecutionPayloadBidTable,
 	}
 	ranges := []snapRange{{0, 10}, {10, 20}, {20, 30}}
 	dirs := datadir.New(t.TempDir())
@@ -194,7 +322,7 @@ func Test_CheckEmptyFutureForkTablesTolerated(t *testing.T) {
 		}
 	}
 	for range 30 {
-		require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, true))
+		require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, true, nil))
 	}
 }
 
@@ -227,7 +355,7 @@ func touchFiles(t *testing.T, dirs datadir.Dirs, ranges []snapRange) {
 			touchFile(t, dirs.Snap, indexfile)
 		}
 	}
-	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil)
+	stateSnapTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(nil, nil)
 
 	for table := range stateSnapTypes.KeyValueGetters {
 		// caplin/v1.1-000000-010500-ActiveValidatorIndicies.idx
@@ -240,6 +368,20 @@ func touchFiles(t *testing.T, dirs datadir.Dirs, ranges []snapRange) {
 			touchFile(t, dirs.SnapCaplin, datafile)
 			touchFile(t, dirs.SnapCaplin, indexfile)
 		}
+	}
+}
+
+func touchCaplinStateFiles(t *testing.T, dirs datadir.Dirs, table string, r snapRange) {
+	t.Helper()
+	touchFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.seg", r.fromStep, r.toStep, table))
+	touchFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.idx", r.fromStep, r.toStep, table))
+}
+
+func removePtcWindowEpochFiles(t *testing.T, dirs datadir.Dirs, ranges []snapRange) {
+	t.Helper()
+	for _, r := range ranges {
+		delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.seg", r.fromStep, r.toStep, kv.PtcWindowEpochTable))
+		delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.idx", r.fromStep, r.toStep, kv.PtcWindowEpochTable))
 	}
 }
 

@@ -54,18 +54,12 @@ func TestGetDiffsetCoversAllDomains(t *testing.T) {
 	}
 }
 
-// Pins the locking contract of the per-domain latestStateLocks: readers and
-// writers of different domains run concurrently while Unwind takes every
-// lock. Meaningful under -race; also checks unwind correctness afterwards.
 func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 	t.Parallel()
 	sd := &TemporalMemBatch{
 		stepSize: 16,
 		storage:  btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
-	}
-	for d := range sd.domains {
-		sd.domains[d] = map[string][]dataWithTxNum{}
 	}
 
 	const keysPerDomain = 200
@@ -116,9 +110,6 @@ func TestFlushDoesNotBlockReaders(t *testing.T) {
 		stepSize: 16,
 		storage:  btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
-	}
-	for d := range sd.domains {
-		sd.domains[d] = map[string][]dataWithTxNum{}
 	}
 	sd.putLatest(kv.AccountsDomain, "acc", []byte("v"), 1)
 
@@ -172,9 +163,6 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 				metrics:           &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 				inMemHistoryReads: inMemHistoryReads,
 			}
-			for d := range sd.domains {
-				sd.domains[d] = map[string][]dataWithTxNum{}
-			}
 
 			// Each case is the FIRST write after the borrow, so the slot still holds
 			// the borrowed buffer when the arm runs. A shorter value fits that buffer,
@@ -202,5 +190,29 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMergeRejectedBatchKeepsReceiverUnchanged(t *testing.T) {
+	t.Parallel()
+	newBatch := func() *TemporalMemBatch {
+		return &TemporalMemBatch{
+			stepSize: 16,
+			storage:  btree2.NewMap[string, []dataWithTxNum](128),
+			metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		}
+	}
+	for _, receiverHasAccumulator := range []bool{false, true} {
+		sd, other := newBatch(), newBatch()
+		other.putLatest(kv.AccountsDomain, "k", []byte("v"), 1)
+		if receiverHasAccumulator {
+			sd.currentChangesAccumulator = &changeset.StateChangeSet{}
+		} else {
+			other.currentChangesAccumulator = &changeset.StateChangeSet{}
+		}
+
+		require.Error(t, sd.Merge(other))
+		_, _, ok := sd.GetLatest(kv.AccountsDomain, []byte("k"))
+		require.False(t, ok, "receiverHasAccumulator=%v", receiverHasAccumulator)
 	}
 }

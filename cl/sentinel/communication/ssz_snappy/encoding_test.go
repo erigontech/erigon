@@ -22,14 +22,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"runtime"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/golang/snappy"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 var snappyStreamIdentifier = []byte{0xff, 0x06, 0x00, 0x00, 's', 'N', 'a', 'P', 'p', 'Y'}
@@ -56,6 +59,39 @@ func (r *countingReader) Read(p []byte) (int, error) {
 	n, err := r.r.Read(p)
 	r.bytes += n
 	return n, err
+}
+
+func TestDecodeAndReadNoForkDigestMaxPayloadSize(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		size      uint64
+		wantError bool
+	}{
+		{name: "at limit", size: clparams.MaxPayloadSize},
+		{name: "over limit", size: clparams.MaxPayloadSize + 1, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payloadBytes := make([]byte, tc.size)
+			if !tc.wantError {
+				_, err := rand.New(rand.NewSource(1)).Read(payloadBytes)
+				require.NoError(t, err)
+			}
+			payload := solid.NewByteListSSZ(tc.size)
+			require.NoError(t, payload.SetBytes(payloadBytes))
+			var encoded bytes.Buffer
+			require.NoError(t, EncodeAndWrite(&encoded, payload))
+
+			decoded := solid.NewByteListSSZ(tc.size)
+			err := DecodeAndReadNoForkDigest(bytes.NewReader(encoded.Bytes()), decoded, clparams.Phase0Version)
+			if tc.wantError {
+				require.ErrorContains(t, err, "payload too big")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, int(tc.size), decoded.Len())
+			require.Equal(t, payloadBytes, decoded.Bytes())
+		})
+	}
 }
 
 func TestDecodeAndReadNoForkDigestExactRejectsTrailingFrames(t *testing.T) {
@@ -88,6 +124,46 @@ func TestDecodeAndReadNoForkDigestExactBoundsCompressedInput(t *testing.T) {
 	err := DecodeAndReadNoForkDigestExact(reader, &cltypes.Ping{}, clparams.Phase0Version, 8)
 	require.Error(t, err)
 	require.LessOrEqual(t, reader.bytes, 1+32+8+8/6)
+}
+
+func TestDecodeAndReadNoForkDigestBoundsCompressedInput(t *testing.T) {
+	const payloadSize = 8
+	maxCompressedSize := snappy.MaxEncodedLen(payloadSize)
+
+	var encoded bytes.Buffer
+	require.NoError(t, EncodeAndWrite(&encoded, &cltypes.Ping{Id: 1}))
+	prefix, body := encoded.Bytes()[:1], encoded.Bytes()[1:]
+	trailer := []byte{0xaa, 0xbb}
+	for _, tc := range []struct {
+		name      string
+		extraByte int
+		wantError bool
+	}{
+		{name: "at limit"},
+		{name: "over limit", extraByte: 1, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			padding := make([]byte, maxCompressedSize-len(body)+tc.extraByte)
+			padding[0] = 0xfe
+			padding[1] = byte(len(padding) - 4)
+			framed := append(append(append(append([]byte{}, prefix...), body[:len(snappyStreamIdentifier)]...), padding...), body[len(snappyStreamIdentifier):]...)
+			require.Len(t, framed, len(prefix)+maxCompressedSize+tc.extraByte)
+			framed = append(framed, trailer...)
+
+			reader := &countingReader{r: bytes.NewReader(framed)}
+			var ping cltypes.Ping
+			err := DecodeAndReadNoForkDigest(reader, &ping, clparams.Phase0Version)
+			if tc.wantError {
+				require.ErrorIs(t, err, errCompressedPayloadLimit)
+				require.LessOrEqual(t, reader.bytes, 1+maxCompressedSize)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, uint64(1), ping.Id)
+			require.Equal(t, len(prefix)+maxCompressedSize, reader.bytes)
+			require.Equal(t, len(trailer), reader.r.Len())
+		})
+	}
 }
 
 func TestDecodeAndReadNoForkDigestExactFailsClosedAtCompressedLimit(t *testing.T) {
@@ -139,7 +215,7 @@ func TestDecodeAndReadNoForkDigestExactRejectsWrappedEOF(t *testing.T) {
 }
 
 func TestDecodeAndReadNoForkDigestDoesNotPreallocateDeclaredLength(t *testing.T) {
-	header := binary.AppendUvarint(nil, uint64(16*datasize.MB))
+	header := binary.AppendUvarint(nil, clparams.MaxPayloadSize)
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	err := DecodeAndReadNoForkDigest(bytes.NewReader(header), &cltypes.BeaconBlocksByRangeRequest{}, clparams.Phase0Version)

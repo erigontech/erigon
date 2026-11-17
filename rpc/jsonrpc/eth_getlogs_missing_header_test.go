@@ -43,9 +43,8 @@ const (
 	missingHeaderLogsPerBlock = 2
 )
 
-// setupMissingHeaderChain builds a chain where every transaction emits one log, then drops
-// the canonical marker of missingHeaderBlock so HeaderByNumber answers nil for it.
-func setupMissingHeaderChain(t *testing.T) *execmoduletester.ExecModuleTester {
+// setupLogsChain builds a chain where every transaction emits one log.
+func setupLogsChain(t *testing.T) *execmoduletester.ExecModuleTester {
 	t.Helper()
 
 	m := execmoduletester.New(
@@ -68,7 +67,15 @@ func setupMissingHeaderChain(t *testing.T) *execmoduletester.ExecModuleTester {
 	})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(c))
+	return m
+}
 
+// setupMissingHeaderChain drops the canonical marker of missingHeaderBlock so HeaderByNumber
+// answers nil for it.
+func setupMissingHeaderChain(t *testing.T) *execmoduletester.ExecModuleTester {
+	t.Helper()
+
+	m := setupLogsChain(t)
 	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
 		return tx.Delete(kv.HeaderCanonical, hexutil.EncodeTs(missingHeaderBlock))
 	}))
@@ -122,4 +129,31 @@ func TestGetLatestLogsStopsBeforeAnUnrequestedBlock(t *testing.T) {
 	for _, l := range logs {
 		require.Equal(t, hexutil.Uint64(missingHeaderChainLen), l.BlockNumber)
 	}
+}
+
+// TestGetLogsFailsOnAMissingBody pins that a transaction whose body cannot be read stops the
+// query instead of silently dropping its logs from the result.
+func TestGetLogsFailsOnAMissingBody(t *testing.T) {
+	t.Parallel()
+
+	m := setupLogsChain(t)
+	dropBodies(t, m.DB, missingHeaderBlock, missingHeaderBlock+1)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	logs, err := api.GetLogs(m.Ctx, fullRangeCriteria())
+	require.ErrorContains(t, err, "transaction not found")
+	require.Nil(t, logs)
+}
+
+// TestGetLatestLogsFailsOnAMissingBody pins the same for erigon_getLatestLogs.
+func TestGetLatestLogsFailsOnAMissingBody(t *testing.T) {
+	t.Parallel()
+
+	m := setupLogsChain(t)
+	dropBodies(t, m.DB, missingHeaderBlock, missingHeaderBlock+1)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	logs, err := api.GetLatestLogs(m.Ctx, fullRangeCriteria(), filters.LogFilterOptions{BlockCount: missingHeaderChainLen})
+	require.ErrorContains(t, err, "transaction not found")
+	require.Nil(t, logs)
 }

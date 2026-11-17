@@ -24,7 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
+	"math/bits"
 	"path"
 	"path/filepath"
 	"runtime/debug"
@@ -33,6 +33,7 @@ import (
 
 	"github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -45,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -93,7 +95,29 @@ func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 	}
 }
 
-func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
+func requirePtcWindowEpochRows(cfg *clparams.BeaconChainConfig, getter KeyValueGetter) KeyValueGetter {
+	return func(slot uint64) ([]byte, []byte, error) {
+		key, value, err := getter(slot)
+		if err != nil {
+			return nil, nil, err
+		}
+		if cfg != nil && slot%cfg.SlotsPerEpoch == 0 && slot/cfg.SlotsPerEpoch >= cfg.GloasForkEpoch && len(value) == 0 {
+			return nil, nil, fmt.Errorf("%w: %s slot %d", errIncompleteStateRange, kv.PtcWindowEpochTable, slot)
+		}
+		return key, value, nil
+	}
+}
+
+func MakeCaplinStateSnapshotsTypes(db kv.RoDB, cfg *clparams.BeaconChainConfig) SnapshotTypes {
+	ptcWindowEpochGetter := requirePtcWindowEpochRows(cfg, getKvGetterForStateTable(db, kv.PtcWindowEpochTable))
+	var gloasForkSlot uint64
+	if cfg != nil {
+		if hi, lo := bits.Mul64(cfg.GloasForkEpoch, cfg.SlotsPerEpoch); hi != 0 {
+			gloasForkSlot = math.MaxUint64
+		} else {
+			gloasForkSlot = lo
+		}
+	}
 	return SnapshotTypes{
 		KeyValueGetters: map[string]KeyValueGetter{
 			kv.ValidatorEffectiveBalance:     getKvGetterForStateTable(db, kv.ValidatorEffectiveBalance),
@@ -128,10 +152,11 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 			kv.PayloadExpectedWithdrawalsDump:    getKvGetterForStateTable(db, kv.PayloadExpectedWithdrawalsDump),
 			kv.ExecutionPayloadAvailabilityTable: getKvGetterForStateTable(db, kv.ExecutionPayloadAvailabilityTable),
 			kv.BuilderPendingPaymentsTable:       getKvGetterForStateTable(db, kv.BuilderPendingPaymentsTable),
-			kv.PtcWindowTable:                    getKvGetterForStateTable(db, kv.PtcWindowTable),
 			kv.LatestExecutionPayloadBidTable:    getKvGetterForStateTable(db, kv.LatestExecutionPayloadBidTable),
+			kv.PtcWindowEpochTable:               ptcWindowEpochGetter,
 		},
-		Compression: map[string]bool{},
+		Compression:   map[string]bool{},
+		GloasForkSlot: gloasForkSlot,
 	}
 }
 
@@ -143,7 +168,6 @@ const caplinDownloaderPrefix = "caplin"
 
 type CaplinStateSnapshots struct {
 	*BaseRoSnapshots
-	Salt uint32
 
 	snapshotTypes SnapshotTypes
 	tmpdir        string
@@ -155,6 +179,7 @@ type KeyValueGetter func(numId uint64) ([]byte, []byte, error)
 type SnapshotTypes struct {
 	KeyValueGetters map[string]KeyValueGetter
 	Compression     map[string]bool
+	GloasForkSlot   uint64
 }
 
 // NewCaplinStateSnapshots - opens all snapshots. But to simplify everything:
@@ -193,6 +218,9 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, sn
 		typeEnums:       typeEnums,
 	}
 	sn.keepUnindexedlyCovered = true
+	for _, typ := range types {
+		sn.SetIndexBuilder(typ, snaptype.IndexBuilderFunc(simpleIdx))
+	}
 	return sn
 }
 
@@ -261,15 +289,22 @@ func (s *CaplinStateSnapshots) IndicesMax() uint64 {
 	minTo := uint64(math.MaxUint64)
 	for _, typ := range s.Types() {
 		segs := vis.segments[typ.Enum()]
-		if len(segs) == 0 {
+		var to uint64
+		if len(segs) != 0 {
+			to = segs[len(segs)-1].to
+		}
+		if typ.Enum() == snaptype.PtcWindowEpoch.Enum() {
+			to = max(to, s.snapshotTypes.GloasForkSlot)
+		}
+		if to == 0 {
 			return 0
 		}
-		minTo = min(minTo, segs[len(segs)-1].to)
+		minTo = min(minTo, to)
 	}
 	if minTo == math.MaxUint64 {
 		return 0
 	}
-	return minTo
+	return minTo - 1
 }
 
 func (s *CaplinStateSnapshots) LogStat(str string) {
@@ -465,10 +500,10 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
 
-	return simpleIdx(ctx, f, salt, tmpDir, p, lvl, logger)
+	return simpleIdx(ctx, f, salt, nil, tmpDir, p, lvl, logger)
 }
 
-func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, _ *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	num := make([]byte, binary.MaxVarintLen64)
 	cfg := recsplit.RecSplitArgs{
 		Enums:      true,
@@ -581,51 +616,7 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 	if s == nil {
 		return nil
 	}
-	// if !s.segmentsReady.Load() {
-	// 	return fmt.Errorf("not all snapshot segments are available")
-	// }
-
-	// wait for Downloader service to download all expected snapshots
-
-	noneDone := true
-
-	for _, typ := range s.Types() {
-		var files []*DirtySegment
-		s.WalkDirtySegments(typ.Enum(), func(df *DirtySegment) bool {
-			files = append(files, df)
-			return true
-		})
-		for _, df := range files {
-			if df.Decompressor == nil {
-				return fmt.Errorf("segment %s is not opened", df.FilePath())
-			}
-			if df.IsIndexed() {
-				continue
-			}
-			sn, _, ok := snaptype.ParseFileName(s.Dir(), df.FileName())
-			if !ok || sn.Type == nil {
-				return fmt.Errorf("invalid caplin state snapshot filename %q", df.FileName())
-			}
-
-			indexFile := filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, sn.CaplinTypeString))
-			if _, err := os.Stat(indexFile); err == nil {
-				logger.Info("index file already exists, yet dirtyFile didn't have it opened", "seg", sn.Name())
-				continue
-			}
-			logger.Info("building index file", "seg", sn.Name())
-			p := &background.Progress{}
-			noneDone = false
-
-			if err := simpleIdx(ctx, sn, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
-				return err
-			}
-		}
-	}
-	if noneDone {
-		return nil
-	}
-
-	return s.OpenFolder()
+	return s.IndexMissed(ctx, "caplin state", s.tmpdir, nil, logger)
 }
 
 func (s *CaplinStateSnapshots) Get(tbl string, slot uint64) ([]byte, error) {

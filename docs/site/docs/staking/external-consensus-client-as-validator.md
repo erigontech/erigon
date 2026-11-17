@@ -52,7 +52,7 @@ erigon \
 * `--externalcl`: Enables the use of an external CL.
 * `--datadir=/data/erigon`: Defines the directory to be used for databases.
 * `--chain=sepolia`: Specifies the Sepolia chain.
-* `--authrpc.jwtsecret=/jwt`: Sets the location of the JWT authentication code in hex encoding. This is used by Erigon (the EL) and the CL (in this case Lighthouse) to authenticate communication.
+* `--authrpc.jwtsecret=/jwt`: Sets the location of the JWT authentication code in hex encoding. This is used by Erigon (the Execution Layer (EL)) and the CL (in this case Lighthouse) to authenticate communication.
 * `--authrpc.addr=0.0.0.0`: Allows the engine API to be accessed from any address.
 * `--http.api=engine,eth,net,web3`: Enables the necessary APIs for external clients and Caplin.
 * `--ws`: enables WebSocket-based communication, which is optional.

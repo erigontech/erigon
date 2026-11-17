@@ -45,18 +45,10 @@ func TestCodeCacheStaysWithinByteBudget(t *testing.T) {
 				binary.BigEndian.PutUint64(addr, uint64(i))
 				cache.PutWithCodeHash(addr, code, crypto.Keccak256(code), uint64(i))
 			}
-			cache.hashToCode.c.CleanUp()
 			cache.codeHashToCode.c.CleanUp()
 
-			// An addr is required or putCodeLocked never runs and codeSize is 0.
-			perLayer := int64(budget / 2)
-			require.NotZero(t, cache.CodeSizeBytes(), "hashToCode must be populated")
-			require.LessOrEqual(t, cache.CodeSizeBytes(), perLayer,
-				"hashToCode exceeds its share of the budget")
-			require.LessOrEqual(t, cache.codeHashCodeSize.Load(), perLayer,
-				"codeHashToCode exceeds its share of the budget")
-			require.LessOrEqual(t, cache.CodeSizeBytes()+cache.codeHashCodeSize.Load(), int64(budget),
-				"the two layers together exceed the configured budget")
+			require.NotZero(t, cache.CodeSizeBytes(), "codeHashToCode must be populated")
+			require.LessOrEqual(t, cache.CodeSizeBytes(), int64(budget), "the code layer exceeds the configured budget")
 		})
 	}
 }
@@ -80,12 +72,9 @@ func TestCodeCacheStaysWithinByteBudgetConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 	// Eviction is not synchronous with Add; force the drain before reading.
-	cache.hashToCode.c.CleanUp()
 	cache.codeHashToCode.c.CleanUp()
 
-	perLayer := int64(budget / 2)
-	require.LessOrEqual(t, cache.CodeSizeBytes(), perLayer)
-	require.LessOrEqual(t, cache.codeHashCodeSize.Load(), perLayer)
+	require.LessOrEqual(t, cache.CodeSizeBytes(), int64(budget))
 }
 
 // A closed cache must release its bytes: it stays reachable until its runtime
@@ -111,10 +100,10 @@ func TestCodeCacheClosedIsCollectable(t *testing.T) {
 		binary.BigEndian.PutUint64(code, uint64(i))
 		one.Put(nil, code, uint64(i))
 	}
-	require.NotZero(t, one.hashToCode.Len(), "layer must be populated before Close")
+	require.NotZero(t, one.codeHashToCode.Len(), "layer must be populated before Close")
 	one.Close()
-	require.Zero(t, one.hashToCode.Len(), "Close must drop the entries")
-	require.Zero(t, one.hashToCode.resident.Load(), "Close must zero the residency")
+	require.Zero(t, one.codeHashToCode.Len(), "Close must drop the entries")
+	require.Zero(t, one.codeHashToCode.resident.Load(), "Close must zero the residency")
 
 	const caches = 200
 	base := heap()
@@ -137,13 +126,12 @@ func TestCodeCacheClosedIsCollectable(t *testing.T) {
 // The real eviction callbacks capture the CodeCache, so this also checks that
 // nothing otter keeps alive after Close reaches back to the caches.
 func TestCodeCacheClosedLayersAreCollectable(t *testing.T) {
-	hashToCode, codeHashToCode := func() (weak.Pointer[otter.Cache[uint64, codeEntry]], weak.Pointer[otter.Cache[uint64, codeEntry]]) {
+	codeHashToCode := func() weak.Pointer[otter.Cache[uint64, codeEntry]] {
 		cc := NewCodeCache(datasize.MB, datasize.MB)
 		cc.Put(nil, make([]byte, 64), 1)
 		cc.Close()
-		return weak.Make(cc.hashToCode.c), weak.Make(cc.codeHashToCode.c)
+		return weak.Make(cc.codeHashToCode.c)
 	}()
 	runtime.GC()
-	require.Nil(t, hashToCode.Value(), "a closed CodeCache's hash-to-code layer must be collected")
 	require.Nil(t, codeHashToCode.Value(), "a closed CodeCache's code-hash-to-code layer must be collected")
 }

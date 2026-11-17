@@ -41,7 +41,7 @@ func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint6
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_getTransactionReceipt"}, resultsCh)
+		go writePattern(true, []string{"eth_getTransactionReceipt"}, resultsCh)
 	}
 
 	reqGen := &RequestGenerator{}
@@ -89,7 +89,7 @@ func BenchBlockReceipts(erigonURL, gethURL string, needCompare bool, blockFrom u
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
 		defer close(resultsCh)
-		go vegetaWrite(true, []string{"eth_getBlockReceipts"}, resultsCh)
+		go writePattern(true, []string{"eth_getBlockReceipts"}, resultsCh)
 	}
 
 	reqGen := &RequestGenerator{}

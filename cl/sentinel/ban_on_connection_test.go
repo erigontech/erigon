@@ -43,13 +43,13 @@ import (
 // stubP2P satisfies p2p.P2PManager with only the host the connection handler needs.
 type stubP2P struct{ host host.Host }
 
-func (s stubP2P) Pubsub() *pubsub.PubSub                       { return nil }
-func (s stubP2P) Host() host.Host                              { return s.host }
-func (s stubP2P) SetDialPolicy(func(peer.ID) bool)             {}
-func (s stubP2P) BandwidthCounter() *metrics.BandwidthCounter  { return nil }
-func (s stubP2P) UDPv5Listener() *discover.UDPv5               { return nil }
-func (s stubP2P) UpdateENRAttSubnets(subnetIndex int, on bool) {}
-func (s stubP2P) UpdateENRSyncNets(subnetIndex int, on bool)   {}
+func (s stubP2P) Pubsub() *pubsub.PubSub                      { return nil }
+func (s stubP2P) Host() host.Host                             { return s.host }
+func (s stubP2P) SetDialPolicy(func(peer.ID) bool)            {}
+func (s stubP2P) BandwidthCounter() *metrics.BandwidthCounter { return nil }
+func (s stubP2P) UDPv5Listener() *discover.UDPv5              { return nil }
+func (s stubP2P) SetENRAttSubnets(subnets []uint64)           {}
+func (s stubP2P) UpdateENRSyncNets(subnetIndex int, on bool)  {}
 
 func testSentinel(t *testing.T, h host.Host) *Sentinel {
 	t.Helper()

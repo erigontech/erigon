@@ -28,7 +28,7 @@ func BenchmarkTxHash(b *testing.B) {
 		"dynamicfee": DynamicFeeTxType,
 		"blob":       BlobTxType,
 		"setcode":    SetCodeTxType,
-		"aa":         AccountAbstractionTxType,
+		"frame":      FrameTxType,
 	} {
 		tx := tr.RandTransaction(txType)
 		b.Run(name, func(b *testing.B) {

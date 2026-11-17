@@ -53,3 +53,21 @@ func TestTimeBasedRateLimiterRefreshesLimitEachWindow(t *testing.T) {
 	require.False(t, limiter.tryAcquire())
 	require.Equal(t, 3, callbackCalls)
 }
+
+func TestTokenBucketRateLimiterSweepKeepsActiveBuckets(t *testing.T) {
+	limiter := newTokenBucketRateLimiter(0.001, 1)
+	require.True(t, limiter.acquire("a"))
+	require.False(t, limiter.acquire("a"))
+
+	limiter.lastSweep = time.Time{}
+	require.False(t, limiter.acquire("a"))
+	require.Contains(t, limiter.limiter, "a")
+
+	limiter.limiter["a"].lastAccess = time.Now().Add(-4 * time.Minute)
+	require.True(t, limiter.acquire("b"))
+	require.Contains(t, limiter.limiter, "a")
+
+	limiter.lastSweep = time.Time{}
+	require.True(t, limiter.acquire("c"))
+	require.NotContains(t, limiter.limiter, "a")
+}

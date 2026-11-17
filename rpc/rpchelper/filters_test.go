@@ -611,6 +611,7 @@ func createReceipt(txHash common.Hash) *remoteproto.SubscribeReceiptsReply {
 		ContractAddress:   nil,
 		Logs:              []*remoteproto.SubscribeLogsReply{},
 		LogsBloom:         make([]byte, 256),
+		LastInBlock:       true,
 		From:              gointerfaces.ConvertAddressToH160([20]byte{2}),
 		To:                gointerfaces.ConvertAddressToH160([20]byte{3}),
 	}
