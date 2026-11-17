@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 )
 
-var ErrAttesterSlashingEmptyIntersection = errors.New("no slashable validators in intersection")
+var ErrAttesterSlashingEmptyIntersection = errors.New("attester slashing has an empty attesting indices intersection")
 
 func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error {
 	if attesterSlashing == nil ||
@@ -40,6 +40,9 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		attesterSlashing.Attestation_1.AttestingIndices == nil ||
 		attesterSlashing.Attestation_2.AttestingIndices == nil {
 		return errors.New("invalid attester slashing")
+	}
+	if _, err := attesterSlashingIntersection(attesterSlashing); err != nil {
+		return err
 	}
 	if f.operationsPool.AttesterSlashingsPool.Has(pool.ComputeKeyForAttesterSlashing(attesterSlashing)) {
 		return ErrIgnore
@@ -65,13 +68,9 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	// Check if this attestation is even slashable.
 	attestation1 := attesterSlashing.Attestation_1
 	attestation2 := attesterSlashing.Attestation_2
-	if attestation1.AttestingIndices.Length() > attestation1.AttestingIndices.Cap() ||
-		attestation2.AttestingIndices.Length() > attestation2.AttestingIndices.Cap() {
-		return errors.New("attesting indices exceed limit")
-	}
-	intersection := intersectAttestingIndices(attestation1.AttestingIndices, attestation2.AttestingIndices)
-	if len(intersection) == 0 {
-		return ErrAttesterSlashingEmptyIntersection
+	intersection, err := attesterSlashingIntersection(attesterSlashing)
+	if err != nil {
+		return err
 	}
 	if f.allAttesterSlashingIndicesSeen(intersection) {
 		return ErrIgnore
@@ -154,6 +153,18 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	f.operationsPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
 	f.queueEmit(func() { f.emitters.Operation().SendAttesterSlashing(attesterSlashing) })
 	return nil
+}
+
+func attesterSlashingIntersection(attesterSlashing *cltypes.AttesterSlashing) ([]uint64, error) {
+	indices1, indices2 := attesterSlashing.Attestation_1.AttestingIndices, attesterSlashing.Attestation_2.AttestingIndices
+	if indices1.Length() > indices1.Cap() || indices2.Length() > indices2.Cap() {
+		return nil, errors.New("attesting indices exceed limit")
+	}
+	intersection := intersectAttestingIndices(indices1, indices2)
+	if len(intersection) == 0 {
+		return nil, ErrAttesterSlashingEmptyIntersection
+	}
+	return intersection, nil
 }
 
 func intersectAttestingIndices(left, right solid.IterableSSZ[uint64]) []uint64 {
