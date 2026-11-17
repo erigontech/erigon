@@ -991,7 +991,7 @@ func TestHeadCaptureRejectsWrongTracedRoot(t *testing.T) {
 	header := info.Block.Header()
 	header.Root = common.Hash{0xde, 0xad}
 	info.Block = info.Block.WithSeal(header)
-	result, err := api.buildWitnessResultHeadCapture(t.Context(), committed, pin, &commitmentdb.ParentRecords{TraceCollapses: true}, info, witnessModeLegacy)
+	result, err := api.buildWitnessResultHeadCapture(t.Context(), committed, pin, &commitmentdb.ParentRecords{}, info, witnessModeLegacy)
 	require.ErrorContains(t, err, "commitment root mismatch (traced=true)")
 	require.Nil(t, result)
 }

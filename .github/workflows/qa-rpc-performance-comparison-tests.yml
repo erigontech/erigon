@@ -343,7 +343,7 @@ jobs:
           RUNNER_WS: ${{ runner.workspace }}
         run: |
           # Generated once from Erigon and shared with the other clients' jobs, so all clients replay the same requests.
-          # Each count covers the largest step of its test, e.g. 30000:20 for eth_call, 6000:20 for mixed.
+          # Each count covers the largest step of its test, e.g. 30000:20 for eth_call, 4500:20 for mixed.
           selected() { [ "$RPC_TEST" = "all" ] || [ "$RPC_TEST" = "$1" ]; }
           cd "$RUNNER_WS/rpc-tests"
           # With --block-tag latest every request asks for "latest", the chain head of each client when the request
@@ -420,7 +420,7 @@ jobs:
           fi
           if selected mixed; then
             ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/mixed.profile" --url http://localhost:8545 \
-              --counts 120000 --block-tag latest --verify --keep ok --fees drop --max-blocks 2500 \
+              --counts 90000 --block-tag latest --verify --keep ok --fees drop --max-blocks 2500 \
               --out "perf/pattern/$CHAIN/stress_test_mixed_gen_latest.jsonl"
           fi
 
@@ -484,7 +484,7 @@ jobs:
           echo "  RUN_ID=${RUN_ID}"
           echo "  NETWORK=${NETWORK}"
           # Wait for an agreement between all the clients
-          python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID" --chain "$NETWORK" --deadline-timeout $TOTAL_TIME_SECONDS
+          python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" --deadline-timeout $TOTAL_TIME_SECONDS
 
       - name: Prepare the benchmark result directories
         id: prepare_perf
@@ -524,168 +524,182 @@ jobs:
             echo "RUNNER_WS=$RUNNER_WS"
           } >> "$GITHUB_ENV"
 
-      # A failed load pattern does not stop the next ones; a failed sync between clients stops the benchmark.
+      # A failed load pattern does not stop the next ones. A client left out at a barrier (--drop-lost-remotes) sets
+      # EXCLUDED_AT and skips the next barriers and patterns; ALIGNED_REMOTES holds the clients still running.
       # Each pattern starts on the same block in all clients, otherwise a saturated client runs the later patterns on a newer chain head.
       - name: Run mixed
         id: perf_mixed
         if: env.RPC_TEST == 'all' || env.RPC_TEST == 'mixed'
         continue-on-error: true
         timeout-minutes: 20
-        run: bash .github/workflows/scripts/run_rpc_perf.sh mixed stress_test_mixed_gen_latest 1000:20,3000:20,6000:20 mixed true
+        run: bash .github/workflows/scripts/run_rpc_perf.sh mixed stress_test_mixed_gen_latest 1000:20,3000:20,4500:20 mixed true
 
       - name: Sync clients before trace_block_call_tracer
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'trace_block_call_tracer')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'trace_block_call_tracer')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-trace_block_call_tracer" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-trace_block_call_tracer" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=trace_block_call_tracer" >> "$GITHUB_ENV"; exit 1; }
 
       # The traces (blocks=32) follow mixed at a low rate, while their blocks are still inside the recent state.
       - name: Run trace_block_call_tracer
         id: perf_trace_block_call_tracer
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'trace_block_call_tracer'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'trace_block_call_tracer')
         continue-on-error: true
         timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh debug_traceBlockByNumber stress_test_debug_traceBlockByNumber_callTracer_gen_latest 10:20,30:20 trace_block_call_tracer
 
       - name: Sync clients before trace_block_struct_log
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'trace_block_struct_log')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'trace_block_struct_log')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-trace_block_struct_log" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-trace_block_struct_log" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=trace_block_struct_log" >> "$GITHUB_ENV"; exit 1; }
 
       - name: Run trace_block_struct_log
         id: perf_trace_block_struct_log
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'trace_block_struct_log'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'trace_block_struct_log')
         continue-on-error: true
         timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh debug_traceBlockByNumber stress_test_debug_traceBlockByNumber_structLog_gen_latest 3:5,5:5 trace_block_struct_log
 
       - name: Sync clients before eth_call_gen
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_call_gen')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_call_gen')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_call_gen" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_call_gen" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_call_gen" >> "$GITHUB_ENV"; exit 1; }
 
       - name: Run eth_call_gen
         id: perf_eth_call_gen
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_call_gen'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_call_gen')
         continue-on-error: true
         timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_call stress_test_eth_call_gen_latest 100:30,1000:20,10000:20,20000:20,30000:20 eth_call_gen
 
       - name: Sync clients before eth_createAccessList_gen
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_createAccessList_gen')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_createAccessList_gen')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_createAccessList_gen" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_createAccessList_gen" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_createAccessList_gen" >> "$GITHUB_ENV"; exit 1; }
 
       - name: Run eth_createAccessList_gen
         id: perf_eth_createAccessList_gen
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_createAccessList_gen'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_createAccessList_gen')
         continue-on-error: true
         timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_createAccessList stress_test_eth_createAccessList_gen_latest 10000:20,20000:20 eth_createAccessList_gen
 
       - name: Sync clients before eth_getLogs_gen
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_gen')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_gen')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_gen" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getLogs_gen" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_getLogs_gen" >> "$GITHUB_ENV"; exit 1; }
 
       - name: Run eth_getLogs_gen
         id: perf_eth_getLogs_gen
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_gen'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_gen')
         continue-on-error: true
         timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_gen_latest 1000:20,3000:20 eth_getLogs_gen
 
       - name: Sync clients before eth_getLogs_head
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_head')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_head')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_head" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getLogs_head" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_getLogs_head" >> "$GITHUB_ENV"; exit 1; }
 
       - name: Run eth_getLogs_head
         id: perf_eth_getLogs_head
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_head'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_head')
         continue-on-error: true
         timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_head_gen_latest 2000:20,10000:20 eth_getLogs_head
 
       - name: Sync clients before eth_getLogs_topics
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_topics')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_topics')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_topics" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getLogs_topics" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_getLogs_topics" >> "$GITHUB_ENV"; exit 1; }
 
       - name: Run eth_getLogs_topics
         id: perf_eth_getLogs_topics
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_topics'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_topics')
         continue-on-error: true
         timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_topics_gen_latest 1000:20,5000:20 eth_getLogs_topics
 
       - name: Sync clients before eth_getLogs_wide
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_wide')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_wide')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_wide" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getLogs_wide" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_getLogs_wide" >> "$GITHUB_ENV"; exit 1; }
 
       - name: Run eth_getLogs_wide
         id: perf_eth_getLogs_wide
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_wide'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_wide')
         continue-on-error: true
         timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_wide_gen_latest 200:20,1000:20 eth_getLogs_wide
 
       - name: Sync clients before eth_getLogs_latest
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_latest')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_latest')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getLogs_latest" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getLogs_latest" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_getLogs_latest" >> "$GITHUB_ENV"; exit 1; }
 
       - name: Run eth_getLogs_latest
         id: perf_eth_getLogs_latest
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_latest'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getLogs_latest')
         continue-on-error: true
         timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getLogs stress_test_eth_getLogs_latest_gen_latest 2000:20,10000:20 eth_getLogs_latest
 
       - name: Sync clients before eth_getBlockReceipts_latest
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_latest')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_latest')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockReceipts_latest" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getBlockReceipts_latest" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_getBlockReceipts_latest" >> "$GITHUB_ENV"; exit 1; }
 
       - name: Run eth_getBlockReceipts_latest
         id: perf_eth_getBlockReceipts_latest
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_latest'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_latest')
         continue-on-error: true
         timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockReceipts stress_test_eth_getBlockReceipts_latest_gen_latest 100:20,500:20 eth_getBlockReceipts_latest
 
       - name: Sync clients before eth_getBlockByNumber_latest
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_latest')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_latest')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockByNumber_latest" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getBlockByNumber_latest" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_getBlockByNumber_latest" >> "$GITHUB_ENV"; exit 1; }
 
       - name: Run eth_getBlockByNumber_latest
         id: perf_eth_getBlockByNumber_latest
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_latest'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_latest')
         continue-on-error: true
         timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockByNumber stress_test_eth_getBlockByNumber_latest_gen_latest 100:20,1000:20 eth_getBlockByNumber_latest
 
       - name: Sync clients before eth_getBlockReceipts_gen
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_gen')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_gen')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockReceipts_gen" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getBlockReceipts_gen" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_getBlockReceipts_gen" >> "$GITHUB_ENV"; exit 1; }
 
       - name: Run eth_getBlockReceipts_gen
         id: perf_eth_getBlockReceipts_gen
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_gen'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockReceipts_gen')
         continue-on-error: true
         timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockReceipts stress_test_eth_getBlockReceipts_gen_latest 100:20,1000:20 eth_getBlockReceipts_gen
 
       - name: Sync clients before eth_getBlockByNumber_gen
-        if: needs.setup.outputs.coordinated == 'true' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_gen')
+        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_gen')
+        continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "$REMOTES" --run-id "$RUN_ID-eth_getBlockByNumber_gen" --chain "$NETWORK"
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_getBlockByNumber_gen" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_getBlockByNumber_gen" >> "$GITHUB_ENV"; exit 1; }
 
       - name: Run eth_getBlockByNumber_gen
         id: perf_eth_getBlockByNumber_gen
-        if: env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_gen'
+        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_getBlockByNumber_gen')
         continue-on-error: true
         timeout-minutes: 20
         run: bash .github/workflows/scripts/run_rpc_perf.sh eth_getBlockByNumber stress_test_eth_getBlockByNumber_gen_latest 1000:20,3000:20 eth_getBlockByNumber_gen
@@ -713,14 +727,32 @@ jobs:
         run: |
           mv "$OUTPUT_LOG" "$RESULT_DIR/"
 
+          # A peer client that died during a pattern is a result, not a failure, once rpc_perf recorded it in the report
+          died_in_report() {
+            [ "$CLIENT" != "erigon" ] && python3 -c 'import json, sys; sys.exit(not any(s.get("error") for s in json.load(open(sys.argv[1]))["results"]))' \
+              "$RESULT_DIR/$CLIENT-$1-result.json" 2>/dev/null
+          }
+
           result=success
           for entry in $OUTCOMES; do
             if [ "$RPC_TEST" != "all" ] && [ "${entry%%=*}" != "$RPC_TEST" ]; then continue; fi
             echo "$entry"
             case "${entry#*=}" in
               success) ;;
-              failure) result=failure ;;
-              *) if [ "$result" = "success" ]; then result=incomplete; fi ;;
+              failure)
+                if died_in_report "${entry%%=*}"; then
+                  echo "::warning::$CLIENT died during ${entry%%=*}, recorded in its report"
+                else
+                  result=failure
+                fi ;;
+              *)
+                if [ -n "$EXCLUDED_AT" ] && [ "$CLIENT" != "erigon" ] && [ "$JOB_STATUS" != "cancelled" ]; then
+                  echo "::warning::$CLIENT left out at the barrier before $EXCLUDED_AT, ${entry%%=*} did not run"
+                  printf '{"configuration":{"testingDaemon":"%s"},"excluded":true,"results":[]}\n' "$CLIENT" \
+                    > "$PAST_TEST_DIR/$CLIENT-${entry%%=*}-result.json"
+                elif [ "$result" = "success" ]; then
+                  result=incomplete
+                fi ;;
             esac
           done
           # A pattern is skipped after a failed sync too, so only the job status tells a cancellation apart
@@ -845,5 +877,6 @@ jobs:
       - name: Generate the comparison summary
         env:
           RESULTS_DIR: ${{ runner.temp }}/perf-results
+          CLIENTS: ${{ join(fromJSON(needs.setup.outputs.matrix).include.*.client, ',') }}
         run: |
-          python3 .github/workflows/scripts/compare_rpc_perf.py --results-dir "$RESULTS_DIR" | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 .github/workflows/scripts/compare_rpc_perf.py --results-dir "$RESULTS_DIR" --clients "$CLIENTS" | tee -a "$GITHUB_STEP_SUMMARY"

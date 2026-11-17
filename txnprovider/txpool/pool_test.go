@@ -19,7 +19,6 @@ package txpool
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -151,6 +150,7 @@ func newTestPool(t *testing.T, configs ...*chain.Config) (context.Context, *TxPo
 		WithFeeCalculator(nil),
 	)
 	require.NoError(t, err)
+	pool.started.Store(true)
 
 	return ctx, pool, poolDB, coreDB
 }
@@ -486,9 +486,7 @@ func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 		return nil
 	}))
 
-	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return pool.fromDB(ctx, poolTx)
-	}))
+	require.NoError(t, pool.fromDB(ctx))
 
 	validHash := validTxn.Txn.Hash()
 	invalidHash := invalidTxn.Txn.Hash()
@@ -496,8 +494,7 @@ func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 	require.NotContains(t, pool.byHash, string(invalidHash[:]))
 }
 
-// A restart reaches fromDB before any OnNewBlock sets the block gas limit.
-func TestFromDBRestoresPersistedTxnsBeforeAnyBlock(t *testing.T) {
+func TestFromDBRestoresPersistedTxnsAfterInitialReset(t *testing.T) {
 	ctx, pool, poolDB, coreDB := newTestPool(t)
 	sender := common.Address{1}
 	account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
@@ -511,9 +508,11 @@ func TestFromDBRestoresPersistedTxnsBeforeAnyBlock(t *testing.T) {
 		return tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded.Bytes()...))
 	}))
 
-	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return pool.fromDB(ctx, poolTx)
-	}))
+	reset := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	reset.StateVersionId = 1
+	reset.StateChangesIncomplete = true
+	require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, pool.fromDB(ctx))
 
 	require.Contains(t, pool.byHash, string(hash[:]))
 }
@@ -543,9 +542,7 @@ func TestFromDBDeletesRejectedRows(t *testing.T) {
 		return nil
 	}))
 
-	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return pool.fromDB(ctx, poolTx)
-	}))
+	require.NoError(t, pool.fromDB(ctx))
 	_, err := pool.flush(ctx)
 	require.NoError(t, err)
 
@@ -586,18 +583,16 @@ func TestFromDBSkipsUnderpricedBlobTxns(t *testing.T) {
 	underpriced, underpricedHash := blobTxn(1, blobFee/2)
 
 	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
-		if err := tx.Put(kv.PoolInfo, PoolPendingBlobFeeKey, binary.BigEndian.AppendUint64(nil, blobFee)); err != nil {
-			return err
-		}
 		if err := tx.Put(kv.PoolTransaction, pricedHash[:], priced); err != nil {
 			return err
 		}
 		return tx.Put(kv.PoolTransaction, underpricedHash[:], underpriced)
 	}))
 
-	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return pool.fromDB(ctx, poolTx)
-	}))
+	reset := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	reset.PendingBlobFeePerGas = blobFee
+	require.NoError(t, pool.OnNewBlock(ctx, reset, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	require.NoError(t, pool.fromDB(ctx))
 
 	require.Contains(t, pool.byHash, string(pricedHash[:]))
 	require.NotContains(t, pool.byHash, string(underpricedHash[:]))
@@ -616,9 +611,7 @@ func TestFromDBSkipsBlobTxnWithBadSidecar(t *testing.T) {
 		return tx.Put(kv.PoolTransaction, hash[:], append(sender[:], encoded.Bytes()...))
 	}))
 
-	require.NoError(t, poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return pool.fromDB(ctx, poolTx)
-	}))
+	require.NoError(t, pool.fromDB(ctx))
 
 	require.NotContains(t, pool.byHash, string(hash[:]))
 }
@@ -926,6 +919,7 @@ func TestNonceFromAddress(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
+	pool.started.Store(true)
 	require.NotNil(pool)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
@@ -1215,6 +1209,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Prague"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(t, err)
+	pool.started.Store(true)
 	require.NotNil(t, pool)
 
 	var stateVersionID uint64 = 0
@@ -1294,6 +1289,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
+	pool.started.Store(true)
 	require.NotNil(pool)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
@@ -1397,6 +1393,7 @@ func TestReverseNonces(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
+	pool.started.Store(true)
 	require.NotNil(pool)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(1_000_000)
@@ -1500,6 +1497,7 @@ func TestTxnPoke(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
+	pool.started.Store(true)
 	require.NotNil(pool)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
@@ -1771,6 +1769,7 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
+	pool.started.Store(true)
 	require.NotNil(pool)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
@@ -1916,6 +1915,7 @@ func TestAddLocalTxnsKeepsBatchOnSenderInfoError(t *testing.T) {
 
 	pool, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, cache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(t, err)
+	pool.started.Store(true)
 	pool.blockGasLimit.Store(30_000_000)
 
 	var badAddr [20]byte
@@ -1962,6 +1962,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
+	pool.started.Store(true)
 
 	require.NotNil(pool)
 	var stateVersionID uint64 = 0
@@ -2325,6 +2326,7 @@ func TestBlobSlots(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
+	pool.started.Store(true)
 	require.NotNil(pool)
 	var stateVersionID uint64 = 0
 
@@ -2415,6 +2417,7 @@ func TestOsakaProofShapeMismatchDiscardsCompletely(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
+	pool.started.Store(true)
 
 	// Fund one account
 	var addr [20]byte
@@ -2530,6 +2533,7 @@ func TestGetBlobs(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
+	pool.started.Store(true)
 	require.NotNil(pool)
 	pool.blockGasLimit.Store(30000000)
 	var stateVersionID uint64 = 0
@@ -2614,6 +2618,7 @@ func TestGasLimitChanged(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
+	pool.started.Store(true)
 	require.NotNil(pool)
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(200000)
@@ -2699,6 +2704,7 @@ func TestZombieQueuedEviction(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
+	pool.started.Store(true)
 	require.NotNil(pool)
 
 	pendingBaseFee := uint64(200_000)
@@ -2784,6 +2790,7 @@ func TestZombieQueuedEviction(t *testing.T) {
 		pool2, err := New(ctx, ch2, db2, coreDB2, cfg2, kvcache.New(kvcache.DefaultCoherentConfig),
 			chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 		require.NoError(err)
+		pool2.started.Store(true)
 
 		acc2 := accounts.Account{
 			Nonce:    baseNonce,
@@ -2858,6 +2865,7 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 	// LatestBatchCache — avoids coherence-version coupling.
 	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewLatestBatchCache(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	req.NoError(err)
+	pool.started.Store(true)
 	req.NotNil(pool)
 
 	var addr1 [20]byte
@@ -2998,6 +3006,7 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 	// node/eth/backend.go and the cache the production failure was observed on.
 	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewLatestBatchCache(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	req.NoError(err)
+	pool.started.Store(true)
 	req.NotNil(pool)
 
 	var addr1 [20]byte
@@ -3080,6 +3089,7 @@ func TestOnNewBlockRefreshesDepthMetrics(t *testing.T) {
 	cfg := txpoolcfg.DefaultConfig
 	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewLatestBatchCache(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	req.NoError(err)
+	pool.started.Store(true)
 	req.NotNil(pool)
 
 	var addr1 [20]byte
@@ -3295,6 +3305,7 @@ func TestBaseFeeRoundTripAnnouncesOnce(t *testing.T) {
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(t, err)
+	pool.started.Store(true)
 
 	var addr [20]byte
 	addr[0] = 1
@@ -3381,9 +3392,7 @@ func TestFromDBBlobsOutliveReadTx(t *testing.T) {
 	require.NoError(poolDB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Put(kv.PoolTransaction, slot.IDHash[:], append(sender[:], txnRlp...))
 	}))
-	require.NoError(poolDB.View(ctx, func(poolTx kv.Tx) error {
-		return pool.fromDB(ctx, poolTx)
-	}))
+	require.NoError(pool.fromDB(ctx))
 
 	bundles := pool.GetBlobs(blobHashes)
 	require.Len(bundles, len(blobHashes))

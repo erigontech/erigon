@@ -38,8 +38,6 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -49,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
@@ -58,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc/contracts"
@@ -444,11 +444,14 @@ func TestPoolProvideTxnsAmsterdamGasAdmission(t *testing.T) {
 }
 
 func TestPoolProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
-	stateChanges := remoteproto.NewMockKVClient(gomock.NewController(t))
-	stateChanges.EXPECT().StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, status.Error(codes.Unavailable, "no core node in this test")).AnyTimes()
-
 	poolCtx, stopPool := context.WithCancel(t.Context())
+	kvServer := remotedbserver.NewKvServer(poolCtx, nil, nil, nil, log.New())
+	kvServer.SetStateChangesSnapshot(func(context.Context) (*remoteproto.StateChangeBatch, error) {
+		return &remoteproto.StateChangeBatch{ChangeBatch: []*remoteproto.StateChange{{
+			BlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+		}}}, nil
+	})
+	stateChanges := direct.NewStateDiffClientDirect(kvServer)
 	publicPool, err := txpool.New(poolCtx, make(chan txpool.Announcements, 1),
 		mdbxtest.NewTestPoolDB(t), temporaltest.NewTestDB(t, datadir.New(t.TempDir())),
 		txpoolcfg.DefaultConfig, kvcache.New(kvcache.DefaultCoherentConfig), chain.AllProtocolChanges,
@@ -614,6 +617,29 @@ func TestPoolWithDecryptionKeysThatDoNotFollowTxnIndexOrder(t *testing.T) {
 	})
 }
 
+func TestPoolStartsBeforeKeyperSetManagerDeployment(t *testing.T) {
+	t.Parallel()
+	pt := PoolTest{t}
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		ksmAddr := common.HexToAddress(handle.config.KeyperSetManagerContractAddress)
+		handle.SimulateCallResult(ksmAddr, nil)
+		handle.contractBackend.EXPECT().CodeAt(gomock.Any(), ksmAddr, uint256.NewInt(0)).Return(nil, nil)
+		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), nil)
+		require.NoError(t, handle.SimulateStateChange(ctx, MockStateChange{
+			batch: &remoteproto.StateChangeBatch{StateChangesIncomplete: true, ChangeBatch: []*remoteproto.StateChange{{}}},
+		}))
+		synctest.Wait()
+		select {
+		case err := <-handle.poolResult:
+			t.Fatalf("Shutter stopped before contract deployment: %v", err)
+		default:
+		}
+
+		handle.DecryptTxns(ctx, t, params.TxGas)
+		require.Len(t, pool.AllDecryptedTxns(), 1)
+	})
+}
+
 type PoolTest struct {
 	*testing.T
 }
@@ -634,7 +660,7 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 		ctrl := gomock.NewController(t)
 		contractBackend := NewMockContractBackend(ctrl, logger)
 		stateChangesClient := NewMockStateChangesClient(ctrl, logger)
-		currentBlockNumReader := func(context.Context) (*uint64, error) { return nil, nil }
+		readCommittedState := func(context.Context) (shutter.BlockState, error) { return shutter.BlockState{}, nil }
 		slotCalculator := NewMockSlotCalculator(ctrl, config)
 		keySenderFactory := NewMockDecryptionKeysSourceFactory(logger)
 		pool := shutter.NewPool(
@@ -644,16 +670,17 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 			baseTxnProvider,
 			contractBackend,
 			stateChangesClient,
-			currentBlockNumReader,
+			readCommittedState,
 			shutter.WithSlotCalculator(slotCalculator),
 			shutter.WithDecryptionKeysSourceFactory(keySenderFactory.NewDecryptionKeysSource),
 		)
 
 		contractBackend.PrepareMocks()
 		slotCalculator.PrepareMocks(t)
-		eg := errgroup.Group{}
-		eg.Go(func() error { return pool.Run(ctx) })
+		poolResult := make(chan error, 1)
+		go func() { poolResult <- pool.Run(ctx) }()
 		handle := PoolTestHandle{
+			poolResult:         poolResult,
 			baseTxnProvider:    baseTxnProvider,
 			chainConfig:        &chainConfig,
 			config:             config,
@@ -669,12 +696,12 @@ func (t PoolTest) Run(testCase func(ctx context.Context, t *testing.T, pool *shu
 		synctest.Wait()
 		testCase(ctx, t, pool, handle)
 		cancel()
-		err := eg.Wait()
-		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, <-poolResult, context.Canceled)
 	})
 }
 
 type PoolTestHandle struct {
+	poolResult         <-chan error
 	baseTxnProvider    *TestTxnProvider
 	chainConfig        *chain.Config
 	config             shuttercfg.Config

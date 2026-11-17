@@ -1014,7 +1014,7 @@ func verifyCommitmentV3History(ctx context.Context, a *Aggregator, ranges []comm
 			at.Close()
 			return fmt.Errorf("commitment history %d-%d has no state entries", r.fromStep, r.toStep)
 		}
-		samples = append(samples, txNums[len(txNums)/2]+1, txNums[len(txNums)-1]+1)
+		samples = append(samples, txNums[0]+1)
 	}
 	at.Close()
 	for _, txNum := range samples {

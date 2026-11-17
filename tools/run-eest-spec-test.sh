@@ -129,6 +129,7 @@ IFS=$'\t' read -r default_workers default_max commitment_parallel commitment_v3 
 # commitment mode is pinned to the manifest, independent of whatever
 # statecfg.ExperimentalParallelCommitment defaults to at runtime.
 export ERIGON_COMMITMENT_PARALLEL="$commitment_parallel"
+unset COMMITMENT_V3
 export ERIGON_COMMITMENT_V3="$commitment_v3"
 
 # Strip "-parallel" / "-sequential" suffix for case-arm routing — both variants

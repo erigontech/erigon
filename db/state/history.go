@@ -1068,6 +1068,32 @@ func (ht *HistoryRoTx) pagedGetter(i, pageSize int) *seg.PagedReader {
 	return ht.pagedGetters[i]
 }
 
+// contiguousEnd is the end of the files before the first gap: history past a gap is not readable.
+func contiguousEnd(files visibleFiles) uint64 {
+	var end uint64
+	for i, f := range files {
+		if i > 0 && f.startTxNum != end {
+			break
+		}
+		end = f.endTxNum
+	}
+	return end
+}
+
+func (ht *HistoryRoTx) checkFilesDBGap(tx kv.Tx) error {
+	if ht.h.HistoryDisabled || ht.h.SnapshotsDisabled {
+		return nil
+	}
+	prg, err := GetPruneValProgress(tx, []byte(ht.h.ValuesTable))
+	if err != nil {
+		return err
+	}
+	if end := min(contiguousEnd(ht.files), contiguousEnd(ht.iit.files)); prg.TxTo > end {
+		return fmt.Errorf("gap between snapshot files and DB for history %s: readable files end at txNum %d but the DB was pruned up to %d; if only accessor files are missing, run `erigon snapshots index --datadir <datadir>` to rebuild them, otherwise run `erigon snapshots reset --datadir <datadir>` to reset and rebuild the datadir", ht.h.FilenameBase, end, prg.TxTo)
+	}
+	return nil
+}
+
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
 	minIdxTx, _ := ht.iit.ii.minTxNumInDB(tx)
 	maxIdxTx := ht.iit.ii.maxTxNumInDB(tx)

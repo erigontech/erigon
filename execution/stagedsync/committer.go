@@ -94,8 +94,7 @@ type commitmentCalculator struct {
 	// drains synchronously, so by the next rotation the handed-off buffer is idle.
 	spare *commitment.Updates
 
-	feed        feedBuffer
-	parentReads bool
+	feed feedBuffer
 
 	branchPrefetch *branchPrefetcher
 
@@ -138,7 +137,6 @@ type commitmentCalculator struct {
 	readAtNum    uint64
 	readAtHash   common.Hash
 	handoff      *commitTarget
-	handoffTrace bool
 	handoffMulti bool
 
 	// lastBlockResult is the most recent block boundary, so compute
@@ -842,7 +840,7 @@ func (cc *commitmentCalculator) noteVerified(t commitTarget) {
 	if cc.handoff != nil && cc.handoff.blockHash != t.blockHash {
 		cc.handoffMulti = true
 	}
-	cc.handoff, cc.handoffTrace = &t, cc.parentReads
+	cc.handoff = &t
 }
 
 func (cc *commitmentCalculator) parentRecords() *commitmentdb.ParentRecords {
@@ -851,7 +849,7 @@ func (cc *commitmentCalculator) parentRecords() *commitmentdb.ParentRecords {
 		return nil
 	}
 	return &commitmentdb.ParentRecords{
-		BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash, TraceCollapses: cc.handoffTrace, Get: p.get, State: h.parent,
+		BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash, Get: p.get, State: h.parent,
 	}
 }
 
