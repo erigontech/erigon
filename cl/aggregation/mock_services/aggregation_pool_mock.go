@@ -13,6 +13,7 @@ import (
 	reflect "reflect"
 
 	solid "github.com/erigontech/erigon/cl/cltypes/solid"
+	bls "github.com/erigontech/erigon/cl/utils/bls"
 	common "github.com/erigontech/erigon/common"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -111,6 +112,44 @@ func (c *MockAggregationPoolAddAttestationCall) Do(f func(*solid.Attestation) er
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockAggregationPoolAddAttestationCall) DoAndReturn(f func(*solid.Attestation) error) *MockAggregationPoolAddAttestationCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// AddVerifiedAttestation mocks base method.
+func (m *MockAggregationPool) AddVerifiedAttestation(att *solid.Attestation, sig *bls.Signature) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddVerifiedAttestation", att, sig)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddVerifiedAttestation indicates an expected call of AddVerifiedAttestation.
+func (mr *MockAggregationPoolMockRecorder) AddVerifiedAttestation(att, sig any) *MockAggregationPoolAddVerifiedAttestationCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddVerifiedAttestation", reflect.TypeOf((*MockAggregationPool)(nil).AddVerifiedAttestation), att, sig)
+	return &MockAggregationPoolAddVerifiedAttestationCall{Call: call}
+}
+
+// MockAggregationPoolAddVerifiedAttestationCall wrap *gomock.Call
+type MockAggregationPoolAddVerifiedAttestationCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockAggregationPoolAddVerifiedAttestationCall) Return(arg0 error) *MockAggregationPoolAddVerifiedAttestationCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockAggregationPoolAddVerifiedAttestationCall) Do(f func(*solid.Attestation, *bls.Signature) error) *MockAggregationPoolAddVerifiedAttestationCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockAggregationPoolAddVerifiedAttestationCall) DoAndReturn(f func(*solid.Attestation, *bls.Signature) error) *MockAggregationPoolAddVerifiedAttestationCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
