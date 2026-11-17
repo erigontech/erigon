@@ -55,6 +55,7 @@ type BlobStore struct {
 func NewBlobStore(db kv.RwDB, fs afero.Fs) BlobStorage {
 	bs := &BlobStore{db: db}
 	bs.bucketStore.init(fs)
+	bs.dropRows = deleteRootRows(db, kv.BlockRootToKzgCommitments)
 	bs.slotLocks.initLocks()
 	return bs
 }
@@ -217,6 +218,22 @@ func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockR
 		firstErr = err
 	}
 	return firstErr
+}
+
+// BlobsStored reports whether the store holds every sidecar of a block. The count row alone is
+// not enough: pruning deletes the sidecar files and keeps the row.
+func BlobsStored(ctx context.Context, storage BlobStorage, slot uint64, root common.Hash, commitments int) (bool, error) {
+	count, err := storage.KzgCommitmentsCount(ctx, root)
+	if err != nil || count != uint32(commitments) {
+		return false, err
+	}
+	for idx := range commitments {
+		present, err := storage.BlobSidecarExists(ctx, slot, root, uint64(idx))
+		if err != nil || !present {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 type sidecarsPayload struct {

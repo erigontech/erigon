@@ -44,7 +44,7 @@ func TestUpdateForkChoiceNotifiesSyncStateWhenBehind(t *testing.T) {
 	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
 
 	tip := chainPack.Blocks[chainLen-1].Header()
-	vr, err := m.ValidateChain(ctx, tip)
+	vr, err := m.ValidateChain(ctx, chainPack.Blocks[chainLen-1])
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus)
 

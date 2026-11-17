@@ -118,9 +118,11 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 	switch ft {
 	case rpchelper.FilterTypeHeads:
 		if blocks, ok := api.filters.ReadPendingBlocks(rpchelper.HeadsSubID(cutIndex)); ok {
-			for _, v := range blocks {
-				stub = append(stub, v.Hash())
+			hashes := make([]any, len(blocks))
+			for i, v := range blocks {
+				hashes[i] = v.Hash()
 			}
+			return hashes, nil
 		}
 	case rpchelper.FilterTypePendingTxs:
 		if txs, ok := api.filters.ReadPendingTxs(rpchelper.PendingTxsSubID(cutIndex)); ok {
@@ -132,9 +134,11 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 		}
 	case rpchelper.FilterTypeLogs:
 		if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
-			for _, v := range logs {
-				stub = append(stub, v)
+			entries := make([]any, len(logs))
+			for i, v := range logs {
+				entries[i] = v
 			}
+			return entries, nil
 		}
 	}
 	return stub, nil

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -321,7 +322,7 @@ func (s *getPayloadStubModule) InsertBlocks(_ context.Context, _ []*types.Block)
 	panic("not implemented")
 }
 
-func (s *getPayloadStubModule) ValidateChain(_ context.Context, _ common.Hash, _ uint64) (execmodule.ValidationResult, error) {
+func (s *getPayloadStubModule) ValidateChain(_ context.Context, _ *types.Block) (execmodule.ValidationResult, error) {
 	panic("not implemented")
 }
 
@@ -337,6 +338,10 @@ func (s *getPayloadStubModule) AssembleBlock(_ context.Context, _ *builder.Param
 	panic("not implemented")
 }
 
+func (s *getPayloadStubModule) ValidateChainAndView(context.Context, *types.Block, time.Duration, execmodule.BlockStateView) (execmodule.ValidationResult, func() error, error) {
+	panic("not implemented")
+}
+
 func (s *getPayloadStubModule) InclusionList(_ context.Context) (types.Transactions, error) {
 	panic("not implemented")
 }
@@ -346,6 +351,10 @@ func (s *getPayloadStubModule) CurrentHeader(_ context.Context) (*types.Header, 
 }
 
 func (s *getPayloadStubModule) GetHeader(_ context.Context, _ *common.Hash, _ *uint64) (*types.Header, error) {
+	panic("not implemented")
+}
+
+func (s *getPayloadStubModule) GetHeadersByRange(_ context.Context, _, _ uint64) ([]*types.Header, error) {
 	panic("not implemented")
 }
 

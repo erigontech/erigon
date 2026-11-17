@@ -130,7 +130,7 @@ func (a *aggregateAndProofServiceImpl) DecodeGossipMessage(pid peer.ID, data []b
 		Receiver:                &sentinelproto.Peer{Pid: pid.String()},
 		SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
 	}
-	if err := obj.SignedAggregateAndProof.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj.SignedAggregateAndProof, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil

@@ -64,6 +64,7 @@ type slowRangeServer struct {
 	held        func(start uint64) bool
 	badPeer     string
 	badStart    uint64
+	emptyStart  uint64
 	sent        atomic.Int32
 	inFlight    atomic.Int32
 	maxInFlight atomic.Int32
@@ -96,6 +97,9 @@ func (s *slowRangeServer) requestBlocksByRange(ctx context.Context, start, count
 	s.mu.Unlock()
 	if firstCall && s.badPeer != "" && start == s.badStart {
 		return nil, s.badPeer, errors.New("bad response")
+	}
+	if firstCall && s.emptyStart != 0 && start == s.emptyStart {
+		return nil, "peer", nil
 	}
 	served := s.blocks
 	if firstCall && start < s.forkBelow {
@@ -268,34 +272,35 @@ func TestBackwardBeaconDownloaderKeepsPrefetchesWhenProcessingStopsAboveThem(t *
 }
 
 func TestBackwardBeaconDownloaderCancelsDroppedPrefetches(t *testing.T) {
-	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
-	server := &slowRangeServer{blocks: blocks, delay: 20 * time.Millisecond, held: func(start uint64) bool { return start > 0 && start < 576 }, calls: map[uint64]int{}}
-	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
-	downloader.SetOnNewBlock(func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
-		return false, nil
-	})
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+		server := &slowRangeServer{blocks: blocks, delay: 20 * time.Millisecond, held: func(start uint64) bool { return start > 0 && start < 576 }, calls: map[uint64]int{}}
+		downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+		downloader.SetOnNewBlock(func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+			return false, nil
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 
-	require.NoError(t, downloader.RequestMore(ctx))
-	require.NotEmpty(t, downloader.prefetched)
-	var dropped []uint64
-	for _, r := range downloader.prefetched {
-		dropped = append(dropped, r.lo)
-	}
-	slices.Sort(dropped)
-	root, err := blocks[63].Block.HashSSZ()
-	require.NoError(t, err)
-	downloader.SetSlotToDownload(63)
-	downloader.SetExpectedRoot(root)
+		require.NoError(t, downloader.RequestMore(ctx))
+		require.NotEmpty(t, downloader.prefetched)
+		var dropped []uint64
+		for _, r := range downloader.prefetched {
+			dropped = append(dropped, r.lo)
+		}
+		slices.Sort(dropped)
+		root, err := blocks[63].Block.HashSSZ()
+		require.NoError(t, err)
+		downloader.SetSlotToDownload(63)
+		downloader.SetExpectedRoot(root)
 
-	require.NoError(t, downloader.RequestMore(ctx))
-	require.True(t, downloader.Finished())
-	require.Eventually(t, func() bool {
+		require.NoError(t, downloader.RequestMore(ctx))
+		require.True(t, downloader.Finished())
+		synctest.Wait()
 		server.mu.Lock()
 		defer server.mu.Unlock()
-		return slices.Equal(dropped, slices.Sorted(slices.Values(server.cancelled)))
-	}, 5*time.Second, time.Millisecond)
+		require.Equal(t, dropped, slices.Sorted(slices.Values(server.cancelled)))
+	})
 }
 
 func TestBackwardBeaconDownloaderCancelsPrefetchesWhenFinished(t *testing.T) {
@@ -517,4 +522,47 @@ func TestBackwardBeaconDownloaderFetchesParentByRootBelowEmptyRange(t *testing.T
 	server := &slowRangeServer{blocks: blocks, delay: 5 * time.Millisecond, calls: map[uint64]int{}}
 
 	require.Equal(t, descending(blocks), walkBackwardFromTop(t, blocks, server, ""))
+}
+
+func TestBackwardBeaconDownloaderRetriesFailedPrefetch(t *testing.T) {
+	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+	server := &slowRangeServer{blocks: blocks, badPeer: "bad", badStart: 512, calls: map[uint64]int{}}
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+
+	downloader.prefetchRange(t.Context(), 576)
+	require.Len(t, downloader.prefetched, 1)
+	require.Equal(t, uint64(512), downloader.prefetched[0].lo)
+	require.Len(t, <-downloader.prefetched[0].blocks, 64)
+}
+
+func TestBackwardBeaconDownloaderRetriesEmptyPrefetch(t *testing.T) {
+	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+	server := &slowRangeServer{blocks: blocks, emptyStart: 512, calls: map[uint64]int{}}
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+
+	downloader.prefetchRange(t.Context(), 576)
+	require.Len(t, <-downloader.prefetched[0].blocks, 64)
+}
+
+func TestBackwardBeaconDownloaderPrefetchAttemptHasDeadline(t *testing.T) {
+	previousAttemptTimeout := prefetchAttemptTimeout
+	prefetchAttemptTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { prefetchAttemptTimeout = previousAttemptTimeout })
+
+	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+	var heldCalls atomic.Int32
+	server := &slowRangeServer{
+		blocks: blocks,
+		held:   func(start uint64) bool { return start == 512 && heldCalls.Add(1) == 1 },
+		calls:  map[uint64]int{},
+	}
+	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+
+	downloader.prefetchRange(t.Context(), 576)
+	select {
+	case got := <-downloader.prefetched[0].blocks:
+		require.Len(t, got, 64)
+	case <-time.After(2 * time.Second):
+		t.Fatal("prefetch attempt held by a silent peer outlived its deadline")
+	}
 }

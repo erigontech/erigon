@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -63,8 +64,9 @@ type InvertedIndex struct {
 	salt    *atomic.Pointer[uint32]
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
-	stepSize          uint64 // amount of transactions inside single aggregation step
-	stepsInFrozenFile uint64 // starting from this number of steps, the file is considered frozen
+	lastInDB          atomic.Pointer[lastTxNumInView] // lastTxNumInDB of the latest read-only view
+	stepSize          uint64                          // amount of transactions inside single aggregation step
+	stepsInFrozenFile uint64                          // starting from this number of steps, the file is considered frozen
 
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
@@ -471,6 +473,12 @@ func (w *InvertedIndexBufferedWriter) close() {
 	}
 }
 
+func (w *InvertedIndexBufferedWriter) detach() *InvertedIndexBufferedWriter {
+	detached := *w
+	w.index, w.indexKeys = nil, nil
+	return &detached
+}
+
 func (iit *InvertedIndexRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *InvertedIndexBufferedWriter {
 	if iit.ii.stepSize != iit.stepSize {
 		panic(fmt.Sprintf("assert: %d %d", iit.ii.stepSize, iit.stepSize))
@@ -493,17 +501,6 @@ func (iit *InvertedIndexRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool)
 		indexTable:        iit.ii.ValuesTable,
 	}
 	return w
-}
-
-func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
-	iv := ii.calcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
-	return ii.beginFilesRo(iv)
-}
-
-func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
-	iit := &InvertedIndexRoTx{}
-	ii.initFilesRo(iit, iv)
-	return iit
 }
 
 // initFilesRo fills a zero iit field by field: assigning a whole literal would zero it again and
@@ -835,12 +832,6 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 
 	//println("in ii", iit.ii.FilenameBase, stat.KeyProgress.String(), stat.ValueProgress.String(), stat.TxTo, untilTx, min)
 	return min == 0 || min < iit.files.EndTxNum() || pruneInProgress || untilTx > stat.TxTo
-}
-
-func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
-	maxStepInFiles := iit.files.EndTxNum() / iit.stepSize
-	maxStepInDB := iit.ii.maxTxNumInDB(dbtx) / iit.stepSize
-	return maxStepInFiles < maxStepInDB
 }
 
 type InvertedIndexPruneStat struct {
@@ -1245,7 +1236,10 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 }
 
 func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Decompressor, ps *background.ProgressSet) error {
-	idxPath := ii.efAccessorNewFilePath(fromStep, toStep)
+	return ii.buildMapAccessorAt(ctx, ii.efAccessorNewFilePath(fromStep, toStep), data, ps)
+}
+
+func (ii *InvertedIndex) buildMapAccessorAt(ctx context.Context, idxPath string, data *seg.Decompressor, ps *background.ProgressSet) error {
 	versionOfRs := version.DataStructureVersion(0)
 	if !ii.FileVersion.AccessorEFI.Current.Eq(version.V1_0) { // v1.0 files predate FuseFilter; dataStructureVersion>=1 is incompatible with them
 		versionOfRs = recsplit.ExistenceFilterVersion
@@ -1357,6 +1351,25 @@ func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) (uint64, error) {
 }
 
 func (ii *InvertedIndex) lastTxNumInDB(tx kv.Tx) (uint64, bool) {
+	// Read-only MDBX txs of one snapshot share its ID, so they share this answer.
+	if ro, ok := tx.(*mdbx.MdbxTx); ok && ro.IsRo() {
+		id := ro.ViewID()
+		if last := ii.lastInDB.Load(); last != nil && last.viewID == id {
+			return last.txNum, last.ok
+		}
+		txNum, found := ii.readLastTxNumInDB(tx)
+		ii.lastInDB.Store(&lastTxNumInView{viewID: id, txNum: txNum, ok: found})
+		return txNum, found
+	}
+	return ii.readLastTxNumInDB(tx)
+}
+
+type lastTxNumInView struct {
+	viewID, txNum uint64
+	ok            bool
+}
+
+func (ii *InvertedIndex) readLastTxNumInDB(tx kv.Tx) (uint64, bool) {
 	lst, _ := kv.LastKey(tx, ii.KeysTable)
 	if len(lst) == 0 {
 		return 0, false

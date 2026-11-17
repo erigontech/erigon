@@ -18,28 +18,32 @@ package beaconevents
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	ethevent "github.com/erigontech/erigon/common/event"
 	"github.com/stretchr/testify/require"
 )
 
 func TestEmitterSet(t *testing.T) {
-	emitter := NewEventEmitter()
-	done := make(chan struct{})
-	go func() {
-		ch := make(chan *EventStream, 10)
-		t.Logf("Subscribing to emitter")
-		sub := emitter.Operation().Subscribe(ch)
-		defer sub.Unsubscribe()
-		t.Logf("Subscribed to emitter")
-		event := <-ch
-		t.Logf("Received event: %v", event)
-		close(done)
-	}()
-	time.Sleep(100 * time.Millisecond)
-	emitter.Operation().SendAttestation(&AttestationData{})
-	<-done
+	synctest.Test(t, func(t *testing.T) {
+		emitter := NewEventEmitter()
+		done := make(chan struct{})
+		go func() {
+			ch := make(chan *EventStream, 10)
+			t.Logf("Subscribing to emitter")
+			sub := emitter.Operation().Subscribe(ch)
+			defer sub.Unsubscribe()
+			t.Logf("Subscribed to emitter")
+			event := <-ch
+			t.Logf("Received event: %v", event)
+			close(done)
+		}()
+		synctest.Wait()
+		emitter.Operation().SendAttestation(&AttestationData{})
+		<-done
+	})
 }
 
 func TestPayloadAttributesSubscriberTracking(t *testing.T) {
@@ -80,4 +84,59 @@ func TestNotifyDataColumnStoredIsNilSafe(t *testing.T) {
 	var emitter *EventEmitter
 	require.Nil(t, emitter.DataColumnStored())
 	emitter.NotifyDataColumnStored(common.Hash{1})
+}
+
+// head, head_v2, execution_payload and execution_payload_available report a dropped event only on their own feeds, to
+// subscribers of that topic. The state and operation feeds, which carry every topic, drop them silently: their
+// subscribers may not have asked for them.
+func TestEventsReportAFullSubscriberOnlyOnTheirOwnFeed(t *testing.T) {
+	state, operation := newStateFeed(), newOpFeed()
+	for name, tc := range map[string]struct {
+		subscribe    func(chan *EventStream) ethevent.Subscription
+		subscribeAll func(chan *EventStream) ethevent.Subscription
+		send         func() int
+	}{
+		"head": {
+			subscribe:    state.SubscribeHead,
+			subscribeAll: state.Subscribe,
+			send:         func() int { return state.TrySendHead(&HeadData{}) },
+		},
+		"head_v2": {
+			subscribe:    state.SubscribeHeadV2,
+			subscribeAll: state.Subscribe,
+			send:         func() int { return state.SendHeadV2(&HeadV2Data{}) },
+		},
+		"execution_payload": {
+			subscribe:    operation.SubscribeExecutionPayload,
+			subscribeAll: operation.Subscribe,
+			send:         func() int { return operation.SendExecutionPayload(&ExecutionPayloadData{}) },
+		},
+		"execution_payload_available": {
+			subscribe:    operation.SubscribeExecutionPayloadAvailable,
+			subscribeAll: operation.Subscribe,
+			send:         func() int { return operation.SendExecutionPayloadAvailable(&ExecutionPayloadAvailableData{}) },
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			topic := make(chan *EventStream)
+			topicSub := tc.subscribe(topic)
+			defer topicSub.Unsubscribe()
+			all := make(chan *EventStream)
+			allSub := tc.subscribeAll(all)
+			defer allSub.Unsubscribe()
+
+			require.Zero(t, tc.send())
+			select {
+			case err := <-topicSub.Err():
+				require.ErrorIs(t, err, ethevent.ErrSubscriberLagged)
+			default:
+				t.Fatalf("%s event dropped without telling its subscriber", name)
+			}
+			select {
+			case err := <-allSub.Err():
+				t.Fatalf("subscriber of every topic told about a %s event it may not want: %v", name, err)
+			default:
+			}
+		})
+	}
 }

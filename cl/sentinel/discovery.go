@@ -17,6 +17,7 @@
 package sentinel
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -79,7 +80,7 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 	}
 
 	// Create a filter that matches any of our target subnets
-	iterator := s.listener.RandomNodes()
+	iterator := s.nodesOnOurFork(s.listener.RandomNodes())
 	filteredIterator := enode.Filter(iterator, func(node *enode.Node) bool {
 		var peerSubnets bitfield.Bitvector64
 		if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
@@ -103,6 +104,8 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 
 	ctx, cancel := context.WithTimeout(s.ctx, subnetSearchTimeout)
 	defer cancel()
+	// The filter skips non-matching nodes inside Next, so a walk would outlive the timeout unless it is closed.
+	defer context.AfterFunc(ctx, filteredIterator.Close)()
 
 	checked := 0
 	maxChecks := 2000 // Higher limit since we're searching for multiple subnets
@@ -117,18 +120,8 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 		return true
 	}
 
-	for !allSatisfied() && checked < maxChecks {
-		select {
-		case <-ctx.Done():
-			log.Debug("[Sentinel] Subnet peer search timeout", "checked", checked)
-			return
-		default:
-		}
-
-		if !filteredIterator.Next() {
-			// Iterator exhausted
-			break
-		}
+	// The walk ends when the iterator is exhausted or when the context ends, which closes the iterator.
+	for !allSatisfied() && checked < maxChecks && filteredIterator.Next() {
 		checked++
 		node := filteredIterator.Node()
 
@@ -196,7 +189,26 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 			satisfied++
 		}
 	}
-	log.Debug("[Sentinel] Subnet peer search completed", "nodesChecked", checked, "subnetsReachedMinPeers", satisfied, "subnetsSearched", len(subnets), "peersFound", totalFound)
+	// ctxErr tells a search that ran out of time or was cancelled from one whose walk ended on its own.
+	log.Debug("[Sentinel] Subnet peer search ended", "nodesChecked", checked, "subnetsReachedMinPeers", satisfied, "subnetsSearched", len(subnets), "peersFound", totalFound, "ctxErr", ctx.Err())
+}
+
+// nodesOnOurFork passes on only the discovered nodes that advertise our current fork digest; every dial path takes
+// discovered nodes through it.
+func (s *Sentinel) nodesOnOurFork(it enode.Iterator) enode.Iterator {
+	return enode.Filter(it, s.onOurFork)
+}
+
+// onOurFork reports whether a discovered node advertises our current fork digest in its ENR. Discovery is shared by
+// every network, and a node without it, such as one of another network, of another fork or an execution layer node,
+// fails the status handshake after the dial.
+func (s *Sentinel) onOurFork(node *enode.Node) bool {
+	var forkID []byte
+	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.Eth2key, &forkID)); err != nil || len(forkID) < 4 {
+		return false
+	}
+	digest, err := s.ethClock.CurrentForkDigest()
+	return err == nil && bytes.Equal(forkID[:4], digest[:])
 }
 
 // proactiveSubnetPeerSearch is a goroutine that monitors subnet coverage
@@ -286,14 +298,6 @@ func coversUnderservedSubnet(peerSubnets bitfield.Bitvector64, coverage *[attest
 	return false
 }
 
-// peerSubnetInfo holds information about a peer's subnet coverage for pruning decisions
-type peerSubnetInfo struct {
-	pid              peer.ID
-	subnetsCount     int   // Total subnets this peer covers (from GossipSub)
-	criticalSubnets  []int // Subnets where this peer is the only provider
-	redundantSubnets []int // Subnets where this peer is one of many
-}
-
 // getSubnetCoverageWithPeers returns subnet coverage and which peers cover each subnet
 // Uses GossipSub's actual topic subscriptions (more accurate than ENR-based counting)
 func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCount]int, subnetToPeers [attestationSubnetCount][]peer.ID) {
@@ -323,120 +327,115 @@ func (s *Sentinel) closePeer(pid peer.ID) {
 	}
 }
 
-// pruneExcessPeers disconnects excess peers while ensuring no subnet becomes empty
-func (s *Sentinel) pruneExcessPeers() {
-	peerCount := len(s.p2p.Host().Network().Peers())
-	targetPeerCount := int(s.cfg.MaxPeerCount)
+type pruneCandidate struct {
+	pid     peer.ID
+	inbound bool
+	opened  time.Time
+	subnets []int
+}
 
-	// Only prune if we're significantly over the limit (10% buffer)
-	pruneThreshold := targetPeerCount + targetPeerCount/10
-	if peerCount <= pruneThreshold {
-		return
+// peerCountToPrune gives the inbound trigger the same 10% buffer as the total trigger, so
+// it tolerates peers admitted through the underserved-subnet exception in the same way.
+func peerCountToPrune(counts peerCounts, maxPeers int) int {
+	buffer := maxPeers / 10
+	toRemove := 0
+	if totalExcess := counts.total() - maxPeers; totalExcess > buffer {
+		toRemove = totalExcess
+	}
+	if inboundExcess := counts.inbound - (maxPeers - outboundReserve(maxPeers)); inboundExcess > buffer {
+		toRemove = max(toRemove, inboundExcess)
+	}
+	return toRemove
+}
+
+func selectPeersToPrune(candidates []pruneCandidate, coverage [attestationSubnetCount]int, toRemove, outboundReserve int) []peer.ID {
+	slices.SortFunc(candidates, func(a, b pruneCandidate) int {
+		if bySubnets := cmp.Compare(len(a.subnets), len(b.subnets)); bySubnets != 0 {
+			return bySubnets
+		}
+		if a.inbound != b.inbound {
+			if a.inbound {
+				return -1
+			}
+			return 1
+		}
+		return b.opened.Compare(a.opened)
+	})
+
+	outboundCount := 0
+	for _, candidate := range candidates {
+		if !candidate.inbound {
+			outboundCount++
+		}
 	}
 
-	peersToRemove := peerCount - targetPeerCount
-	log.Info("[Sentinel] Pruning excess peers", "current", peerCount, "target", targetPeerCount, "toRemove", peersToRemove)
+	selected := make([]peer.ID, 0, min(toRemove, len(candidates)))
+	for _, candidate := range candidates {
+		if len(selected) == toRemove {
+			break
+		}
+		if !candidate.inbound && outboundCount <= outboundReserve {
+			continue
+		}
+		if slices.ContainsFunc(candidate.subnets, func(subnet int) bool { return coverage[subnet] <= 1 }) {
+			continue
+		}
+		selected = append(selected, candidate.pid)
+		if !candidate.inbound {
+			outboundCount--
+		}
+		for _, subnet := range candidate.subnets {
+			coverage[subnet]--
+		}
+	}
+	return selected
+}
 
-	// Get detailed subnet coverage
-	coverage, subnetToPeers := s.getSubnetCoverageWithPeers()
-
-	// Build peer info for all peers based on actual GossipSub subscriptions
+// pruneExcessPeers disconnects excess peers while ensuring no subnet becomes empty
+func (s *Sentinel) pruneExcessPeers() {
 	peers := s.p2p.Host().Network().Peers()
-	peerInfos := make([]peerSubnetInfo, 0, len(peers))
+	candidates := make([]pruneCandidate, 0, len(peers))
+	var counts peerCounts
+	for _, pid := range peers {
+		conns := s.p2p.Host().Network().ConnsToPeer(pid)
+		if len(conns) == 0 {
+			continue
+		}
+		candidate := pruneCandidate{pid: pid, inbound: peerIsInbound(conns), opened: conns[0].Stat().Opened}
+		if candidate.inbound {
+			counts.inbound++
+		} else {
+			counts.outbound++
+		}
+		candidates = append(candidates, candidate)
+	}
 
-	// Build a map of peer -> subnets they're subscribed to (from GossipSub)
+	maxPeers := int(s.cfg.MaxPeerCount)
+	toRemove := peerCountToPrune(counts, maxPeers)
+	if toRemove == 0 {
+		return
+	}
+	log.Debug("[Sentinel] Pruning excess peers", "current", counts.total(), "inbound", counts.inbound, "outbound", counts.outbound, "toRemove", toRemove)
+
+	coverage, subnetToPeers := s.getSubnetCoverageWithPeers()
 	peerToSubnets := make(map[peer.ID][]int)
 	for i := range attestationSubnetCount {
 		for _, pid := range subnetToPeers[i] {
 			peerToSubnets[pid] = append(peerToSubnets[pid], i)
 		}
 	}
-
-	for _, pid := range peers {
-		subnets := peerToSubnets[pid]
-		info := peerSubnetInfo{
-			pid:          pid,
-			subnetsCount: len(subnets),
-		}
-
-		// Check each subnet this peer is actually subscribed to (via GossipSub)
-		for _, subnetIdx := range subnets {
-			if coverage[subnetIdx] == 1 {
-				// This peer is the ONLY one covering this subnet - critical!
-				info.criticalSubnets = append(info.criticalSubnets, subnetIdx)
-			} else {
-				info.redundantSubnets = append(info.redundantSubnets, subnetIdx)
-			}
-		}
-
-		peerInfos = append(peerInfos, info)
+	for i := range candidates {
+		candidates[i].subnets = peerToSubnets[candidates[i].pid]
 	}
 
-	// Sort peers by "removability" (most removable first)
-	// Priority: peers with no critical subnets, then by fewest covered subnets
-	slices.SortFunc(peerInfos, func(a, b peerSubnetInfo) int {
-		aCritical := len(a.criticalSubnets) > 0
-		bCritical := len(b.criticalSubnets) > 0
-		if aCritical != bCritical {
-			if !aCritical {
-				return -1
-			}
-			return 1
-		}
-		return cmp.Compare(a.subnetsCount, b.subnetsCount)
-	})
-
-	// Remove peers, but re-check coverage after each removal
-	removed := 0
-	for _, info := range peerInfos {
-		if removed >= peersToRemove {
-			break
-		}
-
-		// Skip critical peers
-		if len(info.criticalSubnets) > 0 {
-			log.Trace("[Sentinel] Skipping critical peer", "peer", info.pid, "criticalSubnets", info.criticalSubnets)
-			continue
-		}
-
-		// Before removing, verify this won't cause any subnet to become empty
-		safeToRemove := true
-		for _, subnetIdx := range info.redundantSubnets {
-			// Check current coverage (may have changed from previous removals)
-			currentPeers := subnetToPeers[subnetIdx]
-			if len(currentPeers) <= 1 {
-				safeToRemove = false
-				break
-			}
-		}
-
-		if !safeToRemove {
-			log.Trace("[Sentinel] Skipping peer to prevent empty subnet", "peer", info.pid)
-			continue
-		}
-
-		// Safe to remove - update coverage tracking
-		for _, subnetIdx := range info.redundantSubnets {
-			// Remove this peer from the subnet's peer list
-			newPeers := make([]peer.ID, 0, len(subnetToPeers[subnetIdx])-1)
-			for _, pid := range subnetToPeers[subnetIdx] {
-				if pid != info.pid {
-					newPeers = append(newPeers, pid)
-				}
-			}
-			subnetToPeers[subnetIdx] = newPeers
-			coverage[subnetIdx]--
-		}
-
-		// Disconnect the peer
-		s.closePeer(info.pid)
-		s.p2p.Host().Peerstore().RemovePeer(info.pid)
-		removed++
-
-		log.Trace("[Sentinel] Pruned excess peer", "peer", info.pid, "subnetsCount", info.subnetsCount)
+	selected := selectPeersToPrune(candidates, coverage, toRemove, outboundReserve(maxPeers))
+	for _, pid := range selected {
+		s.closePeer(pid)
+		s.p2p.Host().Peerstore().RemovePeer(pid)
+		log.Trace("[Sentinel] Pruned excess peer", "peer", pid)
 	}
 
-	log.Info("[Sentinel] Peer pruning complete", "removed", removed, "remaining", peerCount-removed)
+	log.Debug("[Sentinel] Peer pruning complete", "toRemove", toRemove, "removed", len(selected))
 }
 
 // ConnectWithPeer is used to attempt to connect and add the peer to our pool
@@ -518,8 +517,10 @@ func (s *Sentinel) listenForPeers() {
 		return
 	}
 
-	iterator := s.listener.RandomNodes()
+	iterator := s.nodesOnOurFork(s.listener.RandomNodes())
 	defer iterator.Close()
+	// The filter skips rejected nodes inside Next, so the loop below only sees the context end once the iterator closes.
+	defer context.AfterFunc(s.ctx, iterator.Close)()
 	for {
 		if err := s.ctx.Err(); err != nil {
 			log.Debug("Stopping Ethereum 2.0 peer discovery", "err", err)
@@ -532,7 +533,7 @@ func (s *Sentinel) listenForPeers() {
 		}
 		node := iterator.Node()
 
-		if s.HasTooManyPeers() {
+		if !wantsOutbound(s.peerCountsByDirection(""), int(s.cfg.MaxPeerCount)) {
 			log.Trace("[Sentinel] Not looking for peers, at peer limit")
 			time.Sleep(100 * time.Millisecond)
 			continue
@@ -605,8 +606,17 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Directi
 			}
 		}
 
-		// If peer helps underserved subnets, skip the limit check
-		if s.HasTooManyPeers() && !peerHelpsSubnets {
+		counts := s.peerCountsByDirection(peerId)
+		maxPeers := int(s.cfg.MaxPeerCount)
+		inbound := direction != network.DirOutbound
+		if conns := s.p2p.Host().Network().ConnsToPeer(peerId); len(conns) > 0 {
+			inbound = peerIsInbound(conns)
+		}
+		allowed := wantsOutbound(counts, maxPeers)
+		if inbound {
+			allowed = canAcceptInbound(counts, maxPeers)
+		}
+		if !allowed && !peerHelpsSubnets {
 			log.Trace("[Sentinel] Rejecting peer, at peer limit")
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
 			s.closePeer(peerId)

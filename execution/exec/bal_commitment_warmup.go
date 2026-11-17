@@ -437,10 +437,10 @@ func compactPrefixes(keys [][]byte, depth int) [][]byte {
 	return prefixes
 }
 
-// flatPrefixes returns the distinct compact prefixes of keys at every depth up to prefetchFlatDepth.
-func flatPrefixes(keys [][]byte) [][]byte {
+// flatPrefixes returns the distinct compact prefixes of keys at each of the prefetchFlatDepth levels below start.
+func flatPrefixes(keys [][]byte, start int) [][]byte {
 	var prefixes [][]byte
-	for depth := 0; depth <= prefetchFlatDepth; depth++ {
+	for depth := start; depth <= start+prefetchFlatDepth; depth++ {
 		prefixes = append(prefixes, compactPrefixes(keys, depth)...)
 	}
 	return prefixes
@@ -453,24 +453,28 @@ func prefetchCommitment(ctx context.Context, db kv.RoDB, hashedKeys [][]byte) er
 		if !ok || trieMostlyResident(ctx, p, hashedKeys) {
 			return
 		}
-		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys)); err != nil {
+		if err = prefetchKeys(ctx, db, ttx, kv.CommitmentDomain, flatPrefixes(hashedKeys, 0)); err != nil {
 			return
-		}
-		var storageKeys [][]byte
-		for _, k := range hashedKeys {
-			if len(k) > storageTrieDepth {
-				storageKeys = append(storageKeys, k)
-			}
 		}
 		// The account trie walk loses a storage key at the extension above its account, so storage tries start again at their root.
 		if err = walkTriePrefixes(ctx, db, ttx, hashedKeys, 0); err == nil {
-			err = walkTriePrefixes(ctx, db, ttx, storageKeys, storageTrieDepth)
+			err = walkTriePrefixes(ctx, db, ttx, storageKeysOf(hashedKeys), storageTrieDepth)
 		}
 	})
 	return cmp.Or(txErr, err)
 }
 
 const storageTrieDepth = 64
+
+func storageKeysOf(hashedKeys [][]byte) [][]byte {
+	var storageKeys [][]byte
+	for _, k := range hashedKeys {
+		if len(k) > storageTrieDepth {
+			storageKeys = append(storageKeys, k)
+		}
+	}
+	return storageKeys
+}
 
 // walkTriePrefixes prefetches the trie levels below the flat depth and stops at the first read error.
 func walkTriePrefixes(ctx context.Context, db kv.RoDB, ttx kv.TemporalTx, keys [][]byte, start int) error {
@@ -634,7 +638,10 @@ const (
 // trieMostlyResident probes the flat prefixes of evenly spaced keys and reports whether too few were cold to walk the
 // trie; a failed probe also skips the walk.
 func trieMostlyResident(ctx context.Context, p latestPrefetcher, hashedKeys [][]byte) bool {
-	isCold, err := sampleCold(ctx, p, kv.CommitmentDomain, flatPrefixes(sampleEvenly(hashedKeys, residencySampleKeys)))
+	keys := sampleEvenly(hashedKeys, residencySampleKeys)
+	// Slots of one account share every account-trie level, so only their storage trie can tell a cold trie.
+	sample := append(flatPrefixes(keys, 0), flatPrefixes(storageKeysOf(keys), storageTrieDepth)...)
+	isCold, err := sampleCold(ctx, p, kv.CommitmentDomain, sample)
 	logSampleFailure(kv.CommitmentDomain, err)
 	return err != nil || !isCold
 }

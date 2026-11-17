@@ -14,6 +14,7 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -26,7 +27,6 @@ type depsTest struct {
 	pe        *parallelExecutor
 	be        *blockExecutor
 	deliverTx func(tx, inc int, reads state.ReadSet)
-	stamp     bool
 }
 
 func valueTransfers(senders, recipients []accounts.Address) types.Transactions {
@@ -106,9 +106,6 @@ func newTracedDepsTest(t *testing.T, txs types.Transactions, hooks *tracing.Hook
 			TxIn:            reads,
 			TxOut:           &state.WriteSet{},
 			ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 21000},
-		}
-		if d.stamp {
-			res.ValStamp = be.versionMap.WriteSeq()
 		}
 		blockRes, err := be.nextResult(context.Background(), pe, res, roTx)
 		require.NoError(t, err)
@@ -201,9 +198,25 @@ func TestChargedValueTransferDoesNotWaitForRecipient(t *testing.T) {
 	require.False(t, s.be.selfLoopDispatched[2])
 	// The run executes the frame of a funded precompile, so a transfer to it still waits.
 	p := accounts.InternAddress(common.BytesToAddress([]byte{1}))
-	s = newDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, p, p}))
+	paid := valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, p, p})
+	for _, tx := range paid {
+		tx.(*types.LegacyTx).GasLimit = params.TxGas + params.EcrecoverGas
+	}
+	s = newDepsTest(t, paid)
 	require.True(t, s.be.execTasks.isBlocked(2))
 	require.False(t, s.be.selfLoopDispatched[2])
+	// A frame that cannot pay the precompile fails and never credits it, so the transfer need not wait.
+	s = newDepsTest(t, valueTransfers([]accounts.Address{a, b, c}, []accounts.Address{f, p, p}))
+	require.False(t, s.be.execTasks.isBlocked(2))
+	require.True(t, s.be.selfLoopDispatched[2])
+	// A failed frame still reads the precompile, so it waits for the last funded transfer to it, but not for another failed one.
+	mixed := valueTransfers([]accounts.Address{a, b, c, d}, []accounts.Address{f, p, p, p})
+	mixed[1].(*types.LegacyTx).GasLimit = params.TxGas + params.EcrecoverGas
+	s = newDepsTest(t, mixed)
+	require.True(t, s.be.execTasks.isBlocked(2) && s.be.execTasks.isBlocked(3))
+	s.deliverTx(0, 0, state.ReadSet{})
+	s.deliverTx(1, 0, state.ReadSet{})
+	require.True(t, s.be.selfLoopDispatched[2] && s.be.selfLoopDispatched[3])
 	// A tracer that follows balances or gas keeps the transfer frame, so the transfer still waits.
 	for name, hooks := range map[string]*tracing.Hooks{
 		"balance_hook": {OnBalanceChange: func(accounts.Address, uint256.Int, uint256.Int, tracing.BalanceChangeReason) {}},

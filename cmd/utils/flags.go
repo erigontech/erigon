@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/iouring"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
@@ -461,7 +462,7 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers when --experimental.parallel-commitment is on, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead",
+		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead",
 		Value: httpcfg.DefaultDBReadConcurrency(),
 	}
 	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
@@ -1092,8 +1093,13 @@ var (
 	}
 	CaplinArchiveBlobsFlag = cli.BoolFlag{
 		Name:  "caplin.blobs-archive",
-		Usage: "sets whether backfilling is enabled for caplin",
+		Usage: "sets whether backfilling is enabled for caplin; changing an existing datadir from a bounded archive to plain --caplin.blobs-archive, or removing the bound, does not fetch dropped history: backfill stops at FrozenBlobs and SyncSnapshots is skipped once snapshots are local, so the range from Deneb to the first local blob segment remains unavailable",
 		Value: false,
+	}
+	CaplinArchiveBlobsFromSlotFlag = cli.Uint64Flag{
+		Name:  "caplin.blobs-archive-from-slot",
+		Usage: "keep blob sidecars from this beacon slot (implies --caplin.blobs-archive); also enables ArchiveBlocks, so every beacon block since genesis is downloaded and kept and only blob sidecars are bounded; first sync filters snapshots by slot and spec serving window; with --caplin.custom-config or --caplin.custom-genesis downloads all, then prunes; newest blob snapshot always kept; 0 keeps all since Deneb; changing an existing datadir from a bounded archive to plain --caplin.blobs-archive, or removing the bound, does not fetch dropped history: backfill stops at FrozenBlobs and SyncSnapshots is skipped once snapshots are local, so the range from Deneb to the first local blob segment remains unavailable",
+		Value: 0,
 	}
 	CaplinImmediateBlobBackfillFlag = cli.BoolFlag{
 		Name:  "caplin.blobs-immediate-backfill",
@@ -1174,9 +1180,15 @@ var (
 		Usage: "Use to override the default p2p listen port (defaults to 23102)",
 	}
 	ExperimentalParallelCommitmentFlag = cli.BoolFlag{
-		Name:  "experimental.parallel-commitment",
-		Usage: "Compute commitment on the parallel trie (ParallelPatriciaHashed). Pass =false for the sequential trie.",
-		Value: statecfg.DefaultParallelCommitment,
+		Name:   "experimental.parallel-commitment",
+		Usage:  "(DEPRECATED: No longer has any effect) Commitment always runs on the parallel trie.",
+		Value:  true,
+		Hidden: true,
+	}
+	ExperimentalCommitmentV3Flag = cli.BoolFlag{
+		Name:  "experimental.commitment-v3",
+		Usage: "Compute commitment on the v3 trie.",
+		Value: statecfg.DefaultCommitmentV3,
 	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
@@ -1886,8 +1898,11 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 
 	// Caplin's block's backfilling is enabled if any of the following flags are set
 	if !cfg.CaplinConfig.EnableEngineAPI {
-		cfg.CaplinConfig.ArchiveBlocks = ctx.Bool(CaplinArchiveBlocksFlag.Name) || ctx.Bool(CaplinArchiveStatesFlag.Name) || ctx.Bool(CaplinArchiveBlobsFlag.Name)
-		cfg.CaplinConfig.ArchiveBlobs = ctx.Bool(CaplinArchiveBlobsFlag.Name)
+		blobsFromSlot := ctx.Uint64(CaplinArchiveBlobsFromSlotFlag.Name)
+		archiveBlobs := ctx.Bool(CaplinArchiveBlobsFlag.Name) || ctx.IsSet(CaplinArchiveBlobsFromSlotFlag.Name)
+		cfg.CaplinConfig.ArchiveBlocks = ctx.Bool(CaplinArchiveBlocksFlag.Name) || ctx.Bool(CaplinArchiveStatesFlag.Name) || archiveBlobs
+		cfg.CaplinConfig.ArchiveBlobs = archiveBlobs
+		cfg.CaplinConfig.BlobsArchiveFromSlot = blobsFromSlot
 		cfg.CaplinConfig.BlobPruningDisabled = ctx.Bool(CaplinDisableBlobPruningFlag.Name)
 		cfg.CaplinConfig.ArchiveStates = ctx.Bool(CaplinArchiveStatesFlag.Name)
 	} else {
@@ -1897,7 +1912,7 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 		if ctx.IsSet(CaplinArchiveStatesFlag.Name) {
 			log.Warn("Caplin's state backfilling is disabled when engine API is enabled")
 		}
-		if ctx.IsSet(CaplinArchiveBlobsFlag.Name) {
+		if ctx.IsSet(CaplinArchiveBlobsFlag.Name) || ctx.IsSet(CaplinArchiveBlobsFromSlotFlag.Name) {
 			log.Warn("Caplin's blob backfilling is disabled when engine API is enabled")
 		}
 		if ctx.IsSet(CaplinImmediateBlobBackfillFlag.Name) {
@@ -1907,6 +1922,9 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
+	if cfg.CaplinConfig.SnapshotGenerationEnabled && cfg.CaplinConfig.BlobsArchiveFromSlot > 0 {
+		Fatalf("Option %s cannot be combined with %s: blob snapshots are built contiguously from Deneb", CaplinArchiveBlobsFromSlotFlag.Name, CaplinEnableSnapshotGeneration.Name)
+	}
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
 	cfg.CaplinConfig.ResumeMaxStalenessEpochs = ctx.Uint64(CaplinResumeMaxStalenessEpochsFlag.Name)
 	cfg.CaplinConfig.ColumnKeepSlots = ctx.Uint64(CaplinColumnKeepSlotsFlag.Name)
@@ -1962,9 +1980,24 @@ func CheckExclusive(ctx *cli.Command, args ...any) {
 	}
 }
 
-func setParallelCommitment(ctx *cli.Command) {
+func warnParallelCommitmentDeprecated(ctx *cli.Command, logger log.Logger) {
 	if ctx.IsSet(ExperimentalParallelCommitmentFlag.Name) {
-		statecfg.ExperimentalParallelCommitment = ctx.Bool(ExperimentalParallelCommitmentFlag.Name)
+		logger.Warn("[DEPRECATED] --experimental.parallel-commitment has no effect; commitment always runs on the parallel trie")
+	}
+	for _, name := range []string{"COMMITMENT_PARALLEL", dbg.ErigonEnvPrefix + "COMMITMENT_PARALLEL"} {
+		if _, ok := os.LookupEnv(name); ok {
+			logger.Warn("[DEPRECATED] " + name + " has no effect; commitment always runs on the parallel trie")
+		}
+	}
+}
+
+func setCommitmentV3(ctx *cli.Command) {
+	if ctx.IsSet(ExperimentalCommitmentV3Flag.Name) {
+		if ctx.Bool(ExperimentalCommitmentV3Flag.Name) {
+			statecfg.SetCommitmentV3(true)
+		} else if statecfg.ExperimentalCommitmentV3 {
+			Fatalf("--%s=false conflicts with ERIGON_COMMITMENT_V3=true", ExperimentalCommitmentV3Flag.Name)
+		}
 	}
 }
 
@@ -2068,7 +2101,8 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
-	setParallelCommitment(ctx)
+	warnParallelCommitmentDeprecated(ctx, logger)
+	setCommitmentV3(ctx)
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
@@ -2105,16 +2139,11 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		dbg.FilesBlockingAsyncIO = false
 		dbg.FilesBlockingAsyncIOMultiPage = false
 	}
-	if dbg.BALBatchPrefetch && runtime.GOOS == "linux" && !iouring.Available() {
-		log.Warn("BAL batch prefetch is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); it reads nothing")
-	}
+	disableBALBatchPrefetchWithoutIOUring(iouring.Available())
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
 		warmupWorkers := dbg.BALCommitmentWarmupReaders()
 		blockReadAheadWorkers := dbg.ReadAheadWorkerReaders()
-		parallelCommitmentReaders := 0
-		if statecfg.ExperimentalParallelCommitment {
-			parallelCommitmentReaders = commitment.ParallelCommitmentReadTxs()
-		}
+		parallelCommitmentReaders := commitment.ParallelCommitmentReadTxs()
 		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers); int64(c) < limit {
 			logger.Warn("db.read.concurrency below the exec read-tx floor; raising to avoid a parallel-exec deadlock",
 				"configured", c, "using", limit, "execWorkers", cfg.ExecWorkerCount,
@@ -2501,4 +2530,17 @@ func CobraFlags(cmd *cobra.Command, urfaveCliFlagsLists ...[]cli.Flag) {
 			}
 		}
 	}
+}
+
+// disableBALBatchPrefetchWithoutIOUring turns the BAL batch prefetch off on every platform where io_uring cannot run
+// its reads, so the exec-side planner does not walk the BAL keys for nothing.
+func disableBALBatchPrefetchWithoutIOUring(ioUring bool) {
+	if !dbg.BALBatchPrefetch || ioUring {
+		return
+	}
+	if runtime.GOOS == "linux" {
+		log.Info("BAL batch prefetch needs io_uring, which is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it")
+	}
+	dbg.BALBatchPrefetch = false
+	mmap.BatchPrefetch = false
 }

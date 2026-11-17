@@ -356,10 +356,8 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 				return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 			}
 		}
-	} else {
-		// Normal (non-syscall) calls always go through Transfer —
-		// this handles both value movement and the zero-balance touch
-		// required for state clearing.
+	} else if !value.IsZero() || code.Len() == 0 {
+		// The Transfer of a zero-value call to an account with code is a no-op: such an account is not EIP-161 empty.
 		if err := evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout, evm.chainRules); err != nil {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}

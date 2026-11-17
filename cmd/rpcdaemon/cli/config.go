@@ -19,6 +19,7 @@ package cli
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -227,25 +228,16 @@ type StateChangesClient interface {
 
 func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient, cache kvcache.Cache) {
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
+		for ctx.Err() == nil {
+			err := subscribeToStateChanges(ctx, client, cache)
+			if ctx.Err() != nil {
 				return
-			default:
 			}
-			if err := subscribeToStateChanges(ctx, client, cache); err != nil {
-				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-					// ctx-aware retry delay so callers cancelling ctx don't have to
-					// wait up to 3s for the next retry cycle.
-					err = common.Sleep(ctx, 3*time.Second)
-					if err == nil {
-						continue
-					}
-				}
-				if errors.Is(err, context.Canceled) {
-					return
-				}
+			if err != nil && !grpcutil.IsRetryLater(err) && !grpcutil.IsEndOfStream(err) {
 				log.Warn("[rpcdaemon subscribeToStateChanges]", "err", err)
+			}
+			if common.Sleep(ctx, 3*time.Second) != nil {
+				return
 			}
 		}
 	}()
@@ -908,12 +900,26 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 			return
 		}
 
-		// adding a healthcheck here
-		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
-			return
-		}
 		if cfg.WebsocketEnabled && wsHandler != nil && isWebsocket(r) {
 			wsHandler.ServeHTTP(w, r)
+			return
+		}
+
+		if jwtSecret != nil && AuthenticatedEngineRESTHandler != nil && strings.HasPrefix(r.URL.Path, "/engine/") {
+			if err := rpc.ValidateJWT(r, jwtSecret); err != nil {
+				w.Header().Set("Cache-Control", "no-store")
+				w.Header().Set("Content-Type", "application/problem+json")
+				w.WriteHeader(http.StatusForbidden)
+				problem := struct {
+					Type   string `json:"type"`
+					Detail string `json:"detail"`
+				}{Type: "/engine-api/errors/authentication-error", Detail: err.Error()}
+				if err := json.NewEncoder(w).Encode(problem); err != nil {
+					log.Debug("[SSZ-REST] failed to write authentication problem response", "err", err)
+				}
+				return
+			}
+			AuthenticatedEngineRESTHandler.ServeHTTP(w, r)
 			return
 		}
 
@@ -921,11 +927,9 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 			return
 		}
 
-		if jwtSecret != nil && AuthenticatedEngineRESTHandler != nil && strings.HasPrefix(r.URL.Path, "/engine/") {
-			AuthenticatedEngineRESTHandler.ServeHTTP(w, r)
+		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
 			return
 		}
-
 		httpHandler.ServeHTTP(w, r)
 	})
 
@@ -948,6 +952,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	engineHttpEndpoint := "tcp://" + listenHostPort(cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
 
 	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, true, logger, cfg.RPCSlowLogThreshold)
+	engineSrv.SetBatchLimit(cfg.BatchLimit)
 	engineSrv.SetSubscriptionLimit(cfg.SubscriptionLimit)
 
 	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true, logger); err != nil {
@@ -973,8 +978,9 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	}
 
 	engineListener, engineAddr, err := node.StartHTTPEndpoint(engineHttpEndpoint, &node.HttpEndpointConfig{
-		Timeouts: cfg.AuthRpcTimeouts,
-		Listener: cfg.AuthRpcListener,
+		Timeouts:              cfg.AuthRpcTimeouts,
+		Listener:              cfg.AuthRpcListener,
+		AllowUnencryptedHTTP2: true,
 	}, engineApiHandler)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
@@ -1128,7 +1134,7 @@ func (e *remoteRulesEngine) VerifyUncles(_ rules.ChainReader, _ *types.Header, _
 	panic("remoteRulesEngine.VerifyUncles not supported")
 }
 
-func (e *remoteRulesEngine) Prepare(_ rules.ChainHeaderReader, _ *types.Header, _ *state.IntraBlockState) error {
+func (e *remoteRulesEngine) Prepare(_ rules.ChainHeaderReader, _ *types.Header) error {
 	panic("remoteRulesEngine.Prepare not supported")
 }
 

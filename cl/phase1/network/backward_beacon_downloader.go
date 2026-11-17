@@ -159,7 +159,10 @@ const (
 	maxEmptyResponseBackoff = 5 * time.Second
 	maxPrefetchedRanges     = 8
 	slotsPerRange           = uint64(64)
+	prefetchAttempts        = 3
 )
+
+var prefetchAttemptTimeout = 10 * time.Second
 
 // NewGloasSuccessorValidator validates a direct successor from an immutable checkpoint state.
 func NewGloasSuccessorValidator(anchorState *state.CachingBeaconState, anchorRoot common.Hash) func(*cltypes.SignedBeaconBlock) error {
@@ -553,10 +556,21 @@ func (b *BackwardBeaconDownloader) prefetchRange(ctx context.Context, bottom uin
 	b.prefetched = append(b.prefetched, prefetchedRange{lo: lo, hi: hi, blocks: blocks, cancel: cancel})
 	go func() {
 		defer cancel()
-		resp, peerId, err := b.requestBlocksByRange(reqCtx, lo, hi-lo+1)
-		if err != nil {
-			b.banPeerOnError(peerId, err, lo, hi-lo+1)
-			resp = nil
+		var resp []*cltypes.SignedBeaconBlock
+		for range prefetchAttempts {
+			attemptCtx, cancelAttempt := context.WithTimeout(reqCtx, prefetchAttemptTimeout)
+			got, peerId, err := b.requestBlocksByRange(attemptCtx, lo, hi-lo+1)
+			cancelAttempt()
+			if err == nil && len(got) > 0 {
+				resp = got
+				break
+			}
+			if err != nil {
+				b.banPeerOnError(peerId, err, lo, hi-lo+1)
+			}
+			if reqCtx.Err() != nil {
+				break
+			}
 		}
 		blocks <- resp
 	}()
@@ -1416,7 +1430,7 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelopeP2P(ctx context.Context, b
 
 func (b *BackwardBeaconDownloader) fetchSingleEnvelopeHTTP(ctx context.Context, block *cltypes.SignedBeaconBlock) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if b.httpFallbackURL == "" {
-		return nil, fmt.Errorf("no HTTP fallback URL configured")
+		return nil, errors.New("no HTTP fallback URL configured")
 	}
 	if block == nil || block.Block == nil {
 		return nil, errors.New("cannot fetch envelope for nil block")

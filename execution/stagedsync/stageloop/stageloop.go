@@ -52,7 +52,7 @@ import (
 // an implementation defined in another package (e.g. execmodule.Dispatcher)
 // without creating a circular import.
 type NotificationSender interface {
-	Dispatch(ctx context.Context, tx kv.Tx, stateVersion uint64, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
+	Dispatch(ctx context.Context, tx kv.Tx, state kv.TemporalGetter, stateVersion uint64, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64, committedTx kv.TemporalTx) error
 }
 
 type FrozenBlocksReader interface {
@@ -100,18 +100,6 @@ func NewHook(
 	}
 }
 
-func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
-	notifications := h.notifications
-	if notifications != nil && notifications.Accumulator != nil && inSync {
-		stateVersion, err := rawdb.GetStateVersion(tx)
-		if err != nil {
-			h.logger.Error("problem reading plain state version", "err", err)
-		}
-		notifications.Accumulator.Reset(stateVersion)
-	}
-	return nil
-}
-
 func (h *Hook) LastNewBlockSeen(n uint64) {
 	if h == nil || h.notifications == nil {
 		return
@@ -119,25 +107,21 @@ func (h *Hook) LastNewBlockSeen(n uint64) {
 	h.notifications.NewLastBlockSeen(n)
 }
 
-func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
-	if h == nil {
+func (h *Hook) CheckpointStateChanges() func() {
+	if h == nil || h.notifications == nil {
 		return nil
 	}
-	// Cycle start is where a node that fell behind first sees it; waiting for
-	// a cycle to end while still behind would miss fast catch-ups entirely.
-	h.NotifySyncState(tx)
-	return h.beforeRun(tx, inSync)
+	return h.notifications.Accumulator.Checkpoint()
 }
 
 // SendNotifications dispatches all pending notifications (state changes,
-// headers, logs, receipts) via the Dispatcher. The tx is the data source —
-// either the SD's blockOverlay (pre-commit) or a committed DB tx.
+// headers, logs, receipts) via the Dispatcher using committed state.
 //
 // All call sites follow the same pattern:
 //
 //	hook.SendNotifications(tx, finishProgressBefore)
 //	hook.UpdateHead(tx, finishProgressBefore, isSynced)
-func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
+func (h *Hook) SendNotifications(tx kv.TemporalTx, finishProgressBefore uint64) error {
 	if h == nil {
 		return nil
 	}
@@ -156,12 +140,13 @@ func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
 		}
 	}
 	return h.dispatcher.Dispatch(
-		h.ctx, tx, stateVersion,
+		h.ctx, tx, tx, stateVersion,
 		h.notifications.Accumulator,
 		h.notifications.RecentReceipts,
 		finishProgressBefore,
 		finishStageAfterSync,
 		h.sync.PrevUnwindPoint(),
+		tx,
 	)
 }
 
@@ -194,6 +179,8 @@ func (h *Hook) ClearSnapshotDownloadPin() bool {
 
 // NotifySyncState publishes the sync status on the event bus if it changed;
 // dedup and ordering live in Notifications.PublishSyncState.
+// Publishing before execution starts exposes the transition to syncing even
+// when catch-up finishes within one cycle.
 func (h *Hook) NotifySyncState(tx kv.Tx) {
 	if h == nil || h.notifications == nil || h.notifications.Events == nil || h.frozenBlocksReader == nil {
 		return
@@ -217,23 +204,24 @@ func (h *Hook) NotifyStateRetirementDone() {
 	h.notifications.Events.OnStateRetirementDone()
 }
 
+// blockRangeAnnounceDue reports whether to announce BlockRangeUpdate:
+//   - after initialization
+//   - during sync: every 1 minute. A time limit is used to prevent excessive announcements in
+//     case of fast execution due to empty blocks or small SyncLoopBlockLimit
+//   - after sync: every 32 blocks or on unwind of any depth
+func (h *Hook) blockRangeAnnounceDue(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) bool {
+	hadUnwind := h.sync != nil && h.sync.PrevUnwindPoint() != nil && *h.sync.PrevUnwindPoint() < finishStageBeforeSync
+	isInitialAnnouncement := h.lastAnnouncedBlockRangeLatestNumber == 0
+	progressed := isSynced && finishStageAfterSync >= h.lastAnnouncedBlockRangeLatestNumber+32
+	shouldPublishByTime := !isSynced && time.Since(h.lastAnnouncedBlockRangeTime) >= 1*time.Minute
+	return hadUnwind || isInitialAnnouncement || progressed || shouldPublishByTime
+}
+
 func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) {
 	if h.blockRangePublisher == nil || h.statusDataGetter == nil {
 		return
 	}
-
-	// we want to announce BlockRangeUpdate
-	// - after initialization
-	// - during sync: every 1 minute. A time limit is used to prevent excessive announcements in
-	//									case of fast execution due to empty blocks or small SyncLoopBlockLimit
-	// - after sync: every 32 blocks or on unwind of any depth
-	hadUnwind := h.sync != nil && h.sync.PrevUnwindPoint() != nil && *h.sync.PrevUnwindPoint() < finishStageBeforeSync
-	isInitialAnnouncement := h.lastAnnouncedBlockRangeLatestNumber == 0
-	progressed := finishStageAfterSync >= h.lastAnnouncedBlockRangeLatestNumber+32
-	timeElapsed := time.Since(h.lastAnnouncedBlockRangeTime)
-	shouldPublishByTime := !isSynced && timeElapsed >= 1*time.Minute
-
-	if !hadUnwind && !isInitialAnnouncement && !progressed && !shouldPublishByTime {
+	if !h.blockRangeAnnounceDue(finishStageBeforeSync, finishStageAfterSync, isSynced) {
 		return
 	}
 
@@ -254,13 +242,13 @@ func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSy
 		return
 	}
 
-	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "hadUnwind", hadUnwind, "isSynced", isSynced, "timeElapsed", timeElapsed)
+	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "isSynced", isSynced)
 	h.blockRangePublisher.PublishBlockRangeUpdate(packet)
 	h.lastAnnouncedBlockRangeLatestNumber = packet.Latest
 	h.lastAnnouncedBlockRangeTime = time.Now()
 }
 
-func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules.ChainReader, currentHeader *types.Header, currentBody *types.RawBody) error {
+func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules.ChainReader, currentHeader *types.Header, currentBody *types.Body) error {
 	currentHeight := currentHeader.Number.Uint64()
 	currentHash := currentHeader.Hash()
 	if chainReader != nil {
@@ -285,9 +273,6 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules
 		return err
 	}
 	if err := rawdb.WriteHeadHeaderHash(batch, currentHash); err != nil {
-		return err
-	}
-	if _, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
 		return err
 	}
 	if prevHash != currentHash {
@@ -325,7 +310,7 @@ func cleanupProgressIfNeeded(batch kv.RwTx, header *types.Header) error {
 
 var ErrStateStepHasMoreWork = errors.New("state step has more work")
 
-func StateStep(chainReader rules.ChainReader, engine rules.Engine, sd *execctx.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
+func StateStep(chainReader rules.ChainReader, engine rules.Engine, sd *execctx.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.Body) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -389,7 +374,7 @@ func NewDefaultStages(ctx context.Context,
 	blockWriter := blockio.NewBlockWriter()
 	return stagedsync.DefaultStages(
 		ctx,
-		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
+		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.SnapshotBlobsFromSlot(), cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
 		stagedsync.StageHeadersCfg(blockReader),
 		stagedsync.StageBodiesCfg(blockReader, blockWriter),
 		stagedsync.StageSendersCfg(controlServer.ChainConfig, dbg.BadBlockHalt, dirs.Tmp, blockReader, readAheader),
@@ -425,7 +410,7 @@ func NewPipelineStages(ctx context.Context,
 
 	return stagedsync.PipelineStages(
 		ctx,
-		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
+		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.SnapshotBlobsFromSlot(), cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
 		stagedsync.StageSendersCfg(controlServer.ChainConfig, dbg.BadBlockHalt, dirs.Tmp, blockReader, readAheader),
 		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
 		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),

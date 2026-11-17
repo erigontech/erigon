@@ -41,14 +41,15 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -276,11 +277,17 @@ func crashRecoveryLiveCommitment(t *testing.T, entries map[string]string) map[st
 	t.Helper()
 	entries = maps.Clone(entries)
 	for key, value := range entries {
-		if key == hex.EncodeToString(commitmentdb.KeyCommitmentState) {
+		if key == hex.EncodeToString(commitmenttest.StateKey()) {
 			continue
 		}
 		data, err := hex.DecodeString(value)
 		require.NoError(t, err)
+		if statecfg.ExperimentalCommitmentV3 {
+			if len(data) == 0 {
+				delete(entries, key)
+			}
+			continue
+		}
 		require.GreaterOrEqual(t, len(data), 4, "commitment branch %s", key)
 		if commitment.BranchData(data).ChildCount() == 0 {
 			require.Len(t, data, 4, "an empty branch must not contain cell data")

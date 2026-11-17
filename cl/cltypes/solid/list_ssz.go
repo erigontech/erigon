@@ -100,6 +100,7 @@ func (l *ListSSZ[T]) EnsureStaticProgressive(limit int, bytesPerElement int) {
 		l.bytesPerElement = bytesPerElement
 	}
 	l.progressive = true
+	l.invalidateRoots()
 }
 
 // Progressive lists are semantically unbounded, so decode limits are resource guards rather than protocol maxima.
@@ -134,7 +135,7 @@ func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	if delimiter, ok := token.(json.Delim); !ok || delimiter != '[' {
-		return fmt.Errorf("expected JSON array")
+		return errors.New("expected JSON array")
 	}
 	list := make([]T, 0, min(l.limit, 16))
 	for decoder.More() {
@@ -146,7 +147,7 @@ func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return fmt.Errorf("null list element")
+			return errors.New("null list element")
 		}
 		var element T
 		if err := json.Unmarshal(raw, &element); err != nil {
@@ -169,7 +170,7 @@ func requireJSONEOF(decoder *json.Decoder) error {
 	var trailing json.RawMessage
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return fmt.Errorf("unexpected trailing JSON value")
+			return errors.New("unexpected trailing JSON value")
 		}
 		return err
 	}
@@ -319,6 +320,11 @@ func (l *ListSSZ[T]) Clone() clonable.Clonable {
 	return NewDynamicListSSZ[T](l.limit)
 }
 
+func (l *ListSSZ[T]) CloneTo(dst *ListSSZ[T]) {
+	*dst = *l.Clone().(*ListSSZ[T])
+	dst.invalidateRoots()
+}
+
 func (l *ListSSZ[T]) Get(index int) T {
 	return l.list[index]
 }
@@ -403,19 +409,26 @@ func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
 }
 
 func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
-	cpy := &ListSSZ[T]{
-		list:            make([]T, len(l.list), cap(l.list)),
-		limit:           l.limit,
-		configured:      l.configured,
-		static:          l.static,
-		bytesPerElement: l.bytesPerElement,
-		progressive:     l.progressive,
-		root:            common.Hash(bytes.Clone(l.root[:])),
+	cpy := new(ListSSZ[T])
+	l.ShallowCopyTo(cpy)
+	return cpy
+}
+
+func (l *ListSSZ[T]) ShallowCopyTo(cpy *ListSSZ[T]) {
+	cache := l.ownedProgressiveRoot()
+	source := *l
+	*cpy = ListSSZ[T]{
+		list:            make([]T, len(source.list), cap(source.list)),
+		limit:           source.limit,
+		configured:      source.configured,
+		static:          source.static,
+		bytesPerElement: source.bytesPerElement,
+		progressive:     source.progressive,
+		root:            common.Hash(bytes.Clone(source.root[:])),
 	}
 	cpy.progressiveRoot = &progressiveRootCache[T]{owner: cpy}
-	if cache := l.ownedProgressiveRoot(); cache != nil {
+	if cache != nil {
 		cpy.progressiveRoot.root.Store(cache.root.Load())
 	}
-	copy(cpy.list, l.list)
-	return cpy
+	copy(cpy.list, source.list)
 }
