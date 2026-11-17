@@ -596,6 +596,9 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 	}(); err != nil {
 		return err
 	}
+	if a.hasAccessorsToBuild() { // BuildMissedAccessors re-opens the folder and runs the check
+		return nil
+	}
 	return a.checkFilesDBGap(db)
 }
 
@@ -605,9 +608,6 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 // `--reset` tooling can open and fix it.
 func (a *Aggregator) checkFilesDBGap(db kv.RoDB) error {
 	if a.skipFilesDBGapCheck || db == nil {
-		return nil
-	}
-	if a.hasAccessorsToBuild() { // BuildMissedAccessors re-opens the folder and runs this check
 		return nil
 	}
 	return db.View(context.Background(), func(tx kv.Tx) error {
@@ -1017,6 +1017,9 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, db kv.RoDB, worke
 
 	if err := a.OpenFolder(db); err != nil {
 		return err
+	}
+	if a.hasAccessorsToBuild() { // an accessor that could not be built
+		return a.checkFilesDBGap(db)
 	}
 	return nil
 }
