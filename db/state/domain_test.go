@@ -2162,6 +2162,42 @@ func (c *errAfterCtx) Err() error {
 	return nil
 }
 
+// The file holds A; a later step writes B, A, C, and the unwind of C leaves no DB row, so history alone knows B.
+func TestDomain_GetAsOfAfterPartialStepUnwind(t *testing.T) {
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
+	ctx := t.Context()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	key := make([]byte, length.Addr)
+	a, b, c := []byte("a"), []byte("b"), []byte("c")
+	domainRoTx := d.beginForTests()
+	writer := domainRoTx.NewWriter(db)
+	require.NoError(t, writer.PutWithPrev(key, a, 0, nil))
+	require.NoError(t, writer.PutWithPrev(key, b, 33, a))
+	require.NoError(t, writer.PutWithPrev(key, a, 34, b))
+	writer.diff = &kv.DomainDiff{}
+	require.NoError(t, writer.PutWithPrev(key, c, 35, a))
+	cDiff := changeset.DeserializeDiffSet(changeset.SerializeDiffSet(writer.diff.GetDiffSet(), nil))
+	require.NoError(t, writer.Flush(ctx, tx))
+	writer.Close()
+	domainRoTx.Close()
+	require.NoError(t, d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
+
+	domainRoTx = d.beginForTests()
+	require.NoError(t, domainRoTx.unwind(ctx, tx, 35, cDiff, nil))
+	domainRoTx.Close()
+
+	domainRoTx = d.beginForTests()
+	defer domainRoTx.Close()
+	for txNum, want := range map[uint64][]byte{33: a, 34: b, 35: a, 40: a} {
+		v, _, err := domainRoTx.GetAsOf(key, txNum, tx)
+		require.NoError(t, err)
+		require.Equalf(t, want, v, "txNum %d", txNum)
+	}
+}
+
 func requireGetAsOfEveryTxNum(t *testing.T, d *Domain, tx kv.Tx, data map[string][]upd, maxTxNum uint64) {
 	t.Helper()
 	domainRoTx := d.beginForTests()

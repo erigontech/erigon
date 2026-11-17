@@ -1839,26 +1839,20 @@ func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
 	return max(dt.ht.files[0].startTxNum, dt.ht.iit.files[0].startTxNum)
 }
 
-// GetAsOf returns the value of key as of txNum. With roTx, a key with no DB row whose newest file ends before
-// txNum's step still has that file's value at txNum. Otherwise it seeks history, then latest state.
+// GetAsOf returns the value of key as of txNum. Below the files' end, a key whose newest file ends before txNum's step
+// still has that file's value at txNum. Otherwise it seeks history, then latest state.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	if !dt.d.Enabled {
 		return nil, false, nil
 	}
-	if roTx != nil && dt.name != kv.CommitmentDomain {
-		// Files only: after an unwind a DB row's step can be older than the key's last write.
-		_, _, inDB, err := dt.getLatestFromDb(key, roTx, kv.NoStepBound)
+	// Every write below the files' end is in the files; above it, an unwind can leave history newer than any row.
+	if dt.name != kv.CommitmentDomain && txNum < dt.files.EndTxNum() {
+		latest, ok, _, endTxNum, err := dt.getLatestFromFiles(key, nil, kv.NoStepBound)
 		if err != nil {
 			return nil, false, err
 		}
-		if !inDB {
-			latest, ok, _, endTxNum, err := dt.getLatestFromFiles(key, nil, kv.NoStepBound)
-			if err != nil {
-				return nil, false, err
-			}
-			if ok && len(latest) > 0 && endTxNum/dt.stepSize < txNum/dt.stepSize {
-				return latest, true, nil
-			}
+		if ok && len(latest) > 0 && endTxNum/dt.stepSize < txNum/dt.stepSize {
+			return latest, true, nil
 		}
 	}
 
