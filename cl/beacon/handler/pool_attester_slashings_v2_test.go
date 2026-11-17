@@ -117,7 +117,7 @@ func newV2AttesterSlashingHandler(t *testing.T, electraNode bool) (*ApiHandler, 
 		forkchoiceStore: store,
 		routerCfg:       &beacon_router_configuration.RouterConfiguration{Beacon: true},
 	}
-	handler.Init()
+	handler.o.Do(handler.init)
 	return handler, store
 }
 
