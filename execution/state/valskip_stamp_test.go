@@ -228,6 +228,7 @@ func TestValSkip_StorageOnlyPromotionOnLifecycleEntryBumps(t *testing.T) {
 			stamp := vm.WriteSeq()
 			promote(vm, ws)
 			require.False(t, vm.QuietBelow(5, stamp), "%s, %s cell: a storage-only promotion on an entry with lifecycle cells must bump", name, cell)
+			require.True(t, vm.QuietBelow(5, vm.WriteSeq()), "%s, %s cell: the promotion must close its stamp bracket", name, cell)
 		}
 	}
 }
