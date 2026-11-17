@@ -280,7 +280,7 @@ jobs:
         shell: bash
         run: |
           skip_devnet=$(yq '.env.SKIP_DEVNET_SHARDS' .github/workflows/test-eest-spec.yml)
-          matrix=$(printf '%s\n' "$SHARDS" | yq -o=json '.' | jq -c --arg skip_devnet "$skip_devnet" '[.[] | select($skip_devnet != "true" or .["fixtures-tarball"] != "eest_devnet")]')
+          matrix=$(printf '%s\n' "$SHARDS" | yq -o=json '.' | jq -c --arg skip_devnet "$skip_devnet" --arg event "$GITHUB_EVENT_NAME" '[.[] | select($skip_devnet != "true" or .["fixtures-tarball"] != "eest_devnet") | select(.sim != "consume-wirex" or $event == "schedule" or $event == "workflow_dispatch")]')
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   test-hive-eest:
