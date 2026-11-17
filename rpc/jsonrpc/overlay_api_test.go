@@ -448,7 +448,9 @@ func TestOverlayGetLogsOverrideNeedsMoreGas(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := chain.AllProtocolChanges.Copy()
-			if !tc.bogota {
+			if tc.bogota {
+				cfg.BogotaTime = common.NewUint64(0)
+			} else {
 				cfg.AmsterdamTime, cfg.BogotaTime = nil, nil
 			}
 			key, err := crypto.GenerateKey()
@@ -473,6 +475,7 @@ func TestOverlayGetLogsOverrideNeedsMoreGas(t *testing.T) {
 			require.NoError(t, err)
 			pack, err := generate(probe.Receipts[0][0].GasUsed + 100)
 			require.NoError(t, err)
+			require.Equal(t, tc.bogota, cfg.IsBogota(pack.Blocks[0].Time()))
 			require.NoError(t, m.InsertChain(pack))
 			require.Len(t, pack.Receipts[0][0].Logs, 1)
 			base := newBaseApiForTest(m)

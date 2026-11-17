@@ -7077,7 +7077,9 @@ Response
 
 Traces a call to `eth_sendRawTransaction` without making the call, returning the traces.
 
-The transaction runs on the latest state, with the block environment of the latest block. It is validated as it would be for inclusion in a block: the signature and chain ID, a nonce equal to the sender's nonce (too low and too high are both rejected), the balance for the value and the gas, the intrinsic gas, the fees, the sender-code rule of EIP-3607 (with the EIP-7702 delegation exception) and the gas limit cap of EIP-7825. A transaction that fails validation returns an error; a valid transaction that reverts or halts returns its trace. The sender pays for the gas.
+The transaction runs on the latest state, with the block environment of the latest block. It is validated as it would be for inclusion in a block. For ordinary transactions this includes the signature and chain ID, a nonce equal to the sender's nonce (too low and too high are both rejected), the balance for the value and the gas, the intrinsic gas, the fees, the sender-code rule of EIP-3607 (with the EIP-7702 delegation exception) and the gas limit cap of EIP-7825. The sender pays for the gas.
+
+Frame transactions use their own approval, nonce and gas-budget rules. Gas is charged to the approved payer, which can differ from the sender. For either transaction type, a validation failure returns an error; a valid transaction that reverts or halts returns its trace.
 
 #### Parameters
 
@@ -8066,7 +8068,9 @@ curl -X POST http://localhost:8545 \
 
 Blocks in the requested range are replayed concurrently (up to `runtime.NumCPU()` workers). Each block is independently replayed from the state at `blockNumber - 1`.
 
-Replay preserves the original gas budgets and charges fees normally for all transaction types, including frame transactions. State overrides do not increase the gas available to the replayed code. The RPC gas cap does not apply to log replay.
+Without state overrides, replay preserves the original gas budgets and charges fees normally. With state overrides, blocks containing only ordinary transactions use the RPC gas allowance and skip gas-fee debits. This allows replacement code to use more gas and replay to continue when an override changes how a later transaction is funded.
+
+Blocks containing a frame transaction preserve the original gas budgets and normal fee accounting for **every transaction in the block**, even with overrides. Frame assertions can observe the fee effects of earlier transactions. An override that leaves a payer underfunded returns an error; code that exceeds its original budget runs out of gas. The RPC gas cap does not apply to these blocks or to replay without overrides.
 
 ### `overlay_callConstructor`
 
