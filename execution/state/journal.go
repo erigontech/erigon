@@ -21,6 +21,7 @@ package state
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -126,6 +127,15 @@ func (j *journal) Reset() {
 	clear(j.dirties)
 }
 
+// push appends e, doubling the capacity when it is full: append grows a large slice by
+// about 1.25x, so a long journal (a TSTORE loop) would copy its entries several times over.
+func (j *journal) push(e journalEntry) {
+	if len(j.entries) == cap(j.entries) {
+		j.entries = slices.Grow(j.entries, max(len(j.entries), 64))
+	}
+	j.entries = append(j.entries, e)
+}
+
 // revert undoes a batch of journalled modifications along with any reverted
 // dirty handling too.
 func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
@@ -179,12 +189,12 @@ func (je *journalEntry) committed() bool { return je.flags&flagCommitted != 0 }
 // dirtied(), so the two must agree on every kind.
 
 func (j *journal) createObjectChange(account accounts.Address) {
-	j.entries = append(j.entries, journalEntry{kind: kindCreateObject, account: account})
+	j.push(journalEntry{kind: kindCreateObject, account: account})
 	j.dirties[account]++
 }
 
 func (j *journal) resetObjectChange(account accounts.Address, prev *stateObject, prevWrites *createWriteSnapshot) {
-	j.entries = append(j.entries, journalEntry{kind: kindResetObject, account: account, extra: &journalExtra{prevObj: prev, prevWrites: prevWrites}})
+	j.push(journalEntry{kind: kindResetObject, account: account, extra: &journalExtra{prevObj: prev, prevWrites: prevWrites}})
 	j.dirties[account]++
 }
 
@@ -193,7 +203,7 @@ func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevba
 	if prev {
 		flags |= flagSelfdestructPrev
 	}
-	j.entries = append(j.entries, journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, flags: flags})
+	j.push(journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, flags: flags})
 	j.dirties[account]++
 }
 
@@ -216,7 +226,7 @@ func (j *journal) selfdestructChangeVersioned(account accounts.Address, prev boo
 		}
 		e.extra = &journalExtra{prevBalanceVersioned: prevBalanceVersioned}
 	}
-	j.entries = append(j.entries, e)
+	j.push(e)
 	j.dirties[account]++
 }
 
@@ -225,31 +235,31 @@ func (j *journal) balanceChange(account accounts.Address, prev uint256.Int, wasC
 	if prevDeleted {
 		flags |= flagBalanceDeleted
 	}
-	j.entries = append(j.entries, journalEntry{kind: kindBalance, account: account, value: prev, flags: flags})
+	j.push(journalEntry{kind: kindBalance, account: account, value: prev, flags: flags})
 	j.dirties[account]++
 }
 
 func (j *journal) balanceIncrease(account accounts.Address, increase uint256.Int) {
-	j.entries = append(j.entries, journalEntry{kind: kindBalanceIncrease, account: account, value: increase})
+	j.push(journalEntry{kind: kindBalanceIncrease, account: account, value: increase})
 	j.dirties[account]++
 }
 
 func (j *journal) balanceIncreaseTransfer(bi *BalanceIncrease) {
-	j.entries = append(j.entries, journalEntry{kind: kindBalanceIncreaseTransfer, extra: &journalExtra{bi: bi}})
+	j.push(journalEntry{kind: kindBalanceIncreaseTransfer, extra: &journalExtra{bi: bi}})
 }
 
 func (j *journal) nonceChange(account accounts.Address, prev uint64, wasCommitted bool) {
-	j.entries = append(j.entries, journalEntry{kind: kindNonce, account: account, aux: prev, flags: commitFlag(wasCommitted)})
+	j.push(journalEntry{kind: kindNonce, account: account, aux: prev, flags: commitFlag(wasCommitted)})
 	j.dirties[account]++
 }
 
 func (j *journal) storageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int, wasCommitted bool) {
-	j.entries = append(j.entries, journalEntry{kind: kindStorage, account: account, key: key, value: prevalue, flags: commitFlag(wasCommitted)})
+	j.push(journalEntry{kind: kindStorage, account: account, key: key, value: prevalue, flags: commitFlag(wasCommitted)})
 	j.dirties[account]++
 }
 
 func (j *journal) fakeStorageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int) {
-	j.entries = append(j.entries, journalEntry{kind: kindFakeStorage, account: account, key: key, value: prevalue})
+	j.push(journalEntry{kind: kindFakeStorage, account: account, key: key, value: prevalue})
 	j.dirties[account]++
 }
 
@@ -258,30 +268,30 @@ func (j *journal) codeChange(account accounts.Address, prevcode []byte, prevhash
 	if len(prevcode) != 0 || prevhash != accounts.EmptyCodeHash {
 		extra = &journalExtra{prevcode: prevcode, prevhash: prevhash}
 	}
-	j.entries = append(j.entries, journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommitted), extra: extra})
+	j.push(journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommitted), extra: extra})
 	j.dirties[account]++
 	return &j.entries[len(j.entries)-1]
 }
 
 func (j *journal) refundChange(prev uint64) {
-	j.entries = append(j.entries, journalEntry{kind: kindRefund, aux: prev})
+	j.push(journalEntry{kind: kindRefund, aux: prev})
 }
 
 func (j *journal) touchAccount(account accounts.Address, wasCommitted bool, prev uint256.Int) {
-	j.entries = append(j.entries, journalEntry{kind: kindTouch, account: account, value: prev, flags: commitFlag(wasCommitted)})
+	j.push(journalEntry{kind: kindTouch, account: account, value: prev, flags: commitFlag(wasCommitted)})
 	j.dirties[account]++
 }
 
 func (j *journal) accessListAddAccountChange(address accounts.Address) {
-	j.entries = append(j.entries, journalEntry{kind: kindAccessListAddAccount, account: address})
+	j.push(journalEntry{kind: kindAccessListAddAccount, account: address})
 }
 
 func (j *journal) accessListAddSlotChange(address accounts.Address, slot accounts.StorageKey) {
-	j.entries = append(j.entries, journalEntry{kind: kindAccessListAddSlot, account: address, key: slot})
+	j.push(journalEntry{kind: kindAccessListAddSlot, account: address, key: slot})
 }
 
 func (j *journal) transientStorageChange(account accounts.Address, slot int, prevalue uint256.Int) {
-	j.entries = append(j.entries, journalEntry{kind: kindTransientStorage, account: account, value: prevalue, aux: uint64(slot)})
+	j.push(journalEntry{kind: kindTransientStorage, account: account, value: prevalue, aux: uint64(slot)})
 }
 
 // dirtied returns the address modified by this entry, or (NilAddress, false) for
