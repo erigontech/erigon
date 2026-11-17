@@ -18,6 +18,7 @@ package aggregation
 
 import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -25,6 +26,9 @@ import (
 type AggregationPool interface {
 	// AddAttestation adds a single attestation to the pool.
 	AddAttestation(att *solid.Attestation) error
+	// AddVerifiedAttestation is AddAttestation for a vote whose signature the caller has already verified and
+	// decompressed, so the pool does not decompress it again; a nil sig decompresses att's signature.
+	AddVerifiedAttestation(att *solid.Attestation, sig *bls.Signature) error
 	GetAggregatationByRoot(root common.Hash) *solid.Attestation
 	// GetAggregatationByRootAndCommittee returns the committee's aggregate of the data, also when the
 	// pool keeps it aside because the committee is full.
