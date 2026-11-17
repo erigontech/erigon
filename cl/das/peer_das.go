@@ -4,6 +4,8 @@ import (
 	"container/heap"
 	"context"
 	"errors"
+	"fmt"
+	"maps"
 	"math"
 	"os"
 	"slices"
@@ -1352,7 +1354,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		// Reconstructed columns are published on the subnets this node subscribes to, and stored if in custody. Recovery
 		// runs only on an archive node or a supernode, and a supernode has every column in custody.
 		subscribedToAll := d.publishColumns != nil && d.IsArchivedMode()
-		var toPublish []*cltypes.DataColumnSidecar
+		var toPublish, toStore []*cltypes.DataColumnSidecar
 		beginAddColumns := time.Now()
 		for columnIndex := range d.beaconConfig.NumberOfColumns {
 			_, inCustody := custodyColumns[columnIndex]
@@ -1407,14 +1409,15 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				toPublish = append(toPublish, sidecar)
 				continue
 			}
-			// A published column is marked seen, so a column that failed to write is left for a gossip copy to store.
-			if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), sidecar); err != nil {
-				log.Warn("[blobsRecover] failed to write column sidecar", "err", err, "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
-				continue
-			}
+			toStore = append(toStore, sidecar)
 			toPublish = append(toPublish, sidecar)
-			log.Trace("[blobsRecover] added a custody data column", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
 		}
+		failed, err := d.writeColumnSidecarsBatched(ctx, slot, blockRoot, toStore)
+		if err != nil {
+			log.Warn("[blobsRecover] failed to write column sidecars", "slot", slot, "blockRoot", blockRoot, "failedColumns", slices.Sorted(maps.Keys(failed)), "err", err)
+		}
+		// A published column is marked seen, so a column that failed to write is left for a gossip copy to store.
+		toPublish = slices.DeleteFunc(toPublish, func(s *cltypes.DataColumnSidecar) bool { return failed[s.Index] })
 		if d.publishColumns != nil && len(toPublish) > 0 {
 			d.publishInBackground(ctx, toPublish)
 		}
@@ -1902,6 +1905,28 @@ func (d *peerdas) publishInBackground(ctx context.Context, sidecars []*cltypes.D
 		defer cancel()
 		d.publishColumns(ctx, sidecars)
 	}()
+}
+
+func (d *peerdas) writeColumnSidecarsBatched(ctx context.Context, slot uint64, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) (failed map[uint64]bool, err error) {
+	batchErr := d.columnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars)
+	if batchErr == nil {
+		return nil, nil
+	}
+	var firstSingleErr error
+	for _, sidecar := range sidecars {
+		if singleErr := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(sidecar.Index), sidecar); singleErr != nil {
+			if failed == nil {
+				failed = make(map[uint64]bool)
+				firstSingleErr = singleErr
+			}
+			failed[sidecar.Index] = true
+		}
+	}
+	if failed != nil {
+		return failed, fmt.Errorf("%w (after a failed batch write: %w)", firstSingleErr, batchErr)
+	}
+	log.Warn("[peerdas] batched data column write failed, the columns were written one at a time", "slot", slot, "blockRoot", blockRoot, "columnCount", len(sidecars), "err", batchErr)
+	return nil, nil
 }
 
 // publishFetchedColumns publishes the custody columns one peer response stored for a recent block, one call per block
