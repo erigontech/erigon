@@ -104,10 +104,10 @@ func (c *preparationExecutionClient) StartPayloadBuild(ctx context.Context, head
 }
 
 func TestGloasFullParentPreparationWithExecutionModule(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
 	synctest.Test(t, func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("long-running test")
-		}
 		ctx := t.Context()
 		fixture := newGloasPreparationIntegrationFixture(t)
 		require.True(t, fixture.store.IsPayloadVerified(fixture.parentRoot))
@@ -383,10 +383,10 @@ func prepareGossipIntegrationEnvelope(
 }
 
 func TestGloasGossipAcceptsEnvelopeWhenELInvalidatesPayload(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
 	synctest.Test(t, func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("long-running test")
-		}
 		fixture := newGloasPreparationIntegrationFixture(t)
 		_, childBlock, childEnvelope, _, childRoot, childSlot := produceGloasIntegrationChild(
 			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
@@ -416,10 +416,10 @@ func TestGloasGossipAcceptsEnvelopeWhenELInvalidatesPayload(t *testing.T) {
 }
 
 func TestGloasGossipReturnsBeforeNewPayloadFinishes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
 	synctest.Test(t, func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("long-running test")
-		}
 		fixture := newGloasPreparationIntegrationFixture(t)
 		_, childBlock, childEnvelope, _, childRoot, childSlot := produceGloasIntegrationChild(
 			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
@@ -456,10 +456,10 @@ func TestGloasGossipReturnsBeforeNewPayloadFinishes(t *testing.T) {
 }
 
 func TestGloasGossipAcceptsEnvelopeWithImportOnlyCommitmentFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
 	synctest.Test(t, func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("long-running test")
-		}
 		fixture := newGloasPreparationIntegrationFixture(t)
 		_, childBlock, childEnvelope, _, childRoot, childSlot := produceGloasIntegrationChild(
 			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
@@ -478,10 +478,10 @@ func TestGloasGossipAcceptsEnvelopeWithImportOnlyCommitmentFailure(t *testing.T)
 }
 
 func TestGloasGossipRejectsEnvelopeWithBadSignature(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
 	synctest.Test(t, func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("long-running test")
-		}
 		fixture := newGloasPreparationIntegrationFixture(t)
 		_, childBlock, childEnvelope, _, _, childSlot := produceGloasIntegrationChild(
 			t, fixture.handler, fixture.parentState, fixture.parentRoot, fixture.parentSlot,
@@ -497,10 +497,10 @@ func TestGloasGossipRejectsEnvelopeWithBadSignature(t *testing.T) {
 }
 
 func TestGloasCanonicalForkChoiceAdvancesExecutionHeadOverUnverifiedFullHead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
 	synctest.Test(t, func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("long-running test")
-		}
 		fixture := newGloasPreparationIntegrationFixture(t)
 		fixture.runForkChoice(t)
 		_, childBlock, childEnvelope, childPayload, childRoot, childSlot := produceGloasIntegrationChild(
@@ -572,10 +572,10 @@ func TestGloasPreparationDiscardsBuildAfterPayloadInvalidation(t *testing.T) {
 }
 
 func TestGloasPreparationDiscardsBuildAfterHeadChange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
 	synctest.Test(t, func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("long-running test")
-		}
 		fixture := newGloasPreparationIntegrationFixture(t)
 		fixture.runForkChoice(t)
 		_, childBlock, _, _, childRoot, childSlot := produceGloasIntegrationChild(

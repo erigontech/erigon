@@ -69,10 +69,21 @@ type witnessResultCache struct {
 
 	maxBytes int // resident-bytes cap; 0 disables the byte cap (count-only)
 
+	// addMu serializes Add; mu alone cannot, as onEvict takes it while Add runs.
+	addMu         sync.Mutex
 	mu            sync.Mutex
 	residentBytes int
 	entryBytes    map[common.Hash]int
 	building      map[common.Hash]*witnessBuild
+}
+
+// WitnessResultCache is a witness LRU bounded by entry count and resident bytes.
+type WitnessResultCache = witnessResultCache
+
+// NewWitnessResultCache holds at most blocks witnesses and maxBytes resident bytes,
+// always keeping the newest witness.
+func NewWitnessResultCache(blocks uint, maxBytes int) *WitnessResultCache {
+	return newWitnessResultCache(blocks, maxBytes, false, false)
 }
 
 type witnessBuild struct {
@@ -130,6 +141,25 @@ func (c *witnessResultCache) store(num uint64, hash common.Hash, r *ExecutionWit
 	r.headerByNumber = nil // only the build's BLOCKHASH lookups read it
 	c.Add(hash, r)
 	c.feed.publish(witnessPush{num: num, hash: hash, result: r})
+}
+
+// AddPayloadWitness caches r without Keys and headerByNumber, which the payload-witness route never serves.
+func (c *witnessResultCache) AddPayloadWitness(hash common.Hash, r *ExecutionWitnessResult) {
+	r.Keys = nil
+	r.headerByNumber = nil
+	c.Add(hash, r)
+}
+
+// BuildPayloadWitness runs one build per hash for all concurrent callers and caches its result as AddPayloadWitness does.
+func (c *witnessResultCache) BuildPayloadWitness(ctx context.Context, hash common.Hash, build func(context.Context) (*ExecutionWitnessResult, error)) (*ExecutionWitnessResult, error) {
+	// A caller that missed the cache before an earlier build stored its result leads the next build.
+	cachedOrBuild := func(ctx context.Context) (*ExecutionWitnessResult, error) {
+		if r, ok := c.Get(hash); ok {
+			return r, nil
+		}
+		return build(ctx)
+	}
+	return c.buildOnce(ctx, hash, cachedOrBuild, func(r *ExecutionWitnessResult, _ time.Duration) { c.AddPayloadWitness(hash, r) })
 }
 
 type witnessStoreFunc func(r *ExecutionWitnessResult, took time.Duration)
@@ -195,6 +225,8 @@ func (c *witnessResultCache) unsubscribe(ch chan witnessPush) { c.feed.unsubscri
 // evicting oldest entries when either the count cap or the byte cap would be exceeded.
 func (c *witnessResultCache) Add(hash common.Hash, r *ExecutionWitnessResult) bool {
 	size := witnessResultSize(r)
+	c.addMu.Lock()
+	defer c.addMu.Unlock()
 
 	c.mu.Lock()
 	prev, existed := c.entryBytes[hash]

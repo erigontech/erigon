@@ -452,14 +452,20 @@ func readCanonicalBlock(ctx context.Context, tx kv.Tx, r BeaconSnapshotReader, s
 	if err != nil {
 		return nil, common.Hash{}, err
 	}
-	if block == nil || block.Version() < clparams.GloasVersion {
-		return block, common.Hash{}, nil
-	}
-	root, err = block.Block.HashSSZ()
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
 	if err != nil {
 		return nil, common.Hash{}, err
 	}
-	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	if block == nil {
+		if canonicalRoot != (common.Hash{}) {
+			return nil, common.Hash{}, fmt.Errorf("canonical block at slot %d is missing", slot)
+		}
+		return nil, common.Hash{}, nil
+	}
+	if block.Version() < clparams.GloasVersion {
+		return block, common.Hash{}, nil
+	}
+	root, err = block.Block.HashSSZ()
 	if err != nil {
 		return nil, common.Hash{}, err
 	}

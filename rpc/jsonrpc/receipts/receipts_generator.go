@@ -447,7 +447,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			if err != nil {
 				return nil, err
 			}
-			written.touchAll()
+			if err := written.touchAll(); err != nil {
+				return nil, err
+			}
 			stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipt", nil)
 			if err != nil {
 				return nil, err
@@ -651,7 +653,9 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 				if err != nil {
 					return nil, err
 				}
-				written.touchAll()
+				if err := written.touchAll(); err != nil {
+					return nil, err
+				}
 				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipts", nil)
 				if err != nil {
 					return nil, err
@@ -810,17 +814,17 @@ type blockWrites struct {
 	sd         *execctx.SharedDomains
 	tx         kv.TemporalTx
 	blockStart uint64
-	keys       map[kv.Domain]map[string]struct{}
+	keys       map[string]struct{}
 	scanned    map[string]struct{}
 }
 
 func (w *blockWrites) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
-	w.record(domain, k)
+	w.record(k)
 	return w.TemporalPutDel.DomainPut(domain, k, v, txNum, prevVal)
 }
 
 func (w *blockWrites) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
-	w.record(domain, k)
+	w.record(k)
 	if domain == kv.AccountsDomain {
 		if err := w.recordStorageDeleted(k); err != nil {
 			return err
@@ -864,28 +868,26 @@ func (w *blockWrites) recordStorageDeleted(addr []byte) error {
 			return err
 		}
 		if len(v) > 0 {
-			w.record(kv.StorageDomain, k)
+			w.record(k)
 		}
 	}
 	return nil
 }
 
-func (w *blockWrites) record(domain kv.Domain, k []byte) {
+func (w *blockWrites) record(k []byte) {
 	if w.keys == nil {
-		w.keys = map[kv.Domain]map[string]struct{}{}
+		w.keys = map[string]struct{}{}
 	}
-	if w.keys[domain] == nil {
-		w.keys[domain] = map[string]struct{}{}
-	}
-	w.keys[domain][string(k)] = struct{}{}
+	w.keys[string(k)] = struct{}{}
 }
 
-func (w *blockWrites) touchAll() {
-	for domain, keys := range w.keys {
-		for k := range keys {
-			w.sd.GetCommitmentContext().TouchKey(domain, k, nil)
+func (w *blockWrites) touchAll() error {
+	for k := range w.keys {
+		if err := w.sd.GetCommitmentContext().TouchKeyFromState(w.tx, []byte(k)); err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
 // applyCancellable runs apply with the EVM wired to ctx: a cancelled context aborts it

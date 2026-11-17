@@ -233,6 +233,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				}
 			}
 
+			var prevCode []byte
 			if d.balance.Ok || d.nonce.Ok || d.incarnation.Ok || d.codeHash.Ok || d.codeWritten {
 				// A WriteSet may contain only the changed account fields, so
 				// overlay it on the current state. Self-destruct is the exception:
@@ -249,6 +250,10 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 						if err := accounts.DeserialiseV3(&acc, v); err != nil {
 							return err
 						}
+					}
+					// An EIP-7702 authority comes from a signature, so it is never a predeploy whose code has no account record.
+					if _, isDelegation := types.ParseDelegation(d.code); isDelegation && acc.IsEmptyCodeHash() {
+						prevCode = []byte{}
 					}
 				}
 				if d.balance.Ok {
@@ -286,7 +291,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
 						return err
 					}
-				} else if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, nil); err != nil {
+				} else if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, prevCode); err != nil {
 					return err
 				}
 			}
@@ -940,6 +945,19 @@ func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key common.
 	} else {
 		fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d, stack: %s\n", r.tracePrefix, address, key, &res, r.txNum, dbg.Stack())
 	}
+}
+
+func (r *ReaderV3) ReadAccountCodeSegmentTo(address accounts.Address, from uint64, dst []byte) (bool, error) {
+	segmentReader, ok := r.getter.(execctxapi.CodeSegmentGetter)
+	if !ok {
+		return false, nil
+	}
+	r.addr = address.Value()
+	copied, err := segmentReader.ReadCodeSegmentTo(r.addr[:], r.txNum, from, dst)
+	if r.trace && err == nil && copied {
+		fmt.Printf("%sReadAccountCodeSegmentTo [%x] => from %d, %d bytes, txNum: %d, stack: %s\n", r.tracePrefix, address, from, len(dst), r.txNum, dbg.Stack())
+	}
+	return copied, err
 }
 
 func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {

@@ -31,10 +31,9 @@ type ReceiptsFilterAggregator struct {
 	receiptsFilterLock sync.RWMutex
 
 	blockMu sync.Mutex
-	block   []*remoteproto.SubscribeReceiptsReply // receipts of the block in progress
-	// markers is set once the backend flags the last receipt of a block; before that each
-	// receipt is sent on its own, so a backend without the flag gets no added latency.
-	markers bool
+	// block holds the receipts of the block in progress until the backend flags its last one: every
+	// backend that passes the interface version check sets LastInBlock.
+	block []*remoteproto.SubscribeReceiptsReply
 }
 
 // ReceiptsFilter filters receipts by transaction hashes
@@ -158,11 +157,6 @@ func (a *ReceiptsFilterAggregator) createFilterRequest() *remoteproto.ReceiptsFi
 func (a *ReceiptsFilterAggregator) distributeReceipt(receipt *remoteproto.SubscribeReceiptsReply) {
 	a.blockMu.Lock()
 	defer a.blockMu.Unlock()
-	a.markers = a.markers || receipt.LastInBlock
-	if !a.markers {
-		a.distributeBlock([]*remoteproto.SubscribeReceiptsReply{receipt})
-		return
-	}
 	if len(a.block) > 0 && a.block[0].BlockNumber != receipt.BlockNumber { // the flag got lost
 		a.distributeBlock(a.block)
 		a.block = nil
@@ -174,8 +168,7 @@ func (a *ReceiptsFilterAggregator) distributeReceipt(receipt *remoteproto.Subscr
 	}
 }
 
-// endStream sends a block the ended stream left half-received and forgets that the backend marks
-// blocks: the next stream may come from a backend that does not.
+// endStream sends a block the ended stream left half-received.
 func (a *ReceiptsFilterAggregator) endStream() {
 	a.blockMu.Lock()
 	defer a.blockMu.Unlock()
@@ -183,7 +176,6 @@ func (a *ReceiptsFilterAggregator) endStream() {
 		a.distributeBlock(a.block)
 		a.block = nil
 	}
-	a.markers = false
 }
 
 // distributeBlock sends every subscriber the block's receipts it asked for as one event. The
