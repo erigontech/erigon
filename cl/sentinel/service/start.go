@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/p2p/enode"
 )
@@ -139,12 +140,14 @@ func StartServe(
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 		return
 	}
-	// Create a gRPC server
-	gRPCserver := grpc.NewServer(grpc.Creds(creds))
-	// go server.ListenToGossip()
-	// Regiser our server as a gRPC server
-	sentinelproto.RegisterSentinelServer(gRPCserver, server)
+	gRPCserver := newGRPCServer(server, creds)
 	if err := gRPCserver.Serve(lis); err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 	}
+}
+
+func newGRPCServer(server sentinelproto.SentinelServer, creds credentials.TransportCredentials) *grpc.Server {
+	gRPCserver := grpcutil.NewServerWithOpts(creds)
+	sentinelproto.RegisterSentinelServer(gRPCserver, server)
+	return gRPCserver
 }
