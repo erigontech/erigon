@@ -592,7 +592,7 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
 * `--caplin.blobs-immediate-backfill`: Tells Caplin to immediately backfill blobs.
   * Default: `false`
 * `--caplin.blobs-backfill-endpoint value`: Beacon API endpoint that the blob backfill asks for a block's blobs before peers. Repeat it for fallback endpoints. The blobs are verified against the block before they are stored. Without `--caplin.blobs-archive` the backfill covers only the blob retention window (4096 epochs, about 18 days on mainnet); with it, older slots need an archive-capable endpoint.
-* `--caplin.blobs-backfill-endpoint-workers value`: Number of CPUs the blob backfill uses for blobs from `--caplin.blobs-backfill-endpoint`; up to twice as many blocks are fetched at a time. Set it to the number of CPUs the node can spare: fewer on a validator node, more on a dedicated archive node. The node logs the setting and the CPU core count once at startup.
+* `--caplin.blobs-backfill-endpoint-workers value`: Number of KZG proofs the blob backfill computes at a time, one CPU each, for blobs from `--caplin.blobs-backfill-endpoint` whose proof the endpoint left out; up to twice as many blocks are fetched at a time, and verifying them, about 2% of the proof cost, is not limited. Set it to the number of CPUs the node can spare: fewer on a validator node, more on a dedicated archive node. The node logs the setting and the CPU core count once at startup.
   * Default: `0` — a quarter of the CPUs the process may use (`GOMAXPROCS`, which follows a container's CPU limit), at least 1
 * `--caplin.blobs-no-pruning`: Disables blob pruning.
   * Default: `false`

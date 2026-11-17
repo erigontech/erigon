@@ -1112,7 +1112,7 @@ var (
 	}
 	CaplinBlobsBackfillEndpointWorkersFlag = cli.IntFlag{
 		Name:  "caplin.blobs-backfill-endpoint-workers",
-		Usage: "number of CPUs the blob backfill uses for blobs from --caplin.blobs-backfill-endpoint (up to twice as many blocks are fetched at a time). 0 picks a quarter of the CPUs the process may use (GOMAXPROCS, which follows a container's CPU limit), at least 1; set it to the CPUs the node can spare (lower keeps a validator node responsive, a dedicated archive node can use more)",
+		Usage: "number of KZG proofs the blob backfill computes at a time, one CPU each, for blobs from --caplin.blobs-backfill-endpoint whose proof the endpoint left out (up to twice as many blocks are fetched at a time; verifying them costs about 2% of computing proofs and is not limited). 0 picks a quarter of the CPUs the process may use (GOMAXPROCS, which follows a container's CPU limit), at least 1; set it to the CPUs the node can spare (lower keeps a validator node responsive, a dedicated archive node can use more)",
 		Value: 0,
 	}
 	CaplinDisableBlobPruningFlag = cli.BoolFlag{

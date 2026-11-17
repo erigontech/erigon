@@ -257,7 +257,7 @@ type endpointState struct {
 }
 
 // blobEndpointWorkers returns the configured worker count, or for 0 a quarter of cpus and at least one: each worker
-// keeps about one CPU busy while it verifies blobs.
+// keeps about one CPU busy while it computes a missing proof.
 func blobEndpointWorkers(configured, cpus int) int {
 	if configured > 0 {
 		return configured
@@ -265,8 +265,9 @@ func blobEndpointWorkers(configured, cpus int) int {
 	return max(1, cpus/4)
 }
 
-// SetBlobEndpoints makes the backfill ask the beacon API endpoints for a block's blobs before peers, workers blocks at
-// a time; 0 workers picks the count from GOMAXPROCS, which unlike NumCPU follows a container's CPU limit.
+// SetBlobEndpoints makes the backfill ask the beacon API endpoints for a block's blobs before peers. workers bounds the
+// missing proofs computed at a time, and twice as many blocks are fetched at a time; 0 workers picks the count from
+// GOMAXPROCS, which unlike NumCPU follows a container's CPU limit.
 func (b *BlobHistoryDownloader) SetBlobEndpoints(endpoints []string, workers int) {
 	b.endpoints = endpoints
 	cpus := runtime.GOMAXPROCS(0)
@@ -280,7 +281,7 @@ func (b *BlobHistoryDownloader) SetBlobEndpoints(endpoints []string, workers int
 	}
 	b.logger.Info("[BlobHistoryDownloader] Blob backfill asks beacon API endpoints before peers", "endpoints", strings.Join(hosts, ","),
 		"workers", b.endpointWorkers, "auto", workers <= 0, "usableCPUs", cpus,
-		"tuning", "each worker uses about one CPU while it verifies blobs; the default is a quarter of the usable CPUs, set --caplin.blobs-backfill-endpoint-workers to the CPUs the node can spare")
+		"tuning", "each worker uses about one CPU while it computes a missing proof; the default is a quarter of the usable CPUs, set --caplin.blobs-backfill-endpoint-workers to the CPUs the node can spare")
 	if b.endpointWorkers > cpus {
 		b.logger.Warn("[BlobHistoryDownloader] More blob backfill workers than usable CPUs: the backfill competes with chain-tip work",
 			"workers", b.endpointWorkers, "usableCPUs", cpus)

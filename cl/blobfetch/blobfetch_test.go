@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/spf13/afero"
@@ -112,5 +113,27 @@ func TestFetchAndStoreComputesPlaceholderProofs(t *testing.T) {
 			require.True(t, found)
 			require.Len(t, stored, 2)
 		})
+	}
+}
+
+func TestFetchAndStoreComputesAProofOnlyWithAFreeBudgetSlot(t *testing.T) {
+	block, root, sidecars := prooflessBlock(t, 1, common.Bytes48(goethkzg.PointAtInfinity))
+	store := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
+	budget := semaphore.NewWeighted(1)
+	require.True(t, budget.TryAcquire(1))
+
+	done := make(chan error, 1)
+	go func() { done <- FetchAndStore(t.Context(), store, serveSidecars(t, sidecars), root, block, budget) }()
+	select {
+	case <-done:
+		t.Fatal("the proof was computed while the budget was taken")
+	case <-time.After(300 * time.Millisecond):
+	}
+	budget.Release(1)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the proof was not computed after a budget slot was released")
 	}
 }

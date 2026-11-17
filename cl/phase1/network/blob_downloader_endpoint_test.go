@@ -246,13 +246,20 @@ func TestBlobHistoryDownloaderCountsMissesInSlotOrder(t *testing.T) {
 	blocks, peer := endpointBlocks(t, 100, 99, 98, 97, 96, 95)
 	slow, older := blocks[2], blocks[5]
 	requests := &atomic.Int32{}
+	misses := make(chan struct{}, 4)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		id := common.HexToHash(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:])
 		for _, b := range []endpointBlock{slow, older} {
 			if b.root == id {
 				if b.root == slow.root {
-					time.Sleep(300 * time.Millisecond)
+					// Answer the served slot only after the four misses around it, so they finish first.
+					for range 4 {
+						select {
+						case <-misses:
+						case <-time.After(5 * time.Second):
+						}
+					}
 				}
 				if err := json.NewEncoder(w).Encode(map[string]any{"data": b.sidecars}); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -261,6 +268,10 @@ func TestBlobHistoryDownloaderCountsMissesInSlotOrder(t *testing.T) {
 			}
 		}
 		w.WriteHeader(http.StatusBadRequest)
+		select {
+		case misses <- struct{}{}:
+		default:
+		}
 	}))
 	t.Cleanup(srv.Close)
 	downloader := newEndpointDownloader(t, []string{srv.URL}, 4, peer)

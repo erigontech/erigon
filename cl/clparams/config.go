@@ -55,7 +55,7 @@ type CaplinConfig struct {
 	// history since Deneb.
 	BlobsArchiveFromSlot uint64
 	// BlobsBackfillEndpoints are beacon API endpoints the blob backfill asks for a block's blobs before peers;
-	// BlobsBackfillEndpointWorkers blocks are fetched and verified at a time.
+	// BlobsBackfillEndpointWorkers bounds the missing KZG proofs computed at a time, and twice as many blocks are fetched.
 	BlobsBackfillEndpoints       []string
 	BlobsBackfillEndpointWorkers int
 	SnapshotGenerationEnabled    bool
