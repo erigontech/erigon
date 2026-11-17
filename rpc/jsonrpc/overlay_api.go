@@ -493,7 +493,8 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := blockCtx.Rules(chainConfig)
 
-	if stateOverride != nil && len(*stateOverride) > 0 {
+	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
+	if hasStateOverrides {
 		if err := stateOverride.Override(statedb, nil, rules); err != nil {
 			return nil, err
 		}
@@ -501,7 +502,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 
 	// Assertions can observe earlier transactions' fee effects, so any frame
 	// transaction requires normal fee accounting for the whole block.
-	relaxedReplay := stateOverride != nil && len(*stateOverride) > 0 && !slices.ContainsFunc(replayTransactions, func(txn types.Transaction) bool {
+	relaxedReplay := hasStateOverrides && !slices.ContainsFunc(replayTransactions, func(txn types.Transaction) bool {
 		return txn.Type() == types.FrameTxType
 	})
 	// Overrides may increase aggregate gas use, so the block gas pool is unrestricted.

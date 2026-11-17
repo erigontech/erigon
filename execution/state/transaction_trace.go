@@ -146,11 +146,11 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 		if before != after {
 			trace.AccountFlags[address] |= accountCodeChanged
 			if before.IsEmpty() && !after.IsEmpty() {
-				code, err := ibs.GetCode(address)
+				_, delegation, err := ibs.GetDelegatedDesignation(address)
 				if err != nil {
 					return nil, err
 				}
-				if _, delegation := types.ParseDelegation(code); !delegation {
+				if !delegation {
 					trace.Deployed = append(trace.Deployed, CodeChange{address, after})
 				}
 			}
