@@ -27,7 +27,8 @@ type AggregationPool interface {
 	// AddAttestation adds a single attestation to the pool.
 	AddAttestation(att *solid.Attestation) error
 	// AddVerifiedAttestation is AddAttestation for a vote whose signature the caller has already verified and
-	// decompressed, so the pool does not decompress it again; a nil sig decompresses att's signature.
+	// decompressed. From Electra on the pool adds sig to the committee aggregate without decompressing it again;
+	// before Electra, or with a nil sig, it uses att's compressed signature.
 	AddVerifiedAttestation(att *solid.Attestation, sig *bls.Signature) error
 	GetAggregatationByRoot(root common.Hash) *solid.Attestation
 	// GetAggregatationByRootAndCommittee returns the committee's aggregate of the data, also when the
