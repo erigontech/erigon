@@ -215,6 +215,8 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 			rm := &WriteSet{}
 			rm.SetEmptyRemoval(addr, Version{TxIndex: int(idx) - 1})
 			stamps = append(stamps, rm)
+			d := vm.derivedOf(addr)
+			d.removals = append(d.removals, int(idx)-1)
 			if idx == maxIdx {
 				continue
 			}
@@ -223,6 +225,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 				live := &WriteSet{}
 				live.SetBalance(addr, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: int(next) - 1}}})
 				stamps = append(stamps, live)
+				d.liveZeros = append(d.liveZeros, int(next)-1)
 			}
 		}
 	}
@@ -249,6 +252,8 @@ func (vm *VersionMap) SeedAddresses() {
 		av := VersionedAccountView{addr: addr, txIdx: int(minIdx), vm: vm}
 		if acc := av.Account(); acc != nil {
 			vm.WriteAddressExists(addr, Version{TxIndex: int(minIdx) - 1}, acc)
+			d := vm.derivedOf(addr)
+			d.marker, d.markerAt = acc, int(minIdx)-1
 		}
 	}
 }

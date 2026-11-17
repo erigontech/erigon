@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -269,6 +270,9 @@ type VersionMap struct {
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
+	// derived holds the cells that SeedEmptyRemovals and SeedAddresses derive from bal and the
+	// pre-block state. Seeding writes it before execution, and it is read-only after.
+	derived map[accounts.Address]*derivedSeeds
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -1913,8 +1917,9 @@ func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accoun
 }
 
 // DropWrite removes the cell of a write that an earlier run of the tx at v.TxIndex made and its run at v
-// does not make. A value the access list seeds there is put back as Done instead: before the seal, a
-// reader takes a seeded cell as the tx's final write and validation trusts it.
+// does not make. A value the access list seeds there, or that seeding derives from it, is put back as
+// Done instead: before the seal, a reader takes a seeded cell as the tx's final write and validation
+// trusts it.
 func (vm *VersionMap) DropWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version) {
 	if vm.HasBAL && vm.resetToSeed(addr, path, key, v) {
 		return
@@ -1935,6 +1940,9 @@ func (vm *VersionMap) resetToSeed(addr accounts.Address, path AccountPath, key a
 	defer e.mu.Unlock()
 	var stamped bool
 	defer vm.endDeleteStamp(v.TxIndex, &stamped)
+	if d := vm.derived[addr]; d != nil && d.reset(vm, e, path, v, &stamped) {
+		return true
+	}
 	switch path {
 	case BalancePath:
 		c, ok := balChangeAt(ac.BalanceChanges, func(c *types.BalanceChange) uint32 { return c.Index }, v.TxIndex)
@@ -1974,15 +1982,21 @@ func (vm *VersionMap) resetToSeed(addr accounts.Address, path AccountPath, key a
 	return true
 }
 
-// resetCell sets the cell at v.TxIndex back to seed as Done. Before the seal, a Done cell already
-// holds the seed. As in flushCell, a changed value takes v's incarnation, so that a reader of the
-// earlier value is invalid.
+// resetCell sets the cell at v.TxIndex back to the access list's value seed as Done.
 func resetCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], v Version, seed T, eq func(a, b T) bool, stamped *bool) {
+	resetCellTo(vm, cells, v, seed, ValueChanged, AccountFromBase, eq, stamped)
+}
+
+// resetCellTo sets the cell at v.TxIndex back to a seeded value, with its status and source, as
+// Done. Before the seal, a Done cell is the seed, but a flush of an equal value keeps it Done and
+// rewrites its status and source. As in flushCell, a change takes v's incarnation, so that a reader
+// of the earlier cell is invalid.
+func resetCellTo[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], v Version, seed T, status valueStatus, src AccountSource, eq func(a, b T) bool, stamped *bool) {
 	if cells == nil {
 		return
 	}
 	c, ok := cells.Get(v.TxIndex)
-	if !ok || c.loadFlag() == FlagDone {
+	if !ok || c.loadFlag() == FlagDone && c.valStatus == status && c.accSource == src {
 		return
 	}
 	if !*stamped {
@@ -1990,11 +2004,50 @@ func resetCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], v Ve
 		*stamped = true
 	}
 	inc := c.loadInc()
-	if !eq(c.Value, seed) {
+	if !eq(c.Value, seed) || c.valStatus != status || c.accSource != src {
 		inc = v.Incarnation
 	}
-	c.Value, c.valStatus = seed, ValueChanged
+	c.Value, c.valStatus, c.accSource = seed, status, src
 	c.setState(inc, FlagDone)
+}
+
+// derivedSeeds holds the cells that seeding derives for an account.
+type derivedSeeds struct {
+	removals  []int // txs that remove the account: a destruct and a deleted balance
+	liveZeros []int // txs that revive the account with a zero balance
+	marker    *accounts.Account
+	markerAt  int
+}
+
+func (vm *VersionMap) derivedOf(addr accounts.Address) *derivedSeeds {
+	if vm.derived == nil {
+		vm.derived = map[accounts.Address]*derivedSeeds{}
+	}
+	d := vm.derived[addr]
+	if d == nil {
+		d = &derivedSeeds{}
+		vm.derived[addr] = d
+	}
+	return d
+}
+
+// reset puts back the derived cell of path at v.TxIndex, and reports whether there is one. A
+// removal is seeded after a zero balance at the same tx, so it wins.
+func (d *derivedSeeds) reset(vm *VersionMap, e *AddressEntry, path AccountPath, v Version, stamped *bool) bool {
+	removal := slices.Contains(d.removals, v.TxIndex)
+	switch {
+	case path == SelfDestructPath && removal:
+		resetCellTo(vm, e.SelfDestruct, v, true, ValueChanged, AccountFromBase, eqBool, stamped)
+	case path == BalancePath && removal:
+		resetCellTo(vm, e.Balance, v, uint256.Int{}, ValueDeleted, AccountFromBase, eqUint256, stamped)
+	case path == BalancePath && slices.Contains(d.liveZeros, v.TxIndex):
+		resetCellTo(vm, e.Balance, v, uint256.Int{}, ValueChanged, AccountFromBase, eqUint256, stamped)
+	case path == AddressPath && d.marker != nil && d.markerAt == v.TxIndex:
+		resetCellTo(vm, e.Address, v, d.marker, ValueChanged, AccountFromBAL, eqAccount, stamped)
+	default:
+		return false
+	}
+	return true
 }
 
 func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {

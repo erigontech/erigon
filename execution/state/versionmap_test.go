@@ -2742,17 +2742,17 @@ func TestWritesAlreadySeededRefusesACellTheNetZeroResetMadeDone(t *testing.T) {
 	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 3, 42, ValueChanged)))
 }
 
-// A run that dropped the slot deleted the seed; the cell a later run re-creates is not the seed,
-// even once the net-zero reset makes it Done.
-func TestWritesAlreadySeededRefusesARecreatedCell(t *testing.T) {
+// A run overwrote the seed and a re-run dropped the write: the access list's value is back, but a
+// reader may hold the overwritten value.
+func TestWritesAlreadySeededRefusesASeedADroppedWritePutBack(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
 	slot := accounts.InternKey(common.Hash{0x04})
 	vm := NewVersionMap(seededSlotBAL(addr, slot))
-	vm.Delete(addr, StoragePath, slot, 1, false)
-	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 2, 42, ValueChanged), false)
-	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 3, 5, ValueUnchanged), false)
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 1, 9, ValueChanged), false)
+	vm.DropWrite(addr, StoragePath, slot, Version{TxIndex: 1, Incarnation: 2})
+	require.Equal(t, *uint256.NewInt(42), requireDoneCell(t, vm.load(addr).Storage[slot], 1, 2).Value)
 
-	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 4, 42, ValueChanged)))
+	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 3, 42, ValueChanged)))
 }
 
 func TestWritesAlreadySeededKeepsTheSeedThroughValidation(t *testing.T) {
