@@ -194,9 +194,8 @@ func TestClaimColumnsMarksWithoutPublishing(t *testing.T) {
 	service, _, _ := newGloasClaimTestService(t)
 	sidecars := []*cltypes.DataColumnSidecar{elBuiltGloasSidecar(100, 3), elBuiltGloasSidecar(100, 5)}
 
-	claimed, _ := service.ClaimColumns(sidecars)
+	service.ClaimColumns(sidecars)
 
-	require.Equal(t, sidecars, claimed)
 	for _, sidecar := range sidecars {
 		require.True(t, service.seenGloas.contains(gloasSeenKey(sidecar)))
 	}
@@ -207,11 +206,10 @@ func TestClaimColumnsPublishPublishesTheClaimedColumns(t *testing.T) {
 	published := recordPublishes(publisher)
 	sidecars := []*cltypes.DataColumnSidecar{elBuiltGloasSidecar(100, 3), elBuiltGloasSidecar(100, 5)}
 
-	claimed, publish := service.ClaimColumns(sidecars)
+	publish := service.ClaimColumns(sidecars)
 	require.Empty(t, *published)
 	publish(t.Context())
 
-	require.Equal(t, sidecars, claimed)
 	requirePublished(t, *published, sidecars...)
 }
 
@@ -226,7 +224,7 @@ func TestClaimColumnsPublishReleasesOnlyAFailedColumn(t *testing.T) {
 			published := recordPublishes(publisher, outcomes...)
 			sidecars := []*cltypes.DataColumnSidecar{elBuiltGloasSidecar(100, 3), elBuiltGloasSidecar(100, 5)}
 
-			_, publish := service.ClaimColumns(sidecars)
+			publish := service.ClaimColumns(sidecars)
 			publish(t.Context())
 
 			requirePublished(t, *published, sidecars...)
@@ -241,7 +239,7 @@ func TestClaimColumnsPublishFailureKeepsAMarkTakenAfterItsClaimWasReleasedAndRet
 	service, publisher, _ := newGloasClaimTestService(t)
 	recordPublishes(publisher, errors.New("topic not found"))
 	sidecar := elBuiltGloasSidecar(100, 3)
-	_, publish := service.ClaimColumns([]*cltypes.DataColumnSidecar{sidecar})
+	publish := service.ClaimColumns([]*cltypes.DataColumnSidecar{sidecar})
 	service.seenGloas.cache.Remove(gloasSeenKey(sidecar))
 	_, retaken := service.seenGloas.claim(gloasSeenKey(sidecar))
 	require.True(t, retaken)
@@ -258,10 +256,8 @@ func TestClaimColumnsSkipsColumnsSeenBefore(t *testing.T) {
 	_, claimedBefore := service.seenGloas.claim(gloasSeenKey(seen))
 	require.True(t, claimedBefore)
 
-	claimed, publish := service.ClaimColumns([]*cltypes.DataColumnSidecar{seen, fresh})
-	publish(t.Context())
+	service.ClaimColumns([]*cltypes.DataColumnSidecar{seen, fresh})(t.Context())
 
-	require.Equal(t, []*cltypes.DataColumnSidecar{fresh}, claimed)
 	requirePublished(t, *published, fresh)
 	require.True(t, service.seenGloas.contains(gloasSeenKey(seen)))
 }
@@ -272,10 +268,8 @@ func TestClaimColumnsWithAForkDigestErrorMarksNothing(t *testing.T) {
 	published := recordPublishes(publisher)
 	sidecar := elBuiltGloasSidecar(100, 3)
 
-	claimed, publish := service.ClaimColumns([]*cltypes.DataColumnSidecar{sidecar})
-	publish(t.Context())
+	service.ClaimColumns([]*cltypes.DataColumnSidecar{sidecar})(t.Context())
 
-	require.Empty(t, claimed)
 	require.Empty(t, *published)
 	require.False(t, service.seenGloas.contains(gloasSeenKey(sidecar)))
 }
@@ -285,10 +279,8 @@ func TestClaimColumnsForANonImportableBlockClaimsNothing(t *testing.T) {
 	published := recordPublishes(publisher)
 	sidecar := elBuiltGloasSidecar(elTestFinalized.Epoch*service.cfg.SlotsPerEpoch, 3)
 
-	claimed, publish := service.ClaimColumns([]*cltypes.DataColumnSidecar{sidecar})
-	publish(t.Context())
+	service.ClaimColumns([]*cltypes.DataColumnSidecar{sidecar})(t.Context())
 
-	require.Empty(t, claimed)
 	require.Empty(t, *published)
 	require.False(t, service.seenGloas.contains(gloasSeenKey(sidecar)))
 }

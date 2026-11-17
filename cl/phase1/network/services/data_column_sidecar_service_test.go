@@ -1444,8 +1444,8 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenALocalClaimIsTa
 	verifyDataColumnSidecarWithCommitments = t.mockFuncs.VerifyDataColumnSidecarWithCommitments
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
 	verifyDataColumnSidecarKZGProofsWithCommitments = func(sidecar *cltypes.DataColumnSidecar, _ *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
-		claimed, _ := service.ClaimColumns([]*cltypes.DataColumnSidecar{sidecar})
-		t.Len(claimed, 1)
+		service.ClaimColumns([]*cltypes.DataColumnSidecar{sidecar})
+		t.True(service.seenGloas.contains(seenGloasSidecarKey{beaconBlockRoot: sidecar.BeaconBlockRoot, index: sidecar.Index}))
 		return true
 	}
 	t.mockSyncedData.EXPECT().Syncing().Return(false)

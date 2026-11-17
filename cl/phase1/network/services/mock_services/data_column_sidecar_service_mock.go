@@ -44,12 +44,11 @@ func (m *MockDataColumnSidecarService) EXPECT() *MockDataColumnSidecarServiceMoc
 }
 
 // ClaimColumns mocks base method.
-func (m *MockDataColumnSidecarService) ClaimColumns(sidecars []*cltypes.DataColumnSidecar) ([]*cltypes.DataColumnSidecar, func(context.Context)) {
+func (m *MockDataColumnSidecarService) ClaimColumns(sidecars []*cltypes.DataColumnSidecar) func(context.Context) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ClaimColumns", sidecars)
-	ret0, _ := ret[0].([]*cltypes.DataColumnSidecar)
-	ret1, _ := ret[1].(func(context.Context))
-	return ret0, ret1
+	ret0, _ := ret[0].(func(context.Context))
+	return ret0
 }
 
 // ClaimColumns indicates an expected call of ClaimColumns.
@@ -65,19 +64,19 @@ type MockDataColumnSidecarServiceClaimColumnsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockDataColumnSidecarServiceClaimColumnsCall) Return(claimed []*cltypes.DataColumnSidecar, publish func(context.Context)) *MockDataColumnSidecarServiceClaimColumnsCall {
-	c.Call = c.Call.Return(claimed, publish)
+func (c *MockDataColumnSidecarServiceClaimColumnsCall) Return(publish func(context.Context)) *MockDataColumnSidecarServiceClaimColumnsCall {
+	c.Call = c.Call.Return(publish)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockDataColumnSidecarServiceClaimColumnsCall) Do(f func([]*cltypes.DataColumnSidecar) ([]*cltypes.DataColumnSidecar, func(context.Context))) *MockDataColumnSidecarServiceClaimColumnsCall {
+func (c *MockDataColumnSidecarServiceClaimColumnsCall) Do(f func([]*cltypes.DataColumnSidecar) func(context.Context)) *MockDataColumnSidecarServiceClaimColumnsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockDataColumnSidecarServiceClaimColumnsCall) DoAndReturn(f func([]*cltypes.DataColumnSidecar) ([]*cltypes.DataColumnSidecar, func(context.Context))) *MockDataColumnSidecarServiceClaimColumnsCall {
+func (c *MockDataColumnSidecarServiceClaimColumnsCall) DoAndReturn(f func([]*cltypes.DataColumnSidecar) func(context.Context)) *MockDataColumnSidecarServiceClaimColumnsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

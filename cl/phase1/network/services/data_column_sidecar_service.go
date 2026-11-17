@@ -352,25 +352,28 @@ func (s *dataColumnSidecarService) shouldStore(slot uint64, blockRoot common.Has
 // PublishColumns marks each sidecar of one block as seen and publishes it on its subnet, unless the sidecar was seen
 // already. The sidecars must be on subnets this node subscribes to.
 func (s *dataColumnSidecarService) PublishColumns(ctx context.Context, sidecars []*cltypes.DataColumnSidecar) {
-	publish, ok := s.localColumnPublisher(sidecars)
-	if !ok {
-		return
-	}
-	for _, sidecar := range sidecars {
-		release, claimed := s.claimSeen(sidecar)
-		if claimed {
-			publish(ctx, sidecar, release)
-		}
-	}
+	s.ClaimColumns(sidecars)(ctx)
 }
 
 // ClaimColumns marks the unseen sidecars of one block as seen. The returned function publishes the claimed ones and
 // releases the mark of each one it fails to publish.
-func (s *dataColumnSidecarService) ClaimColumns(sidecars []*cltypes.DataColumnSidecar) (claimed []*cltypes.DataColumnSidecar, publish func(context.Context)) {
-	publishOne, ok := s.localColumnPublisher(sidecars)
-	if !ok {
-		return nil, func(context.Context) {}
+func (s *dataColumnSidecarService) ClaimColumns(sidecars []*cltypes.DataColumnSidecar) (publish func(context.Context)) {
+	if len(sidecars) == 0 {
+		return func(context.Context) {}
 	}
+	// The block may have waited for its parent, the EL or recovery while finality moved on; peers would ignore
+	// or reject its Fulu columns then.
+	slot, ok := s.afterFinality(sidecars[0])
+	if !ok {
+		log.Debug("[dataColumnSidecarService] not publishing local columns below finality", "slot", slot)
+		return func(context.Context) {}
+	}
+	forkDigest, err := s.ethClock.ComputeForkDigest(slot / s.cfg.SlotsPerEpoch)
+	if err != nil {
+		log.Warn("[dataColumnSidecarService] failed to compute the fork digest of local columns", "slot", slot, "err", err)
+		return func(context.Context) {}
+	}
+	var claimed []*cltypes.DataColumnSidecar
 	var releases []func()
 	for _, sidecar := range sidecars {
 		if release, ok := s.claimSeen(sidecar); ok {
@@ -378,42 +381,19 @@ func (s *dataColumnSidecarService) ClaimColumns(sidecars []*cltypes.DataColumnSi
 			releases = append(releases, release)
 		}
 	}
-	return claimed, func(ctx context.Context) {
+	return func(ctx context.Context) {
 		for i, sidecar := range claimed {
-			publishOne(ctx, sidecar, releases[i])
+			encoded, err := sidecar.EncodeSSZ(nil)
+			if err == nil {
+				err = s.gossipManager.PublishToForkDigest(ctx, forkDigest, gossip.TopicNameDataColumnSidecar(computeSubnetForDataColumnSidecar(sidecar.Index)), encoded)
+			}
+			if err != nil {
+				// Unclaimed, a copy from gossip is still processed and relayed.
+				releases[i]()
+				log.Debug("[dataColumnSidecarService] failed to publish a local column", "slot", slot, "index", sidecar.Index, "err", err)
+			}
 		}
 	}
-}
-
-// localColumnPublisher checks that peers would still accept the local columns of one block and returns a function
-// that publishes a claimed column on its subnet, releasing its claim if the publish fails.
-func (s *dataColumnSidecarService) localColumnPublisher(sidecars []*cltypes.DataColumnSidecar) (publish func(ctx context.Context, sidecar *cltypes.DataColumnSidecar, release func()), ok bool) {
-	if len(sidecars) == 0 {
-		return nil, false
-	}
-	// The block may have waited for its parent, the EL or recovery while finality moved on; peers would ignore
-	// or reject its Fulu columns then.
-	slot, ok := s.afterFinality(sidecars[0])
-	if !ok {
-		log.Debug("[dataColumnSidecarService] not publishing local columns below finality", "slot", slot)
-		return nil, false
-	}
-	forkDigest, err := s.ethClock.ComputeForkDigest(slot / s.cfg.SlotsPerEpoch)
-	if err != nil {
-		log.Warn("[dataColumnSidecarService] failed to compute the fork digest of local columns", "slot", slot, "err", err)
-		return nil, false
-	}
-	return func(ctx context.Context, sidecar *cltypes.DataColumnSidecar, release func()) {
-		encoded, err := sidecar.EncodeSSZ(nil)
-		if err == nil {
-			err = s.gossipManager.PublishToForkDigest(ctx, forkDigest, gossip.TopicNameDataColumnSidecar(computeSubnetForDataColumnSidecar(sidecar.Index)), encoded)
-		}
-		if err != nil {
-			// Unclaimed, a copy from gossip is still processed and relayed.
-			release()
-			log.Debug("[dataColumnSidecarService] failed to publish a local column", "slot", slot, "index", sidecar.Index, "err", err)
-		}
-	}, true
 }
 
 // afterFinality returns the sidecar's slot and whether peers would still accept the sidecar. For Fulu, its slot is

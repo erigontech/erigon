@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -211,7 +210,7 @@ type blockValidationContext struct {
 // elColumnsPublisher handles columns built from local EL blobs as if they arrived on gossip.
 type elColumnsPublisher interface {
 	PublishColumns(ctx context.Context, sidecars []*cltypes.DataColumnSidecar)
-	ClaimColumns(sidecars []*cltypes.DataColumnSidecar) (claimed []*cltypes.DataColumnSidecar, publish func(context.Context))
+	ClaimColumns(sidecars []*cltypes.DataColumnSidecar) (publish func(context.Context))
 }
 
 type blockService struct {
@@ -437,21 +436,18 @@ func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *clty
 		log.Debug("[blockService] engine_getBlobsV2 failed", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "err", err)
 		return
 	}
-	var claimed []*cltypes.DataColumnSidecar
 	publishClaimed := func(context.Context) {}
 	var claim func([]*cltypes.DataColumnSidecar)
 	if block.Version() >= clparams.GloasVersion {
 		claim = func(sidecars []*cltypes.DataColumnSidecar) {
-			claimed, publishClaimed = b.dataColumns.ClaimColumns(sidecars)
+			publishClaimed = b.dataColumns.ClaimColumns(sidecars)
 		}
 	}
 	toPublish, err := peerDas.ImportColumnsFromBlobs(ctx, block, blobs, proofs, claim)
 	// The EL wait may have used up the import deadline, but the columns must still be published.
 	if claim != nil {
 		publishClaimed(context.WithoutCancel(ctx))
-		if rest := withoutColumns(toPublish, claimed); len(rest) > 0 {
-			b.dataColumns.PublishColumns(context.WithoutCancel(ctx), rest)
-		}
+		b.dataColumns.PublishColumns(context.WithoutCancel(ctx), toPublish)
 	}
 	if err != nil {
 		// With a claim, the import returns columns together with an error only when their write failed.
@@ -466,15 +462,6 @@ func (b *blockService) importColumnsFromELBlobs(ctx context.Context, block *clty
 		b.dataColumns.PublishColumns(context.WithoutCancel(ctx), toPublish)
 	}
 	log.Debug("[blockService] imported columns from EL blobs", "slot", block.Block.Slot, "blockRoot", common.Hash(blockRoot), "blobs", len(blobs))
-}
-
-// withoutColumns returns the sidecars of columns whose index is not in excluded, in order.
-func withoutColumns(columns, excluded []*cltypes.DataColumnSidecar) []*cltypes.DataColumnSidecar {
-	skip := make(map[uint64]bool, len(excluded))
-	for _, sidecar := range excluded {
-		skip[sidecar.Index] = true
-	}
-	return slices.DeleteFunc(slices.Clone(columns), func(sidecar *cltypes.DataColumnSidecar) bool { return skip[sidecar.Index] })
 }
 
 func waitsForBlockDependency(err error) bool {

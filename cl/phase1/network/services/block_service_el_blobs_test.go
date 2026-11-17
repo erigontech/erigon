@@ -68,10 +68,10 @@ func (r *recordingColumnsPublisher) PublishColumns(ctx context.Context, sidecars
 }
 
 // ClaimColumns claims every sidecar it is given.
-func (r *recordingColumnsPublisher) ClaimColumns(sidecars []*cltypes.DataColumnSidecar) ([]*cltypes.DataColumnSidecar, func(context.Context)) {
+func (r *recordingColumnsPublisher) ClaimColumns(sidecars []*cltypes.DataColumnSidecar) func(context.Context) {
 	r.order = append(r.order, "claim")
 	r.claims = append(r.claims, sidecars)
-	return sidecars, func(ctx context.Context) {
+	return func(ctx context.Context) {
 		r.order = append(r.order, "publish claimed")
 		r.claimedPublished = append(r.claimedPublished, sidecars)
 		r.claimedContextErr = append(r.claimedContextErr, ctx.Err())
@@ -132,9 +132,9 @@ func TestImportColumnsFromELBlobsPublishesStoredColumns(t *testing.T) {
 			b.importColumnsFromELBlobs(t.Context(), block)
 
 			if tc.claims {
-				require.Equal(t, []string{"claim", "batch", "publish claimed"}, columns.order)
+				require.Equal(t, []string{"claim", "batch", "publish claimed", "publish"}, columns.order)
 				require.Equal(t, [][]*cltypes.DataColumnSidecar{stored}, columns.claims)
-				require.Empty(t, columns.published)
+				require.Equal(t, [][]*cltypes.DataColumnSidecar{stored}, columns.published)
 				return
 			}
 			require.Equal(t, []string{"batch", "publish"}, columns.order)
@@ -188,7 +188,32 @@ func TestGloasELImportPublishesClaimedColumnsAfterAFailedWrite(t *testing.T) {
 
 	require.Len(t, columns.claimedPublished, 1)
 	requireSameSidecars(t, stored, columns.claimedPublished[0])
-	require.Empty(t, columns.published)
+	require.Equal(t, [][]*cltypes.DataColumnSidecar{stored}, columns.published)
+}
+
+func TestGloasELImportRetriesAClaimedColumnWhosePublishFailed(t *testing.T) {
+	b, engine, peerDas, _ := setupELBlobsBlockService(t)
+	service, publisher, _ := newGloasClaimTestService(t)
+	b.dataColumns = service
+	published := recordPublishes(publisher, errors.New("topic not found"))
+	block, root, hashes := elBlobsTestBlock(t, clparams.GloasVersion, 2)
+	blobs := [][]byte{{1}, {2}}
+	proofs := [][][]byte{{{1}}, {{2}}}
+	failed, succeeded := elBuiltGloasSidecar(100, 3), elBuiltGloasSidecar(100, 5)
+	built := []*cltypes.DataColumnSidecar{failed, succeeded}
+
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil)
+	engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.GloasVersion).Return(blobs, proofs, nil)
+	peerDas.EXPECT().ImportColumnsFromBlobs(gomock.Any(), block, blobs, proofs, gomock.Any()).DoAndReturn(
+		func(_ context.Context, _ *cltypes.SignedBeaconBlock, _ [][]byte, _ [][][]byte, claim func([]*cltypes.DataColumnSidecar)) ([]*cltypes.DataColumnSidecar, error) {
+			claim(built)
+			return built, nil
+		})
+
+	b.importColumnsFromELBlobs(t.Context(), block)
+
+	requirePublished(t, *published, failed, succeeded, failed)
+	require.True(t, service.seenGloas.contains(gloasSeenKey(failed)))
 }
 
 func logRecordsDuring(f func()) []*log.Record {
