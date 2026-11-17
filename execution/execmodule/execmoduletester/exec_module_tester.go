@@ -911,6 +911,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	if err = mock.InsertChain(c); err != nil {
 		tb.Fatal(err)
 	}
+	if withTxPool {
+		require.Eventually(tb, mock.TxPool.Started, 5*time.Second, time.Millisecond, "transaction pool did not finish startup")
+	}
 
 	return mock
 }
