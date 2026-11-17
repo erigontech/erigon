@@ -223,6 +223,7 @@ func TestCreate2OverStorageOnlyAccountInitCodeReadsOldSlotAsZero(t *testing.T) {
 			})
 			requireGeneratedBlock(t, chainPack)
 			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				require.Equal(t, uint256.Int{}, storageAt(t, st, target, 5), "the creation replaced the storage")
 				require.Equal(t, uint256.Int{}, storageAt(t, st, target, 6), "the init code reads slot 5 as zero")
 				require.Equal(t, uint256.Int{}, storageAt(t, st, target, 7))
 			})
