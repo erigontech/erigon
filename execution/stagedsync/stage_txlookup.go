@@ -142,7 +142,6 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 	}, logger)
 }
 
-// txnLookupTransform - [startKey, endKey)
 func txnLookupIntegrity(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, logger log.Logger) (err error) {
 	for i := blockFrom; i < blockTo; i++ {
 		var blockHeader *types.Header

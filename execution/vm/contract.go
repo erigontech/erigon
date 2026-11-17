@@ -58,9 +58,9 @@ func newJumpDestCache() *cache.GenericCache[bitvec] {
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
+func NewContract(caller accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
 	return &Contract{
-		caller: callerAddress,
+		caller: caller,
 		addr:   addr,
 		value:  value,
 	}

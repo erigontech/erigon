@@ -471,67 +471,6 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 	}
 }
 
-// non-recursive version of get and returns: node and parent node
-func (t *Trie) getNode(hex []byte) (Node, Node, bool, uint64) {
-	nd := t.RootNode
-	var parent Node
-	pos := 0
-	var account bool
-	var incarnation uint64
-	for pos < len(hex) || account {
-		switch n := nd.(type) {
-		case nil:
-			return nil, nil, false, incarnation
-		case *ShortNode:
-			matchlen := nibbles.CommonPrefixLen(hex[pos:], n.Key)
-			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
-				parent = n
-				nd = n.Val
-				pos += matchlen
-				if _, ok := nd.(*AccountNode); ok {
-					account = true
-				}
-			} else {
-				return nil, nil, false, incarnation
-			}
-		case *DuoNode:
-			i1, i2 := n.childrenIdx()
-			switch hex[pos] {
-			case i1:
-				parent = n
-				nd = n.child1
-				pos++
-			case i2:
-				parent = n
-				nd = n.child2
-				pos++
-			default:
-				return nil, nil, false, incarnation
-			}
-		case *FullNode:
-			child := n.Children[hex[pos]]
-			if child == nil {
-				return nil, nil, false, incarnation
-			}
-			parent = n
-			nd = child
-			pos++
-		case *AccountNode:
-			parent = n
-			nd = n.Storage
-			incarnation = n.Incarnation
-			account = false
-		case ValueNode:
-			return nd, parent, true, incarnation
-		case HashNode:
-			return nd, parent, true, incarnation
-		default:
-			panic(fmt.Sprintf("Unknown node: %T", n))
-		}
-	}
-	return nd, parent, true, incarnation
-}
-
 // Delete removes any existing value for key from the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Delete(key []byte) {
