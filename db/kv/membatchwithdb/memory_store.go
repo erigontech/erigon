@@ -585,21 +585,14 @@ func (c *memStoreCursor) NextDup() ([]byte, []byte, error) {
 	if !c.valid {
 		return nil, nil, nil
 	}
-	currentKey := c.current.k
 	c.store.mu.RLock()
 	defer c.store.mu.RUnlock()
 	iter := c.table.tree.Iter()
-	c.valid = c.seekToNext(&iter)
-	if !c.valid {
-		c.current = memEntry{}
-		iter.Release()
+	defer iter.Release()
+	if !c.seekToNext(&iter) || !bytes.Equal(iter.Item().k, c.current.k) {
 		return nil, nil, nil
 	}
 	c.current = iter.Item()
-	iter.Release()
-	if !bytes.Equal(c.current.k, currentKey) {
-		return nil, nil, nil
-	}
 	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
 }
 

@@ -518,6 +518,48 @@ func TestMemStore_MoveAfterDelete(t *testing.T) {
 	}
 }
 
+func TestMemStore_NextDupPastLastDuplicate(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		key       string
+		value     string
+		delete    bool
+		then      func(*memStoreCursor) ([]byte, []byte, error)
+		wantKey   string
+		wantValue string
+	}{
+		{"current", "A", "3", false, (*memStoreCursor).Current, "A", "3"},
+		{"next", "A", "3", false, (*memStoreCursor).Next, "B", "1"},
+		{"next distinct key", "A", "3", false, (*memStoreCursor).NextNoDup, "B", "1"},
+		{"next after delete", "A", "3", true, (*memStoreCursor).Next, "B", "1"},
+		{"next distinct key after delete", "A", "3", true, (*memStoreCursor).NextNoDup, "B", "1"},
+		{"previous from last", "B", "2", false, (*memStoreCursor).Prev, "B", "1"},
+		{"previous after deleting last", "B", "2", true, (*memStoreCursor).Prev, "B", "1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newMemStore()
+			for _, pair := range [][2]string{{"A", "1"}, {"A", "2"}, {"A", "3"}, {"B", "1"}, {"B", "2"}} {
+				require.NoError(t, s.Put(kv.TblAccountVals, []byte(pair[0]), []byte(pair[1])))
+			}
+			c := s.newCursor(kv.TblAccountVals)
+			defer c.Close()
+			_, _, err := c.SeekBothExact([]byte(tc.key), []byte(tc.value))
+			require.NoError(t, err)
+			if tc.delete {
+				require.NoError(t, c.DeleteCurrent())
+			}
+			k, v, err := c.NextDup()
+			require.NoError(t, err)
+			require.Nil(t, k)
+			require.Nil(t, v)
+			k, v, err = tc.then(c)
+			require.NoError(t, err)
+			require.Equal(t, []byte(tc.wantKey), k)
+			require.Equal(t, []byte(tc.wantValue), v)
+		})
+	}
+}
+
 func TestMemStore_CurrentAfterDelete(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
