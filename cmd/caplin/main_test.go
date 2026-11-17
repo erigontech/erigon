@@ -24,8 +24,8 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/caplin/caplincli"
+	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
-	"github.com/erigontech/erigon/node/logging"
 )
 
 func TestCaplinSentinelBindFlags(t *testing.T) {
@@ -42,13 +42,10 @@ func TestCaplinSentinelBindFlags(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			addr := sentinelflags.SentinelServerAddr
 			port := sentinelflags.SentinelServerPort
-			verbosity := logging.LogVerbosityFlag
 			cmd := &cli.Command{
-				Flags: []cli.Flag{&addr, &port, &verbosity},
+				Flags: []cli.Flag{&addr, &port},
 				Action: func(_ context.Context, cmd *cli.Command) error {
-					cfg, err := caplincli.SetupCaplinCli(cmd)
-					require.NoError(t, err)
-					config := newCaplinConfig(cmd, cfg)
+					config := newCaplinConfig(cmd, &caplincli.CaplinCliCfg{SentinelCliCfg: &sentinelcli.SentinelCliCfg{}})
 					require.Equal(t, test.host, config.SentinelAddr)
 					require.Equal(t, test.port, config.SentinelPort)
 					return nil
