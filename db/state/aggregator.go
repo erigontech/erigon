@@ -299,7 +299,8 @@ func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v b
 func (a *Aggregator) referencesInCommitmentBranches() bool {
 	a.commitmentRefsMu.RLock()
 	defer a.commitmentRefsMu.RUnlock()
-	return a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches
+	d := a.d[kv.CommitmentDomain]
+	return d.ReferencesInCommitmentBranches && !d.CommitmentV3Records
 }
 
 // applyReferencesInCommitmentBranches stores the resolved flag pre-configure (ConfigureDomains
@@ -2496,6 +2497,9 @@ func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
 		if err := dt.checkFilesDBGap(tx); err != nil {
 			return err
 		}
+		if err := dt.ht.checkFilesDBGap(tx); err != nil {
+			return err
+		}
 	}
 	for _, iit := range at.iis {
 		if iit == nil || !iit.ii.Enabled {
@@ -2714,10 +2718,21 @@ func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to [
 }
 
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
-	v, ok, err = at.d[name].GetAsOf(k, ts, tx)
-	if name == kv.CommitmentDomain && !ok {
-		v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
+	if name != kv.CommitmentDomain {
+		return at.d[name].GetAsOf(k, ts, tx)
 	}
+	if at.a.d[kv.CommitmentDomain].CommitmentV3Records {
+		v, ok, err = at.d[name].ht.HistorySeek(k, ts, tx)
+		if ok && len(v) == 0 {
+			return nil, false, err
+		}
+	} else {
+		v, ok, err = at.d[name].GetAsOf(k, ts, tx)
+	}
+	if err != nil || ok {
+		return v, ok, err
+	}
+	v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
 	return v, ok, err
 }
 

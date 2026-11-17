@@ -1290,18 +1290,12 @@ type codeSegment struct {
 	copied bool // the read copied the segment into dst and returned the code without bytes
 }
 
-// readCodeSegment is readCode; with seg, a read that reaches the state reader copies the segment
-// into seg.dst and records the read without the code bytes. That includes a state-cache hit and a
-// read-set hit whose bytes were dropped.
+// readCodeSegment is readCode; with seg, a first read that reaches the state reader copies the segment
+// into seg.dst and records the read without the code bytes. A repeated read of the same address reads
+// the whole code once and keeps it in the record, so later copies do not decode it again.
 func readCodeSegment(s *IntraBlockState, addr accounts.Address, seg *codeSegment) (accounts.Code, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
-			if seg != nil && codeBytesDropped(tr.Val) {
-				if _, copied, err := s.readOriginCodeSegmentTo(addr, seg.from, seg.dst); err != nil || copied {
-					seg.copied = copied
-					return tr.Val, tr.Source, tr.Version, err
-				}
-			}
 			code, err := s.recordedCode(addr, tr)
 			return code, tr.Source, tr.Version, err
 		}

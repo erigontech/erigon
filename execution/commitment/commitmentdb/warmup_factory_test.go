@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
@@ -74,7 +75,7 @@ func (db *blockingBeginDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, 
 func TestWarmupFactoriesUnblockBeginOnWarmuperClose(t *testing.T) {
 	t.Parallel()
 	sdc := &SharedDomainsCommitmentContext{sharedDomains: stubSharedDomains{}}
-	concurrent, _ := sdc.concurrentTrieContextFactory(t.Context(), &blockingBeginDB{}, nil, nil, 0)
+	concurrent, _ := sdc.concurrentTrieContextFactory(t.Context(), &blockingBeginDB{}, nil, nil, 0, nil)
 	factories := map[string]commitment.TrieContextFactory{
 		"warmup":     sdc.warmupTrieContextFactory(&blockingBeginDB{}, 0),
 		"concurrent": concurrent,
@@ -101,6 +102,53 @@ func TestWarmupFactoriesUnblockBeginOnWarmuperClose(t *testing.T) {
 	}
 }
 
+type factoryWiringDomains struct{ sd }
+
+func (factoryWiringDomains) AddCommitmentTime(time.Duration)                         {}
+func (factoryWiringDomains) AsPutDel(kv.TemporalTx) kv.TemporalPutDel                { return nil }
+func (factoryWiringDomains) MergeMetrics(kvmetrics.Source, *kvmetrics.DomainMetrics) {}
+func (factoryWiringDomains) StepSize() uint64                                        { return 1 }
+
+type factoryWiringTrie struct {
+	testTrie
+	factory commitment.TrieContextFactory
+	warmup  commitment.WarmupConfig
+}
+
+func (*factoryWiringTrie) RootHash() ([]byte, error) { return []byte{1}, nil }
+
+func (t *factoryWiringTrie) Process(_ context.Context, _ *commitment.Updates, _ string, _ func(*commitment.CommitProgress), warmup commitment.WarmupConfig) ([]byte, error) {
+	t.warmup = warmup
+	return []byte{1}, nil
+}
+
+func (t *factoryWiringTrie) SetTrieContextFactory(factory commitment.TrieContextFactory) {
+	t.factory = factory
+}
+
+func TestComputeCommitmentWiresV3Factories(t *testing.T) {
+	trie := &factoryWiringTrie{}
+	domains := factoryWiringDomains{}
+	updates := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
+	updates.TouchPlainKeyDirect(string([]byte{1}), &commitment.Update{Flags: commitment.BalanceUpdate})
+	sdc := &SharedDomainsCommitmentContext{
+		sharedDomains: &domains,
+		updates:       updates,
+		patriciaTrie:  trie,
+		stateReader:   &testStateReader{},
+		paraTrieDB:    &beginRoRecordingDB{},
+		warmupBase: commitment.WarmupConfig{
+			Enabled:    true,
+			NumWorkers: 2,
+		},
+	}
+
+	_, err := sdc.ComputeCommitment(t.Context(), nil, false, 0, 0, "", nil)
+	require.NoError(t, err)
+	require.NotNil(t, trie.factory, "v3 storage factory must be configured by ComputeCommitment")
+	require.NotNil(t, trie.warmup.CtxFactory, "v3 warmup factory must remain configured")
+}
+
 // snapshotTx answers every domain read with val, from a scratch buffer it
 // rewrites on each read — the aliasing a real getter has.
 type snapshotTx struct {
@@ -113,6 +161,11 @@ type snapshotTx struct {
 	// goroutines asking one txn for its view is a write race.
 	viewMemo  uint64
 	viewCalls atomic.Int64
+
+	// A real txn's cursors are shared by every reader bound to it, so two reads
+	// in flight on one txn at once corrupt each other.
+	reading  atomic.Bool
+	overlaps atomic.Bool
 }
 
 func (t *snapshotTx) ViewID() uint64 {
@@ -130,7 +183,12 @@ type snapshotGetter struct {
 }
 
 func (g *snapshotGetter) GetLatest(kv.Domain, []byte, kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if !g.tx.reading.CompareAndSwap(false, true) {
+		g.tx.overlaps.Store(true)
+	}
+	runtime.Gosched()
 	g.tx.scratch = append(g.tx.scratch[:0], g.tx.val...)
+	g.tx.reading.Store(false)
 	return g.tx.scratch, 0, nil
 }
 
@@ -180,7 +238,7 @@ func TestConcurrentTrieContextReadsCallerSnapshot(t *testing.T) {
 	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
 	sdc, _ := newSnapshotSdc(t)
 
-	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0, nil)
 	trieCtx, cleanup := factory(t.Context())
 	defer func() {
 		cleanup()
@@ -202,7 +260,7 @@ func TestConcurrentTrieContextKeepsWorkerTxOnSameSnapshot(t *testing.T) {
 	db := &snapshotDB{viewID: 7, val: []byte("worker-view")}
 	sdc, _ := newSnapshotSdc(t)
 
-	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0, nil)
 	trieCtx, cleanup := factory(t.Context())
 	defer func() {
 		cleanup()
@@ -251,7 +309,7 @@ func TestConcurrentTrieContextsShareCallerTxSerially(t *testing.T) {
 	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
 	sdc, _ := newSnapshotSdc(t)
 
-	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0, nil)
 	defer func() {
 		for _, c := range drain() {
 			c.Close()
@@ -266,6 +324,65 @@ func TestConcurrentTrieContextsShareCallerTxSerially(t *testing.T) {
 	}
 }
 
+func TestConcurrentTrieContextLeavesHPHMainReaderUnchanged(t *testing.T) {
+	t.Parallel()
+	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
+	sdc, _ := newSnapshotSdc(t)
+	sdc.patriciaTrie = commitment.NewParallelPatriciaHashed(nil, length.Addr, commitment.DefaultTrieConfig())
+	mainReader := NewLatestStateReader(caller, sdc.sharedDomains, LatestStateReaderOptions{})
+	main := &TrieContext{stepSize: 1, stateReader: mainReader}
+
+	_, drain := sdc.concurrentTrieContextFactory(t.Context(), &snapshotDB{viewID: 8, val: []byte("committed-head")}, nil, caller, 0, main)
+	for _, c := range drain() {
+		c.Close()
+	}
+	require.Same(t, mainReader, main.stateReader)
+}
+
+// The v3 fold reads the caller's tx on its own context while the storage phase
+// runs on workers. Once a commit lands during the fold, those workers fall back
+// to the caller's tx too, so the fold's own reads have to take the same turns.
+func TestConcurrentTrieContextSerializesMainContextWithPinnedWorkers(t *testing.T) {
+	t.Parallel()
+	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
+	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
+	sdc, _ := newSnapshotSdc(t)
+	sdc.patriciaTrie = &stateCodecTrie{}
+	main := &TrieContext{stepSize: 1, stateReader: NewLatestStateReader(caller, sdc.sharedDomains, LatestStateReaderOptions{})}
+
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0, main)
+	defer func() {
+		for _, c := range drain() {
+			c.Close()
+		}
+	}()
+
+	done := make(chan struct{})
+	var mainVal []byte
+	var mainErr error
+	go func() {
+		defer close(done)
+		for range 512 {
+			enc, _, err := main.Branch([]byte("prefix"))
+			if err != nil {
+				mainErr = err
+				return
+			}
+			mainVal = append(mainVal[:0], enc...)
+		}
+	}()
+	vals, errs := foldConcurrently(t, factory)
+	<-done
+
+	require.False(t, caller.overlaps.Load(), "the fold's own context and the pinned workers read the caller's tx at once")
+	require.NoError(t, mainErr)
+	require.Equal(t, []byte("caller-snapshot"), mainVal)
+	for i := range vals {
+		require.NoError(t, errs[i])
+		require.Equal(t, []byte("caller-snapshot"), vals[i])
+	}
+}
+
 // The factory runs inside each worker goroutine, so building the caller-tx
 // reader there would touch the caller's tx from every worker at once.
 func TestConcurrentTrieContextBuildsCallerReaderOnce(t *testing.T) {
@@ -274,7 +391,7 @@ func TestConcurrentTrieContextBuildsCallerReaderOnce(t *testing.T) {
 	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
 	sdc, shared := newSnapshotSdc(t)
 
-	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0, nil)
 	defer func() {
 		for _, c := range drain() {
 			c.Close()
@@ -339,7 +456,7 @@ func TestConcurrentTrieContextSerializesSharedCustomReader(t *testing.T) {
 	reader := &sharedSourceReader{tx: caller}
 	sdc.SetStateReader(reader)
 
-	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0, nil)
 	defer func() {
 		for _, c := range drain() {
 			c.Close()
@@ -362,7 +479,7 @@ func TestConcurrentTrieContextSkipsWorkerTxForSharedReader(t *testing.T) {
 	sdc, _ := newSnapshotSdc(t)
 	sdc.SetStateReader(&sharedSourceReader{tx: caller})
 
-	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0, nil)
 	defer func() {
 		for _, c := range drain() {
 			c.Close()
@@ -386,7 +503,7 @@ func TestConcurrentTrieContextSkipsPinnedReaderForWriteCaller(t *testing.T) {
 	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
 	sdc, shared := newSnapshotSdc(t)
 
-	_, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	_, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0, nil)
 	defer func() {
 		for _, c := range drain() {
 			c.Close()
@@ -413,7 +530,7 @@ func TestConcurrentTrieContextKeepsBindingCustomReaderPerWorker(t *testing.T) {
 	sdc, _ := newSnapshotSdc(t)
 	sdc.SetStateReader(&sharedSourceReader{tx: caller, binds: true})
 
-	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0, nil)
 	trieCtx, cleanup := factory(t.Context())
 	defer func() {
 		cleanup()
@@ -436,7 +553,7 @@ func TestConcurrentTrieContextResolvesCallerViewOnce(t *testing.T) {
 	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
 	sdc, _ := newSnapshotSdc(t)
 
-	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0, nil)
 	require.Equal(t, int64(1), caller.viewCalls.Load(), "caller view must be resolved before any worker runs")
 
 	const workers = 8
@@ -474,7 +591,7 @@ func TestConcurrentTrieContextSerializesSharedReaderWithoutCallerTx(t *testing.T
 	reader := &sharedSourceReader{tx: src}
 	sdc.SetStateReader(reader)
 
-	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, nil, 0)
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, nil, 0, nil)
 	defer func() {
 		for _, c := range drain() {
 			c.Close()
@@ -499,7 +616,7 @@ func TestConcurrentTrieContextSkipsPutterWithoutWorkerTx(t *testing.T) {
 	sdc, shared := newSnapshotSdc(t)
 	sdc.SetStateReader(&sharedSourceReader{tx: caller})
 
-	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0, nil)
 	trieCtx, cleanup := factory(t.Context())
 	defer func() {
 		cleanup()
@@ -510,4 +627,28 @@ func TestConcurrentTrieContextSkipsPutterWithoutWorkerTx(t *testing.T) {
 
 	require.Zero(t, shared.putDels.Load(), "a worker with no read tx must not bind a putter to a nil one")
 	require.NoError(t, trieCtx.PutBranch([]byte("prefix"), []byte("data"), nil))
+}
+
+func TestConcurrentTrieContextFactoryReportsAFullReadTxLimitAsErrorContext(t *testing.T) {
+	t.Parallel()
+	sdc := &SharedDomainsCommitmentContext{
+		sharedDomains: stubSharedDomains{},
+		patriciaTrie:  commitment.NewHexPatriciaHashed(length.Addr, nil, commitment.DefaultTrieConfig()),
+	}
+	factory, _ := sdc.concurrentTrieContextFactory(t.Context(), &beginRoRecordingDB{}, nil, nil, 0, nil)
+	trieCtx, cleanup := factory(kv.WithNonBlockingAcquire(t.Context()))
+	require.NotNil(t, cleanup)
+	defer cleanup()
+	require.NotNil(t, trieCtx)
+	_, err := trieCtx.Account(nil)
+	require.ErrorIs(t, err, kv.ErrReadTxLimitExceeded)
+}
+
+func TestConcurrentV3FactoryYieldsAtReadTxLimit(t *testing.T) {
+	t.Parallel()
+	sdc := &SharedDomainsCommitmentContext{sharedDomains: stubSharedDomains{}, patriciaTrie: &testTrie{}}
+	factory, _ := sdc.concurrentTrieContextFactory(t.Context(), &beginRoRecordingDB{}, nil, nil, 0, nil)
+	trieCtx, cleanup := factory(kv.WithNonBlockingAcquire(t.Context()))
+	require.Nil(t, trieCtx)
+	require.Nil(t, cleanup)
 }

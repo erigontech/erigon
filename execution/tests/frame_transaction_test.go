@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -150,13 +151,16 @@ func TestFrameValidationUsesPublishedHead(t *testing.T) {
 		{"expired", expiring, true, false},
 	}
 	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
+	expectedHash := m.Genesis.Hash()
 	check := func(phase string, atHead bool) {
 		t.Run(phase, func(t *testing.T) {
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
 					var encoded bytes.Buffer
 					require.NoError(t, tt.tx.MarshalBinary(&encoded))
-					result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{Transaction: encoded.Bytes()})
+					result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{
+						Transaction: encoded.Bytes(), ExpectedBlockHash: gointerfaces.ConvertHashToH256(expectedHash),
+					})
 					require.NoError(t, err)
 					valid := tt.validBefore
 					if atHead {
@@ -199,6 +203,14 @@ func TestFrameValidationUsesPublishedHead(t *testing.T) {
 		t.Fatal("forkchoice did not reach commit")
 	}
 	require.Equal(t, uint64(0), m.Current(nil).NumberU64())
+	expectedHash = pack.TopBlock.Hash()
+	published, _ := m.Notifications.Events.OverlaySnapshot()
+	require.NotNil(t, published)
+	ahead := pack.TopBlock.Header()
+	ahead.Number.AddUint64(&ahead.Number, 1)
+	ahead.Time += cfg.SecondsPerSlot()
+	require.NoError(t, rawdb.WriteHeader(published.BlockOverlay(), ahead))
+	rawdb.WriteHeadBlockHash(published.BlockOverlay(), ahead.Hash())
 	check("before commit", true)
 	db := &frameValidationCommitDB{TemporalRwDB: m.DB, afterOpen: sync.OnceFunc(func() {
 		release()
@@ -312,7 +324,17 @@ func TestFrameValidationExpectedHead(t *testing.T) {
 	var encoded bytes.Buffer
 	require.NoError(t, frame.MarshalBinary(&encoded))
 	server := privateapi.NewEthBackendServer(t.Context(), nil, m.DB, m.Notifications, m.BlockReader, log.New(), nil, cfg)
-	for _, hash := range []common.Hash{m.Genesis.Hash(), {1}} {
+	ahead := m.Genesis.Header()
+	ahead.Number.SetUint64(1)
+	ahead.Time += cfg.SecondsPerSlot()
+	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := rawdb.WriteHeader(tx, ahead); err != nil {
+			return err
+		}
+		rawdb.WriteHeadBlockHash(tx, ahead.Hash())
+		return nil
+	}))
+	for _, hash := range []common.Hash{m.Genesis.Hash(), ahead.Hash(), {1}} {
 		result, err := server.FrameValidation(t.Context(), &remoteproto.FrameValidationRequest{
 			Transaction: encoded.Bytes(), ExpectedBlockHash: gointerfaces.ConvertHashToH256(hash),
 		})

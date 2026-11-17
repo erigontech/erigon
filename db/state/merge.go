@@ -39,7 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
@@ -361,6 +361,10 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 			return nil, nil, walkErr
 		}
 
+		if !haveSelected || prevEnd != r.history.to {
+			return nil, nil, fmt.Errorf("History.staticFilesInRange: %s source files end at %d before merge range [%d,%d)", ht.h.FilenameBase, prevEnd, r.history.from, r.history.to)
+		}
+
 		for _, f := range historyFiles {
 			if f == nil {
 				panic("must not happen")
@@ -514,7 +518,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 		if keyBuf != nil {
 			if vt != nil {
-				if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
+				if !commitment.IsCommitmentStateKey(keyBuf) { // no replacement for state key
 					valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 					if err != nil {
 						return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
@@ -536,7 +540,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 	if keyBuf != nil {
 		if vt != nil {
-			if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
+			if !commitment.IsCommitmentStateKey(keyBuf) { // no replacement for state key
 				valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 				if err != nil {
 					return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)

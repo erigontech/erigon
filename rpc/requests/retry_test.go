@@ -60,6 +60,7 @@ func TestRetryConnectsNonRecoverableErrorNotRetried(t *testing.T) {
 }
 
 func TestRetryConnectsDialErrorRetriedUntilSuccess(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		var attempts atomic.Int64
 		start := time.Now()
@@ -71,6 +72,7 @@ func TestRetryConnectsDialErrorRetriedUntilSuccess(t *testing.T) {
 }
 
 func TestRetryConnectsTimeoutAfterDialErrorReturnsDialError(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		dialErr := newDialError()
 		var attempts atomic.Int64
@@ -81,6 +83,7 @@ func TestRetryConnectsTimeoutAfterDialErrorReturnsDialError(t *testing.T) {
 }
 
 func TestRetryConnectsTimeoutRetriedUntilSuccess(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		var attempts atomic.Int64
 		err := retryConnects(t.Context(), sequenceOp(&attempts, context.DeadlineExceeded, nil))
@@ -90,6 +93,7 @@ func TestRetryConnectsTimeoutRetriedUntilSuccess(t *testing.T) {
 }
 
 func TestRetryConnectsParentDeadlineReturnsLastDialError(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 1200*time.Millisecond)
 		defer cancel()
@@ -101,6 +105,7 @@ func TestRetryConnectsParentDeadlineReturnsLastDialError(t *testing.T) {
 }
 
 func TestRetryConnectsParentDeadlineAfterOnlyTimeoutsReturnsDeadlineExceeded(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 1200*time.Millisecond)
 		defer cancel()
@@ -120,6 +125,7 @@ func TestRetryConnectsPermanentErrorWrappingDeadlineExceededNotSwallowed(t *test
 }
 
 func TestRetryConnectsParentCancel(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		go func() {
@@ -136,6 +142,7 @@ func TestRetryConnectsParentCancel(t *testing.T) {
 // overall-deadline expiry the last dial error replaces only the context's own
 // deadline error, never a permanent error that merely wraps DeadlineExceeded.
 func TestRetryConnectsOverallDeadlineDoesNotClobberPermanentError(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		// Deadline lands after the first 1s backoff (so a second attempt runs) but
 		// within the per-attempt window (so the second op observes it via its ctx).
