@@ -60,16 +60,16 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	if err != nil {
 		return pc, nil, evm.assertionReadError(err)
 	}
-	switch {
-	case p == 0:
+	switch p {
+	case 0:
 		index.SetUint64(uint64(len(trace.Balances)))
-	case p == 1:
+	case 1:
 		index.SetUint64(uint64(len(trace.Slots)))
-	case p == 2:
+	case 2:
 		index.SetUint64(uint64(len(trace.Codes)))
-	case p == 3:
+	case 3:
 		index.SetUint64(uint64(len(trace.Nonces)))
-	case p <= 6:
+	case 4, 5, 6:
 		if i >= uint64(len(trace.Balances)) {
 			return pc, nil, ErrFrameParameter
 		}
@@ -83,7 +83,7 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 		case 6:
 			index.Set(&entry.After)
 		}
-	case p <= 10:
+	case 7, 8, 9, 10:
 		if i >= uint64(len(trace.Slots)) {
 			return pc, nil, ErrFrameParameter
 		}
@@ -100,7 +100,7 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 			key := entry.Key.Value()
 			index.SetBytes(key[:])
 		}
-	case p <= 13:
+	case 11, 12, 13:
 		if i >= uint64(len(trace.Codes)) {
 			return pc, nil, ErrFrameParameter
 		}
@@ -116,7 +116,7 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 			hash := entry.After.Value()
 			index.SetBytes(hash[:])
 		}
-	case p <= 16:
+	case 14, 15, 16:
 		if i >= uint64(len(trace.Nonces)) {
 			return pc, nil, ErrFrameParameter
 		}
@@ -130,7 +130,7 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 		case 16:
 			index.SetUint64(entry.After)
 		}
-	case p == 17:
+	case 17:
 		index.SetUint64(uint64(len(trace.Events)))
 	default:
 		if i >= uint64(len(trace.Events)) {

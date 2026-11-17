@@ -92,7 +92,10 @@ func zkevmTestCmd(_ context.Context, ctx *cli.Command) error {
 	statecfg.EnableHistoricalCommitment()
 
 	tm := newZkevmFailMatcher()
-	files := collectFiles(path)
+	files, err := collectFiles(path)
+	if err != nil {
+		return err
+	}
 	results, err := runZkevmTestsParallel(path, files, re, tm, workers)
 	if err != nil {
 		return err

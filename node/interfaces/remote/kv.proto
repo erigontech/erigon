@@ -137,9 +137,12 @@ enum Direction {
   UNWIND = 1;
 }
 
-// StateChangeBatch - list of StateDiff done in one DB transaction
+// StateChangeBatch carries changes and metadata for an announced execution state.
+// Changes may span several commits; a subscription reset can carry metadata alone.
 message StateChangeBatch {
-  uint64 state_version_id = 1; // mdbx's tx.ID() - id of write transaction in db - where this changes happened
+  // Erigon's logical state version. A batch published before commit carries
+  // the version expected after its pending state flush.
+  uint64 state_version_id = 1;
   repeated StateChange change_batch = 2;
   uint64 pending_block_base_fee = 3; // BaseFee of the next block to be produced
   uint64 block_gas_limit = 4; // GasLimit of the latest block - proxy for the gas limit of the next block to be produced

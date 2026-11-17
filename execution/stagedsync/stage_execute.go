@@ -237,7 +237,7 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	if err != nil {
 		return err
 	}
-	if err := stateChangesStreamAtUnwind(ctx, rwTx, doms.AsSnapshotGetter(rwTx), u.UnwindPoint, dropFromTxNum, accumulator, changeSet, logger); err != nil {
+	if err := stateChangesStreamAtUnwind(ctx, doms.AsSnapshotGetter(rwTx), u.UnwindPoint, dropFromTxNum, accumulator, changeSet, logger); err != nil {
 		return fmt.Errorf("stateChangesStreamAtUnwind(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.DeleteNewerEpochs(rwTx, dropStateFromBlockNum); err != nil {
@@ -250,7 +250,6 @@ var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
 
 // stateChangesStreamAtUnwind sending state changes to `accumulator`
 func stateChangesStreamAtUnwind(ctx context.Context,
-	tx kv.TemporalRwTx,
 	state kv.TemporalGetter,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
@@ -259,7 +258,7 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 	var currentInc uint64
 	codeChanged := make(map[common.Address]struct{})
 
-	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	handle := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		if len(k) == length.Addr {
 			if accumulator == nil {
 				return nil
@@ -369,7 +368,7 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 			}
 		}
 
-		if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		if err := stateChanges.Load(nil, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
 
@@ -478,10 +477,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		inputTxNum:               inputTxNum,
 		offsetFromBlockBeginning: offsetFromBlockBeginning,
 		maxBlockNum:              to,
-	}
-
-	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
-		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
 	}
 
 	out, execErr := ExecV3(ctx, cfg, doms, rwTx, s.SyncMode(), s.CurrentSyncCycle.IsInitialCycle, s.LogPrefix(), rng, nil, logger)

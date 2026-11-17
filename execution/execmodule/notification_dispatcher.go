@@ -21,6 +21,9 @@ import (
 	"context"
 	"fmt"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -130,7 +133,7 @@ func (d *Dispatcher) StateChangesSnapshot(ctx context.Context, db kv.TemporalRoD
 			return err
 		}
 		if batch == nil {
-			return fmt.Errorf("executed header %d unavailable for state snapshot", height)
+			return status.Errorf(codes.Unavailable, "executed header %d unavailable for state snapshot", height)
 		}
 		result = batch.ToProtoBatch()
 		return nil
@@ -138,27 +141,29 @@ func (d *Dispatcher) StateChangesSnapshot(ctx context.Context, db kv.TemporalRoD
 	return result, err
 }
 
-// Dispatch sends all pending notifications. The tx parameter is the data source
-// for headers and forkchoice markers — it can be the SD's blockOverlay
-// (MemoryMutation) for pre-commit dispatch, or a committed DB tx. The state getter
-// must include all account writes at the announced head, including uncommitted ones.
+// Dispatch sends all pending notifications for the announced head.
 //
 // Parameters:
-//   - ctx: context for cancellation
-//   - tx: data source (overlay or committed tx)
-//   - state: final state at the announced head
-//   - stateVersion: announced state version, which may not yet be committed
-//   - accumulator: state change accumulator (may be nil)
-//   - recentReceipts: receipt/log cache (may be nil)
-//   - finishProgressBefore: Finish stage progress before the sync run
-//   - finishProgressAfter: Finish stage progress after the sync run
-//   - prevUnwindPoint: unwind point of this run, from the FCU or pipeline (may be nil)
-//   - committedTx: committed state holding every block of the run, for blocks missing from recentReceipts
-//     (nil when the blocks are not committed yet)
+//   - ctx: context for cancellation of reads and notification delivery.
+//   - blockTx: block metadata at the announced head, from a block overlay or a committed transaction.
+//   - stateReader: account state at the same head, including any unflushed domain writes.
+//     A block overlay alone is insufficient: its GetLatest reads only the backing transaction.
+//   - stateVersion: state version at the announced head. Before commit, use the projected
+//     version that the pending domain flush will persist.
+//   - accumulator: pending state changes, including retained changes from earlier runs;
+//     nil disables state-change notifications.
+//   - recentReceipts: receipt and log cache; nil disables receipt and log notifications.
+//   - finishProgressBefore: Finish stage height before this run, used as the initial
+//     base for the header notification range.
+//   - finishProgressAfter: Finish stage height after this run, identifying the announced head.
+//     It may be lower than finishProgressBefore after an unwind.
+//   - prevUnwindPoint: unwind target for this run, or nil if none; can lower the notification range's base.
+//   - committedTx: committed transaction covering the notified block range, used to load
+//     missing receipts. Nil skips that recovery and is required while those blocks are uncommitted.
 func (d *Dispatcher) Dispatch(
 	ctx context.Context,
-	tx kv.Tx,
-	state kv.TemporalGetter,
+	blockTx kv.Tx,
+	stateReader kv.TemporalGetter,
 	stateVersion uint64,
 	accumulator *notifications.Accumulator,
 	recentReceipts *notifications.RecentReceipts,
@@ -167,7 +172,7 @@ func (d *Dispatcher) Dispatch(
 	prevUnwindPoint *uint64,
 	committedTx kv.TemporalTx,
 ) error {
-	batch, err := d.prepareStateChanges(ctx, tx, state, stateVersion, finishProgressAfter, accumulator)
+	batch, err := d.prepareStateChanges(ctx, blockTx, stateReader, stateVersion, finishProgressAfter, accumulator)
 	if err != nil {
 		return err
 	}
@@ -209,7 +214,7 @@ func (d *Dispatcher) Dispatch(
 		}
 		notifyTo := finishProgressAfter + 1 //[from, to)
 
-		if err := stagedsync.NotifyNewHeaders(ctx, notifyFrom, notifyTo, d.events, tx, d.logger); err != nil {
+		if err := stagedsync.NotifyNewHeaders(ctx, notifyFrom, notifyTo, d.events, blockTx, d.logger); err != nil {
 			return err
 		}
 		if recentReceipts != nil {
@@ -217,7 +222,7 @@ func (d *Dispatcher) Dispatch(
 			recentReceipts.NotifyReceipts(d.events, notifyFrom, notifyTo)
 			recentReceipts.NotifyLogs(d.events, notifyFrom, notifyTo)
 			if !d.events.HasReceiptOrLogSubscribers() {
-				recentReceipts.DropUpTo(rawdb.ReadForkchoiceFinalizedNum(tx)) // a reorg cannot reach these, and a later subscriber needs removed logs only for blocks above them
+				recentReceipts.DropUpTo(rawdb.ReadForkchoiceFinalizedNum(blockTx)) // a reorg cannot reach these, and a later subscriber needs removed logs only for blocks above them
 			}
 		}
 	}
@@ -233,12 +238,12 @@ func (d *Dispatcher) Dispatch(
 
 // Preparation can fail on account reads. Complete it before publishing any events,
 // and keep recorded changes intact so a failed dispatch can be retried.
-func (d *Dispatcher) prepareStateChanges(ctx context.Context, tx kv.Tx, state kv.TemporalGetter, stateVersion, finishProgress uint64, accumulator *notifications.Accumulator) (*notifications.BlockBatchNotification, error) {
+func (d *Dispatcher) prepareStateChanges(ctx context.Context, blockTx kv.Tx, stateReader kv.TemporalGetter, stateVersion, finishProgress uint64, accumulator *notifications.Accumulator) (*notifications.BlockBatchNotification, error) {
 	if accumulator == nil {
 		return nil, nil
 	}
 	// Head markers can lead execution. The announced head must match the supplied state.
-	header, err := d.headerReader.HeaderByNumber(ctx, tx, finishProgress)
+	header, err := d.headerReader.HeaderByNumber(ctx, blockTx, finishProgress)
 	if err != nil {
 		return nil, err
 	}
@@ -259,8 +264,8 @@ func (d *Dispatcher) prepareStateChanges(ctx context.Context, tx kv.Tx, state kv
 		batch.PendingBlobFee = fee.Uint64()
 	}
 	batch.BlockGasLimit = header.GasLimit
-	batch.FinalizedBlock = common.Deref(rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)))
-	if err := batch.RefreshAccounts(state); err != nil {
+	batch.FinalizedBlock = common.Deref(rawdb.ReadHeaderNumber(blockTx, rawdb.ReadForkchoiceFinalized(blockTx)))
+	if err := batch.RefreshAccounts(stateReader); err != nil {
 		return nil, err
 	}
 	return batch, nil

@@ -722,15 +722,6 @@ func New(
 		)
 		contractBackend := contracts.NewDirectBackend(ethApi)
 		baseTxnProvider := backend.txPool
-		currentBlockNumReader := func(ctx context.Context) (*uint64, error) {
-			tx, err := backend.chainDB.BeginRo(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			defer tx.Rollback()
-			return chain.CurrentBlockNumber(tx)
-		}
 		backend.shutterPool = shutter.NewPool(
 			logger,
 			config.Shutter,
@@ -738,7 +729,7 @@ func New(
 			baseTxnProvider,
 			contractBackend,
 			backend.stateDiffClient,
-			currentBlockNumReader,
+			backend.shutterBlockState,
 		)
 		txnProvider = backend.shutterPool
 	}
@@ -889,7 +880,6 @@ func New(
 		logger,
 		backend.engine,
 		config.Sync,
-		config.ExperimentalBAL,
 		config.FcuBackgroundPrune,
 		false, /* onlySnapDownloadOnStart */
 		backend.readAheader,
@@ -1141,6 +1131,22 @@ func (s *Ethereum) IsMining() bool { return false }
 
 func (s *Ethereum) RegisterMinedBlockObserver(callback func(msg *types.Block)) event.UnregisterFunc {
 	return s.minedBlockObservers.Register(callback)
+}
+
+func (s *Ethereum) shutterBlockState(ctx context.Context) (shutter.BlockState, error) {
+	tx, err := s.chainDB.BeginRo(ctx)
+	if err != nil {
+		return shutter.BlockState{}, err
+	}
+	defer tx.Rollback()
+
+	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return shutter.BlockState{}, err
+	}
+	state := shutter.BlockState{BlockNum: blockNum}
+	state.StateVersionID, err = rawdb.GetStateVersion(tx)
+	return state, err
 }
 
 func (s *Ethereum) ChainKV() kv.RwDB            { return s.chainDB }

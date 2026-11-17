@@ -269,7 +269,6 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		return err
 	}
 	defer func() { doms.Close() }() // RunLoop rotates doms; close whichever is current at exit
-	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	var finishStageBeforeSync uint64
 	if hook != nil {
@@ -310,7 +309,6 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			if err != nil {
 				return nil, nil, err
 			}
-			newSD.SetInMemHistoryReads(inMemHistoryReads)
 			hook.NotifySyncState(newTx)
 			return newTx, newSD, nil
 		},

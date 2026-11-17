@@ -30,8 +30,9 @@ type BalanceChange struct {
 	Before, After uint256.Int
 }
 
-// TransactionTrace exposes surviving transaction changes to ASSERT, including
-// payment escrow and nonce consumption, before final fee settlement.
+// TransactionTrace exposes net changes from transaction prestate to ASSERT,
+// including payment escrow and nonce consumption, before final fee settlement.
+// State tables are sorted by address (then key for storage); events keep emission order.
 type TransactionTrace struct {
 	Balances []BalanceChange
 	Slots    []StorageChange

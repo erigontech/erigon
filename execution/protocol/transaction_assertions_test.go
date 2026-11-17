@@ -31,7 +31,19 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
+	"github.com/erigontech/erigon/execution/vm/testutil"
 )
+
+func TestAssertFailureWithoutPaymentApproval(t *testing.T) {
+	evm, tx := frameTestEnv(t)
+	assertion := common.HexToAddress("0x3000")
+	require.NoError(t, evm.IntraBlockState().SetCode(accounts.InternAddress(assertion), program.New().Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
+	tx.Fees.MaxFee.SetUint64(100_000)
+	tx.Frames = []types.Frame{{Mode: types.FrameAssert, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}}}
+	result, err := applyFrameTest(t, evm, tx)
+	require.EqualError(t, err, "frame transaction without payment approval")
+	require.Nil(t, result)
+}
 
 func TestAssertRollback(t *testing.T) {
 	t.Parallel()
@@ -109,7 +121,7 @@ func TestAssertBalanceTrace(t *testing.T) {
 	assertion := common.HexToAddress("0x3000")
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes(), tracing.CodeChangeUnspecified))
 	code := program.New().Push0().Push0().Op(vm.TXTRACE)
-	assertStackWord(code, 2)
+	testutil.AssertStackWord(code, 2)
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), code.Bytes(), tracing.CodeChangeUnspecified))
 	tx.Frames = []types.Frame{
 		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
@@ -233,13 +245,6 @@ func TestAssertStateReadErrorAbortsTransaction(t *testing.T) {
 	}
 }
 
-func assertStackWord(code *program.Program, expected uint64) {
-	code.Push(expected).Op(vm.EQ)
-	destination := code.Size() + 7
-	code.Op(vm.PUSH2).Append([]byte{byte(destination >> 8), byte(destination)}).Op(vm.JUMPI).
-		Push0().Push0().Op(vm.REVERT, vm.JUMPDEST)
-}
-
 func TestTxTraceOmitsRestoredBalance(t *testing.T) {
 	t.Parallel()
 	evm, tx := frameTestEnv(t)
@@ -252,7 +257,7 @@ func TestTxTraceOmitsRestoredBalance(t *testing.T) {
 	// The relay forwards the value it receives, so its own balance ends unchanged.
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(relay), program.New().Call(uint256.NewInt(0), sink, 5, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
 	code := program.New().Push0().Push0().Op(vm.TXTRACE)
-	assertStackWord(code, 2) // payer and sink
+	testutil.AssertStackWord(code, 2) // payer and sink
 	require.NoError(t, ibs.SetCode(accounts.InternAddress(assertion), code.Op(vm.STOP).Bytes(), tracing.CodeChangeUnspecified))
 	tx.Frames = []types.Frame{
 		{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},

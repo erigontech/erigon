@@ -83,7 +83,7 @@ func TestFrameTransactionRPCSettledGasPrice(t *testing.T) {
 	check := func(t *testing.T, got *ethapi.RPCTransaction, i int) {
 		t.Helper()
 		txn := block.Transactions()[i].(*types.FrameTransaction)
-		receipt := ethutils.MarshalReceipt(receipts[i], txn, m.ChainConfig, block.HeaderNoCopy(), false, false)
+		receipt := ethutils.MarshalReceipt(receipts[i], txn, m.ChainConfig, block.HeaderNoCopy(), false)
 		want := new(uint256.Int).Add(block.BaseFee(), &txn.Fees.TipCap)
 		require.Equal(t, want, (*uint256.Int)(receipt.EffectiveGasPrice))
 		require.NotNil(t, got)

@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | Component | `execution/commitment` |
-| Stability | Default on — `--experimental.parallel-commitment=false` selects the sequential trie |
+| Stability | Always on |
 | Implements | `commitment.Trie` |
 | Audience | Contributors to commitment / state-root computation |
 
@@ -266,7 +266,6 @@ substitution of the as-of reader is validated at runtime by the block-root check
 
 | parameter | default | effect |
 | --- | --- | --- |
-| `--experimental.parallel-commitment` | on | selects `VariantParallelHexPatricia` (`execctx.PickTrieVariant`); `=false`, or `COMMITMENT_PARALLEL=false`, selects `VariantHexPatriciaTrie` |
 | fork grain `G` | `max(128, roundKeys/(4·min(numWorkers, GOMAXPROCS)))` | per-round minimum work a fork must hand to its non-largest children (§4.1.1); `SetForkGrain` overrides — `1` forks at every split point, `ForkGrainNever` disables forking |
 | `numWorkers` | `GOMAXPROCS` | `min(numWorkers, GOMAXPROCS)` sizes the lease pool and divides the grain. Override via `SetNumWorkers` |
 
@@ -303,7 +302,6 @@ in scheduling.
 
 | | `HexPatriciaHashed` | `ParallelPatriciaHashed` |
 | --- | --- | --- |
-| flag | `--experimental.parallel-commitment=false` | (default) |
 | `Updates` mode | `ModeDirect` / `ModeUpdate` | `ModeParallel` |
 | parallel unit | none | one clone per child nibble of a forking prefix-trie node (≤16 per fork) |
 | split granularity | none | every prefix-trie split point whose non-largest children together reach the grain, at any depth and in either plane |

@@ -900,6 +900,7 @@ func writeTestSenderState(t *testing.T, ctx context.Context, coreDB kv.TemporalR
 
 	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 	require.NoError(t, err)
+	sd.SetDisableInlineTouchKey(true)
 
 	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr[:], value, txNum, nil))
 	require.NoError(t, sd.Flush(ctx, tx))
@@ -2839,14 +2840,14 @@ func TestZombieQueuedEviction(t *testing.T) {
 
 // TestStalePendingEvictionViaMineNonce verifies that when the execution layer
 // correctly emits a state-diff UPSERT for an AuRa/Gnosis system-transaction
-// sender (fixed in exec3_serial.go by passing the accumulator to the block-end
-// stateWriter), the txpool evicts the now-stale pending transactions.
+// sender (the apply loop sends the finalize writes to the accumulator), the txpool
+// evicts the now-stale pending transactions.
 //
 // Scenario:
 //  1. addr1 has two pending txns: T1 (nonce=0) and T2 (nonce=1).
 //  2. The block mines T1 from the pool AND an AuRa system tx at nonce=1,
 //     advancing the on-chain nonce to 2. Only T1 appears in minedTxns.
-//  3. The EL (after the exec3_serial.go fix) emits addr1 with nonce=2 in
+//  3. The EL (after the fix) emits addr1 with nonce=2 in
 //     stateChanges. The pool receives this via OnNewBlock.
 //  4. removeMined removes T1; onSenderStateChange(nonce=2) evicts T2 (nonce=1).
 func TestStalePendingEvictionViaMineNonce(t *testing.T) {
@@ -2930,8 +2931,8 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 	writeAccount(2, 1)
 
 	// ── Step 4: OnNewBlock with the correct stateChanges from the fixed EL ───
-	// The exec3_serial.go fix ensures addr1 appears in stateChanges with
-	// nonce=2 because the block-end stateWriter now carries the accumulator.
+	// addr1 appears in stateChanges with nonce=2 because the apply loop sends the
+	// finalize writes to the accumulator.
 	h1 := gointerfaces.ConvertHashToH256([32]byte{1})
 	blockChange := &remoteproto.StateChangeBatch{
 		StateVersionId: 1, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
@@ -3791,7 +3792,7 @@ func TestBlobNonceRetryPrecheck(t *testing.T) {
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 			for nonce := uint64(1); nonce <= 3; nonce++ {
 				nonceRetrySender(t, pool, nonce)
-				reasons, _, err = pool.prepareTxns(t.Context(), txns, nil, true)
+				reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
 				require.NoError(t, err)
 				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 			}
@@ -3829,7 +3830,7 @@ func TestBlobNonceRetryEligibilityChanges(t *testing.T) {
 				txns = prefix
 			case "reorg":
 				nonceRetrySender(t, pool, 66)
-				reasons, _, err = pool.prepareTxns(t.Context(), txns, nil, true)
+				reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
 				require.NoError(t, err)
 				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
 				nonceRetrySender(t, pool, 65)
@@ -3840,7 +3841,7 @@ func TestBlobNonceRetryEligibilityChanges(t *testing.T) {
 			case "gap boundary":
 				nonceRetrySender(t, pool, 1)
 			}
-			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil, true)
+			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
 			require.NoError(t, err)
 			for _, reason := range reasons {
 				require.Equal(t, txpoolcfg.NotSet, reason)
@@ -3885,7 +3886,7 @@ func TestBlobNonceRetryFrameBypass(t *testing.T) {
 			} else {
 				txns.Append(frame, sender[:], true)
 			}
-			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil, true)
+			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
 			require.NoError(t, err)
 			require.Equal(t, txpoolcfg.NotSet, reasons[0])
 		})
@@ -3901,11 +3902,11 @@ func TestBlobNonceRetryStillChecksHonestSidecar(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 	slot.BlobBundles[0].Blob[31] ^= 1
-	reasons, _, err = pool.prepareTxns(t.Context(), txns, nil, true)
+	reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 	nonceRetrySender(t, pool, 1000)
-	reasons, _, err = pool.prepareTxns(t.Context(), txns, nil, true)
+	reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnmatchedBlobTxExt}, reasons)
 	slot.BlobBundles[0].Blob[31] ^= 1
@@ -3932,7 +3933,7 @@ func TestBlobNonceRetryNonceBounds(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooDistant}, reasons)
 			nonceRetrySender(t, pool, tc.nonce)
-			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil, true)
+			reasons, _, err = pool.prepareTxns(t.Context(), txns, nil)
 			require.NoError(t, err)
 			require.Equal(t, []txpoolcfg.DiscardReason{tc.want}, reasons)
 		})

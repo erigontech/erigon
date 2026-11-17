@@ -1555,14 +1555,18 @@ func (s *simulator) computeCommitmentFromStateHistory(
 		for address, locations := range touched {
 			addrValue := address.Value()
 			addressKey := addrValue[:]
-			tsd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(addressKey), nil)
+			if err := tsd.GetCommitmentCtx().TouchKeyFromState(ttx, addressKey); err != nil {
+				return nil, err
+			}
 			s.logger.Debug("Touch key", "domain", kv.AccountsDomain, "key", address.Value().Hex()[2:])
 			for _, loc := range locations {
 				locValue := loc.Value()
 				locationKey := locValue[:]
 				copy(storageFullKey[:length.Addr], addressKey)
 				copy(storageFullKey[length.Addr:], locationKey)
-				tsd.GetCommitmentCtx().TouchKey(kv.StorageDomain, string(storageFullKey), nil)
+				if err := tsd.GetCommitmentCtx().TouchKeyFromState(ttx, storageFullKey); err != nil {
+					return nil, err
+				}
 				s.logger.Debug("Touch key", "domain", kv.StorageDomain, "key", address.Value().Hex()[2:]+loc.Value().Hex()[2:])
 			}
 		}

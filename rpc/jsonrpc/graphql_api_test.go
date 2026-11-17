@@ -171,9 +171,9 @@ func TestRPCReceiptEmbeddersKeepTheirFields(t *testing.T) {
 	}
 }
 
-// Cached receipts carry logs stamped with the block time; graphql_getBlockDetails renders
-// receipts without it, as MarshalReceipt does with withBlockTimestamp false.
-func TestGraphQLReceiptLogsHaveNoBlockTimestamp(t *testing.T) {
+// Cached receipts carry logs stamped with the block time; graphql_getBlockDetails renders them
+// as they are, as eth_getTransactionReceipt does.
+func TestGraphQLReceiptLogsHaveBlockTimestamp(t *testing.T) {
 	t.Parallel()
 
 	header := &types.Header{Number: *uint256.NewInt(1), Time: 7}
@@ -181,8 +181,9 @@ func TestGraphQLReceiptLogsHaveNoBlockTimestamp(t *testing.T) {
 	receipt := &types.Receipt{BlockNumber: uint256.NewInt(1), Logs: types.Logs{{Address: common.HexToAddress("0x01")}}}
 	receipt.Logs.SetBlockTimestamp(header.Time)
 
-	got, err := json.Marshal(NewGraphQLReceipt(receipt, txn, &chain.Config{ChainID: uint256.NewInt(1)}, header))
+	got := NewGraphQLReceipt(receipt, txn, &chain.Config{ChainID: uint256.NewInt(1)}, header)
+	require.Same(t, receipt.Logs[0], got.Logs[0], "a stamped log must not be copied")
+	data, err := json.Marshal(got)
 	require.NoError(t, err)
-	require.NotContains(t, string(got), "blockTimestamp")
-	require.NotNil(t, receipt.Logs[0].BlockTimestamp, "the cached log must stay stamped")
+	require.Contains(t, string(data), `"blockTimestamp":"0x7"`)
 }

@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -271,6 +272,67 @@ func TestMinedBlobTxnKeepsRlpAfterReloadFlushAndUnwind(t *testing.T) {
 		require.Equal(t, want, rlp)
 		return err
 	}))
+}
+
+func TestMinedBlobTxnMinedBeforeStartupRestore(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		restoreBeforeUnwind bool
+		flushBeforeUnwind   bool
+	}{
+		{name: "unwind before restore"},
+		{name: "unwind after restore", restoreBeforeUnwind: true},
+		{name: "unwind after flush", restoreBeforeUnwind: true, flushBeforeUnwind: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newMinedBlobReorgTest(t)
+			want := bytes.Clone(r.blobTxn.Rlp)
+			_, err := r.pool.flush(r.ctx)
+			require.NoError(t, err)
+
+			reloaded, err := New(r.ctx, make(chan Announcements, 5), r.pool.poolDB, r.pool._chainDB, txpoolcfg.DefaultConfig,
+				kvcache.New(kvcache.DefaultCoherentConfig), r.pool.chainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+			require.NoError(t, err)
+			r.pool = reloaded
+			require.NoError(t, r.pool.OnNewBlock(r.ctx, r.block(0, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+			r.mine(t, 1, 3)
+			if tc.restoreBeforeUnwind {
+				require.NoError(t, r.pool.start(r.ctx))
+			}
+			if tc.flushBeforeUnwind {
+				_, err = r.pool.flush(r.ctx)
+				require.NoError(t, err)
+			}
+
+			r.reorgOneBlock(t, 0x11, false)
+			restored := r.pool.byHash[r.hash]
+			require.NotNil(t, restored)
+			require.Len(t, restored.TxnSlot.BlobBundles, len(r.blobTxn.BlobBundles))
+			require.Equal(t, want, restored.TxnSlot.Rlp)
+		})
+	}
+}
+
+func TestRetainedUnwindOfConsumedBlobIsMined(t *testing.T) {
+	r := newMinedBlobReorgTest(t)
+	account := accounts.Account{Nonce: 3, Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+	coreDB := r.pool._chainDB.(kv.TemporalRwDB)
+	writeTestSenderState(t, r.ctx, coreDB, r.pool.logger, r.sender, accounts.SerialiseV3(&account), 1)
+	batch := r.block(1, 3, remoteproto.Direction_UNWIND)
+	batch.StateChangesIncomplete = true
+	require.NoError(t, coreDB.View(r.ctx, func(tx kv.Tx) error {
+		var err error
+		batch.StateVersionId, err = rawdb.GetStateVersion(tx)
+		return err
+	}))
+	batch.ChangeBatch = append(batch.ChangeBatch, &remoteproto.StateChange{BlockHeight: 2})
+	require.NoError(t, r.pool.OnNewBlock(r.ctx, batch, TxnSlots{}, r.streamed(), TxnSlots{}))
+
+	require.NotContains(t, r.pool.byHash, r.hash)
+	mined := r.pool.minedBlobTxnsByHash[r.hash]
+	require.NotNil(t, mined, "a re-mined transaction must keep its sidecar for another reorg")
+	require.Equal(t, uint64(2), mined.minedBlockNum)
+	require.Len(t, mined.TxnSlot.BlobBundles, len(r.blobTxn.BlobBundles))
 }
 
 func TestMinedBlobTxnSurvivesReorgThatMinesItAgain(t *testing.T) {

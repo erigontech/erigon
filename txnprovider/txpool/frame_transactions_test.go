@@ -1511,7 +1511,7 @@ func TestFramePoolBlobFeeFloor(t *testing.T) {
 	require.True(t, frame.Fees.MaxFee.LtUint64(frame.GetBlobGas()))
 	var txns TxnSlots
 	txns.Append(slot, sender[:], false)
-	reasons, err := pool.addNewTxns(ctx, txns, nil, true)
+	reasons, err := pool.addNewTxns(ctx, txns, nil)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.FeeTooLow}, reasons)
 	require.Zero(t, pool.totalBlobsInPool.Load())
@@ -2353,7 +2353,7 @@ func TestFramePoolParkedEvictionPriority(t *testing.T) {
 				frame := framePoolSlot(t, sender, 1, frameFee, keys...)
 				var frames TxnSlots
 				frames.Append(frame, sender[:], false)
-				reasons, err := pool.addNewTxns(ctx, frames, nil, true)
+				reasons, err := pool.addNewTxns(ctx, frames, nil)
 				require.NoError(t, err)
 				require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 
@@ -2366,7 +2366,7 @@ func TestFramePoolParkedEvictionPriority(t *testing.T) {
 				ordinary.IDHash[0] = 1
 				var txns TxnSlots
 				txns.Append(ordinary, ordinarySender[:], false)
-				reasons, err = pool.addNewTxns(ctx, txns, nil, true)
+				reasons, err = pool.addNewTxns(ctx, txns, nil)
 				require.NoError(t, err)
 				require.Len(t, pool.byHash, 1)
 				if frameFee > 5 {
@@ -2400,7 +2400,7 @@ func TestFramePoolParkedCapacity(t *testing.T) {
 		frames = append(frames, frame)
 		var txns TxnSlots
 		txns.Append(frame, sender[:], false)
-		reasons, err := pool.addNewTxns(ctx, txns, nil, true)
+		reasons, err := pool.addNewTxns(ctx, txns, nil)
 		require.NoError(t, err)
 		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
 		require.Equal(t, 1, pool.pending.Len())

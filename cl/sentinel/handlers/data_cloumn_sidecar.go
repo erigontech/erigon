@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -18,7 +19,23 @@ import (
 
 var errInvalidDataColumnIndex = errors.New("invalid column index")
 
+const (
+	// columnChunkWriteDeadline is the per-chunk response timeout that other clients still apply.
+	columnChunkWriteDeadline = 10 * time.Second
+	// columnByRootResponseBudget is when ByRoot stops starting chunks; plus columnChunkWriteDeadline it is both handlers' hard stop.
+	columnByRootResponseBudget = 30 * time.Second
+)
+
+func (c *ConsensusHandlers) renewColumnWriteDeadline(s network.Stream, start time.Time) error {
+	deadline := c.now().Add(columnChunkWriteDeadline)
+	if hardStop := start.Add(columnByRootResponseBudget + columnChunkWriteDeadline); deadline.After(hardStop) {
+		deadline = hardStop
+	}
+	return s.SetWriteDeadline(deadline)
+}
+
 func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) error {
+	start := c.now()
 	requestCtx, cancel := context.WithTimeout(c.ctx, StreamDeadline)
 	defer cancel()
 	curEpoch := c.ethClock.GetCurrentEpoch()
@@ -75,11 +92,11 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 		return err
 	}
 	defer tx.Rollback()
-	return c.writeColumnsByRange(requestCtx, s, tx, req, startSlot, endSlot, curSlot)
+	return c.writeColumnsByRange(requestCtx, s, tx, req, start, startSlot, endSlot, curSlot)
 }
 
 // writeColumnsByRange serves whole blocks. Columns a block does not store take none of the response limit.
-func (c *ConsensusHandlers) writeColumnsByRange(ctx context.Context, s network.Stream, tx kv.Tx, req *cltypes.ColumnSidecarsByRangeRequest, startSlot, endSlot, curSlot uint64) error {
+func (c *ConsensusHandlers) writeColumnsByRange(ctx context.Context, s network.Stream, tx kv.Tx, req *cltypes.ColumnSidecarsByRangeRequest, start time.Time, startSlot, endSlot, curSlot uint64) error {
 	requested := make([]uint64, 0, req.Columns.Length())
 	req.Columns.Range(func(_ int, columnIndex uint64, _ int) bool {
 		requested = append(requested, columnIndex)
@@ -141,6 +158,9 @@ func (c *ConsensusHandlers) writeColumnsByRange(ctx context.Context, s network.S
 			return err
 		}
 		for _, columnIndex := range columns {
+			if err := c.renewColumnWriteDeadline(s, start); err != nil {
+				return err
+			}
 			if _, err := s.Write([]byte{SuccessfulResponsePrefix}); err != nil {
 				log.Debug("failed to write success byte", "error", err)
 				return err
@@ -163,6 +183,7 @@ func (c *ConsensusHandlers) writeColumnsByRange(ctx context.Context, s network.S
 }
 
 func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) error {
+	start := c.now()
 	curEpoch := c.ethClock.GetCurrentEpoch()
 
 	// Use current epoch's version for decoding (supports Fulu and GLOAS)
@@ -212,8 +233,19 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 	defer tx.Rollback()
 
 	count := 0
+	budgetSpent := false
+	outOfBudget := func() bool {
+		if !budgetSpent && count > 0 && c.now().Sub(start) >= columnByRootResponseBudget {
+			budgetSpent = true
+			log.Debug("[pubsubhandler] data column sidecars by root response budget spent", "peer", s.Conn().RemotePeer().String(), "served", count, "requested", totalColumns)
+		}
+		return budgetSpent
+	}
 	var responseErr error
 	for i := 0; i < req.Len(); i++ {
+		if outOfBudget() {
+			break
+		}
 		id := req.Get(i)
 		blockRoot := id.BlockRoot
 		columns := id.Columns
@@ -244,6 +276,9 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 				// max number of sidecars reached
 				return false
 			}
+			if outOfBudget() {
+				return false
+			}
 
 			exists, err := c.dataColumnStorage.ColumnSidecarExists(c.ctx, *slot, blockRoot, int64(columnIndex))
 			if err != nil {
@@ -255,10 +290,17 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 				// skip
 				return true
 			}
+			if outOfBudget() {
+				return false
+			}
 
 			forkDigest, err := c.ethClock.ComputeForkDigest(*slot / c.beaconConfig.SlotsPerEpoch)
 			if err != nil {
 				log.Debug("failed to compute fork digest", "error", err)
+				responseErr = err
+				return false
+			}
+			if err := c.renewColumnWriteDeadline(s, start); err != nil {
 				responseErr = err
 				return false
 			}

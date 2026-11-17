@@ -170,9 +170,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	yielded := mapset.NewSet[[32]byte]()
 	nonceTooHigh := map[accounts.Address][]nonceTooHighTxn{}
 	readNonce := func(sender accounts.Address) (uint64, error) {
-		if !ibs.IsVersioned() {
-			return ibs.GetNonce(sender)
-		}
 		// Filtering must observe executed writes without adding reads to the BAL.
 		view := state.NewVersionedAccountView(sender, len(ba.Txns), ibs.VersionMap(), stateReader)
 		nonce := view.GetNonce()
@@ -247,25 +244,19 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	blockHeight := block.NumberU64()
 
-	// FinalizeBlockExecution skipped the so.data CommitBlock of the versioned state; commit the accumulated per-phase write-sets to the
-	// domains via ApplyWrites instead — the same domain apply the parallel
-	// executor and block generation use (rw_v3 handles the self-destruct delete,
-	// EIP-161 removal and storage-subtree cascade). Each recorded phase
-	// (init/txs/finalize) is applied in order.
-	blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
-	blockRules := blockCtx.Rules(cfg.chainConfig)
+	// The versioned state holds the block's writes as per-phase write-sets (init/txs/finalize). Apply them to the
+	// domains in order with ApplyWrites, as the parallel executor and block generation do (rw_v3 handles the
+	// self-destruct delete, EIP-161 removal and storage-subtree cascade).
 	for _, ws := range ba.WriteSets() {
 		if ws == nil || ws.IsEmpty() {
 			continue
 		}
-		if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, nil, blockRules, false); err != nil {
+		if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, false); err != nil {
 			return fmt.Errorf("apply versioned block writes: %w", err)
 		}
 	}
 
-	// Compute state root directly from the domain writes accumulated during
-	// block assembly. All state changes flow through CommitBlock in
-	// AssembleBlock — no re-execution needed.
+	// The domains now hold every write of the block, so the state root needs no re-execution.
 	rh, err := sd.ComputeCommitment(ctx, tx, false, blockHeight, txNum, logPrefix, nil)
 	if err != nil {
 		return fmt.Errorf("compute commitment failed: %w", err)

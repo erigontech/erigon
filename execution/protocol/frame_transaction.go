@@ -37,7 +37,7 @@ import (
 // boundaries and fee settlement; the EVM executes each individual frame.
 // A non-nil validation tracer limits execution to the pool's validation prefix
 // and causes all simulated changes to be reverted.
-func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refunds, gasBailout bool, validation *frameValidationTracer) (result *evmtypes.ExecutionResult, err error) {
+func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refunds bool, validation *frameValidationTracer) (result *evmtypes.ExecutionResult, err error) {
 	rules := st.evm.ChainRules()
 	if !rules.IsBogota {
 		return nil, types.ErrTxTypeNotSupported
@@ -115,7 +115,6 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	defer st.state.PopSnapshot(snapshot)
 	ctx := st.state.NewFrameContext(tx, maxCost)
 	ctx.LegacyNonce = nonce
-	ctx.GasBailout = gasBailout
 	st.evm.FrameContext = ctx
 	defer func() {
 		st.evm.FrameContext = nil
@@ -142,6 +141,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			tracer.EmitExit(0, nil, gasUsed, vm.VMErrorFromErr(traceErr), err != nil)
 		}()
 	}
+	hasAssertions := len(tx.Frames) > 0 && tx.Frames[len(tx.Frames)-1].Mode == types.FrameAssert
 	var lastErr error
 	batchStart, batchSnapshot := -1, -1
 	bodyStart, bodySnapshot := -1, -1
@@ -244,7 +244,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 				batchStart, batchSnapshot = -1, -1
 			}
 		}
-		if bodySnapshot < 0 && !ctx.Payer.IsNil() && tx.Frames[len(tx.Frames)-1].Mode == types.FrameAssert {
+		if hasAssertions && bodySnapshot < 0 && !ctx.Payer.IsNil() {
 			bodyStart, bodySnapshot = i+1, st.state.PushSnapshot()
 		}
 	}
@@ -258,7 +258,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		used.State += receipt.GasUsed.State
 	}
 	var refund uint64
-	if refunds && !gasBailout {
+	if refunds {
 		refund = min(st.state.GetRefund(), used.Total()/params.RefundQuotientEIP3529)
 	}
 	// Refunds reduce the payer's fee, but do not free block execution capacity.
@@ -273,10 +273,8 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	available := u256.Sub(maxCost, basePaid)
 	tipPaid := tx.Fees.PriorityCost(paid, &available)
 	change := u256.Sub(available, tipPaid)
-	if !gasBailout {
-		if err := st.state.AddBalance(ctx.Payer, change, tracing.BalanceIncreaseGasReturn); err != nil {
-			return nil, err
-		}
+	if err := st.state.AddBalance(ctx.Payer, change, tracing.BalanceIncreaseGasReturn); err != nil {
+		return nil, err
 	}
 	tipped, err := st.payCoinbaseAmount(tipPaid)
 	if err != nil {

@@ -315,15 +315,6 @@ func WithExperimentalBAL() Option {
 	}
 }
 
-// WithoutExperimentalBAL disables experimental BAL (and the parallel executor
-// it forces) for tests that exercise patterns the parallel executor doesn't
-// yet handle correctly (e.g. intra-block SELFDESTRUCT + CREATE2 reincarnation).
-func WithoutExperimentalBAL() Option {
-	return func(opts *options) {
-		opts.experimentalBAL = false
-	}
-}
-
 func WithGenesisSpec(gspec *types.Genesis) Option {
 	return func(opts *options) {
 		opts.genesis = gspec
@@ -440,7 +431,14 @@ func WithStateTransitionObserver(observer execmodule.StateTransitionObserver) Op
 	}
 }
 
+func WithExecutionPathReporter(report func(ethconfig.BlockExecutionPath)) Option {
+	return func(opts *options) {
+		opts.executionPathReporter = report
+	}
+}
+
 type options struct {
+	executionPathReporter    func(ethconfig.BlockExecutionPath)
 	stepSize                 *uint64
 	e2RetireStep             *uint64
 	experimentalBAL          bool
@@ -582,6 +580,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	if opt.execWorkerCount > 0 {
 		cfg.Sync.ExecWorkerCount = opt.execWorkerCount
 	}
+	cfg.Sync.ExecutionPathReporter = opt.executionPathReporter
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
@@ -878,7 +877,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		logger,
 		engine,
 		cfg.Sync,
-		cfg.ExperimentalBAL,
 		cfg.FcuBackgroundPrune,
 		false, /* onlySnapDownloadOnStart */
 		readAheader,

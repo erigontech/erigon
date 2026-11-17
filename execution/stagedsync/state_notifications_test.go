@@ -70,7 +70,7 @@ func TestUnwindCodeNotificationsUseRestoredState(t *testing.T) {
 			accumulator := shards.NewAccumulator()
 			header := makeHeader(1, common.Hash{})
 			accumulator.StartChange(header, nil, true)
-			require.NoError(t, stateChangesStreamAtUnwind(ctx, tx, doms.AsSnapshotGetter(tx), 1, 0, accumulator, &diffs, logger))
+			require.NoError(t, stateChangesStreamAtUnwind(ctx, doms.AsSnapshotGetter(tx), 1, 0, accumulator, &diffs, logger))
 			batch := accumulator.Batch(header).ToProtoBatch()
 			require.False(t, batch.StateChangesIncomplete)
 			require.Len(t, batch.ChangeBatch[0].Changes, 1)
@@ -164,7 +164,7 @@ func TestCatchUpStateNotificationCompleteness(t *testing.T) {
 	accumulator := shards.NewAccumulator()
 	cfg := ExecuteBlockCfg{db: db, notifications: &shards.Notifications{Accumulator: accumulator}}
 	header := makeHeader(100, common.Hash{})
-	require.NoError(t, execV3Finalize(ctx, nil, cfg, doms, 1, 200, 100, header, false, "test", logger))
+	require.NoError(t, execV3Finalize(ctx, cfg, doms, 1, 200, 100, header, false, "test", logger))
 	batch := accumulator.Batch(header).ToProtoBatch()
 	require.True(t, batch.StateChangesIncomplete)
 	require.Len(t, batch.ChangeBatch, 1)

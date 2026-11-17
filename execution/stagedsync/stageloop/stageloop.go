@@ -108,7 +108,7 @@ func (h *Hook) LastNewBlockSeen(n uint64) {
 }
 
 func (h *Hook) CheckpointStateChanges() func() {
-	if h == nil || h.notifications == nil || h.notifications.Accumulator == nil {
+	if h == nil || h.notifications == nil {
 		return nil
 	}
 	return h.notifications.Accumulator.Checkpoint()

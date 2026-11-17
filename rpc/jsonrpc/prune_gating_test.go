@@ -318,24 +318,24 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 		})
 	}},
 	{"trace_block", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return apis.trace.Block(ctx, rpc.BlockNumber(ref.num), new(bool), nil)
+		return apis.trace.Block(ctx, rpc.BlockNumber(ref.num), nil)
 	}},
 	{"trace_transaction", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return apis.trace.Transaction(ctx, ref.txHash, new(bool), nil)
+		return apis.trace.Transaction(ctx, ref.txHash, nil)
 	}},
 	{"trace_get", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return apis.trace.Get(ctx, ref.txHash, nil, new(bool), nil)
+		return apis.trace.Get(ctx, ref.txHash, nil, nil)
 	}},
 	{"trace_filter", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return streamedResult(func(stream *jsonstream.Stream) error {
-			return apis.trace.Filter(ctx, blockTraceFilter(ref.num), new(bool), nil, stream)
+			return apis.trace.Filter(ctx, blockTraceFilter(ref.num), nil, stream)
 		})
 	}},
 	{"trace_replayTransaction", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return apis.trace.ReplayTransaction(ctx, ref.txHash, []string{TraceTypeTrace}, new(bool), nil)
+		return apis.trace.ReplayTransaction(ctx, ref.txHash, []string{TraceTypeTrace}, nil)
 	}},
 	{"trace_replayBlockTransactions", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return apis.trace.ReplayBlockTransactions(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num)), []string{TraceTypeTrace}, new(bool), nil)
+		return apis.trace.ReplayBlockTransactions(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num)), []string{TraceTypeTrace}, nil)
 	}},
 	// A call is executed on the state a block leaves behind, which the body it came
 	// from is not needed for.
