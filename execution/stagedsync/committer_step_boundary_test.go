@@ -1100,6 +1100,75 @@ func TestComputeAhead_WindowBlocksWaitForPreviousResult(t *testing.T) {
 	require.NotEmpty(t, changesets[1].Diffs[kv.CommitmentDomain].GetDiffSet())
 }
 
+func TestComputeAhead_AfterIncrementalBlock(t *testing.T) {
+	setAheadFlags(t, true)
+	dbg.BatchCommitments = false
+
+	for _, tc := range []struct {
+		name         string
+		perBlockFrom uint64
+	}{
+		{name: "window", perBlockFrom: 1},
+		{name: "pre-window", perBlockFrom: 1 << 62},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			hashes := [2]common.Hash{{0xc1}, {0xc2}}
+			addrs := [2]accounts.Address{accounts.InternAddress([20]byte{0xc3}), accounts.InternAddress([20]byte{0xc4})}
+			values := [2]uint256.Int{*uint256.NewInt(21), *uint256.NewInt(22)}
+
+			run := func(balDriven bool, roots [2][]byte) ([2][]byte, [2][]kv.DomainEntryDiff) {
+				dbg.BALDrivenCommitment = balDriven
+				db, tx, doms := setupStepTest(t)
+				doms.SetDeferCommitmentUpdates(true)
+				changesets := [2]*changeset.StateChangeSet{{}, {}}
+				for i := range addrs {
+					doms.SavePastChangesetAccumulator(hashes[i], uint64(i+1), changesets[i])
+					putSeedAccount(t, doms, tx, addrs[i], uint64(i+1))
+				}
+				cc, out := newAheadCalculator(t, doms, db, tc.perBlockFrom)
+				cc.handleBlockRequest(ctx, &blockRequest{blockNum: 1, blockHash: hashes[0], firstTxNum: 1, lastTxNum: 1, stateRoot: common.BytesToHash(roots[0])})
+				cc.handleBlockRequest(ctx, &blockRequest{blockNum: 2, blockHash: hashes[1], firstTxNum: 2, lastTxNum: 2, stateRoot: common.BytesToHash(roots[1]), bal: oneAccountBAL(addrs[1], values[1])})
+				for i := range addrs {
+					n := uint64(i + 1)
+					cc.handleMessage(ctx, recordTx(newRawViewVM(n), n, hashes[i], n, &chain.Rules{}, nonceBalanceWrites(addrs[i], 1, values[i])))
+					require.False(t, cc.computedAhead[1])
+					if balDriven && n == 2 {
+						require.True(t, cc.computedAhead[2])
+					}
+					cc.handleMessage(ctx, &blockResult{BlockNum: n, BlockHash: hashes[i], StateRoot: common.BytesToHash(roots[i]), lastTxNum: n})
+				}
+				for i := range roots {
+					if roots[i] == nil {
+						res := <-out
+						require.ErrorIs(t, res.err, ErrWrongTrieRoot)
+						roots[i] = res.rootHash
+					}
+				}
+				if balDriven && tc.perBlockFrom != 1 {
+					res := <-out
+					require.NoError(t, res.err)
+					require.Equal(t, uint64(2), res.blockNum)
+				}
+				require.Empty(t, out)
+				require.NoError(t, doms.FlushPendingUpdates(tx))
+				return roots, [2][]kv.DomainEntryDiff{changesets[0].Diffs[kv.CommitmentDomain].GetDiffSet(), changesets[1].Diffs[kv.CommitmentDomain].GetDiffSet()}
+			}
+
+			roots, _ := run(false, [2][]byte{})
+			roots, _ = run(false, [2][]byte{roots[0]})
+			_, incrementalDiffs := run(false, roots)
+			_, aheadDiffs := run(true, roots)
+			for i := range aheadDiffs {
+				require.ElementsMatch(t, incrementalDiffs[i], aheadDiffs[i])
+				if tc.perBlockFrom == 1 {
+					require.NotEmpty(t, aheadDiffs[i])
+				}
+			}
+		})
+	}
+}
+
 func TestComputeAhead_WindowBlockUnsafeModes(t *testing.T) {
 	setAheadFlags(t, true)
 
