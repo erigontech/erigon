@@ -24,7 +24,7 @@ Before committing, pushing, or opening/updating a PR, select checks for the chan
 - **Broad changes or linter configuration/rules:** run `make lintci` for full repository lint and the module check
 - **Documentation-only changes (no `.go` files):** check the diff and relevant links or document tooling; Go lint and builds are not required.
 
-`make lint`, `make test-short`. Run affected long tests without `-short`.
+Example targets for the checks above: `make lint`, `make test-short`. Run affected long tests without `-short`.
 
 ## Architecture Overview
 
@@ -62,6 +62,8 @@ When fixing bugs or adding new features, follow the test-driven development (TDD
 
 Before adding a test: Inspect the relevant existing tests - extend them 
 
+Before changing a bound or constant: a deliberate tolerance and an off-by-one are indistinguishable at the call site. Before changing a bound, threshold or rounding expression, read the code that *produces* the value being compared against and confirm the intended relationship.
+
 ### For bug fixes
 
 Reproduce the bug as a failing test **before** touching the fix. This proves three things at once: (a) the bug exists, (b) the agent/contributor understands it, and (c) the fix actually addresses it — the test flips `red → green` when the fix lands.
@@ -97,7 +99,9 @@ Removing tests from CI matrix: require own PR with clear reasons
 
 2. **Flaky tests** — partially valid, with very low (not zero) tolerance. The rule is **reproduce locally and fix**; a skip is a last resort only after serious root-cause analysis (not "I ran it three times and it passed"), with that investigation attached to the tracking issue. 
 
-3. **Long-running tests excluded from short mode** — a test too slow or resource-heavy for the quick `-short` suite may use the canonical guard `if testing.Short() { t.Skip("...") }` (message such as `"long-running test"`). It must still run in the full (non-`-short`) suite, the guard must depend only on `testing.Short()`
+3. **Long-running tests excluded from short mode** — a test too slow or resource-heavy for the quick `-short` suite may use the canonical guard `if testing.Short() { t.Skip("...") }` (message such as `"long-running test"`). It must still run in the full (non-`-short`) suite, the guard must depend only on `testing.Short()`. Never add the guard in response to a failure, hang, or flake.
+
+For the first two reasons, the skip carries an inline comment linking the tracking issue, which is closed by removing the skip — not by closing it with the skip still in place.
 
 ## Conventions
 
@@ -111,13 +115,13 @@ Follow [Local verification](#local-verification) before commits, pushes, and PR 
 
 ### Comments
 
-**Default: no comment.** Clear names and small focused functions read on their own. Before adding comment: ask whether renaming, extracting a helper, or restructuring would remove the need
+**Default: no comment.** Clear names and small focused functions read on their own. Before adding a comment, ask whether renaming, extracting a helper, or restructuring would remove the need
 
 A comment may be warranted for: a non-obvious invariant the types don't enforce; a workaround for a bug in a dependency or the runtime (link the issue/commit); a surprising edge case a reader would otherwise miss; a performance-sensitive choice where the obvious implementation would be wrong.
 
 - Concise, but err on the side of clarity: cut comments a sentence or two - if it doesn't harm clarity
 - High-level, not scenario-specific: explain the invariant or gotcha in general terms
-- Free of forensic detail: Strip dates, devnet/branch names, PR/issue/review references, incident anecdotes, callsite lists. That history belongs in the commit message and PR description
+- Free of forensic detail: Strip dates, devnet/branch names, PR/issue/review references, incident anecdotes, callsite lists, scope or limitation narration (`// forward-only`, `// safety net`). That history belongs in the commit message and PR description
 - Stated once: "The Why" lives at its canonical place — the field, type or function it belongs to; other sites refer to the source of truth
 - Not a restatement of the code
 
@@ -125,17 +129,15 @@ A comment may be warranted for: a non-obvious invariant the types don't enforce;
 
 Keep review feedback focused by PR scope - real unrelated bugs must be fixed in follow-up PR. Do not require unrelated pre-existing issues to be fixed in the same change 
 
-Changing Bound or Constant: off-by-one are indistinguishable at the call site 
-
 ### Pull Request scope
 
 Keep each PR focused on one coherent unit of work. Judge scope by the concepts changed, not only by the number of lines or files
 
 Large change: use stacked PRs
 
-Benchmarks: keep in `xyz_bench_test.go` file instead `xyz_test.go`
+Benchmarks: keep in `xyz_bench_test.go` file instead of `xyz_test.go`
 
-GitHub auto-links `#1` as PRs or Issues - don't use it as list marker
+To refer to a numbered list item, point, step, or nit in PR descriptions, issue descriptions, or comments, write it in words — "point 1", "item 1", "the first nit". Use `#N` only as a reference to a GitHub issue or PR number; GitHub auto-links it, so a bare `#1` would point at an unrelated PR.
 
 ## Manual Workflows
 
@@ -147,7 +149,7 @@ When opening a PR against `release/3.4` (or another release branch):
 
 - **Title**: `[r3.4] db/version: enforce upper-bound file version check`
 - **Body**: keep it short: `Cherry-pick of #<N> to release/3.4.` When release-branch adjustments were needed (different APIs, skipped tests, etc.), add a `## r3.4-specific adaptations` section listing the deltas
-- **Branch name**: `<user>/cp/<PR#>_to_3.4`
+- **Branch name**: `cp/<PR#>-to-3.4`
 - **Base branch**: `release/3.4`.
 
 ## Workflows
@@ -155,3 +157,7 @@ When opening a PR against `release/3.4` (or another release branch):
 Make sure all scripts and shell code used from GitHub workflows is cross platform, for macOS, Windows and Linux.
 
 Read [`CI-GUIDELINES.md`](CI-GUIDELINES.md) for guidelines before making changes to workflows.
+
+## Go Test Caching
+
+**When a test reads a data file at runtime** (via `os.Open`, `os.ReadFile`, `os.Stat`, etc.) that lives outside a `testdata/` directory, it must be added to the `git restore-mtime` pattern list in `setup-erigon/action.yml`. Otherwise that package's test results will never be cached in CI.
