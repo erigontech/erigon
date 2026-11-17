@@ -17,6 +17,7 @@
 package cltypes
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -279,6 +280,28 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparam
 		Version:            version,
 		beaconCfg:          beaconCfg,
 	}
+}
+
+func (b *BlindedBeaconBody) UnmarshalJSON(buf []byte) error {
+	type bodyJSON BlindedBeaconBody
+	if err := json.Unmarshal(buf, (*bodyJSON)(b)); err != nil {
+		return err
+	}
+	if b.AttesterSlashings == nil {
+		return nil
+	}
+	return solid.RangeErr(b.AttesterSlashings, func(i int, slashing *AttesterSlashing, _ int) error {
+		if slashing == nil || slashing.Attestation_1 == nil || slashing.Attestation_2 == nil {
+			return fmt.Errorf("attester slashing %d: attestation_1 and attestation_2 are required", i)
+		}
+		slashing.SetVersionWithConfig(b.Version, b.beaconCfg)
+		for j, att := range []*IndexedAttestation{slashing.Attestation_1, slashing.Attestation_2} {
+			if att.AttestingIndices.Length() > att.AttestingIndices.Cap() {
+				return fmt.Errorf("attester slashing %d attestation_%d: attesting indices exceed limit: %d > %d", i, j+1, att.AttestingIndices.Length(), att.AttestingIndices.Cap())
+			}
+		}
+		return nil
+	})
 }
 
 func (b *BlindedBeaconBody) SetVersion(version clparams.StateVersion) *BlindedBeaconBody {
