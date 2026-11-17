@@ -17,6 +17,7 @@
 package cltypes
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -91,7 +92,7 @@ func (i *IndexedAttestation) Static() bool {
 
 func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 	var tmp struct {
-		AttestingIndices []string               `json:"attesting_indices"`
+		AttestingIndices json.RawMessage        `json:"attesting_indices"`
 		Data             *solid.AttestationData `json:"data"`
 		Signature        common.Bytes96         `json:"signature"`
 	}
@@ -100,25 +101,48 @@ func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 		return err
 	}
 
-	limit := attestingIndicesLimit
+	limit, enforceLimit := attestingIndicesLimit, false
 	if i.AttestingIndices != nil {
-		limit = i.AttestingIndices.Cap()
-		if len(tmp.AttestingIndices) > limit {
-			return fmt.Errorf("attesting indices exceed limit: %d > %d", len(tmp.AttestingIndices), limit)
-		}
+		limit, enforceLimit = i.AttestingIndices.Cap(), true
 	}
-	indices := make([]uint64, len(tmp.AttestingIndices))
-	for j, index := range tmp.AttestingIndices {
-		v, err := strconv.ParseUint(index, 10, 64)
-		if err != nil {
-			return err
-		}
-		indices[j] = v
+	indices, err := decodeAttestingIndices(tmp.AttestingIndices, limit, enforceLimit)
+	if err != nil {
+		return err
 	}
 	i.AttestingIndices = solid.NewRawUint64List(limit, indices)
 	i.Data = tmp.Data
 	i.Signature = tmp.Signature
 	return nil
+}
+
+// decodeAttestingIndices parses a JSON array of decimal strings one element at a time, so an oversized array is
+// rejected before its elements are allocated.
+func decodeAttestingIndices(raw json.RawMessage, limit int, enforceLimit bool) ([]uint64, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if tok, err := dec.Token(); err != nil {
+		return nil, err
+	} else if tok != json.Delim('[') {
+		return nil, fmt.Errorf("attesting indices: expected an array, got %v", tok)
+	}
+	var indices []uint64
+	for dec.More() {
+		if enforceLimit && len(indices) == limit {
+			return nil, fmt.Errorf("attesting indices exceed limit: more than %d", limit)
+		}
+		var index string
+		if err := dec.Decode(&index); err != nil {
+			return nil, err
+		}
+		v, err := strconv.ParseUint(index, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		indices = append(indices, v)
+	}
+	return indices, nil
 }
 
 func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {

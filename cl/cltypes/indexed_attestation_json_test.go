@@ -18,6 +18,8 @@ package cltypes
 
 import (
 	"encoding/json"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -42,6 +44,19 @@ func TestIndexedAttestationJSONIndexLimit(t *testing.T) {
 		require.Equal(t, 1, att.AttestingIndices.Length())
 		require.Equal(t, uint64(4), att.AttestingIndices.Get(0))
 	})
+}
+
+// An oversized list must be rejected without decoding every index first.
+func TestIndexedAttestationJSONStopsAtIndexLimit(t *testing.T) {
+	cfg := clparams.BeaconChainConfig{MaxValidatorsPerCommittee: 1, MaxCommitteesPerSlot: 2}
+	buf := []byte(`{"attesting_indices":["123"` + strings.Repeat(`,"123"`, 100_000) + `]}`)
+	att := NewIndexedAttestationWithConfig(clparams.ElectraVersion, &cfg)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	err := json.Unmarshal(buf, att)
+	runtime.ReadMemStats(&after)
+	require.ErrorContains(t, err, "attesting indices exceed limit")
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(3*len(buf)))
 }
 
 func TestBeaconBodyJSONUsesElectraIndexedAttestationLimit(t *testing.T) {
