@@ -34,7 +34,7 @@ func configuredSlashing(version clparams.StateVersion, cfg *clparams.BeaconChain
 	a := NewAttesterSlashing(version)
 	for _, att := range []*IndexedAttestation{a.Attestation_1, a.Attestation_2} {
 		att.SetVersionWithConfig(version, cfg)
-		for i := 0; i < count; i++ {
+		for i := range count {
 			att.AttestingIndices.Append(uint64(i))
 		}
 	}
@@ -171,6 +171,29 @@ func TestBlindedBodyJSONUsesConfiguredSlashingLimit(t *testing.T) {
 	require.NoError(t, json.Unmarshal(encoded, decoded))
 	decoded.SetVersion(version)
 	root, err := decoded.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, want, root)
+}
+
+func TestBlindedBodySetVersionInvalidatesSlashingRoot(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxValidatorsPerCommittee = 4096
+	version := clparams.BellatrixVersion
+	body := NewBlindedBeaconBody(&cfg, version)
+	body.ExecutionPayload.Extra = solid.NewExtraData()
+	body.AttesterSlashings.Append(configuredSlashing(version, nil, 1))
+	before, err := body.HashSSZ()
+	require.NoError(t, err)
+
+	body.SetVersion(version)
+	encoded, err := body.EncodeSSZ(nil)
+	require.NoError(t, err)
+	decoded := NewBlindedBeaconBody(&cfg, version)
+	require.NoError(t, decoded.DecodeSSZ(encoded, int(version)))
+	want, err := decoded.HashSSZ()
+	require.NoError(t, err)
+	require.NotEqual(t, before, want)
+	root, err := body.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, want, root)
 }

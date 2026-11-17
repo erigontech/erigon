@@ -289,8 +289,9 @@ func (b *BlindedBeaconBody) SetVersion(version clparams.StateVersion) *BlindedBe
 		b.ExecutionPayload.SetVersion(version)
 	}
 	if b.AttesterSlashings != nil {
-		b.AttesterSlashings.Range(func(_ int, slashing *AttesterSlashing, _ int) bool {
+		b.AttesterSlashings.Range(func(index int, slashing *AttesterSlashing, _ int) bool {
 			slashing.SetVersionWithConfig(version, b.beaconCfg)
+			b.AttesterSlashings.Set(index, slashing)
 			return true
 		})
 	}
