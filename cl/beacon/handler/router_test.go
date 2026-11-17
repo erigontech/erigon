@@ -59,7 +59,7 @@ func TestBuilderRoutes(t *testing.T) {
 				},
 				builderClient: client,
 			}
-			handler.Init()
+			handler.o.Do(handler.init)
 			for i, route := range routes {
 				matched := handler.mux.Match(chi.NewRouteContext(), route.method, route.path)
 				require.Equal(t, tc.want[i], matched, route.path)

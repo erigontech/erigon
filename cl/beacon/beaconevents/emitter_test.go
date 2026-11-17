@@ -86,41 +86,55 @@ func TestNotifyDataColumnStoredIsNilSafe(t *testing.T) {
 	emitter.NotifyDataColumnStored(common.Hash{1})
 }
 
-// head and head_v2 report a dropped event only on their own feeds, to subscribers of that topic. The state feed, which
-// carries every topic, drops them silently: its subscribers may not have asked for them.
-func TestHeadEventsReportAFullSubscriberOnlyOnTheirOwnFeed(t *testing.T) {
+// head, head_v2, execution_payload and execution_payload_available report a dropped event only on their own feeds, to
+// subscribers of that topic. The state and operation feeds, which carry every topic, drop them silently: their
+// subscribers may not have asked for them.
+func TestEventsReportAFullSubscriberOnlyOnTheirOwnFeed(t *testing.T) {
+	state, operation := newStateFeed(), newOpFeed()
 	for name, tc := range map[string]struct {
-		subscribe func(*stateFeed, chan *EventStream) ethevent.Subscription
-		send      func(*stateFeed) int
+		subscribe    func(chan *EventStream) ethevent.Subscription
+		subscribeAll func(chan *EventStream) ethevent.Subscription
+		send         func() int
 	}{
 		"head": {
-			subscribe: (*stateFeed).SubscribeHead,
-			send:      func(f *stateFeed) int { return f.TrySendHead(&HeadData{}) },
+			subscribe:    state.SubscribeHead,
+			subscribeAll: state.Subscribe,
+			send:         func() int { return state.TrySendHead(&HeadData{}) },
 		},
 		"head_v2": {
-			subscribe: (*stateFeed).SubscribeHeadV2,
-			send:      func(f *stateFeed) int { return f.SendHeadV2(&HeadV2Data{}) },
+			subscribe:    state.SubscribeHeadV2,
+			subscribeAll: state.Subscribe,
+			send:         func() int { return state.SendHeadV2(&HeadV2Data{}) },
+		},
+		"execution_payload": {
+			subscribe:    operation.SubscribeExecutionPayload,
+			subscribeAll: operation.Subscribe,
+			send:         func() int { return operation.SendExecutionPayload(&ExecutionPayloadData{}) },
+		},
+		"execution_payload_available": {
+			subscribe:    operation.SubscribeExecutionPayloadAvailable,
+			subscribeAll: operation.Subscribe,
+			send:         func() int { return operation.SendExecutionPayloadAvailable(&ExecutionPayloadAvailableData{}) },
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f := newStateFeed()
 			topic := make(chan *EventStream)
-			topicSub := tc.subscribe(f, topic)
+			topicSub := tc.subscribe(topic)
 			defer topicSub.Unsubscribe()
 			all := make(chan *EventStream)
-			allSub := f.Subscribe(all)
+			allSub := tc.subscribeAll(all)
 			defer allSub.Unsubscribe()
 
-			require.Zero(t, tc.send(f))
+			require.Zero(t, tc.send())
 			select {
 			case err := <-topicSub.Err():
 				require.ErrorIs(t, err, ethevent.ErrSubscriberLagged)
 			default:
-				t.Fatal("head event dropped without telling its subscriber")
+				t.Fatalf("%s event dropped without telling its subscriber", name)
 			}
 			select {
 			case err := <-allSub.Err():
-				t.Fatalf("state feed subscriber told about a head event it may not want: %v", err)
+				t.Fatalf("subscriber of every topic told about a %s event it may not want: %v", name, err)
 			default:
 			}
 		})
