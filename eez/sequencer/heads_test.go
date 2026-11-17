@@ -135,6 +135,15 @@ func waitSigned(t *testing.T, s *sequencer.HeadSigner, hash common.Hash, counter
 	return e
 }
 
+// waitDropped waits for s to have dropped n envelopes, then checks that no
+// more follow. An envelope is queued for the publisher after it becomes the
+// latest.
+func waitDropped(t *testing.T, s *sequencer.HeadSigner, n uint64, msgAndArgs ...any) {
+	t.Helper()
+	require.Eventually(t, func() bool { return s.Dropped() == n }, 5*time.Second, time.Millisecond, msgAndArgs...)
+	require.Never(t, func() bool { return s.Dropped() != n }, 200*time.Millisecond, time.Millisecond, msgAndArgs...)
+}
+
 // requireLatest checks that s's latest envelope is hash as counter.
 func requireLatest(t *testing.T, s *sequencer.HeadSigner, hash common.Hash, counter uint64) {
 	t.Helper()
@@ -386,7 +395,7 @@ func TestHeadSignerPublishes(t *testing.T) {
 		s.Moved(b.Hash())
 		waitSigned(t, s, b.Hash(), uint64(i+2))
 	}
-	require.Equal(t, uint64(3), s.Dropped(), "envelopes 2 to 4, replaced while the publisher held 1")
+	waitDropped(t, s, 3, "envelopes 2 to 4, replaced while the publisher held 1")
 
 	close(p.release)
 	require.Eventually(t, func() bool {
@@ -441,10 +450,15 @@ func TestHeadSignerStopsDuringPublication(t *testing.T) {
 	}
 }
 
-// stalledPublisher never returns from a publication before its context ends.
-type stalledPublisher struct{}
+// stalledPublisher never returns from a publication before its context ends;
+// entered is signalled when the first begins.
+type stalledPublisher struct{ entered chan struct{} }
 
-func (stalledPublisher) Publish(ctx context.Context, _ seqsig.Envelope) error {
+func (p stalledPublisher) Publish(ctx context.Context, _ seqsig.Envelope) error {
+	select {
+	case p.entered <- struct{}{}:
+	default:
+	}
 	<-ctx.Done()
 	return ctx.Err()
 }
@@ -600,11 +614,17 @@ func TestStalledOverlay(t *testing.T) {
 	c := derivertest.NewComposer(t)
 	_, chain := derivertest.NewL2(t)
 	sg := newSigning(t, &harness{c: c, chain: chain, pool: &queue{}})
-	sg.publisher = stalledPublisher{}
+	p := stalledPublisher{entered: make(chan struct{}, 1)}
+	sg.publisher = p
 	sg.start(t)
 	genesis, err := chain.HeaderByNumber(t.Context(), 0)
 	require.NoError(t, err)
 	sg.expect(t, genesis.Hash())
+	select {
+	case <-p.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the genesis envelope was not published")
+	}
 
 	s := sg.sequencer(t, 0)
 	for n := uint64(1); n <= 6; n++ {
@@ -613,6 +633,7 @@ func TestStalledOverlay(t *testing.T) {
 		require.Less(t, time.Since(start), time.Second, "block %d", n)
 		sg.expect(t, sg.block(t, n).Hash())
 	}
-	// Of the 7 envelopes, the overlay holds one and one waits for it.
-	require.Equal(t, uint64(5), sg.signer.Dropped())
+	// Of the 7 envelopes, the overlay holds the genesis one and block 6's
+	// waits for it.
+	waitDropped(t, sg.signer, 5)
 }
