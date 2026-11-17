@@ -27,6 +27,8 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 // TestPrefetchReceiptsServesAnOverlayBlock pins that the prefetch tx reads the block overlay as the
@@ -70,4 +72,26 @@ func TestPrefetchReceiptsServesAnOverlayBlock(t *testing.T) {
 	defer p.Close()
 	got := p.Receipts(block)
 	require.Equal(t, want, got)
+}
+
+// TestGetBlockReceiptsOnRemoteBlockReaderOpensOneReadTx pins that eth_getBlockReceipts does not
+// prefetch on an rpcdaemon without --datadir: its remote DB waits for a read slot whatever the ctx
+// asks, while the request already holds one.
+func TestGetBlockReceiptsOnRemoteBlockReaderOpensOneReadTx(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false
+
+	m, _ := createLogIndexTestModule(t)
+	block := rpc.BlockNumberOrHashWithNumber(1)
+	want, err := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetBlockReceipts(m.Ctx, block)
+	require.NoError(t, err)
+	require.NotEmpty(t, want)
+
+	const readTxs = 100
+	db := newReadTxLimitDB(m.DB, readTxs)
+	base := NewBaseApi(nil, m.StateCache, rpcdaemonBlockReader(t, m, true), m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	got, err := newEthApiForTest(base, db, nil, nil).GetBlockReceipts(m.Ctx, block)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+	require.EqualValues(t, 1, readTxs-db.left.Load())
 }
