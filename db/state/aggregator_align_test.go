@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // generateStandaloneIIFile writes files with a hardcoded step size of 10.
@@ -59,7 +60,7 @@ func requireVisibleEnd(t *testing.T, agg *Aggregator, end uint64) {
 
 // state visible past commitment's files = state no commitment covers
 func TestVisibleFilesAligned_LaggingCommitmentClampsEveryone(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
@@ -116,7 +117,7 @@ func TestVisibleFilesAligned_LeadingGapInOneListLowersEveryList(t *testing.T) {
 
 // domains visible past the log/trace indexes answer eth_getLogs from blocks no index saw
 func TestVisibleFilesAligned_LaggingStandaloneIdxClampsEveryone(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
@@ -132,7 +133,7 @@ func TestVisibleFilesAligned_LaggingStandaloneIdxClampsEveryone(t *testing.T) {
 
 // no files at all = nothing to be misaligned with, so the domains stay visible
 func TestVisibleFilesAligned_EntityWithoutFilesDoesNotClamp(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
@@ -149,7 +150,7 @@ func TestVisibleFilesAligned_EntityWithoutFilesDoesNotClamp(t *testing.T) {
 // stage_custom_trace re-executes blocks to rebuild receipts, and reads the state while
 // doing it
 func TestUnalign_KeepsStateVisibleWhileReceiptsLag(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
@@ -174,7 +175,7 @@ func TestUnalign_KeepsStateVisibleWhileReceiptsLag(t *testing.T) {
 // commitment rebuild reads accounts and storage while commitment covers only what it
 // rebuilt so far
 func TestUnalign_KeepsStateVisibleWhileCommitmentLags(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
@@ -213,7 +214,7 @@ func TestUnalign_RejectsStateDomain(t *testing.T) {
 // (here: realigning while receipt still lags, which drops the shared ceiling)
 // must panic, whichever entry point caused it.
 func TestVisibilityLowering_ForbiddenAggregatorPanicsOnLoweringOnly(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
@@ -253,7 +254,7 @@ func craftedClampedVisible(t *testing.T, agg *Aggregator) {
 // nothing would invalidate a fill made during the clamp. DomainVisibleEnd
 // must report ok=false so such views never fill.
 func TestDomainVisibleEnd_ClampedViewHasNoExactFrontier(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
@@ -277,7 +278,7 @@ func TestDomainVisibleEnd_ClampedViewHasNoExactFrontier(t *testing.T) {
 // what DomainVisibleEnd reports, and with values dependency-clamped below the
 // ceiling they can lower while every values end stays put.
 func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})

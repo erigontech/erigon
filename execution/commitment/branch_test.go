@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"encoding/binary"
 	"math/rand"
 	"testing"
 
@@ -70,6 +71,23 @@ func TestDecodeBranchInto_TruncatedInput(t *testing.T) {
 
 	_, err = DecodeBranchInto([]byte{0x00, 0x01}, false, &cells)
 	require.Error(t, err, "bitmap with set bit but no cell data should error")
+}
+
+func TestForEachCellRejectsInvalidBranch(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data BranchData
+		want string
+	}{
+		{"unknown_fields", branchOfCells(t, cellOf(0x20)), "unknown cell fields"},
+		{"field_length_overflow", branchOfCells(t, append(binary.AppendUvarint([]byte{byte(fieldStateHash)}, ^uint64(0)), 0), nil), "past the end"},
+		{"trailing_bytes", append(branchOfCells(t), 0), "trailing bytes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.data.ForEachCell(func(_ int, _ BranchCell) error { return nil })
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
 }
 
 func contractHashFromPrefixReference(prefix []byte) (hash [32]byte, ok bool) {
