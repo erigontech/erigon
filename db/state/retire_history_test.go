@@ -157,6 +157,7 @@ func TestRetire_StaleViewReportsOnlyDetachedFiles(t *testing.T) {
 // A Retire through an older view whose aged files a merge already replaced
 // still retires the dirty files up to that view's boundary.
 func TestRetire_StaleViewRetiresMergedReplacement(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 	generate := func(ranges []testFileRange) {
