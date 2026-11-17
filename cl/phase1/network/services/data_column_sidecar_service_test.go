@@ -418,8 +418,6 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidInclusionProo
 // before compute_start_slot_at_epoch(finalized_checkpoint.epoch) are ignored, not the whole finalized epoch.
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSlotAfterFinalizedEpochStart_PassesFinalityCheck() {
 	t.setupFinalizedAncestorTest(testFinalizedRoot)
-	// The sidecar's slot is in the finalized epoch but after its start slot. FinalizedSlot() returns
-	// the last slot of that epoch, as ForkChoiceStore does.
 	finalizedEpoch := testSlot / testSlotsPerEpoch
 	t.Require().Greater(testSlot, finalizedEpoch*testSlotsPerEpoch)
 	t.mockForkChoice.Ancestors[finalizedEpoch*testSlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: testFinalizedRoot}

@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
@@ -101,44 +102,46 @@ func TestNewBlobHistoryDownloaderRequiresClock(t *testing.T) {
 // its context is cancelled. Column recovery must be bounded per block so the archive
 // blob backfill cannot hang forever holding the index read tx.
 func TestBlobHistoryDownloaderFuluColumnRecoveryIsBounded(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	peerDas := mock_services.NewMockPeerDas(ctrl)
-	peerDas.EXPECT().
-		DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, _ []cltypes.ColumnSyncableSignedBlock) error {
-			<-ctx.Done() // never recovers — unblocks only when the per-attempt ctx expires
-			return ctx.Err()
-		}).
-		AnyTimes()
-	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		peerDas := mock_services.NewMockPeerDas(ctrl)
+		peerDas.EXPECT().
+			DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, _ []cltypes.ColumnSyncableSignedBlock) error {
+				<-ctx.Done() // never recovers — unblocks only when the per-attempt ctx expires
+				return ctx.Err()
+			}).
+			AnyTimes()
+		blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+		blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
 
-	b := &BlobHistoryDownloader{
-		ctx:                   context.Background(),
-		rpc:                   boundaryPeerCounter(1),
-		blobStorage:           blobStorage,
-		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
-		columnBackfillTimeout: 50 * time.Millisecond,
-		logger:                log.New(),
-	}
+		b := &BlobHistoryDownloader{
+			ctx:                   context.Background(),
+			rpc:                   boundaryPeerCounter(1),
+			blobStorage:           blobStorage,
+			peerDasGetter:         staticPeerDasGetter{pd: peerDas},
+			columnBackfillTimeout: 50 * time.Millisecond,
+			logger:                log.New(),
+		}
 
-	fulu := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
-	fulu.Block.Slot = 100
-	fulu.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+		fulu := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+		fulu.Block.Slot = 100
+		fulu.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 
-	blocks := rootedBlocks(t, fulu)
-	done := make(chan struct{})
-	go func() {
-		b.recoverFuluColumns(blocks)
-		close(done)
-	}()
+		blocks := rootedBlocks(t, fulu)
+		done := make(chan struct{})
+		go func() {
+			b.recoverFuluColumns(blocks)
+			close(done)
+		}()
 
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("recoverFuluColumns hung — unbounded PeerDAS column recovery")
-	}
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("recoverFuluColumns hung — unbounded PeerDAS column recovery")
+		}
+	})
 }
 
 func TestBlobHistoryDownloaderFuluInitialStorageCheckUsesBlockTimeout(t *testing.T) {
@@ -178,22 +181,24 @@ func TestBlobHistoryDownloaderFuluInitialStorageCheckUsesBlockTimeout(t *testing
 }
 
 func TestBlobHistoryDownloaderMixedBatchAttemptsFuluAfterDenebFailure(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
 
-	deneb := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
-	deneb.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
-	fulu := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
-	downloader := &BlobHistoryDownloader{
-		ctx:                   t.Context(),
-		beaconCfg:             &clparams.MainnetBeaconConfig,
-		rpc:                   boundaryPeerCounter(1),
-		blobStorage:           blobStorage,
-		columnBackfillTimeout: time.Second,
-		logger:                log.New(),
-	}
+		deneb := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+		deneb.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+		fulu := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+		downloader := &BlobHistoryDownloader{
+			ctx:                   t.Context(),
+			beaconCfg:             &clparams.MainnetBeaconConfig,
+			rpc:                   boundaryPeerCounter(1),
+			blobStorage:           blobStorage,
+			columnBackfillTimeout: time.Second,
+			logger:                log.New(),
+		}
 
-	require.False(t, downloader.processBatch(rootedBlocks(t, deneb, fulu)))
+		require.False(t, downloader.processBatch(rootedBlocks(t, deneb, fulu)))
+	})
 }
 
 func TestBlobHistoryDownloaderMixedBatchCancellationDoesNotStartFulu(t *testing.T) {

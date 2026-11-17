@@ -58,7 +58,7 @@ func (c *ChainEndpoint) storeBlobsForBlock(
 	if err != nil {
 		return err
 	}
-	blobs, err := retrieveBlobsFromRemoteEndpoint(ctx, c.Endpoint, blockRoot, commitments.Len())
+	blobs, err := retrieveSidecars(ctx, c.Endpoint, blockRoot, block)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve blobs at slot %d, root %x: %w", block.Block.Slot, blockRoot, err)
 	}
@@ -133,20 +133,4 @@ func storeRemoteBlobs(
 		}
 	}
 	return nil
-}
-
-// localBlobsStored reports whether the store holds every sidecar of a block. The count row alone is
-// not enough: pruning deletes the sidecar files and keeps the row.
-func localBlobsStored(ctx context.Context, blobDB blob_storage.BlobStorage, slot uint64, root common.Hash, commitments int) (bool, error) {
-	count, err := blobDB.KzgCommitmentsCount(ctx, root)
-	if err != nil || count != uint32(commitments) {
-		return false, err
-	}
-	for idx := range commitments {
-		present, err := blobDB.BlobSidecarExists(ctx, slot, root, uint64(idx))
-		if err != nil || !present {
-			return false, err
-		}
-	}
-	return true, nil
 }

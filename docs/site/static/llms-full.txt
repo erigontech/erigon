@@ -160,10 +160,10 @@ If you must split the datadir across a fast and a slow device, see [Optimizing S
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [pruning mode](https://docs.erigon.tech/fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](https://docs.erigon.tech/fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise. Each figure is the size of the whole datadir with the node stopped, excluding the transient `temp/` directory.
+The amount of disk space recommended and RAM you need depends on the [pruning mode](https://docs.erigon.tech/fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](https://docs.erigon.tech/fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise. A figure marked † is the `erigon seg du` estimate of the snapshot files a node of that mode keeps: only `snapshots/` is counted, without Caplin snapshots. Every other figure is the size of the whole datadir with the node stopped, excluding the transient `temp/` directory.
 
 :::note
-These nodes were measured before the receipts cache was on by default. From 3.7 it is on, which adds about 441 GB on a mainnet archive node and a few GB on full and minimal nodes, whose receipts follow their history window. See [Database](https://docs.erigon.tech/fundamentals/database). The recommended disk sizes below already leave room for it.
+The receipts cache is on by default from 3.7. Figures marked † count it; other figures may have been measured without it. It adds about 441 GB on a mainnet archive node and a few GB on full and minimal nodes, whose receipts follow their history window. See [Database](https://docs.erigon.tech/fundamentals/database). The recommended disk sizes below already leave room for it.
 :::
 
 **Ethereum mainnet**
@@ -1837,7 +1837,7 @@ Deleting `chaindata/` is **recoverable but not free**: it discards the latest mu
 
 - **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM. It is the Execution stage's commit threshold, so a larger value means larger single MDBX write transactions, which raise the file's high-water mark in bigger steps. Keeping it at or below `1G` is a useful heuristic if you want MDBX to grow more gradually.
 - **`--db.size.limit`** — caps the MDBX file size. Useful when running multiple Erigon instances on one disk to prevent one from starving the others.
-- **`--db.read.concurrency`** — maximum number of concurrent open MDBX read transactions (the read-tx semaphore). Raise it for nodes serving heavy parallel RPC (for example a high-throughput RPC Daemon against the same datadir). Lowering it does not reduce read concurrency: a value below the parallel-execution worker count would deadlock, since each worker holds a long-lived read transaction, and parallel commitment (`--experimental.parallel-commitment`) also needs GOMAXPROCS + 1 readers, one per worker and one for the base trie. Erigon raises a lower value, with a warning, to a floor that also counts the warmup and read-ahead readers and a fixed reserve; rpcdaemon uses it as given. Lower `--exec.workers` instead.
+- **`--db.read.concurrency`** — maximum number of concurrent open MDBX read transactions (the read-tx semaphore). Raise it for nodes serving heavy parallel RPC (for example a high-throughput RPC Daemon against the same datadir). Lowering it does not reduce read concurrency: a value below the parallel-execution worker count would deadlock, since each worker holds a long-lived read transaction, and parallel commitment also needs GOMAXPROCS + 1 readers, one per worker and one for the base trie. Erigon raises a lower value, with a warning, to a floor that also counts the warmup and read-ahead readers and a fixed reserve; rpcdaemon uses it as given. Lower `--exec.workers` instead.
 - **Symlinks for tiered storage.** Place `chaindata/` and `snapshots/domain/` on fast NVMe, leave `snapshots/idx/` and `snapshots/history/` on cheaper SATA. See [Optimizing Storage](https://docs.erigon.tech/fundamentals/optimizing-storage) for the recipe.
 
 ## Safe-to-delete subdirectories
@@ -2385,7 +2385,7 @@ These flags control database performance and memory usage. See [Database](https:
   - Default: `true`
   - When the flag is not passed, the `MDBX_DURABLE=true` environment variable also turns the background flush off.
 
-- `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Raise it for nodes serving heavy parallel RPC. Lowering it does not reduce read concurrency: each parallel-execution worker holds a long-lived read transaction, so a value below the worker count would deadlock. Erigon raises a lower value, with a warning, to a floor that sums the exec workers, the parallel-commitment readers (GOMAXPROCS + 1, with `--experimental.parallel-commitment`), the BAL warmup readers, the block read-ahead workers and a fixed reserve; rpcdaemon uses the value as given. To genuinely reduce read concurrency, lower `--exec.workers` instead.
+- `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Raise it for nodes serving heavy parallel RPC. Lowering it does not reduce read concurrency: each parallel-execution worker holds a long-lived read transaction, so a value below the worker count would deadlock. Erigon raises a lower value, with a warning, to a floor that sums the exec workers, the parallel-commitment readers (GOMAXPROCS + 1), the BAL warmup readers, the block read-ahead workers and a fixed reserve; rpcdaemon uses the value as given. To genuinely reduce read concurrency, lower `--exec.workers` instead.
   - Default: scales with the host as `min(max(10, GOMAXPROCS * 64), 9000)` — kept well above the CPU count because reads are I/O-bound, and capped below Go's roughly 10,000 OS-thread limit.
 
 - `--database.verbosity value`: Enables internal database logs.
@@ -3024,10 +3024,11 @@ Flags for configuring the parallel block execution engine.
 - `--exec.state-cache`: Enable the executor's domain-shared read cache. Equivalent to `USE_STATE_CACHE=true`. Disable for cold-read performance measurements.
   - Default: `true`
 
-**Commitment-trie construction.** The following flag changes how the commitment (state-root) trie is computed during execution.
+**Commitment-trie construction.** By default the commitment (state-root) trie is computed with the fully parallel `ParallelPatriciaHashed` implementation.
 
-- `--experimental.parallel-commitment` *(New in v3.6)*: Compute the commitment trie with the fully parallel `ParallelPatriciaHashed` implementation. Pass `--experimental.parallel-commitment=false`, or set `COMMITMENT_PARALLEL=false`, to fall back to the sequential `HexPatriciaHashed` trie.
-  - Default: `true`
+- `--experimental.parallel-commitment` *(Deprecated)*: No longer has any effect.
+- `--experimental.commitment-v3` *(New in v3.9)*: Compute the commitment trie with commitment v3, which stores one record per trie node; set `ERIGON_COMMITMENT_V3=true` for the same effect. A datadir with legacy commitment files must first be converted with `integration commitment convert --v3`; with the flag off, Erigon refuses a datadir that holds v3 commitment files. If convert refuses the datadir, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes --no-history` with `ERIGON_COMMITMENT_V3=true` when commitment history was pruned, or `integration commitment rebuild --yes` with `ERIGON_COMMITMENT_V3=true` otherwise. Convert keeps the legacy files in `snapshots/backup/` until you delete them; `integration commitment convert --restore` brings them back only until the node writes its first new commitment file.
+  - Default: `false`
 
 ### Caplin (Consensus Layer)
 
@@ -3215,7 +3216,6 @@ Erigon's own variables — everything below except the [Docker](https://docs.eri
 
 **Execution and Processing:**
 
-- `EXEC3_PARALLEL` - Enables parallel block execution (Block-STM). **Default changed to `true` in v3.5** — parallel execution is now on by default. Set to `false` or use `--exec.serial` to revert to single-threaded execution.
 - `EXEC3_WORKERS` - Sets the number of parallel execution workers (default: number of CPU cores)
 - `STAGES_ONLY_BLOCKS` - Limits stages to blocks only
 
@@ -4836,7 +4836,7 @@ Usage:
 
 Flags:
       --datadir string                              path to Erigon working directory
-      --db.read.concurrency int                     Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers when --experimental.parallel-commitment is on, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead
+      --db.read.concurrency int                     Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead
       --graphql                                     enables graphql endpoint (disabled by default)
       --grpc                                        Enable GRPC server
       --grpc.addr string                            GRPC server listening interface (default "localhost")
@@ -5783,7 +5783,7 @@ The namespace is enabled by default; if you set `--http.api`, include `erigon` i
 ### Enhanced Features
 
 - `erigon_getLatestLogs` supports `ignoreTopicsOrder` for flexible topic matching
-- `erigon_getLogs`, `erigon_getLatestLogs` and `erigon_getLogsByHash` return each log's block time as `blockTimestamp`, the same field as `eth_getLogs`
+- `erigon_getLogs`, `erigon_getLatestLogs`, `erigon_getLogsByHash` and `erigon_getBlockReceiptsByBlockHash` return each log's block time as `blockTimestamp`, the same field as `eth_getLogs`
 - `erigon_getBlockByTimestamp` uses binary search for efficient timestamp-based block lookup
 
 See more details [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#rpc-implementation-status) about implementation status.
@@ -6017,7 +6017,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getBlockReceiptsByBlockHash","
 
 | Type | Description |
 | --- | --- |
-| Array | Array of receipt objects for all transactions in the block |
+| Array | Array of receipt objects for all transactions in the block; each log carries `blockTimestamp` |
 
 ## **erigon_nodeInfo**
 

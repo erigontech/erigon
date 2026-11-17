@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -331,6 +332,37 @@ func TestWarmBALPropagatesWorkerCancellation(t *testing.T) {
 	bal := types.BlockAccessList{{Address: common.Address{19: 1}}}
 	err := NewBlockReadAheader().warmBAL(ctx, db, bal, nil, balCodeWarmupNone, 1)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+type prefetchRecordingTx struct {
+	commitmentRecordingTx
+}
+
+func (tx *prefetchRecordingTx) AggTx() any { return tx }
+
+func (tx *prefetchRecordingTx) PrefetchLatest(_ context.Context, domain kv.Domain, _ [][]byte) (int, error) {
+	tx.mu.Lock()
+	tx.domains = append(tx.domains, domain)
+	tx.mu.Unlock()
+	return 0, nil
+}
+
+func TestWarmBALSkipsCommitmentWarmupOnV3(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	defer func(v int) { dbg.TrieBALWarmupers = v }(dbg.TrieBALWarmupers)
+	dbg.TrieBALWarmupers = 2
+
+	tx := new(prefetchRecordingTx)
+	db := &singleTxRoDB{tx: tx}
+	bal := types.BlockAccessList{{
+		Address:        common.Address{19: 2},
+		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
+	}}
+	require.NoError(t, NewBlockReadAheader().warmBAL(t.Context(), db, bal, nil, balCodeWarmupNone, 1))
+
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	require.NotContains(t, tx.domains, kv.CommitmentDomain, "the HPH-keyed BAL commitment warmup finds nothing on a v3 trie")
 }
 
 func TestWarmBALContinuesAfterReadError(t *testing.T) {
@@ -724,6 +756,22 @@ func TestCachePopulatingGetterDoesNotCacheBoundedRead(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestCachePopulatingGetterSkipsCodeHashSeedWithoutCodeReads(t *testing.T) {
+	addr := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
+	account := accounts.NewAccount()
+	account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash([]byte("code")))
+	value := accounts.SerialiseV3(&account)
+	sc := newTestStateCache()
+	t.Cleanup(sc.Close)
+	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: value}, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 16, skipCodeHashSeed: true}
+	_, _, err := cpg.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, addr)
+	require.True(t, ok)
+	_, ok = sc.View(nil).GetAddrCodeHash(addr)
+	require.False(t, ok)
+}
+
 // Same invariant for the code addr→code binding, which is rebound when an
 // account's code changes and is therefore just as clobber-able as accounts.
 func TestCachePopulatingGetterKeepsFresherCodeBinding(t *testing.T) {
@@ -812,6 +860,23 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	require.Empty(t, got)
 }
 
+// An account without code leaves the address-to-code-hash cache alone: exec
+// never resolves code for it through that cache.
+func TestCachePopulatingGetterSkipsCodeHashSeedWithoutCode(t *testing.T) {
+	addr := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
+	eoa := accounts.Account{Nonce: 1}
+	frontier := cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })
+	for _, value := range [][]byte{accounts.SerialiseV3(&eoa), nil} {
+		sc := newTestStateCache()
+		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: value}, view: sc.View(frontier), stepSize: 16}
+		_, _, err := cpg.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		_, ok := sc.View(nil).GetAddrCodeHash(addr)
+		require.False(t, ok)
+		sc.Close()
+	}
+}
+
 func TestReadAheadGetterCurrentStepFill(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
 	stateCache := newTestStateCache()
@@ -857,7 +922,7 @@ func TestReadAheadGetterCurrentStepFill(t *testing.T) {
 			for _, tc := range cases {
 				t.Run(tc.domain.String(), func(t *testing.T) {
 					stateCache.Applier().Clear()
-					got, step, err := readAheadGetter(tx, stateCache).GetLatest(tc.domain, tc.key, kv.GetLatestOptions{})
+					got, step, err := readAheadGetter(tx, stateCache, true).GetLatest(tc.domain, tc.key, kv.GetLatestOptions{})
 					require.NoError(t, err)
 					require.Equal(t, tc.value, got)
 					cached, stamp, hit := stateCache.View(nil).GetWithTxNum(tc.domain, tc.key)
@@ -1146,4 +1211,38 @@ func TestCachePopulatingGetterSeedsCodeHashOnACachedAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, code, gotCode)
 	require.Equal(t, 1, source.codeReads, "a cached account must still map its address to the cached code")
+}
+
+func TestCachePopulatingGetterSeedsCodeHashAtReadFrontier(t *testing.T) {
+	account := accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xaa, 0x01}))}
+	value := accounts.SerialiseV3(&account)
+	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
+	addr := common.Address{19: 1}
+	seedFill(stateCache, kv.AccountsDomain, addr[:], value, 5)
+	cpg := &cachePopulatingGetter{TemporalGetter: &sharedCodeTemporalGetter{account: value}, view: stateCache.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })), stepSize: 16}
+	_, _, err := cpg.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{})
+	require.NoError(t, err)
+	_, ok := stateCache.View(nil).GetAddrCodeHash(addr[:])
+	require.True(t, ok)
+
+	stateCache.Applier().Unwind(16)
+	_, ok = stateCache.View(nil).GetAddrCodeHash(addr[:])
+	require.True(t, ok, "an unwind after the observed state keeps the mapping")
+	stateCache.Applier().Unwind(15)
+	_, ok = stateCache.View(nil).GetAddrCodeHash(addr[:])
+	require.False(t, ok, "an unwind into the observed state drops the mapping")
+}
+
+// A bounded read skips the cache, because the cached value can be newer than the bound.
+func TestCachePopulatingGetterBoundedReadSkipsAVisibleEntry(t *testing.T) {
+	addr := common.Address{19: 1}
+	cached, historical := accounts.SerialiseV3(&accounts.Account{Nonce: 2}), accounts.SerialiseV3(&accounts.Account{Nonce: 1})
+	stateCache := newTestStateCache()
+	t.Cleanup(stateCache.Close)
+	seedFill(stateCache, kv.AccountsDomain, addr[:], cached, 5)
+	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: historical}, view: stateCache.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 16, true })), stepSize: 16}
+	got, _, err := cpg.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{}.WithMaxStep(0))
+	require.NoError(t, err)
+	require.Equal(t, historical, got)
 }

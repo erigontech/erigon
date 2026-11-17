@@ -83,7 +83,7 @@ func TestNewPayloadBeyondLoopBlockLimitIsAccepted(t *testing.T) {
 	const lag = 12
 	srv, chainPack := newExecLagEngineServer(t, 5, lag)
 
-	status, err := srv.HandleNewPayload(t.Context(), "test", chainPack.Blocks[1+lag])
+	status, err := srv.HandleNewPayload(t.Context(), "test", chainPack.Blocks[1+lag], nil)
 	require.NoError(t, err)
 	require.Equal(t, engine_types.AcceptedStatus, status.Status)
 	require.Nil(t, status.LatestValidHash)
@@ -93,7 +93,7 @@ func TestNewPayloadWithDownloadedParentBeyondLoopBlockLimitIsAccepted(t *testing
 	const lag = 12
 	srv, chainPack := newExecLagEngineServer(t, 5, lag)
 
-	status, err := srv.HandleNewPayload(t.Context(), "test", chainPack.Blocks[2+lag])
+	status, err := srv.HandleNewPayload(t.Context(), "test", chainPack.Blocks[2+lag], nil)
 	require.NoError(t, err)
 	require.Equal(t, engine_types.AcceptedStatus, status.Status)
 	require.Nil(t, status.LatestValidHash)
@@ -104,7 +104,7 @@ func TestNewPayloadOfCanonicalUnexecutedBlockIsNotValid(t *testing.T) {
 	srv, chainPack := newExecLagEngineServer(t, 5, lag)
 
 	block := chainPack.Blocks[lag]
-	status, err := srv.getQuickPayloadStatusIfPossible(t.Context(), block.Hash(), block.NumberU64(), block.ParentHash(), nil, true, defaultReadinessWait)
+	status, err := srv.getQuickPayloadStatusIfPossible(t.Context(), block.Hash(), block.NumberU64(), block.ParentHash(), nil, nil, true, defaultReadinessWait)
 	require.NoError(t, err)
 	require.Nil(t, status)
 }
@@ -116,12 +116,12 @@ func TestNewPayloadWithBadHeaderWhileLaggingIsInvalidWithNullLatestValidHash(t *
 	badHeader.Time = chainPack.Blocks[2].Time()
 	bad := tip.WithSeal(badHeader)
 
-	status, err := srv.HandleNewPayload(t.Context(), "test", bad)
+	status, err := srv.HandleNewPayload(t.Context(), "test", bad, nil)
 	require.NoError(t, err)
 	require.Equal(t, engine_types.InvalidStatus, status.Status)
 	require.Nil(t, status.LatestValidHash)
 
-	cached, err := srv.getQuickPayloadStatusIfPossible(t.Context(), bad.Hash(), bad.NumberU64(), bad.ParentHash(), nil, true, defaultReadinessWait)
+	cached, err := srv.getQuickPayloadStatusIfPossible(t.Context(), bad.Hash(), bad.NumberU64(), bad.ParentHash(), nil, nil, true, defaultReadinessWait)
 	require.NoError(t, err)
 	require.NotNil(t, cached)
 	require.Equal(t, engine_types.InvalidStatus, cached.Status)
