@@ -1040,6 +1040,9 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 // match, misrouting the [state] write and producing off-by-one wrong roots. It
 // also stamps the pending deferred update with the block's hash so the next
 // call's FlushPendingUpdates uses the same hash-aware routing.
+// probe: block N-1's pending update flushes into its changeset's diff without changesetMu.
+var stubFlushHashNoLock = dbg.EnvBool("STUB_FLUSH_HASH_NOLOCK", false)
+
 func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, t commitTarget) ([]byte, error) {
 	defer func() {
 		if upd := cc.doms.GetCommitmentContext().PeekPendingUpdate(); upd != nil && upd.BlockNum == t.blockNum {
@@ -1050,7 +1053,17 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	// Flush block N-1's own pending update (hash-routed to N-1's saved changeset,
 	// independent of N's diff below) — the one remaining changesetMu window, brief
 	// rather than spanning the fold that follows.
+	flushed := false
+	if stubFlushHashNoLock {
+		var err error
+		if flushed, err = cc.doms.FlushPendingUpdatesHashRouted(cc.roTx); err != nil {
+			return nil, err
+		}
+	}
 	if err := func() error {
+		if flushed {
+			return nil
+		}
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
 		return cc.doms.FlushPendingUpdatesLocked(cc.roTx)
