@@ -652,7 +652,14 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			if !b.sourcesAvailable() {
 				return nil
 			}
-			if b.processBatch(batch) {
+			if len(b.endpoints) > 0 {
+				// Without peers the blocks the endpoints left wait for the next pass, which rescans them; recovering
+				// them now would only queue every older block as a failed recovery.
+				if batch = b.fetchFromEndpoints(batch); len(batch) > 0 && !b.peersAvailable() {
+					return nil
+				}
+			}
+			if b.recoverFromPeers(batch) {
 				b.highestBackfilledSlot.Store(currentSlot)
 			}
 			if b.ctx.Err() != nil {
@@ -1224,9 +1231,14 @@ func (b *BlobHistoryDownloader) storedSidecarsAvailable(blockRoot common.Hash, s
 
 func (b *BlobHistoryDownloader) processBatch(batch []incompleteBlock) bool {
 	if len(b.endpoints) > 0 {
-		if batch = b.fetchFromEndpoints(batch); len(batch) == 0 {
-			return true
-		}
+		batch = b.fetchFromEndpoints(batch)
+	}
+	return b.recoverFromPeers(batch)
+}
+
+func (b *BlobHistoryDownloader) recoverFromPeers(batch []incompleteBlock) bool {
+	if len(batch) == 0 {
+		return true
 	}
 	fuluBlocks := make([]incompleteBlock, 0, len(batch))
 	denebBlocks := make([]incompleteBlock, 0, len(batch))

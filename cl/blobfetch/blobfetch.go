@@ -33,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/hashicorp/go-retryablehttp"
 	"golang.org/x/sync/errgroup"
@@ -324,7 +325,18 @@ func store_(
 	return nil
 }
 
-// computeMissingProofs fills the empty KZG proofs of blobs. Each proof runs on one goroutine: spreading one proof over
+// proofMissing reports a proof an endpoint left as a placeholder: the point at infinity, or bytes that are not a G1
+// point, such as all zeros. A computed proof is verified against the block's commitment like a served one.
+func proofMissing(proof common.Bytes48) bool {
+	if proof == common.Bytes48(goethkzg.PointAtInfinity) {
+		return true
+	}
+	var point bls12381.G1Affine
+	_, err := point.SetBytes(proof[:])
+	return err != nil
+}
+
+// computeMissingProofs fills the placeholder KZG proofs of blobs. Each proof runs on one goroutine: spreading one proof over
 // every CPU costs more CPU time in total, so parallelism comes only from the cpu budget, one slot per proof.
 func computeMissingProofs(ctx context.Context, blobs []*cltypes.BlobSidecar, cpu *semaphore.Weighted) error {
 	compute := func(sidecar *cltypes.BlobSidecar) error {
@@ -337,7 +349,7 @@ func computeMissingProofs(ctx context.Context, blobs []*cltypes.BlobSidecar, cpu
 	}
 	var g errgroup.Group
 	for _, sidecar := range blobs {
-		if sidecar.KzgProof != common.Bytes48(goethkzg.PointAtInfinity) {
+		if !proofMissing(sidecar.KzgProof) {
 			continue
 		}
 		if cpu == nil {

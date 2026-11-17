@@ -37,9 +37,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
-// prooflessBlock returns a Deneb block with blobs blobs and its sidecars carrying the empty proof that some endpoints
-// serve, so the fetch has to compute every proof.
-func prooflessBlock(t *testing.T, blobs int) (*cltypes.SignedBeaconBlock, common.Hash, []*cltypes.BlobSidecar) {
+// prooflessBlock returns a Deneb block with blobs blobs and its sidecars carrying proof, a placeholder some endpoints
+// serve instead of a real proof, so the fetch has to compute every proof.
+func prooflessBlock(t *testing.T, blobs int, proof common.Bytes48) (*cltypes.SignedBeaconBlock, common.Hash, []*cltypes.BlobSidecar) {
 	t.Helper()
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	block.Block.Slot = 100
@@ -63,23 +63,28 @@ func prooflessBlock(t *testing.T, blobs int) (*cltypes.SignedBeaconBlock, common
 			inclusion.Set(j, common.Hash(branch[j]))
 		}
 		sidecars[i] = cltypes.NewBlobSidecar(uint64(i), (*cltypes.Blob)(&data[i]), common.Bytes48(commitments[i]),
-			common.Bytes48(goethkzg.PointAtInfinity), block.SignedBeaconBlockHeader(), inclusion)
+			proof, block.SignedBeaconBlockHeader(), inclusion)
 	}
 	return block, root, sidecars
 }
 
-func TestFetchAndStoreComputesMissingProofsWithinACPUBudget(t *testing.T) {
-	block, root, sidecars := prooflessBlock(t, 4)
+func serveSidecars(t *testing.T, sidecars []*cltypes.BlobSidecar) string {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if err := json.NewEncoder(w).Encode(map[string]any{"data": sidecars}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 	}))
 	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func TestFetchAndStoreComputesMissingProofsWithinACPUBudget(t *testing.T) {
+	block, root, sidecars := prooflessBlock(t, 4, common.Bytes48(goethkzg.PointAtInfinity))
 	store := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
 	budget := semaphore.NewWeighted(2)
 
-	require.NoError(t, FetchAndStore(t.Context(), store, srv.URL, root, block, budget))
+	require.NoError(t, FetchAndStore(t.Context(), store, serveSidecars(t, sidecars), root, block, budget))
 
 	stored, found, err := store.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
 	require.NoError(t, err)
@@ -87,4 +92,25 @@ func TestFetchAndStoreComputesMissingProofsWithinACPUBudget(t *testing.T) {
 	require.Len(t, stored, 4)
 	require.NoError(t, blob_storage.VerifyBlobSidecars(stored, block.Version(), func(*cltypes.SignedBeaconBlockHeader) error { return nil }))
 	require.True(t, budget.TryAcquire(2), "every budget slot is returned")
+}
+
+// Endpoints that rebuild sidecars from columns fill the proof with a placeholder: Lighthouse the point at infinity,
+// Teku 48 zero bytes, which is not a valid point. Any proof that is not a G1 point is computed.
+func TestFetchAndStoreComputesPlaceholderProofs(t *testing.T) {
+	for name, proof := range map[string]common.Bytes48{
+		"zero bytes":  {},
+		"not a point": {0xff, 0xff, 0xff},
+	} {
+		t.Run(name, func(t *testing.T) {
+			block, root, sidecars := prooflessBlock(t, 2, proof)
+			store := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
+
+			require.NoError(t, FetchAndStore(t.Context(), store, serveSidecars(t, sidecars), root, block, semaphore.NewWeighted(1)))
+
+			stored, found, err := store.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Len(t, stored, 2)
+		})
+	}
 }

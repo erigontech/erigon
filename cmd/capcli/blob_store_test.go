@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -86,11 +87,14 @@ func TestStoreRemoteBlobsRejectsAnIncompleteInsert(t *testing.T) {
 	ids := blobIdentifiers(t, &cltypes.BlobIdentifier{BlockRoot: common.HexToHash("0xaa"), Index: 0})
 
 	// A sidecar whose header hashes to some other root: the insert breaks on the first
-	// identifier mismatch, stores nothing, and reports no error.
+	// identifier mismatch, stores nothing, and reports no error. Its proof is a G1 point, so it
+	// is not taken for a placeholder to compute.
+	_, _, g1, _ := bls12381.Generators()
 	sidecar := &cltypes.BlobSidecar{
 		SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{
 			Header: &cltypes.BeaconBlockHeader{Slot: 1},
 		},
+		KzgProof: common.Bytes48(g1.Bytes()),
 	}
 
 	store := blob_mock_services.NewMockBlobStorage(ctrl)

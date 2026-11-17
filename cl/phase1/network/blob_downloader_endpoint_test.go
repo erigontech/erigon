@@ -345,3 +345,18 @@ func TestBlobHistoryDownloaderRetryMissesDoNotEndTheScanWindow(t *testing.T) {
 	downloader.processBatch([]incompleteBlock{{block: scanned.block, root: scanned.root}})
 	require.Equal(t, asked+1, requests.Load(), "the scan still asks the endpoint below the retried slots")
 }
+
+// Without peers, a block the endpoint leaves ends the pass, as a pass without peers did before endpoints: queueing it
+// and every older block as a failed recovery would only refill the retry list.
+func TestBlobHistoryDownloaderEndsAPassWithoutPeersAtABlockTheEndpointLeaves(t *testing.T) {
+	newer, older := newEndpointBlock(t, 100), newEndpointBlock(t, 99)
+	url, requests := blobEndpoint(t)
+	downloader := newBoundaryDownloader(t, 100, 0, 90, &boundaryBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{100: newer.block, 99: older.block}})
+	downloader.blobStorage = blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
+	downloader.rpc = boundaryPeerCounter(0)
+	downloader.SetBlobEndpoints([]string{url}, 1)
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Empty(t, downloader.retryRanges)
+	require.Positive(t, requests.Load())
+}
