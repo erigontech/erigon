@@ -82,6 +82,7 @@ type journalExtra struct {
 	prevhash             accounts.CodeHash    // kindCode
 	prevcode             []byte               // kindCode
 	prevBalanceVersioned uint256.Int          // kindSelfdestruct, when flagSelfdestructHadBalance is set
+	undoCodeChange       func()
 }
 
 // journalEntry is a compact tagged union stored inline in journal.entries.
@@ -252,13 +253,14 @@ func (j *journal) fakeStorageChange(account accounts.Address, key accounts.Stora
 	j.dirties[account]++
 }
 
-func (j *journal) codeChange(account accounts.Address, prevcode []byte, prevhash accounts.CodeHash, wasCommitted bool) {
+func (j *journal) codeChange(account accounts.Address, prevcode []byte, prevhash accounts.CodeHash, wasCommitted bool) *journalEntry {
 	var extra *journalExtra // nil means the previous code was accounts.EmptyCode
 	if len(prevcode) != 0 || prevhash != accounts.EmptyCodeHash {
 		extra = &journalExtra{prevcode: prevcode, prevhash: prevhash}
 	}
 	j.entries = append(j.entries, journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommitted), extra: extra})
 	j.dirties[account]++
+	return &j.entries[len(j.entries)-1]
 }
 
 func (j *journal) refundChange(prev uint64) {
@@ -488,6 +490,9 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 					s.versionedWrites.updateCodeSize(je.account, len(prevcode))
 				}
 			}
+		}
+		if je.extra != nil && je.extra.undoCodeChange != nil {
+			je.extra.undoCodeChange()
 		}
 		return nil
 

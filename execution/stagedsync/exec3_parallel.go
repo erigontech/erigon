@@ -1385,6 +1385,13 @@ func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) e
 			return fmt.Errorf("seed EIP-161 removals of block %d: %w", be.blockNum, err)
 		}
 	}
+	if be.execStarted.IsZero() {
+		if pe.workerCount <= 1 {
+			pe.reportExecutionPath(be.blockNum, be.blockHash, "sequential", "disabled", be.versionMap.HasBAL)
+		} else {
+			pe.reportExecutionPath(be.blockNum, be.blockHash, "parallel", "", be.versionMap.HasBAL)
+		}
+	}
 	be.execStarted = time.Now()
 	be.scheduleExecution(ctx, pe)
 	return nil
@@ -1740,23 +1747,28 @@ type txResult struct {
 // A read that observes an in-flight estimate aborts the run (result.Dep); the task
 // is re-queued once the commit frontier reaches its predecessor.
 
-// selfLoopFlush publishes tv's writes to the versionMap, plus deletion of any key
-// the previous incarnation wrote that this one dropped.
+// selfLoopFlush publishes the writes of the run at version to the versionMap, after dropping the
+// writes of the previous run that this run no longer makes.
 func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxResult, prevWrites *state.WriteSet) {
 	if prevWrites != nil {
-		for h := range prevWrites.AllHeaders() {
-			if !result.TxOut.Has(h) {
-				// checkExists=false: the previous incarnation's write-set may hold a
-				// net-zero storage write that was never materialized in the versionMap
-				// (net-zero writes are skipped at flush), so deleting it must be a no-op,
-				// not a "path must already exist" panic.
-				be.versionMap.Delete(h.Address, h.Path, h.Key, version.TxIndex, false)
-			}
-		}
+		be.dropUnwritten(version, prevWrites, result.TxOut)
 	}
 	// Flush as ESTIMATE (complete=false) so a downstream read observes the in-flight
 	// dependency and pauses until this tx commits.
 	be.versionMap.FlushVersionedWrites(result.TxOut, false)
+}
+
+// dropUnwritten drops the writes that an earlier run made and the run at version does not (see
+// VersionMap.DropWrite), and reports whether there were any. A net-zero storage write was never
+// materialized, so dropping it is a no-op.
+func (be *blockExecutor) dropUnwritten(version state.Version, prev, cur *state.WriteSet) (dropped bool) {
+	for h := range prev.AllHeaders() {
+		if !cur.Has(h) {
+			be.versionMap.DropWrite(h.Address, h.Path, h.Key, version)
+			dropped = true
+		}
+	}
+	return dropped
 }
 
 // taskIndexOf maps a versionMap block-TxIndex into this block's dense task-list
@@ -3322,13 +3334,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 		hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
 
-		// Remove entries the previous incarnation wrote but this one dropped. Like
-		// selfLoopFlush, tolerate a net-zero BAL write that was never materialized.
-		for h := range prevWrites.AllHeaders() {
-			if !res.TxOut.Has(h) {
-				hasWriteChange = true
-				be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, false)
-			}
+		if be.dropUnwritten(txVersion, prevWrites, res.TxOut) {
+			hasWriteChange = true
 		}
 
 		be.blockIO.RecordWrites(txVersion, res.TxOut)

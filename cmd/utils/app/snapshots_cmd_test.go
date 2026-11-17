@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -129,6 +130,49 @@ func TestIndexAggOptsOpenADatadirWithAGap(t *testing.T) {
 func TestSegLS_NoChaindata(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, lsDatadir(context.Background(), dirs, log.New()))
+}
+
+func TestDeleteStateSnapshotsPrompt(t *testing.T) {
+	if dataDir := os.Getenv("ERIGON_DELETE_PROMPT_TEST_DIR"); dataDir != "" {
+		if err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{
+			Dirs: datadir.New(dataDir), RemoveLatest: true, PromptUserBeforeDelete: true,
+		}); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	for _, input := range []string{"", "no\n", "1\n", "1\nno\n", "4\n", "1\n4\n"} {
+		t.Run(fmt.Sprintf("%q", input), func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			file := filepath.Join(dirs.SnapDomain, "v1.0-commitment.0-1.kv")
+			files := []string{file, file + ".torrent", filepath.Join(dirs.SnapDomain, "pending.tmp")}
+			for _, name := range files {
+				require.NoError(t, os.WriteFile(name, nil, 0o644))
+			}
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestDeleteStateSnapshotsPrompt$")
+			cmd.Env = append(os.Environ(), "ERIGON_DELETE_PROMPT_TEST_DIR="+dirs.DataDir)
+			cmd.Stdin = strings.NewReader(input)
+			out, err := cmd.CombinedOutput()
+			require.Contains(t, string(out), "Do that anyway?")
+			prompts := 1
+			if strings.HasPrefix(input, "1\n") {
+				prompts = 2
+			}
+			require.Equal(t, prompts, strings.Count(string(out), "(pick number):"), string(out))
+			if strings.HasSuffix(input, "4\n") {
+				require.NoError(t, err, string(out))
+			} else {
+				var exitErr *exec.ExitError
+				require.ErrorAs(t, err, &exitErr)
+				require.Equal(t, 1, exitErr.ExitCode())
+				require.Contains(t, string(out), "read snapshot deletion confirmation:")
+			}
+			for _, name := range files {
+				require.FileExists(t, name)
+			}
+		})
+	}
 }
 
 func Test_DeleteLatestStateSnaps(t *testing.T) {

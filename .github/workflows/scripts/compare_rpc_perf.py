@@ -79,9 +79,7 @@ def all_succeeded(step, best_rpc):
 
 
 def erigon_status(erigon, best, next_best, best_rpc, percentile):
-    if erigon is None:
-        return "⚪"
-    if is_failed(erigon) or not all_succeeded(erigon, best_rpc) or best is None:
+    if erigon is None or is_failed(erigon) or not all_succeeded(erigon, best_rpc) or best is None:
         return "🔴"
     if erigon[percentile] == best:
         return "🟢🟢" if next_best is not None and next_best >= best * STATUS_RATIO else "🟢"
@@ -128,7 +126,7 @@ def render_overview(results, percentile):
              "err HTTP errors or RPC errors > 1% above the best client, dead the client died,",
              "excluded left out at a barrier, lost no results from the client's job.",
              f"Erigon status on {percentile}, at the end of the row: 🟢🟢 fastest by >= 1.3x, 🟢 fastest,",
-             "🟡 < 1.3x the fastest, 🔴 >= 1.3x or errors, ⚪ no Erigon result.",
+             "🟡 < 1.3x the fastest, 🔴 >= 1.3x, errors or no Erigon result.",
              "",
              line(header)]
     lines += [f"{line(cells)} {status}" for status, cells in rows]

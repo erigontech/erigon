@@ -713,3 +713,29 @@ func TestWitnessPruneKeepsSmallRoot(t *testing.T) {
 	require.Len(t, fromNodes, 1)
 	require.Equal(t, rootRLP, []byte(fromNodes[0]))
 }
+
+func TestWitnessPruneStopsAtExtensionPrefix(t *testing.T) {
+	branch := &FullNode{}
+	account := &accounts.Account{Nonce: 1, Root: empty.RootHash, CodeHash: accounts.EmptyCodeHash}
+	leafKey := append(bytes.Repeat([]byte{1}, 60), 16)
+	branch.Children[0] = &ShortNode{Key: leafKey, Val: &AccountNode{Account: *account, RootCorrect: true}}
+	branch.Children[1] = &ShortNode{Key: leafKey, Val: &AccountNode{Account: *account, RootCorrect: true}}
+	tr := New(common.Hash{})
+	tr.RootNode = &ShortNode{Key: []byte{1, 2, 3}, Val: branch}
+	nodes, err := tr.RLPEncode()
+	require.NoError(t, err)
+	byHash := make(map[string][]byte)
+	for _, node := range nodes {
+		hash := crypto.Keccak256Hash(node)
+		byHash[string(hash[:])] = node
+	}
+	root := crypto.Keccak256Hash(nodes[0])
+	for _, key := range [][]byte{{1, 2, 3}, {1, 2}, {}, {1, 9}} {
+		canonical, err := WitnessNodesForKeysByHash(byHash, root[:], [][]byte{key}, false)
+		require.NoError(t, err)
+		require.Len(t, canonical, 1)
+		legacy, err := WitnessNodesForKeysByHash(byHash, root[:], [][]byte{key}, true)
+		require.NoError(t, err)
+		require.Len(t, legacy, 2)
+	}
+}
