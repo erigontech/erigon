@@ -146,7 +146,9 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 861 # Missing devnet-2 EIPs: 4758, 8151, 8298: https://github.com/erigontech/erigon/issues/25241
+              # Hive's rejection-reason checks add one EIP-8151 and two EIP-8298
+              # failures to the 861 failures reported by the native EngineX runner.
+              max-failures: 864 # Missing devnet-2 EIPs: 4758, 8151, 8298: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
