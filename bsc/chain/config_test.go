@@ -24,15 +24,19 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	bscchain "github.com/erigontech/erigon/bsc/chain"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -552,4 +556,29 @@ func TestChapelTimestampForkChangeIsIncompatible(t *testing.T) {
 	laterJenner := *stored
 	laterJenner.JennerTime = common.NewUint64(*stored.JennerTime + 1)
 	require.Nil(t, stored.CheckCompatible(&laterJenner, head, headTime))
+}
+
+func TestChapelRoutesCAS20FromJenner(t *testing.T) {
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+
+	registry := accounts.InternAddress(common.HexToAddress("0x7020000000000000000000000000000000000001"))
+	isActivated := make([]byte, 4+32)
+	copy(isActivated, crypto.Keccak256([]byte("isActivated(bytes32)"))[:4])
+	call := func(number, time uint64) []byte {
+		ibs := state.New(state.NewNoopReader())
+		defer ibs.Close()
+		bc := evmtypes.BlockContext{
+			CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+			BlockNumber: number,
+			Time:        time,
+		}
+		evm := vm.NewEVM(bc, evmtypes.TxContext{}, ibs, spec.Config, vm.Config{})
+		ret, _, _, err := evm.StaticCall(accounts.ZeroAddress, registry, isActivated, mdgas.MdGas{Execution: 100_000})
+		require.NoError(t, err)
+		return ret
+	}
+
+	assert.Empty(t, call(139533775, 1793240999))
+	assert.Equal(t, make([]byte, 32), call(139533776, 1793241000))
 }
