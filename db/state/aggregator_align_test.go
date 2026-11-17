@@ -269,7 +269,7 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 }
 
 func TestOpenFolderLetsMissedAccessorsBuildBeforeGapCheck(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	ranges := []testFileRange{{0, 1}, {1, 2}}
@@ -287,8 +287,8 @@ func TestOpenFolderLetsMissedAccessorsBuildBeforeGapCheck(t *testing.T) {
 	requireVisibleEnd(t, agg, 2*alignStepSize)
 }
 
-func TestOpenFolderChecksGapWhenOnlyCoveredAccessorsAreMissing(t *testing.T) {
-	t.Parallel()
+func TestHasAccessorsToBuildSkipsCoveredFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	_, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	ranges := []testFileRange{{0, 1}, {1, 2}, {0, 2}}
@@ -308,7 +308,7 @@ func exitedInChildProcess(t *testing.T) bool {
 		return false
 	}
 	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+regexp.QuoteMeta(t.Name())+"$")
-	cmd.Env = append(os.Environ(), "ERIGON_GAP_CHECK_CHILD=1")
+	cmd.Env = append(os.Environ(), "ERIGON_GAP_CHECK_CHILD=1", "TMPDIR="+t.TempDir()) // the child exits before its own cleanup
 	out, err := cmd.CombinedOutput()
 	var exitErr *exec.ExitError
 	require.ErrorAs(t, err, &exitErr, "the gap check must exit the process:\n%s", out)
@@ -320,6 +320,7 @@ func TestOpenFolderChecksGapWhenNoAccessorBuildFollows(t *testing.T) {
 	if exitedInChildProcess(t) {
 		return
 	}
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 	ranges := []testFileRange{{0, 1}, {1, 2}}
 	generateStateFiles(t, agg.Dirs(), ranges)
@@ -336,6 +337,7 @@ func TestBuildMissedAccessorsChecksGapWhenAnAccessorCannotBeBuilt(t *testing.T) 
 	if exitedInChildProcess(t) {
 		return
 	}
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
 	generateStateFiles(t, agg.Dirs(), ranges)
