@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/node/nodecfg"
 )
 
-// recordingLifecycle stands in for the backend, whose construction already starts work that only Stop ends.
+// recordingLifecycle records whether the node started and stopped it.
 type recordingLifecycle struct{ started, stopped atomic.Bool }
 
 func (l *recordingLifecycle) Start() error { l.started.Store(true); return nil }
@@ -71,8 +71,7 @@ func TestServeClosesTheNodeWhenTheContextEnds(t *testing.T) {
 	require.True(t, lifecycle.stopped.Load())
 }
 
-// A shutdown signal can end the context while the node is still being created or started. Every lifecycle must still
-// be stopped: the backend starts work during construction, before Start.
+// A shutdown signal can end the context while the node is still being created or started.
 func TestServeStopsANodeWhoseContextEndedBeforeItStarted(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
