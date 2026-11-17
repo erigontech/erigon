@@ -2341,6 +2341,19 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		}
 	}
 	for a, tr := range rs.balance {
+		// A balance read that a destruct wiped is zero. A non-zero read at the tx of a destruct the
+		// access list seeds read the balance cell there, which a re-run can move to a new incarnation
+		// while the seeded destruct keeps its version, so it is checked against that cell first.
+		if vm.HasBAL && !tr.Val.IsZero() {
+			if e := vm.load(a); e != nil && e.destructed.Load() {
+				if rr := vm.ReadStatus(a, BalancePath, accounts.NilKey, txIdx); rr.DepIdx() == tr.Version.TxIndex && rr.Incarnation() != tr.Version.Incarnation {
+					if traceInvalid {
+						fmt.Printf("%s RD %x balance at a destruct, (%d.%d)!=(%d.%d)\n", tracePrefix, a, tr.Version.TxIndex, tr.Version.Incarnation, rr.DepIdx(), rr.Incarnation())
+					}
+					return VersionInvalid
+				}
+			}
+		}
 		if !ok(validatePath(a, BalancePath, tr.ReadHeader)) {
 			return
 		}
