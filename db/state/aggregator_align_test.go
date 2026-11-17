@@ -427,3 +427,45 @@ func TestBuildMissedAccessorsChecksGapWhenAnAccessorCannotBeBuilt(t *testing.T) 
 	require.NoError(t, agg.OpenFolder(db))
 	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
 }
+
+// files left by a history that is switched off do not cut the lists that are read
+func TestVisibleFilesAligned_DisabledHistoryLeftoversDoNotCut(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	generateCommitmentHistoryAndIndexFiles(t, agg.Dirs(), []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, 2*alignStepSize)
+}
+
+// stage_custom_trace rebuilds a log index while it reads the state
+func TestUnalignIdx_KeepsStateVisibleWhileAnIndexLags(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	for _, name := range []kv.InvertedIdx{kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx} {
+		generateStandaloneIIFile(t, name, agg.Dirs(), ranges)
+	}
+	generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder(db))
+
+	requireVisibleEnd(t, agg, alignStepSize)
+
+	realign := agg.UnalignIdx(kv.LogAddrIdx)
+	at := agg.BeginFilesRo()
+	for _, d := range kv.StateDomains {
+		require.EqualValues(t, 2*alignStepSize, at.d[d].files.EndTxNum(), "domain %s", d)
+	}
+	at.Close()
+
+	realign()
+	requireVisibleEnd(t, agg, alignStepSize)
+}
