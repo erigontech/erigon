@@ -1745,6 +1745,47 @@ func TestBlockServiceGossipIgnoresInvalidatedFullParentPayload(t *testing.T) {
 	require.True(t, scheduled)
 }
 
+func TestBlockServiceGossipRejectsWrongPayloadTimestamp(t *testing.T) {
+	service, block, processing, _ := newFuluColumnGossipFixtureWithPayloadTimeOffset(t, 1)
+
+	err := service.ProcessMessage(t.Context(), nil, block)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.NotContains(t, err.Error(), "ignore")
+	require.Zero(t, processing.calls.Load())
+	require.Zero(t, scheduledBlockCount(t, service))
+}
+
+func TestBlockServiceGossipIgnoresChildOfInvalidParent(t *testing.T) {
+	for name, markInvalid := range map[string]func(*mock_services.ForkChoiceStorageMock, common.Hash){
+		"parent in invalid blocks": func(store *mock_services.ForkChoiceStorageMock, parentRoot common.Hash) {
+			store.InvalidBlocks = map[common.Hash]struct{}{parentRoot: {}}
+		},
+		"parent payload invalidated": func(store *mock_services.ForkChoiceStorageMock, parentRoot common.Hash) {
+			store.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusInvalidated
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			service, block, processing, _ := newFuluColumnGossipFixture(t)
+			markInvalid(processing.ForkChoiceStorage.(*mock_services.ForkChoiceStorageMock), block.Block.ParentRoot)
+
+			err := service.ProcessMessage(t.Context(), nil, block)
+			require.ErrorIs(t, err, ErrIgnore)
+			require.Zero(t, processing.calls.Load())
+			require.Zero(t, scheduledBlockCount(t, service))
+		})
+	}
+}
+
+func TestBlockServiceGossipAcceptsEmptyChildOfInvalidParent(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, func(parentExecutionHead, _ common.Hash) common.Hash {
+		return parentExecutionHead
+	})
+	fcu.InvalidBlocks = map[common.Hash]struct{}{parentRoot: {}}
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusInvalidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
 func TestBlockServiceGossipIgnoresUnavailableParentState(t *testing.T) {
 	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
 	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated

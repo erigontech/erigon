@@ -760,9 +760,22 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 		} else if !ok {
 			return ErrInvalidSignature
 		}
+		if blockVersion >= clparams.BellatrixVersion && blockVersion < clparams.GloasVersion {
+			// [REJECT] block.body.execution_payload.timestamp == compute_timestamp_at_slot(state, block.slot), if execution is enabled for the block.
+			payload := msg.Block.Body.ExecutionPayload
+			if payload != nil && (state.IsMergeTransitionComplete(headState) || payload.BlockHash != (common.Hash{})) &&
+				payload.Time != state.ComputeTimestampAtSlot(headState, msg.Block.Slot) {
+				return fmt.Errorf("invalid execution payload timestamp %d for slot %d", payload.Time, msg.Block.Slot)
+			}
+		}
 		return nil
 	}); err != nil {
 		return err
+	}
+
+	// [IGNORE] The block's parent passes all validation, including the execution node verification of its payload, when that is complete.
+	if blockVersion < clparams.GloasVersion && b.isParentExecutionInvalid(msg.Block.ParentRoot) {
+		return fmt.Errorf("%w: parent %v is invalid", ErrIgnore, msg.Block.ParentRoot)
 	}
 
 	// Only signature-verified blocks may reach the retry checks below.
@@ -865,6 +878,14 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 		return ErrInvalidCommitmentsCount
 	}
 	return nil
+}
+
+func (b *blockService) isParentExecutionInvalid(parentRoot common.Hash) bool {
+	if b.forkchoiceStore.IsBlockInvalid(parentRoot) {
+		return true
+	}
+	status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(parentRoot)
+	return seen && status == execution_client.PayloadStatusInvalidated
 }
 
 func (b *blockService) blockValidationContext(ctx context.Context, parentRoot common.Hash, slot uint64) (*blockValidationContext, error) {

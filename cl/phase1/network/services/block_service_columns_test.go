@@ -19,6 +19,7 @@ import (
 	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/transition"
@@ -146,6 +147,12 @@ func TestProcessMessageRetriesWhenLastColumnArrivesBeforeJobWaits(t *testing.T) 
 
 func newFuluColumnGossipFixture(t *testing.T) (*blockService, *cltypes.SignedBeaconBlock, *onBlockErrorStore, *das_mock.MockPeerDas) {
 	t.Helper()
+	return newFuluColumnGossipFixtureWithPayloadTimeOffset(t, 0)
+}
+
+// newFuluColumnGossipFixtureWithPayloadTimeOffset shifts the payload timestamp by that many seconds before the block is signed.
+func newFuluColumnGossipFixtureWithPayloadTimeOffset(t *testing.T, offset uint64) (*blockService, *cltypes.SignedBeaconBlock, *onBlockErrorStore, *das_mock.MockPeerDas) {
+	t.Helper()
 	parentState, cfg := newUpgradedValidationState(t, clparams.FuluVersion, func(cfg *clparams.BeaconChainConfig, _ uint64) {
 		cfg.AltairForkEpoch = 0
 		cfg.BellatrixForkEpoch = 0
@@ -180,6 +187,7 @@ func newFuluColumnGossipFixture(t *testing.T) (*blockService, *cltypes.SignedBea
 	block.Block.ProposerIndex = proposerIndex
 	block.Block.ParentRoot = parentRoot
 	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
+	block.Block.Body.ExecutionPayload.Time = state.ComputeTimestampAtSlot(parentState, childSlot) + offset
 	domain, err := parentState.GetDomain(cfg.DomainBeaconProposer, childSlot/cfg.SlotsPerEpoch)
 	require.NoError(t, err)
 	signingRoot, err := fork.ComputeSigningRoot(block.Block, domain)
