@@ -900,6 +900,58 @@ func TestDropWritePutsBackTheStatusOfASeededBalance(t *testing.T) {
 	require.Equal(t, ValueChanged, c.valStatus)
 }
 
+// A destruct that a dropped write put back is Done at the re-run's incarnation, which the re-run's
+// balance write shares. A later run's removal moves the destruct to its own incarnation, so that a
+// read of the re-run's balance is invalid once the removal changes the balance.
+func TestALaterRemovalMovesADestructADroppedWritePutBack(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress(common.HexToAddress("0xd5"))
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(5)
+	base := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &acc}}
+	vm := NewVersionMap(types.BlockAccessList{{Address: x.Value(), BalanceChanges: []*types.BalanceChange{{Index: 4, Value: uint256.Int{}}}}})
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, base))
+
+	first := &WriteSet{}
+	first.SetSelfDestruct(x, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: x, Path: SelfDestructPath, Version: Version{TxIndex: 3}}})
+	first.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: Version{TxIndex: 3}}, Val: *uint256.NewInt(8)})
+	vm.FlushVersionedWrites(first, false)
+
+	secondVersion := Version{TxIndex: 3, Incarnation: 1}
+	vm.DropWrite(x, SelfDestructPath, accounts.NilKey, secondVersion)
+	second := &WriteSet{}
+	second.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: secondVersion}, Val: *uint256.NewInt(7)})
+	vm.FlushVersionedWrites(second, false)
+	vm.MarkWritesValidated(second, nil)
+
+	reader := NewWithVersionMap(base, vm)
+	defer reader.Close()
+	reader.SetTxContext(1, 4)
+	value, err := reader.GetBalance(x)
+	require.NoError(t, err)
+	require.False(t, reader.HadInvalidRead())
+	require.Equal(t, *uint256.NewInt(7), value)
+	reads := reader.VersionedReads()
+	require.Equal(t, VersionValid, vm.ValidateReadSet(4, reads, validateEqualVersion, false, ""))
+
+	final := &WriteSet{}
+	final.SetEmptyRemoval(x, Version{TxIndex: 3, Incarnation: 2})
+	vm.FlushVersionedWrites(final, false)
+	vm.MarkWritesValidated(final, nil)
+	vm.MarkWritesComplete(final)
+	vm.SealUpTo(3)
+
+	fresh := NewWithVersionMap(base, vm)
+	defer fresh.Close()
+	fresh.SetTxContext(1, 4)
+	value, err = fresh.GetBalance(x)
+	require.NoError(t, err)
+	require.False(t, fresh.HadInvalidRead())
+	require.True(t, value.IsZero())
+	require.Equal(t, VersionInvalid, vm.ValidateReadSet(4, reads, validateEqualVersion, false, ""), "the full read set must reject the old balance 7 after it changes to 0")
+}
+
 func requireDoneCell[T any](t *testing.T, cells *btree.Map[int, *WriteCell[T]], txIdx int, inc Incarnation) *WriteCell[T] {
 	t.Helper()
 	require.NotNil(t, cells)

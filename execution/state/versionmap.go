@@ -1437,13 +1437,15 @@ func flushCell[T any](vm *VersionMap, e *AddressEntry, cells *btree.Map[int, *Wr
 	return cells
 }
 
-// doneDestruct reports whether cells hold a Done destruct at txIdx.
+// doneDestruct reports whether cells hold the seeded destruct at txIdx: Done at the seed's
+// incarnation. A destruct that a dropped write put back is Done at the re-run's incarnation, which
+// the re-run's other writes share, so a later removal must not keep its version.
 func doneDestruct(cells *btree.Map[int, *WriteCell[bool]], txIdx int) bool {
 	if cells == nil {
 		return false
 	}
 	c, ok := cells.Get(txIdx)
-	return ok && c.Value && c.loadFlag() == FlagDone
+	return ok && c.Value && c.loadFlag() == FlagDone && c.loadInc() == 0
 }
 
 // noOpBind reports whether flushing vw would leave its cell unchanged — flushCell would take
