@@ -443,6 +443,17 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 	return vm
 }
 
+// balSlotCount returns how many storage slots the access list lists for addr
+// (reads and changes over the whole block), or 0 when the block has none.
+func (vm *VersionMap) balSlotCount(addr accounts.Address) int {
+	address := addr.Value()
+	i := sort.Search(len(vm.bal), func(i int) bool { return bytes.Compare(vm.bal[i].Address[:], address[:]) >= 0 })
+	if i == len(vm.bal) || vm.bal[i].Address != address {
+		return 0
+	}
+	return len(vm.bal[i].StorageReads) + len(vm.bal[i].StorageChanges)
+}
+
 // seededStorage returns the value the access list seeds for addr's slot key at txIdx. The access
 // list is validated, so its accounts, slots and changes are in increasing order.
 func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, bool) {

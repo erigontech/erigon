@@ -3779,7 +3779,15 @@ func (ibs *IntraBlockState) noteStorageHints() {
 	}
 }
 
+// probe: pre-size a tx's per-address slot read map from the access list's slot count for the address.
+var stubStorageHintBAL = dbg.EnvBool("STUB_STORAGE_HINT_BAL", false)
+
 func (ibs *IntraBlockState) setStorageRead(addr accounts.Address, key accounts.StorageKey, r VersionedRead[uint256.Int]) {
+	if stubStorageHintBAL && ibs.versionMap != nil && ibs.versionedReads.storage[addr] == nil {
+		if h := ibs.versionMap.balSlotCount(addr); h > 8 {
+			ibs.versionedReads.ensureStorage(addr, h)
+		}
+	}
 	if stubStorageHint {
 		if h := ibs.storageHints[addr]; h > 8 {
 			ibs.versionedReads.ensureStorage(addr, h)
