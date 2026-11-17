@@ -27,10 +27,11 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func TestStepAlignedEndRefusesUnindexedTail(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, path := range []string{
 		"domain/v1.0-accounts.6-8.bt",
 		"accessor/v2.0-accounts.6-8.vi",
@@ -64,10 +65,21 @@ func TestStepAlignedEndAllowsCoveredUnindexedMerge(t *testing.T) {
 	require.EqualValues(t, 40, end)
 }
 
+func TestStepAlignedEndAllowsUnindexedFileUnderIndexedMerge(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), []testFileRange{{0, 2}, {2, 4}, {0, 4}})
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v1.0-logaddrs.0-2.efi")))
+	require.NoError(t, agg.OpenFolder(db))
+	end, err := agg.StepAlignedEnd(20)
+	require.NoError(t, err)
+	require.EqualValues(t, 40, end)
+}
+
 // Indexed files cover an unindexed one only while they are visible: index 0-2 is hidden because history 0-2 has
 // no accessor, so index 0-4 without its accessor is not covered.
 func TestStepAlignedEndRefusesUnindexedFileUnderHiddenMerge(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	ranges := []testFileRange{{0, 2}, {2, 4}, {0, 4}}
 	generateStateFiles(t, agg.Dirs(), ranges)
@@ -76,11 +88,11 @@ func TestStepAlignedEndRefusesUnindexedFileUnderHiddenMerge(t *testing.T) {
 	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v2.0-accounts.0-2.vi")))
 	require.NoError(t, agg.OpenFolder(db))
 	_, err := agg.StepAlignedEnd(20)
-	require.ErrorContains(t, err, "have no accessors")
+	require.ErrorContains(t, err, "is not indexed")
 }
 
 func TestStepAlignedEndRefusesListStartingOffBoundary(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
 	generateAccountsFile(t, dirs, []testFileRange{{0, 20}})
@@ -96,7 +108,7 @@ func TestStepAlignedEndRefusesListStartingOffBoundary(t *testing.T) {
 }
 
 func TestStepAlignedEndRefusesHiddenFiles(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
 	split := []testFileRange{{0, 4}, {4, 6}, {6, 8}, {8, 12}}
@@ -109,7 +121,7 @@ func TestStepAlignedEndRefusesHiddenFiles(t *testing.T) {
 }
 
 func TestAlignFilesToStepSizeRefusesCommitmentRangeMismatch(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
 	split := []testFileRange{{0, 4}, {4, 6}, {6, 8}, {8, 12}}
@@ -124,7 +136,7 @@ func TestAlignFilesToStepSizeRefusesCommitmentRangeMismatch(t *testing.T) {
 }
 
 func TestStepAlignedEndRefusesInterruptedCommitmentMerge(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
 	split := []testFileRange{{0, 4}, {4, 6}, {6, 7}, {7, 8}}
@@ -137,7 +149,7 @@ func TestStepAlignedEndRefusesInterruptedCommitmentMerge(t *testing.T) {
 }
 
 func TestStepAlignedMergesPlanEveryGroupOfEveryList(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
 	split := []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}

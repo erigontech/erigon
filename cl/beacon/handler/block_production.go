@@ -2905,10 +2905,6 @@ func readBoundedBody(body io.Reader, limit int64) ([]byte, error) {
 	return b, nil
 }
 
-func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock, validation BlockPublishingValidation) error {
-	return a.broadcastBlockWithIntegrationWait(ctx, blk, validation, true)
-}
-
 func (a *ApiHandler) broadcastBlockWithIntegrationWait(ctx context.Context, blk *cltypes.SignedBeaconBlock, validation BlockPublishingValidation, waitForIntegration bool) error {
 	return a.broadcastBlockWithIntegrationWaitAndPublication(ctx, blk, nil, validation, waitForIntegration, nil)
 }
@@ -3305,7 +3301,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	a.emitters.NotifyBlockIndicesChanged()
 	markServable()
 	// Columns are chosen after OnBlock, which can raise the custody group count.
-	if err := a.storeDataColumnSidecars(ctx, blockRoot, columnSidecars); err != nil {
+	if err := a.storeDataColumnSidecars(ctx, block.Block.Slot, blockRoot, columnSidecars); err != nil {
 		err = fmt.Errorf("%w: %w", errPublishedBlockDataStorage, err)
 		if knownBlock {
 			return &clservices.AcceptedBlockWriteError{Block: block, Err: err}
@@ -3344,7 +3340,7 @@ func rootKeyedSignedBlockReplayMatches(stored, incoming *cltypes.SignedBeaconBlo
 		stored.Version() == incoming.Version() && stored.Signature == incoming.Signature
 }
 
-func (a *ApiHandler) storeDataColumnSidecars(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+func (a *ApiHandler) storeDataColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
 	if len(sidecars) == 0 {
 		return nil
 	}
@@ -3352,6 +3348,7 @@ func (a *ApiHandler) storeDataColumnSidecars(ctx context.Context, blockRoot comm
 		return errors.New("data column storage unavailable")
 	}
 	store := das.ColumnsToStore(a.peerDas)
+	toStore := make([]*cltypes.DataColumnSidecar, 0, len(sidecars))
 	for _, sidecar := range sidecars {
 		if sidecar == nil {
 			return errors.New("nil data column sidecar")
@@ -3362,10 +3359,28 @@ func (a *ApiHandler) storeDataColumnSidecars(ctx context.Context, blockRoot comm
 		if sidecar.Index > math.MaxInt64 {
 			return fmt.Errorf("data column index %d exceeds storage range", sidecar.Index)
 		}
+		toStore = append(toStore, sidecar)
+	}
+	return a.writeColumnSidecarsBatched(ctx, slot, blockRoot, toStore)
+}
+
+// writeColumnSidecarsBatched stores the columns in one batch. A failed batch may drop columns it had already
+// fsynced, so the columns are then written one at a time, which keeps every column before the first
+// failing one.
+func (a *ApiHandler) writeColumnSidecarsBatched(ctx context.Context, slot uint64, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	if len(sidecars) == 0 {
+		return nil
+	}
+	batchErr := a.columnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars)
+	if batchErr == nil {
+		return nil
+	}
+	for _, sidecar := range sidecars {
 		if err := a.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(sidecar.Index), sidecar); err != nil {
-			return err
+			return fmt.Errorf("%w (after a failed batch write: %w)", err, batchErr)
 		}
 	}
+	log.Warn("[Beacon REST] batched data column write failed, the columns were written one at a time", "slot", slot, "blockRoot", blockRoot, "columnCount", len(sidecars), "err", batchErr)
 	return nil
 }
 

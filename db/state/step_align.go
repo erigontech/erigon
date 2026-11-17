@@ -19,7 +19,6 @@ package state
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -30,18 +29,48 @@ import (
 
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func (a *Aggregator) StepAlignedEnd(stepSize uint64) (uint64, error) {
 	dirty := a.DebugBeginDirtyFilesRo()
 	defer dirty.Close()
-	missed := dirty.FilesWithMissedAccessors()
-	dirty.dropCovered(missed)
-	if !missed.IsEmpty() {
-		return 0, errors.New("some snapshot files have no accessors, and a rebase would delete them: run `erigon snapshots index` first")
-	}
 	at := a.BeginFilesRo()
 	defer at.Close()
+	check := func(name string, files []*FilesItem, visible visibleFiles, accessors statecfg.Accessors) error {
+		srcs := make([]*FilesItem, 0, len(visible))
+		for _, f := range visible {
+			srcs = append(srcs, f.src)
+		}
+		for _, item := range files {
+			if item.canDelete.Load() || checkForVisibility(item, accessors, false) {
+				continue
+			}
+			if !slices.ContainsFunc(srcs, item.isProperSubsetOf) && !coveredByVisibleFiles(item, srcs, accessors) {
+				return fmt.Errorf("%s snapshot [%d,%d) is not indexed; build or repair its accessors before rebasing", name, item.startTxNum, item.endTxNum)
+			}
+		}
+		return nil
+	}
+	for i, d := range dirty.domain {
+		dt := at.d[i]
+		if err := check(d.d.FilenameBase, d.files, dt.files, d.d.Accessors); err != nil {
+			return 0, err
+		}
+		if err := check(d.d.FilenameBase+" history", d.history.files, dt.ht.files, d.history.h.Accessors); err != nil {
+			return 0, err
+		}
+		if err := check(d.d.FilenameBase+" history index", d.history.ii.files, dt.ht.iit.files, d.history.ii.ii.Accessors); err != nil {
+			return 0, err
+		}
+	}
+	for i, ii := range dirty.ii {
+		if ii != nil {
+			if err := check(ii.ii.FilenameBase, ii.files, at.iis[i].files, ii.ii.Accessors); err != nil {
+				return 0, err
+			}
+		}
+	}
 	return at.stepAlignedEnd(stepSize)
 }
 
