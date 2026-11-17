@@ -63,6 +63,43 @@ func (k Kind) String() string {
 	return "live"
 }
 
+// Mode is how a Sync slot is composed.
+type Mode uint8
+
+const (
+	// ModeSteady is a slot on time: its batch targets the L1 block after the
+	// anchor.
+	ModeSteady Mode = iota
+	// ModeCatchup is a slot of a head behind the schedule: its Sync block
+	// carries no cross-chain content.
+	ModeCatchup
+	// ModeEmpty is a slot too late for its proof to reach the next L1 block:
+	// its Sync block is empty and nothing is posted.
+	ModeEmpty
+)
+
+func (m Mode) String() string {
+	switch m {
+	case ModeCatchup:
+		return "catchup"
+	case ModeEmpty:
+		return "empty"
+	}
+	return "steady"
+}
+
+// SyncSlotComposer composes the Sync blocks of a sequencer's slots.
+type SyncSlotComposer interface {
+	// ComposeSyncSlot returns the Sync block on parent with timestamp ts, its
+	// batch aimed at L1 block target, zero for the next one available; nil
+	// has the sequencer fill the block from the pool.
+	ComposeSyncSlot(ctx context.Context, parent *types.Header, ts, target uint64, mode Mode) *types.Block
+	// RecoverFailed handles the bundles that failed on L1, replacing each
+	// failed Sync block through Sequencer.Substitute. It runs before every
+	// trigger reads the head, which it may move.
+	RecoverFailed(ctx context.Context)
+}
+
 // Committer is the follower seen by the sequencer.
 type Committer interface {
 	// Head returns the header of the head block.
@@ -71,6 +108,13 @@ type Committer interface {
 	// it the head, running hook when set. follower.ErrStaleParent reports a
 	// head that has moved.
 	Produce(ctx context.Context, in deriver.HeaderInputs, txs txnprovider.TxnProvider, hook follower.CommitHook) (*types.BlockWithReceipts, error)
+	// Insert makes blocks, the first a child of the head, the head, running
+	// hook when set. follower.ErrStaleParent reports a head that has moved.
+	Insert(ctx context.Context, blocks []*types.Block, hook follower.CommitHook) error
+	// HeadBefore moves the head back to the parent of block and returns it;
+	// follower.ErrBelowSafe reports a block at or below the safe block,
+	// follower.ErrNotCanonical one another block has replaced.
+	HeadBefore(ctx context.Context, block *types.Header) (*types.Header, error)
 	// Settled returns the block the latest settlement ended at.
 	Settled() uint64
 }
@@ -99,6 +143,8 @@ type Config struct {
 	DABudget int
 	// Witnesses, when set, captures each produced block's witness.
 	Witnesses Witnesses
+	// Composer, when set, composes the Sync blocks.
+	Composer SyncSlotComposer
 }
 
 // Sequencer produces an EEZ chain's blocks from the pool on the triggers of
@@ -113,6 +159,9 @@ type Sequencer struct {
 	now         func() time.Time
 	// offGrid counts consecutive Sync blocks skipped off the grid.
 	offGrid int
+	// replacing is a substitution whose sibling failed to build, kept in
+	// memory as the composer's recovery is.
+	replacing *replacement
 
 	statusMu sync.Mutex
 	status   Status
@@ -186,6 +235,12 @@ func (s *Sequencer) Run(ctx context.Context, events <-chan Event) {
 
 // Handle produces what e asks for.
 func (s *Sequencer) Handle(ctx context.Context, e Event) error {
+	if c := s.cfg.Composer; c != nil {
+		c.RecoverFailed(ctx)
+	}
+	if err := s.pending(ctx); err != nil {
+		return err
+	}
 	var err error
 	switch e := e.(type) {
 	case LiveTick:
@@ -237,6 +292,7 @@ func (s *Sequencer) syncSlot(ctx context.Context, slot SyncSlot) error {
 		if head, err = s.produceN(ctx, Live, head, c.Live, false); err != nil {
 			return err
 		}
+		return s.syncBlock(ctx, head, head.Time+s.l2.BlockInterval, slot.L1Head+1, ModeCatchup)
 	case Slot:
 		if head, err = s.produceN(ctx, Live, head, c.Live, true); err != nil || head == nil {
 			return err
@@ -253,19 +309,109 @@ func (s *Sequencer) syncSlot(ctx context.Context, slot SyncSlot) error {
 			s.offGridSkip("parent + L2 block time is not the slot's timestamp", "head", head.Number.Uint64(), "expected", next, "time", slot.Time)
 			return nil
 		}
+		mode, target := ModeSteady, slot.L1Head+1
 		if s.late(slot.Time) {
+			mode, target = ModeEmpty, 0
 			s.logger.Warn("[eez] Sync slot too late for the next L1 block", "event", "eez.sequencer.sync_slot.deferred_late",
 				"height", slot.Height, "time", slot.Time, "l1Head", slot.L1Head)
-			if _, err := s.build(ctx, Sync, head, noTxns{}); err != nil {
-				return err
-			}
-			s.setOffGrid(0)
-			return nil
 		}
-	default:
+		return s.syncBlock(ctx, head, slot.Time, target, mode)
+	}
+	return nil
+}
+
+// Substitute replaces failed, a Sync block whose bundle failed on L1, with an
+// empty Sync block on its parent; a composer calls it from RecoverFailed. It
+// fails with follower.ErrBelowSafe once L1 settled that height,
+// follower.ErrNotCanonical once another block replaced failed, and
+// follower.ErrStaleParent when derivation moves the head between the
+// rollback and the sibling. A sibling that fails to build leaves the head on
+// the parent, where the triggers produce nothing until a retry builds it.
+func (s *Sequencer) Substitute(ctx context.Context, failed *types.Header) (*types.Header, error) {
+	parent, err := s.parentOf(ctx, failed)
+	if err != nil {
+		return nil, err
+	}
+	h, err := s.build(ctx, Sync, parent, noTxns{})
+	if err != nil {
+		s.replacing = &replacement{failed: failed.Hash(), parent: parent.Hash(), err: err}
+		return nil, err
+	}
+	s.replacing = nil
+	s.logger.Warn("[eez] failed Sync block substituted with its empty sibling", "event", "eez.composer.recovery.substituted",
+		"number", h.Number.Uint64(), "hash", h.Hash())
+	return h, nil
+}
+
+// replacement is a substitution of the block failed whose sibling failed to
+// build on parent with err.
+type replacement struct {
+	failed, parent common.Hash
+	err            error
+}
+
+// ErrSubstitutionPending fails a trigger while a failed Sync block's sibling
+// has yet to build on the head.
+var ErrSubstitutionPending = errors.New("failed Sync block's sibling not built yet")
+
+// parentOf moves the head back to the parent of failed and returns it. A
+// substitution of failed whose sibling failed to build left it there.
+func (s *Sequencer) parentOf(ctx context.Context, failed *types.Header) (*types.Header, error) {
+	if r := s.replacing; r != nil && r.failed == failed.Hash() {
+		head, err := s.committer.Head(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if head.Hash() == r.parent {
+			return head, nil
+		}
+	}
+	return s.committer.HeadBefore(ctx, failed)
+}
+
+// pending fails with ErrSubstitutionPending while a substitution's sibling
+// has yet to build on the head, where the trigger produces nothing until a
+// retry builds it; one the head moved away from is dropped.
+func (s *Sequencer) pending(ctx context.Context) error {
+	r := s.replacing
+	if r == nil {
 		return nil
 	}
-	if _, err := s.produce(ctx, Sync, head); err != nil {
+	head, err := s.committer.Head(ctx)
+	if err != nil {
+		return err
+	}
+	if head.Hash() != r.parent {
+		s.replacing = nil
+		return nil
+	}
+	return fmt.Errorf("%w: block %d replacing %x: %w", ErrSubstitutionPending, head.Number.Uint64()+1, r.failed, r.err)
+}
+
+// late reports whether a proof started now reaches L1 after the submission
+// deadline of the Sync block at ts.
+func (s *Sequencer) late(ts uint64) bool {
+	deadline := time.Unix(int64(ts), 0).Add(-s.cfg.Timing.Slack)
+	return s.now().Add(s.cfg.Timing.Proof).After(deadline)
+}
+
+// syncBlock commits the Sync block on parent: the composer's, else one from
+// the pool, empty for a slot too late.
+func (s *Sequencer) syncBlock(ctx context.Context, parent *types.Header, ts, target uint64, mode Mode) error {
+	var composed *types.Block
+	if c := s.cfg.Composer; c != nil {
+		composed = c.ComposeSyncSlot(ctx, parent, ts, target, mode)
+	}
+	var err error
+	switch {
+	case composed != nil:
+		_, err = s.insert(ctx, Sync, composed)
+	case mode == ModeEmpty:
+		_, err = s.build(ctx, Sync, parent, noTxns{})
+	default:
+		_, err = s.produce(ctx, Sync, parent)
+	}
+	if err != nil {
 		return err
 	}
 	s.setOffGrid(0)
@@ -287,13 +433,6 @@ func (s *Sequencer) produceN(ctx context.Context, kind Kind, head *types.Header,
 	return head, nil
 }
 
-// late reports whether a proof started now reaches L1 after the submission
-// deadline of the Sync block at ts.
-func (s *Sequencer) late(ts uint64) bool {
-	deadline := time.Unix(int64(ts), 0).Add(-s.cfg.Timing.Slack)
-	return s.now().Add(s.cfg.Timing.Proof).After(deadline)
-}
-
 // produce builds the block of kind after parent from the pool.
 func (s *Sequencer) produce(ctx context.Context, kind Kind, parent *types.Header) (*types.Header, error) {
 	txs := newPoolTxns(s.pool, parent.Hash(), s.cfg.DABudget, s.logger)
@@ -313,6 +452,25 @@ func (s *Sequencer) build(ctx context.Context, kind Kind, parent *types.Header, 
 		Extra:      []byte{},
 		GasLimit:   s.l2.BlockGasLimit,
 	}
+	return s.commit(ctx, kind, in.Number, func(ctx context.Context, hook follower.CommitHook) (*types.Block, error) {
+		built, err := s.committer.Produce(ctx, in, txs, hook)
+		if err != nil {
+			return nil, err
+		}
+		return built.Block, nil
+	})
+}
+
+// insert commits block, a composer's block of kind, on the head.
+func (s *Sequencer) insert(ctx context.Context, kind Kind, block *types.Block) (*types.Header, error) {
+	return s.commit(ctx, kind, block.NumberU64(), func(ctx context.Context, hook follower.CommitHook) (*types.Block, error) {
+		return block, s.committer.Insert(ctx, []*types.Block{block}, hook)
+	})
+}
+
+// commit runs put, which makes block number the head and runs hook, which
+// records the block's witness.
+func (s *Sequencer) commit(ctx context.Context, kind Kind, number uint64, put func(ctx context.Context, hook follower.CommitHook) (*types.Block, error)) (*types.Header, error) {
 	// The witness belongs to the block, which can commit after ctx ends.
 	wctx := context.WithoutCancel(ctx)
 	var pin interface{ Close() }
@@ -326,10 +484,10 @@ func (s *Sequencer) build(ctx context.Context, kind Kind, parent *types.Header, 
 	record := func(h *types.Header) {
 		switch {
 		case pinErr != nil:
-			s.witnessFailed(in.Number, pinErr)
+			s.witnessFailed(number, pinErr)
 		case pin != nil:
 			if err := s.cfg.Witnesses.Record(wctx, pin, h); err != nil {
-				s.witnessFailed(in.Number, err)
+				s.witnessFailed(number, err)
 			}
 		}
 	}
@@ -341,13 +499,13 @@ func (s *Sequencer) build(ctx context.Context, kind Kind, parent *types.Header, 
 		}
 		return record
 	}
-	built, err := s.committer.Produce(ctx, in, txs, hook)
+	b, err := put(ctx, hook)
 	if err != nil {
 		return nil, err
 	}
-	h := built.Block.Header()
+	h := b.Header()
 	s.logger.Info("[eez] produced block", "event", "eez.sequencer.block.produced", "kind", kind, "number", h.Number.Uint64(),
-		"hash", h.Hash(), "time", h.Time, "txs", len(built.Block.Transactions()))
+		"hash", h.Hash(), "time", h.Time, "txs", len(b.Transactions()))
 	s.statusMu.Lock()
 	s.status.Produced[kind]++
 	s.status.Last = h
