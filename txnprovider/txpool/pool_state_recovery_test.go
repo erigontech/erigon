@@ -861,8 +861,8 @@ func TestStartupKeepsAnnouncedFees(t *testing.T) {
 	require.NoError(t, poolDB.Update(ctx, func(tx kv.RwTx) error {
 		fee := make([]byte, 8)
 		binary.BigEndian.PutUint64(fee, 999)
-		require.NoError(t, tx.Put(kv.PoolInfo, PoolPendingBaseFeeKey, fee))
-		return tx.Put(kv.PoolInfo, PoolPendingBlobFeeKey, fee)
+		require.NoError(t, tx.Put(kv.PoolInfo, []byte("pending_base_fee"), fee))
+		return tx.Put(kv.PoolInfo, []byte("pending_blob_fee"), fee)
 	}))
 	reset := newBlockChangeForAccounts(common.Hash{1}, 0)
 	reset.PendingBlockBaseFee = 7
