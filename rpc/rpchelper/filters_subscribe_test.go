@@ -437,14 +437,13 @@ func TestReceiptsSubscribersShareOneEvent(t *testing.T) {
 	defer f.UnsubscribeReceipts(idA)
 	defer f.UnsubscribeReceipts(idB)
 
-	f.OnReceipts(&remoteproto.SubscribeReceiptsReply{TransactionHash: gointerfaces.ConvertHashToH256(common.HexToHash("0x01"))})
+	f.OnReceipts(&remoteproto.SubscribeReceiptsReply{TransactionHash: gointerfaces.ConvertHashToH256(common.HexToHash("0x01")), LastInBlock: true})
 
 	evA, evB := <-a, <-b
 	require.Same(t, evA, evB)
 }
 
-// Once the backend has marked a block's last receipt, the subscription sends each block's receipts
-// as one event; a backend that never marks them still gets one event per receipt.
+// The subscription sends each block's receipts as one event, when the backend marks the last one.
 func TestReceiptsSubscriptionBatchesPerBlock(t *testing.T) {
 	receipt := func(hash string, block uint64, last bool) *remoteproto.SubscribeReceiptsReply {
 		return &remoteproto.SubscribeReceiptsReply{
@@ -458,7 +457,7 @@ func TestReceiptsSubscriptionBatchesPerBlock(t *testing.T) {
 	require.NoError(t, err)
 	defer f.UnsubscribeReceipts(id)
 
-	f.OnReceipts(receipt("0x00", 6, true)) // the backend shows it marks blocks
+	f.OnReceipts(receipt("0x00", 6, true))
 	require.Len(t, (<-ch).Value, 1)
 
 	f.OnReceipts(receipt("0x01", 7, false))
@@ -469,18 +468,33 @@ func TestReceiptsSubscriptionBatchesPerBlock(t *testing.T) {
 	require.Len(t, (<-ch).Value, 1)
 }
 
-func TestReceiptsSubscriptionWithoutBlockMarkersSendsEachReceipt(t *testing.T) {
+// The first block after the stream starts, or restarts, is one event too: every backend that passes the
+// interface version check marks the last receipt of a block.
+func TestReceiptsSubscriptionSendsTheFirstBlockAsOneEvent(t *testing.T) {
+	receipt := func(hash string, block uint64, last bool) *remoteproto.SubscribeReceiptsReply {
+		return &remoteproto.SubscribeReceiptsReply{
+			TransactionHash: gointerfaces.ConvertHashToH256(common.HexToHash(hash)),
+			BlockNumber:     block,
+			LastInBlock:     last,
+		}
+	}
 	f := newTestFilters(t)
 	ch, id, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
 	require.NoError(t, err)
 	defer f.UnsubscribeReceipts(id)
 
-	f.OnReceipts(&remoteproto.SubscribeReceiptsReply{TransactionHash: gointerfaces.ConvertHashToH256(common.HexToHash("0x01")), BlockNumber: 7})
-	require.Len(t, (<-ch).Value, 1)
+	f.OnReceipts(receipt("0x01", 7, false))
+	f.OnReceipts(receipt("0x02", 7, false))
+	f.OnReceipts(receipt("0x03", 7, true))
+	require.Len(t, (<-ch).Value, 3)
+
+	f.receiptsSubs.endStream()
+	f.OnReceipts(receipt("0x04", 8, false))
+	f.OnReceipts(receipt("0x05", 8, true))
+	require.Len(t, (<-ch).Value, 2, "after a new stream")
 }
 
-// A stream that ends in the middle of a block must not keep the receipts it already delivered,
-// and the next stream may come from a backend that does not mark blocks.
+// A stream that ends in the middle of a block must not keep the receipts it already delivered.
 func TestReceiptsStreamEndFlushesHalfBlock(t *testing.T) {
 	receipt := func(hash string, block uint64, last bool) *remoteproto.SubscribeReceiptsReply {
 		return &remoteproto.SubscribeReceiptsReply{
@@ -499,7 +513,4 @@ func TestReceiptsStreamEndFlushesHalfBlock(t *testing.T) {
 	f.OnReceipts(receipt("0x01", 7, false))
 	f.receiptsSubs.endStream()
 	require.Len(t, (<-ch).Value, 1)
-
-	f.OnReceipts(receipt("0x02", 8, false))
-	require.Len(t, (<-ch).Value, 1, "after a new stream, unmarked receipts go out one by one")
 }

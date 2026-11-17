@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"slices"
 	"sort"
 	"testing"
 	"unsafe"
@@ -1618,6 +1619,98 @@ func TestVersionedIO_CreatedAccountEmptyCodeChangeOmitted(t *testing.T) {
 	require.True(t, found, "authority account must appear in BAL")
 }
 
+// The authority was read as absent at the tx start (an earlier tx removed it), and the tx sets and
+// clears its delegation: no code change.
+func TestVersionedIO_AbsentAccountEmptyCodeChangeOmitted(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0f6dca"))
+	io := NewVersionedIO(1)
+	reads := ReadSet{}
+	reads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead}})
+	io.RecordReads(Version{TxIndex: 0}, reads)
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}}, Val: uint64(2)},
+		&VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 0}}, Val: accounts.Code{}},
+	))
+	bal := io.AsBlockAccessList()
+	require.Len(t, bal, 1)
+	require.Empty(t, bal[0].CodeChanges, "\n%s", bal.DebugString())
+}
+
+// The authority existed with a delegation, which the tx clears: a code change to empty code.
+func TestVersionedIO_PresentAccountClearedDelegationKept(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0f6dcb"))
+	delegation := accounts.NewCode([]byte{0xef, 0x01, 0x00, 0x11, 0x22})
+	io := NewVersionedIO(1)
+	reads := ReadSet{}
+	reads.SetAddress(addr, VersionedRead[AccountView]{Val: NewAccountView(&accounts.Account{Nonce: 4, CodeHash: delegation.Hash})})
+	reads.SetSelfDestruct(addr, VersionedRead[bool]{Val: false})
+	io.RecordReads(Version{TxIndex: 0}, reads)
+	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
+		&VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 0}}, Val: uint64(5)},
+		&VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath, Version: Version{TxIndex: 0}}, Val: accounts.Code{}},
+	))
+	bal := io.AsBlockAccessList()
+	require.Len(t, bal, 1)
+	require.Len(t, bal[0].CodeChanges, 1, "\n%s", bal.DebugString())
+}
+
+// Tx 0's removal of the empty authority is flushed during tx 1's first code-hash read, after the
+// read has probed for a destruct. Tx 1 sets and clears the delegation: no code change.
+func TestVersionedIO_RemovalFlushedDuringCodeHashReadEmptyCodeChangeOmitted(t *testing.T) {
+	t.Parallel()
+	authority := accounts.InternAddress(common.HexToAddress("0xc0f6dcc"))
+	delegate := accounts.InternAddress(common.HexToAddress("0xcafe"))
+	empty := accounts.NewAccount()
+	vm := NewVersionMap(types.BlockAccessList{{Address: authority.Value(), NonceChanges: []*types.NonceChange{{Index: 2, Value: 2}}}})
+	ibs := NewWithVersionMap(&emptyAccountReader{addr: authority, acc: &empty}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	removal := &WriteSet{}
+	removal.SetEmptyRemoval(authority, Version{TxIndex: 0})
+	vm.fieldMissHook = func() {
+		vm.fieldMissHook = nil
+		vm.FlushVersionedWrites(removal, true)
+	}
+
+	for i, target := range []accounts.Address{delegate, accounts.ZeroAddress} {
+		codeHash, err := ibs.GetCodeHash(authority)
+		require.NoError(t, err)
+		if i == 0 {
+			require.Nil(t, vm.fieldMissHook, "the flush must land in the first code-hash read")
+		}
+		if !codeHash.IsEmpty() {
+			_, ok, err := ibs.GetDelegatedDesignation(authority)
+			require.NoError(t, err)
+			require.True(t, ok)
+		}
+		nonce, err := ibs.GetNonce(authority)
+		require.NoError(t, err)
+		require.Equal(t, uint64(i), nonce)
+		_, err = ibs.Exist(authority)
+		require.NoError(t, err)
+		var code []byte
+		if target != accounts.ZeroAddress {
+			code = types.AddressToDelegation(target)
+		}
+		require.NoError(t, ibs.SetCode(authority, code, tracing.CodeChangeAuthorization))
+		require.NoError(t, ibs.SetNonce(authority, nonce+1, tracing.NonceChangeAuthorization))
+	}
+	require.Equal(t, VersionValid, validateReads(vm, ibs, 1))
+
+	writes, err := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true, IsByzantium: true, IsCancun: true, IsPrague: true, IsAmsterdam: true})
+	require.NoError(t, err)
+	io := NewVersionedIO(2)
+	io.RecordReads(Version{TxIndex: 1}, ibs.VersionedReads())
+	io.RecordWrites(Version{TxIndex: 1}, writes)
+	bal := io.AsBlockAccessList()
+	idx := slices.IndexFunc(bal, func(ac types.AccountChanges) bool { return ac.Address == authority.Value() })
+	require.GreaterOrEqual(t, idx, 0, "\n%s", bal.DebugString())
+	require.Equal(t, []*types.NonceChange{{Index: 2, Value: 2}}, bal[idx].NonceChanges, "\n%s", bal.DebugString())
+	require.Empty(t, bal[idx].CodeChanges, "\n%s", bal.DebugString())
+}
+
 func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T) {
 	t.Parallel()
 
@@ -1694,6 +1787,17 @@ func TestAccountState_IndexCrossoverKeepsSlotsFindable(t *testing.T) {
 		require.NotContains(t, account.storageReads, slot, "a write supersedes the recorded read")
 	}
 	require.Len(t, account.storageReads, 4*slotIndexMin)
+}
+
+// A slot read by many txs must occupy one storageReads entry, otherwise finalize
+// sorts one entry per read instead of one per slot.
+func TestAccountState_RepeatedReadsKeepOneEntry(t *testing.T) {
+	account := newAccountState(accounts.InternAddress(common.HexToAddress("0xbeef")))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	for range 3 {
+		account.updateReadStorage(slot, *uint256.NewInt(7))
+	}
+	require.Equal(t, []accounts.StorageKey{slot}, account.storageReads)
 }
 
 // TestAccountState_MatchesReferenceBuilder fuzzes read/write sequences that
@@ -2179,4 +2283,26 @@ func TestAccountStateBalanceTrackingDoesNotAllocate(t *testing.T) {
 		}
 	})
 	require.Zero(t, allocs, "allocations per run for %d accounts", len(states))
+}
+
+func TestWriteSetMergeFromExtendsTheSetInPlace(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	balance := func(v uint64) *VersionedWrite[uint256.Int] {
+		return &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath}, Val: *uint256.NewInt(v)}
+	}
+	nonce := &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: 7}
+
+	ws := newWriteSet(balance(1), nonce)
+	nextBalance := balance(2)
+	next := newWriteSet(nextBalance)
+
+	ws.MergeFrom(next)
+
+	got, ok := ws.GetBalance(addr)
+	require.True(t, ok)
+	require.Equal(t, *uint256.NewInt(2), got.Val, "next wins on the same path")
+	gotNonce, ok := ws.GetNonce(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(7), gotNonce.Val)
+	require.NotSame(t, nextBalance, got, "the merged cell must not alias next")
 }

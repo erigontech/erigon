@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -42,16 +43,78 @@ import (
 	clgossip "github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	mock_services2 "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/phase1/network/gossip"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	services_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
+	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
+
+func TestPoolAttesterSlashingRejectsDisjointIndices(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.ElectraVersion} {
+		for _, route := range []string{"v1", "v2"} {
+			for _, pooled := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/pooled=%t", version, route, pooled), func(t *testing.T) {
+					ctrl := gomock.NewController(t)
+					cfg := clparams.MainnetBeaconConfig
+					epoch := uint64(0)
+					if version == clparams.ElectraVersion {
+						epoch = cfg.ElectraForkEpoch
+					}
+					clock := eth_clock.NewMockEthereumClock(ctrl)
+					clock.EXPECT().GetCurrentEpoch().Return(epoch)
+					anchor := state.New(&cfg)
+					anchor.SetVersion(version)
+					synced := synced_data.NewSyncedDataManager(&cfg, true)
+					opPool := pool.NewOperationsPool(&cfg)
+					store, err := forkchoice.NewForkChoiceStore(clock, anchor, nil, opPool, nil, nil, synced, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(), nil, false, nil)
+					require.NoError(t, err)
+					anchorRoot, err := anchor.BlockRoot()
+					require.NoError(t, err)
+					require.NoError(t, synced.OnHeadStateWithBlockRoot(anchor, anchorRoot))
+					publisher := gossip_mock.NewMockGossip(ctrl)
+					publisher.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+					handler := &ApiHandler{
+						logger:          log.Root(),
+						beaconChainCfg:  &cfg,
+						ethClock:        clock,
+						forkchoiceStore: store,
+						operationsPool:  opPool,
+						sentinel:        &nonNilSentinelClient{},
+						gossipManager:   publisher,
+						routerCfg:       &beacon_router_configuration.RouterConfiguration{Beacon: true},
+					}
+					handler.init()
+					slashing := cltypes.NewAttesterSlashing(version)
+					slashing.Attestation_1.AttestingIndices.Append(1)
+					slashing.Attestation_2.AttestingIndices.Append(2)
+					slashing.Attestation_1.Data.BeaconBlockRoot = common.Hash{1}
+					slashing.Attestation_2.Data.BeaconBlockRoot = common.Hash{2}
+					if pooled {
+						// The pool key covers only the signatures, which this slashing shares.
+						opPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(slashing), cltypes.NewAttesterSlashing(version))
+					}
+					poolSize := len(opPool.AttesterSlashingsPool.Raw())
+					body, err := json.Marshal(slashing)
+					require.NoError(t, err)
+					request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/"+route+"/beacon/pool/attester_slashings", bytes.NewReader(body))
+					recorder := httptest.NewRecorder()
+					handler.mux.ServeHTTP(recorder, request)
+					require.Equal(t, http.StatusBadRequest, recorder.Code)
+					require.Contains(t, recorder.Body.String(), "attester slashing has an empty attesting indices intersection")
+					require.Len(t, opPool.AttesterSlashingsPool.Raw(), poolSize)
+				})
+			}
+		}
+	}
+}
 
 func TestPoolAttesterSlashings(t *testing.T) {
 	attesterSlashing := cltypes.NewAttesterSlashing(clparams.DenebVersion)
@@ -182,6 +245,55 @@ func TestPoolProposerSlashingDoesNotPublishIgnored(t *testing.T) {
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/proposer_slashings", bytes.NewReader(requestBody))
 
 	handler.PostEthV1BeaconPoolProposerSlashings(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+}
+
+func TestPoolVoluntaryExitDoesNotPublishIgnored(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service := services_mock.NewMockVoluntaryExitService(ctrl)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	requestBody, err := json.Marshal(&cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{}})
+	require.NoError(t, err)
+	service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(services.ErrIgnore).Times(1)
+	gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	handler := &ApiHandler{
+		logger:               log.Root(),
+		operationsPool:       pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
+		voluntaryExitService: service,
+		gossipManager:        gossipManager,
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/voluntary_exits", bytes.NewReader(requestBody))
+
+	handler.PostEthV1BeaconPoolVoluntaryExits(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+}
+
+func TestPoolVoluntaryExitRepublishesPooledExitWhenIgnored(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service := services_mock.NewMockVoluntaryExitService(ctrl)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	opPool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
+	pooled := &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{ValidatorIndex: 7}, Signature: common.Bytes96{1}}
+	opPool.VoluntaryExitsPool.Insert(7, pooled)
+	pooledSSZ, err := pooled.EncodeSSZ(nil)
+	require.NoError(t, err)
+	requestBody, err := json.Marshal(&cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{ValidatorIndex: 7}, Signature: common.Bytes96{2}})
+	require.NoError(t, err)
+	service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(services.ErrIgnore).Times(1)
+	gossipManager.EXPECT().Publish(gomock.Any(), clgossip.TopicNameVoluntaryExit, pooledSSZ).Return(nil).Times(1)
+	handler := &ApiHandler{
+		logger:               log.Root(),
+		operationsPool:       opPool,
+		voluntaryExitService: service,
+		gossipManager:        gossipManager,
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/voluntary_exits", bytes.NewReader(requestBody))
+
+	handler.PostEthV1BeaconPoolVoluntaryExits(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 }

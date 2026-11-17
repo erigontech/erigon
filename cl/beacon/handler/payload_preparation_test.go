@@ -256,8 +256,10 @@ func payloadPreparationLoopConfig(secondsPerSlot, fuluForkEpoch, gloasForkEpoch 
 
 func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
-		SecondsPerSlot:   12,
-		IntervalsPerSlot: 3,
+		SecondsPerSlot:         12,
+		IntervalsPerSlot:       3,
+		AttestationDueBps:      clparams.AttestationDueBps,
+		AttestationDueBpsGloas: clparams.AttestationDueBpsGloas,
 	}
 	slotStart := time.Unix(100, 0)
 
@@ -294,8 +296,10 @@ func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
 
 func TestBlockBuilderWindowUsesPartialWarmup(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
-		SecondsPerSlot:   12,
-		IntervalsPerSlot: 3,
+		SecondsPerSlot:         12,
+		IntervalsPerSlot:       3,
+		AttestationDueBps:      clparams.AttestationDueBps,
+		AttestationDueBpsGloas: clparams.AttestationDueBpsGloas,
 	}
 	slotStart := time.Unix(100, 0)
 
@@ -337,8 +341,10 @@ func TestPreparedPayloadKeepsTheEarliestMatchingPrime(t *testing.T) {
 
 func TestMaximumPreparedAdvancePreservesRecentBuildTime(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
-		SecondsPerSlot:   12,
-		IntervalsPerSlot: 3,
+		SecondsPerSlot:         12,
+		IntervalsPerSlot:       3,
+		AttestationDueBps:      clparams.AttestationDueBps,
+		AttestationDueBpsGloas: clparams.AttestationDueBpsGloas,
 	}
 
 	require.Equal(t, 1_999_500*time.Microsecond, maximumPreparedAdvance(cfg, clparams.ElectraVersion))
@@ -3735,8 +3741,10 @@ func TestGloasPreparationRechecksParentDuringExecutionRetry(t *testing.T) {
 
 func TestBlockBuilderWindowGloasLateStartKeepsMinimumBuildTime(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
-		SecondsPerSlot:   12,
-		IntervalsPerSlot: 3,
+		SecondsPerSlot:         12,
+		IntervalsPerSlot:       3,
+		AttestationDueBps:      clparams.AttestationDueBps,
+		AttestationDueBpsGloas: clparams.AttestationDueBpsGloas,
 	}
 	slotStart := time.Unix(100, 0)
 
@@ -3759,8 +3767,10 @@ func TestBlockBuilderWindowGloasLateStartKeepsMinimumBuildTime(t *testing.T) {
 
 func TestBlockBuilderWindowShortGloasWarmupPollsNoLaterThanUnprepared(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
-		SecondsPerSlot:   12,
-		IntervalsPerSlot: 3,
+		SecondsPerSlot:         12,
+		IntervalsPerSlot:       3,
+		AttestationDueBps:      clparams.AttestationDueBps,
+		AttestationDueBpsGloas: clparams.AttestationDueBpsGloas,
 	}
 	slotStart := time.Unix(100, 0)
 

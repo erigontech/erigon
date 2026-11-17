@@ -139,20 +139,20 @@ jobs:
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
         run: |
           set -euo pipefail
-          # Erigon has stopped by now. Drop the external-sort scratch dir so we
-          # report the durable on-disk footprint, not the transient sync peak.
-          rm -rf "$ERIGON_DATA_DIR/temp"
-          # du -sB1 = actual disk blocks used, in bytes (NOT --apparent-size).
-          BYTES=$(du -sB1 "$ERIGON_DATA_DIR" | awk '{print $1}')
+          BYTES=$("$GITHUB_WORKSPACE/build/bin/erigon" seg du --datadir "$ERIGON_DATA_DIR" --json \
+            | python3 -c 'import json, sys; print(next(e["total_bytes"] for e in json.load(sys.stdin)["estimates"] if e["mode"] == sys.argv[1]))' minimal)
           echo "Disk usage for $CHAIN minimal: ${BYTES} bytes"
           echo "$BYTES" > "$GITHUB_WORKSPACE/disk-usage-$CHAIN-minimal.txt"
+          echo "seg-du" > "$GITHUB_WORKSPACE/disk-usage-$CHAIN-minimal.method"
 
       - name: Upload disk usage
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: disk-usage-${{ env.CHAIN }}-minimal
-          path: ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-minimal.txt
+          path: |
+            ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-minimal.txt
+            ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-minimal.method
 
       # Restart Erigon on the datadir just synced, with a state-history window
       # narrower than the one it was synced with. That moves the retirement
@@ -168,6 +168,7 @@ jobs:
       # is also what lets Gnosis run the same check as mainnet.
       - name: Test old state-history file retirement (minimal node)
         id: retirement_step
+        if: ${{ !cancelled() && steps.test_step.outcome == 'success' }}
         run: |
           set +e # Disable exit on error
 

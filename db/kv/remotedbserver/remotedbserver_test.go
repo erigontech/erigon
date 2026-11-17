@@ -234,6 +234,7 @@ func TestKvServerRangeAsOfPagination(t *testing.T) {
 			return err
 		}
 		defer d.Close()
+		d.SetDisableInlineTouchKey(true)
 		for i := byte(1); i <= 5; i++ {
 			if err := d.DomainPut(kv.AccountsDomain, tx, []byte{i}, []byte{i}, 1, nil); err != nil {
 				return err
