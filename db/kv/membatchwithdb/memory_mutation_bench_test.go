@@ -23,7 +23,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 )
 
@@ -34,14 +36,14 @@ func BenchmarkMemoryMutationReadViewForAmount(b *testing.B) {
 	}{
 		{"none", "", 0},
 		{kv.MaxTxNum, kv.MaxTxNum, 1},
-		{kv.HeaderNumber, kv.HeaderNumber, 1},
-		{"many", kv.HeaderNumber, 10_000},
+		{kv.Headers, kv.Headers, 1},
+		{"many", kv.Headers, 10_000},
 	} {
 		b.Run("markers="+markers.name, func(b *testing.B) {
 			db, rwTx := newTestTx(b)
 			const rows = 200
 			for i := range rows {
-				require.NoError(b, rwTx.Put(kv.HeaderNumber, fmt.Appendf(nil, "key-%04d", i), []byte("db-value")))
+				require.NoError(b, rwTx.Put(kv.Headers, dbutils.HeaderKey(uint64(i+1), common.Hash{}), []byte("db-value")))
 			}
 			require.NoError(b, rwTx.Commit())
 			roTx, err := db.BeginTemporalRo(b.Context())
@@ -51,7 +53,11 @@ func BenchmarkMemoryMutationReadViewForAmount(b *testing.B) {
 			require.NoError(b, err)
 			defer batch.Close()
 			for i := range markers.count {
-				require.NoError(b, batch.Delete(markers.table, fmt.Appendf(nil, "absent-%08d", i)))
+				key := dbutils.HeaderKey(uint64(rows+i+1), common.Hash{})
+				if markers.table == kv.MaxTxNum {
+					key = dbutils.EncodeBlockNumber(uint64(rows + i + 1))
+				}
+				require.NoError(b, batch.Delete(markers.table, key))
 			}
 
 			b.ResetTimer()
@@ -65,7 +71,7 @@ func BenchmarkMemoryMutationReadViewForAmount(b *testing.B) {
 				view := batch.NewReadView(tx)
 				for pb.Next() {
 					count := 0
-					err := view.ForAmount(kv.HeaderNumber, nil, rows, func(k, v []byte) error {
+					err := view.ForAmount(kv.Headers, nil, rows, func(k, v []byte) error {
 						count++
 						return nil
 					})
@@ -89,7 +95,7 @@ func BenchmarkMemoryMutationDeleteBatch(b *testing.B) {
 			_, tx := newTestTx(b)
 			keys := make([][]byte, rows)
 			for i := range keys {
-				keys[i] = fmt.Appendf(nil, "key-%08d", i)
+				keys[i] = dbutils.HeaderKey(uint64(i+1), common.Hash{})
 			}
 			for b.Loop() {
 				batch, err := membatchwithdb.NewMemoryBatch(tx)
@@ -97,7 +103,7 @@ func BenchmarkMemoryMutationDeleteBatch(b *testing.B) {
 					b.Fatal(err)
 				}
 				for _, key := range keys {
-					if err := batch.Delete(kv.HeaderNumber, key); err != nil {
+					if err := batch.Delete(kv.Headers, key); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -108,36 +114,44 @@ func BenchmarkMemoryMutationDeleteBatch(b *testing.B) {
 }
 
 func BenchmarkMemoryMutationReadViewGetOne(b *testing.B) {
-	db, tx := newTestTx(b)
-	key, value := []byte("key"), []byte("value")
-	require.NoError(b, tx.Put(kv.HeaderNumber, key, value))
-	require.NoError(b, tx.Commit())
-	roTx, err := db.BeginTemporalRo(b.Context())
-	require.NoError(b, err)
-	defer roTx.Rollback()
-	batch, err := membatchwithdb.NewMemoryBatch(roTx)
-	require.NoError(b, err)
-	defer batch.Close()
-	require.NoError(b, batch.Delete(kv.MaxTxNum, []byte("absent")))
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		tx, err := db.BeginRo(b.Context())
-		if err != nil {
-			b.Error(err)
-			return
-		}
-		defer tx.Rollback()
-		view := batch.NewReadView(tx)
-		for pb.Next() {
-			got, err := view.GetOne(kv.HeaderNumber, key)
-			if err != nil {
-				b.Error(err)
-				return
+	for _, table := range []string{kv.MaxTxNum, kv.Headers} {
+		b.Run("markers="+table, func(b *testing.B) {
+			db, tx := newTestTx(b)
+			key, value := dbutils.HeaderKey(1, common.Hash{}), []byte("value")
+			require.NoError(b, tx.Put(kv.Headers, key, value))
+			require.NoError(b, tx.Commit())
+			roTx, err := db.BeginTemporalRo(b.Context())
+			require.NoError(b, err)
+			defer roTx.Rollback()
+			batch, err := membatchwithdb.NewMemoryBatch(roTx)
+			require.NoError(b, err)
+			defer batch.Close()
+			marker := dbutils.HeaderKey(2, common.Hash{})
+			if table == kv.MaxTxNum {
+				marker = dbutils.EncodeBlockNumber(2)
 			}
-			if !bytes.Equal(got, value) {
-				b.Errorf("read %q, want %q", got, value)
-				return
-			}
-		}
-	})
+			require.NoError(b, batch.Delete(table, marker))
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				tx, err := db.BeginRo(b.Context())
+				if err != nil {
+					b.Error(err)
+					return
+				}
+				defer tx.Rollback()
+				view := batch.NewReadView(tx)
+				for pb.Next() {
+					got, err := view.GetOne(kv.Headers, key)
+					if err != nil {
+						b.Error(err)
+						return
+					}
+					if !bytes.Equal(got, value) {
+						b.Errorf("read %q, want %q", got, value)
+						return
+					}
+				}
+			})
+		})
+	}
 }

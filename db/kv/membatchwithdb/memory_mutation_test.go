@@ -17,6 +17,7 @@
 package membatchwithdb_test
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"sync"
@@ -229,6 +230,23 @@ func TestFlushDeletionMarkers(t *testing.T) {
 			}
 		})
 	}
+}
+
+type deleteErrorTx struct {
+	kv.RwTx
+	err error
+}
+
+func (tx deleteErrorTx) Delete(string, []byte) error { return tx.err }
+
+func TestFlushPropagatesDeleteError(t *testing.T) {
+	_, tx := newTestTx(t)
+	batch, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Delete(kv.HeaderNumber, []byte("deleted")))
+	want := errors.New("delete failed")
+	require.ErrorIs(t, batch.Flush(t.Context(), deleteErrorTx{RwTx: tx, err: want}), want)
 }
 
 // TestFlushAppendPath exercises the Append fast-path used when all in-memory
@@ -1207,6 +1225,57 @@ func TestMemoryMutationConcurrentDeleteDupAndCursorRead(t *testing.T) {
 	_, value, err := reader.SeekBothExact([]byte("key1"), []byte("value1.1"))
 	require.NoError(t, err)
 	require.Nil(t, value)
+}
+
+func TestMemoryMutationDeleteExactKeepsEarlierMarkers(t *testing.T) {
+	_, tx := newTestTx(t)
+	key := bytes.Repeat([]byte{1}, 40)
+	values := [][]byte{bytes.Repeat([]byte{2}, 40), bytes.Repeat([]byte{3}, 40), bytes.Repeat([]byte{4}, 40)}
+	for _, value := range values {
+		require.NoError(t, tx.Put(kv.TblAccountVals, key, value))
+	}
+	batch, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer batch.Close()
+	writer, err := batch.RwCursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer writer.Close()
+	deleteKey, deleteValue := bytes.Clone(key), make([]byte, 40)
+	for _, value := range values[:2] {
+		copy(deleteValue, value)
+		require.NoError(t, writer.DeleteExact(deleteKey, deleteValue))
+	}
+	clear(deleteKey)
+	clear(deleteValue)
+	reader, err := batch.NewReadView(tx).CursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer reader.Close()
+	for _, value := range values[:2] {
+		_, got, err := reader.SeekBothExact(key, value)
+		require.NoError(t, err)
+		require.Nil(t, got)
+	}
+	_, got, err := reader.SeekBothExact(key, values[2])
+	require.NoError(t, err)
+	require.Equal(t, values[2], got)
+}
+
+func TestMemoryMutationReadViewLongKeyLookupAllocations(t *testing.T) {
+	_, tx := newTestTx(t)
+	key, value := bytes.Repeat([]byte{1}, 40), []byte("value")
+	require.NoError(t, tx.Put(kv.Headers, key, value))
+	batch, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Delete(kv.Headers, bytes.Repeat([]byte{2}, 40)))
+	view := batch.NewReadView(tx)
+	var got []byte
+	allocs := testing.AllocsPerRun(1000, func() {
+		got, err = view.GetOne(kv.Headers, key)
+	})
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.Zero(t, allocs)
 }
 
 // erroringDomainReader fails every domain read, so a caller that swallows the

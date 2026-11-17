@@ -30,6 +30,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -75,7 +76,7 @@ func (d *tableDeletions) isEntryDeleted(key []byte) bool {
 	if entries == nil {
 		return false
 	}
-	_, ok := entries.Load(string(key))
+	_, ok := entries.Load(common.ToStringZeroCopy(key))
 	return ok
 }
 
@@ -87,11 +88,11 @@ func (d *tableDeletions) isDupDeleted(key, value []byte) bool {
 	if dups == nil {
 		return false
 	}
-	values, ok := dups.Load(string(key))
+	values, ok := dups.Load(common.ToStringZeroCopy(key))
 	if !ok {
 		return false
 	}
-	_, ok = values.(*sync.Map).Load(string(value))
+	_, ok = values.(*sync.Map).Load(common.ToStringZeroCopy(value))
 	return ok
 }
 
@@ -534,7 +535,7 @@ func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPr
 	var hidden bool
 	if d != nil {
 		if dups := d.dups.Load(); dups != nil {
-			_, hidden = dups.Load(string(key))
+			_, hidden = dups.Load(common.ToStringZeroCopy(key))
 		}
 	}
 	m.mu.RUnlock()
@@ -658,7 +659,7 @@ func (m *MemoryMutation) deleteDup(table string, k, v []byte) {
 		dups = &sync.Map{}
 		d.dups.Store(dups)
 	}
-	values, ok := dups.Load(string(k))
+	values, ok := dups.Load(common.ToStringZeroCopy(k))
 	if !ok {
 		values = &sync.Map{}
 		dups.Store(string(k), values)
