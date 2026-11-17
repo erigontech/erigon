@@ -218,58 +218,19 @@ func TestRetryPendingExecutionPayloadEnvelopeBooksBeforeProbingTheColumns(t *tes
 	awaitSignal(t, done, "the first retry")
 }
 
-// A producer that keeps reporting columns of one root makes the wake probe that root each time, and no other:
-// the rest stay on the probe interval of the poll.
-func TestRetryPendingExecutionPayloadEnvelopesOnColumnsStoredLeavesUnrelatedRootsToThePoll(t *testing.T) {
-	const wakes = 20
-	woken, unrelated := common.HexToHash("0x1"), common.HexToHash("0x2")
-	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
-	peerDas.EXPECT().IsDataAvailable(uint64(7), woken).Return(false, nil).Times(wakes)
-	f, pending := newRetryPendingStore(t, peerDas)
-	pending.Add(woken, &cltypes.SignedExecutionPayloadEnvelope{})
-	pending.Add(unrelated, &cltypes.SignedExecutionPayloadEnvelope{})
-
-	for range wakes {
-		f.emitters.WakePendingEnvelopeRetry(woken)
-		f.RetryPendingExecutionPayloadEnvelopesOnColumnsStored(t.Context(), 0)
-	}
-	require.Empty(t, f.emitters.TakePendingEnvelopeRetryRoots())
-}
-
-func TestRetryPendingExecutionPayloadEnvelopesOnColumnsStoredIgnoresRootsWithoutPendingEnvelope(t *testing.T) {
+func TestHasAttemptablePendingEnvelopeChecksParkedRootsAtOrAboveTheFloor(t *testing.T) {
 	root := common.HexToHash("0x1")
 	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
-	f, _ := newRetryPendingStore(t, peerDas)
-
-	f.emitters.WakePendingEnvelopeRetry(root)
-	f.RetryPendingExecutionPayloadEnvelopesOnColumnsStored(t.Context(), 0)
-
-	_, booked := f.dataAvailableEnvelopeRetryAt.Peek(root)
-	require.False(t, booked)
-}
-
-func TestPrunePendingEnvelopeRetryRootsKeepsParkedRootsAtOrAboveTheFloor(t *testing.T) {
-	parked, unparked := common.HexToHash("0x1"), common.HexToHash("0x2")
-	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
-	peerDas.EXPECT().IsDataAvailable(uint64(7), parked).Return(true, nil).AnyTimes()
+	peerDas.EXPECT().IsDataAvailable(uint64(7), root).Return(true, nil).AnyTimes()
 	f, pending := newRetryPendingStore(t, peerDas)
-	pending.Add(parked, &cltypes.SignedExecutionPayloadEnvelope{})
 
-	f.emitters.WakePendingEnvelopeRetry(unparked)
-	require.False(t, f.PrunePendingEnvelopeRetryRoots(0), "no woken root has a parked envelope")
-	require.Empty(t, f.emitters.TakePendingEnvelopeRetryRoots())
-
-	f.emitters.WakePendingEnvelopeRetry(parked)
-	require.False(t, f.PrunePendingEnvelopeRetryRoots(8), "the block is below the floor")
-	require.Empty(t, f.emitters.TakePendingEnvelopeRetryRoots())
-
-	f.emitters.WakePendingEnvelopeRetry(parked)
-	f.emitters.WakePendingEnvelopeRetry(unparked)
-	require.True(t, f.PrunePendingEnvelopeRetryRoots(7))
-	require.Equal(t, []common.Hash{parked}, f.emitters.TakePendingEnvelopeRetryRoots(), "the pass still finds the parked root")
+	require.False(t, f.HasAttemptablePendingEnvelope(0), "no envelope is parked")
+	pending.Add(root, &cltypes.SignedExecutionPayloadEnvelope{})
+	require.False(t, f.HasAttemptablePendingEnvelope(8), "the block is below the floor")
+	require.True(t, f.HasAttemptablePendingEnvelope(7))
 }
 
-func TestPrunePendingEnvelopeRetryRootsKeepsOnlyRootsThatCanBeAttemptedNow(t *testing.T) {
+func TestHasAttemptablePendingEnvelopeReportsOnlyRootsThatCanBeAttemptedNow(t *testing.T) {
 	root := common.HexToHash("0x1")
 	hourAhead, hourAgo := time.Now().Add(time.Hour), time.Now().Add(-time.Hour)
 	for _, tc := range []struct {
@@ -297,16 +258,10 @@ func TestPrunePendingEnvelopeRetryRootsKeepsOnlyRootsThatCanBeAttemptedNow(t *te
 			if tc.booking != nil {
 				f.dataAvailableEnvelopeRetryAt.Add(root, tc.booking)
 			}
-			f.emitters.WakePendingEnvelopeRetry(root)
 
-			require.Equal(t, tc.want, f.PrunePendingEnvelopeRetryRoots(0))
+			require.Equal(t, tc.want, f.HasAttemptablePendingEnvelope(0))
 
 			require.Equal(t, tc.wantProbes, probes)
-			if tc.want {
-				require.Equal(t, []common.Hash{root}, f.emitters.TakePendingEnvelopeRetryRoots())
-			} else {
-				require.Empty(t, f.emitters.TakePendingEnvelopeRetryRoots(), "a later column store reports the root again")
-			}
 			booking, booked := f.dataAvailableEnvelopeRetryAt.Peek(root)
 			require.Equal(t, tc.booking != nil, booked, "the check books nothing")
 			require.Same(t, tc.booking, booking)
@@ -314,17 +269,16 @@ func TestPrunePendingEnvelopeRetryRootsKeepsOnlyRootsThatCanBeAttemptedNow(t *te
 	}
 }
 
-func TestPrunePendingEnvelopeRetryRootsTreatsMissingPeerDasAsUnavailable(t *testing.T) {
+func TestHasAttemptablePendingEnvelopeTreatsMissingPeerDasAsUnavailable(t *testing.T) {
 	root := common.HexToHash("0x1")
 	f, pending := newRetryPendingStore(t, nil)
 	f.peerDas = nil
 	pending.Add(root, &cltypes.SignedExecutionPayloadEnvelope{})
 
-	f.emitters.WakePendingEnvelopeRetry(root)
-	require.False(t, f.PrunePendingEnvelopeRetryRoots(0))
+	require.False(t, f.HasAttemptablePendingEnvelope(0))
 }
 
-func TestPrunePendingEnvelopeRetryRootsKeepsAZeroBlobRootWithoutProbingColumns(t *testing.T) {
+func TestHasAttemptablePendingEnvelopeReportsAZeroBlobRootWithoutProbingColumns(t *testing.T) {
 	root := common.HexToHash("0x1")
 	f, pending := newRetryPendingStore(t, das_mock.NewMockPeerDas(gomock.NewController(t)))
 	f.forkGraph = retryPendingForkGraph{block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 7, Body: &cltypes.BeaconBody{
@@ -335,8 +289,7 @@ func TestPrunePendingEnvelopeRetryRootsKeepsAZeroBlobRootWithoutProbingColumns(t
 	}}}}
 	pending.Add(root, &cltypes.SignedExecutionPayloadEnvelope{})
 
-	f.emitters.WakePendingEnvelopeRetry(root)
-	require.True(t, f.PrunePendingEnvelopeRetryRoots(0))
+	require.True(t, f.HasAttemptablePendingEnvelope(0))
 }
 
 // A booking that vanished while the caller probed (evicted, or dropped by an interrupted attempt) does not
@@ -422,7 +375,6 @@ func TestRetryPendingExecutionPayloadEnvelopeYieldsToAColumnWake(t *testing.T) {
 					close(targeted)
 				}()
 				<-probing
-				f.emitters.WakePendingEnvelopeRetry(root)
 				go func() {
 					f.RetryPendingExecutionPayloadEnvelopesOnColumnsStored(t.Context(), 0)
 					close(woken)

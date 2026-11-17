@@ -51,7 +51,7 @@ type sleepForSlotForkChoiceFake struct {
 	retryMinSlots  *[]uint64
 	retryDeadlines *[]time.Time
 	emitter        *beaconevents.EventEmitter
-	parkedRoot     func(root common.Hash, minSlot uint64) bool // nil keeps every woken root
+	attemptable    func(minSlot uint64) bool // nil reports an attemptable envelope
 	columnRetry    func(ctx context.Context, minSlot uint64)
 }
 
@@ -106,18 +106,15 @@ func (f sleepForSlotForkChoiceFake) PendingEnvelopeRetryWake() <-chan struct{} {
 	return f.emitter.PendingEnvelopeRetryWake()
 }
 
-func (f sleepForSlotForkChoiceFake) PrunePendingEnvelopeRetryRoots(minSlot uint64) bool {
-	return f.emitter.PrunePendingEnvelopeRetryRoots(func(root common.Hash) bool {
-		return f.parkedRoot == nil || f.parkedRoot(root, minSlot)
-	})
+func (f sleepForSlotForkChoiceFake) HasAttemptablePendingEnvelope(minSlot uint64) bool {
+	return f.attemptable == nil || f.attemptable(minSlot)
 }
 
-func (f sleepForSlotForkChoiceFake) RearmPendingEnvelopeRetryWake() {
-	f.emitter.RearmPendingEnvelopeRetryWake()
+func (f sleepForSlotForkChoiceFake) WakePendingEnvelopeRetry() {
+	f.emitter.WakePendingEnvelopeRetry()
 }
 
 func (f sleepForSlotForkChoiceFake) RetryPendingExecutionPayloadEnvelopesOnColumnsStored(ctx context.Context, minSlot uint64) {
-	f.emitter.TakePendingEnvelopeRetryRoots()
 	if f.columnRetry != nil {
 		f.columnRetry(ctx, minSlot)
 	}
@@ -137,9 +134,9 @@ func (blockingSleepForSlotForkChoiceFake) PendingEnvelopeRetryWake() <-chan stru
 	return nil
 }
 
-func (blockingSleepForSlotForkChoiceFake) PrunePendingEnvelopeRetryRoots(uint64) bool { return false }
+func (blockingSleepForSlotForkChoiceFake) HasAttemptablePendingEnvelope(uint64) bool { return false }
 
-func (blockingSleepForSlotForkChoiceFake) RearmPendingEnvelopeRetryWake() {}
+func (blockingSleepForSlotForkChoiceFake) WakePendingEnvelopeRetry() {}
 
 func (blockingSleepForSlotForkChoiceFake) RetryPendingExecutionPayloadEnvelopesOnColumnsStored(context.Context, uint64) {
 }
@@ -647,7 +644,7 @@ func TestSleepForSlotColumnWakeUsesPreviousSlotFloor(t *testing.T) {
 	}
 }
 
-func TestSleepForSlotColumnWakePrunesRootsBelowThePreviousSlot(t *testing.T) {
+func TestSleepForSlotColumnWakeSkipsRootsBelowThePreviousSlot(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		rootSlot   uint64
@@ -668,7 +665,7 @@ func TestSleepForSlotColumnWakePrunesRootsBelowThePreviousSlot(t *testing.T) {
 				run := startSleepForSlot(t, sleepForSlotConfig(10),
 					sleepForSlotForkChoiceFake{
 						head: head, calls: &reads, emitter: emitter, columnRetry: retries.record,
-						parkedRoot: func(_ common.Hash, minSlot uint64) bool { return tc.rootSlot >= minSlot },
+						attemptable: func(minSlot uint64) bool { return tc.rootSlot >= minSlot },
 					},
 					head, clock, common.Hash{})
 
@@ -729,14 +726,14 @@ func TestSleepForSlotColumnWakeDefersToHeadChange(t *testing.T) {
 func TestSleepForSlotColumnWakeWithoutParkedEnvelopeReadsNoHead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		head := common.Hash{1}
-		parked := common.Hash{0xff}
+		var parked atomic.Bool
 		emitter := beaconevents.NewEventEmitter()
 		var retries columnRetryLog
 		calls := 0
 		clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(time.Minute)}
 		forkChoice := sleepForSlotForkChoiceFake{
 			head: head, calls: &calls, emitter: emitter, columnRetry: retries.record,
-			parkedRoot: func(root common.Hash, _ uint64) bool { return root == parked },
+			attemptable: func(uint64) bool { return parked.Load() },
 		}
 		run := startSleepForSlot(t, sleepForSlotConfig(10), forkChoice, head, clock, common.Hash{})
 		defer run.cancel()
@@ -746,9 +743,10 @@ func TestSleepForSlotColumnWakeWithoutParkedEnvelopeReadsNoHead(t *testing.T) {
 			synctest.Wait()
 		}
 		require.Empty(t, retries.passes())
-		require.Zero(t, calls, "a root without a parked envelope must not cost a head read")
+		require.Zero(t, calls, "a column store without an attemptable envelope must not cost a head read")
 
-		emitter.NotifyDataColumnStored(parked)
+		parked.Store(true)
+		emitter.NotifyDataColumnStored(common.Hash{0xff})
 		synctest.Wait()
 		require.Len(t, retries.passes(), 1)
 		require.Equal(t, 1, calls)
@@ -915,10 +913,10 @@ func TestSleepForSlotColumnWakeStopsOnCancel(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			emitter := beaconevents.NewEventEmitter()
 			emitter.NotifyDataColumnStored(common.Hash{0xff})
-			var prunes, headReads int
+			var checks, headReads int
 			forkChoice := sleepForSlotForkChoiceFake{
 				head: common.Hash{1}, calls: &headReads, emitter: emitter,
-				parkedRoot: func(common.Hash, uint64) bool { prunes++; return true },
+				attemptable: func(uint64) bool { checks++; return true },
 			}
 			ctx, cancel := context.WithCancel(t.Context())
 			clock := cancellingSleepForSlotClock{
@@ -931,7 +929,7 @@ func TestSleepForSlotColumnWakeStopsOnCancel(t *testing.T) {
 			)
 
 			require.ErrorIs(t, err, context.Canceled)
-			require.Zero(t, prunes, "a cancelled wait must not check the availability of the woken roots")
+			require.Zero(t, checks, "a cancelled wait must not check the parked envelopes")
 			require.Zero(t, headReads, "a cancelled wait must not read the head")
 		})
 	})
@@ -1116,6 +1114,35 @@ func TestSleepForSlotColumnWakeReadsNoHeadWhileAnAttemptIsBooked(t *testing.T) {
 		}
 		require.EqualValues(t, 1, forkChoice.headReads.Load(), "columns stored after a failed attempt must not cost a head read")
 		require.EqualValues(t, 1, forkChoice.columnPasses.Load())
+		run.stop(t)
+	})
+}
+
+func TestSleepForSlotRetriesAfterAColumnStoredDuringTheWakeCheck(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newForwardSyncTipFixtureWithBlob(t, 0, false, true)
+		var armed, available atomic.Bool
+		installColumnStorePeerDas(t, f, func(uint64, common.Hash) (bool, error) {
+			if armed.CompareAndSwap(true, false) {
+				available.Store(true)
+				f.cfg.emitter.NotifyDataColumnStored(f.tipRoot)
+				return false, nil
+			}
+			return available.Load(), nil
+		})
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		require.NoError(t, forwardSync(ctx, log.Root(), f.cfg, Args{}))
+		require.True(t, f.cfg.forkChoice.HasPendingExecutionPayloadEnvelope(f.tipRoot))
+		armed.Store(true)
+
+		started := time.Now()
+		run := startSleepForSlotAtTip(t, f, f.cfg.forkChoice)
+		synctest.Wait()
+
+		require.False(t, armed.Load(), "the wake check ran")
+		require.True(t, f.cfg.forkChoice.HasEnvelope(f.tipRoot), "a column stored after the check read storage wakes another check")
+		require.Equal(t, started, time.Now())
 		run.stop(t)
 	})
 }

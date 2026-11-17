@@ -37,8 +37,8 @@ type sleepForSlotForkChoice interface {
 	GetExecutionHead(forkchoice.ForkChoiceNode) (common.Hash, bool)
 	RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx context.Context, minSlot uint64)
 	PendingEnvelopeRetryWake() <-chan struct{}
-	PrunePendingEnvelopeRetryRoots(minSlot uint64) bool
-	RearmPendingEnvelopeRetryWake()
+	HasAttemptablePendingEnvelope(minSlot uint64) bool
+	WakePendingEnvelopeRetry()
 	RetryPendingExecutionPayloadEnvelopesOnColumnsStored(ctx context.Context, minSlot uint64)
 }
 
@@ -89,7 +89,7 @@ func waitForNextSlotOrHeadChange(
 	columnWakeUnserved := false
 	defer func() {
 		if columnWakeUnserved {
-			forkChoice.RearmPendingEnvelopeRetryWake()
+			forkChoice.WakePendingEnvelopeRetry()
 		}
 	}()
 	for {
@@ -101,7 +101,7 @@ func waitForNextSlotOrHeadChange(
 			return sleepForSlotWake{}, false, nil
 		case <-tick:
 			if columnWakeUnserved {
-				forkChoice.RearmPendingEnvelopeRetryWake()
+				forkChoice.WakePendingEnvelopeRetry()
 			}
 			columnWake = columnsStored
 		case <-columnWake:
@@ -117,7 +117,7 @@ func waitForNextSlotOrHeadChange(
 			if err := ctx.Err(); err != nil {
 				return sleepForSlotWake{}, false, err
 			}
-			if !forkChoice.PrunePendingEnvelopeRetryRoots(columnFloor) {
+			if !forkChoice.HasAttemptablePendingEnvelope(columnFloor) {
 				columnWakeUnserved = false
 				continue
 			}

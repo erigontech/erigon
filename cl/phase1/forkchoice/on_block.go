@@ -746,12 +746,22 @@ const (
 // waits for the next chain tip sync, and the next proposer builds on the empty parent. Column storage probes and
 // application attempts are rate-limited per envelope, so this is cheap to poll.
 func (f *ForkChoiceStore) RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx context.Context, minSlot uint64) {
+	f.retryPendingEnvelopesFrom(ctx, minSlot, false)
+}
+
+// RetryPendingExecutionPayloadEnvelopesOnColumnsStored retries the queued envelopes at or after minSlot after a
+// column store, without waiting out the probe interval.
+func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopesOnColumnsStored(ctx context.Context, minSlot uint64) {
+	f.retryPendingEnvelopesFrom(ctx, minSlot, true)
+}
+
+func (f *ForkChoiceStore) retryPendingEnvelopesFrom(ctx context.Context, minSlot uint64, ignoreProbe bool) {
 	for _, root := range f.pendingEnvelopes.Keys() {
 		if ctx.Err() != nil {
 			return
 		}
 		if block, ok := f.blockFrom(root, minSlot); ok {
-			f.retryPendingEnvelopeWhenDue(ctx, root, block, false)
+			f.retryPendingEnvelopeWhenDue(ctx, root, block, ignoreProbe)
 		}
 	}
 }
@@ -768,16 +778,19 @@ func (f *ForkChoiceStore) PendingEnvelopeRetryWake() <-chan struct{} {
 	return f.emitters.PendingEnvelopeRetryWake()
 }
 
-// PrunePendingEnvelopeRetryRoots drops the reported roots that a retry from minSlot could not attempt now and reports
-// whether any is left. It books and applies nothing.
-func (f *ForkChoiceStore) PrunePendingEnvelopeRetryRoots(minSlot uint64) bool {
-	return f.emitters.PrunePendingEnvelopeRetryRoots(func(root common.Hash) bool {
-		if !f.pendingEnvelopes.Contains(root) {
-			return false
+func (f *ForkChoiceStore) WakePendingEnvelopeRetry() {
+	f.emitters.WakePendingEnvelopeRetry()
+}
+
+// HasAttemptablePendingEnvelope reports whether a retry from minSlot could attempt a queued envelope now. It books
+// and applies nothing.
+func (f *ForkChoiceStore) HasAttemptablePendingEnvelope(minSlot uint64) bool {
+	for _, root := range f.pendingEnvelopes.Keys() {
+		if block, ok := f.blockFrom(root, minSlot); ok && !f.pendingEnvelopeAttemptBooked(root) && f.envelopeColumnsAvailable(root, block) {
+			return true
 		}
-		block, ok := f.blockFrom(root, minSlot)
-		return ok && !f.pendingEnvelopeAttemptBooked(root) && f.envelopeColumnsAvailable(root, block)
-	})
+	}
+	return false
 }
 
 func (f *ForkChoiceStore) pendingEnvelopeAttemptBooked(root common.Hash) bool {
@@ -796,26 +809,6 @@ func (f *ForkChoiceStore) envelopeColumnsAvailable(root common.Hash, block *clty
 	}
 	available, err := f.peerDas.IsDataAvailable(block.Block.Slot, root)
 	return err == nil && available
-}
-
-func (f *ForkChoiceStore) RearmPendingEnvelopeRetryWake() {
-	f.emitters.RearmPendingEnvelopeRetryWake()
-}
-
-// RetryPendingExecutionPayloadEnvelopesOnColumnsStored retries, at or after minSlot, the queued envelopes whose
-// columns were reported stored since the last call, without waiting out the probe interval.
-func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopesOnColumnsStored(ctx context.Context, minSlot uint64) {
-	for _, root := range f.emitters.TakePendingEnvelopeRetryRoots() {
-		if ctx.Err() != nil {
-			return
-		}
-		if !f.pendingEnvelopes.Contains(root) {
-			continue
-		}
-		if block, ok := f.blockFrom(root, minSlot); ok {
-			f.retryPendingEnvelopeWhenDue(ctx, root, block, true)
-		}
-	}
 }
 
 // retryPendingEnvelopeWhenDue applies the envelope queued for root when its pacing allows and its

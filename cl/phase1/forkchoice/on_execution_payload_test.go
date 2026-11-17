@@ -1079,7 +1079,6 @@ func TestOnExecutionPayloadWakesRetryWhenParkingForColumns(t *testing.T) {
 	wake := f.PendingEnvelopeRetryWake()
 
 	require.Len(t, wake, 1, "parking for missing columns wakes the retry")
-	require.Contains(t, f.emitters.TakePendingEnvelopeRetryRoots(), common.Hash(blockRoot))
 	<-wake
 
 	f.RetryPendingExecutionPayloadEnvelopes(t.Context(), 1)
@@ -1120,11 +1119,9 @@ func TestRetryPendingExecutionPayloadEnvelopesOnColumnsStoredIgnoresProbeBooking
 	f.RetryDataAvailablePendingExecutionPayloadEnvelopes(t.Context(), block.Block.Slot) // books a probe
 
 	*available = true
-	f.emitters.WakePendingEnvelopeRetry(blockRoot)
 	f.RetryPendingExecutionPayloadEnvelopesOnColumnsStored(t.Context(), block.Block.Slot+1)
 	require.True(t, f.pendingEnvelopes.Contains(blockRoot), "blocks before minSlot are left to the poll")
 
-	f.emitters.WakePendingEnvelopeRetry(blockRoot)
 	f.RetryPendingExecutionPayloadEnvelopesOnColumnsStored(t.Context(), block.Block.Slot)
 	require.False(t, f.pendingEnvelopes.Contains(blockRoot))
 	require.True(t, graph.HasEnvelope(blockRoot))
@@ -1141,7 +1138,6 @@ func TestRetryPendingExecutionPayloadEnvelopesOnColumnsStoredHonoursAttemptBooki
 	require.True(t, f.pendingEnvelopes.Contains(blockRoot), "a storage failure keeps the envelope queued")
 	attemptProbes := *probes
 
-	f.emitters.WakePendingEnvelopeRetry(blockRoot)
 	f.RetryPendingExecutionPayloadEnvelopesOnColumnsStored(t.Context(), block.Block.Slot)
 	require.True(t, f.pendingEnvelopes.Contains(blockRoot))
 	require.Equal(t, attemptProbes, *probes, "a column wake must not probe or repeat a failed attempt")
