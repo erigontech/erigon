@@ -66,12 +66,16 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *ty
 	if err != nil {
 		return nil, err
 	}
-
-	commitmentHistoryEnabled, err := api.commitmentHistoryEnabled(tx)
+	opts, err := api.receiptsOpts(tx)
 	if err != nil {
 		return nil, err
 	}
-	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled})
+	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, opts)
+}
+
+func (api *BaseAPI) receiptsOpts(tx kv.TemporalTx) (eth.ReceiptsOpts, error) {
+	commitmentHistoryEnabled, err := api.commitmentHistoryEnabled(tx)
+	return eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled}, err
 }
 
 func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *receipts.PostStateInfo) (*types.Receipt, error) {
@@ -545,11 +549,10 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if err != nil {
 		return nil, err
 	}
-	commitmentHistoryEnabled, err := api.commitmentHistoryEnabled(tx)
+	opts, err := api.receiptsOpts(tx)
 	if err != nil {
 		return nil, err
 	}
-	opts := eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled}
 	var prefetch *receipts.ReceiptsPrefetch
 	if !api.remoteBlocks {
 		prefetch = api.receiptsGenerator.PrefetchReceipts(ctx, chainConfig, api.db, blockNum, blockHash, opts)
@@ -563,8 +566,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if block == nil {
 		return nil, nil
 	}
-	opts.ReadCached = prefetch.Receipts
-	receipts, err := api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, opts)
+	receipts, err := api.receiptsGenerator.GetReceiptsPrefetched(ctx, chainConfig, tx, block, opts, prefetch)
 	if err != nil {
 		return nil, err
 	}

@@ -75,8 +75,8 @@ func TestPrefetchReceiptsServesAnOverlayBlock(t *testing.T) {
 }
 
 // TestGetBlockReceiptsOnRemoteBlockReaderOpensOneReadTx pins that eth_getBlockReceipts does not
-// prefetch on an rpcdaemon without --datadir: its remote DB waits for a read slot whatever the ctx
-// asks, while the request already holds one.
+// prefetch on an rpcdaemon without --datadir, where the prefetch could wait for a read slot while
+// the request holds one.
 func TestGetBlockReceiptsOnRemoteBlockReaderOpensOneReadTx(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = false

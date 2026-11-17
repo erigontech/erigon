@@ -97,6 +97,43 @@ func TestPrefetchReceiptsMatchesPersistedReceipts(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+// rcacheSeekCountingTx counts the RCache reads made on the request tx.
+type rcacheSeekCountingTx struct {
+	kv.TemporalTx
+	seeks int
+}
+
+func (tx *rcacheSeekCountingTx) HistorySeek(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	if domain == kv.RCacheDomain {
+		tx.seeks++
+	}
+	return tx.TemporalTx.HistorySeek(domain, key, ts)
+}
+
+// TestGetReceiptsPrefetchedServesThePrefetch pins that GetReceiptsPrefetched answers with the
+// prefetched receipts and does not read them again on the request tx.
+func TestGetReceiptsPrefetchedServesThePrefetch(t *testing.T) {
+	servePersistedReceipts(t)
+	m := mockForPrefetch(t, prefetchTestTxs)
+	gen := newPrefetchGenerator(m, shards.NewEvents())
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	block := readBlock(t, m, tx, 1)
+	want, err := rawdb.ReadReceiptsCacheV2(tx, block, m.BlockReader.TxnumReader())
+	require.NoError(t, err)
+	require.Len(t, want, prefetchTestTxs)
+
+	p := gen.PrefetchReceipts(m.Ctx, m.ChainConfig, m.DB, 1, block.Hash(), eth.ReceiptsOpts{})
+	defer p.Close()
+	requestTx := &rcacheSeekCountingTx{TemporalTx: tx}
+	got, err := gen.GetReceiptsPrefetched(m.Ctx, m.ChainConfig, requestTx, block, eth.ReceiptsOpts{}, p)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+	require.Zero(t, requestTx.seeks)
+}
+
 type fullReadTxLimiterDB struct {
 	kv.TemporalRoDB
 	nonBlocking []bool
@@ -333,7 +370,7 @@ func TestPrefetchReceiptsLeavesReExecutionUnchanged(t *testing.T) {
 	gen := newPrefetchGenerator(noCache, shards.NewEvents())
 	p := gen.PrefetchReceipts(noCache.Ctx, noCache.ChainConfig, noCache.DB, 1, block.Hash(), eth.ReceiptsOpts{})
 	defer p.Close()
-	got, err := gen.GetReceipts(noCache.Ctx, noCache.ChainConfig, tx, block, eth.ReceiptsOpts{ReadCached: p.Receipts})
+	got, err := gen.GetReceiptsPrefetched(noCache.Ctx, noCache.ChainConfig, tx, block, eth.ReceiptsOpts{}, p)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 }

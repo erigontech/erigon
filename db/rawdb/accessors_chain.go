@@ -1341,9 +1341,7 @@ func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, 
 	return res, true, nil
 }
 
-func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
-	blockHash := block.Hash()
-	blockNum := block.NumberU64()
+func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdbv3.TxNumsReader) (types.Receipts, error) {
 	transactions := block.Transactions()
 	// Hashing the transactions overlaps with reading the receipts.
 	hashed := make(chan struct{})
@@ -1355,50 +1353,15 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	}()
 	defer func() { <-hashed }()
 
-	minTxNum, err := txNumReader.Min(context.Background(), tx, blockNum)
-	if err != nil {
-		return
-	}
-	maxTxNum, err := txNumReader.Max(context.Background(), tx, blockNum)
-	if err != nil {
-		return
-	}
-
-	receiptIdx := 0
-	for txNum := minTxNum; txNum < maxTxNum+1; txNum++ {
-		v, ok, err := tx.HistorySeek(kv.RCacheDomain, rawtemporaldb.ReceiptCacheKey, txNum+1)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-		if len(v) == 0 {
-			continue
-		}
-
-		// Convert the receipts from their storage form to their internal representation
-		receipt := &types.ReceiptForStorage{}
-		if err := rlp.DecodeBytes(v, receipt); err != nil {
-			return nil, fmt.Errorf("ReadReceiptsCacheV2: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
-		}
-		x := (*types.Receipt)(receipt)
-		txnIdx := int(receipt.TransactionIndex)
-		if txnIdx < 0 || txnIdx != receiptIdx || txnIdx >= len(transactions) {
-			// RCacheV2 is read in txNum order. The stored transaction index must
-			// match the next receipt position, otherwise derive the block instead.
-			return nil, nil
-		}
-		res = append(res, x)
-		receiptIdx++
-	}
-	if receiptIdx != len(transactions) {
+	res, err := ReadBlockReceiptsCacheV2(context.Background(), tx, block.NumberU64(), txNumReader)
+	if err != nil || len(res) != len(transactions) {
 		// Block receipt RPCs require the full ordered receipt set.
-		return nil, nil
+		return nil, err
 	}
 	<-hashed
+	blockHash, blockNum := block.Hash(), block.NumberU64()
 	for i, x := range res {
-		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, transactions[i].Hash(), true)
+		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, transactions[i].Hash(), false)
 	}
 	return res, nil
 }

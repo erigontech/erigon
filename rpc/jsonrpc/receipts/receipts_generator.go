@@ -501,7 +501,12 @@ func PostStateCalculated(cfg *chain.Config, blockNum uint64, commitmentHistoryEn
 	return observed && frozen == 0
 }
 
-func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (_ types.Receipts, err error) {
+func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (types.Receipts, error) {
+	return g.GetReceiptsPrefetched(ctx, cfg, tx, block, opts, nil)
+}
+
+// GetReceiptsPrefetched is GetReceipts that takes the persisted receipts from prefetch when it has them.
+func (g *Generator) GetReceiptsPrefetched(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts, prefetch *ReceiptsPrefetch) (_ types.Receipts, err error) {
 	tx = g.filters.WithTemporalOverlay(tx)
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
@@ -542,9 +547,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	// If/when receipts are saved to the DB *with* the `postState` field,
 	// this check on `calculatePostState` should be removed to utilize the stored receipt.
 	if !rpcDisableRCache && !calculatePostState {
-		if opts.ReadCached != nil {
-			receiptsFromDB = opts.ReadCached(block)
-		}
+		receiptsFromDB = prefetch.Receipts(block)
 		if len(receiptsFromDB) == 0 {
 			receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
 		}

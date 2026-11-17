@@ -174,7 +174,8 @@ type BaseAPI struct {
 
 	_blockReader dbservices.FullBlockReader
 	// remoteBlocks is set when block lookups go to the backend over gRPC (rpcdaemon without
-	// --datadir): each one opens a backend read tx.
+	// --datadir): each one opens a backend read tx, and the remote DB waits for a read slot even
+	// under kv.WithNonBlockingAcquire.
 	remoteBlocks bool
 	_txNumReader rawdbv3.TxNumsReader
 	_txnReader   dbservices.TxnReader
