@@ -887,18 +887,8 @@ func TestComputeAhead_WindowStepBoundaryCheckpointMidBlock(t *testing.T) {
 			blockNum: 2, blockHash: blockHash, firstTxNum: firstTxNum, lastTxNum: lastTxNum,
 			stateRoot: stateRoot, bal: bList,
 		})
-		if balDriven {
-			require.Equal(t, beforeAhead+1, ComputedAheadCountForTest())
-			require.Equal(t, stateRoot[:], cc.balRoots[2])
-			require.Equal(t, uint64(2), cc.lastComputedBlock)
-			aheadUpdate := doms.GetCommitmentContext().PeekPendingUpdate()
-			require.NotNil(t, aheadUpdate)
-			require.Equal(t, lastTxNum, aheadUpdate.TxNum)
-			require.Empty(t, out)
-		} else {
-			require.Equal(t, beforeAhead, ComputedAheadCountForTest())
-			require.Zero(t, cc.lastComputedBlock)
-		}
+		require.Equal(t, beforeAhead, ComputedAheadCountForTest())
+		require.Zero(t, cc.lastComputedBlock)
 
 		for _, write := range writes {
 			cc.handleMessage(ctx, recordTx(vm, 2, blockHash, write.num, &chain.Rules{}, nonceBalanceWrites(write.addr, write.num, write.value)))
@@ -960,6 +950,7 @@ func TestComputeAhead_WindowBlock(t *testing.T) {
 		db, tx, doms := setupStepTest(t)
 		doms.SetDeferCommitmentUpdates(true)
 		ownCS := &changeset.StateChangeSet{}
+		staleCS := &changeset.StateChangeSet{}
 		cc, out := newAheadCalculator(t, doms, db, 1)
 
 		acc := accounts.Account{Nonce: 0, Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
@@ -967,6 +958,8 @@ func TestComputeAhead_WindowBlock(t *testing.T) {
 		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&acc), 1, nil))
 		req := &blockRequest{blockNum: 1, blockHash: blockHash, firstTxNum: 1, lastTxNum: 1, stateRoot: stateRoot, bal: bal}
 		if foldAhead {
+			// An execution of the same block before an in-memory unwind left its changeset.
+			doms.SavePastChangesetAccumulator(blockHash, 1, staleCS)
 			cc.handleBlockRequest(ctx, req)
 			require.Empty(t, cc.computedAhead)
 			doms.SavePastChangesetAccumulator(blockHash, 1, ownCS)
@@ -1002,6 +995,7 @@ func TestComputeAhead_WindowBlock(t *testing.T) {
 			require.Empty(t, out)
 		}
 		require.NoError(t, doms.FlushPendingUpdates(tx))
+		require.Empty(t, staleCS.Diffs[kv.CommitmentDomain].GetDiffSet())
 		return root, ownCS.Diffs[kv.CommitmentDomain].GetDiffSet()
 	}
 
@@ -1069,27 +1063,25 @@ func TestComputeAhead_WindowBlocksWaitForPreviousResult(t *testing.T) {
 	cc, out := newAheadCalculator(t, doms, db, 1)
 
 	cc.handleBlockRequest(ctx, &blockRequest{blockNum: 1, blockHash: hashes[0], firstTxNum: 1, lastTxNum: 1, stateRoot: common.BytesToHash(roots[0]), bal: bals[0]})
-	require.True(t, cc.computedAhead[1])
 	cc.handleBlockRequest(ctx, &blockRequest{blockNum: 2, blockHash: hashes[1], firstTxNum: 2, lastTxNum: 2, stateRoot: common.BytesToHash(roots[1]), bal: bals[1]})
-	require.False(t, cc.computedAhead[2])
+	cc.pending[2].txSeen = true
 	cc.hasSeenBlockResult = true
 	cc.lastBlockResultSeen = 1
-	cc.hasComputed = false
-	cc.lastComputedBlock = 0
 	cc.maybeComputeAhead(ctx, 2)
 	require.False(t, cc.computedAhead[2])
+	cc.pending[2].txSeen = false
 	cc.hasSeenBlockResult = false
-	cc.hasComputed = true
-	cc.lastComputedBlock = 1
 	require.Empty(t, out)
 
 	cc.handleMessage(ctx, recordTx(newRawViewVM(1), 1, hashes[0], 1, &chain.Rules{}, nonceBalanceWrites(addrs[0], 1, values[0])))
+	require.True(t, cc.computedAhead[1])
 	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: hashes[0], StateRoot: common.BytesToHash(roots[0]), lastTxNum: 1})
+	require.False(t, cc.computedAhead[2])
+	cc.handleMessage(ctx, recordTx(newRawViewVM(2), 2, hashes[1], 2, &chain.Rules{}, nonceBalanceWrites(addrs[1], 2, values[1])))
 	require.True(t, cc.computedAhead[2])
 	require.Equal(t, roots[1], cc.balRoots[2])
 	require.Empty(t, out)
 
-	cc.handleMessage(ctx, recordTx(newRawViewVM(2), 2, hashes[1], 2, &chain.Rules{}, nonceBalanceWrites(addrs[1], 2, values[1])))
 	cc.handleMessage(ctx, &blockResult{BlockNum: 2, BlockHash: hashes[1], StateRoot: common.BytesToHash(roots[1]), lastTxNum: 2})
 	require.Equal(t, uint64(2), cc.lastComputedBlock)
 	require.Empty(t, out)
@@ -1166,9 +1158,10 @@ func TestComputeAhead_WindowWrongRootPublishedOnce(t *testing.T) {
 			NonceChanges:   []*types.NonceChange{{Index: 0, Value: 1}},
 		}},
 	})
+	require.Empty(t, out)
+	cc.handleMessage(ctx, recordTx(newRawViewVM(1), 1, blockHash, 1, &chain.Rules{IsAmsterdam: true}, nonceBalanceWrites(addr, 1, value)))
 	require.Len(t, out, 1)
 	require.Nil(t, doms.GetCommitmentContext().PeekPendingUpdate())
-	cc.handleMessage(ctx, recordTx(newRawViewVM(1), 1, blockHash, 1, &chain.Rules{IsAmsterdam: true}, nonceBalanceWrites(addr, 1, value)))
 	cc.handleMessage(ctx, recordTx(newRawViewVM(1), 1, blockHash, 1, &chain.Rules{IsAmsterdam: true}, nonceBalanceWrites(addr, 1, value)))
 	cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: blockHash, StateRoot: common.Hash{0xbe, 0xef}, lastTxNum: 1})
 	require.Len(t, out, 1)
@@ -1208,14 +1201,14 @@ func TestComputeAhead_WindowFailureAtEdgePublishedOnce(t *testing.T) {
 			require.True(t, cc.pending[1].failed)
 			require.Len(t, out, 1)
 			require.ErrorContains(t, (<-out).err, "step-checkpoint")
-
-			cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: blockHash, StateRoot: common.Hash{0xbe, 0xef}, lastTxNum: 17})
-			require.Empty(t, out)
 			if pendingBlock == 1 {
 				require.Nil(t, doms.GetCommitmentContext().PeekPendingUpdate())
 			} else {
 				require.Same(t, pending, doms.GetCommitmentContext().PeekPendingUpdate())
 			}
+
+			cc.handleMessage(ctx, &blockResult{BlockNum: 1, BlockHash: blockHash, StateRoot: common.Hash{0xbe, 0xef}, lastTxNum: 17})
+			require.Empty(t, out)
 		})
 	}
 }

@@ -48,6 +48,9 @@ type pendingBlock struct {
 	req    *blockRequest
 	mode   calcMode
 	failed bool
+	// txSeen: the exec loop saves this execution's changeset before the block's
+	// first txResult, replacing one an earlier execution left under the same hash.
+	txSeen bool
 }
 
 // computedAheadCount counts BAL compute-ahead computations across all calculators;
@@ -422,8 +425,12 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				base = cc.blockBase
 			}
 		}
+		pb := cc.pending[r.blockNum]
+		if pb != nil {
+			pb.txSeen = true
+		}
 		cc.maybeComputeAhead(ctx, r.blockNum)
-		if pb, ok := cc.pending[r.blockNum]; ok && pb.failed {
+		if pb != nil && pb.failed {
 			return
 		}
 		if r.writes != nil && !r.writes.IsEmpty() {
@@ -449,9 +456,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 
 	case *blockResult:
 		if pb, ok := cc.pending[r.BlockNum]; (ok && pb.failed) || (r.Err != nil && cc.computedAhead[r.BlockNum]) {
-			if upd := cc.doms.GetCommitmentContext().PeekPendingUpdate(); upd != nil && upd.BlockNum == r.BlockNum {
-				cc.doms.GetCommitmentContext().ResetPendingUpdates()
-			}
+			cc.dropPendingUpdate(r.BlockNum)
 			cc.forgetBlock(r.BlockNum)
 			cc.clearTouched()
 			return
@@ -574,6 +579,12 @@ func (cc *commitmentCalculator) computeAheadGateOpen(n uint64) bool {
 	return cc.hasSeenBlockResult && cc.lastBlockResultSeen+1 >= n
 }
 
+func (cc *commitmentCalculator) dropPendingUpdate(n uint64) {
+	if upd := cc.doms.GetCommitmentContext().PeekPendingUpdate(); upd != nil && upd.BlockNum == n {
+		cc.doms.GetCommitmentContext().ResetPendingUpdates()
+	}
+}
+
 func (cc *commitmentCalculator) forgetBlock(n uint64) {
 	delete(cc.pending, n)
 	delete(cc.computedAhead, n)
@@ -597,7 +608,7 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 		return
 	}
 	if cc.ownsChangeset(n) {
-		if cc.branchPrefetch == nil || cc.doms.GetChangesetByHash(n, pb.req.blockHash) == nil || dbg.BALShadowCompute || commitmentdb.ParentReadsWanted() {
+		if cc.branchPrefetch == nil || !pb.txSeen || cc.doms.GetChangesetByHash(n, pb.req.blockHash) == nil || dbg.BALShadowCompute || commitmentdb.ParentReadsWanted() {
 			return
 		}
 		if n != cc.firstBlockNum && !(cc.hasComputed && cc.lastComputedBlock == n-1) {
@@ -623,6 +634,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	}
 	fail := func(err error) {
 		pb.failed = true
+		cc.dropPendingUpdate(req.blockNum)
 		cc.fail(ctx, br, err)
 	}
 	vm := state.NewVersionMap(req.bal)
