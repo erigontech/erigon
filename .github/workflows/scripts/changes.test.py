@@ -65,6 +65,11 @@ class ChangesTest(unittest.TestCase):
         self.commit_file("docs/site/docs/intro.md")
         self.assertEqual(self.detect(), {"code": "false", "docs_site": "true"})
 
+    def test_non_ascii_docs_path(self):
+        self.git("config", "core.quotePath", "true")
+        self.commit_file("docs/site/docs/café.md")
+        self.assertEqual(self.detect(), {"code": "false", "docs_site": "true"})
+
     def test_docs_outside_site(self):
         for name in ("docs/design.md", "README.md", "llms-full.txt"):
             self.commit_file(name)
