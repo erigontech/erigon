@@ -675,14 +675,6 @@ func (q *QueueWithRetry) RetriesLen() (l int) {
 	return l
 }
 
-func (q *QueueWithRetry) RetryTxNumsList() (out []uint64) {
-	q.lock.Lock()
-	for _, t := range q.retires {
-		out = append(out, t.Version().TxNum)
-	}
-	q.lock.Unlock()
-	return out
-}
 func (q *QueueWithRetry) Len() (l int) { return q.RetriesLen() + q.NewTasksLen() }
 
 // Add "new task" (which was never executed yet). May block if internal channel is full.
@@ -699,26 +691,6 @@ func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
 			return
 		case newTasks <- t:
 		}
-	}
-}
-
-// TryAdd attempts to add a task without blocking. Returns true if the task was
-// enqueued, false if the channel is full or the queue is closed.
-func (q *QueueWithRetry) TryAdd(t Task) bool {
-	q.lock.Lock()
-	closed := q.closed
-	newTasks := q.newTasks
-	q.lock.Unlock()
-
-	if closed {
-		return false
-	}
-
-	select {
-	case newTasks <- t:
-		return true
-	default:
-		return false
 	}
 }
 
@@ -750,24 +722,9 @@ func (q *QueueWithRetry) Next(ctx context.Context) (Task, bool) {
 }
 
 func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
-	q.lock.Lock()
-	newTasks := q.newTasks
-	q.lock.Unlock()
-
-	if newTasks == nil {
-		return q.popNoWait()
-	}
-
 	for {
-		q.lock.Lock()
-		newTasks := q.newTasks
-		q.lock.Unlock()
-		if newTasks == nil {
-			return q.popNoWait()
-		}
-
 		select {
-		case inTask, ok := <-newTasks:
+		case inTask, ok := <-q.newTasks:
 			if !ok {
 				return q.popNoWait()
 			}
@@ -825,10 +782,7 @@ func (q *QueueWithRetry) Close() {
 		return
 	}
 	q.closed = true
-	if q.newTasks != nil {
-		newTasks := q.newTasks
-		close(newTasks)
-	}
+	close(q.newTasks)
 }
 
 // ResultsQueue thread-safe priority-queue of execution results
