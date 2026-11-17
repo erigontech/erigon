@@ -1142,6 +1142,9 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
+	if contents == nil {
+		a.emitters.NotifyEnvelopeArrived(signedEnvelope.Message.BeaconBlockRoot)
+	}
 	if validation == BlockPublishingValidationConsensusAndEquivocation {
 		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
 		if !ok || block == nil || block.Block == nil {
