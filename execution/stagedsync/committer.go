@@ -184,14 +184,6 @@ type commitmentCalculator struct {
 	computedAhead map[uint64]bool
 	balRoots      map[uint64][]byte
 
-	// lastComputedAheadBlock is the highest block computed ahead so far.
-	// Compute-ahead reads the commitment domain for its baseline, so it may only
-	// run when the preceding block's commitment is already in the domain (or the
-	// block is the batch's first) — otherwise it would read a stale trie
-	// across a block whose BAL sidecar was missing.
-	lastComputedAheadBlock uint64
-	hasComputedAhead       bool
-
 	// signalCtx carries the stopCause; the calculator reads it (never its own
 	// compute ctx) to cap compute-ahead at the batch's coalesce block, so a
 	// clean-stop cancel never aborts an in-flight commitment.
@@ -611,10 +603,8 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 		if cc.branchPrefetch == nil || !pb.txSeen || cc.doms.GetChangesetByHash(n, pb.req.blockHash) == nil || dbg.BALShadowCompute || commitmentdb.ParentReadsWanted() {
 			return
 		}
-		if n != cc.firstBlockNum && !(cc.hasComputed && cc.lastComputedBlock == n-1) {
-			return
-		}
-	} else if n != cc.firstBlockNum && !(cc.hasComputedAhead && cc.lastComputedAheadBlock == n-1) {
+	}
+	if n != cc.firstBlockNum && !(cc.hasComputed && cc.lastComputedBlock == n-1) {
 		return
 	}
 	cc.computeBlockFromBAL(ctx, pb)
@@ -678,8 +668,6 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 	}
 	cc.computedAhead[req.blockNum] = true
 	cc.balRoots[req.blockNum] = rh
-	cc.lastComputedAheadBlock = req.blockNum
-	cc.hasComputedAhead = true
 	computedAheadCount.Add(1)
 	cc.lastComputedBlock = req.blockNum
 	cc.hasComputed = true
