@@ -70,6 +70,8 @@ func (et *EngineTest) RunCLI() error {
 }
 
 func (et *EngineTest) deliver(m *execmoduletester.ExecModuleTester) error {
+	// Forkchoice work outlives its response; drain it before the tester closes.
+	defer m.ExecModule.Drain()
 	// With no peers, a payload whose parent is unknown is answered SYNCING.
 	noPeers := p2p.NewBackwardBlockDownloader(m.Log, nil, p2p.NewPeerTracker(m.Log, nil), m.Dirs.Tmp)
 	srv := engineapi.NewEngineServer(
@@ -106,7 +108,6 @@ func (et *EngineTest) deliver(m *execmoduletester.ExecModuleTester) error {
 			return fmt.Errorf("payload %d: %w", i, err)
 		}
 	}
-	m.ExecModule.WaitIdle(m.Ctx)
 	return nil
 }
 
