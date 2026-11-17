@@ -502,13 +502,14 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 			if isCanonical && !m.ChainConfig.IsByzantium(cb.NumberU64()) {
 				// Staged execution does not retain the per-transaction post-state roots needed
 				// for legacy receipt tries, so use the slower receipt generator to reconstruct them.
-				receiptsErr, err := bt.validatePreByzantiumReceipts(m, cb)
+				receiptHash, err := bt.preByzantiumReceiptHash(m, cb)
 				if err != nil {
 					return nil, err
 				}
-				if receiptsErr != nil {
+				if receiptHash != cb.ReceiptHash() {
 					hash := cb.Hash()
-					bt.Reject(bi, &hash, receiptsErr.Error())
+					bt.Reject(bi, &hash, fmt.Sprintf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
+						receiptHash, cb.ReceiptHash(), cb.NumberU64(), hash))
 					if err := restoreForkChoice(m, previousHead.Hash()); err != nil {
 						return nil, err
 					}
@@ -529,23 +530,17 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 	return validBlocks, nil
 }
 
-// validatePreByzantiumReceipts returns the receipt root mismatch as invalid,
-// or nil if the root matches.
-func (bt *BlockTest) validatePreByzantiumReceipts(m *execmoduletester.ExecModuleTester, block *types.Block) (invalid error, err error) {
+func (bt *BlockTest) preByzantiumReceiptHash(m *execmoduletester.ExecModuleTester, block *types.Block) (common.Hash, error) {
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	if err != nil {
-		return nil, err
+		return common.Hash{}, err
 	}
 	defer tx.Rollback()
 	receipts, err := m.ReceiptsReader.GetReceipts(m.Ctx, m.ChainConfig, tx, block, eth.ReceiptsOpts{})
 	if err != nil {
-		return nil, err
+		return common.Hash{}, err
 	}
-	if receiptHash := types.DeriveSha(receipts); receiptHash != block.ReceiptHash() {
-		return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
-			receiptHash, block.ReceiptHash(), block.NumberU64(), block.Hash()), nil
-	}
-	return nil, nil
+	return types.DeriveSha(receipts), nil
 }
 
 func restoreForkChoice(m *execmoduletester.ExecModuleTester, headHash common.Hash) error {
