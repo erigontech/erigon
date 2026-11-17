@@ -12,7 +12,7 @@ Use [Ponytail](https://github.com/DietrichGebert/ponytail) for coding tasks to k
 
 Explicit task requirements and Erigon's guidelines take precedence, including TDD, test coverage, and comment rules. Keep downloaded files and personal settings out of commits.
 
-Build: `make erigon`, `make gen`
+Build: `make erigon`. Regenerate code: `make gen`.
 
 ### Local verification
 
@@ -24,7 +24,7 @@ Before committing, pushing, or opening/updating a PR, select checks for the chan
 - **Broad changes or linter configuration/rules:** run `make lintci` for full repository lint and the module check
 - **Documentation-only changes (no `.go` files):** check the diff and relevant links or document tooling; Go lint and builds are not required.
 
-`make lint`, `make test-short`
+`make lint`, `make test-short`. Run affected long tests without `-short`.
 
 ## Architecture Overview
 
