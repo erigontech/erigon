@@ -194,6 +194,43 @@ func TestFlush(t *testing.T) {
 	require.Equal(t, value, []byte("value5"))
 }
 
+func TestFlushDeletionMarkers(t *testing.T) {
+	for _, useDiff := range []bool{false, true} {
+		t.Run(fmt.Sprintf("diff=%t", useDiff), func(t *testing.T) {
+			_, tx := newTestTx(t)
+			require.NoError(t, tx.Put(kv.HeaderNumber, []byte("deleted"), []byte("old")))
+			require.NoError(t, tx.Put(kv.HeaderNumber, []byte("kept"), []byte("old")))
+			require.NoError(t, tx.Put(kv.Headers, []byte("cleared"), []byte("old")))
+			batch, err := membatchwithdb.NewMemoryBatch(tx)
+			require.NoError(t, err)
+			defer batch.Close()
+			require.NoError(t, batch.Delete(kv.HeaderNumber, []byte("deleted")))
+			require.NoError(t, batch.ClearTable(kv.Headers))
+			require.NoError(t, batch.Put(kv.Headers, []byte("written"), []byte("new")))
+			if useDiff {
+				diff, err := batch.Diff()
+				require.NoError(t, err)
+				require.NoError(t, diff.Flush(tx))
+			} else {
+				require.NoError(t, batch.Flush(t.Context(), tx))
+			}
+			for _, row := range []struct {
+				table, key string
+				value      []byte
+			}{
+				{kv.HeaderNumber, "deleted", nil},
+				{kv.HeaderNumber, "kept", []byte("old")},
+				{kv.Headers, "cleared", nil},
+				{kv.Headers, "written", []byte("new")},
+			} {
+				got, err := tx.GetOne(row.table, []byte(row.key))
+				require.NoError(t, err)
+				require.Equal(t, row.value, got, "%s/%s", row.table, row.key)
+			}
+		})
+	}
+}
+
 // TestFlushAppendPath exercises the Append fast-path used when all in-memory
 // keys are strictly greater than the destination's existing max. This is the
 // common shape for canonical FCU advance.
@@ -1104,6 +1141,37 @@ func TestMemoryMutationConcurrentClearAndCursorRead(t *testing.T) {
 	for range 500 {
 		_, _, err := cursor.Seek(nil)
 		require.NoError(t, err)
+	}
+}
+
+func TestMemoryMutationConcurrentMarkersInOtherTables(t *testing.T) {
+	_, tx := newTestTx(t)
+	key, value := []byte("key"), []byte("value")
+	require.NoError(t, tx.Put(kv.HeaderNumber, key, value))
+	batch, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer batch.Close()
+	reader, err := batch.NewReadView(tx).Cursor(kv.HeaderNumber)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() {
+		for _, table := range kv.ChaindataTables {
+			if table == kv.HeaderNumber {
+				continue
+			}
+			if err := batch.Delete(table, key); err != nil {
+				t.Errorf("writer: Delete: %v", err)
+				return
+			}
+		}
+	})
+	for range 1000 {
+		_, got, err := reader.SeekExact(key)
+		require.NoError(t, err)
+		require.Equal(t, value, got)
 	}
 }
 

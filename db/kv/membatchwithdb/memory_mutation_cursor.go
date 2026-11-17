@@ -44,41 +44,36 @@ type memoryMutationCursor struct {
 	memCursor kv.RwCursorDupSort
 	// we keep the mining mutation so that we can insert new elements in db
 	mutation        *MemoryMutation
+	deletions       *tableDeletions
+	deletionTables  *map[string]*tableDeletions
 	table           string
 	currentPair     cursorEntry
 	currentDbEntry  cursorEntry
 	currentMemEntry cursorEntry
 	isPrevFromDb    bool
 	pureDupSort     bool
-	marked          bool
 }
 
-func (m *memoryMutationCursor) hasMarkers() bool {
-	if !m.marked {
-		_, m.marked = m.mutation.markedTables.Load(m.table)
+func (m *memoryMutationCursor) tableDeletions() *tableDeletions {
+	if m.deletions == nil {
+		tables := m.mutation.deletions.Load()
+		if tables != nil && tables != m.deletionTables {
+			m.deletionTables = tables
+			m.deletions = (*tables)[m.table]
+		}
 	}
-	return m.marked
+	return m.deletions
 }
 
 func (m *memoryMutationCursor) isTableCleared() bool {
-	if !m.hasMarkers() {
-		return false
-	}
-	m.mutation.mu.RLock()
-	defer m.mutation.mu.RUnlock()
-	return m.mutation.isTableCleared(m.table)
+	return m.tableDeletions().isTableCleared()
 }
 
 func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte) bool {
-	if !m.hasMarkers() {
-		return false
-	}
-	m.mutation.mu.RLock()
-	defer m.mutation.mu.RUnlock()
 	if m.pureDupSort {
-		return m.mutation.isDupDeleted(m.table, key, value)
+		return m.tableDeletions().isDupDeleted(key, value)
 	}
-	return m.mutation.isEntryDeleted(m.table, key)
+	return m.tableDeletions().isEntryDeleted(key)
 }
 
 // First move cursor to first position and return key and value accordingly.
