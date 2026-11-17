@@ -28,12 +28,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// Contract represents an ethereum contract in the state database. It contains
-// the contract code and calling arguments.
+// Contract holds the code and account context for a single EVM execution.
 type Contract struct {
-	// caller is the result of the caller which initialised this
-	// contract. However when the "call method" is delegated this value
-	// needs to be initialised to that of the caller's caller.
 	caller   accounts.Address
 	addr     accounts.Address
 	analysis bitvec // Locally cached result of JUMPDEST analysis
@@ -57,7 +53,7 @@ func newJumpDestCache() *cache.GenericCache[bitvec] {
 	return cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) * 8 }, cache.ModeEvictLRU)
 }
 
-// NewContract returns a new contract environment for the execution of EVM.
+// NewContract returns a contract execution context with no code set.
 func NewContract(caller accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
 	return &Contract{
 		caller: caller,
@@ -118,20 +114,18 @@ func (c *Contract) GetOp(n uint64) OpCode {
 	return STOP
 }
 
-// Caller returns the caller of the contract.
-//
-// Caller will recursively set to the caller's caller when
-// the contract is a delegate call, including that of caller's caller.
+// Caller returns the address exposed by the CALLER opcode. DELEGATECALL preserves
+// the parent call's caller, including across nested delegate calls.
 func (c *Contract) Caller() accounts.Address {
 	return c.caller
 }
 
-// Address returns the contracts address
+// Address returns the account address used for this execution's storage and balance.
 func (c *Contract) Address() accounts.Address {
 	return c.addr
 }
 
-// Value returns the contract's value (sent to it from it's caller)
+// Value returns the value exposed by the CALLVALUE opcode.
 func (c *Contract) Value() uint256.Int {
 	return c.value
 }

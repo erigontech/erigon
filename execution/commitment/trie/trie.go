@@ -502,9 +502,9 @@ func (t *Trie) delete(origNode Node, key []byte, preserveAccountNode bool) (upda
 	return t.deleteRecursive(origNode, key, 0, preserveAccountNode)
 }
 
-// delete returns the new root of the trie with key deleted.
-// It reduces the trie to minimal form by simplifying
-// nodes on the way up after deleting recursively.
+// deleteRecursive removes the key or subtree and simplifies nodes on the way back
+// up. If preserveAccountNode is set, it clears a matching account's storage and
+// cached code but keeps the account node.
 func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserveAccountNode bool) (updated bool, newNode Node) {
 	var nn Node
 	switch n := origNode.(type) {
@@ -521,10 +521,6 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 				updated = true
 				newNode = nil
 			} else {
-				// The key is longer than n.Key. Remove the remaining suffix
-				// from the subtrie. Child can never be nil here since the
-				// subtrie must contain at least two other values with keys
-				// longer than n.Key.
 				updated, nn = t.deleteRecursive(n.Val, key, keyStart+matchlen, preserveAccountNode)
 				if !updated {
 					newNode = n
@@ -596,15 +592,8 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 			newNode = n
 		} else {
 			n.Children[key[keyStart]] = nn
-			// Check how many non-nil entries are left after deleting and
-			// reduce the full node to a short node if only one entry is
-			// left. Since n must've contained at least two children
-			// before deletion (otherwise it would not be a full node) n
-			// can never be reduced to nil.
-			//
-			// When the loop is done, pos contains the index of the single
-			// value that is left in n or -2 if n contains at least two
-			// values.
+			// Collapse branches with one or two remaining children into a ShortNode
+			// or DuoNode. A FullNode cannot become empty after deleting one child.
 			var pos1, pos2 int
 			count := 0
 			for i, cld := range n.Children {
@@ -682,9 +671,8 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 	}
 }
 
-// DeleteSubtree removes any existing value for key from the trie.
-// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
-// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
+// DeleteSubtree removes the subtree at keyPrefix. When keyPrefix identifies an
+// account, it keeps the account node but clears its storage and cached code.
 func (t *Trie) DeleteSubtree(keyPrefix []byte) {
 	hexPrefix := nibbles.KeybytesToHex(keyPrefix)
 

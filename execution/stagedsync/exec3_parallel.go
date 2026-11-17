@@ -928,11 +928,10 @@ func (pe *parallelExecutor) LogCommitments(committedTransactions uint64, stepsIn
 	}
 }
 
-// triggerBatchCommitment sends a commitComputeRequest so the calculator computes
-// the batch commitment before the exec loop exits and closes channels. Delivery is
-// unconditional: cancellation would drop the batch-end commitment when the
-// buffer is momentarily full, leaving commitment behind sd.mem. The calculator
-// keeps draining until its channel closes, so blocking is safe.
+// triggerBatchCommitment queues the final commitment request before the exec loop
+// closes the result channels. The send must not be cancelled: dropping the request
+// could leave commitment out of sync with sd.mem. The calculator drains its input
+// channel before exiting, so the send can safely wait for buffer space.
 func (pe *parallelExecutor) triggerBatchCommitment() {
 	if pe.consumers == nil {
 		return
@@ -3677,8 +3676,8 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 
 	maxValidated := be.validateTasks.maxComplete()
 
-	// dispatch drains pending, enqueuing each tx. Budget bounds enqueues, which each
-	// occupy an input-channel slot. Txs that can't go now are left in pending.
+	// Queue tasks within the dispatch window; later tasks stay pending until the
+	// committed frontier advances.
 	dispatch := func() (dispatched int) {
 		if be.execTasks.minPending() < 0 {
 			return 0
@@ -3690,8 +3689,6 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 			if nextTx < 0 || nextTx > lastTx {
 				break
 			}
-			// A tx needs a free input-channel slot. If none, leave it in pending
-			// (peek, don't take): re-inserting the lowest index would be O(pending) churn.
 			if budget <= 0 {
 				break
 			}
@@ -3708,8 +3705,8 @@ func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 				execCpuNanos: &be.execCpuNanos,
 			}
 
-			// The worker owns its own re-execution loop, so the scheduler dispatches
-			// each task exactly once; re-execution is signalled in place via slReexec.
+			// Re-execution reuses the existing pool task, so the scheduler must not
+			// create another task for the same transaction.
 			if be.selfLoopDispatched[nextTx] {
 				be.cntExec++
 				dispatched++
