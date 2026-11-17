@@ -902,6 +902,10 @@ func (err *ConfigCompatError) Error() string {
 		err.What, uint64PtrStr(err.StoredConfig), uint64PtrStr(err.NewConfig), err.RewindTo)
 	times := fmt.Sprintf("mismatching %s in database (have timestamp %s, want timestamp %s, rewindto timestamp %d)",
 		err.WhatTime, uint64PtrStr(err.StoredTime), uint64PtrStr(err.NewTime), err.RewindToTime)
+	if numEqual(err.StoredTime, err.NewTime) {
+		times = fmt.Sprintf("mismatching %s in database (activation timestamp %s, rewindto timestamp %d)",
+			err.WhatTime, uint64PtrStr(err.StoredTime), err.RewindToTime)
+	}
 	switch {
 	case !err.HasTimestampConflict():
 		return blocks

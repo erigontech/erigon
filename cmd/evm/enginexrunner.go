@@ -238,10 +238,9 @@ func printTimings(results []testResult) {
 }
 
 // loadEngineXGroups walks path for JSON files, parses each, filters tests by
-// the regex, and groups them by (fork, preAllocHash). Each group is the unit
-// of execution given to a worker — a worker creates one EngineApiTester for
-// the group's (fork, preAllocHash), runs all tests in the group sequentially
-// on that tester, then evicts it.
+// the regex, and groups them by (fork, preAllocHash). A worker runs each group's
+// tests sequentially. The runner keeps separate testers for different account
+// lists within the group, then evicts all of them when the group finishes.
 //
 // Files under any pre_alloc/ directory are skipped: those are pre-allocation
 // inputs (consumed via --pre-alloc-dir), not test fixtures, and they don't
@@ -291,12 +290,9 @@ func isUnderPreAlloc(p string) bool {
 	return false
 }
 
-// runEngineXGroup executes every test in the group sequentially on a single
-// tester (created lazily by the runner) then evicts the tester to free its
-// node and temp directory before returning. Results are streamed to resultCh
-// so the parent goroutine can collect across all workers. When timeIt is
-// true, each test's single Run is wrapped in timedExec so wall-time and
-// memstats land on the JSON output.
+// runEngineXGroup executes the group's tests sequentially and then evicts its
+// cached testers. Results are streamed to resultCh. When timeIt is true, each
+// Run is wrapped in timedExec to include wall-time and memstats in the JSON output.
 func runEngineXGroup(
 	ctx context.Context,
 	runner *engineapitester.EngineXTestRunner,

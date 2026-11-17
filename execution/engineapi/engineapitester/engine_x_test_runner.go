@@ -206,7 +206,7 @@ func (extr *EngineXTestRunner) Evict(fork Fork, preAllocHash PreAllocHash) error
 
 // evict performs the slow close-and-remove for a single tester. It does NOT
 // touch extr.mu or extr.testers — callers are responsible for removing the
-// entry from the map first. Shared by Evict (single-key) and Close (drain).
+// entry from the map first. Shared by Evict (group) and Close (all testers).
 func (extr *EngineXTestRunner) evict(entry testerEntry) error {
 	var errs []error
 	err := entry.tester.Close()

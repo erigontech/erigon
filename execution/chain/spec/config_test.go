@@ -219,6 +219,7 @@ func TestCheckCompatibleZeroNonceStorageAccounts(t *testing.T) {
 			require.True(t, err.HasTimestampConflict())
 			require.False(t, err.HasBlockConflict())
 			require.Equal(t, uint64(99), err.RewindToTime)
+			require.EqualError(t, err, "mismatching EIP-8253 account list in database (activation timestamp 100, rewindto timestamp 99)")
 		})
 	}
 }

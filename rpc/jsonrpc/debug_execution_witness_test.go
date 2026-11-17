@@ -850,7 +850,10 @@ func TestExecBlockStatelesslyEIP8253RejectsInvalidParent(t *testing.T) {
 			case "wrong hash":
 				header.ParentHash[0] ^= 1
 			case "wrong number":
-				header.Number.SetUint64(3)
+				parent := types.CopyHeader(witness.headerByNumber[1])
+				parent.Number.SetUint64(2)
+				witness.headerByNumber[1] = parent
+				header.ParentHash = parent.Hash()
 			}
 			block = types.NewBlockWithHeader(header, nil)
 			_, _, err := execBlockStatelessly(witness, block, config, merge.New(ethash.NewFaker()))

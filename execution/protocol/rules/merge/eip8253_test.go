@@ -17,7 +17,6 @@
 package merge
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -46,7 +45,8 @@ func (r nonceBumpChainReader) GetHeader(hash common.Hash, number uint64) *types.
 
 func TestEIP8253BeforeSystemCalls(t *testing.T) {
 	config := chain.AllProtocolChanges.Copy()
-	require.NoError(t, json.Unmarshal([]byte(`{"bogotaTime":100,"zeroNonceStorageAccounts":["0x0000000000000000000000000000000000008253"]}`), config))
+	config.BogotaTime = common.NewUint64(100)
+	config.ZeroNonceStorageAccounts = []common.Address{common.HexToAddress("0x8253")}
 	parent := &types.Header{Number: *uint256.NewInt(1), Time: 99}
 	header := &types.Header{
 		Number: *uint256.NewInt(2), ParentHash: parent.Hash(), Time: 100,

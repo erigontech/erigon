@@ -547,7 +547,7 @@ type ExecutionWitnessResult struct {
 	// back to the oldest block reached via BLOCKHASH.
 	Headers []hexutil.Bytes `json:"headers,omitempty"`
 
-	// lookup map for BLOCKHASH opcode, not serialized to JSON
+	// Header lookups for BLOCKHASH and stateless block initialization; not serialized.
 	headerByNumber map[uint64]*types.Header
 }
 

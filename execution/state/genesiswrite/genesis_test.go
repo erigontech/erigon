@@ -263,6 +263,32 @@ func TestCommitGenesisBlockZeroNonceStorageAccountChange(t *testing.T) {
 	}
 }
 
+func TestCommitGenesisBlockZeroNonceStorageAccountChangeAfterGenesisActivation(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		genesisTime, bogotaTime uint64
+	}{
+		{name: "zero timestamp"},
+		{name: "before genesis timestamp", genesisTime: 100, bogotaTime: 50},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stored := chain.AllProtocolChanges.Copy()
+			stored.BogotaTime = common.NewUint64(tc.bogotaTime)
+			stored.ZeroNonceStorageAccounts = []common.Address{{1}}
+			genesis := testGenesis(stored)
+			genesis.Timestamp = tc.genesisTime
+			db := dbWithGenesisAtHeightOne(t, genesis)
+
+			next := stored.Copy()
+			next.ZeroNonceStorageAccounts = []common.Address{{2}}
+			genesis.Config = next
+			_, err := commitGenesis(t, db, genesis, "")
+			require.NoError(t, err)
+			require.Equal(t, next.ZeroNonceStorageAccounts, readStoredChainConfig(t, db).ZeroNonceStorageAccounts)
+		})
+	}
+}
+
 func TestCommitGenesisBlockZeroNonceStorageAccountsWithoutHeadHeader(t *testing.T) {
 	a, b := common.Address{1}, common.Address{2}
 	for _, tc := range []struct {

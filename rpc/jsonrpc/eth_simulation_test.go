@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
@@ -1068,6 +1069,42 @@ func TestComputeSimulatedStateRootWithoutCommitmentHistory(t *testing.T) {
 
 			require.NoError(t, err)
 			require.Equal(t, common.Hash{}, block.Root())
+		})
+	}
+}
+
+func TestSimulatedChainReaderHeaderLookup(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	stored := &types.Header{Number: *uint256.NewInt(1), Time: 10}
+	require.NoError(t, rawdb.WriteHeader(tx, stored))
+	simulated := types.CopyHeader(stored)
+	simulated.Time = 20
+	reader := &simulatedChainReader{
+		Reader:  consensuschain.NewReader(chain.AllProtocolChanges, tx, nil, log.New()),
+		headers: []*types.Header{simulated},
+	}
+	for _, tc := range []struct {
+		name   string
+		hash   common.Hash
+		number uint64
+		want   *types.Header
+	}{
+		{name: "simulated", hash: simulated.Hash(), number: 1, want: simulated},
+		{name: "stored", hash: stored.Hash(), number: 1, want: stored},
+		{name: "wrong hash", hash: common.Hash{1}, number: 1},
+		{name: "wrong number", hash: simulated.Hash(), number: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := reader.GetHeader(tc.hash, tc.number)
+			if tc.want == nil {
+				require.Nil(t, got)
+			} else {
+				require.NotNil(t, got)
+				require.Equal(t, tc.want.Hash(), got.Hash())
+			}
 		})
 	}
 }
