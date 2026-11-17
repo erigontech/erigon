@@ -774,15 +774,29 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 		if so == nil && r.account == nil {
 			hdr.Source = StorageRead
-			obj, err := s.getStateObject(addr, true)
-			if err != nil {
-				r.err = err
-				r.outcome = outcomeReturnDefault
-				r.source = StorageRead
-				r.version = UnknownVersion
-				return
+			// An absent account's field is its default. readAccountInternal already
+			// resolved the committed base (seedOrigin); a nil result means the account
+			// is in neither the map nor the base, so a materialized stateObject could
+			// add nothing. Record the absent read and return the default — the
+			// noMaterialize flow must never resolve through a stateObject.
+			if !s.noMaterialize {
+				obj, err := s.getStateObject(addr, true)
+				if err != nil {
+					r.err = err
+					r.outcome = outcomeReturnDefault
+					r.source = StorageRead
+					r.version = UnknownVersion
+					return
+				}
+				so = obj
 			}
-			so = obj
+		}
+		if s.noMaterialize && so != nil {
+			r.err = fmt.Errorf("noMaterialize read fell back to a materialized stateObject: %x %s", addr, AccountKey{path, key})
+			r.outcome = outcomeReturnDefault
+			r.source = StorageRead
+			r.version = UnknownVersion
+			return
 		}
 		r.outcome = outcomeStorageRead
 		r.so = so
