@@ -432,6 +432,33 @@ func TestApplyWritesFoldCodeOfCodelessAccountReadsNoPrevCode(t *testing.T) {
 	require.Empty(t, diff[0].Value, "the prev code is empty")
 }
 
+// Re-delegating an authority that already has code keeps that code as the prev value, so an unwind restores it.
+func TestApplyWritesFoldRedelegationKeepsPrevCode(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	addrValue := addr.Value()
+	oldDelegate, newDelegate := common.HexToAddress("0x02"), common.HexToAddress("0x03")
+	oldCode := accounts.NewCode(slices.Concat([]byte{0xef, 0x01, 0x00}, oldDelegate[:]))
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.CodeHash = oldCode.Hash
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 1, nil))
+	require.NoError(t, domains.DomainPut(kv.CodeDomain, tx, addrValue[:], oldCode.Bytes, 1, nil))
+
+	changes := &changeset.StateChangeSet{}
+	domains.SetChangesetAccumulator(changes)
+	newCode := accounts.NewCode(slices.Concat([]byte{0xef, 0x01, 0x00}, newDelegate[:]))
+	ws := &WriteSet{}
+	ws.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath}, Val: 2})
+	ws.SetCode(addr, &VersionedWrite[accounts.Code]{WriteHeader: WriteHeader{Address: addr, Path: CodePath}, Val: newCode})
+
+	require.NoError(t, ApplyWrites(NewVersionMapWriteView(ws, NewVersionMap(nil), 0), domains, tx, 1, 2, false))
+
+	diff := changes.Diffs[kv.CodeDomain].GetDiffSet()
+	require.Len(t, diff, 1)
+	require.Equal(t, oldCode.Bytes, diff[0].Value, "the prev code is the old delegation")
+}
+
 // Code without an account record (a system-contract predeploy) must stay the prev value of a
 // non-delegation code write, so that an unwind restores it.
 func TestApplyWritesFoldNonDelegationCodeReadsPrevCode(t *testing.T) {
