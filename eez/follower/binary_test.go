@@ -926,8 +926,13 @@ func TestSequencerBinary(t *testing.T) {
 		h, err := blockHash(t.Context(), o.url, "0x1")
 		return err == nil && h == receipt.BlockHash
 	})
-	first := regexp.MustCompile(`event=eez\.node\.follower\.head\.advanced number=(\d+) .*imported=(\d+)`).FindStringSubmatch(o.output.String())
-	require.NotNil(t, first, "no head followed")
+	// The head is logged after its fork choice: block 1 can be read first.
+	advanced := regexp.MustCompile(`event=eez\.node\.follower\.head\.advanced number=(\d+) .*imported=(\d+)\s`)
+	var first []string
+	o.waitFor("the follower of signed heads logs its first head", func() bool {
+		first = advanced.FindStringSubmatch(o.output.String())
+		return first != nil
+	})
 	require.NotEqual(t, "1", first[2], "the first head followed, block %s, came without its ancestors", first[1])
 	// Three successive heads of the sequencer, each reached within two L2
 	// blocks.
