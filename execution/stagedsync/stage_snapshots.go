@@ -425,6 +425,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
+	// a state file missing its accessor is excluded from the visible set, so E3 accessors
+	// must be rebuilt before execution and before RPCDaemon reopens files — there is no background rebuild path
+	if err := cfg.db.Debug().BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil {
+		return err
+	}
+
 	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
 	// hashes next time.
 	err = downloadercfg.SaveSnapshotHashes(cfg.dirs, cfg.chainConfig.ChainName)
@@ -443,12 +449,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if err := buildOrDeferE2Indices(ctx, s, cfg, headersProgress); err != nil {
-		return err
-	}
-
-	// a state file missing its accessor is excluded from the visible set, so E3 accessors
-	// must be rebuilt before execution — there is no background rebuild path
-	if err := cfg.db.Debug().BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil {
 		return err
 	}
 
