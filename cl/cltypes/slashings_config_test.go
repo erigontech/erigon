@@ -19,10 +19,12 @@ package cltypes
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common/ssz"
 
 	"github.com/stretchr/testify/require"
@@ -146,6 +148,31 @@ func TestAttesterSlashingConfiguredLimits(t *testing.T) {
 			})
 		}
 	}
+}
+
+// The blinded-block API decodes JSON and then calls SetVersion; the slashings must hash with the configured cap, as
+// after SSZ decoding.
+func TestBlindedBodyJSONUsesConfiguredSlashingLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxValidatorsPerCommittee = 4096
+	version := clparams.BellatrixVersion
+	body := NewBeaconBody(&cfg, version)
+	body.AttesterSlashings.Append(configuredSlashing(version, &cfg, 1))
+	blinded, err := body.Blinded()
+	require.NoError(t, err)
+	blinded.ExecutionPayload.Extra = solid.NewExtraData()
+	want, err := blinded.HashSSZ()
+	require.NoError(t, err)
+	encoded, err := json.Marshal(blinded)
+	require.NoError(t, err)
+
+	decoded := NewBlindedBeaconBody(&cfg, version)
+	decoded.ExecutionPayload = nil
+	require.NoError(t, json.Unmarshal(encoded, decoded))
+	decoded.SetVersion(version)
+	root, err := decoded.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, want, root)
 }
 
 func TestAttesterSlashingConfiguredStrictOffsets(t *testing.T) {
