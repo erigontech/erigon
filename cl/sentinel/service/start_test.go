@@ -70,11 +70,11 @@ func TestSentinelUnsupportedRPCs(t *testing.T) {
 
 func TestSentinelGRPCRecoversPanics(t *testing.T) {
 	client := newTestSentinelClient(t, &panickingSentinelServer{})
-	for _, method := range []string{"unary", "stream"} {
-		t.Run(method, func(t *testing.T) {
+	for _, rpcType := range []string{"unary", "stream"} {
+		t.Run(rpcType, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			if method == "unary" {
+			if rpcType == "unary" {
 				_, err := client.PublishGossip(ctx, &sentinelproto.GossipData{})
 				require.Equal(t, codes.Unknown, status.Code(err))
 			} else {

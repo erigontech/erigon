@@ -45,7 +45,10 @@ func TestCaplinSentinelBindFlags(t *testing.T) {
 			cmd := &cli.Command{
 				Flags: []cli.Flag{&addr, &port},
 				Action: func(_ context.Context, cmd *cli.Command) error {
-					config := newCaplinConfig(cmd, &caplincli.CaplinCliCfg{SentinelCliCfg: &sentinelcli.SentinelCliCfg{}})
+					cliConfig := &caplincli.CaplinCliCfg{
+						SentinelCliCfg: &sentinelcli.SentinelCliCfg{},
+					}
+					config := newCaplinConfig(cmd, cliConfig)
 					require.Equal(t, test.host, config.SentinelAddr)
 					require.Equal(t, test.port, config.SentinelPort)
 					return nil
