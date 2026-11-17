@@ -715,6 +715,12 @@ func (c *memStoreCursor) DeleteCurrent() error {
 	}
 	c.store.mu.Lock()
 	defer c.store.mu.Unlock()
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	if !iter.Seek(c.current) {
+		return nil
+	}
+	c.current = iter.Item()
 	c.table.tree.Delete(c.current)
 	return nil
 }

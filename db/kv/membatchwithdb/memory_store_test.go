@@ -908,3 +908,26 @@ func TestMemStore_ConcurrentDupSort(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestMemStore_DeleteCurrentAfterDelete(t *testing.T) {
+	for _, table := range []string{kv.TblAccountVals, kv.HeaderNumber} {
+		t.Run(table, func(t *testing.T) {
+			s := newMemStore()
+			for _, k := range []string{"A", "B", "C"} {
+				require.NoError(t, s.Put(table, []byte(k), []byte("1")))
+			}
+			c := s.newCursor(table)
+			defer c.Close()
+			_, _, err := c.SeekExact([]byte("A"))
+			require.NoError(t, err)
+			require.NoError(t, c.DeleteCurrent())
+			require.NoError(t, c.DeleteCurrent())
+			k, _, err := c.Current()
+			require.NoError(t, err)
+			require.Equal(t, []byte("C"), k)
+			k, _, err = c.First()
+			require.NoError(t, err)
+			require.Equal(t, []byte("C"), k)
+		})
+	}
+}
