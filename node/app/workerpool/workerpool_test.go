@@ -150,16 +150,13 @@ func TestWorkerTimeout(t *testing.T) {
 			t.Fatal("Expected", maxWorkers, "ready workers")
 		}
 
-		// Advances the fake clock so the pool's idle timer fires; synctest.Wait then lets the
-		// dispatch goroutine finish the kill before the count is read.
+		// Advances the fake clock past two idle timers; the kills complete before Sleep returns.
 		time.Sleep(idleTimeout*2 + idleTimeout/2)
-		synctest.Wait()
 		if countReady(wp) != maxWorkers-1 {
 			t.Fatal("First worker did not timeout")
 		}
 
 		time.Sleep(idleTimeout)
-		synctest.Wait()
 		if countReady(wp) != maxWorkers-2 {
 			t.Fatal("Second worker did not timeout")
 		}
