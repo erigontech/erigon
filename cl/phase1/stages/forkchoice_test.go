@@ -556,9 +556,13 @@ func requireLockOrderOperationCompletes(t *testing.T, fixture lockOrderFixture, 
 	}()
 	time.Sleep(250 * time.Millisecond)
 
+	// A shared index lets the slashing pass the intersection check and reach the fork-choice lock.
+	slashing := cltypes.NewAttesterSlashing(clparams.Phase0Version)
+	slashing.Attestation_1.AttestingIndices.Append(0)
+	slashing.Attestation_2.AttestingIndices.Append(0)
 	slashingDone := make(chan error, 1)
 	go func() {
-		slashingDone <- fixture.cfg.forkChoice.OnAttesterSlashing(cltypes.NewAttesterSlashing(clparams.Phase0Version), true)
+		slashingDone <- fixture.cfg.forkChoice.OnAttesterSlashing(slashing, true)
 	}()
 	select {
 	case err := <-slashingDone:
