@@ -49,15 +49,16 @@ import (
 )
 
 type BuilderExecCfg struct {
-	builderState BuilderState
-	notifier     stagedsync.ChainEventNotifier
-	chainConfig  *chain.Config
-	engine       rules.Engine
-	blockReader  dbservices.FullBlockReader
-	vmConfig     *vm.Config
-	interrupt    *atomic.Bool
-	payloadId    uint64
-	txnProvider  txnprovider.TxnProvider
+	builderState           BuilderState
+	notifier               stagedsync.ChainEventNotifier
+	chainConfig            *chain.Config
+	engine                 rules.Engine
+	blockReader            dbservices.FullBlockReader
+	vmConfig               *vm.Config
+	interrupt              *atomic.Bool
+	payloadId              uint64
+	txnProvider            txnprovider.TxnProvider
+	requireAllTransactions bool
 }
 
 func StageBuilderExecCfg(
@@ -69,18 +70,20 @@ func StageBuilderExecCfg(
 	interrupt *atomic.Bool,
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
+	requireAllTransactions bool,
 	blockReader dbservices.FullBlockReader,
 ) BuilderExecCfg {
 	return BuilderExecCfg{
-		builderState: builderState,
-		notifier:     notifier,
-		chainConfig:  chainConfig,
-		engine:       engine,
-		blockReader:  blockReader,
-		vmConfig:     vmConfig,
-		interrupt:    interrupt,
-		payloadId:    payloadId,
-		txnProvider:  txnProvider,
+		builderState:           builderState,
+		notifier:               notifier,
+		chainConfig:            chainConfig,
+		engine:                 engine,
+		blockReader:            blockReader,
+		vmConfig:               vmConfig,
+		interrupt:              interrupt,
+		payloadId:              payloadId,
+		txnProvider:            txnProvider,
+		requireAllTransactions: requireAllTransactions,
 	}
 }
 
@@ -139,10 +142,11 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	current.PayloadId = cfg.payloadId
 	ba := exec.NewBlockAssembler(exec.AssemblerCfg{
-		ChainConfig:     cfg.chainConfig,
-		Engine:          cfg.engine,
-		BlockReader:     cfg.blockReader,
-		ExperimentalBAL: execCfg.IsExperimentalBAL(),
+		ChainConfig:            cfg.chainConfig,
+		Engine:                 cfg.engine,
+		BlockReader:            cfg.blockReader,
+		ExperimentalBAL:        execCfg.IsExperimentalBAL(),
+		RequireAllTransactions: cfg.requireAllTransactions,
 	}, current)
 
 	ibs.SetVersionMap(state.NewVersionMap(nil))
@@ -165,9 +169,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	yielded := mapset.NewSet[[32]byte]()
 	nonceTooHigh := map[accounts.Address][]nonceTooHighTxn{}
 	readNonce := func(sender accounts.Address) (uint64, error) {
-		if !ibs.IsVersioned() {
-			return ibs.GetNonce(sender)
-		}
 		// Filtering must observe executed writes without adding reads to the BAL.
 		view := state.NewVersionedAccountView(sender, len(ba.Txns), ibs.VersionMap(), stateReader)
 		nonce := view.GetNonce()
@@ -203,6 +204,9 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 		// if we yielded less than the count we wanted, assume the txpool has run dry now
 		if len(txns) < amount {
+			if cfg.requireAllTransactions {
+				break
+			}
 			if interrupt != nil && !interrupt.Load() {
 				// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
 				// since there may be new txns that can arrive
@@ -239,25 +243,19 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	blockHeight := block.NumberU64()
 
-	// FinalizeBlockExecution skipped the so.data CommitBlock of the versioned state; commit the accumulated per-phase write-sets to the
-	// domains via ApplyWrites instead — the same domain apply the parallel
-	// executor and block generation use (rw_v3 handles the self-destruct delete,
-	// EIP-161 removal and storage-subtree cascade). Each recorded phase
-	// (init/txs/finalize) is applied in order.
-	blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
-	blockRules := blockCtx.Rules(cfg.chainConfig)
+	// The versioned state holds the block's writes as per-phase write-sets (init/txs/finalize). Apply them to the
+	// domains in order with ApplyWrites, as the parallel executor and block generation do (rw_v3 handles the
+	// self-destruct delete, EIP-161 removal and storage-subtree cascade).
 	for _, ws := range ba.WriteSets() {
 		if ws == nil || ws.IsEmpty() {
 			continue
 		}
-		if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, nil, blockRules, false); err != nil {
+		if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, false); err != nil {
 			return fmt.Errorf("apply versioned block writes: %w", err)
 		}
 	}
 
-	// Compute state root directly from the domain writes accumulated during
-	// block assembly. All state changes flow through CommitBlock in
-	// AssembleBlock — no re-execution needed.
+	// The domains now hold every write of the block, so the state root needs no re-execution.
 	rh, err := sd.ComputeCommitment(ctx, tx, false, blockHeight, txNum, logPrefix, nil)
 	if err != nil {
 		return fmt.Errorf("compute commitment failed: %w", err)
@@ -285,6 +283,9 @@ func getNextTransactions(
 	logger log.Logger,
 	stats *filtrationStats,
 ) ([]types.Transaction, int, error) {
+	if cfg.txnProvider == nil {
+		return nil, 0, nil
+	}
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
@@ -314,6 +315,11 @@ func getNextTransactions(
 	allTxns, err := cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
 	if err != nil {
 		return nil, 0, err
+	}
+	if cfg.requireAllTransactions {
+		// Explicit lists must be checked against each preceding transaction's actual
+		// writes. The pool filter predicts nonces and can reorder dependent transactions.
+		return allTxns, len(allTxns), nil
 	}
 
 	blockNum := executionAt + 1

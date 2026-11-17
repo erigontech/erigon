@@ -21,8 +21,10 @@
 package tracers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -38,6 +40,8 @@ type Context struct {
 	TxIndex     int          // Index of the transaction within a block (zero if dangling txn or call)
 	TxHash      common.Hash  // Hash of the transaction being traced (zero if dangling call)
 	BlockNumber *uint256.Int // Number of the block (nil if dangling txn or call)
+
+	Ctx context.Context // Cancelled to stop a tracer constructor that runs client code (nil if it never stops)
 }
 
 // Tracer interface extends vm.EVMLogger and additionally
@@ -69,12 +73,20 @@ func RegisterLookup(wildcard bool, lookup lookupFunc) {
 }
 
 // New returns a new instance of a tracer, by iterating through the
-// registered lookups.
+// registered lookups. If none accepts the code, the error of the last one (the
+// wildcard js lookup) is attached to "tracer not found", so the caller can see
+// why a js tracer was rejected.
 func New(code string, ctx *Context, cfg json.RawMessage) (*Tracer, error) {
+	var lastErr error
 	for _, lookup := range lookups {
-		if tracer, err := lookup(code, ctx, cfg); err == nil {
+		tracer, err := lookup(code, ctx, cfg)
+		if err == nil {
 			return tracer, nil
 		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("tracer not found: %w", lastErr)
 	}
 	return nil, errors.New("tracer not found")
 }

@@ -93,6 +93,14 @@ func (s *Stream) WriteRawBytes(content []byte) {
 	s.afterValue()
 }
 
+// RawFields writes object members already encoded as `"name":value` pairs separated by commas.
+func (s *Stream) RawFields(fields []byte) {
+	s.beforeValue()
+	s.stream.SetBuffer(append(s.stream.Buffer(), fields...))
+	s.separatorPending = true
+	flushIfFull(s.stream)
+}
+
 func (s *Stream) WriteHex(b []byte) {
 	s.beforeValue()
 	buf := s.stream.Buffer()

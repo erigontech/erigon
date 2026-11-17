@@ -50,12 +50,12 @@ func TestPromoteKeepsABlobTxnBelowTheBlobFeeOutOfPending(t *testing.T) {
 	pool.queued.Add(mt, "test", log.New())
 
 	var announcements Announcements
-	pool.promoteSubPools(1, 6, &announcements, log.New())
+	pool.promoteSubPools(1, 6, &announcements)
 	require.Zero(t, pool.pending.Len())
 	require.Equal(t, 1, pool.baseFee.Len())
 	require.Zero(t, announcements.Len())
 
-	pool.promoteSubPools(1, 5, &announcements, log.New())
+	pool.promoteSubPools(1, 5, &announcements)
 	require.Equal(t, 1, pool.pending.Len(), "promoted once the blob fee falls to its cap")
 }
 
@@ -113,7 +113,7 @@ func TestPromoteSkipsABlobTxnWaitingForTheBlobFee(t *testing.T) {
 	}
 
 	var announcements Announcements
-	pool.promoteSubPools(1, 6, &announcements, log.New())
+	pool.promoteSubPools(1, 6, &announcements)
 	require.Equal(t, 1, pool.pending.Len())
 	require.Equal(t, ordinary, pool.pending.Best().TxnSlot)
 	require.Equal(t, 1, pool.baseFee.Len())

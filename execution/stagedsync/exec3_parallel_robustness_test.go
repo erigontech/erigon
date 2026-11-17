@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -682,7 +681,7 @@ func TestApplyLoopChannelCloseOrder(t *testing.T) {
 // execLoopShouldExit doesn't honor that signal the exec loop parks on
 // its main select forever waiting for work the dispatcher will never
 // produce. Symptom in production: chiado
-// `EXEC3_PARALLEL=true ... --sync.loop.block.limit=10_000` parallel
+// `--sync.loop.block.limit=10_000` parallel
 // exec from block 0 silently hangs at the first step boundary
 // (block 150662 in chiado's case) — a hang masking the wrong-trie-root
 // failure that issue erigon#20711 reported as the visible symptom.
@@ -1161,23 +1160,16 @@ func TestStopCausePropagation(t *testing.T) {
 
 // custom_trace commits on the same commitment trie the rest of the process selects.
 func TestCustomTraceSharedDomainsUseTheSelectedTrie(t *testing.T) {
-	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
-	for _, parallel := range []bool{false, true} {
-		t.Run(fmt.Sprintf("parallel=%v", parallel), func(t *testing.T) {
-			statecfg.ExperimentalParallelCommitment = parallel
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
 
-			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-			tx, err := db.BeginTemporalRw(t.Context())
-			require.NoError(t, err)
-			defer tx.Rollback()
+	doms, err := newCustomTraceSharedDomains(t.Context(), db, tx, log.New())
+	require.NoError(t, err)
+	defer doms.Close()
 
-			doms, err := newCustomTraceSharedDomains(t.Context(), db, tx, log.New())
-			require.NoError(t, err)
-			defer doms.Close()
-
-			require.Equal(t, execctx.PickTrieVariant(), doms.GetCommitmentCtx().Trie().Variant())
-		})
-	}
+	require.Equal(t, execctx.PickTrieVariant(), doms.GetCommitmentCtx().Trie().Variant())
 }
 
 // A send on a closed result channel is a channel-ownership bug: it must panic

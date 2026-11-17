@@ -58,10 +58,10 @@ type netStatement struct {
 // NewIPTracker creates an IP tracker.
 //
 // The window parameters configure the amount of past network events which are kept. The
-// minStatements parameter enforces a minimum number of statements which must be recorded
-// before any prediction is made. Higher values for these parameters decrease 'flapping' of
-// predictions as network conditions change. Window duration values should typically be in
-// the range of minutes.
+// minStatements parameter is the minimum number of distinct reporter networks that must
+// state an endpoint before it is predicted. Higher values for these parameters decrease
+// 'flapping' of predictions as network conditions change. Window duration values should
+// typically be in the range of minutes.
 func NewIPTracker(window, contactWindow time.Duration, minStatements int) *IPTracker {
 	return &IPTracker{
 		window:        window,

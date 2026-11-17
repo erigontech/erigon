@@ -66,7 +66,7 @@ func (a *ApiHandler) GetEthV1BeaconLightClientOptimisticUpdate(w http.ResponseWr
 }
 
 func (a *ApiHandler) GetEthV1BeaconLightClientFinalityUpdate(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	update := a.forkchoiceStore.NewestLightClientUpdate()
+	update := a.forkchoiceStore.NewestLightClientFinalityUpdate()
 	if update == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no finality update loaded yet, try again later. it may take a few minutes for it to load"))
 	}
@@ -101,23 +101,27 @@ func (a *ApiHandler) GetEthV1BeaconLightClientUpdates(w http.ResponseWriter, r *
 	}
 
 	resp := []any{}
-	currentPeriod := a.beaconChainCfg.SyncCommitteePeriod(a.ethClock.GetCurrentSlot())
+	endPeriod := a.beaconChainCfg.SyncCommitteePeriod(a.ethClock.GetCurrentSlot()) + 1
+	if *startPeriod < endPeriod && *count < endPeriod-*startPeriod {
+		endPeriod = *startPeriod + *count
+	}
 
-	notFoundPrev := false
-	for i := *startPeriod; i <= currentPeriod && i-*startPeriod < *count && len(resp) < maxRequestLightClientUpdates; i++ {
-		respUpdate := map[string]any{}
-		update, has := a.forkchoiceStore.GetLightClientUpdate(i)
-		if !has {
-			notFoundPrev = true
+	// The response holds the earliest known update and the consecutive ones after it: skip leading gaps, stop at the
+	// next one.
+	for _, update := range a.forkchoiceStore.GetLightClientUpdates(*startPeriod, endPeriod) {
+		if update == nil {
+			if len(resp) > 0 {
+				break
+			}
 			continue
 		}
-		if notFoundPrev {
-			resp = []any{}
-			notFoundPrev = false
+		resp = append(resp, map[string]any{
+			"data":    update,
+			"version": clparams.ClVersionToString(update.AttestedHeader.Version()),
+		})
+		if len(resp) >= maxRequestLightClientUpdates {
+			break
 		}
-		respUpdate["data"] = update
-		respUpdate["version"] = clparams.ClVersionToString(update.AttestedHeader.Version())
-		resp = append(resp, respUpdate)
 	}
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {

@@ -204,6 +204,16 @@ func ParseTransactions(payload []byte, pos int, ctx *TxnParseContext, txnSlots *
 	return pos, nil
 }
 
+// pooledTransactions66RequestID reads a reply's request id without decoding its transactions.
+func pooledTransactions66RequestID(payload []byte) (uint64, error) {
+	p, _, err := rlp.ParseList(payload, 0)
+	if err != nil {
+		return 0, err
+	}
+	_, requestID, err := rlp.ParseU64(payload, p)
+	return requestID, err
+}
+
 func ParsePooledTransactions66(payload []byte, pos int, ctx *TxnParseContext, txnSlots *TxnSlots, validateHash func([]byte) error) (requestID uint64, newPos int, err error) {
 	p, _, err := rlp.ParseList(payload, pos)
 	if err != nil {

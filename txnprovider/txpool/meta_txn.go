@@ -171,7 +171,7 @@ func (mt *metaTxn) worse(than *metaTxn, pendingBaseFee uint256.Int) bool {
 
 // SortByNonceLess separates keyed sequences from account nonces. One keyed domain
 // in this index is enough because pool policy allows only one frame transaction
-// per sender; replacement separately requires an identical nonce-key set.
+// per sender; sender admission requires matching nonce keys for replacements.
 func SortByNonceLess(a, b *metaTxn) bool {
 	if a.TxnSlot.SenderID != b.TxnSlot.SenderID {
 		return a.TxnSlot.SenderID < b.TxnSlot.SenderID

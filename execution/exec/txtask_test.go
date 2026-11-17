@@ -18,6 +18,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -329,4 +330,27 @@ func TestChargesSenderAtValidationIncludesCreation(t *testing.T) {
 	}
 	require.True(t, task(0).ChargesSenderAtValidation(0))
 	require.True(t, task(1).ChargesSenderAtValidation(0))
+}
+
+type failingAccountWriter struct {
+	*state.NoopWriter
+	err error
+}
+
+func (w failingAccountWriter) UpdateAccountData(accounts.Address, *accounts.Account, *accounts.Account) error {
+	return w.err
+}
+
+// A failed write says nothing about the block, so it must stop the stage rather than crash the node or condemn the block.
+func TestExecuteReportsFailedWriteSetAsOperational(t *testing.T) {
+	want := errors.New("disk error")
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	require.NoError(t, ibs.AddBalance(accounts.InternAddress(common.HexToAddress("0xaa")), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+
+	task := &TxTask{TxNum: 1, TxIndex: 0, Header: &types.Header{}, Config: chain.TestChainBerlinConfig}
+	result := task.Execute(nil, nil, nil, ibs, failingAccountWriter{state.NewNoopWriter(), want}, chain.TestChainBerlinConfig, nil, datadir.Dirs{}, true)
+
+	require.ErrorIs(t, result.Err, want)
+	require.True(t, result.Operational)
 }
