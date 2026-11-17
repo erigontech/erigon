@@ -30,6 +30,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
+	keccak "github.com/erigontech/fastkeccak"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
@@ -444,10 +446,17 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	offset, size := scope.Stack.pop1Peek1()
 	data := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 
-	hash := crypto.Keccak256Hash(data)
+	var hash common.Hash
+	if stubKeccakNoCache {
+		hash = keccak.Sum256(data)
+	} else {
+		hash = crypto.Keccak256Hash(data)
+	}
 	size.SetBytes(hash[:])
 	return pc, nil, nil
 }
+
+var stubKeccakNoCache = dbg.EnvBool("STUB_EVM_KECCAK_NOCACHE", false)
 
 func (ctx *CallContext) addressWord(index addressWordIndex, address accounts.Address) *uint256.Int {
 	if !ctx.addressWordsSet[index] {
