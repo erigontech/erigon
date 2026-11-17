@@ -17,6 +17,7 @@
 package das
 
 import (
+	"cmp"
 	"container/heap"
 	"context"
 	"errors"
@@ -226,11 +227,18 @@ func recoverableFuluDataAtSlot(t *testing.T, cfg *clparams.BeaconChainConfig, sl
 }
 
 func recoverableFuluDataAtSlotWithExecutionBlockHash(t *testing.T, cfg *clparams.BeaconChainConfig, slot uint64, executionBlockHash common.Hash) (*cltypes.SignedBeaconBlock, common.Hash, []*cltypes.BlobSidecar, []*cltypes.DataColumnSidecar) {
+	return recoverableFuluDataWithBlobs(t, cfg, slot, executionBlockHash, 2)
+}
+
+func recoverableFuluDataWithBlobs(t *testing.T, cfg *clparams.BeaconChainConfig, slot uint64, executionBlockHash common.Hash, blobCount int) (*cltypes.SignedBeaconBlock, common.Hash, []*cltypes.BlobSidecar, []*cltypes.DataColumnSidecar) {
 	t.Helper()
 	block := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
 	block.Block.Slot = slot
 	block.Block.Body.ExecutionPayload.BlockHash = executionBlockHash
-	blobs := []goethkzg.Blob{{1}, {2}}
+	blobs := make([]goethkzg.Blob, blobCount)
+	for i := range blobs {
+		blobs[i] = goethkzg.Blob{byte(i + 1)}
+	}
 	commitments := make([]goethkzg.KZGCommitment, len(blobs))
 	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, len(blobs))
 	for i := range blobs {
@@ -2169,6 +2177,8 @@ const recoveryTestSlot = uint64(9_999)
 type recoveryOptions struct {
 	caplinConfig *clparams.CaplinConfig
 	supernode    bool
+	// blobs is the blob count of the block; zero means two.
+	blobs int
 	// unscheduled leaves the recovery to the test: the helper starts the worker but enqueues no request.
 	unscheduled bool
 	// instrument runs before the worker starts and may wrap the storages of r.d.
@@ -2177,6 +2187,7 @@ type recoveryOptions struct {
 
 type recoveryRun struct {
 	d          *peerdas
+	block      *cltypes.SignedBeaconBlock
 	root       common.Hash
 	metadata   *blobRecoveryMetadata
 	blobs      []*cltypes.BlobSidecar
@@ -2199,7 +2210,7 @@ func startRecoveryWithPublisher(t *testing.T, opts recoveryOptions) *recoveryRun
 	cfg.FuluForkEpoch = 0
 	cfg.InitializeForkSchedule()
 	initTestBeaconConfig(&cfg)
-	block, root, blobs, columns := recoverableFuluDataAtSlot(t, &cfg, recoveryTestSlot)
+	block, root, blobs, columns := recoverableFuluDataWithBlobs(t, &cfg, recoveryTestSlot, common.Hash{}, cmp.Or(opts.blobs, 2))
 
 	d := newELBlobsTestPeerDas(t, &cfg, opts.caplinConfig)
 	if opts.supernode {
@@ -2228,7 +2239,7 @@ func startRecoveryWithPublisher(t *testing.T, opts recoveryOptions) *recoveryRun
 		calls <- recoveredColumnsPublish{ctx: ctx, sidecars: sidecars}
 		<-unblock
 	})
-	r := &recoveryRun{d: d, root: root, metadata: metadata, blobs: blobs, columns: columns, stored: stored, published: calls}
+	r := &recoveryRun{d: d, block: block, root: root, metadata: metadata, blobs: blobs, columns: columns, stored: stored, published: calls}
 	if opts.instrument != nil {
 		opts.instrument(r)
 	}
@@ -2528,10 +2539,12 @@ type firstColumnReadStorage struct {
 	blob_storage.DataColumnStorage
 	root      common.Hash
 	firstRead chan time.Time
+	reads     atomic.Int32
 }
 
 func (s *firstColumnReadStorage) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
 	if blockRoot == s.root {
+		s.reads.Add(1)
 		select {
 		case s.firstRead <- time.Now():
 		default:
@@ -2546,6 +2559,7 @@ type gossipRecovery struct {
 	*recoveryRun
 	slotStart    atomic.Int64
 	firstRead    chan time.Time
+	columnReads  *firstColumnReadStorage
 	workerWrites *countingColumnStorage
 	releaseClock func()
 }
@@ -2554,6 +2568,13 @@ type gossipRecovery struct {
 // releaseClock is called, so gossip can go on until the worker decides when to start. configure may change the
 // peerdas before the worker starts.
 func startGossipRecovery(t *testing.T, gated bool, configure ...func(*recoveryRun)) *gossipRecovery {
+	t.Helper()
+	return startGossipRecoveryWithBlobs(t, gated, 0, configure...)
+}
+
+// startGossipRecoveryWithBlobs is startGossipRecovery for a block with blobs blobs; zero means two. The deferred column
+// sync has a wake channel but no worker.
+func startGossipRecoveryWithBlobs(t *testing.T, gated bool, blobs int, configure ...func(*recoveryRun)) *gossipRecovery {
 	t.Helper()
 	g := &gossipRecovery{firstRead: make(chan time.Time, 1)}
 	clockGate := make(chan struct{})
@@ -2566,7 +2587,9 @@ func startGossipRecovery(t *testing.T, gated bool, configure ...func(*recoveryRu
 		caplinConfig: &clparams.CaplinConfig{},
 		supernode:    true,
 		unscheduled:  true,
+		blobs:        blobs,
 		instrument: func(r *recoveryRun) {
+			r.d.blocksToCheckSync.wake = make(chan struct{}, 1)
 			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 			clock.EXPECT().GetSlotTime(gomock.Any()).DoAndReturn(func(uint64) time.Time {
 				<-clockGate
@@ -2574,7 +2597,8 @@ func startGossipRecovery(t *testing.T, gated bool, configure ...func(*recoveryRu
 			}).AnyTimes()
 			r.d.ethClock = clock
 			g.workerWrites = r.countColumnWrites()
-			r.d.columnStorage = &firstColumnReadStorage{DataColumnStorage: r.d.columnStorage, root: r.root, firstRead: g.firstRead}
+			g.columnReads = &firstColumnReadStorage{DataColumnStorage: r.d.columnStorage, root: r.root, firstRead: g.firstRead}
+			r.d.columnStorage = g.columnReads
 			for _, apply := range configure {
 				apply(r)
 			}
