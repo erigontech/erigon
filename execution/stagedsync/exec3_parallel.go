@@ -1385,7 +1385,7 @@ func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) e
 		}
 	}
 	if be.execStarted.IsZero() {
-		if pe.cfg.syncCfg.ExecWorkerCount <= 1 {
+		if pe.workerCount <= 1 {
 			pe.reportExecutionPath(be.blockNum, be.blockHash, "sequential", "disabled", be.versionMap.HasBAL)
 		} else {
 			pe.reportExecutionPath(be.blockNum, be.blockHash, "parallel", "", be.versionMap.HasBAL)

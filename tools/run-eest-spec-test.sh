@@ -267,16 +267,11 @@ fi
 # code 66, the Go race runtime's "data race detected" signal, emitted even when
 # the run completes and the JSON parses clean, and exit code 2, which drops the
 # tests of any input evm could not run.
-# The grep filter strips any init-time log lines (e.g. dbg.envLookup's
-# "[WARN] [env]" message when ERIGON_COMMITMENT_PARALLEL is set fires before cmd/evm
-# sets the log handler, and the default log handler writes to stdout) so jq
-# sees only JSON.
 for path in "${paths[@]}"; do
 	echo "running: $evm_bin $cmd ${extra[*]:-} --workers $workers --jsonout $path"
 	raw_file=$(mktemp)
 	raw_files+=("$raw_file")
-	part_file=$(mktemp)
-	part_files+=("$part_file")
+	part_files+=("$raw_file")
 	rc=0
 	if (( evm_timeout_minutes > 0 )); then
 		# A hung run would otherwise sit silent until the job timeout and leave no trace.
@@ -307,7 +302,6 @@ for path in "${paths[@]}"; do
 		echo "ERROR: evm could not run all of $path (exit code 2); see the log above" >&2
 		exit 1
 	fi
-	grep -v '^\[[A-Z][A-Z]*\]' "$raw_file" > "$part_file"
 done
 jq -s 'add' "${part_files[@]}" > "$result_file"
 

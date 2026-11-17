@@ -196,7 +196,7 @@ func TestRunnersRunFixturesBesideAnUnreadableOne(t *testing.T) {
 				r := results[i]
 				require.Equal(t, name, r.Name)
 				require.NotNil(t, r.Rejections, name)
-				require.Empty(t, *r.Rejections, name)
+				require.Empty(t, r.Rejections, name)
 				if name == "b" {
 					require.False(t, r.Pass)
 					require.Contains(t, r.Error, `invalid hex or decimal integer "0xzz"`)
@@ -294,4 +294,24 @@ func TestBlocktestBatchModeReportsAnUnreadableFile(t *testing.T) {
 	require.NoError(t, json.Unmarshal(stdout, &results))
 	require.Len(t, results, 1)
 	require.True(t, results[0].Pass, results[0].Error)
+}
+
+// collectFiles names files under the path it was given, even when that path is
+// or goes through a symlink, so path-based names and excludes keep matching.
+func TestCollectFilesKeepsTheGivenPath(t *testing.T) {
+	dir := t.TempDir()
+	fixtures := filepath.Join(dir, "fixtures")
+	require.NoError(t, os.MkdirAll(filepath.Join(fixtures, "sub"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(fixtures, "sub", "a.json"), []byte("{}"), 0o644))
+	link := filepath.Join(dir, "link")
+	require.NoError(t, os.Symlink(fixtures, link))
+
+	for _, path := range []string{link, filepath.Join(link, "sub")} {
+		files, err := collectFiles(path)
+		require.NoError(t, err)
+		require.Len(t, files, 1)
+		rel, err := filepath.Rel(path, files[0])
+		require.NoError(t, err)
+		require.False(t, strings.HasPrefix(rel, ".."), files[0])
+	}
 }

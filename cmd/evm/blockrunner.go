@@ -276,12 +276,16 @@ func collectFiles(path string) ([]string, error) {
 		return []string{path}, nil
 	}
 	var out []string
-	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !d.IsDir() && filepath.Ext(path) == ".json" {
-			out = append(out, path)
+		if !d.IsDir() && filepath.Ext(p) == ".json" {
+			rel, err := filepath.Rel(root, p)
+			if err != nil {
+				return err
+			}
+			out = append(out, filepath.Join(path, rel))
 		}
 		return nil
 	})
@@ -330,12 +334,13 @@ func runFixtures(ctx *cli.Command, fname string, filter testFilter, reportPath f
 			bt.ExecWorkers = 1
 		}
 		bt.ExecutionPathReporter = reportPath
+		bt.Rejections = []testutil.Rejection{}
 		result := testResult{Name: name, Pass: true}
 		if err := test.RunCLI(); err != nil {
 			result.Pass = false
 			result.Error = err.Error()
 		}
-		result.Rejections = rejections(bt.Rejections)
+		result.Rejections = bt.Rejections
 		results = append(results, result)
 	}
 
@@ -356,5 +361,5 @@ func splitFixtures(src []byte) ([]string, map[string]json.RawMessage, error) {
 }
 
 func unreadableFixture(name string, err error) testResult {
-	return testResult{Name: name, Error: err.Error(), Rejections: rejections(nil)}
+	return testResult{Name: name, Error: err.Error(), Rejections: []testutil.Rejection{}}
 }

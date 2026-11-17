@@ -150,6 +150,21 @@ func TestEngineTest(t *testing.T) {
 		require.Empty(t, test.Rejections)
 	})
 
+	// A JSON-RPC error does not reject a payload that expects a validation
+	// error: the block was never validated.
+	t.Run("rpc error for an expected validation error", func(t *testing.T) {
+		test := loadEngineTest(t, func(payloads []any) []any {
+			var bad map[string]any
+			src, err := json.Marshal(payloads[0])
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(src, &bad))
+			bad["params"] = append(bad["params"].([]any), "0x")
+			bad["validationError"] = "BlockException.INVALID_BLOCK_HASH"
+			return append(payloads, bad)
+		})
+		require.ErrorContains(t, test.RunCLI(), "payload 2: too many arguments")
+	})
+
 	// The RPC handler answers a param it cannot decode, or one too many, with
 	// -32602. The bad payload comes last, so the chain still ends where the
 	// fixture expects.

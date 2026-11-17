@@ -116,8 +116,11 @@ func TestRunnersReportRejections(t *testing.T) {
 		// newPayloadV4 refuses an Amsterdam payload with a JSON-RPC error.
 		{"engine rejected by error", "enginetest", func(t *testing.T) string {
 			return writeEditedFixture(t, engineFixture, func(fixture map[string]any) {
-				expectPayload1Invalid("BlockException.INVALID_BLOCK_HASH")(fixture)
-				fixture["engineNewPayloads"].([]any)[1].(map[string]any)["newPayloadVersion"] = "4"
+				expectPayload1Invalid("")(fixture)
+				payload := fixture["engineNewPayloads"].([]any)[1].(map[string]any)
+				delete(payload, "validationError")
+				payload["errorCode"] = "-32602"
+				payload["newPayloadVersion"] = "4"
 			})
 		}, 1, "-32602: unexpected slotNumber before engine_newPayloadV5", false},
 		// A null payload decodes to no fields, so the rejection has no hash.

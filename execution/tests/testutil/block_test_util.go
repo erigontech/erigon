@@ -459,7 +459,6 @@ See https://github.com/ethereum/tests/wiki/Blockchain-Tests-II
 */
 func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlock, error) {
 	validBlocks := make([]btBlock, 0)
-	bt.Rejections = []Rejection{}
 	// insert the test blocks, which will execute all transaction
 	for bi, b := range bt.json.Blocks {
 		cb, err := b.decode()

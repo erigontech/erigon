@@ -66,7 +66,6 @@ func (et *EngineTest) UnmarshalJSON(in []byte) error {
 // RunCLI calls an engine server's handlers in process, at the versions the
 // fixture names, on a fresh execution module.
 func (et *EngineTest) RunCLI() error {
-	et.Rejections = []testutil.Rejection{}
 	return et.RunCLIWith(et.deliver)
 }
 
@@ -146,17 +145,16 @@ func (et *EngineTest) sendPayload(ctx context.Context, client *rpc.Client, chain
 	case err == nil && status.Status == enginetypes.InvalidStatus:
 		et.Reject(i, hash, statusErrorString(status))
 	}
-	expectInvalid := p.ValidationError != "" || p.ErrorCode != ""
 	switch {
-	case isRPCErr && expectInvalid:
+	case isRPCErr && p.ErrorCode != "":
 		return nil
 	case err != nil:
 		return err
-	case status.Status == enginetypes.InvalidStatus && expectInvalid:
+	case status.Status == enginetypes.InvalidStatus && p.ValidationError != "":
 		return nil
 	case status.Status != enginetypes.ValidStatus:
 		return statusError("payload", status)
-	case expectInvalid:
+	case p.ValidationError != "" || p.ErrorCode != "":
 		return fmt.Errorf("payload is valid, expected %s%s", p.ValidationError, p.ErrorCode)
 	}
 	if hash == nil {
