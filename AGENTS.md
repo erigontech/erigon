@@ -62,7 +62,7 @@ When fixing bugs or adding new features, follow the test-driven development (TDD
 
 Before adding a test: Inspect the relevant existing tests - extend them 
 
-Before changing a bound or constant: a deliberate tolerance and an off-by-one are indistinguishable at the call site. Before changing a bound, threshold or rounding expression, read the code that *produces* the value being compared against and confirm the intended relationship.
+Before changing a bound, threshold or rounding expression: a deliberate tolerance and an off-by-one are indistinguishable at the call site, so read the code that *produces* the value being compared against and confirm the intended relationship. A red test does not settle this. It proves the code disagrees with your expectation, not that your expectation matches the system's contract — a test that encodes the same wrong assumption as the change passes for the wrong reason.
 
 ### For bug fixes
 
@@ -91,7 +91,7 @@ When an agent encounters a failing test:
 - Fix the underlying bug
 - If genuinely unfixable in-session: (a) escalate with the findings, or (b) report a tracked blocker — never (c) skip it
 
-Removing tests from CI matrix: require own PR with clear reasons
+Except for that `testing.Short()` convention, this applies to all forms of test muting: `t.Skip`, `t.SkipNow`, `t.Skipf`, `SkipLoad`, `bt.SkipLoad`, build-tag exclusions, conditional bypasses behind `dbg.*` env flags, and removing tests from a runner matrix without a tracking issue. **All are off-limits for automated agents.**
 
 ### Valid reasons a skip may exist
 
@@ -119,7 +119,7 @@ Follow [Local verification](#local-verification) before commits, pushes, and PR 
 
 A comment may be warranted for: a non-obvious invariant the types don't enforce; a workaround for a bug in a dependency or the runtime (link the issue/commit); a surprising edge case a reader would otherwise miss; a performance-sensitive choice where the obvious implementation would be wrong.
 
-- Concise, but err on the side of clarity: cut comments a sentence or two - if it doesn't harm clarity
+- Concise, but err on the side of clarity: most comments fit in a sentence or two; keep an extra sentence when cutting it would cost understanding
 - High-level, not scenario-specific: explain the invariant or gotcha in general terms
 - Free of forensic detail: Strip dates, devnet/branch names, PR/issue/review references, incident anecdotes, callsite lists, scope or limitation narration (`// forward-only`, `// safety net`). That history belongs in the commit message and PR description
 - Stated once: "The Why" lives at its canonical place — the field, type or function it belongs to; other sites refer to the source of truth
@@ -127,13 +127,13 @@ A comment may be warranted for: a non-obvious invariant the types don't enforce;
 
 ## Code Reviews
 
-Keep review feedback focused by PR scope - real unrelated bugs must be fixed in follow-up PR. Do not require unrelated pre-existing issues to be fixed in the same change 
+Keep review feedback focused on the behavior and code changed by the PR. Do not require unrelated pre-existing issues to be fixed in the same change; ask for a follow-up issue or PR instead.
 
 ### Pull Request scope
 
 Keep each PR focused on one coherent unit of work. Judge scope by the concepts changed, not only by the number of lines or files
 
-Large change: use stacked PRs
+A large PR is acceptable when one cohesive change must touch many places, such as a mass rename, an API or package migration, generated-code updates, or a mechanical refactor across call sites. For a large change with multiple dependent, independently reviewable parts, consider stacked pull requests.
 
 Benchmarks: keep in `xyz_bench_test.go` file instead of `xyz_test.go`
 
