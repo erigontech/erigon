@@ -72,7 +72,7 @@ func (d *peerdas) ImportColumnsFromBlobs(ctx context.Context, block *cltypes.Sig
 		}
 		stored = append(stored, sidecar)
 	}
-	if err := d.columnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, stored); err != nil {
+	if _, err := d.writeColumnSidecarsBatched(ctx, block.Block.Slot, blockRoot, stored); err != nil {
 		return nil, err
 	}
 	if err := d.TryScheduleRecover(block.Block.Slot, blockRoot); err != nil {
