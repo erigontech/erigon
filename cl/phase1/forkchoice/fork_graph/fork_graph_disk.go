@@ -136,6 +136,7 @@ type forkGraphDisk struct {
 
 	currentState          *state.CachingBeaconState
 	currentStateBlockRoot common.Hash // block root of the last processed block (avoids BlockRoot() zeroed-StateRoot issue)
+	replayedStates        replayStateCache
 	nextEpochParentRoot   common.Hash
 	nextEpochState        *state.CachingBeaconState
 	highestTransitionSlot uint64
@@ -511,6 +512,22 @@ func (f *forkGraphDisk) replayState(blockRoot common.Hash, addChainSegment bool)
 			return state, err
 		}
 	} else {
+		var cached *state.CachingBeaconState
+		f.lifecycleMu.RLock()
+		if f.retainedBlock(blockRoot) {
+			cached, _ = f.replayedStates.get(blockRoot)
+		}
+		f.lifecycleMu.RUnlock()
+		if cached != nil {
+			if cachedCopy, copyErr := cached.Copy(); copyErr == nil {
+				f.lifecycleMu.RLock()
+				retained := f.retainedBlock(blockRoot)
+				f.lifecycleMu.RUnlock()
+				if retained {
+					return cachedCopy, nil
+				}
+			}
+		}
 		if _, ok := f.GetHeader(blockRoot); !ok {
 			return nil, nil
 		}
@@ -566,12 +583,28 @@ func (f *forkGraphDisk) replayState(blockRoot common.Hash, addChainSegment bool)
 
 	// Traverse the blocks from top to bottom.
 	for _, b := range slices.Backward(blocksInTheWay) {
-		if err := transition.TransitionState(copyReferencedState, b, nil, false); err != nil {
+		var transitionErr error
+		if addChainSegment {
+			transitionErr = transition.TransitionState(copyReferencedState, b, nil, false)
+		} else {
+			transitionErr = transition.TransitionStateForReplay(copyReferencedState, b, nil)
+		}
+		if transitionErr != nil {
 			if addChainSegment {
 				f.currentState = nil
 				f.currentStateBlockRoot = common.Hash{}
 			}
-			return nil, err
+			return nil, transitionErr
+		}
+	}
+	if !addChainSegment {
+		cacheCopy, copyErr := copyReferencedState.Copy()
+		if copyErr == nil {
+			f.lifecycleMu.RLock()
+			if f.retainedBlock(blockRoot) {
+				f.replayedStates.add(blockRoot, cacheCopy)
+			}
+			f.lifecycleMu.RUnlock()
 		}
 	}
 	return copyReferencedState, nil
@@ -712,6 +745,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.previousIndicies.deleteKeys(previousIndexKeys)
 	}
 	f.addPruneMu.Unlock()
+	f.replayedStates.clear()
 	if f.pruneBoundaryHook != nil {
 		f.pruneBoundaryHook()
 	}

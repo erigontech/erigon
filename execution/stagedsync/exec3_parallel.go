@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -1384,6 +1385,13 @@ func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) e
 			return fmt.Errorf("seed EIP-161 removals of block %d: %w", be.blockNum, err)
 		}
 	}
+	if be.execStarted.IsZero() {
+		if pe.workerCount <= 1 {
+			pe.reportExecutionPath(be.blockNum, be.blockHash, "sequential", "disabled", be.versionMap.HasBAL)
+		} else {
+			pe.reportExecutionPath(be.blockNum, be.blockHash, "parallel", "", be.versionMap.HasBAL)
+		}
+	}
 	be.execStarted = time.Now()
 	be.scheduleExecution(ctx, pe)
 	return nil
@@ -1698,6 +1706,7 @@ type blockResult struct {
 	Exhausted        *ErrLoopExhausted
 	Header           *types.Header      // for accumulator.StartChange in apply loop
 	Txs              types.Transactions // for accumulator.StartChange in apply loop
+	parentState      commitmentdb.ParentState
 	BAL              *types.BlockAccessListSidecar
 
 	// Exec window for newPayload wall attribution; the calculator pairs these with
@@ -2732,7 +2741,9 @@ func pathBit(p state.AccountPath) uint16 { return 1 << p }
 func cmpReaderTx(r addrReader, tx int) int { return cmp.Compare(r.tx, tx) }
 
 // dispatchWindow bounds how far past the commit frontier a block dispatches tasks.
-const dispatchWindow = 32
+func dispatchWindow(workers int) int {
+	return min(128, max(32, 8*workers))
+}
 
 // readersAbove returns the readers in the ascending list l that are > tx.
 func readersAbove(l []addrReader, tx int) []addrReader {
@@ -3081,8 +3092,8 @@ func (be *blockExecutor) frontier() int {
 // dispatchLimit is the last task that dispatch may enqueue now. It is at most window tasks past
 // the commit frontier, so results arrive close to block order and the per-result reader scans
 // stay short.
-func (be *blockExecutor) dispatchLimit() int {
-	return min(len(be.tasks)-1, be.frontier()+dispatchWindow)
+func (be *blockExecutor) dispatchLimit(workers int) int {
+	return min(len(be.tasks)-1, be.frontier()+dispatchWindow(workers))
 }
 
 // requeueAt registers pt to be re-queued when the frontier reaches target. Returns
@@ -3643,6 +3654,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			execStartedAt:    be.execStarted,
 			execEndedAt:      time.Now(),
 		}
+		if !isPartial && len(be.tasks) > 0 && commitmentdb.ParentReadsWanted() && !slices.ContainsFunc(be.tasks, func(t *execTask) bool { return t.Task.IsHistoric() }) {
+			be.result.parentState = parentStateFromReads(be.blockIO)
+		}
 		return be.result, nil
 	}
 
@@ -3670,7 +3684,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			return 0
 		}
 		budget := len(be.tasks)
-		lastTx := be.dispatchLimit()
+		lastTx := be.dispatchLimit(pe.workerCount)
 		for {
 			nextTx := be.execTasks.minPending()
 			if nextTx < 0 || nextTx > lastTx {

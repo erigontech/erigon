@@ -30,6 +30,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/c2h5oh/datasize"
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
 
@@ -100,7 +101,17 @@ type EngineServer struct {
 
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
 	maxReorgDepth   uint64
+
+	witnessBuilder   *jsonrpc.DebugAPIImpl
+	payloadWitnesses *jsonrpc.WitnessResultCache
 }
+
+// Bounds for the witnesses kept for payloads resubmitted after their state was committed.
+// One witness can reach hundreds of MB, so the byte bound is the one that matters.
+const (
+	payloadWitnessCacheSize  = 8
+	payloadWitnessCacheBytes = int(256 * datasize.MB)
+)
 
 func NewEngineServer(
 	logger log.Logger,
@@ -130,6 +141,7 @@ func NewEngineServer(
 		txpool:           txPool,
 		blobGetter:       blobGetter,
 		maxReorgDepth:    maxReorgDepth,
+		payloadWitnesses: jsonrpc.NewWitnessResultCache(payloadWitnessCacheSize, payloadWitnessCacheBytes),
 	}
 
 	srv.consuming.Store(consuming)
@@ -137,7 +149,8 @@ func NewEngineServer(
 	return srv
 }
 
-func (e *EngineServer) engineAPI() rpc.API {
+// API returns the engine namespace as the RPC server registers it.
+func (e *EngineServer) API() rpc.API {
 	return rpc.API{
 		Namespace: "engine",
 		Public:    true,
@@ -173,6 +186,7 @@ func (e *EngineServer) Start(
 	}
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, engine, jsonrpc.NewBaseApiConfig(httpConfig))
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
+	e.witnessBuilder = jsonrpc.NewPrivateDebugAPI(base, db, eth, jsonrpc.NewDebugApiConfig(httpConfig))
 
 	apiList := []rpc.API{
 		{
@@ -181,7 +195,7 @@ func (e *EngineServer) Start(
 			Service:   jsonrpc.EthAPI(ethImpl),
 			Version:   "1.0",
 		},
-		e.engineAPI(),
+		e.API(),
 	}
 
 	eg.Go(func() error {
@@ -341,10 +355,13 @@ func (e *EngineServer) decodePayloadTransactions(raw []hexutil.Bytes, gasLimit u
 	return txs, transactions, expectedBlobHashes, nil
 }
 
-// newPayload validates and may execute a payload.
+// newPayload validates and may execute a payload. A non-nil onValid runs for a VALID payload after the engine lock is
+// released. Before it, a view of the validated state taken under the lock builds and caches the payload witness, also
+// for a known VALID payload whose witness is not cached.
 func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
 	executionRequests []hexutil.Bytes, version clparams.StateVersion, deriveBlobHashes bool,
+	onValid func(blockHash common.Hash, witness *jsonrpc.ExecutionWitnessResult),
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if req == nil {
@@ -588,22 +605,64 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if err != nil {
 		return nil, err
 	}
-	if possibleStatus != nil {
+	if possibleStatus != nil && (onValid == nil || possibleStatus.Status != engine_types.ValidStatus) {
 		e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
 		return possibleStatus, nil
 	}
 
+	var witness payloadWitnessJob
+	var validated bool
+	defer func() {
+		if witness.view != nil {
+			if err := witness.view(); err != nil {
+				e.logger.Warn("[NewPayload] could not view the payload state", "hash", blockHash, "err", err)
+			}
+		}
+		if validated {
+			onValid(blockHash, witness.result)
+		}
+	}()
 	e.lock.Lock()
 	defer e.lock.Unlock()
 
-	e.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	// Pass `txs` (the binary tx encodings from the CL) through as the Block's
 	// binaryTransactions cache so the downstream Block.RawBody() invocation
 	// inside InsertBlocks doesn't re-encode every tx
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
-	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block)
+	if possibleStatus != nil {
+		// Decided without the lock: a forkchoice update or another payload may have changed the validated state since.
+		if possibleStatus, err = e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, parent, nil, true, defaultReadinessWait); err != nil {
+			return nil, err
+		}
+		if possibleStatus != nil {
+			e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
+			if possibleStatus.Status != engine_types.ValidStatus {
+				return possibleStatus, nil
+			}
+			if cached, ok := e.payloadWitnesses.Get(blockHash); ok {
+				witness.result = cached
+			} else {
+				status, validationErr, latestValidHash, err := e.validateChain(ctx, block, &witness)
+				if err != nil {
+					return nil, err
+				}
+				if possibleStatus = e.validatedPayloadStatus(block, status, validationErr, latestValidHash); possibleStatus.Status != engine_types.ValidStatus {
+					return possibleStatus, nil
+				}
+			}
+			validated = true
+			return possibleStatus, nil
+		}
+	}
+
+	e.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
+	var witnessOut *payloadWitnessJob
+	if onValid != nil {
+		witnessOut = &witness
+	}
+	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block, witnessOut)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -618,7 +677,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
 	}
-
+	validated = onValid != nil && payloadStatus.Status == engine_types.ValidStatus
 	return payloadStatus, nil
 }
 
@@ -1097,6 +1156,7 @@ func (e *EngineServer) HandleNewPayload(
 	ctx context.Context,
 	logPrefix string,
 	block *types.Block,
+	witness *payloadWitnessJob,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
 
@@ -1141,7 +1201,7 @@ func (e *EngineServer) HandleNewPayload(
 			}); respondSyncing {
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			}
-			status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, block)
+			status, validationErr, latestValidHash, err := e.validateChain(ctx, block, witness)
 			if err != nil {
 				missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
 				if isMissingChainErr {
@@ -1183,7 +1243,7 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	e.logger.Debug(fmt.Sprintf("[%s] New payload begin verification", logPrefix))
-	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, block)
+	status, validationErr, latestValidHash, err := e.validateChain(ctx, block, witness)
 	e.logger.Debug(fmt.Sprintf("[%s] New payload verification ended", logPrefix), "status", status.String(), "err", err)
 	if err != nil {
 		missingBlkHash, isMissingChainErr := execmodule.GetBlockHashFromMissingSegmentError(err)
@@ -1201,6 +1261,40 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	return e.validatedPayloadStatus(block, status, validationErr, latestValidHash), nil
+}
+
+// payloadWitnessJob carries the witness of a VALID payload out of the engine lock.
+type payloadWitnessJob struct {
+	view   func() error // builds result from a copy of the validated state, after the locks are released
+	result *jsonrpc.ExecutionWitnessResult
+}
+
+// validateChain validates block. With a non-nil witness, a VALID block also gets the view that builds its witness.
+func (e *EngineServer) validateChain(ctx context.Context, block *types.Block, witness *payloadWitnessJob) (execmodule.ExecutionStatus, *string, common.Hash, error) {
+	if witness == nil {
+		return e.chainRW.ValidateChain(ctx, block)
+	}
+	blockHash := block.Hash()
+	result, view, err := e.executionService.ValidateChainAndView(ctx, block, defaultReadinessWait, func(blockTx kv.TemporalTx, parentState kv.TemporalGetter) error {
+		result, err := e.payloadWitnesses.BuildPayloadWitness(ctx, blockHash, func(ctx context.Context) (*jsonrpc.ExecutionWitnessResult, error) {
+			return e.witnessBuilder.ValidatedBlockWitness(ctx, blockTx, parentState, blockHash)
+		})
+		if err != nil {
+			e.logger.Warn("[NewPayload] could not build the payload witness", "hash", blockHash, "err", err)
+			return nil
+		}
+		witness.result = result
+		return nil
+	})
+	witness.view = view
+	if err != nil {
+		return 0, nil, common.Hash{}, err
+	}
+	var validationErr *string
+	if len(result.ValidationError) > 0 {
+		validationErr = &result.ValidationError
+	}
+	return result.ValidationStatus, validationErr, result.LatestValidHash, nil
 }
 
 func (e *EngineServer) validatedPayloadStatus(block *types.Block, status execmodule.ExecutionStatus, validationErr *string, latestValidHash common.Hash) *engine_types.PayloadStatus {
