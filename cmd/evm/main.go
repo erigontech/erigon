@@ -24,6 +24,7 @@ import (
 	"context"
 	"math/big"
 	"os"
+	"runtime/pprof"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -240,7 +241,26 @@ func init() {
 }
 
 func main() {
-	if err := app.Run(context.Background(), os.Args); err != nil {
+	if p := os.Getenv("EVM_CPUPROFILE"); p != "" {
+		f, err := os.Create(p)
+		if err != nil {
+			panic(err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			panic(err)
+		}
+	}
+	err := app.Run(context.Background(), os.Args)
+	pprof.StopCPUProfile()
+	if p := os.Getenv("EVM_MEMPROFILE"); p != "" {
+		f, ferr := os.Create(p)
+		if ferr != nil {
+			panic(ferr)
+		}
+		_ = pprof.Lookup("allocs").WriteTo(f, 0)
+		f.Close()
+	}
+	if err != nil {
 		os.Exit(1) // fallback: NewApp's ExitErrHandler normally prints and exits first
 	}
 }
