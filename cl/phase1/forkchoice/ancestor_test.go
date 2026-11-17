@@ -137,3 +137,37 @@ func TestAncestorIsNotMixedByAConcurrentPrune(t *testing.T) {
 
 	require.Equal(t, ForkChoiceNode{PayloadStatus: cltypes.PayloadStatusPending}, store.Ancestor(roots[3], 11))
 }
+
+// Every gossip attestation looks up the same ancestor of the head, so a repeated lookup must not walk again.
+func TestAncestorReusesTheWalkForTheSameRootAndSlot(t *testing.T) {
+	store, graph, roots := ancestorChain(clparams.GloasVersion, 33)
+	store.ancestors = newAncestorCache()
+	first := store.Ancestor(roots[32], 10)
+	headers, blocks := graph.getHeaderCalls, graph.getBlockCalls
+
+	require.Equal(t, first, store.Ancestor(roots[32], 10))
+	require.LessOrEqual(t, graph.getHeaderCalls-headers, 1, "a cached ancestor is only checked to still be stored")
+	require.Zero(t, graph.getBlockCalls-blocks)
+}
+
+func TestAncestorDoesNotKeepAnUnknownResult(t *testing.T) {
+	store, graph, roots := ancestorChain(clparams.FuluVersion, 4)
+	store.ancestors = newAncestorCache()
+	child := graph.headers[roots[3]]
+	delete(graph.headers, roots[3])
+	require.Equal(t, ForkChoiceNode{PayloadStatus: cltypes.PayloadStatusPending}, store.Ancestor(roots[3], 11))
+
+	graph.headers[roots[3]] = child
+	require.Equal(t, roots[1], store.Ancestor(roots[3], 11).Root, "the block arrived, so the walk runs again")
+}
+
+// Pruning removes the headers of old blocks; a cached ancestor that is no longer stored gives the walk's result.
+func TestAncestorDropsACachedAncestorThatIsNoLongerStored(t *testing.T) {
+	store, graph, roots := ancestorChain(clparams.FuluVersion, 4)
+	store.ancestors = newAncestorCache()
+	require.Equal(t, roots[1], store.Ancestor(roots[3], 11).Root)
+
+	delete(graph.headers, roots[1])
+	delete(graph.blocks, roots[1])
+	require.Equal(t, ForkChoiceNode{PayloadStatus: cltypes.PayloadStatusPending}, store.Ancestor(roots[3], 11))
+}

@@ -20,6 +20,8 @@ import (
 	"errors"
 	"fmt"
 
+	lru "github.com/hashicorp/golang-lru/v2"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/transition"
@@ -285,13 +287,43 @@ func (f *ForkChoiceStore) getAncestor(node ForkChoiceNode, slot uint64) ForkChoi
 	}
 }
 
-// Ancestor returns the ancestor to the given root.
-// [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
+type ancestorKey struct {
+	root common.Hash
+	slot uint64
+}
+
+// ancestorCacheSize covers the heads and target slots that gossip attestations name at the same time.
+const ancestorCacheSize = 1024
+
+func newAncestorCache() *lru.Cache[ancestorKey, ForkChoiceNode] {
+	cache, err := lru.New[ancestorKey, ForkChoiceNode](ancestorCacheSize)
+	if err != nil {
+		panic(err)
+	}
+	return cache
+}
+
+// Ancestor returns the ancestor of root at slot with its payload status (Gloas:EIP7732). Found ancestors are cached
+// by root and slot: blocks never change and pruning removes the oldest slots first, so while the cached ancestor is
+// stored, the walk would return it again.
 func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode {
-	return f.getAncestor(ForkChoiceNode{
+	key := ancestorKey{root: root, slot: slot}
+	if f.ancestors != nil {
+		if node, ok := f.ancestors.Get(key); ok {
+			if _, stored := f.forkGraph.GetHeader(node.Root); stored {
+				return node
+			}
+			f.ancestors.Remove(key)
+		}
+	}
+	node := f.getAncestor(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusPending,
 	}, slot)
+	if f.ancestors != nil && node.Root != (common.Hash{}) {
+		f.ancestors.Add(key, node)
+	}
+	return node
 }
 
 // getCheckpointState computes and caches checkpoint states.
