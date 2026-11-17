@@ -18,12 +18,18 @@ package state
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
@@ -260,4 +266,89 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 
 	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
 		"lowering a history-II end while values ends stay put must trip the forbid assert")
+}
+
+func TestOpenFolderLetsMissedAccessorsBuildBeforeGapCheck(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.1-2.bt")))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return SavePruneValProgress(tx, agg.d[kv.AccountsDomain].ValuesTable, &prune.Stat{TxTo: 2 * alignStepSize})
+	}))
+
+	agg.buildsMissedAccessorsAfterOpen = true
+	require.NoError(t, agg.OpenFolder(db))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
+	requireVisibleEnd(t, agg, 2*alignStepSize)
+}
+
+func TestHasAccessorsToBuildSkipsCoveredFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	ranges := []testFileRange{{0, 1}, {1, 2}, {0, 2}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.0-2.bt")))
+	require.NoError(t, agg.OpenFolder(nil))
+
+	require.False(t, agg.hasAccessorsToBuild(), "startup builds no accessor for a file covered by indexed files")
+}
+
+// exitedInChildProcess re-runs the test in a child process, because the gap check exits the process.
+func exitedInChildProcess(t *testing.T) bool {
+	t.Helper()
+	if os.Getenv("ERIGON_GAP_CHECK_CHILD") != "" {
+		return false
+	}
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+regexp.QuoteMeta(t.Name())+"$")
+	cmd.Env = append(os.Environ(), "ERIGON_GAP_CHECK_CHILD=1", "TMPDIR="+t.TempDir()) // the child exits before its own cleanup
+	out, err := cmd.CombinedOutput()
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, err, &exitErr, "the gap check must exit the process:\n%s", out)
+	require.NotContains(t, string(out), "--- FAIL", "the child must exit in the gap check, not fail a check")
+	return true
+}
+
+func TestOpenFolderChecksGapWhenNoAccessorBuildFollows(t *testing.T) {
+	if exitedInChildProcess(t) {
+		return
+	}
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+	ranges := []testFileRange{{0, 1}, {1, 2}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapDomain, "v1.0-accounts.1-2.bt")))
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return SavePruneValProgress(tx, agg.d[kv.AccountsDomain].ValuesTable, &prune.Stat{TxTo: 2 * alignStepSize})
+	}))
+	require.NoError(t, agg.OpenFolder(db))
+}
+
+func TestBuildMissedAccessorsChecksGapWhenAnAccessorCannotBeBuilt(t *testing.T) {
+	if exitedInChildProcess(t) {
+		return
+	}
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	for _, path := range []string{"idx/v1.0-accounts.1-2.ef", "accessor/v2.0-accounts.1-2.vi"} {
+		require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().Snap, filepath.FromSlash(path))))
+	}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return SavePruneValProgress(tx, agg.d[kv.AccountsDomain].History.ValuesTable, &prune.Stat{TxTo: 3 * alignStepSize})
+	}))
+	agg.buildsMissedAccessorsAfterOpen = true
+	require.NoError(t, agg.OpenFolder(db))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
 }

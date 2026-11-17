@@ -27,12 +27,13 @@ type AggOpts struct { //nolint:gocritic
 	erigondbDomainStepsInFrozenFile uint64
 	referencesInCommitmentBranches  *bool // nil = leave global schema default untouched
 
-	genSaltIfNeed       bool
-	sanityOldNaming     bool // prevent start directory with old file names
-	disableFsync        bool // for tests speed
-	disableBranchCache  bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
-	skipFilesDBGapCheck bool
-	btIndexInMem        bool // see BtIndexInMem
+	genSaltIfNeed                  bool
+	sanityOldNaming                bool // prevent start directory with old file names
+	disableFsync                   bool // for tests speed
+	disableBranchCache             bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
+	skipFilesDBGapCheck            bool
+	buildsMissedAccessorsAfterOpen bool
+	btIndexInMem                   bool // see BtIndexInMem
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
@@ -77,6 +78,7 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 	a.branchCacheDisabled = opts.disableBranchCache
 	a.disableFsync = opts.disableFsync
 	a.skipFilesDBGapCheck = opts.skipFilesDBGapCheck
+	a.buildsMissedAccessorsAfterOpen = opts.buildsMissedAccessorsAfterOpen
 
 	a.savedSalt = salt
 
@@ -129,6 +131,13 @@ func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts
 func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts } //nolint:gocritic
 
 func (opts AggOpts) SkipFilesDBGapCheck() AggOpts { opts.skipFilesDBGapCheck = true; return opts } //nolint:gocritic
+
+// BuildsMissedAccessorsAfterOpen defers the files/DB gap check while accessors are missing: the caller runs BuildMissedAccessors, which checks after the build.
+func (opts AggOpts) BuildsMissedAccessorsAfterOpen() AggOpts { //nolint:gocritic
+	opts.buildsMissedAccessorsAfterOpen = true
+	return opts
+}
+
 func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
 	return opts
