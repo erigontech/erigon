@@ -934,9 +934,6 @@ func (ibs *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 // EIP-7702 delegation). No-op when the reader doesn't implement it.
 type codeAccessTracker interface {
 	OnCodeAccess(accounts.Address, []byte)
-}
-
-type codeChangeTracker interface {
 	OnCodeChange(accounts.CodeHash) func()
 }
 
@@ -1761,8 +1758,8 @@ func (ibs *IntraBlockState) writeCode(addr accounts.Address, code accounts.Code,
 // journalCodeChange journals a code change and calls the tracing hooks.
 func (ibs *IntraBlockState) journalCodeChange(addr accounts.Address, prevHash accounts.CodeHash, prevCode []byte, code accounts.Code, wasCommited bool, reason tracing.CodeChangeReason) {
 	entry := ibs.journal.codeChange(addr, prevCode, prevHash, wasCommited)
-	if tracker, ok := ibs.stateReader.(codeChangeTracker); ok {
-		if undo := tracker.OnCodeChange(code.Hash); undo != nil {
+	if ibs.codeAccess != nil {
+		if undo := ibs.codeAccess.OnCodeChange(code.Hash); undo != nil {
 			if entry.extra == nil {
 				entry.extra = &journalExtra{prevhash: accounts.EmptyCodeHash}
 			}

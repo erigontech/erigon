@@ -311,7 +311,7 @@ func WitnessNodesForKeysByHash(byHash map[string][]byte, root []byte, hexKeys []
 				if terminating {
 					nKey = nKey[:len(nKey)-1]
 				}
-				if !produceExclusionProofs && len(k) <= len(nKey) && bytes.HasPrefix(nKey, k) {
+				if !produceExclusionProofs && bytes.Equal(nKey, k) {
 					node = nil
 					break
 				}
