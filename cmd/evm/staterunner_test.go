@@ -29,10 +29,12 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func TestNewStateTestSharedDomainsUsesParallelCommitment(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, tx := temporaltest.NewTestTx(t)
 	sd, err := newStateTestSharedDomains(db, tx)
 	require.NoError(t, err)

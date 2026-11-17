@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -63,6 +64,9 @@ func TestGetTransactionRejectsUnsupportedType(t *testing.T) {
 // rest of the binary uses. The variant is only upgraded once a DB is wired in, so
 // a construction that skips that step computes the state root sequentially.
 func TestT8nSharedDomainsUsesParallelTrie(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	// No t.Parallel: mutates process-global statecfg flags.
+
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
