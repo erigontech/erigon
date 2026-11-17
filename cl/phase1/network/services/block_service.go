@@ -1153,6 +1153,8 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		}
 		go b.importBlockOperations(block)
 	}
+	// Fork choice takes the block after its index write, so waiters are woken only now.
+	b.emitter.NotifyBlockIndicesChanged()
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteHighestFinalized(tx, b.forkchoiceStore.FinalizedSlot())
 	}); err != nil && !isCallerCancellation(ctx, err) {

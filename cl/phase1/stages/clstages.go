@@ -231,6 +231,8 @@ func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.Sign
 	}); err != nil {
 		return err
 	}
+	// Deferred because OnBlock below runs after the index write.
+	defer cfg.emitter.NotifyBlockIndicesChanged()
 
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -20,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 const (
@@ -33,6 +35,7 @@ const (
 	chainTipRequestRetryInterval = 300 * time.Millisecond
 	chainTipNoPeersRetryInterval = 2 * time.Second
 	chainTipPollInterval         = time.Second
+	chainTipPresenceInterval     = 20 * time.Millisecond
 )
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
@@ -223,20 +226,29 @@ func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger 
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()
 
-	// Timer to check block presence every 20 milliseconds
-	presenceTicker := time.NewTicker(20 * time.Millisecond)
+	presenceTicker := time.NewTicker(chainTipPresenceInterval)
 	defer presenceTicker.Stop()
 
 	// Map to keep track of seen block roots
 	seenBlockRoots := make(map[common.Hash]struct{})
 	// Why a block was not imported, so its children report the cause instead of a missing parent.
 	rejected := make(map[common.Hash]error)
+	// An index commit wakes the loop, which returns once the highest seen block is indexed.
+	indicesChanged := cfg.emitter.BlockIndicesChanged()
+	if highestSeenBlockIndexed(ctx, cfg, args.targetSlot) {
+		return nil
+	}
 MainLoop:
 	for {
 		select {
 		case <-presenceTicker.C:
 			// Check if the highest seen block is greater than or equal to the target slot
 			if cfg.forkChoice.HighestSeen() >= args.targetSlot {
+				break MainLoop
+			}
+		case <-indicesChanged:
+			indicesChanged = cfg.emitter.BlockIndicesChanged()
+			if highestSeenBlockIndexed(ctx, cfg, args.targetSlot) {
 				break MainLoop
 			}
 		case <-ctx.Done():
@@ -258,6 +270,19 @@ MainLoop:
 		}
 	}
 	return nil
+}
+
+func highestSeenBlockIndexed(ctx context.Context, cfg *Cfg, targetSlot uint64) bool {
+	if cfg.forkChoice.HighestSeen() < targetSlot {
+		return false
+	}
+	root := cfg.forkChoice.HighestSeenRoot()
+	var slot *uint64
+	err := cfg.indiciesDB.View(ctx, func(tx kv.Tx) (err error) {
+		slot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
+		return err
+	})
+	return err == nil && slot != nil && *slot >= targetSlot
 }
 
 // withMissingAncestors puts the ancestors of a batch's first block with an unknown parent before the

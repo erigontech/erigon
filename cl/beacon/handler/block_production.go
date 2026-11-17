@@ -3226,6 +3226,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	}); err != nil {
 		return err
 	}
+	a.emitters.NotifyBlockIndicesChanged()
 	markServable()
 	// Columns are chosen after OnBlock, which can raise the custody group count.
 	if err := a.storeDataColumnSidecars(ctx, block.Block.Slot, blockRoot, columnSidecars); err != nil {
