@@ -186,7 +186,7 @@ func BenchmarkWitness(b *testing.B) {
 				keys.touch(u)
 				byHash, proved, root, err := hph.WitnessesByHash(ctx, u, exclusion)
 				require.NoError(b, err)
-				_, err = trie.WitnessNodesForKeysByHash(byHash, root, proved)
+				_, err = trie.WitnessNodesForKeysByHash(byHash, root, proved, exclusion)
 				require.NoError(b, err)
 				u.Close()
 			}
@@ -200,7 +200,7 @@ func BenchmarkWitness(b *testing.B) {
 				keys.touch(u)
 				byHash, proved, root, err := tr.WitnessesByHash(ctx, u, exclusion)
 				require.NoError(b, err)
-				_, err = trie.WitnessNodesForKeysByHash(byHash, root, proved)
+				_, err = trie.WitnessNodesForKeysByHash(byHash, root, proved, exclusion)
 				require.NoError(b, err)
 				u.Close()
 			}

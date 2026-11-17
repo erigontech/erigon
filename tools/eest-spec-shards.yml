@@ -258,13 +258,13 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: true
-  expected-tests: 26687
+  expected-tests: 26853
 - shard: zkevm-witness-v3
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: false
   commitment-v3: true
-  expected-tests: 26687
+  expected-tests: 26853
 - shard: blocktests-stable-race-pre-cancun-parallel
   workers: 12
   max-allowed-failures: 0
@@ -299,4 +299,4 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: true
-  expected-tests: 26687
+  expected-tests: 26853
