@@ -56,28 +56,10 @@ func assertMemoMatches[H comparable](t *testing.T, rounds int, memo func(*uint25
 	}
 }
 
-func TestInternStorageKeyMatchesInternKey(t *testing.T) {
-	ibs := &IntraBlockState{}
-	assertMemoMatches(t, storageKeyCacheMinOps+10, ibs.InternStorageKey,
-		func(w *uint256.Int) accounts.StorageKey { return accounts.InternKey(w.Bytes32()) })
-}
-
 func TestInternAddressMatchesInternAddress(t *testing.T) {
 	ibs := &IntraBlockState{}
 	assertMemoMatches(t, addressCacheMinOps+10, ibs.InternAddress,
 		func(w *uint256.Int) accounts.Address { return accounts.InternAddress(w.Bytes20()) })
-}
-
-func TestStorageKeyCacheNotAllocatedForShortLivedState(t *testing.T) {
-	ibs := &IntraBlockState{}
-	word := uint256.NewInt(7)
-	for range storageKeyCacheMinOps {
-		ibs.InternStorageKey(word)
-	}
-	assert.Nil(t, ibs.internCache)
-
-	ibs.InternStorageKey(word)
-	assert.NotNil(t, ibs.internCache)
 }
 
 func TestAddressCacheNotAllocatedForShortLivedState(t *testing.T) {
@@ -222,23 +204,6 @@ func TestInternAddressInternsTheZeroAddressOnAnEmptyBucket(t *testing.T) {
 
 // TestInternStorageKeyInternsTheZeroKeyOnAnEmptyBucket is the same guard on the
 // key table: slot 0 is a legitimate key, and an empty entry holds its word.
-func TestInternStorageKeyInternsTheZeroKeyOnAnEmptyBucket(t *testing.T) {
-	ibs := &IntraBlockState{}
-	var zero uint256.Int
-
-	for i := range uint64(storageKeyCacheMinOps + 1) {
-		word := uint256.Int{i + 1, 0, 0, 0}
-		require.NotEqual(t, slotIndex(&zero), slotIndex(&word))
-		ibs.InternStorageKey(&word)
-	}
-	require.NotNil(t, ibs.internCache)
-	require.Equal(t, accounts.NilKey, ibs.internCache.handles[slotIndex(&zero)],
-		"the zero word must probe an entry nothing has filled")
-
-	require.True(t, accounts.InternKey(common.Hash{}) == ibs.InternStorageKey(&zero),
-		"slot 0 must intern, not read as the empty entry it collides with")
-}
-
 // TestInternAddressSurvivesPooling pins what makes the memo worth having on a
 // pooled or reused state: interning is pure, so a warmed entry stays valid across
 // calls and clearing it would throw away exactly the reuse the table exists for.
@@ -260,24 +225,4 @@ func TestInternAddressSurvivesPooling(t *testing.T) {
 	require.Same(t, ibs, next)
 	require.True(t, sentinel == next.InternAddress(&word),
 		"a warmed address must still hit in the next call on the pooled state")
-}
-
-func TestInternStorageKeySurvivesPooling(t *testing.T) {
-	withSlotPool(t)
-	ibs := NewPooled(NewNoopReader())
-	word := uint256.Int{0x1122334455667788, 0x99aabbccddeeff00, 0x12345678, 0x9abcdef0}
-	for range storageKeyCacheMinOps + 1 {
-		ibs.InternStorageKey(&word)
-	}
-	sentinel := accounts.InternKey(common.HexToHash("0xdeadbeef"))
-	require.Equal(t, 1, poisonEntry(ibs.internCache.handles[:], accounts.InternKey(word.Bytes32()), sentinel))
-
-	ibs.Reset()
-	require.True(t, sentinel == ibs.InternStorageKey(&word), "a warmed key must still hit after Reset")
-
-	ReleasePooled(ibs)
-	next := NewPooled(NewNoopReader())
-	require.Same(t, ibs, next)
-	require.True(t, sentinel == next.InternStorageKey(&word),
-		"a warmed key must still hit in the next call on the pooled state")
 }

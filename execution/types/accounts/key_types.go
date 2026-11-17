@@ -135,10 +135,10 @@ func (a Address) Cmp(o Address) int {
 	return a.Value().Cmp(o.Value())
 }
 
-// StorageKey is a slot key held by value; the zero value is the nil key.
+// StorageKey is a slot key held by value. Its zero value is slot 0; NilKey names
+// it where a read or write has no slot (account-field paths), and the path tells them apart.
 type StorageKey struct {
-	v   common.Hash
-	set bool
+	v common.Hash
 }
 
 var (
@@ -147,7 +147,7 @@ var (
 )
 
 func InternKey(k common.Hash) StorageKey {
-	return StorageKey{v: k, set: true}
+	return StorageKey{v: k}
 }
 
 func (k StorageKey) IsNil() bool {
@@ -159,34 +159,15 @@ func (k StorageKey) Value() common.Hash {
 }
 
 func (k StorageKey) String() string {
-	if k == NilKey {
-		return "<nil>"
-	}
-	return k.Value().String()
+	return k.v.String()
 }
 
 func (k StorageKey) Format(s fmt.State, c rune) {
-	if k == NilKey {
-		_, _ = s.Write([]byte("<nil>"))
-		return
-	}
-	k.Value().Format(s, c)
+	k.v.Format(s, c)
 }
 
 func (k StorageKey) Cmp(o StorageKey) int {
-	switch {
-	case k == NilKey:
-		switch {
-		case o == NilKey:
-			return 0
-		default:
-			return -1
-		}
-	case o == NilKey:
-		return +1
-	}
-
-	return k.Value().Cmp(o.Value())
+	return k.v.Cmp(o.v)
 }
 
 type CodeHash unique.Handle[common.Hash]

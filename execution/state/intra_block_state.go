@@ -220,12 +220,10 @@ type IntraBlockState struct {
 	revisions revisions
 
 	lastCode accounts.Code // last code stored by SetCode
-	// Intern tables survive Reset and the pool on purpose: an idle pooled state keeps ~51 KB of
-	// tables and their unique handles alive, which is the reuse the next call pays for.
-	internCache *storageKeyCache
-	addrCache   *addressCache
-	internOps   uint32
-	addrOps     uint32
+	// The address intern table survives Reset and the pool on purpose: an idle pooled state keeps
+	// it and its unique handles alive, which is the reuse the next call pays for.
+	addrCache *addressCache
+	addrOps   uint32
 }
 
 type sdProbeEntry struct {
