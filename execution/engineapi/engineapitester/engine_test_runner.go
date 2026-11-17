@@ -151,7 +151,9 @@ func (et *EngineTest) sendPayload(ctx context.Context, client *rpc.Client, chain
 		return nil
 	case err != nil:
 		return err
-	case status.Status == enginetypes.InvalidStatus && p.ValidationError != "":
+	// A payload with an errorCode expects that JSON-RPC error even when it also
+	// names a validationError, as the consume engine simulator does.
+	case status.Status == enginetypes.InvalidStatus && p.ValidationError != "" && p.ErrorCode == "":
 		return nil
 	case status.Status != enginetypes.ValidStatus:
 		return statusError("payload", status)

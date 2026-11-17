@@ -165,6 +165,23 @@ func TestEngineTest(t *testing.T) {
 		require.ErrorContains(t, test.RunCLI(), "payload 2: too many arguments")
 	})
 
+	// A payload that names both an errorCode and a validationError, as EEST's
+	// fork transition fixtures do, expects the JSON-RPC error, so INVALID
+	// fails it.
+	t.Run("invalid status for an expected error code", func(t *testing.T) {
+		test := loadEngineTest(t, func(payloads []any) []any {
+			params := func(i int) map[string]any {
+				return payloads[i].(map[string]any)["params"].([]any)[0].(map[string]any)
+			}
+			params(1)["blockAccessList"] = params(0)["blockAccessList"]
+			payloads[1].(map[string]any)["validationError"] = "BlockException.INVALID_BAL_HASH"
+			payloads[1].(map[string]any)["errorCode"] = "-38005"
+			return payloads
+		})
+		require.ErrorContains(t, test.RunCLI(), "payload 1: payload status INVALID")
+		require.Len(t, test.Rejections, 1)
+	})
+
 	// The RPC handler answers a param it cannot decode, or one too many, with
 	// -32602. The bad payload comes last, so the chain still ends where the
 	// fixture expects.
