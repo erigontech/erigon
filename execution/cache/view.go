@@ -327,6 +327,11 @@ func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) []byte
 	return stored
 }
 
+// FillCodeOwned is FillCode for a code buffer the caller hands over.
+func (v ReadView) FillCodeOwned(addr, code, codeHash []byte, readTxNum uint64) {
+	v.fillCodeWithHash(addr, code, codeHash, readTxNum)
+}
+
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account
 // record read from this view. The accounts frontier governs both admission and
 // the validity stamp, even though the mapping lives in the code cache.

@@ -1519,7 +1519,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	}
 	willFill := !opts.noFill && !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
 	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
-	if fillsCode || opts.noFill {
+	if (fillsCode && !stubCodeFillNoClone) || opts.noFill {
 		getOpts = getOpts.WithBuf(opts.buf)
 	}
 
@@ -1547,6 +1547,8 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		case fillsCode && opts.hashFromMem:
 			fillView.Fill(domain, k, v, readTxNum)
 			v = bytes.Clone(v)
+		case fillsCode && stubCodeFillNoClone:
+			fillView.FillCodeOwned(k, v, opts.codeHash, readTxNum)
 		case fillsCode:
 			v = fillView.FillCode(k, v, opts.codeHash, readTxNum)
 		default:
@@ -1555,6 +1557,9 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	}
 	return v, step, nil
 }
+
+// probe: a code fill reads into a fresh buffer and the cache keeps it without a copy.
+var stubCodeFillNoClone = dbg.EnvBool("STUB_CODE_FILL_NOCLONE", false)
 
 // GetCodeSize returns the length of the contract code at addr, probing a
 // size-only cache before falling through to the
