@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"testing"
@@ -390,24 +391,8 @@ func TestAggregateAndProofSuccess(t *testing.T) {
 	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
 	fcu.Ancestors[agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = forkchoice.ForkChoiceNode{Root: agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root}
 	data := agg.SignedAggregateAndProof.Message.Aggregate.Data
-	for _, tc := range []struct {
-		name string
-		slot uint64
-	}{
-		{"older block", data.Slot - 1},
-		{"same slot", data.Slot},
-		{"newer block", data.Slot + 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			fcu.Headers[data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{Slot: tc.slot}
-			err := aggService.ProcessMessage(t.Context(), nil, agg)
-			if tc.slot > data.Slot {
-				require.ErrorContains(t, err, "aggregate votes for a block newer than its slot")
-			} else {
-				require.NoError(t, err)
-			}
-		})
-	}
+	fcu.Headers[data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{Slot: data.Slot}
+	require.NoError(t, aggService.ProcessMessage(t.Context(), nil, agg))
 }
 
 type captureAttestingIndicesForkChoice struct {
@@ -504,6 +489,45 @@ func TestAggregateAndProofUsesTargetShuffling(t *testing.T) {
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, aggregate))
 	require.Equal(t, targetCommittee, capture.attestingIndices)
 	require.Equal(t, []string{"bls", "target", "bls"}, callOrder)
+}
+
+func TestAggregateAndProofFutureBlockDoesNotVote(t *testing.T) {
+	for _, mode := range []string{"validator", "fcr", "observer"} {
+		for _, offset := range []int{-1, 0, 1} {
+			t.Run(fmt.Sprintf("%s/offset=%d", mode, offset), func(t *testing.T) {
+				aggregate, s := getAggregateAndProofAndState()
+				service, sd, fc := setupAggregateAndProofTest(t)
+				impl := service.(*aggregateAndProofServiceImpl)
+				impl.test = false
+				impl.enableFastConfirmation = mode == "fcr"
+				if mode == "validator" {
+					impl.validatorParams.SetFeeRecipient(0, common.Address{})
+				}
+				require.NoError(t, sd.OnHeadState(s))
+				data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
+				committee, err := s.GetBeaconCommitee(data.Slot, data.CommitteeIndex)
+				require.NoError(t, err)
+				prepareTargetShufflingAggregate(t, s, fc, aggregate, committee, true)
+				fc.Headers[data.BeaconBlockRoot].Slot = uint64(int(data.Slot) + offset)
+				capture := &captureAttestingIndicesForkChoice{ForkChoiceStorageMock: fc}
+				impl.forkchoiceStore = capture
+				err = service.ProcessMessage(t.Context(), nil, aggregate)
+				if mode == "observer" {
+					require.ErrorIs(t, err, ErrIgnore)
+					require.Zero(t, impl.opPool.AttestationsPool.Len())
+				} else {
+					require.NoError(t, err)
+					require.NoError(t, impl.batchSignatureVerifier.FlushAggregateProofs(t.Context()))
+					require.Equal(t, 1, impl.opPool.AttestationsPool.Len())
+				}
+				if mode == "observer" || offset > 0 {
+					require.Empty(t, capture.attestingIndices)
+				} else {
+					require.NotEmpty(t, capture.attestingIndices)
+				}
+			})
+		}
+	}
 }
 
 func TestAggregateAndProofRejectsInvalidSignatureBeforeTargetShuffling(t *testing.T) {

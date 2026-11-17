@@ -292,9 +292,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		}
 		return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
 	}
-	if blockHeader.Slot > slot {
-		return errors.New("aggregate votes for a block newer than its slot")
-	}
 	committee, committeesPerSlot, err := beaconCommittee(
 		a.forkchoiceStore, a.syncedDataManager, target, aggregateData.BeaconBlockRoot, slot, committeeIndex,
 		a.beaconCfg.SlotsPerEpoch, func() error { return a.verifyAggregateBeforeBuild(aggregateAndProof) },
@@ -397,10 +394,12 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Signature,
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
 		)
-		a.forkchoiceStore.ProcessAttestingIndicies(
-			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
-			attestingIndices,
-		)
+		if blockHeader.Slot <= slot {
+			a.forkchoiceStore.ProcessAttestingIndicies(
+				aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
+				attestingIndices,
+			)
+		}
 		// Keep the root of the first aggregate validated for this aggregator and epoch.
 		a.seenAggreatorIndexes.ContainsOrAdd(seenIndex, aggregateRoot)
 	}

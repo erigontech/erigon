@@ -353,18 +353,23 @@ func TestFastConfirmationWakePublishesDuringMissedSlot(t *testing.T) {
 					}
 					require.Equal(t, ForkChoice, next, "safe-only changes must publish without another block")
 				}
-				for _, responseErr := range []error{execution_client.ErrForkChoiceUpdateBusy, execution_client.ErrForkChoiceUpdateSyncing, execution_client.ErrForkChoiceUpdateBusy} {
+				var lastAttempt time.Time
+				for attempt, responseErr := range []error{execution_client.ErrForkChoiceUpdateBusy, execution_client.ErrForkChoiceUpdateSyncing, execution_client.ErrForkChoiceUpdateBusy} {
 					publishPending(t)
 					engine.EXPECT().ForkChoiceUpdate(gomock.Any(), hash, hash, hash, nil, clparams.Phase0Version).Return(nil, responseErr)
 					started := time.Now()
 					_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.Root(), cfg)
 					require.NoError(t, err)
 					require.True(t, cfg.safeUpdatePending, "a deferred update must remain pending")
-					require.GreaterOrEqual(t, time.Since(started), sleepForSlotRewakeInterval, "retries must be throttled")
+					if attempt == 0 {
+						require.Zero(t, time.Since(started))
+					} else {
+						require.GreaterOrEqual(t, time.Since(lastAttempt), sleepForSlotRewakeInterval, "retries must be throttled")
+					}
+					lastAttempt = time.Now()
 				}
 				ctx, cancel := context.WithCancel(t.Context())
 				cancel()
-				engine.EXPECT().ForkChoiceUpdate(gomock.Any(), hash, hash, hash, nil, clparams.Phase0Version).Return(nil, execution_client.ErrForkChoiceUpdateBusy)
 				_, _, err := computeAndNotifyServicesOfNewForkChoice(ctx, log.Root(), cfg)
 				require.ErrorIs(t, err, context.Canceled)
 				require.True(t, cfg.safeUpdatePending)

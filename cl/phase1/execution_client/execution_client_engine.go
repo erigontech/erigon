@@ -196,8 +196,24 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		return nil, fmt.Errorf("engine ForkchoiceUpdated failed: %w", err)
 	}
 
-	if cc.EnableFastConfirmation && attributes == nil && resp.PayloadStatus != nil && resp.PayloadStatus.Status == engine_types.InvalidStatus {
-		return nil, fmt.Errorf("engine forkchoice status: %s", resp.PayloadStatus.Status)
+	if cc.EnableFastConfirmation && attributes == nil {
+		if resp == nil || resp.PayloadStatus == nil {
+			return nil, errors.New("engine forkchoice response is missing payload status")
+		}
+		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
+			return nil, err
+		}
+		if resp.PayloadId != nil {
+			return nil, errors.New("engine forkchoice returned a payload ID without attributes")
+		}
+		switch resp.PayloadStatus.Status {
+		case engine_types.ValidStatus:
+			return []byte{}, nil
+		case engine_types.SyncingStatus:
+			return nil, ErrForkChoiceUpdateSyncing
+		default:
+			return nil, fmt.Errorf("engine forkchoice status: %s", resp.PayloadStatus.Status)
+		}
 	}
 	if resp.PayloadId == nil {
 		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
@@ -205,9 +221,6 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		}
 		if attributes != nil {
 			return nil, ErrForkChoiceUpdateNoPayloadID
-		}
-		if cc.EnableFastConfirmation && resp.PayloadStatus != nil && resp.PayloadStatus.Status == engine_types.SyncingStatus {
-			return nil, ErrForkChoiceUpdateSyncing
 		}
 		return []byte{}, nil
 	}

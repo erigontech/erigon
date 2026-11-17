@@ -60,6 +60,10 @@ func selectForkChoiceHead(cfg *Cfg) (head forkchoice.ForkChoiceNode, headSlot ui
 	return head, headSlot, nil
 }
 
+type forkChoiceUpdate struct {
+	beaconHead, head, safe, finalized common.Hash
+}
+
 func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head forkchoice.ForkChoiceNode, headSlot uint64) error {
 	headRoot := head.Root
 	headVersion := cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
@@ -76,19 +80,25 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 		finalizedHash, safeHash := cfg.forkChoice.GetExecutionFinalityHashes(headRoot,
 			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
 			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root))
-		logger.Debug("Caplin is sending forkchoice")
-
-		if _, err := engine.ForkChoiceUpdate(
-			ctx, finalizedHash, safeHash, executionHead, nil, headVersion,
-		); err != nil {
-			if cfg.safeUpdatePending {
-				timer := time.NewTimer(sleepForSlotRewakeInterval)
+		update := forkChoiceUpdate{beaconHead: headRoot, head: executionHead, safe: safeHash, finalized: finalizedHash}
+		if cfg.safeUpdatePending && update == cfg.lastFailedForkChoice {
+			if delay := time.Until(cfg.forkChoiceRetryAt); delay > 0 {
+				timer := time.NewTimer(delay)
 				defer timer.Stop()
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-timer.C:
 				}
+			}
+		}
+		logger.Debug("Caplin is sending forkchoice")
+		if _, err := engine.ForkChoiceUpdate(
+			ctx, finalizedHash, safeHash, executionHead, nil, headVersion,
+		); err != nil {
+			if cfg.safeUpdatePending {
+				cfg.lastFailedForkChoice = update
+				cfg.forkChoiceRetryAt = time.Now().Add(sleepForSlotRewakeInterval)
 			}
 			switch {
 			case errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout):
@@ -103,6 +113,7 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 			}
 		} else {
 			cfg.safeUpdatePending = false
+			cfg.forkChoiceRetryAt = time.Time{}
 		}
 	} else {
 		cfg.safeUpdatePending = false
