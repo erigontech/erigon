@@ -80,6 +80,10 @@ type Config struct {
 	AmsterdamTime *uint64 `json:"amsterdamTime,omitempty"`
 	BogotaTime    *uint64 `json:"bogotaTime,omitempty"`
 
+	// EIP-8253: accounts with zero nonce, empty code and non-empty storage before Bogota.
+	// Each chain supplies its own list; activation sets these nonces to one unconditionally.
+	ZeroNonceStorageAccounts []common.Address `json:"zeroNonceStorageAccounts,omitempty"`
+
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice *uint64                       `json:"minBlobGasPrice,omitempty"`
 	BlobSchedule    map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`

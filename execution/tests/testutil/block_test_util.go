@@ -87,6 +87,9 @@ func (bt *BlockTest) UnmarshalJSON(in []byte) error {
 }
 
 type btJSON struct {
+	Config struct {
+		ZeroNonceStorageAccounts []common.Address `json:"zeroNonceStorageAccounts"`
+	} `json:"config"`
 	Blocks     []btBlock             `json:"blocks"`
 	Genesis    btHeader              `json:"genesisBlockHeader"`
 	Pre        types.GenesisAlloc    `json:"pre"`
@@ -288,6 +291,8 @@ func (bt *BlockTest) newTester(tb testing.TB) (*execmoduletester.ExecModuleTeste
 	if !ok {
 		return nil, testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
+	config = config.Copy()
+	config.ZeroNonceStorageAccounts = bt.json.Config.ZeroNonceStorageAccounts
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
 	mOpts := []execmoduletester.Option{
 		execmoduletester.WithGenesisSpec(bt.genesis(config)),
