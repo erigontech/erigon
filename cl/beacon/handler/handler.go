@@ -503,12 +503,6 @@ func (a *ApiHandler) clearExecutionPayloadEnvelopeRetry(key executionPayloadEnve
 	a.executionPayloadEnvelopeRetries.Remove(key)
 }
 
-func (a *ApiHandler) Init() {
-	a.o.Do(func() {
-		a.init()
-	})
-}
-
 func (a *ApiHandler) init() {
 	r := chi.NewRouter()
 	a.mux = r

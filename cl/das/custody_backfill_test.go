@@ -22,6 +22,7 @@ import (
 	"maps"
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -257,24 +258,26 @@ func TestBackfillCustodyColumnsMergesWaitingRequests(t *testing.T) {
 // Forward sync stores its blocks before the fork choice stage marks them canonical, so the
 // backfill waits until the canonical chain reaches the end of its range.
 func TestBackfillCustodyColumnsWaitsForTheCanonicalChain(t *testing.T) {
-	f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
-		10: blockWithBlobs(t, 10, true),
-	}, nil)
-	f.d.blockReader.(bodyReader).blocks[14] = blockWithBlobs(t, 14, true)
-	marked := make(chan error, 1)
-	go func() {
-		time.Sleep(300 * time.Millisecond)
-		marked <- f.d.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
-			return beacon_indicies.MarkRootCanonical(tx, 14, common.Hash{14, 0xab})
-		})
-	}()
+	synctest.Test(t, func(t *testing.T) {
+		f := newBackfillFixture(t, 100, map[uint64]*cltypes.SignedBeaconBlock{
+			10: blockWithBlobs(t, 10, true),
+		}, nil)
+		f.d.blockReader.(bodyReader).blocks[14] = blockWithBlobs(t, 14, true)
+		marked := make(chan error, 1)
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			marked <- f.d.indiciesDB.Update(t.Context(), func(tx kv.RwTx) error {
+				return beacon_indicies.MarkRootCanonical(tx, 14, common.Hash{14, 0xab})
+			})
+		}()
 
-	start := time.Now()
-	f.d.backfillCustodyColumns(t.Context(), 10, 14)
+		start := time.Now()
+		f.d.backfillCustodyColumns(t.Context(), 10, 14)
 
-	require.NoError(t, <-marked)
-	require.GreaterOrEqual(t, time.Since(start), 300*time.Millisecond)
-	require.Equal(t, []uint64{10, 14}, f.queuedSlots())
+		require.NoError(t, <-marked)
+		require.GreaterOrEqual(t, time.Since(start), 300*time.Millisecond)
+		require.Equal(t, []uint64{10, 14}, f.queuedSlots())
+	})
 }
 
 func gloasBlockWithBlobs(t *testing.T, slot uint64) *cltypes.SignedBeaconBlock {
