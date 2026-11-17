@@ -2379,6 +2379,10 @@ func (a *ApiHandler) postBeaconBlocks(r *http.Request, apiVersion int) (*beaconh
 	// Decode the block
 	block, err := a.parseRequestBeaconBlock(version, r)
 	if err != nil {
+		var endpointErr *beaconhttp.EndpointError
+		if errors.As(err, &endpointErr) {
+			return nil, err
+		}
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	requestBundles, err := a.requestBlobBundles(block)
@@ -2847,7 +2851,7 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 	case "application/json":
 		limit, err := a.publishedBlockJSONLimit(version, false)
 		if err != nil {
-			return nil, err
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 		}
 		body, err := readBoundedBody(r.Body, limit)
 		if err != nil {

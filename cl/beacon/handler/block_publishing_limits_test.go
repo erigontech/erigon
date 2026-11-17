@@ -142,10 +142,15 @@ func TestPublishedBlockJSONAdmitsContents(t *testing.T) {
 			limit, err := h.publishedBlockJSONLimit(version, false)
 			require.NoError(t, err)
 			require.Less(t, int64(len(body)), limit)
+			blindedLimit, err := h.publishedBlockJSONLimit(version, true)
+			require.NoError(t, err)
+			blobsJSON, err := json.Marshal(block.Blobs)
+			require.NoError(t, err)
+			proofsJSON, err := json.Marshal(block.KZGProofs)
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, limit-blindedLimit, int64(len(blobsJSON)+len(proofsJSON)))
 			if version >= clparams.FuluVersion {
 				// The scheduled contents need their own budget beyond the block.
-				blindedLimit, err := h.publishedBlockJSONLimit(version, true)
-				require.NoError(t, err)
 				require.Greater(t, int64(len(body)), blindedLimit)
 			}
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(body))
@@ -156,6 +161,25 @@ func TestPublishedBlockJSONAdmitsContents(t *testing.T) {
 			require.EqualValues(t, blobs*proofsPerBlob, decoded.KZGProofs.Len())
 			require.Len(t, decoded.SignedBlock.Block.Body.ExecutionPayload.Transactions.UnderlyngReference()[0], 12<<20)
 		})
+	}
+}
+
+func TestPublishedBlockJSONLimitErrorIsServerFault(t *testing.T) {
+	for _, blinded := range []bool{false, true} {
+		cfg := clparams.MainnetBeaconConfig
+		h := &ApiHandler{beaconChainCfg: &cfg, netConfig: &clparams.NetworkConfig{GossipMaxSize: math.MaxUint64}}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader([]byte("{}")))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Eth-Consensus-Version", clparams.ElectraVersion.String())
+		var err error
+		if blinded {
+			_, err = h.PostEthV2BlindedBlocks(httptest.NewRecorder(), req)
+		} else {
+			_, err = h.PostEthV2BeaconBlocks(httptest.NewRecorder(), req)
+		}
+		var endpointErr *beaconhttp.EndpointError
+		require.ErrorAs(t, err, &endpointErr)
+		require.Equal(t, http.StatusInternalServerError, endpointErr.Code, "blinded=%t", blinded)
 	}
 }
 
