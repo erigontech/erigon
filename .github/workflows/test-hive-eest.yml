@@ -266,7 +266,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 0
+              max-failures: 560 # EIP-7906, bal_served and bal_withheld
               commitment_mode: parallel
             - sim: consume-wirex
               runner: ubuntu-latest
@@ -440,7 +440,7 @@ jobs:
           eels_args=(--sim.buildarg "tag=$eels_tag")
           consumer_ref=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].consumer_ref // empty' erigon-full/test-fixtures.json)
           if [ '${{ matrix.sim }}' = consume-wirex ]; then
-            consumer_ref=$(jq -r .wirex_consumer_ref erigon-full/.github/workflows/hive-versions.json)
+            consumer_ref=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.wirex_consumer_ref[$t]' erigon-full/.github/workflows/hive-versions.json)
             dockerfile=hive/simulators/ethereum/eels/consume-wirex/Dockerfile.git
             if ! grep -qx 'FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim' "$dockerfile"; then
               echo "ERROR: consume-wirex Dockerfile base image changed; update the uv image override" >&2
