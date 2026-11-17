@@ -53,6 +53,7 @@ func TestImportedEnvelopeEventsSurvivePartialColumnStorage(t *testing.T) {
 	currentSlot := handler.ethClock.GetCurrentSlot()
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	clock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{}, nil).AnyTimes()
 	handler.ethClock = clock
 	handler.beaconChainCfg.GloasForkEpoch = 0
 
