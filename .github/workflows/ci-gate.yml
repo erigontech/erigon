@@ -73,7 +73,8 @@ jobs:
     secrets: inherit
 
   hive-eest:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-hive-eest.yml
     secrets: inherit
 

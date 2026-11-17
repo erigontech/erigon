@@ -72,6 +72,9 @@ jobs:
           JS_YAML_FROM="${RUNNER_TEMP}/oracle" \
             python3 .github/workflows/scripts/docs-deploy-trigger.test.py --oracle
 
+      - name: Change detection tests
+        run: python3 .github/workflows/scripts/changes.test.py
+
       # -shellcheck '' disables actionlint's built-in inline-script checking;
       # the repo's QA workflow run: blocks have many pre-existing shellcheck
       # warnings that need a separate cleanup pass (#21128).  .sh files are
