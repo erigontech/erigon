@@ -274,7 +274,7 @@ func TestEnvelopeArrivalRetriesELColumnsImportFromTheLoop(t *testing.T) {
 			engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.GloasVersion).Return(nil, nil, nil),
 			peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil),
 			engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.GloasVersion).Return(blobs, proofs, nil),
-			peerDas.EXPECT().ImportColumnsFromBlobs(gomock.Any(), block, blobs, proofs).Return(stored, nil),
+			peerDas.EXPECT().ImportColumnsFromBlobs(gomock.Any(), block, blobs, proofs, gomock.Any()).Return(stored, nil),
 		)
 		service.importColumnsFromELBlobs(t.Context(), block)
 
