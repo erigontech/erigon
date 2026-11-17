@@ -551,12 +551,18 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 	opts := eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled}
-	prefetch := api.receiptsGenerator.PrefetchReceipts(ctx, chainConfig, api.db, blockNum, blockHash, opts)
+	abMode, abStart := receipts.DbgABMode(), time.Now()
+	var prefetch *receipts.ReceiptsPrefetch
+	if abMode == 1 {
+		prefetch = api.receiptsGenerator.PrefetchReceipts(ctx, chainConfig, api.db, blockNum, blockHash, opts)
+	}
 	defer prefetch.Close()
 
 	tBlock := time.Now()
 	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
-	receipts.DbgBlockNs.Add(int64(time.Since(tBlock)))
+	blockNs := int64(time.Since(tBlock))
+	receipts.DbgBlockNs.Add(blockNs)
+	defer func() { receipts.DbgABObserve(abMode, abStart, blockNs) }()
 	if err != nil {
 		return nil, err
 	}

@@ -42,6 +42,34 @@ var (
 
 const dbgEvery = 2000
 
+// DEBUG ONLY: in-run A/B, the prefetch is on for even blocks of dbgABBlock requests and off for odd ones.
+const dbgABBlock = 1000
+
+var (
+	dbgReq                          atomic.Int64
+	dbgABNs, dbgABCnt, dbgABBlockNs [2]atomic.Int64
+	dbgABPrev                       [6]int64
+)
+
+// DbgABMode reports whether this request runs with the prefetch (1) or without (0).
+func DbgABMode() int { return int((dbgReq.Add(1)-1)/dbgABBlock%2) ^ 1 }
+
+// DbgABObserve records the GetBlockReceipts time of one request.
+func DbgABObserve(mode int, start time.Time, blockNs int64) {
+	dbgABNs[mode].Add(int64(time.Since(start)))
+	dbgABBlockNs[mode].Add(blockNs)
+	if n := dbgABCnt[mode].Add(1); mode == 0 && n%4000 == 0 {
+		cur := [6]int64{dbgABNs[0].Load(), dbgABCnt[0].Load(), dbgABBlockNs[0].Load(), dbgABNs[1].Load(), dbgABCnt[1].Load(), dbgABBlockNs[1].Load()}
+		d := [6]int64{}
+		for i := range cur {
+			d[i] = cur[i] - dbgABPrev[i]
+		}
+		dbgABPrev = cur
+		log.Info("[dbg] receipts prefetch A/B", "off", d[1], "offUs", d[0]/max(d[1], 1)/1000, "offBlockUs", d[2]/max(d[1], 1)/1000,
+			"on", d[4], "onUs", d[3]/max(d[4], 1)/1000, "onBlockUs", d[5]/max(d[4], 1)/1000)
+	}
+}
+
 func dbgLog() {
 	n := dbgCalls.Add(1)
 	if n%dbgEvery != 0 {
