@@ -209,6 +209,7 @@ func enableCommitmentHistory(agg *Aggregator) {
 // TestRetire_RetiresCommitmentAtOwnCutoff pins commitment retirement
 // at its own cutoff, independent of Default (0 here).
 func TestRetire_RetiresCommitmentAtOwnCutoff(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -236,6 +237,7 @@ func TestRetire_RetiresCommitmentAtOwnCutoff(t *testing.T) {
 // per-domain cutoff of 0 keeps the domain even when Default would cover it (how
 // commitment keep-all and the RCacheDomain skip are expressed).
 func TestRetire_KeepsDomainWhenCutoffZero(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
 	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
@@ -431,6 +433,7 @@ func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 }
 
 func TestRetire_DetachesCoveredSourcesWithCoveringFile(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, unindexed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("unindexed=%v", unindexed), func(t *testing.T) {
 			db, agg := testDbAndAggregatorSmallFrozen(t, 10, 2)
@@ -470,6 +473,7 @@ func TestRetire_DetachesCoveredSourcesWithCoveringFile(t *testing.T) {
 }
 
 func TestRetire_DetachesHiddenOutputCoveredByRetiredSources(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorSmallFrozen(t, 10, 2)
 	ranges := []testFileRange{{0, 1}, {1, 2}, {0, 2}, {2, 3}}
 	generateStateFiles(t, agg.Dirs(), ranges)
@@ -490,6 +494,7 @@ func TestRetire_DetachesHiddenOutputCoveredByRetiredSources(t *testing.T) {
 }
 
 func TestRetire_PreservesTailBelowHiddenCoveringFile(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, tc := range []struct {
 		name      string
 		tailEnd   uint64
