@@ -208,8 +208,8 @@ func TestExecModule_GivenReorgBelowFinalisedBlock_WhenFinality_ThenReorgTooDeep(
 	}
 }
 
-// Retirement can delete part of a side chain. A missing side block below the stored finalized block is not
-// downloaded: the reorg would cross finality anyway. One at or above it is still reported as missing.
+// Retirement can delete part of a side chain. A missing side block at or below the stored finalized height is not
+// downloaded: the reorg would cross finality anyway. Only one above it is still reported as missing.
 func TestExecModule_GivenMissingSideBlock_WhenReorgBelowFinalisedBlock_ThenRefusedWithoutDownload(t *testing.T) {
 	// The fork point (height 2) lies under the missing block and is unknown to the fork choice, so a requested
 	// block under the missing one cannot be shown to be on the new chain.
