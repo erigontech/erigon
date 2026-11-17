@@ -433,9 +433,8 @@ func (n *Node) ResolvePath(x string) string {
 	return n.config.ResolvePath(x)
 }
 
-// StartNode starts the stack; a stack closed meanwhile by a shutdown is not an error.
 func StartNode(stack *Node) {
-	if err := stack.Start(); err != nil && !errors.Is(err, ErrNodeStopped) {
+	if err := stack.Start(); err != nil {
 		utils.Fatalf("Error starting protocol stack: %v", err)
 	}
 }

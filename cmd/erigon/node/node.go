@@ -51,13 +51,15 @@ type ErigonNode struct {
 }
 
 // Serve runs the node and blocks until it is closed. The end of ctx, which a shutdown signal brings, closes it, also
-// when the signal arrives while the node is still starting.
+// when the signal arrived while the node was still being created or started.
 func (eri *ErigonNode) Serve() error {
 	defer eri.Close()
-	stop := context.AfterFunc(eri.ctx, eri.Close)
-	defer stop()
 
 	eri.run()
+	// Only after Start: closing a node that has not started skips its lifecycles' Stop, and the backend already started
+	// work when it was created. A context that has already ended runs Close at once.
+	stop := context.AfterFunc(eri.ctx, eri.Close)
+	defer stop()
 
 	eri.stack.Wait()
 
@@ -126,10 +128,7 @@ func NewEthConfigUrfave(nodeCtx context.Context, ctx *cli.Command, nodeConfig *n
 	return &ethConfig
 }
 
-// New creates a new `ErigonNode`.
-// * ctx - `*cli.Command` from the main function. Necessary to be able to configure the node based on the command-line flags
-// * sync - `stagedsync.StagedSync`, an instance of staged sync, setup just as needed.
-// * optionalParams - additional parameters for running a node.
+// New creates a new `ErigonNode`. The end of ctx, the root context that a shutdown signal cancels, closes the node in Serve.
 func New(
 	ctx context.Context,
 	nodeConfig *nodecfg.Config,
