@@ -245,12 +245,10 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	// are returned to the caller unless we're already at block zero.
 	headHash := rawdb.ReadHeadHeaderHash(tx)
 	if height := rawdb.ReadHeaderNumber(tx, headHash); height != nil && *height != 0 {
-		// The head's time, not just its number: the post-merge forks are scheduled by
-		// timestamp and cannot be compared against a block number. Only a fork that moved
-		// can conflict on that axis, so an undatable head is fatal only to those -- a
-		// datadir whose head header is gone still starts on an unchanged schedule.
+		// Changes to timestamp-based rules require the head's time, not its number.
+		// An unreadable head header does not prevent startup when those rules are unchanged.
 		var headTime uint64
-		if !storedCfg.SameTimestampForks(newCfg) {
+		if !storedCfg.SameTimestampRules(newCfg) {
 			var err error
 			if headTime, err = headTimestamp(tx, headHash, *height, chainName, dirs, logger); err != nil {
 				return newCfg, storedBlock, err

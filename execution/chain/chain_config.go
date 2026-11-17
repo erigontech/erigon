@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -647,17 +648,16 @@ func (c *Config) forkTimestamps() []forkTimestamp {
 	}
 }
 
-// SameTimestampForks reports whether every time-based fork is scheduled identically.
-// When they are, no head time can produce a timestamp conflict, so the caller need not
-// establish one.
-func (c *Config) SameTimestampForks(newcfg *Config) bool {
+// SameTimestampRules compares fork schedules and their activation parameters.
+// Parameters of unscheduled forks do not affect compatibility.
+func (c *Config) SameTimestampRules(newcfg *Config) bool {
 	newTimes := newcfg.forkTimestamps()
 	for i, f := range c.forkTimestamps() {
 		if !numEqual(f.timestamp, newTimes[i].timestamp) {
 			return false
 		}
 	}
-	return true
+	return c.BogotaTime == nil || sameAddressSet(c.ZeroNonceStorageAccounts, newcfg.ZeroNonceStorageAccounts)
 }
 
 // CheckConfigForkOrder rejects missing predecessors and reversed activation schedules.
@@ -786,7 +786,24 @@ func (c *Config) checkCompatibleTimestamps(newcfg *Config, headTime uint64) *Con
 			return newTimestampCompatError(f.what, f.timestamp, newTimes[i].timestamp)
 		}
 	}
+	if (c.IsBogota(headTime) || newcfg.IsBogota(headTime)) && !sameAddressSet(c.ZeroNonceStorageAccounts, newcfg.ZeroNonceStorageAccounts) {
+		return newTimestampCompatError("EIP-8253 account list", c.BogotaTime, newcfg.BogotaTime)
+	}
 	return nil
+}
+
+func sameAddressSet(a, b []common.Address) bool {
+	if slices.Equal(a, b) {
+		return true
+	}
+	left, right := make(map[common.Address]struct{}, len(a)), make(map[common.Address]struct{}, len(b))
+	for _, address := range a {
+		left[address] = struct{}{}
+	}
+	for _, address := range b {
+		right[address] = struct{}{}
+	}
+	return maps.Equal(left, right)
 }
 
 func numEqual(x, y *uint64) bool {
