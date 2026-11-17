@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"math/rand/v2"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -178,6 +179,105 @@ func TestFlushPendingDeltasLandInTheBlockChangeset(t *testing.T) {
 	require.Equal(t, wantLatest, gotLatest)
 	require.Equal(t, wantBlock, gotBlock)
 	require.Equal(t, wantLive, gotLive)
+}
+
+func TestFlushPendingHashRoutedMatchesTheLockedFlush(t *testing.T) {
+	seed := commitmentPutCorpus(64)
+	next := make([]commitment.BranchDelta, len(seed))
+	for i, d := range seed {
+		next[i] = commitment.BranchDelta{Key: d.Key, Data: []byte{byte(i), 2}, Prev: d.Data}
+	}
+	blockHash := common.Hash{8}
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	run := func(hashRouted bool) (map[string][]byte, []kv.DomainEntryDiff, []kv.DomainEntryDiff) {
+		tx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+		require.NoError(t, err)
+		defer sd.Close()
+
+		require.NoError(t, sd.PutCommitmentBranches(tx, [][]commitment.BranchDelta{runner.CloneDeltas(seed)}, 1, nil))
+		block, live := &changeset.StateChangeSet{}, &changeset.StateChangeSet{}
+		sd.SavePastChangesetAccumulator(blockHash, 5, block)
+		sd.SetChangesetAccumulator(live)
+		sd.GetCommitmentContext().SetPendingUpdate(&commitment.PendingCommitmentUpdate{
+			BlockNum: 5, BlockHash: blockHash, TxNum: 2, Deltas: slices.Collect(slices.Chunk(runner.CloneDeltas(next), 5)),
+		})
+		if hashRouted {
+			flushed, err := sd.FlushPendingUpdatesHashRouted(tx)
+			require.NoError(t, err)
+			require.True(t, flushed)
+		} else {
+			require.NoError(t, sd.FlushPendingUpdates(tx))
+		}
+		require.Nil(t, sd.GetCommitmentContext().PeekPendingUpdate())
+		latest := make(map[string][]byte, len(seed))
+		for _, d := range seed {
+			v, _, readErr := sd.GetLatest(kv.CommitmentDomain, tx, d.Key)
+			require.NoError(t, readErr)
+			latest[string(d.Key)] = bytes.Clone(v)
+		}
+		return latest, block.Diffs[kv.CommitmentDomain].GetDiffSet(), live.Diffs[kv.CommitmentDomain].GetDiffSet()
+	}
+
+	wantLatest, wantBlock, wantLive := run(false)
+	gotLatest, gotBlock, gotLive := run(true)
+	require.Len(t, wantBlock, len(seed))
+	require.Equal(t, wantLatest, gotLatest)
+	require.Equal(t, wantBlock, gotBlock)
+	require.Equal(t, wantLive, gotLive)
+}
+
+// TestFlushPendingHashRoutedRunsBesideTheFold flushes a block's pending update
+// while the apply fold binds the same block's changeset and writes state into
+// it, as the commitment calculator and the exec loop do; run it with -race.
+func TestFlushPendingHashRoutedRunsBesideTheFold(t *testing.T) {
+	seed := commitmentPutCorpus(256)
+	next := make([]commitment.BranchDelta, len(seed))
+	for i, d := range seed {
+		next[i] = commitment.BranchDelta{Key: d.Key, Data: []byte{byte(i), 3}, Prev: d.Data}
+	}
+	blockHash := common.Hash{9}
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	require.NoError(t, sd.PutCommitmentBranches(tx, [][]commitment.BranchDelta{runner.CloneDeltas(seed)}, 1, nil))
+	block := &changeset.StateChangeSet{}
+	sd.SavePastChangesetAccumulator(blockHash, 5, block)
+	sd.SetChangesetAccumulator(&changeset.StateChangeSet{})
+	sd.GetCommitmentContext().SetPendingUpdate(&commitment.PendingCommitmentUpdate{
+		BlockNum: 5, BlockHash: blockHash, TxNum: 2, Deltas: slices.Collect(slices.Chunk(runner.CloneDeltas(next), 16)),
+	})
+
+	const folds = 200
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		flushed, err := sd.FlushPendingUpdatesHashRouted(tx)
+		require.NoError(t, err)
+		require.True(t, flushed)
+	})
+	wg.Go(func() {
+		for i := range folds {
+			sd.LockChangesetAccumulator()
+			unswap := sd.SwapChangesetAccumulatorLocked(block)
+			sd.UnlockChangesetAccumulator()
+			addr := make([]byte, 20)
+			binary.BigEndian.PutUint64(addr, uint64(i)+1)
+			require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, []byte{byte(i), 1}, 3, nil))
+			sd.LockChangesetAccumulator()
+			unswap()
+			sd.UnlockChangesetAccumulator()
+		}
+	})
+	wg.Wait()
+	require.Len(t, block.Diffs[kv.CommitmentDomain].GetDiffSet(), len(seed))
+	require.Len(t, block.Diffs[kv.AccountsDomain].GetDiffSet(), folds)
 }
 
 type latestOptionsTx struct {

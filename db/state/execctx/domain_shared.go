@@ -533,6 +533,42 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 	return err
 }
 
+// FlushPendingUpdatesHashRouted flushes the pending deferred commitment update
+// straight into the diff of its block's saved changeset, found by hash, so it
+// needs no changesetMu. It does nothing and returns false when the update has
+// no block hash or no saved changeset; the caller then flushes under the lock.
+func (sd *SharedDomains) FlushPendingUpdatesHashRouted(tx kv.TemporalTx) (bool, error) {
+	upd := sd.sdCtx.PeekPendingUpdate()
+	if upd == nil || upd.BlockHash == (common.Hash{}) {
+		return false, nil
+	}
+	switcher, ok := sd.mem.(changesetSwitcher)
+	if !ok {
+		return false, nil
+	}
+	cs := switcher.GetChangesetByHash(upd.BlockNum, upd.BlockHash)
+	if cs == nil {
+		return false, nil
+	}
+	upd = sd.sdCtx.TakePendingUpdate()
+	defer upd.Clear()
+	diff := &cs.Diffs[kv.CommitmentDomain]
+	if upd.Deltas != nil {
+		if err := sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, diff); err != nil {
+			return true, err
+		}
+	} else {
+		putBranch := func(prefix, data, prevData []byte) error {
+			return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, diff)
+		}
+		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics); err != nil {
+			return true, err
+		}
+	}
+	switcher.SavePastChangesetAccumulator(upd.BlockHash, upd.BlockNum, cs)
+	return true, nil
+}
+
 func (sd *SharedDomains) PutCommitmentBranches(roTx kv.TemporalTx, parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
 	if batch, ok := sd.mem.(commitmentBranchBatchWriter); ok {
 		return batch.PutOwnedCommitmentBranches(parts, txNum, diff)
