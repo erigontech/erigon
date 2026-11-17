@@ -1,7 +1,10 @@
 package blob_storage
 
 import (
+	"io"
+	"math"
 	"os"
+	"path"
 	"slices"
 	"strings"
 	"sync"
@@ -13,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 )
@@ -23,6 +27,7 @@ const (
 )
 
 type batchHarness struct {
+	fs       afero.Fs
 	storage  DataColumnStorage
 	emitters *beaconevents.EventEmitter
 	events   chan *beaconevents.EventStream
@@ -33,6 +38,7 @@ func newBatchHarness(t testing.TB, fs afero.Fs) *batchHarness {
 	cfg := *globalBeaconConfig
 	cfg.NumberOfColumns = 128
 	h := &batchHarness{
+		fs:       fs,
 		emitters: beaconevents.NewEventEmitter(),
 		events:   make(chan *beaconevents.EventStream, 1024),
 	}
@@ -107,28 +113,37 @@ func requireAllReadable(t testing.TB, storage DataColumnStorage, slot uint64, ro
 }
 
 func TestWriteColumnSidecarsBatchStoresAll(t *testing.T) {
-	fs := newCountingFs(afero.NewMemMapFs())
-	h := newBatchHarness(t, fs)
-	root := common.HexToHash("0x1234567890abcdef")
-	indices := batchTestIndices(batchTestColumns)
-
-	require.NoError(t, h.storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, indices...)))
-
-	require.Equal(t, 1, fs.count(opMkdirAll))
-	require.Equal(t, batchTestColumns, fs.count(opCreate))
-	require.Equal(t, batchTestColumns, fs.count(opSync))
-	require.Equal(t, batchTestColumns, fs.count(opRename))
-	requireAllReadable(t, h.storage, batchTestSlot, root, indices...)
-	saved, err := h.storage.GetSavedColumnIndex(t.Context(), batchTestSlot, root)
-	require.NoError(t, err)
-	require.Equal(t, []uint64{0, 1, 2, 3, 4, 5, 6, 7}, saved)
-	events := h.drainEvents()
-	require.Len(t, events, batchTestColumns)
-	for _, event := range events {
-		require.Equal(t, root, event.BlockRoot)
-		require.Equal(t, uint64(batchTestSlot), event.Slot)
+	filesystems := map[string]func() afero.Fs{
+		"MemMapFs":     afero.NewMemMapFs,
+		"openHandleFs": func() afero.Fs { return newOpenHandleFs(afero.NewMemMapFs()) },
 	}
-	require.Equal(t, []common.Hash{root}, h.drainNotifications())
+	for name, newFs := range filesystems {
+		t.Run(name, func(t *testing.T) {
+			fs := newCountingFs(newFs())
+			h := newBatchHarness(t, fs)
+			root := common.HexToHash("0x1234567890abcdef")
+			indices := batchTestIndices(batchTestColumns)
+
+			require.NoError(t, h.storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, indices...)))
+
+			require.Equal(t, 1, fs.count(opMkdirAll))
+			require.Equal(t, 1, fs.count(opCreate))
+			require.Equal(t, 1, fs.count(opSync))
+			require.Equal(t, 1, fs.count(opRename))
+			require.Equal(t, []string{testPackFile(batchTestSlot, root)}, listFiles(t, fs))
+			requireAllReadable(t, h.storage, batchTestSlot, root, indices...)
+			saved, err := h.storage.GetSavedColumnIndex(t.Context(), batchTestSlot, root)
+			require.NoError(t, err)
+			require.Equal(t, []uint64{0, 1, 2, 3, 4, 5, 6, 7}, saved)
+			events := h.drainEvents()
+			require.Len(t, events, batchTestColumns)
+			for _, event := range events {
+				require.Equal(t, root, event.BlockRoot)
+				require.Equal(t, uint64(batchTestSlot), event.Slot)
+			}
+			require.Equal(t, []common.Hash{root}, h.drainNotifications())
+		})
+	}
 }
 
 func TestWriteColumnSidecarsBatchSkipsStored(t *testing.T) {
@@ -145,8 +160,9 @@ func TestWriteColumnSidecarsBatchSkipsStored(t *testing.T) {
 
 	require.NoError(t, h.storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, indices...)))
 
-	require.Equal(t, 2, fs.count(opCreate))
-	require.Equal(t, 2, fs.count(opRename))
+	require.Equal(t, 1, fs.count(opCreate))
+	require.Equal(t, 1, fs.count(opRename))
+	require.Equal(t, []uint64{6, 7}, packedColumns(t, fs, batchTestSlot, root, 128))
 	events := h.drainEvents()
 	require.Len(t, events, 2)
 	got := []uint64{events[0].Index, events[1].Index}
@@ -157,6 +173,85 @@ func TestWriteColumnSidecarsBatchSkipsStored(t *testing.T) {
 	saved, err := h.storage.GetSavedColumnIndex(t.Context(), batchTestSlot, root)
 	require.NoError(t, err)
 	require.Len(t, saved, batchTestColumns)
+}
+
+func TestWriteColumnSidecarsBatchOfOneMissingColumnStaysLoose(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	h := newBatchHarness(t, fs)
+	root := common.HexToHash("0x1234567890abcdef")
+	indices := batchTestIndices(batchTestColumns)
+	for _, sidecar := range batchTestSidecars(batchTestSlot, indices[:7]...) {
+		require.NoError(t, h.storage.WriteColumnSidecars(t.Context(), root, int64(sidecar.Index), sidecar))
+	}
+
+	require.NoError(t, h.storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, indices...)))
+
+	_, last := h.storage.(*dataColumnStorageImpl).path(batchTestSlot, root, 7)
+	files := listFiles(t, fs)
+	require.Len(t, files, batchTestColumns)
+	require.Contains(t, files, last)
+	packsExist, err := afero.DirExists(fs, path.Dir(testPackFile(batchTestSlot, root)))
+	require.NoError(t, err)
+	require.False(t, packsExist)
+}
+
+func TestWriteColumnSidecarsBatchWiderThanAPackHeaderStaysLoose(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	cfg := *globalBeaconConfig
+	cfg.NumberOfColumns = math.MaxUint16 + 1
+	storage := NewDataColumnStore(fs, &cfg, beaconevents.NewEventEmitter())
+	root := common.HexToHash("0x1234567890abcdef")
+
+	require.NoError(t, storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, 0, 1)))
+
+	impl := storage.(*dataColumnStorageImpl)
+	_, first := impl.path(batchTestSlot, root, 0)
+	_, second := impl.path(batchTestSlot, root, 1)
+	require.ElementsMatch(t, []string{first, second}, listFiles(t, fs))
+	packsExist, err := afero.DirExists(fs, path.Dir(testPackFile(batchTestSlot, root)))
+	require.NoError(t, err)
+	require.False(t, packsExist)
+	requireAllReadable(t, storage, batchTestSlot, root, 0, 1)
+}
+
+type oversizedMarshaler struct{}
+
+func (oversizedMarshaler) EncodingSizeSSZ() int                 { return int(clparams.MaxPayloadSize) + 1 }
+func (oversizedMarshaler) EncodeSSZ(dst []byte) ([]byte, error) { return append(dst, 1, 2, 3), nil }
+
+func TestWriteMissingAdmittedKeepsAColumnAboveMaxPayloadSizeLoose(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	storage := newBatchHarness(t, fs).storage.(*dataColumnStorageImpl)
+	root := common.HexToHash("0x1234567890abcdef")
+	entries := []batchEntry{{idx: 0, v: createTestDataColumnSidecar(batchTestSlot, 0)}, {idx: 1, v: oversizedMarshaler{}}}
+
+	existing, created, err := storage.writeMissingAdmitted(batchTestSlot, root, entries)
+
+	require.NoError(t, err)
+	require.Empty(t, existing)
+	require.Equal(t, []int{0, 1}, created)
+	_, first := storage.path(batchTestSlot, root, 0)
+	_, second := storage.path(batchTestSlot, root, 1)
+	require.ElementsMatch(t, []string{first, second}, listFiles(t, fs))
+	packsExist, err := afero.DirExists(fs, path.Dir(testPackFile(batchTestSlot, root)))
+	require.NoError(t, err)
+	require.False(t, packsExist)
+}
+
+type panickingMarshaler struct{}
+
+func (panickingMarshaler) EncodingSizeSSZ() int                 { return 1 }
+func (panickingMarshaler) EncodeSSZ(dst []byte) ([]byte, error) { panic("encode") }
+
+func TestWriteMissingAdmittedClosesThePackTempWhenEncodingPanics(t *testing.T) {
+	handles := newOpenHandleFs(afero.NewMemMapFs())
+	storage := newBatchHarness(t, handles).storage.(*dataColumnStorageImpl)
+	root := common.HexToHash("0x1234567890abcdef")
+	entries := []batchEntry{{idx: 0, v: createTestDataColumnSidecar(batchTestSlot, 0)}, {idx: 1, v: panickingMarshaler{}}}
+
+	require.PanicsWithValue(t, "encode", func() { _, _, _ = storage.writeMissingAdmitted(batchTestSlot, root, entries) })
+
+	require.Empty(t, handles.openHandles())
 }
 
 func TestWriteColumnSidecarsBatchOfStoredColumnsWritesNothing(t *testing.T) {
@@ -244,29 +339,79 @@ func TestWriteColumnSidecarsBatchRejectsBadInput(t *testing.T) {
 
 func TestWriteColumnSidecarsBatchFailureLeavesNothing(t *testing.T) {
 	root := common.HexToHash("0x1234567890abcdef")
-	cases := map[string]func(fs *failingFs, tmpPath string){
-		"sync": func(fs *failingFs, tmpPath string) { fs.failSyncAt(tmpPath, errInducedFailure) },
-		"write": func(fs *failingFs, tmpPath string) {
+	cases := map[string]struct {
+		want         error
+		renameFails  bool
+		injectAtTemp func(fs *failingFs, tmpPath string)
+	}{
+		"sync": {want: errInducedFailure, injectAtTemp: func(fs *failingFs, tmpPath string) { fs.failSyncAt(tmpPath, errInducedFailure) }},
+		"write": {want: errInducedFailure, injectAtTemp: func(fs *failingFs, tmpPath string) {
 			fs.failWritesAfter(tmpPath, 0, errInducedFailure)
-		},
+		}},
+		"short write": {want: io.ErrShortWrite, injectAtTemp: func(fs *failingFs, tmpPath string) { fs.failShortWrite(tmpPath) }},
+		"rename":      {want: errInducedFailure, renameFails: true},
 	}
-	for name, inject := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			fs := newFailingFs(afero.NewMemMapFs())
+			failing := newFailingFs(afero.NewMemMapFs())
+			var fs afero.Fs = failing
+			if tc.renameFails {
+				fs = newRenameFailingFs(failing, errInducedFailure)
+			}
 			h := newBatchHarness(t, fs)
-			impl := h.storage.(*dataColumnStorageImpl)
-			_, file := impl.path(batchTestSlot, root, 3)
-			inject(fs, file+tmpSuffix)
+			if tc.injectAtTemp != nil {
+				tc.injectAtTemp(failing, testPackFile(batchTestSlot, root)+tmpSuffix)
+			}
 
 			err := h.storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, batchTestIndices(batchTestColumns)...))
 
-			require.ErrorIs(t, err, errInducedFailure)
+			require.ErrorIs(t, err, tc.want)
 			require.Empty(t, listFiles(t, fs))
 			require.Empty(t, h.drainEvents())
 			require.Empty(t, h.drainNotifications())
 			saved, err := h.storage.GetSavedColumnIndex(t.Context(), batchTestSlot, root)
 			require.NoError(t, err)
 			require.Empty(t, saved)
+		})
+	}
+}
+
+func TestWriteColumnSidecarsBatchLooseFailureLeavesNothing(t *testing.T) {
+	root := common.HexToHash("0x1234567890abcdef")
+	cases := map[string]struct {
+		want   error
+		inject func(fs *failingFs, tmpPath string)
+	}{
+		"sync": {want: errInducedFailure, inject: func(fs *failingFs, tmpPath string) { fs.failSyncAt(tmpPath, errInducedFailure) }},
+		"write": {want: errInducedFailure, inject: func(fs *failingFs, tmpPath string) {
+			fs.failWritesAfter(tmpPath, 0, errInducedFailure)
+		}},
+		"short write": {want: io.ErrShortWrite, inject: func(fs *failingFs, tmpPath string) { fs.failShortWrite(tmpPath) }},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			failing := newFailingFs(afero.NewMemMapFs())
+			h := newBatchHarness(t, failing)
+			require.NoError(t, h.storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, 0, 1)))
+			packBefore, err := afero.ReadFile(failing, testPackFile(batchTestSlot, root))
+			require.NoError(t, err)
+			h.drainEvents()
+			h.drainNotifications()
+			_, blocked := h.storage.(*dataColumnStorageImpl).path(batchTestSlot, root, 3)
+			tc.inject(failing, blocked+tmpSuffix)
+
+			err = h.storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, batchTestIndices(batchTestColumns)...))
+
+			require.ErrorIs(t, err, tc.want)
+			require.Equal(t, []string{testPackFile(batchTestSlot, root)}, listFiles(t, failing))
+			packAfter, err := afero.ReadFile(failing, testPackFile(batchTestSlot, root))
+			require.NoError(t, err)
+			require.Equal(t, packBefore, packAfter)
+			require.Empty(t, h.drainEvents())
+			require.Empty(t, h.drainNotifications())
+			saved, err := h.storage.GetSavedColumnIndex(t.Context(), batchTestSlot, root)
+			require.NoError(t, err)
+			require.Equal(t, []uint64{0, 1}, saved)
 		})
 	}
 }
@@ -285,14 +430,22 @@ func (f *renamePartiallyFailingFs) Rename(oldname, newname string) error {
 	return f.Fs.Rename(oldname, newname)
 }
 
-func TestWriteColumnSidecarsBatchRenameFailureKeepsRenamedColumns(t *testing.T) {
+func TestWriteColumnSidecarsBatchLooseBatchAfterAPackKeepsItsRenamedPrefix(t *testing.T) {
 	fs := &renamePartiallyFailingFs{Fs: afero.NewMemMapFs(), failAfter: 3}
 	h := newBatchHarness(t, fs)
 	root := common.HexToHash("0x1234567890abcdef")
+	require.NoError(t, h.storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, 0, 1)))
+	packBefore, err := afero.ReadFile(fs, testPackFile(batchTestSlot, root))
+	require.NoError(t, err)
+	h.drainEvents()
+	h.drainNotifications()
 
-	err := h.storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, batchTestIndices(batchTestColumns)...))
+	err = h.storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, batchTestIndices(batchTestColumns)...))
 
 	require.ErrorIs(t, err, errInducedFailure)
+	packAfter, err := afero.ReadFile(fs, testPackFile(batchTestSlot, root))
+	require.NoError(t, err)
+	require.Equal(t, packBefore, packAfter)
 	files := listFiles(t, fs)
 	require.Len(t, files, 3)
 	for _, file := range files {
@@ -300,9 +453,13 @@ func TestWriteColumnSidecarsBatchRenameFailureKeepsRenamedColumns(t *testing.T) 
 	}
 	saved, err := h.storage.GetSavedColumnIndex(t.Context(), batchTestSlot, root)
 	require.NoError(t, err)
-	require.Len(t, saved, 3)
-	requireAllReadable(t, h.storage, batchTestSlot, root, int64(saved[0]), int64(saved[1]), int64(saved[2]))
-	require.Len(t, h.drainEvents(), 3)
+	require.Equal(t, []uint64{0, 1, 2, 3}, saved)
+	requireAllReadable(t, h.storage, batchTestSlot, root, 0, 1, 2, 3)
+	var eventIndices []uint64
+	for _, event := range h.drainEvents() {
+		eventIndices = append(eventIndices, event.Index)
+	}
+	require.ElementsMatch(t, []uint64{2, 3}, eventIndices)
 	require.Equal(t, []common.Hash{root}, h.drainNotifications())
 }
 
@@ -334,47 +491,80 @@ func (f *syncHookFile) Sync() error {
 
 func TestWriteColumnSidecarsBatchVisibleAllOrNothing(t *testing.T) {
 	root := common.HexToHash("0x1234567890abcdef")
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	var once, releaseOnce sync.Once
-	closeRelease := func() { releaseOnce.Do(func() { close(release) }) }
-	t.Cleanup(closeRelease)
-	fs := &syncHookFs{Fs: afero.NewMemMapFs()}
-	h := newBatchHarness(t, fs)
-	impl := h.storage.(*dataColumnStorageImpl)
-	_, blockedFile := impl.path(batchTestSlot, root, 3)
-	fs.onSync = func(name string) {
-		if name == blockedFile+tmpSuffix {
-			once.Do(func() { close(entered) })
-			<-release
-		}
+	cases := map[string]struct {
+		prewritten []int64
+		heldTemp   func(impl *dataColumnStorageImpl) string
+		hidden     []int64
+	}{
+		"pack": {
+			heldTemp: func(*dataColumnStorageImpl) string { return testPackFile(batchTestSlot, root) + tmpSuffix },
+			hidden:   []int64{3},
+		},
+		"loose": {
+			prewritten: []int64{0, 1},
+			heldTemp: func(impl *dataColumnStorageImpl) string {
+				_, file := impl.path(batchTestSlot, root, 3)
+				return file + tmpSuffix
+			},
+			hidden: []int64{2, 3, 4, 5, 6, 7},
+		},
 	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			var once, releaseOnce sync.Once
+			closeRelease := func() { releaseOnce.Do(func() { close(release) }) }
+			t.Cleanup(closeRelease)
+			fs := &syncHookFs{Fs: afero.NewMemMapFs()}
+			h := newBatchHarness(t, fs)
+			if tc.prewritten != nil {
+				require.NoError(t, h.storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, tc.prewritten...)))
+			}
+			heldTemp := tc.heldTemp(h.storage.(*dataColumnStorageImpl))
+			fs.onSync = func(name string) {
+				if name == heldTemp {
+					once.Do(func() { close(entered) })
+					<-release
+				}
+			}
 
-	writeDone := make(chan error, 1)
-	go func() {
-		writeDone <- h.storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, batchTestIndices(batchTestColumns)...))
-	}()
-	select {
-	case <-entered:
-	case err := <-writeDone:
-		t.Fatalf("the batch returned before syncing column 3: %v", err)
+			writeDone := make(chan error, 1)
+			go func() {
+				writeDone <- h.storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, batchTestIndices(batchTestColumns)...))
+			}()
+			select {
+			case <-entered:
+			case err := <-writeDone:
+				t.Fatalf("the batch returned before syncing %s: %v", heldTemp, err)
+			case <-time.After(10 * time.Second):
+				t.Fatalf("%s was never synced", heldTemp)
+			}
+
+			for _, index := range tc.hidden {
+				exists, err := h.storage.ColumnSidecarExists(t.Context(), batchTestSlot, root, index)
+				require.NoError(t, err)
+				require.False(t, exists, "column %d", index)
+				_, err = h.storage.ReadColumnSidecarByColumnIndex(t.Context(), batchTestSlot, root, index)
+				require.ErrorIs(t, err, os.ErrNotExist, "column %d", index)
+			}
+			scanDone := make(chan []uint64, 1)
+			go func() {
+				saved, err := h.storage.GetSavedColumnIndex(t.Context(), batchTestSlot, root)
+				assert.NoError(t, err)
+				scanDone <- saved
+			}()
+			select {
+			case saved := <-scanDone:
+				t.Fatalf("a scan saw %v while the batch was still being written", saved)
+			case <-time.After(100 * time.Millisecond):
+			}
+			closeRelease()
+
+			require.NoError(t, <-writeDone)
+			require.Len(t, <-scanDone, batchTestColumns)
+		})
 	}
-
-	scanDone := make(chan []uint64, 1)
-	go func() {
-		saved, err := h.storage.GetSavedColumnIndex(t.Context(), batchTestSlot, root)
-		assert.NoError(t, err)
-		scanDone <- saved
-	}()
-	select {
-	case saved := <-scanDone:
-		t.Fatalf("a scan saw %v while the batch was still being written", saved)
-	case <-time.After(100 * time.Millisecond):
-	}
-	closeRelease()
-
-	require.NoError(t, <-writeDone)
-	require.Len(t, <-scanDone, batchTestColumns)
 }
 
 func TestWriteColumnSidecarsBatchBelowPruneFloor(t *testing.T) {
@@ -429,4 +619,34 @@ func TestWriteColumnSidecarsBatchConcurrentWithSingleWrites(t *testing.T) {
 	for _, file := range listFiles(t, fs) {
 		require.False(t, strings.HasSuffix(file, tmpSuffix), file)
 	}
+}
+
+func TestWriteColumnSidecarsBatchWaitsForTheBucketLock(t *testing.T) {
+	fs := &blockingColumnFs{Fs: afero.NewMemMapFs(), createCalled: make(chan struct{})}
+	h := newBatchHarness(t, fs)
+	root := common.HexToHash("0x1234567890abcdef")
+	fs.createPath = testPackFile(batchTestSlot, root) + tmpSuffix
+	bucket := h.storage.(*dataColumnStorageImpl).forBucket(batchTestSlot / subdivisionSlot)
+	bucket.Lock()
+	unlock := sync.OnceFunc(bucket.Unlock)
+	t.Cleanup(unlock)
+
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- h.storage.WriteColumnSidecarsBatch(t.Context(), root, batchTestSidecars(batchTestSlot, 0, 1))
+	}()
+	select {
+	case <-fs.createCalled:
+		t.Fatal("the pack was written while the bucket was locked")
+	case <-time.After(100 * time.Millisecond):
+	}
+	unlock()
+
+	select {
+	case err := <-writeDone:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the batch never finished after the bucket was unlocked")
+	}
+	require.Equal(t, []uint64{0, 1}, packedColumns(t, fs, batchTestSlot, root, 128))
 }
