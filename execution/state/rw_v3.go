@@ -233,6 +233,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				}
 			}
 
+			var prevCode []byte
 			if d.balance.Ok || d.nonce.Ok || d.incarnation.Ok || d.codeHash.Ok || d.codeWritten {
 				// A WriteSet may contain only the changed account fields, so
 				// overlay it on the current state. Self-destruct is the exception:
@@ -249,6 +250,10 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 						if err := accounts.DeserialiseV3(&acc, v); err != nil {
 							return err
 						}
+					}
+					// An EIP-7702 authority comes from a signature, so it is never a predeploy whose code has no account record.
+					if _, isDelegation := types.ParseDelegation(d.code); isDelegation && acc.IsEmptyCodeHash() {
+						prevCode = []byte{}
 					}
 				}
 				if d.balance.Ok {
@@ -286,7 +291,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
 						return err
 					}
-				} else if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, nil); err != nil {
+				} else if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, prevCode); err != nil {
 					return err
 				}
 			}
