@@ -443,26 +443,43 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 	return vm
 }
 
-// seededStorage returns the value the access list seeds for addr's slot key at txIdx. The access
-// list is validated, so its accounts, slots and changes are in increasing order.
-func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, bool) {
+// balAccount returns the access list's changes of addr. The access list is validated, so its
+// accounts, slots and changes are in increasing order.
+func (vm *VersionMap) balAccount(addr accounts.Address) *types.AccountChanges {
 	address := addr.Value()
 	i := sort.Search(len(vm.bal), func(i int) bool { return bytes.Compare(vm.bal[i].Address[:], address[:]) >= 0 })
 	if i == len(vm.bal) || vm.bal[i].Address != address {
+		return nil
+	}
+	return &vm.bal[i]
+}
+
+// balChangeAt returns the change in changes that the access list seeds at txIdx.
+func balChangeAt[C any](changes []*C, index func(*C) uint32, txIdx int) (*C, bool) {
+	want := uint32(txIdx + 1)
+	k := sort.Search(len(changes), func(k int) bool { return index(changes[k]) >= want })
+	if k == len(changes) || index(changes[k]) != want {
+		return nil, false
+	}
+	return changes[k], true
+}
+
+// seededStorage returns the value the access list seeds for addr's slot key at txIdx.
+func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, bool) {
+	ac := vm.balAccount(addr)
+	if ac == nil {
 		return uint256.Int{}, false
 	}
-	slots := vm.bal[i].StorageChanges
+	slots := ac.StorageChanges
 	j := sort.Search(len(slots), func(j int) bool { return slots[j].Slot.Cmp(key) >= 0 })
 	if j == len(slots) || slots[j].Slot.Cmp(key) != 0 {
 		return uint256.Int{}, false
 	}
-	changes := slots[j].Changes
-	index := uint32(txIdx + 1)
-	k := sort.Search(len(changes), func(k int) bool { return changes[k].Index >= index })
-	if k == len(changes) || changes[k].Index != index {
+	c, ok := balChangeAt(slots[j].Changes, func(c *types.StorageChange) uint32 { return c.Index }, txIdx)
+	if !ok {
 		return uint256.Int{}, false
 	}
-	return changes[k].Value, true
+	return c.Value, true
 }
 
 // hasNoCells reports whether no tx wrote a cell of path, a lifecycle cell or an address cell of addr.
@@ -1603,14 +1620,8 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 					if cells := e.Storage[key]; cells != nil {
 						if c, ok := cells.Get(vw.Version.TxIndex); ok && c.loadFlag() != FlagDone {
 							if seed, seeded := vm.seededStorage(addr, key, vw.Version.TxIndex); seeded {
-								// As in flushCell, a changed value needs a new version, so that the
-								// readers of the earlier value are invalidated.
-								inc := c.loadInc()
-								if !c.Value.Eq(&seed) {
-									inc = vw.Version.Incarnation
-								}
-								c.Value, c.valStatus = seed, ValueChanged
-								c.setState(inc, FlagDone)
+								stamped := true // the flush is stamped already
+								resetCell(vm, cells, vw.Version, seed, eqUint256, &stamped)
 							} else if c.setFlagUnlessDone(flagDeleted) {
 								cells.Delete(vw.Version.TxIndex)
 							}
@@ -1899,6 +1910,91 @@ func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accoun
 	if !hasField && checkExists {
 		panic(errors.New("path must already exist"))
 	}
+}
+
+// DropWrite removes the cell of a write that an earlier run of the tx at v.TxIndex made and its run at v
+// does not make. A value the access list seeds there is put back as Done instead: before the seal, a
+// reader takes a seeded cell as the tx's final write and validation trusts it.
+func (vm *VersionMap) DropWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version) {
+	if vm.HasBAL && vm.resetToSeed(addr, path, key, v) {
+		return
+	}
+	vm.Delete(addr, path, key, v.TxIndex, false)
+}
+
+// resetToSeed puts the value the access list seeds for addr's path at v.TxIndex back into the cell
+// there, and reports whether the access list seeds it.
+func (vm *VersionMap) resetToSeed(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version) bool {
+	ac := vm.balAccount(addr)
+	e := vm.load(addr)
+	if ac == nil || e == nil {
+		return false
+	}
+	vm.assertUnsealed(v.TxIndex, addr, path, key)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var stamped bool
+	defer vm.endDeleteStamp(v.TxIndex, &stamped)
+	switch path {
+	case BalancePath:
+		c, ok := balChangeAt(ac.BalanceChanges, func(c *types.BalanceChange) uint32 { return c.Index }, v.TxIndex)
+		if !ok {
+			return false
+		}
+		resetCell(vm, e.Balance, v, c.Value, eqUint256, &stamped)
+	case NoncePath:
+		c, ok := balChangeAt(ac.NonceChanges, func(c *types.NonceChange) uint32 { return c.Index }, v.TxIndex)
+		if !ok {
+			return false
+		}
+		resetCell(vm, e.Nonce, v, c.Value, eqUint64, &stamped)
+	case CodePath, CodeHashPath, CodeSizePath:
+		c, ok := balChangeAt(ac.CodeChanges, func(c *types.CodeChange) uint32 { return c.Index }, v.TxIndex)
+		if !ok {
+			return false
+		}
+		code := accounts.NewCode(c.Bytecode)
+		switch path {
+		case CodePath:
+			resetCell(vm, e.Code, v, code, eqCode, &stamped)
+		case CodeHashPath:
+			resetCell(vm, e.CodeHash, v, code.Hash, eqCodeHash, &stamped)
+		default:
+			resetCell(vm, e.CodeSize, v, code.Len(), eqInt, &stamped)
+		}
+	case StoragePath:
+		seed, ok := vm.seededStorage(addr, key, v.TxIndex)
+		if !ok {
+			return false
+		}
+		resetCell(vm, e.Storage[key], v, seed, eqUint256, &stamped)
+	default:
+		return false
+	}
+	return true
+}
+
+// resetCell sets the cell at v.TxIndex back to seed as Done. Before the seal, a Done cell already
+// holds the seed. As in flushCell, a changed value takes v's incarnation, so that a reader of the
+// earlier value is invalid.
+func resetCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], v Version, seed T, eq func(a, b T) bool, stamped *bool) {
+	if cells == nil {
+		return
+	}
+	c, ok := cells.Get(v.TxIndex)
+	if !ok || c.loadFlag() == FlagDone {
+		return
+	}
+	if !*stamped {
+		vm.mutBegin(v.TxIndex)
+		*stamped = true
+	}
+	inc := c.loadInc()
+	if !eq(c.Value, seed) {
+		inc = v.Incarnation
+	}
+	c.Value, c.valStatus = seed, ValueChanged
+	c.setState(inc, FlagDone)
 }
 
 func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {

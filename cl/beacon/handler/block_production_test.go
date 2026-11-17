@@ -6216,26 +6216,28 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 	}
 
 	t.Run("falls back after cap and memoizes wait", func(t *testing.T) {
-		handler, fcu, slot, produceCalls := setup(t)
-		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
-			return forkchoice.ForkChoiceNode{}, false
-		}
+		synctest.Test(t, func(t *testing.T) {
+			handler, fcu, slot, produceCalls := setup(t)
+			fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+				return forkchoice.ForkChoiceNode{}, false
+			}
 
-		start := time.Now()
-		status, data := requestAttestationData(t, handler, t.Context(), slot)
-		elapsed := time.Since(start)
-		require.Equal(t, http.StatusOK, status)
-		require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
-		require.GreaterOrEqual(t, elapsed, waitCap)
-		require.Less(t, elapsed, 2*waitCap+25*time.Millisecond)
-		require.Equal(t, 1, *produceCalls)
+			start := time.Now()
+			status, data := requestAttestationData(t, handler, t.Context(), slot)
+			elapsed := time.Since(start)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
+			require.GreaterOrEqual(t, elapsed, waitCap)
+			require.Less(t, elapsed, 2*waitCap+25*time.Millisecond)
+			require.Equal(t, 1, *produceCalls)
 
-		start = time.Now()
-		status, data = requestAttestationData(t, handler, t.Context(), slot)
-		require.Equal(t, http.StatusOK, status)
-		require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
-		require.Less(t, time.Since(start), waitCap)
-		require.Equal(t, 2, *produceCalls)
+			start = time.Now()
+			status, data = requestAttestationData(t, handler, t.Context(), slot)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
+			require.Less(t, time.Since(start), waitCap)
+			require.Equal(t, 2, *produceCalls)
+		})
 	})
 
 	t.Run("cached fallback does not read state", func(t *testing.T) {
@@ -6263,38 +6265,42 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 	})
 
 	t.Run("uses fork choice when lock becomes free", func(t *testing.T) {
-		handler, fcu, slot, produceCalls := setup(t)
-		handler.attestationDataImportWait = defaultAttestationDataImportWait
-		var attempts atomic.Int64
-		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
-			return forkchoice.ForkChoiceNode{Root: forkChoiceRoot}, attempts.Add(1) >= 4
-		}
-		fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
-			return solid.AttestationData{Slot: slot, BeaconBlockRoot: headRoot}, true
-		}
+		synctest.Test(t, func(t *testing.T) {
+			handler, fcu, slot, produceCalls := setup(t)
+			handler.attestationDataImportWait = defaultAttestationDataImportWait
+			var attempts atomic.Int64
+			fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+				return forkchoice.ForkChoiceNode{Root: forkChoiceRoot}, attempts.Add(1) >= 4
+			}
+			fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+				return solid.AttestationData{Slot: slot, BeaconBlockRoot: headRoot}, true
+			}
 
-		start := time.Now()
-		status, data := requestAttestationData(t, handler, t.Context(), slot)
-		elapsed := time.Since(start)
-		require.Equal(t, http.StatusOK, status)
-		require.Equal(t, forkChoiceRoot, data.BeaconBlockRoot)
-		require.GreaterOrEqual(t, elapsed, 2*attestationDataImportPollInterval)
-		require.Less(t, elapsed, defaultAttestationDataImportWait/2)
-		require.Zero(t, *produceCalls)
+			start := time.Now()
+			status, data := requestAttestationData(t, handler, t.Context(), slot)
+			elapsed := time.Since(start)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, forkChoiceRoot, data.BeaconBlockRoot)
+			require.GreaterOrEqual(t, elapsed, 2*attestationDataImportPollInterval)
+			require.Less(t, elapsed, defaultAttestationDataImportWait/2)
+			require.Zero(t, *produceCalls)
+		})
 	})
 
 	t.Run("request cancellation stops the wait", func(t *testing.T) {
-		handler, fcu, slot, _ := setup(t)
-		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
-			return forkchoice.ForkChoiceNode{}, false
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		time.AfterFunc(15*time.Millisecond, cancel)
+		synctest.Test(t, func(t *testing.T) {
+			handler, fcu, slot, _ := setup(t)
+			fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+				return forkchoice.ForkChoiceNode{}, false
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			time.AfterFunc(15*time.Millisecond, cancel)
 
-		start := time.Now()
-		status, _ := requestAttestationData(t, handler, ctx, slot)
-		require.Equal(t, http.StatusInternalServerError, status)
-		require.Less(t, time.Since(start), waitCap)
+			start := time.Now()
+			status, _ := requestAttestationData(t, handler, ctx, slot)
+			require.Equal(t, http.StatusInternalServerError, status)
+			require.Less(t, time.Since(start), waitCap)
+		})
 	})
 }
 
