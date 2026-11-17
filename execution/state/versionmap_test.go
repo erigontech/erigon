@@ -2447,25 +2447,33 @@ func balanceFlag(t *testing.T, vm *VersionMap, addr accounts.Address, txIdx int)
 
 func TestMarkWritesValidatedDoesNotWaitForTheEntryLock(t *testing.T) {
 	t.Parallel()
-	vm := NewVersionMap(nil)
-	addr := accounts.InternAddress(common.HexToAddress("0x10"))
-	ws := flushPath(vm, addr, 3, BalancePath)
-	e := vm.load(addr)
-	e.mu.Lock()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		vm.MarkWritesValidated(ws, nil)
-	}()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		e.mu.Unlock()
-		<-done
-		t.Fatal("the mark waited for the entry lock")
+	for name, stamped := range map[string]bool{"unstamped": false, "stamped": true} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			vm := NewVersionMap(nil)
+			if stamped {
+				vm.InitStamps(8)
+			}
+			addr := accounts.InternAddress(common.HexToAddress("0x10"))
+			ws := flushPath(vm, addr, 3, BalancePath)
+			e := vm.load(addr)
+			e.mu.Lock()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				vm.MarkWritesValidated(ws, nil)
+			}()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				e.mu.Unlock()
+				<-done
+				t.Fatal("the mark waited for the entry lock")
+			}
+			e.mu.Unlock()
+			require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
+		})
 	}
-	e.mu.Unlock()
-	require.Equal(t, FlagValidated, balanceFlag(t, vm, addr, 3))
 }
 
 func TestMarkWritesValidatedLocksADestructedAccount(t *testing.T) {
