@@ -1486,9 +1486,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 	eip8246 := rules.IsAmsterdam
 	switch {
 	case eip8246:
-		// EIP-8246: SELFDESTRUCT no longer burns. The balance moves to the
-		// beneficiary (a no-op when it is self); a same-tx-created contract is
-		// still cleared at finalization but keeps any residual balance.
+		// EIP-8246: transfers to self preserve the balance.
 		if self != beneficiaryAddr {
 			if err := ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct); err != nil {
 				return pc, nil, err
@@ -1497,7 +1495,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 				return pc, nil, err
 			}
 		}
-		if newContract {
+		if newContract && !rules.IsBogota {
 			_, err = ibs.Selfdestruct(self, true)
 			if err != nil {
 				return pc, nil, err
