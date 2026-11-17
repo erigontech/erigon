@@ -2193,30 +2193,6 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	return vm.ValidateReadSet(txIdx, lastIO.ReadSet(txIdx), checkVersion, traceInvalid, tracePrefix)
 }
 
-// validateAccountAtMarker rejects an account read that matches the version of the BAL existence
-// marker but not the account's existence. A destruct seeded for the marker's tx can have the
-// same version, but the marker records an account that exists: an absent read is valid only
-// while its destruct holds, and a present read from the marker only while no destruct removes
-// the account. Only a sealed write revives the account here: a withdrawn credit does not
-// re-validate a tx that read only the account's existence.
-func (vm *VersionMap) validateAccountAtMarker(addr accounts.Address, tr VersionedRead[AccountView], txIdx int) VersionValidity {
-	if tr.Val != nil && !tr.Val.IsNil() {
-		if tr.accSource == AccountFromBAL {
-			if st, _, destroyedAt, _ := vm.ResolvedAccountLifecycleAt(addr, txIdx); st == LifecycleAbsent && !vm.destructKeptBalance(addr, destroyedAt) {
-				return VersionInvalid
-			}
-		}
-		return VersionValid
-	}
-	if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIdx); ok && sdRR.resolved() && destructed && sdRR.Version() == tr.Version {
-		return VersionValid
-	}
-	if rr := vm.ReadStatus(addr, AddressPath, accounts.NilKey, txIdx); rr.accSource() == AccountFromBAL {
-		return VersionInvalid
-	}
-	return VersionValid
-}
-
 // ValidateReadSet validates rs (a tx's read-set) against the current versionMap at
 // txIdx. Split out of ValidateVersion so a worker can validate its own freshly-produced
 // read-set in parallel, before the exec loop commits.
@@ -2238,9 +2214,6 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 
 	for a, tr := range rs.address {
 		if !ok(validatePath(a, AddressPath, tr.ReadHeader)) {
-			return
-		}
-		if vm.HasBAL && !ok(vm.validateAccountAtMarker(a, tr, txIdx)) {
 			return
 		}
 	}
