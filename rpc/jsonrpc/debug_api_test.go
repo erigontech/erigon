@@ -602,33 +602,43 @@ func TestTraceBlockPrestateDiffAfterSelfdestruct(t *testing.T) {
 	api := newDebugApiForTest(m)
 	tracer, tracerConfig := "prestateTracer", json.RawMessage(`{"diffMode":true}`)
 	config := &tracersConfig.TraceConfig{Tracer: &tracer, TracerConfig: &tracerConfig}
-	var blockTraces []struct {
-		Result json.RawMessage `json:"result"`
-	}
-	readGasTrace(t, &blockTraces, func(stream *jsonstream.Stream) error {
-		return api.TraceBlockByNumber(m.Ctx, 1, config, stream)
-	})
 	block := generated.Blocks[0]
-	require.Len(t, blockTraces, len(block.Transactions()))
-	for i, txn := range block.Transactions() {
-		var txnTrace json.RawMessage
-		readGasTrace(t, &txnTrace, func(stream *jsonstream.Stream) error {
-			return api.TraceTransaction(m.Ctx, txn.Hash(), config, stream)
-		})
-		require.JSONEq(t, string(txnTrace), string(blockTraces[i].Result), "transaction %d", i)
-	}
-
-	var diff struct {
-		Post map[common.Address]struct {
-			Balance *hexutil.U256 `json:"balance"`
-		} `json:"post"`
-	}
-	require.NoError(t, json.Unmarshal(blockTraces[1].Result, &diff))
-	post, ok := diff.Post[coinbase]
-	require.True(t, ok, "%s", blockTraces[1].Result)
 	tip := new(uint256.Int).Sub(gasPrice, block.BaseFee())
 	tip.Mul(tip, uint256.NewInt(generated.Receipts[0][1].GasUsed))
-	require.Equal(t, (*hexutil.U256)(tip), post.Balance)
+	// One CPU replays the block on one shared state; more trace each transaction
+	// on its own.
+	for _, tc := range []struct {
+		name string
+		cpus int
+	}{{"sequential", 1}, {"parallel", 16}} {
+		t.Run(tc.name, func(t *testing.T) {
+			withReplayCPUs(t, tc.cpus)
+			var blockTraces []struct {
+				Result json.RawMessage `json:"result"`
+			}
+			readGasTrace(t, &blockTraces, func(stream *jsonstream.Stream) error {
+				return api.TraceBlockByNumber(m.Ctx, 1, config, stream)
+			})
+			require.Len(t, blockTraces, len(block.Transactions()))
+			for i, txn := range block.Transactions() {
+				var txnTrace json.RawMessage
+				readGasTrace(t, &txnTrace, func(stream *jsonstream.Stream) error {
+					return api.TraceTransaction(m.Ctx, txn.Hash(), config, stream)
+				})
+				require.JSONEq(t, string(txnTrace), string(blockTraces[i].Result), "transaction %d", i)
+			}
+
+			var diff struct {
+				Post map[common.Address]struct {
+					Balance *hexutil.U256 `json:"balance"`
+				} `json:"post"`
+			}
+			require.NoError(t, json.Unmarshal(blockTraces[1].Result, &diff))
+			post, ok := diff.Post[coinbase]
+			require.True(t, ok, "%s", blockTraces[1].Result)
+			require.Equal(t, (*hexutil.U256)(tip), post.Balance)
+		})
+	}
 }
 
 func TestTraceTransaction(t *testing.T) {
