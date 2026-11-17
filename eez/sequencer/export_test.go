@@ -25,5 +25,9 @@ import (
 // PendingHead takes the head waiting for the schedule.
 func (s *Service) PendingHead() l1.Header { return <-s.heads }
 
+// Dropped returns the number of envelopes dropped before the publisher took
+// them.
+func (s *HeadSigner) Dropped() uint64 { return s.dropped.Load() }
+
 // SetClock makes now the sequencer's clock.
 func (s *Sequencer) SetClock(now func() time.Time) { s.now = now }

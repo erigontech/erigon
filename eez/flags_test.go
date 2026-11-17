@@ -18,6 +18,10 @@ package eez
 
 import (
 	"context"
+	"encoding/hex"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -25,6 +29,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/eez/config"
 	"github.com/erigontech/erigon/eez/networks"
 	"github.com/erigontech/erigon/execution/chain"
@@ -181,16 +186,70 @@ func TestConfigFromCLI(t *testing.T) {
 		{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.l1.kv=l1:9090"},
 		{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.chain=eez-devnet"},
 		{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.sequencer", "--eez.proof.time=5s", "--eez.sequencer.rpc=http://seq:8545"},
-		{
-			"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.sequencer", "--eez.proof.time=5s",
-			"--eez.p2p.listen=/ip4/0.0.0.0/tcp/9100", "--eez.sequencer.address=0x5fbdb2315678afecb367f032d93f642f64180aa3",
-		},
 		{"--eez.enabled", "--eez.chain=eez-devnet", "--eez.sequencer", "--eez.proof.time=5s"},
 	} {
 		cfg, err := parse(t, args...)
 		require.NoError(t, err, "%v", args)
 		require.ErrorIs(t, cfg.CheckNode(), ErrConfig, "%v", args)
 	}
+}
+
+// TestSequencerKeyFile: --eez.sequencer.keyfile names the file of the
+// sequencer's private key, 64 hex characters that only the file's owner can
+// access. A missing, malformed or shared file, or the flag without
+// --eez.sequencer, is refused without echoing the key.
+func TestSequencerKeyFile(t *testing.T) {
+	dir := t.TempDir()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	encoded := hex.EncodeToString(crypto.FromECDSA(key))
+	write := func(name, content string, mode os.FileMode) string {
+		t.Helper()
+		file := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(file, []byte(content), mode))
+		require.NoError(t, os.Chmod(file, mode))
+		return file
+	}
+	sequencer := []string{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.sequencer", "--eez.proof.time=5s"}
+
+	for name, content := range map[string]string{"bare": encoded, "with newline": encoded + "\n"} {
+		cfg, err := parse(t, append(sequencer, "--eez.sequencer.keyfile", write(name, content, 0o600))...)
+		require.NoError(t, err, name)
+		require.Equal(t, crypto.FromECDSA(key), crypto.FromECDSA(cfg.Sequencer.Key), name)
+	}
+	cfg, err := parse(t, sequencer...)
+	require.NoError(t, err)
+	require.Nil(t, cfg.Sequencer.Key)
+
+	refuse := func(name, file string, want ...string) {
+		t.Helper()
+		_, err := parse(t, append(sequencer, "--eez.sequencer.keyfile", file)...)
+		require.ErrorIs(t, err, ErrConfig, name)
+		require.NotContains(t, err.Error(), encoded[2:], name)
+		for _, w := range append(want, "--eez.sequencer.keyfile") {
+			require.ErrorContains(t, err, w, name)
+		}
+	}
+	for name, content := range map[string]string{
+		"empty":     "",
+		"short":     encoded[:62],
+		"long":      encoded + "00",
+		"not hex":   "zz" + encoded[2:],
+		"zero":      "0000000000000000000000000000000000000000000000000000000000000000",
+		"order":     "fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141",
+		"trailing":  encoded + " key",
+		"0x prefix": "0x" + encoded,
+	} {
+		refuse(name, write(name, content, 0o600))
+	}
+	refuse("missing", filepath.Join(dir, "missing"))
+	if runtime.GOOS != "windows" {
+		for _, mode := range []os.FileMode{0o640, 0o620, 0o604, 0o602, 0o644} {
+			refuse(mode.String(), write("shared", encoded, mode), "accessible to other users")
+		}
+	}
+	_, err = parse(t, "--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.sequencer.keyfile", write("key", encoded, 0o600))
+	require.ErrorIs(t, err, ErrConfig, "without --eez.sequencer")
 }
 
 // TestSyncMode: --eez.sync.l1only picks where the history below L1's
@@ -276,6 +335,45 @@ func TestOverlayFlags(t *testing.T) {
 	_, err = parse(t, append(follower, "--eez.p2p.peers="+peerAddr)...)
 	require.ErrorIs(t, err, ErrConfig)
 	require.ErrorContains(t, err, "--eez.p2p.peers requires --eez.p2p.listen")
+
+	// A sequencer's overlay publishes and relays the heads its key signs:
+	// the key is required, and its address is the one the overlay accepts.
+	keyFile := filepath.Join(t.TempDir(), "key")
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	require.NoError(t, crypto.SaveECDSA(keyFile, key))
+	signer := crypto.PubkeyToAddress(key.PublicKey)
+	withKey := "--eez.sequencer.keyfile=" + keyFile
+	sequencer := []string{"--eez.enabled", "--eez.l1.rpc=http://l1:8545", "--eez.sequencer", "--eez.proof.time=5s"}
+	for name, args := range map[string][]string{
+		"listen":            {listen, withKey},
+		"listen and peers":  {listen, "--eez.p2p.peers=" + peerAddr, withKey},
+		"the key's address": {listen, "--eez.sequencer.address=" + signer.Hex(), withKey},
+	} {
+		cfg, err := parse(t, append(sequencer, args...)...)
+		require.NoError(t, err, name)
+		require.Equal(t, signer, *cfg.SequencerAddress, name)
+		require.NoError(t, cfg.CheckNode(), name)
+	}
+	for name, args := range map[string][]string{
+		"no key":                 {listen},
+		"no key, an address":     {listen, address},
+		"another address":        {listen, address, withKey},
+		"address without listen": {"--eez.sequencer.address=" + signer.Hex(), withKey},
+		"peers without listen":   {"--eez.p2p.peers=" + peerAddr, withKey},
+		"with the sequencer RPC": {listen, withKey, "--eez.sequencer.rpc=http://seq:8545"},
+	} {
+		_, err := parse(t, append(sequencer, args...)...)
+		require.ErrorIs(t, err, ErrConfig, name)
+	}
+	_, err = parse(t, append(sequencer, listen)...)
+	require.ErrorContains(t, err, "--eez.p2p.listen requires --eez.sequencer.keyfile")
+	_, err = parse(t, append(sequencer, listen, address, withKey)...)
+	require.ErrorContains(t, err, "is not the address of --eez.sequencer.keyfile")
+	cfg, err = parse(t, append(sequencer, withKey)...)
+	require.NoError(t, err)
+	require.Nil(t, cfg.P2PListen, "a key alone signs without publishing")
+	require.Nil(t, cfg.SequencerAddress)
 
 	// The EEZ chain beside its L1 joins the overlay on the same terms.
 	beside := []string{"--eez.enabled", "--eez.chain=eez-devnet"}
