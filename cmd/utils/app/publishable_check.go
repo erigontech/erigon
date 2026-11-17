@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -28,7 +30,7 @@ func CheckFilesForSchema(schema *state.E2SnapSchema, params CheckFilesParams) (l
 	// - starts from 0
 	// - more than 0 files
 	// - no overlaps
-	// - each data file has corresponding index/bt etc.1
+	// - each data file has its idx files
 	// - versions: between min supported version and max
 	// - lastFileTo check
 
@@ -46,11 +48,14 @@ func CheckFilesForSchema(schema *state.E2SnapSchema, params CheckFilesParams) (l
 		if !ok {
 			continue
 		}
-		key := snapFileKey{res.FileType, res.Ext, res.From, res.To}
-		files[key] = append(files[key], *res)
 		if res.IsDataFile() {
 			dataFiles = append(dataFiles, *res)
 		}
+		if !isCanonicalSnapName(schema, res) {
+			continue
+		}
+		key := snapFileKey{res.FileType, res.Ext, res.From, res.To}
+		files[key] = append(files[key], *res)
 	}
 
 	slices.SortFunc(dataFiles, func(a, b state.SnapInfo) int {
@@ -108,6 +113,21 @@ func CheckFilesForSchema(schema *state.E2SnapSchema, params CheckFilesParams) (l
 	}
 
 	return dataFiles[len(dataFiles)-1].To, false, nil
+}
+
+func isCanonicalSnapName(schema *state.E2SnapSchema, f *state.SnapInfo) bool {
+	from, to := kv.RootNum(f.From), kv.RootNum(f.To)
+	var canonical string
+	if f.IsDataFile() {
+		canonical, _ = schema.DataFile(f.Version, from, to)
+	} else {
+		idxPos := slices.Index(schema.IndexTags(), f.FileType)
+		if idxPos < 0 {
+			return false
+		}
+		canonical, _ = schema.AccessorIdxFile(f.Version, from, to, uint16(idxPos))
+	}
+	return filepath.Base(canonical) == f.Name
 }
 
 type snapFileKey struct {

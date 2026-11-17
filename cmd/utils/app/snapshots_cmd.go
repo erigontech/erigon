@@ -2131,18 +2131,18 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool, beaconCo
 }
 
 func checkIfBlockSnapshotsPublishable(snapDir string) error {
-	if err := checkNoDuplicateFileVersions(snapDir); err != nil {
-		return err
-	}
 	files, err := version.GroupByMaskedName(filepath.Join(snapDir, "*"))
 	if err != nil {
+		return err
+	}
+	if err := duplicateFileVersions(files, snapDir); err != nil {
 		return err
 	}
 	newest := func(masked string) (version.VersionedFile, bool) {
 		if len(files[masked]) == 0 {
 			return version.VersionedFile{}, false
 		}
-		return slices.MaxFunc(files[masked], func(a, b version.VersionedFile) int { return a.Version.Cmp(b.Version) }), true
+		return files[masked][0], true
 	}
 	checkIdx := func(idxName string, minSup version.Version) error {
 		masked, err := version.ReplaceVersionWithMask(idxName)
@@ -2313,15 +2313,22 @@ func checkNoDuplicateFileVersions(dirPaths ...string) error {
 		if err != nil {
 			return err
 		}
-		for _, g := range groups {
-			if len(g) < 2 {
-				continue
-			}
-			if !snaptype.IsSeedableExtension(g[0].Name) && !strings.HasSuffix(g[0].Name, ".torrent") {
-				continue // not an erigon snapshot file
-			}
-			return fmt.Errorf("%w: %s and %s in %s", ErrSnapDuplicateVersions, g[0].Name, g[1].Name, dirPath)
+		if err := duplicateFileVersions(groups, dirPath); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func duplicateFileVersions(groups map[string][]version.VersionedFile, dirPath string) error {
+	for _, g := range groups {
+		if len(g) < 2 {
+			continue
+		}
+		if !snaptype.IsSeedableExtension(g[0].Name) && !strings.HasSuffix(g[0].Name, ".torrent") {
+			continue // not an erigon snapshot file
+		}
+		return fmt.Errorf("%w: %s and %s in %s", ErrSnapDuplicateVersions, g[0].Name, g[1].Name, dirPath)
 	}
 	return nil
 }

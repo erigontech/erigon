@@ -347,6 +347,27 @@ func Test_SingleFileWithUnsupportedVersion(t *testing.T) {
 	}
 }
 
+func Test_NonCanonicalPaddingRejected(t *testing.T) {
+	tests := []struct {
+		name     string
+		replaced []string
+	}{
+		{"data and idx", []string{"beaconblocks.seg", "beaconblocks.idx"}},
+		{"idx only", []string{"beaconblocks.idx"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			touchFiles(t, dirs, []snapRange{{0, 10}, {10, 20}, {20, 30}})
+			for _, suffix := range tt.replaced {
+				delFile(t, dirs.Snap, "v1.0-000020-000030-"+suffix)
+				touchFile(t, dirs.Snap, "v1.0-20-30-"+suffix)
+			}
+			require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
+		})
+	}
+}
+
 type snapRange struct {
 	fromStep, toStep uint64
 }

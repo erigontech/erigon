@@ -936,6 +936,8 @@ func Test_CheckIfBlockSnapshotsPublishable_LastRangeCompanions(t *testing.T) {
 		{name: "missing transactions-to-block idx", remove: "v2.0-000520-000521-transactions-to-block.idx", wantError: "index file"},
 		{name: "unsupported bodies seg", remove: "v1.1-000520-000521-bodies.seg", add: "v0.1-000520-000521-bodies.seg", wantError: "expected version"},
 		{name: "unsupported headers seg", remove: "v1.1-000520-000521-headers.seg", add: "v0.1-000520-000521-headers.seg", wantError: "expected version"},
+		{name: "unsupported headers idx", remove: "v2.0-000520-000521-headers.idx", add: "v0.1-000520-000521-headers.idx", wantError: "less than supported"},
+		{name: "unsupported transactions-to-block idx", remove: "v2.0-000520-000521-transactions-to-block.idx", add: "v0.1-000520-000521-transactions-to-block.idx", wantError: "less than supported"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
