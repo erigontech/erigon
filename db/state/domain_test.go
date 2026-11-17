@@ -846,7 +846,7 @@ func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step 
 			domainRoTx := d.beginForTests()
 			defer domainRoTx.Close()
 			r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan, maxSpan)
-			if !r.any() {
+			if !r.any() || contiguousEnd(domainRoTx.ht.files) < domainRoTx.ht.files.EndTxNum() { // the fixture skips steps: no merge across them
 				return true
 			}
 			valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)

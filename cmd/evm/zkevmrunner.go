@@ -91,7 +91,10 @@ func zkevmTestCmd(_ context.Context, ctx *cli.Command) error {
 	// workers below only ever read it.
 	statecfg.EnableHistoricalCommitment()
 
-	files := collectFiles(path)
+	files, err := collectFiles(path)
+	if err != nil {
+		return err
+	}
 	witnesses, err := loadZkevmWitnesses(files)
 	if err != nil {
 		return err
