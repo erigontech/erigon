@@ -1024,6 +1024,10 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 			key := fmt.Appendf(nil, "key-%03d", i)
 			_, _ = view.GetOne(kv.HeaderNumber, key)
 			_, _ = view.Has(kv.HeaderNumber, key)
+			if err := view.ForAmount(kv.HeaderNumber, nil, 100, func(k, v []byte) error { return nil }); err != nil {
+				t.Errorf("reader: ForAmount: %v", err)
+				return
+			}
 		}
 	})
 
@@ -1036,6 +1040,66 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 	})
 
 	wg.Wait()
+}
+
+func TestMemoryMutationConcurrentClearAndCursorRead(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	initializeDbNonDupSort(t, rwTx)
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx)
+	require.NoError(t, err)
+	defer batch.Close()
+	cursor, err := batch.NewReadView(rwTx).Cursor(kv.HeaderNumber)
+	require.NoError(t, err)
+	defer cursor.Close()
+
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() {
+		for range 500 {
+			if err := batch.ClearTable(kv.HeaderNumber); err != nil {
+				t.Errorf("writer: ClearTable: %v", err)
+				return
+			}
+		}
+	})
+	for range 500 {
+		_, _, err := cursor.Seek(nil)
+		require.NoError(t, err)
+	}
+}
+
+func TestMemoryMutationConcurrentDeleteDupAndCursorRead(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	initializeDbDupSort(t, rwTx)
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx)
+	require.NoError(t, err)
+	defer batch.Close()
+	writer, err := batch.RwCursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer writer.Close()
+	reader, err := batch.NewReadView(rwTx).CursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() {
+		for range 500 {
+			if err := writer.DeleteExact([]byte("key1"), []byte("value1.1")); err != nil {
+				t.Errorf("writer: DeleteExact: %v", err)
+				return
+			}
+		}
+	})
+	for range 500 {
+		_, value, err := reader.SeekBothExact([]byte("key1"), []byte("value1.3"))
+		require.NoError(t, err)
+		require.Equal(t, []byte("value1.3"), value)
+	}
+	wg.Wait()
+	_, value, err := reader.SeekBothExact([]byte("key1"), []byte("value1.1"))
+	require.NoError(t, err)
+	require.Nil(t, value)
 }
 
 // erroringDomainReader fails every domain read, so a caller that swallows the

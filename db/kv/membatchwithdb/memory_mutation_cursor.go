@@ -53,10 +53,14 @@ type memoryMutationCursor struct {
 }
 
 func (m *memoryMutationCursor) isTableCleared() bool {
+	m.mutation.mu.RLock()
+	defer m.mutation.mu.RUnlock()
 	return m.mutation.isTableCleared(m.table)
 }
 
 func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte) bool {
+	m.mutation.mu.RLock()
+	defer m.mutation.mu.RUnlock()
 	if m.pureDupSort {
 		return m.mutation.isDupDeleted(m.table, key, value)
 	}
@@ -509,7 +513,7 @@ func (m *memoryMutationCursor) SeekBothExact(key, value []byte) ([]byte, []byte,
 		return nil, nil, err
 	}
 
-	if dbKey != nil && !m.mutation.isDupDeleted(m.table, key, value) {
+	if dbKey != nil && !m.isEntryDeleted(key, value) {
 		m.currentDbEntry.key = dbKey
 		m.currentDbEntry.value = dbValue
 		m.currentMemEntry.key = key
