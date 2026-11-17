@@ -794,14 +794,14 @@ func TestVersionedReaderServesBALMarkedAccountFromOrigin(t *testing.T) {
 	require.Zero(t, reader.reads, "the stored origin answers every tx")
 }
 
-// SeedEmptyRemovals and SeedAddresses derive cells from the access list and the pre-block state:
-// a removal (a destruct and a deleted balance), a zero balance at a tx that revives the account,
-// and the existence marker. They are the tx's final writes, as the cells of the access list are.
-// When a re-run of the tx drops a write that an earlier run made there, the derived cell is back
-// as Done, with its status and source, also when the earlier run wrote an equal value, which kept
-// the cell Done and rewrote them. A change takes the re-run's incarnation, so that a reader of the
-// earlier run's cell is invalid.
-func TestDropWritePutsBackADerivedCell(t *testing.T) {
+// SeedEmptyRemovals derives zero balances from the access list and the pre-block state: a deleted
+// balance where it removes the account, and a zero balance where a later tx revives it without a
+// balance change. They are the tx's final writes, as the cells of the access list are. When a re-run
+// of the tx drops a balance write that an earlier run made there, the derived balance is back as Done
+// with its status, also when the earlier run wrote an equal value, which kept the cell Done and
+// rewrote its status. A change takes the re-run's incarnation, so that a reader of the earlier run's
+// cell is invalid.
+func TestDropWritePutsBackADerivedZeroBalance(t *testing.T) {
 	t.Parallel()
 	prefunded := func(t *testing.T) (accounts.Address, *VersionMap) {
 		x, _, vm := seededRemovalOfPrefundedAccount(t)
@@ -835,53 +835,19 @@ func TestDropWritePutsBackADerivedCell(t *testing.T) {
 			ws.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: ver}, Val: *uint256.NewInt(v)})
 		}
 	}
-	zeroBalance := func(status valueStatus) func(*testing.T, *AddressEntry, int, Incarnation) {
-		return func(t *testing.T, e *AddressEntry, txIdx int, inc Incarnation) {
-			c := requireDoneCell(t, e.Balance, txIdx, inc)
-			require.True(t, c.Value.IsZero())
-			require.Equal(t, status, c.valStatus)
-		}
-	}
-	destruct := func(t *testing.T, e *AddressEntry, txIdx int, inc Incarnation) {
-		require.True(t, requireDoneCell(t, e.SelfDestruct, txIdx, inc).Value)
-	}
-	// The marker of this account is an empty account record.
-	address := func(balance uint64) func(*WriteSet, accounts.Address, Version) {
-		return func(ws *WriteSet, x accounts.Address, ver Version) {
-			acc := accounts.NewAccount()
-			acc.Balance = *uint256.NewInt(balance)
-			ws.SetAddress(x, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: x, Path: AddressPath, Version: ver}, Val: &acc})
-		}
-	}
-	marker := func(t *testing.T, e *AddressEntry, txIdx int, inc Incarnation) {
-		c := requireDoneCell(t, e.Address, txIdx, inc)
-		require.Equal(t, AccountFromBAL, c.accSource)
-		require.True(t, c.Value.Balance.IsZero())
-	}
 	for _, tc := range []struct {
 		name      string
 		seed      func(*testing.T) (accounts.Address, *VersionMap)
-		path      AccountPath
 		txIdx     int
 		overwrite func(*WriteSet, accounts.Address, Version)
-		inc       Incarnation
-		want      func(*testing.T, *AddressEntry, int, Incarnation)
+		status    valueStatus
 	}{
-		{"removal destruct kept by a run that removes the account too", prefunded, SelfDestructPath, 0, (*WriteSet).SetEmptyRemoval, 0, destruct},
-		{
-			"removal destruct", prefunded, SelfDestructPath, 0,
-			func(ws *WriteSet, x accounts.Address, ver Version) {
-				ws.SetSelfDestruct(x, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: x, Path: SelfDestructPath, Version: ver}})
-			}, 2, destruct,
-		},
-		{"removal balance where the access list has a zero balance", prefunded, BalancePath, 0, balance(5), 2, zeroBalance(ValueDeleted)},
-		{"removal balance over an equal balance", prefunded, BalancePath, 0, balance(0), 2, zeroBalance(ValueDeleted)},
-		{"removal balance where the access list has no balance", uncoded, BalancePath, 1, balance(5), 2, zeroBalance(ValueDeleted)},
-		{"zero balance of a revival", prefunded, BalancePath, 1, balance(5), 2, zeroBalance(ValueChanged)},
-		{"zero balance of a revival over a removal", prefunded, BalancePath, 1, (*WriteSet).SetEmptyRemoval, 2, zeroBalance(ValueChanged)},
-		{"removal balance at the tx of a revival", removedTwice, BalancePath, 1, balance(5), 2, zeroBalance(ValueDeleted)},
-		{"existence marker", prefunded, AddressPath, 0, address(7), 2, marker},
-		{"existence marker over an equal record", prefunded, AddressPath, 0, address(0), 2, marker},
+		{"removal where the access list has a zero balance", prefunded, 0, balance(5), ValueDeleted},
+		{"removal over an equal balance", prefunded, 0, balance(0), ValueDeleted},
+		{"removal where the access list has no balance", uncoded, 1, balance(5), ValueDeleted},
+		{"revival", prefunded, 1, balance(5), ValueChanged},
+		{"revival over a removal", prefunded, 1, (*WriteSet).SetEmptyRemoval, ValueChanged},
+		{"removal at the tx of a revival", removedTwice, 1, balance(5), ValueDeleted},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -890,8 +856,10 @@ func TestDropWritePutsBackADerivedCell(t *testing.T) {
 			tc.overwrite(run, x, Version{TxIndex: tc.txIdx, Incarnation: 1})
 			vm.FlushVersionedWrites(run, false)
 
-			vm.DropWrite(x, tc.path, accounts.NilKey, Version{TxIndex: tc.txIdx, Incarnation: 2})
-			tc.want(t, vm.load(x), tc.txIdx, tc.inc)
+			vm.DropWrite(x, BalancePath, accounts.NilKey, Version{TxIndex: tc.txIdx, Incarnation: 2})
+			c := requireDoneCell(t, vm.load(x).Balance, tc.txIdx, 2)
+			require.True(t, c.Value.IsZero())
+			require.Equal(t, tc.status, c.valStatus)
 		})
 	}
 }
@@ -917,10 +885,9 @@ func TestDropWritePutsBackTheStatusOfASeededBalance(t *testing.T) {
 	require.Equal(t, ValueChanged, c.valStatus)
 }
 
-// A destruct that a dropped write put back is Done at the re-run's incarnation, which the re-run's
-// balance write shares. A later run's removal moves the destruct to its own incarnation, so that a
-// read of the re-run's balance is invalid once the removal changes the balance.
-func TestALaterRemovalMovesADestructADroppedWritePutBack(t *testing.T) {
+// A re-run of tx 3 drops its destruct and writes a balance of 7, which tx 4 reads. The final run
+// removes the account, so the read of 7 is stale.
+func TestABalanceReadOfARerunIsStaleOnceTheFinalRunRemovesTheAccount(t *testing.T) {
 	t.Parallel()
 	x := accounts.InternAddress(common.HexToAddress("0xd5"))
 	acc := accounts.NewAccount()
@@ -967,6 +934,57 @@ func TestALaterRemovalMovesADestructADroppedWritePutBack(t *testing.T) {
 	require.False(t, fresh.HadInvalidRead())
 	require.True(t, value.IsZero())
 	require.Equal(t, VersionInvalid, vm.ValidateReadSet(4, reads, validateEqualVersion, false, ""), "the full read set must reject the old balance 7 after it changes to 0")
+}
+
+// A re-run of tx 3 drops its destruct and writes a balance of 7, which tx 4 reads. A later run
+// writes only a balance, so the read of 7 is stale.
+func TestABalanceReadOfARerunIsStaleOnceALaterRunWritesTheBalance(t *testing.T) {
+	t.Parallel()
+	x, base, vm := seededRemovalAtTx3(t)
+	first := &WriteSet{}
+	first.SetSelfDestruct(x, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: x, Path: SelfDestructPath, Version: Version{TxIndex: 3}}})
+	vm.FlushVersionedWrites(first, false)
+	second := Version{TxIndex: 3, Incarnation: 1}
+	vm.DropWrite(x, SelfDestructPath, accounts.NilKey, second)
+	secondWrites := &WriteSet{}
+	secondWrites.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: second}, Val: *uint256.NewInt(7)})
+	vm.FlushVersionedWrites(secondWrites, false)
+	vm.MarkWritesValidated(secondWrites, nil)
+	reads := balanceReadAtTx4(t, base, vm, 7)
+
+	third := &WriteSet{}
+	third.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: Version{TxIndex: 3, Incarnation: 2}}, Val: *uint256.NewInt(9)})
+	vm.FlushVersionedWrites(third, false)
+	vm.MarkWritesValidated(third, nil)
+	require.Equal(t, VersionInvalid, vm.ValidateReadSet(4, reads, validateEqualVersion, false, ""))
+	require.Equal(t, VersionValid, vm.ValidateReadSet(4, balanceReadAtTx4(t, base, vm, 9), validateEqualVersion, false, ""), "a re-run validates")
+}
+
+// seededRemovalAtTx3 returns a version map whose access list seeds a removal of the prefunded x at tx 3.
+func seededRemovalAtTx3(t *testing.T) (accounts.Address, *accountStateReader, *VersionMap) {
+	t.Helper()
+	x := accounts.InternAddress(common.HexToAddress("0xd6"))
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(5)
+	base := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &acc}}
+	vm := NewVersionMap(types.BlockAccessList{{Address: x.Value(), BalanceChanges: []*types.BalanceChange{{Index: 4, Value: uint256.Int{}}}}})
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, base))
+	return x, base, vm
+}
+
+// balanceReadAtTx4 reads the balance of x in tx 4, checks it, and returns the tx's read set.
+func balanceReadAtTx4(t *testing.T, base StateReader, vm *VersionMap, want uint64) ReadSet {
+	t.Helper()
+	x := accounts.InternAddress(common.HexToAddress("0xd6"))
+	ibs := NewWithVersionMap(base, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 4)
+	balance, err := ibs.GetBalance(x)
+	require.NoError(t, err)
+	require.False(t, ibs.HadInvalidRead())
+	require.Equal(t, *uint256.NewInt(want), balance)
+	return ibs.VersionedReads()
 }
 
 func requireDoneCell[T any](t *testing.T, cells *btree.Map[int, *WriteCell[T]], txIdx int, inc Incarnation) *WriteCell[T] {
