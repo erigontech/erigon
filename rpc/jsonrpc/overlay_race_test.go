@@ -1839,6 +1839,36 @@ func TestGasPriceOracle_ForkSharesCallerPinnedOverlay(t *testing.T) {
 		"parent and fork must resolve the same pinned head")
 }
 
+// A write to the pinned overlay after the request acquired its view must not
+// reach the request's forks: parent and fork read one overlay snapshot.
+func TestGasPriceOracle_ForkKeepsRequestOverlaySnapshot(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	overlay := h.doms.BlockOverlay()
+	backend := NewGasPriceOracleBackend(h.m.DB, rpchelper.PinToOverlay(tx, overlay), h.base)
+
+	next := types.CopyHeader(h.overlayHeader)
+	next.ParentHash = h.overlayHeader.Hash()
+	next.Number = *uint256.NewInt(h.overlayHeader.Number.Uint64() + 1)
+	writeHeadBlockMarkers(t, overlay, next, &types.Body{})
+
+	require.NoError(t, backend.PrepareFork(h.m.Ctx))
+	forked, cleanup, err := backend.Fork(h.m.Ctx)
+	require.NoError(t, err)
+	require.NotNil(t, forked)
+	defer cleanup()
+
+	parentHead, err := backend.HeaderByNumber(h.m.Ctx, rpc.LatestBlockNumber)
+	require.NoError(t, err)
+	require.Equal(t, h.overlayHeader.Hash(), parentHead.Hash())
+	forkHead, err := forked.HeaderByNumber(h.m.Ctx, rpc.LatestBlockNumber)
+	require.NoError(t, err)
+	require.Equal(t, parentHead.Hash(), forkHead.Hash())
+}
+
 // TestGasPriceOracle_NilOverlayPinIgnoresLaterPublish pins that a backend built
 // while no overlay was published keeps reading only committed data: an overlay
 // published mid-request (a same-height sibling of the committed head) must not

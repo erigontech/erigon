@@ -1060,20 +1060,30 @@ func (m *MemoryMutation) OverlayView() (*MemoryMutation, bool) {
 // newReadViewMut is the internal constructor that returns the full
 // *MemoryMutation. Used by NewTemporalReadView which needs to embed it.
 func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
-	var dbTx kv.TemporalTx
-	if t, ok := tx.(kv.TemporalTx); ok {
-		dbTx = t
-	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return newReadView(m.memTx.snapshot(), m.DomainReader, m, tx)
+}
+
+// Rebind returns a read view backed by tx that shares the overlay snapshot of
+// the read view m, so both read the same overlay data.
+func (m *MemoryMutation) Rebind(tx kv.TemporalTx) kv.TemporalTx {
+	if m.overlay == nil {
+		panic("MemoryMutation.Rebind: not a read view")
+	}
+	return newReadView(m.memTx, m.DomainReader, m.overlay, tx)
+}
+
+func newReadView(snap *memStore, domainReader DomainReader, overlay *MemoryMutation, tx kv.Tx) *MemoryMutation {
+	dbTx, _ := tx.(kv.TemporalTx)
 	return &MemoryMutation{
 		mu:           &sync.RWMutex{},
-		memTx:        m.memTx.snapshot(),
+		memTx:        snap,
 		memDb:        nil, // caller doesn't own the memDb
 		readTx:       tx,
 		db:           dbTx,
-		DomainReader: m.DomainReader,
-		overlay:      m,
+		DomainReader: domainReader,
+		overlay:      overlay,
 	}
 }
 
