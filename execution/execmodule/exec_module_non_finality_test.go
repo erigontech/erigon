@@ -189,8 +189,8 @@ func TestExecModule_GivenReorgBelowFinalisedBlock_WhenFinality_ThenReorgTooDeep(
 			require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
 			requested := map[string]common.Hash{"fork": fork.TopBlock.Hash(), "canonical": finalisedHash, "prefix": prefix.TopBlock.Hash()}
 			result, err := emt.UpdateForkChoice(ctx, fork.TopBlock.Header(),
-				execmoduletester.WithSafeHash(requested[tc.safe]),
-				execmoduletester.WithFinalisedHash(requested[tc.finalised]))
+				execmoduletester.WithSafeHash(namedHash(t, requested, tc.safe)),
+				execmoduletester.WithFinalisedHash(namedHash(t, requested, tc.finalised)))
 			require.NoError(t, err)
 			require.Equal(t, tc.want, result.Status)
 			forkchoice, err := emt.ExecModule.GetForkChoice(ctx)
@@ -212,18 +212,23 @@ func TestExecModule_GivenReorgBelowFinalisedBlock_WhenFinality_ThenReorgTooDeep(
 // downloaded: the reorg would cross finality anyway. Only one above it is still reported as missing.
 func TestExecModule_GivenMissingSideBlock_WhenReorgBelowFinalisedBlock_ThenRefusedWithoutDownload(t *testing.T) {
 	// The fork point (height 2) lies under the missing block and is unknown to the fork choice, so a requested
-	// block under the missing one cannot be shown to be on the new chain.
+	// block under the missing one, canonical or unknown, may be on the new chain. Only a known block at or above
+	// the missing height that is not on it makes the request inconsistent.
 	for _, tc := range []struct {
 		name            string
 		missing         int    // index of the deleted fork block; the canonical second block (height 4) is finalized
-		safe, finalized string // "fork tip", "zero", "stored finalized" or "fork point"
+		safe, finalized string // "fork tip", "zero", "stored finalized", "fork point" or "unknown"
 		want            execmodule.ExecutionStatus
 	}{
 		{name: "below the finalized block", missing: 0, safe: "fork tip", finalized: "fork tip", want: execmodule.ExecutionStatusReorgTooDeep},
 		{name: "below the finalized block, zero safe and finalized", missing: 0, safe: "zero", finalized: "zero", want: execmodule.ExecutionStatusReorgTooDeep},
 		{name: "below the finalized block, finalized off the new chain", missing: 0, safe: "fork tip", finalized: "stored finalized", want: execmodule.ExecutionStatusInvalidForkchoice},
-		{name: "below the finalized block, finalized below the missing block", missing: 0, safe: "fork tip", finalized: "fork point", want: execmodule.ExecutionStatusInvalidForkchoice},
+		{name: "below the finalized block, finalized at the fork point", missing: 0, safe: "fork tip", finalized: "fork point", want: execmodule.ExecutionStatusReorgTooDeep},
+		{name: "below the finalized block, unknown finalized", missing: 0, safe: "fork tip", finalized: "unknown", want: execmodule.ExecutionStatusReorgTooDeep},
 		{name: "at the finalized height", missing: 1, safe: "fork tip", finalized: "fork tip", want: execmodule.ExecutionStatusReorgTooDeep},
+		{name: "at the finalized height, finalized at the fork point", missing: 1, safe: "fork tip", finalized: "fork point", want: execmodule.ExecutionStatusReorgTooDeep},
+		{name: "at the finalized height, finalized off the new chain", missing: 1, safe: "fork tip", finalized: "stored finalized", want: execmodule.ExecutionStatusInvalidForkchoice},
+		{name: "at the finalized height, safe off the new chain", missing: 1, safe: "stored finalized", finalized: "fork point", want: execmodule.ExecutionStatusInvalidForkchoice},
 		{name: "above the finalized block", missing: 2, safe: "fork tip", finalized: "fork tip", want: execmodule.ExecutionStatusMissingSegment},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -261,8 +266,13 @@ func TestExecModule_GivenMissingSideBlock_WhenReorgBelowFinalisedBlock_ThenRefus
 				require.Nil(t, header)
 				return nil
 			}))
-			hashes := map[string]common.Hash{"fork tip": fork.TopBlock.Hash(), "zero": {}, "stored finalized": finalisedHash, "fork point": prefix.TopBlock.Hash()}
-			result, err := emt.UpdateForkChoice(ctx, fork.TopBlock.Header(), execmoduletester.WithSafeHash(hashes[tc.safe]), execmoduletester.WithFinalisedHash(hashes[tc.finalized]))
+			hashes := map[string]common.Hash{
+				"fork tip": fork.TopBlock.Hash(), "zero": {}, "stored finalized": finalisedHash,
+				"fork point": prefix.TopBlock.Hash(), "unknown": common.HexToHash("0x01"),
+			}
+			result, err := emt.UpdateForkChoice(ctx, fork.TopBlock.Header(),
+				execmoduletester.WithSafeHash(namedHash(t, hashes, tc.safe)),
+				execmoduletester.WithFinalisedHash(namedHash(t, hashes, tc.finalized)))
 			require.NoError(t, err)
 			require.Equal(t, tc.want, result.Status)
 			forkchoice, err := emt.ExecModule.GetForkChoice(ctx)
@@ -271,6 +281,55 @@ func TestExecModule_GivenMissingSideBlock_WhenReorgBelowFinalisedBlock_ThenRefus
 			require.Equal(t, finalisedHash, forkchoice.FinalizedHash)
 		})
 	}
+}
+
+// A head whose chain goes down to a block at height 0 other than this chain's genesis is refused as an invalid fork
+// choice, whether or not a block is finalized.
+func TestExecModule_GivenHeadOnOtherGenesis_WhenUpdateForkChoice_ThenInvalidForkchoice(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		finalised bool // finalize the second of the three canonical blocks
+	}{
+		{name: "finalized block", finalised: true},
+		{name: "nothing finalized", finalised: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+			defer cancel()
+			emt := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+			canonical, err := emt.GenerateChain(3, nil)
+			require.NoError(t, err)
+			var fcuOpts [][]execmoduletester.UFCOpt
+			if tc.finalised {
+				finalisedHash := canonical.Blocks[1].Hash()
+				fcuOpts = [][]execmoduletester.UFCOpt{nil, nil, {execmoduletester.WithSafeHash(finalisedHash), execmoduletester.WithFinalisedHash(finalisedHash)}}
+			}
+			require.NoError(t, emt.InsertValidateAndUfc1By1(ctx, canonical.Blocks, execmoduletester.WithFcuOptSeq(fcuOpts)))
+			otherGenesisHeader := types.CopyHeader(emt.Genesis.Header())
+			otherGenesisHeader.Extra = []byte("other genesis")
+			otherGenesis := types.NewBlockWithHeader(otherGenesisHeader, nil)
+			childHeader := types.CopyHeader(canonical.Blocks[0].Header())
+			childHeader.ParentHash = otherGenesis.Hash()
+			child := types.NewBlockWithHeader(childHeader, nil)
+			status, err := emt.InsertBlocks(ctx, []*types.Block{otherGenesis, child})
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			result, err := emt.UpdateForkChoice(ctx, child.Header())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, result.Status)
+			forkchoice, err := emt.ExecModule.GetForkChoice(ctx)
+			require.NoError(t, err)
+			require.Equal(t, canonical.TopBlock.Hash(), forkchoice.HeadHash)
+		})
+	}
+}
+
+// namedHash returns the hash a test case names, failing the test for a name the table does not define.
+func namedHash(t *testing.T, hashes map[string]common.Hash, name string) common.Hash {
+	t.Helper()
+	hash, ok := hashes[name]
+	require.True(t, ok, "unknown block name %q", name)
+	return hash
 }
 
 func TestExecModule_GivenSameHeadFCULowersFinalised_WhenReorgAboveIt_ThenReorg(t *testing.T) {

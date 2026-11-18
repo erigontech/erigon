@@ -112,9 +112,12 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 	return true, nil
 }
 
-// onHeadChain reports whether each non-zero hash is on the fork choice head's chain: one of newCanonicals,
-// or a canonical block at or below forkPointNum.
-func (e *ExecModule) onHeadChain(ctx context.Context, tx kv.Tx, newCanonicals []*canonicalEntry, forkPointNum uint64, hashes ...common.Hash) (bool, error) {
+// onHeadChain reports whether each non-zero hash may be on the fork choice head's chain. newCanonicals holds that
+// chain from the head down to the lowest block walked, so a block at or above that height must be one of them.
+// Below it, the chain is canonical when the walk reached the canonical chain (forkPointKnown). When it stopped at a
+// missing side block, the chain below is unknown and any block there, or an unknown one, may be an ancestor.
+func (e *ExecModule) onHeadChain(ctx context.Context, tx kv.Tx, newCanonicals []*canonicalEntry, forkPointKnown bool, hashes ...common.Hash) (bool, error) {
+	lowest := newCanonicals[len(newCanonicals)-1].number
 	for _, hash := range hashes {
 		if hash == (common.Hash{}) || slices.ContainsFunc(newCanonicals, func(c *canonicalEntry) bool { return c.hash == hash }) {
 			continue
@@ -123,7 +126,13 @@ func (e *ExecModule) onHeadChain(ctx context.Context, tx kv.Tx, newCanonicals []
 		if err != nil {
 			return false, err
 		}
-		if number == nil || *number > forkPointNum {
+		if number != nil && *number >= lowest {
+			return false, nil
+		}
+		if !forkPointKnown {
+			continue
+		}
+		if number == nil {
 			return false, nil
 		}
 		canonical, err := e.isCanonicalHash(ctx, tx, hash)
@@ -139,8 +148,8 @@ func (e *ExecModule) onHeadChain(ctx context.Context, tx kv.Tx, newCanonicals []
 
 // refuseReorg answers a reorg this node cannot apply: a too deep reorg when the requested safe and finalized
 // blocks are on the new head's chain (see onHeadChain), and an invalid fork choice otherwise.
-func (e *ExecModule) refuseReorg(ctx context.Context, tx kv.Tx, newCanonicals []*canonicalEntry, forkPointNum uint64, safeHash, finalizedHash common.Hash, reason string, logCtx ...any) (*ForkChoiceResult, *uint64, error) {
-	onChain, err := e.onHeadChain(ctx, tx, newCanonicals, forkPointNum, safeHash, finalizedHash)
+func (e *ExecModule) refuseReorg(ctx context.Context, tx kv.Tx, newCanonicals []*canonicalEntry, forkPointKnown bool, safeHash, finalizedHash common.Hash, reason string, logCtx ...any) (*ForkChoiceResult, *uint64, error) {
+	onChain, err := e.onHeadChain(ctx, tx, newCanonicals, forkPointKnown, safeHash, finalizedHash)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -301,6 +310,13 @@ func (e *ExecModule) unwindIfNeeded(
 			return nil, nil, err
 		}
 		for !isCanonicalHash {
+			if currentParentNumber == 0 {
+				// A non-canonical block at height 0 is another genesis, so the head is not on this chain.
+				return &ForkChoiceResult{
+					LatestValidHash: common.Hash{},
+					Status:          ExecutionStatusInvalidForkchoice,
+				}, nil, nil
+			}
 			newCanonicals = append(newCanonicals, &canonicalEntry{
 				hash:   currentParentHash,
 				number: currentParentNumber,
@@ -312,8 +328,8 @@ func (e *ExecModule) unwindIfNeeded(
 			if currentHeader == nil && currentParentNumber <= finalisedBlockNum {
 				// A side block at or below the finalized height means this reorg unwinds the finalized block, so it
 				// is refused whatever the missing blocks are: nothing to download (old side blocks may be retired).
-				// The fork point lies below and is unknown, so genesis is the only known common ancestor.
-				return e.refuseReorg(ctx, tx, newCanonicals, 0, safeHash, finalizedHash,
+				// The fork point lies below and is unknown, so requested blocks below this one may be ancestors.
+				return e.refuseReorg(ctx, tx, newCanonicals, false, safeHash, finalizedHash,
 					"reorg below finalized block through a missing side block", "missingBlock", currentParentNumber, "finalisedBlock", finalisedBlockNum)
 			}
 			if currentHeader == nil {
@@ -337,7 +353,7 @@ func (e *ExecModule) unwindIfNeeded(
 	unwindTarget := currentParentNumber
 	if canonicalHash != blockHash && unwindTarget < finalisedBlockNum {
 		// Changesets and state below the stored finalized block may already be pruned, so this reorg is not supported.
-		return e.refuseReorg(ctx, tx, newCanonicals, unwindTarget, safeHash, finalizedHash,
+		return e.refuseReorg(ctx, tx, newCanonicals, true, safeHash, finalizedHash,
 			"reorg target below finalized block", "unwindTarget", unwindTarget, "finalisedBlock", finalisedBlockNum)
 	}
 	// Determine current canonical tip from TxNums. If unwindTarget is at or
