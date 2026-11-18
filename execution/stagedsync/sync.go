@@ -265,10 +265,11 @@ func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 		return nil
 	}
 	// The request is consumed even on failure: the caller's tx is rolled back,
-	// and a reused Sync must not replay this unwind on its next run.
+	// and a reused Sync must not replay this unwind or resume at the failed stage.
 	defer func() {
 		s.unwindPoint = nil
 		s.unwindReason = UnwindReason{}
+		s.currentStage = 0
 	}()
 	for j := 0; j < len(s.unwindOrder); j++ {
 		if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {

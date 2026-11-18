@@ -211,30 +211,41 @@ func TestRunStartsAtFirstStageAfterPruneError(t *testing.T) {
 func TestFailedRunUnwindDoesNotLeakIntoNextRun(t *testing.T) {
 	unwindErr := errors.New("unwind failed")
 	var flow []stages.SyncStage
-	state := New(ethconfig.Defaults.Sync, []*Stage{{
-		ID: stages.Headers,
-		Forward: func(_ bool, s *StageState, _ Unwinder, _ *execctx.SharedDomains, _ kv.TemporalRwTx, _ log.Logger) error {
-			flow = append(flow, s.ID)
-			return nil
-		},
-		Unwind: func(*UnwindState, *StageState, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error {
-			flow = append(flow, unwindOf(stages.Headers))
-			return unwindErr
-		},
-	}}, UnwindOrder{stages.Headers}, nil, log.New(), stages.ModeForkValidation)
+	stage := func(id stages.SyncStage, unwindFails bool) *Stage {
+		return &Stage{
+			ID: id,
+			Forward: func(_ bool, s *StageState, _ Unwinder, _ *execctx.SharedDomains, _ kv.TemporalRwTx, _ log.Logger) error {
+				flow = append(flow, s.ID)
+				return nil
+			},
+			Unwind: func(*UnwindState, *StageState, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error {
+				flow = append(flow, unwindOf(id))
+				if unwindFails {
+					return unwindErr
+				}
+				return nil
+			},
+		}
+	}
+	state := New(ethconfig.Defaults.Sync, []*Stage{stage(stages.Headers, false), stage(stages.Bodies, true)},
+		UnwindOrder{stages.Bodies, stages.Headers}, nil, log.New(), stages.ModeForkValidation)
 
 	_, tx := temporaltest.NewTestTx(t)
-	require.NoError(t, stages.SaveStageProgress(tx, stages.Headers, 2000))
+	for _, id := range []stages.SyncStage{stages.Headers, stages.Bodies} {
+		require.NoError(t, stages.SaveStageProgress(tx, id, 2000))
+	}
 	require.NoError(t, state.UnwindTo(100, StagedUnwind, nil))
 	require.ErrorIs(t, state.RunUnwind(nil, tx), unwindErr)
 	require.False(t, state.HasUnwindPoint())
 
 	flow = nil
 	_, tx2 := temporaltest.NewTestTx(t)
-	require.NoError(t, stages.SaveStageProgress(tx2, stages.Headers, 2000))
+	for _, id := range []stages.SyncStage{stages.Headers, stages.Bodies} {
+		require.NoError(t, stages.SaveStageProgress(tx2, id, 2000))
+	}
 	_, err := state.RunNoInterrupt(nil, tx2)
 	require.NoError(t, err)
-	require.Equal(t, []stages.SyncStage{stages.Headers}, flow)
+	require.Equal(t, []stages.SyncStage{stages.Headers, stages.Bodies}, flow)
 }
 
 func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
