@@ -157,8 +157,9 @@ var (
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )
 
+// balCommitmentWarmupWorkersDefault leaves most cores to the exec workers, which run beside the trie warmup.
 func balCommitmentWarmupWorkersDefault(gomaxprocs int) int {
-	return max(gomaxprocs, 1)
+	return max(gomaxprocs/2, 1)
 }
 
 func BALCommitmentWarmupReaders() int {

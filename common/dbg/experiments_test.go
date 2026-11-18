@@ -25,8 +25,9 @@ import (
 
 func TestBALCommitmentWarmupWorkersDefault(t *testing.T) {
 	require.Equal(t, 1, balCommitmentWarmupWorkersDefault(1))
-	require.Equal(t, 6, balCommitmentWarmupWorkersDefault(6))
-	require.Equal(t, runtime.GOMAXPROCS(-1), balCommitmentWarmupWorkersDefault(runtime.GOMAXPROCS(-1)))
+	require.Equal(t, 1, balCommitmentWarmupWorkersDefault(2-1))
+	require.Equal(t, 4, balCommitmentWarmupWorkersDefault(8))
+	require.Equal(t, max(runtime.GOMAXPROCS(-1)/2, 1), balCommitmentWarmupWorkersDefault(runtime.GOMAXPROCS(-1)))
 }
 
 func TestBALCommitmentWarmupReaders(t *testing.T) {
