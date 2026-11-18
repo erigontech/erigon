@@ -260,7 +260,6 @@ func TestNextBlockReadsThePreviousBlockWrite(t *testing.T) {
 }
 
 func testNextBlockReadsThePreviousBlockWrite(t *testing.T, amsterdam bool) {
-
 	config := chain.AllProtocolChanges.Copy()
 	if !amsterdam {
 		config.CancunTime = nil
@@ -302,7 +301,6 @@ type counterChain struct {
 }
 
 func newCounterChain(t *testing.T, amsterdam bool) *counterChain {
-
 	config := chain.AllProtocolChanges.Copy()
 	if !amsterdam {
 		config.CancunTime = nil
