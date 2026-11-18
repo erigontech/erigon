@@ -339,11 +339,13 @@ func TestLegacyCommitmentFiles(t *testing.T) {
 				}
 				want := map[string]bool{}
 				var names []string
+				mixedRange := []string{"history/v2.0-commitment.16-32.v", "history/v3.0-commitment.16-32.v", "idx/v2.0-commitment.16-32.ef"}
 				if v3 {
-					names = []string{"domain/v2.2-commitment.0-16.kv", "domain/v2.0-commitment.0-16.kvi", "domain/v2.2-commitment.16-32.kv", "history/v2.0-commitment.0-16.v", "idx/v2.0-commitment.0-16.ef", "accessor/v2.0-commitment.0-16.vi", "history/v2.0-commitment.16-32.v", "idx/v2.0-commitment.48-64.ef", "domain/v2.0-accounts.0-16.kv", "domain/v2.0-accounts.0-16.bt", "domain/v2.0-storage.0-16.kv", "domain/v2.0-storage.0-16.kvei"}
+					names = []string{"domain/v2.2-commitment.0-16.kv", "domain/v2.0-commitment.0-16.kvi", "domain/v2.2-commitment.16-32.kv", "history/v2.0-commitment.0-16.v", "idx/v2.0-commitment.0-16.ef", "accessor/v2.0-commitment.0-16.vi", "idx/v2.0-commitment.48-64.ef", "domain/v2.0-accounts.0-16.kv", "domain/v2.0-accounts.0-16.bt", "domain/v2.0-storage.0-16.kv", "domain/v2.0-storage.0-16.kvei"}
 				} else {
-					names = []string{"domain/v3.0-commitment.16-32.kv", "domain/v3.0-commitment.32-48.kv", "domain/v2.0-commitment.32-48.bt", "history/v3.0-commitment.16-32.v", "history/v3.0-commitment.32-48.v", "idx/v2.0-commitment.32-48.ef"}
+					names = []string{"domain/v3.0-commitment.16-32.kv", "domain/v3.0-commitment.32-48.kv", "domain/v2.0-commitment.32-48.bt", "history/v3.0-commitment.32-48.v", "idx/v2.0-commitment.32-48.ef"}
 				}
+				names = append(names, mixedRange...)
 				for _, name := range names {
 					want[name] = false
 				}
