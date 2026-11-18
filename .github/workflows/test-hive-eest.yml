@@ -128,7 +128,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 3 # Bogota transitions need EIPs 8151, 8298: https://github.com/erigontech/erigon/issues/25241
+              max-failures: 1 # Bogota transition needs EIP-8298: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -146,9 +146,9 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              # Hive's rejection-reason checks add one EIP-8151 and two EIP-8298
-              # failures to the 505 failures reported by the native EngineX runner.
-              max-failures: 508 # Missing devnet-2 EIPs: 8151, 8298: https://github.com/erigontech/erigon/issues/25241
+              # Hive's rejection-reason checks add two EIP-8298 failures
+              # to the 217 failures reported by the native EngineX runner.
+              max-failures: 219 # Missing EIP-8298: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -157,7 +157,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 213 # 211 missing-EIP cases + 2 legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
+              max-failures: 8 # 6 SETCODEFROM cases + 2 legacy chain-ID errors: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
         shell: bash
         run: |

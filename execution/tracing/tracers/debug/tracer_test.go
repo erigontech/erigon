@@ -31,6 +31,22 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 )
 
+func TestAccountAccessRecording(t *testing.T) {
+	var addresses []accounts.Address
+	recorder := &Tracer{wrapped: &tracers.Tracer{Hooks: &tracing.Hooks{
+		OnAccountAccess: func(addr accounts.Address) {
+			addresses = append(addresses, addr)
+		},
+	}}}
+	hooks := recorder.Hooks()
+	require.NotNil(t, hooks.OnAccountAccess)
+	hooks.OnAccountAccess(accounts.ZeroAddress)
+	require.Equal(t, []accounts.Address{accounts.ZeroAddress}, addresses)
+	encoded, err := json.Marshal(recorder.traces)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"traces":[{"onAccountAccess":{"address":"0x0000000000000000000000000000000000000000"}}]}`, string(encoded))
+}
+
 func TestAccountReadRecording(t *testing.T) {
 	var addresses []accounts.Address
 	recorder := &Tracer{wrapped: &tracers.Tracer{Hooks: &tracing.Hooks{

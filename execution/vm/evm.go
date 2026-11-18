@@ -81,6 +81,9 @@ func (evm *EVM) runEcrecover(p PrecompiledContract, input []byte, gas mdgas.MdGa
 		return output, gas, err
 	}
 	address := accounts.InternAddress(common.BytesToAddress(output))
+	if tracer != nil && tracer.OnAccountAccess != nil {
+		tracer.OnAccountAccess(address)
+	}
 	gasCost := params.ExtCodeWarmAccessGasEIP8038
 	if !evm.intraBlockState.AddressInAccessList(address) {
 		gasCost += params.ColdAccountAccessCostEIP8038 - params.WarmStorageReadCostEIP2929

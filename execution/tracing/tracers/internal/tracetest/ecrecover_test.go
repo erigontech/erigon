@@ -111,17 +111,17 @@ func TestEcrecoverPrestate(t *testing.T) {
 func TestEcrecoverAccessList(t *testing.T) {
 	input, signer := ecrecoverInput(t)
 	for _, tc := range []struct {
-		name     string
-		input    []byte
-		gas      uint64
-		warm     bool
-		wantRead bool
-		err      error
+		name       string
+		input      []byte
+		gas        uint64
+		warm       bool
+		wantAccess bool
+		err        error
 	}{
-		{name: "cold", input: input, gas: 6100, wantRead: true},
-		{name: "cold out of gas", input: input, gas: 6099, err: vm.ErrOutOfGas},
-		{name: "warm", input: input, gas: 3200, warm: true, wantRead: true},
-		{name: "warm out of gas", input: input, gas: 3199, warm: true, err: vm.ErrOutOfGas},
+		{name: "cold", input: input, gas: 6100, wantAccess: true},
+		{name: "cold out of gas", input: input, gas: 6099, wantAccess: true, err: vm.ErrOutOfGas},
+		{name: "warm", input: input, gas: 3200, warm: true, wantAccess: true},
+		{name: "warm out of gas", input: input, gas: 3199, warm: true, wantAccess: true, err: vm.ErrOutOfGas},
 		{name: "invalid signature", gas: 3000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,7 +136,7 @@ func TestEcrecoverAccessList(t *testing.T) {
 			require.ErrorIs(t, err, tc.err)
 			require.Empty(t, output)
 			list := tracer.AccessList()
-			if !tc.wantRead {
+			if !tc.wantAccess {
 				require.Empty(t, list)
 				return
 			}

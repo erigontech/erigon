@@ -138,7 +138,13 @@ func ValidateFrameTransaction(evm *vm.EVM, tx *types.FrameTransaction) (*FrameVa
 		// Keyed nonces depend on the manager account as well as their selected storage slots.
 		validation.dependencies[types.FrameNonceManager] = struct{}{}
 	}
-	config.Tracer = &tracing.Hooks{OnOpcodeV2: validation.onOpcode, OnEnterV2: validation.onEnter}
+	config.Tracer = &tracing.Hooks{
+		OnOpcodeV2: validation.onOpcode,
+		OnEnterV2:  validation.onEnter,
+		OnAccountRead: func(addr accounts.Address) {
+			validation.dependencies[addr.Value()] = struct{}{}
+		},
+	}
 	evm.ResetBetweenBlocks(evm.Context, NewEVMTxContext(msg), evm.IntraBlockState(), config, evm.ChainRules())
 	st := NewTxnExecutor(evm, msg, NewGasPool(msg.Gas(), tx.GetBlobGas()))
 	if _, err := st.executeFrameTransaction(tx, true, validation); err != nil {

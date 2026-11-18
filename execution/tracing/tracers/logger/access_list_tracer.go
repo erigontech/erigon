@@ -243,13 +243,13 @@ var accessListOpcodes = tracing.NewOpcodeMask(
 
 func (a *AccessListTracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnOpcodeV2:    a.OnOpcodeV2,
-		OnOpcodeMask:  accessListOpcodes,
-		OnAccountRead: a.OnAccountRead,
+		OnOpcodeV2:      a.OnOpcodeV2,
+		OnOpcodeMask:    accessListOpcodes,
+		OnAccountAccess: a.OnAccountAccess,
 	}
 }
 
-func (a *AccessListTracer) OnAccountRead(addr accounts.Address) {
+func (a *AccessListTracer) OnAccountAccess(addr accounts.Address) {
 	a.addTouchedAddress(addr.Value())
 }
 
