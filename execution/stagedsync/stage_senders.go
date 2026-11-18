@@ -245,6 +245,9 @@ func (b *sendersBatch) flush(ctx context.Context, collector *etl.Collector) (*ba
 		var err error
 		switch {
 		case blk.registered != nil:
+			// bound probe: exec starts without waiting for the newPayload recovery; tasks take a missing sender lazily
+			continue
+		case blk.registered != nil && false:
 			waitStart := time.Now()
 			senders, err = blk.registered.Wait(ctx)
 			log.Info("[np-phase] senders", "elapsed", time.Since(waitStart), "txs", n)
