@@ -22,12 +22,15 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -45,23 +48,78 @@ type DomainReader interface {
 }
 
 type MemoryMutation struct {
-	// mu protects concurrent access to the mutation's maps and backing tx.
-	// Read methods (GetOne, Has) acquire RLock; write methods (Put, Delete,
-	// ClearTable, UpdateTxn) acquire Lock. Cursor-based methods are NOT
-	// protected and must only be called single-threaded (under the semaphore).
-	// Read views created via NewReadView share this pointer so they synchronize
-	// with the parent's writers.
-	mu               *sync.RWMutex
+	// mu serializes writes and protects changes to the backing transaction.
+	// Read views share it, but each reader needs its own cursor and backing transaction.
+	mu *sync.RWMutex
+	// Published table maps are immutable, and their marker sets are never replaced.
+	deletions        *atomic.Pointer[map[string]*tableDeletions]
 	memTx            kv.RwTx
 	memDb            kv.RwDB
-	deletedEntries   map[string]map[string]struct{}
-	deletedDups      map[string]map[string]map[string]struct{}
-	clearedTables    map[string]struct{}
 	readTx           kv.Tx
 	db               kv.TemporalTx
 	statelessCursors map[string]kv.RwCursor
 	DomainReader     DomainReader
 	overlay          *MemoryMutation // non-nil marks a read view, pointing at the overlay it was created from
+}
+
+type tableDeletions struct {
+	cleared atomic.Bool
+	entries atomic.Pointer[sync.Map]
+	dups    atomic.Pointer[sync.Map]
+}
+
+func (d *tableDeletions) isEntryDeleted(key []byte) bool {
+	if d == nil {
+		return false
+	}
+	entries := d.entries.Load()
+	if entries == nil {
+		return false
+	}
+	_, ok := entries.Load(common.ToStringZeroCopy(key))
+	return ok
+}
+
+func (d *tableDeletions) isDupDeleted(key, value []byte) bool {
+	if d == nil {
+		return false
+	}
+	dups := d.dups.Load()
+	if dups == nil {
+		return false
+	}
+	values, ok := dups.Load(common.ToStringZeroCopy(key))
+	if !ok {
+		return false
+	}
+	_, ok = values.(*sync.Map).Load(common.ToStringZeroCopy(value))
+	return ok
+}
+
+func (d *tableDeletions) isTableCleared() bool {
+	return d != nil && d.cleared.Load()
+}
+
+func (m *MemoryMutation) deletionTables() map[string]*tableDeletions {
+	if tables := m.deletions.Load(); tables != nil {
+		return *tables
+	}
+	return nil
+}
+
+func (m *MemoryMutation) tableDeletionsLocked(table string) *tableDeletions {
+	tables := m.deletionTables()
+	if d := tables[table]; d != nil {
+		return d
+	}
+	updated := maps.Clone(tables)
+	if updated == nil {
+		updated = make(map[string]*tableDeletions)
+	}
+	d := &tableDeletions{}
+	updated[table] = d
+	m.deletions.Store(&updated)
+	return d
 }
 
 // NewMemoryBatch creates a pure Go in-memory batch with no OS-thread affinity.
@@ -78,14 +136,12 @@ func NewMemoryBatch(tx kv.TemporalTx) (*MemoryMutation, error) {
 	memDB := &memStoreDB{store: mem}
 
 	return &MemoryMutation{
-		mu:             &sync.RWMutex{},
-		readTx:         tx,
-		db:             tx,
-		memDb:          memDB,
-		memTx:          mem,
-		deletedEntries: make(map[string]map[string]struct{}),
-		deletedDups:    map[string]map[string]map[string]struct{}{},
-		clearedTables:  make(map[string]struct{}),
+		mu:        &sync.RWMutex{},
+		deletions: &atomic.Pointer[map[string]*tableDeletions]{},
+		readTx:    tx,
+		db:        tx,
+		memDb:     memDB,
+		memTx:     mem,
 	}, nil
 }
 
@@ -104,14 +160,12 @@ func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm 
 		return nil, fmt.Errorf("NewMemoryBatchMDBX: begin tx: %w", err)
 	}
 	return &MemoryMutation{
-		mu:             &sync.RWMutex{},
-		readTx:         tx,
-		db:             tx,
-		memDb:          tmpDB,
-		memTx:          memTx,
-		deletedEntries: make(map[string]map[string]struct{}),
-		deletedDups:    map[string]map[string]map[string]struct{}{},
-		clearedTables:  make(map[string]struct{}),
+		mu:        &sync.RWMutex{},
+		deletions: &atomic.Pointer[map[string]*tableDeletions]{},
+		readTx:    tx,
+		db:        tx,
+		memDb:     tmpDB,
+		memTx:     memTx,
 	}, nil
 }
 
@@ -156,33 +210,6 @@ func (m *MemoryMutation) DetachDB() kv.TemporalTx {
 	return db
 }
 
-func (m *MemoryMutation) isTableCleared(table string) bool {
-	_, ok := m.clearedTables[table]
-	return ok
-}
-
-func (m *MemoryMutation) isEntryDeleted(table string, key []byte) bool {
-	_, ok := m.deletedEntries[table]
-	if !ok {
-		return ok
-	}
-	_, ok = m.deletedEntries[table][string(key)]
-	return ok
-}
-
-func (m *MemoryMutation) isDupDeleted(table string, key []byte, val []byte) bool {
-	t, ok := m.deletedDups[table]
-	if !ok {
-		return ok
-	}
-	k, ok := t[string(key)]
-	if !ok {
-		return ok
-	}
-	_, ok = k[string(val)]
-	return ok
-}
-
 func (m *MemoryMutation) DBSize() (uint64, error) {
 	panic("not implemented")
 }
@@ -221,7 +248,8 @@ func (m *MemoryMutation) readSequenceLocked(bucket string) (uint64, error) {
 		}
 		return binary.BigEndian.Uint64(value), nil
 	}
-	if m.isTableCleared(kv.Sequence) || m.isEntryDeleted(kv.Sequence, key) {
+	d := m.deletionTables()[kv.Sequence]
+	if d.isTableCleared() || d.isEntryDeleted(key) {
 		return 0, nil
 	}
 	if m.readTx == nil {
@@ -273,18 +301,18 @@ func (m *MemoryMutation) statelessCursor(table string) (kv.RwCursor, error) {
 }
 
 // GetOne returns the value for a key from the mutation overlay, falling back to the
-// underlying DB transaction. Thread-safe: acquires RLock to allow concurrent reads
-// while writes are serialized by Lock.
+// underlying DB transaction.
 func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	// If table was cleared, only mem layer has valid data.
-	if m.isTableCleared(table) {
+	d := m.deletionTables()[table]
+	if d.isTableCleared() {
 		return m.memTx.GetOne(table, key)
 	}
 	// If key was explicitly deleted, check mem layer only (may have been re-Put).
-	if m.isEntryDeleted(table, key) {
+	if d.isEntryDeleted(key) {
 		return m.memTx.GetOne(table, key)
 	}
 	// Try mem layer first.
@@ -303,15 +331,15 @@ func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
 }
 
 // Has returns whether a key is present in the mutation overlay or underlying DB.
-// Thread-safe: acquires RLock.
 func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if m.isTableCleared(table) {
+	d := m.deletionTables()[table]
+	if d.isTableCleared() {
 		return m.memTx.Has(table, key)
 	}
-	if m.isEntryDeleted(table, key) {
+	if d.isEntryDeleted(key) {
 		return m.memTx.Has(table, key)
 	}
 	has, err := m.memTx.Has(table, key)
@@ -380,10 +408,11 @@ func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc or
 	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit), dupSort: isTablePurelyDupsort(table)}
 	var err error
 	m.mu.RLock()
-	cleared := m.isTableCleared(table)
+	d := m.deletionTables()[table]
+	cleared := d.isTableCleared()
 	// Hidden rows don't count against limit, so the db side must be free to
 	// look past them; the merge below still stops at limit.
-	hidden := len(m.deletedEntries[table]) > 0 || len(m.deletedDups[table]) > 0
+	hidden := d != nil && (d.entries.Load() != nil || d.dups.Load() != nil)
 	m.mu.RUnlock()
 	if m.readTx != nil && !cleared {
 		dbLimit := limit
@@ -396,9 +425,7 @@ func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc or
 		}
 		if hidden {
 			s.iterDb = stream.FilterKV(s.iterDb, func(k, v []byte) bool {
-				m.mu.RLock()
-				defer m.mu.RUnlock()
-				return !m.isEntryDeleted(table, k) && !m.isDupDeleted(table, k, v)
+				return !d.isEntryDeleted(k) && !d.isDupDeleted(k, v)
 			})
 		}
 	}
@@ -501,8 +528,14 @@ func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPr
 	s := &rangeDupSortIter{key: key, orderAscend: bool(asc), limit: int64(limit)}
 	var err error
 	m.mu.RLock()
-	skipDb := m.isTableCleared(table) || m.isEntryDeleted(table, key)
-	hidden := len(m.deletedDups[table][string(key)]) > 0
+	d := m.deletionTables()[table]
+	skipDb := d.isTableCleared() || d.isEntryDeleted(key)
+	var hidden bool
+	if d != nil {
+		if dups := d.dups.Load(); dups != nil {
+			_, hidden = dups.Load(common.ToStringZeroCopy(key))
+		}
+	}
 	m.mu.RUnlock()
 	if m.readTx != nil && !skipDb {
 		dbLimit := limit
@@ -515,9 +548,7 @@ func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPr
 		}
 		if hidden {
 			s.iterDb = stream.FilterKV(s.iterDb, func(_, v []byte) bool {
-				m.mu.RLock()
-				defer m.mu.RUnlock()
-				return !m.isDupDeleted(table, key, v)
+				return !d.isDupDeleted(key, v)
 			})
 		}
 	}
@@ -607,29 +638,31 @@ func (s *rangeDupSortIter) Next() (k, v []byte, err error) {
 func (m *MemoryMutation) Delete(table string, k []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	t, ok := m.deletedEntries[table]
-	if !ok {
-		t = make(map[string]struct{})
-		m.deletedEntries[table] = t
+	d := m.tableDeletionsLocked(table)
+	entries := d.entries.Load()
+	if entries == nil {
+		entries = &sync.Map{}
+		d.entries.Store(entries)
 	}
-	t[string(k)] = struct{}{}
+	entries.Store(string(k), struct{}{})
 	return m.memTx.Delete(table, k)
 }
 
 func (m *MemoryMutation) deleteDup(table string, k, v []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	t, ok := m.deletedDups[table]
-	if !ok {
-		t = map[string]map[string]struct{}{}
-		m.deletedDups[table] = t
+	d := m.tableDeletionsLocked(table)
+	dups := d.dups.Load()
+	if dups == nil {
+		dups = &sync.Map{}
+		d.dups.Store(dups)
 	}
-	km, ok := t[string(k)]
+	values, ok := dups.Load(common.ToStringZeroCopy(k))
 	if !ok {
-		km = map[string]struct{}{}
-		t[string(k)] = km
+		values = &sync.Map{}
+		dups.Store(string(k), values)
 	}
-	km[string(v)] = struct{}{}
+	values.(*sync.Map).Store(string(v), struct{}{})
 }
 
 func (m *MemoryMutation) Commit() error {
@@ -694,7 +727,7 @@ func (m *MemoryMutation) ListTables() ([]string, error) {
 func (m *MemoryMutation) ClearTable(bucket string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.clearedTables[bucket] = struct{}{}
+	m.tableDeletionsLocked(bucket).cleared.Store(true)
 	return m.memTx.ClearTable(bucket)
 }
 
@@ -711,23 +744,23 @@ func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err != nil {
 		return err
 	}
-	// Obliterate buckets who are to be deleted
-	for bucket := range m.clearedTables {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if err := tx.ClearTable(bucket); err != nil {
+	for bucket, d := range m.deletionTables() {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-	}
-	// Obliterate entries who are to be deleted
-	for bucket, keys := range m.deletedEntries {
-		for key := range keys {
-			if err := tx.Delete(bucket, []byte(key)); err != nil {
+		if d.cleared.Load() {
+			if err := tx.ClearTable(bucket); err != nil {
 				return err
 			}
+		}
+		if entries := d.entries.Load(); entries != nil {
+			entries.Range(func(key, _ any) bool {
+				err = tx.Delete(bucket, []byte(key.(string)))
+				return err == nil
+			})
+		}
+		if err != nil {
+			return err
 		}
 	}
 	// Iterate over each bucket and apply changes accordingly.
@@ -867,14 +900,15 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Obliterate buckets who are to be deleted
-	for bucket := range m.clearedTables {
-		memDiff.clearedTableNames = append(memDiff.clearedTableNames, bucket)
-	}
-	// Obliterate entries who are to be deleted
-	for bucket, keys := range m.deletedEntries {
-		for key := range keys {
-			memDiff.deletedEntries[bucket] = append(memDiff.deletedEntries[bucket], key)
+	for bucket, d := range m.deletionTables() {
+		if d.cleared.Load() {
+			memDiff.clearedTableNames = append(memDiff.clearedTableNames, bucket)
+		}
+		if entries := d.entries.Load(); entries != nil {
+			entries.Range(func(key, _ any) bool {
+				memDiff.deletedEntries[bucket] = append(memDiff.deletedEntries[bucket], key.(string))
+				return true
+			})
 		}
 	}
 	// Iterate over each bucket and apply changes accordingly.
@@ -1186,16 +1220,14 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 		dbTx = t
 	}
 	return &MemoryMutation{
-		mu:             m.mu, // share parent's mutex for synchronization
-		memTx:          m.memTx,
-		memDb:          nil, // caller doesn't own the memDb
-		deletedEntries: m.deletedEntries,
-		deletedDups:    m.deletedDups,
-		clearedTables:  m.clearedTables,
-		readTx:         tx,
-		db:             dbTx,
-		DomainReader:   m.DomainReader,
-		overlay:        m,
+		mu:           m.mu, // share parent's mutex for synchronization
+		deletions:    m.deletions,
+		memTx:        m.memTx,
+		memDb:        nil, // caller doesn't own the memDb
+		readTx:       tx,
+		db:           dbTx,
+		DomainReader: m.DomainReader,
+		overlay:      m,
 	}
 }
 
