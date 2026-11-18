@@ -278,7 +278,7 @@ func TestFrameValidationRecentRootGas(t *testing.T) {
 func TestFrameValidationRecentRootGasBudget(t *testing.T) {
 	_, tx := recentRootTestEnv(t)
 	tx.Signatures = []types.FrameSignature{{Scheme: types.FrameSignatureArbitrary}}
-	tx.Frames[0].Limits.Execution = 100_000 - tx.Frames[1].Limits.Execution - tx.Signatures[0].VerificationGas()
+	tx.Frames[0].Limits.Execution = maxFrameValidationExecutionGas - tx.Frames[1].Limits.Execution - tx.Signatures[0].VerificationGas()
 	require.NoError(t, ValidateFrameTransactionPrefix(tx))
 	tx.Frames[0].Limits.Execution++
 	require.ErrorContains(t, ValidateFrameTransactionPrefix(tx), "exceeds gas limit")
