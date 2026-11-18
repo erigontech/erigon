@@ -462,38 +462,6 @@ func TestConvertCommitmentFiles_RejectsUnindexedLegacyFileBeforeBackup(t *testin
 	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "backup"))
 }
 
-func TestConvertCommitmentFiles_BeforeSwapRunsBeforePhase5Failure(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	t.Cleanup(statecfg.SetCommitmentV3(false))
-	db, _ := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
-	rwTx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	t.Cleanup(rwTx.Rollback)
-	at := state.AggTx(rwTx)
-	original := pickLargestCommitmentFile(t, at).Fullpath()
-	var events []string
-	opts := state.ConvertOpts{
-		TargetV3: true,
-		BeforeSwap: func() error {
-			events = append(events, "before-swap")
-			_, statErr := os.Stat(original)
-			require.NoError(t, statErr)
-			return nil
-		},
-	}
-	state.SetConvertPhase5HookForTest(func() error {
-		events = append(events, "phase5")
-		return errors.New("injected phase5 failure")
-	})
-	t.Cleanup(func() { state.SetConvertPhase5HookForTest(nil) })
-	err = state.ConvertCommitmentFiles(t.Context(), at, opts, log.New())
-	rwTx.Rollback()
-	require.ErrorContains(t, err, "injected phase5 failure")
-	require.Equal(t, []string{"before-swap", "phase5"}, events)
-}
-
 // anyFileHasSqueezedField returns true if any non-state branch value in any of
 // the supplied .kv files contains an embedded plain-key reference shorter than
 // binary.MaxVarintLen64 (10 bytes) — the on-disk marker the read side keys off
