@@ -494,14 +494,26 @@ func (failingReceiptsServer) Send(*remoteproto.SubscribeReceiptsReply) error {
 func TestReceiptsFilter_FailedSendKeepsOtherSubscriberOfSameHash(t *testing.T) {
 	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
 	req := &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash1H256}}
-	failedID, failed := agg.insertReceiptsFilter(failingReceiptsServer{newTestReceiptsServer(t.Context())})
-	agg.updateReceiptsFilter(failed, req)
+	failedID, _ := agg.insertReceiptsFilter(failingReceiptsServer{newTestReceiptsServer(t.Context())})
+	agg.updateReceiptsFilter(failedID, req)
 	srv := newTestReceiptsServer(t.Context())
-	_, live := agg.insertReceiptsFilter(srv)
-	agg.updateReceiptsFilter(live, req)
+	liveID, _ := agg.insertReceiptsFilter(srv)
+	agg.updateReceiptsFilter(liveID, req)
 
 	agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1)})
 	agg.removeReceiptsFilter(failedID)
 	agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1)})
 	require.Len(t, srv.sent, 2)
+}
+
+func TestReceiptsFilter_UpdateAfterFailedSendLeavesNoHashes(t *testing.T) {
+	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
+	id, _ := agg.insertReceiptsFilter(failingReceiptsServer{newTestReceiptsServer(t.Context())})
+	agg.updateReceiptsFilter(id, &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash1H256}})
+
+	agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1)})
+	agg.updateReceiptsFilter(id, &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash2H256}})
+	agg.removeReceiptsFilter(id)
+
+	require.Empty(t, agg.aggReceiptsFilter.txHashes)
 }

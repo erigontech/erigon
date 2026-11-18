@@ -99,9 +99,13 @@ func (a *ReceiptsFilterAggregator) removeReceiptsFilterLocked(filterId uint64) {
 	a.checkEmpty()
 }
 
-func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filter *ReceiptsFilter, filterReq *remoteproto.ReceiptsFilterRequest) {
+func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filterId uint64, filterReq *remoteproto.ReceiptsFilterRequest) {
 	a.receiptsFilterLock.Lock()
 	defer a.receiptsFilterLock.Unlock()
+	filter, ok := a.receiptsFilters[filterId]
+	if !ok {
+		return
+	}
 	a.subtractReceiptsFilters(filter)
 	filter.txHashes = make(map[common.Hash]int)
 
@@ -143,12 +147,12 @@ func (a *ReceiptsFilterAggregator) subtractReceiptsFilters(filter *ReceiptsFilte
 }
 
 func (a *ReceiptsFilterAggregator) subscribeReceipts(server remoteproto.ETHBACKEND_SubscribeReceiptsServer) error {
-	filterId, filter := a.insertReceiptsFilter(server)
+	filterId, _ := a.insertReceiptsFilter(server)
 	defer a.removeReceiptsFilter(filterId)
 	var filterReq *remoteproto.ReceiptsFilterRequest
 	var recvErr error
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
-		a.updateReceiptsFilter(filter, filterReq)
+		a.updateReceiptsFilter(filterId, filterReq)
 	}
 	if !errors.Is(recvErr, io.EOF) {
 		return fmt.Errorf("receiving receipts filter request: %w", recvErr)
