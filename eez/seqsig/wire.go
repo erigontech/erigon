@@ -17,6 +17,7 @@
 package seqsig
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -26,7 +27,9 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
-// MaxMessageSize caps the RLP of an envelope and its Snappy block.
+// MaxMessageSize caps the RLP of an envelope. Encode caps its Snappy block
+// too; a receiver leaves that to the gossip frame cap, so that every encoding
+// of an envelope under the cap decodes.
 const MaxMessageSize = 10 << 20
 
 var (
@@ -71,22 +74,11 @@ func Encode(e Envelope) ([]byte, error) {
 	return out, nil
 }
 
-// Decode is the inverse of Encode. The Snappy block and its uncompressed size
-// are checked against the cap before anything is allocated.
+// Decode is the inverse of Encode.
 func Decode(data []byte) (Envelope, error) {
-	if len(data) > MaxMessageSize {
-		return Envelope{}, fmt.Errorf("%w: %d bytes compressed", ErrTooLarge, len(data))
-	}
-	n, err := snappy.DecodedLen(data)
+	enc, err := Decompress(data)
 	if err != nil {
-		return Envelope{}, fmt.Errorf("%w: snappy: %w", ErrMalformed, err)
-	}
-	if n > MaxMessageSize {
-		return Envelope{}, fmt.Errorf("%w: %d bytes", ErrTooLarge, n)
-	}
-	enc, err := snappy.Decode(nil, data)
-	if err != nil {
-		return Envelope{}, fmt.Errorf("%w: snappy: %w", ErrMalformed, err)
+		return Envelope{}, err
 	}
 	var w wireEnvelope
 	if err := rlp.DecodeBytes(enc, &w); err != nil {
@@ -97,4 +89,25 @@ func Decode(data []byte) (Envelope, error) {
 		e.Block = w.Block
 	}
 	return e, nil
+}
+
+// Decompress returns the payload of the raw Snappy block data. Its declared
+// size is checked against the cap before anything is allocated, and only its
+// minimal form is taken: libraries also decode a padded one, and a copy one
+// node takes and another refuses could hold the head back from the stricter.
+func Decompress(data []byte) ([]byte, error) {
+	n, k := binary.Uvarint(data)
+	switch {
+	case k <= 0:
+		return nil, fmt.Errorf("%w: snappy: bad preamble", ErrMalformed)
+	case k > 1 && data[k-1] == 0:
+		return nil, fmt.Errorf("%w: snappy: padded preamble", ErrMalformed)
+	case n > MaxMessageSize:
+		return nil, fmt.Errorf("%w: %d bytes", ErrTooLarge, n)
+	}
+	enc, err := snappy.Decode(nil, data)
+	if err != nil {
+		return nil, fmt.Errorf("%w: snappy: %w", ErrMalformed, err)
+	}
+	return enc, nil
 }

@@ -157,6 +157,7 @@ func TestRelayRule(t *testing.T) {
 		{"undecodable", []byte("junk"), pubsub.ValidationReject},
 		{"above the size cap", oversize, pubsub.ValidationReject},
 		{"trailing bytes", snappy.Encode(nil, append(trailing, 0x80)), pubsub.ValidationReject},
+		{"padded preamble", padded(first), pubsub.ValidationReject},
 		{"first head", first, pubsub.ValidationAccept},
 		{"same message", first, pubsub.ValidationIgnore},
 		{"re-encoded copy", reencode(first, 1), pubsub.ValidationIgnore},
@@ -186,6 +187,15 @@ func TestRelayRule(t *testing.T) {
 	_, got, err := v.check(encode(t, signed(t, 0, head(50, 1, 5), nil)))
 	require.NoError(t, err)
 	require.Equal(t, pubsub.ValidationIgnore, got, "evicted source")
+}
+
+// padded returns the Snappy block data with its length preamble one byte
+// longer than its minimal form.
+func padded(data []byte) []byte {
+	n, k := binary.Uvarint(data)
+	pre := binary.AppendUvarint(nil, n)
+	pre[len(pre)-1] |= 0x80
+	return append(append(pre, 0x00), data[k:]...)
 }
 
 func TestMessageID(t *testing.T) {
