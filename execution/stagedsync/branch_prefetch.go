@@ -97,21 +97,16 @@ func (p *branchPrefetcher) add(it prefetchItem) {
 	}
 }
 
-func (p *branchPrefetcher) drain() (n int) {
+func (p *branchPrefetcher) close() {
 	for {
 		select {
 		case <-p.work:
-			n++
 		default:
-			return n
+			close(p.work)
+			p.wg.Wait()
+			return
 		}
 	}
-}
-
-func (p *branchPrefetcher) close() {
-	p.drain()
-	close(p.work)
-	p.wg.Wait()
 }
 
 func (p *branchPrefetcher) shard(key []byte) *prefetchedShard {
