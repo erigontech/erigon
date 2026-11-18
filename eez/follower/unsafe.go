@@ -119,7 +119,9 @@ type overlay struct {
 	last  common.Hash
 	// gap is the lowest block taken without its announcement kept, zero for
 	// none.
-	gap    uint64
+	gap uint64
+	// pruned is the finalized block the store was last pruned at.
+	pruned uint64
 	logger log.Logger
 }
 
@@ -129,6 +131,7 @@ var errUnannounced = errors.New("sequencer block not announced")
 // step moves the head to the sequencer's latest block, or by at most limit
 // blocks toward it.
 func (o *overlay) step(ctx context.Context) error {
+	o.prune(ctx)
 	o.reread(ctx)
 	number, hash, err := o.seq.Head(ctx)
 	if err != nil || hash == o.last {
@@ -190,8 +193,24 @@ func (o *overlay) step(ctx context.Context) error {
 	return nil
 }
 
+// prune drops the announcements L1 finality covers, once per finalized
+// block.
+func (o *overlay) prune(ctx context.Context) {
+	finalized := o.deriver.Finalized()
+	if o.store == nil || finalized == o.pruned {
+		return
+	}
+	if err := o.store.Prune(ctx, finalized); err != nil {
+		if ctx.Err() == nil {
+			o.logger.Warn("[eez] finalized announcements not pruned", "event", "eez.node.follower.announcement.prune_failed", "err", err)
+		}
+		return
+	}
+	o.pruned = finalized
+}
+
 // keep stores envs, the announcements of blocks, now taken, for the node to
-// serve, and drops those L1 finality covers.
+// serve.
 func (o *overlay) keep(ctx context.Context, blocks []*types.Block, envs [][]byte) {
 	if o.store == nil {
 		return
@@ -202,9 +221,6 @@ func (o *overlay) keep(ctx context.Context, blocks []*types.Block, envs [][]byte
 			o.missing(b.NumberU64())
 			return
 		}
-	}
-	if err := o.store.Prune(ctx, o.deriver.Finalized()); err != nil {
-		o.logger.Warn("[eez] finalized announcements not pruned", "event", "eez.node.follower.announcement.prune_failed", "err", err)
 	}
 }
 

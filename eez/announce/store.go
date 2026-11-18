@@ -153,10 +153,14 @@ func (s *Signer) Announce(ctx context.Context, h *types.Header) error {
 	return s.sign(ctx, h.Number.Uint64(), h.Hash())
 }
 
-// Record signs and keeps the announcement of block h, then those of the
-// canonical blocks between the settled one and h that lack one. Only h's
-// failure is returned. Record must have one caller at a time.
+// Record drops the announcements L1 finality passes, then signs and keeps
+// that of block h and those of the canonical blocks between the settled one
+// and h that lack one. Only h's failure is returned. Record must have one
+// caller at a time.
 func (s *Signer) Record(ctx context.Context, h *types.Header) error {
+	if err := s.store.Prune(ctx, s.finalized()); err != nil {
+		s.logger.Warn("[eez] finalized announcements not pruned", "event", "eez.sequencer.announcement.prune_failed", "err", err)
+	}
 	if err := s.sign(ctx, h.Number.Uint64(), h.Hash()); err != nil {
 		s.gap = true
 		return err
@@ -167,9 +171,6 @@ func (s *Signer) Record(ctx context.Context, h *types.Header) error {
 		} else {
 			s.gap = false
 		}
-	}
-	if err := s.store.Prune(ctx, s.finalized()); err != nil {
-		s.logger.Warn("[eez] finalized announcements not pruned", "event", "eez.sequencer.announcement.prune_failed", "err", err)
 	}
 	return nil
 }

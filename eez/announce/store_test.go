@@ -425,6 +425,25 @@ func TestRecordPruneFailed(t *testing.T) {
 	require.Equal(t, before, failures())
 }
 
+// TestRecordPrunedOnFailure: the announcements L1 finality passes are dropped
+// when the block's own is not kept.
+func TestRecordPrunedOnFailure(t *testing.T) {
+	n := newNode(t)
+	signer := n.signer()
+	k := &faulty{Store: n.store, puts: map[uint64]bool{}}
+	signer.SetKeeper(k)
+	s := n.sequencer(sequencer.Config{Announcements: signer}, n.follower)
+	n.tick(s)
+	n.tick(s)
+	require.NotNil(t, n.announced(1))
+	n.finalized, k.puts[3] = 2, true
+	n.tick(s)
+	require.Equal(t, uint64(3), n.head().Number.Uint64())
+	require.Nil(t, n.announced(3), "not kept")
+	require.Nil(t, n.announced(1), "pruned")
+	require.Equal(t, n.signed(2), n.announced(2))
+}
+
 var errCursor = errors.New("cursor failed")
 
 // cursorFails is a database whose write transactions open cursors that fail

@@ -397,6 +397,81 @@ func TestUnsafeHeadAnnouncementsPruned(t *testing.T) {
 	require.Nil(t, kept, "finalized")
 }
 
+// TestUnsafeHeadAnnouncementsPrunedHeadUnchanged: the follower drops the
+// announcements L1 finality covers once it advances, the sequencer's head
+// unchanged; a failed prune is retried at the next step.
+func TestUnsafeHeadAnnouncementsPrunedHeadUnchanged(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	settled := c.Compose(nil,
+		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)},
+		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{}},
+	)
+	posted := c.Post(derivertest.Posting{Batch: settled}).Header.Number
+	st := openAnnouncements(t)
+	for i, b := range settled.Blocks {
+		require.NoError(t, st.Put(t.Context(), uint64(i+1), b.Hash(), []byte{byte(i + 1)}))
+	}
+	_, chain := derivertest.NewL2(t)
+	cfg := testConfig
+	cfg.Dir, cfg.Announcements = t.TempDir(), st
+	cfg.Sequencer = &announcing{Sequencer: sequencer(t, c.L2), envs: map[uint64][]byte{}}
+	f, err := follower.New(c.L1, chain, derivertest.Config(), cfg, log.New())
+	require.NoError(t, err)
+	require.NoError(t, f.Boot(t.Context()))
+	require.Equal(t, uint64(0), f.Status().Finalized)
+	require.NoError(t, f.StepOverlay(t.Context()))
+
+	require.NoError(t, f.Handle(t.Context(), l1.Finalized{Head: l1.Header{Number: posted}}))
+	require.Equal(t, uint64(2), f.Status().Finalized)
+	kept := func(i int) []byte {
+		t.Helper()
+		env, err := st.Get(t.Context(), uint64(i+1), settled.Blocks[i].Hash())
+		require.NoError(t, err)
+		return env
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.Error(t, f.StepOverlay(ctx))
+	require.NotNil(t, kept(0), "prune failed")
+	require.NoError(t, f.StepOverlay(t.Context()))
+	require.Nil(t, kept(0), "finalized")
+	require.Equal(t, []byte{2}, kept(1), "the finalized block's own")
+}
+
+// TestUnsafeHeadAnnouncementsPrunedKeepFailed: the follower drops the
+// announcements L1 finality covers when those of the blocks a step takes are
+// not kept.
+func TestUnsafeHeadAnnouncementsPrunedKeepFailed(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	settled := c.Compose(nil,
+		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: transfers(c, 1)},
+		derivertest.Block{Coinbase: alice, Extra: []byte{}, Txs: [][]byte{}},
+	)
+	require.NoError(t, c.L1.Finalize(c.Post(derivertest.Posting{Batch: settled}).Header.Number))
+	head := c.Compose(nil, derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}}).Blocks[0].Hash()
+	st := openAnnouncements(t)
+	require.NoError(t, st.Put(t.Context(), 1, settled.Blocks[0].Hash(), []byte{1}))
+	_, exec := derivertest.NewL2(t)
+	chain := &forkChoiceCancels{ExecChain: exec}
+	cfg := testConfig
+	cfg.Dir, cfg.Announcements = t.TempDir(), st
+	cfg.Sequencer = &announcing{Sequencer: sequencer(t, c.L2), envs: map[uint64][]byte{3: signer(t)(derivertest.Config().ChainID, head)}}
+	f, err := follower.New(c.L1, chain, derivertest.Config(), cfg, log.New())
+	require.NoError(t, err)
+	require.NoError(t, f.Boot(t.Context()))
+	require.Equal(t, uint64(2), f.Status().Finalized)
+	stepKeepFailed(t, f, chain)
+	local, err := chain.Head(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, head, local.Hash())
+	kept, err := st.Get(t.Context(), 3, head)
+	require.NoError(t, err)
+	require.Nil(t, kept, "not kept")
+	kept, err = st.Get(t.Context(), 1, settled.Blocks[0].Hash())
+	require.NoError(t, err)
+	require.Nil(t, kept, "finalized")
+}
+
 // forkChoiceCancels cancels the step's context once a fork choice succeeds,
 // so that keeping the announcements fails.
 type forkChoiceCancels struct {
