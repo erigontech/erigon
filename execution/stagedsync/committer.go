@@ -1047,21 +1047,9 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		}
 	}()
 
-	// Flush block N-1's own pending update into N-1's saved changeset, independent
-	// of N's diff below. Routed by hash it needs no changesetMu, so the apply fold
-	// does not wait on it; an update without a saved changeset flushes under the lock.
-	flushed, err := cc.doms.FlushPendingUpdatesHashRouted(cc.roTx)
-	if err != nil {
-		return nil, err
-	}
-	if err := func() error {
-		if flushed {
-			return nil
-		}
-		cc.doms.LockChangesetAccumulator()
-		defer cc.doms.UnlockChangesetAccumulator()
-		return cc.doms.FlushPendingUpdatesLocked(cc.roTx)
-	}(); err != nil {
+	// Flush block N-1's own pending update (hash-routed to N-1's saved changeset,
+	// independent of N's diff below).
+	if err := cc.doms.FlushPendingUpdates(cc.roTx); err != nil {
 		return nil, err
 	}
 

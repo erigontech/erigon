@@ -494,12 +494,9 @@ func (sd *SharedDomains) ResetPendingUpdates() {
 }
 
 // FlushPendingUpdates applies the pending deferred commitment update.
-// It sets the corresponding block's changeset as the accumulator
-// so writes go directly to the correct changeset.
-//
-// The inner swap mutates the commitment writer's diff, which the exec loop
-// also rewrites via SetChangesetAccumulator — hence changesetMu, taken here
-// unless lockHeld says the caller already holds it.
+// When the update's block has a saved changeset, the writes go straight into
+// that changeset's commitment diff and need no lock; otherwise they go to the
+// live diff under changesetMu, taken here unless the caller already holds it.
 func (sd *SharedDomains) FlushPendingUpdates(tx kv.TemporalTx) error {
 	return sd.flushPendingUpdates(tx, false)
 }
@@ -533,42 +530,6 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 	return err
 }
 
-// FlushPendingUpdatesHashRouted flushes the pending deferred commitment update
-// straight into the diff of its block's saved changeset, found by hash, so it
-// needs no changesetMu. It does nothing and returns false when the update has
-// no block hash or no saved changeset; the caller then flushes under the lock.
-func (sd *SharedDomains) FlushPendingUpdatesHashRouted(tx kv.TemporalTx) (bool, error) {
-	upd := sd.sdCtx.PeekPendingUpdate()
-	if upd == nil || upd.BlockHash == (common.Hash{}) {
-		return false, nil
-	}
-	switcher, ok := sd.mem.(changesetSwitcher)
-	if !ok {
-		return false, nil
-	}
-	cs := switcher.GetChangesetByHash(upd.BlockNum, upd.BlockHash)
-	if cs == nil {
-		return false, nil
-	}
-	upd = sd.sdCtx.TakePendingUpdate()
-	defer upd.Clear()
-	diff := &cs.Diffs[kv.CommitmentDomain]
-	if upd.Deltas != nil {
-		if err := sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, diff); err != nil {
-			return true, err
-		}
-	} else {
-		putBranch := func(prefix, data, prevData []byte) error {
-			return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, diff)
-		}
-		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics); err != nil {
-			return true, err
-		}
-	}
-	switcher.SavePastChangesetAccumulator(upd.BlockHash, upd.BlockNum, cs)
-	return true, nil
-}
-
 func (sd *SharedDomains) PutCommitmentBranches(roTx kv.TemporalTx, parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
 	if batch, ok := sd.mem.(commitmentBranchBatchWriter); ok {
 		return batch.PutOwnedCommitmentBranches(parts, txNum, diff)
@@ -590,57 +551,55 @@ func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) er
 	}
 	defer upd.Clear()
 
-	putBranch := func(prefix, data, prevData []byte) error {
-		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
-	}
-	apply := func() error {
-		if upd.Deltas != nil {
-			return sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, sd.mem.(commitmentDiffSwapper).CommitmentDiff())
+	if switcher, ok := sd.mem.(changesetSwitcher); ok {
+		// Hash-aware lookup when the pending update carries a BlockHash. This
+		// disambiguates pastChangesAccumulator entries when multiple changesets
+		// exist for the same block number (canonical + fork during a reorg-bounce).
+		// Falls back to the legacy number-only lookup if the hash isn't set
+		// (zero hash) — preserves behavior for callers that don't yet thread
+		// the hash through.
+		var blockHash common.Hash
+		var cs *changeset.StateChangeSet
+		if upd.BlockHash != (common.Hash{}) {
+			blockHash = upd.BlockHash
+			cs = switcher.GetChangesetByHash(upd.BlockNum, blockHash)
+		} else {
+			blockHash, cs = switcher.GetChangesetByBlockNum(upd.BlockNum)
 		}
-		_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
-		return err
+		if cs != nil {
+			// Writing into the changeset's own diff leaves the commitment writer's
+			// diff alone, so the apply fold's changeset binds do not wait on the flush.
+			diff := &cs.Diffs[kv.CommitmentDomain]
+			var err error
+			if upd.Deltas != nil {
+				err = sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, diff)
+			} else {
+				putBranch := func(prefix, data, prevData []byte) error {
+					return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, diff)
+				}
+				_, err = commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
+			}
+			if err != nil {
+				return err
+			}
+			switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
+			return nil
+		}
 	}
 
+	// No saved changeset: write into the live diff, which the exec loop also rewrites.
 	if !lockHeld {
 		sd.changesetMu.Lock()
 		defer sd.changesetMu.Unlock()
 	}
-
-	switcher, ok := sd.mem.(changesetSwitcher)
-	if !ok {
-		return apply()
+	if upd.Deltas != nil {
+		return sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, sd.mem.(commitmentDiffSwapper).CommitmentDiff())
 	}
-
-	// Hash-aware lookup when the pending update carries a BlockHash. This
-	// disambiguates pastChangesAccumulator entries when multiple changesets
-	// exist for the same block number (canonical + fork during a reorg-bounce).
-	// Falls back to the legacy number-only lookup if the hash isn't set
-	// (zero hash) — preserves behavior for callers that don't yet thread
-	// the hash through.
-	var blockHash common.Hash
-	var cs *changeset.StateChangeSet
-	if upd.BlockHash != (common.Hash{}) {
-		blockHash = upd.BlockHash
-		cs = switcher.GetChangesetByHash(upd.BlockNum, blockHash)
-	} else {
-		blockHash, cs = switcher.GetChangesetByBlockNum(upd.BlockNum)
+	putBranch := func(prefix, data, prevData []byte) error {
+		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
 	}
-	if cs != nil {
-		// Apply deferred branch writes under the pending update's block
-		// changeset, then save it back. All accesses under changesetMu —
-		// see concurrency contract on the wrappers above.
-		defer sd.SwapCommitmentDiffLocked(cs)()
-
-		if err := apply(); err != nil {
-			return err
-		}
-
-		switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
-		return nil
-	}
-
-	// No past changeset found — write into whatever is current.
-	return apply()
+	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
+	return err
 }
 
 // AsStateGetter returns an execution-aware getter with optimized code reads.

@@ -182,7 +182,7 @@ func TestFlushPendingDeltasLandInTheBlockChangeset(t *testing.T) {
 	require.Equal(t, wantLive, gotLive)
 }
 
-func TestFlushPendingHashRoutedMatchesTheLockedFlush(t *testing.T) {
+func TestFlushPendingByBlockNumberLandsInTheBlockChangeset(t *testing.T) {
 	seed := commitmentPutCorpus(64)
 	next := make([]commitment.BranchDelta, len(seed))
 	for i, d := range seed {
@@ -190,7 +190,7 @@ func TestFlushPendingHashRoutedMatchesTheLockedFlush(t *testing.T) {
 	}
 	blockHash := common.Hash{8}
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	run := func(hashRouted bool) (map[string][]byte, []kv.DomainEntryDiff, []kv.DomainEntryDiff) {
+	run := func(pending bool) (map[string][]byte, []kv.DomainEntryDiff, []kv.DomainEntryDiff) {
 		tx, err := db.BeginTemporalRw(t.Context())
 		require.NoError(t, err)
 		defer tx.Rollback()
@@ -202,17 +202,19 @@ func TestFlushPendingHashRoutedMatchesTheLockedFlush(t *testing.T) {
 		block, live := &changeset.StateChangeSet{}, &changeset.StateChangeSet{}
 		sd.SavePastChangesetAccumulator(blockHash, 5, block)
 		sd.SetChangesetAccumulator(live)
-		sd.GetCommitmentContext().SetPendingUpdate(&commitment.PendingCommitmentUpdate{
-			BlockNum: 5, BlockHash: blockHash, TxNum: 2, Deltas: slices.Collect(slices.Chunk(runner.CloneDeltas(next), 5)),
-		})
-		if hashRouted {
-			flushed, err := sd.FlushPendingUpdatesHashRouted(tx)
-			require.NoError(t, err)
-			require.True(t, flushed)
-		} else {
+		if pending {
+			sd.GetCommitmentContext().SetPendingUpdate(&commitment.PendingCommitmentUpdate{
+				BlockNum: 5, TxNum: 2, Deltas: slices.Collect(slices.Chunk(runner.CloneDeltas(next), 5)),
+			})
 			require.NoError(t, sd.FlushPendingUpdates(tx))
+			require.Nil(t, sd.GetCommitmentContext().PeekPendingUpdate())
+		} else {
+			restore := sd.SwapCommitmentDiffLocked(block)
+			for _, d := range runner.CloneDeltas(next) {
+				require.NoError(t, sd.DomainPut(kv.CommitmentDomain, tx, d.Key, d.Data, 2, d.Prev))
+			}
+			restore()
 		}
-		require.Nil(t, sd.GetCommitmentContext().PeekPendingUpdate())
 		latest := make(map[string][]byte, len(seed))
 		for _, d := range seed {
 			v, _, readErr := sd.GetLatest(kv.CommitmentDomain, tx, d.Key)
@@ -225,15 +227,16 @@ func TestFlushPendingHashRoutedMatchesTheLockedFlush(t *testing.T) {
 	wantLatest, wantBlock, wantLive := run(false)
 	gotLatest, gotBlock, gotLive := run(true)
 	require.Len(t, wantBlock, len(seed))
+	require.Empty(t, wantLive)
 	require.Equal(t, wantLatest, gotLatest)
 	require.Equal(t, wantBlock, gotBlock)
 	require.Equal(t, wantLive, gotLive)
 }
 
-// TestFlushPendingHashRoutedRunsBesideTheFold flushes a block's pending update
+// TestFlushPendingRunsBesideTheFold flushes a block's pending update
 // while the apply fold binds the same block's changeset and writes state into
 // it, as the commitment calculator and the exec loop do; run it with -race.
-func TestFlushPendingHashRoutedRunsBesideTheFold(t *testing.T) {
+func TestFlushPendingRunsBesideTheFold(t *testing.T) {
 	seed := commitmentPutCorpus(256)
 	next := make([]commitment.BranchDelta, len(seed))
 	for i, d := range seed {
@@ -259,9 +262,7 @@ func TestFlushPendingHashRoutedRunsBesideTheFold(t *testing.T) {
 	const folds = 200
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		flushed, err := sd.FlushPendingUpdatesHashRouted(tx)
-		require.NoError(t, err)
-		require.True(t, flushed)
+		require.NoError(t, sd.FlushPendingUpdates(tx))
 	})
 	wg.Go(func() {
 		for i := range folds {
