@@ -272,7 +272,7 @@ type VersionMap struct {
 	// derivedBalances holds the zero balances that SeedEmptyRemovals derives from bal and the
 	// pre-block state, by account and tx, with their status: deleted where the account is removed,
 	// changed where it is revived. Seeding writes it before execution, and it is read-only after.
-	derivedBalances map[accounts.Address]map[int]valueStatus
+	derivedBalances map[derivedBalanceKey]valueStatus
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -1942,7 +1942,7 @@ func (vm *VersionMap) resetToSeed(addr accounts.Address, path AccountPath, key a
 	defer vm.endDeleteStamp(v.TxIndex, &stamped)
 	switch path {
 	case BalancePath:
-		if status, ok := vm.derivedBalances[addr][v.TxIndex]; ok {
+		if status, ok := vm.derivedBalances[derivedBalanceKey{addr, v.TxIndex}]; ok {
 			resetCellTo(vm, e.Balance, v, uint256.Int{}, status, eqUint256, &stamped)
 			break
 		}
@@ -2016,12 +2016,14 @@ func resetCellTo[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], v 
 // same tx replaces an earlier one, as the later stamp's flush does.
 func (vm *VersionMap) deriveBalance(addr accounts.Address, txIdx int, status valueStatus) {
 	if vm.derivedBalances == nil {
-		vm.derivedBalances = map[accounts.Address]map[int]valueStatus{}
+		vm.derivedBalances = map[derivedBalanceKey]valueStatus{}
 	}
-	if vm.derivedBalances[addr] == nil {
-		vm.derivedBalances[addr] = map[int]valueStatus{}
-	}
-	vm.derivedBalances[addr][txIdx] = status
+	vm.derivedBalances[derivedBalanceKey{addr, txIdx}] = status
+}
+
+type derivedBalanceKey struct {
+	addr  accounts.Address
+	txIdx int
 }
 
 func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
