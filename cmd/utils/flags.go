@@ -539,12 +539,6 @@ var (
 		Usage: "TxPool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)",
 	}
 
-	TraceMaxtracesFlag = cli.UintFlag{
-		Name:  "trace.maxtraces",
-		Usage: "Sets a limit on traces that can be returned in trace_filter",
-		Value: 200,
-	}
-
 	TLSFlag = cli.BoolFlag{
 		Name:  "tls",
 		Usage: "Enable TLS handshake",
