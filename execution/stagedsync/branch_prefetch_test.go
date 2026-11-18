@@ -97,11 +97,26 @@ func TestBranchPrefetcherLeafRefsOnlyForTheStoredRecord(t *testing.T) {
 	require.Nil(t, p.leafRefs(key, bytes.Clone(data)))
 }
 
-func TestBranchPrefetcherCountsDropped(t *testing.T) {
+func TestBranchPrefetcherCountsDroppedAndDrained(t *testing.T) {
 	p := &branchPrefetcher{work: make(chan prefetchItem, 1)}
 	p.add(prefetchItem{account: common.Hash{1}})
 	p.add(prefetchItem{account: common.Hash{2}})
 	require.Equal(t, uint64(1), p.dropped.Load(), "an item that finds the queue full is dropped")
+	p.pause()
+	p.resume()
+	require.Equal(t, uint64(1), p.drained.Load(), "an item still queued when compute starts is drained")
+}
+
+func TestBranchPrefetcherChunkStopsOnPause(t *testing.T) {
+	p := &branchPrefetcher{work: make(chan prefetchItem, 2*branchPrefetchPerTx)}
+	for i := range 2 * branchPrefetchPerTx {
+		p.add(prefetchItem{account: common.Hash{byte(i), byte(i >> 8)}})
+	}
+	read := func([]byte) []byte { return nil }
+	require.Equal(t, branchPrefetchPerTx, p.walkChunk(<-p.work, read), "an unpaused worker walks a full chunk")
+	p.pausing.Store(true)
+	require.Equal(t, 1, p.walkChunk(<-p.work, read), "a pending pause stops the chunk after the item in hand")
+	require.Len(t, p.work, branchPrefetchPerTx-1)
 }
 
 func TestParentRecordsOnlyForOneVerifiedChildOfTheReadHead(t *testing.T) {
@@ -251,7 +266,9 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 	require.ErrorIs(t, (<-out).err, v3.ErrRecordFormat, "compute-ahead must read commitment records through the prefetch map")
 }
 
-func TestComputeLeavesQueuedPrefetchToWorkers(t *testing.T) {
+func TestComputeLeavesQueuedPrefetchToWorkersWithoutPause(t *testing.T) {
+	defer func(v bool) { prefetchNoPause = v }(prefetchNoPause)
+	prefetchNoPause = true
 	t.Cleanup(statecfg.SetCommitmentV3(true))
 	defer func(v bool) { dbg.BALDrivenCommitment = v }(dbg.BALDrivenCommitment)
 	defer func(v bool) { dbg.IgnoreBAL = v }(dbg.IgnoreBAL)

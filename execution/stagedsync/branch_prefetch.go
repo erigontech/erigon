@@ -23,10 +23,13 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
+
+var prefetchNoPause = dbg.EnvBool("V3_PREFETCH_NOPAUSE", false)
 
 const (
 	branchPrefetchWorkers  = 8
@@ -64,11 +67,13 @@ type prefetchedShard struct {
 type branchPrefetcher struct {
 	work   chan prefetchItem
 	wg     sync.WaitGroup
+	gate   sync.RWMutex
 	seed   maphash.Seed
 	shards [branchPrefetchShards]prefetchedShard
 	bytes  atomic.Int64
 
-	dropped atomic.Uint64
+	pausing          atomic.Bool
+	dropped, drained atomic.Uint64
 }
 
 func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB) *branchPrefetcher {
@@ -97,16 +102,37 @@ func (p *branchPrefetcher) add(it prefetchItem) {
 	}
 }
 
-func (p *branchPrefetcher) close() {
+func (p *branchPrefetcher) pause() {
+	if p == nil {
+		return
+	}
+	p.pausing.Store(true)
+	p.gate.Lock()
+	p.drained.Add(uint64(p.drain()))
+}
+
+func (p *branchPrefetcher) drain() (n int) {
 	for {
 		select {
 		case <-p.work:
+			n++
 		default:
-			close(p.work)
-			p.wg.Wait()
-			return
+			return n
 		}
 	}
+}
+
+func (p *branchPrefetcher) resume() {
+	if p != nil {
+		p.pausing.Store(false)
+		p.gate.Unlock()
+	}
+}
+
+func (p *branchPrefetcher) close() {
+	p.drain()
+	close(p.work)
+	p.wg.Wait()
 }
 
 func (p *branchPrefetcher) shard(key []byte) *prefetchedShard {
@@ -154,8 +180,10 @@ func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
 
 func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 	for it := range p.work {
+		p.gate.RLock()
 		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
+			p.gate.RUnlock()
 			continue
 		}
 		read := func(key []byte) []byte {
@@ -170,12 +198,13 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 		}
 		p.walkChunk(it, read)
 		tx.Rollback()
+		p.gate.RUnlock()
 	}
 }
 
 func (p *branchPrefetcher) walkChunk(it prefetchItem, read func(key []byte) []byte) (n int) {
 	it.touch(read)
-	for n = 1; n < branchPrefetchPerTx; n++ {
+	for n = 1; n < branchPrefetchPerTx && !p.pausing.Load(); n++ {
 		select {
 		case next, ok := <-p.work:
 			if !ok {
