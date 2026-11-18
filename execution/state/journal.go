@@ -21,7 +21,6 @@ package state
 
 import (
 	"fmt"
-	"slices"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -129,9 +128,13 @@ func (j *journal) Reset() {
 
 // push appends e, doubling the capacity when it is full: append grows a large slice by
 // about 1.25x, so a long journal (a TSTORE loop) would copy its entries several times over.
+// make + copy rather than slices.Grow: it doubles exactly and keeps push cheap enough that
+// the entry constructors still inline.
 func (j *journal) push(e journalEntry) {
 	if len(j.entries) == cap(j.entries) {
-		j.entries = slices.Grow(j.entries, max(len(j.entries), 64))
+		grown := make([]journalEntry, len(j.entries), max(2*len(j.entries), 64))
+		copy(grown, j.entries)
+		j.entries = grown
 	}
 	j.entries = append(j.entries, e)
 }
