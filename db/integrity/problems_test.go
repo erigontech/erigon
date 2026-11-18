@@ -21,9 +21,11 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -136,4 +138,48 @@ func TestBudgetExhaustedKeepsTheVerdict(t *testing.T) {
 	require.True(t, BudgetExhausted(context.DeadlineExceeded))
 	require.False(t, BudgetExhausted(errors.Join(context.DeadlineExceeded, probs.verdict("check"))))
 	require.False(t, BudgetExhausted(errChunk))
+}
+
+func TestRunChecksFailsWhenTheBudgetCutsACheck(t *testing.T) {
+	run := func(ctx context.Context, chk Check) error {
+		if chk == ReceiptRootIntegrity {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	}
+
+	err := RunChecks(t.Context(), []Check{HeaderNoGaps, ReceiptRootIntegrity, CommitmentRoot}, 50*time.Millisecond, run, log.New())
+	require.ErrorContains(t, err, string(ReceiptRootIntegrity))
+	require.ErrorContains(t, err, string(CommitmentRoot))
+}
+
+func TestRunChecksFailsWhenTheBudgetEndsBeforeACheckStarts(t *testing.T) {
+	var ran []Check
+	run := func(ctx context.Context, chk Check) error {
+		ran = append(ran, chk)
+		if chk == HeaderNoGaps {
+			time.Sleep(60 * time.Millisecond)
+		}
+		return nil
+	}
+
+	err := RunChecks(t.Context(), []Check{HeaderNoGaps, CommitmentRoot}, 50*time.Millisecond, run, log.New())
+	require.ErrorContains(t, err, string(CommitmentRoot))
+	require.Equal(t, []Check{HeaderNoGaps}, ran)
+}
+
+func TestRunChecksLetsAHeavyCheckUseTheWholeBudget(t *testing.T) {
+	run := func(ctx context.Context, chk Check) error {
+		if chk == HeaderNoGaps {
+			select {
+			case <-time.After(500 * time.Millisecond):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	}
+
+	require.NoError(t, RunChecks(t.Context(), []Check{HeaderNoGaps, Blocks, CommitmentRoot}, time.Second, run, log.New()))
 }

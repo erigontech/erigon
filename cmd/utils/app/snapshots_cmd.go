@@ -445,7 +445,7 @@ var snapshotCommand = cli.Command{
 				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (speeds up repeated runs)"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0); slow checks use 1/10000 of it", Value: 1.0},
-				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; each check gets (remaining / remaining_checks). 0 (default) means no limit"},
+				&cli.DurationFlag{Name: "integrity.budget", Value: 0, Usage: "total wall-clock budget for the run; a check cut by it, or not started before it ends, fails the run. 0 (default) means no limit"},
 			}),
 		},
 		{
@@ -1735,53 +1735,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		}
 	}
 
-	var deadline time.Time
-	if budget := cliCtx.Duration("integrity.budget"); budget > 0 {
-		requestedChecks = integrity.SortChecksByCost(requestedChecks)
-		deadline = time.Now().Add(budget)
-		logger.Info("[integrity] budget", "total", budget, "perCheck", budget/time.Duration(len(requestedChecks)))
-	}
-
-	for i, chk := range requestedChecks {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		checkCtx := ctx
-		var cancel context.CancelFunc
-		if !deadline.IsZero() {
-			remaining := time.Until(deadline)
-			if remaining <= 0 {
-				logger.Info("[integrity] budget exhausted, skipping remaining", "skipped", len(requestedChecks)-i)
-				break
-			}
-			slice := remaining / time.Duration(len(requestedChecks)-i)
-			checkCtx, cancel = context.WithTimeout(ctx, slice)
-		}
-
-		logger.Info("[integrity] starting", "check", chk)
-		start := time.Now()
-		err := runCheck(checkCtx, chk)
-		elapsed := time.Since(start)
-		if cancel != nil {
-			cancel()
-		}
-
-		if err == nil {
-			logger.Info("[integrity] done", "check", chk, "elapsed", elapsed)
-			continue
-		}
-		if parentErr := ctx.Err(); parentErr != nil {
-			return parentErr
-		}
-		if integrity.BudgetExhausted(err) {
-			logger.Info("[integrity] budget exhausted, moving on", "check", chk, "elapsed", elapsed)
-			continue
-		}
-		return fmt.Errorf("%s: %w", chk, err)
-	}
-
-	return nil
+	return integrity.RunChecks(ctx, requestedChecks, cliCtx.Duration("integrity.budget"), runCheck, logger)
 }
 
 // stateFilesProgress returns the latest block fully covered by state-history files.
