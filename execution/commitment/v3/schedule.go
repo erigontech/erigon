@@ -130,11 +130,13 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			ready <- int(nib)
 		}
 	}
+	storageCtx, cancelStorage := context.WithCancel(ctx)
+	defer cancelStorage()
 	storageReady := make(chan struct{})
 	var storageErr error
 	collectStorage := func() {
 		defer close(storageReady)
-		storageErr = runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin, taskDone)
+		storageErr = runStoragePhase(storageCtx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin, taskDone)
 	}
 	nextReady := func() int {
 		select {
@@ -154,6 +156,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	}
 	root, err := g.loadRoot(rawCtx)
 	if err != nil {
+		cancelStorage()
 		<-storageReady
 		return [32]byte{}, nil, err
 	}

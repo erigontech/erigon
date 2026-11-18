@@ -470,6 +470,28 @@ func TestScheduling(t *testing.T) {
 		require.ErrorIs(t, err, wantErr)
 		trie.Release()
 	})
+	t.Run("account_root_read_error_cancels_storage", func(t *testing.T) {
+		wantErr := errors.New("account root read failed")
+		trie := newFactoryTrie(2, failingReadContext{PatriciaContext: newShardedContext(), err: wantErr}, func(ctx context.Context) (commitment.PatriciaContext, func()) {
+			<-ctx.Done()
+			return nil, nil
+		})
+		feed := &commitment.Feed{Accounts: []commitment.FeedAccount{
+			{Hash: [32]byte{0x10}, Update: testAccountUpdate(commitmenttest.AccountValue{Nonce: 1}), Slots: []commitment.FeedSlot{{Hash: [32]byte{1}, Value: []byte{1}}}},
+		}}
+		done := make(chan error, 1)
+		go func() {
+			_, err := trie.ProcessFeed(t.Context(), feed, nil)
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, wantErr)
+		case <-time.After(5 * time.Second):
+			t.Fatal("ProcessFeed must cancel the storage phase on an account root read error")
+		}
+		trie.Release()
+	})
 	t.Run("deferred_builds_worker_contexts", func(t *testing.T) {
 		_, _, calls := runV3(t, newShardedContext(), v3Config{deferred: true}, storage)
 		require.Greater(t, calls, int32(1), "deferred rounds must still build per-worker contexts for the storage phase")
