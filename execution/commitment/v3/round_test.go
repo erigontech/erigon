@@ -492,6 +492,32 @@ func TestScheduling(t *testing.T) {
 		}
 		trie.Release()
 	})
+	t.Run("account_plan_read_error_cancels_storage", func(t *testing.T) {
+		wantErr := errors.New("account child read failed")
+		seeded := newShardedContext()
+		runV3(t, seeded, v3Config{}, storage)
+		var reads atomic.Int32
+		main := failAfterReads{PatriciaContext: seeded, reads: &reads, after: 1, err: wantErr}
+		trie := newFactoryTrie(2, main, func(ctx context.Context) (commitment.PatriciaContext, func()) {
+			<-ctx.Done()
+			return nil, nil
+		})
+		feed := &commitment.Feed{Accounts: []commitment.FeedAccount{
+			{Hash: [32]byte{0x10}, Update: testAccountUpdate(commitmenttest.AccountValue{Nonce: 1}), Slots: []commitment.FeedSlot{{Hash: [32]byte{1}, Value: []byte{1}}}},
+		}}
+		done := make(chan error, 1)
+		go func() {
+			_, err := trie.ProcessFeed(t.Context(), feed, nil)
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, wantErr)
+		case <-time.After(5 * time.Second):
+			t.Fatal("ProcessFeed must cancel the storage phase on an account read error")
+		}
+		trie.Release()
+	})
 	t.Run("deferred_builds_worker_contexts", func(t *testing.T) {
 		_, _, calls := runV3(t, newShardedContext(), v3Config{deferred: true}, storage)
 		require.Greater(t, calls, int32(1), "deferred rounds must still build per-worker contexts for the storage phase")
@@ -1087,8 +1113,7 @@ func TestStorageTaskStopsOnCancel(t *testing.T) {
 				c, cleanup := mem.Open(ctx)
 				return counted(c), cleanup
 			}
-			plan := foldPlan{ctx: runCtx, factory: factory, workers: 2, fanOutMin: 1}
-			_, _, err := runStorageTaskWithPlan(runCtx, counted(mem), tc.task, plan)
+			err := runStoragePhase(runCtx, counted(mem), factory, []storageTask{tc.task}, make([][32]byte, 1), make([]deltaParts, 1), 2, 1, func(int) {})
 			require.ErrorIs(t, err, context.Canceled)
 			require.Less(t, reads.Load(), records/4, "reads after cancellation")
 		})
@@ -1105,6 +1130,20 @@ type cancelAfterSharedReads struct {
 func (c cancelAfterSharedReads) Branch(key []byte) ([]byte, kv.Step, error) {
 	if c.reads.Add(1) > c.after {
 		c.cancel()
+	}
+	return c.PatriciaContext.Branch(key)
+}
+
+type failAfterReads struct {
+	commitment.PatriciaContext
+	reads *atomic.Int32
+	after int32
+	err   error
+}
+
+func (c failAfterReads) Branch(key []byte) ([]byte, kv.Step, error) {
+	if c.reads.Add(1) > c.after {
+		return nil, 0, c.err
 	}
 	return c.PatriciaContext.Branch(key)
 }

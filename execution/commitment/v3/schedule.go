@@ -231,13 +231,14 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		groupHashes[nib], pipelined[nib] = hash, true
 		return nil
 	}
-	planErr := g.planAccounts(rawCtx, root, accounts, plans, accountFold, nextReady, pipeline)
+	if err := g.planAccounts(rawCtx, root, accounts, plans, accountFold, nextReady, pipeline); err != nil {
+		cancelStorage()
+		<-storageReady
+		return [32]byte{}, nil, err
+	}
 	<-storageReady
 	if storageErr != nil {
 		return [32]byte{}, nil, storageErr
-	}
-	if planErr != nil {
-		return [32]byte{}, nil, planErr
 	}
 
 	remaining := make([]int, 0, len(plans))
