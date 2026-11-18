@@ -157,10 +157,11 @@ func TestBlockReadAheaderPreExecBoundsLoopingTx(t *testing.T) {
 	f := newPreExecFixture(t, []byte{0x5b, 0x60, 0x00, 0x56})
 	f.config.OsakaTime = nil
 	ctx, cancel := context.WithCancel(t.Context())
+	txns := types.Transactions{f.txn(t, 1<<62, 0)}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = f.readAheader.preExecTxns(ctx, f.db, f.header(), types.Transactions{f.txn(t, 1<<62, 0)})
+		_ = f.readAheader.preExecTxns(ctx, f.db, f.header(), txns)
 	}()
 	time.Sleep(20 * time.Millisecond)
 	cancel()
