@@ -505,8 +505,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		// Collect per-tx writes to notify the accumulator AFTER StartChange (which
 		// arrives with the blockResult, after all txResults).
 		var pendingAccumulatorWrites []state.WriteSetView
-		// balBuilder holds the current block's access list up to its last published tx.
-		var balBuilder *state.BlockAccessListBuilder
+		// balBuilder builds the current block's access list up to its last published tx.
+		var balBuilder *balAdder
+		defer func() { balBuilder.finish() }()
 		// foldErr is the first per-tx fold error of the current block, surfaced at
 		// its blockResult.
 		var foldErr error
@@ -670,12 +671,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					}
 					if applyResult.txIO != nil {
 						if balBuilder == nil {
-							balBuilder = state.NewBlockAccessListBuilder()
+							balBuilder = newBalAdder()
 						}
-						for balBuilder.Next()+1 < applyResult.balSealed {
-							i := balBuilder.Next()
-							balBuilder.Add(i, applyResult.txIO.ReadSet(i), applyResult.txIO.WriteSet(i))
-						}
+						balBuilder.add(applyResult.txIO, applyResult.balSealed)
 					}
 					if pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
@@ -683,7 +681,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockApplyCount += writeCount
 					pe.rs.SetTrace(false)
 				case *blockResult:
-					built := balBuilder
+					built := balBuilder.finish()
 					balBuilder = nil
 					if finalized {
 						appliedBlocks[applyResult.BlockNum] = struct{}{}
