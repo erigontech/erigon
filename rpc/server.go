@@ -152,6 +152,9 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 			continue
 		}
 		if err != nil {
+			// The connection is gone, so there is no point in finishing calls that
+			// are still being served on it. Cancel them before waiting for them.
+			h.cancelRoot()
 			h.close(err, nil)
 			return
 		}
