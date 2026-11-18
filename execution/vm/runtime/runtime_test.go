@@ -1241,3 +1241,11 @@ func TestExecuteReusedConfigStartsWithEmptyStorage(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, new(uint256.Int).SetBytes(ret).Uint64())
 }
+
+func TestCallBenchBatchesStartFromSameState(t *testing.T) {
+	c := newCallBench(t)
+	c.batch(t)
+	first := c.cfg.State.TxnIndex()
+	c.batch(t)
+	require.Equal(t, first, c.cfg.State.TxnIndex())
+}
