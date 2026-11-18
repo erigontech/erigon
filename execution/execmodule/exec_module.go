@@ -332,6 +332,7 @@ func NewExecModule(
 	// probes on the EVM hot path. Reth's "same hashmap" pattern.
 	if readAheader != nil {
 		readAheader.SetStateCache(domainCache)
+		readAheader.SetPreExec(config, engine, blockReader)
 	}
 
 	if stateCache != nil {

@@ -53,6 +53,7 @@ type BlockReadAheader struct {
 	// cursors — disconnected from the cache layer the EVM actually reads.
 	// Mirrors reth's CachedReads / ExecutionCache "same hashmap" property.
 	stateCache *cache.StateCache
+	preExec    *preExecCfg
 }
 
 func NewBlockReadAheader() *BlockReadAheader {
@@ -481,6 +482,12 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 		codeMode := balCodeWarmupModeForFlags(dbg.ReadAheadBALCode, dbg.ReadAheadTxCode)
 		if err := bra.warmBAL(ctx, db, bal, body.Transactions, codeMode, workers); err != nil && !errors.Is(err, context.Canceled) {
 			log.Warn("[warmBAL] failed", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
+		}
+		return
+	}
+	if bra.preExecOn(header.Number.Uint64()) {
+		if err := bra.preExecTxns(ctx, db, header, body.Transactions, workers); err != nil && !errors.Is(err, context.Canceled) {
+			log.Warn("[preexec] failed", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
 		}
 		return
 	}
