@@ -83,9 +83,17 @@ func (a *ReceiptsFilterAggregator) checkEmpty() {
 	a.events.EmptyReceiptSubscription(isEmpty)
 }
 
-func (a *ReceiptsFilterAggregator) removeReceiptsFilter(filterId uint64, filter *ReceiptsFilter) {
+func (a *ReceiptsFilterAggregator) removeReceiptsFilter(filterId uint64) {
 	a.receiptsFilterLock.Lock()
 	defer a.receiptsFilterLock.Unlock()
+	a.removeReceiptsFilterLocked(filterId)
+}
+
+func (a *ReceiptsFilterAggregator) removeReceiptsFilterLocked(filterId uint64) {
+	filter, ok := a.receiptsFilters[filterId]
+	if !ok {
+		return
+	}
 	a.subtractReceiptsFilters(filter)
 	delete(a.receiptsFilters, filterId)
 	a.checkEmpty()
@@ -136,7 +144,7 @@ func (a *ReceiptsFilterAggregator) subtractReceiptsFilters(filter *ReceiptsFilte
 
 func (a *ReceiptsFilterAggregator) subscribeReceipts(server remoteproto.ETHBACKEND_SubscribeReceiptsServer) error {
 	filterId, filter := a.insertReceiptsFilter(server)
-	defer a.removeReceiptsFilter(filterId, filter)
+	defer a.removeReceiptsFilter(filterId)
 	var filterReq *remoteproto.ReceiptsFilterRequest
 	var recvErr error
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
@@ -153,7 +161,7 @@ func (a *ReceiptsFilterAggregator) subscribeReceipts(server remoteproto.ETHBACKE
 func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.ReceiptNotification) {
 	a.receiptsFilterLock.Lock()
 	defer a.receiptsFilterLock.Unlock()
-	filtersToDelete := make(map[uint64]*ReceiptsFilter)
+	filtersToDelete := make(map[uint64]struct{})
 	// Each stream's latest receipt is held back until the next one shows whether it ends its block.
 	held := make(map[uint64]*remoteproto.SubscribeReceiptsReply)
 	send := func(filterId uint64, reply *remoteproto.SubscribeReceiptsReply, lastInBlock bool) {
@@ -162,7 +170,7 @@ func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.
 			reply.LastInBlock = true
 		}
 		if err := a.receiptsFilters[filterId].sender.Send(reply); err != nil {
-			filtersToDelete[filterId] = a.receiptsFilters[filterId]
+			filtersToDelete[filterId] = struct{}{}
 		}
 	}
 	for _, rn := range receipts {
@@ -192,9 +200,8 @@ func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.
 	for filterId, reply := range held {
 		send(filterId, reply, true)
 	}
-	for filterId, filter := range filtersToDelete {
-		a.subtractReceiptsFilters(filter)
-		delete(a.receiptsFilters, filterId)
+	for filterId := range filtersToDelete {
+		a.removeReceiptsFilterLocked(filterId)
 	}
 }
 

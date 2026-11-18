@@ -18,6 +18,7 @@ package privateapi
 
 import (
 	"context"
+	"errors"
 	"io"
 	"slices"
 	"testing"
@@ -482,4 +483,25 @@ func TestFrameReceiptSubscription(t *testing.T) {
 	result := ethutils.MarshalSubscribeReceipt(notification)
 	require.Equal(t, &payer, result.Payer)
 	require.Len(t, result.FrameReceipts, 1)
+}
+
+type failingReceiptsServer struct{ *testReceiptsServer }
+
+func (failingReceiptsServer) Send(*remoteproto.SubscribeReceiptsReply) error {
+	return errors.New("stream closed")
+}
+
+func TestReceiptsFilter_FailedSendKeepsOtherSubscriberOfSameHash(t *testing.T) {
+	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
+	req := &remoteproto.ReceiptsFilterRequest{TransactionHashes: []*typesproto.H256{txHash1H256}}
+	failedID, failed := agg.insertReceiptsFilter(failingReceiptsServer{newTestReceiptsServer(t.Context())})
+	agg.updateReceiptsFilter(failed, req)
+	srv := newTestReceiptsServer(t.Context())
+	_, live := agg.insertReceiptsFilter(srv)
+	agg.updateReceiptsFilter(live, req)
+
+	agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1)})
+	agg.removeReceiptsFilter(failedID)
+	agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1)})
+	require.Len(t, srv.sent, 2)
 }
