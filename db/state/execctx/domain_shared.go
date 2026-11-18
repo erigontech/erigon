@@ -273,10 +273,9 @@ type SharedDomains struct {
 	// mem; both reach the transaction during flush, which resets the memo.
 	visibleEnds domainVisibleEndMemo
 
-	// changesetMu serializes the exec loop's install of a block's changeset
-	// accumulator against a pending-update flush that has no saved changeset
-	// and writes into the live commitment diff. DomainPut and DomainDel do not
-	// take it.
+	// changesetMu guards the live changeset accumulator and the live commitment
+	// diff: the exec loop's installs and binds, and every swap of or write into
+	// the live commitment diff. DomainPut and DomainDel do not take it.
 	changesetMu sync.Mutex
 
 	// branchCache is the aggregator-scoped commitment cache consulted after local
@@ -560,22 +559,16 @@ func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) er
 		// Falls back to the legacy number-only lookup if the hash isn't set
 		// (zero hash) — preserves behavior for callers that don't yet thread
 		// the hash through.
-		var blockHash common.Hash
 		var cs *changeset.StateChangeSet
 		if upd.BlockHash != (common.Hash{}) {
-			blockHash = upd.BlockHash
-			cs = switcher.GetChangesetByHash(upd.BlockNum, blockHash)
+			cs = switcher.GetChangesetByHash(upd.BlockNum, upd.BlockHash)
 		} else {
-			blockHash, cs = switcher.GetChangesetByBlockNum(upd.BlockNum)
+			_, cs = switcher.GetChangesetByBlockNum(upd.BlockNum)
 		}
 		if cs != nil {
 			// Writing into the changeset's own diff leaves the commitment writer's
 			// diff alone, so the apply fold's changeset binds do not wait on the flush.
-			if err := sd.applyPendingUpdate(tx, upd, &cs.Diffs[kv.CommitmentDomain]); err != nil {
-				return err
-			}
-			switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
-			return nil
+			return sd.applyPendingUpdate(tx, upd, &cs.Diffs[kv.CommitmentDomain])
 		}
 	}
 

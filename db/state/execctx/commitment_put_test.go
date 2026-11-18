@@ -23,6 +23,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -135,7 +136,8 @@ func TestPutCommitmentBranchesMatchesPerRecordPuts(t *testing.T) {
 
 // TestFlushPendingLandsInTheBlockChangeset checks that a pending update whose
 // block has a saved changeset lands in that changeset exactly as it would if
-// the changeset were the live accumulator, and leaves the live one empty.
+// the changeset were the live accumulator, leaves the live one empty, and does
+// not wait on changesetMu.
 func TestFlushPendingLandsInTheBlockChangeset(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	blockHash := common.Hash{7}
@@ -192,7 +194,22 @@ func TestFlushPendingLandsInTheBlockChangeset(t *testing.T) {
 				} else {
 					sd.SetChangesetAccumulator(block)
 				}
-				require.NoError(t, sd.FlushPendingUpdates(tx))
+				if saved {
+					sd.LockChangesetAccumulator()
+					done := make(chan error, 1)
+					go func() { done <- sd.FlushPendingUpdates(tx) }()
+					select {
+					case err := <-done:
+						sd.UnlockChangesetAccumulator()
+						require.NoError(t, err)
+					case <-time.After(5 * time.Second):
+						sd.UnlockChangesetAccumulator()
+						<-done
+						t.Fatal("flush into a saved changeset waited on changesetMu")
+					}
+				} else {
+					require.NoError(t, sd.FlushPendingUpdates(tx))
+				}
 				require.Nil(t, sd.GetCommitmentContext().PeekPendingUpdate())
 				blockDiff = block.Diffs[kv.CommitmentDomain].GetDiffSet()
 				latest = make(map[string][]byte, len(blockDiff))
@@ -215,9 +232,9 @@ func TestFlushPendingLandsInTheBlockChangeset(t *testing.T) {
 	}
 }
 
-// TestFlushPendingRunsBesideTheFold flushes a block's pending update
-// while the apply fold binds the same block's changeset and writes state into
-// it, as the commitment calculator and the exec loop do; run it with -race.
+// TestFlushPendingRunsBesideTheFold flushes a block's pending update while
+// another goroutine binds the same block's changeset and writes state into it;
+// run it with -race.
 func TestFlushPendingRunsBesideTheFold(t *testing.T) {
 	seed := commitmentPutCorpus(256)
 	next := make([]commitment.BranchDelta, len(seed))
