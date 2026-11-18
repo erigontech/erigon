@@ -23,8 +23,7 @@ func TestJournalEntrySize(t *testing.T) {
 // TestJournalGrowsByDoubling pins the growth policy: a TSTORE loop journals one
 // entry per store, and growing by append's ~1.25x would copy the entries many times.
 func TestJournalGrowsByDoubling(t *testing.T) {
-	j := newJournal()
-	defer j.release()
+	j := &journal{dirties: make(map[accounts.Address]int)}
 	grows, last := 0, cap(j.entries)
 	for i := range 1 << 17 {
 		j.transientStorageChange(accounts.NilAddress, i, uint256.Int{})
