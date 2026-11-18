@@ -970,7 +970,7 @@ func (s *memStore) collectRangeDupSort(t *memTable, key []byte, fromPrefix, toPr
 		} else {
 			nextKey, ok := kv.NextSubtree(key)
 			if ok {
-				found := iter.Seek(memEntry{k: nextKey})
+				found := iter.Seek(memEntry{k: nextKey, deleted: true})
 				if found {
 					valid = iter.Prev()
 				} else {

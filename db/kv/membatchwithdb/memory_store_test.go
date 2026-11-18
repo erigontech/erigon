@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 )
 
 // --- memStore unit tests (behavior parity with MDBX) ---
@@ -1022,4 +1023,25 @@ func TestMemStore_KeyTombstoneDoesNotHideEmptyValue(t *testing.T) {
 	require.Nil(t, k)
 	_, rows := s.tombstones(table)
 	require.Equal(t, []entry{{k: key}, {k: key, v: []byte{}}}, rows)
+}
+
+func TestMemStore_DescRangeDupSortStopsBeforeNextKeyTombstone(t *testing.T) {
+	for _, nextLive := range []bool{false, true} {
+		s := newMemStore()
+		table, key, next := kv.TblAccountVals, []byte{1}, []byte{2}
+		require.NoError(t, s.Put(table, key, []byte("v1")))
+		require.NoError(t, s.Delete(table, next))
+		if nextLive {
+			require.NoError(t, s.Put(table, next, []byte("w")))
+		}
+		it, err := s.RangeDupSort(table, key, nil, nil, order.Desc, kv.Unlim)
+		require.NoError(t, err)
+		var vals []string
+		for it.HasNext() {
+			_, v, err := it.Next()
+			require.NoError(t, err)
+			vals = append(vals, string(v))
+		}
+		require.Equal(t, []string{"v1"}, vals, "nextLive=%v", nextLive)
+	}
 }
