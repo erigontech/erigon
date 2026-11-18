@@ -17,8 +17,9 @@
 package backtester
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -28,8 +29,5 @@ func TestBacktesterRejectsCommitmentV3(t *testing.T) {
 	statecfg.ExperimentalCommitmentV3 = true
 	t.Cleanup(func() { statecfg.ExperimentalCommitmentV3 = previous })
 
-	err := (Backtester{}).run(t.Context(), nil, 1, 1)
-	if err == nil || !strings.Contains(err.Error(), "not supported on commitment v3") {
-		t.Fatalf("expected v3 unsupported error, got %v", err)
-	}
+	require.ErrorContains(t, (Backtester{}).run(t.Context(), nil, 1, 1), "not supported on commitment v3")
 }
