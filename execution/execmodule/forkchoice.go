@@ -116,6 +116,7 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 // chain from the head down to the lowest block walked, so a block at or above that height must be one of them.
 // Below it, the chain is canonical when the walk reached the canonical chain (forkPointKnown). When it stopped at a
 // missing side block, the chain below is unknown and any block there, or an unknown one, may be an ancestor.
+// Canonical is checked by number, like the walk, since old canonical blocks may have no total difficulty.
 func (e *ExecModule) onHeadChain(ctx context.Context, tx kv.Tx, newCanonicals []*canonicalEntry, forkPointKnown bool, hashes ...common.Hash) (bool, error) {
 	lowest := newCanonicals[len(newCanonicals)-1].number
 	for _, hash := range hashes {
@@ -135,7 +136,7 @@ func (e *ExecModule) onHeadChain(ctx context.Context, tx kv.Tx, newCanonicals []
 		if number == nil {
 			return false, nil
 		}
-		canonical, err := e.isCanonicalHash(ctx, tx, hash)
+		canonical, err := e.blockReader.IsCanonical(ctx, tx, hash, *number)
 		if err != nil {
 			return false, err
 		}
@@ -295,7 +296,8 @@ func (e *ExecModule) unwindIfNeeded(
 			ValidationError: "forkchoice head is a non-genesis block at height 0",
 		}, nil, nil
 	}
-	// Find the canonical reconnection point, and collect all hashes on the way
+	// Find the canonical reconnection point, and collect all hashes on the way. Canonical is checked by number: old
+	// canonical blocks may have no total difficulty (pruned), and isCanonicalHash would then walk on past the fork point.
 	newCanonicals := make([]*canonicalEntry, 0, 64)
 	newCanonicals = append(newCanonicals, &canonicalEntry{
 		hash:   fcuHeader.Hash(),
@@ -305,7 +307,7 @@ func (e *ExecModule) unwindIfNeeded(
 	if fcuHeader.Number.Sign() > 0 {
 		currentParentHash := fcuHeader.ParentHash
 		currentParentNumber = fcuHeader.Number.Uint64() - 1
-		isCanonicalHash, err := e.isCanonicalHash(ctx, tx, currentParentHash)
+		isCanonicalHash, err := e.blockReader.IsCanonical(ctx, tx, currentParentHash, currentParentNumber)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -344,7 +346,7 @@ func (e *ExecModule) unwindIfNeeded(
 				panic("assert:uint64 underflow") //uint-underflow
 			}
 			currentParentNumber = currentHeader.Number.Uint64() - 1
-			isCanonicalHash, err = e.isCanonicalHash(ctx, tx, currentParentHash)
+			isCanonicalHash, err = e.blockReader.IsCanonical(ctx, tx, currentParentHash, currentParentNumber)
 			if err != nil {
 				return nil, nil, err
 			}

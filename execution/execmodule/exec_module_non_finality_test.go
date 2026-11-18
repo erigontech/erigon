@@ -18,6 +18,7 @@ package execmodule_test
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,7 +26,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -322,6 +325,71 @@ func TestExecModule_GivenHeadOnOtherGenesis_WhenUpdateForkChoice_ThenInvalidFork
 			require.Equal(t, canonical.TopBlock.Hash(), forkchoice.HeadHash)
 		})
 	}
+}
+
+// The total difficulty of old canonical blocks is pruned (PRUNE_TOTAL_DIFFICULTY). The walk still stops at such a
+// fork point instead of going down to genesis, and canonical blocks below it still count as on the new chain.
+func TestExecModule_GivenForkPointWithPrunedTD_WhenReorgBelowFinalisedBlock_ThenWalkStopsAtForkPoint(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	counter := &headerReadCounter{}
+	emt := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges),
+		execmoduletester.WithBlockReaderWrap(func(br dbservices.FullBlockReader) dbservices.FullBlockReader {
+			counter.FullBlockReader = br
+			return counter
+		}))
+	prefix, err := emt.GenerateChain(10, nil)
+	require.NoError(t, err)
+	require.NoError(t, emt.InsertValidateAndUfc1By1(ctx, prefix.Blocks))
+	canonical, err := emt.GenerateChainFrom(prefix.TopBlock, 4, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	fork, err := emt.GenerateChainFrom(prefix.TopBlock, 2, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{2})
+	})
+	require.NoError(t, err)
+	finalisedHash := canonical.Blocks[2].Hash()
+	require.NoError(t, emt.InsertValidateAndUfc1By1(ctx, canonical.Blocks, execmoduletester.WithFcuOptSeq([][]execmoduletester.UFCOpt{
+		nil, nil, nil, {execmoduletester.WithSafeHash(finalisedHash), execmoduletester.WithFinalisedHash(finalisedHash)},
+	})))
+	status, err := emt.InsertBlocks(ctx, fork.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	require.NoError(t, emt.DB.Update(ctx, func(tx kv.RwTx) error {
+		for _, block := range prefix.Blocks {
+			if err := tx.Delete(kv.HeaderTD, dbutils.HeaderKey(block.NumberU64(), block.Hash())); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	forkPoint := prefix.TopBlock.NumberU64()
+	counter.maxHeight.Store(&forkPoint)
+	result, err := emt.UpdateForkChoice(ctx, fork.TopBlock.Header(),
+		execmoduletester.WithSafeHash(prefix.Blocks[4].Hash()),
+		execmoduletester.WithFinalisedHash(prefix.TopBlock.Hash()))
+	counter.maxHeight.Store(nil)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusReorgTooDeep, result.Status)
+	require.Zero(t, counter.reads.Load(), "the walk read headers at or below the fork point")
+	forkchoice, err := emt.ExecModule.GetForkChoice(ctx)
+	require.NoError(t, err)
+	require.Equal(t, canonical.TopBlock.Hash(), forkchoice.HeadHash)
+}
+
+// headerReadCounter counts the header reads at or below maxHeight while it is set.
+type headerReadCounter struct {
+	dbservices.FullBlockReader
+	maxHeight atomic.Pointer[uint64]
+	reads     atomic.Int32
+}
+
+func (r *headerReadCounter) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error) {
+	if h := r.maxHeight.Load(); h != nil && blockNum <= *h {
+		r.reads.Add(1)
+	}
+	return r.FullBlockReader.Header(ctx, tx, hash, blockNum)
 }
 
 // namedHash returns the hash a test case names, failing the test for a name the table does not define.
