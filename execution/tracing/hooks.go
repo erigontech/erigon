@@ -172,6 +172,9 @@ type (
 		- State events -
 	*/
 
+	// AccountReadHook is called before a precompile reads an account, after charging for the read.
+	AccountReadHook = func(addr accounts.Address)
+
 	// BalanceChangeHook is called when the balance of an account changes.
 	BalanceChangeHook = func(addr accounts.Address, prev, new uint256.Int, reason BalanceChangeReason)
 
@@ -219,6 +222,7 @@ type Hooks struct {
 	OnSystemCallStartV2 OnSystemCallStartHookV2
 	OnSystemCallEnd     OnSystemCallEndHook
 	// State events
+	OnAccountRead   AccountReadHook
 	OnBalanceChange BalanceChangeHook
 	OnNonceChange   NonceChangeHook
 	OnNonceChangeV2 NonceChangeHookV2

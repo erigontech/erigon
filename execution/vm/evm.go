@@ -95,6 +95,9 @@ func (evm *EVM) runEcrecover(p PrecompiledContract, input []byte, gas mdgas.MdGa
 	}
 	evm.intraBlockState.AddAddressToAccessList(address)
 	evm.intraBlockState.MarkAddressAccess(address, false)
+	if tracer != nil && tracer.OnAccountRead != nil {
+		tracer.OnAccountRead(address)
+	}
 	code, err := evm.intraBlockState.GetCode(address)
 	if err != nil {
 		return nil, remaining, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
