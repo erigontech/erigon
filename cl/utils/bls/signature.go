@@ -152,14 +152,21 @@ func Verify(signature []byte, msg []byte, publicKeyBytes []byte) (bool, error) {
 // e(S*, G) = \prod_{i=1}^n \prod_{j=1}^{m_i} e(P'_{i,j}, M_{i,j})
 // Using this we can verify multiple signatures safely.
 func VerifyMultipleSignatures(sigs [][]byte, msgs [][]byte, pubKeys [][]byte) (bool, error) {
+	valid, _, err := VerifyMultipleSignaturesDecompressed(sigs, msgs, pubKeys)
+	return valid, err
+}
+
+// VerifyMultipleSignaturesDecompressed is VerifyMultipleSignatures that also returns the signatures it decompressed when
+// they are all valid, so a caller that keeps them, such as an aggregator, does not decompress them again.
+func VerifyMultipleSignaturesDecompressed(sigs [][]byte, msgs [][]byte, pubKeys [][]byte) (bool, []Signature, error) {
 	if len(sigs) == 0 || len(pubKeys) == 0 {
-		return false, nil
+		return false, nil, nil
 	}
 	rawSigs := new(blst.P2Affine).BatchUncompress(sigs)
 
 	length := len(sigs)
 	if length != len(pubKeys) || length != len(msgs) {
-		return false, fmt.Errorf("provided signatures, pubkeys and messages have differing lengths. S: %d, P: %d,M %d",
+		return false, nil, fmt.Errorf("provided signatures, pubkeys and messages have differing lengths. S: %d, P: %d,M %d",
 			length, len(pubKeys), len(msgs))
 	}
 	mulP1Aff := make([]*blst.P1Affine, length)
@@ -168,13 +175,13 @@ func VerifyMultipleSignatures(sigs [][]byte, msgs [][]byte, pubKeys [][]byte) (b
 	for i := range length {
 		pk, err := newPublicKeyFromBytes(pubKeys[i], false)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		mulP1Aff[i] = pk
 		rawMsgs[i] = msgs[i]
 	}
 	if groups := groupByMessage(msgs); 2*len(groups) <= length {
-		return rawSigs != nil && verifyGroupedByMessage(sigs, rawSigs, mulP1Aff, groups), nil
+		return decompressedIfValid(rawSigs, rawSigs != nil && verifyGroupedByMessage(sigs, rawSigs, mulP1Aff, groups))
 	}
 	// Secure source of RNG
 	randLock := new(sync.Mutex)
@@ -192,7 +199,18 @@ func VerifyMultipleSignatures(sigs [][]byte, msgs [][]byte, pubKeys [][]byte) (b
 	dummySig := new(blst.P2Affine)
 
 	// Validate signatures since we uncompress them here. Public keys should already be validated.
-	return dummySig.MultipleAggregateVerify(rawSigs, true, mulP1Aff, false, rawMsgs, eth2Curve, randFunc, randBitsEntropy), nil
+	return decompressedIfValid(rawSigs, dummySig.MultipleAggregateVerify(rawSigs, true, mulP1Aff, false, rawMsgs, eth2Curve, randFunc, randBitsEntropy))
+}
+
+func decompressedIfValid(rawSigs []*blst.P2Affine, valid bool) (bool, []Signature, error) {
+	if !valid {
+		return false, nil, nil
+	}
+	decompressed := make([]Signature, len(rawSigs))
+	for i, sig := range rawSigs {
+		decompressed[i].affine = sig
+	}
+	return true, decompressed, nil
 }
 
 type messageGroup struct {
@@ -291,6 +309,11 @@ func (a *SignatureAggregator) AddValidated(sig []byte) error {
 	}
 	a.agg.Add(affine, false)
 	return nil
+}
+
+// Add adds a signature that has already passed signature verification.
+func (a *SignatureAggregator) Add(sig *Signature) {
+	a.agg.Add(sig.affine, false)
 }
 
 // Compressed returns the compressed aggregate of all added signatures.
