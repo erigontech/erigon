@@ -234,7 +234,7 @@ func (s *memStore) GetOne(table string, key []byte) ([]byte, error) {
 	if !found || item.deleted {
 		return nil, nil
 	}
-	return bytes.Clone(item.v), nil
+	return append([]byte{}, item.v...), nil // non-nil even for an empty value, so callers do not fall back to the db
 }
 
 func (s *memStore) Rollback() {}
@@ -829,12 +829,12 @@ func (s *memStore) collectRange(t *memTable, fromPrefix, toPrefix []byte, asc bo
 		}
 		for valid && (limit < 0 || int64(len(entries)) < limit) {
 			item := iter.Item()
+			if toPrefix != nil && bytes.Compare(item.k, toPrefix) >= 0 {
+				break
+			}
 			if item.deleted {
 				valid = iter.Next()
 				continue
-			}
-			if toPrefix != nil && bytes.Compare(item.k, toPrefix) >= 0 {
-				break
 			}
 			entries = append(entries, memEntry{k: bytes.Clone(item.k), v: bytes.Clone(item.v)})
 			valid = iter.Next()
@@ -857,12 +857,12 @@ func (s *memStore) collectRange(t *memTable, fromPrefix, toPrefix []byte, asc bo
 		}
 		for valid && (limit < 0 || int64(len(entries)) < limit) {
 			item := iter.Item()
+			if fromPrefix != nil && bytes.Compare(item.k, fromPrefix) < 0 {
+				break
+			}
 			if item.deleted {
 				valid = iter.Prev()
 				continue
-			}
-			if fromPrefix != nil && bytes.Compare(item.k, fromPrefix) < 0 {
-				break
 			}
 			entries = append(entries, memEntry{k: bytes.Clone(item.k), v: bytes.Clone(item.v)})
 			valid = iter.Prev()
@@ -882,15 +882,15 @@ func (s *memStore) collectRangeDupSort(t *memTable, key []byte, fromPrefix, toPr
 		valid := iter.Seek(memEntry{k: key, v: fromPrefix})
 		for valid && (limit < 0 || int64(len(entries)) < limit) {
 			item := iter.Item()
-			if item.deleted {
-				valid = iter.Next()
-				continue
-			}
 			if !bytes.Equal(item.k, key) {
 				break
 			}
-			if toPrefix != nil && bytes.Compare(item.v, toPrefix) >= 0 {
+			if toPrefix != nil && !item.keyWide() && bytes.Compare(item.v, toPrefix) >= 0 {
 				break
+			}
+			if item.deleted {
+				valid = iter.Next()
+				continue
 			}
 			entries = append(entries, memEntry{k: bytes.Clone(item.k), v: bytes.Clone(item.v)})
 			valid = iter.Next()
@@ -924,15 +924,15 @@ func (s *memStore) collectRangeDupSort(t *memTable, key []byte, fromPrefix, toPr
 		}
 		for valid && (limit < 0 || int64(len(entries)) < limit) {
 			item := iter.Item()
-			if item.deleted {
-				valid = iter.Prev()
-				continue
-			}
 			if !bytes.Equal(item.k, key) {
 				break
 			}
-			if fromPrefix != nil && bytes.Compare(item.v, fromPrefix) < 0 {
+			if fromPrefix != nil && !item.keyWide() && bytes.Compare(item.v, fromPrefix) < 0 {
 				break
+			}
+			if item.deleted {
+				valid = iter.Prev()
+				continue
 			}
 			entries = append(entries, memEntry{k: bytes.Clone(item.k), v: bytes.Clone(item.v)})
 			valid = iter.Prev()

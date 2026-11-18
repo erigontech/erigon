@@ -1586,3 +1586,17 @@ func TestDeleteExactRemovesPairWrittenInOverlay(t *testing.T) {
 	require.NoError(t, batch.Flush(t.Context(), tx))
 	require.Empty(t, tableRows(t, tx, kv.TblAccountVals))
 }
+
+func TestPutNilAfterDeleteHidesBackingRow(t *testing.T) {
+	_, tx := newTestTx(t)
+	key := []byte("key")
+	require.NoError(t, tx.Put(kv.Headers, key, []byte("old")))
+	batch, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Delete(kv.Headers, key))
+	require.NoError(t, batch.Put(kv.Headers, key, nil))
+	v, err := batch.GetOne(kv.Headers, key)
+	require.NoError(t, err)
+	require.Empty(t, v)
+}
