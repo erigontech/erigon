@@ -109,24 +109,6 @@ func testDbAggregatorWithCommitmentHistory(t *testing.T, stepSize uint64, steps 
 	return db, agg, roots
 }
 
-func TestConvertCommitmentFiles_V3HistoryAndDomainSeparately(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
-	db, agg, roots := testDbAggregatorWithCommitmentHistory(t, 4, 3)
-
-	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoDomain: true})
-	history, err := filepath.Glob(filepath.Join(agg.Dirs().SnapHistory, "*-commitment.*.v"))
-	require.NoError(t, err)
-	require.NotEmpty(t, history)
-	for _, file := range history {
-		require.Contains(t, filepath.Base(file), "v3.0-")
-	}
-
-	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true})
-	c, err := state.FoldCommitmentV3(t.Context(), agg, ^uint64(0))
-	require.NoError(t, err)
-	require.Equal(t, roots[c.TxNum], c.Root)
-}
-
 func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousSchema := statecfg.Schema

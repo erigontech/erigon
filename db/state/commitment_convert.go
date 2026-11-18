@@ -631,15 +631,19 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		logger.Info("[commitment_convert] no commitment files to convert")
 		return nil
 	}
-	if opts.TargetV3 && convertDomain {
+	if opts.TargetV3 {
 		converted := make(map[string]struct{}, len(files))
-		for _, f := range files {
-			converted[filepath.Base(f.Fullpath())] = struct{}{}
+		if convertDomain {
+			for _, f := range files {
+				converted[filepath.Base(f.Fullpath())] = struct{}{}
+			}
 		}
-		for _, f := range at.d[kv.CommitmentDomain].ht.files {
-			converted[filepath.Base(f.Fullpath())] = struct{}{}
+		if convertHistory {
+			for _, f := range at.d[kv.CommitmentDomain].ht.files {
+				converted[filepath.Base(f.Fullpath())] = struct{}{}
+			}
 		}
-		unindexed, err := legacyCommitmentFilesNotConverted(at.Dirs(), converted)
+		unindexed, err := legacyCommitmentFilesNotConverted(at.Dirs(), converted, convertDomain, convertHistory)
 		if err != nil {
 			return err
 		}
@@ -963,9 +967,16 @@ func forEachCommitmentDataFile(dirPath string, fn func(name string, major uint64
 	return nil
 }
 
-func legacyCommitmentFilesNotConverted(dirs datadir.Dirs, converted map[string]struct{}) ([]string, error) {
+func legacyCommitmentFilesNotConverted(dirs datadir.Dirs, converted map[string]struct{}, convertDomain, convertHistory bool) ([]string, error) {
 	var unindexed []string
-	for _, dirPath := range []string{dirs.SnapDomain, dirs.SnapHistory} {
+	paths := make([]string, 0, 2)
+	if convertDomain {
+		paths = append(paths, dirs.SnapDomain)
+	}
+	if convertHistory {
+		paths = append(paths, dirs.SnapHistory)
+	}
+	for _, dirPath := range paths {
 		err := forEachCommitmentDataFile(dirPath, func(name string, _ uint64) error {
 			if _, ok := converted[name]; !ok {
 				unindexed = append(unindexed, filepath.Join(dirPath, name))
