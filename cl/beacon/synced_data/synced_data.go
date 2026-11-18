@@ -146,7 +146,7 @@ func (s *SyncedDataManager) OnOwnedHeadStateWithBlockRoot(newState *state.Cachin
 }
 
 // TakeSpareHeadState removes and returns the state the last head rotation dropped, or nil. The caller owns it and may
-// overwrite it, e.g. with a copy of the next head.
+// overwrite it.
 func (s *SyncedDataManager) TakeSpareHeadState() *state.CachingBeaconState {
 	s.writeLock.Lock()
 	defer s.writeLock.Unlock()

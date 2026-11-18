@@ -86,16 +86,20 @@ func TestGetOwnedStateAtBlockRootCopiesIntoTheGivenState(t *testing.T) {
 	require.NoError(t, err)
 	store := &ForkChoiceStore{forkGraph: graph, totalActiveBalances: totals}
 
+	seededTotal := 2 * clparams.MainnetBeaconConfig.EffectiveBalanceIncrement
+	require.NotEqual(t, expected, seededTotal)
 	for _, seeded := range []bool{false, true} {
+		want := expected
 		if seeded {
-			totals.Add(root, expected)
+			totals.Add(root, seededTotal)
+			want = seededTotal
 		}
 		reuse := state.New(&clparams.MainnetBeaconConfig)
 		copied, err := store.GetOwnedStateAtBlockRoot(root, reuse)
 		require.NoError(t, err)
 		require.Same(t, reuse, copied)
 		require.Equal(t, uint64(42), copied.Slot())
-		require.Equal(t, expected, copied.GetTotalActiveBalance())
+		require.Equal(t, want, copied.GetTotalActiveBalance())
 	}
 }
 
