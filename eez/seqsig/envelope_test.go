@@ -34,18 +34,12 @@ var secp256k1N = uint256.MustFromHex("0xfffffffffffffffffffffffffffffffebaaedce6
 
 func TestVerifyAcceptsSignedHead(t *testing.T) {
 	b := testBlock(7)
-	for name, block := range map[string][]byte{"with block": encodeBlock(t, b), "without block": nil} {
-		v, err := signed(t, headOf(b), block).Verify(domain, common.HexToAddress(signerHex))
-		require.NoError(t, err, name)
-		require.Equal(t, headOf(b), v.Head, name)
-		require.Equal(t, common.HexToAddress(signerHex), v.Signer, name)
-		if block == nil {
-			require.Nil(t, v.Block, name)
-			continue
-		}
-		require.NotNil(t, v.Block, name)
-		require.Equal(t, b.Hash(), v.Block.Hash(), name)
-	}
+	v, err := signed(t, headOf(b), encodeBlock(t, b)).Verify(domain, common.HexToAddress(signerHex))
+	require.NoError(t, err)
+	require.Equal(t, headOf(b), v.Head)
+	require.Equal(t, common.HexToAddress(signerHex), v.Signer)
+	require.NotNil(t, v.Block)
+	require.Equal(t, b.Hash(), v.Block.Hash())
 }
 
 func TestVerifyRejects(t *testing.T) {
@@ -175,6 +169,11 @@ func TestVerifyRejects(t *testing.T) {
 				return e
 			},
 			want: seqsig.ErrBadSignature,
+		},
+		{
+			name: "no block",
+			env:  func() seqsig.Envelope { return signed(t, headOf(b7), nil) },
+			want: seqsig.ErrBlockDecode,
 		},
 		{
 			name: "block of another number",

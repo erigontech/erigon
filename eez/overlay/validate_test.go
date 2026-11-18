@@ -21,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/binary"
+	"sync"
 	"testing"
 
 	"github.com/golang/snappy"
@@ -55,17 +56,42 @@ func key(i byte) *ecdsa.PrivateKey {
 
 func addr(i byte) common.Address { return crypto.PubkeyToAddress(key(i).PublicKey) }
 
-func head(epochMs, counter uint64, hash byte) seqsig.Head {
+// blocks holds the encoding of every block head built, by hash.
+var blocks sync.Map
+
+// head returns the head of block number counter, told apart from its siblings
+// by mark, as counter of signing process epochMs.
+func head(epochMs, counter uint64, mark byte) seqsig.Head {
+	b := types.NewBlock(&types.Header{Number: *uint256.NewInt(counter), ParentHash: common.Hash{0x11}, Extra: []byte{mark}}, nil, nil, nil, nil, nil)
+	enc, err := rlp.EncodeToBytes(b)
+	if err != nil {
+		panic(err)
+	}
+	blocks.Store(b.Hash(), enc)
 	return seqsig.Head{
-		RollupID: testDomain.RollupID, Number: counter, BlockHash: common.Hash{hash},
+		RollupID: testDomain.RollupID, Number: counter, BlockHash: b.Hash(),
 		ParentHash: common.Hash{0x11}, EpochMs: epochMs, Counter: counter,
 	}
 }
 
+// blockOf returns the encoding of the block of a head that head built.
+func blockOf(h seqsig.Head) []byte {
+	enc, ok := blocks.Load(h.BlockHash)
+	if !ok {
+		panic("no block for the head")
+	}
+	return enc.([]byte)
+}
+
+// signed returns h signed by key signer, carrying block, or h's own block
+// when nil.
 func signed(t *testing.T, signer byte, h seqsig.Head, block []byte) seqsig.Envelope {
 	t.Helper()
 	sig, err := seqsig.Sign(h, testDomain, key(signer))
 	require.NoError(t, err)
+	if block == nil {
+		block = blockOf(h)
+	}
 	return seqsig.Envelope{Head: h, Signature: sig, Block: block}
 }
 
@@ -82,7 +108,7 @@ func mustEncode(signer byte, h seqsig.Head) []byte {
 	if err != nil {
 		panic(err)
 	}
-	data, err := seqsig.Encode(seqsig.Envelope{Head: h, Signature: sig})
+	data, err := seqsig.Encode(seqsig.Envelope{Head: h, Signature: sig, Block: blockOf(h)})
 	if err != nil {
 		panic(err)
 	}
@@ -120,6 +146,8 @@ func TestRelayRule(t *testing.T) {
 	trailing, err := snappy.Decode(nil, first)
 	require.NoError(t, err)
 	oversize := binary.AppendUvarint(nil, seqsig.MaxMessageSize+1)
+	bare := signed(t, 0, head(100, 2, 2), nil)
+	bare.Block = nil
 
 	steps := []struct {
 		name string
@@ -138,6 +166,7 @@ func TestRelayRule(t *testing.T) {
 		{"other rollup", encode(t, signed(t, 0, otherRollup, nil)), pubsub.ValidationReject},
 		{"tampered head", encode(t, tampered), pubsub.ValidationReject},
 		{"block not the head's", encode(t, signed(t, 0, head(100, 2, 1), blockEnc)), pubsub.ValidationReject},
+		{"no block", encode(t, bare), pubsub.ValidationReject},
 		{"equivocation", encode(t, signed(t, 0, head(100, 1, 2), nil)), pubsub.ValidationReject},
 		{"next head", encode(t, signed(t, 0, head(100, 2, 2), nil)), pubsub.ValidationAccept},
 		{"restarted signer", encode(t, signed(t, 0, head(200, 1, 3), nil)), pubsub.ValidationAccept},

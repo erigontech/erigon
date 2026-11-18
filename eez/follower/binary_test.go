@@ -61,6 +61,7 @@ import (
 	"github.com/erigontech/erigon/eez/overlay"
 	"github.com/erigontech/erigon/eez/seqsig"
 	seqpkg "github.com/erigontech/erigon/eez/sequencer"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/enode"
 )
@@ -634,9 +635,11 @@ func TestAllInOneBinary(t *testing.T) {
 	go func() {
 		epoch := uint64(time.Now().UnixMilli())
 		for counter := uint64(1); ctx.Err() == nil; counter++ {
-			h := seqsig.Head{RollupID: 1, Number: counter, BlockHash: common.Hash{byte(counter)}, ParentHash: common.Hash{0xff}, EpochMs: epoch, Counter: counter}
-			if sig, err := seqsig.Sign(h, domain, sequencer); err == nil {
-				_ = publisher.Publish(ctx, seqsig.Envelope{Head: h, Signature: sig})
+			b := types.NewBlock(&types.Header{Number: *uint256.NewInt(counter), ParentHash: common.Hash{0xff}}, nil, nil, nil, nil, nil)
+			enc, encErr := rlp.EncodeToBytes(b)
+			h := seqsig.Head{RollupID: 1, Number: counter, BlockHash: b.Hash(), ParentHash: common.Hash{0xff}, EpochMs: epoch, Counter: counter}
+			if sig, err := seqsig.Sign(h, domain, sequencer); err == nil && encErr == nil {
+				_ = publisher.Publish(ctx, seqsig.Envelope{Head: h, Signature: sig, Block: enc})
 			}
 			select {
 			case <-ctx.Done():
