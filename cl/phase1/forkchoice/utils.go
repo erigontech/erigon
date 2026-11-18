@@ -310,7 +310,7 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 				cached = cs.(*checkpointState)
 				return
 			}
-			baseState, current, err = f.copyCurrentStateLocked(checkpoint.Root)
+			baseState, current, err = f.copyCurrentStateLocked(checkpoint.Root, nil)
 		}()
 		if cached != nil || err != nil {
 			return cached, err
@@ -329,7 +329,7 @@ func (f *ForkChoiceStore) getCheckpointStateLocked(checkpoint solid.Checkpoint) 
 	if f.forkGraph == nil {
 		return nil, errors.New("getCheckpointState: forkGraph not initialized")
 	}
-	baseState, current, err := f.copyCurrentStateLocked(checkpoint.Root)
+	baseState, current, err := f.copyCurrentStateLocked(checkpoint.Root, nil)
 	if err != nil {
 		return nil, err
 	}
