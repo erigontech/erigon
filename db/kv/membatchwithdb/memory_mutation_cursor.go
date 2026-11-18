@@ -522,7 +522,7 @@ func (m *memoryMutationCursor) SeekBothExact(key, value []byte) ([]byte, []byte,
 		return nil, nil, err
 	}
 
-	if dbKey != nil && !m.tableDeletions().isDupDeleted(key, value) {
+	if dbKey != nil && !m.isEntryDeleted(key, value) && !m.tableDeletions().isDupDeleted(key, value) {
 		m.currentDbEntry.key = dbKey
 		m.currentDbEntry.value = dbValue
 		m.currentMemEntry.key = key

@@ -1249,32 +1249,44 @@ func TestMemoryMutationConcurrentDeleteDupAndCursorRead(t *testing.T) {
 }
 
 func TestMemoryMutationSeekBothExactCustomDupSort(t *testing.T) {
-	const table = "CustomDupSort"
-	require.NotContains(t, kv.ChaindataTablesCfg, table)
-	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-		return kv.TableCfg{table: {Flags: kv.DupSort}}
-	}).MustOpen()
-	t.Cleanup(db.Close)
-	tx := mdbxtest.BeginRw(t, db)
-	key, deleted, kept := []byte("key"), []byte("deleted"), []byte("kept")
-	require.NoError(t, tx.Put(table, key, deleted))
-	require.NoError(t, tx.Put(table, key, kept))
-	batch, err := membatchwithdb.NewMemoryBatch(nil)
-	require.NoError(t, err)
-	defer batch.Close()
-	writer, err := batch.RwCursorDupSort(table)
-	require.NoError(t, err)
-	defer writer.Close()
-	require.NoError(t, writer.DeleteExact(key, deleted))
-	reader, err := batch.NewReadView(tx).CursorDupSort(table)
-	require.NoError(t, err)
-	defer reader.Close()
-	_, got, err := reader.SeekBothExact(key, deleted)
-	require.NoError(t, err)
-	require.Nil(t, got)
-	_, got, err = reader.SeekBothExact(key, kept)
-	require.NoError(t, err)
-	require.Equal(t, kept, got)
+	for _, deleteKey := range []bool{false, true} {
+		t.Run(fmt.Sprintf("wholeKey=%t", deleteKey), func(t *testing.T) {
+			const table = "CustomDupSort"
+			require.NotContains(t, kv.ChaindataTablesCfg, table)
+			db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+				return kv.TableCfg{table: {Flags: kv.DupSort}}
+			}).MustOpen()
+			t.Cleanup(db.Close)
+			tx := mdbxtest.BeginRw(t, db)
+			key, deleted, kept := []byte("key"), []byte("deleted"), []byte("kept")
+			require.NoError(t, tx.Put(table, key, deleted))
+			require.NoError(t, tx.Put(table, key, kept))
+			batch, err := membatchwithdb.NewMemoryBatch(nil)
+			require.NoError(t, err)
+			defer batch.Close()
+			if deleteKey {
+				require.NoError(t, batch.Delete(table, key))
+			} else {
+				writer, err := batch.RwCursorDupSort(table)
+				require.NoError(t, err)
+				defer writer.Close()
+				require.NoError(t, writer.DeleteExact(key, deleted))
+			}
+			reader, err := batch.NewReadView(tx).CursorDupSort(table)
+			require.NoError(t, err)
+			defer reader.Close()
+			_, got, err := reader.SeekBothExact(key, deleted)
+			require.NoError(t, err)
+			require.Nil(t, got)
+			_, got, err = reader.SeekBothExact(key, kept)
+			require.NoError(t, err)
+			if deleteKey {
+				require.Nil(t, got)
+			} else {
+				require.Equal(t, kept, got)
+			}
+		})
+	}
 }
 
 func TestMemoryMutationDeleteExactKeepsEarlierMarkers(t *testing.T) {
