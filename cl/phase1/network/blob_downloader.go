@@ -55,10 +55,15 @@ const (
 	blobDownloaderInterval      = 12 * time.Second
 	blobLogInterval             = 30 * time.Second
 	blobBackfillWarningInterval = 4 * time.Minute
-	blocksBatchSize             = uint64(8)
-	blobRetryShardBits          = 10
-	maxBlobRetryRanges          = 1 << blobRetryShardBits
-	blobRetryShardShift         = 64 - blobRetryShardBits
+	// PeerDAS batches four blocks per recovery task and has eight workers.
+	blocksBatchSize = uint64(32)
+	// Retry attempts are serial, so keep their per-cycle budget independent of
+	// the larger concurrent scan batch.
+	blobRetryBatchSize    = uint64(8)
+	blobRetryCheckTimeout = time.Second
+	blobRetryShardBits    = 10
+	maxBlobRetryRanges    = 1 << blobRetryShardBits
+	blobRetryShardShift   = 64 - blobRetryShardBits
 	// bounds a fulu block's column recovery; columns past the custody window are
 	// unfetchable and would otherwise block forever.
 	blobColumnBackfillTimeout  = 30 * time.Second
@@ -166,7 +171,7 @@ type BlobHistoryDownloader struct {
 	archiveFromSlot uint64
 	// immediateBlobsBackfilling indicates whether to backfill blobs immediately
 	immediateBlobsBackfilling bool
-	// columnBackfillTimeout bounds each fulu block's PeerDAS column recovery
+	// columnBackfillTimeout bounds one batched Fulu PeerDAS column recovery
 	columnBackfillTimeout time.Duration
 	verifyBlobSidecars    func([]*cltypes.BlobSidecar, clparams.StateVersion, func(*cltypes.SignedBeaconBlockHeader) error) error
 
@@ -634,20 +639,21 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			case <-b.ctx.Done():
 				return b.ctx.Err()
 			case <-logInterval.C:
-				if shouldLog {
-					slotSec := float64(prevLogSlot-currentSlot) / time.Since(prevTime).Seconds()
-					prevLogSlot = currentSlot
-					prevTime = time.Now()
-					progress := 0.0
-					if startSlot > targetSlot {
-						progress = float64(startSlot-currentSlot) / float64(startSlot-targetSlot) * 100
-					}
-					b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards",
-						"slot", currentSlot, "to", targetSlot,
-						"slots/sec", fmt.Sprintf("%.2f", slotSec),
-						"progress", fmt.Sprintf("%.1f%%", progress),
-						"eta", utils.ETA(currentSlot-targetSlot, slotSec))
+				slotSec := float64(prevLogSlot-currentSlot) / time.Since(prevTime).Seconds()
+				prevLogSlot = currentSlot
+				prevTime = time.Now()
+				progressFloor := max(targetSlot, b.sn.FrozenBlobs())
+				progress := 0.0
+				if startSlot > progressFloor {
+					processed := startSlot - min(currentSlot, startSlot)
+					progress = float64(processed) / float64(startSlot-progressFloor) * 100
 				}
+				remaining := currentSlot - min(currentSlot, progressFloor)
+				b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards",
+					"slot", currentSlot, "to", progressFloor,
+					"slots/sec", fmt.Sprintf("%.2f", slotSec),
+					"progress", fmt.Sprintf("%.1f%%", progress),
+					"eta", utils.ETA(remaining, slotSec))
 			default:
 			}
 			if !b.sourcesAvailable() {
@@ -697,8 +703,8 @@ func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor, fuluRetentionF
 	}
 	firstUnfrozenSlot := max(retryFloor, b.sn.FrozenBlobs())
 	b.trimRetryRanges(firstUnfrozenSlot)
-	attemptedSlots := make(map[uint64]struct{}, blocksBatchSize)
-	for range blocksBatchSize {
+	attemptedSlots := make(map[uint64]struct{}, blobRetryBatchSize)
+	for range blobRetryBatchSize {
 		var slot uint64
 		found := false
 		for range len(b.retryRanges) {
@@ -1148,6 +1154,7 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot,
 
 	batch = make([]incompleteBlock, 0, blocksBatchSize)
 	for ; visited < blocksBatchSize; visited++ {
+		targetSlot = max(targetSlot, b.sn.FrozenBlobs())
 		if currentSlot < visited || currentSlot-visited < targetSlot {
 			break
 		}
@@ -1478,15 +1485,17 @@ func (b *denebRecoveryBatch) remaining() *solid.ListSSZ[*cltypes.BlobIdentifier]
 	return remaining
 }
 
-// recoverFuluColumns recovers blobs from PeerDAS columns, bounding each attempt so
-// columns no peer still serves can't block the backfill indefinitely.
+// recoverFuluColumns recovers a batch of blobs from PeerDAS columns. A single
+// PeerDAS call lets its recovery workers process blocks concurrently; the batch
+// timeout bounds the attempt so unavailable historical columns cannot block the
+// backfill indefinitely.
 func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []incompleteBlock) bool {
-	completeBatch := true
+	candidates := make([]incompleteBlock, 0, len(blocks))
 	for i, item := range blocks {
 		block, blockRoot := item.block, item.root
 		commitments := block.GetBlobKzgCommitments()
 		if commitments == nil {
-			b.addRetryBlocks(blocks[i:])
+			b.addRetryBlocks(blocks)
 			b.logger.Warn("[BlobHistoryDownloader] Blob recovery completed without commitments", "slot", block.GetSlot())
 			return false
 		}
@@ -1495,41 +1504,67 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []incompleteBlock) boo
 		}
 		ctx, cancel := context.WithTimeout(b.ctx, b.columnBackfillTimeout)
 		_, complete, err := b.storedBlobSidecarsComplete(ctx, block, blockRoot)
+		cancel()
 		if err != nil {
-			cancel()
-			b.addRetryBlocks(blocks[i:])
+			b.addRetryBlocks(append(candidates, blocks[i:]...))
 			b.logger.Warn("[BlobHistoryDownloader] Failed to read stored blobs", "err", err, "slot", block.GetSlot())
 			return false
 		}
-		if complete {
-			cancel()
-			continue
+		if !complete {
+			candidates = append(candidates, item)
 		}
-		if !b.peersAvailable() {
-			cancel()
-			b.addRetryBlocks(blocks[i:])
-			return false
-		}
-		peerDas := b.peerDasGetter.GetPeerDas()
-		err = peerDas.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{rootedColumnBlock{SignedBeaconBlock: block, root: blockRoot}})
-		if err != nil {
-			cancel()
-			b.addRetryBlocks(blocks[i:])
-			b.logger.Warn("[BlobHistoryDownloader] Error recovering blobs from block", "err", err, "slot", block.GetSlot())
-			return false
-		}
-		stored, complete, err := b.waitForStoredBlobSidecars(ctx, block, blockRoot)
+	}
+	if len(candidates) == 0 {
+		return true
+	}
+	if !b.peersAvailable() {
+		b.addRetryBlocks(candidates)
+		return false
+	}
+
+	columnBlocks := make([]cltypes.ColumnSyncableSignedBlock, 0, len(candidates))
+	for _, item := range candidates {
+		columnBlocks = append(columnBlocks, rootedColumnBlock{SignedBeaconBlock: item.block, root: item.root})
+	}
+	ctx, cancel := context.WithTimeout(b.ctx, b.columnBackfillTimeout)
+	err := b.peerDasGetter.GetPeerDas().DownloadColumnsAndRecoverBlobs(ctx, columnBlocks)
+	if err != nil {
 		cancel()
+		b.addRetryBlocks(candidates)
+		b.logger.Warn("[BlobHistoryDownloader] Error recovering blobs from block batch", "err", err, "slots", blockSlots(candidates))
+		return false
+	}
+
+	completeBatch := true
+	for _, item := range candidates {
+		stored, complete, err := b.waitForStoredBlobSidecars(ctx, item.block, item.root)
+		if err != nil && ctx.Err() != nil && b.ctx.Err() == nil {
+			// Re-check with a fresh context: the shared batch deadline must not
+			// fail a block that is already durable.
+			checkCtx, checkCancel := context.WithTimeout(b.ctx, blobRetryCheckTimeout)
+			stored, complete, err = b.storedBlobSidecarsComplete(checkCtx, item.block, item.root)
+			checkCancel()
+		}
 		if err != nil || !complete {
-			b.addRetrySlot(block.GetSlot())
+			b.addRetrySlot(item.block.GetSlot())
 			completeBatch = false
-			b.logger.Warn("[BlobHistoryDownloader] Blob recovery did not satisfy durable postcondition", "err", err, "slot", block.GetSlot(), "stored", stored, "expected", commitments.Len())
+			b.logger.Warn("[BlobHistoryDownloader] Blob recovery did not satisfy durable postcondition", "err", err, "slot", item.block.GetSlot(), "stored", stored, "expected", item.block.GetBlobKzgCommitments().Len())
 			if b.ctx.Err() != nil {
+				cancel()
 				return false
 			}
 		}
 	}
+	cancel()
 	return completeBatch
+}
+
+func blockSlots(blocks []incompleteBlock) []uint64 {
+	slots := make([]uint64, 0, len(blocks))
+	for _, item := range blocks {
+		slots = append(slots, item.block.GetSlot())
+	}
+	return slots
 }
 
 func (b *BlobHistoryDownloader) waitForStoredBlobSidecars(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash) (uint32, bool, error) {
