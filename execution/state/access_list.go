@@ -33,6 +33,8 @@ type accessList struct {
 	addresses map[accounts.Address]int
 	slots     []map[accounts.StorageKey]struct{}
 	// TXDIFF may warm a slot without warming its address (EIP-7906).
+	// Entries remain here when the address becomes warm; address and slot
+	// warmth are journaled independently.
 	// The length checks avoid extra key hashing when this map is empty.
 	slotsOnly map[frameStorageSlot]struct{}
 

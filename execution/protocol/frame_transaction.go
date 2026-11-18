@@ -221,6 +221,8 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			// Assertions preserve the complete payment-approval frame, including
 			// its state changes after APPROVE returns from a nested call.
 			st.state.RevertToSnapshot(bodySnapshot, frameErr)
+			// Revert removes the snapshot. Clear its reusable ID so deferred
+			// cleanup cannot pop a later snapshot.
 			bodySnapshot = -1
 			for j := bodyStart; j <= i; j++ {
 				ctx.Receipts[j].Logs = nil
