@@ -46,6 +46,7 @@ import (
 var (
 	preExecArm        = dbg.EnvString("V3_PREEXEC", "")
 	preExecCommitment = dbg.EnvBool("V3_PREEXEC_COMMITMENT", false)
+	preExecWorkers    = dbg.EnvInt("V3_PREEXEC_WORKERS", 0)
 )
 
 type preExecCfg struct {
@@ -75,6 +76,9 @@ func (bra *BlockReadAheader) preExecOn(blockNum uint64) bool {
 
 func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header *types.Header, txns types.Transactions, workers int) error {
 	pe := bra.preExec
+	if preExecWorkers > 0 {
+		workers = preExecWorkers
+	}
 	start := time.Now()
 	signer := types.MakeSigner(pe.config, header.Number.Uint64(), header.Time)
 	var next, paths atomic.Int64
