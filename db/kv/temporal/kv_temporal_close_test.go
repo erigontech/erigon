@@ -1,6 +1,7 @@
 package temporal
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 )
 
-// Close must not release state files while a temporal tx that reads them is still open.
+// Close, also from two callers at once, must not release state files while a temporal tx that reads them is still open.
 func TestTemporalDB_CloseKeepsFilesOfOpenTx(t *testing.T) {
 	ctx := t.Context()
 	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
@@ -48,11 +49,10 @@ func TestTemporalDB_CloseKeepsFilesOfOpenTx(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte{1}, v)
 
-	closed := make(chan struct{})
-	go func() {
-		defer close(closed)
-		db.Close()
-	}()
+	var closers sync.WaitGroup
+	for range 2 {
+		closers.Go(db.Close)
+	}
 	// MDBX refuses new txs only once Close has reached it.
 	require.Eventually(t, func() bool {
 		tx, beginErr := mdbxDb.BeginRo(ctx) //nolint:gocritic
@@ -68,5 +68,5 @@ func TestTemporalDB_CloseKeepsFilesOfOpenTx(t *testing.T) {
 	require.Equal(t, []byte{1}, v)
 
 	roTx.Rollback()
-	<-closed
+	closers.Wait()
 }
