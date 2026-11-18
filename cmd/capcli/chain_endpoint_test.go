@@ -316,11 +316,12 @@ func runSepoliaWalk(t *testing.T, datadirPath, url string) error {
 
 func TestChainEndpointRunWalksPastASkippedGloasPayload(t *testing.T) {
 	for name, tc := range map[string]struct {
-		local, stored bool
+		local, stored, headIsChild bool
 	}{
-		"served":               {},
-		"local without blobs":  {local: true},
-		"local with its blobs": {local: true, stored: true},
+		"served":                {},
+		"served under the head": {headIsChild: true},
+		"local without blobs":   {local: true},
+		"local with its blobs":  {local: true, stored: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(networkname.Sepolia)
@@ -334,6 +335,9 @@ func TestChainEndpointRunWalksPastASkippedGloasPayload(t *testing.T) {
 			datadirPath := t.TempDir()
 			dirs := datadir.New(datadirPath)
 			served := []*cltypes.SignedBeaconBlock{head, child}
+			if tc.headIsChild {
+				served = served[1:]
+			}
 			if tc.local {
 				writeLocalBlocks(t, dirs, skipped)
 			} else {
