@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"maps"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -148,8 +149,7 @@ func TestAPI(t *testing.T) {
 
 	api := eezrpc.NewAPI()
 	server := erigonrpc.NewServer(1, false, false, true, log.New(), 0)
-	reg := api.API()
-	require.NoError(t, server.RegisterName(reg.Namespace, reg.Service))
+	require.NoError(t, server.RegisterAPI(api.API()))
 	t.Cleanup(server.Stop)
 	hs := httptest.NewServer(server)
 	t.Cleanup(hs.Close)
@@ -193,8 +193,7 @@ func TestAPI(t *testing.T) {
 func serve(t *testing.T, api *eezrpc.API) *erigonrpc.Client {
 	t.Helper()
 	server := erigonrpc.NewServer(1, false, false, true, log.New(), 0)
-	reg := api.API()
-	require.NoError(t, server.RegisterName(reg.Namespace, reg.Service))
+	require.NoError(t, server.RegisterAPI(api.API()))
 	t.Cleanup(server.Stop)
 	hs := httptest.NewServer(server)
 	t.Cleanup(hs.Close)
@@ -340,6 +339,49 @@ func TestUnsafeBlockAnnouncement(t *testing.T) {
 	require.Equal(t, `"0x0102"`, announcement(1))
 	require.Equal(t, "null", announcement(2), "another block's")
 	require.Equal(t, "null", announcement(3), "no block")
+}
+
+// TestSettersNotServed: the methods that attach what the API reports on are
+// not served, so a caller cannot detach the announcement store.
+func TestSettersNotServed(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	b := c.Compose(nil, derivertest.Block{Coinbase: common.Address{1}, Extra: []byte{}, Txs: [][]byte{}})
+	c.Post(derivertest.Posting{Batch: b})
+	_, chain := derivertest.NewL2(t)
+	cfg := follower.DefaultConfig
+	cfg.Dir = t.TempDir()
+	f, err := follower.New(c.L1, chain, derivertest.Config(), cfg, log.New())
+	require.NoError(t, err)
+	require.NoError(t, f.Boot(t.Context()))
+	st, err := announce.Open(t.Context(), t.TempDir(), log.New())
+	require.NoError(t, err)
+	defer st.Close()
+	require.NoError(t, st.Put(t.Context(), 1, b.Blocks[0].Hash(), []byte{1}))
+
+	api := eezrpc.NewAPI()
+	api.Attach(f)
+	api.AttachAnnouncements(st)
+	client := serve(t, api)
+	for _, method := range []string{"eez_attach", "eez_attachSequencer", "eez_attachWitnesses", "eez_attachAnnouncements", "eez_aPI"} {
+		var rerr erigonrpc.Error
+		require.ErrorAs(t, client.CallContext(t.Context(), nil, method, nil), &rerr, method)
+		require.Equal(t, -32601, rerr.ErrorCode(), method)
+	}
+	var raw json.RawMessage
+	require.NoError(t, client.CallContext(t.Context(), &raw, "eez_getUnsafeBlockAnnouncement", hexutil.Uint64(1)))
+	require.Equal(t, `"0x01"`, string(raw), "still attached")
+}
+
+// TestServedMethods: every exported method of API is served, but those that
+// attach what it reports on.
+func TestServedMethods(t *testing.T) {
+	iface := eezrpc.NewAPI().API().Iface
+	require.NotNil(t, iface)
+	setters := []string{"API", "Attach", "AttachAnnouncements", "AttachSequencer", "AttachWitnesses"}
+	for m := range reflect.TypeFor[*eezrpc.API]().Methods() {
+		_, served := iface.MethodByName(m.Name)
+		require.Equal(t, !slices.Contains(setters, m.Name), served, m.Name)
+	}
 }
 
 type noTxns struct{}

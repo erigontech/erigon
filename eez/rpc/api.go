@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sync"
 	"sync/atomic"
 
@@ -98,9 +99,20 @@ func (a *API) AttachWitnesses(s *witness.Store) { a.witnesses.Store(s) }
 // AttachAnnouncements makes the API serve the announcements of s.
 func (a *API) AttachAnnouncements(s *announce.Store) { a.announcements.Store(s) }
 
+// served declares the methods of the namespace; the setters above stay off
+// the wire.
+type served interface {
+	FollowerStatus(context.Context) (*FollowerStatus, error)
+	Settlement(context.Context, hexutil.Uint64) (*Settlement, error)
+	SequencerStatus(context.Context) (*SequencerStatus, error)
+	ExecutionWitnessByNumber(context.Context, hexutil.Uint64) (json.RawMessage, error)
+	GetUnsafeBlockAnnouncement(context.Context, hexutil.Uint64) (*hexutil.Bytes, error)
+	DecodeBatch(context.Context, hexutil.Bytes) (*Batch, error)
+}
+
 // API returns the RPC registration of a.
 func (a *API) API() erigonrpc.API {
-	return erigonrpc.API{Namespace: Namespace, Version: "1.0", Service: a, Public: true}
+	return erigonrpc.API{Namespace: Namespace, Version: "1.0", Service: a, Public: true, Iface: reflect.TypeFor[served]()}
 }
 
 // Settlement is a batch settlement on L1 and the L2 block it ended at.
