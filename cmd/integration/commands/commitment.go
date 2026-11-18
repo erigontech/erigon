@@ -557,6 +557,8 @@ mid-run crash discards any in-progress work in snap/rebuild/domain/ and
 Phase 1 restarts from scratch. --continue is mutually exclusive with
 --restore.
 
+For --v3, --no-domain skips domain files and --no-history skips history files.
+
 Examples:
   integration commitment convert --datadir /path/to/datadir --chain mainnet
   integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true
@@ -573,6 +575,9 @@ Examples:
 		if convertV3 && (convertRestore || cmd.Flags().Changed("squeeze") || cmd.Flags().Changed("nibbles.v2")) {
 			return errors.New("--v3 is mutually exclusive with --restore/--squeeze/--nibbles.v2")
 		}
+		if !convertV3 && (convertNoDomain || convertNoHistory) {
+			return errors.New("--no-domain and --no-history require --v3")
+		}
 		if convertRestore && convertContinue {
 			return errors.New("--continue is mutually exclusive with --restore")
 		}
@@ -582,13 +587,9 @@ Examples:
 		if convertRestore {
 			return commitmentRestore(ctx, logger)
 		}
-		if convertV3 {
-			legacyHistory, err := filepath.Glob(filepath.Join(datadir.New(datadirCli).SnapHistory, "*-commitment.*.v"))
-			if err != nil {
-				return fmt.Errorf("listing commitment history: %w", err)
-			}
-			if len(legacyHistory) > 0 {
-				statecfg.EnableHistoricalCommitment()
+		if convertV3 && !convertNoHistory {
+			if err := enableCommitmentConvertHistory(ctx, logger); err != nil {
+				return err
 			}
 		}
 
@@ -603,6 +604,8 @@ Examples:
 			TargetNibblesV2: convertNibblesV2,
 			Continue:        convertContinue,
 			TargetV3:        convertV3,
+			NoDomain:        convertNoDomain,
+			NoHistory:       convertNoHistory,
 		}
 		return commitmentConvert(db, cmd.Context(), logger, opts)
 	},
@@ -615,6 +618,24 @@ func commitmentRestore(ctx context.Context, logger log.Logger) error {
 	}
 	logger.Info("Commitment files restored. Next step: integration stage_exec --reset")
 	return nil
+}
+
+func enableCommitmentConvertHistory(ctx context.Context, logger log.Logger) error {
+	db, err := openRawDB(dbCfg(dbcfg.ChainDB, chaindata), false, logger)
+	if err != nil {
+		return fmt.Errorf("opening DB to read commitment history setting: %w", err)
+	}
+	defer db.Close()
+	return db.View(ctx, func(tx kv.Tx) error {
+		enabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		if err != nil {
+			return fmt.Errorf("reading commitment history setting: %w", err)
+		}
+		if enabled {
+			statecfg.EnableHistoricalCommitment()
+		}
+		return nil
+	})
 }
 
 func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {

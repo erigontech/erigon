@@ -96,6 +96,64 @@ func TestCommitmentVerifyRejectsAsOfWithoutHistory(t *testing.T) {
 	require.ErrorContains(t, commitmentVerify(t.Context(), log.New()), "history is disabled")
 }
 
+func TestCommitmentConvertV3HistoryThenDomainFreshOpens(t *testing.T) {
+	previousSchema := statecfg.Schema
+	previousExperimental := statecfg.ExperimentalCommitmentV3
+	previousDatadir, previousChaindata, previousVerifyAsOf := datadirCli, chaindata, verifyAsOf
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+		statecfg.ExperimentalCommitmentV3 = previousExperimental
+		datadirCli, chaindata, verifyAsOf = previousDatadir, previousChaindata, previousVerifyAsOf
+		convertSqueeze, convertNibblesV2, convertRestore, convertContinue, convertV3, convertNoDomain, convertNoHistory = false, false, false, false, false, false, false
+		for _, name := range []string{"squeeze", "nibbles.v2", "restore", "continue", "v3", "no-domain", "no-history"} {
+			cmdCommitmentConvert.Flags().Lookup(name).Changed = false
+		}
+	})
+	restoreLegacy := statecfg.SetCommitmentV3(false)
+	t.Cleanup(restoreLegacy)
+	statecfg.EnableHistoricalCommitment()
+	db, dirs, _ := dbWithState(t, true)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	db.Close()
+	chaindata = ""
+	openSnapshotOnce = sync.Once{}
+
+	root := integrationRoot()
+	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", dirs.DataDir, "--chain", "mainnet", "--v3", "--no-domain"})
+	require.NoError(t, root.ExecuteContext(t.Context()))
+
+	statecfg.Schema = previousSchema
+	statecfg.ExperimentalCommitmentV3 = false
+	openSnapshotOnce = sync.Once{}
+	convertNoDomain, convertNoHistory = false, false
+	cmdCommitmentConvert.Flags().Lookup("no-domain").Changed = false
+	cmdCommitmentConvert.Flags().Lookup("no-history").Changed = false
+	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", dirs.DataDir, "--chain", "mainnet", "--v3", "--no-history"})
+	require.NoError(t, root.ExecuteContext(t.Context()))
+
+	for _, pattern := range []struct {
+		dir, glob string
+	}{
+		{dirs.SnapDomain, "*-commitment.*.kv"},
+		{dirs.SnapHistory, "*-commitment.*.v"},
+	} {
+		files, err := filepath.Glob(filepath.Join(pattern.dir, pattern.glob))
+		require.NoError(t, err)
+		require.NotEmpty(t, files)
+		for _, file := range files {
+			require.Contains(t, filepath.Base(file), "v3.0-")
+		}
+	}
+
+	restoreV3 := statecfg.SetCommitmentV3(true)
+	t.Cleanup(restoreV3)
+	datadirCli, chaindata, verifyAsOf = dirs.DataDir, dirs.Chaindata, nil
+	openSnapshotOnce = sync.Once{}
+	require.NoError(t, commitmentVerify(t.Context(), log.New()))
+}
+
 func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(true))
 	statecfg.EnableHistoricalCommitment()

@@ -304,6 +304,10 @@ func TestConvertCommitmentFiles_V3HistoryRefusesPrunedStart(t *testing.T) {
 	require.ErrorContains(t, err, "commitment history below step")
 	require.ErrorContains(t, err, "no commitment file was replaced; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes --no-history` with ERIGON_COMMITMENT_V3=true")
 	require.NoDirExists(t, filepath.Join(dirs.Snap, "backup"))
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true})
+	_, err = state.FoldCommitmentV3(t.Context(), agg, ^uint64(0))
+	require.NoError(t, err)
 }
 
 type commitmentHistoryPair struct {
