@@ -178,6 +178,29 @@ func (s *memStore) tombstones(table string) (cleared bool, rows []entry) {
 	return t.cleared, rows
 }
 
+// hasTombstone reports whether table holds a tombstone with fromKey <= k < toKey;
+// nil bounds are open.
+func (s *memStore) hasTombstone(table string, fromKey, toKey []byte) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.tables[table]
+	if !ok {
+		return false
+	}
+	iter := t.tree.Iter()
+	defer iter.Release()
+	for valid := iter.Seek(memEntry{k: fromKey, deleted: true}); valid; valid = iter.Next() {
+		item := iter.Item()
+		if toKey != nil && bytes.Compare(item.k, toKey) >= 0 {
+			return false
+		}
+		if item.deleted {
+			return true
+		}
+	}
+	return false
+}
+
 // deleteExact replaces the (k, v) pair of a DupSort table, or the key of a
 // plain table, with a tombstone. Must be called with mu held.
 func (t *memTable) deleteExact(k, v []byte) {

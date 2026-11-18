@@ -291,7 +291,15 @@ func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc or
 	if m.readTx != nil && !m.memTx.isCleared(table) {
 		// Hidden rows don't count against limit, so the db side must be free to
 		// look past them; the merge below still stops at limit.
-		if s.iterDb, err = m.readTx.Range(table, fromPrefix, toPrefix, asc, kv.Unlim); err != nil {
+		fromKey, toKey := fromPrefix, toPrefix
+		if !asc { // the db and the overlay read descending bounds differently
+			fromKey, toKey = nil, nil
+		}
+		dbLimit := kv.Unlim
+		if limit >= 0 && !m.memTx.hasTombstone(table, fromKey, toKey) {
+			dbLimit = limit
+		}
+		if s.iterDb, err = m.readTx.Range(table, fromPrefix, toPrefix, asc, dbLimit); err != nil {
 			s.Close()
 			return nil, err
 		}
@@ -398,7 +406,11 @@ func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPr
 	s := &rangeDupSortIter{key: key, orderAscend: bool(asc), limit: int64(limit)}
 	var err error
 	if m.readTx != nil && !m.memTx.isHidden(table, key, nil) {
-		if s.iterDb, err = m.readTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, kv.Unlim); err != nil {
+		dbLimit := kv.Unlim
+		if nextKey, _ := kv.NextSubtree(key); limit >= 0 && !m.memTx.hasTombstone(table, key, nextKey) {
+			dbLimit = limit
+		}
+		if s.iterDb, err = m.readTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, dbLimit); err != nil {
 			s.Close()
 			return nil, err
 		}

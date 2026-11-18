@@ -388,3 +388,69 @@ func TestCursorLastKeepsEmptyValueOnNestedBatch(t *testing.T) {
 	require.NotNil(t, v)
 	require.Empty(t, v)
 }
+
+type rangeLimitSpy struct {
+	kv.TemporalTx
+	limits []int
+}
+
+func (s *rangeLimitSpy) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
+	s.limits = append(s.limits, limit)
+	return s.TemporalTx.Range(table, fromPrefix, toPrefix, asc, limit)
+}
+
+func (s *rangeLimitSpy) RangeDupSort(table string, key, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
+	s.limits = append(s.limits, limit)
+	return s.TemporalTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit)
+}
+
+func newChildOverSpy(tb testing.TB, parent *membatchwithdb.MemoryMutation) (*membatchwithdb.MemoryMutation, *rangeLimitSpy) {
+	tb.Helper()
+	spy := &rangeLimitSpy{TemporalTx: parent}
+	child, err := membatchwithdb.NewMemoryBatch(spy)
+	require.NoError(tb, err)
+	tb.Cleanup(child.Close)
+	return child, spy
+}
+
+// The db side may stop at limit only while no tombstone in range can hide its rows.
+func TestNestedRangePushesLimitDown(t *testing.T) {
+	child, spy := newChildOverSpy(t, newBatchOverDbNonDupSort(t))
+	require.NoError(t, child.Put(kv.HeaderNumber, []byte("ZZZZ"), []byte("child")))
+	require.NoError(t, child.Delete(kv.HeaderNumber, []byte("AAAA")))
+
+	it, err := child.Range(kv.HeaderNumber, []byte("C"), nil, order.Asc, 1)
+	require.NoError(t, err)
+	keys, _ := collectStream(t, it)
+	require.Equal(t, []string{"CAAA"}, keys)
+	require.Equal(t, []int{1}, spy.limits)
+
+	spy.limits = nil
+	it, err = child.Range(kv.HeaderNumber, nil, nil, order.Asc, 1)
+	require.NoError(t, err)
+	keys, _ = collectStream(t, it)
+	require.Equal(t, []string{"CAAA"}, keys)
+	require.Equal(t, []int{kv.Unlim}, spy.limits)
+}
+
+func TestNestedRangeDupSortPushesLimitDown(t *testing.T) {
+	child, spy := newChildOverSpy(t, newBatchOverDbDupSort(t))
+	require.NoError(t, child.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.2")))
+	c, err := child.RwCursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer c.Close()
+	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.1")))
+
+	it, err := child.RangeDupSort(kv.TblAccountVals, []byte("key1"), nil, nil, order.Asc, 1)
+	require.NoError(t, err)
+	_, values := collectStream(t, it)
+	require.Equal(t, []string{"value1.1"}, values)
+	require.Equal(t, []int{1}, spy.limits)
+
+	spy.limits = nil
+	it, err = child.RangeDupSort(kv.TblAccountVals, []byte("key3"), nil, nil, order.Asc, 1)
+	require.NoError(t, err)
+	_, values = collectStream(t, it)
+	require.Equal(t, []string{"value3.3"}, values)
+	require.Equal(t, []int{kv.Unlim}, spy.limits)
+}
