@@ -76,15 +76,3 @@ func (rh *ReconHeap) Pop() any {
 	*rh = old[0 : n-1]
 	return x
 }
-
-type ReconHeapOlderFirst struct {
-	ReconHeap
-}
-
-func (rh ReconHeapOlderFirst) Less(i, j int) bool {
-	c := bytes.Compare(rh.ReconHeap[i].key, rh.ReconHeap[j].key)
-	if c == 0 {
-		return rh.ReconHeap[i].txNum >= rh.ReconHeap[j].txNum
-	}
-	return c < 0
-}

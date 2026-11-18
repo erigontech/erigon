@@ -24,10 +24,72 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
+
+func TestStepAlignedEndRefusesUnindexedTail(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	for _, path := range []string{
+		"domain/v1.0-accounts.6-8.bt",
+		"accessor/v2.0-accounts.6-8.vi",
+		"accessor/v1.0-accounts.6-8.efi",
+		"accessor/v1.0-logaddrs.6-8.efi",
+	} {
+		t.Run(path, func(t *testing.T) {
+			db, agg := testDbAndAggregatorv3(t, 10)
+			ranges := []testFileRange{{0, 2}, {2, 4}, {4, 6}, {6, 8}}
+			if !strings.Contains(path, "logaddrs") {
+				generateStateFiles(t, agg.Dirs(), ranges)
+				generateCommitmentFile(t, agg.Dirs(), ranges)
+			}
+			generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+			require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().Snap, filepath.FromSlash(path))))
+			require.NoError(t, agg.OpenFolder(db))
+			_, err := agg.StepAlignedEnd(20)
+			require.ErrorContains(t, err, "accessor")
+		})
+	}
+}
+
+func TestStepAlignedEndAllowsCoveredUnindexedMerge(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), []testFileRange{{0, 2}, {2, 4}, {0, 4}})
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v1.0-logaddrs.0-4.efi")))
+	require.NoError(t, agg.OpenFolder(db))
+	end, err := agg.StepAlignedEnd(20)
+	require.NoError(t, err)
+	require.EqualValues(t, 40, end)
+}
+
+func TestStepAlignedEndAllowsUnindexedFileUnderIndexedMerge(t *testing.T) {
+	t.Parallel()
+	db, agg := testDbAndAggregatorv3(t, 10)
+	generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), []testFileRange{{0, 2}, {2, 4}, {0, 4}})
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v1.0-logaddrs.0-2.efi")))
+	require.NoError(t, agg.OpenFolder(db))
+	end, err := agg.StepAlignedEnd(20)
+	require.NoError(t, err)
+	require.EqualValues(t, 40, end)
+}
+
+// Indexed files cover an unindexed one only while they are visible: index 0-2 is hidden because history 0-2 has
+// no accessor, so index 0-4 without its accessor is not covered.
+func TestStepAlignedEndRefusesUnindexedFileUnderHiddenMerge(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, 10)
+	ranges := []testFileRange{{0, 2}, {2, 4}, {0, 4}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v1.0-accounts.0-4.efi")))
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v2.0-accounts.0-2.vi")))
+	require.NoError(t, agg.OpenFolder(db))
+	_, err := agg.StepAlignedEnd(20)
+	require.ErrorContains(t, err, "is not indexed")
+}
 
 func TestStepAlignedEndRefusesListStartingOffBoundary(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
@@ -55,7 +117,7 @@ func TestStepAlignedEndRefusesHiddenFiles(t *testing.T) {
 	generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 4}, {4, 8}, {8, 12}})
 	require.NoError(t, agg.OpenFolder(db))
 	_, err := agg.StepAlignedEnd(30)
-	require.ErrorContains(t, err, "no visible file for txNum 40-80")
+	require.ErrorContains(t, err, "not readable past txNum 40")
 }
 
 func TestAlignFilesToStepSizeRefusesCommitmentRangeMismatch(t *testing.T) {

@@ -55,13 +55,8 @@ import (
 func testDbAggregatorWithCommitmentHistory(t *testing.T, stepSize uint64, steps int) (kv.TemporalRwDB, *state.Aggregator, map[uint64][]byte) {
 	t.Helper()
 	previousSchema := statecfg.Schema
-	previousParallel := statecfg.ExperimentalParallelCommitment
 	statecfg.EnableHistoricalCommitment()
-	statecfg.ExperimentalParallelCommitment = true
-	t.Cleanup(func() {
-		statecfg.Schema = previousSchema
-		statecfg.ExperimentalParallelCommitment = previousParallel
-	})
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
@@ -670,13 +665,8 @@ func TestConvertCommitmentFiles_V3HistoryStaleStorageBranchOfRecreatedAccount(t 
 func TestConvertCommitmentFiles_V3HistorySerialRecreatedAccountRefusesBeforeSwap(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousSchema := statecfg.Schema
-	previousParallel := statecfg.ExperimentalParallelCommitment
 	statecfg.EnableHistoricalCommitment()
-	statecfg.ExperimentalParallelCommitment = false
-	t.Cleanup(func() {
-		statecfg.Schema = previousSchema
-		statecfg.ExperimentalParallelCommitment = previousParallel
-	})
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	db, agg, _ := buildRecreatedOwnerFilesWithParallel(t, 4, 3, 4, true, false)
 	beforeDomain := snapshotCommitmentFiles(t, agg.Dirs().SnapDomain)

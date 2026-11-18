@@ -425,6 +425,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
+	// a state file missing its accessor is excluded from the visible set, so E3 accessors
+	// must be rebuilt before execution and before RPCDaemon reopens files — there is no background rebuild path
+	if err := cfg.db.Debug().BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil {
+		return err
+	}
+
 	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
 	// hashes next time.
 	err = downloadercfg.SaveSnapshotHashes(cfg.dirs, cfg.chainConfig.ChainName)
@@ -443,12 +449,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if err := buildOrDeferE2Indices(ctx, s, cfg, headersProgress); err != nil {
-		return err
-	}
-
-	// a state file missing its accessor is excluded from the visible set, so E3 accessors
-	// must be rebuilt before execution — there is no background rebuild path
-	if err := cfg.db.Debug().BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil {
 		return err
 	}
 
@@ -484,16 +484,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// Plain assignment: the deferred stopReporter reads this variable, and a
 	// := here would shadow it and silently disable the handoff pin.
 	commitBlock = readCommitmentBlockFromDB(ctx, cfg.db)
-	if commitBlock > 0 {
-		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
-		if err != nil {
-			return fmt.Errorf("get Execution stage progress: %w", err)
-		}
-		if execProgress < commitBlock {
-			if err := stages.SaveStageProgress(tx, stages.Execution, commitBlock); err != nil {
-				return fmt.Errorf("advance Execution stage to snapshot commitment block: %w", err)
-			}
-		}
+	if err := cfg.advanceExecutionToSnapshot(tx, commitBlock); err != nil {
+		return err
 	}
 
 	{
@@ -506,6 +498,25 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		})
 	}
 
+	return nil
+}
+
+func (me *SnapshotsCfg) advanceExecutionToSnapshot(tx kv.RwTx, commitBlock uint64) error {
+	if commitBlock == 0 {
+		return nil
+	}
+	execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return fmt.Errorf("get Execution stage progress: %w", err)
+	}
+	if execProgress >= commitBlock {
+		return nil
+	}
+	if err := stages.SaveStageProgress(tx, stages.Execution, commitBlock); err != nil {
+		return fmt.Errorf("advance Execution stage to snapshot commitment block: %w", err)
+	}
+	// Installing snapshot state bypasses execution and its change notifications.
+	me.notifier.Accumulator.MarkIncomplete()
 	return nil
 }
 
@@ -540,7 +551,7 @@ func firstNonGenesisCheck(tx kv.RwTx, snapshots dbservices.BlockSnapshots, logPr
 	return nil
 }
 
-func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservices.FullBlockReader) error {
+func pruneCanonicalMarkers(tx kv.RwTx, blockReader dbservices.FullBlockReader) error {
 	pruneThreshold := rawdbreset.GetPruneMarkerSafeThreshold(blockReader)
 	if pruneThreshold == 0 {
 		return nil
@@ -622,7 +633,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
 		return err
 	}
-	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
+	if err := pruneCanonicalMarkers(tx, cfg.blockReader); err != nil {
 		return err
 	}
 	return nil

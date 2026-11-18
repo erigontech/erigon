@@ -139,7 +139,7 @@ jobs:
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
         run: |
           set -euo pipefail
-          BYTES=$("$GITHUB_WORKSPACE/build/bin/erigon" seg du --datadir "$ERIGON_DATA_DIR" --json \
+          BYTES=$(env -u ERIGON_ASSERT "$GITHUB_WORKSPACE/build/bin/erigon" seg du --datadir "$ERIGON_DATA_DIR" --json \
             | python3 -c 'import json, sys; print(next(e["total_bytes"] for e in json.load(sys.stdin)["estimates"] if e["mode"] == sys.argv[1]))' minimal)
           echo "Disk usage for $CHAIN minimal: ${BYTES} bytes"
           echo "$BYTES" > "$GITHUB_WORKSPACE/disk-usage-$CHAIN-minimal.txt"

@@ -168,9 +168,9 @@ func TestContiguityGuard_ChainNeverRecovers(t *testing.T) {
 		firstBlockNum: 5,
 		perBlockFrom:  1 << 62,
 		// Block 5 computed ahead, block 6 had no BAL and never advanced the domain.
-		hasComputedAhead:       true,
-		lastComputedAheadBlock: 5,
-		hasSeenBlockResult:     true,
+		hasComputed:        true,
+		lastComputedBlock:  5,
+		hasSeenBlockResult: true,
 	}
 
 	for n := uint64(7); n <= 12; n++ {
@@ -182,7 +182,7 @@ func TestContiguityGuard_ChainNeverRecovers(t *testing.T) {
 		cc.maybeComputeAhead(ctx, n)
 		assert.False(t, cc.computedAhead[n], "block %d must not compute ahead across the gap at block 6", n)
 	}
-	assert.Equal(t, uint64(5), cc.lastComputedAheadBlock, "the chain must stay anchored at block 5")
+	assert.Equal(t, uint64(5), cc.lastComputedBlock, "the chain must stay anchored at block 5")
 }
 
 // TestComputeAheadCap_StopsComputeAhead pins the orphan guard: once the shared

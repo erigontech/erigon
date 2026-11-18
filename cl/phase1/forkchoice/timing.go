@@ -53,27 +53,10 @@ func (f *ForkChoiceStore) getContributionDueMs(epoch uint64) uint64 {
 	return f.beaconCfg.BpsToMs(bps)
 }
 
-// getPayloadAttestationDueMs returns the PTC payload attestation deadline in milliseconds.
-// [New in Gloas:EIP7732] This deadline only exists post-GLOAS (75% of slot = 9000 ms on mainnet).
-// Callers should only invoke this for post-GLOAS epochs; the returned value is well-defined
-// regardless, but meaningless pre-GLOAS since PTC duties do not exist before GLOAS.
-func (f *ForkChoiceStore) getPayloadAttestationDueMs(_ uint64) uint64 {
+// getPayloadAttestationDueMs returns the configured PTC payload attestation
+// deadline in milliseconds from slot start. PTC duties exist only from Gloas onward.
+func (f *ForkChoiceStore) getPayloadAttestationDueMs() uint64 {
 	return f.beaconCfg.PayloadAttestationDueMs()
-}
-
-// shouldApplyProposerBoost returns whether a block arriving at the current store time
-// is timely enough to receive the proposer boost (i.e. arrived before the attestation deadline).
-//
-// This is equivalent to checking block_timeliness[ATTESTATION_TIMELINESS_INDEX] at the
-// current store time. It is NOT the same as WeightStore.ShouldApplyProposerBoost(),
-// which implements the spec's should_apply_proposer_boost for weight calculation
-// (GLOAS: complex logic with equivocation checks; pre-GLOAS: checks proposer_boost_root != zero).
-func (f *ForkChoiceStore) shouldApplyProposerBoost() bool {
-	timeMs := f.timeMs.Load()
-	timeIntoSlotMs := (timeMs - utils.SecondsToMilliseconds(f.genesisTime)) % (f.beaconCfg.SecondsPerSlot * 1000)
-	epoch := f.computeEpochAtSlot(f.slotAtTimeMs(timeMs))
-	attestationDueMs := f.getAttestationDueMs(epoch)
-	return timeIntoSlotMs < attestationDueMs
 }
 
 // recordBlockTimeliness implements record_block_timeliness from the spec.
@@ -91,8 +74,8 @@ func (f *ForkChoiceStore) shouldApplyProposerBoost() bool {
 // Post-GLOAS: stores [block_timely, block_before_ptc_deadline] in blockTimeliness.
 //
 // NOTE: Both elements are time-based checks on when the *block* was received.
-// PTC_TIMELINESS_INDEX records whether the block arrived before the PTC deadline
-// (75% of slot), NOT whether the PTC has voted the payload present.
+// PTC_TIMELINESS_INDEX records whether the block arrived before the configured PTC
+// deadline, not whether the PTC has voted the payload present.
 func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, blockRoot common.Hash, timeMs uint64) uint64 {
 	var timeliness [clparams.NumBlockTimelinessDeadlines]bool
 	currentSlot := f.slotAtTimeMs(timeMs)
@@ -101,7 +84,7 @@ func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, bloc
 		timeIntoSlotMs := (timeMs - utils.SecondsToMilliseconds(f.genesisTime)) % (f.beaconCfg.SecondsPerSlot * 1000)
 		timeliness[clparams.AttestationTimelinessIndex] = timeIntoSlotMs < f.getAttestationDueMs(epoch)
 		if epoch >= f.beaconCfg.GloasForkEpoch {
-			timeliness[clparams.PtcTimelinessIndex] = timeIntoSlotMs < f.getPayloadAttestationDueMs(epoch)
+			timeliness[clparams.PtcTimelinessIndex] = timeIntoSlotMs < f.getPayloadAttestationDueMs()
 		}
 	}
 
@@ -223,19 +206,6 @@ func (f *ForkChoiceStore) shouldApplyProposerBoostGloasWith(proposerBoostRoot co
 		return true
 	})
 	return !hasEquivocation
-}
-
-// isHeadLate returns true if the head block was not received on time.
-// Uses the block_timely element (index 0) of the timeliness vector.
-// [New in Gloas:EIP7732] Updated to use the two-element timeliness vector.
-func (f *ForkChoiceStore) isHeadLate(root common.Hash) bool {
-	raw, ok := f.blockTimeliness.Load(root)
-	if !ok {
-		// Unknown block — treat as late (conservative)
-		return true
-	}
-	timeliness := raw.([clparams.NumBlockTimelinessDeadlines]bool)
-	return !timeliness[clparams.AttestationTimelinessIndex]
 }
 
 // isHeadWeak returns true if the head block has insufficient attestation support

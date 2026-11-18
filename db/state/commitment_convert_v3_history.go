@@ -1227,7 +1227,7 @@ func commitmentV3HistorySamples(a *Aggregator) ([]uint64, error) {
 		if len(txNums) == 0 {
 			return nil, fmt.Errorf("commitment history %s has no state entries", f.src.decompressor.FileName())
 		}
-		samples = append(samples, txNums[len(txNums)/2]+1, txNums[len(txNums)-1]+1)
+		samples = append(samples, txNums[0]+1)
 	}
 	return samples, nil
 }

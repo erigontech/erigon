@@ -94,8 +94,8 @@ func newTracedDepsTest(t *testing.T, txs types.Transactions, hooks *tracing.Hook
 			Hooks:           hooks,
 		}
 	}
-	require.NoError(t, pe.processRequest(context.Background(), &execRequest{blockNum: 1, tasks: tasks}, roTx))
-	be.scheduleExecution(context.Background(), pe)
+	require.NoError(t, pe.processRequest(&execRequest{blockNum: 1, tasks: tasks}, roTx))
+	be.scheduleExecution(pe)
 	d := &depsTest{t: t, pe: pe, be: be}
 	d.deliverTx = func(tx, inc int, reads state.ReadSet) {
 		res := &exec.TxResult{

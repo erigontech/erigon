@@ -81,10 +81,7 @@ type RecordingState struct {
 	// for debugging: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
 
-	// The system address is touched as msg.sender on every block's system calls;
-	// that alone is not a witness access. A real opcode access during a user tx
-	// (seen via the per-tx access set) sets this so it is kept (EIP-7928).
-	systemAddrTouchedInTx bool
+	systemAddrAccessed bool
 }
 
 // NewRecordingState creates a new RecordingState wrapping the given inner reader.
@@ -109,9 +106,7 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 	}
 }
 
-// MarkSystemAddrTouchedInTx records that a user transaction accessed the system
-// address via an opcode, so it is kept in the witness even without a state change.
-func (s *RecordingState) MarkSystemAddrTouchedInTx() { s.systemAddrTouchedInTx = true }
+func (s *RecordingState) MarkSystemAddrAccessed() { s.systemAddrAccessed = true }
 
 func (s *RecordingState) SetAccountsToTrace(addrs []common.Address) {
 	if len(addrs) == 0 {
@@ -255,12 +250,7 @@ func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, erro
 		return nil, err
 	}
 	if len(code) > 0 {
-		s.AccessedCode[addr] = code
-		if _, already := s.PreStateCode[addr]; !already {
-			if _, created := s.createdCodeHashes[s.codeHash(code)]; !created {
-				s.PreStateCode[addr] = code
-			}
-		}
+		s.OnCodeAccess(address, code)
 	} else {
 		s.emptyCodeAccessed = true
 	}
@@ -344,6 +334,18 @@ func (s *RecordingState) codeHash(code []byte) common.Hash {
 	h := crypto.Keccak256Hash(code)
 	s.codeHashes[string(code)] = h
 	return h
+}
+
+func (s *RecordingState) OnCodeChange(codeHash accounts.CodeHash) func() {
+	if codeHash == accounts.EmptyCodeHash {
+		return nil
+	}
+	hash := codeHash.Value()
+	if _, exists := s.createdCodeHashes[hash]; exists {
+		return nil
+	}
+	s.createdCodeHashes[hash] = struct{}{}
+	return func() { delete(s.createdCodeHashes, hash) }
 }
 
 func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
@@ -482,11 +484,17 @@ func (s *RecordingState) GetModifiedKeys() ([]common.Address, map[common.Address
 	return addresses, storageKeys
 }
 
-// OnCodeAccess tracks code that bypasses ReadAccountCode via stateObject cache hits.
 func (s *RecordingState) OnCodeAccess(address accounts.Address, code []byte) {
 	if len(code) > 0 {
-		s.AccessedCode[address.Value()] = code
-		//s.HashedCodes[crypto.Keccak256Hash(code)] = code
+		addr := address.Value()
+		s.AccessedCode[addr] = code
+		if _, already := s.PreStateCode[addr]; !already {
+			_, modified := s.codeOverlay[addr]
+			_, created := s.createdCodeHashes[s.codeHash(code)]
+			if !modified && !created {
+				s.PreStateCode[addr] = code
+			}
+		}
 	}
 }
 
@@ -694,7 +702,7 @@ func (api *BaseAPI) buildAccessedState(
 		// A user tx that accesses the system address via an opcode keeps it in the
 		// witness; the per-tx access set captures this even on state-cache hits.
 		if ibs.AccessedAddr(params.SystemAddress) {
-			recordingState.MarkSystemAddrTouchedInTx()
+			recordingState.MarkSystemAddrAccessed()
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
@@ -719,6 +727,11 @@ func (api *BaseAPI) buildAccessedState(
 
 	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), receipts, block.Withdrawals(), chainReader, syscall, false /* skipReceiptsEval */, log.Root()); err != nil {
 		return nil, nil, fmt.Errorf("failed to finalize block: %w", err)
+	}
+	for _, withdrawal := range block.Withdrawals() {
+		if withdrawal.Address == params.SystemAddress.Value() {
+			recordingState.MarkSystemAddrAccessed()
+		}
 	}
 
 	if err = ethapi.FinalizeCallTxTo(ibs, blockRules, recordingState); err != nil {
@@ -1323,7 +1336,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 			postExists = preExists
 		}
 		existenceChanged := preExists != postExists
-		if !reallyChanged && !hasStorage && !existenceChanged && !rs.systemAddrTouchedInTx {
+		if !reallyChanged && !hasStorage && !existenceChanged && !rs.systemAddrAccessed {
 			delete(out.Addresses, sysAddr)
 		}
 	}
@@ -1470,7 +1483,7 @@ func detectCollapseSiblings(
 	}
 	traced := false
 	var root []byte
-	if mode == witnessModeLegacy && hc != nil && hc.records != nil && hc.records.TraceCollapses {
+	if mode == witnessModeLegacy && hc != nil && hc.records != nil {
 		if traced, root, err = sdCtx.TraceCollapses(ctx, tx, blockNum, firstTxNumInBlock, trace); err != nil {
 			return nil, fmt.Errorf("[debug_executionWitness] collapse detection via TraceCollapses failed: %w", err)
 		}

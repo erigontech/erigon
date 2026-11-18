@@ -23,6 +23,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"math"
 	"math/big"
 	"sort"
@@ -1288,10 +1289,6 @@ func TestBuildDoesNotWaitBetweenFullBatchesOfNonceTooHighTxns(t *testing.T) {
 // The 256 recipients must exceed commitment.minForkGrain (currently 128)
 // to exercise parallel commitment worker reads.
 func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
-	original := statecfg.ExperimentalParallelCommitment
-	statecfg.ExperimentalParallelCommitment = true
-	t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = original })
-
 	t.Run("without_concurrent_commit", func(t *testing.T) {
 		testAssembleBlockWithSiblingCommit(t, false)
 	})
@@ -3524,11 +3521,23 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 // real count) so a silent degrade-to-incremental can't make the differential pass
 // trivially.
 func TestBALDrivenComputeAheadChangesetIntegrity(t *testing.T) {
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) {
+			t.Cleanup(statecfg.SetCommitmentV3(v3))
+			testBALDrivenComputeAheadChangesetIntegrity(t, v3)
+		})
+	}
+}
+
+func testBALDrivenComputeAheadChangesetIntegrity(t *testing.T, v3 bool) {
 	off := runBALComputeAheadChangeset(t, false, false)
 	on := runBALComputeAheadChangeset(t, true, false)
 
 	require.Zero(t, off.computedAhead, "compute-ahead-off must not compute any block ahead")
 	require.Positive(t, on.computedAhead, "compute-ahead-on must actually compute the pre-window blocks ahead (else the differential is vacuous)")
+	if v3 {
+		require.Equal(t, on.blocks, on.computedAhead, "with v3 the window blocks must fold ahead too")
+	}
 	// Compare the SET OF KEYS each window block's commitment changeset touched,
 	// not the raw diff bytes: per-block compute-ahead and a merged batch transition
 	// legitimately encode the same branches differently (step references), so
@@ -3682,6 +3691,7 @@ type balComputeAheadResult struct {
 	// across modes to catch compute-ahead misrouting deltas into the wrong block.
 	windowCommitmentKeys map[uint64][]string
 	computedAhead        int64
+	blocks               int64
 }
 
 func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balComputeAheadResult {
@@ -3762,6 +3772,7 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 	res := balComputeAheadResult{
 		windowCommitmentKeys: map[uint64][]string{},
 		computedAhead:        stagedsync.ComputedAheadCountForTest(),
+		blocks:               chainLen,
 	}
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		// Confirm blocks carry BALs (checked on the tip, which is inside the
