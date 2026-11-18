@@ -114,9 +114,9 @@ func TestSendRawTransactionRefuses(t *testing.T) {
 }
 
 // TestInboundRefused is S4.3 (App. F.3.1): type 0x45, unsigned, is refused
-// over the raw-transaction RPC, by the signing APIs, and by the transactions
-// the RPC builds from call arguments. TestTxpoolRefuses covers the pool and
-// gossip.
+// over the raw-transaction RPC and by the transactions the RPC builds from
+// call arguments, and the signing APIs are disabled. TestTxpoolRefuses covers
+// the pool and gossip.
 func TestInboundRefused(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithTxPool())
 	chain, err := m.GenerateChain(1, func(int, *blockgen.BlockGen) {})
@@ -126,8 +126,7 @@ func TestInboundRefused(t *testing.T) {
 	api := jsonrpc.NewEthAPI(
 		jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}),
 		m.DB, nil, txpoolproto.NewTxpoolClient(conn), nil,
-		// Unprotected transactions allowed, so that only the type refuses them.
-		&rpccfg.EthApiConfig{GasCap: 5_000_000, FeeCap: ethconfig.Defaults.RPCTxFeeCap, AllowUnprotectedTxs: true, RpcTxSyncDefaultTimeout: time.Second, RpcTxSyncMaxTimeout: time.Second},
+		&rpccfg.EthApiConfig{GasCap: 5_000_000, FeeCap: ethconfig.Defaults.RPCTxFeeCap, RpcTxSyncDefaultTimeout: time.Second, RpcTxSyncMaxTimeout: time.Second},
 		log.New())
 	chainID := m.ChainConfig.ChainID.Uint64()
 
@@ -148,6 +147,7 @@ func TestInboundRefused(t *testing.T) {
 		require.ErrorContains(t, err, tc.reason)
 	}
 
+	// Disabled for every type.
 	_, err = api.Sign(ctx, common.Address{}, hexutil.Bytes{0x45})
 	require.ErrorContains(t, err, "eth_sign")
 	_, err = api.SignTransaction(ctx, map[string]any{"type": "0x45"})

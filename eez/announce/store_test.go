@@ -392,6 +392,27 @@ func TestRecordBackfill(t *testing.T) {
 	require.Equal(t, n.signed(7), n.announced(7))
 }
 
+// TestRecordKeepsKept: an announcement kept already, another producer's taken
+// by a follower on the same datadir, is not signed over.
+func TestRecordKeepsKept(t *testing.T) {
+	n := newNode(t)
+	unsigned := n.sequencer(sequencer.Config{}, n.follower)
+	for range 2 {
+		n.tick(unsigned)
+	}
+	other, err := crypto.HexToECDSA("0202020202020202020202020202020202020202020202020202020202020202")
+	require.NoError(t, err)
+	kept, err := announce.Sign(other, n.chainID, n.hash(1))
+	require.NoError(t, err)
+	require.NotEqual(t, n.signed(1), kept)
+	require.NoError(t, n.store.Put(t.Context(), 1, n.hash(1), kept))
+
+	n.tick(n.sequencer(sequencer.Config{Announcements: n.signer()}, n.follower))
+	require.Equal(t, kept, n.announced(1))
+	require.Equal(t, n.signed(2), n.announced(2))
+	require.Equal(t, n.signed(3), n.announced(3))
+}
+
 // TestRecordPruneFailed: a failed prune is not a failed announcement; the
 // block's announcement is served and no failure is counted.
 func TestRecordPruneFailed(t *testing.T) {
