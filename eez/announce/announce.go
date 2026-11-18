@@ -16,7 +16,7 @@
 
 // Package announce signs and verifies the unsafe-block announcements of
 // Rollup0 App. D.6, and keeps those of a sequencer's blocks until L1 finality
-// covers them.
+// passes them.
 package announce
 
 import (

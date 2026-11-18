@@ -365,7 +365,7 @@ func TestUnsafeHeadAnnouncementUnread(t *testing.T) {
 }
 
 // TestUnsafeHeadAnnouncementsPruned: the follower drops the announcements it
-// keeps once L1 finality covers their blocks.
+// keeps once L1 finality passes their blocks.
 func TestUnsafeHeadAnnouncementsPruned(t *testing.T) {
 	c := derivertest.NewComposer(t)
 	settled := c.Compose(nil,

@@ -273,7 +273,7 @@ func (k *faulty) Prune(ctx context.Context, number uint64) error {
 
 // TestRecord is T-SEQ-8 on a sequencer: every block it commits is announced
 // with its key, a composer's before it becomes the head, and the store
-// serves the announcement of the block at a number until L1 finality covers
+// serves the announcement of the block at a number until L1 finality passes
 // it. A failed announcement is counted and does not stop production.
 func TestRecord(t *testing.T) {
 	n := newNode(t)
