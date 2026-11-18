@@ -20,7 +20,6 @@ import (
 	"bufio"
 	"compress/gzip"
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/erigontech/erigon/common"
@@ -82,7 +81,7 @@ func (b *ReplayBatch) Blobs() [][]byte {
 
 // LoadEEZDevReplay reads rollupx/eezdev-699069/replay-0-2250.json.gz.
 func LoadEEZDevReplay() (*EEZDevReplay, error) {
-	data, err := readGzip("eezdev-699069", EEZDevReplayFile)
+	data, err := ReadGzip("rollupx", "eezdev-699069", EEZDevReplayFile)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +202,7 @@ func LoadRollupXL1Replay(chainID uint64) (*RollupXL1Replay, error) {
 		return nil, fmt.Errorf("no L1 replay of chain %d", chainID)
 	}
 	file := src[1]
-	data, err := readGzip(src[0], file)
+	data, err := ReadGzip("rollupx", src[0], file)
 	if err != nil {
 		return nil, err
 	}
@@ -219,22 +218,4 @@ func LoadRollupXL1Replay(chainID uint64) (*RollupXL1Replay, error) {
 		}
 	}
 	return &r, nil
-}
-
-// readGzip returns the decompressed content of the gzip file under rollupx/dir.
-func readGzip(dir, file string) ([]byte, error) {
-	f, err := os.Open(Path("rollupx", dir, file))
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	z, err := gzip.NewReader(f)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", file, err)
-	}
-	data, err := io.ReadAll(z)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", file, err)
-	}
-	return data, nil
 }

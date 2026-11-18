@@ -22,7 +22,7 @@
 // golang.org/x/crypto/sha3 Keccak-256 and RLP written out here. From the
 // repository root:
 //
-//	go run ./eez/testdata/vectors/unsafe_block_announcement_vectors.go > eez/testdata/vectors/unsafe_block_announcement_vectors.json
+//	go run ./eez/testdata/vectors/unsafe_block_announcement_vectors.go | gzip -9 -n > eez/testdata/vectors/unsafe_block_announcement_vectors.json.gz
 package main
 
 import (

@@ -18,8 +18,6 @@ package announce_test
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -29,9 +27,10 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/eez/announce"
+	"github.com/erigontech/erigon/eez/internal/testfixtures"
 )
 
-// vector is an announcement of vectors/unsafe_block_announcement_vectors.json.
+// vector is an announcement of vectors/unsafe_block_announcement_vectors.json.gz.
 type vector struct {
 	Name       string         `json:"name"`
 	PrivateKey hexutil.Bytes  `json:"privateKey"`
@@ -51,7 +50,7 @@ type vectors struct {
 
 func load(t *testing.T) vectors {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "testdata", "vectors", "unsafe_block_announcement_vectors.json"))
+	raw, err := testfixtures.ReadGzip("vectors", "unsafe_block_announcement_vectors.json.gz")
 	require.NoError(t, err)
 	var v vectors
 	require.NoError(t, json.Unmarshal(raw, &v))

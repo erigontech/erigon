@@ -22,7 +22,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
-	"os"
 	"sync"
 	"testing"
 
@@ -35,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/eez/internal/testfixtures"
 	"github.com/erigontech/erigon/eez/seqsig"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -206,7 +206,7 @@ func padded(data []byte) []byte {
 // vector of eez/testdata/SOURCES.md has its known id. Data that is not a
 // Snappy block within the cap is hashed as is, under another domain.
 func TestMessageID(t *testing.T) {
-	raw, err := os.ReadFile("../testdata/vectors/signed_head_p2p_v0.json")
+	raw, err := testfixtures.ReadGzip("vectors", "signed_head_p2p_v0.json.gz")
 	require.NoError(t, err)
 	var v struct {
 		Envelope  hexutil.Bytes `json:"envelope"`

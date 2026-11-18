@@ -18,7 +18,6 @@ package seqsig_test
 
 import (
 	"encoding/json"
-	"os"
 	"testing"
 
 	"github.com/golang/snappy"
@@ -27,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/eez/internal/testfixtures"
 	"github.com/erigontech/erigon/eez/seqsig"
 	"github.com/erigontech/erigon/execution/rlp"
 )
@@ -52,7 +52,7 @@ type p2pVector struct {
 
 func loadP2PVector(t *testing.T) p2pVector {
 	t.Helper()
-	raw, err := os.ReadFile("../testdata/vectors/signed_head_p2p_v0.json")
+	raw, err := testfixtures.ReadGzip("vectors", "signed_head_p2p_v0.json.gz")
 	require.NoError(t, err)
 	var v p2pVector
 	require.NoError(t, json.Unmarshal(raw, &v))
