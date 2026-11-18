@@ -633,10 +633,8 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	}
 	if opts.TargetV3 {
 		converted := make(map[string]struct{}, len(files))
-		if convertDomain {
-			for _, f := range files {
-				converted[filepath.Base(f.Fullpath())] = struct{}{}
-			}
+		for _, f := range files {
+			converted[filepath.Base(f.Fullpath())] = struct{}{}
 		}
 		if convertHistory {
 			for _, f := range at.d[kv.CommitmentDomain].ht.files {

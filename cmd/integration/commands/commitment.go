@@ -587,12 +587,6 @@ Examples:
 		if convertRestore {
 			return commitmentRestore(ctx, logger)
 		}
-		if convertV3 && !convertNoHistory {
-			if err := enableCommitmentConvertHistory(ctx, logger); err != nil {
-				return err
-			}
-		}
-
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
 			return fmt.Errorf("opening DB: %w", err)
@@ -618,24 +612,6 @@ func commitmentRestore(ctx context.Context, logger log.Logger) error {
 	}
 	logger.Info("Commitment files restored. Next step: integration stage_exec --reset")
 	return nil
-}
-
-func enableCommitmentConvertHistory(ctx context.Context, logger log.Logger) error {
-	db, err := openRawDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
-	if err != nil {
-		return fmt.Errorf("opening DB to read commitment history setting: %w", err)
-	}
-	defer db.Close()
-	return db.View(ctx, func(tx kv.Tx) error {
-		enabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
-		if err != nil {
-			return fmt.Errorf("reading commitment history setting: %w", err)
-		}
-		if enabled {
-			statecfg.EnableHistoricalCommitment()
-		}
-		return nil
-	})
 }
 
 func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {

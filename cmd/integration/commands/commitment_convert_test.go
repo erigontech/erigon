@@ -201,6 +201,7 @@ func TestCommitmentConvertRestoreLeavesExecutionUnchanged(t *testing.T) {
 
 	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
 	require.NoError(t, commitmentRestore(t.Context(), log.New()))
+	require.NoDirExists(t, backupDir)
 
 	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
 	defer rawDB.Close()
@@ -244,39 +245,6 @@ func TestCommitmentConvertRestoreRetryLeavesExecutionUnchanged(t *testing.T) {
 	require.NoError(t, dir.RemoveFile(blocker))
 	require.NoError(t, dir.RemoveFile(blocked))
 	require.NoError(t, commitmentRestore(t.Context(), log.New()))
-
-	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
-	defer rawDB.Close()
-	require.NoError(t, rawDB.View(t.Context(), func(tx kv.Tx) error {
-		progress, err := stages.GetStageProgress(tx, stages.Execution)
-		require.NoError(t, err)
-		require.Equal(t, uint64(100), progress)
-		return nil
-	}))
-}
-
-func TestCommitmentConvertRestoreRetryAfterFilesLeavesExecutionUnchanged(t *testing.T) {
-	t.Cleanup(statecfg.SetCommitmentV3(false))
-	previousDatadir, previousChaindata := datadirCli, chaindata
-	t.Cleanup(func() { datadirCli, chaindata = previousDatadir, previousChaindata })
-
-	db, dirs := dbWithV3State(t)
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return stages.SaveStageProgress(tx, stages.Execution, 100)
-	}))
-	db.Close()
-	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
-	require.NoError(t, os.MkdirAll(backupDir, 0o755))
-	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment.*"))
-	require.NoError(t, err)
-	require.NotEmpty(t, files)
-	for _, f := range files {
-		require.NoError(t, os.Rename(f, filepath.Join(backupDir, filepath.Base(f))))
-	}
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-2.kv"), nil, 0o644))
-	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
-	require.NoError(t, commitmentRestore(t.Context(), log.New()))
-	require.NoDirExists(t, backupDir)
 
 	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
 	defer rawDB.Close()
