@@ -97,26 +97,11 @@ func TestBranchPrefetcherLeafRefsOnlyForTheStoredRecord(t *testing.T) {
 	require.Nil(t, p.leafRefs(key, bytes.Clone(data)))
 }
 
-func TestBranchPrefetcherCountsDroppedAndDrained(t *testing.T) {
+func TestBranchPrefetcherCountsDropped(t *testing.T) {
 	p := &branchPrefetcher{work: make(chan prefetchItem, 1)}
 	p.add(prefetchItem{account: common.Hash{1}})
 	p.add(prefetchItem{account: common.Hash{2}})
 	require.Equal(t, uint64(1), p.dropped.Load(), "an item that finds the queue full is dropped")
-	p.pause()
-	p.resume()
-	require.Equal(t, uint64(1), p.drained.Load(), "an item still queued when compute starts is drained")
-}
-
-func TestBranchPrefetcherChunkStopsOnPause(t *testing.T) {
-	p := &branchPrefetcher{work: make(chan prefetchItem, 2*branchPrefetchPerTx)}
-	for i := range 2 * branchPrefetchPerTx {
-		p.add(prefetchItem{account: common.Hash{byte(i), byte(i >> 8)}})
-	}
-	read := func([]byte) []byte { return nil }
-	require.Equal(t, branchPrefetchPerTx, p.walkChunk(<-p.work, read), "an unpaused worker walks a full chunk")
-	p.pausing.Store(true)
-	require.Equal(t, 1, p.walkChunk(<-p.work, read), "a pending pause stops the chunk after the item in hand")
-	require.Len(t, p.work, branchPrefetchPerTx-1)
 }
 
 func TestParentRecordsOnlyForOneVerifiedChildOfTheReadHead(t *testing.T) {
@@ -264,4 +249,45 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 
 	require.Len(t, out, 1)
 	require.ErrorIs(t, (<-out).err, v3.ErrRecordFormat, "compute-ahead must read commitment records through the prefetch map")
+}
+
+func TestComputeLeavesQueuedPrefetchToWorkers(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	defer func(v bool) { dbg.BALDrivenCommitment = v }(dbg.BALDrivenCommitment)
+	defer func(v bool) { dbg.IgnoreBAL = v }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment, dbg.IgnoreBAL = true, false
+
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+	db, tx, doms := setupStepTest(t)
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	require.NoError(t, err)
+	defer cc.Stop()
+	require.NotNil(t, cc.branchPrefetch)
+	cc.branchPrefetch.close()
+	p := newPrefetchRecords()
+	p.work = make(chan prefetchItem, 16)
+	cc.branchPrefetch, cc.asOfReader.prefetched = p, p
+	cc.hasFirstBlock, cc.firstBlockNum = true, 1
+
+	addr := common.Address{19: 1}
+	acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(5), CodeHash: accounts.EmptyCodeHash}
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&acc), 1, nil))
+	cc.handleBlockRequest(ctx, &blockRequest{
+		blockNum:   1,
+		firstTxNum: 1,
+		lastTxNum:  2,
+		stateRoot:  common.Hash{0xde, 0xad},
+		bal: types.BlockAccessList{{
+			Address:        addr,
+			BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(5)}},
+			NonceChanges:   []*types.NonceChange{{Index: 0, Value: 1}},
+		}},
+	})
+
+	require.Len(t, out, 1, "the block's round ran")
+	require.Len(t, p.work, 1, "the round leaves the queued account walk to the workers instead of discarding it")
 }
