@@ -65,8 +65,8 @@ type ConvertOpts struct {
 }
 
 const (
-	rebuildV3Advice          = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if commitment history was pruned; alternatively drop commitment history with `erigon seg rm-state --domain=commitment --only-history`, then run `integration commitment convert --v3 --no-history`"
-	rebuildV3NoHistoryAdvice = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes --no-history` with ERIGON_COMMITMENT_V3=true; alternatively drop commitment history with `erigon seg rm-state --domain=commitment --only-history`, then run `integration commitment convert --v3 --no-history`"
+	rebuildV3Advice          = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if commitment history was pruned; alternatively run `integration commitment convert --v3 --no-history`"
+	rebuildV3NoHistoryAdvice = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes --no-history` with ERIGON_COMMITMENT_V3=true; alternatively run `integration commitment convert --v3 --no-history`"
 )
 
 // fileState describes the detected current encoding of a commitment .kv file.
