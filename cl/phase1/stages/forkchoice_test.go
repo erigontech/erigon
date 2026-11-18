@@ -724,18 +724,18 @@ func (m *busyOnceExecutionModule) UpdateForkChoice(context.Context, common.Hash,
 }
 
 func TestGloasForkChoiceRejectedAsBusyIsResent(t *testing.T) {
-	cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
-	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
-	module := &busyOnceExecutionModule{}
-	direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
-	require.NoError(t, err)
-	engine.forkChoiceFn = direct.ForkChoiceUpdate
-
 	synctest.Test(t, func(t *testing.T) {
+		cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+		bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+		module := &busyOnceExecutionModule{}
+		direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+		require.NoError(t, err)
+		engine.forkChoiceFn = direct.ForkChoiceUpdate
+
 		started := time.Now()
 		previousExecutionHead := cfg.executionHead
 		cfg.sleepForSlotLastWake = sleepForSlotWake{root: headRoot, executionHead: bid.ParentBlockHash, at: started}
-		_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+		_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
 		require.NoError(t, err)
 		require.Equal(t, 1, module.forkChoiceCalls)
 		require.Equal(t, previousExecutionHead, cfg.executionHead, "a busy execution module did not apply the head")

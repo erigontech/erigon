@@ -2134,8 +2134,37 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool, beaconCo
 }
 
 func checkIfBlockSnapshotsPublishable(snapDir string) error {
-	if err := checkNoDuplicateFileVersions(snapDir); err != nil {
+	files, err := version.GroupByMaskedName(filepath.Join(snapDir, "*"))
+	if err != nil {
 		return err
+	}
+	if err := duplicateFileVersions(files, snapDir); err != nil {
+		return err
+	}
+	byUnversionedName := map[string][]version.VersionedFile{}
+	for _, group := range files {
+		for _, f := range group {
+			name := unversionedName(f.Name)
+			byUnversionedName[name] = append(byUnversionedName[name], f)
+		}
+	}
+	newest := func(name string) (best version.VersionedFile, ok bool) {
+		for _, f := range byUnversionedName[unversionedName(name)] {
+			if !ok || f.Version.Greater(best.Version) {
+				best, ok = f, true
+			}
+		}
+		return best, ok
+	}
+	checkIdx := func(idxName string, minSup version.Version) error {
+		idx, ok := newest(idxName)
+		if !ok {
+			return fmt.Errorf("index file %s: file not found", unversionedName(idxName))
+		}
+		if idx.Version.Less(minSup) {
+			return fmt.Errorf("index file %s: version %s is less than supported version %s", idx.Name, idx.Version, minSup)
+		}
+		return nil
 	}
 
 	var sum uint64
@@ -2188,40 +2217,19 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 		// check that all files exist
 		for _, snapType := range []string{"headers", "transactions", "bodies"} {
 			segName := strings.Replace(headerSegName, "headers", snapType, 1)
-			segVer := verMap[snapType]["seg"].Current
-			segName = strings.Replace(segName, headerSegVer.String(), segVer.String(), 1)
-			segNameMasked, err := version.ReplaceVersionWithMask(segName)
-			if err != nil {
-				return err
-			}
-			segName, ver, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(snapDir, segNameMasked))
-			if err != nil {
-				return fmt.Errorf("finding %s: %w", segNameMasked, err)
-			}
+			seg, ok := newest(segName)
 			if !ok {
-				return fmt.Errorf("missing file-%s", segNameMasked)
+				return fmt.Errorf("missing file-%s", unversionedName(segName))
 			}
-			if !verMap[snapType]["seg"].Supports(ver) {
-				return fmt.Errorf("expected version %s, filename: %s", verMap[snapType]["seg"].Current.String(), segName)
+			if !verMap[snapType]["seg"].Supports(seg.Version) {
+				return fmt.Errorf("expected version %s, filename: %s", verMap[snapType]["seg"].Current.String(), seg.Name)
 			}
-			// check that the index file exist
-			idxName := strings.Replace(segName, ".seg", ".idx", 1)
-			idxNameMasked, err := version.ReplaceVersionWithMask(idxName)
-			if err != nil {
+			if err := checkIdx(strings.Replace(seg.Name, ".seg", ".idx", 1), verMap[snapType]["idx"].MinSupported); err != nil {
 				return err
-			}
-			if err := version.CheckIsThereFileWithSupportedVersion(idxNameMasked, verMap[snapType]["idx"].MinSupported); err != nil {
-				return fmt.Errorf("index file %s: %w", idxName, err)
 			}
 			if snapType == "transactions" {
-				// check that the tx index file exist
-				txIdxName := strings.Replace(segName, "transactions.seg", "transactions-to-block.idx", 1)
-				txIdxNameMasked, err := version.ReplaceVersionWithMask(txIdxName)
-				if err != nil {
+				if err := checkIdx(strings.Replace(seg.Name, "transactions.seg", "transactions-to-block.idx", 1), verMap["transactions-to-block"]["idx"].MinSupported); err != nil {
 					return err
-				}
-				if err := version.CheckIsThereFileWithSupportedVersion(txIdxNameMasked, verMap["transactions-to-block"]["idx"].MinSupported); err != nil {
-					return fmt.Errorf("index file %s: %w", txIdxName, err)
 				}
 			}
 		}
@@ -2259,9 +2267,9 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	return nil
 }
 
-func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error {
+func checkIfStateSnapshotsPublishable(ctx context.Context, dirs datadir.Dirs, chainDB kv.RoDB) error {
 	var persistReceiptCache, commitmentHistory bool
-	if err := chainDB.View(context.Background(), func(tx kv.Tx) error {
+	if err := chainDB.View(ctx, func(tx kv.Tx) error {
 		var err error
 		persistReceiptCache, err = kvcfg.PersistReceipts.Enabled(tx)
 		if err != nil {
@@ -2307,15 +2315,22 @@ func checkNoDuplicateFileVersions(dirPaths ...string) error {
 		if err != nil {
 			return err
 		}
-		for _, g := range groups {
-			if len(g) < 2 {
-				continue
-			}
-			if !snaptype.IsSeedableExtension(g[0].Name) && !strings.HasSuffix(g[0].Name, ".torrent") {
-				continue // not an erigon snapshot file
-			}
-			return fmt.Errorf("%w: %s and %s in %s", ErrSnapDuplicateVersions, g[0].Name, g[1].Name, dirPath)
+		if err := duplicateFileVersions(groups, dirPath); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func duplicateFileVersions(groups map[string][]version.VersionedFile, dirPath string) error {
+	for _, g := range groups {
+		if len(g) < 2 {
+			continue
+		}
+		if !snaptype.IsSeedableExtension(g[0].Name) && !strings.HasSuffix(g[0].Name, ".torrent") {
+			continue // not an erigon snapshot file
+		}
+		return fmt.Errorf("%w: %s and %s in %s", ErrSnapDuplicateVersions, g[0].Name, g[1].Name, dirPath)
 	}
 	return nil
 }
@@ -2619,12 +2634,18 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 		defer chainDB.Close()
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Iterate over all fies in dat.Snap
-	if err := checkIfStateSnapshotsPublishable(dat, chainDB); err != nil {
+	if err := checkIfStateSnapshotsPublishable(ctx, dat, chainDB); err != nil {
 		return err
 	}
 	var chainName string
@@ -2657,6 +2678,9 @@ func doPublishable(ctx context.Context, dat datadir.Dirs, chainDB kv.RoDB) error
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := checkIfCaplinSnapshotsPublishable(dat, true, beaconConfig); err != nil {
 		return err
 	}
