@@ -643,6 +643,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		fail(fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	}
+	vm.SeedStorageWipes()
 	// A block straddling an unfrozen step edge must checkpoint at that edge, else
 	// the step's commitment .kv lags its account/storage .kv. The per-tx BAL lets
 	// compute-ahead do this mid-block.

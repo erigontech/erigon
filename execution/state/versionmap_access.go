@@ -232,6 +232,38 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 	return nil
 }
 
+// SeedStorageWipes derives, at construction, the storage wipe that a CREATE/CREATE2 over a
+// pre-existing storage-only account performs. EIP-7928 records the code deploy but not the
+// per-slot clear (unbounded), so the zero is derived: the create's CreateContract cell —
+// which the storage read path already treats as wiping the prior incarnation's slots — is
+// seeded from the BAL's non-delegation code change, so every reader resolves a cleared slot
+// to zero without the creating tx having run. An EIP-7702 delegation sets code without
+// creating a contract and does not wipe storage.
+func (vm *VersionMap) SeedStorageWipes() {
+	var stamps []*WriteSet
+	for i := range vm.bal {
+		ac := &vm.bal[i]
+		addr := accounts.InternAddress(ac.Address)
+		for _, cc := range ac.CodeChanges {
+			if len(cc.Bytecode) == 0 {
+				continue
+			}
+			if _, ok := types.ParseDelegation(cc.Bytecode); ok {
+				continue
+			}
+			ws := &WriteSet{}
+			ws.SetCreateContract(addr, &VersionedWrite[bool]{
+				WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: Version{TxIndex: int(cc.Index) - 1}},
+				Val:         true,
+			})
+			stamps = append(stamps, ws)
+		}
+	}
+	for _, ws := range stamps {
+		vm.FlushVersionedWrites(ws, true)
+	}
+}
+
 // SeedAddresses marks each BAL account as existing at its creating tx, so the address
 // existence read resolves present. The BAL
 // writes only field cells (not an AddressPath), so a block-created account would
