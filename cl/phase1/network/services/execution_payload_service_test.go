@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -426,6 +427,50 @@ func TestExecutionPayloadServiceAcceptsGossipWhenValidatedEnvelopeWaitsForColumn
 	requireEnvelopeImportKeptSeen(t, forkchoiceMock, blockRoot, 7)
 }
 
+func TestExecutionPayloadServiceNotifiesArrivalOfValidatedEnvelope(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter, nil)
+	service.(*executionPayloadService).pending.stopAndWait()
+
+	blockRoot := common.Hash{1}
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 7)
+	forkchoiceMock.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 7)))
+	select {
+	case root := <-emitter.EnvelopeArrived():
+		require.Equal(t, blockRoot, root)
+	default:
+		t.Fatal("validated gossip envelope did not notify its arrival")
+	}
+	requireEnvelopeImportKeptSeen(t, forkchoiceMock, blockRoot, 7)
+}
+
+func TestExecutionPayloadServiceNotifiesArrivalOfPendingEnvelopeOnceItsBlockIsKnown(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter, nil)
+	impl := service.(*executionPayloadService)
+	impl.pending.stopAndWait()
+
+	blockRoot := common.Hash{1}
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 7)), ErrIgnore)
+	require.Empty(t, emitter.EnvelopeArrived())
+
+	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 7)
+	impl.pending.processPending(t.Context())
+
+	select {
+	case root := <-emitter.EnvelopeArrived():
+		require.Equal(t, blockRoot, root)
+	default:
+		t.Fatal("validated pending envelope did not notify its arrival")
+	}
+}
+
 func TestExecutionPayloadServiceDoesNotEmitStaleHeadV2AfterReorg(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
@@ -518,6 +563,7 @@ func TestExecutionPayloadServiceDoesNotEmitGossipWhenValidationFails(t *testing.
 		t.Fatalf("emitted gossip event for invalid envelope: %#v", event)
 	default:
 	}
+	require.Empty(t, emitter.EnvelopeArrived())
 }
 
 func TestExecutionPayloadServiceProgressesWhileEventFeedIsBlocked(t *testing.T) {
@@ -647,32 +693,35 @@ func TestExecutionPayloadServiceRollsBackOnlyLookupRequiredAlreadySeen(t *testin
 }
 
 func TestExecutionPayloadServiceQueuesEnvelopeWhileAdmissionIsBusy(t *testing.T) {
-	service, fcu := setupExecutionPayloadService(t)
-	tokens := make([]forkchoice.ExecutionPayloadEnvelopeAdmissionToken, 0, 1024)
-	for i := range 1024 {
-		token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.Hash{byte(i), byte(i >> 8)}, uint64(i))
-		require.NoError(t, err)
-		tokens = append(tokens, token)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		service, fcu := setupExecutionPayloadService(t)
+		tokens := make([]forkchoice.ExecutionPayloadEnvelopeAdmissionToken, 0, 1024)
+		for i := range 1024 {
+			token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.Hash{byte(i), byte(i >> 8)}, uint64(i))
+			require.NoError(t, err)
+			tokens = append(tokens, token)
+		}
 
-	blockRoot := common.HexToHash("0xffff")
-	envelope := newTestSignedEnvelope(100, blockRoot, 7)
-	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 7)
-	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
-	impl := service.(*executionPayloadService)
-	require.Equal(t, int32(1), impl.pending.count.Load())
-	impl.pending.processPending(t.Context())
-	require.Equal(t, int32(1), impl.pending.count.Load())
-	require.False(t, fcu.OnExecutionPayloadCalled)
+		blockRoot := common.HexToHash("0xffff")
+		envelope := newTestSignedEnvelope(100, blockRoot, 7)
+		fcu.Blocks[blockRoot] = newTestGloasBlock(100, 7)
+		require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+		impl := service.(*executionPayloadService)
+		require.Equal(t, int32(1), impl.pending.count.Load())
+		impl.pending.processPending(t.Context())
+		require.Equal(t, int32(1), impl.pending.count.Load())
+		require.False(t, fcu.OnExecutionPayloadCalled)
 
-	for _, token := range tokens {
-		fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
-	}
-	impl.pending.processPending(t.Context())
+		for _, token := range tokens {
+			fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
+		}
+		impl.pending.processPending(t.Context())
 
-	require.Zero(t, impl.pending.count.Load())
-	require.Eventually(t, func() bool { return fcu.HasEnvelope(blockRoot) }, 5*time.Second, 10*time.Millisecond)
-	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 7}))
+		require.Zero(t, impl.pending.count.Load())
+		synctest.Wait()
+		require.True(t, fcu.HasEnvelope(blockRoot))
+		require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 7}))
+	})
 }
 
 func TestAdmissionBusyEnvelopeDoesNotHoldPayloadPreparation(t *testing.T) {
@@ -757,72 +806,73 @@ func TestExecutionPayloadServicePendingTryClaimRollsBackOnlyLookupRequiredAlread
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			service, fcu := setupExecutionPayloadService(t)
-			impl := service.(*executionPayloadService)
-			blockRoot := common.HexToHash("0x1234")
-			envelope := newTestSignedEnvelope(100, blockRoot, 1)
-			require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
-			require.Equal(t, int32(1), impl.pending.count.Load())
-			fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
-			var reads atomic.Int32
-			fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-				reads.Add(1)
-				if tc.persistedEnvelope {
-					return envelope, nil
-				}
-				return nil, errors.New("unexpected persisted envelope read")
-			}
-			if tc.claimError == nil {
-				if tc.staleFirstCheck {
-					fcu.HasEnvelopeFunc = func(common.Hash) bool { return true }
-				} else {
-					var hasEnvelopeCalls atomic.Int32
-					fcu.HasEnvelopeFunc = func(common.Hash) bool { return hasEnvelopeCalls.Add(1) > 1 }
-				}
-			} else {
-				owner, err := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
-				require.NoError(t, err)
-				fcu.EnvelopeGossipAdmissions.Finish(owner, true)
-				fcu.TryClaimExecutionPayloadEnvelopeForGossipFunc = func(common.Hash, uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
-					return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, tc.claimError
-				}
-			}
-
-			impl.pending.processPending(t.Context())
-
-			if tc.wantKept {
+			synctest.Test(t, func(t *testing.T) {
+				service, fcu := setupExecutionPayloadService(t)
+				impl := service.(*executionPayloadService)
+				blockRoot := common.HexToHash("0x1234")
+				envelope := newTestSignedEnvelope(100, blockRoot, 1)
+				require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
 				require.Equal(t, int32(1), impl.pending.count.Load())
-				owner, err := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
-				require.NoError(t, err)
-				fcu.EnvelopeGossipAdmissions.Finish(owner, true)
+				fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+				var reads atomic.Int32
+				fcu.ReadEnvelopeFromDiskFunc = func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+					reads.Add(1)
+					if tc.persistedEnvelope {
+						return envelope, nil
+					}
+					return nil, errors.New("unexpected persisted envelope read")
+				}
+				if tc.claimError == nil {
+					if tc.staleFirstCheck {
+						fcu.HasEnvelopeFunc = func(common.Hash) bool { return true }
+					} else {
+						var hasEnvelopeCalls atomic.Int32
+						fcu.HasEnvelopeFunc = func(common.Hash) bool { return hasEnvelopeCalls.Add(1) > 1 }
+					}
+				} else {
+					owner, err := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+					require.NoError(t, err)
+					fcu.EnvelopeGossipAdmissions.Finish(owner, true)
+					fcu.TryClaimExecutionPayloadEnvelopeForGossipFunc = func(common.Hash, uint64) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+						return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, tc.claimError
+					}
+				}
+
 				impl.pending.processPending(t.Context())
+
+				if tc.wantKept {
+					require.Equal(t, int32(1), impl.pending.count.Load())
+					owner, err := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+					require.NoError(t, err)
+					fcu.EnvelopeGossipAdmissions.Finish(owner, true)
+					impl.pending.processPending(t.Context())
+					require.Equal(t, tc.wantReads, reads.Load())
+					_, err = fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+					require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+					fcu.ForgetExecutionPayloadEnvelopeForGossip(blockRoot, 1)
+				} else {
+					require.Zero(t, impl.pending.count.Load())
+				}
+				require.False(t, fcu.OnExecutionPayloadCalled)
 				require.Equal(t, tc.wantReads, reads.Load())
-				_, err = fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
-				require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
-				fcu.ForgetExecutionPayloadEnvelopeForGossip(blockRoot, 1)
-			} else {
-				require.Zero(t, impl.pending.count.Load())
-			}
-			require.False(t, fcu.OnExecutionPayloadCalled)
-			require.Equal(t, tc.wantReads, reads.Load())
-			require.Equal(t, tc.wantLocalSeen, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
-			fcu.HasEnvelopeFunc = func(common.Hash) bool { return false }
-			token, claimErr := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
-			if tc.wantForgotten || tc.wantKept {
-				require.NoError(t, claimErr)
-				fcu.EnvelopeGossipAdmissions.Finish(token, false)
-			} else {
-				require.ErrorIs(t, claimErr, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
-			}
-			if tc.wantKept {
-				impl.pending.processPending(t.Context())
-				require.Zero(t, impl.pending.count.Load())
-				require.Eventually(t, func() bool {
+				require.Equal(t, tc.wantLocalSeen, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+				fcu.HasEnvelopeFunc = func(common.Hash) bool { return false }
+				token, claimErr := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
+				if tc.wantForgotten || tc.wantKept {
+					require.NoError(t, claimErr)
+					fcu.EnvelopeGossipAdmissions.Finish(token, false)
+				} else {
+					require.ErrorIs(t, claimErr, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+				}
+				if tc.wantKept {
+					impl.pending.processPending(t.Context())
+					require.Zero(t, impl.pending.count.Load())
+					synctest.Wait()
 					_, claimErr := fcu.EnvelopeGossipAdmissions.TryClaim(blockRoot, 1)
-					return errors.Is(claimErr, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
-				}, 5*time.Second, 10*time.Millisecond)
-				require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
-			}
+					require.ErrorIs(t, claimErr, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+					require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+				}
+			})
 		})
 	}
 }
@@ -1318,71 +1368,73 @@ func TestExecutionPayloadServiceParksEnvelopeOnlyWhenGossipStateIsUnavailable(t 
 }
 
 func TestExecutionPayloadServiceRollsBackSeenAfterTransientImportFailure(t *testing.T) {
-	service, fcu := setupExecutionPayloadService(t)
-	blockRoot := common.HexToHash("0x1234")
-	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
-	imports := make(chan int, 2)
-	var calls atomic.Int32
-	fcu.OnExecutionPayloadAtFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error {
-		call := int(calls.Add(1))
-		imports <- call
-		if call == 1 {
-			return errors.New("engine temporarily unavailable")
+	synctest.Test(t, func(t *testing.T) {
+		service, fcu := setupExecutionPayloadService(t)
+		blockRoot := common.HexToHash("0x1234")
+		fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+		imports := make(chan int, 2)
+		var calls atomic.Int32
+		fcu.OnExecutionPayloadAtFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error {
+			call := int(calls.Add(1))
+			imports <- call
+			if call == 1 {
+				return errors.New("engine temporarily unavailable")
+			}
+			return nil
 		}
-		return nil
-	}
-	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+		envelope := newTestSignedEnvelope(100, blockRoot, 1)
 
-	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
-	require.Equal(t, 1, receiveWithTimeout(t, imports, "first payload import did not run"))
-	require.Eventually(t, func() bool {
-		return service.ProcessMessage(t.Context(), nil, envelope) == nil
-	}, 5*time.Second, 10*time.Millisecond)
-	require.Equal(t, 2, receiveWithTimeout(t, imports, "second payload import did not run"))
-	requireEnvelopeImportKeptSeen(t, fcu, blockRoot, 1)
+		require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+		require.Equal(t, 1, receiveWithTimeout(t, imports, "first payload import did not run"))
+		synctest.Wait() // the import's rollback must finish before the retry can claim the envelope
+		require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+		require.Equal(t, 2, receiveWithTimeout(t, imports, "second payload import did not run"))
+		requireEnvelopeImportKeptSeen(t, fcu, blockRoot, 1)
+	})
 }
 
 func TestExecutionPayloadServiceHoldsPayloadPreparationUntilImportEnds(t *testing.T) {
-	serviceCtx, cancelService := context.WithCancel(t.Context())
-	defer cancelService()
-	fcu := mock_services.NewForkChoiceStorageMock(t)
-	service := NewExecutionPayloadService(serviceCtx, fcu, &clparams.MainnetBeaconConfig, beaconevents.NewEventEmitter(), nil)
-	blockRoot := common.HexToHash("0x1234")
-	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
-	started := make(chan struct{})
-	release := make(chan struct{})
-	done := make(chan struct{})
-	var releaseOnce sync.Once
-	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
-	fcu.OnExecutionPayloadAtFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error {
-		close(started)
-		<-release
-		close(done)
-		return nil
-	}
-	verdict := make(chan error, 1)
-	go func() {
-		verdict <- service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 1))
-	}()
-	receiveWithTimeout(t, started, "payload import did not start")
-	select {
-	case err := <-verdict:
-		require.NoError(t, err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("gossip verdict waited for payload import")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		serviceCtx, cancelService := context.WithCancel(t.Context())
+		defer cancelService()
+		fcu := mock_services.NewForkChoiceStorageMock(t)
+		service := NewExecutionPayloadService(serviceCtx, fcu, &clparams.MainnetBeaconConfig, beaconevents.NewEventEmitter(), nil)
+		blockRoot := common.HexToHash("0x1234")
+		fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+		started := make(chan struct{})
+		release := make(chan struct{})
+		done := make(chan struct{})
+		var releaseOnce sync.Once
+		t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+		fcu.OnExecutionPayloadAtFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error {
+			close(started)
+			<-release
+			close(done)
+			return nil
+		}
+		verdict := make(chan error, 1)
+		go func() {
+			verdict <- service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 1))
+		}()
+		receiveWithTimeout(t, started, "payload import did not start")
+		select {
+		case err := <-verdict:
+			require.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("gossip verdict waited for payload import")
+		}
 
-	_, _, ok := fcu.TryBeginPayloadPreparation(t.Context(), 100, 100)
-	require.False(t, ok)
-	releaseOnce.Do(func() { close(release) })
-	receiveWithTimeout(t, done, "payload import did not finish")
-	require.Eventually(t, func() bool {
+		_, _, ok := fcu.TryBeginPayloadPreparation(t.Context(), 100, 100)
+		require.False(t, ok)
+		releaseOnce.Do(func() { close(release) })
+		receiveWithTimeout(t, done, "payload import did not finish")
+		synctest.Wait()
 		_, finish, available := fcu.TryBeginPayloadPreparation(t.Context(), 100, 100)
+		require.True(t, available)
 		if available {
 			finish()
 		}
-		return available
-	}, 5*time.Second, 10*time.Millisecond)
+	})
 }
 
 func TestExecutionPayloadServiceReleasesOwnershipWhenGossipEmitPanics(t *testing.T) {
@@ -1409,30 +1461,31 @@ func TestExecutionPayloadServiceReleasesOwnershipWhenGossipEmitPanics(t *testing
 }
 
 func TestExecutionPayloadServiceRecoversPanickingImport(t *testing.T) {
-	output := captureServiceLogs(t)
-	service, fcu := setupExecutionPayloadService(t)
-	impl := service.(*executionPayloadService)
-	blockRoot := common.HexToHash("0x1234")
-	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
-	importStarted := make(chan struct{})
-	fcu.OnExecutionPayloadAtFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error {
-		close(importStarted)
-		panic("payload import panic")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		output := captureServiceLogs(t)
+		service, fcu := setupExecutionPayloadService(t)
+		impl := service.(*executionPayloadService)
+		blockRoot := common.HexToHash("0x1234")
+		fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+		importStarted := make(chan struct{})
+		fcu.OnExecutionPayloadAtFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error {
+			close(importStarted)
+			panic("payload import panic")
+		}
 
-	require.NoError(t, service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 1)))
-	receiveWithTimeout(t, importStarted, "payload import did not start")
-	requireEnvelopeImportReleased(t, fcu, blockRoot, 1)
-	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
-	require.Eventually(t, func() bool {
+		require.NoError(t, service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 1)))
+		receiveWithTimeout(t, importStarted, "payload import did not start")
+		requireEnvelopeImportReleased(t, fcu, blockRoot, 1)
+		require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+		synctest.Wait()
 		_, finish, available := fcu.TryBeginPayloadPreparation(t.Context(), 100, 100)
+		require.True(t, available)
 		if available {
 			finish()
 		}
-		return available
-	}, 5*time.Second, 10*time.Millisecond)
-	require.Contains(t, output.String(), "Recovered from panicking execution payload envelope import")
-	require.Contains(t, output.String(), "payload import panic")
+		require.Contains(t, output.String(), "Recovered from panicking execution payload envelope import")
+		require.Contains(t, output.String(), "payload import panic")
+	})
 }
 
 func TestExecutionPayloadServiceAcceptsValidatedEnvelopeWithIndicesPending(t *testing.T) {
@@ -1836,80 +1889,81 @@ func TestExecutionPayloadServicePendingQueueOwnsBoundedBytes(t *testing.T) {
 }
 
 func TestExecutionPayloadServiceQueuesValidatedEnvelopeWhenBackgroundImportBytesAreExhausted(t *testing.T) {
-	cfg := &clparams.MainnetBeaconConfig
-	fcu := mock_services.NewForkChoiceStorageMock(t)
-	observer := &pendingHoldSeenObserver{
-		ForkChoiceStorageMock: fcu,
-		seenKey:               seenEnvelopeKey{common.Hash{5}, 5},
-	}
-	service := NewExecutionPayloadService(t.Context(), observer, cfg, beaconevents.NewEventEmitter(), nil)
-	impl := service.(*executionPayloadService)
-	observer.service = impl
-	impl.pending.stopAndWait()
-	largeTransaction := make([]byte, int(clparams.MaxChunkSize)-1024)
-	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 6)
-	for i := range envelopes {
-		slot := uint64(100)
-		if i == 4 {
-			slot = 200
+	synctest.Test(t, func(t *testing.T) {
+		cfg := &clparams.MainnetBeaconConfig
+		fcu := mock_services.NewForkChoiceStorageMock(t)
+		observer := &pendingHoldSeenObserver{
+			ForkChoiceStorageMock: fcu,
+			seenKey:               seenEnvelopeKey{common.Hash{5}, 5},
 		}
-		root := common.Hash{byte(i + 1)}
-		builderIndex := uint64(i + 1)
-		fcu.Blocks[root] = newTestGloasBlock(slot, builderIndex)
-		envelopes[i] = newTestSignedEnvelope(slot, root, builderIndex)
-		envelopes[i].Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{largeTransaction})
-	}
+		service := NewExecutionPayloadService(t.Context(), observer, cfg, beaconevents.NewEventEmitter(), nil)
+		impl := service.(*executionPayloadService)
+		observer.service = impl
+		impl.pending.stopAndWait()
+		largeTransaction := make([]byte, int(clparams.MaxChunkSize)-1024)
+		envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 6)
+		for i := range envelopes {
+			slot := uint64(100)
+			if i == 4 {
+				slot = 200
+			}
+			root := common.Hash{byte(i + 1)}
+			builderIndex := uint64(i + 1)
+			fcu.Blocks[root] = newTestGloasBlock(slot, builderIndex)
+			envelopes[i] = newTestSignedEnvelope(slot, root, builderIndex)
+			envelopes[i].Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{largeTransaction})
+		}
 
-	importsStarted := make(chan struct{}, len(envelopes))
-	release := make(chan struct{})
-	var releaseOnce sync.Once
-	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
-	var imports atomic.Int32
-	fcu.OnExecutionPayloadAtFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error {
-		imports.Add(1)
-		importsStarted <- struct{}{}
-		<-release
-		return nil
-	}
+		importsStarted := make(chan struct{}, len(envelopes))
+		release := make(chan struct{})
+		var releaseOnce sync.Once
+		t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+		var imports atomic.Int32
+		fcu.OnExecutionPayloadAtFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error {
+			imports.Add(1)
+			importsStarted <- struct{}{}
+			<-release
+			return nil
+		}
 
-	for _, envelope := range envelopes[:4] {
-		require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
-	}
-	for range 4 {
-		receiveWithTimeout(t, importsStarted, "payload import did not start")
-	}
+		for _, envelope := range envelopes[:4] {
+			require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+		}
+		for range 4 {
+			receiveWithTimeout(t, importsStarted, "payload import did not start")
+		}
 
-	fifth := envelopes[4]
-	err := service.ProcessMessage(t.Context(), nil, fifth)
-	require.ErrorIs(t, err, ErrIgnore)
-	require.Equal(t, int32(1), impl.pending.count.Load())
-	require.Equal(t, uint64(fifth.EncodingSizeSSZ()), impl.pendingBytes.Load())
-	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{fifth.Message.BeaconBlockRoot, fifth.Message.BuilderIndex}))
-	requireEnvelopeImportReleased(t, fcu, fifth.Message.BeaconBlockRoot, fifth.Message.BuilderIndex)
-	_, _, ok := fcu.TryBeginPayloadPreparation(t.Context(), 200, 201)
-	require.False(t, ok)
+		fifth := envelopes[4]
+		err := service.ProcessMessage(t.Context(), nil, fifth)
+		require.ErrorIs(t, err, ErrIgnore)
+		require.Equal(t, int32(1), impl.pending.count.Load())
+		require.Equal(t, uint64(fifth.EncodingSizeSSZ()), impl.pendingBytes.Load())
+		require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{fifth.Message.BeaconBlockRoot, fifth.Message.BuilderIndex}))
+		requireEnvelopeImportReleased(t, fcu, fifth.Message.BeaconBlockRoot, fifth.Message.BuilderIndex)
+		_, _, ok := fcu.TryBeginPayloadPreparation(t.Context(), 200, 201)
+		require.False(t, ok)
 
-	releaseOnce.Do(func() { close(release) })
-	require.Eventually(t, func() bool {
+		releaseOnce.Do(func() { close(release) })
+		synctest.Wait()
 		_, finish, available := fcu.TryBeginPayloadPreparation(t.Context(), 100, 101)
+		require.True(t, available)
 		if available {
 			finish()
 		}
-		return available
-	}, 5*time.Second, 10*time.Millisecond)
-	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelopes[5]))
-	receiveWithTimeout(t, importsStarted, "sixth payload import did not start")
+		require.NoError(t, service.ProcessMessage(t.Context(), nil, envelopes[5]))
+		receiveWithTimeout(t, importsStarted, "sixth payload import did not start")
 
-	impl.pending.processPending(t.Context())
-	receiveWithTimeout(t, importsStarted, "pending payload import did not start")
-	require.Zero(t, impl.pending.count.Load())
-	require.Zero(t, impl.pendingBytes.Load())
-	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{fifth.Message.BeaconBlockRoot, fifth.Message.BuilderIndex}))
-	_, finish, ok := fcu.TryBeginPayloadPreparation(t.Context(), 200, 201)
-	require.True(t, ok)
-	finish()
-	require.Equal(t, int32(6), imports.Load())
-	require.NotContains(t, observer.seenAtBegins, true)
+		impl.pending.processPending(t.Context())
+		receiveWithTimeout(t, importsStarted, "pending payload import did not start")
+		require.Zero(t, impl.pending.count.Load())
+		require.Zero(t, impl.pendingBytes.Load())
+		require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{fifth.Message.BeaconBlockRoot, fifth.Message.BuilderIndex}))
+		_, finish, ok = fcu.TryBeginPayloadPreparation(t.Context(), 200, 201)
+		require.True(t, ok)
+		finish()
+		require.Equal(t, int32(6), imports.Load())
+		require.NotContains(t, observer.seenAtBegins, true)
+	})
 }
 
 func TestExecutionPayloadServiceIgnoresEnvelopeWhenBackgroundImportBytesAreExhaustedAndPendingQueueRefuses(t *testing.T) {
@@ -2045,43 +2099,44 @@ func TestExecutionPayloadServicePendingEnvelopePublicationUsesGossipVerdict(t *t
 }
 
 func TestExecutionPayloadServiceProcessesEnvelopeWhenBlockArrivesBeforeAdmission(t *testing.T) {
-	service, forkchoiceMock := setupExecutionPayloadService(t)
-	blockRoot := common.Hash{1}
-	envelope := newTestSignedEnvelope(100, blockRoot, 1)
-	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 1)
-	type importCall struct {
-		envelope        *cltypes.SignedExecutionPayloadEnvelope
-		checkBlobData   bool
-		validatePayload bool
-	}
-	imports := make(chan importCall, 1)
-	forkchoiceMock.OnExecutionPayloadFn = func(_ context.Context, got *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
-		imports <- importCall{got, checkBlobData, validatePayload}
-		return nil
-	}
+	synctest.Test(t, func(t *testing.T) {
+		service, forkchoiceMock := setupExecutionPayloadService(t)
+		blockRoot := common.Hash{1}
+		envelope := newTestSignedEnvelope(100, blockRoot, 1)
+		forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+		type importCall struct {
+			envelope        *cltypes.SignedExecutionPayloadEnvelope
+			checkBlobData   bool
+			validatePayload bool
+		}
+		imports := make(chan importCall, 1)
+		forkchoiceMock.OnExecutionPayloadFn = func(_ context.Context, got *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
+			imports <- importCall{got, checkBlobData, validatePayload}
+			return nil
+		}
 
-	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
-	select {
-	case got := <-imports:
-		require.Same(t, envelope, got.envelope)
-		require.True(t, got.checkBlobData)
-		require.True(t, got.validatePayload)
-	case <-time.After(5 * time.Second):
-		t.Fatal("payload import did not run")
-	}
-	claimCtx, cancelClaim := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancelClaim()
-	_, err := forkchoiceMock.ClaimExecutionPayloadEnvelopeForGossip(claimCtx, blockRoot, 1)
-	require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
-	require.Eventually(t, func() bool {
+		require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+		select {
+		case got := <-imports:
+			require.Same(t, envelope, got.envelope)
+			require.True(t, got.checkBlobData)
+			require.True(t, got.validatePayload)
+		case <-time.After(5 * time.Second):
+			t.Fatal("payload import did not run")
+		}
+		claimCtx, cancelClaim := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancelClaim()
+		_, err := forkchoiceMock.ClaimExecutionPayloadEnvelopeForGossip(claimCtx, blockRoot, 1)
+		require.ErrorIs(t, err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen)
+		synctest.Wait()
 		_, finish, available := forkchoiceMock.TryBeginPayloadPreparation(t.Context(), 100, 100)
+		require.True(t, available)
 		if available {
 			finish()
 		}
-		return available
-	}, 5*time.Second, 10*time.Millisecond)
-	require.Zero(t, service.(*executionPayloadService).pending.count.Load())
-	require.Zero(t, service.(*executionPayloadService).pendingBytes.Load())
+		require.Zero(t, service.(*executionPayloadService).pending.count.Load())
+		require.Zero(t, service.(*executionPayloadService).pendingBytes.Load())
+	})
 }
 
 func TestExecutionPayloadServicePendingByteAdmissionConcurrent(t *testing.T) {

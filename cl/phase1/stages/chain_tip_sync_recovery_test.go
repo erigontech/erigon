@@ -85,6 +85,7 @@ type chainTipBatchForkGraph struct {
 	insertOnAdd bool
 	envReads    map[common.Hash]int
 	anchorSlot  *uint64
+	dumpErr     error
 }
 
 type chainTipBatchEnvelopeSentinel struct {
@@ -201,6 +202,9 @@ func (g *chainTipBatchForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltype
 func (g *chainTipBatchForkGraph) DumpEnvelopeOnDisk(root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	g.envelopesMu.Lock()
 	defer g.envelopesMu.Unlock()
+	if g.dumpErr != nil {
+		return g.dumpErr
+	}
 	g.envelopes[root] = envelope
 	return nil
 }
@@ -338,13 +342,14 @@ func newChainTipBatchFixtureWithBlob(t *testing.T, replayStatus execution_client
 	}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconCfg)
 	engine := &testExecutionEngine{payloadStatus: replayStatus}
+	emitter := beaconevents.NewEventEmitter()
 	store, err := forkchoice.NewForkChoiceStore(
 		clock,
 		anchorState,
 		engine,
 		pool.NewOperationsPool(beaconCfg),
 		graph,
-		beaconevents.NewEventEmitter(),
+		emitter,
 		synced_data.NewSyncedDataManager(beaconCfg, true),
 		nil,
 		public_keys_registry.NewInMemoryPublicKeysRegistry(),
@@ -376,6 +381,7 @@ func newChainTipBatchFixtureWithBlob(t *testing.T, replayStatus execution_client
 		indiciesDB:            mdbxtest.NewTestDB(t, dbcfg.ChainDB),
 		executionClient:       engine,
 		gloasPayloadValidator: engine,
+		emitter:               emitter,
 	}
 	return stageCfg, graph, parentRoot, fullChild, emptyChild, engine
 }

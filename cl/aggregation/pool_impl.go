@@ -52,7 +52,17 @@ var blsAggregate = bls.AggregateSignatures
 
 type signatureAggregator interface {
 	AddValidated(sig []byte) error
+	Add(sig *bls.Signature)
 	Compressed() [96]byte
+}
+
+// addSignature adds the vote's signature, decompressing it only when the caller has no decompressed copy.
+func addSignature(agg signatureAggregator, inAtt *solid.Attestation, sig *bls.Signature) error {
+	if sig != nil {
+		agg.Add(sig)
+		return nil
+	}
+	return agg.AddValidated(inAtt.Signature[:])
 }
 
 var newSignatureAggregator = func() signatureAggregator { return &bls.SignatureAggregator{} }
@@ -123,6 +133,10 @@ func NewAggregationPool(
 }
 
 func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
+	return p.AddVerifiedAttestation(inAtt, nil)
+}
+
+func (p *aggregationPoolImpl) AddVerifiedAttestation(inAtt *solid.Attestation, sig *bls.Signature) error {
 	// use hash of attestation data as key
 	hashRoot, err := inAtt.Data.HashSSZ()
 	if err != nil {
@@ -174,12 +188,12 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 		p.aggregates[hashRoot] = mergedAttestation
 	} else {
 		// Electra and after case, aggregate by committee
-		return p.aggregateByCommittee(inAtt, clversion)
+		return p.aggregateByCommittee(inAtt, clversion, sig)
 	}
 	return nil
 }
 
-func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, version clparams.StateVersion) error {
+func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, version clparams.StateVersion, sig *bls.Signature) error {
 	indices := inAtt.CommitteeBits.GetOnIndices()
 	if len(indices) != 1 {
 		// it's composed of multiple committees, so ignore
@@ -200,24 +214,24 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, ver
 	if p.votedForOtherData(perCommittee, key, inAtt) {
 		return ErrVoterAlreadyCounted
 	}
-	if err := p.addCommitteeVote(perCommittee, key, inAtt, version); err != nil {
+	if err := p.addCommitteeVote(perCommittee, key, inAtt, version, sig); err != nil {
 		return err
 	}
 	return p.countVoters(perCommittee, inAtt)
 }
 
-func (p *aggregationPoolImpl) addCommitteeVote(perCommittee slotCommittee, key keyAggrInCommittee, inAtt *solid.Attestation, version clparams.StateVersion) error {
+func (p *aggregationPoolImpl) addCommitteeVote(perCommittee slotCommittee, key keyAggrInCommittee, inAtt *solid.Attestation, version clparams.StateVersion, sig *bls.Signature) error {
 	entry, exist := p.aggregatesInCommittee[key]
 	if exist {
-		return entry.add(inAtt, version)
+		return entry.add(inAtt, version, sig)
 	}
 	_, pinned := p.pinned[key.dataRoot]
 	full := len(p.dataPerCommittee[perCommittee]) >= maxDataPerCommittee
 	if full && !(pinned && p.hasUnpinnedData(perCommittee)) {
-		return p.addRefusedVote(perCommittee, key, inAtt, version)
+		return p.addRefusedVote(perCommittee, key, inAtt, version, sig)
 	}
 	// Decode the signature before making room, so a rejected attestation evicts nothing.
-	entry, err := newCommitteeAggregate(inAtt, version)
+	entry, err := newCommitteeAggregate(inAtt, version, sig)
 	if err != nil {
 		return err
 	}
@@ -263,9 +277,9 @@ func (p *aggregationPoolImpl) countVoters(perCommittee slotCommittee, inAtt *sol
 	return nil
 }
 
-func newCommitteeAggregate(inAtt *solid.Attestation, version clparams.StateVersion) (*committeeAggregate, error) {
+func newCommitteeAggregate(inAtt *solid.Attestation, version clparams.StateVersion, sig *bls.Signature) (*committeeAggregate, error) {
 	signature := newSignatureAggregator()
-	if err := signature.AddValidated(inAtt.Signature[:]); err != nil {
+	if err := addSignature(signature, inAtt, sig); err != nil {
 		return nil, err
 	}
 	attestation := inAtt.Copy()
@@ -274,7 +288,7 @@ func newCommitteeAggregate(inAtt *solid.Attestation, version clparams.StateVersi
 }
 
 // add merges a vote of the same data and committee into the aggregate.
-func (entry *committeeAggregate) add(inAtt *solid.Attestation, version clparams.StateVersion) error {
+func (entry *committeeAggregate) add(inAtt *solid.Attestation, version clparams.StateVersion, sig *bls.Signature) error {
 	att := entry.attestation
 	if utils.IsOverlappingSSZBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
 		// the on bit is already set, so ignore
@@ -287,7 +301,7 @@ func (entry *committeeAggregate) add(inAtt *solid.Attestation, version clparams.
 		log.Debug("failed to merge aggregation bits", "err", err)
 		return err
 	}
-	if err := entry.signature.AddValidated(inAtt.Signature[:]); err != nil {
+	if err := addSignature(entry.signature, inAtt, sig); err != nil {
 		return err
 	}
 	mergedAttestation := &solid.Attestation{
@@ -358,16 +372,16 @@ func (p *aggregationPoolImpl) storePinnedAggregate(perCommittee slotCommittee, k
 
 // addRefusedVote adds a vote for data that a full committee does not store. The data replaces the
 // committee's weakest data once it has more voters; until then its votes are kept aside.
-func (p *aggregationPoolImpl) addRefusedVote(perCommittee slotCommittee, key keyAggrInCommittee, inAtt *solid.Attestation, version clparams.StateVersion) error {
+func (p *aggregationPoolImpl) addRefusedVote(perCommittee slotCommittee, key keyAggrInCommittee, inAtt *solid.Attestation, version clparams.StateVersion, sig *bls.Signature) error {
 	refused := p.refused[perCommittee]
 	entry, exist := refused[key.dataRoot]
 	if exist {
-		if err := entry.add(inAtt, version); err != nil {
+		if err := entry.add(inAtt, version, sig); err != nil {
 			return err
 		}
 	} else {
 		var err error
-		if entry, err = newCommitteeAggregate(inAtt, version); err != nil {
+		if entry, err = newCommitteeAggregate(inAtt, version, sig); err != nil {
 			return err
 		}
 		if !p.evictWeakestRefused(refused, p.refusedLimit(perCommittee)) {

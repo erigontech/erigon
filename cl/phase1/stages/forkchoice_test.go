@@ -561,9 +561,13 @@ func requireLockOrderOperationCompletes(t *testing.T, fixture lockOrderFixture, 
 	}()
 	time.Sleep(250 * time.Millisecond)
 
+	// A shared index lets the slashing pass the intersection check and reach the fork-choice lock.
+	slashing := cltypes.NewAttesterSlashing(clparams.Phase0Version)
+	slashing.Attestation_1.AttestingIndices.Append(0)
+	slashing.Attestation_2.AttestingIndices.Append(0)
 	slashingDone := make(chan error, 1)
 	go func() {
-		slashingDone <- fixture.cfg.forkChoice.OnAttesterSlashing(cltypes.NewAttesterSlashing(clparams.Phase0Version), true)
+		slashingDone <- fixture.cfg.forkChoice.OnAttesterSlashing(slashing, true)
 	}()
 	select {
 	case err := <-slashingDone:
@@ -726,18 +730,18 @@ func (m *deferredOnceExecutionModule) UpdateForkChoice(context.Context, common.H
 }
 
 func TestGloasForkChoiceRejectedAsBusyIsResent(t *testing.T) {
-	cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
-	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
-	module := &deferredOnceExecutionModule{firstResult: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}}
-	direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
-	require.NoError(t, err)
-	engine.forkChoiceFn = direct.ForkChoiceUpdate
-
 	synctest.Test(t, func(t *testing.T) {
+		cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+		bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+		module := &deferredOnceExecutionModule{firstResult: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}}
+		direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+		require.NoError(t, err)
+		engine.forkChoiceFn = direct.ForkChoiceUpdate
+
 		started := time.Now()
 		previousExecutionHead := cfg.executionHead
 		cfg.sleepForSlotLastWake = sleepForSlotWake{root: headRoot, executionHead: bid.ParentBlockHash, at: started}
-		_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+		_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
 		require.NoError(t, err)
 		require.Equal(t, 1, module.forkChoiceCalls)
 		require.Equal(t, previousExecutionHead, cfg.executionHead, "a busy execution module did not apply the head")

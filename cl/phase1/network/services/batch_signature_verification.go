@@ -24,7 +24,7 @@ const (
 	peerBanQueueSize                     = 256
 )
 
-var blsVerifyMultipleSignatures = bls.VerifyMultipleSignatures
+var blsVerifyMultipleSignatures = bls.VerifyMultipleSignaturesDecompressed
 
 type BatchSignatureVerifier struct {
 	sentinel                   sentinelproto.SentinelClient
@@ -50,8 +50,18 @@ type AggregateVerificationData struct {
 	Pks         [][]byte
 	F           func()
 	SendingPeer *sentinelproto.Peer
+	verified    []bls.Signature
 	result      chan error
 	waiterDone  <-chan struct{}
+}
+
+// VerifiedSignature returns signature i as the batch verification decompressed it, or nil when it was verified on its
+// own after a failed batch.
+func (v *AggregateVerificationData) VerifiedSignature(i int) *bls.Signature {
+	if i >= len(v.verified) {
+		return nil
+	}
+	return &v.verified[i]
 }
 
 func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinelproto.SentinelClient) *BatchSignatureVerifier {
@@ -252,8 +262,14 @@ func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificat
 			append(pks, v.Pks...),
 			append(fns, v.F)
 	}
-	if err := b.runBatchVerification(signatures, signRoots, pks); err != nil {
+	verified, err := b.runBatchVerification(signatures, signRoots, pks)
+	if err != nil {
 		return b.handleIncorrectSignatures(aggregateVerificationData), err
+	}
+	if len(verified) == len(signatures) {
+		for _, v := range aggregateVerificationData {
+			v.verified, verified = verified[:len(v.Signatures):len(v.Signatures)], verified[len(v.Signatures):]
+		}
 	}
 
 	for _, v := range aggregateVerificationData {
@@ -274,7 +290,7 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 		_ = b.fallbackVerificationLimit.Acquire(context.Background(), weight)
 		group.Go(func() {
 			defer b.fallbackVerificationLimit.Release(weight)
-			verificationResults[i].valid, verificationResults[i].err = blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
+			verificationResults[i].valid, _, verificationResults[i].err = blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		})
 	}
 	group.Wait()
@@ -326,19 +342,19 @@ func (v *AggregateVerificationData) report(err error) bool {
 	}
 }
 
-func (b *BatchSignatureVerifier) runBatchVerification(signatures, signRoots, pks [][]byte) error {
+func (b *BatchSignatureVerifier) runBatchVerification(signatures, signRoots, pks [][]byte) ([]bls.Signature, error) {
 	start := time.Now()
-	valid, err := blsVerifyMultipleSignatures(signatures, signRoots, pks)
+	valid, verified, err := blsVerifyMultipleSignatures(signatures, signRoots, pks)
 	if err != nil {
-		return errors.New("batch signature verification failed with the error: " + err.Error())
+		return nil, errors.New("batch signature verification failed with the error: " + err.Error())
 	}
 	monitor.ObserveBatchVerificationThroughput(time.Since(start), len(signatures))
 
 	if !valid {
-		return ErrInvalidBlsSignature
+		return nil, ErrInvalidBlsSignature
 	}
 
-	return nil
+	return verified, nil
 }
 
 func (b *BatchSignatureVerifier) FlushAggregateProofs(ctx context.Context) error {

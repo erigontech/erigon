@@ -45,12 +45,12 @@ func newRepeatedSignatureEntry(signature byte, signatureCount int) *AggregateVer
 
 func TestBatchSignatureVerifierReportsEachEntryResult(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		if len(signatures) > 1 {
 			return false, nil
 		}
 		return signatures[0][0] == 1, nil
-	}
+	})
 
 	verifier := NewBatchSignatureVerifier(t.Context(), nil)
 
@@ -110,7 +110,7 @@ func TestBatchSignatureVerifierChecksFailedBatchEntriesConcurrently(t *testing.T
 		firstStarted := make(chan struct{})
 		secondDone := make(chan struct{})
 		laterEntriesDone := make(chan struct{})
-		blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 			if len(signatures) > 1 {
 				return false, nil
 			}
@@ -127,7 +127,7 @@ func TestBatchSignatureVerifierChecksFailedBatchEntriesConcurrently(t *testing.T
 				close(laterEntriesDone)
 			}
 			return signature%2 == 1, nil
-		}
+		})
 
 		callbackOrder := make([]byte, 0, 2)
 		resultOrder := make(chan error, 3)
@@ -163,12 +163,12 @@ func TestBatchSignatureVerifierCapsFallbackWeightAtBudget(t *testing.T) {
 	t.Cleanup(func() { runtime.GOMAXPROCS(previousGOMAXPROCS) })
 
 	synctest.Test(t, func(t *testing.T) {
-		blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 			if signatures[0][0] == 1 && signatures[len(signatures)-1][0] == 2 {
 				return false, nil
 			}
 			return signatures[0][0] == 1, nil
-		}
+		})
 
 		results := make(chan error, 2)
 		entries := []*AggregateVerificationData{newRepeatedSignatureEntry(1, 3), newRepeatedSignatureEntry(2, 1)}
@@ -198,7 +198,7 @@ func TestBatchSignatureVerifierSharesFallbackConcurrencyBudget(t *testing.T) {
 		release := func() { releaseOnce.Do(func() { close(releaseFallbacks) }) }
 		t.Cleanup(release)
 		var inFlightWeight atomic.Int32
-		blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 			if signatures[0][0] == 1 && signatures[len(signatures)-1][0] == 2 {
 				return false, nil
 			}
@@ -211,7 +211,7 @@ func TestBatchSignatureVerifierSharesFallbackConcurrencyBudget(t *testing.T) {
 			<-releaseFallbacks
 			inFlightWeight.Add(-weight)
 			return true, nil
-		}
+		})
 
 		verifier := NewBatchSignatureVerifier(t.Context(), nil)
 		var group sync.WaitGroup
@@ -241,7 +241,7 @@ func TestVerifyPayloadAttestationBatchMatchesSinglePath(t *testing.T) {
 	realVerifyMultipleSignatures := blsVerifyMultipleSignatures
 	firstBatchSize := make(chan int, 1)
 	var recordFirstBatch sync.Once
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, []bls.Signature, error) {
 		recordFirstBatch.Do(func() { firstBatchSize <- len(signatures) })
 		return realVerifyMultipleSignatures(signatures, signRoots, pks)
 	}
@@ -326,9 +326,9 @@ func TestVerifyPayloadAttestationBatchMatchesSinglePath(t *testing.T) {
 
 func TestBatchSignatureVerifierUsesPayloadAttestationFlushInterval(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return true, nil
-	}
+	})
 	require.Equal(t, 20*time.Millisecond, payloadAttestationBatchCheckInterval)
 
 	synctest.Test(t, func(t *testing.T) {
@@ -439,12 +439,12 @@ func TestBatchSignatureVerifierUsesPayloadAttestationFlushInterval(t *testing.T)
 
 func TestBatchSignatureVerifierContinuesAfterBlockingBan(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		if len(signatures) > 1 {
 			return false, nil
 		}
 		return signatures[0][0] == 1, nil
-	}
+	})
 
 	banStarted := make(chan struct{})
 	releaseBan := make(chan struct{})
@@ -496,12 +496,12 @@ func TestBatchSignatureVerifierContinuesAfterBlockingBan(t *testing.T) {
 
 func TestBatchSignatureVerifierBoundsBlockingBans(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		if len(signatures) > 1 {
 			return false, nil
 		}
 		return signatures[0][0] == 1, nil
-	}
+	})
 
 	banStarted := make(chan struct{})
 	releaseBan := make(chan struct{})
@@ -555,9 +555,9 @@ func TestBatchSignatureVerifierBoundsBlockingBans(t *testing.T) {
 
 func TestBatchSignatureVerifierDoesNotBanWaitedEntry(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return false, nil
-	}
+	})
 
 	banStarted := make(chan struct{})
 	releaseBan := make(chan struct{})
@@ -592,9 +592,9 @@ func TestBatchSignatureVerifierDoesNotBanWaitedEntry(t *testing.T) {
 
 func TestBatchSignatureVerifierBansWhenWaiterCancelsAfterAdmission(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return false, nil
-	}
+	})
 
 	banStarted := make(chan struct{})
 	releaseBan := make(chan struct{})
@@ -650,9 +650,9 @@ func waitForQueuedVerification(t *testing.T, queue chan *AggregateVerificationDa
 
 func TestBatchSignatureVerifierReportsBeforeBlockingCallback(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return true, nil
-	}
+	})
 
 	verifier := NewBatchSignatureVerifier(t.Context(), nil)
 	verifier.Start()
@@ -702,9 +702,9 @@ func TestBatchSignatureVerifierReportsBeforeBlockingCallback(t *testing.T) {
 
 func TestBatchSignatureVerifierContinuesWhileCallbackBlocked(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return true, nil
-	}
+	})
 
 	verifier := NewBatchSignatureVerifier(t.Context(), nil)
 	verifier.Start()
@@ -786,9 +786,9 @@ func TestBatchSignatureVerifierContinuesWhileCallbackBlocked(t *testing.T) {
 
 func TestBatchSignatureVerifierImmediateVerificationRunsCallback(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return true, nil
-	}
+	})
 
 	verifier := NewBatchSignatureVerifier(t.Context(), nil)
 	callbackRan := false
@@ -814,7 +814,7 @@ func TestBatchSignatureVerifierWaitReturnsIgnoreOnContextCancel(t *testing.T) {
 
 func TestBatchSignatureVerifierFlushWaitsForAggregateCallbacks(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+	blsVerifyMultipleSignatures = withoutDecompressed(func(_, _, _ [][]byte) (bool, error) { return true, nil })
 	verifier := NewBatchSignatureVerifier(t.Context(), nil)
 	entry := newRepeatedSignatureEntry(1, 1)
 	applied := false
@@ -823,4 +823,28 @@ func TestBatchSignatureVerifierFlushWaitsForAggregateCallbacks(t *testing.T) {
 	verifier.Start()
 	require.NoError(t, verifier.FlushAggregateProofs(t.Context()))
 	require.True(t, applied, "flush returned before the prior aggregate was applied")
+}
+
+func TestBatchVerificationHandsEachItemItsDecompressedSignatures(t *testing.T) {
+	root := make([]byte, 32)
+	items := make([]*AggregateVerificationData, 3)
+	for i := range items {
+		key, err := bls.GenerateKey()
+		require.NoError(t, err)
+		items[i] = &AggregateVerificationData{
+			Signatures: [][]byte{key.Sign(root).Bytes()},
+			SignRoots:  [][]byte{root},
+			Pks:        [][]byte{bls.CompressPublicKey(key.PublicKey())},
+			F:          func() {},
+		}
+	}
+	verifier := NewBatchSignatureVerifier(t.Context(), nil)
+
+	_, err := verifier.processSignatureVerification(items)
+	require.NoError(t, err)
+	for _, item := range items {
+		require.NotNil(t, item.VerifiedSignature(0))
+		require.Equal(t, item.Signatures[0], item.VerifiedSignature(0).Bytes())
+		require.Nil(t, item.VerifiedSignature(1))
+	}
 }

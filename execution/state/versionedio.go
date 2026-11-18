@@ -2160,14 +2160,6 @@ func versionedUpdateCodeHash(vm *VersionMap, addr accounts.Address, txIndex int)
 	return accounts.CodeHash{}, false
 }
 
-func versionedUpdateStorage(vm *VersionMap, addr accounts.Address, key accounts.StorageKey, txIndex int) (uint256.Int, bool) {
-	val, res, ok := liveStorageValue(vm, addr, key, txIndex)
-	if ok && res.Status() != MVReadResultNone {
-		return val, true
-	}
-	return uint256.Int{}, false
-}
-
 // applyVersionedUpdates overlays versionMap field cells onto account, so field-only updates from prior txs are not missed when only a subset of fields was read.
 func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, account accounts.Account) accounts.Account {
 	vr.versionMap.applySubFieldWrites(address, vr.txIndex, &account)
@@ -2203,25 +2195,8 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 
 	// Check version map for storage written by prior transactions.
 	if vr.versionMap != nil {
-		if state, _, destroyedAt, _ := vr.versionMap.AccountLifecycleAt(address, vr.txIndex); state != LifecycleLive {
-			// Self-destructed in-block: a slot cell at or below the destruct is
-			// wiped to zero; only a write above it survives.
-			if val, res, ok := vr.versionMap.ReadStorage(address, key, vr.txIndex); ok &&
-				res.resolved() && res.DepIdx() > destroyedAt {
-				return val, true, nil
-			}
-			return uint256.Int{}, false, nil
-		}
-		// A creation clears the slots of the prior incarnation without writing them, and a
-		// seeded origin can hold their old values.
-		if created, res, ok := vr.versionMap.ReadCreateContract(address, vr.txIndex); ok && created && res.resolved() {
-			if val, slot, ok := liveStorageValue(vr.versionMap, address, key, vr.txIndex); ok && slot.Status() != MVReadResultNone && slot.DepIdx() >= res.DepIdx() {
-				return val, true, nil
-			}
-			return uint256.Int{}, false, nil
-		}
-		if val, ok := versionedUpdateStorage(vr.versionMap, address, key, vr.txIndex); ok {
-			return val, true, nil
+		if val, res, ok, wipe := liveStorageValue(vr.versionMap, address, key, vr.txIndex); ok && res.Status() != MVReadResultNone {
+			return val, wipe == wipeNone, nil
 		}
 	}
 
