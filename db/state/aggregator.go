@@ -1136,11 +1136,7 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 				return err
 			}
 
-			dd, err := kv.String2Domain(d.FilenameBase)
-			if err != nil {
-				return err
-			}
-			static.d[dd] = sf
+			static.d[id] = sf
 			return nil
 		})
 	}

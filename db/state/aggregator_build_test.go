@@ -66,6 +66,17 @@ func requireSnapshotFilesUnchanged(t *testing.T, files map[string]os.FileInfo) {
 	}
 }
 
+func removeSnapshotFiles(t *testing.T, pattern string) []string {
+	t.Helper()
+	paths, err := filepath.Glob(pattern)
+	require.NoError(t, err)
+	require.NotEmpty(t, paths, "no snapshot files match %s", pattern)
+	for _, path := range paths {
+		require.NoError(t, dir.RemoveFile(path))
+	}
+	return paths
+}
+
 func TestAggregatorBuildRecoversUnindexedFiles(t *testing.T) {
 	const stepSize = uint64(10)
 	accessorExt := "kvi"
@@ -116,12 +127,7 @@ func TestAggregatorBuildRecoversUnindexedFiles(t *testing.T) {
 			if test.accessorDir {
 				folder = dirs.SnapAccessors
 			}
-			paths, err := filepath.Glob(filepath.Join(folder, test.pattern))
-			require.NoError(t, err)
-			require.Len(t, paths, 2)
-			for _, path := range paths {
-				require.NoError(t, dir.RemoveFile(path))
-			}
+			require.Len(t, removeSnapshotFiles(t, filepath.Join(folder, test.pattern)), 2)
 			agg = NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
 			t.Cleanup(agg.Close)
 			require.NoError(t, agg.OpenFolder(db))
@@ -264,12 +270,8 @@ func TestAggregatorBuildDefersNewlyEnabledDomain(t *testing.T) {
 	for step := range kv.Step(3) {
 		require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil))
 	}
-	var plan fileBuildPlan
-	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
-		var err error
-		plan, err = agg.planFileBuild(tx)
-		return err
-	}))
+	plan, err := agg.readFileBuildPlan(ctx, db)
+	require.NoError(t, err)
 	require.Equal(t, kv.Step(3), plan.firstStep)
 	agg.EnableDomain(kv.RCacheDomain)
 
@@ -416,12 +418,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 				if isIndex {
 					folder, filename = dirs.SnapIdx, kv.FileLogAddressIdx
 				}
-				paths, err := filepath.Glob(filepath.Join(folder, "*-"+filename+".*"))
-				require.NoError(t, err)
-				require.NotEmpty(t, paths)
-				for _, path := range paths {
-					require.NoError(t, dir.RemoveFile(path))
-				}
+				removeSnapshotFiles(t, filepath.Join(folder, "*-"+filename+".*"))
 				agg = NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
 				configure(agg)
 				t.Cleanup(agg.Close)
@@ -707,12 +704,7 @@ func TestAggregatorBuildRespectsSharedCeiling(t *testing.T) {
 				filepath.Join(dirs.SnapAccessors, "*-"+kv.FileLogAddressIdx+".*"),
 				filepath.Join(dirs.SnapDomain, test.accessors),
 			} {
-				paths, err := filepath.Glob(pattern)
-				require.NoError(t, err)
-				require.NotEmpty(t, paths)
-				for _, path := range paths {
-					require.NoError(t, dir.RemoveFile(path))
-				}
+				removeSnapshotFiles(t, pattern)
 			}
 			agg = NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
 			t.Cleanup(agg.Close)
