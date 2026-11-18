@@ -524,7 +524,9 @@ func (m *memoryMutationCursor) SeekBothExact(key, value []byte) ([]byte, []byte,
 
 	// isEntryDeleted already checks pair markers for tables classified as pure DupSort.
 	// Other tables, including custom DupSort tables, need the extra pair check.
-	if dbKey != nil && !m.isEntryDeleted(key, value) && (m.pureDupSort || !m.tableDeletions().isDupDeleted(key, value)) {
+	if dbKey != nil &&
+		!m.isEntryDeleted(key, value) &&
+		(m.pureDupSort || !m.tableDeletions().isDupDeleted(key, value)) {
 		m.currentDbEntry.key = dbKey
 		m.currentDbEntry.value = dbValue
 		m.currentMemEntry.key = key

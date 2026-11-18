@@ -1249,8 +1249,8 @@ func TestMemoryMutationConcurrentDeleteDupAndCursorRead(t *testing.T) {
 }
 
 func TestMemoryMutationSeekBothExactCustomDupSort(t *testing.T) {
-	for _, deleteKey := range []bool{false, true} {
-		t.Run(fmt.Sprintf("wholeKey=%t", deleteKey), func(t *testing.T) {
+	for _, operation := range []string{"DeleteExact", "Delete"} {
+		t.Run(operation, func(t *testing.T) {
 			const table = "CustomDupSort"
 			require.NotContains(t, kv.ChaindataTablesCfg, table)
 			db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
@@ -1264,7 +1264,7 @@ func TestMemoryMutationSeekBothExactCustomDupSort(t *testing.T) {
 			batch, err := membatchwithdb.NewMemoryBatch(nil)
 			require.NoError(t, err)
 			defer batch.Close()
-			if deleteKey {
+			if operation == "Delete" {
 				require.NoError(t, batch.Delete(table, key))
 			} else {
 				writer, err := batch.RwCursorDupSort(table)
@@ -1280,7 +1280,7 @@ func TestMemoryMutationSeekBothExactCustomDupSort(t *testing.T) {
 			require.Nil(t, got)
 			_, got, err = reader.SeekBothExact(key, kept)
 			require.NoError(t, err)
-			if deleteKey {
+			if operation == "Delete" {
 				require.Nil(t, got)
 			} else {
 				require.Equal(t, kept, got)
