@@ -2141,13 +2141,12 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	byUnversionedName := map[string][]version.VersionedFile{}
 	for _, group := range files {
 		for _, f := range group {
-			_, unversioned, _ := strings.Cut(f.Name, "-")
-			byUnversionedName[unversioned] = append(byUnversionedName[unversioned], f)
+			name := unversionedName(f.Name)
+			byUnversionedName[name] = append(byUnversionedName[name], f)
 		}
 	}
-	newest := func(masked string) (best version.VersionedFile, ok bool) {
-		_, unversioned, _ := strings.Cut(masked, "-")
-		for _, f := range byUnversionedName[unversioned] {
+	newest := func(name string) (best version.VersionedFile, ok bool) {
+		for _, f := range byUnversionedName[unversionedName(name)] {
 			if !ok || f.Version.Greater(best.Version) {
 				best, ok = f, true
 			}
@@ -2155,13 +2154,9 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 		return best, ok
 	}
 	checkIdx := func(idxName string, minSup version.Version) error {
-		masked, err := version.ReplaceVersionWithMask(idxName)
-		if err != nil {
-			return err
-		}
-		idx, ok := newest(masked)
+		idx, ok := newest(idxName)
 		if !ok {
-			return fmt.Errorf("index file %s: file not found", masked)
+			return fmt.Errorf("index file %s: file not found", unversionedName(idxName))
 		}
 		if idx.Version.Less(minSup) {
 			return fmt.Errorf("index file %s: version %s is less than supported version %s", idx.Name, idx.Version, minSup)
@@ -2219,15 +2214,9 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 		// check that all files exist
 		for _, snapType := range []string{"headers", "transactions", "bodies"} {
 			segName := strings.Replace(headerSegName, "headers", snapType, 1)
-			segVer := verMap[snapType]["seg"].Current
-			segName = strings.Replace(segName, headerSegVer.String(), segVer.String(), 1)
-			segNameMasked, err := version.ReplaceVersionWithMask(segName)
-			if err != nil {
-				return err
-			}
-			seg, ok := newest(segNameMasked)
+			seg, ok := newest(segName)
 			if !ok {
-				return fmt.Errorf("missing file-%s", segNameMasked)
+				return fmt.Errorf("missing file-%s", unversionedName(segName))
 			}
 			if !verMap[snapType]["seg"].Supports(seg.Version) {
 				return fmt.Errorf("expected version %s, filename: %s", verMap[snapType]["seg"].Current.String(), seg.Name)

@@ -326,27 +326,6 @@ func Test_CheckEmptyFutureForkTablesTolerated(t *testing.T) {
 	}
 }
 
-func Test_SingleFileWithUnsupportedVersion(t *testing.T) {
-	tests := []struct {
-		folder func(datadir.Dirs) string
-		name   string
-	}{
-		{func(d datadir.Dirs) string { return d.Snap }, "000020-000030-beaconblocks.seg"},
-		{func(d datadir.Dirs) string { return d.Snap }, "000020-000030-beaconblocks.idx"},
-		{func(d datadir.Dirs) string { return d.SnapCaplin }, "000020-000030-ActiveValidatorIndicies.seg"},
-		{func(d datadir.Dirs) string { return d.SnapCaplin }, "000020-000030-ActiveValidatorIndicies.idx"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dirs := datadir.New(t.TempDir())
-			touchFiles(t, dirs, []snapRange{{0, 10}, {10, 20}, {20, 30}})
-			delFile(t, tt.folder(dirs), "v1.0-"+tt.name)
-			touchFile(t, tt.folder(dirs), "v0.9-"+tt.name)
-			require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
-		})
-	}
-}
-
 func Test_NonCanonicalPaddingRejected(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -368,8 +347,8 @@ func Test_NonCanonicalPaddingRejected(t *testing.T) {
 	}
 }
 
-func Test_LegacyVersionPrefix(t *testing.T) {
-	tests := []struct {
+func Test_CaplinFileVersionPrefix(t *testing.T) {
+	files := []struct {
 		folder func(datadir.Dirs) string
 		name   string
 	}{
@@ -378,20 +357,32 @@ func Test_LegacyVersionPrefix(t *testing.T) {
 		{func(d datadir.Dirs) string { return d.SnapCaplin }, "000020-000030-ActiveValidatorIndicies.seg"},
 		{func(d datadir.Dirs) string { return d.SnapCaplin }, "000020-000030-ActiveValidatorIndicies.idx"},
 	}
-	for _, tt := range tests {
-		t.Run("accepted "+tt.name, func(t *testing.T) {
-			dirs := datadir.New(t.TempDir())
-			touchFiles(t, dirs, []snapRange{{0, 10}, {10, 20}, {20, 30}})
-			delFile(t, tt.folder(dirs), "v1.0-"+tt.name)
-			touchFile(t, tt.folder(dirs), "v1-"+tt.name)
-			require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
-		})
-		t.Run("duplicate "+tt.name, func(t *testing.T) {
-			dirs := datadir.New(t.TempDir())
-			touchFiles(t, dirs, []snapRange{{0, 10}, {10, 20}, {20, 30}})
-			touchFile(t, tt.folder(dirs), "v1-"+tt.name)
-			require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
-		})
+	cases := []struct {
+		name, prefix string
+		keepCurrent  bool
+		wantErr      bool
+	}{
+		{"unsupported", "v0.9-", false, true},
+		{"legacy", "v1-", false, false},
+		{"legacy beside current", "v1-", true, true},
+	}
+	for _, f := range files {
+		for _, tc := range cases {
+			t.Run(tc.name+" "+f.name, func(t *testing.T) {
+				dirs := datadir.New(t.TempDir())
+				touchFiles(t, dirs, []snapRange{{0, 10}, {10, 20}, {20, 30}})
+				if !tc.keepCurrent {
+					delFile(t, f.folder(dirs), "v1.0-"+f.name)
+				}
+				touchFile(t, f.folder(dirs), tc.prefix+f.name)
+				err := checkIfCaplinSnapshotsPublishable(dirs, false, nil)
+				if tc.wantErr {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
 	}
 }
 

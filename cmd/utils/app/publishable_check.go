@@ -39,7 +39,7 @@ func CheckFilesForSchema(schema *state.E2SnapSchema, params CheckFilesParams) (l
 	if err != nil && !os.IsNotExist(err) {
 		return 0, false, err
 	}
-	files := map[snapFileKey][]state.SnapInfo{}
+	files := map[string][]state.SnapInfo{}
 	dataFiles := make([]state.SnapInfo, 0)
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -52,11 +52,8 @@ func CheckFilesForSchema(schema *state.E2SnapSchema, params CheckFilesParams) (l
 		if res.IsDataFile() {
 			dataFiles = append(dataFiles, *res)
 		}
-		if !isCanonicalSnapName(schema, res) {
-			continue
-		}
-		key := snapFileKey{res.FileType, res.Ext, res.From, res.To}
-		files[key] = append(files[key], *res)
+		name := unversionedName(res.Name)
+		files[name] = append(files[name], *res)
 	}
 
 	slices.SortFunc(dataFiles, func(a, b state.SnapInfo) int {
@@ -100,14 +97,15 @@ func CheckFilesForSchema(schema *state.E2SnapSchema, params CheckFilesParams) (l
 
 	versions := schema.Versions()
 	for _, dataFile := range dataFiles {
-		dataKey := snapFileKey{dataFile.FileType, dataFile.Ext, dataFile.From, dataFile.To}
-		if err := onlySupportedFile(files[dataKey], versions.DataFileVersion); err != nil {
+		from, to := kv.RootNum(dataFile.From), kv.RootNum(dataFile.To)
+		dataName, _ := schema.DataFile(versions.DataFileVersion.Current, from, to)
+		if err := onlySupportedFile(files[unversionedName(dataName)], versions.DataFileVersion); err != nil {
 			return 0, false, fmt.Errorf("unsupported data file version: %s: %w", dataFile.Name, err)
 		}
 
-		for idxPos, idxTag := range schema.IndexTags() {
-			idxKey := snapFileKey{idxTag, string(state.AccessorExtensionIdx), dataFile.From, dataFile.To}
-			if err := onlySupportedFile(files[idxKey], versions.AccessorVersion); err != nil {
+		for idxPos := range schema.AccessorIdxCount() {
+			idxName, _ := schema.AccessorIdxFile(versions.AccessorVersion.Current, from, to, idxPos)
+			if err := onlySupportedFile(files[unversionedName(idxName)], versions.AccessorVersion); err != nil {
 				return 0, false, fmt.Errorf("missing %s accessor idx file for data file %s (idx tag: %d): %w", schema.DataTag(), dataFile.Name, idxPos, err)
 			}
 		}
@@ -116,26 +114,9 @@ func CheckFilesForSchema(schema *state.E2SnapSchema, params CheckFilesParams) (l
 	return dataFiles[len(dataFiles)-1].To, false, nil
 }
 
-func isCanonicalSnapName(schema *state.E2SnapSchema, f *state.SnapInfo) bool {
-	from, to := kv.RootNum(f.From), kv.RootNum(f.To)
-	var canonical string
-	if f.IsDataFile() {
-		canonical, _ = schema.DataFile(f.Version, from, to)
-	} else {
-		idxPos := slices.Index(schema.IndexTags(), f.FileType)
-		if idxPos < 0 {
-			return false
-		}
-		canonical, _ = schema.AccessorIdxFile(f.Version, from, to, uint16(idxPos))
-	}
-	_, want, _ := strings.Cut(filepath.Base(canonical), "-")
-	_, got, _ := strings.Cut(f.Name, "-")
-	return want == got
-}
-
-type snapFileKey struct {
-	fileType, ext string
-	from, to      uint64
+func unversionedName(path string) string {
+	_, name, _ := strings.Cut(filepath.Base(path), "-")
+	return name
 }
 
 func onlySupportedFile(versions []state.SnapInfo, supported version.Versions) error {
