@@ -125,6 +125,9 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 }
 
 func (pe *preExecCfg) run(ctx context.Context, blockCtx evmtypes.BlockContext, chainRules *chain.Rules, from accounts.Address, txn types.Transaction, gas uint64, reader state.StateReader, toucher *commitmentToucher) {
+	if txn.Type() == types.FrameTxType {
+		return
+	}
 	to := accounts.NilAddress
 	if t := txn.GetTo(); t != nil {
 		to = accounts.InternAddress(*t)

@@ -209,6 +209,24 @@ func TestBlockReadAheaderPreExecClampsGasPriceToFeeCap(t *testing.T) {
 	require.False(t, ok, "the slot keyed by the base fee was read")
 }
 
+func TestBlockReadAheaderPreExecSkipsFrameTxn(t *testing.T) {
+	f := newPreExecFixture(t, []byte{0x00})
+	pe := f.readAheader.preExec
+	ttx, err := f.db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer ttx.Rollback()
+	reader := state.NewReaderV3(readAheadGetter(ttx, f.stateCache, true))
+	noHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
+	blockCtx := protocol.NewEVMBlockContext(f.header(), noHash, pe.engine, accounts.NilAddress, f.config)
+	toucher := &commitmentToucher{ctx: t.Context(), read: func([]byte) []byte { return nil }}
+	sender := crypto.PubkeyToAddress(f.key.PublicKey)
+	pe.run(t.Context(), blockCtx, blockCtx.Rules(f.config), accounts.InternAddress(sender), &types.FrameTransaction{Nonce: 3}, 100_000, reader, toucher)
+
+	created := types.CreateAddress(sender, 3)
+	_, ok := f.stateCache.View(nil).Get(kv.AccountsDomain, created[:])
+	require.False(t, ok, "a frame transaction was pre-executed as a contract creation")
+}
+
 func TestBlockReadAheaderPreExecCreatesAtTxNonce(t *testing.T) {
 	f := newPreExecFixture(t, []byte{0x00})
 	signer := *types.MakeSigner(f.config, 1, 1000)
