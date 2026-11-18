@@ -115,8 +115,8 @@ func (i *IndexedAttestation) UnmarshalJSON(buf []byte) error {
 	return nil
 }
 
-// decodeAttestingIndices parses a JSON array of decimal strings one element at a time, so an oversized array is
-// rejected before its elements are allocated.
+// decodeAttestingIndices decodes one index at a time and, when enforceLimit is set,
+// rejects oversized arrays before decoding indices beyond the limit.
 func decodeAttestingIndices(raw json.RawMessage, limit int, enforceLimit bool) ([]uint64, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil

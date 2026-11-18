@@ -158,6 +158,8 @@ func TestPostPoolAttesterSlashingIndexLimit(t *testing.T) {
 		{name: "Electra first attestation over limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 3, first: true, status: http.StatusBadRequest},
 		{name: "Electra repeated first attestation at limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 2, first: true, duplicateField: "attestation_1", status: http.StatusOK},
 		{name: "Electra repeated second attestation at limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 2, duplicateField: "attestation_2", status: http.StatusOK},
+		{name: "Electra repeated first attestation over limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 3, first: true, duplicateField: "attestation_1", status: http.StatusBadRequest},
+		{name: "Electra repeated second attestation over limit", epoch: cfg.ElectraForkEpoch, limit: 2, count: 3, duplicateField: "attestation_2", status: http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler, store := newAttesterSlashingTestHandler(t, &cfg, tc.epoch)
@@ -186,6 +188,11 @@ func TestPostPoolAttesterSlashingIndexLimit(t *testing.T) {
 				require.Equal(t, tc.limit, stored[0].Attestation_2.AttestingIndices.Cap())
 			} else {
 				require.Contains(t, resp.Body.String(), "attesting indices exceed limit")
+				if tc.first {
+					require.Contains(t, resp.Body.String(), "attestation_1:")
+				} else {
+					require.Contains(t, resp.Body.String(), "attestation_2:")
+				}
 				require.Zero(t, store.Pool.AttesterSlashingsPool.Len())
 			}
 		})
