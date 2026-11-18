@@ -210,6 +210,9 @@ func RunChecks(ctx context.Context, checks []Check, budget time.Duration, run fu
 			return parentErr
 		}
 		if err != nil && !BudgetExhausted(err) {
+			if runCtx.Err() != nil {
+				return fmt.Errorf("%s: %w; integrity budget %s exhausted, not run: %v", chk, err, budget, checks[i+1:])
+			}
 			return fmt.Errorf("%s: %w", chk, err)
 		}
 		if err != nil || runCtx.Err() != nil {

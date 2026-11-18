@@ -200,7 +200,9 @@ func TestRunChecksReportsAnIntegrityFailureCutByTheBudget(t *testing.T) {
 		return errors.Join(ctx.Err(), probs.verdict("check"))
 	}
 
-	require.ErrorIs(t, RunChecks(t.Context(), []Check{HeaderNoGaps}, 50*time.Millisecond, run, log.New()), ErrIntegrity)
+	err := RunChecks(t.Context(), []Check{HeaderNoGaps, CommitmentRoot}, 50*time.Millisecond, run, log.New())
+	require.ErrorIs(t, err, ErrIntegrity)
+	require.ErrorContains(t, err, "not run: ["+string(CommitmentRoot)+"]")
 }
 
 func TestRunChecksReturnsTheParentErrorWhenTheLastCheckSwallowsIt(t *testing.T) {
