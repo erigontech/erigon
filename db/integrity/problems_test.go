@@ -19,6 +19,7 @@ package integrity
 import (
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -167,6 +168,27 @@ func TestRunChecksFailsWhenACheckSwallowsTheBudgetCut(t *testing.T) {
 	err := RunChecks(t.Context(), []Check{HeaderNoGaps, CommitmentRoot}, 50*time.Millisecond, run, log.New())
 	require.ErrorContains(t, err, string(HeaderNoGaps)+" cut")
 	require.ErrorContains(t, err, string(CommitmentRoot))
+	require.Equal(t, []Check{HeaderNoGaps}, ran)
+}
+
+func TestRunChecksDoesNotStartACheckAfterTheBudgetEnds(t *testing.T) {
+	var ran []Check
+	var budgetDone <-chan struct{}
+	run := func(ctx context.Context, chk Check) error {
+		ran = append(ran, chk)
+		budgetDone = ctx.Done()
+		return nil
+	}
+	logger := log.New()
+	logger.SetHandler(log.FilterHandler(func(r *log.Record) bool {
+		if r.Msg == "[integrity] done" {
+			<-budgetDone
+		}
+		return false
+	}, log.StreamHandler(io.Discard, log.LogfmtFormat())))
+
+	err := RunChecks(t.Context(), []Check{HeaderNoGaps, CommitmentRoot}, 50*time.Millisecond, run, logger)
+	require.ErrorContains(t, err, "not run: ["+string(CommitmentRoot)+"]")
 	require.Equal(t, []Check{HeaderNoGaps}, ran)
 }
 

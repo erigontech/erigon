@@ -197,6 +197,9 @@ func RunChecks(ctx context.Context, checks []Check, budget time.Duration, run fu
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if runCtx.Err() != nil {
+			return fmt.Errorf("integrity budget %s exhausted, not run: %v", budget, checks[i:])
+		}
 
 		logger.Info("[integrity] starting", "check", chk)
 		start := time.Now()
