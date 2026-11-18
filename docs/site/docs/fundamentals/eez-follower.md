@@ -109,7 +109,7 @@ An L1-only boot on a rollup0 network checks the same root: it stops with "L1 his
 
 ### Signed heads
 
-The sequencer signs every change of its head: an EIP-712 `SignedHead` of the rollup id, the block's number, hash and parent hash, the start time of the signing process in milliseconds (its epoch) and a counter, in the domain `EEZ Sequencer`, version `0`, of the L2 chain id and the registry. It gossips each head, with its block, on a libp2p gossipsub overlay. With `--eez.p2p.listen` and `--eez.sequencer.address` the follower joins the overlay and takes as its head the highest-version head, latest epoch first, then highest counter, among those that descend from the safe block:
+The sequencer signs every change of its head: an EIP-712 `SignedHead` of the rollup id, the block's number, hash and parent hash, the start time of the signing process in milliseconds (its epoch) and a counter, in the domain `EEZ Sequencer`, version `0`, of the L2 chain id and the registry. It gossips each head, with its block, on a libp2p gossipsub overlay. Nodes take one encoding of each head, so that every node reaches the same verdict on a relayed copy: the signature with `v` 27 or 28 and low `s`, the block in its canonical encoding, the Snappy length in its minimal form. With `--eez.p2p.listen` and `--eez.sequencer.address` the follower joins the overlay and takes as its head the highest-version head, latest epoch first, then highest counter, among those that descend from the safe block:
 
 ```bash
 ./build/bin/erigon --eez.enabled --chain=eez-devnet --datadir=/data/eez-b \
