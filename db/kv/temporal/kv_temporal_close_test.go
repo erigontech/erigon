@@ -27,13 +27,13 @@ func TestTemporalDB_CloseKeepsFilesOfOpenTx(t *testing.T) {
 	acc := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	for txNum := uint64(1); txNum <= 3; txNum++ {
 		require.NoError(t, db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-			sd, err := execctx.NewSharedDomains(ctx, tx, log.Root())
-			if err != nil {
-				return err
+			sd, sdErr := execctx.NewSharedDomains(ctx, tx, log.Root())
+			if sdErr != nil {
+				return sdErr
 			}
 			defer sd.Close()
-			if err := sd.DomainPut(kv.AccountsDomain, tx, acc[:], []byte{byte(txNum)}, txNum, nil); err != nil {
-				return err
+			if putErr := sd.DomainPut(kv.AccountsDomain, tx, acc[:], []byte{byte(txNum)}, txNum, nil); putErr != nil {
+				return putErr
 			}
 			return sd.Flush(ctx, tx)
 		}))
@@ -42,6 +42,7 @@ func TestTemporalDB_CloseKeepsFilesOfOpenTx(t *testing.T) {
 
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
+	defer roTx.Rollback()
 	require.Positive(t, roTx.Debug().TxNumsInFiles(kv.AccountsDomain))
 	v, _, err := roTx.GetAsOf(kv.AccountsDomain, acc[:], 2)
 	require.NoError(t, err)
@@ -54,11 +55,11 @@ func TestTemporalDB_CloseKeepsFilesOfOpenTx(t *testing.T) {
 	}()
 	// MDBX refuses new txs only once Close has reached it.
 	require.Eventually(t, func() bool {
-		tx, err := mdbxDb.BeginRo(ctx) //nolint:gocritic
-		if err == nil {
+		tx, beginErr := mdbxDb.BeginRo(ctx) //nolint:gocritic
+		if beginErr == nil {
 			tx.Rollback()
 		}
-		return err != nil
+		return beginErr != nil
 	}, 10*time.Second, time.Millisecond)
 
 	require.Positive(t, roTx.Debug().TxNumsInFiles(kv.AccountsDomain), "open tx lost its files")
