@@ -37,8 +37,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/das"
-	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
@@ -47,10 +45,7 @@ import (
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/p2p/enode"
 )
 
 type contentsEventKind string
@@ -116,6 +111,24 @@ func (s *loggingColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoo
 	deadline, _ := ctx.Deadline()
 	s.f.record(contentsEvent{kind: eventColumnWrite, index: uint64(columnIndex), err: err, ctxErr: ctx.Err(), deadline: deadline})
 	return err
+}
+
+func (s *loggingColumnStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	if s.f.failWrite != nil {
+		for _, sidecar := range sidecars {
+			if err := s.f.failWrite(sidecar.Index); err != nil {
+				return err
+			}
+		}
+	}
+	if err := s.DataColumnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars); err != nil {
+		return err
+	}
+	deadline, _ := ctx.Deadline()
+	for _, sidecar := range sidecars {
+		s.f.record(contentsEvent{kind: eventColumnWrite, index: sidecar.Index, ctxErr: ctx.Err(), deadline: deadline})
+	}
+	return nil
 }
 
 // dataAvailabilityForkchoice makes the consensus-mode validation run the same data availability
@@ -863,27 +876,4 @@ func TestPostEnvelopeContentsConsensusModesRetryOfIgnoredEnvelope(t *testing.T) 
 			require.Len(t, f.eventsOf(eventEnvelopePublish), 1, "only the first POST publishes the envelope")
 		})
 	}
-}
-
-type publishedColumnsFixture struct {
-	handler *ApiHandler
-	columns *hookedColumnStorage
-}
-
-type hookedColumnStorage struct {
-	blob_storage.DataColumnStorage
-}
-
-func (f *publishedColumnsFixture) newPeerDas(t *testing.T, caplinConfig clparams.CaplinConfig) das.PeerDas {
-	t.Helper()
-	networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
-	state := peerdasstate.NewPeerDasState(f.handler.beaconChainCfg, &networkConfig)
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	nodeDB, err := enode.OpenDB("")
-	require.NoError(t, err)
-	t.Cleanup(nodeDB.Close)
-	localNode := enode.NewLocalNode(nodeDB, key)
-	state.SetLocalNodeID(localNode)
-	return das.NewPeerDas(nil, f.handler.beaconChainCfg, &caplinConfig, f.columns, nil, nil, localNode.ID(), f.handler.ethClock, state, f.handler.gossipManager, nil, f.handler.indiciesDB)
 }

@@ -22,10 +22,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +38,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/holiman/uint256"
 	libp2ppeer "github.com/libp2p/go-libp2p/core/peer"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -51,8 +54,12 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -74,12 +81,14 @@ import (
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	dbversion "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -89,6 +98,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 var _ serviceinterface.Service[*cltypes.SignedExecutionPayloadBid] = acceptingExecutionPayloadBidService{}
@@ -332,6 +342,7 @@ type installingForkchoice struct {
 	headers      map[common.Hash]*cltypes.BeaconBlockHeader
 	blocks       map[common.Hash]*cltypes.SignedBeaconBlock
 	onBlockCalls int
+	afterOnBlock func()
 }
 
 type conflictAfterValidationForkchoice struct {
@@ -375,6 +386,9 @@ func (f *installingForkchoice) OnBlock(_ context.Context, block *cltypes.SignedB
 	f.headers[root] = block.SignedBeaconBlockHeader().Header.Copy()
 	f.blocks[root] = block
 	f.onBlockCalls++
+	if f.afterOnBlock != nil {
+		f.afterOnBlock()
+	}
 	return nil
 }
 
@@ -418,18 +432,159 @@ func TestStoreDataColumnSidecars(t *testing.T) {
 	root := common.Hash{1}
 	column := &cltypes.DataColumnSidecar{Index: 7}
 
-	storage.EXPECT().WriteColumnSidecars(gomock.Any(), root, int64(7), column).Return(nil)
-	require.NoError(t, handler.storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{column}))
+	storage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), root, []*cltypes.DataColumnSidecar{column}).Return(nil)
+	require.NoError(t, handler.storeDataColumnSidecars(context.Background(), 1, root, []*cltypes.DataColumnSidecar{column}))
 }
 
 func TestStoreDataColumnSidecarsRejectsInvalidInput(t *testing.T) {
 	root := common.Hash{1}
-	require.NoError(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), root, nil))
-	require.Error(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{{}}))
-	require.Error(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{nil}))
+	require.NoError(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), 1, root, nil))
+	require.NoError(t, (&ApiHandler{}).writeColumnSidecarsBatched(context.Background(), 1, root, nil))
+	require.Error(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), 1, root, []*cltypes.DataColumnSidecar{{}}))
+	require.Error(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), 1, root, []*cltypes.DataColumnSidecar{nil}))
 	require.Error(t, (&ApiHandler{columnStorage: blob_storage_mock.NewMockDataColumnStorage(gomock.NewController(t))}).storeDataColumnSidecars(
-		context.Background(), root, []*cltypes.DataColumnSidecar{{Index: math.MaxUint64}},
+		context.Background(), 1, root, []*cltypes.DataColumnSidecar{{Index: math.MaxUint64}},
 	))
+}
+
+func TestStoreDataColumnSidecarsWritesNothingWhenALaterSidecarIsInvalid(t *testing.T) {
+	root := common.Hash{1}
+	valid := &cltypes.DataColumnSidecar{Index: 7}
+	for name, invalid := range map[string]*cltypes.DataColumnSidecar{
+		"nil":                  nil,
+		"index above MaxInt64": {Index: math.MaxInt64 + 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			noWritesExpected := blob_storage_mock.NewMockDataColumnStorage(gomock.NewController(t))
+			handler := &ApiHandler{columnStorage: noWritesExpected}
+
+			err := handler.storeDataColumnSidecars(t.Context(), 1, root, []*cltypes.DataColumnSidecar{valid, invalid})
+
+			require.Error(t, err)
+		})
+	}
+}
+
+var errInjectedColumnFsFailure = errors.New("injected column filesystem failure")
+
+// faultyColumnFs fails the failRenameAt-th Rename once, and every Create of a path ending in
+// failCreateSuffix.
+type faultyColumnFs struct {
+	afero.Fs
+	renames          atomic.Int32
+	createFailures   atomic.Int32
+	failRenameAt     int32
+	failCreateSuffix string
+}
+
+func (f *faultyColumnFs) Rename(oldname, newname string) error {
+	if f.renames.Add(1) == f.failRenameAt {
+		return errInjectedColumnFsFailure
+	}
+	return f.Fs.Rename(oldname, newname)
+}
+
+func (f *faultyColumnFs) Create(name string) (afero.File, error) {
+	if f.failCreateSuffix != "" && strings.HasSuffix(name, f.failCreateSuffix) {
+		return nil, fmt.Errorf("%w: create failure %d", errInjectedColumnFsFailure, f.createFailures.Add(1))
+	}
+	return f.Fs.Create(name)
+}
+
+type realColumnStoreFixture struct {
+	handler *ApiHandler
+	events  chan *beaconevents.EventStream
+	warns   func() string
+}
+
+func newRealColumnStoreFixture(t *testing.T, fs afero.Fs) *realColumnStoreFixture {
+	t.Helper()
+	if clparams.GetBeaconConfig() == nil {
+		globalCfg := clparams.MainnetBeaconConfig
+		clparams.InitGlobalStaticConfig(&globalCfg)
+	}
+	cfg := clparams.MainnetBeaconConfig
+	emitters := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, cfg.NumberOfColumns)
+	subscription := emitters.Operation().Subscribe(events)
+	t.Cleanup(subscription.Unsubscribe)
+
+	return &realColumnStoreFixture{
+		handler: &ApiHandler{columnStorage: blob_storage.NewDataColumnStore(fs, &cfg, emitters)},
+		events:  events,
+		warns:   captureProductionLogs(t),
+	}
+}
+
+func (f *realColumnStoreFixture) eventIndices() []uint64 {
+	var indices []uint64
+	for len(f.events) > 0 {
+		event := <-f.events
+		if event.Event == beaconevents.OpDataColumnSidecar {
+			indices = append(indices, event.Data.(*beaconevents.DataColumnSidecarData).Index)
+		}
+	}
+	return indices
+}
+
+func (f *realColumnStoreFixture) savedColumns(t *testing.T, slot uint64, root common.Hash) []uint64 {
+	t.Helper()
+	saved, err := f.handler.columnStorage.GetSavedColumnIndex(t.Context(), slot, root)
+	require.NoError(t, err)
+	slices.Sort(saved)
+	return saved
+}
+
+func testColumnSidecars(slot uint64, count uint64) []*cltypes.DataColumnSidecar {
+	sidecars := make([]*cltypes.DataColumnSidecar, count)
+	for i := range sidecars {
+		sidecars[i] = cltypes.NewDataColumnSidecar()
+		sidecars[i].Index = uint64(i)
+		sidecars[i].SignedBlockHeader = &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: slot}}
+	}
+	return sidecars
+}
+
+func TestStoreDataColumnSidecarsKeepsEveryColumnWhenTheBatchRenameFailsOnce(t *testing.T) {
+	const slot, columns = 1000, 8
+	root := common.Hash{1}
+	f := newRealColumnStoreFixture(t, &faultyColumnFs{Fs: afero.NewMemMapFs(), failRenameAt: columns / 2})
+
+	require.NoError(t, f.handler.storeDataColumnSidecars(t.Context(), slot, root, testColumnSidecars(slot, columns)))
+
+	all := []uint64{0, 1, 2, 3, 4, 5, 6, 7}
+	require.Equal(t, all, f.savedColumns(t, slot, root))
+	for _, index := range all {
+		_, err := f.handler.columnStorage.ReadColumnSidecarByColumnIndex(t.Context(), slot, root, int64(index))
+		require.NoError(t, err, "column %d", index)
+	}
+	indices := f.eventIndices()
+	slices.Sort(indices)
+	require.Equal(t, all, indices, "one data_column_sidecar event per column")
+	warns := f.warns()
+	require.NotContains(t, warns, "\n", "exactly one warning")
+	require.Contains(t, warns, "batched data column write failed")
+	require.Contains(t, warns, "slot=1000")
+	require.Contains(t, warns, "columnCount=8")
+}
+
+func TestStoreDataColumnSidecarsReturnsTheWriteErrorAfterTheStoredPrefix(t *testing.T) {
+	const slot, columns, failingColumn = 1000, 8, 5
+	root := common.Hash{1}
+	f := newRealColumnStoreFixture(t, &faultyColumnFs{Fs: afero.NewMemMapFs(), failCreateSuffix: fmt.Sprintf("_%d.tmp", failingColumn)})
+
+	err := f.handler.storeDataColumnSidecars(t.Context(), slot, root, testColumnSidecars(slot, columns))
+
+	require.ErrorIs(t, err, errInjectedColumnFsFailure)
+	require.ErrorContains(t, err, "create failure 1", "the batch error")
+	require.ErrorContains(t, err, "create failure 2", "the single write error")
+	require.ErrorContains(t, err, "after a failed batch write")
+	stored := []uint64{0, 1, 2, 3, 4}
+	require.Equal(t, stored, f.savedColumns(t, slot, root))
+	indices := f.eventIndices()
+	slices.Sort(indices)
+	require.Equal(t, stored, indices)
+	require.Empty(t, f.warns(), "the failing write is logged by the block service, not here")
 }
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
@@ -2551,7 +2706,7 @@ func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testin
 	indicesChanged := handler.emitters.BlockIndicesChanged()
 
 	for range 2 {
-		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationGossip)
+		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationGossip, func() {})
 		require.ErrorContains(t, err, "database unavailable")
 	}
 	select {
@@ -2582,7 +2737,7 @@ func TestStoreBlockAndBlobsToleratesBusyForkchoice(t *testing.T) {
 	handler.emitters = beaconevents.NewEventEmitter()
 	indicesChanged := handler.emitters.BlockIndicesChanged()
 
-	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus)
+	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus, func() {})
 
 	require.NoError(t, err)
 	select {
@@ -2602,7 +2757,7 @@ func TestStoreBlockAndBlobsClassifiesKnownRootMismatchAsPermanent(t *testing.T) 
 	incoming := &cltypes.SignedBeaconBlock{Block: stored.Block, Signature: stored.Signature}
 	incoming.Signature[0] ^= 1
 
-	err = handler.storeBlockAndBlobs(t.Context(), incoming, nil, nil, BlockPublishingValidationConsensus)
+	err = handler.storeBlockAndBlobs(t.Context(), incoming, nil, nil, BlockPublishingValidationConsensus, func() {})
 	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
 }
 
@@ -2611,7 +2766,7 @@ func TestStoreBlockAndBlobsClassifiesFinalizedHorizonRaceAsPermanent(t *testing.
 	block := blocks[1]
 	fcu.FinalizedSlotVal = block.Block.Slot
 
-	err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus)
+	err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus, func() {})
 	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
 }
 
@@ -2626,8 +2781,404 @@ func TestStoreBlockAndBlobsClassifiesKnownEquivocationAsPermanent(t *testing.T) 
 	conflict.Root[0] ^= 1
 	fcu.Headers[common.Hash{0xff}] = conflict
 
-	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensusAndEquivocation)
+	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensusAndEquivocation, func() {})
 	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
+}
+
+// publishedColumnsFixture publishes a block with one blob through a handler that imports it into fork
+// choice, stores its columns in a real column store and runs the store job on its own goroutine, so
+// -race sees the store job and column gossip run concurrently.
+type publishedColumnsFixture struct {
+	handler    *ApiHandler
+	forkchoice *installingForkchoice
+	columns    *hookedColumnStorage
+	published  *publishedGossip
+	// Closed by the gossip goroutine. Polling the recorded topics instead would share their mutex with
+	// that goroutine and, through the test goroutine, order the store's writes before later gossip,
+	// which hides a store/gossip race from -race.
+	columnsGossiped chan struct{}
+	jobs            sync.WaitGroup
+	block           *cltypes.SignedBeaconBlock
+	root            common.Hash
+	store           func(context.Context) error
+}
+
+type hookedColumnStorage struct {
+	blob_storage.DataColumnStorage
+	hook         func(write func() error) error
+	singleWrites atomic.Int32
+}
+
+func (s *hookedColumnStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	return s.hooked(func() error {
+		return s.DataColumnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars)
+	})
+}
+
+func (s *hookedColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
+	s.singleWrites.Add(1)
+	return s.hooked(func() error {
+		return s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
+	})
+}
+
+func (s *hookedColumnStorage) hooked(write func() error) error {
+	if s.hook == nil {
+		return write()
+	}
+	return s.hook(write)
+}
+
+type runningPublishedBlockJob struct {
+	done chan struct{}
+	err  error
+}
+
+func (j *runningPublishedBlockJob) Wait(ctx context.Context) error {
+	select {
+	case <-j.done:
+		return j.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func newPublishedColumnsFixture(t *testing.T, version clparams.StateVersion) *publishedColumnsFixture {
+	t.Helper()
+	if clparams.GetBeaconConfig() == nil {
+		cfg := clparams.MainnetBeaconConfig
+		clparams.InitGlobalStaticConfig(&cfg)
+	}
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	f := &publishedColumnsFixture{
+		handler:         handler,
+		published:       &publishedGossip{topics: map[string][]byte{}},
+		columnsGossiped: make(chan struct{}),
+	}
+	t.Cleanup(f.jobs.Wait)
+	ctrl := gomock.NewController(t)
+
+	b := newTestBlob(t, 1, clparams.FuluVersion)
+	proofs := make([]common.Bytes48, len(b.proofs))
+	for i := range b.proofs {
+		proofs[i] = common.Bytes48(b.proofs[i])
+	}
+	handler.blobBundles.Add(common.Bytes48(b.commitment), BlobBundle{Commitment: common.Bytes48(b.commitment), Blob: b.blob, KzgProofs: proofs})
+	f.block = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, version)
+	f.block.Block.Slot = blocks[1].Block.Slot
+	commitment := b.commitment
+	if version >= clparams.GloasVersion {
+		bid := f.block.Block.Body.SignedExecutionPayloadBid.Message
+		bid.BuilderIndex = clparams.BuilderIndexSelfBuild
+		bid.BlobKzgCommitments.Append(&commitment)
+	} else {
+		f.block.Block.Body.BlobKzgCommitments.Append(&commitment)
+	}
+	root, err := f.block.Block.HashSSZ()
+	require.NoError(t, err)
+	f.root = root
+
+	fcu.StateAtBlockRootVal[f.root] = postState
+	fcu.HeadVal = f.root
+	fcu.HeadSlotVal = f.block.Block.Slot
+	fcu.OnTickFn = func(uint64) {}
+	f.forkchoice = &installingForkchoice{
+		ForkChoiceStorage: fcu,
+		headers:           make(map[common.Hash]*cltypes.BeaconBlockHeader),
+		blocks:            make(map[common.Hash]*cltypes.SignedBeaconBlock),
+	}
+	handler.forkchoiceStore = f.forkchoice
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
+	handler.engine = engine
+	handler.attestationProducer = cachedAttestationDataProducer{}
+
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	var allColumnsGossiped sync.Once
+	gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, topic string, data []byte) error {
+		if err := f.published.record(ctx, topic, data); err != nil {
+			return err
+		}
+		if f.published.columnCount() == int(handler.beaconChainCfg.NumberOfColumns) {
+			allColumnsGossiped.Do(func() { close(f.columnsGossiped) })
+		}
+		return nil
+	}).AnyTimes()
+	gossipManager.EXPECT().SubscribeWithExpiry(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	handler.gossipManager = gossipManager
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	blockService.EXPECT().CommitGossipReservation(gomock.Any()).AnyTimes()
+	blockService.EXPECT().ReleaseGossipReservation(gomock.Any()).AnyTimes()
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) clservices.PublishedBlockJob {
+			f.store = store
+			job := &runningPublishedBlockJob{done: make(chan struct{})}
+			f.jobs.Go(func() {
+				defer close(job.done)
+				job.err = store(context.Background())
+			})
+			return job
+		},
+	).AnyTimes()
+	handler.blockService = blockService
+
+	f.columns = &hookedColumnStorage{DataColumnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), handler.beaconChainCfg, beaconevents.NewEventEmitter())}
+	handler.columnStorage = f.columns
+	handler.peerDas = f.newPeerDas(t, clparams.CaplinConfig{})
+	return f
+}
+
+func (f *publishedColumnsFixture) newPeerDas(t *testing.T, caplinConfig clparams.CaplinConfig) das.PeerDas {
+	t.Helper()
+	networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	state := peerdasstate.NewPeerDasState(f.handler.beaconChainCfg, &networkConfig)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	nodeDB, err := enode.OpenDB("")
+	require.NoError(t, err)
+	t.Cleanup(nodeDB.Close)
+	localNode := enode.NewLocalNode(nodeDB, key)
+	state.SetLocalNodeID(localNode)
+	return das.NewPeerDas(nil, f.handler.beaconChainCfg, &caplinConfig, f.columns, nil, nil, localNode.ID(), f.handler.ethClock, state, f.handler.gossipManager, nil, f.handler.indiciesDB)
+}
+
+func (f *publishedColumnsFixture) blockIndexed() (bool, error) {
+	var slot *uint64
+	err := f.handler.indiciesDB.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		slot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, f.root)
+		return err
+	})
+	return slot != nil, err
+}
+
+func (f *publishedColumnsFixture) storedColumns(t *testing.T) []uint64 {
+	t.Helper()
+	saved, err := f.columns.GetSavedColumnIndex(t.Context(), f.block.Block.Slot, f.root)
+	require.NoError(t, err)
+	slices.Sort(saved)
+	return saved
+}
+
+func (f *publishedColumnsFixture) custodyColumns(t *testing.T) []uint64 {
+	t.Helper()
+	custody, err := f.handler.peerDas.StateReader().GetMyCustodyColumns()
+	require.NoError(t, err)
+	return slices.Sorted(maps.Keys(custody))
+}
+
+func requireClosed(t *testing.T, ch <-chan struct{}, msg string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal(msg)
+	}
+}
+
+func (p *publishedGossip) columnCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	columns := 0
+	for topic := range p.topics {
+		if strings.HasPrefix(topic, "data_column_sidecar_") {
+			columns++
+		}
+	}
+	return columns
+}
+
+func TestBroadcastBlockStoresAllColumnsInArchiveMode(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			f := newPublishedColumnsFixture(t, version)
+			f.handler.peerDas = f.newPeerDas(t, clparams.CaplinConfig{ArchiveBlobs: true})
+
+			require.NoError(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip))
+
+			require.Len(t, f.storedColumns(t), int(f.handler.beaconChainCfg.NumberOfColumns))
+			require.Zero(t, f.columns.singleWrites.Load(), "the columns must be stored in one batch")
+		})
+	}
+}
+
+func TestBroadcastBlockWritesColumnsAfterOnBlockAndIndexWrite(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			f := newPublishedColumnsFixture(t, version)
+			var once sync.Once
+			var onBlockCalls int
+			var indexed bool
+			var indexErr error
+			f.columns.hook = func(write func() error) error {
+				once.Do(func() {
+					onBlockCalls = f.forkchoice.onBlockCalls
+					indexed, indexErr = f.blockIndexed()
+				})
+				return write()
+			}
+
+			require.NoError(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip))
+
+			require.NoError(t, indexErr)
+			require.Equal(t, 1, onBlockCalls, "OnBlock must run before the first column write")
+			require.True(t, indexed, "the block index must be written before the first column write")
+		})
+	}
+}
+
+// TestBroadcastGloasBlockHoldsColumnsUntilBlockIsServable proves Gloas column gossip waits for the
+// block to be imported, so a peer that asks for the block of a column can get it, and that a stalled
+// import holds the columns back for at most publishedBlockStoreWaitBeforeColumns.
+func TestBroadcastGloasBlockHoldsColumnsUntilBlockIsServable(t *testing.T) {
+	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
+	importing, release := make(chan struct{}), make(chan struct{})
+	f.forkchoice.afterOnBlock = func() {
+		close(importing)
+		<-release
+	}
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() { done <- f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip) }()
+	defer func() {
+		close(release)
+		require.NoError(t, <-done)
+	}()
+
+	requireClosed(t, importing, "the block was not imported")
+	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
+	require.GreaterOrEqual(t, time.Since(start), publishedBlockStoreWaitBeforeColumns, "columns must wait for the block import")
+}
+
+func TestBroadcastGloasBlockGossipsColumnsOnceTheStoreJobFails(t *testing.T) {
+	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
+	f.handler.forkchoiceStore = &rejectingOnBlockForkchoice{ForkChoiceStorage: f.forkchoice, err: forkchoice.ErrBlockInvalid}
+	start := time.Now()
+
+	require.ErrorIs(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip), forkchoice.ErrBlockInvalid)
+
+	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
+	require.Less(t, time.Since(start), publishedBlockStoreWaitBeforeColumns, "a failed store job must release the columns")
+}
+
+func TestBroadcastGloasBlockGossipsColumnsWhileColumnWriteBlocks(t *testing.T) {
+	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
+	blocked, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	f.columns.hook = func(write func() error) error {
+		once.Do(func() { close(blocked) })
+		<-release
+		return write()
+	}
+	done := make(chan error, 1)
+	go func() { done <- f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip) }()
+	defer func() {
+		close(release)
+		require.NoError(t, <-done)
+	}()
+
+	requireClosed(t, blocked, "the column write did not start")
+	blockedAt := time.Now()
+	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
+	require.Less(t, time.Since(blockedAt), publishedBlockStoreWaitBeforeColumns/2, "column gossip must not wait for the column writes")
+}
+
+func TestBroadcastBlockColumnWriteFailureKeepsImportedBlockAndRetries(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			f := newPublishedColumnsFixture(t, version)
+			var failing atomic.Bool
+			failing.Store(true)
+			f.columns.hook = func(write func() error) error {
+				if failing.Load() {
+					return errors.New("disk full")
+				}
+				return write()
+			}
+
+			err := f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip)
+			require.ErrorIs(t, err, errPublishedBlockDataStorage)
+			var writeErr *clservices.AcceptedBlockWriteError
+			require.ErrorAs(t, err, &writeErr, "the block service must back off the retry of a failed column write")
+
+			indexed, err := f.blockIndexed()
+			require.NoError(t, err)
+			require.True(t, indexed, "a block accepted by fork choice must be persisted although its columns failed")
+
+			failing.Store(false)
+			require.NoError(t, f.store(t.Context()), "the block service retries the same store job")
+			require.Equal(t, 1, f.forkchoice.onBlockCalls, "the retry must not import the block again")
+			require.Equal(t, f.custodyColumns(t), f.storedColumns(t))
+		})
+	}
+}
+
+// TestBroadcastBlockStoresCustodyRaisedByItsOwnImport proves the columns are chosen after OnBlock,
+// which may raise the custody group count.
+func TestBroadcastBlockStoresCustodyRaisedByItsOwnImport(t *testing.T) {
+	const raisedCgc = 16
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			f := newPublishedColumnsFixture(t, version)
+			before := f.custodyColumns(t)
+			f.forkchoice.afterOnBlock = func() { f.handler.peerDas.UpdateValidatorsCustody(raisedCgc) }
+
+			require.NoError(t, f.handler.broadcastBlock(t.Context(), f.block, BlockPublishingValidationGossip))
+
+			raised := f.custodyColumns(t)
+			require.Len(t, raised, raisedCgc)
+			require.Less(t, len(before), len(raised))
+			require.Equal(t, raised, f.storedColumns(t))
+			require.Equal(t, int(f.handler.beaconChainCfg.NumberOfColumns), f.published.columnCount(), "every column is gossiped")
+		})
+	}
+}
+
+// TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA covers the v1 block POST, which
+// skips the integration wait: a stateful envelope POST that follows must find the custody columns.
+func TestPostGloasBlockWithoutIntegrationWaitLetsStatefulEnvelopePassDA(t *testing.T) {
+	f := newPublishedColumnsFixture(t, clparams.GloasVersion)
+	release := make(chan struct{})
+	releaseWrites := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseWrites)
+	f.columns.hook = func(write func() error) error {
+		<-release
+		return write()
+	}
+	f.forkchoice.ForkChoiceStorage.(*forkchoice_mock.ForkChoiceStorageMock).OnExecutionPayloadFn = func(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
+		available, err := f.handler.peerDas.IsDataAvailable(f.block.Block.Slot, envelope.Message.BeaconBlockRoot)
+		if err != nil {
+			return err
+		}
+		if !available {
+			return forkchoice.ErrEIP7594ColumnDataNotAvailable
+		}
+		return nil
+	}
+
+	done := make(chan error, 1)
+	f.jobs.Go(func() {
+		done <- f.handler.broadcastBlockWithIntegrationWait(t.Context(), f.block, BlockPublishingValidationGossip, false)
+	})
+	requireClosed(t, f.columnsGossiped, "the columns were not gossiped")
+	select {
+	case <-done:
+		t.Fatal("the response must not overtake the column writes")
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseWrites()
+	require.NoError(t, <-done)
+
+	body := fmt.Sprintf(`{"message":{"beacon_block_root":%q,"builder_index":"%d"}}`, f.root.Hex(), uint64(clparams.BuilderIndexSelfBuild))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+	f.handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }
 
 func TestBroadcastBlockExactReplayCompletesMissingDataSidecars(t *testing.T) {
@@ -2674,6 +3225,7 @@ func TestBroadcastBlockExactReplayCompletesMissingDataSidecars(t *testing.T) {
 				handler.blobStoage = blobStorage
 			} else {
 				columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
+				columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage unavailable")).AnyTimes()
 				columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage unavailable")).AnyTimes()
 				handler.columnStorage = columnStorage
 			}

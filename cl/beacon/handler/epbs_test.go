@@ -1702,11 +1702,11 @@ func testPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T, 
 
 	var columnsWritten atomic.Int32
 	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
-	columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), common.Hash(blockRoot), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error {
-			columnsWritten.Add(1)
+	columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), common.Hash(blockRoot), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+			columnsWritten.Add(int32(len(sidecars)))
 			return nil
-		}).Times(int(handler.beaconChainCfg.NumberOfColumns))
+		})
 	handler.columnStorage = columnStorage
 	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
 		if columnsWritten.Load() != int32(handler.beaconChainCfg.NumberOfColumns) {

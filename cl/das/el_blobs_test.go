@@ -3,6 +3,8 @@ package das
 import (
 	"context"
 	"fmt"
+	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -125,6 +128,69 @@ func TestImportColumnsFromBlobsStoresCustodyColumns(t *testing.T) {
 	}
 }
 
+func TestImportColumnsFromBlobsWritesCustodyColumnsInOneBatch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(gomock.NewController(t))
+	d.columnStorage = columnStorage
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
+	custody, err := d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	require.NotEmpty(t, custody)
+	require.Less(t, len(custody), int(cfg.NumberOfColumns))
+	var written []*cltypes.DataColumnSidecar
+	columnStorage.EXPECT().WriteColumnSidecarsBatch(gomock.Any(), root, gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+			written = sidecars
+			return nil
+		}).Times(1)
+
+	stored, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+
+	require.Len(t, written, len(custody))
+	for _, sidecar := range written {
+		require.True(t, custody[sidecar.Index])
+	}
+	require.Equal(t, written, stored)
+}
+
+type statCountingFs struct {
+	afero.Fs
+	stats atomic.Int32
+}
+
+func (f *statCountingFs) Stat(name string) (os.FileInfo, error) {
+	f.stats.Add(1)
+	return f.Fs.Stat(name)
+}
+
+func TestIsDataAvailableReadsOnlyCustodyColumns(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+	fs := &statCountingFs{Fs: afero.NewMemMapFs()}
+	d.columnStorage = blob_storage.NewDataColumnStore(fs, &cfg, beaconevents.NewEventEmitter())
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 1)
+	custody, err := d.state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	require.Less(t, len(custody), int(cfg.NumberOfColumns))
+
+	available, err := d.IsDataAvailable(block.Block.Slot, root)
+	require.NoError(t, err)
+	require.False(t, available)
+	require.Equal(t, int32(1), fs.stats.Load(), "the check must stop at the first missing custody column")
+
+	_, err = d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+	fs.stats.Store(0)
+	available, err = d.IsDataAvailable(block.Block.Slot, root)
+	require.NoError(t, err)
+	require.True(t, available)
+	require.Equal(t, int32(len(custody)), fs.stats.Load())
+}
+
 func TestImportColumnsFromBlobsStoresAllColumnsInArchiveMode(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	initTestBeaconConfig(&cfg)
@@ -148,6 +214,23 @@ func TestImportColumnsFromBlobsStoresAllColumnsInArchiveMode(t *testing.T) {
 	}
 }
 
+// Without a custody set the node subscribes to no column subnet: it keeps every column and publishes none.
+func TestImportColumnsFromBlobsStoresAllColumnsOnCustodyLookupError(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
+	d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups+1, func() uint64 { return 0 })
+	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
+
+	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
+	require.NoError(t, err)
+
+	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.Len(t, saved, int(cfg.NumberOfColumns))
+	require.Empty(t, toPublish)
+}
+
 // An archive node subscribes to every column subnet whatever its custody set.
 func TestImportColumnsFromBlobsPublishesAllColumnsInArchiveModeOnCustodyLookupError(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
@@ -164,24 +247,6 @@ func TestImportColumnsFromBlobsPublishesAllColumnsInArchiveModeOnCustodyLookupEr
 	require.NoError(t, err)
 
 	require.Len(t, toPublish, int(cfg.NumberOfColumns))
-}
-
-func TestImportColumnsFromBlobsStoresAndPublishesNothingOnCustodyLookupError(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	initTestBeaconConfig(&cfg)
-	d := newELBlobsTestPeerDas(t, &cfg, &clparams.CaplinConfig{})
-	d.state.SetCustodyGroupCount(cfg.NumberOfCustodyGroups+1, func() uint64 { return 0 })
-	_, err := d.state.GetMyCustodyColumns()
-	require.Error(t, err)
-	block, root, blobs, proofs := elBlobsFixture(t, &cfg, 2)
-
-	toPublish, err := d.ImportColumnsFromBlobs(t.Context(), block, blobs, proofs)
-	require.Error(t, err)
-	require.Empty(t, toPublish)
-
-	saved, err := d.columnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
-	require.NoError(t, err)
-	require.Empty(t, saved)
 }
 
 func TestImportColumnsFromBlobsStoresAllColumnsWithoutLocalNode(t *testing.T) {

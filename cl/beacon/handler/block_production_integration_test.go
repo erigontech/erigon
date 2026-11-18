@@ -222,8 +222,8 @@ func requireCaplinPublishesBlobData(t *testing.T, block *cltypes.BlindOrExecutio
 
 		publisher.forkchoiceStore.(*forkchoice_mock.ForkChoiceStorageMock).Blocks[common.Hash(blockRoot)] = signed.SignedBlock
 		publisher.columnStorage.(*blob_storage_mock.MockDataColumnStorage).EXPECT().
-			WriteColumnSidecars(gomock.Any(), common.Hash(blockRoot), gomock.Any(), gomock.Any()).
-			Return(nil).Times(int(publisher.beaconChainCfg.NumberOfColumns))
+			WriteColumnSidecarsBatch(gomock.Any(), common.Hash(blockRoot), gomock.Len(int(publisher.beaconChainCfg.NumberOfColumns))).
+			Return(nil)
 		publisher.sentinel = &nonNilSentinelClient{}
 		envelopeContents := cltypes.NewSignedExecutionPayloadEnvelopeContents(publisher.beaconChainCfg, block.Slot)
 		envelope := envelopeContents.SignedExecutionPayloadEnvelope.Message
