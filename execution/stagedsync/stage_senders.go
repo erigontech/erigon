@@ -245,7 +245,10 @@ func (b *sendersBatch) flush(ctx context.Context, collector *etl.Collector) (*ba
 		var err error
 		switch {
 		case blk.registered != nil:
-			if senders, err = blk.registered.Wait(ctx); err != nil || len(senders) != n {
+			waitStart := time.Now()
+			senders, err = blk.registered.Wait(ctx)
+			log.Info("[np-phase] senders", "elapsed", time.Since(waitStart), "txs", n)
+			if err != nil || len(senders) != n {
 				senders, err = exec.StartSendersRecovery(ctx, blk.signer, blk.body.Transactions).Wait(ctx)
 			}
 		case batchErr != nil:
