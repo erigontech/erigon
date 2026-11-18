@@ -1113,6 +1113,13 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 		if step < firstStep {
 			continue
 		}
+		if len(ac.d[id].files) == 0 && !a.canPublishFirstDomainStep(kv.Domain(id), txFrom, txTo) {
+			a.deferredDomainWarnings[id].Do(func() {
+				a.logger.Warn("[snapshots] file build deferred; rebuild missing history snapshots to resume",
+					"entity", d.Name, "step", step, "retainedIn", "MDBX")
+			})
+			continue
+		}
 
 		g.Go(func() error {
 			var collation Collation
@@ -1180,6 +1187,20 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt), "workers", a.workers.getCollateAndBuild())
 
 	return nil
+}
+
+func (a *Aggregator) canPublishFirstDomainStep(id kv.Domain, txFrom, txTo uint64) bool {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	d := a.d[id]
+	if a.unalignedDomain[id] || d.dirtyFiles.Len() > 0 || d.HistoryDisabled || d.SnapshotsDisabled {
+		return true
+	}
+	// The first values file also exposes retained history and index files. Each
+	// readable prefix must connect to the new range so shared visibility cannot fall.
+	history, index := d.History.calcVisibleFiles(txTo)
+	return (len(history) == 0 || contiguousEnd(history) >= txFrom) &&
+		(len(index.files) == 0 || contiguousEnd(index.files) >= txFrom)
 }
 
 func (a *Aggregator) readyForCollation(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {

@@ -521,6 +521,82 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 	}
 }
 
+func TestAggregatorBuildPreservesRetainedHistory(t *testing.T) {
+	const stepSize = uint64(10)
+	stateRanges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	for _, test := range []struct {
+		name           string
+		history, index []testFileRange
+		deferred       bool
+	}{
+		{name: "history_only", history: stateRanges[:1], deferred: true},
+		{name: "history_gap", history: stateRanges[:1], index: stateRanges, deferred: true},
+		{name: "index_gap", history: stateRanges, index: stateRanges[:1], deferred: true},
+		{name: "both_gaps", history: stateRanges[:1], index: stateRanges[:1], deferred: true},
+		{name: "continuous", history: stateRanges, index: stateRanges},
+	} {
+		for _, pending := range []bool{true, false} {
+			name := "empty_mdbx"
+			if pending {
+				name = "pending_step_2"
+			}
+			t.Run(test.name+"/"+name, func(t *testing.T) {
+				db, agg := testDbAndAggregatorv3(t, stepSize)
+				dirs := agg.Dirs()
+				generateStateFiles(t, dirs, stateRanges)
+				generateCommitmentFile(t, dirs, stateRanges)
+				generateStandaloneIIFiles(t, dirs, stateRanges)
+				receipt := agg.d[kv.ReceiptDomain]
+				populateFiles2(t, dirs, NewHistorySnapSchema(receipt.HistCfg, stepSize, dirs), stepSize, test.history)
+				populateFiles2(t, dirs, NewIISnapSchema(receipt.InvertedIndex.InvIdxCfg, stepSize, dirs), stepSize, test.index)
+				require.NoError(t, agg.OpenFolder(db))
+				require.Equal(t, len(test.history), receipt.History.dirtyFiles.Len())
+				require.Equal(t, len(test.index), receipt.InvertedIndex.dirtyFiles.Len())
+				requireVisibleEnd(t, agg, 3*stepSize)
+				agg.ForbidVisibilityLowering()
+				key, value := []byte{1}, []byte{7}
+				if pending {
+					require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+						at := agg.BeginFilesRo()
+						defer at.Close()
+						writer := at.d[kv.ReceiptDomain].NewWriter(db)
+						defer writer.Close()
+						require.NoError(t, writer.PutWithPrev(key, value, 2*stepSize+1, nil))
+						return writer.Flush(t.Context(), tx)
+					}))
+				}
+				existing := snapshotFileIdentities(t, dirs)
+				plan, err := agg.readFileBuildPlan(t.Context(), db)
+				require.NoError(t, err)
+				require.NotPanics(t, func() {
+					for step := plan.firstStep; step < 4; step++ {
+						require.NoError(t, agg.buildFilesWithPlan(t.Context(), asTemporalRoDB(db), step, unboundedFinalityCtx, nil, plan))
+					}
+					require.NoError(t, agg.OpenFolder(db))
+				}, "publishing the first values file must not expose a gap in retained history or its index")
+				requireVisibleEnd(t, agg, 4*stepSize)
+				requireSnapshotFilesUnchanged(t, existing)
+				require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+					at := agg.BeginFilesRo()
+					defer at.Close()
+					if test.deferred {
+						require.Empty(t, at.d[kv.ReceiptDomain].files)
+					} else {
+						require.Equal(t, 4*stepSize, at.d[kv.ReceiptDomain].files.EndTxNum())
+					}
+					if pending {
+						got, _, found, err := at.d[kv.ReceiptDomain].GetLatest(key, tx)
+						require.NoError(t, err)
+						require.True(t, found)
+						require.Equal(t, value, got)
+					}
+					return nil
+				}))
+			})
+		}
+	}
+}
+
 func TestAggregatorBuildKeepsAlignedEntitiesAheadOfBackfill(t *testing.T) {
 	const stepSize = uint64(10)
 	for _, test := range []struct {
