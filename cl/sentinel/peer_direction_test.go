@@ -19,6 +19,7 @@ package sentinel
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -323,4 +324,81 @@ func TestSelectPeersToPrunePicksYoungestFirst(t *testing.T) {
 	}
 
 	require.Equal(t, []peer.ID{"younger"}, selectPeersToPrune(candidates, [attestationSubnetCount]int{}, 1, 0))
+}
+
+func TestSelectPeersToPruneKeepsSubnetsAtSearchTarget(t *testing.T) {
+	coverage := [attestationSubnetCount]int{minimumPeersPerSubnet, minimumPeersPerSubnet + 1}
+	candidates := []pruneCandidate{
+		{pid: "younger", inbound: true, subnets: []int{0}, opened: time.Unix(2, 0)},
+		{pid: "older", inbound: true, subnets: []int{1}, opened: time.Unix(1, 0)},
+	}
+
+	require.Equal(t, []peer.ID{"older"}, selectPeersToPrune(candidates, coverage, 1, 0))
+}
+
+func subnetCoverage(candidates []pruneCandidate) (coverage [attestationSubnetCount]int) {
+	for _, candidate := range candidates {
+		for _, subnet := range candidate.subnets {
+			coverage[subnet]++
+		}
+	}
+	return coverage
+}
+
+func TestSelectPeersToPruneReachesTargetBelowSearchTarget(t *testing.T) {
+	const (
+		maxPeers      = 128
+		inboundPeers  = 120
+		outboundPeers = 26
+	)
+	candidates := make([]pruneCandidate, 0, inboundPeers+outboundPeers)
+	for i := range inboundPeers + outboundPeers {
+		first := i % attestationSubnetCount
+		second := (first + attestationSubnetCount/2) % attestationSubnetCount
+		candidates = append(candidates, pruneCandidate{
+			pid:     peer.ID(fmt.Sprintf("peer-%d", i)),
+			inbound: i < inboundPeers,
+			opened:  time.Unix(int64(i), 0),
+			subnets: []int{first, second},
+		})
+	}
+	coverage := subnetCoverage(candidates)
+	for subnet, count := range coverage {
+		require.Less(t, count, minimumPeersPerSubnet, "subnet %d", subnet)
+	}
+	toRemove := peerCountToPrune(peerCounts{inbound: inboundPeers, outbound: outboundPeers}, maxPeers)
+	require.Positive(t, toRemove)
+
+	selected := selectPeersToPrune(candidates, coverage, toRemove, outboundReserve(maxPeers))
+
+	require.Len(t, selected, toRemove)
+	removed := make(map[peer.ID]bool, len(selected))
+	for _, pid := range selected {
+		removed[pid] = true
+	}
+	var kept []pruneCandidate
+	keptOutbound := 0
+	for _, candidate := range candidates {
+		if removed[candidate.pid] {
+			continue
+		}
+		kept = append(kept, candidate)
+		if !candidate.inbound {
+			keptOutbound++
+		}
+	}
+	for subnet, count := range subnetCoverage(kept) {
+		require.Positive(t, count, "subnet %d", subnet)
+	}
+	require.GreaterOrEqual(t, keptOutbound, outboundReserve(maxPeers))
+}
+
+func TestSelectPeersToPrunePrefersPeersOffSubnetsBelowSearchTarget(t *testing.T) {
+	coverage := [attestationSubnetCount]int{minimumPeersPerSubnet + 1, minimumPeersPerSubnet + 1, 2}
+	candidates := []pruneCandidate{
+		{pid: "belowTarget", inbound: true, subnets: []int{2}},
+		{pid: "wellCovered", inbound: true, subnets: []int{0, 1}},
+	}
+
+	require.Equal(t, []peer.ID{"wellCovered"}, selectPeersToPrune(candidates, coverage, 1, 0))
 }

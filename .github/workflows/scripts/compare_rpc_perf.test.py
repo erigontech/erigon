@@ -358,5 +358,57 @@ with tempfile.TemporaryDirectory() as tmp:
     check("main without results exits 0", code in (0, None), code)
     check("main without results says so", "No results" in out, out)
 
+# --- apis: the rows by method (mixed with --verbose) or by subscription measure ---
+
+
+def api(p50_ms, p95_ms, max_ms, requests, errors=0):
+    return {"requests": requests, "errors": errors, "empty": 0,
+            "latencies": {"50th": int(p50_ms * 1e6), "95th": int(p95_ms * 1e6), "max": int(max_ms * 1e6)}}
+
+
+def rep_apis(apis):
+    r = rep(1, 2, 3)
+    r["apis"] = apis
+    return r
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "mixed", [{"qps": "100", "testRepetitions": [
+        rep_apis({"eth_call": api(1, 10, 50, 100, 1), "eth_getLogs": api(4, 40, 400, 10)}),
+        rep_apis({"eth_call": api(3, 30, 90, 100, 2)}),
+        rep_apis({"eth_call": api(2, 20, 70, 100)}),
+    ]}])
+    res = mod.load_results(tmp)
+    apis = res["mixed"]["erigon"]["100"]["apis"]
+    check("api p50 and p95 are the median over repetitions",
+          apis["eth_call"]["p50"] == 2.0 and apis["eth_call"]["p95"] == 20.0, apis)
+    check("api max is the max over repetitions", apis["eth_call"]["max"] == 90.0, apis)
+    check("api requests and errors are summed over repetitions",
+          apis["eth_call"]["requests"] == 300 and apis["eth_call"]["errors"] == 3, apis)
+    check("an api of some repetitions only is over those", apis["eth_getLogs"]["requests"] == 10, apis)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_call", [{"qps": "1", "testRepetitions": [rep(1, 2, 3)]}])
+    res = mod.load_results(tmp)
+    check("a step without apis has no apis", "apis" not in res["eth_call"]["erigon"]["1"], res)
+    md = mod.render(res)
+    check("the detail without apis has no api table", "| API |" not in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe", [{"qps": "10", "testRepetitions": [
+        rep_apis({"newHeads latency": api(1, 2, 3, 30), "logs vs newHeads": api(4, 5, 6, 90, 1)})]}])
+    write_result(tmp, "geth", "eth_subscribe", [{"qps": "10", "testRepetitions": [
+        rep_apis({"newHeads latency": api(7, 8, 9, 30)})]}])
+    md = mod.render(mod.load_results(tmp))
+    check("the api table has a row per api and client",
+          "| 10 | logs vs newHeads | erigon | 4.00 | 5.00 | 6.00 | 90 | 1 |" in md
+          and "| 10 | newHeads latency | erigon | 1.00 | 2.00 | 3.00 | 30 | 0 |" in md
+          and "| 10 | newHeads latency | geth | 7.00 | 8.00 | 9.00 | 30 | 0 |" in md, md)
+    check("the api rows are by api, then by client",
+          md.find("logs vs newHeads | erigon") < md.find("newHeads latency | erigon")
+          < md.find("newHeads latency | geth"), md)
+    check("the api table follows the step table in the same details",
+          md.find("| QPS | Client |") < md.find("| QPS | API | Client |") < md.find("</details>"), md)
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
