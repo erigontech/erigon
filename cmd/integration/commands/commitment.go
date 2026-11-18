@@ -191,28 +191,28 @@ Examples:
   integration commitment branch --datadir /path/to/datadir --prefix 0a1b
   integration commitment branch --datadir /path/to/datadir --prefix 0a1b --txnum 1000000
   integration commitment branch --datadir /path/to/datadir  # reads root (empty prefix)`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if statecfg.ExperimentalCommitmentV3 {
+			return errors.New("not supported on commitment v3")
+		}
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 
 		prefix, err := commitment.PrefixStringToNibbles(branchPrefixFlag)
 		if err != nil {
-			logger.Error("Failed to parse prefix", "error", err)
-			return
+			return err
 		}
 
 		dirs := datadir.New(datadirCli)
 		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return err
 		}
 		defer chainDb.Close()
 
 		// Start a read-only temporal transaction
 		tx, err := chainDb.BeginTemporalRo(ctx)
 		if err != nil {
-			logger.Error("Failed to begin temporal tx", "error", err)
-			return
+			return err
 		}
 		defer tx.Rollback()
 
@@ -221,8 +221,7 @@ Examples:
 			fmt.Printf("(asOfTxNum: %d)\n", txnumFlag)
 			reader := commitmentdb.NewHistoryStateReader(tx, txnumFlag)
 			if err := readBranch(reader, prefix, stepSize); err != nil {
-				logger.Error("Failed to read branch", "error", err)
-				return
+				return err
 			}
 		} else {
 			// Latest state read
@@ -234,10 +233,10 @@ Examples:
 			defer sd.Close()
 			reader := commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{})
 			if err := readBranch(reader, prefix, stepSize); err != nil {
-				logger.Error("Failed to read branch", "error", err)
-				return
+				return err
 			}
 		}
+		return nil
 	},
 }
 
