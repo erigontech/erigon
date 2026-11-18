@@ -42,31 +42,27 @@ func (d *Domain) buildMissingBtIndex(btPath, filterPath string, data *seg.Reader
 	if err != nil {
 		return err
 	}
-	filterExists := !d.Accessors.Has(statecfg.AccessorExistence)
-	if !filterExists {
-		filterExists, err = dir.FileExist(filterPath)
+	accessors := d.Accessors
+	if accessors.Has(statecfg.AccessorExistence) {
+		filterExists, err := dir.FileExist(filterPath)
 		if err != nil {
 			return err
 		}
+		if filterExists {
+			accessors &^= statecfg.AccessorExistence
+		}
 	}
-	if btExists && filterExists {
-		return nil
-	}
-
-	// The builder produces both outputs. Send an already-complete sibling to
-	// a temporary directory so its live mapping and path stay untouched.
-	if btExists || (d.Accessors.Has(statecfg.AccessorExistence) && filterExists) {
+	if btExists {
+		if !accessors.Has(statecfg.AccessorExistence) {
+			return nil
+		}
+		// Building the missing filter also writes a B-tree. Keep the mapped B-tree in place.
 		tmp, err := os.MkdirTemp(d.dirs.Tmp, "snapshot-accessors-")
 		if err != nil {
 			return err
 		}
 		defer dir.RemoveAll(tmp) //nolint:errcheck
-		if btExists {
-			btPath = filepath.Join(tmp, filepath.Base(btPath))
-		}
-		if filterExists {
-			filterPath = filepath.Join(tmp, filepath.Base(filterPath))
-		}
+		btPath = filepath.Join(tmp, filepath.Base(btPath))
 	}
-	return btindex.BuildBtreeIndexWithDecompressor(btPath, filterPath, data, ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors)
+	return btindex.BuildBtreeIndexWithDecompressor(btPath, filterPath, data, ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, accessors)
 }

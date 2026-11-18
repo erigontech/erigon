@@ -917,13 +917,7 @@ func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.St
 		return StaticFiles{}, err
 	}
 
-	ps := background.NewProgressSet()
-	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, ps, dstDir)
-	wal.Close() // munmap ETL temp files after buildFileRange consumed the zero-copy data
-	if err != nil {
-		return StaticFiles{}, err
-	}
-	return static, nil
+	return d.buildFileRange(ctx, stepFrom, stepTo, coll, background.NewProgressSet(), dstDir)
 }
 
 // [stepFrom; stepTo)
