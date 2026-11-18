@@ -54,10 +54,10 @@ func (zeroCanonical) BadHeaderNumber(context.Context, kv.Getter, common.Hash) (*
 }
 
 func TestBlockReadAheaderPreExecWarmsSlotReadByTx(t *testing.T) {
-	oldReadAhead, oldArm := dbg.ReadAhead, preExecArm
+	oldReadAhead, oldOn := dbg.ReadAhead, preExecOn
 	dbg.SetReadAhead(true)
-	preExecArm = "all"
-	t.Cleanup(func() { dbg.SetReadAhead(oldReadAhead); preExecArm = oldArm })
+	preExecOn = true
+	t.Cleanup(func() { dbg.SetReadAhead(oldReadAhead); preExecOn = oldOn })
 	ctx := t.Context()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 

@@ -43,11 +43,9 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-var (
-	preExecArm        = dbg.EnvString("V3_PREEXEC", "")
-	preExecCommitment = dbg.EnvBool("V3_PREEXEC_COMMITMENT", false)
-	preExecWorkers    = dbg.EnvInt("V3_PREEXEC_WORKERS", 0)
-)
+var preExecOn = dbg.EnvBool("V3_PREEXEC", false)
+
+const preExecWorkers = 4
 
 type preExecCfg struct {
 	config    *chain.Config
@@ -59,31 +57,13 @@ func (bra *BlockReadAheader) SetPreExec(config *chain.Config, engine rules.Engin
 	bra.preExec = &preExecCfg{config: config, engine: engine, canonical: canonical}
 }
 
-func (bra *BlockReadAheader) preExecOn(blockNum uint64) bool {
-	if bra.preExec == nil {
-		return false
-	}
-	switch preExecArm {
-	case "all":
-		return true
-	case "odd":
-		return blockNum%2 == 1
-	case "even":
-		return blockNum%2 == 0
-	}
-	return false
-}
-
-func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header *types.Header, txns types.Transactions, workers int) error {
+func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header *types.Header, txns types.Transactions) error {
 	pe := bra.preExec
-	if preExecWorkers > 0 {
-		workers = preExecWorkers
-	}
 	start := time.Now()
 	signer := types.MakeSigner(pe.config, header.Number.Uint64(), header.Time)
 	var next, paths atomic.Int64
 	wg, ctx := errgroup.WithContext(ctx)
-	for w := range min(workers, secp256k1.NumOfContexts(), len(txns)) {
+	for w := range min(preExecWorkers, secp256k1.NumOfContexts(), len(txns)) {
 		cryptoContext := secp256k1.ContextForThread(w)
 		wg.Go(func() error {
 			tx, err := db.BeginRo(ctx)
@@ -102,17 +82,14 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 			}
 			blockCtx := protocol.NewEVMBlockContext(header, blockHash, pe.engine, accounts.NilAddress, pe.config)
 			chainRules := blockCtx.Rules(pe.config)
-			var toucher *commitmentToucher
-			if preExecCommitment {
-				toucher = &commitmentToucher{read: func(key []byte) []byte {
-					v, _, err := ttx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
-					if err != nil {
-						return nil
-					}
-					return v
-				}}
-				defer func() { paths.Add(int64(toucher.paths)) }()
-			}
+			toucher := &commitmentToucher{read: func(key []byte) []byte {
+				v, _, err := ttx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
+				if err != nil {
+					return nil
+				}
+				return v
+			}}
+			defer func() { paths.Add(int64(toucher.paths)) }()
 			for i := int(next.Add(1)) - 1; i < len(txns); i = int(next.Add(1)) - 1 {
 				if err := ctx.Err(); err != nil {
 					return err
@@ -127,7 +104,7 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 		})
 	}
 	err := wg.Wait()
-	log.Info("[preexec] block", "num", header.Number.Uint64(), "txs", len(txns), "ms", time.Since(start).Milliseconds(), "paths", paths.Load(), "err", err)
+	log.Debug("[preexec] block", "num", header.Number.Uint64(), "txs", len(txns), "ms", time.Since(start).Milliseconds(), "paths", paths.Load(), "err", err)
 	return err
 }
 
@@ -149,7 +126,7 @@ func (pe *preExecCfg) run(blockCtx evmtypes.BlockContext, chainRules *chain.Rule
 	txCtx := protocol.NewEVMTxContext(msg)
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, pe.config, vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true})
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-	if _, err := protocol.ApplyMessage(evm, msg, gp, true, true, pe.engine); err == nil && toucher != nil {
+	if _, err := protocol.ApplyMessage(evm, msg, gp, true, true, pe.engine); err == nil {
 		_ = ibs.FinalizeTx(chainRules, toucher)
 	}
 }
