@@ -76,6 +76,8 @@ func (t *muxTracer) tracer() *tracers.Tracer {
 			OnOpcodeV2:          t.OnOpcodeV2,
 			OnFaultV2:           t.OnFaultV2,
 			OnGasChangeV2:       t.OnGasChangeV2,
+			OnAccountAccess:     t.OnAccountAccess,
+			OnAccountRead:       t.OnAccountRead,
 			OnBalanceChange:     t.OnBalanceChange,
 			OnNonceChangeV2:     t.OnNonceChangeV2,
 			OnCodeChangeV2:      t.OnCodeChangeV2,
@@ -133,6 +135,22 @@ func (t *muxTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from
 func (t *muxTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 	for _, child := range t.tracers {
 		child.Hooks.EmitTxEnd(receipt, txnGasUsage, err)
+	}
+}
+
+func (t *muxTracer) OnAccountAccess(addr accounts.Address) {
+	for _, child := range t.tracers {
+		if child.Hooks != nil && child.OnAccountAccess != nil {
+			child.OnAccountAccess(addr)
+		}
+	}
+}
+
+func (t *muxTracer) OnAccountRead(addr accounts.Address) {
+	for _, child := range t.tracers {
+		if child.Hooks != nil && child.OnAccountRead != nil {
+			child.OnAccountRead(addr)
+		}
 	}
 }
 

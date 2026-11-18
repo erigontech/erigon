@@ -27,6 +27,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -44,8 +45,16 @@ func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
 	return p, ok
 }
 
-// runPrecompile puts the identity output into the buffer a RETURN of the callee frame would use.
 func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
+	if evm.chainRules.IsBogota {
+		contract := p
+		if cached, ok := contract.(*cachedPrecompile); ok {
+			contract = cached.PrecompiledContract
+		}
+		if _, ok := contract.(*ecrecover); ok {
+			return evm.runEcrecover(p, input, gas, tracer)
+		}
+	}
 	if _, identity := p.(*dataCopy); !identity || len(input) == 0 {
 		return RunPrecompiledContract(p, input, gas, tracer)
 	}
@@ -64,6 +73,42 @@ func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdG
 	}
 	*buf = append((*buf)[:0], input...)
 	return slices.Clip(*buf), remaining, nil
+}
+
+func (evm *EVM) runEcrecover(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
+	output, gas, err := RunPrecompiledContract(p, input, gas, tracer)
+	if err != nil || len(output) == 0 {
+		return output, gas, err
+	}
+	address := accounts.InternAddress(common.BytesToAddress(output))
+	if tracer != nil && tracer.OnAccountAccess != nil {
+		tracer.OnAccountAccess(address)
+	}
+	gasCost := params.ExtCodeWarmAccessGasEIP8038
+	if !evm.intraBlockState.AddressInAccessList(address) {
+		gasCost += params.ColdAccountAccessCostEIP8038 - params.WarmStorageReadCostEIP2929
+	}
+	if gas.Execution < gasCost {
+		return nil, gas, ErrOutOfGas
+	}
+	remaining := gas
+	remaining.Execution -= gasCost
+	if tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(gas, remaining, tracing.GasChangeCallPrecompiledContract)
+	}
+	evm.intraBlockState.AddAddressToAccessList(address)
+	evm.intraBlockState.MarkAddressAccess(address, false)
+	if tracer != nil && tracer.OnAccountRead != nil {
+		tracer.OnAccountRead(address)
+	}
+	code, err := evm.intraBlockState.GetCode(address)
+	if err != nil {
+		return nil, remaining, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
+	if _, delegated := types.ParseDelegation(code); len(code) != 0 && !delegated {
+		return nil, remaining, nil
+	}
+	return output, remaining, nil
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides

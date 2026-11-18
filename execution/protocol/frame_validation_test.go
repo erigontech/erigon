@@ -139,6 +139,45 @@ func TestFrameValidationCodeAccess(t *testing.T) {
 	}
 }
 
+func TestFrameValidationEcrecoverDependency(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	owner := crypto.PubkeyToAddress(key.PublicKey)
+	hash := crypto.Keccak256Hash([]byte("frame validation"))
+	signature, err := crypto.Sign(hash[:], key)
+	require.NoError(t, err)
+	input := make([]byte, 128)
+	copy(input, hash[:])
+	input[63] = signature[64] + 27
+	copy(input[64:], signature[:64])
+	precompile := common.HexToAddress("0x01")
+	target := accounts.InternAddress(common.HexToAddress("0x2000"))
+	code := program.New().Mstore(input, 0).
+		StaticCall(uint256.NewInt(6_100), precompile, 0, 128, 0, 32).Op(vm.POP).
+		Push0().Op(vm.MLOAD).Push(owner).Op(vm.EQ).Push(3).Op(vm.MUL).
+		Push0().Push0().Op(vm.APPROVE).Bytes()
+	for name, ownerCode := range map[string][]byte{
+		"empty code": nil,
+		"delegation": types.AddressToDelegation(target),
+	} {
+		t.Run(name, func(t *testing.T) {
+			evm, tx := frameTestEnv(t)
+			ibs := evm.IntraBlockState()
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), code, tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(owner), ownerCode, tracing.CodeChangeUnspecified))
+			require.NoError(t, ibs.SetCode(target, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+			tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 20_000}}}
+			result, err := ValidateFrameTransaction(evm, tx)
+			require.NoError(t, err)
+			require.ElementsMatch(t, []common.Address{tx.SenderAddress, precompile, owner}, result.Dependencies)
+
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(owner), []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+			_, err = ValidateFrameTransaction(evm, tx)
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestFrameValidationZeroDeadline(t *testing.T) {
 	evm, tx := frameTestEnv(t)
 	evm.Context.Time = 1

@@ -30,6 +30,20 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+func TestMuxForwardsAccountAccess(t *testing.T) {
+	var addresses []accounts.Address
+	mux := newTestMuxTracer([]string{"access", "nil", "empty"}, []*tracers.Tracer{
+		{Hooks: &tracing.Hooks{OnAccountAccess: func(addr accounts.Address) {
+			addresses = append(addresses, addr)
+		}}},
+		{},
+		{Hooks: &tracing.Hooks{}},
+	})
+	require.NotNil(t, mux.OnAccountAccess)
+	mux.OnAccountAccess(accounts.ZeroAddress)
+	require.Equal(t, []accounts.Address{accounts.ZeroAddress}, addresses)
+}
+
 func TestMuxForwardsTxEndV2(t *testing.T) {
 	receipt := &types.Receipt{GasUsed: 100}
 	usage := mdgas.TxnGasUsage{BlockExecutionGasUsed: 40, BlockStateGasUsed: 70, GasRefund: 10}

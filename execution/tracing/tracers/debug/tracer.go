@@ -80,6 +80,8 @@ func (t *Tracer) Hooks() *tracing.Hooks {
 		OnSystemCallStartV2: t.OnSystemCallStartV2,
 		OnSystemCallEnd:     t.OnSystemCallEnd,
 		// State events
+		OnAccountAccess: t.OnAccountAccess,
+		OnAccountRead:   t.OnAccountRead,
 		OnBalanceChange: t.OnBalanceChange,
 		OnNonceChangeV2: t.OnNonceChangeV2,
 		OnCodeChangeV2:  t.OnCodeChangeV2,
@@ -379,6 +381,20 @@ func (t *Tracer) OnSystemCallEnd() {
 	})
 }
 
+func (t *Tracer) OnAccountAccess(address accounts.Address) {
+	if t.wrapped != nil && t.wrapped.Hooks != nil && t.wrapped.OnAccountAccess != nil {
+		t.wrapped.OnAccountAccess(address)
+	}
+	t.traces.Append(Trace{OnAccountAccess: &OnAccountAccessTrace{Address: address.Value()}})
+}
+
+func (t *Tracer) OnAccountRead(address accounts.Address) {
+	if t.wrapped != nil && t.wrapped.Hooks != nil && t.wrapped.OnAccountRead != nil {
+		t.wrapped.OnAccountRead(address)
+	}
+	t.traces.Append(Trace{OnAccountRead: &OnAccountReadTrace{Address: address.Value()}})
+}
+
 func (t *Tracer) OnBalanceChange(address accounts.Address, oldBalance, newBalance uint256.Int, reason tracing.BalanceChangeReason) {
 	if t.recordOptions.DisableOnBalanceChangeRecording {
 		return
@@ -603,6 +619,8 @@ type Trace struct {
 	OnSystemCallStart *OnSystemCallStartTrace `json:"onSystemCallStart,omitempty"`
 	OnSystemCallEnd   *OnSystemCallEndTrace   `json:"onSystemCallEnd,omitempty"`
 	// State events
+	OnAccountAccess *OnAccountAccessTrace `json:"onAccountAccess,omitempty"`
+	OnAccountRead   *OnAccountReadTrace   `json:"onAccountRead,omitempty"`
 	OnBalanceChange *OnBalanceChangeTrace `json:"onBalanceChange,omitempty"`
 	OnNonceChange   *OnNonceChangeTrace   `json:"onNonceChange,omitempty"`
 	OnCodeChange    *OnCodeChangeTrace    `json:"onCodeChange,omitempty"`
@@ -695,6 +713,14 @@ type OnGenesisBlockTrace struct {
 type OnSystemCallStartTrace struct{}
 
 type OnSystemCallEndTrace struct{}
+
+type OnAccountAccessTrace struct {
+	Address common.Address `json:"address"`
+}
+
+type OnAccountReadTrace struct {
+	Address common.Address `json:"address"`
+}
 
 type OnBalanceChangeTrace struct {
 	Address    common.Address `json:"address,omitempty"`
