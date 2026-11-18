@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // Fixture construction chooses individual steps without recovery planning.
@@ -37,15 +39,51 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	return a.buildFilesWithPlan(ctx, db, step, finalityCtx, filesDone, fileBuildPlan{})
 }
 
+func snapshotFileIdentities(t *testing.T, dirs datadir.Dirs) map[string]os.FileInfo {
+	t.Helper()
+	files := make(map[string]os.FileInfo)
+	for _, folder := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+		entries, err := os.ReadDir(folder)
+		require.NoError(t, err)
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			info, err := entry.Info()
+			require.NoError(t, err)
+			files[filepath.Join(folder, entry.Name())] = info
+		}
+	}
+	return files
+}
+
+func requireSnapshotFilesUnchanged(t *testing.T, files map[string]os.FileInfo) {
+	t.Helper()
+	for path, before := range files {
+		after, err := os.Stat(path)
+		require.NoError(t, err)
+		require.True(t, os.SameFile(before, after), "recovery must reuse completed snapshot files: %s", path)
+	}
+}
+
 func TestAggregatorBuildRecoversUnindexedFiles(t *testing.T) {
 	const stepSize = uint64(10)
-	for _, test := range []struct {
+	accessorExt := "kvi"
+	if statecfg.Schema.CommitmentDomain.Accessors.Has(statecfg.AccessorBTree) {
+		accessorExt = "bt"
+	}
+	type testCase struct {
 		name, pattern string
 		accessorDir   bool
-	}{
-		{name: "commitment", pattern: "*-commitment.[23]-[34].kvi"},
+	}
+	tests := []testCase{
+		{name: "commitment", pattern: "*-commitment.[23]-[34]." + accessorExt},
 		{name: "logaddrs", pattern: "*-logaddrs.[23]-[34].efi", accessorDir: true},
-	} {
+	}
+	if statecfg.Schema.CommitmentDomain.Accessors.Has(statecfg.AccessorExistence) {
+		tests = append(tests, testCase{name: "commitment_filter", pattern: "*-commitment.[23]-[34].kvei"})
+	}
+	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			db, agg := testDbAndAggregatorv3(t, stepSize)
 			ctx := t.Context()
@@ -89,10 +127,12 @@ func TestAggregatorBuildRecoversUnindexedFiles(t *testing.T) {
 			require.NoError(t, agg.OpenFolder(db))
 			agg.ForbidVisibilityLowering()
 
+			existing := snapshotFileIdentities(t, dirs)
 			finished, started := agg.buildFilesInBackground(asTemporalRoDB(db), lastTxNum, false, unboundedFinalityCtx)
 			require.True(t, started)
 			<-finished
 			requireVisibleEnd(t, agg, 6*stepSize)
+			requireSnapshotFilesUnchanged(t, existing)
 		})
 	}
 }
@@ -423,6 +463,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					}
 					return nil
 				}))
+				existing := snapshotFileIdentities(t, dirs)
 				if test.explicit {
 					require.NoError(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), test.fromStep, kv.Step(lastTxNum/stepSize), unboundedFinalityCtx, false))
 					agg.WaitForFiles()
@@ -431,6 +472,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					require.True(t, started)
 					<-finished
 				}
+				requireSnapshotFilesUnchanged(t, existing)
 				require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 					at := agg.BeginFilesRo()
 					defer at.Close()
@@ -548,12 +590,16 @@ func TestAggregatorBuildKeepsAlignedEntitiesAheadOfBackfill(t *testing.T) {
 
 func TestAggregatorBuildRespectsSharedCeiling(t *testing.T) {
 	const stepSize = uint64(10)
+	accessorExt := "kvi"
+	if statecfg.Schema.CommitmentDomain.Accessors.Has(statecfg.AccessorBTree) {
+		accessorExt = "bt"
+	}
 	for _, test := range []struct {
 		name, accessors   string
 		visibleStateSteps uint64
 	}{
-		{name: "missing_last_accessor", accessors: "*-commitment.2-3.kvi", visibleStateSteps: 2},
-		{name: "missing_all_accessors", accessors: "*-commitment.*.kvi", visibleStateSteps: 0},
+		{name: "missing_last_accessor", accessors: "*-commitment.2-3." + accessorExt, visibleStateSteps: 2},
+		{name: "missing_all_accessors", accessors: "*-commitment.*." + accessorExt, visibleStateSteps: 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db, agg := testDbAndAggregatorv3(t, stepSize)
