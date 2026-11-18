@@ -154,19 +154,43 @@ func TestRunChecksFailsWhenTheBudgetCutsACheck(t *testing.T) {
 	require.ErrorContains(t, err, string(CommitmentRoot))
 }
 
-func TestRunChecksFailsWhenTheBudgetEndsBeforeACheckStarts(t *testing.T) {
+func TestRunChecksFailsWhenACheckSwallowsTheBudgetCut(t *testing.T) {
 	var ran []Check
 	run := func(ctx context.Context, chk Check) error {
 		ran = append(ran, chk)
 		if chk == HeaderNoGaps {
-			time.Sleep(60 * time.Millisecond)
+			<-ctx.Done()
 		}
 		return nil
 	}
 
 	err := RunChecks(t.Context(), []Check{HeaderNoGaps, CommitmentRoot}, 50*time.Millisecond, run, log.New())
+	require.ErrorContains(t, err, string(HeaderNoGaps)+" cut")
 	require.ErrorContains(t, err, string(CommitmentRoot))
 	require.Equal(t, []Check{HeaderNoGaps}, ran)
+}
+
+func TestRunChecksReportsAnIntegrityFailureCutByTheBudget(t *testing.T) {
+	var probs problems
+	require.NoError(t, probs.report(false, errChunk))
+	run := func(ctx context.Context, chk Check) error {
+		<-ctx.Done()
+		return errors.Join(ctx.Err(), probs.verdict("check"))
+	}
+
+	require.ErrorIs(t, RunChecks(t.Context(), []Check{HeaderNoGaps}, 50*time.Millisecond, run, log.New()), ErrIntegrity)
+}
+
+func TestRunChecksReturnsTheParentErrorWhenTheLastCheckSwallowsIt(t *testing.T) {
+	for _, budget := range []time.Duration{0, time.Minute} {
+		ctx, cancel := context.WithCancel(t.Context())
+		run := func(context.Context, Check) error {
+			cancel()
+			return nil
+		}
+
+		require.ErrorIs(t, RunChecks(ctx, []Check{HeaderNoGaps}, budget, run, log.New()), context.Canceled, "budget %s", budget)
+	}
 }
 
 func TestRunChecksLetsAHeavyCheckUseTheWholeBudget(t *testing.T) {

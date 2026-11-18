@@ -197,26 +197,22 @@ func RunChecks(ctx context.Context, checks []Check, budget time.Duration, run fu
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if runCtx.Err() != nil {
-			return fmt.Errorf("integrity budget %s exhausted, not run: %v", budget, checks[i:])
-		}
 
 		logger.Info("[integrity] starting", "check", chk)
 		start := time.Now()
 		err := run(runCtx, chk)
 		elapsed := time.Since(start)
 
-		if err == nil {
-			logger.Info("[integrity] done", "check", chk, "elapsed", elapsed)
-			continue
-		}
 		if parentErr := ctx.Err(); parentErr != nil {
 			return parentErr
 		}
-		if BudgetExhausted(err) {
+		if err != nil && !BudgetExhausted(err) {
+			return fmt.Errorf("%s: %w", chk, err)
+		}
+		if err != nil || runCtx.Err() != nil {
 			return fmt.Errorf("integrity budget %s exhausted: %s cut after %s, not run: %v", budget, chk, elapsed.Round(time.Millisecond), checks[i+1:])
 		}
-		return fmt.Errorf("%s: %w", chk, err)
+		logger.Info("[integrity] done", "check", chk, "elapsed", elapsed)
 	}
 
 	return nil
