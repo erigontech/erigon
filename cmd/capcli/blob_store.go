@@ -79,8 +79,8 @@ func storedBlobsComplete(ctx context.Context, tx kv.Tx, blocks freezeblocks.Beac
 	// Look the blobs up under the walked root: before Gloas the stored body has no execution
 	// transactions or withdrawals, so its own hash is not the block root.
 	n, _, err := blobfetch.ExpectedBlobs(ctx, tx, blocks, root, block)
-	if err != nil {
-		return false, err
+	if err != nil || n == 0 {
+		return err == nil, err
 	}
 	return blob_storage.BlobsStored(ctx, blobDB, slot, root, n)
 }

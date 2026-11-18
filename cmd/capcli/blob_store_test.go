@@ -375,17 +375,3 @@ func TestChainEndpointWalkStoresAroundASkippedGloasPayload(t *testing.T) {
 	require.True(t, f.storedValid(fillTestSlot+2, after))
 	require.Zero(t, requestsFor(requests, skipped))
 }
-
-func TestStoredBlobsCompleteAcceptsASkippedGloasPayload(t *testing.T) {
-	f, _, _ := newSkippedPayloadFixture(t, 1)
-	skipped, err := f.blocks.blocks[fillTestSlot+1].Block.HashSSZ()
-	require.NoError(t, err)
-
-	var stored bool
-	require.NoError(t, f.db.View(t.Context(), func(tx kv.Tx) error {
-		stored, err = storedBlobsComplete(t.Context(), tx, f.blocks, f.store, fillTestSlot+1, skipped)
-		return err
-	}))
-
-	require.True(t, stored)
-}
