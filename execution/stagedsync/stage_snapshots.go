@@ -551,7 +551,7 @@ func firstNonGenesisCheck(tx kv.RwTx, snapshots dbservices.BlockSnapshots, logPr
 	return nil
 }
 
-func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservices.FullBlockReader) error {
+func pruneCanonicalMarkers(tx kv.RwTx, blockReader dbservices.FullBlockReader) error {
 	pruneThreshold := rawdbreset.GetPruneMarkerSafeThreshold(blockReader)
 	if pruneThreshold == 0 {
 		return nil
@@ -633,7 +633,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
 		return err
 	}
-	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
+	if err := pruneCanonicalMarkers(tx, cfg.blockReader); err != nil {
 		return err
 	}
 	return nil

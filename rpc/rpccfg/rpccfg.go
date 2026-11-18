@@ -101,7 +101,6 @@ func DefaultDebugApiConfig() *DebugApiConfig {
 
 // TraceApiConfig defines the configurable parameters for the trace_ namespace
 type TraceApiConfig struct {
-	MaxTraces     uint64
 	GasCap        uint64
 	Compatibility bool // Bug for bug compatibility with OpenEthereum
 }

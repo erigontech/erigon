@@ -928,12 +928,11 @@ func (pe *parallelExecutor) LogCommitments(committedTransactions uint64, stepsIn
 	}
 }
 
-// triggerBatchCommitment sends a commitComputeRequest so the calculator computes
-// the batch commitment before the exec loop exits and closes channels. Delivery is
-// unconditional: honouring ctx.Done would drop the batch-end commitment when the
-// buffer is momentarily full, leaving commitment behind sd.mem. The calculator
-// keeps draining until its channel closes, so blocking is safe.
-func (pe *parallelExecutor) triggerBatchCommitment(ctx context.Context) {
+// triggerBatchCommitment queues the final commitment request before the exec loop
+// closes the result channels. The send must not be cancelled: dropping the request
+// could leave commitment out of sync with sd.mem. The calculator drains its input
+// channel before exiting, so the send can safely wait for buffer space.
+func (pe *parallelExecutor) triggerBatchCommitment() {
 	if pe.consumers == nil {
 		return
 	}
@@ -1048,7 +1047,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		var blockResult *blockResult
 		select {
 		case exec := <-pendingCh:
-			if err := pe.processRequest(ctx, exec, applyTx); err != nil {
+			if err := pe.processRequest(exec, applyTx); err != nil {
 				return err
 			}
 			continue
@@ -1078,7 +1077,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							pe.Lock()
 							delete(pe.blockExecutors, br.BlockNum)
 							pe.Unlock()
-							if err := pe.scheduleNextPending(ctx); err != nil {
+							if err := pe.scheduleNextPending(); err != nil {
 								return err
 							}
 						}
@@ -1197,13 +1196,13 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					// The calculator drains commitResults on its own uncancelled ctx;
 					// trigger the batch commitment, then deferred closeApplyChannels
 					// closes commitResults → applyResults.
-					pe.triggerBatchCommitment(ctx)
+					pe.triggerBatchCommitment()
 					return nil
 				}
 				if startCatchup {
 					sizeCutPending = true
 				}
-				if err := pe.scheduleNextPending(ctx); err != nil {
+				if err := pe.scheduleNextPending(); err != nil {
 					return err
 				}
 			}
@@ -1220,7 +1219,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// the exec loop (single-writer); lazily installed on first apply otherwise.
 				pe.ensureChangesetAccumulator(blockExecutor.blockNum, blockExecutor.blockHash)
 				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
-				if err := pe.startBlock(ctx, blockExecutor); err != nil {
+				if err := pe.startBlock(blockExecutor); err != nil {
 					return err
 				}
 			}
@@ -1247,7 +1246,7 @@ func (pe *parallelExecutor) refreshApplyTx(ctx context.Context, applyTx kv.Tempo
 	return applyTx, nil
 }
 
-func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest, applyTx kv.TemporalTx) (err error) {
+func (pe *parallelExecutor) processRequest(execRequest *execRequest, applyTx kv.TemporalTx) (err error) {
 	prevAccountTx := map[common.Address]int{}
 	var blockStart state.StateReader
 	var scheduleable *blockExecutor
@@ -1365,13 +1364,13 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	if scheduleable != nil {
-		return pe.startBlock(ctx, scheduleable)
+		return pe.startBlock(scheduleable)
 	}
 
 	return nil
 }
 
-func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) error {
+func (pe *parallelExecutor) startBlock(be *blockExecutor) error {
 	if be.execStarted.IsZero() && be.versionMap.HasBAL {
 		var reader state.StateReader = state.NewReaderV3(pe.domainsRead().AsGetter(pe.applyTx))
 		if first := be.tasks[0]; first.IsHistoric() {
@@ -1393,7 +1392,7 @@ func (pe *parallelExecutor) startBlock(ctx context.Context, be *blockExecutor) e
 		}
 	}
 	be.execStarted = time.Now()
-	be.scheduleExecution(ctx, pe)
+	be.scheduleExecution(pe)
 	return nil
 }
 
@@ -1563,7 +1562,7 @@ func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
 // by processRequest while the slot was busy gets scheduled — processRequest itself
 // only schedules when the map was empty at insert time, so without this a block
 // enqueued mid-flight would orphan in the map and never be validated.
-func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) error {
+func (pe *parallelExecutor) scheduleNextPending() error {
 	pe.Lock()
 	if len(pe.blockExecutors) == 0 {
 		pe.Unlock()
@@ -1583,7 +1582,7 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) error {
 		// Already running (or scheduled).
 		return nil
 	}
-	return pe.startBlock(ctx, next)
+	return pe.startBlock(next)
 }
 
 // processSingleResult routes one worker result to its block executor's
@@ -3375,7 +3374,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	maxValidated := be.validateTasks.maxComplete()
-	be.scheduleExecution(ctx, pe)
+	be.scheduleExecution(pe)
 
 	if be.publishTasks.minPending() != -1 {
 		toPublish := make(sort.IntSlice, 0, 2)
@@ -3664,7 +3663,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	return nil, nil
 }
 
-func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {
+func (be *blockExecutor) scheduleExecution(pe *parallelExecutor) {
 	if be.poolTasks == nil && len(be.tasks) > 0 {
 		be.poolTasks = make([]*poolTask, len(be.tasks))
 		be.pool = pe.pool
@@ -3677,8 +3676,8 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 
 	maxValidated := be.validateTasks.maxComplete()
 
-	// dispatch drains pending, enqueuing each tx. Budget bounds enqueues, which each
-	// occupy an input-channel slot. Txs that can't go now are left in pending.
+	// Queue tasks within the dispatch window; later tasks stay pending until the
+	// committed frontier advances.
 	dispatch := func() (dispatched int) {
 		if be.execTasks.minPending() < 0 {
 			return 0
@@ -3690,8 +3689,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			if nextTx < 0 || nextTx > lastTx {
 				break
 			}
-			// A tx needs a free input-channel slot. If none, leave it in pending
-			// (peek, don't take): re-inserting the lowest index would be O(pending) churn.
 			if budget <= 0 {
 				break
 			}
@@ -3708,8 +3705,8 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 				execCpuNanos: &be.execCpuNanos,
 			}
 
-			// The worker owns its own re-execution loop, so the scheduler dispatches
-			// each task exactly once; re-execution is signalled in place via slReexec.
+			// Re-execution reuses the existing pool task, so the scheduler must not
+			// create another task for the same transaction.
 			if be.selfLoopDispatched[nextTx] {
 				be.cntExec++
 				dispatched++

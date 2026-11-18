@@ -24,6 +24,7 @@ Two things run these fuzzers:
 
 | Package | Fuzzers |
 |---|---|
+| `cl/persistence/blob_storage` | `FuzzParsePackHeader` |
 | `common/bitutil` | `FuzzEncoder`, `FuzzDecoder` |
 | `db/datastruct/fusefilter` | `FuzzReaderOnBytes`, `FuzzReaderShardedOnBytes`, `FuzzWriterRoundTrip` |
 | `db/recsplit/eliasfano16` | `FuzzSingleEliasFano`, `FuzzDoubleEliasFano` |

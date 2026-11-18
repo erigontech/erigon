@@ -25,6 +25,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -50,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -160,10 +162,20 @@ type postPruneColumnWriteStorage struct {
 
 func (s *postPruneColumnWriteStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
 	err := s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
-	if s.pruned.Load() && s.writes.Add(1) == s.want {
+	s.countWrites(1)
+	return err
+}
+
+func (s *postPruneColumnWriteStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	err := s.DataColumnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars)
+	s.countWrites(len(sidecars))
+	return err
+}
+
+func (s *postPruneColumnWriteStorage) countWrites(n int) {
+	if s.pruned.Load() && s.writes.Add(int32(n)) == s.want {
 		s.once.Do(func() { close(s.done) })
 	}
-	return err
 }
 
 func (s *savedColumnReadCountingStorage) GetSavedColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash) ([]uint64, error) {
@@ -2268,6 +2280,37 @@ func (failingColumnWrites) WriteColumnSidecars(context.Context, common.Hash, int
 	return errors.New("column write failed")
 }
 
+func (failingColumnWrites) WriteColumnSidecarsBatch(context.Context, common.Hash, []*cltypes.DataColumnSidecar) error {
+	return errColumnBatchFailed
+}
+
+var (
+	errColumnBatchFailed  = errors.New("column batch write failed")
+	errColumnSingleFailed = errors.New("column single write failed")
+)
+
+type failingColumnBatch struct {
+	blob_storage.DataColumnStorage
+	keep       int
+	failSingle map[uint64]bool
+	singles    atomic.Int32
+}
+
+func (s *failingColumnBatch) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	if err := s.DataColumnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars[:min(s.keep, len(sidecars))]); err != nil {
+		return err
+	}
+	return errColumnBatchFailed
+}
+
+func (s *failingColumnBatch) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
+	s.singles.Add(1)
+	if s.failSingle[uint64(columnIndex)] {
+		return errColumnSingleFailed
+	}
+	return s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
+}
+
 // recoveryTestSlot is the last slot of the first column bucket, so PruneBelow(recoveryTestSlot+1) drops the bucket.
 const recoveryTestSlot = uint64(9_999)
 
@@ -2462,15 +2505,167 @@ func TestBlobRecoveryDoesNotPublishCustodyColumnsItFailedToWrite(t *testing.T) {
 	require.ElementsMatch(t, reconstructedOutsideCustody, publishedColumnIndices(call.sidecars))
 }
 
+func drainColumnEvents(events <-chan *beaconevents.EventStream) []uint64 {
+	var indices []uint64
+	for {
+		select {
+		case event := <-events:
+			indices = append(indices, event.Data.(*beaconevents.DataColumnSidecarData).Index)
+		default:
+			return indices
+		}
+	}
+}
+
+func TestBlobRecoveryWritesColumnsOneAtATimeAfterAFailedBatch(t *testing.T) {
+	r := startRecoveryWithPublisher(t, recoveryOptions{
+		caplinConfig: &clparams.CaplinConfig{},
+		supernode:    true,
+		instrument:   func(r *recoveryRun) { r.d.columnStorage = &failingColumnBatch{DataColumnStorage: r.d.columnStorage} },
+	})
+
+	call := receiveRecoveredColumnsPublish(t, r.published)
+
+	requireBlobRecoveryReleased(t, r.d, r.root)
+	missing := publishedColumnIndices(r.unstoredColumns())
+	require.ElementsMatch(t, missing, publishedColumnIndices(call.sidecars))
+	saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
+	require.NoError(t, err)
+	require.Subset(t, saved, missing)
+}
+
+func TestBlobRecoveryKeepsTheColumnsABatchStoredBeforeItFailed(t *testing.T) {
+	events := make(chan *beaconevents.EventStream, 1024)
+	var columns *failingColumnBatch
+	r := startRecoveryWithPublisher(t, recoveryOptions{
+		caplinConfig: &clparams.CaplinConfig{},
+		supernode:    true,
+		instrument: func(r *recoveryRun) {
+			emitter := beaconevents.NewEventEmitter()
+			subscription := emitter.Operation().Subscribe(events)
+			t.Cleanup(subscription.Unsubscribe)
+			store := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), r.d.beaconConfig, emitter)
+			for index := range r.stored {
+				require.NoError(t, store.WriteColumnSidecars(t.Context(), r.root, int64(index), r.columns[index]))
+			}
+			drainColumnEvents(events)
+			columns = &failingColumnBatch{DataColumnStorage: store, keep: 3}
+			r.d.columnStorage = columns
+		},
+	})
+
+	call := receiveRecoveredColumnsPublish(t, r.published)
+
+	requireBlobRecoveryReleased(t, r.d, r.root)
+	missing := publishedColumnIndices(r.unstoredColumns())
+	require.ElementsMatch(t, missing, publishedColumnIndices(call.sidecars))
+	saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
+	require.NoError(t, err)
+	require.Subset(t, saved, missing)
+	require.ElementsMatch(t, missing, drainColumnEvents(events))
+	require.Equal(t, int32(len(missing)), columns.singles.Load())
+}
+
+func TestBlobRecoveryPublishesOnlyTheColumnsItStoredAfterAFailedBatch(t *testing.T) {
+	var unwritable uint64
+	r := startRecoveryWithPublisher(t, recoveryOptions{
+		caplinConfig: &clparams.CaplinConfig{},
+		supernode:    true,
+		instrument: func(r *recoveryRun) {
+			unwritable = r.unstoredColumns()[0].Index
+			r.d.columnStorage = &failingColumnBatch{DataColumnStorage: r.d.columnStorage, failSingle: map[uint64]bool{unwritable: true}}
+		},
+	})
+
+	call := receiveRecoveredColumnsPublish(t, r.published)
+
+	requireBlobRecoveryReleased(t, r.d, r.root)
+	want := slices.DeleteFunc(publishedColumnIndices(r.unstoredColumns()), func(index uint64) bool { return index == unwritable })
+	require.ElementsMatch(t, want, publishedColumnIndices(call.sidecars))
+	saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
+	require.NoError(t, err)
+	require.NotContains(t, saved, unwritable)
+	require.Len(t, saved, int(r.d.beaconConfig.NumberOfColumns)-1)
+}
+
+func writeThreeColumnsAfterAFailedBatch(t *testing.T, failSingle map[uint64]bool) (map[uint64]bool, error) {
+	cfg := clparams.MainnetBeaconConfig
+	initTestBeaconConfig(&cfg)
+	store := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	d := &peerdas{columnStorage: &failingColumnBatch{DataColumnStorage: store, failSingle: failSingle}}
+	sidecars := make([]*cltypes.DataColumnSidecar, 3)
+	for i := range sidecars {
+		sidecars[i] = cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
+		sidecars[i].Index = uint64(i)
+		sidecars[i].SignedBlockHeader.Header.Slot = recoveryTestSlot
+	}
+	return d.writeColumnSidecarsBatched(t.Context(), recoveryTestSlot, common.Hash{1}, sidecars)
+}
+
+func TestWriteColumnSidecarsBatchedJoinsTheBatchAndTheSingleError(t *testing.T) {
+	failed, err := writeThreeColumnsAfterAFailedBatch(t, map[uint64]bool{1: true})
+
+	require.True(t, failed[1])
+	require.ErrorIs(t, err, errColumnBatchFailed)
+	require.ErrorIs(t, err, errColumnSingleFailed)
+}
+
+func capturePeerDasLogs(run func()) []*log.Record {
+	records := make(chan *log.Record, 64)
+	previous := log.Root().GetHandler()
+	defer log.Root().SetHandler(previous)
+	log.Root().SetHandler(log.FilterHandler(func(r *log.Record) bool { return strings.HasPrefix(r.Msg, "[peerdas]") }, log.ChannelHandler(records)))
+	run()
+	captured := make([]*log.Record, len(records))
+	for i := range captured {
+		captured[i] = <-records
+	}
+	return captured
+}
+
+func logContextValue(record *log.Record, key string) any {
+	for i := 0; i+1 < len(record.Ctx); i += 2 {
+		if record.Ctx[i] == key {
+			return record.Ctx[i+1]
+		}
+	}
+	return nil
+}
+
+func TestWriteColumnSidecarsBatchedLogsTheBatchErrorAfterASuccessfulFallback(t *testing.T) {
+	write := func(failSingle map[uint64]bool) []*log.Record {
+		return capturePeerDasLogs(func() { _, _ = writeThreeColumnsAfterAFailedBatch(t, failSingle) })
+	}
+
+	t.Run("every single write succeeds", func(t *testing.T) {
+		records := write(nil)
+
+		require.Len(t, records, 1)
+		require.Equal(t, log.LvlWarn, records[0].Lvl)
+		require.Equal(t, errColumnBatchFailed, logContextValue(records[0], "err"))
+	})
+
+	t.Run("a single write fails", func(t *testing.T) {
+		require.Empty(t, write(map[uint64]bool{1: true}))
+	})
+}
+
 // countingColumnStorage counts the column writes made through it.
 type countingColumnStorage struct {
 	blob_storage.DataColumnStorage
-	writes atomic.Int32
+	writes  atomic.Int32
+	batches atomic.Int32
 }
 
 func (s *countingColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
 	s.writes.Add(1)
 	return s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
+}
+
+func (s *countingColumnStorage) WriteColumnSidecarsBatch(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	s.writes.Add(int32(len(sidecars)))
+	s.batches.Add(1)
+	return s.DataColumnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars)
 }
 
 func (r *recoveryRun) countColumnWrites() *countingColumnStorage {
@@ -2542,6 +2737,7 @@ func TestBlobRecoveryWritesAndPublishesMissingColumns(t *testing.T) {
 	missing := publishedColumnIndices(r.unstoredColumns())
 	require.ElementsMatch(t, missing, publishedColumnIndices(call.sidecars))
 	require.Equal(t, int32(len(missing)), columns.writes.Load(), "column writes by the worker")
+	require.Equal(t, int32(1), columns.batches.Load(), "column batch writes by the worker")
 }
 
 // A failed read of the stored columns after the matrix recovery leaves the worker with the columns it read before.
@@ -2627,6 +2823,7 @@ func TestBlobRecoveryPrunedDuringMatrixRecoveryRebuildsOnlyUnstoredColumns(t *te
 	missing := publishedColumnIndices(r.unstoredColumns())
 	require.ElementsMatch(t, missing, publishedColumnIndices(call.sidecars))
 	require.Equal(t, int32(len(missing)), columns.writes.Load(), "column writes by the worker")
+	require.Equal(t, int32(1), columns.batches.Load(), "column batch writes by the worker")
 	saved, err := r.d.columnStorage.GetSavedColumnIndex(t.Context(), recoveryTestSlot, r.root)
 	require.NoError(t, err)
 	require.Empty(t, saved)
