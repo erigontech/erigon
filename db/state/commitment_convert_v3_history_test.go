@@ -223,10 +223,18 @@ func TestConvertCommitmentFiles_V3History(t *testing.T) {
 	require.Greater(t, checked, 90)
 }
 
-func TestConvertCommitmentFiles_V3HistoryThenDomains(t *testing.T) {
+func TestConvertCommitmentFiles_V3SplitPassesReopen(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
+	legacySchema := statecfg.Schema
 	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 4)
 	dirs := agg.Dirs()
+	reopen := func() {
+		t.Helper()
+		statecfg.Schema = legacySchema
+		require.NoError(t, state.SetCommitmentConvertSchema(dirs))
+		db, agg = reopenAggregator(t, db, agg, 10)
+		require.NoError(t, agg.OpenFolder(db))
+	}
 	requireCommitmentMajor := func(dir, glob, prefix string) {
 		t.Helper()
 		files, err := filepath.Glob(filepath.Join(dir, glob))
@@ -237,16 +245,43 @@ func TestConvertCommitmentFiles_V3HistoryThenDomains(t *testing.T) {
 		}
 	}
 
+	reopen()
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoDomain: true})
 	requireCommitmentMajor(dirs.SnapHistory, "*-commitment.*.v", "v3.")
 	requireCommitmentMajor(dirs.SnapDomain, "*-commitment.*.kv", "v2.")
-
+	reopen()
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true})
-	requireCommitmentMajor(dirs.SnapHistory, "*-commitment.*.v", "v3.")
 	requireCommitmentMajor(dirs.SnapDomain, "*-commitment.*.kv", "v3.")
 
+	statecfg.Schema = legacySchema
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	statecfg.EnableHistoricalCommitment()
+	db, agg = reopenAggregator(t, db, agg, 10)
+	require.NoError(t, agg.OpenFolder(db))
 	_, err := state.FoldCommitmentV3(t.Context(), agg, ^uint64(0))
 	require.NoError(t, err)
+}
+
+func TestConvertCommitmentFiles_V3HistoryAfterDomainsRefused(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	legacySchema := statecfg.Schema
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 4)
+	dirs := agg.Dirs()
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true})
+	statecfg.Schema = legacySchema
+	require.NoError(t, state.SetCommitmentConvertSchema(dirs))
+	db, agg = reopenAggregator(t, db, agg, 10)
+	require.NoError(t, agg.OpenFolder(db))
+
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true, NoDomain: true}, log.New())
+	require.ErrorContains(t, err, "converts only before the domain files")
+	history, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "v2.*-commitment.*.v"))
+	require.NoError(t, err)
+	require.NotEmpty(t, history)
 }
 
 func TestConvertCommitmentFiles_V3HistoryRejectsAsOfOrphans(t *testing.T) {

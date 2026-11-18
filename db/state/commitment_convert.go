@@ -65,8 +65,8 @@ type ConvertOpts struct {
 }
 
 const (
-	rebuildV3Advice          = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if commitment history was pruned; alternatively run `integration commitment convert --v3 --no-history`"
-	rebuildV3NoHistoryAdvice = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes --no-history` with ERIGON_COMMITMENT_V3=true; alternatively run `integration commitment convert --v3 --no-history`"
+	rebuildV3Advice          = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if commitment history was pruned; alternatively drop commitment history with `erigon seg rm-state --domain=commitment --only-history`, then run `integration commitment convert --v3 --no-history`"
+	rebuildV3NoHistoryAdvice = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes --no-history` with ERIGON_COMMITMENT_V3=true; alternatively drop commitment history with `erigon seg rm-state --domain=commitment --only-history`, then run `integration commitment convert --v3 --no-history`"
 )
 
 // fileState describes the detected current encoding of a commitment .kv file.
@@ -649,6 +649,9 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 			return fmt.Errorf("[commitment_convert] legacy commitment files are not visible to the aggregator: %s", strings.Join(unindexed, ", "))
 		}
 	}
+	if convertHistory && at.d[kv.CommitmentDomain].d.CommitmentV3Records && len(at.d[kv.CommitmentDomain].ht.files) > 0 {
+		return errors.New("[commitment_convert] commitment history converts only before the domain files, and these are already v3")
+	}
 	if convertHistory {
 		if err := checkCommitmentHistoryV3Start(at.d[kv.CommitmentDomain], at.StepSize()); err != nil {
 			return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3NoHistoryAdvice)
@@ -940,6 +943,38 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 		}
 	}
 	return restoredV3, nil
+}
+
+func SetCommitmentConvertSchema(d datadir.Dirs) error {
+	var domainV3, history, historyV3 bool
+	if err := forEachCommitmentDataFile(d.SnapDomain, func(_ string, major uint64) error {
+		domainV3 = domainV3 || major >= 3
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := forEachCommitmentDataFile(d.SnapHistory, func(_ string, major uint64) error {
+		history, historyV3 = true, historyV3 || major >= 3
+		return nil
+	}); err != nil {
+		return err
+	}
+	if history {
+		statecfg.EnableHistoricalCommitment()
+	}
+	cfg := statecfg.Schema.CommitmentDomain
+	v3 := cfg
+	statecfg.EnableCommitmentV3Records(&v3)
+	if domainV3 {
+		legacyHistory := cfg.Hist.FileVersion.DataV
+		cfg = v3
+		cfg.Hist.FileVersion.DataV = legacyHistory
+	}
+	if historyV3 {
+		cfg.Hist.FileVersion.DataV = v3.Hist.FileVersion.DataV
+	}
+	statecfg.Schema.CommitmentDomain = cfg
+	return nil
 }
 
 func forEachCommitmentDataFile(dirPath string, fn func(name string, major uint64) error) error {

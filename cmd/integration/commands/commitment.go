@@ -557,7 +557,7 @@ mid-run crash discards any in-progress work in snap/rebuild/domain/ and
 Phase 1 restarts from scratch. --continue is mutually exclusive with
 --restore.
 
-For --v3, --no-domain skips domain files and --no-history skips history files.
+For --v3, --no-domain skips domain files and --no-history skips history files; a split run converts history (--no-domain) first.
 
 Examples:
   integration commitment convert --datadir /path/to/datadir --chain mainnet
@@ -586,6 +586,11 @@ Examples:
 		}
 		if convertRestore {
 			return commitmentRestore(ctx, logger)
+		}
+		if convertV3 {
+			if err := dbstate.SetCommitmentConvertSchema(datadir.New(datadirCli)); err != nil {
+				return err
+			}
 		}
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
