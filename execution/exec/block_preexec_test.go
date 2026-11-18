@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -37,8 +38,11 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
+	v3 "github.com/erigontech/erigon/execution/commitment/v3"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -215,4 +219,22 @@ func TestCommitmentToucherStopsAfterCancel(t *testing.T) {
 	cancel()
 	require.NoError(t, toucher.UpdateAccountData(accounts.InternAddress(common.Address{2}), nil, nil))
 	require.Equal(t, 1, reads, "the toucher read commitment after cancellation")
+}
+
+func TestBlockReadAheaderPreExecWalksStoragePathOfTxWrite(t *testing.T) {
+	f := newPreExecFixture(t, []byte{0x60, 0x2a, 0x60, 0x08, 0x55, 0x00})
+	pe := f.readAheader.preExec
+	ttx, err := f.db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer ttx.Rollback()
+	reader := state.NewReaderV3(readAheadGetter(ttx, f.stateCache, true))
+	noHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
+	blockCtx := protocol.NewEVMBlockContext(f.header(), noHash, pe.engine, accounts.NilAddress, f.config)
+	var reads []string
+	toucher := &commitmentToucher{ctx: t.Context(), read: func(key []byte) []byte { reads = append(reads, string(key)); return nil }}
+	from := accounts.InternAddress(crypto.PubkeyToAddress(f.key.PublicKey))
+	pe.run(t.Context(), blockCtx, blockCtx.Rules(f.config), from, f.txn(t, 100_000, 1), 100_000, reader, toucher)
+
+	contractHash := keccak.Sum256(f.contract[:])
+	require.Contains(t, reads, string(v3.StorageNodeKey(contractHash, nil, nil)), "the tx's SSTORE must walk the contract's storage path")
 }
