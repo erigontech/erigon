@@ -131,6 +131,9 @@ func (pe *preExecCfg) run(ctx context.Context, blockCtx evmtypes.BlockContext, c
 	}
 	gasPrice := txn.GetEffectiveGasTip(&blockCtx.BaseFee)
 	gasPrice.Add(&gasPrice, &blockCtx.BaseFee)
+	if gasPrice.Gt(txn.GetFeeCap()) {
+		gasPrice.Set(txn.GetFeeCap())
+	}
 	msg := types.NewMessage(from, to, txn.GetNonce(), txn.GetValue(), gas, &gasPrice, txn.GetFeeCap(),
 		txn.GetTipCap(), txn.GetData(), txn.GetAccessList(), false, false, true, false, nil)
 	if h := txn.GetBlobHashes(); len(h) > 0 {

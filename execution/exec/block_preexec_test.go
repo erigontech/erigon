@@ -191,6 +191,24 @@ func TestBlockReadAheaderPreExecUsesEffectiveGasPrice(t *testing.T) {
 	require.False(t, ok, "the slot keyed by the fee cap was read")
 }
 
+func TestBlockReadAheaderPreExecClampsGasPriceToFeeCap(t *testing.T) {
+	f := newPreExecFixture(t, []byte{0x3a, 0x54, 0x00})
+	header := f.header()
+	header.BaseFee = uint256.NewInt(10)
+	txn, err := types.SignNewTx(f.key, *types.MakeSigner(f.config, 1, 1000), &types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{To: &f.contract, GasLimit: 100_000},
+		ChainID:  *f.config.ChainID,
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{txn}))
+
+	feeCap, baseFee := common.Hash{}, common.Hash{31: 10}
+	_, ok := f.stateCache.View(nil).Get(kv.StorageDomain, append(f.contract[:], feeCap[:]...))
+	require.True(t, ok, "the slot keyed by the fee cap was not read")
+	_, ok = f.stateCache.View(nil).Get(kv.StorageDomain, append(f.contract[:], baseFee[:]...))
+	require.False(t, ok, "the slot keyed by the base fee was read")
+}
+
 func TestBlockReadAheaderPreExecCreatesAtTxNonce(t *testing.T) {
 	f := newPreExecFixture(t, []byte{0x00})
 	signer := *types.MakeSigner(f.config, 1, 1000)
