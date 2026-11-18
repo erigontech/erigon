@@ -17,12 +17,15 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/stretchr/testify/require"
 )
@@ -917,4 +920,55 @@ func Test_CheckIfBlockSnapshotsPublishable_IgnoresStateSubdirs(t *testing.T) {
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapDomain, "v1.2-storage.0-128.kv")
 	require.NoError(t, checkIfBlockSnapshotsPublishable(dirs.Snap))
+}
+
+func Test_CheckIfBlockSnapshotsPublishable_LastRangeCompanions(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		remove    string
+		add       string
+		wantError string
+	}{
+		{name: "missing bodies seg", remove: "v1.1-000520-000521-bodies.seg", wantError: "missing file"},
+		{name: "missing headers idx", remove: "v2.0-000520-000521-headers.idx", wantError: "index file"},
+		{name: "missing transactions idx", remove: "v2.0-000520-000521-transactions.idx", wantError: "index file"},
+		{name: "missing transactions-to-block idx", remove: "v2.0-000520-000521-transactions-to-block.idx", wantError: "index file"},
+		{name: "unsupported bodies seg", remove: "v1.1-000520-000521-bodies.seg", add: "v0.1-000520-000521-bodies.seg", wantError: "expected version"},
+		{name: "unsupported headers seg", remove: "v1.1-000520-000521-headers.seg", add: "v0.1-000520-000521-headers.seg", wantError: "expected version"},
+		{name: "unsupported headers idx", remove: "v2.0-000520-000521-headers.idx", add: "v0.1-000520-000521-headers.idx", wantError: "less than supported"},
+		{name: "unsupported transactions-to-block idx", remove: "v2.0-000520-000521-transactions-to-block.idx", add: "v0.1-000520-000521-transactions-to-block.idx", wantError: "less than supported"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dirs := setupWorkingStateMockDatadir(t)
+			removeMockFile(t, dirs.Snap, tt.remove)
+			if tt.add != "" {
+				createMockFile(t, dirs.Snap, tt.add)
+			}
+			require.ErrorContains(t, checkIfBlockSnapshotsPublishable(dirs.Snap), tt.wantError)
+		})
+	}
+}
+
+func Test_CheckIfBlockSnapshotsPublishable_LegacyIdxVersion(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"headers.idx", "transactions.idx", "transactions-to-block.idx"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dirs := setupWorkingStateMockDatadir(t)
+			removeMockFile(t, dirs.Snap, "v2.0-000520-000521-"+name)
+			createMockFile(t, dirs.Snap, "v2-000520-000521-"+name)
+			require.NoError(t, checkIfBlockSnapshotsPublishable(dirs.Snap))
+		})
+	}
+}
+
+func Test_DoPublishable_StopsOnExpiredContext(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 0)
+	defer cancel()
+	dirs := datadir.New(t.TempDir())
+	require.ErrorIs(t, doPublishable(ctx, dirs, mdbxtest.NewTestDB(t, dbcfg.ChainDB)), context.DeadlineExceeded)
 }

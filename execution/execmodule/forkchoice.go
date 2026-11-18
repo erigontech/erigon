@@ -522,9 +522,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 
 	e.logger.Debug("[execmodule] updating fork choice", "number", fcuHeader.Number.Uint64(), "hash", fcuHeader.Hash())
-	UpdateForkChoiceArrivalDelay(fcuHeader.Time)
-	metrics.UpdateBlockConsumerPreExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
-	defer metrics.UpdateBlockConsumerPostExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 
 	var limitedBigJump bool
 	limitedBigJumpPadding := uint64(2)
@@ -585,6 +582,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		sendForkchoiceResultWithoutWaiting(outcomeCh, result, false)
 		return nil
 	}
+
+	UpdateForkChoiceArrivalDelay(fcuHeader.Time)
+	metrics.UpdateBlockConsumerPreExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
+	defer metrics.UpdateBlockConsumerPostExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 
 	var restoreRecentReceipts func()
 	defer func() {
@@ -819,10 +820,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			e.closeModuleContext()
 		}
 
-		// Dispatch notifications from the SD overlay (before flush/commit).
-		// After this, all consumers have the data — the semaphore can be
-		// released and flush/commit/prune can proceed without blocking the
-		// next FCU.
+		// Dispatch notifications from the overlay before flush/commit; the semaphore
+		// stays held through commit and prune.
 		e.logger.Debug("[updateForkChoice] dispatching notifications", "head", blockHash)
 		prevUnwindPoint := fcuUnwindPoint
 		if prevUnwindPoint == nil {

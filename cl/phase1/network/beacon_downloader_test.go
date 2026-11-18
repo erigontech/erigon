@@ -478,50 +478,41 @@ func TestForwardRequestMoreRotatesSlowP2PProbes(t *testing.T) {
 	require.Zero(t, sentinel.active.Load())
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func TestForwardRequestMoreStartsHTTPFallbackWhileProbesAreSlow(t *testing.T) {
-	previousInterval := forwardBeaconRequestInterval
-	previousTimeout := forwardBeaconRequestTimeout
-	previousFallbackDelay := forwardBeaconFallbackDelay
-	forwardBeaconRequestInterval = time.Millisecond
-	forwardBeaconRequestTimeout = 200 * time.Millisecond
-	forwardBeaconFallbackDelay = 20 * time.Millisecond
-	t.Cleanup(func() {
-		forwardBeaconRequestInterval = previousInterval
-		forwardBeaconRequestTimeout = previousTimeout
-		forwardBeaconFallbackDelay = previousFallbackDelay
-	})
+	synctest.Test(t, func(t *testing.T) {
+		previousInterval := forwardBeaconRequestInterval
+		previousTimeout := forwardBeaconRequestTimeout
+		previousFallbackDelay := forwardBeaconFallbackDelay
+		previousClient := beaconAPIClient
+		forwardBeaconRequestInterval = time.Millisecond
+		forwardBeaconRequestTimeout = time.Second
+		forwardBeaconFallbackDelay = 20 * time.Millisecond
+		var fallbackStarted atomic.Bool
+		beaconAPIClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			fallbackStarted.Store(true)
+			return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody, Request: r}, nil
+		})}
+		defer func() {
+			forwardBeaconRequestInterval = previousInterval
+			forwardBeaconRequestTimeout = previousTimeout
+			forwardBeaconFallbackDelay = previousFallbackDelay
+			beaconAPIClient = previousClient
+		}()
 
-	fallbackStarted := make(chan struct{})
-	var fallbackOnce sync.Once
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fallbackOnce.Do(func() { close(fallbackStarted) })
-		http.NotFound(w, nil)
-	}))
-	t.Cleanup(server.Close)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		sentinel := newCountingBlockingSentinel()
+		rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+		downloader := NewForwardBeaconDownloader(ctx, rpcClient, cfg)
+		downloader.SetHTTPFallbackURL("http://beacon.invalid")
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	sentinel := newCountingBlockingSentinel()
-	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
-	downloader := NewForwardBeaconDownloader(ctx, rpcClient, cfg)
-	downloader.SetHTTPFallbackURL(server.URL)
-
-	done := make(chan struct{})
-	go func() {
 		downloader.RequestMore(ctx)
-		close(done)
-	}()
-
-	select {
-	case <-fallbackStarted:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("slow P2P probes prevented the HTTP fallback from starting")
-	}
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("RequestMore did not finish after its request window")
-	}
+		require.True(t, fallbackStarted.Load(), "slow P2P probes prevented the HTTP fallback from starting")
+	})
 }
 
 func TestForwardRequestMoreDoesNotPreferHTTPWithoutProgress(t *testing.T) {

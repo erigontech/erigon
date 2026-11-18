@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -612,7 +613,8 @@ func TestImportColumnsFromBlobsReturnsThePublicationSetWithTheWriteErrorWhenClai
 
 var errRenameFailed = errors.New("rename failed")
 
-// renameFailingFs fails every Rename from the failAt-th on, which leaves the earlier renames durable.
+// renameFailingFs fails every Rename onto a pack, so a batch write fails as a whole. It counts the other Renames
+// and fails them from the failAt-th on, which leaves the earlier ones durable.
 type renameFailingFs struct {
 	afero.Fs
 	failAt  int32
@@ -620,7 +622,7 @@ type renameFailingFs struct {
 }
 
 func (f *renameFailingFs) Rename(oldname, newname string) error {
-	if f.renames.Add(1) >= f.failAt {
+	if strings.HasSuffix(newname, ".pack") || f.renames.Add(1) >= f.failAt {
 		return errRenameFailed
 	}
 	return f.Fs.Rename(oldname, newname)

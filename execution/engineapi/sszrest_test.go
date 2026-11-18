@@ -1726,10 +1726,11 @@ func TestSSZRESTForkchoiceStartsPayloadBuild(t *testing.T) {
 	attrs := goldenSampleAttrs(clparams.GloasVersion)
 	attrs.Timestamp = 500
 	module := &stubExecutionModule{
-		getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
-			return execmodule.ForkChoiceState{
-				HeadHash: state.HeadHash, SafeHash: state.SafeBlockHash, FinalizedHash: state.FinalizedBlockHash,
-			}, nil
+		headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+			return common.NewUint64(1), nil
+		},
+		updateForkChoiceFunc: func(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+			return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusSuccess, LatestValidHash: state.HeadHash}, nil
 		},
 		getHeaderFunc: func(_ context.Context, hash *common.Hash, _ *uint64) (*types.Header, error) {
 			require.Equal(t, &state.HeadHash, hash)
@@ -1750,6 +1751,7 @@ func TestSSZRESTForkchoiceStartsPayloadBuild(t *testing.T) {
 		},
 	}
 	srv := newProposingEngineServerWithConfig(cfg, module)
+	srv.blockDownloader = engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), module, nil, nil, cfg, ethconfig.Sync{}, nil)
 	body, err := encodeForkchoiceUpdate(clparams.GloasVersion, state, attrs, nil)
 	require.NoError(t, err)
 	rec := httptest.NewRecorder()
@@ -1794,14 +1796,10 @@ func TestSSZRESTForkchoiceHeaderForkMustMatchAttributes(t *testing.T) {
 				}
 				attrs := goldenSampleAttrs(tc.version)
 				attrs.Timestamp = tc.timestamp
-				var forkchoiceReads, forkchoiceUpdates, payloadBuilds int
+				var headerReads, forkchoiceUpdates, payloadBuilds int
 				module := &stubExecutionModule{
-					getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
-						forkchoiceReads++
-						// Keep the current state different so a known head would need a forkchoice update.
-						return execmodule.ForkChoiceState{}, nil
-					},
 					getHeaderFunc: func(context.Context, *common.Hash, *uint64) (*types.Header, error) {
+						headerReads++
 						if !knownHead {
 							return nil, nil
 						}
@@ -1837,7 +1835,7 @@ func TestSSZRESTForkchoiceHeaderForkMustMatchAttributes(t *testing.T) {
 				require.Equal(t, problemUnsupportedFork, problemType(t, rec))
 				require.Zero(t, forkchoiceUpdates, "a fork mismatch must not apply forkchoice state")
 				require.Zero(t, payloadBuilds, "a fork mismatch must not start a payload build")
-				require.Zero(t, forkchoiceReads, "a fork mismatch must be rejected before forkchoice processing")
+				require.Zero(t, headerReads, "a fork mismatch must be rejected before forkchoice processing")
 			})
 		}
 	}

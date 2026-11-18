@@ -506,7 +506,7 @@ func TestValidateRead_StoragePath_RemovalUnderBALSubsumed(t *testing.T) {
 
 	// The validator stands on the wipe anchor (tx3), not the origin — so the cold origin
 	// read version-mismatches and is rejected, even with HasBAL set.
-	live := liveStorage(vm, addr, key, 5)
+	_, live, _, _ := liveStorageValue(vm, addr, key, 5)
 	require.Equal(t, 3, live.Version().TxIndex, "the live anchor is the wipe (tx3), not the origin")
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, checkVersionEqual, false, ""),
 		"a cold origin read under a later destruct invalidates by version even under BAL")
@@ -2596,7 +2596,7 @@ func TestValidateReadSet_BaseReadOfQuietAccountSkipsValidation(t *testing.T) {
 		{"self-destruct", SelfDestructPath, true, base, VersionInvalid, false},
 		{"address write", AddressPath, &accounts.Account{Incarnation: 1}, base, VersionValid, false},
 		{"incarnation write", IncarnationPath, uint64(1), base, VersionInvalid, false},
-		{"create contract", CreateContractPath, true, base, VersionValid, false},
+		{"create contract", CreateContractPath, true, base, VersionInvalid, false},
 		{"read of a removed write", 0, nil, ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, VersionInvalid, false},
 		{"read of an aborted write", StoragePath, *uint256.NewInt(8), ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 1}}, VersionInvalid, false},
 	} {

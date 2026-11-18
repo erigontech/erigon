@@ -620,7 +620,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, parent, nil, true, defaultReadinessWait)
+	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, parent, true, defaultReadinessWait)
 	if err != nil {
 		return nil, err
 	}
@@ -655,7 +655,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	block = block.WithInclusionList(il)
 	if possibleStatus != nil {
 		// Decided without the lock: a forkchoice update or another payload may have changed the validated state since.
-		if possibleStatus, err = e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, parent, nil, true, defaultReadinessWait); err != nil {
+		if possibleStatus, err = e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, parent, true, defaultReadinessWait); err != nil {
 			return nil, err
 		}
 		if possibleStatus != nil {
@@ -733,7 +733,7 @@ func attributesReadinessWait(secondsPerSlot uint64) time.Duration {
 
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated. For a
 // newPayload, parent is the stored parent header, or nil.
-func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, parent *types.Header, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool, readinessWait time.Duration) (*engine_types.PayloadStatus, error) {
+func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, parent *types.Header, newPayload bool, readinessWait time.Duration) (*engine_types.PayloadStatus, error) {
 	// Determine which prefix to use for logs
 	var prefix string
 	if newPayload {
@@ -744,20 +744,6 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 	if e.config.TerminalTotalDifficulty == nil {
 		e.logger.Error(fmt.Sprintf("[%s] not a proof-of-stake chain", prefix))
 		return nil, errors.New("not a proof-of-stake chain")
-	}
-
-	headHash, finalizedHash, safeHash, err := e.chainRW.GetForkChoice(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Some Consensus layer clients sometimes sends us repeated FCUs and make Erigon print a gazillion logs.
-	// E.G teku sometimes will end up spamming fcu on the terminal block if it has not synced to that point.
-	if forkchoiceMessage != nil &&
-		forkchoiceMessage.FinalizedBlockHash == finalizedHash &&
-		forkchoiceMessage.HeadHash == headHash &&
-		forkchoiceMessage.SafeBlockHash == safeHash {
-		return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 	}
 
 	var header *types.Header
@@ -782,11 +768,12 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 	}
 
 	var isCanonical bool
-	if header != nil {
+	if newPayload && header != nil {
+		var err error
 		isCanonical, err = e.chainRW.IsCanonicalHash(ctx, blockHash)
-	}
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if newPayload && parent != nil && blockNumber != parent.Number.Uint64()+1 {
@@ -830,8 +817,8 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		}
 	}
 
-	currentHeader := e.chainRW.CurrentHeader(ctx)
-	// If header is already validated or has a missing parent, you can either return VALID or SYNCING.
+	// Only newPayload can return VALID here. A pending commit can still change the stored
+	// forkchoice, so forkchoice updates must go through the execution module's serialized path.
 	if newPayload {
 		// The quick VALID result is provisional for a validated non-canonical payload
 		// with an unchecked non-empty inclusion list; NewPayload re-inserts and revalidates it.
@@ -853,13 +840,6 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		}); shouldWait {
 			e.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
-		}
-
-		// For NewPayload: if the block is already canonical and known, return VALID immediately.
-		// For FCU: we must always go through HandleForkChoice so the EL head actually moves,
-		// even if the requested head is a canonical ancestor (e.g. fork choice head regression).
-		if newPayload && currentHeader != nil && header != nil && isCanonical {
-			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
 	// Ready can block on snapshot readiness; bounding its context keeps each call inside the budget.
@@ -987,13 +967,11 @@ func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	e.logger.Debug("[ForkChoiceUpdated] processing new request", newReqLogInfoArgs...)
 	readinessWait := defaultReadinessWait
 	if payloadAttributes != nil {
-		// The previous head's flush, commit and prune keep the module busy after its forkchoice
-		// update has already answered. Answering SYNCING here drops the payload build - and with
-		// it the proposal - so wait as long as the AssembleBlock step below would, capped so a
-		// long-slot chain can't turn this into a client-side timeout instead of a clean SYNCING.
+		// The module may still be committing or pruning after an earlier VALID response.
+		// A SYNCING response has no payload ID, so allow a longer readiness wait for builds.
 		readinessWait = attributesReadinessWait(e.config.SecondsPerSlot())
 	}
-	status, err := e.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, nil, forkchoiceState, false, readinessWait)
+	status, err := e.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, nil, false, readinessWait)
 	if err != nil {
 		return nil, err
 	}
