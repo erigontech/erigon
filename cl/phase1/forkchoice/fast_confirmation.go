@@ -279,7 +279,7 @@ func (f *ForkChoiceStore) fastConfirmationView(slot uint64) (*fcrView, error) {
 				if ok {
 					block.parentStatus = f.getParentPayloadStatus(signed.Block)
 				}
-				block.valid = block.valid && (bid.ParentBlockHash == f.finalizedExecutionHashLocked(v.finalized.Root) || f.payloadValidatedLocked(common.Hash{}, bid.ParentBlockHash))
+				block.valid = !f.cutOffByInvalidation(root) && (bid.ParentBlockHash == f.finalizedExecutionHashLocked(v.finalized.Root) || f.payloadValidatedLocked(common.Hash{}, bid.ParentBlockHash))
 			} else {
 				version := f.beaconCfg.GetCurrentStateVersion(header.Slot / v.slotsPerEpoch)
 				if signed, ok := f.forkGraph.GetBlock(root); ok {

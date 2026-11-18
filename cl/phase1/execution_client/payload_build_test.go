@@ -140,22 +140,25 @@ func TestDirectForkChoiceUpdateKeepsBuildingWithAttributes(t *testing.T) {
 		{Status: execmodule.ExecutionStatusTooFarAway},
 	} {
 		t.Run(result.Status.String(), func(t *testing.T) {
-			module := &payloadBuildModuleStub{
-				forkChoiceResult: result,
-				assembled:        execmodule.AssembleBlockResult{PayloadID: 42},
+			for _, enabled := range []bool{false, true} {
+				module := &payloadBuildModuleStub{
+					forkChoiceResult: result,
+					assembled:        execmodule.AssembleBlockResult{PayloadID: 42},
+				}
+				client, err := NewExecutionClientDirect(
+					chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
+				)
+				require.NoError(t, err)
+				client.EnableFastConfirmation = enabled
+
+				id, err := client.ForkChoiceUpdate(
+					t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.ElectraVersion,
+				)
+
+				require.NoError(t, err)
+				require.Equal(t, encodeDirectPayloadID(42), id)
+				require.Equal(t, 1, module.assembleCalls)
 			}
-			client, err := NewExecutionClientDirect(
-				chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil,
-			)
-			require.NoError(t, err)
-
-			id, err := client.ForkChoiceUpdate(
-				t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.ElectraVersion,
-			)
-
-			require.NoError(t, err)
-			require.Equal(t, encodeDirectPayloadID(42), id)
-			require.Equal(t, 1, module.assembleCalls)
 		})
 	}
 }

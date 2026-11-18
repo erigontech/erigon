@@ -364,3 +364,62 @@ func TestFastConfirmationHeaderOnlyAnchorVotes(t *testing.T) {
 		})
 	}
 }
+
+func TestFastConfirmationGloasInvalidPayloadKeepsEmptyPath(t *testing.T) {
+	for _, full := range []bool{false, true} {
+		t.Run(fmt.Sprintf("full=%t", full), func(t *testing.T) {
+			store, base, anchor := executionHeadFixture(t)
+			graph := &invalidTrackingGraph{getFinalizedExecutionHashForkGraph: base.getFinalizedExecutionHashForkGraph, invalid: make(map[common.Hash]bool)}
+			store.forkGraph = graph
+			graph.headers = map[common.Hash]*cltypes.BeaconBlockHeader{anchor.Root: {}}
+			graph.anchorRoot = anchor.Root
+			checkpoint := solid.Checkpoint{Root: anchor.Root}
+			graph.currentJustified = checkpoint
+			store.finalizedCheckpoint.Store(checkpoint)
+			store.unrealizedJustifiedCheckpoint.Store(checkpoint)
+			store.latestMessages = newLatestMessagesStore(4)
+			store.EnableFastConfirmation(checkpoint)
+			parent, child := common.Hash{4}, common.Hash{5}
+			for i, root := range []common.Hash{parent, child} {
+				block := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+				block.Block.Slot = uint64(i + 1)
+				block.Block.ParentRoot = anchor.Root
+				bid := block.Block.Body.SignedExecutionPayloadBid.Message
+				bid.ParentBlockHash, bid.BlockHash = common.Hash{2}, common.Hash{byte(i + 4)}
+				if i == 1 {
+					block.Block.ParentRoot = parent
+					if full {
+						bid.ParentBlockHash = common.Hash{4}
+					}
+				}
+				addInvalidAncestorsBlock(graph, root, block)
+				store.unrealizedJustifications.Store(root, checkpoint)
+			}
+			store.MarkPayloadStatus(parent, common.Hash{4}, execution_client.PayloadStatusInvalidated)
+			require.True(t, graph.IsBlockInvalid(parent))
+			require.False(t, store.cutOffByInvalidation(parent))
+			require.Equal(t, full, store.cutOffByInvalidation(child))
+			store.headHash, store.headSlot = child, 2
+			store.timeMs.Store(3 * store.beaconCfg.SecondsPerSlot * 1000)
+			for i := range 4 {
+				store.latestMessages.set(i, LatestMessage{Root: child, Slot: 2})
+			}
+			view, err := store.fastConfirmationView(store.Slot())
+			require.NoError(t, err)
+			balances := &fcrBalances{balances: []uint64{100, 100, 100, 100}, active: []bool{true, true, true, true}, slashed: make([]bool, 4), total: 400}
+			view.balanceIncrement, view.proposerBoost = 1, 0
+			view.committees = map[uint64][]uint64{2: {0, 1, 2, 3}}
+			view.headBalances = balances
+			require.True(t, view.oneConfirmed(balances, parent), "the block's optional invalid payload must not exclude its EMPTY variant")
+			require.Equal(t, !full, view.oneConfirmed(balances, child))
+			want := child
+			if full {
+				want = parent
+			}
+			rule := store.fastConfirmation.rule
+			require.Equal(t, want, rule.latestDescendant(view, balances, anchor.Root))
+			view.slot = view.slotsPerEpoch
+			require.Equal(t, !full, rule.chainSafe(view, balances, child), "epoch-boundary reconfirmation must use the surviving payload path")
+		})
+	}
+}

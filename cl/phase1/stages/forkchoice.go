@@ -83,12 +83,8 @@ func notifyServicesOfHead(ctx context.Context, logger log.Logger, cfg *Cfg, head
 		update := forkChoiceUpdate{beaconHead: headRoot, head: executionHead, safe: safeHash, finalized: finalizedHash}
 		if cfg.safeUpdatePending && update == cfg.lastFailedForkChoice {
 			if delay := time.Until(cfg.forkChoiceRetryAt); delay > 0 {
-				timer := time.NewTimer(delay)
-				defer timer.Stop()
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-timer.C:
+				if err := common.Sleep(ctx, delay); err != nil {
+					return err
 				}
 			}
 		}

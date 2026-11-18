@@ -90,12 +90,18 @@ type chainTipBatchForkGraph struct {
 
 type chainTipBatchEnvelopeSentinel struct {
 	sentinelproto.SentinelClient
-	response []byte
-	calls    int
+	response  []byte
+	calls     int
+	onRequest func(context.Context) error
 }
 
-func (s *chainTipBatchEnvelopeSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+func (s *chainTipBatchEnvelopeSentinel) SendRequest(ctx context.Context, _ *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
 	s.calls++
+	if s.onRequest != nil {
+		if err := s.onRequest(ctx); err != nil {
+			return nil, err
+		}
+	}
 	return &sentinelproto.ResponseData{Data: s.response, Peer: &sentinelproto.Peer{Pid: "envelope-peer"}}, nil
 }
 
@@ -2282,6 +2288,7 @@ func TestChainTipAncestorLookupEndsWithinHalfASlot(t *testing.T) {
 	)
 	missing, _ := f.child(f.parent, 65)
 	tip, _ := f.child(missing, 66)
+	f.pinCurrentSlot(&tip.Block.Slot)
 	var requestedAt, deadline time.Time
 	var hasDeadline bool
 	f.sentinel.onRequest = func(ctx context.Context) {
@@ -2302,6 +2309,7 @@ func TestChainTipAncestorLookupEndsWithinHalfASlot(t *testing.T) {
 	require.True(t, hasDeadline)
 	require.LessOrEqual(t, deadline.Sub(requestedAt), halfSlot)
 	require.Less(t, time.Since(started), stageTimeout/2, "a stalled lookup outlived its half-slot deadline")
+	require.Equal(t, f.cfg.ethClock.GetCurrentSlot(), f.cfg.ancestorLookupFailedSlot)
 }
 
 // A lookup that fails after the clock moved on throttles the slot it ended in.
@@ -2570,10 +2578,14 @@ func TestChainTipSyncSlowImportWhileSafeUpdatePending(t *testing.T) {
 		name    string
 		pending bool
 		cancel  bool
+		delay   time.Duration
+		timeout bool
 	}{
-		{"pending", true, false},
-		{"flag off", false, false},
-		{"stage canceled", true, true},
+		{"pending", true, false, 2 * time.Second, false},
+		{"flag off", false, false, 2 * time.Second, false},
+		{"stage canceled", true, true, 2 * time.Second, false},
+		{"pending import timeout", true, false, 30 * time.Second, true},
+		{"flag off import timeout", false, false, 30 * time.Second, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -2594,21 +2606,25 @@ func TestChainTipSyncSlowImportWhileSafeUpdatePending(t *testing.T) {
 					if tc.cancel {
 						cancel()
 					}
-					timer := time.NewTimer(2 * time.Second)
-					defer timer.Stop()
-					select {
-					case <-importCtx.Done():
-						return importCtx.Err()
-					case <-timer.C:
-						return nil
-					}
+					return common.Sleep(importCtx, tc.delay)
 				}}
 
+				started := time.Now()
 				err = chainTipSync(ctx, log.Root(), f.cfg, Args{seenSlot: f.parent.Block.Slot, targetSlot: block.Block.Slot})
 
 				if tc.cancel {
 					require.ErrorIs(t, err, context.Canceled)
 					require.NotNil(t, f.cfg.pendingBlockWrite)
+					return
+				}
+				if tc.timeout {
+					if tc.pending {
+						require.NoError(t, err)
+					} else {
+						require.ErrorIs(t, err, context.DeadlineExceeded)
+					}
+					require.NotNil(t, f.cfg.pendingBlockWrite)
+					require.InDelta(t, 25, time.Since(started).Seconds(), 0.1)
 					return
 				}
 				require.NoError(t, err)
@@ -2633,14 +2649,10 @@ func TestChainTipBatchSlowPayloadImportOutlivesFetchDeadline(t *testing.T) {
 		cfg.rpc, _ = newChainTipBatchEnvelopeRPC(t, cfg.beaconCfg, graph.envelopes[parentRoot])
 		delete(graph.envelopes, parentRoot)
 		engine.newPayloadFn = func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
-			timer := time.NewTimer(2 * time.Second)
-			defer timer.Stop()
-			select {
-			case <-ctx.Done():
-				return execution_client.PayloadStatusNone, ctx.Err()
-			case <-timer.C:
-				return execution_client.PayloadStatusValidated, nil
+			if err := common.Sleep(ctx, 2*time.Second); err != nil {
+				return execution_client.PayloadStatusNone, err
 			}
+			return execution_client.PayloadStatusValidated, nil
 		}
 		fetchCtx, cancel := context.WithTimeout(t.Context(), time.Second)
 		defer cancel()
@@ -2654,4 +2666,68 @@ func TestChainTipBatchSlowPayloadImportOutlivesFetchDeadline(t *testing.T) {
 		require.Equal(t, 1, engine.newPayloadCalls)
 		require.True(t, cfg.forkChoice.IsPayloadVerified(parentRoot))
 	})
+}
+
+func TestChainTipAncestorLookupOuterDeadlineDoesNotThrottleSlot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newAncestorLookupFixture(t)
+		missing, _ := f.child(f.parent, 65)
+		tip, _ := f.child(missing, 66)
+		f.tickTo(tip.Block.Slot)
+		f.pinCurrentSlot(&tip.Block.Slot)
+		f.cfg.emitter = beaconevents.NewEventEmitter()
+		batch := &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: []*cltypes.SignedBeaconBlock{tip}, Peer: ancestorPeer}
+		f.sentinel.onRequest = func(ctx context.Context) { <-ctx.Done() }
+		importCtx, cancelImport := context.WithTimeout(t.Context(), 25*time.Second)
+		defer cancelImport()
+		fetchCtx, cancelFetch := context.WithTimeout(importCtx, time.Second)
+		defer cancelFetch()
+		respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1)
+		respCh <- batch
+		started := time.Now()
+		err := listenToIncomingBlocksUntilANewBlockIsReceived(importCtx, fetchCtx, log.Root(), f.cfg, Args{targetSlot: tip.Block.Slot}, respCh, make(chan error))
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.NoError(t, importCtx.Err())
+		require.InDelta(t, 1, time.Since(started).Seconds(), 0.1)
+		require.Len(t, f.sentinel.requests, 1)
+		require.Zero(t, f.cfg.ancestorLookupFailedSlot)
+
+		f.sentinel.onRequest = nil
+		f.sentinel.serve = servingChain(0, missing)
+		blocks := withMissingAncestors(importCtx, f.cfg, batch, make(map[common.Hash]error))
+		require.Len(t, f.sentinel.requests, 2, "retry in the same slot once the outer deadline is gone")
+		require.Len(t, blocks, 2)
+		require.Equal(t, missing.Block.Slot, blocks[0].Block.Slot)
+	})
+}
+
+func TestChainTipSlowEnvelopesUseFetchDeadline(t *testing.T) {
+	for _, kind := range []string{"parent", "anchor"} {
+		t.Run(kind, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cfg, graph, parentRoot, child, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+				peerRPC, sentinel := newChainTipBatchEnvelopeRPC(t, cfg.beaconCfg, graph.envelopes[parentRoot])
+				cfg.rpc = peerRPC
+				sentinel.onRequest = func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
+				delete(graph.envelopes, parentRoot)
+				if kind == "anchor" {
+					cfg.forkChoice = newAnchorForkChoiceStore(t, cfg.beaconCfg, graph.parentState, engine)
+					child.Block.ParentRoot = cfg.forkChoice.AnchorRoot()
+					cfg.caplinConfig.DisabledCheckpointSync = true
+				}
+				importCtx, cancelImport := context.WithTimeout(t.Context(), 25*time.Second)
+				defer cancelImport()
+				fetchCtx, cancelFetch := context.WithTimeout(importCtx, time.Second)
+				defer cancelFetch()
+				started := time.Now()
+				rejected := make(map[common.Hash]error)
+				require.False(t, processChainTipBatch(importCtx, fetchCtx, cfg, Args{targetSlot: child.Block.Slot}, []*cltypes.SignedBeaconBlock{child}, make(map[common.Hash]struct{}), rejected))
+				require.Positive(t, sentinel.calls)
+				require.NotEmpty(t, rejected)
+				require.NoError(t, importCtx.Err())
+				require.ErrorIs(t, fetchCtx.Err(), context.DeadlineExceeded)
+				require.InDelta(t, 1, time.Since(started).Seconds(), 0.1)
+			})
+		})
+	}
 }
