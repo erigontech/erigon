@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -42,18 +43,12 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-type zeroCanonical struct{}
+type zeroCanonical struct {
+	dbservices.CanonicalReader
+}
 
 func (zeroCanonical) CanonicalHash(context.Context, kv.Getter, uint64) (common.Hash, bool, error) {
 	return common.Hash{}, true, nil
-}
-
-func (zeroCanonical) IsCanonical(context.Context, kv.Getter, common.Hash, uint64) (bool, error) {
-	return true, nil
-}
-
-func (zeroCanonical) BadHeaderNumber(context.Context, kv.Getter, common.Hash) (*uint64, error) {
-	return nil, nil
 }
 
 type preExecFixture struct {

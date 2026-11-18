@@ -158,20 +158,15 @@ func (t *commitmentToucher) touch(addrHash, slotHash []byte) {
 	t.paths++
 }
 
-func (t *commitmentToucher) touchAccount(a accounts.Address) {
+func (t *commitmentToucher) UpdateAccountData(a accounts.Address, _, _ *accounts.Account) error {
 	addr := a.Value()
 	h := keccak.Sum256(addr[:])
 	t.touch(h[:], nil)
-}
-
-func (t *commitmentToucher) UpdateAccountData(a accounts.Address, _, _ *accounts.Account) error {
-	t.touchAccount(a)
 	return nil
 }
 
 func (t *commitmentToucher) DeleteAccount(a accounts.Address, _ *accounts.Account) error {
-	t.touchAccount(a)
-	return nil
+	return t.UpdateAccountData(a, nil, nil)
 }
 
 func (t *commitmentToucher) WriteAccountStorage(a accounts.Address, _ uint64, k accounts.StorageKey, _, _ uint256.Int) error {
