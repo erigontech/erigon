@@ -1315,8 +1315,9 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	ibs := state.New(stateReader)
+	ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
 	defer ibs.Close()
+	ibs.SetNoConflictDetection()
 
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, api.evmCallTimeout)
 	defer cleanup()
@@ -1326,7 +1327,6 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
-	transactions.VersionedCallState(ibs)
 	if traceTypeVmTrace {
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
@@ -1406,9 +1406,9 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 			return nil, err
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
-		initialIbs := state.New(stateReader)
+		initialIbs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
 		defer initialIbs.Close()
-		transactions.VersionedCallState(initialIbs)
+		initialIbs.SetNoConflictDetection()
 		if traceConfig != nil && traceConfig.StateOverrides != nil {
 			if _, err := applyStateOverrides(initialIbs, traceConfig.StateOverrides, blockCtx.Rules(chainConfig)); err != nil {
 				return nil, err
@@ -1592,9 +1592,8 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
-	ibs := state.New(cachedReader)
+	ibs := state.NewWithVersionMap(cachedReader, state.NewVersionMap(nil))
 	defer ibs.Close()
-	transactions.VersionedBlockState(ibs)
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
 		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig, overrides)
@@ -1881,9 +1880,9 @@ func finalizeTraceTx(ibs *state.IntraBlockState, rules *chain.Rules, cloneReader
 	if sd == nil {
 		return ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter)
 	}
-	initialIbs := state.New(cloneReader)
+	initialIbs := state.NewWithVersionMap(cloneReader, state.NewVersionMap(nil))
 	defer initialIbs.Close()
-	transactions.VersionedCallState(initialIbs)
+	initialIbs.SetNoConflictDetection()
 	var changes bufferedWriter
 	if err := ethapi.EndCallTx(ibs, rules, &changes); err != nil {
 		return err
@@ -2039,9 +2038,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
 
-	ibs := state.New(stateReader)
+	ibs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
+	ibs.SetNoConflictDetection()
 
 	var ot OeTracer
 	ot.config, err = parseOeTracerConfig(nil)
@@ -2101,9 +2100,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		if err := ethapi.EndCallTx(ibs, evm.ChainRules(), sd); err != nil {
 			return nil, err
 		}
-		initialIbs := state.New(stateReader)
+		initialIbs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
 		defer initialIbs.Close()
-		transactions.VersionedCallState(initialIbs)
+		initialIbs.SetNoConflictDetection()
 		if err := sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
