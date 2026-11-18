@@ -686,11 +686,6 @@ func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types
 	if body == nil || !ok {
 		return nil, false
 	}
-	for _, txn := range body.Transactions {
-		if _, ok := txn.GetSender(); !ok {
-			return nil, false
-		}
-	}
 	bal, _ := bra.bals.Get(blockHash)
 	return types.NewBlockFromStorage(header.Hash(), header, body.Transactions, body.Uncles, body.Withdrawals, bal), true
 }
