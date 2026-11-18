@@ -443,7 +443,6 @@ func TestVisibleFilesAligned_DisabledHistoryLeftoversDoNotCut(t *testing.T) {
 	requireVisibleEnd(t, agg, 2*alignStepSize)
 }
 
-// stage_custom_trace rebuilds a log index while it reads the state
 func TestUnalignIdx_KeepsStateVisibleWhileAnIndexLags(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg := testDbAndAggregatorv3(t, alignStepSize)
@@ -467,5 +466,19 @@ func TestUnalignIdx_KeepsStateVisibleWhileAnIndexLags(t *testing.T) {
 	at.Close()
 
 	realign()
+	requireVisibleEnd(t, agg, alignStepSize)
+}
+
+func TestVisibleFilesAligned_HistoryGapLowersEveryListWithoutDependencies(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
+	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
+	generateStateFiles(t, agg.Dirs(), ranges)
+	generateCommitmentFile(t, agg.Dirs(), ranges)
+	generateStandaloneIIFiles(t, agg.Dirs(), ranges)
+	require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, "v2.0-accounts.1-2.vi")))
+	agg.DisableAllDependencies()
+	require.NoError(t, agg.OpenFolder(db))
+
 	requireVisibleEnd(t, agg, alignStepSize)
 }
