@@ -130,7 +130,6 @@ func (s *EthBackendClientDirect) SubscribeLogs(ctx context.Context, opts ...grpc
 		ctx:    ctx,
 	}
 	go func() {
-		defer close(subscribeLogsRequestChan)
 		defer close(subscribeLogsReplyChan)
 		srv.Err(s.server.SubscribeLogs(srv))
 	}()
@@ -160,8 +159,12 @@ type subscribeLogsRequest struct {
 }
 
 func (s *SubscribeLogsStreamS) Send(m *remoteproto.SubscribeLogsReply) error {
-	s.chSend <- &subscribeLogsReply{r: m}
-	return nil
+	select {
+	case s.chSend <- &subscribeLogsReply{r: m}:
+		return nil
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
 }
 
 func (s *SubscribeLogsStreamS) Recv() (*remoteproto.LogsFilterRequest, error) {
@@ -180,7 +183,10 @@ func (s *SubscribeLogsStreamS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.chSend <- &subscribeLogsReply{err: err}
+	select {
+	case s.chSend <- &subscribeLogsReply{err: err}:
+	case <-s.ctx.Done():
+	}
 }
 
 type SubscribeLogsStreamC struct {
@@ -191,8 +197,12 @@ type SubscribeLogsStreamC struct {
 }
 
 func (c *SubscribeLogsStreamC) Send(m *remoteproto.LogsFilterRequest) error {
-	c.chSend <- &subscribeLogsRequest{r: m}
-	return nil
+	select {
+	case c.chSend <- &subscribeLogsRequest{r: m}:
+		return nil
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	}
 }
 
 func (c *SubscribeLogsStreamC) Recv() (*remoteproto.SubscribeLogsReply, error) {
@@ -220,7 +230,6 @@ func (s *EthBackendClientDirect) SubscribeReceipts(ctx context.Context, opts ...
 		ctx:    ctx,
 	}
 	go func() {
-		defer close(subscribeReceiptsRequestChan)
 		defer close(subscribeReceiptsReplyChan)
 		srv.Err(s.server.SubscribeReceipts(srv))
 	}()
@@ -250,8 +259,12 @@ type subscribeReceiptsRequest struct {
 }
 
 func (s *SubscribeReceiptsStreamS) Send(m *remoteproto.SubscribeReceiptsReply) error {
-	s.chSend <- &subscribeReceiptsReply{r: m}
-	return nil
+	select {
+	case s.chSend <- &subscribeReceiptsReply{r: m}:
+		return nil
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
 }
 
 func (s *SubscribeReceiptsStreamS) Recv() (*remoteproto.ReceiptsFilterRequest, error) {
@@ -270,7 +283,10 @@ func (s *SubscribeReceiptsStreamS) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.chSend <- &subscribeReceiptsReply{err: err}
+	select {
+	case s.chSend <- &subscribeReceiptsReply{err: err}:
+	case <-s.ctx.Done():
+	}
 }
 
 type SubscribeReceiptsStreamC struct {
@@ -281,8 +297,12 @@ type SubscribeReceiptsStreamC struct {
 }
 
 func (c *SubscribeReceiptsStreamC) Send(m *remoteproto.ReceiptsFilterRequest) error {
-	c.chSend <- &subscribeReceiptsRequest{r: m}
-	return nil
+	select {
+	case c.chSend <- &subscribeReceiptsRequest{r: m}:
+		return nil
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	}
 }
 
 func (c *SubscribeReceiptsStreamC) Recv() (*remoteproto.SubscribeReceiptsReply, error) {
