@@ -228,7 +228,33 @@ func (w *workersCfg) unlockEditing() {
 	w.pending = nil
 }
 
+func CheckMixedCommitmentFiles(d datadir.Dirs) error {
+	var legacyName, v3Name string
+	var legacyMajor, v3Major uint64
+	for _, dirPath := range []string{d.SnapDomain, d.SnapHistory} {
+		err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
+			if major < 3 && legacyName == "" {
+				legacyName, legacyMajor = name, major
+			}
+			if major >= 3 && v3Name == "" {
+				v3Name, v3Major = name, major
+			}
+			if legacyName != "" && v3Name != "" {
+				return fmt.Errorf("commitment files have mixed major versions: %s (v%d) and %s (v%d)", legacyName, legacyMajor, v3Name, v3Major)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
+	if err := CheckMixedCommitmentFiles(d); err != nil {
+		return err
+	}
 	for _, dirPath := range d.VersionedDirs() {
 		if dirPath == d.SnapDomain || dirPath == d.SnapHistory {
 			err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
