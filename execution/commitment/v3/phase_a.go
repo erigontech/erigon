@@ -153,6 +153,11 @@ func runStorageTaskWithPlan(runCtx context.Context, ctx commitment.PatriciaConte
 	fanned := false
 	if len(task.entries) >= plan.fanOutMin {
 		fanned, err = g.fanOutRoot(ctx, root, len(task.entries), func(i int) byte { return task.entries[i].path[0] }, plan, func(ctx commitment.PatriciaContext, i int) error {
+			if i%storageCancelCheckEvery == 0 {
+				if err := runCtx.Err(); err != nil {
+					return err
+				}
+			}
 			return g.ensurePath(ctx, root, task.entries[i].path)
 		}, nil, nil)
 		if err != nil {

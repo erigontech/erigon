@@ -1065,4 +1065,37 @@ func TestStorageTaskStopsOnCancel(t *testing.T) {
 			require.Less(t, len(ctx.branchCalls), records/4, "reads after cancellation")
 		})
 	}
+	t.Run("fanned update", func(t *testing.T) {
+		mem := runner.NewMemory(runner.ContextSpec{})
+		storageRound(t, mem, addr, ops)
+		records := int32(len(mem.Records()))
+		runCtx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		var reads atomic.Int32
+		counted := func(c commitment.PatriciaContext) commitment.PatriciaContext {
+			return cancelAfterSharedReads{PatriciaContext: c, reads: &reads, cancel: cancel, after: 32}
+		}
+		factory := func(ctx context.Context) (commitment.PatriciaContext, func()) {
+			c, cleanup := mem.Open(ctx)
+			return counted(c), cleanup
+		}
+		plan := foldPlan{ctx: runCtx, factory: factory, workers: 2, fanOutMin: 1}
+		_, _, err := runStorageTaskWithPlan(runCtx, counted(mem), storageTaskFor(addr, updated), plan)
+		require.ErrorIs(t, err, context.Canceled)
+		require.Less(t, reads.Load(), records/4, "reads after cancellation")
+	})
+}
+
+type cancelAfterSharedReads struct {
+	commitment.PatriciaContext
+	reads  *atomic.Int32
+	cancel context.CancelFunc
+	after  int32
+}
+
+func (c cancelAfterSharedReads) Branch(key []byte) ([]byte, kv.Step, error) {
+	if c.reads.Add(1) > c.after {
+		c.cancel()
+	}
+	return c.PatriciaContext.Branch(key)
 }
