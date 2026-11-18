@@ -2297,15 +2297,25 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 // re-validate a tx that read only the account's existence.
 func (vm *VersionMap) validateAccountAtMarker(addr accounts.Address, tr VersionedRead[AccountView], txIdx int) VersionValidity {
 	if tr.Val != nil && !tr.Val.IsNil() {
-		if tr.accSource == AccountFromBAL {
-			if st, _, destroyedAt, _ := vm.ResolvedAccountLifecycleAt(addr, txIdx); st == LifecycleAbsent && !vm.destructKeptBalance(addr, destroyedAt) {
-				return VersionInvalid
-			}
+		if tr.accSource != AccountFromBAL {
+			return VersionValid
+		}
+		if e := vm.load(addr); e == nil || !e.destructed.Load() {
+			return VersionValid
+		}
+		if st, _, destroyedAt, _ := vm.ResolvedAccountLifecycleAt(addr, txIdx); st == LifecycleAbsent && !vm.destructKeptBalance(addr, destroyedAt) {
+			return VersionInvalid
 		}
 		return VersionValid
 	}
-	if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIdx); ok && sdRR.resolved() && destructed && sdRR.Version() == tr.Version {
+	e := vm.load(addr)
+	if e == nil {
 		return VersionValid
+	}
+	if e.destructed.Load() {
+		if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIdx); ok && sdRR.resolved() && destructed && sdRR.Version() == tr.Version {
+			return VersionValid
+		}
 	}
 	if rr := vm.ReadStatus(addr, AddressPath, accounts.NilKey, txIdx); rr.accSource() == AccountFromBAL {
 		return VersionInvalid
