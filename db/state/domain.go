@@ -392,7 +392,7 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 }
 
 func (d *Domain) openExistenceFilter(fPath string) (*existence.Filter, error) {
-	filter, err := existence.OpenFilter(fPath, false)
+	filter, err := existence.OpenFilter(fPath)
 	if err != nil {
 		return nil, err
 	}
@@ -519,7 +519,7 @@ func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
 	d.History.InvertedIndex.dirtyFiles.CloseIf(pred)
 }
 
-func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) {
+func (d *Domain) scanDirtyFiles(fileNames []string) {
 	if d.FilenameBase == "" {
 		panic("assert: empty `filenameBase`")
 	}
@@ -529,7 +529,6 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) 
 			d.dirtyFiles.Set(dirtyFile)
 		}
 	}
-	return garbageFiles
 }
 
 func (d *Domain) closeWhatNotInList(fNames []string) {

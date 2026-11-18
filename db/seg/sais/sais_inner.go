@@ -37,10 +37,10 @@ func sais_32(text []int32, textMax int, sa, tmp []int32) {
 	} else {
 		induceSubL_32(text, sa, freq, bucket)
 		induceSubS_32(text, sa, freq, bucket)
-		length_32(text, sa, numLMS)
+		length_32(text, sa)
 		maxID := assignID_32(text, sa, numLMS)
 		if maxID < numLMS {
-			map_32(sa, numLMS)
+			map_32(sa)
 			recurse_32(sa, tmp, numLMS, maxID)
 			unmap_32(text, sa, numLMS)
 		} else {
@@ -191,7 +191,7 @@ func induceSubS_32(text []int32, sa, freq, bucket []int32) {
 	}
 }
 
-func length_32(text []int32, sa []int32, numLMS int) {
+func length_32(text []int32, sa []int32) {
 	end := 0
 
 	c0, c1, isTypeS := int32(0), int32(0), false
