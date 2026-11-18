@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
 
@@ -269,7 +270,7 @@ func TestFlushPendingHashRoutedRunsBesideTheFold(t *testing.T) {
 			sd.UnlockChangesetAccumulator()
 			addr := make([]byte, 20)
 			binary.BigEndian.PutUint64(addr, uint64(i)+1)
-			require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, []byte{byte(i), 1}, 3, nil))
+			require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&accounts.Account{Nonce: uint64(i) + 1}), 3, nil))
 			sd.LockChangesetAccumulator()
 			unswap()
 			sd.UnlockChangesetAccumulator()
