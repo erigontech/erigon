@@ -564,7 +564,8 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 		files = calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum)
 	}
 	dv := newDomainVisible(d.Name, files, d.Enabled)
-	// Incomplete history stays dirty until its domain values become readable.
+	// History and index files can reach disk before the values for the same range.
+	// Keep them hidden beyond the end of the last readable values file.
 	hv, hiv := d.History.calcVisibleFiles(dv.files.EndTxNum())
 	return dv, hv, hiv
 }

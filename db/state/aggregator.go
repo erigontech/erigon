@@ -1258,8 +1258,9 @@ Loop:
 	return nil
 }
 
-// BuildFiles2 plans synchronously, then schedules builds for [fromStep, toStep).
-// Pending data can extend the start backward.
+// BuildFiles2 schedules a background build for [fromStep, toStep), including
+// earlier steps with pending data when needed. It returns planning errors directly.
+// A nil result can also mean a build is already running or the aggregator is closing.
 func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
 	// Close must wait for synchronous planning as well as the background build.
 	if !a.background.TryAdd() {
@@ -1861,11 +1862,11 @@ func (a *Aggregator) FirstTxNumOfStep(step kv.Step) uint64 { // could have some 
 	return firstTxNumOfStep(step, a.StepSize())
 }
 
-// dirtyFilesEndTxNumMinimax is the ceiling shared by all visible files: no entity is visible
-// past a range another one misses. Left out: entities with no files at all (a fresh node, or
-// optional indexes never downloaded, would otherwise see nothing) and unaligned ones.
+// dirtyFilesEndTxNumMinimax returns the lowest on-disk end among enabled, aligned
+// entities. A domain contributes once it has a values file (.kv), and a standalone
+// index once it has a data file. Missing accessors can keep the readable range
+// below this ceiling.
 func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
-	// end == 0 means "entity has no files", it does not lower the ceiling
 	_min := func(ceiling, end uint64) uint64 {
 		if end == 0 {
 			return ceiling
@@ -2354,8 +2355,8 @@ func (a *Aggregator) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 	a.dirtyFilesLock.Lock()
 	at := a.BeginFilesRo()
 	ceilingStep := kv.Step(a.dirtyFilesEndTxNumMinimax() / at.StepSize())
-	// A fileless entity's first published step must reach the shared ceiling.
-	// Existing files already contribute to that ceiling, even without accessors.
+	// An aligned entity's first data file must reach the current ceiling.
+	// Publishing an earlier step would lower the shared ceiling.
 	var minResumeStep kv.Step
 	if ceilingStep > 0 {
 		minResumeStep = ceilingStep - 1
