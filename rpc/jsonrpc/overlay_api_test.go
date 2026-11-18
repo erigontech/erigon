@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
+	"github.com/erigontech/erigon/execution/vm/testutil"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -729,6 +730,69 @@ func TestFrameCallConstructorFeeAccounting(t *testing.T) {
 	require.NotNil(t, result)
 	require.NotNil(t, result.Code)
 	require.Equal(t, hexutil.Bytes(want), *result.Code)
+}
+
+func TestFrameCallConstructorAssertionRollback(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		createInApproval bool
+	}{
+		{name: "body creation is reverted"},
+		{name: "payment approval creation survives", createInApproval: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := chain.AllProtocolChanges.Copy()
+			cfg.BogotaTime = common.NewUint64(0)
+			sender, factory, assertion := common.HexToAddress("0x1000"), common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
+			contract := types.CreateAddress(factory, 0)
+			initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+			create := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP, vm.STOP)
+			assertCode := testutil.AssertStackWord(program.New().Push(contract).Op(vm.EXTCODESIZE), 1).Op(vm.STOP)
+			approval := program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE)
+			frames := []types.Frame{
+				{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+				{Mode: types.FrameSender, Target: &factory, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
+				{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}},
+			}
+			if tc.createInApproval {
+				approval = program.New().Call(uint256.NewInt(200_000), factory, 0, 0, 0, 0, 0).Op(vm.POP).Append(approval.Bytes())
+				frames = append(frames[:1], frames[2:]...)
+				frames[0].Mode = types.FrameDefault
+				frames[0].Limits = mdgas.MdGas{Execution: 300_000, State: 1_000_000}
+			}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+				Alloc: types.GenesisAlloc{
+					sender:    {Balance: big.NewInt(1_000_000_000_000_000_000), Code: approval.Bytes()},
+					factory:   {Code: create.Bytes()},
+					assertion: {Code: assertCode.Bytes()},
+				},
+			}))
+			frameTx := &types.FrameTransaction{
+				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+				Fees: types.FrameFees{FeeCap: uint256.Int{1}}, Frames: frames,
+			}
+			pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(pack))
+			require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].Status)
+			require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].FrameReceipts[len(frames)-1].Status)
+
+			base := newBaseApiForTest(m)
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+			// The replacement changes the code size, so POST_TX rolls back the body.
+			want := hexutil.Bytes{byte(vm.PUSH0), byte(vm.STOP)}
+			result, err := api.CallConstructor(m.Ctx, contract, program.New().ReturnData(want).Bytes())
+			require.NoError(t, err)
+			if tc.createInApproval {
+				require.NotNil(t, result)
+				require.NotNil(t, result.Code)
+				require.Equal(t, want, *result.Code)
+			} else {
+				require.Nil(t, result)
+			}
+		})
+	}
 }
 
 func TestCallConstructorRejectsNonContract(t *testing.T) {

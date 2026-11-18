@@ -265,6 +265,14 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	resultCode := &CreationCode{}
 	if len(ct.resultCode) > 0 {
+		// Later calls or frame assertions can roll back an already captured creation.
+		size, err := statedb.GetCodeSize(ct.contractAddress)
+		if err != nil {
+			return nil, err
+		}
+		if size == 0 {
+			return nil, nil
+		}
 		c := hexutil.Bytes(ct.resultCode)
 		resultCode.Code = &c
 		return resultCode, nil
