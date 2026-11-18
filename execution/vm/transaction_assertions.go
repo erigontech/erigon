@@ -44,16 +44,16 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	if !param.IsUint64() || param.Uint64() > 0x15 || !index.IsUint64() {
 		return pc, nil, ErrFrameParameter
 	}
-	p, i := param.Uint64(), index.Uint64()
-	if (p <= 2 || p == 0x0c || p >= 0x14) && i != 0 {
+	selector, entryIndex := param.Uint64(), index.Uint64()
+	if (selector <= 2 || selector == 0x0c || selector >= 0x14) && entryIndex != 0 {
 		return pc, nil, ErrFrameParameter
 	}
 	ctx := evm.FrameContext
-	if p == 0x14 {
+	if selector == 0x14 {
 		index.Set(&ctx.MaxCost)
 		return pc, nil, nil
 	}
-	if p == 0x15 {
+	if selector == 0x15 {
 		address := ctx.Payer.Value()
 		index.SetBytes(address[:])
 		return pc, nil, nil
@@ -62,7 +62,7 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	if err != nil {
 		return pc, nil, evm.assertionReadError(err)
 	}
-	switch p {
+	switch selector {
 	case 0:
 		index.SetUint64(uint64(len(trace.Balances)))
 	case 1:
@@ -70,11 +70,11 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	case 2:
 		index.SetUint64(uint64(len(trace.Deployed)))
 	case 3, 4, 5:
-		if i >= uint64(len(trace.Balances)) {
+		if entryIndex >= uint64(len(trace.Balances)) {
 			return pc, nil, ErrFrameParameter
 		}
-		entry := &trace.Balances[i]
-		switch p {
+		entry := &trace.Balances[entryIndex]
+		switch selector {
 		case 3:
 			address := entry.Address.Value()
 			index.SetBytes(address[:])
@@ -84,11 +84,11 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 			index.Set(&entry.After)
 		}
 	case 6, 7, 8, 9:
-		if i >= uint64(len(trace.Slots)) {
+		if entryIndex >= uint64(len(trace.Slots)) {
 			return pc, nil, ErrFrameParameter
 		}
-		entry := &trace.Slots[i]
-		switch p {
+		entry := &trace.Slots[entryIndex]
+		switch selector {
 		case 6:
 			address := entry.Address.Value()
 			index.SetBytes(address[:])
@@ -101,25 +101,25 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 			index.Set(&entry.After)
 		}
 	case 0x0a, 0x0b:
-		if i >= uint64(len(trace.Deployed)) {
+		if entryIndex >= uint64(len(trace.Deployed)) {
 			return pc, nil, ErrFrameParameter
 		}
-		entry := &trace.Deployed[i]
-		if p == 0x0a {
+		entry := &trace.Deployed[entryIndex]
+		if selector == 0x0a {
 			address := entry.Address.Value()
 			index.SetBytes(address[:])
 		} else {
-			hash := entry.After.Value()
+			hash := entry.CodeHash.Value()
 			index.SetBytes(hash[:])
 		}
 	case 0x0c:
 		index.SetUint64(uint64(len(trace.Events)))
 	default:
-		if i >= uint64(len(trace.Events)) {
+		if entryIndex >= uint64(len(trace.Events)) {
 			return pc, nil, ErrFrameParameter
 		}
-		event := trace.Events[i]
-		switch p {
+		event := trace.Events[entryIndex]
+		switch selector {
 		case 0x0d:
 			index.SetBytes(event.Address[:])
 		case 0x0e:
@@ -127,7 +127,7 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 		case 0x13:
 			index.SetUint64(uint64(len(event.Data)))
 		default:
-			topic := p - 0x0f
+			topic := selector - 0x0f
 			if topic >= uint64(len(event.Topics)) {
 				return pc, nil, ErrFrameParameter
 			}
@@ -147,12 +147,12 @@ func gasTxDiff(evm *EVM, call *CallContext, _ mdgas.MdGas, _ uint64) (mdgas.MdGa
 		return mdgas.MdGasCost{}, nil
 	}
 	var cost uint64
-	if p := param.Uint64(); p <= 1 {
+	if selector := param.Uint64(); selector <= 1 {
 		address, slot := ibs.InternAddress(key), ibs.InternStorageKey(index)
 		if _, warm := ibs.SlotInAccessList(address, slot); !warm {
 			cost = coldStorageAccessCost(evm.chainRules) - params.WarmStorageReadCostEIP2929
 		}
-	} else if p <= 5 && !ibs.AddressInAccessList(ibs.InternAddress(key)) {
+	} else if selector <= 5 && !ibs.AddressInAccessList(ibs.InternAddress(key)) {
 		cost = coldAccountAccessCost(evm.chainRules) - params.WarmStorageReadCostEIP2929
 	}
 	return mdgas.MdGasCost{Execution: cost}, nil
@@ -166,8 +166,8 @@ func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	if !param.IsUint64() || param.Uint64() > 0x0c {
 		return pc, nil, ErrFrameParameter
 	}
-	p := param.Uint64()
-	if p >= 2 && p != 7 && p != 9 && p != 0x0c && !index.IsZero() {
+	selector := param.Uint64()
+	if selector >= 2 && selector != 7 && selector != 9 && selector != 0x0c && !index.IsZero() {
 		return pc, nil, ErrFrameParameter
 	}
 	ibs := evm.IntraBlockState()
@@ -175,13 +175,13 @@ func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	if err != nil {
 		return pc, nil, evm.assertionReadError(err)
 	}
-	if p <= 5 {
+	if selector <= 5 {
 		address := ibs.InternAddress(key)
 		ibs.MarkAddressAccess(address, false)
-		if p <= 1 {
+		if selector <= 1 {
 			slot := ibs.InternStorageKey(index)
 			ibs.AddSlotOnlyToAccessList(address, slot)
-			value, err := trace.Storage(ibs, address, slot, p == 0)
+			value, err := trace.Storage(ibs, address, slot, selector == 0)
 			if err != nil {
 				return pc, nil, evm.assertionReadError(err)
 			}
@@ -189,15 +189,15 @@ func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 			return pc, nil, nil
 		}
 		ibs.AddAddressToAccessList(address)
-		if p <= 3 {
-			value, err := trace.Balance(ibs, address, p == 2)
+		if selector <= 3 {
+			value, err := trace.Balance(ibs, address, selector == 2)
 			if err != nil {
 				return pc, nil, evm.assertionReadError(err)
 			}
 			index.Set(&value)
 			return pc, nil, nil
 		}
-		hash, err := trace.CodeHash(ibs, address, p == 4)
+		hash, err := trace.CodeHash(ibs, address, selector == 4)
 		if err != nil {
 			return pc, nil, evm.assertionReadError(err)
 		}
@@ -206,7 +206,7 @@ func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 		return pc, nil, nil
 	}
 	var indices []int
-	switch p {
+	switch selector {
 	case 6, 7:
 		indices = trace.SlotIndicesByAddress[ibs.InternAddress(key)]
 	case 8, 9:
@@ -217,7 +217,7 @@ func opTxDiff(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 	case 0x0b, 0x0c:
 		indices = trace.EventIndicesByTopic[key.Bytes32()]
 	}
-	if p == 6 || p == 8 || p == 0x0b {
+	if selector == 6 || selector == 8 || selector == 0x0b {
 		index.SetUint64(uint64(len(indices)))
 	} else {
 		if !index.IsUint64() || index.Uint64() >= uint64(len(indices)) {

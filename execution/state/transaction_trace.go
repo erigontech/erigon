@@ -44,7 +44,7 @@ type BalanceChange struct {
 type TransactionTrace struct {
 	Balances              []BalanceChange
 	Slots                 []StorageChange
-	Deployed              []CodeChange
+	Deployed              []ContractDeployment
 	Events                []*types.Log
 	AccountFlags          map[accounts.Address]uint64
 	SlotIndicesByAddress  map[accounts.Address][]int
@@ -61,9 +61,9 @@ type StorageChange struct {
 	Before, After uint256.Int
 }
 
-type CodeChange struct {
-	Address accounts.Address
-	After   accounts.CodeHash
+type ContractDeployment struct {
+	Address  accounts.Address
+	CodeHash accounts.CodeHash
 }
 
 // TransactionTrace builds the view once for the read-only POST_TX suffix. A failed
@@ -155,7 +155,7 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 			return nil, err
 		}
 		if !delegation {
-			trace.Deployed = append(trace.Deployed, CodeChange{address, after})
+			trace.Deployed = append(trace.Deployed, ContractDeployment{address, after})
 		}
 	}
 	slices.SortFunc(trace.Balances, func(a, b BalanceChange) int {
@@ -167,7 +167,7 @@ func (ctx *FrameContext) TransactionTrace(ibs *IntraBlockState) (*TransactionTra
 		}
 		return a.Key.Cmp(b.Key)
 	})
-	slices.SortFunc(trace.Deployed, func(a, b CodeChange) int {
+	slices.SortFunc(trace.Deployed, func(a, b ContractDeployment) int {
 		return a.Address.Cmp(b.Address)
 	})
 	for i, slot := range trace.Slots {
