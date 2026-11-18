@@ -57,6 +57,123 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
+type attesterSlashingStore struct {
+	forkchoice.ForkChoiceStorage
+	onAttesterSlashing func(*cltypes.AttesterSlashing, bool) error
+}
+
+func (s *attesterSlashingStore) OnAttesterSlashing(slashing *cltypes.AttesterSlashing, test bool) error {
+	return s.onAttesterSlashing(slashing, test)
+}
+
+func TestPoolAttesterSlashingPublication(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		err          error
+		status       int
+		publishCalls int
+		pooled       bool
+		tampered     bool
+	}{
+		{name: "validated", status: http.StatusOK, publishCalls: 1},
+		{name: "ignored", err: forkchoice.ErrIgnore, status: http.StatusOK},
+		{name: "wrapped ignore", err: fmt.Errorf("already seen: %w", forkchoice.ErrIgnore), status: http.StatusOK},
+		{name: "invalid", err: errors.New("invalid attester slashing"), status: http.StatusBadRequest},
+		{name: "pooled ignore", err: forkchoice.ErrIgnore, status: http.StatusOK, publishCalls: 1, pooled: true},
+		{name: "pooled wrapped ignore", err: fmt.Errorf("already seen: %w", forkchoice.ErrIgnore), status: http.StatusOK, publishCalls: 1, pooled: true},
+		{name: "tampered pooled request", err: forkchoice.ErrIgnore, status: http.StatusOK, publishCalls: 1, pooled: true, tampered: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			clock.EXPECT().GetCurrentEpoch().Return(uint64(0)).Times(1)
+			slashing := cltypes.NewAttesterSlashing(clparams.Phase0Version)
+			opPool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
+			if tc.pooled {
+				opPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(slashing), slashing)
+			}
+			encoded, err := slashing.EncodeSSZ(nil)
+			require.NoError(t, err)
+			if tc.tampered {
+				slashing = cltypes.NewAttesterSlashing(clparams.Phase0Version)
+				slashing.Attestation_1.Data.Slot = 123
+				tamperedSSZ, err := slashing.EncodeSSZ(nil)
+				require.NoError(t, err)
+				require.NotEqual(t, encoded, tamperedSSZ)
+			}
+			body, err := json.Marshal(slashing)
+			require.NoError(t, err)
+			publisher := gossip_mock.NewMockGossip(ctrl)
+			publisher.EXPECT().Publish(gomock.Any(), clgossip.TopicNameAttesterSlashing, encoded).Return(nil).Times(tc.publishCalls)
+			calls := 0
+			store := &attesterSlashingStore{onAttesterSlashing: func(req *cltypes.AttesterSlashing, test bool) error {
+				calls++
+				require.Equal(t, slashing, req)
+				require.False(t, test)
+				return tc.err
+			}}
+			handler := &ApiHandler{
+				logger:          log.Root(),
+				beaconChainCfg:  &clparams.MainnetBeaconConfig,
+				ethClock:        clock,
+				forkchoiceStore: store,
+				operationsPool:  opPool,
+				sentinel:        &nonNilSentinelClient{},
+				gossipManager:   publisher,
+			}
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/attester_slashings", bytes.NewReader(body))
+			handler.PostEthV1BeaconPoolAttesterSlashings(recorder, request)
+			require.Equal(t, tc.status, recorder.Code)
+			require.Equal(t, 1, calls)
+		})
+	}
+}
+
+func TestPoolAttesterSlashingRetriesFailedPublication(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentEpoch().Return(uint64(0)).Times(2)
+	opPool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
+	slashing := cltypes.NewAttesterSlashing(clparams.Phase0Version)
+	body, err := json.Marshal(slashing)
+	require.NoError(t, err)
+	encoded, err := slashing.EncodeSSZ(nil)
+	require.NoError(t, err)
+	calls := 0
+	store := &attesterSlashingStore{onAttesterSlashing: func(req *cltypes.AttesterSlashing, test bool) error {
+		calls++
+		require.False(t, test)
+		key := pool.ComputeKeyForAttesterSlashing(req)
+		if opPool.AttesterSlashingsPool.Has(key) {
+			return forkchoice.ErrIgnore
+		}
+		opPool.AttesterSlashingsPool.Insert(key, req)
+		return nil
+	}}
+	publisher := gossip_mock.NewMockGossip(ctrl)
+	gomock.InOrder(
+		publisher.EXPECT().Publish(gomock.Any(), clgossip.TopicNameAttesterSlashing, encoded).Return(errors.New("topic not found")),
+		publisher.EXPECT().Publish(gomock.Any(), clgossip.TopicNameAttesterSlashing, encoded).Return(nil),
+	)
+	handler := &ApiHandler{
+		logger:          log.Root(),
+		beaconChainCfg:  &clparams.MainnetBeaconConfig,
+		ethClock:        clock,
+		forkchoiceStore: store,
+		operationsPool:  opPool,
+		sentinel:        &nonNilSentinelClient{},
+		gossipManager:   publisher,
+	}
+	for range 2 {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/attester_slashings", bytes.NewReader(body))
+		handler.PostEthV1BeaconPoolAttesterSlashings(recorder, request)
+		require.Equal(t, http.StatusOK, recorder.Code)
+	}
+	require.Equal(t, 2, calls)
+}
+
 func TestPoolAttesterSlashingRejectsDisjointIndices(t *testing.T) {
 	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.ElectraVersion} {
 		for _, route := range []string{"v1", "v2"} {
@@ -69,7 +186,9 @@ func TestPoolAttesterSlashingRejectsDisjointIndices(t *testing.T) {
 						epoch = cfg.ElectraForkEpoch
 					}
 					clock := eth_clock.NewMockEthereumClock(ctrl)
-					clock.EXPECT().GetCurrentEpoch().Return(epoch)
+					if route == "v1" {
+						clock.EXPECT().GetCurrentEpoch().Return(epoch)
+					}
 					anchor := state.New(&cfg)
 					anchor.SetVersion(version)
 					synced := synced_data.NewSyncedDataManager(&cfg, true)
@@ -105,6 +224,9 @@ func TestPoolAttesterSlashingRejectsDisjointIndices(t *testing.T) {
 					body, err := json.Marshal(slashing)
 					require.NoError(t, err)
 					request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/"+route+"/beacon/pool/attester_slashings", bytes.NewReader(body))
+					if route == "v2" {
+						request.Header.Set("Eth-Consensus-Version", version.String())
+					}
 					recorder := httptest.NewRecorder()
 					handler.mux.ServeHTTP(recorder, request)
 					require.Equal(t, http.StatusBadRequest, recorder.Code)
