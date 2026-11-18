@@ -192,7 +192,8 @@ func CanRetire(epoch bool, from, to uint64, snapType snaptype.Enum, snCfg *snapc
 // 1024 default, but only to a power of two that still divides the 8192 era1 tier — a step that never
 // lines up with a merge span would strand its segments below the ladder forever.
 func epochMinSegmentSize(retireStep uint64) uint64 {
-	if retireStep == 0 || retireStep > snaptype.EpochMinSegmentSize || 8_192%retireStep != 0 ||
+	era1 := snaptype.EpochMergeSteps[len(snaptype.EpochMergeSteps)-1]
+	if retireStep == 0 || retireStep > snaptype.EpochMinSegmentSize || era1%retireStep != 0 ||
 		retireStep&(retireStep-1) != 0 {
 		return snaptype.EpochMinSegmentSize
 	}
@@ -203,28 +204,24 @@ func canRetireEpoch(from, to, minSize uint64) (blockFrom, blockTo uint64, can bo
 	blockFrom = (from / minSize) * minSize
 	roundedTo := (to / minSize) * minSize
 
-	var maxJump uint64 = minSize
-	switch {
-	case blockFrom%snaptype.EpochMergeLimit == 0:
-		maxJump = snaptype.EpochMergeLimit
-	case blockFrom%65_536 == 0:
-		maxJump = 65_536
-	case blockFrom%8_192 == 0:
-		maxJump = 8_192
+	maxJump := minSize
+	for _, step := range snaptype.EpochMergeSteps { // largest first
+		if blockFrom%step == 0 {
+			maxJump = step
+			break
+		}
 	}
 
 	jump := min(maxJump, roundedTo-blockFrom)
-	switch { // only next segment sizes are allowed
-	case jump >= snaptype.EpochMergeLimit:
-		blockTo = blockFrom + snaptype.EpochMergeLimit
-	case jump >= 65_536:
-		blockTo = blockFrom + 65_536
-	case jump >= 8_192:
-		blockTo = blockFrom + 8_192
-	case jump >= minSize:
+	blockTo = blockFrom
+	for _, step := range snaptype.EpochMergeSteps { // only next segment sizes are allowed
+		if jump >= step {
+			blockTo = blockFrom + step
+			break
+		}
+	}
+	if blockTo == blockFrom && jump >= minSize {
 		blockTo = blockFrom + minSize
-	default:
-		blockTo = blockFrom
 	}
 	return blockFrom, blockTo, blockTo-blockFrom >= minSize
 }

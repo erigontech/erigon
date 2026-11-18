@@ -19,9 +19,11 @@ package freezeblocks
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -43,9 +45,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -573,7 +577,7 @@ func TestMigrateRefusesTypeWithNoSegments(t *testing.T) {
 		createSeqSeg(t, dir, 1000, 2000, tp, version.V1_0, false, logger)
 	}
 
-	err := MigrateDecimalToEpoch(t.Context(), datadir.Dirs{Snap: dir, Tmp: dir}, nil,
+	err := MigrateDecimalToEpoch(t.Context(), datadir.Dirs{Snap: dir, Tmp: dir}, mdbxtest.NewTestDB(t, dbcfg.ChainDB),
 		chainspec.Mainnet.Config, 1, logger)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "transactions", "the error must name the missing type")
@@ -623,4 +627,77 @@ func TestPlanEpochConversionStartInLastSegment(t *testing.T) {
 	require.Equal(t, [][2]uint64{{0, 1024}, {1024, 2048}}, plan)
 	require.Equal(t, uint64(2_048), tailFrom)
 	require.Equal(t, tailFrom, start[snaptype2.Enums.Transactions])
+}
+
+func touchDecimalSegs(t *testing.T, dir string, typ snaptype.Type, bounds ...uint64) (names []string) {
+	t.Helper()
+	for i := 0; i+1 < len(bounds); i++ {
+		name := snaptype.SegmentFileName(version.V1_0, false, bounds[i], bounds[i+1], typ.Enum())
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte{1}, 0o644))
+		names = append(names, name)
+	}
+	return names
+}
+
+// A finished download holds every block the manifest lists. The node merges downloaded segments and
+// prunes transactions from the front, so the blocks are compared, not the file names.
+func TestDecimalSegsCover(t *testing.T) {
+	var manifest []string
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		manifest = append(manifest, touchDecimalSegs(t, t.TempDir(), typ, 0, 1000, 2000, 3000)...)
+	}
+	manifest = append(manifest, "salt-blocks.txt", "v1.1-000000-000512-headers-ep.seg")
+
+	covers := func(manifest []string, headers, bodies, txs []uint64) bool {
+		snapDir := t.TempDir()
+		touchDecimalSegs(t, snapDir, snaptype2.Headers, headers...)
+		touchDecimalSegs(t, snapDir, snaptype2.Bodies, bodies...)
+		touchDecimalSegs(t, snapDir, snaptype2.Transactions, txs...)
+		onDisk, err := snaptype.Segments(snapDir)
+		require.NoError(t, err)
+		return decimalSegsCover(onDisk, manifest)
+	}
+	full := []uint64{0, 1000, 2000, 3000}
+
+	require.True(t, covers(manifest, full, full, full), "complete")
+	require.True(t, covers(manifest, []uint64{0, 1000, 3000}, []uint64{0, 3000}, full), "segments merged after the download")
+	require.True(t, covers(manifest, full, full, []uint64{0, 1000, 2000, 3000, 4000}), "segments retired after the download")
+	require.True(t, covers(manifest, full, full, []uint64{1000, 2000, 3000}), "transactions pruned from the front")
+	require.False(t, covers(manifest, full, full, []uint64{0, 1000, 2000}), "transactions missing at the end")
+	require.False(t, covers(manifest, []uint64{0, 1000, 2000}, full, full), "headers missing at the end")
+	require.False(t, covers(manifest, full, []uint64{1000, 2000, 3000}, full), "bodies missing at the start")
+	require.False(t, covers(manifest, full, full, nil), "no transactions at all")
+	require.False(t, covers([]string{"v1.1-000000-000512-headers-ep.seg"}, full, full, full), "a manifest without decimal segments proves nothing")
+
+	gapDir := t.TempDir()
+	touchDecimalSegs(t, gapDir, snaptype2.Headers, full...)
+	touchDecimalSegs(t, gapDir, snaptype2.Bodies, full...)
+	touchDecimalSegs(t, gapDir, snaptype2.Transactions, 0, 1000)
+	touchDecimalSegs(t, gapDir, snaptype2.Transactions, 2000, 3000)
+	onDisk, err := snaptype.Segments(gapDir)
+	require.NoError(t, err)
+	require.False(t, decimalSegsCover(onDisk, manifest), "a gap in the transactions")
+}
+
+// Removing chaindata is a documented repair, and the node rebuilds the DB from the files, so the
+// Snapshots stage progress it clears is not the only proof of a finished download: the pinned
+// preverified.toml is one too, when the decimal segments on disk hold every block it lists.
+func TestCheckLegacyDownloadFinishedAcceptsPinnedManifest(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	var names []string
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		names = append(names, touchDecimalSegs(t, dirs.Snap, typ, 0, 1000, 2000)...)
+	}
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.ErrorIs(t, CheckLegacyDownloadFinished(db, dirs, chainspec.Mainnet.Config), ErrUnfinishedLegacyDownload, "no pinned manifest")
+
+	var toml strings.Builder
+	for _, n := range names {
+		fmt.Fprintf(&toml, "%q = %q\n", n, "00")
+	}
+	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte(toml.String()), 0o644))
+	require.NoError(t, CheckLegacyDownloadFinished(db, dirs, chainspec.Mainnet.Config), "pinned manifest, every block present")
+
+	require.NoError(t, dir.RemoveFile(filepath.Join(dirs.Snap, names[0])))
+	require.ErrorIs(t, CheckLegacyDownloadFinished(db, dirs, chainspec.Mainnet.Config), ErrUnfinishedLegacyDownload, "pinned manifest, a headers segment missing")
 }

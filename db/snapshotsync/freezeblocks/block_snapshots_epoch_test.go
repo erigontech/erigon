@@ -58,6 +58,26 @@ func TestEpochRetirePipeline(t *testing.T) {
 	// tail [599_040, 600_000) is < 1024 and stays in the DB.
 }
 
+// A retire step below the produce tier hands DumpBlocks ranges shorter than the tier, like
+// [1024,1032); rounding their end down would give an empty range and the dump loop would stand still.
+func TestChooseSegmentEndAlwaysAdvances(t *testing.T) {
+	cfg := &snapcfg.Cfg{}
+	require.Equal(t, uint64(1_032), chooseSegmentEnd(true, 1_024, 1_032, snaptype.Unknown, cfg))
+	require.Equal(t, uint64(1_008), chooseSegmentEnd(false, 1_000, 1_008, snaptype.Unknown, cfg))
+	require.Equal(t, uint64(599_040), chooseSegmentEnd(true, 598_016, 600_000, snaptype.Unknown, cfg), "a tier-long range still rounds down")
+	require.Equal(t, uint64(900), chooseSegmentEnd(true, 0, 900, snaptype.Unknown, cfg), "a chain shorter than the tier is one file")
+
+	for _, epoch := range []bool{true, false} {
+		for _, from := range []uint64{0, 8, 1_000, 1_024, 9_216, 524_288} {
+			for _, to := range []uint64{from + 1, from + 8, from + 1_000, from + 1_024, from + 5_000} {
+				end := chooseSegmentEnd(epoch, from, to, snaptype.Unknown, cfg)
+				require.Greater(t, end, from, "epoch=%v [%d,%d)", epoch, from, to)
+				require.LessOrEqual(t, end, to, "epoch=%v [%d,%d)", epoch, from, to)
+			}
+		}
+	}
+}
+
 // The decimal tier decomposition (1000/10000/100000) is what a non-epoch chain gets; the regime
 // comes from the explicit epoch argument, not from the type.
 func TestDecimalRetirePipeline(t *testing.T) {
@@ -68,14 +88,15 @@ func TestDecimalRetirePipeline(t *testing.T) {
 	}, retireSegments(120_000, snaptype.Unknown, false, &snapcfg.Cfg{}))
 }
 
-// A freshly-dumped segment is compressed only at the frozen (merge-limit) size; smaller
-// tiers are left uncompressed for merge to compress later. The threshold follows the
-// region's merge limit (524288 for the epoch block stream, 100000 for a decimal one).
+// A decimal segment is compressed only at the frozen (merge-limit) size, smaller tiers are left for
+// merge to compress. An epoch segment is left uncompressed only at the 1024 produce tier: the merger
+// compresses every tier above it, and a migrated or dumped 8192 or 65536 file must match.
 func TestSegmentNoCompress(t *testing.T) {
 	require.False(t, segmentNoCompress(false, snaptype.Erigon2MergeLimit)) // decimal frozen -> compress
 	require.True(t, segmentNoCompress(false, 10_000))                      // small tier -> uncompressed
 
-	require.False(t, segmentNoCompress(true, snaptype.EpochMergeLimit)) // 524288 frozen -> compress
-	require.True(t, segmentNoCompress(true, 65_536))                    // intermediate tier -> uncompressed
+	require.False(t, segmentNoCompress(true, snaptype.EpochMergeLimit))
+	require.False(t, segmentNoCompress(true, 65_536))
+	require.False(t, segmentNoCompress(true, 8_192))
 	require.True(t, segmentNoCompress(true, 1_024))
 }

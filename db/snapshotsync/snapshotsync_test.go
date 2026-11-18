@@ -19,6 +19,7 @@ package snapshotsync
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -34,6 +35,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
@@ -105,7 +108,7 @@ func TestBlackListForPruning(t *testing.T) {
 	const blockPrune uint64 = 25_000_000
 	// effectiveCutoff mirrors the internal adjustBlockPrune clamp; without
 	// it the assertion accepts segments above the cutoff the function actually used.
-	effectiveCutoff := adjustBlockPrune(blockPrune, minBlockToDownload)
+	effectiveCutoff := adjustBlockPrune(false, blockPrune, minBlockToDownload)
 	blackList, err := buildBlackListForPruning(prune.MinimalMode, nil, stepPrune, 0, 0, minBlockToDownload, blockPrune, preverified)
 	if err != nil {
 		t.Fatal(err)
@@ -615,4 +618,71 @@ func TestReceiptsSegmentRetentionCutoff_FollowsHistoryWindow(t *testing.T) {
 	require.Equal(t, uint64(head-config3.MinimalPruneDistance),
 		receiptsSegmentRetentionCutoff(prune.MinimalMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
 	require.Zero(t, receiptsSegmentRetentionCutoff(prune.ArchiveMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
+}
+
+// A manifest that lists a block type only in the other segment layout would leave a fresh node with no
+// block files, and the empty request would then be pinned in preverified.toml, so it must fail.
+func TestCheckManifestRegime(t *testing.T) {
+	decimal := snapcfg.PreverifiedItems{
+		{Name: "v1.1-000000-000500-headers.seg", Hash: "a"},
+		{Name: "v1.1-000000-000500-bodies.seg", Hash: "b"},
+		{Name: "v1.1-000000-000500-transactions.seg", Hash: "c"},
+		{Name: "v1.1-000000-000500-headers.idx", Hash: "d"},
+		{Name: "salt-blocks.txt", Hash: "e"},
+	}
+	epoch := snapcfg.PreverifiedItems{
+		{Name: "v1.1-000000-000512-headers-ep.seg", Hash: "f"},
+		{Name: "v1.1-000000-000512-bodies-ep.seg", Hash: "g"},
+		{Name: "v1.1-000000-000512-transactions-ep.seg", Hash: "h"},
+	}
+	epochHeadersDecimalTxs := snapcfg.PreverifiedItems{epoch[0], epoch[1], decimal[2]}
+	both := append(append(snapcfg.PreverifiedItems{}, decimal...), epoch...)
+
+	full := requiredBlockTypes(false, AlsoCaplin)
+	headers := requiredBlockTypes(true, AlsoCaplin)
+	for _, tc := range []struct {
+		name     string
+		items    snapcfg.PreverifiedItems
+		epoch    bool
+		required []snaptype.Type
+		wantErr  bool
+	}{
+		{"decimal manifest on an epoch chain", decimal, true, full, true},
+		{"epoch manifest on a decimal chain", epoch, false, full, true},
+		{"both layouts", both, true, full, false},
+		{"matching layout", decimal, false, full, false},
+		{"empty manifest", nil, true, full, false},
+		{"header chain needs no transactions", epochHeadersDecimalTxs, true, headers, false},
+		{"full sync needs transactions", epochHeadersDecimalTxs, true, full, true},
+		{"caplin only", decimal, true, requiredBlockTypes(false, OnlyCaplin), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkManifestRegime(tc.items, tc.epoch, tc.required)
+			if tc.wantErr {
+				require.ErrorIs(t, err, ErrNoBlockSegmentsInRegime)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// An epoch chain retires transaction files a whole top-tier window at a time, and a download has to
+// skip them on the same boundary: a window that starts in the middle never merges into its top-tier
+// file, and headers and bodies merge along with the transactions.
+func TestBlackListForPruningKeepsWholeEpochWindow(t *testing.T) {
+	const window = snaptype.EpochMergeLimit
+	name := func(from, to uint64) string {
+		return snaptype.SegmentFileName(version.V1_1, true, from, to, snaptype2.Enums.Transactions)
+	}
+	preverified := snapcfg.Preverified{Items: snapcfg.PreverifiedItems{
+		{Name: name(0, window)},
+		{Name: name(window, window+65_536)},
+		{Name: name(window+65_536, window+131_072)},
+		{Name: name(window+131_072, window+196_608)},
+	}}
+
+	blackList, err := buildBlackListForPruning(prune.FullMode, &chain.Config{}, 0, 0, 0, math.MaxUint64, window+150_000, preverified)
+	require.NoError(t, err)
+	require.Equal(t, map[string]struct{}{name(0, window): {}}, blackList)
 }

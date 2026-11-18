@@ -110,6 +110,11 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	agg := openAgg(ctx, dirs, chainDB, logger)
 	defer agg.Close()
+	if pending, err := freezeblocks.EpochMigrationPending(ctx, chainDB, dirs, chainConfig); err != nil {
+		return err
+	} else if pending {
+		return fmt.Errorf("datadir %s has block segments still to convert to epoch: start erigon once to convert them", dirs.DataDir)
+	}
 	blockSnaps := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err := blockSnaps.OpenFolder(); err != nil {
 		return err

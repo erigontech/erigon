@@ -70,6 +70,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
@@ -649,6 +650,9 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = r.Chain
+	if err := refuseUnconvertedBlockSegments(ctx, dirs, r.Chain); err != nil {
+		return err
+	}
 	allSnapshots := blocksnapshots.NewRoSnapshots(freezingCfg, dirs.Snap, log.Root())
 	if err := allSnapshots.OpenFolder(); err != nil {
 		return err
@@ -1559,5 +1563,27 @@ func (m *MakeDepositArgs) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to marshal deposit details to JSON: %w", err)
 	}
 	fmt.Println(string(depositJSON))
+	return nil
+}
+
+// refuseUnconvertedBlockSegments keeps a read-only tool off a datadir whose block segments the node
+// has still to convert to the epoch layout.
+func refuseUnconvertedBlockSegments(ctx context.Context, dirs datadir.Dirs, chainName string) error {
+	spec, err := chainspec.ChainSpecByName(chainName)
+	if err != nil {
+		return err
+	}
+	chainDB, err := mdbx.New(dbcfg.ChainDB, log.Root()).Path(dirs.Chaindata).Readonly(true).Accede(true).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer chainDB.Close()
+	pending, err := freezeblocks.EpochMigrationPending(ctx, chainDB, dirs, spec.Config)
+	if err != nil {
+		return err
+	}
+	if pending {
+		return fmt.Errorf("datadir %s has block segments still to convert to epoch: start erigon once to convert them", dirs.DataDir)
+	}
 	return nil
 }

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common/background"
@@ -56,7 +55,7 @@ func (m *Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 			}
 			aggFrom := r.To() - span
 			if !rangesCover(currentRanges, aggFrom, r.To()) {
-				break // reaches below our lowest segment; pruning deleted those blocks
+				continue // reaches below our lowest segment, pruning deleted those blocks; a smaller tier may fit
 			}
 			toMerge = append(toMerge, NewRange(aggFrom, r.To()))
 			for i >= 0 && currentRanges[i].From() > aggFrom {
@@ -115,6 +114,16 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 	return
 }
 
+// removeMergeOutput deletes a merge target with its indexes and torrent files.
+func removeMergeOutput(sn snaptype.FileInfo) {
+	_ = dir.RemoveFile(sn.Path)
+	_ = dir.RemoveFile(sn.Path + ".torrent")
+	for _, idx := range sn.Type.IdxFileNames(sn.Epoch, sn.From, sn.To) {
+		_ = dir.RemoveFile(filepath.Join(sn.Dir(), idx))
+		_ = dir.RemoveFile(filepath.Join(sn.Dir(), idx+".torrent"))
+	}
+}
+
 func (m *Merger) mergeSubSegment(
 	ctx context.Context,
 	sn snaptype.FileInfo,
@@ -130,18 +139,7 @@ func (m *Merger) mergeSubSegment(
 			}
 		}
 		if err != nil {
-			f := sn.Path
-			_ = dir.RemoveFile(f)
-			_ = dir.RemoveFile(f + ".torrent")
-			ext := filepath.Ext(f)
-			withoutExt := f[:len(f)-len(ext)]
-			_ = dir.RemoveFile(withoutExt + ".idx")
-			_ = dir.RemoveFile(withoutExt + ".idx.torrent")
-			isTxnType := strings.HasSuffix(withoutExt, snaptype2.Transactions.Name())
-			if isTxnType {
-				_ = dir.RemoveFile(withoutExt + "-to-block.idx")
-				_ = dir.RemoveFile(withoutExt + "-to-block.idx.torrent")
-			}
+			removeMergeOutput(sn)
 		}
 	}()
 	if len(toMerge) == 0 {

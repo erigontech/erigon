@@ -61,7 +61,7 @@ func markedType(fileType string, epoch bool) string {
 	return fileType
 }
 
-func fileName(version Version, epoch bool, from, to uint64, fileType string) string {
+func FileName(version Version, epoch bool, from, to uint64, fileType string) string {
 	base, spellOut := nameEncoding(epoch, from, to)
 	fileType = markedType(fileType, epoch)
 	if spellOut {
@@ -70,7 +70,7 @@ func fileName(version Version, epoch bool, from, to uint64, fileType string) str
 	return fmt.Sprintf("%s-%06d-%06d-%s", version.String(), from/base, to/base, fileType)
 }
 
-func fileMask(epoch bool, from, to uint64, fileType string) string {
+func FileMask(epoch bool, from, to uint64, fileType string) string {
 	base, spellOut := nameEncoding(epoch, from, to)
 	fileType = markedType(fileType, epoch)
 	if spellOut {
@@ -87,28 +87,20 @@ func nameEncoding(epoch bool, from, to uint64) (base uint64, spellOut bool) {
 	return base, to-from < base
 }
 
-func FileName(version Version, epoch bool, from, to uint64, fileType string) string {
-	return fileName(version, epoch, from, to, fileType)
-}
-
-func FileMask(epoch bool, from, to uint64, fileType string) string {
-	return fileMask(epoch, from, to, fileType)
-}
-
 func SegmentFileName(version Version, epoch bool, from, to uint64, t Enum) string {
-	return fileName(version, epoch, from, to, t.String()) + ".seg"
+	return FileName(version, epoch, from, to, t.String()) + ".seg"
 }
 
 func IdxFileName(version Version, epoch bool, from, to uint64, fType string) string {
-	return fileName(version, epoch, from, to, fType) + ".idx"
+	return FileName(version, epoch, from, to, fType) + ".idx"
 }
 
 func SegmentFileMask(epoch bool, from, to uint64, t Enum) string {
-	return fileMask(epoch, from, to, t.String()) + ".seg"
+	return FileMask(epoch, from, to, t.String()) + ".seg"
 }
 
 func IdxFileMask(epoch bool, from, to uint64, fType string) string {
-	return fileMask(epoch, from, to, fType) + ".idx"
+	return FileMask(epoch, from, to, fType) + ".idx"
 }
 
 func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
@@ -378,14 +370,10 @@ var EpochMergeSteps = []uint64{524_288, 65_536, 8_192}
 // epochTypes is the set of segment types eligible for the epoch (era1-aligned) layout — the core eth
 // block segments. Whether a given file/production actually uses epoch is decided per chain (see
 // snaptype2.RegimeFor); this set only gates which types can ever be epoch. Written only at init.
-var epochTypes = map[Enum]bool{Unknown: true}
+var epochTypes = map[Enum]bool{}
 
 // RegisterEpochType marks a segment type as epoch-eligible.
 func RegisterEpochType(t Enum) { epochTypes[t] = true }
-
-// EpochType reports whether type t is epoch-eligible (a core block segment). The actual regime for a
-// file is carried by FileInfo.Epoch (reads) or chosen by the chain at production (writes).
-func EpochType(t Enum) bool { return epochTypes[t] }
 
 // EpochRegimeMismatch reports whether snapshot file `name` belongs to the block-segment regime
 // opposite to epochOn, so a chain in that regime must skip it: an epoch chain skips decimal
@@ -445,7 +433,7 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 // FileName: an epoch block segment encodes block/1024, and a hand-rolled /1000 here would address a
 // different range for every segment whose two encodings disagree (any tier from 8192 up).
 func (f FileInfo) As(t Type) FileInfo {
-	name := fileName(f.Version, f.Epoch, f.From, f.To, t.Name()) + f.Ext
+	name := FileName(f.Version, f.Epoch, f.From, f.To, t.Name()) + f.Ext
 	return FileInfo{
 		Version: f.Version,
 		Epoch:   f.Epoch,

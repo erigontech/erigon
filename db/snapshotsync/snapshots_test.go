@@ -1849,6 +1849,27 @@ func TestFindMergeRangeSkipsUncoveredLowerHalf(t *testing.T) {
 		"the 8192 tier below 3_203_072 reaches under the pruned frontier")
 }
 
+// A tier that reaches below the pruned frontier must not keep the smaller tiers ending at the same
+// boundary from merging: 3_670_016 is a 524288, 65536 and 8192 boundary, and only the 524288 range
+// starts below the transactions.
+func TestFindMergeRangeFallsBackToCoveredTier(t *testing.T) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	merger.DisableFsync()
+
+	var r Ranges
+	for from := uint64(3_211_264); from < 3_604_480; from += 65_536 {
+		r = append(r, NewRange(from, from+65_536))
+	}
+	for from := uint64(3_604_480); from < 3_661_824; from += 8_192 {
+		r = append(r, NewRange(from, from+8_192))
+	}
+	for from := uint64(3_661_824); from < 3_670_016; from += 1_024 {
+		r = append(r, NewRange(from, from+1_024))
+	}
+
+	require.Equal(t, Ranges{NewRange(3_604_480, 3_670_016)}.String(), Ranges(merger.FindMergeRanges(r)).String())
+}
+
 // The other side of that condition. When the pruned type resumes on a 524288 boundary, every merge
 // the ladder can ask for starts at or above it, so the coverage check must not get in the way.
 func TestFindMergeRangeAllowsAlignedPrunedStart(t *testing.T) {
@@ -1902,4 +1923,27 @@ func TestSegmentsMinNeedsEveryType(t *testing.T) {
 	minBlock, ok := s.SegmentsMin()
 	require.True(t, ok)
 	require.Zero(t, minBlock)
+}
+
+// A merge that fails leaves its half-written output behind: the segment, its indexes and their
+// torrent files. The transactions type has a second index, named differently in each regime.
+func TestRemoveMergeOutputCoversEveryIndex(t *testing.T) {
+	snapDir := t.TempDir()
+	for _, epoch := range []bool{false, true} {
+		info := snaptype2.Transactions.FileInfo(snapDir, epoch, 0, 1_000)
+		var names []string
+		names = append(names, info.Name(), info.Name()+".torrent")
+		for _, idx := range snaptype2.Transactions.IdxFileNames(epoch, 0, 1_000) {
+			names = append(names, idx, idx+".torrent")
+		}
+		for _, n := range names {
+			require.NoError(t, os.WriteFile(filepath.Join(snapDir, n), []byte{1}, 0o644))
+		}
+
+		removeMergeOutput(info)
+
+		for _, n := range names {
+			require.NoFileExists(t, filepath.Join(snapDir, n), "epoch=%v", epoch)
+		}
+	}
 }

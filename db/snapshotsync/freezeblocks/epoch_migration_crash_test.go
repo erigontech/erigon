@@ -17,6 +17,7 @@
 package freezeblocks_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -76,21 +78,21 @@ func snapState(t *testing.T, dirs datadir.Dirs) map[string][32]byte {
 
 // requireOpens checks that every block type is visible up to the tail, which needs each segment's
 // indexes to open and the types to share one tiling.
-func requireOpens(t *testing.T, m *migrationFixture, msg string) {
+func requireOpens(t *testing.T, m *migrationFixture, tailFrom uint64, msg string) {
 	t.Helper()
 	cfg := ethconfig.Defaults.Snapshot
 	cfg.ChainName = m.ChainConfig.ChainName
 	snaps := blocksnapshots.NewRoSnapshots(cfg, m.dirs.Snap, log.New())
 	defer snaps.Close()
 	require.NoError(t, snaps.OpenFolder(), msg)
-	require.Equal(t, uint64(crashTailFrom-1), snaps.SegmentsMax(), msg)
+	require.Equal(t, tailFrom-1, snaps.SegmentsMax(), msg)
 }
 
 // dropTail removes the tail blocks' headers from the DB, so only the migration can put them back.
-func dropTail(t *testing.T, m *migrationFixture, frozenMax uint64) {
+func dropTail(t *testing.T, m *migrationFixture, tailFrom, frozenMax uint64) {
 	t.Helper()
 	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
-		for n := uint64(crashTailFrom); n < frozenMax; n++ {
+		for n := tailFrom; n < frozenMax; n++ {
 			if h := rawdb.ReadHeaderByNumber(tx, n); h != nil {
 				if err := tx.Delete(kv.Headers, dbutils.HeaderKey(n, h.Hash())); err != nil {
 					return err
@@ -105,8 +107,9 @@ func dropTail(t *testing.T, m *migrationFixture, frozenMax uint64) {
 // the DB, starts it again, and requires the same files, byte for byte, as a run that never stopped,
 // with the tail back in the DB and nothing left pending. Each scenario is a datadir shape a node can
 // have: everything from block 0, transactions pruned to a start off the epoch grid, either of those
-// with the inputs of an earlier merge left beside the merged segment, and a frontier on the epoch grid,
-// where no decimal segment is left once the repacks are done.
+// with the inputs of an earlier merge left beside the merged segment, a frontier on the epoch grid,
+// where no decimal segment is left once the repacks are done, transactions with a gap, whose decimal
+// segments past the gap are deleted rather than converted, and the last two together.
 func TestEpochMigration_CrashAtEveryStep(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -122,29 +125,38 @@ func TestEpochMigration_CrashAtEveryStep(t *testing.T) {
 	all := snaptype2.BlockSnapshotTypes
 	onGrid := append(slices.Clone(crashBounds[:len(crashBounds)-1]), crashTailFrom)
 	scenarios := []struct {
-		name      string
-		frozenMax uint64
-		dump      func(m *migrationFixture)
+		name                string
+		tailFrom, frozenMax uint64
+		dump                func(m *migrationFixture)
 	}{
-		{"unpruned", crashChainSize, func(m *migrationFixture) {
+		{"unpruned", crashTailFrom, crashChainSize, func(m *migrationFixture) {
 			dumpDecimalTypes(t, m, crashBounds, logger, all...)
 		}},
-		{"pruned transactions", crashChainSize, func(m *migrationFixture) {
+		{"pruned transactions", crashTailFrom, crashChainSize, func(m *migrationFixture) {
 			dumpDecimalTypes(t, m, crashBounds, logger, snaptype2.Headers, snaptype2.Bodies)
 			dumpDecimalTypes(t, m, crashBounds[1:], logger, snaptype2.Transactions)
 		}},
-		{"merge leftovers", crashChainSize, func(m *migrationFixture) {
+		{"merge leftovers", crashTailFrom, crashChainSize, func(m *migrationFixture) {
 			dumpDecimalTypes(t, m, []uint64{0, 3000}, logger, all...)
 			dumpDecimalTypes(t, m, crashBounds, logger, all...)
 		}},
-		{"pruned transactions with merge leftovers", crashChainSize, func(m *migrationFixture) {
+		{"pruned transactions with merge leftovers", crashTailFrom, crashChainSize, func(m *migrationFixture) {
 			dumpDecimalTypes(t, m, []uint64{0, 3000}, logger, snaptype2.Headers, snaptype2.Bodies)
 			dumpDecimalTypes(t, m, crashBounds, logger, snaptype2.Headers, snaptype2.Bodies)
 			dumpDecimalTypes(t, m, []uint64{1000, 3000}, logger, snaptype2.Transactions)
 			dumpDecimalTypes(t, m, crashBounds[1:], logger, snaptype2.Transactions)
 		}},
-		{"frontier on the epoch grid", crashTailFrom, func(m *migrationFixture) {
+		{"frontier on the epoch grid", crashTailFrom, crashTailFrom, func(m *migrationFixture) {
 			dumpDecimalTypes(t, m, onGrid, logger, all...)
+		}},
+		{"transactions with a gap", 6144, 7000, func(m *migrationFixture) {
+			dumpDecimalTypes(t, m, crashBounds, logger, snaptype2.Headers, snaptype2.Bodies)
+			dumpDecimalTypes(t, m, crashBounds[:8], logger, snaptype2.Transactions)
+			dumpDecimalTypes(t, m, []uint64{8000, 9000, crashChainSize}, logger, snaptype2.Transactions)
+		}},
+		{"frontier on the epoch grid with segments above a gap", crashTailFrom, crashTailFrom, func(m *migrationFixture) {
+			dumpDecimalTypes(t, m, onGrid, logger, all...)
+			dumpDecimalTypes(t, m, []uint64{9300, crashChainSize}, logger, all...)
 		}},
 	}
 	for _, sc := range scenarios {
@@ -157,7 +169,7 @@ func TestEpochMigration_CrashAtEveryStep(t *testing.T) {
 			fresh := func() *migrationFixture {
 				m := &migrationFixture{ExecModuleTester: src.ExecModuleTester, dirs: datadir.New(t.TempDir())}
 				require.NoError(t, os.CopyFS(m.dirs.Snap, os.DirFS(pristine.Snap)))
-				dropTail(t, m, sc.frozenMax)
+				dropTail(t, m, sc.tailFrom, sc.frozenMax)
 				return m
 			}
 
@@ -167,7 +179,7 @@ func TestEpochMigration_CrashAtEveryStep(t *testing.T) {
 			require.NoError(t, migrate(t, ref, logger))
 			restore()
 			want := snapState(t, ref.dirs)
-			requireOpens(t, ref, "reference run")
+			requireOpens(t, ref, sc.tailFrom, "reference run")
 			require.Greater(t, steps, 10)
 
 			for crashAt := 1; crashAt <= steps; crashAt++ {
@@ -189,8 +201,8 @@ func TestEpochMigration_CrashAtEveryStep(t *testing.T) {
 				require.NoError(t, migrate(t, m, logger), "resume after step %d", crashAt)
 				msg := fmt.Sprintf("crash after step %d of %d", crashAt, steps)
 				require.Equal(t, want, snapState(t, m.dirs), msg)
-				requireOpens(t, m, msg)
-				for n := uint64(crashTailFrom); n < sc.frozenMax; n++ {
+				requireOpens(t, m, sc.tailFrom, msg)
+				for n := sc.tailFrom; n < sc.frozenMax; n++ {
 					require.True(t, headerInDB(t, m, n), "%s: tail block %d", msg, n)
 				}
 				pending, err = freezeblocks.EpochMigrationPending(m.Ctx, m.DB, m.dirs, m.ChainConfig)
@@ -199,4 +211,56 @@ func TestEpochMigration_CrashAtEveryStep(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A migrated segment above the 1024 tier stands in for the file the merger would have written from
+// the 1024 segments, so it has to come out byte-identical: compressed, with the merger's settings.
+func TestEpochMigration_WritesMergedTiersLikeTheMerger(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	noPrune := dbg.NoPrune()
+	dbg.SetNoPrune(true)
+	m := &migrationFixture{
+		ExecModuleTester: createDumpTestKV(t, chain.AllProtocolChanges, crashChainSize),
+		dirs:             datadir.New(t.TempDir()),
+	}
+	dbg.SetNoPrune(noPrune)
+	_, err := snaptype.LoadSalt(m.dirs.Snap, true, logger)
+	require.NoError(t, err)
+	dumpDecimalTypes(t, m, crashBounds, logger, snaptype2.BlockSnapshotTypes...)
+	require.NoError(t, migrate(t, m, logger))
+
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		migrated := typ.FileInfo(m.dirs.Snap, true, 0, 8_192).Path
+		merged := filepath.Join(t.TempDir(), filepath.Base(migrated))
+		writeLikeTheMerger(t, migrated, merged, logger)
+		want, err := os.ReadFile(merged)
+		require.NoError(t, err)
+		got, err := os.ReadFile(migrated)
+		require.NoError(t, err)
+		require.True(t, bytes.Equal(want, got), "%s differs from the merger's output", filepath.Base(migrated))
+	}
+}
+
+// writeLikeTheMerger copies the words of src into dst the way Merger.merge writes a target file.
+func writeLikeTheMerger(t *testing.T, src, dst string, logger log.Logger) {
+	t.Helper()
+	d, err := seg.NewDecompressor(src)
+	require.NoError(t, err)
+	defer d.Close()
+	cfg := seg.DefaultCfg
+	cfg.Workers = 1
+	c, err := seg.NewCompressor(t.Context(), "merge", dst, t.TempDir(), cfg, log.LvlTrace, logger)
+	require.NoError(t, err)
+	defer c.Close()
+	c.DisableFsync()
+	g := d.MakeGetter()
+	var word []byte
+	for g.HasNext() {
+		word, _ = g.Next(word[:0])
+		require.NoError(t, c.AddWord(word))
+	}
+	require.NoError(t, c.Compress())
 }

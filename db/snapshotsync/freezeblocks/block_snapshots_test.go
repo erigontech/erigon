@@ -19,6 +19,7 @@ package freezeblocks
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -305,4 +306,43 @@ func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
 	_, err := dumpRange(t.Context(), f, dumper, nil, nil, nil, dir, 1, log.LvlInfo, logger, &snapshots.BaseRoSnapshots)
 	require.ErrorIs(t, err, snapshotsync.ErrRangeBuildInProgress)
 	require.False(t, dumperCalled)
+}
+
+// An epoch window reaches its top-tier file only while all of its transactions are on disk, and
+// headers and bodies merge along with them, so transaction files are retired a whole window at a time.
+func TestRetireTransactionFilesKeepsUnmergedEpochWindow(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, dir, logger)
+	defer snapshots.Close()
+
+	const window = snaptype.EpochMergeLimit
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFileInRegime(t, true, 0, window, typ.Enum(), dir, version.V1_0, logger)
+		for from := uint64(window); from < 2*window; from += 65_536 {
+			createTestSegmentFileInRegime(t, true, from, from+65_536, typ.Enum(), dir, version.V1_0, logger)
+		}
+	}
+	require.NoError(t, snapshots.OpenFolder())
+
+	ethCfg := ethconfig.Defaults
+	br := NewBlockRetire(t.Context(), 1, datadir.New(t.TempDir()), NewBlockReader(snapshots), nil,
+		mdbxtest.NewTestDB(t, dbcfg.ChainDB), chain.AllProtocolChanges, &ethCfg, nil, nil, logger)
+	defer br.Close()
+
+	var deleted []string
+	_, err := br.RetireTransactionFiles(800_000, func(files []string) error {
+		deleted = append(deleted, files...)
+		return nil
+	})
+	require.NoError(t, err)
+
+	require.NotEmpty(t, deleted)
+	for _, f := range deleted {
+		fi, _, ok := snaptype.ParseFileName("", filepath.Base(f))
+		require.True(t, ok, f)
+		require.Equal(t, uint64(window), fi.To, "%s is in the window holding the cutoff, which has not merged yet", f)
+	}
 }

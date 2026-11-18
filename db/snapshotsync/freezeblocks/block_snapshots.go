@@ -84,19 +84,21 @@ func chooseSegmentEnd(epoch bool, from, to uint64, snapType snaptype.Enum, snCfg
 	next := (from/blocksPerFile + 1) * blocksPerFile
 	to = min(next, to)
 
-	if to < minSize {
+	if to-from < minSize { // shorter than the produce tier: one file, so the range never comes out empty
 		return to
 	}
 
 	return to - (to % minSize) // round down to the nearest minSize
 }
 
+// segmentNoCompress leaves the produce tier uncompressed for the merger to compress later. On the
+// epoch ladder that is the 1024 tier only: every tier above it is also written by the migration, which
+// has to match the merger's output.
 func segmentNoCompress(epoch bool, size uint64) bool {
-	mergeLimit := uint64(snaptype.Erigon2MergeLimit)
 	if epoch {
-		mergeLimit = snaptype.EpochMergeLimit
+		return size < snaptype.EpochMergeSteps[len(snaptype.EpochMergeSteps)-1]
 	}
-	return size < mergeLimit-1
+	return size < snaptype.Erigon2MergeLimit-1
 }
 
 type BlockRetire struct {
@@ -466,7 +468,18 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 // RetireTransactionFiles expires transaction segments ending below blockTo — the
 // minimal/full-node step that drops old bodies once state no longer needs them.
 func (br *BlockRetire) RetireTransactionFiles(blockTo uint64, onDelete func(l []string) error) (bool, error) {
+	if snaptype2.RegimeFor(br.chainConfig) {
+		blockTo = epochRetireTo(blockTo)
+	}
 	return br.snapshots().RetireFilesBelow(snaptype2.Transactions, blockTo, onDelete)
+}
+
+// epochRetireTo turns a pruning cutoff into a RetireFilesBelow bound that only takes whole top-tier
+// windows: every window ending at or below the cutoff, and nothing of the window holding it. A window
+// merges into its top-tier file only while all of its transactions are on disk, and headers and
+// bodies merge along with them.
+func epochRetireTo(blockTo uint64) uint64 {
+	return blockTo - blockTo%snaptype.EpochMergeLimit + 1
 }
 
 func (br *BlockRetire) RemoveOverlaps(onDelete func(l []string) error) error {

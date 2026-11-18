@@ -415,7 +415,7 @@ func TestEpochMigration_FailsWhileADecimalSegmentSurvivesCleanup(t *testing.T) {
 
 	var restored bool
 	restore := freezeblocks.SetEpochMigrationCrashHook(func() error {
-		if _, statErr := os.Stat(straddle); !restored && os.IsNotExist(statErr) {
+		if _, statErr := os.Stat(straddle); os.IsNotExist(statErr) {
 			restored = true
 			return os.WriteFile(straddle, content, 0o644)
 		}
@@ -427,4 +427,63 @@ func TestEpochMigration_FailsWhileADecimalSegmentSurvivesCleanup(t *testing.T) {
 
 	require.NoError(t, migrate(t, m, logger))
 	requireEpochOnly(t, m)
+}
+
+// A decimal file above a gap in the transactions is dropped by the final cleanup, not converted. If it
+// survives that cleanup, the next run finds epoch segments and then a decimal file past a hole, which
+// reads as missing blocks, so the cleanup has to resume on its own.
+func TestEpochMigration_ResumesCleanupAboveAGap(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	m := newMigrationFixture(t, logger)
+	dumpDecimalTypes(t, m, decimalBounds, logger, snaptype2.Headers, snaptype2.Bodies)
+	dumpDecimalTypes(t, m, []uint64{0, 1000, 2000}, logger, snaptype2.Transactions)
+	dumpDecimalTypes(t, m, []uint64{2500, migrationChainSize}, logger, snaptype2.Transactions)
+	aboveGap := filepath.Join(m.dirs.Snap, snaptype.SegmentFileName(version.V1_0, false, 2500, migrationChainSize, snaptype2.Transactions.Enum()))
+	content, err := os.ReadFile(aboveGap)
+	require.NoError(t, err)
+
+	var restored bool
+	restore := freezeblocks.SetEpochMigrationCrashHook(func() error {
+		if _, statErr := os.Stat(aboveGap); os.IsNotExist(statErr) {
+			restored = true
+			return os.WriteFile(aboveGap, content, 0o644)
+		}
+		return nil
+	})
+	require.Error(t, migrate(t, m, logger))
+	restore()
+	require.True(t, restored)
+
+	require.NoError(t, migrate(t, m, logger))
+	require.False(t, decimalSegsLeft(t, m))
+	pending, err := freezeblocks.EpochMigrationPending(m.Ctx, m.DB, m.dirs, m.ChainConfig)
+	require.NoError(t, err)
+	require.False(t, pending)
+}
+
+// The transactions repack reads the bodies to know each block's txn count, and lines the two up only
+// when transactions start above bodies, the shape pruning leaves. Bodies starting above transactions
+// would pair every block with another block's transactions, so the migration refuses before it
+// changes anything.
+func TestEpochMigration_RefusesBodiesStartingAboveTransactions(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	logger := log.New()
+	m := newMigrationFixture(t, logger)
+	dumpDecimalTypes(t, m, decimalBounds, logger, snaptype2.Headers, snaptype2.Transactions)
+	dumpDecimalTypes(t, m, decimalBounds[1:], logger, snaptype2.Bodies)
+	before := snapState(t, m.dirs)
+
+	err := migrate(t, m, logger)
+	t.Logf("migrate: %v", err)
+	require.ErrorContains(t, err, "bodies")
+
+	require.Equal(t, before, snapState(t, m.dirs), "nothing is converted or deleted")
+	pending, err := freezeblocks.EpochMigrationPending(m.Ctx, m.DB, m.dirs, m.ChainConfig)
+	require.NoError(t, err)
+	require.True(t, pending, "the decimal segments are still there and no marker was set")
 }

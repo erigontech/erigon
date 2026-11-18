@@ -36,6 +36,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/pelletier/go-toml/v2"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
@@ -296,6 +298,7 @@ type epochMigrator struct {
 	// a crash between a merge and its cleanup leaves both, and cleanup has to remove both.
 	allDecimal map[snaptype.Enum][]snaptype.FileInfo
 	hasEpoch   map[snaptype.Enum]bool
+	resuming   bool        // an earlier run of this conversion stopped part way
 	epochFrom  []uint64    // where each type's epoch segments begin
 	plan       [][2]uint64 // the one tiling every type converts on
 }
@@ -314,6 +317,20 @@ func afterStep() error {
 // epochMigrationKey marks a conversion that has started and not finished. Once the repacks delete the
 // last decimal segment, the files alone no longer show that the indexes are still to be built.
 var epochMigrationKey = []byte("epochMigrationInProgress")
+
+// compressCfg picks the compressor settings for a segment of size blocks: the produce tier is written
+// the way a dump writes it, every tier above it the way the merger does, so the file matches one the
+// node would have merged from the produce tier.
+func (m *epochMigrator) compressCfg(size uint64) (cfg seg.Cfg, noCompress bool) {
+	noCompress = segmentNoCompress(true, size)
+	if noCompress {
+		cfg = BlockCompressCfg
+	} else {
+		cfg = seg.DefaultCfg
+	}
+	cfg.Workers = m.workers
+	return cfg, noCompress
+}
 
 func (m *epochMigrator) segsToMigrate(t snaptype.Enum) []snaptype.FileInfo {
 	return m.decimalSegs[t][:m.contiguousLen[t]]
@@ -350,15 +367,13 @@ func (m *epochMigrator) repackWordPerBlock(ctx context.Context, t snaptype.Type,
 	delIdx := 0
 
 	writeSeg := func(a, b uint64) error {
-		compressCfg := BlockCompressCfg
-		compressCfg.Workers = m.workers
+		compressCfg, noCompress := m.compressCfg(b - a)
 		path := t.FileInfo(m.dirs.Snap, true, a, b).Path
 		c, err := seg.NewCompressor(ctx, "epoch-migrate "+t.Name(), path, m.dirs.Tmp, compressCfg, m.lvl, m.logger)
 		if err != nil {
 			return err
 		}
 		defer c.Close()
-		noCompress := segmentNoCompress(true, b-a)
 		for ; blockNum < b; blockNum++ {
 			w, ok, err := sw.next()
 			if err != nil {
@@ -560,15 +575,13 @@ func (m *epochMigrator) repackTransactions(ctx context.Context, startBlock, froz
 	tt := snaptype2.Transactions
 	blockNum := startBlock
 	writeSeg := func(a, b uint64) error {
-		compressCfg := BlockCompressCfg
-		compressCfg.Workers = m.workers
+		compressCfg, noCompress := m.compressCfg(b - a)
 		path := tt.FileInfo(m.dirs.Snap, true, a, b).Path
 		c, err := seg.NewCompressor(ctx, "epoch-migrate transactions", path, m.dirs.Tmp, compressCfg, m.lvl, m.logger)
 		if err != nil {
 			return err
 		}
 		defer c.Close()
-		noCompress := segmentNoCompress(true, b-a)
 		for ; blockNum < b; blockNum++ {
 			txCount, _, err := nextBlock(blockNum)
 			if err != nil {
@@ -638,11 +651,13 @@ func (m *epochMigrator) repackTransactions(ctx context.Context, startBlock, froz
 // a segment set with holes, and leaving it alone does not help either, because this build asks the
 // manifest for epoch files only, so the decimal download it was in the middle of cannot resume.
 var ErrUnfinishedLegacyDownload = errors.New("this datadir holds an unfinished pre-epoch snapshot download: " +
-	"finish it with the previous release, or remove the snapshots directory and sync again")
+	"finish it with the previous release before upgrading")
 
 // CheckLegacyDownloadFinished guards every entry point that would convert a datadir. It reports
 // ErrUnfinishedLegacyDownload when decimal segments are present from a download that never finished,
-// so the operator is told what the datadir actually is rather than that some type is missing.
+// so the operator is told what the datadir actually is rather than that some type is missing. A
+// finished download shows either as Snapshots stage progress, or, once chaindata was removed and the
+// DB is empty, as the pinned preverified.toml with every block it lists on disk.
 func CheckLegacyDownloadFinished(db kv.RoDB, dirs datadir.Dirs, chainConfig *chain.Config) error {
 	complete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {
@@ -655,10 +670,75 @@ func CheckLegacyDownloadFinished(db kv.RoDB, dirs datadir.Dirs, chainConfig *cha
 	if err != nil {
 		return err
 	}
-	if hasDecimal {
-		return ErrUnfinishedLegacyDownload
+	if !hasDecimal {
+		return nil
 	}
-	return nil
+	covered, err := decimalSegsCoverPinnedManifest(dirs)
+	if err != nil {
+		return err
+	}
+	if covered {
+		return nil
+	}
+	return ErrUnfinishedLegacyDownload
+}
+
+// decimalSegsCoverPinnedManifest reads preverified.toml from the datadir itself: the downloader loads
+// it into the snapshot config only after the block segments are set up, and some entry points never do.
+func decimalSegsCoverPinnedManifest(dirs datadir.Dirs) (bool, error) {
+	pinned, err := os.ReadFile(dirs.PreverifiedPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var hashes map[string]string
+	if err = toml.Unmarshal(pinned, &hashes); err != nil {
+		return false, fmt.Errorf("reading %s: %w", dirs.PreverifiedPath(), err)
+	}
+	onDisk, err := snaptype.Segments(dirs.Snap)
+	if err != nil {
+		return false, err
+	}
+	return decimalSegsCover(onDisk, slices.Collect(maps.Keys(hashes))), nil
+}
+
+// decimalSegsCover reports whether the decimal block segments in onDisk hold every block the decimal
+// segments named in manifest do. Blocks are compared, not names: the node merges the segments it
+// downloaded, and prunes transactions from the front. A manifest that names no decimal segment of a
+// type proves nothing about that type.
+func decimalSegsCover(onDisk []snaptype.FileInfo, manifest []string) bool {
+	for _, t := range snaptype2.BlockSnapshotTypes {
+		var listed bool
+		var listedFrom, listedTo uint64
+		for _, name := range manifest {
+			fi, _, ok := snaptype.ParseFileName("", name)
+			if !ok || fi.Epoch || fi.Ext != ".seg" || fi.Type == nil || fi.Type.Enum() != t.Enum() {
+				continue
+			}
+			if !listed {
+				listed, listedFrom = true, fi.From
+			}
+			listedFrom, listedTo = min(listedFrom, fi.From), max(listedTo, fi.To)
+		}
+		_, decimal := classifyByType(onDisk, t.Enum())
+		if !listed || len(decimal) == 0 {
+			return false
+		}
+		for i := 1; i < len(decimal); i++ {
+			if decimal[i].From != decimal[i-1].To {
+				return false
+			}
+		}
+		if decimal[len(decimal)-1].To < listedTo {
+			return false
+		}
+		if decimal[0].From > listedFrom && t.Enum() != snaptype2.Transactions.Enum() {
+			return false
+		}
+	}
+	return true
 }
 
 // HasDecimalBlockSegments reports whether the datadir still holds legacy decimal block segments that
@@ -688,7 +768,8 @@ func EpochMigrationPending(ctx context.Context, db kv.RoDB, dirs datadir.Dirs, c
 	if pending, err := HasDecimalBlockSegments(dirs, chainConfig); err != nil || pending {
 		return pending, err
 	}
-	return migrationInProgress(ctx, db)
+	phase, err := migrationPhase(ctx, db)
+	return phase != 0, err
 }
 
 // MigrateDecimalToEpoch turns any decimal block segments in dirs.Snap into epoch ones and writes the
@@ -712,29 +793,33 @@ func MigrateDecimalToEpoch(ctx context.Context, dirs datadir.Dirs, db kv.RwDB, c
 	return m.run(ctx)
 }
 
-// run keeps no marker file: every step is idempotent and a crash resumes from the epoch segments on
-// disk. Types go in dependency order — headers, transactions, bodies — because the transactions repack
+// run records its phase under epochMigrationKey in the DB; the files on disk say where to resume,
+// and every step is idempotent. Types go in dependency order — headers, transactions, bodies — because the transactions repack
 // reads the decimal bodies, so those go last. Each repack deletes its own decimal segments as their
 // blocks become safe in epoch segments; the segment straddling tailFrom is kept until the DB tail is
 // committed, then removed.
 func (m *epochMigrator) run(ctx context.Context) error {
+	phase, err := m.phase(ctx)
+	if err != nil {
+		return err
+	}
+	if phase == migrationCleaningUp {
+		return m.finishCleanup(ctx)
+	}
+	m.resuming = phase == migrationConverting
 	start, frozenMax, hasDecimal, err := m.loadSegs()
 	if err != nil {
 		return err
 	}
-	inProgress, err := m.inProgress(ctx)
-	if err != nil {
-		return err
-	}
 	if !hasDecimal {
-		if !inProgress {
+		if phase == 0 {
 			return nil
 		}
 		// Every block is in an epoch segment or the DB tail; what may be missing is their indexes.
 		if err := m.buildEpochIndexes(ctx); err != nil {
 			return err
 		}
-		return m.setInProgress(ctx, false)
+		return m.finishCleanup(ctx)
 	}
 	if frozenMax == 0 {
 		// Every block type must be present and reachable: the visible-file calculation drops every
@@ -744,6 +829,12 @@ func (m *epochMigrator) run(ctx context.Context) error {
 	}
 
 	frontier := maps.Clone(start)
+	// The transactions repack reads each block's txn count from the bodies and lines the two up only
+	// when transactions start higher, the shape pruning leaves; the other way round every block would
+	// get another block's transactions.
+	if b, tx := frontier[snaptype2.Bodies.Enum()], frontier[snaptype2.Transactions.Enum()]; b > tx {
+		return fmt.Errorf("epoch-migration: bodies segments start at block %d, above the transactions segments at block %d; refusing to convert", b, tx)
+	}
 	var tailFrom uint64
 	m.plan, tailFrom = planEpochConversion(start, m.epochFrom, frozenMax, m.snCfg)
 	for _, t := range snaptype2.BlockSnapshotTypes {
@@ -756,7 +847,7 @@ func (m *epochMigrator) run(ctx context.Context) error {
 	if err := m.warnDropped(ctx, frontier, start, frozenMax); err != nil {
 		return err
 	}
-	if err := m.setInProgress(ctx, true); err != nil {
+	if err := m.setPhase(ctx, migrationConverting); err != nil {
 		return err
 	}
 	if err := afterStep(); err != nil {
@@ -806,48 +897,100 @@ func (m *epochMigrator) run(ctx context.Context) error {
 		return err
 	}
 
-	// tail is in the DB now, so the straddle segments (and any leftovers) can go.
+	// The tail is in the DB and every epoch segment is indexed, so what is left of the decimal
+	// segments, the straddle and anything past a gap, is only cleanup from here on.
+	if err := m.setPhase(ctx, migrationCleaningUp); err != nil {
+		return err
+	}
+	if err := afterStep(); err != nil {
+		return err
+	}
 	if err := m.deleteDecimalSegs(frozenMax); err != nil {
 		return err
 	}
-	if left, err := HasDecimalBlockSegments(m.dirs, m.chainConfig); err != nil {
-		return err
-	} else if left {
-		return fmt.Errorf("epoch-migration: decimal block segments in %s could not be deleted; stop whatever holds them open and start again", m.dirs.Snap)
-	}
-	if err := m.setInProgress(ctx, false); err != nil {
+	if err := m.finishCleanup(ctx); err != nil {
 		return err
 	}
 	m.logger.Info("[epoch-migration] done", "upto", frozenMax, "tailToDB", [2]uint64{tailFrom, frozenMax})
 	return nil
 }
 
-func (m *epochMigrator) inProgress(ctx context.Context) (bool, error) {
-	if m.db == nil {
-		return false, nil
-	}
-	return migrationInProgress(ctx, m.db)
+// Values of epochMigrationKey. Once the tail and the indexes are done, a decimal file left above a gap
+// would read as missing blocks to a new conversion, so a resumed cleanup must not start one.
+const (
+	migrationConverting byte = 1
+	migrationCleaningUp byte = 2
+)
+
+func (m *epochMigrator) phase(ctx context.Context) (byte, error) {
+	return migrationPhase(ctx, m.db)
 }
 
-func migrationInProgress(ctx context.Context, db kv.RoDB) (started bool, err error) {
+func migrationPhase(ctx context.Context, db kv.RoDB) (phase byte, err error) {
 	err = db.View(ctx, func(tx kv.Tx) error {
 		v, getErr := tx.GetOne(kv.DatabaseInfo, epochMigrationKey)
-		started = len(v) > 0
+		if len(v) > 0 {
+			phase = v[0]
+		}
 		return getErr
 	})
-	return started, err
+	return phase, err
 }
 
-func (m *epochMigrator) setInProgress(ctx context.Context, started bool) error {
-	if m.db == nil {
-		return nil
-	}
+func (m *epochMigrator) setPhase(ctx context.Context, phase byte) error {
 	return m.db.Update(ctx, func(tx kv.RwTx) error {
-		if started {
-			return tx.Put(kv.DatabaseInfo, epochMigrationKey, []byte{1})
+		if phase == 0 {
+			return tx.Delete(kv.DatabaseInfo, epochMigrationKey)
 		}
-		return tx.Delete(kv.DatabaseInfo, epochMigrationKey)
+		return tx.Put(kv.DatabaseInfo, epochMigrationKey, []byte{phase})
 	})
+}
+
+// finishCleanup deletes every decimal block file still in the snapshots dir and clears the marker
+// only when none is left. A file that cannot be deleted, e.g. one held open on Windows, fails the run
+// with the marker kept, so the next start tries again.
+func (m *epochMigrator) finishCleanup(ctx context.Context) error {
+	left, err := decimalBlockFiles(m.dirs.Snap)
+	if err != nil {
+		return err
+	}
+	for _, f := range left {
+		_ = dir.RemoveFile(f)
+		if stepErr := afterStep(); stepErr != nil {
+			return stepErr
+		}
+	}
+	if left, err = decimalBlockFiles(m.dirs.Snap); err != nil {
+		return err
+	}
+	if len(left) > 0 {
+		return fmt.Errorf("epoch-migration: %d decimal block files in %s could not be deleted, e.g. %s; stop whatever holds them open and start again",
+			len(left), m.dirs.Snap, filepath.Base(left[0]))
+	}
+	return m.setPhase(ctx, 0)
+}
+
+// decimalBlockFiles lists the decimal block segments in snapDir, with their indexes and torrent files.
+func decimalBlockFiles(snapDir string) ([]string, error) {
+	des, err := os.ReadDir(snapDir)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, de := range des {
+		if de.IsDir() {
+			continue
+		}
+		fi, _, ok := snaptype.ParseFileName(snapDir, de.Name())
+		if !ok || fi.Epoch || fi.Type == nil || !slices.ContainsFunc(snaptype2.BlockSnapshotTypes, func(t snaptype.Type) bool { return t.Enum() == fi.Type.Enum() }) {
+			continue
+		}
+		switch fi.Ext {
+		case ".seg", ".idx", ".torrent":
+			paths = append(paths, filepath.Join(snapDir, de.Name()))
+		}
+	}
+	return paths, nil
 }
 
 // warnDropped logs the blocks a pruned type gives up to start on the epoch grid, and how many of them
@@ -856,13 +999,11 @@ func (m *epochMigrator) setInProgress(ctx context.Context, started bool) error {
 // the tiling is not one the published files have, so the segments around it never merge or match them.
 func (m *epochMigrator) warnDropped(ctx context.Context, frontier, start map[snaptype.Enum]uint64, frozenMax uint64) error {
 	var mode prune.Mode
-	if m.db != nil {
-		if err := m.db.View(ctx, func(tx kv.Tx) (err error) {
-			mode, err = prune.Get(tx)
-			return err
-		}); err != nil {
-			return err
-		}
+	if err := m.db.View(ctx, func(tx kv.Tx) (err error) {
+		mode, err = prune.Get(tx)
+		return err
+	}); err != nil {
+		return err
 	}
 	for _, t := range snaptype2.BlockSnapshotTypes {
 		from, to := frontier[t.Enum()], start[t.Enum()]
@@ -903,6 +1044,11 @@ func (m *epochMigrator) loadSegs() (start map[snaptype.Enum]uint64, frozenMax ui
 		}
 		decimal = dropConverted(epoch, decimal)
 		typeStart, coveredTo, contiguousLen := coverage(epoch, decimal)
+		if end := epochRunEnd(epoch); m.resuming && len(epoch) > 0 && len(decimal) > 0 && decimal[0].From > end {
+			// The repack deleted every decimal segment it read, so what is left lies past a gap and
+			// is for the cleanup to delete, not a run that fails to meet the epoch segments.
+			typeStart, coveredTo, contiguousLen = end, end, 0
+		}
 		m.decimalSegs[t.Enum()] = decimal
 		m.hasEpoch[t.Enum()] = len(epoch) > 0
 		if len(epoch) > 0 {
