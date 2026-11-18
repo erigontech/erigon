@@ -25,6 +25,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -536,12 +537,6 @@ var (
 	TxpoolApiAddrFlag = cli.StringFlag{
 		Name:  "txpool.api.addr",
 		Usage: "TxPool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)",
-	}
-
-	TraceMaxtracesFlag = cli.UintFlag{
-		Name:  "trace.maxtraces",
-		Usage: "Sets a limit on traces that can be returned in trace_filter",
-		Value: 200,
 	}
 
 	TLSFlag = cli.BoolFlag{
@@ -1105,6 +1100,15 @@ var (
 		Name:  "caplin.blobs-immediate-backfill",
 		Usage: "sets whether caplin should immediately backfill blobs (4096 epochs)",
 		Value: false,
+	}
+	CaplinBlobsBackfillEndpointFlag = cli.StringSliceFlag{
+		Name:  "caplin.blobs-backfill-endpoint",
+		Usage: "beacon API endpoint that the blob backfill asks for a block's blobs before peers; repeat for fallback endpoints. Blobs are verified against the block before they are stored. Without --caplin.blobs-archive only the blob retention window is backfilled",
+	}
+	CaplinBlobsBackfillEndpointWorkersFlag = cli.IntFlag{
+		Name:  "caplin.blobs-backfill-endpoint-workers",
+		Usage: "number of KZG proofs the blob backfill computes at a time, one CPU each, for blobs from --caplin.blobs-backfill-endpoint whose proof the endpoint left out (up to twice as many blocks are fetched at a time; verifying them costs about 2% of computing proofs and is not limited). 0 picks a quarter of the CPUs the process may use (GOMAXPROCS, which follows a container's CPU limit), at least 1; set it to the CPUs the node can spare (lower keeps a validator node responsive, a dedicated archive node can use more)",
+		Value: 0,
 	}
 	CaplinDisableBlobPruningFlag = cli.BoolFlag{
 		Name:  "caplin.blobs-no-pruning",
@@ -1921,6 +1925,14 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	}
 
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
+	for i, endpoint := range ctx.StringSlice(CaplinBlobsBackfillEndpointFlag.Name) {
+		if u, err := url.Parse(endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+			// The value is not echoed: it can carry an API key.
+			Fatalf("Option %s: value %d is not an http or https URL", CaplinBlobsBackfillEndpointFlag.Name, i+1)
+		}
+		cfg.CaplinConfig.BlobsBackfillEndpoints = append(cfg.CaplinConfig.BlobsBackfillEndpoints, endpoint)
+	}
+	cfg.CaplinConfig.BlobsBackfillEndpointWorkers = ctx.Int(CaplinBlobsBackfillEndpointWorkersFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	if cfg.CaplinConfig.SnapshotGenerationEnabled && cfg.CaplinConfig.BlobsArchiveFromSlot > 0 {
 		Fatalf("Option %s cannot be combined with %s: blob snapshots are built contiguously from Deneb", CaplinArchiveBlobsFromSlotFlag.Name, CaplinEnableSnapshotGeneration.Name)

@@ -792,3 +792,41 @@ func TestVersionedReaderServesBALMarkedAccountFromOrigin(t *testing.T) {
 	}
 	require.Zero(t, reader.reads, "the stored origin answers every tx")
 }
+
+// The access list seeds a removal of x at tx 3. The first run of tx 3 writes a balance of 8 at the
+// seed's version, and tx 4 reads it. The re-run removes x, which keeps the seeded destruct and moves
+// the balance to a deleted zero at the re-run's incarnation, so the read of 8 is stale. A read of the
+// deleted zero is recorded at the destruct's version, so it stays valid.
+func TestABalanceReadAtTheSeededDestructsVersionIsStaleOnceTheBalanceMoves(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress(common.HexToAddress("0xd6"))
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(5)
+	base := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &acc}}
+	vm := NewVersionMap(types.BlockAccessList{{Address: x.Value(), BalanceChanges: []*types.BalanceChange{{Index: 4, Value: uint256.Int{}}}}})
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, base))
+	readBalance := func(want uint64) ReadSet {
+		ibs := NewWithVersionMap(base, vm)
+		defer ibs.Close()
+		ibs.SetTxContext(1, 4)
+		balance, err := ibs.GetBalance(x)
+		require.NoError(t, err)
+		require.False(t, ibs.HadInvalidRead())
+		require.Equal(t, *uint256.NewInt(want), balance)
+		return ibs.VersionedReads()
+	}
+
+	first := &WriteSet{}
+	first.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: Version{TxIndex: 3}}, Val: *uint256.NewInt(8)})
+	vm.FlushVersionedWrites(first, false)
+	vm.MarkWritesValidated(first, nil)
+	reads := readBalance(8)
+
+	final := &WriteSet{}
+	final.SetEmptyRemoval(x, Version{TxIndex: 3, Incarnation: 1})
+	vm.FlushVersionedWrites(final, false)
+	vm.MarkWritesValidated(final, nil)
+	require.Equal(t, VersionInvalid, vm.ValidateReadSet(4, reads, validateEqualVersion, false, ""))
+	require.Equal(t, VersionValid, vm.ValidateReadSet(4, readBalance(0), validateEqualVersion, false, ""))
+}
