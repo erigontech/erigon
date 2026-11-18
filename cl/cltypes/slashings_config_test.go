@@ -207,7 +207,14 @@ func TestAttesterSlashingConfiguredStrictOffsets(t *testing.T) {
 			a := configuredSlashing(version, &cfg, 1)
 			encoded, err := a.EncodeSSZ(nil)
 			require.NoError(t, err)
-			binary.LittleEndian.PutUint32(encoded[offset:], uint32(len(encoded)+1))
+			const gap = 8
+			if offset == 0 {
+				first := int(binary.LittleEndian.Uint32(encoded))
+				second := int(binary.LittleEndian.Uint32(encoded[4:]))
+				copy(encoded[first+gap:second], encoded[first:second-gap])
+			}
+			binary.LittleEndian.PutUint32(encoded[offset:], binary.LittleEndian.Uint32(encoded[offset:])+gap)
+			require.NoError(t, new(AttesterSlashing).DecodeSSZWithConfig(encoded, int(version), &cfg))
 			require.ErrorIs(t, new(AttesterSlashing).DecodeSSZStrictWithConfig(encoded, int(version), &cfg), ssz.ErrBadOffset)
 			body := NewBeaconBody(&cfg, version)
 			body.AttesterSlashings.Append(a)
@@ -218,6 +225,7 @@ func TestAttesterSlashingConfiguredStrictOffsets(t *testing.T) {
 			pos := bytes.Index(bodyBytes, original)
 			require.Greater(t, pos, 0)
 			copy(bodyBytes[pos:], encoded)
+			require.NoError(t, NewBeaconBody(&cfg, version).DecodeSSZ(bodyBytes, int(version)))
 			require.ErrorIs(t, NewBeaconBody(&cfg, version).DecodeSSZStrict(bodyBytes, int(version)), ssz.ErrBadOffset)
 		})
 	}
