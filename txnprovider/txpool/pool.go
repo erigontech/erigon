@@ -2980,7 +2980,9 @@ func (p *TxPool) Run(ctx context.Context) error {
 	defer dormancySweep.Stop()
 
 	if err := p.start(ctx); err != nil {
-		p.logger.Error("[txpool] Failed to start", "err", err)
+		if !errors.Is(err, context.Canceled) {
+			p.logger.Error("[txpool] Failed to start", "err", err)
+		}
 		return err
 	}
 	frameCtx, cancelFrames := context.WithCancel(ctx)
