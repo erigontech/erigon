@@ -2036,16 +2036,33 @@ func TestNewPayloadV5RequiresBlockAccessListBeforeAmsterdam(t *testing.T) {
 	require.Equal(t, "blockAccessList missing", invalidParams.Message)
 }
 
-func TestNewPayloadV5RejectsBogotaPayload(t *testing.T) {
+func TestNewPayloadV5AndV6AcceptBogotaPayload(t *testing.T) {
 	t.Parallel()
 
-	cfg := bogotaChainConfig()
-	srv := NewEngineServer(log.New(), cfg, &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+	for _, version := range []clparams.StateVersion{clparams.GloasVersion, clparams.HezeVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			t.Parallel()
 
-	status, err := srv.NewPayloadV5(t.Context(), bogotaPayload(t, makeParentHeader(1000)), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
-	require.Nil(t, status)
-	var unsupported *rpc.UnsupportedForkError
-	require.ErrorAs(t, err, &unsupported)
+			cfg := bogotaChainConfig()
+			parent := makeParentHeader(1000)
+			srv, _ := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
+				ValidationStatus: execmodule.ExecutionStatusSuccess,
+				LatestValidHash:  common.Hash{0x1},
+			}, nil, ilTestMaxReorgDepth)
+			payload := bogotaPayload(t, parent)
+
+			var status *engine_types.PayloadStatus
+			var err error
+			if version == clparams.HezeVersion {
+				status, err = srv.NewPayloadV6(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, []hexutil.Bytes{})
+			} else {
+				status, err = srv.NewPayloadV5(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
+			}
+			require.NoError(t, err)
+			require.NotNil(t, status)
+			require.Equal(t, engine_types.ValidStatus, status.Status)
+		})
+	}
 }
 
 func TestNewPayloadV6RejectsPreBogotaPayload(t *testing.T) {

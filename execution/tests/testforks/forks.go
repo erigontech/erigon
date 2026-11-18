@@ -218,7 +218,6 @@ func init() {
 	Forks["Amsterdam"] = cAms
 
 	cBogota := configCopy(cAms)
-	cBogota.DisabledEIPs = append(cBogota.DisabledEIPs, 7805)
 	cBogota.BogotaTime = common.NewUint64(15_000)
 	Forks["AmsterdamToBogotaAtTime15k"] = cBogota
 	cBogota = configCopy(cBogota)

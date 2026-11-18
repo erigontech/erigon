@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/rpc"
 )
 
 const ilTestMaxReorgDepth = 64
@@ -724,43 +723,4 @@ func TestGetInclusionListV1PropagatesExecutionError(t *testing.T) {
 	var result []hexutil.Bytes
 	err := client.CallContext(t.Context(), &result, "engine_getInclusionListV1")
 	require.ErrorContains(t, err, "inclusion list building is not available")
-}
-
-func bogotaWithoutFOCILChainConfig() *chain.Config {
-	cfg := bogotaChainConfig()
-	cfg.DisabledEIPs = []int{7805}
-	return cfg
-}
-
-func TestNewPayloadV5AcceptsBogotaPayloadWithoutFOCIL(t *testing.T) {
-	t.Parallel()
-
-	parent := makeParentHeader(1000)
-	srv, _ := newInclusionListServer(bogotaWithoutFOCILChainConfig(), parent, execmodule.ValidationResult{
-		ValidationStatus: execmodule.ExecutionStatusSuccess,
-		LatestValidHash:  common.Hash{0x1},
-	}, nil, ilTestMaxReorgDepth)
-
-	status, err := srv.NewPayloadV5(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
-	require.NoError(t, err)
-	require.NotNil(t, status)
-	require.Equal(t, engine_types.ValidStatus, status.Status)
-	require.Nil(t, status.InclusionListSatisfied)
-}
-
-func TestNewPayloadV6RejectsBogotaPayloadWithoutFOCIL(t *testing.T) {
-	t.Parallel()
-
-	satisfied := true
-	cfg := bogotaWithoutFOCILChainConfig()
-	parent := makeParentHeader(1000)
-	srv, _ := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
-		ValidationStatus: execmodule.ExecutionStatusSuccess,
-		LatestValidHash:  common.Hash{0x1},
-	}, &satisfied, ilTestMaxReorgDepth)
-
-	status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, signedInclusionList(t, cfg))
-	require.Nil(t, status)
-	var unsupported *rpc.UnsupportedForkError
-	require.ErrorAs(t, err, &unsupported)
 }

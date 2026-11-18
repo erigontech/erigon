@@ -77,7 +77,8 @@ func CheckInclusionListTransactions(
 
 // OmittedInclusionListTxns returns the IL txns that the block omits and that a
 // builder could include from the IL alone. Blob-carrying txns are excluded
-// because the IL carries no sidecar.
+// because the IL carries no sidecar, as in check_inclusion_list_transactions:
+// https://github.com/ethereum/execution-specs/blob/59f9268081b204ba45ad241e5ca5aff0d7719a34/src/ethereum/forks/bogota/fork.py#L1182-L1248
 func OmittedInclusionListTxns(blockTxns, inclusionListTxns types.Transactions) types.Transactions {
 	inBlock := make(map[common.Hash]struct{}, len(blockTxns))
 	for _, tx := range blockTxns {

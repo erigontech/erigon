@@ -525,8 +525,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		(e.config.IsPrague(header.Time) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
 		(!e.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
 		(e.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) ||
-		(!e.config.IsEIPEnabled(7805, header.Time) && version >= clparams.HezeVersion) ||
-		(e.config.IsEIPEnabled(7805, header.Time) && version < clparams.HezeVersion) {
+		(!e.config.IsBogota(header.Time) && version >= clparams.HezeVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -667,21 +666,21 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			if possibleStatus, err = e.quickInclusionListStatus(ctx, possibleStatus, blockHash, uint64(req.BlockNumber), il); err != nil {
 				return nil, err
 			}
-			if possibleStatus != nil && possibleStatus.Status == engine_types.ValidStatus {
-				if cached, ok := e.payloadWitnesses.Get(blockHash); ok {
-					witness.result = cached
-				} else {
-					status, validationErr, latestValidHash, err := e.validateChain(ctx, block, &witness)
-					if err != nil {
-						return nil, err
-					}
-					if validatedStatus := e.validatedPayloadStatus(block, status, validationErr, latestValidHash); validatedStatus.Status != engine_types.ValidStatus {
-						return validatedStatus, nil
-					}
-				}
-				validated = true
-			}
 			if possibleStatus != nil {
+				if possibleStatus.Status == engine_types.ValidStatus {
+					if cached, ok := e.payloadWitnesses.Get(blockHash); ok {
+						witness.result = cached
+					} else {
+						status, validationErr, latestValidHash, err := e.validateChain(ctx, block, &witness)
+						if err != nil {
+							return nil, err
+						}
+						if validatedStatus := e.validatedPayloadStatus(block, status, validationErr, latestValidHash); validatedStatus.Status != engine_types.ValidStatus {
+							return validatedStatus, nil
+						}
+					}
+					validated = true
+				}
 				return possibleStatus, nil
 			}
 		}
@@ -1678,7 +1677,7 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 }
 
 func (e *EngineServer) getInclusionList(ctx context.Context) ([]hexutil.Bytes, error) {
-	if !e.config.IsEIPEnabled(7805, uint64(time.Now().Unix())) {
+	if !e.config.IsBogota(uint64(time.Now().Unix())) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
