@@ -18,7 +18,6 @@ package overlay
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"context"
 	"fmt"
 	"net"
@@ -275,8 +274,7 @@ func TestRogueFloodDoesNotStallPublisher(t *testing.T) {
 		case msg := <-relayed:
 			seen++
 			requireAnonymous(t, msg)
-			id := sha256.Sum256(msg.Data)
-			require.Equal(t, string(id[:]), msg.ID, "message id")
+			require.Equal(t, msgID(msg.Message), msg.ID, "message id")
 			e, err := seqsig.Decode(msg.Data)
 			require.NoError(t, err)
 			h, err := e.Verify(testDomain, addr(0))

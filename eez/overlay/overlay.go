@@ -23,6 +23,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -579,10 +580,30 @@ func gossipOptions() []pubsub.Option {
 	}
 }
 
-// msgID is the SHA-256 of the message data.
+// Message-id domains for data that is and is not a Snappy block within the
+// cap.
+var (
+	validSnappy   = [4]byte{1, 0, 0, 0}
+	invalidSnappy = [4]byte{0, 0, 0, 0}
+)
+
+// msgID is the message id of Ethereum consensus since Altair, over the
+// decompressed envelope: every Snappy encoding of one head has one id, so a
+// re-compressed copy is dropped as a duplicate.
 func msgID(m *pubsubpb.Message) string {
-	h := sha256.Sum256(m.Data)
-	return string(h[:])
+	topic := m.GetTopic()
+	h := sha256.New()
+	payload, err := seqsig.Decompress(m.Data)
+	if err == nil {
+		h.Write(validSnappy[:])
+	} else {
+		h.Write(invalidSnappy[:])
+		payload = m.Data
+	}
+	h.Write(binary.LittleEndian.AppendUint64(nil, uint64(len(topic))))
+	h.Write([]byte(topic))
+	h.Write(payload)
+	return string(h.Sum(nil)[:20])
 }
 
 // PeerID returns the overlay peer id of the node whose devp2p public key is

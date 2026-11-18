@@ -21,6 +21,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
+	"os"
 	"sync"
 	"testing"
 
@@ -32,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/eez/seqsig"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -198,8 +201,40 @@ func padded(data []byte) []byte {
 	return append(append(pre, 0x00), data[k:]...)
 }
 
+// TestMessageID: the id of a message is that of its decompressed envelope on
+// its topic, so every Snappy encoding of a head has one id, and the signed-head
+// vector of eez/testdata/SOURCES.md has its known id. Data that is not a
+// Snappy block within the cap is hashed as is, under another domain.
 func TestMessageID(t *testing.T) {
-	data := encode(t, signed(t, 0, head(100, 1, 1), nil))
-	want := sha256.Sum256(data)
-	require.Equal(t, string(want[:]), msgID(&pubsubpb.Message{Data: data}))
+	raw, err := os.ReadFile("../testdata/vectors/signed_head_p2p_v0.json")
+	require.NoError(t, err)
+	var v struct {
+		Envelope  hexutil.Bytes `json:"envelope"`
+		Topic     string        `json:"topic"`
+		MessageID hexutil.Bytes `json:"messageId"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &v))
+	require.Equal(t, v.Topic, Topic(1337, 1))
+	data := snappy.Encode(nil, v.Envelope)
+	for _, enc := range [][]byte{data, reencode(data, 1), reencode(data, 60)} {
+		require.Equal(t, string(v.MessageID), msgID(&pubsubpb.Message{Topic: &v.Topic, Data: enc}))
+	}
+
+	invalid := func(data []byte) string {
+		h := sha256.New()
+		h.Write([]byte{0, 0, 0, 0})
+		h.Write(binary.LittleEndian.AppendUint64(nil, uint64(len(v.Topic))))
+		h.Write([]byte(v.Topic))
+		h.Write(data)
+		return string(h.Sum(nil)[:20])
+	}
+	for name, enc := range map[string][]byte{
+		"not snappy":                 []byte("junk"),
+		"padded preamble":            padded(data),
+		"truncated":                  data[:len(data)-1],
+		"declared above the cap":     binary.AppendUvarint(nil, seqsig.MaxMessageSize+1),
+		"decompressed above the cap": snappy.Encode(nil, make([]byte, seqsig.MaxMessageSize+1)),
+	} {
+		require.Equal(t, invalid(enc), msgID(&pubsubpb.Message{Topic: &v.Topic, Data: enc}), name)
+	}
 }
