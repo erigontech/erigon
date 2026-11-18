@@ -82,17 +82,20 @@ jobs:
               max-failures: 2 # Legacy chain-ID error categories: https://github.com/ethereum/hive/issues/1656
               commitment_mode: parallel
             - sim: consume-rlp
-              sim-limit: ".*fork_(Amsterdam|Cancun)-.*"
+              sim-limit: '.*(eip2930_access_list|eip4844_blobs).*\[fork_(Amsterdam|BPO1|BPO2).*'
               shard: rlp-a
               fixtures-tarball: eest_stable
               max-failures: 0
               commitment_mode: parallel
             # rlp split in two for wall time: one 16k-test job takes ~30 min.
-            # The halves partition the selection by fork (verified 8426/7837
-            # against the fixture-set meta index) and run as parallel matrix
-            # jobs; add a new fork to the "other" half, it picks it up by default.
+            # Both halves keep the old shard's directory scope and split it by
+            # the fork parameter (anchored to the "[fork_" that starts a test's
+            # parameter list, so fork tokens in file names cannot leak across);
+            # verified 7025/9238 against the fixture-set meta index. The
+            # consumer applies sim-limit with Python regex, so the lookahead in
+            # rlp-b is fine. A new fork lands in rlp-b by default.
             - sim: consume-rlp
-              sim-limit: ".*fork_(?!Amsterdam-|Cancun-).*"
+              sim-limit: '.*(eip2930_access_list|eip4844_blobs).*\[fork_(?!Amsterdam|BPO1|BPO2).*'
               shard: rlp-b
               fixtures-tarball: eest_stable
               max-failures: 0
