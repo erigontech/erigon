@@ -485,6 +485,13 @@ func TestForAmount(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"CAAA", "CBAA", "CCAA"}, keys1)
 	require.Equal(t, []string{"value1", "value2", "value3"}, values1)
+
+	calls := 0
+	require.NoError(t, batch.ForAmount(kv.HeaderNumber, []byte("C"), 0, func(k, v []byte) error {
+		calls++
+		return nil
+	}))
+	require.Zero(t, calls)
 }
 
 func TestGetOneAfterClearBucket(t *testing.T) {
