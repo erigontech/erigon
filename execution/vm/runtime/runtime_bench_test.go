@@ -46,57 +46,65 @@ import (
 )
 
 func BenchmarkCall(b *testing.B) {
+	c := newCallBench(b)
+	for b.Loop() {
+		c.batch(b)
+	}
+}
+
+type callBench struct {
+	cfg    *Config
+	reader state.StateReader
+	code   []byte
+	inputs [][]byte
+	tmpdir string
+}
+
+func newCallBench(tb testing.TB) *callBench {
 	definition := `[{"constant":true,"inputs":[],"name":"seller","outputs":[{"name":"","type":"address"}],"type":"function"},{"constant":false,"inputs":[],"name":"abort","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"value","outputs":[{"name":"","type":"uint256"}],"type":"function"},{"constant":false,"inputs":[],"name":"refund","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"buyer","outputs":[{"name":"","type":"address"}],"type":"function"},{"constant":false,"inputs":[],"name":"confirmReceived","outputs":[],"type":"function"},{"constant":true,"inputs":[],"name":"state","outputs":[{"name":"","type":"uint8"}],"type":"function"},{"constant":false,"inputs":[],"name":"confirmPurchase","outputs":[],"type":"function"},{"inputs":[],"type":"constructor"},{"anonymous":false,"inputs":[],"name":"Aborted","type":"event"},{"anonymous":false,"inputs":[],"name":"PurchaseConfirmed","type":"event"},{"anonymous":false,"inputs":[],"name":"ItemReceived","type":"event"},{"anonymous":false,"inputs":[],"name":"Refunded","type":"event"}]`
 
 	code := common.Hex2Bytes("6060604052361561006c5760e060020a600035046308551a53811461007457806335a063b4146100865780633fa4f245146100a6578063590e1ae3146100af5780637150d8ae146100cf57806373fac6f0146100e1578063c19d93fb146100fe578063d696069714610112575b610131610002565b610133600154600160a060020a031681565b610131600154600160a060020a0390811633919091161461015057610002565b61014660005481565b610131600154600160a060020a039081163391909116146102d557610002565b610133600254600160a060020a031681565b610131600254600160a060020a0333811691161461023757610002565b61014660025460ff60a060020a9091041681565b61013160025460009060ff60a060020a9091041681146101cc57610002565b005b600160a060020a03166060908152602090f35b6060908152602090f35b60025460009060a060020a900460ff16811461016b57610002565b600154600160a060020a03908116908290301631606082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517f72c874aeff0b183a56e2b79c71b46e1aed4dee5e09862134b8821ba2fddbf8bf9250a150565b80546002023414806101dd57610002565b6002805460a060020a60ff021973ffffffffffffffffffffffffffffffffffffffff1990911633171660a060020a1790557fd5d55c8a68912e9a110618df8d5e2e83b8d83211c57a8ddd1203df92885dc881826060a15050565b60025460019060a060020a900460ff16811461025257610002565b60025460008054600160a060020a0390921691606082818181858883f150508354604051600160a060020a0391821694503090911631915082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517fe89152acd703c9d8c7d28829d443260b411454d45394e7995815140c8cbcbcf79250a150565b60025460019060a060020a900460ff1681146102f057610002565b6002805460008054600160a060020a0390921692909102606082818181858883f150508354604051600160a060020a0391821694503090911631915082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517f8616bbbbad963e4e65b1366f1d75dfb63f9e9704bbbf91fb01bec70849906cf79250a15056")
 
 	abi, err := abi.JSON(strings.NewReader(definition))
-	if err != nil {
-		b.Fatal(err)
-	}
-
+	require.NoError(tb, err)
 	cpurchase, err := abi.Pack("confirmPurchase")
-	if err != nil {
-		b.Fatal(err)
-	}
+	require.NoError(tb, err)
 	creceived, err := abi.Pack("confirmReceived")
-	if err != nil {
-		b.Fatal(err)
-	}
+	require.NoError(tb, err)
 	refund, err := abi.Pack("refund")
-	if err != nil {
-		b.Fatal(err)
+	require.NoError(tb, err)
+
+	db := temporaltest.NewTestDB(tb, datadir.New(tb.TempDir()))
+	tx, sd := temporaltest.NewTestTxSD(tb, db)
+	c := &callBench{
+		// cfg carries a non-zero Value, so the origin has to be able to pay it or
+		// every call fails the balance check before reaching the interpreter.
+		cfg:    &Config{ChainConfig: &chain.Config{}, Value: *uint256.MustFromBig(big.NewInt(13377)), Difficulty: uint256.NewInt(0), Origin: accounts.ZeroAddress},
+		reader: state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})),
+		code:   code,
+		inputs: [][]byte{cpurchase, creceived, refund},
+		tmpdir: tb.TempDir(),
 	}
-	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: 0, Time: 0, Value: *uint256.MustFromBig(big.NewInt(13377)), Difficulty: uint256.NewInt(0)}
-	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
-	tx, sd := temporaltest.NewTestTxSD(b, db)
-	//cfg.w = state.NewWriter(execctx, nil)
-	cfg.State = benchState(b, state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
-	defer cfg.State.Close()
-	// cfg carries a non-zero Value, so the origin has to be able to pay it or
-	// every call fails the balance check before reaching the interpreter.
-	cfg.Origin = accounts.ZeroAddress
-	require.NoError(b, cfg.State.SetBalance(cfg.Origin, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified))
-	//cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
+	tb.Cleanup(func() { c.cfg.State.Close() })
+	return c
+}
 
-	tmpdir := b.TempDir()
-
-	// Execute runs the deployed runtime code, so the constructor never initialises
-	// seller/value and every entry point hits the contract's pre-REVERT throw.
-	// Pinned so the benchmark cannot degrade further without failing; making it
-	// execute the purchase flow needs a new fixture.
-	inputs := [][]byte{cpurchase, creceived, refund}
-	for b.Loop() {
-		snap := cfg.State.PushSnapshot()
-		for range 400 {
-			for _, input := range inputs {
-				if _, _, err := Execute(code, input, cfg, tmpdir); !errors.Is(err, vm.ErrInvalidJump) {
-					b.Fatalf("expected the contract throw, got %v", err)
-				}
+// batch runs every entry point 400 times on a fresh versioned state: Execute publishes
+// each run to the version map and advances the tx index, which a snapshot revert does
+// not undo. Execute runs the deployed runtime code, so the constructor never initialises
+// seller/value and every entry point hits the contract's pre-REVERT throw. Pinned so the
+// benchmark cannot degrade further without failing; making it execute the purchase flow
+// needs a new fixture.
+func (c *callBench) batch(tb testing.TB) {
+	c.cfg.State.Close()
+	c.cfg.State = benchState(tb, c.reader)
+	require.NoError(tb, c.cfg.State.SetBalance(c.cfg.Origin, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified))
+	for range 400 {
+		for _, input := range c.inputs {
+			if _, _, err := Execute(c.code, input, c.cfg, c.tmpdir); !errors.Is(err, vm.ErrInvalidJump) {
+				tb.Fatalf("expected the contract throw, got %v", err)
 			}
 		}
-		cfg.State.RevertToSnapshot(snap, nil)
-		cfg.State.PopSnapshot(snap)
 	}
 }
 
@@ -287,8 +295,8 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 
 // benchState builds state on the parallel-execution path, the one staged sync
 // runs: the stateObject cache is off and reads resolve from the version map.
-func benchState(b *testing.B, reader state.StateReader) *state.IntraBlockState {
-	b.Helper()
+func benchState(tb testing.TB, reader state.StateReader) *state.IntraBlockState {
+	tb.Helper()
 	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
 	statedb.SetNoConflictDetection()
 	return statedb
