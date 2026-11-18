@@ -8095,7 +8095,7 @@ This is useful for understanding what a contract would have initialised to if it
 { "code": "0x<effective_creation_code>" }
 ```
 
-`null` if the replacement constructor runs without an error but leaves no code at the address.
+`null` if the constructor succeeds but no runtime code remains at the address after replay. A later factory revert or failed frame assertion can remove code even when the replacement constructor succeeds. Constructor execution errors are returned as RPC errors when no code remains.
 
 **Example**
 
@@ -8117,7 +8117,7 @@ Internally, this method:
 
 1. Looks up the contract's creation transaction via the Otterscan API
 2. Replays all transactions in that block up to (but not including) the creation tx
-3. Executes the creation tx using the provided bytecode instead of the original
+3. Executes the creation tx using the provided bytecode for the target constructor, keeping the original deployment address for both CREATE and CREATE2. The factory and later frames continue normally, so their reverts and assertions apply to the replacement.
 4. Returns the effective code that would have been stored at the contract address, or `null` if no code would have been stored
 
 :::info
