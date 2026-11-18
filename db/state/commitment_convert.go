@@ -618,6 +618,13 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	}
 	convertDomain := !opts.TargetV3 || !opts.NoDomain
 	convertHistory := opts.TargetV3 && !opts.NoHistory
+	if convertHistory {
+		for _, sub := range []string{"history", "idx", "accessor"} {
+			if err := preflightBackupDir(filepath.Join(at.Dirs().Snap, "backup", sub)); err != nil {
+				return err
+			}
+		}
+	}
 	allFiles := at.Files(kv.CommitmentDomain)
 	files := make(VisibleFiles, 0, len(allFiles))
 	if convertDomain {
@@ -857,7 +864,10 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		if err := verifyCommitmentV3Files(ctx, at.a, logger); err != nil {
 			return commitmentRestoreError("v3 verification", err)
 		}
-		if convertHistory && len(historyRanges) > 0 {
+		if !convertHistory && commitmentDomain.History.FileVersion.DataV.Current.Major >= 3 {
+			historyRanges = visibleCommitmentHistoryRanges(at.a)
+		}
+		if len(historyRanges) > 0 {
 			if err := verifyCommitmentV3History(ctx, at.a, historyRanges, logger); err != nil {
 				return commitmentRestoreError("v3 history verification", err)
 			}

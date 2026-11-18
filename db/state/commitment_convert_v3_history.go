@@ -998,6 +998,17 @@ func convertHistoryPhase4(dirs datadir.Dirs, stage commitmentV3HistoryStage) (in
 	return moved, nil
 }
 
+func visibleCommitmentHistoryRanges(a *Aggregator) []commitmentHistoryRange {
+	at := a.BeginFilesRo()
+	defer at.Close()
+	stepSize := at.StepSize()
+	var ranges []commitmentHistoryRange
+	for _, v := range at.d[kv.CommitmentDomain].ht.files {
+		ranges = append(ranges, commitmentHistoryRange{fromStep: kv.Step(v.startTxNum / stepSize), toStep: kv.Step(v.endTxNum / stepSize)})
+	}
+	return ranges
+}
+
 func verifyCommitmentV3History(ctx context.Context, a *Aggregator, ranges []commitmentHistoryRange, logger log.Logger) error {
 	started := time.Now()
 	at := a.BeginFilesRo()
