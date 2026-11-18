@@ -143,10 +143,10 @@ func opTxTrace(pc uint64, evm *EVM, call *CallContext) (uint64, []byte, error) {
 func gasTxDiff(evm *EVM, call *CallContext, _ mdgas.MdGas, _ uint64) (mdgas.MdGasCost, error) {
 	param, key, index := call.Stack.back3(0, 1, 2)
 	ibs := evm.IntraBlockState()
-	var cost uint64
 	if !param.IsUint64() {
-		return mdgas.MdGasCost{Execution: cost}, nil
+		return mdgas.MdGasCost{}, nil
 	}
+	var cost uint64
 	if p := param.Uint64(); p <= 1 {
 		address, slot := ibs.InternAddress(key), ibs.InternStorageKey(index)
 		if _, warm := ibs.SlotInAccessList(address, slot); !warm {
