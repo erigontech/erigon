@@ -24,31 +24,20 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
 // storeBlobsForBlock fetches and stores the sidecars a block needs, and fails if the store does
 // not hold all of them afterwards.
 func (c *ChainEndpoint) storeBlobsForBlock(
 	ctx context.Context,
-	tx kv.Tx,
-	blocks freezeblocks.BeaconSnapshotReader,
 	blobDB blob_storage.BlobStorage,
 	beaconConfig *clparams.BeaconChainConfig,
-	block *cltypes.SignedBeaconBlock,
+	block, child *cltypes.SignedBeaconBlock,
 ) error {
-	if !c.Blobs {
+	if !c.Blobs || expectedBlobsForChild(block, child) == 0 {
 		return nil
-	}
-	blockRoot, err := block.Block.HashSSZ()
-	if err != nil {
-		return err
-	}
-	if n, _, err := blobfetch.ExpectedBlobs(ctx, tx, blocks, blockRoot, block); err != nil || n == 0 {
-		return err
 	}
 	commitments := block.Block.Body.GetBlobKzgCommitments()
 	ids, err := network.BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{block}, beaconConfig)
@@ -61,6 +50,10 @@ func (c *ChainEndpoint) storeBlobsForBlock(
 	if ids.Len() != commitments.Len() {
 		return fmt.Errorf("got %d blob identifiers for %d commitments at slot %d", ids.Len(), commitments.Len(), block.Block.Slot)
 	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
 	blobs, err := blobfetch.Retrieve(ctx, c.Endpoint, blockRoot, block)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve blobs at slot %d, root %x: %w", block.Block.Slot, blockRoot, err)
@@ -71,16 +64,10 @@ func (c *ChainEndpoint) storeBlobsForBlock(
 	return nil
 }
 
-func storedBlobsComplete(ctx context.Context, tx kv.Tx, blocks freezeblocks.BeaconSnapshotReader, blobDB blob_storage.BlobStorage, slot uint64, root common.Hash) (bool, error) {
-	block, err := blocks.ReadBeaconBlockBodyBySlot(ctx, tx, slot)
-	if err != nil || block == nil {
-		return false, err
+func expectedBlobsForChild(block, child *cltypes.SignedBeaconBlock) int {
+	n := blobfetch.BlobCount(block)
+	if n == 0 || block.Version() < clparams.GloasVersion || child == nil || forkchoice.ParentPayloadStatusFromBids(block, child.Block) == cltypes.PayloadStatusFull {
+		return n
 	}
-	// Look the blobs up under the walked root: before Gloas the stored body has no execution
-	// transactions or withdrawals, so its own hash is not the block root.
-	n, _, err := blobfetch.ExpectedBlobs(ctx, tx, blocks, root, block)
-	if err != nil || n == 0 {
-		return err == nil, err
-	}
-	return blob_storage.BlobsStored(ctx, blobDB, slot, root, n)
+	return 0
 }

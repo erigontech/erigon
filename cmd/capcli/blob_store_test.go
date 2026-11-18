@@ -204,7 +204,7 @@ func TestStoreBlobsForBlockRejectsFewerIdentifiersThanCommitments(t *testing.T) 
 	}
 
 	endpoint := &ChainEndpoint{Blobs: true}
-	err := endpoint.storeBlobsForBlock(t.Context(), nil, nil, nil, beaconConfig, block)
+	err := endpoint.storeBlobsForBlock(t.Context(), nil, beaconConfig, block, nil)
 
 	require.Error(t, err, "a block whose commitments exceed the request cap must not pass silently")
 	require.ErrorContains(t, err, "identifier")
@@ -357,19 +357,15 @@ func TestRedactEndpointKeepsSchemeAndHost(t *testing.T) {
 
 func TestChainEndpointWalkStoresAroundASkippedGloasPayload(t *testing.T) {
 	f, before, after := newSkippedPayloadFixture(t, 1)
-	skipped, err := f.blocks.blocks[fillTestSlot+1].Block.HashSSZ()
-	require.NoError(t, err)
+	skipped := blockRootOf(t, f.blocks.blocks[fillTestSlot+1])
 	url, requests := f.endpoint(false)
 	endpoint := &ChainEndpoint{Blobs: true, Endpoint: url}
 
-	require.NoError(t, f.db.View(t.Context(), func(tx kv.Tx) error {
-		for _, slot := range []uint64{fillTestSlot + 2, fillTestSlot + 1, fillTestSlot} {
-			if err := endpoint.storeBlobsForBlock(t.Context(), tx, f.blocks, f.store, &clparams.MainnetBeaconConfig, f.blocks.blocks[slot]); err != nil {
-				return err
-			}
-		}
-		return nil
-	}))
+	var child *cltypes.SignedBeaconBlock
+	for _, slot := range []uint64{fillTestSlot + 2, fillTestSlot + 1, fillTestSlot} {
+		require.NoError(t, endpoint.storeBlobsForBlock(t.Context(), f.store, &clparams.MainnetBeaconConfig, f.blocks.blocks[slot], child))
+		child = f.blocks.blocks[slot]
+	}
 
 	require.True(t, f.storedValid(fillTestSlot, before))
 	require.True(t, f.storedValid(fillTestSlot+2, after))
