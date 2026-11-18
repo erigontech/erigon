@@ -199,20 +199,23 @@ Examples:
 
 		prefix, err := commitment.PrefixStringToNibbles(branchPrefixFlag)
 		if err != nil {
-			return err
+			logger.Error("Failed to parse prefix", "error", err)
+			return nil
 		}
 
 		dirs := datadir.New(datadirCli)
 		chainDb, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
-			return err
+			logger.Error("Opening DB", "error", err)
+			return nil
 		}
 		defer chainDb.Close()
 
 		// Start a read-only temporal transaction
 		tx, err := chainDb.BeginTemporalRo(ctx)
 		if err != nil {
-			return err
+			logger.Error("Failed to begin temporal tx", "error", err)
+			return nil
 		}
 		defer tx.Rollback()
 
@@ -221,7 +224,8 @@ Examples:
 			fmt.Printf("(asOfTxNum: %d)\n", txnumFlag)
 			reader := commitmentdb.NewHistoryStateReader(tx, txnumFlag)
 			if err := readBranch(reader, prefix, stepSize); err != nil {
-				return err
+				logger.Error("Failed to read branch", "error", err)
+				return nil
 			}
 		} else {
 			// Latest state read
@@ -233,7 +237,8 @@ Examples:
 			defer sd.Close()
 			reader := commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{})
 			if err := readBranch(reader, prefix, stepSize); err != nil {
-				return err
+				logger.Error("Failed to read branch", "error", err)
+				return nil
 			}
 		}
 		return nil
