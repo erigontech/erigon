@@ -539,14 +539,23 @@ func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
 				return writer.Flush(ctx, tx)
 			}))
 			if mode == "explicit" {
-				require.NoError(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), 10, 11, unboundedFinalityCtx, false))
-				agg.WaitForFiles()
+				err := agg.BuildFiles2(ctx, asTemporalRoDB(db), 10, 11, unboundedFinalityCtx, false)
+				require.ErrorContains(t, err, "gap between state snapshots and MDBX")
+				require.False(t, agg.HasBackgroundFilesBuild2(), "a refused build must release its slot")
 			} else {
 				require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 11*stepSize, unboundedFinalityCtx))
 			}
 			after, err := dir.ListFiles(dirs.SnapDomain, ".kv")
 			require.NoError(t, err)
 			require.ElementsMatch(t, before, after, "a gap must prevent new state files")
+			if mode == "explicit" {
+				generateStateFiles(t, dirs, []testFileRange{{5, 10}})
+				generateCommitmentFile(t, dirs, []testFileRange{{5, 10}})
+				require.NoError(t, agg.OpenFolder(db))
+				require.NoError(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), 10, 11, unboundedFinalityCtx, false))
+				agg.WaitForFiles()
+				requireVisibleEnd(t, agg, 11*stepSize)
+			}
 		})
 	}
 }

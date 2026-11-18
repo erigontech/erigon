@@ -1262,29 +1262,32 @@ Loop:
 	return nil
 }
 
-// BuildFiles2 schedules builds for [fromStep, toStep), extending the start backward
-// when pending data needs recovery.
+// BuildFiles2 plans synchronously, then schedules builds for [fromStep, toStep).
+// Pending data can extend the start backward.
 func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
+	// Close must wait for synchronous planning as well as the background build.
+	if !a.background.TryAdd() {
+		return nil
+	}
+	defer a.background.Done()
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
+	var plan fileBuildPlan
+	if toStep > fromStep {
+		var err error
+		plan, err = a.readFileBuildPlan(ctx, db)
+		if err != nil {
+			a.buildingFiles.Store(false)
+			return err
+		}
+		// Include pending steps before the requested range so later pruning
+		// cannot delete data that this build would otherwise skip.
+		fromStep = min(fromStep, plan.firstStep)
+		log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
+	}
 	started := a.background.TryGo(func() {
 		defer a.buildingFiles.Store(false)
-		var plan fileBuildPlan
-		if toStep > fromStep {
-			var err error
-			plan, err = a.readFileBuildPlan(ctx, db)
-			if err != nil {
-				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
-					a.logger.Warn("[snapshots] first step to build", "err", err)
-				}
-				return
-			}
-			// Include pending steps before the requested range so later pruning
-			// cannot delete data that this build would otherwise skip.
-			fromStep = min(fromStep, plan.firstStep)
-			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
-		}
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFilesWithPlan(ctx, db, step, finalityCtx, nil, plan); err != nil {
 				if errors.Is(err, errStepNotReady) {
