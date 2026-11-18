@@ -261,7 +261,7 @@ func wipedFieldOutcome(s *IntraBlockState, addr accounts.Address) readPathOutcom
 	state, destructDep := s.versionMap.AccountLifecycleWithDestructDep(addr, s.txIndex)
 	// A destruct back in flight is not counted by the lifecycle, so the verdict may be stale.
 	if destructDep != UnknownDep {
-		s.dep = max(s.dep, destructDep)
+		s.noteDep(destructDep)
 	}
 	if state == LifecycleRevived {
 		return outcomeReturnEmpty

@@ -1489,7 +1489,7 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		}
 		// An in-flight destruct below is not net-absent yet, but the committed record predates it.
 		if destructDep != UnknownDep {
-			ibs.dep = max(ibs.dep, destructDep)
+			ibs.noteDep(destructDep)
 		}
 	}
 
