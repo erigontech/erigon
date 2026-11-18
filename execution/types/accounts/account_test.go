@@ -419,7 +419,7 @@ func TestInternSlotCollision(t *testing.T) {
 	require.NotEqual(t, canon[k1], canon[k2])
 	for range 2 {
 		for _, k := range []common.Hash{k1, k2} {
-			require.Equal(t, canon[k], InternKey(k))
+			require.True(t, canon[k] == InternKey(k))
 			require.Equal(t, k, InternKey(k).Value())
 		}
 		for _, a := range []common.Address{a1, a2} {
@@ -433,7 +433,7 @@ func requireCanonKey(t *testing.T, k common.Hash, h StorageKey) {
 	t.Helper()
 	wp, ok := keyCanon.Load(k)
 	require.True(t, ok)
-	require.Equal(t, StorageKey{wp.Value()}, h)
+	require.Same(t, wp.Value(), h.p)
 	require.Equal(t, k, h.Value())
 }
 
@@ -446,7 +446,7 @@ func TestInternKeyConcurrentFirstUse(t *testing.T) {
 	}
 	wg.Wait()
 	for _, h := range got {
-		require.Equal(t, got[0], h)
+		require.True(t, got[0] == h)
 	}
 	requireCanonKey(t, k, got[0])
 }
@@ -482,7 +482,7 @@ func TestInternKeyAfterRelease(t *testing.T) {
 	requireKeyReleased(t, k)
 	h := InternKey(k)
 	requireCanonKey(t, k, h)
-	require.Equal(t, h, InternKey(k))
+	require.True(t, h == InternKey(k))
 	internAndEvict(t, k)
 	requireKeyReleased(t, k)
 }
