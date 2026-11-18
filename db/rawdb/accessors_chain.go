@@ -1354,16 +1354,25 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	defer func() { <-hashed }()
 
 	res, err := ReadBlockReceiptsCacheV2(context.Background(), tx, block.NumberU64(), txNumReader)
-	if err != nil || len(res) != len(transactions) {
-		// Block receipt RPCs require the full ordered receipt set.
+	if err != nil {
 		return nil, err
 	}
 	<-hashed
+	return DeriveCachedBlockReceipts(block, res), nil
+}
+
+// DeriveCachedBlockReceipts completes the RCacheV2 receipts of block with the block fields.
+// It returns nil when res does not hold one receipt per transaction: block receipt RPCs require the full set.
+func DeriveCachedBlockReceipts(block *types.Block, res types.Receipts) types.Receipts {
+	transactions := block.Transactions()
+	if len(res) != len(transactions) {
+		return nil
+	}
 	blockHash, blockNum := block.Hash(), block.NumberU64()
 	for i, x := range res {
 		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, transactions[i].Hash(), false)
 	}
-	return res, nil
+	return res
 }
 
 func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uint64) error {
@@ -1372,7 +1381,7 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uin
 }
 
 // ReadBlockReceiptsCacheV2 reads and decodes the RCacheV2 receipts of blockNum, with their blooms,
-// without the block. It returns nil when the cache does not hold them in transaction order.
+// without the block. A gap returns nil, and a missing tail returns a shorter list.
 func ReadBlockReceiptsCacheV2(ctx context.Context, tx kv.TemporalTx, blockNum uint64, txNumReader rawdbv3.TxNumsReader) (res types.Receipts, err error) {
 	minTxNum, err := txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {

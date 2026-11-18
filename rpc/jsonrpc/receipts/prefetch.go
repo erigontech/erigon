@@ -71,19 +71,12 @@ func (p *ReceiptsPrefetch) Receipts(block *types.Block) types.Receipts {
 	if p == nil {
 		return nil
 	}
-	transactions := block.Transactions()
-	for _, txn := range transactions {
+	// Hashing the transactions overlaps with reading the receipts.
+	for _, txn := range block.Transactions() {
 		txn.Hash()
 	}
 	<-p.done
-	if len(p.receipts) != len(transactions) {
-		return nil
-	}
-	blockHash, blockNum := block.Hash(), block.NumberU64()
-	for i, x := range p.receipts {
-		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, transactions[i].Hash(), false)
-	}
-	return p.receipts
+	return rawdb.DeriveCachedBlockReceipts(block, p.receipts)
 }
 
 // Close stops the prefetch and waits until its read tx is closed.
