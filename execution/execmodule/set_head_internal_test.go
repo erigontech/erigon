@@ -110,40 +110,64 @@ func TestSetHeadFailedCommitPreservesPendingNotifications(t *testing.T) {
 }
 
 func TestSetHeadClearsSafeAndFinalizedAboveTarget(t *testing.T) {
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	logger := log.New()
-	target := &types.Header{Number: *uint256.NewInt(1)}
-	finalized := &types.Header{Number: *uint256.NewInt(2), ParentHash: target.Hash()}
-	head := &types.Header{Number: *uint256.NewInt(3), ParentHash: finalized.Hash()}
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		for _, header := range []*types.Header{target, finalized, head} {
-			require.NoError(t, rawdb.WriteHeader(tx, header))
-			require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()))
-		}
-		rawdb.WriteHeadBlockHash(tx, head.Hash())
-		rawdb.WriteForkchoiceHead(tx, head.Hash())
-		rawdb.WriteForkchoiceSafe(tx, head.Hash())
-		rawdb.WriteForkchoiceFinalized(tx, finalized.Hash())
-		return stages.SaveStageProgress(tx, stages.Headers, head.Number.Uint64())
-	}))
-	sync := stagedsync.New(ethconfig.Sync{}, []*stagedsync.Stage{{
-		ID: stages.Headers,
-		Unwind: func(u *stagedsync.UnwindState, _ *stagedsync.StageState, _ *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
-			return u.Done(tx)
-		},
-	}}, []stages.SyncStage{stages.Headers}, nil, logger, stages.ModeApplyingBlocks)
-	module := &ExecModule{
-		db:               db,
-		blockReader:      setHeadBlockReader{},
-		semaphore:        semaphore.NewWeighted(1),
-		pipelineExecutor: &PipelineExecutor{sync: sync},
-		logger:           logger,
-	}
+	const target = 2
+	for _, tc := range []struct {
+		name                      string
+		safe, finalized           uint64
+		safeCleared, finalCleared bool
+	}{
+		{"both above", 4, 3, true, true},
+		{"only safe above", 3, 2, true, false},
+		{"both at or below", 2, 1, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			logger := log.New()
+			headers := make([]*types.Header, 5)
+			for n := uint64(1); n <= 4; n++ {
+				headers[n] = &types.Header{Number: *uint256.NewInt(n)}
+				if n > 1 {
+					headers[n].ParentHash = headers[n-1].Hash()
+				}
+			}
+			head := headers[4]
+			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+				for _, header := range headers[1:] {
+					require.NoError(t, rawdb.WriteHeader(tx, header))
+					require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()))
+				}
+				rawdb.WriteHeadBlockHash(tx, head.Hash())
+				rawdb.WriteForkchoiceHead(tx, head.Hash())
+				rawdb.WriteForkchoiceSafe(tx, headers[tc.safe].Hash())
+				rawdb.WriteForkchoiceFinalized(tx, headers[tc.finalized].Hash())
+				return stages.SaveStageProgress(tx, stages.Headers, head.Number.Uint64())
+			}))
+			sync := stagedsync.New(ethconfig.Sync{}, []*stagedsync.Stage{{
+				ID: stages.Headers,
+				Unwind: func(u *stagedsync.UnwindState, _ *stagedsync.StageState, _ *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
+					return u.Done(tx)
+				},
+			}}, []stages.SyncStage{stages.Headers}, nil, logger, stages.ModeApplyingBlocks)
+			module := &ExecModule{
+				db:               db,
+				blockReader:      setHeadBlockReader{},
+				semaphore:        semaphore.NewWeighted(1),
+				pipelineExecutor: &PipelineExecutor{sync: sync},
+				logger:           logger,
+			}
 
-	require.NoError(t, module.SetHead(t.Context(), target.Number.Uint64()))
-	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		require.Equal(t, common.Hash{}, rawdb.ReadForkchoiceSafe(tx))
-		require.Equal(t, common.Hash{}, rawdb.ReadForkchoiceFinalized(tx))
-		return nil
-	}))
+			require.NoError(t, module.SetHead(t.Context(), target))
+			want := func(cleared bool, n uint64) common.Hash {
+				if cleared {
+					return common.Hash{}
+				}
+				return headers[n].Hash()
+			}
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				require.Equal(t, want(tc.safeCleared, tc.safe), rawdb.ReadForkchoiceSafe(tx))
+				require.Equal(t, want(tc.finalCleared, tc.finalized), rawdb.ReadForkchoiceFinalized(tx))
+				return nil
+			}))
+		})
+	}
 }
