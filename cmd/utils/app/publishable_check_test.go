@@ -326,6 +326,66 @@ func Test_CheckEmptyFutureForkTablesTolerated(t *testing.T) {
 	}
 }
 
+func Test_NonCanonicalPaddingRejected(t *testing.T) {
+	tests := []struct {
+		name     string
+		replaced []string
+	}{
+		{"data and idx", []string{"beaconblocks.seg", "beaconblocks.idx"}},
+		{"idx only", []string{"beaconblocks.idx"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			touchFiles(t, dirs, []snapRange{{0, 10}, {10, 20}, {20, 30}})
+			for _, suffix := range tt.replaced {
+				delFile(t, dirs.Snap, "v1.0-000020-000030-"+suffix)
+				touchFile(t, dirs.Snap, "v1.0-20-30-"+suffix)
+			}
+			require.Error(t, checkIfCaplinSnapshotsPublishable(dirs, false, nil))
+		})
+	}
+}
+
+func Test_CaplinFileVersionPrefix(t *testing.T) {
+	files := []struct {
+		folder func(datadir.Dirs) string
+		name   string
+	}{
+		{func(d datadir.Dirs) string { return d.Snap }, "000020-000030-beaconblocks.seg"},
+		{func(d datadir.Dirs) string { return d.Snap }, "000020-000030-beaconblocks.idx"},
+		{func(d datadir.Dirs) string { return d.SnapCaplin }, "000020-000030-ActiveValidatorIndicies.seg"},
+		{func(d datadir.Dirs) string { return d.SnapCaplin }, "000020-000030-ActiveValidatorIndicies.idx"},
+	}
+	cases := []struct {
+		name, prefix string
+		keepCurrent  bool
+		wantErr      bool
+	}{
+		{"unsupported", "v0.9-", false, true},
+		{"legacy", "v1-", false, false},
+		{"legacy beside current", "v1-", true, true},
+	}
+	for _, f := range files {
+		for _, tc := range cases {
+			t.Run(tc.name+" "+f.name, func(t *testing.T) {
+				dirs := datadir.New(t.TempDir())
+				touchFiles(t, dirs, []snapRange{{0, 10}, {10, 20}, {20, 30}})
+				if !tc.keepCurrent {
+					delFile(t, f.folder(dirs), "v1.0-"+f.name)
+				}
+				touchFile(t, f.folder(dirs), tc.prefix+f.name)
+				err := checkIfCaplinSnapshotsPublishable(dirs, false, nil)
+				if tc.wantErr {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	}
+}
+
 type snapRange struct {
 	fromStep, toStep uint64
 }

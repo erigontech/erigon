@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	networkgossip "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
+	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -372,7 +374,57 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter,
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
-	if err := a.forkchoiceStore.OnAttesterSlashing(req, false); err != nil && !errors.Is(err, forkchoice.ErrIgnore) {
+	a.submitAttesterSlashing(w, r, req)
+}
+
+func (a *ApiHandler) PostEthV2BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) {
+	version, err := clparams.StringToClVersion(r.Header.Get("Eth-Consensus-Version"))
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid Eth-Consensus-Version header: %w", err)).WriteTo(w)
+		return
+	}
+	const jsonOverhead = 4 << 10
+	const bytesPerIndexPair = 2 * 32
+	maxIndices := a.beaconChainCfg.MaxValidatorsPerCommittee
+	committees := uint64(1)
+	if version >= clparams.ElectraVersion {
+		committees = a.beaconChainCfg.MaxCommitteesPerSlot
+	}
+	maxSupportedIndices := min(uint64(math.MaxInt), uint64((math.MaxInt64-jsonOverhead)/bytesPerIndexPair))
+	if committees != 0 && maxIndices > maxSupportedIndices/committees {
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("attester slashing limits exceed supported range")).WriteTo(w)
+		return
+	}
+	maxIndices *= committees
+	bodyLimit := jsonOverhead + int64(maxIndices)*bytesPerIndexPair
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, bodyLimit))
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	req := cltypes.NewAttesterSlashing(version)
+	req.Attestation_1.AttestingIndices.SetCap(int(maxIndices))
+	req.Attestation_2.AttestingIndices.SetCap(int(maxIndices))
+	if err := json.Unmarshal(body, req); err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	if req.Attestation_1.AttestingIndices.Length() > int(maxIndices) || req.Attestation_2.AttestingIndices.Length() > int(maxIndices) {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attesting indices exceed limit")).WriteTo(w)
+		return
+	}
+	a.submitAttesterSlashing(w, r, req)
+}
+
+func (a *ApiHandler) submitAttesterSlashing(w http.ResponseWriter, r *http.Request, req *cltypes.AttesterSlashing) {
+	if err := a.forkchoiceStore.OnAttesterSlashing(req, false); errors.Is(err, forkchoice.ErrIgnore) {
+		pooled, ok := a.operationsPool.AttesterSlashingsPool.Get(pool.ComputeKeyForAttesterSlashing(req))
+		if !ok {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		req = pooled
+	} else if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}

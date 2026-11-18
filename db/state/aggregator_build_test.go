@@ -578,10 +578,10 @@ func TestAggregatorBuildRespectsSharedCeiling(t *testing.T) {
 			require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
 				at := agg.BeginFilesRo()
 				defer at.Close()
-				// An unindexed state file lowers the state minimum, but other entities
-				// remain visible up to the shared ceiling.
+				// Missing accessors cut every readable list, but recovery must still
+				// respect the shared ceiling of the files on disk.
 				require.Equal(t, test.visibleStateSteps*stepSize, at.TxNumsInFiles(kv.StateDomains...))
-				require.Equal(t, 3*stepSize, at.TxNumsInFiles(kv.CodeDomain))
+				require.Equal(t, 3*stepSize, at.visible.ceilingTxNum)
 				plan, err := at.planFileBuild(tx)
 				require.NoError(t, err)
 				require.Equal(t, kv.Step(test.visibleStateSteps), plan.firstStep)
