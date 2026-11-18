@@ -174,7 +174,7 @@ func applyDeltas(parts deltaParts, putBranch func(key, data, prev []byte) error,
 	return nil
 }
 
-func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *deltaParts) ([32]byte, error) {
+func (g graph) materialize(runCtx context.Context, ctx commitment.PatriciaContext, n, root *node, acc *deltaParts) ([32]byte, error) {
 	g.dropDead(n, n.dead, acc)
 	n.dead = nil
 	for m := n.childMask &^ n.leafMask; m != 0; m &= m - 1 {
@@ -186,7 +186,7 @@ func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *d
 			}
 			continue
 		}
-		childHash, err := g.materialize(ctx, child, root, acc)
+		childHash, err := g.materialize(runCtx, ctx, child, root, acc)
 		if err != nil {
 			return [32]byte{}, err
 		}
@@ -205,6 +205,9 @@ func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *d
 	key := nodeKey(g.plane, g.addrHash, path, nil)
 	prev := n.raw
 	if !n.loaded {
+		if err := runCtx.Err(); err != nil {
+			return [32]byte{}, err
+		}
 		if prev, _, err = branchOwned(ctx, key); err != nil {
 			return [32]byte{}, err
 		}
@@ -304,7 +307,7 @@ func (p foldPlan) runEach(caller commitment.PatriciaContext, n int, nibAt func(k
 	return nil
 }
 
-func (g graph) materializeRootChildren(ctx commitment.PatriciaContext, root *node, plan foldPlan) ([]deltaParts, error) {
+func (g graph) materializeRootChildren(runCtx context.Context, ctx commitment.PatriciaContext, root *node, plan foldPlan) ([]deltaParts, error) {
 	nibs := make([]int, 0, 16)
 	for nib := range 16 {
 		if root.child(nib) != nil {
@@ -318,7 +321,7 @@ func (g graph) materializeRootChildren(ctx commitment.PatriciaContext, root *nod
 	accs := make([]deltaParts, len(nibs))
 	hashes := make([][32]byte, len(nibs))
 	err := plan.run(ctx, nibs, func(workerCtx commitment.PatriciaContext, k, nib int) error {
-		hash, err := g.materialize(workerCtx, root.child(nib), root, &accs[k])
+		hash, err := g.materialize(runCtx, workerCtx, root.child(nib), root, &accs[k])
 		hashes[k] = hash
 		return err
 	})
@@ -331,7 +334,7 @@ func (g graph) materializeRootChildren(ctx commitment.PatriciaContext, root *nod
 	return accs, nil
 }
 
-func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan foldPlan) (deltaParts, [32]byte, error) {
+func (g graph) persistGraph(runCtx context.Context, ctx commitment.PatriciaContext, root *node, plan foldPlan) (deltaParts, [32]byte, error) {
 	if err := promoteRootExtension(root); err != nil {
 		return nil, [32]byte{}, err
 	}
@@ -341,11 +344,11 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan fol
 	var accs []deltaParts
 	if plan.parallel() && len(root.path) == 0 {
 		var err error
-		if accs, err = g.materializeRootChildren(ctx, root, plan); err != nil {
+		if accs, err = g.materializeRootChildren(runCtx, ctx, root, plan); err != nil {
 			return nil, [32]byte{}, err
 		}
 	}
-	hash, err := g.materialize(ctx, root, root, &acc)
+	hash, err := g.materialize(runCtx, ctx, root, root, &acc)
 	if err != nil {
 		return nil, [32]byte{}, err
 	}

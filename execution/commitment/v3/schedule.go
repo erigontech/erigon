@@ -196,7 +196,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	var groupHashes [16][32]byte
 	var groupParts [16]deltaParts
 	var pending [16]*pendingRemoval
-	pipeline := func(ctx commitment.PatriciaContext, nib int, group []int) error {
+	pipeline := func(workerCtx commitment.PatriciaContext, nib int, group []int) error {
 		child := root.child(nib)
 		if len(root.path) != 0 || child == nil || len(child.path) != 1 {
 			return nil
@@ -224,7 +224,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 				}
 			}
 		}
-		hash, err := g.materialize(ctx, child, root, &groupParts[nib])
+		hash, err := g.materialize(ctx, workerCtx, child, root, &groupParts[nib])
 		if err != nil {
 			return err
 		}
@@ -300,7 +300,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			return [32]byte{}, nil, err
 		}
 	}
-	accountParts, hash, err := g.persistGraph(rawCtx, root, accountFold)
+	accountParts, hash, err := g.persistGraph(ctx, rawCtx, root, accountFold)
 	if err != nil {
 		return [32]byte{}, nil, err
 	}

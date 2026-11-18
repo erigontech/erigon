@@ -193,7 +193,7 @@ func runStorageTaskWithPlan(runCtx context.Context, ctx commitment.PatriciaConte
 		}
 	}
 
-	parts, hash, err := g.persistGraph(ctx, root, plan)
+	parts, hash, err := g.persistGraph(runCtx, ctx, root, plan)
 	return hash, parts, err
 }
 
@@ -208,7 +208,7 @@ func (g graph) rebuildStorage(ctx commitment.PatriciaContext, entries []storageE
 			return [32]byte{}, nil, err
 		}
 	}
-	parts, hash, err := g.persistGraph(wipedContext{ctx}, root, foldPlan{})
+	parts, hash, err := g.persistGraph(context.Background(), wipedContext{ctx}, root, foldPlan{})
 	if err != nil {
 		return [32]byte{}, nil, err
 	}
