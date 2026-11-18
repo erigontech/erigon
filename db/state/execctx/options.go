@@ -68,7 +68,8 @@ func WithParaTrieDB(db kv.TemporalRoDB) SharedDomainOption {
 
 // WithSequentialCommitment replaces the experimental parallel trie with the
 // sequential HexPatriciaHashed trie — for one-shot / empty-DB paths
-// (e.g. genesis) that wire no trie-context factory for the parallel trie.
+// (e.g. genesis) that wire no trie-context factory for the parallel trie. It
+// swaps only the parallel trie and leaves commitment v3 untouched.
 func WithSequentialCommitment() SharedDomainOption {
 	return func(o *sharedDomainOptions) {
 		if o.trieCfg.Variant == commitment.VariantParallelHexPatricia {

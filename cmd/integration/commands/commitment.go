@@ -267,7 +267,6 @@ func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize ui
 	return nil
 }
 
-// integration commitment rebuild
 var cmdCommitmentVerify = &cobra.Command{
 	Use:   "verify",
 	Short: "Fold the v3 commitment records to the stored state root, at the latest state and at --asof txNums; fails on orphan records",
