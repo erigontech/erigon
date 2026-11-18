@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -45,7 +46,11 @@ import (
 
 var preExecOn = dbg.EnvBool("V3_PREEXEC", false)
 
-const preExecWorkers = 4
+const (
+	preExecWorkers  = 4
+	preExecTxGas    = 1 << 24
+	preExecBlockGas = 1 << 28
+)
 
 type preExecCfg struct {
 	config    *chain.Config
@@ -59,9 +64,15 @@ func (bra *BlockReadAheader) SetPreExec(config *chain.Config, engine rules.Engin
 
 func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header *types.Header, txns types.Transactions) error {
 	pe := bra.preExec
+	if header.ExcessBlobGas != nil {
+		if _, err := misc.GetBlobGasPrice(pe.config, *header.ExcessBlobGas, header.Time); err != nil {
+			return err
+		}
+	}
 	start := time.Now()
 	signer := types.MakeSigner(pe.config, header.Number.Uint64(), header.Time)
-	var next, paths atomic.Int64
+	var next, paths, gasLeft atomic.Int64
+	gasLeft.Store(preExecBlockGas)
 	wg, ctx := errgroup.WithContext(ctx)
 	for w := range min(preExecWorkers, secp256k1.NumOfContexts(), len(txns)) {
 		cryptoContext := secp256k1.ContextForThread(w)
@@ -98,7 +109,11 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 				if err != nil {
 					continue
 				}
-				pe.run(blockCtx, chainRules, from, txns[i], reader, toucher)
+				gas := min(txns[i].GetGasLimit(), preExecTxGas)
+				if gasLeft.Add(-int64(gas)) < 0 {
+					return nil
+				}
+				pe.run(ctx, blockCtx, chainRules, from, txns[i], gas, reader, toucher)
 			}
 			return nil
 		})
@@ -108,12 +123,12 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 	return err
 }
 
-func (pe *preExecCfg) run(blockCtx evmtypes.BlockContext, chainRules *chain.Rules, from accounts.Address, txn types.Transaction, reader state.StateReader, toucher *commitmentToucher) {
+func (pe *preExecCfg) run(ctx context.Context, blockCtx evmtypes.BlockContext, chainRules *chain.Rules, from accounts.Address, txn types.Transaction, gas uint64, reader state.StateReader, toucher *commitmentToucher) {
 	to := accounts.NilAddress
 	if t := txn.GetTo(); t != nil {
 		to = accounts.InternAddress(*t)
 	}
-	msg := types.NewMessage(from, to, txn.GetNonce(), txn.GetValue(), txn.GetGasLimit(), txn.GetFeeCap(), txn.GetFeeCap(),
+	msg := types.NewMessage(from, to, txn.GetNonce(), txn.GetValue(), gas, txn.GetFeeCap(), txn.GetFeeCap(),
 		txn.GetTipCap(), txn.GetData(), txn.GetAccessList(), false, false, true, false, nil)
 	if h := txn.GetBlobHashes(); len(h) > 0 {
 		msg.SetBlobVersionedHashes(h)
@@ -125,8 +140,9 @@ func (pe *preExecCfg) run(blockCtx evmtypes.BlockContext, chainRules *chain.Rule
 	defer state.ReleasePooled(ibs)
 	txCtx := protocol.NewEVMTxContext(msg)
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, pe.config, vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true})
+	defer context.AfterFunc(ctx, evm.Cancel)()
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-	if _, err := protocol.ApplyMessage(evm, msg, gp, true, true, pe.engine); err == nil {
+	if _, err := protocol.ApplyMessage(evm, msg, gp, true, true, pe.engine); err == nil && ctx.Err() == nil {
 		_ = ibs.FinalizeTx(chainRules, toucher)
 	}
 }
