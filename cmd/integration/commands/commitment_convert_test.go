@@ -274,13 +274,9 @@ func TestCommitmentConvertRestoreRetryAfterFilesLeavesExecutionUnchanged(t *test
 		require.NoError(t, os.Rename(f, filepath.Join(backupDir, filepath.Base(f))))
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-2.kv"), nil, 0o644))
-	restoredV3, err := state.RestoreCommitmentFiles(t.Context(), dirs, log.New())
-	require.NoError(t, err)
-	require.True(t, restoredV3)
-	require.NoDirExists(t, backupDir)
-
 	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
 	require.NoError(t, commitmentRestore(t.Context(), log.New()))
+	require.NoDirExists(t, backupDir)
 
 	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
 	defer rawDB.Close()
