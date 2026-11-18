@@ -68,8 +68,21 @@ func TestAncestorReturnsTheParentPayloadStatusOfTheAncestor(t *testing.T) {
 	require.Equal(t, ForkChoiceNode{Root: roots[2], PayloadStatus: cltypes.PayloadStatusEmpty}, store.Ancestor(roots[5], 12))
 	require.Equal(t, ForkChoiceNode{Root: roots[1], PayloadStatus: cltypes.PayloadStatusFull}, store.Ancestor(roots[5], 11))
 	require.Equal(t, ForkChoiceNode{Root: roots[3], PayloadStatus: cltypes.PayloadStatusFull}, store.getAncestor(tip, 13))
-	require.Equal(t, tip, store.getAncestor(tip, 15), "a node at or below the slot is its own ancestor")
-	require.Equal(t, ForkChoiceNode{PayloadStatus: cltypes.PayloadStatusPending}, store.Ancestor(roots[5], 9), "the walk runs past the first stored block")
+}
+
+func TestAncestorOfANodeAtOrBelowTheSlotIsTheNode(t *testing.T) {
+	store, _, roots := ancestorChain(clparams.GloasVersion, 6)
+	tip := ForkChoiceNode{Root: roots[5], PayloadStatus: cltypes.PayloadStatusFull}
+	require.Equal(t, tip, store.getAncestor(tip, 15))
+}
+
+func TestAncestorBeforeTheFirstStoredBlockIsUnknown(t *testing.T) {
+	store, _, roots := ancestorChain(clparams.GloasVersion, 6)
+	require.Equal(t, ForkChoiceNode{PayloadStatus: cltypes.PayloadStatusPending}, store.Ancestor(roots[5], 9))
+}
+
+func TestAncestorOfAnUnknownRootIsUnknown(t *testing.T) {
+	store, _, _ := ancestorChain(clparams.GloasVersion, 6)
 	require.Equal(t, ForkChoiceNode{PayloadStatus: cltypes.PayloadStatusPending}, store.Ancestor(common.Hash{0x99}, 9))
 }
 
@@ -80,8 +93,8 @@ func TestAncestorBeforeGloasHasAnEmptyPayloadStatus(t *testing.T) {
 
 func TestAncestorReadsTwoBlocksWhateverTheDistance(t *testing.T) {
 	store, graph, roots := ancestorChain(clparams.GloasVersion, 33)
-	require.Equal(t, roots[0], store.Ancestor(roots[32], 10).Root)
-	require.LessOrEqual(t, graph.getBlockCalls, 2, "only the returned ancestor and its child are read as blocks")
+	require.Equal(t, ForkChoiceNode{Root: roots[0], PayloadStatus: cltypes.PayloadStatusFull}, store.Ancestor(roots[32], 10))
+	require.Equal(t, 2, graph.getBlockCalls, "only the returned ancestor and its child are read as blocks")
 }
 
 func TestAncestorReturnsTheCheckpointAnchor(t *testing.T) {
@@ -103,39 +116,24 @@ func TestAncestorWithoutTheChildBlockIsUnknown(t *testing.T) {
 	require.Equal(t, ForkChoiceNode{PayloadStatus: cltypes.PayloadStatusPending}, store.Ancestor(roots[5], 12))
 }
 
-// pruningForkGraph hides a block and its header once another block has been read, as a concurrent Prune can.
+// pruningForkGraph prunes a block and its header when that block is read, as a concurrent Prune can.
 type pruningForkGraph struct {
 	*getFinalizedExecutionHashForkGraph
-	trigger, hide common.Hash
-	hidden        bool
+	prune common.Hash
 }
 
 func (g *pruningForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
-	if g.hidden && root == g.hide {
-		return nil, false
+	if root == g.prune {
+		delete(g.blocks, root)
+		delete(g.headers, root)
 	}
-	block, ok := g.getFinalizedExecutionHashForkGraph.GetBlock(root)
-	if root == g.trigger {
-		g.hidden = true
-	}
-	return block, ok
+	return g.getFinalizedExecutionHashForkGraph.GetBlock(root)
 }
 
-func (g *pruningForkGraph) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
-	if g.hidden && root == g.hide {
-		return nil, false
-	}
-	return g.getFinalizedExecutionHashForkGraph.GetHeader(root)
-}
-
-// A prune between reading the ancestor's header and its bid gives the result before or after the prune, never a mix.
+// A prune while the ancestor's bid is read gives the result after the prune, not the ancestor with a wrong status.
 func TestAncestorIsNotMixedByAConcurrentPrune(t *testing.T) {
 	store, graph, roots := ancestorChain(clparams.GloasVersion, 4)
-	store.forkGraph = &pruningForkGraph{getFinalizedExecutionHashForkGraph: graph, trigger: roots[2], hide: roots[1]}
+	store.forkGraph = &pruningForkGraph{getFinalizedExecutionHashForkGraph: graph, prune: roots[1]}
 
-	got := store.Ancestor(roots[3], 11)
-	require.Contains(t, []ForkChoiceNode{
-		{Root: roots[1], PayloadStatus: cltypes.PayloadStatusFull},
-		{PayloadStatus: cltypes.PayloadStatusPending},
-	}, got)
+	require.Equal(t, ForkChoiceNode{PayloadStatus: cltypes.PayloadStatusPending}, store.Ancestor(roots[3], 11))
 }
