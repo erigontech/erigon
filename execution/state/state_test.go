@@ -422,7 +422,7 @@ func TestCodeResolve(t *testing.T) {
 	code, err := state1.GetCode(stateobjaddr0)
 	require.NoError(t, err)
 	require.Equal(t, del, code)
-	resolved, err := state1.ResolveCode(stateobjaddr0)
+	resolved, err := state1.ResolveCode(stateobjaddr0, true)
 	require.NoError(t, err)
 	require.Equal(t, target, resolved.Bytes)
 }

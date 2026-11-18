@@ -132,7 +132,7 @@ func TestEIP8246_RecreationSeededByFieldCellsReadsAsAlive(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), nonce)
 
-	resolved, err := ibs.ResolveCode(addr)
+	resolved, err := ibs.ResolveCode(addr, true)
 	require.NoError(t, err)
 	require.Equal(t, code, resolved.Bytes)
 	require.NoError(t, ibs.TouchAccount(addr))
