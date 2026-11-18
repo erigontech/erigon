@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
@@ -105,6 +106,9 @@ func (bt Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) 
 }
 
 func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64, toBlock uint64) error {
+	if statecfg.ExperimentalCommitmentV3 {
+		return fmt.Errorf("not supported on commitment v3")
+	}
 	start := time.Now()
 	bt.logger.Info("starting commitment backtest", "fromBlock", fromBlock, "toBlock", toBlock)
 	if fromBlock > toBlock || fromBlock == 0 {

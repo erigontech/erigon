@@ -48,6 +48,16 @@ import (
 
 var integrationRoot = sync.OnceValue(RootCommand)
 
+func TestCommitmentBranchRejectsCommitmentV3(t *testing.T) {
+	previous := statecfg.ExperimentalCommitmentV3
+	statecfg.ExperimentalCommitmentV3 = true
+	t.Cleanup(func() { statecfg.ExperimentalCommitmentV3 = previous })
+
+	root := integrationRoot()
+	root.SetArgs([]string{"--log.dir.disable", "commitment", "branch"})
+	require.ErrorContains(t, root.ExecuteContext(t.Context()), "not supported on commitment v3")
+}
+
 func TestCommitmentConvertReturnsErrors(t *testing.T) {
 	enabled := statecfg.ExperimentalCommitmentV3
 	t.Cleanup(func() {
