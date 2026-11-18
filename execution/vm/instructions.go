@@ -1057,6 +1057,10 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		offset, size = o.Uint64(), sz.Uint64()
 		input        = scope.Memory.GetPtr(offset, size)
 	)
+	if scope.create.overridden {
+		input = scope.create.initCode
+		scope.create.initCode = nil
+	}
 	return execCreate(pc, evm, scope, value, input, nil)
 }
 
@@ -1081,7 +1085,7 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 		input        = scope.create.initCode
 	)
 	scope.create.initCode = nil
-	if !evm.chainRules.IsAmsterdam {
+	if !evm.chainRules.IsAmsterdam && !scope.create.overridden {
 		input = scope.Memory.GetPtr(offset, size)
 	}
 	return execCreate(pc, evm, scope, endowment, input, &salt)
@@ -1098,7 +1102,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	var preparation createPreparation
 	var suberr error
 	switch {
-	case evm.chainRules.IsAmsterdam:
+	case evm.chainRules.IsAmsterdam || scope.create.overridden:
 		address = scope.create.address
 		codeAndHash.hash = scope.create.codeHash
 		preparation = scope.create.preparation

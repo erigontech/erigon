@@ -51,6 +51,10 @@ type Config struct {
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
+
+	// OverrideInitCode replaces constructor code for RPC replay after the deployment
+	// address is derived, so CREATE2 keeps the address of the original initcode.
+	OverrideInitCode func(address accounts.Address, initCode []byte) []byte
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {

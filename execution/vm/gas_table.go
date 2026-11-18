@@ -375,7 +375,7 @@ func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	if overflow {
 		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
-	return gasCreateAccount(evm, callContext, availableGas, gas, false), nil
+	return gasCreateAccount(evm, callContext, availableGas, gas, false)
 }
 
 func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGasCost, err error) {
@@ -400,7 +400,7 @@ func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 	if overflow {
 		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
-	return gasCreateAccount(evm, callContext, availableGas, gas, true), nil
+	return gasCreateAccount(evm, callContext, availableGas, gas, true)
 }
 
 type createGasPreparation struct {
@@ -409,16 +409,18 @@ type createGasPreparation struct {
 	codeHash    accounts.CodeHash
 	preparation createPreparation
 	err         error
+	overridden  bool
 }
 
-func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, gas mdgas.MdGasCost, create2 bool) mdgas.MdGasCost {
-	if !evm.chainRules.IsAmsterdam || availableGas.Execution < gas.Execution {
-		return gas
+func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, gas mdgas.MdGasCost, create2 bool) (mdgas.MdGasCost, error) {
+	override := evm.config.OverrideInitCode
+	if override == nil && (!evm.chainRules.IsAmsterdam || availableGas.Execution < gas.Execution) {
+		return gas, nil
 	}
 	prepared := &callContext.create
-	*prepared = createGasPreparation{}
+	*prepared = createGasPreparation{overridden: override != nil}
 	caller := callContext.Contract.Address()
-	if create2 {
+	if create2 || override != nil {
 		offset := callContext.Stack.back(1).Uint64()
 		size := callContext.Stack.back(2).Uint64()
 		if size > 0 {
@@ -426,6 +428,8 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 			memory := callContext.Memory.Data()
 			copy(prepared.initCode, memory[min(offset, uint64(len(memory))):])
 		}
+	}
+	if create2 {
 		input := codeAndHash{code: prepared.initCode}
 		prepared.codeHash = input.Hash()
 		prepared.address = accounts.InternAddress(types.CreateAddress2(caller.Value(), callContext.Stack.back(3).Bytes32(), prepared.codeHash))
@@ -433,15 +437,33 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 		nonce, err := evm.intraBlockState.GetNonce(caller)
 		if err != nil {
 			prepared.err = fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-			return gas
+			return gas, nil
 		}
 		prepared.address = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
+	}
+	if override != nil {
+		prepared.initCode = override(prepared.address, prepared.initCode)
+		prepared.codeHash = accounts.NilCodeHash
+		if err := CheckMaxInitCodeSize(uint64(len(prepared.initCode)), true, evm.chainRules.IsAmsterdam); err != nil {
+			return mdgas.MdGasCost{}, err
+		}
+		// Memory and CREATE2 hashing still use the original input. Only the
+		// initcode-analysis charge follows the replacement.
+		gas.Execution -= params.InitCodeWordGas * ToWordSize(callContext.Stack.back(2).Uint64())
+		var overflow bool
+		gas.Execution, overflow = math.SafeAdd(gas.Execution, params.InitCodeWordGas*ToWordSize(uint64(len(prepared.initCode))))
+		if overflow {
+			return mdgas.MdGasCost{}, ErrGasUintOverflow
+		}
+	}
+	if !evm.chainRules.IsAmsterdam || availableGas.Execution < gas.Execution {
+		return gas, nil
 	}
 	prepared.preparation, prepared.err = evm.prepareCreate(caller, prepared.address, *callContext.Stack.peek(), true, false, true)
 	if prepared.err == nil && prepared.preparation.chargeNewAccount {
 		gas.State = params.StateGasNewAccount
 	}
-	return gas
+	return gas, nil
 }
 
 func gasExpFrontier(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
