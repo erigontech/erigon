@@ -232,7 +232,7 @@ Examples:
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			if err != nil {
 				logger.Error("Failed to create shared domains", "error", err)
-				return
+				return nil
 			}
 			defer sd.Close()
 			reader := commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{})
