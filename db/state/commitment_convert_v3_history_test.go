@@ -109,6 +109,24 @@ func testDbAggregatorWithCommitmentHistory(t *testing.T, stepSize uint64, steps 
 	return db, agg, roots
 }
 
+func TestConvertCommitmentFiles_V3HistoryAndDomainSeparately(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg, roots := testDbAggregatorWithCommitmentHistory(t, 4, 3)
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoDomain: true})
+	history, err := filepath.Glob(filepath.Join(agg.Dirs().SnapHistory, "*-commitment.*.v"))
+	require.NoError(t, err)
+	require.NotEmpty(t, history)
+	for _, file := range history {
+		require.Contains(t, filepath.Base(file), "v3.0-")
+	}
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true})
+	c, err := state.FoldCommitmentV3(t.Context(), agg, ^uint64(0))
+	require.NoError(t, err)
+	require.Equal(t, roots[c.TxNum], c.Root)
+}
+
 func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousSchema := statecfg.Schema
@@ -304,6 +322,10 @@ func TestConvertCommitmentFiles_V3HistoryRefusesPrunedStart(t *testing.T) {
 	require.ErrorContains(t, err, "commitment history below step")
 	require.ErrorContains(t, err, "no commitment file was replaced; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes --no-history` with ERIGON_COMMITMENT_V3=true")
 	require.NoDirExists(t, filepath.Join(dirs.Snap, "backup"))
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true})
+	_, err = state.FoldCommitmentV3(t.Context(), agg, ^uint64(0))
+	require.NoError(t, err)
 }
 
 type commitmentHistoryPair struct {
