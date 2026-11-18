@@ -108,3 +108,42 @@ func TestSetHeadFailedCommitPreservesPendingNotifications(t *testing.T) {
 	require.Len(t, accum.Accumulator.Changes(), 1, "only changes committed before SetHead may remain pending")
 	require.Equal(t, want, accum.Accumulator.Changes()[0].ToProto())
 }
+
+func TestSetHeadClearsSafeAndFinalizedAboveTarget(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	logger := log.New()
+	target := &types.Header{Number: *uint256.NewInt(1)}
+	finalized := &types.Header{Number: *uint256.NewInt(2), ParentHash: target.Hash()}
+	head := &types.Header{Number: *uint256.NewInt(3), ParentHash: finalized.Hash()}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, header := range []*types.Header{target, finalized, head} {
+			require.NoError(t, rawdb.WriteHeader(tx, header))
+			require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()))
+		}
+		rawdb.WriteHeadBlockHash(tx, head.Hash())
+		rawdb.WriteForkchoiceHead(tx, head.Hash())
+		rawdb.WriteForkchoiceSafe(tx, head.Hash())
+		rawdb.WriteForkchoiceFinalized(tx, finalized.Hash())
+		return stages.SaveStageProgress(tx, stages.Headers, head.Number.Uint64())
+	}))
+	sync := stagedsync.New(ethconfig.Sync{}, []*stagedsync.Stage{{
+		ID: stages.Headers,
+		Unwind: func(u *stagedsync.UnwindState, _ *stagedsync.StageState, _ *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
+			return u.Done(tx)
+		},
+	}}, []stages.SyncStage{stages.Headers}, nil, logger, stages.ModeApplyingBlocks)
+	module := &ExecModule{
+		db:               db,
+		blockReader:      setHeadBlockReader{},
+		semaphore:        semaphore.NewWeighted(1),
+		pipelineExecutor: &PipelineExecutor{sync: sync},
+		logger:           logger,
+	}
+
+	require.NoError(t, module.SetHead(t.Context(), target.Number.Uint64()))
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		require.Equal(t, common.Hash{}, rawdb.ReadForkchoiceSafe(tx))
+		require.Equal(t, common.Hash{}, rawdb.ReadForkchoiceFinalized(tx))
+		return nil
+	}))
+}

@@ -154,6 +154,12 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("failed to write head header hash: %w", err)
 	}
 	rawdb.WriteForkchoiceHead(tx, targetHash)
+	if safeNum := rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceSafe(tx)); safeNum != nil && *safeNum > targetBlock {
+		rawdb.WriteForkchoiceSafe(tx, common.Hash{})
+	}
+	if rawdb.ReadForkchoiceFinalizedNum(tx) > targetBlock {
+		rawdb.WriteForkchoiceFinalized(tx, common.Hash{})
+	}
 
 	// Update stage progress for headers and bodies
 	if err := stages.SaveStageProgress(tx, stages.Headers, targetBlock); err != nil {
