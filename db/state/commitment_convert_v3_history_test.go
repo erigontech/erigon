@@ -223,6 +223,32 @@ func TestConvertCommitmentFiles_V3History(t *testing.T) {
 	require.Greater(t, checked, 90)
 }
 
+func TestConvertCommitmentFiles_V3HistoryThenDomains(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 4)
+	dirs := agg.Dirs()
+	requireCommitmentMajor := func(dir, glob, prefix string) {
+		t.Helper()
+		files, err := filepath.Glob(filepath.Join(dir, glob))
+		require.NoError(t, err)
+		require.NotEmpty(t, files)
+		for _, f := range files {
+			require.Truef(t, strings.HasPrefix(filepath.Base(f), prefix), "%s is not %s", filepath.Base(f), prefix)
+		}
+	}
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoDomain: true})
+	requireCommitmentMajor(dirs.SnapHistory, "*-commitment.*.v", "v3.")
+	requireCommitmentMajor(dirs.SnapDomain, "*-commitment.*.kv", "v2.")
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true})
+	requireCommitmentMajor(dirs.SnapHistory, "*-commitment.*.v", "v3.")
+	requireCommitmentMajor(dirs.SnapDomain, "*-commitment.*.kv", "v3.")
+
+	_, err := state.FoldCommitmentV3(t.Context(), agg, ^uint64(0))
+	require.NoError(t, err)
+}
+
 func TestConvertCommitmentFiles_V3HistoryRejectsAsOfOrphans(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 7, 2)
