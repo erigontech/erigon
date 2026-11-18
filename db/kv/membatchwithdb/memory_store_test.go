@@ -931,3 +931,95 @@ func TestMemStore_DeleteCurrentAfterDelete(t *testing.T) {
 		})
 	}
 }
+
+// A NoLocks tree copy must stay readable while the original keeps changing.
+func TestMemStore_TreeCopyIsSafeAgainstWriter(t *testing.T) {
+	tree := newMemTable(false).tree
+	for i := range 1000 {
+		tree.Set(memEntry{k: fmt.Appendf(nil, "k%05d", i), v: []byte("old")})
+	}
+	clone := tree.Copy()
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for i := range 5000 {
+			k := fmt.Appendf(nil, "k%05d", i%2000)
+			if i%3 == 0 {
+				tree.Delete(memEntry{k: k})
+			} else {
+				tree.Set(memEntry{k: k, v: []byte("new")})
+			}
+		}
+	})
+	for range 50 {
+		n := 0
+		iter := clone.Iter()
+		for ok := iter.First(); ok; ok = iter.Next() {
+			require.Equal(t, []byte("old"), iter.Item().v)
+			n++
+		}
+		iter.Release()
+		require.Equal(t, 1000, n)
+		_, found := clone.Get(memEntry{k: []byte("k00999")})
+		require.True(t, found)
+	}
+	wg.Wait()
+}
+
+func TestMemStore_ReadsSkipTombstones(t *testing.T) {
+	s := newMemStore()
+	for _, k := range []string{"A", "B", "C"} {
+		require.NoError(t, s.Put("test", []byte(k), []byte("1")))
+	}
+	require.NoError(t, s.Delete("test", []byte("B")))
+	require.NoError(t, s.Delete("test", []byte("D")))
+
+	has, err := s.Has("test", []byte("B"))
+	require.NoError(t, err)
+	require.False(t, has)
+	n, err := s.Count("test")
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), n)
+	var keys []string
+	require.NoError(t, s.ForEach("test", nil, func(k, _ []byte) error {
+		keys = append(keys, string(k))
+		return nil
+	}))
+	require.Equal(t, []string{"A", "C"}, keys)
+	it, err := s.Range("test", nil, nil, false, -1)
+	require.NoError(t, err)
+	keys = keys[:0]
+	for it.HasNext() {
+		k, _, err := it.Next()
+		require.NoError(t, err)
+		keys = append(keys, string(k))
+	}
+	require.Equal(t, []string{"C", "A"}, keys)
+	c := s.newCursor("test")
+	defer c.Close()
+	k, _, err := c.Last()
+	require.NoError(t, err)
+	require.Equal(t, []byte("C"), k)
+	require.True(t, s.isHidden("test", []byte("B"), nil))
+	require.False(t, s.isHidden("test", []byte("A"), nil))
+}
+
+func TestMemStore_KeyTombstoneDoesNotHideEmptyValue(t *testing.T) {
+	s := newMemStore()
+	table, key := kv.TblAccountVals, []byte("k")
+	require.NoError(t, s.Delete(table, key))
+	require.NoError(t, s.Put(table, key, []byte{}))
+	c := s.newCursor(table)
+	defer c.Close()
+	k, v, err := c.SeekExact(key)
+	require.NoError(t, err)
+	require.Equal(t, key, k)
+	require.Empty(t, v)
+	require.True(t, s.isHidden(table, key, []byte("db")))
+
+	require.NoError(t, c.DeleteExact(key, []byte{}))
+	k, _, err = c.First()
+	require.NoError(t, err)
+	require.Nil(t, k)
+	_, rows := s.tombstones(table)
+	require.Equal(t, []entry{{k: key}, {k: key, v: []byte{}}}, rows)
+}
