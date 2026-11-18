@@ -1512,7 +1512,7 @@ To run Erigon with RPC Daemon, TxPool, and other components in a single process 
 
 - Based on the [pruning mode](https://docs.erigon.tech/fundamentals/pruning-modes) you want to run you can add `--prune.mode=archive` to run an archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
 
-- `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use [RPC Service](https://docs.erigon.tech/interacting-with-erigon) and e.g. be able to connect your [wallet](https://docs.erigon.tech/fundamentals/web3-wallet).
+- `--http.addr=0.0.0.0 --http.api=eth,web3,net,trace,txpool` to use [RPC Service](https://docs.erigon.tech/interacting-with-erigon) and e.g. be able to connect your [wallet](https://docs.erigon.tech/fundamentals/web3-wallet).
 
 - `--torrent.download.rate` sets the torrent download rate cap. The default is `512mb` (megabytes per second). During initial sync Erigon will use the full allowance — on a dedicated machine this is fine, but if you share the machine with other work you may want to lower it (e.g. `--torrent.download.rate=128mb`). Set `--torrent.download.rate=Inf` to remove the limit entirely.
 
@@ -4760,13 +4760,13 @@ Whatever network you are running, it's easy to connect your Erigon node to your 
 For Erigon to provide access to wallet functionalities it is necessary to enable RPC by adding the flags
 
 ```bash
---http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool
+--http.addr="0.0.0.0" --http.api=eth,web3,net,trace,txpool
 ```
 
 For example:
 
 ```bash
-/build/bin/erigon --http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool
+/build/bin/erigon --http.addr="0.0.0.0" --http.api=eth,web3,net,trace,txpool
 ```
 
 ## Metamask
