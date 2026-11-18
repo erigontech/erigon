@@ -274,9 +274,9 @@ type SharedDomains struct {
 	visibleEnds domainVisibleEndMemo
 
 	// changesetMu serializes the exec loop's install of a block's changeset
-	// accumulator against the calculator's swap of the commitment writer's
-	// diff. Writers other than commitment are never redirected, so DomainPut
-	// and DomainDel do not take it — see SwapCommitmentDiffLocked.
+	// accumulator against a pending-update flush that has no saved changeset
+	// and writes into the live commitment diff. DomainPut and DomainDel do not
+	// take it.
 	changesetMu sync.Mutex
 
 	// branchCache is the aggregator-scoped commitment cache consulted after local
@@ -502,9 +502,7 @@ func (sd *SharedDomains) FlushPendingUpdates(tx kv.TemporalTx) error {
 }
 
 // FlushPendingUpdatesLocked is the variant for callers that already hold
-// changesetMu via LockChangesetAccumulator (the parallel calculator's
-// per-block compute window). The public FlushPendingUpdates above
-// acquires the lock itself.
+// changesetMu via LockChangesetAccumulator.
 func (sd *SharedDomains) FlushPendingUpdatesLocked(tx kv.TemporalTx) error {
 	return sd.flushPendingUpdates(tx, true)
 }
@@ -520,11 +518,15 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 		return nil
 	}
 	defer upd.Clear()
+	return sd.applyPendingUpdate(tx, upd, nil)
+}
+
+func (sd *SharedDomains) applyPendingUpdate(tx kv.TemporalTx, upd *commitment.PendingCommitmentUpdate, diff *kv.DomainDiff) error {
 	if upd.Deltas != nil {
-		return sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, nil)
+		return sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, diff)
 	}
 	putBranch := func(prefix, data, prevData []byte) error {
-		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, nil)
+		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, diff)
 	}
 	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
 	return err
@@ -569,17 +571,7 @@ func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) er
 		if cs != nil {
 			// Writing into the changeset's own diff leaves the commitment writer's
 			// diff alone, so the apply fold's changeset binds do not wait on the flush.
-			diff := &cs.Diffs[kv.CommitmentDomain]
-			var err error
-			if upd.Deltas != nil {
-				err = sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, diff)
-			} else {
-				putBranch := func(prefix, data, prevData []byte) error {
-					return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, diff)
-				}
-				_, err = commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
-			}
-			if err != nil {
+			if err := sd.applyPendingUpdate(tx, upd, &cs.Diffs[kv.CommitmentDomain]); err != nil {
 				return err
 			}
 			switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
@@ -592,14 +584,7 @@ func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) er
 		sd.changesetMu.Lock()
 		defer sd.changesetMu.Unlock()
 	}
-	if upd.Deltas != nil {
-		return sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, sd.mem.(commitmentDiffSwapper).CommitmentDiff())
-	}
-	putBranch := func(prefix, data, prevData []byte) error {
-		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
-	}
-	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
-	return err
+	return sd.applyPendingUpdate(tx, upd, sd.mem.(commitmentDiffSwapper).CommitmentDiff())
 }
 
 // AsStateGetter returns an execution-aware getter with optimized code reads.
@@ -670,15 +655,9 @@ func (sd *SharedDomains) flushRequestMetrics() {
 	sd.reqMetrics = nil
 }
 
-// LockChangesetAccumulator and UnlockChangesetAccumulator bracket
-// FlushPendingUpdatesLocked's hash-aware swap+use+restore of the commitment
-// writer's diff when flushing a previous block's deferred update. It
-// serializes against the exec loop's per-block SetChangesetAccumulator;
-// apply-side DomainPut/DomainDel no longer take it, because the swap leaves
-// their writers alone (see SwapCommitmentDiffLocked). The calculator's own
-// per-block compute (ComputeCommitmentWithDiff) does not run inside this
-// lock — it routes its own writes through an explicit diff instead (see
-// DomainPutCommitmentDiff), so only the brief flush step needs it.
+// LockChangesetAccumulator and UnlockChangesetAccumulator hold changesetMu
+// across several *Locked calls, such as a swap of the live accumulator, a
+// flush into it and the restore.
 //
 // Inside the locked window callers must use the *Locked variants
 // (SwapCommitmentDiffLocked) — the public Set/Get acquire the same Mutex
@@ -804,8 +783,8 @@ type commitmentDiffSwapper interface {
 // SwapCommitmentDiffLocked points the commitment writer's diff at acc and
 // returns a func restoring the previous one. Every other domain writer is left
 // alone, so apply-side writes need no lock. Callers must hold changesetMu.
-// Used only by flushPendingUpdates's hash-aware routing — a call with a known
-// target diff should use DomainPutCommitmentDiff instead, which needs no lock.
+// A write with a known target diff should use DomainPutCommitmentDiff
+// instead, which needs no lock.
 func (sd *SharedDomains) SwapCommitmentDiffLocked(acc *changeset.StateChangeSet) (restore func()) {
 	h := sd.mem.(commitmentDiffSwapper)
 	prev := h.CommitmentDiff()
