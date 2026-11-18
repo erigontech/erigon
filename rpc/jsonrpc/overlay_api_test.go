@@ -628,6 +628,94 @@ func TestCallConstructorIntrinsicExecutionGasCap(t *testing.T) {
 	}
 }
 
+func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		opcode        vm.OpCode
+		frameTx       bool
+		postTx        bool
+		repeatCreate2 bool
+	}{
+		{name: "ordinary CREATE", opcode: vm.CREATE},
+		{name: "ordinary CREATE2", opcode: vm.CREATE2},
+		{name: "frame CREATE", opcode: vm.CREATE, frameTx: true},
+		{name: "frame CREATE2", opcode: vm.CREATE2, frameTx: true},
+		{name: "frame CREATE with assertion", opcode: vm.CREATE, frameTx: true, postTx: true},
+		{name: "frame CREATE2 with assertion", opcode: vm.CREATE2, frameTx: true, postTx: true},
+		{name: "ordinary repeated CREATE2", opcode: vm.CREATE2, repeatCreate2: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			factory := common.HexToAddress("0x2000")
+			assertion := common.HexToAddress("0x3000")
+			initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+			create := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE)
+			contract := types.CreateAddress(factory, 0)
+			if tc.opcode == vm.CREATE2 {
+				create = program.New().Create2(initCode, 0)
+				contract = types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+			}
+			factoryCode := testutil.AssertStackWord(create.Op(vm.ISZERO), 0)
+			if tc.repeatCreate2 {
+				factoryCode.Create2(initCode, 0).Op(vm.POP)
+			}
+			factoryCode.Op(vm.STOP)
+			cfg := chain.AllProtocolChanges.Copy()
+			cfg.BogotaTime = common.NewUint64(0)
+			var approval []byte
+			if tc.frameTx {
+				approval = program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE).Bytes()
+			}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+				Alloc: types.GenesisAlloc{
+					sender:    {Balance: big.NewInt(1_000_000_000_000_000_000), Code: approval},
+					factory:   {Code: factoryCode.Bytes()},
+					assertion: {Code: testutil.AssertStackWord(program.New().Push(contract).Op(vm.EXTCODESIZE), 1).Op(vm.STOP).Bytes()},
+				},
+			}), execmoduletester.WithKey(key))
+			var txn types.Transaction
+			if tc.frameTx {
+				frameTx := &types.FrameTransaction{
+					ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
+					Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+					Frames: []types.Frame{
+						{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+						{Mode: types.FrameSender, Target: &factory, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
+					},
+				}
+				if tc.postTx {
+					frameTx.Frames = append(frameTx.Frames, types.Frame{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}})
+				}
+				txn = frameTx
+			} else {
+				txn, err = types.SignTx(types.NewTransaction(0, factory, new(uint256.Int), 500_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(cfg), key)
+				require.NoError(t, err)
+			}
+			pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(pack))
+			require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].Status)
+			if tc.postTx {
+				require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].FrameReceipts[2].Status)
+			}
+			base := newBaseApiForTest(m)
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+			want := hexutil.Bytes{byte(vm.PUSH0), byte(vm.STOP)}
+			if tc.postTx {
+				want = hexutil.Bytes{byte(vm.STOP)}
+			}
+			result, err := api.CallConstructor(m.Ctx, contract, program.New().ReturnData(want).Bytes())
+			require.NoError(t, err)
+			require.NotNil(t, result, "successful replacement constructor must return its captured code")
+			require.NotNil(t, result.Code)
+			require.Equal(t, want, *result.Code)
+		})
+	}
+}
+
 func TestFrameCallConstructor(t *testing.T) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)

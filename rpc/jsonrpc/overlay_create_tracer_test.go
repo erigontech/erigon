@@ -28,42 +28,39 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/program"
 )
 
-func TestOverlayCreateTracerCapturesResultCode(t *testing.T) {
+func TestOverlayCreateTracerRecordsError(t *testing.T) {
 	t.Parallel()
-	caller := accounts.InternAddress(common.Address{0x01})
-	target := accounts.InternAddress(common.Address{0x02})
-	statedb := state.New(state.NewNoopReader())
-	defer statedb.Close()
-	evm := vm.NewEVM(
-		evmtypes.BlockContext{CanTransfer: protocol.CanTransfer, Transfer: misc.Transfer},
-		evmtypes.TxContext{},
-		statedb,
-		chain.AllProtocolChanges,
-		vm.Config{},
-	)
-	tracer := OverlayCreateTracer{
-		contractAddress: target,
-		code:            program.New().ReturnData([]byte{0xaa}).Bytes(),
-		gasCap:          1_000_000,
-		evm:             evm,
+	for _, tc := range []struct {
+		name        string
+		runtimeCode []byte
+		wantErr     error
+	}{
+		{name: "successful creation", runtimeCode: []byte{0xaa}},
+		{name: "invalid deployed code", runtimeCode: []byte{0xef}, wantErr: vm.ErrInvalidCode},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caller := accounts.InternAddress(common.Address{0x01})
+			target := accounts.InternAddress(types.CreateAddress(caller.Value(), 0))
+			statedb := state.New(state.NewNoopReader())
+			defer statedb.Close()
+			tracer := OverlayCreateTracer{contractAddress: target}
+			evm := vm.NewEVM(
+				evmtypes.BlockContext{CanTransfer: protocol.CanTransfer, Transfer: misc.Transfer},
+				evmtypes.TxContext{},
+				statedb,
+				chain.AllProtocolChanges,
+				vm.Config{Tracer: tracer.Tracer().Hooks},
+			)
+			_, _, _, _, err := evm.Create(caller, program.New().ReturnData(tc.runtimeCode).Bytes(), mdgas.MdGas{Execution: 1_000_000}, uint256.Int{}, nil, false)
+			require.ErrorIs(t, err, tc.wantErr)
+			require.ErrorIs(t, tracer.err, tc.wantErr)
+		})
 	}
-	tracer.OnEnterV2(
-		0,
-		byte(vm.CREATE2),
-		caller,
-		target,
-		false,
-		nil,
-		mdgas.MdGas{Execution: tracer.gasCap},
-		uint256.Int{},
-		nil,
-	)
-	require.NoError(t, tracer.err)
-	require.Equal(t, []byte{0xaa}, tracer.resultCode)
 }

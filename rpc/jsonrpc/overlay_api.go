@@ -241,7 +241,6 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	statedb.SetTxContext(blockNum, transactionIndex)
 
-	// CREATE2: keep original message so we match the existing contract address, code will be replaced later
 	msg, err := creationTx.AsMessage(*signer, block.BaseFee(), rules)
 	if err != nil {
 		return nil, err
@@ -249,52 +248,35 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	contractAddr := types.CreateAddress(msg.From().Value(), msg.Nonce())
 	if creationTx.IsContractDeploy() && contractAddr == address {
-		// CREATE: adapt message with new code so it's replaced instantly
+		// Top-level deployments must include the replacement initcode in intrinsic gas.
 		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
 	}
 	api.applyGasBudget(msg)
 	txCtx = protocol.NewEVMTxContext(msg)
-	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), code: code, gasCap: msg.Gas()}
-	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
-	ct.evm = evm
+	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address)}
+	evm = vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{
+		Tracer: ct.Tracer().Hooks,
+		OverrideInitCode: func(target accounts.Address, initCode []byte) []byte {
+			if target == ct.contractAddress {
+				return code
+			}
+			return initCode
+		},
+	})
 
 	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
-	if ct.err != nil {
-		return nil, ct.err
+	if err != nil {
+		return nil, err
 	}
-
-	resultCode := &CreationCode{}
-	if len(ct.resultCode) > 0 {
-		// Later calls or frame assertions can roll back an already captured creation.
-		size, err := statedb.GetCodeSize(ct.contractAddress)
-		if err != nil {
-			return nil, err
-		}
-		if size == 0 {
-			return nil, nil
-		}
-		c := hexutil.Bytes(ct.resultCode)
-		resultCode.Code = &c
-		return resultCode, nil
-	} else {
-		// err from core.ApplyMessage()
-		if err != nil {
-			return nil, err
-		}
-		code, err := evm.IntraBlockState().GetCode(accounts.InternAddress(address))
-		if err != nil {
-			return nil, err
-		}
-		if len(code) > 0 {
-			c := hexutil.Bytes(code)
-			resultCode.Code = &c
-			return resultCode, nil
-		}
+	runtimeCode, err := statedb.GetCode(ct.contractAddress)
+	if err != nil {
+		return nil, err
 	}
-
-	_ = ethapi.FinalizeCallTx(statedb, rules)
-
-	return nil, nil
+	if len(runtimeCode) > 0 {
+		c := hexutil.Bytes(runtimeCode)
+		return &CreationCode{Code: &c}, nil
+	}
+	return nil, ct.err
 }
 
 func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides, _ *chain.Rules) ([]*types.Log, error) {

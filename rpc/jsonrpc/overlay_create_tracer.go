@@ -29,23 +29,19 @@ import (
 type OverlayCreateTracer struct {
 	contractAddress accounts.Address
 	isCapturing     bool
-	code            []byte
-	gasCap          uint64
+	depth           int
 	err             error
-	resultCode      []byte
-	evm             *vm.EVM
 }
 
 func (ct *OverlayCreateTracer) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: nil,
 			OnEnterV2: ct.OnEnterV2,
+			OnExitV2:  ct.OnExitV2,
 		},
 	}
 }
 
-// Rest of the frames
 func (ct *OverlayCreateTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	if ct.isCapturing {
 		return
@@ -53,11 +49,13 @@ func (ct *OverlayCreateTracer) OnEnterV2(depth int, typ byte, from accounts.Addr
 
 	if (vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2) && to == ct.contractAddress {
 		ct.isCapturing = true
-		_, _, _, _, err := ct.evm.OverlayCreate(from, vm.NewCodeAndHash(ct.code), mdgas.MdGas{Execution: ct.gasCap}, value, to, vm.OpCode(typ), true /* incrementNonce */)
-		if err != nil {
-			ct.err = err
-		} else {
-			ct.resultCode, ct.err = ct.evm.IntraBlockState().GetCode(ct.contractAddress)
-		}
+		ct.depth = depth
+	}
+}
+
+func (ct *OverlayCreateTracer) OnExitV2(depth int, _ []byte, _ mdgas.MdGasUsage, err error, _ bool) {
+	if ct.isCapturing && depth == ct.depth {
+		ct.err = err
+		ct.isCapturing = false
 	}
 }
