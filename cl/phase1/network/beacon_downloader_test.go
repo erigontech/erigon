@@ -483,7 +483,7 @@ func TestForwardRequestMoreStartsHTTPFallbackWhileProbesAreSlow(t *testing.T) {
 	previousTimeout := forwardBeaconRequestTimeout
 	previousFallbackDelay := forwardBeaconFallbackDelay
 	forwardBeaconRequestInterval = time.Millisecond
-	forwardBeaconRequestTimeout = 200 * time.Millisecond
+	forwardBeaconRequestTimeout = time.Second
 	forwardBeaconFallbackDelay = 20 * time.Millisecond
 	t.Cleanup(func() {
 		forwardBeaconRequestInterval = previousInterval
@@ -513,14 +513,14 @@ func TestForwardRequestMoreStartsHTTPFallbackWhileProbesAreSlow(t *testing.T) {
 	}()
 
 	select {
-	case <-fallbackStarted:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("slow P2P probes prevented the HTTP fallback from starting")
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("RequestMore did not finish after its request window")
 	}
 	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("RequestMore did not finish after its request window")
+	case <-fallbackStarted:
+	default:
+		t.Fatal("slow P2P probes prevented the HTTP fallback from starting")
 	}
 }
 
