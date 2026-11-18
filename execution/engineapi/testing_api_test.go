@@ -77,7 +77,6 @@ type stubExecutionModule struct {
 	isCanonicalHashFunc    func(ctx context.Context, hash common.Hash) (bool, error)
 	ilSatisfiedFunc        func(ctx context.Context, blockHash common.Hash, blockNumber uint64, il types.Transactions) (*bool, error)
 	readyFunc              func(ctx context.Context) (bool, error)
-	isCanonicalHashFunc    func(ctx context.Context, hash common.Hash) (bool, error)
 	isValidatedFunc        func(hash common.Hash) bool
 
 	getPayloadBodiesByHashFunc func(ctx context.Context, hashes []common.Hash) ([]*execmodule.PayloadBody, error)
