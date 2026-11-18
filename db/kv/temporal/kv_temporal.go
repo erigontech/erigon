@@ -266,9 +266,12 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 
 func (db *DB) Close() {
 	if db.stateFiles != nil {
+		db.stateFiles.StopMaintenance()
+	}
+	db.RwDB.Close() // refuses new txs and waits for open ones, which may read state files
+	if db.stateFiles != nil {
 		db.stateFiles.Close()
 	}
-	db.RwDB.Close()
 }
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
