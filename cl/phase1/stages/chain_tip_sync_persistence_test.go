@@ -54,9 +54,15 @@ type blockWriteErrorDB struct {
 	failures     int
 	writes       int
 	onWriteError func()
+	beforeUpdate func(context.Context) error
 }
 
 func (db *blockWriteErrorDB) Update(ctx context.Context, fn func(kv.RwTx) error) error {
+	if db.beforeUpdate != nil {
+		if err := db.beforeUpdate(ctx); err != nil {
+			return err
+		}
+	}
 	db.writes++
 	if db.writes <= db.failures {
 		if db.onWriteError != nil {
@@ -77,7 +83,7 @@ func TestChainTipBatchDoesNotRejectAcceptedBlockAfterWriteFailure(t *testing.T) 
 	require.NoError(t, err)
 	rejected := make(map[common.Hash]error)
 
-	reachedTarget := processChainTipBatch(t.Context(), cfg, Args{targetSlot: block.Block.Slot}, []*cltypes.SignedBeaconBlock{block}, make(map[common.Hash]struct{}), rejected)
+	reachedTarget := processChainTipBatch(t.Context(), t.Context(), cfg, Args{targetSlot: block.Block.Slot}, []*cltypes.SignedBeaconBlock{block}, make(map[common.Hash]struct{}), rejected)
 
 	require.False(t, reachedTarget)
 	_, accepted := cfg.forkChoice.GetHeader(root)
@@ -102,7 +108,7 @@ func TestChainTipListenerRetriesWriteWithoutAnotherBatch(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	err = listenToIncomingBlocksUntilANewBlockIsReceived(ctx, log.Root(), cfg, Args{targetSlot: block.Block.Slot}, respCh, make(chan error))
+	err = listenToIncomingBlocksUntilANewBlockIsReceived(ctx, ctx, log.Root(), cfg, Args{targetSlot: block.Block.Slot}, respCh, make(chan error))
 
 	require.NoError(t, err)
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
@@ -136,7 +142,7 @@ func TestChainTipSyncRetriesWriteAfterStageCancellation(t *testing.T) {
 	db.onWriteError = cancel
 	args := Args{targetSlot: block.Block.Slot, hasDownloaded: true, peers: 1}
 
-	err = listenToIncomingBlocksUntilANewBlockIsReceived(ctx, log.Root(), cfg, args, respCh, make(chan error))
+	err = listenToIncomingBlocksUntilANewBlockIsReceived(ctx, ctx, log.Root(), cfg, args, respCh, make(chan error))
 
 	require.ErrorIs(t, err, context.Canceled)
 	args.seenSlot = cfg.forkChoice.HighestSeen()
@@ -334,7 +340,7 @@ func TestFastConfirmationWakePublishesDuringMissedSlot(t *testing.T) {
 				graph := ConsensusClStages()
 				started := time.Now()
 				if stage == ChainTipSync {
-					require.NoError(t, listenToIncomingBlocksUntilANewBlockIsReceived(t.Context(), log.Root(), cfg, args, nil, nil))
+					require.NoError(t, listenToIncomingBlocksUntilANewBlockIsReceived(t.Context(), t.Context(), log.Root(), cfg, args, nil, nil))
 				} else {
 					require.NoError(t, graph.Stages[stage].ActionFunc(t.Context(), log.Root(), cfg, args))
 				}

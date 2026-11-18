@@ -203,7 +203,7 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 
 // listenToIncomingBlocksUntilANewBlockIsReceived listens for incoming blocks until a new block with a slot greater than or equal to the target slot is received.
 // It processes blocks, checks their validity, and publishes them. It also handles context cancellation and logs progress periodically.
-func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger log.Logger, cfg *Cfg, args Args, respCh <-chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) error {
+func listenToIncomingBlocksUntilANewBlockIsReceived(ctx, waitCtx context.Context, logger log.Logger, cfg *Cfg, args Args, respCh <-chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) error {
 	// Timer to log progress every 30 seconds
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()
@@ -241,9 +241,9 @@ MainLoop:
 			if highestSeenBlockIndexed(ctx, cfg, args.targetSlot) {
 				break MainLoop
 			}
-		case <-ctx.Done():
+		case <-waitCtx.Done():
 			// Handle context cancellation
-			return ctx.Err()
+			return waitCtx.Err()
 		case err := <-errCh:
 			// Handle errors received on the error channel
 			return err
@@ -251,7 +251,7 @@ MainLoop:
 			if blocks == nil {
 				continue
 			}
-			if processChainTipBatch(ctx, cfg, args, withMissingAncestors(ctx, cfg, blocks, rejected), seenBlockRoots, rejected) {
+			if processChainTipBatch(ctx, waitCtx, cfg, args, withMissingAncestors(waitCtx, cfg, blocks, rejected), seenBlockRoots, rejected) {
 				break MainLoop
 			}
 		case <-logTicker.C:
@@ -385,7 +385,7 @@ func firstBlockWithMissingParent(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock, 
 	return nil
 }
 
-func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cltypes.SignedBeaconBlock, seenBlockRoots map[common.Hash]struct{}, rejected map[common.Hash]error) bool {
+func processChainTipBatch(ctx, fetchCtx context.Context, cfg *Cfg, args Args, blocks []*cltypes.SignedBeaconBlock, seenBlockRoots map[common.Hash]struct{}, rejected map[common.Hash]error) bool {
 	// [GLOAS] Batch-determine and fetch parent envelopes before processing blocks.
 	envelopeRoots, batchBlockByRoot := determineParentEnvelopeRoots(cfg, blocks)
 	parentBlockByRoot := func(root common.Hash) *cltypes.SignedBeaconBlock {
@@ -398,7 +398,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 		block := parentBlockByRoot(root)
 		return block, block != nil
 	})
-	envelopes, storedEnvelopeRoots := fetchParentEnvelopes(ctx, cfg, envelopeRoots, validateEnvelope)
+	envelopes, storedEnvelopeRoots := fetchParentEnvelopes(fetchCtx, cfg, envelopeRoots, validateEnvelope)
 	storedReplayRoots := storedParentReplayRoots(
 		blocks,
 		args.targetSlot,
@@ -424,7 +424,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 
 	for _, block := range blocks {
 		blockRoot, _ := block.Block.HashSSZ() // Ignoring error as block would not process if HashSSZ failed
-		if !ensureAnchorEnvelopeForChild(ctx, cfg.forkChoice, func(recoveryCtx context.Context) error {
+		if !ensureAnchorEnvelopeForChild(fetchCtx, cfg.forkChoice, func(recoveryCtx context.Context) error {
 			return ensureAnchorEnvelopeOnce(recoveryCtx, cfg)
 		}, block) {
 			rejectChainTipBlock(ctx, cfg, rejected, block, blockRoot, errAnchorEnvelopeUnavailable.Error(), errAnchorEnvelopeUnavailable)
@@ -1782,7 +1782,11 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 
 	go startFetchingBlocksMissedByGossipAfterSomeTime(waitCtx, cfg, args, delay, respCh, errCh)
 
-	err = listenToIncomingBlocksUntilANewBlockIsReceived(waitCtx, logger, cfg, args, respCh, errCh)
+	importCtx := waitCtx
+	if cfg.safeUpdatePending {
+		importCtx = ctx
+	}
+	err = listenToIncomingBlocksUntilANewBlockIsReceived(importCtx, waitCtx, logger, cfg, args, respCh, errCh)
 	if cfg.safeUpdatePending && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 		return nil
 	}

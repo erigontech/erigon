@@ -309,3 +309,58 @@ func TestFastConfirmationEnablesExecutionStatusReporting(t *testing.T) {
 		require.True(t, *tc.enabled)
 	}
 }
+
+func TestFastConfirmationHeaderOnlyAnchorVotes(t *testing.T) {
+	_, anchor, _ := tests.GetBellatrixRandom()
+	cfg := *anchor.BeaconConfig()
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
+	cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0
+	cfg.InitializeForkSchedule()
+	store := newOverlapTestStore(t, anchor, nil, false).store
+	store.beaconCfg = &cfg
+	store.EnableFastConfirmation(anchor.CurrentJustifiedCheckpoint())
+	root := store.AnchorRoot()
+	_, hasBody := store.forkGraph.GetBlock(root)
+	require.False(t, hasBody)
+	slot := anchor.Slot()
+	store.OnTick((anchor.GenesisTime() + (slot+3)*cfg.SecondsPerSlot) * 1000)
+	balances := &fcrBalances{balances: []uint64{100, 100, 100, 100}, active: []bool{true, true, true, true}, slashed: make([]bool, 4), total: 400}
+	for _, tc := range []struct {
+		name    string
+		offset  uint64
+		present bool
+		status  cltypes.PayloadStatus
+	}{
+		{"same slot empty", 0, false, cltypes.PayloadStatusPending},
+		{"same slot full", 0, true, cltypes.PayloadStatusPending},
+		{"later empty", 1, false, cltypes.PayloadStatusEmpty},
+		{"later full", 1, true, cltypes.PayloadStatusFull},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for i := range 4 {
+				store.latestMessages.set(i, LatestMessage{Root: root, Slot: slot + tc.offset, PayloadPresent: tc.present})
+			}
+			view, err := store.fastConfirmationView(store.Slot())
+			require.NoError(t, err)
+			require.True(t, view.gloas)
+			for _, vote := range view.votes[:4] {
+				require.Equal(t, root, vote.root)
+				require.Equal(t, tc.status, vote.status)
+			}
+			if tc.offset == 0 {
+				return
+			}
+			view.balanceIncrement = 1
+			view.committees = map[uint64][]uint64{slot + 1: {0, 1, 2, 3}}
+			for _, parentStatus := range []cltypes.PayloadStatus{cltypes.PayloadStatusEmpty, cltypes.PayloadStatusFull} {
+				child := common.Hash{99, byte(parentStatus)}
+				view.blocks[child] = fcrBlock{slot: slot + 2, parent: root, parentStatus: parentStatus}
+				var discount uint64
+				if parentStatus == tc.status {
+					discount = 300
+				}
+				require.Equal(t, discount, view.emptySlotDiscount(balances, child))
+			}
+		})
+	}
+}

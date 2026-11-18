@@ -338,7 +338,7 @@ func newChainTipListenerFixture(t *testing.T) (*Cfg, *cltypes.SignedBeaconBlock)
 func listenInBackground(ctx context.Context, cfg *Cfg, targetSlot uint64) <-chan error {
 	done := make(chan error, 1)
 	go func() {
-		done <- listenToIncomingBlocksUntilANewBlockIsReceived(ctx, log.Root(), cfg, Args{targetSlot: targetSlot}, make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]), make(chan error))
+		done <- listenToIncomingBlocksUntilANewBlockIsReceived(ctx, ctx, log.Root(), cfg, Args{targetSlot: targetSlot}, make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]), make(chan error))
 	}()
 	return done
 }

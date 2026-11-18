@@ -311,7 +311,12 @@ func (f *ForkChoiceStore) fastConfirmationView(slot uint64) (*fcrView, error) {
 			addChain(message.Root)
 			if v.gloas {
 				vote.epoch = message.Slot / v.slotsPerEpoch
-				vote.status = f.getSupportedNode(message).PayloadStatus
+				if block, ok := v.blocks[message.Root]; ok && block.slot < message.Slot {
+					vote.status = cltypes.PayloadStatusEmpty
+					if message.PayloadPresent {
+						vote.status = cltypes.PayloadStatusFull
+					}
+				}
 			}
 		}
 		v.votes[i] = vote
