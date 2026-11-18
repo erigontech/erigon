@@ -109,8 +109,9 @@ type Domain struct {
 }
 
 type domainVisible struct {
-	files visibleFiles
-	name  kv.Domain
+	files   visibleFiles
+	name    kv.Domain
+	enabled bool
 }
 
 func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
@@ -500,10 +501,10 @@ func (d *Domain) firstStepToBuild(tx kv.Tx, filesEndStep, minResumeStep kv.Step)
 }
 
 func (dt *DomainRoTx) NewWriter(db kv.RoDB) *DomainBufferedWriter {
-	return dt.newWriter(db, dt.d.dirs.Tmp, !dt.d.Enabled.Load())
+	return dt.newWriter(db, dt.d.dirs.Tmp, !dt.visible.enabled)
 }
 
-// openList opens scanned files and detaches missing or incomplete ranges.
+// openList opens scanned files and detaches files missing from the scan.
 // Returned files must be reclaimed after existing readers finish, even when
 // opening fails.
 func (d *Domain) openList(ctx context.Context, scanResult ScanDirsResult) (retiredFiles, error) {
@@ -517,36 +518,14 @@ func (d *Domain) openList(ctx context.Context, scanResult ScanDirsResult) (retir
 	if err := d.openDirtyFiles(ctx, scanResult.domainFiles); err != nil {
 		return retired, fmt.Errorf("Domain(%s).openList: %w", d.FilenameBase, err)
 	}
-	retired = append(retired, d.protectFromHistoryFilesAheadOfDomainFiles()...)
 	return retired, nil
 }
 
-// History files can survive an interrupted build before domain values are written.
-// An empty domain file set must cap coverage at zero, even though minimax treats it as unset.
-func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() retiredFiles {
-	endTxNum := min(d.dirtyFiles.EndTxNumMax(), d.dirtyFilesEndTxNumMinimax())
-	return d.retireFilesAfterStep(kv.Step(endTxNum / d.stepSize))
-}
-
 func (d *Domain) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFiles, error) {
-	if !d.Enabled.Load() {
+	if !d.Enabled {
 		return nil, nil
 	}
 	return d.openList(ctx, *r)
-}
-
-func (d *Domain) retireFilesAfterStep(lowerBound kv.Step) (retired retiredFiles) {
-	for _, files := range []*DirtyFiles{d.dirtyFiles, d.History.dirtyFiles, d.History.InvertedIndex.dirtyFiles} {
-		var outs []*FilesItem
-		files.Scan(func(item *FilesItem) bool {
-			if item.StartStep(d.stepSize) >= lowerBound {
-				outs = append(outs, item)
-			}
-			return true
-		})
-		retired = append(retired, retire(mvcc.RetireReasonIncomplete, files, outs, d.FilenameBase, d.logger)...)
-	}
-	return retired
 }
 
 func (d *Domain) scanDirtyFiles(fileNames []string) {
@@ -580,8 +559,13 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 			return d.checker.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	dv := newDomainVisible(d.Name, calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum))
-	hv, hiv := d.History.calcVisibleFiles(toTxNum)
+	var files visibleFiles
+	if d.Enabled {
+		files = calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum)
+	}
+	dv := newDomainVisible(d.Name, files, d.Enabled)
+	// Incomplete history stays dirty until its domain values become readable.
+	hv, hiv := d.History.calcVisibleFiles(dv.files.EndTxNum())
 	return dv, hv, hiv
 }
 
@@ -915,10 +899,13 @@ func (c Collation) Close() {
 // An empty dstDir uses the live snapshots directory. The caller must publish
 // the returned files through the aggregator or close their handles.
 func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.Step, batch *TemporalMemBatch, vt valueTransformer, dstDir string) (StaticFiles, error) {
-	if !d.Enabled.Load() || stepFrom == stepTo {
+	if stepFrom == stepTo {
 		return StaticFiles{}, nil
 	}
 	wal := batch.domainWriters[d.Name]
+	if wal == nil || wal.discard {
+		return StaticFiles{}, nil
+	}
 
 	if stepFrom > stepTo {
 		panic(fmt.Errorf("assert: stepFrom=%d > stepTo=%d", stepFrom, stepTo))
@@ -943,9 +930,6 @@ func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.St
 // In contrast to collate function collateETL puts contents of wal into file.
 // dstDir overrides the output directory; empty means d.dirs.SnapDomain.
 func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *etl.Collector, vt valueTransformer, dstDir string) (coll Collation, err error) {
-	if !d.Enabled.Load() {
-		return Collation{}, err
-	}
 	started := time.Now()
 	closeCollation := true
 	defer func() {
@@ -1036,10 +1020,6 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
 func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64, roTx kv.Tx) (coll Collation, err error) {
-	if !d.Enabled.Load() {
-		return Collation{}, nil
-	}
-
 	{ // assert
 		if txFrom%d.stepSize != 0 {
 			panic(fmt.Errorf("assert: unexpected txFrom=%d", txFrom))
@@ -1153,9 +1133,6 @@ func (sf StaticFiles) CleanupOnError() {
 
 // skips history files; dstDir overrides where index files land (empty = d.dirs.SnapDomain).
 func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, collation Collation, ps *background.ProgressSet, dstDir string) (StaticFiles, error) {
-	if !d.Enabled.Load() {
-		return StaticFiles{}, nil
-	}
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
 	if traceFileLife != "" && d.FilenameBase == traceFileLife {
@@ -1253,10 +1230,6 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
-	if !d.Enabled.Load() {
-		return StaticFiles{}, nil
-	}
-
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
 	if traceFileLife != "" && d.FilenameBase == traceFileLife {
@@ -1537,7 +1510,7 @@ func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compres
 }
 
 func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) retiredFiles {
-	if !d.Enabled.Load() {
+	if !d.Enabled {
 		return nil
 	}
 	if txNumFrom == txNumTo {
@@ -1783,7 +1756,7 @@ func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size
 }
 
 func (dt *DomainRoTx) GetLatestValSize(key []byte, roTx kv.Tx) (size int, found bool, err error) {
-	if !dt.d.Enabled.Load() {
+	if !dt.visible.enabled {
 		return 0, false, nil
 	}
 	v, _, found, err := dt.getLatestFromDb(key, roTx, kv.NoStepBound)
@@ -1820,7 +1793,7 @@ func (dt *DomainRoTx) HistoryCoverageStart() uint64 {
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	if !dt.d.Enabled.Load() {
+	if !dt.visible.enabled {
 		return nil, false, nil
 	}
 
@@ -2053,7 +2026,7 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 }
 
 func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, opts kv.GetLatestOptions) ([]byte, kv.Step, bool, error) {
-	if !dt.d.Enabled.Load() {
+	if !dt.visible.enabled {
 		return nil, 0, false, nil
 	}
 	metrics, start := opts.Metrics()

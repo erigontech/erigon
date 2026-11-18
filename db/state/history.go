@@ -419,7 +419,7 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 }
 
 func (ht *HistoryRoTx) NewWriter(db kv.RoDB) *historyBufferedWriter {
-	return ht.newWriter(db, ht.h.dirs.Tmp, !ht.h.Enabled.Load())
+	return ht.newWriter(db, ht.h.dirs.Tmp, !ht.iit.visible.enabled)
 }
 
 type historyBufferedWriter struct {
@@ -849,6 +849,9 @@ func (sf HistoryFiles) CleanupOnError() {
 }
 
 func (h *History) calcVisibleFiles(toTxNum uint64) (visibleFiles, *iiVisible) {
+	if !h.Enabled {
+		toTxNum = 0
+	}
 	hv := calcVisibleFiles(h.dirtyFiles, h.Accessors, nil, false, toTxNum)
 	hiv := h.InvertedIndex.calcVisibleFiles(toTxNum)
 	return hv, hiv
@@ -1306,7 +1309,7 @@ func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 // HistorySeek searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	if !ht.h.Enabled.Load() {
+	if !ht.iit.visible.enabled {
 		return nil, false, nil
 	}
 

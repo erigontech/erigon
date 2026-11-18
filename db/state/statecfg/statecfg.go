@@ -84,7 +84,7 @@ func (h HistCfg) GetVersions() VersionTypes {
 }
 
 type InvIdxCfg struct {
-	Enabled bool // initial state: false disables Domain/History/InvertedIndex writes and file production
+	Enabled bool // when false: Domain/History/InvertedIndex is fully off - all writes ignored, no files produced
 
 	FileVersion IIVersionTypes
 

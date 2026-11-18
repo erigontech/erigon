@@ -368,14 +368,15 @@ func TestDomainOpenListKeepsPinnedHistory(t *testing.T) {
 	require.Empty(t, fresh.d[kv.AccountsDomain].files)
 	require.Empty(t, fresh.d[kv.AccountsDomain].ht.files)
 	require.Empty(t, fresh.d[kv.AccountsDomain].ht.iit.files)
+	require.Equal(t, 1, agg.d[kv.AccountsDomain].History.dirtyFiles.Len(), "incomplete history stays in the dirty inventory")
+	require.Equal(t, 1, agg.d[kv.AccountsDomain].InvertedIndex.dirtyFiles.Len())
 	reader.Close()
-	for _, file := range files {
-		require.Nil(t, file.decompressor, "retired mappings must close after the last reader")
-		require.Nil(t, file.index)
-		require.Nil(t, file.vAccessor)
+	require.Nil(t, files[0].decompressor, "the missing domain file is reclaimed after its reader closes")
+	for _, file := range files[1:] {
+		require.NotNil(t, file.decompressor, "dirty files remain open for later recovery")
 	}
 	for _, path := range paths {
-		require.FileExists(t, path, "retiring incomplete files must leave them on disk")
+		require.FileExists(t, path, "hiding incomplete files must leave them on disk")
 	}
 }
 

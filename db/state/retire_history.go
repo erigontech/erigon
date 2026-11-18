@@ -72,7 +72,7 @@ func (at *AggregatorRoTx) Retire(cutoffs kv.RetireCutoffs) (retiredCount int, er
 	// Select over visible files (no lock — at.d/at.iis are the pinned visible generation).
 	var aged []agedFiles
 	for _, dt := range at.d {
-		if !dt.d.Enabled.Load() || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
+		if !dt.visible.enabled || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
 			continue
 		}
 		cutoffTxNum := cutoffs.Default
@@ -89,7 +89,7 @@ func (at *AggregatorRoTx) Retire(cutoffs kv.RetireCutoffs) (retiredCount int, er
 		aged = append(aged, dt.ht.filesBeforeStep(cutoffStep)...)
 	}
 	for _, iit := range at.standaloneIIs() {
-		if !iit.ii.Enabled.Load() {
+		if !iit.visible.enabled {
 			continue
 		}
 		cutoffStep := kv.Step(cutoffs.Default / iit.stepSize)

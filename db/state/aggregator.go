@@ -471,7 +471,7 @@ func (a *Aggregator) ConfigureDomains() error {
 
 func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv.Domain) {
 	dd := a.d[dependent]
-	if !dd.Enabled.Load() || !a.d[dependency].Enabled.Load() {
+	if !dd.Enabled || !a.d[dependency].Enabled {
 		a.logger.Debug("skipping dependency between disabled domains", "dependency", dependency, "dependent", dependent)
 		return
 	}
@@ -493,7 +493,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	// ii has checker on history dirtyFiles (same domain)
 	dd := a.d[domain]
-	if dd.HistCfg.SnapshotsDisabled || dd.HistCfg.HistoryDisabled || !dd.Enabled.Load() {
+	if dd.HistCfg.SnapshotsDisabled || dd.HistCfg.HistoryDisabled || !dd.Enabled {
 		a.logger.Debug("history or ii disabled, can't register dependency", "domain", domain.String())
 		return
 	}
@@ -683,7 +683,7 @@ func (a *Aggregator) openFolder() error {
 
 	eg, ctx := errgroup.WithContext(a.ctx)
 	for id, d := range a.d {
-		if !d.Enabled.Load() {
+		if !d.Enabled {
 			continue
 		}
 
@@ -693,7 +693,7 @@ func (a *Aggregator) openFolder() error {
 		})
 	}
 	for id, ii := range standaloneIIs {
-		if !ii.Enabled.Load() {
+		if !ii.Enabled {
 			continue
 		}
 		eg.Go(func() (err error) {
@@ -793,7 +793,16 @@ func (a *Aggregator) closeDirtyFiles() {
 	wg.Wait()
 }
 
-func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].Enabled.Store(true) }
+// EnableDomain affects new views; existing views keep their read and write policy.
+func (a *Aggregator) EnableDomain(domain kv.Domain) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	if a.d[domain].Enabled {
+		return
+	}
+	a.d[domain].Enabled = true
+	a.recalcVisibleFiles(nil)
+}
 
 func (a *Aggregator) setBuildAccessorsWorkers(i int) {
 	a.workers.trySet(func() {
@@ -1096,7 +1105,7 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 	ac := a.BeginFilesRo()
 	defer ac.Close()
 	for id, d := range a.d {
-		if !d.Enabled.Load() || plan.deferredDomains[id] {
+		if !ac.d[id].visible.enabled || plan.deferredDomains[id] {
 			continue
 		}
 
@@ -1130,7 +1139,7 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 	}
 	// indices are built concurrently
 	for iikey, ii := range a.standaloneIIs() {
-		if !ii.Enabled.Load() || plan.deferredIndices[iikey] {
+		if !ac.iis[iikey].visible.enabled || plan.deferredIndices[iikey] {
 			continue
 		}
 
@@ -1846,13 +1855,13 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 
 	ceiling := uint64(math.MaxUint64)
 	for id, d := range a.d {
-		if d == nil || !d.Enabled.Load() || a.unalignedDomain[id] {
+		if d == nil || !d.Enabled || a.unalignedDomain[id] {
 			continue
 		}
 		ceiling = _min(ceiling, d.dirtyFilesEndTxNumMinimax())
 	}
 	for id, ii := range a.standaloneIIs() {
-		if ii == nil || !ii.Enabled.Load() || a.unalignedIdx[id] {
+		if ii == nil || !ii.Enabled || a.unalignedIdx[id] {
 			continue
 		}
 		ceiling = _min(ceiling, ii.dirtyFilesEndTxNumMinimax())
@@ -1871,19 +1880,12 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 // FilesDelete flow: Merge/Prune can mark old files as "ready for delete". Then last reader traversing linked-list of aggregatorVisible objects and perform real FileDelete
 // See: docs/plans/20260525-lockfree-file-reclamation-spec.md
 type aggregatorVisible struct {
-	generation      uint64
-	d               [kv.DomainLen]*domainVisible
-	dh              [kv.DomainLen]visibleFiles      // per-domain History visible files
-	dhii            [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
-	iis             [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
-	minimaxTxNum    uint64                          // min of domain file EndTxNum across kv.StateDomains
-	ceilingTxNum    uint64                          // shared cap before filtering out unindexed files
-	unalignedDomain [kv.DomainLen]bool
-	unalignedIdx    [kv.StandaloneIdxLen]bool
-
-	// Includes files hidden by missing accessors.
-	domainHasFiles [kv.DomainLen]bool
-	indexHasFiles  [kv.StandaloneIdxLen]bool
+	generation   uint64
+	d            [kv.DomainLen]*domainVisible
+	dh           [kv.DomainLen]visibleFiles      // per-domain History visible files
+	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
+	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
+	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
 
 	refcnt  atomic.Int32       // live readers
 	retired retiredFiles       // last reader of  `aggregatorVisible` object will close/remove this files
@@ -1923,13 +1925,12 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 				continue
 			}
 			next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
-			next.domainHasFiles[id] = d.dirtyFiles.EndTxNumMax() != 0
-			if !d.Enabled.Load() || a.unalignedDomain[id] {
+			if !d.Enabled || a.unalignedDomain[id] {
 				continue
 			}
 			lower(d.dirtyFiles, next.d[id].files)
 			lowerToFirstFile(d.dirtyFiles, next.d[id].files)
-			if !d.HistCfg.SnapshotsDisabled && !d.HistCfg.HistoryDisabled {
+			if d.dirtyFiles.Len() > 0 && !d.HistCfg.SnapshotsDisabled && !d.HistCfg.HistoryDisabled {
 				lower(d.History.dirtyFiles, next.dh[id])
 				lower(d.InvertedIndex.dirtyFiles, next.dhii[id].files)
 			}
@@ -1939,8 +1940,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 				continue
 			}
 			next.iis[id] = ii.calcVisibleFiles(toTxNum)
-			next.indexHasFiles[id] = ii.dirtyFiles.EndTxNumMax() != 0
-			if ii.Enabled.Load() && !a.unalignedIdx[id] {
+			if ii.Enabled && !a.unalignedIdx[id] {
 				lower(ii.dirtyFiles, next.iis[id].files)
 			}
 		}
@@ -1958,9 +1958,6 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	if toTxNum < dirtyEnd {
 		a.logger.Warn("[agg] a gap in files: every list stops at the first one that stops", "visibleEnd", toTxNum, "filesEnd", dirtyEnd)
 	}
-	next.ceilingTxNum = dirtyEnd
-	next.unalignedDomain = a.unalignedDomain
-	next.unalignedIdx = a.unalignedIdx
 	next.minimaxTxNum = next.stateMinimaxTxNum()
 
 	if a.visibilityLoweringForbidden.Load() {
@@ -2046,7 +2043,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		}
 	}
 	for id, d := range at.d {
-		if !d.d.Enabled.Load() {
+		if !d.visible.enabled {
 			continue
 		}
 		r.domain[id] = d.findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan)
@@ -2094,7 +2091,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 	}
 
 	for id, ii := range at.standaloneIIs() {
-		if !ii.ii.Enabled.Load() {
+		if !ii.visible.enabled {
 			continue
 		}
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
@@ -2138,7 +2135,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	accStorageMerged := new(sync.WaitGroup)
 
 	for id := range at.d {
-		if !at.d[id].d.Enabled.Load() {
+		if !at.d[id].visible.enabled {
 			continue
 		}
 		if !r.domain[id].any() {
@@ -2175,7 +2172,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	}
 
 	for id, rng := range r.invertedIndex {
-		if rng == nil || at.iis[id] == nil || !at.iis[id].ii.Enabled.Load() {
+		if rng == nil || at.iis[id] == nil || !at.iis[id].visible.enabled {
 			continue
 		}
 
@@ -2212,14 +2209,14 @@ func (a *Aggregator) integrateMergedDirtyFiles(in *MergeResult) {
 
 	var retired retiredFiles
 	for id, d := range a.d {
-		if !d.Enabled.Load() {
+		if !d.Enabled {
 			continue
 		}
 		retired = append(retired, d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])...)
 	}
 
 	for id, ii := range a.standaloneIIs() {
-		if !ii.Enabled.Load() {
+		if !ii.Enabled {
 			continue
 		}
 		retired = append(retired, ii.integrateMergedDirtyFiles(in.iis[id])...)
@@ -2252,7 +2249,7 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult, 
 	}
 	for _, id := range order {
 		d := at.d[id]
-		if !d.d.Enabled.Load() {
+		if !d.visible.enabled {
 			continue
 		}
 		var names []string
@@ -2266,7 +2263,7 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult, 
 		retired = append(retired, r...)
 	}
 	for id, ii := range at.standaloneIIs() {
-		if !ii.ii.Enabled.Load() {
+		if !ii.visible.enabled {
 			continue
 		}
 		var names []string
@@ -2327,29 +2324,44 @@ type fileBuildPlan struct {
 
 func (a *Aggregator) readFileBuildPlan(ctx context.Context, db kv.RoDB) (plan fileBuildPlan, err error) {
 	err = db.View(ctx, func(tx kv.Tx) (err error) {
-		at := a.BeginFilesRo()
-		defer at.Close()
-		plan, err = at.planFileBuild(tx)
+		plan, err = a.planFileBuild(tx)
 		return err
 	})
 	return plan, err
 }
 
-func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
-	if err := at.checkStateFilesBuildGap(tx); err != nil {
-		return fileBuildPlan{}, err
-	}
-	stateStep := kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())
-	ceilingStep := kv.Step(at.visible.ceilingTxNum / at.StepSize())
-	plan := fileBuildPlan{firstStep: stateStep}
+func (a *Aggregator) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
+	a.dirtyFilesLock.Lock()
+	at := a.BeginFilesRo()
+	ceilingStep := kv.Step(a.dirtyFilesEndTxNumMinimax() / at.StepSize())
 	// A fileless entity's first published step must reach the shared ceiling.
 	// Existing files already contribute to that ceiling, even without accessors.
 	var minResumeStep kv.Step
 	if ceilingStep > 0 {
 		minResumeStep = ceilingStep - 1
 	}
+	unalignedDomains, unalignedIndices := a.unalignedDomain, a.unalignedIdx
+	var domainMinResumeStep [kv.DomainLen]kv.Step
+	var indexMinResumeStep [kv.StandaloneIdxLen]kv.Step
+	for id, d := range a.d {
+		if d != nil && !unalignedDomains[id] && d.dirtyFiles.Len() == 0 {
+			domainMinResumeStep[id] = minResumeStep
+		}
+	}
+	for id, ii := range a.standaloneIIs() {
+		if ii != nil && !unalignedIndices[id] && ii.dirtyFiles.Len() == 0 {
+			indexMinResumeStep[id] = minResumeStep
+		}
+	}
+	a.dirtyFilesLock.Unlock()
+	defer at.Close()
+
+	if err := at.checkStateFilesBuildGap(tx); err != nil {
+		return fileBuildPlan{}, err
+	}
+	plan := fileBuildPlan{firstStep: kv.Step(at.TxNumsInFiles(kv.StateDomains...) / at.StepSize())}
 	for id, d := range at.d {
-		if d == nil || !d.d.Enabled.Load() {
+		if d == nil || !d.visible.enabled {
 			plan.deferredDomains[id] = true
 			continue
 		}
@@ -2358,34 +2370,30 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 		if filesEndStep >= ceilingStep {
 			continue
 		}
-		domainMinResumeStep := minResumeStep
-		if at.visible.unalignedDomain[id] || at.visible.domainHasFiles[id] {
-			domainMinResumeStep = 0
-		}
-		plan.domainFirstStep[id] = max(filesEndStep, domainMinResumeStep)
-		first, found, err := d.d.firstStepToBuild(tx, filesEndStep, domainMinResumeStep)
+		plan.domainFirstStep[id] = max(filesEndStep, domainMinResumeStep[id])
+		first, found, err := d.d.firstStepToBuild(tx, filesEndStep, domainMinResumeStep[id])
 		if err != nil {
 			return plan, err
 		}
 		if !found {
 			continue
 		}
-		if first < domainMinResumeStep {
+		if first < domainMinResumeStep[id] {
 			plan.deferredDomains[id] = true
-			at.a.deferredDomainWarnings[id].Do(func() {
-				at.a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume",
+			a.deferredDomainWarnings[id].Do(func() {
+				a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume",
 					"entity", d.d.Name, "pendingStep", first,
 					"ceilingStep", ceilingStep, "retainedIn", "MDBX")
 			})
 			continue
 		}
-		if !at.visible.unalignedDomain[id] {
+		if !unalignedDomains[id] {
 			plan.domainFirstStep[id] = first
 		}
 		plan.firstStep = min(plan.firstStep, first)
 	}
 	for id, ii := range at.standaloneIIs() {
-		if ii == nil || !ii.ii.Enabled.Load() {
+		if ii == nil || !ii.visible.enabled {
 			plan.deferredIndices[id] = true
 			continue
 		}
@@ -2394,11 +2402,7 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 		if filesEndStep >= ceilingStep {
 			continue
 		}
-		indexMinResumeStep := minResumeStep
-		if at.visible.unalignedIdx[id] || at.visible.indexHasFiles[id] {
-			indexMinResumeStep = 0
-		}
-		plan.indexFirstStep[id] = max(filesEndStep, indexMinResumeStep)
+		plan.indexFirstStep[id] = max(filesEndStep, indexMinResumeStep[id])
 		first, found, err := ii.ii.firstStepInDB(tx)
 		if err != nil {
 			return plan, err
@@ -2407,16 +2411,16 @@ func (at *AggregatorRoTx) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 			continue
 		}
 		first = max(filesEndStep, first)
-		if first < indexMinResumeStep {
+		if first < indexMinResumeStep[id] {
 			plan.deferredIndices[id] = true
-			at.a.deferredIndexWarnings[id].Do(func() {
-				at.a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume",
+			a.deferredIndexWarnings[id].Do(func() {
+				a.logger.Warn("[snapshots] file build deferred; rebuild missing snapshots to resume",
 					"entity", ii.ii.Name, "pendingStep", first,
 					"ceilingStep", ceilingStep, "retainedIn", "MDBX")
 			})
 			continue
 		}
-		if !at.visible.unalignedIdx[id] {
+		if !unalignedIndices[id] {
 			plan.indexFirstStep[id] = first
 		}
 		plan.firstStep = min(plan.firstStep, first)
@@ -2697,7 +2701,7 @@ func (at *AggregatorRoTx) Generation() uint64 { return at.visible.generation }
 // erigon without `integration stage_exec --reset`. Meant to run once at startup.
 func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
 	for _, dt := range at.d {
-		if dt == nil || !dt.d.Enabled.Load() {
+		if dt == nil || !dt.visible.enabled {
 			continue
 		}
 		if err := dt.checkFilesDBGap(tx); err != nil {
@@ -2708,7 +2712,7 @@ func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
 		}
 	}
 	for _, iit := range at.iis {
-		if iit == nil || !iit.ii.Enabled.Load() {
+		if iit == nil || !iit.visible.enabled {
 			continue
 		}
 		if err := iit.checkFilesDBGap(tx); err != nil {

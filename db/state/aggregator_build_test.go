@@ -139,8 +139,6 @@ func TestAggregatorBuildResumesCommitmentBehindState(t *testing.T) {
 func TestAggregatorEnableDomainDuringFilePlanning(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, 10)
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-		at := agg.BeginFilesRo()
-		defer at.Close()
 		var writers sync.WaitGroup
 		writers.Go(func() {
 			for range 100 {
@@ -149,7 +147,7 @@ func TestAggregatorEnableDomainDuringFilePlanning(t *testing.T) {
 		})
 		defer writers.Wait()
 		for range 100 {
-			plan, err := at.planFileBuild(tx)
+			plan, err := agg.planFileBuild(tx)
 			require.NoError(t, err)
 			require.Zero(t, plan.firstStep)
 		}
@@ -157,7 +155,45 @@ func TestAggregatorEnableDomainDuringFilePlanning(t *testing.T) {
 	}))
 }
 
-func TestAggregatorBuildDefersNewlyEnabledEntities(t *testing.T) {
+func TestAggregatorEnableDomainKeepsPinnedView(t *testing.T) {
+	db, agg := testDbAndAggregatorv3(t, 10)
+	ctx := t.Context()
+	key, value := []byte{1}, []byte{7}
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		// A disabled domain can retain data from an earlier run.
+		writer := at.d[kv.RCacheDomain].newWriter(db, agg.dirs.Tmp, false)
+		defer writer.Close()
+		require.NoError(t, writer.PutWithPrev(key, value, 1, nil))
+		return writer.Flush(ctx, tx)
+	}))
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		before := agg.BeginFilesRo()
+		defer before.Close()
+		_, _, found, err := before.d[kv.RCacheDomain].GetLatest(key, tx)
+		require.NoError(t, err)
+		require.False(t, found)
+
+		agg.EnableDomain(kv.RCacheDomain)
+		after := agg.BeginFilesRo()
+		defer after.Close()
+		got, _, found, err := after.d[kv.RCacheDomain].GetLatest(key, tx)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, value, got)
+
+		_, _, found, err = before.d[kv.RCacheDomain].GetLatest(key, tx)
+		require.NoError(t, err)
+		require.False(t, found, "enabling a domain must not change an open reader")
+		writer := before.d[kv.RCacheDomain].NewWriter(db)
+		defer writer.Close()
+		require.True(t, writer.discard, "an old view must keep its write policy")
+		return nil
+	}))
+}
+
+func TestAggregatorBuildDefersNewlyEnabledDomain(t *testing.T) {
 	const stepSize = uint64(10)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	ctx := t.Context()
@@ -177,50 +213,35 @@ func TestAggregatorBuildDefersNewlyEnabledEntities(t *testing.T) {
 			require.NoError(t, writer.Flush(ctx, tx))
 			writer.Close()
 		}
-		writer := at.searchII(kv.LogAddrIdx).newWriter(db, agg.dirs.Tmp, false)
-		defer writer.close()
-		require.NoError(t, writer.Add(key, 1))
-		return writer.Flush(ctx, tx)
+		return nil
 	}))
 
 	// Disabled entities can still have MDBX data from an earlier run.
-	agg.d[kv.RCacheDomain].Enabled.Store(false)
-	logAddrs := agg.searchII(kv.LogAddrIdx)
-	logAddrs.Enabled.Store(false)
+	agg.dirtyFilesLock.Lock()
+	agg.d[kv.RCacheDomain].Enabled = false
+	agg.recalcVisibleFiles(nil)
+	agg.dirtyFilesLock.Unlock()
 	for step := range kv.Step(3) {
 		require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil))
 	}
 	var plan fileBuildPlan
 	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
-		at := agg.BeginFilesRo()
-		defer at.Close()
 		var err error
-		plan, err = at.planFileBuild(tx)
+		plan, err = agg.planFileBuild(tx)
 		return err
 	}))
 	require.Equal(t, kv.Step(3), plan.firstStep)
 	agg.EnableDomain(kv.RCacheDomain)
-	logAddrs.Enabled.Store(true)
 
 	assertPendingData := func(t *testing.T) {
 		t.Helper()
 		require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
 			at := agg.BeginFilesRo()
 			defer at.Close()
-			t.Run("domain", func(t *testing.T) {
-				got, _, found, err := at.d[kv.RCacheDomain].GetLatest(key, tx)
-				require.NoError(t, err)
-				require.True(t, found)
-				require.Equal(t, value, got)
-			})
-			t.Run("index", func(t *testing.T) {
-				entries, err := at.IndexRange(kv.LogAddrIdx, key, 0, int(5*stepSize), order.Asc, -1, tx)
-				require.NoError(t, err)
-				defer entries.Close()
-				txNums, err := stream.ToArray(entries)
-				require.NoError(t, err)
-				require.Equal(t, []uint64{1}, txNums)
-			})
+			got, _, found, err := at.d[kv.RCacheDomain].GetLatest(key, tx)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, value, got)
 			return nil
 		}))
 	}
@@ -373,9 +394,9 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 						realign = agg.Unalign(targetDomain)
 					}
 				}
-				if !isIndex && targetDomain == kv.ReceiptDomain {
-					require.Zero(t, agg.d[kv.ReceiptDomain].History.dirtyFiles.Len(), "incomplete receipt history must be detached before rebuilding")
-					require.Zero(t, agg.d[kv.ReceiptDomain].History.InvertedIndex.dirtyFiles.Len(), "incomplete receipt indices must be detached before rebuilding")
+				if !isIndex && !withoutHistory && targetDomain == kv.ReceiptDomain {
+					require.NotZero(t, agg.d[kv.ReceiptDomain].History.dirtyFiles.Len(), "incomplete history must remain available for recovery")
+					require.NotZero(t, agg.d[kv.ReceiptDomain].History.InvertedIndex.dirtyFiles.Len())
 				}
 				require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
 					at := agg.BeginFilesRo()
@@ -389,7 +410,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					if !isIndex {
 						counted.table = agg.d[targetDomain].ValuesTable
 					}
-					plan, err := at.planFileBuild(counted)
+					plan, err := agg.planFileBuild(counted)
 					require.NoError(t, err)
 					if deferred {
 						require.Equal(t, test.stateSteps, plan.firstStep, "an unsafe backfill must not block healthy entities")
@@ -581,8 +602,7 @@ func TestAggregatorBuildRespectsSharedCeiling(t *testing.T) {
 				// Missing accessors cut every readable list, but recovery must still
 				// respect the shared ceiling of the files on disk.
 				require.Equal(t, test.visibleStateSteps*stepSize, at.TxNumsInFiles(kv.StateDomains...))
-				require.Equal(t, 3*stepSize, at.visible.ceilingTxNum)
-				plan, err := at.planFileBuild(tx)
+				plan, err := agg.planFileBuild(tx)
 				require.NoError(t, err)
 				require.Equal(t, kv.Step(test.visibleStateSteps), plan.firstStep)
 				for id, ii := range at.standaloneIIs() {
