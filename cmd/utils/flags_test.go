@@ -483,10 +483,11 @@ func TestSetEthConfigWiresCommitmentV3Flag(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	commitmentV3Flag := ExperimentalCommitmentV3Flag
 	downloaderAddrFlag := DownloaderAddrFlag
+	chainFlag := ChainFlag
 	var cfg ethconfig.Config
 	nodeConfig := nodecfg.Config{}
 	app := &cli.Command{
-		Flags: []cli.Flag{&commitmentV3Flag, &downloaderAddrFlag},
+		Flags: []cli.Flag{&commitmentV3Flag, &downloaderAddrFlag, &chainFlag},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			SetEthConfig(ctx, cmd, &nodeConfig, &cfg, log.Root())
 			return nil

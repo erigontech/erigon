@@ -54,7 +54,7 @@ func TestCommitmentBranchRejectsCommitmentV3(t *testing.T) {
 	t.Cleanup(func() { statecfg.ExperimentalCommitmentV3 = previous })
 
 	root := integrationRoot()
-	root.SetArgs([]string{"--log.dir.disable", "commitment", "branch"})
+	root.SetArgs([]string{"--log.dir.disable", "commitment", "branch", "--datadir", t.TempDir(), "--chain", "mainnet"})
 	require.ErrorContains(t, root.ExecuteContext(t.Context()), "not supported on commitment v3")
 }
 
