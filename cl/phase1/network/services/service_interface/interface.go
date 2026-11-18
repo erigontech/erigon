@@ -30,3 +30,16 @@ type Service[T any] interface {
 	DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (T, error)
 	ProcessMessage(ctx context.Context, subnet *uint64, msg T) error
 }
+
+type gossipPeerKey struct{}
+
+// WithGossipPeer returns ctx carrying the peer that forwarded the gossip message.
+func WithGossipPeer(ctx context.Context, pid peer.ID) context.Context {
+	return context.WithValue(ctx, gossipPeerKey{}, pid)
+}
+
+// GossipPeer returns the peer that forwarded the gossip message, if known.
+func GossipPeer(ctx context.Context) (peer.ID, bool) {
+	pid, _ := ctx.Value(gossipPeerKey{}).(peer.ID)
+	return pid, pid != ""
+}
