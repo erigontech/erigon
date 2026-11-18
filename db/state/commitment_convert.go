@@ -906,7 +906,7 @@ const restoreManifestTmpName = ".restore_manifest.tmp"
 // Refuses before moving anything if a live v3 commitment data file has no
 // matching range in its existing backup dir, or if snapshots/backup/domains/
 // is missing or empty without a history backup or a v3 restore.
-// On success, empty backup dirs are removed. Restart erigon to pick up the restored files.
+// On success, empty backup dirs are removed. Run integration stage_exec --reset before restarting erigon.
 //
 // Safe to re-run after a partial failure: the first attempt persists a manifest
 // listing every file that needs to be restored, and subsequent attempts use

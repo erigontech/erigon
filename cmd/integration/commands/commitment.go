@@ -621,7 +621,7 @@ func commitmentRestore(ctx context.Context, logger log.Logger) error {
 }
 
 func enableCommitmentConvertHistory(ctx context.Context, logger log.Logger) error {
-	db, err := openRawDB(dbCfg(dbcfg.ChainDB, chaindata), false, logger)
+	db, err := openRawDB(dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 	if err != nil {
 		return fmt.Errorf("opening DB to read commitment history setting: %w", err)
 	}

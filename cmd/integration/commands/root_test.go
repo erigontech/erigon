@@ -89,6 +89,20 @@ func TestOpenRawDBCreatesTableAfterUncleanShutdown(t *testing.T) {
 	requirePendingMigrations(t, dataDir, logger, false)
 }
 
+func TestCommitmentConvertHistoryProbeAppliesPendingMigrations(t *testing.T) {
+	logger := log.New()
+	dataDir := useTestDatadir(t)
+	previousChaindata := chaindata
+	chaindata = filepath.Join(dataDir, "chaindata")
+	t.Cleanup(func() { chaindata = previousChaindata })
+
+	createDBWithoutPtcTable(t, dbcfg.ChainDB, chaindata, kv.ChaindataTablesCfg)
+	markMigrationsAppliedExcept(t, dataDir, logger, "create_ptc_window_epoch_table")
+
+	require.NotPanics(t, func() { require.NoError(t, enableCommitmentConvertHistory(t.Context(), logger)) })
+	requirePendingMigrations(t, dataDir, logger, false)
+}
+
 func TestOpenRawDBUncleanShutdownHelperProcess(t *testing.T) {
 	path := os.Getenv(uncleanShutdownPathEnv)
 	if path == "" {
