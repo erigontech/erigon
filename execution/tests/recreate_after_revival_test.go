@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -48,8 +47,9 @@ func setExecWorkers(t *testing.T, workers int) {
 	ethconfig.Defaults.Sync.ExecWorkerCount = workers
 }
 
-// generatedBlockWant pins the root and gas of generated blocks, as the non-versioned generator built them.
-// Generation and import share the versioned state code, so neither can check the other.
+// generatedBlockWant pins the root and gas of generated blocks, as the removed serial executor computed them.
+// Generation and import share the versioned state code, so the missing-entry hint checks nothing: check a new
+// row against an independent source (another client, or the expected state worked out by hand).
 var generatedBlockWant = map[string]struct {
 	root string
 	gas  uint64
@@ -80,6 +80,8 @@ var generatedBlockWant = map[string]struct {
 	"TestCoinbaseRecreatedWithCodeAfterFeeRevival/amsterdam=true":                       {"0x29d9c0b0bbd07c2a06f0e2c55ea1f04676ab9c710b08389f4c9765b3cc556d06", 232560},
 	"TestCreate2AfterCoinbaseDestructAndFeeRevival":                                     {"0x9f5bca819162e640333546263ed762c3d3ed5b65f0130b1c242ed6b73c517e60", 908647},
 	"TestCreate2AfterDestructAndTransferRevival":                                        {"0x9ac7dae57dab901312f629da58429619436b41ed1da83348ba3a48587444810a", 185647},
+	"TestCreate2OverStorageOnlyAccountReplacesItsStorage/amsterdam":                     {"0x3d17c5551d42fdc4d2032fcec9e39520832fdc557dd000b7203a3bc377fb8dba", 97920},
+	"TestCreate2OverStorageOnlyAccountReplacesItsStorage/prague":                        {"0x98adec99881cc8d35f9329cf1b85b414ffa616577e349068d2205963cd383812", 75183},
 	"TestCreateAfterSameTxRevival/osaka":                                                {"0xa7158442c8b79c9264115e2c6c56a57f62e5f4a150169bd59f80afeb3b674e01", 176348},
 	"TestCreateAfterSameTxRevival/shanghai":                                             {"0xa7158442c8b79c9264115e2c6c56a57f62e5f4a150169bd59f80afeb3b674e01", 176348},
 	"TestCreditedEmptyAccountIsKept/burnt-fee_recipient_with_a_non-zero_burn/amsterdam": {"0x35f5a7f038bfd5a4d33cb7e28ca02099e9ed963d06ed83201dafcf1b24fcbb3d", 15000},
@@ -91,11 +93,11 @@ var generatedBlockWant = map[string]struct {
 	"TestCreditedEmptyAccountIsKept/value_call/amsterdam":                               {"0x34f3de35fc1de9b305678716b564f027d71788d10a6d610c6e74f64a98dcf574", 183600},
 	"TestCreditedEmptyAccountIsKept/value_call/prague":                                  {"0x87a9d76605f9800e1251ab6ab8ea9e19a0a538c282a187f40722777c63a31491", 55320},
 	"TestDroppedNetZeroWrite":                                                           {"0x658c99d04fb32f9cfd318febd4543a8395ff039618f260537879dfe27298a003", 1297980},
-	"TestEIP8246CoinbaseSelfdestructPreservesBalance/parallel":                          {"0xf0ab463ec68d3d0ee3ce4b16fa4416289b51e30619b790516ac5f68920eb4d10", 183600},
-	"TestEIP8246FundedThenSelfdestructedAccount/parallel/workers=1":                     {"0x5b0f55b567bf4f2d38a84319121094cb597c0b70d738e8953c936014e90dde38", 183600},
-	"TestEIP8246FundedThenSelfdestructedAccount/parallel/workers=4":                     {"0x5b0f55b567bf4f2d38a84319121094cb597c0b70d738e8953c936014e90dde38", 183600},
-	"TestEIP8246PreserveToNonSelfBeneficiaryThenCredited/parallel/workers=1":            {"0xc618810598298363b14ed044142939326321fb178632b6f126c0257d6bee9802", 550800},
-	"TestEIP8246PreserveToNonSelfBeneficiaryThenCredited/parallel/workers=4":            {"0xc618810598298363b14ed044142939326321fb178632b6f126c0257d6bee9802", 550800},
+	"TestEIP8246CoinbaseSelfdestructPreservesBalance":                                   {"0xf0ab463ec68d3d0ee3ce4b16fa4416289b51e30619b790516ac5f68920eb4d10", 183600},
+	"TestEIP8246FundedThenSelfdestructedAccount/workers=1":                              {"0x5b0f55b567bf4f2d38a84319121094cb597c0b70d738e8953c936014e90dde38", 183600},
+	"TestEIP8246FundedThenSelfdestructedAccount/workers=4":                              {"0x5b0f55b567bf4f2d38a84319121094cb597c0b70d738e8953c936014e90dde38", 183600},
+	"TestEIP8246PreserveToNonSelfBeneficiaryThenCredited/workers=1":                     {"0xc618810598298363b14ed044142939326321fb178632b6f126c0257d6bee9802", 550800},
+	"TestEIP8246PreserveToNonSelfBeneficiaryThenCredited/workers=4":                     {"0xc618810598298363b14ed044142939326321fb178632b6f126c0257d6bee9802", 550800},
 	"TestEmptiedContractIsKept/amsterdam":                                               {"0x5eebd76796247ca6375a5e606dc21baec1f4633ff2139eec8098f52cb7f50aca", 183600},
 	"TestEmptiedContractIsKept/prague":                                                  {"0x9e3fe459f4675dcb45a8e65940cc5196b1d3637d9e23f10b65c7900d8d95c069", 64642},
 	"TestFeeRevivingTouchedRecipientIsVisibleToLaterReads/burnt/amsterdam":              {"0xb783fa7ef727c5000fc892b87e2986c9d29dbc17f450401118ccd294756e4dd0", 3035520},
@@ -105,11 +107,15 @@ var generatedBlockWant = map[string]struct {
 	"TestFeeRevivingTouchedRecipientIsVisibleToLaterReads/coinbase/london":              {"0x900e3f8a89edc137f241db7977bb6ea17006acc31bf34da241b35ca4e09e450b", 1440475},
 	"TestFeeRevivingTouchedRecipientIsVisibleToLaterReads/coinbase/prague":              {"0x5e40df368f0d786cc4324f0cf3dbecb7ab64e84ab46cba5967825822c58617cf", 1360475},
 	"TestParallelBatchStorageAndHistoryMatchSerial":                                     {"0xad3f85347ed48c2e374570af706950dbaefec68ec1112246f9030836e1bbc4df", 87974},
-	"TestRevertedCreate2KeepsCredits/parallel":                                          {"0x617c60d82936ee9eb9a83daaae8bd4feb1ab50716417a3f14506bcd5476eba75", 281520},
+	"TestRevertedCreate2KeepsCredits":                                                   {"0x617c60d82936ee9eb9a83daaae8bd4feb1ab50716417a3f14506bcd5476eba75", 281520},
 	"TestRevertedSelfdestructKeepsCreateEndowment/amsterdam=false":                      {"0x1876dda970bbd77e904b2b7fdc5c674e17d38d65d56506fabfd743efbf0d837f", 162166},
 	"TestRevertedSelfdestructKeepsCreateEndowment/amsterdam=true":                       {"0x266a5cde6739b5ccf4246279e28ac5fa0134471766ab2fd259c5b20da7524afb", 201960},
 	"TestSelfdestructRefundAfterRecreate/berlin":                                        {"0x6c00adbbe82a30f808465bf07c80d70793ff29bededc4ab63aab3c50cfa6e5db", 246372},
 	"TestSelfdestructRefundAfterRecreate/petersburg":                                    {"0x552c5fe09dfd21423cae06da59d18cb1c44c44e0cc13bc82381217ac952fc1d5", 233172},
+	"TestSelfdestructRefundInTxAfterRecreate/berlin":                                    {"0xebd30387316ce450e736cdb8f8289a7995eb0f83f574ff9a4cf5775f547f025d", 166543},
+	"TestSelfdestructRefundInTxAfterRecreate/petersburg":                                {"0xdc15d9db6c68f2f33382ae21d7e77e53415c5b8c638ee32f9e08e37f33e8c1fe", 162043},
+	"TestSelfdestructRefundOncePerTx/berlin":                                            {"0x691e15c187ee18959efdd606d269e277075d5759e5fc6442fd8c0aa5381a1512", 512707},
+	"TestSelfdestructRefundOncePerTx/petersburg":                                        {"0x059ac83c33d636102399a612ace142a90bacf1cb51e6ec22026aee7a1bc8342b", 1437807},
 	"TestStorageReadAfterRecreate/osaka":                                                {"0x4566ac309f9379db840cddaad60371b2631881026bee2b0e39410138373c373b", 981981},
 	"TestStorageReadAfterRecreate/shanghai":                                             {"0x110266e0cc2a44f0dc18346331985645aa11e6d811b16108b3157fb53b9a7fec", 1027547},
 	"TestTouchedStorageOnlyAccountIsAbsentForLaterTx/amsterdam":                         {"0xac06f2a6d73d1dcecc65cefb9006695e47caee746664fe36c70a6b7be252f187", 183600},
@@ -159,11 +165,10 @@ type revivalCall struct {
 // counts and checks the resulting state.
 func importInParallel(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKey, chainPack *blockgen.ChainPack, check func(t *testing.T, st *state.IntraBlockState)) {
 	t.Helper()
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 	for _, workers := range []int{1, 2, 4, 8} {
 		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
-			dbg.Exec3Parallel = true
 			ethconfig.Defaults.Sync.ExecWorkerCount = workers
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 			require.NoError(t, m.InsertChain(chainPack))

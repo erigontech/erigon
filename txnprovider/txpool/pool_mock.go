@@ -351,6 +351,42 @@ func (c *MockPoolIdHashKnownCall) DoAndReturn(f func(kv.Tx, []byte) (bool, error
 	return c
 }
 
+// MarkStateStale mocks base method.
+func (m *MockPool) MarkStateStale() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "MarkStateStale")
+}
+
+// MarkStateStale indicates an expected call of MarkStateStale.
+func (mr *MockPoolMockRecorder) MarkStateStale() *MockPoolMarkStateStaleCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkStateStale", reflect.TypeOf((*MockPool)(nil).MarkStateStale))
+	return &MockPoolMarkStateStaleCall{Call: call}
+}
+
+// MockPoolMarkStateStaleCall wrap *gomock.Call
+type MockPoolMarkStateStaleCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPoolMarkStateStaleCall) Return() *MockPoolMarkStateStaleCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPoolMarkStateStaleCall) Do(f func()) *MockPoolMarkStateStaleCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPoolMarkStateStaleCall) DoAndReturn(f func()) *MockPoolMarkStateStaleCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // OnNewBlock mocks base method.
 func (m *MockPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
 	m.ctrl.T.Helper()
@@ -421,6 +457,42 @@ func (c *MockPoolRejectFramePrefixCall) Do(f func(common.Hash)) *MockPoolRejectF
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockPoolRejectFramePrefixCall) DoAndReturn(f func(common.Hash)) *MockPoolRejectFramePrefixCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// RetainBogotaActivation mocks base method.
+func (m *MockPool) RetainBogotaActivation(changes *remoteproto.StateChangeBatch) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "RetainBogotaActivation", changes)
+}
+
+// RetainBogotaActivation indicates an expected call of RetainBogotaActivation.
+func (mr *MockPoolMockRecorder) RetainBogotaActivation(changes any) *MockPoolRetainBogotaActivationCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RetainBogotaActivation", reflect.TypeOf((*MockPool)(nil).RetainBogotaActivation), changes)
+	return &MockPoolRetainBogotaActivationCall{Call: call}
+}
+
+// MockPoolRetainBogotaActivationCall wrap *gomock.Call
+type MockPoolRetainBogotaActivationCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPoolRetainBogotaActivationCall) Return() *MockPoolRetainBogotaActivationCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPoolRetainBogotaActivationCall) Do(f func(*remoteproto.StateChangeBatch)) *MockPoolRetainBogotaActivationCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPoolRetainBogotaActivationCall) DoAndReturn(f func(*remoteproto.StateChangeBatch)) *MockPoolRetainBogotaActivationCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

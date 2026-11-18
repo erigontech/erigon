@@ -260,8 +260,6 @@ func TestNextBlockReadsThePreviousBlockWrite(t *testing.T) {
 }
 
 func testNextBlockReadsThePreviousBlockWrite(t *testing.T, amsterdam bool) {
-	prevParallel := dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
 
 	config := chain.AllProtocolChanges.Copy()
 	if !amsterdam {
@@ -290,7 +288,6 @@ func testNextBlockReadsThePreviousBlockWrite(t *testing.T, amsterdam bool) {
 	})
 	require.NoError(t, err)
 
-	dbg.Exec3Parallel = true
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
 	require.NoError(t, m.InsertChain(blocks))
 }
@@ -305,9 +302,6 @@ type counterChain struct {
 }
 
 func newCounterChain(t *testing.T, amsterdam bool) *counterChain {
-	prevParallel := dbg.Exec3Parallel
-	t.Cleanup(func() { dbg.Exec3Parallel = prevParallel })
-	dbg.Exec3Parallel = true
 
 	config := chain.AllProtocolChanges.Copy()
 	if !amsterdam {

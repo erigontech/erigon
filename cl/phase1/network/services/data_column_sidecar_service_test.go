@@ -418,8 +418,6 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidInclusionProo
 // before compute_start_slot_at_epoch(finalized_checkpoint.epoch) are ignored, not the whole finalized epoch.
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSlotAfterFinalizedEpochStart_PassesFinalityCheck() {
 	t.setupFinalizedAncestorTest(testFinalizedRoot)
-	// The sidecar's slot is in the finalized epoch but after its start slot. FinalizedSlot() returns
-	// the last slot of that epoch, as ForkChoiceStore does.
 	finalizedEpoch := testSlot / testSlotsPerEpoch
 	t.Require().Greater(testSlot, finalizedEpoch*testSlotsPerEpoch)
 	t.mockForkChoice.Ancestors[finalizedEpoch*testSlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: testFinalizedRoot}
@@ -1288,7 +1286,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDropsSeenSidecar() {
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	service.scheduleSidecarForLaterProcessing(sidecar)
 	t.Require().Equal(int32(1), service.pendingGloasSidecars.count.Load())
-	service.seenGloasSidecar.Add(seenGloasSidecarKey{testBlockRoot, sidecar.Index}, struct{}{})
+	service.seenGloas.claim(seenGloasSidecarKey{testBlockRoot, sidecar.Index})
 	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
 
 	service.pendingGloasSidecars.processPending(t.T().Context())
@@ -1333,7 +1331,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueProcessesSidecarAtBlob
 	service.pendingGloasSidecars.processPending(t.T().Context())
 
 	t.Zero(service.pendingGloasSidecars.count.Load())
-	_, seen := service.seenGloasSidecar.Get(seenGloasSidecarKey{
+	seen := service.seenGloas.contains(seenGloasSidecarKey{
 		beaconBlockRoot: testBlockRoot,
 		index:           sidecar.Index,
 	})
@@ -1438,6 +1436,35 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenValid_StoresSuc
 	t.NoError(err)
 }
 
+// Columns built from EL blobs claim their keys while a gossip copy is being validated: the copy is a duplicate, so it
+// is ignored, not stored or forwarded.
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenALocalClaimIsTakenDuringValidation_IgnoresTheCopy() {
+	t.activateGloas()
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	verifyDataColumnSidecarWithCommitments = t.mockFuncs.VerifyDataColumnSidecarWithCommitments
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
+	verifyDataColumnSidecarKZGProofsWithCommitments = func(sidecar *cltypes.DataColumnSidecar, _ *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
+		service.ClaimColumns([]*cltypes.DataColumnSidecar{sidecar})
+		t.True(service.seenGloas.contains(seenGloasSidecarKey{beaconBlockRoot: sidecar.BeaconBlockRoot, index: sidecar.Index}))
+		return true
+	}
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+	t.mockEthClock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{1, 2, 3, 4}, nil).AnyTimes()
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
+	writes, recoveries := 0, 0
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error { writes++; return nil }).AnyTimes()
+	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(uint64, common.Hash) error { recoveries++; return nil }).AnyTimes()
+
+	err := service.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot))
+
+	t.ErrorIs(err, ErrIgnore)
+	t.Zero(writes)
+	t.Zero(recoveries)
+}
+
 // TestGloasProcessMessage_WhenStorageFails_ReturnsError tests GLOAS storage failure
 func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenStorageFails_ReturnsError() {
 	t.activateGloas()
@@ -1460,7 +1487,29 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenStorageFails_Re
 	t.Error(err)
 	t.ErrorIs(err, ErrIgnore)
 	t.Contains(err.Error(), "failed to write data column sidecar")
-	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloasSidecar.Get(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 0})
+	seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloas.contains(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 0})
+	t.False(seen)
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenStoragePanics_ReleasesTheClaim() {
+	t.activateGloas()
+	verifyDataColumnSidecarWithCommitments = t.mockFuncs.VerifyDataColumnSidecarWithCommitments
+	verifyDataColumnSidecarKZGProofsWithCommitments = t.mockFuncs.VerifyDataColumnSidecarKZGProofsWithCommitments
+
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
+	t.importBlock(testBlockRoot, createMockGloasBlock(testSlot))
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error { panic("encode failure") })
+
+	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
+	t.PanicsWithValue("encode failure", func() {
+		_ = t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
+	})
+
+	seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloas.contains(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 0})
 	t.False(seen)
 }
 
@@ -1507,7 +1556,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenValidSidecarOut
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot))
 
 	t.NoError(err)
-	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloasSidecar.Get(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 1})
+	seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloas.contains(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 1})
 	t.True(seen)
 }
 
@@ -1540,7 +1589,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenInvalidSidecarO
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot))
 
 	t.EqualError(err, "invalid kzg proofs for data column sidecar")
-	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloasSidecar.Get(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 1})
+	seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloas.contains(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 1})
 	t.False(seen)
 	t.Empty(events)
 }
@@ -1576,7 +1625,7 @@ func (t *dataColumnSidecarTestSuite) assertGloasArchiveSidecar(blobsRecovered, k
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot))
 
-	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloasSidecar.Get(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 1})
+	seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloas.contains(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 1})
 	if kzgProofsValid {
 		t.NoError(err)
 		t.True(seen)
@@ -1647,7 +1696,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPublishColumns_WhenBlockCannotBeIm
 
 	t.dataColumnSidecarService.PublishColumns(t.T().Context(), []*cltypes.DataColumnSidecar{createMockGloasDataColumnSidecar(testSlot, 1, testBlockRoot)})
 
-	_, seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloasSidecar.Get(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 1})
+	seen := t.dataColumnSidecarService.(*dataColumnSidecarService).seenGloas.contains(seenGloasSidecarKey{beaconBlockRoot: testBlockRoot, index: 1})
 	t.False(seen)
 }
 

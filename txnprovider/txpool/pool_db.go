@@ -33,29 +33,10 @@ import (
 )
 
 var (
-	PoolChainConfigKey    = []byte("chain_config")
-	PoolLastSeenBlockKey  = []byte("last_seen_block")
-	PoolPendingBaseFeeKey = []byte("pending_base_fee")
-	PoolPendingBlobFeeKey = []byte("pending_blob_fee")
-	PoolStateVersion      = []byte("state_version")
+	PoolChainConfigKey   = []byte("chain_config")
+	PoolLastSeenBlockKey = []byte("last_seen_block")
+	PoolStateVersion     = []byte("state_version")
 )
-
-func getExecutionProgress(db kv.Getter) (uint64, error) {
-	data, err := db.GetOne(kv.SyncStageProgress, []byte("Execution"))
-	if err != nil {
-		return 0, err
-	}
-
-	if len(data) == 0 {
-		return 0, nil
-	}
-
-	if len(data) < 8 {
-		return 0, fmt.Errorf("value must be at least 8 bytes, got %d", len(data))
-	}
-
-	return binary.BigEndian.Uint64(data[:8]), nil
-}
 
 func LastSeenBlock(tx kv.Getter) (uint64, error) {
 	v, err := tx.GetOne(kv.PoolInfo, PoolLastSeenBlockKey)

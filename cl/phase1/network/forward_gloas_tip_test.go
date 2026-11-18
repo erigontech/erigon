@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -850,42 +851,44 @@ func TestForwardBeaconDownloaderImportsTipAfterUnrelatedHigherBlock(t *testing.T
 			name = "while the block is held"
 		}
 		t.Run(name, func(t *testing.T) {
-			a := makeGloasBlock(9, hash(0xa0), common.Hash{})
-			b := makeGloasBlock(10, hash(0xb0), common.Hash{})
-			linkBeaconBlocks(t, a, b)
-			unrelated := makeGloasBlock(12, hash(0xdd), common.Hash{})
-			unrelated.Block.ParentRoot = hash(0xee)
+			synctest.Test(t, func(t *testing.T) {
+				a := makeGloasBlock(9, hash(0xa0), common.Hash{})
+				b := makeGloasBlock(10, hash(0xb0), common.Hash{})
+				linkBeaconBlocks(t, a, b)
+				unrelated := makeGloasBlock(12, hash(0xdd), common.Hash{})
+				unrelated.Block.ParentRoot = hash(0xee)
 
-			cfg := gloasFromGenesisConfig()
-			client, _ := newNoPeersRPC(t, cfg)
-			downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
-			downloader.SetHighestProcessedSlot(9)
-			downloader.SetCurrentSlotSampler(func() uint64 { return 13 })
-			var processedHeld bool
-			downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
-				for _, block := range blocks {
-					processedHeld = processedHeld || block == b
-					highest = block.Block.Slot
+				cfg := gloasFromGenesisConfig()
+				client, _ := newNoPeersRPC(t, cfg)
+				downloader := NewForwardBeaconDownloader(t.Context(), client, cfg)
+				downloader.SetHighestProcessedSlot(9)
+				downloader.SetCurrentSlotSampler(func() uint64 { return 13 })
+				var processedHeld bool
+				downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+					for _, block := range blocks {
+						processedHeld = processedHeld || block == b
+						highest = block.Block.Slot
+					}
+					return highest, nil
+				})
+
+				if heldWhenUnrelatedArrives {
+					downloadFromPeer(t, downloader, b)
+					require.Same(t, b, downloader.gloasLookahead)
 				}
-				return highest, nil
-			})
-
-			if heldWhenUnrelatedArrives {
+				downloadFromPeer(t, downloader, unrelated)
+				if !heldWhenUnrelatedArrives {
+					require.Same(t, unrelated, downloader.gloasLookahead)
+				}
 				downloadFromPeer(t, downloader, b)
+				if !heldWhenUnrelatedArrives {
+					downloadFromPeer(t, downloader, b)
+				}
 				require.Same(t, b, downloader.gloasLookahead)
-			}
-			downloadFromPeer(t, downloader, unrelated)
-			if !heldWhenUnrelatedArrives {
-				require.Same(t, unrelated, downloader.gloasLookahead)
-			}
-			downloadFromPeer(t, downloader, b)
-			if !heldWhenUnrelatedArrives {
-				downloadFromPeer(t, downloader, b)
-			}
-			require.Same(t, b, downloader.gloasLookahead)
-			answerEmpty(t, downloader)
-			require.True(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip))
-			require.True(t, processedHeld)
+				answerEmpty(t, downloader)
+				require.True(t, downloader.ImportHeldGloasTip(t.Context(), 50*time.Millisecond, acceptAnyTip))
+				require.True(t, processedHeld)
+			})
 		})
 	}
 }
@@ -1086,52 +1089,58 @@ func TestForwardBeaconDownloaderKeepsDownloadedParentRecordBounded(t *testing.T)
 	}
 
 	t.Run("rejected responses", func(t *testing.T) {
-		downloader := newDownloader(t)
-		parent := makeGloasBlock(9, hash(0xa0), common.Hash{})
-		held := makeGloasBlock(10, hash(0xb0), common.Hash{})
-		linkBeaconBlocks(t, parent, held)
-		downloadFromPeer(t, downloader, parent, held)
-		for i := range 5 {
-			require.Same(t, held, downloader.gloasLookahead)
-			downloadFromPeer(t, downloader, farBlock(i))
-			require.Nil(t, downloader.gloasLookahead)
-			downloadFromPeer(t, downloader, held)
-		}
-		require.LessOrEqual(t, len(downloader.gloasDownloadedParents), 2)
+		synctest.Test(t, func(t *testing.T) {
+			downloader := newDownloader(t)
+			parent := makeGloasBlock(9, hash(0xa0), common.Hash{})
+			held := makeGloasBlock(10, hash(0xb0), common.Hash{})
+			linkBeaconBlocks(t, parent, held)
+			downloadFromPeer(t, downloader, parent, held)
+			for i := range 5 {
+				require.Same(t, held, downloader.gloasLookahead)
+				downloadFromPeer(t, downloader, farBlock(i))
+				require.Nil(t, downloader.gloasLookahead)
+				downloadFromPeer(t, downloader, held)
+			}
+			require.LessOrEqual(t, len(downloader.gloasDownloadedParents), 2)
+		})
 	})
 
 	t.Run("far children of processed blocks", func(t *testing.T) {
-		downloader := newDownloader(t)
-		var previous *cltypes.SignedBeaconBlock
-		for i := range 5 {
-			block := makeGloasBlock(9+uint64(i), hash(byte(0x80+i)), common.Hash{})
-			child := makeGloasBlock(2000+uint64(i), hash(0xcc), common.Hash{})
-			if previous != nil {
-				linkBeaconBlocks(t, previous, block)
+		synctest.Test(t, func(t *testing.T) {
+			downloader := newDownloader(t)
+			var previous *cltypes.SignedBeaconBlock
+			for i := range 5 {
+				block := makeGloasBlock(9+uint64(i), hash(byte(0x80+i)), common.Hash{})
+				child := makeGloasBlock(2000+uint64(i), hash(0xcc), common.Hash{})
+				if previous != nil {
+					linkBeaconBlocks(t, previous, block)
+				}
+				linkBeaconBlocks(t, block, child)
+				downloadFromPeer(t, downloader, block, child)
+				require.Same(t, child, downloader.gloasLookahead)
+				downloadFromPeer(t, downloader, farBlock(i))
+				require.Nil(t, downloader.gloasLookahead)
+				previous = block
 			}
-			linkBeaconBlocks(t, block, child)
-			downloadFromPeer(t, downloader, block, child)
-			require.Same(t, child, downloader.gloasLookahead)
-			downloadFromPeer(t, downloader, farBlock(i))
-			require.Nil(t, downloader.gloasLookahead)
-			previous = block
-		}
-		require.Equal(t, uint64(13), downloader.GetHighestProcessedSlot())
-		require.LessOrEqual(t, len(downloader.gloasDownloadedParents), 2)
+			require.Equal(t, uint64(13), downloader.GetHighestProcessedSlot())
+			require.LessOrEqual(t, len(downloader.gloasDownloadedParents), 2)
+		})
 	})
 
 	t.Run("accepted but unprocessed responses", func(t *testing.T) {
-		downloader := newDownloader(t)
-		downloader.gloasDownloadedParents = map[common.Hash]uint64{}
-		for i := range maxGloasDownloadedParents {
-			downloader.gloasDownloadedParents[common.Hash{0xee, byte(i), byte(i >> 8)}] = 5000
-		}
-		parent := makeGloasBlock(9, hash(0xa0), common.Hash{})
-		held := makeGloasBlock(10, hash(0xb0), common.Hash{})
-		linkBeaconBlocks(t, parent, held)
-		downloadFromPeer(t, downloader, parent, held)
-		require.Same(t, held, downloader.gloasLookahead)
-		require.LessOrEqual(t, len(downloader.gloasDownloadedParents), 2)
-		require.Contains(t, downloader.gloasDownloadedParents, held.Block.ParentRoot)
+		synctest.Test(t, func(t *testing.T) {
+			downloader := newDownloader(t)
+			downloader.gloasDownloadedParents = map[common.Hash]uint64{}
+			for i := range maxGloasDownloadedParents {
+				downloader.gloasDownloadedParents[common.Hash{0xee, byte(i), byte(i >> 8)}] = 5000
+			}
+			parent := makeGloasBlock(9, hash(0xa0), common.Hash{})
+			held := makeGloasBlock(10, hash(0xb0), common.Hash{})
+			linkBeaconBlocks(t, parent, held)
+			downloadFromPeer(t, downloader, parent, held)
+			require.Same(t, held, downloader.gloasLookahead)
+			require.LessOrEqual(t, len(downloader.gloasDownloadedParents), 2)
+			require.Contains(t, downloader.gloasDownloadedParents, held.Block.ParentRoot)
+		})
 	})
 }

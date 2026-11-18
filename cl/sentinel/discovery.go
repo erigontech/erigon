@@ -43,8 +43,8 @@ import (
 const (
 	goRoutinesOpeningPeerConnections = 4
 	attestationSubnetCount           = 64
-	// Subscribers wanted per attestation subnet before the proactive search stops: the mesh low watermark, so
-	// gossipsub can fill a subnet's mesh.
+	// Subscribers wanted per attestation subnet before the proactive search stops, and kept by pruning when possible:
+	// the mesh low watermark, so gossipsub can fill a subnet's mesh.
 	minimumPeersPerSubnet = gossip.GossipSubDlo
 	subnetSearchTimeout   = 30 * time.Second
 	subnetSearchInterval  = 12 * time.Second // Check every slot
@@ -348,6 +348,7 @@ func peerCountToPrune(counts peerCounts, maxPeers int) int {
 	return toRemove
 }
 
+// selectPeersToPrune prefers peers whose removal keeps every subnet at minimumPeersPerSubnet, and otherwise never empties a subnet.
 func selectPeersToPrune(candidates []pruneCandidate, coverage [attestationSubnetCount]int, toRemove, outboundReserve int) []peer.ID {
 	slices.SortFunc(candidates, func(a, b pruneCandidate) int {
 		if bySubnets := cmp.Compare(len(a.subnets), len(b.subnets)); bySubnets != 0 {
@@ -370,22 +371,29 @@ func selectPeersToPrune(candidates []pruneCandidate, coverage [attestationSubnet
 	}
 
 	selected := make([]peer.ID, 0, min(toRemove, len(candidates)))
-	for _, candidate := range candidates {
-		if len(selected) == toRemove {
-			break
-		}
-		if !candidate.inbound && outboundCount <= outboundReserve {
-			continue
-		}
-		if slices.ContainsFunc(candidate.subnets, func(subnet int) bool { return coverage[subnet] <= 1 }) {
-			continue
-		}
-		selected = append(selected, candidate.pid)
-		if !candidate.inbound {
-			outboundCount--
-		}
-		for _, subnet := range candidate.subnets {
-			coverage[subnet]--
+	taken := make([]bool, len(candidates))
+	for _, floor := range []int{minimumPeersPerSubnet, 1} {
+		for i, candidate := range candidates {
+			if len(selected) == toRemove {
+				return selected
+			}
+			if taken[i] {
+				continue
+			}
+			if !candidate.inbound && outboundCount <= outboundReserve {
+				continue
+			}
+			if slices.ContainsFunc(candidate.subnets, func(subnet int) bool { return coverage[subnet] <= floor }) {
+				continue
+			}
+			taken[i] = true
+			selected = append(selected, candidate.pid)
+			if !candidate.inbound {
+				outboundCount--
+			}
+			for _, subnet := range candidate.subnets {
+				coverage[subnet]--
+			}
 		}
 	}
 	return selected

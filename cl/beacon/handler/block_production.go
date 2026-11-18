@@ -103,7 +103,7 @@ const (
 const (
 	minPayloadPollingWindow     = 100 * time.Millisecond
 	builderHandoffRetryInterval = 500 * time.Millisecond
-	// A published block is normally imported within one block service tick (50 ms) plus OnBlock; the bound caps how
+	// A published block is normally imported as soon as the block service is woken for it, plus OnBlock; the bound caps how
 	// long a stalled store can delay the block's data columns and a publish response without the integration wait.
 	publishedBlockStoreWaitBeforeColumns = time.Second
 )
@@ -1235,7 +1235,7 @@ func (a *ApiHandler) produceBlock(
 		ParentRoot:    baseBlockRoot,
 		Cfg:           a.beaconChainCfg,
 	}
-	if builderHeader == nil || !a.routerCfg.Builder || builderErr != nil || stateVersion.AfterOrEqual(clparams.GloasVersion) {
+	if builderHeader == nil || !a.builderRelayEnabled() || builderErr != nil || stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		// Gloas compares P2P and configured builder bids against the local value.
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 			selfBid := beaconBody.SignedExecutionPayloadBid.Message
@@ -1665,7 +1665,7 @@ func (a *ApiHandler) getBuilderPayload(
 	baseState *state.CachingBeaconState,
 	targetSlot uint64,
 ) (*builder.ExecutionHeader, *big.Int, error) {
-	if !a.routerCfg.Builder || a.builderClient == nil {
+	if !a.builderRelayEnabled() {
 		return nil, nil, errBuilderNotEnabled
 	}
 
@@ -2379,6 +2379,9 @@ func (a *ApiHandler) postBeaconBlocks(r *http.Request, apiVersion int) (*beaconh
 	// Decode the block
 	block, err := a.parseRequestBeaconBlock(version, r)
 	if err != nil {
+		if _, ok := errors.AsType[*beaconhttp.EndpointError](err); ok {
+			return nil, err
+		}
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	requestBundles, err := a.requestBlobBundles(block)
@@ -2669,7 +2672,16 @@ func (a *ApiHandler) publishBlindedBlocks(r *http.Request, apiVersion int) (*bea
 
 	signedBlindedBlock := cltypes.NewSignedBlindedBeaconBlock(a.beaconChainCfg, version)
 	signedBlindedBlock.Block.SetVersion(version)
-	b, err := io.ReadAll(r.Body)
+	var b []byte
+	if isJSON {
+		limit, limitErr := a.publishedBlockJSONLimit(version, true)
+		if limitErr != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, limitErr)
+		}
+		b, err = readBoundedBody(r.Body, limit)
+	} else {
+		b, err = io.ReadAll(r.Body)
+	}
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
@@ -2836,7 +2848,15 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 	// check content type
 	switch r.Header.Get("Content-Type") {
 	case "application/json":
-		if err := json.NewDecoder(r.Body).Decode(block); err != nil {
+		limit, err := a.publishedBlockJSONLimit(version, false)
+		if err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+		}
+		body, err := readBoundedBody(r.Body, limit)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.NewDecoder(bytes.NewReader(body)).Decode(block); err != nil {
 			return nil, err
 		}
 		return block, nil
@@ -2851,6 +2871,41 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 		return block, nil
 	}
 	return nil, errors.New("invalid content type")
+}
+
+// publishedBlockJSONLimit budgets four JSON bytes per SSZ byte of a gossip block.
+// Hex bytes need twice the space and quoted uint64s less than three times;
+// the rest covers keys and formatting. Blob contents have a separate budget.
+func (a *ApiHandler) publishedBlockJSONLimit(version clparams.StateVersion, blinded bool) (int64, error) {
+	blockSize := clparams.MaxChunkSize
+	if a.netConfig != nil {
+		blockSize = max(blockSize, a.netConfig.GossipMaxSize, a.netConfig.GossipMaxSizeBellatrix)
+	}
+	if blockSize > (math.MaxInt64-1)/4 {
+		return 0, errors.New("block JSON limit exceeds supported range")
+	}
+	limit := int64(blockSize * 4)
+	if blinded || version < clparams.DenebVersion {
+		return limit, nil
+	}
+	blobs := a.beaconChainCfg.MaxBlobsPerBlockByVersion(version)
+	proofsPerBlob := uint64(1)
+	if version >= clparams.FuluVersion {
+		// The slot is inside the unread body. Admit every configured blob schedule.
+		blobs = a.beaconChainCfg.MaxBlobsPerBlockUpperBound()
+		proofsPerBlob = a.beaconChainCfg.NumberOfColumns
+	}
+	// Hex prefix, quotes, comma and whitespace are included for each list entry.
+	const blobJSONSize = 2*cltypes.BYTES_PER_BLOB + 8
+	const proofJSONSize = 2*cltypes.BYTES_KZG_PROOF + 8
+	if proofsPerBlob > (math.MaxInt64-blobJSONSize)/proofJSONSize {
+		return 0, errors.New("blob proof JSON limit exceeds supported range")
+	}
+	bytesPerBlob := int64(blobJSONSize + proofsPerBlob*proofJSONSize)
+	if blobs > uint64((math.MaxInt64-1-limit)/bytesPerBlob) {
+		return 0, errors.New("block contents JSON limit exceeds supported range")
+	}
+	return limit + int64(blobs)*bytesPerBlob, nil
 }
 
 const maxGloasPublishedBlockSize = 10 << 20
@@ -2903,10 +2958,6 @@ func readBoundedBody(body io.Reader, limit int64) ([]byte, error) {
 		return nil, fmt.Errorf("request body exceeds %d bytes", limit)
 	}
 	return b, nil
-}
-
-func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock, validation BlockPublishingValidation) error {
-	return a.broadcastBlockWithIntegrationWait(ctx, blk, validation, true)
 }
 
 func (a *ApiHandler) broadcastBlockWithIntegrationWait(ctx context.Context, blk *cltypes.SignedBeaconBlock, validation BlockPublishingValidation, waitForIntegration bool) error {
@@ -3305,7 +3356,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	a.emitters.NotifyBlockIndicesChanged()
 	markServable()
 	// Columns are chosen after OnBlock, which can raise the custody group count.
-	if err := a.storeDataColumnSidecars(ctx, blockRoot, columnSidecars); err != nil {
+	if err := a.storeDataColumnSidecars(ctx, block.Block.Slot, blockRoot, columnSidecars); err != nil {
 		err = fmt.Errorf("%w: %w", errPublishedBlockDataStorage, err)
 		if knownBlock {
 			return &clservices.AcceptedBlockWriteError{Block: block, Err: err}
@@ -3344,7 +3395,7 @@ func rootKeyedSignedBlockReplayMatches(stored, incoming *cltypes.SignedBeaconBlo
 		stored.Version() == incoming.Version() && stored.Signature == incoming.Signature
 }
 
-func (a *ApiHandler) storeDataColumnSidecars(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+func (a *ApiHandler) storeDataColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
 	if len(sidecars) == 0 {
 		return nil
 	}
@@ -3352,6 +3403,7 @@ func (a *ApiHandler) storeDataColumnSidecars(ctx context.Context, blockRoot comm
 		return errors.New("data column storage unavailable")
 	}
 	store := das.ColumnsToStore(a.peerDas)
+	toStore := make([]*cltypes.DataColumnSidecar, 0, len(sidecars))
 	for _, sidecar := range sidecars {
 		if sidecar == nil {
 			return errors.New("nil data column sidecar")
@@ -3362,10 +3414,28 @@ func (a *ApiHandler) storeDataColumnSidecars(ctx context.Context, blockRoot comm
 		if sidecar.Index > math.MaxInt64 {
 			return fmt.Errorf("data column index %d exceeds storage range", sidecar.Index)
 		}
+		toStore = append(toStore, sidecar)
+	}
+	return a.writeColumnSidecarsBatched(ctx, slot, blockRoot, toStore)
+}
+
+// writeColumnSidecarsBatched stores the columns in one batch. A failed batch may drop columns it had already
+// fsynced, so the columns are then written one at a time, which keeps every column before the first
+// failing one.
+func (a *ApiHandler) writeColumnSidecarsBatched(ctx context.Context, slot uint64, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
+	if len(sidecars) == 0 {
+		return nil
+	}
+	batchErr := a.columnStorage.WriteColumnSidecarsBatch(ctx, blockRoot, sidecars)
+	if batchErr == nil {
+		return nil
+	}
+	for _, sidecar := range sidecars {
 		if err := a.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(sidecar.Index), sidecar); err != nil {
-			return err
+			return fmt.Errorf("%w (after a failed batch write: %w)", err, batchErr)
 		}
 	}
+	log.Warn("[Beacon REST] batched data column write failed, the columns were written one at a time", "slot", slot, "blockRoot", blockRoot, "columnCount", len(sidecars), "err", batchErr)
 	return nil
 }
 

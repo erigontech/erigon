@@ -85,6 +85,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/verify"
@@ -742,17 +743,16 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 	defer bti.Close()
 
 	getter := seg.NewReader(rd.MakeGetter(), statecfg.Schema.CommitmentDomain.Compression)
-	c, err := bti.Seek(getter, []byte(stateKey))
-	if err != nil {
-		return false, false, "", err
-	}
-	if c == nil {
-		return false, false, "", nil
-	}
-	defer c.Close()
-
-	if bytes.Equal(c.Key(), []byte(stateKey)) {
-		return true, false, "Not Unwindable (*)", nil
+	for _, key := range commitment.CommitmentStateKeys {
+		c, err := bti.Seek(getter, key)
+		if err != nil {
+			return false, false, "", err
+		}
+		found := c != nil && bytes.Equal(c.Key(), key)
+		c.Close()
+		if found {
+			return true, false, "Not Unwindable (*)", nil
+		}
 	}
 	return false, false, "", nil
 }
@@ -937,9 +937,9 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			removeLatest = false // --step has higher priority
 		}
 
-		promptExit := func(s string) (exitNow bool) {
+		promptExit := func(s string) (bool, error) {
 			if !promptUserBeforeDelete {
-				return false
+				return false, nil
 			}
 
 		AllowPruneSteps:
@@ -947,14 +947,13 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			var ans uint8
 			_, err := fmt.Scanf("%d\n", &ans)
 			if err != nil {
-				fmt.Printf("err: %v\n", err)
-				return true
+				return false, fmt.Errorf("read snapshot deletion confirmation: %w", err)
 			}
 			switch ans {
 			case 1:
-				return false
+				return false, nil
 			case 4:
-				return true
+				return true, nil
 			default:
 				fmt.Printf("invalid input: %d; Just a number 1 or 4 expected.\n", ans)
 				goto AllowPruneSteps
@@ -1049,7 +1048,9 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 		if hasStateTrie == 0 && len(commitmentFilesWithState) > 0 {
 			fmt.Printf("\nthis will remove ALL commitment files with state trie\n")
 			q := "Do that anyway?\n\t1) RemoveFile\n\t4) NONONO (Exit)\n (pick number): "
-			if promptExit(q) {
+			if exitNow, err := promptExit(q); err != nil {
+				return err
+			} else if exitNow {
 				os.Exit(0)
 			}
 		}
@@ -1057,7 +1058,9 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 		// Prompt with file count and estimated deletion size
 		q := fmt.Sprintf("\nremove %d files (~%s)?\n1) RemoveFile\n4) Exit\n (pick number): ",
 			len(toRemove), common.ByteCount(removeSize))
-		if promptExit(q) {
+		if exitNow, err := promptExit(q); err != nil {
+			return err
+		} else if exitNow {
 			os.Exit(0)
 		}
 	} else {
@@ -3010,6 +3013,9 @@ func removeAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger) error {
 	return nil
 }
 
+// indexAggOpts skip the startup gap check: `snapshots index` rebuilds the accessors whose absence makes it refuse.
+var indexAggOpts = []func(state.AggOpts) state.AggOpts{state.AggOpts.SkipFilesDBGapCheck}
+
 func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	logger := log.Root()
 	defer logger.Info("Done")
@@ -3031,7 +3037,7 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger, indexAggOpts...)
 	caplinSnaps, caplinStateSnaps, br, agg := res.CaplinSnaps, res.CaplinStateSnaps, res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
@@ -3126,7 +3132,7 @@ type OpenSnapsResult struct {
 	TemporalDB *temporal.DB
 }
 
-func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger, aggOpts ...func(state.AggOpts) state.AggOpts) (
 	res OpenSnapsResult,
 	clean func(),
 	err error,
@@ -3177,7 +3183,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	blockWriter := blockio.NewBlockWriter()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 
-	res.Aggregator = openAgg(ctx, dirs, chainDB, logger)
+	res.Aggregator = openAgg(ctx, dirs, chainDB, logger, aggOpts...)
 	res.Aggregator.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	res.TemporalDB, err = temporal.New(chainDB, res.Aggregator, res.BlockSnaps)
@@ -3722,20 +3728,24 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 
-func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
-	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
+func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger, aggOpts ...func(state.AggOpts) state.AggOpts) *state.Aggregator {
+	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger, aggOpts...)
 	if err != nil {
 		panic(err)
 	}
 	return agg
 }
 
-func tryOpenAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (*state.Aggregator, error) {
+func tryOpenAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger, aggOpts ...func(state.AggOpts) state.AggOpts) (*state.Aggregator, error) {
 	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {
 		return nil, err
 	}
-	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx)
+	opts := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings)
+	for _, o := range aggOpts {
+		opts = o(opts)
+	}
+	agg, err := opts.Open(ctx)
 	if err != nil {
 		return nil, err
 	}
