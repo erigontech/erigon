@@ -1,0 +1,11 @@
+FROM debian:13-slim
+RUN apt-get update && apt-get install -y bash curl iproute2 jq libstdc++6 libgcc-s1 && rm -rf /var/lib/apt/lists/*
+COPY erigon /usr/local/bin/erigon
+COPY genesis.json /genesis.json
+COPY mapper.jq /mapper.jq
+COPY erigon.sh /erigon.sh
+COPY enode.sh /enode.sh
+ENTRYPOINT ["/erigon.sh"]
+RUN chmod +x /erigon.sh /enode.sh /usr/local/bin/erigon \
+	&& erigon --version | sed -e 's/erigon version \(.*\)/\1/' > /version.txt \
+	&& if erigon --help | grep -q -- '--override.genesis'; then touch /hive-override-genesis; fi

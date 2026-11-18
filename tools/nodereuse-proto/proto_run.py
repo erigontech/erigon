@@ -12,6 +12,7 @@ Writes one JSON line per test to results-<arm>.jsonl and a summary to
 summary-<arm>.json.
 """
 import json
+import os
 import statistics
 import subprocess
 import sys
@@ -23,6 +24,7 @@ HERE = Path(__file__).resolve().parent
 PORT = 18545
 RPC = f"http://127.0.0.1:{PORT}"
 RUNNER = "rlp-proto-runner"
+RESET_SCRIPT = os.environ.get("RESET_SCRIPT", "reset_run.sh")
 
 BASE_ENV = {
     "HIVE_NETWORK_ID": "1337",
@@ -92,9 +94,9 @@ def run_before(test: dict, rulesets: dict, image: str) -> dict:
     if c.returncode != 0:
         return {"error": "create", "detail": c.stderr[-300:]}
     cp = sh(
-        "docker", "cp", f"{test_dir}/genesis-input.json", f"{RUNNER}:/genesis.json"
+        "docker", "cp", f"{test['dir']}/genesis-input.json", f"{RUNNER}:/genesis.json"
     )
-    cpb = sh("docker", "cp", f"{test_dir}/blocks", f"{RUNNER}:/blocks")
+    cpb = sh("docker", "cp", f"{test['dir']}/blocks", f"{RUNNER}:/blocks")
     if cp.returncode != 0 or cpb.returncode != 0:
         sh("docker", "rm", "-f", RUNNER)
         return {"error": "cp", "detail": (cp.stderr + cpb.stderr)[-300:]}
@@ -141,7 +143,7 @@ def run_after(test: dict, rulesets: dict) -> dict:
     t0 = time.perf_counter()
     e = sh(
         "docker", "exec", *env, RUNNER,
-        "/bin/bash", "/proto/reset_run.sh", "/proto/" + Path(test["dir"]).name,
+        "/bin/bash", f"/proto/{RESET_SCRIPT}", "/proto/" + Path(test["dir"]).name,
     )
     seg["reset_boot"] = time.perf_counter() - t0
     ok = e.returncode == 0
