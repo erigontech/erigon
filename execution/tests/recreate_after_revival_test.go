@@ -80,6 +80,8 @@ var generatedBlockWant = map[string]struct {
 	"TestCoinbaseRecreatedWithCodeAfterFeeRevival/amsterdam=true":                       {"0x29d9c0b0bbd07c2a06f0e2c55ea1f04676ab9c710b08389f4c9765b3cc556d06", 232560},
 	"TestCreate2AfterCoinbaseDestructAndFeeRevival":                                     {"0x9f5bca819162e640333546263ed762c3d3ed5b65f0130b1c242ed6b73c517e60", 908647},
 	"TestCreate2AfterDestructAndTransferRevival":                                        {"0x9ac7dae57dab901312f629da58429619436b41ed1da83348ba3a48587444810a", 185647},
+	"TestCreate2DestructOverAnAccountWithStorageKeepsOnlyTheBalance/amsterdam":          {"0x030dad7492fecca2168cc11a1cd8283a2f2934e9595db8859607955a3d164a3c", 195840},
+	"TestCreate2DestructOverAnAccountWithStorageKeepsOnlyTheBalance/prague":             {"0x90a98bf7c2f878ce3e913db68d32b340d854a5f49b8e6a3578543269a9d7848a", 86155},
 	"TestCreate2OverStorageOnlyAccountInitCodeReadsOldSlotAsZero/amsterdam":             {"0x7e6d30b35f3dded251712262a606e3997f757bacf360eb012b230f59e06f9d44", 818711},
 	"TestCreate2OverStorageOnlyAccountInitCodeReadsOldSlotAsZero/prague":                {"0xf37edb8aca8c91d688bc8db21f7eff1e65b711bbf5e73ec96ae74f894cd5ac14", 852305},
 	"TestCreate2OverStorageOnlyAccountReplacesItsStorage/amsterdam":                     {"0x3d17c5551d42fdc4d2032fcec9e39520832fdc557dd000b7203a3bc377fb8dba", 97920},
