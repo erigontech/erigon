@@ -48,10 +48,6 @@ var (
 	noMemstat                   = EnvBool("NO_MEMSTAT", false)
 
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
-	// CallNoMaterialize runs eth_call on the versioned state path, where reads
-	// go straight to the state reader instead of a resident stateObject.
-	CallNoMaterialize = EnvBool("CALL_NO_MATERIALIZE", true)
-
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
 	MdbxNoSyncUnsafe = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
@@ -79,6 +75,8 @@ var (
 	// reader goroutine exists: flag parsing, or test setup before the first read.
 	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
 
+	KVFileReadSummaries = KVReadLevelledMetrics // only KV_READ_METRICS enables it; the slow-block flag sets KVReadLevelledMetrics later
+
 	// allow simultaneous build of multiple snapshot types.
 	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1) // allows 1 kind of snapshots to be built simultaneously
@@ -90,7 +88,6 @@ var (
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
-	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", true)
 	numWorkers           = runtime.NumCPU()
 	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))

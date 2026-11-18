@@ -533,14 +533,7 @@ func (c *memStoreCursor) Next() ([]byte, []byte, error) {
 	c.store.mu.RLock()
 	defer c.store.mu.RUnlock()
 	iter := c.table.tree.Iter()
-	// Re-seek to current position, then advance.
-	if !c.seekToCurrent(&iter) {
-		c.valid = false
-		c.current = memEntry{}
-		iter.Release()
-		return nil, nil, nil
-	}
-	c.valid = iter.Next()
+	c.valid = c.seekToNext(&iter)
 	if !c.valid {
 		c.current = memEntry{}
 		iter.Release()
@@ -558,13 +551,11 @@ func (c *memStoreCursor) Prev() ([]byte, []byte, error) {
 	c.store.mu.RLock()
 	defer c.store.mu.RUnlock()
 	iter := c.table.tree.Iter()
-	if !c.seekToCurrent(&iter) {
-		c.valid = false
-		c.current = memEntry{}
-		iter.Release()
-		return nil, nil, nil
+	if iter.Seek(c.current) {
+		c.valid = iter.Prev()
+	} else {
+		c.valid = iter.Last()
 	}
-	c.valid = iter.Prev()
 	if !c.valid {
 		c.current = memEntry{}
 		iter.Release()
@@ -579,34 +570,29 @@ func (c *memStoreCursor) Current() ([]byte, []byte, error) {
 	if !c.valid {
 		return nil, nil, nil
 	}
-	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
+	c.store.mu.RLock()
+	defer c.store.mu.RUnlock()
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	if !iter.Seek(c.current) {
+		return nil, nil, nil
+	}
+	item := iter.Item()
+	return bytes.Clone(item.k), bytes.Clone(item.v), nil
 }
 
 func (c *memStoreCursor) NextDup() ([]byte, []byte, error) {
 	if !c.valid {
 		return nil, nil, nil
 	}
-	currentKey := c.current.k
 	c.store.mu.RLock()
 	defer c.store.mu.RUnlock()
 	iter := c.table.tree.Iter()
-	if !c.seekToCurrent(&iter) {
-		c.valid = false
-		c.current = memEntry{}
-		iter.Release()
-		return nil, nil, nil
-	}
-	c.valid = iter.Next()
-	if !c.valid {
-		c.current = memEntry{}
-		iter.Release()
+	defer iter.Release()
+	if !c.seekToNext(&iter) || !bytes.Equal(iter.Item().k, c.current.k) {
 		return nil, nil, nil
 	}
 	c.current = iter.Item()
-	iter.Release()
-	if !bytes.Equal(c.current.k, currentKey) {
-		return nil, nil, nil
-	}
 	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
 }
 
@@ -617,26 +603,17 @@ func (c *memStoreCursor) NextNoDup() ([]byte, []byte, error) {
 	c.store.mu.RLock()
 	defer c.store.mu.RUnlock()
 	iter := c.table.tree.Iter()
-	if !c.seekToCurrent(&iter) {
-		c.valid = false
-		c.current = memEntry{}
-		iter.Release()
-		return nil, nil, nil
-	}
 	currentKey := c.current.k
-	for {
-		c.valid = iter.Next()
-		if !c.valid {
-			c.current = memEntry{}
-			iter.Release()
-			return nil, nil, nil
-		}
+	for c.valid = c.seekToNext(&iter); c.valid; c.valid = iter.Next() {
 		c.current = iter.Item()
 		if !bytes.Equal(c.current.k, currentKey) {
 			iter.Release()
 			return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
 		}
 	}
+	c.current = memEntry{}
+	iter.Release()
+	return nil, nil, nil
 }
 
 func (c *memStoreCursor) SeekBothRange(key, value []byte) ([]byte, error) {
@@ -738,6 +715,12 @@ func (c *memStoreCursor) DeleteCurrent() error {
 	}
 	c.store.mu.Lock()
 	defer c.store.mu.Unlock()
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	if !iter.Seek(c.current) {
+		return nil
+	}
+	c.current = iter.Item()
 	c.table.tree.Delete(c.current)
 	return nil
 }
@@ -802,21 +785,14 @@ func (c *memStoreCursor) PutCurrent(key, value []byte) error { panic("PutCurrent
 
 func (c *memStoreCursor) Close() {}
 
-// seekToCurrent positions iter at c.current. Must be called with mu held.
-// For dupSort tables, seeks by (key, value); for normal tables, seeks by key.
-// Takes a pointer because IterG methods have pointer receivers.
-func (c *memStoreCursor) seekToCurrent(iter *btree2.IterG[memEntry]) bool {
-	if c.table.dupSort {
-		if !iter.Seek(memEntry{k: c.current.k, v: c.current.v}) {
-			return false
-		}
-		item := iter.Item()
-		return bytes.Equal(item.k, c.current.k) && bytes.Equal(item.v, c.current.v)
-	}
-	if !iter.Seek(memEntry{k: c.current.k}) {
+func (c *memStoreCursor) seekToNext(iter *btree2.IterG[memEntry]) bool {
+	if !iter.Seek(c.current) {
 		return false
 	}
-	return bytes.Equal(iter.Item().k, c.current.k)
+	if c.table.tree.Less(c.current, iter.Item()) {
+		return true
+	}
+	return iter.Next()
 }
 
 // --- Range helpers: collect into slices for thread safety ---

@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -116,13 +117,15 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 	cachedWriter := state.NewCachedWriter(noop, sc)
 	ibs := state.New(cachedReader)
 	defer ibs.Close()
+	transactions.VersionedBlockState(ibs)
+	ibs.SetTxContext(block.NumberU64(), -1)
 
 	logger := log.New("component", "trace_filtering_test")
 	consensusHeaderReader := consensuschain.NewReader(cfg, tx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader,
 		block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	require.NoError(t, err)
-	err = ibs.CommitBlock(rules, cachedWriter)
+	err = ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter)
 	require.NoError(t, err)
 
 	// Parallel path — creates its own MDBX read transactions per worker; does

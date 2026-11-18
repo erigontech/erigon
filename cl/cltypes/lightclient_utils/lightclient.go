@@ -87,7 +87,7 @@ func CreateLightClientUpdate(cfg *clparams.BeaconChainConfig, block *cltypes.Sig
 	}
 	updateAttestedPeriod := cfg.SyncCommitteePeriod(attestedBlock.Block.Slot)
 
-	update := cltypes.NewLightClientUpdate(block.Version(), cfg)
+	update := cltypes.NewLightClientUpdate(attestedBlock.Version(), cfg)
 	update.AttestedHeader, err = BlockToLightClientHeader(attestedBlock)
 	if err != nil {
 		return nil, err
@@ -98,7 +98,7 @@ func CreateLightClientUpdate(cfg *clparams.BeaconChainConfig, block *cltypes.Sig
 	}
 	if finalizedBlock != nil {
 		if finalizedBlock.Block.Slot != cfg.GenesisSlot {
-			update.FinalizedHeader, err = BlockToLightClientHeader(finalizedBlock)
+			update.FinalizedHeader, err = blockToLightClientHeaderAt(finalizedBlock, attestedBlock.Version())
 			if err != nil {
 				return nil, err
 			}
@@ -131,13 +131,20 @@ func CreateLightClientUpdate(cfg *clparams.BeaconChainConfig, block *cltypes.Sig
 //	    ),
 //	)
 func BlockToLightClientHeader(block *cltypes.SignedBeaconBlock) (*cltypes.LightClientHeader, error) {
-	h := cltypes.NewLightClientHeader(block.Version())
+	return blockToLightClientHeaderAt(block, block.Version())
+}
+
+// blockToLightClientHeaderAt is block_to_light_client_header of the given pre-Gloas fork, which also takes a block of
+// an earlier fork: before Capella the header carries no execution data, and payload fields of later forks stay zero.
+// A Gloas header gets only the beacon block header.
+func blockToLightClientHeaderAt(block *cltypes.SignedBeaconBlock, version clparams.StateVersion) (*cltypes.LightClientHeader, error) {
+	h := cltypes.NewLightClientHeader(version)
 	h.Beacon = block.SignedBeaconBlockHeader().Header
-	if block.Version() < clparams.CapellaVersion {
+	if version < clparams.CapellaVersion || block.Version() < clparams.CapellaVersion {
 		return h, nil
 	}
 	// [Modified in Gloas:EIP7732] ExecutionPayload not in BeaconBody for GLOAS blocks
-	if block.Version() >= clparams.GloasVersion || block.Block.Body.ExecutionPayload == nil {
+	if version >= clparams.GloasVersion || block.Block.Body.ExecutionPayload == nil {
 		return h, nil
 	}
 	var err error
@@ -145,6 +152,7 @@ func BlockToLightClientHeader(block *cltypes.SignedBeaconBlock) (*cltypes.LightC
 	if err != nil {
 		return nil, err
 	}
+	h.ExecutionPayloadHeader.SetVersion(version)
 	payloadMerkleProof, err := block.Block.Body.ExecutionPayloadMerkleProof()
 	if err != nil {
 		return nil, err
@@ -203,4 +211,60 @@ func CreateLightClientBootstrap(state *state.CachingBeaconState, block *cltypes.
 		CurrentSyncCommittee:       state.CurrentSyncCommittee(),
 		CurrentSyncCommitteeBranch: hashVector,
 	}, nil
+}
+
+// IsBetterUpdate implements is_better_update: whether newUpdate is a better light client update for its sync
+// committee period than oldUpdate.
+func IsBetterUpdate(cfg *clparams.BeaconChainConfig, newUpdate, oldUpdate *cltypes.LightClientUpdate) bool {
+	maxActiveParticipants := int(cfg.SyncCommitteeSize)
+	newActiveParticipants := newUpdate.SyncAggregate.Sum()
+	oldActiveParticipants := oldUpdate.SyncAggregate.Sum()
+	newHasSupermajority := newActiveParticipants*3 >= maxActiveParticipants*2
+	oldHasSupermajority := oldActiveParticipants*3 >= maxActiveParticipants*2
+	if newHasSupermajority != oldHasSupermajority {
+		return newHasSupermajority
+	}
+	if !newHasSupermajority && newActiveParticipants != oldActiveParticipants {
+		return newActiveParticipants > oldActiveParticipants
+	}
+
+	newHasRelevantSyncCommittee := hasRelevantSyncCommittee(cfg, newUpdate)
+	if oldHasRelevantSyncCommittee := hasRelevantSyncCommittee(cfg, oldUpdate); newHasRelevantSyncCommittee != oldHasRelevantSyncCommittee {
+		return newHasRelevantSyncCommittee
+	}
+
+	newHasFinality := IsFinalityUpdate(newUpdate)
+	if oldHasFinality := IsFinalityUpdate(oldUpdate); newHasFinality != oldHasFinality {
+		return newHasFinality
+	}
+
+	if newHasFinality {
+		newHasSyncCommitteeFinality := cfg.SyncCommitteePeriod(newUpdate.FinalizedHeader.Beacon.Slot) == cfg.SyncCommitteePeriod(newUpdate.AttestedHeader.Beacon.Slot)
+		oldHasSyncCommitteeFinality := cfg.SyncCommitteePeriod(oldUpdate.FinalizedHeader.Beacon.Slot) == cfg.SyncCommitteePeriod(oldUpdate.AttestedHeader.Beacon.Slot)
+		if newHasSyncCommitteeFinality != oldHasSyncCommitteeFinality {
+			return newHasSyncCommitteeFinality
+		}
+	}
+
+	if newActiveParticipants != oldActiveParticipants {
+		return newActiveParticipants > oldActiveParticipants
+	}
+	if newUpdate.AttestedHeader.Beacon.Slot != oldUpdate.AttestedHeader.Beacon.Slot {
+		return newUpdate.AttestedHeader.Beacon.Slot < oldUpdate.AttestedHeader.Beacon.Slot
+	}
+	return newUpdate.SignatureSlot < oldUpdate.SignatureSlot
+}
+
+// IsFinalityUpdate implements is_finality_update: whether the update proves a finalized header.
+func IsFinalityUpdate(update *cltypes.LightClientUpdate) bool {
+	return !isZeroBranch(update.FinalityBranch)
+}
+
+func hasRelevantSyncCommittee(cfg *clparams.BeaconChainConfig, update *cltypes.LightClientUpdate) bool {
+	return !isZeroBranch(update.NextSyncCommitteeBranch) &&
+		cfg.SyncCommitteePeriod(update.AttestedHeader.Beacon.Slot) == cfg.SyncCommitteePeriod(update.SignatureSlot)
+}
+
+func isZeroBranch(branch solid.HashVectorSSZ) bool {
+	return len(common.TrimLeftZeroes(branch.Bytes())) == 0
 }

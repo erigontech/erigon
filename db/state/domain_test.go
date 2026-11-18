@@ -40,6 +40,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
@@ -60,6 +61,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	dto "github.com/prometheus/client_model/go"
 )
 
 type rndGen struct {
@@ -741,6 +743,47 @@ func (d *Domain) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv.
 	return nil
 }
 
+// The per-block read counters must not bring the per-file latency summaries with them: a summary is one shared
+// mutex for every file read of every worker.
+func TestDomain_FileReadObservesNoSummaryUnderBlockReadMetrics(t *testing.T) {
+	prevLevelled, prevSummaries := dbg.KVReadLevelledMetrics, dbg.KVFileReadSummaries
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics, dbg.KVFileReadSummaries = prevLevelled, prevSummaries })
+	dbg.KVReadLevelledMetrics, dbg.KVFileReadSummaries = true, false
+
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	key := bytes.Repeat([]byte{0xa1}, length.Addr)
+	domainRoTx := d.beginForTests()
+	writer := domainRoTx.NewWriter(db)
+	require.NoError(t, writer.PutWithPrev(key, []byte("value"), 1, nil))
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	domainRoTx.Close()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, background.NewProgressSet()))
+	roTx := d.beginForTests()
+	defer roTx.Close()
+	_, err = roTx.Prune(t.Context(), tx, 0, 0, d.stepSize, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+
+	sampleCount := func() uint64 {
+		var m dto.Metric
+		require.NoError(t, domainReadMetric(kv.AccountsDomain, 0).Write(&m))
+		return m.GetSummary().GetSampleCount()
+	}
+	before := sampleCount()
+	v, _, found, err := roTx.GetLatest(key, tx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, []byte("value"), v)
+	require.Equal(t, before, sampleCount())
+}
+
 func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 	t.Helper()
 	logEvery := time.NewTicker(30 * time.Second)
@@ -803,7 +846,7 @@ func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step 
 			domainRoTx := d.beginForTests()
 			defer domainRoTx.Close()
 			r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan, maxSpan)
-			if !r.any() {
+			if !r.any() || contiguousEnd(domainRoTx.ht.files) < domainRoTx.ht.files.EndTxNum() { // the fixture skips steps: no merge across them
 				return true
 			}
 			valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
@@ -899,7 +942,7 @@ func TestDomain_ScanFiles(t *testing.T) {
 }
 
 func TestCommitmentKvWriteVersion(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	logger := log.New()
 	_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
 
@@ -921,7 +964,7 @@ func TestNonCommitmentKvWriteVersionUsesCurrent(t *testing.T) {
 }
 
 func TestCommitmentKvVersionAcceptance(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	vers := statecfg.Schema.CommitmentDomain.FileVersion.DataKV
 	require.True(t, vers.Supports(version.V2_0))
 	require.True(t, vers.Supports(version.V2_1))
@@ -2628,7 +2671,7 @@ func TestDomain_Unwind(t *testing.T) {
 			}
 		}
 
-		err = domainRoTx.unwind(ctx, tx, unwindTo/d.stepSize, unwindTo, totalDiff)
+		err = domainRoTx.unwind(ctx, tx, unwindTo, totalDiff, nil)
 		currTx = unwindTo
 		require.NoError(t, err)
 		domainRoTx.Close()
@@ -3808,7 +3851,7 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			defer domainRoTx.Close()
 
 			// diff for txNum 18: prev was empty (key was deleted) → Value=[]byte{}
-			err = domainRoTx.unwind(ctx, tx, 1, 18, txNum18Diff)
+			err = domainRoTx.unwind(ctx, tx, 18, txNum18Diff, nil)
 			require.NoError(err)
 			domainRoTx.Close()
 			require.NoError(tx.Commit())
@@ -4281,6 +4324,89 @@ func TestDefaultExistenceFilterModeOffloadsBelow20GiB(t *testing.T) {
 	}
 }
 
+var (
+	equalHashSalt = uint32(0x34e93639)
+	equalHashKeyA = common.FromHex("0x1111111111111111111111111111111111111111" + "0000000000000000000000000000000000000000000000000000000000000001")
+	equalHashKeyB = common.FromHex("0x1111111111111111111111111111111111111111" + "a5a5a5a5a5a5a5a5a5a5a5a5f61ef864ba9c0d52e0955981d75680a900000001")
+)
+
+// storageDomainTxWithFileKey returns a read tx over a storage domain whose only file holds k=v at txNum 1.
+func storageDomainTxWithFileKey(tb testing.TB, salt uint32, k, v []byte) *DomainRoTx {
+	tb.Helper()
+	db, d := testDbAndDomainOfStep(tb, statecfg.Schema.StorageDomain, 16, log.New())
+	d.salt.Store(&salt)
+	tx, err := db.BeginRw(tb.Context())
+	require.NoError(tb, err)
+	defer tx.Rollback()
+	domainTx := d.beginForTests()
+	writer := domainTx.NewWriter(db)
+	require.NoError(tb, writer.PutWithPrev(k, v, 1, nil))
+	require.NoError(tb, writer.Flush(tb.Context(), tx))
+	writer.Close()
+	domainTx.Close()
+	require.NoError(tb, d.collateBuildIntegrate(tb.Context(), 0, tx, background.NewProgressSet()))
+	domainTx = d.beginForTests()
+	tb.Cleanup(domainTx.Close)
+	return domainTx
+}
+
+func TestDomainFileCacheDistinctKeysWithEqualHashDoNotAlias(t *testing.T) {
+	t.Parallel()
+
+	keyA, keyB, valA := equalHashKeyA, equalHashKeyB, common.FromHex("0xdeadbeef")
+	hiA, loA := murmur3.Sum128WithSeed(keyA, equalHashSalt)
+	hiB, loB := murmur3.Sum128WithSeed(keyB, equalHashSalt)
+	require.Equal(t, [2]uint64{hiA, loA}, [2]uint64{hiB, loB})
+
+	newDomainTx := func(t *testing.T) *DomainRoTx { return storageDomainTxWithFileKey(t, equalHashSalt, keyA, valA) }
+	requireLatest := func(t *testing.T, dt *DomainRoTx, k, want []byte, wantFound bool) {
+		t.Helper()
+		v, found, _, _, err := dt.getLatestFromFiles(k, nil, kv.NoStepBound)
+		require.NoError(t, err)
+		require.Equal(t, wantFound, found)
+		require.Equal(t, want, v)
+	}
+
+	t.Run("A then B", func(t *testing.T) {
+		dt := newDomainTx(t)
+		requireLatest(t, dt, keyA, valA, true)
+		requireLatest(t, dt, keyB, nil, false)
+	})
+	t.Run("B then A", func(t *testing.T) {
+		dt := newDomainTx(t)
+		requireLatest(t, dt, keyB, nil, false)
+		requireLatest(t, dt, keyA, valA, true)
+	})
+	t.Run("value size", func(t *testing.T) {
+		dt := newDomainTx(t)
+		requireLatest(t, dt, keyA, valA, true)
+		size, found, err := dt.getLatestFromFilesValSize(keyB, 0)
+		require.NoError(t, err)
+		require.False(t, found)
+		require.Zero(t, size)
+	})
+	t.Run("history seek", func(t *testing.T) {
+		dt := newDomainTx(t)
+		found, res, err := dt.ht.iit.seekInFiles(keyA, 0)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, uint64(1), res.txNum)
+		found, _, err = dt.ht.iit.seekInFiles(keyB, 0)
+		require.NoError(t, err)
+		require.False(t, found)
+	})
+	t.Run("history seek, miss first", func(t *testing.T) {
+		dt := newDomainTx(t)
+		found, _, err := dt.ht.iit.seekInFiles(keyB, 0)
+		require.NoError(t, err)
+		require.False(t, found)
+		found, res, err := dt.ht.iit.seekInFiles(keyA, 0)
+		require.NoError(t, err)
+		require.True(t, found, "a cached miss of an equal-hash key must not hide a present key")
+		require.Equal(t, uint64(1), res.txNum)
+	})
+}
+
 func TestDomain_MayContainInFilesUsesExistenceFilters(t *testing.T) {
 	prev := domainExistenceForceInMem
 	domainExistenceForceInMem = []string{kv.AccountsDomain.String()}
@@ -4353,4 +4479,38 @@ func TestDomain_MayContainInFilesKeepsKeysOfMappedFilters(t *testing.T) {
 	for i := range 100 {
 		require.True(t, domainTx.mayContainInFiles(fmt.Appendf(nil, "absent-%d", i)))
 	}
+}
+
+func TestDomainCloseFilesAfterStep(t *testing.T) {
+	t.Parallel()
+	d := emptyTestDomain(t, 1)
+	d.scanDirtyFiles([]string{"v1.0-accounts.0-2.kv", "v1.0-accounts.2-4.kv"})
+	d.History.scanDirtyFiles([]string{"v1.0-accounts.0-2.v", "v1.0-accounts.2-4.v"})
+	d.History.InvertedIndex.scanDirtyFiles([]string{"v1.0-accounts.0-2.ef", "v1.0-accounts.2-4.ef"})
+	all := []*DirtyFiles{d.dirtyFiles, d.History.dirtyFiles, d.History.InvertedIndex.dirtyFiles}
+
+	d.closeFilesAfterStep(3)
+	for _, df := range all {
+		require.Equal(t, []string{"0-2", "2-4"}, stepRanges(t, df.Items(), d.stepSize))
+	}
+	d.closeFilesAfterStep(2)
+	for _, df := range all {
+		require.Equal(t, []string{"0-2"}, stepRanges(t, df.Items(), d.stepSize))
+	}
+}
+
+// beginForTests recomputes visible files from dirtyFiles directly instead of
+// using Aggregator's published snapshot. Unsafe to mix with an Aggregator,
+// because it can observe an unsynchronized/torn view of dirtyFiles across
+// entities. Production code goes through Aggregator.BeginFilesRo.
+func (d *Domain) beginForTests() *DomainRoTx {
+	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	dt := &DomainRoTx{}
+	d.initFilesRo(dt, &HistoryRoTx{}, &InvertedIndexRoTx{}, dv, hv, iv)
+	return dt
+}
+
+func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
+	maxStepInFiles := kv.Step(dt.files.EndTxNum() / dt.stepSize)
+	return maxStepInFiles < dt.d.maxStepInDB(dbtx)
 }

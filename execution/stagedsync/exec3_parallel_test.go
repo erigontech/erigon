@@ -593,7 +593,7 @@ func executeParallelWithCheck(pe *parallelExecutor, tasks []exec.Task, profile b
 	consumers := newResultStream()
 	consumers.register("applyResults", applyResults)
 
-	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, consumers, profile, nil}
+	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, consumers, profile, nil, nil}
 
 	// TODO get results back
 
@@ -653,6 +653,26 @@ func TestParallelExecutorWorkerPoolSize(t *testing.T) {
 			defer executorCancel(nil)
 
 			require.Len(t, pe.execWorkers, tc.poolSize)
+		})
+	}
+}
+
+func TestDispatchWindow(t *testing.T) {
+	for _, tc := range []struct {
+		workers int
+		want    int
+	}{
+		{workers: 0, want: 32},
+		{workers: 1, want: 32},
+		{workers: 4, want: 32},
+		{workers: 6, want: 48},
+		{workers: 8, want: 64},
+		{workers: 16, want: 128},
+		{workers: 48, want: 128},
+		{workers: 128, want: 128},
+	} {
+		t.Run(fmt.Sprintf("workers=%d", tc.workers), func(t *testing.T) {
+			require.Equal(t, tc.want, dispatchWindow(tc.workers))
 		})
 	}
 }
@@ -1435,6 +1455,7 @@ func seedResumeTestDB(t *testing.T, db kv.TemporalRwDB, seed func(putter kv.Temp
 			return err
 		}
 		defer domains.Close()
+		domains.SetDisableInlineTouchKey(true)
 		if err := seed(domains.AsPutDel(rwTx)); err != nil {
 			return err
 		}
@@ -1551,7 +1572,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 // TestParallelResumeReconstructsPriorReceipts pins the block-end prefix
 // reconstruction for resumed blocks: receipts of transactions executed in an
 // earlier batch are re-derived so that engine.Finalize and the notification
-// cache see the complete set, mirroring the serial executor.
+// cache see the complete set.
 func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 	assert := assert.New(t)
 	db := newResumeTestDB(t)
@@ -1846,6 +1867,49 @@ func TestParallelNextResultDropsUnmaterializedNetZeroWrite(t *testing.T) {
 	require.NotPanics(t, func() { _, _ = be.nextResult(context.Background(), pe, rerun, roTx) })
 }
 
+// nextResult, like selfLoopFlush, puts the seed of a dropped write back at the re-run's incarnation.
+func TestParallelNextResultKeepsTheSeedOfADroppedWrite(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	signedTx := signSelfSendTx(t, 0, 0, 1, 21000, config, 0)
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+
+	addr := accounts.InternAddress([20]byte{0xaa})
+	bal := types.BlockAccessList{{
+		Address:        addr.Value(),
+		BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(7)}},
+	}}
+
+	txs := []types.Transaction{signedTx, signedTx}
+	eTask := &execTask{Task: &exec.TxTask{Header: header, TxNum: 2, TxIndex: 0, Config: config, Txs: txs}}
+	pending := &execTask{Task: &exec.TxTask{Header: header, TxNum: 3, TxIndex: 1, Config: config, Txs: txs}, index: 1}
+	pe, roTx := newResumeTestExec(t, db, config)
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(10_000_000), bal, discardConsumers(1), false, nil)
+	be.tasks = []*execTask{eTask, pending}
+	be.results = []*execResult{nil, nil}
+	be.execTasks.setInProgress(0)
+	be.execTasks.setInProgress(1)
+
+	earlier := state.Version{BlockNum: 1, TxIndex: 0}
+	earlierWrites := newWS().bal(addr, earlier, *uint256.NewInt(8)).build()
+	be.versionMap.FlushVersionedWrites(earlierWrites, false)
+	be.blockIO.RecordWrites(earlier, earlierWrites)
+
+	dropping := state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 2}
+	rerun := &exec.TxResult{
+		Task:     &taskVersion{execTask: eTask, version: dropping},
+		TxOut:    &state.WriteSet{},
+		Coinbase: accounts.ZeroAddress,
+	}
+	_, _ = be.nextResult(context.Background(), pe, rerun, roTx)
+
+	bal7, res, ok := be.versionMap.ReadBalance(addr, 1)
+	require.True(t, ok)
+	require.Equal(t, *uint256.NewInt(7), bal7)
+	require.Equal(t, state.MVReadResultDone, res.Status())
+	require.Equal(t, state.Version{TxIndex: 0, Incarnation: 1}, res.Version())
+}
+
 // A newPayload block lives only in the block overlay until commit; the tracer
 // must still get its OnBlockStart.
 func TestOnBlockStartSeesOverlayBlock(t *testing.T) {
@@ -1886,7 +1950,7 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 		pe.blockExecMetrics = newBlockExecMetrics()
 		pe.workersCtx = t.Context()
 		header := &types.Header{Number: *uint256.NewInt(1)}
-		require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, nil))
+		require.NoError(t, pe.processRequest(&execRequest{blockNum: 1, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, nil))
 		be := pe.blockExecutors[1]
 		require.False(t, be.execStarted.IsZero())
 		pe.recordBlockExecMetrics(be)
@@ -1898,7 +1962,7 @@ func TestBlockExecMetricsCountEachBlockOnce(t *testing.T) {
 			txExecutor:     txExecutor{blockExecMetrics: newBlockExecMetrics()},
 			blockExecutors: map[uint64]*blockExecutor{1: be},
 		}
-		require.NoError(t, pe.scheduleNextPending(t.Context()))
+		require.NoError(t, pe.scheduleNextPending())
 		require.False(t, be.execStarted.IsZero())
 		pe.recordBlockExecMetrics(be)
 		require.EqualValues(t, 1, pe.blockExecMetrics.BlockCount.Load())
@@ -1914,13 +1978,13 @@ func TestStartBlockSeedsRemovalsOnce(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xd7a3"))
 	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
 	header := &types.Header{Number: *uint256.NewInt(1)}
-	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, roTx))
+	require.NoError(t, pe.processRequest(&execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, roTx))
 	be := pe.blockExecutors[1]
 	lc, _, _, _ := be.versionMap.AccountLifecycleAt(addr, 1)
 	require.NotEqual(t, state.LifecycleLive, lc, "first start seeds the removal")
 
 	be.versionMap = state.NewVersionMap(bal)
-	require.NoError(t, pe.startBlock(t.Context(), be))
+	require.NoError(t, pe.startBlock(be))
 	lc, _, _, _ = be.versionMap.AccountLifecycleAt(addr, 1)
 	require.Equal(t, state.LifecycleLive, lc, "a restart must not seed again")
 }
@@ -1939,7 +2003,7 @@ func TestStartBlockFailsOnSeedBaseReadError(t *testing.T) {
 	pe.workersCtx = t.Context()
 	bal := types.BlockAccessList{{Address: av, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
 	header := &types.Header{Number: *uint256.NewInt(1)}
-	err := pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, roTx)
+	err := pe.processRequest(&execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{&exec.TxTask{Header: header, Config: config}}}, roTx)
 	require.ErrorContains(t, err, "seed EIP-161 removals of block 1")
 }
 
@@ -1965,7 +2029,7 @@ func TestStartBlockSeedsHistoricBlockAgainstHistory(t *testing.T) {
 	bal := types.BlockAccessList{{Address: av, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	task := &exec.TxTask{Header: header, Config: config, TxNum: 1, HistoryExecution: true}
-	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
+	require.NoError(t, pe.processRequest(&execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
 	lc, _, _, _ := pe.blockExecutors[1].versionMap.AccountLifecycleAt(addr, 1)
 	require.NotEqual(t, state.LifecycleLive, lc)
 }
@@ -1997,7 +2061,7 @@ func TestStartBlockSeedsAgainstUncommittedPrevBlock(t *testing.T) {
 	bal := types.BlockAccessList{{Address: addr.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}}}
 	header := &types.Header{Number: *uint256.NewInt(2)}
 	task := &exec.TxTask{Header: header, Config: config, TxNum: 4}
-	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 2, accessList: bal, tasks: []exec.Task{task}}, roTx))
+	require.NoError(t, pe.processRequest(&execRequest{blockNum: 2, accessList: bal, tasks: []exec.Task{task}}, roTx))
 	lc, _, _, _ := pe.blockExecutors[2].versionMap.AccountLifecycleAt(addr, 1)
 	require.Equal(t, state.LifecycleLive, lc)
 }
@@ -2016,7 +2080,7 @@ func TestProcessRequestSetsVersionMapBase(t *testing.T) {
 	}}}
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	task := &exec.TxTask{Header: header, Config: config, TxNum: 11, TxIndex: 0}
-	require.NoError(t, pe.processRequest(t.Context(), &execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
+	require.NoError(t, pe.processRequest(&execRequest{blockNum: 1, accessList: bal, tasks: []exec.Task{task}}, roTx))
 
 	const edgeTxNum = 15
 	view := pe.blockExecutors[1].versionMap.View(edgeTxNum, state.NewNoopReader())
@@ -2027,4 +2091,26 @@ func TestProcessRequestSetsVersionMapBase(t *testing.T) {
 	acc, ok, _ = pe.blockExecutors[1].versionMap.View(edgeTxNum+1, state.NewNoopReader()).GetAccount(addr)
 	require.True(t, ok)
 	require.Equal(t, uint64(600), acc.Balance.Uint64(), "view past txNum 16 includes its write")
+}
+
+// A block dispatches at most the window of tasks past the commit frontier, whether or not it
+// carries a block access list: speculative work past the frontier stays bounded.
+func TestDispatchLimitBoundsEveryBlock(t *testing.T) {
+	addr := common.HexToAddress("0xd15a")
+	for _, tc := range []struct {
+		name string
+		bal  types.BlockAccessList
+	}{
+		{"no access list", nil},
+		{"empty access list", types.BlockAccessList{}},
+		{"access list", types.BlockAccessList{{Address: addr, BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(1)}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			be := &blockExecutor{versionMap: state.NewVersionMap(tc.bal), tasks: make([]*execTask, 100)}
+			be.committedFrontier.Store(-1)
+			require.Equal(t, dispatchWindow(4)-1, be.dispatchLimit(4))
+			be.committedFrontier.Store(90)
+			require.Equal(t, 99, be.dispatchLimit(4))
+		})
+	}
 }

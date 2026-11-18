@@ -120,7 +120,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.AllowUnprotectedTxs,
 	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
-	&utils.TraceMaxtracesFlag,
 	&utils.AlwaysGenerateChangesetsFlag,
 
 	&HTTPReadTimeoutFlag,
@@ -247,8 +246,11 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.CaplinArchiveBlocksFlag,
 	&utils.CaplinArchiveBlobsFlag,
+	&utils.CaplinArchiveBlobsFromSlotFlag,
 	&utils.CaplinArchiveStatesFlag,
 	&utils.CaplinImmediateBlobBackfillFlag,
+	&utils.CaplinBlobsBackfillEndpointFlag,
+	&utils.CaplinBlobsBackfillEndpointWorkersFlag,
 
 	&utils.CaplinDisableBlobPruningFlag,
 	&utils.CaplinColumnKeepSlotsFlag,
@@ -282,6 +284,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalParallelCommitmentFlag,
+	&utils.ExperimentalCommitmentV3Flag,
 
 	&utils.MCPDisableFlag,
 	&utils.MCPAddrFlag,

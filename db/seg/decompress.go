@@ -153,6 +153,9 @@ func countHuffmanArena(depths []uint64, bits int, depth, maxDepth uint64) (consu
 	if depth == depths[0] {
 		return 1, 0, 0
 	}
+	if depth > depths[0] {
+		return
+	}
 	if bits == 9 {
 		c, s, nt := countHuffmanArena(depths, 0, depth, maxDepth)
 		return c, s + (1 << min(int(maxDepth), 9)), nt + 1
@@ -460,6 +463,9 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 	if len(depths) == 0 {
 		return 0, nil
 	}
+	if depth > depths[0] {
+		return 0, fmt.Errorf("buildCondensedPatternTable: leaf depth=%d is shallower than node depth=%d", depths[0], depth)
+	}
 	if depth == depths[0] {
 		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pattern=[%x]\n", depth, maxDepth, code, bits, pattern)
 		idx, cw := arena.allocCW(code, word(patterns[0]), byte(bits), nil)
@@ -495,6 +501,9 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 	}
 	if len(depths) == 0 {
 		return 0, nil
+	}
+	if depth > depths[0] {
+		return 0, fmt.Errorf("buildPosTable: leaf depth=%d is shallower than node depth=%d", depths[0], depth)
 	}
 	if depth == depths[0] {
 		p := poss[0]

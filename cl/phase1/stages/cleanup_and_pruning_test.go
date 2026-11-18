@@ -147,6 +147,45 @@ func TestCleanupAndPruningKeepsEveryBlobUnderArchiveFlags(t *testing.T) {
 	}
 }
 
+func TestCleanupAndPruningBoundedBlobArchiveKeepsFromSlotAndServingWindow(t *testing.T) {
+	const currentSlot = uint64(200_000)
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.DenebForkEpoch = 0
+	serveFloor := beaconCfg.BlobSidecarServeRangeStartSlot(currentSlot)
+	require.Positive(t, serveFloor)
+
+	for _, test := range []struct {
+		name      string
+		fromSlot  uint64
+		wantFloor uint64
+	}{
+		{name: "from slot below the serving window", fromSlot: 10_000, wantFloor: 10_000},
+		{name: "from slot inside the serving window", fromSlot: serveFloor + 1, wantFloor: serveFloor},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			blobStore := blob_mock_services.NewMockBlobStorage(ctrl)
+			peerDas := das_mock_services.NewMockPeerDas(ctrl)
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+
+			clock.EXPECT().GetCurrentSlot().Return(currentSlot)
+			blobStore.EXPECT().PruneBelow(test.wantFloor).Return(nil)
+			peerDas.EXPECT().PruneBelow(gomock.Any()).Return(nil)
+
+			cfg := &Cfg{
+				indiciesDB:   mdbxtest.NewTestDB(t, dbcfg.ChainDB),
+				ethClock:     clock,
+				beaconCfg:    &beaconCfg,
+				blobStore:    blobStore,
+				peerDas:      peerDas,
+				caplinConfig: clparams.CaplinConfig{ArchiveBlobs: true, BlobsArchiveFromSlot: test.fromSlot},
+			}
+
+			require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
+		})
+	}
+}
+
 func TestCleanupAndPruningResolvesZeroColumnKeepSlotsToTheSpecWindow(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStore := blob_mock_services.NewMockBlobStorage(ctrl)

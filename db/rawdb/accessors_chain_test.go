@@ -345,7 +345,7 @@ func TestWriteRawTransactions_UniqueKeys(t *testing.T) {
 	}
 }
 
-func TestTxnByIdxInBlock(t *testing.T) {
+func TestTxnRlpByIdxInBlock(t *testing.T) {
 	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
 
@@ -356,29 +356,27 @@ func TestTxnByIdxInBlock(t *testing.T) {
 	err := rawdb.WriteBody(tx, blockHash, blockNum, &types.Body{Transactions: []types.Transaction{txn}})
 	require.NoError(t, err)
 
-	got, ok, err := rawdb.TxnByIdxInBlock(tx, blockHash, blockNum, 0)
+	got, err := rawdb.TxnRlpByIdxInBlock(tx, blockHash, blockNum, 0)
 	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, txn.Hash(), got.Hash())
+	gotTxn, err := types.DecodeTransaction(got)
+	require.NoError(t, err)
+	require.Equal(t, txn.Hash(), gotTxn.Hash())
 
-	got, ok, err = rawdb.TxnByIdxInBlock(tx, blockHash, blockNum, 1_000_000)
+	got, err = rawdb.TxnRlpByIdxInBlock(tx, blockHash, blockNum, 1_000_000)
 	require.NoError(t, err)
-	require.False(t, ok)
 	require.Nil(t, got)
 
 	// txn ids are global: an index past the block's end must not reach the next block's transactions
 	nextTxn := types.NewTransaction(1, common.HexToAddress("0x5678"), uint256.NewInt(100), 21000, uint256.NewInt(1000000000), nil)
 	require.NoError(t, rawdb.WriteBody(tx, common.HexToHash("0xb10d"), blockNum+1, &types.Body{Transactions: []types.Transaction{nextTxn}}))
 	for _, i := range []int{-1, 1, 2, 3, 4} {
-		got, ok, err = rawdb.TxnByIdxInBlock(tx, blockHash, blockNum, i)
+		got, err = rawdb.TxnRlpByIdxInBlock(tx, blockHash, blockNum, i)
 		require.NoError(t, err)
-		require.False(t, ok, "index %d", i)
 		require.Nil(t, got, "index %d", i)
 	}
 
-	got, ok, err = rawdb.TxnByIdxInBlock(tx, common.HexToHash("0xdead"), blockNum, 0)
+	got, err = rawdb.TxnRlpByIdxInBlock(tx, common.HexToHash("0xdead"), blockNum, 0)
 	require.NoError(t, err)
-	require.False(t, ok)
 	require.Nil(t, got)
 }
 
@@ -1045,6 +1043,66 @@ func TestReadReceiptsCacheV2UnorderedTxIndex(t *testing.T) {
 	require.Empty(t, rs)
 }
 
+func TestReadReceiptsCacheV2DerivesTxHashes(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithEnableDomain(kv.RCacheDomain))
+	tx, err := m.DB.BeginTemporalRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	br := m.BlockReader
+	txNumReader := br.TxnumReader()
+	ctx := m.Ctx
+
+	txns := types.Transactions{
+		newTestLegacyTx(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1),
+		newTestLegacyTx(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2),
+		newTestLegacyTx(3, common.HexToAddress("0x3"), u256.Num1, 3, u256.Num1),
+	}
+	header := &types.Header{Number: *common.Num1}
+	hash := header.Hash()
+	body := &types.Body{Transactions: txns}
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, header.Number.Uint64()))
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteBody(tx, hash, 1, body))
+	require.NoError(t, rawdb.AppendCanonicalTxNums(tx, 1))
+	require.NoError(t, rawdb.WriteSenders(tx, hash, 1, body.SendersFromTxs()))
+
+	blockNum := header.Number.Uint64()
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithParaTrieDB(m.DB))
+	require.NoError(t, err)
+	defer sd.Close()
+	base, err := txNumReader.Min(t.Context(), tx, blockNum)
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, base))
+	for i := range txns {
+		r := &types.Receipt{
+			Status:            types.ReceiptStatusSuccessful,
+			CumulativeGasUsed: uint64(i + 1),
+			GasUsed:           1,
+			Logs:              []*types.Log{{Address: common.BytesToAddress([]byte{byte(i + 1)})}},
+			TransactionIndex:  uint(i),
+		}
+		require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), r, base+1+uint64(i)))
+	}
+	last := base + uint64(len(txns)) + 1
+	require.NoError(t, rawdb.WriteReceiptCacheV2(sd.AsPutDel(tx), nil, last))
+	_, err = sd.ComputeCommitment(ctx, tx, true, blockNum, last, "flush-commitment", nil)
+	require.NoError(t, err)
+	require.NoError(t, sd.Flush(ctx, tx))
+
+	b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	rs, err := rawdb.ReadReceiptsCacheV2(tx, b, txNumReader)
+	require.NoError(t, err)
+	require.Len(t, rs, len(txns))
+	for i, r := range rs {
+		require.Equal(t, txns[i].Hash(), r.TxHash)
+		require.Len(t, r.Logs, 1)
+		require.Equal(t, txns[i].Hash(), r.Logs[0].TxHash)
+	}
+}
+
 // Tests block storage and retrieval operations with withdrawals.
 func TestBlockWithdrawalsStorage(t *testing.T) {
 	if testing.Short() {
@@ -1659,4 +1717,24 @@ func TestTruncateBlocksKeepsGenesis(t *testing.T) {
 		}))
 		require.Equal(t, []uint64{0, 1}, got, "%s: blocks >= 2 must be gone", table)
 	}
+}
+
+func TestRaiseCaplinBlobsArchiveFromSlotKeepsHighest(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+
+	got, err := rawdb.ReadCaplinBlobsArchiveFromSlot(tx)
+	require.NoError(t, err)
+	require.Zero(t, got)
+
+	for _, slot := range []uint64{2_000_000, 1_000_000, 0} {
+		require.NoError(t, rawdb.RaiseCaplinBlobsArchiveFromSlot(tx, slot))
+	}
+	got, err = rawdb.ReadCaplinBlobsArchiveFromSlot(tx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2_000_000), got)
+
+	require.NoError(t, rawdb.RaiseCaplinBlobsArchiveFromSlot(tx, 3_000_000))
+	got, err = rawdb.ReadCaplinBlobsArchiveFromSlot(tx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3_000_000), got)
 }

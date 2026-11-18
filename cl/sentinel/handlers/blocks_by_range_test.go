@@ -25,6 +25,9 @@ import (
 	"io"
 	"math"
 	"testing"
+	"time"
+
+	"github.com/golang/snappy"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -35,12 +38,15 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/snappypool"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 func TestBeaconBlocksByRangeRequestCost(t *testing.T) {
@@ -126,6 +132,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
+	require.NoError(t, stream.CloseWrite())
 
 	firstByte := make([]byte, 1)
 	_, err = stream.Read(firstByte)
@@ -251,6 +258,7 @@ func TestBeaconBlocksByRangeHandlerStaysInRequestedRange(t *testing.T) {
 			require.NoError(t, err)
 			_, err = stream.Write(reqBuf.Bytes())
 			require.NoError(t, err)
+			require.NoError(t, stream.CloseWrite())
 
 			if tc.wantInvalid {
 				code := make([]byte, 1)
@@ -292,5 +300,79 @@ func readBlocksByRangeSlots(t *testing.T, stream network.Stream, ethClock eth_cl
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, version)
 		require.NoError(t, block.DecodeSSZ(raw, int(version)))
 		slots = append(slots, block.Block.Slot)
+	}
+}
+
+type countingStream struct {
+	network.Stream
+	r    io.Reader
+	read int
+}
+
+func (s *countingStream) Read(p []byte) (int, error) {
+	n, err := s.r.Read(p)
+	s.read += n
+	return n, err
+}
+
+// A fixed-size request whose prefix claims a large payload must be refused before that payload is read.
+func TestBlocksByRangeRefusesOversizedRequest(t *testing.T) {
+	payload := make([]byte, clparams.MaxPayloadSize)
+	var req bytes.Buffer
+	req.Write(binary.AppendUvarint(nil, uint64(len(payload))))
+	sw := snappy.NewBufferedWriter(&req)
+	_, err := sw.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, sw.Close())
+
+	s := &countingStream{r: &req}
+	require.ErrorIs(t, (&ConsensusHandlers{}).beaconBlocksByRangeHandler(s), ssz_snappy.ErrPayloadExceedsLimit)
+	require.Less(t, s.read, 64, "the handler read the claimed payload")
+}
+
+func TestOversizedFixedSizeRequestGetsInvalidRequest(t *testing.T) {
+	for _, p := range []string{
+		communication.BeaconBlocksByRangeProtocolV2,
+		communication.BeaconBlocksByHeadProtocolV1,
+		communication.BlobSidecarByRangeProtocolV1,
+		communication.LightClientBootstrapProtocolV1,
+		communication.LightClientUpdatesByRangeProtocolV1,
+	} {
+		t.Run(p, func(t *testing.T) {
+			stream, _ := newHeartbeatTestStream(t, protocol.ID(p))
+			require.NoError(t, stream.SetDeadline(time.Now().Add(5*time.Second)))
+			_, err := stream.Write(binary.AppendUvarint(nil, uint64(clparams.MaxPayloadSize)))
+			require.NoError(t, err)
+			requireResponseCode(t, stream, InvalidRequestPrefix)
+		})
+	}
+}
+
+func TestRequestWithTrailingByteGetsInvalidRequest(t *testing.T) {
+	roots := solid.NewHashList(1)
+	roots.Append(common.Hash{1})
+	blobIDs := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](1, new(cltypes.BlobIdentifier).EncodingSizeSSZ())
+	blobIDs.Append(&cltypes.BlobIdentifier{BlockRoot: common.Hash{1}})
+	for _, tc := range []struct {
+		protocol string
+		request  ssz.Marshaler
+	}{
+		{communication.BeaconBlocksByRangeProtocolV2, &cltypes.BeaconBlocksByRangeRequest{StartSlot: 1, Count: 1, Step: 1}},
+		{communication.BeaconBlocksByRootProtocolV2, roots},
+		{communication.BlobSidecarByRootProtocolV1, blobIDs},
+		{communication.LightClientBootstrapProtocolV1, &cltypes.Root{Root: common.Hash{1}}},
+	} {
+		t.Run(tc.protocol, func(t *testing.T) {
+			var wire bytes.Buffer
+			require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, tc.request))
+			wire.WriteByte(0x00)
+
+			stream, _ := newHeartbeatTestStream(t, protocol.ID(tc.protocol))
+			require.NoError(t, stream.SetDeadline(time.Now().Add(5*time.Second)))
+			_, err := stream.Write(wire.Bytes())
+			require.NoError(t, err)
+			require.NoError(t, stream.CloseWrite())
+			requireResponseCode(t, stream, InvalidRequestPrefix)
+		})
 	}
 }
