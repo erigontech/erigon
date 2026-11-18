@@ -231,13 +231,14 @@ func TestCreate2OverStorageOnlyAccountInitCodeReadsOldSlotAsZero(t *testing.T) {
 	}
 }
 
-// A CREATE2 to an account with storage and a balance destroys the new contract in its init code.
-// Under EIP-8246 the account keeps its balance and the creation replaces its storage; before it, the
-// destruct burns the balance and removes the account. A later tx of the block reads the balance and
-// the code hash, which tells an existing account from an absent one.
+// A CREATE2 to an account with storage and a balance writes a slot that the account holds and
+// destroys the new contract in its init code. Under EIP-8246 the account keeps its balance and the
+// creation replaces its storage; before it, the destruct burns the balance and removes the account.
+// A later tx of the block reads the balance and the code hash, which tells an existing account from
+// an absent one.
 func TestCreate2DestructOverAnAccountWithStorageKeepsOnlyTheBalance(t *testing.T) {
 	keys, senders := eip161TouchKeys(t, 1)
-	initCode := program.New().Op(vm.ADDRESS, vm.SELFDESTRUCT).Bytes()
+	initCode := program.New().Sstore(1, 7).Op(vm.ADDRESS, vm.SELFDESTRUCT).Bytes()
 	factory := common.HexToAddress("0xfac7")
 	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
 	probe := common.HexToAddress("0x9b0e")
