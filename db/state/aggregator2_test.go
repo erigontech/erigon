@@ -130,6 +130,33 @@ func TestCheckSnapshotsCompatibilityV3RecordsIgnoresConvertBackups(t *testing.T)
 	require.NoError(t, CheckSnapshotsCompatibility(dirs))
 }
 
+func TestCheckMixedCommitmentFilesRejectsMixedMajors(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		legacy string
+		v3     string
+	}{
+		{name: "domain data", legacy: "v2.0-commitment.0-1.kv", v3: "v3.0-commitment.1-2.kv"},
+		{name: "history data", legacy: "v2.0-commitment.0-1.v", v3: "v3.0-commitment.1-2.v"},
+		{name: "across domain and history", legacy: "v2.0-commitment.0-1.kv", v3: "v3.0-commitment.1-2.v"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			legacyDir, v3Dir := dirs.SnapDomain, dirs.SnapDomain
+			if filepath.Ext(test.legacy) == ".v" {
+				legacyDir = dirs.SnapHistory
+			}
+			if filepath.Ext(test.v3) == ".v" {
+				v3Dir = dirs.SnapHistory
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(legacyDir, test.legacy), nil, 0o644))
+			require.NoError(t, os.WriteFile(filepath.Join(v3Dir, test.v3), nil, 0o644))
+			require.ErrorContains(t, CheckMixedCommitmentFiles(dirs), "mixed major versions")
+			require.ErrorContains(t, CheckSnapshotsCompatibility(dirs), "mixed major versions")
+		})
+	}
+}
+
 func TestCheckSnapshotsCompatibilityV3RecordsRequiresFlag(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 
@@ -152,4 +179,16 @@ func TestOpenRefusesPendingRestoreReset(t *testing.T) {
 		agg.Close()
 	}
 	require.ErrorContains(t, err, "commitment restore has not reset the execution state")
+}
+
+func TestOpenRefusesMixedCommitmentVersions(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.1-2.kv"), nil, 0o644))
+
+	agg, err := NewTest(dirs).SanityOldNaming().Open(t.Context())
+	if err == nil {
+		agg.Close()
+	}
+	require.ErrorContains(t, err, "mixed major versions")
 }

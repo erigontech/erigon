@@ -1171,9 +1171,6 @@ func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.Tempo
 		return nil, err
 	}
 	dirs := datadir.New(datadirCli)
-	if err := dbstate.CheckSnapshotsCompatibility(dirs); err != nil {
-		return nil, err
-	}
 	chainConfig := fromdb.ChainConfig(db)
 	snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
 	_allSnapshotsSingleton = blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, logger)

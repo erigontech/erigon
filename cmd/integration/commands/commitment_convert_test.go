@@ -131,10 +131,8 @@ func TestCommitmentVerifyRejectsAsOfBelowHistory(t *testing.T) {
 	}
 }
 
-func TestNewTemporalDBRejectsV3FilesWhenV3IsDisabled(t *testing.T) {
-	previous := statecfg.ExperimentalCommitmentV3
-	statecfg.ExperimentalCommitmentV3 = false
-	t.Cleanup(func() { statecfg.ExperimentalCommitmentV3 = previous })
+func TestNewTemporalDBAllowsV3FilesWhenV3IsDisabled(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	db, dirs := dbWithV3State(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
@@ -142,10 +140,24 @@ func TestNewTemporalDBRejectsV3FilesWhenV3IsDisabled(t *testing.T) {
 	datadirCli = dirs.DataDir
 	t.Cleanup(func() { datadirCli = previousDatadir })
 
-	require.ErrorContains(t, func() error {
-		_, err := newTemporalDB(t.Context(), db, log.New())
-		return err
-	}(), "requires commitment v3")
+	opened, err := newTemporalDB(t.Context(), db, log.New())
+	require.NoError(t, err)
+	opened.Close()
+}
+
+func TestNewTemporalDBAllowsMixedCommitmentFiles(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+
+	db, dirs := dbWithV3State(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-1.kv"), nil, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+	previousDatadir := datadirCli
+	datadirCli = dirs.DataDir
+	t.Cleanup(func() { datadirCli = previousDatadir })
+
+	opened, err := newTemporalDB(t.Context(), db, log.New())
+	require.NoError(t, err)
+	opened.Close()
 }
 
 func TestCommitmentConvertLegacyRestoreKeepsExecution(t *testing.T) {
