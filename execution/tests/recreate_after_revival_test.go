@@ -80,6 +80,8 @@ var generatedBlockWant = map[string]struct {
 	"TestCoinbaseRecreatedWithCodeAfterFeeRevival/amsterdam=true":                       {"0x29d9c0b0bbd07c2a06f0e2c55ea1f04676ab9c710b08389f4c9765b3cc556d06", 232560},
 	"TestCreate2AfterCoinbaseDestructAndFeeRevival":                                     {"0x9f5bca819162e640333546263ed762c3d3ed5b65f0130b1c242ed6b73c517e60", 908647},
 	"TestCreate2AfterDestructAndTransferRevival":                                        {"0x9ac7dae57dab901312f629da58429619436b41ed1da83348ba3a48587444810a", 185647},
+	"TestCreate2OverStorageOnlyAccountInitCodeReadsOldSlotAsZero/amsterdam":             {"0x7e6d30b35f3dded251712262a606e3997f757bacf360eb012b230f59e06f9d44", 818711},
+	"TestCreate2OverStorageOnlyAccountInitCodeReadsOldSlotAsZero/prague":                {"0xf37edb8aca8c91d688bc8db21f7eff1e65b711bbf5e73ec96ae74f894cd5ac14", 852305},
 	"TestCreate2OverStorageOnlyAccountReplacesItsStorage/amsterdam":                     {"0x3d17c5551d42fdc4d2032fcec9e39520832fdc557dd000b7203a3bc377fb8dba", 97920},
 	"TestCreate2OverStorageOnlyAccountReplacesItsStorage/prague":                        {"0x98adec99881cc8d35f9329cf1b85b414ffa616577e349068d2205963cd383812", 75183},
 	"TestCreateAfterSameTxRevival/osaka":                                                {"0xa7158442c8b79c9264115e2c6c56a57f62e5f4a150169bd59f80afeb3b674e01", 176348},
@@ -120,6 +122,8 @@ var generatedBlockWant = map[string]struct {
 	"TestStorageReadAfterRecreate/shanghai":                                             {"0x110266e0cc2a44f0dc18346331985645aa11e6d811b16108b3157fb53b9a7fec", 1027547},
 	"TestTouchedStorageOnlyAccountIsAbsentForLaterTx/amsterdam":                         {"0xac06f2a6d73d1dcecc65cefb9006695e47caee746664fe36c70a6b7be252f187", 183600},
 	"TestTouchedStorageOnlyAccountIsAbsentForLaterTx/prague":                            {"0x3e3de2ba4f240e5ef22d52a7cc84d431c57a624ec77837f2358099aebd3a9b78", 42000},
+	"TestTxAfterCreate2OverStorageOnlyAccountSeesNewStorage/amsterdam":                  {"0xcc4ec4a1e2e146f8c0c647aba08d93033327607d8d8cb1baf7715066916b644b", 423810},
+	"TestTxAfterCreate2OverStorageOnlyAccountSeesNewStorage/prague":                     {"0xfed67065ca3af5ee716990abd3c341ec3c2c6000c7a56d50121dcdfe102f27de", 170960},
 	"TestZeroBaseFeeRemovesEmptyBurntRecipient":                                         {"0xe0fb98b28045966873e9bd251994c0da40e37f4f8b21843431378f2334eb8c07", 21000},
 }
 
