@@ -274,7 +274,12 @@ func (f *ForkChoiceStore) getAncestor(node ForkChoiceNode, slot uint64) ForkChoi
 			if !hasChild || child == nil {
 				return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 			}
-			return ForkChoiceNode{Root: parentRoot, PayloadStatus: f.getParentPayloadStatus(child.Block)}
+			status := f.getParentPayloadStatus(child.Block)
+			// Prune runs outside f.mu: re-read the header so a prune between the reads gives its own result, not a mix.
+			if _, stillStored := f.forkGraph.GetHeader(parentRoot); !stillStored {
+				return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
+			}
+			return ForkChoiceNode{Root: parentRoot, PayloadStatus: status}
 		}
 		childRoot, header = parentRoot, parentHeader
 	}
