@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -93,7 +94,7 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 			}
 			blockCtx := protocol.NewEVMBlockContext(header, blockHash, pe.engine, accounts.NilAddress, pe.config)
 			chainRules := blockCtx.Rules(pe.config)
-			toucher := &commitmentToucher{read: func(key []byte) []byte {
+			toucher := &commitmentToucher{ctx: ctx, read: func(key []byte) []byte {
 				v, _, err := ttx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
 				if err != nil {
 					return nil
@@ -128,7 +129,9 @@ func (pe *preExecCfg) run(ctx context.Context, blockCtx evmtypes.BlockContext, c
 	if t := txn.GetTo(); t != nil {
 		to = accounts.InternAddress(*t)
 	}
-	msg := types.NewMessage(from, to, txn.GetNonce(), txn.GetValue(), gas, txn.GetFeeCap(), txn.GetFeeCap(),
+	gasPrice := txn.GetEffectiveGasTip(&blockCtx.BaseFee)
+	gasPrice.Add(&gasPrice, &blockCtx.BaseFee)
+	msg := types.NewMessage(from, to, txn.GetNonce(), txn.GetValue(), gas, &gasPrice, txn.GetFeeCap(),
 		txn.GetTipCap(), txn.GetData(), txn.GetAccessList(), false, false, true, false, nil)
 	if h := txn.GetBlobHashes(); len(h) > 0 {
 		msg.SetBlobVersionedHashes(h)
@@ -138,6 +141,9 @@ func (pe *preExecCfg) run(ctx context.Context, blockCtx evmtypes.BlockContext, c
 	}
 	ibs := state.NewPooled(reader)
 	defer state.ReleasePooled(ibs)
+	if err := ibs.SetNonce(from, txn.GetNonce(), tracing.NonceChangeUnspecified); err != nil {
+		return
+	}
 	txCtx := protocol.NewEVMTxContext(msg)
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, pe.config, vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true})
 	defer context.AfterFunc(ctx, evm.Cancel)()
@@ -149,11 +155,15 @@ func (pe *preExecCfg) run(ctx context.Context, blockCtx evmtypes.BlockContext, c
 
 type commitmentToucher struct {
 	state.NoopWriter
+	ctx   context.Context
 	read  func(key []byte) []byte
 	paths int
 }
 
 func (t *commitmentToucher) touch(addrHash, slotHash []byte) {
+	if t.ctx.Err() != nil {
+		return
+	}
 	v3.PrefetchPath(t.read, addrHash, slotHash)
 	t.paths++
 }

@@ -166,3 +166,53 @@ func TestBlockReadAheaderPreExecBoundsLoopingTx(t *testing.T) {
 		t.Fatal("pre-exec of a looping tx did not stop after cancellation")
 	}
 }
+
+func TestBlockReadAheaderPreExecUsesEffectiveGasPrice(t *testing.T) {
+	f := newPreExecFixture(t, []byte{0x3a, 0x54, 0x00})
+	header := f.header()
+	header.BaseFee = uint256.NewInt(10)
+	txn, err := types.SignNewTx(f.key, *types.MakeSigner(f.config, 1, 1000), &types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{To: &f.contract, GasLimit: 100_000},
+		ChainID:  *f.config.ChainID,
+		TipCap:   *uint256.NewInt(2),
+		FeeCap:   *uint256.NewInt(100),
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{txn}))
+
+	effective, feeCap := common.Hash{31: 12}, common.Hash{31: 100}
+	_, ok := f.stateCache.View(nil).Get(kv.StorageDomain, append(f.contract[:], effective[:]...))
+	require.True(t, ok, "the slot keyed by the effective gas price was not read")
+	_, ok = f.stateCache.View(nil).Get(kv.StorageDomain, append(f.contract[:], feeCap[:]...))
+	require.False(t, ok, "the slot keyed by the fee cap was read")
+}
+
+func TestBlockReadAheaderPreExecCreatesAtTxNonce(t *testing.T) {
+	f := newPreExecFixture(t, []byte{0x00})
+	signer := *types.MakeSigner(f.config, 1, 1000)
+	call := f.txn(t, 100_000, 1)
+	create, err := types.SignNewTx(f.key, signer, &types.LegacyTx{
+		CommonTx: types.CommonTx{Nonce: 1, GasLimit: 200_000, Data: []byte{0x60, 0x2a, 0x60, 0x07, 0x55, 0x00}},
+		GasPrice: *uint256.NewInt(1),
+	})
+	require.NoError(t, err)
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), types.Transactions{call, create}))
+
+	sender := crypto.PubkeyToAddress(f.key.PublicKey)
+	atTxNonce, atParentNonce := types.CreateAddress(sender, 1), types.CreateAddress(sender, 0)
+	_, ok := f.stateCache.View(nil).Get(kv.AccountsDomain, atTxNonce[:])
+	require.True(t, ok, "the contract address at the tx nonce was not read")
+	_, ok = f.stateCache.View(nil).Get(kv.AccountsDomain, atParentNonce[:])
+	require.False(t, ok, "the contract address at the parent nonce was read")
+}
+
+func TestCommitmentToucherStopsAfterCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	reads := 0
+	toucher := &commitmentToucher{ctx: ctx, read: func([]byte) []byte { reads++; return nil }}
+	require.NoError(t, toucher.UpdateAccountData(accounts.InternAddress(common.Address{1}), nil, nil))
+	require.Equal(t, 1, reads)
+	cancel()
+	require.NoError(t, toucher.UpdateAccountData(accounts.InternAddress(common.Address{2}), nil, nil))
+	require.Equal(t, 1, reads, "the toucher read commitment after cancellation")
+}
