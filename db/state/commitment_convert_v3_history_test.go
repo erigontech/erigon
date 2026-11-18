@@ -243,11 +243,15 @@ func TestConvertCommitmentFiles_V3SplitPassesReopen(t *testing.T) {
 	}
 
 	reopen()
-	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoDomain: true})
+	logs, err := convertLogged(t, db, state.ConvertOpts{TargetV3: true, NoDomain: true})
+	require.NoError(t, err)
+	require.Contains(t, logs, "next step: run `integration commitment convert --v3 --no-history`")
 	requireCommitmentMajor(dirs.SnapHistory, "*-commitment.*.v", "v3.")
 	requireCommitmentMajor(dirs.SnapDomain, "*-commitment.*.kv", "v2.")
 	reopen()
-	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true})
+	logs, err = convertLogged(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true})
+	require.NoError(t, err)
+	require.Contains(t, logs, "next step: run `integration stage_exec --reset`")
 	requireCommitmentMajor(dirs.SnapDomain, "*-commitment.*.kv", "v3.")
 
 	statecfg.Schema = legacySchema
@@ -255,7 +259,7 @@ func TestConvertCommitmentFiles_V3SplitPassesReopen(t *testing.T) {
 	statecfg.EnableHistoricalCommitment()
 	db, agg = reopenAggregator(t, db, agg, 10)
 	require.NoError(t, agg.OpenFolder(db))
-	_, err := state.FoldCommitmentV3(t.Context(), agg, ^uint64(0))
+	_, err = state.FoldCommitmentV3(t.Context(), agg, ^uint64(0))
 	require.NoError(t, err)
 }
 
@@ -764,7 +768,8 @@ func TestConvertCommitmentFiles_HistoryBackupFailureNamesRestore(t *testing.T) {
 func reopenForConvert(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, schema statecfg.SchemaGen) (kv.TemporalRwDB, *state.Aggregator) {
 	t.Helper()
 	statecfg.Schema = schema
-	require.NoError(t, state.SetCommitmentConvertSchema(agg.Dirs()))
+	statecfg.EnableHistoricalCommitment()
+	require.NoError(t, state.MatchCommitmentSchemaToFiles(agg.Dirs()))
 	db, agg = reopenAggregator(t, db, agg, 10)
 	require.NoError(t, agg.OpenFolder(db))
 	return db, agg
@@ -772,10 +777,20 @@ func reopenForConvert(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, s
 
 func convertErr(t *testing.T, db kv.TemporalRwDB, opts state.ConvertOpts) error {
 	t.Helper()
+	_, err := convertLogged(t, db, opts)
+	return err
+}
+
+func convertLogged(t *testing.T, db kv.TemporalRwDB, opts state.ConvertOpts) (string, error) {
+	t.Helper()
+	var buf bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&buf, log.LogfmtFormat()))
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	return state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), opts, log.New())
+	err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), opts, logger)
+	return buf.String(), err
 }
 
 func TestConvertCommitmentFiles_V3HistoryRetryRefusesPendingBackup(t *testing.T) {

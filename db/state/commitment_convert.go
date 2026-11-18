@@ -884,7 +884,18 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		doneSummary, backupDir,
 	))
 	if opts.TargetV3 {
-		logger.Info("[commitment_convert] next step: run `integration stage_exec --reset` before starting erigon")
+		next := "`integration stage_exec --reset` before starting erigon"
+		if !convertDomain {
+			if err := forEachCommitmentDataFile(at.Dirs().SnapDomain, func(_ string, major uint64) error {
+				if major < 3 {
+					next = "`integration commitment convert --v3 --no-history`"
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+		logger.Info("[commitment_convert] next step: run " + next)
 	}
 	return nil
 }
@@ -955,35 +966,25 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 	return restoredV3, nil
 }
 
-func SetCommitmentConvertSchema(d datadir.Dirs) error {
-	var domainV3, history, historyV3 bool
+func MatchCommitmentSchemaToFiles(d datadir.Dirs) error {
+	cfg := statecfg.Schema.CommitmentDomain
+	domainV3, historyV3 := cfg.CommitmentV3Records, cfg.Hist.FileVersion.DataV.Current.Major >= 3
+	var domain, history bool
 	if err := forEachCommitmentDataFile(d.SnapDomain, func(_ string, major uint64) error {
-		domainV3 = domainV3 || major >= 3
+		domainV3 = domain && domainV3 || major >= 3
+		domain = true
 		return nil
 	}); err != nil {
 		return err
 	}
 	if err := forEachCommitmentDataFile(d.SnapHistory, func(_ string, major uint64) error {
-		history, historyV3 = true, historyV3 || major >= 3
+		historyV3 = history && historyV3 || major >= 3
+		history = true
 		return nil
 	}); err != nil {
 		return err
 	}
-	if history {
-		statecfg.EnableHistoricalCommitment()
-	}
-	cfg := statecfg.Schema.CommitmentDomain
-	v3 := cfg
-	statecfg.EnableCommitmentV3Records(&v3)
-	if domainV3 {
-		legacyHistory := cfg.Hist.FileVersion.DataV
-		cfg = v3
-		cfg.Hist.FileVersion.DataV = legacyHistory
-	}
-	if historyV3 {
-		cfg.Hist.FileVersion.DataV = v3.Hist.FileVersion.DataV
-	}
-	statecfg.Schema.CommitmentDomain = cfg
+	statecfg.SetCommitmentFileVersions(domainV3, historyV3)
 	return nil
 }
 

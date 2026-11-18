@@ -52,6 +52,7 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 	enabled := statecfg.ExperimentalCommitmentV3
 	t.Cleanup(func() {
 		convertSqueeze, convertNibblesV2, convertRestore, convertContinue, convertV3, statecfg.ExperimentalCommitmentV3 = false, false, false, false, false, enabled
+		convertNoDomain, convertNoHistory = false, false
 		cmdCommitmentConvert.Flags().Lookup("squeeze").Changed = false
 		cmdCommitmentConvert.Flags().Lookup("nibbles.v2").Changed = false
 	})
@@ -76,6 +77,12 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 		root.SetArgs(append([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet"}, mode...))
 		require.ErrorContains(t, root.ExecuteContext(t.Context()), "without ERIGON_COMMITMENT_V3=true", mode)
 	}
+
+	statecfg.ExperimentalCommitmentV3, convertSqueeze, convertNibblesV2 = false, false, false
+	cmdCommitmentConvert.Flags().Lookup("squeeze").Changed = false
+	cmdCommitmentConvert.Flags().Lookup("nibbles.v2").Changed = false
+	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--v3", "--no-domain", "--no-history"})
+	require.ErrorContains(t, root.ExecuteContext(t.Context()), "leave nothing to convert")
 }
 
 func TestCommitmentVerifyRejectsAsOfWithoutHistory(t *testing.T) {
@@ -152,6 +159,45 @@ func TestNewTemporalDBAllowsMixedCommitmentFiles(t *testing.T) {
 	opened, err := newTemporalDB(t.Context(), db, log.New())
 	require.NoError(t, err)
 	opened.Close()
+}
+
+func TestIntegrationOpensCommitmentFilesAtTheirVersions(t *testing.T) {
+	previousDatadir, previousChaindata := datadirCli, chaindata
+	t.Cleanup(func() {
+		datadirCli, chaindata = previousDatadir, previousChaindata
+		openSnapshotOnce = sync.Once{}
+	})
+	open := func(t *testing.T, dirs datadir.Dirs) {
+		t.Helper()
+		datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
+		openSnapshotOnce = sync.Once{}
+		opened, err := openDB(t.Context(), dbCfg(dbcfg.ChainDB, dirs.Chaindata), false, log.New())
+		require.NoError(t, err)
+		opened.Close()
+	}
+
+	t.Run("v3 files, v3 off", func(t *testing.T) {
+		t.Cleanup(statecfg.SetCommitmentV3(false))
+		db, dirs := dbWithV3State(t)
+		require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true, NoHistory: true}))
+		db.Close()
+		v3Files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "v3.0-commitment.*.kv"))
+		require.NoError(t, err)
+		require.NotEmpty(t, v3Files)
+
+		open(t, dirs)
+		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "files are v3 and ERIGON_COMMITMENT_V3 is off")
+	})
+
+	t.Run("legacy files, v3 on", func(t *testing.T) {
+		t.Cleanup(statecfg.SetCommitmentV3(false))
+		db, dirs := dbWithV3State(t)
+		db.Close()
+		statecfg.SetCommitmentV3(true)
+
+		open(t, dirs)
+		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "files are legacy and ERIGON_COMMITMENT_V3=true")
+	})
 }
 
 func TestCommitmentConvertLegacyRestoreKeepsExecution(t *testing.T) {

@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -708,6 +709,9 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		}
 		return nil
 	}
+	if err := checkCommitmentTrieMatchesFiles(); err != nil {
+		return err
+	}
 
 	if txtrace {
 		// Activate tracing and writing into json files for each transaction
@@ -1171,6 +1175,9 @@ func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.Tempo
 		return nil, err
 	}
 	dirs := datadir.New(datadirCli)
+	if err := dbstate.MatchCommitmentSchemaToFiles(dirs); err != nil {
+		return nil, err
+	}
 	chainConfig := fromdb.ChainConfig(db)
 	snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
 	_allSnapshotsSingleton = blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, logger)
@@ -1185,6 +1192,16 @@ func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.Tempo
 	agg := aggOpts.MustOpen(ctx)
 	agg.SetProduceMod(snapCfg.ProduceE3)
 	return temporal.New(db, agg, _allSnapshotsSingleton)
+}
+
+func checkCommitmentTrieMatchesFiles() error {
+	if statecfg.Schema.CommitmentDomain.CommitmentV3Records == statecfg.ExperimentalCommitmentV3 {
+		return nil
+	}
+	if statecfg.ExperimentalCommitmentV3 {
+		return errors.New("commitment domain files are legacy and ERIGON_COMMITMENT_V3=true; run `integration commitment convert --v3` without it first")
+	}
+	return errors.New("commitment domain files are v3 and ERIGON_COMMITMENT_V3 is off; set ERIGON_COMMITMENT_V3=true")
 }
 
 func allSnapshots(ctx context.Context, db kv.TemporalRwDB, logger log.Logger) (*blocksnapshots.RoSnapshots, *freezeblocks.CaplinSnapshots, error) {

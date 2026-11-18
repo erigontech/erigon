@@ -416,6 +416,20 @@ func EnableCommitmentV3Records(c *DomainCfg) {
 	c.Hist.FileVersion.DataV = version.Versions{Current: version.V3_0, MinSupported: version.V3_0}
 }
 
+func SetCommitmentFileVersions(domainV3, historyV3 bool) {
+	cfg := Schema.CommitmentDomain
+	d, h := legacyCommitmentDomain, legacyCommitmentDomain
+	if domainV3 {
+		EnableCommitmentV3Records(&d)
+	}
+	if historyV3 {
+		EnableCommitmentV3Records(&h)
+	}
+	cfg.CommitmentV3Records, cfg.Accessors, cfg.FileVersion = d.CommitmentV3Records, d.Accessors, d.FileVersion
+	cfg.Hist.FileVersion.DataV = h.Hist.FileVersion.DataV
+	Schema.CommitmentDomain = cfg
+}
+
 func EnableHistoricalCommitment() {
 	cfg := Schema.CommitmentDomain
 	cfg.Hist.HistoryDisabled = false

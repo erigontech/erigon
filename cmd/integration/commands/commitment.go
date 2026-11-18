@@ -347,6 +347,11 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if reset {
 		return rawdbreset.Reset(ctx, db, stages.Execution)
 	}
+	if !clearCommitment {
+		if err := checkCommitmentTrieMatchesFiles(); err != nil {
+			return err
+		}
+	}
 
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, br, dbg.MaxReorgDepth)
@@ -578,6 +583,9 @@ Examples:
 		if !convertV3 && (convertNoDomain || convertNoHistory) {
 			return errors.New("--no-domain and --no-history require --v3")
 		}
+		if convertNoDomain && convertNoHistory {
+			return errors.New("--no-domain and --no-history together leave nothing to convert")
+		}
 		if convertRestore && convertContinue {
 			return errors.New("--continue is mutually exclusive with --restore")
 		}
@@ -586,11 +594,6 @@ Examples:
 		}
 		if convertRestore {
 			return commitmentRestore(ctx, logger)
-		}
-		if convertV3 {
-			if err := dbstate.SetCommitmentConvertSchema(datadir.New(datadirCli)); err != nil {
-				return err
-			}
 		}
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
 		if err != nil {
