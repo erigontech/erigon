@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -70,23 +72,17 @@ func Sign(h Head, d Domain, key *ecdsa.PrivateKey) ([]byte, error) {
 
 // Recover returns the address that signed h in domain d.
 //
-// The parity byte may be 0 or 1, 27 or 28, or an EIP-155 value, and s may be
-// high: every encoding of one signature recovers the same signer.
+// Only v 27 or 28 with low s is taken. A relay may re-encode a signature,
+// and nodes relay the first copy of a head only: a copy one node takes and
+// another refuses would hold the head back from the stricter.
 func Recover(h Head, d Domain, sig []byte) (common.Address, error) {
 	if len(sig) != SignatureLength {
 		return common.Address{}, fmt.Errorf("%w: %d bytes, want %d", ErrBadSignature, len(sig), SignatureLength)
 	}
-	v := sig[64]
-	var parity byte
-	switch {
-	case v <= 1:
-		parity = v
-	case v == 27 || v == 28:
-		parity = v - 27
-	case v >= 35:
-		parity = (v - 35) & 1
-	default:
-		return common.Address{}, fmt.Errorf("%w: parity byte %d", ErrBadSignature, v)
+	// A v other than 27 or 28 leaves a parity other than 0 or 1, which fails.
+	parity := sig[64] - 27
+	if !crypto.TransactionSignatureIsValid(parity, new(uint256.Int).SetBytes(sig[:32]), new(uint256.Int).SetBytes(sig[32:64]), false) {
+		return common.Address{}, fmt.Errorf("%w: v %d, or r or s out of range", ErrBadSignature, sig[64])
 	}
 	var buf [SignatureLength]byte
 	copy(buf[:], sig)

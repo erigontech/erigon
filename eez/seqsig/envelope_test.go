@@ -233,9 +233,9 @@ func TestVerifyRejects(t *testing.T) {
 	}
 }
 
-// TestRecoverEncodings pins the signature encodings that recover the signer:
-// parity 0/1, 27/28 or EIP-155 (odd v parity 0, even v parity 1), and the
-// high-s twin of a signature.
+// TestRecoverEncodings pins the one encoding of a signature that recovers the
+// signer: v 27 or 28 with low s. Every other encoding of it is refused, so
+// that every node reaches the same verdict on a relayed copy.
 func TestRecoverEncodings(t *testing.T) {
 	h := headOf(testBlock(7))
 	sig := common.FromHex(signatureHex)
@@ -259,29 +259,45 @@ func TestRecoverEncodings(t *testing.T) {
 		want int
 	}{
 		{"v 27/28", sig, signer},
-		{"v 0/1", withV(sig, parity), signer},
-		{"v EIP-155 35/36", withV(sig, 35+parity), signer},
-		{"v EIP-155 37/38", withV(sig, 37+parity), signer},
-		{"high s", highS, signer},
-		{"high s, v 255", withV(highS, 255), signer},
+		{"v 0/1", withV(sig, parity), badSignature},
+		{"v EIP-155 35/36", withV(sig, 35+parity), badSignature},
+		{"v EIP-155 37/38", withV(sig, 37+parity), badSignature},
+		{"high s", highS, badSignature},
+		{"high s, v 255", withV(highS, 255), badSignature},
 		{"other parity", withV(sig, 27+(parity^1)), otherSigner},
+		{"zero s", withS(sig, new(uint256.Int)), badSignature},
+		{"r at the curve order", withR(sig, secp256k1N), badSignature},
 		{"v 2", withV(sig, 2), badSignature},
 		{"v 26", withV(sig, 26), badSignature},
 		{"v 29", withV(sig, 29), badSignature},
 		{"v 34", withV(sig, 34), badSignature},
 	} {
-		got, err := seqsig.Recover(h, domain, c.sig)
-		switch c.want {
-		case signer:
-			require.NoError(t, err, c.name)
-			require.Equal(t, authorized, got, c.name)
-		case otherSigner:
-			require.NoError(t, err, c.name)
-			require.NotEqual(t, authorized, got, c.name)
-		case badSignature:
-			require.ErrorIs(t, err, seqsig.ErrBadSignature, c.name)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			got, err := seqsig.Recover(h, domain, c.sig)
+			switch c.want {
+			case signer:
+				require.NoError(t, err)
+				require.Equal(t, authorized, got)
+			case otherSigner:
+				require.NoError(t, err)
+				require.NotEqual(t, authorized, got)
+			case badSignature:
+				require.ErrorIs(t, err, seqsig.ErrBadSignature)
+			}
+		})
 	}
+}
+
+func withR(sig []byte, r *uint256.Int) []byte {
+	out := bytes.Clone(sig)
+	r.WriteToSlice(out[:32])
+	return out
+}
+
+func withS(sig []byte, s *uint256.Int) []byte {
+	out := bytes.Clone(sig)
+	s.WriteToSlice(out[32:64])
+	return out
 }
 
 func withV(sig []byte, v byte) []byte {
