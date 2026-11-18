@@ -108,7 +108,7 @@ func TestDeltas(t *testing.T) {
 		storageRound(t, ctx, addr, seed)
 		previous, start := ctx.Records(), len(ctx.Deltas())
 		next := []commitmenttest.Op{{Key: seed[0].Key, Delete: true}, {Key: slotPath(1, 4), Storage: []byte{5}}, seed[2]}
-		root, parts, err := runStorageTaskWithPlan(ctx, storageTaskFor(addr, next), foldPlan{ctx: t.Context(), factory: ctx.Open, workers: 2, fanOutMin: 1})
+		root, parts, err := runStorageTaskWithPlan(t.Context(), ctx, storageTaskFor(addr, next), foldPlan{ctx: t.Context(), factory: ctx.Open, workers: 2, fanOutMin: 1})
 		require.NoError(t, err)
 		require.NoError(t, applyDeltas(parts, ctx.PutBranch, nil))
 		for _, delta := range ctx.Deltas()[start:] {
@@ -129,7 +129,7 @@ func TestDeltas(t *testing.T) {
 		rebuilt := runner.NewMemory(runner.ContextSpec{})
 		want := storageRound(t, rebuilt, addr, []commitmenttest.Op{seed[0], seed[1], added})
 		require.Equal(t, want, root)
-		reachable, err := enumerateStorageRecords(ctx, addr)
+		reachable, err := enumerateStorageRecords(t.Context(), ctx, addr)
 		require.NoError(t, err)
 		orphans := len(liveStorageRecords(ctx.Records())) - len(reachable)
 		require.Zero(t, orphans)

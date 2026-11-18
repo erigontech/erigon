@@ -187,7 +187,7 @@ func TestStorageTransitions(t *testing.T) {
 			if live {
 				ops = append(ops[:1], put(slotPath(3, 5, 2), 2), ops[1])
 			}
-			root, parts, err := runStorageTaskWithPlan(ctx, storageTaskFor(addr, ops), foldPlan{})
+			root, parts, err := runStorageTaskWithPlan(t.Context(), ctx, storageTaskFor(addr, ops), foldPlan{})
 			require.NoError(t, err)
 			for _, part := range parts {
 				for _, delta := range part {
@@ -564,7 +564,7 @@ func TestScheduling(t *testing.T) {
 		record, _, err := parallel.Branch(StorageNodeKey(addr, nil, nil))
 		require.NoError(t, err)
 		require.NotEmpty(t, (Record{data: record}).SelfExt())
-		want, _, err := runStorageTaskWithPlan(serial, task, foldPlan{})
+		want, _, err := runStorageTaskWithPlan(t.Context(), serial, task, foldPlan{})
 		require.NoError(t, err)
 		roots, parts := make([][32]byte, 1), make([]deltaParts, 1)
 		require.NoError(t, runStoragePhase(context.Background(), parallel, parallel.factory, []storageTask{task}, roots, parts, 2, defaultStorageFanOutMin, func(int) {}))
@@ -1019,5 +1019,50 @@ func TestWipeRebuildKeepsRecordsEqualToTheWipedOnes(t *testing.T) {
 	require.Equal(t, root, got)
 	for key, data := range before {
 		require.Equal(t, data, ctx.branches[key], "record %x", key)
+	}
+}
+
+type cancelAfterReads struct {
+	*mockContext
+	cancel context.CancelFunc
+	after  int
+}
+
+func (c cancelAfterReads) Branch(key []byte) ([]byte, kv.Step, error) {
+	if len(c.branchCalls) >= c.after {
+		c.cancel()
+	}
+	return c.mockContext.Branch(key)
+}
+
+// A storage task that is already running must stop soon after its phase is cancelled.
+func TestStorageTaskStopsOnCancel(t *testing.T) {
+	addr := [32]byte{0x42}
+	ops := make([]commitmenttest.Op, 1<<16)
+	for i := range ops {
+		ops[i] = commitmenttest.Op{Key: commitmenttest.Path([]byte{byte(i >> 12), byte(i >> 8 & 15), byte(i >> 4 & 15), byte(i & 15)}, 1), Storage: []byte{byte(i) | 1}}
+	}
+	updated := slices.Clone(ops)
+	for i := range updated {
+		updated[i].Storage = []byte{byte(i>>8) | 1, 2}
+	}
+	for _, tc := range []struct {
+		name string
+		task func() storageTask
+	}{
+		{"wipe", func() storageTask { return storageTask{addrHash: addr, wipe: true} }},
+		{"update", func() storageTask { return storageTaskFor(addr, updated) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := newMockContext()
+			storageRound(t, ctx, addr, ops)
+			records := len(ctx.branches)
+			ctx.branchCalls = nil
+			runCtx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			err := runStoragePhase(runCtx, cancelAfterReads{ctx, cancel, 32}, nil, []storageTask{tc.task()}, make([][32]byte, 1), make([]deltaParts, 1), 1, 0, func(int) {})
+			require.ErrorIs(t, err, context.Canceled)
+			require.Less(t, len(ctx.branchCalls), records/4, "reads after cancellation")
+		})
 	}
 }

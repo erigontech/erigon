@@ -54,7 +54,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			root, taskParts, err := runStorageTaskWithPlan(rawCtx, task, foldPlan{})
+			root, taskParts, err := runStorageTaskWithPlan(ctx, rawCtx, task, foldPlan{})
 			if err != nil {
 				return err
 			}
@@ -85,7 +85,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 				if i >= len(storage) {
 					return nil
 				}
-				root, taskParts, err := runStorageTaskWithPlan(workerCtx, storage[i], taskPlan)
+				root, taskParts, err := runStorageTaskWithPlan(gCtx, workerCtx, storage[i], taskPlan)
 				if err != nil {
 					return err
 				}

@@ -18,6 +18,7 @@ package v3
 
 import (
 	"bytes"
+	"context"
 	"errors"
 
 	"github.com/erigontech/erigon/common/empty"
@@ -123,13 +124,15 @@ func hashAddressPath(path []byte) [32]byte {
 
 const defaultStorageFanOutMin = 1024
 
-func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, plan foldPlan) ([32]byte, deltaParts, error) {
+const storageCancelCheckEvery = 256
+
+func runStorageTaskWithPlan(runCtx context.Context, ctx commitment.PatriciaContext, task storageTask, plan foldPlan) ([32]byte, deltaParts, error) {
 	if ctx == nil {
 		return [32]byte{}, nil, errors.New("commitment v3: nil phase A context")
 	}
 	g := graph{plane: planeStorage, addrHash: task.addrHash[:]}
 	if task.wipe {
-		records, err := enumerateStorageRecords(ctx, task.addrHash)
+		records, err := enumerateStorageRecords(runCtx, ctx, task.addrHash)
 		if err != nil {
 			return [32]byte{}, nil, err
 		}
@@ -160,7 +163,12 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 		plan = foldPlan{}
 	}
 
-	for _, entry := range task.entries {
+	for i, entry := range task.entries {
+		if i%storageCancelCheckEvery == 0 {
+			if err := runCtx.Err(); err != nil {
+				return [32]byte{}, nil, err
+			}
+		}
 		if !fanned && bytes.HasPrefix(entry.path, root.path) {
 			if err := g.ensurePath(ctx, root, entry.path); err != nil {
 				return [32]byte{}, nil, err
