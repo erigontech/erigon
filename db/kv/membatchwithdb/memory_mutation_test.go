@@ -17,6 +17,7 @@
 package membatchwithdb_test
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"sync"
@@ -192,6 +193,60 @@ func TestFlush(t *testing.T) {
 	value, err = rwTx.GetOne(kv.HeaderNumber, []byte("AAAA"))
 	require.NoError(t, err)
 	require.Equal(t, value, []byte("value5"))
+}
+
+func TestFlushDeletionMarkers(t *testing.T) {
+	for _, useDiff := range []bool{false, true} {
+		t.Run(fmt.Sprintf("diff=%t", useDiff), func(t *testing.T) {
+			_, tx := newTestTx(t)
+			require.NoError(t, tx.Put(kv.HeaderNumber, []byte("deleted"), []byte("old")))
+			require.NoError(t, tx.Put(kv.HeaderNumber, []byte("kept"), []byte("old")))
+			require.NoError(t, tx.Put(kv.Headers, []byte("cleared"), []byte("old")))
+			batch, err := membatchwithdb.NewMemoryBatch(tx)
+			require.NoError(t, err)
+			defer batch.Close()
+			require.NoError(t, batch.Delete(kv.HeaderNumber, []byte("deleted")))
+			require.NoError(t, batch.ClearTable(kv.Headers))
+			require.NoError(t, batch.Put(kv.Headers, []byte("written"), []byte("new")))
+			if useDiff {
+				diff, err := batch.Diff()
+				require.NoError(t, err)
+				require.NoError(t, diff.Flush(tx))
+			} else {
+				require.NoError(t, batch.Flush(t.Context(), tx))
+			}
+			for _, row := range []struct {
+				table, key string
+				value      []byte
+			}{
+				{kv.HeaderNumber, "deleted", nil},
+				{kv.HeaderNumber, "kept", []byte("old")},
+				{kv.Headers, "cleared", nil},
+				{kv.Headers, "written", []byte("new")},
+			} {
+				got, err := tx.GetOne(row.table, []byte(row.key))
+				require.NoError(t, err)
+				require.Equal(t, row.value, got, "%s/%s", row.table, row.key)
+			}
+		})
+	}
+}
+
+type deleteErrorTx struct {
+	kv.RwTx
+	err error
+}
+
+func (tx deleteErrorTx) Delete(string, []byte) error { return tx.err }
+
+func TestFlushPropagatesDeleteError(t *testing.T) {
+	_, tx := newTestTx(t)
+	batch, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Delete(kv.HeaderNumber, []byte("deleted")))
+	want := errors.New("delete failed")
+	require.ErrorIs(t, batch.Flush(t.Context(), deleteErrorTx{RwTx: tx, err: want}), want)
 }
 
 // TestFlushAppendPath exercises the Append fast-path used when all in-memory
@@ -989,6 +1044,45 @@ func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
 	assert.Equal(t, []byte("write-val-0499"), v)
 }
 
+func TestMemoryMutationReadViewCursorObservesNewMarkers(t *testing.T) {
+	for _, operation := range []string{"delete", "clear", "delete duplicate"} {
+		t.Run(operation, func(t *testing.T) {
+			_, rwTx := newTestTx(t)
+			table := kv.HeaderNumber
+			if operation == "delete duplicate" {
+				table = kv.TblAccountVals
+			}
+			key, value := []byte("key"), []byte("value")
+			require.NoError(t, rwTx.Put(table, key, value))
+			batch, err := membatchwithdb.NewMemoryBatch(rwTx)
+			require.NoError(t, err)
+			defer batch.Close()
+			require.NoError(t, batch.Delete(kv.MaxTxNum, []byte("absent")))
+			reader, err := batch.NewReadView(rwTx).Cursor(table)
+			require.NoError(t, err)
+			defer reader.Close()
+			_, got, err := reader.SeekExact(key)
+			require.NoError(t, err)
+			require.Equal(t, value, got)
+
+			switch operation {
+			case "delete":
+				require.NoError(t, batch.Delete(table, key))
+			case "clear":
+				require.NoError(t, batch.ClearTable(table))
+			case "delete duplicate":
+				writer, err := batch.RwCursorDupSort(table)
+				require.NoError(t, err)
+				defer writer.Close()
+				require.NoError(t, writer.DeleteExact(key, value))
+			}
+			_, got, err = reader.SeekExact(key)
+			require.NoError(t, err)
+			require.Nil(t, got)
+		})
+	}
+}
+
 // TestMemoryMutationConcurrentDeleteAndRead verifies that concurrent Delete
 // and OverlayReadView reads don't race.
 func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
@@ -1024,6 +1118,10 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 			key := fmt.Appendf(nil, "key-%03d", i)
 			_, _ = view.GetOne(kv.HeaderNumber, key)
 			_, _ = view.Has(kv.HeaderNumber, key)
+			if err := view.ForAmount(kv.HeaderNumber, nil, 100, func(k, v []byte) error { return nil }); err != nil {
+				t.Errorf("reader: ForAmount: %v", err)
+				return
+			}
 		}
 	})
 
@@ -1036,6 +1134,148 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 	})
 
 	wg.Wait()
+}
+
+func TestMemoryMutationConcurrentClearAndCursorRead(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	initializeDbNonDupSort(t, rwTx)
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx)
+	require.NoError(t, err)
+	defer batch.Close()
+	cursor, err := batch.NewReadView(rwTx).Cursor(kv.HeaderNumber)
+	require.NoError(t, err)
+	defer cursor.Close()
+
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() {
+		for range 500 {
+			if err := batch.ClearTable(kv.HeaderNumber); err != nil {
+				t.Errorf("writer: ClearTable: %v", err)
+				return
+			}
+		}
+	})
+	for range 500 {
+		_, _, err := cursor.Seek(nil)
+		require.NoError(t, err)
+	}
+}
+
+func TestMemoryMutationConcurrentMarkersInOtherTables(t *testing.T) {
+	_, tx := newTestTx(t)
+	key, value := []byte("key"), []byte("value")
+	require.NoError(t, tx.Put(kv.HeaderNumber, key, value))
+	batch, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer batch.Close()
+	reader, err := batch.NewReadView(tx).Cursor(kv.HeaderNumber)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() {
+		for _, table := range kv.ChaindataTables {
+			if table == kv.HeaderNumber {
+				continue
+			}
+			if err := batch.Delete(table, key); err != nil {
+				t.Errorf("writer: Delete: %v", err)
+				return
+			}
+		}
+	})
+	for range 1000 {
+		_, got, err := reader.SeekExact(key)
+		require.NoError(t, err)
+		require.Equal(t, value, got)
+	}
+}
+
+func TestMemoryMutationConcurrentDeleteDupAndCursorRead(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	initializeDbDupSort(t, rwTx)
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx)
+	require.NoError(t, err)
+	defer batch.Close()
+	writer, err := batch.RwCursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer writer.Close()
+	reader, err := batch.NewReadView(rwTx).CursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() {
+		for range 500 {
+			if err := writer.DeleteExact([]byte("key1"), []byte("value1.1")); err != nil {
+				t.Errorf("writer: DeleteExact: %v", err)
+				return
+			}
+		}
+	})
+	for range 500 {
+		_, value, err := reader.SeekBothExact([]byte("key1"), []byte("value1.3"))
+		require.NoError(t, err)
+		require.Equal(t, []byte("value1.3"), value)
+	}
+	wg.Wait()
+	_, value, err := reader.SeekBothExact([]byte("key1"), []byte("value1.1"))
+	require.NoError(t, err)
+	require.Nil(t, value)
+}
+
+func TestMemoryMutationDeleteExactKeepsEarlierMarkers(t *testing.T) {
+	_, tx := newTestTx(t)
+	key := bytes.Repeat([]byte{1}, 40)
+	values := [][]byte{bytes.Repeat([]byte{2}, 40), bytes.Repeat([]byte{3}, 40), bytes.Repeat([]byte{4}, 40)}
+	for _, value := range values {
+		require.NoError(t, tx.Put(kv.TblAccountVals, key, value))
+	}
+	batch, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer batch.Close()
+	writer, err := batch.RwCursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer writer.Close()
+	deleteKey, deleteValue := bytes.Clone(key), make([]byte, 40)
+	for _, value := range values[:2] {
+		copy(deleteValue, value)
+		require.NoError(t, writer.DeleteExact(deleteKey, deleteValue))
+	}
+	clear(deleteKey)
+	clear(deleteValue)
+	reader, err := batch.NewReadView(tx).CursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer reader.Close()
+	for _, value := range values[:2] {
+		_, got, err := reader.SeekBothExact(key, value)
+		require.NoError(t, err)
+		require.Nil(t, got)
+	}
+	_, got, err := reader.SeekBothExact(key, values[2])
+	require.NoError(t, err)
+	require.Equal(t, values[2], got)
+}
+
+func TestMemoryMutationReadViewLongKeyLookupAllocations(t *testing.T) {
+	_, tx := newTestTx(t)
+	key, value := bytes.Repeat([]byte{1}, 40), []byte("value")
+	require.NoError(t, tx.Put(kv.Headers, key, value))
+	batch, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Delete(kv.Headers, bytes.Repeat([]byte{2}, 40)))
+	view := batch.NewReadView(tx)
+	var got []byte
+	allocs := testing.AllocsPerRun(1000, func() {
+		got, err = view.GetOne(kv.Headers, key)
+	})
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.Zero(t, allocs)
 }
 
 // erroringDomainReader fails every domain read, so a caller that swallows the
