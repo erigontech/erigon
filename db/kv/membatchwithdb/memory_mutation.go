@@ -1007,9 +1007,10 @@ func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, chang
 }
 
 // NewReadView creates a lightweight, non-owning view of this overlay backed by
-// the given tx for fallback reads. The view shares the in-memory data and the
-// parent's mutex, but uses the caller's tx for its own backing reads. Temporal
-// methods also use it when it implements kv.TemporalTx.
+// the given tx for fallback reads. The view reads a point-in-time snapshot of
+// the in-memory data without taking the overlay's lock, and uses the caller's
+// tx for its own backing reads. Temporal methods also use it when it
+// implements kv.TemporalTx.
 //
 // The returned kv.TemporalTx interface exposes only read methods. Rollback and
 // Close leave the shared overlay and the caller's transaction open because the
@@ -1058,9 +1059,11 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 	if t, ok := tx.(kv.TemporalTx); ok {
 		dbTx = t
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return &MemoryMutation{
-		mu:           m.mu, // share parent's mutex for synchronization
-		memTx:        m.memTx,
+		mu:           &sync.RWMutex{},
+		memTx:        m.memTx.snapshot(),
 		memDb:        nil, // caller doesn't own the memDb
 		readTx:       tx,
 		db:           dbTx,

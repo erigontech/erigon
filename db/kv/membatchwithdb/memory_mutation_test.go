@@ -1079,6 +1079,12 @@ func TestMemoryMutationReadViewCursorObservesNewMarkers(t *testing.T) {
 			}
 			_, got, err = reader.SeekExact(key)
 			require.NoError(t, err)
+			require.Equal(t, value, got, "an existing view keeps its point-in-time rows")
+			newReader, err := batch.NewReadView(rwTx).Cursor(table)
+			require.NoError(t, err)
+			defer newReader.Close()
+			_, got, err = newReader.SeekExact(key)
+			require.NoError(t, err)
 			require.Nil(t, got)
 		})
 	}
@@ -1223,7 +1229,10 @@ func TestMemoryMutationConcurrentDeleteDupAndCursorRead(t *testing.T) {
 		require.Equal(t, []byte("value1.3"), value)
 	}
 	wg.Wait()
-	_, value, err := reader.SeekBothExact([]byte("key1"), []byte("value1.1"))
+	newReader, err := batch.NewReadView(rwTx).CursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer newReader.Close()
+	_, value, err := newReader.SeekBothExact([]byte("key1"), []byte("value1.1"))
 	require.NoError(t, err)
 	require.Nil(t, value)
 }
@@ -1419,6 +1428,107 @@ func tableRows(tb testing.TB, tx kv.Tx, table string) []string {
 	}
 	require.Equal(tb, rows, rangeRows, "cursor and Range disagree")
 	return rows
+}
+
+// A view keeps its point-in-time rows while the writer keeps writing, and no
+// deleted row comes back from the backing tx for the writer or a later view.
+func TestMemoryMutationReadViewKeepsPointInTimeRows(t *testing.T) {
+	for _, tc := range []struct {
+		name, table string
+		seed        func(testing.TB, kv.RwTx)
+		before      [][2]string
+		write       func(*membatchwithdb.MemoryMutation) error
+		viewRows    []string
+		afterRows   []string
+	}{
+		{
+			name: "plain delete and put", table: kv.HeaderNumber, seed: initializeDbNonDupSort,
+			before: [][2]string{{"BBBB", "mem"}},
+			write: func(b *membatchwithdb.MemoryMutation) error {
+				return errors.Join(
+					b.Delete(kv.HeaderNumber, []byte("CAAA")),
+					b.Delete(kv.HeaderNumber, []byte("BBBB")),
+					b.Put(kv.HeaderNumber, []byte("AAAA"), []byte("new")),
+					b.Put(kv.HeaderNumber, []byte("DDDD"), []byte("new")),
+				)
+			},
+			viewRows:  []string{"AAAA=value", "BBBB=mem", "CAAA=value1", "CBAA=value2", "CCAA=value3"},
+			afterRows: []string{"AAAA=new", "CBAA=value2", "CCAA=value3", "DDDD=new"},
+		},
+		{
+			name: "plain clear and put", table: kv.HeaderNumber, seed: initializeDbNonDupSort,
+			before: [][2]string{{"BBBB", "mem"}},
+			write: func(b *membatchwithdb.MemoryMutation) error {
+				return errors.Join(b.ClearTable(kv.HeaderNumber), b.Put(kv.HeaderNumber, []byte("DDDD"), []byte("new")))
+			},
+			viewRows:  []string{"AAAA=value", "BBBB=mem", "CAAA=value1", "CBAA=value2", "CCAA=value3"},
+			afterRows: []string{"DDDD=new"},
+		},
+		{
+			name: "dupsort delete, delete exact and put", table: kv.TblAccountVals, seed: initializeDbDupSort,
+			before: [][2]string{{"key2", "value2.1"}},
+			write: func(b *membatchwithdb.MemoryMutation) error {
+				c, err := b.RwCursorDupSort(kv.TblAccountVals)
+				if err != nil {
+					return err
+				}
+				defer c.Close()
+				return errors.Join(
+					b.Delete(kv.TblAccountVals, []byte("key1")),
+					b.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.2")),
+					c.DeleteExact([]byte("key3"), []byte("value3.1")),
+					c.DeleteExact([]byte("key2"), []byte("value2.1")),
+				)
+			},
+			viewRows:  []string{"key1=value1.1", "key1=value1.3", "key2=value2.1", "key3=value3.1", "key3=value3.3"},
+			afterRows: []string{"key1=value1.2", "key3=value3.3"},
+		},
+		{
+			name: "dupsort clear and put", table: kv.TblAccountVals, seed: initializeDbDupSort,
+			before: [][2]string{{"key2", "value2.1"}},
+			write: func(b *membatchwithdb.MemoryMutation) error {
+				return errors.Join(b.ClearTable(kv.TblAccountVals), b.Put(kv.TblAccountVals, []byte("key9"), []byte("value9.1")))
+			},
+			viewRows:  []string{"key1=value1.1", "key1=value1.3", "key2=value2.1", "key3=value3.1", "key3=value3.3"},
+			afterRows: []string{"key9=value9.1"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, rwTx := newTestTx(t)
+			tc.seed(t, rwTx)
+			require.NoError(t, rwTx.Commit())
+			writerTx, err := db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer writerTx.Rollback()
+			tx, err := db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			batch, err := membatchwithdb.NewMemoryBatch(writerTx)
+			require.NoError(t, err)
+			defer batch.Close()
+			for _, row := range tc.before {
+				require.NoError(t, batch.Put(tc.table, []byte(row[0]), []byte(row[1])))
+			}
+			view := batch.NewReadView(tx)
+			require.Equal(t, tc.viewRows, tableRows(t, view, tc.table))
+
+			done := make(chan error)
+			go func() { done <- tc.write(batch) }()
+			for running := true; running; {
+				select {
+				case err := <-done:
+					require.NoError(t, err)
+					running = false
+				default:
+				}
+				require.Equal(t, tc.viewRows, tableRows(t, view, tc.table))
+			}
+
+			require.Equal(t, tc.afterRows, tableRows(t, batch, tc.table))
+			require.Equal(t, tc.afterRows, tableRows(t, batch.NewReadView(tx), tc.table))
+			require.Equal(t, tc.afterRows, tableRows(t, batch.NewTemporalReadView(tx), tc.table))
+		})
+	}
 }
 
 func TestFlushDeletesDupPair(t *testing.T) {
