@@ -70,12 +70,6 @@ func TestCommitmentConvertReturnsErrors(t *testing.T) {
 
 	convertRestore = false
 	statecfg.ExperimentalCommitmentV3 = false
-	dirs := datadir.New(t.TempDir())
-	require.NoError(t, os.MkdirAll(filepath.Join(dirs.Snap, "backup"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "backup", ".restore_v3_reset_pending"), nil, 0o644))
-	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", dirs.DataDir, "--chain", "mainnet", "--v3"})
-	require.ErrorContains(t, root.ExecuteContext(t.Context()), "convert --restore")
-
 	convertV3 = false
 	statecfg.ExperimentalCommitmentV3 = true
 	for _, mode := range [][]string{nil, {"--squeeze=true"}, {"--nibbles.v2=true"}} {
@@ -185,7 +179,7 @@ func TestCommitmentConvertLegacyRestoreKeepsExecution(t *testing.T) {
 	}))
 }
 
-func TestCommitmentConvertRestoreResetsExecution(t *testing.T) {
+func TestCommitmentConvertRestoreLeavesExecutionUnchanged(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousDatadir, previousChaindata := datadirCli, chaindata
 	t.Cleanup(func() { datadirCli, chaindata = previousDatadir, previousChaindata })
@@ -215,10 +209,10 @@ func TestCommitmentConvertRestoreResetsExecution(t *testing.T) {
 		progress, err = stages.GetStageProgress(tx, stages.Execution)
 		return err
 	}))
-	require.Zero(t, progress)
+	require.Equal(t, uint64(100), progress)
 }
 
-func TestCommitmentConvertRestoreRetryResetsExecution(t *testing.T) {
+func TestCommitmentConvertRestoreRetryLeavesExecutionUnchanged(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousDatadir, previousChaindata := datadirCli, chaindata
 	t.Cleanup(func() { datadirCli, chaindata = previousDatadir, previousChaindata })
@@ -256,12 +250,12 @@ func TestCommitmentConvertRestoreRetryResetsExecution(t *testing.T) {
 	require.NoError(t, rawDB.View(t.Context(), func(tx kv.Tx) error {
 		progress, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
-		require.Zero(t, progress)
+		require.Equal(t, uint64(100), progress)
 		return nil
 	}))
 }
 
-func TestCommitmentConvertRestoreRetryAfterFilesResetsExecution(t *testing.T) {
+func TestCommitmentConvertRestoreRetryAfterFilesLeavesExecutionUnchanged(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	previousDatadir, previousChaindata := datadirCli, chaindata
 	t.Cleanup(func() { datadirCli, chaindata = previousDatadir, previousChaindata })
@@ -280,23 +274,18 @@ func TestCommitmentConvertRestoreRetryAfterFilesResetsExecution(t *testing.T) {
 		require.NoError(t, os.Rename(f, filepath.Join(backupDir, filepath.Base(f))))
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-2.kv"), nil, 0o644))
-	restoredV3, err := state.RestoreCommitmentFiles(t.Context(), dirs, log.New())
-	require.NoError(t, err)
-	require.True(t, restoredV3)
-	require.NoDirExists(t, backupDir)
-
 	datadirCli, chaindata = dirs.DataDir, dirs.Chaindata
 	require.NoError(t, commitmentRestore(t.Context(), log.New()))
+	require.NoDirExists(t, backupDir)
 
 	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
 	defer rawDB.Close()
 	require.NoError(t, rawDB.View(t.Context(), func(tx kv.Tx) error {
 		progress, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
-		require.Zero(t, progress)
+		require.Equal(t, uint64(100), progress)
 		return nil
 	}))
-	require.NoFileExists(t, filepath.Join(dirs.Snap, "backup", ".restore_v3_reset_pending"))
 }
 
 func dbWithV3State(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) {

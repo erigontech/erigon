@@ -582,10 +582,6 @@ Examples:
 		if convertRestore {
 			return commitmentRestore(ctx, logger)
 		}
-		if err := dbstate.CheckRestoreResetDone(datadir.New(datadirCli)); err != nil {
-			return err
-		}
-
 		if convertV3 {
 			legacyHistory, err := filepath.Glob(filepath.Join(datadir.New(datadirCli).SnapHistory, "*-commitment.*.v"))
 			if err != nil {
@@ -612,23 +608,13 @@ Examples:
 	},
 }
 
-// commitmentRestore moves the files back before openDB so recovery still works
-// when MDBX/aggregator/snapshots can't open — which is exactly when --restore
-// is most needed.
 func commitmentRestore(ctx context.Context, logger log.Logger) error {
-	restoredV3, err := dbstate.RestoreCommitmentFiles(ctx, datadir.New(datadirCli), logger)
-	if err != nil || !restoredV3 {
-		return err
-	}
-	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
+	_, err := dbstate.RestoreCommitmentFiles(ctx, datadir.New(datadirCli), logger)
 	if err != nil {
-		return fmt.Errorf("commitment files are restored, but the execution state still needs a reset: re-run the same `integration commitment convert --restore` command before starting erigon: %w", err)
-	}
-	defer db.Close()
-	if err := rawdbreset.ResetExec(ctx, db); err != nil {
 		return err
 	}
-	return dbstate.CompleteCommitmentRestore(datadir.New(datadirCli), logger)
+	logger.Info("Commitment files restored. Next step: integration stage_exec --reset")
+	return nil
 }
 
 func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {

@@ -53,9 +53,6 @@ func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:gocritic
 	// TODO: rename `OpenFolder` to `ReopenFolder`
 	if opts.sanityOldNaming {
-		if err := CheckRestoreResetDone(opts.dirs); err != nil {
-			return nil, err
-		}
 		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
 			return nil, err
 		}
