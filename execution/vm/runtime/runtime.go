@@ -138,7 +138,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+		cfg.State = state.NewWithVersionMap(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewVersionMap(nil))
 	}
 	var (
 		address = contractAsAddress
@@ -146,6 +146,11 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		sender  = cfg.Origin
 		rules   = vmenv.ChainRules()
 	)
+	if externalState && cfg.State.IsVersioned() {
+		if err := startNextTx(cfg.State); err != nil {
+			return nil, nil, err
+		}
+	}
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
 	if err := cfg.State.CreateAccount(address, true); err != nil {
 		return nil, nil, err
@@ -169,6 +174,20 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	cfg.EVMConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 
 	return ret, cfg.State, err
+}
+
+// startNextTx publishes the previous run's writes to the version map and moves to the next
+// tx index, as CreateAccount does not hide storage written at its own index. Nil rules skip
+// the EIP-161 cleanup Execute never applied, and its reads of a reader that may be closed.
+func startNextTx(ibs *state.IntraBlockState) error {
+	writes, err := ibs.FinalizedWrites(nil)
+	if err != nil {
+		return err
+	}
+	ibs.FlushWritesToVersionMap(writes)
+	ibs.ResetVersionedIO()
+	ibs.SetTxContext(ibs.BlockNumber(), ibs.TxnIndex()+1)
+	return nil
 }
 
 // Create executes the code using the EVM create method
@@ -200,7 +219,7 @@ func Create(input []byte, cfg *Config) ([]byte, common.Address, mdgas.MdGas, err
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+		cfg.State = state.NewWithVersionMap(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewVersionMap(nil))
 	}
 	var (
 		vmenv  = NewEnv(cfg)
