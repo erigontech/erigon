@@ -204,7 +204,7 @@ func TestStoreBlobsForBlockRejectsFewerIdentifiersThanCommitments(t *testing.T) 
 	}
 
 	endpoint := &ChainEndpoint{Blobs: true}
-	err := endpoint.storeBlobsForBlock(t.Context(), nil, beaconConfig, block)
+	err := endpoint.storeBlobsForBlock(t.Context(), nil, nil, nil, beaconConfig, block)
 
 	require.Error(t, err, "a block whose commitments exceed the request cap must not pass silently")
 	require.ErrorContains(t, err, "identifier")
@@ -353,4 +353,39 @@ func TestRetrieveBlobsKeepsTheEndpointSecretOutOfErrors(t *testing.T) {
 func TestRedactEndpointKeepsSchemeAndHost(t *testing.T) {
 	require.Equal(t, "https://beacon.example:5052", blobfetch.RedactEndpoint("https://u:p@beacon.example:5052/key/eth?apikey=k"))
 	require.Equal(t, "<invalid endpoint>", blobfetch.RedactEndpoint("http://h/%zz"))
+}
+
+func TestChainEndpointWalkStoresAroundASkippedGloasPayload(t *testing.T) {
+	f, before, after := newSkippedPayloadFixture(t, 1)
+	skipped, err := f.blocks.blocks[fillTestSlot+1].Block.HashSSZ()
+	require.NoError(t, err)
+	url, requests := f.endpoint(false)
+	endpoint := &ChainEndpoint{Blobs: true, Endpoint: url}
+
+	require.NoError(t, f.db.View(t.Context(), func(tx kv.Tx) error {
+		for _, slot := range []uint64{fillTestSlot + 2, fillTestSlot + 1, fillTestSlot} {
+			if err := endpoint.storeBlobsForBlock(t.Context(), tx, f.blocks, f.store, &clparams.MainnetBeaconConfig, f.blocks.blocks[slot]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	require.True(t, f.storedValid(fillTestSlot, before))
+	require.True(t, f.storedValid(fillTestSlot+2, after))
+	require.Zero(t, requestsFor(requests, skipped))
+}
+
+func TestStoredBlobsCompleteAcceptsASkippedGloasPayload(t *testing.T) {
+	f, _, _ := newSkippedPayloadFixture(t, 1)
+	skipped, err := f.blocks.blocks[fillTestSlot+1].Block.HashSSZ()
+	require.NoError(t, err)
+
+	var stored bool
+	require.NoError(t, f.db.View(t.Context(), func(tx kv.Tx) error {
+		stored, err = storedBlobsComplete(t.Context(), tx, f.blocks, f.store, fillTestSlot+1, skipped)
+		return err
+	}))
+
+	require.True(t, stored)
 }
