@@ -1724,6 +1724,10 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 			return integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, logger)
 		case integrity.StateVerify:
 			return integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger)
+		case integrity.CodeHash:
+			return integrity.CheckCodeHash(ctx, sc, db, failFast, fromStep, logger)
+		case integrity.StorageOfAbsentAccount:
+			return integrity.CheckStorageOfAbsentAccount(ctx, sc, db, failFast, fromStep, logger)
 		case integrity.TorrentPieces:
 			// Already run as a pre-pass when --file-integrity-cache enabled it.
 			if cache == nil {
