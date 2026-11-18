@@ -29,10 +29,12 @@ import (
 	"github.com/golang/snappy"
 	"github.com/holiman/uint256"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	pubsubpb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/eez/seqsig"
@@ -124,6 +126,52 @@ func TestSignedMessageNotDelivered(t *testing.T) {
 	require.True(t, ok, "A did not deliver the anonymous head")
 	_, ok = awaitHead(oa.Heads(), signedHead.BlockHash, 2*time.Second)
 	require.False(t, ok, "A delivered a signed message")
+}
+
+// TestAuthorFieldsRefused: a message carrying from, seqno, signature or key,
+// present but empty included, is refused, and refused before its id is seen:
+// the clean copy, which has the same id, is delivered after it.
+func TestAuthorFieldsRefused(t *testing.T) {
+	t.Parallel()
+	a := newTestNode(t, 1)
+	oa := a.start()
+	// A host without gossipsub, writing RPCs by hand.
+	h, err := newHost(key(6), ma.StringCast("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = h.Close() })
+	require.NoError(t, h.Connect(t.Context(), a.info()))
+	s, err := h.NewStream(t.Context(), a.info().ID, pubsub.GossipSubID_v11)
+	require.NoError(t, err)
+	defer s.Close()
+	topic := Topic(testDomain.ChainID, testDomain.RollupID)
+	send := func(m *pubsubpb.Message) {
+		b, err := proto.Marshal(&pubsubpb.RPC{Publish: []*pubsubpb.Message{m}})
+		require.NoError(t, err)
+		_, err = s.Write(append(binary.AppendUvarint(nil, uint64(len(b))), b...))
+		require.NoError(t, err)
+	}
+
+	empty := []byte{}
+	for i, set := range []func(*pubsubpb.Message){
+		func(m *pubsubpb.Message) { m.From = empty },
+		func(m *pubsubpb.Message) { m.Seqno = empty },
+		func(m *pubsubpb.Message) { m.Signature = empty },
+		func(m *pubsubpb.Message) { m.Key = empty },
+		func(m *pubsubpb.Message) { m.Key = []byte{1} },
+	} {
+		h := head(nowMs(), uint64(i+1), 0x60)
+		data := mustEncode(0, h)
+		carried := &pubsubpb.Message{Topic: &topic, Data: data}
+		set(carried)
+		send(carried)
+		_, ok := awaitHead(oa.Heads(), h.BlockHash, time.Second)
+		require.False(t, ok, "case %d: delivered a message carrying an author field", i)
+		send(&pubsubpb.Message{Topic: &topic, Data: data})
+		_, ok = awaitHead(oa.Heads(), h.BlockHash, 5*time.Second)
+		require.True(t, ok, "case %d: the clean copy was held back", i)
+		_, ok = awaitHead(oa.Heads(), h.BlockHash, time.Second)
+		require.False(t, ok, "case %d: delivered twice", i)
+	}
 }
 
 // largeBlock returns a block whose single transaction carries size random,
