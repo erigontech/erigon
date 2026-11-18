@@ -1955,14 +1955,14 @@ func (vm *VersionMap) resetToSeed(addr accounts.Address, path AccountPath, key a
 	switch path {
 	case BalancePath:
 		if status, ok := vm.derivedBalances[derivedBalanceKey{addr, v.TxIndex}]; ok {
-			resetCellTo(vm, e.Balance, v, uint256.Int{}, status, eqUint256, &stamped)
+			resetBalance(vm, e.Balance, v, uint256.Int{}, status, &stamped)
 			break
 		}
 		c, ok := balChangeAt(ac.BalanceChanges, func(c *types.BalanceChange) uint32 { return c.Index }, v.TxIndex)
 		if !ok {
 			return false
 		}
-		resetCell(vm, e.Balance, v, c.Value, eqUint256, &stamped)
+		resetBalance(vm, e.Balance, v, c.Value, ValueChanged, &stamped)
 	case NoncePath:
 		c, ok := balChangeAt(ac.NonceChanges, func(c *types.NonceChange) uint32 { return c.Index }, v.TxIndex)
 		if !ok {
@@ -1995,16 +1995,33 @@ func (vm *VersionMap) resetToSeed(addr accounts.Address, path AccountPath, key a
 	return true
 }
 
-// resetCell sets the cell at v.TxIndex back to the access list's value seed as Done.
+// resetCell sets the cell at v.TxIndex back to seed as Done. Before the seal, a Done cell already
+// holds the seed. As in flushCell, a changed value takes v's incarnation, so that a reader of the
+// earlier value is invalid.
 func resetCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], v Version, seed T, eq func(a, b T) bool, stamped *bool) {
-	resetCellTo(vm, cells, v, seed, ValueChanged, eq, stamped)
+	if cells == nil {
+		return
+	}
+	c, ok := cells.Get(v.TxIndex)
+	if !ok || c.loadFlag() == FlagDone {
+		return
+	}
+	if !*stamped {
+		vm.mutBegin(v.TxIndex)
+		*stamped = true
+	}
+	inc := c.loadInc()
+	if !eq(c.Value, seed) {
+		inc = v.Incarnation
+	}
+	c.Value, c.valStatus = seed, ValueChanged
+	c.setState(inc, FlagDone)
 }
 
-// resetCellTo sets the cell at v.TxIndex back to a seeded value, with its status, as Done. Before
-// the seal, a Done cell is the seed, but a flush of an equal value keeps it Done and rewrites its
-// status. As in flushCell, a change takes v's incarnation, so that a reader of the earlier cell is
-// invalid.
-func resetCellTo[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], v Version, seed T, status valueStatus, eq func(a, b T) bool, stamped *bool) {
+// resetBalance is resetCell for a balance seeded with status. Readers take a deleted balance as a
+// removed account, so the status counts as a change too: a flush of an equal value keeps the cell
+// Done but rewrites its status.
+func resetBalance(vm *VersionMap, cells *btree.Map[int, *WriteCell[uint256.Int]], v Version, seed uint256.Int, status valueStatus, stamped *bool) {
 	if cells == nil {
 		return
 	}
@@ -2017,7 +2034,7 @@ func resetCellTo[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], v 
 		*stamped = true
 	}
 	inc := c.loadInc()
-	if !eq(c.Value, seed) || c.valStatus != status {
+	if !eqUint256(c.Value, seed) || c.valStatus != status {
 		inc = v.Incarnation
 	}
 	c.Value, c.valStatus = seed, status

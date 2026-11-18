@@ -885,6 +885,94 @@ func TestDropWritePutsBackTheStatusOfASeededBalance(t *testing.T) {
 	require.Equal(t, ValueChanged, c.valStatus)
 }
 
+// The derived balances are per account: a drop of another account's write at the same tx puts back
+// that account's value from the access list.
+func TestDropWritePutsBackTheSeedOfAnAccountNextToADerivedBalance(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress(common.HexToAddress("0x5a1e"))
+	y := accounts.InternAddress(common.HexToAddress("0x5a1f"))
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(5)
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &acc}}
+	vm := NewVersionMap(types.BlockAccessList{
+		{Address: x.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: uint256.Int{}}}},
+		{Address: y.Value(), BalanceChanges: []*types.BalanceChange{{Index: 1, Value: *uint256.NewInt(7)}}},
+	})
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, reader))
+	run := &WriteSet{}
+	run.SetBalance(y, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: y, Path: BalancePath, Version: Version{TxIndex: 0, Incarnation: 1}}, Val: *uint256.NewInt(9)})
+	vm.FlushVersionedWrites(run, false)
+
+	vm.DropWrite(y, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 2})
+	c := requireDoneCell(t, vm.load(y).Balance, 0, 2)
+	require.Equal(t, *uint256.NewInt(7), c.Value)
+	require.Equal(t, ValueChanged, c.valStatus)
+}
+
+// The access list seeds a removal of x at tx 3. A run of tx 3 writes a balance, the next creates
+// x with a zero balance, and tx 4 reads that x exists. The third run writes nothing, and the
+// final run removes x.
+func TestExistenceReadIsStaleOnceADropPutsTheRemovalBack(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress(common.HexToAddress("0x5a1e"))
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(5)
+	base := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{x: &acc}}
+	vm := NewVersionMap(types.BlockAccessList{{Address: x.Value(), BalanceChanges: []*types.BalanceChange{{Index: 4, Value: uint256.Int{}}}}})
+	vm.SeedAddresses()
+	require.NoError(t, vm.SeedEmptyRemovals(true, false, base))
+	rerun := func(prev, cur *WriteSet, v Version) {
+		for h := range prev.AllHeaders() {
+			if !cur.Has(h) {
+				vm.DropWrite(h.Address, h.Path, h.Key, v)
+			}
+		}
+		vm.FlushVersionedWrites(cur, false)
+	}
+	exists := func() (bool, ReadSet) {
+		ibs := NewWithVersionMap(base, vm)
+		t.Cleanup(ibs.Close)
+		ibs.SetTxContext(1, 4)
+		ok, err := ibs.Exist(x)
+		require.NoError(t, err)
+		require.False(t, ibs.HadInvalidRead())
+		return ok, ibs.VersionedReads()
+	}
+
+	run0 := &WriteSet{}
+	run0.SetBalance(x, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: x, Path: BalancePath, Version: Version{TxIndex: 3}}, Val: *uint256.NewInt(7)})
+	vm.FlushVersionedWrites(run0, false)
+	vm.MarkWritesValidated(run0, nil)
+
+	creator := NewWithVersionMap(base, vm)
+	defer creator.Close()
+	creator.SetTxContext(1, 3)
+	creator.SetVersion(1)
+	require.NoError(t, creator.CreateAccount(x, true))
+	require.NoError(t, creator.SetNonce(x, 1, tracing.NonceChangeUnspecified))
+	require.NoError(t, creator.SetBalance(x, uint256.Int{}, tracing.BalanceChangeUnspecified))
+	require.NoError(t, creator.MakeWriteSet(&chain.Rules{IsAmsterdam: true}, NewNoopWriter()))
+	run1 := creator.VersionedWrites()
+	rerun(run0, run1, Version{TxIndex: 3, Incarnation: 1})
+	vm.MarkWritesValidated(run1, nil)
+	existed, reads := exists()
+	require.True(t, existed)
+
+	run2 := &WriteSet{}
+	rerun(run1, run2, Version{TxIndex: 3, Incarnation: 2})
+	removal := &WriteSet{}
+	removal.SetEmptyRemoval(x, Version{TxIndex: 3, Incarnation: 3})
+	rerun(run2, removal, Version{TxIndex: 3, Incarnation: 3})
+	vm.MarkWritesValidated(removal, nil)
+	vm.MarkWritesComplete(removal)
+	vm.SealUpTo(3)
+
+	existsAtSeal, _ := exists()
+	require.False(t, existsAtSeal)
+	require.Equal(t, VersionInvalid, vm.ValidateReadSet(4, reads, validateEqualVersion, false, ""), "tx 4 read x as existing")
+}
+
 func requireDoneCell[T any](t *testing.T, cells *btree.Map[int, *WriteCell[T]], txIdx int, inc Incarnation) *WriteCell[T] {
 	t.Helper()
 	require.NotNil(t, cells)

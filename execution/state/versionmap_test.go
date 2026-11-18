@@ -2755,6 +2755,18 @@ func TestWritesAlreadySeededRefusesASeedADroppedWritePutBack(t *testing.T) {
 	require.False(t, vm.WritesAlreadySeeded(addr, storageWriteSet(addr, slot, 3, 42, ValueChanged)))
 }
 
+// A run wrote a slot's seeded value with another status, which keeps the cell Done. Only a balance's
+// status has readers, so the drop keeps the seed's version and its readers stay valid.
+func TestDropWriteKeepsTheVersionOfASlotARunWroteEqually(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
+	slot := accounts.InternKey(common.Hash{0x04})
+	vm := NewVersionMap(seededSlotBAL(addr, slot))
+	vm.FlushVersionedWrites(storageWriteSet(addr, slot, 1, 42, ValueCreated), false)
+
+	vm.DropWrite(addr, StoragePath, slot, Version{TxIndex: 1, Incarnation: 2})
+	requireDoneCell(t, vm.load(addr).Storage[slot], 1, 0)
+}
+
 func TestWritesAlreadySeededKeepsTheSeedThroughValidation(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xbe, 0xef})
 	slot := accounts.InternKey(common.Hash{0x04})
