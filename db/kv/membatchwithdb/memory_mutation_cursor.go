@@ -35,13 +35,19 @@ const (
 type cursorEntry struct {
 	key   []byte
 	value []byte
+	// deleted marks a mem tombstone that sorts after the current db entry.
+	deleted bool
+}
+
+func memCursorEntry(k, v []byte, deleted bool) cursorEntry {
+	return cursorEntry{key: k, value: v, deleted: deleted}
 }
 
 // cursor
 type memoryMutationCursor struct {
 	// entry history
 	cursor    kv.CursorDupSort
-	memCursor kv.RwCursorDupSort
+	memCursor *memStoreCursor
 	// we keep the mining mutation so that we can insert new elements in db
 	mutation        *MemoryMutation
 	table           string
@@ -62,10 +68,10 @@ func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte) bool {
 
 // First move cursor to first position and return key and value accordingly.
 func (m *memoryMutationCursor) First() ([]byte, []byte, error) {
-	memKey, memValue, err := m.memCursor.First()
-	if err != nil || m.isTableCleared() {
-		return memKey, memValue, err
+	if m.isTableCleared() {
+		return m.memCursor.First()
 	}
+	mem := memCursorEntry(m.memCursor.firstRaw())
 
 	dbKey, dbValue, err := m.cursor.First()
 	if err != nil {
@@ -78,7 +84,7 @@ func (m *memoryMutationCursor) First() ([]byte, []byte, error) {
 		}
 	}
 
-	return m.resolveCursorPriority(memKey, memValue, dbKey, dbValue, Normal)
+	return m.resolveCursorPriority(mem, dbKey, dbValue, Normal)
 }
 
 func (m *memoryMutationCursor) getNextOnDb(t NextType) (key []byte, value []byte, err error) {
@@ -158,7 +164,32 @@ func (m *memoryMutationCursor) skipIntersection(memKey, memValue, dbKey, dbValue
 	return
 }
 
-func (m *memoryMutationCursor) resolveCursorPriority(memKey, memValue, dbKey, dbValue []byte, t NextType) ([]byte, []byte, error) {
+// skipMemTombstones moves the mem side past the tombstones that sort at or before
+// the db entry, or past all of them once the db side is exhausted. Tombstones
+// further ahead stay unvisited: the db rows they hide are filtered by isEntryDeleted.
+func (m *memoryMutationCursor) skipMemTombstones(mem cursorEntry, dbKey, dbValue []byte) cursorEntry {
+	for mem.deleted {
+		if dbValue != nil {
+			if c := bytes.Compare(mem.key, dbKey); c > 0 || c == 0 && bytes.Compare(mem.value, dbValue) > 0 {
+				break
+			}
+		}
+		mem = memCursorEntry(m.memCursor.nextRaw())
+	}
+	return mem
+}
+
+func (m *memoryMutationCursor) resolveCursorPriority(mem cursorEntry, dbKey, dbValue []byte, t NextType) ([]byte, []byte, error) {
+	if mem.deleted {
+		if mem = m.skipMemTombstones(mem, dbKey, dbValue); mem.deleted {
+			m.currentMemEntry = mem
+			m.currentDbEntry = cursorEntry{key: dbKey, value: dbValue}
+			m.currentPair = m.currentDbEntry
+			m.isPrevFromDb = true
+			return dbKey, dbValue, nil
+		}
+	}
+	memKey, memValue := mem.key, mem.value
 	if memValue == nil && dbValue == nil {
 		return nil, nil, nil
 	}
@@ -169,8 +200,8 @@ func (m *memoryMutationCursor) resolveCursorPriority(memKey, memValue, dbKey, db
 		return nil, nil, err
 	}
 
-	m.currentDbEntry = cursorEntry{dbKey, dbValue}
-	m.currentMemEntry = cursorEntry{memKey, memValue}
+	m.currentDbEntry = cursorEntry{key: dbKey, value: dbValue}
+	m.currentMemEntry = cursorEntry{key: memKey, value: memValue}
 	// compare entries
 	if bytes.Equal(memKey, dbKey) {
 		m.isPrevFromDb = dbValue != nil && (memValue == nil || bytes.Compare(memValue, dbValue) > 0)
@@ -184,11 +215,11 @@ func (m *memoryMutationCursor) resolveCursorPriority(memKey, memValue, dbKey, db
 		m.currentMemEntry = cursorEntry{}
 	}
 	if m.isPrevFromDb {
-		m.currentPair = cursorEntry{dbKey, dbValue}
+		m.currentPair = cursorEntry{key: dbKey, value: dbValue}
 		return dbKey, dbValue, nil
 	}
 
-	m.currentPair = cursorEntry{memKey, memValue}
+	m.currentPair = cursorEntry{key: memKey, value: memValue}
 	return memKey, memValue, nil
 }
 
@@ -203,15 +234,10 @@ func (m *memoryMutationCursor) Next() ([]byte, []byte, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		return m.resolveCursorPriority(m.currentMemEntry.key, m.currentMemEntry.value, k, v, Normal)
+		return m.resolveCursorPriority(m.currentMemEntry, k, v, Normal)
 	}
 
-	memK, memV, err := m.memCursor.Next()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return m.resolveCursorPriority(memK, memV, m.currentDbEntry.key, m.currentDbEntry.value, Normal)
+	return m.resolveCursorPriority(memCursorEntry(m.memCursor.nextRaw()), m.currentDbEntry.key, m.currentDbEntry.value, Normal)
 }
 
 // NextDup returns the next element of the mutation.
@@ -225,7 +251,7 @@ func (m *memoryMutationCursor) NextDup() ([]byte, []byte, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		return m.resolveCursorPriority(m.currentMemEntry.key, m.currentMemEntry.value, k, v, Dup)
+		return m.resolveCursorPriority(m.currentMemEntry, k, v, Dup)
 	}
 
 	memK, memV, err := m.memCursor.NextDup()
@@ -233,7 +259,7 @@ func (m *memoryMutationCursor) NextDup() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	return m.resolveCursorPriority(memK, memV, m.currentDbEntry.key, m.currentDbEntry.value, Dup)
+	return m.resolveCursorPriority(cursorEntry{key: memK, value: memV}, m.currentDbEntry.key, m.currentDbEntry.value, Dup)
 }
 
 // Seek move pointer to a key at a certain position.
@@ -255,12 +281,7 @@ func (m *memoryMutationCursor) Seek(seek []byte) ([]byte, []byte, error) {
 		}
 	}
 
-	memKey, memValue, err := m.memCursor.Seek(seek)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return m.resolveCursorPriority(memKey, memValue, dbKey, dbValue, Normal)
+	return m.resolveCursorPriority(memCursorEntry(m.memCursor.seekRaw(seek)), dbKey, dbValue, Normal)
 }
 
 // Seek move pointer to a key at a certain position.
@@ -343,7 +364,7 @@ func (m *memoryMutationCursor) SeekBothRange(key, value []byte) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	_, retValue, err := m.resolveCursorPriority(key, memValue, key, dbValue, Dup)
+	_, retValue, err := m.resolveCursorPriority(cursorEntry{key: key, value: memValue}, key, dbValue, Dup)
 	return retValue, err
 }
 
@@ -368,8 +389,8 @@ func (m *memoryMutationCursor) Last() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	m.currentDbEntry = cursorEntry{dbKey, dbValue}
-	m.currentMemEntry = cursorEntry{memKey, memValue}
+	m.currentDbEntry = cursorEntry{key: dbKey, value: dbValue}
+	m.currentMemEntry = cursorEntry{key: memKey, value: memValue}
 
 	if dbValue == nil {
 		m.isPrevFromDb = false
@@ -464,15 +485,10 @@ func (m *memoryMutationCursor) NextNoDup() ([]byte, []byte, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		return m.resolveCursorPriority(m.currentMemEntry.key, m.currentMemEntry.value, k, v, NoDup)
+		return m.resolveCursorPriority(m.currentMemEntry, k, v, NoDup)
 	}
 
-	memK, memV, err := m.memCursor.NextNoDup()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return m.resolveCursorPriority(memK, memV, m.currentDbEntry.key, m.currentDbEntry.value, NoDup)
+	return m.resolveCursorPriority(memCursorEntry(m.memCursor.nextNoDupRaw()), m.currentDbEntry.key, m.currentDbEntry.value, NoDup)
 }
 
 func (m *memoryMutationCursor) LastDup() ([]byte, error) {
@@ -490,12 +506,11 @@ func (m *memoryMutationCursor) SeekBothExact(key, value []byte) ([]byte, []byte,
 	}
 
 	if memKey != nil {
-		m.currentMemEntry.key = memKey
-		m.currentMemEntry.value = memValue
-		m.currentDbEntry.key = key
+		m.currentMemEntry = cursorEntry{key: memKey, value: memValue}
+		m.currentDbEntry = cursorEntry{key: key}
 		m.currentDbEntry.value, err = m.cursor.SeekBothRange(key, value)
 		m.isPrevFromDb = false
-		m.currentPair = cursorEntry{memKey, memValue}
+		m.currentPair = cursorEntry{key: memKey, value: memValue}
 		return memKey, memValue, err
 	}
 
@@ -505,12 +520,11 @@ func (m *memoryMutationCursor) SeekBothExact(key, value []byte) ([]byte, []byte,
 	}
 
 	if dbKey != nil && !m.isEntryDeleted(key, value) {
-		m.currentDbEntry.key = dbKey
-		m.currentDbEntry.value = dbValue
-		m.currentMemEntry.key = key
+		m.currentDbEntry = cursorEntry{key: dbKey, value: dbValue}
+		m.currentMemEntry = cursorEntry{key: key}
 		m.currentMemEntry.value, err = m.memCursor.SeekBothRange(key, value)
 		m.isPrevFromDb = true
-		m.currentPair = cursorEntry{dbKey, dbValue}
+		m.currentPair = cursorEntry{key: dbKey, value: dbValue}
 		return dbKey, dbValue, err
 	}
 	return nil, nil, nil

@@ -174,19 +174,15 @@ func (m *MemoryMutation) ForAmount(bucket string, prefix []byte, amount uint32, 
 	defer c.Close()
 
 	k, v, err := c.Seek(prefix)
-	if err != nil {
-		return err
-	}
-	for ; k != nil && amount > 0; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
+	for ; k != nil && err == nil; k, v, err = c.Next() {
 		if err := walker(k, v); err != nil {
 			return err
 		}
-		amount--
+		if amount--; amount == 0 {
+			return nil
+		}
 	}
-	return nil
+	return err
 }
 
 func (m *MemoryMutation) statelessCursor(table string) (kv.RwCursor, error) {
@@ -820,10 +816,7 @@ func (m *MemoryMutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 			return nil, err
 		}
 	}
-	c.memCursor, err = m.memTx.RwCursorDupSort(bucket) //nolint:gocritic
-	if err != nil {
-		return nil, err
-	}
+	c.memCursor = m.memTx.newCursor(bucket)
 	c.mutation = m
 	return c, err
 }

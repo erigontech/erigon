@@ -200,6 +200,14 @@ func skipDeleted(iter *btree2.IterG[memEntry], valid, forward bool) bool {
 	return valid
 }
 
+// skipDeletedDup moves a positioned iterator past the tombstones of key only.
+func skipDeletedDup(iter *btree2.IterG[memEntry], valid bool, key []byte) bool {
+	for valid && iter.Item().deleted && bytes.Equal(iter.Item().k, key) {
+		valid = iter.Next()
+	}
+	return valid
+}
+
 // getOrCreateTable must be called with mu held (read or write).
 func (s *memStore) getOrCreateTable(table string) *memTable {
 	t, ok := s.tables[table]
@@ -570,7 +578,7 @@ type memStoreCursor struct {
 	current memEntry
 }
 
-// land records the live entry the iterator stopped at, or an exhausted cursor.
+// land records the entry the iterator stopped at, or an exhausted cursor.
 func (c *memStoreCursor) land(iter *btree2.IterG[memEntry], valid bool) ([]byte, []byte, error) {
 	c.valid = valid
 	if !valid {
@@ -667,7 +675,7 @@ func (c *memStoreCursor) NextDup() ([]byte, []byte, error) {
 	defer c.store.mu.RUnlock()
 	iter := c.table.tree.Iter()
 	defer iter.Release()
-	if !skipDeleted(&iter, c.seekToNext(&iter), true) || !bytes.Equal(iter.Item().k, c.current.k) {
+	if !skipDeletedDup(&iter, c.seekToNext(&iter), c.current.k) || !bytes.Equal(iter.Item().k, c.current.k) {
 		return nil, nil, nil
 	}
 	c.current = iter.Item()
@@ -694,7 +702,7 @@ func (c *memStoreCursor) SeekBothRange(key, value []byte) ([]byte, error) {
 	defer c.store.mu.RUnlock()
 	iter := c.table.tree.Iter()
 	defer iter.Release()
-	k, v, _ := c.land(&iter, skipDeleted(&iter, iter.Seek(memEntry{k: key, v: value}), true))
+	k, v, _ := c.land(&iter, skipDeletedDup(&iter, iter.Seek(memEntry{k: key, v: value}), key))
 	if !bytes.Equal(k, key) {
 		return nil, nil
 	}
@@ -706,7 +714,7 @@ func (c *memStoreCursor) SeekBothExact(key, value []byte) ([]byte, []byte, error
 	defer c.store.mu.RUnlock()
 	iter := c.table.tree.Iter()
 	defer iter.Release()
-	k, v, _ := c.land(&iter, skipDeleted(&iter, iter.Seek(memEntry{k: key, v: value}), true))
+	k, v, _ := c.land(&iter, skipDeletedDup(&iter, iter.Seek(memEntry{k: key, v: value}), key))
 	if !bytes.Equal(k, key) || !bytes.Equal(v, value) {
 		return nil, nil, nil
 	}
@@ -751,6 +759,56 @@ func (c *memStoreCursor) LastDup() ([]byte, error) {
 	}
 	c.current = iter.Item()
 	return bytes.Clone(c.current.v), nil
+}
+
+// firstRaw, seekRaw, nextRaw and nextNoDupRaw are First, Seek, Next and
+// NextNoDup that can stop at a tombstone and report it, so a caller decides how
+// many tombstones to walk.
+func (c *memStoreCursor) firstRaw() ([]byte, []byte, bool) {
+	c.store.mu.RLock()
+	defer c.store.mu.RUnlock()
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	return c.landRaw(&iter, iter.First())
+}
+
+func (c *memStoreCursor) seekRaw(seek []byte) ([]byte, []byte, bool) {
+	c.store.mu.RLock()
+	defer c.store.mu.RUnlock()
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	return c.landRaw(&iter, iter.Seek(memEntry{k: seek}))
+}
+
+func (c *memStoreCursor) nextRaw() ([]byte, []byte, bool) {
+	if !c.valid {
+		return nil, nil, false
+	}
+	c.store.mu.RLock()
+	defer c.store.mu.RUnlock()
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	return c.landRaw(&iter, c.seekToNext(&iter))
+}
+
+func (c *memStoreCursor) nextNoDupRaw() ([]byte, []byte, bool) {
+	if !c.valid {
+		return nil, nil, false
+	}
+	c.store.mu.RLock()
+	defer c.store.mu.RUnlock()
+	iter := c.table.tree.Iter()
+	defer iter.Release()
+	valid := c.seekToNext(&iter)
+	for valid && bytes.Equal(iter.Item().k, c.current.k) {
+		valid = iter.Next()
+	}
+	return c.landRaw(&iter, valid)
+}
+
+func (c *memStoreCursor) landRaw(iter *btree2.IterG[memEntry], valid bool) ([]byte, []byte, bool) {
+	k, v, _ := c.land(iter, valid)
+	return k, v, c.current.deleted
 }
 
 func (c *memStoreCursor) PrevDup() ([]byte, []byte, error)   { panic("PrevDup not implemented") }
