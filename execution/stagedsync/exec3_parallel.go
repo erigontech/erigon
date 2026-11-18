@@ -241,6 +241,9 @@ func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64, blockHas
 	}
 }
 
+// probe (bound only): skip the state-change notification of each applied block.
+var stubSkipNotifyAccumulator = dbg.EnvBool("STUB_SKIP_NOTIFY_ACC", false)
+
 // clearChangesetAccumulator detaches the current changeset accumulator after
 // its block's changeset has been saved. Exec-loop only.
 func (pe *parallelExecutor) clearChangesetAccumulator() {
@@ -777,7 +780,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// keep accumulator access single-threaded. StartChange must precede
 					// NotifyAccumulator: it initialises the latestChange entry the notify
 					// writes into.
-					if pe.accumulator != nil && applyResult.Header != nil {
+					if pe.accumulator != nil && applyResult.Header != nil && !stubSkipNotifyAccumulator {
 						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
 						if marshalErr != nil {
 							<-balDone
