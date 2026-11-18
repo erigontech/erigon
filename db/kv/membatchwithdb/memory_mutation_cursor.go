@@ -44,8 +44,6 @@ type memoryMutationCursor struct {
 	memCursor kv.RwCursorDupSort
 	// we keep the mining mutation so that we can insert new elements in db
 	mutation        *MemoryMutation
-	deletions       *tableDeletions
-	deletionTables  *map[string]*tableDeletions
 	table           string
 	currentPair     cursorEntry
 	currentDbEntry  cursorEntry
@@ -54,26 +52,12 @@ type memoryMutationCursor struct {
 	pureDupSort     bool
 }
 
-func (m *memoryMutationCursor) tableDeletions() *tableDeletions {
-	if m.deletions == nil {
-		tables := m.mutation.deletions.Load()
-		if tables != nil && tables != m.deletionTables {
-			m.deletionTables = tables
-			m.deletions = (*tables)[m.table]
-		}
-	}
-	return m.deletions
-}
-
 func (m *memoryMutationCursor) isTableCleared() bool {
-	return m.tableDeletions().isTableCleared()
+	return m.mutation.memTx.isCleared(m.table)
 }
 
 func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte) bool {
-	if m.pureDupSort {
-		return m.tableDeletions().isDupDeleted(key, value)
-	}
-	return m.tableDeletions().isEntryDeleted(key)
+	return m.mutation.memTx.isHidden(m.table, key, value)
 }
 
 // First move cursor to first position and return key and value accordingly.
@@ -319,13 +303,11 @@ func (m *memoryMutationCursor) DeleteCurrent() error {
 	if !m.pureDupSort {
 		return m.mutation.Delete(m.table, m.currentPair.key)
 	}
-	m.mutation.deleteDup(m.table, m.currentPair.key, m.currentPair.value)
-	return nil
+	return m.mutation.deleteExact(m.table, m.currentPair.key, m.currentPair.value)
 }
 
 func (m *memoryMutationCursor) DeleteExact(k, v []byte) error {
-	m.mutation.deleteDup(m.table, k, v)
-	return nil
+	return m.mutation.deleteExact(m.table, k, v)
 }
 
 func (m *memoryMutationCursor) DeleteCurrentDuplicates() error {

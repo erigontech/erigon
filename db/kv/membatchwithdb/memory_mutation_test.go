@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -1395,4 +1396,83 @@ func TestHistoryDisabledFallsThrough(t *testing.T) {
 			})
 		})
 	}
+}
+
+func tableRows(tb testing.TB, tx kv.Tx, table string) []string {
+	tb.Helper()
+	c, err := tx.Cursor(table)
+	require.NoError(tb, err)
+	defer c.Close()
+	var rows []string
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		require.NoError(tb, err)
+		rows = append(rows, string(k)+"="+string(v))
+	}
+	it, err := tx.Range(table, nil, nil, order.Asc, kv.Unlim)
+	require.NoError(tb, err)
+	defer it.Close()
+	var rangeRows []string
+	for it.HasNext() {
+		k, v, err := it.Next()
+		require.NoError(tb, err)
+		rangeRows = append(rangeRows, string(k)+"="+string(v))
+	}
+	require.Equal(tb, rows, rangeRows, "cursor and Range disagree")
+	return rows
+}
+
+func TestFlushDeletesDupPair(t *testing.T) {
+	for _, useDiff := range []bool{false, true} {
+		t.Run(fmt.Sprintf("diff=%t", useDiff), func(t *testing.T) {
+			_, tx := newTestTx(t)
+			initializeDbDupSort(t, tx)
+			batch, err := membatchwithdb.NewMemoryBatch(tx)
+			require.NoError(t, err)
+			defer batch.Close()
+			c, err := batch.RwCursorDupSort(kv.TblAccountVals)
+			require.NoError(t, err)
+			defer c.Close()
+			require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1")))
+			if useDiff {
+				diff, err := batch.Diff()
+				require.NoError(t, err)
+				require.NoError(t, diff.Flush(tx))
+			} else {
+				require.NoError(t, batch.Flush(t.Context(), tx))
+			}
+			require.Equal(t, []string{"key1=value1.3", "key3=value3.1", "key3=value3.3"}, tableRows(t, tx, kv.TblAccountVals))
+		})
+	}
+}
+
+func TestDupSortCursorHidesDeletedKey(t *testing.T) {
+	batch := newBatchOverDbDupSort(t)
+	require.NoError(t, batch.Delete(kv.TblAccountVals, []byte("key1")))
+	c, err := batch.CursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer c.Close()
+	k, v, err := c.SeekExact([]byte("key1"))
+	require.NoError(t, err)
+	require.Nil(t, k)
+	require.Nil(t, v)
+	require.Equal(t, []string{"key3=value3.1", "key3=value3.3"}, tableRows(t, batch, kv.TblAccountVals))
+}
+
+func TestDeleteExactRemovesPairWrittenInOverlay(t *testing.T) {
+	_, tx := newTestTx(t)
+	batch, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer batch.Close()
+	key, value := []byte("key2"), []byte("value2.1")
+	require.NoError(t, batch.Put(kv.TblAccountVals, key, value))
+	c, err := batch.RwCursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer c.Close()
+	require.NoError(t, c.DeleteExact(key, value))
+	k, v, err := c.SeekBothExact(key, value)
+	require.NoError(t, err)
+	require.Nil(t, k)
+	require.Nil(t, v)
+	require.NoError(t, batch.Flush(t.Context(), tx))
+	require.Empty(t, tableRows(t, tx, kv.TblAccountVals))
 }
