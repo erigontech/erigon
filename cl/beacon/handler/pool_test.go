@@ -186,7 +186,9 @@ func TestPoolAttesterSlashingRejectsDisjointIndices(t *testing.T) {
 						epoch = cfg.ElectraForkEpoch
 					}
 					clock := eth_clock.NewMockEthereumClock(ctrl)
-					clock.EXPECT().GetCurrentEpoch().Return(epoch)
+					if route == "v1" {
+						clock.EXPECT().GetCurrentEpoch().Return(epoch)
+					}
 					anchor := state.New(&cfg)
 					anchor.SetVersion(version)
 					synced := synced_data.NewSyncedDataManager(&cfg, true)
@@ -222,6 +224,9 @@ func TestPoolAttesterSlashingRejectsDisjointIndices(t *testing.T) {
 					body, err := json.Marshal(slashing)
 					require.NoError(t, err)
 					request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/"+route+"/beacon/pool/attester_slashings", bytes.NewReader(body))
+					if route == "v2" {
+						request.Header.Set("Eth-Consensus-Version", version.String())
+					}
 					recorder := httptest.NewRecorder()
 					handler.mux.ServeHTTP(recorder, request)
 					require.Equal(t, http.StatusBadRequest, recorder.Code)
