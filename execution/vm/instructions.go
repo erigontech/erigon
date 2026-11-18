@@ -1478,11 +1478,14 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 	if err != nil {
 		return pc, nil, err
 	}
-	newContract, err := ibs.IsNewContract(self)
-	if err != nil {
-		return pc, nil, err
-	}
 	rules := evm.ChainRules()
+	var newContract bool
+	if !rules.IsBogota {
+		newContract, err = ibs.IsNewContract(self)
+		if err != nil {
+			return pc, nil, err
+		}
+	}
 	eip8246 := rules.IsAmsterdam
 	switch {
 	case eip8246:
@@ -1495,7 +1498,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 				return pc, nil, err
 			}
 		}
-		if newContract && !rules.IsBogota {
+		if newContract {
 			_, err = ibs.Selfdestruct(self, true)
 			if err != nil {
 				return pc, nil, err
