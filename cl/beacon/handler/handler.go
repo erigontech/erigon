@@ -503,12 +503,6 @@ func (a *ApiHandler) clearExecutionPayloadEnvelopeRetry(key executionPayloadEnve
 	a.executionPayloadEnvelopeRetries.Remove(key)
 }
 
-func (a *ApiHandler) Init() {
-	a.o.Do(func() {
-		a.init()
-	})
-}
-
 func (a *ApiHandler) init() {
 	r := chi.NewRouter()
 	a.mux = r
@@ -685,7 +679,7 @@ func (a *ApiHandler) init() {
 						r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV2BeaconPoolAttestations))
 						r.Post("/attestations", a.PostEthV2BeaconPoolAttestations)
 						r.Get("/attester_slashings", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttesterSlashings)) // reuse
-						r.Post("/attester_slashings", a.PostEthV1BeaconPoolAttesterSlashings)                              // resue
+						r.Post("/attester_slashings", a.PostEthV2BeaconPoolAttesterSlashings)
 					})
 					if a.builderRelayEnabled() {
 						r.Post("/blinded_blocks", beaconhttp.HandleEndpointFunc(a.PostEthV2BlindedBlocks))

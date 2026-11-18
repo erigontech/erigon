@@ -272,34 +272,35 @@ func TestBackwardBeaconDownloaderKeepsPrefetchesWhenProcessingStopsAboveThem(t *
 }
 
 func TestBackwardBeaconDownloaderCancelsDroppedPrefetches(t *testing.T) {
-	blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
-	server := &slowRangeServer{blocks: blocks, delay: 20 * time.Millisecond, held: func(start uint64) bool { return start > 0 && start < 576 }, calls: map[uint64]int{}}
-	downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
-	downloader.SetOnNewBlock(func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
-		return false, nil
-	})
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+	synctest.Test(t, func(t *testing.T) {
+		blocks := denebChain(t, slotsUpTo(640, func(uint64) bool { return false }))
+		server := &slowRangeServer{blocks: blocks, delay: 20 * time.Millisecond, held: func(start uint64) bool { return start > 0 && start < 576 }, calls: map[uint64]int{}}
+		downloader := newRangeDownloader(t, blocks[len(blocks)-1], server)
+		downloader.SetOnNewBlock(func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+			return false, nil
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 
-	require.NoError(t, downloader.RequestMore(ctx))
-	require.NotEmpty(t, downloader.prefetched)
-	var dropped []uint64
-	for _, r := range downloader.prefetched {
-		dropped = append(dropped, r.lo)
-	}
-	slices.Sort(dropped)
-	root, err := blocks[63].Block.HashSSZ()
-	require.NoError(t, err)
-	downloader.SetSlotToDownload(63)
-	downloader.SetExpectedRoot(root)
+		require.NoError(t, downloader.RequestMore(ctx))
+		require.NotEmpty(t, downloader.prefetched)
+		var dropped []uint64
+		for _, r := range downloader.prefetched {
+			dropped = append(dropped, r.lo)
+		}
+		slices.Sort(dropped)
+		root, err := blocks[63].Block.HashSSZ()
+		require.NoError(t, err)
+		downloader.SetSlotToDownload(63)
+		downloader.SetExpectedRoot(root)
 
-	require.NoError(t, downloader.RequestMore(ctx))
-	require.True(t, downloader.Finished())
-	require.Eventually(t, func() bool {
+		require.NoError(t, downloader.RequestMore(ctx))
+		require.True(t, downloader.Finished())
+		synctest.Wait()
 		server.mu.Lock()
 		defer server.mu.Unlock()
-		return slices.Equal(dropped, slices.Sorted(slices.Values(server.cancelled)))
-	}, 5*time.Second, time.Millisecond)
+		require.Equal(t, dropped, slices.Sorted(slices.Values(server.cancelled)))
+	})
 }
 
 func TestBackwardBeaconDownloaderCancelsPrefetchesWhenFinished(t *testing.T) {

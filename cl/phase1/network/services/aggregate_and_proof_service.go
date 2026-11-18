@@ -177,7 +177,7 @@ func (a *aggregateAndProofServiceImpl) verifyAggregateBeforeBuild(aggregateAndPr
 	}); err != nil {
 		return err
 	}
-	valid, err := blsVerifyMultipleSignatures(
+	valid, _, err := blsVerifyMultipleSignatures(
 		[][]byte{signature1, signature2},
 		[][]byte{signingRoot1, signingRoot2},
 		[][]byte{pubKey1, pubKey2},

@@ -51,7 +51,6 @@ type TraceAPI interface {
 type TraceAPIImpl struct {
 	*BaseAPI
 	kv            kv.TemporalRoDB
-	maxTraces     uint64
 	gasCap        uint64
 	compatibility bool // Bug for bug compatiblity with OpenEthereum
 }
@@ -61,7 +60,6 @@ func NewTraceAPI(base *BaseAPI, kv kv.TemporalRoDB, cfg *rpccfg.TraceApiConfig) 
 	return &TraceAPIImpl{
 		BaseAPI:       base,
 		kv:            kv,
-		maxTraces:     cfg.MaxTraces,
 		gasCap:        cfg.GasCap,
 		compatibility: cfg.Compatibility,
 	}

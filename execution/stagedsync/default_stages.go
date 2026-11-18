@@ -100,7 +100,7 @@ func DefaultStages(
 				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return UnwindSendersStage(u, tx, senders, ctx)
+				return UnwindSendersStage(u, tx, senders)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil
@@ -205,7 +205,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, senders Senders
 				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return UnwindSendersStage(u, tx, senders, ctx)
+				return UnwindSendersStage(u, tx, senders)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil
@@ -293,7 +293,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, send
 				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return UnwindSendersStage(u, tx, senders, ctx)
+				return UnwindSendersStage(u, tx, senders)
 			},
 		},
 		{

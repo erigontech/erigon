@@ -427,7 +427,7 @@ func prepareTargetShufflingAggregate(
 ) {
 	t.Helper()
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) { return true, nil }
+	blsVerifyMultipleSignatures = withoutDecompressed(func([][]byte, [][]byte, [][]byte) (bool, error) { return true, nil })
 	data := aggregate.SignedAggregateAndProof.Message.Aggregate.Data
 	epoch := data.Slot / clparams.MainnetBeaconConfig.SlotsPerEpoch
 	expectedCommitteeIndex := data.CommitteeIndex
@@ -462,10 +462,10 @@ func TestAggregateAndProofUsesTargetShuffling(t *testing.T) {
 	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
 	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
 	var callOrder []string
-	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func([][]byte, [][]byte, [][]byte) (bool, error) {
 		callOrder = append(callOrder, "bls")
 		return true, nil
-	}
+	})
 	targetCommitteeFn := fc.TargetBeaconCommitteeFn
 	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, claimBuild func() bool) ([]uint64, uint64, error) {
 		require.Equal(t, []string{"bls"}, callOrder)
@@ -504,7 +504,7 @@ func TestAggregateAndProofRejectsInvalidSignatureBeforeTargetShuffling(t *testin
 		targetCalls++
 		return targetCommitteeFn(target, slot, committeeIndex, claimBuild)
 	}
-	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) { return false, nil }
+	blsVerifyMultipleSignatures = withoutDecompressed(func([][]byte, [][]byte, [][]byte) (bool, error) { return false, nil })
 	aggregate.SignedAggregateAndProof.Message.AggregatorIndex = targetCommittee[0]
 	aggregate.SignedAggregateAndProof.Message.Aggregate.AggregationBits = solid.BitlistFromBytes([]byte{0b111}, 2048)
 
@@ -694,10 +694,10 @@ func TestAggregateAndProofIgnoresUnknownVotedBlockTargetAncestor(t *testing.T) {
 	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
 	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
 	blsCalls := 0
-	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func([][]byte, [][]byte, [][]byte) (bool, error) {
 		blsCalls++
 		return true, nil
-	}
+	})
 	targetCalls := 0
 	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
 		targetCalls++
@@ -725,10 +725,10 @@ func TestAggregateAndProofIgnoresUnavailableTargetCheckpointState(t *testing.T) 
 	targetCommittee := targetCommitteeOutsideHead(t, s, headCommittee, 2)
 	prepareTargetShufflingAggregate(t, s, fc, aggregate, targetCommittee, true)
 	blsCalls := 0
-	blsVerifyMultipleSignatures = func([][]byte, [][]byte, [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func([][]byte, [][]byte, [][]byte) (bool, error) {
 		blsCalls++
 		return true, nil
-	}
+	})
 	targetCalls := 0
 	fc.TargetBeaconCommitteeFn = func(target solid.Checkpoint, slot, committeeIndex uint64, _ func() bool) ([]uint64, uint64, error) {
 		targetCalls++
@@ -747,9 +747,9 @@ func TestAggregateAndProofIgnoresUnavailableTargetCheckpointState(t *testing.T) 
 
 func TestAggregateAndProofGossipDoesNotAcceptBeforeBLSVerification(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return false, nil
-	}
+	})
 
 	agg, s := getAggregateAndProofAndState()
 	setValidAggregateSelectionProof(t, &clparams.MainnetBeaconConfig, agg, s)
@@ -767,9 +767,9 @@ func TestAggregateAndProofGossipDoesNotAcceptBeforeBLSVerification(t *testing.T)
 
 func TestAggregateAndProofImmediateRetryReturnsAlreadySeenOnlyForSameAggregate(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return true, nil
-	}
+	})
 
 	cfg := clparams.MainnetBeaconConfig
 	agg, s := getAggregateAndProofAndState()
@@ -908,9 +908,9 @@ func setupValidAggregateGossipMessage(
 
 func TestAggregateAndProofGossipNewForkAggregateOnOldForkTopicNotAccepted(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return true, nil
-	}
+	})
 
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
@@ -939,9 +939,9 @@ func TestAggregateAndProofGossipNewForkAggregateOnOldForkTopicNotAccepted(t *tes
 
 func TestAggregateAndProofGossipRejectsDifferentBPOForkDigest(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return true, nil
-	}
+	})
 
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
@@ -981,9 +981,9 @@ func TestAggregateAndProofGossipRejectsDifferentBPOForkDigest(t *testing.T) {
 
 func TestAggregateAndProofGossipPreForkAggregateOnPostForkTopicNotAccepted(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		return true, nil
-	}
+	})
 
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
@@ -1565,7 +1565,7 @@ func TestAggregateAndProofRejectsAggregationBitsLengthMismatchBeforeElectra(t *t
 
 func TestAggregateAndProofForLateBlockIsProcessedOnceBlockArrives(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+	blsVerifyMultipleSignatures = withoutDecompressed(func(_, _, _ [][]byte) (bool, error) { return true, nil })
 
 	cfg := &clparams.MainnetBeaconConfig
 	agg, s := getAggregateAndProofAndState()
@@ -1602,7 +1602,7 @@ func TestAggregateAndProofIsVerifiedWhenTheNodeHasValidators(t *testing.T) {
 	for _, validatorSource := range []string{"none", "fee recipient", "attached"} {
 		t.Run(validatorSource, func(t *testing.T) {
 			saveSignatureGlobals(t)
-			blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+			blsVerifyMultipleSignatures = withoutDecompressed(func(_, _, _ [][]byte) (bool, error) { return true, nil })
 
 			cfg := &clparams.MainnetBeaconConfig
 			agg, s := getAggregateAndProofAndState()
