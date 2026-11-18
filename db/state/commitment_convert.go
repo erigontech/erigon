@@ -59,8 +59,7 @@ type ConvertOpts struct {
 	// every required accessor sibling are skipped. Operator is responsible
 	// for passing the same TargetSqueeze / TargetNibblesV2 values used in
 	// the original run; a mismatch produces mixed-encoding output silently.
-	Continue   bool
-	BeforeSwap func() error
+	Continue bool
 }
 
 const (
@@ -754,11 +753,6 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 			processedFiles, priorCompleteCount, expectedConverted, len(convertedFiles))
 	}
 	logger.Info(fmt.Sprintf("[commitment_convert] phase 2 pre-swap check: %d files ok", len(convertedFiles)))
-	if opts.BeforeSwap != nil {
-		if err := opts.BeforeSwap(); err != nil {
-			return fmt.Errorf("[commitment_convert] before swap: %w", err)
-		}
-	}
 
 	// Windows can't rename a mmapped file, so drop the aggregator's handles on
 	// the originals before Phase 3 moves them out of snapshots/domain/. This
@@ -834,6 +828,9 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		"[commitment_convert] DONE. converted %s. Originals preserved at:\n    %s\nTo restore originals: re-run with --restore",
 		doneSummary, backupDir,
 	))
+	if opts.TargetV3 {
+		logger.Info("[commitment_convert] next step: run `integration stage_exec --reset` before starting erigon")
+	}
 	return nil
 }
 
