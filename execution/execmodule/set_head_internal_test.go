@@ -113,12 +113,13 @@ func TestSetHeadClearsSafeAndFinalizedAboveTarget(t *testing.T) {
 	const target = 2
 	for _, tc := range []struct {
 		name                      string
-		safe, finalized           uint64
+		head, safe, finalized     uint64
 		safeCleared, finalCleared bool
 	}{
-		{"both above", 4, 3, true, true},
-		{"only safe above", 3, 2, true, false},
-		{"both at or below", 2, 1, false, false},
+		{"both above", 4, 4, 3, true, true},
+		{"only safe above", 4, 3, 2, true, false},
+		{"both at or below", 4, 2, 1, false, false},
+		{"retry at the current head", target, 4, 3, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -130,7 +131,7 @@ func TestSetHeadClearsSafeAndFinalizedAboveTarget(t *testing.T) {
 					headers[n].ParentHash = headers[n-1].Hash()
 				}
 			}
-			head := headers[4]
+			head := headers[tc.head]
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 				for _, header := range headers[1:] {
 					require.NoError(t, rawdb.WriteHeader(tx, header))
