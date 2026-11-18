@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Close, also from two callers at once, must not release state files while a temporal tx that reads them is still open.
@@ -33,7 +34,7 @@ func TestTemporalDB_CloseKeepsFilesOfOpenTx(t *testing.T) {
 				return sdErr
 			}
 			defer sd.Close()
-			if putErr := sd.DomainPut(kv.AccountsDomain, tx, acc[:], []byte{byte(txNum)}, txNum, nil); putErr != nil {
+			if putErr := sd.DomainPut(kv.AccountsDomain, tx, acc[:], accountAt(txNum), txNum, nil); putErr != nil {
 				return putErr
 			}
 			return sd.Flush(ctx, tx)
@@ -47,7 +48,7 @@ func TestTemporalDB_CloseKeepsFilesOfOpenTx(t *testing.T) {
 	require.Positive(t, roTx.Debug().TxNumsInFiles(kv.AccountsDomain))
 	v, _, err := roTx.GetAsOf(kv.AccountsDomain, acc[:], 2)
 	require.NoError(t, err)
-	require.Equal(t, []byte{1}, v)
+	require.Equal(t, accountAt(1), v)
 
 	var closers sync.WaitGroup
 	for range 2 {
@@ -65,8 +66,12 @@ func TestTemporalDB_CloseKeepsFilesOfOpenTx(t *testing.T) {
 	require.Positive(t, roTx.Debug().TxNumsInFiles(kv.AccountsDomain), "open tx lost its files")
 	v, _, err = roTx.GetAsOf(kv.AccountsDomain, acc[:], 2)
 	require.NoError(t, err)
-	require.Equal(t, []byte{1}, v)
+	require.Equal(t, accountAt(1), v)
 
 	roTx.Rollback()
 	closers.Wait()
+}
+
+func accountAt(nonce uint64) []byte {
+	return accounts.SerialiseV3(&accounts.Account{Nonce: nonce})
 }
