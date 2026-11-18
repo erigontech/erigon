@@ -316,6 +316,7 @@ func exitedInChildProcess(t *testing.T, wantOutput ...string) bool {
 	var exitErr *exec.ExitError
 	require.ErrorAs(t, err, &exitErr, "the gap check must exit the process:\n%s", out)
 	require.Equal(t, 1, exitErr.ExitCode(), "the gap check exits with code 1:\n%s", out)
+	require.NotContains(t, string(out), "--- FAIL", "the child must exit in the gap check, not fail a check")
 	for _, want := range append(wantOutput, "gap between snapshot files and DB") {
 		require.Contains(t, string(out), want)
 	}
