@@ -403,12 +403,6 @@ func (p *historyPagers) value(hc *HistoryRoTx, i int, offset, txNum uint64, key 
 	if d.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
 		pageSize = hc.h.HistoryValuesOnCompressedPage
 	}
-	if pageSize <= 1 {
-		g := hc.statelessGetter(i)
-		g.Reset(offset)
-		v, _ := g.Next(nil)
-		return v, nil
-	}
 	if *p == nil {
 		*p = make(historyPagers, len(hc.files))
 	}
@@ -418,7 +412,11 @@ func (p *historyPagers) value(hc *HistoryRoTx, i int, offset, txNum uint64, key 
 		(*p)[i] = g
 	}
 	g.Reset(offset)
-	return g.GetFromPage(historyKey(txNum, key, nil))
+	v, err := g.GetFromPage(historyKey(txNum, key, nil))
+	if err == nil && v == nil {
+		return nil, fmt.Errorf("page of %s holds no value for key %x at txNum %d", g.FileName(), key, txNum)
+	}
+	return v, err
 }
 
 // HistoryChangesIterFiles - producing state-patch for Unwind - return state-patch for Unwind: "what keys changed between `[from, to)` and what was their value BEFORE txNum"

@@ -740,10 +740,11 @@ type CommitmentV3Check struct {
 }
 
 var (
-	commitmentV3FoldRanges  uint64 = 8192
-	commitmentV3FoldChunk          = 4096
-	commitmentV3RangeChunks        = 64
+	commitmentV3FoldRanges uint64 = 8192
+	commitmentV3FoldChunk         = 4096
 )
+
+const commitmentV3RangeChunks = 64
 
 type foldChunk struct {
 	batch *hashedBatch

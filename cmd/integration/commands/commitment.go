@@ -140,7 +140,7 @@ func init() {
 	withChain(cmdCommitmentVerify)
 	withDataDir(cmdCommitmentVerify)
 	cmdCommitmentVerify.Flags().UintSliceVar(&verifyAsOf, "asof", nil, "also fold the records as of these txNums")
-	cmdCommitmentVerify.Flags().BoolVar(&verifyHistory, "history", false, "also fold the records at the middle and the last state of every commitment history file")
+	cmdCommitmentVerify.Flags().BoolVar(&verifyHistory, "history", false, "also fold the records just after the first state of every commitment history file")
 	commitmentCmd.AddCommand(cmdCommitmentVerify)
 
 	// commitment visualize
