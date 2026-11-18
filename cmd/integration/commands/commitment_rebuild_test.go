@@ -101,7 +101,7 @@ func fillAccountState(t *testing.T, db kv.TemporalRwDB, txs uint64) (*state.Aggr
 func requireExecutionReset(t *testing.T, db kv.TemporalRwDB, countTail func() uint64) {
 	t.Helper()
 	require.Zero(t, countTail(), "the files-only rewrite covers only the files, so the DB tail past them must be gone")
-	require.Zero(t, executionProgress(t, db))
+	require.Zero(t, executionProgressOf(t, db))
 }
 
 func TestCommitmentRebuildWithoutHistoryDropsTheDBTail(t *testing.T) {
@@ -124,19 +124,18 @@ func TestCommitmentRebuildWithoutHistoryDropsTheDBTail(t *testing.T) {
 func TestCommitmentConvertV3KeepsTheDBTail(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	db, _, countTail := dbWithState(t, true)
-	tail, progress := countTail(), executionProgress(t, db)
+	tail, progress := countTail(), executionProgressOf(t, db)
 	require.NoError(t, commitmentConvert(db, t.Context(), log.New(), state.ConvertOpts{TargetV3: true}))
 	require.Equal(t, tail, countTail())
-	require.Equal(t, progress, executionProgress(t, db))
+	require.Equal(t, progress, executionProgressOf(t, db))
 }
 
-func executionProgress(t *testing.T, db kv.TemporalRwDB) uint64 {
+func executionProgressOf(t *testing.T, db kv.TemporalRwDB) (progress uint64) {
 	t.Helper()
-	roTx, err := db.BeginRo(t.Context())
-	require.NoError(t, err)
-	defer roTx.Rollback()
-	progress, err := stages.GetStageProgress(roTx, stages.Execution)
-	require.NoError(t, err)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) (err error) {
+		progress, err = executionProgress(tx)
+		return err
+	}))
 	return progress
 }
 
