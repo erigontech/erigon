@@ -129,13 +129,16 @@ func (s *EthBackendClientDirect) SubscribeLogs(ctx context.Context, opts ...grpc
 		chRecv: subscribeLogsRequestChan,
 		ctx:    ctx,
 	}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		defer close(subscribeLogsReplyChan)
 		srv.Err(s.server.SubscribeLogs(srv))
 	}()
 	cli := &SubscribeLogsStreamC{
 		chSend: subscribeLogsRequestChan,
 		chRecv: subscribeLogsReplyChan,
+		done:   done,
 		ctx:    ctx,
 	}
 	return cli, nil
@@ -192,14 +195,24 @@ func (s *SubscribeLogsStreamS) Err(err error) {
 type SubscribeLogsStreamC struct {
 	chSend chan *subscribeLogsRequest
 	chRecv chan *subscribeLogsReply
+	done   <-chan struct{} // closed when the server handler has returned
 	ctx    context.Context
 	grpc.ClientStream
 }
 
 func (c *SubscribeLogsStreamC) Send(m *remoteproto.LogsFilterRequest) error {
 	select {
+	case <-c.done:
+		return io.EOF
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+	select {
 	case c.chSend <- &subscribeLogsRequest{r: m}:
 		return nil
+	case <-c.done:
+		return io.EOF
 	case <-c.ctx.Done():
 		return c.ctx.Err()
 	}
@@ -229,13 +242,16 @@ func (s *EthBackendClientDirect) SubscribeReceipts(ctx context.Context, opts ...
 		chRecv: subscribeReceiptsRequestChan,
 		ctx:    ctx,
 	}
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		defer close(subscribeReceiptsReplyChan)
 		srv.Err(s.server.SubscribeReceipts(srv))
 	}()
 	cli := &SubscribeReceiptsStreamC{
 		chSend: subscribeReceiptsRequestChan,
 		chRecv: subscribeReceiptsReplyChan,
+		done:   done,
 		ctx:    ctx,
 	}
 	return cli, nil
@@ -292,14 +308,24 @@ func (s *SubscribeReceiptsStreamS) Err(err error) {
 type SubscribeReceiptsStreamC struct {
 	chSend chan *subscribeReceiptsRequest
 	chRecv chan *subscribeReceiptsReply
+	done   <-chan struct{} // closed when the server handler has returned
 	ctx    context.Context
 	grpc.ClientStream
 }
 
 func (c *SubscribeReceiptsStreamC) Send(m *remoteproto.ReceiptsFilterRequest) error {
 	select {
+	case <-c.done:
+		return io.EOF
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+	select {
 	case c.chSend <- &subscribeReceiptsRequest{r: m}:
 		return nil
+	case <-c.done:
+		return io.EOF
 	case <-c.ctx.Done():
 		return c.ctx.Err()
 	}
