@@ -279,9 +279,7 @@ func (pe *parallelExecutor) foldTx(ctx context.Context, rwTx kv.TemporalTx, r *t
 	if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes); err != nil {
 		return fmt.Errorf("fold state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 	}
-	if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
-		return fmt.Errorf("fold index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
-	}
+	// bound probe: tx indexes (logs, traces, receipt metadata) leave the fold goroutine entirely
 	return nil
 }
 
