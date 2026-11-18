@@ -202,11 +202,13 @@ func (c *composer) ComposeSyncSlot(ctx context.Context, parent *types.Header, ts
 func (*composer) RecoverFailed(context.Context) {}
 
 // insertSpy is a committer that records, for each block inserted, whether
-// its announcement was kept already.
+// its announcement was kept already, and which canonical blocks below it had
+// theirs.
 type insertSpy struct {
 	*follower.Follower
 	store     *announce.Store
 	announced []bool
+	below     [][]uint64
 }
 
 func (c *insertSpy) Insert(ctx context.Context, blocks []*types.Block, hook follower.CommitHook) error {
@@ -216,12 +218,30 @@ func (c *insertSpy) Insert(ctx context.Context, blocks []*types.Block, hook foll
 			return err
 		}
 		c.announced = append(c.announced, env != nil)
+		var below []uint64
+		for n := uint64(1); n < b.NumberU64(); n++ {
+			hash, _, err := c.CanonicalHash(ctx, n)
+			if err != nil {
+				return err
+			}
+			if env, err := c.store.Get(ctx, n, hash); err != nil {
+				return err
+			} else if env != nil {
+				below = append(below, n)
+			}
+		}
+		c.below = append(c.below, below)
 	}
 	return c.Follower.Insert(ctx, blocks, hook)
 }
 
 // failing fails every announcement.
 type failing struct{ calls int }
+
+func (f *failing) Announce(context.Context, *types.Header) error {
+	f.calls++
+	return errors.New("disk full")
+}
 
 func (f *failing) Record(context.Context, *types.Header) error {
 	f.calls++
@@ -287,6 +307,29 @@ func TestRecord(t *testing.T) {
 	require.Equal(t, uint64(8), n.head().Number.Uint64())
 	require.Equal(t, 1, broken.calls)
 	require.Equal(t, before+1, failures())
+}
+
+// TestRecordComposedBlockAlone: before a composer's block becomes the head
+// only its own announcement is kept. The unsettled blocks a previous run left
+// unannounced are announced once it is the head, against the settled block
+// derivation has published by then.
+func TestRecordComposedBlockAlone(t *testing.T) {
+	n := newNode(t)
+	unsigned := n.sequencer(sequencer.Config{}, n.follower)
+	for range 5 {
+		n.tick(unsigned)
+	}
+	_, mirror := derivertest.NewL2(t)
+	comp := &composer{t: t, chain: n.chain, mirror: mirror}
+	spy := &insertSpy{Follower: n.follower, store: n.store}
+	s := n.sequencer(sequencer.Config{Composer: comp, Announcements: n.signer()}, spy)
+	require.NoError(t, s.Handle(t.Context(), sequencer.SyncSlot{Height: 6, Time: n.genesis.Time + 12, L1Head: 1}))
+	require.Equal(t, uint64(6), n.head().Number.Uint64())
+	require.Equal(t, []bool{true}, spy.announced, "the composer's block is announced before it is the head")
+	require.Equal(t, [][]uint64{nil}, spy.below, "and none below it")
+	for i := uint64(1); i <= 6; i++ {
+		require.Equal(t, n.signed(i), n.announced(i), "block %d", i)
+	}
 }
 
 // TestRecordSubstitute: the empty sibling that replaces a failed Sync block

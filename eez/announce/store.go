@@ -147,6 +147,12 @@ func NewSigner(key *ecdsa.PrivateKey, chainID *uint256.Int, store *Store, chain 
 // Address is the producer identity the signer's announcements recover to.
 func (s *Signer) Address() common.Address { return crypto.PubkeyToAddress(s.key.PublicKey) }
 
+// Announce signs and keeps the announcement of block h alone. It reads
+// nothing of the chain, which derivation may be replacing.
+func (s *Signer) Announce(ctx context.Context, h *types.Header) error {
+	return s.sign(ctx, h.Number.Uint64(), h.Hash())
+}
+
 // Record signs and keeps the announcement of block h, then those of the
 // canonical blocks between the settled one and h that lack one. Only h's
 // failure is returned. Record must have one caller at a time.

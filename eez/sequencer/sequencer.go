@@ -129,8 +129,11 @@ type Witnesses interface {
 
 // Announcements signs each produced block.
 type Announcements interface {
-	// Record signs and keeps the announcement of block h, the head or a block
-	// about to become it.
+	// Announce signs and keeps the announcement of block h alone, a block
+	// about to become the head.
+	Announce(ctx context.Context, h *types.Header) error
+	// Record signs and keeps the announcement of block h, the head, and those
+	// of the unsettled blocks below it that lack one.
 	Record(ctx context.Context, h *types.Header) error
 }
 
@@ -474,8 +477,9 @@ func (s *Sequencer) build(ctx context.Context, kind Kind, parent *types.Header, 
 func (s *Sequencer) insert(ctx context.Context, kind Kind, block *types.Block) (*types.Header, error) {
 	if a := s.cfg.Announcements; a != nil {
 		// Its hash is known: followers find the announcement with the head. A
-		// failure is retried once the block is the head.
-		_ = a.Record(ctx, block.Header())
+		// failure is retried once the block is the head, and the blocks below
+		// wait for that too: derivation may be replacing them now.
+		_ = a.Announce(ctx, block.Header())
 	}
 	return s.commit(ctx, kind, block.NumberU64(), func(ctx context.Context, hook follower.CommitHook) (*types.Block, error) {
 		return block, s.committer.Insert(ctx, []*types.Block{block}, hook)
