@@ -1372,7 +1372,11 @@ func (tx *MdbxTx) dropEvenIfBucketIsNotDeprecated(name string) error {
 }
 
 func (tx *MdbxTx) ClearTable(bucket string) error {
-	dbi := tx.db.buckets[bucket].DBI
+	cfg, ok := tx.db.buckets[bucket]
+	if !ok {
+		return fmt.Errorf("table %s not found", bucket)
+	}
+	dbi := cfg.DBI
 	if dbi == NonExistingDBI {
 		return nil
 	}
