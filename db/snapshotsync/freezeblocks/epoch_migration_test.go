@@ -701,3 +701,19 @@ func TestCheckLegacyDownloadFinishedAcceptsPinnedManifest(t *testing.T) {
 	require.NoError(t, dir.RemoveFile(filepath.Join(dirs.Snap, names[0])))
 	require.ErrorIs(t, CheckLegacyDownloadFinished(db, dirs, chainspec.Mainnet.Config), ErrUnfinishedLegacyDownload, "pinned manifest, a headers segment missing")
 }
+
+// A conversion that has started deletes decimal segments as it goes, so the coverage the pinned
+// manifest proved is gone by the time it resumes; its own marker has to pass the guard instead.
+func TestCheckLegacyDownloadFinishedLetsAStartedMigrationResume(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	var names []string
+	for _, typ := range snaptype2.BlockSnapshotTypes {
+		names = append(names, touchDecimalSegs(t, dirs.Snap, typ, 0, 1000, 2000)...)
+	}
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	m := &epochMigrator{db: db}
+	require.NoError(t, m.setPhase(t.Context(), migrationConverting))
+	require.NoError(t, dir.RemoveFile(filepath.Join(dirs.Snap, names[0])))
+
+	require.NoError(t, CheckLegacyDownloadFinished(db, dirs, chainspec.Mainnet.Config))
+}

@@ -666,6 +666,12 @@ func CheckLegacyDownloadFinished(db kv.RoDB, dirs datadir.Dirs, chainConfig *cha
 	if complete {
 		return nil
 	}
+	// A conversion starts only after this check has passed, and then deletes the decimal segments
+	// the check counts, so one already under way must be let through to resume.
+	phase, err := migrationPhase(context.Background(), db)
+	if err != nil || phase != 0 {
+		return err
+	}
 	hasDecimal, err := HasDecimalBlockSegments(dirs, chainConfig)
 	if err != nil {
 		return err
