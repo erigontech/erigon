@@ -82,8 +82,8 @@ func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Temp
 	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, header, txn, index, txNum, postState)
 }
 
-func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
-	return api.receiptsGenerator.GetReceiptsGasUsed(ctx, tx, block, api._txNumReader)
+func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, framesOnly bool) (types.Receipts, error) {
+	return api.receiptsGenerator.GetReceiptsGasUsed(ctx, tx, block, api._txNumReader, framesOnly)
 }
 
 func (api *BaseAPI) frameReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, fullTx bool) (types.Receipts, error) {
@@ -104,7 +104,7 @@ func (api *BaseAPI) frameReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, 
 		if err != nil || !ok || hash != block.Hash() {
 			return nil, err
 		}
-		return api.getReceiptsGasUsed(ctx, tx, block)
+		return api.getReceiptsGasUsed(ctx, tx, block, true)
 	}
 	return nil, nil
 }

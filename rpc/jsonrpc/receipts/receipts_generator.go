@@ -753,13 +753,13 @@ func (g *Generator) GetReceiptGasUsed(ctx context.Context, tx kv.TemporalTx, hea
 		return 0, err
 	}
 	txNum := startTxNum + 1 + uint64(index)
-	cumulative, _, _, err := rawtemporaldb.ReceiptAsOf(tx, txNum+1)
+	cumulative, err := rawtemporaldb.CumulativeGasUsedAsOf(tx, txNum+1)
 	if err != nil {
 		return 0, err
 	}
 	var previous uint64
 	if index > 0 {
-		previous, _, _, err = rawtemporaldb.ReceiptAsOf(tx, txNum)
+		previous, err = rawtemporaldb.CumulativeGasUsedAsOf(tx, txNum)
 		if err != nil {
 			return 0, err
 		}
@@ -767,7 +767,9 @@ func (g *Generator) GetReceiptGasUsed(ctx context.Context, tx kv.TemporalTx, hea
 	return cumulative - previous, nil
 }
 
-func (g *Generator) GetReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, txNumsReader rawdbv3.TxNumsReader) (types.Receipts, error) {
+// GetReceiptsGasUsed returns gas usage indexed by transaction position.
+// With framesOnly, entries for ordinary transactions may be nil.
+func (g *Generator) GetReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, txNumsReader rawdbv3.TxNumsReader, framesOnly bool) (types.Receipts, error) {
 	tx = g.filters.WithTemporalOverlay(tx)
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
 		return receipts, nil
@@ -778,23 +780,26 @@ func (g *Generator) GetReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, bl
 		return nil, err
 	}
 
-	receipts := make(types.Receipts, len(block.Transactions()))
-
+	txns := block.Transactions()
+	receipts := make(types.Receipts, len(txns))
 	var prevCumGasUsed uint64
-	currentTxNum := startTxNum + 1
-	for i := range block.Transactions() {
-		receipt := &types.Receipt{}
-		cumGasUsed, _, _, err := rawtemporaldb.ReceiptAsOf(tx, currentTxNum+1)
+	for i, txn := range txns {
+		needReceipt := !framesOnly || txn.Type() == types.FrameTxType
+		// A frame also needs the cumulative total after its immediate predecessor.
+		if !needReceipt && (i+1 == len(txns) || txns[i+1].Type() != types.FrameTxType) {
+			continue
+		}
+		currentTxNum := startTxNum + 1 + uint64(i)
+		cumGasUsed, err := rawtemporaldb.CumulativeGasUsedAsOf(tx, currentTxNum+1)
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceiptsGasUsed: at tx %d (block %d, index %d): %w",
 				currentTxNum, block.NumberU64(), i, err)
 		}
 
-		receipt.GasUsed = cumGasUsed - prevCumGasUsed
-		receipts[i] = receipt
-
+		if needReceipt {
+			receipts[i] = &types.Receipt{GasUsed: cumGasUsed - prevCumGasUsed}
+		}
 		prevCumGasUsed = cumGasUsed
-		currentTxNum++
 	}
 
 	return receipts, nil

@@ -69,7 +69,7 @@ func (b *gapBackend) ChainConfig() *chain.Config { return b.config }
 
 func (b *gapBackend) GetLatestBlockNumber() (uint64, error) { return b.head, nil }
 
-func (b *gapBackend) GetReceiptsGasUsed(context.Context, *types.Block) (types.Receipts, error) {
+func (b *gapBackend) GetReceiptsGasUsed(context.Context, *types.Block, bool) (types.Receipts, error) {
 	return nil, nil
 }
 

@@ -149,12 +149,13 @@ func TestSuggestTipCapFrameFeeBudget(t *testing.T) {
 			block := types.NewBlockFromStorage(common.Hash{1}, header, types.Transactions{transfer, frame}, nil, nil, nil)
 			backend := &feeChain{
 				blocks:   []*types.Block{nil, block},
-				receipts: map[uint64]types.Receipts{1: {{GasUsed: transfer.GetGasLimit()}, {GasUsed: gasUsed}}},
+				receipts: map[uint64]types.Receipts{1: {nil, {GasUsed: gasUsed}}},
 			}
 			oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 1}, jsonrpc.NewGasPriceCache(), nil, log.New())
 			tip, err := oracle.SuggestTipCap(t.Context())
 			require.NoError(t, err)
 			require.Equal(t, uint256.NewInt(tc.wantTip), tip)
+			require.EqualValues(t, 1, backend.frameReceiptReads.Load())
 		})
 	}
 }
@@ -333,7 +334,7 @@ func (m *mockOracleBackend) GetLatestBlockNumber() (uint64, error) {
 	return m.head.Number.Uint64(), nil
 }
 
-func (m *mockOracleBackend) GetReceiptsGasUsed(_ context.Context, _ *types.Block) (types.Receipts, error) {
+func (m *mockOracleBackend) GetReceiptsGasUsed(_ context.Context, _ *types.Block, _ bool) (types.Receipts, error) {
 	return nil, nil
 }
 

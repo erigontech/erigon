@@ -710,7 +710,8 @@ var (
 
 // RPCMarshalBlock converts the given block to the RPC output. When inclTx is true the
 // result carries the block's transactions, as full objects if fullTx is also true and
-// as hashes otherwise. Optional receipts supply gas used for settled frame prices.
+// as hashes otherwise. Optional receipts supply gas used for settled frame prices
+// and may leave entries for ordinary transactions nil.
 func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool, blobBaseFee *uint256.Int, receipts types.Receipts) *RPCBlock {
 	// A concrete slice type, not []any: boxing each element would heap-allocate
 	// every hash and send the encoder down its reflection path per transaction.
@@ -727,7 +728,7 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool, blobBaseFee *
 			for i, txn := range txs {
 				indexes[i] = hexutil.Uint64(i)
 				var gasUsed uint64
-				if receipts != nil {
+				if receipts != nil && receipts[i] != nil {
 					gasUsed = receipts[i].GasUsed
 				}
 				full[i] = newRPCTransaction(txn, baseFee, blobBaseFee, gasUsed)
