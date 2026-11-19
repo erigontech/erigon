@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -508,7 +509,8 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		})
 	}
 	var cold coldState
-	if mmap.NewProbe() != nil {
+	// The page prefetch runs beside exec and pays only for a short exec: skip it once the block has a tx per core.
+	if len(txns) < runtime.GOMAXPROCS(-1) && mmap.NewProbe() != nil {
 		if !statecfg.ExperimentalCommitmentV3 {
 			group.Go(func() error {
 				prefetchBALCommitment(ctx, db, trieKeys())
