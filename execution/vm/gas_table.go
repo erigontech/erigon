@@ -360,16 +360,14 @@ func initCodeGas(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, m
 		}
 		gasPerWord += params.InitCodeWordGas
 	}
-	wordGas, overflow := math.SafeMul(ToWordSize(size), gasPerWord)
-	if overflow {
-		return mdgas.MdGasCost{}, ErrGasUintOverflow
-	}
+	// A uint64 byte length needs at most 2^59 words, at up to 8 gas each.
+	wordGas := ToWordSize(size) * gasPerWord
 	gas.Execution, overflow = math.SafeAdd(gas.Execution, wordGas)
 	if overflow {
 		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
 	if evm.chainRules.IsAmsterdam && availableGas.Execution >= gas.Execution {
-		gas = gasCreateAccount(evm, callContext, gas, op == CREATE2)
+		gas.State = gasCreateAccount(evm, callContext, op, size)
 	}
 	return gas, nil
 }
@@ -382,13 +380,12 @@ type createGasPreparation struct {
 	err         error
 }
 
-func gasCreateAccount(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, create2 bool) mdgas.MdGasCost {
+func gasCreateAccount(evm *EVM, callContext *CallContext, op OpCode, size uint64) int64 {
 	prepared := &callContext.create
 	*prepared = createGasPreparation{}
 	caller := callContext.Contract.Address()
-	if create2 {
+	if op == CREATE2 {
 		offset := callContext.Stack.back(1).Uint64()
-		size := callContext.Stack.back(2).Uint64()
 		if size > 0 {
 			prepared.initCode = make([]byte, size)
 			memory := callContext.Memory.Data()
@@ -401,15 +398,15 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, c
 		nonce, err := evm.intraBlockState.GetNonce(caller)
 		if err != nil {
 			prepared.err = fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-			return gas
+			return 0
 		}
 		prepared.address = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
 	}
 	prepared.preparation, prepared.err = evm.prepareCreate(caller, prepared.address, *callContext.Stack.peek(), true, false, true)
 	if prepared.err == nil && prepared.preparation.chargeNewAccount {
-		gas.State = params.StateGasNewAccount
+		return params.StateGasNewAccount
 	}
-	return gas
+	return 0
 }
 
 func gasExpFrontier(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {

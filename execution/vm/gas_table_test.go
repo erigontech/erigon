@@ -22,6 +22,7 @@ package vm_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"testing"
@@ -48,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/program"
+	"github.com/erigontech/erigon/execution/vm/runtime"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -705,80 +707,48 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 	}
 }
 
-var createGasTests = []struct {
-	op      vm.OpCode
-	size    int
-	eip3860 bool
-	gasUsed uint64
-	wantErr error
-}{
-	{vm.CREATE, params.MaxInitCodeSize, false, 41225, nil},
-	{vm.CREATE, params.MaxInitCodeSize, true, 44297, nil},
-	{vm.CREATE, params.MaxInitCodeSize + 1, false, 41234, nil},
-	{vm.CREATE, params.MaxInitCodeSize + 1, true, math.MaxUint64, vm.ErrMaxInitCodeSizeExceeded},
-	{vm.CREATE2, params.MaxInitCodeSize, false, 50444, nil},
-	{vm.CREATE2, params.MaxInitCodeSize, true, 53516, nil},
-	{vm.CREATE2, params.MaxInitCodeSize + 1, false, 50459, nil},
-	{vm.CREATE2, params.MaxInitCodeSize + 1, true, math.MaxUint64, vm.ErrMaxInitCodeSizeExceeded},
-}
-
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	tx, err := db.BeginTemporalRw(context.Background())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	for i, tt := range createGasTests {
-		func() {
-			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
-
-			domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-			require.NoError(t, err)
-			defer domains.Close()
-
-			stateReader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-			stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
-
-			s := state.New(stateReader)
-			defer s.Close()
-			require.NoError(t, s.CreateAccount(address, true))
+	const gasLimit = uint64(math.MaxUint64)
+	eip3860 := []int{3860}
+	factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
+	tests := []struct {
+		op        vm.OpCode
+		size      int
+		extraEips []int
+		gasUsed   uint64
+		wantErr   error
+	}{
+		{vm.CREATE, params.MaxInitCodeSize, nil, 41225, nil},
+		{vm.CREATE, params.MaxInitCodeSize, eip3860, 44297, nil},
+		{vm.CREATE, params.MaxInitCodeSize + 1, nil, 41234, nil},
+		{vm.CREATE, params.MaxInitCodeSize + 1, eip3860, gasLimit, vm.ErrMaxInitCodeSizeExceeded},
+		{vm.CREATE2, params.MaxInitCodeSize, nil, 50444, nil},
+		{vm.CREATE2, params.MaxInitCodeSize, eip3860, 53516, nil},
+		{vm.CREATE2, params.MaxInitCodeSize + 1, nil, 50459, nil},
+		{vm.CREATE2, params.MaxInitCodeSize + 1, eip3860, gasLimit, vm.ErrMaxInitCodeSizeExceeded},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s/size=%d/extraEips=%v", tt.op, tt.size, tt.extraEips), func(t *testing.T) {
 			code := program.New()
 			if tt.op == vm.CREATE2 {
 				code.Push(0) // salt
 			}
 			code.Push(tt.size).Push(0).Push(0).Op(tt.op)
-			require.NoError(t, s.SetCode(address, code.Bytes(), tracing.CodeChangeUnspecified))
+			statedb := state.New(state.NewNoopReader())
+			defer statedb.Close()
+			require.NoError(t, statedb.SetCode(factory, code.Bytes(), tracing.CodeChangeUnspecified))
 
-			vmctx := evmtypes.BlockContext{
-				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
-				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
-					return nil
-				},
-			}
-			//
-			// TODO revis BlockContext and add test for eip8037?
-			//
-			_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), stateWriter)
-			config := vm.Config{}
-			if tt.eip3860 {
-				config.ExtraEips = []int{3860}
-			}
-
-			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, config)
-			startGas := mdgas.MdGas{
-				Execution: math.MaxUint64,
-			}
-			_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
-			if !errors.Is(err, tt.wantErr) {
-				t.Errorf("test %d (%s, size %d, EIP-3860 %t): got error %v, want %v", i, tt.op, tt.size, tt.eip3860, err, tt.wantErr)
-			}
-			if gasUsed := startGas.Execution - gas.Execution; gasUsed != tt.gasUsed {
-				t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
-			}
-		}()
+			_, left, err := runtime.Call(factory, nil, &runtime.Config{
+				ChainConfig: chain.TestChainBerlinConfig,
+				EVMConfig:   vm.Config{ExtraEips: tt.extraEips},
+				GasLimit:    gasLimit,
+				State:       statedb,
+			})
+			require.ErrorIs(t, err, tt.wantErr)
+			require.Equal(t, tt.gasUsed, gasLimit-left.Execution)
+		})
 	}
-	tx.Rollback()
 }
 
 // TestSystemCallZeroValueSkipsTransferChecks verifies that zero-value system
