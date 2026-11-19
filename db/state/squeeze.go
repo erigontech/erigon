@@ -328,30 +328,42 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 // readReferencePages reads the cold file pages that the branch's shortened keys point to in one batch, so the expansion
 // does not wait for them one after another. It returns the number of pages it read.
 func readReferencePages(branch commitment.BranchData, accounts, storage *seg.Reader) int {
+	refs := 0
+	forEachReference(branch, accounts, storage, func(*seg.Reader, uint64) { refs++ })
+	if refs < 2 { // one page is read as fast by the expansion itself
+		return 0
+	}
 	pr := mmap.NewProbe()
 	if pr == nil {
 		return 0
 	}
 	var cold []uintptr
-	_, _ = branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		r, plainLen := accounts, length.Addr
-		if isStorage {
-			r, plainLen = storage, length.Addr+length.Hash
+	forEachReference(branch, accounts, storage, func(r *seg.Reader, offset uint64) {
+		if page, isCold := probeWordPage(r, pr, offset); isCold && !slices.Contains(cold, page) {
+			cold = append(cold, page)
 		}
-		if len(key) > 0 && len(key) != plainLen {
-			if page, isCold := probeWordPage(r, pr, DecodeReferenceKey(key)); isCold && !slices.Contains(cold, page) {
-				cold = append(cold, page)
-			}
-		}
-		return nil, nil
 	})
-	if len(cold) < 2 { // one page is read as fast by the expansion itself
+	if len(cold) < 2 {
 		return 0
 	}
 	if mmap.ReadPages(context.Background(), cold) != nil {
 		return 0
 	}
 	return len(cold)
+}
+
+// forEachReference calls fn with the file reader and the word offset of each shortened key in branch.
+func forEachReference(branch commitment.BranchData, accounts, storage *seg.Reader, fn func(r *seg.Reader, offset uint64)) {
+	_, _ = branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		r, plainLen := accounts, length.Addr
+		if isStorage {
+			r, plainLen = storage, length.Addr+length.Hash
+		}
+		if len(key) > 0 && len(key) != plainLen {
+			fn(r, DecodeReferenceKey(key))
+		}
+		return nil, nil
+	})
 }
 
 // probeWordPage reports the page of the word at offset when it is not resident.
