@@ -7,8 +7,12 @@ status of Erigon per test label and QPS step, then, per test label and QPS step,
 p50, p95 and max latency of each client, followed by its rows by method (mixed, run with
 --verbose) or by subscription measure (eth_subscribe), when the reports have them.
 The fan-out measures of eth_subscribe (how long the node takes to send one notification
-to every connection) also get overview rows, one per client class when the pattern has them,
-since the latency of the test itself is mostly the block import time, the same for all clients.
+to every connection) and its vs newHeads measures (how long after the head a log or receipt
+of the block reaches the same connection) also get overview rows, one per client class when
+the pattern has them, since the latency of the test itself is mostly the block import time,
+the same for all clients.
+A test whose pattern splits the connections into client classes gets, after the overviews,
+a legend of the classes and the measures and a table with the measures of each class.
 p50, p90 and p95 are the median over the repetitions, max is the worst one.
 HTTP is the share of requests answered with HTTP 200, RPC the share of requests
 answered with a result and no JSON-RPC error; both are the worst over the repetitions.
@@ -21,6 +25,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import statistics
 
 CLIENT_ORDER = ["erigon", "geth", "nethermind", "reth"]
@@ -62,6 +67,19 @@ def load_results(root):
     return results
 
 
+def load_patterns(root):
+    """Return the pattern of every test whose pattern splits the connections into client classes."""
+    patterns = {}
+    for path in sorted(glob.glob(os.path.join(root, "**", "*-result.json"), recursive=True)):
+        with open(path, encoding="utf-8") as fh:
+            report = json.load(fh)
+        client = report["configuration"]["testingDaemon"]
+        pattern = report["configuration"].get("pattern") or {}
+        if pattern.get("clients"):
+            patterns.setdefault(os.path.basename(path)[len(client) + 1:-len("-result.json")], pattern)
+    return patterns
+
+
 def load_apis(repetitions):
     """Merge the rows by method or by subscription measure of the repetitions, as the step stats."""
     rows = {}
@@ -83,19 +101,20 @@ def load_apis(repetitions):
 
 
 def overview_results(results):
-    """Add to the results a test per fan-out measure, as "<label> <measure>", for the overview only."""
+    """Add to the results a test per fan-out or vs newHeads measure, as "<label> <measure>", for the overview only."""
     out = dict(results)
     for label, clients in results.items():
-        names = {n for steps in clients.values() for s in steps.values() for n in s.get("apis", {}) if "fan-out" in n}
+        names = {n for steps in clients.values() for s in steps.values() for n in s.get("apis", {})
+                 if "fan-out" in n or "vs newHeads" in n}
         for name in names:
             if any(other.startswith(name + " ") for other in names):
                 continue
-            out[f"{label} {name}"] = {c: {qps: fanout_step(s, name) for qps, s in steps.items()}
+            out[f"{label} {name}"] = {c: {qps: measure_step(s, name) for qps, s in steps.items()}
                                       for c, steps in clients.items()}
     return out
 
 
-def fanout_step(step, name):
+def measure_step(step, name):
     if is_failed(step):
         return step
     api = step.get("apis", {}).get(name)
@@ -105,6 +124,71 @@ def fanout_step(step, name):
     measure["success"] = 1
     measure["rpc_success"] = 1 - api["errors"] / max(api["requests"], 1)
     return measure
+
+
+MEASURE_LEGEND = [
+    "- **latency**: arrival minus the block timestamp, the wait from the start of the slot as a user sees it: "
+    "block propagation, consensus client, execution, forkchoice and delivery.",
+    "- **fan-out**: arrival minus the first arrival of the same event on any connection, the time the node "
+    "takes to send one notification to every subscriber.",
+    "- **vs newHeads**: arrival of a log or receipt minus the arrival of the head of the same block on the same "
+    "connection, the filtering and encoding of the logs and receipts after the head.",
+]
+PER_RECEIPT_LEGEND = ("- **per receipt**: a client that sends the receipts of a block one notification each: "
+                      "the arrival of the last one minus the first.")
+TYPE_ORDER = ["newHeads", "logs", "transactionReceipts"]
+MEASURE_ORDER = ["latency", "fan-out", "vs newHeads", "per receipt"]
+
+
+def measure_rank(measure):
+    typ, kind = measure.split(" ", 1)
+    return (TYPE_ORDER.index(typ) if typ in TYPE_ORDER else len(TYPE_ORDER),
+            MEASURE_ORDER.index(kind) if kind in MEASURE_ORDER else len(MEASURE_ORDER), measure)
+
+
+def class_legend(pattern):
+    """Return a line per client class of the pattern: its share of the connections and its subscriptions."""
+    lines = []
+    for part in pattern.get("description", "").split(": ", 1)[-1].split("; "):
+        m = re.fullmatch(r"(\w+) share (\d+)(?:, pick (\d+))?: (.+)", part)
+        if m is None:
+            continue
+        name, share, pick, subs = m.groups()
+        pick_note = f" (each connection takes {pick} of the logs)" if pick else ""
+        lines.append(f"- **{name}**, {share}% of the connections: {subs}{pick_note}")
+    return lines
+
+
+def render_classes(results, patterns):
+    """Return, per test with client classes, the legend and the latency, fan-out and vs newHeads of each class."""
+    lines = []
+    for label in sorted(patterns):
+        if label not in results:
+            continue
+        clients = sorted(results[label], key=lambda c: (client_rank(c), c))
+        classes = [c["name"] for c in patterns[label]["clients"]]
+        lines += [f"### {label}: client classes and measures", "", "Client classes:"] + class_legend(patterns[label])
+        lines += ["", "Measures, p50 / p95 in ms, * fastest p50:"] + MEASURE_LEGEND
+        if any(n.startswith("transactionReceipts per receipt") for c in results[label].values()
+               for s in c.values() for n in s.get("apis", {})):
+            lines.append(PER_RECEIPT_LEGEND)
+        for qps in sorted({q for c in clients for q in results[label][c]}, key=float):
+            steps = {c: results[label][c].get(qps) or {} for c in clients}
+            apis = {c: s.get("apis", {}) for c, s in steps.items()}
+            lines += ["", f"{qps} connections:", "",
+                      "| Class | Measure | " + " | ".join(clients) + " |",
+                      "|---|---|" + "---:|" * len(clients)]
+            for cls in classes:
+                measures = {n[:-len(cls) - 1] for a in apis.values() for n in a if n.endswith(" " + cls)}
+                for measure in sorted(measures, key=measure_rank):
+                    rows = {c: a.get(f"{measure} {cls}") for c, a in apis.items()}
+                    best = min((r["p50"] for r in rows.values() if r), default=None)
+                    cells = [steps[c]["failed"] if is_failed(steps[c]) else
+                             f"{r['p50']:.2f}{'*' if r['p50'] == best else ''} / {r['p95']:.2f}" if r else "-"
+                             for c, r in rows.items()]
+                    lines.append(f"| {cls} | {measure} | " + " | ".join(cells) + " |")
+        lines.append("")
+    return "\n".join(lines)
 
 
 def add_lost(results, clients):
@@ -235,7 +319,8 @@ def main():
     steps = [s for clients in overview.values() for qps in clients.values() for s in qps.values() if s]
     overviews = [render_overview(overview, percentile) for percentile in ("p50", "p90", "p95", "max")
                  if all(percentile in s for s in steps if not is_failed(s))]
-    print("\n".join(overviews + [render(results)]) if results else "No results found.")
+    classes = render_classes(results, load_patterns(args.results_dir))
+    print("\n".join(overviews + ([classes] if classes else []) + [render(results)]) if results else "No results found.")
     return 0
 
 

@@ -355,12 +355,12 @@ jobs:
               --out "perf/pattern/$CHAIN/stress_test_eth_subscribe_newHeads_gen_latest.jsonl"
           fi
           # The connections are split into the clients of an RPC provider: wallets follow the heads, dapps also
-          # a filtered log each, indexers take every log and receipt. The filters name no block, so the pattern does not age.
+          # a filtered log each, indexers also every log and receipt. The filters name no block, so the pattern does not age.
           if selected eth_subscribe_classes; then
             ./build/bin/rpc_pattern_gen eth_subscribe --url http://localhost:8545 --logs-filter address \
               --client wallet:90:newHeads=1 \
               --client dapp:9:newHeads=1,logs=50,pick=1 \
-              --client indexer:1:logs-all=1,transactionReceipts=1 \
+              --client indexer:1:newHeads=1,logs-all=1,transactionReceipts=1 \
               --out "perf/pattern/$CHAIN/stress_test_eth_subscribe_classes_gen_latest.jsonl"
           fi
           # With --block-tag latest every request asks for "latest", the chain head of each client when the request
