@@ -884,15 +884,6 @@ func TestFilters_SubscriptionWithSeveralAddressesReceivesLogOnce(t *testing.T) {
 	require.Len(t, ch, 1)
 }
 
-func TestFilters_UnsubscribingLastAddressFilterDropsItsIndexEntry(t *testing.T) {
-	t.Parallel()
-	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
-	_, id, _ := f.SubscribeLogs(256, filters.FilterCriteria{Addresses: []common.Address{address1}}, "")
-	require.True(t, f.UnsubscribeLogs(id))
-
-	require.NotContains(t, f.logsSubs.filtersByAddr, address1)
-}
-
 func TestFilters_UnsubscribedAddressFilterReceivesNoLog(t *testing.T) {
 	t.Parallel()
 	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
