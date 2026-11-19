@@ -24,12 +24,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -140,6 +143,35 @@ func snapshotTree(t *testing.T, root string) map[string]string {
 		return nil
 	}))
 	return tree
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func captureCommandLogs(t *testing.T) *lockedBuffer {
+	t.Helper()
+	logs := &lockedBuffer{}
+	previousStderr, previousRoot := log.StderrHandler, log.Root().GetHandler()
+	log.StderrHandler = log.StreamHandler(logs, log.LogfmtFormat())
+	t.Cleanup(func() {
+		log.StderrHandler = previousStderr
+		log.Root().SetHandler(previousRoot)
+	})
+	return logs
 }
 
 func requireConvertRefusedBeforeWriting(t *testing.T, dirs datadir.Dirs, wantErr string, flags ...string) {
@@ -298,4 +330,21 @@ func TestCommitmentConvertV3EmptySideErrors(t *testing.T) {
 
 		requireConvertRefusedBeforeWriting(t, dirs, "already exists with", "--v3", "--no-history")
 	})
+}
+
+func TestCommitmentConvertV3WithNothingToConvert(t *testing.T) {
+	dirs, _, _, _ := legacyDatadirWithoutChaindata(t)
+	require.NoError(t, app.DeleteStateSnapshots(app.DeleteStateSnapshotsArgs{Dirs: dirs, DomainNames: []string{"commitment"}}))
+	before := snapshotTree(t, dirs.Snap)
+	require.NotEmpty(t, before)
+	for rel := range before {
+		require.NotContains(t, rel, "-commitment.")
+	}
+	logs := captureCommandLogs(t)
+
+	require.NoError(t, runCommitmentConvert(t, dirs, "--v3"))
+
+	require.Contains(t, logs.String(), "no files needed conversion; no backup or promote performed")
+	require.Equal(t, before, snapshotTree(t, dirs.Snap))
+	requireNoThrowawayDB(t, dirs)
 }
