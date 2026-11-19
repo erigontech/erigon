@@ -71,7 +71,8 @@ type crashRecoveryRequest struct {
 	Deadline       time.Time
 	Canonical      []*engineapitester.MockClPayload
 	Replacement    []*engineapitester.MockClPayload
-	CatchupCycle   int // One-based catch-up cycle; zero selects tip-mode crash windows.
+	CatchupCycle   int // One-based FCU catch-up cycle.
+	StartupCycle   int // One-based startup cycle on an existing crashed datadir.
 	Downloaded     []crashRecoveryBlock
 }
 
@@ -508,8 +509,17 @@ func runUnwindCrashChild(t *testing.T) {
 	transitions := newStateTransitionController()
 	clientTimeout := time.Until(request.Deadline)
 	require.Positive(t, clientTimeout)
+	var startupBoundary *stateTransitionHold
+	if request.StartupCycle > 0 {
+		seen := 0
+		startupBoundary = transitions.holdMatching(t, request.Point, 1, func(context.Context) bool {
+			seen++
+			return seen == request.StartupCycle
+		})
+		t.Cleanup(func() { os.Exit(crashRecoveryFailureExitCode) })
+	}
 	// Node lifetime belongs to the process. Test cancellation must not release
-	// a pre-commit barrier and let shutdown persist the parked FCU.
+	// a pre-commit barrier and let shutdown persist the parked transaction.
 	eat, err := engineapitester.InitialiseEngineApiTester(context.Background(), engineapitester.EngineApiTesterInitArgs{
 		Logger:                  testlog.Logger(t, log.LvlError),
 		DataDir:                 request.DataDir,
@@ -519,7 +529,7 @@ func runUnwindCrashChild(t *testing.T) {
 		EngineApiClientTimeout:  &clientTimeout,
 		StateTransitionObserver: transitions.observe,
 		EthConfigTweaker: func(config *ethconfig.Config) {
-			if request.CatchupCycle > 0 {
+			if request.CatchupCycle > 0 || request.StartupCycle > 0 {
 				configureCatchupCrashRecovery(config)
 			} else {
 				configureCrashRecovery(config)
@@ -528,6 +538,11 @@ func runUnwindCrashChild(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+	if startupBoundary != nil {
+		require.NoError(t, waitCrashRecoveryTransition(ctx, startupBoundary, nil, true), "startup cycle %d", request.StartupCycle)
+		waitForCrashKill(t, ctx, request.ControlAddress, request.Deadline, int(startupBoundary.point))
+		return
+	}
 	startForkchoice := func(head common.Hash) <-chan error {
 		response := make(chan error, 1)
 		go func() {
@@ -639,41 +654,60 @@ func crashRecoveryExitError(err error) error {
 	return fmt.Errorf("child exited without the expected kill: %w", err)
 }
 
-func (request crashRecoveryRequest) validateMode() error {
+func (request crashRecoveryRequest) validate() error {
+	if request.StartupCycle < 0 {
+		return errors.New("startup cycle must not be negative")
+	}
+	if request.StartupCycle > 0 {
+		if request.CatchupCycle != 0 || len(request.Canonical)+len(request.Replacement)+len(request.Downloaded) != 0 {
+			return errors.New("startup recovery must use the existing datadir without importing blocks")
+		}
+		if request.Point != execmodule.StateTransitionStartupCommitReady && request.Point != execmodule.StateTransitionStartupCommitComplete {
+			return fmt.Errorf("startup recovery requires a startup commit boundary, got %d", request.Point)
+		}
+		return nil
+	}
 	if request.CatchupCycle < 0 {
 		return errors.New("catch-up cycle must not be negative")
+	}
+	if len(request.Canonical) == 0 {
+		return errors.New("forkchoice crash requests require canonical blocks")
 	}
 	if request.CatchupCycle > 0 {
 		if request.Point != execmodule.StateTransitionFCUCatchupCommitReady && request.Point != execmodule.StateTransitionFCUCatchupCommitComplete {
 			return fmt.Errorf("catch-up mode requires a catch-up commit boundary, got %d", request.Point)
 		}
-	} else {
-		switch request.Point {
-		case execmodule.StateTransitionUnwindComplete, execmodule.StateTransitionOverlayPublished,
-			execmodule.StateTransitionCommitReady, execmodule.StateTransitionCommitComplete, execmodule.StateTransitionOverlayCleared:
-		default:
-			return fmt.Errorf("tip mode requires a tip FCU boundary, got %d", request.Point)
+		if len(request.Replacement) > 0 {
+			return errors.New("catch-up imports use only the downloaded blocks")
 		}
-		if len(request.Downloaded) > 0 {
-			return errors.New("tip-mode crash requests must not include downloaded blocks")
+		if len(request.Downloaded) == 0 {
+			return errors.New("catch-up crash requests require downloaded blocks")
 		}
+		return nil
+	}
+	switch request.Point {
+	case execmodule.StateTransitionUnwindComplete, execmodule.StateTransitionOverlayPublished,
+		execmodule.StateTransitionCommitReady, execmodule.StateTransitionCommitComplete, execmodule.StateTransitionOverlayCleared:
+	default:
+		return fmt.Errorf("tip mode requires a tip FCU boundary, got %d", request.Point)
+	}
+	if len(request.Downloaded) > 0 {
+		return errors.New("tip-mode crash requests must not include downloaded blocks")
+	}
+	if len(request.Replacement) == 0 {
+		return errors.New("tip-mode crash requests require replacement blocks")
+	}
+	canonicalHead := request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockNumber
+	replacementHead := request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockNumber
+	if replacementHead > canonicalHead {
+		return fmt.Errorf("replacement FCU must stay in tip mode: head %d exceeds canonical head %d", replacementHead, canonicalHead)
 	}
 	return nil
 }
 
 func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
 	t.Helper()
-	require.NoError(t, request.validateMode())
-	require.NotEmpty(t, request.Canonical)
-	canonicalHead := request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockNumber
-	if request.CatchupCycle > 0 {
-		require.Empty(t, request.Replacement, "catch-up imports use only the downloaded blocks")
-		require.NotEmpty(t, request.Downloaded)
-	} else {
-		require.NotEmpty(t, request.Replacement)
-		replacementHead := request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockNumber
-		require.LessOrEqual(t, replacementHead, canonicalHead, "the replacement FCU must stay in tip mode, without catch-up commits")
-	}
+	require.NoError(t, request.validate())
 	killAtCrashBoundary(t, "TestEngineApiCrashRecovery", unwindCrashChild, int(request.Point), func(address string, deadline time.Time) any {
 		request.ControlAddress, request.Deadline = address, deadline
 		return request
