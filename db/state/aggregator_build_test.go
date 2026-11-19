@@ -63,7 +63,7 @@ func TestAggregatorBuildKeepsBackfilledReceiptVisible(t *testing.T) {
 			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 				at := agg.BeginFilesRo()
 				defer at.Close()
-				require.Empty(t, at.d[tc.domain].files)
+				require.Zero(t, at.TxNumsInFiles(tc.domain))
 				write := func(domain kv.Domain, entries ...entry) {
 					w := at.d[domain].NewWriter(db)
 					defer w.Close()
@@ -83,7 +83,7 @@ func TestAggregatorBuildKeepsBackfilledReceiptVisible(t *testing.T) {
 					at := agg.BeginFilesRo()
 					defer at.Close()
 					for _, e := range tc.receipts {
-						got, _, found, err := at.d[tc.domain].GetLatest([]byte{e.key}, tx)
+						got, _, found, err := at.GetLatest(tc.domain, []byte{e.key}, tx, kv.GetLatestOptions{})
 						require.NoError(t, err)
 						require.Truef(t, found, "receipt at txNum %d must remain readable", e.txNum)
 						require.Equal(t, value, got)
@@ -102,9 +102,9 @@ func TestAggregatorBuildKeepsBackfilledReceiptVisible(t *testing.T) {
 
 			at := agg.BeginFilesRo()
 			defer at.Close()
-			require.Equal(t, buildEnd, at.d[kv.AccountsDomain].files.EndTxNum())
+			require.Equal(t, buildEnd, at.TxNumsInFiles(kv.AccountsDomain))
 			if tc.mustBuild {
-				require.Equal(t, buildEnd, at.d[tc.domain].files.EndTxNum(), "all receipt data fits in the new snapshot")
+				require.Equal(t, buildEnd, at.TxNumsInFiles(tc.domain), "all receipt data fits in the new snapshot")
 			}
 		})
 	}
