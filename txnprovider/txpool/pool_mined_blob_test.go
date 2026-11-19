@@ -127,11 +127,7 @@ type minedBlobReorgTest struct {
 // newMinedBlobReorgTest starts a pool at block 0 holding one local blob txn with nonce 2.
 func newMinedBlobReorgTest(t *testing.T) *minedBlobReorgTest {
 	r := newMinedBlobReorgPool(t)
-	var local TxnSlots
-	local.Append(&r.blobTxn, r.sender[:], true)
-	reasons, err := r.pool.AddLocalTxns(r.ctx, local)
-	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	r.add(t, &r.blobTxn, true)
 	return r
 }
 
@@ -149,18 +145,49 @@ func newMinedBlobReorgPool(t *testing.T) *minedBlobReorgTest {
 	require.NoError(t, pool.OnNewBlock(ctx, r.block(0, 2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.NoError(t, pool.start(ctx))
 
-	// Parsed, so Rlp and blobs share one buffer as in production.
-	wrapped := types.MakeWrappedBlobTxn(chainConfig.ChainID)
+	wrapped := r.wrappedBlobs(2)
 	wrapped.Tx.Nonce = 2
-	wrapped.Tx.MaxFeePerBlobGas = *uint256.NewInt(200_000)
-	var encoded bytes.Buffer
-	require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
-	parseCtx := NewTxnParseContext(*chainConfig.ChainID)
-	parseCtx.WithSender(false)
-	_, err = parseCtx.ParseTransaction(encoded.Bytes(), 0, &r.blobTxn, nil, false, true, nil)
-	require.NoError(t, err)
+	r.blobTxn = parseMinedBlobSlot(t, wrapped)
 	r.hash = string(r.blobTxn.IDHash[:])
 	return r
+}
+
+func (r *minedBlobReorgTest) wrappedBlobs(count int) *types.BlobTxWrapper {
+	wrapped := types.MakeWrappedBlobTxn(&r.pool.chainID)
+	wrapped.Tx.MaxFeePerBlobGas = *uint256.NewInt(200_000)
+	wrapped.Tx.BlobVersionedHashes = wrapped.Tx.BlobVersionedHashes[:count]
+	wrapped.Blobs = wrapped.Blobs[:count]
+	wrapped.Commitments = wrapped.Commitments[:count]
+	wrapped.Proofs = wrapped.Proofs[:count]
+	return wrapped
+}
+
+func (r *minedBlobReorgTest) add(t *testing.T, slot *TxnSlot, local bool) {
+	t.Helper()
+	var slots TxnSlots
+	slots.Append(slot, r.sender[:], local)
+	if local {
+		reasons, err := r.pool.AddLocalTxns(r.ctx, slots)
+		require.NoError(t, err)
+		require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	} else {
+		r.pool.AddRemoteTxns(r.ctx, slots, nil, nil)
+		require.NoError(t, r.pool.processRemoteTxns(r.ctx))
+	}
+	require.Contains(t, r.pool.byHash, string(slot.IDHash[:]))
+}
+
+// Parsing the wire encoding makes the RLP and sidecar share one buffer as in production.
+func parseMinedBlobSlot(t *testing.T, wrapped *types.BlobTxWrapper) TxnSlot {
+	t.Helper()
+	var encoded bytes.Buffer
+	require.NoError(t, wrapped.MarshalBinaryWrapped(&encoded))
+	parseCtx := NewTxnParseContext(wrapped.Tx.ChainID)
+	parseCtx.WithSender(false)
+	var slot TxnSlot
+	_, err := parseCtx.ParseTransaction(encoded.Bytes(), 0, &slot, nil, false, true, nil)
+	require.NoError(t, err)
+	return slot
 }
 
 func (r *minedBlobReorgTest) block(height byte, nonce uint64, direction remoteproto.Direction) *remoteproto.StateChangeBatch {
@@ -216,6 +243,65 @@ func TestMinedBlobTxnReturnsWithBlobsAfterUnwind(t *testing.T) {
 	r.reorgOneBlock(t, 0x11, false)
 	require.Contains(t, r.pool.byHash, r.hash)
 	require.Len(t, r.pool.byHash[r.hash].TxnSlot.BlobBundles, 2)
+}
+
+func TestUnwindKeepsExecutableBlobsWithinLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		senderLimit    uint64
+		poolLimit      uint64
+		successorBlobs int
+		localTail      bool
+		wantNonces     []uint64
+	}{
+		{"sender limit", 4, 8, 2, false, []uint64{2, 3}},
+		{"pool limit", 8, 4, 2, false, []uint64{2, 3}},
+		{"two one-blob successors", 2, 8, 1, false, []uint64{2}},
+		{"local successor", 4, 8, 2, true, []uint64{2, 3}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newMinedBlobReorgPool(t)
+			r.pool.cfg.BlobSlots, r.pool.cfg.TotalBlobPoolLimit = tc.senderLimit, tc.poolLimit
+			r.add(t, &r.blobTxn, false)
+			r.mine(t, 1, 3)
+			wrapped := r.wrappedBlobs(tc.successorBlobs)
+			for _, nonce := range []uint64{3, 4} {
+				wrapped.Tx.Nonce = nonce
+				slot := parseMinedBlobSlot(t, wrapped)
+				r.add(t, &slot, tc.localTail && nonce == 4)
+			}
+			require.Equal(t, []uint64{3, 4}, providedNonces(t, r.ctx, r.pool))
+
+			r.reorgOneBlock(t, 0x11, false)
+			require.Equal(t, tc.wantNonces, providedNonces(t, r.ctx, r.pool))
+			require.Len(t, r.pool.byHash, len(tc.wantNonces))
+			require.Equal(t, min(tc.senderLimit, tc.poolLimit), r.pool.totalBlobsInPool.Load())
+		})
+	}
+}
+
+func TestReturnedBlobReplacementKeepsExecutableSuccessor(t *testing.T) {
+	r := newMinedBlobReorgPool(t)
+	r.pool.cfg.BlobSlots = 2
+	r.add(t, &r.blobTxn, false)
+	r.mine(t, 1, 3)
+	require.NoError(t, r.pool.OnNewBlock(r.ctx, r.block(0, 2, remoteproto.Direction_UNWIND), TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	// A cheaper one-blob replacement and its successor now fit together.
+	wrapped := r.wrappedBlobs(1)
+	wrapped.Tx.FeeCap.SetUint64(1_000_000_000)
+	wrapped.Tx.TipCap.SetUint64(1_000_000_000)
+	wrapped.Tx.MaxFeePerBlobGas.SetUint64(100_000)
+	for _, nonce := range []uint64{2, 3} {
+		wrapped.Tx.Nonce = nonce
+		slot := parseMinedBlobSlot(t, wrapped)
+		r.add(t, &slot, false)
+	}
+	require.Equal(t, []uint64{2, 3}, providedNonces(t, r.ctx, r.pool))
+
+	r.reorgOneBlock(t, 0x11, false)
+	require.Equal(t, []uint64{2, 3}, providedNonces(t, r.ctx, r.pool))
+	require.NotContains(t, r.pool.byHash, r.hash)
 }
 
 // A remote blob txn mined before its queue is processed must be cached with the blobs of the queued copy.

@@ -1444,20 +1444,20 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		}
 	}
 	if txn.HasBlobs() {
-		return p.validateBlobTxn(txn, isLocal), nil
+		return p.validateBlobTxn(txn, isLocal, unwinding), nil
 	}
 	return txpoolcfg.Success, nil
 }
 
 // validateBlobTxnAndSidecar runs both blob checks, for callers that already hold p.lock.
 func (p *TxPool) validateBlobTxnAndSidecar(txn *TxnSlot, isLocal bool, cells blobCells) txpoolcfg.DiscardReason {
-	if reason := p.validateBlobTxn(txn, isLocal); reason != txpoolcfg.Success {
+	if reason := p.validateBlobTxn(txn, isLocal, false); reason != txpoolcfg.Success {
 		return reason
 	}
 	return p.validateBlobSidecar(txn, cells)
 }
 
-func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReason {
+func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal, unwinding bool) txpoolcfg.DiscardReason {
 	if !p.isCancun() {
 		return txpoolcfg.TypeNotActivated
 	}
@@ -1473,6 +1473,11 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		return txpoolcfg.TooManyBlobs
 	}
 
+	// A reorg can free slots by mining or displacing pooled transactions.
+	// Check both budgets against the live pool when each returned transaction is inserted.
+	if unwinding {
+		return txpoolcfg.Success
+	}
 	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx sender blob limit exceeded idHash=%x blobs=%d, limit=%d", txn.IDHash, p.all.blobCount(txn.SenderID)+uint64(blobCount), p.cfg.BlobSlots))
@@ -2090,7 +2095,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView,
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
 
-		if reason := p.addLocked(mt, &announcements, cells); reason != txpoolcfg.NotSet {
+		if reason := p.addLocked(mt, &announcements, cells, false); reason != txpoolcfg.NotSet {
 			discardReasons[i] = reason
 			continue
 		}
@@ -2140,7 +2145,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 			continue
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
-		if reason := p.addLocked(mt, &announcements, cells); reason != txpoolcfg.NotSet {
+		if reason := p.addLocked(mt, &announcements, cells, true); reason != txpoolcfg.NotSet {
 			p.deletedTxns = append(p.deletedTxns, mt)
 			continue
 		}
@@ -2246,7 +2251,7 @@ func (p *TxPool) updateInSubPool(mt *metaTxn) {
 	}
 }
 
-func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blobCells) txpoolcfg.DiscardReason {
+func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blobCells, restoreBlobNonce bool) txpoolcfg.DiscardReason {
 	// Find a replacement candidate within the sender's nonce domain.
 	// Account nonces and keyed sequences can have equal values without conflicting.
 	found, _ := p.all.tree.Get(mt)
@@ -2299,6 +2304,11 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 		}
 	}
 
+	if restoreBlobNonce && mt.TxnSlot.HasBlobs() {
+		if reason := p.makeRoomForReturnedBlobs(mt, found); reason != txpoolcfg.Success {
+			return reason
+		}
+	}
 	if found != nil {
 		p.removeFromSubPool(found, "add")
 		p.discardLocked(found, txpoolcfg.ReplacedByHigherTip)
@@ -2342,6 +2352,58 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements, cells blob
 	// Remove from mined cache as we are now "resurrecting" it to a sub-pool
 	p.deleteMinedBlobTxn(hashStr)
 	return txpoolcfg.NotSet
+}
+
+// Later blob transactions cannot execute until the missing account nonce is restored.
+// A same-nonce replacement fills no gap and must fit alongside its successors.
+func (p *TxPool) makeRoomForReturnedBlobs(mt, replaced *metaTxn) txpoolcfg.DiscardReason {
+	txn := mt.TxnSlot
+	count := uint64(len(txn.GetBlobHashes()))
+	senderBlobs := p.all.blobCount(txn.SenderID) + count
+	total := p.totalBlobsInPool.Load() + count
+	if replaced != nil {
+		old := uint64(len(replaced.TxnSlot.GetBlobHashes()))
+		senderBlobs -= old
+		total -= old
+	}
+	var needed uint64
+	reason := txpoolcfg.BlobPoolOverflow
+	if total > p.cfg.TotalBlobPoolLimit {
+		needed = total - p.cfg.TotalBlobPoolLimit
+	}
+	if mt.subPool&IsLocal == 0 && senderBlobs > p.cfg.BlobSlots {
+		needed = max(needed, senderBlobs-p.cfg.BlobSlots)
+		reason = txpoolcfg.BlobSlotsOverflow
+	}
+	if needed == 0 {
+		return txpoolcfg.Success
+	}
+	if replaced != nil {
+		return reason
+	}
+
+	var tail []*metaTxn
+	p.all.descend(txn.SenderID, func(pooled *metaTxn) bool {
+		if pooled.keyedNonce {
+			return true
+		}
+		if pooled.TxnSlot.Nonce <= txn.Nonce {
+			return false
+		}
+		if blobs := uint64(len(pooled.TxnSlot.GetBlobHashes())); blobs != 0 {
+			tail = append(tail, pooled)
+			needed -= min(needed, blobs)
+		}
+		return needed != 0
+	})
+	if needed != 0 {
+		return reason
+	}
+	for _, pooled := range tail {
+		p.removeFromSubPool(pooled, reason.String())
+		p.discardLocked(pooled, reason)
+	}
+	return txpoolcfg.Success
 }
 
 // dropping transaction from all sub-structures and from db
