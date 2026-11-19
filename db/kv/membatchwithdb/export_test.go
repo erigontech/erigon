@@ -16,10 +16,26 @@
 
 package membatchwithdb
 
-import "github.com/erigontech/erigon/db/kv"
+import (
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/stream"
+)
 
 // MemCursorPosition returns the in-memory entry an overlay cursor is positioned at.
 func MemCursorPosition(c kv.Cursor) (k []byte, valid bool) {
 	mc := c.(*memoryMutationCursor).memCursor
 	return mc.current.k, mc.valid
+}
+
+// RangeFiltersDb reports whether an overlay range stream checks its db rows against tombstones.
+func RangeFiltersDb(it stream.KV) bool {
+	var db stream.KV
+	switch r := it.(type) {
+	case *rangeIter:
+		db = r.iterDb
+	case *rangeDupSortIter:
+		db = r.iterDb
+	}
+	_, ok := db.(*stream.FilteredDuo[[]byte, []byte])
+	return ok
 }

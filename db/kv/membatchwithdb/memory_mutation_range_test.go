@@ -454,3 +454,58 @@ func TestNestedRangeDupSortPushesLimitDown(t *testing.T) {
 	require.Equal(t, []string{"value3.3"}, values)
 	require.Equal(t, []int{kv.Unlim}, spy.limits)
 }
+
+func TestRangeFiltersDbOnlyUnderTombstone(t *testing.T) {
+	batch := newBatchOverDbNonDupSort(t)
+	rangeKeys := func(from, to []byte, asc order.By) (bool, []string) {
+		it, err := batch.Range(kv.HeaderNumber, from, to, asc, kv.Unlim)
+		require.NoError(t, err)
+		filtered := membatchwithdb.RangeFiltersDb(it)
+		keys, _ := collectStream(t, it)
+		return filtered, keys
+	}
+
+	filtered, keys := rangeKeys(nil, nil, order.Asc)
+	require.False(t, filtered)
+	require.Equal(t, []string{"AAAA", "CAAA", "CBAA", "CCAA"}, keys)
+	filtered, keys = rangeKeys(nil, nil, order.Desc)
+	require.False(t, filtered)
+	require.Equal(t, []string{"CCAA", "CBAA", "CAAA", "AAAA"}, keys)
+
+	require.NoError(t, batch.Delete(kv.HeaderNumber, []byte("AAAA")))
+	filtered, keys = rangeKeys([]byte("C"), nil, order.Asc)
+	require.False(t, filtered)
+	require.Equal(t, []string{"CAAA", "CBAA", "CCAA"}, keys)
+	filtered, keys = rangeKeys(nil, nil, order.Asc)
+	require.True(t, filtered)
+	require.Equal(t, []string{"CAAA", "CBAA", "CCAA"}, keys)
+	filtered, keys = rangeKeys(nil, nil, order.Desc)
+	require.True(t, filtered)
+	require.Equal(t, []string{"CCAA", "CBAA", "CAAA"}, keys)
+}
+
+func TestRangeDupSortFiltersDbOnlyUnderTombstone(t *testing.T) {
+	batch := newBatchOverDbDupSort(t)
+	values := func(key []byte) (bool, []string) {
+		it, err := batch.RangeDupSort(kv.TblAccountVals, key, nil, nil, order.Asc, kv.Unlim)
+		require.NoError(t, err)
+		filtered := membatchwithdb.RangeFiltersDb(it)
+		_, vals := collectStream(t, it)
+		return filtered, vals
+	}
+
+	filtered, vals := values([]byte("key1"))
+	require.False(t, filtered)
+	require.Equal(t, []string{"value1.1", "value1.3"}, vals)
+
+	c, err := batch.RwCursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer c.Close()
+	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.1")))
+	filtered, vals = values([]byte("key1"))
+	require.False(t, filtered)
+	require.Equal(t, []string{"value1.1", "value1.3"}, vals)
+	filtered, vals = values([]byte("key3"))
+	require.True(t, filtered)
+	require.Equal(t, []string{"value3.3"}, vals)
+}

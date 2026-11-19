@@ -295,17 +295,20 @@ func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc or
 		if !asc { // the db and the overlay read descending bounds differently
 			fromKey, toKey = nil, nil
 		}
+		hasTombstone := m.memTx.hasTombstone(table, fromKey, toKey)
 		dbLimit := kv.Unlim
-		if limit >= 0 && !m.memTx.hasTombstone(table, fromKey, toKey) {
+		if !hasTombstone {
 			dbLimit = limit
 		}
 		if s.iterDb, err = m.readTx.Range(table, fromPrefix, toPrefix, asc, dbLimit); err != nil {
 			s.Close()
 			return nil, err
 		}
-		s.iterDb = stream.FilterKV(s.iterDb, func(k, v []byte) bool {
-			return !m.memTx.isHidden(table, k, v)
-		})
+		if hasTombstone {
+			s.iterDb = stream.FilterKV(s.iterDb, func(k, v []byte) bool {
+				return !m.memTx.isHidden(table, k, v)
+			})
+		}
 	}
 	if s.iterMem, err = m.memTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
 		s.Close()
@@ -406,17 +409,21 @@ func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPr
 	s := &rangeDupSortIter{key: key, orderAscend: bool(asc), limit: int64(limit)}
 	var err error
 	if m.readTx != nil && !m.memTx.isHidden(table, key, nil) {
+		nextKey, _ := kv.NextSubtree(key)
+		hasTombstone := m.memTx.hasTombstone(table, key, nextKey)
 		dbLimit := kv.Unlim
-		if nextKey, _ := kv.NextSubtree(key); limit >= 0 && !m.memTx.hasTombstone(table, key, nextKey) {
+		if !hasTombstone {
 			dbLimit = limit
 		}
 		if s.iterDb, err = m.readTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, dbLimit); err != nil {
 			s.Close()
 			return nil, err
 		}
-		s.iterDb = stream.FilterKV(s.iterDb, func(_, v []byte) bool {
-			return !m.memTx.isHidden(table, key, v)
-		})
+		if hasTombstone {
+			s.iterDb = stream.FilterKV(s.iterDb, func(_, v []byte) bool {
+				return !m.memTx.isHidden(table, key, v)
+			})
+		}
 	}
 	if s.iterMem, err = m.memTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
 		s.Close()
