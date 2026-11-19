@@ -1141,7 +1141,9 @@ func (ff *Filters) consumeInProcessLogs(ctx context.Context, ch <-chan []*notifi
 			return
 		case logs := <-ch:
 			for _, n := range logs {
+				dbg.ProbeMark("rpcLogIn", uint64(n.BlockNumber))
 				ff.logsSubs.distributeNativeLog(inProcessLog(n))
+				dbg.ProbeMark("rpcLogOut", uint64(n.BlockNumber))
 			}
 		}
 	}
