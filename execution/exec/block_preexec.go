@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -167,7 +168,7 @@ type commitmentToucher struct {
 }
 
 func (t *commitmentToucher) touch(addrHash, slotHash []byte) {
-	if t.ctx.Err() != nil {
+	if !statecfg.ExperimentalCommitmentV3 || t.ctx.Err() != nil {
 		return
 	}
 	v3.PrefetchPath(t.read, addrHash, slotHash)

@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
@@ -248,7 +249,17 @@ func TestBlockReadAheaderPreExecCreatesAtTxNonce(t *testing.T) {
 	require.False(t, ok, "the contract address at the parent nonce was read")
 }
 
+func TestCommitmentToucherSkipsLegacyCommitment(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	reads := 0
+	toucher := &commitmentToucher{ctx: t.Context(), read: func([]byte) []byte { reads++; return nil }}
+	require.NoError(t, toucher.UpdateAccountData(accounts.InternAddress(common.Address{1}), nil, nil))
+	require.NoError(t, toucher.WriteAccountStorage(accounts.InternAddress(common.Address{1}), 0, accounts.InternKey(common.Hash{1}), uint256.Int{}, uint256.Int{}))
+	require.Zero(t, reads, "the toucher read commitment with commitment v3 off")
+}
+
 func TestCommitmentToucherStopsAfterCancel(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	ctx, cancel := context.WithCancel(t.Context())
 	reads := 0
 	toucher := &commitmentToucher{ctx: ctx, read: func([]byte) []byte { reads++; return nil }}
@@ -261,6 +272,7 @@ func TestCommitmentToucherStopsAfterCancel(t *testing.T) {
 
 func TestBlockReadAheaderPreExecWalksStoragePathOfTxWrite(t *testing.T) {
 	f := newPreExecFixture(t, []byte{0x60, 0x2a, 0x60, 0x08, 0x55, 0x00})
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	pe := f.readAheader.preExec
 	ttx, err := f.db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
