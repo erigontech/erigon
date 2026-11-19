@@ -1732,6 +1732,7 @@ func TestDupSortPointReadsSkipDeletedDbValue(t *testing.T) {
 	v, err = batch.GetOne(kv.TblAccountVals, []byte("key3"))
 	require.NoError(t, err)
 	require.Nil(t, v)
+}
 
 func TestMemoryMutationDupSortCursorKeepsEarlierRowsOfCustomTable(t *testing.T) {
 	const table = "CustomDupSort"
