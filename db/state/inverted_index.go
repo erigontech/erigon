@@ -1074,7 +1074,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 
 	var (
 		coll = InvertedIndexCollation{
-			iiPath: ii.efNewFilePath(step, stepTo),
+			iiPath: ii.dirtyFiles.dataFilePath(txFrom, txTo, ii.efNewFilePath(step, stepTo)),
 		}
 		closeComp bool
 	)
@@ -1218,7 +1218,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 	}
 
 	{
-		if err = coll.writer.Compress(); err != nil {
+		if err = buildMissingFile(coll.iiPath, coll.writer.Compress); err != nil {
 			return InvertedFiles{}, fmt.Errorf("compress %s: %w", ii.FilenameBase, err)
 		}
 		coll.Close()
@@ -1228,7 +1228,9 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 		return InvertedFiles{}, fmt.Errorf("open %s decompressor: %w", ii.FilenameBase, err)
 	}
 
-	if err := ii.buildMapAccessor(ctx, step, step+1, decomp, ps); err != nil {
+	if err := buildMissingFile(ii.efAccessorNewFilePath(step, step+1), func() error {
+		return ii.buildMapAccessor(ctx, step, step+1, decomp, ps)
+	}); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.FilenameBase, err)
 	}
 	if ii.Accessors.Has(statecfg.AccessorHashMap) {

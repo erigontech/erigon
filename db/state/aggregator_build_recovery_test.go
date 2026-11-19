@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -26,9 +27,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // Fixture construction chooses individual steps without recovery planning.
@@ -36,15 +39,62 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	return a.buildFilesWithPlan(ctx, db, step, finalityCtx, filesDone, fileBuildPlan{})
 }
 
+func snapshotFileIdentities(t *testing.T, dirs datadir.Dirs) map[string]os.FileInfo {
+	t.Helper()
+	files := make(map[string]os.FileInfo)
+	for _, folder := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+		entries, err := os.ReadDir(folder)
+		require.NoError(t, err)
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			info, err := entry.Info()
+			require.NoError(t, err)
+			files[filepath.Join(folder, entry.Name())] = info
+		}
+	}
+	return files
+}
+
+func requireSnapshotFilesUnchanged(t *testing.T, files map[string]os.FileInfo) {
+	t.Helper()
+	for path, before := range files {
+		after, err := os.Stat(path)
+		require.NoError(t, err)
+		require.True(t, os.SameFile(before, after), "recovery must reuse completed snapshot files: %s", path)
+	}
+}
+
+func removeSnapshotFiles(t *testing.T, pattern string) []string {
+	t.Helper()
+	paths, err := filepath.Glob(pattern)
+	require.NoError(t, err)
+	require.NotEmpty(t, paths, "no snapshot files match %s", pattern)
+	for _, path := range paths {
+		require.NoError(t, dir.RemoveFile(path))
+	}
+	return paths
+}
+
 func TestAggregatorBuildRecoversUnindexedFiles(t *testing.T) {
 	const stepSize = uint64(10)
-	for _, test := range []struct {
+	accessorExt := "kvi"
+	if statecfg.Schema.CommitmentDomain.Accessors.Has(statecfg.AccessorBTree) {
+		accessorExt = "bt"
+	}
+	type testCase struct {
 		name, pattern string
 		accessorDir   bool
-	}{
-		{name: "commitment", pattern: "*-commitment.[23]-[34].kvi"},
+	}
+	tests := []testCase{
+		{name: "commitment", pattern: "*-commitment.[23]-[34]." + accessorExt},
 		{name: "logaddrs", pattern: "*-logaddrs.[23]-[34].efi", accessorDir: true},
-	} {
+	}
+	if statecfg.Schema.CommitmentDomain.Accessors.Has(statecfg.AccessorExistence) {
+		tests = append(tests, testCase{name: "commitment_filter", pattern: "*-commitment.[23]-[34].kvei"})
+	}
+	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			db, agg := testDbAndAggregatorv3(t, stepSize)
 			ctx := t.Context()
@@ -77,21 +127,18 @@ func TestAggregatorBuildRecoversUnindexedFiles(t *testing.T) {
 			if test.accessorDir {
 				folder = dirs.SnapAccessors
 			}
-			paths, err := filepath.Glob(filepath.Join(folder, test.pattern))
-			require.NoError(t, err)
-			require.Len(t, paths, 2)
-			for _, path := range paths {
-				require.NoError(t, dir.RemoveFile(path))
-			}
+			require.Len(t, removeSnapshotFiles(t, filepath.Join(folder, test.pattern)), 2)
 			agg = NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
 			t.Cleanup(agg.Close)
 			require.NoError(t, agg.OpenFolder(db))
 			agg.ForbidVisibilityLowering()
 
+			existing := snapshotFileIdentities(t, dirs)
 			finished, started := agg.buildFilesInBackground(asTemporalRoDB(db), lastTxNum, false, unboundedFinalityCtx)
 			require.True(t, started)
 			<-finished
 			requireVisibleEnd(t, agg, 6*stepSize)
+			requireSnapshotFilesUnchanged(t, existing)
 		})
 	}
 }
@@ -146,12 +193,8 @@ func TestAggregatorBuildDefersNewlyEnabledDomain(t *testing.T) {
 	for step := range kv.Step(3) {
 		require.NoError(t, agg.buildFiles(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil))
 	}
-	var plan fileBuildPlan
-	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
-		var err error
-		plan, err = agg.planFileBuild(tx)
-		return err
-	}))
+	plan, err := agg.readFileBuildPlan(ctx, db)
+	require.NoError(t, err)
 	require.Equal(t, kv.Step(3), plan.firstStep)
 	agg.EnableDomain(kv.RCacheDomain)
 
@@ -298,12 +341,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 				if isIndex {
 					folder, filename = dirs.SnapIdx, kv.FileLogAddressIdx
 				}
-				paths, err := filepath.Glob(filepath.Join(folder, "*-"+filename+".*"))
-				require.NoError(t, err)
-				require.NotEmpty(t, paths)
-				for _, path := range paths {
-					require.NoError(t, dir.RemoveFile(path))
-				}
+				removeSnapshotFiles(t, filepath.Join(folder, "*-"+filename+".*"))
 				agg = NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
 				configure(agg)
 				t.Cleanup(agg.Close)
@@ -345,6 +383,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					}
 					return nil
 				}))
+				existing := snapshotFileIdentities(t, dirs)
 				if test.explicit {
 					require.NoError(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), test.fromStep, kv.Step(lastTxNum/stepSize), unboundedFinalityCtx, false))
 					agg.WaitForFiles()
@@ -353,6 +392,7 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 					require.True(t, started)
 					<-finished
 				}
+				requireSnapshotFilesUnchanged(t, existing)
 				require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 					at := agg.BeginFilesRo()
 					defer at.Close()
@@ -470,12 +510,16 @@ func TestAggregatorBuildKeepsAlignedEntitiesAheadOfBackfill(t *testing.T) {
 
 func TestAggregatorBuildRespectsSharedCeiling(t *testing.T) {
 	const stepSize = uint64(10)
+	accessorExt := "kvi"
+	if statecfg.Schema.CommitmentDomain.Accessors.Has(statecfg.AccessorBTree) {
+		accessorExt = "bt"
+	}
 	for _, test := range []struct {
 		name, accessors   string
 		visibleStateSteps uint64
 	}{
-		{name: "missing_last_accessor", accessors: "*-commitment.2-3.kvi", visibleStateSteps: 2},
-		{name: "missing_all_accessors", accessors: "*-commitment.*.kvi", visibleStateSteps: 0},
+		{name: "missing_last_accessor", accessors: "*-commitment.2-3." + accessorExt, visibleStateSteps: 2},
+		{name: "missing_all_accessors", accessors: "*-commitment.*." + accessorExt, visibleStateSteps: 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db, agg := testDbAndAggregatorv3(t, stepSize)
@@ -507,12 +551,7 @@ func TestAggregatorBuildRespectsSharedCeiling(t *testing.T) {
 				filepath.Join(dirs.SnapAccessors, "*-"+kv.FileLogAddressIdx+".*"),
 				filepath.Join(dirs.SnapDomain, test.accessors),
 			} {
-				paths, err := filepath.Glob(pattern)
-				require.NoError(t, err)
-				require.NotEmpty(t, paths)
-				for _, path := range paths {
-					require.NoError(t, dir.RemoveFile(path))
-				}
+				removeSnapshotFiles(t, pattern)
 			}
 			agg = NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
 			t.Cleanup(agg.Close)

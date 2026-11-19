@@ -69,6 +69,14 @@ func (df *DirtyFiles) copy() *DirtyFiles {
 	return &DirtyFiles{*df.BTreeG.Copy()}
 }
 
+// The caller pins a file generation while using the captured data path.
+func (df *DirtyFiles) dataFilePath(txFrom, txTo uint64, newPath string) string {
+	if file, ok := df.Get(newFilesItem(txFrom, txTo)); ok && file.decompressor != nil {
+		return file.decompressor.FilePath()
+	}
+	return newPath
+}
+
 // Replaced files must be retired with the outgoing visible generation, without
 // deleting the paths now owned by their replacements.
 func (df *DirtyFiles) replace(item *FilesItem) retiredFiles {

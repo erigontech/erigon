@@ -585,7 +585,8 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 		files = calcVisibleFiles(d.dirtyFiles, d.Accessors, checker, false, toTxNum)
 	}
 	dv := newDomainVisible(d.Name, files, d.Enabled)
-	// Incomplete history stays dirty until its domain values become readable.
+	// History and index files can reach disk before the values for the same range.
+	// Keep them hidden beyond the end of the last readable values file.
 	hv, hiv := d.History.calcVisibleFiles(dv.files.EndTxNum())
 	return dv, hv, hiv
 }
@@ -938,13 +939,7 @@ func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.St
 		return StaticFiles{}, err
 	}
 
-	ps := background.NewProgressSet()
-	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, ps, dstDir)
-	wal.Close() // munmap ETL temp files after buildFileRange consumed the zero-copy data
-	if err != nil {
-		return StaticFiles{}, err
-	}
-	return static, nil
+	return d.buildFileRange(ctx, stepFrom, stepTo, coll, background.NewProgressSet(), dstDir)
 }
 
 // [stepFrom; stepTo)
@@ -1065,7 +1060,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 		}
 	}()
 
-	coll.valuesPath = d.kvNewFilePath(step, step+1)
+	coll.valuesPath = d.dirtyFiles.dataFilePath(txFrom, txTo, d.kvNewFilePath(step, step+1))
 	if coll.valuesComp, err = seg.NewCompressor(ctx, d.FilenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.FilenameBase, err)
 	}
@@ -1298,7 +1293,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	if d.noFsync {
 		valuesComp.DisableFsync()
 	}
-	if err = valuesComp.Compress(); err != nil {
+	if err = buildMissingFile(collation.valuesPath, valuesComp.Compress); err != nil {
 		return StaticFiles{}, fmt.Errorf("compress %s values: %w", d.FilenameBase, err)
 	}
 	valuesComp.Close()
@@ -1308,7 +1303,9 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	}
 
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
-		if err = d.buildHashMapAccessor(ctx, step, step+1, valuesDecomp, ps); err != nil {
+		if err = buildMissingFile(d.kviAccessorNewFilePath(step, step+1), func() error {
+			return d.buildHashMapAccessor(ctx, step, step+1, valuesDecomp, ps)
+		}); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
 		}
 		valuesIdx, err = d.openHashMapAccessor(d.kviAccessorNewFilePath(step, step+1))
@@ -1320,9 +1317,13 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePath(step, step+1)
 		kveiPath := d.kvExistenceIdxNewFilePath(step, step+1)
-		bt, err = d.buildBtIndex(btPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps)
+		err = d.buildMissingBtIndex(btPath, kveiPath, d.dataReader(valuesDecomp), ps)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
+		}
+		bt, err = d.openBtIndex(btPath, d.dataReader(valuesDecomp))
+		if err != nil {
+			return StaticFiles{}, err
 		}
 	}
 	if d.Accessors.Has(statecfg.AccessorExistence) {
@@ -1432,7 +1433,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		g.Go(func() error {
 			idxPath := d.kvBtAccessorNewFilePath(item.StepRange(d.stepSize))
 			kveiPath := d.kvExistenceIdxNewFilePath(item.StepRange(d.stepSize))
-			if err := btindex.BuildBtreeIndexWithDecompressor(idxPath, kveiPath, d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
+			if err := d.buildMissingBtIndex(idxPath, kveiPath, d.dataReader(item.decompressor), ps); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
 			return nil
