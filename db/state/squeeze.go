@@ -346,7 +346,7 @@ func readReferencePages(branch commitment.BranchData, accounts, storage *seg.Rea
 	if len(cold) < 2 {
 		return 0
 	}
-	if mmap.ReadPages(context.Background(), cold) != nil {
+	if mmap.ReadExpandPages(context.Background(), cold) != nil {
 		return 0
 	}
 	return len(cold)
