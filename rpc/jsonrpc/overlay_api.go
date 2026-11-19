@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"sync"
 	"time"
 
@@ -257,9 +258,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Tracer: ct.Tracer().Hooks})
 	ct.evm = evm
 
-	// Later frames may read the payer's balance after payment approval.
-	gasBailout := creationTx.Type() != types.FrameTxType
-	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout, api.engine())
+	_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, api.engine())
 	if ct.err != nil {
 		return nil, ct.err
 	}
@@ -494,19 +493,26 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := blockCtx.Rules(chainConfig)
 
-	if stateOverride != nil && len(*stateOverride) > 0 {
+	hasStateOverrides := stateOverride != nil && len(*stateOverride) > 0
+	if hasStateOverrides {
 		if err := stateOverride.Override(statedb, nil, rules); err != nil {
 			return nil, err
 		}
 	}
 
+	// Assertions can observe earlier transactions' fee effects, so any frame
+	// transaction requires original gas budgets and normal fee accounting
+	// for the whole block.
+	relaxedReplay := hasStateOverrides && !slices.ContainsFunc(replayTransactions, func(txn types.Transaction) bool {
+		return txn.Type() == types.FrameTxType
+	})
 	// Overrides may increase aggregate gas use, so the block gas pool is unrestricted.
-	// Each transaction still uses its original gas budgets.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	evm = vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chainConfig, vm.Config{})
 	storeEVM(evm)
 
-	// On the versioned state the overrides took tx index 0; the block's txs follow them.
+	// Overrides use transaction index 0 in versioned state, when present.
+	// Replay starts after them so their writes are visible to the first transaction.
 	firstTxIndex := statedb.TxnIndex()
 	// try to replay all transactions in this block
 	for idx, txn := range replayTransactions {
@@ -518,11 +524,16 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			return nil, err
 		}
 
+		if relaxedReplay {
+			api.applyGasBudget(msg)
+			// Unlimited per-transaction allowances must not exhaust the block pool.
+			gp.Reset(math.MaxUint64, math.MaxUint64)
+		}
 		statedb.SetTxContext(blockNum, firstTxIndex+idx)
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm.TxContext = txCtx
 
-		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
+		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, relaxedReplay /* gasBailout */, api.engine())
 		if err != nil {
 			log.Error(err.Error())
 			return nil, err

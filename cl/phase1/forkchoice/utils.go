@@ -261,23 +261,27 @@ func (f *ForkChoiceStore) getAncestor(node ForkChoiceNode, slot uint64) ForkChoi
 		return node
 	}
 
+	// Walk the headers: only the returned ancestor's payload status counts, and it needs its child's block.
+	childRoot := node.Root
 	for {
-		block, hasBlock := f.forkGraph.GetBlock(node.Root)
-		if !hasBlock || block == nil {
-			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
-		}
-		parent := ForkChoiceNode{
-			Root:          block.Block.ParentRoot,
-			PayloadStatus: f.getParentPayloadStatus(block.Block),
-		}
-		parentHeader, hasParent := f.forkGraph.GetHeader(parent.Root)
+		parentRoot := header.ParentRoot
+		parentHeader, hasParent := f.forkGraph.GetHeader(parentRoot)
 		if !hasParent {
 			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 		}
 		if parentHeader.Slot <= slot {
-			return parent
+			child, hasChild := f.forkGraph.GetBlock(childRoot)
+			if !hasChild || child == nil {
+				return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
+			}
+			status := f.getParentPayloadStatus(child.Block)
+			// Prune runs outside f.mu: re-read the header so a prune between the reads gives its own result, not a mix.
+			if _, stillStored := f.forkGraph.GetHeader(parentRoot); !stillStored {
+				return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
+			}
+			return ForkChoiceNode{Root: parentRoot, PayloadStatus: status}
 		}
-		node = parent
+		childRoot, header = parentRoot, parentHeader
 	}
 }
 
@@ -310,7 +314,7 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 				cached = cs.(*checkpointState)
 				return
 			}
-			baseState, current, err = f.copyCurrentStateLocked(checkpoint.Root)
+			baseState, current, err = f.copyCurrentStateLocked(checkpoint.Root, nil)
 		}()
 		if cached != nil || err != nil {
 			return cached, err
@@ -329,7 +333,7 @@ func (f *ForkChoiceStore) getCheckpointStateLocked(checkpoint solid.Checkpoint) 
 	if f.forkGraph == nil {
 		return nil, errors.New("getCheckpointState: forkGraph not initialized")
 	}
-	baseState, current, err := f.copyCurrentStateLocked(checkpoint.Root)
+	baseState, current, err := f.copyCurrentStateLocked(checkpoint.Root, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -148,6 +148,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			tracer.EmitExit(0, nil, gasUsed, vm.VMErrorFromErr(traceErr), err != nil)
 		}()
 	}
+	hasPostTx := len(tx.Frames) > 0 && tx.Frames[len(tx.Frames)-1].Mode == types.FramePostTx
 	var lastErr error
 	batchStart, batchSnapshot := -1, -1
 	bodyStart, bodySnapshot := -1, -1
@@ -220,13 +221,14 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 			// Assertions preserve the complete payment-approval frame, including
 			// its state changes after APPROVE returns from a nested call.
 			st.state.RevertToSnapshot(bodySnapshot, frameErr)
+			// Revert removes the snapshot. Clear its reusable ID so deferred
+			// cleanup cannot pop a later snapshot.
 			bodySnapshot = -1
 			for j := bodyStart; j <= i; j++ {
 				ctx.Receipts[j].Logs = nil
 			}
 			for j := i + 1; j < len(tx.Frames); j++ {
-				ctx.Receipts[j].Status = types.ReceiptStatusSkipped
-				st.evm.TraceSkippedFrame(j)
+				st.skipFrame(j)
 			}
 			break
 		}
@@ -241,8 +243,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 				// The first frame without the flag is still part of this batch.
 				for tx.Frames[i].Flags&types.FrameAtomicBatch != 0 {
 					i++
-					ctx.Receipts[i].Status = types.ReceiptStatusSkipped
-					st.evm.TraceSkippedFrame(i)
+					st.skipFrame(i)
 				}
 			}
 			if frameErr != nil || frame.Flags&types.FrameAtomicBatch == 0 {
@@ -250,7 +251,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 				batchStart, batchSnapshot = -1, -1
 			}
 		}
-		if bodySnapshot < 0 && !ctx.Payer.IsNil() && tx.Frames[len(tx.Frames)-1].Mode == types.FramePostTx {
+		if hasPostTx && bodySnapshot < 0 && !ctx.Payer.IsNil() {
 			bodyStart, bodySnapshot = i+1, st.state.PushSnapshot()
 		}
 	}
@@ -308,4 +309,9 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		st.evm.Context.PostApplyMessage(st.state, sender, st.evm.Context.Coinbase, result, rules)
 	}
 	return result, nil
+}
+
+func (st *TxnExecutor) skipFrame(index int) {
+	st.evm.FrameContext.Receipts[index].Status = types.ReceiptStatusSkipped
+	st.evm.TraceSkippedFrame(index)
 }

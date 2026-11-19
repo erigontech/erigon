@@ -43,6 +43,9 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
+// Enough to fund the original gas budgets, but not an enlarged RPC allowance.
+const mixedFrameReplayBalance = 200_000
+
 func newMixedFrameReplayChain(t *testing.T, ordinaryReverts bool) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
 	t.Helper()
 	cfg := chain.AllProtocolChanges.Copy()
@@ -51,22 +54,21 @@ func newMixedFrameReplayChain(t *testing.T, ordinaryReverts bool) (*execmodulete
 	require.NoError(t, err)
 	sender := crypto.PubkeyToAddress(key.PublicKey)
 	ordinaryTarget, frameTarget, assertion := common.HexToAddress("0x2000"), common.HexToAddress("0x3000"), common.HexToAddress("0x4000")
-	ordinaryCode := []byte{byte(vm.STOP)}
+	ordinaryCode := program.New().Push(sender).Op(vm.BALANCE).Push0().Op(vm.MSTORE).
+		Push(32).Push0().Op(vm.RETURN).Bytes()
 	if ordinaryReverts {
 		ordinaryCode = program.New().Push0().Push0().Op(vm.REVERT).Bytes()
 	}
 	balanceLog := program.New().Push(sender).Op(vm.BALANCE).Push0().Op(vm.MSTORE).
 		Push(32).Push0().Op(vm.LOG0).Bytes()
-	// Enough to fund the original gas budgets, but not an enlarged RPC allowance.
-	const initialBalance = 200_000
 	// Revert if the preceding transaction's fee debit is missing from the prestate.
 	assertionCode := program.New().Push0().Push(sender).Push(2).Op(vm.TXDIFF).
-		Push(initialBalance).Op(vm.EQ)
+		Push(mixedFrameReplayBalance).Op(vm.EQ)
 	testutil.AssertStackWord(assertionCode, 0).Op(vm.STOP)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 		Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
 		Alloc: types.GenesisAlloc{
-			sender:         {Balance: big.NewInt(initialBalance)},
+			sender:         {Balance: big.NewInt(mixedFrameReplayBalance)},
 			ordinaryTarget: {Code: ordinaryCode},
 			frameTarget:    {Code: balanceLog},
 			assertion:      {Code: assertionCode.Bytes()},
@@ -103,6 +105,39 @@ func newMixedFrameReplayChain(t *testing.T, ordinaryReverts bool) (*execmodulete
 	require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][1].FrameReceipts[2].Status)
 	require.Len(t, pack.Receipts[0][1].Logs, 1)
 	return m, pack
+}
+
+func TestTraceReplayChargesOrdinaryFees(t *testing.T) {
+	m, pack := newMixedFrameReplayChain(t, false)
+	api := newTraceApiForTest(m)
+	txn := pack.Blocks[0].Transactions()[0]
+	upfront := new(uint256.Int).Mul(uint256.NewInt(txn.GetGasLimit()), txn.GetFeeCap())
+	expected := new(uint256.Int).Sub(uint256.NewInt(mixedFrameReplayBalance), upfront).Bytes32()
+
+	t.Run("single transaction", func(t *testing.T) {
+		result, err := api.ReplayTransaction(m.Ctx, txn.Hash(), []string{TraceTypeTrace, TraceTypeStateDiff}, nil)
+		require.NoError(t, err)
+		require.Equal(t, expected[:], []byte(result.Output))
+	})
+	t.Run("parallel block", func(t *testing.T) {
+		results, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithNumber(1), []string{TraceTypeTrace}, nil)
+		require.NoError(t, err)
+		require.Len(t, results, 2)
+		require.Equal(t, expected[:], []byte(results[0].Output))
+	})
+	t.Run("filter", func(t *testing.T) {
+		number := rpc.BlockNumber(1)
+		stream := jsonstream.New(nil)
+		require.NoError(t, api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &number, ToBlock: &number}, nil, stream))
+		var traces []struct {
+			TransactionHash common.Hash `json:"transactionHash"`
+			Result          TraceResult `json:"result"`
+		}
+		require.NoError(t, json.Unmarshal(stream.Buffer(), &traces))
+		require.NotEmpty(t, traces)
+		require.Equal(t, txn.Hash(), traces[0].TransactionHash)
+		require.Equal(t, expected[:], []byte(traces[0].Result.Output))
+	})
 }
 
 func TestReplayBlockPreservesOrdinaryFeesBeforeFrame(t *testing.T) {

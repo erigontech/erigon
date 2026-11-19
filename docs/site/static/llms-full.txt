@@ -2232,6 +2232,11 @@ In addition, Caplin can backfill recent blobs for an op-node or other uses with 
 
 - `--caplin.blobs-immediate-backfill`: Backfills the last 18 days' worth of blobs to quickly populate historical blob data for operational needs or analytics.
 
+The blob backfill can also ask a beacon API endpoint first, which is much faster than peers and covers slots that peers no longer serve:
+
+- `--caplin.blobs-backfill-endpoint <url>`: Beacon API endpoint asked for a block's blobs before peers; repeat it for fallback endpoints. The blobs are verified against the block before they are stored, so the endpoint does not need to be trusted. Without `--caplin.blobs-archive` the backfill covers only the blob retention window (4096 epochs, about 18 days on mainnet); with it, slots older than that need an archive-capable endpoint. An endpoint that does not serve several slots in a row is not asked for older slots until the next backfill pass, and one that keeps failing (down, timing out or rate-limiting) is paused for 5 minutes; peers fill what the endpoints do not. From Fulu on, a beacon node builds blob sidecars from data columns and can serve them only when it keeps at least half of the columns (a supernode or semi-supernode); Nimbus does not serve the `blob_sidecars` API.
+- `--caplin.blobs-backfill-endpoint-workers <n>`: KZG proofs the backfill computes at a time, one CPU each, for fetched blobs whose proof the endpoint left out; up to twice as many blocks are fetched at a time. Verifying the fetched blobs runs outside this limit and costs about 2% of computing their proofs. The default picks a quarter of the CPUs the process may use, at least 1 (4 on a 16-core machine). In a container this follows the CPU limit (`--cpus` or a Kubernetes CPU limit), as `GOMAXPROCS` does; set `GOMAXPROCS` or this flag where the limit is not detected, for example under Windows job objects. Each worker keeps about one CPU busy, so a node with validators can set a lower value to leave the CPU to attestation and block processing, and a dedicated archive node can set a higher one, for example `8` on a 16-core machine. At startup the node logs the endpoints (host only), the worker count and the number of CPU cores, and warns when there are more workers than cores.
+
 With state archival enabled, Caplin's indexing database (`<datadir>/caplin/indexing`) is pruned automatically: state rows already frozen into snapshots are deleted on the antiquary cadence, so the database holds only the un-frozen tail. The `mdbx.dat` file does not shrink when rows are pruned — freed pages are reused, bounding future growth. Set `CAPLIN_STATE_PRUNE_DISABLE=true` to turn pruning off.
 
 ### PeerDAS Data Column Retention
@@ -2814,10 +2819,6 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 
   - Default: `false`
 
-- `--trace.maxtraces value`: Caps the number of traces `trace_filter` may return.
-
-  - Default: `200`
-
 - `--trace.compat`: Reproduces OpenEthereum's quirks in the `trace_` namespace, for consumers that depend on them.
 
   - Default: `false`
@@ -3024,9 +3025,11 @@ Flags for configuring the parallel block execution engine.
 - `--exec.state-cache`: Enable the executor's domain-shared read cache. Equivalent to `USE_STATE_CACHE=true`. Disable for cold-read performance measurements.
   - Default: `true`
 
-**Commitment-trie construction.** The commitment (state-root) trie is always computed with the fully parallel `ParallelPatriciaHashed` implementation.
+**Commitment-trie construction.** By default the commitment (state-root) trie is computed with the fully parallel `ParallelPatriciaHashed` implementation.
 
 - `--experimental.parallel-commitment` *(Deprecated)*: No longer has any effect.
+- `--experimental.commitment-v3` *(New in v3.9)*: Compute the commitment trie with commitment v3, which stores one record per trie node; set `ERIGON_COMMITMENT_V3=true` for the same effect. A datadir with legacy commitment files must first be converted with `integration commitment convert --v3`; with the flag off, Erigon refuses a datadir that holds v3 commitment files. If convert refuses the datadir, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes --no-history` with `ERIGON_COMMITMENT_V3=true` when commitment history was pruned, or `integration commitment rebuild --yes` with `ERIGON_COMMITMENT_V3=true` otherwise. Convert keeps the legacy files in `snapshots/backup/` until you delete them; `integration commitment convert --restore` brings them back only until the node writes its first new commitment file.
+  - Default: `false`
 
 ### Caplin (Consensus Layer)
 
@@ -3090,6 +3093,10 @@ Flags for configuring the [Caplin](https://docs.erigon.tech/fundamentals/caplin)
 
 - `--caplin.blobs-immediate-backfill`: Tells Caplin to immediately backfill blobs.
   - Default: `false`
+
+- `--caplin.blobs-backfill-endpoint value`: Beacon API endpoint that the blob backfill asks for a block's blobs before peers. Repeat it for fallback endpoints. The blobs are verified against the block before they are stored. Without `--caplin.blobs-archive` the backfill covers only the blob retention window (4096 epochs, about 18 days on mainnet); with it, older slots need an archive-capable endpoint.
+- `--caplin.blobs-backfill-endpoint-workers value`: Number of KZG proofs the blob backfill computes at a time, one CPU each, for blobs from `--caplin.blobs-backfill-endpoint` whose proof the endpoint left out; up to twice as many blocks are fetched at a time, and verifying them, about 2% of the proof cost, is not limited. Set it to the number of CPUs the node can spare: fewer on a validator node, more on a dedicated archive node. The node logs the setting and the CPU core count once at startup.
+  - Default: `0` — a quarter of the CPUs the process may use (`GOMAXPROCS`, which follows a container's CPU limit), at least 1
 
 - `--caplin.blobs-no-pruning`: Disables blob pruning.
   - Default: `false`
@@ -4907,7 +4914,6 @@ Flags:
       --tls.key string                              key file for client side TLS handshake for GRPC
       --trace string                                Write execution trace to the given file
       --trace.compat                                Bug for bug compatibility with OE for trace_ routines
-      --trace.maxtraces uint                        Sets a limit on traces that can be returned in trace_filter (default 200)
       --txpool.api.addr string                      txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)
       --verbosity string                            Set the log level for console logs (default "info")
       --ws                                          Enable Websockets - Same port as HTTP[S]
@@ -6712,8 +6718,6 @@ A failure inside the EVM, such as a revert or an out-of-gas halt, is reported in
 | `--rpc.blockrange.limit` | `1000` | Maximum `toBlock - fromBlock` of a `trace_filter` range; `0` means no limit. |
 | `--trace.compat` | `false` | Bug-for-bug compatibility with OpenEthereum: the error of a root `create` frame is not reported, and `vmTrace` operations have no `op` member. |
 
-`--trace.maxtraces` is accepted but currently has no effect: `trace_filter` returns all matching records unless `count` limits them.
-
 ## JSON-RPC methods
 
 #### Ad-hoc Tracing
@@ -7075,7 +7079,9 @@ Response
 
 Traces a call to `eth_sendRawTransaction` without making the call, returning the traces.
 
-The transaction runs on the latest state, with the block environment of the latest block. It is validated as it would be for inclusion in a block: the signature and chain ID, a nonce equal to the sender's nonce (too low and too high are both rejected), the balance for the value and the gas, the intrinsic gas, the fees, the sender-code rule of EIP-3607 (with the EIP-7702 delegation exception) and the gas limit cap of EIP-7825. A transaction that fails validation returns an error; a valid transaction that reverts or halts returns its trace. The sender pays for the gas.
+The transaction runs on the latest state, with the block environment of the latest block. It is validated as it would be for inclusion in a block. For ordinary transactions this includes the signature and chain ID, a nonce equal to the sender's nonce (too low and too high are both rejected), the balance for the value and the gas, the intrinsic gas, the fees, the sender-code rule of EIP-3607 (with the EIP-7702 delegation exception) and the gas limit cap of EIP-7825. The sender pays for the gas.
+
+Frame transactions use their own approval, nonce and gas-budget rules. Gas is charged to the approved payer, which can differ from the sender. For either transaction type, a validation failure returns an error; a valid transaction that reverts or halts returns its trace.
 
 #### Parameters
 
@@ -8064,7 +8070,11 @@ curl -X POST http://localhost:8545 \
 
 Blocks in the requested range are replayed concurrently (up to `runtime.NumCPU()` workers). Each block is independently replayed from the state at `blockNumber - 1`.
 
-Replay preserves the original gas budgets and charges fees normally for all transaction types, including frame transactions. State overrides do not increase the gas available to the replayed code. The RPC gas cap does not apply to log replay.
+Without state overrides, replay preserves the original gas budgets and charges fees normally. With state overrides, blocks containing only ordinary transactions use the RPC gas allowance and skip gas-fee debits. This allows replacement code to use more gas and replay to continue when an override changes how a later transaction is funded.
+
+In this mode, replay can credit the transaction value to its recipient without debiting an underfunded sender. Gas refunds are also skipped, while tips are still credited to the block producer. These balance changes can affect later transactions and their logs.
+
+Blocks containing a frame transaction preserve the original gas budgets and normal fee accounting for **every transaction in the block**, even with overrides. Frame assertions can observe the fee effects of earlier transactions. An override that leaves a payer underfunded returns an error; code that exceeds its original budget runs out of gas. The RPC gas cap does not apply to these blocks or to replay without overrides.
 
 ### `overlay_callConstructor`
 

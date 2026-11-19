@@ -153,6 +153,9 @@ func TestHistoryStaticFilesInRange_DetectsGapInSourceFiles(t *testing.T) {
 	_, _, err := hc.staticFilesInRange(r)
 	require.Error(t, err, "staticFilesInRange must reject a merge range with a gap in source files")
 
+	_, _, err = hc.staticFilesInRange(NewHistoryRanges(*NewMergeRange("accounts", true, 1, 3), MergeRange{}))
+	require.Error(t, err, "staticFilesInRange must reject a merge range whose source files start late")
+
 	hc.files = hc.files[:1]
 	_, _, err = hc.staticFilesInRange(r)
 	require.ErrorContains(t, err, "accounts", "staticFilesInRange must reject a merge range beyond its source files")
@@ -194,7 +197,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 				filesGetter: func() *DirtyFiles {
 					return d.History.dirtyFiles
 				},
-				accessors: d.History.Accessors,
+				accessors: &d.History.Accessors,
 			})
 			d.History.InvertedIndex.SetChecker(checker)
 		}
@@ -1337,7 +1340,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 			filesGetter: func() *DirtyFiles {
 				return commitment.dirtyFiles
 			},
-			accessors: commitment.Accessors,
+			accessors: &commitment.Accessors,
 		}
 		checker.AddDependency(FromDomain(account.Name), info)
 		checker.AddDependency(FromDomain(storage.Name), info)

@@ -17,12 +17,9 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"math"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -34,12 +31,11 @@ import (
 	"github.com/spf13/afero"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/cl/blobfetch"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -53,12 +49,6 @@ import (
 // fillWorkers is the number of slots checked and filled at once. Each holds at most one block's
 // sidecars, a few MB.
 const fillWorkers = 8
-
-// fillRequestTimeout bounds one endpoint request. A full response, 21 blobs of hex JSON, is about
-// 6 MB. A variable so tests can shorten it.
-var fillRequestTimeout = time.Minute
-
-var fillRetryWait = time.Second
 
 type BlobArchiveStoreFill struct {
 	chainCfg
@@ -76,8 +66,6 @@ type endpointWindow struct {
 	from atomic.Uint64
 	err  error
 }
-
-var errNoSidecars = errors.New("the endpoint has no sidecars for the block")
 
 // fillReport counts slots by outcome; only the slots that could not be filled are listed.
 type fillReport struct {
@@ -106,7 +94,7 @@ func (b *BlobArchiveStoreFill) Run(ctx context.Context) error {
 		return errors.New("--endpoint is required unless --dry-run is set")
 	}
 	for i, endpoint := range b.Endpoints {
-		if !validEndpoint(endpoint) {
+		if !blobfetch.ValidEndpoint(endpoint) {
 			return fmt.Errorf("--endpoint %d is not an http or https URL with a host", i+1)
 		}
 	}
@@ -331,7 +319,7 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		if slot < b.windows[i].from.Load() {
 			continue
 		}
-		lastErr = fetchAndStoreBlobs(ctx, store, endpoint, root, block)
+		lastErr = blobfetch.FetchAndStore(ctx, store, endpoint, root, block, nil)
 		if err := store.err(); err != nil {
 			return fmt.Errorf("blob store write failed, stopping: %w", err)
 		}
@@ -345,14 +333,14 @@ func (b *BlobArchiveStoreFill) fillSlot(ctx context.Context, db kv.RoDB, blocks 
 		if ctx.Err() != nil {
 			return nil
 		}
-		if !notServed(lastErr) {
+		if !blobfetch.NotServed(lastErr) {
 			unserved = false
 		} else if !unresolved {
 			if err := b.findWindow(ctx, db, blocks, i, slot+1); err != nil {
 				return fmt.Errorf("find the window of endpoint %d: %w", i+1, err)
 			}
 		}
-		log.Debug("Endpoint could not fill slot", "slot", slot, "endpoint", redactEndpoint(endpoint), "err", lastErr)
+		log.Debug("Endpoint could not fill slot", "slot", slot, "endpoint", blobfetch.RedactEndpoint(endpoint), "err", lastErr)
 	}
 	if unserved {
 		if unresolved {
@@ -380,61 +368,12 @@ func readSlot(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapsho
 	return root, block, err
 }
 
-func blobCount(block *cltypes.SignedBeaconBlock) int {
-	if block == nil || block.Version() < clparams.DenebVersion {
-		return 0
-	}
-	if commitments := block.Block.Body.GetBlobKzgCommitments(); commitments != nil {
-		return commitments.Len()
-	}
-	return 0
-}
-
 func expectedBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, root common.Hash, block *cltypes.SignedBeaconBlock) (n int, unresolved bool, err error) {
 	err = db.View(ctx, func(tx kv.Tx) error {
-		n, unresolved, err = expectedBlobsInTx(ctx, tx, blocks, root, block)
+		n, unresolved, err = blobfetch.ExpectedBlobs(ctx, tx, blocks, root, block)
 		return err
 	})
 	return n, unresolved, err
-}
-
-func expectedBlobsInTx(ctx context.Context, tx kv.Tx, blocks freezeblocks.BeaconSnapshotReader, root common.Hash, block *cltypes.SignedBeaconBlock) (int, bool, error) {
-	n := blobCount(block)
-	if n == 0 || block.Version() < clparams.GloasVersion {
-		return n, false, nil
-	}
-	var childSlot uint64
-	var childRoot common.Hash
-	if err := beacon_indicies.RangeBlockRoots(tx, block.Block.Slot+1, math.MaxUint64, func(slot uint64, root common.Hash) bool {
-		childSlot, childRoot = slot, root
-		return false
-	}); err != nil {
-		return 0, false, err
-	}
-	if childRoot == (common.Hash{}) {
-		return n, true, nil
-	}
-	child, err := blocks.ReadBeaconBlockBodyBySlot(ctx, tx, childSlot)
-	if err != nil {
-		return 0, false, err
-	}
-	if child == nil || child.Block.ParentRoot != root {
-		return n, true, nil
-	}
-	if gotRoot, err := child.Block.HashSSZ(); err != nil {
-		return 0, false, err
-	} else if gotRoot != childRoot {
-		return n, true, nil
-	}
-	if forkchoice.ParentPayloadStatusFromBids(block, child.Block) == cltypes.PayloadStatusFull {
-		return n, false, nil
-	}
-	return 0, false, nil
-}
-
-func notServed(err error) bool {
-	status, ok := errors.AsType[blobStatusError](err)
-	return errors.Is(err, errNoSidecars) || ok && status == http.StatusBadRequest
 }
 
 func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, blocks freezeblocks.BeaconSnapshotReader, i int, lo uint64) error {
@@ -457,11 +396,11 @@ func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, block
 			if served, ok := answers[root]; ok {
 				return served
 			}
-			sidecars, err := retrieveSidecars(ctx, b.Endpoints[i], root, block)
+			sidecars, err := blobfetch.Retrieve(ctx, b.Endpoints[i], root, block)
 			if err == nil && len(sidecars) == 0 {
-				err = errNoSidecars
+				err = blobfetch.ErrNoSidecars
 			}
-			answers[root] = !notServed(err)
+			answers[root] = !blobfetch.NotServed(err)
 			return answers[root]
 		})
 		if w.err != nil {
@@ -474,11 +413,11 @@ func (b *BlobArchiveStoreFill) findWindow(ctx context.Context, db kv.RoDB, block
 		}
 		if block == nil {
 			w.from.Store(b.ToSlot + 1)
-			log.Info("Endpoint serves no blobs in the requested range", "endpoint", redactEndpoint(b.Endpoints[i]), "fromSlot", lo, "toSlot", b.ToSlot)
+			log.Info("Endpoint serves no blobs in the requested range", "endpoint", blobfetch.RedactEndpoint(b.Endpoints[i]), "fromSlot", lo, "toSlot", b.ToSlot)
 			return
 		}
 		w.from.Store(block.Block.Slot)
-		log.Info("First slot the endpoint serves", "endpoint", redactEndpoint(b.Endpoints[i]), "slot", w.from.Load())
+		log.Info("First slot the endpoint serves", "endpoint", blobfetch.RedactEndpoint(b.Endpoints[i]), "slot", w.from.Load())
 	})
 	return w.err
 }
@@ -504,25 +443,6 @@ func nextSlotWithBlobs(ctx context.Context, db kv.RoDB, blocks freezeblocks.Beac
 	}
 	scanned[from] = to
 	return common.Hash{}, nil, false, nil
-}
-
-func fetchAndStoreBlobs(ctx context.Context, store blob_storage.BlobStorage, endpoint string, root common.Hash, block *cltypes.SignedBeaconBlock) error {
-	commitments := block.Block.Body.GetBlobKzgCommitments()
-	sidecars, err := retrieveSidecars(ctx, endpoint, root, block)
-	if err != nil {
-		return err
-	}
-	if len(sidecars) == 0 {
-		return errNoSidecars
-	}
-	slices.SortFunc(sidecars, func(a, b *cltypes.BlobSidecar) int { return cmp.Compare(a.Index, b.Index) })
-	// Identifiers carry the canonical root: the block read from storage keeps no transactions,
-	// so its own hash is not that root.
-	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](commitments.Len(), 40)
-	for i := range commitments.Len() {
-		ids.Append(&cltypes.BlobIdentifier{BlockRoot: root, Index: uint64(i)})
-	}
-	return storeRemoteBlobs(ctx, store, ids, sidecars, block)
 }
 
 // storedBlobsValid reports whether the store serves one valid sidecar per commitment: each carries

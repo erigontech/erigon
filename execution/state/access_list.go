@@ -33,6 +33,9 @@ type accessList struct {
 	addresses map[accounts.Address]int
 	slots     []map[accounts.StorageKey]struct{}
 	// TXDIFF may warm a slot without warming its address (EIP-7906).
+	// Entries remain here when the address becomes warm; address and slot
+	// warmth are journaled independently.
+	// The length checks avoid extra key hashing when this map is empty.
 	slotsOnly map[frameStorageSlot]struct{}
 
 	// Memo of the last resolved (address -> slot set) and the last slot known
@@ -44,9 +47,9 @@ type accessList struct {
 	lastSlots    map[accounts.StorageKey]struct{}
 	lastWarmSlot accounts.StorageKey
 
-	// A cleared, truncated or reverted map keeps its buckets for the next call
-	// to reuse, so what a pooled list pins is the largest each has been, not
-	// what it holds now. Every shrink records it: see markPeak.
+	// Cleared or reverted maps retain their buckets, so these counts track
+	// their largest sizes. Peaks for addresses and slots are recorded before
+	// shrinking; slotsOnlyPeak is updated on insertion.
 	peak          []int
 	addrPeak      int
 	slotsOnlyPeak int

@@ -34,6 +34,17 @@ import (
 	"github.com/erigontech/erigon/execution/vm/testutil"
 )
 
+func TestPostTxFailureWithoutPaymentApproval(t *testing.T) {
+	evm, tx := frameTestEnv(t)
+	assertion := common.HexToAddress("0x3000")
+	require.NoError(t, evm.IntraBlockState().SetCode(accounts.InternAddress(assertion), program.New().Push0().Push0().Op(vm.REVERT).Bytes(), tracing.CodeChangeUnspecified))
+	tx.Fees.FeeCap.SetUint64(1)
+	tx.Frames = []types.Frame{{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}}}
+	result, err := applyFrameTest(t, evm, tx)
+	require.EqualError(t, err, "frame transaction without payment approval")
+	require.Nil(t, result)
+}
+
 func TestPostTxRollback(t *testing.T) {
 	t.Parallel()
 	evm, tx := frameTestEnv(t)

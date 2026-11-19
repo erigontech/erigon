@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -145,7 +146,11 @@ func TestCachesRepeatedUnwind(t *testing.T) {
 					}))
 				})
 			}
-			require.True(t, cached(), "the read between unwinds must fill the cache")
+			if domain == kv.CommitmentDomain && statecfg.ExperimentalCommitmentV3 {
+				require.False(t, cached(), "v3 shared domains must leave the branch cache empty")
+			} else {
+				require.True(t, cached(), "the read between unwinds must fill the cache")
+			}
 			// Readers can refill from the old committed state after staging the unwind.
 			unwind(18, func() { read(a) })
 			read(b)
