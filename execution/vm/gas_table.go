@@ -329,24 +329,24 @@ func gasCreate(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 	return mdgas.MdGasCost{Execution: g}, err
 }
 
-func gasCreate2(evm *EVM, scope *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
-	return initCodeGas(evm, scope, availableGas, memorySize, CREATE2, false)
+func gasCreate2(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+	return initCodeGas(evm, callContext, availableGas, memorySize, CREATE2, false)
 }
 
-func gasCreateEip3860(evm *EVM, scope *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
-	return initCodeGas(evm, scope, availableGas, memorySize, CREATE, true)
+func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+	return initCodeGas(evm, callContext, availableGas, memorySize, CREATE, true)
 }
 
-func gasCreate2Eip3860(evm *EVM, scope *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
-	return initCodeGas(evm, scope, availableGas, memorySize, CREATE2, true)
+func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+	return initCodeGas(evm, callContext, availableGas, memorySize, CREATE2, true)
 }
 
-func initCodeGas(evm *EVM, scope *CallContext, availableGas mdgas.MdGas, memorySize uint64, op OpCode, eip3860 bool) (mdgas.MdGasCost, error) {
-	gas, err := gasCreate(evm, scope, availableGas, memorySize)
+func initCodeGas(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, op OpCode, eip3860 bool) (mdgas.MdGasCost, error) {
+	gas, err := gasCreate(evm, callContext, availableGas, memorySize)
 	if err != nil {
 		return gas, err
 	}
-	size, overflow := scope.Stack.back(2).Uint64WithOverflow()
+	size, overflow := callContext.Stack.back(2).Uint64WithOverflow()
 	if overflow {
 		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
@@ -368,8 +368,8 @@ func initCodeGas(evm *EVM, scope *CallContext, availableGas mdgas.MdGas, memoryS
 	if overflow {
 		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
-	if eip3860 && evm.chainRules.IsAmsterdam && availableGas.Execution >= gas.Execution {
-		gas = gasCreateAccount(evm, scope, gas, op == CREATE2)
+	if evm.chainRules.IsAmsterdam && availableGas.Execution >= gas.Execution {
+		gas = gasCreateAccount(evm, callContext, gas, op == CREATE2)
 	}
 	return gas, nil
 }
