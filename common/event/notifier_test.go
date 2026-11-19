@@ -73,11 +73,9 @@ func TestNotifierWaitReturnsWhenSignaled(t *testing.T) {
 
 func TestNotifierWaitReturnsWhenAlreadySignaled(t *testing.T) {
 	t.Parallel()
-	synctest.Test(t, func(t *testing.T) {
-		n := NewNotifier()
-		n.SetAndBroadcast()
-		require.NoError(t, requireReturnsSynctest(t, waitAsync(n, t.Context())))
-	})
+	n := NewNotifier()
+	n.SetAndBroadcast()
+	require.NoError(t, requireReturns(t, waitAsync(n, t.Context())))
 }
 
 func TestNotifierWaitReturnsOnContextCancel(t *testing.T) {
@@ -101,6 +99,7 @@ func TestNotifierSetAndBroadcastReleasesEveryWaiter(t *testing.T) {
 		for i := range results {
 			results[i] = waitAsync(n, t.Context())
 		}
+		synctest.Wait()
 		n.SetAndBroadcast()
 
 		for _, done := range results {

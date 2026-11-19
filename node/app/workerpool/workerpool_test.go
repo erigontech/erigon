@@ -77,6 +77,7 @@ func TestMaxWorkers(t *testing.T) {
 
 		started := make(chan struct{}, maxWorkers)
 		release := make(chan struct{})
+		defer close(release)
 
 		// Start workers, and have them all wait on a channel before completing.
 		for range maxWorkers {
@@ -101,7 +102,6 @@ func TestMaxWorkers(t *testing.T) {
 		}
 
 		// Release workers.
-		close(release)
 	})
 }
 
