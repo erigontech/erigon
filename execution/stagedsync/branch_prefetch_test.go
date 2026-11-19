@@ -20,6 +20,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,9 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -289,19 +290,57 @@ func TestBranchPrefetcherDrainSortedWaitsForItemsTakenByWorkers(t *testing.T) {
 	require.Zero(t, p.drainTimeout.Load())
 }
 
+type walkOrderDB struct {
+	kv.TemporalRoDB
+	mu  sync.Mutex
+	txs []*walkOrderTx
+}
+
+func (db *walkOrderDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
+	tx := &walkOrderTx{}
+	db.mu.Lock()
+	db.txs = append(db.txs, tx)
+	db.mu.Unlock()
+	return tx, nil
+}
+
+type walkOrderTx struct {
+	kv.TemporalTx
+	keys []string
+}
+
+func (tx *walkOrderTx) GetLatest(_ kv.Domain, key []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	tx.keys = append(tx.keys, string(key))
+	return nil, 0, nil
+}
+
+func (tx *walkOrderTx) Rollback() {}
+
 func TestBranchPrefetcherDrainSortedWalksTheBacklog(t *testing.T) {
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
-	p := newBranchPrefetcher(context.Background(), db)
-	defer p.close()
-	p.gate.Lock()
-	for i := range 600 {
-		p.add(prefetchItem{account: [32]byte{0: byte(i), 1: byte(i >> 8)}})
+	const n = 256
+	db := &walkOrderDB{}
+	p := newPrefetchRecords()
+	p.db, p.work = db, make(chan prefetchItem, n)
+	order := make(map[string]int, n)
+	for i := n - 1; i >= 0; i-- {
+		account := [32]byte{0: byte(i >> 8), 1: byte(i)}
+		order[string(v3.StorageNodeKey(account, nil, nil))] = i
+		p.add(prefetchItem{account: account, slot: [32]byte{0: byte(^i >> 8), 1: byte(^i)}, storage: true})
 	}
-	p.gate.Unlock()
 	p.drainSorted()
-	require.Empty(t, p.work)
+	p.wg.Wait()
+	require.Zero(t, p.drainTimeout.Load(), "burst workers must walk the backlog with no regular worker running")
 	require.Zero(t, p.pending.Load())
-	require.EqualValues(t, 600, p.queued.Load())
+	walked := 0
+	for _, tx := range db.txs {
+		seq := make([]int, len(tx.keys))
+		for j, k := range tx.keys {
+			seq[j] = order[k]
+		}
+		require.True(t, slices.IsSorted(seq), "a chunk must walk the backlog in path order: %v", seq)
+		walked += len(seq)
+	}
+	require.Equal(t, n, walked)
 }
 
 func TestBranchPrefetcherQueuesRepeatsWithoutAFollower(t *testing.T) {
@@ -361,6 +400,7 @@ func TestBranchPrefetcherQueuesAnItemOncePerFold(t *testing.T) {
 	require.Len(t, p.work, 1)
 	require.EqualValues(t, 1, p.deduped.Load())
 	p.pause()
+	require.Zero(t, p.pending.Load(), "an item discarded at the pause is no longer pending")
 	p.resume()
 	p.add(prefetchItem{account: [32]byte{1}})
 	require.Len(t, p.work, 1, "an item discarded at the pause is queued again for the next fold")
@@ -422,4 +462,13 @@ func TestBranchPrefetcherFollowsPreExecTouchesUntilStopped(t *testing.T) {
 	touches.C <- []commitmentdb.PathTouch{{Account: [32]byte{4}}}
 	time.Sleep(5 * time.Millisecond)
 	require.Empty(t, p.work)
+}
+
+func TestBranchPrefetcherLosesAnItemWhoseReadTxFailsToOpen(t *testing.T) {
+	p := newPrefetchRecords()
+	p.db, p.work = failingRoDB{err: errors.New("read tx limit")}, make(chan prefetchItem, 1)
+	p.add(prefetchItem{account: [32]byte{1}})
+	p.chunk(<-p.work)
+	require.Zero(t, p.pending.Load())
+	require.EqualValues(t, 1, p.dropped.Load())
 }
