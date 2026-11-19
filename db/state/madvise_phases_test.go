@@ -78,17 +78,17 @@ func TestMmapAdviceAcrossFilePhases(t *testing.T) {
 	requireAllRandom(t, snapDir, "build")
 	built := snapFiles(t, snapDir, ".kv")
 
-	for _, ext := range []string{".kvi", ".bt", ".kvei", ".vi", ".efi"} {
-		for _, f := range snapFiles(t, snapDir, ext) {
-			require.NoError(t, dir.RemoveFile(f))
-		}
+	removed := accessorFiles(t, snapDir)
+	require.NotEmpty(t, removed)
+	for _, f := range removed {
+		require.NoError(t, dir.RemoveFile(f))
 	}
 	db, agg = reopenAggregator(t, db, agg, stepSize)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 	require.NoError(t, agg.OpenFolder(db))
-	require.Empty(t, snapFiles(t, snapDir, ".kvi"))
+	require.Empty(t, accessorFiles(t, snapDir))
 	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
-	require.NotEmpty(t, snapFiles(t, snapDir, ".kvi"), "indexing rebuilt no accessor")
+	require.ElementsMatch(t, removed, accessorFiles(t, snapDir), "indexing must rebuild every removed accessor")
 	requireAllRandom(t, snapDir, "indexing")
 
 	require.NoError(t, agg.MergeLoop(t.Context()))
@@ -96,6 +96,16 @@ func TestMmapAdviceAcrossFilePhases(t *testing.T) {
 	require.NotEmpty(t, slices.DeleteFunc(slices.Clone(afterMerge), func(f string) bool { return slices.Contains(built, f) }),
 		"merge produced no file: built %v, after merge %v", relNames(snapDir, built), relNames(snapDir, afterMerge))
 	requireAllRandom(t, snapDir, "merge")
+}
+
+// accessorFiles lists the index files of every kind; which kinds exist depends on the commitment format.
+func accessorFiles(t *testing.T, snapDir string) []string {
+	t.Helper()
+	var files []string
+	for _, ext := range []string{".kvi", ".bt", ".kvei", ".vi", ".efi"} {
+		files = append(files, snapFiles(t, snapDir, ext)...)
+	}
+	return files
 }
 
 func relNames(root string, paths []string) []string {
