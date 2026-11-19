@@ -912,48 +912,11 @@ func writeTestSenderState(t *testing.T, ctx context.Context, coreDB kv.TemporalR
 
 func TestNonceFromAddress(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
-	ch := make(chan Announcements, 100)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := mdbxtest.NewTestPoolDB(t)
-	cfg := txpoolcfg.DefaultConfig
-	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New())
-	require.NoError(err)
-	pool.started.Store(true)
-	require.NotNil(pool)
-	var stateVersionID uint64 = 0
-	pendingBaseFee := uint64(200000)
-	// start blocks from 0, set empty hash - then kvcache will also work on this
-	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remoteproto.StateChangeBatch{
-		StateVersionId:      stateVersionID,
-		PendingBlockBaseFee: pendingBaseFee,
-		BlockGasLimit:       1000000,
-		ChangeBatch: []*remoteproto.StateChange{
-			{BlockHeight: 0, BlockHash: h1},
-		},
-	}
-	var addr [20]byte
-	addr[0] = 1
-	acc := accounts.Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
-	}
-	v := accounts.SerialiseV3(&acc)
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-		Action:  remoteproto.Action_UPSERT,
-		Address: gointerfaces.ConvertAddressToH160(addr),
-		Data:    v,
-	})
-	tx, err := db.BeginRw(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
-	require.NoError(err)
+	ctx, pool, _, _ := newTestPool(t)
+	addr := common.Address{1}
+	change := newBlockChangeForAccounts(common.Hash{}, 2, addr)
+	change.PendingBlockBaseFee = 200_000
+	require.NoError(pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 	add := func(nonces ...uint64) {
 		t.Helper()
@@ -1280,48 +1243,11 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 func TestReplaceWithHigherFee(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
-	ch := make(chan Announcements, 100)
-	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := mdbxtest.NewTestPoolDB(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	cfg := txpoolcfg.DefaultConfig
-	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New())
-	require.NoError(err)
-	pool.started.Store(true)
-	require.NotNil(pool)
-	var stateVersionID uint64 = 0
-	pendingBaseFee := uint64(200000)
-	// start blocks from 0, set empty hash - then kvcache will also work on this
-	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remoteproto.StateChangeBatch{
-		StateVersionId:      stateVersionID,
-		PendingBlockBaseFee: pendingBaseFee,
-		BlockGasLimit:       1000000,
-		ChangeBatch: []*remoteproto.StateChange{
-			{BlockHeight: 0, BlockHash: h1},
-		},
-	}
-	var addr [20]byte
-	addr[0] = 1
-	acc := accounts.Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
-	}
-	v := accounts.SerialiseV3(&acc)
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-		Action:  remoteproto.Action_UPSERT,
-		Address: gointerfaces.ConvertAddressToH160(addr),
-		Data:    v,
-	})
-	tx, err := db.BeginRw(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
-	require.NoError(err)
+	ctx, pool, _, _ := newTestPool(t)
+	addr := common.Address{1}
+	change := newBlockChangeForAccounts(common.Hash{}, 2, addr)
+	change.PendingBlockBaseFee = 200_000
+	require.NoError(pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 	originalHash := common.Hash{1}
 	{
