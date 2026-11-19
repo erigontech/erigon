@@ -7,10 +7,10 @@ import (
 
 // Local fan-out probe, not for commit.
 var (
-	SimProbeOn   atomic.Bool
-	simWakeIdx   atomic.Int64
-	simWriteIdx  atomic.Int64
-	SimWakeTimes = make([]int64, 1<<16)
+	SimProbeOn    atomic.Bool
+	simWakeIdx    atomic.Int64
+	simWriteIdx   atomic.Int64
+	SimWakeTimes  = make([]int64, 1<<16)
 	SimWriteTimes = make([]int64, 1<<16)
 )
 
