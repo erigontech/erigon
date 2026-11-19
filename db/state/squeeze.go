@@ -971,7 +971,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	rebuildTrieCfg := commitment.DefaultTrieConfig()
 	rebuildTrieCfg.EnableTrieWarmup = false
 	rebuildTrieCfg.Variant = execctx.PickTrieVariant()
-	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
 
 	var totalKeysCommitted uint64
 
@@ -1001,7 +1000,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		stepsInShard := uint64(shardTo - shardFrom)
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
-		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), maxShardSteps))
+		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), rebuildShardMaxSteps(keysPerStep)))
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
 		}
@@ -1183,6 +1182,18 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	}
 
 	return latestRoot, nil
+}
+
+// rebuildShardKeys is the key count a rebuild shard grows towards, so a datadir with short steps does not
+// rebuild in thousands of tiny shards, each with its own commit and merge.
+const rebuildShardKeys = 1 << 24
+
+func rebuildShardMaxSteps(keysPerStep uint64) uint64 {
+	steps := uint64(commitment.DefaultRebuildShardMaxSteps)
+	for keysPerStep > 0 && steps*2*keysPerStep <= rebuildShardKeys {
+		steps *= 2
+	}
+	return steps
 }
 
 func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
