@@ -486,7 +486,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 		return
 	}
 	if preExecOn && bra.preExec != nil {
-		if err := bra.preExecTxns(ctx, db, header, body.Transactions); err != nil && !errors.Is(err, context.Canceled) {
+		if err := bra.preExecTxns(ctx, db, header, body.Transactions, workers); err != nil && !errors.Is(err, context.Canceled) {
 			log.Warn("[preexec] failed", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
 		}
 		return

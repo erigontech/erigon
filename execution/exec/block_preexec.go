@@ -63,7 +63,7 @@ func (bra *BlockReadAheader) SetPreExec(config *chain.Config, engine rules.Engin
 	bra.preExec = &preExecCfg{config: config, engine: engine, canonical: canonical}
 }
 
-func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header *types.Header, txns types.Transactions) error {
+func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header *types.Header, txns types.Transactions, workers int) error {
 	pe := bra.preExec
 	if header.ExcessBlobGas != nil {
 		if _, err := misc.GetBlobGasPrice(pe.config, *header.ExcessBlobGas, header.Time); err != nil {
@@ -75,7 +75,7 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 	var next, paths, gasLeft atomic.Int64
 	gasLeft.Store(preExecBlockGas)
 	wg, ctx := errgroup.WithContext(ctx)
-	for w := range min(preExecWorkers, secp256k1.NumOfContexts(), len(txns)) {
+	for w := range min(workers, preExecWorkers, secp256k1.NumOfContexts(), len(txns)) {
 		cryptoContext := secp256k1.ContextForThread(w)
 		wg.Go(func() error {
 			tx, err := db.BeginRo(ctx)

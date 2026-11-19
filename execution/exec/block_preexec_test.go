@@ -19,10 +19,12 @@ package exec
 import (
 	"context"
 	"crypto/ecdsa"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
+	"github.com/erigontech/secp256k1"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -147,7 +149,7 @@ func TestBlockReadAheaderPreExecRejectsBlobGasPriceOverflow(t *testing.T) {
 	header.ExcessBlobGas = &excess
 	var err error
 	require.NotPanics(t, func() {
-		err = f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{f.txn(t, 100_000, 1)})
+		err = f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{f.txn(t, 100_000, 1)}, preExecWorkers)
 	})
 	require.Error(t, err)
 }
@@ -160,7 +162,7 @@ func TestBlockReadAheaderPreExecBoundsLoopingTx(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = f.readAheader.preExecTxns(ctx, f.db, f.header(), txns)
+		_ = f.readAheader.preExecTxns(ctx, f.db, f.header(), txns, preExecWorkers)
 	}()
 	time.Sleep(20 * time.Millisecond)
 	cancel()
@@ -182,7 +184,7 @@ func TestBlockReadAheaderPreExecUsesEffectiveGasPrice(t *testing.T) {
 		FeeCap:   *uint256.NewInt(100),
 	})
 	require.NoError(t, err)
-	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{txn}))
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{txn}, preExecWorkers))
 
 	effective, feeCap := common.Hash{31: 12}, common.Hash{31: 100}
 	_, ok := f.stateCache.View(nil).Get(kv.StorageDomain, append(f.contract[:], effective[:]...))
@@ -200,7 +202,7 @@ func TestBlockReadAheaderPreExecClampsGasPriceToFeeCap(t *testing.T) {
 		ChainID:  *f.config.ChainID,
 	})
 	require.NoError(t, err)
-	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{txn}))
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{txn}, preExecWorkers))
 
 	feeCap, baseFee := common.Hash{}, common.Hash{31: 10}
 	_, ok := f.stateCache.View(nil).Get(kv.StorageDomain, append(f.contract[:], feeCap[:]...))
@@ -236,7 +238,7 @@ func TestBlockReadAheaderPreExecCreatesAtTxNonce(t *testing.T) {
 		GasPrice: *uint256.NewInt(1),
 	})
 	require.NoError(t, err)
-	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), types.Transactions{call, create}))
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), types.Transactions{call, create}, preExecWorkers))
 
 	sender := crypto.PubkeyToAddress(f.key.PublicKey)
 	atTxNonce, atParentNonce := types.CreateAddress(sender, 1), types.CreateAddress(sender, 0)
@@ -273,4 +275,27 @@ func TestBlockReadAheaderPreExecWalksStoragePathOfTxWrite(t *testing.T) {
 
 	contractHash := keccak.Sum256(f.contract[:])
 	require.Contains(t, reads, string(v3.StorageNodeKey(contractHash, nil, nil)), "the tx's SSTORE must walk the contract's storage path")
+}
+
+type countingRoDB struct {
+	kv.RoDB
+	begins atomic.Int32
+}
+
+func (d *countingRoDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	d.begins.Add(1)
+	return d.RoDB.BeginRo(ctx)
+}
+
+func TestBlockReadAheaderPreExecWorkers(t *testing.T) {
+	for _, tc := range []struct{ workers, want int }{{1, 1}, {8, 4}} {
+		f := newPreExecFixture(t, []byte{0x00})
+		txns := make(types.Transactions, 8)
+		for i := range txns {
+			txns[i] = f.txn(t, 100_000, 1)
+		}
+		db := &countingRoDB{RoDB: f.db}
+		require.NoError(t, f.readAheader.preExecTxns(t.Context(), db, f.header(), txns, tc.workers))
+		require.Equal(t, int32(min(tc.want, secp256k1.NumOfContexts())), db.begins.Load(), "workers=%d", tc.workers)
+	}
 }
