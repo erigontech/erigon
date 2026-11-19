@@ -7,8 +7,10 @@ status of Erigon per test label and QPS step, then, per test label and QPS step,
 p50, p95 and max latency of each client, followed by its rows by method (mixed, run with
 --verbose) or by subscription measure (eth_subscribe), when the reports have them.
 The fan-out measures of eth_subscribe (how long the node takes to send one notification
-to every connection) also get overview rows, one per client class when the pattern has them,
-since the latency of the test itself is mostly the block import time, the same for all clients.
+to every connection) and its vs newHeads measures (how long after the head a log or receipt
+of the block reaches the same connection) also get overview rows, one per client class when
+the pattern has them, since the latency of the test itself is mostly the block import time,
+the same for all clients.
 p50, p90 and p95 are the median over the repetitions, max is the worst one.
 HTTP is the share of requests answered with HTTP 200, RPC the share of requests
 answered with a result and no JSON-RPC error; both are the worst over the repetitions.
@@ -83,19 +85,20 @@ def load_apis(repetitions):
 
 
 def overview_results(results):
-    """Add to the results a test per fan-out measure, as "<label> <measure>", for the overview only."""
+    """Add to the results a test per fan-out or vs newHeads measure, as "<label> <measure>", for the overview only."""
     out = dict(results)
     for label, clients in results.items():
-        names = {n for steps in clients.values() for s in steps.values() for n in s.get("apis", {}) if "fan-out" in n}
+        names = {n for steps in clients.values() for s in steps.values() for n in s.get("apis", {})
+                 if "fan-out" in n or "vs newHeads" in n}
         for name in names:
             if any(other.startswith(name + " ") for other in names):
                 continue
-            out[f"{label} {name}"] = {c: {qps: fanout_step(s, name) for qps, s in steps.items()}
+            out[f"{label} {name}"] = {c: {qps: measure_step(s, name) for qps, s in steps.items()}
                                       for c, steps in clients.items()}
     return out
 
 
-def fanout_step(step, name):
+def measure_step(step, name):
     if is_failed(step):
         return step
     api = step.get("apis", {}).get(name)

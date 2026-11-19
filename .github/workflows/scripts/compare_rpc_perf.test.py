@@ -453,5 +453,24 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a dead client shows only the first line of its error",
           "| 500 | reth | dead: dial: bad handshake | | | | |" in details, details)
 
+# --- eth_subscribe: the vs newHeads rows get an overview row of their own --------
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "logs vs newHeads": api(1, 12, 20, 100, p90_ms=8),
+        "logs vs newHeads dapp": api(0.4, 12, 20, 60, p90_ms=8),
+        "transactionReceipts vs newHeads indexer": api(20, 40, 60, 10, p90_ms=30)})]}])
+    write_result(tmp, "geth", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "logs vs newHeads": api(0.2, 13, 20, 100, p90_ms=9),
+        "logs vs newHeads dapp": api(0.1, 13, 20, 60, p90_ms=9),
+        "transactionReceipts vs newHeads indexer": api(25, 45, 70, 10, p90_ms=35)})]}])
+    md = mod.render_overview(mod.overview_results(mod.load_results(tmp)), "p50")
+    check("a vs newHeads measure has its own overview row",
+          fanout_row(md, "eth_subscribe_classes logs vs newHeads dapp", "500") == ["500", "0.40", "0.10*", "🔴"], md)
+    check("the vs newHeads rows of every class are in the overview",
+          fanout_row(md, "eth_subscribe_classes transactionReceipts vs newHeads indexer", "500") == ["500", "20.00*", "25.00", "🟢"], md)
+    check("a vs newHeads measure with copies per class has no overview row of its own",
+          "eth_subscribe_classes logs vs newHeads 500" not in " ".join(md.split()), md)
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
