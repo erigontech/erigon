@@ -815,7 +815,7 @@ func TestEnumerateRecordChildrenRejectsUnsafeDepth(t *testing.T) {
 	var records []recordDelta
 	var err error
 	require.NotPanics(t, func() {
-		err = enumerateRecordChildren(nil, [32]byte{}, nil, data, 64, &records)
+		err = enumerateRecordChildren(t.Context(), nil, [32]byte{}, nil, data, 64, &records)
 	})
 	require.ErrorIs(t, err, ErrRecordRoot)
 }

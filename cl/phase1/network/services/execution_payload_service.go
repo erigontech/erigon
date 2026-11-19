@@ -327,6 +327,7 @@ func (s *executionPayloadService) processMessage(
 		return fmt.Errorf("%w: %w", forkchoice.ErrInvalidExecutionPayloadEnvelope, err)
 	}
 	s.forkchoiceStore.RecordExecutionPayloadArrival(beaconBlockRoot, envelope.Payload.SlotNumber, receivedAt)
+	s.emitters.NotifyEnvelopeArrived(beaconBlockRoot)
 	var importBytes int64
 	if preclaimedAdmission == nil {
 		importBytes = int64(signedEnvelope.EncodingSizeSSZ())

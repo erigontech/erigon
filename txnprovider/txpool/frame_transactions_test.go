@@ -1930,9 +1930,10 @@ func TestFramePoolReloadRestoresNonceChain(t *testing.T) {
 
 	restored, err := New(ctx, make(chan Announcements, 1), pool.poolDB, pool._chainDB,
 		pool.cfg, pool._stateCache, pool.chainConfig, nil, nil, func() {}, nil,
-		pool.ethBackend, log.New(), WithFeeCalculator(nil))
+		pool.ethBackend, log.New())
 	require.NoError(t, err)
 	restored.chainID.SetUint64(1)
+	require.NoError(t, restored.OnNewBlock(ctx, newBlockChangeForAccounts(pool.stateBlockHash, 0, sender), TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	require.NoError(t, restored.start(ctx))
 	for _, txn := range txns.Txns {
 		mt := restored.byHash[string(txn.IDHash[:])]

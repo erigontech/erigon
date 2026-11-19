@@ -436,3 +436,28 @@ func TestVerifyMultipleSignaturesRejectsDifferingLengths(t *testing.T) {
 	require.Error(t, err)
 	require.False(t, valid)
 }
+
+func TestVerifyMultipleSignaturesDecompressedReturnsTheVerifiedSignatures(t *testing.T) {
+	distinct := make([][]byte, 8)
+	for i := range distinct {
+		distinct[i] = []byte{byte(i)}
+	}
+	for name, messages := range map[string][][]byte{"grouped": {[]byte("a"), []byte("b")}, "distinct": distinct} {
+		t.Run(name, func(t *testing.T) {
+			sigs, msgs, pks := sharedMessageBatch(t, 8, messages...)
+			valid, decompressed, err := bls.VerifyMultipleSignaturesDecompressed(sigs, msgs, pks)
+			require.NoError(t, err)
+			require.True(t, valid)
+			require.Len(t, decompressed, len(sigs))
+			for i := range sigs {
+				require.Equal(t, sigs[i], decompressed[i].Bytes())
+			}
+
+			sigs[0], sigs[1] = sigs[1], sigs[0]
+			valid, decompressed, err = bls.VerifyMultipleSignaturesDecompressed(sigs, msgs, pks)
+			require.NoError(t, err)
+			require.False(t, valid)
+			require.Nil(t, decompressed)
+		})
+	}
+}

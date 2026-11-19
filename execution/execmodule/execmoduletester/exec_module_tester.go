@@ -710,7 +710,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			nil,
 			// txpool.WithP2PFetcherWg(&mock.ReceiveWg), // this seems unecessary now status changes are async
 			txpool.WithP2PSenderWg(nil),
-			txpool.WithFeeCalculator(nil),
 			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.Logger) (kv.RwDB, error) {
 				dbOpts := mdbx.New(dbcfg.TxPoolDB, logger)
 				if tb == nil {

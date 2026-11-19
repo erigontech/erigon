@@ -23,7 +23,7 @@ func TestGasSStoreDoesNotRefill(t *testing.T) {
 	require.NoError(t, ibs.SetState(accounts.ZeroAddress, accounts.ZeroKey, *uint256.NewInt(1)))
 	ibs.AddSlotToAccessList(accounts.ZeroAddress, accounts.ZeroKey)
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 200_000})
+	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 200_000})
 	defer evm.putCallContext(scope)
 	scope.cacheGen++
 	require.True(t, scope.useMdGas(params.StateGasPerStorageSet, mdgas.StateGas, nil, tracing.GasChangeIgnored))
@@ -53,7 +53,7 @@ func TestGasCallDoesNotCharge(t *testing.T) {
 			defer ibs.Close()
 			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 			initial := mdgas.MdGas{Execution: 500_000, State: params.StateGasNewAccount / 2}
-			scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, initial)
+			scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, initial)
 			defer evm.putCallContext(scope)
 			scope.cacheGen++
 			for range 4 {
@@ -88,7 +88,7 @@ func TestFrameCallDoesNotSpillStateGas(t *testing.T) {
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 	tx := &types.FrameTransaction{NonceKeys: nil, Frames: []types.Frame{{Limits: mdgas.MdGas{Execution: 500_000, State: params.StateGasNewAccount - 1}}}}
 	evm.FrameContext = ibs.NewFrameContext(tx, uint256.Int{})
-	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, tx.Frames[0].Limits)
+	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, tx.Frames[0].Limits)
 	defer evm.putCallContext(scope)
 	scope.cacheGen++
 	for range 4 {

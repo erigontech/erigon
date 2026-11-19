@@ -125,7 +125,7 @@ func materializeNode(path []byte, plane byte, spec *commitmenttest.RecordSpec) *
 }
 
 func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte, error) {
-	root, parts, err := runStorageTaskWithPlan(ctx, task, foldPlan{})
+	root, parts, err := runStorageTaskWithPlan(context.Background(), ctx, task, foldPlan{})
 	if err != nil {
 		return [32]byte{}, err
 	}

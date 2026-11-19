@@ -187,7 +187,7 @@ func TestStorageTransitions(t *testing.T) {
 			if live {
 				ops = append(ops[:1], put(slotPath(3, 5, 2), 2), ops[1])
 			}
-			root, parts, err := runStorageTaskWithPlan(ctx, storageTaskFor(addr, ops), foldPlan{})
+			root, parts, err := runStorageTaskWithPlan(t.Context(), ctx, storageTaskFor(addr, ops), foldPlan{})
 			require.NoError(t, err)
 			for _, part := range parts {
 				for _, delta := range part {
@@ -470,6 +470,54 @@ func TestScheduling(t *testing.T) {
 		require.ErrorIs(t, err, wantErr)
 		trie.Release()
 	})
+	t.Run("account_root_read_error_cancels_storage", func(t *testing.T) {
+		wantErr := errors.New("account root read failed")
+		trie := newFactoryTrie(2, failingReadContext{PatriciaContext: newShardedContext(), err: wantErr}, func(ctx context.Context) (commitment.PatriciaContext, func()) {
+			<-ctx.Done()
+			return nil, nil
+		})
+		feed := &commitment.Feed{Accounts: []commitment.FeedAccount{
+			{Hash: [32]byte{0x10}, Update: testAccountUpdate(commitmenttest.AccountValue{Nonce: 1}), Slots: []commitment.FeedSlot{{Hash: [32]byte{1}, Value: []byte{1}}}},
+		}}
+		done := make(chan error, 1)
+		go func() {
+			_, err := trie.ProcessFeed(t.Context(), feed, nil)
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, wantErr)
+		case <-time.After(5 * time.Second):
+			t.Fatal("ProcessFeed must cancel the storage phase on an account root read error")
+		}
+		trie.Release()
+	})
+	t.Run("account_plan_read_error_cancels_storage", func(t *testing.T) {
+		wantErr := errors.New("account child read failed")
+		seeded := newShardedContext()
+		runV3(t, seeded, v3Config{}, storage)
+		var reads atomic.Int32
+		main := failAfterReads{PatriciaContext: seeded, reads: &reads, after: 1, err: wantErr}
+		trie := newFactoryTrie(2, main, func(ctx context.Context) (commitment.PatriciaContext, func()) {
+			<-ctx.Done()
+			return nil, nil
+		})
+		feed := &commitment.Feed{Accounts: []commitment.FeedAccount{
+			{Hash: [32]byte{0x10}, Update: testAccountUpdate(commitmenttest.AccountValue{Nonce: 1}), Slots: []commitment.FeedSlot{{Hash: [32]byte{1}, Value: []byte{1}}}},
+		}}
+		done := make(chan error, 1)
+		go func() {
+			_, err := trie.ProcessFeed(t.Context(), feed, nil)
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, wantErr)
+		case <-time.After(5 * time.Second):
+			t.Fatal("ProcessFeed must cancel the storage phase on an account read error")
+		}
+		trie.Release()
+	})
 	t.Run("deferred_builds_worker_contexts", func(t *testing.T) {
 		_, _, calls := runV3(t, newShardedContext(), v3Config{deferred: true}, storage)
 		require.Greater(t, calls, int32(1), "deferred rounds must still build per-worker contexts for the storage phase")
@@ -542,7 +590,7 @@ func TestScheduling(t *testing.T) {
 		record, _, err := parallel.Branch(StorageNodeKey(addr, nil, nil))
 		require.NoError(t, err)
 		require.NotEmpty(t, (Record{data: record}).SelfExt())
-		want, _, err := runStorageTaskWithPlan(serial, task, foldPlan{})
+		want, _, err := runStorageTaskWithPlan(t.Context(), serial, task, foldPlan{})
 		require.NoError(t, err)
 		roots, parts := make([][32]byte, 1), make([]deltaParts, 1)
 		require.NoError(t, runStoragePhase(context.Background(), parallel, parallel.factory, []storageTask{task}, roots, parts, 2, defaultStorageFanOutMin, func(int) {}))
@@ -998,4 +1046,104 @@ func TestWipeRebuildKeepsRecordsEqualToTheWipedOnes(t *testing.T) {
 	for key, data := range before {
 		require.Equal(t, data, ctx.branches[key], "record %x", key)
 	}
+}
+
+type cancelAfterReads struct {
+	*mockContext
+	cancel context.CancelFunc
+	after  int
+}
+
+func (c cancelAfterReads) Branch(key []byte) ([]byte, kv.Step, error) {
+	if len(c.branchCalls) >= c.after {
+		c.cancel()
+	}
+	return c.mockContext.Branch(key)
+}
+
+// A storage task that is already running must stop soon after its phase is cancelled.
+func TestStorageTaskStopsOnCancel(t *testing.T) {
+	addr, fresh := [32]byte{0x42}, [32]byte{0x43}
+	ops := make([]commitmenttest.Op, 1<<16)
+	for i := range ops {
+		ops[i] = commitmenttest.Op{Key: commitmenttest.Path([]byte{byte(i >> 12), byte(i >> 8 & 15), byte(i >> 4 & 15), byte(i & 15)}, 1), Storage: []byte{byte(i) | 1}}
+	}
+	updated := slices.Clone(ops)
+	for i := range updated {
+		updated[i].Storage = []byte{byte(i>>8) | 1, 2}
+	}
+	for _, tc := range []struct {
+		name string
+		task func() storageTask
+	}{
+		{"wipe", func() storageTask { return storageTask{addrHash: addr, wipe: true} }},
+		{"update", func() storageTask { return storageTaskFor(addr, updated) }},
+		{"fresh insert", func() storageTask { return storageTaskFor(fresh, ops) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := newMockContext()
+			storageRound(t, ctx, addr, ops)
+			records := len(ctx.branches)
+			ctx.branchCalls = nil
+			runCtx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			err := runStoragePhase(runCtx, cancelAfterReads{ctx, cancel, 32}, nil, []storageTask{tc.task()}, make([][32]byte, 1), make([]deltaParts, 1), 1, 0, func(int) {})
+			require.ErrorIs(t, err, context.Canceled)
+			require.Less(t, len(ctx.branchCalls), records/4, "reads after cancellation")
+		})
+	}
+	for _, tc := range []struct {
+		name string
+		task storageTask
+	}{
+		{"fanned update", storageTaskFor(addr, updated)},
+		{"fanned fresh insert", storageTaskFor(fresh, ops)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := runner.NewMemory(runner.ContextSpec{})
+			storageRound(t, mem, addr, ops)
+			records := int32(len(mem.Records()))
+			runCtx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var reads atomic.Int32
+			counted := func(c commitment.PatriciaContext) commitment.PatriciaContext {
+				return cancelAfterSharedReads{PatriciaContext: c, reads: &reads, cancel: cancel, after: 32}
+			}
+			factory := func(ctx context.Context) (commitment.PatriciaContext, func()) {
+				c, cleanup := mem.Open(ctx)
+				return counted(c), cleanup
+			}
+			err := runStoragePhase(runCtx, counted(mem), factory, []storageTask{tc.task}, make([][32]byte, 1), make([]deltaParts, 1), 2, 1, func(int) {})
+			require.ErrorIs(t, err, context.Canceled)
+			require.Less(t, reads.Load(), records/4, "reads after cancellation")
+		})
+	}
+}
+
+type cancelAfterSharedReads struct {
+	commitment.PatriciaContext
+	reads  *atomic.Int32
+	cancel context.CancelFunc
+	after  int32
+}
+
+func (c cancelAfterSharedReads) Branch(key []byte) ([]byte, kv.Step, error) {
+	if c.reads.Add(1) > c.after {
+		c.cancel()
+	}
+	return c.PatriciaContext.Branch(key)
+}
+
+type failAfterReads struct {
+	commitment.PatriciaContext
+	reads *atomic.Int32
+	after int32
+	err   error
+}
+
+func (c failAfterReads) Branch(key []byte) ([]byte, kv.Step, error) {
+	if c.reads.Add(1) > c.after {
+		return nil, 0, c.err
+	}
+	return c.PatriciaContext.Branch(key)
 }

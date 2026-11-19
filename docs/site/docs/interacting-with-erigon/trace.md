@@ -180,8 +180,6 @@ A failure inside the EVM, such as a revert or an out-of-gas halt, is reported in
 | `--rpc.blockrange.limit` | `1000` | Maximum `toBlock - fromBlock` of a `trace_filter` range; `0` means no limit. |
 | `--trace.compat` | `false` | Bug-for-bug compatibility with OpenEthereum: the error of a root `create` frame is not reported, and `vmTrace` operations have no `op` member. |
 
-`--trace.maxtraces` is accepted but currently has no effect: `trace_filter` returns all matching records unless `count` limits them.
-
 ## JSON-RPC methods
 
 #### Ad-hoc Tracing

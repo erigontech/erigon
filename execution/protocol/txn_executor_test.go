@@ -135,6 +135,8 @@ func (r *codeAccessRecordingReader) OnCodeAccess(addr accounts.Address, _ []byte
 	r.accesses = append(r.accesses, addr)
 }
 
+func (*codeAccessRecordingReader) OnCodeChange(accounts.CodeHash) func() { return nil }
+
 type accountErrorReader struct {
 	state.StateReader
 	err error
