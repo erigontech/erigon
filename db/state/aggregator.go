@@ -2877,6 +2877,11 @@ func (at *AggregatorRoTx) PrefetchLatest(ctx context.Context, domain kv.Domain, 
 var prefetchMaxWaves = 64
 
 func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {
+	return firstColdPage(func() { _, _, _, _, _ = dt.lookupLatestFromFiles(k, nil, 0, false) })
+}
+
+// firstColdPage runs a probed read and reports the page where its ColdPage panic stopped it.
+func firstColdPage(read func()) (page uintptr, cold bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			p, ok := r.(mmap.ColdPage)
@@ -2886,7 +2891,7 @@ func probeLatestFromFiles(dt *DomainRoTx, k []byte) (page uintptr, cold bool) {
 			page, cold = uintptr(p), true
 		}
 	}()
-	_, _, _, _, _ = dt.lookupLatestFromFiles(k, nil, 0, false)
+	read()
 	return 0, false
 }
 

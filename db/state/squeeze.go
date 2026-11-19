@@ -358,19 +358,7 @@ func readReferencePages(branch commitment.BranchData, accounts, storage *seg.Rea
 func probeWordPage(r *seg.Reader, pr *mmap.Probe, offset uint64) (page uintptr, cold bool) {
 	r.SetProbe(pr)
 	defer r.SetProbe(nil)
-	defer func() {
-		if rec := recover(); rec != nil {
-			p, ok := rec.(mmap.ColdPage)
-			if !ok {
-				panic(rec)
-			}
-			page, cold = uintptr(p), true
-		}
-	}()
-	if offset < uint64(r.Size()) {
-		r.Reset(offset)
-	}
-	return 0, false
+	return firstColdPage(func() { r.Reset(offset) })
 }
 
 // ExpandShortenedKeysInBranch expands shortened key references (file offsets) in branch data back
