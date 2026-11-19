@@ -105,6 +105,8 @@ func (*balCommitmentContext) Storage([]byte) (*commitment.Update, error) {
 	return nil, errors.New("BAL commitment warmup does not read storage")
 }
 
+const warmupWarmCheckEvery = 512
+
 // warmBALCommitment warms the trie branches of keys, the BAL's balCommitmentWarmupKeys.
 func warmBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte, workers int) error {
 	if err := ctx.Err(); err != nil {
@@ -128,7 +130,11 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, keys [][]byte, workers i
 	})
 	warmuper.Start()
 	var previous []byte
-	for _, key := range keys {
+	for i, key := range keys {
+		// A warm trie answers every lookup from the branch cache: stop paying for lookups that fill nothing.
+		if i > 0 && i%warmupWarmCheckEvery == 0 && cacheStats.misses.Load() == 0 && cacheStats.hits.Load() > 0 {
+			break
+		}
 		startDepth := 0
 		for startDepth < min(len(previous), len(key)) && previous[startDepth] == key[startDepth] {
 			startDepth++
