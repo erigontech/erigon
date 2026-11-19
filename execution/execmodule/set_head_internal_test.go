@@ -112,36 +112,31 @@ func TestSetHeadFailedCommitPreservesPendingNotifications(t *testing.T) {
 func TestSetHeadClearsSafeAndFinalizedAboveTarget(t *testing.T) {
 	const target = 2
 	for _, tc := range []struct {
-		name                      string
-		head, safe, finalized     uint64
-		safeCleared, finalCleared bool
+		name                    string
+		head, safe, finalized   uint64
+		wantSafe, wantFinalized uint64 // 0: the marker is cleared
 	}{
-		{"both above", 4, 4, 3, true, true},
-		{"only safe above", 4, 3, 2, true, false},
-		{"both at or below", 4, 2, 1, false, false},
-		{"retry at the current head", target, 4, 3, true, true},
+		{"both above", 4, 4, 3, 0, 0},
+		{"only safe above", 4, 3, 2, 0, 2},
+		{"both at or below", 4, 2, 1, 2, 1},
+		{"retry at the current head", target, 4, 3, 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 			logger := log.New()
-			headers := make([]*types.Header, 5)
-			for n := uint64(1); n <= 4; n++ {
-				headers[n] = &types.Header{Number: *uint256.NewInt(n)}
-				if n > 1 {
-					headers[n].ParentHash = headers[n-1].Hash()
-				}
-			}
-			head := headers[tc.head]
+			var hashes [5]common.Hash // hashes[0] stays zero: a cleared marker
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-				for _, header := range headers[1:] {
+				for n := uint64(1); n <= 4; n++ {
+					header := &types.Header{Number: *uint256.NewInt(n), ParentHash: hashes[n-1]}
+					hashes[n] = header.Hash()
 					require.NoError(t, rawdb.WriteHeader(tx, header))
-					require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()))
+					require.NoError(t, rawdb.WriteCanonicalHash(tx, hashes[n], n))
 				}
-				rawdb.WriteHeadBlockHash(tx, head.Hash())
-				rawdb.WriteForkchoiceHead(tx, head.Hash())
-				rawdb.WriteForkchoiceSafe(tx, headers[tc.safe].Hash())
-				rawdb.WriteForkchoiceFinalized(tx, headers[tc.finalized].Hash())
-				return stages.SaveStageProgress(tx, stages.Headers, head.Number.Uint64())
+				rawdb.WriteHeadBlockHash(tx, hashes[tc.head])
+				rawdb.WriteForkchoiceHead(tx, hashes[tc.head])
+				rawdb.WriteForkchoiceSafe(tx, hashes[tc.safe])
+				rawdb.WriteForkchoiceFinalized(tx, hashes[tc.finalized])
+				return stages.SaveStageProgress(tx, stages.Headers, tc.head)
 			}))
 			sync := stagedsync.New(ethconfig.Sync{}, []*stagedsync.Stage{{
 				ID: stages.Headers,
@@ -158,15 +153,9 @@ func TestSetHeadClearsSafeAndFinalizedAboveTarget(t *testing.T) {
 			}
 
 			require.NoError(t, module.SetHead(t.Context(), target))
-			want := func(cleared bool, n uint64) common.Hash {
-				if cleared {
-					return common.Hash{}
-				}
-				return headers[n].Hash()
-			}
 			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
-				require.Equal(t, want(tc.safeCleared, tc.safe), rawdb.ReadForkchoiceSafe(tx))
-				require.Equal(t, want(tc.finalCleared, tc.finalized), rawdb.ReadForkchoiceFinalized(tx))
+				require.Equal(t, hashes[tc.wantSafe], rawdb.ReadForkchoiceSafe(tx))
+				require.Equal(t, hashes[tc.wantFinalized], rawdb.ReadForkchoiceFinalized(tx))
 				return nil
 			}))
 		})
