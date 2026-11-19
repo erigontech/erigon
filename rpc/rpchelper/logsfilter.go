@@ -281,9 +281,12 @@ func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.
 // distributeLog processes an event log and distributes it to all subscribed log filters.
 // It checks each filter to determine if the log should be sent based on the filter's address and topic settings.
 func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogsReply) {
+	a.distributeNativeLog(ethutils.RPCLogFromProto(eventLog))
+}
+
+func (a *LogsFilterAggregator) distributeNativeLog(lg *types.Log) {
 	// The same log instance is sent to every matching subscriber, each reading it from
 	// its own goroutine, so it must not be mutated after the first Send.
-	lg := ethutils.RPCLogFromProto(eventLog)
 	addr, topics := lg.Address, lg.Topics
 
 	a.logsFilterLock.RLock()
