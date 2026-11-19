@@ -70,10 +70,7 @@ type withdrawalBalanceDiff struct {
 }
 
 // Transaction implements trace_transaction
-func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
-	if gasBailOut == nil {
-		gasBailOut = new(bool) // false by default
-	}
+func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, traceConfig *config.TraceConfig) (ParityTraces, error) {
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -113,7 +110,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	bn := hexutil.Uint64(blockNumber)
 	hash := header.Hash()
 	// Returns an array of trace arrays, one trace array for each transaction
-	trace, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, *gasBailOut, chainConfig, traceConfig)
+	trace, err := api.callTransaction(ctx, tx, header, []string{TraceTypeTrace}, txIndex, chainConfig, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -133,8 +130,8 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 }
 
 // Get implements trace_get
-func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, traceAddress []hexutil.Uint64, gasBailOut *bool, traceConfig *config.TraceConfig) (*ParityTrace, error) {
-	traces, err := api.Transaction(ctx, txHash, gasBailOut, traceConfig)
+func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, traceAddress []hexutil.Uint64, traceConfig *config.TraceConfig) (*ParityTrace, error) {
+	traces, err := api.Transaction(ctx, txHash, traceConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -180,12 +177,9 @@ func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Addres
 }
 
 // Block implements trace_block
-func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
+func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, traceConfig *config.TraceConfig) (ParityTraces, error) {
 	if err := rejectPendingNumber(blockNr); err != nil {
 		return nil, err
-	}
-	if gasBailOut == nil {
-		gasBailOut = new(bool) // false by default
 	}
 	tx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
@@ -222,7 +216,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	var rewards []protocolrules.Reward
-	traces, wdiffs, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, *gasBailOut /* gasBailOut */, cfg, traceConfig,
+	traces, wdiffs, err := api.callBlock(ctx, tx, block, []string{TraceTypeTrace}, cfg, traceConfig,
 		func(syscall protocolrules.SystemCall) error {
 			var err error
 			rewards, err = api.engine().CalculateRewards(cfg, block.Header(), block.Uncles(), syscall)
@@ -302,7 +296,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // Filter implements trace_filter
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
-func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream *jsonstream.Stream) error {
+func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, traceConfig *config.TraceConfig, stream *jsonstream.Stream) error {
 	if req.BlockHash != nil && (req.FromBlock != nil || req.ToBlock != nil) {
 		return &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
 	}
@@ -315,10 +309,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		if err := rejectPendingNumber(*req.ToBlock); err != nil {
 			return err
 		}
-	}
-	if gasBailOut == nil {
-		//nolint
-		gasBailOut = new(bool) // false by default
 	}
 	dbtx, err1 := api.kv.BeginTemporalRo(ctx)
 	if err1 != nil {
@@ -364,7 +354,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		return err
 	}
 
-	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
+	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, traceConfig)
 }
 
 // resolveFilterBound resolves an explicit trace_filter bound. A bound past the
@@ -422,7 +412,7 @@ func callBlockError(err error, block rpc.BlockNumberOrHash) error {
 	return unknownBlockAsResourceNotFound(err)
 }
 
-func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsonstream.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
+func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsonstream.Stream, traceConfig *config.TraceConfig) error {
 	var fromTxNum, toTxNum uint64
 	var err error
 
@@ -546,7 +536,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if api.evmCallTimeout > 0 {
 			timer = time.AfterFunc(api.evmCallTimeout, evm.Cancel)
 		}
-		execResult, execErr := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
+		execResult, execErr := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if timer != nil {
 			timer.Stop()
 		}
@@ -731,7 +721,6 @@ func (api *TraceAPIImpl) callBlock(
 	dbtx kv.TemporalTx,
 	block *types.Block,
 	traceTypes []string,
-	gasBailOut bool,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
 	// withSyscall, when non-nil, runs against the block's state before it is
@@ -833,11 +822,11 @@ func (api *TraceAPIImpl) callBlock(
 	var traces []*TraceCallResult
 	cmErr := errNoReplayReadTx
 	if isHistoricalStateReader && !hasStateDiff && !hasVmTrace && len(txs) > 1 && !api.remoteBlocks {
-		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
+		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, traceConfig)
 	}
 	if errors.Is(cmErr, errNoReplayReadTx) {
 		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
-			header, true /* requireCanonical */, gasBailOut /* gasBailout */, true /* advanceTxNum */, false /* noBaseFee */, traceConfig, nil /* overrides */)
+			header, true /* requireCanonical */, true /* advanceTxNum */, false /* noBaseFee */, traceConfig, nil /* overrides */)
 	}
 
 	if cmErr != nil {
@@ -900,7 +889,6 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 	msgs []*types.Message,
 	callParams []TraceCallParam,
 	header *types.Header,
-	gasBailout bool,
 	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -961,7 +949,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				tracer.Hooks.OnTxStart(evm.GetVMContext(), txns[txIndex], msg.From())
 			}
 
-			execResult, execErr := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout, engine)
+			execResult, execErr := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 			if execErr != nil {
 				tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, execErr)
 				return fmt.Errorf("txIndex %d: %w", txIndex, execErr)
@@ -995,7 +983,6 @@ func (api *TraceAPIImpl) callTransaction(
 	header *types.Header,
 	traceTypes []string,
 	txIndex int,
-	gasBailOut bool,
 	cfg *chain.Config,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
@@ -1054,7 +1041,7 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	return api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txn, callParam,
-		header, true /* requireCanonical */, gasBailOut /* gasBailout */, txIndex, traceConfig)
+		header, true /* requireCanonical */, txIndex, traceConfig)
 }
 
 // TraceFilterRequest represents the arguments for trace_filter. As in

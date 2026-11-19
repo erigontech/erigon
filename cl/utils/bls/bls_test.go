@@ -348,3 +348,116 @@ func TestSignatureAggregatorRejectsMalformedSignature(t *testing.T) {
 	require.ErrorIs(t, aggregator.AddValidated(make([]byte, 96)), bls.ErrDeserializeSignature)
 	require.Error(t, aggregator.AddValidated(make([]byte, 95)))
 }
+
+// sharedMessageBatch returns n signatures where signer i signs messages[i%len(messages)], as gossip batches mostly do.
+func sharedMessageBatch(t *testing.T, n int, messages ...[]byte) (sigs, msgs, pks [][]byte) {
+	t.Helper()
+	_, publicKeys, _ := generateAggregateInputs(t, n)
+	for i := range n {
+		var ikm [32]byte
+		binary.LittleEndian.PutUint64(ikm[:], uint64(i+1))
+		privateKey, err := bls.NewPrivateKeyFromIKM(ikm[:])
+		require.NoError(t, err)
+		msg := messages[i%len(messages)]
+		sigs = append(sigs, privateKey.Sign(msg).Bytes())
+		msgs = append(msgs, msg)
+		pks = append(pks, publicKeys[i])
+	}
+	return sigs, msgs, pks
+}
+
+// notInG2Signature returns a point on the G2 curve outside the prime-order subgroup: nearly every curve point is.
+func notInG2Signature(t *testing.T) []byte {
+	t.Helper()
+	for x := range 256 {
+		compressed := make([]byte, 96)
+		compressed[0] = 0x80
+		compressed[95] = byte(x)
+		if point := new(blst.P2Affine).Uncompress(compressed); point != nil {
+			require.False(t, point.InG2())
+			return compressed
+		}
+	}
+	t.Fatal("no curve point found")
+	return nil
+}
+
+func TestVerifyMultipleSignaturesSharedMessages(t *testing.T) {
+	first, second := []byte("first message"), []byte("second message")
+	sigs, msgs, pks := sharedMessageBatch(t, 8, first, second)
+
+	valid, err := bls.VerifyMultipleSignatures(sigs, msgs, pks)
+	require.NoError(t, err)
+	require.True(t, valid)
+}
+
+// Signers of the same message can swap their signatures without changing the plain sum, so only the random
+// weights catch it.
+func TestVerifyMultipleSignaturesRejectsSwappedSignaturesOfOneMessage(t *testing.T) {
+	sigs, msgs, pks := sharedMessageBatch(t, 4, []byte("shared message"))
+	sigs[0], sigs[1] = sigs[1], sigs[0]
+
+	valid, err := bls.VerifyMultipleSignatures(sigs, msgs, pks)
+	require.NoError(t, err)
+	require.False(t, valid)
+}
+
+func TestVerifyMultipleSignaturesRejectsOneBadSignatureInAGroup(t *testing.T) {
+	sigs, msgs, pks := sharedMessageBatch(t, 6, []byte("first message"), []byte("second message"))
+	sigs[3] = negativeSignature(t, sigs[3])
+
+	valid, err := bls.VerifyMultipleSignatures(sigs, msgs, pks)
+	require.NoError(t, err)
+	require.False(t, valid)
+}
+
+func TestVerifyMultipleSignaturesRejectsSignatureOutsideG2(t *testing.T) {
+	sigs, msgs, pks := sharedMessageBatch(t, 4, []byte("shared message"))
+	sigs[2] = notInG2Signature(t)
+
+	valid, err := bls.VerifyMultipleSignatures(sigs, msgs, pks)
+	require.NoError(t, err)
+	require.False(t, valid)
+}
+
+func TestVerifyMultipleSignaturesRejectsInfiniteSignatureInAGroup(t *testing.T) {
+	sigs, msgs, pks := sharedMessageBatch(t, 4, []byte("shared message"))
+	sigs[1] = bls.InfiniteSignature[:]
+
+	valid, err := bls.VerifyMultipleSignatures(sigs, msgs, pks)
+	require.NoError(t, err)
+	require.False(t, valid)
+}
+
+func TestVerifyMultipleSignaturesRejectsDifferingLengths(t *testing.T) {
+	sigs, msgs, pks := sharedMessageBatch(t, 4, []byte("shared message"))
+
+	valid, err := bls.VerifyMultipleSignatures(sigs, msgs[:3], pks)
+	require.Error(t, err)
+	require.False(t, valid)
+}
+
+func TestVerifyMultipleSignaturesDecompressedReturnsTheVerifiedSignatures(t *testing.T) {
+	distinct := make([][]byte, 8)
+	for i := range distinct {
+		distinct[i] = []byte{byte(i)}
+	}
+	for name, messages := range map[string][][]byte{"grouped": {[]byte("a"), []byte("b")}, "distinct": distinct} {
+		t.Run(name, func(t *testing.T) {
+			sigs, msgs, pks := sharedMessageBatch(t, 8, messages...)
+			valid, decompressed, err := bls.VerifyMultipleSignaturesDecompressed(sigs, msgs, pks)
+			require.NoError(t, err)
+			require.True(t, valid)
+			require.Len(t, decompressed, len(sigs))
+			for i := range sigs {
+				require.Equal(t, sigs[i], decompressed[i].Bytes())
+			}
+
+			sigs[0], sigs[1] = sigs[1], sigs[0]
+			valid, decompressed, err = bls.VerifyMultipleSignaturesDecompressed(sigs, msgs, pks)
+			require.NoError(t, err)
+			require.False(t, valid)
+			require.Nil(t, decompressed)
+		})
+	}
+}

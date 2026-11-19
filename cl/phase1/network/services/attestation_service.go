@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -369,7 +370,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			if err != nil {
 				return err
 			}
-			valid, err := blsVerifyMultipleSignatures(
+			valid, _, err := blsVerifyMultipleSignatures(
 				[][]byte{signature[:]},
 				[][]byte{signingRoot[:]},
 				[][]byte{pubKey[:]},
@@ -489,9 +490,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		SignRoots:   [][]byte{signingRoot[:]},
 		Pks:         [][]byte{pubKey[:]},
 		SendingPeer: att.Receiver,
-		F: func() {
-			s.onVerifiedAttestation(vIndex, targetEpoch, attestation, att)
-		},
+	}
+	aggregateVerificationData.F = func() {
+		s.onVerifiedAttestation(vIndex, targetEpoch, attestation, att, aggregateVerificationData.VerifiedSignature(0))
 	}
 
 	if att.ImmediateProcess {
@@ -510,7 +511,7 @@ func contains[T comparable](target T, slices []T) int {
 	return -1
 }
 
-func (s *attestationService) onVerifiedAttestation(vIndex, targetEpoch uint64, attestation *solid.Attestation, att *AttestationForGossip) {
+func (s *attestationService) onVerifiedAttestation(vIndex, targetEpoch uint64, attestation *solid.Attestation, att *AttestationForGossip, sig *bls.Signature) {
 	start := time.Now()
 	defer monitor.ObserveAggregateAttestation(start)
 	// Claimed only now: a message dropped before its signature was
@@ -518,7 +519,7 @@ func (s *attestationService) onVerifiedAttestation(vIndex, targetEpoch uint64, a
 	if !s.validatorVotes.claim(vIndex, targetEpoch) {
 		return
 	}
-	if err := s.aggregationPool.AddAttestation(attestation); errors.Is(err, aggregation.ErrPoolLimit) || errors.Is(err, aggregation.ErrVoterAlreadyCounted) {
+	if err := s.aggregationPool.AddVerifiedAttestation(attestation, sig); errors.Is(err, aggregation.ErrPoolLimit) || errors.Is(err, aggregation.ErrVoterAlreadyCounted) {
 		dataRoot, _ := attestation.Data.HashSSZ()
 		log.Debug("aggregation pool refused attestation", "slot", attestation.Data.Slot,
 			"committees", attestation.CommitteeBits.GetOnIndices(), "dataRoot", common.Hash(dataRoot), "err", err)

@@ -375,7 +375,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		if err != nil {
 			return nil, err
 		}
-		transactions.VersionedBlockState(genEnv.ibs)
 
 		minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
@@ -420,7 +419,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		if err != nil {
 			return nil, err
 		}
-		transactions.VersionedCallState(genEnv.ibs)
+		genEnv.ibs.SetNoConflictDetection()
 		stateWriter = genEnv.noopWriter
 	}
 
@@ -447,7 +446,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			if err != nil {
 				return nil, err
 			}
-			written.touchAll()
+			if err := written.touchAll(); err != nil {
+				return nil, err
+			}
 			stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipt", nil)
 			if err != nil {
 				return nil, err
@@ -499,7 +500,12 @@ func PostStateCalculated(cfg *chain.Config, blockNum uint64, commitmentHistoryEn
 	return observed && frozen == 0
 }
 
-func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (_ types.Receipts, err error) {
+func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (types.Receipts, error) {
+	return g.GetReceiptsPrefetched(ctx, cfg, tx, block, opts, nil)
+}
+
+// GetReceiptsPrefetched is GetReceipts that takes the persisted receipts from prefetch when it has them.
+func (g *Generator) GetReceiptsPrefetched(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts, prefetch *ReceiptsPrefetch) (_ types.Receipts, err error) {
 	tx = g.filters.WithTemporalOverlay(tx)
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
@@ -540,7 +546,10 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	// If/when receipts are saved to the DB *with* the `postState` field,
 	// this check on `calculatePostState` should be removed to utilize the stored receipt.
 	if !rpcDisableRCache && !calculatePostState {
-		receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
+		receiptsFromDB = prefetch.Receipts(block)
+		if len(receiptsFromDB) == 0 {
+			receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -570,7 +579,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	if !calculatePostState {
 		// Fast path (post-Byzantium): use the shared derivation package.
 		// DeriveBlockReceipts sets BlockHash and FirstLogIndexWithinBlock.
-		transactions.VersionedBlockState(genEnv.ibs)
 		receipts, err = sharedreceipts.DeriveBlockReceipts(ctx, cfg, g.engine, block.HeaderNoCopy(), block.Transactions(), genEnv.ibs, genEnv.gp, genEnv.getHeader)
 		if err != nil {
 			return nil, err
@@ -618,7 +626,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			stateWriter = genEnv.noopWriter
 		}
 
-		transactions.VersionedBlockState(genEnv.ibs)
 		for i, txn := range block.Transactions() {
 			select {
 			case <-ctx.Done():
@@ -651,7 +658,9 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 				if err != nil {
 					return nil, err
 				}
-				written.touchAll()
+				if err := written.touchAll(); err != nil {
+					return nil, err
+				}
 				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipts", nil)
 				if err != nil {
 					return nil, err
@@ -810,17 +819,17 @@ type blockWrites struct {
 	sd         *execctx.SharedDomains
 	tx         kv.TemporalTx
 	blockStart uint64
-	keys       map[kv.Domain]map[string]struct{}
+	keys       map[string]struct{}
 	scanned    map[string]struct{}
 }
 
 func (w *blockWrites) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
-	w.record(domain, k)
+	w.record(k)
 	return w.TemporalPutDel.DomainPut(domain, k, v, txNum, prevVal)
 }
 
 func (w *blockWrites) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
-	w.record(domain, k)
+	w.record(k)
 	if domain == kv.AccountsDomain {
 		if err := w.recordStorageDeleted(k); err != nil {
 			return err
@@ -864,28 +873,26 @@ func (w *blockWrites) recordStorageDeleted(addr []byte) error {
 			return err
 		}
 		if len(v) > 0 {
-			w.record(kv.StorageDomain, k)
+			w.record(k)
 		}
 	}
 	return nil
 }
 
-func (w *blockWrites) record(domain kv.Domain, k []byte) {
+func (w *blockWrites) record(k []byte) {
 	if w.keys == nil {
-		w.keys = map[kv.Domain]map[string]struct{}{}
+		w.keys = map[string]struct{}{}
 	}
-	if w.keys[domain] == nil {
-		w.keys[domain] = map[string]struct{}{}
-	}
-	w.keys[domain][string(k)] = struct{}{}
+	w.keys[string(k)] = struct{}{}
 }
 
-func (w *blockWrites) touchAll() {
-	for domain, keys := range w.keys {
-		for k := range keys {
-			w.sd.GetCommitmentContext().TouchKey(domain, k, nil)
+func (w *blockWrites) touchAll() error {
+	for k := range w.keys {
+		if err := w.sd.GetCommitmentContext().TouchKeyFromState(w.tx, []byte(k)); err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
 // applyCancellable runs apply with the EVM wired to ctx: a cancelled context aborts it

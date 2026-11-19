@@ -470,13 +470,13 @@ func TestStoreDataColumnSidecarsWritesNothingWhenALaterSidecarIsInvalid(t *testi
 var errInjectedColumnFsFailure = errors.New("injected column filesystem failure")
 
 // faultyColumnFs fails the failRenameAt-th Rename once, and every Create of a path ending in
-// failCreateSuffix.
+// one of failCreateSuffixes.
 type faultyColumnFs struct {
 	afero.Fs
-	renames          atomic.Int32
-	createFailures   atomic.Int32
-	failRenameAt     int32
-	failCreateSuffix string
+	renames            atomic.Int32
+	createFailures     atomic.Int32
+	failRenameAt       int32
+	failCreateSuffixes []string
 }
 
 func (f *faultyColumnFs) Rename(oldname, newname string) error {
@@ -487,7 +487,7 @@ func (f *faultyColumnFs) Rename(oldname, newname string) error {
 }
 
 func (f *faultyColumnFs) Create(name string) (afero.File, error) {
-	if f.failCreateSuffix != "" && strings.HasSuffix(name, f.failCreateSuffix) {
+	if slices.ContainsFunc(f.failCreateSuffixes, func(suffix string) bool { return strings.HasSuffix(name, suffix) }) {
 		return nil, fmt.Errorf("%w: create failure %d", errInjectedColumnFsFailure, f.createFailures.Add(1))
 	}
 	return f.Fs.Create(name)
@@ -546,7 +546,7 @@ func testColumnSidecars(slot uint64, count uint64) []*cltypes.DataColumnSidecar 
 func TestStoreDataColumnSidecarsKeepsEveryColumnWhenTheBatchRenameFailsOnce(t *testing.T) {
 	const slot, columns = 1000, 8
 	root := common.Hash{1}
-	f := newRealColumnStoreFixture(t, &faultyColumnFs{Fs: afero.NewMemMapFs(), failRenameAt: columns / 2})
+	f := newRealColumnStoreFixture(t, &faultyColumnFs{Fs: afero.NewMemMapFs(), failRenameAt: 1})
 
 	require.NoError(t, f.handler.storeDataColumnSidecars(t.Context(), slot, root, testColumnSidecars(slot, columns)))
 
@@ -569,7 +569,7 @@ func TestStoreDataColumnSidecarsKeepsEveryColumnWhenTheBatchRenameFailsOnce(t *t
 func TestStoreDataColumnSidecarsReturnsTheWriteErrorAfterTheStoredPrefix(t *testing.T) {
 	const slot, columns, failingColumn = 1000, 8, 5
 	root := common.Hash{1}
-	f := newRealColumnStoreFixture(t, &faultyColumnFs{Fs: afero.NewMemMapFs(), failCreateSuffix: fmt.Sprintf("_%d.tmp", failingColumn)})
+	f := newRealColumnStoreFixture(t, &faultyColumnFs{Fs: afero.NewMemMapFs(), failCreateSuffixes: []string{".pack.tmp", fmt.Sprintf("_%d.tmp", failingColumn)}})
 
 	err := f.handler.storeDataColumnSidecars(t.Context(), slot, root, testColumnSidecars(slot, columns))
 
@@ -6216,26 +6216,28 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 	}
 
 	t.Run("falls back after cap and memoizes wait", func(t *testing.T) {
-		handler, fcu, slot, produceCalls := setup(t)
-		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
-			return forkchoice.ForkChoiceNode{}, false
-		}
+		synctest.Test(t, func(t *testing.T) {
+			handler, fcu, slot, produceCalls := setup(t)
+			fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+				return forkchoice.ForkChoiceNode{}, false
+			}
 
-		start := time.Now()
-		status, data := requestAttestationData(t, handler, t.Context(), slot)
-		elapsed := time.Since(start)
-		require.Equal(t, http.StatusOK, status)
-		require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
-		require.GreaterOrEqual(t, elapsed, waitCap)
-		require.Less(t, elapsed, 2*waitCap+25*time.Millisecond)
-		require.Equal(t, 1, *produceCalls)
+			start := time.Now()
+			status, data := requestAttestationData(t, handler, t.Context(), slot)
+			elapsed := time.Since(start)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
+			require.GreaterOrEqual(t, elapsed, waitCap)
+			require.Less(t, elapsed, 2*waitCap+25*time.Millisecond)
+			require.Equal(t, 1, *produceCalls)
 
-		start = time.Now()
-		status, data = requestAttestationData(t, handler, t.Context(), slot)
-		require.Equal(t, http.StatusOK, status)
-		require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
-		require.Less(t, time.Since(start), waitCap)
-		require.Equal(t, 2, *produceCalls)
+			start = time.Now()
+			status, data = requestAttestationData(t, handler, t.Context(), slot)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, fallbackRoot, data.BeaconBlockRoot)
+			require.Less(t, time.Since(start), waitCap)
+			require.Equal(t, 2, *produceCalls)
+		})
 	})
 
 	t.Run("cached fallback does not read state", func(t *testing.T) {
@@ -6263,38 +6265,42 @@ func TestGetEthV1ValidatorAttestationDataHeadLockBusy(t *testing.T) {
 	})
 
 	t.Run("uses fork choice when lock becomes free", func(t *testing.T) {
-		handler, fcu, slot, produceCalls := setup(t)
-		handler.attestationDataImportWait = defaultAttestationDataImportWait
-		var attempts atomic.Int64
-		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
-			return forkchoice.ForkChoiceNode{Root: forkChoiceRoot}, attempts.Add(1) >= 4
-		}
-		fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
-			return solid.AttestationData{Slot: slot, BeaconBlockRoot: headRoot}, true
-		}
+		synctest.Test(t, func(t *testing.T) {
+			handler, fcu, slot, produceCalls := setup(t)
+			handler.attestationDataImportWait = defaultAttestationDataImportWait
+			var attempts atomic.Int64
+			fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+				return forkchoice.ForkChoiceNode{Root: forkChoiceRoot}, attempts.Add(1) >= 4
+			}
+			fcu.AttestationDataFn = func(headRoot common.Hash, slot uint64) (solid.AttestationData, bool) {
+				return solid.AttestationData{Slot: slot, BeaconBlockRoot: headRoot}, true
+			}
 
-		start := time.Now()
-		status, data := requestAttestationData(t, handler, t.Context(), slot)
-		elapsed := time.Since(start)
-		require.Equal(t, http.StatusOK, status)
-		require.Equal(t, forkChoiceRoot, data.BeaconBlockRoot)
-		require.GreaterOrEqual(t, elapsed, 2*attestationDataImportPollInterval)
-		require.Less(t, elapsed, defaultAttestationDataImportWait/2)
-		require.Zero(t, *produceCalls)
+			start := time.Now()
+			status, data := requestAttestationData(t, handler, t.Context(), slot)
+			elapsed := time.Since(start)
+			require.Equal(t, http.StatusOK, status)
+			require.Equal(t, forkChoiceRoot, data.BeaconBlockRoot)
+			require.GreaterOrEqual(t, elapsed, 2*attestationDataImportPollInterval)
+			require.Less(t, elapsed, defaultAttestationDataImportWait/2)
+			require.Zero(t, *produceCalls)
+		})
 	})
 
 	t.Run("request cancellation stops the wait", func(t *testing.T) {
-		handler, fcu, slot, _ := setup(t)
-		fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
-			return forkchoice.ForkChoiceNode{}, false
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		time.AfterFunc(15*time.Millisecond, cancel)
+		synctest.Test(t, func(t *testing.T) {
+			handler, fcu, slot, _ := setup(t)
+			fcu.TryGetHeadNodeFn = func() (forkchoice.ForkChoiceNode, bool) {
+				return forkchoice.ForkChoiceNode{}, false
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			time.AfterFunc(15*time.Millisecond, cancel)
 
-		start := time.Now()
-		status, _ := requestAttestationData(t, handler, ctx, slot)
-		require.Equal(t, http.StatusInternalServerError, status)
-		require.Less(t, time.Since(start), waitCap)
+			start := time.Now()
+			status, _ := requestAttestationData(t, handler, ctx, slot)
+			require.Equal(t, http.StatusInternalServerError, status)
+			require.Less(t, time.Since(start), waitCap)
+		})
 	})
 }
 

@@ -846,7 +846,7 @@ func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step 
 			domainRoTx := d.beginForTests()
 			defer domainRoTx.Close()
 			r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan, maxSpan)
-			if !r.any() {
+			if !r.any() || contiguousEnd(domainRoTx.ht.files) < domainRoTx.ht.files.EndTxNum() { // the fixture skips steps: no merge across them
 				return true
 			}
 			valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
@@ -942,7 +942,7 @@ func TestDomain_ScanFiles(t *testing.T) {
 }
 
 func TestCommitmentKvWriteVersion(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	logger := log.New()
 	_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
 
@@ -964,7 +964,7 @@ func TestNonCommitmentKvWriteVersionUsesCurrent(t *testing.T) {
 }
 
 func TestCommitmentKvVersionAcceptance(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	vers := statecfg.Schema.CommitmentDomain.FileVersion.DataKV
 	require.True(t, vers.Supports(version.V2_0))
 	require.True(t, vers.Supports(version.V2_1))
@@ -4322,6 +4322,89 @@ func TestDefaultExistenceFilterModeOffloadsBelow20GiB(t *testing.T) {
 	} {
 		require.Equal(t, tc.want, defaultExistenceFilterMode(tc.mode, tc.total), "mode %d total %d", tc.mode, tc.total)
 	}
+}
+
+var (
+	equalHashSalt = uint32(0x34e93639)
+	equalHashKeyA = common.FromHex("0x1111111111111111111111111111111111111111" + "0000000000000000000000000000000000000000000000000000000000000001")
+	equalHashKeyB = common.FromHex("0x1111111111111111111111111111111111111111" + "a5a5a5a5a5a5a5a5a5a5a5a5f61ef864ba9c0d52e0955981d75680a900000001")
+)
+
+// storageDomainTxWithFileKey returns a read tx over a storage domain whose only file holds k=v at txNum 1.
+func storageDomainTxWithFileKey(tb testing.TB, salt uint32, k, v []byte) *DomainRoTx {
+	tb.Helper()
+	db, d := testDbAndDomainOfStep(tb, statecfg.Schema.StorageDomain, 16, log.New())
+	d.salt.Store(&salt)
+	tx, err := db.BeginRw(tb.Context())
+	require.NoError(tb, err)
+	defer tx.Rollback()
+	domainTx := d.beginForTests()
+	writer := domainTx.NewWriter(db)
+	require.NoError(tb, writer.PutWithPrev(k, v, 1, nil))
+	require.NoError(tb, writer.Flush(tb.Context(), tx))
+	writer.Close()
+	domainTx.Close()
+	require.NoError(tb, d.collateBuildIntegrate(tb.Context(), 0, tx, background.NewProgressSet()))
+	domainTx = d.beginForTests()
+	tb.Cleanup(domainTx.Close)
+	return domainTx
+}
+
+func TestDomainFileCacheDistinctKeysWithEqualHashDoNotAlias(t *testing.T) {
+	t.Parallel()
+
+	keyA, keyB, valA := equalHashKeyA, equalHashKeyB, common.FromHex("0xdeadbeef")
+	hiA, loA := murmur3.Sum128WithSeed(keyA, equalHashSalt)
+	hiB, loB := murmur3.Sum128WithSeed(keyB, equalHashSalt)
+	require.Equal(t, [2]uint64{hiA, loA}, [2]uint64{hiB, loB})
+
+	newDomainTx := func(t *testing.T) *DomainRoTx { return storageDomainTxWithFileKey(t, equalHashSalt, keyA, valA) }
+	requireLatest := func(t *testing.T, dt *DomainRoTx, k, want []byte, wantFound bool) {
+		t.Helper()
+		v, found, _, _, err := dt.getLatestFromFiles(k, nil, kv.NoStepBound)
+		require.NoError(t, err)
+		require.Equal(t, wantFound, found)
+		require.Equal(t, want, v)
+	}
+
+	t.Run("A then B", func(t *testing.T) {
+		dt := newDomainTx(t)
+		requireLatest(t, dt, keyA, valA, true)
+		requireLatest(t, dt, keyB, nil, false)
+	})
+	t.Run("B then A", func(t *testing.T) {
+		dt := newDomainTx(t)
+		requireLatest(t, dt, keyB, nil, false)
+		requireLatest(t, dt, keyA, valA, true)
+	})
+	t.Run("value size", func(t *testing.T) {
+		dt := newDomainTx(t)
+		requireLatest(t, dt, keyA, valA, true)
+		size, found, err := dt.getLatestFromFilesValSize(keyB, 0)
+		require.NoError(t, err)
+		require.False(t, found)
+		require.Zero(t, size)
+	})
+	t.Run("history seek", func(t *testing.T) {
+		dt := newDomainTx(t)
+		found, res, err := dt.ht.iit.seekInFiles(keyA, 0)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, uint64(1), res.txNum)
+		found, _, err = dt.ht.iit.seekInFiles(keyB, 0)
+		require.NoError(t, err)
+		require.False(t, found)
+	})
+	t.Run("history seek, miss first", func(t *testing.T) {
+		dt := newDomainTx(t)
+		found, _, err := dt.ht.iit.seekInFiles(keyB, 0)
+		require.NoError(t, err)
+		require.False(t, found)
+		found, res, err := dt.ht.iit.seekInFiles(keyA, 0)
+		require.NoError(t, err)
+		require.True(t, found, "a cached miss of an equal-hash key must not hide a present key")
+		require.Equal(t, uint64(1), res.txNum)
+	})
 }
 
 func TestDomain_MayContainInFilesUsesExistenceFilters(t *testing.T) {

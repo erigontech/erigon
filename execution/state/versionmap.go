@@ -443,26 +443,43 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 	return vm
 }
 
-// seededStorage returns the value the access list seeds for addr's slot key at txIdx. The access
-// list is validated, so its accounts, slots and changes are in increasing order.
-func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, bool) {
+// balAccount returns the access list's changes of addr. The access list is validated, so its
+// accounts, slots and changes are in increasing order.
+func (vm *VersionMap) balAccount(addr accounts.Address) *types.AccountChanges {
 	address := addr.Value()
 	i := sort.Search(len(vm.bal), func(i int) bool { return bytes.Compare(vm.bal[i].Address[:], address[:]) >= 0 })
 	if i == len(vm.bal) || vm.bal[i].Address != address {
+		return nil
+	}
+	return &vm.bal[i]
+}
+
+// balChangeAt returns the change in changes that the access list seeds at txIdx.
+func balChangeAt[C any](changes []*C, index func(*C) uint32, txIdx int) (*C, bool) {
+	want := uint32(txIdx + 1)
+	k := sort.Search(len(changes), func(k int) bool { return index(changes[k]) >= want })
+	if k == len(changes) || index(changes[k]) != want {
+		return nil, false
+	}
+	return changes[k], true
+}
+
+// seededStorage returns the value the access list seeds for addr's slot key at txIdx.
+func (vm *VersionMap) seededStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, bool) {
+	ac := vm.balAccount(addr)
+	if ac == nil {
 		return uint256.Int{}, false
 	}
-	slots := vm.bal[i].StorageChanges
+	slots := ac.StorageChanges
 	j := sort.Search(len(slots), func(j int) bool { return slots[j].Slot.Cmp(key) >= 0 })
 	if j == len(slots) || slots[j].Slot.Cmp(key) != 0 {
 		return uint256.Int{}, false
 	}
-	changes := slots[j].Changes
-	index := uint32(txIdx + 1)
-	k := sort.Search(len(changes), func(k int) bool { return changes[k].Index >= index })
-	if k == len(changes) || changes[k].Index != index {
+	c, ok := balChangeAt(slots[j].Changes, func(c *types.StorageChange) uint32 { return c.Index }, txIdx)
+	if !ok {
 		return uint256.Int{}, false
 	}
-	return changes[k].Value, true
+	return c.Value, true
 }
 
 // hasNoCells reports whether no tx wrote a cell of path, a lifecycle cell or an address cell of addr.
@@ -898,6 +915,11 @@ type lifecycleVerdict struct {
 	canonicalVer Version
 	destroyedAt  int
 	wipeInc      Incarnation
+	// createdAt is the latest contract creation below the read, or UnknownDep. A creation
+	// replaces the account's storage without writing the old slots. createInc is -1 while
+	// the creation is in flight.
+	createdAt int
+	createInc Incarnation
 }
 
 // readFloorLife is readFloor that also returns the account lifecycle verdict,
@@ -908,6 +930,7 @@ func readFloorLife[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel 
 	res.depIdx = UnknownDep
 	res.incarnation = -1
 	life.state = LifecycleLive
+	life.createdAt = UnknownDep
 	if vm == nil {
 		return val, res, false, life
 	}
@@ -918,6 +941,12 @@ func readFloorLife[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel 
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	life.state, life.canonicalVer, life.destroyedAt, life.wipeInc = accountLifecycleLocked(e, txIdx, false)
+	if fk, fv := floorCell(e.CreateContract, txIdx); fv != nil && fv.Value {
+		life.createdAt, life.createInc = fk, -1
+		if fv.settled() {
+			life.createInc = fv.loadInc()
+		}
+	}
 	cells := sel(e)
 	if cells == nil {
 		return val, res, false, life
@@ -1603,14 +1632,8 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 					if cells := e.Storage[key]; cells != nil {
 						if c, ok := cells.Get(vw.Version.TxIndex); ok && c.loadFlag() != FlagDone {
 							if seed, seeded := vm.seededStorage(addr, key, vw.Version.TxIndex); seeded {
-								// As in flushCell, a changed value needs a new version, so that the
-								// readers of the earlier value are invalidated.
-								inc := c.loadInc()
-								if !c.Value.Eq(&seed) {
-									inc = vw.Version.Incarnation
-								}
-								c.Value, c.valStatus = seed, ValueChanged
-								c.setState(inc, FlagDone)
+								stamped := true // the flush is stamped already
+								resetCell(vm, cells, vw.Version, seed, eqUint256, &stamped)
 							} else if c.setFlagUnlessDone(flagDeleted) {
 								cells.Delete(vw.Version.TxIndex)
 							}
@@ -1901,6 +1924,91 @@ func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accoun
 	}
 }
 
+// DropWrite removes the cell of a write that an earlier run of the tx at v.TxIndex made and its run at v
+// does not make. A value the access list seeds there is put back as Done instead: before the seal, a
+// reader takes a seeded cell as the tx's final write and validation trusts it.
+func (vm *VersionMap) DropWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version) {
+	if vm.HasBAL && vm.resetToSeed(addr, path, key, v) {
+		return
+	}
+	vm.Delete(addr, path, key, v.TxIndex, false)
+}
+
+// resetToSeed puts the value the access list seeds for addr's path at v.TxIndex back into the cell
+// there, and reports whether the access list seeds it.
+func (vm *VersionMap) resetToSeed(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version) bool {
+	ac := vm.balAccount(addr)
+	e := vm.load(addr)
+	if ac == nil || e == nil {
+		return false
+	}
+	vm.assertUnsealed(v.TxIndex, addr, path, key)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var stamped bool
+	defer vm.endDeleteStamp(v.TxIndex, &stamped)
+	switch path {
+	case BalancePath:
+		c, ok := balChangeAt(ac.BalanceChanges, func(c *types.BalanceChange) uint32 { return c.Index }, v.TxIndex)
+		if !ok {
+			return false
+		}
+		resetCell(vm, e.Balance, v, c.Value, eqUint256, &stamped)
+	case NoncePath:
+		c, ok := balChangeAt(ac.NonceChanges, func(c *types.NonceChange) uint32 { return c.Index }, v.TxIndex)
+		if !ok {
+			return false
+		}
+		resetCell(vm, e.Nonce, v, c.Value, eqUint64, &stamped)
+	case CodePath, CodeHashPath, CodeSizePath:
+		c, ok := balChangeAt(ac.CodeChanges, func(c *types.CodeChange) uint32 { return c.Index }, v.TxIndex)
+		if !ok {
+			return false
+		}
+		code := accounts.NewCode(c.Bytecode)
+		switch path {
+		case CodePath:
+			resetCell(vm, e.Code, v, code, eqCode, &stamped)
+		case CodeHashPath:
+			resetCell(vm, e.CodeHash, v, code.Hash, eqCodeHash, &stamped)
+		default:
+			resetCell(vm, e.CodeSize, v, code.Len(), eqInt, &stamped)
+		}
+	case StoragePath:
+		seed, ok := vm.seededStorage(addr, key, v.TxIndex)
+		if !ok {
+			return false
+		}
+		resetCell(vm, e.Storage[key], v, seed, eqUint256, &stamped)
+	default:
+		return false
+	}
+	return true
+}
+
+// resetCell sets the cell at v.TxIndex back to seed as Done. Before the seal, a Done cell already
+// holds the seed. As in flushCell, a changed value takes v's incarnation, so that a reader of the
+// earlier value is invalid.
+func resetCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], v Version, seed T, eq func(a, b T) bool, stamped *bool) {
+	if cells == nil {
+		return
+	}
+	c, ok := cells.Get(v.TxIndex)
+	if !ok || c.loadFlag() == FlagDone {
+		return
+	}
+	if !*stamped {
+		vm.mutBegin(v.TxIndex)
+		*stamped = true
+	}
+	inc := c.loadInc()
+	if !eq(c.Value, seed) {
+		inc = v.Incarnation
+	}
+	c.Value, c.valStatus = seed, ValueChanged
+	c.setState(inc, FlagDone)
+}
+
 func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
 	vm.assertUnsealed(txIdx, addr, AddressPath, accounts.NilKey)
 	e := vm.load(addr)
@@ -1968,26 +2076,36 @@ func wipedByDestruct(path AccountPath) bool {
 	return path == AddressPath || path == BalancePath || path == NoncePath || path == CodeSizePath || path == StoragePath
 }
 
-// liveStorage is the one path that needs a dedicated live reader: a slot's wipe after a
-// destruct is a lifecycle verdict ReadStorage alone does not carry. Every other path
-// validates on the plain ReadStatus result (version + status, no value), so ValidateReadSet
-// uses ReadStatus directly for them.
-func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) ReadResult {
-	_, rr, _ := liveStorageValue(vm, a, k, tx)
-	return rr
-}
-
-func liveStorageValue(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
+// liveStorageValue is the validator's storage reader. Storage is the one path that needs a
+// dedicated live reader: a slot's wipe after a destruct or a creation is a lifecycle verdict
+// ReadStorage alone does not carry. wipe reports whether a destruct or a creation below the
+// read replaced the slot's value. Every other path validates on the plain ReadStatus result.
+func liveStorageValue(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (val uint256.Int, res ReadResult, ok bool, wipe slotWipe) {
+	val, res, ok, life := vm.ReadStorageLife(a, k, tx)
 	// Wipe-aware: a slot of a destructed account reads zero unless a post-destruct write
 	// revived it, anchored on the destruct ({destroyedAt, wipeInc}) so it validates by
 	// version alone — a later store above the destruct resolves here and version-mismatches.
-	if state, _, destroyedAt, wipeInc := vm.AccountLifecycleAt(a, tx); state != LifecycleLive {
-		if val, res, ok := vm.ReadStorage(a, k, tx); ok && res.resolved() && res.DepIdx() > destroyedAt {
-			return val, res, ok
-		}
-		return uint256.Int{}, ReadResult{depIdx: destroyedAt, incarnation: wipeInc}, true
+	if life.state != LifecycleLive && !(ok && res.resolved() && res.DepIdx() > life.destroyedAt) {
+		return uint256.Int{}, ReadResult{depIdx: life.destroyedAt, incarnation: life.wipeInc}, true, wipeDestruct
 	}
-	return vm.ReadStorage(a, k, tx)
+	if storageClearedByCreate(life, ok, res.DepIdx()) {
+		return uint256.Int{}, ReadResult{depIdx: life.createdAt, incarnation: life.createInc}, true, wipeCreate
+	}
+	return val, res, ok, wipeNone
+}
+
+type slotWipe uint8
+
+const (
+	wipeNone slotWipe = iota
+	wipeDestruct
+	wipeCreate
+)
+
+// storageClearedByCreate reports whether a contract creation replaced the slot after its floor
+// value: the slot has no value below the read, or its value is older than the creation.
+func storageClearedByCreate(life lifecycleVerdict, ok bool, slotIdx int) bool {
+	return life.createdAt != UnknownDep && (!ok || slotIdx < life.createdAt)
 }
 
 func eqUint256(a, b uint256.Int) bool { return a.Eq(&b) }
@@ -2193,6 +2311,22 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	return vm.ValidateReadSet(txIdx, lastIO.ReadSet(txIdx), checkVersion, traceInvalid, tracePrefix)
 }
 
+// validateBalanceAtDestruct rejects a stale balance read at a destruct's version. A non-zero balance
+// read at a destruct's version came from the balance cell. A re-run can move that cell to a new
+// incarnation while the seeded destruct keeps its version.
+func (vm *VersionMap) validateBalanceAtDestruct(addr accounts.Address, tr VersionedRead[uint256.Int], txIdx int) VersionValidity {
+	if tr.Val.IsZero() {
+		return VersionValid
+	}
+	if e := vm.load(addr); e == nil || !e.destructed.Load() {
+		return VersionValid
+	}
+	if rr := vm.ReadStatus(addr, BalancePath, accounts.NilKey, txIdx); rr.DepIdx() == tr.Version.TxIndex && rr.Incarnation() != tr.Version.Incarnation {
+		return VersionInvalid
+	}
+	return VersionValid
+}
+
 // validateAccountAtMarker rejects an account read that matches the version of the BAL existence
 // marker but not the account's existence. A destruct seeded for the marker's tx can have the
 // same version, but the marker records an account that exists: an absent read is valid only
@@ -2201,15 +2335,25 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 // re-validate a tx that read only the account's existence.
 func (vm *VersionMap) validateAccountAtMarker(addr accounts.Address, tr VersionedRead[AccountView], txIdx int) VersionValidity {
 	if tr.Val != nil && !tr.Val.IsNil() {
-		if tr.accSource == AccountFromBAL {
-			if st, _, destroyedAt, _ := vm.ResolvedAccountLifecycleAt(addr, txIdx); st == LifecycleAbsent && !vm.destructKeptBalance(addr, destroyedAt) {
-				return VersionInvalid
-			}
+		if tr.accSource != AccountFromBAL {
+			return VersionValid
+		}
+		if e := vm.load(addr); e == nil || !e.destructed.Load() {
+			return VersionValid
+		}
+		if st, _, destroyedAt, _ := vm.ResolvedAccountLifecycleAt(addr, txIdx); st == LifecycleAbsent && !vm.destructKeptBalance(addr, destroyedAt) {
+			return VersionInvalid
 		}
 		return VersionValid
 	}
-	if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIdx); ok && sdRR.resolved() && destructed && sdRR.Version() == tr.Version {
+	e := vm.load(addr)
+	if e == nil {
 		return VersionValid
+	}
+	if e.destructed.Load() {
+		if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIdx); ok && sdRR.resolved() && destructed && sdRR.Version() == tr.Version {
+			return VersionValid
+		}
 	}
 	if rr := vm.ReadStatus(addr, AddressPath, accounts.NilKey, txIdx); rr.accSource() == AccountFromBAL {
 		return VersionInvalid
@@ -2227,7 +2371,7 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 	// validatePath validates any non-storage path on the plain ReadStatus result:
 	// validation never compares the recorded value, so version + status is the
 	// authoritative basis for every path except storage, which needs the wipe-aware
-	// liveStorage reader.
+	// liveStorageValue reader.
 	validatePath := func(addr accounts.Address, path AccountPath, hdr ReadHeader) VersionValidity {
 		if (hdr.Version.TxIndex == originIndex || hdr.Source == StorageRead && hdr.Version == UnknownVersion) && vm.hasNoCells(addr, path) {
 			return VersionValid
@@ -2245,6 +2389,9 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 		}
 	}
 	for a, tr := range rs.balance {
+		if vm.HasBAL && !ok(vm.validateBalanceAtDestruct(a, tr, txIdx)) {
+			return
+		}
 		if !ok(validatePath(a, BalancePath, tr.ReadHeader)) {
 			return
 		}
@@ -2270,7 +2417,13 @@ func (vm *VersionMap) ValidateReadSet(txIdx int, rs ReadSet, checkVersion func(r
 			if quiet && tr.Version.TxIndex == originIndex {
 				continue
 			}
-			if !ok(vm.validateReadImpl(txIdx, a, StoragePath, k, tr.Source, tr.Version, liveStorage(vm, a, k, txIdx), checkVersion, traceInvalid, tracePrefix, false)) {
+			_, rr, _, wipe := liveStorageValue(vm, a, k, txIdx)
+			// A pre-block zero stays right once a creation clears the slot. Not so after a destruct:
+			// its anchor holds also while a write above it is in flight.
+			if wipe == wipeCreate && rr.resolved() && tr.Version.TxIndex == originIndex && tr.Val.IsZero() {
+				continue
+			}
+			if !ok(vm.validateReadImpl(txIdx, a, StoragePath, k, tr.Source, tr.Version, rr, checkVersion, traceInvalid, tracePrefix, false)) {
 				return
 			}
 		}

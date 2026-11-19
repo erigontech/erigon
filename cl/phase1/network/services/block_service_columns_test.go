@@ -260,6 +260,73 @@ func TestScheduledBlockRetriesWhenCustodyColumnsAreStored(t *testing.T) {
 	})
 }
 
+func TestEnvelopeArrivalRetriesELColumnsImportFromTheLoop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service, engine, peerDas, columns := setupELBlobsBlockService(t)
+		block, root, hashes := elBlobsTestBlock(t, clparams.GloasVersion, 2)
+		admitToForkChoice(service, block, root)
+		service.emitter = beaconevents.NewEventEmitter()
+		blobs := [][]byte{{1}, {2}}
+		proofs := [][][]byte{{{1}}, {{2}}}
+		stored := []*cltypes.DataColumnSidecar{cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)}
+		gomock.InOrder(
+			peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil),
+			engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.GloasVersion).Return(nil, nil, nil),
+			peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(false, nil),
+			engine.EXPECT().GetBlobs(gomock.Any(), hashes, clparams.GloasVersion).Return(blobs, proofs, nil),
+			peerDas.EXPECT().ImportColumnsFromBlobs(gomock.Any(), block, blobs, proofs, gomock.Any()).Return(stored, nil),
+		)
+		service.importColumnsFromELBlobs(t.Context(), block)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go service.loop(ctx)
+		synctest.Wait()
+		service.emitter.NotifyEnvelopeArrived(root)
+		synctest.Wait()
+
+		require.Equal(t, [][]*cltypes.DataColumnSidecar{stored}, columns.published)
+	})
+}
+
+func TestEnvelopeArrivalRetryDoesNotBlockTheLoop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service, engine, peerDas, _ := setupELBlobsBlockService(t)
+		slowBlock, slowRoot, slowHashes := elBlobsTestBlock(t, clparams.GloasVersion, 2)
+		otherBlock, otherRoot, otherHashes := elBlobsTestBlock(t, clparams.GloasVersion, 3)
+		admitToForkChoice(service, slowBlock, slowRoot)
+		admitToForkChoice(service, otherBlock, otherRoot)
+		peerDas.EXPECT().IsDataAvailable(slowBlock.Block.Slot, slowRoot).Return(false, nil).Times(2)
+		peerDas.EXPECT().IsDataAvailable(otherBlock.Block.Slot, otherRoot).Return(false, nil).Times(2)
+		service.emitter = beaconevents.NewEventEmitter()
+		engine.EXPECT().GetBlobs(gomock.Any(), slowHashes, clparams.GloasVersion).Return(nil, nil, nil)
+		engine.EXPECT().GetBlobs(gomock.Any(), slowHashes, clparams.GloasVersion).DoAndReturn(
+			func(ctx context.Context, _ []common.Hash, _ clparams.StateVersion) ([][]byte, [][][]byte, error) {
+				<-ctx.Done()
+				return nil, nil, ctx.Err()
+			})
+		engine.EXPECT().GetBlobs(gomock.Any(), otherHashes, clparams.GloasVersion).Return(nil, nil, nil)
+		otherRetried := false
+		engine.EXPECT().GetBlobs(gomock.Any(), otherHashes, clparams.GloasVersion).DoAndReturn(
+			func(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte, error) {
+				otherRetried = true
+				return nil, nil, nil
+			})
+		service.importColumnsFromELBlobs(t.Context(), slowBlock)
+		service.importColumnsFromELBlobs(t.Context(), otherBlock)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		go service.loop(ctx)
+		synctest.Wait()
+		service.emitter.NotifyEnvelopeArrived(slowRoot)
+		service.emitter.NotifyEnvelopeArrived(otherRoot)
+		synctest.Wait()
+
+		require.True(t, otherRetried, "a retry waiting on the EL must not stop the loop from handling the next envelope")
+	})
+}
+
 func TestColumnNotificationsRetryOnlyOnceCustodyIsComplete(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		service, _, peerDas, _ := setupELBlobsBlockService(t)

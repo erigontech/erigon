@@ -51,7 +51,7 @@ func seedBlobKZGTestPool(t testing.TB, ctx context.Context) *TxPool {
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"],
-		nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		nil, nil, func() {}, nil, nil, log.New())
 	require.NoError(t, err)
 
 	change := &remoteproto.StateChangeBatch{

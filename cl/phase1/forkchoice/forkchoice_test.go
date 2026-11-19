@@ -1325,7 +1325,7 @@ func TestAllAttesterSlashingIndicesSeen(t *testing.T) {
 	require.True(t, store.allAttesterSlashingIndicesSeen(nil))
 }
 
-func TestAttesterSlashingIgnoresDisjointIndices(t *testing.T) {
+func TestAttesterSlashingRejectsDisjointIndices(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	store := &ForkChoiceStore{}
 	slashing := &cltypes.AttesterSlashing{
@@ -1339,7 +1339,8 @@ func TestAttesterSlashingIgnoresDisjointIndices(t *testing.T) {
 
 	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
 
-	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, ErrAttesterSlashingEmptyIntersection)
+	require.NotErrorIs(t, err, ErrIgnore)
 }
 
 func TestAttesterSlashingSeenCheckPrecedesValidation(t *testing.T) {

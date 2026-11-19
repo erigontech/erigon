@@ -4,7 +4,8 @@
 Reads every ``<client>-<label>-result.json`` under ``--results-dir`` and prints an
 overview for each of p50, p90, p95 and max, with the latency of each client and the
 status of Erigon per test label and QPS step, then, per test label and QPS step, the
-p50, p95 and max latency of each client.
+p50, p95 and max latency of each client, followed by its rows by method (mixed, run with
+--verbose) or by subscription measure (eth_subscribe), when the reports have them.
 p50, p90 and p95 are the median over the repetitions, max is the worst one.
 HTTP is the share of requests answered with HTTP 200, RPC the share of requests
 answered with a result and no JSON-RPC error; both are the worst over the repetitions.
@@ -49,10 +50,28 @@ def load_results(root):
             }
             if all("90th" in r["latencies"] for r in reps):
                 stats["p90"] = statistics.median(r["latencies"]["90th"] for r in reps) / 1e6
+            apis = load_apis(step["testRepetitions"])
+            if apis:
+                stats["apis"] = apis
     for label, client in excluded:
         steps = {q for c in results.get(label, {}).values() for q in c}
         results.setdefault(label, {})[client] = {q: {"failed": "excluded"} for q in steps}
     return results
+
+
+def load_apis(repetitions):
+    """Merge the rows by method or by subscription measure of the repetitions, as the step stats."""
+    rows = {}
+    for r in repetitions:
+        for name, row in r.get("apis", {}).items():
+            rows.setdefault(name, []).append(row)
+    return {name: {
+        "p50": statistics.median(r["latencies"]["50th"] for r in reps) / 1e6,
+        "p95": statistics.median(r["latencies"]["95th"] for r in reps) / 1e6,
+        "max": max(r["latencies"]["max"] for r in reps) / 1e6,
+        "requests": sum(r["requests"] for r in reps),
+        "errors": sum(r["errors"] for r in reps),
+    } for name, reps in rows.items()}
 
 
 def add_lost(results, clients):
@@ -79,9 +98,7 @@ def all_succeeded(step, best_rpc):
 
 
 def erigon_status(erigon, best, next_best, best_rpc, percentile):
-    if erigon is None:
-        return "⚪"
-    if is_failed(erigon) or not all_succeeded(erigon, best_rpc) or best is None:
+    if erigon is None or is_failed(erigon) or not all_succeeded(erigon, best_rpc) or best is None:
         return "🔴"
     if erigon[percentile] == best:
         return "🟢🟢" if next_best is not None and next_best >= best * STATUS_RATIO else "🟢"
@@ -128,7 +145,7 @@ def render_overview(results, percentile):
              "err HTTP errors or RPC errors > 1% above the best client, dead the client died,",
              "excluded left out at a barrier, lost no results from the client's job.",
              f"Erigon status on {percentile}, at the end of the row: 🟢🟢 fastest by >= 1.3x, 🟢 fastest,",
-             "🟡 < 1.3x the fastest, 🔴 >= 1.3x or errors, ⚪ no Erigon result.",
+             "🟡 < 1.3x the fastest, 🔴 >= 1.3x, errors or no Erigon result.",
              "",
              line(header)]
     lines += [f"{line(cells)} {status}" for status, cells in rows]
@@ -153,8 +170,22 @@ def render(results):
                 elif s:
                     lines.append(f"| {qps} | {client} | {s['p50']:.2f} | {s['p95']:.2f} | {s['max']:.2f} "
                                  f"| {s['success']:.2%} | {s['rpc_success']:.2%} |")
+        lines += render_apis(results[label], clients, steps)
         lines += ["", "</details>", ""]
     return "\n".join(lines)
+
+
+def render_apis(clients_steps, clients, steps):
+    rows = []
+    for qps in steps:
+        apis = {c: clients_steps[c].get(qps, {}).get("apis", {}) for c in clients}
+        for name in sorted({n for a in apis.values() for n in a}):
+            rows += [f"| {qps} | {name} | {c} | {a['p50']:.2f} | {a['p95']:.2f} | {a['max']:.2f} "
+                     f"| {a['requests']} | {a['errors']} |" for c in clients if (a := apis[c].get(name))]
+    if not rows:
+        return []
+    return ["", "| QPS | API | Client | p50 (ms) | p95 (ms) | max (ms) | Requests | Errors |",
+            "|---:|---|---|---:|---:|---:|---:|---:|"] + rows
 
 
 def main():
