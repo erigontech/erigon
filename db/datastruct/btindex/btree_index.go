@@ -742,10 +742,14 @@ func (b *BtIndex) GetValSize(lookup []byte, gr *seg.Reader) (size int, found boo
 //
 // Caller should close cursor after use.
 func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
+	return b.seekFrom(g, x, 0, nil)
+}
+
+func (b *BtIndex) seekFrom(g *seg.Reader, x []byte, pivotDi uint64, pivotKey []byte) (*Cursor, error) {
 	if b.Empty() {
 		return nil, nil
 	}
-	c, err := b.bplus.Seek(g, x)
+	c, err := b.bplus.SeekFrom(g, x, pivotDi, pivotKey)
 	if err != nil || c == nil {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return nil, nil
@@ -799,7 +803,11 @@ func (b *BtIndex) GetSeq(h *SeqHint, lookup, buf []byte, g *seg.Reader, maxSteps
 		}
 	}
 	h.Seeks++
-	c, err := b.Seek(g, lookup)
+	var pivot []byte
+	if h.valid {
+		pivot = h.key
+	}
+	c, err := b.seekFrom(g, lookup, h.di, pivot)
 	if err != nil || c == nil {
 		h.valid = false
 		return nil, false, err

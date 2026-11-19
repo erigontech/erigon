@@ -138,3 +138,33 @@ func BenchmarkBtIndex_Get(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkBtIndex_GetSeq(b *testing.B) {
+	compress := seg.CompressKeys
+	tmp := b.TempDir()
+	kvPath := generateKV(b, tmp, 32, 10, 200_000, log.New(), compress)
+	keys, err := pivotKeysFromKV(kvPath)
+	require.NoError(b, err)
+	indexPath := filepath.Join(tmp, "m64.bt")
+	buildBtreeIndexWithM(b, kvPath, indexPath, compress, 64, log.New())
+	decomp, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress)
+	require.NoError(b, err)
+	defer bt.Close()
+	defer decomp.Close()
+	getter := seg.NewReader(decomp.MakeGetter(), compress)
+
+	for _, stride := range []int{8, 24, 48, 200} {
+		b.Run(fmt.Sprintf("stride%d", stride), func(b *testing.B) {
+			var h SeqHint
+			i := 0
+			for b.Loop() {
+				if i += stride; i >= len(keys) {
+					i, h = i%stride, SeqHint{}
+				}
+				if _, ok, err := bt.GetSeq(&h, keys[i], nil, getter, 4); err != nil || !ok {
+					b.Fatal(err, ok)
+				}
+			}
+		})
+	}
+}

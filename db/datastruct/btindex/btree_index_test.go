@@ -967,6 +967,16 @@ func Test_BtreeIndex_GetSeq(t *testing.T) {
 				check(&far, keys[i])
 			}
 			require.Zero(t, far.Nexts)
+
+			var random SeqHint
+			rnd := newRnd(7)
+			for range 4 * len(keys) {
+				key := keys[rnd.IntN(len(keys))]
+				if rnd.IntN(2) == 0 {
+					key = append(slices.Clone(key), byte(rnd.IntN(256)))
+				}
+				check(&random, key)
+			}
 		})
 	}
 }

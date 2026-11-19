@@ -405,6 +405,10 @@ func (b *BpsTree) bs(x []byte) (dl, dr uint64, klo, khi []byte) {
 // If found item.key has a prefix of key, returns item.key
 // if key is greater than all keys, returns nil
 func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, _ error) {
+	return b.SeekFrom(g, seekKey, 0, nil)
+}
+
+func (b *BpsTree) SeekFrom(g *seg.Reader, seekKey []byte, pivotDi uint64, pivotKey []byte) (cur *Cursor, _ error) {
 	//b.trace = true
 	if b.trace {
 		fmt.Printf("seek %x\n", seekKey)
@@ -419,6 +423,16 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, _ error) {
 
 	// check cached nodes and narrow roi
 	l, r, klo, khi := b.bs(seekKey) // l===r when key is found
+	if pivotKey != nil && l < r && pivotDi >= l && pivotDi < r {
+		switch c := bytes.Compare(pivotKey, seekKey); {
+		case c < 0:
+			l, klo = pivotDi+1, pivotKey
+		case c > 0:
+			r, khi = pivotDi, pivotKey
+		default:
+			l, r = pivotDi, pivotDi
+		}
+	}
 	if l == r {
 		// l can be Count() when seeking past the last key (insertion point);
 		// Reset then reports out-of-bounds and Seek's contract is (nil, nil).
