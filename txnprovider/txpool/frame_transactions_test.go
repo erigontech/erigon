@@ -72,6 +72,7 @@ type frameValidationBackend struct {
 	deadlines      []time.Time
 	onValidate     func()
 	dependencies   []*typesproto.H160
+	proxies        []*typesproto.H160
 	creationNonces []*remoteproto.FrameCreationNonce
 }
 
@@ -107,7 +108,7 @@ func (b *frameValidationBackend) FrameValidation(ctx context.Context, req *remot
 	return &remoteproto.FrameValidationReply{
 		Valid: b.valid, Payer: gointerfaces.ConvertAddressToH160(b.payer),
 		PayerBalance: gointerfaces.ConvertUint256IntToH256(uint256.NewInt(b.balance)), MaxCost: gointerfaces.ConvertUint256IntToH256(cost),
-		Paymaster: b.paymaster, Deadline: expiry, Dependencies: dependencies, CreationNonces: b.creationNonces,
+		Paymaster: b.paymaster, Deadline: expiry, Dependencies: dependencies, CreationNonces: b.creationNonces, ProxyDependencies: b.proxies,
 	}, nil
 }
 
@@ -348,7 +349,7 @@ func TestFramePoolDelegatedSenderLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			chainConfig := chain.AllProtocolChanges.Copy()
 			chainConfig.BogotaTime = common.NewUint64(0)
-			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, testDelegationCodeHash(), chainConfig)
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, testDelegation.Hash, chainConfig)
 			pool.ethBackend = &frameValidationBackend{payer: sender, balance: common.Ether, valid: true}
 			frame := framePoolSlot(t, sender, 1, 2, uint256.Int{1})
 			ordinary := newTestTxnSlot(0, 0, 1, 2, 21_000)
@@ -412,8 +413,11 @@ func TestFramePoolNewlyDelegatedSender(t *testing.T) {
 			require.Len(t, pool.byHash, 2)
 
 			change := newBlockChangeForAccounts(common.Hash{1}, nonce, sender)
-			account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: testDelegationCodeHash()}
-			change.ChangeBatch[0].Changes[0].Data = accounts.SerialiseV3(&account)
+			account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: testDelegation.Hash}
+			funded := change.ChangeBatch[0].Changes[0]
+			funded.Action = remoteproto.Action_UPSERT_CODE
+			funded.Data = accounts.SerialiseV3(&account)
+			funded.Code = testDelegation.Bytes
 			require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
 			require.Len(t, pool.byHash, 1)
@@ -813,7 +817,7 @@ func TestFramePoolKeyedNonceIndependent(t *testing.T) {
 	reasons, err := pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, txpoolcfg.Success, reasons[0])
-	pool.onSenderStateChange(slot.SenderID, 9, *uint256.NewInt(1_000_000), accounts.EmptyCodeHash, 1_000_000)
+	pool.onSenderStateChange(slot.SenderID, 9, *uint256.NewInt(1_000_000), accounts.EmptyCodeHash, false, 1_000_000)
 	require.Equal(t, 1, pool.pending.Len())
 	require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 }
@@ -1698,7 +1702,7 @@ func TestFramePoolUnwindPreservesPooledNonceChain(t *testing.T) {
 		t.Run(outcome, func(t *testing.T) {
 			codeHash := accounts.EmptyCodeHash
 			if outcome == "delegated" {
-				codeHash = testDelegationCodeHash()
+				codeHash = testDelegation.Hash
 			}
 			chainConfig := chain.AllProtocolChanges.Copy()
 			chainConfig.BogotaTime = common.NewUint64(0)
@@ -2838,6 +2842,30 @@ func TestFramePoolReservationsAndReplacement(t *testing.T) {
 	require.Equal(t, txpoolcfg.Success, add(common.Address{2}, 1, 2), "replacement must release the old payer reservation")
 }
 
+func TestFramePoolProxyLimit(t *testing.T) {
+	config := chain.AllProtocolChanges.Copy()
+	config.BogotaTime = common.NewUint64(0)
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash, config)
+	pool.cfg.AccountSlots = 1
+	proxy := gointerfaces.ConvertAddressToH160(common.Address{8})
+	backend := &frameValidationBackend{payer: common.Address{9}, balance: 1_000_000, valid: true, proxies: []*typesproto.H160{proxy}}
+	pool.ethBackend = backend
+	add := func(addr common.Address, tip, fee uint64) txpoolcfg.DiscardReason {
+		var txns TxnSlots
+		txns.Append(framePoolSlot(t, addr, tip, fee), addr[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txns)
+		require.NoError(t, err)
+		return reasons[0]
+	}
+	require.Equal(t, txpoolcfg.Success, add(sender, 1, 2))
+	require.Equal(t, txpoolcfg.InvalidFrame, add(common.Address{2}, 1, 2))
+	require.Equal(t, txpoolcfg.Success, add(sender, 2, 4))
+	backend.proxies = nil
+	require.Equal(t, txpoolcfg.Success, add(sender, 4, 8))
+	backend.proxies = []*typesproto.H160{proxy}
+	require.Equal(t, txpoolcfg.Success, add(common.Address{2}, 2, 4))
+}
+
 func TestFramePoolPaymasterLimit(t *testing.T) {
 	chainConfig := chain.AllProtocolChanges.Copy()
 	chainConfig.BogotaTime = common.NewUint64(0)
@@ -2901,7 +2929,7 @@ func TestFramePoolReplacementIncreasesGasBudget(t *testing.T) {
 func TestFramePoolReplacementRequiresSameKeys(t *testing.T) {
 	chainConfig := chain.AllProtocolChanges.Copy()
 	chainConfig.BogotaTime = common.NewUint64(0)
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, testDelegationCodeHash(), chainConfig)
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, testDelegation.Hash, chainConfig)
 	pool.ethBackend = &frameValidationBackend{payer: sender, balance: common.Ether, valid: true}
 	var txns TxnSlots
 	txns.Append(framePoolSlot(t, sender, 1, 2, uint256.Int{1}), sender[:], true)

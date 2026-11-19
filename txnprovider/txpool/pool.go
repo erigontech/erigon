@@ -193,6 +193,7 @@ type TxPool struct {
 	frameValidationGate     chan struct{}
 	remoteFrames            remoteFrameQueue
 	frameReservations       map[common.Address]frameReservation
+	frameProxyUsers         map[common.Address]uint64
 	frameAccountsToRefresh  map[common.Address]struct{}
 	frameRejections         *simplelru.LRU[string, frameRejection]
 
@@ -1442,6 +1443,13 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		return txpoolcfg.InsufficientFunds, nil
 	}
 	if !senderCodeHash.IsEmpty() {
+		regular, err := p.senderHasRegularCode(stateCache, txn.SenderID, senderCodeHash)
+		if err != nil {
+			return txpoolcfg.ErrGetSenderInfo, err
+		}
+		if regular {
+			return txpoolcfg.InvalidSender, nil
+		}
 		if existing := p.all.get(txn.SenderID, txn.Nonce); existing == nil {
 			if p.all.hasTxns(txn.SenderID) {
 				return txpoolcfg.DelegatedTxnLimit, nil
@@ -2677,12 +2685,32 @@ func (p *TxPool) updateGasLimitMarker(mt *metaTxn, blockGasLimit uint64) {
 	}
 }
 
+func (p *TxPool) senderHasRegularCode(view kvcache.CacheView, senderID uint64, hash accounts.CodeHash) (bool, error) {
+	if hash.IsEmpty() || !p.isBogota() {
+		return false, nil
+	}
+	addr := p.senders.senderID2Addr[senderID]
+	code, err := view.GetCode(addr[:])
+	if err != nil {
+		return false, err
+	}
+	if len(code) == 0 {
+		return false, fmt.Errorf("missing sender code %s at %x", hash, addr)
+	}
+	_, delegated := types.ParseDelegation(code)
+	return !delegated, nil
+}
+
 func (p *TxPool) refreshSender(cacheView kvcache.CacheView, senderID uint64) error {
 	nonce, balance, codeHash, err := p.senders.info(cacheView, senderID)
 	if err != nil {
 		return err
 	}
-	p.onSenderStateChange(senderID, nonce, balance, codeHash, p.blockGasLimit.Load())
+	regular, err := p.senderHasRegularCode(cacheView, senderID, codeHash)
+	if err != nil {
+		return err
+	}
+	p.onSenderStateChange(senderID, nonce, balance, codeHash, regular, p.blockGasLimit.Load())
 	return nil
 }
 
@@ -2690,7 +2718,7 @@ func (p *TxPool) refreshSender(cacheView kvcache.CacheView, senderID uint64) err
 // Transactions using account nonces depend on earlier nonces and cumulative sender costs.
 // Keyed frames bypass that chain: simulation checks their nonces, and payer
 // reservations cover their fees.
-func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, senderCodeHash accounts.CodeHash, blockGasLimit uint64) {
+func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, senderCodeHash accounts.CodeHash, regularCode bool, blockGasLimit uint64) {
 	sender := p.senders.senderID2Addr[senderID]
 	delete(p.frameAccountsToRefresh, sender)
 	// A legacy frame awaiting restoration or revalidation cannot advance the account
@@ -2717,6 +2745,9 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		deleteAndContinueReasonLog := ""
 		discardReason := txpoolcfg.NotSet
 		switch {
+		case regularCode && mt.TxnSlot.TxType() != FrameTxnType:
+			deleteAndContinueReasonLog = "ECDSA sender has regular code"
+			discardReason = txpoolcfg.InvalidSender
 		case !nonceChainBlocked && senderHasCode && senderTxnKept:
 			deleteAndContinueReasonLog = "delegated sender transaction limit"
 			discardReason = txpoolcfg.DelegatedTxnLimit

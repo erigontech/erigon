@@ -40,7 +40,7 @@ func matchTestBuilder() *BlockAccessListBuilder {
 	writer.applyWriteBalance(*uint256.NewInt(90), 1)
 	writer.applyWriteBalance(*uint256.NewInt(80), 3)
 	writer.applyWriteNonce(5, 1)
-	writer.applyWriteCode(accounts.Code{Bytes: []byte{0x60, 0x00}}, 2)
+	writer.code.recordWrite(2, types.CodeChange{Index: 2, Bytecode: []byte{0x60, 0x00}})
 
 	slots := ensureAccountState(b.ac, addr(3))
 	slots.updateReadStorage(key(3), *uint256.NewInt(1))

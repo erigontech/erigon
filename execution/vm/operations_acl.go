@@ -32,6 +32,50 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+func gasSetCodeFrom(evm *EVM, scope *CallContext, available mdgas.MdGas, _ uint64) (mdgas.MdGasCost, error) {
+	if evm.readOnly {
+		return mdgas.MdGasCost{}, ErrWriteProtection
+	}
+	config := evm.chainConfig
+	switch scope.Address() {
+	case params.BeaconRootsAddress, params.HistoryStorageAddress,
+		config.GetWithdrawalRequestContract(), config.GetConsolidationRequestContract(),
+		config.GetBuilderDepositContract(), config.GetBuilderExitContract():
+		return mdgas.MdGasCost{}, ErrWriteProtection
+	}
+	source := scope.peekAddress(evm)
+	ibs := evm.IntraBlockState()
+	tracer := evm.Config().Tracer
+	cost := mdgas.MdGasCost{Execution: evm.codeAccessGas(source, tracer)}
+	if available.Execution < cost.Execution {
+		return cost, ErrOutOfGas
+	}
+	evm.recordCodeAccess(source, tracer)
+	scope.adoption, scope.writeAdoption = accounts.Code{}, false
+	code, err := ibs.GetCodeWithHash(source)
+	if err != nil || code.IsEmpty() || code.Bytes[0] == 0xef {
+		return cost, err
+	}
+	created, err := ibs.ContractCreatedThisTx(source)
+	if err != nil || created {
+		return cost, err
+	}
+	cost.Execution += params.WarmStorageReadCostEIP2929
+	if available.Execution < cost.Execution {
+		return cost, ErrOutOfGas
+	}
+	current, err := ibs.GetCodeHash(scope.Address())
+	if err != nil {
+		return cost, err
+	}
+	scope.adoption = code
+	scope.writeAdoption = current != code.Hash
+	if scope.writeAdoption {
+		cost.Execution += params.AccountWriteCostEIP8038
+	}
+	return cost, nil
+}
+
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 		rules := evm.chainRules

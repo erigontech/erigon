@@ -792,3 +792,54 @@ func TestVersionedReaderServesBALMarkedAccountFromOrigin(t *testing.T) {
 	}
 	require.Zero(t, reader.reads, "the stored origin answers every tx")
 }
+
+func TestResolveBALCodeAdoptions(t *testing.T) {
+	source := accounts.InternAddress(common.Address{19: 2})
+	target := common.Address{19: 1}
+	code := accounts.NewCode([]byte{0x60, 1})
+	account := accounts.NewAccount()
+	account.CodeHash = code.Hash
+	prestate := &codeReader{addr: source, account: &account, code: code.Bytes}
+	emptyAccount := accounts.NewAccount()
+	for _, tc := range []struct {
+		name    string
+		base    StateReader
+		deposit uint32
+		hash    accounts.CodeHash
+		valid   bool
+	}{
+		{"prestate", prestate, 0, code.Hash, true},
+		{"earlier deposit", NewNoopReader(), 1, code.Hash, true},
+		{"same index", NewNoopReader(), 2, code.Hash, false},
+		{"later deposit", NewNoopReader(), 3, code.Hash, false},
+		{"unknown hash", NewNoopReader(), 0, code.Hash, false},
+		{"empty code hash", &codeReader{addr: source, account: &emptyAccount}, 0, accounts.EmptyCodeHash, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bal := types.BlockAccessList{
+				{Address: target, CodeChanges: []*types.CodeChange{{Index: 2, CodeHash: tc.hash}}},
+				{Address: source.Value()},
+			}
+			if tc.deposit != 0 {
+				bal[1].CodeChanges = []*types.CodeChange{{Index: tc.deposit, Bytecode: code.Bytes}}
+			}
+			vm := NewVersionMap(bal)
+			err := vm.SeedAdoptedCode(tc.base)
+			if !tc.valid {
+				require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
+				return
+			}
+			require.NoError(t, err)
+			require.NoError(t, vm.SeedAdoptedCode(tc.base))
+			addr := accounts.InternAddress(target)
+			_, _, ok := vm.ReadCode(addr, 1)
+			require.False(t, ok)
+			got, _, ok := vm.ReadCode(addr, 2)
+			require.True(t, ok)
+			require.Equal(t, code, got)
+			size, _, ok := vm.ReadCodeSize(addr, 2)
+			require.True(t, ok)
+			require.Equal(t, code.Len(), size)
+		})
+	}
+}

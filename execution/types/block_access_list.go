@@ -236,6 +236,7 @@ type NonceChange struct {
 type CodeChange struct {
 	Index    uint32
 	Bytecode []byte
+	CodeHash accounts.CodeHash
 }
 
 // Copy returns a deep copy of bal.
@@ -458,7 +459,7 @@ func (ac *AccountChanges) Equal(other *AccountChanges) bool {
 		slices.EqualFunc(ac.BalanceChanges, other.BalanceChanges, func(x, y *BalanceChange) bool { return *x == *y }) &&
 		slices.EqualFunc(ac.NonceChanges, other.NonceChanges, func(x, y *NonceChange) bool { return *x == *y }) &&
 		slices.EqualFunc(ac.CodeChanges, other.CodeChanges, func(x, y *CodeChange) bool {
-			return x.Index == y.Index && bytes.Equal(x.Bytecode, y.Bytecode)
+			return x.Index == y.Index && x.CodeHash == y.CodeHash && bytes.Equal(x.Bytecode, y.Bytecode)
 		})
 }
 
@@ -629,10 +630,16 @@ func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
 func (cc *CodeChange) EncodingSize() int {
 	size := rlp.U64Len(uint64(cc.Index))
 	size += rlp.StringLen(cc.Bytecode)
+	if !cc.CodeHash.IsNil() {
+		size += 1 + len(common.Hash{})
+	}
 	return size
 }
 
 func (cc *CodeChange) EncodeRLP(w io.Writer) error {
+	if err := cc.validate(); err != nil {
+		return err
+	}
 	b := rlp.NewEncodingBuf()
 	defer b.Release()
 
@@ -643,7 +650,14 @@ func (cc *CodeChange) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeU64(uint64(cc.Index), w, b[:]); err != nil {
 		return err
 	}
-	return rlp.EncodeString(cc.Bytecode, w, b[:])
+	if err := rlp.EncodeString(cc.Bytecode, w, b[:]); err != nil {
+		return err
+	}
+	if !cc.CodeHash.IsNil() {
+		hash := cc.CodeHash.Value()
+		return rlp.EncodeString(hash[:], w, b[:])
+	}
+	return nil
 }
 
 func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
@@ -663,7 +677,25 @@ func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Bytecode: %w", err)
 	}
 	cc.Bytecode = data
+	cc.CodeHash = accounts.NilCodeHash
+	if s.MoreDataInList() {
+		hash, err := s.ReadHash()
+		if err != nil {
+			return err
+		}
+		cc.CodeHash = accounts.InternCodeHash(hash)
+		if err := cc.validate(); err != nil {
+			return err
+		}
+	}
 	return s.ListEnd()
+}
+
+func (cc *CodeChange) validate() error {
+	if !cc.CodeHash.IsNil() && len(cc.Bytecode) != 0 {
+		return fmt.Errorf("%w: adopted code change contains bytecode", ErrInvalidBlockAccessList)
+	}
+	return nil
 }
 
 func dedupByIndex[T interface{ GetIndex() uint32 }](changes []T) []T {
@@ -1215,6 +1247,11 @@ func (ac *AccountChanges) validate() error {
 	if err := validateIndexedChanges(ac.CodeChanges); err != nil {
 		return fmt.Errorf("code_changes: %w", err)
 	}
+	for _, change := range ac.CodeChanges {
+		if err := change.validate(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1351,7 +1388,11 @@ func (bal BlockAccessList) DebugPrint(w io.Writer) {
 					fmt.Fprint(w, "<nil>")
 					continue
 				}
-				fmt.Fprintf(w, "%d:len(%d)", change.Index, len(change.Bytecode))
+				if change.CodeHash.IsNil() {
+					fmt.Fprintf(w, "%d:len(%d)", change.Index, len(change.Bytecode))
+				} else {
+					fmt.Fprintf(w, "%d:%s", change.Index, change.CodeHash)
+				}
 			}
 			fmt.Fprint(w, "]")
 		}

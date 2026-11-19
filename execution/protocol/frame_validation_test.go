@@ -75,6 +75,7 @@ func TestFrameValidationKeyedNonceDependency(t *testing.T) {
 func TestFrameValidationPolicy(t *testing.T) {
 	t.Parallel()
 	for name, code := range map[string][]byte{
+		"code adoption":   program.New().Push0().Op(vm.SETCODEFROM, vm.POP).Bytes(),
 		"timestamp":       program.New().Op(vm.TIMESTAMP, vm.POP).Bytes(),
 		"gas observation": program.New().Op(vm.GAS, vm.POP).Bytes(),
 		"empty helper":    program.New().DelegateCall(uint256.NewInt(1_000), common.HexToAddress("0x2000"), 0, 0, 0, 0).Op(vm.POP).Bytes(),
@@ -135,6 +136,42 @@ func TestFrameValidationCodeAccess(t *testing.T) {
 			tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 10_000}}}
 			_, err := ValidateFrameTransaction(evm, tx)
 			require.NoError(t, err)
+		})
+	}
+}
+
+func TestFrameValidationSetCodeFrom(t *testing.T) {
+	helper := common.HexToAddress("0x2000")
+	for _, tc := range []struct {
+		name       string
+		helperCode []byte
+		wantErr    bool
+	}{
+		{"mutable helper", []byte{byte(vm.STOP), byte(vm.SETCODEFROM)}, true},
+		{"push immediate", []byte{byte(vm.PUSH1), byte(vm.SETCODEFROM)}, false},
+		{"dupn immediate", []byte{byte(vm.DUPN), byte(vm.SETCODEFROM)}, false},
+		{"proxy helper", []byte{byte(vm.STOP), byte(vm.DELEGATECALL)}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evm, tx := frameTestEnv(t)
+			ibs := evm.IntraBlockState()
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(helper), tc.helperCode, tracing.CodeChangeUnspecified))
+			senderCode := program.New().Push(helper).Op(vm.EXTCODESIZE, vm.POP).
+				Push(3).Push0().Push0().Op(vm.APPROVE, vm.STOP, vm.SETCODEFROM).Bytes()
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(tx.SenderAddress), senderCode, tracing.CodeChangeUnspecified))
+			tx.Frames = []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 20_000}}}
+			result, err := ValidateFrameTransaction(evm, tx)
+			if tc.wantErr {
+				require.ErrorContains(t, err, "mutable validation target")
+			} else {
+				require.NoError(t, err)
+				require.Contains(t, result.Dependencies, helper)
+				if tc.name == "proxy helper" {
+					require.Equal(t, []common.Address{helper}, result.ProxyDependencies)
+				} else {
+					require.Empty(t, result.ProxyDependencies)
+				}
+			}
 		})
 	}
 }

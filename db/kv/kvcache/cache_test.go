@@ -569,12 +569,50 @@ func TestOnNewBlockCodeHashKey(t *testing.T) {
 	require.Equal(code, elems[0].V)
 }
 
+func TestGetCodeReflectsAccountChanges(t *testing.T) {
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	for name, cache := range map[string]Cache{"coherent": New(cfg), "latest batch": NewLatestBatchCache()} {
+		t.Run(name, func(t *testing.T) {
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			addr := common.Address{19: 1}
+			for i, code := range [][]byte{{0xef, 1, 0}, {0x60, 0}, nil} {
+				version := uint64(i + 1)
+				require.NoError(t, db.UpdateTemporal(t.Context(), func(tx kv.TemporalRwTx) error {
+					return tx.Put(kv.Sequence, kv.PlainStateVersion, binary.BigEndian.AppendUint64(nil, version))
+				}))
+				account := accounts.NewAccount()
+				account.CodeHash = accounts.NewCode(code).Hash
+				action := remoteproto.Action_UPSERT_CODE
+				reportedCode := code
+				if code == nil {
+					action = remoteproto.Action_REMOVE
+					reportedCode = []byte{0x60, 0}
+				}
+				cache.OnNewBlock(&remoteproto.StateChangeBatch{StateVersionId: version, ChangeBatch: []*remoteproto.StateChange{{
+					Changes: []*remoteproto.AccountChange{{Address: gointerfaces.ConvertAddressToH160(addr), Action: action, Data: accounts.SerialiseV3(&account), Code: reportedCode}},
+				}}})
+				require.NoError(t, db.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+					view, err := cache.View(t.Context(), tx)
+					require.NoError(t, err)
+					got, err := view.GetCode(addr[:])
+					require.NoError(t, err)
+					require.Equal(t, code, got)
+					return nil
+				}))
+			}
+		})
+	}
+}
+
 func TestCode(t *testing.T) {
 	require, ctx := require.New(t), t.Context()
 	c := New(DefaultCoherentConfig)
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	k1 := [20]byte{1}
 	code := []byte{0x60, 0x00, 0x60, 0x00}
+	account := accounts.NewAccount()
+	account.CodeHash = accounts.NewCode(code).Hash
 
 	require.NoError(db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		d, err := execctx.NewSharedDomains(ctx, tx, log.New())
@@ -582,6 +620,9 @@ func TestCode(t *testing.T) {
 			return err
 		}
 		defer d.Close()
+		if err := d.DomainPut(kv.AccountsDomain, tx, k1[:], accounts.SerialiseV3(&account), 0, nil); err != nil {
+			return err
+		}
 		if err := d.DomainPut(kv.CodeDomain, tx, k1[:], code, 0, nil); err != nil {
 			return err
 		}
@@ -589,6 +630,9 @@ func TestCode(t *testing.T) {
 	}))
 
 	require.NoError(db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		version, err := tx.ReadSequence(string(kv.PlainStateVersion))
+		require.NoError(err)
+		c.OnNewBlock(&remoteproto.StateChangeBatch{StateVersionId: version})
 		cacheView, err := c.View(ctx, tx)
 		require.NoError(err)
 		view := cacheView.(*CoherentView)
@@ -601,6 +645,9 @@ func TestCode(t *testing.T) {
 		v, err = c.GetCode(k1[:], tx, view.stateVersionID)
 		require.NoError(err)
 		require.Equal(code, v)
+		check, err := c.ValidateCurrentRoot(ctx, tx)
+		require.NoError(err)
+		require.Empty(check.CodeKeysOutOfSync)
 		return nil
 	}))
 }

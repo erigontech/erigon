@@ -820,7 +820,7 @@ func (ibs *IntraBlockState) TxnIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
-	code, err := ibs.getCode(addr)
+	code, err := ibs.GetCodeWithHash(addr)
 	return code.Bytes, err
 }
 
@@ -845,7 +845,7 @@ func (ibs *IntraBlockState) ReadCodeSegmentTo(addr accounts.Address, from uint64
 	return err
 }
 
-func (ibs *IntraBlockState) getCode(addr accounts.Address) (accounts.Code, error) {
+func (ibs *IntraBlockState) GetCodeWithHash(addr accounts.Address) (accounts.Code, error) {
 	if ibs.versionMap == nil {
 		stateObject, err := ibs.getStateObject(addr, true)
 		if err != nil {
@@ -1001,10 +1001,10 @@ func (ibs *IntraBlockState) GetCommittedCodeHash(addr accounts.Address) (account
 func (ibs *IntraBlockState) ResolveCode(addr accounts.Address) (accounts.Code, error) {
 	// committed=false so the tx's own writes (e.g. EIP-7702 authorization) are
 	// visible rather than stale delegation code from the version map.
-	code, err := ibs.getCode(addr)
+	code, err := ibs.GetCodeWithHash(addr)
 	// eip-7702
 	if delegation, ok := types.ParseDelegation(code.Bytes); ok {
-		return ibs.getCode(delegation)
+		return ibs.GetCodeWithHash(delegation)
 	}
 	if err != nil {
 		return accounts.Code{}, err
@@ -1683,6 +1683,14 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		canonical = accounts.NewCode(code)
 		ibs.lastCode = canonical
 	}
+	return ibs.setCode(addr, canonical, reason)
+}
+
+func (ibs *IntraBlockState) AdoptCode(addr accounts.Address, code accounts.Code) error {
+	return ibs.setCode(addr, code, tracing.CodeChangeAdoption)
+}
+
+func (ibs *IntraBlockState) setCode(addr accounts.Address, canonical accounts.Code, reason tracing.CodeChangeReason) error {
 	// A live account this tx created: no own self-destruct, and createObject wrote its AddressPath.
 	if ibs.noMaterialize && !ibs.warmReadable(addr) && ibs.hasWrite(addr, AddressPath, accounts.NilKey) && !ibs.accountLifecycle(addr) {
 		return ibs.setCreatedCode(addr, canonical, reason)
@@ -1728,38 +1736,45 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 			if unchanged {
 				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x originalHash=%x codeLen=%d\n",
-					ibs.blockNum, ibs.txIndex, ibs.version, addr, codeHash, baseCodeHash, stateObject.original.CodeHash, len(code))
+					ibs.blockNum, ibs.txIndex, ibs.version, addr, codeHash, baseCodeHash, stateObject.original.CodeHash, canonical.Len())
 			} else {
 				fmt.Printf("%d (%d.%d) SetCode WRITE %x codeHash=%x baseHash=%x codeLen=%d\n",
-					ibs.blockNum, ibs.txIndex, ibs.version, addr, codeHash, baseCodeHash, len(code))
+					ibs.blockNum, ibs.txIndex, ibs.version, addr, codeHash, baseCodeHash, canonical.Len())
 			}
 		}
-		ibs.writeCode(addr, canonical, unchanged)
+		ibs.writeCode(addr, canonical, unchanged, reason)
 	}
 	return nil
 }
 
 // writeCode records code as this tx's Code, CodeHash and CodeSize writes, or
 // drops those writes when the code is unchanged.
-func (ibs *IntraBlockState) writeCode(addr accounts.Address, code accounts.Code, unchanged bool) {
+func (ibs *IntraBlockState) writeCode(addr accounts.Address, code accounts.Code, unchanged bool, reason tracing.CodeChangeReason) {
 	if unchanged {
 		ibs.versionedWrites.DelCode(addr)
 		ibs.versionedWrites.DelCodeHash(addr)
 		ibs.versionedWrites.DelCodeSize(addr)
 		return
 	}
-	ibs.recordWriteCode(addr, code)
+	ibs.recordWriteCode(addr, code, reason)
 	ibs.recordWriteCodeHash(addr, code.Hash)
 	ibs.recordWriteCodeSize(addr, code.Len())
 }
 
 // journalCodeChange journals a code change and calls the tracing hooks.
 func (ibs *IntraBlockState) journalCodeChange(addr accounts.Address, prevHash accounts.CodeHash, prevCode []byte, code accounts.Code, wasCommited bool, reason tracing.CodeChangeReason) {
-	ibs.journal.codeChange(addr, prevCode, prevHash, wasCommited)
+	ibs.journalPreviousCode(addr, prevHash, prevCode, wasCommited)
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnCodeChangeV2 != nil {
 		ibs.tracingHooks.OnCodeChangeV2(addr, prevHash, prevCode, code.Hash, code.Bytes, reason)
 	} else if ibs.tracingHooks != nil && ibs.tracingHooks.OnCodeChange != nil {
 		ibs.tracingHooks.OnCodeChange(addr, prevHash, prevCode, code.Hash, code.Bytes)
+	}
+}
+
+func (ibs *IntraBlockState) journalPreviousCode(addr accounts.Address, hash accounts.CodeHash, code []byte, committed bool) {
+	entry := ibs.journal.codeChange(addr, code, hash, committed)
+	if prev, ok := ibs.versionedWrites.GetCode(addr); ok {
+		entry.aux = uint64(prev.CodeReason)
 	}
 }
 
@@ -1789,7 +1804,7 @@ func (ibs *IntraBlockState) setCreatedCode(addr accounts.Address, code accounts.
 		return nil
 	}
 	ibs.journalCodeChange(addr, prev.Hash, prev.Bytes, code, !hadCode, reason)
-	ibs.writeCode(addr, code, code.Hash == prev.Hash)
+	ibs.writeCode(addr, code, code.Hash == prev.Hash, reason)
 	return nil
 }
 
@@ -1899,12 +1914,12 @@ func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) e
 	if ibs.versionMap != nil {
 		// An incarnation cell wipes storage and code for later transactions: a slot
 		// or code without a newer cell reads as empty, so the code is written again.
-		code, err := ibs.getCode(addr)
+		code, err := ibs.GetCodeWithHash(addr)
 		if err != nil {
 			return err
 		}
 		if code.Len() > 0 {
-			ibs.writeCode(addr, code, false)
+			ibs.writeCode(addr, code, false, tracing.CodeChangeUnspecified)
 		}
 		ibs.recordWriteIncarnation(addr, stateObject.data.Incarnation)
 		// The incarnation cell does not hide a slot cell of an earlier transaction.
@@ -2081,6 +2096,15 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 }
 
 var zeroBalance uint256.Int
+
+func (ibs *IntraBlockState) ContractCreatedThisTx(addr accounts.Address) (bool, error) {
+	if ibs.versionMap != nil {
+		created, _ := ibs.versionedWriteCreateContract(addr)
+		return created, nil
+	}
+	obj, err := ibs.getStateObject(addr, true)
+	return obj != nil && obj.newlyCreated && obj.createdContract, err
+}
 
 // Used for EIP-6780
 func (ibs *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
@@ -3455,19 +3479,20 @@ func (ibs *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val
 	traceWrite(ibs, vw)
 }
 
-func (ibs *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.Code) {
+func (ibs *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.Code, reason tracing.CodeChangeReason) {
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
 	}
 	if vw, ok := ibs.versionedWrites.GetCode(addr); ok {
 		vw.Version = ibs.Version()
+		vw.CodeReason = reason
 		vw.Val = val
 		traceWrite(ibs, vw)
 		return
 	}
 	vw := ibs.versionedWrites.newVWCode()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: CodePath, Version: ibs.Version()}
+	vw.WriteHeader = WriteHeader{Address: addr, Path: CodePath, Version: ibs.Version(), CodeReason: reason}
 	vw.Val = val
 	ibs.versionedWrites.SetCode(addr, vw)
 	traceWrite(ibs, vw)
@@ -3896,9 +3921,9 @@ func (ibs *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 			// contain the post-write code value (when the worker read the code
 			// after a SetCodeTx modified it), causing SetCode's equality
 			// comparison to incorrectly skip the update and leave dirtyCode unset.
-			ibs.journal.codeChange(addr, stateObject.code.Bytes, stateObject.data.CodeHash, !ibs.hasWrite(addr, CodePath, accounts.NilKey))
+			ibs.journalPreviousCode(addr, stateObject.data.CodeHash, stateObject.code.Bytes, !ibs.hasWrite(addr, CodePath, accounts.NilKey))
 			stateObject.setCode(code)
-			ibs.recordWriteCode(addr, code)
+			ibs.recordWriteCode(addr, code, vwCode.CodeReason)
 			ibs.recordWriteCodeHash(addr, code.Hash)
 			ibs.recordWriteCodeSize(addr, code.Len())
 		case CodeHashPath, CodeSizePath:

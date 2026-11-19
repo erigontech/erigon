@@ -101,6 +101,8 @@ type CallContext struct {
 	// Stack.data is 32 KB it can skip entirely.
 	Contract        Contract
 	create          createGasPreparation
+	adoption        accounts.Code
+	writeAdoption   bool
 	slots           frameSlots
 	Stack           Stack
 	addressWords    [addressWordCount]uint256.Int
@@ -237,6 +239,7 @@ func (evm *EVM) putCallContext(ctx *CallContext) {
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
 	ctx.create = createGasPreparation{}
+	ctx.adoption = accounts.Code{}
 	ctx.slots.ok = [2]bool{}                 // the next frame may have another storage address
 	ctx.slots.key = [2]accounts.StorageKey{} // like cachedKey below: release the canonMap pins
 	ctx.slots.memoGen = ^uint64(0)

@@ -381,6 +381,15 @@ func (p *TxPool) simulateFrame(ctx context.Context, txn *TxnSlot, generation uin
 		}
 		v.Dependencies = append(v.Dependencies, gointerfaces.ConvertH160toAddress(dependency))
 	}
+	for _, proxy := range reply.ProxyDependencies {
+		if proxy.GetHi() == nil {
+			return frameValidationResult{}, errors.New("invalid frame proxy dependency")
+		}
+		address := gointerfaces.ConvertH160toAddress(proxy)
+		if !slices.Contains(v.ProxyDependencies, address) {
+			v.ProxyDependencies = append(v.ProxyDependencies, address)
+		}
+	}
 	for _, dependency := range reply.CreationNonces {
 		if dependency == nil || dependency.Address.GetHi() == nil || dependency.MinNonce > dependency.MaxNonce {
 			return frameValidationResult{}, errors.New("invalid frame creation nonce dependency")
@@ -433,13 +442,20 @@ func (p *TxPool) checkFrameAdmission(txn *TxnSlot, found *metaTxn) txpoolcfg.Dis
 // checkFrameReservation requires the pool lock. Replacements and revalidation
 // reuse the previous reservation, so only their net change counts against balance.
 func (p *TxPool) checkFrameReservation(txn *TxnSlot, v *protocol.FrameValidation, previous *metaTxn) txpoolcfg.DiscardReason {
-	reserved := p.frameReservations[v.Payer]
+	var old *protocol.FrameValidation
 	if previous != nil {
-		if old := previous.TxnSlot.frameValidation; old != nil && old.Payer == v.Payer {
-			reserved.cost.Sub(&reserved.cost, &previous.TxnSlot.Txn.(*types.FrameTransaction).Fees.MaxFee)
-			if old.Paymaster {
-				reserved.paymasters--
-			}
+		old = previous.TxnSlot.frameValidation
+	}
+	for _, proxy := range v.ProxyDependencies {
+		if p.frameProxyUsers[proxy] >= max(1, p.cfg.AccountSlots) && (old == nil || !slices.Contains(old.ProxyDependencies, proxy)) {
+			return txpoolcfg.InvalidFrame
+		}
+	}
+	reserved := p.frameReservations[v.Payer]
+	if old != nil && old.Payer == v.Payer {
+		reserved.cost.Sub(&reserved.cost, &previous.TxnSlot.Txn.(*types.FrameTransaction).Fees.MaxFee)
+		if old.Paymaster {
+			reserved.paymasters--
 		}
 	}
 	// All coded paymasters use the non-canonical pool policy: one pending frame
@@ -515,6 +531,12 @@ func (p *TxPool) reserveFrame(txn *TxnSlot) {
 	if v == nil {
 		return
 	}
+	for _, proxy := range v.ProxyDependencies {
+		if p.frameProxyUsers == nil {
+			p.frameProxyUsers = make(map[common.Address]uint64)
+		}
+		p.frameProxyUsers[proxy]++
+	}
 	if p.frameReservations == nil {
 		p.frameReservations = make(map[common.Address]frameReservation)
 	}
@@ -531,6 +553,13 @@ func (p *TxPool) releaseFrame(txn *TxnSlot) {
 	v := txn.frameValidation
 	if v == nil {
 		return
+	}
+	for _, proxy := range v.ProxyDependencies {
+		if p.frameProxyUsers[proxy] == 1 {
+			delete(p.frameProxyUsers, proxy)
+		} else {
+			p.frameProxyUsers[proxy]--
+		}
 	}
 	r := p.frameReservations[v.Payer]
 	r.cost.Sub(&r.cost, &txn.Txn.(*types.FrameTransaction).Fees.MaxFee)

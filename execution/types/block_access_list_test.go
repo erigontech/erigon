@@ -456,6 +456,46 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 	}
 }
 
+func TestCodeChangeRLP(t *testing.T) {
+	hash := common.Hash{31: 1}
+	for _, tc := range []struct {
+		name   string
+		fields []any
+		want   *CodeChange
+	}{
+		{"32 bytes of code", []any{uint64(1), hash[:]}, &CodeChange{Index: 1, Bytecode: hash[:]}},
+		{"adopted hash", []any{uint64(1), []byte{}, hash[:]}, &CodeChange{Index: 1, CodeHash: accounts.InternCodeHash(hash)}},
+		{"code and hash", []any{uint64(1), []byte{1}, hash[:]}, nil},
+		{"short hash", []any{uint64(1), []byte{}, hash[:31]}, nil},
+		{"extra field", []any{uint64(1), []byte{}, hash[:], []byte{}}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := rlp.EncodeToBytes(tc.fields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got CodeChange
+			err = rlp.DecodeBytes(raw, &got)
+			if tc.want == nil {
+				if err == nil {
+					t.Fatal("invalid code change decoded successfully")
+				}
+				if tc.name == "code and hash" && !errors.Is(err, ErrInvalidBlockAccessList) {
+					t.Fatalf("want an invalid BAL, got %v", err)
+				}
+				return
+			}
+			if err != nil || got.Index != tc.want.Index || got.CodeHash != tc.want.CodeHash || !bytes.Equal(got.Bytecode, tc.want.Bytecode) {
+				t.Fatalf("decoded %+v, error %v", got, err)
+			}
+			encoded, err := rlp.EncodeToBytes(tc.want)
+			if err != nil || !bytes.Equal(raw, encoded) {
+				t.Fatalf("encoded %x, want %x, error %v", encoded, raw, err)
+			}
+		})
+	}
+}
+
 // EIP-7928 bounds the BAL by the block gas limit only, not by its encoded size.
 func TestBlockAccessListAbove10MiB(t *testing.T) {
 	code := make([]byte, 10<<20)

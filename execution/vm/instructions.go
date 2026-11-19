@@ -1440,6 +1440,18 @@ func opStop(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	return pc, nil, errStopToken
 }
 
+func opSetCodeFrom(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	if scope.adoption.IsEmpty() {
+		scope.Stack.peek().Clear()
+		return pc, nil, nil
+	}
+	scope.Stack.peek().SetOne()
+	if scope.writeAdoption {
+		return pc, nil, evm.IntraBlockState().AdoptCode(scope.Address(), scope.adoption)
+	}
+	return pc, nil, nil
+}
+
 func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection

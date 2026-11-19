@@ -75,12 +75,7 @@ func (evm *EVM) runPrecompile(p PrecompiledContract, input []byte, gas mdgas.MdG
 	return slices.Clip(*buf), remaining, nil
 }
 
-func (evm *EVM) runEcrecover(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
-	output, gas, err := RunPrecompiledContract(p, input, gas, tracer)
-	if err != nil || len(output) == 0 {
-		return output, gas, err
-	}
-	address := accounts.InternAddress(common.BytesToAddress(output))
+func (evm *EVM) codeAccessGas(address accounts.Address, tracer *tracing.Hooks) uint64 {
 	if tracer != nil && tracer.OnAccountAccess != nil {
 		tracer.OnAccountAccess(address)
 	}
@@ -88,6 +83,24 @@ func (evm *EVM) runEcrecover(p PrecompiledContract, input []byte, gas mdgas.MdGa
 	if !evm.intraBlockState.AddressInAccessList(address) {
 		gasCost += params.ColdAccountAccessCostEIP8038 - params.WarmStorageReadCostEIP2929
 	}
+	return gasCost
+}
+
+func (evm *EVM) recordCodeAccess(address accounts.Address, tracer *tracing.Hooks) {
+	evm.intraBlockState.AddAddressToAccessList(address)
+	evm.intraBlockState.MarkAddressAccess(address, false)
+	if tracer != nil && tracer.OnAccountRead != nil {
+		tracer.OnAccountRead(address)
+	}
+}
+
+func (evm *EVM) runEcrecover(p PrecompiledContract, input []byte, gas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
+	output, gas, err := RunPrecompiledContract(p, input, gas, tracer)
+	if err != nil || len(output) == 0 {
+		return output, gas, err
+	}
+	address := accounts.InternAddress(common.BytesToAddress(output))
+	gasCost := evm.codeAccessGas(address, tracer)
 	if gas.Execution < gasCost {
 		return nil, gas, ErrOutOfGas
 	}
@@ -96,11 +109,7 @@ func (evm *EVM) runEcrecover(p PrecompiledContract, input []byte, gas mdgas.MdGa
 	if tracer.HasGasChangeHook() {
 		tracer.EmitGasChange(gas, remaining, tracing.GasChangeCallPrecompiledContract)
 	}
-	evm.intraBlockState.AddAddressToAccessList(address)
-	evm.intraBlockState.MarkAddressAccess(address, false)
-	if tracer != nil && tracer.OnAccountRead != nil {
-		tracer.OnAccountRead(address)
-	}
+	evm.recordCodeAccess(address, tracer)
 	code, err := evm.intraBlockState.GetCode(address)
 	if err != nil {
 		return nil, remaining, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -820,6 +829,15 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 	}
 
 	ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, nil, false)
+
+	if err == nil && evm.chainRules.IsBogota {
+		deployed, readErr := evm.intraBlockState.GetCode(address)
+		if readErr != nil {
+			err = fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, readErr)
+		} else if len(deployed) != 0 {
+			return deployed, address, gasRemaining, gasUsed, nil
+		}
+	}
 
 	// EIP-170: Contract code size limit
 	if err == nil {
