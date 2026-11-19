@@ -875,6 +875,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 		}
 	}()
 
+	npTearT := time.Now()
 	executorCancel(nil)
 
 	if !hasLoggedExecution {
@@ -882,7 +883,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	}
 
 	// Wait for all goroutines to complete before reading shared state.
-	if waitErr := pe.wait(); waitErr != nil {
+	npWaitT := time.Now()
+	waitErr := pe.wait()
+	if pe.isForkValidation {
+		log.Info("[np-phase] teardown", "npLoopToCancel", npTearT.Sub(npImplStart), "npLog", npWaitT.Sub(npTearT), "npWait", time.Since(npWaitT))
+	}
+	if waitErr != nil {
 		if execErr == nil {
 			execErr = waitErr
 		} else {
