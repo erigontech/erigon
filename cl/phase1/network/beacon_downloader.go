@@ -47,12 +47,17 @@ type ProcessFn func(
 	newHighestSlotProcessed uint64,
 	err error)
 
+type blocksByRangeRequester interface {
+	SendBeaconBlocksByRangeReq(ctx context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error)
+}
+
 type ForwardBeaconDownloader struct {
 	ctx                   context.Context
 	highestSlotProcessed  uint64
 	highestSlotUpdateTime time.Time
 	minSlot               uint64 // earliest requestable slot (e.g. checkpoint anchor)
 	rpc                   *rpc.BeaconRpcP2P
+	ranges                blocksByRangeRequester
 	process               ProcessFn
 	beaconCfg             *clparams.BeaconChainConfig
 	httpFallbackURL       string      // beacon API base URL for HTTP fallback when P2P fails
@@ -65,6 +70,7 @@ func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, beac
 	return &ForwardBeaconDownloader{
 		ctx:       ctx,
 		rpc:       rpc,
+		ranges:    rpc,
 		beaconCfg: beaconCfg,
 	}
 }
@@ -139,6 +145,8 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 		// Start with a base interval; backoff increases it on repeated failures.
 		baseInterval := 300 * time.Millisecond
 		var consecutiveFailures atomic.Int32
+		// One request at a time per call: overlapping ones trip the serving peer's rate limit and bypass the backoff.
+		var inFlight atomic.Bool
 		reqInterval := time.NewTicker(baseInterval)
 		defer reqInterval.Stop()
 		// Timeout: if no blocks received within this duration, return to let the caller
@@ -150,7 +158,11 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 		for {
 			select {
 			case <-reqInterval.C:
+				if !inFlight.CompareAndSwap(false, true) {
+					continue
+				}
 				go func() {
+					defer inFlight.Store(false)
 					if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 						return
 					}
@@ -177,7 +189,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 					if time.Since(f.highestSlotUpdateTime) > 90*time.Second {
 						log.Trace("Forward beacon downloader gets stuck", "time", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
 					}
-					responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, reqCount)
+					responses, peerId, err := f.ranges.SendBeaconBlocksByRangeReq(ctx, reqSlot, reqCount)
 					if err != nil {
 						if errors.Is(err, peers.ErrNoPeers) {
 							log.Debug("[Caplin] no peers available for beacon blocks by range request", "slot", reqSlot, "reqCount", reqCount)
