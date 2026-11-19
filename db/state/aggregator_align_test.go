@@ -491,3 +491,42 @@ func TestVisibleFilesAligned_HistoryGapLowersEveryListWithoutDependencies(t *tes
 
 	requireVisibleEnd(t, agg, alignStepSize)
 }
+
+func TestAggregatorBuildResumesCommitmentBehindState(t *testing.T) {
+	const stepSize = uint64(10)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	ctx := t.Context()
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 5}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder(db))
+	agg.DisableInterDomainDependencies()
+	realign := agg.Unalign(kv.CommitmentDomain)
+	agg.ForbidVisibilityLowering()
+
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		at := agg.BeginFilesRo()
+		defer at.Close()
+		require.Equal(t, 5*stepSize, at.TxNumsInFiles(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain))
+		require.Equal(t, stepSize, at.TxNumsInFiles(kv.CommitmentDomain))
+		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CommitmentDomain} {
+			firstStep := uint64(5)
+			if domain == kv.CommitmentDomain {
+				firstStep = 1
+			}
+			writer := at.d[domain].NewWriter(db)
+			t.Cleanup(writer.Close)
+			for txNum := firstStep*stepSize + 1; txNum <= 6*stepSize+1; txNum += stepSize {
+				require.NoError(t, writer.PutWithPrev([]byte{byte(txNum)}, []byte{7}, txNum, nil))
+			}
+			require.NoError(t, writer.Flush(ctx, tx))
+			writer.Close()
+		}
+		return nil
+	}))
+
+	// Existing state files cover the history pruned from MDBX during a commitment rebuild.
+	require.NoError(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), 1, 5, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	requireVisibleEnd(t, agg, 5*stepSize)
+	realign()
+}
