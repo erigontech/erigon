@@ -54,7 +54,7 @@ func newStateRecoveryBenchmarkPool(b *testing.B, cache kvcache.Cache) (*TxPool, 
 	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
 	cfg := txpoolcfg.DefaultConfig
 	pool, poolErr := New(ctx, make(chan Announcements, 1), mdbxtest.NewTestPoolDB(b), db, cfg, cache,
-		chain.TestChainOsakaConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+		chain.TestChainOsakaConfig, nil, nil, func() {}, nil, nil, logger)
 	require.NoError(b, poolErr)
 	pool.started.Store(true)
 	count := cfg.PendingSubPoolLimit + cfg.BaseFeeSubPoolLimit + cfg.QueuedSubPoolLimit

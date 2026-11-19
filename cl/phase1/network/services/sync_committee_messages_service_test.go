@@ -86,7 +86,7 @@ func TestSyncCommitteesIgnoresForgedSlotThatAliasesToNow(t *testing.T) {
 
 	mockFuncs := &mockFuncs{ctrl: ctrl}
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures // no expectation: any call fails the test
+	blsVerifyMultipleSignatures = withoutDecompressed(mockFuncs.BlsVerifyMultipleSignatures) // no expectation: any call fails the test
 
 	state, msg := getObjectsForSyncCommitteesServiceTest()
 	cfg := &clparams.MainnetBeaconConfig
@@ -139,7 +139,7 @@ func TestSyncCommitteesSuccess(t *testing.T) {
 
 	mockFuncs := &mockFuncs{ctrl: ctrl}
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+	blsVerifyMultipleSignatures = withoutDecompressed(mockFuncs.BlsVerifyMultipleSignatures)
 
 	state, msg := getObjectsForSyncCommitteesServiceTest()
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
@@ -164,7 +164,7 @@ func TestSyncCommitteesIgnoresReplacementWithDifferentContent(t *testing.T) {
 
 	mockFuncs := &mockFuncs{ctrl: ctrl}
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+	blsVerifyMultipleSignatures = withoutDecompressed(mockFuncs.BlsVerifyMultipleSignatures)
 
 	state, msg := getObjectsForSyncCommitteesServiceTest()
 	// Exactly one verification call is ever expected: gomock fails the test
@@ -203,7 +203,7 @@ func TestSyncCommitteesRetryAfterFailedPublishStillSucceeds(t *testing.T) {
 
 	mockFuncs := &mockFuncs{ctrl: ctrl}
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+	blsVerifyMultipleSignatures = withoutDecompressed(mockFuncs.BlsVerifyMultipleSignatures)
 
 	state, msg := getObjectsForSyncCommitteesServiceTest()
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
@@ -226,7 +226,7 @@ func TestSyncCommitteesIgnoresRetryAfterSuccessfulPublish(t *testing.T) {
 
 	mockFuncs := &mockFuncs{ctrl: ctrl}
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+	blsVerifyMultipleSignatures = withoutDecompressed(mockFuncs.BlsVerifyMultipleSignatures)
 
 	state, msg := getObjectsForSyncCommitteesServiceTest()
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
@@ -247,7 +247,7 @@ func TestSyncCommitteesIgnoresRetryAfterSuccessfulPublish(t *testing.T) {
 // whatever slot the head is at.
 func TestSyncCommitteesChecksTheCommitteeOfTheMessageSlot(t *testing.T) {
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(_, _, _ [][]byte) (bool, error) { return true, nil }
+	blsVerifyMultipleSignatures = withoutDecompressed(func(_, _, _ [][]byte) (bool, error) { return true, nil })
 	fixture, _ := getObjectsForSyncCommitteesServiceTest()
 	period := fixture.BeaconConfig().SlotsPerEpoch * fixture.BeaconConfig().EpochsPerSyncCommitteePeriod
 
@@ -325,7 +325,7 @@ func TestSyncCommitteesGossipRejectsInvalidSignatureBeforeAccepting(t *testing.T
 	ctrl := gomock.NewController(t)
 	mockFuncs := &mockFuncs{ctrl: ctrl}
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+	blsVerifyMultipleSignatures = withoutDecompressed(mockFuncs.BlsVerifyMultipleSignatures)
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
 	state, msg := getObjectsForSyncCommitteesServiceTest()
 	msg.ImmediateVerification = false
@@ -343,11 +343,11 @@ func TestSyncCommitteesGossipWaitsForVerificationWithoutHoldingLocks(t *testing.
 	entered, release := make(chan struct{}), make(chan struct{})
 	releaseVerification := sync.OnceFunc(func() { close(release) })
 	t.Cleanup(releaseVerification)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		close(entered)
 		<-release
 		return true, nil
-	}
+	})
 	state, msg := getObjectsForSyncCommitteesServiceTest()
 	msg.ImmediateVerification = false
 	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
@@ -384,11 +384,11 @@ func TestSyncCommitteesAcceptsOneOfConcurrentlyVerifiedMessagesForTheSameValidat
 			saveSignatureGlobals(t)
 			var entered sync.WaitGroup
 			entered.Add(2)
-			blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+			blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 				entered.Done()
 				entered.Wait()
 				return true, nil
-			}
+			})
 			var poolAdds atomic.Int32
 			pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
 			pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
@@ -436,7 +436,7 @@ func TestSyncCommitteesAcceptsOneOfConcurrentlyVerifiedMessagesForTheSameValidat
 func TestSyncCommitteesPoolAddDoesNotBlockDuplicateCheck(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil }
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil })
 	entered, release := make(chan struct{}), make(chan struct{})
 	releasePoolAdd := sync.OnceFunc(func() { close(release) })
 	t.Cleanup(releasePoolAdd)
@@ -478,10 +478,10 @@ func TestSyncCommitteesPoolAddsHoldOneHeadStateViewAtATime(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	saveSignatureGlobals(t)
 	verified := make(chan struct{}, 2)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		verified <- struct{}{}
 		return true, nil
-	}
+	})
 	entered := make(chan struct{}, 2)
 	firstRelease, secondRelease := make(chan struct{}), make(chan struct{})
 	releaseFirst := sync.OnceFunc(func() { close(firstRelease) })
@@ -586,7 +586,7 @@ func otherValidatorOnSubnet(t *testing.T, s *state.CachingBeaconState, slot, sub
 func TestSyncCommitteesCleansStaleMessagesOncePerHeadSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil }
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil })
 	headState, msg := getObjectsForSyncCommitteesServiceTest()
 	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
 	require.NoError(t, synced.OnHeadState(headState))
@@ -645,11 +645,11 @@ func TestSyncCommitteesIgnoresMessageVerifiedAfterTheHeadMovedPastIt(t *testing.
 	entered, release := make(chan struct{}), make(chan struct{})
 	releaseVerification := sync.OnceFunc(func() { close(release) })
 	t.Cleanup(releaseVerification)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		close(entered)
 		<-release
 		return true, nil
-	}
+	})
 	var poolAdds atomic.Int32
 	pool := syncpoolmock.NewMockSyncContributionPool(ctrl)
 	pool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
@@ -696,12 +696,12 @@ func TestSyncCommitteesIgnoresDuplicateVerifiedAfterTheFirstWasPublished(t *test
 	ctrl := gomock.NewController(t)
 	saveSignatureGlobals(t)
 	entered := make(chan chan struct{}, 2)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) {
 		release := make(chan struct{})
 		entered <- release
 		<-release
 		return true, nil
-	}
+	})
 	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
 	headState, msg := getObjectsForSyncCommitteesServiceTest()
 	require.NoError(t, synced.OnHeadState(headState))
@@ -727,7 +727,7 @@ func TestSyncCommitteesIgnoresDuplicateVerifiedAfterTheFirstWasPublished(t *test
 func TestSyncCommitteesMessageStaleAfterWaitingForThePoolIsIgnored(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil }
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil })
 	entered, release := make(chan struct{}, 2), make(chan struct{})
 	releasePool := sync.OnceFunc(func() { close(release) })
 	t.Cleanup(releasePool)
@@ -783,7 +783,7 @@ func TestSyncCommitteesMessageStaleAfterWaitingForThePoolIsIgnored(t *testing.T)
 func TestSyncCommitteesEvictedSlotStaysEvictedAfterHeadRollback(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil }
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil })
 	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
 	headState, msg := getObjectsForSyncCommitteesServiceTest()
 	require.NoError(t, synced.OnHeadState(headState))
@@ -844,7 +844,7 @@ func TestSyncCommitteesEvictedSlotStaysEvictedAfterHeadRollback(t *testing.T) {
 func TestSyncCommitteesClaimantIgnoresMessagePublishedWhileItWaitedForThePool(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	saveSignatureGlobals(t)
-	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil }
+	blsVerifyMultipleSignatures = withoutDecompressed(func(signatures, signRoots, pks [][]byte) (bool, error) { return true, nil })
 	entered, release := make(chan struct{}, 1), make(chan struct{})
 	releasePool := sync.OnceFunc(func() { close(release) })
 	t.Cleanup(releasePool)

@@ -141,13 +141,13 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 
 		batch.add(cfg, header, blockHash, body, cached)
 		if len(batch.txns) >= sendersBatchTxs || len(batch.blocks) >= sendersBatchBlocks {
-			if bad, err = batch.flush(ctx, cfg, collectorSenders); err != nil {
+			if bad, err = batch.flush(ctx, collectorSenders); err != nil {
 				return err
 			}
 		}
 	}
 	if bad == nil {
-		if bad, err = batch.flush(ctx, cfg, collectorSenders); err != nil {
+		if bad, err = batch.flush(ctx, collectorSenders); err != nil {
 			return err
 		}
 	}
@@ -232,7 +232,7 @@ func (b *sendersBatch) add(cfg SendersCfg, header *types.Header, hash common.Has
 	b.blocks = append(b.blocks, blk)
 }
 
-func (b *sendersBatch) flush(ctx context.Context, cfg SendersCfg, collector *etl.Collector) (*badSendersBlock, error) {
+func (b *sendersBatch) flush(ctx context.Context, collector *etl.Collector) (*badSendersBlock, error) {
 	defer func() { b.blocks, b.txns, b.signers = b.blocks[:0], b.txns[:0], b.signers[:0] }()
 	recovery := exec.StartBatchSendersRecovery(ctx, b.signers, b.txns)
 	recovered, batchErr := recovery.Wait(ctx)
@@ -289,7 +289,7 @@ func sendersBytes(senders []accounts.Address) []byte {
 	return out
 }
 
-func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
+func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
 	if err := u.Done(tx); err != nil {
 		return err

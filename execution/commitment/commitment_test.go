@@ -51,6 +51,42 @@ func noopCtxFactory(context.Context) (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
 }
 
+func TestCollectedHashedKeysIncludeHashedTouches(t *testing.T) {
+	u := NewUpdates(ModeCollect, t.TempDir(), KeyToHexNibbleHash)
+	account := []byte("0123456789abcdefghij")
+	other := []byte("jihgfedcba9876543210")
+	u.TouchPlainKey(string(account), nil, func(*KeyUpdate, []byte) {})
+	u.TouchPlainKeyDirect(string(account), &Update{Flags: NonceUpdate, Nonce: 1})
+	u.TouchPlainKeyDirect(string(other), &Update{Flags: NonceUpdate, Nonce: 2})
+	partial := []byte{0x3, 0x0, 0xa}
+	u.TouchHashedKey(partial)
+	u.TouchHashedKey(partial)
+
+	want := [][]byte{partial, KeyToHexNibbleHash(account), KeyToHexNibbleHash(other)}
+	slices.SortFunc(want, bytes.Compare)
+	require.Equal(t, want, u.CollectedHashedKeys())
+}
+
+func TestTouchPlainKeyDirectCollectMergesRepeatedTouches(t *testing.T) {
+	u := NewUpdates(ModeCollect, t.TempDir(), KeyToHexNibbleHash)
+	account := "0123456789abcdefghij"
+	first := &Update{Flags: BalanceUpdate, DeleteStorageSubtree: true}
+	first.Balance.SetUint64(5)
+	u.TouchPlainKeyDirect(account, first)
+	u.TouchPlainKeyDirect(account, &Update{Flags: NonceUpdate, Nonce: 7})
+
+	var got []*Update
+	require.NoError(t, u.Drain(func(_ string, upd *Update) error {
+		got = append(got, upd)
+		return nil
+	}))
+	require.Len(t, got, 1)
+	require.True(t, got[0].DeleteStorageSubtree)
+	require.Equal(t, BalanceUpdate|NonceUpdate, got[0].Flags)
+	require.Equal(t, uint64(5), got[0].Balance.Uint64())
+	require.Equal(t, uint64(7), got[0].Nonce)
+}
+
 type gatedPatriciaContext struct {
 	sleep       time.Duration
 	descend     bool
@@ -885,7 +921,7 @@ func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
 	require.Nil(t, ut.tree)
 	require.Nil(t, ut.treeIdx)
 	require.Nil(t, ut.etl, "ModeParallel uses the prefix trie, not any ETL collector")
-	require.True(t, ut.IsConcurrentCommitment(), "IsConcurrentCommitment must report true for ModeParallel")
+	require.Equal(t, ModeParallel, ut.Mode(), "collection must stay in ModeParallel")
 	require.Equal(t, uint64(0), ut.Size())
 }
 
@@ -1041,7 +1077,6 @@ func TestInitializeTrieAndUpdates_Variants(t *testing.T) {
 			require.Equal(t, tc.wantMode, upd.Mode())
 			if tc.wantParallel {
 				require.NotNil(t, upd.parallel)
-				require.True(t, upd.IsConcurrentCommitment())
 			} else {
 				require.Nil(t, upd.parallel)
 			}

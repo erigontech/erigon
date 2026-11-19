@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -102,4 +103,12 @@ func saveSignatureGlobals(t testing.TB) {
 		blsVerify = origBlsVerify
 		blsVerifyMultipleSignatures = origBlsVerifyMultipleSignatures
 	})
+}
+
+// withoutDecompressed adapts a (bool, error) verification stub; callbacks then fall back to the compressed signatures.
+func withoutDecompressed(verify func(sigs, msgs, pks [][]byte) (bool, error)) func(sigs, msgs, pks [][]byte) (bool, []bls.Signature, error) {
+	return func(sigs, msgs, pks [][]byte) (bool, []bls.Signature, error) {
+		valid, err := verify(sigs, msgs, pks)
+		return valid, nil, err
+	}
 }

@@ -52,7 +52,8 @@ const (
 // store still holds everything the caller was about to stop advertising.
 var ErrPruneNotStarted = errors.New("prune did not start")
 
-// bucketStore holds sidecars under <slot/subdivisionSlot>/<blockRoot>_<index>.
+// bucketStore holds sidecars under <slot/subdivisionSlot>/<blockRoot>_<index>, and columns also under
+// <slot/subdivisionSlot>/packs/<blockRoot>.pack.
 //
 // The caller picks the slot granularity. Reads need none: a write lands by rename, so a
 // reader sees the old file or the new one and never a partial. Writes do — see writeAdmitted.
@@ -141,63 +142,6 @@ func (b *bucketStore) writeAdmitted(slot uint64, root common.Hash, idx uint64, v
 	return created, nil
 }
 
-type batchEntry struct {
-	idx uint64
-	v   ssz.Marshaler
-}
-
-// writeMissingAdmitted stores the entries whose target is absent, skipping the rest. It
-// encodes and fsyncs all temp files in parallel and renames them only once every one is
-// durable, so a failure before the renames leaves no target of this batch. existing and
-// created hold positions into entries, also when err is set; entries left out of both were
-// not stored. The caller holds startWrite and the stripe lock that serializes writes of
-// these files.
-func (b *bucketStore) writeMissingAdmitted(slot uint64, root common.Hash, entries []batchEntry) (existing, created []int, err error) {
-	l := b.forBucket(slot / subdivisionSlot)
-	l.RLock()
-	defer l.RUnlock()
-	var missing []int
-	for i, e := range entries {
-		_, file := b.path(slot, root, e.idx)
-		if _, err := b.fs.Stat(file); err == nil {
-			existing = append(existing, i)
-		} else if errors.Is(err, os.ErrNotExist) {
-			missing = append(missing, i)
-		} else {
-			return existing, nil, err
-		}
-	}
-	if len(missing) == 0 {
-		return existing, nil, nil
-	}
-	dir, _ := b.path(slot, root, 0)
-	if err := b.fs.MkdirAll(dir, 0o755); err != nil {
-		return existing, nil, err
-	}
-	targets := make([]string, len(missing))
-	temps := make([]string, len(missing))
-	for j, i := range missing {
-		_, targets[j] = b.path(slot, root, entries[i].idx)
-		temps[j] = targets[j] + tmpSuffix
-	}
-	if err := b.encodeAll(temps, entries, missing); err != nil {
-		for _, tmp := range temps {
-			b.removeTemp(tmp)
-		}
-		return existing, nil, err
-	}
-	for j, i := range missing {
-		if err := b.fs.Rename(temps[j], targets[j]); err != nil {
-			for _, tmp := range temps[j:] {
-				b.removeTemp(tmp)
-			}
-			return existing, created, err
-		}
-		created = append(created, i)
-	}
-	return existing, created, nil
-}
-
 // encodeAll encodes entries[positions[j]] onto temps[j].
 func (b *bucketStore) encodeAll(temps []string, entries []batchEntry, positions []int) error {
 	if len(temps) == 1 { // inline, so a panic reaches the caller's recover and its deferred unlocks
@@ -284,12 +228,12 @@ func (b *bucketStore) stream(w io.Writer, slot uint64, root common.Hash, idx uin
 	return err
 }
 
-// EarliestStoredSlot returns where the lowest bucket holding a sidecar starts, which can be
-// below the first sidecar actually stored in it, or 0 when nothing is stored. A bucket that
+// earliestStoredSlot returns where the lowest bucket for which holds reports a stored sidecar starts, which
+// can be below the first sidecar actually stored in it, or 0 when nothing is stored. A bucket that
 // cannot be read is skipped, since its sidecars cannot be served either, but when no readable
 // bucket holds a sidecar the first read error is returned, so an unreadable store is not
 // mistaken for an empty one.
-func (b *bucketStore) EarliestStoredSlot() (uint64, error) {
+func (b *bucketStore) earliestStoredSlot(holds func(dir string) (bool, error)) (uint64, error) {
 	entries, err := afero.ReadDir(b.fs, ".")
 	if err != nil {
 		return 0, err
@@ -309,7 +253,7 @@ func (b *bucketStore) EarliestStoredSlot() (uint64, error) {
 	slices.Sort(buckets)
 	var firstErr error
 	for _, bucket := range buckets {
-		stored, err := b.holdsSidecar(strconv.FormatUint(bucket, 10))
+		stored, err := holds(strconv.FormatUint(bucket, 10))
 		if err != nil {
 			log.Warn("[blob_storage] skipping unreadable column bucket", "bucket", bucket, "err", err)
 			if firstErr == nil {
