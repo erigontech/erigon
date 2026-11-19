@@ -385,9 +385,6 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		if so, ok := s.stateObjects[je.account]; ok {
 			so.selfdestructed = prev
 			if s.versionMap == nil { // the versioned path keeps the flag in its CreateContract cell
-				if prevCreated && !so.createdContract {
-					clear(so.originStorage) // a read while destructed cached a value from before the creation
-				}
 				so.createdContract = prevCreated
 			}
 			so.setBalance(je.value)

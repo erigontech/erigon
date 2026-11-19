@@ -226,6 +226,9 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 		res.Clear()
 	}
 
+	if so.selfdestructed { // a revert can make this a contract created in this tx, whose old slots read zero
+		return res, nil
+	}
 	so.originStorage.set(key, res)
 	so.blockOriginStorage.set(key, res)
 

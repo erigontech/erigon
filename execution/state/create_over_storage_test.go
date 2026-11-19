@@ -241,3 +241,56 @@ func TestRevertedSelfdestructKeepsCreatedContract(t *testing.T) {
 		})
 	}
 }
+
+// A reverted SELFDESTRUCT keeps the origin values that an earlier tx committed for the contract.
+func TestRevertedSelfdestructKeepsEarlierTxOrigin(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress([20]byte{0x51})
+	k5 := accounts.InternKey([32]byte{31: 5})
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(1)
+	reader := &storageReader{addr: x, account: &acc, storage: map[accounts.StorageKey]uint256.Int{k5: *uint256.NewInt(3)}}
+	rules := &chain.Rules{}
+	ibs := New(reader)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.CreateAccount(x, true))
+	require.NoError(t, ibs.SetState(x, k5, *uint256.NewInt(7)))
+	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+
+	ibs.SetTxContext(1, 1)
+	snap := ibs.PushSnapshot()
+	_, err := ibs.Selfdestruct(x, false)
+	require.NoError(t, err)
+	ibs.RevertToSnapshot(snap, nil)
+	original, err := ibs.GetCommittedState(x, k5)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(7), original)
+}
+
+// A slot read while the created contract is destructed must not become the block-start value
+// that decides whether CommitBlock writes the slot.
+func TestRevertedSelfdestructCommitsSlotEqualToPreCreationValue(t *testing.T) {
+	t.Parallel()
+	x := accounts.InternAddress([20]byte{0x51})
+	k5 := accounts.InternKey([32]byte{31: 5})
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(1)
+	reader := &storageReader{addr: x, account: &acc, storage: map[accounts.StorageKey]uint256.Int{k5: *uint256.NewInt(3)}}
+	rules := &chain.Rules{}
+	ibs := New(reader)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.CreateAccount(x, true))
+	snap := ibs.PushSnapshot()
+	_, err := ibs.Selfdestruct(x, false)
+	require.NoError(t, err)
+	_, err = ibs.GetState(x, k5)
+	require.NoError(t, err)
+	ibs.RevertToSnapshot(snap, nil)
+	require.NoError(t, ibs.SetState(x, k5, *uint256.NewInt(3)))
+	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	w := newFinalStateWriter()
+	require.NoError(t, ibs.CommitBlock(rules, w))
+	require.Equal(t, *uint256.NewInt(3), w.storage[x][k5])
+}
