@@ -1882,7 +1882,6 @@ func finalizeTraceTx(ibs *state.IntraBlockState, rules *chain.Rules, cloneReader
 	}
 	initialIbs := state.NewWithVersionMap(cloneReader, state.NewVersionMap(nil))
 	defer initialIbs.Close()
-	initialIbs.SetNoConflictDetection()
 	var changes bufferedWriter
 	if err := ethapi.EndCallTx(ibs, rules, &changes); err != nil {
 		return err
@@ -2102,7 +2101,6 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		}
 		initialIbs := state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
 		defer initialIbs.Close()
-		initialIbs.SetNoConflictDetection()
 		if err := sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
