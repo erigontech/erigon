@@ -1518,8 +1518,36 @@ func TestFramePoolBlobFeeFloor(t *testing.T) {
 	require.Empty(t, pool.frameReservations)
 }
 
+func TestFramePoolRemoteBlobPriceLimit(t *testing.T) {
+	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.cfg.MinFeeCap = 20
+	change := newBlockChangeForAccounts(common.Hash{1}, 0, sender)
+	change.PendingBlockBaseFee, change.PendingBlobFeePerGas = 1, 2
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	// The budget covers the execution price limit exactly when blob gas costs 1 wei.
+	frame := framePoolSlot(t, sender, 1, pool.cfg.MinFeeCap, uint256.Int{1}).Txn.(*types.FrameTransaction)
+	frame.Fees.MaxFee.AddUint64(&frame.Fees.MaxFee, params.GasPerBlob)
+	slot := framePoolSlotWithBlob(t, frame)
+	var txns TxnSlots
+	txns.Append(slot, sender[:], false)
+	reasons, err := pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.UnderPriced}, reasons)
+	require.Empty(t, pool.ethBackend.(*frameValidationBackend).calls)
+
+	change = newBlockChangeForAccounts(common.Hash{2}, 0)
+	change.PendingBlockBaseFee, change.PendingBlobFeePerGas = 1, 1
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	reasons, err = pool.addNewTxns(ctx, txns, nil)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	require.Equal(t, PendingSubPool, pool.byHash[string(slot.IDHash[:])].currentSubPool)
+}
+
 func TestFramePoolSponsoredBlobFeeFalls(t *testing.T) {
 	ctx, pool, sender := keyedFramePoolEnv(t)
+	pool.cfg.MinFeeCap = 10
 	backend := pool.ethBackend.(*frameValidationBackend)
 	backend.payer, backend.balance = common.Address{9}, common.Ether
 	change := newBlockChangeForAccounts(common.Hash{1}, 0, sender, backend.payer)

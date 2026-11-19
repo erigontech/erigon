@@ -177,11 +177,22 @@ func (p *TxPool) validateFrame(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardReas
 	if err := frame.Validate(); err != nil {
 		return txpoolcfg.InvalidFrame
 	}
-	if !isLocal && frame.GetFeeCap().LtUint64(p.cfg.MinFeeCap) {
-		return txpoolcfg.UnderPriced
-	}
 	_, _, limits, err := frame.GasLimits()
-	if err != nil || limits.Execution > p.blockGasLimit.Load() || limits.State > p.blockGasLimit.Load() {
+	if err != nil {
+		return txpoolcfg.GasLimitTooHigh
+	}
+	if !isLocal {
+		// A frame pays for blobs and execution from the same signed fee budget.
+		minFee, blobFee := uint256.NewInt(p.cfg.MinFeeCap), uint256.NewInt(p.pendingBlobFee.Load())
+		_, blobCost, err := frame.Fees.RequiredCost(limits.Total(), frame.GetBlobGas(), minFee, blobFee)
+		if err != nil {
+			if frame.Fees.MaxFee.Lt(&blobCost) {
+				return txpoolcfg.FeeTooLow
+			}
+			return txpoolcfg.UnderPriced
+		}
+	}
+	if limits.Execution > p.blockGasLimit.Load() || limits.State > p.blockGasLimit.Load() {
 		return txpoolcfg.GasLimitTooHigh
 	}
 	return txpoolcfg.Success
