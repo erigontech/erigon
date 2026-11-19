@@ -317,3 +317,28 @@ func TestStopPreExecCancelsARunThatStartsLater(t *testing.T) {
 	defer untrack()
 	require.ErrorIs(t, ctx.Err(), context.Canceled)
 }
+
+func TestBlockReadAheaderPreExecPublishesItsPathsUntilStopped(t *testing.T) {
+	f := newPreExecFixture(t, []byte{0x60, 0x2a, 0x60, 0x08, 0x55, 0x00})
+	oldQueue := preExecQueue
+	preExecQueue = true
+	t.Cleanup(func() {
+		preExecQueue = oldQueue
+		commitmentdb.PublishPreExecTouches(nil)
+		stoppedPreExec.Store(nil)
+	})
+	header := f.header()
+	header.ParentHash = common.Hash{0x51}
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{f.txn(t, 100_000, 1)}))
+	touches := commitmentdb.PreExecTouchesFor(header.Number.Uint64(), header.ParentHash)
+	require.NotNil(t, touches, "pre-exec must publish its queue under the block's number and parent hash")
+	require.Len(t, touches.C, 1, "a worker's last batch shorter than preExecBatch must reach the queue")
+	slot := common.Hash{31: 8}
+	require.Contains(t, <-touches.C, commitmentdb.PathTouch{Account: keccak.Sum256(f.contract[:]), Slot: keccak.Sum256(slot[:]), Storage: true})
+
+	StopPreExec(header.Hash())
+	_ = f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{f.txn(t, 100_000, 1)})
+	touches = commitmentdb.PreExecTouchesFor(header.Number.Uint64(), header.ParentHash)
+	require.NotNil(t, touches)
+	require.Empty(t, touches.C, "a pre-exec its block's compute stopped must queue nothing")
+}
