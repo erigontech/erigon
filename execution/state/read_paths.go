@@ -1276,7 +1276,7 @@ func recordWipedSelfDestruct(s *IntraBlockState, addr accounts.Address, life lif
 // read depends on it.
 func readClearedByCreate(s *IntraBlockState, hdr ReadHeader, r *readPathResult) {
 	if r.life.createInc < 0 {
-		s.dep = max(s.dep, r.life.createdAt)
+		s.noteDep(r.life.createdAt)
 	}
 	hdr.Source = MapRead
 	hdr.Version = Version{TxIndex: r.life.createdAt, Incarnation: r.life.createInc}

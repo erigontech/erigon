@@ -84,6 +84,7 @@ func TestOldSlotReadDependsOnAnInFlightCreation(t *testing.T) {
 	original, err := ibs.GetCommittedState(x, k5)
 	require.NoError(t, err)
 	require.Equal(t, 0, ibs.DepTxIndex())
+	require.False(t, ibs.FirstDepReadAt().IsZero(), "the dependency read must take the time")
 	require.True(t, original.IsZero())
 	ibs.PublishOrigins()
 	_, published := vm.LoadOriginStorage(x, k5)
