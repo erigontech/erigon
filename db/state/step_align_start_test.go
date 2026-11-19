@@ -17,7 +17,6 @@
 package state
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func TestStepAlignedEndRefusesUnindexedTail(t *testing.T) {
@@ -183,11 +183,8 @@ func TestStepAlignedMergesPlanEveryGroupOfEveryList(t *testing.T) {
 
 func generatePlainCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
-	generateCommitmentFile(t, dirs, ranges)
-	paths, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "v1.0-commitment.*"))
-	require.NoError(t, err)
-	require.NotEmpty(t, paths)
-	for _, path := range paths {
-		require.NoError(t, os.Rename(path, filepath.Join(dirs.SnapDomain, "v2.2-"+strings.TrimPrefix(filepath.Base(path), "v1.0-"))))
-	}
+	cfg := statecfg.Schema.CommitmentDomain
+	cfg.FileVersion.DataKV.Current = version.V2_2
+	schema := NewDomainSnapSchema(cfg, alignStepSize, dirs)
+	populateFiles2(t, dirs, schema, alignStepSize, ranges)
 }
