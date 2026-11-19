@@ -173,6 +173,7 @@ func (vm *VersionMap) HasAmbiguousBaseAccount(eip161Enabled, isAura bool, base S
 func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateReader) error {
 	var stamps []*WriteSet
 	var candidates []uint32
+	once := &baseOnceReader{StateReader: base}
 	for i := range vm.bal {
 		ac := &vm.bal[i]
 		var maxIdx uint32
@@ -204,7 +205,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 			if ch, ok := versionedUpdateCodeHash(vm, addr, int(idx)); ok && !ch.IsEmpty() {
 				continue
 			}
-			av := VersionedAccountView{addr: addr, txIdx: int(idx), vm: vm, base: base}
+			av := VersionedAccountView{addr: addr, txIdx: int(idx), vm: vm, base: once}
 			acc := av.Account()
 			if err := av.Err(); err != nil {
 				return err
@@ -278,4 +279,22 @@ func balNextChangeIndex(ac *types.AccountChanges, after uint32) uint32 {
 		}
 	})
 	return m
+}
+
+// baseOnceReader reads an account's committed base once: the removal candidates of one account all
+// compose the same block-start base, at different tx indexes.
+type baseOnceReader struct {
+	StateReader
+	addr accounts.Address
+	acc  *accounts.Account
+	err  error
+	ok   bool
+}
+
+func (r *baseOnceReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	if !r.ok || r.addr != addr {
+		r.addr, r.ok = addr, true
+		r.acc, r.err = r.StateReader.ReadAccountData(addr)
+	}
+	return r.acc, r.err
 }
