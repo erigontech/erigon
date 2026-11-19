@@ -46,6 +46,16 @@ func TestIndexedAttestationJSONIndexLimit(t *testing.T) {
 	})
 }
 
+func TestIndexedAttestationJSONEmptyIndicesRoundTrip(t *testing.T) {
+	att := NewIndexedAttestation(clparams.Phase0Version)
+	buf, err := json.Marshal(att)
+	require.NoError(t, err)
+
+	decoded := NewIndexedAttestation(clparams.Phase0Version)
+	require.NoError(t, json.Unmarshal(buf, decoded))
+	require.Equal(t, att, decoded)
+}
+
 // An oversized list must be rejected without decoding every index first.
 func TestIndexedAttestationJSONStopsAtIndexLimit(t *testing.T) {
 	cfg := clparams.BeaconChainConfig{MaxValidatorsPerCommittee: 1, MaxCommitteesPerSlot: 2}

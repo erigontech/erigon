@@ -127,7 +127,7 @@ func decodeAttestingIndices(raw json.RawMessage, limit int, enforceLimit bool) (
 	} else if tok != json.Delim('[') {
 		return nil, fmt.Errorf("attesting indices: expected an array, got %v", tok)
 	}
-	var indices []uint64
+	indices := make([]uint64, 0)
 	for dec.More() {
 		if enforceLimit && len(indices) == limit {
 			return nil, fmt.Errorf("attesting indices exceed limit: more than %d", limit)
