@@ -173,14 +173,6 @@ func (s *SentinelServer) BanPeerForInvalidData(_ context.Context, p *sentinelpro
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
-func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelproto.GossipData) (*sentinelproto.EmptyMessage, error) {
-	panic("do not call this")
-}
-
-func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, stream sentinelproto.Sentinel_SubscribeGossipServer) error {
-	panic("do not call this")
-}
-
 func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
 	protocolID, _, _ := strings.Cut(req.Topic, ",")
 	requestType := strings.TrimSpace(protocolID)
@@ -403,8 +395,4 @@ func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelproto.PeersIn
 		filtered.Peers = append(filtered.Peers, peer)
 	}
 	return filtered, nil
-}
-
-func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelproto.RequestSubscribeExpiry) (*sentinelproto.EmptyMessage, error) {
-	panic("do not call this")
 }

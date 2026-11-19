@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -491,6 +492,7 @@ func TestCommit(t *testing.T) {
 // The commitment context routes both the trie trace and the branch read/write
 // trace through one io.Writer; branch writes surface as [SDC] lines.
 func TestCommitmentContextTraceWriter(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	ctx := t.Context()
 	db, _, _ := testDbAndAggregatorv3(t, t.TempDir(), uint64(100))
 	tx, err := db.BeginTemporalRw(ctx)

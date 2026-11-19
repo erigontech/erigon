@@ -62,7 +62,7 @@ func runTrace(tracer *tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, 
 		gasLimit uint64 = 31000
 		startGas        = mdgas.MdGas{Execution: 10000}
 		value           = uint256.Int{}
-		contract        = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, value)
+		contract        = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, value)
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 	if contractCode != nil {
@@ -186,7 +186,7 @@ func TestHaltBetweenSteps(t *testing.T) {
 	}
 	env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: *uint256.NewInt(1)}, state.New(state.NewNoopReader()), chain.AllProtocolChanges, vm.Config{Tracer: tracer.Hooks})
 	scope := &vm.CallContext{
-		Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}),
+		Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}),
 	}
 	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, accounts.ZeroAddress.Value(), new(uint256.Int), 0, new(uint256.Int), nil), accounts.ZeroAddress)
 	tracer.EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, []byte{}, mdgas.MdGas{}, uint256.Int{}, []byte{})
@@ -299,7 +299,7 @@ func TestEnterExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := &vm.CallContext{
-		Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}),
+		Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}),
 	}
 	tracer.EmitEnter(1, byte(vm.CALL), scope.Contract.Caller(), scope.Contract.Address(), false, []byte{}, mdgas.MdGas{Execution: 1000, State: 200}, uint256.Int{}, []byte{})
 	tracer.EmitExit(1, []byte{}, mdgas.MdGasUsage{Execution: 400, State: -30, StateSpill: 10}, nil, false)

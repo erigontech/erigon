@@ -461,7 +461,7 @@ func TestHeadEventBeforeStateCopyMatchesCopiedStateEvent(t *testing.T) {
 
 			emitted := emitHeadEventBeforeStateCopy(&beaconCfg, store, earlyEmitter, headSlot, head.Root)
 			require.True(t, emitted)
-			copied, err := store.GetOwnedStateAtBlockRoot(head.Root)
+			copied, err := store.GetOwnedStateAtBlockRoot(head.Root, nil)
 			require.NoError(t, err)
 			require.NoError(t, emitHeadEvent(&beaconCfg, store, oldEmitter, headSlot, head.Root, copied))
 
@@ -556,9 +556,13 @@ func requireLockOrderOperationCompletes(t *testing.T, fixture lockOrderFixture, 
 	}()
 	time.Sleep(250 * time.Millisecond)
 
+	// A shared index lets the slashing pass the intersection check and reach the fork-choice lock.
+	slashing := cltypes.NewAttesterSlashing(clparams.Phase0Version)
+	slashing.Attestation_1.AttestingIndices.Append(0)
+	slashing.Attestation_2.AttestingIndices.Append(0)
 	slashingDone := make(chan error, 1)
 	go func() {
-		slashingDone <- fixture.cfg.forkChoice.OnAttesterSlashing(cltypes.NewAttesterSlashing(clparams.Phase0Version), true)
+		slashingDone <- fixture.cfg.forkChoice.OnAttesterSlashing(slashing, true)
 	}()
 	select {
 	case err := <-slashingDone:
@@ -720,18 +724,18 @@ func (m *busyOnceExecutionModule) UpdateForkChoice(context.Context, common.Hash,
 }
 
 func TestGloasForkChoiceRejectedAsBusyIsResent(t *testing.T) {
-	cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
-	bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
-	module := &busyOnceExecutionModule{}
-	direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
-	require.NoError(t, err)
-	engine.forkChoiceFn = direct.ForkChoiceUpdate
-
 	synctest.Test(t, func(t *testing.T) {
+		cfg, _, headRoot, headBlock, _, engine := newGloasCanonicalForkChoiceFixture(t, true)
+		bid := headBlock.Block.Body.GetSignedExecutionPayloadBid().Message
+		module := &busyOnceExecutionModule{}
+		direct, err := execution_client.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+		require.NoError(t, err)
+		engine.forkChoiceFn = direct.ForkChoiceUpdate
+
 		started := time.Now()
 		previousExecutionHead := cfg.executionHead
 		cfg.sleepForSlotLastWake = sleepForSlotWake{root: headRoot, executionHead: bid.ParentBlockHash, at: started}
-		_, _, err := computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
+		_, _, err = computeAndNotifyServicesOfNewForkChoice(t.Context(), log.New(), cfg)
 		require.NoError(t, err)
 		require.Equal(t, 1, module.forkChoiceCalls)
 		require.Equal(t, previousExecutionHead, cfg.executionHead, "a busy execution module did not apply the head")
@@ -887,6 +891,40 @@ func TestPostForkchoiceOperationsPublishesOwnedHeadState(t *testing.T) {
 		require.Same(t, recorder.ownedState, head)
 		return nil
 	}))
+}
+
+type spareHeadStateData struct {
+	synced_data.SyncedData
+	spare *state.CachingBeaconState
+}
+
+func (s *spareHeadStateData) TakeSpareHeadState() *state.CachingBeaconState {
+	spare := s.spare
+	s.spare = nil
+	return spare
+}
+
+func TestPostForkchoiceOperationsCopiesTheHeadIntoTheSpareState(t *testing.T) {
+	fixture := newLockOrderFixture(t, 1)
+	fixture.cfg.blobDownloader = &network2.BlobHistoryDownloader{}
+	fixture.cfg.attestationDataProducer = noOpAttestationDataProducer{}
+	fixture.cfg.dirs = datadir.New(t.TempDir())
+	var spare *state.CachingBeaconState
+	require.NoError(t, fixture.cfg.forkChoice.ViewStateAtBlockRoot(fixture.headRoot, func(current *state.CachingBeaconState) error {
+		spare = state.New(current.BeaconConfig())
+		return nil
+	}))
+	recorder := &recordingHeadPublish{SyncedData: &spareHeadStateData{SyncedData: fixture.syncedData, spare: spare}}
+	fixture.cfg.syncedData = recorder
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	require.NoError(t, postForkchoiceOperations(tx, log.New(), fixture.cfg, fixture.headState.Slot(), fixture.headRoot))
+
+	require.Same(t, spare, recorder.ownedState)
+	require.Equal(t, fixture.headState.Slot(), spare.Slot())
 }
 
 func newForkChoicePublicationFixture(t *testing.T) (*Cfg, *cltypes.SignedBeaconBlock, common.Hash) {
@@ -2008,7 +2046,7 @@ func TestHeadEventsDeduplicateAcrossStateCopy(t *testing.T) {
 	emitPass := func() {
 		t.Helper()
 		require.True(t, emitHeadEventBeforeStateCopy(f.cfg.beaconCfg, f.cfg.forkChoice, f.cfg.emitter, f.headSlot, f.headRoot))
-		copied, err := f.cfg.forkChoice.GetOwnedStateAtBlockRoot(f.headRoot)
+		copied, err := f.cfg.forkChoice.GetOwnedStateAtBlockRoot(f.headRoot, nil)
 		require.NoError(t, err)
 		require.NoError(t, emitHeadEvent(f.cfg.beaconCfg, f.cfg.forkChoice, f.cfg.emitter, f.headSlot, f.headRoot, copied))
 	}
@@ -2237,4 +2275,14 @@ func TestPostForkchoiceHighestFinalizedFailureDoesNotPublish(t *testing.T) {
 
 	f.requireCopiesAndPublishes(t, 0)
 	require.Equal(t, f.headSlot, f.cfg.blobDownloader.HeadSlot())
+}
+
+// computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
+// It updates the fork choice if possible and sets the status in the RPC. It returns the head slot, head root, and any error encountered.
+func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Logger, cfg *Cfg) (headSlot uint64, headRoot common.Hash, err error) {
+	head, headSlot, err := selectForkChoiceHead(cfg)
+	if err != nil {
+		return 0, common.Hash{}, err
+	}
+	return headSlot, head.Root, notifyServicesOfHead(ctx, logger, cfg, head, headSlot)
 }
