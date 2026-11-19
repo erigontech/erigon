@@ -244,8 +244,8 @@ func (t *commitmentToucher) touch(addrHash, slotHash []byte) {
 		return
 	}
 	t.paths++
-	v3.PrefetchPath(t.read, addrHash, slotHash)
 	if t.out == nil {
+		v3.PrefetchPath(t.read, addrHash, slotHash)
 		return
 	}
 	it := commitmentdb.PathTouch{Account: [32]byte(addrHash)}

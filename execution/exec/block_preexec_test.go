@@ -346,7 +346,7 @@ func TestBlockReadAheaderPreExecWalksStoragePathOfTxWrite(t *testing.T) {
 	require.Contains(t, reads, string(v3.StorageNodeKey(contractHash, nil, nil)), "the tx's SSTORE must walk the contract's storage path")
 }
 
-func TestCommitmentToucherWalksAndQueuesSortedBatches(t *testing.T) {
+func TestCommitmentToucherQueuesSortedBatchesInsteadOfWalking(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(true))
 	touches := &commitmentdb.PreExecTouches{C: make(chan []commitmentdb.PathTouch, 1)}
 	reads := 0
@@ -354,7 +354,7 @@ func TestCommitmentToucherWalksAndQueuesSortedBatches(t *testing.T) {
 	for i := range preExecBatch + 1 {
 		toucher.touch(bytes.Repeat([]byte{byte(250 - i)}, 32), nil)
 	}
-	require.Equal(t, preExecBatch+1, reads, "queueing a path must not replace pre-exec's own walk")
+	require.Zero(t, reads, "a queued path is read once, by the prefetcher that keeps the record")
 	batch := <-touches.C
 	require.Len(t, batch, preExecBatch)
 	require.True(t, slices.IsSortedFunc(batch, commitmentdb.ComparePathTouch))
