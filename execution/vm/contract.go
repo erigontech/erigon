@@ -49,6 +49,8 @@ type Contract struct {
 // around 64MB cache in the worst case.
 var jumpDestCache = newJumpDestCache()
 
+const jumpdestNoCacheMaxCode = 2048
+
 func newJumpDestCache() *cache.GenericCache[bitvec] {
 	return cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) * 8 }, cache.ModeEvictLRU)
 }
@@ -83,6 +85,10 @@ func (c *Contract) analysedJumpdest(dest *uint256.Int) bool {
 
 // jumpdestAnalysis returns the cached JUMPDEST analysis of the code or computes it.
 func (c *Contract) jumpdestAnalysis() bitvec {
+	// A small code's bitmap costs less to compute than a cache lookup.
+	if len(c.Code) <= jumpdestNoCacheMaxCode {
+		return codeBitmap(c.Code)
+	}
 	var codeHash common.Hash
 	isCodeHashZero := c.CodeHash.IsZero()
 	if !isCodeHashZero {
