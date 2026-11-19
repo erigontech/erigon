@@ -778,6 +778,8 @@ func TestConvertCommitmentFiles_V3RebuiltStepRefusesBeforeSwap(t *testing.T) {
 	require.ErrorContains(t, err, "no commitment file was replaced; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if commitment history was pruned")
 	require.False(t, swapped)
 	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "backup"))
+	require.NotContains(t, err.Error(), "phase 1", "refuse before converting any file: on mainnet the state key sorts near the end, hours into the file")
+	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "rebuild"))
 }
 
 func TestConvertCommitmentFiles_V3RejectsCorruptLatestRecord(t *testing.T) {

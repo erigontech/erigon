@@ -194,6 +194,25 @@ func collectConverted(g *errgroup.Group, out <-chan *convertedBatch, collectors 
 	}
 }
 
+// checkCommitmentStateAtFileEnds requires each file's state record at the file's last txNum, before any file is
+// converted. Files built without step-edge checkpoints keep it at the last block end inside the file.
+func checkCommitmentStateAtFileEnds(dt *DomainRoTx) error {
+	hi, lo := dt.ht.iit.hashKey(commitment.KeyCommitmentState)
+	for i, f := range dt.files {
+		v, ok, _, err := dt.getLatestFromFile(i, commitment.KeyCommitmentState, nil, hi, lo)
+		if err != nil {
+			return fmt.Errorf("%s: read commitment state: %w", f.src.decompressor.FileName(), err)
+		}
+		if !ok || len(v) < 8 {
+			continue
+		}
+		if txNum := binary.BigEndian.Uint64(v); txNum != f.endTxNum-1 {
+			return fmt.Errorf("%s: commitment state txNum %d differs from file end txNum %d", f.src.decompressor.FileName(), txNum, f.endTxNum-1)
+		}
+	}
+	return nil
+}
+
 func convertCommitmentFileV3(
 	ctx context.Context,
 	at *AggregatorRoTx,

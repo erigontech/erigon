@@ -646,6 +646,9 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		if err := checkCommitmentHistoryV3Start(at.d[kv.CommitmentDomain], at.StepSize()); err != nil {
 			return fmt.Errorf("%w; no commitment file was replaced; %s", err, rebuildV3NoHistoryAdvice)
 		}
+		if err := checkCommitmentStateAtFileEnds(at.d[kv.CommitmentDomain]); err != nil {
+			return fmt.Errorf("[commitment_convert] %w; no commitment file was replaced; %s", err, rebuildV3Advice)
+		}
 	}
 
 	// Output .kv version encodes the squeeze target for the version-gated reader (v2.1 squeezed,
