@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -624,6 +625,35 @@ func TestCallConstructorIntrinsicExecutionGasCap(t *testing.T) {
 			require.NotNil(t, result)
 			require.NotNil(t, result.Code)
 			require.Equal(t, hexutil.Bytes(want), *result.Code)
+		})
+	}
+}
+
+func TestCallConstructorTopLevelInitCodeLimits(t *testing.T) {
+	m, key, sender := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	initCode := program.New().Return(0, 1).Bytes()
+	txn, err := types.SignTx(types.NewContractCreation(0, new(uint256.Int), 1_000_000, uint256.NewInt(2_000_000_000), initCode), *types.LatestSigner(m.ChainConfig), key)
+	require.NoError(t, err)
+	insertConstructorTx(t, m, txn)
+	target := types.CreateAddress(sender, 0)
+	base := newBaseApiForTest(m)
+	ots := NewOtterscanAPI(base, m.DB, 25)
+
+	// Padding after RETURN changes the size and intrinsic gas while keeping execution identical.
+	for _, tc := range []struct {
+		name        string
+		gasCap      uint64
+		replacement []byte
+		wantErr     error
+	}{
+		{"size limit", 2_000_000, common.RightPadBytes(initCode, params.MaxInitCodeSize+1), vm.ErrMaxInitCodeSizeExceeded},
+		{"intrinsic gas", 100_000, append(initCode, bytes.Repeat([]byte{byte(vm.JUMPDEST)}, 10_000)...), protocol.ErrIntrinsicGas},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: tc.gasCap}, ots)
+			result, err := api.CallConstructor(m.Ctx, target, tc.replacement)
+			require.ErrorIs(t, err, tc.wantErr)
+			require.Nil(t, result)
 		})
 	}
 }
