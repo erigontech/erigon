@@ -1071,7 +1071,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if rebuildTrieCfg.Variant == commitment.VariantParallelHexPatricia {
+			if rebuildTrieCfg.Variant == commitment.VariantParallelHexPatricia || (rebuildTrieCfg.Variant == commitment.VariantCommitmentV3 && dbg.EnvBool("V3_REBUILD_PARALLEL", false)) {
 				domains.EnableParaTrieDB(rwDb)
 			}
 
