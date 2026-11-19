@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -282,6 +283,30 @@ func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.
 // It checks each filter to determine if the log should be sent based on the filter's address and topic settings.
 func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogsReply) {
 	a.distributeNativeLog(ethutils.RPCLogFromProto(eventLog))
+}
+
+// distributeNativeLogs serves the filters by address for the whole batch before the filters on every address,
+// so a few selective subscribers do not wait behind all the logs sent to the others.
+func (a *LogsFilterAggregator) distributeNativeLogs(logs []*types.Log) {
+	a.logsFilterLock.RLock()
+	defer a.logsFilterLock.RUnlock()
+	for _, lg := range logs {
+		for _, filter := range a.filtersByAddr[lg.Address] {
+			if a.chooseTopics(filter, lg.Topics) {
+				filter.sender.Send(lg)
+			}
+		}
+	}
+	if len(logs) > 0 {
+		dbg.ProbeMark("rpcLogAddrDone", uint64(logs[0].BlockNumber))
+	}
+	for _, lg := range logs {
+		for _, filter := range a.anyAddrFilters {
+			if a.chooseTopics(filter, lg.Topics) {
+				filter.sender.Send(lg)
+			}
+		}
+	}
 }
 
 func (a *LogsFilterAggregator) distributeNativeLog(lg *types.Log) {

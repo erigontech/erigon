@@ -1073,7 +1073,7 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 			ff.logger.Info("[fanout-probe-logs]", "block", n, "dispatchStart", pDs, "headersDone", pHd, "cacheDone", pCd,
 				"receiptsDone", pRd, "logsDone", pLd, "rpcReceiptFirst", rif, "rpcReceiptLast", ril,
 				"rpcLogFirst", lif, "rpcLogLast", lil, "rpcLogDistributed", lol,
-				"logBeforeHead", dbg.ProbeTakeSum("logBeforeHead", n))
+				"logBeforeHead", dbg.ProbeTakeSum("logBeforeHead", n), "rpcLogAddrDone", func() float64 { _, l := rel("rpcLogAddrDone"); return l }())
 			ff.logger.Info("[fanout-probe]", "block", n, "gcIn1s", gcCycles()-gc0, "sinceBlockTime_ms", t0/1e6-int64(tsec)*1000, "sendLoop_ms", float64(t1-t0)/1e6,
 				"wake_p50", q(wakes, .5), "wake_p99", q(wakes, .99), "wake_last", q(wakes, 1), "wakes", len(wakes),
 				"write_p50", q(writes, .5), "write_p99", q(writes, .99), "write_last", q(writes, 1), "writes", len(writes))
@@ -1141,10 +1141,14 @@ func (ff *Filters) consumeInProcessLogs(ctx context.Context, ch <-chan []*notifi
 		case <-ctx.Done():
 			return
 		case logs := <-ch:
-			for _, n := range logs {
+			batch := make([]*types.Log, len(logs))
+			for i, n := range logs {
 				dbg.ProbeMark("rpcLogIn", uint64(n.BlockNumber))
-				ff.logsSubs.distributeNativeLog(inProcessLog(n))
-				dbg.ProbeMark("rpcLogOut", uint64(n.BlockNumber))
+				batch[i] = inProcessLog(n)
+			}
+			ff.logsSubs.distributeNativeLogs(batch)
+			for _, lg := range batch {
+				dbg.ProbeMark("rpcLogOut", uint64(lg.BlockNumber))
 			}
 		}
 	}
