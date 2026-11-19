@@ -454,7 +454,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 	return bytes.Clone(hi.kBackup), bytes.Clone(hi.vBackup), nil
 }
 
-// debugIteratePrefixLatest iterates over key-value pairs of the storage domain that start with given prefix,
+// debugIteratePrefixLatest iterates over key-value pairs of the domain that start with given prefix,
 // including tombstones (empty v).
 //
 // k and v lifetime is bounded by the lifetime of the iterator
