@@ -189,7 +189,6 @@ func TestCachedValueRunsOneProducerForConcurrentCallers(t *testing.T) {
 		default:
 		}
 		close(release)
-		synctest.Wait()
 
 		for range waiters + 1 {
 			require.Equal(t, uint64(42), <-answers, "the pass answers every caller waiting on it")

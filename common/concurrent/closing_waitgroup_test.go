@@ -91,6 +91,7 @@ func TestClosingWaitGroup_WaitJoinsInFlight(t *testing.T) {
 		synctest.Wait()
 		select {
 		case <-waited:
+			close(release)
 			t.Fatal("Wait returned before the in-flight goroutine called Done")
 		default:
 		}
