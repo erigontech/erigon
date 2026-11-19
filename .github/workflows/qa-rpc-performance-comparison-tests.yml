@@ -755,9 +755,9 @@ jobs:
         continue-on-error: true
         timeout-minutes: ${{ needs.setup.outputs.rpc_test == 'eth_subscribe_classes' && 30 || 20 }}
         env:
-          # On 4 cores rpc_perf reads a burst of heads more slowly than the clients write it, so the fan-out
-          # measured the tool. It gets cores 8-15 here and shares 8-11 with the client, which serves these
-          # subscriptions with a fraction of one core.
+          # The fan-out is taken when rpc_perf reads a notification, so it also holds the time the notification
+          # waits in rpc_perf, which grows when the tool has fewer CPUs. Cores 8-15 keep that wait low; the client
+          # shares 8-11 with the tool and serves these subscriptions with a fraction of one core.
           RPC_PERF_CPUS: 8-15,24-31
         run: |
           sequence=500:120
