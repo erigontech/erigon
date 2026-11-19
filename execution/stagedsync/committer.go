@@ -105,7 +105,9 @@ type commitmentCalculator struct {
 
 	feed feedBuffer
 
-	branchPrefetch *branchPrefetcher
+	branchPrefetch *exec.BranchPrefetcher
+	touchBatch     []exec.PathTouch
+	adopted        bool
 
 	prefetch   *commitment.Warmuper
 	balBlock   bool
@@ -294,12 +296,11 @@ func newCommitmentCalculator(
 				cc.readAtNum, cc.readAtHash = n, h
 			}
 		}
-		cc.branchPrefetch = newBranchPrefetcher(workCtx, db)
-		cc.branchPrefetch.blockNum, cc.branchPrefetch.parentHash = cc.readAtNum+1, cc.readAtHash
-		asOfReader.prefetched = cc.branchPrefetch
-		if exec.PreExecQueueOn() {
-			cc.branchPrefetch.follow()
+		cc.branchPrefetch = exec.TakeBranchPrefetcher(cc.readAtNum+1, cc.readAtHash, kv.UnderlyingTx(roTx).ViewID())
+		if cc.adopted = cc.branchPrefetch != nil; !cc.adopted {
+			cc.branchPrefetch = exec.NewBranchPrefetcher(workCtx, db)
 		}
+		asOfReader.prefetched = cc.branchPrefetch
 	}
 	if dbg.BALCommitmentWarmupReaders() > 0 {
 		cc.prefetchFn = func(plainKey []byte) {
@@ -321,9 +322,9 @@ func (cc *commitmentCalculator) Stop() {
 	close(cc.done)
 	cc.wg.Wait()
 	if p := cc.branchPrefetch; p != nil {
-		p.close()
-		preDropped, preUnread := p.preExecLost()
-		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load(), "queued", p.queued.Load(), "deduped", p.deduped.Load(), "followed", p.followed.Load(), "preDropped", preDropped, "preUnread", preUnread, "backlog", p.backlog.Load(), "foldHits", p.foldHits.Load(), "foldMisses", p.foldMisses.Load(), "drainWaitUs", p.drainWait.Load()/1000, "drainTimeout", p.drainTimeout.Load())
+		p.Close()
+		st := p.Stats()
+		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", st.Bytes, "adopted", cc.adopted, "queued", st.Queued, "backlog", st.Backlog, "foldHits", st.FoldHits, "foldMisses", st.FoldMisses, "drainWaitUs", st.DrainWait.Microseconds())
 		if commitmentdb.ParentReadsWanted() {
 			if r := cc.parentRecords(); r != nil {
 				commitmentdb.PublishParentRecords(r)
@@ -770,14 +771,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // buffer rather than compute()'s shared one.
 func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
 	cc.finishPrefetch()
-	if cc.branchPrefetch != nil {
-		cc.branchPrefetch.stopFollow()
-		if prefetchDrain {
-			cc.branchPrefetch.drainSorted()
-		}
-	}
-	cc.branchPrefetch.pause()
-	defer cc.branchPrefetch.resume()
+	cc.branchPrefetch.Drain()
 	sdCtx := cc.doms.GetCommitmentContext()
 	if cc.branchPrefetch != nil {
 		sdCtx.SetFeed(&cc.feed.Feed)
@@ -883,7 +877,7 @@ func (cc *commitmentCalculator) parentRecords() *commitmentdb.ParentRecords {
 		return nil
 	}
 	return &commitmentdb.ParentRecords{
-		BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash, Get: p.get, State: h.parent,
+		BlockNum: h.blockNum, BlockHash: h.blockHash, ParentHash: h.parentHash, Get: p.Get, State: h.parent,
 	}
 }
 
@@ -1118,7 +1112,7 @@ type asOfStateReader struct {
 	// concurrent users never share one.
 	dr *state.LayeredDomainReader
 
-	prefetched *branchPrefetcher
+	prefetched *exec.BranchPrefetcher
 	// cur layers the folding block's own writes up to curTxNum (accounts, storage and code): the trie
 	// also reads untouched siblings, and dr sees them only after the apply loop lands them in sd.mem.
 	cur          *state.VersionMap
@@ -1175,14 +1169,14 @@ func (r *asOfStateReader) prefetchedBranch(key []byte) ([]byte, kv.Step, bool) {
 	if _, maxStep, inMem := r.sd.GetLatestFromMemory(kv.CommitmentDomain, key); inMem || maxStep != kv.NoStepBound {
 		return nil, 0, false
 	}
-	return r.prefetched.foldGet(key)
+	return r.prefetched.FoldGet(key)
 }
 
 func (r *asOfStateReader) LeafRefs(key, data []byte) *commitment.LeafRefs {
 	if r.prefetched == nil || len(data) == 0 {
 		return nil
 	}
-	return r.prefetched.leafRefs(key, data)
+	return r.prefetched.LeafRefs(key, data)
 }
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {

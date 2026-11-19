@@ -17,14 +17,12 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
 	"slices"
 	"sync"
 	"testing"
-	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
@@ -37,9 +35,9 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -47,12 +45,12 @@ import (
 
 func TestPrefetchedBranchesYieldToMemBatch(t *testing.T) {
 	_, tx, doms := setupStepTest(t)
-	p := newPrefetchRecords()
+	p := exec.NewBranchPrefetcher(context.Background(), nil)
 	r := &asOfStateReader{sd: doms, roTx: tx, prefetched: p}
 
 	flushed, untouched, absent := []byte{0x40, 0x12, 0x02}, []byte{0x40, 0x34, 0x02}, []byte{0x40, 0x56, 0x02}
-	p.put(flushed, []byte("prefetched-flushed"), 3)
-	p.put(untouched, []byte("prefetched-untouched"), 3)
+	p.Put(flushed, []byte("prefetched-flushed"), 3)
+	p.Put(untouched, []byte("prefetched-untouched"), 3)
 	require.NoError(t, doms.DomainPut(kv.CommitmentDomain, tx, flushed, []byte("mem-flushed"), 5, nil))
 
 	got, _, err := r.Read(kv.CommitmentDomain, flushed, 16)
@@ -72,7 +70,7 @@ func TestPrefetchedBranchesYieldToMemBatch(t *testing.T) {
 	var unwound [kv.DomainLen][]kv.DomainEntryDiff
 	unwound[kv.CommitmentDomain] = []kv.DomainEntryDiff{{Key: string(outside) + string(binary.BigEndian.AppendUint64(nil, ^uint64(2)))}}
 	doms.Unwind(32, &unwound)
-	p.put(outside, []byte("prefetched-past-unwind"), 3)
+	p.Put(outside, []byte("prefetched-past-unwind"), 3)
 	_, maxStep, inMem := doms.GetLatestFromMemory(kv.CommitmentDomain, outside)
 	require.False(t, inMem)
 	require.NotEqual(t, kv.NoStepBound, maxStep)
@@ -81,52 +79,10 @@ func TestPrefetchedBranchesYieldToMemBatch(t *testing.T) {
 	require.Empty(t, got)
 }
 
-func TestBranchPrefetcherStopsAtByteCap(t *testing.T) {
-	p := newPrefetchRecords()
-	p.put([]byte("kept"), []byte("value"), 0)
-	p.bytes.Store(branchPrefetchMaxBytes)
-	p.put([]byte("overflow"), []byte("dropped"), 0)
-	_, _, ok := p.get([]byte("overflow"))
-	require.False(t, ok)
-	value, _, ok := p.get([]byte("kept"))
-	require.True(t, ok)
-	require.Equal(t, []byte("value"), value)
-}
-
-func TestBranchPrefetcherLeafRefsOnlyForTheStoredRecord(t *testing.T) {
-	p := newPrefetchRecords()
-	key, data, refs := []byte{0x42, 0x00}, []byte{1, 2, 3}, &commitment.LeafRefs{Mask: 1}
-	p.shard(key).records[string(key)] = prefetchedRecord{data: data, refs: refs}
-	require.Same(t, refs, p.leafRefs(key, data))
-	require.Nil(t, p.leafRefs(key, bytes.Clone(data)))
-}
-
-func TestBranchPrefetcherCountsDroppedAndDrained(t *testing.T) {
-	p := &branchPrefetcher{work: make(chan prefetchItem, 1)}
-	p.add(prefetchItem{account: common.Hash{1}})
-	p.add(prefetchItem{account: common.Hash{2}})
-	require.Equal(t, uint64(1), p.dropped.Load(), "an item that finds the queue full is dropped")
-	p.pause()
-	p.resume()
-	require.Equal(t, uint64(1), p.drained.Load(), "an item still queued when compute starts is drained")
-}
-
-func TestBranchPrefetcherChunkStopsOnPause(t *testing.T) {
-	p := &branchPrefetcher{work: make(chan prefetchItem, 2*branchPrefetchPerTx)}
-	for i := range 2 * branchPrefetchPerTx {
-		p.add(prefetchItem{account: common.Hash{byte(i), byte(i >> 8)}})
-	}
-	read := func([]byte) []byte { return nil }
-	require.Equal(t, branchPrefetchPerTx, p.walkChunk(<-p.work, read), "an unpaused worker walks a full chunk")
-	p.pausing.Store(true)
-	require.Equal(t, 1, p.walkChunk(<-p.work, read), "a pending pause stops the chunk after the item in hand")
-	require.Len(t, p.work, branchPrefetchPerTx-1)
-}
-
 func TestParentRecordsOnlyForOneVerifiedChildOfTheReadHead(t *testing.T) {
 	t.Cleanup(func() { commitmentdb.PublishParentRecords(nil) })
-	p := newPrefetchRecords()
-	p.put([]byte{0x12}, []byte("parent-record"), 4)
+	p := exec.NewBranchPrefetcher(context.Background(), nil)
+	p.Put([]byte{0x12}, []byte("parent-record"), 4)
 	head := common.Hash{9}
 	child := commitTarget{blockNum: 10, blockHash: common.Hash{10}, parentHash: head}
 	calc := func() *commitmentCalculator {
@@ -175,8 +131,7 @@ func TestStopDoesNotPublishParentRecordsWhenNotWanted(t *testing.T) {
 	previous := commitmentdb.ParentReadsWanted()
 	commitmentdb.WantParentReads(false)
 	t.Cleanup(func() { commitmentdb.WantParentReads(previous) })
-	p := newPrefetchRecords()
-	p.work = make(chan prefetchItem, 1)
+	p := exec.NewBranchPrefetcher(context.Background(), nil)
 	cc := &commitmentCalculator{
 		branchPrefetch: p,
 		done:           make(chan struct{}),
@@ -194,7 +149,9 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
 	dbg.IgnoreBAL = false
 
-	p := &branchPrefetcher{work: make(chan prefetchItem, 16)}
+	db := &recordingRoDB{}
+	p := exec.NewBranchPrefetcher(context.Background(), db)
+	t.Cleanup(p.Close)
 	cc := &commitmentCalculator{
 		branchPrefetch: p,
 		balBlock:       true,
@@ -216,19 +173,10 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 
 	cc.handleBlockRequest(context.Background(), &blockRequest{blockNum: 5, bal: bal})
 
+	p.Drain()
+	require.Equal(t, 4, p.Stats().Queued)
 	hash := keccak.Sum256
-	sa, sb := slotA.Value(), slotB.Value()
-	want := []prefetchItem{
-		{account: hash(balanceOnly[:])},
-		{account: hash(storageOnly[:])},
-		{account: hash(storageOnly[:]), slot: hash(sa[:]), storage: true},
-		{account: hash(storageOnly[:]), slot: hash(sb[:]), storage: true},
-	}
-	var got []prefetchItem
-	for len(p.work) > 0 {
-		got = append(got, <-p.work)
-	}
-	require.ElementsMatch(t, want, got, "BAL writes queue their account and slot walks at the request, whatever block came before; storage-only accounts get the account walk, read-only accounts get nothing")
+	require.Contains(t, db.recorded(), string(v3.StorageNodeKey(hash(storageOnly[:]), nil, nil)))
 }
 
 func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
@@ -253,7 +201,7 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 	addr := common.Address{19: 1}
 	acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(5), CodeHash: accounts.EmptyCodeHash}
 	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&acc), 1, nil))
-	p.put([]byte{0x40, 0x00}, []byte{0x0f}, 0)
+	p.Put([]byte{0x40, 0x00}, []byte{0x0f}, 0)
 	cc.handleBlockRequest(ctx, &blockRequest{
 		blockNum:   1,
 		firstTxNum: 1,
@@ -270,205 +218,58 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 	require.ErrorIs(t, (<-out).err, v3.ErrRecordFormat, "compute-ahead must read commitment records through the prefetch map")
 }
 
-func TestBranchPrefetcherDrainSortedWaitsForItemsTakenByWorkers(t *testing.T) {
-	p := newPrefetchRecords()
-	p.work = make(chan prefetchItem, 8)
-	p.add(prefetchItem{account: [32]byte{1}})
-	<-p.work
-	done := make(chan struct{})
-	go func() {
-		p.drainSorted()
-		close(done)
-	}()
-	select {
-	case <-done:
-		t.Fatal("drainSorted returned with an item in flight")
-	case <-time.After(50 * time.Millisecond):
-	}
-	p.done(1)
-	<-done
-	require.Zero(t, p.drainTimeout.Load())
+type recordingRoDB struct {
+	kv.RoDB
+	mu     sync.Mutex
+	keys   []string
+	limit  int
+	opened int
 }
 
-type walkOrderDB struct {
-	kv.TemporalRoDB
-	mu  sync.Mutex
-	txs []*walkOrderTx
-}
-
-func (db *walkOrderDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
-	tx := &walkOrderTx{}
+func (db *recordingRoDB) BeginRo(context.Context) (kv.Tx, error) {
 	db.mu.Lock()
-	db.txs = append(db.txs, tx)
-	db.mu.Unlock()
-	return tx, nil
+	defer db.mu.Unlock()
+	if db.limit > 0 && db.opened >= db.limit {
+		return nil, errors.New("read tx limit")
+	}
+	db.opened++
+	return &recordingTx{db: db}, nil
 }
 
-type walkOrderTx struct {
+func (db *recordingRoDB) recorded() []string {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	return slices.Clone(db.keys)
+}
+
+type recordingTx struct {
 	kv.TemporalTx
-	keys []string
+	db *recordingRoDB
 }
 
-func (tx *walkOrderTx) GetLatest(_ kv.Domain, key []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
-	tx.keys = append(tx.keys, string(key))
+func (tx *recordingTx) ViewID() uint64 { return 0 }
+
+func (tx *recordingTx) GetLatest(_ kv.Domain, key []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	tx.db.mu.Lock()
+	tx.db.keys = append(tx.db.keys, string(key))
+	tx.db.mu.Unlock()
 	return nil, 0, nil
 }
 
-func (tx *walkOrderTx) Rollback() {}
+func (tx *recordingTx) Rollback() {}
 
-func TestBranchPrefetcherDrainSortedWalksTheBacklog(t *testing.T) {
-	const n = 256
-	db := &walkOrderDB{}
-	p := newPrefetchRecords()
-	p.db, p.work = db, make(chan prefetchItem, n)
-	order := make(map[string]int, n)
-	for i := n - 1; i >= 0; i-- {
-		account := [32]byte{0: byte(i >> 8), 1: byte(i)}
-		order[string(v3.StorageNodeKey(account, nil, nil))] = i
-		p.add(prefetchItem{account: account, slot: [32]byte{0: byte(^i >> 8), 1: byte(^i)}, storage: true})
+func TestCalculatorQueuesAWriteSetAsOneSortedBatch(t *testing.T) {
+	p := exec.NewBranchPrefetcher(context.Background(), &recordingRoDB{limit: 1})
+	t.Cleanup(p.Close)
+	cc := &commitmentCalculator{branchPrefetch: p}
+	for i := 3; i >= 1; i-- {
+		owner := [32]byte{0: byte(i)}
+		cc.queueBranch(owner[:], []byte{31: byte(i)})
 	}
-	p.drainSorted()
-	p.wg.Wait()
-	require.Zero(t, p.drainTimeout.Load(), "burst workers must walk the backlog with no regular worker running")
-	require.Zero(t, p.pending.Load())
-	walked := 0
-	for _, tx := range db.txs {
-		seq := make([]int, len(tx.keys))
-		for j, k := range tx.keys {
-			seq[j] = order[k]
-		}
-		require.True(t, slices.IsSorted(seq), "a chunk must walk the backlog in path order: %v", seq)
-		walked += len(seq)
-	}
-	require.Equal(t, n, walked)
-}
-
-func TestBranchPrefetcherQueuesRepeatsWithoutAFollower(t *testing.T) {
-	p := newPrefetchRecords()
-	p.work = make(chan prefetchItem, 8)
-	p.add(prefetchItem{account: [32]byte{1}})
-	p.add(prefetchItem{account: [32]byte{1}})
-	require.Len(t, p.work, 2)
-}
-
-func TestBranchPrefetcherQueuesADroppedItemAgain(t *testing.T) {
-	p := newPrefetchRecords()
-	p.dedupe = true
-	p.work = make(chan prefetchItem, 1)
-	p.add(prefetchItem{account: [32]byte{1}})
-	p.add(prefetchItem{account: [32]byte{2}})
-	require.Equal(t, prefetchItem{account: [32]byte{1}}, <-p.work)
-	p.add(prefetchItem{account: [32]byte{2}})
-	require.Len(t, p.work, 1, "an item the full queue dropped must be queued when it is touched again")
-}
-
-func TestBranchPrefetcherForwardsAQueuePublishedJustBeforeStop(t *testing.T) {
-	for i := range 30 {
-		p := newPrefetchRecords()
-		p.work = make(chan prefetchItem, 8)
-		p.blockNum, p.parentHash = uint64(200+i), common.Hash{4}
-		p.follow()
-		time.Sleep(200 * time.Microsecond)
-		touches := &commitmentdb.PreExecTouches{BlockNum: p.blockNum, ParentHash: p.parentHash, C: make(chan []commitmentdb.PathTouch, 2)}
-		touches.C <- []commitmentdb.PathTouch{{Account: [32]byte{1}}}
-		commitmentdb.PublishPreExecTouches(touches)
-		p.stopFollow()
-		require.Len(t, p.work, 1)
-	}
-}
-
-func TestBranchPrefetcherReportsLossesOfItsOwnQueue(t *testing.T) {
-	p := newPrefetchRecords()
-	p.work = make(chan prefetchItem, 8)
-	p.blockNum, p.parentHash = 11, common.Hash{5}
-	own := &commitmentdb.PreExecTouches{BlockNum: 11, ParentHash: common.Hash{5}, C: make(chan []commitmentdb.PathTouch, 1)}
-	own.Dropped.Store(3)
-	commitmentdb.PublishPreExecTouches(own)
-	p.follow()
-	p.stopFollow()
-	commitmentdb.PublishPreExecTouches(&commitmentdb.PreExecTouches{BlockNum: 12, ParentHash: common.Hash{6}})
-	dropped, _ := p.preExecLost()
-	require.EqualValues(t, 3, dropped)
-}
-
-func TestBranchPrefetcherQueuesAnItemOncePerFold(t *testing.T) {
-	p := newPrefetchRecords()
-	p.dedupe = true
-	p.work = make(chan prefetchItem, 8)
-	p.add(prefetchItem{account: [32]byte{1}})
-	p.add(prefetchItem{account: [32]byte{1}})
-	require.Len(t, p.work, 1)
-	require.EqualValues(t, 1, p.deduped.Load())
-	p.pause()
-	require.Zero(t, p.pending.Load(), "an item discarded at the pause is no longer pending")
-	p.resume()
-	p.add(prefetchItem{account: [32]byte{1}})
-	require.Len(t, p.work, 1, "an item discarded at the pause is queued again for the next fold")
-}
-
-func TestBranchPrefetcherFoldGetCountsHitsAndMisses(t *testing.T) {
-	p := newPrefetchRecords()
-	p.put([]byte{1}, []byte{2}, 0)
-	_, _, ok := p.foldGet([]byte{1})
-	require.True(t, ok)
-	_, _, ok = p.foldGet([]byte{3})
-	require.False(t, ok)
-	require.EqualValues(t, 1, p.foldHits.Load())
-	require.EqualValues(t, 1, p.foldMisses.Load())
-}
-
-func TestBranchPrefetcherForwardsBatchesBufferedAtStop(t *testing.T) {
-	for i := range 30 {
-		p := newPrefetchRecords()
-		p.work = make(chan prefetchItem, 8)
-		p.blockNum, p.parentHash = uint64(100+i), common.Hash{2}
-		touches := &commitmentdb.PreExecTouches{BlockNum: p.blockNum, ParentHash: p.parentHash, C: make(chan []commitmentdb.PathTouch, 2)}
-		touches.C <- []commitmentdb.PathTouch{{Account: [32]byte{1}}}
-		commitmentdb.PublishPreExecTouches(touches)
-		p.stopOnce.Do(func() { close(p.stop) })
-		p.follow()
-		p.stopFollow()
-		require.Len(t, p.work, 1)
-		require.EqualValues(t, 1, p.followed.Load())
-	}
-}
-
-func TestBranchPrefetcherFollowsARepublishedQueue(t *testing.T) {
-	p := newPrefetchRecords()
-	p.work = make(chan prefetchItem, 8)
-	p.blockNum, p.parentHash = 9, common.Hash{3}
-	commitmentdb.PublishPreExecTouches(&commitmentdb.PreExecTouches{BlockNum: 9, ParentHash: common.Hash{3}, C: make(chan []commitmentdb.PathTouch, 1)})
-	p.follow()
-	defer p.stopFollow()
-	time.Sleep(20 * time.Millisecond)
-	retry := &commitmentdb.PreExecTouches{BlockNum: 9, ParentHash: common.Hash{3}, C: make(chan []commitmentdb.PathTouch, 1)}
-	retry.C <- []commitmentdb.PathTouch{{Account: [32]byte{5}}}
-	commitmentdb.PublishPreExecTouches(retry)
-	require.Eventually(t, func() bool { return len(p.work) == 1 }, time.Second, time.Millisecond)
-}
-
-func TestBranchPrefetcherFollowsPreExecTouchesUntilStopped(t *testing.T) {
-	p := newPrefetchRecords()
-	p.work = make(chan prefetchItem, 64)
-	p.blockNum, p.parentHash = 7, common.Hash{1}
-	touches := &commitmentdb.PreExecTouches{BlockNum: 7, ParentHash: common.Hash{1}, C: make(chan []commitmentdb.PathTouch, 2)}
-	commitmentdb.PublishPreExecTouches(touches)
-	p.follow()
-	touches.C <- []commitmentdb.PathTouch{{Account: [32]byte{1}}, {Account: [32]byte{2}, Slot: [32]byte{3}, Storage: true}}
-	require.Eventually(t, func() bool { return len(p.work) == 2 }, time.Second, time.Millisecond)
-	require.Equal(t, prefetchItem{account: [32]byte{1}}, <-p.work)
-	require.Equal(t, prefetchItem{account: [32]byte{2}, slot: [32]byte{3}, storage: true}, <-p.work)
-	p.stopFollow()
-	touches.C <- []commitmentdb.PathTouch{{Account: [32]byte{4}}}
-	time.Sleep(5 * time.Millisecond)
-	require.Empty(t, p.work)
-}
-
-func TestBranchPrefetcherLosesAnItemWhoseReadTxFailsToOpen(t *testing.T) {
-	p := newPrefetchRecords()
-	p.db, p.work = failingRoDB{err: errors.New("read tx limit")}, make(chan prefetchItem, 1)
-	p.add(prefetchItem{account: [32]byte{1}})
-	p.chunk(<-p.work)
-	require.Zero(t, p.pending.Load())
-	require.EqualValues(t, 1, p.dropped.Load())
+	require.Len(t, cc.touchBatch, 3)
+	cc.flushBranches()
+	require.Empty(t, cc.touchBatch)
+	require.True(t, slices.IsSortedFunc(cc.touchBatch[:3], exec.ComparePathTouch), "the batch is sorted before it is handed over")
+	p.Drain()
+	require.Equal(t, 3, p.Stats().Queued)
 }

@@ -33,10 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -48,12 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-var (
-	preExecOn    = dbg.EnvBool("V3_PREEXEC", false)
-	preExecQueue = dbg.EnvBool("V3_PREEXEC_QUEUE", false)
-)
-
-func PreExecQueueOn() bool { return preExecOn && preExecQueue }
+var preExecOn = dbg.EnvBool("V3_PREEXEC", false)
 
 const (
 	preExecWorkers  = 4
@@ -72,7 +64,7 @@ func (bra *BlockReadAheader) SetPreExec(config *chain.Config, engine rules.Engin
 	bra.preExec = &preExecCfg{config: config, engine: engine, canonical: canonical}
 }
 
-func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header *types.Header, txns types.Transactions, workers int, recovery *SendersRecovery) error {
+func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header *types.Header, txns types.Transactions, workers int, recovery *SendersRecovery, prefetch *BranchPrefetcher) error {
 	pe := bra.preExec
 	if header.ExcessBlobGas != nil {
 		if _, err := misc.GetBlobGasPrice(pe.config, *header.ExcessBlobGas, header.Time); err != nil {
@@ -92,11 +84,6 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 	signer := types.MakeSigner(pe.config, header.Number.Uint64(), header.Time)
 	var next, paths, gasLeft atomic.Int64
 	gasLeft.Store(preExecBlockGas)
-	var touches *commitmentdb.PreExecTouches
-	if preExecQueue {
-		touches = &commitmentdb.PreExecTouches{BlockNum: header.Number.Uint64(), ParentHash: header.ParentHash, C: make(chan []commitmentdb.PathTouch, 1024)}
-		commitmentdb.PublishPreExecTouches(touches)
-	}
 	wg, ctx := errgroup.WithContext(ctx)
 	for w := range min(workers, preExecWorkers, secp256k1.NumOfContexts(), len(txns)) {
 		cryptoContext := secp256k1.ContextForThread(w)
@@ -117,13 +104,7 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 			}
 			blockCtx := protocol.NewEVMBlockContext(header, blockHash, pe.engine, accounts.NilAddress, pe.config)
 			chainRules := blockCtx.Rules(pe.config)
-			toucher := &commitmentToucher{ctx: ctx, out: touches, read: func(key []byte) []byte {
-				v, _, err := ttx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
-				if err != nil {
-					return nil
-				}
-				return v
-			}}
+			toucher := &commitmentToucher{ctx: ctx, out: prefetch, seen: map[PathTouch]struct{}{}}
 			defer func() {
 				toucher.flush()
 				paths.Add(int64(toucher.paths))
@@ -190,10 +171,10 @@ func (pe *preExecCfg) run(ctx context.Context, blockCtx evmtypes.BlockContext, c
 type commitmentToucher struct {
 	state.NoopWriter
 	ctx   context.Context
-	read  func(key []byte) []byte
 	paths int
-	out   *commitmentdb.PreExecTouches
-	batch []commitmentdb.PathTouch
+	out   *BranchPrefetcher
+	seen  map[PathTouch]struct{}
+	batch []PathTouch
 }
 
 type preExecRun struct {
@@ -230,28 +211,24 @@ func (t *commitmentToucher) flush() {
 	if len(t.batch) == 0 {
 		return
 	}
-	slices.SortFunc(t.batch, commitmentdb.ComparePathTouch)
-	select {
-	case t.out.C <- t.batch:
-	default:
-		t.out.Dropped.Add(int64(len(t.batch)))
-	}
-	t.batch = nil
+	slices.SortFunc(t.batch, ComparePathTouch)
+	t.out.Add(t.batch...)
+	t.batch = t.batch[:0]
 }
 
 func (t *commitmentToucher) touch(addrHash, slotHash []byte) {
-	if !statecfg.ExperimentalCommitmentV3 || t.ctx.Err() != nil {
+	if t.out == nil || t.ctx.Err() != nil {
 		return
 	}
-	t.paths++
-	if t.out == nil {
-		v3.PrefetchPath(t.read, addrHash, slotHash)
-		return
-	}
-	it := commitmentdb.PathTouch{Account: [32]byte(addrHash)}
+	it := PathTouch{Account: [32]byte(addrHash)}
 	if slotHash != nil {
 		it.Slot, it.Storage = [32]byte(slotHash), true
 	}
+	if _, dup := t.seen[it]; dup {
+		return
+	}
+	t.seen[it] = struct{}{}
+	t.paths++
 	if t.batch = append(t.batch, it); len(t.batch) == preExecBatch {
 		t.flush()
 	}

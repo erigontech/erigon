@@ -344,43 +344,7 @@ type ParentState interface {
 var (
 	parentRecords     atomic.Pointer[ParentRecords]
 	parentReadsWanted atomic.Bool
-	preExecTouches    atomic.Pointer[PreExecTouches]
 )
-
-type PathTouch struct {
-	Account, Slot [32]byte
-	Storage       bool
-}
-
-func ComparePathTouch(a, b PathTouch) int {
-	if c := bytes.Compare(a.Account[:], b.Account[:]); c != 0 {
-		return c
-	}
-	if a.Storage != b.Storage {
-		if a.Storage {
-			return 1
-		}
-		return -1
-	}
-	return bytes.Compare(a.Slot[:], b.Slot[:])
-}
-
-type PreExecTouches struct {
-	BlockNum   uint64
-	ParentHash common.Hash
-	C          chan []PathTouch
-	Dropped    atomic.Int64
-}
-
-func PublishPreExecTouches(t *PreExecTouches) { preExecTouches.Store(t) }
-
-func PreExecTouchesFor(blockNum uint64, parentHash common.Hash) *PreExecTouches {
-	t := preExecTouches.Load()
-	if t == nil || t.BlockNum != blockNum || t.ParentHash != parentHash {
-		return nil
-	}
-	return t
-}
 
 func WantParentReads(want bool) { parentReadsWanted.Store(want) }
 

@@ -55,6 +55,7 @@ func (cc *commitmentCalculator) prefetchWrites(writes state.WriteSetView) {
 			cc.queueBranch(hash, cc.touchHash(slices.Concat(address[:], slot[:])))
 		}
 	}
+	cc.flushBranches()
 }
 
 type feedBuffer struct {

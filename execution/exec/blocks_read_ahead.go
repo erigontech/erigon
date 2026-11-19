@@ -279,6 +279,7 @@ func (bra *BlockReadAheader) WaitForWarmup(ctx context.Context) {
 	if err := bra.warmupGate.Acquire(ctx, 1); err == nil {
 		bra.warmupGate.Release(1)
 	}
+	closePublishedBranchPrefetcher()
 }
 
 type SendersRecovery struct {
@@ -487,9 +488,24 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 		}
 		return
 	}
+	var p *BranchPrefetcher
+	if statecfg.ExperimentalCommitmentV3 {
+		p = NewBranchPrefetcher(ctx, db)
+		p.BlockNum, p.ParentHash = header.Number.Uint64(), header.ParentHash
+		if p.pool == 0 || !publishBranchPrefetcher(p) {
+			p.Close()
+			p = nil
+		}
+	}
 	if preExecOn && bra.preExec != nil {
-		if err := bra.preExecTxns(ctx, db, header, body.Transactions, workers, recovery); err != nil && !errors.Is(err, context.Canceled) {
+		if err := bra.preExecTxns(ctx, db, header, body.Transactions, workers, recovery, p); err != nil && !errors.Is(err, context.Canceled) {
 			log.Warn("[preexec] failed", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
+		}
+		return
+	}
+	if p != nil {
+		if err := bra.warmStatic(ctx, p, header, body, recovery, workers); err != nil && !errors.Is(err, context.Canceled) {
+			log.Warn("[warmStatic] failed", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
 		}
 		return
 	}

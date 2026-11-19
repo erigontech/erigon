@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	_ "github.com/erigontech/erigon/execution/commitment/v3"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -148,7 +149,7 @@ func TestEmitTouchedFeedCarriesWhatEmitTouchedEmits(t *testing.T) {
 		want[string(hash)] = u
 	}
 
-	cc := &commitmentCalculator{branchPrefetch: newPrefetchRecords()}
+	cc := &commitmentCalculator{branchPrefetch: exec.NewBranchPrefetcher(context.Background(), nil)}
 	cc.accumulateTouched(state.NewVersionMapWriteView(ws, vm, txIdx), nil)
 	require.NoError(t, cc.emitTouchedFeed(view()))
 	feed := cc.feed.Feed
@@ -209,24 +210,11 @@ func computeAheadRoot(t *testing.T, wantFeed bool) []byte {
 		}
 		bal = append(bal, ac)
 	}
-	const queued = 3
-	if wantFeed {
-		cc.branchPrefetch.close()
-		p := newPrefetchRecords()
-		p.work = make(chan prefetchItem, 64)
-		cc.branchPrefetch, cc.asOfReader.prefetched = p, p
-		for i := range queued {
-			p.add(prefetchItem{account: [32]byte{byte(i)}})
-		}
-	}
 	req := &blockRequest{blockNum: 2, firstTxNum: 2, lastTxNum: 3, bal: bal}
 	vm := state.NewVersionMap(req.bal)
 	vm.SetBaseTxNum(req.firstTxNum)
 	rh, _, err := cc.computeRootFromBAL(ctx, req, vm, math.MaxUint32, commitTarget{blockNum: req.blockNum, lastTxNum: req.lastTxNum})
 	require.NoError(t, err)
 	require.Equal(t, wantFeed, cc.feed.Keys > 0, "v3 compute-ahead folds through the feed")
-	if wantFeed {
-		require.Equal(t, uint64(queued), cc.branchPrefetch.drained.Load(), "compute-ahead pauses the prefetcher like a block compute, and queues nothing the BAL request already queued")
-	}
 	return rh
 }

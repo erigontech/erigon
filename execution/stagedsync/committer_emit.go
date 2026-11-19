@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -99,6 +100,7 @@ func (cc *commitmentCalculator) accumulateTouched(writes state.WriteSetView, bas
 			}
 		}
 	}
+	cc.flushBranches()
 }
 
 func (cc *commitmentCalculator) touchHash(plainKey []byte) []byte {
@@ -138,11 +140,20 @@ func (cc *commitmentCalculator) addTouchedAccount(a accounts.Address, base state
 }
 
 func (cc *commitmentCalculator) queueBranch(account, slot []byte) {
-	it := prefetchItem{account: [32]byte(account)}
+	it := exec.PathTouch{Account: [32]byte(account)}
 	if slot != nil {
-		it.slot, it.storage = [32]byte(slot), true
+		it.Slot, it.Storage = [32]byte(slot), true
 	}
-	cc.branchPrefetch.add(it)
+	cc.touchBatch = append(cc.touchBatch, it)
+}
+
+func (cc *commitmentCalculator) flushBranches() {
+	if len(cc.touchBatch) == 0 {
+		return
+	}
+	slices.SortFunc(cc.touchBatch, exec.ComparePathTouch)
+	cc.branchPrefetch.Add(cc.touchBatch...)
+	cc.touchBatch = cc.touchBatch[:0]
 }
 
 // emitTouched writes one commitment Update per touched key, reading each final value
