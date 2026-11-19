@@ -3526,7 +3526,8 @@ func TestReplacementAtAccountSlotsLimitIsNotSpam(t *testing.T) {
 func TestRemoteBatchOfReplacementsIsNotSpam(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	pool.started.Store(true)
-	pending := pool.cfg.AccountSlots - 6
+	pool.cfg.AccountSlots = 16
+	pending := pool.cfg.AccountSlots - 6 // two batches overflow the slots unless replacements are free
 	addBatch := func(tip uint64, hashTag byte) {
 		var txns TxnSlots
 		for i := range pending {

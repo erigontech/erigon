@@ -397,6 +397,26 @@ func TestRemoteBatchOfBlobFeeBumpsCountsOnlyAddedBlobs(t *testing.T) {
 	}
 }
 
+// The second txn has a bad proof: BlobSlotsOverflow, not UnmatchedBlobTxExt, shows it was cut before KZG.
+func TestPrepareTxnsCutsSenderBlobBatchBeforeKZG(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pool := seedBlobKZGTestPool(t, ctx)
+	sender := [20]byte{1}
+	var slots TxnSlots
+	for nonce := range uint64(2) {
+		s := makeBlobSlot(0xa0+byte(nonce), nonce == 1)
+		s.Nonce = nonce
+		s.Txn.(*types.BlobTx).Nonce = nonce
+		slots.Append(&s, sender[:], false)
+	}
+	pool.cfg.BlobSlots = uint64(len(slots.Txns[0].GetBlobHashes()))
+
+	reasons, _, err := pool.prepareTxns(ctx, slots, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NotSet, txpoolcfg.BlobSlotsOverflow}, reasons)
+}
+
 func TestBlobPoolLimitsCheckedBeforeKZG(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

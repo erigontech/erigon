@@ -1292,15 +1292,15 @@ type batchUsage struct {
 	totalBlobs  uint64
 }
 
+func newBatchUsage() *batchUsage {
+	return &batchUsage{senderTxns: map[uint64]int{}, senderBlobs: map[uint64]uint64{}}
+}
+
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) (txpoolcfg.DiscardReason, error) {
 	return p.validateTxWithCells(txn, isLocal, stateCache, nil, nil)
 }
 
 func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView, cells blobCells, batch *batchUsage) (txpoolcfg.DiscardReason, error) {
-	inBatch := batch != nil
-	if batch == nil {
-		batch = &batchUsage{} // counts nothing: nil maps read as zero
-	}
 	isEIP3860 := p.isShanghai()
 	isPrague := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
@@ -1416,9 +1416,12 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		return txpoolcfg.GasLimitTooHigh, nil
 	}
 
-	slots := p.all.count(txn.SenderID) + batch.senderTxns[txn.SenderID]
-	if inBatch && p.pooledTxnReplacedBy(txn) == nil {
-		slots++ // a new nonce takes a slot; a replacement keeps the pooled txn's
+	slots := p.all.count(txn.SenderID)
+	if batch != nil {
+		slots += batch.senderTxns[txn.SenderID]
+		if p.pooledTxnReplacedBy(txn) == nil {
+			slots++ // a new nonce takes a slot; a replacement keeps the pooled txn's
+		}
 	}
 	if !isLocal && uint64(slots) > p.cfg.AccountSlots {
 		if txn.Traced {
@@ -1488,14 +1491,18 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool, batch *batchUsage) 
 	}
 
 	added := addedBlobs(txn, p.pooledTxnReplacedBy(txn))
-	blobs := p.all.blobCount(txn.SenderID) + batch.senderBlobs[txn.SenderID] + added
+	blobs := p.all.blobCount(txn.SenderID) + added
+	total := p.totalBlobsInPool.Load()
+	if batch != nil {
+		blobs += batch.senderBlobs[txn.SenderID]
+		total += batch.totalBlobs
+	}
 	if !isLocal && blobs > p.cfg.BlobSlots {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx sender blob limit exceeded idHash=%x blobs=%d, limit=%d", txn.IDHash, blobs, p.cfg.BlobSlots))
 		}
 		return txpoolcfg.BlobSlotsOverflow
 	}
-	total := p.totalBlobsInPool.Load() + batch.totalBlobs
 	if added > 0 && total >= p.cfg.TotalBlobPoolLimit {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%d current blobs=%d", p.cfg.TotalBlobPoolLimit, total))
@@ -1799,7 +1806,7 @@ func (p *TxPool) prepareTxns(ctx context.Context, txns TxnSlots, sources []remot
 	var goodTxns TxnSlots
 	err := p.withLockedState(ctx, &prechecked, func(_ kv.TemporalTx, view kvcache.CacheView) error {
 		var err error
-		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil, nil)
+		precheckReasons, goodTxns, _, err = p.validateTxns(&prechecked, view, nil, nil, newBatchUsage())
 		if err != nil || p.cfg.MaxNonceGap == 0 || hasFrames {
 			return err
 		}
@@ -2067,7 +2074,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, sources []rem
 				return err
 			}
 			reasons = preparedReasons
-			validatedReasons, goodTxns, cells, err := p.validateTxns(&newTxns, cacheView, reasons, sources, &batchUsage{senderTxns: map[uint64]int{}, senderBlobs: map[uint64]uint64{}})
+			validatedReasons, goodTxns, cells, err := p.validateTxns(&newTxns, cacheView, reasons, sources, newBatchUsage())
 			if err != nil {
 				return err
 			}
