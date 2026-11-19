@@ -146,17 +146,52 @@ def measure_rank(measure):
             MEASURE_ORDER.index(kind) if kind in MEASURE_ORDER else len(MEASURE_ORDER), measure)
 
 
+def split_connections(conns, shares):
+    """Split conns among classes by share as rpc_perf does: largest remainder, at least one per class."""
+    exact = [conns * share / sum(shares) for share in shares]
+    counts = [int(e) for e in exact]
+    for k in sorted(range(len(shares)), key=lambda k: exact[k] - counts[k], reverse=True)[:conns - sum(counts)]:
+        counts[k] += 1
+    for k, n in enumerate(counts):
+        if n == 0:
+            counts[counts.index(max(counts))] -= 1
+            counts[k] = 1
+    return counts
+
+
+def describe_subscription(count, typ, flt, pick):
+    """Describe in words the subscriptions of one line of a class description, e.g. "50 logs filter=address"."""
+    if typ == "newHeads":
+        return "`newHeads`"
+    if typ == "transactionReceipts":
+        return "`transactionReceipts` (all the receipts of a block in one notification)"
+    if typ == "logs" and flt == "all":
+        return "`logs` with no filter (every log of every block)"
+    if typ == "logs" and pick:
+        what = "one contract address, a different one" if pick == 1 else f"{pick} contract addresses, different ones"
+        return f"`logs` filtered by {what} per connection, taken in turn from {count} addresses active in recent blocks"
+    return f"{count} `{typ}`" + (f" filtered by {flt}" if flt else "")
+
+
 def class_legend(pattern):
-    """Return a line per client class of the pattern: its share of the connections and its subscriptions."""
+    """Return the legend of the client classes: how they split the connections and what each one subscribes to."""
     lines = []
     for part in pattern.get("description", "").split(": ", 1)[-1].split("; "):
         m = re.fullmatch(r"(\w+) share (\d+)(?:, pick (\d+))?: (.+)", part)
         if m is None:
             continue
         name, share, pick, subs = m.groups()
-        pick_note = f" (each connection takes {pick} of the logs)" if pick else ""
-        lines.append(f"- **{name}**, {share}% of the connections: {subs}{pick_note}")
-    return lines
+        items = []
+        for item in subs.split(", "):
+            sm = re.fullmatch(r"(\d+) (\w+)(?: filter=(\w+))?", item)
+            items.append(describe_subscription(int(sm[1]), sm[2], sm[3], int(pick or 0)) if sm else item)
+        said = items[0] if len(items) == 1 else ", to ".join(items[:-1]) + " and to " + items[-1]
+        if items == ["`newHeads`"]:
+            said += ": one notification per new block, with its header"
+        lines.append(f"- **{name}**, {share}% of the connections. Each one subscribes to {said}.")
+    shares = [str(c["share"]) + "%" for c in pattern["clients"]]
+    return [f"The connections are split into {len(shares)} classes of clients, by share of the total "
+            f"({' + '.join(shares)} = 100%):"] + lines
 
 
 def render_classes(results, patterns):
@@ -167,7 +202,7 @@ def render_classes(results, patterns):
             continue
         clients = sorted(results[label], key=lambda c: (client_rank(c), c))
         classes = [c["name"] for c in patterns[label]["clients"]]
-        lines += [f"### {label}: client classes and measures", "", "Client classes:"] + class_legend(patterns[label])
+        lines += [f"### {label}: client classes and measures", ""] + class_legend(patterns[label])
         lines += ["", "Measures, p50 / p95 in ms, * fastest p50:"] + MEASURE_LEGEND
         if any(n.startswith("transactionReceipts per receipt") for c in results[label].values()
                for s in c.values() for n in s.get("apis", {})):
@@ -175,7 +210,8 @@ def render_classes(results, patterns):
         for qps in sorted({q for c in clients for q in results[label][c]}, key=float):
             steps = {c: results[label][c].get(qps) or {} for c in clients}
             apis = {c: s.get("apis", {}) for c, s in steps.items()}
-            lines += ["", f"{qps} connections:", "",
+            split = split_connections(int(float(qps)), [c["share"] for c in patterns[label]["clients"]])
+            lines += ["", f"{qps} connections: " + ", ".join(f"{n} {c}" for n, c in zip(split, classes)), "",
                       "| Class | Measure | " + " | ".join(clients) + " |",
                       "|---|---|" + "---:|" * len(clients)]
             for cls in classes:
