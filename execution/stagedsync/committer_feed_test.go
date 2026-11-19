@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -237,22 +236,18 @@ func computeAheadRoot(t *testing.T, wantFeed bool) []byte {
 func TestPrefetchWritesSortedForSeqLookup(t *testing.T) {
 	defer func(v int) { prefetchSeqSteps = v }(prefetchSeqSteps)
 	prefetchSeqSteps = 4
-	var blockBAL types.BlockAccessList
+	ws := newWS()
 	for i := range 16 {
-		ac := types.AccountChanges{
-			Address:        common.Address{19: byte(i + 1)},
-			BalanceChanges: []*types.BalanceChange{{Index: 0, Value: *uint256.NewInt(uint64(i + 1))}},
-		}
+		addr := accounts.InternAddress(common.Address{19: byte(i + 1)})
+		ws.bal(addr, state.Version{}, *uint256.NewInt(uint64(i + 1)))
 		for j := range i % 4 {
-			slot := accounts.InternKey(common.Hash{31: byte(j + 1)})
-			ac.StorageChanges = append(ac.StorageChanges, types.SlotChanges{Slot: slot, Changes: []*types.StorageChange{{Index: 0, Value: *uint256.NewInt(1)}}})
+			ws.stor(addr, accounts.InternKey(common.Hash{31: byte(j + 1)}), state.Version{}, *uint256.NewInt(1))
 		}
-		blockBAL = append(blockBAL, ac)
 	}
 	p := newPrefetchRecords()
 	p.work = make(chan prefetchItem, 256)
 	cc := &commitmentCalculator{branchPrefetch: p}
-	cc.prefetchWrites(bal.ToWriteSet(blockBAL, math.MaxUint32))
+	cc.prefetchWrites(ws.build())
 	close(p.work)
 	var got []prefetchItem
 	for it := range p.work {

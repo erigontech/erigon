@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
@@ -38,11 +39,6 @@ const (
 )
 
 var prefetchSeqSteps = dbg.EnvInt("V3_PREFETCH_SEQ_STEPS", 0)
-
-type seqLookuper interface {
-	SetSeqLookup(domain kv.Domain, steps int)
-	SeqLookupStats(domain kv.Domain) (nexts, seeks uint64)
-}
 
 type prefetchItem struct {
 	account [32]byte
@@ -213,9 +209,9 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 			p.gate.RUnlock()
 			continue
 		}
-		var seq seqLookuper
+		var seq *dbstate.AggregatorRoTx
 		if prefetchSeqSteps > 0 {
-			if seq, _ = tx.AggTx().(seqLookuper); seq != nil {
+			if seq, _ = tx.AggTx().(*dbstate.AggregatorRoTx); seq != nil {
 				seq.SetSeqLookup(kv.CommitmentDomain, prefetchSeqSteps)
 			}
 		}
