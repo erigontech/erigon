@@ -489,6 +489,15 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 	}
 }
 
+// trieWarmupWorkers leaves one core per tx to exec: the trie warmup runs beside exec and pays only when
+// the block's exec is short, so a block with as many txs as cores keeps a single warmup worker.
+func trieWarmupWorkers(maxWorkers, txs int) int {
+	if maxWorkers <= 0 {
+		return 0
+	}
+	return max(maxWorkers-min(txs, maxWorkers), 1)
+}
+
 func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, txns types.Transactions, codeMode balCodeWarmupMode, workers int) error {
 	var txCodeDestinations map[accounts.Address]struct{}
 	if codeMode == balCodeWarmupTxnDestinations {
@@ -504,7 +513,7 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	var group errgroup.Group
 	if dbg.TrieBALWarmupers > 0 && !statecfg.ExperimentalCommitmentV3 {
 		group.Go(func() error {
-			return warmBALCommitment(ctx, db, trieKeys(), dbg.TrieBALWarmupers)
+			return warmBALCommitment(ctx, db, trieKeys(), trieWarmupWorkers(dbg.TrieBALWarmupers, len(txns)))
 		})
 	}
 	var cold coldState
