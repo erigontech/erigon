@@ -1291,18 +1291,18 @@ func (ii *InvertedIndex) buildMapAccessorAt(ctx context.Context, idxPath string,
 	return nil
 }
 
-func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
+func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) retiredFiles {
 	if txNumFrom == txNumTo {
 		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
 	}
 	if sf.decomp == nil {
-		return // build was skipped — don't overwrite existing dirty files
+		return nil // build was skipped — don't overwrite existing dirty files
 	}
 	fi := newFilesItem(txNumFrom, txNumTo)
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	fi.existence = sf.existence
-	ii.dirtyFiles.Set(fi)
+	return ii.dirtyFiles.replace(fi)
 }
 
 func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
