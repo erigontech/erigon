@@ -217,11 +217,7 @@ func TestRevertedSelfdestructKeepsCreatedContract(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			x := accounts.InternAddress([20]byte{0x51})
-			k5 := accounts.InternKey([32]byte{31: 5})
-			acc := accounts.NewAccount()
-			acc.Balance = *uint256.NewInt(1)
-			reader := &storageReader{addr: x, account: &acc, storage: map[accounts.StorageKey]uint256.Int{k5: *uint256.NewInt(3)}}
+			x, _, k5, reader := slotsBeforeTheBlock()
 			ibs := tc.new(reader)
 			defer ibs.Close()
 			ibs.SetTxContext(1, 0)
@@ -245,11 +241,7 @@ func TestRevertedSelfdestructKeepsCreatedContract(t *testing.T) {
 // A reverted SELFDESTRUCT keeps the origin values that an earlier tx committed for the contract.
 func TestRevertedSelfdestructKeepsEarlierTxOrigin(t *testing.T) {
 	t.Parallel()
-	x := accounts.InternAddress([20]byte{0x51})
-	k5 := accounts.InternKey([32]byte{31: 5})
-	acc := accounts.NewAccount()
-	acc.Balance = *uint256.NewInt(1)
-	reader := &storageReader{addr: x, account: &acc, storage: map[accounts.StorageKey]uint256.Int{k5: *uint256.NewInt(3)}}
+	x, _, k5, reader := slotsBeforeTheBlock()
 	rules := &chain.Rules{}
 	ibs := New(reader)
 	defer ibs.Close()
@@ -272,11 +264,7 @@ func TestRevertedSelfdestructKeepsEarlierTxOrigin(t *testing.T) {
 // that decides whether CommitBlock writes the slot.
 func TestRevertedSelfdestructCommitsSlotEqualToPreCreationValue(t *testing.T) {
 	t.Parallel()
-	x := accounts.InternAddress([20]byte{0x51})
-	k5 := accounts.InternKey([32]byte{31: 5})
-	acc := accounts.NewAccount()
-	acc.Balance = *uint256.NewInt(1)
-	reader := &storageReader{addr: x, account: &acc, storage: map[accounts.StorageKey]uint256.Int{k5: *uint256.NewInt(3)}}
+	x, _, k5, reader := slotsBeforeTheBlock()
 	rules := &chain.Rules{}
 	ibs := New(reader)
 	defer ibs.Close()
@@ -293,4 +281,28 @@ func TestRevertedSelfdestructCommitsSlotEqualToPreCreationValue(t *testing.T) {
 	w := newFinalStateWriter()
 	require.NoError(t, ibs.CommitBlock(rules, w))
 	require.Equal(t, *uint256.NewInt(3), w.storage[x][k5])
+}
+
+// A slot written while the created contract is destructed journals zero as its previous value,
+// so the revert does not bring back the value from before the creation.
+func TestRevertedSelfdestructUndoesWriteToZero(t *testing.T) {
+	t.Parallel()
+	x, _, k5, reader := slotsBeforeTheBlock()
+	rules := &chain.Rules{}
+	ibs := New(reader)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.CreateAccount(x, true))
+	snap := ibs.PushSnapshot()
+	_, err := ibs.Selfdestruct(x, false)
+	require.NoError(t, err)
+	require.NoError(t, ibs.SetState(x, k5, *uint256.NewInt(9)))
+	ibs.RevertToSnapshot(snap, nil)
+	current, err := ibs.GetState(x, k5)
+	require.NoError(t, err)
+	require.True(t, current.IsZero())
+	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	w := newFinalStateWriter()
+	require.NoError(t, ibs.CommitBlock(rules, w))
+	require.NotContains(t, w.storage[x], k5)
 }

@@ -70,7 +70,7 @@ const (
 	flagSelfdestructHadBalance     uint8 = 1 << 3 // kindSelfdestruct: a versioned balance write predated the destruct
 	flagBalanceDeleted             uint8 = 1 << 4
 	flagSlotOnly                   uint8 = 1 << 5
-	flagSelfdestructPrevCreated    uint8 = 1 << 6 // kindSelfdestruct: account was a contract created in this tx
+	flagSelfdestructPrevCreated    uint8 = 1 << 6 // kindSelfdestruct: createdContract was set
 )
 
 // journalExtra holds the fields needed only by the infrequent entry kinds,
@@ -386,6 +386,9 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			so.selfdestructed = prev
 			if s.versionMap == nil { // the versioned path keeps the flag in its CreateContract cell
 				so.createdContract = prevCreated
+				if prevCreated {
+					so.destructedCreated = false
+				}
 			}
 			so.setBalance(je.value)
 		} else if s.versionMap == nil {

@@ -2002,6 +2002,7 @@ func (ibs *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 	}
 
 	stateObject.markSelfdestructed()
+	stateObject.destructedCreated = stateObject.destructedCreated || stateObject.createdContract
 	stateObject.createdContract = false
 
 	ibs.recordWriteIncarnation(addr, stateObject.data.Incarnation)

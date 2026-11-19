@@ -95,11 +95,12 @@ type stateObject struct {
 	// Cache flags.
 	// When an object is marked selfdestructed it will be delete from the trie
 	// during the "update" phase of the state transition.
-	dirtyCode       bool // true if the code was updated
-	selfdestructed  bool
-	deleted         bool // true if account was deleted during the lifetime of this object
-	newlyCreated    bool // true if this object was created in the current transaction
-	createdContract bool // true if this object represents a newly created contract
+	dirtyCode         bool // true if the code was updated
+	selfdestructed    bool
+	deleted           bool // true if account was deleted during the lifetime of this object
+	newlyCreated      bool // true if this object was created in the current transaction
+	createdContract   bool // true if this object represents a newly created contract
+	destructedCreated bool // createdContract was set when the account self-destructed, so its old slots still read zero
 
 	// Set by stateObjectArena.alloc; keeps release from pooling a slot the arena owns.
 	arena bool
@@ -138,6 +139,7 @@ func (so *stateObject) reset() {
 	so.deleted = false
 	so.newlyCreated = false
 	so.createdContract = false
+	so.destructedCreated = false
 }
 
 // release resets the object and pools it, unless the arena owns the slot.
@@ -195,7 +197,7 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 			return value, nil
 		}
 	}
-	if so.createdContract {
+	if so.createdContract || so.destructedCreated {
 		if dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle())) {
 			fmt.Printf("%d (%d.%d) GetCommittedState SKIP (createdContract) %x key=%x\n",
 				so.db.blockNum, so.db.txIndex, so.db.version, so.address, key)
@@ -226,9 +228,6 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 		res.Clear()
 	}
 
-	if so.selfdestructed { // a revert can make this a contract created in this tx, whose old slots read zero
-		return res, nil
-	}
 	so.originStorage.set(key, res)
 	so.blockOriginStorage.set(key, res)
 
