@@ -120,7 +120,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, allFiles []string) {
 
 			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
 			kveiFile := strings.TrimSuffix(filename, ".bt") + ".kvei"
-			if err := btindex.BuildBtreeIndexWithDecompressor(filename, kveiFile, r, background.NewProgressSet(), dirs.Tmp, uint32(1), log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence); err != nil {
+			if err := btindex.BuildBtreeIndexWithDecompressor(filename, kveiFile, r, background.NewProgressSet(), dirs.Tmp, uint32(1), log.New(), true, statecfg.AccessorBTree); err != nil {
 				t.Fatal(err)
 			}
 			seg3.Close()
