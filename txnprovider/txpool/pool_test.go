@@ -199,7 +199,9 @@ func TestUnwindRestoresTransactionsAboveAccountLimit(t *testing.T) {
 	require.NoError(t, pool.OnNewBlock(ctx, block(1, 1, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, first))
 	require.NoError(t, pool.OnNewBlock(ctx, block(2, pool.cfg.AccountSlots+2, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, rest))
 
-	// The first unwound block alone can put the sender above the admission limit.
+	// The first unwind restores the higher nonces and puts the sender above the
+	// admission limit. The second rewinds the account nonce to 0, so those
+	// transactions can stay pending only if the pool also restores nonce 0.
 	require.NoError(t, pool.OnNewBlock(ctx, block(1, 1, remoteproto.Direction_UNWIND), rest, TxnSlots{}, TxnSlots{}))
 	require.EqualValues(t, pool.cfg.AccountSlots+1, pool.pending.Len())
 
