@@ -122,6 +122,56 @@ func (it *ReverseRangeIter[T]) Next() (T, error) {
 	return v, nil
 }
 
+// Seeker is a stream that can skip ahead: after Seek(v), Next returns the first element not before v
+// in the stream order (>= v ascending, <= v descending). Seek never moves backwards. CanSeek reports
+// whether skipping is cheaper than iterating, e.g. a B-tree search instead of a scan. A stream with
+// a finite limit does not seek: the elements it skips would not count against the limit.
+type Seeker[T any] interface {
+	CanSeek() bool
+	Seek(v T) error
+}
+
+func seeker[T any](it Uno[T]) Seeker[T] {
+	if s, ok := it.(Seeker[T]); ok && s.CanSeek() {
+		return s
+	}
+	return nil
+}
+
+func before[T cmp.Ordered](a, b T, asc bool) bool {
+	return (asc && a < b) || (!asc && a > b)
+}
+
+// skipTo moves a stream whose head, already taken out with Next, is *k (has: there is one) to the
+// first element not before v. It steps once before seeking: a target that is the next element needs
+// no seek, and on MDBX a step costs about as much as a seek.
+func skipTo[T cmp.Ordered](it Uno[T], k *T, has *bool, v T, asc bool) (err error) {
+	next := func() error {
+		if *has = it.HasNext(); *has {
+			*k, err = it.Next()
+		}
+		return err
+	}
+	if !*has || !before(*k, v, asc) {
+		return nil
+	}
+	if err = next(); err != nil || !*has || !before(*k, v, asc) {
+		return err
+	}
+	if s := seeker(it); s != nil {
+		if err := s.Seek(v); err != nil {
+			return err
+		}
+		return next()
+	}
+	for *has && before(*k, v, asc) {
+		if err := next(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type UnionUno[T cmp.Ordered] struct {
 	x, y           Uno[T]
 	asc            bool
@@ -213,6 +263,21 @@ func (m *UnionUno[T]) Next() (res T, _ error) {
 	return k, err
 }
 
+func (m *UnionUno[T]) CanSeek() bool {
+	return m.limit < 0 && (seeker(m.x) != nil || seeker(m.y) != nil)
+}
+
+func (m *UnionUno[T]) Seek(v T) error {
+	if m.err != nil {
+		return m.err
+	}
+	if m.err = skipTo(m.x, &m.xNextK, &m.xHas, v, m.asc); m.err != nil {
+		return m.err
+	}
+	m.err = skipTo(m.y, &m.yNextK, &m.yHas, v, m.asc)
+	return m.err
+}
+
 func (m *UnionUno[T]) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()
@@ -250,6 +315,13 @@ func (m *Intersected[T]) HasNext() bool {
 func (m *Intersected[T]) advance() {
 	m.advanceX()
 	m.advanceY()
+	m.align()
+}
+
+// align moves the stream behind up to the head of the other one, skipping with a seek when it can,
+// until both heads are equal: a small stream intersected with a large one costs the small one's size.
+func (m *Intersected[T]) align() {
+	asc := bool(m.asc)
 	for m.xHasNext && m.yHasNext {
 		if m.err != nil {
 			break
@@ -257,25 +329,40 @@ func (m *Intersected[T]) advance() {
 		if m.xNextK == m.yNextK {
 			return
 		}
-		if m.asc {
-			if m.xNextK < m.yNextK {
-				m.advanceX()
-				continue
-			} else {
-				m.advanceY()
-				continue
-			}
-		} else {
-			if m.xNextK < m.yNextK {
-				m.advanceY()
-				continue
-			} else {
-				m.advanceX()
-				continue
-			}
+		switch {
+		case before(m.xNextK, m.yNextK, asc):
+			m.err = skipTo(m.x, &m.xNextK, &m.xHasNext, m.yNextK, asc)
+		case before(m.yNextK, m.xNextK, asc):
+			m.err = skipTo(m.y, &m.yNextK, &m.yHasNext, m.xNextK, asc)
+		case m.xNextK != m.xNextK: //nolint:gocritic // NaN: unordered and never equal, so it cannot match
+			m.advanceX()
+		default:
+			m.advanceY()
 		}
 	}
 	m.xHasNext = false
+}
+
+func (m *Intersected[T]) CanSeek() bool {
+	return m.limit < 0 && (seeker(m.x) != nil || seeker(m.y) != nil)
+}
+
+func (m *Intersected[T]) Seek(v T) error {
+	if m.err != nil {
+		return m.err
+	}
+	if !m.xHasNext || !m.yHasNext {
+		return nil
+	}
+	asc := bool(m.asc)
+	if m.err = skipTo(m.x, &m.xNextK, &m.xHasNext, v, asc); m.err != nil {
+		return m.err
+	}
+	if m.err = skipTo(m.y, &m.yNextK, &m.yHasNext, v, asc); m.err != nil {
+		return m.err
+	}
+	m.align()
+	return m.err
 }
 
 func (m *Intersected[T]) advanceX() {

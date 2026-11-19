@@ -42,9 +42,8 @@ func TestExtractWitness_RetainedAccountBlindedStorage(t *testing.T) {
 	require.True(t, ok, "leaf should be an AccountNode")
 	an.Storage = &HashNode{hash: crypto.Keccak256([]byte("blinded storage subtrie"))}
 
-	rlb := NewRetainListBuilder()
-	rlb.AddTouch(addrHash)
-	rl := rlb.Build(false)
+	rl := NewRetainList(0)
+	rl.AddKey(addrHash)
 
 	w, err := tr.ExtractWitness(false, rl)
 	require.NoError(t, err)

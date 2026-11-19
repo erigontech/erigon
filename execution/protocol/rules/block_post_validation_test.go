@@ -24,7 +24,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -35,9 +34,6 @@ import (
 // and friends).
 func TestBlockPostValidation_PreByzantiumBloomMismatch(t *testing.T) {
 	t.Parallel()
-
-	// Frontier rules — pre-Byzantium, so the receipt-root path is not exercised.
-	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	logAddr := common.HexToAddress("0x095e7baea6a6c7c4c2dfeb977efac326af552d87")
 	receipt := &types.Receipt{
@@ -63,7 +59,7 @@ func TestBlockPostValidation_PreByzantiumBloomMismatch(t *testing.T) {
 	const checkReceipts = false // pre-Byzantium gate
 	const checkBloom = true
 
-	err := DefaultBlockPostValidation(cfg, header, 21912, 0, checkReceipts, checkBloom, receipts, nil, log.New())
+	err := DefaultBlockPostValidation(header, 21912, 0, checkReceipts, checkBloom, receipts, nil, log.New())
 	if err == nil {
 		t.Fatal("expected bloom-mismatch error on pre-Byzantium block, got nil")
 	}
@@ -73,14 +69,14 @@ func TestBlockPostValidation_PreByzantiumBloomMismatch(t *testing.T) {
 
 	// Set the correct bloom — validation must pass.
 	header.Bloom = correctBloom
-	if err := DefaultBlockPostValidation(cfg, header, 21912, 0, checkReceipts, checkBloom, receipts, nil, log.New()); err != nil {
+	if err := DefaultBlockPostValidation(header, 21912, 0, checkReceipts, checkBloom, receipts, nil, log.New()); err != nil {
 		t.Fatalf("expected success when bloom matches, got: %v", err)
 	}
 
 	// With checkBloom disabled the mismatch must not trigger an error
 	// (sanity check that the new flag does gate the new path).
 	header.Bloom = types.Bloom{}
-	if err := DefaultBlockPostValidation(cfg, header, 21912, 0, checkReceipts, false, receipts, nil, log.New()); err != nil {
+	if err := DefaultBlockPostValidation(header, 21912, 0, checkReceipts, false, receipts, nil, log.New()); err != nil {
 		t.Fatalf("checkBloom=false should skip bloom validation, got: %v", err)
 	}
 }
@@ -88,7 +84,6 @@ func TestBlockPostValidation_PreByzantiumBloomMismatch(t *testing.T) {
 func TestBlockPostValidation_ReceiptBloomReuse(t *testing.T) {
 	t.Parallel()
 
-	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 	receipts := types.Receipts{
 		{
 			Status:            types.ReceiptStatusSuccessful,
@@ -137,12 +132,12 @@ func TestBlockPostValidation_ReceiptBloomReuse(t *testing.T) {
 	const checkReceipts = true
 	const checkBloom = true
 
-	if err := DefaultBlockPostValidation(cfg, header, 42_000, 0, checkReceipts, checkBloom, receipts, nil, log.New()); err != nil {
+	if err := DefaultBlockPostValidation(header, 42_000, 0, checkReceipts, checkBloom, receipts, nil, log.New()); err != nil {
 		t.Fatalf("expected receipt+bloom validation to accept OR-merged bloom: %v", err)
 	}
 
 	header.Bloom = types.Bloom{}
-	err := DefaultBlockPostValidation(cfg, header, 42_000, 0, checkReceipts, checkBloom, receipts, nil, log.New())
+	err := DefaultBlockPostValidation(header, 42_000, 0, checkReceipts, checkBloom, receipts, nil, log.New())
 	if err == nil {
 		t.Fatal("expected bloom-mismatch error, got nil")
 	}

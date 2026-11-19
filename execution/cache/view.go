@@ -65,6 +65,18 @@ type FrontierFunc func(domain kv.Domain) (visibleEnd uint64, ok bool)
 
 func (f FrontierFunc) DomainVisibleEnd(domain kv.Domain) (uint64, bool) { return f(domain) }
 
+// ClampFillTxNum bounds a read-fill stamp by a read-only snapshot's last visible
+// txNum. A nil frontier leaves the stamp unchanged; use it for writable backing
+// transactions, whose visible bounds may lag behind writes.
+func ClampFillTxNum(f Frontier, domain kv.Domain, txNum uint64) uint64 {
+	if f != nil {
+		if end, ok := f.DomainVisibleEnd(domain); ok && end > 0 {
+			return min(txNum, end-1)
+		}
+	}
+	return txNum
+}
+
 // rejectedFrontier distinguishes a non-retryable rejection from a nil, retryable
 // binding without growing ReadView, which is embedded in every state getter.
 type rejectedFrontier struct{}
@@ -78,23 +90,23 @@ func (rejectedFrontier) DomainVisibleEnd(kv.Domain) (uint64, bool) { return 0, f
 // because code size is content-addressed. The zero value is inert: reads miss,
 // fills no-op.
 //
-// A ReadView does not isolate reads: the cache holds latest-applied state, so
-// a hit can be newer than the view — the same direction the exec overlay
-// already serves. In the forward direction the cache's invariant is
-// monotonicity (content never regresses behind the applied frontier),
-// enforced on the fill side; unwinds invalidate stored entries by their
-// per-cache entry epoch and floor.
+// Get and GetWithTxNum can return values newer than the transaction's snapshot.
+// GetVisible and GetAsOf check the snapshot's frontier and read-view epoch;
+// callers must read misses from their transaction. The cache stores latest-applied
+// values, not historical versions. Fills prevent cache contents from regressing
+// behind the applied frontier; unwinds invalidate entries by their per-cache
+// epoch and floor.
 //
 // Each view also snapshots the StateCache read-view epoch. An unwind advances
-// that epoch, so older views can still read but cannot fill from the discarded
-// fork. State version is checked when the frontier is bound, not on every fill:
+// that epoch, so older views cannot fill, and their snapshot-bounded reads miss.
+// State version is checked when the frontier is bound, not on every fill:
 // continuous forward publication keeps the view eligible, while the domain
 // frontier rejects values older than the latest update. A discontinuity also
 // advances the epoch and revokes every previously bound view.
-// During publication, reads remain available. Existing eligible views cannot
-// fill until the complete update batch is installed. A view bound during
-// publication has no frontier and remains fill-inert until explicitly rebound.
-// Snapshot-isolated caching is kvcache's job (node/shards).
+// During publication, unbounded reads remain available. Existing eligible views
+// cannot fill until the complete update batch is installed. A view bound during
+// publication has no frontier: snapshot-bounded reads miss and fills are disabled
+// until it is explicitly rebound.
 type ReadView struct {
 	c             *StateCache
 	frontier      Frontier
@@ -104,7 +116,9 @@ type ReadView struct {
 // View creates a ReadView vouched for by f. If the cache has a durable state
 // version, f must report the same version when it is bound. A stale or
 // versionless frontier is not retried automatically. A nil frontier,
-// publication in progress, or a cache behind f may be retried later.
+// publication in progress, or a cache behind f may be retried later. A cache
+// without a version counts as behind any versioned f: it missed the commits
+// before its first initialization.
 func (c *StateCache) View(f Frontier) ReadView {
 	if c == nil {
 		return ReadView{}
@@ -142,10 +156,13 @@ func (c *StateCache) bindFrontierLocked(frontier Frontier) Frontier {
 	if frontier == nil || c.publishing {
 		return nil
 	}
+	versioned, ok := frontier.(stateVersionFrontier)
 	if !c.stateVersionKnown {
+		if ok {
+			return nil
+		}
 		return frontier
 	}
-	versioned, ok := frontier.(stateVersionFrontier)
 	if !ok {
 		return rejectedFrontier{}
 	}
@@ -169,13 +186,40 @@ func (v ReadView) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 	return v.c.get(domain, key)
 }
 
-// GetWithTxNum is Get plus the txNum the cached value reflects, so the read
-// path can bound a hit by step against an in-flight unwind's maxStep.
+// GetWithTxNum is Get plus a conservative validity stamp, so the read
+// path can bound a hit against an in-flight unwind.
 func (v ReadView) GetWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64, bool) {
 	if v.c == nil {
 		return nil, 0, false
 	}
 	return v.c.getWithTxNum(domain, key)
+}
+
+// GetVisible is GetWithTxNum limited to the bound view's own state: a value
+// stamped at or above its frontier, or any value once an unwind revoked the
+// view, is a miss.
+func (v ReadView) GetVisible(domain kv.Domain, key []byte) ([]byte, uint64, bool) {
+	if v.c == nil || v.frontier == nil {
+		return nil, 0, false
+	}
+	end, ok := v.frontier.DomainVisibleEnd(domain)
+	if !ok {
+		return nil, 0, false
+	}
+	val, txNum, hit := v.c.getWithTxNum(domain, key)
+	// The epoch is loaded after the entry: an unwind bumps it before it installs
+	// the replacement fork's entries.
+	if !hit || txNum >= end || v.readViewEpoch != v.c.readViewEpoch.Load() {
+		return nil, 0, false
+	}
+	return val, txNum, true
+}
+
+// GetAsOf serves the latest visible value only when its validity stamp proves
+// that it was already valid before ts.
+func (v ReadView) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool) {
+	val, txNum, ok := v.GetVisible(domain, key)
+	return val, ok && txNum < ts
 }
 
 // GetCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
@@ -184,7 +228,7 @@ func (v ReadView) GetCodeByHash(codeHash []byte) ([]byte, bool) {
 	if v.c == nil {
 		return nil, false
 	}
-	return v.c.getCodeByHash(codeHash)
+	return v.c.GetCodeByHash(codeHash)
 }
 
 // GetCodeSizeByHash returns the cached code length for codeHash.
@@ -204,10 +248,10 @@ func (v ReadView) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	return v.c.getAddrCodeHash(addr)
 }
 
-// GetCodeByAddressHash resolves the durable addr→codeHash mapping and then
-// probes the content-addressed code cache. On a hit it also fills the
-// addr-keyed code binding with the mapping's original txNum, avoiding both a
-// database read and a redundant keccak of the cached code.
+// GetCodeByAddressHash resolves the cached addr→codeHash mapping and then probes
+// the content-addressed code cache, avoiding a database read and another keccak.
+// On a hit it also offers an addr-keyed binding stamped with the greater of the
+// mapping's validity stamp and the code view's last visible txNum.
 func (v ReadView) GetCodeByAddressHash(addr []byte) ([]byte, bool) {
 	if v.c == nil {
 		return nil, false
@@ -216,7 +260,7 @@ func (v ReadView) GetCodeByAddressHash(addr []byte) ([]byte, bool) {
 	if !ok || codeHash == ([32]byte{}) {
 		return nil, false
 	}
-	code, ok := v.c.getCodeByHash(codeHash[:])
+	code, ok := v.c.GetCodeByHash(codeHash[:])
 	if !ok {
 		return nil, false
 	}
@@ -252,12 +296,11 @@ func (v ReadView) CanFill() bool {
 // NeedsFrontier reports whether rebinding could make this view fill-eligible.
 func (v ReadView) NeedsFrontier() bool { return v.c != nil && v.frontier == nil }
 
-// Fill offers a value read from this view without replacing an authoritative
-// entry. Admission is checked against the view's frontier for the domain;
-// views without an exact frontier skip the fill. A code fill also checks the
-// accounts frontier: an addr-keyed code entry derives from the account — an
-// account deletion drops it without advancing the code frontier — so a view
-// that predates the deletion must not refill it (mirrors SeedAddrCodeHash).
+// Fill offers a value read from this view without replacing an authoritative entry.
+// Its stamp is at least the view's last visible txNum: an unwind can reuse an older
+// row, so the row's step does not prove historical validity. readTxNum may raise
+// this bound for a writable view. Views without an exact frontier skip the fill;
+// code fills also require a current accounts frontier.
 func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uint64) {
 	if v.c == nil || v.c.disableFills || v.frontier == nil {
 		return
@@ -285,8 +328,8 @@ func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) []byte
 }
 
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account
-// record read from this view, so admission checks the accounts frontier even
-// though the mapping lives in the code cache.
+// record read from this view. The accounts frontier governs both admission and
+// the validity stamp, even though the mapping lives in the code cache.
 func (v ReadView) SeedAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	if v.c == nil || v.c.disableFills || v.frontier == nil {
 		return
@@ -299,9 +342,6 @@ func (v ReadView) SeedAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	// the executing transaction that requested the lookup.
 	if h == ([32]byte{}) {
 		txNum = 0
-		if visibleEnd > 0 {
-			txNum = visibleEnd - 1
-		}
 	}
 	v.c.seedAddrCodeHash(addr, h, txNum, visibleEnd, v.readViewEpoch)
 }

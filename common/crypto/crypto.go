@@ -136,12 +136,6 @@ func Keccak256(data ...[]byte) []byte {
 	return b
 }
 
-// Keccak256Hash calc Keccak256
-// Single-argument by design: a variadic signature exceeds the inlining budget.
-func Keccak256Hash(data []byte) common.Hash {
-	return keccak.Sum256(data)
-}
-
 func keccak256Hash(data [][]byte) common.Hash {
 	if len(data) == 1 { // fast-path
 		return keccak.Sum256(data[0])

@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"sync"
 	"time"
 
@@ -434,6 +433,10 @@ func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, logPrefi
 }
 
 type Progress struct {
+	// logMu serializes the Log* methods so the exec goroutine (LogExecution) and
+	// the commitment calculator goroutine (LogCommitments) can interleave without
+	// racing the prev* deltas they share (notably prevDomainMetrics).
+	logMu                   sync.Mutex
 	initialTime             time.Time
 	initialTxNum            uint64
 	initialBlockNum         uint64
@@ -468,29 +471,15 @@ type Progress struct {
 	logger                  log.Logger
 }
 
-type executor interface {
-	LogExecution()
-	LogCommitments(committedTransactions uint64, stepsInDb float64, lastProgress commitment.CommitProgress)
-	LogComplete(stepsInDb float64)
-}
-
-func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
+func (p *Progress) LogExecution(rs *state.StateV3, pe *parallelExecutor) {
+	p.logMu.Lock()
+	defer p.logMu.Unlock()
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevExecTime)
 	seconds := interval.Seconds()
 
-	var suffix string
-	execVals := make([]any, 0, 2)
-	var te *txExecutor
-
-	switch ex := ex.(type) {
-	case *parallelExecutor:
-		te = &ex.txExecutor
-		suffix = " parallel"
-	case *serialExecutor:
-		te = &ex.txExecutor
-		suffix = " serial"
-	}
+	te := &pe.txExecutor
+	suffix := " parallel"
 
 	taskGas := te.taskExecMetrics.GasUsed.Total.Load()
 	taskDur := time.Duration(te.taskExecMetrics.Duration.Load())
@@ -527,7 +516,6 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 
 	var readRatio float64
 	var execRatio float64
-	var avgTaskGasPerSec int64
 	var avgTaskDur time.Duration
 	var avgReadDur time.Duration
 	var avgExecDur time.Duration
@@ -557,7 +545,6 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		}
 
 		avgTaskGas = curTaskGas / curActivations
-		avgTaskGasPerSec = int64(float64(avgTaskGas) / seconds)
 	}
 
 	curTaskGasPerSec := int64(float64(curTaskGas) / seconds)
@@ -565,97 +552,81 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	uncommitedGas := uint64(te.executedGas.Load() - te.committedGas.Load())
 	sizeEstimate := rs.SizeEstimateBeforeCommitment()
 
-	switch ex.(type) {
-	case *parallelExecutor:
-		execCount := uint64(te.execCount.Load())
-		abortCount := uint64(te.abortCount.Load())
-		invalidCount := uint64(te.invalidCount.Load())
-		readCount := te.readCount.Load()
-		writeCount := uint64(te.writeCount.Load())
+	execCount := uint64(te.execCount.Load())
+	abortCount := uint64(te.abortCount.Load())
+	invalidCount := uint64(te.invalidCount.Load())
+	readCount := te.readCount.Load()
+	writeCount := uint64(te.writeCount.Load())
 
-		// not sure why this happens but sometime we read more from disk than from memory
-		storageReadCount := te.taskExecMetrics.ReadCount.Load()
-		if storageReadCount > readCount {
-			readCount = storageReadCount
-		}
-
-		execDiff := execCount - p.prevExecCount
-
-		repeats := max(int(execDiff)-max(int(te.lastExecutedTxNum.Load())-int(p.prevExecutedTxNum), 0), 0)
-		var repeatRatio float64
-
-		if repeats > 0 {
-			repeatRatio = 100.0 * float64(repeats) / float64(execDiff)
-		}
-
-		curReadCount := int64(readCount - p.prevReadCount)
-		curWriteCount := int64(writeCount - p.prevWriteCount)
-
-		curReadRate := uint64(float64(curReadCount) / seconds)
-		curWriteRate := uint64(float64(curWriteCount) / seconds)
-
-		mxExecReadRate.SetUint64(curReadRate)
-		mxExecWriteRate.SetUint64(curWriteRate)
-		mxExecAccountReadRate.Set(float64(curAccountReadCount) / seconds)
-		mxExecStorageReadRate.Set(float64(curStorageReadCount) / seconds)
-		mxExecCodeReadRate.Set(float64(curCodeReadCount) / seconds)
-
-		mxExecGasPerTxn.Set(float64(avgTaskGas))
-		mxTaskMgasSec.Set(float64(curTaskGasPerSec / 1e6))
-		mxExecCPUs.Set(float64(curTaskDur) / float64(interval))
-
-		execVals = []any{
-			"exec", common.PrettyCounter(execDiff),
-			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
-			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
-			"invalid", common.PrettyCounter(invalidCount - p.prevInvalidCount),
-			"tgas/s", common.PrettyCounter(curTaskGasPerSec),
-			"tcpus", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
-			"tdur", common.Round(avgTaskDur, 0).String(),
-			"exec", fmt.Sprintf("%v(%.2f%%)", common.Round(avgExecDur, 0), execRatio),
-			"read", fmt.Sprintf("%v(%.2f%%),a=%v,s=%v,c=%v", common.Round(avgReadDur, 0), readRatio, common.Round(avgAccountReadDur, 0), common.Round(avgStorageReadDur, 0), common.Round(avgCodeReadDur, 0)),
-			"rd", fmt.Sprintf("%s,a=%s,s=%s,c=%s", common.PrettyCounter(curReadCount), common.PrettyCounter(curAccountReadCount),
-				common.PrettyCounter(curStorageReadCount), common.PrettyCounter(curCodeReadCount)),
-			"wrt", common.PrettyCounter(curWriteCount),
-			"rd/s", common.PrettyCounter(curReadRate),
-			"wrt/s", common.PrettyCounter(curWriteRate),
-			"buf", fmt.Sprintf("%s/%s", common.ByteCount(uint64(sizeEstimate)), common.ByteCount(p.commitThreshold)),
-		}
-
-		mxExecRepeats.SetInt(repeats)
-		execMode := "other"
-		switch {
-		case te.isForkValidation:
-			execMode = "newpayload"
-		case te.isApplyingBlocks:
-			execMode = "applyingblocks"
-		}
-		mxExecsTotal.WithLabelValues(execMode).AddUint64(execDiff)
-		mxRepeatsTotal.WithLabelValues(execMode).AddInt(repeats)
-		mxDiscardsTotal.WithLabelValues(execMode, "abort").AddUint64(abortCount - p.prevAbortCount)
-		mxDiscardsTotal.WithLabelValues(execMode, "invalid").AddUint64(invalidCount - p.prevInvalidCount)
-		mxExecTriggers.SetInt(int(execCount))
-
-		p.prevExecCount = execCount
-		p.prevAbortCount = abortCount
-		p.prevInvalidCount = invalidCount
-		p.prevReadCount = readCount
-		p.prevWriteCount = writeCount
-	case *serialExecutor:
-		readCount := te.taskExecMetrics.ReadCount.Load()
-		curReadCount := readCount - p.prevReadCount
-		p.prevReadCount = readCount
-
-		execVals = []any{
-			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
-			"aratio", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
-			"tdur", common.Round(avgTaskDur, 0),
-			"trdur", fmt.Sprintf("%v(%.2f%%)", common.Round(avgReadDur, 0), readRatio),
-			"rd", common.PrettyCounter(curReadCount),
-			"rd/s", common.PrettyCounter(uint64(float64(curReadCount) / seconds)),
-			"buf", fmt.Sprintf("%s/%s", common.ByteCount(uint64(sizeEstimate)), common.ByteCount(p.commitThreshold)),
-		}
+	// not sure why this happens but sometimes we read more from disk than from memory
+	totalReadCount := te.taskExecMetrics.ReadCount.Load()
+	if totalReadCount > readCount {
+		readCount = totalReadCount
 	}
+
+	execDiff := execCount - p.prevExecCount
+
+	repeats := max(int(execDiff)-max(int(te.lastExecutedTxNum.Load())-int(p.prevExecutedTxNum), 0), 0)
+	var repeatRatio float64
+
+	if repeats > 0 {
+		repeatRatio = 100.0 * float64(repeats) / float64(execDiff)
+	}
+
+	curReadCount := int64(readCount - p.prevReadCount)
+	curWriteCount := int64(writeCount - p.prevWriteCount)
+
+	curReadRate := uint64(float64(curReadCount) / seconds)
+	curWriteRate := uint64(float64(curWriteCount) / seconds)
+
+	mxExecReadRate.SetUint64(curReadRate)
+	mxExecWriteRate.SetUint64(curWriteRate)
+	mxExecAccountReadRate.Set(float64(curAccountReadCount) / seconds)
+	mxExecStorageReadRate.Set(float64(curStorageReadCount) / seconds)
+	mxExecCodeReadRate.Set(float64(curCodeReadCount) / seconds)
+
+	mxExecGasPerTxn.Set(float64(avgTaskGas))
+	mxTaskMgasSec.Set(float64(curTaskGasPerSec / 1e6))
+	mxExecCPUs.Set(float64(curTaskDur) / float64(interval))
+
+	execVals := make([]any, 0, 30)
+	execVals = append(execVals,
+		"exec", common.PrettyCounter(execDiff),
+		"repeat%", fmt.Sprintf("%.2f", repeatRatio),
+		"abort", common.PrettyCounter(abortCount-p.prevAbortCount),
+		"invalid", common.PrettyCounter(invalidCount-p.prevInvalidCount),
+		"tgas/s", common.PrettyCounter(curTaskGasPerSec),
+		"tcpus", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
+		"tdur", common.Round(avgTaskDur, 0).String(),
+		"exec", fmt.Sprintf("%v(%.2f%%)", common.Round(avgExecDur, 0), execRatio),
+		"read", fmt.Sprintf("%v(%.2f%%),a=%v,s=%v,c=%v", common.Round(avgReadDur, 0), readRatio, common.Round(avgAccountReadDur, 0), common.Round(avgStorageReadDur, 0), common.Round(avgCodeReadDur, 0)),
+		"rd", fmt.Sprintf("%s,a=%s,s=%s,c=%s", common.PrettyCounter(curReadCount), common.PrettyCounter(curAccountReadCount),
+			common.PrettyCounter(curStorageReadCount), common.PrettyCounter(curCodeReadCount)),
+		"wrt", common.PrettyCounter(curWriteCount),
+		"rd/s", common.PrettyCounter(curReadRate),
+		"wrt/s", common.PrettyCounter(curWriteRate),
+		"buf", fmt.Sprintf("%s/%s", common.ByteCount(uint64(sizeEstimate)), common.ByteCount(p.commitThreshold)),
+	)
+
+	mxExecRepeats.SetInt(repeats)
+	execMode := "other"
+	switch {
+	case te.isForkValidation:
+		execMode = "newpayload"
+	case te.isApplyingBlocks:
+		execMode = "applyingblocks"
+	}
+	mxExecsTotal.WithLabelValues(execMode).AddUint64(execDiff)
+	mxRepeatsTotal.WithLabelValues(execMode).AddInt(repeats)
+	mxDiscardsTotal.WithLabelValues(execMode, "abort").AddUint64(abortCount - p.prevAbortCount)
+	mxDiscardsTotal.WithLabelValues(execMode, "invalid").AddUint64(invalidCount - p.prevInvalidCount)
+	mxExecTriggers.SetInt(int(execCount))
+
+	p.prevExecCount = execCount
+	p.prevAbortCount = abortCount
+	p.prevInvalidCount = invalidCount
+	p.prevReadCount = readCount
+	p.prevWriteCount = writeCount
 
 	blockCount := te.blockExecMetrics.BlockCount.Load()
 	blockExecDur := time.Duration(te.blockExecMetrics.Duration.Load())
@@ -706,19 +677,11 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	}
 }
 
-func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, stepsInDb float64, lastProgress commitment.CommitProgress) {
-	var te *txExecutor
-	var suffix string
-
-	switch ex := ex.(type) {
-	case *parallelExecutor:
-		te = &ex.txExecutor
-		suffix = " parallel"
-
-	case *serialExecutor:
-		te = &ex.txExecutor
-		suffix = " serial"
-	}
+func (p *Progress) LogCommitments(rs *state.StateV3, pe *parallelExecutor, stepsInDb float64, lastProgress commitment.CommitProgress) {
+	p.logMu.Lock()
+	defer p.logMu.Unlock()
+	te := &pe.txExecutor
+	suffix := " parallel"
 
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevCommitTime)
@@ -737,24 +700,11 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, stepsInDb floa
 		commitedBlockDur = interval / time.Duration(committedDiffBlocks)
 	}
 
-	lastProgress.Metrics.RLock()
-	cacheBranchHits := lastProgress.Metrics.CacheBranch
-	cacheAccountHits := lastProgress.Metrics.CacheAccount
-	cacheStorageHits := lastProgress.Metrics.CacheStorage
-	missBranchCount := lastProgress.Metrics.MissBranch
-	missAccountCount := lastProgress.Metrics.MissAccount
-	missStorageCount := lastProgress.Metrics.MissStorage
-	lastProgress.Metrics.RUnlock()
-
-	totalCacheHits := cacheBranchHits + cacheAccountHits + cacheStorageHits
-	totalCacheMisses := missBranchCount + missAccountCount + missStorageCount
-
 	rs.Domains().Metrics().RLock()
 	commitVals := []any{
 		"bdur", common.Round(commitedBlockDur, 0),
 		"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(lastProgress.KeyIndex), common.PrettyCounter(lastProgress.UpdateCount)),
 		"buf", common.ByteCount(uint64(rs.Domains().Metrics().CachePutSize + rs.Domains().Metrics().CacheGetSize)),
-		"chit", common.PrettyCounter(totalCacheHits), "cmiss", common.PrettyCounter(totalCacheMisses),
 	}
 	rs.Domains().Metrics().RUnlock()
 
@@ -772,20 +722,12 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, stepsInDb floa
 	}
 }
 
-func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64) {
+func (p *Progress) LogComplete(rs *state.StateV3, pe *parallelExecutor, stepsInDb float64) {
+	p.logMu.Lock()
+	defer p.logMu.Unlock()
 	interval := time.Since(p.initialTime)
-	var te *txExecutor
-	var suffix string
-
-	switch ex := ex.(type) {
-	case *parallelExecutor:
-		te = &ex.txExecutor
-		suffix = " parallel"
-
-	case *serialExecutor:
-		te = &ex.txExecutor
-		suffix = " serial"
-	}
+	te := &pe.txExecutor
+	suffix := " parallel"
 
 	gas := te.committedGas.Load()
 
@@ -818,8 +760,7 @@ func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64
 func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.StateV3, interval time.Duration,
 	blk uint64, blks int64, txs uint64, txsSec uint64, gasSec uint64, uncommitedGas uint64, stepsInDb float64, extraVals []any,
 ) {
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
+	alloc, sys := dbg.MemUsage()
 	mxExecStepsInDB.Set(stepsInDb * 100)
 
 	if len(suffix) > 0 {
@@ -862,8 +803,8 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	}
 
 	vals = append(vals, []any{
-		"alloc", common.ByteCount(m.Alloc),
-		"sys", common.ByteCount(m.Sys),
+		"alloc", common.ByteCount(alloc),
+		"sys", common.ByteCount(sys),
 		"isForkValidation", te.isForkValidation,
 		"isApplyingBlocks", te.isApplyingBlocks,
 	}...)

@@ -57,7 +57,7 @@ func TestWriteGenesisBeaconBlockGloas(t *testing.T) {
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	header, _, err := beacon_indicies.ReadSignedHeaderByBlockRoot(t.Context(), tx, genesisRoot)
+	header, _, err := beacon_indicies.ReadSignedHeaderByBlockRoot(tx, genesisRoot)
 	require.NoError(t, err)
 	require.NotNil(t, header, "the genesis body must match the state's bid and be persisted")
 	require.Equal(t, common.Hash(bodyRoot), header.Header.BodyRoot)

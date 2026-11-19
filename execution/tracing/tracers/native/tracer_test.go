@@ -159,6 +159,25 @@ func TestFlatCallTracerTxnGasUsagePresence(t *testing.T) {
 	}
 }
 
+func TestFlatCallTracerTopLevelPrecompile(t *testing.T) {
+	tracer, err := tracers.New("flatCallTracer", &tracers.Context{}, json.RawMessage("{}"))
+	require.NoError(t, err)
+	sha256 := accounts.InternAddress(common.HexToAddress("0x02"))
+	tracer.OnTxStart(&tracing.VMContext{Rules: &chain.Rules{}},
+		types.NewTransaction(0, sha256.Value(), nil, 100_000, nil, nil), accounts.ZeroAddress)
+	tracer.EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, sha256, true, nil, mdgas.MdGas{Execution: 1000}, uint256.Int{}, nil)
+	tracer.EmitExit(0, nil, mdgas.MdGasUsage{Execution: 100}, nil, false)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: 21_060}, mdgas.TxnGasUsage{}, nil)
+	encoded, err := tracer.GetResult()
+	require.NoError(t, err)
+	var frames []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(encoded, &frames))
+	require.Len(t, frames, 1)
+	var action map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(frames[0]["action"], &action))
+	require.JSONEq(t, `"0x0000000000000000000000000000000000000002"`, string(action["to"]))
+}
+
 // TestTracerStopRace exercises the concurrent Stop / GetResult path that the
 // trace RPC handler uses: a timeout watchdog goroutine calls Stop while the
 // main goroutine is still running the trace and will eventually call

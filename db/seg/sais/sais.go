@@ -37,7 +37,7 @@ func Sais16(text []uint16, textMax int, sa []int32, buf *[]int32) error {
 	return nil
 }
 
-func map_32(sa []int32, numLMS int) {
+func map_32(sa []int32) {
 	w := len(sa)
 	for i := len(sa) / 2; i >= 0; i-- {
 		j := sa[i]

@@ -17,7 +17,6 @@
 package handler
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -35,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId *beaconhttp.SegmentID) (root common.Hash, httpStatusErr int, err error) {
+func (a *ApiHandler) blockRootFromStateId(tx kv.Tx, stateId *beaconhttp.SegmentID) (root common.Hash, httpStatusErr int, err error) {
 	switch {
 	case stateId.Head():
 		root, _, httpStatusErr, err = a.getStateHead()
@@ -99,7 +98,7 @@ func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beac
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	root, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	root, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
@@ -112,6 +111,11 @@ func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beac
 	if slot == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", root))
 	}
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
+	if err != nil {
+		return nil, err
+	}
+	finalizedSlot := a.forkchoiceStore.FinalizedCheckpoint().Epoch * a.beaconChainCfg.SlotsPerEpoch
 	epoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch)
@@ -123,7 +127,8 @@ func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beac
 		PreviousVersion: utils.Uint32ToBytes4(previousVersion),
 		CurrentVersion:  utils.Uint32ToBytes4(currentVersion),
 		Epoch:           forkEpoch,
-	}).WithOptimistic(isOptimistic), nil
+	}).WithOptimistic(isOptimistic).
+		WithFinalized(canonicalRoot == root && *slot <= finalizedSlot), nil
 }
 
 func (a *ApiHandler) getStateRoot(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -139,12 +144,12 @@ func (a *ApiHandler) getStateRoot(w http.ResponseWriter, r *http.Request) (*beac
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	root, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	root, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
 
-	stateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, root)
+	stateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(tx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +188,7 @@ func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beac
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
@@ -200,9 +205,9 @@ func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beac
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("could not read canonical block root: %x", blockRoot))
 	}
 
-	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
+	state, err := a.forkchoiceStateAtBlockSlot(blockId, blockRoot, *slot)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	if state == nil {
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
@@ -256,7 +261,7 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
@@ -314,7 +319,7 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
@@ -414,7 +419,7 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconh
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
@@ -433,9 +438,13 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconh
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", blockRoot))
 	}
 	slot := *slotPtr
-	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
+	stateEpoch := slot / a.beaconChainCfg.SlotsPerEpoch
+	epoch := stateEpoch
 	if epochReq != nil {
 		epoch = *epochReq
+	}
+	if epoch > stateEpoch || stateEpoch-epoch >= a.beaconChainCfg.EpochsPerHistoricalVector {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("epoch is out of range for the randao_mixes of the state"))
 	}
 	randaoMixes := a.randaoMixesPool.Get().(solid.HashListSSZ)
 	defer a.randaoMixesPool.Put(randaoMixes)
@@ -458,13 +467,21 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconh
 	defer snRoTx.Close()
 
 	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
-	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(tx, stateGetter, slot, epoch%a.beaconChainCfg.EpochsPerHistoricalVector)
+	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, slot, epoch%a.beaconChainCfg.EpochsPerHistoricalVector)
 	if err != nil {
-		return nil, err
+		return nil, randaoReadError(err)
 	}
 	return newBeaconResponse(randaoResponse{Randao: mix}).
 		WithFinalized(slot <= a.forkchoiceStore.FinalizedSlot()).
 		WithOptimistic(isOptimistic), nil
+}
+
+func randaoReadError(err error) *beaconhttp.EndpointError {
+	status := http.StatusInternalServerError
+	if errors.Is(err, historical_states_reader.ErrRandaoMixUnavailable) {
+		status = http.StatusNotFound
+	}
+	return beaconhttp.NewEndpointError(status, fmt.Errorf("could not read randao mix: %w", err))
 }
 
 // Implements /eth/v1/beacon/states/{state_id}/pending_consolidations
@@ -482,7 +499,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingConsolidations(w http.ResponseWr
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
@@ -500,19 +517,23 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingConsolidations(w http.ResponseWr
 	if err != nil {
 		return nil, err
 	}
+	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	if version < clparams.ElectraVersion {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("pending consolidations are not available before Electra: slot %d", *slot))
+	}
 
 	pendingConsolidations := solid.NewPendingConsolidationList(a.beaconChainCfg)
 
-	isSlotAvailableInMemory := a.forkchoiceStore.LowestAvailableSlot() < *slot
-
-	if isSlotAvailableInMemory {
-		var ok bool
-		pendingConsolidations, ok = a.forkchoiceStore.GetPendingConsolidations(blockRoot)
-		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no pending consolidations found for block root: %x", blockRoot))
-		}
-		// If we have the pending consolidations in memory, we can return them directly.
+	if cached, ok := a.forkchoiceStore.GetPendingConsolidations(blockRoot); ok {
+		pendingConsolidations = cached
 	} else {
+		isReconstructed, err := a.isStateReconstructed(tx, *slot)
+		if err != nil {
+			return nil, err
+		}
+		if canonicalRoot != blockRoot || !isReconstructed {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read pending consolidations: %x", blockRoot))
+		}
 		stateView := a.caplinStateSnapshots.View()
 		defer stateView.Close()
 
@@ -521,7 +542,6 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingConsolidations(w http.ResponseWr
 		}
 	}
 
-	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	return newBeaconResponse(pendingConsolidations).
 		WithHeader("Eth-Consensus-Version", version.String()).
 		WithVersion(version).
@@ -544,7 +564,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingDeposits(w http.ResponseWriter, 
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
@@ -562,18 +582,23 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingDeposits(w http.ResponseWriter, 
 	if err != nil {
 		return nil, err
 	}
+	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	if version < clparams.ElectraVersion {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("pending deposits are not available before Electra: slot %d", *slot))
+	}
 
 	pendingDeposits := solid.NewPendingDepositList(a.beaconChainCfg)
 
-	isSlotAvailableInMemory := a.forkchoiceStore.LowestAvailableSlot() < *slot
-
-	if isSlotAvailableInMemory {
-		var ok bool
-		pendingDeposits, ok = a.forkchoiceStore.GetPendingDeposits(blockRoot)
-		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no pending deposits found for block root: %x", blockRoot))
-		}
+	if cached, ok := a.forkchoiceStore.GetPendingDeposits(blockRoot); ok {
+		pendingDeposits = cached
 	} else {
+		isReconstructed, err := a.isStateReconstructed(tx, *slot)
+		if err != nil {
+			return nil, err
+		}
+		if canonicalRoot != blockRoot || !isReconstructed {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read pending deposits: %x", blockRoot))
+		}
 		stateView := a.caplinStateSnapshots.View()
 		defer stateView.Close()
 
@@ -582,7 +607,6 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingDeposits(w http.ResponseWriter, 
 		}
 	}
 
-	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	return newBeaconResponse(pendingDeposits).
 		WithHeader("Eth-Consensus-Version", version.String()).
 		WithVersion(version).
@@ -605,7 +629,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingPartialWithdrawals(w http.Respon
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
@@ -623,18 +647,23 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingPartialWithdrawals(w http.Respon
 	if err != nil {
 		return nil, err
 	}
+	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	if version < clparams.ElectraVersion {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("pending partial withdrawals are not available before Electra: slot %d", *slot))
+	}
 
 	pendingWithdrawals := solid.NewPendingWithdrawalList(a.beaconChainCfg)
 
-	isSlotAvailableInMemory := a.forkchoiceStore.LowestAvailableSlot() < *slot
-
-	if isSlotAvailableInMemory {
-		var ok bool
-		pendingWithdrawals, ok = a.forkchoiceStore.GetPendingPartialWithdrawals(blockRoot)
-		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no pending partial withdrawals found for block root: %x", blockRoot))
-		}
+	if cached, ok := a.forkchoiceStore.GetPendingPartialWithdrawals(blockRoot); ok {
+		pendingWithdrawals = cached
 	} else {
+		isReconstructed, err := a.isStateReconstructed(tx, *slot)
+		if err != nil {
+			return nil, err
+		}
+		if canonicalRoot != blockRoot || !isReconstructed {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read pending partial withdrawals: %x", blockRoot))
+		}
 		stateView := a.caplinStateSnapshots.View()
 		defer stateView.Close()
 
@@ -643,12 +672,22 @@ func (a *ApiHandler) GetEthV1BeaconStatesPendingPartialWithdrawals(w http.Respon
 		}
 	}
 
-	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	return newBeaconResponse(pendingWithdrawals).
 		WithHeader("Eth-Consensus-Version", version.String()).
 		WithVersion(version).
 		WithOptimistic(isOptimistic).
 		WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+}
+
+func (a *ApiHandler) isStateReconstructed(tx kv.Tx, slot uint64) (bool, error) {
+	stateProgress, err := state_accessors.GetStateProcessingProgress(tx)
+	if err != nil {
+		return false, err
+	}
+	if a.caplinStateSnapshots != nil {
+		stateProgress = max(stateProgress, a.caplinStateSnapshots.BlocksAvailable())
+	}
+	return slot <= stateProgress, nil
 }
 
 func (a *ApiHandler) GetEthV1BeaconStatesProposerLookahead(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -670,7 +709,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesProposerLookahead(w http.ResponseWriter
 		)
 	}
 	defer tx.Rollback()
-	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, stateId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(tx, stateId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
@@ -697,16 +736,33 @@ func (a *ApiHandler) GetEthV1BeaconStatesProposerLookahead(w http.ResponseWriter
 		)
 	}
 
+	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
+	if version < clparams.FuluVersion {
+		return nil, beaconhttp.NewEndpointError(
+			http.StatusBadRequest,
+			fmt.Errorf("proposer lookahead is not available before Fulu: slot %d", *slot),
+		)
+	}
+
 	proposerLookahead, ok := a.forkchoiceStore.GetProposerLookahead(*slot)
 	if !ok {
+		if canonicalRoot != blockRoot {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read proposer lookahead: %x", blockRoot))
+		}
 		stateView := a.caplinStateSnapshots.View()
 		defer stateView.Close()
 		// read epoch data
-		epochData, err := state_accessors.ReadEpochData(state_accessors.GetValFnTxAndSnapshot(tx, stateView), *slot/a.beaconChainCfg.SlotsPerEpoch, a.beaconChainCfg)
+		epochData, err := state_accessors.ReadEpochData(state_accessors.GetValFnTxAndSnapshot(tx, stateView), a.beaconChainCfg.RoundSlotToEpoch(*slot), a.beaconChainCfg)
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(
 				http.StatusInternalServerError,
 				fmt.Errorf("failed to read historical epoch data: %w", err),
+			)
+		}
+		if epochData == nil {
+			return nil, beaconhttp.NewEndpointError(
+				http.StatusNotFound,
+				fmt.Errorf("could not read epoch data for slot %d", *slot),
 			)
 		}
 		proposerLookahead = epochData.ProposerLookahead
@@ -718,7 +774,6 @@ func (a *ApiHandler) GetEthV1BeaconStatesProposerLookahead(w http.ResponseWriter
 		return true
 	})
 
-	version := a.ethClock.StateVersionByEpoch(*slot / a.beaconChainCfg.SlotsPerEpoch)
 	return newBeaconResponse(respProposerLookahead).
 		WithHeader("Eth-Consensus-Version", version.String()).
 		WithVersion(version).

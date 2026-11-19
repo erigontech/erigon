@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
@@ -32,6 +33,11 @@ import (
 type EncodableHashableSSZ interface {
 	ssz.EncodableSSZ
 	ssz.HashableSSZ
+}
+
+type progressiveRootCache[T EncodableHashableSSZ] struct {
+	owner *ListSSZ[T]
+	root  atomic.Pointer[[32]byte]
 }
 
 type ListSSZ[T EncodableHashableSSZ] struct {
@@ -46,6 +52,8 @@ type ListSSZ[T EncodableHashableSSZ] struct {
 	progressive     bool
 	// root caches the hash-tree root computed by HashSSZ.
 	root common.Hash
+	// The holder is used only by its owner, so value copies cannot share a cached root.
+	progressiveRoot *progressiveRootCache[T]
 }
 
 func NewDynamicListSSZ[T EncodableHashableSSZ](limit int) *ListSSZ[T] {
@@ -92,6 +100,7 @@ func (l *ListSSZ[T]) EnsureStaticProgressive(limit int, bytesPerElement int) {
 		l.bytesPerElement = bytesPerElement
 	}
 	l.progressive = true
+	l.invalidateRoots()
 }
 
 // Progressive lists are semantically unbounded, so decode limits are resource guards rather than protocol maxima.
@@ -117,7 +126,7 @@ func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
 	}
 	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
 		l.list = nil
-		l.root = common.Hash{}
+		l.invalidateRoots()
 		return nil
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -126,7 +135,7 @@ func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	if delimiter, ok := token.(json.Delim); !ok || delimiter != '[' {
-		return fmt.Errorf("expected JSON array")
+		return errors.New("expected JSON array")
 	}
 	list := make([]T, 0, min(l.limit, 16))
 	for decoder.More() {
@@ -138,7 +147,7 @@ func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return fmt.Errorf("null list element")
+			return errors.New("null list element")
 		}
 		var element T
 		if err := json.Unmarshal(raw, &element); err != nil {
@@ -153,7 +162,7 @@ func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	l.list = list
-	l.root = common.Hash{}
+	l.invalidateRoots()
 	return nil
 }
 
@@ -161,7 +170,7 @@ func requireJSONEOF(decoder *json.Decoder) error {
 	var trailing json.RawMessage
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return fmt.Errorf("unexpected trailing JSON value")
+			return errors.New("unexpected trailing JSON value")
 		}
 		return err
 	}
@@ -224,7 +233,7 @@ func (l *ListSSZ[T]) decodeSSZ(buf []byte, version int, strict bool) (err error)
 	default:
 		l.list, err = ssz.DecodeDynamicList[T](buf, 0, uint32(len(buf)), limit, version)
 	}
-	l.root = common.Hash{}
+	l.invalidateRoots()
 	return
 }
 
@@ -253,6 +262,15 @@ func (l *ListSSZ[T]) HashSSZ() ([32]byte, error) {
 }
 
 func (l *ListSSZ[T]) HashSSZProgressive(hashElement func(T) ([32]byte, error)) ([32]byte, error) {
+	var cache *progressiveRootCache[T]
+	if hashElement == nil {
+		cache = l.ownedProgressiveRoot()
+		if cache != nil {
+			if root := cache.root.Load(); root != nil {
+				return *root, nil
+			}
+		}
+	}
 	roots := make([][32]byte, len(l.list))
 	for i, element := range l.list {
 		var err error
@@ -265,7 +283,21 @@ func (l *ListSSZ[T]) HashSSZProgressive(hashElement func(T) ([32]byte, error)) (
 			return [32]byte{}, err
 		}
 	}
-	return merkle_tree.ProgressiveListRoot(roots, uint64(len(l.list)))
+	root, err := merkle_tree.ProgressiveListRoot(roots, uint64(len(l.list)))
+	if err != nil {
+		return [32]byte{}, err
+	}
+	if cache != nil {
+		cache.root.CompareAndSwap(nil, &root)
+	}
+	return root, nil
+}
+
+func (l *ListSSZ[T]) ownedProgressiveRoot() *progressiveRootCache[T] {
+	if l.progressiveRoot == nil || l.progressiveRoot.owner != l {
+		return nil
+	}
+	return l.progressiveRoot
 }
 
 func (l *ListSSZ[T]) Clone() clonable.Clonable {
@@ -286,6 +318,11 @@ func (l *ListSSZ[T]) Clone() clonable.Clonable {
 		return NewStaticListSSZ[T](l.limit, l.bytesPerElement)
 	}
 	return NewDynamicListSSZ[T](l.limit)
+}
+
+func (l *ListSSZ[T]) CloneTo(dst *ListSSZ[T]) {
+	*dst = *l.Clone().(*ListSSZ[T])
+	dst.invalidateRoots()
 }
 
 func (l *ListSSZ[T]) Get(index int) T {
@@ -315,22 +352,22 @@ func (l *ListSSZ[T]) ValidateBounds(limit int) error {
 
 func (l *ListSSZ[T]) Set(index int, value T) {
 	l.list[index] = value
-	l.root = common.Hash{}
+	l.invalidateRoots()
 }
 
 func (l *ListSSZ[T]) Append(obj T) {
 	l.list = append(l.list, obj)
-	l.root = common.Hash{}
+	l.invalidateRoots()
 }
 
 func (l *ListSSZ[T]) Clear() {
 	l.list = nil
-	l.root = common.Hash{}
+	l.invalidateRoots()
 }
 
 func (l *ListSSZ[T]) Truncate(length int) {
 	l.list = l.list[:length]
-	l.root = common.Hash{}
+	l.invalidateRoots()
 }
 
 func (l *ListSSZ[T]) Cut(length int) {
@@ -339,7 +376,16 @@ func (l *ListSSZ[T]) Cut(length int) {
 	} else {
 		l.list = l.list[length:]
 	}
+	l.invalidateRoots()
+}
+
+func (l *ListSSZ[T]) invalidateRoots() {
 	l.root = common.Hash{}
+	if cache := l.ownedProgressiveRoot(); cache != nil {
+		cache.root.Store(nil)
+		return
+	}
+	l.progressiveRoot = &progressiveRootCache[T]{owner: l}
 }
 
 func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
@@ -363,15 +409,26 @@ func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
 }
 
 func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
-	cpy := &ListSSZ[T]{
-		list:            make([]T, len(l.list), cap(l.list)),
-		limit:           l.limit,
-		configured:      l.configured,
-		static:          l.static,
-		bytesPerElement: l.bytesPerElement,
-		progressive:     l.progressive,
-		root:            common.Hash(bytes.Clone(l.root[:])),
-	}
-	copy(cpy.list, l.list)
+	cpy := new(ListSSZ[T])
+	l.ShallowCopyTo(cpy)
 	return cpy
+}
+
+func (l *ListSSZ[T]) ShallowCopyTo(cpy *ListSSZ[T]) {
+	cache := l.ownedProgressiveRoot()
+	source := *l
+	*cpy = ListSSZ[T]{
+		list:            make([]T, len(source.list), cap(source.list)),
+		limit:           source.limit,
+		configured:      source.configured,
+		static:          source.static,
+		bytesPerElement: source.bytesPerElement,
+		progressive:     source.progressive,
+		root:            common.Hash(bytes.Clone(source.root[:])),
+	}
+	cpy.progressiveRoot = &progressiveRootCache[T]{owner: cpy}
+	if cache != nil {
+		cpy.progressiveRoot.root.Store(cache.root.Load())
+	}
+	copy(cpy.list, source.list)
 }

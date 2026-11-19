@@ -97,12 +97,14 @@ func (p Publisher) enqueueTask(t publishTask) {
 	select {
 	case p.tasks <- t: // enqueued
 	default:
-		p.logger.Warn(
-			"[p2p-publisher] task queue is full, dropping task",
-			"blockNumber", t.block.Number(),
-			"blockHash", t.block.Hash(),
-			"taskType", t.taskType,
-		)
+		logArgs := []any{"taskType", t.taskType}
+		if t.block != nil {
+			logArgs = append(logArgs, "blockNumber", t.block.Number(), "blockHash", t.block.Hash())
+		}
+		if t.blockRangeUpdate != nil {
+			logArgs = append(logArgs, "latest", t.blockRangeUpdate.Latest)
+		}
+		p.logger.Warn("[p2p-publisher] task queue is full, dropping task", logArgs...)
 	}
 }
 

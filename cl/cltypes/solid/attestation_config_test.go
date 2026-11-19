@@ -2,7 +2,6 @@ package solid
 
 import (
 	"encoding/binary"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -104,8 +103,49 @@ func TestAttestationDecodeSSZRejectsOffsetPastBufferBeforeAllocation(t *testing.
 			} else {
 				err = decoded.DecodeSSZ(buf, int(clparams.GloasVersion))
 			}
-			require.True(t, errors.Is(err, ssz.ErrBadOffset), err)
+			require.ErrorIs(t, err, ssz.ErrBadOffset, err)
 			require.Nil(t, decoded.CommitteeBits)
 		})
+	}
+}
+
+func TestAttestationDecodeSSZWithoutConfigBoundsCommitteeBitsByMainnetWidth(t *testing.T) {
+	mainnetCommittees := int(clparams.MainnetBeaconConfig.MaxCommitteesPerSlot)
+	tests := []struct {
+		name       string
+		committees int
+		wantErr    bool
+	}{
+		{name: "minimal preset", committees: 4},
+		{name: "mainnet preset", committees: mainnetCommittees},
+		{name: "one byte wider than mainnet", committees: mainnetCommittees + 8, wantErr: true},
+	}
+	for _, test := range tests {
+		for _, strict := range []bool{false, true} {
+			t.Run(test.name+map[bool]string{false: " permissive", true: " strict"}[strict], func(t *testing.T) {
+				attestation := &Attestation{
+					AggregationBits: BitlistFromBytes([]byte{1}, aggregationBitsSizeElectra),
+					Data:            &AttestationData{},
+					CommitteeBits:   NewBitVector(test.committees),
+				}
+				encoded, err := attestation.EncodeSSZ(nil)
+				require.NoError(t, err)
+
+				decoded := new(Attestation)
+				if strict {
+					err = decoded.DecodeSSZStrict(encoded, int(clparams.GloasVersion))
+				} else {
+					err = decoded.DecodeSSZ(encoded, int(clparams.GloasVersion))
+				}
+				if !test.wantErr {
+					require.NoError(t, err)
+					require.Equal(t, (test.committees+7)/8, decoded.CommitteeBits.EncodingSizeSSZ())
+					return
+				}
+				require.ErrorIs(t, err, errCommitteeBitsTooWide)
+				require.Nil(t, decoded.CommitteeBits)
+				require.Nil(t, decoded.AggregationBits)
+			})
+		}
 	}
 }

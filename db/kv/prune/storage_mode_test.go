@@ -51,6 +51,20 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 	})
 }
 
+// A stored distance that is not 8 bytes long is reported as an error, not decoded.
+func TestGetRejectsAMalformedDistance(t *testing.T) {
+	for _, key := range [][]byte{kv.PruneHistory, kv.PruneBlocks, kv.PruneCommitmentHistory, kv.PruneReceipts} {
+		t.Run(string(key), func(t *testing.T) {
+			_, tx := mdbxtest.NewTestTx(t)
+			require.NoError(t, tx.Put(kv.DatabaseInfo, key, []byte{1, 2, 3}))
+			require.NoError(t, tx.Put(kv.DatabaseInfo, keyType(key), kv.PruneTypeOlder))
+
+			_, err := Get(tx)
+			require.ErrorContains(t, err, "3 bytes")
+		})
+	}
+}
+
 func TestNamedModesKeepAllCommitmentHistory(t *testing.T) {
 	for _, m := range []Mode{ArchiveMode, FullMode, BlocksMode, MinimalMode, MockMode, DefaultMode} {
 		assert.Equal(t, KeepAllBlocksPruneMode, m.CommitmentHistory, "named modes must default CommitmentHistory to keep-all")

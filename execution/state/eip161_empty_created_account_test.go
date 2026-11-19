@@ -35,19 +35,17 @@ type emptinessScenario struct {
 	want  bool
 }
 
-// emptinessMode is one of the three state configurations that must agree:
-// the serial path, and the versioned path with the stateObject cache on and
-// off. noMaterialize is the configuration staged sync runs.
+// emptinessMode is one of the two state configurations that must agree: the
+// serial path, and the versioned (noMaterialize) path staged sync runs. A
+// versionMap forces noMaterialize, so there is no versioned+materialize config.
 type emptinessMode struct {
-	name          string
-	versioned     bool
-	noMaterialize bool
+	name      string
+	versioned bool
 }
 
 var emptinessModes = []emptinessMode{
-	{"serial", false, false},
-	{"versioned", true, false},
-	{"versioned+noMaterialize", true, true},
+	{"serial", false},
+	{"versioned", true},
 }
 
 func runEmptiness(t *testing.T, mode emptinessMode, sc emptinessScenario, addr accounts.Address) bool {
@@ -57,7 +55,6 @@ func runEmptiness(t *testing.T, mode emptinessMode, sc emptinessScenario, addr a
 	var ibs *IntraBlockState
 	if mode.versioned {
 		ibs = NewWithVersionMap(reader, NewVersionMap(nil))
-		ibs.SetNoMaterialize(mode.noMaterialize)
 	} else {
 		ibs = New(reader)
 	}
@@ -76,10 +73,10 @@ func runEmptiness(t *testing.T, mode emptinessMode, sc emptinessScenario, addr a
 // across the account lifecycle on the versioned (parallel) path.
 //
 // EIP-161 defines empty purely by fields — no code, zero nonce, zero balance —
-// so materializing an account must not change the verdict. createObject records
-// SelfDestructPath=false for every account it materializes, and reading that
-// write as evidence of a self-destruct made every freshly created empty account
-// report non-empty for the rest of the transaction. That suppresses the
+// so materializing an account must not change the verdict. CreateAccount records
+// SelfDestructPath=false for a new or revived account, and reading that write
+// as evidence of a self-destruct made a freshly created empty account report
+// non-empty for the rest of the transaction. That suppresses the
 // EIP-8037 account-creation state gas on a later value-bearing CALL to the
 // same address, so the two clients disagree on gas and diverge (issue #23670).
 //

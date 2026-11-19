@@ -207,7 +207,7 @@ func (a *ApiHandler) PostEthV1BeaconStatesBuilders(w http.ResponseWriter, r *htt
 		return nil, err
 	}
 	defer tx.Rollback()
-	root, statusCode, err := a.blockRootFromStateId(r.Context(), tx, stateID)
+	root, statusCode, err := a.blockRootFromStateId(tx, stateID)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
@@ -218,7 +218,7 @@ func (a *ApiHandler) PostEthV1BeaconStatesBuilders(w http.ResponseWriter, r *htt
 	if slot == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("state not found"))
 	}
-	requestedState, err := a.forkchoiceStore.GetStateAtBlockRoot(root, true)
+	requestedState, err := a.forkchoiceStateAtBlockSlot(stateID, root, *slot)
 	if err != nil && !errors.Is(err, fork_graph.ErrStateNotFound) {
 		return nil, err
 	}
@@ -271,7 +271,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		}
 		return response, nil
 	}
-	root, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	root, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
@@ -303,9 +303,12 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		if blockRoot == (common.Hash{}) {
 			continue
 		}
-		blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, blockRoot)
+		blk, err := a.readBlockByRoot(ctx, tx, blockRoot)
 		if err != nil {
 			return nil, err
+		}
+		if blk == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("next block body not found"))
 		}
 		// [Modified in Gloas:EIP7732] GLOAS blocks have no ExecutionPayload; withdrawals are in the envelope
 		if blk.Version() >= clparams.GloasVersion {
@@ -356,4 +359,18 @@ func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r 
 	}
 	log.Info("Registered new validator", "count", len(registerReq))
 	return newBeaconResponse(nil), nil
+}
+
+// forkchoiceStateAtBlockSlot returns the fork choice state of blockRoot. For a
+// slot or state-root stateID it returns nil if that state was advanced past the
+// block's slot, as an anchor state can be; named ids get the state as it is.
+func (a *ApiHandler) forkchoiceStateAtBlockSlot(stateID *beaconhttp.SegmentID, blockRoot common.Hash, blockSlot uint64) (*state.CachingBeaconState, error) {
+	st, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot)
+	if err != nil || st == nil {
+		return nil, err
+	}
+	if (stateID.GetSlot() != nil || stateID.GetRoot() != nil) && st.Slot() != blockSlot {
+		return nil, nil
+	}
+	return st, nil
 }

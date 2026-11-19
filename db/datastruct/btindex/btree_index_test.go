@@ -24,6 +24,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -131,9 +132,9 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	}
 	for i := 1; i < len(keys); i++ {
 		alt := bytes.Clone(keys[i])
-		for j := len(alt) - 1; j >= 0; j-- {
-			if alt[j] > 0 {
-				alt[j] -= 1
+		for i, v := range slices.Backward(alt) {
+			if v > 0 {
+				alt[i]--
 				break
 			}
 		}
@@ -841,4 +842,80 @@ func TestAddKeyRefusesNodeSectionOverUint32(t *testing.T) {
 	err = iw.AddKey([]byte("k1"), 1)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "node section offset")
+}
+
+func TestOpenBtreeIndexInMem(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	logger := log.New()
+	compressFlags := seg.CompressKeys | seg.CompressVals
+	dataPath := generateKV(t, tmp, 52, 180, 1000, logger, 0)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
+	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
+
+	kv, mapped, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags)
+	require.NoError(t, err)
+	defer kv.Close()
+	defer mapped.Close()
+	getter := seg.NewReader(kv.MakeGetter(), compressFlags)
+
+	inMem, err := OpenBtreeIndexInMem(indexPath, getter)
+	require.NoError(t, err)
+	defer inMem.Close()
+	require.False(t, mapped.InMem())
+	require.True(t, inMem.InMem())
+	require.Equal(t, mapped.KeyCount(), inMem.KeyCount())
+
+	keys, err := pivotKeysFromKV(dataPath)
+	require.NoError(t, err)
+	for i, key := range keys {
+		want, err := mapped.Seek(getter, key)
+		require.NoErrorf(t, err, "i=%d", i)
+		got, err := inMem.Seek(getter, key)
+		require.NoErrorf(t, err, "i=%d", i)
+		require.Equalf(t, want.Key(), got.Key(), "i=%d", i)
+		require.Equalf(t, want.Value(), got.Value(), "i=%d", i)
+		want.Close()
+		got.Close()
+	}
+
+	closed := 0
+	inMem.OnClose(func() { closed++ })
+	inMem.OnClose(func() { closed += 10 })
+	inMem.Close()
+	inMem.Close()
+	require.False(t, inMem.InMem(), "Close must release the in-memory buffer")
+	require.Equal(t, 11, closed, "every OnClose callback runs once")
+}
+
+func Test_BtreeIndex_OrdinalLookupAfterNext(t *testing.T) {
+	tmp := t.TempDir()
+	logger := log.New()
+	dataPath := generateKV(t, tmp, 52, 180, 16, logger, 0)
+	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
+	buildBtreeIndex(t, dataPath, indexPath, 0, 1, logger, true)
+
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, 0)
+	require.NoError(t, err)
+	defer bt.Close()
+	defer kv.Close()
+
+	getter := seg.NewReader(kv.MakeGetter(), 0)
+	c, err := bt.Seek(getter, nil)
+	require.NoError(t, err)
+	require.True(t, c.Next())
+	c.Close()
+	require.Nil(t, c.Key())
+	require.Nil(t, c.Value())
+
+	k, v, _, err := bt.dataLookup(0, getter)
+	require.NoError(t, err)
+	k, v = bytes.Clone(k), bytes.Clone(v)
+
+	cur := bt.OrdinalLookup(getter, 0)
+	require.NotNil(t, cur)
+	require.Equal(t, k, cur.Key())
+	require.Equal(t, v, cur.Value())
+	cur.Close()
 }

@@ -39,6 +39,9 @@ import (
 // an empty success.
 var ErrForkChoiceUpdateTimeout = errors.New("forkchoice update timed out")
 
+// ErrForkChoiceUpdateBusy reports that the execution module did not start the update.
+var ErrForkChoiceUpdateBusy = errors.New("forkchoice update was not started because the execution module is busy")
+
 // ErrForkChoiceUpdateNoPayloadID reports that an attribute-bearing update did not start a payload build.
 var ErrForkChoiceUpdateNoPayloadID = errors.New("forkchoice update returned no payload ID")
 
@@ -69,11 +72,14 @@ type ExecutionEngine interface {
 	InsertBlocks(ctx context.Context, blocks []*types.Block) error
 	InsertBlock(ctx context.Context, block *types.Block) error
 	CurrentHeader(ctx context.Context) (*types.Header, error)
+	GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error)
 	IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error)
 	Ready(ctx context.Context) (bool, error)
 	// Range methods
 	GetBodiesByRange(ctx context.Context, start, count uint64) ([]*types.RawBody, error)
 	GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error)
+	// Callers must not modify returned block access lists because they may share memory with an EL cache.
+	GetPayloadBodiesByHash(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error)
 	HasBlock(ctx context.Context, hash common.Hash) (bool, error)
 	// Snapshots
 	FrozenBlocks(ctx context.Context) uint64

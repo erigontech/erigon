@@ -1,0 +1,105 @@
+---
+title: "Upgrading from a previous version"
+description: "Upgrade from a previous version of Erigon without losing chain data or your configuration."
+sidebar_position: 1
+---
+
+
+# Upgrading from a previous version
+
+Updating to the latest version of Erigon gives you access to the latest features and ensures optimal performance and stability.
+
+## General Recommendations Before Upgrade
+
+* **Read Release Notes**: Carefully review the [Release Notes](https://github.com/erigontech/erigon/releases) for breaking changes and new features relevant to your setup.
+* **Terminate your Erigon**: End your current Erigon session by pressing `CTRL+C`.
+* **Backup**: Always back up your `datadir` before performing major upgrades.
+
+## Upgrading from 3.6 to 3.7
+
+{/* llms-pinned-version: [v3.7.0 release notes](https://github.com/erigontech/erigon/releases/tag/v3.7.0) */}
+{/* llms-pinned-version: v3.7.1 or later */}
+{/* llms-pinned-version: v3.7.0 predates */}
+
+A 3.6.x node upgrades to 3.7 in place: there is no database migration and no re-sync. Before restarting on the new version, check the following:
+
+* **Sepolia: Glamsterdam**: Glamsterdam has been active on Sepolia since epoch `353024`, 6 October 2026 13:53:36 UTC (Amsterdam in the execution layer, Gloas in Caplin). Sepolia nodes need v3.7.1 or later: v3.7.0 predates Glamsterdam fixes the fork needs, and 3.6 does not follow the chain past it. With an external consensus client, upgrade it too.
+* **CPU baseline**: amd64 binaries and Docker images now require the `x86-64-v2` baseline (SSE4.2, POPCNT). The separate `amd64v2` tarball and `linux/amd64/v2` Docker platform are gone; use the standard amd64 artifacts. Building from source requires Go 1.26 or newer. See [Hardware Requirements](../hardware-requirements).
+* **Removed flags**: `--fcu.background.commit` and `--experimental.streaming-commitment` now prevent startup. Remove them from your startup arguments.
+* **Caplin with checkpoint sync disabled**: nodes running `--caplin.checkpoint-sync.disable` re-sync Caplin from genesis on upgrade unless a finalized state is saved locally. Allow checkpoint sync during the upgrade to avoid the replay.
+* **Receipts**: fresh datadirs now keep receipts by default (`--prune.include-receipts`). An existing datadir keeps the setting it was created with; changing it requires a fresh datadir. See [Pruning Modes](../../fundamentals/pruning-modes).
+* **Polygon**: Polygon chain names, datadirs and `--bor.*` / `--polygon.*` flags are no longer accepted. Use [0xPolygon/erigon](https://github.com/0xPolygon/erigon).
+* **JSON-RPC**: `erigon_getLogs` and `erigon_getLatestLogs` now return the block time as `blockTimestamp` (it was `timestamp`), matching `eth_getLogs`, and `erigon_getLogsByHash` now includes it too. Several other endpoints are stricter or return renamed fields. Review the [v3.7.0 release notes](https://github.com/erigontech/erigon/releases/tag/v3.7.0) if you run applications against the RPC.
+
+## Managing your Data
+
+Erigon 3.1 introduces a new snapshot format while continuing to support the old one. This means that new releases are fully compatible with your existing data. However, users who want the latest data files and data-specific fixes can perform an **optional** manual data upgrade:
+
+1. Backup your datadir.
+2. [Upgrade your Erigon installation](#upgrading-your-erigon-installation) whether from a binary, compiled source code, or Docker.
+3. Upgrade your snapshots using one of the [options below](#snapshots-upgrade-options).
+4. Run Erigon; it downloads any missing snapshots and resumes syncing.
+
+### Snapshots Upgrade Options
+
+* `erigon snapshots update-to-new-ver-format --datadir /your/datadir`: converts your existing snapshots in place to the latest format, **keeping your data**. Quicker, but you won't get the full performance benefits of freshly built snapshots.
+* `erigon snapshots reset --datadir /your/datadir`: **destructive** — deletes `chaindata/` (and any leftover `heimdall/` and `polygon-bridge/` directories from a former Polygon datadir) and removes any snapshot files **not** in the preverified set (locally generated files, and torrents with a mismatched hash). Preverified snapshots already on disk are **kept**; on the next start Erigon downloads only **missing or incorrect** snapshots and rebuilds state.
+
+:::warning
+`erigon snapshots reset` does **not** reuse your `chaindata/` — it deletes the chaindata DB (and any leftover Polygon aux directories) and any locally generated or mismatched snapshots, then rebuilds state on the next start (downloading only missing or incorrect snapshots). Back up your `--datadir` first, and prefer `update-to-new-ver-format` if you want to keep your current data.
+:::
+
+Choose `update-to-new-ver-format` to convert your data in place, or `reset` for a clean reset to the preverified snapshot set.
+
+<details>
+
+<summary>Why Upgrading Erigon Doesn't Always Fix Your Data</summary>
+
+Upgrading Erigon involves a key distinction between its core software and its data files, which are managed separately. This approach is rooted in practicality and user control.
+
+The Erigon **software** is the application that processes and interacts with blockchain data. However, the majority of the data itself, including the state of the network, exists in **data files** that you download and store locally.
+
+If a bug is discovered, it is often in the data itself rather than a flaw in the Erigon code. In such a case, simply updating the Erigon binary won't resolve the issue because the faulty data remains on your disk. This is because Erigon upgrades do not normally alter the data files. You must reset and re-download the data snapshots to get the corrected files.
+
+This separation prevents unnecessary and time-consuming processes. The Erigon team cannot regenerate months of data for every minor bug fix, and users shouldn't have to re-download terabytes of information with every new weekly software release.
+
+This design also provides flexibility. A user might need a specific data fix but prefer to remain on an older software version due to a known bug or regression in the latest release. Similarly, a user might be satisfied with their current data set and only need to update the Erigon binary.
+
+While this dual-versioning system may seem complex, it is a deliberate design choice that optimizes for both efficiency and user autonomy.
+
+</details>
+
+### Snapshots Downgrade Options
+
+If upgrading snapshots(`3.0`to `3.1`) now happens automatically, you should follow these instructions for downgrading:
+
+:::warning
+**WARNING**: This algorithm will remove incompatible `3.1` snapshot files because they are not backward-compatible.
+:::
+
+1. Make sure that you're running Erigon on a 3.1.x version; check with `erigon --version`.
+2. Run `erigon snapshots reset-to-old-ver-format --datadir /your/datadir` to reset your snapshots to the old format.
+3. `git checkout v3.0.x` to check out the preferred `3.0` version. For example, the current latest is: `git checkout v3.0.15`
+4. Run your old version of Erigon.
+
+## Upgrading your Erigon Installation
+
+Follow the below instructions depending on your installation method:
+
+* [Pre-built binaries](#pre-built-binaries-only-linux-and-macos)
+* [Docker](#docker)
+* [Compiled source code](#compiled-from-source)
+
+### Pre-built Binaries (only Linux and macOS)
+
+Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), verify the [checksum](./#install-prebuilt), and reinstall it; no other operation is needed.
+
+### Docker
+
+If you're using Docker to run Erigon, the process to upgrade to a newer version of the software is straightforward and revolves around pulling the latest Docker image and then running it.
+
+Simply follow the [Docker](#docker) instructions and install and launch the new version.
+
+### Compiled from source
+
+To upgrade Erigon to a newer version when you've originally installed it via Git and manual compilation, follow the installation instructions from step 2 "Check Out the Desired Stable Version (Tag)".

@@ -33,8 +33,28 @@ import (
 // that can block - opening a read view, waiting on a transaction provider - has to honour it.
 type BlockBuilderFunc func(ctx context.Context, param *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
 
+type InclusionListFunc func(ctx context.Context) (types.Transactions, error)
+
 // ErrDiscarded reports that the payload was abandoned before the build completed.
 var ErrDiscarded = errors.New("block builder discarded")
+
+// parentBlockWaitGrace is how long a stopped build still waits for its transaction provider to see
+// the parent block. A getPayload that follows the forkchoice update right away can find the txpool
+// still catching up with the new head. The grace is half the Engine API's one-second getPayload timeout.
+const parentBlockWaitGrace = 500 * time.Millisecond
+
+type stopSignalsKey struct{}
+
+// stopSignals are closed by a BlockBuilder that is asked for its payload: stopped at once, and
+// parentBlockWaitStopped parentBlockWaitGrace later. Both are nil for a build that runs without one.
+type stopSignals struct {
+	stopped, parentBlockWaitStopped <-chan struct{}
+}
+
+func stopSignalsOf(ctx context.Context) stopSignals {
+	signals, _ := ctx.Value(stopSignalsKey{}).(stopSignals)
+	return signals
+}
 
 const (
 	blockBuilderRunning uint32 = iota
@@ -47,13 +67,16 @@ const (
 // It answers to two different requests. Interrupting asks for the block it has so far, which is how
 // a payload is collected. Discarding says the payload is not wanted at all, and cancels the work.
 type BlockBuilder struct {
-	interrupt atomic.Bool
-	state     atomic.Uint32
-	discard   context.CancelFunc
-	mu        sync.Mutex
-	done      chan struct{}
-	result    *types.BlockWithReceipts
-	err       error
+	interrupt              atomic.Bool
+	stopped                chan struct{}
+	parentBlockWaitStopped chan struct{}
+	stopOnce               sync.Once
+	state                  atomic.Uint32
+	discard                context.CancelFunc
+	mu                     sync.Mutex
+	done                   chan struct{}
+	result                 *types.BlockWithReceipts
+	err                    error
 }
 
 // NewBlockBuilder starts a build. maxBuildTime is the budget after which the builder stops itself
@@ -62,7 +85,16 @@ type BlockBuilder struct {
 // discarded.
 func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Parameters, maxBuildTime, stopGrace time.Duration) *BlockBuilder {
 	buildCtx, discard := context.WithCancel(ctx)
-	builder := &BlockBuilder{done: make(chan struct{}), discard: discard}
+	builder := &BlockBuilder{
+		done:                   make(chan struct{}),
+		stopped:                make(chan struct{}),
+		parentBlockWaitStopped: make(chan struct{}),
+		discard:                discard,
+	}
+	buildCtx = context.WithValue(buildCtx, stopSignalsKey{}, stopSignals{
+		stopped:                builder.stopped,
+		parentBlockWaitStopped: builder.parentBlockWaitStopped,
+	})
 
 	go func() {
 		var result *types.BlockWithReceipts
@@ -129,6 +161,10 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 
 func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, error) {
 	b.interrupt.Store(true)
+	b.stopOnce.Do(func() {
+		close(b.stopped)
+		time.AfterFunc(parentBlockWaitGrace, func() { close(b.parentBlockWaitStopped) })
+	})
 	if b.Discarded() {
 		return b.readResult()
 	}

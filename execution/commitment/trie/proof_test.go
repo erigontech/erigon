@@ -4,51 +4,34 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"testing"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/require"
 )
 
 //go:embed proofResponse.json
 var responseJson string
 
-func TestPrintProof(t *testing.T) {
+func TestProofMapMainnetNodes(t *testing.T) {
 	var proof accounts.AccProofResult
 	require.NoError(t, json.Unmarshal([]byte(responseJson), &proof))
-
-	fmt.Printf("AccountProof entries: %d\n", len(proof.AccountProof))
-	for i, p := range proof.AccountProof {
-		fmt.Printf("  [%d] %d bytes\n", i, len(p))
+	nodes := proof.AccountProof
+	for _, sp := range proof.StorageProof {
+		nodes = append(nodes, sp.Proof...)
 	}
-	fmt.Printf("Balance: %s\n", (*proof.Balance).String()) // decimal
-	fmt.Printf("Nonce: %d\n", uint64(proof.Nonce))
-	fmt.Printf("CodeHash: %s\n", proof.CodeHash.Hex())
-	fmt.Printf("StorageHash: %s\n", proof.StorageHash.Hex())
-	fmt.Printf("Address: %s\n", proof.Address.Hex())
-	hashedKey := crypto.Keccak256Hash(proof.Address[:])
-	fmt.Printf("HashedKey: %s", hashedKey.Hex())
-
-	fmt.Printf("AccountProof: \n")
-	err := PrintProof(proof.AccountProof)
+	require.Len(t, nodes, 12)
+	m, _, err := proofMap(nodes)
 	require.NoError(t, err)
-
-	if proof.StorageProof == nil {
-		return
-	}
-	fmt.Println()
-	fmt.Printf("StorageProof: \n")
-	for i, storageProof := range proof.StorageProof {
-		fmt.Printf("\t #%d key=%x, value=%v \n", i, storageProof.Key, storageProof.Value)
-		require.NoError(t, PrintProof(storageProof.Proof))
-	}
+	require.Len(t, m, 12)
 }
 
 func TestProofFromNodesMatchesProve(t *testing.T) {
@@ -87,7 +70,7 @@ func TestProofFromNodesMatchesProve(t *testing.T) {
 }
 
 func TestProofFromNodesEmptyTrie(t *testing.T) {
-	proof, value, err := ProofFromNodes(map[string][]byte{}, EmptyRoot[:], crypto.Keccak256([]byte("any")))
+	proof, value, err := ProofFromNodes(map[string][]byte{}, empty.RootHash[:], crypto.Keccak256([]byte("any")))
 	require.NoError(t, err)
 	require.Empty(t, proof)
 	require.Nil(t, value)

@@ -315,6 +315,10 @@ func (s *EthBackendClientDirect) Block(ctx context.Context, in *remoteproto.Bloc
 	return s.server.Block(ctx, in)
 }
 
+func (s *EthBackendClientDirect) BlockBody(ctx context.Context, in *remoteproto.BlockRequest, opts ...grpc.CallOption) (*remoteproto.BlockBodyReply, error) {
+	return s.server.BlockBody(ctx, in)
+}
+
 func (s *EthBackendClientDirect) TxnLookup(ctx context.Context, in *remoteproto.TxnLookupRequest, opts ...grpc.CallOption) (*remoteproto.TxnLookupReply, error) {
 	return s.server.TxnLookup(ctx, in)
 }
@@ -351,8 +355,8 @@ func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.E
 	return s.server.PendingBlock(ctx, in)
 }
 
-func (s *EthBackendClientDirect) AAValidation(ctx context.Context, in *remoteproto.AAValidationRequest, opts ...grpc.CallOption) (*remoteproto.AAValidationReply, error) {
-	return s.server.AAValidation(ctx, in)
+func (s *EthBackendClientDirect) FrameValidation(ctx context.Context, in *remoteproto.FrameValidationRequest, opts ...grpc.CallOption) (*remoteproto.FrameValidationReply, error) {
+	return s.server.FrameValidation(ctx, in)
 }
 
 func (s *EthBackendClientDirect) BlockForTxNum(ctx context.Context, in *remoteproto.BlockForTxNumRequest, opts ...grpc.CallOption) (*remoteproto.BlockForTxNumResponse, error) {

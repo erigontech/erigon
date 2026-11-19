@@ -144,6 +144,58 @@ func TestNewP2PManagerRejectsSharedDiscoveryAndQUICPort(t *testing.T) {
 	require.EqualError(t, err, "discovery and QUIC ports must differ: 9000")
 }
 
+func TestNewP2PManagerAllowsSharedDiscoveryAndQUICPortWhenQUICDisabled(t *testing.T) {
+	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	networkConfigCopy := *networkConfig
+	networkConfigCopy.BootNodes = nil
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
+
+	for range 10 {
+		discoveryPort, _, err := availableCaplinTestPorts()
+		if err != nil {
+			t.Logf("could not probe listener ports: %v", err)
+			continue
+		}
+
+		cfg := &P2PConfig{
+			NetworkConfig: &networkConfigCopy,
+			BeaconConfig:  beaconConfig,
+			IpAddr:        "127.0.0.1",
+			Port:          discoveryPort,
+			TCPPort:       0,
+			QUICPort:      uint(discoveryPort),
+			DisableQUIC:   true,
+			TmpDir:        t.TempDir(),
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		manager, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
+		if errors.Is(err, syscall.EADDRINUSE) {
+			cancel()
+			continue
+		}
+		require.NoError(t, err)
+		listener := manager.UDPv5Listener()
+		localNodeDB := listener.LocalNode().Database()
+		t.Cleanup(func() {
+			cancel()
+			require.NoError(t, manager.Host().Close())
+			listener.Close()
+			localNodeDB.Close()
+		})
+
+		require.Zero(t, cfg.QUICPort)
+		_, ok := listener.LocalNode().Node().QUICEndpoint()
+		require.False(t, ok, "ENR must not advertise a QUIC endpoint when QUIC is disabled")
+		for _, addr := range manager.Host().Network().ListenAddresses() {
+			_, err := addr.ValueForProtocol(multiaddr.P_QUIC_V1)
+			require.Error(t, err, "host must not listen on QUIC when disabled")
+		}
+		return
+	}
+	t.Fatal("could not claim a discovery port after 10 attempts")
+}
+
 func TestDiscoveryAndQUICPortConflict(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -165,6 +217,7 @@ func TestDiscoveryAndQUICPortConflict(t *testing.T) {
 		{name: "ephemeral discovery explicit quic", cfg: P2PConfig{IpAddr: "127.0.0.1", Port: 0, QUICPort: 9000}},
 		{name: "explicit discovery ephemeral quic", cfg: P2PConfig{IpAddr: "127.0.0.1", Port: 9000, QUICPort: 0}},
 		{name: "different ports", cfg: P2PConfig{IpAddr: "127.0.0.1", Port: 9000, QUICPort: 9001}},
+		{name: "quic disabled ignores same-port collision", cfg: P2PConfig{IpAddr: "127.0.0.1", Port: 9000, QUICPort: 9000, DisableQUIC: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -182,10 +235,10 @@ func TestNewP2PManagerAllowsSharedDiscoveryAndTCPPort(t *testing.T) {
 
 	for range 10 {
 		discoveryPort, quicPort, err := availableCaplinTestPorts()
-		if errors.Is(err, syscall.EADDRINUSE) {
+		if err != nil {
+			t.Logf("could not probe listener ports: %v", err)
 			continue
 		}
-		require.NoError(t, err)
 
 		cfg := &P2PConfig{
 			NetworkConfig: &networkConfigCopy,
@@ -217,17 +270,17 @@ func TestNewP2PManagerAllowsSharedDiscoveryAndTCPPort(t *testing.T) {
 }
 
 func availableCaplinTestPorts() (int, int, error) {
-	tcpProbe, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
-	if err != nil {
-		return 0, 0, err
-	}
-	defer tcpProbe.Close()
-	discoveryPort := tcpProbe.Addr().(*net.TCPAddr).Port
-	discoveryProbe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: discoveryPort})
+	discoveryProbe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
 	if err != nil {
 		return 0, 0, err
 	}
 	defer discoveryProbe.Close()
+	discoveryPort := discoveryProbe.LocalAddr().(*net.UDPAddr).Port
+	tcpProbe, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: discoveryPort})
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tcpProbe.Close()
 	quicProbe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
 	if err != nil {
 		return 0, 0, err

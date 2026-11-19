@@ -7,7 +7,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
 const (
@@ -15,22 +14,6 @@ const (
 )
 
 type CellsAndKZGProofs = cltypes.CellsAndKZGProofs
-
-// GetCellsAndKZGProofsFromBlobsBundle extracts cells and KZG proofs from a blobs bundle
-func GetCellsAndKZGProofsFromBlobsBundle(blobsBundle *engine_types.BlobsBundle) ([]CellsAndKZGProofs, error) {
-	cellsAndKZGProofs := make([]CellsAndKZGProofs, 0)
-	for i, blob := range blobsBundle.Blobs {
-		cells, proofs, err := ComputeCellsAndKZGProofs(blob)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compute cells and proofs for blob %d: %w", i, err)
-		}
-		cellsAndKZGProofs = append(cellsAndKZGProofs, CellsAndKZGProofs{
-			Blobs:  cells,
-			Proofs: proofs,
-		})
-	}
-	return cellsAndKZGProofs, nil
-}
 
 // GetDataColumnSidecars assembles sidecars that can be distributed to peers given a signed block header
 // and the commitments, inclusion proof, cells/proofs associated with each blob in the block.

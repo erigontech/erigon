@@ -77,22 +77,6 @@ func TestCacheBtreeOrderAccountStorage(t *testing.T) {
 	sc.SetCodeWrite(a1[:], 1, []byte{1})
 	sc.SetCodeWrite(a2[:], 1, []byte{2})
 	lastK = lastK[:0]
-	//if err := WalkWrites(sc.PrepareWrites(), nil, nil, nil, nil, func(address []byte, incarnation uint64, code []byte) error {
-	//	i++
-	//	if i == 1 {
-	//		assert.Equal(t, a1[:], address)
-	//		assert.Equal(t, 1, incarnation)
-	//		assert.Equal(t, []byte{1}, code)
-	//	}
-	//	if i == 2 {
-	//		assert.Equal(t, a2[:], address)
-	//		assert.Equal(t, 1, incarnation)
-	//		assert.Equal(t, []byte{2}, code)
-	//	}
-	//	return nil
-	//}, nil); err != nil {
-	//	t.Fatal(err)
-	//}
 }
 
 func TestAccountReads(t *testing.T) {

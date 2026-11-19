@@ -35,21 +35,21 @@ import (
 )
 
 type IdealReward struct {
-	EffectiveBalance int64 `json:"effective_balance,string"`
-	Head             int64 `json:"head,string"`
-	Target           int64 `json:"target,string"`
-	Source           int64 `json:"source,string"`
-	InclusionDelay   int64 `json:"inclusion_delay,string"`
-	Inactivity       int64 `json:"inactivity,string"`
+	EffectiveBalance int64  `json:"effective_balance,string"`
+	Head             int64  `json:"head,string"`
+	Target           int64  `json:"target,string"`
+	Source           int64  `json:"source,string"`
+	InclusionDelay   *int64 `json:"inclusion_delay,string,omitempty"`
+	Inactivity       int64  `json:"inactivity,string"`
 }
 
 type TotalReward struct {
-	ValidatorIndex int64 `json:"validator_index,string"`
-	Head           int64 `json:"head,string"`
-	Target         int64 `json:"target,string"`
-	Source         int64 `json:"source,string"`
-	InclusionDelay int64 `json:"inclusion_delay,string"`
-	Inactivity     int64 `json:"inactivity,string"`
+	ValidatorIndex int64  `json:"validator_index,string"`
+	Head           int64  `json:"head,string"`
+	Target         int64  `json:"target,string"`
+	Source         int64  `json:"source,string"`
+	InclusionDelay *int64 `json:"inclusion_delay,string,omitempty"`
+	Inactivity     int64  `json:"inactivity,string"`
 }
 
 type attestationsRewardsResponse struct {
@@ -67,10 +67,6 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	defer tx.Rollback()
 
 	epoch, err := beaconhttp.EpochFromRequest(r)
-
-	// attestation rewards are always delayed by 1 extra epoch compared to other rewards
-	epoch += 1
-
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
@@ -97,9 +93,10 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
 	headEpoch := headSlot / a.beaconChainCfg.SlotsPerEpoch
-	if epoch > headEpoch {
+	if epoch >= headEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("epoch is in the future"))
 	}
+	epoch++
 	// Few cases to handle:
 	// 1) finalized data
 	// 2) not finalized data
@@ -310,7 +307,6 @@ func (a *ApiHandler) computeAttestationsRewardsForAltair(validatorSet *solid.Val
 			idealReward.Target = int64(baseReward * rewardMultipliers[a.beaconChainCfg.TimelyTargetFlagIndex] / rewardDenominator)
 			idealReward.Source = int64(baseReward * rewardMultipliers[a.beaconChainCfg.TimelySourceFlagIndex] / rewardDenominator)
 		}
-		// Note: for altair, we don't have the inclusion delay, always 0.
 		for flagIdx := range weights {
 			if flagsUnslashedIndiciesSet[flagIdx][index] {
 				switch flagIdx {
@@ -382,6 +378,7 @@ func (a *ApiHandler) computeAttestationsRewardsForPhase0(validatorSet *solid.Val
 	}
 
 	rewardDenominator := activeBalance / beaconConfig.EffectiveBalanceIncrement
+	inclusionDelay := new(int64)
 	var unslashedMatchingSourceBalanceIncrements, unslashedMatchingTargetBalanceIncrements, unslashedMatchingHeadBalanceIncrements uint64
 	var err error
 
@@ -427,8 +424,8 @@ func (a *ApiHandler) computeAttestationsRewardsForPhase0(validatorSet *solid.Val
 		previousMatchingTargetAttester = previousParticipation.HasFlag(int(beaconConfig.TimelyTargetFlagIndex))
 		previousMatchingSourceAttester = previousParticipation.HasFlag(int(beaconConfig.TimelySourceFlagIndex))
 
-		totalReward := TotalReward{ValidatorIndex: int64(index)}
-		idealReward := IdealReward{EffectiveBalance: int64(currentValidator.EffectiveBalance())}
+		totalReward := TotalReward{ValidatorIndex: int64(index), InclusionDelay: inclusionDelay}
+		idealReward := IdealReward{EffectiveBalance: int64(currentValidator.EffectiveBalance()), InclusionDelay: inclusionDelay}
 
 		// TODO: check inclusion delay
 		// if !currentValidator.Slashed() && previousMatchingSourceAttester {

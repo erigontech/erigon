@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -575,41 +574,9 @@ func assertEqual(orig Transaction, cpy Transaction) error {
 	return nil
 }
 
-func assertEqualBlobWrapper(orig *BlobTxWrapper, cpy *BlobTxWrapper) error {
-	// compare commitments, blobs, proofs
-	if want, got := len(orig.Commitments), len(cpy.Commitments); want != got {
-		return fmt.Errorf("parsed txn commitments have unequal size: want%v, got %v", want, got)
-	}
-
-	if want, got := len(orig.Blobs), len(cpy.Blobs); want != got {
-		return fmt.Errorf("parsed txn blobs have unequal size: want%v, got %v", want, got)
-	}
-
-	if want, got := len(orig.Proofs), len(cpy.Proofs); want != got {
-		return fmt.Errorf("parsed txn proofs have unequal size: want%v, got %v", want, got)
-	}
-
-	if want, got := orig.Commitments, cpy.Commitments; !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("parsed txn commitments unequal: want%v, got %v", want, got)
-	}
-
-	if want, got := orig.Blobs, cpy.Blobs; !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("parsed txn blobs unequal: want%v, got %v", want, got)
-	}
-
-	if want, got := orig.Proofs, cpy.Proofs; !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("parsed txn proofs unequal: want%v, got %v", want, got)
-	}
-
-	return nil
-}
-
 const N = 50
 
-var (
-	dummyBlobTxs        = [N]*BlobTx{}
-	dummyBlobWrapperTxs = [N]*BlobTxWrapper{}
-)
+var dummyBlobTxs = [N]*BlobTx{}
 
 func randIntInRange(_min, _max int) int {
 	return (rand.Intn(_max-_min) + _min)
@@ -682,57 +649,6 @@ func newRandBlobTx() *BlobTx {
 		BlobVersionedHashes: randHashes(randIntInRange(1, 6)),
 	}
 	return stx
-}
-
-func randByte() byte {
-	return byte(rand.Intn(256))
-}
-
-func newRandCommitments(size int) BlobKzgs {
-	var result BlobKzgs
-	for range size {
-		var arr [LEN_48]byte
-		for j := range LEN_48 {
-			arr[j] = randByte()
-		}
-		result = append(result, arr)
-	}
-	return result
-}
-
-func newRandProofs(size int) KZGProofs {
-	var result KZGProofs
-	for range size {
-		var arr [LEN_48]byte
-		for j := range LEN_48 {
-			arr[j] = randByte()
-		}
-		result = append(result, arr)
-	}
-	return result
-}
-
-func newRandBlobs(size int) Blobs {
-	var result Blobs
-	for range size {
-		var arr [params.BlobSize]byte
-		for j := range params.BlobSize {
-			arr[j] = randByte()
-		}
-		result = append(result, arr)
-	}
-	return result
-}
-
-func newRandBlobWrapper() *BlobTxWrapper {
-	btxw := newRandBlobTx()
-	l := len(btxw.BlobVersionedHashes)
-	return &BlobTxWrapper{
-		Tx:          btxw.copyData(),
-		Commitments: newRandCommitments(l),
-		Blobs:       newRandBlobs(l),
-		Proofs:      newRandProofs(l),
-	}
 }
 
 func populateBlobTxs() {
@@ -913,21 +829,6 @@ func TestUnmarshalDynamicFeeTransactionFromJSONWithoutGasPrice(t *testing.T) {
 	txn, err := UnmarshalTransactionFromJSON([]byte(txJSON))
 	require.NoError(t, err)
 	assert.Equal(t, uint256.NewInt(1_000_000_000), txn.GetFeeCap())
-}
-
-func TestAATotalGasLimitOverflow(t *testing.T) {
-	t.Parallel()
-
-	tx := &AccountAbstractionTransaction{ValidationGasLimit: 1, PaymasterValidationGasLimit: 2, PostOpGasLimit: 4}
-	tx.GasLimit = 8
-	total, ok := tx.TotalGasLimit(16)
-	assert.True(t, ok)
-	assert.Equal(t, uint64(31), total)
-
-	overflowing := &AccountAbstractionTransaction{ValidationGasLimit: ^uint64(0), PaymasterValidationGasLimit: 1}
-	_, ok = overflowing.TotalGasLimit(params.TxAAGas)
-	assert.False(t, ok)
-	assert.Equal(t, ^uint64(0), overflowing.GetGasLimit())
 }
 
 // decodeAccessList backs every tuple's StorageKeys with one arena, so a tuple's
@@ -1147,7 +1048,6 @@ func TestTransactionHashFromEncoding(t *testing.T) {
 		signedDynFeeTx,
 		&BlobTx{DynamicFeeTransaction: dynFee(), MaxFeePerBlobGas: *uint256.NewInt(3), BlobVersionedHashes: []common.Hash{{0x01}}},
 		&SetCodeTransaction{DynamicFeeTransaction: dynFee(), Authorizations: []Authorization{{ChainID: u256.Num1, Address: to, Nonce: 2}}},
-		&AccountAbstractionTransaction{ChainID: uint256.NewInt(1), NonceKey: uint256.NewInt(0), Nonce: 1, Tip: uint256.NewInt(1), FeeCap: uint256.NewInt(2), BuilderFee: uint256.NewInt(0), GasLimit: 21000},
 	} {
 		var binary bytes.Buffer
 		require.NoError(t, txn.MarshalBinary(&binary))
@@ -1157,6 +1057,50 @@ func TestTransactionHashFromEncoding(t *testing.T) {
 			got, err := TransactionHashFromEncoding(enc)
 			require.NoError(t, err)
 			require.Equal(t, txn.Hash(), got, "type %d, encoding %x", txn.Type(), enc[:1])
+			bin, err := BinaryFromStoredTxn(enc)
+			require.NoError(t, err)
+			require.Equal(t, binary.Bytes(), bin, "type %d, encoding %x", txn.Type(), enc[:1])
 		}
+	}
+}
+
+// A stored record whose framing is not one transaction's is rejected, not handed out as one.
+func TestBinaryFromStoredTxnRejectsMalformed(t *testing.T) {
+	wrap := func(b []byte) []byte {
+		out := make([]byte, rlp.StringLen(b))
+		rlp.EncodeStringToBuf(b, out)
+		return out
+	}
+	binaryOf := func(txn Transaction) []byte {
+		var buf bytes.Buffer
+		require.NoError(t, txn.MarshalBinary(&buf))
+		return bytes.Clone(buf.Bytes())
+	}
+	legacyBinary, typedBinary := binaryOf(rightvrsTx), binaryOf(signedDynFeeTx)
+	// The trailing-byte cases must be a valid encoding plus one byte: anything shorter
+	// is already rejected on the field count, leaving the trailing checks untested.
+	withTrailing := func(b []byte) []byte { return append(bytes.Clone(b), 0x80) }
+
+	for name, stored := range map[string][]byte{
+		"empty":                  {},
+		"legacy empty list":      {0xc0},
+		"legacy not a list":      {0x01, 0x02},
+		"legacy trailing bytes":  withTrailing(legacyBinary),
+		"typed empty list":       wrap([]byte{0x02, 0xc0}),
+		"typed without fields":   wrap([]byte{0x02}),
+		"typed trailing bytes":   wrap(withTrailing(typedBinary)),
+		"wrapped trailing bytes": withTrailing(wrap(typedBinary)),
+		"wrapped empty":          {0x80},
+		"legacy one field":       {0xc1, 0x80},
+		"typed one field":        {0x02, 0xc1, 0x80},
+		"unknown type byte":      {0x7f, 0xc1, 0x80},
+		"non-canonical field":    {0xc2, 0x81, 0x00},
+		"wrapped one field":      {0x82, 0xc1, 0x80},
+		"legacy field count":     append([]byte{0xf8, 0x39}, bytes.Repeat([]byte{0x80}, 57)...),
+		"zero type byte":         append([]byte{0x00}, legacyBinary...),
+		"wrapped legacy list":    wrap(legacyBinary),
+	} {
+		_, err := BinaryFromStoredTxn(stored)
+		require.Error(t, err, name)
 	}
 }

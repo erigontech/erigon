@@ -105,11 +105,7 @@ func (t *TransactionTracer) OnEnterV2(depth int, typRaw byte, from accounts.Addr
 	case vm.CREATE2:
 		entry = &TraceEntry{"CREATE2", t.depth, from.Value(), to.Value(), (*hexutil.U256)(&value), inputCopy, nil}
 	case vm.SELFDESTRUCT:
-		selfDestructDepth := depth
-		if len(t.Results) > 0 {
-			selfDestructDepth = t.Results[len(t.Results)-1].Depth + 1
-		}
-		entry = &TraceEntry{"SELFDESTRUCT", selfDestructDepth, from.Value(), to.Value(), (*hexutil.U256)(&value), nil, nil}
+		entry = &TraceEntry{"SELFDESTRUCT", t.depth, from.Value(), to.Value(), (*hexutil.U256)(&value), nil, nil}
 	default:
 		// safeguard in case new CALL-like opcodes are introduced but not handled,
 		// otherwise CaptureExit/stack will get out of sync

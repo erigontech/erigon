@@ -78,15 +78,16 @@ func newLogsFilter(sender Sub[*types.Log], criteria filters.FilterCriteria, poll
 			filter.addrs.Put(addr, 1)
 		}
 	}
-	if len(criteria.Topics) == 0 {
-		filter.allTopics = 1
-	} else {
-		for _, topics := range criteria.Topics {
-			for _, topic := range topics {
-				filter.topics.Put(topic, 1)
-			}
+	filter.topicsOriginal = criteria.Topics
+	anyTopic := true
+	for _, topics := range criteria.Topics {
+		for _, topic := range topics {
+			filter.topics.Put(topic, 1)
+			anyTopic = false
 		}
-		filter.topicsOriginal = criteria.Topics
+	}
+	if anyTopic {
+		filter.allTopics = 1
 	}
 	return filter
 }
@@ -259,7 +260,7 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogs
 				return nil
 			}
 		}
-		if filter.allTopics == 0 && !a.chooseTopics(filter, topics) {
+		if !a.chooseTopics(filter, topics) {
 			return nil
 		}
 		filter.sender.Send(lg)

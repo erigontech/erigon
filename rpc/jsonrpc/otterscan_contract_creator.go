@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -56,6 +58,15 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	// EOA?
 	if plainStateAcc.IsEmptyCodeHash() {
 		return nil, nil
+	}
+	if plainStateAcc.Incarnation == state.NonContractIncarnation {
+		code, err := latestState.ReadAccountCode(accounts.InternAddress(addr))
+		if err != nil {
+			return nil, err
+		}
+		if _, delegated := types.ParseDelegation(code); delegated {
+			return nil, nil
+		}
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
@@ -159,6 +170,24 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		return nil, searchErr
 	}
 	if creationTxnID == 0 {
+		afterGenesis, err := api._txNumReader.Min(ctx, tx, 1)
+		if err != nil {
+			return nil, err
+		}
+		if err := api.checkPruneState(ctx, tx, 0); err != nil {
+			return nil, err
+		}
+		codeChanges, err := tx.IndexRange(kv.CodeHistoryIdx, addr[:], int(afterGenesis), -1, order.Asc, 1)
+		if err != nil {
+			return nil, err
+		}
+		defer codeChanges.Close()
+		if !codeChanges.HasNext() {
+			return nil, nil
+		}
+		if _, err := codeChanges.Next(); err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
 	}
 
