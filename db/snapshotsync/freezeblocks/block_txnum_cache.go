@@ -90,7 +90,6 @@ func (c *BlockTxNumLookupCache) Find(r snapshotsync.Range, queryTxNum uint64, ge
 		}
 
 		return txNum >= queryTxNum
-
 	})
 
 	if err != nil {

@@ -35,10 +35,19 @@ func ByteCount(b uint64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f%cB", float64(b)/float64(div), "KMGTPE"[exp])
-
 }
 
-var Copy = bytes.Clone
+//go:fix inline
+func Copy(b []byte) []byte { return bytes.Clone(b) }
+
+// CopySegment copies src[from:] into dst and zeroes the part of dst past the end of src.
+func CopySegment(dst, src []byte, from uint64) {
+	n := 0
+	if from < uint64(len(src)) {
+		n = copy(dst, src[from:])
+	}
+	clear(dst[n:])
+}
 
 func EnsureEnoughSize(in []byte, size int) []byte {
 	if cap(in) < size {
@@ -154,7 +163,7 @@ func ToBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s)
 
 func KeyCmp(key1, key2 []byte) (int, bool) {
 	switch {
-	//both keys are empty
+	// both keys are empty
 	case len(key1) == 0 && len(key2) == 0:
 		return 0, true
 	//	key1 is empty

@@ -25,10 +25,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
 const (
@@ -39,13 +40,14 @@ const (
 // testResult contains the execution status after running a block test, any
 // error that might have occurred and a dump of the final state if requested.
 type testResult struct {
-	Name  string       `json:"name"`
-	Pass  bool         `json:"pass"`
-	Root  *common.Hash `json:"stateRoot,omitempty"`
-	Fork  string       `json:"fork,omitempty"`
-	Error string       `json:"error"`
-	State *state.Dump  `json:"state,omitempty"`
-	Stats *execStats   `json:"benchStats,omitempty"`
+	Name       string               `json:"name"`
+	Pass       bool                 `json:"pass"`
+	Root       *common.Hash         `json:"stateRoot,omitempty"`
+	Fork       string               `json:"fork,omitempty"`
+	Error      string               `json:"error"`
+	Rejections []testutil.Rejection `json:"rejections,omitzero"`
+	State      *state.Dump          `json:"state,omitempty"`
+	Stats      *execStats           `json:"benchStats,omitempty"`
 }
 
 func (r testResult) String() string {
@@ -66,20 +68,21 @@ func (r testResult) String() string {
 
 	out := fmt.Sprintf("%s %s%s", status, r.Name, extra)
 	if r.State != nil {
-		state, _ := json.MarshalIndent(r.State, "", "  ")
-		out += "\n" + string(state)
+		if state, err := json.MarshalIndent(r.State, "", "  "); err == nil {
+			out += "\n" + string(state)
+		}
 	}
 	return out
 }
 
 // report prints the after-test summary.
-func report(ctx *cli.Context, results []testResult) {
+func report(ctx *cli.Command, results []testResult) {
 	if ctx.Bool(JSONOutputFlag.Name) {
 		// Write directly to stdout via encoder to avoid the intermediate
 		// MarshalIndent -> string -> Println allocation chain.
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		enc.Encode(results) //nolint:errcheck
+		_ = enc.Encode(results) //nolint:errcheck,errchkjson
 		return
 	}
 	pass := 0

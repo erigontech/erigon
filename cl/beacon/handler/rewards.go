@@ -17,12 +17,13 @@
 package handler
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -53,7 +54,7 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 	if err != nil {
 		return nil, err
 	}
-	root, err := a.rootFromBlockId(ctx, tx, blockId)
+	root, err := a.rootFromBlockId(tx, blockId)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +87,7 @@ func (a *ApiHandler) GetEthV1BeaconRewardsBlocks(w http.ResponseWriter, r *http.
 	defer snRoTx.Close()
 
 	stateGetter := state_accessors.GetValFnTxAndSnapshot(tx, snRoTx)
-	slotData, err := state_accessors.ReadSlotData(stateGetter, slot, a.beaconChainCfg)
+	slotData, err := state_accessors.ReadSlotData(stateGetter, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +139,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 	if err != nil {
 		return nil, err
 	}
-	root, err := a.rootFromBlockId(ctx, tx, blockId)
+	root, err := a.rootFromBlockId(tx, blockId)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +221,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 	for committeeIdx, v := range committee {
 		idx, _, err := a.syncedData.ValidatorIndexByPublicKey(v)
 		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("sync committee public key not found: %s", err))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("sync committee public key not found: %w", err))
 		}
 		if len(filterIndiciesSet) > 0 {
 			if _, ok := filterIndiciesSet[idx]; !ok {
@@ -239,8 +240,8 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 			Reward:         reward,
 		})
 	}
-	sort.Slice(rewards, func(i, j int) bool {
-		return rewards[i].ValidatorIndex < rewards[j].ValidatorIndex
+	slices.SortFunc(rewards, func(a, b syncCommitteeReward) int {
+		return cmp.Compare(a.ValidatorIndex, b.ValidatorIndex)
 	})
 	return newBeaconResponse(rewards).WithFinalized(isFinalized).WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
 }

@@ -21,11 +21,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -37,6 +38,25 @@ const DelegateDesignationCodeSize = 23
 type SetCodeTransaction struct {
 	DynamicFeeTransaction
 	Authorizations []Authorization
+	// authorities is set by the block pre-pass when it starts a list, so the executor waits for it rather than
+	// recovering the same list again; it is read and written atomically.
+	authorities atomic.Pointer[RecoveredAuthorities]
+}
+
+// RecoveredAuthorities is RecoverSigners of a tx's authorization list; Signers and Errs are set once done is closed.
+type RecoveredAuthorities struct {
+	done    chan struct{}
+	Signers []common.Address
+	Errs    []error
+}
+
+// WarmAuthorities recovers the authorization list on several goroutines for the tx's Message.
+func (tx *SetCodeTransaction) WarmAuthorities(chainID *uint256.Int) {
+	r := &RecoveredAuthorities{done: make(chan struct{})}
+	if tx.authorities.Load() == nil && tx.authorities.CompareAndSwap(nil, r) {
+		r.Signers, r.Errs = RecoverSigners(tx.Authorizations, chainID)
+		close(r.done)
+	}
 }
 
 func (tx *SetCodeTransaction) Unwrap() Transaction {
@@ -61,8 +81,8 @@ func (tx *SetCodeTransaction) copy() *SetCodeTransaction {
 
 	cpy.Authorizations = make([]Authorization, len(tx.Authorizations))
 
-	for i, ath := range tx.Authorizations {
-		cpy.Authorizations[i] = *ath.copy()
+	for i := range tx.Authorizations {
+		cpy.Authorizations[i] = *tx.Authorizations[i].copy()
 	}
 
 	return cpy
@@ -151,6 +171,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *c
 		return nil, errors.New("SetCodeTransaction without authorizations is invalid")
 	}
 	msg.authorizations = tx.Authorizations
+	msg.authorities = &tx.authorities
 
 	var err error
 	if msg.from, err = tx.Sender(s); err != nil {
@@ -176,25 +197,16 @@ func (tx *SetCodeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(SetCodeTxType, []any{
-		&tx.ChainID,
-		tx.Nonce,
-		&tx.TipCap,
-		&tx.FeeCap,
-		tx.GasLimit,
-		tx.To,
-		&tx.Value,
-		tx.Data,
-		tx.AccessList,
-		tx.Authorizations,
-		tx.V, tx.R, tx.S,
+	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
+	hash := prefixedPayloadHash(SetCodeTxType, func(w io.Writer, b []byte) error {
+		return tx.encodePayload(w, b, payloadSize, accessListLen, authorizationsLen)
 	})
 	tx.hash.Store(&hash)
 	return hash
 }
 
 type setCodeTxSigHash struct {
-	ChainID    *big.Int
+	ChainID    *uint256.Int
 	Nonce      uint64
 	GasTipCap  *uint256.Int
 	GasFeeCap  *uint256.Int
@@ -206,7 +218,7 @@ type setCodeTxSigHash struct {
 	AuthList   []Authorization
 }
 
-func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) common.Hash {
+func (tx *SetCodeTransaction) SigningHash(chainID *uint256.Int) common.Hash {
 	return prefixedRlpHash(
 		SetCodeTxType,
 		&setCodeTxSigHash{
@@ -220,7 +232,8 @@ func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) common.Hash {
 			Data:       tx.Data,
 			AccessList: tx.AccessList,
 			AuthList:   tx.Authorizations,
-		})
+		},
+	)
 }
 
 func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
@@ -249,33 +262,34 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.ChainID); err != nil {
+	if err := s.ReadUint256(&tx.ChainID); err != nil {
 		return err
 	}
 	if tx.Nonce, err = s.Uint64(); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.TipCap); err != nil {
+	if err := s.ReadUint256(&tx.TipCap); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.FeeCap); err != nil {
+	if err := s.ReadUint256(&tx.FeeCap); err != nil {
 		return err
 	}
 	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
-	tx.To = &common.Address{}
 	if kind, size, err := s.Kind(); err != nil {
 		return err
 	} else if kind == rlp.Byte {
-		return fmt.Errorf("wrong size for To: 1")
-	} else if size != 20 {
+		return errors.New("wrong size for To: 1")
+	} else if size != length.Addr {
 		return fmt.Errorf("wrong size for To: %d", size)
 	}
-	if err = s.ReadBytes(tx.To[:]); err != nil {
+	to, err := s.Addr()
+	if err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.Value); err != nil {
+	tx.To = &to
+	if err := s.ReadUint256(&tx.Value); err != nil {
 		return err
 	}
 	if tx.Data, err = s.Bytes(); err != nil {
@@ -283,24 +297,24 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 	// decode AccessList
 	tx.AccessList = AccessList{}
-	if err = decodeAccessList(&tx.AccessList, s); err != nil {
+	if err := decodeAccessList(&tx.AccessList, s); err != nil {
 		return err
 	}
 
 	// decode authorizations
 	tx.Authorizations = make([]Authorization, 0)
-	if err = decodeAuthorizations(&tx.Authorizations, s); err != nil {
+	if err := decodeAuthorizations(&tx.Authorizations, s); err != nil {
 		return err
 	}
 
 	// decode V
-	if err = s.ReadUint256(&tx.V); err != nil {
+	if err := s.ReadUint256(&tx.V); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.R); err != nil {
+	if err := s.ReadUint256(&tx.R); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.S); err != nil {
+	if err := s.ReadUint256(&tx.S); err != nil {
 		return err
 	}
 	return s.ListEnd()
@@ -372,7 +386,6 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	return nil
-
 }
 
 // ParseDelegation tries to parse the address from a delegation slice.

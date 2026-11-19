@@ -477,6 +477,132 @@ func TestMemStore_DeleteCurrent(t *testing.T) {
 	v, err := s.GetOne("test", []byte("B"))
 	require.NoError(t, err)
 	assert.Nil(t, v)
+
+	k, v, err := c.Next()
+	require.NoError(t, err)
+	require.Equal(t, []byte("C"), k)
+	require.Equal(t, []byte("3"), v)
+}
+
+func TestMemStore_MoveAfterDelete(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		key       string
+		value     string
+		move      func(*memStoreCursor) ([]byte, []byte, error)
+		wantKey   string
+		wantValue string
+	}{
+		{"next duplicate", "A", "2", (*memStoreCursor).NextDup, "A", "3"},
+		{"next distinct key", "A", "2", (*memStoreCursor).NextNoDup, "B", "1"},
+		{"previous", "A", "2", (*memStoreCursor).Prev, "A", "1"},
+		{"previous from last", "B", "1", (*memStoreCursor).Prev, "A", "3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newMemStore()
+			for _, pair := range [][2]string{{"A", "1"}, {"A", "2"}, {"A", "3"}, {"B", "1"}} {
+				require.NoError(t, s.Put(kv.TblAccountVals, []byte(pair[0]), []byte(pair[1])))
+			}
+			c := s.newCursor(kv.TblAccountVals)
+			defer c.Close()
+			k, v, err := c.SeekBothExact([]byte(tc.key), []byte(tc.value))
+			require.NoError(t, err)
+			require.Equal(t, []byte(tc.key), k)
+			require.Equal(t, []byte(tc.value), v)
+			require.NoError(t, c.DeleteCurrent())
+			k, v, err = tc.move(c)
+			require.NoError(t, err)
+			require.Equal(t, []byte(tc.wantKey), k)
+			require.Equal(t, []byte(tc.wantValue), v)
+		})
+	}
+}
+
+func TestMemStore_NextDupPastLastDuplicate(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		key       string
+		value     string
+		delete    bool
+		then      func(*memStoreCursor) ([]byte, []byte, error)
+		wantKey   string
+		wantValue string
+	}{
+		{"current", "A", "3", false, (*memStoreCursor).Current, "A", "3"},
+		{"next", "A", "3", false, (*memStoreCursor).Next, "B", "1"},
+		{"next distinct key", "A", "3", false, (*memStoreCursor).NextNoDup, "B", "1"},
+		{"next after delete", "A", "3", true, (*memStoreCursor).Next, "B", "1"},
+		{"next distinct key after delete", "A", "3", true, (*memStoreCursor).NextNoDup, "B", "1"},
+		{"previous from last", "B", "2", false, (*memStoreCursor).Prev, "B", "1"},
+		{"previous after deleting last", "B", "2", true, (*memStoreCursor).Prev, "B", "1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newMemStore()
+			for _, pair := range [][2]string{{"A", "1"}, {"A", "2"}, {"A", "3"}, {"B", "1"}, {"B", "2"}} {
+				require.NoError(t, s.Put(kv.TblAccountVals, []byte(pair[0]), []byte(pair[1])))
+			}
+			c := s.newCursor(kv.TblAccountVals)
+			defer c.Close()
+			_, _, err := c.SeekBothExact([]byte(tc.key), []byte(tc.value))
+			require.NoError(t, err)
+			if tc.delete {
+				require.NoError(t, c.DeleteCurrent())
+			}
+			k, v, err := c.NextDup()
+			require.NoError(t, err)
+			require.Nil(t, k)
+			require.Nil(t, v)
+			k, v, err = tc.then(c)
+			require.NoError(t, err)
+			require.Equal(t, []byte(tc.wantKey), k)
+			require.Equal(t, []byte(tc.wantValue), v)
+		})
+	}
+}
+
+func TestMemStore_CurrentAfterDelete(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		table     string
+		key       string
+		value     string
+		wantKey   []byte
+		wantValue []byte
+	}{
+		{"next entry", kv.TblAccountVals, "A", "2", []byte("A"), []byte("3")},
+		{"next key", kv.TblAccountVals, "A", "3", []byte("B"), []byte("1")},
+		{"last entry", kv.TblAccountVals, "B", "1", nil, nil},
+		{"non-dupsort", kv.HeaderNumber, "A", "3", []byte("B"), []byte("1")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newMemStore()
+			pairs := [][2]string{{"A", "1"}, {"A", "2"}, {"A", "3"}, {"B", "1"}}
+			if tc.table == kv.HeaderNumber {
+				pairs = [][2]string{{"A", "3"}, {"B", "1"}}
+			}
+			for _, pair := range pairs {
+				require.NoError(t, s.Put(tc.table, []byte(pair[0]), []byte(pair[1])))
+			}
+			c := s.newCursor(tc.table)
+			defer c.Close()
+			k, v, err := c.SeekExact([]byte(tc.key))
+			require.NoError(t, err)
+			for err == nil && k != nil && string(v) != tc.value {
+				k, v, err = c.Next()
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.value, string(v))
+			require.NoError(t, c.DeleteCurrent())
+			k, v, err = c.Current()
+			require.NoError(t, err)
+			require.Equal(t, tc.wantKey, k)
+			require.Equal(t, tc.wantValue, v)
+			k, v, err = c.Next()
+			require.NoError(t, err)
+			require.Equal(t, tc.wantKey, k)
+			require.Equal(t, tc.wantValue, v)
+		})
+	}
 }
 
 func TestMemStore_DeleteExact(t *testing.T) {
@@ -550,16 +676,14 @@ func TestMemStore_ConcurrentReadWrite(t *testing.T) {
 
 	// Pre-populate
 	for i := range 100 {
-		require.NoError(t, s.Put("test", []byte(fmt.Sprintf("key%04d", i)), []byte(fmt.Sprintf("val%04d", i))))
+		require.NoError(t, s.Put("test", fmt.Appendf(nil, "key%04d", i), fmt.Appendf(nil, "val%04d", i)))
 	}
 
 	var wg sync.WaitGroup
 
 	// Writers: continuously put new keys
 	for w := range numWriters {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range numOps {
 				key := fmt.Sprintf("w%d-key%04d", w, i)
 				val := fmt.Sprintf("w%d-val%04d", w, i)
@@ -568,14 +692,12 @@ func TestMemStore_ConcurrentReadWrite(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 
 	// Readers: continuously read and iterate
 	for range numReaders {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range numOps {
 				// Random reads
 				_, _ = s.GetOne("test", []byte("key0050"))
@@ -591,7 +713,7 @@ func TestMemStore_ConcurrentReadWrite(t *testing.T) {
 					return nil
 				})
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -615,16 +737,14 @@ func TestMemStore_ConcurrentCursors(t *testing.T) {
 
 	// Pre-populate with sorted data
 	for i := range 200 {
-		require.NoError(t, s.Put("test", []byte(fmt.Sprintf("key%04d", i)), []byte(fmt.Sprintf("val%04d", i))))
+		require.NoError(t, s.Put("test", fmt.Appendf(nil, "key%04d", i), fmt.Appendf(nil, "val%04d", i)))
 	}
 
 	var wg sync.WaitGroup
 
 	// Concurrent cursor operations
 	for range numGoroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range numOps {
 				c := s.newCursor("test")
 
@@ -640,7 +760,7 @@ func TestMemStore_ConcurrentCursors(t *testing.T) {
 					continue
 				}
 
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					k, _, err = c.Next()
 					if err != nil {
 						t.Errorf("Next error: %v", err)
@@ -653,18 +773,16 @@ func TestMemStore_ConcurrentCursors(t *testing.T) {
 
 				c.Close()
 			}
-		}()
+		})
 	}
 
 	// Concurrent writer
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range numOps {
 			key := fmt.Sprintf("ckey%04d", i)
 			_ = s.Put("test", []byte(key), []byte("cval"))
 		}
-	}()
+	})
 
 	wg.Wait()
 }
@@ -676,9 +794,7 @@ func TestMemStore_ConcurrentSequences(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range numGoroutines {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range numIncrements {
 				_, err := s.IncrementSequence("counter", 1)
 				if err != nil {
@@ -686,7 +802,7 @@ func TestMemStore_ConcurrentSequences(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -701,16 +817,14 @@ func TestMemStore_ConcurrentRangeAndWrite(t *testing.T) {
 
 	// Pre-populate
 	for i := range 100 {
-		require.NoError(t, s.Put("test", []byte(fmt.Sprintf("key%04d", i)), []byte(fmt.Sprintf("val%04d", i))))
+		require.NoError(t, s.Put("test", fmt.Appendf(nil, "key%04d", i), fmt.Appendf(nil, "val%04d", i)))
 	}
 
 	var wg sync.WaitGroup
 
 	// Range iterators while writing
 	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 200 {
 				iter, err := s.Range("test", []byte("key0010"), []byte("key0090"), true, -1)
 				if err != nil {
@@ -735,18 +849,16 @@ func TestMemStore_ConcurrentRangeAndWrite(t *testing.T) {
 					t.Errorf("Range returned 0 entries")
 				}
 			}
-		}()
+		})
 	}
 
 	// Writer
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range 200 {
 			key := fmt.Sprintf("key%04d", 1000+i)
 			_ = s.Put("test", []byte(key), []byte("new"))
 		}
-	}()
+	})
 
 	wg.Wait()
 }
@@ -759,8 +871,8 @@ func TestMemStore_ConcurrentDupSort(t *testing.T) {
 	for i := range 10 {
 		for j := range 10 {
 			require.NoError(t, s.Put(table,
-				[]byte(fmt.Sprintf("key%02d", i)),
-				[]byte(fmt.Sprintf("val%02d", j))))
+				fmt.Appendf(nil, "key%02d", i),
+				fmt.Appendf(nil, "val%02d", j)))
 		}
 	}
 
@@ -768,9 +880,7 @@ func TestMemStore_ConcurrentDupSort(t *testing.T) {
 
 	// Concurrent readers with SeekBothRange
 	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 200 {
 				c := s.newCursor(table)
 				v, err := c.SeekBothRange([]byte("key05"), []byte("val03"))
@@ -784,19 +894,40 @@ func TestMemStore_ConcurrentDupSort(t *testing.T) {
 				}
 				c.Close()
 			}
-		}()
+		})
 	}
 
 	// Concurrent writer
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := range 200 {
 			_ = s.Put(table,
-				[]byte(fmt.Sprintf("key%02d", i%10)),
-				[]byte(fmt.Sprintf("new%04d", i)))
+				fmt.Appendf(nil, "key%02d", i%10),
+				fmt.Appendf(nil, "new%04d", i))
 		}
-	}()
+	})
 
 	wg.Wait()
+}
+
+func TestMemStore_DeleteCurrentAfterDelete(t *testing.T) {
+	for _, table := range []string{kv.TblAccountVals, kv.HeaderNumber} {
+		t.Run(table, func(t *testing.T) {
+			s := newMemStore()
+			for _, k := range []string{"A", "B", "C"} {
+				require.NoError(t, s.Put(table, []byte(k), []byte("1")))
+			}
+			c := s.newCursor(table)
+			defer c.Close()
+			_, _, err := c.SeekExact([]byte("A"))
+			require.NoError(t, err)
+			require.NoError(t, c.DeleteCurrent())
+			require.NoError(t, c.DeleteCurrent())
+			k, _, err := c.Current()
+			require.NoError(t, err)
+			require.Equal(t, []byte("C"), k)
+			k, _, err = c.First()
+			require.NoError(t, err)
+			require.Equal(t, []byte("C"), k)
+		})
+	}
 }

@@ -23,16 +23,18 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -95,7 +97,7 @@ func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash common.H
 		log.Warn("[engine] GetBlockByHash", "err", err)
 		return nil
 	}
-	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
+	return types.NewBlock(header, txs, nil, nil, body.Withdrawals, nil)
 }
 
 func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint64) *types.Block {
@@ -117,16 +119,20 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 		log.Warn("[engine] GetBlockByNumber", "err", err)
 		return nil
 	}
-	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
+	return types.NewBlock(header, txs, nil, nil, body.Withdrawals, nil)
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash common.Hash) *types.Header {
-	h, err := c.executionModule.GetHeader(ctx, &hash, nil)
+	h, err := c.HeaderByHash(ctx, hash)
 	if err != nil {
 		log.Warn("[engine] GetHeaderByHash", "err", err)
 		return nil
 	}
 	return h
+}
+
+func (c ChainReaderWriterEth1) HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+	return c.executionModule.GetHeader(ctx, &hash, nil)
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uint64) *types.Header {
@@ -138,7 +144,7 @@ func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uin
 	return h
 }
 
-func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash common.Hash, number uint64) *big.Int {
+func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash common.Hash, number uint64) *uint256.Int {
 	td, err := c.executionModule.GetTD(ctx, &hash, &number)
 	if err != nil {
 		log.Warn("[engine] GetTd", "err", err)
@@ -181,10 +187,15 @@ func convertPayloadBodies(bodies []*execmodule.PayloadBody) []*engine_types.Exec
 		for j, tx := range body.Transactions {
 			txs[j] = tx
 		}
+		var blockAccessList *hexutil.Bytes
+		if body.BlockAccessList != nil {
+			bal := hexutil.Bytes(body.BlockAccessList)
+			blockAccessList = &bal
+		}
 		result[i] = &engine_types.ExecutionPayloadBodyV2{
 			Transactions:    txs,
 			Withdrawals:     body.Withdrawals,
-			BlockAccessList: body.BlockAccessList,
+			BlockAccessList: blockAccessList,
 		}
 	}
 	return result
@@ -202,56 +213,25 @@ func (c ChainReaderWriterEth1) IsCanonicalHash(ctx context.Context, hash common.
 	return c.executionModule.IsCanonicalHash(ctx, hash)
 }
 
+func (c ChainReaderWriterEth1) IsValidated(hash common.Hash) bool {
+	return c.executionModule.IsValidated(hash)
+}
+
 func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) {
 	frozen, hasGap, err := c.executionModule.FrozenBlocks(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			return 0, false
+		}
 		panic(err)
 	}
 	return frozen, hasGap
 }
 
-func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks []*types.Block) error {
-	return c.InsertBlocksAndWaitWithAccessLists(ctx, blocks, nil)
-}
-
-// InsertBlocksAndWaitWithAccessLists inserts blocks and waits for confirmation.
-// accessLists maps block hash to its RLP-encoded block access list bytes (nil if not present).
-func (c ChainReaderWriterEth1) InsertBlocksAndWaitWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists map[common.Hash][]byte) error {
-	rawBlocks := blocksToRaw(blocks, accessLists)
-	for {
-		status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
-		if err != nil {
-			return err
-		}
-		if status != execmodule.ExecutionStatusBusy {
-			if status != execmodule.ExecutionStatusSuccess {
-				return fmt.Errorf("InsertBlocksAndWait: executionModule.InsertBlocks ExecutionStatus = %s", status)
-			}
-			return nil
-		}
-		const retryDelay = 100 * time.Millisecond
-		select {
-		case <-time.After(retryDelay):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-}
-
 func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	return c.InsertBlocksWithAccessLists(ctx, blocks, nil)
-}
-
-// InsertBlocksWithAccessLists inserts blocks without waiting for confirmation.
-// accessLists maps block hash to its RLP-encoded block access list bytes (nil if not present).
-func (c ChainReaderWriterEth1) InsertBlocksWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists map[common.Hash][]byte) error {
-	rawBlocks := blocksToRaw(blocks, accessLists)
-	status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
+	status, err := c.executionModule.InsertBlocks(ctx, blocks)
 	if err != nil {
 		return err
-	}
-	if status == execmodule.ExecutionStatusBusy {
-		return context.DeadlineExceeded
 	}
 	if status != execmodule.ExecutionStatusSuccess {
 		return fmt.Errorf("InsertBlocks: invalid code received from execution module: %s", status)
@@ -259,27 +239,19 @@ func (c ChainReaderWriterEth1) InsertBlocksWithAccessLists(ctx context.Context, 
 	return nil
 }
 
-func (c ChainReaderWriterEth1) InsertBlockAndWait(ctx context.Context, block *types.Block) error {
-	return c.InsertBlocksAndWait(ctx, []*types.Block{block})
-}
-
-func blocksToRaw(blocks []*types.Block, accessLists map[common.Hash][]byte) []*types.RawBlock {
-	raw := make([]*types.RawBlock, len(blocks))
-	for i, b := range blocks {
-		rawBody := b.RawBody()
-		rb := &types.RawBlock{Header: b.Header(), Body: rawBody}
-		if accessLists != nil {
-			if bal, ok := accessLists[b.Hash()]; ok {
-				rb.BlockAccessList = bal
-			}
-		}
-		raw[i] = rb
+func (c ChainReaderWriterEth1) StartSendersRecovery(ctx context.Context, blockHash common.Hash, header *types.Header, txns types.Transactions) {
+	if len(txns) == 0 {
+		return
 	}
-	return raw
+	c.executionModule.AddSendersRecovery(blockHash, exec.StartSendersRecovery(ctx, types.MakeSigner(c.cfg, header.Number.Uint64(), header.Time), txns))
 }
 
-func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Hash, number uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {
-	result, err := c.executionModule.ValidateChain(ctx, hash, number)
+func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Block) error {
+	return c.InsertBlocks(ctx, []*types.Block{block})
+}
+
+func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, block *types.Block) (execmodule.ExecutionStatus, *string, common.Hash, error) {
+	result, err := c.executionModule.ValidateChain(ctx, block)
 	if err != nil {
 		return 0, nil, common.Hash{}, err
 	}
@@ -291,6 +263,18 @@ func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Ha
 }
 
 func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {
+	result, err := c.UpdateForkChoiceResult(ctx, headHash, safeHash, finalizeHash, timeoutOverride...)
+	if err != nil {
+		return 0, nil, common.Hash{}, err
+	}
+	var validationError *string
+	if len(result.ValidationError) > 0 {
+		validationError = &result.ValidationError
+	}
+	return result.Status, validationError, result.LatestValidHash, nil
+}
+
+func (c ChainReaderWriterEth1) UpdateForkChoiceResult(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execmodule.ForkChoiceResult, error) {
 	// Apply timeout via context so the native UpdateForkChoice returns Busy on deadline exceeded.
 	timeout := c.fcuTimeout
 	if len(timeoutOverride) > 0 {
@@ -302,15 +286,7 @@ func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, s
 		callCtx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	result, err := c.executionModule.UpdateForkChoice(callCtx, headHash, safeHash, finalizeHash)
-	if err != nil {
-		return 0, nil, common.Hash{}, err
-	}
-	var validationError *string
-	if len(result.ValidationError) > 0 {
-		validationError = &result.ValidationError
-	}
-	return result.Status, validationError, result.LatestValidHash, nil
+	return c.executionModule.UpdateForkChoice(callCtx, headHash, safeHash, finalizeHash)
 }
 
 func (c ChainReaderWriterEth1) GetForkChoice(ctx context.Context) (headHash, finalizedHash, safeHash common.Hash, err error) {
@@ -326,7 +302,15 @@ func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash common.Hash) (
 	return c.executionModule.HasBlock(ctx, &hash, nil)
 }
 
-func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
+// ErrExecutionBusy reports that the execution module was already occupied, which settles on its
+// own, as opposed to a rejection that returns the same answer however many times it is asked.
+var ErrExecutionBusy = errors.New("execution module is busy")
+
+// ErrUnknownPayload reports that no builder is held for a payload id, so nothing will ever arrive
+// for it. Without it a caller polling that id cannot tell it from a build still running.
+var ErrUnknownPayload = errors.New("unknown payload id")
+
+func (c ChainReaderWriterEth1) AssembleBlock(ctx context.Context, baseHash common.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
 	params := &builder.Parameters{
 		ParentHash:            baseHash,
 		Timestamp:             uint64(attributes.Timestamp),
@@ -334,25 +318,29 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *e
 		SuggestedFeeRecipient: attributes.SuggestedFeeRecipient,
 		Withdrawals:           attributes.Withdrawals,
 		SlotNumber:            (*uint64)(attributes.SlotNumber),
+		TargetGasLimit:        (*uint64)(attributes.TargetGasLimit),
 		ParentBeaconBlockRoot: attributes.ParentBeaconBlockRoot,
 	}
-	result, err := c.executionModule.AssembleBlock(context.Background(), params)
+	result, err := c.executionModule.AssembleBlock(ctx, params)
 	if err != nil {
 		return 0, err
 	}
 	if result.Busy {
-		return 0, errors.New("execution data is still syncing")
+		return 0, ErrExecutionBusy
 	}
 	return result.PayloadID, nil
 }
 
-func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	result, err := c.executionModule.GetAssembledBlock(context.Background(), id)
+func (c ChainReaderWriterEth1) GetAssembledBlock(ctx context.Context, id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+	result, err := c.executionModule.GetAssembledBlock(ctx, id)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 	if result.Busy {
-		return nil, nil, nil, nil, errors.New("execution data is still syncing")
+		return nil, nil, nil, nil, ErrExecutionBusy
+	}
+	if result.Unknown {
+		return nil, nil, nil, nil, ErrUnknownPayload
 	}
 	if result.Block == nil {
 		return nil, nil, nil, nil, nil
@@ -360,61 +348,22 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 
 	br := result.Block
 	block := br.Block
-	header := block.Header()
-
-	// Encode transactions
-	encodedTxs, err := types.MarshalTransactionsBinary(block.Transactions())
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	// Build CL Eth1Block
-	extraData := solid.NewExtraData()
-	extraData.SetBytes(header.Extra)
-	blockHash := block.Hash()
-
-	// BaseFeePerGas in cltypes.Eth1Block is stored as little-endian bytes in a common.Hash.
-	var baseFeeLE common.Hash
-	if header.BaseFee != nil {
-		be := header.BaseFee.Bytes32() // big-endian [32]byte
-		copy(baseFeeLE[:], be[:])
-		utils.ReverseBytes(&baseFeeLE) // convert to little-endian
+	// The beacon block producer supplies the consensus version.
+	eth1Block, err := payload.ToEth1Block(clparams.Phase0Version, &clparams.MainnetBeaconConfig)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
-
-	eth1Block := &cltypes.Eth1Block{
-		ParentHash:    header.ParentHash,
-		FeeRecipient:  header.Coinbase,
-		StateRoot:     header.Root,
-		ReceiptsRoot:  header.ReceiptHash,
-		LogsBloom:     header.Bloom,
-		BlockNumber:   header.Number.Uint64(),
-		GasLimit:      header.GasLimit,
-		GasUsed:       header.GasUsed,
-		Time:          header.Time,
-		Extra:         extraData,
-		PrevRandao:    header.MixDigest,
-		Transactions:  solid.NewTransactionsSSZFromTransactions(encodedTxs),
-		BlockHash:     blockHash,
-		BaseFeePerGas: baseFeeLE,
+	if eth1Block.Extra == nil {
+		eth1Block.Extra = solid.NewExtraData()
 	}
-	if header.ExcessBlobGas != nil {
-		eth1Block.ExcessBlobGas = *header.ExcessBlobGas
+	if eth1Block.Withdrawals == nil {
+		eth1Block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
 	}
-	if header.BlobGasUsed != nil {
-		eth1Block.BlobGasUsed = *header.BlobGasUsed
-	}
-
-	// Withdrawals
-	withdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
-	for _, w := range block.Withdrawals() {
-		withdrawals.Append(&cltypes.Withdrawal{
-			Amount:    w.Amount,
-			Address:   w.Address,
-			Index:     w.Index,
-			Validator: w.Validator,
-		})
-	}
-	eth1Block.Withdrawals = withdrawals
 
 	// Blob bundle
 	blobsBundle, err := engine_types.BlobsBundleFromTransactions(block.Transactions())

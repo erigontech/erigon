@@ -5,26 +5,27 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-const MaxActiveValidatorsCacheSize = 8
+const (
+	MaxActiveValidatorsCacheSize          = 8
+	MaxLookaheadActiveValidatorsCacheSize = 4
+)
 
 type activeValidatorsCacheKey struct {
 	epoch uint64
 	root  common.Hash
 }
 
-type activeValidatorsCacheVal struct {
-	activeValidators   []uint64
-	totalActiveBalance uint64
-}
-
 type ActiveValidatorsCache struct {
-	cache *lru.Cache[activeValidatorsCacheKey, activeValidatorsCacheVal]
+	cache *lru.Cache[activeValidatorsCacheKey, []uint64]
 }
 
-var ActiveValidatorsCacheGlobal = NewActiveValidatorsCache(MaxActiveValidatorsCacheSize)
+var (
+	ActiveValidatorsCacheGlobal          = NewActiveValidatorsCache("active_validators", MaxActiveValidatorsCacheSize)
+	LookaheadActiveValidatorsCacheGlobal = NewActiveValidatorsCache("lookahead_active_validators", MaxLookaheadActiveValidatorsCacheSize)
+)
 
-func NewActiveValidatorsCache(size int) *ActiveValidatorsCache {
-	cache, err := lru.New[activeValidatorsCacheKey, activeValidatorsCacheVal]("active_validators", size)
+func NewActiveValidatorsCache(name string, size int) *ActiveValidatorsCache {
+	cache, err := lru.New[activeValidatorsCacheKey, []uint64](name, size)
 	if err != nil {
 		panic(err)
 	}
@@ -33,17 +34,10 @@ func NewActiveValidatorsCache(size int) *ActiveValidatorsCache {
 	}
 }
 
-func (c *ActiveValidatorsCache) Get(epoch uint64, root common.Hash) ([]uint64, uint64, bool) {
-	val, ok := c.cache.Get(activeValidatorsCacheKey{epoch: epoch, root: root})
-	if !ok {
-		return nil, 0, false
-	}
-	return val.activeValidators, val.totalActiveBalance, true
+func (c *ActiveValidatorsCache) Get(epoch uint64, root common.Hash) ([]uint64, bool) {
+	return c.cache.Get(activeValidatorsCacheKey{epoch: epoch, root: root})
 }
 
-func (c *ActiveValidatorsCache) Put(epoch uint64, root common.Hash, activeValidators []uint64, totalActiveBalance uint64) {
-	c.cache.Add(activeValidatorsCacheKey{epoch: epoch, root: root}, activeValidatorsCacheVal{
-		activeValidators:   activeValidators,
-		totalActiveBalance: totalActiveBalance,
-	})
+func (c *ActiveValidatorsCache) Put(epoch uint64, root common.Hash, activeValidators []uint64) {
+	c.cache.Add(activeValidatorsCacheKey{epoch: epoch, root: root}, activeValidators)
 }

@@ -11,7 +11,7 @@ type number interface {
 // EMA holds the Exponential Moving Average of a float64 with a the given
 // default α value. Safe to access concurrently.
 // https://en.wikipedia.org/wiki/Moving_average#Exponential_moving_average.
-// It can also optionally have β which controls decrease rate seperately.
+// It can also optionally have β which controls decrease rate separately.
 type EMA[T number] struct {
 	defaultAlpha float64
 	defaultBeta  float64
@@ -24,7 +24,7 @@ func NewEma[T number](defaultValue T, defaultAlpha float64) *EMA[T] {
 	return NewEmaWithBeta(defaultValue, defaultAlpha, defaultAlpha)
 }
 
-// NewWithBeta is the same as New but supplies a seperate beta to control the
+// NewWithBeta is the same as New but supplies a separate beta to control the
 // decrease rate
 func NewEmaWithBeta[T number](defaultValue T, defaultAlpha float64, defaultBeta float64) *EMA[T] {
 	return &EMA[T]{defaultAlpha: defaultAlpha, defaultBeta: defaultBeta, defaultValue: defaultValue}

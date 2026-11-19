@@ -41,6 +41,11 @@ var LightClientBeaconBlockBodyExecutionMerkleProof = spectest.HandlerFunc(func(t
 		require.NoError(t, spectest.ReadSsz(root, c.Version(), spectest.ObjectSSZ, beaconBody))
 		proof, err = beaconBody.ExecutionPayloadMerkleProof()
 		require.NoError(t, err)
+	case "execution_block_hash_merkle_proof":
+		beaconBody := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, c.Version())
+		require.NoError(t, spectest.ReadSsz(root, c.Version(), spectest.ObjectSSZ, beaconBody))
+		proof, err = beaconBody.ExecutionBlockHashMerkleProof()
+		require.NoError(t, err)
 	case "current_sync_committee_merkle_proof":
 		state := state.New(&clparams.MainnetBeaconConfig)
 		require.NoError(t, spectest.ReadSsz(root, c.Version(), spectest.ObjectSSZ, state))

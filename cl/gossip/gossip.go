@@ -33,6 +33,11 @@ const (
 	TopicNameLightClientFinalityUpdate   = "light_client_finality_update"
 	TopicNameLightClientOptimisticUpdate = "light_client_optimistic_update"
 
+	TopicNameExecutionPayload    = "execution_payload"
+	TopicNameExecutionPayloadBid = "execution_payload_bid"
+	TopicNamePayloadAttestation  = "payload_attestation_message"
+	TopicNameProposerPreferences = "proposer_preferences"
+
 	TopicNamePrefixBlobSidecar       = "blob_sidecar_%d"
 	TopicNamePrefixBeaconAttestation = "beacon_attestation_%d"
 	TopicNamePrefixSyncCommittee     = "sync_committee_%d"
@@ -41,9 +46,13 @@ const (
 
 const SSZSnappyCodec = "ssz_snappy"
 
-// GossipSubD is the libp2p pubsub topic stable mesh target count (matches
-// the Ethereum consensus-layer spec value).
-const GossipSubD = 4
+// GossipSubD is the libp2p pubsub topic stable mesh target count (the
+// Ethereum consensus-layer spec value).
+const GossipSubD = 8
+
+// GossipSubDlo is the libp2p pubsub topic stable mesh low watermark (the
+// Ethereum consensus-layer spec value).
+const GossipSubDlo = 6
 
 // DecayToZero is the terminal value used when decaying pubsub scoring
 // values toward zero.
@@ -80,6 +89,7 @@ func IsTopicDataColumnSidecar(d string) bool {
 func IsTopicSyncCommittee(d string) bool {
 	return strings.HasPrefix(d, "sync_committee_") && !strings.Contains(d, TopicNameSyncCommitteeContributionAndProof)
 }
+
 func IsTopicBeaconAttestation(d string) bool {
 	return strings.HasPrefix(d, "beacon_attestation_")
 }

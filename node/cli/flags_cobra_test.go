@@ -54,3 +54,29 @@ func TestApplyFlagsForEthConfigCobra_UsesProvidedFlags(t *testing.T) {
 	require.False(t, cfg.StateStream)
 	require.True(t, cfg.ExperimentalBAL)
 }
+
+func TestApplyFlagsForEthConfigCobra_BlocksDistanceValues(t *testing.T) {
+	cases := []struct {
+		name       string
+		blocksFlag string
+		want       prune.BlockAmount
+	}{
+		{name: "alias keep-post-merge", blocksFlag: "keep-post-merge", want: prune.KeepPostMergeBlocksPruneMode},
+		{name: "alias keep-all", blocksFlag: "keep-all", want: prune.KeepAllBlocksPruneMode},
+		{name: "numeric sentinel still works", blocksFlag: "18446744073709551615", want: prune.KeepPostMergeBlocksPruneMode},
+		{name: "finite numeric", blocksFlag: "262144", want: prune.Distance(262_144)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			flags.String(PruneModeFlag.Name, PruneModeFlag.Value, PruneModeFlag.Usage)
+			flags.String(PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value, PruneBlocksDistanceFlag.Usage)
+			require.NoError(t, flags.Set(PruneModeFlag.Name, "archive"))
+			require.NoError(t, flags.Set(PruneBlocksDistanceFlag.Name, tc.blocksFlag))
+
+			cfg := &ethconfig.Config{}
+			ApplyFlagsForEthConfigCobra(flags, cfg)
+			require.Equal(t, tc.want, cfg.Prune.Blocks)
+		})
+	}
+}

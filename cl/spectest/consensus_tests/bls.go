@@ -23,8 +23,7 @@ import (
 	"github.com/erigontech/erigon/cl/spectest/spectest"
 )
 
-type BlsAggregateVerify struct {
-}
+type BlsAggregateVerify struct{}
 
 func (b *BlsAggregateVerify) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	t.Skipf("Skipping BLS because it is done by library")

@@ -52,13 +52,6 @@ func WithTesting(t *testing.T) func(*Harness) error {
 	}
 }
 
-func WithTests(name string, xs []Test) func(*Harness) error {
-	return func(h *Harness) error {
-		h.tests[name] = xs
-		return nil
-	}
-}
-
 func WithHandler(name string, handler http.Handler) func(*Harness) error {
 	return func(h *Harness) error {
 		h.handlers[name] = handler
@@ -72,6 +65,7 @@ func WithFilesystem(name string, handler afero.Fs) func(*Harness) error {
 		return nil
 	}
 }
+
 func WithTestFromFs(fs afero.Fs, name string) func(*Harness) error {
 	return func(h *Harness) error {
 		filename := name
@@ -162,7 +156,8 @@ func Execute(options ...HarnessOption) {
 func (h *Harness) Execute() {
 	ctx := context.Background()
 	for suiteName, tests := range h.tests {
-		for idx, v := range tests {
+		for idx := range tests {
+			v := &tests[idx]
 			v.Actual.h = h
 			v.Expect.h = h
 			name := v.Name
@@ -206,6 +201,19 @@ type Comparison struct {
 	Expr    string   `json:"expr"`
 	Exprs   []string `json:"exprs"`
 	Literal bool     `json:"literal"`
+}
+
+// exprList returns every assertion to evaluate: the plural exprs, the singular expr if set,
+// and the default assertions only when neither is provided.
+func (c *Comparison) exprList() []string {
+	out := append([]string{}, c.Exprs...)
+	if c.Expr != "" {
+		out = append(out, c.Expr)
+	}
+	if len(c.Exprs) == 0 && c.Expr == "" {
+		out = append(out, "actual_code == 200", "actual == expect")
+	}
+	return out
 }
 
 func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bCode int) error {
@@ -252,11 +260,7 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 		bType = cel.StringType
 	}
 
-	exprs := []string{}
-	// if no default expr set and no exprs are set, then add the default expr
-	if len(c.Exprs) == 0 && c.Expr == "" {
-		exprs = append(exprs, "actual_code == 200", "actual == expect")
-	}
+	exprs := c.exprList()
 
 	env, err := cel.NewEnv(
 		cel.Variable("expect", aType),
@@ -268,7 +272,7 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 		return err
 	}
 
-	for _, expr := range append(c.Exprs, exprs...) {
+	for _, expr := range exprs {
 		ast, issues := env.Compile(expr)
 		if issues != nil && issues.Err() != nil {
 			return issues.Err()
@@ -302,7 +306,6 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 				actual%d: %v
 				expr: %s
 				`, t.Name(), aCode, a, bCode, b, expr)
-
 			}
 			t.FailNow()
 		}
@@ -336,19 +339,20 @@ type Source struct {
 
 func (s *Source) Execute(ctx context.Context) (json.RawMessage, int, error) {
 	if s.Raw != nil {
-		return s.executeRaw(ctx)
+		return s.executeRaw()
 	}
 	if s.File != nil {
-		return s.executeFile(ctx)
+		return s.executeFile()
 	}
 	if s.Remote != nil || s.Handler != nil {
 		return s.executeRemote(ctx)
 	}
 	if s.Data != nil {
-		return s.executeData(ctx)
+		return s.executeData()
 	}
-	return s.executeEmpty(ctx)
+	return s.executeEmpty()
 }
+
 func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error) {
 	method := "GET"
 	if s.Method != "" {
@@ -366,14 +370,15 @@ func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error
 		body = bytes.NewBuffer(msg)
 	}
 	var purl *url.URL
-	if s.Remote != nil {
+	switch {
+	case s.Remote != nil:
 		niceUrl, err := url.Parse(*s.Remote)
 		if err != nil {
 			return nil, 0, err
 		}
 		purl = niceUrl
 
-	} else if s.Handler != nil {
+	case s.Handler != nil:
 		handler, ok := s.h.handlers[*s.Handler]
 		if !ok {
 			return nil, 0, fmt.Errorf("handler not registered: %s", *s.Handler)
@@ -385,7 +390,7 @@ func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error
 			return nil, 0, err
 		}
 		purl = niceUrl
-	} else {
+	default:
 		panic("impossible code path. bug? source.Execute() should ensure this never happens")
 	}
 
@@ -396,7 +401,7 @@ func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error
 	}
 	purl.RawQuery = q.Encode()
 
-	request, err := http.NewRequest(method, strings.ReplaceAll(purl.String(), "%3F", "?"), body)
+	request, err := http.NewRequestWithContext(ctx, method, strings.ReplaceAll(purl.String(), "%3F", "?"), body)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -418,7 +423,7 @@ func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error
 	return json.RawMessage(out), 200, nil
 }
 
-func (s *Source) executeData(ctx context.Context) (json.RawMessage, int, error) {
+func (s *Source) executeData() (json.RawMessage, int, error) {
 	ans, err := json.Marshal(s.Data)
 	if err != nil {
 		return nil, 400, nil
@@ -426,7 +431,7 @@ func (s *Source) executeData(ctx context.Context) (json.RawMessage, int, error) 
 	return ans, 200, nil
 }
 
-func (s *Source) executeFile(ctx context.Context) (json.RawMessage, int, error) {
+func (s *Source) executeFile() (json.RawMessage, int, error) {
 	afs, ok := s.h.fss[s.Fs]
 	if !ok {
 		return nil, 404, fmt.Errorf("filesystem %s not defined", s.Fs)
@@ -447,10 +452,11 @@ func (s *Source) executeFile(ctx context.Context) (json.RawMessage, int, error) 
 	}
 	return json.RawMessage(fileBytes), 200, nil
 }
-func (s *Source) executeRaw(ctx context.Context) (json.RawMessage, int, error) {
+
+func (s *Source) executeRaw() (json.RawMessage, int, error) {
 	return json.RawMessage(*s.Raw), 200, nil
 }
 
-func (s *Source) executeEmpty(ctx context.Context) (json.RawMessage, int, error) {
+func (s *Source) executeEmpty() (json.RawMessage, int, error) {
 	return []byte("{}"), 200, nil
 }

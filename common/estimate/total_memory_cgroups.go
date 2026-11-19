@@ -47,11 +47,15 @@ import (
 // This function will return an error immediately if the OS does not support cgroups,
 // or if another error occurs during initialization.
 func cgroupsMemoryLimit() (uint64, error) {
-	switch cgroups.Mode() {
+	return cgroupsMemoryLimitForMode(cgroups.Mode(), cgroupsV1MemoryLimit, cgroupsV2MemoryLimit)
+}
+
+func cgroupsMemoryLimitForMode(mode cgroups.CGMode, v1Limit, v2Limit func() (uint64, error)) (uint64, error) {
+	switch mode {
 	case cgroups.Unified:
-		return cgroupsV2MemoryLimit()
-	case cgroups.Legacy:
-		return cgroupsV1MemoryLimit()
+		return v2Limit()
+	case cgroups.Legacy, cgroups.Hybrid:
+		return v1Limit()
 	case cgroups.Unavailable:
 		fallthrough
 	default:
@@ -74,8 +78,7 @@ func cgroupsV1MemoryLimit() (uint64, error) {
 		}
 		var out []cgroup1.Subsystem
 		for _, v := range system {
-			switch v.Name() {
-			case cgroup1.Memory:
+			if v.Name() == cgroup1.Memory {
 				out = append(out, v)
 			}
 		}

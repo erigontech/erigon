@@ -30,6 +30,8 @@ func (arr *hashBuf) makeBuf(size int) {
 	arr.buf = arr.buf[:size]
 }
 
-// GetDepth returns the depth of a merkle tree with a given number of nodes.
+// GetDepth returns the depth of a merkle tree with room for v leaves, that is
+// log2(next_pow_of_two(v)).
+//
 // Deprecated: Use merkle_tree.GetDepth directly.
 var GetDepth = merkle_tree.GetDepth

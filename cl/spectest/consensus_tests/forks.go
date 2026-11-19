@@ -30,7 +30,6 @@ import (
 )
 
 var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
-
 	preState, err := spectest.ReadBeaconState(root, c.Version()-1, spectest.PreSsz)
 	require.NoError(t, err)
 
@@ -52,6 +51,8 @@ var ForksFork = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.T
 		err = preState.UpgradeToElectra()
 	case clparams.ElectraVersion:
 		err = preState.UpgradeToFulu()
+	case clparams.FuluVersion:
+		err = preState.UpgradeToGloas()
 	default:
 		err = spectest.ErrHandlerNotImplemented(fmt.Sprintf("block state %v", preState.Version()))
 	}

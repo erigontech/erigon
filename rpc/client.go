@@ -25,6 +25,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"sync/atomic"
@@ -77,13 +79,10 @@ type BatchElem struct {
 
 // Client represents a connection to an RPC server.
 type Client struct {
-	idgen           func() ID // for subscriptions
-	isHTTP          bool
-	services        *serviceRegistry
-	methodAllowList AllowList
-	batchLimit      int // batch size limit
+	isHTTP   bool
+	services *serviceRegistry // methods the server can call on this client
 
-	idCounter uint32
+	idCounter atomic.Uint32
 
 	// This function, if non-nil, is called when the connection is lost.
 	reconnectFunc reconnectFunc
@@ -115,14 +114,17 @@ type clientConn struct {
 	handler *handler
 }
 
-func (c *Client) newClientConn(conn ServerCodec, connCtx context.Context) *clientConn {
-	ctx := context.WithValue(connCtx, clientContextKey{}, c)
+func (c *Client) newClientConn(conn ServerCodec) *clientConn {
+	ctx := context.WithValue(context.Background(), clientContextKey{}, c)
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, conn.peerInfo())
-	handler := newHandler(ctx, conn, c.idgen, c.services, c.batchLimit, c.methodAllowList, 50, false /* traceRequests */, c.logger, 0)
+	handler := newHandler(ctx, conn, randomIDGenerator(), c.services, 0, nil, 50, false /* traceRequests */, c.logger, 0)
 	return &clientConn{conn, handler}
 }
 
 func (cc *clientConn) close(err error, inflightReq *requestOp) {
+	// The connection is gone, so there is no point in finishing calls that are
+	// still being served on it. Cancel them before waiting for them to return.
+	cc.handler.cancelRoot()
 	cc.handler.close(err, inflightReq)
 	cc.codec.Close()
 }
@@ -147,6 +149,7 @@ func (op *requestOp) wait(ctx context.Context, c *Client) ([]*jsonrpcMessage, er
 		if !c.isHTTP {
 			select {
 			case c.reqTimeout <- op:
+			case <-op.resp: // closed when the connection is torn down, which can wait for this call
 			case <-c.closing:
 			}
 		}
@@ -160,8 +163,10 @@ func (op *requestOp) wait(ctx context.Context, c *Client) ([]*jsonrpcMessage, er
 //
 // The currently supported URL schemes are "http", "https", "ws" and "wss". If rawurl is a
 // file name with no URL scheme, a local socket connection is established using UNIX
-// domain sockets on supported platforms and named pipes on Windows. If you want to
-// configure transport options, use DialHTTP, DialWebsocket or DialIPC instead.
+// domain sockets.
+//
+// If you want to further configure the transport, use DialOptions instead of this
+// function.
 //
 // For websocket connections, the origin is set to the local host name.
 //
@@ -175,29 +180,52 @@ func Dial(rawurl string, logger log.Logger) (*Client, error) {
 // The context is used to cancel or time out the initial connection establishment. It does
 // not affect subsequent interactions with the client.
 func DialContext(ctx context.Context, rawurl string, logger log.Logger) (*Client, error) {
+	return DialOptions(ctx, rawurl, logger)
+}
+
+// DialOptions creates a new RPC client for the given URL. You can supply any of the
+// pre-defined client options to configure the underlying transport.
+//
+// The context is used to cancel or time out the initial connection establishment. It does
+// not affect subsequent interactions with the client.
+//
+// The client reconnects automatically when the connection is lost.
+func DialOptions(ctx context.Context, rawurl string, logger log.Logger, options ...ClientOption) (*Client, error) {
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return nil, err
 	}
+	if filepath.VolumeName(rawurl) != "" {
+		u.Scheme = "" // a Windows drive letter, not a URL scheme
+	}
+
+	cfg := new(clientConfig)
+	for _, opt := range options {
+		opt(cfg)
+	}
+
+	var reconnect reconnectFunc
 	switch u.Scheme {
 	case "http", "https":
-		return DialHTTP(rawurl, logger)
+		reconnect = newClientTransportHTTP(rawurl, cfg)
 	case "ws", "wss":
-		return DialWebsocket(ctx, rawurl, "", logger)
+		if reconnect, err = newClientTransportWS(rawurl, cfg); err != nil {
+			return nil, err
+		}
 	case "stdio":
-		return DialStdIO(ctx, logger)
+		reconnect = newClientTransportIO(os.Stdin, os.Stdout)
+	case "":
+		reconnect = newClientTransportIPC(rawurl)
 	default:
 		return nil, fmt.Errorf("no known transport for URL scheme %q", u.Scheme)
 	}
+	return newClient(ctx, reconnect, logger)
 }
 
-// Client retrieves the client from the context, if any. This can be used to perform
+// ClientFromContext retrieves the client from the context, if any. This can be used to perform
 // 'reverse calls' in a handler method.
-func ClientFromContext(ctx context.Context, logger log.Logger) (*Client, bool) {
+func ClientFromContext(ctx context.Context) (*Client, bool) {
 	client, ok := ctx.Value(clientContextKey{}).(*Client)
-	if ok {
-		client.logger = logger
-	}
 	return client, ok
 }
 
@@ -206,22 +234,16 @@ func newClient(initctx context.Context, connect reconnectFunc, logger log.Logger
 	if err != nil {
 		return nil, err
 	}
-	c := initClient(conn, randomIDGenerator(), &serviceRegistry{logger: logger}, 0, logger)
+	c := initClient(conn, logger)
 	c.reconnectFunc = connect
 	return c, nil
 }
 
-func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, batchLimit int, logger log.Logger) *Client {
-	return initClientWithBaseCtx(context.Background(), conn, idgen, services, batchLimit, logger)
-}
-
-func initClientWithBaseCtx(baseCtx context.Context, conn ServerCodec, idgen func() ID, services *serviceRegistry, batchLimit int, logger log.Logger) *Client {
+func initClient(conn ServerCodec, logger log.Logger) *Client {
 	_, isHTTP := conn.(*httpConn)
 	c := &Client{
-		idgen:       idgen,
 		isHTTP:      isHTTP,
-		services:    services,
-		batchLimit:  batchLimit,
+		services:    &serviceRegistry{logger: logger},
 		writeConn:   conn,
 		close:       make(chan struct{}),
 		closing:     make(chan struct{}),
@@ -235,7 +257,8 @@ func initClientWithBaseCtx(baseCtx context.Context, conn ServerCodec, idgen func
 		logger:      logger,
 	}
 	if !isHTTP {
-		go c.dispatch(conn, baseCtx)
+		go c.dispatch(conn)
+		go c.read(conn)
 	}
 	return c
 }
@@ -245,11 +268,11 @@ func initClientWithBaseCtx(baseCtx context.Context, conn ServerCodec, idgen func
 // subscription an error is returned. Otherwise a new service is created and added to the
 // service collection this client provides to the server.
 func (c *Client) RegisterName(name string, receiver any) error {
-	return c.services.registerName(name, receiver)
+	return c.services.registerName(name, receiver, nil)
 }
 
 func (c *Client) nextID() json.RawMessage {
-	id := atomic.AddUint32(&c.idCounter, 1)
+	id := c.idCounter.Add(1)
 	return strconv.AppendUint(nil, uint64(id), 10)
 }
 
@@ -347,8 +370,10 @@ func (c *Client) CallContext(ctx context.Context, result any, method string, arg
 // BatchCall sends all given requests as a single batch and waits for the server
 // to return a response for all of them.
 //
-// In contrast to Call, BatchCall only returns I/O errors. Any error specific to
-// a request is reported through the Error field of the corresponding BatchElem.
+// In contrast to Call, BatchCall only returns I/O errors, with one exception:
+// an empty batch is rejected with an invalid-request error (-32600) before any
+// send. Any error specific to a request is reported through the Error field of
+// the corresponding BatchElem.
 //
 // Note that batch calls may not be executed atomically on the server side.
 func (c *Client) BatchCall(b []BatchElem) error {
@@ -361,11 +386,16 @@ func (c *Client) BatchCall(b []BatchElem) error {
 // context's deadline.
 //
 // In contrast to CallContext, BatchCallContext only returns errors that have occurred
-// while sending the request. Any error specific to a request is reported through the
-// Error field of the corresponding BatchElem.
+// while sending the request, with one exception: an empty batch is rejected with
+// an invalid-request error (-32600) before any send. Any error specific to a
+// request is reported through the Error field of the corresponding BatchElem.
 //
 // Note that batch calls may not be executed atomically on the server side.
 func (c *Client) BatchCallContext(ctx context.Context, b []BatchElem) error {
+	if len(b) == 0 {
+		return &invalidRequestError{"empty batch"}
+	}
+
 	var (
 		msgs = make([]*jsonrpcMessage, len(b))
 		byID = make(map[string]int, len(b))
@@ -400,7 +430,7 @@ func (c *Client) BatchCallContext(ctx context.Context, b []BatchElem) error {
 	}
 
 	// Wait for all responses to come back.
-	for n := 0; n < len(batchResp); n++ {
+	for n := range batchResp {
 		resp := batchResp[n]
 		if resp == nil {
 			// Ignore null responses. These can happen for batches sent via HTTP.
@@ -501,6 +531,13 @@ func (c *Client) Subscribe(ctx context.Context, namespace string, channel any, a
 	return op.sub, nil
 }
 
+// SupportsSubscriptions reports whether subscriptions are supported by the client
+// transport. When this returns false, Subscribe and related methods will return
+// ErrNotificationsUnsupported.
+func (c *Client) SupportsSubscriptions() bool {
+	return !c.isHTTP
+}
+
 func (c *Client) newMessage(method string, paramsIn ...any) (*jsonrpcMessage, error) {
 	msg := &jsonrpcMessage{Version: vsn, ID: c.nextID(), Method: method}
 	if paramsIn != nil { // prevent sending "params":null
@@ -574,11 +611,11 @@ func (c *Client) reconnect(ctx context.Context) error {
 // dispatch is the main loop of the client.
 // It sends read messages to waiting calls to Call and BatchCall
 // and subscription notifications to registered subscriptions.
-func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
+func (c *Client) dispatch(codec ServerCodec) {
 	var (
 		lastOp      *requestOp  // tracks last send operation
 		reqInitLock = c.reqInit // nil while the send lock is held
-		conn        = c.newClientConn(codec, connCtx)
+		conn        = c.newClientConn(codec)
 		reading     = true
 	)
 	defer func() {
@@ -590,9 +627,6 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 		close(c.didClose)
 	}()
 
-	// Spawn the initial read loop.
-	go c.read(codec)
-
 	for {
 		select {
 		case <-c.close:
@@ -601,9 +635,9 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 		// Read path:
 		case op := <-c.readOp:
 			if op.batch {
-				conn.handler.handleBatch(op.msgs)
+				conn.handler.handleBatch(op.msgs, nil)
 			} else {
-				conn.handler.handleMsg(op.msgs[0], nil)
+				conn.handler.handleMsg(op.msgs[0], nil, nil)
 			}
 
 		case err := <-c.readErr:
@@ -630,7 +664,7 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 			}
 			go c.read(newcodec)
 			reading = true
-			conn = c.newClientConn(newcodec, connCtx)
+			conn = c.newClientConn(newcodec)
 			// Re-register the in-flight request on the new handler because that's where it will be sent.
 			// lastOp is nil if a fatal read error already cancelled the op — nothing to transfer then.
 			if lastOp != nil {
@@ -676,14 +710,22 @@ func (c *Client) drainRead() {
 // read decodes RPC messages from a codec, feeding them into dispatch.
 func (c *Client) read(codec ServerCodec) {
 	for {
-		msgs, batch, err := codec.ReadBatch()
-		if _, ok := err.(*json.SyntaxError); ok {
-			codec.WriteJSON(context.Background(), errorMessage(&parseError{err.Error()}))
-		}
+		msgs, batch, err := readBatch(codec, 0, c.logger)
 		if err != nil {
 			c.readErr <- err
 			return
 		}
 		c.readOp <- readOp{msgs, batch}
 	}
+}
+
+// readBatch reads the next message or batch, answering a JSON syntax error before returning it.
+func readBatch(codec ServerCodec, batchLimit int, logger log.Logger) ([]*jsonrpcMessage, bool, error) {
+	msgs, batch, err := codec.ReadBatch(batchLimit)
+	if _, ok := errors.AsType[*json.SyntaxError](err); ok {
+		if writeErr := codec.WriteJSON(context.Background(), errorMessage(&parseError{err.Error()})); writeErr != nil {
+			logger.Trace("RPC failed to write parse error response", "err", writeErr)
+		}
+	}
+	return msgs, batch, err
 }

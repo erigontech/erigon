@@ -58,6 +58,12 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 	defer e.semaphore.Release(1)
 
+	resumeReadAhead, err := e.suspendReadAhead(ctx)
+	if err != nil {
+		return fmt.Errorf("suspend read-ahead: %w", err)
+	}
+	defer resumeReadAhead()
+
 	tx, err := e.db.BeginTemporalRw(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin rw transaction: %w", err)
@@ -103,14 +109,30 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 	defer sd.Close()
 
+	// Wire the shared state cache so unwindExec3 invalidates it (epoch bump +
+	// floor lower). Without this, the SD has no cache attached during the unwind,
+	// so sd.Unwind's invalidation is a no-op, the cache keeps pre-unwind values,
+	// and the next FCU re-execution reads them and computes a stale state root
+	// (BadBlock). Mirrors ValidateChain/forkchoice.
+	sd.SetStateCache(e.stateCache)
+
+	// Pending notifications must follow the unwind's database commit outcome.
+	var restoreStateChanges func()
+	if e.accum != nil {
+		restoreStateChanges = e.accum.Accumulator.Checkpoint()
+	}
+	defer func() {
+		if restoreStateChanges != nil {
+			restoreStateChanges()
+		}
+	}()
+
 	// Set the unwind point and run the unwind
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {
 		return fmt.Errorf("failed to set unwind point: %w", err)
 	}
 
-	if err := e.hook.BeforeRun(tx, true); err != nil {
-		return fmt.Errorf("hook BeforeRun failed: %w", err)
-	}
+	e.hook.NotifySyncState(tx)
 
 	if err := e.pipelineExecutor.RunUnwind(sd, tx); err != nil {
 		return fmt.Errorf("failed to run unwind: %w", err)
@@ -144,13 +166,14 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("failed to save block hashes stage progress: %w", err)
 	}
 
-	// Flush and commit
-	if err := sd.Flush(ctx, tx); err != nil {
-		return fmt.Errorf("failed to flush shared domains: %w", err)
+	// sd.Commit flushes + commits as one unit and applies the BranchCache only
+	// after the commit succeeds, so a failed commit can't leave it poisoned.
+	if err := sd.Commit(ctx, tx); err != nil {
+		return fmt.Errorf("failed to commit shared domains: %w", err)
 	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+	restoreStateChanges = nil
+	if e.accum != nil && e.accum.RecentReceipts != nil {
+		e.accum.RecentReceipts.Clear()
 	}
 
 	e.logger.Info("SetHead: successfully rewound chain", "targetBlock", targetBlock, "previousHead", currentHead)

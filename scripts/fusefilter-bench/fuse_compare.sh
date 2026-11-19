@@ -32,7 +32,6 @@ fi
 
 DATADIR=/erigon-data/chiado_commit_gate
 LOGDIR=/erigon-logs
-METRICS_HOST=127.0.0.1
 METRICS_PORT=6061
 METRICS_URL=""                  # discovered after erigon starts (step 3a)
 POLL_INTERVAL=3                 # seconds between metric samples
@@ -96,7 +95,7 @@ COLLECT_TABLE_SIZES_FREQUENCY=3s nohup "$BIN" \
   --nat=stun \
   --torrent.download.rate 10G --torrent.upload.rate=1k \
   --pprof --pprof.port=6062 \
-  --prune.mode=archive --persist.receipts \
+  --prune.mode=archive --prune.include-receipts \
   --db.pagesize=4k \
   --sync.loop.block.limit=10_000_000 \
   --batchSize=512m --http=false \

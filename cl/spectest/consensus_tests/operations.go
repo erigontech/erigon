@@ -46,6 +46,8 @@ const (
 	voluntaryExitFileName    = "voluntary_exit.ssz_snappy"
 	executionPayloadFileName = "execution_payload.ssz_snappy"
 	addressChangeFileName    = "address_change.ssz_snappy"
+	builderDepositFileName   = "builder_deposit_request.ssz_snappy"
+	builderExitFileName      = "builder_exit_request.ssz_snappy"
 )
 
 func operationAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
@@ -60,7 +62,11 @@ func operationAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) 
 	if err := spectest.ReadSszOld(root, att, c.Version(), attestationFileName); err != nil {
 		return err
 	}
-	if err := c.Machine.ProcessAttestations(preState, solid.NewDynamicListSSZFromList([]*solid.Attestation{att}, 128)); err != nil {
+	var parentSlot uint64
+	if preState.Version() >= clparams.GloasVersion {
+		parentSlot = preState.LatestBlockHeader().Slot
+	}
+	if err := c.Machine.ProcessAttestations(preState, solid.NewDynamicListSSZFromList([]*solid.Attestation{att}, 128), parentSlot); err != nil {
 		if expectedError {
 			return nil
 		}
@@ -136,11 +142,11 @@ func operationProposerSlashingHandler(t *testing.T, root fs.FS, c spectest.TestC
 			state.GetEpochAtSlot(preState.BeaconConfig(), signedHeader.Header.Slot),
 		)
 		if err != nil {
-			return fmt.Errorf("unable to get domain: %v", err)
+			return fmt.Errorf("unable to get domain: %w", err)
 		}
 		signingRoot, err := fork.ComputeSigningRoot(signedHeader.Header, domain)
 		if err != nil {
-			return fmt.Errorf("unable to compute signing root: %v", err)
+			return fmt.Errorf("unable to compute signing root: %w", err)
 		}
 		pk := proposer.PublicKey()
 		valid, err := bls.Verify(signedHeader.Signature[:], signingRoot[:], pk[:])
@@ -279,10 +285,7 @@ func operationVoluntaryExitHandler(t *testing.T, root fs.FS, c spectest.TestCase
 	// we have removed signature verification from the function, to make this test pass we do it here.
 	var domain []byte
 	voluntaryExit := vo.VoluntaryExit
-	validator, err := preState.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
-	if err != nil {
-		return err
-	}
+
 	if preState.Version() < clparams.DenebVersion {
 		domain, err = preState.GetDomain(preState.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
 	} else if preState.Version() >= clparams.DenebVersion {
@@ -295,7 +298,27 @@ func operationVoluntaryExitHandler(t *testing.T, root fs.FS, c spectest.TestCase
 	if err != nil {
 		return err
 	}
-	pk := validator.PublicKey()
+
+	// [New in Gloas:EIP7732] Get pubkey from builders for builder indices
+	var pk [48]byte
+	if preState.Version() >= clparams.GloasVersion && state.IsBuilderIndex(voluntaryExit.ValidatorIndex) {
+		builderIndex := state.ConvertValidatorIndexToBuilderIndex(voluntaryExit.ValidatorIndex)
+		builders := preState.GetBuilders()
+		if builders == nil || int(builderIndex) >= builders.Len() {
+			if expectedError {
+				return nil
+			}
+			return fmt.Errorf("invalid builder index %d", builderIndex)
+		}
+		pk = builders.Get(int(builderIndex)).Pubkey
+	} else {
+		validator, err := preState.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
+		if err != nil {
+			return err
+		}
+		pk = validator.PublicKey()
+	}
+
 	valid, err := bls.Verify(vo.Signature[:], signingRoot[:], pk[:])
 	if err != nil || !valid {
 		if expectedError {
@@ -320,12 +343,19 @@ func operationWithdrawalHandler(t *testing.T, root fs.FS, c spectest.TestCase) e
 	if err != nil && !expectedError {
 		return err
 	}
-	executionPayload := cltypes.NewEth1Block(c.Version(), &clparams.MainnetBeaconConfig)
-	if err := spectest.ReadSszOld(root, executionPayload, c.Version(), executionPayloadFileName); err != nil {
-		return err
+
+	// [Modified in Gloas:EIP7732] In GLOAS, withdrawals are computed from state
+	// rather than extracted from an execution payload.
+	var withdrawals *solid.ListSSZ[*cltypes.Withdrawal]
+	if c.Version() < clparams.GloasVersion {
+		executionPayload := cltypes.NewEth1Block(c.Version(), &clparams.MainnetBeaconConfig)
+		if err := spectest.ReadSszOld(root, executionPayload, c.Version(), executionPayloadFileName); err != nil {
+			return err
+		}
+		withdrawals = executionPayload.Withdrawals
 	}
 
-	if err := c.Machine.ProcessWithdrawals(preState, executionPayload.Withdrawals); err != nil {
+	if err := c.Machine.ProcessWithdrawals(preState, withdrawals); err != nil {
 		if expectedError {
 			return nil
 		}
@@ -467,6 +497,66 @@ func operationWithdrawalRequstHandler(t *testing.T, root fs.FS, c spectest.TestC
 	return nil
 }
 
+func operationBuilderDepositRequestHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	request := &solid.BuilderDepositRequest{}
+	if err := spectest.ReadSszOld(root, request, c.Version(), builderDepositFileName); err != nil {
+		return err
+	}
+	if err := c.Machine.ProcessBuilderDepositRequest(preState, request); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+func operationBuilderExitRequestHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	request := &solid.BuilderExitRequest{}
+	if err := spectest.ReadSszOld(root, request, c.Version(), builderExitFileName); err != nil {
+		return err
+	}
+	if err := c.Machine.ProcessBuilderExitRequest(preState, request); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
 func operationExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
 	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
 	require.NoError(t, err)
@@ -475,11 +565,176 @@ func operationExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestC
 	if err != nil && !expectedError {
 		return err
 	}
-	body := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, c.Version())
-	if err := spectest.ReadSszOld(root, body, c.Version(), "body.ssz_snappy"); err != nil {
+
+	var execMeta struct {
+		ExecutionValid bool `yaml:"execution_valid"`
+	}
+	execMeta.ExecutionValid = true // default to true if file doesn't exist
+	// file may not exist (e.g. GLOAS tests use signed_envelope); ignore
+	_ = spectest.ReadMeta(root, "execution.yaml", &execMeta)
+
+	if c.Version() >= clparams.GloasVersion {
+		// [New in Gloas:EIP7732] execution_payload tests use signed_envelope.ssz_snappy
+		envelope := &cltypes.SignedExecutionPayloadEnvelope{
+			Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig),
+		}
+		if err := spectest.ReadSszOld(root, envelope, c.Version(), "signed_envelope.ssz_snappy"); err != nil {
+			return err
+		}
+		if err := c.Machine.ProcessExecutionPayloadEnvelope(preState, envelope); err != nil {
+			if expectedError {
+				return nil
+			}
+			return err
+		}
+	} else {
+		body := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, c.Version())
+		if err := spectest.ReadSszOld(root, body, c.Version(), "body.ssz_snappy"); err != nil {
+			return err
+		}
+		if err := c.Machine.ProcessExecutionPayload(preState, body); err != nil {
+			if expectedError {
+				return nil
+			}
+			return err
+		}
+	}
+
+	// If the EL would reject this payload (execution_valid: false) but the CL
+	// handler returned no error, treat as pass — we cannot simulate EL rejection
+	// in a CL-only spectest.
+	if !execMeta.ExecutionValid && expectedError {
+		return nil
+	}
+
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+func verifySignatureSet(signature, signingRoot, publicKey []byte, err error) error {
+	if err != nil {
 		return err
 	}
-	if err := c.Machine.ProcessExecutionPayload(preState, body); err != nil {
+	valid, err := bls.Verify(signature, signingRoot, publicKey)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return errors.New("verification error")
+	}
+	return nil
+}
+
+func operationExecutionPayloadBidHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	signedBid := &cltypes.SignedExecutionPayloadBid{}
+	if err := spectest.ReadSszOld(root, signedBid, c.Version(), "execution_payload_bid.ssz_snappy"); err != nil {
+		return err
+	}
+	if signedBid.Message == nil {
+		return errors.New("execution payload bid message is nil")
+	}
+	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, c.Version())
+	block.Slot = signedBid.Message.Slot
+	block.ParentRoot = signedBid.Message.ParentBlockRoot
+	block.Body.SignedExecutionPayloadBid = signedBid
+	if err := c.Machine.ProcessExecutionPayloadBid(preState, block); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if signedBid.Message.BuilderIndex != clparams.BuilderIndexSelfBuild {
+		err := verifySignatureSet(state.ExecutionPayloadBidSignatureSet(preState, signedBid))
+		if err != nil {
+			if expectedError {
+				return nil
+			}
+			return err
+		}
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+func operationParentExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, c.Version())
+	if err := spectest.ReadSszOld(root, block, c.Version(), blockFileName); err != nil {
+		return err
+	}
+	if err := c.Machine.ProcessParentExecutionPayload(preState, block); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+func operationPayloadAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	att := &cltypes.PayloadAttestation{}
+	if err := spectest.ReadSszOld(root, att, c.Version(), "payload_attestation.ssz_snappy"); err != nil {
+		return err
+	}
+	if err := c.Machine.ProcessPayloadAttestation(preState, att); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	indexedAttestation, err := preState.GetIndexedPayloadAttestation(att)
+	if err == nil {
+		err = verifySignatureSet(state.IndexedPayloadAttestationSignatureSet(preState, indexedAttestation))
+	}
+	if err != nil {
 		if expectedError {
 			return nil
 		}

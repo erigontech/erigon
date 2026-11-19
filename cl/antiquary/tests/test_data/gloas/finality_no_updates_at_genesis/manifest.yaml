@@ -1,0 +1,6 @@
+preset: mainnet
+fork: gloas
+runner: finality
+handler: finality
+suite: pyspec_tests
+case: finality_no_updates_at_genesis

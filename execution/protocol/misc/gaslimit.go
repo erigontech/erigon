@@ -22,7 +22,9 @@ package misc
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // VerifyGaslimit verifies the header gas limit according increase/decrease
@@ -41,6 +43,16 @@ func VerifyGaslimit(parentGasLimit, headerGasLimit uint64) error {
 		return fmt.Errorf("invalid gas limit below %d", params.MinBlockGasLimit)
 	}
 	return nil
+}
+
+// VerifyParentGasLimit checks the parent-relative gas limit rule (±1/1024).
+// Applies the elasticity multiplier at the London transition boundary.
+func VerifyParentGasLimit(config *chain.Config, parent, header *types.Header) error {
+	parentGasLimit := parent.GasLimit
+	if config.IsLondon(header.Number.Uint64()) && !config.IsLondon(parent.Number.Uint64()) {
+		parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
+	}
+	return VerifyGaslimit(parentGasLimit, header.GasLimit)
 }
 
 // CalcGasLimit computes the gas limit of the next block after parent. It aims

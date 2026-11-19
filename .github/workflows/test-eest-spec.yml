@@ -3,36 +3,109 @@ name: EEST spec tests
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      cache-warming-only:
+        description: "Build the evm binaries only; skip fixture runs (for cache warming runs)"
+        type: boolean
+        default: false
 
 defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+
+env:
+  SKIP_DEVNET_SHARDS: 'false'
+
 jobs:
   # Matrix entries (shard / workers / max-allowed-failures) come from
-  # tools/eest-spec-shards.json so this workflow and tools/run-eest-spec-test.sh
-  # share a single source of truth. enginextests-devnet is intentionally absent
-  # from the manifest (the devnet tarball doesn't yet ship
-  # blockchain_tests_engine_x/); re-add it there when the fixture lands.
+  # tools/eest-spec-shards.yml so this workflow and tools/run-eest-spec-test.sh
+  # share a single source of truth.
   load-matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     outputs:
       matrix: ${{ steps.load.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
       - id: load
-        run: echo "matrix=$(jq -c . tools/eest-spec-shards.json)" >> "$GITHUB_OUTPUT"
+        run: |
+          matrix=$(yq -o=json '.' tools/eest-spec-shards.yml | jq -c '[.[] | select(env.SKIP_DEVNET_SHARDS != "true" or (.shard | contains("-devnet") | not))]')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  # Build evm and evm.race once per run and ship them as an artifact, so the
+  # shard jobs below skip Go installation, module download, the ~3GB GOCACHE
+  # restore and the redundant per-shard rebuild (~14m of overhead each). Runs in
+  # warming mode build nothing new except caches: this job is also what keeps
+  # the test-eest-spec build cache fresh, so it runs there too.
+  build-binaries:
+    name: build-evm-binaries
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
+    timeout-minutes: 60
+    steps:
+      - name: Checkout custom actions
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-erigon
+        with:
+          cache-namespace: test-eest-spec
+
+      - name: Build evm binaries
+        run: make evm evm.race
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !inputs.cache-warming-only }}
+        with:
+          name: evm-binaries
+          path: build/bin
+          # Long enough to cover "re-run failed jobs" on a red run; the shard
+          # jobs cannot rebuild the binaries themselves.
+          retention-days: 3
+          # "Re-run all jobs" keeps the run ID, and with it the artifact name.
+          overwrite: true
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running shards (which are skipped
+      # anyway when this job fails). Mirrors the step in eest-spec-tests.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
 
   eest-spec-tests:
-    needs: load-matrix
+    needs: [load-matrix, build-binaries]
+    # Warming runs only build/refresh caches (build-binaries above).
+    if: ${{ !inputs.cache-warming-only }}
     name: eest-spec-${{ matrix.shard }}
     strategy:
-      fail-fast: false
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR can be evicted.
+      # In PR runs: keep all shards going so authors see the full failure
+      # picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         include: ${{ fromJson(needs.load-matrix.outputs.matrix) }}
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
     timeout-minutes: 60
     env:
       RAMDISK_SIZE_MB: '8192'
@@ -42,42 +115,74 @@ jobs:
         run: echo "Runner $RUNNER_NAME"
 
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
-      - uses: ./.github/actions/setup-erigon
-        id: erigon
+      # No Go toolchain, no build caches: consume the binaries built once by
+      # build-binaries. Zipped artifacts normalize file modes, so restore the
+      # executable bit the run script checks for.
+      - name: Download evm binaries
+        uses: actions/download-artifact@v8
         with:
-          submodules: false
-          lfs: false
-          cleanup-space: true
-          ramdisk: true
-          build-cache-extra-key: eest-spec-${{ matrix.shard }}
+          name: evm-binaries
+          path: build/bin
 
-      - name: Cache EEST tarballs
-        uses: actions/cache@v4
+      - name: Make evm binaries executable
+        run: chmod +x build/bin/evm build/bin/evm.race
+
+      - name: Create RAM disk
+        # matrix.no-ramdisk is absent (null, falsy) for shards without the key.
+        if: ${{ !matrix.no-ramdisk }}
+        run: |
+          path=$(bash tools/create-ramdisk)
+          echo "ERIGON_EXECUTION_TESTS_TMPDIR=$path" >> "$GITHUB_ENV"
+
+      # Restore-only: PR / merge_group runs never SAVE, so they don't mint a
+      # per-ref ~1.6GB duplicate every run. The base-branch (main) entry is
+      # populated by cache-warming-eest-fixtures.yml; default-branch caches are
+      # readable from every PR. A miss here self-heals (tools/test-fixtures.sh
+      # re-downloads), and the warmer repopulates main.
+      - name: Restore EEST tarballs
+        if: ${{ !contains(matrix.shard, 'legacy') }}
+        uses: actions/cache/restore@v6
         with:
-          # Only cache the .tar.gz files; extracted dirs are recreated by
-          # tools/test-fixtures.sh on each run from the cached tarballs.
-          # Dedicated EEST cache so this workflow doesn't compete with
-          # test-integration-caplin.yml's cl_mainnet cache under one key.
+          # Only the .tar.gz files are cached; each shard re-extracts just the
+          # fixture set it needs (tools/run-eest-spec-test.sh). cl_mainnet is
+          # intentionally excluded (owned by test-integration-caplin.yml's
+          # separate cache).
           path: |
             test-fixtures-cache/eest_stable.tar.gz
             test-fixtures-cache/eest_devnet.tar.gz
             test-fixtures-cache/eest_benchmark.tar.gz
+            test-fixtures-cache/eest_zkevm.tar.gz
           key: test-fixtures-eest-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
           restore-keys: |
             test-fixtures-eest-${{ runner.os }}-
+
+      - name: Restore legacy fixture tarballs
+        if: ${{ contains(matrix.shard, 'legacy') }}
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            test-fixtures-cache/legacy_tests.tar.gz
+            test-fixtures-cache/legacy_cancun.tar.gz
+          key: test-fixtures-legacy-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-legacy-${{ runner.os }}-
 
       - name: Run eest-spec-${{ matrix.shard }}
         env:
           EEST_SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
           EEST_SPEC_WORKERS: ${{ matrix.workers }}
-        run: make eest-spec-${{ matrix.shard }}
-
-      - uses: ./.github/actions/cleanup-erigon
-        if: always()
+          ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment-parallel }}
+          SHARD: ${{ matrix.shard }}
+          # Mirrors the Makefile's eest-spec-* targets: race shards run the
+          # race-instrumented binary. Direct script call (not make) because the
+          # make targets are .PHONY and would rebuild evm here.
+          EVM_BIN: ${{ contains(matrix.shard, '-race') && 'build/bin/evm.race' || 'build/bin/evm' }}
+        run: bash tools/run-eest-spec-test.sh "$SHARD"
 
       # In the merge queue, cancel the run on first failure so the gate
       # doesn't stall waiting for still-running siblings. PR runs keep
@@ -86,4 +191,52 @@ jobs:
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }} || true
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true
+
+  # Fast guard (no fixture execution): catches coverage regressions a normal test
+  # run does NOT surface — the stable race and stable/devnet hive-consume-enginex
+  # fork partitions (a fork silently unmatched by any shard). Reads live config
+  # + corpus .meta/index.json. Part of
+  # this reusable workflow, so ci-gate's eest-spec-tests dependency fails when
+  # coverage regresses.
+  eest-shard-coverage:
+    if: ${{ !inputs.cache-warming-only }}
+    name: eest-shard-coverage
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Restore EEST tarballs
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            test-fixtures-cache/eest_stable.tar.gz
+            test-fixtures-cache/eest_devnet.tar.gz
+            test-fixtures-cache/eest_benchmark.tar.gz
+            test-fixtures-cache/eest_zkevm.tar.gz
+          key: test-fixtures-eest-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-eest-${{ runner.os }}-
+
+      - name: Check EEST shard coverage
+        run: make check-eest-shards
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true

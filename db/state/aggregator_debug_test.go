@@ -11,15 +11,14 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 )
 
-// TestDirtyFilesRoTx_CloseCallsCloseAndRemoveWhenRefCntDropsToZero tests the "refcnt > 0" bug:
-// when a dirtyFilesRoTx is the LAST holder of a canDelete=true file (refcount 1→0 on Close),
-// Close() must call closeFilesAndRemove() so the FD is released and the disk file unlinked.
-//
-// Without the fix, Close() only decrements refcount without checking canDelete, leaving the
-// decompressor FD open and the file on disk indefinitely (inode count=0 but not freed).
-// This in turn causes OpenFolder to re-create a new FilesItem instance for the same range,
-// and BuildMissedAccessors to build fresh accessors for it — an unbreakable cycle.
-func TestDirtyFilesRoTx_CloseCallsCloseAndRemoveWhenRefCntDropsToZero(t *testing.T) {
+// TestDirtyFilesRoTx_CloseIsNotADeleter verifies the reclamation ownership
+// invariant: a debug dirtyFilesRoTx.Close() must NOT physically delete files —
+// even with canDelete=true. Files captured by a DebugBeginDirtyFilesRo are
+// protected by the pinned generation, and physical deletion is owned solely by
+// the aggregator reclaimer (reclaimRetiredLocked). A second deleter here would
+// re-introduce the double-free this design removes. (End-to-end coverage of the
+// deferred deletion: TestAggregatorRetireDeferredWhileDebugPins.)
+func TestDirtyFilesRoTx_CloseIsNotADeleter(t *testing.T) {
 	tmp := t.TempDir()
 	fPath := filepath.Join(tmp, "v1-foo.0-1.kv")
 
@@ -33,29 +32,21 @@ func TestDirtyFilesRoTx_CloseCallsCloseAndRemoveWhenRefCntDropsToZero(t *testing
 
 	dec, err := seg.NewDecompressor(fPath)
 	require.NoError(t, err)
+	defer dec.Close() // Close() under test must not delete; release the FD so TempDir cleanup can unlink (Windows)
 
 	item := &FilesItem{startTxNum: 0, endTxNum: 10}
 	item.decompressor = dec
+	item.canDelete.Store(true) // even with canDelete set, Close must not delete
 
-	// Simulate: file was merged away → removed from BTree and marked canDelete=true.
-	// The dirtyFilesRoTx still owns refcount=1 (incremented by DebugBeginDirtyFilesRo).
-	item.canDelete.Store(true)
-	item.refcount.Store(1)
-
-	// Construct iiDirtyFilesRoTx as DebugBeginDirtyFilesRo() would.
-	// ii must be non-nil so Close() doesn't short-circuit; the actual InvertedIndex
-	// fields are irrelevant for this test.
 	rotx := &iiDirtyFilesRoTx{
 		ii:    &InvertedIndex{},
 		files: []*FilesItem{item},
 	}
 
-	// Close() is the last reader releasing the file (refcount 1→0, canDelete=true).
-	// Must call closeFilesAndRemove(): closes FDs and unlinks the disk file.
 	rotx.Close()
 
 	exists, err := dir.FileExist(fPath)
 	require.NoError(t, err)
-	require.False(t, exists,
-		"file must be deleted from disk when dirtyFilesRoTx.Close() is the last reader with canDelete=true")
+	require.True(t, exists,
+		"debug dirtyFilesRoTx.Close() must NOT delete the file; only the aggregator reclaimer deletes")
 }

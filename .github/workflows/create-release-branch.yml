@@ -1,0 +1,224 @@
+name: Create release branch
+
+run-name: "Create ${{ inputs.release_branch }} from ${{ inputs.from_ref }} by @${{ github.actor }}"
+
+# Manually-dispatched utility to create a `release/N.N` branch. Gated by the
+# `release-branch-management` GitHub Environment: the job only runs after one of
+# that environment's required reviewers approves, so dispatching the workflow is
+# not enough on its own to create a branch in the protected release namespace.
+#
+# Branch-protection rules are applied MANUALLY in repo settings, on purpose:
+# that keeps `administration:write` out of any automation token and off the
+# repo's attack surface. This workflow only needs `contents:write` (to create
+# the ref), which the release App already has.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_branch:
+        description: "Release branch to create, e.g. release/3.6 (must match release/N.N)"
+        required: true
+        type: string
+      from_ref:
+        description: "Base to cut from: a branch, tag, or commit SHA (any past commit, on any branch) — e.g. main, v3.5.0, a1b2c3d"
+        required: false
+        type: string
+        default: main
+      dry_run:
+        description: "Resolve the base commit and validate, but do not create the branch"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  # Serialize per target branch so two runs can't race on the same ref.
+  group: create-release-branch-${{ inputs.release_branch }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  create-release-branch:
+    runs-on: ubuntu-latest
+    # Approval gate: configure required reviewers on this environment in repo
+    # settings. Only those reviewers can release the run to continue.
+    environment: release-branch-management
+    timeout-minutes: 10
+    outputs:
+      outcome: ${{ steps.result.outputs.outcome }}
+      detail: ${{ steps.result.outputs.detail }}
+      base_sha: ${{ steps.result.outputs.base_sha }}
+    steps:
+      - name: Validate release branch name
+        env:
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_BRANCH" =~ ^release/[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$RELEASE_BRANCH' does not match the required pattern 'release/N.N' (e.g. release/3.6)."
+            exit 1
+          fi
+          echo "Release branch name '$RELEASE_BRANCH' is valid."
+
+      - name: Generate GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  ## v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          repositories: "erigon"
+          # Scope the token to only what this workflow needs (create a ref),
+          # instead of inheriting all the App's installation permissions.
+          permission-contents: write
+
+      - name: Create branch
+        id: result
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          REPO: ${{ github.repository }}
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
+          FROM_REF: ${{ inputs.from_ref }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          fail() {
+            echo "detail=$1" >> "$GITHUB_OUTPUT"
+            echo "outcome=failure" >> "$GITHUB_OUTPUT"
+            echo "::error::$1"
+            exit 1
+          }
+
+          # Refuse to overwrite an existing release branch. Only a 404 means it is absent;
+          # any other error (token, API outage) stops the run with its own message.
+          status=$(gh api -i "repos/$REPO/branches/$RELEASE_BRANCH" 2>/dev/null | head -1 | awk '{print $2}' || true)
+          case "$status" in
+            200) fail "Branch '$RELEASE_BRANCH' already exists — refusing to recreate." ;;
+            404) ;;
+            *) fail "Could not check whether '$RELEASE_BRANCH' exists (HTTP ${status:-no response})." ;;
+          esac
+
+          # Resolve FROM_REF to a commit SHA. The commits/{ref} endpoint accepts
+          # a branch, tag, or SHA uniformly, so any past commit (on any branch)
+          # works as the base.
+          base_sha=$(gh api "repos/$REPO/commits/$FROM_REF" --jq '.sha' 2>/dev/null || true)
+          if [ -z "$base_sha" ] || [ "$base_sha" = "null" ]; then
+            fail "Could not resolve base '$FROM_REF' to a commit (check the branch/tag/SHA exists)."
+          fi
+          echo "Base '$FROM_REF' resolves to $base_sha"
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+
+          if [ "$DRY_RUN" = "true" ]; then
+            detail="dry-run: would create '$RELEASE_BRANCH' at $base_sha (from '$FROM_REF')"
+            echo "$detail"
+            echo "detail=$detail" >> "$GITHUB_OUTPUT"
+            echo "outcome=dry-run" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Creating '$RELEASE_BRANCH' at $base_sha"
+          gh api -X POST "repos/$REPO/git/refs" \
+            -f "ref=refs/heads/$RELEASE_BRANCH" \
+            -f "sha=$base_sha" >/dev/null \
+            || fail "Failed to create branch '$RELEASE_BRANCH'."
+
+          detail="'$RELEASE_BRANCH' created at $base_sha (from '$FROM_REF')."
+          echo "detail=$detail" >> "$GITHUB_OUTPUT"
+          echo "outcome=success" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release branch \`$RELEASE_BRANCH\` created"
+            echo ""
+            echo "- Base: \`$FROM_REF\` → \`$base_sha\`"
+            echo "- **Manual steps required:**"
+            echo "  1. Add the branch-protection rule in **Settings → Branches** (mirror the existing release branch)."
+            echo "  2. Complete the org-level Actions setup for this branch (see the internal release checklist)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  notify:
+    needs: [create-release-branch]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Notify Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          JOB_RESULT: ${{ needs.create-release-branch.result }}
+          OUTCOME: ${{ needs.create-release-branch.outputs.outcome }}
+          DETAIL: ${{ needs.create-release-branch.outputs.detail }}
+          BASE_SHA: ${{ needs.create-release-branch.outputs.base_sha }}
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
+          FROM_REF: ${{ inputs.from_ref }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISCORD_WEBHOOK:-}" ]; then
+            echo "DISCORD_WEBHOOK not set — skipping Discord notification."
+            exit 0
+          fi
+
+          now=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+          # A cancelled/skipped upstream job (e.g. environment approval denied or
+          # timed out) reports as failure to the team.
+          mention="@here"
+          if [ "$JOB_RESULT" = "success" ] && [ "$OUTCOME" = "success" ]; then
+            title=":white_check_mark: Release branch created"; color=3066993
+            desc=$(printf '%s\n%s\n%s' \
+              ":warning: **Manual steps required:**" \
+              "1. Add the branch-protection rule in **Settings → Branches** (mirror the existing release branch)." \
+              "2. Complete the org-level Actions setup for this branch (see the internal release checklist).")
+          elif [ "$OUTCOME" = "dry-run" ]; then
+            # A dry-run is the operator's own check — don't ping the channel.
+            title=":mag: Release branch dry-run"; color=3447003; mention=""
+            desc="Dry-run only — no branch was created."
+          else
+            title=":x: Release branch creation failed"; color=15158332
+            desc="${DETAIL:-Job result: ${JOB_RESULT}. See the run for details.}"
+          fi
+
+          # allowed_mentions.parse=["everyone"] authorizes the @here ping; the
+          # embed carries the full audit record so the message answers who/when/
+          # what without opening the run.
+          payload=$(jq -nc \
+            --arg mention "$mention" \
+            --arg title "$title" \
+            --argjson color "$color" \
+            --arg desc "$desc" \
+            --arg branch "$RELEASE_BRANCH" \
+            --arg from "$FROM_REF" \
+            --arg sha "${BASE_SHA:-n/a}" \
+            --arg actor "$ACTOR" \
+            --arg when "$now" \
+            --arg ts "$ts" \
+            --arg url "$RUN_URL" \
+            '{
+              content: $mention,
+              allowed_mentions: {parse: ["everyone"]},
+              embeds: [{
+                title: $title,
+                description: $desc,
+                color: $color,
+                url: $url,
+                timestamp: $ts,
+                fields: [
+                  {name: "Branch",       value: ("`" + $branch + "`"), inline: true},
+                  {name: "Base ref",     value: ("`" + $from + "`"),   inline: true},
+                  {name: "Commit",       value: ("`" + $sha + "`"),    inline: false},
+                  {name: "Triggered by", value: ("[" + $actor + "](https://github.com/" + $actor + ")"), inline: true},
+                  {name: "When (UTC)",   value: $when,                 inline: true},
+                  {name: "Run",          value: ("[Open workflow run](" + $url + ")"), inline: false}
+                ],
+                footer: {text: "erigon • create-release-branch"}
+              }]
+            }')
+          curl -sS -f -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK" \
+            && echo "Discord notified." \
+            || echo "::warning::Discord notification failed (webhook unreachable or invalid)."

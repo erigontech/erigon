@@ -21,30 +21,28 @@ package testutil
 
 import (
 	"context"
-	context2 "context"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
 	"strconv"
 	"strings"
-	"testing"
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -69,7 +67,24 @@ type StateSubtest struct {
 }
 
 func (t *StateTest) UnmarshalJSON(in []byte) error {
-	return jsoniter.ConfigFastest.Unmarshal(in, &t.Json)
+	// When every post has txbytes, those bytes are the input to transaction
+	// validation. The JSON metadata may contain intentionally invalid values,
+	// so decode it into stTransaction only when a post needs the fallback.
+	dec := struct {
+		*stJSON
+		Tx jsoniter.RawMessage `json:"transaction"`
+	}{stJSON: &t.Json}
+	if err := jsoniter.ConfigFastest.Unmarshal(in, &dec); err != nil {
+		return err
+	}
+	for _, posts := range t.Json.Post {
+		for i := range posts {
+			if len(posts[i].Tx) == 0 {
+				return jsoniter.ConfigFastest.Unmarshal(dec.Tx, &t.Json.Tx)
+			}
+		}
+	}
+	return nil
 }
 
 type stJSON struct {
@@ -96,7 +111,7 @@ type stTransaction struct {
 	GasPrice             *math.HexOrDecimal256 `json:"gasPrice"`
 	MaxFeePerGas         *math.HexOrDecimal256 `json:"maxFeePerGas"`
 	MaxPriorityFeePerGas *math.HexOrDecimal256 `json:"maxPriorityFeePerGas"`
-	Nonce                math.HexOrDecimal64   `json:"nonce"`
+	Nonce                math.HexOrDecimal256  `json:"nonce"`
 	GasLimit             []math.HexOrDecimal64 `json:"gasLimit"`
 	PrivateKey           hexutil.Bytes         `json:"secretKey"`
 	To                   string                `json:"to"`
@@ -176,6 +191,7 @@ type stEnv struct {
 	Timestamp     uint64         `json:"currentTimestamp"  gencodec:"required"`
 	BaseFee       *uint256.Int   `json:"currentBaseFee"    gencodec:"optional"`
 	ExcessBlobGas *uint64        `json:"currentExcessBlobGas" gencodec:"optional"`
+	SlotNumber    *uint64        `json:"slotNumber"        gencodec:"optional"` // EIP-7843
 }
 
 type stEnvMarshaling struct {
@@ -187,6 +203,7 @@ type stEnvMarshaling struct {
 	Timestamp     math.HexOrDecimal64
 	BaseFee       *math.HexOrDecimal256
 	ExcessBlobGas *math.HexOrDecimal64
+	SlotNumber    *math.HexOrDecimal64
 }
 
 // GetChainConfig takes a fork definition and returns a chain config.
@@ -246,73 +263,77 @@ func (t *StateTest) checkError(subtest StateSubtest, err error) error {
 	return nil
 }
 
-// Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
-	st, root, _, err := t.RunNoVerify(tb, tx, subtest, vmconfig, dirs)
+// Run executes a specific subtest and verifies the post-state and logs.
+// sd is the caller-owned SharedDomains: discard (Close without Flush) to
+// prevent per-subtest state from polluting the long-lived branch cache.
+func (t *StateTest) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
+	st, root, _, err := t.RunNoVerify(sd, tx, subtest, vmconfig)
+	return st, root, t.checkResult(subtest, st, root, err)
+}
 
+func (t *StateTest) checkResult(subtest StateSubtest, st *state.IntraBlockState, root common.Hash, err error) error {
 	checkedErr := t.checkError(subtest, err)
 	if checkedErr != nil {
-		return st, empty.RootHash, checkedErr
+		return checkedErr
 	}
 	if err != nil {
-		// Error was expected — check post-state root if specified
-		post := t.Json.Post[subtest.Fork][subtest.Index]
-		if post.Root != (common.UnprefixedHash{}) && root != common.Hash(post.Root) {
-			return st, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
-		}
-		return st, root, nil
+		return nil
 	}
 	post := t.Json.Post[subtest.Fork][subtest.Index]
 	if root != common.Hash(post.Root) {
-		return st, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
+		return fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
-	if logs := rlpHash(st.Logs()); logs != common.Hash(post.Logs) {
-		return st, root, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
+	if logs := st.LogsRlpHash(); logs != common.Hash(post.Logs) {
+		return fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
-	return st, root, nil
+	return nil
 }
 
-// RunNoVerify runs a specific subtest and returns the statedb, post-state root and gas used.
-func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, uint64, error) {
+// RunNoVerify runs a specific subtest and returns the statedb, post-state root
+// and gas used. sd is the caller-owned SharedDomains scope; pre-state is loaded
+// into it via MakePreStateInto so the per-subtest writes can be discarded by
+// closing sd without Flush — keeping ephemeral test state out of the long-lived
+// branch cache.
+func (t *StateTest) RunNoVerify(sd *execctx.SharedDomains, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config) (statedb *state.IntraBlockState, root common.Hash, gasUsed uint64, err error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := genesiswrite.GenesisToBlock(nil, t.genesis(config), dirs, log.Root())
-	if err != nil {
-		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
-	}
+	// Only header fields feed the block context, and the genesis state root is not
+	// one of them: computing it would mean a throwaway DB plus a commitment over
+	// Pre, which MakePreStateInto redoes below anyway.
+	header, _ := genesiswrite.GenesisWithoutStateToBlock(t.genesis(config))
 
-	readBlockNr := block.NumberU64()
+	readBlockNr := header.Number.Uint64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(&chain.Rules{}, tx, t.Json.Pre, readBlockNr)
+	_, err = MakePreStateInto(&chain.Rules{}, sd, tx, t.Json.Pre, readBlockNr)
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-	if err != nil {
-		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
-	}
-	defer domains.Close()
 	blockNum, txNum := readBlockNr, uint64(1)
 
-	// Pre-state root, computed once over the just-flushed pre-allocation.
-	// We return it for any early-return path so the test framework's
-	// `post.Root` check still has a real root to compare against when the tx
-	// was rejected before / during apply (the fixture's post.Root for those
-	// cases equals the pre-state root).
-	preRootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
-	if err != nil {
-		return nil, common.Hash{}, 0, fmt.Errorf("pre-state ComputeCommitment: %w", err)
-	}
-	preRoot := common.BytesToHash(preRootBytes)
+	defer func() {
+		rootBytes, rootBytesErr := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
+		if rootBytesErr != nil {
+			if err != nil {
+				err = fmt.Errorf("ComputeCommitment: %w: %w", rootBytesErr, err)
+			} else {
+				err = fmt.Errorf("ComputeCommitment: %w", rootBytesErr)
+			}
+			return
+		}
+		root = common.BytesToHash(rootBytes)
+	}()
 
-	r := rpchelper.NewLatestStateReader(tx)
-	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), writeBlockNr)
-	statedb := state.New(r)
+	// Read through sd.AsStateGetter so execution sees never-Flushed pre-state held in sd.mem.
+	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	w := rpchelper.NewLatestStateWriter(tx, sd, (*freezeblocks.BlockReader)(nil), writeBlockNr)
+	statedb = state.New(r)
+	statedb.SetVersionMap(state.NewVersionMap(nil))
+	statedb.SetTxContext(0, 0)
 
 	var baseFee *uint256.Int
 	if config.IsLondon(0) {
@@ -324,7 +345,6 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		}
 	}
 	post := t.Json.Post[subtest.Fork][subtest.Index]
-	header := block.HeaderNoCopy()
 
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
 	blockContext.GetHash = vmTestBlockHash
@@ -339,7 +359,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		blockContext.PrevRanDao = &rnd
 		blockContext.Difficulty.Clear()
 	}
-	if config.IsCancun(block.Time()) && t.Json.Env.ExcessBlobGas != nil {
+	if config.IsCancun(header.Time) && t.Json.Env.ExcessBlobGas != nil {
 		blockContext.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
 		if err != nil {
 			return nil, common.Hash{}, 0, err
@@ -362,16 +382,16 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		signer.SetMalleable(true) // allow Frontier/Homestead malleable signatures
 		decodedTx, err := types.DecodeTransaction(post.Tx)
 		if err != nil {
-			return statedb, preRoot, 0, err
+			return statedb, root, 0, err
 		}
 		msg, err = decodedTx.AsMessage(*signer, baseFee, chainRules)
 		if err != nil {
-			return statedb, preRoot, 0, err
+			return statedb, root, 0, err
 		}
 	} else {
 		msg, err = toMessage(t.Json.Tx, post, baseFee)
 		if err != nil {
-			return statedb, preRoot, 0, err
+			return statedb, root, 0, err
 		}
 	}
 
@@ -385,9 +405,8 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	// Execute the message.
 	snapshot := statedb.PushSnapshot()
 	gaspool := new(protocol.GasPool)
-	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
+	gaspool.AddGas(header.GasLimit).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
 	res, err := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
-	gasUsed := uint64(0)
 	if res != nil {
 		gasUsed = res.ReceiptGasUsed
 	}
@@ -395,70 +414,96 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		statedb.RevertToSnapshot(snapshot, err)
 	}
 	statedb.PopSnapshot(snapshot)
-	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
-		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed}, nil)
+	if vmconfig.Tracer.HasTxEndHook() {
+		var txnGasUsage mdgas.TxnGasUsage
+		if res != nil {
+			txnGasUsage = res.TxnGasUsage
+		}
+		vmconfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: gasUsed}, txnGasUsage, err)
 	}
 	if err != nil {
-		return statedb, preRoot, gasUsed, err
+		return statedb, root, gasUsed, err
 	}
 
 	// Add 0-value mining reward. This only makes a difference in the cases
 	// where the coinbase self-destructed or the tx didn't pay any fees; in
 	// those cases the coinbase isn't otherwise created and needs to be
 	// touched. Matches go-ethereum's state-test runner.
-	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
-
-	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
-		return nil, common.Hash{}, gasUsed, err
-	}
-	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
-		return nil, common.Hash{}, gasUsed, err
+	if err := statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified); err != nil {
+		return statedb, root, gasUsed, err
 	}
 
-	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
+	writes, err := statedb.FinalizedWrites(evm.ChainRules())
 	if err != nil {
-		return statedb, common.Hash{}, gasUsed, fmt.Errorf("ComputeCommitment: %w", err)
+		return nil, root, gasUsed, err
 	}
-	return statedb, common.BytesToHash(rootBytes), gasUsed, nil
+	statedb.FlushWritesToVersionMap(writes)
+	if err := statedb.WriteFlushedTo(writes, w); err != nil {
+		return nil, root, gasUsed, err
+	}
+
+	return statedb, root, gasUsed, nil
 }
 
-func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	r := rpchelper.NewLatestStateReader(tx)
+// Loads pre-state and flushes it to db + branch cache; for callers needing pre-state to outlive the call.
+func MakePreState(rules *chain.Rules, db kv.TemporalRoDB, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	if err != nil {
+		return nil, err
+	}
+	defer sd.Close()
+	sd.EnableParaTrieDB(db)
+	statedb, err := MakePreStateInto(rules, sd, tx, alloc, blockNr)
+	if err != nil {
+		return nil, err
+	}
+	if err := sd.Flush(context.Background(), tx); err != nil {
+		return nil, err
+	}
+	return statedb, nil
+}
+
+// Loads pre-state into the caller-owned sd; closing sd without Flush discards it (keeps test state out of the branch cache).
+func MakePreStateInto(rules *chain.Rules, sd *execctx.SharedDomains, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+	// Read through sd.AsStateGetter so SetCode/SetBalance see prior pre-state held in sd.mem.
+	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	statedb := state.New(r)
 	statedb.SetTxContext(blockNr, 0)
 	for addr, a := range alloc {
 		address := accounts.InternAddress(addr)
-		statedb.SetCode(address, a.Code)
-		statedb.SetNonce(address, a.Nonce)
+		if err := statedb.SetCode(address, a.Code, tracing.CodeChangeGenesis); err != nil {
+			return nil, err
+		}
+		if err := statedb.SetNonce(address, a.Nonce, tracing.NonceChangeGenesis); err != nil {
+			return nil, err
+		}
 		var balance uint256.Int
 		if a.Balance != nil {
 			_ = balance.SetFromBig(a.Balance)
 		}
-		statedb.SetBalance(address, balance, tracing.BalanceChangeUnspecified)
+		if err := statedb.SetBalance(address, balance, tracing.BalanceIncreaseGenesisBalance); err != nil {
+			return nil, err
+		}
 		for k, v := range a.Storage {
 			key := accounts.InternKey(k)
-			val := uint256.NewInt(0).SetBytes(v.Bytes())
-			statedb.SetState(address, key, *val)
+			val := uint256.NewInt(0).SetBytes(v[:])
+			if err := statedb.SetState(address, key, *val); err != nil {
+				return nil, err
+			}
 		}
-
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
-			statedb.SetIncarnation(address, state.FirstContractIncarnation)
+			if err := statedb.SetIncarnation(address, state.FirstContractIncarnation); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-	if err != nil {
-		return nil, err
-	}
-	defer domains.Close()
-	latestTxNum, latestBlockNum, err := domains.SeekCommitment(context.Background(), tx)
+	latestTxNum, latestBlockNum, err := sd.SeekCommitment(context.Background(), tx)
 	if err != nil {
 		return nil, err
 	}
 
-	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), blockNr-1)
-
-	// Commit and re-open to start with a clean state.
+	w := rpchelper.NewLatestStateWriter(tx, sd, (*freezeblocks.BlockReader)(nil), blockNr-1)
 	if err := statedb.FinalizeTx(rules, w); err != nil {
 		return nil, err
 	}
@@ -466,12 +511,7 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		return nil, err
 	}
 
-	_, err = domains.ComputeCommitment(context.Background(), tx, true, latestBlockNum, latestTxNum, "flush-commitment", nil)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := domains.Flush(context2.Background(), tx); err != nil {
+	if _, err := sd.ComputeCommitment(context.Background(), tx, true, latestBlockNum, latestTxNum, "pre-state-commitment", nil); err != nil {
 		return nil, err
 	}
 	return statedb, nil
@@ -486,13 +526,12 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 		Number:     t.Json.Env.Number,
 		Timestamp:  t.Json.Env.Timestamp,
 		Alloc:      t.Json.Pre,
+		SlotNumber: t.Json.Env.SlotNumber,
 	}
 }
 
-var rlpHash = types.RlpHash
-
 func vmTestBlockHash(n uint64) (common.Hash, error) {
-	return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
+	return crypto.Keccak256Hash([]byte(new(big.Int).SetUint64(n).String())), nil
 }
 
 // toMessage builds a protocol.Message directly from the JSON fixture's
@@ -507,7 +546,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	if len(tx.PrivateKey) > 0 {
 		key, err := crypto.ToECDSA(tx.PrivateKey)
 		if err != nil {
-			return nil, fmt.Errorf("invalid private key: %v", err)
+			return nil, fmt.Errorf("invalid private key: %w", err)
 		}
 		from = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
 	}
@@ -517,7 +556,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	if tx.To != "" {
 		var txto common.Address
 		if err := txto.UnmarshalText([]byte(tx.To)); err != nil {
-			return nil, fmt.Errorf("invalid to address: %v", err)
+			return nil, fmt.Errorf("invalid to address: %w", err)
 		}
 		to = accounts.InternAddress(txto)
 	}
@@ -553,7 +592,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 		return nil, fmt.Errorf("invalid txn data %q", dataHex)
 	}
 	var accessList types.AccessList
-	if tx.AccessLists != nil && tx.AccessLists[ps.Indexes.Data] != nil {
+	if len(tx.AccessLists) > ps.Indexes.Data && tx.AccessLists[ps.Indexes.Data] != nil {
 		accessList = *tx.AccessLists[ps.Indexes.Data]
 	}
 
@@ -579,7 +618,14 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	if gasPrice == nil {
 		return nil, errors.New("no gas price provided")
 	}
-
+	if baseFee == nil {
+		feeCap = big.Int(*gasPrice)
+		tipCap = big.Int(*gasPrice)
+	}
+	nonce := (*big.Int)(&tx.Nonce)
+	if !nonce.IsUint64() {
+		return nil, fmt.Errorf("invalid txn nonce (overflowed) %q", nonce)
+	}
 	gpi := big.Int(*gasPrice)
 	gasPriceInt := uint256.NewInt(gpi.Uint64())
 
@@ -591,7 +637,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	msg := types.NewMessage(
 		from,
 		to,
-		uint64(tx.Nonce),
+		nonce.Uint64(),
 		value,
 		uint64(gasLimit),
 		gasPriceInt,

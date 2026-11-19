@@ -19,9 +19,12 @@ package hexutil
 import (
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"math/big"
+	"math/bits"
+	"slices"
 	"strconv"
+
+	"github.com/holiman/uint256"
 )
 
 // Decode decodes a hex string with 0x prefix.
@@ -63,9 +66,7 @@ func DecodeUint64(input string) (uint64, error) {
 
 // EncodeUint64 encodes i as a hex string with 0x prefix.
 func EncodeUint64(i uint64) string {
-	enc := make([]byte, 2, 10)
-	copy(enc, "0x")
-	return string(strconv.AppendUint(enc, i, 16))
+	return string(AppendUint64(make([]byte, 0, 18), i))
 }
 
 var bigWordNibbles int
@@ -112,10 +113,44 @@ func DecodeBig(input string) (*big.Int, error) {
 	return dec, nil
 }
 
-// MustDecodeBig decodes a hex string with 0x prefix as a quantity.
+// DecodeU256 decodes a hex string with 0x prefix as a quantity.
+// It accepts exactly what DecodeBig does, minus the big.Int round-trip:
+// numbers larger than 256 bits are not accepted.
+//
+// The result is returned by value so a caller that only reads it pays no
+// allocation; take its address to build a hexutil.U256.
+func DecodeU256(input string) (uint256.Int, error) {
+	var dec uint256.Int
+	raw, err := checkNumber(input)
+	if err != nil {
+		return dec, err
+	}
+	if len(raw) > 64 {
+		return dec, ErrBig256Range
+	}
+	// Fill one 64-bit word per 16 nibbles, least-significant word first, rather
+	// than shifting the whole 256-bit value once per nibble.
+	end := len(raw)
+	for i := 0; i < len(dec) && end > 0; i++ {
+		start := max(end-16, 0)
+		var word uint64
+		for ri := start; ri < end; ri++ {
+			nib := decodeNibble(raw[ri])
+			if nib == badNibble {
+				return uint256.Int{}, ErrSyntax
+			}
+			word = word<<4 | nib
+		}
+		dec[i] = word
+		end = start
+	}
+	return dec, nil
+}
+
+// MustDecodeU256 decodes a hex string with 0x prefix as a quantity.
 // It panics for invalid input.
-func MustDecodeBig(input string) *big.Int {
-	dec, err := DecodeBig(input)
+func MustDecodeU256(input string) uint256.Int {
+	dec, err := DecodeU256(input)
 	if err != nil {
 		panic(err)
 	}
@@ -123,13 +158,14 @@ func MustDecodeBig(input string) *big.Int {
 }
 
 // EncodeBig encodes bigint as a hex string with 0x prefix.
-// The sign of the integer is ignored.
 func EncodeBig(bigint *big.Int) string {
-	nbits := bigint.BitLen()
-	if nbits == 0 {
+	if sign := bigint.Sign(); sign == 0 {
 		return "0x0"
+	} else if sign > 0 {
+		return "0x" + bigint.Text(16)
+	} else {
+		return "-0x" + bigint.Text(16)[1:]
 	}
-	return fmt.Sprintf("%#x", bigint)
 }
 
 func has0xPrefix(input string) bool {
@@ -209,7 +245,7 @@ func CompressNibbles(nibbles []byte, out *[]byte) {
 // LO_NIBBLE(b) = b & 0x0F
 func DecompressNibbles(in []byte, out *[]byte) {
 	tmp := (*out)[:0]
-	for i := 0; i < len(in); i++ {
+	for i := range in {
 		tmp = append(tmp, (in[i]>>4)&0x0F, in[i]&0x0F)
 	}
 	*out = tmp
@@ -243,9 +279,7 @@ func EncodeTs(number uint64) []byte {
 
 // Encode encodes b as a hex string with 0x prefix.
 func Encode(b []byte) string {
-	enc := make([]byte, len(b)*2+2)
-	copy(enc, "0x")
-	hex.Encode(enc[2:], b)
+	enc, _ := Bytes(b).MarshalText()
 	return string(enc)
 }
 
@@ -289,4 +323,18 @@ func IsHex(str string) bool {
 // isHexCharacter returns bool of c being a valid hexadecimal.
 func isHexCharacter(c byte) bool {
 	return ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F')
+}
+
+// AppendUint64 appends v as a 0x-prefixed hex quantity. It is faster than strconv.AppendUint with
+// base 16, which formats into a scratch array and copies it.
+func AppendUint64(dst []byte, v uint64) []byte {
+	n := max((bits.Len64(v)+3)/4, 1)
+	l := len(dst)
+	dst = slices.Grow(dst, n+2)[:l+n+2]
+	dst[l], dst[l+1] = '0', 'x'
+	for i := l + n + 1; i > l+1; i-- {
+		dst[i] = "0123456789abcdef"[v&0xf]
+		v >>= 4
+	}
+	return dst
 }

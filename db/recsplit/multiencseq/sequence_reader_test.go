@@ -19,7 +19,6 @@ func buildTestSeq(baseNum uint64, vals ...uint64) []byte {
 }
 
 func TestMultiEncSeq(t *testing.T) {
-
 	t.Run("plain elias fano", func(t *testing.T) {
 		b := make([]byte, 0)
 
@@ -163,7 +162,7 @@ func TestMerge(t *testing.T) {
 		require.Equal(t, uint64(20), result.Count())
 		require.Equal(t, uint64(1000), result.Min())
 		require.Equal(t, uint64(1038), result.Max())
-		for i := uint64(0); i < 20; i++ {
+		for i := range uint64(20) {
 			require.Equal(t, 1000+i*2, result.Get(i))
 		}
 	})
@@ -211,7 +210,7 @@ func TestMergeSorted(t *testing.T) {
 		require.Equal(t, uint64(20), result.Count())
 		require.Equal(t, uint64(1000), result.Min())
 		require.Equal(t, uint64(1038), result.Max())
-		for i := uint64(0); i < 20; i++ {
+		for i := range uint64(20) {
 			require.Equal(t, 1000+i*2, result.Get(i))
 		}
 	})
@@ -275,14 +274,16 @@ func TestMergeEncodingBoundary(t *testing.T) {
 	}
 
 	// 8+8=16: must stay simple encoding
-	raw16 := merge(1000,
+	raw16 := merge(
+		1000,
 		buildTestSeq(1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008),
 		buildTestSeq(1000, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016),
 	)
 	require.Equal(t, byte(SimpleEncoding)|15, raw16[0], "8+8=16 must use simple encoding")
 
 	// 8+9=17: must flip to rebased EF
-	raw17 := merge(1000,
+	raw17 := merge(
+		1000,
 		buildTestSeq(1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008),
 		buildTestSeq(1000, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017),
 	)
@@ -305,17 +306,17 @@ func TestMergeSeek(t *testing.T) {
 	result := ReadMultiEncSeq(1000, merged.AppendBytes(nil))
 
 	// Seek to existing value
-	n, ok := result.Seek(1010)
+	n, _, ok := result.Seek(1010)
 	require.True(t, ok)
 	require.Equal(t, uint64(1010), n)
 
 	// Seek to gap — returns next
-	n, ok = result.Seek(1011)
+	n, _, ok = result.Seek(1011)
 	require.True(t, ok)
 	require.Equal(t, uint64(1012), n)
 
 	// Seek past end
-	_, ok = result.Seek(1039)
+	_, _, ok = result.Seek(1039)
 	require.False(t, ok)
 
 	// Has
@@ -333,51 +334,18 @@ func TestBuilderFreeFunctions(t *testing.T) {
 	b.Build()
 	raw := b.AppendBytes(nil)
 
-	require.Equal(t, uint64(3), Count(baseNum, raw))
+	require.Equal(t, uint64(3), Count(raw))
 
-	n, ok := Seek(baseNum, raw, 5006)
+	n, _, ok := Seek(baseNum, raw, 5006)
 	require.True(t, ok)
 	require.Equal(t, uint64(5007), n)
 
-	n, ok = Seek(baseNum, raw, 5007)
+	n, _, ok = Seek(baseNum, raw, 5007)
 	require.True(t, ok)
 	require.Equal(t, uint64(5007), n)
 
-	_, ok = Seek(baseNum, raw, 5016)
+	_, _, ok = Seek(baseNum, raw, 5016)
 	require.False(t, ok)
-}
-
-func BenchmarkMerge(b *testing.B) {
-	const baseNum = 1_000_000
-	const n = 500 // elements per sequence
-
-	raw1 := func() []byte {
-		sb := NewBuilder(baseNum, n, baseNum+n*2-2)
-		for i := uint64(0); i < n; i++ {
-			sb.AddOffset(baseNum + i*2)
-		}
-		sb.Build()
-		return sb.AppendBytes(nil)
-	}()
-	raw2 := func() []byte {
-		sb := NewBuilder(baseNum, n, baseNum+n*2+n*2-2)
-		for i := uint64(0); i < n; i++ {
-			sb.AddOffset(baseNum + n*2 + i*2)
-		}
-		sb.Build()
-		return sb.AppendBytes(nil)
-	}()
-
-	var s1, s2 SequenceReader
-	var merged SequenceBuilder
-	for b.Loop() {
-		s1.Reset(baseNum, raw1)
-		s2.Reset(baseNum, raw2)
-		if err := merged.Merge(&s1, &s2, baseNum); err != nil {
-			b.Fatal(err)
-		}
-		_ = merged.AppendBytes(nil)
-	}
 }
 
 func requireSequenceChecks(t *testing.T, s *SequenceReader) {
@@ -488,22 +456,22 @@ func requireRawDataChecks(t *testing.T, b []byte) {
 	t.Helper()
 
 	// check fast count
-	require.Equal(t, uint64(3), Count(1000, b))
+	require.Equal(t, uint64(3), Count(b))
 
 	// check search
-	n, found := Seek(1000, b, 1014)
+	n, _, found := Seek(1000, b, 1014)
 	require.True(t, found)
 	require.Equal(t, uint64(1015), n)
 
-	n, found = Seek(1000, b, 1015)
+	n, _, found = Seek(1000, b, 1015)
 	require.True(t, found)
 	require.Equal(t, uint64(1015), n)
 
-	_, found = Seek(1000, b, 1028)
+	_, _, found = Seek(1000, b, 1028)
 	require.False(t, found)
 
 	// check search before base num
-	n, found = Seek(1000, b, 999)
+	n, _, found = Seek(1000, b, 999)
 	require.True(t, found)
 	require.Equal(t, uint64(1000), n)
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -31,7 +32,7 @@ import (
 // ExecutionEngineBodyFetcher fetches raw block bodies. Matches a subset of
 // execution_client.ExecutionEngine to avoid an import cycle.
 type ExecutionEngineBodyFetcher interface {
-	GetBodiesByRange(ctx context.Context, start, count uint64) ([]*types.RawBody, error)
+	GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error)
 }
 
 // cachedBody stores a recently produced block body for immediate retrieval.
@@ -49,16 +50,16 @@ type ExecutionEngineReader struct {
 	engine    ExecutionEngineBodyFetcher
 	beaconCfg *clparams.BeaconChainConfig
 
-	mu            sync.RWMutex
-	cache         map[uint64]*cachedBody // block number -> body
-	highestCached uint64
+	mu         sync.RWMutex
+	cache      map[common.Hash]*cachedBody
+	cacheOrder []common.Hash
 }
 
 func NewExecutionEngineReader(ctx context.Context, engine ExecutionEngineBodyFetcher) *ExecutionEngineReader {
 	return &ExecutionEngineReader{
 		ctx:    ctx,
 		engine: engine,
-		cache:  make(map[uint64]*cachedBody),
+		cache:  make(map[common.Hash]*cachedBody),
 	}
 }
 
@@ -68,46 +69,49 @@ func (r *ExecutionEngineReader) SetBeaconChainConfig(beaconCfg *clparams.BeaconC
 
 // CacheBody stores a block body for immediate retrieval. Call this when a
 // block is produced, before the EL has committed the data to its DB.
-func (r *ExecutionEngineReader) CacheBody(number uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
+func (r *ExecutionEngineReader) CacheBody(number uint64, hash common.Hash, transactions [][]byte, withdrawals []*types.Withdrawal) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.cache[number] = &cachedBody{transactions: transactions, withdrawals: withdrawals}
-	if number > r.highestCached {
-		r.highestCached = number
+	if _, ok := r.cache[hash]; !ok {
+		r.cacheOrder = append(r.cacheOrder, hash)
 	}
-	// Evict old entries (keep last 64 blocks)
-	if len(r.cache) > 64 {
-		threshold := r.highestCached - 64
-		for k := range r.cache {
-			if k < threshold {
-				delete(r.cache, k)
-			}
-		}
+	r.cache[hash] = &cachedBody{transactions: transactions, withdrawals: withdrawals}
+	if len(r.cacheOrder) > 64 {
+		delete(r.cache, r.cacheOrder[0])
+		copy(r.cacheOrder, r.cacheOrder[1:])
+		r.cacheOrder = r.cacheOrder[:64]
 	}
 }
 
-func (r *ExecutionEngineReader) getCached(number uint64) *cachedBody {
+func (r *ExecutionEngineReader) getCached(hash common.Hash) *cachedBody {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.cache[number]
+	return r.cache[hash]
+}
+
+func (r *ExecutionEngineReader) body(number uint64, hash common.Hash) (*cachedBody, error) {
+	if cached := r.getCached(hash); cached != nil {
+		return cached, nil
+	}
+	if r.engine == nil {
+		return nil, fmt.Errorf("%w for block %d (%x)", snapshot_format.ErrExecutionBodyNotFound, number, hash)
+	}
+	bodies, err := r.engine.GetBodiesByHashes(r.ctx, []common.Hash{hash})
+	if err != nil {
+		return nil, fmt.Errorf("GetBodiesByHashes(%x): %w", hash, err)
+	}
+	if len(bodies) == 0 || bodies[0] == nil {
+		return nil, fmt.Errorf("%w for block %d (%x)", snapshot_format.ErrExecutionBodyNotFound, number, hash)
+	}
+	return &cachedBody{transactions: bodies[0].Transactions, withdrawals: bodies[0].Withdrawals}, nil
 }
 
 func (r *ExecutionEngineReader) Transactions(number uint64, hash common.Hash) (*solid.TransactionsSSZ, error) {
-	// Check cache first (handles race between beacon write and EL commit).
-	if cached := r.getCached(number); cached != nil {
-		return solid.NewTransactionsSSZFromTransactions(cached.transactions), nil
-	}
-	if r.engine == nil {
-		return solid.NewTransactionsSSZFromTransactions(nil), nil
-	}
-	bodies, err := r.engine.GetBodiesByRange(r.ctx, number, 1)
+	body, err := r.body(number, hash)
 	if err != nil {
-		return nil, fmt.Errorf("GetBodiesByRange(%d): %w", number, err)
+		return nil, err
 	}
-	if len(bodies) == 0 || bodies[0] == nil {
-		return solid.NewTransactionsSSZFromTransactions(nil), nil
-	}
-	return solid.NewTransactionsSSZFromTransactions(bodies[0].Transactions), nil
+	return solid.NewTransactionsSSZFromTransactions(body.transactions), nil
 }
 
 func (r *ExecutionEngineReader) Withdrawals(number uint64, hash common.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error) {
@@ -115,42 +119,20 @@ func (r *ExecutionEngineReader) Withdrawals(number uint64, hash common.Hash) (*s
 	if r.beaconCfg != nil {
 		maxWithdrawals = int(r.beaconCfg.MaxWithdrawalsPerPayload)
 	}
-	// Check cache first (handles race between beacon write and EL commit).
-	if cached := r.getCached(number); cached != nil {
-		ret := solid.NewStaticListSSZ[*cltypes.Withdrawal](maxWithdrawals, 44)
-		for _, w := range cached.withdrawals {
-			if w == nil {
-				continue
-			}
-			ret.Append(&cltypes.Withdrawal{
-				Index:     w.Index,
-				Validator: w.Validator,
-				Address:   w.Address,
-				Amount:    w.Amount,
-			})
-		}
-		return ret, nil
-	}
-	if r.engine == nil {
-		return solid.NewStaticListSSZ[*cltypes.Withdrawal](maxWithdrawals, 44), nil
-	}
-	bodies, err := r.engine.GetBodiesByRange(r.ctx, number, 1)
+	body, err := r.body(number, hash)
 	if err != nil {
-		return nil, fmt.Errorf("GetBodiesByRange(%d): %w", number, err)
+		return nil, err
 	}
 	ret := solid.NewStaticListSSZ[*cltypes.Withdrawal](maxWithdrawals, 44)
-	if len(bodies) == 0 || bodies[0] == nil {
-		return ret, nil
-	}
-	for _, w := range bodies[0].Withdrawals {
+	for _, w := range body.withdrawals {
 		if w == nil {
 			continue
 		}
 		ret.Append(&cltypes.Withdrawal{
-			Index:     w.Index,
-			Validator: w.Validator,
+			Index:     uint64(w.Index),
+			Validator: uint64(w.Validator),
 			Address:   w.Address,
-			Amount:    w.Amount,
+			Amount:    uint64(w.Amount),
 		})
 	}
 	return ret, nil

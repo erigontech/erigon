@@ -72,7 +72,7 @@ validate_args() {
                 exit 0
                 ;;
             --skip-mirror)
-            ## if you're running with --no-commit etc., the mirrored datadir doesn't change
+            ## if your run doesn't change the datadir, the mirror doesn't change
             ## and so you can skip this step
                 SKIP_MIRROR=true
                 shift
@@ -112,8 +112,7 @@ Benchmark script for Erigon.
 OPTIONS:
     -h, --help              Show this help message and exit
     --skip-mirror           Skip mirroring datadirs (use existing one)
-                            Useful when running with --no-commit etc. wherein
-                            no change to datadir happens
+                            Useful when the run doesn't change the datadir
     --continue-on-panic     Continue next steps even if erigon panics
                             Some flags like ERIGON_STOP_AFTER_BLOCK cause
                             intentional panics
@@ -278,8 +277,6 @@ execute_benchmark() {
     local cmd="$1"
     local datadir="$2"
     local run_number="$3"
-    local timeout_seconds=30
-    
     log_info "Starting benchmark run $run_number for $datadir"
 
     local logfile="$LOG_LOCATION/output.txt"
@@ -303,7 +300,8 @@ execute_benchmark() {
     clear_caches
     log_info "Executing Command: $cmd"
 
-    local log_file="$LOG_LOCATION/benchmark_run${run_number}_$(date +%Y%m%d_%H%M%S).log"
+    local log_file
+    log_file="$LOG_LOCATION/benchmark_run${run_number}_$(date +%Y%m%d_%H%M%S).log"
     
     if [[ "$CONTINUE_ON_ERIGON_PANIC" == "true" ]]; then
        set +e

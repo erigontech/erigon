@@ -22,10 +22,134 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OffchainLabs/go-bitfield"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/p2p"
+	"github.com/erigontech/erigon/cl/p2p/mock_services"
+	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/p2p/discover"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
+	libp2p "github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/semaphore"
 )
+
+func TestFilterNonPrivatePeerAddressesPreservesExistingLocalDiscoveryBehavior(t *testing.T) {
+	info := &peer.AddrInfo{Addrs: []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip6/::1/udp/9001/quic-v1"),
+		multiaddr.StringCast("/ip6/fc00::1/tcp/9000"),
+		multiaddr.StringCast("/ip4/127.0.0.1/udp/9001/quic-v1"),
+		multiaddr.StringCast("/ip4/10.0.0.1/tcp/9000"),
+		multiaddr.StringCast("/ip4/198.51.100.1/tcp/9000"),
+		multiaddr.StringCast("/ip6/2001:db8::1/udp/9001/quic-v1"),
+	}}
+
+	require.True(t, filterNonPrivatePeerAddresses(info))
+	require.Equal(t, []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip6/::1/udp/9001/quic-v1"),
+		multiaddr.StringCast("/ip4/127.0.0.1/udp/9001/quic-v1"),
+		multiaddr.StringCast("/ip4/198.51.100.1/tcp/9000"),
+		multiaddr.StringCast("/ip6/2001:db8::1/udp/9001/quic-v1"),
+	}, info.Addrs)
+}
+
+func TestFilterNonPrivatePeerAddressesPreservesLinkLocalEndpoints(t *testing.T) {
+	info := &peer.AddrInfo{Addrs: []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip4/169.254.1.1/tcp/9000"),
+		multiaddr.StringCast("/ip6/fe80::1/udp/9001/quic-v1"),
+	}}
+
+	require.True(t, filterNonPrivatePeerAddresses(info))
+	require.Len(t, info.Addrs, 2)
+}
+
+func TestFilterNonPrivatePeerAddressesRejectsPrivateOnlyPeer(t *testing.T) {
+	info := &peer.AddrInfo{Addrs: []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip4/10.0.0.1/tcp/9000"),
+		multiaddr.StringCast("/ip6/fc00::1/udp/9001/quic-v1"),
+	}}
+
+	require.False(t, filterNonPrivatePeerAddresses(info))
+	require.Empty(t, info.Addrs)
+}
+
+func TestListenForPeersDialsDirectPeersWithoutDiscovery(t *testing.T) {
+	local, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, local.Close()) })
+	remote, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, remote.Close()) })
+
+	peerComponent, err := multiaddr.NewComponent("p2p", remote.ID().String())
+	require.NoError(t, err)
+	directPeer := remote.Addrs()[0].Encapsulate(peerComponent).String()
+	connected := make(chan struct{}, 1)
+	local.Network().Notify(&network.NotifyBundle{
+		ConnectedF: func(_ network.Network, connection network.Conn) {
+			if connection.RemotePeer() == remote.ID() {
+				connected <- struct{}{}
+			}
+		},
+	})
+
+	controller := gomock.NewController(t)
+	p2pManager := mock_services.NewMockP2PManager(controller)
+	p2pManager.EXPECT().Host().AnyTimes().Return(local)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	unsupportedPeer := "/ip4/127.0.0.1/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT"
+	sentinel := &Sentinel{
+		ctx: ctx,
+		cfg: &SentinelConfig{P2PConfig: p2p.P2PConfig{
+			NetworkConfig: &clparams.NetworkConfig{StaticPeers: []string{unsupportedPeer, directPeer}},
+			NoDiscovery:   true,
+		}},
+		peers:      peers.NewPool(local),
+		p2p:        p2pManager,
+		connectSem: semaphore.NewWeighted(goRoutinesOpeningPeerConnections),
+	}
+
+	sentinel.listenForPeers()
+	select {
+	case <-connected:
+	case <-time.After(5 * time.Second):
+		t.Fatal("direct peer was not dialed while discovery was disabled")
+	}
+}
+
+func TestConnectWithAllPeersWaitsForDialCapacity(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	sem := semaphore.NewWeighted(1)
+	require.NoError(t, sem.Acquire(ctx, 1))
+	sentinel := &Sentinel{ctx: ctx, connectSem: sem}
+	directPeer, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/9000/p2p/16Uiu2HAmBciu61DBo623TByPbuBaGh9So6hRQfvHpCegCE71JNp9")
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- sentinel.connectWithAllPeers([]multiaddr.Multiaddr{directPeer})
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("connection batch bypassed exhausted dial capacity: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+	sem.Release(1)
+}
 
 // TestConnectSemaphoreInitialized verifies that a Sentinel's connectSem field
 // is properly initialised (not nil) and that its capacity matches
@@ -39,7 +163,7 @@ func TestConnectSemaphoreInitialized(t *testing.T) {
 	require.NotNil(t, s.connectSem, "connectSem must not be nil after construction")
 
 	// We should be able to acquire exactly goRoutinesOpeningPeerConnections tokens.
-	for i := 0; i < goRoutinesOpeningPeerConnections; i++ {
+	for i := range goRoutinesOpeningPeerConnections {
 		ok := s.connectSem.TryAcquire(1)
 		assert.True(t, ok, "TryAcquire should succeed for token %d of %d", i+1, goRoutinesOpeningPeerConnections)
 	}
@@ -49,7 +173,7 @@ func TestConnectSemaphoreInitialized(t *testing.T) {
 	assert.False(t, ok, "TryAcquire should fail when semaphore is at capacity")
 
 	// Release all so the semaphore is left clean.
-	for i := 0; i < goRoutinesOpeningPeerConnections; i++ {
+	for range goRoutinesOpeningPeerConnections {
 		s.connectSem.Release(1)
 	}
 }
@@ -86,7 +210,7 @@ func TestConnectSemaphoreBoundsConcurrency(t *testing.T) {
 	}
 
 	done := make(chan struct{}, totalGoroutines)
-	for i := 0; i < totalGoroutines; i++ {
+	for range totalGoroutines {
 		go func() {
 			defer func() { done <- struct{}{} }()
 
@@ -108,7 +232,7 @@ func TestConnectSemaphoreBoundsConcurrency(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < totalGoroutines; i++ {
+	for range totalGoroutines {
 		select {
 		case <-done:
 		case <-ctx.Done():
@@ -140,7 +264,7 @@ func TestConnectSemaphoreReleaseAndReacquire(t *testing.T) {
 	sem := semaphore.NewWeighted(int64(goRoutinesOpeningPeerConnections))
 
 	// Exhaust all tokens.
-	for i := 0; i < goRoutinesOpeningPeerConnections; i++ {
+	for i := range goRoutinesOpeningPeerConnections {
 		ok := sem.TryAcquire(1)
 		require.True(t, ok, "should acquire token %d", i+1)
 	}
@@ -160,7 +284,7 @@ func TestConnectSemaphoreReleaseAndReacquire(t *testing.T) {
 	assert.False(t, ok, "semaphore should be exhausted again after re-acquire")
 
 	// Clean up.
-	for i := 0; i < goRoutinesOpeningPeerConnections; i++ {
+	for range goRoutinesOpeningPeerConnections {
 		sem.Release(1)
 	}
 }
@@ -204,4 +328,115 @@ func TestGoRoutinesOpeningPeerConnectionsConst(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, 4, goRoutinesOpeningPeerConnections,
 		"goRoutinesOpeningPeerConnections must be 4; changing this affects concurrency bounds")
+}
+
+func TestUnderservedSubnetsBelowMeshLowWatermark(t *testing.T) {
+	var coverage [attestationSubnetCount]int
+	for i := range coverage {
+		coverage[i] = 6
+	}
+	coverage[3] = 5
+	coverage[7] = 0
+
+	require.Equal(t, []subnetSearchState{{idx: 7, wanted: 6}, {idx: 3, wanted: 1}}, underservedSubnets(&coverage))
+}
+
+func TestPeerCoveringSubnetBelowMeshLowWatermarkIsWanted(t *testing.T) {
+	var coverage [attestationSubnetCount]int
+	for i := range coverage {
+		coverage[i] = 6
+	}
+	peerSubnets := bitfield.NewBitvector64()
+	peerSubnets.SetBitAt(3, true)
+
+	require.False(t, coversUnderservedSubnet(peerSubnets, &coverage))
+	coverage[3] = 5
+	require.True(t, coversUnderservedSubnet(peerSubnets, &coverage))
+	coverage[3] = 0
+	coverage[4] = 0
+	peerSubnets.SetBitAt(3, false)
+	require.False(t, coversUnderservedSubnet(peerSubnets, &coverage))
+}
+
+// A discv5 walk that finds no node blocks in Next; the search must still end when its context does.
+func TestFindPeersForSubnetsEndsWithItsContext(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	listener, err := p2p.NewUDPv5Listener(t.Context(), &p2p.P2PConfig{IpAddr: "127.0.0.1", TmpDir: t.TempDir()},
+		discover.Config{PrivateKey: key, Log: log.Root()}, log.Root())
+	require.NoError(t, err)
+	defer listener.LocalNode().Database().Close() // Close does not close it, and Windows cannot remove an open file
+	defer listener.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	s := &Sentinel{ctx: ctx, listener: listener, cfg: &SentinelConfig{}}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.findPeersForSubnets([]subnetSearchState{{idx: 0, wanted: 1}})
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the search outlived its context")
+	}
+}
+
+func newTestDiscoveryListener(t *testing.T, bootnodes []*enode.Node) *discover.UDPv5 {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	listener, err := p2p.NewUDPv5Listener(t.Context(), &p2p.P2PConfig{IpAddr: "127.0.0.1", TmpDir: t.TempDir()},
+		discover.Config{PrivateKey: key, Bootnodes: bootnodes, Log: log.Root()}, log.Root())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		listener.Close()
+		listener.LocalNode().Database().Close() // Close does not close it, and Windows cannot remove an open file
+	})
+	return listener
+}
+
+// When discovery offers only nodes of another fork, the filter keeps rejecting them inside Next; peer discovery must
+// still end with the sentinel's context.
+func TestListenForPeersEndsWithItsContextWhileTheFilterRejectsEveryNode(t *testing.T) {
+	offFork := newTestDiscoveryListener(t, nil)
+	offFork.LocalNode().Set(enr.WithEntry("eth2", []byte{9, 9, 9, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}))
+	listener := newTestDiscoveryListener(t, []*enode.Node{offFork.Self()})
+
+	rejected := make(chan struct{}, 1)
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().CurrentForkDigest().DoAndReturn(func() (common.Bytes4, error) {
+		select {
+		case rejected <- struct{}{}:
+		default:
+		}
+		return common.Bytes4{1, 2, 3, 4}, nil
+	}).AnyTimes()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	s := &Sentinel{
+		ctx:      ctx,
+		listener: listener,
+		ethClock: clock,
+		cfg:      &SentinelConfig{P2PConfig: p2p.P2PConfig{NetworkConfig: &clparams.NetworkConfig{Eth2key: "eth2"}}},
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.listenForPeers()
+	}()
+	select {
+	case <-rejected:
+	case <-time.After(10 * time.Second):
+		t.Fatal("discovery never offered the node of another fork")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("peer discovery outlived its context")
+	}
 }

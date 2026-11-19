@@ -20,6 +20,7 @@ package shutter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -144,7 +145,7 @@ func (et *KsmEonTracker) recentEon(index EonIndex) (Eon, bool) {
 
 func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
-	blockEventC := make(chan BlockEvent)
+	blockEventC := make(chan BlockEvent, 1)
 	unregisterBlockEventObserver := et.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
 		select {
 		case <-ctx.Done(): // no-op
@@ -173,6 +174,13 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 
 	blockNum := blockEvent.LatestBlockNum
 	eon, ok, err := et.readEonAtNewBlockEvent(blockNum)
+	if errors.Is(err, bind.ErrNoCode) {
+		// A reset or unwind can precede deployment, invalidating all cached eons.
+		et.currentEon = nil
+		et.recentEons.Clear(false)
+		et.lastCleanupBlockNum = 0
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("read eon at block event (blockNum=%d): %w", blockNum, err)
 	}
@@ -191,8 +199,7 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 	return nil
 }
 
-func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, bool, error) {
-	var err error
+func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (_ Eon, _ bool, err error) {
 	var cached bool
 	startTime := time.Now()
 	defer func() {
@@ -205,7 +212,8 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, bool, err
 
 	callOpts := &bind.CallOpts{BlockNumber: uint256.NewInt(blockNum)}
 	if et.currentEon == nil {
-		numKeyperSets, err := et.ksmContract.GetNumKeyperSets(callOpts)
+		var numKeyperSets uint64
+		numKeyperSets, err = et.ksmContract.GetNumKeyperSets(callOpts)
 		if err != nil {
 			return Eon{}, false, fmt.Errorf("get num keyper sets: %w", err)
 		}
@@ -216,7 +224,8 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, bool, err
 			return Eon{}, false, nil
 		}
 
-		activationBlock, err := et.ksmContract.GetKeyperSetActivationBlock(callOpts, 0)
+		var activationBlock uint64
+		activationBlock, err = et.ksmContract.GetKeyperSetActivationBlock(callOpts, 0)
 		if err != nil {
 			return Eon{}, false, fmt.Errorf("initial get keyper set activation block: %w", err)
 		}

@@ -17,23 +17,28 @@
 package merkle_tree
 
 import (
+	"fmt"
 	"math/bits"
+	"slices"
 
 	"github.com/prysmaticlabs/gohashtree"
 
-	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
 // MerkleizeVector uses our optimized routine to hash a list of 32-byte
 // elements.
 func MerkleizeVector(elements [][32]byte, length uint64) ([32]byte, error) {
+	if uint64(len(elements)) > length {
+		return [32]byte{}, fmt.Errorf("merkleize: %d chunks exceed limit %d", len(elements), length)
+	}
 	depth := GetDepth(length)
 	// Return zerohash at depth
 	if len(elements) == 0 {
 		return ZeroHashes[depth], nil
 	}
-	for i := uint8(0); i < depth; i++ {
+	for i := range depth {
 		// Sequential
 		layerLen := len(elements)
 		if layerLen%2 == 1 {
@@ -56,6 +61,9 @@ func BitlistRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
 		size          uint64
 	)
 	unpackedRoots, size = parseBitlist(unpackedRoots, bits)
+	if size > limit {
+		return [32]byte{}, fmt.Errorf("bitlist: %d bits exceed limit %d", size, limit)
+	}
 
 	roots := packBits(unpackedRoots)
 	base, err := MerkleizeVector(roots, (limit+255)/256)
@@ -64,7 +72,7 @@ func BitlistRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
 	}
 
 	lengthRoot := Uint64Root(size)
-	return utils.Sha256(base[:], lengthRoot[:]), nil
+	return crypto.Sha256(base[:], lengthRoot[:]), nil
 }
 
 func BitvectorRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
@@ -77,7 +85,10 @@ func BitvectorRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
 }
 
 func packBits(bytes []byte) [][32]byte {
-	var chunks [][32]byte
+	if len(bytes) == 0 {
+		return nil
+	}
+	chunks := make([][32]byte, 0, (len(bytes)+31)/32)
 	for i := 0; i < len(bytes); i += 32 {
 		var chunk [32]byte
 		copy(chunk[:], bytes[i:])
@@ -86,7 +97,30 @@ func packBits(bytes []byte) [][32]byte {
 	return chunks
 }
 
+// packBitsInto packs bytes into 32-byte chunks, reusing dst's backing array.
+// The spare element beyond the packed length keeps MerkleizeVector's odd-length
+// padding append in-cap: n+1 is the longest layer its reduction produces.
+func packBitsInto(dst [][32]byte, bytes []byte) [][32]byte {
+	n := (len(bytes) + 31) / 32
+	if cap(dst) < n+1 {
+		dst = make([][32]byte, n, n+1)
+	} else {
+		dst = dst[:n]
+	}
+	for i := range n {
+		copy(dst[i][:], bytes[i*32:])
+	}
+	if rem := len(bytes) % 32; rem != 0 {
+		clear(dst[n-1][rem:])
+	}
+	return dst
+}
+
 func parseBitlist(dst, buf []byte) ([]byte, uint64) {
+	// A bitlist without its sentinel bit has no recoverable length.
+	if len(buf) == 0 || buf[len(buf)-1] == 0 {
+		return dst, 0
+	}
 	msb := uint8(bits.Len8(buf[len(buf)-1])) - 1
 	size := uint64(8*(len(buf)-1) + int(msb))
 
@@ -94,8 +128,8 @@ func parseBitlist(dst, buf []byte) ([]byte, uint64) {
 	dst[len(dst)-1] &^= uint8(1 << msb)
 
 	newLen := len(dst)
-	for i := len(dst) - 1; i >= 0; i-- {
-		if dst[i] != 0x00 {
+	for i, d := range slices.Backward(dst) {
+		if d != 0x00 {
 			break
 		}
 		newLen = i
@@ -109,10 +143,9 @@ func TransactionsListRoot(transactions [][]byte) ([32]byte, error) {
 }
 
 func ListObjectSSZRoot[T ssz.HashableSSZ](list []T, limit uint64) ([32]byte, error) {
-	globalHasher.mu2.Lock()
-	defer globalHasher.mu2.Unlock()
-	// due to go generics we cannot make a method for global hasher.
-	subLeaves := globalHasher.getBufferForSSZList(len(list))
+	// Allocate a local buffer instead of a shared global one: HashSSZ() can call
+	// ListObjectSSZRoot re-entrantly, so a shared buffer under a lock would deadlock.
+	subLeaves := make([][32]byte, len(list))
 	for i, element := range list {
 		subLeaf, err := element.HashSSZ()
 		if err != nil {
@@ -125,5 +158,5 @@ func ListObjectSSZRoot[T ssz.HashableSSZ](list []T, limit uint64) ([32]byte, err
 		return [32]byte{}, err
 	}
 	lenLeaf := Uint64Root(uint64(len(list)))
-	return utils.Sha256(vectorLeaf[:], lenLeaf[:]), nil
+	return crypto.Sha256(vectorLeaf[:], lenLeaf[:]), nil
 }

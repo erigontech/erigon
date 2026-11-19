@@ -18,14 +18,15 @@ package cltypes
 
 import (
 	"encoding/json"
+	"errors"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -68,6 +69,9 @@ func (b *BlobSidecar) UnmarshalJSON(buf []byte) error {
 	tmp.CommitmentInclusionProof = solid.NewHashVector(CommitmentBranchSize)
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
+	}
+	if tmp.Blob == nil {
+		return errors.New("blob sidecar has a null blob")
 	}
 	b.Index = tmp.Index
 	b.Blob = *tmp.Blob
@@ -140,7 +144,7 @@ func (b *BlobIdentifier) getSchema() []any {
 	}
 }
 
-func VerifyCommitmentInclusionProof(commitment common.Bytes48, commitmentInclusionProof solid.HashVectorSSZ, commitmentIndex uint64, version clparams.StateVersion, bodyRoot [32]byte) bool {
+func VerifyCommitmentInclusionProof(commitment common.Bytes48, commitmentInclusionProof solid.HashVectorSSZ, commitmentIndex uint64, bodyRoot [32]byte) bool {
 	// Initialize the merkle tree leaf
 	value, err := merkle_tree.HashTreeRoot(commitment[:])
 	if err != nil {
@@ -153,22 +157,23 @@ func VerifyCommitmentInclusionProof(commitment common.Bytes48, commitmentInclusi
 	if commitmentInclusionProof == nil || commitmentInclusionProof.Length() < bodyDepth+int(commitmentsDepth) {
 		return false
 	}
+	var curr common.Hash
 	// Start by constructing the commitments subtree
-	for i := uint64(0); i < commitmentsDepth; i++ {
-		curr := commitmentInclusionProof.Get(int(i))
+	for i := range commitmentsDepth {
+		curr = commitmentInclusionProof.Get(int(i))
 		if (commitmentIndex / utils.PowerOf2(i) % 2) == 1 {
-			value = utils.Sha256(append(curr[:], value[:]...))
+			value = crypto.Sha256(curr[:], value[:])
 		} else {
-			value = utils.Sha256(append(value[:], curr[:]...))
+			value = crypto.Sha256(value[:], curr[:])
 		}
 	}
 	// Construct up the block giga tree
 	for i := uint64(0); i < uint64(bodyDepth); i++ {
-		curr := commitmentInclusionProof.Get(int(i + commitmentsDepth))
+		curr = commitmentInclusionProof.Get(int(i + commitmentsDepth))
 		if (bIndex / utils.PowerOf2(i) % 2) == 1 {
-			value = utils.Sha256(append(curr[:], value[:]...))
+			value = crypto.Sha256(curr[:], value[:])
 		} else {
-			value = utils.Sha256(append(value[:], curr[:]...))
+			value = crypto.Sha256(value[:], curr[:])
 		}
 	}
 	return value == bodyRoot

@@ -30,31 +30,13 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
-var PoolChainConfigKey = []byte("chain_config")
-var PoolLastSeenBlockKey = []byte("last_seen_block")
-var PoolPendingBaseFeeKey = []byte("pending_base_fee")
-var PoolPendingBlobFeeKey = []byte("pending_blob_fee")
-var PoolStateVersion = []byte("state_version")
-
-func getExecutionProgress(db kv.Getter) (uint64, error) {
-	data, err := db.GetOne(kv.SyncStageProgress, []byte("Execution"))
-	if err != nil {
-		return 0, err
-	}
-
-	if len(data) == 0 {
-		return 0, nil
-	}
-
-	if len(data) < 8 {
-		return 0, fmt.Errorf("value must be at least 8 bytes, got %d", len(data))
-	}
-
-	return binary.BigEndian.Uint64(data[:8]), nil
-}
+var (
+	PoolChainConfigKey   = []byte("chain_config")
+	PoolLastSeenBlockKey = []byte("last_seen_block")
+	PoolStateVersion     = []byte("state_version")
+)
 
 func LastSeenBlock(tx kv.Getter) (uint64, error) {
 	v, err := tx.GetOne(kv.PoolInfo, PoolLastSeenBlockKey)
@@ -135,25 +117,13 @@ func PutChainConfig(tx kv.Putter, cc *chain.Config, buf []byte) error {
 	return tx.Put(kv.PoolInfo, PoolChainConfigKey, wr.Bytes())
 }
 
-func initBor(cc *chain.Config) *chain.Config {
-	if cc.Bor == nil && cc.BorJSON != nil {
-		borConfig := &borcfg.BorConfig{}
-		err := json.Unmarshal(cc.BorJSON, borConfig)
-		if err != nil {
-			panic(fmt.Errorf("Could not parse 'bor' chainspec: %w", err))
-		}
-		cc.Bor = borConfig
-	}
-	return cc
-}
-
 func SaveChainConfigIfNeed(
 	ctx context.Context,
 	coreDB kv.RoDB,
 	poolDB kv.RwDB,
 	logger log.Logger,
 ) (cc *chain.Config, blockNum uint64, err error) {
-	if err = poolDB.View(ctx, func(tx kv.Tx) error {
+	err = poolDB.View(ctx, func(tx kv.Tx) error {
 		cc, err = ChainConfig(tx)
 		if err != nil {
 			return err
@@ -163,7 +133,8 @@ func SaveChainConfigIfNeed(
 			return err
 		}
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, 0, err
 	}
 
@@ -173,7 +144,8 @@ func SaveChainConfigIfNeed(
 			if err != nil {
 				return err
 			}
-			n, err := chain.CurrentBlockNumber(tx)
+			var n *uint64
+			n, err = chain.CurrentBlockNumber(tx)
 			if err != nil {
 				return err
 			}
@@ -193,11 +165,11 @@ func SaveChainConfigIfNeed(
 		break
 	}
 
-	if err = poolDB.Update(ctx, func(tx kv.RwTx) error {
-		if err = PutChainConfig(tx, cc, nil); err != nil {
+	if err := poolDB.Update(ctx, func(tx kv.RwTx) error {
+		if err := PutChainConfig(tx, cc, nil); err != nil {
 			return err
 		}
-		if err = PutLastSeenBlock(tx, blockNum, nil); err != nil {
+		if err := PutLastSeenBlock(tx, blockNum, nil); err != nil {
 			return err
 		}
 		return nil
@@ -207,5 +179,5 @@ func SaveChainConfigIfNeed(
 	if cc.ChainID.Sign() == 0 {
 		return nil, 0, errors.New("wrong chain config")
 	}
-	return initBor(cc), blockNum, nil
+	return cc, blockNum, nil
 }

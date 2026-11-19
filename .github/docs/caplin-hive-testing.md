@@ -25,7 +25,6 @@ Location: `/erigon/mark/hive/`
 |------|--------|-----|
 | `clients/erigon/Dockerfile` | Replaced pre-built image with local build from source (alpine-based) | Build from working tree instead of pulling from Docker Hub |
 | `clients/erigon/Dockerfile.local` | Added `caplin` binary build, `EXTRA_BUILD_TAGS=nosilkworm`, extra ports | Local development builds need caplin + silkworm disabled |
-| `clients/erigon/erigon.sh` | Added `ERIGON_EXEC3_PARALLEL=true` for Amsterdam/BAL blocks | BAL validation only runs in parallel execution path |
 
 ### Key Files
 
@@ -47,7 +46,7 @@ Location: `/erigon/mark/hive/`
 ### Dockerfile.local (full)
 
 ```dockerfile
-FROM golang:1.25.0-trixie as builder
+FROM golang:1.26.0-trixie as builder
 ARG local_path=erigon
 COPY $local_path erigon
 RUN apt-get update && apt-get install -y bash build-essential ca-certificates git \
@@ -67,18 +66,6 @@ COPY enode.sh /hive-bin/enode.sh
 RUN chmod +x /erigon.sh /hive-bin/enode.sh
 EXPOSE 8545 8546 8551 30303 30303/udp 30304 30304/udp
 ENTRYPOINT ["/erigon.sh"]
-```
-
-### erigon.sh Modifications
-
-Only one addition to upstream — Amsterdam/BAL parallel execution:
-
-```bash
-# Enable parallel execution for Amsterdam (BAL) blocks.
-# BAL validation only runs in the parallel execution path.
-if [ "$HIVE_AMSTERDAM_TIMESTAMP" != "" ]; then
-    export ERIGON_EXEC3_PARALLEL=true
-fi
 ```
 
 ### Running Hive Tests Locally
@@ -184,7 +171,7 @@ participants:
     cl_log_level: "debug"
     use_separate_vc: true
     vc_type: lighthouse
-    vc_image: sigp/lighthouse:v7.0.1
+    vc_image: sigp/lighthouse:v8.1.3
 network_params:
   seconds_per_slot: 12
   deneb_fork_epoch: 0
@@ -193,7 +180,7 @@ additional_services:
 assertoor_params:
   run_stability_check: true
   run_block_proposal_check: true
-  image: ethpandaops/assertoor:v0.0.17
+  image: ethpandaops/assertoor:v0.1.2
   tests:
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/synchronized-check.yaml
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/block-proposal-check.yaml

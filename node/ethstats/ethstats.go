@@ -40,9 +40,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
@@ -56,10 +56,8 @@ const (
 	historyUpdateRange = 50
 )
 
-var (
-	// urlRegex is a regular expression for parsing netstats connection URL
-	urlRegex = regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
-)
+// urlRegex is a regular expression for parsing netstats connection URL
+var urlRegex = regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
 
 // Service implements an Ethereum netstats reporting daemon that pushes local
 // chain statistics up to a monitoring server.
@@ -78,7 +76,7 @@ type Service struct {
 	pongCh chan struct{} // Pong notifications are fed into this channel
 	histCh chan []uint64 // History request block numbers are fed into this channel
 
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 	txPool      txpoolproto.TxpoolClient
 }
 
@@ -125,8 +123,9 @@ func (w *connWrapper) Close() error {
 }
 
 // New returns a monitoring service ready for stats reporting.
-func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, blockReader services.FullBlockReader,
-	url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte, txPoolRpcClient txpoolproto.TxpoolClient) error {
+func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, blockReader dbservices.FullBlockReader,
+	url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte, txPoolRpcClient txpoolproto.TxpoolClient,
+) error {
 	// Parse the netstats connection url
 	parts := urlRegex.FindStringSubmatch(url)
 	if len(parts) != 5 {
@@ -165,17 +164,20 @@ func (s *Service) Stop() error {
 	return nil
 }
 
+// statsURL defaults to TLS and never falls back to plaintext on its own: the login sends the secret.
+func statsURL(host string) string {
+	path := host + "/api"
+	// url.Parse and url.IsAbs is unsuitable (https://github.com/golang/go/issues/19779)
+	if !strings.Contains(path, "://") {
+		return "wss://" + path
+	}
+	return path
+}
+
 // loop keeps trying to connect to the netstats server, reporting chain events
 // until termination.
 func (s *Service) loop() {
-	// Resolve the URL, defaulting to TLS, but falling back to none too
-	path := s.host + "/api"
-	urls := []string{path}
-
-	// url.Parse and url.IsAbs is unsuitable (https://github.com/golang/go/issues/19779)
-	if !strings.Contains(path, "://") {
-		urls = []string{"wss://" + path, "ws://" + path}
-	}
+	url := statsURL(s.host)
 
 	errTimer := time.NewTimer(0)
 	defer errTimer.Stop()
@@ -185,31 +187,21 @@ func (s *Service) loop() {
 		case <-s.quitCh:
 			return
 		case <-errTimer.C:
-			// Establish a websocket connection to the server on any supported URL
-			var (
-				conn *connWrapper
-				err  error
-			)
+			// Establish a websocket connection to the server
 			header := make(http.Header)
 			header.Set("origin", "http://localhost")
-			for _, url := range urls {
-				dialCtx, dialCancel := context.WithTimeout(context.Background(), 5*time.Second)
-				c, resp, dialErr := websocket.Dial(dialCtx, url, &websocket.DialOptions{HTTPHeader: header})
-				dialCancel()
-				if dialErr != nil {
-					if resp != nil {
-						resp.Body.Close()
-					}
-					continue
+			dialCtx, dialCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			c, resp, err := websocket.Dial(dialCtx, url, &websocket.DialOptions{HTTPHeader: header})
+			dialCancel()
+			if err != nil {
+				if resp != nil {
+					resp.Body.Close()
 				}
-				conn = newConnectionWrapper(c)
-				break
-			}
-			if conn == nil {
-				log.Warn("Stats server unreachable")
+				log.Warn("Stats server unreachable, only an explicit ws:// URL uses plaintext", "url", url, "err", err)
 				errTimer.Reset(10 * time.Second)
 				continue
 			}
+			conn := newConnectionWrapper(c)
 			// Authenticate the client with the server
 			if err = s.login(conn); err != nil {
 				log.Warn("Stats login failed", "err", err)
@@ -549,9 +541,9 @@ func (s *Service) reportBlock(conn *connWrapper) error {
 
 // assembleBlockStats retrieves any required metadata to report a single block
 // and assembles the block stats. If block is nil, the current head is processed.
-func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStats {
+func (s *Service) assembleBlockStats(block *types.Block, td *uint256.Int) *blockStats {
 	if td == nil {
-		td = common.Big0
+		td = new(uint256.Int)
 	}
 	// Gather the block infos from the local blockchain
 	txs := make([]txStats, 0, len(block.Transactions()))
@@ -563,7 +555,7 @@ func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStat
 		Number:     block.Header().Number,
 		Hash:       block.Hash(),
 		ParentHash: block.Header().ParentHash,
-		Timestamp:  new(big.Int).SetUint64(block.Header().Time),
+		Timestamp:  new(big.Int).SetUint64(block.Time()),
 		Miner:      block.Header().Coinbase,
 		GasUsed:    block.Header().GasUsed,
 		GasLimit:   block.Header().GasLimit,

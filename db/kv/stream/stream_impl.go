@@ -42,6 +42,7 @@ var (
 func FilterU64(it U64, filter func(k uint64) bool) *Filtered[uint64] {
 	return Filter[uint64](it, filter)
 }
+
 func FilterKV(it KV, filter func(k, v []byte) bool) *FilteredDuo[[]byte, []byte] {
 	return FilterDuo[[]byte, []byte](it, filter)
 }
@@ -56,6 +57,7 @@ func ToArrU64Must(s U64) []uint64 {
 	}
 	return arr
 }
+
 func ToArrKVMust(s KV) ([][]byte, [][]byte) {
 	keys, values, err := ToArrayDuo[[]byte, []byte](s)
 	if err != nil {
@@ -80,6 +82,7 @@ type (
 func PaginateKV(f NextPageDuo[[]byte, []byte]) *PaginatedDuo[[]byte, []byte] {
 	return PaginateDuo[[]byte, []byte](f)
 }
+
 func PaginateU64(f NextPageUno[uint64]) *Paginated[uint64] {
 	return Paginate[uint64](f)
 }
@@ -87,10 +90,35 @@ func PaginateU64(f NextPageUno[uint64]) *Paginated[uint64] {
 type TransformKV2U64Iter[K, V []byte] struct {
 	it        KV
 	transform func(K, V) (uint64, error)
+	encode    func(dst []byte, n uint64) []byte // appends the value n is stored as, for Seek; nil = no Seek
+	seekBuf   []byte
 }
 
 func TransformKV2U64[K, V []byte](it KV, transform func(K, V) (uint64, error)) *TransformKV2U64Iter[K, V] {
 	return &TransformKV2U64Iter[K, V]{it: it, transform: transform}
+}
+
+// ValueSeeker is a KV stream over the values of one key that can skip to a value, see Seeker.
+// SeekValue must not keep v: callers reuse its memory.
+type ValueSeeker interface {
+	CanSeekValue() bool
+	SeekValue(v []byte) error
+}
+
+// TransformKV2U64Seekable is TransformKV2U64 over the values of one key, stored as encode(nil, n):
+// it seeks when it supports ValueSeeker.
+func TransformKV2U64Seekable[K, V []byte](it KV, transform func(K, V) (uint64, error), encode func(dst []byte, n uint64) []byte) *TransformKV2U64Iter[K, V] {
+	return &TransformKV2U64Iter[K, V]{it: it, transform: transform, encode: encode}
+}
+
+func (m *TransformKV2U64Iter[K, V]) CanSeek() bool {
+	s, ok := m.it.(ValueSeeker)
+	return ok && m.encode != nil && s.CanSeekValue()
+}
+
+func (m *TransformKV2U64Iter[K, V]) Seek(v uint64) error {
+	m.seekBuf = m.encode(m.seekBuf[:0], v)
+	return m.it.(ValueSeeker).SeekValue(m.seekBuf)
 }
 func (m *TransformKV2U64Iter[K, V]) HasNext() bool { return m.it.HasNext() }
 func (m *TransformKV2U64Iter[K, V]) Next() (uint64, error) {
@@ -100,6 +128,7 @@ func (m *TransformKV2U64Iter[K, V]) Next() (uint64, error) {
 	}
 	return m.transform(k, v)
 }
+
 func (m *TransformKV2U64Iter[K, v]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
@@ -134,12 +163,14 @@ func UnionKV(x, y KV, limit int) KV {
 	m.advanceY()
 	return m
 }
+
 func (m *UnionKVIter) HasNext() bool {
 	if m.err != nil {
 		return true
 	}
 	return (m.limit != 0 && m.xHasNext) || (m.limit != 0 && m.yHasNext)
 }
+
 func (m *UnionKVIter) advanceX() {
 	if m.err != nil {
 		return
@@ -149,6 +180,7 @@ func (m *UnionKVIter) advanceX() {
 		m.xNextK, m.xNextV, m.err = m.x.Next()
 	}
 }
+
 func (m *UnionKVIter) advanceY() {
 	if m.err != nil {
 		return
@@ -158,6 +190,7 @@ func (m *UnionKVIter) advanceY() {
 		m.yNextK, m.yNextV, m.err = m.y.Next()
 	}
 }
+
 func (m *UnionKVIter) Next() ([]byte, []byte, error) {
 	if m.err != nil {
 		return nil, nil, m.err
@@ -236,6 +269,7 @@ func MultisetKU64(x, y KU64, limit int) KU64 { return multisetDuo[uint64](x, y, 
 func (m *MultisetDuoIter[V]) HasNext() bool {
 	return m.err != nil || (m.limit != 0 && (m.xHasNext || m.yHasNext))
 }
+
 func (m *MultisetDuoIter[V]) advanceX() {
 	if m.err != nil {
 		return
@@ -245,6 +279,7 @@ func (m *MultisetDuoIter[V]) advanceX() {
 		m.xNextK, m.xNextV, m.err = m.x.Next()
 	}
 }
+
 func (m *MultisetDuoIter[V]) advanceY() {
 	if m.err != nil {
 		return
@@ -254,6 +289,7 @@ func (m *MultisetDuoIter[V]) advanceY() {
 		m.yNextK, m.yNextV, m.err = m.y.Next()
 	}
 }
+
 func (m *MultisetDuoIter[V]) Next() ([]byte, V, error) {
 	var zero V
 	if m.err != nil {
@@ -279,6 +315,7 @@ func (m *MultisetDuoIter[V]) Next() ([]byte, V, error) {
 	m.advanceY()
 	return k, v, err
 }
+
 func (m *MultisetDuoIter[V]) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()

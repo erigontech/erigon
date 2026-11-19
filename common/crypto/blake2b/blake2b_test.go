@@ -73,7 +73,7 @@ func TestMarshal(t *testing.T) {
 		input[i] = byte(i)
 	}
 	for _, size := range []int{Size, Size256, Size384, 12, 25, 63} {
-		for i := 0; i < 256; i++ {
+		for i := range 256 {
 			h, err := New(size, nil)
 			if err != nil {
 				t.Fatalf("size=%d, len(input)=%d: error from New(%v, nil): %v", size, i, size, err)
@@ -142,7 +142,7 @@ func testHashes(t *testing.T) {
 		}
 
 		h.Reset()
-		for j := 0; j < i; j++ {
+		for j := range i {
 			h.Write(input[j : j+1])
 		}
 
@@ -185,10 +185,12 @@ func testHashes2X(t *testing.T) {
 		}
 
 		h.Reset()
-		for j := 0; j < len(input); j++ {
-			h.Write(input[j : j+1])
+		for j := range input {
+			if _, err := h.Write(input[j : j+1]); err != nil {
+				t.Fatalf("#%d (byte-by-byte write): error from Write: %v", i, err)
+			}
 		}
-		for j := 0; j < len(sum); j++ {
+		for j := range sum {
 			h = h.Clone()
 			if _, err := h.Read(sum[j : j+1]); err != nil {
 				t.Fatalf("#%d (byte-by-byte) - Read %d: error from Read: %v", i, j, err)
@@ -304,55 +306,6 @@ func TestSelfTest(t *testing.T) {
 }
 
 // Benchmarks
-
-func benchmarkSum(b *testing.B, size int, sse4, avx, avx2 bool) {
-	b.Helper()
-	// Enable the correct set of instructions
-	defer func(sse4, avx, avx2 bool) {
-		useSSE4, useAVX, useAVX2 = sse4, avx, avx2
-	}(useSSE4, useAVX, useAVX2)
-	useSSE4, useAVX, useAVX2 = sse4, avx, avx2
-
-	data := make([]byte, size)
-	b.SetBytes(int64(size))
-	for b.Loop() {
-		Sum512(data)
-	}
-}
-
-func benchmarkWrite(b *testing.B, size int, sse4, avx, avx2 bool) {
-	b.Helper()
-	// Enable the correct set of instructions
-	defer func(sse4, avx, avx2 bool) {
-		useSSE4, useAVX, useAVX2 = sse4, avx, avx2
-	}(useSSE4, useAVX, useAVX2)
-	useSSE4, useAVX, useAVX2 = sse4, avx, avx2
-
-	data := make([]byte, size)
-	h, _ := New512(nil)
-	b.SetBytes(int64(size))
-	for b.Loop() {
-		h.Write(data)
-	}
-}
-
-func BenchmarkWrite128Generic(b *testing.B) { benchmarkWrite(b, 128, false, false, false) }
-func BenchmarkWrite1KGeneric(b *testing.B)  { benchmarkWrite(b, 1024, false, false, false) }
-func BenchmarkWrite128SSE4(b *testing.B)    { benchmarkWrite(b, 128, true, false, false) }
-func BenchmarkWrite1KSSE4(b *testing.B)     { benchmarkWrite(b, 1024, true, false, false) }
-func BenchmarkWrite128AVX(b *testing.B)     { benchmarkWrite(b, 128, false, true, false) }
-func BenchmarkWrite1KAVX(b *testing.B)      { benchmarkWrite(b, 1024, false, true, false) }
-func BenchmarkWrite128AVX2(b *testing.B)    { benchmarkWrite(b, 128, false, false, true) }
-func BenchmarkWrite1KAVX2(b *testing.B)     { benchmarkWrite(b, 1024, false, false, true) }
-
-func BenchmarkSum128Generic(b *testing.B) { benchmarkSum(b, 128, false, false, false) }
-func BenchmarkSum1KGeneric(b *testing.B)  { benchmarkSum(b, 1024, false, false, false) }
-func BenchmarkSum128SSE4(b *testing.B)    { benchmarkSum(b, 128, true, false, false) }
-func BenchmarkSum1KSSE4(b *testing.B)     { benchmarkSum(b, 1024, true, false, false) }
-func BenchmarkSum128AVX(b *testing.B)     { benchmarkSum(b, 128, false, true, false) }
-func BenchmarkSum1KAVX(b *testing.B)      { benchmarkSum(b, 1024, false, true, false) }
-func BenchmarkSum128AVX2(b *testing.B)    { benchmarkSum(b, 128, false, false, true) }
-func BenchmarkSum1KAVX2(b *testing.B)     { benchmarkSum(b, 1024, false, false, true) }
 
 // These values were taken from https://blake2.net/blake2b-test.txt.
 var hashes = []string{

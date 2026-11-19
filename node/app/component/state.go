@@ -35,15 +35,15 @@ const (
 
 // UnmarshalText implements the encoding.TextUnmarshaler interface for XML/JSON
 // deserialization.
-func (e *State) UnmarshalText(text []byte) (err error) {
-	*e, err = ParseState(string(text))
+func (state *State) UnmarshalText(text []byte) (err error) {
+	*state, err = ParseState(string(text))
 	return err
 }
 
 // MarshalText implements the encoding.TextMarshaler interface for XML/JSON
 // serialization.
-func (e State) MarshalText() (text []byte, err error) {
-	return []byte(e.String()), nil
+func (state State) MarshalText() (text []byte, err error) {
+	return []byte(state.String()), nil
 }
 
 func (state State) IsConfigured() bool {

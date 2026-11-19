@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"errors"
+	"slices"
 	"sort"
 	"time"
 )
@@ -12,12 +13,26 @@ type ExecutionStat struct {
 	Duration    time.Duration
 }
 
+// complete/inProgress use dense []bool (O(1)) rather than sorted []int: completions
+// arrive out of tx order, so slice insert/delete would be O(n²) per block.
 type execStatusList struct {
-	pending    []int
-	inProgress []int
-	complete   []int
-	dependency map[int]map[int]bool
-	blocker    map[int]map[int]bool
+	pending       []int
+	inProgress    []bool
+	complete      []bool
+	dependency    map[int]map[int]bool
+	blocker       map[int]map[int]bool
+	inProgressCnt int
+	completeCnt   int
+	completeUpTo  int // completeUpTo-1 == maxComplete (contiguous-from-zero complete prefix)
+}
+
+func (m *execStatusList) ensureLen(tx int) {
+	n := tx + 1
+	if n <= len(m.complete) {
+		return
+	}
+	m.complete = slices.Grow(m.complete, n-len(m.complete))[:n]
+	m.inProgress = slices.Grow(m.inProgress, n-len(m.inProgress))[:n]
 }
 
 func insertInList(l []int, v int) []int {
@@ -29,9 +44,7 @@ func insertInList(l []int, v int) []int {
 			// already in list
 			return l
 		}
-		a := append(l[:x+1], l[x:]...)
-		a[x] = v
-		return a
+		return slices.Insert(l, x, v)
 	}
 }
 
@@ -42,38 +55,68 @@ func (m *execStatusList) takeNextPending() int {
 
 	x := m.pending[0]
 	m.pending = m.pending[1:]
-	m.inProgress = insertInList(m.inProgress, x)
+	m.setInProgress(x)
 
 	return x
 }
 
-func hasNoGap(l []int) bool {
-	return l[0]+len(l) == l[len(l)-1]+1
+// takePendingWhere removes and returns every pending tx satisfying pred, in
+// ascending order, marking each in-progress. Unlike takeNextPending (min-only,
+// contiguous), this lets validation select a non-contiguous ready subset for
+// dependency-ordered validation. Returns nil when nothing matches.
+func (m *execStatusList) takePendingWhere(pred func(tx int) bool) []int {
+	if len(m.pending) == 0 {
+		return nil
+	}
+	var taken []int
+	kept := m.pending[:0]
+	for _, tx := range m.pending {
+		if pred(tx) {
+			taken = append(taken, tx)
+			m.setInProgress(tx)
+		} else {
+			kept = append(kept, tx)
+		}
+	}
+	m.pending = kept
+	return taken
 }
 
 func (m execStatusList) maxComplete() int {
-	if len(m.complete) == 0 || m.complete[0] != 0 {
-		return -1
-	} else if m.complete[len(m.complete)-1] == len(m.complete)-1 {
-		return m.complete[len(m.complete)-1]
-	} else {
-		for i := len(m.complete) - 2; i >= 0; i-- {
-			if hasNoGap(m.complete[:i+1]) {
-				return m.complete[i]
-			}
-		}
-	}
-
-	return -1
+	return m.completeUpTo - 1
 }
 
 func (m *execStatusList) pushPending(tx int) {
+	m.ensureLen(tx)
 	m.pending = insertInList(m.pending, tx)
 }
 
+func (m *execStatusList) setInProgress(tx int) {
+	m.ensureLen(tx)
+	if !m.inProgress[tx] {
+		m.inProgress[tx] = true
+		m.inProgressCnt++
+	}
+}
+
+func (m *execStatusList) setComplete(tx int) {
+	m.ensureLen(tx)
+	if !m.complete[tx] {
+		m.complete[tx] = true
+		m.completeCnt++
+	}
+	if tx == m.completeUpTo {
+		for m.completeUpTo < len(m.complete) && m.complete[m.completeUpTo] {
+			m.completeUpTo++
+		}
+	}
+}
+
+func (m *execStatusList) inProgressCount() int { return m.inProgressCnt }
+
 func removeFromList(l []int, v int, expect bool) []int {
 	x := sort.SearchInts(l, v)
-	if x == -1 || l[x] != v {
+	if x >= len(l) || l[x] != v {
 		if expect {
 			panic(errors.New("should not happen - element expected in list"))
 		}
@@ -92,8 +135,21 @@ func removeFromList(l []int, v int, expect bool) []int {
 }
 
 func (m *execStatusList) markComplete(tx int) {
-	m.inProgress = removeFromList(m.inProgress, tx, true)
-	m.complete = insertInList(m.complete, tx)
+	m.ensureLen(tx)
+	if !m.inProgress[tx] {
+		panic(errors.New("should not happen - element expected in list"))
+	}
+	m.inProgress[tx] = false
+	m.inProgressCnt--
+	if !m.complete[tx] {
+		m.complete[tx] = true
+		m.completeCnt++
+	}
+	if tx == m.completeUpTo {
+		for m.completeUpTo < len(m.complete) && m.complete[m.completeUpTo] {
+			m.completeUpTo++
+		}
+	}
 }
 
 func (m *execStatusList) minPending() int {
@@ -105,7 +161,7 @@ func (m *execStatusList) minPending() int {
 }
 
 func (m *execStatusList) countComplete() int {
-	return len(m.complete)
+	return m.completeCnt
 }
 
 func (m *execStatusList) addDependency(blocker int, dependent int) bool {
@@ -170,16 +226,15 @@ func (m *execStatusList) removeDependency(tx int) {
 }
 
 func (m *execStatusList) clearInProgress(tx int) {
-	m.inProgress = removeFromList(m.inProgress, tx, true)
+	if tx >= len(m.inProgress) || !m.inProgress[tx] {
+		panic(errors.New("should not happen - element expected in list"))
+	}
+	m.inProgress[tx] = false
+	m.inProgressCnt--
 }
 
 func (m *execStatusList) checkInProgress(tx int) bool {
-	x := sort.SearchInts(m.inProgress, tx)
-	if x < len(m.inProgress) && m.inProgress[x] == tx {
-		return true
-	}
-
-	return false
+	return tx >= 0 && tx < len(m.inProgress) && m.inProgress[tx]
 }
 
 func (m *execStatusList) checkPending(tx int) bool {
@@ -192,12 +247,7 @@ func (m *execStatusList) checkPending(tx int) bool {
 }
 
 func (m *execStatusList) checkComplete(tx int) bool {
-	x := sort.SearchInts(m.complete, tx)
-	if x < len(m.complete) && m.complete[x] == tx {
-		return true
-	}
-
-	return false
+	return tx >= 0 && tx < len(m.complete) && m.complete[tx]
 }
 
 // getRevalidationRange: this range will be all tasks from tx (inclusive) that are not currently in progress up to the
@@ -225,9 +275,35 @@ func (m *execStatusList) pushPendingSet(set []int) {
 }
 
 func (m *execStatusList) clearComplete(tx int) {
-	m.complete = removeFromList(m.complete, tx, false)
+	if tx >= 0 && tx < len(m.complete) && m.complete[tx] {
+		m.complete[tx] = false
+		m.completeCnt--
+	}
+	if tx < m.completeUpTo {
+		m.completeUpTo = tx
+	}
 }
 
 func (m *execStatusList) clearPending(tx int) {
 	m.pending = removeFromList(m.pending, tx, false)
+}
+
+func (m *execStatusList) completeList() []int {
+	out := make([]int, 0, m.completeCnt)
+	for i, v := range m.complete {
+		if v {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+func (m *execStatusList) inProgressList() []int {
+	out := make([]int, 0, m.inProgressCnt)
+	for i, v := range m.inProgress {
+		if v {
+			out = append(out, i)
+		}
+	}
+	return out
 }

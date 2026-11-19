@@ -21,11 +21,12 @@
 package rules
 
 import (
-	"math/big"
+	"fmt"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
@@ -61,11 +62,10 @@ type ChainHeaderReader interface {
 	GetHeaderByHash(hash common.Hash) *types.Header
 
 	// GetTd retrieves the total difficulty from the database by hash and number.
-	GetTd(hash common.Hash, number uint64) *big.Int
+	GetTd(hash common.Hash, number uint64) *uint256.Int
 
 	// Number of blocks frozen in the block snapshots
 	FrozenBlocks() uint64
-	FrozenBorBlocks(align bool) uint64
 }
 
 // ChainReader defines a small collection of methods needed to access the local
@@ -80,8 +80,10 @@ type ChainReader interface {
 type SystemCall func(contract accounts.Address, data []byte) ([]byte, error)
 
 // Use more options to call contract
-type SysCallCustom func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
-type Call func(contract accounts.Address, data []byte) ([]byte, error)
+type (
+	SysCallCustom func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
+	Call          func(contract accounts.Address, data []byte) ([]byte, error)
+)
 
 // RewardKind - The kind of block reward.
 // Depending on the rules engine the allocated block reward might have
@@ -136,6 +138,10 @@ type EngineReader interface {
 
 	GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc
 
+	ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
+		gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+		receipts types.Receipts, txns types.Transactions, logger log.Logger) error
+
 	// Close terminates any background threads, DB's etc maintained by the rules engine.
 	Close() error
 }
@@ -153,7 +159,7 @@ type EngineWriter interface {
 
 	// Prepare initializes the consensus fields of a block header according to the
 	// rules of a particular engine. The changes are executed inline.
-	Prepare(chain ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error
+	Prepare(chain ChainHeaderReader, header *types.Header) error
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
 	Initialize(config *chain.Config, chain ChainHeaderReader, header *types.Header,
@@ -179,6 +185,8 @@ type EngineWriter interface {
 	//
 	// Note, the method returns immediately and will send the result async. More
 	// than one result may also be returned depending on the consensus algorithm.
+	// Seal must not access chain after returning; the caller may release its backing resources
+	// immediately.
 	Seal(chain ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error
 
 	// SealHash returns the hash of a block prior to it being sealed.
@@ -191,6 +199,52 @@ type EngineWriter interface {
 
 	// APIs returns the RPC APIs this rules engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
+}
+
+var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
+
+func DefaultBlockPostValidation(header *types.Header,
+	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
+	if gasUsed != header.GasUsed {
+		logger.Warn("gas used mismatch", "block", header.Number.Uint64(), "header", header.GasUsed, "execution", gasUsed,
+			"diff", int64(gasUsed)-int64(header.GasUsed), "txCount", len(txns), "receiptCount", len(receipts))
+		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
+			gasUsed, header.GasUsed, header.Number.Uint64(), header.Hash())
+	}
+
+	if header.BlobGasUsed != nil && blobGasUsed != *header.BlobGasUsed {
+		return fmt.Errorf("blobGasUsed by execution: %d, in header: %d, headerNum=%d, %x",
+			blobGasUsed, *header.BlobGasUsed, header.Number.Uint64(), header.Hash())
+	}
+
+	var bloom types.Bloom
+	bloomFromReceipts := checkReceipts && checkBloom && !alwaysSkipReceiptCheck
+	if checkReceipts && !alwaysSkipReceiptCheck {
+		for _, r := range receipts {
+			r.Bloom = types.CreateBloom(types.Receipts{r})
+			if bloomFromReceipts {
+				bloom.Or(&r.Bloom)
+			}
+		}
+		receiptHash := types.DeriveSha(receipts)
+		if receiptHash != header.ReceiptHash {
+			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
+				receiptHash, header.ReceiptHash, header.Number.Uint64(), header.Hash())
+		}
+	}
+
+	if checkBloom && !alwaysSkipReceiptCheck {
+		if !bloomFromReceipts {
+			bloom = types.CreateBloom(receipts)
+		}
+		if bloom != header.Bloom {
+			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", header.Bloom, bloom)
+		}
+	}
+
+	return nil
 }
 
 // PoW is a rules engine based on proof-of-work.

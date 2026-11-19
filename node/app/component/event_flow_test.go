@@ -38,11 +38,9 @@ type testPool struct {
 }
 
 func (p *testPool) Exec(task func()) {
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
+	p.wg.Go(func() {
 		task()
-	}()
+	})
 }
 
 func (p *testPool) PoolSize() int  { return 4 }
@@ -57,15 +55,17 @@ func newTestBus() (event.EventBus, *testPool) {
 
 // --- Event types ---
 
-type FileCreated struct{ Path string }
-type FileDeleted struct{ Path string }
-type DownloadComplete struct{ Path string }
+type (
+	FileCreated      struct{ Path string }
+	FileDeleted      struct{ Path string }
+	DownloadComplete struct{ Path string }
+)
 
 // --- Event-driven provider ---
 
 type eventProvider struct {
 	name     string
-	received []interface{}
+	received []any
 	mu       sync.Mutex
 	tracker  *orderTracker
 }
@@ -74,6 +74,7 @@ func (p *eventProvider) Configure(ctx context.Context, opts ...app.Option) error
 	p.tracker.record(p.name + ":configure")
 	return nil
 }
+
 func (p *eventProvider) Initialize(ctx context.Context, opts ...app.Option) error {
 	p.tracker.record(p.name + ":initialize")
 	return nil
@@ -83,6 +84,7 @@ func (p *eventProvider) Activate(ctx context.Context) error {
 	p.tracker.record(p.name + ":activate")
 	return nil
 }
+
 func (p *eventProvider) Deactivate(ctx context.Context) error {
 	p.tracker.record(p.name + ":deactivate")
 	return nil
@@ -102,10 +104,10 @@ func (p *eventProvider) HandleFileDeleted(evt FileDeleted) {
 	p.tracker.record(p.name + ":FileDeleted:" + evt.Path)
 }
 
-func (p *eventProvider) getReceived() []interface{} {
+func (p *eventProvider) getReceived() []any {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	out := make([]interface{}, len(p.received))
+	out := make([]any, len(p.received))
 	copy(out, p.received)
 	return out
 }
@@ -191,7 +193,7 @@ func TestEventLoadCompleteness(t *testing.T) {
 	require.NoError(t, bus.SubscribeAsync(handler))
 
 	const N = 10000
-	for i := 0; i < N; i++ {
+	for range N {
 		bus.Publish(FileCreated{Path: "file"})
 	}
 
@@ -211,7 +213,7 @@ func TestEventLoadMultipleSubscribers(t *testing.T) {
 	require.NoError(t, bus.SubscribeAsync(handler2))
 
 	const N = 5000
-	for i := 0; i < N; i++ {
+	for range N {
 		bus.Publish(FileCreated{Path: "file"})
 	}
 
@@ -268,7 +270,7 @@ func TestSyncHandlerTotalOrdering(t *testing.T) {
 	var order []int
 	var mu sync.Mutex
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		idx := i
 		handler := func(evt FileCreated) {
 			mu.Lock()

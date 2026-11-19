@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"errors"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -45,6 +44,8 @@ type memoryMutationCursor struct {
 	memCursor kv.RwCursorDupSort
 	// we keep the mining mutation so that we can insert new elements in db
 	mutation        *MemoryMutation
+	deletions       *tableDeletions
+	deletionTables  *map[string]*tableDeletions
 	table           string
 	currentPair     cursorEntry
 	currentDbEntry  cursorEntry
@@ -53,15 +54,26 @@ type memoryMutationCursor struct {
 	pureDupSort     bool
 }
 
-func (m *memoryMutationCursor) isTableCleared() bool {
-	return m.mutation.isTableCleared(m.table)
+func (m *memoryMutationCursor) tableDeletions() *tableDeletions {
+	if m.deletions == nil {
+		tables := m.mutation.deletions.Load()
+		if tables != nil && tables != m.deletionTables {
+			m.deletionTables = tables
+			m.deletions = (*tables)[m.table]
+		}
+	}
+	return m.deletions
 }
 
-func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte, t NextType) bool {
+func (m *memoryMutationCursor) isTableCleared() bool {
+	return m.tableDeletions().isTableCleared()
+}
+
+func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte) bool {
 	if m.pureDupSort {
-		return m.mutation.isDupDeleted(m.table, key, value)
+		return m.tableDeletions().isDupDeleted(key, value)
 	}
-	return m.mutation.isEntryDeleted(m.table, key)
+	return m.tableDeletions().isEntryDeleted(key)
 }
 
 // First move cursor to first position and return key and value accordingly.
@@ -76,7 +88,7 @@ func (m *memoryMutationCursor) First() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	if dbKey != nil && m.isEntryDeleted(dbKey, dbValue, Normal) {
+	if dbKey != nil && m.isEntryDeleted(dbKey, dbValue) {
 		if dbKey, dbValue, err = m.getNextOnDb(Normal); err != nil {
 			return nil, nil, err
 		}
@@ -107,7 +119,7 @@ func (m *memoryMutationCursor) getNextOnDb(t NextType) (key []byte, value []byte
 		return
 	}
 
-	for key != nil && value != nil && m.isEntryDeleted(key, value, t) {
+	for key != nil && value != nil && m.isEntryDeleted(key, value) {
 		switch t {
 		case Normal:
 			key, value, err = m.cursor.Next()
@@ -137,7 +149,7 @@ func (m *memoryMutationCursor) Current() ([]byte, []byte, error) {
 	if m.isTableCleared() {
 		return m.memCursor.Current()
 	}
-	return common.Copy(m.currentPair.key), common.Copy(m.currentPair.value), nil
+	return bytes.Clone(m.currentPair.key), bytes.Clone(m.currentPair.value), nil
 }
 
 func (m *memoryMutationCursor) skipIntersection(memKey, memValue, dbKey, dbValue []byte, t NextType) (newDbKey []byte, newDbValue []byte, err error) {
@@ -226,7 +238,6 @@ func (m *memoryMutationCursor) NextDup() ([]byte, []byte, error) {
 
 	if m.isPrevFromDb {
 		k, v, err := m.getNextOnDb(Dup)
-
 		if err != nil {
 			return nil, nil, err
 		}
@@ -253,7 +264,7 @@ func (m *memoryMutationCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	}
 
 	// If the entry is marked as deleted find one that is not
-	if dbKey != nil && m.isEntryDeleted(dbKey, dbValue, Normal) {
+	if dbKey != nil && m.isEntryDeleted(dbKey, dbValue) {
 		dbKey, dbValue, err = m.getNextOnDb(Normal)
 		if err != nil {
 			return nil, nil, err
@@ -281,16 +292,15 @@ func (m *memoryMutationCursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 }
 
 func (m *memoryMutationCursor) Put(k, v []byte) error {
-	return m.mutation.Put(m.table, common.Copy(k), common.Copy(v))
+	return m.mutation.Put(m.table, bytes.Clone(k), bytes.Clone(v))
 }
 
 func (m *memoryMutationCursor) Append(k []byte, v []byte) error {
-	return m.mutation.Append(m.table, common.Copy(k), common.Copy(v))
-
+	return m.mutation.Append(m.table, bytes.Clone(k), bytes.Clone(v))
 }
 
 func (m *memoryMutationCursor) AppendDup(k []byte, v []byte) error {
-	return m.memCursor.AppendDup(common.Copy(k), common.Copy(v))
+	return m.memCursor.AppendDup(bytes.Clone(k), bytes.Clone(v))
 }
 
 func (m *memoryMutationCursor) PutNoDupData(key, value []byte) error {
@@ -340,7 +350,7 @@ func (m *memoryMutationCursor) SeekBothRange(key, value []byte) ([]byte, error) 
 		return nil, err
 	}
 
-	if dbValue != nil && m.isEntryDeleted(key, dbValue, Dup) {
+	if dbValue != nil && m.isEntryDeleted(key, dbValue) {
 		_, dbValue, err = m.getNextOnDb(Dup)
 		if err != nil {
 			return nil, err
@@ -365,6 +375,11 @@ func (m *memoryMutationCursor) Last() ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if dbKey != nil && m.isEntryDeleted(dbKey, dbValue) {
+		if dbKey, dbValue, err = m.lastLiveOnDb(); err != nil {
+			return nil, nil, err
+		}
+	}
 
 	dbKey, dbValue, err = m.skipIntersection(memKey, memValue, dbKey, dbValue, Normal)
 	if err != nil {
@@ -373,13 +388,6 @@ func (m *memoryMutationCursor) Last() ([]byte, []byte, error) {
 
 	m.currentDbEntry = cursorEntry{dbKey, dbValue}
 	m.currentMemEntry = cursorEntry{memKey, memValue}
-
-	// Basic checks
-	if dbKey != nil && m.isEntryDeleted(dbKey, dbValue, Normal) {
-		m.currentDbEntry = cursorEntry{}
-		m.isPrevFromDb = false
-		return memKey, memValue, nil
-	}
 
 	if dbValue == nil {
 		m.isPrevFromDb = false
@@ -414,12 +422,39 @@ func (m *memoryMutationCursor) Last() ([]byte, []byte, error) {
 	return dbKey, dbValue, nil
 }
 
+// lastLiveOnDb returns the last backing-db entry that is not deleted on this overlay.
+// Cursors of nested memory batches do not implement Prev, so for them it falls back
+// to a forward scan.
+func (m *memoryMutationCursor) lastLiveOnDb() ([]byte, []byte, error) {
+	if _, nested := m.cursor.(*memoryMutationCursor); !nested {
+		k, v, err := m.cursor.Last()
+		for k != nil && err == nil && m.isEntryDeleted(k, v) {
+			k, v, err = m.cursor.Prev()
+		}
+		return k, v, err
+	}
+	// Non-nil buffers: Last reads a nil value as "no db entry", so an empty value must stay empty.
+	lastK, lastV, found := []byte{}, []byte{}, false
+	k, v, err := m.cursor.First()
+	for ; k != nil && err == nil; k, v, err = m.cursor.Next() {
+		if !m.isEntryDeleted(k, v) {
+			lastK, lastV, found = append(lastK[:0], k...), append(lastV[:0], v...), true
+		}
+	}
+	if err != nil || !found {
+		return nil, nil, err
+	}
+	return lastK, lastV, nil
+}
+
 func (m *memoryMutationCursor) Prev() ([]byte, []byte, error) {
 	panic("Prev is not implemented!")
 }
+
 func (m *memoryMutationCursor) PrevDup() ([]byte, []byte, error) {
 	panic("Prev is not implemented!")
 }
+
 func (m *memoryMutationCursor) PrevNoDup() ([]byte, []byte, error) {
 	panic("Prev is not implemented!")
 }
@@ -487,7 +522,11 @@ func (m *memoryMutationCursor) SeekBothExact(key, value []byte) ([]byte, []byte,
 		return nil, nil, err
 	}
 
-	if dbKey != nil && !m.mutation.isDupDeleted(m.table, key, value) {
+	// isEntryDeleted already checks pair markers for tables classified as pure DupSort.
+	// Other tables, including custom DupSort tables, need the extra pair check.
+	if dbKey != nil &&
+		!m.isEntryDeleted(key, value) &&
+		(m.pureDupSort || !m.tableDeletions().isDupDeleted(key, value)) {
 		m.currentDbEntry.key = dbKey
 		m.currentDbEntry.value = dbValue
 		m.currentMemEntry.key = key

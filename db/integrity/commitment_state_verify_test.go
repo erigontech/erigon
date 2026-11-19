@@ -17,52 +17,64 @@
 package integrity_test
 
 import (
+	"bytes"
+	"math"
 	"math/rand"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func TestCheckStateVerify(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	t.Parallel()
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
+func checkStateVerifyOnRandomWrites(t *testing.T, v3 bool) {
+	t.Helper()
 	logger := log.New()
 	ctx := t.Context()
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	// Sequential: the parallel trie leaves the last step's storage keys unreferenced by any
+	// commitment branch, which is what CheckStateVerify inspects here.
+	var opts []execctx.SharedDomainOption
+	if !v3 {
+		opts = append(opts, execctx.WithSequentialCommitment())
+	}
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, opts...)
 	require.NoError(t, err)
 	defer domains.Close()
 
+	steps := uint64(5)
+	if v3 {
+		steps = 3
+	}
 	// Generate 500 txs (5 steps with stepSize=100).
 	// Compute commitment at EVERY txNum to ensure all accounts/storage entries
 	// have their trie branch data in the same step (no boundary effects).
-	txs := stepSize * 5
+	txs := stepSize * steps
 	rnd := rand.New(rand.NewSource(42))
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -81,7 +93,7 @@ func TestCheckStateVerify(t *testing.T) {
 		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
-		storageKey := append(common.Copy(addr), loc...)
+		storageKey := append(bytes.Clone(addr), loc...)
 		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
@@ -99,7 +111,7 @@ func TestCheckStateVerify(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build snapshot files
-	err = agg.BuildFiles(txs)
+	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	endTxNum := agg.EndTxNumMinimax()
@@ -109,6 +121,22 @@ func TestCheckStateVerify(t *testing.T) {
 	// Run the state verification check
 	err = integrity.CheckStateVerify(ctx, db, true /* failFast */, 0 /* fromStep */, logger)
 	require.NoError(t, err)
+	if v3 {
+		require.NoError(t, integrity.CheckCommitmentKvDeref(ctx, db, nil, true, logger))
+		require.NoError(t, integrity.CheckCommitmentKvi(ctx, integrity.SamplerCfg{SampleRatio: 1}, db, nil, true, logger))
+		check, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
+		require.NoError(t, err)
+		require.NotZero(t, check.Records)
+		require.Equal(t, endTxNum-1, check.TxNum)
+	}
+}
+
+func TestCheckStateVerify(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	checkStateVerifyOnRandomWrites(t, false)
 }
 
 // TestCheckStateVerify_NoopWrite verifies that no-op writes (same value re-written)
@@ -119,21 +147,21 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	logger := log.New()
 	ctx := t.Context()
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -160,17 +188,17 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
-		storageKey := append(common.Copy(addr), loc...)
+		storageKey := append(bytes.Clone(addr), loc...)
 		storageVal := []byte{addr[0], loc[0]}
 		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, storageVal, txNum, nil)
 		require.NoError(t, err)
 
 		// Save one entry from step 1 (txNum 100-199) for re-writing in step range 2.
 		if txNum == 150 {
-			noopAddr = common.Copy(addr)
-			noopStorageKey = common.Copy(storageKey)
-			noopAccBuf = common.Copy(buf)
-			noopStorageVal = common.Copy(storageVal)
+			noopAddr = bytes.Clone(addr)
+			noopStorageKey = bytes.Clone(storageKey)
+			noopAccBuf = bytes.Clone(buf)
+			noopStorageVal = bytes.Clone(storageVal)
 		}
 
 		blockNum := txNum
@@ -195,7 +223,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
-		storageKey := append(common.Copy(addr), loc...)
+		storageKey := append(bytes.Clone(addr), loc...)
 		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
@@ -219,7 +247,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build snapshot files for all steps
-	err = agg.BuildFiles(400)
+	err = agg.BuildFiles(db, 400, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	endTxNum := agg.EndTxNumMinimax()
@@ -235,20 +263,20 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 // then reads the branch data directly from the DB and verifies the hash.
 // This tests whether hash verification works on DB-level data before snapshot creation.
 func TestVerifyBranchHashesFromDB(t *testing.T) {
-	t.Parallel()
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 
 	logger := log.New()
 	ctx := t.Context()
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -279,7 +307,7 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 		err = domains.DomainPut(kv.AccountsDomain, tx, addr, accBuf, txNum, nil)
 		require.NoError(t, err)
 
-		storageKey := append(common.Copy(addr), loc...)
+		storageKey := append(bytes.Clone(addr), loc...)
 		storageVal := []byte{addr[0], loc[0]}
 		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, storageVal, txNum, nil)
 		require.NoError(t, err)
@@ -334,4 +362,9 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 
 	t.Logf("Checked %d branches: %d passed, %d failed", checked, passed, failed)
 	require.Zero(t, failed, "expected all branch hashes to verify")
+}
+
+func TestCheckStateVerifyOnCommitmentV3Records(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
+	checkStateVerifyOnRandomWrites(t, true)
 }

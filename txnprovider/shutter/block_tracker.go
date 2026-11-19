@@ -24,24 +24,30 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-type currentBlockNumReader func(ctx context.Context) (*uint64, error)
-
-type BlockTracker struct {
-	logger                log.Logger
-	blockListener         *BlockListener
-	blockChangeCond       *sync.Cond
-	currentBlockNum       uint64
-	stopped               bool
-	currentBlockNumReader currentBlockNumReader
+// BlockNum and StateVersionID must come from the same execution view.
+type BlockState struct {
+	BlockNum       uint64
+	StateVersionID uint64
 }
 
-func NewBlockTracker(logger log.Logger, blockListener *BlockListener, bnReader currentBlockNumReader) *BlockTracker {
+type committedStateReader func(ctx context.Context) (BlockState, error)
+
+type BlockTracker struct {
+	logger             log.Logger
+	blockListener      *BlockListener
+	blockChangeCond    *sync.Cond
+	currentBlockNum    uint64
+	stopped            bool
+	readCommittedState committedStateReader
+}
+
+func NewBlockTracker(logger log.Logger, blockListener *BlockListener, readCommittedState committedStateReader) *BlockTracker {
 	var blockChangeMu sync.Mutex
 	return &BlockTracker{
-		logger:                logger,
-		blockListener:         blockListener,
-		blockChangeCond:       sync.NewCond(&blockChangeMu),
-		currentBlockNumReader: bnReader,
+		logger:             logger,
+		blockListener:      blockListener,
+		blockChangeCond:    sync.NewCond(&blockChangeMu),
+		readCommittedState: readCommittedState,
 	}
 }
 
@@ -58,33 +64,46 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 	}()
 
 	ctx, cancel := context.WithCancel(ctx)
-	blockEventC := make(chan BlockEvent)
-	unregisterBlockEventObserver := bt.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
+	blockEventC := make(chan BlockEvent, 1)
+	var initialState BlockState
+	onLive := func(blockEvent BlockEvent) {
 		select {
 		case <-ctx.Done(): // no-op
 		case blockEventC <- blockEvent:
 		}
-	})
+	}
+	onReplay := func(replay BlockEvent) {
+		initialState = BlockState{BlockNum: replay.LatestBlockNum, StateVersionID: replay.StateVersionID}
+	}
+	unregisterBlockEventObserver := bt.blockListener.registerObserver(onLive, onReplay)
 	defer unregisterBlockEventObserver()
 	defer cancel() // make sure we release the observer before unregistering to avoid leaks/deadlocks
 
-	bn, err := bt.currentBlockNumReader(ctx)
+	committedState, err := bt.readCommittedState(ctx)
 	if err != nil {
 		return err
 	}
-	if bn != nil {
-		bt.logger.Debug("block tracker setting initial block num", "blockNum", *bn)
-		bt.blockChangeCond.L.Lock()
-		bt.currentBlockNum = *bn
-		bt.blockChangeCond.Broadcast()
-		bt.blockChangeCond.L.Unlock()
+	// State versions order execution views across unwinds; block heights do not.
+	// The replay may also be newer than committed state because publication can precede commit.
+	if committedState.StateVersionID >= initialState.StateVersionID {
+		initialState = committedState
 	}
+	bt.logger.Debug("block tracker setting initial block num", "blockNum", initialState.BlockNum)
+	bt.blockChangeCond.L.Lock()
+	bt.currentBlockNum = initialState.BlockNum
+	bt.blockChangeCond.Broadcast()
+	bt.blockChangeCond.L.Unlock()
 
+	stateVersionID := initialState.StateVersionID
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case blockEvent := <-blockEventC:
+			if blockEvent.StateVersionID < stateVersionID {
+				continue
+			}
+			stateVersionID = blockEvent.StateVersionID
 			bt.logger.Debug("block tracker got block event", "blockNum", blockEvent.LatestBlockNum)
 			bt.blockChangeCond.L.Lock()
 			bt.currentBlockNum = blockEvent.LatestBlockNum
@@ -95,32 +114,26 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 }
 
 func (bt *BlockTracker) Wait(ctx context.Context, blockNum uint64) error {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-
+	stop := context.AfterFunc(ctx, func() {
+		// Hold the lock so cancellation cannot be lost between the check and Wait.
 		bt.blockChangeCond.L.Lock()
-		defer bt.blockChangeCond.L.Unlock()
-
-		for bt.currentBlockNum < blockNum && !bt.stopped && ctx.Err() == nil {
-			bt.blockChangeCond.Wait()
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		// note the below will wake up all waiters prematurely, but thanks to the for loop condition
-		// in the waiting goroutine the ones that still need to wait will go back to sleep
 		bt.blockChangeCond.Broadcast()
-		return ctx.Err()
-	case <-done:
-		bt.blockChangeCond.L.Lock()
-		defer bt.blockChangeCond.L.Unlock()
+		bt.blockChangeCond.L.Unlock()
+	})
+	defer stop()
 
-		if bt.currentBlockNum < blockNum && bt.stopped {
-			return errors.New("block tracker stopped")
-		}
+	bt.blockChangeCond.L.Lock()
+	defer bt.blockChangeCond.L.Unlock()
+	for bt.currentBlockNum < blockNum && !bt.stopped && ctx.Err() == nil {
+		bt.blockChangeCond.Wait()
+	}
 
+	switch {
+	case bt.currentBlockNum >= blockNum:
 		return nil
+	case ctx.Err() != nil:
+		return ctx.Err()
+	default:
+		return errors.New("block tracker stopped")
 	}
 }

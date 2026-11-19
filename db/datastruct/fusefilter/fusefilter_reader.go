@@ -1,20 +1,19 @@
 package fusefilter
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"unsafe"
 
 	"github.com/FastFilter/xorfilter"
 	"github.com/c2h5oh/datasize"
-	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common/dbg"
-	mm "github.com/erigontech/erigon/common/mmap"
+	"github.com/erigontech/erigon/common/mmap"
 )
 
 type Features uint32
@@ -34,8 +33,8 @@ type Reader struct {
 	keepInMem bool // keep it in mem insted of mmap
 
 	fileName string
-	f        *os.File
-	m        mmap.MMap
+	f        *os.File // non-nil only when this Reader mapped the file itself
+	m        []byte   // borrowed unless f != nil
 	features Features
 
 	version uint8
@@ -46,27 +45,32 @@ var (
 	MadvNormalByDefault   = dbg.EnvBool("FUSE_MADV_NORMAL", false)
 )
 
-func NewReader(filePath string) (*Reader, error) {
+func NewReader(filePath string) (_ *Reader, err error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			_ = f.Close() //nolint
+		}
+	}()
 	st, err := f.Stat()
 	if err != nil {
-		_ = f.Close() //nolint
 		return nil, err
 	}
 	sz := int(st.Size())
-	var content []byte
-	m, err := mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
+	m, err := mmap.OpenRo(f, sz)
 	if err != nil {
-		_ = f.Close() //nolint
 		return nil, err
 	}
-	content = m
-
+	defer func() {
+		if err != nil {
+			_ = m.Unmap() //nolint
+		}
+	}()
 	_, fileName := filepath.Split(filePath)
-	r, _, err := NewReaderOnBytes(content, fileName)
+	r, _, err := NewReaderOnBytes(m, fileName)
 	if err != nil {
 		return nil, err
 	}
@@ -155,70 +159,127 @@ func validateFilterGeometry(filter *xorfilter.BinaryFuse[uint8], fingerprintsLen
 }
 
 func (r *Reader) ForceInMem() datasize.ByteSize {
-	r.inner.Fingerprints = bytes.Clone(r.inner.Fingerprints)
+	if r.m == nil || r.inner == nil {
+		return 0
+	}
+	cpy := make([]byte, len(r.inner.Fingerprints)) // don't use bytes.Clone - to see ram owner on heap profiler
+	copy(cpy, r.inner.Fingerprints)
+	r.inner.Fingerprints = cpy
 	r.keepInMem = true
 	return datasize.ByteSize(len(r.inner.Fingerprints))
 }
 
 func (r *Reader) MadvWillNeed() {
-	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || r.f == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
-	if err := mm.MadviseWillNeed(r.m); err != nil {
+	if err := mmap.MadviseWillNeed(r.m); err != nil {
 		panic(err)
 	}
 }
+
 func (r *Reader) MadvNormal() {
-	if r == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || r.f == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
-	if err := mm.MadviseNormal(r.m); err != nil {
+	if err := mmap.MadviseNormal(r.m); err != nil {
+		panic(err)
+	}
+}
+
+func (r *Reader) MadvRandom() {
+	if r == nil || r.f == nil || len(r.m) == 0 || r.keepInMem {
+		return
+	}
+	if err := mmap.MadviseRandom(r.m); err != nil {
 		panic(err)
 	}
 }
 func (r *Reader) FileName() string           { return r.fileName }
 func (r *Reader) ContainsHash(v uint64) bool { return r.inner.Contains(v) }
+
+// InMem reports whether the filter is a heap copy, so a lookup reads no file page.
+func (r *Reader) InMem() bool { return r.keepInMem }
+
+// ContainsHashProbe is ContainsHash with pr first touching the three fingerprints Contains reads for v.
+func (r *Reader) ContainsHashProbe(v uint64, pr *mmap.Probe) bool {
+	if pr != nil && !r.keepInMem {
+		r.probe(v, pr)
+	}
+	return r.inner.Contains(v)
+}
+
+func (r *Reader) probe(v uint64, pr *mmap.Probe) {
+	f := r.inner
+	h := v + f.Seed
+	h ^= h >> 33
+	h *= 0xff51afd7ed558ccd
+	h ^= h >> 33
+	h *= 0xc4ceb9fe1a85ec53
+	h ^= h >> 33
+	hi, _ := bits.Mul64(h, uint64(f.SegmentCountLength))
+	h0 := uint32(hi)
+	h1 := h0 + f.SegmentLength
+	h2 := h1 + f.SegmentLength
+	h1 ^= uint32(h>>18) & f.SegmentLengthMask
+	h2 ^= uint32(h) & f.SegmentLengthMask
+	for _, i := range [3]uint32{h0, h1, h2} {
+		if int(i) < len(f.Fingerprints) {
+			pr.Touch(unsafe.Pointer(&f.Fingerprints[i]))
+		}
+	}
+}
+
 func (r *Reader) Close() {
-	if r == nil || r.f == nil {
+	if r == nil {
 		return
 	}
-	_ = r.m.Unmap() //nolint
-	_ = r.f.Close() //nolint
-	r.f = nil
+	if r.f != nil { // borrowed bytes are not ours to unmap
+		owned := mmap.Ro(r.m)
+		_ = owned.Unmap() //nolint
+		_ = r.f.Close()   //nolint
+		r.f, r.m = nil, nil
+	}
 }
 
 // ReaderSharded reads a sharded fusefilter (outer header version=1).
 // Only the shard matching keyHash >> 56 is checked on lookup.
 // shards is a value array (not pointer array) so ContainsHash needs only one pointer dereference.
 type ReaderSharded struct {
-	m         mmap.MMap // outer slice spanning header + all shard blobs, used for madvise
-	f         *os.File  // non-nil only when opened via NewReaderSharded(filePath)
+	m         []byte   // outer slice spanning header + all shard blobs, used for madvise
+	f         *os.File // non-nil only when opened via NewReaderSharded(filePath)
 	fileName  string
 	keepInMem bool // ForceInMem replaced m with an anonymous heap copy; skip madvise/munmap
 	shards    [256]Reader
 }
 
-func NewReaderSharded(filePath string) (*ReaderSharded, error) {
+func NewReaderSharded(filePath string) (_ *ReaderSharded, err error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			_ = f.Close() //nolint
+		}
+	}()
 	st, err := f.Stat()
 	if err != nil {
-		_ = f.Close() //nolint
 		return nil, err
 	}
 	sz := int(st.Size())
-	m, err := mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
+	m, err := mmap.OpenRo(f, sz)
 	if err != nil {
-		_ = f.Close() //nolint
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			_ = m.Unmap() //nolint
+		}
+	}()
 	_, fileName := filepath.Split(filePath)
 	r, _, err := NewReaderShardedOnBytes(m, fileName)
 	if err != nil {
-		_ = m.Unmap() //nolint
-		_ = f.Close() //nolint
 		return nil, err
 	}
 	r.f = f
@@ -230,14 +291,15 @@ func NewReaderSharded(filePath string) (*ReaderSharded, error) {
 func (r *ReaderSharded) FileName() string { return r.fileName }
 
 func (r *ReaderSharded) Close() {
-	if r == nil || r.f == nil {
+	if r == nil {
 		return
 	}
-	if !r.keepInMem {
-		_ = r.m.Unmap() //nolint
+	if r.f != nil { // borrowed bytes are not ours to unmap
+		owned := mmap.Ro(r.m)
+		_ = owned.Unmap() //nolint
+		_ = r.f.Close()   //nolint
+		r.f, r.m = nil, nil
 	}
-	_ = r.f.Close() //nolint
-	r.f = nil
 }
 
 func NewReaderShardedOnBytes(m []byte, fName string) (*ReaderSharded, int, error) {
@@ -285,36 +347,39 @@ func NewReaderShardedOnBytes(m []byte, fName string) (*ReaderSharded, int, error
 	return r, offset, nil
 }
 
+// InMem reports whether the filter is a heap copy, so a lookup reads no file page.
+func (r *ReaderSharded) InMem() bool {
+	for i := range r.shards {
+		if r.shards[i].inner != nil {
+			return r.shards[i].keepInMem
+		}
+	}
+	return true
+}
+
+func (r *ReaderSharded) ContainsHashProbe(v uint64, pr *mmap.Probe) bool {
+	s := &r.shards[v>>56]
+	if s.inner == nil {
+		return false
+	}
+	return s.ContainsHashProbe(v, pr)
+}
+
 func (r *ReaderSharded) ContainsHash(v uint64) bool {
 	s := &r.shards[v>>56]
 	if s.inner == nil {
 		return false
 	}
-	return s.ContainsHash(v)
+	return s.inner.Contains(v)
 }
 
-// ForceInMem clones the entire mmap region into anonymous heap memory in a
-// single allocation, then re-points each shard's Fingerprints slice into the
-// clone at the same byte offset. Avoids 256 separate allocations.
+// ForceInMem clones each shard's fingerprints into anonymous heap memory.
 func (r *ReaderSharded) ForceInMem() datasize.ByteSize {
-	if len(r.m) == 0 {
-		return 0
-	}
-	base := unsafe.Pointer(&r.m[0])
-	clone := bytes.Clone(r.m)
+	var res datasize.ByteSize
 	for i := range r.shards {
-		s := &r.shards[i]
-		if s.inner == nil || len(s.inner.Fingerprints) == 0 {
-			continue
-		}
-		off := uintptr(unsafe.Pointer(&s.inner.Fingerprints[0])) - uintptr(base)
-		ln := len(s.inner.Fingerprints)
-		s.inner.Fingerprints = clone[off : off+uintptr(ln)]
-		s.keepInMem = true
+		res += r.shards[i].ForceInMem()
 	}
-	r.m = clone
-	r.keepInMem = true
-	return datasize.ByteSize(len(clone))
+	return res
 }
 
 // MadvWillNeed hints to the OS that all shard blobs will be accessed.
@@ -324,7 +389,7 @@ func (r *ReaderSharded) MadvWillNeed() {
 	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
-	if err := mm.MadviseWillNeed(r.m); err != nil {
+	if err := mmap.MadviseWillNeed(r.m); err != nil {
 		panic(err)
 	}
 }
@@ -333,7 +398,16 @@ func (r *ReaderSharded) MadvNormal() {
 	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
-	if err := mm.MadviseNormal(r.m); err != nil {
+	if err := mmap.MadviseNormal(r.m); err != nil {
+		panic(err)
+	}
+}
+
+func (r *ReaderSharded) MadvRandom() {
+	if r == nil || len(r.m) == 0 || r.keepInMem {
+		return
+	}
+	if err := mmap.MadviseRandom(r.m); err != nil {
 		panic(err)
 	}
 }

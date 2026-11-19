@@ -8,14 +8,26 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   tests-mac-linux:
     strategy:
+      # In merge_group: cancel sibling shards on first failure so ci-gate's
+      # `needs` reach terminal state quickly and the broken PR can be evicted.
+      # In PR runs: keep all shards going so authors see the full failure
+      # picture across every shard.
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         os:
           - ubuntu-24.04
           - macos-15
           - windows-2025
+        commitment_mode:
+          - v3
+          - parallel
         include:
           # Windows GitHub-hosted runners run noticeably slower than Linux for
           # this suite; give them extra headroom to avoid marginal timeouts
@@ -25,7 +37,9 @@ jobs:
             skip_execution_tests: 'true'
           - os: macos-15
             skip_execution_tests: 'true'
+    name: tests-mac-linux (${{ matrix.os }}, ${{ matrix.commitment_mode }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
 
     steps:
       - name: Declare runners
@@ -34,25 +48,34 @@ jobs:
           echo "This workflow is being executed by this runner: $RUNNER_NAME"
 
       - name: Checkout custom actions
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
-          submodules: true
-          lfs: tests
           cleanup-space: true
           ramdisk: true
+          cache-namespace: test-all-erigon
+          build-cache-extra-key: commitment-${{ matrix.commitment_mode }}
 
-      - name: Run all tests on ${{ matrix.os }}
+      - name: Run all tests on ${{ matrix.os }} (${{ matrix.commitment_mode }} commitment)
         env:
           SKIP_FLAKY_TESTS: 'true'
           TEST_TIMEOUT: ${{ matrix.test_timeout || '20m' }}
           ERIGON_SKIP_EXECUTION_TESTS: ${{ matrix.skip_execution_tests || '' }}
+          ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
+          ERIGON_COMMITMENT_V3: ${{ matrix.commitment_mode == 'v3' && 'true' || 'false' }}
         run: |
           if ! make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"; then
+            # A failed test binary is a real result: a cold rerun only repeats it or hides a flake. A build failure,
+            # or a full disk the log reports, still takes the cache clear below; a disk failure that prints nothing
+            # (a SIGBUS on a sparse mmap) does not.
+            if grep -qE '^FAIL[[:space:]]+[^[:space:]]+[[:space:]]+[0-9.]+s' run.log && ! grep -q -e 'no space left on device' -e 'not enough space on the disk' -e '\[build failed\]' run.log; then
+              exit 1
+            fi
             # Retry after clearing the Go build cache. Low disk space can cause
             # severe, non-obvious build/test failures that don't surface a clear
             # "no space left" message. Tuning a cache size limit is too fragile;
@@ -73,4 +96,6 @@ jobs:
         if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run cancel ${{ github.run_id }} || true
+        run: |
+          echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
+          gh run cancel ${{ github.run_id }} || true

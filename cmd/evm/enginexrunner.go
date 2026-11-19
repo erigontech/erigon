@@ -17,19 +17,26 @@
 package main
 
 import (
+	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"runtime"
+	"runtime/pprof"
+	"slices"
 	"strings"
 	"sync"
 
-	"github.com/urfave/cli/v2"
+	"github.com/felixge/fgprof"
+	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 )
@@ -62,6 +69,14 @@ var engineXTestCommand = cli.Command{
 		&TimeFlag,
 		&VerbosityFlag,
 		&WorkersFlag,
+		&cli.StringFlag{
+			Name:  "pprof.cpu",
+			Usage: "directory in which to write one CPU profile per engine API request",
+		},
+		&cli.StringFlag{
+			Name:  "fgprof",
+			Usage: "directory in which to write one fgprof wall-clock profile per engine API request",
+		},
 	},
 }
 
@@ -75,7 +90,7 @@ type engineXGroupKey struct {
 	hash engineapitester.PreAllocHash
 }
 
-func engineXTestCmd(cliCtx *cli.Context) error {
+func engineXTestCmd(ctx context.Context, cliCtx *cli.Command) error {
 	if cliCtx.Int(VerbosityFlag.Name) > 0 {
 		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cliCtx.Int(VerbosityFlag.Name)), log.StderrHandler))
 	} else {
@@ -94,24 +109,28 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("invalid --run regex: %w", err)
 	}
-	workers := cliCtx.Int(WorkersFlag.Name)
-	if workers <= 0 {
-		// Knee of the wall-time vs. RAM curve on the full EEST engine_x set
-		// (~64k tests / ~36k groups): workers=8 reaches plateau speedup at
-		// ~4.3GB peak RSS. Higher values barely improve wall time and
-		// values >24 risk MDBX virtual-memory exhaustion.
-		workers = 8
+	workers := cliCtx.Uint64(WorkersFlag.Name)
+	if workers == 0 {
+		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
+	}
+	cpuProfileDir := cliCtx.String("pprof.cpu")
+	wallProfileDir := cliCtx.String("fgprof")
+	profilingEnabled := cpuProfileDir != "" || wallProfileDir != ""
+	if profilingEnabled && workers > 1 {
+		// pprof.StartCPUProfile and fgprof.Start are process-global, so
+		// concurrent workers cannot produce isolated per-request profiles.
+		return fmt.Errorf("--pprof.cpu/--fgprof require --workers=1 (got %d)", workers)
 	}
 
-	ctx, cancel := context.WithCancel(cliCtx.Context)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	groups, totalTests, err := loadEngineXGroups(path, re)
 	if err != nil {
 		return err
 	}
-	if workers > len(groups) && len(groups) > 0 {
-		workers = len(groups)
+	if workers > uint64(len(groups)) && len(groups) > 0 {
+		workers = uint64(len(groups))
 	}
 	fmt.Fprintf(os.Stderr, "Collected %d tests across %d (fork, preAllocHash) groups; running with %d workers\n", totalTests, len(groups), workers)
 
@@ -120,7 +139,27 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 		return nil
 	}
 
-	runner, err := engineapitester.NewEngineXTestRunner(ctx, log.Root(), preAllocDir)
+	runnerOpts := []engineapitester.EngineXTestRunnerOption{
+		// needed for benchmarks, to reproduce real-life node startup
+		engineapitester.WithWarmupKzgCtxOnInit(true),
+	}
+	if profilingEnabled {
+		if cpuProfileDir != "" {
+			err := os.MkdirAll(cpuProfileDir, 0o755)
+			if err != nil {
+				return fmt.Errorf("create cpu profile dir: %w", err)
+			}
+		}
+		if wallProfileDir != "" {
+			err := os.MkdirAll(wallProfileDir, 0o755)
+			if err != nil {
+				return fmt.Errorf("create wall profile dir: %w", err)
+			}
+		}
+		runnerOpts = append(runnerOpts, engineapitester.WithRequestProfileHook(makeRequestProfileHook(cpuProfileDir, wallProfileDir)))
+	}
+
+	runner, err := engineapitester.NewEngineXTestRunner(ctx, log.Root(), preAllocDir, runnerOpts...)
 	if err != nil {
 		return fmt.Errorf("create runner: %w", err)
 	}
@@ -141,14 +180,12 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 
 	timeIt := cliCtx.Bool(TimeFlag.Name)
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for w := uint64(0); w < workers; w++ {
+		wg.Go(func() {
 			for key := range groupCh {
 				runEngineXGroup(ctx, runner, key, groups[key], timeIt, resultCh)
 			}
-		}()
+		})
 	}
 
 	go func() {
@@ -172,7 +209,7 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 		results = append(results, r)
 	}
 
-	sort.Slice(results, func(i, j int) bool { return results[i].Name < results[j].Name })
+	slices.SortFunc(results, func(a, b testResult) int { return cmp.Compare(a.Name, b.Name) })
 
 	report(cliCtx, results)
 	if timeIt {
@@ -190,8 +227,8 @@ func printTimings(results []testResult) {
 			timed = append(timed, r)
 		}
 	}
-	sort.Slice(timed, func(i, j int) bool {
-		return timed[i].Stats.Time > timed[j].Stats.Time
+	slices.SortFunc(timed, func(a, b testResult) int {
+		return cmp.Compare(b.Stats.Time, a.Stats.Time)
 	})
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "=== test timings (descending) ===")
@@ -212,7 +249,10 @@ func printTimings(results []testResult) {
 // to be a valid engine-x fixture; an unmarshal error is treated as a hard
 // failure rather than silently skipped.
 func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]engineXNamedTest, int, error) {
-	files := collectFiles(path)
+	files, err := collectFiles(path)
+	if err != nil {
+		return nil, 0, err
+	}
 	groups := make(map[engineXGroupKey][]engineXNamedTest)
 	total := 0
 	for _, fname := range files {
@@ -243,7 +283,7 @@ func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]en
 // isUnderPreAlloc reports whether any directory component of p is named
 // "pre_alloc" — those are pre-allocation inputs, not test fixtures.
 func isUnderPreAlloc(p string) bool {
-	for _, c := range strings.Split(filepath.ToSlash(p), "/") {
+	for c := range strings.SplitSeq(filepath.ToSlash(p), "/") {
 		if c == "pre_alloc" {
 			return true
 		}
@@ -273,22 +313,118 @@ func runEngineXGroup(
 	}()
 	for _, t := range tests {
 		r := testResult{Name: t.name, Pass: true}
+		// timedExec(bench=false): single execution with memstats. We
+		// deliberately don't expose bench=true (testing.Benchmark loop) for
+		// engine_x tests because NewPayload + FCU are idempotent for a block
+		// hash the EL has already processed — iterations 2..N would
+		// short-circuit through the already-known-block fast path instead of
+		// re-executing.
+		testCtx := engineapitester.ContextWithTestName(ctx, t.name)
 		var err error
 		if timeIt {
 			var stats execStats
 			_, stats, err = timedExec(false, func() ([]byte, uint64, error) {
-				return nil, 0, runner.Run(ctx, t.def)
+				return nil, 0, runner.Run(testCtx, t.def)
 			})
 			if err == nil {
 				r.Stats = &stats
 			}
 		} else {
-			err = runner.Run(ctx, t.def)
+			err = runner.Run(testCtx, t.def)
 		}
 		if err != nil {
 			r.Pass = false
 			r.Error = err.Error()
 		}
 		resultCh <- r
+	}
+}
+
+// safeFilenameRe matches characters that are unsafe in filenames across
+// macOS/Linux/Windows. Replaced with '_' in profileFilename so paths derived
+// from EEST test names (which contain `[`, `]`, `:`, `/`, ` `, etc.) remain
+// usable.
+var safeFilenameRe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+// maxFilenameLen is the file name limit of common filesystems (NAME_MAX).
+const maxFilenameLen = 255
+
+func profileFilename(dir, kind, id, ext string) string {
+	name, suffix := kind+"__"+safeFilenameRe.ReplaceAllString(id, "_"), "."+ext
+	if len(name)+len(suffix) > maxFilenameLen {
+		sum := sha256.Sum256([]byte(name))
+		tag := "_" + hex.EncodeToString(sum[:8])
+		name = name[:maxFilenameLen-len(suffix)-len(tag)] + tag
+	}
+	return filepath.Join(dir, name+suffix)
+}
+
+// makeRequestProfileHook returns a hook that writes one CPU profile and/or
+// one fgprof profile per engine API request, keyed by the request kind +
+// per-request id supplied by the runner. The hook holds an internal mutex so
+// concurrent invocations serialise on the process-global pprof state — in
+// practice callers should pair profiling with --workers=1.
+func makeRequestProfileHook(cpuDir, wallDir string) engineapitester.RequestProfileHook {
+	var mu sync.Mutex
+	return func(kind, id string) func() {
+		mu.Lock()
+		var cpuFile, wallFile *os.File
+		var stopFgprof func() error
+		if cpuDir != "" {
+			path := profileFilename(cpuDir, kind, id, "pprof.cpu")
+			f, err := os.Create(path)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "create cpu profile %s: %v\n", path, err)
+			} else {
+				err = pprof.StartCPUProfile(f)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "start cpu profile %s: %v\n", path, err)
+					f.Close()
+				} else {
+					cpuFile = f
+				}
+			}
+		}
+		if wallDir != "" {
+			path := profileFilename(wallDir, kind, id, "fgprof")
+			f, err := os.Create(path)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "create fgprof %s: %v\n", path, err)
+			} else {
+				stopFgprof = fgprof.Start(f, fgprof.FormatPprof)
+				wallFile = f
+			}
+		}
+		return func() {
+			defer mu.Unlock()
+			if cpuFile != nil {
+				pprof.StopCPUProfile()
+				cpuFile.Close()
+			}
+			if stopFgprof != nil {
+				stopWallProfile(stopFgprof, wallFile)
+			}
+		}
+	}
+}
+
+// stopWallProfile removes the profile of a request that ended before fgprof's first tick:
+// fgprof v0.9.5 divides by its zero sample rate there, and such a profile has no samples.
+func stopWallProfile(stop func() error, f *os.File) {
+	defer func() {
+		r := recover()
+		f.Close()
+		if r == nil {
+			return
+		}
+		if err, ok := r.(runtime.Error); !ok || !strings.Contains(err.Error(), "divide by zero") {
+			panic(r)
+		}
+		if err := dir.RemoveFile(f.Name()); err != nil {
+			fmt.Fprintf(os.Stderr, "remove empty fgprof profile: %v\n", err)
+		}
+	}()
+	if err := stop(); err != nil {
+		fmt.Fprintf(os.Stderr, "stop fgprof: %v\n", err)
 	}
 }

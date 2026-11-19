@@ -26,19 +26,22 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -46,14 +49,36 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/rulesconfig"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
 // A BlockTest checks handling of entire blocks.
 type BlockTest struct {
-	json            btJSON
-	br              services.FullBlockReader
-	ExperimentalBAL bool
+	json                  btJSON
+	br                    dbservices.FullBlockReader
+	ExperimentalBAL       bool
+	ExecWorkers           int
+	ExecutionPathReporter func(ethconfig.BlockExecutionPath)
+	// Rejections lists the blocks the last run rejected, in fixture order.
+	Rejections []Rejection
+	// deliveredAccessLists maps each block delivered with a list to whether
+	// that list was dropped.
+	deliveredAccessLists sync.Map
+}
+
+// A Rejection is a block or payload the client rejected, at its index in the
+// fixture, with the client's own error.
+type Rejection struct {
+	Index int          `json:"index"`
+	Hash  *common.Hash `json:"hash,omitempty"`
+	Error string       `json:"error"`
+}
+
+// Reject records that the block or payload at index was rejected with err.
+func (bt *BlockTest) Reject(index int, hash *common.Hash, err string) {
+	bt.Rejections = append(bt.Rejections, Rejection{Index: index, Hash: hash, Error: err})
 }
 
 // UnmarshalJSON implements json.Unmarshaler interface.
@@ -76,7 +101,46 @@ type btBlock struct {
 	ExpectException string
 	Rlp             string
 	UncleHeaders    []*btHeader
-	BlockAccessList btBlockAccessList `json:"blockAccessList"`
+	// The access list stays raw until accessList decodes it, so one that cannot
+	// be decoded is dropped instead of failing the fixture.
+	BlockAccessList jsoniter.RawMessage `json:"blockAccessList"`
+	// An expected-invalid block's access list is only in rlp_decoded.
+	RlpDecoded *struct {
+		BlockAccessList jsoniter.RawMessage `json:"blockAccessList"`
+	} `json:"rlp_decoded"`
+}
+
+// accessList returns the block's access list, or dropped when it cannot be
+// decoded or its hash differs from the header's, as sync drops a peer's. A
+// list the header commits to is returned even if malformed.
+func (bb *btBlock) accessList(header *types.Header) (sidecar *types.BlockAccessListSidecar, dropped bool) {
+	list, err := decodeAccessList(bb.BlockAccessList)
+	if err == nil && len(list) == 0 && bb.RlpDecoded != nil {
+		list, err = decodeAccessList(bb.RlpDecoded.BlockAccessList)
+	}
+	if err != nil {
+		return nil, true
+	}
+	sidecar = types.NewBlockAccessListSidecar(list.toBAL())
+	if sidecar == nil {
+		return nil, false
+	}
+	if header.BlockAccessListHash == nil {
+		return nil, true
+	}
+	hash, err := sidecar.Hash()
+	if err != nil || hash != *header.BlockAccessListHash {
+		return nil, true
+	}
+	return sidecar, false
+}
+
+func decodeAccessList(raw jsoniter.RawMessage) (list btBlockAccessList, err error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	err = jsoniter.ConfigFastest.Unmarshal(raw, &list)
+	return list, err
 }
 
 // btBlockAccessList and related types for parsing block access list data from test JSON.
@@ -121,17 +185,18 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 		return nil
 	}
 	result := make(types.BlockAccessList, len(bal))
-	for i, ac := range bal {
+	for i := range bal {
+		ac := &bal[i]
 		entry := &types.AccountChanges{
-			Address:        accounts.InternAddress(ac.Address),
-			StorageChanges: make([]*types.SlotChanges, 0, len(ac.StorageChanges)),
-			StorageReads:   make([]accounts.StorageKey, 0, len(ac.StorageReads)),
+			Address:        ac.Address,
+			StorageChanges: make([]types.SlotChanges, 0, len(ac.StorageChanges)),
+			StorageReads:   make([]common.Hash, 0, len(ac.StorageReads)),
 			BalanceChanges: make([]*types.BalanceChange, 0, len(ac.BalanceChanges)),
 			NonceChanges:   make([]*types.NonceChange, 0, len(ac.NonceChanges)),
 			CodeChanges:    make([]*types.CodeChange, 0, len(ac.CodeChanges)),
 		}
 		for _, sc := range ac.StorageChanges {
-			slotChanges := &types.SlotChanges{
+			slotChanges := types.SlotChanges{
 				Slot:    accounts.InternKey(common.BytesToHash(sc.Slot)),
 				Changes: make([]*types.StorageChange, 0, len(sc.SlotChanges)),
 			}
@@ -144,7 +209,7 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 			entry.StorageChanges = append(entry.StorageChanges, slotChanges)
 		}
 		for _, sr := range ac.StorageReads {
-			entry.StorageReads = append(entry.StorageReads, accounts.InternKey(common.BytesToHash(sr)))
+			entry.StorageReads = append(entry.StorageReads, common.BytesToHash(sr))
 		}
 		for _, bc := range ac.BalanceChanges {
 			entry.BalanceChanges = append(entry.BalanceChanges, &types.BalanceChange{
@@ -164,7 +229,7 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 				Bytecode: cc.NewCode,
 			})
 		}
-		result[i] = entry
+		result[i] = *entry
 	}
 	return result
 }
@@ -212,27 +277,51 @@ type btHeaderMarshaling struct {
 }
 
 func (bt *BlockTest) Run(t *testing.T) error {
+	_, err := bt.RunWithTester(t)
+	return err
+}
+
+// newTester builds the ExecModuleTester for this block test. tb may be nil for
+// CLI usage, in which case the caller owns the tester's lifecycle and MUST Close it.
+func (bt *BlockTest) newTester(tb testing.TB) (*execmoduletester.ExecModuleTester, error) {
 	config, ok := testforks.Forks[bt.json.Network]
 	if !ok {
-		return testforks.UnsupportedForkError{Name: bt.json.Network}
+		return nil, testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
 	mOpts := []execmoduletester.Option{
 		execmoduletester.WithGenesisSpec(bt.genesis(config)),
 		execmoduletester.WithEngine(engine),
+		execmoduletester.WithoutSystemContracts(),
 	}
 	if bt.ExperimentalBAL {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
 	}
-	m := execmoduletester.New(t, mOpts...)
-
-	bt.br = m.BlockReader
-	// import pre accounts & construct test genesis block & state root
-	if m.Genesis.Hash() != bt.json.Genesis.Hash {
-		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
+	if bt.ExecWorkers > 0 {
+		mOpts = append(mOpts, execmoduletester.WithExecWorkerCount(bt.ExecWorkers))
 	}
-	if m.Genesis.Root() != bt.json.Genesis.StateRoot {
-		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
+	if report := bt.ExecutionPathReporter; report != nil {
+		mOpts = append(mOpts, execmoduletester.WithExecutionPathReporter(func(p ethconfig.BlockExecutionPath) {
+			// A block delivered without a list keeps the executor's reason.
+			if dropped, delivered := bt.deliveredAccessLists.Load(p.Hash); delivered {
+				switch {
+				case dbg.IgnoreBAL:
+					p.Reason = "withheld"
+				case dropped.(bool):
+					p.Reason = "bad-access-list"
+				}
+			}
+			report(p)
+		}))
+	}
+	return execmoduletester.New(tb, mOpts...), nil
+}
+
+// runChecks imports the test blocks into m and validates the result against the
+// fixture (genesis, head block hash, post-state, imported headers).
+func (bt *BlockTest) runChecks(m *execmoduletester.ExecModuleTester) error {
+	if err := bt.validateGenesis(m); err != nil {
+		return err
 	}
 
 	validBlocks, err := bt.insertBlocks(m)
@@ -246,6 +335,26 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	}
 	defer tx.Rollback()
 
+	if err := bt.validateHeadAndPostState(m, tx); err != nil {
+		return err
+	}
+	return bt.validateImportedHeaders(tx, validBlocks, m)
+}
+
+func (bt *BlockTest) validateGenesis(m *execmoduletester.ExecModuleTester) error {
+	bt.br = m.BlockReader
+	genesisHash := m.Genesis.Hash()
+	if genesisHash != bt.json.Genesis.Hash {
+		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", genesisHash[:6], bt.json.Genesis.Hash[:6])
+	}
+	genesisRoot := m.Genesis.Root()
+	if genesisRoot != bt.json.Genesis.StateRoot {
+		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", genesisRoot[:6], bt.json.Genesis.StateRoot[:6])
+	}
+	return nil
+}
+
+func (bt *BlockTest) validateHeadAndPostState(m *execmoduletester.ExecModuleTester, tx kv.TemporalTx) error {
 	cmlast := rawdb.ReadHeadBlockHash(tx)
 	if common.Hash(bt.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
@@ -254,50 +363,62 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	if err := bt.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %w", err)
 	}
+	return nil
+}
 
-	return bt.validateImportedHeaders(tx, validBlocks, m)
+// RunWithTester runs the block test and returns the ExecModuleTester it built.
+// The returned tester's lifetime is bound to t (via t.Cleanup); callers MUST NOT Close it.
+func (bt *BlockTest) RunWithTester(t *testing.T) (*execmoduletester.ExecModuleTester, error) {
+	m, err := bt.newTester(t)
+	if err != nil {
+		return nil, err
+	}
+	if err := bt.runChecks(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// RunWithTesterCLI is the CLI counterpart of RunWithTester: it builds the tester
+// with a nil testing.TB and returns it even on failure so the caller owns its
+// lifecycle and MUST Close it.
+func (bt *BlockTest) RunWithTesterCLI() (*execmoduletester.ExecModuleTester, error) {
+	m, err := bt.newTester(nil)
+	if err != nil {
+		return nil, err
+	}
+	return m, bt.runChecks(m)
 }
 
 // RunCLI executes the test without requiring a testing.T context, suitable for CLI usage.
 func (bt *BlockTest) RunCLI() error {
-	config, ok := testforks.Forks[bt.json.Network]
-	if !ok {
-		return testforks.UnsupportedForkError{Name: bt.json.Network}
+	m, err := bt.RunWithTesterCLI()
+	if m != nil {
+		defer m.Close()
 	}
-	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(bt.genesis(config)), execmoduletester.WithEngine(engine))
-	defer m.Close()
+	return err
+}
 
-	bt.br = m.BlockReader
-	// import pre accounts & construct test genesis block & state root
-	if m.Genesis.Hash() != bt.json.Genesis.Hash {
-		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
-	}
-	if m.Genesis.Root() != bt.json.Genesis.StateRoot {
-		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
-	}
-
-	validBlocks, err := bt.insertBlocks(m)
+// RunCLIWith is RunCLI with deliver importing the chain in place of the
+// test's blocks.
+func (bt *BlockTest) RunCLIWith(deliver func(m *execmoduletester.ExecModuleTester) error) error {
+	m, err := bt.newTester(nil)
 	if err != nil {
 		return err
 	}
-
+	defer m.Close()
+	if err := bt.validateGenesis(m); err != nil {
+		return err
+	}
+	if err := deliver(m); err != nil {
+		return err
+	}
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	cmlast := rawdb.ReadHeadBlockHash(tx)
-	if common.Hash(bt.json.BestBlock) != cmlast {
-		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
-	}
-	newDB := state.New(m.NewStateReader(tx))
-	if err := bt.validatePostState(newDB); err != nil {
-		return fmt.Errorf("post state validation failed: %w", err)
-	}
-
-	return bt.validateImportedHeaders(tx, validBlocks, m)
+	return bt.validateHeadAndPostState(m, tx)
 }
 
 func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
@@ -342,40 +463,62 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 	for bi, b := range bt.json.Blocks {
 		cb, err := b.decode()
 		if err != nil {
+			bt.Reject(bi, nil, err.Error())
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {
 				return nil, fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
 			}
 		}
-		var balBytes []byte
-		if len(b.BlockAccessList) > 0 {
-			bal := b.BlockAccessList.toBAL()
-			balBytes, err = types.EncodeBlockAccessListBytes(bal)
+		// RLP decoding worked, try to insert into chain:
+		accessList, dropped := b.accessList(cb.HeaderNoCopy())
+		cb = types.NewBlockFromNetwork(cb.HeaderNoCopy(), cb.Body(), accessList)
+		if accessList != nil || dropped {
+			bt.deliveredAccessLists.Store(cb.Hash(), dropped)
+		}
+		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb}
+		var previousHead *types.Header
+		if b.BlockHeader == nil {
+			previousHead, err = m.ExecModule.CurrentHeader(m.Ctx)
 			if err != nil {
-				return nil, fmt.Errorf("block #%v encode block access list: %w", cb.Number(), err)
+				return nil, err
 			}
 		}
-		// RLP decoding worked, try to insert into chain:
-		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb, BlockAccessLists: [][]byte{balBytes}}
-
 		err1 := m.InsertChain(chain)
 		if err1 != nil {
+			hash := cb.Hash()
+			bt.Reject(bi, &hash, err1.Error())
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
 			} else {
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err1)
 			}
-		} else if b.BlockHeader == nil {
+		}
+		if b.BlockHeader == nil {
 			isCanonical, err := bt.isCanonical(m, cb)
 			if err != nil {
 				return nil, err
 			}
+			if isCanonical && !m.ChainConfig.IsByzantium(cb.NumberU64()) {
+				// Staged execution does not retain the per-transaction post-state roots needed
+				// for legacy receipt tries, so use the slower receipt generator to reconstruct them.
+				receiptHash, err := bt.preByzantiumReceiptHash(m, cb)
+				if err != nil {
+					return nil, err
+				}
+				if receiptHash != cb.ReceiptHash() {
+					hash := cb.Hash()
+					bt.Reject(bi, &hash, fmt.Sprintf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
+						receiptHash, cb.ReceiptHash(), cb.NumberU64(), hash))
+					if err := restoreForkChoice(m, previousHead.Hash()); err != nil {
+						return nil, err
+					}
+					continue
+				}
+			}
 			if isCanonical {
 				return nil, fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
 			}
-		}
-		if b.BlockHeader == nil {
 			continue
 		}
 		// validate RLP decoding by checking all values against test file JSON
@@ -385,6 +528,32 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 		validBlocks = append(validBlocks, b)
 	}
 	return validBlocks, nil
+}
+
+func (bt *BlockTest) preByzantiumReceiptHash(m *execmoduletester.ExecModuleTester, block *types.Block) (common.Hash, error) {
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer tx.Rollback()
+	receipts, err := m.ReceiptsReader.GetReceipts(m.Ctx, m.ChainConfig, tx, block, eth.ReceiptsOpts{})
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return types.DeriveSha(receipts), nil
+}
+
+func restoreForkChoice(m *execmoduletester.ExecModuleTester, headHash common.Hash) error {
+	m.ExecModule.WaitIdle(m.Ctx)
+	result, err := m.ExecModule.UpdateForkChoice(m.Ctx, headHash, headHash, headHash)
+	if err != nil {
+		return err
+	}
+	m.ExecModule.WaitIdle(m.Ctx)
+	if result.Status != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("restore fork choice failed, status: %s, error: %s", result.Status, result.ValidationError)
+	}
+	return nil
 }
 
 // isCanonical reports whether block is the canonical block at its height.
@@ -515,7 +684,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 			return fmt.Errorf("account balance mismatch for addr: %x, want: %d, have: %d", addr, acct.Balance, &balance2)
 		}
 		for loc, val := range acct.Storage {
-			val1 := uint256.NewInt(0).SetBytes(val.Bytes())
+			val1 := uint256.NewInt(0).SetBytes(val[:])
 			val2, _ := statedb.GetState(address, accounts.InternKey(loc))
 			if !val1.Eq(&val2) {
 				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, &val2)

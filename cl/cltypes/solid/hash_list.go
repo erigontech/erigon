@@ -17,12 +17,14 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/ssz"
 )
@@ -40,27 +42,27 @@ func NewHashList(c int) HashListSSZ {
 	}
 }
 
-func (arr *hashList) Bytes() []byte {
-	return arr.u[:arr.l*length.Hash]
+func (h *hashList) Bytes() []byte {
+	return h.u[:h.l*length.Hash]
 }
 
-func (arr *hashList) MarshalJSON() ([]byte, error) {
-	list := make([]common.Hash, arr.l)
-	for i := 0; i < arr.l; i++ {
-		list[i] = arr.Get(i)
+func (h *hashList) MarshalJSON() ([]byte, error) {
+	list := make([]common.Hash, h.l)
+	for i := 0; i < h.l; i++ {
+		list[i] = h.Get(i)
 	}
 	return json.Marshal(list)
 }
 
-func (arr *hashList) UnmarshalJSON(buf []byte) error {
+func (h *hashList) UnmarshalJSON(buf []byte) error {
 	var list []common.Hash
 
 	if err := json.Unmarshal(buf, &list); err != nil {
 		return err
 	}
-	arr.Clear()
+	h.Clear()
 	for _, elem := range list {
-		arr.Append(elem)
+		h.Append(elem)
 	}
 	return nil
 }
@@ -126,8 +128,11 @@ func (h *hashList) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf)%length.Hash > 0 {
 		return ssz.ErrBadDynamicLength
 	}
+	if l := len(buf) / length.Hash; l > h.c {
+		return fmt.Errorf("hash list length exceeds limit: %d > %d", l, h.c)
+	}
 	h.MerkleTree = nil
-	h.u = common.Copy(buf)
+	h.u = bytes.Clone(buf)
 	h.l = len(h.u) / length.Hash
 	return nil
 }
@@ -170,12 +175,15 @@ func (h *hashList) hashVectorSSZ() ([32]byte, error) {
 }
 
 func (h *hashList) HashSSZ() ([32]byte, error) {
+	if h.l > h.c {
+		return [32]byte{}, fmt.Errorf("hash list length exceeds limit: %d > %d", h.l, h.c)
+	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(h.l))
 	coreRoot, err := h.hashVectorSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}
-	return utils.Sha256(coreRoot[:], lengthRoot[:]), nil
+	return crypto.Sha256(coreRoot[:], lengthRoot[:]), nil
 }
 
 func (h *hashList) Range(fn func(int, common.Hash, int) bool) {

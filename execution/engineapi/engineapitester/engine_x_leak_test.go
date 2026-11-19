@@ -125,7 +125,8 @@ func printSample(t *testing.T, iter int) {
 	require.NoError(t, err)
 	mapsLines := bytes.Count(mapsBytes, []byte{'\n'})
 
-	fmt.Printf("%d,%d,%d,%d,%d,%d\n",
+	fmt.Printf(
+		"%d,%d,%d,%d,%d,%d\n",
 		iter,
 		rssKb/1024,
 		vmKb/1024/1024,
@@ -136,7 +137,7 @@ func printSample(t *testing.T, iter int) {
 }
 
 func procStatusKb(s, key string) int {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if !strings.HasPrefix(line, key) {
 			continue
 		}

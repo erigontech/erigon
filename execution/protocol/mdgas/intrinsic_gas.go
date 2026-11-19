@@ -20,6 +20,8 @@
 package mdgas
 
 import (
+	"bytes"
+
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
@@ -30,34 +32,52 @@ type IntrinsicGasCalcArgs struct {
 	AuthorizationsLen  uint64
 	AccessListLen      uint64
 	StorageKeysLen     uint64
-	CostPerStateByte   uint64
 	IsContractCreation bool
+	IsSelfTransfer     bool
+	HasValue           bool
 	IsEIP2             bool
 	IsEIP2028          bool
 	IsEIP3860          bool
 	IsEIP7623          bool
 	IsEIP7976          bool
 	IsEIP7981          bool
-	IsEIP8037          bool
-	IsAATxn            bool
+	IsEIP2780          bool
 }
 
 type IntrinsicGasCalcResult struct {
-	RegularGas   uint64
+	ExecutionGas uint64
 	FloorGasCost uint64
-	StateGas     uint64
+}
+
+type FrameIntrinsicGasCalcArgs struct {
+	FramesLen         uint64
+	KeyedNoncesLen    uint64
+	ValueTransfersLen uint64
+	SignatureGas      uint64
+	DataLen           uint64
+	DataNonZeroLen    uint64
+}
+
+// CalcFrameIntrinsicGas charges transaction overhead before any frame executes.
+// Keyed-nonce reads and writes are prepaid here; first-use storage creation is
+// charged separately to the state-gas budget of the frame that approves payment.
+func CalcFrameIntrinsicGas(args FrameIntrinsicGasCalcArgs) IntrinsicGasCalcResult {
+	base := params.FrameIntrinsicGas + params.FrameOverheadGas*args.FramesLen
+	base += args.KeyedNoncesLen * (params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038)
+	base += args.ValueTransfersLen*params.TxValueCostEIP2780 + args.SignatureGas
+	dataGas := (args.DataLen-args.DataNonZeroLen)*params.TxDataZeroGas + args.DataNonZeroLen*params.TxDataNonZeroGasEIP2028
+	return IntrinsicGasCalcResult{
+		ExecutionGas: base + dataGas,
+		FloorGasCost: base + params.TxTotalCostFloorPerTokenEIP7976*params.TxStandardTokensPerByte*args.DataLen,
+	}
 }
 
 // CountNonZeroBytes returns the number of non-zero bytes in data.
 func CountNonZeroBytes(data []byte) int {
-	count := 0
-	for _, b := range data {
-		if b != 0 {
-			count++
-		}
-	}
-	return count
+	return len(data) - bytes.Count(data, zeroByte)
 }
+
+var zeroByte = []byte{0}
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
 // It counts the non-zero bytes in args.Data and then calls CalcIntrinsicGas.
@@ -72,18 +92,27 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	var result IntrinsicGasCalcResult
 	dataLen := uint64(len(args.Data))
 	// Set the starting gas for the raw transaction
-	if args.IsEIP8037 && args.IsContractCreation {
-		// EIP-8037: GAS_CREATE = 112*cpsb (state) + 9000 (regular), plus TxGas (21000)
-		result.RegularGas = params.TxGas + params.CreateGasEIP8037
-		result.StateGas = params.StateBytesNewAccount * args.CostPerStateByte
-	} else if args.IsContractCreation && args.IsEIP2 {
-		result.RegularGas = params.TxGasContractCreation
-	} else if args.IsAATxn {
-		result.RegularGas = params.TxAAGas
-	} else {
-		result.RegularGas = params.TxGas
+	switch {
+	case args.IsEIP2780:
+		result.ExecutionGas = params.TxBaseEIP2780
+		if args.IsContractCreation {
+			result.ExecutionGas += params.CreateAccessEIP2780
+		} else if !args.IsSelfTransfer {
+			result.ExecutionGas += params.ColdAccountAccessEIP2780
+			if args.HasValue {
+				result.ExecutionGas += params.TxValueCostEIP2780
+			}
+		}
+	case args.IsContractCreation && args.IsEIP2:
+		result.ExecutionGas = params.TxGasContractCreation
+	default:
+		result.ExecutionGas = params.TxGas
 	}
-	result.FloorGasCost = params.TxGas
+	if args.IsEIP2780 {
+		result.FloorGasCost = result.ExecutionGas
+	} else {
+		result.FloorGasCost = params.TxGas
+	}
 	nz := args.DataNonZeroLen
 	// Bump the required gas by the amount of transactional data
 	if dataLen > 0 {
@@ -98,7 +127,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
+		result.ExecutionGas, overflow = math.SafeAdd(result.ExecutionGas, product)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -109,7 +138,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
+		result.ExecutionGas, overflow = math.SafeAdd(result.ExecutionGas, product)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -120,27 +149,35 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}
-			result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
+			result.ExecutionGas, overflow = math.SafeAdd(result.ExecutionGas, product)
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}
 		}
 	}
 	if args.AccessListLen > 0 {
-		product, overflow := math.SafeMul(args.AccessListLen, params.TxAccessListAddressGas)
+		var addressGas, storageKeyGas uint64
+		if args.IsEIP2780 {
+			addressGas = params.TxAccessListAddressGasEIP8038
+			storageKeyGas = params.TxAccessListStorageKeyGasEIP8038
+		} else {
+			addressGas = params.TxAccessListAddressGas
+			storageKeyGas = params.TxAccessListStorageKeyGas
+		}
+		product, overflow := math.SafeMul(args.AccessListLen, addressGas)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
+		result.ExecutionGas, overflow = math.SafeAdd(result.ExecutionGas, product)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
 
-		product, overflow = math.SafeMul(args.StorageKeysLen, params.TxAccessListStorageKeyGas)
+		product, overflow = math.SafeMul(args.StorageKeysLen, storageKeyGas)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
+		result.ExecutionGas, overflow = math.SafeAdd(result.ExecutionGas, product)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -158,7 +195,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	//   - EIP-7981 (Glamsterdam): extends floor coverage to access-list data
 	//     (addresses + storage keys) on top of the calldata floor, using the
 	//     same 4 tokens-per-byte / 16 gas-per-token rate. Also charges the
-	//     access-list data cost at floor rate in the regular intrinsic gas path
+	//     access-list data cost at floor rate in the execution intrinsic gas path
 	//     so access lists cannot be used to bypass calldata floor pricing.
 	//
 	// Compute calldata floor tokens (EIP-7623 or EIP-7976) independently from
@@ -172,7 +209,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	// EIP-7976 and EIP-7981 share the same per-token rate (16 gas/token), and
 	// EIP-7981 spec requires EIP-7976 as a precondition. Selecting the rate on
 	// either flag keeps the access-list floor surcharge (charged at floor rate
-	// in RegularGas) consistent with the FloorGasCost rate.
+	// in ExecutionGas) consistent with the FloorGasCost rate.
 	if args.IsEIP7976 || args.IsEIP7981 {
 		costPerToken = params.TxTotalCostFloorPerTokenEIP7976
 	} else {
@@ -222,7 +259,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}
-			result.RegularGas, overflow = math.SafeAdd(result.RegularGas, accessListDataGas)
+			result.ExecutionGas, overflow = math.SafeAdd(result.ExecutionGas, accessListDataGas)
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}
@@ -244,39 +281,46 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	}
 
 	// Add the cost of authorizations
-	if args.IsEIP8037 {
-		regularCost, overflow := math.SafeMul(args.AuthorizationsLen, params.PerAuthBaseCostEIP8037)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
-		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, regularCost)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
-		authCost, overflow := math.SafeMul(params.StateBytesNewAccount+params.StateBytesAuthBase, args.CostPerStateByte)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
-		authCost, overflow = math.SafeMul(args.AuthorizationsLen, authCost)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
-		result.StateGas, overflow = math.SafeAdd(result.StateGas, authCost)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
+	var perAuthCost uint64
+	if args.IsEIP2780 {
+		perAuthCost = params.ExecutionPerAuthBaseCostEIP8038
 	} else {
-		authCost, overflow := math.SafeMul(args.AuthorizationsLen, params.PerEmptyAccountCost)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
-		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, authCost)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
+		perAuthCost = params.PerEmptyAccountCost
+	}
+	authCost, overflow := math.SafeMul(args.AuthorizationsLen, perAuthCost)
+	if overflow {
+		return IntrinsicGasCalcResult{}, true
+	}
+	result.ExecutionGas, overflow = math.SafeAdd(result.ExecutionGas, authCost)
+	if overflow {
+		return IntrinsicGasCalcResult{}, true
 	}
 
 	return result, false
+}
+
+// MinTxGas is the least intrinsic gas of any transaction: the cost of a
+// zero-value self-transfer.
+func MinTxGas(isEIP2780 bool) uint64 {
+	if isEIP2780 {
+		return params.TxBaseEIP2780
+	}
+	return params.TxGas
+}
+
+// MinTxBlockGas is a lower bound on block gas per transaction: MinTxGas less
+// the largest refund. Since Prague the EIP-7623 floor is not refundable, and
+// since Amsterdam block gas does not count refunds (EIP-7778).
+func MinTxBlockGas(isLondon, isPrague, isAmsterdam bool) uint64 {
+	minTxGas := MinTxGas(isAmsterdam)
+	switch {
+	case isPrague || isAmsterdam:
+		return minTxGas
+	case isLondon:
+		return minTxGas - minTxGas/params.RefundQuotientEIP3529
+	default:
+		return minTxGas - minTxGas/params.RefundQuotient
+	}
 }
 
 // toWordSize returns the ceiled word size required for memory expansion.

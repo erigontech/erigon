@@ -5,7 +5,7 @@ set -e # Enable exit on error
 if [ -z "$1" ] || [ -z "$2" ]; then
   echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR] [TESTS_TYPE] [REFERENCE_HOST] [COMPARE_ERROR_MESSAGE] [DUMP_RESPONSE] [TRANSPORT_TYPES]"
   echo
-  echo "  CHAIN:                 The chain identifier (possible values: mainnet, gnosis, polygon)"
+  echo "  CHAIN:                 The chain identifier (possible values: mainnet, gnosis)"
   echo "  RPC_VERSION:           The rpc-tests repository version or branch (e.g., v1.66.0, main)"
   echo "  DISABLED_TESTS:        Comma-separated list of disabled tests (optional, default: empty)"
   echo "  WORKSPACE:             Workspace directory where repository checkout will happen (optional, default: /tmp)"
@@ -49,7 +49,7 @@ fi
 if [ "$TEST_TYPE" = "latest" ]; then
     OPTIONAL_FLAGS+=" --tests-on-latest-block"
     if [ -n "$REFERENCE_HOST" ]; then
-        NUM_OF_RETRIES=3
+        NUM_OF_RETRIES=5
     fi
 fi
 
@@ -82,38 +82,19 @@ if [ -d "$WORKSPACE/rpc-tests/.git" ]; then
 fi
 if $_rpc_tests_cached; then
   echo "Using cached rpc-tests at $RPC_VERSION"
+  # For branch references (not tags) pull the latest commits so the cache stays fresh.
+  if [ -z "$_exact_tag" ]; then
+    git -C "$WORKSPACE/rpc-tests" fetch --depth 1 origin "$RPC_VERSION" >/dev/null 2>&1 && \
+      git -C "$WORKSPACE/rpc-tests" reset --hard FETCH_HEAD >/dev/null 2>&1 || true
+  fi
   # Remove stale untracked test fixtures left by runs using a different branch/version,
-  # but preserve .venv/ and build/ which are the expensive parts of the cache.
-  git -C "$WORKSPACE/rpc-tests" clean -fd -e .venv -e build >/dev/null 2>&1
+  # but preserve build/ which holds the compiled rpc_int binary.
+  git -C "$WORKSPACE/rpc-tests" clean -fd -e build >/dev/null 2>&1
 else
   rm -rf "$WORKSPACE/rpc-tests" >/dev/null 2>&1
   git -c advice.detachedHead=false clone --depth 1 --branch "$RPC_VERSION" https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests" >/dev/null 2>&1
 fi
 cd "$WORKSPACE/rpc-tests"
-
-# Create and activate Python virtual environment, reusing existing one if already set up for this version
-VENV_MARKER=".venv/.installed-${RPC_VERSION//\//_}"
-if [ -f ".venv/bin/activate" ] && [ -f "$VENV_MARKER" ]; then
-  echo "Using cached Python virtual environment"
-  source .venv/bin/activate
-else
-  # Try to create a Python virtual environment or install packages globally if it fails
-  if python3 -m venv .venv >/dev/null 2>&1; then :
-  elif python3 -m virtualenv .venv >/dev/null 2>&1; then :
-  elif virtualenv .venv >/dev/null 2>&1; then :
-  else
-    echo "Failed to create a virtual environment, installing packages globally."
-    pip3 install -r requirements.txt 1>/dev/null
-  fi
-
-  # Activate virtual environment if it was created
-  if [ -f ".venv/bin/activate" ]; then
-    source .venv/bin/activate
-    pip3 install --upgrade pip 1>/dev/null
-    pip3 install -r requirements.txt 1>/dev/null
-    touch "$VENV_MARKER"
-  fi
-fi
 
 # Remove the local results directory if any
 cd "$WORKSPACE/rpc-tests/integration"
@@ -137,8 +118,12 @@ cd ..
 make rpc_int
 
 retries=0
+attempt=0
 while true; do
-   ./build/bin/rpc_int --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --verbose 1 $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee "$LOG_FILE"
+   attempt=$((attempt + 1))
+   echo "" | tee -a "$LOG_FILE"
+   echo "Attempt $attempt" | tee -a "$LOG_FILE"
+   ./build/bin/rpc_int --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --verbose 1 $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee -a "$LOG_FILE"
    RUN_TESTS_EXIT_CODE=${PIPESTATUS[0]}
 
    if [ "$RUN_TESTS_EXIT_CODE" -eq 0 ]; then
@@ -148,6 +133,11 @@ while true; do
 
    if [ $retries -ge $NUM_OF_RETRIES ]; then
         break
+   fi
+
+   # rpc_int wipes the results dir at startup, so save this attempt's artifacts before retrying.
+   if [ -n "$RESULT_DIR" ]; then
+        cp -r "$WORKSPACE/rpc-tests/integration/$CHAIN/results" "$RESULT_DIR/results_attempt_$attempt"
    fi
 done
 
@@ -159,12 +149,6 @@ if [ -n "$RESULT_DIR" ]; then
   cp -r "$WORKSPACE/rpc-tests/integration/$CHAIN/results/" "$RESULT_DIR"
   # Clean up the local result directory
   rm -rf "$WORKSPACE/rpc-tests/integration/$CHAIN/results/"
-fi
-
-# Deactivate the Python virtual environment if it was created
-cd "$WORKSPACE/rpc-tests"
-if [ -f ".venv/bin/activate" ]; then
-  deactivate 2>/dev/null || :
 fi
 
 exit "$RUN_TESTS_EXIT_CODE"

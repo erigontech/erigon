@@ -67,14 +67,13 @@ func (s *SyncCommittee) Bytes() []byte {
 }
 
 func (s *SyncCommittee) CommitteeSize() int {
-	if s.committeeSize == 0 && len(s.data) > 0 {
-		// Backwards compat: infer from data length
-		s.committeeSize = len(s.data)/48 - 1
+	if s.committeeSize != 0 {
+		return s.committeeSize
 	}
-	if s.committeeSize == 0 {
-		return defaultSyncCommitteeSize
+	if len(s.data) > 0 {
+		return len(s.data)/48 - 1
 	}
-	return s.committeeSize
+	return defaultSyncCommitteeSize
 }
 
 func (s *SyncCommittee) ensureData() {
@@ -159,7 +158,7 @@ func (s *SyncCommittee) HashSSZ() ([32]byte, error) {
 	s.ensureData()
 	size := s.CommitteeSize()
 	syncCommitteeLayer := make([]byte, size*32)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		root, err := merkle_tree.BytesRoot(s.data[i*48 : (i*48)+48])
 		if err != nil {
 			return [32]byte{}, err
