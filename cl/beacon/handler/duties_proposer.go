@@ -68,7 +68,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(w http.ResponseWriter, r *http.
 	expectedSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 	isFinalized := expectedSlot <= a.forkchoiceStore.FinalizedSlot()
 	headEpoch := a.syncedData.HeadSlot() / a.beaconChainCfg.SlotsPerEpoch
-	if epoch > headEpoch+maxEpochsLookaheadForDuties {
+	if a.dutiesTooFarAhead(epoch) {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("proposer duties: epoch %d is too far in the future", epoch))
 	}
 	isAvailableInHeadState := epoch >= headEpoch || (!isFinalized && expectedSlot >= a.forkchoiceStore.LowestAvailableSlot())
@@ -151,7 +151,7 @@ func (a *ApiHandler) getDutiesProposerForVersion(w http.ResponseWriter, r *http.
 		// When the target epoch is beyond the lookahead range (e.g. head is far
 		// behind), we must advance a copy of the state to the target epoch so
 		// that RANDAO mixes and proposer lookahead are correct.
-		if s.Version() >= clparams.FuluVersion && epoch > headEpoch+a.beaconChainCfg.MinSeedLookahead {
+		if epoch > headEpoch+a.beaconChainCfg.MinSeedLookahead {
 			advancedState, copyErr := a.copyHeadStateForDuties(s)
 			if copyErr != nil {
 				return copyErr

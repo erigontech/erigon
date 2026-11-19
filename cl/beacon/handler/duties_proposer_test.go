@@ -299,15 +299,14 @@ func TestGetDutiesProposerFutureEpochTooFarReturnsBadRequest(t *testing.T) {
 	fcu.HeadVal = headRoot
 	fcu.HeadSlotVal = postState.Slot()
 
-	headEpoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
-	epoch := headEpoch + maxEpochsLookaheadForDuties + 1
+	epoch := handler.ethClock.GetCurrentEpoch() + maxEpochsLookaheadForDuties + 1
 	request := httptest.NewRequest(http.MethodGet, "/eth/v1/validator/duties/proposer/"+strconv.FormatUint(epoch, 10), nil)
 	recorder := httptest.NewRecorder()
 	handler.mux.ServeHTTP(recorder, request)
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
-func TestGetDependentRootReturnsNotFoundWhenRootUnavailable(t *testing.T) {
+func TestGetDependentRootPastTheHeadIsTheHeadRoot(t *testing.T) {
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
 	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
@@ -317,9 +316,8 @@ func TestGetDependentRootReturnsNotFoundWhenRootUnavailable(t *testing.T) {
 
 	epoch := postState.Slot()/handler.beaconChainCfg.SlotsPerEpoch + maxEpochsLookaheadForDuties*3
 	root, err := handler.getDependentRoot(epoch, false)
-	require.Error(t, err)
-	require.Equal(t, common.Hash{}, root)
-	require.Contains(t, err.Error(), "dependent root not found")
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(headRoot), root)
 }
 
 type proposerDutiesResponse struct {
@@ -455,4 +453,107 @@ func getProposerDutiesForPath(t *testing.T, handler *ApiHandler, path string) pr
 	require.NoError(t, json.NewDecoder(recorder.Body).Decode(&body))
 	require.NotEmpty(t, body.Data)
 	return body
+}
+
+func TestGetDutiesProposerEpochsPastAStaleHeadComeFromTheAdvancedState(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadVal = headRoot
+	fcu.HeadSlotVal = postState.Slot()
+
+	headEpoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
+	epoch := headEpoch + 5
+	expectedSlot := epoch * handler.beaconChainCfg.SlotsPerEpoch
+	advanced, err := postState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, expectedSlot))
+	expectedProposers, err := advanced.GetBeaconProposerIndices(epoch)
+	require.NoError(t, err)
+
+	response := getProposerDutiesForEpoch(t, handler, epoch)
+	for i, duty := range response.Data {
+		require.Equal(t, expectedSlot+uint64(i), duty.Slot)
+		require.Equal(t, expectedProposers[i], duty.ValidatorIndex, "slot %d", duty.Slot)
+	}
+}
+
+func TestGetDutiesProposerServesTheCurrentEpochWhenTheHeadIsFarBehind(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadVal = headRoot
+	fcu.HeadSlotVal = postState.Slot()
+
+	headEpoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
+	epoch := headEpoch + maxEpochsLookaheadForDuties + 8
+	require.Less(t, epoch, handler.ethClock.GetCurrentEpoch())
+
+	response := getProposerDutiesForEpoch(t, handler, epoch)
+	require.Len(t, response.Data, int(handler.beaconChainCfg.SlotsPerEpoch))
+}
+
+func TestGetAttesterDutiesEpochsPastAStaleHeadComeFromTheAdvancedState(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadVal = headRoot
+	fcu.HeadSlotVal = postState.Slot()
+	lowest := uint64(0)
+	fcu.LowestAvailableSlotVal = &lowest
+
+	headEpoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
+	for _, epoch := range []uint64{headEpoch + 5, headEpoch + maxEpochsLookaheadForDuties + 8} {
+		advanced, err := postState.Copy()
+		require.NoError(t, err)
+		require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, epoch*handler.beaconChainCfg.SlotsPerEpoch))
+
+		indices := make([]string, 64)
+		for i := range indices {
+			indices[i] = strconv.Itoa(i)
+		}
+		raw, err := json.Marshal(indices)
+		require.NoError(t, err)
+		request := httptest.NewRequest(http.MethodPost, "/eth/v1/validator/duties/attester/"+strconv.FormatUint(epoch, 10), strings.NewReader(string(raw)))
+		recorder := httptest.NewRecorder()
+		handler.mux.ServeHTTP(recorder, request)
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+
+		var body struct {
+			Data []struct {
+				ValidatorIndex          uint64 `json:"validator_index,string"`
+				CommitteeIndex          uint64 `json:"committee_index,string"`
+				ValidatorCommitteeIndex uint64 `json:"validator_committee_index,string"`
+				Slot                    uint64 `json:"slot,string"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.NewDecoder(recorder.Body).Decode(&body))
+		require.Len(t, body.Data, len(indices))
+		for _, duty := range body.Data {
+			committee, err := advanced.GetBeaconCommitee(duty.Slot, duty.CommitteeIndex)
+			require.NoError(t, err)
+			require.Equal(t, duty.ValidatorIndex, committee[duty.ValidatorCommitteeIndex], "epoch %d slot %d", epoch, duty.Slot)
+		}
+	}
+}
+
+func TestGetDutiesProposerDependentRootPastAStaleHeadIsTheHead(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, syncedData, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+
+	headRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadVal = headRoot
+	fcu.HeadSlotVal = postState.Slot()
+	manager, ok := syncedData.(*synced_data.SyncedDataManager)
+	require.True(t, ok)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(postState, headRoot))
+
+	headEpoch := postState.Slot() / handler.beaconChainCfg.SlotsPerEpoch
+	epoch := headEpoch + 2*maxEpochsLookaheadForDuties + 8
+
+	response := getProposerDutiesForEpoch(t, handler, epoch)
+	require.Equal(t, common.Hash(headRoot).String(), response.DependentRoot)
 }

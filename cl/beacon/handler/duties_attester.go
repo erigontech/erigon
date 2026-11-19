@@ -29,11 +29,19 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
 
 const maxEpochsLookaheadForDuties = 32
+
+// dutiesTooFarAhead measures the duty horizon from the later of the head and the clock, so a chain
+// resuming after downtime can still be given duties for the current epoch.
+func (a *ApiHandler) dutiesTooFarAhead(epoch uint64) bool {
+	horizon := max(a.syncedData.HeadSlot()/a.beaconChainCfg.SlotsPerEpoch, a.ethClock.GetCurrentEpoch())
+	return epoch > horizon+maxEpochsLookaheadForDuties
+}
 
 func epochSlotOverflows(epoch, slotsPerEpoch uint64) bool {
 	return slotsPerEpoch > 0 && epoch > math.MaxUint64/slotsPerEpoch-1
@@ -69,7 +77,7 @@ func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (common.Hash,
 	)
 	return dependentRoot, a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
 		dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, attester)
-		if !a.syncedData.Syncing() && dependentRootSlot == a.syncedData.HeadSlot() {
+		if !a.syncedData.Syncing() && dependentRootSlot >= a.syncedData.HeadSlot() {
 			dependentRoot = a.syncedData.HeadRoot()
 			return nil
 		}
@@ -147,7 +155,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d overflows slot computation", epoch))
 	}
 	headEpoch := a.syncedData.HeadSlot() / a.beaconChainCfg.SlotsPerEpoch
-	if epoch > headEpoch+maxEpochsLookaheadForDuties {
+	if a.dutiesTooFarAhead(epoch) {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is too far in the future", epoch))
 	}
 
@@ -182,6 +190,16 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 			return newBeaconResponse([]string{}).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()).With("dependent_root", dependentRoot), nil
 		}
 		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+			if epoch > headEpoch+a.beaconChainCfg.MinSeedLookahead {
+				advanced, err := a.copyHeadStateForDuties(s)
+				if err != nil {
+					return err
+				}
+				if err := transition.DefaultMachine.ProcessSlots(advanced, epoch*a.beaconChainCfg.SlotsPerEpoch); err != nil {
+					return err
+				}
+				s = advanced
+			}
 			// get active validator indicies
 			committeeCount := s.CommitteeCount(epoch)
 			// now start obtaining the committees from the head state
