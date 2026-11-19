@@ -61,46 +61,48 @@ func TestExample(t *testing.T) {
 func TestMaxWorkers(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	wp := New(0)
-	wp.Stop()
-	if wp.maxWorkers != 1 {
-		t.Fatal("should have created one worker")
-	}
-
-	wp = New(maxWorkers)
-	defer wp.Stop()
-
-	if wp.Size() != maxWorkers {
-		t.Fatal("wrong size returned")
-	}
-
-	started := make(chan struct{}, maxWorkers)
-	release := make(chan struct{})
-
-	// Start workers, and have them all wait on a channel before completing.
-	for range maxWorkers {
-		wp.Submit(func() {
-			started <- struct{}{}
-			<-release
-		})
-	}
-
-	// Wait for all queued tasks to be dispatched to workers.
-	if wp.waitingQueue.Len() != wp.WaitingQueueSize() {
-		t.Fatal("Working Queue size returned should not be 0")
-	}
-	timeout := time.After(5 * time.Second)
-	for startCount := 0; startCount < maxWorkers; {
-		select {
-		case <-started:
-			startCount++
-		case <-timeout:
-			t.Fatal("timed out waiting for workers to start")
+	synctest.Test(t, func(t *testing.T) {
+		wp := New(0)
+		wp.Stop()
+		if wp.maxWorkers != 1 {
+			t.Fatal("should have created one worker")
 		}
-	}
 
-	// Release workers.
-	close(release)
+		wp = New(maxWorkers)
+		defer wp.Stop()
+
+		if wp.Size() != maxWorkers {
+			t.Fatal("wrong size returned")
+		}
+
+		started := make(chan struct{}, maxWorkers)
+		release := make(chan struct{})
+
+		// Start workers, and have them all wait on a channel before completing.
+		for range maxWorkers {
+			wp.Submit(func() {
+				started <- struct{}{}
+				<-release
+			})
+		}
+
+		// Wait for all queued tasks to be dispatched to workers.
+		if wp.waitingQueue.Len() != wp.WaitingQueueSize() {
+			t.Fatal("Working Queue size returned should not be 0")
+		}
+		for startCount := 0; startCount < maxWorkers; {
+			synctest.Wait()
+			select {
+			case <-started:
+				startCount++
+			default:
+				t.Fatal("timed out waiting for workers to start")
+			}
+		}
+
+		// Release workers.
+		close(release)
+	})
 }
 
 func TestReuseWorkers(t *testing.T) {
