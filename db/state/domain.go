@@ -468,6 +468,27 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	return binary.BigEndian.Uint64(lstIdx) / d.stepSize
 }
 
+// A first snapshot must cover any older MDBX values before its end can be used
+// as the boundary for reads and pruning. This check runs only for a late first file.
+func (d *Domain) hasValuesBeforeStep(tx kv.Tx, step kv.Step) (bool, error) {
+	c, err := tx.Cursor(d.ValuesTable)
+	if err != nil {
+		return false, err
+	}
+	defer c.Close()
+	for k, v, err := c.First(); ; k, v, err = c.Next() {
+		if err != nil || k == nil {
+			return false, err
+		}
+		if d.LargeValues {
+			v = k[len(k)-8:]
+		}
+		if kv.Step(^binary.BigEndian.Uint64(v)) < step {
+			return true, nil
+		}
+	}
+}
+
 func (dt *DomainRoTx) NewWriter(db kv.RoDB) *DomainBufferedWriter {
 	return dt.newWriter(db, dt.d.dirs.Tmp, !dt.d.Enabled)
 }

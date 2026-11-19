@@ -1104,11 +1104,21 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 
 		g.Go(func() error {
 			var collation Collation
+			var skip bool
 			if err := db.View(workerCtx, func(tx kv.Tx) (err error) {
+				if firstStepNotInFiles == 0 && step > 0 {
+					skip, err = d.hasValuesBeforeStep(tx, step)
+					if err != nil || skip {
+						return err
+					}
+				}
 				collation, err = d.collate(workerCtx, step, txFrom, txTo, tx)
 				return err
 			}); err != nil {
 				return fmt.Errorf("domain collation %q has failed: %w", d.FilenameBase, err)
+			}
+			if skip {
+				return nil
 			}
 			sf, err := d.buildFiles(workerCtx, step, collation, a.backgroundProgress)
 			collation.Close()
