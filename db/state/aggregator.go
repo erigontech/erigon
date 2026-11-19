@@ -790,7 +790,16 @@ func (a *Aggregator) closeDirtyFiles() {
 	wg.Wait()
 }
 
-func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].Enabled = true }
+// EnableDomain affects new views; existing views keep their read and write policy.
+func (a *Aggregator) EnableDomain(domain kv.Domain) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	if a.d[domain].Enabled {
+		return
+	}
+	a.d[domain].Enabled = true
+	a.recalcVisibleFiles(nil)
+}
 
 func (a *Aggregator) setBuildAccessorsWorkers(i int) {
 	a.workers.trySet(func() {
@@ -1094,7 +1103,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	defer ac.Close()
 	skipDomains, skipIndices := a.filelessEntitiesBelowCeiling(txTo)
 	for id, d := range a.d {
-		if !d.Enabled || skipDomains[id] {
+		if !ac.d[id].visible.enabled || skipDomains[id] {
 			continue
 		}
 
@@ -1138,7 +1147,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 	}
 	// indices are built concurrently
 	for iikey, ii := range a.standaloneIIs() {
-		if !ii.Enabled || skipIndices[iikey] {
+		if !ac.iis[iikey].visible.enabled || skipIndices[iikey] {
 			continue
 		}
 
@@ -2045,7 +2054,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		}
 	}
 	for id, d := range at.d {
-		if !d.d.Enabled {
+		if !d.visible.enabled {
 			continue
 		}
 		r.domain[id] = d.findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan)
@@ -2093,7 +2102,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 	}
 
 	for id, ii := range at.standaloneIIs() {
-		if !ii.ii.Enabled {
+		if !ii.visible.enabled {
 			continue
 		}
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
@@ -2137,7 +2146,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	accStorageMerged := new(sync.WaitGroup)
 
 	for id := range at.d {
-		if !at.d[id].d.Enabled {
+		if !at.d[id].visible.enabled {
 			continue
 		}
 		if !r.domain[id].any() {
@@ -2174,7 +2183,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	}
 
 	for id, rng := range r.invertedIndex {
-		if rng == nil || at.iis[id] == nil || !at.iis[id].ii.Enabled {
+		if rng == nil || at.iis[id] == nil || !at.iis[id].visible.enabled {
 			continue
 		}
 
@@ -2251,7 +2260,7 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult, 
 	}
 	for _, id := range order {
 		d := at.d[id]
-		if !d.d.Enabled {
+		if !d.visible.enabled {
 			continue
 		}
 		var names []string
@@ -2265,7 +2274,7 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult, 
 		retired = append(retired, r...)
 	}
 	for id, ii := range at.standaloneIIs() {
-		if !ii.ii.Enabled {
+		if !ii.visible.enabled {
 			continue
 		}
 		var names []string
@@ -2586,7 +2595,7 @@ func (at *AggregatorRoTx) Generation() uint64 { return at.visible.generation }
 // erigon without `integration stage_exec --reset`. Meant to run once at startup.
 func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
 	for _, dt := range at.d {
-		if dt == nil || !dt.d.Enabled {
+		if dt == nil || !dt.visible.enabled {
 			continue
 		}
 		if err := dt.checkFilesDBGap(tx); err != nil {
@@ -2597,7 +2606,7 @@ func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
 		}
 	}
 	for _, iit := range at.iis {
-		if iit == nil || !iit.ii.Enabled {
+		if iit == nil || !iit.visible.enabled {
 			continue
 		}
 		if err := iit.checkFilesDBGap(tx); err != nil {

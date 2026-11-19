@@ -60,6 +60,7 @@ import (
 
 type InvertedIndex struct {
 	statecfg.InvIdxCfg
+
 	dirs    datadir.Dirs
 	salt    *atomic.Pointer[uint32]
 	noFsync bool // fsync is enabled by default, but tests can manually disable
@@ -85,9 +86,10 @@ type InvertedIndex struct {
 }
 
 type iiVisible struct {
-	files  visibleFiles
-	name   string
-	caches *sync.Pool
+	files   visibleFiles
+	name    string
+	caches  *sync.Pool
+	enabled bool
 }
 
 func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*InvertedIndex, error) {
@@ -240,7 +242,11 @@ func (ii *InvertedIndex) calcVisibleFiles(toTxNum uint64) *iiVisible {
 			return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	return newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
+	var files visibleFiles
+	if ii.Enabled {
+		files = calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum)
+	}
+	return newIIVisible(ii.FilenameBase, files, ii.Enabled)
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
@@ -332,7 +338,7 @@ func (iit *InvertedIndexRoTx) Files() (res VisibleFiles) {
 }
 
 func (iit *InvertedIndexRoTx) NewWriter(db kv.RoDB) *InvertedIndexBufferedWriter {
-	return iit.newWriter(db, iit.ii.dirs.Tmp, !iit.ii.Enabled)
+	return iit.newWriter(db, iit.ii.dirs.Tmp, !iit.visible.enabled)
 }
 
 type InvertedIndexBufferedWriter struct {
