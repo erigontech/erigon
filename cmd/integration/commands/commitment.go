@@ -47,11 +47,13 @@ import (
 	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
@@ -548,6 +550,8 @@ tool detects the current state of each file and converts only what is needed.
 Files already in the target state on disk under <datadir>/snapshots/domain/
 are skipped.
 
+It reads and writes snapshot files only: <datadir>/chaindata is never opened and may be absent.
+
 Originals are preserved at <datadir>/snapshots/backup/domains/ for revert.
 
 --restore is a sibling mode that moves the originals back into place and
@@ -595,12 +599,6 @@ Examples:
 		if convertRestore {
 			return commitmentRestore(ctx, logger)
 		}
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, logger)
-		if err != nil {
-			return fmt.Errorf("opening DB: %w", err)
-		}
-		defer db.Close()
-
 		opts := dbstate.ConvertOpts{
 			TargetSqueeze:   convertSqueeze,
 			TargetNibblesV2: convertNibblesV2,
@@ -609,7 +607,7 @@ Examples:
 			NoDomain:        convertNoDomain,
 			NoHistory:       convertNoHistory,
 		}
-		return commitmentConvert(db, cmd.Context(), logger, opts)
+		return commitmentConvertWithoutChaindata(ctx, logger, opts)
 	},
 }
 
@@ -636,6 +634,50 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	// nil-guarded closeFiles), but MadvNormal would dereference freed mmap.
 
 	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
+}
+
+func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
+	dirs := datadir.Open(datadirCli)
+	if err := CheckSaltFilesExist(dirs); err != nil {
+		return err
+	}
+	if err := dbstate.MatchCommitmentSchemaToFiles(dirs); err != nil {
+		return err
+	}
+	settings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dirs.Tmp, dir.DirPerm); err != nil {
+		return err
+	}
+	throwawayDir, err := os.MkdirTemp(dirs.Tmp, "commitment-convert-")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := dir.RemoveAll(throwawayDir); err != nil {
+			logger.Warn("[commitment_convert] removing the throwaway DB failed", "dir", throwawayDir, "err", err)
+		}
+	}()
+	rawDB, err := mdbx.New(dbcfg.ChainDB, logger).Path(throwawayDir).Open(ctx)
+	if err != nil {
+		return fmt.Errorf("opening throwaway DB: %w", err)
+	}
+	defer rawDB.Close()
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	db, err := temporal.New(rawDB, agg, nil)
+	if err != nil {
+		return err
+	}
+	if err := db.OpenStateSnapshots(ctx); err != nil {
+		return err
+	}
+	return commitmentConvert(db, ctx, logger, opts)
 }
 
 // integration commitment visualize
