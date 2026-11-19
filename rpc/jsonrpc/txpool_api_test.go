@@ -196,11 +196,34 @@ func TestTxPoolInspect(t *testing.T) {
 		"pending": {a1.Hex(): {
 			"0": to.Hex() + ": 1234 wei + 21000 gas × 10 wei",
 			"1": to.Hex() + ": 7 wei + 50000 gas × 30 wei",
+			"7": common.HexToAddress("0x811a752c8cd697e3cb27279c330ed1ada745a8d7").Hex() + ": 0 wei + 5748100 gas × 30000000000 wei",
 		}},
 		"queued": {a2.Hex(): {
 			"5": "contract creation: 0 wei + 100000 gas × 3 wei",
 		}},
 	}, inspect)
+}
+
+// The txpool spec lists blob transactions among the pending and queued ones, and txpool_status counts them.
+func TestTxPoolContentIncludesBlobTxs(t *testing.T) {
+	require := require.New(t)
+	blobRlp, _ := types.MakeBlobTxnRlp()
+	sender := common.HexToAddress("0xfe00000000000000000000000000000000000001")
+	pool := &stubPoolContentClient{all: &txpoolproto.AllReply{Txs: []*txpoolproto.AllReply_Tx{
+		{TxnType: txpoolproto.AllReply_PENDING, Sender: gointerfaces.ConvertAddressToH160(sender), RlpTx: blobRlp},
+	}}}
+	api := NewTxPoolAPI(nil, pool)
+
+	content, err := api.Content(context.Background())
+	require.NoError(err)
+	blobTxn := content["pending"][sender.Hex()]["7"]
+	require.NotNil(blobTxn)
+	require.Equal(hexutil.Uint64(types.BlobTxType), blobTxn.Type)
+	require.Len(blobTxn.BlobVersionedHashes, 2)
+
+	contentFrom, err := api.ContentFrom(context.Background(), sender)
+	require.NoError(err)
+	require.Equal(blobTxn, contentFrom["pending"]["7"])
 }
 
 func TestTxPoolStatusSumsCountsWithoutWrapping(t *testing.T) {

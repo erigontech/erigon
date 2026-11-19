@@ -64,22 +64,16 @@ func linkBeaconBlocks(t *testing.T, blocks ...*cltypes.SignedBeaconBlock) {
 	}
 }
 
-func TestForwardBeaconDownloaderEmptyGloasRangeStopsAtForkBoundary(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
+func TestForwardBeaconDownloaderEmptyGloasScanCrossesForkBoundary(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
 	cfg.SlotsPerEpoch = 10
-	cfg.AltairForkEpoch = math.MaxUint64
-	cfg.BellatrixForkEpoch = math.MaxUint64
-	cfg.CapellaForkEpoch = math.MaxUint64
-	cfg.DenebForkEpoch = math.MaxUint64
-	cfg.ElectraForkEpoch = math.MaxUint64
-	cfg.FuluForkEpoch = math.MaxUint64
 	cfg.GloasForkEpoch = 11
 
 	requests := make(chan cltypes.BeaconBlocksByRangeRequest, 1)
 	downloader := &ForwardBeaconDownloader{
-		beaconCfg:          &cfg,
-		gloasLookahead:     makeGloasBlock(98, hash(0xaa), common.Hash{}),
-		gloasNextUnscanned: 98,
+		beaconCfg:          cfg,
+		gloasLookahead:     makeFuluBlock(98),
+		gloasNextUnscanned: 99,
 		requestBlocksByRange: func(_ context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 			requests <- cltypes.BeaconBlocksByRangeRequest{StartSlot: start, Count: count}
 			return []*cltypes.SignedBeaconBlock{}, "block-peer", nil
@@ -94,15 +88,65 @@ func TestForwardBeaconDownloaderEmptyGloasRangeStopsAtForkBoundary(t *testing.T)
 		downloader.RequestMore(ctx)
 	}()
 	request := <-requests
+	require.Equal(t, cltypes.BeaconBlocksByRangeRequest{StartSlot: 99, Count: 33}, request)
 	require.Eventually(t, func() bool {
 		start, pending := downloader.nextRequestStart(false)
-		return pending && start == 110
+		return pending && start == 132
 	}, time.Second, 10*time.Millisecond)
 	cancel()
 	<-done
 
-	require.Equal(t, cltypes.BeaconBlocksByRangeRequest{StartSlot: 98, Count: 12}, request)
 	require.Equal(t, uint64(97), downloader.GetHighestProcessedSlot())
+}
+
+func TestForwardBeaconDownloaderCrossesForkBoundaryAfterEmptySlot(t *testing.T) {
+	previous := forwardBeaconRequestInterval
+	forwardBeaconRequestInterval = time.Millisecond
+	t.Cleanup(func() { forwardBeaconRequestInterval = previous })
+
+	cfg := gloasFromGenesisConfig()
+	cfg.GloasForkEpoch = 6
+	chain := []*cltypes.SignedBeaconBlock{
+		makeFuluBlock(188), makeFuluBlock(189), makeFuluBlock(190),
+		makeGloasBlock(193, hash(0xaa), common.Hash{}), makeGloasBlock(194, hash(0xbb), hash(0xcc)),
+	}
+	linkBeaconBlocks(t, chain...)
+	var mu sync.Mutex
+	var requests []cltypes.BeaconBlocksByRangeRequest
+	downloader := &ForwardBeaconDownloader{
+		beaconCfg: cfg,
+		requestBlocksByRange: func(_ context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			requests = append(requests, cltypes.BeaconBlocksByRangeRequest{StartSlot: start, Count: count})
+			blocks := []*cltypes.SignedBeaconBlock{}
+			for _, block := range chain {
+				if block.Block.Slot >= start && block.Block.Slot-start < count {
+					blocks = append(blocks, block)
+				}
+			}
+			return blocks, "peer", nil
+		},
+	}
+	downloader.SetCurrentSlotSampler(func() uint64 { return 200 })
+	downloader.SetHighestProcessedSlot(189)
+	var processed []uint64
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		for _, block := range blocks {
+			if block.Block.Slot > highest {
+				processed = append(processed, block.Block.Slot)
+				highest = block.Block.Slot
+			}
+		}
+		return highest, nil
+	})
+
+	for i := 0; i < 3 && downloader.GetHighestProcessedSlot() < 193; i++ {
+		downloader.RequestMore(t.Context())
+	}
+
+	require.Equal(t, uint64(193), downloader.GetHighestProcessedSlot(), "requests: %v", requests)
+	require.Equal(t, []uint64{190, 193}, processed, "requests: %v", requests)
 }
 
 type countingBlockingSentinel struct {
@@ -252,7 +296,7 @@ func newContextBlockingBeaconRPC(ctx context.Context, sentinel sentinelproto.Sen
 	cfg := clparams.MainnetBeaconConfig
 	cfg.InitializeForkSchedule()
 	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, &cfg)
-	return rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock, nil), &cfg
+	return rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock), &cfg
 }
 
 func TestForwardRequestMoreCancelsOutstandingRequestsWhenBatchExpires(t *testing.T) {
@@ -397,7 +441,7 @@ func TestForwardRequestMoreRotatesSlowP2PProbes(t *testing.T) {
 	sentinel := &rotatingProbeSentinel{response: response.Bytes()}
 	// Outside the bubble: NewBeaconRpcP2P starts loops that outlive a request,
 	// and a bubble may not end while they are parked.
-	rpcClient := rpc.NewBeaconRpcP2P(t.Context(), sentinel, &cfg, clock, nil)
+	rpcClient := rpc.NewBeaconRpcP2P(t.Context(), sentinel, &cfg, clock)
 
 	synctest.Test(t, func(t *testing.T) {
 		// synctest treats a receive as durably blocking only for a channel created
@@ -434,50 +478,41 @@ func TestForwardRequestMoreRotatesSlowP2PProbes(t *testing.T) {
 	require.Zero(t, sentinel.active.Load())
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func TestForwardRequestMoreStartsHTTPFallbackWhileProbesAreSlow(t *testing.T) {
-	previousInterval := forwardBeaconRequestInterval
-	previousTimeout := forwardBeaconRequestTimeout
-	previousFallbackDelay := forwardBeaconFallbackDelay
-	forwardBeaconRequestInterval = time.Millisecond
-	forwardBeaconRequestTimeout = 200 * time.Millisecond
-	forwardBeaconFallbackDelay = 20 * time.Millisecond
-	t.Cleanup(func() {
-		forwardBeaconRequestInterval = previousInterval
-		forwardBeaconRequestTimeout = previousTimeout
-		forwardBeaconFallbackDelay = previousFallbackDelay
-	})
+	synctest.Test(t, func(t *testing.T) {
+		previousInterval := forwardBeaconRequestInterval
+		previousTimeout := forwardBeaconRequestTimeout
+		previousFallbackDelay := forwardBeaconFallbackDelay
+		previousClient := beaconAPIClient
+		forwardBeaconRequestInterval = time.Millisecond
+		forwardBeaconRequestTimeout = time.Second
+		forwardBeaconFallbackDelay = 20 * time.Millisecond
+		var fallbackStarted atomic.Bool
+		beaconAPIClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			fallbackStarted.Store(true)
+			return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody, Request: r}, nil
+		})}
+		defer func() {
+			forwardBeaconRequestInterval = previousInterval
+			forwardBeaconRequestTimeout = previousTimeout
+			forwardBeaconFallbackDelay = previousFallbackDelay
+			beaconAPIClient = previousClient
+		}()
 
-	fallbackStarted := make(chan struct{})
-	var fallbackOnce sync.Once
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fallbackOnce.Do(func() { close(fallbackStarted) })
-		http.NotFound(w, nil)
-	}))
-	t.Cleanup(server.Close)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		sentinel := newCountingBlockingSentinel()
+		rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+		downloader := NewForwardBeaconDownloader(ctx, rpcClient, cfg)
+		downloader.SetHTTPFallbackURL("http://beacon.invalid")
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	sentinel := newCountingBlockingSentinel()
-	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
-	downloader := NewForwardBeaconDownloader(ctx, rpcClient, cfg)
-	downloader.SetHTTPFallbackURL(server.URL)
-
-	done := make(chan struct{})
-	go func() {
 		downloader.RequestMore(ctx)
-		close(done)
-	}()
-
-	select {
-	case <-fallbackStarted:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("slow P2P probes prevented the HTTP fallback from starting")
-	}
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("RequestMore did not finish after its request window")
-	}
+		require.True(t, fallbackStarted.Load(), "slow P2P probes prevented the HTTP fallback from starting")
+	})
 }
 
 func TestForwardRequestMoreDoesNotPreferHTTPWithoutProgress(t *testing.T) {
@@ -523,7 +558,7 @@ func TestForwardRequestMoreDoesNotPreferHTTPWithoutProgress(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	sentinel := &switchableProbeSentinel{response: p2pResponse.Bytes()}
-	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock, nil)
+	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock)
 	downloader := NewForwardBeaconDownloader(ctx, rpcClient, &cfg)
 	downloader.SetHTTPFallbackURL(server.URL)
 	var firstProcessCalls atomic.Int32

@@ -51,6 +51,42 @@ func noopCtxFactory(context.Context) (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
 }
 
+func TestCollectedHashedKeysIncludeHashedTouches(t *testing.T) {
+	u := NewUpdates(ModeCollect, t.TempDir(), KeyToHexNibbleHash)
+	account := []byte("0123456789abcdefghij")
+	other := []byte("jihgfedcba9876543210")
+	u.TouchPlainKey(string(account), nil, func(*KeyUpdate, []byte) {})
+	u.TouchPlainKeyDirect(string(account), &Update{Flags: NonceUpdate, Nonce: 1})
+	u.TouchPlainKeyDirect(string(other), &Update{Flags: NonceUpdate, Nonce: 2})
+	partial := []byte{0x3, 0x0, 0xa}
+	u.TouchHashedKey(partial)
+	u.TouchHashedKey(partial)
+
+	want := [][]byte{partial, KeyToHexNibbleHash(account), KeyToHexNibbleHash(other)}
+	slices.SortFunc(want, bytes.Compare)
+	require.Equal(t, want, u.CollectedHashedKeys())
+}
+
+func TestTouchPlainKeyDirectCollectMergesRepeatedTouches(t *testing.T) {
+	u := NewUpdates(ModeCollect, t.TempDir(), KeyToHexNibbleHash)
+	account := "0123456789abcdefghij"
+	first := &Update{Flags: BalanceUpdate, DeleteStorageSubtree: true}
+	first.Balance.SetUint64(5)
+	u.TouchPlainKeyDirect(account, first)
+	u.TouchPlainKeyDirect(account, &Update{Flags: NonceUpdate, Nonce: 7})
+
+	var got []*Update
+	require.NoError(t, u.Drain(func(_ string, upd *Update) error {
+		got = append(got, upd)
+		return nil
+	}))
+	require.Len(t, got, 1)
+	require.True(t, got[0].DeleteStorageSubtree)
+	require.Equal(t, BalanceUpdate|NonceUpdate, got[0].Flags)
+	require.Equal(t, uint64(5), got[0].Balance.Uint64())
+	require.Equal(t, uint64(7), got[0].Nonce)
+}
+
 type gatedPatriciaContext struct {
 	sleep       time.Duration
 	descend     bool
@@ -726,6 +762,31 @@ func (r *recordingCtx) Account(_ []byte) (*Update, error) { return nil, nil }
 func (r *recordingCtx) Storage(_ []byte) (*Update, error) { return nil, nil }
 func (r *recordingCtx) TxNum() uint64                     { return 0 }
 
+// CollectTombstone writes the empty-branch tombstone raw and carries prev through
+// for the domain diff — it must NOT merge the tombstone against prev (a real branch
+// can be shorter than its bitmap implies, and Merge would overrun it).
+func TestCollectTombstone_WritesRawAndCarriesPrev(t *testing.T) {
+	t.Parallel()
+	prefix := []byte{0xab, 0xcd}
+	row, bm := generateCellRow(t, 5)
+	cells := generateCellEncodeDataRow(t, row, bm)
+
+	be := NewBranchEncoder(1024)
+	branch, err := be.EncodeBranch(bm, bm, bm, &cells)
+	require.NoError(t, err)
+	prev := bytes.Clone(branch)
+
+	wantTomb, err := NewBranchEncoder(1024).EncodeBranch(0, bm, 0, nil)
+	require.NoError(t, err)
+
+	ctx := &recordingCtx{}
+	require.NoError(t, be.CollectTombstone(ctx, prefix, bm, prev))
+	require.Len(t, ctx.puts, 1)
+	require.Equal(t, 0, BranchData(ctx.puts[0].data).ChildCount(), "tombstone is an empty branch")
+	require.Equal(t, []byte(wantTomb), ctx.puts[0].data, "raw tombstone, not a merge of prev")
+	require.Equal(t, prev, ctx.puts[0].prev, "prev is carried for the domain diff / unwind")
+}
+
 func TestCollectUpdate_HonoursSuppliedPrev(t *testing.T) {
 	t.Parallel()
 	prefix := []byte{0xab, 0xcd}
@@ -860,7 +921,7 @@ func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
 	require.Nil(t, ut.tree)
 	require.Nil(t, ut.treeIdx)
 	require.Nil(t, ut.etl, "ModeParallel uses the prefix trie, not any ETL collector")
-	require.True(t, ut.IsConcurrentCommitment(), "IsConcurrentCommitment must report true for ModeParallel")
+	require.Equal(t, ModeParallel, ut.Mode(), "collection must stay in ModeParallel")
 	require.Equal(t, uint64(0), ut.Size())
 }
 
@@ -989,35 +1050,38 @@ func TestUpdatesModeParallel_SetMode(t *testing.T) {
 	require.Same(t, prev, ut.parallel)
 }
 
-func TestInitializeTrieAndUpdates_ParallelVariant(t *testing.T) {
+func TestInitializeTrieAndUpdates_Variants(t *testing.T) {
 	t.Parallel()
 
-	cfg := DefaultTrieConfig()
-	cfg.Variant = VariantParallelHexPatricia
-	trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
-	defer upd.Close()
-	defer trie.Release()
+	for _, tc := range []struct {
+		name         string
+		variant      TrieVariant
+		wantType     any
+		wantMode     Mode
+		wantParallel bool
+	}{
+		{"parallel", VariantParallelHexPatricia, (*ParallelPatriciaHashed)(nil), ModeParallel, true},
+		{"hex unchanged", VariantHexPatriciaTrie, (*HexPatriciaHashed)(nil), ModeDirect, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	require.IsType(t, (*ParallelPatriciaHashed)(nil), trie)
-	require.Equal(t, VariantParallelHexPatricia, trie.Variant())
-	require.Equal(t, ModeParallel, upd.Mode())
-	require.NotNil(t, upd.parallel)
-	require.True(t, upd.IsConcurrentCommitment())
-}
+			cfg := DefaultTrieConfig()
+			cfg.Variant = tc.variant
+			trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+			defer upd.Close()
+			defer trie.Release()
 
-func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
-	t.Parallel()
-
-	cfg := DefaultTrieConfig()
-	cfg.Variant = VariantHexPatriciaTrie
-	trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
-	defer upd.Close()
-	defer trie.Release()
-
-	require.IsType(t, (*HexPatriciaHashed)(nil), trie)
-	require.Equal(t, VariantHexPatriciaTrie, trie.Variant())
-	require.Equal(t, ModeDirect, upd.Mode())
-	require.Nil(t, upd.parallel)
+			require.IsType(t, tc.wantType, trie)
+			require.Equal(t, tc.variant, trie.Variant())
+			require.Equal(t, tc.wantMode, upd.Mode())
+			if tc.wantParallel {
+				require.NotNil(t, upd.parallel)
+			} else {
+				require.Nil(t, upd.parallel)
+			}
+		})
+	}
 }
 
 // reuseBytes is what makes the pooled buffers reusable; sync.Pool itself guarantees

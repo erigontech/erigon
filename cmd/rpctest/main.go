@@ -140,7 +140,7 @@ func main() {
 		Short: "",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return rpctest.BenchEthCreateAccessList(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
+			return rpctest.BenchEthCreateAccessList(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchEthCreateAccessListCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
@@ -150,7 +150,7 @@ func main() {
 		Short: "",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return rpctest.BenchEthGetBlockByHash(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
+			return rpctest.BenchEthGetBlockByHash(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchEthGetBlockByHash, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
@@ -160,7 +160,7 @@ func main() {
 		Short: "",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return rpctest.BenchEthGetBlockByNumber2(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
+			return rpctest.BenchEthGetBlockByNumber2(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchEthGetBlockByNumber2Cmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
@@ -180,7 +180,7 @@ func main() {
 		Short: "",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return rpctest.BenchOtsGetBlockTransactions(erigonURL, gethURL, needCompare, visitAllPages, latest, blockFrom, blockTo, recordFile, errorFile)
+			return rpctest.BenchOtsGetBlockTransactions(erigonURL, gethURL, needCompare, visitAllPages, blockFrom, blockTo, recordFile, errorFile)
 		},
 	}
 	with(benchOtsGetBlockTransactions, withErigonUrl, withGethUrl, withNeedCompare, withVisitAllPages, withBlockNum, withRecord, withErrorFile, withLatest)
@@ -190,7 +190,7 @@ func main() {
 		Short: "",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return rpctest.Bench1(erigonURL, gethURL, needCompare, fullTest, blockFrom, blockTo, recordFile)
+			return rpctest.Bench1(erigonURL, gethURL, needCompare, fullTest, blockFrom, blockTo)
 		},
 	}
 	with(bench1Cmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord)
@@ -268,7 +268,7 @@ func main() {
 		Short: "",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return rpctest.EthGetLogsInvariants(cmd.Context(), erigonURL, gethURL, needCompare, blockFrom, blockTo, latest, failFast, queryLimit)
+			return rpctest.EthGetLogsInvariants(cmd.Context(), erigonURL, gethURL, blockFrom, blockTo, failFast, queryLimit)
 		},
 	}
 	with(ethGetLogsInvariantsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest, withFailFast, withQueryLimit)

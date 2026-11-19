@@ -23,6 +23,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -30,6 +31,26 @@ import (
 	"github.com/erigontech/erigon/common"
 	log "github.com/erigontech/erigon/common/log/v3"
 )
+
+type auxiliaryStateView func(synced_data.ViewHeadStateFn) error
+
+var errHeadWouldWait = errors.New("head read would wait")
+
+func (f *ForkChoiceStore) lockStore(try bool) bool {
+	if try {
+		return f.mu.TryLock()
+	}
+	f.mu.Lock()
+	return true
+}
+
+func (f *ForkChoiceStore) rlockStore(try bool) bool {
+	if try {
+		return f.mu.TryRLock()
+	}
+	f.mu.RLock()
+	return true
+}
 
 // accountWeights updates the weights of the validators, given the vote and given an head leaf.
 func (f *ForkChoiceStore) accountWeights(votes, weights map[common.Hash]uint64, justifedRoot, leaf common.Hash) {
@@ -39,6 +60,9 @@ func (f *ForkChoiceStore) accountWeights(votes, weights map[common.Hash]uint64, 
 		accumulated += votes[curr]
 		votes[curr] = 0 // make sure we don't double count
 		weights[curr] += accumulated
+		if f.cutOffByInvalidation(curr) {
+			accumulated = 0
+		}
 		header, has := f.forkGraph.GetHeader(curr)
 		if !has {
 			return
@@ -75,7 +99,7 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, jus
 		}
 		boostRoot := f.proposerBoostRoot.Load().(common.Hash)
 		if boostRoot != (common.Hash{}) {
-			activeBalance := uint64(0)
+			var activeBalance uint64
 			if cachedState, ok := f.checkpointStates.Load(justifiedCheckpoint); ok {
 				activeBalance = cachedState.(*checkpointState).unslashedActiveBalance
 			} else {
@@ -85,13 +109,7 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, jus
 			votes[boostRoot] += (boost * f.beaconCfg.ProposerScoreBoost) / 100
 		}
 	} else {
-		for validatorIndex := 0; validatorIndex < f.latestMessages.latestMessagesCount(); validatorIndex++ {
-			message, balance, ok := f.countableVote(justificationState, validatorIndex)
-			if !ok {
-				continue
-			}
-			votes[message.Root] += balance
-		}
+		votes = f.voteTally.votes(f, justifiedCheckpoint, justificationState)
 		boostRoot := f.proposerBoostRoot.Load().(common.Hash)
 		if boostRoot != (common.Hash{}) {
 			boost := justificationState.unslashedActiveBalance / justificationState.beaconConfig.SlotsPerEpoch
@@ -113,12 +131,26 @@ func voteSampleBounds(count int, probabilistic bool, gen *rand.Rand) (int, int) 
 // GetHead returns the head of the fork choice store.
 // Dispatches to GLOAS or pre-GLOAS implementation based on current epoch.
 func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error) {
-	head, slot, err := f.getHeadNode(auxilliaryState)
+	var viewAuxiliaryState auxiliaryStateView
+	if auxilliaryState != nil {
+		viewAuxiliaryState = func(fn synced_data.ViewHeadStateFn) error {
+			return fn(auxilliaryState)
+		}
+	}
+	head, slot, err := f.getHeadNode(viewAuxiliaryState, false)
 	return head.Root, slot, err
 }
 
-func (f *ForkChoiceStore) getHeadNode(auxilliaryState *state.CachingBeaconState) (ForkChoiceNode, uint64, error) {
-	f.mu.RLock()
+// GetHeadWithSyncedHeadState resolves the head using the synced head state when needed.
+// Callers must not hold a synced-data lock: the fork-choice lock must come first.
+func (f *ForkChoiceStore) GetHeadWithSyncedHeadState() (ForkChoiceNode, uint64, error) {
+	return f.getHeadNode(f.syncedDataManager.ViewHeadState, false)
+}
+
+func (f *ForkChoiceStore) getHeadNode(viewAuxiliaryState auxiliaryStateView, try bool) (ForkChoiceNode, uint64, error) {
+	if !f.rlockStore(try) {
+		return ForkChoiceNode{}, 0, errHeadWouldWait
+	}
 	if f.headHash != (common.Hash{}) {
 		head := ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}
 		headSlot := f.headSlot
@@ -137,7 +169,9 @@ func (f *ForkChoiceStore) getHeadNode(auxilliaryState *state.CachingBeaconState)
 	if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
 		log.Debug("GetHead: justified root not in fork graph, using anchor as head",
 			"justifiedRoot", justifiedCheckpoint.Root)
-		f.mu.Lock()
+		if !f.lockStore(try) {
+			return ForkChoiceNode{}, 0, errHeadWouldWait
+		}
 		defer f.mu.Unlock()
 		if f.headHash != (common.Hash{}) {
 			head := ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}
@@ -154,29 +188,42 @@ func (f *ForkChoiceStore) getHeadNode(auxilliaryState *state.CachingBeaconState)
 
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
-		return f.getHeadGloas()
+		return f.getHeadGloas(try)
 	}
-	return f.getHead(auxilliaryState)
+	return f.getHead(viewAuxiliaryState, try)
 }
 
 // GetHeadNode returns the root, payload status, and slot from one head snapshot.
 // It recomputes an invalidated cache and publishes the selected head. Reading the status
 // separately could pair the root with another head's status or a cache invalidation's PENDING value.
 func (f *ForkChoiceStore) GetHeadNode() (ForkChoiceNode, uint64, error) {
-	return f.getHeadNode(nil)
+	return f.getHeadNode(nil, false)
+}
+
+// TryGetHeadNode is GetHeadNode that reports false instead of waiting for the store lock or loading a checkpoint state.
+func (f *ForkChoiceStore) TryGetHeadNode() (ForkChoiceNode, bool) {
+	head, _, err := f.getHeadNode(nil, true)
+	return head, err == nil
 }
 
 // getHeadGloas returns the head using GLOAS fork choice rules.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) getHeadGloas() (ForkChoiceNode, uint64, error) {
+func (f *ForkChoiceStore) getHeadGloas(try bool) (ForkChoiceNode, uint64, error) {
 	for {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-		// Fetch the checkpoint state before acquiring f.mu (it can read from disk);
-		// a nil state degrades to zero attestation weight, as before.
-		cs, _ := f.getCheckpointState(justifiedCheckpoint)
+		getCheckpointState := f.getCheckpointState
+		if try {
+			getCheckpointState = f.getCachedCheckpointState
+		}
+		cs, err := f.gloasHeadCheckpointState(justifiedCheckpoint, getCheckpointState)
+		if err != nil {
+			return ForkChoiceNode{}, 0, err
+		}
 
 		head, headSlot, ok, err := func() (ForkChoiceNode, uint64, bool, error) {
-			f.mu.Lock()
+			if !f.lockStore(try) {
+				return ForkChoiceNode{}, 0, false, errHeadWouldWait
+			}
 			defer f.mu.Unlock()
 
 			// Another reader may have filled the cache while this call waited.
@@ -204,7 +251,28 @@ func (f *ForkChoiceStore) getHeadGloas() (ForkChoiceNode, uint64, error) {
 		if ok {
 			return head, headSlot, nil
 		}
+		if try {
+			return ForkChoiceNode{}, 0, errHeadWouldWait
+		}
 	}
+}
+
+func (f *ForkChoiceStore) getCachedCheckpointState(checkpoint solid.Checkpoint) (*checkpointState, error) {
+	cs, ok := f.checkpointStates.Load(checkpoint)
+	if !ok {
+		return nil, errHeadWouldWait
+	}
+	return cs.(*checkpointState), nil
+}
+
+func (f *ForkChoiceStore) gloasHeadCheckpointState(justifiedCheckpoint solid.Checkpoint, getCheckpointState func(solid.Checkpoint) (*checkpointState, error)) (*checkpointState, error) {
+	cs, err := getCheckpointState(justifiedCheckpoint)
+	if err != nil {
+		if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
+			return nil, nil
+		}
+	}
+	return cs, err
 }
 
 func (f *ForkChoiceStore) computeHeadGloasWithAnchorFallback(justifiedCheckpoint solid.Checkpoint, cs *checkpointState) (ForkChoiceNode, uint64, error) {
@@ -225,6 +293,7 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 	currentSlot := f.Slot()
 	nodes, nodeChildren := f.getFilteredNodeTree(justifiedCheckpoint.Root, justifiedCheckpoint, currentSlot)
 	f.headIsFallback = len(nodes) == 0
+	ws := f.gloasWeightTree.prepare(justifiedCheckpoint, cs)
 	if len(nodes) == 0 {
 		header, hasHeader := f.forkGraph.GetHeader(justifiedCheckpoint.Root)
 		if !hasHeader {
@@ -241,8 +310,6 @@ func (f *ForkChoiceStore) computeHeadGloas(justifiedCheckpoint solid.Checkpoint,
 		Root:          justifiedCheckpoint.Root,
 		PayloadStatus: cltypes.PayloadStatusPending,
 	}
-
-	ws := f.gloasWeightTree.prepare(justifiedCheckpoint, cs)
 
 	for {
 		children := make([]ForkChoiceNode, 0, 2)
@@ -359,15 +426,18 @@ func (f *ForkChoiceStore) getFilteredNodeTree(base common.Hash, justifiedCheckpo
 }
 
 // getHead returns the head using pre-GLOAS fork choice rules.
-func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (ForkChoiceNode, uint64, error) {
+func (f *ForkChoiceStore) getHead(viewAuxiliaryState auxiliaryStateView, try bool) (ForkChoiceNode, uint64, error) {
 	for {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-		head, headSlot, ok, err := f.getHeadOnce(auxilliaryState, justifiedCheckpoint)
+		head, headSlot, ok, err := f.getHeadOnce(viewAuxiliaryState, justifiedCheckpoint, try)
 		if err != nil {
 			return ForkChoiceNode{}, 0, err
 		}
 		if ok {
 			return head, headSlot, nil
+		}
+		if try {
+			return ForkChoiceNode{}, 0, errHeadWouldWait
 		}
 	}
 }
@@ -376,41 +446,60 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (Fo
 // ok=false when the checkpoint moved while it waited for f.mu, so the caller retries:
 // caching a head computed from a superseded checkpoint would leave it stale until the next
 // attestation, tick or block clears it.
-func (f *ForkChoiceStore) getHeadOnce(auxilliaryState *state.CachingBeaconState, justifiedCheckpoint solid.Checkpoint) (ForkChoiceNode, uint64, bool, error) {
+func (f *ForkChoiceStore) getHeadOnce(viewAuxiliaryState auxiliaryStateView, justifiedCheckpoint solid.Checkpoint, try bool) (ForkChoiceNode, uint64, bool, error) {
 	var justificationState *checkpointState
 	var err error
-	if auxilliaryState == nil {
+	if viewAuxiliaryState == nil {
 		// Compute checkpoint state BEFORE acquiring f.mu: this operation
 		// can read a large state from disk, which would block the OnTick
 		// goroutine if done under the lock.
-		justificationState, err = f.getCheckpointState(justifiedCheckpoint)
+		if try {
+			justificationState, err = f.getCachedCheckpointState(justifiedCheckpoint)
+		} else {
+			justificationState, err = f.getCheckpointState(justifiedCheckpoint)
+		}
 		if err != nil {
 			return ForkChoiceNode{}, 0, false, err
 		}
 	} else if _, cached := f.checkpointStates.Load(justifiedCheckpoint); !cached {
 		_, _ = f.getCheckpointState(justifiedCheckpoint)
 	}
-	f.mu.Lock()
+	if !f.lockStore(try) {
+		return ForkChoiceNode{}, 0, false, errHeadWouldWait
+	}
 	currentSlot := f.Slot()
 	// Checkpoint I/O can cross the fork boundary. Do not replace a Gloas head
 	// with a result from the pre-fork algorithm.
 	if f.beaconCfg.GetCurrentStateVersion(f.computeEpochAtSlot(currentSlot)) >= clparams.GloasVersion {
 		f.mu.Unlock()
 		// getHeadGloas runs its own checkpoint retry, so its result is final.
-		head, headSlot, err := f.getHeadGloas()
+		head, headSlot, err := f.getHeadGloas(try)
 		return head, headSlot, true, err
 	}
 	defer f.mu.Unlock()
+	if f.headHash != (common.Hash{}) {
+		head := ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}
+		f.publishSelectedHead(head.Root, f.headSlot)
+		return head, f.headSlot, true, nil
+	}
 	if f.justifiedCheckpoint.Load().(solid.Checkpoint) != justifiedCheckpoint {
 		return ForkChoiceNode{}, 0, false, nil
+	}
+
+	var votes map[common.Hash]uint64
+	if viewAuxiliaryState == nil {
+		votes = f.computeVotes(justifiedCheckpoint, justificationState, nil)
+	} else if err := viewAuxiliaryState(func(auxiliaryState *state.CachingBeaconState) error {
+		votes = f.computeVotes(justifiedCheckpoint, justificationState, auxiliaryState)
+		return nil
+	}); err != nil {
+		return ForkChoiceNode{}, 0, false, err
 	}
 
 	// Retrieve att
 	f.headHash = justifiedCheckpoint.Root
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 	blocks := f.getFilteredBlockTree(f.headHash, justifiedCheckpoint, currentSlot)
-	// Do a simple scan to determine the fork votes.
-	votes := f.computeVotes(justifiedCheckpoint, justificationState, auxilliaryState)
 	// Account for weights on each head fork
 	f.weights = make(map[common.Hash]uint64)
 	for head := range f.headSet {
@@ -476,37 +565,8 @@ func (f *ForkChoiceStore) publishSelectedHead(root common.Hash, slot uint64) {
 func (f *ForkChoiceStore) getFilteredBlockTree(base common.Hash, justifiedCheckpoint solid.Checkpoint, currentSlot uint64) map[common.Hash]*cltypes.BeaconBlockHeader {
 	blocks := make(map[common.Hash]*cltypes.BeaconBlockHeader)
 	currentEpoch := f.computeEpochAtSlot(currentSlot)
-	f.getFilterBlockTree(base, blocks, currentEpoch, justifiedCheckpoint)
+	f.markViableUncutBlocks(base, blocks, currentEpoch, justifiedCheckpoint)
 	return blocks
-}
-
-// getFilterBlockTree recursively traverses the block tree to identify viable blocks.
-// It takes a block hash and a map of viable blocks as input parameters, and returns a boolean value indicating
-// whether the current block is viable.
-func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader, currentEpoch uint64, justifiedCheckpoint solid.Checkpoint) bool {
-	header, has := f.forkGraph.GetHeader(blockRoot)
-	if !has {
-		return false
-	}
-	children := f.children(blockRoot)
-	// If there are children iterate down recursively and see which branches are viable.
-	if len(children) > 0 {
-		isAnyViable := false
-		for _, child := range children {
-			if f.getFilterBlockTree(child, blocks, currentEpoch, justifiedCheckpoint) {
-				isAnyViable = true
-			}
-		}
-		if isAnyViable {
-			blocks[blockRoot] = header
-		}
-		return isAnyViable
-	}
-	if f.isViableLeaf(blockRoot, header, currentEpoch, justifiedCheckpoint) {
-		blocks[blockRoot] = header
-		return true
-	}
-	return false
 }
 
 func (f *ForkChoiceStore) isViableLeaf(blockRoot common.Hash, header *cltypes.BeaconBlockHeader, currentEpoch uint64, justifiedCheckpoint solid.Checkpoint) bool {

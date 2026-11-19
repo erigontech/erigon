@@ -38,6 +38,7 @@ import (
 	service_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 func TestRegisterGossipServicesProcessesGloasPreferencesOneEpochEarly(t *testing.T) {
@@ -109,8 +110,9 @@ func TestRegisterGossipServicesProcessesGloasPreferencesOneEpochEarly(t *testing
 			// A nil host makes local publishes run the validator like a peer's message.
 			p2pManager.EXPECT().Host().Return(nil).AnyTimes()
 			p2pManager.EXPECT().BandwidthCounter().Return(metrics.NewBandwidthCounter()).AnyTimes()
+			networkConfig := clparams.NetworkConfigs[chainspec.MainnetChainID]
 			gm := gossip.NewGossipManager(
-				t.Context(), p2pManager, &cfg, &clparams.NetworkConfig{}, clock, false, 0,
+				t.Context(), p2pManager, &cfg, &networkConfig, clock, false, 0,
 				datasize.MB, datasize.MB, false,
 			)
 			t.Cleanup(func() { require.NoError(t, gm.Close()) })
@@ -159,7 +161,7 @@ func TestRegisterGossipServicesProcessesGloasPreferencesOneEpochEarly(t *testing
 			forkChoice := forkchoice_mock.NewForkChoiceStorageMock(t)
 			forkChoice.HighestSeenVal = 64
 			RegisterGossipServices(
-				gm, forkChoice, clock, blockService, attesterSlashingService, blobService, dataColumnSidecarService,
+				gm, forkChoice, clock, &cfg, func() uint64 { return 0 }, blockService, attesterSlashingService, blobService, dataColumnSidecarService,
 				syncCommitteeMessagesService, syncContributionService, aggregateAndProofService, attestationService,
 				voluntaryExitService, blsToExecutionChangeService, proposerSlashingService, executionPayloadService,
 				payloadAttestationService, proposerPreferencesService, executionPayloadBidService,

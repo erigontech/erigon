@@ -29,6 +29,8 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	gossipMgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -46,8 +48,10 @@ type CommitteeSubscribeMgmt struct {
 	beaconConfig    *clparams.BeaconChainConfig
 	netConfig       *clparams.NetworkConfig
 	syncedData      *synced_data.SyncedDataManager
-	gossipManager   *gossipMgr.GossipManager
+	gossipManager   gossipMgr.Gossip
 	aggregationPool aggregation.AggregationPool
+	ethClock        eth_clock.EthereumClock
+	validatorParams *validator_params.ValidatorParams
 }
 
 func NewCommitteeSubscribeManagement(
@@ -56,6 +60,8 @@ func NewCommitteeSubscribeManagement(
 	syncedData *synced_data.SyncedDataManager,
 	gossipManager *gossipMgr.GossipManager,
 	aggregationPool aggregation.AggregationPool,
+	ethClock eth_clock.EthereumClock,
+	validatorParams *validator_params.ValidatorParams,
 ) *CommitteeSubscribeMgmt {
 	c := &CommitteeSubscribeMgmt{
 		beaconConfig:    beaconConfig,
@@ -63,6 +69,8 @@ func NewCommitteeSubscribeManagement(
 		syncedData:      syncedData,
 		gossipManager:   gossipManager,
 		aggregationPool: aggregationPool,
+		ethClock:        ethClock,
+		validatorParams: validatorParams,
 	}
 	return c
 }
@@ -81,6 +89,10 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	}
 
 	log.Trace("Add attestation subscription", "slot", slot, "committeeIndex", cIndex, "isAggregator", p.IsAggregator, "validatorIndex", p.ValidatorIndex)
+	// Only aggregators need to receive subnet attestations; non-aggregators publish through the joined topic.
+	if !p.IsAggregator {
+		return nil
+	}
 	commiteePerSlot := c.syncedData.CommitteeCount(p.Slot / c.beaconConfig.SlotsPerEpoch)
 	subnetId := subnets.ComputeSubnetForAttestation(commiteePerSlot, slot, cIndex, c.beaconConfig.SlotsPerEpoch, c.netConfig.AttestationSubnetCount)
 

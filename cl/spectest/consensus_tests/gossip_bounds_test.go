@@ -41,11 +41,11 @@ func TestGossipCurrentSlotRejectsInvalidTimeConfig(t *testing.T) {
 func TestGossipSyncSubcommitteePublicKeysRejectsInvalidBounds(t *testing.T) {
 	config := clparams.MainnetBeaconConfig
 	config.SyncCommitteeSubnetCount = 0
-	_, ok := gossipSyncSubcommitteePublicKeys(state.New(&config), 0)
+	_, ok := gossipSyncSubcommitteePublicKeys(&config, state.New(&config).CurrentSyncCommittee(), 0)
 	require.False(t, ok)
 
 	config = clparams.MainnetBeaconConfig
-	_, ok = gossipSyncSubcommitteePublicKeys(state.New(&config), config.SyncCommitteeSubnetCount)
+	_, ok = gossipSyncSubcommitteePublicKeys(&config, state.New(&config).CurrentSyncCommittee(), config.SyncCommitteeSubnetCount)
 	require.False(t, ok)
 }
 

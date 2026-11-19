@@ -37,7 +37,7 @@ erigon \
   * `--http.api=engine,eth,net,web3`: enables the necessary APIs for external clients and Caplin.
   * `--ws`: enables WebSocket-based communication (optional).
 * Consensus Layer (Caplin):
-  * `--caplin.discovery.addr` and `--caplin.discovery.port`: configures Caplin's gossip and discovery layer.
+  * `--caplin.discovery.addr` and `--caplin.discovery.port`: configure Caplin's gossip and discovery layer.
   * `--beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse`: enables all possible API endpoints for the validator client.
 
 ## 2. Set Up Lighthouse Validator Client
@@ -58,7 +58,7 @@ mkdir -p ~/.lighthouse/validators
 
 ### 2.3. Run Lighthouse Validator Client
 
-Start the validator client and connect it to the Caplin CL:
+Start the validator client and connect it to the Caplin Consensus Layer (CL):
 
 ```bash
 lighthouse vc \
@@ -85,7 +85,7 @@ lighthouse account validator import --directory <path_to_validator_keys>
 
 ### 3.1. Payload Preparation Ahead of the Proposer Slot
 
-Since v3.6, Caplin primes the execution layer one slot before the slot this node is due to propose, so the execution layer has already begun assembling a payload when the proposal is requested. There is no flag for this; it is on whenever all of the following hold:
+Since v3.6, Caplin primes the execution layer one slot before the slot this node is due to propose, so the execution layer has already begun assembling a payload when the proposal is requested. Preparation is enabled by default. Use `--caplin.payload-preparation.disable` to disable it while keeping the validator API and normal block production enabled. Preparation runs when all of the following hold:
 
 * The Beacon API is running with the `validator` namespace enabled — for example `--beacon.api=beacon,validator,...` as in the command above. Without `validator`, preparation never starts.
 * A validator client has registered a fee recipient for the proposer index, which Lighthouse does through the standard `prepare_beacon_proposer` call. A node with no registered validators never does the work.
@@ -93,12 +93,14 @@ Since v3.6, Caplin primes the execution layer one slot before the slot this node
 
 Preparation looks at most one slot ahead, and it does not alter execution-layer fork choice — it only starts the builder early. To confirm it is running, look for these lines in the Erigon log:
 
-```
+```text
 PayloadPreparation: watching for proposals
 PayloadPreparation: primed execution layer
 ```
 
-Preparation is skipped for the Gloas (EIP-7732) fork, where builders gossip bids instead, and before Capella.
+Preparation starts at Capella. It supports the first Gloas slot and steady-state Gloas EMPTY paths whose execution parent is already canonical. Gloas FULL and FULL-to-EMPTY paths wait for normal production's fork-choice update. Missing or mismatched preparation keeps the normal collection window.
+
+The metrics endpoint exposes `caplin_payload_preparation_outcomes_total{outcome="..."}` for scheduler results. Outcomes use fixed reasons such as `success`, `unregistered`, `stale_head`, `busy`, `too_early`, `late`, `needs_forkchoice`, and `unchanged`. `caplin_payload_preparation_collections_total{outcome="reused|absent|mismatch"}` records whether production reused a prepared payload ID, found no prepared payload, or found a different ID. `absent` also covers nodes where preparation is disabled or unsupported. Head hashes, slots, proposer indices, and error messages are never metric labels.
 
 ### 3.2. Fork-Choice Head Published Before the Head-State Copy
 

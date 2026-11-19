@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/utils"
@@ -333,7 +334,7 @@ func TestNewPayloadPublishesInvalidatedBeforeReleasingAdmission(t *testing.T) {
 		defer store.mu.Unlock()
 		_, _, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 			blockRoot, func() error { return nil }, derived,
-			block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+			block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil, nil)
 	}()
 	awaitSignal(t, elEntered, "NewPayload to start")
 
@@ -370,7 +371,7 @@ func TestGetHeadOnceDiscardsSupersededCheckpoint(t *testing.T) {
 	stale := store.justifiedCheckpoint.Load().(solid.Checkpoint)
 	store.justifiedCheckpoint.Store(solid.Checkpoint{Epoch: stale.Epoch + 1, Root: stale.Root})
 
-	_, _, ok, err := store.getHeadOnce(nil, stale)
+	_, _, ok, err := store.getHeadOnce(nil, stale, false)
 	require.NoError(t, err)
 	require.False(t, ok, "a superseded checkpoint must not produce a head")
 
@@ -395,7 +396,7 @@ func TestNewPayloadSkipsELWhenBlockIsNoLongerAdmissible(t *testing.T) {
 	store.mu.Lock()
 	status, _, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 		blockRoot, func() error { return errBlockAtFinalizedHorizon }, noDerivedHash,
-		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil, nil)
 	store.mu.Unlock()
 
 	require.ErrorIs(t, err, errBlockAtFinalizedHorizon)
@@ -547,7 +548,7 @@ func TestNewPayloadKeepsInvalidAheadOfValidated(t *testing.T) {
 		defer store.mu.Unlock()
 		_, _, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 			blockRoot, func() error { return nil }, noDerivedHash,
-			block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+			block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil, nil)
 	}()
 	awaitSignal(t, elEntered, "NewPayload to start")
 
@@ -576,7 +577,7 @@ func TestNewPayloadPublishesInvalidatedAgainstThePayload(t *testing.T) {
 		defer store.mu.Unlock()
 		_, _, _ = store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 			common.HexToHash("0xaaaa"), func() error { return nil }, derived,
-			payload, &block.Block.ParentRoot, nil, nil)
+			payload, &block.Block.ParentRoot, nil, nil, nil)
 	}()
 	awaitSignal(t, elEntered, "NewPayload to start")
 
@@ -609,7 +610,7 @@ func TestNewPayloadPublishesInvalidatedAgainstThePayload(t *testing.T) {
 	store.mu.Lock()
 	second, _, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 		common.HexToHash("0xbbbb"), func() error { return nil }, derived,
-		payload, &block.Block.ParentRoot, nil, nil)
+		payload, &block.Block.ParentRoot, nil, nil, nil)
 	store.mu.Unlock()
 	require.NoError(t, err)
 	require.EqualValues(t, execution_client.PayloadStatusInvalidated, second)
@@ -633,7 +634,7 @@ func TestNewPayloadHonoursTheAuthoritativeInvalidSet(t *testing.T) {
 	store.mu.Lock()
 	status, _, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 		common.HexToHash("0xcccc"), func() error { return nil }, derived,
-		payload, &block.Block.ParentRoot, nil, nil)
+		payload, &block.Block.ParentRoot, nil, nil, nil)
 	store.mu.Unlock()
 	require.NoError(t, err)
 	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
@@ -663,7 +664,7 @@ func TestNewPayloadChecksAdmissionOnlyAfterWinningTheToken(t *testing.T) {
 			common.HexToHash("0xbbbb"), func() error {
 				checked.Store(true)
 				return nil
-			}, noDerivedHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+			}, noDerivedHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil, nil)
 		store.mu.Unlock()
 		done <- err
 	}()
@@ -742,7 +743,7 @@ func TestNewPayloadDoesNotWaitForTheLockWhileHoldingTheToken(t *testing.T) {
 			blockRoot, func() error {
 				checked.Store(true)
 				return nil
-			}, noDerivedHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+			}, noDerivedHash, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil, nil)
 		store.mu.Unlock()
 	}()
 
@@ -772,7 +773,7 @@ func TestNewPayloadForBlockWhileYieldingLockSkipsValidatedPayload(t *testing.T) 
 	f.mu.Lock()
 	status, _, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 		blockRoot, func() error { return nil }, noDerivedHash,
-		&cltypes.Eth1Block{}, nil, nil, nil)
+		&cltypes.Eth1Block{}, nil, nil, nil, nil)
 	locked := f.mu.TryLock()
 	f.mu.Unlock()
 
@@ -872,7 +873,7 @@ func TestNewPayloadInvalidVerdictSurvivesStatusCacheEviction(t *testing.T) {
 	store.mu.Lock()
 	status, _, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 		blockRoot, func() error { return nil }, derived,
-		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil, nil)
 	store.mu.Unlock()
 	require.ErrorContains(t, err, "bad block")
 	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
@@ -951,7 +952,7 @@ func TestNewPayloadFastPathPublishesNothingToRetract(t *testing.T) {
 	store.mu.Lock()
 	status, published, err := store.newPayloadForBlockWhileYieldingForkChoiceLock(context.Background(),
 		blockRoot, func() error { return nil }, noDerivedHash,
-		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
+		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil, nil)
 	store.mu.Unlock()
 
 	require.NoError(t, err)
@@ -959,4 +960,20 @@ func TestNewPayloadFastPathPublishesNothingToRetract(t *testing.T) {
 	require.Equal(t, common.Hash{}, published, "the fast path must not claim the writer's entry")
 	_, held := store.inFlightInvalidPayloads.Load(executionHash)
 	require.True(t, held, "the writer's entry must survive a non-writer passing through")
+}
+
+// UpdateValidatorsCustody writes the indexing DB, so it must run without f.mu: the fork
+// choice stage holds an indexing-DB write tx while it waits for f.mu.
+func TestOnBlockUpdatesValidatorsCustodyWithoutForkChoiceLock(t *testing.T) {
+	store, block := buildExAnteStorePendingLast(t, nil)
+	store.localValidators.SetFeeRecipient(0, common.Address{})
+	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().IsArchivedMode().Return(false).AnyTimes()
+	peerDas.EXPECT().UpdateValidatorsCustody(gomock.Any()).Times(1).Do(func(uint64) {
+		require.True(t, store.mu.TryLock(), "UpdateValidatorsCustody must not run under the fork-choice lock")
+		store.mu.Unlock()
+	})
+	store.InitPeerDas(peerDas)
+
+	require.NoError(t, store.OnBlock(context.Background(), block, false, true, false))
 }

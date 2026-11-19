@@ -45,6 +45,9 @@ func NewRawUint64List(limit int, u []uint64) *RawUint64List {
 }
 
 func (arr *RawUint64List) SetCap(c int) {
+	if arr.c != c {
+		arr.cachedHash = common.Hash{}
+	}
 	arr.c = c
 }
 
@@ -70,7 +73,10 @@ func (arr *RawUint64List) Set(index int, v uint64) {
 func (arr *RawUint64List) CopyTo(target IterableSSZ[uint64]) {
 	if c, ok := target.(*RawUint64List); ok {
 		c.u = append(c.u[:0], arr.u...)
-		c.cachedHash = arr.cachedHash
+		c.cachedHash = common.Hash{}
+		if c.c == arr.c {
+			c.cachedHash = arr.cachedHash
+		}
 		return
 	}
 	panic("incompatible type")
@@ -142,6 +148,9 @@ func (arr *RawUint64List) hashBufLength() int {
 }
 
 func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
+	if len(arr.u) > arr.c {
+		return [32]byte{}, fmt.Errorf("uint64 list length exceeds limit: %d > %d", len(arr.u), arr.c)
+	}
 	if arr.cachedHash != (common.Hash{}) {
 		return arr.cachedHash, nil
 	}
@@ -157,6 +166,7 @@ func (arr *RawUint64List) HashSSZ() ([32]byte, error) {
 	}
 
 	arr.hahsBuffer = arr.hahsBuffer[:arr.hashBufLength()]
+	clear(arr.hahsBuffer)
 	for i, v := range arr.u {
 		binary.LittleEndian.PutUint64(arr.hahsBuffer[i*8:], v)
 	}
@@ -200,13 +210,18 @@ func (arr *RawUint64List) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &strs); err != nil {
 		return err
 	}
-	arr.u = make([]uint64, len(strs))
+	if len(strs) > arr.c {
+		return fmt.Errorf("uint64 list length exceeds limit: %d > %d", len(strs), arr.c)
+	}
+	values := make([]uint64, len(strs))
 	for i, s := range strs {
 		v, err := strconv.ParseUint(s, 10, 64)
 		if err != nil {
 			return err
 		}
-		arr.u[i] = v
+		values[i] = v
 	}
+	arr.u = values
+	arr.cachedHash = common.Hash{}
 	return nil
 }

@@ -58,11 +58,12 @@ type CaplinCliCfg struct {
 	TrustedCIDRs            []string      `json:"trusted_cidrs"`
 	JwtSecret               []byte
 
-	AllowedMethods     []string `json:"allowed_methods"`
-	AllowedOrigins     []string `json:"allowed_origins"`
-	AllowCredentials   bool     `json:"allow_credentials"`
-	PreserveGraffiti   bool     `json:"preserve_graffiti"`
-	SubscribeAllTopics bool     `json:"subscribe_all_topics"`
+	AllowedMethods            []string `json:"allowed_methods"`
+	AllowedOrigins            []string `json:"allowed_origins"`
+	AllowCredentials          bool     `json:"allow_credentials"`
+	PreserveGraffiti          bool     `json:"preserve_graffiti"`
+	DisablePayloadPreparation bool     `json:"disable_payload_preparation"`
+	SubscribeAllTopics        bool     `json:"subscribe_all_topics"`
 
 	Dirs datadir.Dirs
 }
@@ -89,6 +90,7 @@ func SetupCaplinCli(ctx *cli.Command) (cfg *CaplinCliCfg, err error) {
 	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Uint(caplinflags.BeaconApiPort.Name))
 	cfg.AllowCredentials = ctx.Bool(utils.BeaconApiAllowCredentialsFlag.Name)
 	cfg.PreserveGraffiti = ctx.Bool(utils.BeaconApiPreserveGraffitiFlag.Name)
+	cfg.DisablePayloadPreparation = ctx.Bool(utils.CaplinPayloadPreparationDisableFlag.Name)
 	cfg.AllowedMethods = ctx.StringSlice(utils.BeaconApiAllowMethodsFlag.Name)
 	cfg.AllowedOrigins = ctx.StringSlice(utils.BeaconApiAllowOriginsFlag.Name)
 	cfg.BeaconProtocol = "tcp"

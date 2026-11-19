@@ -22,6 +22,7 @@ package rpc
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 )
 
 // Helpers for finding the bounds of JSON values without parsing them, so a
@@ -104,6 +105,31 @@ func scanJSONValue(data []byte, i int) int {
 		}
 		return len(data)
 	}
+}
+
+// jsonKeyIs reports whether the object key raw, as written between its quotes, decodes to
+// name, which holds only ASCII letters. It unescapes while it compares, so it allocates nothing.
+func jsonKeyIs(raw []byte, name string) bool {
+	for len(raw) > 0 {
+		c, n := raw[0], 1
+		if c == '\\' {
+			// Only a \u escape below 0x80 can spell a letter.
+			c, n = 0, 2
+			if raw[1] == 'u' && len(raw) >= 6 {
+				var v [2]byte
+				_, _ = hex.Decode(v[:], raw[2:6])
+				n = 6
+				if v[0] == 0 {
+					c = v[1]
+				}
+			}
+		}
+		if len(name) == 0 || c != name[0] {
+			return false
+		}
+		raw, name = raw[n:], name[1:]
+	}
+	return len(name) == 0
 }
 
 // forEachJSONField calls fn with the key and raw value of every member of the

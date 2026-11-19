@@ -88,6 +88,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.AuthRpcPort,
 	&utils.JWTSecretPath,
 	&utils.HttpCompressionFlag,
+	&utils.HttpCompressionLoopbackFlag,
 	&utils.HTTPCORSDomainFlag,
 	&utils.HTTPVirtualHostsFlag,
 	&utils.AuthRpcVirtualHostsFlag,
@@ -119,7 +120,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.AllowUnprotectedTxs,
 	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
-	&utils.TraceMaxtracesFlag,
 	&utils.AlwaysGenerateChangesetsFlag,
 
 	&HTTPReadTimeoutFlag,
@@ -180,7 +180,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.DevValidatorSeedFlag,
 	&utils.DevValidatorCountFlag,
 	&utils.DevSlotTimeFlag,
-	&utils.VMEnableDebugFlag,
 	&utils.NetworkIdFlag,
 	&utils.PersistReceiptsV2Flag,
 	&utils.PersistReceiptsDistanceFlag,
@@ -204,10 +203,10 @@ var DefaultFlags = []cli.Flag{
 	&utils.DownloaderVerifyFlag,
 	&utils.HealthCheckFlag,
 	&utils.WebSeedsFlag,
-	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideOsakaFlag,
 	&utils.OverrideAmsterdamFlag,
+	&utils.OverrideGenesisFlag,
 	&utils.KeepStoredChainConfigFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,
@@ -247,8 +246,11 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.CaplinArchiveBlocksFlag,
 	&utils.CaplinArchiveBlobsFlag,
+	&utils.CaplinArchiveBlobsFromSlotFlag,
 	&utils.CaplinArchiveStatesFlag,
 	&utils.CaplinImmediateBlobBackfillFlag,
+	&utils.CaplinBlobsBackfillEndpointFlag,
+	&utils.CaplinBlobsBackfillEndpointWorkersFlag,
 
 	&utils.CaplinDisableBlobPruningFlag,
 	&utils.CaplinColumnKeepSlotsFlag,
@@ -258,6 +260,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinMevRelayUrl,
 	&utils.CaplinAllowPrivateBuilderURLs,
 	&utils.CaplinValidatorMonitorFlag,
+	&utils.CaplinPayloadPreparationDisableFlag,
 	&utils.CaplinCustomConfigFlag,
 	&utils.CaplinCustomGenesisFlag,
 	&utils.CaplinUseEngineApiFlag,
@@ -281,6 +284,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalParallelCommitmentFlag,
+	&utils.ExperimentalCommitmentV3Flag,
 
 	&utils.MCPDisableFlag,
 	&utils.MCPAddrFlag,

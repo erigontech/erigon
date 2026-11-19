@@ -34,6 +34,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -214,6 +215,51 @@ func TestClientBatchSendsRunInOrder(t *testing.T) {
 	defer svc.mu.Unlock()
 	if !slices.Equal(svc.order, []int{0, 1, 2, 3}) {
 		t.Fatalf("batch ran its sends in order %v, want 0 1 2 3", svc.order)
+	}
+}
+
+// syncSendService answers true only when both of its calls run at the same time.
+type syncSendService struct {
+	arrived atomic.Int32
+	both    chan struct{}
+}
+
+func (s *syncSendService) SendRawTransactionSync() bool {
+	if s.arrived.Add(1) == 2 {
+		close(s.both)
+	}
+	select {
+	case <-s.both:
+		return true
+	case <-time.After(time.Second):
+		return false
+	}
+}
+
+// A sync send waits for its receipt, so a batch of them must not wait for each receipt in turn.
+func TestClientBatchSyncSendsRunConcurrently(t *testing.T) {
+	logger := log.New()
+	server := newTestServer(logger)
+	defer server.Stop()
+	server.batchConcurrency = 2
+	svc := &syncSendService{both: make(chan struct{})}
+	if err := server.RegisterName("eth", svc); err != nil {
+		t.Fatal(err)
+	}
+	client := DialInProc(server, logger)
+	defer client.Close()
+
+	batch := make([]BatchElem, 2)
+	for i := range batch {
+		batch[i] = BatchElem{Method: "eth_sendRawTransactionSync", Result: new(bool)}
+	}
+	if err := client.BatchCall(batch); err != nil {
+		t.Fatal(err)
+	}
+	for i, elem := range batch {
+		if elem.Error != nil || !*elem.Result.(*bool) {
+			t.Fatalf("call %d did not overlap the other one: result %v, err %v", i, *elem.Result.(*bool), elem.Error)
+		}
 	}
 }
 
@@ -1076,14 +1122,10 @@ func (reverseService) Echo(ctx context.Context, s string) (string, error) {
 }
 
 // pipeClient returns a client whose server side is the returned writer and decoder.
-func pipeClient(t *testing.T, opts ...ClientOption) (*Client, io.Writer, *json.Decoder) {
+func pipeClient(t *testing.T) (*Client, io.Writer, *json.Decoder) {
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
-	cfg := new(clientConfig)
-	for _, opt := range opts {
-		opt(cfg)
-	}
-	client, err := newClient(context.Background(), cfg, newClientTransportIO(inR, outW), log.New())
+	client, err := newClient(context.Background(), newClientTransportIO(inR, outW), log.New())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		inW.Close() // ends the client's read loop, which Close waits for
@@ -1102,4 +1144,66 @@ func TestClientServesReverseCalls(t *testing.T) {
 	require.NoError(t, out.Decode(&resp))
 	require.Nil(t, resp.Error)
 	require.JSONEq(t, `"hi"`, string(resp.Result))
+}
+
+// A call the remote end made to the client is canceled when the connection is
+// closed.
+func TestClientCancelCallsOnDisconnect(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	clientConn, remoteConn := net.Pipe()
+	defer remoteConn.Close()
+	client := initClient(NewCodec(clientConn), logger)
+	svc := newWaitService()
+	if err := client.RegisterName("test", svc); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_, _ = remoteConn.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"test_wait"}`))
+	}()
+	<-svc.started
+	remoteConn.Close()
+	svc.awaitDone(t)
+	client.Close()
+}
+
+type nestedCallService struct {
+	started chan struct{}
+	done    chan error
+}
+
+func (s *nestedCallService) Call(ctx context.Context) error {
+	client, _ := ClientFromContext(ctx)
+	close(s.started)
+	err := client.CallContext(ctx, nil, "remote_method")
+	s.done <- err
+	return err
+}
+
+// A call the remote end made to the client, waiting on its own call back to the remote end, returns
+// when the connection is closed: closing the connection waits for it.
+func TestClientCancelNestedCallOnDisconnect(t *testing.T) {
+	t.Parallel()
+	clientConn, remoteConn := net.Pipe()
+	defer remoteConn.Close()
+	client := initClient(NewCodec(clientConn), log.New())
+	svc := &nestedCallService{started: make(chan struct{}), done: make(chan error, 1)}
+	require.NoError(t, client.RegisterName("test", svc))
+
+	go func() {
+		_, _ = remoteConn.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"test_call"}`))
+	}()
+	<-svc.started
+	var nested jsonrpcMessage
+	require.NoError(t, json.NewDecoder(remoteConn).Decode(&nested))
+	require.Equal(t, "remote_method", nested.Method)
+	remoteConn.Close()
+
+	select {
+	case err := <-svc.done:
+		require.Error(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("nested call still waiting after the connection was closed")
+	}
+	client.Close()
 }

@@ -18,10 +18,12 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"time"
 
@@ -36,7 +38,9 @@ import (
 	networkgossip "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
+	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/ssz"
 )
@@ -44,6 +48,8 @@ import (
 // Above the largest request the spec allows, about 17 MB: MAX_COMMITTEES_PER_SLOT * TARGET_AGGREGATORS_PER_COMMITTEE
 // aggregates, each with a full Electra aggregation bitlist.
 const maxAggregateAndProofsRequestSize = 32 << 20
+
+const blockArrivalPollInterval = 50 * time.Millisecond
 
 // maxFutureSlotLookahead bounds how far beyond the current slot a
 // sync-committee message's slot is entertained before its expiry is even
@@ -150,6 +156,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		return
 	}
 
+	blockDeadline := time.Now().Add(time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second)
 	failures := []poolingFailure{}
 	for i, attestation := range req {
 		if a.syncedData.Syncing() {
@@ -179,7 +186,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			return
 		}
 
-		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); errors.Is(err, services.ErrAttestationAlreadySeen) {
+		if err := a.processPoolAttestation(r.Context(), blockDeadline, &subnet, attestationWithGossipData, attestation.Data.BeaconBlockRoot); errors.Is(err, services.ErrAttestationAlreadySeen) {
 			continue
 		} else if err != nil {
 			if errors.Is(err, services.ErrIgnore) {
@@ -232,6 +239,7 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
+	blockDeadline := time.Now().Add(time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second)
 	failures := []poolingFailure{}
 	for i, attestation := range req {
 		if a.syncedData.Syncing() {
@@ -261,7 +269,7 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 			return
 		}
 
-		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); errors.Is(err, services.ErrAttestationAlreadySeen) {
+		if err := a.processPoolAttestation(r.Context(), blockDeadline, &subnet, attestationWithGossipData, attestation.AttestationData().BeaconBlockRoot); errors.Is(err, services.ErrAttestationAlreadySeen) {
 			continue
 		} else if err != nil {
 			if errors.Is(err, services.ErrIgnore) {
@@ -292,6 +300,33 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 	w.WriteHeader(http.StatusOK)
 }
 
+// processPoolAttestation processes a submitted attestation. A validator client may attest before the node imports the
+// block it votes for, e.g. while blob data is still awaited, so it waits for that block until the deadline and retries.
+func (a *ApiHandler) processPoolAttestation(ctx context.Context, blockDeadline time.Time, subnet *uint64, att *services.AttestationForGossip, blockRoot common.Hash) error {
+	err := a.attestationService.ProcessMessage(ctx, subnet, att)
+	if !errors.Is(err, services.ErrBlockNotSeen) || !a.awaitBlock(ctx, blockDeadline, blockRoot) {
+		return err
+	}
+	return a.attestationService.ProcessMessage(ctx, subnet, att)
+}
+
+func (a *ApiHandler) awaitBlock(ctx context.Context, deadline time.Time, blockRoot common.Hash) bool {
+	ctx, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	ticker := time.NewTicker(blockArrivalPollInterval)
+	defer ticker.Stop()
+	for {
+		if _, ok := a.forkchoiceStore.GetHeader(blockRoot); ok {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
+	}
+}
+
 func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) {
 	req := cltypes.SignedVoluntaryExit{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -305,10 +340,22 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 		return
 	}
 
-	if err := a.voluntaryExitService.ProcessMessage(r.Context(), nil, &services.SignedVoluntaryExitForGossip{
+	err = a.voluntaryExitService.ProcessMessage(r.Context(), nil, &services.SignedVoluntaryExitForGossip{
 		SignedVoluntaryExit:   &req,
 		ImmediateVerification: true,
-	}); err != nil && !errors.Is(err, services.ErrIgnore) {
+	})
+	if errors.Is(err, services.ErrIgnore) {
+		// The request itself was not verified, so only an exit already verified into the pool may be gossiped.
+		pooled, ok := a.operationsPool.VoluntaryExitsPool.Get(req.VoluntaryExit.ValidatorIndex)
+		if !ok {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if encodedSSZ, err = pooled.EncodeSSZ(nil); err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
+		}
+	} else if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -327,7 +374,57 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter,
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
-	if err := a.forkchoiceStore.OnAttesterSlashing(req, false); err != nil && !errors.Is(err, forkchoice.ErrIgnore) {
+	a.submitAttesterSlashing(w, r, req)
+}
+
+func (a *ApiHandler) PostEthV2BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) {
+	version, err := clparams.StringToClVersion(r.Header.Get("Eth-Consensus-Version"))
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid Eth-Consensus-Version header: %w", err)).WriteTo(w)
+		return
+	}
+	const jsonOverhead = 4 << 10
+	const bytesPerIndexPair = 2 * 32
+	maxIndices := a.beaconChainCfg.MaxValidatorsPerCommittee
+	committees := uint64(1)
+	if version >= clparams.ElectraVersion {
+		committees = a.beaconChainCfg.MaxCommitteesPerSlot
+	}
+	maxSupportedIndices := min(uint64(math.MaxInt), uint64((math.MaxInt64-jsonOverhead)/bytesPerIndexPair))
+	if committees != 0 && maxIndices > maxSupportedIndices/committees {
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("attester slashing limits exceed supported range")).WriteTo(w)
+		return
+	}
+	maxIndices *= committees
+	bodyLimit := jsonOverhead + int64(maxIndices)*bytesPerIndexPair
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, bodyLimit))
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	req := cltypes.NewAttesterSlashing(version)
+	req.Attestation_1.AttestingIndices.SetCap(int(maxIndices))
+	req.Attestation_2.AttestingIndices.SetCap(int(maxIndices))
+	if err := json.Unmarshal(body, req); err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	if req.Attestation_1.AttestingIndices.Length() > int(maxIndices) || req.Attestation_2.AttestingIndices.Length() > int(maxIndices) {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attesting indices exceed limit")).WriteTo(w)
+		return
+	}
+	a.submitAttesterSlashing(w, r, req)
+}
+
+func (a *ApiHandler) submitAttesterSlashing(w http.ResponseWriter, r *http.Request, req *cltypes.AttesterSlashing) {
+	if err := a.forkchoiceStore.OnAttesterSlashing(req, false); errors.Is(err, forkchoice.ErrIgnore) {
+		pooled, ok := a.operationsPool.AttesterSlashingsPool.Get(pool.ComputeKeyForAttesterSlashing(req))
+		if !ok {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		req = pooled
+	} else if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
@@ -545,7 +642,11 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 	for idx, v := range msgs {
 		var publishingSubnets []uint64
 		if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-			publishingSubnets, err = subnets.ComputeSubnetsForSyncCommittee(headState, v.ValidatorIndex)
+			// A phase0 head has zero-filled sync committees, so no validator would be found in them.
+			if headState.Version() < clparams.AltairVersion {
+				return errors.New("head state is before Altair and has no sync committee")
+			}
+			publishingSubnets, err = subnets.ComputeSubnetsForSyncCommittee(headState, v.Slot, v.ValidatorIndex)
 			if err != nil {
 				return err
 			}
@@ -556,6 +657,10 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 				return
 			}
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
+			continue
+		}
+		if len(publishingSubnets) == 0 {
+			failures = append(failures, poolingFailure{Index: idx, Message: fmt.Sprintf("validator %d is not in the sync committee for slot %d", v.ValidatorIndex, v.Slot)})
 			continue
 		}
 
@@ -649,7 +754,8 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 			return
 		}
 
-		if err = a.syncContributionAndProofsService.ProcessMessage(r.Context(), nil, &signedContributionAndProofWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {
+		// An ignored contribution was not verified, so it is reported rather than published.
+		if err = a.syncContributionAndProofsService.ProcessMessage(r.Context(), nil, &signedContributionAndProofWithGossipData); err != nil {
 			log.Warn("[Beacon REST] failed to process sync contribution", "err", err)
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue

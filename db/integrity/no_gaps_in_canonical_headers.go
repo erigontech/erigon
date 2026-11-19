@@ -18,6 +18,7 @@ package integrity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -51,6 +52,14 @@ func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br dbservices.Ful
 	}
 
 	for i := firstBlockInDB; i < lastBlockNum; i++ {
+		select {
+		case <-ctx.Done():
+			return errors.Join(ctx.Err(), probs.verdict(string(HeaderNoGaps)))
+		case <-logEvery.C:
+			log.Info("[integrity] HeaderNoGaps", "progress", fmt.Sprintf("%s/%s", common.PrettyExact(i), common.PrettyExact(lastBlockNum)))
+		default:
+		}
+
 		hash, ok, err := br.CanonicalHash(ctx, tx, i)
 		if err != nil {
 			panic(err)
@@ -73,14 +82,6 @@ func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br dbservices.Ful
 			if err := probs.report(failFast, fmt.Errorf("body not found: %d", i)); err != nil {
 				return err
 			}
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			log.Info("[integrity] HeaderNoGaps", "progress", fmt.Sprintf("%s/%s", common.PrettyExact(i), common.PrettyExact(lastBlockNum)))
-		default:
 		}
 	}
 	return probs.verdict(string(HeaderNoGaps))

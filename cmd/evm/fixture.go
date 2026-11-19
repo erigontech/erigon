@@ -99,7 +99,7 @@ type txName struct{ name, hash string }
 
 // fetchTxNames names each fixture after its list entry, or after its hash.
 func fetchTxNames(args []string, list string) ([]txName, error) {
-	var names []txName
+	names := make([]txName, 0, len(args))
 	for _, h := range args {
 		names = append(names, txName{h, h})
 	}

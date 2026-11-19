@@ -3,66 +3,37 @@ package log
 import (
 	"io"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func TestStreamHandlerNoContention(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping wall-clock contention test in short mode")
-	}
-
-	const (
-		goroutines = 100
-		writeDelay = 2 * time.Millisecond
-	)
-
-	run := func(handler Handler, wr *slowWriter) (time.Duration, int64) {
-		lg := New()
-		lg.SetHandler(handler)
-
-		start := time.Now()
-		var wg sync.WaitGroup
-		for range goroutines {
-			wg.Go(func() {
-				lg.Info("msg")
-			})
+	// Each Write waits for the other one, so both return promptly only if StreamHandler lets writes overlap.
+	both := make(chan struct{})
+	var entered atomic.Int32
+	lg := New()
+	lg.SetHandler(StreamHandler(writeFunc(func(p []byte) (int, error) {
+		if entered.Add(1) == 2 {
+			close(both)
 		}
-		wg.Wait()
-
-		return time.Since(start), wr.lines.Load()
+		select {
+		case <-both:
+		case <-time.After(10 * time.Second):
+			t.Error("StreamHandler serializes writes")
+		}
+		return len(p), nil
+	}), TerminalFormatNoColor()))
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() { lg.Info("msg") })
 	}
-
-	parallelWr := &slowWriter{delay: writeDelay}
-	parallelElapsed, parallelLines := run(
-		StreamHandler(parallelWr, TerminalFormatNoColor()),
-		parallelWr,
-	)
-	if parallelLines != goroutines {
-		t.Fatalf("parallel StreamHandler run: expected %d log lines, got %d", goroutines, parallelLines)
-	}
-
-	serialWr := &slowWriter{delay: writeDelay}
-	serialElapsed, serialLines := run(
-		SyncHandler(StreamHandler(serialWr, TerminalFormatNoColor())),
-		serialWr,
-	)
-	if serialLines != goroutines {
-		t.Fatalf("sync-wrapped StreamHandler run: expected %d log lines, got %d", goroutines, serialLines)
-	}
-
-	// Compare relative behavior within the same test run instead of asserting a
-	// fixed wall-clock threshold. The sync-wrapped handler should be
-	// meaningfully slower because it serializes all writes through one mutex.
-	if serialElapsed <= parallelElapsed {
-		t.Fatalf("expected SyncHandler(StreamHandler(...)) to be slower than StreamHandler(...): parallel=%v serial=%v", parallelElapsed, serialElapsed)
-	}
-	if serialElapsed < 2*parallelElapsed {
-		t.Fatalf("expected SyncHandler(StreamHandler(...)) to be at least 2x slower: parallel=%v serial=%v", parallelElapsed, serialElapsed)
-	}
-
-	t.Logf("parallel=%v serial=%v lines=%d", parallelElapsed, serialElapsed, parallelLines)
+	wg.Wait()
 }
+
+type writeFunc func([]byte) (int, error)
+
+func (f writeFunc) Write(p []byte) (int, error) { return f(p) }
 
 func TestStreamHandlerAllocsUpperBound(t *testing.T) {
 	lg := New()

@@ -19,8 +19,10 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -45,7 +47,7 @@ import (
 
 func TestGetStateFork(t *testing.T) {
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -54,26 +56,53 @@ func TestGetStateFork(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	finalizedEpoch := blocks[len(blocks)-1].Block.Slot / handler.beaconChainCfg.SlotsPerEpoch
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: finalizedEpoch}
+	fcu.FinalizedSlotVal = (finalizedEpoch+1)*handler.beaconChainCfg.SlotsPerEpoch - 1
+
+	nonCanonicalBlock := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.Phase0Version)
+	nonCanonicalBlock.Block.Slot = blocks[0].Block.Slot
+	nonCanonicalBlock.Block.ParentRoot = blocks[0].Block.ParentRoot
+	nonCanonicalBlock.Block.StateRoot = common.Hash{0xca, 0xfe}
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(tx, nonCanonicalBlock, false))
+	require.NoError(t, tx.Commit())
 
 	cases := []struct {
-		blockID string
-		code    int
+		blockID   string
+		code      int
+		finalized bool
 	}{
 		{
-			blockID: "0x" + common.Bytes2Hex(postRoot[:]),
-			code:    http.StatusOK,
+			blockID:   "0x" + common.Bytes2Hex(postRoot[:]),
+			code:      http.StatusOK,
+			finalized: false,
 		},
 		{
-			blockID: "head",
-			code:    http.StatusOK,
+			blockID:   "head",
+			code:      http.StatusOK,
+			finalized: false,
+		},
+		{
+			blockID:   strconv.FormatInt(int64(blocks[0].Block.Slot), 10),
+			code:      http.StatusOK,
+			finalized: true,
+		},
+		{
+			blockID:   strconv.FormatInt(int64(blocks[len(blocks)-1].Block.Slot), 10),
+			code:      http.StatusOK,
+			finalized: false,
+		},
+		{
+			blockID:   "0x" + common.Bytes2Hex(nonCanonicalBlock.Block.StateRoot[:]),
+			code:      http.StatusOK,
+			finalized: false,
 		},
 		{
 			blockID: "0x" + common.Bytes2Hex(make([]byte, 32)),
 			code:    http.StatusNotFound,
-		},
-		{
-			blockID: strconv.FormatInt(int64(postState.Slot()), 10),
-			code:    http.StatusOK,
 		},
 	}
 
@@ -94,6 +123,7 @@ func TestGetStateFork(t *testing.T) {
 			jsonVal := make(map[string]any)
 			// unmarshal the json
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(&jsonVal))
+			require.Equal(t, c.finalized, jsonVal["finalized"])
 			data := jsonVal["data"].(map[string]any)
 			require.Equal(t, "0x00000000", data["current_version"])
 			require.Equal(t, "0x00000000", data["previous_version"])
@@ -366,6 +396,55 @@ func TestGetStateFullSkipsForkchoiceStateAtLaterSlot(t *testing.T) {
 	}
 }
 
+// An invalid block or state id is answered 400 by every endpoint, also by those that return the parser's error as is.
+func TestInvalidIdsAreBadRequests(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	for _, path := range []string{
+		"/eth/v2/beacon/blocks/18446744073709551616",
+		"/eth/v2/beacon/blocks/not-an-id",
+		"/eth/v1/beacon/blob_sidecars/18446744073709551616",
+		"/eth/v1/beacon/states/18446744073709551616/root",
+		"/eth/v2/debug/beacon/states/not-an-id",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+path, nil)
+			require.NoError(t, err)
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+			var body struct{ Message string }
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+			require.True(t, strings.HasPrefix(body.Message, "invalid path variable"), body.Message)
+		})
+	}
+}
+
+// A fork choice failure while reading a valid state id is an internal error, not an invalid id.
+func TestGetStateFullForkchoiceErrorIsInternal(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	fcu.GetStateAtBlockRootFn = func(common.Hash) (*state.CachingBeaconState, error) {
+		return nil, errors.New("fork graph read failed")
+	}
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/head", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+}
+
 // TestGetStateFullFinalizedServesAdvancedForkchoiceState pins that a named
 // state_id still gets the fork choice state when it was advanced past its
 // block, as the anchor checkpoint state can be.
@@ -591,7 +670,7 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 
 func TestGetRandao(t *testing.T) {
 	// setupTestingHandler(t, clparams.Phase0Version)
-	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
 
 	postRoot, err := postState.HashSSZ()
 	require.NoError(t, err)
@@ -645,44 +724,288 @@ func TestGetRandao(t *testing.T) {
 			require.Equal(t, expected, string(out))
 		})
 	}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(postState.Slot()))
+	}))
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+strconv.FormatInt(int64(postState.Slot()), 10)+"/randao", nil)
+	require.NoError(t, err)
+	resp, err := server.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(postState.Slot()), make([]byte, 31))
+	}))
+	req, err = http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+strconv.FormatInt(int64(postState.Slot()), 10)+"/randao", nil)
+	require.NoError(t, err)
+	resp, err = server.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+}
+
+func TestGetRandaoMissingPreviousEpochMix(t *testing.T) {
+	db, _, _, pre, post, h, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	epoch := post.Slot() / h.beaconChainCfg.SlotsPerEpoch
+	require.Greater(t, epoch, pre.Slot()/h.beaconChainCfg.SlotsPerEpoch)
+	queryEpoch := epoch - 1
+	path := fmt.Sprintf("/eth/v1/beacon/states/%d/randao?epoch=%d", post.Slot(), queryEpoch)
+	available := httptest.NewRecorder()
+	h.mux.ServeHTTP(available, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+	require.Equal(t, http.StatusOK, available.Code, available.Body.String())
+
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Delete(kv.RandaoMixes, base_encoding.Encode64ToBytes4(queryEpoch*h.beaconChainCfg.SlotsPerEpoch))
+	}))
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+	require.Equal(t, http.StatusNotFound, rec.Code, "unavailable previous-epoch mix must return 404: GET %s returned %d: %s", path, rec.Code, rec.Body.String())
+}
+
+func TestGetRandaoEpochOutOfRange(t *testing.T) {
+	_, _, _, _, post, h, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	epoch := post.Slot() / h.beaconChainCfg.SlotsPerEpoch
+	for _, queryEpoch := range []uint64{epoch + 1, math.MaxUint64} {
+		path := fmt.Sprintf("/eth/v1/beacon/states/%d/randao?epoch=%d", post.Slot(), queryEpoch)
+		rec := httptest.NewRecorder()
+		h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+		require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetRandaoHistoricalEpochBoundary(t *testing.T) {
+	db, blocks, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	stateEpoch := h.beaconChainCfg.EpochsPerHistoricalVector + 5
+	oldestValidEpoch := stateEpoch - h.beaconChainCfg.EpochsPerHistoricalVector + 1
+	stateSlot := stateEpoch * h.beaconChainCfg.SlotsPerEpoch
+	root, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.WriteHeaderSlot(tx, root, stateSlot); err != nil {
+			return err
+		}
+		if err := beacon_indicies.MarkRootCanonical(tx, stateSlot, root); err != nil {
+			return err
+		}
+		if err := tx.Put(kv.RandaoMixes, base_encoding.Encode64ToBytes4(oldestValidEpoch*h.beaconChainCfg.SlotsPerEpoch), make([]byte, 32)); err != nil {
+			return err
+		}
+		return tx.Put(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(stateSlot), make([]byte, 32))
+	}))
+	for _, tc := range []struct {
+		epoch uint64
+		code  int
+	}{
+		{oldestValidEpoch - 1, http.StatusBadRequest},
+		{oldestValidEpoch, http.StatusOK},
+	} {
+		path := fmt.Sprintf("/eth/v1/beacon/states/%d/randao?epoch=%d", stateSlot, tc.epoch)
+		rec := httptest.NewRecorder()
+		h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+		require.Equal(t, tc.code, rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetCommitteesMissingRandaoMixReturns404(t *testing.T) {
+	db, _, _, _, post, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.FinalizedSlotVal = post.Slot() + 1
+	epoch := post.Slot()/h.beaconChainCfg.SlotsPerEpoch - 1
+	path := fmt.Sprintf("/eth/v1/beacon/states/%d/committees?epoch=%d", post.Slot(), epoch)
+	request := func() *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+		return rec
+	}
+	available := request()
+	require.Equal(t, http.StatusOK, available.Code, available.Body.String())
+	mixEpoch := epoch - h.beaconChainCfg.MinSeedLookahead - 1
+	key := base_encoding.Encode64ToBytes4(mixEpoch * h.beaconChainCfg.SlotsPerEpoch)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		mix, err := tx.GetOne(kv.RandaoMixes, key)
+		if err != nil {
+			return err
+		}
+		require.Len(t, mix, 32)
+		return tx.Delete(kv.RandaoMixes, key)
+	}))
+	missing := request()
+	require.Equal(t, http.StatusNotFound, missing.Code, missing.Body.String())
+	var response struct {
+		Message string `json:"message"`
+	}
+	require.NoError(t, json.Unmarshal(missing.Body.Bytes(), &response))
+	require.Contains(t, response.Message, "randao mix")
+}
+
+func TestGetCommitteesMalformedRandaoMixReturns500(t *testing.T) {
+	db, _, _, _, post, h, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.FinalizedSlotVal = post.Slot() + 1
+	epoch := post.Slot()/h.beaconChainCfg.SlotsPerEpoch - 1
+	path := fmt.Sprintf("/eth/v1/beacon/states/%d/committees?epoch=%d", post.Slot(), epoch)
+	mixEpoch := epoch - h.beaconChainCfg.MinSeedLookahead - 1
+	key := base_encoding.Encode64ToBytes4(mixEpoch * h.beaconChainCfg.SlotsPerEpoch)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.RandaoMixes, key, make([]byte, 31))
+	}))
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
 }
 
 func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
-	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	handler.beaconChainCfg.FuluForkEpoch = 1
+	handler.beaconChainCfg.InitializeForkSchedule()
 
 	var err error
 	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
 	require.NoError(t, err)
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
-	lowest := uint64(0)
-	fcu.LowestAvailableSlotVal = &lowest
+	require.NotZero(t, fcu.HeadSlotVal)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return state_accessors.SetStateProcessingProgress(tx, fcu.HeadSlotVal-1)
+	}))
+	pendingConsolidations := solid.NewPendingConsolidationList(&clparams.MainnetBeaconConfig)
+	pendingConsolidations.Append(&solid.PendingConsolidation{SourceIndex: 123, TargetIndex: 456})
 	fcu.PendingConsolidationsVal = map[common.Hash]*solid.ListSSZ[*solid.PendingConsolidation]{
-		fcu.HeadVal: solid.NewPendingConsolidationList(&clparams.MainnetBeaconConfig),
+		fcu.HeadVal: pendingConsolidations,
 	}
+	pendingDeposits := solid.NewPendingDepositList(&clparams.MainnetBeaconConfig)
+	pendingDeposits.Append(&solid.PendingDeposit{Amount: 789, Slot: 1011})
 	fcu.PendingDepositsVal = map[common.Hash]*solid.ListSSZ[*solid.PendingDeposit]{
-		fcu.HeadVal: solid.NewPendingDepositList(&clparams.MainnetBeaconConfig),
+		fcu.HeadVal: pendingDeposits,
 	}
+	pendingWithdrawals := solid.NewPendingWithdrawalList(&clparams.MainnetBeaconConfig)
+	pendingWithdrawals.Append(&solid.PendingPartialWithdrawal{ValidatorIndex: 1213, Amount: 1415, WithdrawableEpoch: 1617})
 	fcu.PendingPartialWithdrawalsVal = map[common.Hash]*solid.ListSSZ[*solid.PendingPartialWithdrawal]{
-		fcu.HeadVal: solid.NewPendingWithdrawalList(&clparams.MainnetBeaconConfig),
+		fcu.HeadVal: pendingWithdrawals,
 	}
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 
-	versions := map[string]string{}
-	for _, endpoint := range []string{"pending_consolidations", "pending_deposits", "pending_partial_withdrawals"} {
-		req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/head/"+endpoint, nil)
-		require.NoError(t, err)
-		resp, err := server.Client().Do(req)
-		require.NoError(t, err)
-		resp.Body.Close()
-		require.Equal(t, http.StatusOK, resp.StatusCode, endpoint)
-		v := resp.Header.Get("Eth-Consensus-Version")
-		require.NotEmpty(t, v, "%s must set Eth-Consensus-Version", endpoint)
-		versions[endpoint] = v
+	want := map[string]string{
+		"pending_consolidations":      `"source_index":"123"`,
+		"pending_deposits":            `"amount":"789"`,
+		"pending_partial_withdrawals": `"validator_index":"1213"`,
 	}
-	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_consolidations"])
-	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_deposits"])
+	for _, lowest := range []uint64{0, fcu.HeadSlotVal} {
+		fcu.LowestAvailableSlotVal = &lowest
+		for endpoint, marker := range want {
+			status, body, version := getPendingQueue(t, server, "head", endpoint)
+			require.Equal(t, http.StatusOK, status, "%s at lowest slot %d", endpoint, lowest)
+			require.Contains(t, body, marker, "%s at lowest slot %d", endpoint, lowest)
+			require.Equal(t, clparams.FuluVersion.String(), version, "%s at lowest slot %d", endpoint, lowest)
+		}
+	}
+}
+
+func getPendingQueue(t *testing.T, server *httptest.Server, stateID, endpoint string) (int, string, string) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/states/"+stateID+"/"+endpoint, nil)
+	require.NoError(t, err)
+	resp, err := server.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return resp.StatusCode, string(body), resp.Header.Get("Eth-Consensus-Version")
+}
+
+func TestGetPendingQueuesRejectPreElectraState(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	for _, endpoint := range []string{"pending_consolidations", "pending_deposits", "pending_partial_withdrawals"} {
+		status, body, _ := getPendingQueue(t, server, "head", endpoint)
+		require.Equal(t, http.StatusBadRequest, status, "%s: %s", endpoint, body)
+	}
+}
+
+func TestGetPendingQueuesRejectNonCanonicalCacheMiss(t *testing.T) {
+	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	slot := blocks[len(blocks)-1].Block.Slot
+	sideBlockRoot := common.Hash{1}
+	sideStateRoot := common.Hash{2}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := beacon_indicies.WriteHeaderSlot(tx, sideBlockRoot, slot); err != nil {
+			return err
+		}
+		return beacon_indicies.WriteStateRoot(tx, sideBlockRoot, sideStateRoot)
+	}))
+	lowest := uint64(0)
+	fcu.LowestAvailableSlotVal = &lowest
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	stateID := "0x" + common.Bytes2Hex(sideStateRoot[:])
+	for _, endpoint := range []string{"pending_consolidations", "pending_deposits", "pending_partial_withdrawals"} {
+		status, body, _ := getPendingQueue(t, server, stateID, endpoint)
+		require.Equal(t, http.StatusNotFound, status, "%s: %s", endpoint, body)
+	}
+}
+
+func TestGetPendingQueuesRejectUnreconstructedCacheMiss(t *testing.T) {
+	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	require.NotZero(t, fcu.HeadSlotVal)
+	lowest := uint64(0)
+	fcu.LowestAvailableSlotVal = &lowest
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return state_accessors.SetStateProcessingProgress(tx, fcu.HeadSlotVal-1)
+	}))
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	for _, endpoint := range []string{"pending_consolidations", "pending_deposits", "pending_partial_withdrawals"} {
+		status, body, _ := getPendingQueue(t, server, "head", endpoint)
+		require.Equal(t, http.StatusNotFound, status, "%s: %s", endpoint, body)
+	}
+}
+
+func TestGetPendingQueuesFallBackToHistoricalOnCacheMiss(t *testing.T) {
+	db, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+
+	var err error
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return state_accessors.SetStateProcessingProgress(tx, fcu.HeadSlotVal)
+	}))
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	want := map[string]json.Marshaler{
+		"pending_consolidations":      postState.GetPendingConsolidations(),
+		"pending_deposits":            postState.GetPendingDeposits(),
+		"pending_partial_withdrawals": postState.GetPendingPartialWithdrawals(),
+	}
+	for endpoint, queue := range want {
+		status, body, _ := getPendingQueue(t, server, "head", endpoint)
+		require.Equal(t, http.StatusOK, status, "%s: %s", endpoint, body)
+		var response struct {
+			Data json.RawMessage `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(body), &response), endpoint)
+		expected, err := queue.MarshalJSON()
+		require.NoError(t, err, endpoint)
+		require.JSONEq(t, string(expected), string(response.Data), endpoint)
+	}
 }
 
 // The response can be hundreds of MB on mainnet, so it must not stay in the pool.
@@ -750,7 +1073,7 @@ func TestGetStateProposerLookaheadHistorical(t *testing.T) {
 
 	epochData := &state_accessors.EpochData{JustificationBits: &cltypes.JustificationBits{}, ProposerLookahead: lookahead, BeaconConfig: cfg, Version: clparams.FuluVersion}
 	var buf bytes.Buffer
-	require.NoError(t, epochData.WriteTo(&buf))
+	require.NoError(t, epochData.Serialize(&buf))
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		return tx.Put(kv.EpochData, key, buf.Bytes())
 	}))

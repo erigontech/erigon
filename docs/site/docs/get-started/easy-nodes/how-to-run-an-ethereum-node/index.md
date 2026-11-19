@@ -69,7 +69,7 @@ echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
 ```
 
 or by exporting it in your shell. Forward the `30303`, `42069`, `4000` and `4001`
-ports on your router, plus the QUIC UDP port used by your image, otherwise peers still cannot reach you.
+ports on your router, plus the QUIC UDP port used by your image; otherwise, peers still cannot reach you.
 
 QUIC support depends on the image version. v3.7.1 uses `4001/udp`; builds that include `--caplin.quic.disable` default to `4002/udp`. Check `docker run --rm erigontech/erigon:v{ERIGON_VERSION} --help` for `--caplin.discovery.quicport`, and keep only the QUIC UDP mapping that matches its port. If that option is absent, the image has no QUIC support; remove both QUIC UDP mappings. Keep `4001:4001/tcp` in all cases.
 
@@ -107,11 +107,11 @@ and follow the logs when you need them with `docker compose logs -f`.
 * `--chain=mainnet` specifies to run on Ethereum mainnet
 * Add `--prune.mode=minimal` to run minimal [Pruning Mode](/fundamentals/pruning-modes) or `--prune.mode=archive` to run an archive node
 * `--datadir=/var/lib/erigon` has to name the same path as the container side of the volume mount. Without it Erigon writes to its default location inside the container instead of your mounted directory, and the data ends up in an anonymous Docker volume rather than where you pointed it
-* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet). `0.0.0.0` is the address *inside* the container, which is what lets Docker forward to it at all; the `127.0.0.1:8545:8545` port mapping is what keeps it off your LAN. Change that mapping to `8545:8545` only if you intend to expose RPC to other machines
+* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet). `0.0.0.0` is the address *inside* the container, which is what lets Docker forward to it at all; the `127.0.0.1:8545:8545` port mapping is what keeps it off your local area network (LAN). Change that mapping to `8545:8545` only if you intend to expose RPC to other machines
 * `--nat=extip:<your public IP>` and `--caplin.nat=extip:<your public IP>` advertise a reachable address so other nodes can dial you — the first for the execution layer, the second for Caplin. Without them, and without the forwarded ports, the node still syncs but only through connections it opens itself
 * `--torrent.download.rate` is deliberately not set above, because its default of `512mb` (megabytes per second) is already the maximum this recipe would ask for. During initial sync Erigon uses the full allowance, which is what you want on a dedicated machine. Add the flag only to **lower** the cap if you share the machine with other work (e.g. `--torrent.download.rate=128mb`), or set `--torrent.download.rate=Inf` to remove the limit entirely.
 
-When you get familiar with running Erigon from CLI you may also consider [staking](/staking/caplin) and/or running an Ethereum node with an [external Consensus Layer](/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl).
+When you get familiar with running Erigon from the CLI you may also consider [staking](/staking/caplin) and/or running an Ethereum node with an [external Consensus Layer](/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl).
 
 :::tip
 Press `Ctrl+C` in your terminal to stop Erigon.
@@ -119,7 +119,7 @@ Press `Ctrl+C` in your terminal to stop Erigon.
 
 ## Host networking as an alternative
 
-Publishing each port individually is explicit, but Docker's NAT is also what
+Publishing each port individually is explicit, but Docker's Network Address Translation (NAT) is also what
 makes `--nat=extip:...` necessary in the first place. Adding `network_mode:
 host` to the service instead gives the container the host's network stack
 directly, so peers see the host's own address and there is nothing to map:

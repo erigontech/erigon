@@ -17,9 +17,9 @@
 package commitment
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -32,13 +32,6 @@ import (
 // k is already a maphash.Hash output, spread uniformly across all 64 bits, so
 // the low 32 bits suffice for shard routing.
 func u64ident(k uint64) uint32 { return uint32(k) }
-
-// KeyCommitmentState must never enter the BranchCache: it changes every block.
-var KeyCommitmentState = []byte("state")
-
-func isCommitmentStateKey(prefix []byte) bool {
-	return bytes.Equal(prefix, KeyCommitmentState)
-}
 
 // BranchCache: writer stripes only make stamped publications atomic with
 // Clear; callers must still ensure one logical mutation per prefix.
@@ -77,14 +70,18 @@ type BranchCache struct {
 
 	putStripes [256]sync.Mutex
 
-	coh         coherence.Gen
-	unwoundView atomic.Uint64 // MDBX txn that committed the latest unwind
+	coh           coherence.Gen
+	committedView atomic.Uint64 // MDBX txn that committed the latest published branches or unwind
 }
+
+// Read fills have no known write time. Stamping just below the unbounded-read
+// limit makes them miss every bounded read and become stale after an unwind.
+const branchReadFillTxNum uint64 = math.MaxUint64 - 1
 
 type branchCacheEntry struct {
 	data  []byte
-	step  uint64 // on-disk file step; 0 = untracked
-	txN   uint64 // write txN, upper bound of validity; 0 = frozen/untracked
+	step  uint64 // MDBX row step or snapshot file's exclusive end step; 0 also represents untracked
+	txN   uint64 // validity bound
 	epoch uint32
 }
 
@@ -193,7 +190,7 @@ func (t *trunk) slot(path *[4]byte, n int, forWrite bool) *atomic.Pointer[branch
 	return nil
 }
 
-const DefaultBranchCacheTailCapacity = 50000 // ~50k * ~500B = ~25MB at mainnet branch sizes
+const DefaultBranchCacheTailCapacity = 125000 // ~125k * ~500B = ~62MB at mainnet branch sizes
 
 // BranchCacheProvider: returning nil means no shared cache; callers must
 // treat that as disabled, not panic.
@@ -509,7 +506,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 
 // PinEntry copies data; safe to mutate the input after the call.
 func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
-	if isCommitmentStateKey(prefix) {
+	if IsCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))
@@ -531,7 +528,7 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 	}
 	if slot := st.slot(&nibBuf, n, true); slot != nil {
 		// Swap publishes and reads prior occupancy in one step: eviction
-		// (Invalidate from a stale Get) takes no put stripe, so a separate
+		// (evict from a stale Get) takes no put stripe, so a separate
 		// load-then-store here would let it interleave.
 		if slot.Swap(entry) == nil {
 			st.entries.Add(1)
@@ -575,12 +572,14 @@ func (c *BranchCache) UnpinContract(contractHash []byte) {
 }
 
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
-	return c.GetBefore(prefix, ^uint64(0))
+	return c.GetBefore(prefix, math.MaxUint64)
 }
 
-// GetBefore rejects newer entries without evicting them from other readers.
+// GetBefore rejects entries at or above txNum, leaving otherwise valid entries cached.
+// It also rejects read fills, whose write time is unknown, unless txNum is
+// math.MaxUint64 (unbounded).
 func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bool) {
-	if isCommitmentStateKey(prefix) {
+	if IsCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
 	coh := c.coh.Snapshot()
@@ -589,7 +588,7 @@ func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bo
 		return nil, 0, false
 	}
 	if coh.IsStale(entry.txN, entry.epoch) {
-		c.Invalidate(prefix)
+		c.evict(prefix)
 		c.staleEvicted.Add(1)
 		return nil, 0, false
 	}
@@ -602,7 +601,7 @@ func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bo
 
 // Put copies the input data.
 func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
-	if isCommitmentStateKey(prefix) {
+	if IsCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))
@@ -620,11 +619,12 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	})
 }
 
-// Fill copies a branch read through MDBX txn viewID. It drops the read if that txn is older than the latest
-// committed unwind, or if an Unwind or Clear ran during the read.
-func (c *BranchCache) Fill(prefix []byte, data []byte, step, txN, viewID uint64) {
+// Fill copies a branch read through MDBX txn viewID. The view ID rejects snapshots
+// older than the latest committed publication or unwind. Before storing the copy,
+// it rechecks the epoch to detect Unwind or Clear since Fill started.
+func (c *BranchCache) Fill(prefix []byte, data []byte, step, viewID uint64) {
 	epoch := c.coh.Epoch()
-	if viewID < c.unwoundView.Load() || isCommitmentStateKey(prefix) {
+	if viewID < c.committedView.Load() || IsCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))
@@ -634,18 +634,27 @@ func (c *BranchCache) Fill(prefix []byte, data []byte, step, txN, viewID uint64)
 	stripe.Lock()
 	defer stripe.Unlock()
 
-	if c.coh.Epoch() != epoch {
+	// Rechecked under the stripe: a commit records its view before it publishes or deletes under this stripe.
+	if c.coh.Epoch() != epoch || viewID < c.committedView.Load() {
 		return
 	}
 	c.store(prefix, &branchCacheEntry{
 		data:  dataCopy,
 		step:  step,
-		txN:   txN,
+		txN:   branchReadFillTxNum,
 		epoch: epoch,
 	})
 }
 
+// Invalidate drops prefix under its put stripe, so a Fill cannot store over the deletion.
 func (c *BranchCache) Invalidate(prefix []byte) {
+	stripe := c.putStripe(prefix)
+	stripe.Lock()
+	defer stripe.Unlock()
+	c.evict(prefix)
+}
+
+func (c *BranchCache) evict(prefix []byte) {
 	if isRootPrefix(prefix) {
 		c.root.Store(nil)
 		return
@@ -669,15 +678,25 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 	}
 }
 
-// Unwind is O(1) and scan-free: it bumps the epoch and lowers the unwind
-// floor, so stale entries drop lazily on their next Get.
+// Unwind revokes read fills and writes at or above unwindToTxN. It advances
+// the generation without scanning; stale entries drop on their next Get.
 func (c *BranchCache) Unwind(unwindToTxN uint64) {
 	c.coh.Unwind(unwindToTxN)
 }
 
+// Committed records MDBX txn viewID as committed; older txns can no longer Fill. Call it after the
+// commit succeeds and before publishing the commit's branches or deletions.
+func (c *BranchCache) Committed(viewID uint64) {
+	for cur := c.committedView.Load(); viewID > cur; cur = c.committedView.Load() {
+		if c.committedView.CompareAndSwap(cur, viewID) {
+			return
+		}
+	}
+}
+
 // UnwindCommitted is Unwind for an unwind committed by MDBX txn viewID; older txns can no longer Fill.
 func (c *BranchCache) UnwindCommitted(unwindToTxN, viewID uint64) {
-	c.unwoundView.Store(viewID) // before the epoch bump, see Fill
+	c.Committed(viewID) // before the epoch bump, see Fill
 	c.Unwind(unwindToTxN)
 }
 

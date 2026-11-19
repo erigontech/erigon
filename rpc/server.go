@@ -135,19 +135,25 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCodec, options CodecOption) {
 	defer codec.Close()
 
-	// Don't serve if server is stopped.
+	// Check run only after Add: a Stop that misses the codec in its close pass
+	// must have flipped run already.
+	s.codecs.Add(codec)
+	defer s.codecs.Remove(codec)
 	if !s.run.Load() {
 		return
 	}
 
-	// Add the codec to the set so it can be closed by Stop.
-	s.codecs.Add(codec)
-	defer s.codecs.Remove(codec)
-
 	h := s.newConnHandler(context.WithValue(connCtx, peerInfoContextKey{}, codec.peerInfo()), codec)
 	for {
-		msgs, batch, err := readBatch(codec, s.logger)
+		msgs, batch, err := readBatch(codec, s.batchLimit, s.logger)
+		if tooLarge, ok := errors.AsType[*batchTooLargeError](err); ok {
+			h.handleBatchTooLarge(tooLarge, codec.takeRelease())
+			continue
+		}
 		if err != nil {
+			// The connection is gone, so there is no point in finishing calls that
+			// are still being served on it. Cancel them before waiting for them.
+			h.cancelRoot()
 			h.close(err, nil)
 			return
 		}
@@ -163,7 +169,7 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 // newConnHandler builds the handler of one connection, so every transport applies the
 // server's allow list and limits.
 func (s *Server) newConnHandler(ctx context.Context, conn jsonWriter) *handler {
-	return newHandler(ctx, conn, s.idgen, &s.services, s.batchLimit, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	return newHandler(ctx, conn, s.idgen, &s.services, s.subscriptionLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
 }
 
 // serveSingleRequest reads and processes a single RPC request from the given codec. This
@@ -179,7 +185,11 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 	h.inlineCalls = true
 	defer h.close(io.EOF, nil)
 
-	reqs, batch, err := codec.ReadBatch()
+	reqs, batch, err := codec.ReadBatch(s.batchLimit)
+	if tooLarge, ok := errors.AsType[*batchTooLargeError](err); ok {
+		h.handleBatchTooLarge(tooLarge, nil)
+		return nil
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, io.EOF):

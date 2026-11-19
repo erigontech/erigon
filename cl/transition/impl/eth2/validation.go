@@ -25,9 +25,14 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 )
+
+// ErrInvalidBlockSignature reports a bad proposer signature. The block root does not cover the
+// signature, so this error does not prove that the block itself is invalid.
+var ErrInvalidBlockSignature = errors.New("invalid block signature")
 
 func (imp *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.BeaconBlock) error {
 	if !imp.FullValidation {
@@ -48,11 +53,14 @@ func (imp *impl) VerifyBlockSignature(s abstract.BeaconState, block *cltypes.Sig
 		return nil
 	}
 	valid, err := VerifyBlockSignature(s, block)
+	if errors.Is(err, raw.ErrInvalidValidatorIndex) {
+		return fmt.Errorf("invalid proposer index: %w", err)
+	}
 	if err != nil {
-		return fmt.Errorf("error validating block signature: %w", err)
+		return fmt.Errorf("%w: %w", ErrInvalidBlockSignature, err)
 	}
 	if !valid {
-		return errors.New("block not valid")
+		return ErrInvalidBlockSignature
 	}
 	return nil
 }

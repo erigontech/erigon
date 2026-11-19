@@ -373,7 +373,7 @@ type ValidatorSafeContract struct {
 	client client
 }
 
-func NewValidatorSafeContract(contractAddress common.Address, posdaoTransition *uint64, client client) *ValidatorSafeContract {
+func NewValidatorSafeContract(contractAddress common.Address, posdaoTransition *uint64) *ValidatorSafeContract {
 	const MemoizeCapacity = 500
 	c, err := lru.New[common.Hash, *SimpleList](MemoizeCapacity)
 	if err != nil {

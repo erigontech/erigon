@@ -21,9 +21,11 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"math/big"
 	"math/rand/v2"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -355,4 +357,20 @@ func TestShortEncodingStaysOnStack(t *testing.T) {
 		text, _ := Bytes(b).MarshalText()
 		n += len(text)
 	}), 0)
+}
+
+func TestAppendUint64(t *testing.T) {
+	values := []uint64{0, 1, 0xf, 0x10, 0xff, 0x100, 0x1918bce, 1<<32 - 1, 1 << 32, 1 << 63, math.MaxUint64}
+	for v := uint64(1); v != 0; v <<= 1 {
+		values = append(values, v-1, v, v+1)
+	}
+	for _, v := range values {
+		want := "0x" + strconv.FormatUint(v, 16)
+		if got := string(AppendUint64(nil, v)); got != want {
+			t.Errorf("AppendUint64(nil, %d) = %s, want %s", v, got, want)
+		}
+		if got := string(AppendUint64([]byte(`"`), v)); got != `"`+want {
+			t.Errorf("AppendUint64 after a prefix, %d = %s, want \"%s", v, got, want)
+		}
+	}
 }

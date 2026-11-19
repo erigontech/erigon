@@ -31,11 +31,13 @@ def check(name, cond, detail=""):
         print(f"FAIL {name} {detail}")
 
 
-def rep(p50_ms, p95_ms, max_ms, success=1.0):
+def rep(p50_ms, p95_ms, max_ms, success=1.0, rpc_success=1.0, p90_ms=None):
+    p90_ms = p95_ms if p90_ms is None else p90_ms
     return {"vegetaReport": {
-        "latencies": {"50th": int(p50_ms * 1e6), "95th": int(p95_ms * 1e6), "max": int(max_ms * 1e6)},
+        "latencies": {"50th": int(p50_ms * 1e6), "90th": int(p90_ms * 1e6), "95th": int(p95_ms * 1e6),
+                      "max": int(max_ms * 1e6)},
         "success": success,
-    }}
+    }, "rpcSuccessRatio": rpc_success}
 
 
 def write_result(root, client, label, results):
@@ -63,11 +65,12 @@ def run_main(argv):
 
 with tempfile.TemporaryDirectory() as tmp:
     write_result(tmp, "erigon", "mixed", [
-        {"qps": "100", "testRepetitions": [rep(1, 10, 50), rep(3, 30, 90), rep(2, 20, 70)]},
+        {"qps": "100", "testRepetitions": [rep(1, 10, 50, p90_ms=5), rep(3, 30, 90, p90_ms=15), rep(2, 20, 70, p90_ms=10)]},
     ])
     res = mod.load_results(tmp)
     s = res["mixed"]["erigon"]["100"]
     check("p50 is the median over repetitions", s["p50"] == 2.0, s)
+    check("p90 is the median over repetitions", s.get("p90") == 10.0, s)
     check("p95 is the median over repetitions", s["p95"] == 20.0, s)
     check("max is the max over repetitions", s["max"] == 90.0, s)
     check("success is the worst repetition", s["success"] == 1.0, s)
@@ -97,7 +100,238 @@ with tempfile.TemporaryDirectory() as tmp:
     check("qps sorted numerically", [r.split("|")[1].strip() for r in eth_rows] == ["1"] * 3 + ["1000"] * 3, md)
     check("clients in fixed order", [r.split("|")[2].strip() for r in eth_rows[:3]] == ["erigon", "geth", "nethermind"], md)
     check("latencies rendered in ms", "| 1000 | erigon | 4.00 | 5.00 | 6.00 | 100.00% |" in md, md)
-    check("one section per test", md.count("### eth_call") == 1 and md.count("### mixed") == 1, md)
+    check("one collapsed section per test",
+          md.count("<details><summary>eth_call</summary>") == 1 and md.count("<details><summary>mixed</summary>") == 1
+          and md.count("</details>") == 2, md)
+
+# --- RPC success: the worst repetition, rendered apart from the HTTP one ---------
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "reth", "trace_block_struct_log", [
+        {"qps": "5", "testRepetitions": [rep(1, 2, 3, 1.0, 0.25), rep(1, 2, 3, 1.0, 0.06), rep(1, 2, 3, 1.0, 0.5)]},
+    ])
+    res = mod.load_results(tmp)
+    check("rpc success is the worst repetition", res["trace_block_struct_log"]["reth"]["5"]["rpc_success"] == 0.06, res)
+    md = mod.render(res)
+    check("rpc success rendered next to http success", "| 100.00% | 6.00% |" in md, md)
+
+# --- overview: one row per test and qps, p95 per client, Erigon status --------
+
+
+def overview_row(text, label, qps):
+    return next((line.split() for line in text.splitlines() if line.split()[:2] == [label, qps]), [])
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_call", [
+        {"qps": "1", "testRepetitions": [rep(1, 2.0, 3)]},
+        {"qps": "2", "testRepetitions": [rep(1, 12.0, 3)]},
+        {"qps": "3", "testRepetitions": [rep(1, 13.0, 3)]},
+        {"qps": "4", "testRepetitions": [rep(1, 1.05, 3)]},
+        {"qps": "5", "testRepetitions": [rep(1, 2.0, 3, 0.9)]},
+    ])
+    write_result(tmp, "reth", "eth_call", [
+        {"qps": "1", "testRepetitions": [rep(1, 4.0, 3)]},
+        {"qps": "2", "testRepetitions": [rep(1, 10.0, 3)]},
+        {"qps": "3", "testRepetitions": [rep(1, 10.0, 3)]},
+        {"qps": "4", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "5", "testRepetitions": [rep(1, 1.0, 3)]},
+    ])
+    write_result(tmp, "geth", "eth_call", [
+        {"qps": "1", "testRepetitions": [rep(1, 1.0, 3, 0.99)]},
+    ])
+    write_result(tmp, "reth", "mixed", [{"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]}])
+    md = mod.render_overview(mod.load_results(tmp), "p95")
+    check("overview is a code block, for the summary and for Discord",
+          md.startswith("```\n") and md.rstrip().endswith("```"), md)
+    check("overview header has the clients in fixed order",
+          any(line.split() == ["Test", "QPS", "erigon", "geth", "reth"] for line in md.splitlines()), md)
+    header = next(line for line in md.splitlines() if line.split()[:2] == ["Test", "QPS"])
+    rows = [line.rsplit(" ", 1)[0] for line in md.splitlines() if line[-1:] in ("🟢", "🟡", "🔴")]
+    check("overview columns are ASCII and aligned, the status closes each row",
+          len(rows) == 6 and all(r.isascii() and len(r) == len(header) for r in rows), md)
+    row = overview_row(md, "eth_call", "1")
+    check("erigon fastest by 1.3x or more is double green, fastest marked with *",
+          row == ["eth_call", "1", "2.00*", "err", "4.00", "🟢🟢"], row)
+    check("a client below 100% HTTP is err and not the fastest", "1.00*" not in row, row)
+    row = overview_row(md, "eth_call", "2")
+    check("erigon below 1.3x the fastest is yellow", row[-1:] == ["🟡"] and "10.00*" in row, row)
+    row = overview_row(md, "eth_call", "3")
+    check("erigon at 1.3x the fastest is red", row[-1:] == ["🔴"], row)
+    row = overview_row(md, "eth_call", "4")
+    check("erigon not the fastest is never green", row[-1:] == ["🟡"], row)
+    row = overview_row(md, "eth_call", "5")
+    check("erigon below 100% HTTP is red", row == ["eth_call", "5", "err", "-", "1.00*", "🔴"], row)
+    row = overview_row(md, "mixed", "1")
+    check("no erigon result where another client has one is red", row == ["mixed", "1", "-", "-", "1.00*", "🔴"], row)
+    check("legend says a missing Erigon result is red", "🔴 >= 1.3x, errors or no Erigon result" in md, md)
+    check("legend has no white status", "⚪" not in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "mixed", [
+        {"qps": "1", "testRepetitions": [rep(1, 20.0, 3)]},
+        {"qps": "2", "testRepetitions": [rep(1, 1.0, 3, 1.0, 0.9)]},
+    ])
+    write_result(tmp, "geth", "mixed", [
+        {"qps": "1", "testRepetitions": [rep(1, 1.0, 3, 1.0, 0.5)]},
+        {"qps": "2", "testRepetitions": [rep(1, 2.0, 3)]},
+    ])
+    md = mod.render_overview(mod.load_results(tmp), "p95")
+    row = overview_row(md, "mixed", "1")
+    check("a client below 100% RPC is err and not the fastest", row == ["mixed", "1", "20.00*", "err", "🟢"], row)
+    row = overview_row(md, "mixed", "2")
+    check("erigon below 100% RPC is red", row == ["mixed", "2", "err", "2.00*", "🔴"], row)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_call", [{"qps": "1", "testRepetitions": [rep(1, 2.0, 3, 1.0, 0.964)]}])
+    write_result(tmp, "geth", "eth_call", [{"qps": "1", "testRepetitions": [rep(1, 1.0, 3, 1.0, 0.97)]}])
+    write_result(tmp, "reth", "eth_call", [{"qps": "1", "testRepetitions": [rep(1, 0.5, 3, 1.0, 0.95)]}])
+    row = overview_row(mod.render_overview(mod.load_results(tmp), "p95"), "eth_call", "1")
+    check("RPC errors of every client do not count, more than 1 point below the best does",
+          row == ["eth_call", "1", "2.00", "1.00*", "err", "🔴"], row)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_call", [{"qps": "1", "testRepetitions": [rep(1, 3.0, 9)]}])
+    write_result(tmp, "reth", "eth_call", [{"qps": "1", "testRepetitions": [rep(2, 2.0, 9)]}])
+    text = mod.render_overview(mod.load_results(tmp), "p50")
+    row = overview_row(text, "eth_call", "1")
+    check("p50 overview uses p50 latency and status", row == ["eth_call", "1", "1.00*", "2.00", "🟢🟢"], row)
+    check("p50 overview legend names p50", "status on p50" in text and "p50 latency" in text, text)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_call", [
+        {"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "2", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "3", "testRepetitions": [rep(1, 1.0, 3)]},
+    ])
+    write_result(tmp, "geth", "eth_call", [
+        {"qps": "1", "testRepetitions": [rep(1, 1.3, 3)]},
+        {"qps": "2", "testRepetitions": [rep(1, 1.2, 3)]},
+        {"qps": "3", "testRepetitions": [rep(1, 1.0, 3)]},
+    ])
+    write_result(tmp, "reth", "eth_call", [
+        {"qps": "1", "testRepetitions": [rep(1, 5.0, 3)]},
+        {"qps": "2", "testRepetitions": [rep(1, 5.0, 3)]},
+        {"qps": "3", "testRepetitions": [rep(1, 5.0, 3)]},
+    ])
+    text = mod.render_overview(mod.load_results(tmp), "p95")
+    row = overview_row(text, "eth_call", "1")
+    check("erigon fastest by exactly 1.3x the next client is double green", row[-1:] == ["🟢🟢"], row)
+    row = overview_row(text, "eth_call", "2")
+    check("erigon fastest by less than 1.3x the next client is green", row[-1:] == ["🟢"], row)
+    row = overview_row(text, "eth_call", "3")
+    check("erigon tied with another client is green", row[-1:] == ["🟢"], row)
+    check("legend explains double green", "🟢🟢 fastest by >= 1.3x" in text, text)
+
+# --- dead: a level that rpc_perf recorded with an error -------------------------
+
+DEAD = "server died during test"
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "reth", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 2, 3)]},
+        {"qps": "5", "testRepetitions": [], "error": DEAD},
+    ])
+    write_result(tmp, "geth", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 2, 3)]},
+        {"qps": "5", "testRepetitions": [rep(1, 2, 3)], "error": DEAD},
+    ])
+    res = mod.load_results(tmp)
+    check("a level with an error and no repetition is dead", res["trace_block_struct_log"]["reth"]["5"] == {"failed": "dead", "error": DEAD}, res)
+    check("a level with an error after some repetitions is dead", res["trace_block_struct_log"]["geth"]["5"] == {"failed": "dead", "error": DEAD}, res)
+    md = mod.render(res)
+    check("the detail table shows the error of a dead level", f"| 5 | reth | dead: {DEAD} |" in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 2.0, 3)]},
+        {"qps": "5", "testRepetitions": [rep(1, 2.0, 3)]},
+    ])
+    write_result(tmp, "reth", "trace_block_struct_log", [
+        {"qps": "3", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "5", "testRepetitions": [], "error": DEAD},
+    ])
+    write_result(tmp, "erigon", "mixed", [{"qps": "1", "testRepetitions": [], "error": DEAD}])
+    write_result(tmp, "geth", "mixed", [{"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]}])
+    md = mod.render_overview(mod.load_results(tmp), "p95")
+    row = overview_row(md, "trace_block_struct_log", "5")
+    check("a dead client is dead in the overview and erigon is the fastest",
+          row == ["trace_block_struct_log", "5", "2.00*", "-", "dead", "🟢"], row)
+    row = overview_row(md, "mixed", "1")
+    check("a dead erigon is red", row == ["mixed", "1", "dead", "1.00*", "-", "🔴"], row)
+    check("legend explains dead", "dead the client died" in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "reth", "mixed", [
+        {"qps": "1", "testRepetitions": [rep(1, 2, 3)]},
+        {"qps": "2", "testRepetitions": [], "error": DEAD},
+    ])
+    code, out = run_main(["--results-dir", tmp])
+    check("main with a dead level exits 0", code in (0, None), code)
+    check("main with a dead level prints all the overviews",
+          all(f"status on {p}" in out for p in ("p50", "p90", "p95", "max")), out)
+
+# --- excluded: a client left out at a barrier, so its later patterns did not run ---
+
+
+def write_excluded(root, client, label):
+    path = os.path.join(root, f"{client}-{label}-result.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump({"configuration": {"testingDaemon": client}, "excluded": True, "results": []}, fh)
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_call_gen", [
+        {"qps": "100", "testRepetitions": [rep(1, 2.0, 3)]},
+        {"qps": "1000", "testRepetitions": [rep(1, 2.0, 3)]},
+    ])
+    write_result(tmp, "reth", "eth_call_gen", [
+        {"qps": "100", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "1000", "testRepetitions": [rep(1, 1.0, 3)]},
+    ])
+    write_excluded(tmp, "geth", "eth_call_gen")
+    write_excluded(tmp, "erigon", "mixed")
+    write_result(tmp, "reth", "mixed", [{"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]}])
+    res = mod.load_results(tmp)
+    check("an excluded client has every qps step of the pattern, excluded",
+          res["eth_call_gen"]["geth"] == {"100": {"failed": "excluded"}, "1000": {"failed": "excluded"}}, res)
+    md = mod.render_overview(res, "p95")
+    row = overview_row(md, "eth_call_gen", "1000")
+    check("an excluded client is excluded in the overview",
+          row == ["eth_call_gen", "1000", "2.00", "excluded", "1.00*", "🔴"], row)
+    row = overview_row(md, "mixed", "1")
+    check("an excluded erigon is red", row == ["mixed", "1", "excluded", "-", "1.00*", "🔴"], row)
+    check("legend explains excluded", "excluded left out at a barrier" in md, md)
+    md = mod.render(res)
+    check("the detail table shows an excluded client", "| 100 | geth | excluded | | | | |" in md, md)
+    code, out = run_main(["--results-dir", tmp])
+    check("main with an excluded client prints all the overviews",
+          code in (0, None) and all(f"status on {p}" in out for p in ("p50", "p90", "p95", "max")), out)
+
+# --- lost: a client of the run whose job uploaded no report -------------------
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "reth", "mixed", [
+        {"qps": "1", "testRepetitions": [rep(1, 1.0, 3)]},
+        {"qps": "2", "testRepetitions": [rep(1, 1.0, 3)]},
+    ])
+    write_excluded(tmp, "geth", "mixed")
+    res = mod.load_results(tmp)
+    check("add_lost returns the clients with no report", mod.add_lost(res, ["erigon", "geth", "reth"]) == ["erigon"], res)
+    check("a client with no report is lost on every qps step",
+          res["mixed"]["erigon"] == {"1": {"failed": "lost"}, "2": {"failed": "lost"}}, res)
+    check("a client with an excluded report is not lost", res["mixed"]["geth"]["1"] == {"failed": "excluded"}, res)
+    md = mod.render_overview(res, "p50")
+    row = overview_row(md, "mixed", "1")
+    check("a lost erigon is lost and red in the overview", row == ["mixed", "1", "lost", "excluded", "1.00*", "🔴"], row)
+    check("legend explains lost", "lost no results from the client's job" in md, md)
+    md = mod.render(res)
+    check("the detail table shows a lost client", "| 1 | erigon | lost | | | | |" in md, md)
+    code, out = run_main(["--results-dir", tmp, "--clients", "erigon,geth,reth"])
+    check("main warns about a lost client", "⚠️ erigon: no results" in out, out)
+    check("main does not warn about a client with a report", "⚠️ geth" not in out and "⚠️ reth" not in out, out)
+    code, out = run_main(["--results-dir", tmp])
+    check("main without --clients has no lost client", "⚠️" not in out and "| erigon |" not in out, out)
 
 # --- main ---------------------------------------------------------------------
 
@@ -106,11 +340,75 @@ with tempfile.TemporaryDirectory() as tmp:
     code, out = run_main(["--results-dir", tmp])
     check("main exits 0", code in (0, None), code)
     check("main prints the comparison", "| 1 | geth |" in out, out)
+    check("main prints the p50, p90, p95 and max overviews in this order",
+          0 <= out.find("status on p50") < out.find("status on p90") < out.find("status on p95")
+          < out.find("status on max"), out)
+
+with tempfile.TemporaryDirectory() as tmp:
+    without_p90 = rep(1, 2, 3)
+    del without_p90["vegetaReport"]["latencies"]["90th"]
+    write_result(tmp, "geth", "mixed", [{"qps": "1", "testRepetitions": [without_p90]}])
+    code, out = run_main(["--results-dir", tmp])
+    check("main without p90 exits 0", code in (0, None), code)
+    check("main without p90 prints no p90 overview",
+          "status on p90" not in out and "status on p50" in out and "status on p95" in out, out)
 
 with tempfile.TemporaryDirectory() as tmp:
     code, out = run_main(["--results-dir", tmp])
     check("main without results exits 0", code in (0, None), code)
     check("main without results says so", "No results" in out, out)
+
+# --- apis: the rows by method (mixed with --verbose) or by subscription measure ---
+
+
+def api(p50_ms, p95_ms, max_ms, requests, errors=0):
+    return {"requests": requests, "errors": errors, "empty": 0,
+            "latencies": {"50th": int(p50_ms * 1e6), "95th": int(p95_ms * 1e6), "max": int(max_ms * 1e6)}}
+
+
+def rep_apis(apis):
+    r = rep(1, 2, 3)
+    r["apis"] = apis
+    return r
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "mixed", [{"qps": "100", "testRepetitions": [
+        rep_apis({"eth_call": api(1, 10, 50, 100, 1), "eth_getLogs": api(4, 40, 400, 10)}),
+        rep_apis({"eth_call": api(3, 30, 90, 100, 2)}),
+        rep_apis({"eth_call": api(2, 20, 70, 100)}),
+    ]}])
+    res = mod.load_results(tmp)
+    apis = res["mixed"]["erigon"]["100"]["apis"]
+    check("api p50 and p95 are the median over repetitions",
+          apis["eth_call"]["p50"] == 2.0 and apis["eth_call"]["p95"] == 20.0, apis)
+    check("api max is the max over repetitions", apis["eth_call"]["max"] == 90.0, apis)
+    check("api requests and errors are summed over repetitions",
+          apis["eth_call"]["requests"] == 300 and apis["eth_call"]["errors"] == 3, apis)
+    check("an api of some repetitions only is over those", apis["eth_getLogs"]["requests"] == 10, apis)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_call", [{"qps": "1", "testRepetitions": [rep(1, 2, 3)]}])
+    res = mod.load_results(tmp)
+    check("a step without apis has no apis", "apis" not in res["eth_call"]["erigon"]["1"], res)
+    md = mod.render(res)
+    check("the detail without apis has no api table", "| API |" not in md, md)
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe", [{"qps": "10", "testRepetitions": [
+        rep_apis({"newHeads latency": api(1, 2, 3, 30), "logs vs newHeads": api(4, 5, 6, 90, 1)})]}])
+    write_result(tmp, "geth", "eth_subscribe", [{"qps": "10", "testRepetitions": [
+        rep_apis({"newHeads latency": api(7, 8, 9, 30)})]}])
+    md = mod.render(mod.load_results(tmp))
+    check("the api table has a row per api and client",
+          "| 10 | logs vs newHeads | erigon | 4.00 | 5.00 | 6.00 | 90 | 1 |" in md
+          and "| 10 | newHeads latency | erigon | 1.00 | 2.00 | 3.00 | 30 | 0 |" in md
+          and "| 10 | newHeads latency | geth | 7.00 | 8.00 | 9.00 | 30 | 0 |" in md, md)
+    check("the api rows are by api, then by client",
+          md.find("logs vs newHeads | erigon") < md.find("newHeads latency | erigon")
+          < md.find("newHeads latency | geth"), md)
+    check("the api table follows the step table in the same details",
+          md.find("| QPS | Client |") < md.find("| QPS | API | Client |") < md.find("</details>"), md)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

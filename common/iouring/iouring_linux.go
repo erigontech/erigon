@@ -23,7 +23,9 @@
 package iouring
 
 import (
+	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -77,6 +79,8 @@ type Ring struct {
 	sqMask         uint32
 	sqArray        []uint32
 	cqHead, cqTail *uint32
+	cqMask         uint32
+	cqes           uint32 // offset of the CQE array in cqRing
 }
 
 func p32(b []byte, off uint32) *uint32 { return (*uint32)(unsafe.Pointer(&b[off])) }
@@ -120,16 +124,37 @@ func New(entries uint32) (*Ring, error) {
 
 	ring.cqHead = p32(ring.cqRing, pp.cqOff.head)
 	ring.cqTail = p32(ring.cqRing, pp.cqOff.tail)
+	ring.cqMask = *p32(ring.cqRing, pp.cqOff.ringMask)
+	ring.cqes = pp.cqOff.cqes
 
 	return ring, nil
 }
 
-// reset resyncs the cached indices to the kernel's, discarding any half-submitted
-// SQE or pending CQE left by a failed io_uring_enter so the ring is reusable. A
-// dropped completion only moves the read to the following mmap access.
+// ErrRingReset reports a batch that failed with no read left in flight: the ring was reset and stays usable.
+var ErrRingReset = errors.New("io_uring: ring reset with nothing in flight")
+
+// reset resyncs the cached indices to the kernel's, dropping unsubmitted SQEs and unreaped CQEs.
 func (r *Ring) reset() {
 	atomic.StoreUint32(r.sqTail, atomic.LoadUint32(r.sqHead))
 	atomic.StoreUint32(r.cqHead, atomic.LoadUint32(r.cqTail))
+}
+
+// abandoned keeps failed rings and their read buffers alive: the kernel may still write into them.
+var (
+	abandonedMu sync.Mutex
+	abandoned   []abandonedRing
+)
+
+type abandonedRing struct {
+	r    *Ring
+	bufs [][]byte
+}
+
+// Abandon retires a ring whose reads may still be in flight: the ring and bufs stay alive and are never reused.
+func (r *Ring) Abandon(bufs ...[]byte) {
+	abandonedMu.Lock()
+	defer abandonedMu.Unlock()
+	abandoned = append(abandoned, abandonedRing{r, bufs})
 }
 
 func (r *Ring) Close() {
@@ -159,8 +184,13 @@ func (r *Ring) fillSQE(idx uint32, fd int, off uint64, buf []byte, userData uint
 	*(*uint64)(unsafe.Add(base, 32)) = userData                                 // user_data @32
 }
 
+// ErrReadFailed marks a read that completed with an error; the ring itself still works.
+var ErrReadFailed = errors.New("io_uring read failed")
+
 // BlockingBatchRead reads each (offset,len) request into scratch buffers using
-// io_uring, keeping up to the ring size in flight. It returns after all complete.
+// io_uring, keeping up to the ring size in flight. It returns after all complete. After
+// ErrReadFailed or ErrRingReset no read is in flight, so the ring and scratch can be reused; after any
+// other error reads may still be in flight into scratch: the caller must not reuse them.
 func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch [][]byte) error {
 	n := len(offsets)
 	done := 0
@@ -182,29 +212,42 @@ func (r *Ring) BlockingBatchRead(fd int, offsets []int64, lens []int, scratch []
 		// visible to the kernel before it observes the advanced tail.
 		atomic.StoreUint32(r.sqTail, tail)
 
-		_, _, errno := unix.Syscall6(unix.SYS_IO_URING_ENTER, uintptr(r.fd), uintptr(wave), uintptr(wave), enterGetevents, 0, 0)
-		if errno != 0 {
-			return fmt.Errorf("io_uring_enter: %w", errno)
-		}
-
-		// Reap `wave` completions.
-		reaped := 0
+		// The kernel may take only part of the wave and then returns without waiting, so each
+		// wait also submits what is still queued.
+		submitted, reaped := 0, 0
+		var failed error
 		for reaped < wave {
 			ch := atomic.LoadUint32(r.cqHead)
 			ct := atomic.LoadUint32(r.cqTail)
-			// A CQE result (res @8) is discarded: a failed read moves the work
-			// to the following mmap access. Only the count matters.
 			for ch != ct {
+				// A failed read leaves its page cold; report it once the wave is drained so the caller stops.
+				cqe := r.cqes + (ch&r.cqMask)*cqeSize
+				if res := int32(*p32(r.cqRing, cqe+8)); res < 0 && failed == nil {
+					i := *(*uint64)(unsafe.Pointer(&r.cqRing[cqe]))
+					failed = fmt.Errorf("%w: request %d: %w", ErrReadFailed, i, unix.Errno(-res))
+				}
 				ch++
 				reaped++
 			}
 			atomic.StoreUint32(r.cqHead, ch)
-			if reaped < wave {
-				_, _, errno := unix.Syscall6(unix.SYS_IO_URING_ENTER, uintptr(r.fd), 0, uintptr(wave-reaped), enterGetevents, 0, 0)
-				if errno != 0 {
-					return fmt.Errorf("io_uring_enter(wait): %w", errno)
-				}
+			if reaped == wave {
+				break
 			}
+			taken, _, errno := unix.Syscall6(unix.SYS_IO_URING_ENTER, uintptr(r.fd), uintptr(wave-submitted), uintptr(wave-reaped), enterGetevents, 0, 0)
+			if errno == unix.EINTR {
+				continue
+			}
+			if errno != 0 {
+				if submitted == reaped { // a failed enter submits nothing, so no read is in flight
+					r.reset()
+					return fmt.Errorf("io_uring_enter: %w: %w", ErrRingReset, errno)
+				}
+				return fmt.Errorf("io_uring_enter: %w", errno)
+			}
+			submitted += int(taken)
+		}
+		if failed != nil {
+			return failed
 		}
 		done += wave
 	}

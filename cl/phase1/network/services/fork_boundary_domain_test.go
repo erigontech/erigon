@@ -198,7 +198,7 @@ func TestDataColumnSidecarProposerSignatureUsesHeaderEpochForkVersion(t *testing
 	require.NoError(t, syncedData.OnHeadState(headState))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	service := NewDataColumnSidecarService(ctx, &cfg, nil, nil, syncedData, nil, nil).(*dataColumnSidecarService)
+	service := NewDataColumnSidecarService(ctx, &cfg, nil, nil, syncedData, nil, nil, nil).(*dataColumnSidecarService)
 
 	valid, err := service.verifyProposerSignature(0, signedHeaderAtFork(t, &cfg, clparams.FuluVersion, key, common.Hash{}))
 	require.NoError(t, err)
@@ -213,7 +213,7 @@ func TestBlobSidecarProposerSignatureUsesHeaderEpochForkVersion(t *testing.T) {
 	parentRoot := common.HexToHash("0x3333333333333333333333333333333333333333333333333333333333333333")
 	forkChoice := mock_services.NewForkChoiceStorageMock(t)
 	forkChoice.Headers[parentRoot] = &cltypes.BeaconBlockHeader{Slot: headState.Slot()}
-	service := NewBlobSidecarService(&cfg, forkChoice, syncedData, nil, nil, false).(*blobSidecarService)
+	service := NewBlobSidecarService(t.Context(), &cfg, forkChoice, syncedData, nil, nil, false).(*blobSidecarService)
 
 	require.NoError(t, service.verifySidecarsSignature(signedHeaderAtFork(t, &cfg, clparams.ElectraVersion, key, parentRoot)))
 }

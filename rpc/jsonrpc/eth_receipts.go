@@ -66,12 +66,16 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *ty
 	if err != nil {
 		return nil, err
 	}
-
-	commitmentHistoryEnabled, err := api.commitmentHistoryEnabled(tx)
+	opts, err := api.receiptsOpts(tx)
 	if err != nil {
 		return nil, err
 	}
-	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled})
+	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, opts)
+}
+
+func (api *BaseAPI) receiptsOpts(tx kv.TemporalTx) (eth.ReceiptsOpts, error) {
+	commitmentHistoryEnabled, err := api.commitmentHistoryEnabled(tx)
+	return eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled}, err
 }
 
 func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *receipts.PostStateInfo) (*types.Receipt, error) {
@@ -104,18 +108,9 @@ func exceedsLogQueryLimit(crit filters.FilterCriteria, limit int) bool {
 }
 
 // usesLogIndex reports whether the filter makes the query search LogAddrIdx or
-// LogTopicIdx. It tracks applyFiltersV3, which skips topic positions that are
-// empty because those match any topic.
+// LogTopicIdx.
 func usesLogIndex(crit filters.FilterCriteria) bool {
-	if len(crit.Addresses) > 0 {
-		return true
-	}
-	for _, position := range crit.Topics {
-		if len(position) > 0 {
-			return true
-		}
-	}
-	return false
+	return len(logIndexClauses(crit)) > 0
 }
 
 // errBlockHashNotFound marks a by-hash selector that names no canonical block
@@ -195,9 +190,12 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 	end = latest
 	if crit.ToBlock != nil {
 		toBlock := crit.ToBlock.Int64()
-		if toBlock > 0 {
+		switch {
+		case toBlock > 0:
 			end = uint64(toBlock)
-		} else {
+		case crit.FromBlock != nil && crit.FromBlock.Int64() == toBlock:
+			end = begin
+		default:
 			blockNum := rpc.BlockNumber(toBlock)
 			end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader)
 			if err != nil {
@@ -223,6 +221,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, beginErr
 	}
 	defer tx.Rollback()
+	// Committed view only: GetReceipt must not wrap this tx in a newer overlay.
+	tx = rpchelper.PinToOverlay(tx, nil)
 
 	if exceedsLogQueryLimit(crit, api.logQueryLimit) {
 		return nil, &rpc.CustomError{Message: fmt.Sprintf(errExceedLogQueryLimit, api.logQueryLimit), Code: rpc.ErrCodeInvalidParams}
@@ -264,7 +264,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("node is still initializing")
 	}
 
-	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, crit); err != nil {
+	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, end, crit); err != nil {
 		return nil, err
 	}
 
@@ -296,45 +296,18 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		toTxNum--
 	}
 
-	var topicsBitmap stream.U64
-
-	if asc {
-		topicsBitmap, err = getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum, asc)
-	} else {
-		topicsBitmap, err = getTopicsBitmapV3(tx, crit.Topics, toTxNum, fromTxNum, asc)
-	}
-	if err != nil {
-		return out, err
-	}
-	if topicsBitmap != nil {
-		out = topicsBitmap
-	}
-
-	var addrBitmap stream.U64
-
-	if asc {
-		addrBitmap, err = getAddrsBitmapV3(tx, crit.Addresses, fromTxNum, toTxNum, asc)
-	} else {
-		addrBitmap, err = getAddrsBitmapV3(tx, crit.Addresses, toTxNum, fromTxNum, asc)
-	}
-	if err != nil {
-		return out, err
-	}
-	if addrBitmap != nil {
-		if out == nil {
-			out = addrBitmap
-		} else {
-			out = stream.Intersect[uint64](out, addrBitmap, asc, kv.Unlim)
-		}
-	}
-	if out == nil {
+	clauses := logIndexClauses(crit)
+	if len(clauses) == 0 {
 		if asc == order.Asc {
-			out = stream.Range[uint64](fromTxNum, toTxNum)
-		} else {
-			out = stream.ReverseRange[uint64](toTxNum, fromTxNum)
+			return stream.Range[uint64](fromTxNum, toTxNum), nil
 		}
+		return stream.ReverseRange[uint64](toTxNum, fromTxNum), nil
 	}
-	return out, nil
+	q := kv.IndexQuery{Clauses: clauses, FromTs: int(fromTxNum), ToTs: int(toTxNum), Asc: asc}
+	if !asc {
+		q.FromTs, q.ToTs = int(toTxNum), int(fromTxNum)
+	}
+	return tx.IndexJoin(q)
 }
 
 func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int, maxResults int) (types.Logs, error) {
@@ -347,11 +320,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 	}
 
-	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
-	for _, v := range crit.Addresses {
-		addrMap[v] = struct{}{}
-	}
-	topicMap := types.BuildTopicMap(crit.Topics)
+	filter := types.NewLogFilter(crit.Addresses, crit.Topics)
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -365,14 +334,14 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return nil, err
 	}
 
-	it := rawdbv3.TxNums2BlockNums(ctx, tx, api._txNumReader, txNumbers, order.Asc)
+	it := rawdbv3.TxNums2BlockNumsFrom(ctx, tx, api._txNumReader, txNumbers, order.Asc, begin)
 	defer it.Close()
 
 	for it.HasNext() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := it.Next()
+		txNum, blockNum, txIndex, _, isSystemTxn, blockNumChanged, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
@@ -387,12 +356,12 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 		}
 
-		if isFinalTxn {
+		if isSystemTxn {
 			continue
 		}
 
 		if r, ok := api.receiptsGenerator.TryGetCachedReceipt(header.Hash(), txNum, txIndex); ok {
-			logs, err = appendRPCLogs(logs, r.Logs, addrMap, topicMap, header.Time, maxResults)
+			logs, err = appendRPCLogs(logs, r.Logs, filter, header.Time, maxResults)
 			if err != nil {
 				return nil, err
 			}
@@ -409,17 +378,14 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return nil, err
 			}
 			if !ok {
-				continue
+				return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNum, txIndex)
 			}
 			if r, err = api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, header, txn, txIndex, txNum, nil); err != nil {
 				return nil, err
 			}
 		}
-		if r == nil {
-			return nil, err
-		}
 
-		logs, err = appendRPCLogs(logs, r.Logs, addrMap, topicMap, header.Time, maxResults)
+		logs, err = appendRPCLogs(logs, r.Logs, filter, header.Time, maxResults)
 		if err != nil {
 			return nil, err
 		}
@@ -428,14 +394,14 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	return logs, nil
 }
 
-func appendRPCLogs(logs types.Logs, receiptLogs types.Logs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, blockTime uint64, maxResults int) (types.Logs, error) {
+func appendRPCLogs(logs types.Logs, receiptLogs types.Logs, filter *types.LogFilter, blockTime uint64, maxResults int) (types.Logs, error) {
 	// One entry past the cap is enough to detect the overflow without converting the rest.
 	// At math.MaxInt there is no such entry, so the append stays unlimited.
 	var limit int
 	if maxResults != 0 && maxResults != math.MaxInt {
 		limit = maxResults + 1
 	}
-	logs = receiptLogs.AppendFilteredLogs(logs, addrMap, topicMap, blockTime, limit)
+	logs = receiptLogs.AppendFilteredLogs(logs, filter, blockTime, limit)
 	if maxResults != 0 && len(logs) > maxResults {
 		return nil, &rpc.InvalidParamsError{
 			Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
@@ -444,50 +410,29 @@ func appendRPCLogs(logs types.Logs, receiptLogs types.Logs, addrMap map[common.A
 	return logs, nil
 }
 
-// The Topic list restricts matches to particular event topics. Each event has a list
-// of topics. Topics matches a prefix of that list. An empty element slice matches any
-// topic. Non-empty elements represent an alternative that matches any of the
-// contained topics.
-//
-// Examples:
-// {} or nil          matches any topic list
-// {{A}}              matches topic A in first position
-// {{}, {B}}          matches any topic in first position AND B in second position
-// {{A}, {B}}         matches topic A in first position AND B in second position
-// {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64, asc order.By) (res stream.U64, err error) {
-	for _, sub := range topics {
-		if len(sub) == 0 {
+// logIndexClauses returns the index query clauses of a log filter: one clause per topic position that
+// is not empty, then one for the addresses. An empty topic position matches any topic, so it has
+// no clause.
+func logIndexClauses(crit filters.FilterCriteria) [][]kv.IndexKey {
+	var clauses [][]kv.IndexKey
+	for _, position := range crit.Topics {
+		if len(position) == 0 {
 			continue
 		}
-
-		var topicsUnion stream.U64
-		for _, topic := range sub {
-			it, err := tx.IndexRange(kv.LogTopicIdx, topic[:], int(from), int(to), asc, kv.Unlim)
-			if err != nil {
-				return nil, err
-			}
-			topicsUnion = stream.Union[uint64](topicsUnion, it, asc, kv.Unlim)
+		clause := make([]kv.IndexKey, len(position))
+		for i := range position {
+			clause[i] = kv.IndexKey{Idx: kv.LogTopicIdx, Key: position[i][:]}
 		}
-
-		if res == nil {
-			res = topicsUnion
-			continue
-		}
-		res = stream.Intersect[uint64](res, topicsUnion, asc, kv.Unlim)
+		clauses = append(clauses, clause)
 	}
-	return res, nil
-}
-
-func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64, asc order.By) (res stream.U64, err error) {
-	for _, addr := range addrs {
-		it, err := tx.IndexRange(kv.LogAddrIdx, addr[:], int(from), int(to), asc, kv.Unlim)
-		if err != nil {
-			return nil, err
+	if len(crit.Addresses) > 0 {
+		clause := make([]kv.IndexKey, len(crit.Addresses))
+		for i := range crit.Addresses {
+			clause[i] = kv.IndexKey{Idx: kv.LogAddrIdx, Key: crit.Addresses[i][:]}
 		}
-		res = stream.Union[uint64](res, it, asc, kv.Unlim)
+		clauses = append(clauses, clause)
 	}
-	return res, nil
+	return clauses
 }
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.
@@ -510,13 +455,16 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
 	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum)
 	if err != nil {
+		return nil, err
+	}
+	if err := api.checkReceiptAvailableAtIndex(ctx, tx, blockNum, uint64(txnIndex)); err != nil {
 		return nil, err
 	}
 
@@ -566,7 +514,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true, true), nil
+	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -597,6 +545,20 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	opts, err := api.receiptsOpts(tx)
+	if err != nil {
+		return nil, err
+	}
+	var prefetch *receipts.ReceiptsPrefetch
+	if !api.remoteBlocks {
+		prefetch = api.receiptsGenerator.PrefetchReceipts(ctx, chainConfig, api.db, blockNum, blockHash, opts)
+		defer prefetch.Close()
+	}
+
 	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
@@ -604,18 +566,14 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if block == nil {
 		return nil, nil
 	}
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	receipts, err := api.getReceipts(ctx, tx, block)
+	receipts, err := api.receiptsGenerator.GetReceiptsPrefetched(ctx, chainConfig, tx, block, opts, prefetch)
 	if err != nil {
 		return nil, err
 	}
 	result := make(ethutils.RPCReceipts, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), true, true))
+		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), true))
 	}
 
 	return result, nil

@@ -138,6 +138,15 @@ func TestSyncCommitteeMinimalPreset(t *testing.T) {
 	assert.True(t, sc.Equal(fromJSON))
 }
 
+func TestSyncCommitteeSizeInferenceDoesNotMutate(t *testing.T) {
+	const committeeSize = 32
+	syncCommittee := &SyncCommittee{data: make([]byte, (committeeSize+1)*48)}
+
+	require.Zero(t, syncCommittee.committeeSize)
+	require.Equal(t, committeeSize, syncCommittee.CommitteeSize())
+	require.Zero(t, syncCommittee.committeeSize)
+}
+
 func TestSyncCommitteeJson(t *testing.T) {
 	// Test MarshalJSON and UnmarshalJSON
 	committee := make([]common.Bytes48, 512)

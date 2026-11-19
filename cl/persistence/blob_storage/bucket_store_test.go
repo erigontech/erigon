@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type removeAllFailingFs struct {
@@ -52,6 +54,14 @@ func (r *removeAllFailingFs) RemoveAll(path string) error {
 		return err
 	}
 	return r.Fs.RemoveAll(path)
+}
+
+func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Marshaler) (bool, error) {
+	if !b.startWrite(slot) {
+		return false, nil
+	}
+	defer b.finishWrite()
+	return b.writeAdmitted(slot, root, idx, v)
 }
 
 func newBucketStore(t *testing.T, fs afero.Fs) *bucketStore {
@@ -183,7 +193,7 @@ func TestBucketStorePruneBelowPropagatesReaddirError(t *testing.T) {
 	b := newBucketStore(t, fs)
 
 	require.ErrorIs(t, b.pruneBelow(3*subdivisionSlot), ErrPruneNotStarted)
-	require.Zero(t, b.pruneFloor)
+	require.Zero(t, b.pruneFloor.Load())
 }
 
 func TestBucketStorePruneBelowContinuesPastRemoveAllError(t *testing.T) {
@@ -195,6 +205,61 @@ func TestBucketStorePruneBelowContinuesPastRemoveAllError(t *testing.T) {
 	require.ErrorIs(t, b.pruneBelow(3*subdivisionSlot), errInducedFailure)
 
 	require.Equal(t, []string{"1", "3"}, rootEntryNames(t, fs))
+}
+
+func TestBucketStorePruneBelowKeepsABucketWhoseRowsCouldNotBeDropped(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	b := newBucketStore(t, fs)
+	b.dropRows = func([]common.Hash) error { return errInducedFailure }
+	makeBuckets(t, fs, "0", "1")
+
+	require.ErrorIs(t, b.pruneBelow(2*subdivisionSlot), errInducedFailure)
+
+	require.Equal(t, []string{"0", "1"}, rootEntryNames(t, fs), "the files are the only record of the roots to drop")
+}
+
+func TestBucketStorePruneBelowKeepsABucketItCannotList(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	makeBuckets(t, mem, "0", "1")
+	b := newBucketStore(t, openFailingFs{Fs: mem, name: "0"})
+	b.dropRows = func([]common.Hash) error { return nil }
+
+	require.ErrorIs(t, b.pruneBelow(2*subdivisionSlot), os.ErrPermission)
+
+	require.Equal(t, []string{"0"}, rootEntryNames(t, mem), "an unlisted bucket's roots would leak with it")
+}
+
+// interleavingOpenFs runs during before the first Open of name returns, so a test can slip a
+// second pruneBelow between the first one's listing and its open of the bucket.
+type interleavingOpenFs struct {
+	afero.Fs
+	name   string
+	during func()
+	ran    atomic.Bool
+}
+
+func (f *interleavingOpenFs) Open(name string) (afero.File, error) {
+	if name == f.name && f.ran.CompareAndSwap(false, true) {
+		f.during()
+	}
+	return f.Fs.Open(name)
+}
+
+func TestBucketStoreOverlappingPrunesBothSucceed(t *testing.T) {
+	mem := afero.NewMemMapFs()
+	makeBuckets(t, mem, "0", "1")
+	require.NoError(t, afero.WriteFile(mem, "0/"+common.Hash{7}.String()+"_0", []byte{1}, 0o644))
+	fs := &interleavingOpenFs{Fs: mem, name: "0"}
+	b := newBucketStore(t, fs)
+	var dropped [][]common.Hash
+	b.dropRows = func(roots []common.Hash) error { dropped = append(dropped, roots); return nil }
+	var inner error
+	fs.during = func() { inner = b.pruneBelow(subdivisionSlot) }
+
+	require.NoError(t, b.pruneBelow(subdivisionSlot), "the bucket the other prune removed counts as pruned")
+	require.NoError(t, inner)
+	require.Equal(t, [][]common.Hash{{{7}}}, dropped, "the inner prune drops the rows once")
+	require.Equal(t, []string{"1"}, rootEntryNames(t, mem))
 }
 
 func TestBucketStoreLowerPruneRetriesTheEstablishedFloor(t *testing.T) {
@@ -230,7 +295,6 @@ func TestSlotLocksStripesBySlot(t *testing.T) {
 	var s slotLocks
 	s.initLocks()
 
-	require.Same(t, s.forSlot(7), s.forSlot(7))
 	require.Same(t, s.forSlot(7), s.forSlot(7+rwLocksCount))
 	require.NotSame(t, s.forSlot(7), s.forSlot(8))
 }
@@ -539,10 +603,13 @@ func TestFacadePruneRejectsAWriteIntoTheBucketItRemoves(t *testing.T) {
 func TestFacadeWriteRacingPruneLeavesNoPartialFile(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
+		batch             bool
 		releaseWriteFirst bool
 	}{
 		{name: "write released first", releaseWriteFirst: true},
-		{name: "both released together", releaseWriteFirst: false},
+		{name: "both released together"},
+		{name: "batch write released first", batch: true, releaseWriteFirst: true},
+		{name: "batch both released together", batch: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fs := newPruneRaceFs(afero.NewBasePathFs(afero.NewOsFs(), t.TempDir()))
@@ -550,15 +617,27 @@ func TestFacadeWriteRacingPruneLeavesNoPartialFile(t *testing.T) {
 			const slot = 1000
 			root := common.Hash{3}
 			_, file := (&bucketStore{fs: fs}).path(slot, root, 0)
+			tmpFile := file + tmpSuffix
+			if tc.batch {
+				tmpFile = testPackFile(slot, root) + tmpSuffix
+			}
 			fs.removePath = "0"
-			fs.createPath = file + tmpSuffix
+			fs.createPath = tmpFile
 			require.NoError(t, fs.MkdirAll(fs.removePath, 0o755))
 
 			writeDone := make(chan error, 1)
 			go func() {
+				if tc.batch {
+					writeDone <- storage.WriteColumnSidecarsBatch(t.Context(), root, []*cltypes.DataColumnSidecar{createTestDataColumnSidecar(slot, 0), createTestDataColumnSidecar(slot, 1)})
+					return
+				}
 				writeDone <- storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(slot, 0))
 			}()
-			<-fs.createEntered
+			select {
+			case <-fs.createEntered:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the write never created its temp file")
+			}
 
 			pruneDone := make(chan error, 1)
 			go func() { pruneDone <- storage.PruneBelow(subdivisionSlot) }()
@@ -582,7 +661,7 @@ func TestFacadeWriteRacingPruneLeavesNoPartialFile(t *testing.T) {
 				require.NoError(t, <-pruneDone)
 			}
 
-			tmpExists, err := afero.Exists(fs, file+tmpSuffix)
+			tmpExists, err := afero.Exists(fs, tmpFile)
 			require.NoError(t, err)
 			require.False(t, tmpExists)
 			exists, err := storage.ColumnSidecarExists(t.Context(), slot, root, 0)
@@ -795,7 +874,7 @@ func TestBucketStoreLowestStoredSlotSkipsEmptyBuckets(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	b := newBucketStore(t, fs)
 
-	slot, err := b.EarliestStoredSlot()
+	slot, err := b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Zero(t, slot)
 
@@ -806,7 +885,7 @@ func TestBucketStoreLowestStoredSlotSkipsEmptyBuckets(t *testing.T) {
 	require.NoError(t, afero.WriteFile(fs, "07/root_0", []byte{1}, 0o644))
 	require.NoError(t, afero.WriteFile(fs, "4", []byte{1}, 0o644))
 
-	slot, err = b.EarliestStoredSlot()
+	slot, err = b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Equal(t, uint64(3*subdivisionSlot), slot)
 }
@@ -819,12 +898,12 @@ func TestBucketStoreEarliestStoredSlotFindsSidecarBehindManyTempFiles(t *testing
 	for i := range 3 * listBatch {
 		require.NoError(t, afero.WriteFile(fs, fmt.Sprintf("4/a_%03d%s", i, tmpSuffix), []byte{1}, 0o644))
 	}
-	slot, err := b.EarliestStoredSlot()
+	slot, err := b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Zero(t, slot)
 
 	require.NoError(t, afero.WriteFile(fs, "4/z_0", []byte{1}, 0o644))
-	slot, err = b.EarliestStoredSlot()
+	slot, err = b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Equal(t, uint64(4*subdivisionSlot), slot)
 }
@@ -848,7 +927,7 @@ func TestBucketStoreEarliestStoredSlotSkipsAnUnreadableBucket(t *testing.T) {
 	require.NoError(t, afero.WriteFile(mem, "3/root_0", []byte{1}, 0o644))
 	b := newBucketStore(t, openFailingFs{Fs: mem, name: "2"})
 
-	slot, err := b.EarliestStoredSlot()
+	slot, err := b.earliestStoredSlot(b.holdsSidecar)
 	require.NoError(t, err)
 	require.Equal(t, uint64(3*subdivisionSlot), slot)
 }
@@ -859,6 +938,6 @@ func TestBucketStoreEarliestStoredSlotErrorsWhenTheOnlyBucketIsUnreadable(t *tes
 	require.NoError(t, afero.WriteFile(mem, "3/root_0", []byte{1}, 0o644))
 	b := newBucketStore(t, openFailingFs{Fs: mem, name: "3"})
 
-	_, err := b.EarliestStoredSlot()
+	_, err := b.earliestStoredSlot(b.holdsSidecar)
 	require.ErrorIs(t, err, os.ErrPermission)
 }

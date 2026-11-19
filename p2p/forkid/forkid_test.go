@@ -115,10 +115,7 @@ func TestCreation(t *testing.T) {
 				{60412, 1742999832, ID{Hash: ChecksumToBytes(0x0929e24e), Activation: 1742999832, Next: 1761677592}},   // First Prague block
 				{1526774, 1761677592, ID{Hash: ChecksumToBytes(0xe7e0e7ff), Activation: 1761677592, Next: 1762365720}}, // First Osaka block (approx)
 				{1584118, 1762365720, ID{Hash: ChecksumToBytes(0x3893353e), Activation: 1762365720, Next: 1762955544}}, // First BPO1 block (approx)
-				{futureBn, 1762955544, ID{Hash: ChecksumToBytes(0x23aa1351), Activation: 1762955544, Next: 1793036568}},
-				{futureBn, 1793036567, ID{Hash: ChecksumToBytes(0x23aa1351), Activation: 1762955544, Next: 1793036568}},
-				{futureBn, 1793036568, ID{Hash: ChecksumToBytes(0x3d068b59), Activation: 1793036568, Next: 0}},
-				{8000000, 1800000000, ID{Hash: ChecksumToBytes(0x3d068b59), Activation: 1793036568, Next: 0}},
+				{8000000, 1800000000, ID{Hash: ChecksumToBytes(0x23aa1351), Activation: 1762955544, Next: 0}},          // Future BPO2 block (mock)
 			},
 		},
 		{
@@ -272,6 +269,30 @@ func TestEncoding(t *testing.T) {
 		}
 		if !bytes.Equal(have, tt.want) {
 			t.Errorf("test %d: RLP mismatch: have %x, want %x", i, have, tt.want)
+		}
+	}
+}
+
+func TestValidationAtForkActivation(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		headHeight uint64
+		headTime   uint64
+		id         ID
+		err        error
+	}{
+		{"exactly on Petersburg, remote Byzantium aware of Petersburg", 7280000, 0, ID{Hash: ChecksumToBytes(0xa00bc324), Next: 7280000}, nil},
+		{"exactly on Petersburg, remote Byzantium unaware of Petersburg", 7280000, 0, ID{Hash: ChecksumToBytes(0xa00bc324), Next: 0}, ErrRemoteStale},
+		{"exactly on Shanghai, remote Gray Glacier aware of Shanghai", 17034870, 1681338455, ID{Hash: ChecksumToBytes(0xf0afd0e3), Next: 1681338455}, nil},
+		{"exactly on Shanghai, remote Gray Glacier unaware of Shanghai", 17034870, 1681338455, ID{Hash: ChecksumToBytes(0xf0afd0e3), Next: 0}, ErrRemoteStale},
+		{"head at maxuint64, incompatible remote", math.MaxUint64, math.MaxUint64, ID{Hash: ChecksumToBytes(0xdeadbeef), Next: 0}, ErrLocalIncompatibleOrStale},
+	}
+	heightForks, timeForks := GatherForks(chainspec.Mainnet.Config, 0 /* genesisTime */)
+	for _, tt := range tests {
+		filter := newFilter(heightForks, timeForks, chainspec.Mainnet.GenesisHash, tt.headHeight, tt.headTime)
+		if err := filter(tt.id); !errors.Is(err, tt.err) {
+			t.Errorf("%s: validation error mismatch: have %v, want %v", tt.name, err, tt.err)
 		}
 	}
 }

@@ -535,7 +535,7 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 
 func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGasCost, error) {
 	var accountGas uint64
-	address := evm.internAddress(callContext.Stack.back(1))
+	address := evm.intraBlockState.InternAddress(callContext.Stack.back(1))
 	rules := evm.ChainRules()
 	callContext.newAccountCharged = false
 	if rules.IsEIP161Enabled() {

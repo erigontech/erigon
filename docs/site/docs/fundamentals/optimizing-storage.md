@@ -19,7 +19,7 @@ Place the `datadir` on the slower disk. Then, create symbolic links (using `ln -
 
 This will speed up the execution of E3.
 
-On the **slow disk** place `datadir` folder with the following structure:
+On the **slow disk** place the `datadir` folder with the following structure:
 
 * `chaindata` (linked to fast disk)
 * `snapshots`

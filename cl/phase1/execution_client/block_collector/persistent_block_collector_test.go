@@ -30,12 +30,14 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -160,6 +162,44 @@ func TestDecodeBlockRejectsShortPersistentValue(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := c.decodeBlock(utils.CompressSnappy(raw))
 			require.ErrorContains(t, err, "persistent block value too short")
+		})
+	}
+}
+
+func TestFlushTypedTransactionEncoding(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		wrapped bool
+	}{
+		{name: "canonical"},
+		{name: "wrapped", wrapped: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newFlushTestHarness(t, 0)
+			transactions, err := types.MarshalTransactionsBinary(types.Transactions{&types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Data: make([]byte, 64)},
+			}})
+			require.NoError(t, err)
+			block := makeBeaconBlock(t, 1, 'a', common.Hash{})
+			payload := block.Body.ExecutionPayload
+			if tc.wrapped {
+				transactions[0], err = rlp.EncodeToBytes(transactions[0])
+				require.NoError(t, err)
+			}
+			payload.Transactions = solid.NewTransactionsSSZFromTransactions(transactions)
+			payload.BlockHash, err = payload.ComputeBlockHash(&block.ParentRoot, common.Hash{}, nil)
+			require.NoError(t, err)
+
+			require.NoError(t, h.collector.AddBlock(block))
+			require.NoError(t, h.collector.Flush(t.Context()))
+			if tc.wrapped {
+				require.Empty(t, h.inserted)
+				require.Empty(t, h.fcuHeads)
+				return
+			}
+			require.Len(t, h.inserted, 1)
+			require.Equal(t, payload.BlockHash, h.inserted[0].Hash())
+			require.Equal(t, []common.Hash{payload.BlockHash}, h.fcuHeads)
 		})
 	}
 }

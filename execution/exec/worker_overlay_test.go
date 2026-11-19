@@ -17,6 +17,7 @@
 package exec
 
 import (
+	"context"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -88,20 +89,15 @@ func TestWorker_ChainReader_SeesOverlayHeader(t *testing.T) {
 	// nil blockReader → consensuschain.Reader uses rawdb.ReadHeader directly,
 	// keeping the test focused on the tx + overlay path without any
 	// snapshot-file plumbing.
-	rw := NewWorker(t.Context(), true, nil, db, nil, nil,
-		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, nil, dirs, logger)
+	rw := NewWorkerContext(t.Context(), true, nil, db, nil,
+		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, dirs, logger)
 	rw.rs = rs
 
-	// workerRoTx ownership transfers to rw on ResetTx; rolling it back
-	// directly here would double-Rollback against rw.chainRoTx.
+	// The worker only borrows the tx (bindTx never rolls it back), so the caller
+	// owns workerRoTx and rolls it back here — mirroring the dispatch goroutine.
 	workerRoTx, err := db.BeginTemporalRo(t.Context()) //nolint:gocritic
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		if rw.chainRoTx != nil {
-			rw.chainRoTx.Rollback()
-			rw.chainRoTx = nil
-		}
-	})
+	t.Cleanup(workerRoTx.Rollback)
 	require.NoError(t, rw.ResetTx(workerRoTx))
 
 	got := rw.chain.GetHeaderByHash(hash)
@@ -158,23 +154,30 @@ func TestWorker_ChainReader_NoOverlayStillWorks(t *testing.T) {
 	// nil blockReader → consensuschain.Reader uses rawdb.ReadHeader directly,
 	// keeping the test focused on the tx + overlay path without any
 	// snapshot-file plumbing.
-	rw := NewWorker(t.Context(), true, nil, db, nil, nil,
-		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, nil, dirs, logger)
+	rw := NewWorkerContext(t.Context(), true, nil, db, nil,
+		&chain.Config{ChainID: uint256.NewInt(1)}, nil, nil, dirs, logger)
 	rw.rs = rs
 
-	// workerRoTx ownership transfers to rw on ResetTx; rolling it back
-	// directly here would double-Rollback against rw.chainRoTx.
+	// The worker only borrows the tx (bindTx never rolls it back), so the caller
+	// owns workerRoTx and rolls it back here — mirroring the dispatch goroutine.
 	workerRoTx, err := db.BeginTemporalRo(t.Context()) //nolint:gocritic
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		if rw.chainRoTx != nil {
-			rw.chainRoTx.Rollback()
-			rw.chainRoTx = nil
-		}
-	})
+	t.Cleanup(workerRoTx.Rollback)
 	require.NoError(t, rw.ResetTx(workerRoTx))
 
 	got := rw.chain.GetHeaderByHash(hash)
 	require.NotNil(t, got, "committed-MDBX header must still resolve when no overlay is active")
 	require.Equal(t, number, got.Number.Uint64())
+}
+
+// A worker run without a bound roTx is an executor fault: the result must carry
+// the operational marker so it cannot become a block verdict downstream.
+func TestRunTxTaskWithoutRoTxIsOperational(t *testing.T) {
+	w := NewWorkerContext(context.Background(), true, NewWorkerMetrics(), nil, nil, chain.AllProtocolChanges, nil, nil, datadir.Dirs{}, log.New())
+	w.stateReader = state.NewNoopReader()
+
+	res := w.RunTxTaskNoLock(&TxTask{})
+
+	require.Error(t, res.Err)
+	require.True(t, res.Operational)
 }
