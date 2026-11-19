@@ -620,6 +620,7 @@ func TestValidateCurrentRootWithStorage(t *testing.T) {
 			return err
 		}
 		defer d.Close()
+		d.SetDisableInlineTouchKey(true)
 		if err := d.DomainPut(kv.AccountsDomain, tx, acc[:], []byte{0x01}, 0, nil); err != nil {
 			return err
 		}

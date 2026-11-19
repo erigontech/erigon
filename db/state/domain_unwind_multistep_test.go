@@ -189,6 +189,7 @@ func TestDomain_RepeatedUnwindKeepsVersionOrder(t *testing.T) {
 }
 
 func TestDomain_UnwindDoesNotRestoreAbsentBranch(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	for _, oldBranch := range [][]byte{{0, 1, 0, 0}, {0, 1, 0, 1, 0}} {
 		t.Run(fmt.Sprintf("old_%x", oldBranch), func(t *testing.T) {
 			db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, log.New())
@@ -357,4 +358,29 @@ func TestDomain_RepeatedUnwindRemovesRestoredVersions(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestDomain_UnwindRestoresDeletedCommitmentV3Record(t *testing.T) {
+	cfg := statecfg.Schema.CommitmentDomain
+	statecfg.EnableCommitmentV3Records(&cfg)
+	db, d := testDbAndDomainOfStep(t, cfg, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	view := d.beginForTests()
+	defer view.Close()
+	writer := view.NewWriter(db)
+	defer writer.Close()
+
+	key, old := []byte("key"), []byte{1}
+	require.NoError(t, writer.PutWithPrev(key, old, 2, nil))
+	require.NoError(t, writer.DeleteWithPrev(key, 18, old))
+	writer.SetDiff(&kv.DomainDiff{})
+	require.NoError(t, writer.PutWithPrev(key, []byte{2}, 20, []byte{}))
+	diffs := writer.Diff().GetDiffSet()
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	require.NoError(t, view.unwind(t.Context(), tx, 20, diffs, nil))
+	value, _, _, err := view.GetLatest(key, tx)
+	require.NoError(t, err)
+	require.Empty(t, value)
 }

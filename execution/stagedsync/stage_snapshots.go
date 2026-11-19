@@ -348,6 +348,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 		agg.StepSize(),
+		cfg.dirs,
 	); err != nil {
 		return err
 	}
@@ -399,6 +400,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.snapshotDownloader,
 		cfg.syncConfig,
 		agg.StepSize(),
+		cfg.dirs,
 	); err != nil {
 		return err
 	}
@@ -423,6 +425,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
+	// a state file missing its accessor is excluded from the visible set, so E3 accessors
+	// must be rebuilt before execution and before RPCDaemon reopens files — there is no background rebuild path
+	if err := cfg.db.Debug().BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil {
+		return err
+	}
+
 	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
 	// hashes next time.
 	err = downloadercfg.SaveSnapshotHashes(cfg.dirs, cfg.chainConfig.ChainName)
@@ -441,12 +449,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if err := buildOrDeferE2Indices(ctx, s, cfg, headersProgress); err != nil {
-		return err
-	}
-
-	// a state file missing its accessor is excluded from the visible set, so E3 accessors
-	// must be rebuilt before execution — there is no background rebuild path
-	if err := cfg.db.Debug().BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil {
 		return err
 	}
 
@@ -549,7 +551,7 @@ func firstNonGenesisCheck(tx kv.RwTx, snapshots dbservices.BlockSnapshots, logPr
 	return nil
 }
 
-func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservices.FullBlockReader) error {
+func pruneCanonicalMarkers(tx kv.RwTx, blockReader dbservices.FullBlockReader) error {
 	pruneThreshold := rawdbreset.GetPruneMarkerSafeThreshold(blockReader)
 	if pruneThreshold == 0 {
 		return nil
@@ -631,7 +633,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	if _, err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit, pruneTimeout); err != nil {
 		return err
 	}
-	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
+	if err := pruneCanonicalMarkers(tx, cfg.blockReader); err != nil {
 		return err
 	}
 	return nil
@@ -670,16 +672,12 @@ func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg) (bool, error) {
 // readCommitmentBlockFromDB reads the commitment domain's "state" key via a
 // temporary RO tx. The RwTx from the snapshot stage is not temporal, so we
 // need a separate temporal RO tx to read domain data from snapshot files.
-// The value format: txNum(8 bytes) + blockNum(8 bytes) + trie state.
 func readCommitmentBlockFromDB(ctx context.Context, db kv.TemporalRwDB) uint64 {
 	roTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0
 	}
 	defer roTx.Rollback()
-	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
-	if err != nil || len(v) < 16 {
-		return 0
-	}
-	return binary.BigEndian.Uint64(v[8:16])
+	n, _ := commitmentdb.LatestBlockNumWithCommitment(roTx)
+	return n
 }

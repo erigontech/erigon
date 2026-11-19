@@ -2794,7 +2794,7 @@ func TestOeTracerStateGasRemaining(t *testing.T) {
 			tracer := &OeTracer{r: result}
 			env := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges,
 				vm.Config{Tracer: tracer.Tracer().Hooks})
-			contract := *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			contract := *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 			contract.Code = []byte{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.SSTORE)}
 			if tc.refill {
 				contract.Code = append(contract.Code, byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.SSTORE))

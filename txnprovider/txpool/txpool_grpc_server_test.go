@@ -419,7 +419,7 @@ func TestGrpcServerAddRetriesNonceGapAfterStateUpdate(t *testing.T) {
 			cfg := txpoolcfg.DefaultConfig
 			cfg.MaxNonceGap = 64
 			pool, err := New(ctx, make(chan Announcements, 1), poolDB, coreDB, cfg, kvcache.NewLatestBatchCache(),
-				chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+				chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger)
 			require.NoError(t, err)
 			pool.started.Store(true)
 			key, err := crypto.GenerateKey()
@@ -921,7 +921,6 @@ func TestP2PPropagationContinuesWhileOnAddSubscriberStalls(t *testing.T) {
 		newSlotsStreams,
 		nil,
 		logger,
-		WithFeeCalculator(nil),
 	)
 	require.NoError(t, err)
 	pool.p2pSender = NewSend(ctx, []sentryproto.SentryClient{sentryClient}, logger)
