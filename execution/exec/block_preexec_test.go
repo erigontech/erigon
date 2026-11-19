@@ -303,10 +303,17 @@ func TestCommitmentToucherCountsBatchesTheQueueRefused(t *testing.T) {
 }
 
 func TestStopPreExecCancelsOnlyTheNamedBlock(t *testing.T) {
-	ctx, untrack := trackPreExec(context.Background(), 7)
+	ctx, untrack := trackPreExec(context.Background(), common.Hash{7})
 	defer untrack()
-	StopPreExec(8)
+	StopPreExec(common.Hash{8})
 	require.NoError(t, ctx.Err())
-	StopPreExec(7)
+	StopPreExec(common.Hash{7})
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+}
+
+func TestStopPreExecCancelsARunThatStartsLater(t *testing.T) {
+	StopPreExec(common.Hash{9})
+	ctx, untrack := trackPreExec(context.Background(), common.Hash{9})
+	defer untrack()
 	require.ErrorIs(t, ctx.Err(), context.Canceled)
 }

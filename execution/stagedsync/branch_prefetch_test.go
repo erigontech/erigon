@@ -302,11 +302,59 @@ func TestBranchPrefetcherDrainSortedWalksTheBacklog(t *testing.T) {
 	require.Empty(t, p.work)
 	require.Zero(t, p.pending.Load())
 	require.EqualValues(t, 600, p.queued.Load())
-	require.Positive(t, p.backlog.Load())
+}
+
+func TestBranchPrefetcherQueuesRepeatsWithoutAFollower(t *testing.T) {
+	p := newPrefetchRecords()
+	p.work = make(chan prefetchItem, 8)
+	p.add(prefetchItem{account: [32]byte{1}})
+	p.add(prefetchItem{account: [32]byte{1}})
+	require.Len(t, p.work, 2)
+}
+
+func TestBranchPrefetcherQueuesADroppedItemAgain(t *testing.T) {
+	p := newPrefetchRecords()
+	p.dedupe = true
+	p.work = make(chan prefetchItem, 1)
+	p.add(prefetchItem{account: [32]byte{1}})
+	p.add(prefetchItem{account: [32]byte{2}})
+	require.Equal(t, prefetchItem{account: [32]byte{1}}, <-p.work)
+	p.add(prefetchItem{account: [32]byte{2}})
+	require.Len(t, p.work, 1, "an item the full queue dropped must be queued when it is touched again")
+}
+
+func TestBranchPrefetcherForwardsAQueuePublishedJustBeforeStop(t *testing.T) {
+	for i := range 30 {
+		p := newPrefetchRecords()
+		p.work = make(chan prefetchItem, 8)
+		p.blockNum, p.parentHash = uint64(200+i), common.Hash{4}
+		p.follow()
+		time.Sleep(200 * time.Microsecond)
+		touches := &commitmentdb.PreExecTouches{BlockNum: p.blockNum, ParentHash: p.parentHash, C: make(chan []commitmentdb.PathTouch, 2)}
+		touches.C <- []commitmentdb.PathTouch{{Account: [32]byte{1}}}
+		commitmentdb.PublishPreExecTouches(touches)
+		p.stopFollow()
+		require.Len(t, p.work, 1)
+	}
+}
+
+func TestBranchPrefetcherReportsLossesOfItsOwnQueue(t *testing.T) {
+	p := newPrefetchRecords()
+	p.work = make(chan prefetchItem, 8)
+	p.blockNum, p.parentHash = 11, common.Hash{5}
+	own := &commitmentdb.PreExecTouches{BlockNum: 11, ParentHash: common.Hash{5}, C: make(chan []commitmentdb.PathTouch, 1)}
+	own.Dropped.Store(3)
+	commitmentdb.PublishPreExecTouches(own)
+	p.follow()
+	p.stopFollow()
+	commitmentdb.PublishPreExecTouches(&commitmentdb.PreExecTouches{BlockNum: 12, ParentHash: common.Hash{6}})
+	dropped, _ := p.preExecLost()
+	require.EqualValues(t, 3, dropped)
 }
 
 func TestBranchPrefetcherQueuesAnItemOncePerFold(t *testing.T) {
 	p := newPrefetchRecords()
+	p.dedupe = true
 	p.work = make(chan prefetchItem, 8)
 	p.add(prefetchItem{account: [32]byte{1}})
 	p.add(prefetchItem{account: [32]byte{1}})

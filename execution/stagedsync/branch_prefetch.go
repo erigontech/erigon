@@ -97,6 +97,8 @@ type branchPrefetcher struct {
 	idle                               chan struct{}
 	seenMu                             sync.Mutex
 	seen                               map[prefetchItem]struct{}
+	dedupe                             bool
+	touches                            atomic.Pointer[commitmentdb.PreExecTouches]
 	queued, deduped, followed          atomic.Uint64
 	foldHits, foldMisses, drainTimeout atomic.Uint64
 	backlog, drainWait                 atomic.Int64
@@ -140,16 +142,18 @@ func newPrefetchRecords() *branchPrefetcher {
 }
 
 func (p *branchPrefetcher) add(it prefetchItem) {
-	p.seenMu.Lock()
-	_, dup := p.seen[it]
-	if p.seen == nil {
-		p.seen = make(map[prefetchItem]struct{})
-	}
-	p.seen[it] = struct{}{}
-	p.seenMu.Unlock()
-	if dup {
-		p.deduped.Add(1)
-		return
+	if p.dedupe {
+		p.seenMu.Lock()
+		_, dup := p.seen[it]
+		if p.seen == nil {
+			p.seen = make(map[prefetchItem]struct{})
+		}
+		p.seen[it] = struct{}{}
+		p.seenMu.Unlock()
+		if dup {
+			p.deduped.Add(1)
+			return
+		}
 	}
 	p.queued.Add(1)
 	p.pending.Add(1)
@@ -160,9 +164,16 @@ func (p *branchPrefetcher) send(it prefetchItem) {
 	select {
 	case p.work <- it:
 	default:
-		p.dropped.Add(1)
-		p.done(1)
+		p.lose(it)
 	}
+}
+
+func (p *branchPrefetcher) lose(it prefetchItem) {
+	p.seenMu.Lock()
+	delete(p.seen, it)
+	p.seenMu.Unlock()
+	p.dropped.Add(1)
+	p.done(1)
 }
 
 func (p *branchPrefetcher) pause() {
@@ -253,15 +264,15 @@ func (p *branchPrefetcher) run() {
 }
 
 func (p *branchPrefetcher) chunk(it prefetchItem) {
-	n := 1
-	defer func() { p.done(n) }()
 	p.gate.RLock()
 	defer p.gate.RUnlock()
 	tx, err := p.db.BeginTemporalRo(p.ctx) //nolint:gocritic
 	if err != nil {
-		p.dropped.Add(1)
+		p.lose(it)
 		return
 	}
+	n := 1
+	defer func() { p.done(n) }()
 	defer tx.Rollback()
 	n = p.walkChunk(it, func(key []byte) []byte {
 		if data, _, ok := p.get(key); ok {
@@ -276,6 +287,7 @@ func (p *branchPrefetcher) chunk(it prefetchItem) {
 }
 
 func (p *branchPrefetcher) follow() {
+	p.dedupe = true
 	p.feed.Go(func() {
 		forward := func(batch []commitmentdb.PathTouch) {
 			p.followed.Add(uint64(len(batch)))
@@ -286,18 +298,14 @@ func (p *branchPrefetcher) follow() {
 		republished := time.NewTicker(time.Millisecond)
 		defer republished.Stop()
 		for {
-			var batches chan []commitmentdb.PathTouch
-			if t := commitmentdb.PreExecTouchesFor(p.blockNum, p.parentHash); t != nil {
-				batches = t.C
-			}
 			select {
-			case batch := <-batches:
+			case batch := <-p.published():
 				forward(batch)
 			case <-republished.C:
 			case <-p.stop:
 				for {
 					select {
-					case batch := <-batches:
+					case batch := <-p.published():
 						forward(batch)
 					default:
 						return
@@ -308,8 +316,17 @@ func (p *branchPrefetcher) follow() {
 	})
 }
 
+func (p *branchPrefetcher) published() chan []commitmentdb.PathTouch {
+	t := commitmentdb.PreExecTouchesFor(p.blockNum, p.parentHash)
+	if t == nil {
+		return nil
+	}
+	p.touches.Store(t)
+	return t.C
+}
+
 func (p *branchPrefetcher) preExecLost() (droppedPaths int64, unreadBatches int) {
-	if t := commitmentdb.PreExecTouchesFor(p.blockNum, p.parentHash); t != nil {
+	if t := p.touches.Load(); t != nil {
 		return t.Dropped.Load(), len(t.C)
 	}
 	return 0, 0
@@ -323,6 +340,8 @@ func (p *branchPrefetcher) stopFollow() {
 func (p *branchPrefetcher) drainSorted() {
 	start := time.Now()
 	defer func() { p.drainWait.Store(int64(time.Since(start))) }()
+	limit := time.NewTimer(branchPrefetchDrainMax)
+	defer limit.Stop()
 	p.backlog.Store(int64(len(p.work)))
 	backlog := make([]prefetchItem, 0, len(p.work))
 collect:
@@ -356,8 +375,6 @@ collect:
 			}
 		})
 	}
-	limit := time.NewTimer(branchPrefetchDrainMax)
-	defer limit.Stop()
 	for p.pending.Load() != 0 {
 		select {
 		case <-p.idle:

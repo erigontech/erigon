@@ -926,7 +926,7 @@ func (cc *commitmentCalculator) finishPrefetch() {
 // path; the per-call differences live in m.
 
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
-	exec.StopPreExec(t.blockNum)
+	exec.StopPreExec(t.blockHash)
 	cc.finishPrefetch()
 	// The version map is the ledger: exec's writes already encode every EIP-161 /
 	// self-destruct removal, so emitTouched folds the block's touched keys straight

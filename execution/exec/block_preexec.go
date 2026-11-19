@@ -78,7 +78,7 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 			return err
 		}
 	}
-	ctx, untrack := trackPreExec(ctx, header.Number.Uint64())
+	ctx, untrack := trackPreExec(ctx, header.Hash())
 	defer untrack()
 	start := time.Now()
 	signer := types.MakeSigner(pe.config, header.Number.Uint64(), header.Time)
@@ -187,24 +187,31 @@ type commitmentToucher struct {
 }
 
 type preExecRun struct {
-	blockNum uint64
-	cancel   context.CancelFunc
+	block  common.Hash
+	cancel context.CancelFunc
 }
 
-var activePreExec atomic.Pointer[preExecRun]
+var (
+	activePreExec  atomic.Pointer[preExecRun]
+	stoppedPreExec atomic.Pointer[common.Hash]
+)
 
-func trackPreExec(ctx context.Context, blockNum uint64) (context.Context, func()) {
+func trackPreExec(ctx context.Context, block common.Hash) (context.Context, func()) {
 	ctx, cancel := context.WithCancel(ctx)
-	run := &preExecRun{blockNum: blockNum, cancel: cancel}
+	run := &preExecRun{block: block, cancel: cancel}
 	activePreExec.Store(run)
+	if stopped := stoppedPreExec.Load(); stopped != nil && *stopped == block {
+		cancel()
+	}
 	return ctx, func() {
 		activePreExec.CompareAndSwap(run, nil)
 		cancel()
 	}
 }
 
-func StopPreExec(blockNum uint64) {
-	if run := activePreExec.Load(); run != nil && run.blockNum == blockNum {
+func StopPreExec(block common.Hash) {
+	stoppedPreExec.Store(&block)
+	if run := activePreExec.Load(); run != nil && run.block == block {
 		run.cancel()
 	}
 }
