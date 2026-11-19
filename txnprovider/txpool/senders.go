@@ -47,16 +47,15 @@ type BySenderAndNonce struct {
 }
 
 func (b *BySenderAndNonce) nonce(senderID uint64) (nonce uint64, ok bool) {
-	s := b.search
-	s.TxnSlot.SenderID = senderID
-	s.TxnSlot.Nonce = math.MaxUint64
-	s.keyedNonce = false
-
-	b.tree.DescendLessOrEqual(s, func(mt *metaTxn) bool {
-		if mt.TxnSlot.SenderID == senderID {
-			nonce = mt.TxnSlot.Nonce
-			ok = true
+	lowerEntries := b.count(senderID)
+	b.descend(senderID, func(mt *metaTxn) bool {
+		lowerEntries--
+		// Account nonces sort before keyed nonces. An account nonce has no gap
+		// below it when its distance from the state nonce equals the number of lower entries.
+		if mt.keyedNonce || mt.nonceDistance != uint64(lowerEntries) {
+			return true
 		}
+		nonce, ok = mt.TxnSlot.Nonce, true
 		return false
 	})
 	return nonce, ok

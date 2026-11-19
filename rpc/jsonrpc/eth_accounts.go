@@ -105,7 +105,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 			reply.Nonce++
 			return (*hexutil.Uint64)(&reply.Nonce), nil
 		}
-		// txpool doesn't know about this address yet: fall through to DB lookup
+		// Use the state nonce when the pool has no transaction at that nonce.
 	}
 	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
 	if err != nil {

@@ -955,36 +955,34 @@ func TestNonceFromAddress(t *testing.T) {
 	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 
-	{
+	add := func(nonces ...uint64) {
+		t.Helper()
 		var txnSlots TxnSlots
-		txnSlot1 := newTestTxnSlot(3, 0, 300000, 300000, 100000)
-		txnSlot1.IDHash[0] = 1
-		txnSlots.Append(txnSlot1, addr[:], true)
-
+		for _, nonce := range nonces {
+			slot := newTestTxnSlot(nonce, 0, 300000, 300000, 100000)
+			slot.IDHash = slot.Txn.Hash()
+			txnSlots.Append(slot, addr[:], true)
+		}
 		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(err)
 		for _, reason := range reasons {
-			assert.Equal(txpoolcfg.Success, reason, reason.String())
+			require.Equal(txpoolcfg.Success, reason)
 		}
 	}
+	add(3, 4, 6)
+	_, ok := pool.NonceFromAddress(addr)
+	assert.False(ok)
 
-	{
-		txnSlots := TxnSlots{}
-		txnSlot2 := newTestTxnSlot(4, 0, 300000, 300000, 100000)
-		txnSlot2.IDHash[0] = 2
-		txnSlot3 := newTestTxnSlot(6, 0, 300000, 300000, 100000)
-		txnSlot3.IDHash[0] = 3
-		txnSlots.Append(txnSlot2, addr[:], true)
-		txnSlots.Append(txnSlot3, addr[:], true)
-		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
-		require.NoError(err)
-		for _, reason := range reasons {
-			assert.Equal(txpoolcfg.Success, reason, reason.String())
-		}
-		nonce, ok := pool.NonceFromAddress(addr)
-		assert.True(ok)
-		assert.Equal(uint64(6), nonce)
-	}
+	add(2)
+	nonce, ok := pool.NonceFromAddress(addr)
+	assert.True(ok)
+	assert.Equal(uint64(4), nonce)
+
+	add(5)
+	nonce, ok = pool.NonceFromAddress(addr)
+	assert.True(ok)
+	assert.Equal(uint64(6), nonce)
+
 	// test too expensive tx
 	{
 		var txnSlots TxnSlots
@@ -1325,10 +1323,11 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
 
+	originalHash := common.Hash{1}
 	{
 		var txnSlots TxnSlots
 		txnSlot := newTestTxnSlot(3, 0, 300000, 3000000, 100000)
-		txnSlot.IDHash[0] = 1
+		txnSlot.IDHash = originalHash
 		txnSlots.Append(txnSlot, addr[:], true)
 
 		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
@@ -1348,9 +1347,8 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.NotReplaced, reason, reason.String())
 		}
-		nonce, ok := pool.NonceFromAddress(addr)
-		assert.True(ok)
-		assert.Equal(uint64(3), nonce)
+		assert.Contains(pool.byHash, string(originalHash[:]))
+		assert.NotContains(pool.byHash, string(txnSlot.IDHash[:]))
 	}
 	// Bumped only tip, transaction not accepted
 	{
@@ -1363,9 +1361,8 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.NotReplaced, reason, reason.String())
 		}
-		nonce, ok := pool.NonceFromAddress(addr)
-		assert.True(ok)
-		assert.Equal(uint64(3), nonce)
+		assert.Contains(pool.byHash, string(originalHash[:]))
+		assert.NotContains(pool.byHash, string(txnSlot.IDHash[:]))
 	}
 	// Bumped both tip and feeCap by 10%, txn accepted
 	{
@@ -1378,9 +1375,8 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		for _, reason := range reasons {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
-		nonce, ok := pool.NonceFromAddress(addr)
-		assert.True(ok)
-		assert.Equal(uint64(3), nonce)
+		assert.NotContains(pool.byHash, string(originalHash[:]))
+		assert.Contains(pool.byHash, string(txnSlot.IDHash[:]))
 	}
 }
 
