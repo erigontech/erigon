@@ -122,6 +122,8 @@ func (ac *aggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorAggFi
 }
 
 func (ac *aggDirtyFilesRoTx) dropCovered(mf *MissedAccessorAggFiles) {
+	ac.agg.dirtyFilesLock.Lock()
+	defer ac.agg.dirtyFilesLock.Unlock()
 	drop := func(missed MissedFilesMap, all []*FilesItem, l statecfg.Accessors) {
 		for acc := range missed {
 			missed[acc] = dropCoveredAccessors(missed[acc], all, l)

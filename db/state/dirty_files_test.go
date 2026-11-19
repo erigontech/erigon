@@ -86,6 +86,9 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 	df.Set(f1)
 	df.Set(f2)
 	df.Set(f3)
+	retired := newFilesItem(41, 50)
+	retired.canDelete.Store(true)
+	df.Set(retired)
 
 	accessorFor := func(fromStep, toStep kv.Step) []string {
 		return []string{
@@ -107,7 +110,15 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 		t.Cleanup(func() { _ = dir.RemoveFile(f) })
 	}
 
-	fileItems := fileItemsWithMissedAccessors(df.Items(), aggStep, accessorFor)
+	dl := readDirNames(tmp)
+	fileItems := fileItemsWithMissedAccessors(df.Items(), aggStep, statecfg.AccessorHashMap, func(from, to kv.Step) bool {
+		for _, path := range accessorFor(from, to) {
+			if !dl[filepath.Base(path)] {
+				return false
+			}
+		}
+		return true
+	})
 	require.Len(t, fileItems, 1)
 	require.Equal(t, f3, fileItems[0])
 }
@@ -130,7 +141,7 @@ func TestOpenDirtyFileHelpersLogInvalidMask(t *testing.T) {
 		{
 			name: "data",
 			open: func(t *testing.T, logger log.Logger) {
-				require.False(t, openDirtyDataFile(&FilesItem{}, mask, dirEntries, t.TempDir(), version.Versions{}, "test", logger))
+				require.False(t, newDirtyFiles().openDirtyDataFile(&FilesItem{}, mask, dirEntries, t.TempDir(), version.Versions{}, "test", logger))
 			},
 		},
 		{
@@ -159,7 +170,7 @@ func TestOpenDirtyDataFileDoesNotLogNonCorruptionOpenError(t *testing.T) {
 	fileName := "v1.0-accounts.0-1.kv"
 	versions := version.Versions{Current: version.V1_0, MinSupported: version.V1_0}
 
-	require.False(t, openDirtyDataFile(&FilesItem{}, "*-accounts.0-1.kv", []string{fileName}, t.TempDir(), versions, "test", logger))
+	require.False(t, newDirtyFiles().openDirtyDataFile(&FilesItem{}, "*-accounts.0-1.kv", []string{fileName}, t.TempDir(), versions, "test", logger))
 	require.Empty(t, output.String())
 }
 
