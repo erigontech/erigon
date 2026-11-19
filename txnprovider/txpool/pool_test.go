@@ -416,6 +416,32 @@ func TestAddLocalTxnsAllowsDelegatedSenderReplacement(t *testing.T) {
 	require.Contains(t, pool.byHash, string(replacement.IDHash[:]))
 }
 
+func TestUnwindKeepsExecutableDelegatedTransaction(t *testing.T) {
+	codeHash := testDelegationCodeHash()
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, codeHash)
+	require.NoError(t, pool.start(ctx))
+	block := func(height byte, nonce uint64, direction remoteproto.Direction) *remoteproto.StateChangeBatch {
+		change := newBlockChangeForAccounts(common.Hash{height}, nonce, sender)
+		change.ChangeBatch[0].BlockHeight = uint64(height)
+		change.ChangeBatch[0].Direction = direction
+		account := accounts.Account{Nonce: nonce, Balance: *uint256.NewInt(common.Ether), CodeHash: codeHash}
+		change.ChangeBatch[0].Changes[0].Data = accounts.SerialiseV3(&account)
+		return change
+	}
+
+	var mined, next TxnSlots
+	mined.Append(newTestSenderTxnSlot(sender, 0), sender[:], false)
+	next.Append(newTestSenderTxnSlot(sender, 1), sender[:], false)
+	require.NoError(t, pool.OnNewBlock(ctx, block(1, 1, remoteproto.Direction_FORWARD), TxnSlots{}, TxnSlots{}, mined))
+	pool.AddRemoteTxns(ctx, next, nil, nil)
+	require.NoError(t, pool.processRemoteTxns(ctx))
+	require.Equal(t, []uint64{1}, providedNonces(t, ctx, pool))
+
+	require.NoError(t, pool.OnNewBlock(ctx, block(0, 0, remoteproto.Direction_UNWIND), mined, TxnSlots{}, TxnSlots{}))
+	require.Equal(t, []uint64{0}, providedNonces(t, ctx, pool))
+	require.NotContains(t, pool.byHash, string(next.Txns[0].IDHash[:]))
+}
+
 func TestOnNewBlockLimitsNewlyDelegatedSender(t *testing.T) {
 	ctx, pool, _, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 

@@ -1432,14 +1432,17 @@ func (p *TxPool) validateTxWithCells(txn *TxnSlot, isLocal bool, stateCache kvca
 		}
 		return txpoolcfg.InsufficientFunds, nil
 	}
-	if !senderCodeHash.IsEmpty() {
-		if existing := p.all.get(txn.SenderID, txn.Nonce); existing == nil {
+	if !senderCodeHash.IsEmpty() && p.all.get(txn.SenderID, txn.Nonce) == nil {
+		if txn.Nonce != senderNonce {
 			if p.all.hasTxns(txn.SenderID) {
 				return txpoolcfg.DelegatedTxnLimit, nil
 			}
-			if txn.Nonce != senderNonce {
-				return txpoolcfg.DelegatedNonceGap, nil
-			}
+			return txpoolcfg.DelegatedNonceGap, nil
+		}
+		// A reorg can leave the old account nonce in the pool until the sender is
+		// refreshed. A keyed frame has its own nonce, and a parked frame awaits validation.
+		if frame := p.all.senderIDFrameTxn[txn.SenderID]; frame != nil && (frame.keyedNonce || frame.currentSubPool == 0) {
+			return txpoolcfg.DelegatedTxnLimit, nil
 		}
 	}
 	if txn.HasBlobs() {
