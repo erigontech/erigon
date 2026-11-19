@@ -613,6 +613,11 @@ func signedByteSizeHR(n int64) string {
 // opts.Continue set, complete shards from a prior interrupted run are
 // preserved and skipped in Phase 1 (see preflightResume).
 func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts ConvertOpts, logger log.Logger) error {
+	if !opts.TargetV3 {
+		if err := refuseV3CommitmentFiles(at.Dirs()); err != nil {
+			return err
+		}
+	}
 	if opts.Continue {
 		logger.Warn("[commitment_convert] --continue: assumes prior interrupted run used the SAME --squeeze and --nibbles.v2 values. Mismatch will produce mixed-encoding output silently.")
 	}
@@ -1005,6 +1010,21 @@ func forEachCommitmentDataFile(dirPath string, fn func(name string, major uint64
 			continue
 		}
 		if err := fn(entry.Name(), info.Version.Major); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func refuseV3CommitmentFiles(dirs datadir.Dirs) error {
+	for _, dirPath := range []string{dirs.SnapDomain, dirs.SnapHistory} {
+		err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
+			if major >= 3 {
+				return fmt.Errorf("[commitment_convert] --squeeze and --nibbles.v2 apply to legacy commitment files only; %s is v3", filepath.Join(dirPath, name))
+			}
+			return nil
+		})
+		if err != nil {
 			return err
 		}
 	}
