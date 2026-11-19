@@ -29,14 +29,12 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 type ContractCreatorData struct {
-	Tx              common.Hash    `json:"hash"`
-	Creator         common.Address `json:"creator"`
-	create2InitCode *vm.Create2InitCode
+	Tx      common.Hash    `json:"hash"`
+	Creator common.Address `json:"creator"`
 }
 
 func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common.Address) (*ContractCreatorData, error) {
@@ -218,8 +216,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		return nil, fmt.Errorf("contract creator not found for address %s", addr)
 	}
 	return &ContractCreatorData{
-		Tx:              tracer.Tx.Hash(),
-		Creator:         tracer.Creator.Value(),
-		create2InitCode: tracer.create2InitCode,
+		Tx:      tracer.Tx.Hash(),
+		Creator: tracer.Creator.Value(),
 	}, nil
 }

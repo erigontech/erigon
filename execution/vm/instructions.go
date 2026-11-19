@@ -1057,9 +1057,8 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		offset, size = o.Uint64(), sz.Uint64()
 		input        = scope.Memory.GetPtr(offset, size)
 	)
-	if scope.create.overridePending {
+	if scope.create.overridden {
 		input = scope.create.initCode
-		scope.create.initCode = nil
 	}
 	return execCreate(pc, evm, scope, value, input, nil)
 }
@@ -1084,8 +1083,7 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 		salt         = scope.Stack.popCopy()
 		input        = scope.create.initCode
 	)
-	scope.create.initCode = nil
-	if !evm.chainRules.IsAmsterdam && !scope.create.overridePending {
+	if !scope.create.ready {
 		input = scope.Memory.GetPtr(offset, size)
 	}
 	return execCreate(pc, evm, scope, endowment, input, &salt)
@@ -1102,15 +1100,15 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	var preparation createPreparation
 	var suberr error
 	switch {
-	case evm.chainRules.IsAmsterdam || scope.create.overridePending:
+	case scope.create.ready:
 		address = scope.create.address
 		codeAndHash.hash = scope.create.codeHash
 		preparation = scope.create.preparation
 		suberr = scope.create.err
-		if suberr != nil && scope.create.overridePending && evm.config.OnInitCodeOverrideError != nil {
+		if suberr != nil && evm.config.OnInitCodeOverrideError != nil {
 			evm.config.OnInitCodeOverrideError(address, suberr)
 		}
-		scope.create.overridePending = false
+		scope.create = createGasPreparation{}
 		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
 			return pc, nil, suberr
 		}

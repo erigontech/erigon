@@ -54,8 +54,8 @@ type Config struct {
 
 	// OverrideInitCode replaces constructor code for RPC replay after the deployment
 	// address is derived, so CREATE2 keeps the address of the original initcode.
-	// The EVM clears the original code hash because it keys the shared jump destination cache.
-	OverrideInitCode        func(address accounts.Address, initCode []byte) []byte
+	// A replacement must drop the original code hash, which keys the shared jump destination cache.
+	OverrideInitCode        func(address accounts.Address) (replacement []byte, matched bool)
 	OriginalCreate2InitCode *Create2InitCode
 	// OnInitCodeOverrideError reports gas or preparation errors that prevent
 	// a nested creation from entering its constructor frame during replay.

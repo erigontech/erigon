@@ -405,12 +405,13 @@ func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 }
 
 type createGasPreparation struct {
-	initCode        []byte
-	address         accounts.Address
-	codeHash        accounts.CodeHash
-	preparation     createPreparation
-	err             error
-	overridePending bool
+	initCode    []byte
+	address     accounts.Address
+	codeHash    accounts.CodeHash
+	preparation createPreparation
+	err         error
+	ready       bool
+	overridden  bool
 }
 
 // Create2InitCode identifies the historical constructor even when CREATE2
@@ -432,7 +433,7 @@ func NewCreate2InitCode(input []byte) *Create2InitCode {
 
 func (evm *EVM) reportCreateError(scope *CallContext, op OpCode, err error) {
 	report := evm.config.OnInitCodeOverrideError
-	if scope.create.overridePending {
+	if scope.create.ready {
 		report(scope.create.address, err)
 		return
 	}
@@ -468,9 +469,9 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 		return gas, nil
 	}
 	prepared := &callContext.create
-	*prepared = createGasPreparation{overridePending: override != nil}
+	*prepared = createGasPreparation{ready: true}
 	caller := callContext.Contract.Address()
-	if create2 || override != nil {
+	if create2 {
 		offset := callContext.Stack.back(1).Uint64()
 		size := callContext.Stack.back(2).Uint64()
 		if size > 0 {
@@ -478,8 +479,6 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 			memory := callContext.Memory.Data()
 			copy(prepared.initCode, memory[min(offset, uint64(len(memory))):])
 		}
-	}
-	if create2 {
 		input := codeAndHash{code: prepared.initCode}
 		prepared.codeHash = input.Hash()
 		prepared.address = accounts.InternAddress(types.CreateAddress2(caller.Value(), callContext.Stack.back(3).Bytes32(), prepared.codeHash))
@@ -491,17 +490,21 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 		}
 		prepared.address = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
 	}
+	var replacement []byte
 	if override != nil {
-		prepared.initCode = override(prepared.address, prepared.initCode)
+		replacement, prepared.overridden = override(prepared.address)
+	}
+	if prepared.overridden {
+		prepared.initCode = replacement
 		prepared.codeHash = accounts.NilCodeHash
-		if err := CheckMaxInitCodeSize(uint64(len(prepared.initCode)), true, evm.chainRules.IsAmsterdam); err != nil {
+		if err := CheckMaxInitCodeSize(uint64(len(replacement)), true, evm.chainRules.IsAmsterdam); err != nil {
 			return mdgas.MdGasCost{}, err
 		}
 		// Memory and CREATE2 hashing still use the original input. Only the
 		// initcode-analysis charge follows the replacement.
 		gas.Execution -= params.InitCodeWordGas * ToWordSize(callContext.Stack.back(2).Uint64())
 		var overflow bool
-		gas.Execution, overflow = math.SafeAdd(gas.Execution, params.InitCodeWordGas*ToWordSize(uint64(len(prepared.initCode))))
+		gas.Execution, overflow = math.SafeAdd(gas.Execution, params.InitCodeWordGas*ToWordSize(uint64(len(replacement))))
 		if overflow {
 			return mdgas.MdGasCost{}, ErrGasUintOverflow
 		}

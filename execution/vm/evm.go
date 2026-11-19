@@ -678,8 +678,10 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 	gasRemaining = gas
 	// Metered nested creations already applied the override during gas calculation.
 	if override := evm.config.OverrideInitCode; override != nil && (preparation == nil || !evm.config.HasEip3860(evm.chainRules)) {
-		codeAndHash.code = override(address, codeAndHash.code)
-		codeAndHash.hash = accounts.NilCodeHash
+		if replacement, matched := override(address); matched {
+			codeAndHash.code = replacement
+			codeAndHash.hash = accounts.NilCodeHash
+		}
 	}
 
 	depth := evm.depth

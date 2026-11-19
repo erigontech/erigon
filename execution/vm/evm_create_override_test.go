@@ -49,12 +49,20 @@ func TestCreateInitCodeOverrideCodeHash(t *testing.T) {
 		{"Osaka", chain.TestChainOsakaConfig},
 		{"Amsterdam", chain.AllProtocolChanges},
 	} {
-		for _, op := range []vm.OpCode{vm.CREATE, vm.CREATE2} {
-			t.Run(fork.name+"/"+op.String(), func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			op    vm.OpCode
+			match bool
+		}{
+			{"CREATE", vm.CREATE, true},
+			{"CREATE2", vm.CREATE2, true},
+			{"sibling CREATE2", vm.CREATE2, false},
+		} {
+			t.Run(fork.name+"/"+tc.name, func(t *testing.T) {
 				hooks := &tracing.Hooks{}
-				evm, factory, target := createOverrideEVM(t, fork.config, op, original, vm.Config{
+				evm, factory, target := createOverrideEVM(t, fork.config, tc.op, original, vm.Config{
 					Tracer:           hooks,
-					OverrideInitCode: func(_ accounts.Address, _ []byte) []byte { return replacement },
+					OverrideInitCode: func(accounts.Address) ([]byte, bool) { return replacement, tc.match },
 				})
 				var executedHash common.Hash
 				var frameHash accounts.CodeHash
@@ -66,13 +74,17 @@ func TestCreateInitCodeOverrideCodeHash(t *testing.T) {
 				}
 				_, _, _, err := evm.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}, uint256.Int{}, false)
 				require.NoError(t, err)
-				require.Equal(t, crypto.Keccak256Hash(replacement), executedHash, "executed initcode")
-				if !frameHash.IsZero() {
+				wantInitCode, wantRuntime := original, []byte{0}
+				if tc.match {
+					wantInitCode, wantRuntime = replacement, []byte{0, 0}
+				}
+				require.Equal(t, crypto.Keccak256Hash(wantInitCode), executedHash, "executed initcode")
+				if !tc.match || !frameHash.IsZero() {
 					require.Equal(t, executedHash, frameHash.Value(), "constructor code hash")
 				}
 				code, err := evm.IntraBlockState().GetCode(target)
 				require.NoError(t, err)
-				require.Equal(t, []byte{0, 0}, code)
+				require.Equal(t, wantRuntime, code)
 			})
 		}
 	}
@@ -100,7 +112,7 @@ func TestCreateInitCodeOverrideSize(t *testing.T) {
 					replacement := make([]byte, size)
 					copy(replacement, initCode)
 					evm, factory, target := createOverrideEVM(t, fork.config, op, initCode, vm.Config{
-						OverrideInitCode: func(_ accounts.Address, _ []byte) []byte { return replacement },
+						OverrideInitCode: func(accounts.Address) ([]byte, bool) { return replacement, true },
 					})
 					result, _, _, err := evm.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}, uint256.Int{}, false)
 					if excess {
@@ -160,7 +172,7 @@ func TestCreateInitCodeOverrideGas(t *testing.T) {
 						}
 						vmConfig := vm.Config{Tracer: hooks}
 						if override {
-							vmConfig.OverrideInitCode = func(_ accounts.Address, _ []byte) []byte { return replacement }
+							vmConfig.OverrideInitCode = func(accounts.Address) ([]byte, bool) { return replacement, true }
 						}
 						evm, factory, target := createOverrideEVM(t, fork.config, op, initCode, vmConfig)
 						result, gas, _, err := evm.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}, uint256.Int{}, false)

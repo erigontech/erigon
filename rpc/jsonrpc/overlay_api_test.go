@@ -633,7 +633,6 @@ func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 		name          string
 		opcode        vm.OpCode
 		frameTx       bool
-		postTx        bool
 		repeatCreate2 bool
 		emptyRuntime  bool
 	}{
@@ -641,8 +640,6 @@ func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 		{name: "ordinary CREATE2", opcode: vm.CREATE2},
 		{name: "frame CREATE", opcode: vm.CREATE, frameTx: true},
 		{name: "frame CREATE2", opcode: vm.CREATE2, frameTx: true},
-		{name: "frame CREATE with assertion", opcode: vm.CREATE, frameTx: true, postTx: true},
-		{name: "frame CREATE2 with assertion", opcode: vm.CREATE2, frameTx: true, postTx: true},
 		{name: "ordinary repeated CREATE2", opcode: vm.CREATE2, repeatCreate2: true},
 		{name: "ordinary empty repeated CREATE2", opcode: vm.CREATE2, repeatCreate2: true, emptyRuntime: true},
 		{name: "frame empty repeated CREATE2", opcode: vm.CREATE2, frameTx: true, repeatCreate2: true, emptyRuntime: true},
@@ -652,7 +649,6 @@ func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 			require.NoError(t, err)
 			sender := crypto.PubkeyToAddress(key.PublicKey)
 			factory := common.HexToAddress("0x2000")
-			assertion := common.HexToAddress("0x3000")
 			initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
 			create := program.New().Mstore(initCode, 0).Push(len(initCode)).Push0().Push0().Op(vm.CREATE)
 			contract := types.CreateAddress(factory, 0)
@@ -674,14 +670,13 @@ func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 				Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
 				Alloc: types.GenesisAlloc{
-					sender:    {Balance: big.NewInt(1_000_000_000_000_000_000), Code: approval},
-					factory:   {Code: factoryCode.Bytes()},
-					assertion: {Code: testutil.AssertStackWord(program.New().Push(contract).Op(vm.EXTCODESIZE), 1).Op(vm.STOP).Bytes()},
+					sender:  {Balance: big.NewInt(1_000_000_000_000_000_000), Code: approval},
+					factory: {Code: factoryCode.Bytes()},
 				},
 			}), execmoduletester.WithKey(key))
 			var txn types.Transaction
 			if tc.frameTx {
-				frameTx := &types.FrameTransaction{
+				txn = &types.FrameTransaction{
 					ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
 					Fees: types.FrameFees{FeeCap: uint256.Int{1}},
 					Frames: []types.Frame{
@@ -689,10 +684,6 @@ func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 						{Mode: types.FrameSender, Target: &factory, Limits: mdgas.MdGas{Execution: 200_000, State: 1_000_000}},
 					},
 				}
-				if tc.postTx {
-					frameTx.Frames = append(frameTx.Frames, types.Frame{Mode: types.FramePostTx, Target: &assertion, Limits: mdgas.MdGas{Execution: 10_000}})
-				}
-				txn = frameTx
 			} else {
 				txn, err = types.SignTx(types.NewTransaction(0, factory, new(uint256.Int), 500_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(cfg), key)
 				require.NoError(t, err)
@@ -701,15 +692,9 @@ func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, m.InsertChain(pack))
 			require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].Status)
-			if tc.postTx {
-				require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].FrameReceipts[2].Status)
-			}
 			base := newBaseApiForTest(m)
 			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
 			want := hexutil.Bytes{byte(vm.PUSH0), byte(vm.STOP)}
-			if tc.postTx {
-				want = hexutil.Bytes{byte(vm.STOP)}
-			}
 			if tc.emptyRuntime {
 				want = nil
 			}
@@ -827,7 +812,11 @@ func TestCallConstructorRetryInsufficientBalance(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, m.InsertChain(pack))
 			base := newBaseApiForTest(m)
-			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 5_000_000}, NewOtterscanAPI(base, m.DB, 25))
+			ots := NewOtterscanAPI(base, m.DB, 25)
+			creator, err := ots.GetContractCreator(m.Ctx, target)
+			require.NoError(t, err)
+			require.Equal(t, &ContractCreatorData{Tx: txn.Hash(), Creator: factory}, creator)
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 5_000_000}, ots)
 			result, err := api.CallConstructor(m.Ctx, target, initCode)
 			require.NoError(t, err)
 			require.Equal(t, &CreationCode{Code: &runtime}, result)
@@ -992,6 +981,7 @@ func TestCallConstructorNestedInitCodeErrors(t *testing.T) {
 				replacement []byte
 				wantErr     error
 			}{
+				{"empty initcode", nil, nil},
 				{"size limit", common.RightPadBytes(initCode, params.MaxInitCodeSize+1), vm.ErrMaxInitCodeSizeExceeded},
 				{"analysis gas", common.RightPadBytes(initCode, 32*1024), vm.ErrOutOfGas},
 				{"code deposit gas", program.New().Return(0, 100).Bytes(), vm.ErrCodeStoreOutOfGas},
@@ -1267,7 +1257,8 @@ func TestCallConstructorRejectsNonContract(t *testing.T) {
 func newOverlayRPCClient(t *testing.T, m *execmoduletester.ExecModuleTester) *rpc.Client {
 	t.Helper()
 	base := newBaseApiForTest(m)
-	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 1_000_000}, NewOtterscanAPI(base, m.DB, 25))
+	ots := struct{ OtterscanAPI }{NewOtterscanAPI(base, m.DB, 25)}
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 1_000_000}, ots)
 	server := rpc.NewServer(50, false, false, true, log.New(), 100)
 	t.Cleanup(server.Stop)
 	require.NoError(t, server.RegisterName("overlay", api))

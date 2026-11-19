@@ -135,7 +135,11 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	defer func(start time.Time) { log.Trace("CallConstructor finished", "runtime", time.Since(start)) }(time.Now())
 
-	creationData, err := api.OtsAPI.GetContractCreator(ctx, address)
+	var originalCreate2InitCode *vm.Create2InitCode
+	lookupCtx := context.WithValue(ctx, create2InputHookKey{}, func(input []byte) {
+		originalCreate2InitCode = vm.NewCreate2InitCode(input)
+	})
+	creationData, err := api.OtsAPI.GetContractCreator(lookupCtx, address)
 	if err != nil {
 		return nil, err
 	}
@@ -257,13 +261,10 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), statedb: statedb}
 	evm = vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{
 		Tracer: ct.Tracer().Hooks,
-		OverrideInitCode: func(target accounts.Address, initCode []byte) []byte {
-			if target == ct.contractAddress {
-				return code
-			}
-			return initCode
+		OverrideInitCode: func(target accounts.Address) ([]byte, bool) {
+			return code, target == ct.contractAddress
 		},
-		OriginalCreate2InitCode: creationData.create2InitCode,
+		OriginalCreate2InitCode: originalCreate2InitCode,
 		OnInitCodeOverrideError: ct.onInitCodeOverrideError,
 	})
 
