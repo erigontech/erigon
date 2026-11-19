@@ -433,3 +433,11 @@ func TestFilterBadTransactionsReturnsOnlyNonceTooHighLeftovers(t *testing.T) {
 	require.Equal(t, []types.Transaction{tooHigh}, nonceTooHigh)
 	require.Equal(t, uint64(3), st.accounts[sender].Nonce)
 }
+
+func TestGetNextTransactionsWithoutTxnProviderYieldsNothing(t *testing.T) {
+	t.Parallel()
+
+	got := pollTxns(t, nil, newFundedState(), 50)
+
+	require.Empty(t, got)
+}

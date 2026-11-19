@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -65,6 +66,7 @@ func TestAccumulateTouchedPrefetchesFirstTouchPerBlock(t *testing.T) {
 // The BAL compute-ahead of a batch's first block skips the branch prefetch, as the
 // BAL blocks folded from tx results do.
 func TestComputeAhead_FirstBlockSkipsBranchPrefetch(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	defer func(balDriven, ignoreBAL, readAhead bool, workers int) {
 		dbg.BALDrivenCommitment, dbg.IgnoreBAL, dbg.ReadAhead, dbg.TrieBALWarmupers = balDriven, ignoreBAL, readAhead, workers
 	}(dbg.BALDrivenCommitment, dbg.IgnoreBAL, dbg.ReadAhead, dbg.TrieBALWarmupers)
@@ -94,6 +96,7 @@ func TestComputeAhead_FirstBlockSkipsBranchPrefetch(t *testing.T) {
 }
 
 func TestCalculatorRootUnchangedByBranchPrefetch(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	ctx := context.Background()
 	logger := log.New()
 	logger.SetHandler(log.DiscardHandler())

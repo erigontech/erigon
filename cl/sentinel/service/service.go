@@ -22,12 +22,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/libp2p/go-libp2p/core/peer"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel"
@@ -90,6 +92,31 @@ func (s *SentinelServer) releaseStream(key peerStream) {
 	}
 }
 
+var maxBulkResponse = int64(httpreqresp.MaxResponseBodySize(communication.BeaconBlocksByRangeProtocolV2, math.MaxUint64))
+
+// These bound the reservations of running requests, not the response memory, which callers hold after the release.
+var (
+	bulkResponseBudget  = semaphore.NewWeighted(2 * maxBulkResponse)
+	smallResponseBudget = semaphore.NewWeighted(maxBulkResponse)
+)
+
+// responseBudget keeps small requests apart from bulk ones, because one queued bulk waiter blocks every later Acquire.
+func responseBudget(weight int64) *semaphore.Weighted {
+	if weight >= maxBulkResponse/2 {
+		return bulkResponseBudget
+	}
+	return smallResponseBudget
+}
+
+// responseBodyWeight is the largest response cap among the topic's comma-separated alternatives, as the peer picks one.
+func responseBodyWeight(topic string, maxBytes uint64) int64 {
+	var weight uint64
+	for alt := range strings.SplitSeq(topic, ",") {
+		weight = max(weight, httpreqresp.MaxResponseBodySize(strings.TrimSpace(alt), maxBytes))
+	}
+	return int64(weight)
+}
+
 type peerRequestBackend interface {
 	GetPeersCount() (active int, connected int, disconnected int)
 	Config() *sentinel.SentinelConfig
@@ -146,20 +173,18 @@ func (s *SentinelServer) BanPeerForInvalidData(_ context.Context, p *sentinelpro
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
-func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelproto.GossipData) (*sentinelproto.EmptyMessage, error) {
-	panic("do not call this")
-}
-
-func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, stream sentinelproto.Sentinel_SubscribeGossipServer) error {
-	panic("do not call this")
-}
-
 func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
 	protocolID, _, _ := strings.Cut(req.Topic, ",")
 	requestType := strings.TrimSpace(protocolID)
 	if rest, ok := strings.CutPrefix(requestType, communication.ProtocolPrefix+"/"); ok {
 		requestType, _, _ = strings.Cut(rest, "/")
 	}
+	weight := responseBodyWeight(req.Topic, req.MaxResponseBytes)
+	budget := responseBudget(weight)
+	if err := budget.Acquire(ctx, weight); err != nil {
+		return nil, err
+	}
+	defer budget.Release(weight)
 	stream := peerStream{pid: pid, requestType: requestType}
 	if !s.claimStream(stream) {
 		return nil, ErrPeerBusy
@@ -370,8 +395,4 @@ func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelproto.PeersIn
 		filtered.Peers = append(filtered.Peers, peer)
 	}
 	return filtered, nil
-}
-
-func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelproto.RequestSubscribeExpiry) (*sentinelproto.EmptyMessage, error) {
-	panic("do not call this")
 }

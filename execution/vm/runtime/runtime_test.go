@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"fmt"
 	"math/big"
-	"os"
 	"strings"
 	"testing"
 	"unsafe"
@@ -631,7 +630,7 @@ func TestEip2929Cases(t *testing.T) {
 		id++
 		cfg := &Config{
 			EVMConfig: vm.Config{
-				Tracer:    logger.NewMarkdownLogger(nil, os.Stdout).Hooks(),
+				Tracer:    logger.NewStructLogger(nil).Hooks(),
 				ExtraEips: []int{2929},
 			},
 		}
@@ -1241,4 +1240,73 @@ func TestExecuteReusedConfigStartsWithEmptyStorage(t *testing.T) {
 	ret, _, err := Execute(p.Return(0, 32).Bytes(), nil, cfg, t.TempDir())
 	require.NoError(t, err)
 	require.Zero(t, new(uint256.Int).SetBytes(ret).Uint64())
+}
+
+func TestExecuteReusedConfigStartsWithoutPreviousCode(t *testing.T) {
+	cfg := &Config{}
+	ret, _, err := Execute(program.New().Push(0x2a).Push(0).Op(vm.MSTORE8).Return(0, 1).Bytes(), nil, cfg, t.TempDir())
+	require.NoError(t, err)
+	defer cfg.State.Close()
+	require.Equal(t, []byte{0x2a}, ret)
+	ret, _, err = Execute(nil, nil, cfg, t.TempDir())
+	require.NoError(t, err)
+	require.Empty(t, ret)
+}
+
+func TestStateReadableAfterExecuteReturns(t *testing.T) {
+	absent := accounts.InternAddress(common.HexToAddress("0xbb"))
+	cfg := &Config{}
+	_, _, err := Execute(program.New().Push(absent.Value()).Op(vm.BALANCE, vm.POP).Bytes(), nil, cfg, t.TempDir())
+	require.NoError(t, err)
+	defer cfg.State.Close()
+	val, err := cfg.State.GetState(absent, accounts.StorageKey{})
+	require.NoError(t, err)
+	require.True(t, val.IsZero())
+	_, err = cfg.State.FinalizedWrites(NewEnv(cfg).ChainRules())
+	require.NoError(t, err)
+}
+
+func TestStateReadableAfterCreateReturns(t *testing.T) {
+	absent := accounts.InternAddress(common.HexToAddress("0xbb"))
+	cfg := &Config{}
+	_, _, _, err := Create(program.New().Push(absent.Value()).Op(vm.BALANCE, vm.POP).Bytes(), cfg)
+	require.NoError(t, err)
+	defer cfg.State.Close()
+	val, err := cfg.State.GetState(absent, accounts.StorageKey{})
+	require.NoError(t, err)
+	require.True(t, val.IsZero())
+}
+
+type storageRecorder struct {
+	*state.NoopWriter
+	values map[common.Hash]uint256.Int
+}
+
+func (w *storageRecorder) WriteAccountStorage(_ accounts.Address, _ uint64, key accounts.StorageKey, _, value uint256.Int) error {
+	w.values[key.Value()] = value
+	return nil
+}
+
+func TestExecuteStorageReachesWriterOnCommit(t *testing.T) {
+	cfg := &Config{}
+	_, _, err := Execute(program.New().Sstore(0, 9).Bytes(), nil, cfg, t.TempDir())
+	require.NoError(t, err)
+	defer cfg.State.Close()
+	w := &storageRecorder{NoopWriter: state.NewNoopWriter(), values: map[common.Hash]uint256.Int{}}
+	rules := NewEnv(cfg).ChainRules()
+	require.NoError(t, cfg.State.FinalizeTx(rules, w))
+	require.NoError(t, cfg.State.CommitBlock(rules, w))
+	require.Equal(t, map[common.Hash]uint256.Int{{}: *uint256.NewInt(9)}, w.values)
+}
+
+func TestExecuteKeepsCallerTxIndexOnFirstRun(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, sd := temporaltest.NewTestTxSD(t, db)
+	ibs := state.NewWithVersionMap(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetTxContext(42, 7)
+	_, _, err := Execute(program.New().Push(0).Push(0).Op(vm.LOG0).Bytes(), nil, &Config{State: ibs}, t.TempDir())
+	require.NoError(t, err)
+	require.Equal(t, 7, ibs.TxnIndex())
+	require.Len(t, ibs.GetRawLogs(7), 1)
 }

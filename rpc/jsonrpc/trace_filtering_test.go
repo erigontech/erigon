@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -116,18 +117,20 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 	cachedWriter := state.NewCachedWriter(noop, sc)
 	ibs := state.New(cachedReader)
 	defer ibs.Close()
+	transactions.VersionedBlockState(ibs)
+	ibs.SetTxContext(block.NumberU64(), -1)
 
 	logger := log.New("component", "trace_filtering_test")
 	consensusHeaderReader := consensuschain.NewReader(cfg, tx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader,
 		block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	require.NoError(t, err)
-	err = ibs.CommitBlock(rules, cachedWriter)
+	err = ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter)
 	require.NoError(t, err)
 
 	// Parallel path — creates its own MDBX read transactions per worker; does
 	// not modify stateReader/ibs, so it is safe to call first.
-	parallelResults, err := api.doCallBlockParallel(ctx, tx, baseTxNum, txs, msgs, callParams, header, false, nil)
+	parallelResults, err := api.doCallBlockParallel(ctx, tx, baseTxNum, txs, msgs, callParams, header, nil)
 	require.NoError(t, err)
 	require.Len(t, parallelResults, len(txs))
 	for _, tc := range []struct {
@@ -141,7 +144,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			api.kv = historyFloorDB{TemporalRoDB: m.DB, startTxNum: tc.startTxNum}
 			defer func() { api.kv = m.DB }()
-			_, err := api.doCallBlockParallel(ctx, tx, baseTxNum, txs, msgs, callParams, header, false, nil)
+			_, err := api.doCallBlockParallel(ctx, tx, baseTxNum, txs, msgs, callParams, header, nil)
 			if tc.pruned {
 				require.ErrorIs(t, err, state.ErrPruned)
 				require.Contains(t, err.Error(), fmt.Sprintf("requested block %d", blockNum))
@@ -153,7 +156,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 
 	// Sequential path — uses the stateReader/ibs prepared above.
 	sequentialResults, _, err := api.doCallBlock(ctx, tx, stateReader, sc, cachedWriter, ibs, txs, msgs,
-		callParams, header, parentNrOrHash.RequireCanonical, false, true /* advanceTxNum */, false /* noBaseFee */, nil, nil)
+		callParams, header, parentNrOrHash.RequireCanonical, true /* advanceTxNum */, false /* noBaseFee */, nil, nil)
 	require.NoError(t, err)
 	require.Len(t, sequentialResults, len(txs))
 
@@ -195,7 +198,7 @@ func TestCallTransactionNilTxnReturnsError(t *testing.T) {
 	// finds the body but no matching entry in kv.EthTx and returns ok=false.
 	unresolvedTxIndex := len(block.Transactions()) + 1_000_000
 
-	_, err = api.callTransaction(ctx, tx, block.Header(), []string{TraceTypeTrace}, unresolvedTxIndex, false, chainConfig, nil)
+	_, err = api.callTransaction(ctx, tx, block.Header(), []string{TraceTypeTrace}, unresolvedTxIndex, chainConfig, nil)
 	require.Error(t, err)
 }
 
@@ -253,7 +256,7 @@ func TestBlockWithdrawalTraceEntries(t *testing.T) {
 	api := newTraceApiForTest(m)
 	n := rpc.BlockNumber(blk.NumberU64())
 
-	traces, err := api.Block(context.Background(), n, new(bool), traceConfigWithWithdrawals())
+	traces, err := api.Block(context.Background(), n, traceConfigWithWithdrawals())
 	require.NoError(t, err)
 	require.NotNil(t, traces)
 
@@ -298,7 +301,7 @@ func TestBlockWithdrawalNoEntriesWithoutFlag(t *testing.T) {
 	api := newTraceApiForTest(m)
 	n := rpc.BlockNumber(blk.NumberU64())
 
-	traces, err := api.Block(context.Background(), n, new(bool), nil)
+	traces, err := api.Block(context.Background(), n, nil)
 	require.NoError(t, err)
 	assertNoWithdrawalTraces(t, traces)
 }
@@ -312,7 +315,7 @@ func TestBlockWithdrawalNoEntriesPreShanghai(t *testing.T) {
 
 	// Block 1 is pre-Shanghai on the default test chain.
 	n := rpc.BlockNumber(1)
-	traces, err := api.Block(context.Background(), n, new(bool), nil)
+	traces, err := api.Block(context.Background(), n, nil)
 	require.NoError(t, err)
 	assertNoWithdrawalTraces(t, traces)
 }
@@ -329,7 +332,7 @@ func TestReplayBlockTransactionsWithdrawalStateDiff(t *testing.T) {
 
 	n := rpc.BlockNumber(blk.NumberU64())
 	bnOrHash := rpc.BlockNumberOrHash{BlockNumber: &n}
-	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, new(bool), traceConfigWithWithdrawals())
+	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, traceConfigWithWithdrawals())
 	require.NoError(t, err)
 	require.NotEmpty(t, results)
 
@@ -384,7 +387,7 @@ func TestReplayBlockTransactionsMultiWithdrawalSameAddr(t *testing.T) {
 	api := newTraceApiForTest(m)
 	n := rpc.BlockNumber(blk.NumberU64())
 	bnOrHash := rpc.BlockNumberOrHash{BlockNumber: &n}
-	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, new(bool), traceConfigWithWithdrawals())
+	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, traceConfigWithWithdrawals())
 	require.NoError(t, err)
 	require.NotEmpty(t, results)
 
@@ -428,7 +431,7 @@ func TestReplayBlockTransactionsWithdrawalNewAddress(t *testing.T) {
 	api := newTraceApiForTest(m)
 	n := rpc.BlockNumber(generated.Blocks[0].NumberU64())
 	bnOrHash := rpc.BlockNumberOrHash{BlockNumber: &n}
-	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, new(bool), traceConfigWithWithdrawals())
+	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, traceConfigWithWithdrawals())
 	require.NoError(t, err)
 	require.NotEmpty(t, results)
 
@@ -473,7 +476,7 @@ func TestReplayBlockTransactionsMultiWithdrawalNewAddress(t *testing.T) {
 	api := newTraceApiForTest(m)
 	n := rpc.BlockNumber(generated.Blocks[0].NumberU64())
 	bnOrHash := rpc.BlockNumberOrHash{BlockNumber: &n}
-	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, new(bool), traceConfigWithWithdrawals())
+	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, traceConfigWithWithdrawals())
 	require.NoError(t, err)
 	require.NotEmpty(t, results)
 
@@ -505,7 +508,7 @@ func TestReplayBlockTransactionsWithdrawalNoEntriesWithoutFlag(t *testing.T) {
 	n := rpc.BlockNumber(blk.NumberU64())
 	bnOrHash := rpc.BlockNumberOrHash{BlockNumber: &n}
 
-	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, new(bool), nil)
+	results, err := api.ReplayBlockTransactions(context.Background(), bnOrHash, []string{"stateDiff"}, nil)
 	require.NoError(t, err)
 	internedAddr := internedAddress(withdrawalAddr.Hex())
 	for _, r := range results {
@@ -529,7 +532,7 @@ func TestTraceGetResolvesTraceAddressPath(t *testing.T) {
 	for _, path := range [][]int{{}, {0}, {1}, {0, 0}, {1, 0}} {
 		t.Run(fmt.Sprintf("found %v", path), func(t *testing.T) {
 			selector := common.SliceMap(path, func(level int) hexutil.Uint64 { return hexutil.Uint64(level) })
-			trace, err := api.Get(ctx, txHash, selector, nil, nil)
+			trace, err := api.Get(ctx, txHash, selector, nil)
 			require.NoError(t, err)
 			require.NotNil(t, trace)
 			require.Equal(t, path, trace.TraceAddress)
@@ -544,14 +547,14 @@ func TestTraceGetResolvesTraceAddressPath(t *testing.T) {
 		{1, math.MaxUint64},
 	} {
 		t.Run(fmt.Sprintf("null %v", selector), func(t *testing.T) {
-			trace, err := api.Get(ctx, txHash, selector, nil, nil)
+			trace, err := api.Get(ctx, txHash, selector, nil)
 			require.NoError(t, err)
 			require.Nil(t, trace)
 		})
 	}
 
 	t.Run("nil selector returns root", func(t *testing.T) {
-		trace, err := api.Get(ctx, txHash, nil, nil, nil)
+		trace, err := api.Get(ctx, txHash, nil, nil)
 		require.NoError(t, err)
 		require.NotNil(t, trace)
 		require.Empty(t, trace.TraceAddress)
@@ -562,7 +565,7 @@ func TestTraceGetUnknownTxReturnsNull(t *testing.T) {
 	m := rpcdaemontest.CreateTestExecModuleForTraces(t)
 	api := newTraceApiForTest(m)
 
-	trace, err := api.Get(context.Background(), common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"), []hexutil.Uint64{0}, nil, nil)
+	trace, err := api.Get(context.Background(), common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"), []hexutil.Uint64{0}, nil)
 	require.NoError(t, err)
 	require.Nil(t, trace)
 }
@@ -571,7 +574,7 @@ func TestParityTracesMarshalFastJSONMatchesReflection(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
 	for n := rpc.BlockNumber(1); n <= 10; n++ {
-		traces, err := api.Block(context.Background(), n, new(bool), &config.TraceConfig{})
+		traces, err := api.Block(context.Background(), n, &config.TraceConfig{})
 		require.NoError(t, err)
 		requireFastJSONMatchesReflection(t, fmt.Sprintf("block %d", n), traces)
 	}
@@ -636,12 +639,12 @@ func TestTraceRecordLocalizationMembers(t *testing.T) {
 	api := newTraceApiForTest(m)
 	n := rpc.BlockNumber(1)
 
-	block, err := api.Block(m.Ctx, n, new(bool), nil)
+	block, err := api.Block(m.Ctx, n, nil)
 	require.NoError(t, err)
 	blockJSON, err := jsonstream.Marshal(block)
 	require.NoError(t, err)
 	filter := jsonstream.New(nil)
-	require.NoError(t, api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &n, ToBlock: &n}, new(bool), nil, filter))
+	require.NoError(t, api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &n, ToBlock: &n}, nil, filter))
 
 	for name, encoded := range map[string][]byte{"trace_block": blockJSON, "trace_filter": filter.Buffer()} {
 		var records []map[string]json.RawMessage
@@ -660,7 +663,7 @@ func TestTraceRecordLocalizationMembers(t *testing.T) {
 		require.Positive(t, rewards, name)
 	}
 
-	replay, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithNumber(n), []string{TraceTypeTrace}, new(bool), nil)
+	replay, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithNumber(n), []string{TraceTypeTrace}, nil)
 	require.NoError(t, err)
 	replayJSON, err := json.Marshal(replay)
 	require.NoError(t, err)

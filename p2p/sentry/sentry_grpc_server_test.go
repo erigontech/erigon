@@ -1727,3 +1727,81 @@ func TestPeerInfo_AsyncAfterRemoveReleasesBytes(t *testing.T) {
 	}
 	require.Eventually(t, func() bool { return pi.queuedBytes.Load() == 0 }, time.Second, 5*time.Millisecond)
 }
+
+func TestRunPeer_InvalidMessageCodeKicksPeer(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		version uint
+		code    uint64
+	}{
+		{name: "unassigned code on eth/68", version: direct.ETH68, code: 0x0b},
+		{name: "NewBlock on eth/69", version: direct.ETH69, code: eth.NewBlockMsg},
+		{name: "NewBlockHashes on eth/69", version: direct.ETH69, code: eth.NewBlockHashesMsg},
+		{name: "NewBlock on eth/71", version: direct.ETH71, code: eth.NewBlockMsg},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			peerInfo, peerID := newTestPeerInfoWithEth(t)
+			rw := NewRLPReadWriter()
+			t.Cleanup(rw.Close)
+
+			sendCh := make(chan struct{}, 1)
+			send := func(msgId sentryproto.MessageId, peerID [64]byte, b []byte) { sendCh <- struct{}{} }
+			hasSubscribers := func(msgId sentryproto.MessageId) bool { return true }
+
+			payload := []byte{0xc0}
+			rw.readCh <- p2p.Msg{
+				Code:    tt.code,
+				Size:    uint32(len(payload)),
+				Payload: io.NopCloser(bytes.NewReader(payload)),
+			}
+
+			peerCap := p2p.Cap{Name: eth.ProtocolName, Version: tt.version}
+			errCh := make(chan *p2p.PeerError, 1)
+			go func() {
+				errCh <- runPeer(t.Context(), peerID, peerCap, rw, peerInfo, send, hasSubscribers, log.Root())
+			}()
+
+			select {
+			case peerErr := <-errCh:
+				require.NotNil(t, peerErr)
+				assert.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
+			case <-time.After(5 * time.Second):
+				t.Fatal("runPeer did not disconnect the peer")
+			}
+
+			select {
+			case <-sendCh:
+				t.Fatal("message with an invalid code must not be forwarded to subscribers")
+			default:
+			}
+		})
+	}
+}
+
+func TestRunPeer_EveryAssignedCodeIsHandled(t *testing.T) {
+	t.Parallel()
+	for version, codes := range eth.ToProto {
+		for code := range codes {
+			if code == eth.StatusMsg || (version >= direct.ETH69 && (code == eth.NewBlockMsg || code == eth.NewBlockHashesMsg)) {
+				continue
+			}
+			t.Run(fmt.Sprintf("eth%d/0x%02x", version, code), func(t *testing.T) {
+				t.Parallel()
+				peerInfo, peerID := newTestPeerInfoWithEth(t)
+				rw := NewMockMsgReadWriter()
+				require.NoError(t, rw.WriteMsg(p2p.Msg{Code: code, Size: 1, Payload: bytes.NewReader([]byte{0xc0})}))
+				rw.WriteToReadBuffer(rw.ReadAllWritten())
+				peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: version}, rw, peerInfo,
+					func(sentryproto.MessageId, [64]byte, []byte) {}, func(sentryproto.MessageId) bool { return false }, log.Root())
+				require.NotNil(t, peerErr)
+				require.Equal(t, p2p.PeerErrorMessageReceive, peerErr.Code, peerErr.Error())
+				require.ErrorIs(t, peerErr.Err, io.EOF)
+			})
+		}
+	}
+}

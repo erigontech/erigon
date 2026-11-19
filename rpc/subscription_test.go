@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"runtime"
@@ -30,6 +31,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -632,4 +635,22 @@ func TestSubscriptionLimitFreesSlotOfFailedSubscribeWithinBatch(t *testing.T) {
 	if answers[1].Error != nil {
 		t.Fatalf("subscription after a failed one in the same batch rejected: %v", answers[1].Error)
 	}
+}
+
+type failingWriter struct {
+	discardWriter
+	err error
+}
+
+func (w failingWriter) WriteJSON(context.Context, any) error { return w.err }
+
+func TestFailedActivateStopsBuffering(t *testing.T) {
+	t.Parallel()
+	want := errors.New("write timeout")
+	n := &RemoteNotifier{h: &handler{conn: failingWriter{err: want}}, prefix: notificationPrefix("eth", "0x9a"), sub: &Subscription{ID: "0x9a"}}
+
+	require.NoError(t, n.Notify("0x9a", "before activation"))
+	require.ErrorIs(t, n.activate(), want)
+	require.ErrorIs(t, n.Notify("0x9a", "after the failed flush"), want)
+	require.Empty(t, n.buffer)
 }

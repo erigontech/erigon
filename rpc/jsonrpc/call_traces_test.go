@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 func blockNumbersFromTraces(t *testing.T, b []byte) []int {
@@ -64,6 +65,40 @@ func blockNumbersFromTraces(t *testing.T, b []byte) []int {
 		numbers = append(numbers, bn)
 	}
 	return numbers
+}
+
+func TestHistoricalTraceSettingsPosition(t *testing.T) {
+	m := execmoduletester.New(t)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	for _, tc := range []struct {
+		method string
+		args   []any
+	}{
+		{"trace_replayTransaction", []any{common.Hash{1}, []string{TraceTypeTrace}}},
+		{"trace_replayBlockTransactions", []any{"0x0", []string{TraceTypeTrace}}},
+		{"trace_transaction", []any{common.Hash{1}}},
+		{"trace_get", []any{common.Hash{1}, []string{"0x0"}}},
+		{"trace_block", []any{"0x0"}},
+		{"trace_filter", []any{map[string]any{"fromBlock": "0x0", "toBlock": "0x0"}}},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			t.Run("settings", func(t *testing.T) {
+				var result json.RawMessage
+				require.NoError(t, client.CallContext(t.Context(), &result, tc.method, append(tc.args, &config.TraceConfig{})...))
+			})
+			t.Run("reject bailout", func(t *testing.T) {
+				var result json.RawMessage
+				err := client.CallContext(t.Context(), &result, tc.method, append(tc.args, true)...)
+				var rpcErr rpc.Error
+				require.ErrorAs(t, err, &rpcErr)
+				require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+			})
+		})
+	}
 }
 
 func TestCallTraceOneByOne(t *testing.T) {
@@ -94,7 +129,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 		ToBlock:   &toBlock,
 		ToAddress: []*common.Address{&toAddress1},
 	}
-	if err = api.Filter(context.Background(), traceReq1, new(bool), nil, stream); err != nil {
+	if err = api.Filter(context.Background(), traceReq1, nil, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
 	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
@@ -135,7 +170,7 @@ func TestCallTraceUnwind(t *testing.T) {
 		ToBlock:   &toBlock,
 		ToAddress: []*common.Address{&toAddress1},
 	}
-	if err = api.Filter(context.Background(), traceReq1, new(bool), nil, stream); err != nil {
+	if err = api.Filter(context.Background(), traceReq1, nil, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
 	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
@@ -150,7 +185,7 @@ func TestCallTraceUnwind(t *testing.T) {
 		ToBlock:   &toBlock,
 		ToAddress: []*common.Address{&toAddress1},
 	}
-	if err = api.Filter(context.Background(), traceReq2, new(bool), nil, stream); err != nil {
+	if err = api.Filter(context.Background(), traceReq2, nil, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
 	assert.Equal(t, []int{1, 2, 3, 4, 5, 11, 12}, blockNumbersFromTraces(t, stream.Buffer()))
@@ -166,7 +201,7 @@ func TestCallTraceUnwind(t *testing.T) {
 		ToBlock:   &toBlock,
 		ToAddress: []*common.Address{&toAddress1},
 	}
-	if err = api.Filter(context.Background(), traceReq3, new(bool), nil, stream); err != nil {
+	if err = api.Filter(context.Background(), traceReq3, nil, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
 	assert.Equal(t, []int{12, 13, 14, 15, 16, 17, 18, 19, 20}, blockNumbersFromTraces(t, stream.Buffer()))
@@ -201,7 +236,7 @@ func TestFilterNoAddresses(t *testing.T) {
 		t.Run(string(mode), func(t *testing.T) {
 			traceReq1.Mode = mode
 			stream.Reset(nil)
-			require.NoError(t, api.Filter(t.Context(), traceReq1, nil, nil, stream))
+			require.NoError(t, api.Filter(t.Context(), traceReq1, nil, stream))
 			require.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
 		})
 	}
@@ -219,7 +254,7 @@ func TestFilterGenesisHasNoReward(t *testing.T) {
 	require.NoError(t, m.InsertChain(chain))
 	api := newTraceApiForTest(m)
 
-	genesisTraces, err := api.Block(context.Background(), 0, new(bool), nil)
+	genesisTraces, err := api.Block(context.Background(), 0, nil)
 	require.NoError(t, err)
 	require.Empty(t, genesisTraces)
 
@@ -234,7 +269,7 @@ func TestFilterGenesisHasNoReward(t *testing.T) {
 			After:     after,
 			Count:     count,
 		}
-		require.NoError(t, api.Filter(context.Background(), req, new(bool), nil, stream))
+		require.NoError(t, api.Filter(context.Background(), req, nil, stream))
 		return blockNumbersFromTraces(t, stream.Buffer())
 	}
 	one := uint64(1)
@@ -416,7 +451,7 @@ func TestFilterFailedCreateHasNoRecipient(t *testing.T) {
 			ToBlock:     &block,
 			FromAddress: from, ToAddress: to,
 		}
-		require.NoError(t, api.Filter(context.Background(), req, new(bool), nil, stream))
+		require.NoError(t, api.Filter(context.Background(), req, nil, stream))
 		var traces []map[string]any
 		require.NoError(t, json.Unmarshal(stream.Buffer(), &traces))
 		return traces
@@ -514,6 +549,30 @@ func TestFilterBoundPastHead(t *testing.T) {
 		require.NoError(t, client.CallContext(t.Context(), &result, "trace_filter", map[string]any{"fromBlock": "0x0", "toBlock": "0x0"}))
 		require.JSONEq(t, "[]", string(result))
 	})
+}
+
+// TestFilterRangeLimit checks that a range wider than --rpc.blockrange.limit
+// returns -32602, as eth_getLogs does, and that a range at the limit is served.
+func TestFilterRangeLimit(t *testing.T) {
+	m := execmoduletester.New(t)
+	chain, err := m.GenerateChain(2, func(i int, gen *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chain))
+
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	api := NewTraceAPI(newBaseApiWithLimits(m, 1, 0, 0), m.DB, &rpccfg.TraceApiConfig{})
+	require.NoError(t, server.RegisterName("trace", api))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	var result json.RawMessage
+	err = client.CallContext(t.Context(), &result, "trace_filter", map[string]any{"fromBlock": "0x0", "toBlock": "0x2"})
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+	require.EqualError(t, err, errExceedBlockRange+": 1")
+
+	require.NoError(t, client.CallContext(t.Context(), &result, "trace_filter", map[string]any{"fromBlock": "0x1", "toBlock": "0x2"}))
 }
 
 // An explicit null for an optional trace_filter member is the same as omitting it.
@@ -801,7 +860,7 @@ func TestFilterBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	}
 
 	stream := jsonstream.New(nil)
-	err := api.Filter(context.Background(), traceReq, new(bool), traceConfigWithBaseFeeOverride(overrideBaseFee), stream)
+	err := api.Filter(context.Background(), traceReq, traceConfigWithBaseFeeOverride(overrideBaseFee), stream)
 	require.NoError(t, err)
 
 	expectedGasPrice := new(uint256.Int).AddUint64(overrideBaseFee, tipCap)
@@ -832,7 +891,7 @@ func TestFilterBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
 			}
 
 			stream := jsonstream.New(nil)
-			err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+			err := api.Filter(context.Background(), traceReq, &config.TraceConfig{
 				BlockOverrides: tc.override,
 			}, stream)
 			require.NoError(t, err)
@@ -861,7 +920,7 @@ func TestFilterRejectedBlockOverrideReturnsError(t *testing.T) {
 
 	beaconRoot := common.HexToHash("0x01")
 	stream := jsonstream.New(nil)
-	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+	err := api.Filter(context.Background(), traceReq, &config.TraceConfig{
 		BlockOverrides: &ethapi.BlockOverrides{BeaconRoot: &beaconRoot},
 	}, stream)
 	require.Error(t, err)
@@ -890,7 +949,7 @@ func TestFilterSignerReflectsBlockOverridesNumber(t *testing.T) {
 	}
 
 	stream := jsonstream.New(nil)
-	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+	err := api.Filter(context.Background(), traceReq, &config.TraceConfig{
 		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 	}, stream)
 	require.ErrorContains(t, err, "protected txn is not supported by signer")
@@ -925,7 +984,7 @@ func TestFilterErrorAfterExportedTracesKeepsValidJSON(t *testing.T) {
 	stream.Field("id")
 	stream.Int(1)
 	err := rpc.WriteFieldOrError(stream, "result", func(*jsonstream.Stream) error {
-		return api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+		return api.Filter(context.Background(), traceReq, &config.TraceConfig{
 			BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 		}, stream)
 	})
@@ -973,7 +1032,7 @@ func TestFilterCountSatisfiedIgnoresLaterErrors(t *testing.T) {
 	}
 
 	stream := jsonstream.New(nil)
-	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+	err := api.Filter(context.Background(), traceReq, &config.TraceConfig{
 		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 	}, stream)
 	require.NoError(t, err)
@@ -1006,7 +1065,7 @@ func TestFilterAfterSkipsTracesBeforeExporting(t *testing.T) {
 	}
 
 	stream := jsonstream.New(nil)
-	err := api.Filter(context.Background(), traceReq, new(bool), nil, stream)
+	err := api.Filter(context.Background(), traceReq, nil, stream)
 	require.NoError(t, err)
 
 	var traces []map[string]json.RawMessage
@@ -1036,7 +1095,7 @@ func TestFilterZeroCountReturnsEmptyArray(t *testing.T) {
 	}
 
 	stream := jsonstream.New(nil)
-	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+	err := api.Filter(context.Background(), traceReq, &config.TraceConfig{
 		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 	}, stream)
 	require.NoError(t, err)
