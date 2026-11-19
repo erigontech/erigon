@@ -41,3 +41,5 @@ func (*Probe) Touch(unsafe.Pointer) {}
 func (*Probe) MarkResident([]uintptr) {}
 
 func ReadPages(context.Context, []uintptr) error { return nil }
+
+func ReadExpandPages(context.Context, []uintptr) error { return nil }

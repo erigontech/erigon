@@ -364,7 +364,7 @@ func readReferencePages(branch commitment.BranchData, accounts, storage *seg.Rea
 	rrp.batches.Add(1)
 	t1 := time.Now()
 	defer func() { rrp.readNs.Add(int64(time.Since(t1))) }()
-	if mmap.ReadPages(context.Background(), cold) != nil {
+	if mmap.ReadExpandPages(context.Background(), cold) != nil {
 		return 0
 	}
 	return len(cold)

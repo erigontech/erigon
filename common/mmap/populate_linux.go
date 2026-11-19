@@ -141,11 +141,31 @@ var (
 	batchRings     chan *batchRing
 )
 
-func initBatchRings() {
+func initBatchRings() { batchRings = newRingPool() }
+
+var (
+	expandRingsOnce sync.Once
+	expandRings     chan *batchRing
+)
+
+// ReadExpandPages is ReadPages on a ring pool of its own, so short branch-expansion batches do not queue behind
+// the BAL prefetch's batches.
+func ReadExpandPages(ctx context.Context, pages []uintptr) error {
+	if len(pages) == 0 || !BatchPrefetch {
+		return nil
+	}
+	expandRingsOnce.Do(func() { expandRings = newRingPool() })
+	if expandRings == nil {
+		return nil
+	}
+	return readPages(ctx, pages, expandRings)
+}
+
+func newRingPool() (pool chan *batchRing) {
 	rings := make(chan *batchRing, 8)
 	defer func() {
 		if len(rings) > 0 {
-			batchRings = rings
+			pool = rings
 		}
 	}()
 	for range cap(rings) {
@@ -155,6 +175,7 @@ func initBatchRings() {
 		}
 		rings <- br
 	}
+	return
 }
 
 func newBatchRing() (*batchRing, bool) {
@@ -200,6 +221,10 @@ func ReadPages(ctx context.Context, pages []uintptr) error {
 	if batchRings == nil {
 		return nil
 	}
+	return readPages(ctx, pages, batchRings)
+}
+
+func readPages(ctx context.Context, pages []uintptr, pool chan *batchRing) error {
 	byFd := map[int][]int64{}
 	seen := make(map[uintptr]struct{}, len(pages))
 	for _, p := range pages {
@@ -222,12 +247,12 @@ func ReadPages(ctx context.Context, pages []uintptr) error {
 			wg.Go(func() {
 				var br *batchRing
 				select {
-				case br = <-batchRings:
+				case br = <-pool:
 				case <-ctx.Done():
 					errOnce.Do(func() { firstErr = ctx.Err() })
 					return
 				}
-				defer func() { batchRings <- br }()
+				defer func() { pool <- br }()
 				if err := ctx.Err(); err != nil {
 					errOnce.Do(func() { firstErr = err })
 					return
