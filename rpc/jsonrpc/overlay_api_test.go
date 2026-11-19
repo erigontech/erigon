@@ -710,7 +710,7 @@ func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 				require.Nil(t, result)
 				return
 			}
-			require.NotNil(t, result, "successful replacement constructor must return its captured code")
+			require.NotNil(t, result, "replay must return the deployed runtime code")
 			require.NotNil(t, result.Code)
 			require.Equal(t, want, *result.Code)
 		})
@@ -788,7 +788,8 @@ func TestCallConstructorRetryInsufficientBalance(t *testing.T) {
 	initCode := program.New().ReturnData(runtime).Bytes()
 	target := types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
 
-	// The factory accepts one byte of runtime code and uses the calldata length as the endowment.
+	// The factory reverts unless the deployed code is one byte long. It uses the
+	// calldata length as the endowment, so the retry needs one wei from the unfunded factory.
 	create := program.New().Mstore(initCode, 0).Push0().Push(len(initCode)).Push0().Op(vm.CALLDATASIZE, vm.CREATE2, vm.EXTCODESIZE)
 	factoryCode := testutil.AssertStackWord(create, 1)
 	calls := program.New().Call(nil, factory, 0, 0, 0, 0, 0).Op(vm.POP)
@@ -950,8 +951,8 @@ func TestCallConstructorNestedInitCodeErrors(t *testing.T) {
 				create = program.New().Create2(initCode, 0)
 				target = types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
 			}
-			// The entry contract ignores a failed factory call. Its gas allowance
-			// covers the original initcode and leaves little room for a replacement.
+			// The entry contract gives the factory enough gas for the original deployment.
+			// It discards the call result, so a factory failure can leave the transaction successful.
 			call := program.New().Call(uint256.NewInt(params.CreateGas+700), factory, 0, 0, 0, 0, 0).Op(vm.POP, vm.STOP)
 			factoryCode := testutil.AssertStackWord(create.Op(vm.ISZERO), 0).Op(vm.STOP)
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{

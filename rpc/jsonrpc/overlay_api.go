@@ -170,8 +170,6 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, fmt.Errorf("block not found: %d", blockNum)
 	}
 
-	// -1 is a default value for transaction index.
-	// If it's -1, we will try to replay every single transaction in that block
 	transactionIndex := -1
 	for idx, transaction := range block.Transactions() {
 		if transaction.Hash() == creationData.Tx {
@@ -218,14 +216,13 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress, chainConfig)
 
-	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{})
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
 	rules := evm.ChainRules()
 
-	// Setup the gas pool (also for unmetered requests)
-	// and apply the message.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
+	// Replay the earlier transactions with their original messages to restore
+	// the state at the start of the deployment transaction.
 	for idx, txn := range replayTransactions {
 		statedb.SetTxContext(blockNum, idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
@@ -234,7 +231,6 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		}
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
-		// Execute the transaction message
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
 			return nil, err
@@ -253,7 +249,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	contractAddr := types.CreateAddress(msg.From().Value(), msg.Nonce())
 	if creationTx.IsContractDeploy() && contractAddr == address {
-		// Top-level deployments must include the replacement initcode in intrinsic gas.
+		// Intrinsic gas is charged on the message data before the EVM applies the initcode override.
 		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
 	}
 	api.applyGasBudget(msg)
@@ -272,6 +268,8 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	if err != nil {
 		return nil, cmp.Or(ct.err, err)
 	}
+	// A later rollback can undo a successful deployment. Read the surviving code
+	// from state, checking SELFDESTRUCT first because deletion happens at finalization.
 	selfdestructed, err := statedb.HasSelfdestructed(ct.contractAddress)
 	if err != nil {
 		return nil, err

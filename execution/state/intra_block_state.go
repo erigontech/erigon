@@ -2094,7 +2094,8 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 
 var zeroBalance uint256.Int
 
-// ContractCreatedInTx reports whether a deployment at addr survived all reverts in this transaction.
+// ContractCreatedInTx reports whether the current transaction created a contract at addr.
+// The marker survives SELFDESTRUCT and is cleared if the creation is rolled back.
 func (ibs *IntraBlockState) ContractCreatedInTx(addr accounts.Address) bool {
 	if ibs.versionMap != nil {
 		created, _ := ibs.versionedWriteCreateContract(addr)

@@ -52,13 +52,15 @@ type Config struct {
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 
-	// OverrideInitCode replaces constructor code for RPC replay after the deployment
-	// address is derived, so CREATE2 keeps the address of the original initcode.
-	// A replacement must drop the original code hash, which keys the shared jump destination cache.
-	OverrideInitCode        func(address accounts.Address) (replacement []byte, matched bool)
+	// OverrideInitCode selects replacement initcode by deployment address during RPC replay.
+	// CREATE2 derives that address from the original initcode. A match can supply empty initcode.
+	// The VM clears the original code hash so the replacement bypasses the shared JUMPDEST cache.
+	OverrideInitCode func(address accounts.Address) (replacement []byte, matched bool)
+	// OriginalCreate2InitCode lets replay identify the target when a CREATE2 gas
+	// check fails before the VM derives the address.
 	OriginalCreate2InitCode *Create2InitCode
-	// OnInitCodeOverrideError reports gas or preparation errors that prevent
-	// a nested creation from entering its constructor frame during replay.
+	// OnInitCodeOverrideError reports gas or preparation errors that occur before a
+	// nested constructor frame opens. The receiver filters by deployment address.
 	OnInitCodeOverrideError func(address accounts.Address, err error)
 }
 

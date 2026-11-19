@@ -43,6 +43,8 @@ func (ct *OverlayCreateTracer) TracingHooks() *tracing.Hooks {
 	}
 }
 
+// After a successful deployment, ignore later errors at its address even if
+// the runtime code is empty. A rollback lets the tracer observe the next attempt.
 func (ct *OverlayCreateTracer) canCapture(target accounts.Address) bool {
 	return target == ct.contractAddress && !ct.isCapturing && !ct.statedb.ContractCreatedInTx(target)
 }

@@ -675,7 +675,8 @@ func (evm *EVM) createPrepared(caller accounts.Address, codeAndHash *codeAndHash
 
 func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool, preparation *createPreparation) (ret []byte, createAddress accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	gasRemaining = gas
-	// Metered nested creations already applied the override during gas calculation.
+	// With EIP-3860, nested creations select the replacement when calculating
+	// the initcode charge, before gas is forwarded to the constructor.
 	if override := evm.config.OverrideInitCode; override != nil && (preparation == nil || !evm.config.HasEip3860(evm.chainRules)) {
 		if replacement, matched := override(address); matched {
 			codeAndHash.code = replacement

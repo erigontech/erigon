@@ -414,8 +414,9 @@ type createGasPreparation struct {
 	overridden  bool
 }
 
-// Create2InitCode identifies the historical constructor even when CREATE2
-// cannot pay to expand memory. Bytes beyond the allocated memory are zero.
+// Create2InitCode records the original CREATE2 input and its hash. New EVM
+// memory is zero-filled, so the full length and the prefix through the last
+// nonzero byte identify the input without expanding memory during replay.
 type Create2InitCode struct {
 	size   uint64
 	prefix []byte
@@ -439,7 +440,7 @@ func (evm *EVM) reportCreateError(scope *CallContext, err error) {
 	if !errors.Is(err, ErrOutOfGas) && !errors.Is(err, ErrGasUintOverflow) {
 		return
 	}
-	// Gas checks run on the jump-table path, which saves the PC before charging gas.
+	// Failed gas checks reach the jump-table path, where savedPC identifies the failing opcode.
 	op := scope.Contract.GetOp(scope.savedPC)
 	caller := scope.Contract.Address()
 	if op == CREATE {
@@ -498,8 +499,8 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 		if err := CheckMaxInitCodeSize(uint64(len(replacement)), true, evm.chainRules.IsAmsterdam); err != nil {
 			return mdgas.MdGasCost{}, err
 		}
-		// Memory and CREATE2 hashing still use the original input. Only the
-		// initcode-analysis charge follows the replacement.
+		// Memory expansion and CREATE2 hashing use the original input.
+		// The EIP-3860 analysis charge uses the replacement's length.
 		gas.Execution -= params.InitCodeWordGas * ToWordSize(callContext.Stack.back(2).Uint64())
 		var overflow bool
 		gas.Execution, overflow = math.SafeAdd(gas.Execution, params.InitCodeWordGas*ToWordSize(uint64(len(replacement))))
