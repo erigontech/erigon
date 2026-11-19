@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 // Fixture construction chooses individual steps without recovery planning.
@@ -38,11 +39,15 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 
 func TestAggregatorBuildRecoversUnindexedFiles(t *testing.T) {
 	const stepSize = uint64(10)
+	accessorExt := "kvi"
+	if statecfg.Schema.CommitmentDomain.Accessors.Has(statecfg.AccessorBTree) {
+		accessorExt = "bt"
+	}
 	for _, test := range []struct {
 		name, pattern string
 		accessorDir   bool
 	}{
-		{name: "commitment", pattern: "*-commitment.[23]-[34].kvi"},
+		{name: "commitment", pattern: "*-commitment.[23]-[34]." + accessorExt},
 		{name: "logaddrs", pattern: "*-logaddrs.[23]-[34].efi", accessorDir: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -470,12 +475,16 @@ func TestAggregatorBuildKeepsAlignedEntitiesAheadOfBackfill(t *testing.T) {
 
 func TestAggregatorBuildRespectsSharedCeiling(t *testing.T) {
 	const stepSize = uint64(10)
+	accessorExt := "kvi"
+	if statecfg.Schema.CommitmentDomain.Accessors.Has(statecfg.AccessorBTree) {
+		accessorExt = "bt"
+	}
 	for _, test := range []struct {
 		name, accessors   string
 		visibleStateSteps uint64
 	}{
-		{name: "missing_last_accessor", accessors: "*-commitment.2-3.kvi", visibleStateSteps: 2},
-		{name: "missing_all_accessors", accessors: "*-commitment.*.kvi", visibleStateSteps: 0},
+		{name: "missing_last_accessor", accessors: "*-commitment.2-3." + accessorExt, visibleStateSteps: 2},
+		{name: "missing_all_accessors", accessors: "*-commitment.*." + accessorExt, visibleStateSteps: 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db, agg := testDbAndAggregatorv3(t, stepSize)
