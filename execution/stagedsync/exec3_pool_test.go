@@ -442,7 +442,6 @@ func TestPoolSettleWaitsForReadTargetUnlessBAL(t *testing.T) {
 func TestProgressFlushRerunsPublishesWhatTheLastTickMissed(t *testing.T) {
 	var te txExecutor
 	p := &Progress{}
-	p.publishReruns(&te, execModeOf(&te))
 	discards, wasted, voidTail := sumExecMetric(mxDiscardsTotal, "abort"), sumExecMetric(mxDiscardSecondsTotal, "abort"), sumExecMetric(mxVoidTailSecondsTotal)
 	repeats, execs := sumExecMetric(mxRepeatsTotal), sumExecMetric(mxExecsTotal)
 
