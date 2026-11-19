@@ -468,7 +468,8 @@ func warmBALStateTask(ctx context.Context, stateReader *state.ReaderV3, account 
 
 // warmBody warms state for all transactions in a body using multiple workers.
 // It reads: To accounts, To account code, To account storage from access lists,
-// and block-level access lists. Each worker creates its own transaction.
+// and block-level access lists; without a BAL and with V3_PREEXEC it pre-executes
+// the transactions instead. Each worker creates its own transaction.
 // AddHeaderAndBody permits only one warmBody at a time; concurrent requests
 // skip warming.
 func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body, bal types.BlockAccessList, workers int) {
@@ -486,7 +487,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 		return
 	}
 	if preExecOn && bra.preExec != nil {
-		if err := bra.preExecTxns(ctx, db, header, body.Transactions); err != nil && !errors.Is(err, context.Canceled) {
+		if err := bra.preExecTxns(ctx, db, header, body.Transactions, workers); err != nil && !errors.Is(err, context.Canceled) {
 			log.Warn("[preexec] failed", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
 		}
 		return

@@ -21,10 +21,12 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
+	"github.com/erigontech/secp256k1"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -38,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -150,28 +153,81 @@ func TestBlockReadAheaderPreExecRejectsBlobGasPriceOverflow(t *testing.T) {
 	header.ExcessBlobGas = &excess
 	var err error
 	require.NotPanics(t, func() {
-		err = f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{f.txn(t, 100_000, 1)})
+		err = f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{f.txn(t, 100_000, 1)}, preExecWorkers)
 	})
 	require.Error(t, err)
 }
 
-func TestBlockReadAheaderPreExecBoundsLoopingTx(t *testing.T) {
+type cancelOnCodeRead struct {
+	state.StateReader
+	cancel context.CancelFunc
+}
+
+func (r cancelOnCodeRead) ReadAccountCode(a accounts.Address) ([]byte, error) {
+	r.cancel()
+	code, err := r.StateReader.ReadAccountCode(a)
+	return bytes.Clone(code), err
+}
+
+func TestBlockReadAheaderPreExecCancelStopsRunningTx(t *testing.T) {
 	f := newPreExecFixture(t, []byte{0x5b, 0x60, 0x00, 0x56})
 	f.config.OsakaTime = nil
+	pe := f.readAheader.preExec
+	ttx, err := f.db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer ttx.Rollback()
 	ctx, cancel := context.WithCancel(t.Context())
-	txns := types.Transactions{f.txn(t, 1<<62, 0)}
+	reader := cancelOnCodeRead{StateReader: state.NewReaderV3(readAheadGetter(ttx, f.stateCache, true)), cancel: cancel}
+	noHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
+	blockCtx := protocol.NewEVMBlockContext(f.header(), noHash, pe.engine, accounts.NilAddress, f.config)
+	toucher := &commitmentToucher{ctx: ctx, read: func([]byte) []byte { return nil }}
+	from := accounts.InternAddress(crypto.PubkeyToAddress(f.key.PublicKey))
+	txn := f.txn(t, 1<<62, 0)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = f.readAheader.preExecTxns(ctx, f.db, f.header(), txns)
+		pe.run(ctx, blockCtx, blockCtx.Rules(f.config), from, txn, 1<<62, reader, toucher)
 	}()
-	time.Sleep(20 * time.Millisecond)
-	cancel()
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
-		t.Fatal("pre-exec of a looping tx did not stop after cancellation")
+		t.Fatal("cancellation did not stop a running tx")
 	}
+	require.Error(t, ctx.Err(), "the tx never read its code")
+}
+
+func TestBlockReadAheaderPreExecCapsTxGas(t *testing.T) {
+	f := newPreExecFixture(t, []byte{0x5a, 0x54, 0x00})
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), types.Transactions{f.txn(t, preExecTxGas<<3, 0)}, preExecWorkers))
+
+	gasAtStart := common.Hash(uint256.NewInt(preExecTxGas - 21_000 - 2).Bytes32())
+	_, ok := f.stateCache.View(nil).Get(kv.StorageDomain, append(f.contract[:], gasAtStart[:]...))
+	require.True(t, ok, "the tx did not run with the capped gas")
+}
+
+func TestBlockReadAheaderPreExecStopsAtBlockGas(t *testing.T) {
+	f := newPreExecFixture(t, []byte{0x00})
+	signer := *types.MakeSigner(f.config, 1, 1000)
+	txns := make(types.Transactions, preExecBlockGas/preExecTxGas+1)
+	for i := range txns {
+		txn, err := types.SignNewTx(f.key, signer, &types.LegacyTx{
+			CommonTx: types.CommonTx{Nonce: uint64(i), GasLimit: preExecTxGas},
+			GasPrice: *uint256.NewInt(1),
+		})
+		require.NoError(t, err)
+		txns[i] = txn
+	}
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), txns, preExecWorkers))
+
+	sender := crypto.PubkeyToAddress(f.key.PublicKey)
+	ran := 0
+	for i := range txns {
+		created := types.CreateAddress(sender, uint64(i))
+		if _, ok := f.stateCache.View(nil).Get(kv.AccountsDomain, created[:]); ok {
+			ran++
+		}
+	}
+	require.Equal(t, preExecBlockGas/preExecTxGas, ran, "pre-exec ran past the block gas budget")
 }
 
 func TestBlockReadAheaderPreExecUsesEffectiveGasPrice(t *testing.T) {
@@ -185,7 +241,7 @@ func TestBlockReadAheaderPreExecUsesEffectiveGasPrice(t *testing.T) {
 		FeeCap:   *uint256.NewInt(100),
 	})
 	require.NoError(t, err)
-	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{txn}))
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{txn}, preExecWorkers))
 
 	effective, feeCap := common.Hash{31: 12}, common.Hash{31: 100}
 	_, ok := f.stateCache.View(nil).Get(kv.StorageDomain, append(f.contract[:], effective[:]...))
@@ -203,7 +259,7 @@ func TestBlockReadAheaderPreExecClampsGasPriceToFeeCap(t *testing.T) {
 		ChainID:  *f.config.ChainID,
 	})
 	require.NoError(t, err)
-	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{txn}))
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{txn}, preExecWorkers))
 
 	feeCap, baseFee := common.Hash{}, common.Hash{31: 10}
 	_, ok := f.stateCache.View(nil).Get(kv.StorageDomain, append(f.contract[:], feeCap[:]...))
@@ -239,7 +295,7 @@ func TestBlockReadAheaderPreExecCreatesAtTxNonce(t *testing.T) {
 		GasPrice: *uint256.NewInt(1),
 	})
 	require.NoError(t, err)
-	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), types.Transactions{call, create}))
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), types.Transactions{call, create}, preExecWorkers))
 
 	sender := crypto.PubkeyToAddress(f.key.PublicKey)
 	atTxNonce, atParentNonce := types.CreateAddress(sender, 1), types.CreateAddress(sender, 0)
@@ -249,7 +305,17 @@ func TestBlockReadAheaderPreExecCreatesAtTxNonce(t *testing.T) {
 	require.False(t, ok, "the contract address at the parent nonce was read")
 }
 
+func TestCommitmentToucherSkipsLegacyCommitment(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
+	reads := 0
+	toucher := &commitmentToucher{ctx: t.Context(), read: func([]byte) []byte { reads++; return nil }}
+	require.NoError(t, toucher.UpdateAccountData(accounts.InternAddress(common.Address{1}), nil, nil))
+	require.NoError(t, toucher.WriteAccountStorage(accounts.InternAddress(common.Address{1}), 0, accounts.InternKey(common.Hash{1}), uint256.Int{}, uint256.Int{}))
+	require.Zero(t, reads, "the toucher read commitment with commitment v3 off")
+}
+
 func TestCommitmentToucherStopsAfterCancel(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	ctx, cancel := context.WithCancel(t.Context())
 	reads := 0
 	toucher := &commitmentToucher{ctx: ctx, read: func([]byte) []byte { reads++; return nil }}
@@ -262,6 +328,7 @@ func TestCommitmentToucherStopsAfterCancel(t *testing.T) {
 
 func TestBlockReadAheaderPreExecWalksStoragePathOfTxWrite(t *testing.T) {
 	f := newPreExecFixture(t, []byte{0x60, 0x2a, 0x60, 0x08, 0x55, 0x00})
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	pe := f.readAheader.preExec
 	ttx, err := f.db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
@@ -279,6 +346,7 @@ func TestBlockReadAheaderPreExecWalksStoragePathOfTxWrite(t *testing.T) {
 }
 
 func TestCommitmentToucherWalksAndQueuesSortedBatches(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	touches := &commitmentdb.PreExecTouches{C: make(chan []commitmentdb.PathTouch, 1)}
 	reads := 0
 	toucher := &commitmentToucher{ctx: context.Background(), out: touches, read: func([]byte) []byte { reads++; return nil }}
@@ -295,6 +363,7 @@ func TestCommitmentToucherWalksAndQueuesSortedBatches(t *testing.T) {
 }
 
 func TestCommitmentToucherCountsBatchesTheQueueRefused(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	touches := &commitmentdb.PreExecTouches{C: make(chan []commitmentdb.PathTouch)}
 	toucher := &commitmentToucher{ctx: context.Background(), out: touches, read: func([]byte) []byte { return nil }}
 	toucher.touch(bytes.Repeat([]byte{1}, 32), nil)
@@ -319,6 +388,7 @@ func TestStopPreExecCancelsARunThatStartsLater(t *testing.T) {
 }
 
 func TestBlockReadAheaderPreExecPublishesItsPathsUntilStopped(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(true))
 	f := newPreExecFixture(t, []byte{0x60, 0x2a, 0x60, 0x08, 0x55, 0x00})
 	oldQueue := preExecQueue
 	preExecQueue = true
@@ -329,7 +399,7 @@ func TestBlockReadAheaderPreExecPublishesItsPathsUntilStopped(t *testing.T) {
 	})
 	header := f.header()
 	header.ParentHash = common.Hash{0x51}
-	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{f.txn(t, 100_000, 1)}))
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{f.txn(t, 100_000, 1)}, preExecWorkers))
 	touches := commitmentdb.PreExecTouchesFor(header.Number.Uint64(), header.ParentHash)
 	require.NotNil(t, touches, "pre-exec must publish its queue under the block's number and parent hash")
 	require.Len(t, touches.C, 1, "a worker's last batch shorter than preExecBatch must reach the queue")
@@ -337,8 +407,31 @@ func TestBlockReadAheaderPreExecPublishesItsPathsUntilStopped(t *testing.T) {
 	require.Contains(t, <-touches.C, commitmentdb.PathTouch{Account: keccak.Sum256(f.contract[:]), Slot: keccak.Sum256(slot[:]), Storage: true})
 
 	StopPreExec(header.Hash())
-	_ = f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{f.txn(t, 100_000, 1)})
+	_ = f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{f.txn(t, 100_000, 1)}, preExecWorkers)
 	touches = commitmentdb.PreExecTouchesFor(header.Number.Uint64(), header.ParentHash)
 	require.NotNil(t, touches)
 	require.Empty(t, touches.C, "a pre-exec its block's compute stopped must queue nothing")
+}
+
+type countingRoDB struct {
+	kv.RoDB
+	begins atomic.Int32
+}
+
+func (d *countingRoDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	d.begins.Add(1)
+	return d.RoDB.BeginRo(ctx)
+}
+
+func TestBlockReadAheaderPreExecWorkers(t *testing.T) {
+	for _, tc := range []struct{ workers, want int }{{1, 1}, {8, 4}} {
+		f := newPreExecFixture(t, []byte{0x00})
+		txns := make(types.Transactions, 8)
+		for i := range txns {
+			txns[i] = f.txn(t, 100_000, 1)
+		}
+		db := &countingRoDB{RoDB: f.db}
+		require.NoError(t, f.readAheader.preExecTxns(t.Context(), db, f.header(), txns, tc.workers))
+		require.Equal(t, int32(min(tc.want, secp256k1.NumOfContexts())), db.begins.Load(), "workers=%d", tc.workers)
+	}
 }
