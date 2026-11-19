@@ -537,12 +537,12 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				return
 			}
 		}
-		if path == StoragePath && storageClearedByCreate(r.life, true, hdr.Version.TxIndex) {
-			readClearedByCreate(s, hdr, r)
-			return
-		}
-		// A value below this tx is older than a creation in it.
 		if path == StoragePath {
+			if storageClearedByCreate(r.life, true, hdr.Version.TxIndex) {
+				readClearedByCreate(s, hdr, r)
+				return
+			}
+			// A value below this tx is older than a creation in it.
 			if created, ok := s.versionedWriteCreateContract(addr); ok && created {
 				r.mapStorageVal = uint256.Int{}
 			}
