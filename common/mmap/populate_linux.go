@@ -193,12 +193,30 @@ var brokenBatchLog sync.Once
 // page outside the registered file mappings is skipped. It returns the first failed batch's error. Once ctx is done no
 // further batch starts.
 func ReadPages(ctx context.Context, pages []uintptr) error {
+	_, err := readPages(ctx, pages, false)
+	return err
+}
+
+// TryReadPages is ReadPages that reads nothing and returns false when no ring is free at once.
+func TryReadPages(ctx context.Context, pages []uintptr) (bool, error) {
+	return readPages(ctx, pages, true)
+}
+
+func readPages(ctx context.Context, pages []uintptr, try bool) (bool, error) {
 	if len(pages) == 0 || !BatchPrefetch {
-		return nil
+		return true, nil
 	}
 	batchRingsOnce.Do(initBatchRings)
 	if batchRings == nil {
-		return nil
+		return true, nil
+	}
+	var first *batchRing
+	if try {
+		select {
+		case first = <-batchRings:
+		default:
+			return false, nil
+		}
 	}
 	byFd := map[int][]int64{}
 	seen := make(map[uintptr]struct{}, len(pages))
@@ -219,13 +237,16 @@ func ReadPages(ctx context.Context, pages []uintptr) error {
 			n := min(len(offs), batchRingEntries)
 			chunk := offs[:n]
 			offs = offs[n:]
+			br := first
+			first = nil
 			wg.Go(func() {
-				var br *batchRing
-				select {
-				case br = <-batchRings:
-				case <-ctx.Done():
-					errOnce.Do(func() { firstErr = ctx.Err() })
-					return
+				if br == nil {
+					select {
+					case br = <-batchRings:
+					case <-ctx.Done():
+						errOnce.Do(func() { firstErr = ctx.Err() })
+						return
+					}
 				}
 				defer func() { batchRings <- br }()
 				if err := ctx.Err(); err != nil {
@@ -250,5 +271,8 @@ func ReadPages(ctx context.Context, pages []uintptr) error {
 		}
 	}
 	wg.Wait()
-	return firstErr
+	if first != nil {
+		batchRings <- first
+	}
+	return true, firstErr
 }

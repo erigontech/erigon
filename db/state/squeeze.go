@@ -329,7 +329,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 // readReferencePages reads the cold file pages that the branch's shortened keys point to in one batch, so the expansion
 // does not wait for them one after another. It returns the number of pages it read.
 var rrp struct {
-	calls, refs, ref2, cold, batches, ns, readNs atomic.Int64
+	calls, refs, ref2, cold, batches, noRing, ns, readNs atomic.Int64
 }
 
 func readReferencePages(branch commitment.BranchData, accounts, storage *seg.Reader) int {
@@ -337,7 +337,7 @@ func readReferencePages(branch commitment.BranchData, accounts, storage *seg.Rea
 	defer func() {
 		rrp.ns.Add(int64(time.Since(t0)))
 		if rrp.calls.Add(1)%4096 == 0 {
-			log.Info("[rrp] expand refs", "npCalls", rrp.calls.Swap(0)+1, "npRefs", rrp.refs.Swap(0), "npRefTwo", rrp.ref2.Swap(0), "npColdPg", rrp.cold.Swap(0), "npBatches", rrp.batches.Swap(0), "npRrpMs", rrp.ns.Swap(0)/1e6, "npReadMs", rrp.readNs.Swap(0)/1e6)
+			log.Info("[rrp] expand refs", "npCalls", rrp.calls.Swap(0)+1, "npRefs", rrp.refs.Swap(0), "npRefTwo", rrp.ref2.Swap(0), "npColdPg", rrp.cold.Swap(0), "npBatches", rrp.batches.Swap(0), "npNoRing", rrp.noRing.Swap(0), "npRrpMs", rrp.ns.Swap(0)/1e6, "npReadMs", rrp.readNs.Swap(0)/1e6)
 		}
 	}()
 	refs := 0
@@ -364,7 +364,11 @@ func readReferencePages(branch commitment.BranchData, accounts, storage *seg.Rea
 	rrp.batches.Add(1)
 	t1 := time.Now()
 	defer func() { rrp.readNs.Add(int64(time.Since(t1))) }()
-	if mmap.ReadPages(context.Background(), cold) != nil {
+	read, err := mmap.TryReadPages(context.Background(), cold)
+	if !read {
+		rrp.noRing.Add(1)
+	}
+	if !read || err != nil {
 		return 0
 	}
 	return len(cold)
