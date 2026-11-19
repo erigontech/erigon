@@ -579,6 +579,41 @@ func TestAggregator_BuildFiles_EmptyStepOK(t *testing.T) {
 	require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 2*stepSize, unboundedFinalityCtx))
 }
 
+func TestAggregatorBuildWithHistoryAtStepZero(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+
+	for _, zeroStepDomain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain} {
+		t.Run(zeroStepDomain.String(), func(t *testing.T) {
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			ctx := t.Context()
+			generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 5}})
+			generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 5}})
+			require.NoError(t, agg.OpenFolder(db))
+			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+				at := agg.BeginFilesRo()
+				defer at.Close()
+				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain} {
+					firstStep := uint64(10)
+					if domain == zeroStepDomain {
+						firstStep = 0
+					}
+					writer := at.d[domain].NewWriter(db)
+					t.Cleanup(writer.Close)
+					for step := firstStep; step <= 11; step++ {
+						require.NoError(t, writer.PutWithPrev([]byte{byte(step)}, []byte{7}, step*stepSize+1, nil))
+					}
+					require.NoError(t, writer.Flush(ctx, tx))
+					writer.Close()
+				}
+				return nil
+			}))
+			require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 11*stepSize, unboundedFinalityCtx))
+			requireVisibleEnd(t, agg, 11*stepSize)
+		})
+	}
+}
+
 // putHistoryKey inserts a single (txNumBE, key) pair into the domain's
 // History.KeysTable. The table is a DupSort table, but DupSort Put semantics
 // are equivalent to Put for a single value, which is all these tests need.

@@ -2374,25 +2374,27 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		//
 		// The `step > 0` clause is what distinguishes this from a legitimate
 		// empty step on a fresh datadir (no earlier files exist, so there's
-		// nothing to merge with and no corruption path). The bug only lives on
-		// datadirs where the preverified snapshot set stops below MDBX's
-		// minimum step. `minStepInDB` returns 0 for both "no keys" and "first
-		// key at step 0"; either way a zero can't exceed a positive `step`, so
-		// we don't need to disambiguate.
+		// nothing to merge with and no corruption path).
 		if step > 0 {
 			var firstInDB kv.Step
+			var foundHistory bool
 			if err := db.View(a.ctx, func(tx kv.Tx) error {
 				for _, d := range []*Domain{a.d[kv.AccountsDomain], a.d[kv.StorageDomain], a.d[kv.CodeDomain]} {
-					s := kv.Step(d.minStepInDB(tx))
-					if s > 0 && (firstInDB == 0 || s < firstInDB) {
-						firstInDB = s
+					first, found, err := d.InvertedIndex.firstStepInDB(tx)
+					if err != nil {
+						return err
+					}
+					if found && (!foundHistory || first < firstInDB) {
+						firstInDB, foundHistory = first, true
 					}
 				}
 				return nil
 			}); err != nil {
 				a.logger.Warn("[snapshots] gap-detection", "err", err)
+				close(fin)
+				return
 			}
-			if firstInDB > step {
+			if foundHistory && firstInDB > step {
 				a.logger.Error("[snapshots] gap between snapshots and MDBX — refusing to build files",
 					"step", step, "firstInDB", firstInDB, "lastInDB", lastInDB,
 					"hint", "MDBX history starts above the next step to aggregate; building here would create empty step files and a merge would silently drop state. "+
