@@ -623,7 +623,9 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			var dbBAL types.BlockAccessList
 			var blockNum uint64
 			var more bool
+			npNextStart := time.Now()
 			b, dbBAL, blockNum, more, err = src.next(ctx)
+			npNext := time.Since(npNextStart)
 			if err != nil {
 				return err
 			}
@@ -707,6 +709,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					return ctx.Err()
 				}
 			}
+			log.Info("[np-phase] blocksrc", "blk", blockNum, "npNext", npNext, "npBuild", time.Since(npNextStart)-npNext)
 			select {
 			case te.execRequests <- &execRequest{
 				b.NumberU64(), b.Hash(),
