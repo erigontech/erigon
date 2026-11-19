@@ -91,6 +91,12 @@ func finishBlock(ctx context.Context, tx kv.TemporalTx, cfg BuilderFinishCfg, lo
 		current.Header.BlockAccessListHash = &hash
 	}
 	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals, blockAccessListSidecar)
+	gasUsed := current.CumulativeGasUsed()
+	checkReceipts := cfg.chainConfig.IsByzantium(block.NumberU64())
+	if err := cfg.engine.ValidateBlockPostExecution(cfg.chainConfig, block.HeaderNoCopy(), gasUsed.BlockGasUsed(), gasUsed.Blob,
+		checkReceipts, true, current.Receipts, block.Transactions(), logger); err != nil {
+		return fmt.Errorf("validate built block: %w", err)
+	}
 	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests, BlockAccessList: current.BlockAccessList}
 	if dbg.LogHashMismatchReason() {
 		ethutils.LogReceipts(log.LvlInfo, "Block built", current.Receipts, current.Txns, cfg.chainConfig, current.Header, logger)

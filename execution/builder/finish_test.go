@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -75,10 +76,11 @@ func TestFinishBlockDoesNotSealWhenCanceledDuringAssembly(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	testCtx := &cancelOnSecondCheckContext{Context: ctx, cancel: cancel}
-	engine := &recordingSealEngine{}
+	engine := &recordingSealEngine{Engine: ethash.NewFaker()}
 	store := NewLatestBlockBuiltStore()
 	cfg := BuilderFinishCfg{
-		engine: engine,
+		chainConfig: chain.AllProtocolChanges,
+		engine:      engine,
 		builderState: BuilderState{
 			BuiltBlock: &exec.AssembledBlock{Header: &types.Header{}},
 		},
@@ -114,4 +116,49 @@ func TestFinishBlockValidatesBlockAccessListBeforeSealing(t *testing.T) {
 	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
 	require.False(t, engine.called.Load())
 	require.Nil(t, store.BlockBuilt())
+}
+
+func TestFinishBlockRejectsInvalidExecutionResults(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		block   exec.AssembledBlock
+		wantErr string
+	}{
+		{
+			name:    "block gas",
+			block:   exec.AssembledBlock{Header: &types.Header{GasUsed: 1}},
+			wantErr: "gas used by execution: 0, in header: 1",
+		},
+		{
+			name:    "blob gas with preset nonce",
+			block:   exec.AssembledBlock{Header: &types.Header{BlobGasUsed: common.NewUint64(1), Nonce: types.EncodeNonce(1)}},
+			wantErr: "blobGasUsed by execution: 0, in header: 1",
+		},
+		{
+			name: "receipt bloom disagrees with logs",
+			block: exec.AssembledBlock{
+				Header:   &types.Header{},
+				Txns:     types.Transactions{&types.LegacyTx{}},
+				Receipts: types.Receipts{{Bloom: types.Bloom{1}}},
+			},
+			wantErr: "receiptHash mismatch",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &recordingSealEngine{Engine: ethash.NewFaker()}
+			store := NewLatestBlockBuiltStore()
+			state := NewBuilderState(nil)
+			tc.block.Header.Number.SetUint64(1)
+			state.BuiltBlock = &tc.block
+			cfg := StageBuilderFinishCfg(chain.AllProtocolChanges, engine, state, nil, nil, store)
+
+			err := finishBlock(t.Context(), nil, cfg, log.Root())
+
+			require.ErrorContains(t, err, tc.wantErr)
+			require.False(t, engine.called.Load())
+			require.Nil(t, store.BlockBuilt())
+			require.Empty(t, state.PendingResultCh)
+			require.Empty(t, state.BuilderResultCh)
+		})
+	}
 }

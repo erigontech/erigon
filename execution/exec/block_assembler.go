@@ -42,12 +42,15 @@ type AssembledBlock struct {
 	Requests         types.FlatRequests
 	BlockAccessList  types.BlockAccessList
 
+	gasUsed               protocol.GasUsed // cumulative across AddTransactions calls
 	headerRlpSize         *int
 	withdrawalsRlpSize    *int
 	unclesRlpSize         *int
 	txnsRlpSize           int
 	txnsRlpSizeCalculated int
 }
+
+func (mb *AssembledBlock) CumulativeGasUsed() protocol.GasUsed { return mb.gasUsed }
 
 func (mb *AssembledBlock) AddTxn(txn types.Transaction) {
 	mb.Txns = append(mb.Txns, txn)
@@ -117,10 +120,7 @@ type BlockAssembler struct {
 	balIO      *state.VersionedIO // nil when the block carries no access list
 	writeSets  []*state.WriteSet  // per-phase writes, applied by the builder in order
 	blockRules *chain.Rules
-	gasUsed    protocol.GasUsed // EIP-8037: cumulative per-dimension gas across AddTransactions calls
 }
-
-func (ba *BlockAssembler) CumulativeGasUsed() protocol.GasUsed { return ba.gasUsed }
 
 func NewBlockAssembler(cfg AssemblerCfg, block *AssembledBlock) *BlockAssembler {
 	ba := &BlockAssembler{AssembledBlock: block, cfg: cfg}
