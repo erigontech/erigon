@@ -18,6 +18,7 @@ package state
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -377,17 +378,23 @@ func TestHasAccessorsToBuildSkipsCoveredFiles(t *testing.T) {
 }
 
 // exitedInChildProcess re-runs the test in a child process, because the gap check exits the process.
-func exitedInChildProcess(t *testing.T) bool {
+// The child must also print each of wantOutput before the gap check exits it.
+func exitedInChildProcess(t *testing.T, wantOutput ...string) bool {
 	t.Helper()
 	if os.Getenv("ERIGON_GAP_CHECK_CHILD") != "" {
 		return false
 	}
 	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+regexp.QuoteMeta(t.Name())+"$")
-	cmd.Env = append(os.Environ(), "ERIGON_GAP_CHECK_CHILD=1", "TMPDIR="+t.TempDir()) // the child exits before its own cleanup
+	tmp := t.TempDir() // the child exits before its own cleanup
+	cmd.Env = append(os.Environ(), "ERIGON_GAP_CHECK_CHILD=1", "TMPDIR="+tmp, "TMP="+tmp, "TEMP="+tmp)
 	out, err := cmd.CombinedOutput()
 	var exitErr *exec.ExitError
 	require.ErrorAs(t, err, &exitErr, "the gap check must exit the process:\n%s", out)
+	require.Equal(t, 1, exitErr.ExitCode(), "the gap check exits with code 1:\n%s", out)
 	require.NotContains(t, string(out), "--- FAIL", "the child must exit in the gap check, not fail a check")
+	for _, want := range append(wantOutput, "gap between snapshot files and DB") {
+		require.Contains(t, string(out), want)
+	}
 	return true
 }
 
@@ -409,7 +416,8 @@ func TestOpenFolderChecksGapWhenNoAccessorBuildFollows(t *testing.T) {
 }
 
 func TestBuildMissedAccessorsChecksGapWhenAnAccessorCannotBeBuilt(t *testing.T) {
-	if exitedInChildProcess(t) {
+	const opened = "OpenFolder deferred the gap check"
+	if exitedInChildProcess(t, opened) {
 		return
 	}
 	t.Cleanup(statecfg.SetCommitmentV3(false))
@@ -425,6 +433,7 @@ func TestBuildMissedAccessorsChecksGapWhenAnAccessorCannotBeBuilt(t *testing.T) 
 	}))
 	agg.buildsMissedAccessorsAfterOpen = true
 	require.NoError(t, agg.OpenFolder(db))
+	fmt.Println(opened)
 	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
 }
 
