@@ -2861,7 +2861,7 @@ func (p *TxPool) promote(cacheView kvcache.CacheView, pendingBaseFee uint64, pen
 // onSenderStateChange has seen the txn.
 func coversPendingFees(mt *metaTxn, pendingBaseFee, pendingBlobFee uint64) bool {
 	if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok {
-		if _, err := frame.Fees.Budget(frame.GetGasLimit(), frame.GetBlobGas(), uint256.NewInt(pendingBaseFee), uint256.NewInt(pendingBlobFee)); err != nil {
+		if _, _, err := frame.Fees.RequiredCost(frame.GetGasLimit(), frame.GetBlobGas(), uint256.NewInt(pendingBaseFee), uint256.NewInt(pendingBlobFee)); err != nil {
 			return false
 		}
 	}

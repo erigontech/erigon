@@ -508,7 +508,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 						return nil, nil, err
 					}
 				}
-				_, feeErr = frame.Fees.Budget(frame.GetGasLimit(), frame.GetBlobGas(), baseFee256, &blobBaseFee)
+				_, _, feeErr = frame.Fees.RequiredCost(frame.GetGasLimit(), frame.GetBlobGas(), baseFee256, &blobBaseFee)
 			} else if !transaction.GetFeeCap().IsZero() || !transaction.GetTipCap().IsZero() {
 				feeErr = protocol.CheckEip1559TxGasFeeCap(senderAddress, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */)
 			}

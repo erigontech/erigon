@@ -176,7 +176,7 @@ func headerVariants() map[string]*types.Header {
 func TestRPCMarshalHeaderMatchesLegacyJSON(t *testing.T) {
 	for name, head := range headerVariants() {
 		block := types.NewBlockWithHeader(head, nil)
-		requireSameJSONObject(t, name, legacyRPCMarshalBlock(block, false, false), RPCMarshalBlock(block, false, false, nil, nil))
+		requireSameJSONObject(t, name, legacyRPCMarshalBlock(block, false, false), RPCMarshalBlock(block, false, false))
 	}
 }
 
@@ -200,7 +200,7 @@ func TestRPCMarshalBlockMatchesLegacyJSON(t *testing.T) {
 				txs := []types.Transaction{pinnedLegacyTx()}
 				block := types.NewBlock(header, txs, uncles, nil, withdrawals.value, nil)
 				name := fmt.Sprintf("withdrawals=%s/uncles=%d/inclTx=%v/fullTx=%v", withdrawals.name, uncleCount, tx.inclTx, tx.fullTx)
-				requireSameJSONObject(t, name, legacyRPCMarshalBlock(block, tx.inclTx, tx.fullTx), RPCMarshalBlock(block, tx.inclTx, tx.fullTx, nil, nil))
+				requireSameJSONObject(t, name, legacyRPCMarshalBlock(block, tx.inclTx, tx.fullTx), RPCMarshalBlock(block, tx.inclTx, tx.fullTx))
 			}
 		}
 	}

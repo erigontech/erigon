@@ -58,10 +58,10 @@ func TestFrameRPCBlockGasPriceWithBlob(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(1), BaseFee: uint256.NewInt(10), ExcessBlobGas: &excess}
 	ordinary := types.NewTransaction(0, common.Address{}, nil, 21_000, uint256.NewInt(11), nil)
 	block := types.NewBlockFromStorage(common.Hash{1}, header, types.Transactions{ordinary, tx}, nil, nil, nil)
-	result := RPCMarshalBlock(block, true, true, uint256.NewInt(1), types.Receipts{nil, {GasUsed: tx.GetGasLimit() / 2}})
+	result := RPCMarshalBlockWithFramePrices(block, true, true, uint256.NewInt(1), types.Receipts{nil, {GasUsed: tx.GetGasLimit() / 2}})
 	transactions := result.Transactions.([]*RPCTransaction)
 	require.Equal(t, uint256.NewInt(11), (*uint256.Int)(transactions[0].GasPrice))
 	require.Equal(t, uint256.NewInt(20), (*uint256.Int)(transactions[1].GasPrice))
-	estimated := RPCMarshalBlock(block, true, true, uint256.NewInt(1), nil).Transactions.([]*RPCTransaction)
+	estimated := RPCMarshalBlockWithFramePrices(block, true, true, uint256.NewInt(1), nil).Transactions.([]*RPCTransaction)
 	require.Equal(t, uint256.NewInt(10), (*uint256.Int)(estimated[1].GasPrice))
 }

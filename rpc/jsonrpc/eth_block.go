@@ -275,10 +275,10 @@ func (api *BaseAPI) marshalBlock(ctx context.Context, tx kv.TemporalTx, block *t
 					return nil, err
 				}
 			}
-			return ethapi.RPCMarshalBlock(block, true, true, blobFee, receipts), nil
+			return ethapi.RPCMarshalBlockWithFramePrices(block, true, true, blobFee, receipts), nil
 		}
 	}
-	return ethapi.RPCMarshalBlock(block, true, fullTx, nil, nil), nil
+	return ethapi.RPCMarshalBlock(block, true, fullTx), nil
 }
 
 // GetHeaderByNumber implements eth_getHeaderByNumber. Returns a block's header given a block

@@ -710,9 +710,16 @@ var (
 
 // RPCMarshalBlock converts the given block to the RPC output. When inclTx is true the
 // result carries the block's transactions, as full objects if fullTx is also true and
-// as hashes otherwise. Optional receipts supply gas used for settled frame prices
-// and may leave entries for ordinary transactions nil.
-func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool, blobBaseFee *uint256.Int, receipts types.Receipts) *RPCBlock {
+// as hashes otherwise.
+func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
+	return RPCMarshalBlockWithFramePrices(block, inclTx, fullTx, nil, nil)
+}
+
+// RPCMarshalBlockWithFramePrices uses the blob base fee and receipt gas usage to
+// price frame transactions. When supplied, receipts match the length and order of
+// the block's transactions. A frame without a receipt uses the pre-execution
+// estimate when the required fees are available.
+func RPCMarshalBlockWithFramePrices(block *types.Block, inclTx, fullTx bool, blobBaseFee *uint256.Int, receipts types.Receipts) *RPCBlock {
 	// A concrete slice type, not []any: boxing each element would heap-allocate
 	// every hash and send the encoder down its reflection path per transaction.
 	transactions := noTxHashes
