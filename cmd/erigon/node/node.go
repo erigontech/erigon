@@ -45,15 +45,20 @@ import (
 // ErigonNode represents a single node, that runs sync and p2p network.
 // it also can export the private endpoint for RPC daemon, etc.
 type ErigonNode struct {
+	ctx     context.Context
 	stack   *node.Node
 	backend *eth.Ethereum
 }
 
-// Serve runs the node and blocks the execution. It returns when the node is existed.
+// Serve runs the node and blocks until it is closed; the end of ctx, which a shutdown signal brings, closes it.
 func (eri *ErigonNode) Serve() error {
 	defer eri.Close()
 
 	eri.run()
+	// Only after Start: closing a node that has not started skips its lifecycles' Stop, and the backend already started
+	// work when it was created.
+	stop := context.AfterFunc(eri.ctx, eri.Close)
+	defer stop()
 
 	eri.stack.Wait()
 
@@ -123,9 +128,6 @@ func NewEthConfigUrfave(nodeCtx context.Context, ctx *cli.Command, nodeConfig *n
 }
 
 // New creates a new `ErigonNode`.
-// * ctx - `*cli.Command` from the main function. Necessary to be able to configure the node based on the command-line flags
-// * sync - `stagedsync.StagedSync`, an instance of staged sync, setup just as needed.
-// * optionalParams - additional parameters for running a node.
 func New(
 	ctx context.Context,
 	nodeConfig *nodecfg.Config,
@@ -147,7 +149,7 @@ func New(
 	if err != nil {
 		return nil, err
 	}
-	return &ErigonNode{stack: node, backend: ethereum}, nil
+	return &ErigonNode{ctx: ctx, stack: node, backend: ethereum}, nil
 }
 
 func NewNodeConfig(debugMux *http.ServeMux) *nodecfg.Config {

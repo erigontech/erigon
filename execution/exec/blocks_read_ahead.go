@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -101,9 +102,12 @@ type cachePopulatingGetter struct {
 	view     cache.ReadView
 	snapshot cache.Frontier
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
+	// Without a code phase the warmup does not write the addr→codeHash seed: exec reads it first but falls back to the
+	// cached account record.
+	skipCodeHashSeed bool
 }
 
-func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGetter {
+func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache, readsCode bool) execctxapi.StateGetter {
 	if sc == nil {
 		return execctx.NewTemporalTxStateGetter(ttx)
 	}
@@ -113,7 +117,7 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 		return execctx.NewTemporalTxStateGetter(ttx)
 	}
 	frontier := cache.FrontierWithStateVersion(debug, stateVersion)
-	getter := &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
+	getter := &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize(), skipCodeHashSeed: !readsCode}
 	if !kv.UnderlyingTxIsWritable(ttx) {
 		getter.snapshot = frontier
 	}
@@ -121,17 +125,32 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if opts.MaxStep() == kv.NoStepBound {
+		if v, txNum, ok := cpg.view.GetVisible(name, k); ok {
+			if name == kv.AccountsDomain {
+				cpg.seedCodeHash(k, v, txNum)
+			}
+			return v, kv.Step(txNum / cpg.stepSize), nil
+		}
+	}
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k, opts)
 	if err == nil && opts.MaxStep() == kv.NoStepBound {
 		readTxNum := cache.ClampFillTxNum(cpg.snapshot, name, step.LastTxNum(cpg.stepSize))
 		cpg.view.Fill(name, k, v, readTxNum)
 		if name == kv.AccountsDomain {
-			var codeHash common.Hash
-			copy(codeHash[:], accounts.DeserialiseV3CodeHash(v))
-			cpg.view.SeedAddrCodeHash(k, codeHash, readTxNum)
+			cpg.seedCodeHash(k, v, readTxNum)
 		}
 	}
 	return v, step, err
+}
+
+func (cpg *cachePopulatingGetter) seedCodeHash(addr, account []byte, txNum uint64) {
+	if cpg.skipCodeHashSeed {
+		return
+	}
+	if h := accounts.DeserialiseV3CodeHash(account); h != nil {
+		cpg.view.SeedAddrCodeHash(addr, common.Hash(h), txNum)
+	}
 }
 
 func (cpg *cachePopulatingGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, error) {
@@ -483,17 +502,19 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		return balCommitmentWarmupKeys(bal)
 	})
 	var group errgroup.Group
-	if dbg.TrieBALWarmupers > 0 {
+	if dbg.TrieBALWarmupers > 0 && !statecfg.ExperimentalCommitmentV3 {
 		group.Go(func() error {
 			return warmBALCommitment(ctx, db, trieKeys(), dbg.TrieBALWarmupers)
 		})
 	}
 	var cold coldState
 	if mmap.NewProbe() != nil {
-		group.Go(func() error {
-			prefetchBALCommitment(ctx, db, trieKeys())
-			return nil
-		})
+		if !statecfg.ExperimentalCommitmentV3 {
+			group.Go(func() error {
+				prefetchBALCommitment(ctx, db, trieKeys())
+				return nil
+			})
+		}
 		cold = stateKeysCold(ctx, db, bal)
 	}
 	group.Go(func() error {
@@ -544,7 +565,7 @@ func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal t
 			if !ok {
 				return errors.New("BAL warmup requires a temporal read transaction")
 			}
-			stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache))
+			stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache, codeMode != balCodeWarmupNone))
 			tasksProcessed := 0
 			for {
 				select {
@@ -601,7 +622,7 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 			if !ok {
 				return errors.New("transaction warmup requires a temporal read transaction")
 			}
-			stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache))
+			stateReader := state.NewReaderV3(readAheadGetter(ttx, bra.stateCache, true))
 			for txIdx := start; txIdx < end; txIdx++ {
 				select {
 				case <-workerCtx.Done():

@@ -587,8 +587,7 @@ func TestIndexedPayloadAttestationDecodeZeroLimit(t *testing.T) {
 }
 
 func TestIndexedPayloadAttestationCloneZeroLimit(t *testing.T) {
-	var source IndexedPayloadAttestation
-	require.NoError(t, json.Unmarshal([]byte(`{"attesting_indices":["1"],"data":{}}`), &source))
+	source := IndexedPayloadAttestation{AttestingIndices: solid.NewRawUint64List(0, []uint64{1}), Data: &PayloadAttestationData{}}
 	require.Equal(t, 0, source.AttestingIndices.Cap())
 	cloned := source.Clone().(*IndexedPayloadAttestation)
 	require.Equal(t, int(clparams.MaxPtcSize), cloned.AttestingIndices.Cap())

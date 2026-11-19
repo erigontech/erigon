@@ -61,13 +61,11 @@ func TestGetTransactionRejectsUnsupportedType(t *testing.T) {
 }
 
 // TestT8nSharedDomainsUsesParallelTrie pins t8n on the same commitment trie the
-// rest of the binary selects. The variant is only upgraded once a DB is wired in,
-// so a construction that skips that step computes the state root sequentially no
-// matter what the flag says.
+// rest of the binary uses. The variant is only upgraded once a DB is wired in, so
+// a construction that skips that step computes the state root sequentially.
 func TestT8nSharedDomainsUsesParallelTrie(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	// No t.Parallel: mutates process-global statecfg flags.
-	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
-	statecfg.ExperimentalParallelCommitment = true
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRw(t.Context())

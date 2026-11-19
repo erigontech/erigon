@@ -193,6 +193,7 @@ func writeBlocksByHeadRequest(t *testing.T, stream network.Stream, root common.H
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&reqBuf, req))
 	_, err := stream.Write(bytes.Clone(reqBuf.Bytes()))
 	require.NoError(t, err)
+	require.NoError(t, stream.CloseWrite())
 }
 
 func readBlocksByHeadResponses(t *testing.T, stream network.Stream, count int) []*cltypes.SignedBeaconBlock {

@@ -194,6 +194,209 @@ func TestRevalCandidates_BALKeepsReadersOfDroppedWrite(t *testing.T) {
 	require.Equal(t, []int{1}, be.revalCandidates(0, newWS().build(), oldW))
 }
 
+func TestFinalizeFlushFlagsTheReaderOfAChangedCell(t *testing.T) {
+	be := newDetExecutor(t, 4)
+	be.versionMap.HasBAL = true
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	reads := state.ReadSet{}
+	reads.SetHeader(addr, state.StoragePath, slot, state.ReadHeader{Source: state.StorageRead})
+	be.blockIO.RecordReads(state.Version{TxIndex: 2}, reads)
+	be.indexReads(2, reads)
+
+	ws := newWS().stor(addr, slot, state.Version{TxIndex: 1}, *uint256.NewInt(1)).build()
+	be.versionMap.FlushVersionedWrites(ws, true)
+	be.markReadersDirty(1, ws)
+
+	require.Equal(t, map[int]bool{2: true}, be.revalidate)
+}
+
+// A reader that read a BAL seed from the version map stays valid and clean while the writer's flush leaves the seed
+// untouched, and is flagged when the writer's value differs from the seed.
+func TestMarkReadersDirtyOnBALSeededAccountPaths(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
+	writer := state.Version{TxIndex: 1}
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	seedCode, otherCode := accounts.NewCode([]byte{0x60, 0x01}), accounts.NewCode([]byte{0x60, 0x02})
+	codeSeed := types.AccountChanges{CodeChanges: []*types.CodeChange{{Index: 2, Bytecode: seedCode.Bytes}}}
+	codeWrites := func(c accounts.Code) *state.WriteSet {
+		return newWS().code(addr, writer, c).codeHash(addr, writer, c.Hash).codeSize(addr, writer, c.Len()).build()
+	}
+	cases := []struct {
+		name         string
+		path         state.AccountPath
+		seed         types.AccountChanges
+		same, differ *state.WriteSet
+	}{
+		{
+			"balance", state.BalancePath,
+			types.AccountChanges{BalanceChanges: []*types.BalanceChange{{Index: 2, Value: *uint256.NewInt(7)}}},
+			newWS().bal(addr, writer, *uint256.NewInt(7)).build(), newWS().bal(addr, writer, *uint256.NewInt(8)).build(),
+		},
+		{
+			"nonce", state.NoncePath,
+			types.AccountChanges{NonceChanges: []*types.NonceChange{{Index: 2, Value: 7}}},
+			newWS().nonce(addr, writer, 7).build(), newWS().nonce(addr, writer, 8).build(),
+		},
+		{"code", state.CodePath, codeSeed, codeWrites(seedCode), codeWrites(otherCode)},
+		{
+			"code hash", state.CodeHashPath, codeSeed,
+			newWS().codeHash(addr, writer, seedCode.Hash).build(), newWS().codeHash(addr, writer, otherCode.Hash).build(),
+		},
+		{
+			"code size", state.CodeSizePath, codeSeed,
+			newWS().codeSize(addr, writer, seedCode.Len()).build(), newWS().codeSize(addr, writer, seedCode.Len()+1).build(),
+		},
+		{
+			"storage", state.StoragePath,
+			types.AccountChanges{StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(7)}}}}},
+			newWS().stor(addr, slot, writer, *uint256.NewInt(7)).build(), newWS().stor(addr, slot, writer, *uint256.NewInt(8)).build(),
+		},
+	}
+	for _, c := range cases {
+		newBE := func() *blockExecutor {
+			be := newDetExecutor(t, 4)
+			seed := c.seed
+			seed.Address = addr.Value()
+			be.versionMap = state.NewVersionMap(types.BlockAccessList{seed})
+			rs := state.ReadSet{}
+			key := accounts.NilKey
+			if c.path == state.StoragePath {
+				key = slot
+			}
+			rs.SetHeader(addr, c.path, key, state.ReadHeader{Source: state.MapRead, Version: writer})
+			be.blockIO.RecordReads(state.Version{TxIndex: 2}, rs)
+			be.indexReads(2, rs)
+			return be
+		}
+		valid := func(be *blockExecutor) state.VersionValidity {
+			return be.versionMap.ValidateVersion(2, be.blockIO, func(rv, wv state.Version) state.VersionValidity {
+				if rv != wv {
+					return state.VersionInvalid
+				}
+				return state.VersionValid
+			}, false, "")
+		}
+		t.Run(c.name+" seed left untouched", func(t *testing.T) {
+			be := newBE()
+			require.Equal(t, state.VersionValid, valid(be))
+			be.versionMap.FlushVersionedWrites(c.same, true)
+			be.markReadersDirty(1, c.same)
+			require.Empty(t, be.revalidate)
+			require.Equal(t, state.VersionValid, valid(be))
+		})
+		t.Run(c.name+" seed overwritten", func(t *testing.T) {
+			be := newBE()
+			be.markReadersDirty(1, c.differ)
+			require.Equal(t, map[int]bool{2: true}, be.revalidate)
+		})
+	}
+}
+
+// A re-run that no longer writes a value the access list seeds at its tx puts the seed back instead
+// of removing the cell. Without the cell, a later tx would read the committed value, and validation
+// accepts a committed read of a seeded path once the seed is back. A value the access list seeds
+// only below the tx is not the tx's write, so the cell is removed.
+func TestSelfLoopFlushKeepsTheSeedOfADroppedWrite(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
+	slot := accounts.InternKey(common.HexToHash("0x01"))
+	earlier := state.Version{TxIndex: 1}
+	seedCode, otherCode := accounts.NewCode([]byte{0x60, 0x01}), accounts.NewCode([]byte{0x60, 0x02})
+	cases := []struct {
+		name    string
+		seed    func(index uint32) types.AccountChanges
+		earlier *state.WriteSet
+		paths   []state.AccountPath
+		value   func(*state.VersionMap) any
+		want    any
+	}{
+		{
+			"balance",
+			func(index uint32) types.AccountChanges {
+				return types.AccountChanges{BalanceChanges: []*types.BalanceChange{{Index: index, Value: *uint256.NewInt(7)}}}
+			},
+			newWS().bal(addr, earlier, *uint256.NewInt(8)).build(),
+			[]state.AccountPath{state.BalancePath},
+			func(vm *state.VersionMap) any { v, _, _ := vm.ReadBalance(addr, 2); return v }, *uint256.NewInt(7),
+		},
+		{
+			"balance of a removed account",
+			func(index uint32) types.AccountChanges {
+				return types.AccountChanges{BalanceChanges: []*types.BalanceChange{{Index: index, Value: *uint256.NewInt(7)}}}
+			},
+			newWS().emptyRemoval(addr, earlier).build(),
+			[]state.AccountPath{state.BalancePath},
+			func(vm *state.VersionMap) any { v, _, _ := vm.ReadBalance(addr, 2); return v }, *uint256.NewInt(7),
+		},
+		{
+			"nonce",
+			func(index uint32) types.AccountChanges {
+				return types.AccountChanges{NonceChanges: []*types.NonceChange{{Index: index, Value: 7}}}
+			},
+			newWS().nonce(addr, earlier, 8).build(),
+			[]state.AccountPath{state.NoncePath},
+			func(vm *state.VersionMap) any { v, _, _ := vm.ReadNonce(addr, 2); return v }, uint64(7),
+		},
+		{
+			"code",
+			func(index uint32) types.AccountChanges {
+				return types.AccountChanges{CodeChanges: []*types.CodeChange{{Index: index, Bytecode: seedCode.Bytes}}}
+			},
+			newWS().code(addr, earlier, otherCode).codeHash(addr, earlier, otherCode.Hash).codeSize(addr, earlier, otherCode.Len()+1).build(),
+			[]state.AccountPath{state.CodePath, state.CodeHashPath, state.CodeSizePath},
+			func(vm *state.VersionMap) any {
+				code, _, _ := vm.ReadCode(addr, 2)
+				hash, _, _ := vm.ReadCodeHash(addr, 2)
+				size, _, _ := vm.ReadCodeSize(addr, 2)
+				return []any{code.Bytes, hash, size}
+			},
+			[]any{seedCode.Bytes, seedCode.Hash, seedCode.Len()},
+		},
+		{
+			"storage",
+			func(index uint32) types.AccountChanges {
+				return types.AccountChanges{StorageChanges: []types.SlotChanges{{Slot: slot, Changes: []*types.StorageChange{{Index: index, Value: *uint256.NewInt(7)}}}}}
+			},
+			newWS().stor(addr, slot, earlier, *uint256.NewInt(8)).build(),
+			[]state.AccountPath{state.StoragePath},
+			func(vm *state.VersionMap) any { v, _, _ := vm.ReadStorage(addr, slot, 2); return v }, *uint256.NewInt(7),
+		},
+	}
+	dropping := state.Version{TxIndex: 1, Incarnation: 1}
+	for _, c := range cases {
+		for _, at := range []struct {
+			name  string
+			index uint32
+			want  state.Version
+		}{
+			{"seeded at the tx", 2, dropping},
+			{"seeded below the tx", 1, state.Version{TxIndex: 0}},
+		} {
+			t.Run(c.name+" "+at.name, func(t *testing.T) {
+				be := newDetExecutor(t, 3)
+				seed := c.seed(at.index)
+				seed.Address = addr.Value()
+				be.versionMap = state.NewVersionMap(types.BlockAccessList{seed})
+				run := &exec.TxResult{Task: be.tasks[1].Task, TxOut: c.earlier}
+				be.selfLoopFlush(earlier, run, nil)
+				be.selfLoopFlush(dropping, &exec.TxResult{Task: be.tasks[1].Task, TxOut: &state.WriteSet{}}, run.TxOut)
+
+				key := accounts.NilKey
+				if c.paths[0] == state.StoragePath {
+					key = slot
+				}
+				for _, path := range c.paths {
+					res := be.versionMap.ReadStatus(addr, path, key, 2)
+					require.Equal(t, state.MVReadResultDone, res.Status(), path)
+					require.Equal(t, at.want, res.Version(), path)
+					require.NotEqual(t, state.ValueDeleted, res.ValStatus(), path)
+				}
+				require.Equal(t, c.want, c.value(be.versionMap))
+			})
+		}
+	}
+}
+
 func TestMarkReadersDirty(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
 	slot1 := accounts.InternKey(common.HexToHash("0x01"))
@@ -228,6 +431,47 @@ func TestMarkReadersDirty(t *testing.T) {
 		read(be, 2, 1, slot2)
 		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
 		require.Empty(t, be.revalidate)
+	})
+	seeded := types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot1, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(1)}}}}}}
+	t.Run("a write the BAL already holds leaves the readers clean", func(t *testing.T) {
+		be := newBE()
+		be.versionMap = state.NewVersionMap(seeded)
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
+		require.Empty(t, be.revalidate)
+	})
+	t.Run("a write the BAL holds leaves the readers clean after validation", func(t *testing.T) {
+		be := newBE()
+		be.versionMap = state.NewVersionMap(seeded)
+		ws := newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build()
+		be.versionMap.FlushVersionedWrites(ws, false)
+		be.versionMap.MarkWritesValidated(ws, func(accounts.Address) bool { return false })
+		be.markReadersDirty(1, ws)
+		require.Empty(t, be.revalidate)
+	})
+	t.Run("a Done cell a re-run left with the BAL value flags the readers", func(t *testing.T) {
+		be := newBE()
+		be.versionMap = state.NewVersionMap(seeded)
+		be.versionMap.WriteStorage(addr, slot1, state.Version{TxIndex: 1, Incarnation: 2}, *uint256.NewInt(1), true)
+		be.markReadersDirty(1, newWS().stor(addr, slot1, state.Version{TxIndex: 1, Incarnation: 3}, *uint256.NewInt(1)).build())
+		require.Equal(t, map[int]bool{2: true}, be.revalidate)
+	})
+	t.Run("a write the BAL does not hold flags the readers", func(t *testing.T) {
+		be := newBE()
+		be.versionMap = state.NewVersionMap(types.BlockAccessList{{Address: addr.Value(), StorageChanges: []types.SlotChanges{{Slot: slot2, Changes: []*types.StorageChange{{Index: 2, Value: *uint256.NewInt(1)}}}}}})
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).build())
+		require.Equal(t, map[int]bool{2: true}, be.revalidate)
+	})
+	t.Run("a write that differs from the BAL flags the readers", func(t *testing.T) {
+		be := newBE()
+		be.versionMap = state.NewVersionMap(seeded)
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(2)).build())
+		require.Equal(t, map[int]bool{2: true}, be.revalidate)
+	})
+	t.Run("a BAL block still flags readers of a lifecycle write", func(t *testing.T) {
+		be := newBE()
+		be.versionMap = state.NewVersionMap(seeded)
+		be.markReadersDirty(1, newWS().stor(addr, slot1, writer, *uint256.NewInt(1)).selfDestruct(addr, writer, true).build())
+		require.Equal(t, map[int]bool{2: true, 3: true}, be.revalidate)
 	})
 	writes := map[state.AccountPath]*state.WriteSet{
 		state.BalancePath:  newWS().bal(addr, writer, *uint256.NewInt(1)).build(),

@@ -35,7 +35,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
@@ -2439,15 +2438,12 @@ func (e *blockEndLogEngine) FinalizeAndAssemble(chainConfig *libchain.Config, he
 }
 
 // Logs of block-end system calls must reach the log address and topic indexes
-// at the block's final txNum, in both executors.
+// at the block's final txNum.
 func TestBlockEndSyscallLogsReachLogIndexes(t *testing.T) {
-	for _, tc := range []struct {
-		parallel bool
-		workers  int
-	}{{false, 1}, {true, 1}, {true, 4}} {
-		t.Run(fmt.Sprintf("parallel=%v/workers=%d", tc.parallel, tc.workers), func(t *testing.T) {
-			prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-			t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	for _, workers := range []int{1, 4} {
+		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
+			prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+			t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 
 			logContract := common.HexToAddress("0x00000000000000000000000000000000000c0de0")
 			code := []byte{byte(vm.PUSH1), 0x42, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG1), byte(vm.STOP)}
@@ -2461,8 +2457,7 @@ func TestBlockEndSyscallLogsReachLogIndexes(t *testing.T) {
 			}}
 			engine := &blockEndLogEngine{FakeEthash: ethash.NewFaker(), contract: accounts.InternAddress(logContract), calls: 3}
 
-			dbg.Exec3Parallel = false
-			ethconfig.Defaults.Sync.ExecWorkerCount = tc.workers
+			ethconfig.Defaults.Sync.ExecWorkerCount = workers
 			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithEngine(engine))
 			signer := types.LatestSignerForChainID(config.ChainID)
 			const blocks = 3
@@ -2474,8 +2469,6 @@ func TestBlockEndSyscallLogsReachLogIndexes(t *testing.T) {
 				}
 			})
 			require.NoError(t, err)
-
-			dbg.Exec3Parallel = tc.parallel
 			require.NoError(t, m.InsertChain(chainPack))
 
 			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
@@ -2506,8 +2499,8 @@ func TestBlockEndSyscallLogsReachLogIndexes(t *testing.T) {
 // step size, so every block crosses several mid-block step edges. The parallel executor must reproduce the roots
 // the serial block generator computed.
 func TestParallelStepEdgeFoldsMatchSerial(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 
 	counter := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
 	deployCode := append([]byte{byte(vm.PUSH1), byte(len(counter)), byte(vm.PUSH1), 12, byte(vm.PUSH1), 0, byte(vm.CODECOPY), byte(vm.PUSH1), byte(len(counter)), byte(vm.PUSH1), 0, byte(vm.RETURN)}, counter...)
@@ -2529,7 +2522,6 @@ func TestParallelStepEdgeFoldsMatchSerial(t *testing.T) {
 				keys[i] = key
 				alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(common.Ether)}
 			}
-			dbg.Exec3Parallel = false
 			ethconfig.Defaults.Sync.ExecWorkerCount = 4
 			m := execmoduletester.New(t, execmoduletester.WithKey(keys[0]),
 				execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc, GasLimit: 60_000_000}),
@@ -2567,7 +2559,6 @@ func TestParallelStepEdgeFoldsMatchSerial(t *testing.T) {
 					require.Equal(t, types.ReceiptStatusSuccessful, r.Status)
 				}
 			}
-			dbg.Exec3Parallel = true
 			require.NoError(t, m.InsertChain(chainPack))
 		})
 	}
@@ -2576,8 +2567,8 @@ func TestParallelStepEdgeFoldsMatchSerial(t *testing.T) {
 // TestParallelStepEdgeKeepsRevivedStorage revives a CREATE2 address in one tx, writes a slot in its init code,
 // then writes another slot after a mid-block step edge: the fold after the edge must not wipe the first slot.
 func TestParallelStepEdgeKeepsRevivedStorage(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 
 	counter := []byte{byte(vm.PUSH1), 0, byte(vm.SLOAD), byte(vm.PUSH1), 1, byte(vm.ADD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP)}
 	// With call value: self-destruct in the creating tx. Without: slot 1 = 1, deploy counter.
@@ -2601,7 +2592,6 @@ func TestParallelStepEdgeKeepsRevivedStorage(t *testing.T) {
 	from := crypto.PubkeyToAddress(key.PublicKey)
 	config := libchain.AllProtocolChanges
 	alloc := types.GenesisAlloc{from: {Balance: big.NewInt(common.Ether)}, factory: {Code: factoryCode, Balance: big.NewInt(0)}}
-	dbg.Exec3Parallel = false
 	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 	m := execmoduletester.New(t, execmoduletester.WithKey(key),
 		execmoduletester.WithGenesisSpec(&types.Genesis{Config: config, Alloc: alloc, GasLimit: 60_000_000}),
@@ -2627,6 +2617,5 @@ func TestParallelStepEdgeKeepsRevivedStorage(t *testing.T) {
 	for _, r := range chainPack.Receipts[0] {
 		require.Equal(t, types.ReceiptStatusSuccessful, r.Status)
 	}
-	dbg.Exec3Parallel = true
 	require.NoError(t, m.InsertChain(chainPack))
 }

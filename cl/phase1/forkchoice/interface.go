@@ -62,7 +62,7 @@ type ForkChoiceStorageReader interface {
 	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash
 	GetStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error)
-	GetOwnedStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error)
+	GetOwnedStateAtBlockRoot(blockRoot common.Hash, reuse *state.CachingBeaconState) (*state.CachingBeaconState, error)
 	// State-view callbacks must not call fork choice, mutate the state or keep it after returning.
 	ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error
 	ViewCurrentStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error
@@ -81,7 +81,8 @@ type ForkChoiceStorageReader interface {
 	Synced() bool
 	GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool)
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
-	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
+	NewestLightClientFinalityUpdate() *cltypes.LightClientUpdate
+	GetLightClientUpdates(startPeriod, endPeriod uint64) []*cltypes.LightClientUpdate
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	// [New in Gloas:EIP7732] GetBlock returns the full block for a given block root.
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)

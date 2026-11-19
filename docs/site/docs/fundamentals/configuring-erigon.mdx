@@ -99,7 +99,7 @@ These flags control database performance and memory usage. See [Database](/funda
 * `--db.safe.nosync`: Lets committed writes reach the disk in the background instead of flushing before each commit returns. After a power cut the node resumes from the last flushed point and re-syncs the seconds in between; the database stays intact either way. Set `--db.safe.nosync=false` to flush before every commit returns, at the cost of write speed.
   * Default: `true`
   * When the flag is not passed, the `MDBX_DURABLE=true` environment variable also turns the background flush off.
-* `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Raise it for nodes serving heavy parallel RPC. Lowering it does not reduce read concurrency: each parallel-execution worker holds a long-lived read transaction, so a value below the worker count would deadlock. Erigon raises a lower value, with a warning, to a floor that sums the exec workers, the parallel-commitment readers (GOMAXPROCS + 1, with `--experimental.parallel-commitment`), the BAL warmup readers, the block read-ahead workers and a fixed reserve; rpcdaemon uses the value as given. To genuinely reduce read concurrency, lower `--exec.workers` instead.
+* `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Raise it for nodes serving heavy parallel RPC. Lowering it does not reduce read concurrency: each parallel-execution worker holds a long-lived read transaction, so a value below the worker count would deadlock. Erigon raises a lower value, with a warning, to a floor that sums the exec workers, the parallel-commitment readers (GOMAXPROCS + 1), the BAL warmup readers, the block read-ahead workers and a fixed reserve; rpcdaemon uses the value as given. To genuinely reduce read concurrency, lower `--exec.workers` instead.
   * Default: scales with the host as `min(max(10, GOMAXPROCS * 64), 9000)` — kept well above the CPU count because reads are I/O-bound, and capped below Go's roughly 10,000 OS-thread limit.
 * `--database.verbosity value`: Enables internal database logs.
   * Default: `2`
@@ -378,8 +378,6 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `false`
 * `--http.dbg.single`: Accepts the `dbg: true` HTTP header on an RPC request and logs how that request was executed. Intended for debugging a single call, not for continuous use.
   * Default: `false`
-* `--trace.maxtraces value`: Caps the number of traces `trace_filter` may return.
-  * Default: `200`
 * `--trace.compat`: Reproduces OpenEthereum's quirks in the `trace_` namespace, for consumers that depend on them.
   * Default: `false`
 * `--ots.search.max.pagesize value`: Caps the page size accepted by the Otterscan (`ots_`) search methods.
@@ -543,10 +541,11 @@ Flags for configuring the parallel block execution engine.
 * `--exec.state-cache`: Enable the executor's domain-shared read cache. Equivalent to `USE_STATE_CACHE=true`. Disable for cold-read performance measurements.
   * Default: `true`
 
-**Commitment-trie construction.** The following flag changes how the commitment (state-root) trie is computed during execution.
+**Commitment-trie construction.** By default the commitment (state-root) trie is computed with the fully parallel `ParallelPatriciaHashed` implementation.
 
-* `--experimental.parallel-commitment` *(New in v3.6)*: Compute the commitment trie with the fully parallel `ParallelPatriciaHashed` implementation. Pass `--experimental.parallel-commitment=false`, or set `COMMITMENT_PARALLEL=false`, to fall back to the sequential `HexPatriciaHashed` trie.
-  * Default: `true`
+* `--experimental.parallel-commitment` *(Deprecated)*: No longer has any effect.
+* `--experimental.commitment-v3` *(New in v3.9)*: Compute the commitment trie with commitment v3, which stores one record per trie node; set `ERIGON_COMMITMENT_V3=true` for the same effect. A datadir with legacy commitment files must first be converted with `integration commitment convert --v3`; with the flag off, Erigon refuses a datadir that holds v3 commitment files. If convert refuses the datadir, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes --no-history` with `ERIGON_COMMITMENT_V3=true` when commitment history was pruned, or `integration commitment rebuild --yes` with `ERIGON_COMMITMENT_V3=true` otherwise. Convert keeps the legacy files in `snapshots/backup/` until you delete them; `integration commitment convert --restore` brings them back only until the node writes its first new commitment file.
+  * Default: `false`
 
 ### Caplin (Consensus Layer)
 
@@ -592,6 +591,9 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `false`
 * `--caplin.blobs-immediate-backfill`: Tells Caplin to immediately backfill blobs.
   * Default: `false`
+* `--caplin.blobs-backfill-endpoint value`: Beacon API endpoint that the blob backfill asks for a block's blobs before peers. Repeat it for fallback endpoints. The blobs are verified against the block before they are stored. Without `--caplin.blobs-archive` the backfill covers only the blob retention window (4096 epochs, about 18 days on mainnet); with it, older slots need an archive-capable endpoint.
+* `--caplin.blobs-backfill-endpoint-workers value`: Number of KZG proofs the blob backfill computes at a time, one CPU each, for blobs from `--caplin.blobs-backfill-endpoint` whose proof the endpoint left out; up to twice as many blocks are fetched at a time, and verifying them, about 2% of the proof cost, is not limited. Set it to the number of CPUs the node can spare: fewer on a validator node, more on a dedicated archive node. The node logs the setting and the CPU core count once at startup.
+  * Default: `0` — a quarter of the CPUs the process may use (`GOMAXPROCS`, which follows a container's CPU limit), at least 1
 * `--caplin.blobs-no-pruning`: Disables blob pruning.
   * Default: `false`
 * `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for data availability (DA) oracle or rollup nodes that need longer column history.
@@ -703,7 +705,6 @@ Erigon's own variables — everything below except the [Docker](#docker-environm
 
 **Execution and Processing:**
 
-* `EXEC3_PARALLEL` - Enables parallel block execution (Block-STM). **Default changed to `true` in v3.5** — parallel execution is now on by default. Set to `false` or use `--exec.serial` to revert to single-threaded execution.
 * `EXEC3_WORKERS` - Sets the number of parallel execution workers (default: number of CPU cores)
 * `STAGES_ONLY_BLOCKS` - Limits stages to blocks only
 
