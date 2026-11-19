@@ -636,8 +636,6 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
 }
 
-var removeThrowawayDB = dir.RemoveAll
-
 func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
 	dirs := datadir.Open(datadirCli)
 	if err := CheckSaltFilesExist(dirs); err != nil {
@@ -658,7 +656,7 @@ func commitmentConvertWithoutChaindata(ctx context.Context, logger log.Logger, o
 		return err
 	}
 	defer func() {
-		if err := removeThrowawayDB(throwawayDir); err != nil {
+		if err := dir.RemoveAll(throwawayDir); err != nil {
 			logger.Warn("[commitment_convert] removing the throwaway DB failed", "dir", throwawayDir, "err", err)
 		}
 	}()
