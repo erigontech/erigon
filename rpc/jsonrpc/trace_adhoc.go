@@ -1315,7 +1315,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	ibs := state.New(stateReader)
+	ibs := state.NewVersionedCall(stateReader)
 	defer ibs.Close()
 
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, api.evmCallTimeout)
@@ -1326,7 +1326,6 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
-	transactions.VersionedCallState(ibs)
 	if traceTypeVmTrace {
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
@@ -1406,9 +1405,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 			return nil, err
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
-		initialIbs := state.New(stateReader)
+		initialIbs := state.NewVersionedCall(stateReader)
 		defer initialIbs.Close()
-		transactions.VersionedCallState(initialIbs)
 		if traceConfig != nil && traceConfig.StateOverrides != nil {
 			if _, err := applyStateOverrides(initialIbs, traceConfig.StateOverrides, blockCtx.Rules(chainConfig)); err != nil {
 				return nil, err
@@ -1592,9 +1590,8 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
-	ibs := state.New(cachedReader)
+	ibs := state.NewVersionedBlock(cachedReader)
 	defer ibs.Close()
-	transactions.VersionedBlockState(ibs)
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
 		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig, overrides)
@@ -1881,9 +1878,8 @@ func finalizeTraceTx(ibs *state.IntraBlockState, rules *chain.Rules, cloneReader
 	if sd == nil {
 		return ethapi.FinalizeCallTxTo(ibs, rules, cachedWriter)
 	}
-	initialIbs := state.New(cloneReader)
+	initialIbs := state.NewVersionedCall(cloneReader)
 	defer initialIbs.Close()
-	transactions.VersionedCallState(initialIbs)
 	var changes bufferedWriter
 	if err := ethapi.EndCallTx(ibs, rules, &changes); err != nil {
 		return err
@@ -2039,9 +2035,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 	}
 
-	ibs := state.New(stateReader)
+	ibs := state.NewVersionedCall(stateReader)
 	defer ibs.Close()
-	transactions.VersionedCallState(ibs)
 
 	var ot OeTracer
 	ot.config, err = parseOeTracerConfig(nil)
@@ -2101,9 +2096,8 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		if err := ethapi.EndCallTx(ibs, evm.ChainRules(), sd); err != nil {
 			return nil, err
 		}
-		initialIbs := state.New(stateReader)
+		initialIbs := state.NewVersionedCall(stateReader)
 		defer initialIbs.Close()
-		transactions.VersionedCallState(initialIbs)
 		if err := sd.CompareStates(initialIbs, ibs); err != nil {
 			return nil, err
 		}
