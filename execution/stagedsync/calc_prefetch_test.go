@@ -75,7 +75,7 @@ func TestComputeAhead_FirstBlockSkipsBranchPrefetch(t *testing.T) {
 	ctx := context.Background()
 	db, _, doms := setupStepTest(t)
 	out := make(chan commitmentResult, 4)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, make(chan applyResult, 4), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, make(chan applyResult, 4), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 	cc.hasFirstBlock = true
@@ -146,7 +146,7 @@ func TestCalculatorRootUnchangedByBranchPrefetch(t *testing.T) {
 
 		in := make(chan applyResult, 64)
 		out := make(chan commitmentResult, 64)
-		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 		require.NoError(t, err)
 
 		const lastTxNum = 1 + 64
@@ -217,7 +217,7 @@ func TestCalculatorRootSameWithFirstTouchBaseCache(t *testing.T) {
 		doms.SetDisableInlineTouchKey(true)
 
 		out := make(chan commitmentResult, 64)
-		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, perBlock, 1<<62, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, perBlock, 1<<62, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 		require.NoError(t, err)
 
 		txNum := uint64(1)

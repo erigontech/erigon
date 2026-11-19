@@ -123,13 +123,6 @@ func storageTouch(n int) PathTouch {
 
 func firstKey(t PathTouch) []byte { return v3.StorageNodeKey(t.Account, nil, nil) }
 
-func resetPublishedPrefetcher(t *testing.T) {
-	t.Cleanup(func() {
-		closePublishedBranchPrefetcher()
-		TakeBranchPrefetcher(0, common.Hash{}, 0)
-	})
-}
-
 func returnsWithin(d time.Duration, f func()) bool {
 	done := make(chan struct{})
 	go func() {
@@ -153,7 +146,7 @@ func TestBranchPrefetcherOpensItsReadTxsOnce(t *testing.T) {
 		touches[i] = storageTouch(i)
 	}
 	p.Add(touches...)
-	p.Drain()
+	p.Drain(t.Context())
 	require.Equal(t, branchPrefetchTxs, db.beginCount())
 	got := db.readKeys()
 	require.Len(t, got, len(touches))
@@ -170,23 +163,33 @@ func TestBranchPrefetcherOpensItsReadTxsOnce(t *testing.T) {
 
 func TestBranchPrefetcherDrainWalksSortedUniqueBacklog(t *testing.T) {
 	db := newFakeDB(1)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	db.onRead = func([]byte) {
+		once.Do(func() { close(entered) })
+		<-release
+	}
 	p := NewBranchPrefetcher(t.Context(), db)
 	defer p.Close()
-	tx := p.borrow()
-	require.NotNil(t, tx)
+	p.Add(storageTouch(200))
+	<-entered
 	touches := []PathTouch{storageTouch(9), storageTouch(3), storageTouch(7), storageTouch(3), storageTouch(1)}
 	p.Add(touches...)
-	require.Empty(t, db.readKeys())
-	p.giveBack(tx)
-	p.Drain()
-
+	drained := make(chan struct{})
+	go func() {
+		p.Drain(t.Context())
+		close(drained)
+	}()
 	unique := slices.CompactFunc(slices.SortedFunc(slices.Values(touches), ComparePathTouch), func(a, b PathTouch) bool { return a == b })
-	want := make([][]byte, len(unique))
-	for i, touch := range unique {
-		want[i] = firstKey(touch)
+	require.Eventually(t, func() bool { return p.Stats().Backlog == len(unique) }, 10*time.Second, time.Millisecond)
+	close(release)
+	<-drained
+
+	want := [][]byte{firstKey(storageTouch(200))}
+	for _, touch := range unique {
+		want = append(want, firstKey(touch))
 	}
 	require.Equal(t, want, db.readKeys())
-	require.Equal(t, len(unique), p.Stats().Backlog)
 }
 
 func TestBranchPrefetcherDrainWaitsForRunningWorker(t *testing.T) {
@@ -204,7 +207,7 @@ func TestBranchPrefetcherDrainWaitsForRunningWorker(t *testing.T) {
 
 	drained := make(chan struct{})
 	go func() {
-		p.Drain()
+		p.Drain(t.Context())
 		close(drained)
 	}()
 	select {
@@ -237,7 +240,7 @@ func TestBranchPrefetcherWithoutReadTxsQueuesNothing(t *testing.T) {
 		p := NewBranchPrefetcher(t.Context(), db)
 		require.True(t, returnsWithin(time.Second, func() {
 			p.Add(storageTouch(1))
-			p.Drain()
+			p.Drain(t.Context())
 		}), name)
 		require.Zero(t, p.Stats().Queued, name)
 		p.Close()
@@ -249,7 +252,7 @@ func TestBranchPrefetcherDoesNotPoolTxOfAnotherView(t *testing.T) {
 	db.odd = map[int]uint64{3: 99}
 	p := NewBranchPrefetcher(t.Context(), db)
 	require.Equal(t, 2, p.pool)
-	require.Equal(t, uint64(5), p.ViewID)
+	require.Equal(t, PrefetchView{MDBX: 5}, p.View)
 	require.Equal(t, []int{0, 0, 1}, db.rollbackCounts())
 	p.Close()
 	require.Equal(t, []int{1, 1, 1}, db.rollbackCounts())
@@ -300,36 +303,36 @@ func publishedFake(t *testing.T, num uint64, parent common.Hash) (*BranchPrefetc
 }
 
 func TestBranchPrefetcherTakeHandsOverOnce(t *testing.T) {
-	resetPublishedPrefetcher(t)
+	var slot prefetchSlot
 	p, _ := publishedFake(t, 7, common.Hash{1})
-	require.True(t, publishBranchPrefetcher(p))
-	require.Same(t, p, TakeBranchPrefetcher(7, common.Hash{1}, p.ViewID))
-	require.Nil(t, TakeBranchPrefetcher(7, common.Hash{1}, p.ViewID))
+	require.True(t, slot.publish(p))
+	require.Same(t, p, slot.take(7, common.Hash{1}, p.View))
+	require.Nil(t, slot.take(7, common.Hash{1}, p.View))
 }
 
 func TestBranchPrefetcherTakeRefusesAnotherView(t *testing.T) {
-	resetPublishedPrefetcher(t)
+	var slot prefetchSlot
 	p, db := publishedFake(t, 7, common.Hash{1})
-	require.True(t, publishBranchPrefetcher(p))
-	require.Nil(t, TakeBranchPrefetcher(7, common.Hash{1}, p.ViewID+1))
+	require.True(t, slot.publish(p))
+	require.Nil(t, slot.take(7, common.Hash{1}, PrefetchView{MDBX: p.View.MDBX, Files: p.View.Files + 1}))
 	for i, c := range db.rollbackCounts() {
 		require.Equal(t, 1, c, "tx %d", i)
 	}
 }
 
 func TestBranchPrefetcherPublishAfterClaimIsRefused(t *testing.T) {
-	resetPublishedPrefetcher(t)
-	require.Nil(t, TakeBranchPrefetcher(9, common.Hash{2}, 0))
+	var slot prefetchSlot
+	require.Nil(t, slot.take(9, common.Hash{2}, PrefetchView{}))
 	p, _ := publishedFake(t, 9, common.Hash{2})
-	require.False(t, publishBranchPrefetcher(p))
+	require.False(t, slot.publish(p))
 }
 
 func TestBranchPrefetcherPublishClosesUnclaimedPrevious(t *testing.T) {
-	resetPublishedPrefetcher(t)
+	var slot prefetchSlot
 	first, firstDB := publishedFake(t, 7, common.Hash{1})
 	second, _ := publishedFake(t, 8, common.Hash{1})
-	require.True(t, publishBranchPrefetcher(first))
-	require.True(t, publishBranchPrefetcher(second))
+	require.True(t, slot.publish(first))
+	require.True(t, slot.publish(second))
 	for i, c := range firstDB.rollbackCounts() {
 		require.Equal(t, 1, c, "tx %d", i)
 	}
@@ -354,9 +357,117 @@ func TestBranchPrefetcherCloseStopsARunningWorkerAtItsBatch(t *testing.T) {
 		p.Close()
 		close(closed)
 	}()
-	time.Sleep(20 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.closed
+	}, 10*time.Second, time.Millisecond)
 	close(release)
 	<-closed
 	require.Len(t, db.readKeys(), 1, "a closed prefetcher reads nothing past the batch a worker holds")
 	require.Equal(t, []int{1}, db.rollbackCounts())
+}
+
+func TestBranchPrefetcherDrainGivesUpAfterItsBound(t *testing.T) {
+	db := newFakeDB(1)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	db.onRead = func([]byte) {
+		once.Do(func() { close(entered) })
+		<-release
+	}
+	p := NewBranchPrefetcher(t.Context(), db)
+	defer p.Close()
+	defer close(release)
+	p.Add(storageTouch(1))
+	<-entered
+	for i := range 2 * branchPrefetchBatch {
+		p.Add(storageTouch(i + 2))
+	}
+	start := time.Now()
+	p.Drain(t.Context())
+	require.GreaterOrEqual(t, time.Since(start), branchPrefetchDrainMax)
+	st := p.Stats()
+	require.Equal(t, 1, st.DrainTimeouts)
+	require.Equal(t, 2*branchPrefetchBatch, st.Dropped, "the fold reads what the drain left; the backlog is dropped")
+}
+
+func TestBranchPrefetcherDrainReturnsWhenItsContextEnds(t *testing.T) {
+	db := newFakeDB(1)
+	entered, release := make(chan struct{}), make(chan struct{})
+	db.onRead = func([]byte) {
+		close(entered)
+		<-release
+	}
+	p := NewBranchPrefetcher(t.Context(), db)
+	defer p.Close()
+	defer close(release)
+	p.Add(storageTouch(1))
+	<-entered
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	start := time.Now()
+	p.Drain(ctx)
+	require.Less(t, time.Since(start), branchPrefetchDrainMax)
+}
+
+func TestBranchPrefetcherBoundsItsBacklog(t *testing.T) {
+	db := newFakeDB(1)
+	p := NewBranchPrefetcher(t.Context(), db)
+	defer p.Close()
+	tx := p.borrow()
+	items := make([]PathTouch, branchPrefetchBacklog+5)
+	p.Add(items...)
+	st := p.Stats()
+	require.Equal(t, branchPrefetchBacklog, st.Queued)
+	require.Equal(t, 5, st.Dropped)
+	p.giveBack(tx)
+}
+
+func TestBlockReadAheaderBranchPrefetcherReadsNothingAtAnotherView(t *testing.T) {
+	db := newFakeDB(-1)
+	var bra *BlockReadAheader
+	p, adopted := bra.BranchPrefetcher(t.Context(), db, 21, common.Hash{3}, PrefetchView{MDBX: db.view + 1})
+	defer p.Close()
+	require.False(t, adopted)
+	p.Add(storageTouch(1))
+	require.Zero(t, p.Stats().Queued, "a prefetcher that cannot read at the fold's view queues nothing")
+	for _, n := range db.rollbackCounts() {
+		require.Equal(t, 1, n)
+	}
+
+	same, adopted := bra.BranchPrefetcher(t.Context(), db, 22, common.Hash{3}, PrefetchView{MDBX: db.view})
+	defer same.Close()
+	require.False(t, adopted)
+	same.Add(storageTouch(1))
+	require.Equal(t, 1, same.Stats().Queued)
+}
+
+func TestBlockReadAheaderBranchPrefetcherAdoptsThePublishedOne(t *testing.T) {
+	bra := NewBlockReadAheader()
+	db := newFakeDB(-1)
+	published := NewBranchPrefetcher(t.Context(), db)
+	published.BlockNum, published.ParentHash = 41, common.Hash{5}
+	require.True(t, bra.prefetchers.publish(published))
+	p, adopted := bra.BranchPrefetcher(t.Context(), db, 41, common.Hash{5}, published.View)
+	defer p.Close()
+	require.True(t, adopted)
+	require.Same(t, published, p)
+}
+
+func TestBranchPrefetcherPublishAfterShutdownIsRefused(t *testing.T) {
+	var slot prefetchSlot
+	slot.close(true)
+	p := NewBranchPrefetcher(t.Context(), newFakeDB(-1))
+	defer p.Close()
+	p.BlockNum, p.ParentHash = 31, common.Hash{4}
+	require.False(t, slot.publish(p))
+}
+
+func TestBranchPrefetcherLeafRefsOfAnEmptyRecord(t *testing.T) {
+	p := NewBranchPrefetcher(t.Context(), nil)
+	p.Put([]byte{1}, nil, 0)
+	data, _, ok := p.Get([]byte{1})
+	require.True(t, ok)
+	require.Nil(t, p.LeafRefs([]byte{1}, data))
 }

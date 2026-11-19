@@ -52,8 +52,9 @@ type BlockReadAheader struct {
 	// pre-warmed. Without it, prefetches only warm OS page cache + RoTx
 	// cursors — disconnected from the cache layer the EVM actually reads.
 	// Mirrors reth's CachedReads / ExecutionCache "same hashmap" property.
-	stateCache *cache.StateCache
-	preExec    *preExecCfg
+	stateCache  *cache.StateCache
+	preExec     *preExecCfg
+	prefetchers prefetchSlot
 }
 
 func NewBlockReadAheader() *BlockReadAheader {
@@ -247,6 +248,7 @@ func (bra *BlockReadAheader) SuspendWarmup(ctx context.Context) (func(), error) 
 	if err := bra.warmupGate.Acquire(ctx, 1); err != nil {
 		return nil, err
 	}
+	bra.prefetchers.close(false)
 	return sync.OnceFunc(func() { bra.warmupGate.Release(1) }), nil
 }
 
@@ -279,7 +281,7 @@ func (bra *BlockReadAheader) WaitForWarmup(ctx context.Context) {
 	if err := bra.warmupGate.Acquire(ctx, 1); err == nil {
 		bra.warmupGate.Release(1)
 	}
-	closePublishedBranchPrefetcher()
+	bra.prefetchers.close(true)
 }
 
 type SendersRecovery struct {
@@ -492,7 +494,7 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 	if statecfg.ExperimentalCommitmentV3 {
 		p = NewBranchPrefetcher(ctx, db)
 		p.BlockNum, p.ParentHash = header.Number.Uint64(), header.ParentHash
-		if p.pool == 0 || !publishBranchPrefetcher(p) {
+		if p.pool == 0 || !bra.prefetchers.publish(p) {
 			p.Close()
 			p = nil
 		}

@@ -116,7 +116,7 @@ func TestParentRecordsOnlyForOneVerifiedChildOfTheReadHead(t *testing.T) {
 	ctx := t.Context()
 	db, _, doms := setupStepTest(t)
 	out := make(chan commitmentResult, 1)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 0, make(chan applyResult), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 0, make(chan applyResult), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 	cc.readAtNum, cc.readAtHash = 9, head
@@ -173,7 +173,7 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 
 	cc.handleBlockRequest(context.Background(), &blockRequest{blockNum: 5, bal: bal})
 
-	p.Drain()
+	p.Drain(t.Context())
 	require.Equal(t, 4, p.Stats().Queued)
 	hash := keccak.Sum256
 	require.Contains(t, db.recorded(), string(v3.StorageNodeKey(hash(storageOnly[:]), nil, nil)))
@@ -191,7 +191,7 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 	db, tx, doms := setupStepTest(t)
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 	p := cc.branchPrefetch
@@ -270,6 +270,6 @@ func TestCalculatorQueuesAWriteSetAsOneSortedBatch(t *testing.T) {
 	cc.flushBranches()
 	require.Empty(t, cc.touchBatch)
 	require.True(t, slices.IsSortedFunc(cc.touchBatch[:3], exec.ComparePathTouch), "the batch is sorted before it is handed over")
-	p.Drain()
+	p.Drain(t.Context())
 	require.Equal(t, 3, p.Stats().Queued)
 }

@@ -236,6 +236,7 @@ func newCommitmentCalculator(
 	out chan commitmentResult,
 	drTemplate *state.LayeredDomainReader,
 	logCommit func(commitment.CommitProgress),
+	readAheader *exec.BlockReadAheader,
 ) (*commitmentCalculator, error) {
 	// ModeUpdate carries values in its btree for the trie to read; the parallel
 	// trie reads leaf values from the as-of reader and v3 owns its own collected
@@ -296,10 +297,7 @@ func newCommitmentCalculator(
 				cc.readAtNum, cc.readAtHash = n, h
 			}
 		}
-		cc.branchPrefetch = exec.TakeBranchPrefetcher(cc.readAtNum+1, cc.readAtHash, kv.UnderlyingTx(roTx).ViewID())
-		if cc.adopted = cc.branchPrefetch != nil; !cc.adopted {
-			cc.branchPrefetch = exec.NewBranchPrefetcher(workCtx, db)
-		}
+		cc.branchPrefetch, cc.adopted = readAheader.BranchPrefetcher(workCtx, db, cc.readAtNum+1, cc.readAtHash, exec.ViewOf(roTx))
 		asOfReader.prefetched = cc.branchPrefetch
 	}
 	if dbg.BALCommitmentWarmupReaders() > 0 {
@@ -324,7 +322,7 @@ func (cc *commitmentCalculator) Stop() {
 	if p := cc.branchPrefetch; p != nil {
 		p.Close()
 		st := p.Stats()
-		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", st.Bytes, "adopted", cc.adopted, "queued", st.Queued, "backlog", st.Backlog, "foldHits", st.FoldHits, "foldMisses", st.FoldMisses, "drainWaitUs", st.DrainWait.Microseconds())
+		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", st.Bytes, "adopted", cc.adopted, "queued", st.Queued, "dropped", st.Dropped, "backlog", st.Backlog, "drainTimeout", st.DrainTimeouts, "foldHits", st.FoldHits, "foldMisses", st.FoldMisses, "drainWaitUs", st.DrainWait.Microseconds())
 		if commitmentdb.ParentReadsWanted() {
 			if r := cc.parentRecords(); r != nil {
 				commitmentdb.PublishParentRecords(r)
@@ -771,7 +769,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // buffer rather than compute()'s shared one.
 func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
 	cc.finishPrefetch()
-	cc.branchPrefetch.Drain()
+	cc.branchPrefetch.Drain(ctx)
 	sdCtx := cc.doms.GetCommitmentContext()
 	if cc.branchPrefetch != nil {
 		sdCtx.SetFeed(&cc.feed.Feed)

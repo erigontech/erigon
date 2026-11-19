@@ -37,6 +37,8 @@ const (
 	branchPrefetchWorkers  = 8
 	branchPrefetchTxs      = 16
 	branchPrefetchBatch    = 8
+	branchPrefetchBacklog  = 1 << 16
+	branchPrefetchDrainMax = 100 * time.Millisecond
 	branchPrefetchShards   = 64
 	branchPrefetchMaxBytes = 1 << 30
 )
@@ -79,16 +81,28 @@ type prefetchedShard struct {
 }
 
 type BranchPrefetchStats struct {
-	Bytes                int64
-	Queued, Backlog      int
-	FoldHits, FoldMisses uint64
-	DrainWait            time.Duration
+	Bytes                    int64
+	Queued, Dropped, Backlog int
+	FoldHits, FoldMisses     uint64
+	DrainWait                time.Duration
+	DrainTimeouts            int
+}
+
+type PrefetchView struct{ MDBX, Files uint64 }
+
+func ViewOf(tx kv.TemporalTx) PrefetchView {
+	tx = kv.UnderlyingTx(tx)
+	v := PrefetchView{MDBX: tx.ViewID()}
+	if files, ok := tx.(interface{ HistoryFilesGeneration() uint64 }); ok {
+		v.Files = files.HistoryFilesGeneration()
+	}
+	return v
 }
 
 type BranchPrefetcher struct {
 	BlockNum   uint64
 	ParentHash common.Hash
-	ViewID     uint64
+	View       PrefetchView
 
 	seed   maphash.Seed
 	shards [branchPrefetchShards]prefetchedShard
@@ -106,8 +120,8 @@ type BranchPrefetcher struct {
 	running int
 	closed  bool
 
-	queued, drainBacklog int
-	drainWait            time.Duration
+	queued, dropped, drainBacklog, drainTimeouts int
+	drainWait                                    time.Duration
 }
 
 func NewBranchPrefetcher(ctx context.Context, db kv.RoDB) *BranchPrefetcher {
@@ -119,7 +133,7 @@ func NewBranchPrefetcher(ctx context.Context, db kv.RoDB) *BranchPrefetcher {
 	if db == nil {
 		return p
 	}
-	ctx = kv.WithNonBlockingAcquire(ctx)
+	ctx = kv.WithNonBlockingAcquire(context.WithoutCancel(ctx))
 	for range branchPrefetchTxs {
 		tx, err := db.BeginRo(ctx) //nolint:gocritic
 		if err != nil {
@@ -130,10 +144,10 @@ func NewBranchPrefetcher(ctx context.Context, db kv.RoDB) *BranchPrefetcher {
 			tx.Rollback()
 			break
 		}
-		view := kv.UnderlyingTx(ttx).ViewID()
+		view := ViewOf(ttx)
 		if len(p.txs) == 0 {
-			p.ViewID = view
-		} else if view != p.ViewID {
+			p.View = view
+		} else if view != p.View {
 			tx.Rollback()
 			break
 		}
@@ -148,6 +162,13 @@ func (p *BranchPrefetcher) Add(items ...PathTouch) {
 	defer p.mu.Unlock()
 	if p.closed || p.pool == 0 {
 		return
+	}
+	if p.head*2 >= len(p.backlog) {
+		p.backlog, p.head = p.backlog[:copy(p.backlog, p.backlog[p.head:])], 0
+	}
+	if room := branchPrefetchBacklog - len(p.backlog); len(items) > room {
+		p.dropped += len(items) - room
+		items = items[:room]
 	}
 	p.backlog = append(p.backlog, items...)
 	p.queued += len(items)
@@ -227,22 +248,37 @@ func (p *BranchPrefetcher) giveBack(tx kv.TemporalTx) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.release(tx)
+	if !p.closed {
+		p.spawn(branchPrefetchWorkers)
+	}
 }
 
-func (p *BranchPrefetcher) Drain() {
+func (p *BranchPrefetcher) Drain(ctx context.Context) {
 	if p == nil {
 		return
 	}
 	start := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, branchPrefetchDrainMax)
+	defer cancel()
+	defer context.AfterFunc(ctx, func() {
+		p.mu.Lock()
+		p.idle.Broadcast()
+		p.mu.Unlock()
+	})()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	rest := p.backlog[p.head:]
 	slices.SortFunc(rest, ComparePathTouch)
 	p.backlog = p.backlog[:p.head+len(slices.Compact(rest))]
 	p.drainBacklog += len(p.backlog) - p.head
-	for !p.closed && (p.head < len(p.backlog) || p.running > 0) {
+	for !p.closed && ctx.Err() == nil && (p.head < len(p.backlog) || p.running > 0) {
 		p.spawn(branchPrefetchTxs)
 		p.idle.Wait()
+	}
+	if ctx.Err() != nil && p.head < len(p.backlog) {
+		p.dropped += len(p.backlog) - p.head
+		p.backlog, p.head = p.backlog[:0], 0
+		p.drainTimeouts++
 	}
 	p.drainWait += time.Since(start)
 }
@@ -269,8 +305,8 @@ func (p *BranchPrefetcher) Stats() BranchPrefetchStats {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return BranchPrefetchStats{
-		Bytes: p.bytes.Load(), Queued: p.queued, Backlog: p.drainBacklog,
-		FoldHits: p.foldHits.Load(), FoldMisses: p.foldMisses.Load(), DrainWait: p.drainWait,
+		Bytes: p.bytes.Load(), Queued: p.queued, Dropped: p.dropped, Backlog: p.drainBacklog,
+		FoldHits: p.foldHits.Load(), FoldMisses: p.foldMisses.Load(), DrainWait: p.drainWait, DrainTimeouts: p.drainTimeouts,
 	}
 }
 
@@ -303,7 +339,7 @@ func (p *BranchPrefetcher) FoldGet(key []byte) ([]byte, kv.Step, bool) {
 
 func (p *BranchPrefetcher) LeafRefs(key, data []byte) *commitment.LeafRefs {
 	r, ok := p.lookup(key)
-	if !ok || len(r.data) != len(data) || &r.data[0] != &data[0] {
+	if !ok || len(data) == 0 || len(r.data) != len(data) || &r.data[0] != &data[0] {
 		return nil
 	}
 	return r.refs
@@ -327,17 +363,17 @@ func (p *BranchPrefetcher) Put(key, data []byte, step kv.Step) []byte {
 	return data
 }
 
-var publishedPrefetcher struct {
+type prefetchSlot struct {
 	sync.Mutex
 	p             *BranchPrefetcher
 	claimedNum    uint64
 	claimedParent common.Hash
+	shut          bool
 }
 
-func publishBranchPrefetcher(p *BranchPrefetcher) bool {
-	s := &publishedPrefetcher
+func (s *prefetchSlot) publish(p *BranchPrefetcher) bool {
 	s.Lock()
-	if s.claimedNum == p.BlockNum && s.claimedParent == p.ParentHash {
+	if s.shut || s.claimedNum == p.BlockNum && s.claimedParent == p.ParentHash {
 		s.Unlock()
 		return false
 	}
@@ -348,8 +384,7 @@ func publishBranchPrefetcher(p *BranchPrefetcher) bool {
 	return true
 }
 
-func TakeBranchPrefetcher(blockNum uint64, parentHash common.Hash, viewID uint64) *BranchPrefetcher {
-	s := &publishedPrefetcher
+func (s *prefetchSlot) take(blockNum uint64, parentHash common.Hash, view PrefetchView) *BranchPrefetcher {
 	s.Lock()
 	s.claimedNum, s.claimedParent = blockNum, parentHash
 	p := s.p
@@ -359,18 +394,31 @@ func TakeBranchPrefetcher(blockNum uint64, parentHash common.Hash, viewID uint64
 	}
 	s.p = nil
 	s.Unlock()
-	if p.ViewID != viewID || p.pool == 0 {
+	if p.View != view || p.pool == 0 {
 		p.Close()
 		return nil
 	}
 	return p
 }
 
-func closePublishedBranchPrefetcher() {
-	s := &publishedPrefetcher
+func (s *prefetchSlot) close(shut bool) {
 	s.Lock()
 	p := s.p
-	s.p = nil
+	s.p, s.shut = nil, shut
 	s.Unlock()
 	p.Close()
+}
+
+func (bra *BlockReadAheader) BranchPrefetcher(ctx context.Context, db kv.RoDB, blockNum uint64, parentHash common.Hash, view PrefetchView) (*BranchPrefetcher, bool) {
+	if bra != nil {
+		if p := bra.prefetchers.take(blockNum, parentHash, view); p != nil {
+			return p, true
+		}
+	}
+	p := NewBranchPrefetcher(ctx, db)
+	if p.pool > 0 && p.View != view {
+		p.Close()
+		p = NewBranchPrefetcher(ctx, nil)
+	}
+	return p, false
 }

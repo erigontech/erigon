@@ -128,7 +128,7 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 
 	// Block 1: txNums 1..10, fully before the step-0 edge (txNum 15).
@@ -203,7 +203,7 @@ func TestCommitmentCalculator_ReportsProgress(t *testing.T) {
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
 
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 
 	rnd := rand.New(rand.NewSource(7))
@@ -238,7 +238,7 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
 	// forcePerBlockCompute=true => snapshot-producer mode (per-block at every block).
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 
 	const block1End = uint64(10)
@@ -295,7 +295,7 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
 	// forcePerBlockCompute=true routes the first partial block to computeWithoutCheck.
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -333,7 +333,7 @@ func TestHandleMessage_BaseReadErrorFailsTheBlock(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -360,7 +360,7 @@ func TestComputeAhead_BaseReadErrorFailsTheBlock(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 	cc.hasFirstBlock = true
@@ -486,7 +486,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 	// forcePerBlockCompute=false + huge perBlockFrom => pure batch mode: the
 	// blockResult never triggers a per-block compute, so the only thing that can
 	// checkpoint the step edge is the step-boundary hook.
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 
 	rnd := rand.New(rand.NewSource(42))
@@ -582,7 +582,7 @@ func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -638,7 +638,7 @@ func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T)
 	out := make(chan commitmentResult, 64)
 	// perBlockFrom=1 => block 1 is in-window, so it routes through the hash-aware
 	// wrap (ownsChangeset(1)=true) rather than the isolated path.
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -679,7 +679,7 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 	out := make(chan commitmentResult, 64)
 	// forcePerBlockCompute=true + perBlockFrom=5 => block 1 is pre-window yet
 	// still computes per-block.
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 5, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 5, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -769,7 +769,7 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 	// Make block 2 the batch's first block so the compute-ahead gate opens with
@@ -846,7 +846,7 @@ func setAheadFlags(t *testing.T, balDriven bool) {
 func newAheadCalculator(t *testing.T, doms *execctx.SharedDomains, db kv.TemporalRoDB, perBlockFrom uint64) (*commitmentCalculator, chan commitmentResult) {
 	t.Helper()
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(context.Background(), context.Background(), doms, db, &chain.Config{}, "test", log.New(), false, perBlockFrom, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(context.Background(), context.Background(), doms, db, &chain.Config{}, "test", log.New(), false, perBlockFrom, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	t.Cleanup(cc.Stop)
 	return cc, out
@@ -1384,7 +1384,7 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 				in := make(chan applyResult, 4)
 				reqs := make(chan *blockRequest, 4)
 				out := make(chan commitmentResult, 4)
-				cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, reqs, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+				cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, reqs, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 				require.NoError(t, err)
 				cc.hasFirstBlock = true
 				cc.firstBlockNum = i
@@ -1449,7 +1449,7 @@ func feedBlock1Shadow(t *testing.T, n uint64, balRoot []byte) commitmentResult {
 	db, _, doms := setupStepTest(t)
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "shadow", log.New(), false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "shadow", log.New(), false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 
 	rnd := rand.New(rand.NewSource(42))
@@ -1506,7 +1506,7 @@ func TestStepBoundaryRecordsIntoTheExecutorsChangeset(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -1576,7 +1576,7 @@ func isolatedCommitmentBranchCount(t *testing.T, checkRoot bool) (int, []commitm
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 5, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 5, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -1635,7 +1635,7 @@ func TestHandleMessage_ComputedAheadBlockSkipsTouchedUnion(t *testing.T) {
 
 		in := make(chan applyResult, 64)
 		out := make(chan commitmentResult, 64)
-		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 		require.NoError(t, err)
 
 		addr := accounts.InternAddress([20]byte{0xe3})
@@ -1664,7 +1664,7 @@ func TestHandleMessage_FirstTouchWorkOnlyInPerBlockMode(t *testing.T) {
 		t.Run(fmt.Sprintf("perBlock=%v", perBlock), func(t *testing.T) {
 			ctx := context.Background()
 			db, _, doms := setupStepTest(t)
-			cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), perBlock, 1<<62, make(chan applyResult, 4), nil, make(chan commitmentResult, 4), state.NewLayeredDomainReader(doms, nil, nil), nil)
+			cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), perBlock, 1<<62, make(chan applyResult, 4), nil, make(chan commitmentResult, 4), state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 			require.NoError(t, err)
 			defer cc.Stop()
 
@@ -1692,7 +1692,7 @@ func TestHandleMessage_PartialBlockFoldSeesCommittedEarlierTxs(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), true, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 
@@ -1729,7 +1729,7 @@ func TestComputeAhead_StepCheckpointExcludesPostEdgeWrite(t *testing.T) {
 	db, tx, doms := setupStepTest(t)
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 	require.NoError(t, err)
 	defer cc.Stop()
 	cc.hasFirstBlock = true
@@ -1810,7 +1810,7 @@ func TestComputeAhead_BALDrainedEmptyAccountFoldsAsAbsent(t *testing.T) {
 		ctx := context.Background()
 		db, tx, doms := setupStepTest(t)
 		out := make(chan commitmentResult, 64)
-		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &cfg, "test", log.New(), false, 1<<62, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil)
+		cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &cfg, "test", log.New(), false, 1<<62, make(chan applyResult, 64), nil, out, state.NewLayeredDomainReader(doms, nil, nil), nil, nil)
 		require.NoError(t, err)
 		defer cc.Stop()
 		cc.hasFirstBlock = true

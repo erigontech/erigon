@@ -333,7 +333,7 @@ func TestCommitmentToucherStopsAfterCancel(t *testing.T) {
 	cancel()
 	toucher.touch(touchHash(2), touchHash(2))
 	toucher.flush()
-	p.Drain()
+	p.Drain(t.Context())
 	require.Equal(t, 1, p.Stats().Queued, "the toucher queued a path after cancellation")
 	require.Equal(t, [][]byte{v3.StorageNodeKey([32]byte(touchHash(1)), nil, nil)}, db.readKeys())
 }
@@ -352,7 +352,7 @@ func TestCommitmentToucherQueuesSortedBatches(t *testing.T) {
 	toucher.flush()
 	require.Equal(t, preExecBatch+1, p.Stats().Queued)
 	require.Equal(t, preExecBatch+1, toucher.paths)
-	p.Drain()
+	p.Drain(t.Context())
 	require.Len(t, db.readKeys(), preExecBatch+1)
 }
 
@@ -393,14 +393,14 @@ func TestBlockReadAheaderPreExecQueuesItsPathsUntilStopped(t *testing.T) {
 	p := NewBranchPrefetcher(t.Context(), f.db)
 	defer p.Close()
 	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{f.txn(t, 100_000, 1)}, preExecWorkers, nil, p))
-	p.Drain()
+	p.Drain(t.Context())
 	require.Positive(t, p.Stats().Queued, "pre-exec must queue the paths its tx wrote")
 
 	StopPreExec(header.Hash())
 	stopped := NewBranchPrefetcher(t.Context(), f.db)
 	defer stopped.Close()
 	_ = f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{f.txn(t, 100_000, 1)}, preExecWorkers, nil, stopped)
-	stopped.Drain()
+	stopped.Drain(t.Context())
 	require.Zero(t, stopped.Stats().Queued, "a pre-exec its block's compute stopped must queue nothing")
 }
 

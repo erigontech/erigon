@@ -425,7 +425,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// committedTransactions=0: handleCommitResult already stored the absolute
 	// lastCommittedTxNum, so the commit log must not re-add a delta.
 	logCommit := func(p commitment.CommitProgress) { pe.LogCommitments(0, stepsInDb, p) }
-	calculator, err := newCommitmentCalculator(ctx, executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults, commitDomainReader, logCommit)
+	calculator, err := newCommitmentCalculator(ctx, executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults, commitDomainReader, logCommit, pe.cfg.readAheader)
 	if err != nil {
 		return nil, nil, err
 	}
