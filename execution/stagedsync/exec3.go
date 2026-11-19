@@ -173,6 +173,13 @@ func ExecV3(ctx context.Context,
 	}()
 	isForkValidation := syncMode == stages.ModeForkValidation
 	isApplyingBlocks := syncMode == stages.ModeApplyingBlocks
+	npT0 := time.Now()
+	var npT1, npT2 time.Time
+	defer func() {
+		if isForkValidation && !npT2.IsZero() {
+			logger.Info("[np-phase] execv3", "npPre", npT1.Sub(npT0), "npExec", npT2.Sub(npT1), "npPost", time.Since(npT2))
+		}
+	}()
 	hooks := cfg.vmConfig.Tracer
 	applyTx := rwTx
 	initialTxNum := rng.initialTxNum
@@ -265,8 +272,12 @@ func ExecV3(ctx context.Context,
 	}()
 
 	var lastHeader *types.Header
+	npT1 = time.Now()
+	npT1 = time.Now()
 	lastHeader, applyTx, execErr = pe.exec(ctx, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
 		initialTxNum, inputTxNum, initialCycle, applyTx, stepsInDb, accumulator, readAhead, logEvery)
+	npT2 = time.Now()
+	npT2 = time.Now()
 
 	out = execV3Outcome{
 		applyTx:               applyTx,

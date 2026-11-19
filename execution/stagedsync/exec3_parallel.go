@@ -311,6 +311,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// run context). Read once here; every injection site additionally gates on
 	// enableChaosMonkey, and incarnation-scoped faults fire only at the last valid
 	// incarnation (the seal path) so induced failures are deterministic and traceable.
+	npImplStart := time.Now()
 	pe.chaosFaults = chaos_monkey.FaultsFromContext(ctx)
 
 	// Do NOT set pe.applyTx to the stageloop's rwTx — the rwTx is thread-bound
@@ -386,6 +387,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	}
 
 	pe.resetWorkers(pe.rs)
+	if pe.isForkValidation {
+		log.Info("[np-phase] execimpl", "npSetup", time.Since(npImplStart))
+	}
 
 	// Disable inline TouchKey — the commitment calculator accumulates touches
 	// via its own Updates buffer.
