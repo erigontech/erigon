@@ -740,69 +740,29 @@ jobs:
           if [ "$RPC_TEST" = "eth_subscribe_newHeads" ]; then sequence=100:300; fi
           bash .github/workflows/scripts/run_rpc_perf.sh eth_subscribe stress_test_eth_subscribe_newHeads_gen_latest "$sequence" eth_subscribe_newHeads
 
-      - name: Sync clients before eth_subscribe_classes_half
+      - name: Sync clients before eth_subscribe_classes
         if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_classes')
         continue-on-error: true
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_subscribe_classes_half" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_subscribe_classes_half" >> "$GITHUB_ENV"; exit 1; }
+        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_subscribe_classes" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_subscribe_classes" >> "$GITHUB_ENV"; exit 1; }
 
-      - name: Run eth_subscribe_classes_half
-        id: perf_eth_subscribe_classes_half
+      # The qps of the sequence is the number of WebSocket connections, split among the client classes of the pattern;
+      # at most 500, the default connection limit of Reth.
+      # In the full run a short check (about 10 blocks per repetition); alone, a longer one.
+      - name: Run eth_subscribe_classes
+        id: perf_eth_subscribe_classes
         if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_classes')
         continue-on-error: true
-        timeout-minutes: 20
+        timeout-minutes: ${{ needs.setup.outputs.rpc_test == 'eth_subscribe_classes' && 30 || 20 }}
         env:
+          # The fan-out is taken when rpc_perf reads a notification, so it also holds the time the notification
+          # waits in rpc_perf, which grows when the tool has fewer CPUs. Cores 8-15 keep that wait low; the client
+          # shares 8-11 with the tool and serves these subscriptions with a fraction of one core.
           RPC_PERF_CPUS: 8-15,24-31
-          RPC_PERF_LIGHT_SHARE: half
-        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_subscribe stress_test_eth_subscribe_classes_gen_latest 500:120 eth_subscribe_classes_half
-
-      - name: Sync clients before eth_subscribe_classes_quarter
-        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_classes')
-        continue-on-error: true
-        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_subscribe_classes_quarter" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_subscribe_classes_quarter" >> "$GITHUB_ENV"; exit 1; }
-
-      - name: Run eth_subscribe_classes_quarter
-        id: perf_eth_subscribe_classes_quarter
-        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_classes')
-        continue-on-error: true
-        timeout-minutes: 20
-        env:
-          RPC_PERF_CPUS: 8-15,24-31
-          RPC_PERF_LIGHT_SHARE: quarter
-        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_subscribe stress_test_eth_subscribe_classes_gen_latest 500:120 eth_subscribe_classes_quarter
-
-      - name: Sync clients before eth_subscribe_classes_shared
-        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_classes')
-        continue-on-error: true
-        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_subscribe_classes_shared" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_subscribe_classes_shared" >> "$GITHUB_ENV"; exit 1; }
-
-      - name: Run eth_subscribe_classes_shared
-        id: perf_eth_subscribe_classes_shared
-        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_classes')
-        continue-on-error: true
-        timeout-minutes: 20
-        env:
-          RPC_PERF_CPUS: 8-15,24-31
-          RPC_PERF_LIGHT_SHARE: shared
-        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_subscribe stress_test_eth_subscribe_classes_gen_latest 500:120 eth_subscribe_classes_shared
-
-      - name: Sync clients before eth_subscribe_classes_threeq
-        if: needs.setup.outputs.coordinated == 'true' && env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_classes')
-        continue-on-error: true
-        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
-        run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_subscribe_classes_threeq" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_subscribe_classes_threeq" >> "$GITHUB_ENV"; exit 1; }
-
-      - name: Run eth_subscribe_classes_threeq
-        id: perf_eth_subscribe_classes_threeq
-        if: env.EXCLUDED_AT == '' && (env.RPC_TEST == 'all' || env.RPC_TEST == 'eth_subscribe_classes')
-        continue-on-error: true
-        timeout-minutes: 20
-        env:
-          RPC_PERF_CPUS: 8-15,24-31
-          RPC_PERF_LIGHT_SHARE: three-quarters
-        run: bash .github/workflows/scripts/run_rpc_perf.sh eth_subscribe stress_test_eth_subscribe_classes_gen_latest 500:120 eth_subscribe_classes_threeq
+        run: |
+          sequence=500:120
+          if [ "$RPC_TEST" = "eth_subscribe_classes" ]; then sequence=500:300; fi
+          bash .github/workflows/scripts/run_rpc_perf.sh eth_subscribe stress_test_eth_subscribe_classes_gen_latest "$sequence" eth_subscribe_classes
 
       - name: Collect the benchmark results
         id: collect_results
@@ -824,7 +784,7 @@ jobs:
             eth_getBlockReceipts_gen=${{ steps.perf_eth_getBlockReceipts_gen.outcome }}
             eth_getBlockByNumber_gen=${{ steps.perf_eth_getBlockByNumber_gen.outcome }}
             eth_subscribe_newHeads=${{ steps.perf_eth_subscribe_newHeads.outcome }}
-            eth_subscribe_classes=${{ steps.perf_eth_subscribe_classes_half.outcome }}
+            eth_subscribe_classes=${{ steps.perf_eth_subscribe_classes.outcome }}
           JOB_STATUS: ${{ job.status }}
         run: |
           mv "$OUTPUT_LOG" "$RESULT_DIR/"

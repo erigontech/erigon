@@ -20,6 +20,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"github.com/erigontech/erigon/common/dbg"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -214,13 +215,18 @@ func (d *Dispatcher) Dispatch(
 		}
 		notifyTo := finishProgressAfter + 1 //[from, to)
 
+		dbg.ProbeMark("dispatchStart", finishProgressAfter)
 		if err := stagedsync.NotifyNewHeaders(ctx, notifyFrom, notifyTo, d.events, blockTx, d.logger); err != nil {
 			return err
 		}
+		dbg.ProbeMark("headersDone", finishProgressAfter)
 		if recentReceipts != nil {
 			d.cacheMissingReceipts(ctx, committedTx, recentReceipts, notifyFrom, notifyTo)
+			dbg.ProbeMark("cacheDone", finishProgressAfter)
 			recentReceipts.NotifyReceipts(d.events, notifyFrom, notifyTo)
+			dbg.ProbeMark("receiptsDone", finishProgressAfter)
 			recentReceipts.NotifyLogs(d.events, notifyFrom, notifyTo)
+			dbg.ProbeMark("logsDone", finishProgressAfter)
 			if !d.events.HasReceiptOrLogSubscribers() {
 				recentReceipts.DropUpTo(rawdb.ReadForkchoiceFinalizedNum(blockTx)) // a reorg cannot reach these, and a later subscriber needs removed logs only for blocks above them
 			}

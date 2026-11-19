@@ -130,7 +130,8 @@ MEASURE_LEGEND = [
     "- **latency**: arrival minus the block timestamp, the wait from the start of the slot as a user sees it: "
     "block propagation, consensus client, execution, forkchoice and delivery.",
     "- **fan-out**: arrival minus the first arrival of the same event on any connection, the time the node "
-    "takes to send one notification to every subscriber.",
+    "takes to send one notification to every subscriber, plus the time the notification waits in rpc_perf: "
+    "compare it only between the clients of the same run.",
     "- **vs newHeads**: arrival of a log or receipt minus the arrival of the head of the same block on the same "
     "connection, the filtering and encoding of the logs and receipts after the head.",
 ]

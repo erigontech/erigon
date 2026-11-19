@@ -1045,6 +1045,24 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 					"wake_p50", q(hw, .5), "wake_p90", q(hw, .9), "wake_p99", q(hw, .99), "wake_last", q(hw, 1),
 					"done_p50", q(hd, .5), "done_p90", q(hd, .9), "done_p99", q(hd, .99), "done_last", q(hd, 1))
 			}
+			rel := func(name string) (float64, float64) {
+				f, l := dbg.ProbeTake(name, n)
+				if f == 0 {
+					return -1, -1
+				}
+				return float64(f-t0) / 1e6, float64(l-t0) / 1e6
+			}
+			pDs, _ := rel("dispatchStart")
+			pHd, _ := rel("headersDone")
+			pCd, _ := rel("cacheDone")
+			pRd, _ := rel("receiptsDone")
+			pLd, _ := rel("logsDone")
+			rif, ril := rel("rpcReceiptIn")
+			lif, lil := rel("rpcLogIn")
+			_, lol := rel("rpcLogOut")
+			ff.logger.Info("[fanout-probe-logs]", "block", n, "dispatchStart", pDs, "headersDone", pHd, "cacheDone", pCd,
+				"receiptsDone", pRd, "logsDone", pLd, "rpcReceiptFirst", rif, "rpcReceiptLast", ril,
+				"rpcLogFirst", lif, "rpcLogLast", lil, "rpcLogDistributed", lol)
 			ff.logger.Info("[fanout-probe]", "block", n, "gcIn1s", gcCycles()-gc0, "sinceBlockTime_ms", t0/1e6-int64(tsec)*1000, "sendLoop_ms", float64(t1-t0)/1e6,
 				"wake_p50", q(wakes, .5), "wake_p99", q(wakes, .99), "wake_last", q(wakes, 1), "wakes", len(wakes),
 				"write_p50", q(writes, .5), "write_p99", q(writes, .99), "write_last", q(writes, 1), "writes", len(writes))
@@ -1070,6 +1088,7 @@ func (ff *Filters) invalidateStalePendingBlock(header *types.Header) {
 
 // OnReceipts handles a new receipt event from the remote and processes it.
 func (ff *Filters) OnReceipts(reply *remoteproto.SubscribeReceiptsReply) {
+	dbg.ProbeMark("rpcReceiptIn", reply.GetBlockNumber())
 	ff.receiptsSubs.distributeReceipt(reply)
 }
 
@@ -1096,7 +1115,9 @@ func (ff *Filters) OnNewTx(reply *txpoolproto.OnAddReply) {
 
 // OnNewLogs handles a new log event from the remote and processes it.
 func (ff *Filters) OnNewLogs(reply *remoteproto.SubscribeLogsReply) {
+	dbg.ProbeMark("rpcLogIn", reply.GetBlockNumber())
 	ff.logsSubs.distributeLog(reply)
+	dbg.ProbeMark("rpcLogOut", reply.GetBlockNumber())
 }
 
 // AddLogs adds logs to the store associated with the given subscription ID.
