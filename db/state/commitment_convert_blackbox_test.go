@@ -598,6 +598,7 @@ func runOrchestrator(t *testing.T, db kv.TemporalRwDB, opts state.ConvertOpts) {
 // every file is already in the requested state, the orchestrator emits no
 // backup, no rebuild dir, and modifies nothing on disk.
 func TestConvertCommitmentFiles_AllAlreadyTarget(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
@@ -660,6 +661,7 @@ func TestConvertCommitmentFiles_EmptyDatadir(t *testing.T) {
 // the user hasn't acknowledged), the orchestrator must refuse to start so it
 // can't silently overwrite a recovery point.
 func TestConvertCommitmentFiles_BackupExists(t *testing.T) {
+	t.Cleanup(statecfg.SetCommitmentV3(false))
 	if testing.Short() {
 		t.Skip()
 	}
