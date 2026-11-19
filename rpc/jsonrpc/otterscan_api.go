@@ -439,7 +439,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, fmt.Errorf("receipts count mismatch: got %d, need %d", len(receipts), pageEnd)
 	}
 
-	blobFee, err := api.blobBaseFee(ctx, tx, b.HeaderNoCopy())
+	blobFee, err := api.frameBlobBaseFee(ctx, tx, b.HeaderNoCopy(), b.Transactions()[pageStart:pageEnd]...)
 	if err != nil {
 		return nil, err
 	}

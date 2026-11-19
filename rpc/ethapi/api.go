@@ -849,7 +849,7 @@ type RPCTransaction struct {
 	BlockTimestamp       *hexutil.Uint64         `json:"blockTimestamp" ethjson:"quantity"`
 	From                 common.Address          `json:"from" ethjson:"data"`
 	Gas                  hexutil.Uint64          `json:"gas" ethjson:"quantity"`
-	GasPrice             hexutil.U256            `json:"gasPrice" ethjson:"quantity"`
+	GasPrice             *hexutil.U256           `json:"gasPrice,omitempty" ethjson:"quantity"`
 	MaxPriorityFeePerGas *hexutil.U256           `json:"maxPriorityFeePerGas,omitempty" ethjson:"quantity"`
 	MaxFeePerGas         *hexutil.U256           `json:"maxFeePerGas,omitempty" ethjson:"quantity"`
 	MaxFee               *hexutil.U256           `json:"maxFee,omitempty" ethjson:"quantity"`
@@ -869,6 +869,9 @@ type RPCTransaction struct {
 	YParity              *hexutil.U256           `json:"yParity,omitempty" ethjson:"quantity"`
 	R                    *hexutil.U256           `json:"r" ethjson:"quantity"`
 	S                    *hexutil.U256           `json:"s" ethjson:"quantity"`
+
+	// Keep calculated prices inline to avoid an extra allocation per transaction in a full block.
+	computedGasPrice hexutil.U256
 }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
@@ -918,7 +921,7 @@ func newRPCTransaction(txn types.Transaction, baseFee, blobBaseFee *uint256.Int,
 				result.ChainID = (*hexutil.U256)(chainId)
 			}
 		}
-		result.GasPrice = hexutil.U256(*txn.GetTipCap())
+		result.GasPrice = (*hexutil.U256)(txn.GetTipCap())
 	} else {
 		chainId = txn.GetChainID()
 		result.ChainID = (*hexutil.U256)(chainId)
@@ -929,9 +932,9 @@ func newRPCTransaction(txn types.Transaction, baseFee, blobBaseFee *uint256.Int,
 		}
 
 		if txn.Type() == types.AccessListTxType {
-			result.GasPrice = hexutil.U256(*txn.GetTipCap())
+			result.GasPrice = (*hexutil.U256)(txn.GetTipCap())
 		} else {
-			result.GasPrice = computeGasPrice(txn, baseFee, blobBaseFee, gasUsed)
+			result.setGasPrice(txn, baseFee, blobBaseFee, gasUsed)
 			result.MaxPriorityFeePerGas = (*hexutil.U256)(txn.GetTipCap())
 			result.MaxFeePerGas = (*hexutil.U256)(txn.GetFeeCap())
 		}
@@ -986,25 +989,32 @@ func newRPCTransaction(txn types.Transaction, baseFee, blobBaseFee *uint256.Int,
 	return result
 }
 
-// Frame settlement can pay more per gas than GASPRICE reports. A nonzero gasUsed
-// selects the settled price; without an execution result, only an estimate is known.
-func computeGasPrice(txn types.Transaction, baseFee, blobBaseFee *uint256.Int, gasUsed uint64) hexutil.U256 {
-	if baseFee != nil {
-		if frame, ok := txn.(*types.FrameTransaction); ok {
-			if gasUsed != 0 {
-				return hexutil.U256(*ethutils.ReceiptGasPrice(frame, gasUsed, baseFee, blobBaseFee))
-			}
-			if blobBaseFee == nil {
-				blobBaseFee = new(uint256.Int)
-			}
-			budget, err := frame.Fees.Budget(frame.GetGasLimit(), frame.GetBlobGas(), baseFee, blobBaseFee)
-			if err != nil {
-				log.Warn("cannot derive frame gas price", "txHash", frame.Hash(), "err", err)
-			}
-			return hexutil.U256(budget.GasPrice)
-		}
-		// price = min(tip + baseFee, gasFeeCap)
-		return hexutil.U256(u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap()))
+// A frame's settled price can exceed its GASPRICE estimate, so use the receipt's
+// gas usage when available. Both prices require the blob base fee if the frame carries blobs.
+func (r *RPCTransaction) setGasPrice(txn types.Transaction, baseFee, blobBaseFee *uint256.Int, gasUsed uint64) {
+	if baseFee == nil {
+		r.GasPrice = (*hexutil.U256)(txn.GetFeeCap())
+		return
 	}
-	return hexutil.U256(*txn.GetFeeCap())
+	if frame, ok := txn.(*types.FrameTransaction); ok {
+		if frame.GetBlobGas() != 0 && blobBaseFee == nil {
+			r.GasPrice = nil
+			return
+		}
+		if gasUsed != 0 {
+			r.GasPrice = (*hexutil.U256)(ethutils.ReceiptGasPrice(frame, gasUsed, baseFee, blobBaseFee))
+			return
+		}
+		if blobBaseFee == nil {
+			blobBaseFee = new(uint256.Int)
+		}
+		budget, err := frame.Fees.Budget(frame.GetGasLimit(), frame.GetBlobGas(), baseFee, blobBaseFee)
+		if err != nil {
+			log.Warn("cannot derive frame gas price", "txHash", frame.Hash(), "err", err)
+		}
+		r.computedGasPrice = hexutil.U256(budget.GasPrice)
+	} else {
+		r.computedGasPrice = hexutil.U256(u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap()))
+	}
+	r.GasPrice = &r.computedGasPrice
 }

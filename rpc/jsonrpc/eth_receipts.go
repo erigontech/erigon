@@ -86,27 +86,18 @@ func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, bl
 	return api.receiptsGenerator.GetReceiptsGasUsed(ctx, tx, block, api._txNumReader, framesOnly)
 }
 
-func (api *BaseAPI) frameReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, fullTx bool) (types.Receipts, error) {
-	if !fullTx {
-		return nil, nil
+func (api *BaseAPI) frameReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
+	executed, err := rpchelper.GetLatestExecutedBlockNumber(tx)
+	if err != nil || block.NumberU64() > executed {
+		return nil, err
 	}
-	for _, txn := range block.Transactions() {
-		if txn.Type() != types.FrameTxType {
-			continue
-		}
-		executed, err := rpchelper.GetLatestExecutedBlockNumber(tx)
-		if err != nil || block.NumberU64() > executed {
-			return nil, err
-		}
-		// Receipt metadata is indexed by canonical transaction number, so it
-		// cannot supply gas used for another block at the same height.
-		hash, ok, err := (canonicalViewReader{api._blockReader}).CanonicalHash(ctx, tx, block.NumberU64())
-		if err != nil || !ok || hash != block.Hash() {
-			return nil, err
-		}
-		return api.getReceiptsGasUsed(ctx, tx, block, true)
+	// Receipt metadata is indexed by canonical transaction number, so it
+	// cannot supply gas used for another block at the same height.
+	hash, ok, err := (canonicalViewReader{api._blockReader}).CanonicalHash(ctx, tx, block.NumberU64())
+	if err != nil || !ok || hash != block.Hash() {
+		return nil, err
 	}
-	return nil, nil
+	return api.getReceiptsGasUsed(ctx, tx, block, true)
 }
 
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {

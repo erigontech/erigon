@@ -38,6 +38,7 @@ func TestFrameRPCTransaction(t *testing.T) {
 	require.Contains(t, fields, "signatures")
 	require.NotContains(t, fields, "maxFeePerGas")
 	require.NotContains(t, fields, "maxFeePerBlobGas")
+	require.JSONEq(t, `"0x0"`, string(fields["gasPrice"]))
 	require.JSONEq(t, `"0x0"`, string(fields["maxFee"]))
 }
 
@@ -46,7 +47,7 @@ func TestFrameRPCGasPriceMaxTip(t *testing.T) {
 	tx.Fees.TipCap.SetAllOne()
 	tx.Fees.MaxFee.SetUint64(13 * tx.GetGasLimit())
 	result := NewRPCTransaction(tx, common.Hash{1}, 1, 1, 0, uint256.NewInt(10), nil, tx.GetGasLimit())
-	require.Equal(t, uint256.NewInt(13), (*uint256.Int)(&result.GasPrice))
+	require.Equal(t, uint256.NewInt(13), (*uint256.Int)(result.GasPrice))
 }
 
 func TestFrameRPCBlockGasPriceWithBlob(t *testing.T) {
@@ -59,6 +60,8 @@ func TestFrameRPCBlockGasPriceWithBlob(t *testing.T) {
 	block := types.NewBlockFromStorage(common.Hash{1}, header, types.Transactions{ordinary, tx}, nil, nil, nil)
 	result := RPCMarshalBlock(block, true, true, uint256.NewInt(1), types.Receipts{nil, {GasUsed: tx.GetGasLimit() / 2}})
 	transactions := result.Transactions.([]*RPCTransaction)
-	require.Equal(t, uint256.NewInt(11), (*uint256.Int)(&transactions[0].GasPrice))
-	require.Equal(t, uint256.NewInt(20), (*uint256.Int)(&transactions[1].GasPrice))
+	require.Equal(t, uint256.NewInt(11), (*uint256.Int)(transactions[0].GasPrice))
+	require.Equal(t, uint256.NewInt(20), (*uint256.Int)(transactions[1].GasPrice))
+	estimated := RPCMarshalBlock(block, true, true, uint256.NewInt(1), nil).Transactions.([]*RPCTransaction)
+	require.Equal(t, uint256.NewInt(10), (*uint256.Int)(estimated[1].GasPrice))
 }

@@ -334,38 +334,41 @@ func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend Ora
 		tx  types.Transaction
 		tip uint256.Int
 	}
-	items := make([]txWithTip, len(block.Transactions()))
+	items := make([]txWithTip, 0, len(block.Transactions()))
 	var receipts types.Receipts
-	var blobBaseFee uint256.Int
+	var blobBaseFee *uint256.Int
+	receiptsLoaded := false
 	for i, tx := range block.Transactions() {
-		items[i].tx = tx
 		if tx.Type() != types.FrameTxType {
-			items[i].tip = tx.GetEffectiveGasTip(baseFee)
+			items = append(items, txWithTip{tx: tx, tip: tx.GetEffectiveGasTip(baseFee)})
 			continue
 		}
-		if receipts == nil {
+		if !receiptsLoaded {
 			receipts, err = backend.GetReceiptsGasUsed(ctx, block, true)
 			if err != nil {
 				return err
 			}
-			if header := block.HeaderNoCopy(); header.ExcessBlobGas != nil {
-				config := backend.ChainConfig()
-				if config == nil {
-					return fmt.Errorf("chain config unavailable for block %d", blockNum)
-				}
-				blobBaseFee, err = misc.GetBlobGasPrice(config, *header.ExcessBlobGas, header.Time)
-				if err != nil {
-					return err
-				}
-			}
+			receiptsLoaded = true
 		}
 		if i >= len(receipts) || receipts[i] == nil {
-			return fmt.Errorf("missing receipt for frame transaction %d in block %d", i, blockNum)
+			continue
 		}
-		items[i].tip, err = ethutils.ReceiptGasTip(tx, receipts[i].GasUsed, baseFee, &blobBaseFee)
+		if header := block.HeaderNoCopy(); tx.GetBlobGas() != 0 && blobBaseFee == nil && header.ExcessBlobGas != nil {
+			config := backend.ChainConfig()
+			if config == nil {
+				return fmt.Errorf("chain config unavailable for block %d", blockNum)
+			}
+			fee, err := misc.GetBlobGasPrice(config, *header.ExcessBlobGas, header.Time)
+			if err != nil {
+				return err
+			}
+			blobBaseFee = &fee
+		}
+		tip, err := ethutils.ReceiptGasTip(tx, receipts[i].GasUsed, baseFee, blobBaseFee)
 		if err != nil {
 			return err
 		}
+		items = append(items, txWithTip{tx: tx, tip: tip})
 	}
 
 	// Sort ascending by effective tip; slices.SortFunc uses pdqsort (no reflection).

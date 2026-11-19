@@ -813,7 +813,7 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]any, er
 
 	results := make([]map[string]any, 0, len(blocks))
 	for _, block := range blocks {
-		blobFee, err := api.blobBaseFee(ctx, tx, block.HeaderNoCopy())
+		response, err := api.marshalBlock(ctx, tx, block, true, false)
 		if err != nil {
 			return nil, err
 		}
@@ -826,7 +826,7 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]any, er
 
 		results = append(results, map[string]any{
 			"hash":  block.Hash(),
-			"block": ethapi.RPCMarshalBlock(block, true, true, blobFee, nil),
+			"block": response,
 			"rlp":   blockRlp,
 		})
 	}

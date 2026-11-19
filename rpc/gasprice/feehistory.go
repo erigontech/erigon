@@ -531,6 +531,10 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 					}
 					if fees.block != nil && fees.err == nil {
 						fees.receipts, fees.err = localBackend.GetReceiptsGasUsed(fetchCtx, fees.block, false)
+						if errors.Is(fees.err, state.ErrPruned) {
+							blockResults[idx].missing = true
+							continue
+						}
 					}
 				case byHash:
 					fees.header, fees.err = localBackend.HeaderByHashNumber(fetchCtx, key.hash, blockNumber)

@@ -2868,14 +2868,23 @@ func TestFramePoolReplacementNeedsFeeIncrease(t *testing.T) {
 	reasons, err := pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, txpoolcfg.Success, reasons[0])
-	replacement := framePoolSlot(t, sender, 1, 2)
-	replacement.Txn.(*types.FrameTransaction).Frames[0].Data = []byte{1}
-	replacement.Txn.(*types.FrameTransaction).TransactionMisc = types.TransactionMisc{}
-	replacement.IDHash = replacement.Txn.Hash()
+	replacement := framePoolSlot(t, sender, 2, 2)
 	txns.Txns[0] = replacement
 	reasons, err = pool.AddLocalTxns(ctx, txns)
 	require.NoError(t, err)
 	require.Equal(t, txpoolcfg.NotReplaced, reasons[0])
+}
+
+func TestBlobFrameReplacementRequiresBlobPriceBump(t *testing.T) {
+	slot := func(tip, maxFee uint64) *TxnSlot {
+		return &TxnSlot{Txn: &types.FrameTransaction{
+			BlobVersionedHashes: []common.Hash{{1}},
+			Fees:                types.FrameFees{TipCap: *uint256.NewInt(tip), MaxFee: *uint256.NewInt(maxFee)},
+		}}
+	}
+	previous := slot(10, 100)
+	require.Equal(t, txpoolcfg.ReplaceUnderpriced, validateFrameReplacement(previous, slot(11, 199), 10, 100))
+	require.Equal(t, txpoolcfg.Success, validateFrameReplacement(previous, slot(11, 200), 10, 100))
 }
 
 func TestFramePoolReplacementIncreasesGasBudget(t *testing.T) {

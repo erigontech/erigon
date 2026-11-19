@@ -148,6 +148,7 @@ func TestFeeHistory(t *testing.T) {
 type feeChain struct {
 	blocks            []*types.Block
 	receipts          map[uint64]types.Receipts
+	receiptErr        error
 	pending           *types.Block
 	fetches           atomic.Int32
 	frameReceiptReads atomic.Int32
@@ -185,6 +186,8 @@ func (c *feeChain) GetLatestBlockNumber() (uint64, error) { return uint64(len(c.
 func (c *feeChain) GetReceiptsGasUsed(_ context.Context, b *types.Block, framesOnly bool) (types.Receipts, error) {
 	if framesOnly {
 		c.frameReceiptReads.Add(1)
+	} else if c.receiptErr != nil {
+		return nil, c.receiptErr
 	}
 	return c.receipts[b.NumberU64()], nil
 }
