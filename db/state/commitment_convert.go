@@ -65,8 +65,8 @@ type ConvertOpts struct {
 }
 
 const (
-	rebuildV3Advice          = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if commitment history was pruned; alternatively run `integration commitment convert --v3 --no-history`"
-	rebuildV3NoHistoryAdvice = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes --no-history` with ERIGON_COMMITMENT_V3=true; alternatively run `integration commitment convert --v3 --no-history`"
+	rebuildV3Advice          = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if the history of accounts, storage, code or commitment was pruned"
+	rebuildV3NoHistoryAdvice = "to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes --no-history` with ERIGON_COMMITMENT_V3=true"
 )
 
 // fileState describes the detected current encoding of a commitment .kv file.
@@ -1055,6 +1055,14 @@ func requireV3SideFiles(dirs datadir.Dirs, opts ConvertOpts) error {
 		return requireCommitmentFiles(dirs.SnapHistory, ".v", "history", "--no-domain")
 	}
 	if opts.NoHistory {
+		if err := forEachCommitmentDataFile(dirs.SnapHistory, func(name string, major uint64) error {
+			if major < 3 {
+				return fmt.Errorf("[commitment_convert] %s is legacy commitment history; --no-history would leave it beside v3 domains, which erigon refuses to open; convert it first with --v3 --no-domain", name)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
 		if err := preflightBackupDir(filepath.Join(dirs.Snap, "backup", "domains")); err != nil {
 			return err
 		}

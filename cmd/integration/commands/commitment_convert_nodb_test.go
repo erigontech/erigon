@@ -295,6 +295,13 @@ func TestCommitmentConvertV3SplitRunFromFiles(t *testing.T) {
 	requireCommitmentKVPrefix(t, dirs, "v3.")
 }
 
+func TestCommitmentConvertV3NoHistoryRefusesLegacyHistory(t *testing.T) {
+	dirs := legacyDatadirWithCommitmentHistory(t)
+	requireCommitmentFilesPrefix(t, dirs.SnapHistory, "*-commitment.*.v", "v2.")
+
+	requireConvertRefusedBeforeWriting(t, dirs, "legacy commitment history", "--v3", "--no-history")
+}
+
 func TestCommitmentConvertV3EmptySideErrors(t *testing.T) {
 	t.Run("no history files", func(t *testing.T) {
 		dirs, _, _, _ := legacyDatadirWithoutChaindata(t)

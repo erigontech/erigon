@@ -40,7 +40,6 @@ func TestConvertCommitmentFiles_LegacyModesRefuseV3Files(t *testing.T) {
 	}{
 		{"domain and history", state.ConvertOpts{TargetV3: true}, "v3.", "v3."},
 		{"history only", state.ConvertOpts{TargetV3: true, NoDomain: true}, "v2.", "v3."},
-		{"domain only", state.ConvertOpts{TargetV3: true, NoHistory: true}, "v3.", "v2."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Cleanup(statecfg.SetCommitmentV3(false))

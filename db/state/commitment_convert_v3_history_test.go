@@ -271,11 +271,12 @@ func TestConvertCommitmentFiles_V3HistoryAfterDomainsRefused(t *testing.T) {
 	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 4)
 	dirs := agg.Dirs()
 
-	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true})
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+	require.NoError(t, dir.RemoveAll(filepath.Join(dirs.Snap, "backup")))
 	db, _ = reopenForConvert(t, db, agg, &legacySchema)
 
 	require.ErrorContains(t, convertErr(t, db, state.ConvertOpts{TargetV3: true, NoDomain: true}), "converts only before the domain files")
-	history, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "v2.*-commitment.*.v"))
+	history, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "v3.*-commitment.*.v"))
 	require.NoError(t, err)
 	require.NotEmpty(t, history)
 }
@@ -362,9 +363,7 @@ func TestConvertCommitmentFiles_V3HistoryRefusesPrunedStart(t *testing.T) {
 	require.ErrorContains(t, err, "no commitment file was replaced; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes --no-history` with ERIGON_COMMITMENT_V3=true")
 	require.NoDirExists(t, filepath.Join(dirs.Snap, "backup"))
 
-	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true})
-	_, err = state.FoldCommitmentV3(t.Context(), agg, ^uint64(0))
-	require.NoError(t, err)
+	require.ErrorContains(t, convertErr(t, db, state.ConvertOpts{TargetV3: true, NoHistory: true}), "legacy commitment history")
 }
 
 type commitmentHistoryPair struct {
@@ -665,7 +664,7 @@ func TestConvertCommitmentFiles_V3HistorySerialRecreatedAccountRefusesBeforeSwap
 	err = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx), state.ConvertOpts{TargetV3: true}, log.New())
 	tx.Rollback()
 	require.ErrorContains(t, err, "[commitment_convert] phase 1 history:")
-	require.ErrorContains(t, err, "no commitment file was replaced; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if commitment history was pruned")
+	require.ErrorContains(t, err, "no commitment file was replaced; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if the history of accounts, storage, code or commitment was pruned")
 
 	require.Equal(t, beforeDomain, snapshotCommitmentFiles(t, agg.Dirs().SnapDomain))
 	require.Equal(t, beforeHistory, snapshotCommitmentFiles(t, agg.Dirs().SnapHistory))

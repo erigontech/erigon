@@ -768,7 +768,7 @@ func TestConvertCommitmentFiles_V3RebuiltStepRefusesBeforeSwap(t *testing.T) {
 	defer at.Close()
 	err = state.ConvertCommitmentFiles(t.Context(), at, state.ConvertOpts{TargetV3: true}, log.New())
 	require.ErrorContains(t, err, "commitment state txNum 62 differs from file end txNum 63")
-	require.ErrorContains(t, err, "no commitment file was replaced; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if commitment history was pruned")
+	require.ErrorContains(t, err, "no commitment file was replaced; to build v3 commitment from state instead, remove the commitment files with `erigon seg rm-state --domain=commitment`, then run `integration commitment rebuild --yes` with ERIGON_COMMITMENT_V3=true, adding `--no-history` if the history of accounts, storage, code or commitment was pruned")
 	require.NoDirExists(t, filepath.Join(agg.Dirs().Snap, "backup"))
 }
 

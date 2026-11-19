@@ -198,6 +198,16 @@ func TestIntegrationOpensCommitmentFilesAtTheirVersions(t *testing.T) {
 		open(t, dirs)
 		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "files are legacy and ERIGON_COMMITMENT_V3=true")
 	})
+
+	t.Run("v3 history, legacy domain, v3 off", func(t *testing.T) {
+		dirs := legacyDatadirWithCommitmentHistory(t)
+		require.NoError(t, runCommitmentConvert(t, dirs, "--v3", "--no-domain"))
+		requireCommitmentKVPrefix(t, dirs, "v2.")
+		statecfg.SetCommitmentV3(false)
+
+		open(t, dirs)
+		require.ErrorContains(t, checkCommitmentTrieMatchesFiles(), "history files are v3 and domain files are legacy")
+	})
 }
 
 func TestCommitmentConvertLegacyRestoreKeepsExecution(t *testing.T) {
