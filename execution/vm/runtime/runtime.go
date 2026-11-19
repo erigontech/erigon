@@ -20,22 +20,14 @@
 package runtime
 
 import (
-	"context"
 	"errors"
 	"math"
 	"math/big"
-	"os"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -62,7 +54,9 @@ type Config struct {
 	BaseFee     uint256.Int
 	L2Version   uint64
 
-	State     *state.IntraBlockState
+	State *state.IntraBlockState
+
+	ownState  *state.IntraBlockState // the State a run built because the caller gave none
 	GetHashFn func(n uint64) (common.Hash, error)
 }
 
@@ -115,31 +109,13 @@ func setDefaults(cfg *Config) {
 
 var contractAsAddress = accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
-func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.IntraBlockState, error) {
+func Execute(code, input []byte, cfg *Config) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
 	setDefaults(cfg)
 
-	externalState := cfg.State != nil
-	if !externalState {
-		dirs := datadir.New(tempdir)
-		db := temporaltest.NewTestDB(nil, dirs)
-		defer db.Close()
-
-		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-		if err != nil {
-			return nil, nil, err
-		}
-		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-		if err != nil {
-			return nil, nil, err
-		}
-		defer sd.Close()
-		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
-	}
+	prepareState(cfg)
 	var (
 		address = contractAsAddress
 		vmenv   = NewEnv(cfg)
@@ -178,30 +154,7 @@ func Create(input []byte, cfg *Config) ([]byte, common.Address, mdgas.MdGas, err
 	}
 	setDefaults(cfg)
 
-	externalState := cfg.State != nil
-	if !externalState {
-		tmp, err := os.MkdirTemp("", "erigon-create-vm-*")
-		if err != nil {
-			return nil, [20]byte{}, mdgas.MdGas{}, err
-		}
-		defer dir.RemoveAll(tmp) //nolint:errcheck
-
-		dirs := datadir.New(tmp)
-		db := temporaltest.NewTestDB(nil, dirs)
-		defer db.Close()
-		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-		if err != nil {
-			return nil, [20]byte{}, mdgas.MdGas{}, err
-		}
-		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-		if err != nil {
-			return nil, [20]byte{}, mdgas.MdGas{}, err
-		}
-		defer sd.Close()
-		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
-	}
+	prepareState(cfg)
 	var (
 		vmenv  = NewEnv(cfg)
 		sender = cfg.Origin
@@ -298,4 +251,16 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	}
 
 	return ret, leftOverGas, err
+}
+
+// prepareState gives a run without a caller state a new versioned state over an empty base. A state it built for
+// an earlier run is replaced too, so every run starts from empty accounts, as the non-versioned state did.
+func prepareState(cfg *Config) {
+	if cfg.State != nil && cfg.State != cfg.ownState {
+		return
+	}
+	cfg.State.Close()
+	cfg.State = state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	cfg.State.SetNoConflictDetection()
+	cfg.ownState = cfg.State
 }

@@ -84,7 +84,7 @@ func TestEVM(t *testing.T) {
 		byte(vm.ORIGIN),
 		byte(vm.BLOCKHASH),
 		byte(vm.COINBASE),
-	}, nil, nil, t.TempDir()); err != nil {
+	}, nil, nil); err != nil {
 		t.Fatal("didn't expect error", err)
 	}
 }
@@ -98,7 +98,7 @@ func TestExecute(t *testing.T) {
 		byte(vm.PUSH1), 32,
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
-	}, nil, nil, t.TempDir())
+	}, nil, nil)
 	if err != nil {
 		t.Fatal("didn't expect error", err)
 	}
@@ -128,7 +128,7 @@ func TestLogNotStoredWithoutReceipts(t *testing.T) {
 		logs       int
 	}{{false, 1}, {true, 0}} {
 		statedb := state.New(state.NewNoopReader())
-		ret, _, err := Execute(code, nil, &Config{State: statedb, EVMConfig: vm.Config{NoReceipts: tc.noReceipts}}, t.TempDir())
+		ret, _, err := Execute(code, nil, &Config{State: statedb, EVMConfig: vm.Config{NoReceipts: tc.noReceipts}})
 		require.NoError(t, err)
 		require.Equal(t, uint64(0x77), new(uint256.Int).SetBytes(ret).Uint64(), "noReceipts=%v", tc.noReceipts)
 		require.Len(t, statedb.GetRawLogs(0), tc.logs, "noReceipts=%v", tc.noReceipts)
@@ -521,8 +521,8 @@ func (d *dummyChain) GetHeader(h common.Hash, n uint64) (*types.Header, error) {
 	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
 	copy(parentHash[:], s)
 
-	//parentHash := common.Hash{byte(n - 1)}
-	//fmt.Printf("GetHeader(%x, %d) => header with parent %x\n", h, n, parentHash)
+	// parentHash := common.Hash{byte(n - 1)}
+	// fmt.Printf("GetHeader(%x, %d) => header with parent %x\n", h, n, parentHash)
 	return fakeHeader(n, parentHash), nil
 }
 
@@ -581,7 +581,7 @@ func TestBlockhash(t *testing.T) {
 	setDefaults(cfg)
 	pragueTime := uint64(1)
 	cfg.ChainConfig.PragueTime = &pragueTime
-	ret, _, err := Execute(data, input, cfg, t.TempDir())
+	ret, _, err := Execute(data, input, cfg)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -609,7 +609,6 @@ func TestBlockhash(t *testing.T) {
 // TestEip2929Cases contains various testcases that are used for
 // EIP-2929 about gas repricings
 func TestEip2929Cases(t *testing.T) {
-	tmpdir := t.TempDir()
 	id := 1
 	prettyPrint := func(code []byte) {
 		instrs := make([]string, 0)
@@ -622,8 +621,8 @@ func TestEip2929Cases(t *testing.T) {
 			}
 		}
 		ops := strings.Join(instrs, ", ")
-		//fmt.Printf("### Case %d\n\n", id)
-		//fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
+		// fmt.Printf("### Case %d\n\n", id)
+		// fmt.Printf("%v\n\nBytecode: \n```\n0x%x\n```\nOperations: \n```\n%v\n```\n\n",
 		//	comment,
 		//	code, ops)
 		_ = ops
@@ -636,7 +635,7 @@ func TestEip2929Cases(t *testing.T) {
 		}
 		setDefaults(cfg)
 		//nolint:errcheck
-		Execute(code, nil, cfg, tmpdir)
+		Execute(code, nil, cfg)
 	}
 
 	{ // First eip testcase
@@ -887,7 +886,7 @@ func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
 		GasLimit:  10_000_000,
 	}
 
-	_, _, err := Execute(code, nil, cfg, t.TempDir())
+	_, _, err := Execute(code, nil, cfg)
 	require.NoError(t, err)
 
 	// Verify we actually observed at least one GasChangeCallOpCode event
@@ -1021,7 +1020,8 @@ func TestLogBlockNumberFromEVMContext(t *testing.T) {
 		byte(vm.PUSH1), 0,
 		byte(vm.PUSH1), 0,
 		byte(vm.LOG0),
-	}, nil, cfg, t.TempDir())
+	}, nil, cfg)
+
 	require.NoError(t, err)
 
 	logs := ibs.GetRawLogs(0)
@@ -1060,7 +1060,7 @@ func TestOpcodeMaskFiltersDelivery(t *testing.T) {
 					}
 				}
 				cfg := &Config{EVMConfig: vm.Config{Tracer: hooks}}
-				if _, _, err := Execute(code, nil, cfg, t.TempDir()); err != nil {
+				if _, _, err := Execute(code, nil, cfg); err != nil {
 					t.Fatal(err)
 				}
 				return seen
@@ -1110,7 +1110,7 @@ func TestOpcodeMaskStillReportsFaults(t *testing.T) {
 				GasLimit:  5, // too little to finish, so an excluded opcode faults
 				EVMConfig: vm.Config{Tracer: hooks},
 			}
-			if _, _, err := Execute(code, nil, cfg, t.TempDir()); err == nil {
+			if _, _, err := Execute(code, nil, cfg); err == nil {
 				t.Fatal("expected the run to fail on gas")
 			}
 			require.Empty(t, opcodes, "the mask excludes every opcode this code runs")
@@ -1232,23 +1232,23 @@ func TestCallCreatesItsOriginWithoutEIP161(t *testing.T) {
 // carry the previous run's storage into the new contract.
 func TestExecuteReusedConfigStartsWithEmptyStorage(t *testing.T) {
 	cfg := &Config{}
-	_, _, err := Execute(program.New().Sstore(0, 1).Bytes(), nil, cfg, t.TempDir())
+	_, _, err := Execute(program.New().Sstore(0, 1).Bytes(), nil, cfg)
 	require.NoError(t, err)
 	defer cfg.State.Close()
 	p := program.New()
 	loadTo(p, 0, 0)
-	ret, _, err := Execute(p.Return(0, 32).Bytes(), nil, cfg, t.TempDir())
+	ret, _, err := Execute(p.Return(0, 32).Bytes(), nil, cfg)
 	require.NoError(t, err)
 	require.Zero(t, new(uint256.Int).SetBytes(ret).Uint64())
 }
 
 func TestExecuteReusedConfigStartsWithoutPreviousCode(t *testing.T) {
 	cfg := &Config{}
-	ret, _, err := Execute(program.New().Push(0x2a).Push(0).Op(vm.MSTORE8).Return(0, 1).Bytes(), nil, cfg, t.TempDir())
+	ret, _, err := Execute(program.New().Push(0x2a).Push(0).Op(vm.MSTORE8).Return(0, 1).Bytes(), nil, cfg)
 	require.NoError(t, err)
 	defer cfg.State.Close()
 	require.Equal(t, []byte{0x2a}, ret)
-	ret, _, err = Execute(nil, nil, cfg, t.TempDir())
+	ret, _, err = Execute(nil, nil, cfg)
 	require.NoError(t, err)
 	require.Empty(t, ret)
 }
@@ -1256,7 +1256,7 @@ func TestExecuteReusedConfigStartsWithoutPreviousCode(t *testing.T) {
 func TestStateReadableAfterExecuteReturns(t *testing.T) {
 	absent := accounts.InternAddress(common.HexToAddress("0xbb"))
 	cfg := &Config{}
-	_, _, err := Execute(program.New().Push(absent.Value()).Op(vm.BALANCE, vm.POP).Bytes(), nil, cfg, t.TempDir())
+	_, _, err := Execute(program.New().Push(absent.Value()).Op(vm.BALANCE, vm.POP).Bytes(), nil, cfg)
 	require.NoError(t, err)
 	defer cfg.State.Close()
 	val, err := cfg.State.GetState(absent, accounts.StorageKey{})
@@ -1289,13 +1289,14 @@ func (w *storageRecorder) WriteAccountStorage(_ accounts.Address, _ uint64, key 
 
 func TestExecuteStorageReachesWriterOnCommit(t *testing.T) {
 	cfg := &Config{}
-	_, _, err := Execute(program.New().Sstore(0, 9).Bytes(), nil, cfg, t.TempDir())
+	_, _, err := Execute(program.New().Sstore(0, 9).Bytes(), nil, cfg)
 	require.NoError(t, err)
 	defer cfg.State.Close()
 	w := &storageRecorder{NoopWriter: state.NewNoopWriter(), values: map[common.Hash]uint256.Int{}}
-	rules := NewEnv(cfg).ChainRules()
-	require.NoError(t, cfg.State.FinalizeTx(rules, w))
-	require.NoError(t, cfg.State.CommitBlock(rules, w))
+	writes, err := cfg.State.FinalizedWrites(NewEnv(cfg).ChainRules())
+	require.NoError(t, err)
+	cfg.State.FlushWritesToVersionMap(writes)
+	require.NoError(t, cfg.State.WriteFlushedTo(writes, w))
 	require.Equal(t, map[common.Hash]uint256.Int{{}: *uint256.NewInt(9)}, w.values)
 }
 
@@ -1305,7 +1306,7 @@ func TestExecuteKeepsCallerTxIndexOnFirstRun(t *testing.T) {
 	ibs := state.NewWithVersionMap(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewVersionMap(nil))
 	defer ibs.Close()
 	ibs.SetTxContext(42, 7)
-	_, _, err := Execute(program.New().Push(0).Push(0).Op(vm.LOG0).Bytes(), nil, &Config{State: ibs}, t.TempDir())
+	_, _, err := Execute(program.New().Push(0).Push(0).Op(vm.LOG0).Bytes(), nil, &Config{State: ibs})
 	require.NoError(t, err)
 	require.Equal(t, 7, ibs.TxnIndex())
 	require.Len(t, ibs.GetRawLogs(7), 1)
