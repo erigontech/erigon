@@ -19,6 +19,7 @@ package direct
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"testing/synctest"
 
@@ -152,6 +153,57 @@ func TestSubscribeReceiptsStreamSendCancellation(t *testing.T) {
 			<-done
 			t.Fatal("Send remained blocked after cancellation")
 		}
+	})
+}
+
+func TestSubscribeReceiptsStreamErrCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		replies := make(chan *subscribeReceiptsReply, 1)
+		replies <- &subscribeReceiptsReply{}
+		stream := &SubscribeReceiptsStreamS{ctx: ctx, chSend: replies}
+		done := make(chan struct{})
+		go func() {
+			stream.Err(errors.New("server failed"))
+			close(done)
+		}()
+		synctest.Wait()
+
+		cancel()
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			<-replies
+			<-done
+			t.Fatal("Err remained blocked after cancellation")
+		}
+	})
+}
+
+func TestSubscribeBlockedClientSendEndsWhenHandlerExits(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		handlerDone := make(chan struct{})
+		logsReqs := make(chan *subscribeLogsRequest, 1)
+		logsReqs <- &subscribeLogsRequest{}
+		logs := &SubscribeLogsStreamC{chSend: logsReqs, done: handlerDone, ctx: t.Context()}
+		receiptsReqs := make(chan *subscribeReceiptsRequest, 1)
+		receiptsReqs <- &subscribeReceiptsRequest{}
+		receipts := &SubscribeReceiptsStreamC{chSend: receiptsReqs, done: handlerDone, ctx: t.Context()}
+		errs := make(chan error, 2)
+		go func() { errs <- logs.Send(&remoteproto.LogsFilterRequest{}) }()
+		go func() { errs <- receipts.Send(&remoteproto.ReceiptsFilterRequest{}) }()
+		synctest.Wait()
+		require.Empty(t, errs)
+
+		close(handlerDone)
+		synctest.Wait()
+		require.Len(t, errs, 2, "Send remained blocked after the handler exited")
+		require.ErrorIs(t, <-errs, io.EOF)
+		require.ErrorIs(t, <-errs, io.EOF)
+		<-logsReqs
+		<-receiptsReqs
 	})
 }
 
