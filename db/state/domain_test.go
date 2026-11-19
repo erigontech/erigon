@@ -103,6 +103,58 @@ func testDbAndDomainOfStep(t testing.TB, domainCfg statecfg.DomainCfg, aggStep u
 	return db, d
 }
 
+func TestDomainBuildResumeStep(t *testing.T) {
+	configs := []statecfg.DomainCfg{statecfg.Schema.AccountsDomain, statecfg.Schema.CommitmentDomain, statecfg.Schema.RCacheDomain}
+	for i := range configs {
+		cfg := &configs[i]
+		cfg.Hist.IiCfg.Enabled = true
+		for _, tc := range []struct {
+			name          string
+			steps         []uint64
+			filesEndStep  kv.Step
+			minResumeStep kv.Step
+			want          kv.Step
+		}{
+			{name: "empty", filesEndStep: 2},
+			{name: "no_files", steps: []uint64{4, 1}, want: 1},
+			{name: "before_files", steps: []uint64{1, 0}, filesEndStep: 2, want: 2},
+			{name: "at_files", steps: []uint64{2, 1}, filesEndStep: 2, want: 2},
+			{name: "after_files", steps: []uint64{4, 3}, filesEndStep: 2, want: 3},
+			{name: "deferred", steps: []uint64{4, 1}, minResumeStep: 6, want: 1},
+			{name: "resume_boundary", steps: []uint64{3, 1}, minResumeStep: 3, want: 1},
+			{name: "safe_resume", steps: []uint64{4, 3}, minResumeStep: 3, want: 3},
+			{name: "file_bound_before_resume", steps: []uint64{4, 1}, filesEndStep: 2, minResumeStep: 3, want: 2},
+			{name: "file_bound_after_resume", steps: []uint64{4, 1}, filesEndStep: 3, minResumeStep: 2, want: 3},
+		} {
+			t.Run(fmt.Sprintf("%s/%s", cfg.Name, tc.name), func(t *testing.T) {
+				db, d := testDbAndDomainOfStep(t, *cfg, 16, log.New())
+				tx, err := db.BeginRw(t.Context())
+				require.NoError(t, err)
+				defer tx.Rollback()
+				view := d.beginForTests()
+				defer view.Close()
+				writer := view.NewWriter(db)
+				defer writer.Close()
+				for i, step := range tc.steps {
+					require.NoError(t, writer.PutWithPrev([]byte{byte(i)}, []byte{1}, step*d.stepSize+1, nil))
+				}
+				require.NoError(t, writer.Flush(t.Context(), tx))
+				first, found, err := d.firstStepToBuild(tx, tc.filesEndStep, tc.minResumeStep)
+				require.NoError(t, err)
+				require.Equal(t, len(tc.steps) != 0, found)
+				if found {
+					if tc.want < tc.minResumeStep {
+						require.GreaterOrEqual(t, first, tc.want)
+						require.Less(t, first, tc.minResumeStep, "pending data below the safe resume boundary must defer the build")
+					} else {
+						require.Equal(t, tc.want, first)
+					}
+				}
+			})
+		}
+	}
+}
+
 // requireFileNameMatches asserts the file name shape - base, step range and
 // extension - without pinning the schema version, which bumps independently.
 func requireFileNameMatches(t *testing.T, path, mask string) {
