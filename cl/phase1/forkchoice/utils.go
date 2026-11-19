@@ -305,7 +305,7 @@ func newAncestorCache() *lru.Cache[ancestorKey, ForkChoiceNode] {
 
 // Ancestor returns the ancestor of root at slot with its payload status (Gloas:EIP7732). Found ancestors are cached
 // by root and slot: blocks never change and pruning removes the oldest slots first, so while the cached ancestor is
-// stored, the walk would return it again.
+// stored, the walk would return it again. The anchor is not cached: it has no block, so pruning keeps its header.
 func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode {
 	key := ancestorKey{root: root, slot: slot}
 	if f.ancestors != nil {
@@ -320,7 +320,7 @@ func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusPending,
 	}, slot)
-	if f.ancestors != nil && node.Root != (common.Hash{}) {
+	if f.ancestors != nil && node.Root != (common.Hash{}) && node.Root != f.forkGraph.AnchorRoot() {
 		f.ancestors.Add(key, node)
 	}
 	return node

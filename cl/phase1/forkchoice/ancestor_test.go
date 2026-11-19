@@ -171,3 +171,16 @@ func TestAncestorDropsACachedAncestorThatIsNoLongerStored(t *testing.T) {
 	delete(graph.blocks, roots[1])
 	require.Equal(t, ForkChoiceNode{PayloadStatus: cltypes.PayloadStatusPending}, store.Ancestor(roots[3], 11))
 }
+
+// The anchor has a header but no block, so pruning keeps its header while it removes the blocks after it.
+func TestAncestorDoesNotKeepTheCheckpointAnchor(t *testing.T) {
+	store, graph, roots := ancestorChain(clparams.FuluVersion, 4)
+	store.ancestors = newAncestorCache()
+	delete(graph.blocks, roots[0])
+	graph.anchorRoot = roots[0]
+	require.Equal(t, roots[0], store.Ancestor(roots[3], 10).Root)
+
+	delete(graph.headers, roots[1])
+	delete(graph.blocks, roots[1])
+	require.Equal(t, ForkChoiceNode{PayloadStatus: cltypes.PayloadStatusPending}, store.Ancestor(roots[3], 10))
+}
