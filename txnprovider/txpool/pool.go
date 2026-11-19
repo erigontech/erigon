@@ -2596,7 +2596,7 @@ func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, found bool) {
 	if !ok {
 		return 0, false
 	}
-	return p.all.nonce(senderID)
+	return p.all.lastConsecutiveAccountNonce(senderID)
 }
 
 // removeMined - apply new highest block (or batch of blocks)

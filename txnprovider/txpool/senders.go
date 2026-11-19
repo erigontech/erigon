@@ -41,21 +41,21 @@ type BySenderAndNonce struct {
 	senderIDFrameTxn  map[uint64]*metaTxn
 }
 
-func (b *BySenderAndNonce) nonce(senderID uint64) (nonce uint64, ok bool) {
-	lowerEntries := b.count(senderID)
+func (b *BySenderAndNonce) lastConsecutiveAccountNonce(senderID uint64) (nonce uint64, found bool) {
+	lowerEntries := uint64(b.count(senderID))
 	b.descend(senderID, func(mt *metaTxn) bool {
 		lowerEntries--
 		// Keyed nonces sort last, and the pool removes account nonces below the
 		// state nonce. For an account nonce N, lowerEntries counts the distinct
 		// pooled nonces in [stateNonce, N). That range has nonceDistance possible
 		// values, so equal counts mean there is no gap.
-		if mt.keyedNonce || mt.nonceDistance != uint64(lowerEntries) {
-			return true
+		if !mt.keyedNonce && mt.nonceDistance == lowerEntries {
+			nonce, found = mt.TxnSlot.Nonce, true
+			return false
 		}
-		nonce, ok = mt.TxnSlot.Nonce, true
-		return false
+		return true
 	})
-	return nonce, ok
+	return nonce, found
 }
 
 func (b *BySenderAndNonce) ascendAll(f func(*metaTxn) bool) {
