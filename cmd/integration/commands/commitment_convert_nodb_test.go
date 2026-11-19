@@ -17,23 +17,65 @@
 package commands
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
+
+type recordingHandler struct {
+	mu      sync.Mutex
+	records []log.Record
+}
+
+func (h *recordingHandler) Log(r *log.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, *r)
+	return nil
+}
+
+func (h *recordingHandler) Enabled(context.Context, log.Lvl) bool { return true }
+
+func (h *recordingHandler) withMsg(msg string) []log.Record {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var found []log.Record
+	for _, r := range h.records {
+		if r.Msg == msg {
+			found = append(found, r)
+		}
+	}
+	return found
+}
+
+func recordConsoleLogs(t *testing.T) *recordingHandler {
+	t.Helper()
+	recorder := &recordingHandler{}
+	previousConsole, previousRoot := log.StderrHandler, log.Root().GetHandler()
+	log.StderrHandler = recorder
+	t.Cleanup(func() {
+		log.StderrHandler = previousConsole
+		log.Root().SetHandler(previousRoot)
+	})
+	return recorder
+}
 
 func legacyDatadirWithoutChaindata(t *testing.T) (dirs datadir.Dirs, stepSize, lastFiledTxNum uint64, roots []common.Hash) {
 	t.Helper()
@@ -147,6 +189,29 @@ func TestCommitmentConvertWithoutChaindataRemovesTheThrowawayDBOnError(t *testin
 
 	require.NoDirExists(t, dirs.Chaindata)
 	requireNoThrowawayDB(t, dirs)
+}
+
+func TestCommitmentConvertWithoutChaindataWarnsWhenTheThrowawayDBStaysBehind(t *testing.T) {
+	dirs, _, _, _ := legacyDatadirWithoutChaindata(t)
+	removeErr := errors.New("injected removal failure")
+	var attempted []string
+	previousRemove := removeThrowawayDB
+	t.Cleanup(func() { removeThrowawayDB = previousRemove })
+	removeThrowawayDB = func(path string) error {
+		attempted = append(attempted, path)
+		return removeErr
+	}
+	logs := recordConsoleLogs(t)
+
+	require.NoError(t, runCommitmentConvert(t, dirs, "--v3"))
+
+	requireCommitmentKVPrefix(t, dirs, "v3.")
+	require.Len(t, attempted, 1)
+	require.DirExists(t, attempted[0])
+	warned := logs.withMsg("[commitment_convert] removing the throwaway DB failed")
+	require.Len(t, warned, 1)
+	require.Equal(t, log.LvlWarn, warned[0].Lvl)
+	require.Equal(t, []any{"dir", attempted[0], "err", removeErr}, warned[0].Ctx)
 }
 
 func TestCommitmentConvertWithoutChaindataOpensV3FilesAtTheirVersions(t *testing.T) {
