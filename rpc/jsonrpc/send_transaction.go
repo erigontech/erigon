@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -20,7 +21,8 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
-// SendRawTransaction implements eth_sendRawTransaction. Creates a new message call or contract creation for a previously signed transaction.
+// SendRawTransaction implements eth_sendRawTransaction. It submits a signed
+// transaction to the pool and returns its hash on successful admission.
 func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
 	if err := txpool.ValidateSerializedTxn(encodedTx); err != nil {
 		return common.Hash{}, err
@@ -30,9 +32,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		return common.Hash{}, err
 	}
 
-	// If the transaction fee cap is already specified, ensure the
-	// fee of the given transaction is _reasonable_.
-	if err := checkTxFee(txn.GetFeeCap().ToBig(), txn.GetGasLimit(), api.FeeCap); err != nil {
+	if err := checkTxFee(txn, api.FeeCap); err != nil {
 		return common.Hash{}, err
 	}
 
@@ -88,7 +88,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 }
 
 // SendRawTransactionSync implements eth_sendRawTransactionSync (https://eips.ethereum.org/EIPS/eip-7966).
-// Creates a new message call or contract creation for a previously signed transaction waiting for the transaction to be processed and the receipt to be available.
+// It submits a signed transaction and waits for its receipt until the timeout expires.
 func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeoutMs *uint64) (*ethutils.RPCReceipt, error) {
 	hash, err := api.SendRawTransaction(ctx, encodedTx)
 	if err != nil {
@@ -166,19 +166,29 @@ func (api *APIImpl) SendTransaction(_ context.Context, _ any) (common.Hash, erro
 	return common.Hash{0}, fmt.Errorf(NotImplemented, "eth_sendTransaction")
 }
 
-// checkTxFee is an internal function used to check whether the fee of
-// the given transaction is _reasonable_(under the cap).
-func checkTxFee(gasPrice *big.Int, gas uint64, gasCap float64) error {
-	// Short circuit if there is no gasCap for transaction fee at all.
-	if gasCap == 0 {
+// checkTxFee enforces --rpc.txfeecap, the maximum transaction fee allowed over RPC
+// in ether. A fee equal to the cap is allowed. A zero cap disables the check.
+func checkTxFee(txn types.Transaction, capEther float64) error {
+	if capEther == 0 {
 		return nil
 	}
 
-	feeEth := new(big.Float).Quo(new(big.Float).SetInt(new(big.Int).Mul(gasPrice, new(big.Int).SetUint64(gas))), new(big.Float).SetInt(big.NewInt(common.Ether)))
-	feeFloat, _ := feeEth.Float64()
-	if feeFloat > gasCap {
-		return fmt.Errorf("tx fee (%.2f ether) exceeds the configured cap (%.2f ether)", feeFloat, gasCap)
+	var feeWei *big.Int
+	if frame, ok := txn.Unwrap().(*types.FrameTransaction); ok {
+		// MaxFee is the signed budget for the whole transaction, including blob fees.
+		// GetFeeCap rounds down to whole wei per gas, so multiplying by the gas
+		// limit can understate that budget.
+		feeWei = frame.Fees.MaxFee.ToBig()
+	} else {
+		feeWei = new(big.Int).Mul(txn.GetFeeCap().ToBig(), new(big.Int).SetUint64(txn.GetGasLimit()))
 	}
-
+	// Read the float64 setting as a decimal ether amount so a cap such as 0.3
+	// compares exactly. Rounding the fee to float64 could hide a one-wei excess.
+	feeEther := new(big.Rat).SetFrac(feeWei, big.NewInt(common.Ether))
+	limit, finite := new(big.Rat).SetString(strconv.FormatFloat(capEther, 'g', -1, 64))
+	// SetString rejects infinities and NaN. Of those, only -Inf is smaller than a fee.
+	if capEther < 0 || finite && feeEther.Cmp(limit) > 0 {
+		return fmt.Errorf("tx fee (%s ether) exceeds the configured cap (%g ether)", feeEther.FloatString(18), capEther)
+	}
 	return nil
 }
