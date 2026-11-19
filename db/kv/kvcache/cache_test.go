@@ -774,3 +774,46 @@ func TestStreamedStorageValueIsNotServed(t *testing.T) {
 		return nil
 	}))
 }
+
+func TestOnNewBlockRemoveInvalidatesStorage(t *testing.T) {
+	c := New(DefaultCoherentConfig)
+	old := c.advanceRoot(1, false)
+	address := common.Address{0xaa}
+	neighbor := common.Address{0xaa, 19: 1}
+	var keys [][]byte
+	for _, addr := range []common.Address{address, neighbor} {
+		keys = append(keys, bytes.Clone(addr[:]))
+		for slot := range 100 {
+			location := common.Hash{31: byte(slot)}
+			keys = append(keys, append(bytes.Clone(addr[:]), location[:]...))
+		}
+		keys = append(keys, append(bytes.Clone(addr[:]), bytes.Repeat([]byte{0xff}, 32)...))
+	}
+	for _, key := range keys {
+		c.add(key, []byte{1}, old, 1)
+	}
+	c.OnNewBlock(&remoteproto.StateChangeBatch{
+		StateVersionId: 2,
+		ChangeBatch: []*remoteproto.StateChange{{Changes: []*remoteproto.AccountChange{{
+			Address: gointerfaces.ConvertAddressToH160(address), Action: remoteproto.Action_REMOVE,
+		}}}},
+	})
+	for _, key := range keys {
+		value, err := c.Get(key, nil, 1)
+		require.NoError(t, err)
+		require.Equal(t, []byte{1}, value, "older readers retain their storage")
+		if bytes.HasPrefix(key, address[:]) && len(key) > len(address) {
+			_, ok := c.latestStateView.cache.Get(&Element{K: key})
+			require.False(t, ok, "deleted storage must fall back to the reader's transaction")
+		} else {
+			value, err = c.Get(key, nil, 2)
+			require.NoError(t, err)
+			if bytes.Equal(key, address[:]) {
+				require.Empty(t, value)
+			} else {
+				require.Equal(t, []byte{1}, value, "neighboring accounts retain their cache entries")
+			}
+		}
+	}
+	require.Equal(t, c.latestStateView.cache.Len(), c.stateEvict.Len())
+}
