@@ -153,19 +153,25 @@ func TestExecModule_GivenReorgBelowFinalisedBlock_WhenFinality_ThenReorgTooDeep(
 	for _, tc := range []struct {
 		name            string
 		blocks          int    // canonical and fork blocks above the shared prefix; the canonical first one is finalized
-		safe, finalised string // requested block: "fork" tip, finalized "canonical" block or "prefix" tip
+		safe, finalised string // requested block: "fork" tip, finalized "canonical" block, "prefix" tip, "other" branch or "unknown"
 		want            execmodule.ExecutionStatus
 	}{
 		{name: "finalized at the fork tip height", blocks: 1, safe: "fork", finalised: "fork", want: execmodule.ExecutionStatusReorgTooDeep},
 		{name: "finalized above the fork point", blocks: 2, safe: "fork", finalised: "prefix", want: execmodule.ExecutionStatusReorgTooDeep},
 		{name: "safe off the new chain", blocks: 1, safe: "canonical", finalised: "fork", want: execmodule.ExecutionStatusInvalidForkchoice},
 		{name: "finalized off the new chain", blocks: 1, safe: "fork", finalised: "canonical", want: execmodule.ExecutionStatusInvalidForkchoice},
+		{name: "unknown finalized", blocks: 1, safe: "fork", finalised: "unknown", want: execmodule.ExecutionStatusInvalidForkchoice},
+		{name: "finalized on another branch below the fork point", blocks: 1, safe: "fork", finalised: "other", want: execmodule.ExecutionStatusInvalidForkchoice},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 			defer cancel()
 			emt := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 			prefix, err := emt.GenerateChain(2, nil)
+			require.NoError(t, err)
+			other, err := emt.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+				gen.SetCoinbase(common.Address{3})
+			})
 			require.NoError(t, err)
 			require.NoError(t, emt.InsertValidateAndUfc1By1(ctx, prefix.Blocks))
 			canonical, err := emt.GenerateChainFrom(prefix.TopBlock, tc.blocks, func(_ int, gen *blockgen.BlockGen) {
@@ -187,10 +193,16 @@ func TestExecModule_GivenReorgBelowFinalisedBlock_WhenFinality_ThenReorgTooDeep(
 			status, err := emt.InsertBlocks(ctx, fork.Blocks)
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+			status, err = emt.InsertBlocks(ctx, other.Blocks)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 			validation, err := emt.ValidateChain(ctx, fork.TopBlock)
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
-			requested := map[string]common.Hash{"fork": fork.TopBlock.Hash(), "canonical": finalisedHash, "prefix": prefix.TopBlock.Hash()}
+			requested := map[string]common.Hash{
+				"fork": fork.TopBlock.Hash(), "canonical": finalisedHash, "prefix": prefix.TopBlock.Hash(),
+				"other": other.TopBlock.Hash(), "unknown": common.HexToHash("0x01"),
+			}
 			result, err := emt.UpdateForkChoice(ctx, fork.TopBlock.Header(),
 				execmoduletester.WithSafeHash(namedHash(t, requested, tc.safe)),
 				execmoduletester.WithFinalisedHash(namedHash(t, requested, tc.finalised)))

@@ -296,8 +296,8 @@ func (e *ExecModule) unwindIfNeeded(
 			ValidationError: "forkchoice head is a non-genesis block at height 0",
 		}, nil, nil
 	}
-	// Find the canonical reconnection point, and collect all hashes on the way. Canonical is checked by number: old
-	// canonical blocks may have no total difficulty (pruned), and isCanonicalHash would then walk on past the fork point.
+	// Find the canonical reconnection point, and collect all hashes on the way.
+	// Canonical is checked by number, see onHeadChain.
 	newCanonicals := make([]*canonicalEntry, 0, 64)
 	newCanonicals = append(newCanonicals, &canonicalEntry{
 		hash:   fcuHeader.Hash(),
