@@ -120,11 +120,13 @@ func TestCreateInitCodeOverrideSize(t *testing.T) {
 
 func TestCreateInitCodeOverrideGas(t *testing.T) {
 	for _, fork := range []struct {
-		name   string
-		config *chain.Config
+		name            string
+		config          *chain.Config
+		initCodeWordGas int64
 	}{
-		{"Osaka", chain.TestChainOsakaConfig},
-		{"Amsterdam", chain.AllProtocolChanges},
+		{"Berlin", chain.TestChainBerlinConfig, 0},
+		{"Osaka", chain.TestChainOsakaConfig, 2},
+		{"Amsterdam", chain.AllProtocolChanges, 2},
 	} {
 		for _, op := range []vm.OpCode{vm.CREATE, vm.CREATE2} {
 			for _, tc := range []struct {
@@ -132,8 +134,8 @@ func TestCreateInitCodeOverrideGas(t *testing.T) {
 				originalSize, replacementSize int
 				extraGas                      int64
 			}{
-				{"longer", 32, 33, 2},
-				{"shorter", 33, 32, -2},
+				{"longer", 32, 33, fork.initCodeWordGas},
+				{"shorter", 33, 32, -fork.initCodeWordGas},
 				{"same word count", 33, 64, 0},
 			} {
 				t.Run(fork.name+"/"+op.String()+"/"+tc.name, func(t *testing.T) {
@@ -142,7 +144,8 @@ func TestCreateInitCodeOverrideGas(t *testing.T) {
 					constructor := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
 					copy(initCode, constructor)
 					copy(replacement, constructor)
-					run := func(override bool) (remaining, available, forwarded uint64) {
+					run := func(override bool) (remaining, available uint64) {
+						var forwarded uint64
 						hooks := &tracing.Hooks{
 							OnOpcode: func(_ uint64, typ byte, gas, cost uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
 								if vm.OpCode(typ) == op {
@@ -163,14 +166,14 @@ func TestCreateInitCodeOverrideGas(t *testing.T) {
 						result, gas, _, err := evm.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}, uint256.Int{}, false)
 						require.NoError(t, err)
 						require.Equal(t, target.Value(), common.BytesToAddress(result))
-						return gas.Execution, available, forwarded
+						require.Equal(t, available-available/64, forwarded, "gas forwarded to the constructor")
+						return gas.Execution, available
 					}
-					baseRemaining, baseAvailable, _ := run(false)
-					remaining, available, forwarded := run(true)
+					baseRemaining, baseAvailable := run(false)
+					remaining, available := run(true)
 					require.Equal(t, int64(baseRemaining)-tc.extraGas, int64(remaining), "only the initcode-analysis charge changes")
 					expectedAvailable := uint64(int64(baseAvailable) - tc.extraGas)
-					require.Equal(t, expectedAvailable, available)
-					require.Equal(t, expectedAvailable-expectedAvailable/64, forwarded, "replacement is metered before the 63/64 forwarding rule")
+					require.Equal(t, expectedAvailable, available, "initcode analysis is charged before gas is forwarded")
 				})
 			}
 		}
