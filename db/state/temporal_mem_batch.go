@@ -542,24 +542,24 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 	// freshly-written same-value SSTORE as a no-op and producing a wrong
 	// trie root. See GetAsOf's unwoundLatest for the equivalent point-read
 	// fix.
-	wrappedIt := it
+	//
+	// Tombstones are filtered only after the changeset is applied: the unwind may restore a key deleted in the DB.
+	var values map[string]kv.DomainEntryDiff
 	if sd.unwindChangeset != nil {
-		if values := sd.unwindChangeset[domain]; len(values) > 0 {
-			wrappedIt = func(k []byte, v []byte) (cont bool, err error) {
-				if latest, ok := sd.overlayLatest(sd.shard(domain, common.ToStringZeroCopy(k)), domain, k); ok { // overlay wins over the changeset, as in getLatest
-					return it(k, latest.data)
-				}
-				if entry, ok := values[common.ToStringZeroCopy(k)]; ok {
-					if len(entry.Value) == 0 {
-						// Pre-unwind state had no value at this key — skip it.
-						return true, nil
-					}
-					// Restore the pre-unwind value.
-					return it(k, entry.Value)
-				}
-				return it(k, v)
+		values = sd.unwindChangeset[domain]
+	}
+	wrappedIt := func(k []byte, v []byte) (cont bool, err error) {
+		if len(values) > 0 {
+			if latest, ok := sd.overlayLatest(sd.shard(domain, common.ToStringZeroCopy(k)), domain, k); ok { // overlay wins over the changeset, as in getLatest
+				v = latest.data
+			} else if entry, ok := values[common.ToStringZeroCopy(k)]; ok {
+				v = entry.Value
 			}
 		}
+		if len(v) == 0 {
+			return true, nil
+		}
+		return it(k, v)
 	}
 	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, wrappedIt, roTx)
 }
