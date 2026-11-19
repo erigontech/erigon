@@ -84,3 +84,31 @@ func TestCloseAcceptsWrappedCancellation(t *testing.T) {
 	m.Close()
 	require.True(t, db.closed)
 }
+
+type closeFailureTB struct {
+	testing.TB
+	message string
+	failed  bool
+}
+
+func (tb *closeFailureTB) Errorf(format string, args ...any) {
+	tb.message += fmt.Sprintf(format, args...)
+}
+
+func (tb *closeFailureTB) FailNow() { tb.failed = true }
+
+func TestCloseReportsFlushErrorWithCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	db := new(startupTrackingDB)
+	tb := &closeFailureTB{TB: t}
+	m := &ExecModuleTester{Ctx: ctx, Cancel: cancel, DB: db, tb: tb}
+	m.bgComponentsEg.Go(func() error {
+		<-ctx.Done()
+		return fmt.Errorf("%w: %w", os.ErrPermission, ctx.Err())
+	})
+	m.Close()
+	require.True(t, tb.failed, "cleanup must report a failure combined with cancellation")
+	require.Contains(t, tb.message, os.ErrPermission.Error())
+	require.True(t, db.closed)
+}

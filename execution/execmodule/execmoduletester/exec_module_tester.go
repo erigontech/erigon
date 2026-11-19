@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -177,7 +178,7 @@ func (emt *ExecModuleTester) Close() {
 		_ = dir.RemoveAll(emt.Dirs.DataDir)
 	}
 	if err != nil && emt.tb != nil {
-		require.ErrorIs(emt.tb, err, context.Canceled)
+		require.NoError(emt.tb, commonerrors.NilIfCanceled(err))
 	}
 }
 
