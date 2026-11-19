@@ -360,7 +360,7 @@ func TestMemStore_Range(t *testing.T) {
 	assert.Equal(t, []string{"B", "C"}, keys)
 
 	// Descending range
-	iter2, err := s.Range("test", []byte("B"), []byte("D"), false, -1)
+	iter2, err := s.Range("test", []byte("C"), []byte("A"), false, -1)
 	require.NoError(t, err)
 	defer iter2.Close()
 

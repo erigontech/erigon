@@ -171,6 +171,22 @@ func (t *memTable) hides(k, v []byte) bool {
 	return found && e.deleted
 }
 
+// firstLive returns the live entry of key: on a DupSort table, its smallest value.
+func (t *memTable) firstLive(key []byte) (e memEntry, found bool) {
+	if !t.dupSort {
+		e, found = t.tree.Get(memEntry{k: key})
+		return e, found && !e.deleted
+	}
+	t.tree.Ascend(memEntry{k: key, deleted: true}, func(item memEntry) bool {
+		if !bytes.Equal(item.k, key) {
+			return false
+		}
+		e, found = item, !item.deleted
+		return !found
+	})
+	return e, found
+}
+
 // isHidden is memTable.hides for a table name.
 func (s *memStore) isHidden(table string, k, v []byte) bool {
 	s.rlock()
@@ -277,8 +293,8 @@ func (s *memStore) Has(table string, key []byte) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	e, found := t.tree.Get(memEntry{k: key})
-	return found && !e.deleted, nil
+	_, found := t.firstLive(key)
+	return found, nil
 }
 
 func (s *memStore) GetOne(table string, key []byte) ([]byte, error) {
@@ -288,8 +304,8 @@ func (s *memStore) GetOne(table string, key []byte) ([]byte, error) {
 	if !ok {
 		return nil, nil
 	}
-	item, found := t.tree.Get(memEntry{k: key})
-	if !found || item.deleted {
+	item, found := t.firstLive(key)
+	if !found {
 		return nil, nil
 	}
 	return append([]byte{}, item.v...), nil // non-nil even for an empty value, so callers do not fall back to the db
@@ -955,25 +971,14 @@ func (s *memStore) collectRange(t *memTable, fromPrefix, toPrefix []byte, asc bo
 			entries = append(entries, memEntry{k: bytes.Clone(item.k), v: bytes.Clone(item.v)})
 			valid = iter.Next()
 		}
-	} else {
-		var valid bool
-		if toPrefix != nil {
-			found := iter.Seek(memEntry{k: toPrefix})
-			if found {
-				if bytes.Compare(iter.Item().k, toPrefix) >= 0 {
-					valid = iter.Prev()
-				} else {
-					valid = true
-				}
-			} else {
-				valid = iter.Last()
-			}
-		} else {
-			valid = iter.Last()
+	} else { // like MDBX: from the last key with prefix fromPrefix down to toPrefix (exclusive)
+		valid := iter.Last()
+		if nextK, ok := kv.NextSubtree(fromPrefix); fromPrefix != nil && ok {
+			valid = seekedPrev(&iter, iter.Seek(memEntry{k: nextK, deleted: true}))
 		}
 		for valid && (limit < 0 || int64(len(entries)) < limit) {
 			item := iter.Item()
-			if fromPrefix != nil && bytes.Compare(item.k, fromPrefix) < 0 {
+			if toPrefix != nil && bytes.Compare(item.k, toPrefix) <= 0 {
 				break
 			}
 			if item.deleted {
@@ -986,6 +991,14 @@ func (s *memStore) collectRange(t *memTable, fromPrefix, toPrefix []byte, asc bo
 	}
 
 	return &memStoreSliceIter{entries: entries}
+}
+
+// seekedPrev steps a Seek result back to the entry before it, or to the last entry when the Seek found none.
+func seekedPrev(iter *btree2.IterG[memEntry], found bool) bool {
+	if found {
+		return iter.Prev()
+	}
+	return iter.Last()
 }
 
 // collectRangeDupSort collects dupsort entries for a specific key into a slice. Must be called with mu held.
@@ -1011,39 +1024,19 @@ func (s *memStore) collectRangeDupSort(t *memTable, key []byte, fromPrefix, toPr
 			entries = append(entries, memEntry{k: bytes.Clone(item.k), v: bytes.Clone(item.v)})
 			valid = iter.Next()
 		}
-	} else {
-		var valid bool
-		if toPrefix != nil {
-			found := iter.Seek(memEntry{k: key, v: toPrefix})
-			if found {
-				item := iter.Item()
-				if !bytes.Equal(item.k, key) || bytes.Compare(item.v, toPrefix) >= 0 {
-					valid = iter.Prev()
-				} else {
-					valid = true
-				}
-			} else {
-				valid = iter.Last()
-			}
-		} else {
-			nextKey, ok := kv.NextSubtree(key)
-			if ok {
-				found := iter.Seek(memEntry{k: nextKey, deleted: true})
-				if found {
-					valid = iter.Prev()
-				} else {
-					valid = iter.Last()
-				}
-			} else {
-				valid = iter.Last()
-			}
+	} else { // like MDBX: from the last value with prefix fromPrefix down to toPrefix (exclusive)
+		valid := iter.Last()
+		if nextV, ok := kv.NextSubtree(fromPrefix); fromPrefix != nil && ok {
+			valid = seekedPrev(&iter, iter.Seek(memEntry{k: key, v: nextV}))
+		} else if nextKey, ok := kv.NextSubtree(key); ok {
+			valid = seekedPrev(&iter, iter.Seek(memEntry{k: nextKey, deleted: true}))
 		}
 		for valid && (limit < 0 || int64(len(entries)) < limit) {
 			item := iter.Item()
 			if !bytes.Equal(item.k, key) {
 				break
 			}
-			if fromPrefix != nil && !item.keyWide() && bytes.Compare(item.v, fromPrefix) < 0 {
+			if toPrefix != nil && !item.keyWide() && bytes.Compare(item.v, toPrefix) <= 0 {
 				break
 			}
 			if item.deleted {
