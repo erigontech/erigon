@@ -154,3 +154,12 @@ func TestBlindedBeaconBodyEncodingSizeTracksEncoding(t *testing.T) {
 		})
 	}
 }
+
+func TestBlindedBeaconBodyJSONRejectsNullExecutionRequests(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			body := NewBlindedBeaconBody(&clparams.MainnetBeaconConfig, version)
+			require.Error(t, json.Unmarshal([]byte(`{"execution_requests":null}`), body))
+		})
+	}
+}

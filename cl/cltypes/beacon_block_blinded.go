@@ -287,6 +287,9 @@ func (b *BlindedBeaconBody) UnmarshalJSON(buf []byte) error {
 	if err := json.Unmarshal(buf, (*bodyJSON)(b)); err != nil {
 		return err
 	}
+	if b.ExecutionRequests == nil && b.Version >= clparams.ElectraVersion {
+		return errors.New("blinded beacon body contains null execution requests")
+	}
 	if b.AttesterSlashings == nil {
 		return nil
 	}
