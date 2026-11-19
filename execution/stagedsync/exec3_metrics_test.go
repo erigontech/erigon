@@ -1,11 +1,12 @@
 package stagedsync
 
 import (
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestExecutionRepeatStats(t *testing.T) {
@@ -66,44 +67,17 @@ func TestExecutionRepeatStats(t *testing.T) {
 	}
 }
 
-func TestScheduleExecutionRepeatCountAcrossPartialBlockResume(t *testing.T) {
-	queue := exec.NewQueueWithRetry(2)
-	t.Cleanup(queue.Release)
-
-	pe := &parallelExecutor{in: queue}
-	be := newBlockExec(newParallelTestBlock(7), nil, nil, nil, nil, false, nil)
-	be.tasks = []*execTask{{
-		Task: &exec.TxTask{
-			TxNum:   50,
-			TxIndex: 7,
-		},
-		index: 0,
-	}}
-	be.txIncarnations = []int{0}
-	be.execTasks.pushPending(0)
-
-	be.scheduleExecution(t.Context(), pe)
-
-	require.Equal(t, 1, be.cntExec)
-	require.Zero(t, be.cntRepeat)
-	first, ok := queue.Next(t.Context())
-	require.True(t, ok)
-	require.Zero(t, first.Version().Incarnation)
-
-	be.execTasks.clearInProgress(0)
-	be.execTasks.pushPending(0)
-	be.txIncarnations[0] = 1
-
-	be.scheduleExecution(t.Context(), pe)
-
-	require.Equal(t, 2, be.cntExec)
-	require.Equal(t, 1, be.cntRepeat)
-	retry, ok := queue.Next(t.Context())
-	require.True(t, ok)
-	require.Equal(t, 1, retry.Version().Incarnation)
+func TestRecordBlockExecMetricsCountsRuns(t *testing.T) {
+	pe := &parallelExecutor{}
+	be := newBlockExec(1, common.Hash{}, nil, nil, discardConsumers(1), false, nil)
+	be.runInc = make([]atomic.Int64, 3)
+	be.runInc[0].Store(0)
+	be.runInc[1].Store(2)
+	be.runInc[2].Store(-1)
 
 	pe.recordBlockExecMetrics(be)
+
 	execCount, repeatCount := pe.dispatchCounts.load()
-	require.Equal(t, uint64(2), execCount)
-	require.Equal(t, uint64(1), repeatCount)
+	require.Equal(t, uint64(4), execCount)
+	require.Equal(t, uint64(2), repeatCount)
 }

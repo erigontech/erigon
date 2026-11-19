@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -84,7 +85,7 @@ func runFrozenBlocksObserved(t *testing.T, syncCfg ethconfig.Sync) frozenCycleOb
 	chainConfig := &chain.Config{ChainName: "test"}
 	notifications := shards.NewNotifications(nil)
 	sync := stagedsync.New(syncCfg, []*stagedsync.Stage{stage}, nil, stagedsync.PruneOrder{stages.Snapshots}, logger, stages.ModeApplyingBlocks)
-	dispatcher := NewDispatcher(chainConfig, notifications.Events, notifications.StateChangesConsumer, logger)
+	dispatcher := NewDispatcher(chainConfig, freezeblocks.NewBlockReader(nil), notifications.Events, notifications.StateChangesConsumer, nil, logger)
 	pe := NewPipelineExecutor(sync, db, pinTestBlockReader{}, chainConfig, nil, nil, nil, dispatcher, logger)
 	hook := stageloop.NewHook(t.Context(), notifications, sync, chainConfig, logger, dispatcher, nil, nil, nil, pinTestBlockReader{})
 
@@ -162,7 +163,7 @@ func runOneBlockPerCycle(t *testing.T, syncCfg ethconfig.Sync, finishProgress ui
 	chainConfig := &chain.Config{ChainName: "test"}
 	notifications := shards.NewNotifications(nil)
 	sync := stagedsync.New(syncCfg, []*stagedsync.Stage{stage}, nil, nil, logger, stages.ModeApplyingBlocks)
-	dispatcher := NewDispatcher(chainConfig, notifications.Events, notifications.StateChangesConsumer, logger)
+	dispatcher := NewDispatcher(chainConfig, freezeblocks.NewBlockReader(nil), notifications.Events, notifications.StateChangesConsumer, nil, logger)
 	pe := NewPipelineExecutor(sync, db, frozenTo100BlockReader{}, chainConfig, nil, nil, nil, dispatcher, logger)
 	hook := stageloop.NewHook(t.Context(), notifications, sync, chainConfig, logger, dispatcher, nil, nil, nil, frozenTo100BlockReader{})
 

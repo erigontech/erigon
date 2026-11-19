@@ -40,7 +40,7 @@ type testFileRange struct {
 	fromStep, toStep uint64
 }
 
-func populateFiles2(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, stepSize uint64, ranges []testFileRange) {
+func populateFiles2(t testing.TB, dirs datadir.Dirs, schema SnapNameSchema, stepSize uint64, ranges []testFileRange) {
 	t.Helper()
 	var allFiles []string //nolint:prealloc
 	v := version.V1_0
@@ -68,7 +68,7 @@ func populateFiles2(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, step
 	populateFiles(t, dirs, allFiles)
 }
 
-func populateFiles(t *testing.T, dirs datadir.Dirs, allFiles []string) {
+func populateFiles(t testing.TB, dirs datadir.Dirs, allFiles []string) {
 	t.Helper()
 
 	writeSegFile := func(filename string, words ...[]byte) {

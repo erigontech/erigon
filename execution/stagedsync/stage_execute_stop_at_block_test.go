@@ -35,8 +35,8 @@ func TestExecutionStageStopsAtExecStopAtBlock(t *testing.T) {
 	exec := ExecuteBlockCfg{syncCfg: ethconfig.Sync{ExecStopAtBlock: stopAt}}
 
 	pipelines := map[string][]*Stage{
-		"DefaultStages":  DefaultStages(t.Context(), SnapshotsCfg{}, HeadersCfg{}, BlockHashesCfg{}, BodiesCfg{}, SendersCfg{}, exec, TxLookupCfg{}, FinishCfg{}),
-		"PipelineStages": PipelineStages(t.Context(), SnapshotsCfg{}, BlockHashesCfg{}, SendersCfg{}, exec, TxLookupCfg{}, FinishCfg{}),
+		"DefaultStages":  DefaultStages(t.Context(), SnapshotsCfg{}, HeadersCfg{}, BodiesCfg{}, SendersCfg{}, exec, TxLookupCfg{}, FinishCfg{}),
+		"PipelineStages": PipelineStages(t.Context(), SnapshotsCfg{}, SendersCfg{}, exec, TxLookupCfg{}, FinishCfg{}),
 	}
 	for name, stageList := range pipelines {
 		t.Run(name, func(t *testing.T) {
