@@ -3689,15 +3689,8 @@ func TestDomain_KeyPosResetOnCollisionRetry(t *testing.T) {
 	}
 }
 
-// TestDomain_DeletedKeyNotResurrectedByFiles is a regression test for the bug
-// where getLatestFromDb discards deletion entries whose step is already covered
-// by frozen files. Since frozen files lack tombstones, the fallthrough to
-// getLatestFromFiles returns a stale pre-deletion value.
+// A deletion in the latest snapshot must shadow values in older snapshots.
 func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
 
 	// Cover both DupSort (LargeValues=false) and non-DupSort (LargeValues=true) paths.
@@ -3757,11 +3750,7 @@ func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
 
 			v, _, found, err := domainRoTx.GetLatest(key, roTx)
 			require.NoError(err)
-			// The key was deleted at step 1. The deletion entry in DB must be
-			// authoritative even though step 1 is covered by frozen files.
-			// Without the fix, getLatestFromDb discards the deletion entry and
-			// getLatestFromFiles returns stale "value1" from the step 0 file.
-			require.True(found, "deletion entry should be found in DB")
+			require.True(found, "deletion record should be found")
 			require.Empty(v, "deleted key should have empty value, got %q", v)
 		})
 	}
