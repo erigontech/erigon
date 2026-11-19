@@ -552,8 +552,8 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		txKey     [8]byte
 		err       error
 
-		historyPath   = h.vNewFilePath(step, step+1)
-		efHistoryPath = h.efNewFilePath(step, step+1)
+		historyPath   = h.dirtyFiles.dataFilePath(txFrom, txTo, h.vNewFilePath(step, step+1))
+		efHistoryPath = h.InvertedIndex.dirtyFiles.dataFilePath(txFrom, txTo, h.efNewFilePath(step, step+1))
 		startAt       = time.Now()
 		closeComp     = true
 	)
@@ -901,12 +901,12 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}
 
 	{
-		if err = collation.efHistoryComp.Compress(); err != nil {
+		if err = buildMissingFile(collation.efHistoryPath, collation.efHistoryComp.Compress); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .ef history: %w", h.FilenameBase, err)
 		}
 	}
 	{
-		if err = collation.historyComp.Compress(); err != nil {
+		if err = buildMissingFile(collation.historyPath, collation.historyComp.Compress); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .v history: %w", h.FilenameBase, err)
 		}
 	}
@@ -917,7 +917,9 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 		return HistoryFiles{}, fmt.Errorf("open %s .ef history decompressor: %w", h.FilenameBase, err)
 	}
 	{
-		if err := h.InvertedIndex.buildMapAccessor(ctx, step, step+1, efHistoryDecomp, ps); err != nil {
+		if err := buildMissingFile(h.InvertedIndex.efAccessorNewFilePath(step, step+1), func() error {
+			return h.InvertedIndex.buildMapAccessor(ctx, step, step+1, efHistoryDecomp, ps)
+		}); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s .ef history idx: %w", h.FilenameBase, err)
 		}
 		if efHistoryIdx, err = h.InvertedIndex.openHashMapAccessor(h.InvertedIndex.efAccessorNewFilePath(step, step+1)); err != nil {
@@ -931,7 +933,9 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}
 
 	historyIdxPath := h.vAccessorNewFilePath(step, step+1)
-	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
+	err = buildMissingFile(historyIdxPath, func() error {
+		return h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
+	})
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.FilenameBase, err)
 	}

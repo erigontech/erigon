@@ -1120,7 +1120,6 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 		if step < firstStep {
 			continue
 		}
-
 		firstFileAfterStepZero := step > 0 && ac.d[id].FirstStepNotInFiles() == 0
 		g.Go(func() error {
 			var collation Collation
@@ -1147,11 +1146,7 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 				return err
 			}
 
-			dd, err := kv.String2Domain(d.FilenameBase)
-			if err != nil {
-				return err
-			}
-			static.d[dd] = sf
+			static.d[id] = sf
 			return nil
 		})
 	}
@@ -1185,11 +1180,11 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 			return nil
 		})
 	}
-	ac.Close()
 	if err := g.Wait(); err != nil {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
+	ac.Close()
 	a.logger.Debug("[agg] collate-build", "step", step, "collate_workers", a.workers.getCollateAndBuild(), "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers, "took", time.Since(stepStartedAt))
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.observeMaintenance(ctx, MaintenanceEvent{Point: MaintenanceFilesBuilt})
@@ -1863,11 +1858,11 @@ func (a *Aggregator) FirstTxNumOfStep(step kv.Step) uint64 { // could have some 
 	return firstTxNumOfStep(step, a.StepSize())
 }
 
-// dirtyFilesEndTxNumMinimax is the ceiling shared by all visible files: no entity is visible
-// past a range another one misses. Left out: entities with no files at all (a fresh node, or
-// optional indexes never downloaded, would otherwise see nothing) and unaligned ones.
+// dirtyFilesEndTxNumMinimax returns the lowest on-disk end among enabled, aligned
+// entities. A domain contributes once it has a values file (.kv), and a standalone
+// index once it has a data file. Missing accessors can keep the readable range
+// below this ceiling.
 func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
-	// end == 0 means "entity has no files", it does not lower the ceiling
 	_min := func(ceiling, end uint64) uint64 {
 		if end == 0 {
 			return ceiling
@@ -2356,8 +2351,8 @@ func (a *Aggregator) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 	a.dirtyFilesLock.Lock()
 	at := a.BeginFilesRo()
 	ceilingStep := kv.Step(a.dirtyFilesEndTxNumMinimax() / at.StepSize())
-	// A fileless entity's first published step must reach the shared ceiling.
-	// Existing files already contribute to that ceiling, even without accessors.
+	// An aligned entity's first data file must reach the current ceiling.
+	// Publishing an earlier step would lower the shared ceiling.
 	var minResumeStep kv.Step
 	if ceilingStep > 0 {
 		minResumeStep = ceilingStep - 1
