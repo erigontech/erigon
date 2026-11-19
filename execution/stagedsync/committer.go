@@ -623,7 +623,7 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 	if !cc.computeAheadGateOpen(n) {
 		return
 	}
-	if cc.ownsChangeset(n) {
+	if cc.ownsChangeset(n) && !dbg.EnvBool("PROBE_AHEAD_NOGATE", false) {
 		if cc.branchPrefetch == nil || !pb.txSeen || cc.doms.GetChangesetByHash(n, pb.req.blockHash) == nil || dbg.BALShadowCompute || commitmentdb.ParentReadsWanted() {
 			return
 		}
