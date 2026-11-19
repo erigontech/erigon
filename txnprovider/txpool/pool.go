@@ -2740,9 +2740,11 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			senderTxnKept = true
 		}
 
-		feeCap := mt.TxnSlot.GetFeeCap()
+		var feeCap *uint256.Int
 		if frame, ok := mt.TxnSlot.Txn.(*types.FrameTransaction); ok {
 			feeCap = frame.ExecutionFeeCap(uint256.NewInt(p.pendingBlobFee.Load()))
+		} else {
+			feeCap = mt.TxnSlot.GetFeeCap()
 		}
 		if mt.keyedNonce {
 			mt.minFeeCap = *feeCap

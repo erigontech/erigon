@@ -906,18 +906,19 @@ func newRPCTransaction(txn types.Transaction, baseFee, blobBaseFee *uint256.Int,
 		Value: (*hexutil.U256)(txn.GetValue()),
 	}
 	txn = txn.Unwrap()
+	txType := txn.Type()
 
 	v, r, s := txn.RawSignatureValues()
 	// For LegacyTx, v=r=s=0 means an unsigned system/protocol transaction (e.g. EIP-4788);
 	// match geth which returns null for these. For typed transactions (EIP-1559, EIP-2930…),
 	// v=0 is valid yParity=0 and must serialise as "0x0" — do not suppress it.
-	if txn.Type() != types.LegacyTxType || !v.IsZero() || !r.IsZero() || !s.IsZero() {
+	if txType != types.LegacyTxType || !v.IsZero() || !r.IsZero() || !s.IsZero() {
 		result.V = (*hexutil.U256)(v)
 		result.R = (*hexutil.U256)(r)
 		result.S = (*hexutil.U256)(s)
 	}
 
-	if txn.Type() == types.LegacyTxType {
+	if txType == types.LegacyTxType {
 		if !v.IsZero() { // skip chain id derivation in case of call simulation (where v,r,s are zero)
 			var err error
 			chainId, err = types.DeriveChainId(v)
@@ -938,15 +939,17 @@ func newRPCTransaction(txn types.Transaction, baseFee, blobBaseFee *uint256.Int,
 			result.Accesses = types.AccessList{}
 		}
 
-		if txn.Type() == types.AccessListTxType {
+		if txType == types.AccessListTxType {
 			result.GasPrice = (*hexutil.U256)(txn.GetTipCap())
 		} else {
 			result.setGasPrice(txn, baseFee, blobBaseFee, gasUsed)
 			result.MaxPriorityFeePerGas = (*hexutil.U256)(txn.GetTipCap())
-			result.MaxFeePerGas = (*hexutil.U256)(txn.GetFeeCap())
+			if txType != types.FrameTxType {
+				result.MaxFeePerGas = (*hexutil.U256)(txn.GetFeeCap())
+			}
 		}
 
-		switch txn.Type() {
+		switch txType {
 		case types.BlobTxType:
 			blobTx := txn.(*types.BlobTx)
 			result.MaxFeePerBlobGas = (*hexutil.U256)(&blobTx.MaxFeePerBlobGas)
@@ -962,7 +965,6 @@ func newRPCTransaction(txn types.Transaction, baseFee, blobBaseFee *uint256.Int,
 				signatures = types.FrameSignatures{}
 			}
 			result.Signatures = &signatures
-			result.MaxFeePerGas = nil
 			result.MaxFee = (*hexutil.U256)(&frame.Fees.MaxFee)
 			result.BlobVersionedHashes = frame.BlobVersionedHashes
 			result.Accesses, result.YParity, result.V, result.R, result.S = nil, nil, nil, nil, nil
@@ -1015,7 +1017,7 @@ func (r *RPCTransaction) setGasPrice(txn types.Transaction, baseFee, blobBaseFee
 		if blobBaseFee == nil {
 			blobBaseFee = new(uint256.Int)
 		}
-		budget, err := frame.Fees.Budget(frame.GetGasLimit(), frame.GetBlobGas(), baseFee, blobBaseFee)
+		budget, err := frame.Fees.Budget(uint64(r.Gas), frame.GetBlobGas(), baseFee, blobBaseFee)
 		if err != nil {
 			// A stored block can contain a frame that cannot pay its base fees.
 			r.GasPrice = nil

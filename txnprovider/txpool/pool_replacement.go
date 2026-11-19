@@ -86,19 +86,22 @@ func (p *TxPool) checkReplacement(replacement, previous *metaTxn) replacementDec
 // Frame replacements must strictly increase fees, even when the configured
 // percentage would round down to no increase.
 func validateFrameReplacement(previous, replacement *TxnSlot, priceBump, blobPriceBump uint64) txpoolcfg.DiscardReason {
-	oldCap, newCap := previous.GetFeeCap(), replacement.GetFeeCap()
 	oldFrame, oldIsFrame := previous.Txn.(*types.FrameTransaction)
 	newFrame, newIsFrame := replacement.Txn.(*types.FrameTransaction)
-	if oldIsFrame && newIsFrame {
+	bothFrames := oldIsFrame && newIsFrame
+	var oldCap, newCap *uint256.Int
+	if bothFrames {
 		oldCap, newCap = &oldFrame.Fees.MaxFee, &newFrame.Fees.MaxFee
+	} else {
+		oldCap, newCap = previous.GetFeeCap(), replacement.GetFeeCap()
 	}
 	if !frameReplacementFee(previous.GetTipCap(), replacement.GetTipCap(), priceBump) || !frameReplacementFee(oldCap, newCap, priceBump) {
 		return txpoolcfg.NotReplaced
 	}
 	if replacement.HasBlobs() && previous.HasBlobs() {
-		oldBlobCap, newBlobCap := previous.GetBlobFeeCap(), replacement.GetBlobFeeCap()
-		if oldIsFrame && newIsFrame {
-			oldBlobCap, newBlobCap = oldCap, newCap
+		oldBlobCap, newBlobCap := oldCap, newCap
+		if !bothFrames {
+			oldBlobCap, newBlobCap = previous.GetBlobFeeCap(), replacement.GetBlobFeeCap()
 		}
 		if !frameReplacementFee(oldBlobCap, newBlobCap, blobPriceBump) {
 			return txpoolcfg.ReplaceUnderpriced
