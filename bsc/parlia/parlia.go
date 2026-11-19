@@ -79,7 +79,8 @@ func (p *Parlia) IsSystemTransaction(tx types.Transaction, header *types.Header)
 	if _, ok := bscSystemContracts[*to]; !ok {
 		return false, nil
 	}
-	if !tx.GetTipCap().IsZero() {
+	// BSC has no base fee, so the effective gas price is min(feeCap, tipCap).
+	if !tx.GetFeeCap().IsZero() && !tx.GetTipCap().IsZero() {
 		return false, nil
 	}
 	sender, err := tx.Sender(*p.signer)
