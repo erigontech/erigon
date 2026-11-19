@@ -329,78 +329,49 @@ func gasCreate(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 	return mdgas.MdGasCost{Execution: g}, err
 }
 
-func gasCreate2(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
-	if evm.readOnly {
-		return mdgas.MdGasCost{}, ErrWriteProtection
-	}
-	gas, err := memoryGasCost(callContext, memorySize)
-	if err != nil {
-		return mdgas.MdGasCost{}, err
-	}
-	size, overflow := callContext.Stack.back(2).Uint64WithOverflow()
-	if overflow {
-		return mdgas.MdGasCost{}, ErrGasUintOverflow
-	}
-	numWords := ToWordSize(size)
-	wordGas, overflow := math.SafeMul(numWords, params.Keccak256WordGas)
-	if overflow {
-		return mdgas.MdGasCost{}, ErrGasUintOverflow
-	}
-	gas, overflow = math.SafeAdd(gas, wordGas)
-	if overflow {
-		return mdgas.MdGasCost{}, ErrGasUintOverflow
-	}
-	return mdgas.MdGasCost{Execution: gas}, nil
+func gasCreate2(evm *EVM, scope *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+	return initCodeGas(evm, scope, availableGas, memorySize, CREATE2, false)
 }
 
-func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGasCost, err error) {
-	if evm.readOnly {
-		return mdgas.MdGasCost{}, ErrWriteProtection
-	}
-	gas.Execution, err = memoryGasCost(callContext, memorySize)
+func gasCreateEip3860(evm *EVM, scope *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+	return initCodeGas(evm, scope, availableGas, memorySize, CREATE, true)
+}
+
+func gasCreate2Eip3860(evm *EVM, scope *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+	return initCodeGas(evm, scope, availableGas, memorySize, CREATE2, true)
+}
+
+func initCodeGas(evm *EVM, scope *CallContext, availableGas mdgas.MdGas, memorySize uint64, op OpCode, eip3860 bool) (mdgas.MdGasCost, error) {
+	gas, err := gasCreate(evm, scope, availableGas, memorySize)
 	if err != nil {
-		return mdgas.MdGasCost{}, err
+		return gas, err
 	}
-	size, overflow := callContext.Stack.back(2).Uint64WithOverflow()
+	size, overflow := scope.Stack.back(2).Uint64WithOverflow()
 	if overflow {
 		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
-	if err := CheckMaxInitCodeSize(size, evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
-		return mdgas.MdGasCost{}, err
+	var gasPerWord uint64
+	if op == CREATE2 {
+		gasPerWord = params.Keccak256WordGas
 	}
-	numWords := ToWordSize(size)
-	// Since size <= params.MaxInitCodeSize(Amsterdam), this multiplication cannot overflow
-	wordGas := params.InitCodeWordGas * numWords
+	if eip3860 {
+		if err := CheckMaxInitCodeSize(size, true, evm.chainRules.IsAmsterdam); err != nil {
+			return mdgas.MdGasCost{}, err
+		}
+		gasPerWord += params.InitCodeWordGas
+	}
+	wordGas, overflow := math.SafeMul(ToWordSize(size), gasPerWord)
+	if overflow {
+		return mdgas.MdGasCost{}, ErrGasUintOverflow
+	}
 	gas.Execution, overflow = math.SafeAdd(gas.Execution, wordGas)
 	if overflow {
 		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
-	return gasCreateAccount(evm, callContext, availableGas, gas, false), nil
-}
-
-func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGasCost, err error) {
-	if evm.readOnly {
-		return mdgas.MdGasCost{}, ErrWriteProtection
+	if eip3860 && evm.chainRules.IsAmsterdam && availableGas.Execution >= gas.Execution {
+		gas = gasCreateAccount(evm, scope, gas, op == CREATE2)
 	}
-	gas.Execution, err = memoryGasCost(callContext, memorySize)
-	if err != nil {
-		return mdgas.MdGasCost{}, err
-	}
-	size, overflow := callContext.Stack.back(2).Uint64WithOverflow()
-	if overflow {
-		return mdgas.MdGasCost{}, ErrGasUintOverflow
-	}
-	if err := CheckMaxInitCodeSize(size, evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
-		return mdgas.MdGasCost{}, err
-	}
-	numWords := ToWordSize(size)
-	// Since size <= params.MaxInitCodeSize(Amsterdam), this multiplication cannot overflow
-	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * numWords
-	gas.Execution, overflow = math.SafeAdd(gas.Execution, wordGas)
-	if overflow {
-		return mdgas.MdGasCost{}, ErrGasUintOverflow
-	}
-	return gasCreateAccount(evm, callContext, availableGas, gas, true), nil
+	return gas, nil
 }
 
 type createGasPreparation struct {
@@ -411,10 +382,7 @@ type createGasPreparation struct {
 	err         error
 }
 
-func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, gas mdgas.MdGasCost, create2 bool) mdgas.MdGasCost {
-	if !evm.chainRules.IsAmsterdam || availableGas.Execution < gas.Execution {
-		return gas
-	}
+func gasCreateAccount(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, create2 bool) mdgas.MdGasCost {
 	prepared := &callContext.create
 	*prepared = createGasPreparation{}
 	caller := callContext.Contract.Address()

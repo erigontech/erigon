@@ -706,18 +706,20 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 }
 
 var createGasTests = []struct {
-	code    string
+	op      vm.OpCode
+	size    int
 	eip3860 bool
 	gasUsed uint64
+	wantErr error
 }{
-	// create(0, 0, 0xc000)
-	{"0x61C00060006000f0", false, 41225},
-	// create(0, 0, 0xc000)
-	{"0x61C00060006000f0", true, 44297},
-	// create2(0, 0, 0xc000, 0)
-	{"0x600061C00060006000f5", false, 50444},
-	// create2(0, 0, 0xc000, 0)
-	{"0x600061C00060006000f5", true, 53516},
+	{vm.CREATE, params.MaxInitCodeSize, false, 41225, nil},
+	{vm.CREATE, params.MaxInitCodeSize, true, 44297, nil},
+	{vm.CREATE, params.MaxInitCodeSize + 1, false, 41234, nil},
+	{vm.CREATE, params.MaxInitCodeSize + 1, true, math.MaxUint64, vm.ErrMaxInitCodeSizeExceeded},
+	{vm.CREATE2, params.MaxInitCodeSize, false, 50444, nil},
+	{vm.CREATE2, params.MaxInitCodeSize, true, 53516, nil},
+	{vm.CREATE2, params.MaxInitCodeSize + 1, false, 50459, nil},
+	{vm.CREATE2, params.MaxInitCodeSize + 1, true, math.MaxUint64, vm.ErrMaxInitCodeSizeExceeded},
 }
 
 func TestCreateGas(t *testing.T) {
@@ -741,7 +743,12 @@ func TestCreateGas(t *testing.T) {
 			s := state.New(stateReader)
 			defer s.Close()
 			require.NoError(t, s.CreateAccount(address, true))
-			require.NoError(t, s.SetCode(address, hexutil.MustDecode(tt.code), tracing.CodeChangeUnspecified))
+			code := program.New()
+			if tt.op == vm.CREATE2 {
+				code.Push(0) // salt
+			}
+			code.Push(tt.size).Push(0).Push(0).Op(tt.op)
+			require.NoError(t, s.SetCode(address, code.Bytes(), tracing.CodeChangeUnspecified))
 
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
@@ -763,8 +770,8 @@ func TestCreateGas(t *testing.T) {
 				Execution: math.MaxUint64,
 			}
 			_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
-			if err != nil {
-				t.Errorf("test %d execution failed: %v", i, err)
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("test %d (%s, size %d, EIP-3860 %t): got error %v, want %v", i, tt.op, tt.size, tt.eip3860, err, tt.wantErr)
 			}
 			if gasUsed := startGas.Execution - gas.Execution; gasUsed != tt.gasUsed {
 				t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
