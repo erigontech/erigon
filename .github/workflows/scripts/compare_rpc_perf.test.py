@@ -361,9 +361,11 @@ with tempfile.TemporaryDirectory() as tmp:
 # --- apis: the rows by method (mixed with --verbose) or by subscription measure ---
 
 
-def api(p50_ms, p95_ms, max_ms, requests, errors=0):
-    return {"requests": requests, "errors": errors, "empty": 0,
-            "latencies": {"50th": int(p50_ms * 1e6), "95th": int(p95_ms * 1e6), "max": int(max_ms * 1e6)}}
+def api(p50_ms, p95_ms, max_ms, requests, errors=0, p90_ms=None):
+    latencies = {"50th": int(p50_ms * 1e6), "95th": int(p95_ms * 1e6), "max": int(max_ms * 1e6)}
+    if p90_ms is not None:
+        latencies["90th"] = int(p90_ms * 1e6)
+    return {"requests": requests, "errors": errors, "empty": 0, "latencies": latencies}
 
 
 def rep_apis(apis):
@@ -409,6 +411,47 @@ with tempfile.TemporaryDirectory() as tmp:
           < md.find("newHeads latency | geth"), md)
     check("the api table follows the step table in the same details",
           md.find("| QPS | Client |") < md.find("| QPS | API | Client |") < md.find("</details>"), md)
+
+# --- eth_subscribe: the fan-out rows get an overview row of their own ------------
+
+
+def fanout_row(text, name, qps):
+    """The cells of the overview row of a fan-out measure, whose name holds spaces."""
+    line = next((line for line in text.splitlines() if line.startswith(name + " ")), "")
+    cells = line[len(name):].split()
+    return cells if cells[:1] == [qps] else []
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    write_result(tmp, "erigon", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "newHeads fan-out": api(11, 39, 66, 1000, p90_ms=30),
+        "newHeads fan-out wallet": api(11, 39, 66, 900, p90_ms=30),
+        "newHeads latency wallet": api(1600, 3300, 3500, 900, p90_ms=3200),
+        "transactionReceipts fan-out indexer": api(5, 17, 26, 10, p90_ms=12)})]}])
+    write_result(tmp, "geth", "eth_subscribe_classes", [{"qps": "500", "testRepetitions": [rep_apis({
+        "newHeads fan-out": api(5, 20, 85, 1000, p90_ms=15),
+        "newHeads fan-out wallet": api(5, 20, 85, 900, p90_ms=15),
+        "newHeads latency wallet": api(1700, 3400, 3700, 900, p90_ms=3300),
+        "transactionReceipts fan-out indexer": api(4.5, 16, 43, 10, 1, p90_ms=11)})]}])
+    write_result(tmp, "reth", "eth_subscribe_classes", [
+        {"qps": "500", "testRepetitions": [], "error": "dial: bad handshake\ndial: bad handshake"}])
+    res = mod.load_results(tmp)
+    md = mod.render_overview(mod.overview_results(res), "p50")
+    row = fanout_row(md, "eth_subscribe_classes newHeads fan-out wallet", "500")
+    check("a fan-out measure has its own overview row with the erigon status",
+          row == ["500", "11.00", "5.00*", "dead", "🔴"], md)
+    row = fanout_row(md, "eth_subscribe_classes transactionReceipts fan-out indexer", "500")
+    check("errors in a fan-out measure make the client err", row == ["500", "5.00*", "err", "dead", "🟢"], md)
+    check("a measure with copies per class has no overview row of its own",
+          "eth_subscribe_classes newHeads fan-out 500" not in " ".join(md.split()), md)
+    check("the latency measures have no overview row", "newHeads latency" not in md, md)
+    md90 = mod.render_overview(mod.overview_results(res), "p90")
+    check("the p90 overview has the fan-out rows",
+          fanout_row(md90, "eth_subscribe_classes newHeads fan-out wallet", "500")[:3] == ["500", "30.00", "15.00*"], md90)
+    details = mod.render(res)
+    check("the fan-out measures have no details section of their own", details.count("<details>") == 1, details)
+    check("a dead client shows only the first line of its error",
+          "| 500 | reth | dead: dial: bad handshake | | | | |" in details, details)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

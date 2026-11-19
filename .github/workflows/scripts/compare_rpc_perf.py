@@ -6,6 +6,9 @@ overview for each of p50, p90, p95 and max, with the latency of each client and 
 status of Erigon per test label and QPS step, then, per test label and QPS step, the
 p50, p95 and max latency of each client, followed by its rows by method (mixed, run with
 --verbose) or by subscription measure (eth_subscribe), when the reports have them.
+The fan-out measures of eth_subscribe (how long the node takes to send one notification
+to every connection) also get overview rows, one per client class when the pattern has them,
+since the latency of the test itself is mostly the block import time, the same for all clients.
 p50, p90 and p95 are the median over the repetitions, max is the worst one.
 HTTP is the share of requests answered with HTTP 200, RPC the share of requests
 answered with a result and no JSON-RPC error; both are the worst over the repetitions.
@@ -65,13 +68,43 @@ def load_apis(repetitions):
     for r in repetitions:
         for name, row in r.get("apis", {}).items():
             rows.setdefault(name, []).append(row)
-    return {name: {
-        "p50": statistics.median(r["latencies"]["50th"] for r in reps) / 1e6,
-        "p95": statistics.median(r["latencies"]["95th"] for r in reps) / 1e6,
-        "max": max(r["latencies"]["max"] for r in reps) / 1e6,
-        "requests": sum(r["requests"] for r in reps),
-        "errors": sum(r["errors"] for r in reps),
-    } for name, reps in rows.items()}
+    apis = {}
+    for name, reps in rows.items():
+        apis[name] = {
+            "p50": statistics.median(r["latencies"]["50th"] for r in reps) / 1e6,
+            "p95": statistics.median(r["latencies"]["95th"] for r in reps) / 1e6,
+            "max": max(r["latencies"]["max"] for r in reps) / 1e6,
+            "requests": sum(r["requests"] for r in reps),
+            "errors": sum(r["errors"] for r in reps),
+        }
+        if all("90th" in r["latencies"] for r in reps):
+            apis[name]["p90"] = statistics.median(r["latencies"]["90th"] for r in reps) / 1e6
+    return apis
+
+
+def overview_results(results):
+    """Add to the results a test per fan-out measure, as "<label> <measure>", for the overview only."""
+    out = dict(results)
+    for label, clients in results.items():
+        names = {n for steps in clients.values() for s in steps.values() for n in s.get("apis", {}) if "fan-out" in n}
+        for name in names:
+            if any(other.startswith(name + " ") for other in names):
+                continue
+            out[f"{label} {name}"] = {c: {qps: fanout_step(s, name) for qps, s in steps.items()}
+                                      for c, steps in clients.items()}
+    return out
+
+
+def fanout_step(step, name):
+    if is_failed(step):
+        return step
+    api = step.get("apis", {}).get(name)
+    if api is None:
+        return None
+    measure = {k: api[k] for k in ("p50", "p90", "p95", "max") if k in api}
+    measure["success"] = 1
+    measure["rpc_success"] = 1 - api["errors"] / max(api["requests"], 1)
+    return measure
 
 
 def add_lost(results, clients):
@@ -165,7 +198,7 @@ def render(results):
             for client in clients:
                 s = results[label][client].get(qps)
                 if is_failed(s):
-                    detail = f"{s['failed']}: {s['error']}" if "error" in s else s["failed"]
+                    detail = f"{s['failed']}: {s['error'].splitlines()[0]}" if "error" in s else s["failed"]
                     lines.append(f"| {qps} | {client} | {detail} | | | | |")
                 elif s:
                     lines.append(f"| {qps} | {client} | {s['p50']:.2f} | {s['p95']:.2f} | {s['max']:.2f} "
@@ -198,8 +231,9 @@ def main():
     print("## RPC Performance Comparison (latest block)\n")
     for client in add_lost(results, clients):
         print(f"⚠️ {client}: no results, its job ended before uploading them (e.g. the runner was lost).\n")
-    steps = [s for clients in results.values() for qps in clients.values() for s in qps.values()]
-    overviews = [render_overview(results, percentile) for percentile in ("p50", "p90", "p95", "max")
+    overview = overview_results(results)
+    steps = [s for clients in overview.values() for qps in clients.values() for s in qps.values() if s]
+    overviews = [render_overview(overview, percentile) for percentile in ("p50", "p90", "p95", "max")
                  if all(percentile in s for s in steps if not is_failed(s))]
     print("\n".join(overviews + [render(results)]) if results else "No results found.")
     return 0
