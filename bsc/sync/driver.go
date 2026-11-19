@@ -27,6 +27,8 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	bscp2p "github.com/erigontech/erigon/bsc/p2p"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -58,15 +60,10 @@ func RunBlockDownloader(ctx context.Context, logger log.Logger, cfg Config) erro
 	if cfg.FcuInterval == 0 {
 		cfg.FcuInterval = defaultFcuBlocks
 	}
-	errCh := make(chan error, 2)
-	go func() { errCh <- cfg.Svc.Run(ctx) }()
-	go func() { errCh <- runParallel(ctx, logger, cfg) }()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-errCh:
-		return err
-	}
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error { return cfg.Svc.Run(ctx) })
+	eg.Go(func() error { return runParallel(ctx, logger, cfg) })
+	return eg.Wait()
 }
 
 // runParallel downloads [head+1, TargetBlock] with the parallel multi-peer range
