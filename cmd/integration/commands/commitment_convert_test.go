@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -63,6 +64,19 @@ func TestCommitmentBranchRejectsCommitmentV3(t *testing.T) {
 	root := integrationRoot()
 	root.SetArgs([]string{"--log.dir.disable", "commitment", "branch", "--datadir", dirs.DataDir, "--chain", networkname.Test})
 	require.ErrorContains(t, root.ExecuteContext(t.Context()), "not supported on commitment v3")
+}
+
+func TestCommitmentBranchStopsProfilingOnError(t *testing.T) {
+	root := integrationRoot()
+	t.Cleanup(func() {
+		branchPrefixFlag = ""
+		cpu := root.PersistentFlags().Lookup("pprof.cpuprofile")
+		_ = cpu.Value.Set("")
+		cpu.Changed = false
+	})
+	root.SetArgs([]string{"--log.dir.disable", "--pprof.cpuprofile", filepath.Join(t.TempDir(), "cpu.out"), "commitment", "branch", "--datadir", t.TempDir(), "--chain", networkname.Test, "--prefix", "zz"})
+	require.ErrorContains(t, root.ExecuteContext(t.Context()), "parsing prefix")
+	require.ErrorContains(t, debug.Handler.StopCPUProfile(), "not in progress")
 }
 
 func TestCommitmentConvertReturnsErrors(t *testing.T) {
