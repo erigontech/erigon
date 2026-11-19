@@ -38,6 +38,13 @@ import (
 
 // testDbAndAggregatorSmallFrozen is like testDbAndAggregatorv3 but with a
 // configurable stepsInFrozenFile, so "frozen" files can use small step ranges.
+// addCommitmentDependencies hides accounts/storage files that no commitment file covers.
+// The schema no longer registers this dependency, so commitment can merge on its own.
+func addCommitmentDependencies(agg *Aggregator) {
+	agg.AddDependencyBtwnDomains(kv.AccountsDomain, kv.CommitmentDomain)
+	agg.AddDependencyBtwnDomains(kv.StorageDomain, kv.CommitmentDomain)
+}
+
 func testDbAndAggregatorSmallFrozen(t *testing.T, stepSize, stepsInFrozenFile uint64) (kv.RwDB, *Aggregator) {
 	t.Helper()
 	logger := log.New()
@@ -540,6 +547,7 @@ func TestRetire_PreservesTailBelowHiddenCoveringFile(t *testing.T) {
 					require.NoError(t, dir.RemoveFile(filepath.Join(agg.Dirs().SnapAccessors, fmt.Sprintf("%s-accounts.0-%d.%s", ver, tc.outputEnd, name))))
 				}
 			}
+			addCommitmentDependencies(agg)
 			require.NoError(t, agg.OpenFolder(db))
 			agg.ForbidVisibilityLowering()
 			require.NotPanics(t, func() {

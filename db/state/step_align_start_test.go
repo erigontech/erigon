@@ -115,6 +115,7 @@ func TestStepAlignedEndRefusesHiddenFiles(t *testing.T) {
 	generateAccountsFile(t, dirs, split)
 	generateStorageFile(t, dirs, split)
 	generatePlainCommitmentFile(t, dirs, []testFileRange{{0, 4}, {4, 8}, {8, 12}})
+	addCommitmentDependencies(agg)
 	require.NoError(t, agg.OpenFolder(db))
 	_, err := agg.StepAlignedEnd(30)
 	require.ErrorContains(t, err, "not readable past txNum 40")

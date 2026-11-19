@@ -170,6 +170,7 @@ func TestAggregatorColdMergeWaitsWhilePaused(t *testing.T) {
 
 	link := agg.d[kv.CommitmentDomain].kvNewFilePath(0, 4) + coldMergeLinkSuffix
 	require.Eventually(t, func() bool { _, err := os.Lstat(link); return err == nil }, 5*time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return mxColdMergePaused.GetValue() == 1 }, 5*time.Second, time.Millisecond)
 	select {
 	case err := <-done:
 		t.Fatalf("merge finished while paused: %v", err)
