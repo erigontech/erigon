@@ -111,7 +111,10 @@ const (
 	SLOTNUM     OpCode = 0x4b
 )
 
-const APPROVE OpCode = 0xaa
+const (
+	SETCODEFROM OpCode = 0xa7
+	APPROVE     OpCode = 0xaa
+)
 
 const (
 	TXPARAM OpCode = 0xb0 + iota
@@ -310,6 +313,7 @@ var opCodeToString = map[OpCode]string{
 	BLOBHASH:      "BLOBHASH",
 	BLOBBASEFEE:   "BLOBBASEFEE",
 	SLOTNUM:       "SLOTNUM",
+	SETCODEFROM:   "SETCODEFROM",
 	APPROVE:       "APPROVE",
 	TXPARAM:       "TXPARAM",
 	FRAMEDATALOAD: "FRAMEDATALOAD",
@@ -482,6 +486,7 @@ var stringToOp = map[string]OpCode{
 	"BLOBHASH":       BLOBHASH,
 	"BLOBBASEFEE":    BLOBBASEFEE,
 	"SLOTNUM":        SLOTNUM,
+	"SETCODEFROM":    SETCODEFROM,
 	"APPROVE":        APPROVE,
 	"TXPARAM":        TXPARAM,
 	"FRAMEDATALOAD":  FRAMEDATALOAD,

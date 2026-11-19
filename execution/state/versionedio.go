@@ -703,6 +703,7 @@ type WriteHeader struct {
 	Path        AccountPath
 	Reason      tracing.BalanceChangeReason
 	NonceReason tracing.NonceChangeReason
+	CodeReason  tracing.CodeChangeReason
 	valStatus   valueStatus
 }
 
@@ -1940,24 +1941,6 @@ func (ws *WriteSet) updateSelfDestruct(addr accounts.Address, val bool) {
 	}
 }
 
-func (ws *WriteSet) updateCode(addr accounts.Address, val accounts.Code) {
-	if vw, ok := ws.code[addr]; ok {
-		vw.Val = val
-	}
-}
-
-func (ws *WriteSet) updateCodeHash(addr accounts.Address, val accounts.CodeHash) {
-	if vw, ok := ws.codeHash[addr]; ok {
-		vw.Val = val
-	}
-}
-
-func (ws *WriteSet) updateCodeSize(addr accounts.Address, val int) {
-	if vw, ok := ws.codeSize[addr]; ok {
-		vw.Val = val
-	}
-}
-
 func valueString(path AccountPath, value any) string {
 	if value == nil {
 		return "<nil>"
@@ -2910,7 +2893,11 @@ func (b *BlockAccessListBuilder) Add(txIndex int, rs ReadSet, writes *WriteSet) 
 			if tr, ok := rs.address[addr]; ok && (tr.Val == nil || tr.Val.IsNil()) || rs.selfDestruct[addr].Val {
 				account.initialCodeEmpty = true
 			}
-			account.applyWriteCode(w.Val, w.Version.blockAccessIndex())
+			change := types.CodeChange{Index: w.Version.blockAccessIndex(), Bytecode: w.Val.Bytes}
+			if w.CodeReason == tracing.CodeChangeAdoption {
+				change.Bytecode, change.CodeHash = nil, w.Val.Hash
+			}
+			account.code.recordWrite(change.Index, change)
 		}
 		for addr, byKey := range writes.Storages() {
 			if addr.IsNil() {
@@ -3026,7 +3013,7 @@ type accountState struct {
 	changes             types.AccountChanges
 	balance             fieldTracker[uint256.Int]
 	nonce               fieldTracker[uint64]
-	code                fieldTracker[accounts.Code]
+	code                fieldTracker[types.CodeChange]
 	balanceValue        g.Option[uint256.Int]               // tracks latest seen balance
 	initialBalanceValue g.Option[uint256.Int]               // tracks pre-block balance for net-zero detection
 	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
@@ -3129,22 +3116,20 @@ func applyToNonce(nt *fieldTracker[uint64], ac *types.AccountChanges) {
 	})
 }
 
-func applyToCode(ct *fieldTracker[accounts.Code], ac *types.AccountChanges, initialCodeEmpty bool) {
+func applyToCode(ct *fieldTracker[types.CodeChange], ac *types.AccountChanges, initialCodeEmpty bool) {
 	// A first code change back to empty when pre-block code was already empty
 	// (e.g. an EIP-7702 delegation set then cleared in the same tx) is a net-zero
 	// change and is omitted, matching EELS's post-vs-pre code-hash diff.
 	firstFiltered := false
-	ct.changes.apply(func(idx uint32, value accounts.Code) {
+	ct.changes.apply(func(_ uint32, value types.CodeChange) {
 		if !firstFiltered {
 			firstFiltered = true
-			if initialCodeEmpty && len(value.Bytes) == 0 {
+			if initialCodeEmpty && value.CodeHash.IsNil() && len(value.Bytecode) == 0 {
 				return
 			}
 		}
-		ac.CodeChanges = append(ac.CodeChanges, &types.CodeChange{
-			Index:    idx,
-			Bytecode: bytes.Clone(value.Bytes),
-		})
+		value.Bytecode = bytes.Clone(value.Bytecode)
+		ac.CodeChanges = append(ac.CodeChanges, &value)
 	})
 }
 
@@ -3214,10 +3199,6 @@ func (account *accountState) applyWriteStorage(key accounts.StorageKey, val uint
 
 func (account *accountState) applyWriteNonce(val uint64, accessIndex uint32) {
 	account.nonce.recordWrite(accessIndex, val)
-}
-
-func (account *accountState) applyWriteCode(val accounts.Code, accessIndex uint32) {
-	account.code.recordWrite(accessIndex, val)
 }
 
 func (account *accountState) applyWriteBalance(val uint256.Int, accessIndex uint32) {

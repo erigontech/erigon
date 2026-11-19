@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/erigontech/erigon/execution/tracing"
@@ -369,4 +370,50 @@ func TestResolveCodeTakesTheHashFromTheRead(t *testing.T) {
 		require.Equal(t, code, got.Bytes, "versioned=%v", versioned)
 		require.Equal(t, hash, got.Hash, "versioned=%v", versioned)
 	}
+}
+
+func TestAdoptionTracesPrecedingTransactionCode(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{1})
+	old, preceding := accounts.NewCode([]byte{1}), accounts.NewCode([]byte{2})
+	account := accounts.NewAccount()
+	account.CodeHash = old.Hash
+	reader := &codeReader{addr: addr, account: &account, code: old.Bytes}
+	vm := NewVersionMap(nil)
+	vm.WriteCode(addr, Version{TxIndex: 0}, preceding, true)
+	vm.WriteCodeHash(addr, Version{TxIndex: 0}, preceding.Hash, true)
+	ibs := NewWithVersionMap(reader, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+	var previous accounts.Code
+	ibs.SetHooks(&tracing.Hooks{OnCodeChangeV2: func(_ accounts.Address, hash accounts.CodeHash, code []byte, _ accounts.CodeHash, _ []byte, _ tracing.CodeChangeReason) {
+		previous = accounts.Code{Hash: hash, Bytes: code}
+	}})
+	require.NoError(t, ibs.AdoptCode(addr, accounts.NewCode([]byte{3})))
+	require.Equal(t, preceding, previous)
+}
+
+func TestRevertOfAdoptionBackToOriginalCode(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{1})
+	original, adopted := accounts.NewCode([]byte{1}), accounts.NewCode([]byte{2})
+	account := accounts.NewAccount()
+	account.CodeHash = original.Hash
+	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &account, code: original.Bytes}, NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetTxContext(1, 0)
+
+	require.NoError(t, ibs.AdoptCode(addr, adopted))
+	snapshot := ibs.PushSnapshot()
+	require.NoError(t, ibs.AdoptCode(addr, original))
+	_, written := ibs.versionedWrites.GetCode(addr)
+	require.False(t, written)
+	ibs.RevertToSnapshot(snapshot, errors.New("revert"))
+	ibs.PopSnapshot(snapshot)
+
+	hash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, adopted.Hash, hash)
+	write, written := ibs.versionedWrites.GetCode(addr)
+	require.True(t, written)
+	require.Equal(t, adopted, write.Val)
+	require.Equal(t, tracing.CodeChangeAdoption, write.CodeReason)
 }

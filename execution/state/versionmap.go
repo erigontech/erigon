@@ -266,9 +266,10 @@ type VersionMap struct {
 	// Account lookup is lock-free. Each entry's RWMutex guards only its own cells.
 	s atomic.Pointer[xsync.Map[accounts.Address, *AddressEntry]]
 	// nonEmpty latches before the first entry is taken: nothing removes entries.
-	nonEmpty atomic.Bool
-	HasBAL   bool // When true, all significant writes are pre-populated from BAL
-	bal      types.BlockAccessList
+	nonEmpty  atomic.Bool
+	HasBAL    bool // When true, all significant writes are pre-populated from BAL
+	bal       types.BlockAccessList
+	adoptions map[accounts.CodeHash]*balAdoption
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -609,18 +610,104 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 			seed(e.Nonce, int(nonceChange.Index)-1)
 		}
 		for _, codeChange := range accountChanges.CodeChanges {
-			// Seed the whole code trio together: a CodePath cell without its
-			// CodeHashPath/CodeSizePath siblings lets a reader see code but no code hash.
-			code := accounts.NewCode(codeChange.Bytecode)
 			v := Version{TxIndex: int(codeChange.Index) - 1}
-			vm.WriteCode(addr, v, code, true)
-			vm.WriteCodeHash(addr, v, code.Hash, true)
-			vm.WriteCodeSize(addr, v, code.Len(), true)
-			seed(e.Code, v.TxIndex)
+			hash := codeChange.CodeHash
+			if hash.IsNil() {
+				code := accounts.NewCode(codeChange.Bytecode)
+				vm.seedCodeBytes(addr, v, e, code)
+				hash = code.Hash
+			} else {
+				if vm.adoptions == nil {
+					vm.adoptions = make(map[accounts.CodeHash]*balAdoption)
+				}
+				ref := vm.adoptions[hash]
+				if ref == nil {
+					vm.adoptions[hash] = &balAdoption{first: codeChange.Index}
+				} else {
+					ref.first = min(ref.first, codeChange.Index)
+				}
+			}
+			vm.WriteCodeHash(addr, v, hash, true)
 			seed(e.CodeHash, v.TxIndex)
-			seed(e.CodeSize, v.TxIndex)
 		}
 	}
+}
+
+type balAdoption struct {
+	first uint32
+	code  accounts.Code
+}
+
+func (vm *VersionMap) seedCodeBytes(addr accounts.Address, v Version, e *AddressEntry, code accounts.Code) {
+	vm.WriteCode(addr, v, code, true)
+	vm.WriteCodeSize(addr, v, code.Len(), true)
+	seed(e.Code, v.TxIndex)
+	seed(e.CodeSize, v.TxIndex)
+}
+
+// SeedAdoptedCode resolves each hash before execution starts. The first adoption
+// reads a source listed in the BAL, so its bytes come from an earlier deposit or
+// from a listed account in the pre-block state.
+func (vm *VersionMap) SeedAdoptedCode(base StateReader) error {
+	missing := 0
+	for _, ref := range vm.adoptions {
+		if ref.code.IsEmpty() {
+			missing++
+		}
+	}
+	if missing == 0 {
+		return nil
+	}
+	for i := range vm.bal {
+		for _, change := range vm.bal[i].CodeChanges {
+			if !change.CodeHash.IsNil() || len(change.Bytecode) == 0 {
+				continue
+			}
+			code := accounts.NewCode(change.Bytecode)
+			if ref := vm.adoptions[code.Hash]; ref != nil && ref.code.IsEmpty() && change.Index < ref.first {
+				ref.code = code
+				missing--
+			}
+		}
+	}
+	for i := range vm.bal {
+		if missing == 0 {
+			break
+		}
+		addr := accounts.InternAddress(vm.bal[i].Address)
+		acc, err := base.ReadAccountData(addr)
+		if err != nil {
+			return err
+		}
+		if acc == nil || acc.IsEmptyCodeHash() {
+			continue
+		}
+		if ref := vm.adoptions[acc.CodeHash]; ref != nil && ref.code.IsEmpty() {
+			raw, err := base.ReadAccountCode(addr)
+			if err != nil {
+				return err
+			}
+			code := accounts.NewCode(raw)
+			if code.IsEmpty() || code.Hash != acc.CodeHash {
+				return fmt.Errorf("pre-block code does not match %s at %s", acc.CodeHash, addr)
+			}
+			ref.code = code
+			missing--
+		}
+	}
+	if missing != 0 {
+		return fmt.Errorf("%w: %d adopted code hashes have no source", types.ErrInvalidBlockAccessList, missing)
+	}
+	for i := range vm.bal {
+		account := &vm.bal[i]
+		for _, change := range account.CodeChanges {
+			if !change.CodeHash.IsNil() {
+				addr := accounts.InternAddress(account.Address)
+				vm.seedCodeBytes(addr, Version{TxIndex: int(change.Index) - 1}, vm.load(addr), vm.adoptions[change.CodeHash].code)
+			}
+		}
+	}
+	return nil
 }
 
 func seed[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int) {
@@ -1954,6 +2041,9 @@ func (vm *VersionMap) resetToSeed(addr accounts.Address, path AccountPath, key a
 			return false
 		}
 		code := accounts.NewCode(c.Bytecode)
+		if !c.CodeHash.IsNil() {
+			code = vm.adoptions[c.CodeHash].code
+		}
 		switch path {
 		case CodePath:
 			resetCell(vm, e.Code, v, code, eqCode, &stamped)

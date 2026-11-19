@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -252,13 +253,14 @@ func (j *journal) fakeStorageChange(account accounts.Address, key accounts.Stora
 	j.dirties[account]++
 }
 
-func (j *journal) codeChange(account accounts.Address, prevcode []byte, prevhash accounts.CodeHash, wasCommitted bool) {
+func (j *journal) codeChange(account accounts.Address, prevcode []byte, prevhash accounts.CodeHash, wasCommitted bool) *journalEntry {
 	var extra *journalExtra // nil means the previous code was accounts.EmptyCode
 	if len(prevcode) != 0 || prevhash != accounts.EmptyCodeHash {
 		extra = &journalExtra{prevcode: prevcode, prevhash: prevhash}
 	}
 	j.entries = append(j.entries, journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommitted), extra: extra})
 	j.dirties[account]++
+	return &j.entries[len(j.entries)-1]
 }
 
 func (j *journal) refundChange(prev uint64) {
@@ -478,15 +480,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 				s.versionedWrites.DelCode(je.account)
 				s.versionedWrites.DelCodeSize(je.account)
 			} else {
-				if _, ok := s.versionedWrites.GetCode(je.account); ok {
-					s.versionedWrites.updateCode(je.account, accounts.Code{Hash: prevhash, Bytes: prevcode})
-				}
-				if _, ok := s.versionedWrites.GetCodeHash(je.account); ok {
-					s.versionedWrites.updateCodeHash(je.account, prevhash)
-				}
-				if _, ok := s.versionedWrites.GetCodeSize(je.account); ok {
-					s.versionedWrites.updateCodeSize(je.account, len(prevcode))
-				}
+				s.writeCode(je.account, accounts.Code{Hash: prevhash, Bytes: prevcode}, false, tracing.CodeChangeReason(je.aux))
 			}
 		}
 		return nil

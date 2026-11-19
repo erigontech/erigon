@@ -25,7 +25,22 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func TestToWriteSetPreservesAdoptedCodeHash(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{1})
+	code := accounts.NewCode([]byte{0})
+	writes := ToWriteSet(types.BlockAccessList{{
+		Address: addr.Value(), CodeChanges: []*types.CodeChange{{Index: 1, CodeHash: code.Hash}},
+	}}, 1)
+	hash, ok := writes.GetCodeHash(addr)
+	require.True(t, ok)
+	require.Equal(t, code.Hash, hash.Val)
+	_, ok = writes.GetCode(addr)
+	require.False(t, ok)
+}
 
 func TestFinalChange(t *testing.T) {
 	t.Parallel()

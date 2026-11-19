@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -281,4 +282,23 @@ func TestZeroValueCallToCodeReadsNoCalleeBalance(t *testing.T) {
 	reads := ibs.VersionedReads()
 	_, balanceRead := reads.GetBalance(callee)
 	require.False(t, balanceRead, "a zero-value call to an account with code depends on no balance")
+}
+
+func TestSetCodeFromNewAuthority(t *testing.T) {
+	config := chain.AllProtocolChanges.Copy()
+	config.BogotaTime = common.NewUint64(0)
+	authority := accounts.InternAddress(common.Address{19: 0x20})
+	current := accounts.InternAddress(common.Address{19: 0x21})
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	require.NoError(t, ibs.SetCode(authority, types.AddressToDelegation(current), tracing.CodeChangeAuthorization))
+	adopted := accounts.NewCode([]byte{byte(STOP)})
+	require.NoError(t, ibs.AdoptCode(authority, adopted))
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, config, Config{})
+	code := []byte{byte(PUSH1), 0x20, byte(SETCODEFROM), byte(STOP)}
+	_, _, _, err := evm.Run(Contract{addr: current, Code: code}, mdgas.MdGas{Execution: 15_000}, nil, false)
+	require.NoError(t, err)
+	got, err := ibs.GetCodeHash(current)
+	require.NoError(t, err)
+	require.Equal(t, adopted.Hash, got)
 }

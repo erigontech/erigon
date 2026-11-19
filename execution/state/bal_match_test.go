@@ -33,14 +33,16 @@ func matchTestBuilder() *BlockAccessListBuilder {
 	addr := func(n byte) accounts.Address { return accounts.InternAddress(common.Address{19: n}) }
 	key := func(n int) accounts.StorageKey { return accounts.InternKey(common.Hash{30: byte(n >> 8), 31: byte(n)}) }
 
-	ensureAccountState(b.ac, addr(1)).updateReadBalance(*uint256.NewInt(7))
+	adopter := ensureAccountState(b.ac, addr(1))
+	adopter.updateReadBalance(*uint256.NewInt(7))
+	adopter.code.recordWrite(1, types.CodeChange{Index: 1, CodeHash: accounts.InternCodeHash(common.Hash{31: 1})})
 
 	writer := ensureAccountState(b.ac, addr(2))
 	writer.updateReadBalance(*uint256.NewInt(100))
 	writer.applyWriteBalance(*uint256.NewInt(90), 1)
 	writer.applyWriteBalance(*uint256.NewInt(80), 3)
 	writer.applyWriteNonce(5, 1)
-	writer.applyWriteCode(accounts.Code{Bytes: []byte{0x60, 0x00}}, 2)
+	writer.code.recordWrite(2, types.CodeChange{Index: 2, Bytecode: []byte{0x60, 0x00}})
 
 	slots := ensureAccountState(b.ac, addr(3))
 	slots.updateReadStorage(key(3), *uint256.NewInt(1))
@@ -83,6 +85,14 @@ func TestBlockAccessListBuilderMatchesAgreesWithHash(t *testing.T) {
 		"nonce value": func(bal types.BlockAccessList) types.BlockAccessList { bal[1].NonceChanges[0].Value = 6; return bal },
 		"code bytes": func(bal types.BlockAccessList) types.BlockAccessList {
 			bal[1].CodeChanges[0].Bytecode = []byte{0x60}
+			return bal
+		},
+		"adopted hash": func(bal types.BlockAccessList) types.BlockAccessList {
+			bal[0].CodeChanges[0].CodeHash = accounts.InternCodeHash(common.Hash{31: 2})
+			return bal
+		},
+		"adoption as empty code": func(bal types.BlockAccessList) types.BlockAccessList {
+			bal[0].CodeChanges[0].CodeHash = accounts.NilCodeHash
 			return bal
 		},
 		"storage value": func(bal types.BlockAccessList) types.BlockAccessList {

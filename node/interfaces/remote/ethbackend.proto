@@ -307,6 +307,7 @@ message FrameValidationReply {
   repeated FrameCreationNonce creation_nonces = 8;
   // Only meaningful when valid is false; unspecified reasons are generic rejections.
   RejectionReason rejection_reason = 9;
+  repeated types.H160 proxy_dependencies = 10;
 }
 
 message BlockForTxNumRequest {

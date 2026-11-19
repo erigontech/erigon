@@ -532,6 +532,8 @@ const (
 	// CodeChangeRevert is emitted when the code is reverted back to a previous value due to call failure.
 	// It is only emitted when the tracer has opted in to use the journaling wrapper (WrapWithJournal).
 	CodeChangeRevert CodeChangeReason = 6
+
+	CodeChangeAdoption CodeChangeReason = 7
 )
 
 // OpcodeMask is the set of opcodes a tracer asks to see, one bit per opcode so the

@@ -181,6 +181,7 @@ type btNonceChange struct {
 type btCodeChange struct {
 	BlockAccessIndex hexutil.Uint32 `json:"blockAccessIndex"`
 	NewCode          hexutil.Bytes  `json:"newCode"`
+	NewCodeHash      *common.Hash   `json:"newCodeHash"`
 }
 
 func (bal btBlockAccessList) toBAL() types.BlockAccessList {
@@ -227,10 +228,14 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 			})
 		}
 		for _, cc := range ac.CodeChanges {
-			entry.CodeChanges = append(entry.CodeChanges, &types.CodeChange{
+			change := &types.CodeChange{
 				Index:    uint32(cc.BlockAccessIndex),
 				Bytecode: cc.NewCode,
-			})
+			}
+			if cc.NewCodeHash != nil {
+				change.CodeHash = accounts.InternCodeHash(*cc.NewCodeHash)
+			}
+			entry.CodeChanges = append(entry.CodeChanges, change)
 		}
 		result[i] = *entry
 	}

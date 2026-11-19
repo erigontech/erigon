@@ -114,9 +114,8 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Co
 	return accounts.Code{Hash: codeHash, Bytes: code}, err
 }
 
-// codeSeed returns the code this tx currently sees at addr — its own Code write cell
-// if any, else the committed value — without recording an OCC read. Lets SetCode on the
-// rebuilt noMaterialize transient compare against current code, not the stale tx-start value.
+// A rebuilt state object needs the same version of the bytes and hash when it
+// journals the previous code.
 func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts.CodeHash) (accounts.Code, error) {
 	if _, isDirty := ibs.journal.dirties[addr]; isDirty {
 		if vw, ok := ibs.versionedWrites.GetCode(addr); ok {
@@ -126,11 +125,8 @@ func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 	if currentHash == accounts.EmptyCodeHash {
 		return accounts.Code{Hash: accounts.EmptyCodeHash}, nil
 	}
-	code, err := ibs.originCodeDirect(addr)
-	if err != nil {
-		return accounts.Code{}, err
-	}
-	return accounts.Code{Hash: currentHash, Bytes: code.Bytes}, nil
+	code, _, _, err := readCode(ibs, addr)
+	return code, err
 }
 
 // originCodeHash returns the pre-block origin code hash from the state reader
