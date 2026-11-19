@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -39,5 +40,9 @@ func (s *attesterSlashingService) DecodeGossipMessage(_ peer.ID, data []byte, ve
 }
 
 func (s *attesterSlashingService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.AttesterSlashing) error {
-	return s.forkchoiceStore.OnAttesterSlashing(msg, false)
+	err := s.forkchoiceStore.OnAttesterSlashing(msg, false)
+	if errors.Is(err, forkchoice.ErrAttesterSlashingEmptyIntersection) {
+		return ErrIgnore
+	}
+	return err
 }

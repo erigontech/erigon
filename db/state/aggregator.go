@@ -97,9 +97,10 @@ type Aggregator struct {
 	visibilityLoweringForbidden atomic.Bool
 	snapshotBuildSema           *semaphore.Weighted
 
-	branchCacheDisabled bool
-	skipFilesDBGapCheck bool
-	workers             workersCfg
+	branchCacheDisabled            bool
+	skipFilesDBGapCheck            bool
+	buildsMissedAccessorsAfterOpen bool
+	workers                        workersCfg
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -299,7 +300,8 @@ func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v b
 func (a *Aggregator) referencesInCommitmentBranches() bool {
 	a.commitmentRefsMu.RLock()
 	defer a.commitmentRefsMu.RUnlock()
-	return a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches
+	d := a.d[kv.CommitmentDomain]
+	return d.ReferencesInCommitmentBranches && !d.CommitmentV3Records
 }
 
 // applyReferencesInCommitmentBranches stores the resolved flag pre-configure (ConfigureDomains
@@ -473,7 +475,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 	a.checker.AddDependency(FromDomain(dependency), &DependentInfo{
 		entity:      FromDomain(dependent),
 		filesGetter: func() *DirtyFiles { return dd.dirtyFiles },
-		accessors:   dd.Accessors,
+		accessors:   &dd.Accessors,
 	})
 	a.d[dependency].SetChecker(a.checker)
 }
@@ -497,7 +499,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 		filesGetter: func() *DirtyFiles {
 			return h.dirtyFiles
 		},
-		accessors: h.Accessors,
+		accessors: &h.Accessors,
 	})
 	h.InvertedIndex.SetChecker(a.checker)
 }
@@ -596,6 +598,9 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 	}(); err != nil {
 		return err
 	}
+	if a.buildsMissedAccessorsAfterOpen && a.hasAccessorsToBuild() {
+		return nil
+	}
 	return a.checkFilesDBGap(db)
 }
 
@@ -618,6 +623,14 @@ func (a *Aggregator) checkFilesDBGap(db kv.RoDB) error {
 		}
 		return nil
 	})
+}
+
+func (a *Aggregator) hasAccessorsToBuild() bool {
+	dirty := a.DebugBeginDirtyFilesRo()
+	defer dirty.Close()
+	missed := dirty.FilesWithMissedAccessors()
+	dirty.dropCovered(missed) // startup builds with kv.SkipCoveredAccessors
+	return !missed.IsEmpty()
 }
 
 func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
@@ -1006,6 +1019,9 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, db kv.RoDB, worke
 
 	if err := a.OpenFolder(db); err != nil {
 		return err
+	}
+	if a.hasAccessorsToBuild() { // an accessor that could not be built
+		return a.checkFilesDBGap(db)
 	}
 	return nil
 }
@@ -1850,19 +1866,64 @@ type aggregatorVisible struct {
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
 func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
-	toTxNum := a.dirtyFilesEndTxNumMinimax()
-	next := &aggregatorVisible{}
-	for id, d := range a.d {
-		if d == nil {
-			continue
+	// buildVisible builds every list up to toTxNum and returns the lowest end among the lists that have files.
+	buildVisible := func(toTxNum uint64) (next *aggregatorVisible, lowestEnd uint64) {
+		next, lowestEnd = &aggregatorVisible{}, toTxNum
+		lower := func(dirty *DirtyFiles, visible visibleFiles) {
+			if dirty.Len() > 0 {
+				lowestEnd = min(lowestEnd, contiguousEnd(visible))
+			}
 		}
-		next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
+		// values files are never retired, so a values list must start at its first file on disk
+		lowerToFirstFile := func(dirty *DirtyFiles, visible visibleFiles) {
+			firstStart := uint64(math.MaxUint64)
+			dirty.Scan(func(f *FilesItem) bool {
+				if !f.canDelete.Load() {
+					firstStart = min(firstStart, f.startTxNum)
+				}
+				return true
+			})
+			if len(visible) > 0 && visible[0].startTxNum > firstStart {
+				lowestEnd = min(lowestEnd, firstStart)
+			}
+		}
+		for id, d := range a.d {
+			if d == nil {
+				continue
+			}
+			next.d[id], next.dh[id], next.dhii[id] = d.calcVisibleFiles(toTxNum)
+			if !d.Enabled || a.unalignedDomain[id] {
+				continue
+			}
+			lower(d.dirtyFiles, next.d[id].files)
+			lowerToFirstFile(d.dirtyFiles, next.d[id].files)
+			if !d.HistCfg.SnapshotsDisabled && !d.HistCfg.HistoryDisabled {
+				lower(d.History.dirtyFiles, next.dh[id])
+				lower(d.InvertedIndex.dirtyFiles, next.dhii[id].files)
+			}
+		}
+		for id, ii := range a.standaloneIIs() {
+			if ii == nil {
+				continue
+			}
+			next.iis[id] = ii.calcVisibleFiles(toTxNum)
+			if ii.Enabled && !a.unalignedIdx[id] {
+				lower(ii.dirtyFiles, next.iis[id].files)
+			}
+		}
+		return next, lowestEnd
 	}
-	for id, ii := range a.standaloneIIs() {
-		if ii == nil {
-			continue
-		}
-		next.iis[id] = ii.calcVisibleFiles(toTxNum)
+
+	dirtyEnd := a.dirtyFilesEndTxNumMinimax()
+	toTxNum := dirtyEnd
+	next, end := buildVisible(toTxNum)
+	// A list that stops early stops every list there; cutting there can drop a merged file that crosses it, so repeat.
+	for end < toTxNum {
+		toTxNum = end
+		next, end = buildVisible(toTxNum)
+	}
+	if toTxNum < dirtyEnd {
+		a.logger.Warn("[agg] a gap in files: every list stops at the first one that stops", "visibleEnd", toTxNum, "filesEnd", dirtyEnd)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
 
@@ -2146,7 +2207,15 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult) 
 	// anything (deferred to reclaimRetired), so it won't re-create a file we delete.
 	var deleted []string
 	var retired []*FilesItem
-	for id, d := range at.d {
+	// Commitment goes first: a domain input is kept while a commitment file of its range is still dirty.
+	order := []kv.Domain{kv.CommitmentDomain}
+	for id := range at.d {
+		if kv.Domain(id) != kv.CommitmentDomain {
+			order = append(order, kv.Domain(id))
+		}
+	}
+	for _, id := range order {
+		d := at.d[id]
 		if !d.d.Enabled {
 			continue
 		}
@@ -2488,6 +2557,9 @@ func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
 		if err := dt.checkFilesDBGap(tx); err != nil {
 			return err
 		}
+		if err := dt.ht.checkFilesDBGap(tx); err != nil {
+			return err
+		}
 	}
 	for _, iit := range at.iis {
 		if iit == nil || !iit.ii.Enabled {
@@ -2706,19 +2778,30 @@ func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to [
 }
 
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
-	v, ok, err = at.d[name].GetAsOf(k, ts, tx)
-	if name == kv.CommitmentDomain && !ok {
-		v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
+	if name != kv.CommitmentDomain {
+		return at.d[name].GetAsOf(k, ts, tx)
 	}
+	if at.a.d[kv.CommitmentDomain].CommitmentV3Records {
+		v, ok, err = at.d[name].ht.HistorySeek(k, ts, tx)
+		if ok && len(v) == 0 {
+			return nil, false, err
+		}
+	} else {
+		v, ok, err = at.d[name].GetAsOf(k, ts, tx)
+	}
+	if err != nil || ok {
+		return v, ok, err
+	}
+	v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
 	return v, ok, err
 }
 
-func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.Step, txNum uint64, tx kv.Tx) {
+func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.Step, tx kv.Tx) {
 	if !enabled || len(v) == 0 {
 		return
 	}
 	if branchCache := at.BranchCache(); branchCache != nil {
-		branchCache.Fill(k, v, uint64(step), txNum, tx.ViewID())
+		branchCache.Fill(k, v, uint64(step), tx.ViewID())
 	}
 }
 
@@ -2822,7 +2905,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(domain, start)
 		}
-		at.cacheLatestBranch(cacheBranch, k, v, step, step.LastTxNum(at.StepSize()), tx)
+		at.cacheLatestBranch(cacheBranch, k, v, step, tx)
 		return v, step, true, nil
 	}
 	var found bool
@@ -2837,7 +2920,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	step = kv.Step(fileEndTxNum / at.StepSize())
 	if err == nil {
-		at.cacheLatestBranch(cacheBranch, k, v, step, fileEndTxNum, tx)
+		at.cacheLatestBranch(cacheBranch, k, v, step, tx)
 	}
 	return v, step, found, err
 }
@@ -2875,9 +2958,12 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	step := txNumUnwindTo / at.StepSize()
 	for idx, d := range at.d {
-		if err := d.unwind(ctx, tx, step, txNumUnwindTo, changeset[idx]); err != nil {
+		var expandBranch func([]byte, commitment.BranchData, uint64, uint64) (commitment.BranchData, error)
+		if kv.Domain(idx) == kv.CommitmentDomain {
+			expandBranch = at.replaceShortenedKeysInBranch
+		}
+		if err := d.unwind(ctx, tx, txNumUnwindTo, changeset[idx], expandBranch); err != nil {
 			return err
 		}
 	}

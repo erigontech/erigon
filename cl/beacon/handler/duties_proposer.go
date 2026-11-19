@@ -335,7 +335,7 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 		a.beaconChainCfg.EpochsPerHistoricalVector
 	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(stateGetter, expectedSlot, mixPosition)
 	if err != nil {
-		return nil, err
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("could not read randao mix: %w", err))
 	}
 	if mix == (common.Hash{}) {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("mix not found for slot %d and index %d. maybe block was not backfilled or range was pruned", expectedSlot, mixPosition))

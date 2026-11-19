@@ -16,19 +16,9 @@
 
 package txpool
 
-import (
-	"sync"
-
-	"github.com/erigontech/erigon/execution/protocol/misc"
-)
+import "sync"
 
 type Option func(*options)
-
-func WithFeeCalculator(f FeeCalculator) Option {
-	return func(o *options) {
-		o.feeCalculator = f
-	}
-}
 
 func WithPoolDBInitializer(init poolDBInitializer) Option {
 	return func(o *options) {
@@ -49,7 +39,6 @@ func WithP2PSenderWg(wg *sync.WaitGroup) Option {
 }
 
 type options struct {
-	feeCalculator     FeeCalculator
 	poolDBInitializer poolDBInitializer
 	p2pSenderWg       *sync.WaitGroup
 	p2pFetcherWg      *sync.WaitGroup
@@ -65,5 +54,4 @@ func applyOpts(opts ...Option) options {
 
 var defaultOptions = options{
 	poolDBInitializer: defaultPoolDBInitializer,
-	feeCalculator:     misc.Eip1559FeeCalculator,
 }

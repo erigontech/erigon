@@ -21,6 +21,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
@@ -74,6 +75,15 @@ func (wbt *WitnessBlockTest) UnmarshalJSON(in []byte) error {
 
 func (wbt *WitnessBlockTest) NumBlocks() int {
 	return len(wbt.witnesses)
+}
+
+func (wbt *WitnessBlockTest) Network() string { return wbt.json.Network }
+
+func (wbt *WitnessBlockTest) BlockHashForBlock(i int) common.Hash {
+	if i < 0 || i >= len(wbt.json.Blocks) || wbt.json.Blocks[i].BlockHeader == nil {
+		return common.Hash{}
+	}
+	return wbt.json.Blocks[i].BlockHeader.Hash
 }
 
 // BlockNumberForBlock returns the canonical block number for block index i,

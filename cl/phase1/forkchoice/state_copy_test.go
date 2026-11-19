@@ -74,6 +74,51 @@ func TestGetStateAtBlockRootSeedsCurrentStateTotalActiveBalance(t *testing.T) {
 	require.Equal(t, seededTotal, copied.GetTotalActiveBalance())
 }
 
+func TestGetOwnedStateAtBlockRootCopiesIntoTheGivenState(t *testing.T) {
+	root := common.Hash{0x01}
+	current, expected := stateWithStaleTotalActiveBalance(t, &clparams.MainnetBeaconConfig)
+	require.NoError(t, current.SetSlot(42))
+	graph := &getFinalizedExecutionHashForkGraph{
+		states:           map[common.Hash]*state.CachingBeaconState{root: current},
+		currentStateRoot: root,
+	}
+	totals, err := lru.New[common.Hash, uint64](1)
+	require.NoError(t, err)
+	store := &ForkChoiceStore{forkGraph: graph, totalActiveBalances: totals}
+
+	seededTotal := 2 * clparams.MainnetBeaconConfig.EffectiveBalanceIncrement
+	require.NotEqual(t, expected, seededTotal)
+	for _, seeded := range []bool{false, true} {
+		want := expected
+		if seeded {
+			totals.Add(root, seededTotal)
+			want = seededTotal
+		}
+		reuse := state.New(&clparams.MainnetBeaconConfig)
+		copied, err := store.GetOwnedStateAtBlockRoot(root, reuse)
+		require.NoError(t, err)
+		require.Same(t, reuse, copied)
+		require.Equal(t, uint64(42), copied.Slot())
+		require.Equal(t, want, copied.GetTotalActiveBalance())
+	}
+}
+
+func TestGetOwnedStateAtBlockRootDoesNotReuseAStateOfAnotherConfig(t *testing.T) {
+	root := common.Hash{0x01}
+	graph := &getFinalizedExecutionHashForkGraph{
+		states:           map[common.Hash]*state.CachingBeaconState{root: state.New(&clparams.MainnetBeaconConfig)},
+		currentStateRoot: root,
+	}
+	store := &ForkChoiceStore{forkGraph: graph}
+	cfg := clparams.MainnetBeaconConfig
+	reuse := state.New(&cfg)
+
+	copied, err := store.GetOwnedStateAtBlockRoot(root, reuse)
+	require.NoError(t, err)
+	require.NotSame(t, reuse, copied)
+	require.Same(t, &clparams.MainnetBeaconConfig, copied.BeaconConfig())
+}
+
 func TestGetStateAtBlockRootRescansWithoutCachedTotal(t *testing.T) {
 	root := common.Hash{0x01}
 	current, expected := stateWithStaleTotalActiveBalance(t, &clparams.MainnetBeaconConfig)
@@ -117,6 +162,15 @@ func TestNewForkChoiceStoreSeedsAnchorTotalFromForkGraphState(t *testing.T) {
 	total, ok := store.TotalActiveBalance(anchorRoot)
 	require.True(t, ok)
 	require.Equal(t, expected, total)
+}
+
+type ownedReplayStateForkGraph struct {
+	fork_graph.ForkGraph
+	replayed *state.CachingBeaconState
+}
+
+func (g ownedReplayStateForkGraph) ReplayStateWithOwnership(common.Hash) (*state.CachingBeaconState, bool, error) {
+	return g.replayed, true, nil
 }
 
 func TestGetStateAtBlockRootHoldsReadLockDuringCurrentStateCopy(t *testing.T) {
@@ -387,7 +441,7 @@ func TestGetOwnedStateAtBlockRootCopiesReplayedState(t *testing.T) {
 	}
 	store := &ForkChoiceStore{forkGraph: graph}
 
-	owned, err := store.GetOwnedStateAtBlockRoot(root)
+	owned, err := store.GetOwnedStateAtBlockRoot(root, nil)
 	require.NoError(t, err)
 	require.NotSame(t, replayed, owned)
 
@@ -405,6 +459,20 @@ func TestGetOwnedStateAtBlockRootCopiesReplayedState(t *testing.T) {
 	require.Equal(t, common.Hash{0x44}, owned.GetLatestExecutionPayloadBid().BlockHash)
 }
 
+func TestGetOwnedStateAtBlockRootKeepsOwnedReplay(t *testing.T) {
+	root := common.Hash{0x01}
+	replayed := state.New(&clparams.MainnetBeaconConfig)
+	base := &getFinalizedExecutionHashForkGraph{
+		states:           map[common.Hash]*state.CachingBeaconState{root: replayed},
+		currentStateRoot: common.Hash{0xff},
+	}
+	store := &ForkChoiceStore{forkGraph: ownedReplayStateForkGraph{ForkGraph: base, replayed: replayed}}
+
+	owned, err := store.GetOwnedStateAtBlockRoot(root, nil)
+	require.NoError(t, err)
+	require.Same(t, replayed, owned)
+}
+
 func TestGetOwnedStateAtBlockRootCopiesCurrentState(t *testing.T) {
 	root := common.Hash{0x01}
 	current := state.New(&clparams.MainnetBeaconConfig)
@@ -417,7 +485,7 @@ func TestGetOwnedStateAtBlockRootCopiesCurrentState(t *testing.T) {
 	expectedRoot, err := current.HashSSZ()
 	require.NoError(t, err)
 
-	owned, err := store.GetOwnedStateAtBlockRoot(root)
+	owned, err := store.GetOwnedStateAtBlockRoot(root, nil)
 	require.NoError(t, err)
 	require.NotSame(t, current, owned)
 	actualRoot, err := owned.HashSSZ()

@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/transition"
-	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -166,8 +165,8 @@ func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeacon
 	return nil
 }
 
-// invalidateCachedHead forces the next GetHead to recompute. A GetHead running while f.mu
-// was released caches a head that predates this block.
+// invalidateCachedHead forces the next GetHead to recompute. Heads cached while validation
+// releases f.mu can be stale after block or payload updates. The caller must hold f.mu.
 func (f *ForkChoiceStore) invalidateCachedHead() {
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
@@ -267,7 +266,6 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
 
 	// Validate parent payload status path early (before expensive operations)
-	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	isGloas := blockVersion >= clparams.GloasVersion
 	headBeforeBlock := common.Hash{}
 	if isGloas && f.Slot() == block.Block.Slot {
@@ -288,6 +286,9 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	// These fields are handled separately in OnExecutionPayload when the envelope arrives.
 	startEngine := time.Now()
 	isVerifiedExecutionPayload := f.IsPayloadVerified(blockRoot)
+	var overlap *blockImportOverlap
+	overlapResult := ""
+	overlapSettled := false
 	if blockVersion < clparams.GloasVersion {
 		// Find the versioned hashes from blob commitments
 		var versionedHashes []common.Hash
@@ -335,7 +336,21 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 					return invalidKzgCommitmentsError(err)
 				}
 			}
+			overlap = f.startBlockImportOverlapLocked(block, blockRoot, fullValidation)
+			if overlap != nil {
+				overlapResult = "abandoned"
+				defer func() {
+					if !overlapSettled {
+						f.settleBlockImportOverlapLocked(blockRoot, overlap)
+					}
+					blockImportOverlapCounter.WithLabelValues(overlapResult).Inc()
+				}()
+			}
 			var admissionErr error
+			var join func()
+			if overlap != nil {
+				join = overlap.join
+			}
 			payloadStatus, publishedInvalidHash, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(ctx, blockRoot, func() error {
 				_, _, admissionErr = f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload)
 				return admissionErr
@@ -346,7 +361,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 				}
 				executionHash, hashErr := block.Block.Body.ExecutionPayload.ComputeBlockHash(&block.Block.ParentRoot, requestsHash, nil)
 				return executionHash, hashErr == nil
-			}, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+			}, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList, join)
 			if publishedInvalidHash != (common.Hash{}) {
 				// Only the caller that published the verdict may retract it, and only once
 				// its own durable write below has happened.
@@ -443,12 +458,64 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	// not via a separate execution_payload_state. We still validate that the parent's
 	// payload was received (store.payloads check) via validateParentPayloadPath above.
 
-	lastProcessedState, status, err := f.addChainSegmentAndQueueLightClientEvents(block, fullValidation)
+	importedBlock := block.Block
+	var lastProcessedState *state.CachingBeaconState
+	var status fork_graph.ChainSegmentInsertionResult
+	if overlap != nil {
+		if overlap.err != nil {
+			overlapResult = "prepare_failed"
+			return overlap.err
+		}
+		lastProcessedState, status, err = f.insertAndQueueLightClientEvents(func() (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
+			postState, result, commitErr := f.forkGraph.CommitChainSegment(overlap.segment)
+			f.settleBlockImportOverlapLocked(blockRoot, overlap)
+			overlapSettled = true
+			return postState, result, commitErr
+		})
+		if err == nil && status == fork_graph.Success {
+			overlapResult = "committed"
+		} else {
+			overlapResult = "commit_failed"
+		}
+		importedBlock = overlap.block.Block
+	} else {
+		waited := false
+		for {
+			settled, ok := f.blockImportsInFlight[blockRoot]
+			if !ok {
+				break
+			}
+			waited = true
+			// A same-root import must not overtake an open segment.
+			f.mu.Unlock()
+			select {
+			case <-settled:
+			case <-ctx.Done():
+				f.mu.Lock()
+				return fmt.Errorf("%w: %w", ErrPayloadValidationInterrupted, ctx.Err())
+			}
+			f.mu.Lock()
+		}
+		if waited {
+			f.invalidateCachedHead()
+			if _, _, recheckErr := f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload); recheckErr != nil {
+				if errors.Is(recheckErr, errBlockAtFinalizedHorizon) {
+					return nil
+				}
+				return recheckErr
+			}
+			startStateProcess = time.Now()
+		}
+		lastProcessedState, status, err = f.addChainSegmentAndQueueLightClientEvents(block, fullValidation)
+	}
 	if err != nil {
 		if status == fork_graph.InvalidBlock {
 			return invalidBlockError(err)
 		}
 		return err
+	}
+	if overlap != nil {
+		startStateProcess = time.Now().Add(-overlap.transitionDuration)
 	}
 	monitor.ObserveFullBlockProcessingTime(startStateProcess)
 	if status != fork_graph.Success {
@@ -461,7 +528,6 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		f.processPendingEnvelopeAfterBlock(ctx, common.Hash(blockRoot), checkDataAvaiability)
 		return nil
 	case fork_graph.Success:
-		f.updateChildren(block.Block.Slot-1, block.Block.ParentRoot, blockRoot) // parent slot can be innacurate
 	case fork_graph.BelowAnchor:
 		log.Debug("replay block", "status", status.String())
 		return nil
@@ -470,121 +536,23 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	default:
 		return fmt.Errorf("replay block, status %+v", status)
 	}
-	if block.Block.Body.ExecutionPayload != nil {
-		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
-	} else if blockVersion >= clparams.GloasVersion {
-		// [New in Gloas:EIP7732] No ExecutionPayload in beacon block (GLOAS separates them).
-		// Inherit parent's execution head as a placeholder so FCU sends a valid (non-zero) hash.
-		// OnExecutionPayload will overwrite this with the real payload hash if the envelope arrives (FULL path).
-		// If the envelope never arrives (EMPTY path), the parent hash is the correct EL head anyway.
-		if parentHash, ok := f.eth2Roots.Get(block.Block.ParentRoot); ok {
-			f.eth2Roots.Add(blockRoot, parentHash)
-		}
-	}
-	// Note: highestSeen was already updated before AddChainSegment (line ~216)
-	// so aggregates/attestations for this slot are accepted promptly. No second
-	// update needed here.
-
-	// Remove the parent from the head set
-	delete(f.headSet, block.Block.ParentRoot)
-	f.headSet[blockRoot] = struct{}{}
-	// record_block_timeliness: store [block_timely, ptc_timely] vector.
-	// [Modified in Gloas:EIP7732] Post-GLOAS stores a two-element timeliness vector;
-	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
-	currentSlot := f.recordBlockTimeliness(block.Block, common.Hash(blockRoot))
-	// update_proposer_boost_root: conditionally set proposer boost root.
-	f.updateProposerBoostRoot(headBeforeBlock, common.Hash(blockRoot), currentSlot)
-
-	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
-	var pendingEnvelopeFound bool
-	if blockVersion >= clparams.GloasVersion {
-		// Initialize payload timeliness and data availability votes for this block
-		f.payloadTimelinessVote.Store(common.Hash(blockRoot), [clparams.PtcSize]int8{})
-		f.payloadDataAvailabilityVote.Store(common.Hash(blockRoot), [clparams.PtcSize]int8{})
-
-		if block.Block.Body.PayloadAttestations != nil {
-			f.notifyPtcMessages(lastProcessedState, block.Block.Body.PayloadAttestations)
-		}
-
-		if _, ok := f.pendingLocalSelfBuildEnvelopes.Get(common.Hash(blockRoot)); ok {
-			pendingEnvelopeFound = true
-		} else if _, ok := f.pendingEnvelopes.Get(common.Hash(blockRoot)); ok {
-			pendingEnvelopeFound = true
-		}
-	}
-	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
-		// Update randao mixes
-		r := solid.NewHashVector(int(f.beaconCfg.EpochsPerHistoricalVector))
-		lastProcessedState.RandaoMixes().CopyTo(r)
-		f.randaoMixesLists.Add(blockRoot, r)
+	storeTimeMs := f.timeMs.Load()
+	var prepared *preparedPostState
+	if overlap != nil {
+		prepared = overlap.prepared
 	} else {
-		f.randaoDeltas.Add(blockRoot, randaoDelta{
-			epoch: state.Epoch(lastProcessedState),
-			delta: lastProcessedState.GetRandaoMixes(state.Epoch(lastProcessedState)),
-		})
+		prepared = preparePostState(lastProcessedState, importedBlock)
 	}
-	f.participation.Add(state.Epoch(lastProcessedState), lastProcessedState.CurrentEpochParticipation().Copy())
-	f.preverifiedSizes.Add(blockRoot, preverifiedAppendListsSizes{
-		validatorLength:           uint64(lastProcessedState.ValidatorLength()),
-		historicalRootsLength:     lastProcessedState.HistoricalRootsLength(),
-		historicalSummariesLength: lastProcessedState.HistoricalSummariesLength(),
-	})
-	f.finalityCheckpoints.Add(blockRoot, finalityCheckpoints{
-		finalizedCheckpoint:         lastProcessedState.FinalizedCheckpoint(),
-		currentJustifiedCheckpoint:  lastProcessedState.CurrentJustifiedCheckpoint(),
-		previousJustifiedCheckpoint: lastProcessedState.PreviousJustifiedCheckpoint(),
-	})
-
-	if err := f.addPendingConsolidations(blockRoot, lastProcessedState.PendingConsolidations()); err != nil {
-		return err
-	}
-	if err := f.addPendingDeposits(blockRoot, lastProcessedState.PendingDeposits()); err != nil {
-		return err
-	}
-	if err := f.addPendingPartialWithdrawals(blockRoot, lastProcessedState.PendingPartialWithdrawals()); err != nil {
-		return err
-	}
-	if err := f.addProposerLookahead(block.Block.Slot, lastProcessedState.ProposerLookahead()); err != nil {
-		return err
-	}
-
-	f.totalActiveBalances.Add(blockRoot, lastProcessedState.GetTotalActiveBalance())
-	// Update checkpoints
-	f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
-	// First thing save previous values of the checkpoints (avoid memory copy of all states and ensure easy revert)
-	var (
-		previousJustifiedCheckpoint = lastProcessedState.PreviousJustifiedCheckpoint()
-		currentJustifiedCheckpoint  = lastProcessedState.CurrentJustifiedCheckpoint()
-		stateFinalized              = lastProcessedState.FinalizedCheckpoint()
-		justificationBits           = lastProcessedState.JustificationBits().Copy()
+	pendingEnvelopeFound, err := f.applyBlockImportLocked(
+		importedBlock,
+		blockRoot,
+		headBeforeBlock,
+		storeTimeMs,
+		lastProcessedState,
+		prepared,
 	)
-	// Eagerly compute unrealized justification and finality (spec: compute_pulled_up_tip)
-	if err := statechange.ProcessJustificationBitsAndFinality(lastProcessedState, nil); err != nil {
+	if err != nil {
 		return err
-	}
-	// Capture post-pull-up values BEFORE restoring lastProcessedState so the
-	// prior-epoch updateCheckpoints below can use them per spec
-	// (compute_pulled_up_tip uses state.current_justified_checkpoint AFTER
-	// process_justification_and_finalization, not before).
-	postPullupJustified := lastProcessedState.CurrentJustifiedCheckpoint()
-	postPullupFinalized := lastProcessedState.FinalizedCheckpoint()
-	// Store per-block unrealized checkpoints (spec: store.unrealized_justifications[block_root])
-	f.unrealizedJustifications.Store(common.Hash(blockRoot), postPullupJustified)
-	f.unrealizedFinalizations.Store(common.Hash(blockRoot), postPullupFinalized)
-	f.updateUnrealizedCheckpoints(postPullupJustified, postPullupFinalized)
-	// Set the changed value pre-simulation
-	lastProcessedState.SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint)
-	lastProcessedState.SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint)
-	lastProcessedState.SetFinalizedCheckpoint(stateFinalized)
-	lastProcessedState.SetJustificationBits(justificationBits)
-
-	// Spec compute_pulled_up_tip: if the block is from a prior epoch, apply the
-	// post-pull-up checkpoints to the store. Previously this used the restored
-	// pre-pull-up values, which meant store.justified/finalized lagged what
-	// the spec would have for late-arriving prior-epoch blocks.
-	currentEpoch := f.computeEpochAtSlot(f.Slot())
-	if blockEpoch < currentEpoch {
-		f.updateCheckpoints(postPullupJustified, postPullupFinalized)
 	}
 	if !isVerifiedExecutionPayload {
 		log.Debug("OnBlock", "elapsed", time.Since(start), "slot", block.Block.Slot)
@@ -599,13 +567,6 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			updateValidatorsCustody = true
 		}
 	}
-
-	block.Block.Body.Attestations.Range(func(_ int, attestation *solid.Attestation, _ int) bool {
-		if err := f.onAttestationLocked(attestation, true, lastProcessedState, blockRoot); err != nil {
-			log.Debug("[OnBlock] block attestation not applied", "slot", block.Block.Slot, "err", err)
-		}
-		return true
-	})
 
 	// Release lock (via defer) before writing DB indices for the applied envelope.
 	unlocked = true
@@ -785,73 +746,129 @@ const (
 // waits for the next chain tip sync, and the next proposer builds on the empty parent. Column storage probes and
 // application attempts are rate-limited per envelope, so this is cheap to poll.
 func (f *ForkChoiceStore) RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx context.Context, minSlot uint64) {
+	f.retryPendingEnvelopesFrom(ctx, minSlot, false)
+}
+
+// RetryPendingExecutionPayloadEnvelopesOnColumnsStored retries the queued envelopes at or after minSlot after a
+// column store, without waiting out the probe interval.
+func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopesOnColumnsStored(ctx context.Context, minSlot uint64) {
+	f.retryPendingEnvelopesFrom(ctx, minSlot, true)
+}
+
+func (f *ForkChoiceStore) retryPendingEnvelopesFrom(ctx context.Context, minSlot uint64, ignoreProbe bool) {
 	for _, root := range f.pendingEnvelopes.Keys() {
 		if ctx.Err() != nil {
 			return
 		}
-		block, ok := f.forkGraph.GetBlock(root)
-		if !ok || block == nil || block.Block == nil || block.Block.Slot < minSlot {
-			continue
+		if block, ok := f.blockFrom(root, minSlot); ok {
+			f.retryPendingEnvelopeWhenDue(ctx, root, block, ignoreProbe)
 		}
-		f.retryPendingEnvelopeWhenDue(ctx, root, block)
 	}
+}
+
+func (f *ForkChoiceStore) blockFrom(root common.Hash, minSlot uint64) (*cltypes.SignedBeaconBlock, bool) {
+	block, ok := f.forkGraph.GetBlock(root)
+	if !ok || block == nil || block.Block == nil || block.Block.Slot < minSlot {
+		return nil, false
+	}
+	return block, true
+}
+
+func (f *ForkChoiceStore) PendingEnvelopeRetryWake() <-chan struct{} {
+	return f.emitters.PendingEnvelopeRetryWake()
+}
+
+func (f *ForkChoiceStore) WakePendingEnvelopeRetry() {
+	f.emitters.WakePendingEnvelopeRetry()
+}
+
+// HasAttemptablePendingEnvelope reports whether a retry from minSlot could attempt a queued envelope now. It books
+// and applies nothing.
+func (f *ForkChoiceStore) HasAttemptablePendingEnvelope(minSlot uint64) bool {
+	for _, root := range f.pendingEnvelopes.Keys() {
+		if block, ok := f.blockFrom(root, minSlot); ok && !f.pendingEnvelopeAttemptBooked(root) && f.envelopeColumnsAvailable(root, block) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *ForkChoiceStore) pendingEnvelopeAttemptBooked(root common.Hash) bool {
+	f.dataAvailableEnvelopeRetryMu.Lock()
+	defer f.dataAvailableEnvelopeRetryMu.Unlock()
+	booking, ok := f.dataAvailableEnvelopeRetryAt.Peek(root)
+	return ok && booking.attempt && time.Now().Before(booking.at)
+}
+
+func (f *ForkChoiceStore) envelopeColumnsAvailable(root common.Hash, block *cltypes.SignedBeaconBlock) bool {
+	if commitments := block.GetBlobKzgCommitments(); commitments == nil || commitments.Len() == 0 {
+		return true
+	}
+	if f.peerDas == nil {
+		return false
+	}
+	available, err := f.peerDas.IsDataAvailable(block.Block.Slot, root)
+	return err == nil && available
 }
 
 // retryPendingEnvelopeWhenDue applies the envelope queued for root when its pacing allows and its
 // columns are available, and returns when the next attempt is due.
-func (f *ForkChoiceStore) retryPendingEnvelopeWhenDue(ctx context.Context, root common.Hash, block *cltypes.SignedBeaconBlock) time.Time {
+func (f *ForkChoiceStore) retryPendingEnvelopeWhenDue(ctx context.Context, root common.Hash, block *cltypes.SignedBeaconBlock, ignoreProbe bool) time.Time {
 	now := time.Now()
-	retryAt, due := f.bookPendingEnvelopeRetry(root, now, now.Add(missingEnvelopeDataProbeInterval))
+	booked, due := f.bookPendingEnvelopeRetry(root, now, now.Add(missingEnvelopeDataProbeInterval), ignoreProbe)
 	if !due {
-		return retryAt
+		return booked.at
 	}
-	if commitments := block.GetBlobKzgCommitments(); commitments != nil && commitments.Len() > 0 {
-		if f.peerDas == nil {
-			return retryAt
-		}
-		if available, err := f.peerDas.IsDataAvailable(block.Block.Slot, root); err != nil || !available {
-			return retryAt
-		}
+	if !f.envelopeColumnsAvailable(root, block) {
+		return booked.at
 	}
-	attemptAt := now.Add(dataAvailableEnvelopeRetryInterval)
-	f.rebookPendingEnvelopeRetry(root, retryAt, attemptAt)
+	attempt := &pendingEnvelopeRetryBooking{at: now.Add(dataAvailableEnvelopeRetryInterval), attempt: true}
+	if !f.rebookPendingEnvelopeRetry(root, booked, attempt) {
+		return booked.at
+	}
 	f.processPendingEnvelopeAfterBlock(ctx, root, true)
 	if ctx.Err() != nil {
 		// The caller's context ended the attempt before a verdict, so it does not hold the interval.
-		f.rebookPendingEnvelopeRetry(root, attemptAt, time.Time{})
+		f.rebookPendingEnvelopeRetry(root, attempt, nil)
 		return time.Now()
 	}
-	return attemptAt
+	return attempt.at
 }
 
-// bookPendingEnvelopeRetry books the next retry of root at next unless one is booked for later
-// than now, and reports whether this caller booked it.
-func (f *ForkChoiceStore) bookPendingEnvelopeRetry(root common.Hash, now, next time.Time) (time.Time, bool) {
+// bookPendingEnvelopeRetry books the next retry of root at next unless one is booked for later than now,
+// and reports whether this caller booked it.
+func (f *ForkChoiceStore) bookPendingEnvelopeRetry(root common.Hash, now, next time.Time, ignoreProbe bool) (*pendingEnvelopeRetryBooking, bool) {
 	f.dataAvailableEnvelopeRetryMu.Lock()
 	defer f.dataAvailableEnvelopeRetryMu.Unlock()
-	if retryAt, ok := f.dataAvailableEnvelopeRetryAt.Get(root); ok && now.Before(retryAt) {
-		return retryAt, false
+	if booking, ok := f.dataAvailableEnvelopeRetryAt.Get(root); ok && now.Before(booking.at) && (booking.attempt || !ignoreProbe) {
+		return booking, false
 	}
-	f.dataAvailableEnvelopeRetryAt.Add(root, next)
-	return next, true
+	booking := &pendingEnvelopeRetryBooking{at: next}
+	f.dataAvailableEnvelopeRetryAt.Add(root, booking)
+	return booking, true
 }
 
-// rebookPendingEnvelopeRetry moves the booking of root from booked to next, or drops it when next
-// is zero. A booking that another caller made since is kept.
-func (f *ForkChoiceStore) rebookPendingEnvelopeRetry(root common.Hash, booked, next time.Time) {
+// rebookPendingEnvelopeRetry moves the booking of root from booked to next, or drops it when next is nil, and
+// reports whether the caller may go on. A booking that another caller made since stops the caller when it is an
+// attempt or when the caller drops; otherwise the caller takes it over.
+func (f *ForkChoiceStore) rebookPendingEnvelopeRetry(root common.Hash, booked, next *pendingEnvelopeRetryBooking) bool {
 	f.dataAvailableEnvelopeRetryMu.Lock()
 	defer f.dataAvailableEnvelopeRetryMu.Unlock()
-	if current, ok := f.dataAvailableEnvelopeRetryAt.Peek(root); !ok || !current.Equal(booked) {
-		return
+	if current, ok := f.dataAvailableEnvelopeRetryAt.Peek(root); ok && current != booked && (current.attempt || next == nil) {
+		return false
 	}
-	if next.IsZero() {
+	if next == nil {
 		f.dataAvailableEnvelopeRetryAt.Remove(root)
-		return
+	} else {
+		f.dataAvailableEnvelopeRetryAt.Add(root, next)
 	}
-	f.dataAvailableEnvelopeRetryAt.Add(root, next)
+	return true
 }
 
 func (f *ForkChoiceStore) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
+	if f.IsEnvelopeRejected(blockRoot) {
+		return false
+	}
 	return f.pendingEnvelopes != nil && f.pendingEnvelopes.Contains(blockRoot) ||
 		f.pendingLocalSelfBuildEnvelopes != nil && f.pendingLocalSelfBuildEnvelopes.Contains(blockRoot)
 }
@@ -864,11 +881,11 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelope(ctx context.Conte
 	if !f.HasPendingExecutionPayloadEnvelope(blockRoot) {
 		return time.Time{}
 	}
-	block, ok := f.forkGraph.GetBlock(blockRoot)
-	if !ok || block == nil || block.Block == nil {
+	block, ok := f.blockFrom(blockRoot, 0)
+	if !ok {
 		return time.Time{}
 	}
-	return f.retryPendingEnvelopeWhenDue(ctx, blockRoot, block)
+	return f.retryPendingEnvelopeWhenDue(ctx, blockRoot, block, false)
 }
 
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx context.Context, limit int) {
@@ -1123,34 +1140,44 @@ func (f *ForkChoiceStore) retryPendingEnvelopeError(err error, pending *cltypes.
 }
 
 func (f *ForkChoiceStore) addChainSegmentAndQueueLightClientEvents(block *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
+	return f.insertAndQueueLightClientEvents(func() (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
+		return f.forkGraph.AddChainSegment(block, fullValidation)
+	})
+}
+
+func (f *ForkChoiceStore) insertAndQueueLightClientEvents(insert func() (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error)) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
 	lcUpdateBefore := f.forkGraph.NewestLightClientUpdate()
-	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
+	lastProcessedState, status, err := insert()
 	if err != nil {
 		return nil, status, err
 	}
-	f.queueLightClientEvents(lcUpdateBefore, block.Version().String())
+	f.queueLightClientEvents(lcUpdateBefore)
 	return lastProcessedState, status, nil
 }
 
 // queueLightClientEvents emits the light client events for an update stored by
-// AddChainSegment. The fork graph runs under f.mu and must not send events
+// a chain segment insertion. The fork graph runs under f.mu and must not send events
 // itself, so OnBlock detects a freshly stored update and queues the sends.
-func (f *ForkChoiceStore) queueLightClientEvents(before *cltypes.LightClientUpdate, version string) {
+func (f *ForkChoiceStore) queueLightClientEvents(before *cltypes.LightClientUpdate) {
 	lcUpdate := f.forkGraph.NewestLightClientUpdate()
 	if lcUpdate == nil || lcUpdate == before {
 		return
 	}
+	version := lcUpdate.AttestedHeader.Version().String()
+	sendFinality := f.forkGraph.NewestLightClientFinalityUpdate() == lcUpdate
 	f.queueEmit(func() {
-		f.emitters.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
-			Version: version,
-			Data: cltypes.LightClientFinalityUpdate{
-				AttestedHeader:  lcUpdate.AttestedHeader,
-				FinalizedHeader: lcUpdate.FinalizedHeader,
-				FinalityBranch:  lcUpdate.FinalityBranch,
-				SyncAggregate:   lcUpdate.SyncAggregate,
-				SignatureSlot:   lcUpdate.SignatureSlot,
-			},
-		})
+		if sendFinality {
+			f.emitters.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
+				Version: version,
+				Data: cltypes.LightClientFinalityUpdate{
+					AttestedHeader:  lcUpdate.AttestedHeader,
+					FinalizedHeader: lcUpdate.FinalizedHeader,
+					FinalityBranch:  lcUpdate.FinalityBranch,
+					SyncAggregate:   lcUpdate.SyncAggregate,
+					SignatureSlot:   lcUpdate.SignatureSlot,
+				},
+			})
+		}
 		f.emitters.State().SendLightClientOptimisticUpdate(&beaconevents.LightClientOptimisticUpdateData{
 			Version: version,
 			Data: cltypes.LightClientOptimisticUpdate{

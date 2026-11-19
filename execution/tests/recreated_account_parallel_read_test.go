@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -45,8 +44,8 @@ import (
 // while the re-creation is still running. Parallel import must accept the
 // block the serial generator built.
 func TestParallelReadOfRecreatedAccountBeforeRecreatorCommits(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 
 	// The constructor self-destructs while the account still holds its
 	// pre-block wei and deploys 32 bytes of code once that wei is gone.
@@ -77,7 +76,6 @@ func TestParallelReadOfRecreatedAccountBeforeRecreatorCommits(t *testing.T) {
 		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(1_000_000_000_000_000_000)}
 	}
 
-	dbg.Exec3Parallel = false
 	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
@@ -101,8 +99,6 @@ func TestParallelReadOfRecreatedAccountBeforeRecreatorCommits(t *testing.T) {
 	for _, receipt := range chainPack.Receipts[0] {
 		require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 	}
-
-	dbg.Exec3Parallel = true
 	require.NoError(t, m.InsertChain(chainPack))
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -132,8 +128,8 @@ func iterations(n uint64) []byte {
 // the earlier tx's value. tx0 credits A; tx1, still running when tx0 folds, only
 // bumps A's nonce with a CREATE2.
 func TestParallelFoldKeepsEarlierTxFieldOfSameAccount(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
 
 	a := common.HexToAddress("0xaaaa")
 	config := chain.TestChainOsakaConfig.Copy()
@@ -151,7 +147,6 @@ func TestParallelFoldKeepsEarlierTxFieldOfSameAccount(t *testing.T) {
 		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: big.NewInt(1_000_000_000_000_000_000)}
 	}
 
-	dbg.Exec3Parallel = false
 	ethconfig.Defaults.Sync.ExecWorkerCount = 4
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
@@ -174,8 +169,6 @@ func TestParallelFoldKeepsEarlierTxFieldOfSameAccount(t *testing.T) {
 	for _, receipt := range chainPack.Receipts[0] {
 		require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 	}
-
-	dbg.Exec3Parallel = true
 	require.NoError(t, m.InsertChain(chainPack))
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -190,17 +183,24 @@ func TestParallelFoldKeepsEarlierTxFieldOfSameAccount(t *testing.T) {
 	}))
 }
 
-// A BAL block dispatches a bounded window of txs past the commit frontier. A block
-// of many more txs than the window, each depending on the one before it, must still
-// complete and match the serial result.
-func TestParallelBALBlockPastDispatchWindow(t *testing.T) {
-	prevParallel, prevWorkers := dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount
-	t.Cleanup(func() { dbg.Exec3Parallel, ethconfig.Defaults.Sync.ExecWorkerCount = prevParallel, prevWorkers })
+// A block dispatches a bounded window of txs past the commit frontier, with or without a
+// block access list. A block of many more txs than the window, each depending on the one
+// before it, must still complete and match the serial result.
+func TestParallelBlockPastDispatchWindow(t *testing.T) {
+	t.Run("bal", func(t *testing.T) { testParallelBlockPastDispatchWindow(t, true) })
+	t.Run("no_bal", func(t *testing.T) { testParallelBlockPastDispatchWindow(t, false) })
+}
 
-	const txs = 80
+func testParallelBlockPastDispatchWindow(t *testing.T, withBAL bool) {
+	prevWorkers := ethconfig.Defaults.Sync.ExecWorkerCount
+	t.Cleanup(func() { ethconfig.Defaults.Sync.ExecWorkerCount = prevWorkers })
+
+	const txs = 300
 	counter := common.HexToAddress("0xc0c0")
 	config := chain.TestChainOsakaConfig.Copy()
-	config.AmsterdamTime = common.NewUint64(0)
+	if withBAL {
+		config.AmsterdamTime = common.NewUint64(0)
+	}
 	signer := types.LatestSignerForChainID(config.ChainID)
 	key, err := crypto.ToECDSA(common.LeftPadBytes([]byte{1}, 32))
 	require.NoError(t, err)
@@ -210,8 +210,7 @@ func TestParallelBALBlockPastDispatchWindow(t *testing.T) {
 		sender:  {Balance: big.NewInt(1_000_000_000_000_000_000)},
 	}
 
-	dbg.Exec3Parallel = false
-	ethconfig.Defaults.Sync.ExecWorkerCount = 4
+	ethconfig.Defaults.Sync.ExecWorkerCount = 16
 	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
@@ -225,8 +224,6 @@ func TestParallelBALBlockPastDispatchWindow(t *testing.T) {
 	for _, receipt := range chainPack.Receipts[0] {
 		require.Equal(t, uint64(types.ReceiptStatusSuccessful), receipt.Status)
 	}
-
-	dbg.Exec3Parallel = true
 	require.NoError(t, m.InsertChain(chainPack))
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))

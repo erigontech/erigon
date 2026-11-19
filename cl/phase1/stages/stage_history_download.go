@@ -448,10 +448,14 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			cfg.logger.Info("Full backfilling finished")
 		}
 
+		currentHeadSlot := uint64(0)
+		if cfg.forkchoiceStore != nil {
+			currentHeadSlot = cfg.forkchoiceStore.HighestSeen()
+		}
 		startBlobHistoryDownload(
 			cfg.downloader.Finished(),
 			cfg.blobDownloader,
-			cfg.startingSlot+1,
+			blobBackfillStartSlot(cfg.startingSlot, currentHeadSlot),
 			cfg.antiquary.NotifyBlobBackfilled,
 		)
 	}()
@@ -477,6 +481,10 @@ func startBlobHistoryDownload(blockHistoryFinished bool, downloader blobHistoryD
 	downloader.SetHeadSlot(headSlot)
 	downloader.SetNotifyBlobBackfilled(network.NewBlobBackfilledNotifier(notify))
 	downloader.Start()
+}
+
+func blobBackfillStartSlot(checkpointSlot, currentHeadSlot uint64) uint64 {
+	return max(checkpointSlot, currentHeadSlot) + 1
 }
 
 func waitForHistoryCompletion(ctx context.Context, finishCh <-chan struct{}, waitForAllRoutines bool) error {

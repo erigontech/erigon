@@ -24,6 +24,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
@@ -101,44 +102,46 @@ func TestNewBlobHistoryDownloaderRequiresClock(t *testing.T) {
 // its context is cancelled. Column recovery must be bounded per block so the archive
 // blob backfill cannot hang forever holding the index read tx.
 func TestBlobHistoryDownloaderFuluColumnRecoveryIsBounded(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	peerDas := mock_services.NewMockPeerDas(ctrl)
-	peerDas.EXPECT().
-		DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, _ []cltypes.ColumnSyncableSignedBlock) error {
-			<-ctx.Done() // never recovers — unblocks only when the per-attempt ctx expires
-			return ctx.Err()
-		}).
-		AnyTimes()
-	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		peerDas := mock_services.NewMockPeerDas(ctrl)
+		peerDas.EXPECT().
+			DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(ctx context.Context, _ []cltypes.ColumnSyncableSignedBlock) error {
+				<-ctx.Done() // never recovers — unblocks only when the per-attempt ctx expires
+				return ctx.Err()
+			}).
+			AnyTimes()
+		blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+		blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
 
-	b := &BlobHistoryDownloader{
-		ctx:                   context.Background(),
-		rpc:                   boundaryPeerCounter(1),
-		blobStorage:           blobStorage,
-		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
-		columnBackfillTimeout: 50 * time.Millisecond,
-		logger:                log.New(),
-	}
+		b := &BlobHistoryDownloader{
+			ctx:                   context.Background(),
+			rpc:                   boundaryPeerCounter(1),
+			blobStorage:           blobStorage,
+			peerDasGetter:         staticPeerDasGetter{pd: peerDas},
+			columnBackfillTimeout: 50 * time.Millisecond,
+			logger:                log.New(),
+		}
 
-	fulu := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
-	fulu.Block.Slot = 100
-	fulu.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+		fulu := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+		fulu.Block.Slot = 100
+		fulu.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 
-	blocks := rootedBlocks(t, fulu)
-	done := make(chan struct{})
-	go func() {
-		b.recoverFuluColumns(blocks)
-		close(done)
-	}()
+		blocks := rootedBlocks(t, fulu)
+		done := make(chan struct{})
+		go func() {
+			b.recoverFuluColumns(blocks)
+			close(done)
+		}()
 
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("recoverFuluColumns hung — unbounded PeerDAS column recovery")
-	}
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("recoverFuluColumns hung — unbounded PeerDAS column recovery")
+		}
+	})
 }
 
 func TestBlobHistoryDownloaderFuluInitialStorageCheckUsesBlockTimeout(t *testing.T) {
@@ -178,22 +181,24 @@ func TestBlobHistoryDownloaderFuluInitialStorageCheckUsesBlockTimeout(t *testing
 }
 
 func TestBlobHistoryDownloaderMixedBatchAttemptsFuluAfterDenebFailure(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
 
-	deneb := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
-	deneb.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
-	fulu := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
-	downloader := &BlobHistoryDownloader{
-		ctx:                   t.Context(),
-		beaconCfg:             &clparams.MainnetBeaconConfig,
-		rpc:                   boundaryPeerCounter(1),
-		blobStorage:           blobStorage,
-		columnBackfillTimeout: time.Second,
-		logger:                log.New(),
-	}
+		deneb := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+		deneb.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+		fulu := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+		downloader := &BlobHistoryDownloader{
+			ctx:                   t.Context(),
+			beaconCfg:             &clparams.MainnetBeaconConfig,
+			rpc:                   boundaryPeerCounter(1),
+			blobStorage:           blobStorage,
+			columnBackfillTimeout: time.Second,
+			logger:                log.New(),
+		}
 
-	require.False(t, downloader.processBatch(rootedBlocks(t, deneb, fulu)))
+		require.False(t, downloader.processBatch(rootedBlocks(t, deneb, fulu)))
+	})
 }
 
 func TestBlobHistoryDownloaderMixedBatchCancellationDoesNotStartFulu(t *testing.T) {
@@ -227,7 +232,7 @@ func TestBlobHistoryDownloaderIncompleteFuluRecoveryWithholdsCompletionUntilRetr
 	var countReads atomic.Int32
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(context.Context, common.Hash) (uint32, error) {
-			if countReads.Add(1) >= 4 {
+			if countReads.Add(1) >= 5 {
 				return 1, nil
 			}
 			return 0, nil
@@ -262,6 +267,61 @@ func TestBlobHistoryDownloaderIncompleteFuluRecoveryWithholdsCompletionUntilRetr
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, int32(1), notified.Load())
+}
+
+func TestBlobHistoryDownloaderBatchesFuluColumnRecovery(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	peerDas := mock_services.NewMockPeerDas(ctrl)
+	blockA := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	blockA.Block.Slot = 101
+	blockA.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	blockB := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	blockB.Block.Slot = 100
+	blockB.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	blocks := rootedBlocks(t, blockA, blockB)
+
+	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, requested []cltypes.ColumnSyncableSignedBlock) error {
+			require.Len(t, requested, 2, "all incomplete blocks should share one PeerDAS call")
+			require.Equal(t, []uint64{101, 100}, []uint64{requested[0].GetSlot(), requested[1].GetSlot()})
+			return nil
+		})
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	reads := make(map[common.Hash]int)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, root common.Hash) (uint32, error) {
+			reads[root]++
+			if reads[root] == 1 {
+				return 0, nil
+			}
+			return 1, nil
+		},
+	).AnyTimes()
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, _ uint64, root common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
+			switch root {
+			case blocks[0].root:
+				return []*cltypes.BlobSidecar{storedFuluSidecar(blockA, 0)}, true, nil
+			case blocks[1].root:
+				return []*cltypes.BlobSidecar{storedFuluSidecar(blockB, 0)}, true, nil
+			default:
+				return nil, false, nil
+			}
+		},
+	).AnyTimes()
+	downloader := &BlobHistoryDownloader{
+		ctx:                   t.Context(),
+		rpc:                   boundaryPeerCounter(1),
+		blobStorage:           blobStorage,
+		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
+		columnBackfillTimeout: time.Second,
+		verifyBlobSidecars: func([]*cltypes.BlobSidecar, clparams.StateVersion, func(*cltypes.SignedBeaconBlockHeader) error) error {
+			return nil
+		},
+		logger: log.New(),
+	}
+
+	require.True(t, downloader.recoverFuluColumns(blocks))
 }
 
 func TestBlobHistoryDownloaderCompletedFuluRecoveryMeetsDurablePostcondition(t *testing.T) {
@@ -375,13 +435,101 @@ func TestBlobHistoryDownloaderFuluRecoveryWaitsForAsyncPersistence(t *testing.T)
 	require.GreaterOrEqual(t, reads.Load(), int32(3))
 }
 
+func TestBlobHistoryDownloaderPrecheckErrorRequeuesOnlyIncompleteWork(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	peerDas := mock_services.NewMockPeerDas(ctrl)
+	blockA := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	blockA.Block.Slot = 103
+	blockA.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	blockB := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	blockB.Block.Slot = 102
+	blockB.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	blockC := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	blockC.Block.Slot = 101
+	blockC.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	blocks := rootedBlocks(t, blockA, blockB, blockC)
+	storage := blobstoragemock.NewMockBlobStorage(ctrl)
+	wantErr := errors.New("temporary storage read failure")
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), blocks[0].root).Return(uint32(0), nil)
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), blocks[1].root).Return(uint32(1), nil)
+	storage.EXPECT().ReadBlobSidecars(gomock.Any(), blockB.GetSlot(), blocks[1].root).
+		Return([]*cltypes.BlobSidecar{storedFuluSidecar(blockB, 0)}, true, nil)
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), blocks[2].root).Return(uint32(0), wantErr)
+
+	downloader := &BlobHistoryDownloader{
+		ctx:           t.Context(),
+		blobStorage:   storage,
+		peerDasGetter: staticPeerDasGetter{pd: peerDas},
+		verifyBlobSidecars: func([]*cltypes.BlobSidecar, clparams.StateVersion, func(*cltypes.SignedBeaconBlockHeader) error) error {
+			return nil
+		},
+		logger: log.New(),
+	}
+
+	require.False(t, downloader.recoverFuluColumns(blocks))
+	require.Len(t, downloader.retryRanges, 1)
+	require.True(t, downloader.retryRanges[0].contains(blockA.GetSlot()))
+	require.True(t, downloader.retryRanges[0].contains(blockC.GetSlot()))
+	require.False(t, downloader.retryRanges[0].contains(blockB.GetSlot()))
+	require.Equal(t, uint64(2), downloader.retryRanges[0].workCount())
+}
+
+func TestBlobHistoryDownloaderFinalDurabilityCheckUsesFreshContextPerCandidate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	peerDas := mock_services.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error {
+			require.Len(t, blocks, 2)
+			<-ctx.Done()
+			return nil
+		},
+	)
+
+	blockA := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	blockA.Block.Slot = 101
+	blockA.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	blockB := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	blockB.Block.Slot = 100
+	blockB.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	blocks := rootedBlocks(t, blockA, blockB)
+	completeRoot := blocks[1].root
+	reads := make(map[common.Hash]int)
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, root common.Hash) (uint32, error) {
+			reads[root]++
+			if root == completeRoot && reads[root] >= 3 {
+				return 1, nil
+			}
+			return 0, nil
+		},
+	).AnyTimes()
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), completeRoot).
+		Return([]*cltypes.BlobSidecar{storedFuluSidecar(blockB, 0)}, true, nil).AnyTimes()
+
+	downloader := &BlobHistoryDownloader{
+		ctx:                   t.Context(),
+		rpc:                   boundaryPeerCounter(1),
+		blobStorage:           blobStorage,
+		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
+		columnBackfillTimeout: 5 * time.Millisecond,
+		verifyBlobSidecars: func([]*cltypes.BlobSidecar, clparams.StateVersion, func(*cltypes.SignedBeaconBlockHeader) error) error {
+			return nil
+		},
+		logger: log.New(),
+	}
+
+	require.False(t, downloader.recoverFuluColumns(blocks))
+	require.Equal(t, []blobRetryRange{{start: blockA.GetSlot(), end: blockA.GetSlot(), cursor: blockA.GetSlot()}}, downloader.retryRanges)
+}
+
 func TestBlobHistoryDownloaderFuluRecoveryRejectsStaleCommitmentCount(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	peerDas := mock_services.NewMockPeerDas(ctrl)
 	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(nil)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).Times(2)
-	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, false, nil).Times(2)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, false, nil).AnyTimes()
 
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 	block.Block.Slot = 100
@@ -524,7 +672,7 @@ func TestBlobHistoryDownloaderRetriesRecoveryAfterDurablePostcheckFailure(t *tes
 	readCalls := 0
 	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), block.Block.Slot, gomock.Any()).DoAndReturn(func(context.Context, uint64, common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
 		readCalls++
-		if readCalls <= 2 {
+		if readCalls <= 4 {
 			return []*cltypes.BlobSidecar{invalidSidecar}, true, nil
 		}
 		return []*cltypes.BlobSidecar{validSidecar}, true, nil
@@ -541,7 +689,7 @@ func TestBlobHistoryDownloaderRetriesRecoveryAfterDurablePostcheckFailure(t *tes
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.NoError(t, downloader.downloadOnce(false))
-	require.Equal(t, 3, readCalls)
+	require.Equal(t, 5, readCalls)
 }
 
 func TestBlobHistoryDownloaderConservesEveryIncompleteFuluBlockAcrossPasses(t *testing.T) {
@@ -583,8 +731,10 @@ func TestBlobHistoryDownloaderConservesEveryIncompleteFuluBlockAcrossPasses(t *t
 			peerDas := mock_services.NewMockPeerDas(ctrl)
 			peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).DoAndReturn(
 				func(_ context.Context, requested []cltypes.ColumnSyncableSignedBlock) error {
-					require.Len(t, requested, 1)
-					attempts[requested[0].GetSlot()]++
+					require.NotEmpty(t, requested)
+					for _, block := range requested {
+						attempts[block.GetSlot()]++
+					}
 					return nil
 				},
 			).AnyTimes()
@@ -693,8 +843,8 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsInvalidStoredSidecars(t *testin
 			sidecar := storedFuluSidecar(block, 0)
 			mutate(sidecar)
 			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
-			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil)
-			blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return([]*cltypes.BlobSidecar{sidecar}, true, nil)
+			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+			blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return([]*cltypes.BlobSidecar{sidecar}, true, nil).AnyTimes()
 			downloader := &BlobHistoryDownloader{
 				ctx:                   t.Context(),
 				rpc:                   boundaryPeerCounter(1),
@@ -721,8 +871,8 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsFailedStoredSidecarVerification
 	block.Block.Slot = 100
 	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil)
-	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return([]*cltypes.BlobSidecar{storedFuluSidecar(block, 0)}, true, nil)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return([]*cltypes.BlobSidecar{storedFuluSidecar(block, 0)}, true, nil).AnyTimes()
 	downloader := &BlobHistoryDownloader{
 		ctx:                   t.Context(),
 		rpc:                   boundaryPeerCounter(1),
@@ -1375,9 +1525,10 @@ func TestReadRetryBlockReturnsTheCanonicalRoot(t *testing.T) {
 		return beacon_indicies.MarkRootCanonical(tx, slot, canonical)
 	}))
 
-	got, root, err := downloader.readRetryBlock(slot)
+	got, _, err := downloader.readRetryBlock(slot)
 	require.NoError(t, err)
-	require.NotNil(t, got)
+	require.NotNil(t, got.block)
+	root := got.root
 	require.Equal(t, canonical, root, "the retry must carry the indexed root, not the block's own hash")
 	require.NotEqual(t, common.Hash(selfHash), root)
 }

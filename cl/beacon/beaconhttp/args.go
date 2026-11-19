@@ -18,6 +18,7 @@ package beaconhttp
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -73,11 +74,11 @@ func EpochFromRequest(r *http.Request) (uint64, error) {
 	regex := regexp.MustCompile(`^\d+$`)
 	epoch := chi.URLParam(r, "epoch")
 	if !regex.MatchString(epoch) {
-		return 0, errors.New("invalid path variable: {epoch}")
+		return 0, NewEndpointError(http.StatusBadRequest, errors.New("invalid path variable: {epoch}"))
 	}
 	epochMaybe, err := strconv.ParseUint(epoch, 10, 64)
 	if err != nil {
-		return 0, err
+		return 0, NewEndpointError(http.StatusBadRequest, errors.New("invalid path variable: {epoch}"))
 	}
 	return epochMaybe, nil
 }
@@ -95,7 +96,7 @@ func BlockIdFromRequest(r *http.Request) (*SegmentID, error) {
 
 	blockId := chi.URLParam(r, "block_id")
 	if !regex.MatchString(blockId) {
-		return nil, errors.New("invalid path variable: {block_id}")
+		return nil, NewEndpointError(http.StatusBadRequest, errors.New("invalid path variable: {block_id}"))
 	}
 
 	if blockId == "head" {
@@ -107,9 +108,12 @@ func BlockIdFromRequest(r *http.Request) (*SegmentID, error) {
 	if blockId == "genesis" {
 		return &SegmentID{tag: Genesis}, nil
 	}
-	slotMaybe, err := strconv.ParseUint(blockId, 10, 64)
-	if err == nil {
-		return &SegmentID{slot: &slotMaybe}, nil
+	if !strings.HasPrefix(blockId, "0x") {
+		slot, err := strconv.ParseUint(blockId, 10, 64)
+		if err != nil {
+			return nil, NewEndpointError(http.StatusBadRequest, errors.New("invalid path variable: {block_id}"))
+		}
+		return &SegmentID{slot: &slot}, nil
 	}
 	root := common.HexToHash(blockId)
 	return &SegmentID{
@@ -122,7 +126,7 @@ func StateIdFromRequest(r *http.Request) (*SegmentID, error) {
 
 	stateId := chi.URLParam(r, "state_id")
 	if !regex.MatchString(stateId) {
-		return nil, errors.New("invalid path variable: {state_id}")
+		return nil, NewEndpointError(http.StatusBadRequest, errors.New("invalid path variable: {state_id}"))
 	}
 
 	if stateId == "head" {
@@ -137,9 +141,12 @@ func StateIdFromRequest(r *http.Request) (*SegmentID, error) {
 	if stateId == "justified" {
 		return &SegmentID{tag: Justified}, nil
 	}
-	slotMaybe, err := strconv.ParseUint(stateId, 10, 64)
-	if err == nil {
-		return &SegmentID{slot: &slotMaybe}, nil
+	if !strings.HasPrefix(stateId, "0x") {
+		slot, err := strconv.ParseUint(stateId, 10, 64)
+		if err != nil {
+			return nil, NewEndpointError(http.StatusBadRequest, errors.New("invalid path variable: {state_id}"))
+		}
+		return &SegmentID{slot: &slot}, nil
 	}
 	root := common.HexToHash(stateId)
 	return &SegmentID{
@@ -179,7 +186,7 @@ func Uint64FromQueryParams(r *http.Request, name string) (*uint64, error) {
 	}
 	num, err := strconv.ParseUint(str, 10, 64)
 	if err != nil {
-		return nil, err
+		return nil, NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid query parameter %s: %q is not a base-10 uint64", name, str))
 	}
 	return &num, nil
 }

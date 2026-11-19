@@ -21,6 +21,7 @@ package js
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -61,7 +62,7 @@ func runTrace(tracer *tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, 
 		gasLimit uint64 = 31000
 		startGas        = mdgas.MdGas{Execution: 10000}
 		value           = uint256.Int{}
-		contract        = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, value)
+		contract        = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, value)
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 	if contractCode != nil {
@@ -185,7 +186,7 @@ func TestHaltBetweenSteps(t *testing.T) {
 	}
 	env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: *uint256.NewInt(1)}, state.New(state.NewNoopReader()), chain.AllProtocolChanges, vm.Config{Tracer: tracer.Hooks})
 	scope := &vm.CallContext{
-		Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}),
+		Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}),
 	}
 	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, accounts.ZeroAddress.Value(), new(uint256.Int), 0, new(uint256.Int), nil), accounts.ZeroAddress)
 	tracer.EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, []byte{}, mdgas.MdGas{}, uint256.Int{}, []byte{})
@@ -298,7 +299,7 @@ func TestEnterExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := &vm.CallContext{
-		Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}),
+		Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}),
 	}
 	tracer.EmitEnter(1, byte(vm.CALL), scope.Contract.Caller(), scope.Contract.Address(), false, []byte{}, mdgas.MdGas{Execution: 1000, State: 200}, uint256.Int{}, []byte{})
 	tracer.EmitExit(1, []byte{}, mdgas.MdGasUsage{Execution: 400, State: -30, StateSpill: 10}, nil, false)
@@ -456,4 +457,59 @@ func TestGetCodeBufferDoesNotAliasState(t *testing.T) {
 	got, err := ibs.GetCode(addr)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+}
+
+func TestConstructorStopsWhenCancelled(t *testing.T) {
+	t.Parallel()
+	for name, code := range map[string]string{
+		"tracer body": "(function(){ while (true) {} })()",
+		"setup":       "{result: function() {}, fault: function() {}, setup: function() { while (true) {} }}",
+		"getter":      "{get result() { while (true) {} }, fault: function() {}}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond) // long enough to reach the loop
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				_, err := newJsTracer(code, &tracers.Context{Ctx: ctx}, nil)
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				require.Error(t, err)
+			case <-time.After(10 * time.Second):
+				t.Fatal("the tracer constructor did not stop")
+			}
+		})
+	}
+}
+
+func TestTracerInterfaceErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+		want string
+	}{
+		{"null", `null`, "Cannot convert undefined or null to object"},
+		{"undefined", `undefined`, "Cannot convert undefined or null to object"},
+		{"result getter throws", `{get result() { throw 1 }, fault: function() {}}`, "1 at"},
+		{"fault getter throws", `{result: function() {}, get fault() { throw new Error("boom") }}`, "boom"},
+		{"step getter throws", `{result: function() {}, fault: function() {}, get step() { throw new Error("boom") }}`, "boom"},
+		{"exit getter throws", `{result: function() {}, fault: function() {}, enter: function() {}, get exit() { throw new Error("boom") }}`, "boom"},
+		{"setup getter throws", `{result: function() {}, fault: function() {}, get setup() { throw new Error("boom") }}`, "boom"},
+		{"primitive", `1`, "trace object must expose a function result()"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var err error
+			require.NotPanics(t, func() {
+				_, err = newJsTracer(tt.code, new(tracers.Context), nil)
+			})
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+
+	_, err := newJsTracer(`{result: function() {}, fault: function() {}}`, new(tracers.Context), nil)
+	require.NoError(t, err)
 }
