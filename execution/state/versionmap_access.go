@@ -240,6 +240,10 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 // base read: the AddressPath is marked AccountFromBAL, so field reads still fall back to
 // the committed base for a base-present account's untouched fields.
 func (vm *VersionMap) SeedAddresses() {
+	if balChunkWorkers(len(vm.bal)) <= 1 {
+		vm.seedAddresses(0, len(vm.bal))
+		return
+	}
 	forBALChunks(len(vm.bal), vm.seedAddresses)
 }
 
