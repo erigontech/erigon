@@ -19,6 +19,8 @@ package jsonrpc
 import (
 	"context"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -197,13 +199,19 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 					rpc.SimProbeHeadWake()
 				}
 				err := rpc.CoalesceNotifications(notifier, func() {
+					probeLogBeforeHead(rpc.ProbeConnKey(notifier), item)
 					notify(emit, item)
 					for range len(ch) {
-						notify(emit, <-ch)
+						next := <-ch
+						probeLogBeforeHead(rpc.ProbeConnKey(notifier), next)
+						notify(emit, next)
 					}
 				})
 				if head {
 					rpc.SimProbeHeadDone()
+					if h, ok := any(item).(*rpchelper.Shared[*types.Header]); ok {
+						probeHeadWritten(rpc.ProbeConnKey(notifier), h.Value.Number.Uint64())
+					}
 				}
 				if err != nil {
 					log.Warn("[rpc] notification batch write failed, connection closed", "err", err)
@@ -351,4 +359,24 @@ func (api *APIImpl) TransactionReceipts(ctx context.Context, crit *filters.Recei
 			}
 		},
 		"[rpc] receipts channel was closed")
+}
+
+// Probe, not for merge: per connection, the last head block written, to count logs written before their head.
+var probeHeadOf sync.Map // connection -> *atomic.Uint64
+
+func probeHeadWritten(n any, block uint64) {
+	v, _ := probeHeadOf.LoadOrStore(n, new(atomic.Uint64))
+	v.(*atomic.Uint64).Store(block)
+}
+
+func probeLogBeforeHead(n any, item any) {
+	lg, ok := item.(*types.Log)
+	if !ok {
+		return
+	}
+	bn := uint64(lg.BlockNumber)
+	v, ok := probeHeadOf.Load(n)
+	if !ok || v.(*atomic.Uint64).Load() < bn {
+		dbg.ProbeAdd("logBeforeHead", bn, 1)
+	}
 }
