@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -206,6 +207,15 @@ func TestCommitmentRebuildWithoutHistoryAfterPrunedHistoryRefusal(t *testing.T) 
 	datadirCli, noHistory, yes = dirs.DataDir, true, true
 	t.Cleanup(statecfg.SetCommitmentV3(true))
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for block, root := range roots {
+			header := &types.Header{Number: *uint256.NewInt(uint64(block)), Root: root}
+			if err := rawdb.WriteHeader(tx, header); err != nil {
+				return err
+			}
+			if err := rawdb.WriteCanonicalHash(tx, header.Hash(), uint64(block)); err != nil {
+				return err
+			}
+		}
 		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
 	}))
 

@@ -481,6 +481,10 @@ func TestCommitmentPlainValuesFromCtx(t *testing.T) {
 
 func TestSetEthConfigWiresCommitmentV3Flag(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
+	prefetch, mmapPrefetch, asyncIO, asyncIOMultiPage := dbg.BALBatchPrefetch, mmap.BatchPrefetch, dbg.FilesBlockingAsyncIO, dbg.FilesBlockingAsyncIOMultiPage
+	t.Cleanup(func() {
+		dbg.BALBatchPrefetch, mmap.BatchPrefetch, dbg.FilesBlockingAsyncIO, dbg.FilesBlockingAsyncIOMultiPage = prefetch, mmapPrefetch, asyncIO, asyncIOMultiPage
+	})
 	commitmentV3Flag := ExperimentalCommitmentV3Flag
 	downloaderAddrFlag := DownloaderAddrFlag
 	chainFlag := ChainFlag
