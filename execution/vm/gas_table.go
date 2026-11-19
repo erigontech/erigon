@@ -431,6 +431,21 @@ func NewCreate2InitCode(input []byte) *Create2InitCode {
 	}
 }
 
+func (original *Create2InitCode) matches(scope *CallContext) bool {
+	size := scope.Stack.back(2)
+	if size.CmpUint64(original.size) != 0 {
+		return false
+	}
+	memory := scope.Memory.Data()
+	offset, overflow := scope.Stack.back(1).Uint64WithOverflow()
+	if overflow || offset >= uint64(len(memory)) {
+		return len(original.prefix) == 0
+	}
+	available := memory[offset:]
+	input := available[:min(original.size, uint64(len(available)))]
+	return bytes.Equal(common.TrimRightZeroes(input), original.prefix)
+}
+
 func (evm *EVM) reportCreateError(scope *CallContext, err error) {
 	report := evm.config.OnInitCodeOverrideError
 	if scope.create.ready {
@@ -440,28 +455,19 @@ func (evm *EVM) reportCreateError(scope *CallContext, err error) {
 	if !errors.Is(err, ErrOutOfGas) && !errors.Is(err, ErrGasUintOverflow) {
 		return
 	}
-	// Failed gas checks reach the jump-table path, where savedPC identifies the failing opcode.
-	op := scope.Contract.GetOp(scope.savedPC)
 	caller := scope.Contract.Address()
-	if op == CREATE {
+	// Failed gas checks reach the jump-table path, where savedPC identifies the failing opcode.
+	switch scope.Contract.GetOp(scope.savedPC) {
+	case CREATE:
 		if nonce, readErr := evm.intraBlockState.GetNonce(caller); readErr == nil {
 			report(accounts.InternAddress(types.CreateAddress(caller.Value(), nonce)), err)
 		}
-		return
-	}
-	original := evm.config.OriginalCreate2InitCode
-	if op != CREATE2 || original == nil || scope.Stack.back(2).CmpUint64(original.size) != 0 {
-		return
-	}
-	var input []byte
-	memory := scope.Memory.Data()
-	if offset, overflow := scope.Stack.back(1).Uint64WithOverflow(); !overflow && offset < uint64(len(memory)) {
-		available := memory[offset:]
-		input = available[:min(uint64(len(available)), original.size)]
-	}
-	if bytes.Equal(common.TrimRightZeroes(input), original.prefix) {
-		address := types.CreateAddress2(caller.Value(), scope.Stack.back(3).Bytes32(), original.hash)
-		report(accounts.InternAddress(address), err)
+	case CREATE2:
+		original := evm.config.OriginalCreate2InitCode
+		if original != nil && original.matches(scope) {
+			address := types.CreateAddress2(caller.Value(), scope.Stack.back(3).Bytes32(), original.hash)
+			report(accounts.InternAddress(address), err)
+		}
 	}
 }
 

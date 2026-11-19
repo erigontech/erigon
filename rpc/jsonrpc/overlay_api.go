@@ -115,14 +115,6 @@ func (api *OverlayAPIImpl) applyGasBudget(msg *types.Message) {
 }
 
 func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.Address, code hexutil.Bytes) (*CreationCode, error) {
-	var (
-		replayTransactions types.Transactions
-		evm                *vm.EVM
-		blockCtx           evmtypes.BlockContext
-		txCtx              evmtypes.TxContext
-		overrideBlockHash  map[uint64]common.Hash
-	)
-
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
@@ -190,8 +182,6 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		}
 	}
 
-	replayTransactions = block.Transactions()[:transactionIndex]
-
 	err = rpchelper.CheckBlockExecuted(tx, blockNum)
 	if err != nil {
 		return nil, err
@@ -207,30 +197,26 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	transactions.VersionedBlockState(statedb)
 
 	header := block.HeaderNoCopy()
-
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, block.Hash())
 	}
 
-	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, overrideBlockHash)
-
-	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress, chainConfig)
-
-	evm = vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{})
+	getHash := transactions.MakeBlockHashProvider(ctx, tx, api._blockReader, nil)
+	blockCtx := protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress, chainConfig)
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
-	rules := evm.ChainRules()
+	rules := blockCtx.Rules(chainConfig)
 
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	// Replay the earlier transactions with their original messages to restore
 	// the state at the start of the deployment transaction.
-	for idx, txn := range replayTransactions {
+	for idx, txn := range block.Transactions()[:transactionIndex] {
 		statedb.SetTxContext(blockNum, idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, err
 		}
-		txCtx = protocol.NewEVMTxContext(msg)
-		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
+		txCtx := protocol.NewEVMTxContext(msg)
+		evm := vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{})
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
 			return nil, err
@@ -250,12 +236,12 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	contractAddr := types.CreateAddress(msg.From().Value(), msg.Nonce())
 	if creationTx.IsContractDeploy() && contractAddr == address {
 		// Intrinsic gas is charged on the message data before the EVM applies the initcode override.
-		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.TipCap(), code, msg.AccessList(), msg.CheckNonce(), msg.CheckTransaction(), msg.CheckGas(), msg.IsFree(), msg.MaxFeePerBlobGas())
+		msg.SetData(code)
 	}
 	api.applyGasBudget(msg)
-	txCtx = protocol.NewEVMTxContext(msg)
+	txCtx := protocol.NewEVMTxContext(msg)
 	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), statedb: statedb}
-	evm = vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{
+	evm := vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{
 		Tracer: ct.TracingHooks(),
 		OverrideInitCode: func(target accounts.Address) ([]byte, bool) {
 			return code, target == ct.contractAddress
