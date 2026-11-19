@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -551,6 +552,29 @@ var EmbeddedWebseeds = map[string][]string{
 func GetEmbeddedWebseeds(chain string) ([]string, bool) {
 	s, ok := EmbeddedWebseeds[chain]
 	return s, ok
+}
+
+// Webseeds returns the webseeds of the snapshot branch the manifest comes from (SNAPS_GIT_BRANCH).
+func Webseeds(ctx context.Context, chain string) ([]string, bool) {
+	return webseedsFrom(ctx, snapshotGitBranch, chain, func(ctx context.Context, branch, chain string) ([]byte, error) {
+		return FetchTomlFromURL(ctx, WebseedTomlGitHubURL(branch, chain))
+	})
+}
+
+func webseedsFrom(ctx context.Context, branch, chain string, fetch func(ctx context.Context, branch, chain string) ([]byte, error)) ([]string, bool) {
+	embedded, ok := GetEmbeddedWebseeds(chain)
+	if branch == ver.DefaultSnapshotGitBranch { // the embedded list is the default branch's
+		return embedded, ok
+	}
+	b, err := fetch(ctx, branch, chain)
+	if err == nil {
+		var named map[string]string
+		if err = toml.Unmarshal(b, &named); err == nil && len(named) > 0 {
+			return slices.Sorted(maps.Values(named)), true
+		}
+	}
+	log.Warn("[snapshots] no webseed list on the snapshot branch, using the embedded one", "branch", branch, "chain", chain, "err", err)
+	return embedded, ok
 }
 
 const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"

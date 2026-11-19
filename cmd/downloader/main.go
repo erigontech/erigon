@@ -272,7 +272,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
 	webseedsList := common.CliString2Array(cobraFlagValues.webseeds)
-	if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
+	if known, ok := snapcfg.Webseeds(ctx, chain); ok {
 		webseedsList = append(webseedsList, known...)
 	}
 	if seedbox {

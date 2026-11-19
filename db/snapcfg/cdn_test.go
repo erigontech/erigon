@@ -1,6 +1,15 @@
 package snapcfg
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+)
 
 func TestChainTomlR2URL(t *testing.T) {
 	tests := []struct {
@@ -32,4 +41,25 @@ func TestChainTomlGitHubURL(t *testing.T) {
 			t.Errorf("ChainTomlGitHubURL(%q, %q) = %q, want %q", tt.branch, tt.chain, got, tt.want)
 		}
 	}
+}
+
+func TestWebseedsFollowTheManifestBranch(t *testing.T) {
+	fetched := map[string]string{}
+	fetch := func(_ context.Context, branch, chain string) ([]byte, error) {
+		fetched[chain] = branch
+		return []byte(`"e3-v1-pub" = "v1:https://erigon310-v1-snapshots-mainnet.erigon.network"`), nil
+	}
+	got, ok := webseedsFrom(t.Context(), "release/3.10", networkname.Mainnet, fetch)
+	require.True(t, ok)
+	require.Equal(t, []string{"v1:https://erigon310-v1-snapshots-mainnet.erigon.network"}, got)
+	require.Equal(t, "release/3.10", fetched[networkname.Mainnet])
+
+	got, ok = webseedsFrom(t.Context(), version.DefaultSnapshotGitBranch, networkname.Mainnet, fetch)
+	require.True(t, ok)
+	require.Equal(t, EmbeddedWebseeds[networkname.Mainnet], got, "the embedded list is the default branch's")
+
+	failing := func(context.Context, string, string) ([]byte, error) { return nil, errors.New("404") }
+	got, ok = webseedsFrom(t.Context(), "release/3.10", networkname.Mainnet, failing)
+	require.True(t, ok)
+	require.Equal(t, EmbeddedWebseeds[networkname.Mainnet], got, "a branch without a webseed file falls back to the embedded list")
 }
