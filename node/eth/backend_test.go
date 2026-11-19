@@ -12,13 +12,24 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/txnprovider/shutter"
@@ -111,4 +122,31 @@ func TestMCPNamespacesFollowHTTPAPI(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestSetUpBlockReaderRebuildsMissedAccessor(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	stateDB := temporaltest.NewTestDB(t, dirs)
+	tx, sd := temporaltest.NewTestTxSD(t, stateDB)
+	addr := common.Address{1}
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr[:], accounts.SerialiseV3(&accounts.Account{Nonce: 1}), config3.DefaultStepSize, nil))
+	require.NoError(t, sd.Flush(t.Context(), tx))
+	require.NoError(t, tx.Commit())
+	require.NoError(t, stateDB.(*temporal.DB).BuildFiles(2*config3.DefaultStepSize, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
+	stateDB.Close()
+	accessors, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.0-1.bt"))
+	require.NoError(t, err)
+	require.Len(t, accessors, 1)
+	require.NoError(t, dir.RemoveFile(accessors[0]))
+
+	chainDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, chainDB.Update(t.Context(), func(tx kv.RwTx) error {
+		return stages.SaveStageProgress(tx, stages.Snapshots, 1)
+	}))
+	cfg := ethconfig.Defaults
+	_, _, blockSnapshots, temporalDB, err := SetUpBlockReader(t.Context(), chainDB, dirs, &cfg, &chain.Config{ChainName: networkname.Test}, log.New(), nil)
+	require.NoError(t, err)
+	t.Cleanup(blockSnapshots.Close)
+	t.Cleanup(temporalDB.Close)
+	require.FileExists(t, accessors[0])
 }
