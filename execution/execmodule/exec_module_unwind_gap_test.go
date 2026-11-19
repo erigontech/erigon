@@ -103,6 +103,10 @@ func TestUpdateForkChoiceBadBlockMidBatchThenRecovery(t *testing.T) {
 	// tampered block or anything outside its valid ancestry.
 	require.Contains(t, []common.Hash{chainPack.Blocks[committedTo-1].Hash(), block11.Hash()}, res.LatestValidHash,
 		"latest valid hash must be a valid ancestor of the rejected tip")
+	res, err = m.UpdateForkChoice(ctx, block11.Header())
+	require.NoError(t, err)
+	require.Equalf(t, execmodule.ExecutionStatusSuccess, res.Status,
+		"the valid ancestor must remain selectable after rejecting its child: %s", res.ValidationError)
 
 	// The CL's recovery move: switch to the untampered block 12 at the same
 	// height. This only works if block 11 was not wrongly marked bad by the

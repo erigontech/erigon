@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // waitForDomainFilesSettled blocks until background building has produced at
@@ -214,6 +215,18 @@ func TestEngineApiUnwindToSnapshotBoundaryPreservesDeletedSlots(t *testing.T) {
 		assertChurnState(ctx, t, eat, churn, payloads[target-2], sums[target-2])
 
 		// Keep churning: every poke re-reads its ring slots from MDBX+files.
-		churnAndAssert(ctx, t, eat, churn, 4, func(k int) int64 { return int64(5_000 + k) })
+		continued, continuedSums := churnAndAssert(ctx, t, eat, churn, 4, func(k int) int64 { return int64(5_000 + k) })
+		head := continued[len(continued)-1]
+		headSum := continuedSums[len(continuedSums)-1]
+
+		// Retained changesets cannot make immutable snapshot state unwindable.
+		// Rejection must leave both reads and subsequent payload building usable.
+		err = eat.MockCl.UpdateForkChoice(ctx, payloads[18]) // block 20
+		var rpcErr rpc.Error
+		require.ErrorAs(t, err, &rpcErr)
+		require.Equal(t, -38006, rpcErr.ErrorCode())
+		assertChurnState(ctx, t, eat, churn, head, headSum)
+		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, head))
+		churnAndAssert(ctx, t, eat, churn, 3, func(k int) int64 { return int64(6_000 + k) })
 	})
 }
