@@ -17,6 +17,8 @@
 package jsonrpc
 
 import (
+	"errors"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -63,6 +65,10 @@ func (ct *OverlayCreateTracer) OnEnterV2(depth int, typ byte, from accounts.Addr
 
 func (ct *OverlayCreateTracer) OnExitV2(depth int, _ []byte, _ mdgas.MdGasUsage, err error, _ bool) {
 	if ct.isCapturing && depth == ct.depth {
+		// The RPC encoder would otherwise use the tracing wrapper's error code.
+		if vmErr, ok := errors.AsType[*vm.VMError](err); ok {
+			err = vmErr.Unwrap()
+		}
 		ct.err = err
 		ct.isCapturing = false
 	}

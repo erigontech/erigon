@@ -1103,7 +1103,7 @@ func TestCallConstructorRejectsNonContract(t *testing.T) {
 	}
 }
 
-func TestCallConstructorRequiresCode(t *testing.T) {
+func TestCallConstructorRPCErrors(t *testing.T) {
 	m, _, contractAddress, _ := chainWithDeployedContract(t)
 	base := newBaseApiForTest(m)
 	api := NewOverlayAPI(
@@ -1117,16 +1117,25 @@ func TestCallConstructorRequiresCode(t *testing.T) {
 	client := rpc.DialInProc(server, log.New())
 	t.Cleanup(func() { client.Close(); server.Stop() })
 
-	for name, params := range map[string][]any{
-		"omitted": {contractAddress},
-		"null":    {contractAddress, nil},
+	revert := hexutil.Bytes(program.New().Push(0).Push(0).Op(vm.REVERT).Bytes())
+	for _, tc := range []struct {
+		name        string
+		params      []any
+		wantCode    int
+		wantMessage string
+	}{
+		{"omitted code", []any{contractAddress}, rpc.ErrCodeInvalidParams, "missing value for required argument 1"},
+		{"null code", []any{contractAddress, nil}, rpc.ErrCodeInvalidParams, "missing value for required argument 1"},
+		{"invalid opcode", []any{contractAddress, hexutil.Bytes{byte(vm.INVALID)}}, rpc.ErrCodeDefault, "invalid opcode: INVALID"},
+		{"constructor revert", []any{contractAddress, revert}, rpc.ErrCodeDefault, "execution reverted"},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			var result json.RawMessage
-			err := client.CallContext(t.Context(), &result, "overlay_callConstructor", params...)
+			err := client.CallContext(t.Context(), &result, "overlay_callConstructor", tc.params...)
 			var rpcErr rpc.Error
 			require.ErrorAs(t, err, &rpcErr)
-			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+			require.EqualError(t, err, tc.wantMessage)
+			require.Equal(t, tc.wantCode, rpcErr.ErrorCode())
 		})
 	}
 }
