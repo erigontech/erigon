@@ -48,6 +48,9 @@ func requireReturns(t *testing.T, done <-chan error) error {
 
 func requireReturnsSynctest(t *testing.T, done <-chan error) error {
 	t.Helper()
+	// synctest.Wait settles the bubble's goroutines (durable blocks only);
+	// a mutex deadlock here hangs until the package timeout, as with any
+	// synctest test, since sync.Mutex.Lock is not a durable block.
 	synctest.Wait()
 	select {
 	case err := <-done:
