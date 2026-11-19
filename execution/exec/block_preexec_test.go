@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -151,7 +152,7 @@ func TestBlockReadAheaderPreExecRejectsBlobGasPriceOverflow(t *testing.T) {
 	header.ExcessBlobGas = &excess
 	var err error
 	require.NotPanics(t, func() {
-		err = f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{f.txn(t, 100_000, 1)}, preExecWorkers)
+		err = f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{f.txn(t, 100_000, 1)}, preExecWorkers, nil)
 	})
 	require.Error(t, err)
 }
@@ -196,7 +197,7 @@ func TestBlockReadAheaderPreExecCancelStopsRunningTx(t *testing.T) {
 
 func TestBlockReadAheaderPreExecCapsTxGas(t *testing.T) {
 	f := newPreExecFixture(t, []byte{0x5a, 0x54, 0x00})
-	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), types.Transactions{f.txn(t, preExecTxGas<<3, 0)}, preExecWorkers))
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), types.Transactions{f.txn(t, preExecTxGas<<3, 0)}, preExecWorkers, nil))
 
 	gasAtStart := common.Hash(uint256.NewInt(preExecTxGas - 21_000 - 2).Bytes32())
 	_, ok := f.stateCache.View(nil).Get(kv.StorageDomain, append(f.contract[:], gasAtStart[:]...))
@@ -215,7 +216,7 @@ func TestBlockReadAheaderPreExecStopsAtBlockGas(t *testing.T) {
 		require.NoError(t, err)
 		txns[i] = txn
 	}
-	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), txns, preExecWorkers))
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), txns, preExecWorkers, nil))
 
 	sender := crypto.PubkeyToAddress(f.key.PublicKey)
 	ran := 0
@@ -239,7 +240,7 @@ func TestBlockReadAheaderPreExecUsesEffectiveGasPrice(t *testing.T) {
 		FeeCap:   *uint256.NewInt(100),
 	})
 	require.NoError(t, err)
-	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{txn}, preExecWorkers))
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{txn}, preExecWorkers, nil))
 
 	effective, feeCap := common.Hash{31: 12}, common.Hash{31: 100}
 	_, ok := f.stateCache.View(nil).Get(kv.StorageDomain, append(f.contract[:], effective[:]...))
@@ -257,7 +258,7 @@ func TestBlockReadAheaderPreExecClampsGasPriceToFeeCap(t *testing.T) {
 		ChainID:  *f.config.ChainID,
 	})
 	require.NoError(t, err)
-	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{txn}, preExecWorkers))
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, header, types.Transactions{txn}, preExecWorkers, nil))
 
 	feeCap, baseFee := common.Hash{}, common.Hash{31: 10}
 	_, ok := f.stateCache.View(nil).Get(kv.StorageDomain, append(f.contract[:], feeCap[:]...))
@@ -293,7 +294,7 @@ func TestBlockReadAheaderPreExecCreatesAtTxNonce(t *testing.T) {
 		GasPrice: *uint256.NewInt(1),
 	})
 	require.NoError(t, err)
-	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), types.Transactions{call, create}, preExecWorkers))
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), types.Transactions{call, create}, preExecWorkers, nil))
 
 	sender := crypto.PubkeyToAddress(f.key.PublicKey)
 	atTxNonce, atParentNonce := types.CreateAddress(sender, 1), types.CreateAddress(sender, 0)
@@ -361,7 +362,48 @@ func TestBlockReadAheaderPreExecWorkers(t *testing.T) {
 			txns[i] = f.txn(t, 100_000, 1)
 		}
 		db := &countingRoDB{RoDB: f.db}
-		require.NoError(t, f.readAheader.preExecTxns(t.Context(), db, f.header(), txns, tc.workers))
+		require.NoError(t, f.readAheader.preExecTxns(t.Context(), db, f.header(), txns, tc.workers, nil))
 		require.Equal(t, int32(min(tc.want, secp256k1.NumOfContexts())), db.begins.Load(), "workers=%d", tc.workers)
 	}
+}
+
+func recoveredSenders(err error, senders ...common.Address) *SendersRecovery {
+	r := &SendersRecovery{done: make(chan struct{}), err: err, failedTx: -1}
+	for _, s := range senders {
+		r.senders = append(r.senders, accounts.InternAddress(s))
+	}
+	close(r.done)
+	return r
+}
+
+func TestBlockReadAheaderPreExecTakesSendersFromTheBlockRecovery(t *testing.T) {
+	f := newPreExecFixture(t, []byte{0x33, 0x54, 0x00})
+	ctx := t.Context()
+	header, other := f.header(), common.Address{19: 0x99}
+	f.readAheader.AddSendersRecovery(header.Hash(), recoveredSenders(nil, other))
+	require.NoError(t, f.db.View(ctx, func(tx kv.Tx) error {
+		f.readAheader.AddHeaderAndBody(ctx, f.db, tx, header, &types.Body{Transactions: types.Transactions{f.txn(t, 100_000, 1)}})
+		return nil
+	}))
+	f.readAheader.WaitForWarmup(ctx)
+
+	slotOf := func(caller common.Address) []byte {
+		var slot common.Hash
+		copy(slot[12:], caller[:])
+		return append(f.contract[:], slot[:]...)
+	}
+	_, ok := f.stateCache.View(nil).Get(kv.StorageDomain, slotOf(other))
+	require.True(t, ok, "pre-exec did not run the tx as the sender the block's recovery found")
+	_, ok = f.stateCache.View(nil).Get(kv.StorageDomain, slotOf(crypto.PubkeyToAddress(f.key.PublicKey)))
+	require.False(t, ok, "pre-exec recovered the sender a second time")
+	_, ok = f.readAheader.TakeSendersRecovery(header.Hash())
+	require.True(t, ok, "pre-exec must leave the recovery for the senders stage")
+}
+
+func TestBlockReadAheaderPreExecSkipsABlockWhoseSendersFailed(t *testing.T) {
+	f := newPreExecFixture(t, []byte{0x60, 0x07, 0x54, 0x00})
+	failed := recoveredSenders(errors.New("invalid signature"), common.Address{})
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), types.Transactions{f.txn(t, 100_000, 1)}, preExecWorkers, failed))
+	_, ok := f.stateCache.View(nil).Get(kv.StorageDomain, f.slotKey)
+	require.False(t, ok, "pre-exec ran a block whose sender recovery failed")
 }
