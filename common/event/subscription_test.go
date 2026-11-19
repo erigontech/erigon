@@ -81,9 +81,6 @@ loop:
 }
 
 func TestResubscribe(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	t.Parallel()
 
 	synctest.Test(t, func(t *testing.T) {
