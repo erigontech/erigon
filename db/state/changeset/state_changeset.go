@@ -37,14 +37,6 @@ type StateChangeSet struct {
 	Diffs [kv.DomainLen]kv.DomainDiff
 }
 
-func (s *StateChangeSet) Copy() *StateChangeSet {
-	res := *s
-	for i := range s.Diffs {
-		res.Diffs[i] = *s.Diffs[i].Copy()
-	}
-	return &res
-}
-
 func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 	out = slices.Grow(out, serializeDiffSetBufLen(diffSet))
 

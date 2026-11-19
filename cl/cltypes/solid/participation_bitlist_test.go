@@ -17,10 +17,19 @@
 package solid_test
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"math/rand"
+	"strconv"
 	"testing"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 func TestParticipationBitListStatic(t *testing.T) {
@@ -124,3 +133,147 @@ func TestParticipationBitListCap(t *testing.T) {
 }
 
 // Add more tests as needed for other functions in the BitList struct.
+
+// sha256ListRoot computes hash_tree_root(List[uint8, limit]) with crypto/sha256 only.
+func sha256ListRoot(data []byte, limit int) [32]byte {
+	layer := make([][32]byte, 0, (len(data)+31)/32+1)
+	for i := 0; i < len(data); i += 32 {
+		var chunk [32]byte
+		copy(chunk[:], data[i:min(len(data), i+32)])
+		layer = append(layer, chunk)
+	}
+	var zero [32]byte
+	for depth := 0; 1<<depth < (limit+31)/32; depth++ {
+		if len(layer)%2 == 1 {
+			layer = append(layer, zero)
+		}
+		for i := range len(layer) / 2 {
+			layer[i] = sha256.Sum256(append(layer[2*i][:], layer[2*i+1][:]...))
+		}
+		layer = layer[:len(layer)/2]
+		zero = sha256.Sum256(append(zero[:], zero[:]...))
+	}
+	root := zero
+	if len(layer) > 0 {
+		root = layer[0]
+	}
+	var length [32]byte
+	binary.LittleEndian.PutUint64(length[:], uint64(len(data)))
+	return sha256.Sum256(append(root[:], length[:]...))
+}
+
+func randomParticipation(rng *rand.Rand, n int) []byte {
+	values := make([]byte, n)
+	for i := range values {
+		values[i] = byte(1 + rng.Intn(7))
+	}
+	return values
+}
+
+func appendAll(bitList *solid.ParticipationBitList, values []byte) *solid.ParticipationBitList {
+	for _, v := range values {
+		bitList.Append(v)
+	}
+	return bitList
+}
+
+func hashedBitList(t *testing.T, values []byte, limit int) *solid.ParticipationBitList {
+	t.Helper()
+	bitList := appendAll(solid.NewParticipationBitList(0, limit), values)
+	_, err := bitList.HashSSZ()
+	require.NoError(t, err)
+	return bitList
+}
+
+func TestParticipationBitListHashSSZMatchesSha256Oracle(t *testing.T) {
+	const subtreeBytes = solid.ParticipationSubtreeChunks * 32
+	limit := int(clparams.MainnetBeaconConfig.ValidatorRegistryLimit)
+	rng := rand.New(rand.NewSource(1))
+	producers := []struct {
+		name    string
+		produce func(t *testing.T, values []byte) *solid.ParticipationBitList
+	}{
+		{"new_and_set", func(t *testing.T, values []byte) *solid.ParticipationBitList {
+			bitList := solid.NewParticipationBitList(len(values), limit)
+			for i, v := range values {
+				bitList.Set(i, v)
+			}
+			return bitList
+		}},
+		{"set_past_length", func(t *testing.T, values []byte) *solid.ParticipationBitList {
+			bitList := solid.NewParticipationBitList(len(values), limit)
+			for i, v := range values {
+				bitList.Set(i, v)
+			}
+			bitList.Set(len(values), 7)
+			return bitList
+		}},
+		{"append", func(t *testing.T, values []byte) *solid.ParticipationBitList {
+			return appendAll(solid.NewParticipationBitList(0, limit), values)
+		}},
+		{"decode_ssz", func(t *testing.T, values []byte) *solid.ParticipationBitList {
+			bitList := solid.NewParticipationBitList(0, limit)
+			require.NoError(t, bitList.DecodeSSZ(values, 0))
+			return bitList
+		}},
+		{"copy", func(t *testing.T, values []byte) *solid.ParticipationBitList {
+			return hashedBitList(t, values, limit).Copy()
+		}},
+		{"copy_to", func(t *testing.T, values []byte) *solid.ParticipationBitList {
+			target := solid.NewParticipationBitList(0, limit)
+			hashedBitList(t, values, limit).CopyTo(target)
+			return target
+		}},
+		{"clear_then_shorter_append", func(t *testing.T, values []byte) *solid.ParticipationBitList {
+			bitList := hashedBitList(t, bytes.Repeat([]byte{0xff}, 2*len(values)+subtreeBytes), limit)
+			bitList.Clear()
+			return appendAll(bitList, values)
+		}},
+		{"json_reuse_shorter", func(t *testing.T, values []byte) *solid.ParticipationBitList {
+			bitList := hashedBitList(t, bytes.Repeat([]byte{0xff}, len(values)+100), limit)
+			list := make([]string, len(values))
+			for i, v := range values {
+				list[i] = strconv.Itoa(int(v))
+			}
+			input, err := json.Marshal(list)
+			require.NoError(t, err)
+			require.NoError(t, bitList.UnmarshalJSON(input))
+			return bitList
+		}},
+		{"rehash_after_set", func(t *testing.T, values []byte) *solid.ParticipationBitList {
+			bitList := hashedBitList(t, bytes.Repeat([]byte{0xff}, len(values)), limit)
+			for i, v := range values {
+				bitList.Set(i, v)
+			}
+			return bitList
+		}},
+	}
+	for _, length := range []int{1, 31, 33, subtreeBytes, 2*subtreeBytes + 65, 3*subtreeBytes - 1, 5 * subtreeBytes, 2_100_001} {
+		values := randomParticipation(rng, length)
+		want := sha256ListRoot(values, limit)
+		for _, producer := range producers {
+			t.Run(fmt.Sprintf("%s/%d", producer.name, length), func(t *testing.T) {
+				bitList := producer.produce(t, values)
+				require.Equal(t, values, bitList.Bytes())
+				root, err := bitList.HashSSZ()
+				require.NoError(t, err)
+				require.Equal(t, want, root)
+			})
+		}
+	}
+}
+
+func TestParticipationBitListHashSSZSmallCapacity(t *testing.T) {
+	rng := rand.New(rand.NewSource(2))
+	for _, limit := range []int{1, 32, 33, 64, 1000, solid.ParticipationSubtreeChunks*32 + 1} {
+		for _, length := range []int{1, limit / 2, limit} {
+			if length == 0 {
+				continue
+			}
+			values := randomParticipation(rng, length)
+			root, err := appendAll(solid.NewParticipationBitList(0, limit), values).HashSSZ()
+			require.NoError(t, err)
+			require.Equal(t, sha256ListRoot(values, limit), root, "limit %d length %d", limit, length)
+		}
+	}
+}

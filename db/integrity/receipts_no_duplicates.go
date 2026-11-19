@@ -58,10 +58,6 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 		return err
 	}
 
-	if toBlock > 0 {
-		toBlock-- // [fromBlock,toBlock)
-	}
-
 	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
 	if err != nil {
 		return err
@@ -78,7 +74,7 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 		return err
 	}
 	defer cumGasTx.Rollback()
-	cumGasIt, err := cumGasTx.Debug().TraceKey(kv.ReceiptDomain, rawtemporaldb.CumulativeGasUsedInBlockKey, fromTxNum, toTxNum+1)
+	cumGasIt, err := cumGasTx.Debug().TraceKey(kv.ReceiptDomain, rawtemporaldb.CumulativeGasUsedInBlockKey, fromTxNum, toTxNum)
 	if err != nil {
 		return err
 	}
@@ -105,7 +101,7 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 
 		strongMonotonicCumGasUsed := int(cumGasUsed) > prevCumGasUsed
 		if !strongMonotonicCumGasUsed && !blockChanged { // system tx can be skipped
-			if err := probs.report(failFast, fmt.Errorf("CheckReceiptsNoDups: non-monotonic cumGasUsed at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)); err != nil {
+			if err := probs.report(failFast, fmt.Errorf("%w: CheckReceiptsNoDups: non-monotonic cumGasUsed at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", ErrIntegrity, txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)); err != nil {
 				return err
 			}
 		}
@@ -137,10 +133,6 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 		return err
 	}
 
-	if toBlock > 0 {
-		toBlock-- // [fromBlock,toBlock)
-	}
-
 	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
 	if err != nil {
 		return err
@@ -158,7 +150,7 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 	}
 	defer logIdxTx.Rollback()
 
-	logIdxAfterTxIt, err := logIdxTx.Debug().TraceKey(kv.ReceiptDomain, rawtemporaldb.LogIndexAfterTxKey, fromTxNum, toTxNum+1)
+	logIdxAfterTxIt, err := logIdxTx.Debug().TraceKey(kv.ReceiptDomain, rawtemporaldb.LogIndexAfterTxKey, fromTxNum, toTxNum)
 	if err != nil {
 		return err
 	}
@@ -184,7 +176,7 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 
 		monotonicLogIdx := logIdxAfterTx >= prevLogIdxAfterTx
 		if !monotonicLogIdx && !blockChanged {
-			if err := probs.report(failFast, fmt.Errorf("CheckReceiptsNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdxAfterTx=%d, prevLogIdxAfterTx=%d", txNum, blockNum, _min, _max, logIdxAfterTx, prevLogIdxAfterTx)); err != nil {
+			if err := probs.report(failFast, fmt.Errorf("%w: CheckReceiptsNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdxAfterTx=%d, prevLogIdxAfterTx=%d", ErrIntegrity, txNum, blockNum, _min, _max, logIdxAfterTx, prevLogIdxAfterTx)); err != nil {
 				return err
 			}
 		}
@@ -207,8 +199,11 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 // ReceiptsNoDupsRange checks one block range on its own. Callers inside a fan-out use
 // receiptsNoDupsRange instead, so that one tally covers every chunk.
 func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) error {
+	if toBlock <= fromBlock {
+		return nil
+	}
 	var probs problems
-	err := receiptsNoDupsRange(ctx, fromBlock, toBlock, db, blockReader, failFast, &probs)
+	err := receiptsNoDupsRange(ctx, fromBlock, toBlock-1, db, blockReader, failFast, &probs)
 	return errors.Join(err, probs.verdict(string(ReceiptsNoDups)))
 }
 

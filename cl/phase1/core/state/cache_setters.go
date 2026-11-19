@@ -35,9 +35,28 @@ func (b *CachingBeaconState) AddValidator(validator solid.Validator, balance uin
 	if err := b.BeaconState.AddValidator(validator, balance); err != nil {
 		return err
 	}
-	pk := validator.PublicKey()
-	b.publicKeyIndicies.Set(pk[:], uint64(b.ValidatorLength())-1)
+	b.publicKeyIndices.add(validator.PublicKey(), uint64(b.ValidatorLength())-1)
 	// change in validator set means cache purging
 	b.totalActiveBalanceCache = nil
 	return nil
+}
+
+func (b *CachingBeaconState) AppendValidator(validator solid.Validator) {
+	b.BeaconState.AppendValidator(validator)
+	b.publicKeyIndices.add(validator.PublicKey(), uint64(b.ValidatorLength())-1)
+}
+
+func (b *CachingBeaconState) SetValidators(validators *solid.ValidatorSet) {
+	b.BeaconState.SetValidators(validators)
+	b.rebuildPubkeyIndex()
+}
+
+func (b *CachingBeaconState) SetValidatorSet(validators *solid.ValidatorSet) {
+	b.BeaconState.SetValidatorSet(validators)
+	b.rebuildPubkeyIndex()
+}
+
+func (b *CachingBeaconState) SetValidatorAtIndex(index int, validator solid.Validator) {
+	b.BeaconState.SetValidatorAtIndex(index, validator)
+	b.rebuildPubkeyIndex()
 }

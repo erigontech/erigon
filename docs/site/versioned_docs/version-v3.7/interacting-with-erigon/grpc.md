@@ -1,0 +1,166 @@
+---
+title: "gRPC"
+description: "High-performance binary interface for programmatic Erigon access via gRPC."
+sidebar_position: 13
+---
+
+# gRPC
+
+Erigon provides gRPC APIs that allow users to access blockchain data and services directly through protocol buffer interfaces. These APIs offer high-performance, strongly-typed access to Erigon's internal services and are particularly useful for applications requiring efficient data access or integration with other gRPC-based systems.
+
+The gRPC server can be explicitly enabled using the `--grpc` flag when running the **standalone `rpcdaemon`** binary. This flag is **not available** on the main `erigon` binary — internal gRPC services for components like TxPool, Downloader, and Sentry start automatically on the `--private.api.addr` endpoint and do not require any additional flag.
+
+### Performance Considerations
+
+* gRPC APIs provide better performance than JSON-RPC for high-throughput applications
+* Direct database access via the key-value (KV) interface offers the fastest data retrieval
+* Shared memory access (when running locally) provides optimal performance
+
+### Data Format and Buckets
+
+Database bucket names and their formats are documented in `db/kv/tables.go`. Understanding these structures is essential for effective use of the KV interface.
+
+### Network Access
+
+* gRPC services can be accessed over the network when properly configured
+* TLS encryption is recommended for production deployments
+* Rate limiting can be configured via the `--private.api.ratelimit` flag
+
+### Integration Libraries
+
+Erigon provides Go, Rust, and C++ implementations of the RoKV (read-only key-value) interface for easy integration with applications.
+
+### Availability
+
+* gRPC services are available when enabled with the `--grpc` flag on the **standalone `rpcdaemon`** binary
+* The default listening address is configurable via `--grpc.addr` and `--grpc.port`
+* Services require the main Erigon node to be running and accessible
+
+For more information, visit the [Erigon Interfaces GitHub repository](https://github.com/erigontech/interfaces).
+
+***
+
+## **KV (Key-Value) Interface**
+
+The KV interface provides low-level database access methods for reading blockchain data directly from Erigon's MDBX database.
+
+**Interface Definition**
+
+The KV interface is defined in the remote protobuf specification and provides methods for:
+
+* Opening read-only transactions
+* Reading data by key ranges
+* Iterating over database buckets
+* Accessing historical state data
+
+**Example Usage**
+
+```bash
+# Connect to gRPC endpoint
+grpcurl -plaintext localhost:9090 remote.KV/Version
+```
+
+**Available Methods**
+
+| Method       | Description                                   |
+| ------------ | --------------------------------------------- |
+| Version      | Returns the KV service API version            |
+| Tx           | Opens a read-only transaction for data access |
+| StateChanges | Streams state changes for a block range       |
+| Snapshots    | Returns information about available snapshots |
+
+***
+
+## **ETHBACKEND Interface**
+
+The ETHBACKEND interface provides access to Ethereum-specific backend services including block data, transaction information, and network status.
+
+**Available Services**
+
+| Service         | Description                                         |
+| --------------- | --------------------------------------------------- |
+| Etherbase       | Returns the coinbase address                        |
+| NetVersion      | Returns the network ID                              |
+| NetPeerCount    | Returns the number of connected peers               |
+| ProtocolVersion | Returns the Ethereum protocol version               |
+| ClientVersion   | Returns the client version string                   |
+| Subscribe       | Subscribes to blockchain events                     |
+| NodeInfo        | Returns node information                            |
+| Peers           | Returns information about connected peers           |
+| AddPeer         | Adds a peer to the node                             |
+| PendingBlock    | Returns the pending block                           |
+
+***
+
+## **TxPool Interface**
+
+The TxPool interface provides access to transaction pool operations and status information.
+
+**Available Methods**
+
+| Method            | Description                               |
+| ----------------- | ----------------------------------------- |
+| Version           | Returns the TxPool service version        |
+| FindUnknownHashes | Finds unknown transaction hashes          |
+| GetTransactions   | Retrieves transactions from the pool      |
+| All               | Returns all transactions in the pool      |
+| PendingAdd        | Adds transactions to the pending pool         |
+| PendingRemove     | Removes transactions from the pending pool    |
+| OnAdd             | Subscribes to transaction addition events |
+| Mining            | Returns mining-related transaction data   |
+| NonceFromAddress  | Gets the next nonce for an address        |
+
+***
+
+## **Downloader Interface**
+
+The Downloader interface provides access to snapshot downloading and torrent management functionality.
+
+**Available Methods**
+
+| Method       | Description                        |
+| ------------ | ---------------------------------- |
+| Add          | Adds files to the download queue       |
+| Delete       | Removes files from the download queue  |
+| Completed    | Checks if downloads are completed  |
+| SetLogPrefix | Sets logging prefix for Downloader |
+
+***
+
+## Configuration and Security
+
+### TLS Configuration
+
+Erigon supports TLS encryption for gRPC connections using certificate files:
+
+```bash
+./build/bin/rpcdaemon --grpc --tls.cert=/path/to/cert.pem --tls.key=/path/to/key.pem --tls.cacert=/path/to/ca.pem
+```
+
+
+### Health Checks
+
+gRPC health checks can be enabled to monitor service availability:
+
+```bash
+./build/bin/rpcdaemon --grpc --grpc.healthcheck
+```
+
+### Connection Examples
+
+**Go Client Example**
+
+```go
+conn, err := grpc.Dial("localhost:9090", grpc.WithInsecure())
+if err != nil {
+    log.Fatal(err)
+}
+defer conn.Close()
+
+client := remote.NewKVClient(conn)
+// Use client for database operations
+```
+
+**Direct Database Access**
+
+The gRPC interface allows reading Erigon's database while the node is running, sharing the same OS-level PageCache for optimal performance.

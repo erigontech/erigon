@@ -38,7 +38,7 @@ var (
 // Builder represents a builder in the consensus layer.
 type Builder struct {
 	Pubkey            common.Bytes48 `json:"pubkey"`
-	Version           uint8          `json:"version"`
+	Version           uint8          `json:"version,string"`
 	ExecutionAddress  common.Address `json:"execution_address"`
 	Balance           uint64         `json:"balance,string"`
 	DepositEpoch      uint64         `json:"deposit_epoch,string"`
@@ -144,7 +144,7 @@ func (b *BuilderPendingPayment) Clone() clonable.Clonable {
 	if b == nil {
 		return &BuilderPendingPayment{Withdrawal: &BuilderPendingWithdrawal{}}
 	}
-	withdrawal := (*BuilderPendingWithdrawal)(nil)
+	var withdrawal *BuilderPendingWithdrawal
 	if b.Withdrawal != nil {
 		withdrawal = b.Withdrawal.Clone().(*BuilderPendingWithdrawal)
 	} else {

@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -365,6 +366,42 @@ func TestReceiptsFilter_FlagsLastReceiptOfBlockPerStream(t *testing.T) {
 	}
 }
 
+func TestReceiptsFilter_FlagsBlockEndsInsideOneBatch(t *testing.T) {
+	txHash3, txHash4 := common.HexToHash("0x03"), common.HexToHash("0x04")
+	receipt := func(txHash common.Hash, blockNum uint64) *notifications.ReceiptNotification {
+		rn := createReceiptNotification(txHash)
+		rn.Receipt.BlockNumber = uint256.NewInt(blockNum)
+		return rn
+	}
+	batch := []*notifications.ReceiptNotification{receipt(txHash1, 100), receipt(txHash2, 100), receipt(txHash3, 101), receipt(txHash4, 101)}
+	for name, tc := range map[string]struct {
+		hashes []*typesproto.H256
+		want   []bool
+	}{
+		"all receipts":  {[]*typesproto.H256{}, []bool{false, true, false, true}},
+		"one per block": {[]*typesproto.H256{txHash1H256, gointerfaces.ConvertHashToH256(txHash3)}, []bool{true, true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
+			srv := newTestReceiptsServer(t.Context())
+			srv.received <- &remoteproto.ReceiptsFilterRequest{TransactionHashes: tc.hashes}
+			go func() {
+				if err := agg.subscribeReceipts(srv); err != nil {
+					t.Error(err)
+				}
+			}()
+			<-srv.receiveCompleted
+
+			agg.distributeReceipts(batch)
+			var got []bool
+			for _, r := range srv.sent {
+				got = append(got, r.LastInBlock)
+			}
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
 // The RPC side has no transaction, so the reply must already carry the effective gas price
 // eth_getTransactionReceipt reports, not the block base fee.
 func TestReceiptsFilter_SendsEffectiveGasPrice(t *testing.T) {
@@ -435,4 +472,14 @@ func TestReceiptsFilter_SendsBlobFields(t *testing.T) {
 			assert.Equal(t, tc.wantPrice, gointerfaces.ConvertH256ToUint256Int(reply.BlobGasPrice))
 		})
 	}
+}
+
+func TestFrameReceiptSubscription(t *testing.T) {
+	payer := common.Address{1}
+	receipt := &types.Receipt{Type: types.FrameTxType, Payer: &payer, BlockNumber: uint256.NewInt(1), FrameReceipts: []types.FrameReceipt{{Status: 1}}}
+	aggregator := &ReceiptsFilterAggregator{}
+	notification := aggregator.receiptNotificationToProto(&notifications.ReceiptNotification{Receipt: receipt})
+	result := ethutils.MarshalSubscribeReceipt(notification)
+	require.Equal(t, &payer, result.Payer)
+	require.Len(t, result.FrameReceipts, 1)
 }

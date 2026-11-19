@@ -32,8 +32,8 @@ func TestPacedWriterWaitsBeforeEachChunk(t *testing.T) {
 	defer f.Close()
 	var sizesAtWait []int64
 	w := NewPacedWriter(f, 4, func() error {
-		fi, err := f.Stat()
-		require.NoError(t, err)
+		fi, statErr := f.Stat()
+		require.NoError(t, statErr)
 		sizesAtWait = append(sizesAtWait, fi.Size())
 		return nil
 	})

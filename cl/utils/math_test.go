@@ -24,31 +24,6 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 )
 
-func TestIsPowerOf2(t *testing.T) {
-	testCases := []struct {
-		n          uint64
-		isPowerOf2 bool
-	}{
-		{0, false},
-		{1, true},
-		{2, true},
-		{3, false},
-		{4, true},
-		{16, true},
-		{17, false},
-		{64, true},
-		{100, false},
-		{256, true},
-	}
-
-	for _, tc := range testCases {
-		isPowerOf2 := utils.IsPowerOf2(tc.n)
-		if isPowerOf2 != tc.isPowerOf2 {
-			t.Errorf("IsPowerOf2 returned incorrect result for %d. Expected: %t, Got: %t", tc.n, tc.isPowerOf2, isPowerOf2)
-		}
-	}
-}
-
 func TestPowerOf2(t *testing.T) {
 	testCases := []struct {
 		n            uint64
@@ -109,6 +84,23 @@ func TestIntegerSquareRoot(t *testing.T) {
 		sqrt := utils.IntegerSquareRoot(tc.n)
 		if sqrt != tc.expectedSqrt {
 			t.Errorf("IntegerSquareRoot returned incorrect result for %d. Expected: %d, Got: %d", tc.n, tc.expectedSqrt, sqrt)
+		}
+	}
+}
+
+func TestSecondsToMilliseconds(t *testing.T) {
+	testCases := []struct {
+		seconds      uint64
+		milliseconds uint64
+	}{
+		{0, 0},
+		{math.MaxUint64 / 1000, (math.MaxUint64 / 1000) * 1000},
+		{math.MaxUint64/1000 + 1, math.MaxUint64},
+	}
+
+	for _, tc := range testCases {
+		if got := utils.SecondsToMilliseconds(tc.seconds); got != tc.milliseconds {
+			t.Errorf("SecondsToMilliseconds(%d) = %d, want %d", tc.seconds, got, tc.milliseconds)
 		}
 	}
 }

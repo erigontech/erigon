@@ -110,23 +110,30 @@ func (msg *jsonrpcMessage) errorResponse(err error) *jsonrpcMessage {
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
 func (msg *jsonrpcMessage) writeResponse(stream *jsonstream.Stream, result any) error {
 	return writeResultResponse(stream, msg.ID, func(s *jsonstream.Stream) error {
-		if isNilPointer(result) {
-			return json.NewEncoder(encoderWriter{s}).Encode(result)
+		if err := encodeResult(s, result); err != nil {
+			return &CustomError{Code: ErrCodeInternalError, Message: err.Error()}
 		}
-		if fm, ok := result.(jsonstream.Marshaler); ok {
-			if err := fm.MarshalFastJSONTo(s); err != nil {
-				return err
-			}
-			return s.Err() // a latched write error left a placeholder in the stream
-		}
-		// A TextAppender's JSON is taken to be its quoted text, so this must stay ahead of the
-		// reflection encoder and must not catch a type whose json.Marshaler writes something else.
-		if ta, ok := result.(encoding.TextAppender); ok {
-			s.WriteQuotedText(ta)
-			return s.Err()
-		}
-		return json.NewEncoder(encoderWriter{s}).Encode(result)
+		return nil
 	})
+}
+
+func encodeResult(s *jsonstream.Stream, result any) error {
+	if isNilPointer(result) {
+		return json.NewEncoder(encoderWriter{s}).Encode(result)
+	}
+	if fm, ok := result.(jsonstream.Marshaler); ok {
+		if err := fm.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+		return s.Err() // a latched write error left a placeholder in the stream
+	}
+	// A TextAppender's JSON is taken to be its quoted text, so this must stay ahead of the
+	// reflection encoder and must not catch a type whose json.Marshaler writes something else.
+	if ta, ok := result.(encoding.TextAppender); ok {
+		s.WriteQuotedText(ta)
+		return s.Err()
+	}
+	return json.NewEncoder(encoderWriter{s}).Encode(result)
 }
 
 // writeResultResponse writes the response envelope with write filling "result". An error from write
@@ -247,8 +254,10 @@ type jsonCodec struct {
 	decode  func(v any) error // decoder to allow multiple transports
 	// readFrame is set only by transports that delimit messages themselves. Each
 	// call must return bytes it does not reuse: parsed messages point into them
-	// and are handled asynchronously, so they outlive the call that read them.
-	readFrame    func() ([]byte, error)
+	// and are handled asynchronously, so they outlive the call that read them. A
+	// frame that holds resources comes with what releases them, nil otherwise.
+	readFrame    func() ([]byte, func(), error)
+	release      func()            // releases the last frame read, until taken
 	encMu        sync.Mutex        // guards the encoder
 	encode       func(v any) error // encoder to allow multiple transports
 	conn         deadlineCloser
@@ -260,7 +269,7 @@ type jsonCodec struct {
 // implements ConnRemoteAddr, log messages include the remote address. decode must reject
 // invalid JSON, reading a message relies on it. A transport with a frame reader never calls
 // decode, so it may be nil.
-func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFrame func() ([]byte, error)) *jsonCodec {
+func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFrame func() ([]byte, func(), error)) *jsonCodec {
 	codec := &jsonCodec{
 		closeCh:      make(chan any),
 		encode:       encode,
@@ -330,13 +339,18 @@ func (c *jsonCodec) peerInfo() PeerInfo {
 	return PeerInfo{Transport: "ipc", RemoteAddr: c.remote}
 }
 
-func (c *jsonCodec) ReadBatch() (messages []*jsonrpcMessage, batch bool, err error) {
+func (c *jsonCodec) ReadBatch(batchLimit int) (messages []*jsonrpcMessage, batch bool, err error) {
 	rawmsg, err := c.readMessage()
 	if err != nil {
 		return nil, false, err
 	}
-	messages, batch, err = parseMessage(rawmsg)
+	messages, batch, err = parseMessage(rawmsg, batchLimit)
 	if err != nil {
+		// A batch over the limit keeps its frame until its error, which holds the frame's
+		// id, is written.
+		if _, tooLarge := errors.AsType[*batchTooLargeError](err); !tooLarge {
+			c.releaseFrame()
+		}
 		return nil, false, err
 	}
 	for i, msg := range messages {
@@ -361,11 +375,13 @@ func (c *jsonCodec) readMessage() (json.RawMessage, error) {
 	}
 	// The transport delimits the message, so one read and one check will do.
 	// Decoding into a json.RawMessage would scan twice and copy.
-	frame, err := c.readFrame()
+	frame, release, err := c.readFrame()
 	if err != nil {
 		return nil, err
 	}
+	c.release = release
 	if !validJSON(frame) {
+		c.releaseFrame()
 		// Decode the broken message to report where it went wrong. validJSON
 		// only ever accepts more than Unmarshal, so it fails here too. The
 		// fallback only guards against the two ever disagreeing.
@@ -376,6 +392,18 @@ func (c *jsonCodec) readMessage() (json.RawMessage, error) {
 		return nil, errors.New("invalid JSON request")
 	}
 	return frame, nil
+}
+
+func (c *jsonCodec) takeRelease() func() {
+	release := c.release
+	c.release = nil
+	return release
+}
+
+func (c *jsonCodec) releaseFrame() {
+	if release := c.takeRelease(); release != nil {
+		release()
+	}
 }
 
 func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {
@@ -428,7 +456,7 @@ func (c *jsonCodec) closed() <-chan any {
 // checks in this function because the raw message has already been syntax-checked when it
 // is called. Any non-JSON-RPC messages in the input return the zero value of
 // jsonrpcMessage.
-func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool, error) {
+func parseMessage(raw json.RawMessage, batchLimit int) ([]*jsonrpcMessage, bool, error) {
 	if !isBatch(raw) {
 		// ReadBatch turns a nil message into a zero one, which is how null is rejected.
 		if isJSONNull(raw) {
@@ -437,6 +465,16 @@ func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool, error) {
 		msg := new(jsonrpcMessage)
 		fillMessage(raw, msg)
 		return []*jsonrpcMessage{msg}, false, nil
+	}
+	if batchLimit > 0 {
+		size := 0
+		forEachJSONElement(raw, func([]byte) bool {
+			size++
+			return true
+		})
+		if size > batchLimit {
+			return nil, true, &batchTooLargeError{limit: batchLimit, size: size, id: firstCallID(raw)}
+		}
 	}
 	var msgs []*jsonrpcMessage
 	forEachJSONElement(raw, func(elem []byte) bool {
@@ -450,6 +488,43 @@ func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool, error) {
 		return true
 	})
 	return msgs, true, nil
+}
+
+// batchTooLargeError rejects a batch with more elements than the server's limit.
+type batchTooLargeError struct {
+	limit int
+	size  int
+	id    json.RawMessage // of the first call, nil when the batch has none
+}
+
+func (e *batchTooLargeError) Error() string {
+	return fmt.Sprintf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", e.limit, e.size)
+}
+
+// firstCallID returns the id of the first element of the batch raw that fillMessage would
+// make a call, nil when there is none. It reads only the id and method fields, so it
+// allocates nothing.
+func firstCallID(raw []byte) json.RawMessage {
+	var id json.RawMessage
+	forEachJSONElement(raw, func(elem []byte) bool {
+		var msg jsonrpcMessage
+		hasMethod := false
+		forEachJSONField(elem, func(key, value []byte) {
+			switch {
+			case jsonKeyIs(key, "id"):
+				msg.ID = value
+			case jsonKeyIs(key, "method") && !isJSONNull(value):
+				// As in decodeStringField: null keeps the name, a non-empty string sets one.
+				hasMethod = len(value) > 2 && value[0] == '"'
+			}
+		})
+		if hasMethod && msg.hasValidID() {
+			id = msg.ID
+			return false
+		}
+		return true
+	})
+	return id
 }
 
 // fillMessage picks a message apart into msg. Input that does not hold an object

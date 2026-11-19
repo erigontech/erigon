@@ -18,7 +18,13 @@ package integrity
 
 import (
 	"cmp"
+	"context"
+	"errors"
+	"fmt"
 	"slices"
+	"time"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type Check string
@@ -121,6 +127,12 @@ const (
 	// breaks historical-state reads. Cheap: iterates the .seg words, no DB or re-derivation.
 	CaplinStateRoots Check = "CaplinStateRoots"
 
+	// HistoryVi validates history value accessor files (.vi). Re-derives every value's
+	// offset in the .v file by walking the paired .ef and .v the way the index was
+	// built, and compares it with what the .vi answers. Catches an .vi that does not
+	// belong to its .v as well as a corrupt one.
+	HistoryVi Check = "HistoryVi"
+
 	// CaplinBlobSidecars validates frozen blob sidecars against canonical beacon blocks and their cryptographic proofs.
 	CaplinBlobSidecars Check = "CaplinBlobSidecars"
 
@@ -139,7 +151,7 @@ var FastChecks = []Check{
 }
 
 var (
-	SlowChecks       = []Check{CaplinBlobSidecars, StateVerify}
+	SlowChecks       = []Check{CaplinBlobSidecars, StateVerify, HistoryVi}
 	DeprecatedChecks = []Check{
 		CommitmentKvDeref, // StateVerify - will overcome
 		StateProgress,
@@ -170,4 +182,42 @@ func SortChecksByCost(checks []Check) []Check {
 		}
 	})
 	return out
+}
+
+func RunChecks(ctx context.Context, checks []Check, budget time.Duration, run func(context.Context, Check) error, logger log.Logger) error {
+	runCtx := ctx
+	if budget > 0 {
+		checks = SortChecksByCost(checks)
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, budget)
+		defer cancel()
+		logger.Info("[integrity] budget", "total", budget)
+	}
+
+	for i, chk := range checks {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if runCtx.Err() != nil {
+			return fmt.Errorf("integrity budget %s exhausted, not run: %v", budget, checks[i:])
+		}
+
+		logger.Info("[integrity] starting", "check", chk)
+		start := time.Now()
+		err := run(runCtx, chk)
+		elapsed := time.Since(start)
+
+		if parentErr := ctx.Err(); parentErr != nil {
+			return parentErr
+		}
+		if runCtx.Err() != nil {
+			return errors.Join(err, fmt.Errorf("integrity budget %s exhausted: %s cut after %s, not run: %v", budget, chk, elapsed.Round(time.Millisecond), checks[i+1:]))
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %w", chk, err)
+		}
+		logger.Info("[integrity] done", "check", chk, "elapsed", elapsed)
+	}
+
+	return nil
 }

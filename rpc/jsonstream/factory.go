@@ -98,6 +98,19 @@ type Marshaler interface {
 	MarshalFastJSONTo(*Stream) error
 }
 
+// MarshalTo encodes v straight to w: a value past FlushThreshold streams instead of being held.
+func MarshalTo(w io.Writer, v Marshaler) error {
+	s := Get(w)
+	defer Put(s)
+	if err := v.MarshalFastJSONTo(s); err != nil {
+		return err
+	}
+	if err := s.Err(); err != nil {
+		return err
+	}
+	return s.Flush()
+}
+
 // Marshal encodes v into a byte slice the caller owns.
 func Marshal(v Marshaler) ([]byte, error) {
 	s := Get(nil)

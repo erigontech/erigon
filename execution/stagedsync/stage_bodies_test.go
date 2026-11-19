@@ -18,6 +18,7 @@ package stagedsync_test
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 	"time"
 
@@ -30,6 +31,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -190,4 +193,100 @@ func TestBodiesUnwind(t *testing.T) {
 		require.Equal(11, int(lastBlockNum))
 		require.Equal(1+11*(3+2), int(lastTxNum))
 	}
+}
+
+func TestBlockHashStageKeepsBadHeaderUnindexed(t *testing.T) {
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	bad := &types.Header{Extra: []byte("bad")}
+	bad.Number.SetUint64(1)
+	require.NoError(t, rawdb.WriteHeader(tx, bad))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, bad.Hash(), 1))
+	require.NoError(t, rawdb.TruncateCanonicalHash(tx, 1, true))
+
+	good := &types.Header{}
+	good.Number.SetUint64(1)
+	require.NoError(t, rawdb.WriteHeader(tx, good))
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Headers, 1))
+
+	s := &stagedsync.StageState{ID: stages.BlockHashes}
+	require.NoError(t, stagedsync.SpawnBlockHashStage(s, tx))
+
+	require.Nil(t, rawdb.ReadHeaderNumber(tx, bad.Hash()))
+	progress, err := stages.GetStageProgress(tx, stages.BlockHashes)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), progress)
+}
+
+func writeCanonicalChain(t *testing.T, tx kv.RwTx, n uint64) []common.Hash {
+	hashes := make([]common.Hash, n+1)
+	for i := uint64(1); i <= n; i++ {
+		h := &types.Header{ParentHash: hashes[i-1]}
+		h.Number.SetUint64(i)
+		hashes[i] = h.Hash()
+		require.NoError(t, rawdb.WriteHeader(tx, h))
+		require.NoError(t, rawdb.WriteCanonicalHash(tx, hashes[i], i))
+	}
+	return hashes
+}
+
+func TestBadBlockUnwindKeepsValidAncestorsIndexed(t *testing.T) {
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const n = 5
+	hashes := writeCanonicalChain(t, tx, n)
+
+	u := &stagedsync.UnwindState{ID: stages.Headers, UnwindPoint: n - 3, Reason: stagedsync.BadBlock(hashes[n], errors.New("bad"))}
+	s := &stagedsync.StageState{ID: stages.Headers}
+	require.NoError(t, stagedsync.HeadersUnwind(m.Ctx, u, s, tx, stagedsync.StageHeadersCfg(m.BlockReader)))
+
+	for _, i := range []uint64{n - 2, n - 1} {
+		num := rawdb.ReadHeaderNumber(tx, hashes[i])
+		require.NotNil(t, num, "valid ancestor %d lost its hash index", i)
+		require.Equal(t, i, *num)
+		badNum, err := rawdb.ReadBadHeaderNumber(tx, hashes[i])
+		require.NoError(t, err)
+		require.Nil(t, badNum, "valid ancestor %d marked bad", i)
+	}
+	for _, i := range []uint64{n - 2, n - 1, n} {
+		canonical, err := rawdb.ReadCanonicalHash(tx, i)
+		require.NoError(t, err)
+		require.Equal(t, common.Hash{}, canonical, "block %d still canonical", i)
+	}
+	canonical, err := rawdb.ReadCanonicalHash(tx, n-3)
+	require.NoError(t, err)
+	require.Equal(t, hashes[n-3], canonical)
+	require.Nil(t, rawdb.ReadHeaderNumber(tx, hashes[n]))
+	badNum, err := rawdb.ReadBadHeaderNumber(tx, hashes[n])
+	require.NoError(t, err)
+	require.Equal(t, uint64(n), *badNum)
+}
+
+func TestBadBlockUnwindWithoutHashIndexMarksWholeRangeBad(t *testing.T) {
+	m := execmoduletester.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const n = 5
+	hashes := writeCanonicalChain(t, tx, n)
+	require.NoError(t, tx.Delete(kv.HeaderNumber, hashes[n][:]))
+
+	u := &stagedsync.UnwindState{ID: stages.Headers, UnwindPoint: n - 3, Reason: stagedsync.BadBlock(hashes[n], errors.New("bad"))}
+	s := &stagedsync.StageState{ID: stages.Headers}
+	require.NoError(t, stagedsync.HeadersUnwind(m.Ctx, u, s, tx, stagedsync.StageHeadersCfg(m.BlockReader)))
+
+	for _, i := range []uint64{n - 2, n - 1, n} {
+		require.Nil(t, rawdb.ReadHeaderNumber(tx, hashes[i]), "block %d kept its hash index", i)
+		badNum, err := rawdb.ReadBadHeaderNumber(tx, hashes[i])
+		require.NoError(t, err)
+		require.Equal(t, i, *badNum, "block %d not marked bad", i)
+	}
+	require.Equal(t, uint64(n-3), *rawdb.ReadHeaderNumber(tx, hashes[n-3]))
 }

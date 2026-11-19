@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -64,6 +65,12 @@ func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*type
 		return nil, nil, fmt.Errorf("nil block %d", blockNum)
 	}
 
+	if sidecar := b.BlockAccessListSidecar(); !dbg.IgnoreBAL && len(sidecar.BlockAccessList()) > 0 {
+		if err := sidecar.ValidateForHeader(b.GasLimit()); err != nil {
+			return nil, nil, fmt.Errorf("invalid block access list: %w", err)
+		}
+		return b, sidecar.BlockAccessList(), nil
+	}
 	blockBAL, err := blockAccessList(s.blockTx, b, blockNum, s.cfg.offlineBAL, s.logger)
 	if err != nil {
 		return nil, nil, err
@@ -71,13 +78,12 @@ func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*type
 	if b.BlockAccessList() == nil && blockBAL != nil {
 		b = b.WithBlockAccessListSidecar(types.NewBlockAccessListSidecar(blockBAL))
 	}
+	if dbg.IgnoreBAL {
+		return b, nil, nil
+	}
 	return b, blockBAL, nil
 }
 
 func (s *dbBlockSource) header(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
-	h, err := s.cfg.blockReader.Header(ctx, s.blockTx, hash, number)
-	if h == nil && err == nil {
-		h = &types.Header{}
-	}
-	return h, err
+	return s.cfg.blockReader.Header(ctx, s.blockTx, hash, number)
 }

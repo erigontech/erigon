@@ -31,6 +31,8 @@ type ReconItem struct {
 	startTxNum  uint64
 	endTxNum    uint64
 	histFileIdx int // index into HistoryRoTx.files; -1 if not found
+	// position of `key` in the .ef file, which addresses the .vi accessor
+	keyOrdinal uint64
 }
 
 type ReconHeap []*ReconItem
@@ -73,16 +75,4 @@ func (rh *ReconHeap) Pop() any {
 	old[n-1] = nil
 	*rh = old[0 : n-1]
 	return x
-}
-
-type ReconHeapOlderFirst struct {
-	ReconHeap
-}
-
-func (rh ReconHeapOlderFirst) Less(i, j int) bool {
-	c := bytes.Compare(rh.ReconHeap[i].key, rh.ReconHeap[j].key)
-	if c == 0 {
-		return rh.ReconHeap[i].txNum >= rh.ReconHeap[j].txNum
-	}
-	return c < 0
 }

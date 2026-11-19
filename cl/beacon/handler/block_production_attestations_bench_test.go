@@ -47,7 +47,6 @@ func mainnetLikeCandidates(layers int) []attestationCandidate {
 func BenchmarkSelectAttestations(b *testing.B) {
 	candidates := mainnetLikeCandidates(32)
 	weights := []uint64{14, 26, 14}
-	b.ResetTimer()
 	for b.Loop() {
 		selectAttestations(candidates, weights, 1, 8)
 	}
@@ -68,7 +67,6 @@ func BenchmarkSelectAttestationsManyDisjoint(b *testing.B) {
 		candidates = append(candidates, candidate)
 	}
 	weights := []uint64{14, 26, 14}
-	b.ResetTimer()
 	for b.Loop() {
 		selectAttestations(candidates, weights, 1, 128)
 	}

@@ -1,0 +1,275 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package executiontests
+
+import (
+	"fmt"
+	"math/big"
+	"testing"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
+)
+
+func storageAt(t *testing.T, st *state.IntraBlockState, addr common.Address, slot byte) uint256.Int {
+	t.Helper()
+	v, err := st.GetState(accounts.InternAddress(addr), accounts.InternKey(common.BytesToHash([]byte{slot})))
+	require.NoError(t, err)
+	return v
+}
+
+// A tx touches an empty account that holds storage, so EIP-161 removes the
+// account with its storage. A later tx delegates the account by EIP-7702 to
+// code that stores SLOAD(1)+1 in slot 2, so slot 2 must be 1.
+func TestTouchedEmptyAccountWithStorageIsWiped(t *testing.T) {
+	setExecWorkers(t, 4)
+
+	authorityKey, err := crypto.ToECDSA(common.LeftPadBytes([]byte{0xa0}, 32))
+	require.NoError(t, err)
+	authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
+	delegate := common.HexToAddress("0xd0d0")
+	burner := common.HexToAddress("0xbbbb")
+	_, loop := program.New().Jumpdest()
+	burnerCode := program.New().Op(vm.JUMPDEST).Push(loop).Op(vm.JUMP).Bytes()
+	gasPrice := uint256.NewInt(10_000_000_000)
+
+	for _, fork := range []struct {
+		name      string
+		amsterdam bool
+	}{{"prague", false}, {"amsterdam", true}} {
+		t.Run(fork.name, func(t *testing.T) {
+			config := chain.TestChainOsakaConfig.Copy()
+			if fork.amsterdam {
+				config.AmsterdamTime = common.NewUint64(0)
+			} else {
+				config.OsakaTime = nil
+			}
+			alloc := types.GenesisAlloc{
+				burner:    {Code: burnerCode},
+				delegate:  {Code: program.New().Push(1).Op(vm.SLOAD).Push(1).Op(vm.ADD).Push(2).Op(vm.SSTORE, vm.STOP).Bytes()},
+				authority: {Balance: big.NewInt(0), Storage: map[common.Hash]common.Hash{common.BytesToHash([]byte{1}): common.BytesToHash([]byte{1})}},
+			}
+			keys := revivalKeys(t, alloc, 3)
+			gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: alloc}
+			signer := types.LatestSignerForChainID(config.ChainID)
+			auth, err := types.SignAuthorization(authorityKey, *config.ChainID, delegate, 0)
+			require.NoError(t, err)
+
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
+			chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+				b.SetCoinbase(common.Address{1})
+				for i, to := range []common.Address{burner, authority} {
+					gas := uint64(100_000)
+					if to == burner {
+						gas = 1_000_000
+					}
+					sender := crypto.PubkeyToAddress(keys[i].PublicKey)
+					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(sender), to, uint256.NewInt(0), gas, gasPrice, nil), *signer, keys[i])
+					require.NoError(t, err)
+					b.AddTx(txn)
+				}
+				sender := crypto.PubkeyToAddress(keys[2].PublicKey)
+				setCode, err := types.SignTx(&types.SetCodeTransaction{
+					DynamicFeeTransaction: types.DynamicFeeTransaction{
+						CommonTx: types.CommonTx{Nonce: b.TxNonce(sender), GasLimit: 500_000, To: &authority},
+						ChainID:  *config.ChainID,
+						TipCap:   *gasPrice,
+						FeeCap:   *gasPrice,
+					},
+					Authorizations: []types.Authorization{auth},
+				}, *signer, keys[2])
+				require.NoError(t, err)
+				b.AddTx(setCode)
+			})
+			require.NoError(t, err)
+			for _, workers := range []int{1, 4} {
+				t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
+					setExecWorkers(t, workers)
+					m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(keys[0]))
+					require.NoError(t, m.InsertChain(chainPack))
+					require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+						st := state.New(m.NewStateReader(tx))
+						defer st.Close()
+						require.Equal(t, uint256.Int{}, storageAt(t, st, authority, 1))
+						require.Equal(t, *uint256.NewInt(1), storageAt(t, st, authority, 2))
+						return nil
+					}))
+				})
+			}
+		})
+	}
+}
+
+// A CREATE2 to an account with storage but no nonce and no code succeeds, and the init code's
+// storage replaces the old storage.
+func TestCreate2OverStorageOnlyAccountReplacesItsStorage(t *testing.T) {
+	keys, senders := eip161TouchKeys(t, 1)
+	initCode := program.New().Sstore(2, 1).Op(vm.STOP).Bytes()
+	factory := common.HexToAddress("0xfac7")
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	for _, fork := range eip161TouchForks {
+		t.Run(fork.name, func(t *testing.T) {
+			gspec := &types.Genesis{Config: fork.config, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+				senders[0]: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+				factory:    {Code: program.New().Create2(initCode, 0).Op(vm.STOP).Bytes()},
+				target:     {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x09")}},
+			}}
+			chainPack := generateEIP161TouchBlock(t, gspec, keys[0], func(b *blockgen.BlockGen) {
+				txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), factory, uint256.NewInt(0), 1_000_000, uint256.NewInt(10_000_000_000), nil), *types.LatestSignerForChainID(fork.config.ChainID), keys[0])
+				require.NoError(t, err)
+				b.AddTx(txn)
+			})
+			requireGeneratedBlock(t, chainPack)
+			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				nonce, err := st.GetNonce(accounts.InternAddress(target))
+				require.NoError(t, err)
+				require.Equal(t, uint64(1), nonce, "the CREATE2 succeeds")
+				require.Equal(t, uint256.Int{}, storageAt(t, st, target, 1))
+				require.Equal(t, *uint256.NewInt(1), storageAt(t, st, target, 2))
+			})
+		})
+	}
+}
+
+// After a CREATE2 to an account with storage but no nonce and no code, a later tx of the same
+// block sees only the new contract's storage: an old slot reads as zero, a write to an old slot
+// is priced as a write to an empty slot, and a slot the init code wrote keeps its value.
+func TestTxAfterCreate2OverStorageOnlyAccountSeesNewStorage(t *testing.T) {
+	keys, senders := eip161TouchKeys(t, 1)
+	runtime := program.New().Push(1).Op(vm.SLOAD).Push(1).Op(vm.ADD).Push(3).Op(vm.SSTORE).Sstore(5, 7).Push(2).Op(vm.SLOAD).Push(4).Op(vm.SSTORE).Op(vm.STOP).Bytes()
+	initCode := program.New().Sstore(2, 1).ReturnViaCodeCopy(runtime).Bytes()
+	factory := common.HexToAddress("0xfac7")
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	for _, fork := range eip161TouchForks {
+		t.Run(fork.name, func(t *testing.T) {
+			gspec := &types.Genesis{Config: fork.config, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+				senders[0]: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+				factory:    {Code: program.New().Create2(initCode, 0).Op(vm.STOP).Bytes()},
+				target: {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{
+					common.HexToHash("0x01"): common.HexToHash("0x09"),
+					common.HexToHash("0x05"): common.HexToHash("0x03"),
+				}},
+			}}
+			chainPack := generateEIP161TouchBlock(t, gspec, keys[0], func(b *blockgen.BlockGen) {
+				for _, to := range []common.Address{factory, target} {
+					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), to, uint256.NewInt(0), 1_000_000, uint256.NewInt(10_000_000_000), nil), *types.LatestSignerForChainID(fork.config.ChainID), keys[0])
+					require.NoError(t, err)
+					b.AddTx(txn)
+				}
+			})
+			requireGeneratedBlock(t, chainPack)
+			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				require.Equal(t, uint256.Int{}, storageAt(t, st, target, 1))
+				require.Equal(t, *uint256.NewInt(1), storageAt(t, st, target, 2))
+				require.Equal(t, *uint256.NewInt(1), storageAt(t, st, target, 3), "slot 1 reads as zero")
+				require.Equal(t, *uint256.NewInt(1), storageAt(t, st, target, 4), "slot 2 keeps the init code's value")
+				require.Equal(t, *uint256.NewInt(7), storageAt(t, st, target, 5))
+			})
+		})
+	}
+}
+
+// A CREATE2 to an account with storage but no nonce and no code reads an old slot as zero in its
+// init code. On a block with an access list, a later tx can read the slot first: the init code is
+// slow, so that with several workers the later tx runs before it.
+func TestCreate2OverStorageOnlyAccountInitCodeReadsOldSlotAsZero(t *testing.T) {
+	keys, senders := eip161TouchKeys(t, 1)
+	runtime := program.New().Push(5).Op(vm.SLOAD).Push(7).Op(vm.SSTORE).Op(vm.STOP).Bytes()
+	initCode := program.New().Push(3000)
+	_, loop := initCode.Jumpdest()
+	initCode.Push(1024).Push(0).Op(vm.KECCAK256, vm.POP).Push(1).Op(vm.SWAP1, vm.SUB, vm.DUP1).Push(loop).Op(vm.JUMPI, vm.POP)
+	initCode.Push(5).Op(vm.SLOAD).Push(6).Op(vm.SSTORE).ReturnViaCodeCopy(runtime)
+	factory := common.HexToAddress("0xfac7")
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode.Bytes())))
+	for _, fork := range eip161TouchForks {
+		t.Run(fork.name, func(t *testing.T) {
+			gspec := &types.Genesis{Config: fork.config, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+				senders[0]: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+				factory:    {Code: program.New().Create2(initCode.Bytes(), 0).Op(vm.STOP).Bytes()},
+				target:     {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{common.HexToHash("0x05"): common.HexToHash("0x03")}},
+			}}
+			chainPack := generateEIP161TouchBlock(t, gspec, keys[0], func(b *blockgen.BlockGen) {
+				for _, to := range []common.Address{factory, target} {
+					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), to, uint256.NewInt(0), 1_000_000, uint256.NewInt(10_000_000_000), nil), *types.LatestSignerForChainID(fork.config.ChainID), keys[0])
+					require.NoError(t, err)
+					b.AddTx(txn)
+				}
+			})
+			requireGeneratedBlock(t, chainPack)
+			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				require.Equal(t, uint256.Int{}, storageAt(t, st, target, 5), "the creation replaced the storage")
+				require.Equal(t, uint256.Int{}, storageAt(t, st, target, 6), "the init code reads slot 5 as zero")
+				require.Equal(t, uint256.Int{}, storageAt(t, st, target, 7))
+			})
+		})
+	}
+}
+
+// A CREATE2 to an account with storage and a balance writes a slot that the account holds and
+// destroys the new contract in its init code. Under EIP-8246 the account keeps its balance and the
+// creation replaces its storage; before it, the destruct burns the balance and removes the account.
+// A later tx of the block reads the balance and the code hash, which tells an existing account from
+// an absent one.
+func TestCreate2DestructOverAnAccountWithStorageKeepsOnlyTheBalance(t *testing.T) {
+	keys, senders := eip161TouchKeys(t, 1)
+	initCode := program.New().Sstore(1, 7).Op(vm.ADDRESS, vm.SELFDESTRUCT).Bytes()
+	factory := common.HexToAddress("0xfac7")
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	probe := common.HexToAddress("0x9b0e")
+	probeCode := program.New().Push(target).Op(vm.BALANCE).Push(0).Op(vm.SSTORE).Push(target).Op(vm.EXTCODEHASH).Push(1).Op(vm.SSTORE).Op(vm.STOP).Bytes()
+	for _, fork := range eip161TouchForks {
+		t.Run(fork.name, func(t *testing.T) {
+			gspec := &types.Genesis{Config: fork.config, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+				senders[0]: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+				factory:    {Code: program.New().Create2(initCode, 0).Op(vm.STOP).Bytes()},
+				probe:      {Code: probeCode},
+				target:     {Balance: big.NewInt(5), Storage: map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x09")}},
+			}}
+			chainPack := generateEIP161TouchBlock(t, gspec, keys[0], func(b *blockgen.BlockGen) {
+				for _, to := range []common.Address{factory, probe} {
+					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(senders[0]), to, uint256.NewInt(0), 1_000_000, uint256.NewInt(10_000_000_000), nil), *types.LatestSignerForChainID(fork.config.ChainID), keys[0])
+					require.NoError(t, err)
+					b.AddTx(txn)
+				}
+			})
+			requireGeneratedBlock(t, chainPack)
+			kept := fork.config.AmsterdamTime != nil
+			importInParallel(t, gspec, keys[0], chainPack, func(t *testing.T, st *state.IntraBlockState) {
+				require.Equal(t, uint256.Int{}, storageAt(t, st, target, 1), "the old slot is gone")
+				wantBalance, wantCodeHash := uint256.Int{}, uint256.Int{}
+				if kept {
+					wantBalance = *uint256.NewInt(5)
+					wantCodeHash.SetBytes(crypto.Keccak256(nil))
+				}
+				require.Equal(t, wantBalance, storageAt(t, st, probe, 0), "balance read by a later tx")
+				require.Equal(t, wantCodeHash, storageAt(t, st, probe, 1), "code hash read by a later tx")
+			})
+		})
+	}
+}

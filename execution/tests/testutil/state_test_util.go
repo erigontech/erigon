@@ -67,7 +67,24 @@ type StateSubtest struct {
 }
 
 func (t *StateTest) UnmarshalJSON(in []byte) error {
-	return jsoniter.ConfigFastest.Unmarshal(in, &t.Json)
+	// When every post has txbytes, those bytes are the input to transaction
+	// validation. The JSON metadata may contain intentionally invalid values,
+	// so decode it into stTransaction only when a post needs the fallback.
+	dec := struct {
+		*stJSON
+		Tx jsoniter.RawMessage `json:"transaction"`
+	}{stJSON: &t.Json}
+	if err := jsoniter.ConfigFastest.Unmarshal(in, &dec); err != nil {
+		return err
+	}
+	for _, posts := range t.Json.Post {
+		for i := range posts {
+			if len(posts[i].Tx) == 0 {
+				return jsoniter.ConfigFastest.Unmarshal(dec.Tx, &t.Json.Tx)
+			}
+		}
+	}
+	return nil
 }
 
 type stJSON struct {
@@ -315,6 +332,8 @@ func (t *StateTest) RunNoVerify(sd *execctx.SharedDomains, tx kv.TemporalRwTx, s
 	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	w := rpchelper.NewLatestStateWriter(tx, sd, (*freezeblocks.BlockReader)(nil), writeBlockNr)
 	statedb = state.New(r)
+	statedb.SetVersionMap(state.NewVersionMap(nil))
+	statedb.SetTxContext(0, 0)
 
 	var baseFee *uint256.Int
 	if config.IsLondon(0) {
@@ -414,10 +433,12 @@ func (t *StateTest) RunNoVerify(sd *execctx.SharedDomains, tx kv.TemporalRwTx, s
 		return statedb, root, gasUsed, err
 	}
 
-	if err := statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
+	writes, err := statedb.FinalizedWrites(evm.ChainRules())
+	if err != nil {
 		return nil, root, gasUsed, err
 	}
-	if err := statedb.CommitBlock(evm.ChainRules(), w); err != nil {
+	statedb.FlushWritesToVersionMap(writes)
+	if err := statedb.WriteFlushedTo(writes, w); err != nil {
 		return nil, root, gasUsed, err
 	}
 

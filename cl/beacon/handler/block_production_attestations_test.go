@@ -20,9 +20,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/pool"
 )
 
 var testParticipationWeights = []uint64{14, 26, 14}
@@ -124,4 +127,17 @@ func TestSelectAttestationsKeepsEpochFlagsApartForAnyFlagCount(t *testing.T) {
 	selected := selectAttestations([]attestationCandidate{previousEpochFlag4, currentEpochFlag0}, weights, 1, 8)
 
 	require.ElementsMatch(t, []uint64{1, 2}, selectedSlots(selected))
+}
+
+func TestBlockInclusionAttestationsIncludesLocalAggregates(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	opPool := pool.NewOperationsPool(&cfg)
+	gossipAggregate := &solid.Attestation{Data: &solid.AttestationData{Slot: 1}, Signature: [96]byte{1}}
+	opPool.AttestationsPool.Insert(gossipAggregate.Signature, gossipAggregate)
+	localAggregate := &solid.Attestation{Data: &solid.AttestationData{Slot: 2}, Signature: [96]byte{2}}
+	aggregationPool := mock_services.NewMockAggregationPool(gomock.NewController(t))
+	aggregationPool.EXPECT().Aggregates().Return([]*solid.Attestation{localAggregate})
+	a := &ApiHandler{operationsPool: opPool, aggregatePool: aggregationPool}
+
+	require.ElementsMatch(t, []*solid.Attestation{gossipAggregate, localAggregate}, a.blockInclusionAttestations())
 }

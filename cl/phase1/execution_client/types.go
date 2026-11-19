@@ -16,7 +16,12 @@
 
 package execution_client
 
-import "github.com/erigontech/erigon/execution/engineapi/engine_types"
+import (
+	"context"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+)
 
 type PayloadStatus int
 
@@ -26,6 +31,27 @@ const (
 	PayloadStatusInvalidated
 	PayloadStatusValidated
 )
+
+// InvalidPayloadError accompanies an INVALID verdict whose latestValidHash is known.
+type InvalidPayloadError struct {
+	LatestValidHash common.Hash
+	Err             error
+}
+
+func (e *InvalidPayloadError) Error() string {
+	if e.Err == nil {
+		return "execution payload is invalid"
+	}
+	return e.Err.Error()
+}
+
+func (e *InvalidPayloadError) Unwrap() error { return e.Err }
+
+// ValidationInterrupted reports a NewPayload call that ended with the context instead of an EL
+// verdict; such a result must not be recorded as a payload status.
+func ValidationInterrupted(ctx context.Context, status PayloadStatus, err error) bool {
+	return err != nil && status == PayloadStatusNone && ctx.Err() != nil
+}
 
 func newPayloadStatusByEngineStatus(status engine_types.EngineStatus) PayloadStatus {
 	switch status {

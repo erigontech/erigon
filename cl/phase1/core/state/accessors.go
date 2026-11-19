@@ -340,6 +340,21 @@ func getBalanceAfterWithdrawals(b abstract.BeaconState, validatorIndex uint64, w
 	return 0
 }
 
+func getBuilderBalanceAfterWithdrawals(balance uint64, builderIndex uint64, withdrawalSets ...[]*cltypes.Withdrawal) uint64 {
+	validatorIndex := ConvertBuilderIndexToValidatorIndex(builderIndex)
+	for _, set := range withdrawalSets {
+		for _, withdrawal := range set {
+			if withdrawal.Validator == validatorIndex {
+				if withdrawal.Amount >= balance {
+					return 0
+				}
+				balance -= withdrawal.Amount
+			}
+		}
+	}
+	return balance
+}
+
 // GetExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
 func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) (*cltypes.ExpectedWithdrawals, error) {
 	nextWithdrawalIndex := b.NextWithdrawalIndex()
@@ -526,14 +541,17 @@ func GetBuildersSweepWithdrawals(b abstract.BeaconState, withdrawalIndex uint64,
 		}
 
 		builder := builders.Get(int(builderIndex))
-		if builder != nil && builder.WithdrawableEpoch <= epoch && builder.Balance > 0 {
-			withdrawals = append(withdrawals, &cltypes.Withdrawal{
-				Index:     withdrawalIndex,
-				Validator: ConvertBuilderIndexToValidatorIndex(builderIndex),
-				Address:   builder.ExecutionAddress,
-				Amount:    builder.Balance,
-			})
-			withdrawalIndex++
+		if builder != nil {
+			balance := getBuilderBalanceAfterWithdrawals(builder.Balance, builderIndex, priorWithdrawals, withdrawals)
+			if builder.WithdrawableEpoch <= epoch && balance > 0 {
+				withdrawals = append(withdrawals, &cltypes.Withdrawal{
+					Index:     withdrawalIndex,
+					Validator: ConvertBuilderIndexToValidatorIndex(builderIndex),
+					Address:   builder.ExecutionAddress,
+					Amount:    balance,
+				})
+				withdrawalIndex++
+			}
 		}
 
 		builderIndex = (builderIndex + 1) % uint64(buildersLen)

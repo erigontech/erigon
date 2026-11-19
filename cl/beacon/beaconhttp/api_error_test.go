@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,4 +45,12 @@ func TestWrapEndpointErrorStatusCodes(t *testing.T) {
 			require.Equal(t, tc.code, WrapEndpointError(tc.err).Code)
 		})
 	}
+}
+
+func TestEndpointErrorWriteToDeclaresJSON(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewEndpointError(http.StatusNotFound, errors.New("not found")).WriteTo(rec)
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	require.JSONEq(t, `{"code":404,"message":"not found"}`, rec.Body.String())
 }

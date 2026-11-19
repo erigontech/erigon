@@ -37,6 +37,8 @@ const (
 	maxPendingValidationContextBuilds            = int(clparams.PtcSize)
 )
 
+var errPayloadAttestationSlotMismatch = errors.New("payload attestation slot does not match block slot")
+
 type payloadAttestationValidationContext struct {
 	slot       uint64
 	domain     common.Hash
@@ -174,64 +176,69 @@ func (f *ForkChoiceStore) payloadAttestationValidationContext(
 	slot uint64,
 ) (*payloadAttestationValidationContext, error) {
 	return f.payloadAttestationContexts.get(ctx, blockRoot, func() (*payloadAttestationValidationContext, error) {
-		blockState, err := f.GetStateAtBlockRoot(blockRoot, true)
-		if err != nil {
+		var validationContext *payloadAttestationValidationContext
+		var buildErr error
+		if err := f.ViewStateAtBlockRoot(blockRoot, func(blockState *state.CachingBeaconState) error {
+			validationContext, buildErr = buildPayloadAttestationValidationContext(blockState, slot)
+			return nil
+		}); err != nil {
 			return nil, fmt.Errorf("%w: block state unavailable for root %v: %w", ErrIgnore, blockRoot, err)
 		}
-		if blockState == nil {
-			return nil, fmt.Errorf("%w: block state not found for root %v", ErrIgnore, blockRoot)
-		}
-		if slot != blockState.Slot() {
-			return nil, fmt.Errorf("%w: attestation slot %d does not match block slot %d", ErrIgnore, slot, blockState.Slot())
-		}
-
-		ptc, err := blockState.GetPTC(slot)
-		if err != nil {
-			return nil, err
-		}
-		if len(ptc) != int(blockState.BeaconConfig().PtcSize) {
-			return nil, fmt.Errorf("invalid PTC length %d, expected %d", len(ptc), blockState.BeaconConfig().PtcSize)
-		}
-		domain, err := blockState.GetDomain(blockState.BeaconConfig().DomainPtcAttester, state.GetEpochAtSlot(blockState.BeaconConfig(), slot))
-		if err != nil {
-			return nil, fmt.Errorf("unable to get the domain: %w", err)
-		}
-		if len(domain) != len(common.Hash{}) {
-			return nil, fmt.Errorf("invalid PTC attester domain length %d", len(domain))
-		}
-
-		validationContext := &payloadAttestationValidationContext{
-			slot:       slot,
-			positions:  make(map[uint64][]int, len(ptc)),
-			publicKeys: make(map[uint64]common.Bytes48, len(ptc)),
-		}
-		copy(validationContext.domain[:], domain)
-		for position, validatorIndex := range ptc {
-			if validatorIndex >= uint64(blockState.ValidatorLength()) {
-				return nil, fmt.Errorf("PTC validator %d is out of range", validatorIndex)
-			}
-			validationContext.positions[validatorIndex] = append(validationContext.positions[validatorIndex], position)
-			if _, ok := validationContext.publicKeys[validatorIndex]; ok {
-				continue
-			}
-			validator, err := blockState.ValidatorForValidatorIndex(int(validatorIndex))
-			if err != nil {
-				return nil, fmt.Errorf("failed to get PTC validator %d: %w", validatorIndex, err)
-			}
-			if len(validator.PublicKeyBytes()) != len(common.Bytes48{}) {
-				return nil, fmt.Errorf("invalid public key length for PTC validator %d", validatorIndex)
-			}
-			var publicKey common.Bytes48
-			copy(publicKey[:], validator.PublicKeyBytes())
-			validationContext.publicKeys[validatorIndex] = publicKey
-		}
-		return validationContext, nil
+		return validationContext, buildErr
 	})
+}
+
+func buildPayloadAttestationValidationContext(blockState *state.CachingBeaconState, slot uint64) (*payloadAttestationValidationContext, error) {
+	if slot != blockState.Slot() {
+		return nil, fmt.Errorf("%w: %w: attestation slot %d, block slot %d", ErrIgnore, errPayloadAttestationSlotMismatch, slot, blockState.Slot())
+	}
+
+	ptc, err := blockState.GetPTC(slot)
+	if err != nil {
+		return nil, err
+	}
+	if len(ptc) != int(blockState.BeaconConfig().PtcSize) {
+		return nil, fmt.Errorf("invalid PTC length %d, expected %d", len(ptc), blockState.BeaconConfig().PtcSize)
+	}
+	domain, err := blockState.GetDomain(blockState.BeaconConfig().DomainPtcAttester, state.GetEpochAtSlot(blockState.BeaconConfig(), slot))
+	if err != nil {
+		return nil, fmt.Errorf("unable to get the domain: %w", err)
+	}
+	if len(domain) != len(common.Hash{}) {
+		return nil, fmt.Errorf("invalid PTC attester domain length %d", len(domain))
+	}
+
+	validationContext := &payloadAttestationValidationContext{
+		slot:       slot,
+		positions:  make(map[uint64][]int, len(ptc)),
+		publicKeys: make(map[uint64]common.Bytes48, len(ptc)),
+	}
+	copy(validationContext.domain[:], domain)
+	for position, validatorIndex := range ptc {
+		if validatorIndex >= uint64(blockState.ValidatorLength()) {
+			return nil, fmt.Errorf("PTC validator %d is out of range", validatorIndex)
+		}
+		validationContext.positions[validatorIndex] = append(validationContext.positions[validatorIndex], position)
+		if _, ok := validationContext.publicKeys[validatorIndex]; ok {
+			continue
+		}
+		validator, err := blockState.ValidatorForValidatorIndex(int(validatorIndex))
+		if err != nil {
+			return nil, fmt.Errorf("failed to get PTC validator %d: %w", validatorIndex, err)
+		}
+		if len(validator.PublicKeyBytes()) != len(common.Bytes48{}) {
+			return nil, fmt.Errorf("invalid public key length for PTC validator %d", validatorIndex)
+		}
+		var publicKey common.Bytes48
+		copy(publicKey[:], validator.PublicKeyBytes())
+		validationContext.publicKeys[validatorIndex] = publicKey
+	}
+	return validationContext, nil
 }
 
 func (c *payloadAttestationValidationContext) ptcPositions(msg *cltypes.PayloadAttestationMessage) ([]int, error) {
 	if msg.Data.Slot != c.slot {
-		return nil, fmt.Errorf("%w: attestation slot %d does not match block slot %d", ErrIgnore, msg.Data.Slot, c.slot)
+		return nil, fmt.Errorf("%w: %w: attestation slot %d, block slot %d", ErrIgnore, errPayloadAttestationSlotMismatch, msg.Data.Slot, c.slot)
 	}
 	positions, ok := c.positions[msg.ValidatorIndex]
 	if !ok {
@@ -240,12 +247,18 @@ func (c *payloadAttestationValidationContext) ptcPositions(msg *cltypes.PayloadA
 	return positions, nil
 }
 
-func (c *payloadAttestationValidationContext) validateSignature(msg *cltypes.PayloadAttestationMessage) error {
+func (c *payloadAttestationValidationContext) validateSignature(ctx context.Context, msg *cltypes.PayloadAttestationMessage, verifySignature PayloadAttestationSignatureVerifier) error {
 	signingRoot, err := fork.ComputeSigningRoot(msg.Data, c.domain[:])
 	if err != nil {
 		return fmt.Errorf("unable to get signing root: %w", err)
 	}
 	publicKey := c.publicKeys[msg.ValidatorIndex]
+	if verifySignature != nil {
+		if err := verifySignature(ctx, msg.Signature[:], signingRoot[:], publicKey[:]); err != nil {
+			return fmt.Errorf("error while validating signature: %w", err)
+		}
+		return nil
+	}
 	valid, err := bls.VerifyAggregate(msg.Signature[:], signingRoot[:], [][]byte{publicKey[:]})
 	if err != nil {
 		return fmt.Errorf("error while validating signature: %w", err)

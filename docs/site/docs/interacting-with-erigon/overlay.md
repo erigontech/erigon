@@ -69,6 +69,12 @@ curl -X POST http://localhost:8545 \
 
 Blocks in the requested range are replayed concurrently (up to `runtime.NumCPU()` workers). Each block is independently replayed from the state at `blockNumber - 1`.
 
+Without state overrides, replay preserves the original gas budgets and charges fees normally. With state overrides, blocks containing only ordinary transactions use the RPC gas allowance and skip gas-fee debits. This allows replacement code to use more gas and replay to continue when an override changes how a later transaction is funded.
+
+In this mode, replay can credit the transaction value to its recipient without debiting an underfunded sender. Gas refunds are also skipped, while tips are still credited to the block producer. These balance changes can affect later transactions and their logs.
+
+Blocks containing a frame transaction preserve the original gas budgets and normal fee accounting for **every transaction in the block**, even with overrides. Frame assertions can observe the fee effects of earlier transactions. An override that leaves a payer underfunded returns an error; code that exceeds its original budget runs out of gas. The RPC gas cap does not apply to these blocks or to replay without overrides.
+
 ---
 
 ### `overlay_callConstructor`
@@ -90,6 +96,8 @@ This is useful for understanding what a contract would have initialised to if it
 { "code": "0x<effective_creation_code>" }
 ```
 
+`null` if the replacement constructor runs without an error but leaves no code at the address.
+
 **Example**
 
 ```bash
@@ -110,7 +118,7 @@ Internally, this method:
 1. Looks up the contract's creation transaction via the Otterscan API
 2. Replays all transactions in that block up to (but not including) the creation tx
 3. Executes the creation tx using the provided bytecode instead of the original
-4. Returns the effective code that would have been stored at the contract address
+4. Returns the effective code that would have been stored at the contract address, or `null` if no code would have been stored
 
 :::info
 `overlay_callConstructor` requires the Otterscan API (`--http.api=...,ots,overlay`) to resolve the contract creation transaction.

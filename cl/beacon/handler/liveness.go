@@ -83,7 +83,7 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 	// we need to obtain the relevant data:
 	// Use the blocks in the epoch as heuristic
 	for i := epoch * a.beaconChainCfg.SlotsPerEpoch; i < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; i++ {
-		block, err := a.blockReader.ReadBlockBySlot(ctx, tx, i)
+		block, err := a.blockReader.ReadBeaconBlockBodyBySlot(ctx, tx, i)
 		if err != nil {
 			return nil, err
 		}
@@ -111,9 +111,11 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 		live.IsLive = currentEpochParticipation.Get(int(idx)) != 0
 	}
 
-	resp := []*live{}
+	resp := make([]*live, len(liveSet))
+	i := 0
 	for _, v := range liveSet {
-		resp = append(resp, v)
+		resp[i] = v
+		i++
 	}
 	slices.SortFunc(resp, func(a, b *live) int {
 		return cmp.Compare(a.Index, b.Index)

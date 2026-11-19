@@ -230,7 +230,8 @@ func (a *Aggregator) DemoteInBackground(boundaryTxNum uint64) bool {
 	}
 	started := a.background.TryGo(func() {
 		defer a.demoting.Store(false)
-		if err := a.DemoteFile(a.ctx, kv.CommitmentDomain, from, to, a.demoteColdDir); err != nil && !errors.Is(err, context.Canceled) {
+		// observerCtx is cancelled when Close starts, so Close does not wait for a long copy to finish.
+		if err := a.DemoteFile(a.observerCtx, kv.CommitmentDomain, from, to, a.demoteColdDir); err != nil && !errors.Is(err, context.Canceled) {
 			a.logger.Warn("[tiering] demotion failed", "from", from, "to", to, "err", err)
 		}
 	})

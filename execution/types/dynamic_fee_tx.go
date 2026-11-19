@@ -32,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+var ErrDynamicFeePreLondon = errors.New("eip-1559 transactions require London")
+
 type DynamicFeeTransaction struct {
 	CommonTx
 	ChainID    uint256.Int
@@ -295,7 +297,7 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules
 		checkGas:         true,
 	}
 	if !rules.IsLondon {
-		return nil, errors.New("eip-1559 transactions require London")
+		return nil, ErrDynamicFeePreLondon
 	}
 	if baseFee != nil {
 		msg.gasPrice.Set(baseFee)

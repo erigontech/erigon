@@ -83,7 +83,7 @@ func ReadSlotData(getFn GetValFn, slot uint64) (*SlotData, error) {
 	}
 	buf := bytes.NewBuffer(v)
 
-	err = sd.ReadFrom(buf)
+	err = sd.Deserialize(buf)
 	return sd, err
 }
 
@@ -101,7 +101,7 @@ func ReadEpochData(getFn GetValFn, slot uint64, beaconConfig *clparams.BeaconCha
 	}
 	buf := bytes.NewBuffer(v)
 
-	err = ed.ReadFrom(buf)
+	err = ed.Deserialize(buf)
 	return ed, err
 }
 
@@ -163,7 +163,7 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 		if _, err := buf.Write(v); err != nil {
 			return err
 		}
-		if err := staticValidator.ReadFrom(&buf); err != nil {
+		if err := staticValidator.Deserialize(&buf); err != nil {
 			return err
 		}
 		out.validatorTable = append(out.validatorTable, staticValidator)

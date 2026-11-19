@@ -65,7 +65,9 @@ func TestFrameV2Recording(t *testing.T) {
 	input := []byte{0xab}
 	recorder.Hooks().EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, input, initial, uint256.Int{}, nil)
 	input[0] = 0
-	recorder.Hooks().EmitExit(0, nil, usage, nil, false)
+	output := []byte{0xcd}
+	recorder.Hooks().EmitExit(0, output, usage, nil, false)
+	output[0] = 0
 	require.Equal(t, []uint64{100}, legacyEntry)
 	require.Equal(t, []uint64{20}, legacyUsage)
 	encoded, err := json.Marshal(recorder.traces)
@@ -83,18 +85,20 @@ func TestFrameV2Recording(t *testing.T) {
 	}
 	var exit struct {
 		GasUsed mdgas.MdGasUsage
+		Output  string
 	}
 	require.NoError(t, json.Unmarshal(recorded.Traces[0]["onEnterV2"], &enter))
 	require.NoError(t, json.Unmarshal(recorded.Traces[1]["onExitV2"], &exit))
 	require.Equal(t, initial, enter.Gas)
 	require.Equal(t, "0xab", enter.Input)
 	require.Equal(t, usage, exit.GasUsed)
+	require.Equal(t, "0xcd", exit.Output)
 }
 
 func TestOpcodeV2Recording(t *testing.T) {
 	gas := mdgas.MdGas{Execution: 100, State: 200}
 	cost := mdgas.MdGasCost{Execution: 10, State: 50}
-	scope := &vm.CallContext{Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
+	scope := &vm.CallContext{Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
 	scope.Memory.Resize(2)
 	scope.Memory.Set(0, 2, []byte{0xab, 0xcd})
 	var receivedGas []mdgas.MdGas
@@ -126,7 +130,7 @@ func TestOpcodeV2Recording(t *testing.T) {
 func TestFaultV2Recording(t *testing.T) {
 	gas := mdgas.MdGas{Execution: 100, State: 200}
 	cost := mdgas.MdGasCost{Execution: 10, State: 50}
-	scope := &vm.CallContext{Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
+	scope := &vm.CallContext{Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
 	var receivedGas []mdgas.MdGas
 	var receivedCost []mdgas.MdGasCost
 	recorder := &Tracer{wrapped: &tracers.Tracer{Hooks: &tracing.Hooks{

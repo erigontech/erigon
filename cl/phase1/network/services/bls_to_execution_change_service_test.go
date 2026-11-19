@@ -71,7 +71,7 @@ func setupBLSToExecutionChangeTest(t *testing.T) (*blsToExecutionChangeTestConte
 	prevComputeSigningRoot := computeSigningRoot
 	prevBlsVerifyMultipleSignatures := blsVerifyMultipleSignatures
 	computeSigningRoot = mockFuncs.ComputeSigningRoot
-	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+	blsVerifyMultipleSignatures = withoutDecompressed(mockFuncs.BlsVerifyMultipleSignatures)
 	t.Cleanup(func() {
 		computeSigningRoot = prevComputeSigningRoot
 		blsVerifyMultipleSignatures = prevBlsVerifyMultipleSignatures
@@ -240,6 +240,34 @@ func TestBlsToExecutionChangeIgnoresSeenValidatorAfterPoolPrune(t *testing.T) {
 
 	require.ErrorIs(t, testCtx.service.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
 	require.True(t, testCtx.gomockCtrl.Satisfied())
+}
+
+func TestBlsToExecutionChangeGossipNotAcceptedBeforeSignatureVerification(t *testing.T) {
+	const validatorIndex = uint64(1)
+	testCtx, st := setupBLSToExecutionChangeTest(t)
+	msg := newSignedBLSToExecutionChangeForGossip(validatorIndex)
+	msg.ImmediateVerification = false
+	st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(
+		int(validatorIndex),
+		matchingWithdrawalCredentials(testCtx.beaconCfg, msg.SignedBLSToExecutionChange.Message.From),
+	)
+	syncHeadState(t, testCtx.syncedData, st)
+	testCtx.gomockCtrl.RecordCall(
+		testCtx.mockFuncs,
+		"ComputeSigningRoot",
+		msg.SignedBLSToExecutionChange.Message,
+		gomock.Any(),
+	).Return([32]byte{}, nil).Times(1)
+	testCtx.gomockCtrl.RecordCall(
+		testCtx.mockFuncs,
+		"BlsVerifyMultipleSignatures",
+		gomock.Any(),
+		gomock.Any(),
+		gomock.Any(),
+	).Return(false, nil).AnyTimes()
+
+	err := testCtx.service.ProcessMessage(context.Background(), nil, msg)
+	require.ErrorIs(t, err, ErrInvalidBlsSignature)
 }
 
 func TestBlsToExecutionChangeStoresOneVerifiedChangePerValidator(t *testing.T) {

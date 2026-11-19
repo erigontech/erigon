@@ -25,6 +25,21 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
+// HTTPError is returned by client operations when the HTTP status code of the
+// response is not a 2xx status.
+type HTTPError struct {
+	StatusCode int
+	Status     string
+	Body       []byte
+}
+
+func (err HTTPError) Error() string {
+	if len(err.Body) == 0 {
+		return err.Status
+	}
+	return fmt.Sprintf("%v: %s", err.Status, err.Body)
+}
+
 var (
 	_ Error = new(methodNotFoundError)
 	_ Error = new(subscriptionNotFoundError)

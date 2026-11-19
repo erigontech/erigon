@@ -23,9 +23,9 @@ func GenerateBenchData(ctx context.Context, c *rpcclient.Client) (BenchData, err
 		return BenchData{}, fmt.Errorf("eth_chainId: %w", err)
 	}
 
-	var targets []uint64
+	targets := make([]uint64, divisionFactor-1)
 	for i := 1; i < divisionFactor; i++ {
-		targets = append(targets, uint64(math.Floor(float64(latest)*float64(i)/divisionFactor)))
+		targets[i-1] = uint64(math.Floor(float64(latest) * float64(i) / divisionFactor))
 	}
 
 	blocks := make([]BenchItem, 0, len(targets))
