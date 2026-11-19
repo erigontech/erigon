@@ -269,6 +269,7 @@ type VersionMap struct {
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
+	balAddrs []accounts.Address // bal's addresses, interned once per block
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -439,8 +440,30 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		HasBAL: len(changes) > 0,
 		bal:    changes,
 	}
+	if len(changes) > 0 {
+		m := xsync.NewMap[accounts.Address, *AddressEntry](xsync.WithPresize(len(changes)))
+		entries := make([]AddressEntry, len(changes))
+		vm.balAddrs = make([]accounts.Address, len(changes))
+		for i := range changes {
+			ac := &changes[i]
+			vm.balAddrs[i] = accounts.InternAddress(ac.Address)
+			if len(ac.StorageChanges)+len(ac.BalanceChanges)+len(ac.NonceChanges)+len(ac.CodeChanges) > 0 {
+				m.Store(vm.balAddrs[i], &entries[i])
+				vm.nonEmpty.Store(true)
+			}
+		}
+		vm.s.Store(m)
+	}
 	vm.WriteChanges(changes)
 	return vm
+}
+
+// balAddr is the interned address of ac, taken from balAddrs when ac is vm.bal[i].
+func (vm *VersionMap) balAddr(i int, ac *types.AccountChanges) accounts.Address {
+	if i < len(vm.balAddrs) && ac == &vm.bal[i] {
+		return vm.balAddrs[i]
+	}
+	return accounts.InternAddress(ac.Address)
 }
 
 // balAccount returns the access list's changes of addr. The access list is validated, so its
@@ -564,7 +587,7 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 			len(accountChanges.NonceChanges) == 0 && len(accountChanges.CodeChanges) == 0 {
 			continue
 		}
-		addr := accounts.InternAddress(accountChanges.Address)
+		addr := vm.balAddr(i, accountChanges)
 		e := vm.entryOrCreate(addr)
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {
