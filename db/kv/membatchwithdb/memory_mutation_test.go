@@ -1699,3 +1699,32 @@ func TestPutNilAfterDeleteHidesBackingRow(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, v)
 }
+
+func TestMemoryMutationDupSortCursorKeepsEarlierRowsOfCustomTable(t *testing.T) {
+	const table = "CustomDupSort"
+	require.NotContains(t, kv.ChaindataTablesCfg, table)
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{table: {Flags: kv.DupSort}}
+	}).MustOpen()
+	t.Cleanup(db.Close)
+	tx := mdbxtest.BeginRw(t, db)
+	batch, err := membatchwithdb.NewMemoryBatch(nil)
+	require.NoError(t, err)
+	defer batch.Close()
+	key := []byte("key")
+	require.NoError(t, batch.Put(table, key, []byte("a")))
+	writer, err := batch.RwCursorDupSort(table)
+	require.NoError(t, err)
+	defer writer.Close()
+	require.NoError(t, writer.Put(key, []byte("b")))
+
+	reader, err := batch.NewReadView(tx).CursorDupSort(table)
+	require.NoError(t, err)
+	defer reader.Close()
+	var values []string
+	for k, v, err := reader.SeekExact(key); k != nil; k, v, err = reader.NextDup() {
+		require.NoError(t, err)
+		values = append(values, string(v))
+	}
+	require.Equal(t, []string{"a", "b"}, values)
+}

@@ -134,6 +134,26 @@ func memTableIsDupSort(table string) bool {
 	return config.Flags&kv.DupSort != 0
 }
 
+// markDupSort makes a table that ChaindataTablesCfg does not know a DupSort table, as a DupSort
+// cursor on it says it is one. Rows already stored keep their order: a plain table has one per key.
+func (s *memStore) markDupSort(table string) {
+	if _, known := kv.ChaindataTablesCfg[table]; known || s.mu == nil {
+		return
+	}
+	s.lock()
+	defer s.unlock()
+	t := s.getOrCreateTable(table)
+	if t.dupSort {
+		return
+	}
+	d := newMemTable(true)
+	t.tree.Scan(func(e memEntry) bool {
+		d.tree.Set(e)
+		return true
+	})
+	t.tree, t.dupSort = d.tree, true // in place: open cursors hold t
+}
+
 // snapshot returns a point-in-time copy that later writes to s do not change.
 func (s *memStore) snapshot() *memStore {
 	if s.mu == nil {
