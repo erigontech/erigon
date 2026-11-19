@@ -18,6 +18,7 @@ package membatchwithdb_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -26,8 +27,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -248,6 +253,22 @@ func TestFlushPropagatesDeleteError(t *testing.T) {
 	require.NoError(t, batch.Delete(kv.HeaderNumber, []byte("deleted")))
 	want := errors.New("delete failed")
 	require.ErrorIs(t, batch.Flush(t.Context(), deleteErrorTx{RwTx: tx, err: want}), want)
+}
+
+func TestFlushCancelledBeforeDeletion(t *testing.T) {
+	_, tx := newTestTx(t)
+	key, value := []byte("deleted"), []byte("value")
+	require.NoError(t, tx.Put(kv.HeaderNumber, key, value))
+	batch, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Delete(kv.HeaderNumber, key))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	assert.ErrorIs(t, batch.Flush(ctx, tx), context.Canceled)
+	got, err := tx.GetOne(kv.HeaderNumber, key)
+	require.NoError(t, err)
+	require.Equal(t, value, got)
 }
 
 // TestFlushAppendPath exercises the Append fast-path used when all in-memory
@@ -1244,6 +1265,47 @@ func TestMemoryMutationConcurrentDeleteDupAndCursorRead(t *testing.T) {
 	require.Nil(t, value)
 }
 
+func TestMemoryMutationSeekBothExactCustomDupSort(t *testing.T) {
+	for _, operation := range []string{"DeleteExact", "Delete"} {
+		t.Run(operation, func(t *testing.T) {
+			const table = "CustomDupSort"
+			require.NotContains(t, kv.ChaindataTablesCfg, table)
+			db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+				return kv.TableCfg{table: {Flags: kv.DupSort}}
+			}).MustOpen()
+			t.Cleanup(db.Close)
+			tx := mdbxtest.BeginRw(t, db)
+			key, deleted, kept := []byte("key"), []byte("deleted"), []byte("kept")
+			require.NoError(t, tx.Put(table, key, deleted))
+			require.NoError(t, tx.Put(table, key, kept))
+			batch, err := membatchwithdb.NewMemoryBatch(nil)
+			require.NoError(t, err)
+			defer batch.Close()
+			if operation == "Delete" {
+				require.NoError(t, batch.Delete(table, key))
+			} else {
+				writer, err := batch.RwCursorDupSort(table)
+				require.NoError(t, err)
+				defer writer.Close()
+				require.NoError(t, writer.DeleteExact(key, deleted))
+			}
+			reader, err := batch.NewReadView(tx).CursorDupSort(table)
+			require.NoError(t, err)
+			defer reader.Close()
+			_, got, err := reader.SeekBothExact(key, deleted)
+			require.NoError(t, err)
+			require.Nil(t, got)
+			_, got, err = reader.SeekBothExact(key, kept)
+			require.NoError(t, err)
+			if operation == "Delete" {
+				require.Nil(t, got)
+			} else {
+				require.Equal(t, kept, got)
+			}
+		})
+	}
+}
+
 func TestMemoryMutationDeleteExactKeepsEarlierMarkers(t *testing.T) {
 	_, tx := newTestTx(t)
 	key := bytes.Repeat([]byte{1}, 40)
@@ -1275,6 +1337,21 @@ func TestMemoryMutationDeleteExactKeepsEarlierMarkers(t *testing.T) {
 	_, got, err := reader.SeekBothExact(key, values[2])
 	require.NoError(t, err)
 	require.Equal(t, values[2], got)
+}
+
+func TestMemoryMutationDeleteOwnsKey(t *testing.T) {
+	_, tx := newTestTx(t)
+	key := bytes.Repeat([]byte{1}, 40)
+	require.NoError(t, tx.Put(kv.Headers, key, []byte("value")))
+	batch, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer batch.Close()
+	deleteKey := bytes.Clone(key)
+	require.NoError(t, batch.Delete(kv.Headers, deleteKey))
+	clear(deleteKey)
+	got, err := batch.NewReadView(tx).GetOne(kv.Headers, key)
+	require.NoError(t, err)
+	require.Nil(t, got)
 }
 
 func TestMemoryMutationReadViewLongKeyLookupAllocations(t *testing.T) {
@@ -1655,4 +1732,32 @@ func TestDupSortPointReadsSkipDeletedDbValue(t *testing.T) {
 	v, err = batch.GetOne(kv.TblAccountVals, []byte("key3"))
 	require.NoError(t, err)
 	require.Nil(t, v)
+
+func TestMemoryMutationDupSortCursorKeepsEarlierRowsOfCustomTable(t *testing.T) {
+	const table = "CustomDupSort"
+	require.NotContains(t, kv.ChaindataTablesCfg, table)
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{table: {Flags: kv.DupSort}}
+	}).MustOpen()
+	t.Cleanup(db.Close)
+	tx := mdbxtest.BeginRw(t, db)
+	batch, err := membatchwithdb.NewMemoryBatch(nil)
+	require.NoError(t, err)
+	defer batch.Close()
+	key := []byte("key")
+	require.NoError(t, batch.Put(table, key, []byte("a")))
+	writer, err := batch.RwCursorDupSort(table)
+	require.NoError(t, err)
+	defer writer.Close()
+	require.NoError(t, writer.Put(key, []byte("b")))
+
+	reader, err := batch.NewReadView(tx).CursorDupSort(table)
+	require.NoError(t, err)
+	defer reader.Close()
+	var values []string
+	for k, v, err := reader.SeekExact(key); k != nil; k, v, err = reader.NextDup() {
+		require.NoError(t, err)
+		values = append(values, string(v))
+	}
+	require.Equal(t, []string{"a", "b"}, values)
 }

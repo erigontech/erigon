@@ -103,7 +103,7 @@ func TestTraceBlockUnderReadTxLimit(t *testing.T) {
 // TestTraceBlockParityUnderReadTxLimit pins the same for trace_block.
 func TestTraceBlockParityUnderReadTxLimit(t *testing.T) {
 	m, _ := createLogIndexTestModule(t)
-	want, err := newTraceApiForTest(m).Block(m.Ctx, 1, nil, nil)
+	want, err := newTraceApiForTest(m).Block(m.Ctx, 1, nil)
 	require.NoError(t, err)
 
 	withReplayCPUs(t, 16)
@@ -111,7 +111,7 @@ func TestTraceBlockParityUnderReadTxLimit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			api := newTraceApiForTest(m)
 			api.kv = newReadTxLimitDB(m.DB, readTxs)
-			got, err := api.Block(readTxLimitCtx(t, m.Ctx), 1, nil, nil)
+			got, err := api.Block(readTxLimitCtx(t, m.Ctx), 1, nil)
 			require.NoError(t, err)
 			require.Equal(t, want, got)
 		})
@@ -302,13 +302,13 @@ func TestTraceBlockOnRemoteBlockReaderIsSequential(t *testing.T) {
 
 	t.Run("trace_block", func(t *testing.T) {
 		withReplayCPUs(t, 1)
-		want, err := newTraceApiForTest(m).Block(m.Ctx, 1, nil, nil)
+		want, err := newTraceApiForTest(m).Block(m.Ctx, 1, nil)
 		require.NoError(t, err)
 
 		withReplayCPUs(t, 16)
 		db := newReadTxLimitDB(m.DB, readTxs)
 		api := NewTraceAPI(remoteBase(), db, &rpccfg.TraceApiConfig{})
-		got, err := api.Block(m.Ctx, 1, nil, nil)
+		got, err := api.Block(m.Ctx, 1, nil)
 		require.NoError(t, err)
 		require.Equal(t, want, got)
 		require.EqualValues(t, 1, opened(db))

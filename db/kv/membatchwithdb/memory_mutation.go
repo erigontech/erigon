@@ -860,6 +860,7 @@ func (m *MemoryMutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 
 // Cursor creates a new cursor (the real fun begins here)
 func (m *MemoryMutation) RwCursorDupSort(bucket string) (kv.RwCursorDupSort, error) {
+	m.memTx.markDupSort(bucket)
 	return m.makeCursor(bucket)
 }
 
@@ -870,6 +871,7 @@ func (m *MemoryMutation) RwCursor(bucket string) (kv.RwCursor, error) {
 
 // Cursor creates a new cursor (the real fun begins here)
 func (m *MemoryMutation) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
+	m.memTx.markDupSort(bucket)
 	return m.makeCursor(bucket)
 }
 
