@@ -358,7 +358,7 @@ func readReferencePages(branch commitment.BranchData, accounts, storage *seg.Rea
 		}
 	})
 	rrp.cold.Add(int64(len(cold)))
-	if len(cold) < 2 {
+	if len(cold) < 4 {
 		return 0
 	}
 	rrp.batches.Add(1)
