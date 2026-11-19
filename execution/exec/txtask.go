@@ -162,6 +162,7 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		TransactionIndex:         uint(txIndex),
 		Type:                     r.TxType(),
 		GasUsed:                  r.ExecutionResult.ReceiptGasUsed,
+		BlobGasUsed:              r.Tx().GetBlobGas(),
 		CumulativeGasUsed:        cumulativeGasUsed,
 		TxHash:                   r.TxHash(),
 		Payer:                    r.ExecutionResult.Payer,
