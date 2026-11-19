@@ -164,12 +164,14 @@ func TestFrameTransactionRPCNonCanonicalGasPrice(t *testing.T) {
 func TestFrameTransactionRPCUnexecutedGasPrice(t *testing.T) {
 	m, block, _ := framePriceTestChain(t)
 	header := block.Header()
+	header.ParentHash = block.Hash()
 	header.Number.AddUint64(&header.Number, 1)
 	block = types.NewBlockFromStorage(header.Hash(), header, block.Transactions(), nil, nil, nil)
 	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
 		if err := rawdb.WriteHeader(tx, header); err != nil {
 			return err
 		}
+		rawdb.WriteForkchoiceHead(tx, block.Hash())
 		return rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64())
 	}))
 	base := newBaseApiForTest(m)
@@ -190,6 +192,16 @@ func TestFrameTransactionRPCUnexecutedGasPrice(t *testing.T) {
 			require.NotNil(t, got)
 			require.Equal(t, block.BaseFee(), (*uint256.Int)(got.GasPrice))
 		}
+	})
+	t.Run("fee history", func(t *testing.T) {
+		headers, err := api.FeeHistory(m.Ctx, 2, rpc.LatestBlockNumber, nil)
+		require.NoError(t, err)
+		require.Len(t, headers.GasUsedRatio, 2)
+
+		withRewards, err := api.FeeHistory(m.Ctx, 2, rpc.LatestBlockNumber, []float64{50})
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), withRewards.OldestBlock.ToInt().Uint64())
+		require.Len(t, withRewards.Reward, 1, "only the executed parent has receipts")
 	})
 }
 

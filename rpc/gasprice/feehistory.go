@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 var (
@@ -531,7 +532,8 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 					}
 					if fees.block != nil && fees.err == nil {
 						fees.receipts, fees.err = localBackend.GetReceiptsGasUsed(fetchCtx, fees.block, false)
-						if errors.Is(fees.err, state.ErrPruned) {
+						_, unexecuted := errors.AsType[*rpchelper.BlockNotExecutedError](fees.err)
+						if unexecuted || errors.Is(fees.err, state.ErrPruned) {
 							blockResults[idx].missing = true
 							continue
 						}

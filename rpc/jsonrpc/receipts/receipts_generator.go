@@ -3,6 +3,7 @@ package receipts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"runtime"
@@ -742,12 +743,12 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt, tx
 // supply the gas used by this canonical transaction.
 func (g *Generator) GetReceiptGasUsed(ctx context.Context, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int) (uint64, error) {
 	tx = g.filters.WithTemporalOverlay(tx)
-	if receipts, ok := g.receiptsCache.Get(header.Hash()); ok {
-		return receipts[index].GasUsed, nil
-	}
 	executed, err := rpchelper.GetLatestExecutedBlockNumber(tx)
 	if err != nil || header.Number.Uint64() > executed {
 		return 0, err
+	}
+	if receipts, ok := g.receiptsCache.Get(header.Hash()); ok {
+		return receipts[index].GasUsed, nil
 	}
 	startTxNum, err := g.txNumReader.Min(ctx, tx, header.Number.Uint64())
 	if err != nil {
@@ -765,11 +766,17 @@ func (g *Generator) GetReceiptGasUsed(ctx context.Context, tx kv.TemporalTx, hea
 	return receipt.GasUsed, nil
 }
 
-// GetReceiptsGasUsed returns gas usage indexed by transaction position. With
-// framesOnly, ordinary transactions and frames with unavailable receipts are nil.
-// A request for all receipts needs exact gas weights for every transaction.
+// GetReceiptsGasUsed returns gas usage indexed by transaction position.
+// With framesOnly, an unexecuted block returns nil and individual entries may
+// be nil. A request for all receipts needs exact gas weights for every transaction.
 func (g *Generator) GetReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, txNumsReader rawdbv3.TxNumsReader, framesOnly bool) (types.Receipts, error) {
 	tx = g.filters.WithTemporalOverlay(tx)
+	if err := rpchelper.CheckBlockExecuted(tx, block.NumberU64()); err != nil {
+		if _, unexecuted := errors.AsType[*rpchelper.BlockNotExecutedError](err); framesOnly && unexecuted {
+			return nil, nil
+		}
+		return nil, err
+	}
 	if receipts, ok := g.receiptsCache.Get(block.Hash()); ok {
 		return receipts, nil
 	}

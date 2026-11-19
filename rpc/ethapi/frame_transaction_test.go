@@ -50,6 +50,15 @@ func TestFrameRPCGasPriceMaxTip(t *testing.T) {
 	require.Equal(t, uint256.NewInt(13), (*uint256.Int)(result.GasPrice))
 }
 
+func TestFrameRPCGasPriceUnaffordable(t *testing.T) {
+	tx := &types.FrameTransaction{Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}}}
+	tx.Fees.MaxFee.SetUint64(tx.GetGasLimit() - 1)
+	result := NewRPCTransaction(tx, common.Hash{1}, 1, 1, 0, uint256.NewInt(1), nil, 0)
+	data, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.NotContains(t, string(data), `"gasPrice"`)
+}
+
 func TestFrameRPCBlockGasPriceWithBlob(t *testing.T) {
 	tx := &types.FrameTransaction{Frames: []types.Frame{{Mode: types.FrameVerify, Flags: types.FrameApproveBoth}}, BlobVersionedHashes: []common.Hash{{1}}}
 	tx.Fees.TipCap.SetAllOne()

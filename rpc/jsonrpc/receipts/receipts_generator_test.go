@@ -102,6 +102,7 @@ func TestFirstReceiptAtGasHistoryStart(t *testing.T) {
 	require.NoError(t, doms.AsPutDel(tx).DomainPut(kv.ReceiptDomain, rawtemporaldb.CumulativeGasUsedInBlockKey,
 		binary.AppendUvarint(nil, 300), 4, binary.AppendUvarint(nil, 100)))
 	require.NoError(t, doms.Flush(t.Context(), tx))
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 1))
 	block := types.NewBlockFromStorage(common.Hash{1}, &types.Header{Number: *uint256.NewInt(1)},
 		types.Transactions{&types.FrameTransaction{}, &types.LegacyTx{}}, nil, nil, nil)
 	got, err := newTestGenerator(t).GetReceiptsGasUsed(t.Context(), tx, block, rawdbv3.TxNums, false)
@@ -137,6 +138,12 @@ func TestGetReceiptsGasUsedMixedBlock(t *testing.T) {
 	require.NoError(t, doms.Flush(t.Context(), tx))
 
 	g := newTestGenerator(t)
+	t.Run("before execution", func(t *testing.T) {
+		got, err := g.GetReceiptsGasUsed(t.Context(), tx, block, rawdbv3.TxNums, true)
+		require.NoError(t, err)
+		require.Empty(t, got)
+	})
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, block.NumberU64()))
 	for _, tc := range []struct {
 		name       string
 		framesOnly bool

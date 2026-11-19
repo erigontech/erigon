@@ -1017,7 +1017,9 @@ func (r *RPCTransaction) setGasPrice(txn types.Transaction, baseFee, blobBaseFee
 		}
 		budget, err := frame.Fees.Budget(frame.GetGasLimit(), frame.GetBlobGas(), baseFee, blobBaseFee)
 		if err != nil {
-			log.Warn("cannot derive frame gas price", "txHash", frame.Hash(), "err", err)
+			// A stored block can contain a frame that cannot pay its base fees.
+			r.GasPrice = nil
+			return
 		}
 		r.computedGasPrice = hexutil.U256(budget.GasPrice)
 	} else {
