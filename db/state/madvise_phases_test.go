@@ -92,8 +92,22 @@ func TestMmapAdviceAcrossFilePhases(t *testing.T) {
 	requireAllRandom(t, snapDir, "indexing")
 
 	require.NoError(t, agg.MergeLoop(t.Context()))
-	require.NotEmpty(t, slices.DeleteFunc(snapFiles(t, snapDir, ".kv"), func(f string) bool { return slices.Contains(built, f) }), "merge produced no file")
+	afterMerge := snapFiles(t, snapDir, ".kv")
+	require.NotEmpty(t, slices.DeleteFunc(slices.Clone(afterMerge), func(f string) bool { return slices.Contains(built, f) }),
+		"merge produced no file: built %v, after merge %v", relNames(snapDir, built), relNames(snapDir, afterMerge))
 	requireAllRandom(t, snapDir, "merge")
+}
+
+func relNames(root string, paths []string) []string {
+	names := make([]string, 0, len(paths))
+	for _, p := range paths {
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			rel = p
+		}
+		names = append(names, rel)
+	}
+	return names
 }
 
 func snapFiles(t *testing.T, snapDir, ext string) []string {
