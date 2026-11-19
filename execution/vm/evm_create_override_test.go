@@ -180,6 +180,44 @@ func TestCreateInitCodeOverrideGas(t *testing.T) {
 	}
 }
 
+func TestCreate2OverrideErrorBeforeMemoryExpansion(t *testing.T) {
+	const size = 256
+	prefix := common.RightPadBytes(program.New().Return(0, 1).Bytes(), 32)
+	initCode := common.RightPadBytes(prefix, size)
+	for _, tc := range []struct {
+		name       string
+		size       uint256.Int
+		offset     uint256.Int
+		gas        uint64
+		wantTarget bool
+	}{
+		{"unpaid hash and memory expansion", uint256.Int{size}, uint256.Int{}, params.Create2Gas + 40, true},
+		{"different input length", uint256.Int{size, 1}, uint256.Int{}, 1_000, false},
+		{"different initcode", uint256.Int{size}, uint256.Int{1}, 1_000, false},
+		{"offset exceeds 64 bits", uint256.Int{size}, uint256.Int{0, 1}, 1_000, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var reported accounts.Address
+			evm, factory, target := createOverrideEVM(t, chain.TestChainBerlinConfig, vm.CREATE2, initCode, vm.Config{
+				OriginalCreate2InitCode: vm.NewCreate2InitCode(initCode),
+				OnInitCodeOverrideError: func(address accounts.Address, err error) {
+					require.ErrorIs(t, err, vm.ErrOutOfGas)
+					reported = address
+				},
+			})
+			code := program.New().Mstore(prefix, 0).Push(0).Push(tc.size).Push(tc.offset).Push(0).Op(vm.CREATE2)
+			require.NoError(t, evm.IntraBlockState().SetCode(factory, code.Bytes(), tracing.CodeChangeUnspecified))
+			_, _, _, err := evm.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Execution: tc.gas}, uint256.Int{}, false)
+			require.ErrorIs(t, err, vm.ErrOutOfGas)
+			if tc.wantTarget {
+				require.Equal(t, target, reported)
+			} else {
+				require.NotEqual(t, target, reported)
+			}
+		})
+	}
+}
+
 func createOverrideEVM(t *testing.T, config *chain.Config, op vm.OpCode, initCode []byte, vmConfig vm.Config) (*vm.EVM, accounts.Address, accounts.Address) {
 	t.Helper()
 	factory := accounts.InternAddress(common.HexToAddress("0xfac0"))

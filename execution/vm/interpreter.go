@@ -55,7 +55,8 @@ type Config struct {
 	// OverrideInitCode replaces constructor code for RPC replay after the deployment
 	// address is derived, so CREATE2 keeps the address of the original initcode.
 	// The EVM clears the original code hash because it keys the shared jump destination cache.
-	OverrideInitCode func(address accounts.Address, initCode []byte) []byte
+	OverrideInitCode        func(address accounts.Address, initCode []byte) []byte
+	OriginalCreate2InitCode *Create2InitCode
 	// OnInitCodeOverrideError reports gas or preparation errors that prevent
 	// a nested creation from entering its constructor frame during replay.
 	OnInitCodeOverrideError func(address accounts.Address, err error)
@@ -584,8 +585,8 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 	// Increment the call depth which is restricted to 1024
 	evm.depth++
 	defer func() {
-		if err != nil && callContext.create.overridePending && evm.config.OnInitCodeOverrideError != nil {
-			evm.config.OnInitCodeOverrideError(callContext.create.address, err)
+		if err != nil && evm.config.OnInitCodeOverrideError != nil && (op == CREATE || op == CREATE2) {
+			evm.reportCreateError(callContext, op, err)
 		}
 		// EIP-8037: snapshot the spilled portion and derive the frame's net
 		// state-gas usage from the reservoir delta before callContext.put()

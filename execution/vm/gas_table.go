@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
@@ -410,6 +411,55 @@ type createGasPreparation struct {
 	preparation     createPreparation
 	err             error
 	overridePending bool
+}
+
+// Create2InitCode identifies the historical constructor even when CREATE2
+// cannot pay to expand memory. Bytes beyond the allocated memory are zero.
+type Create2InitCode struct {
+	size   uint64
+	prefix []byte
+	hash   accounts.CodeHash
+}
+
+func NewCreate2InitCode(input []byte) *Create2InitCode {
+	code := codeAndHash{code: input}
+	return &Create2InitCode{
+		size:   uint64(len(input)),
+		prefix: bytes.Clone(common.TrimRightZeroes(input)),
+		hash:   code.Hash(),
+	}
+}
+
+func (evm *EVM) reportCreateError(scope *CallContext, op OpCode, err error) {
+	report := evm.config.OnInitCodeOverrideError
+	if scope.create.overridePending {
+		report(scope.create.address, err)
+		return
+	}
+	if !errors.Is(err, ErrOutOfGas) && !errors.Is(err, ErrGasUintOverflow) {
+		return
+	}
+	caller := scope.Contract.Address()
+	if op == CREATE {
+		if nonce, readErr := evm.intraBlockState.GetNonce(caller); readErr == nil {
+			report(accounts.InternAddress(types.CreateAddress(caller.Value(), nonce)), err)
+		}
+		return
+	}
+	original := evm.config.OriginalCreate2InitCode
+	if original == nil || scope.Stack.back(2).CmpUint64(original.size) != 0 {
+		return
+	}
+	var input []byte
+	memory := scope.Memory.Data()
+	if offset, overflow := scope.Stack.back(1).Uint64WithOverflow(); !overflow && offset < uint64(len(memory)) {
+		available := memory[offset:]
+		input = available[:min(uint64(len(available)), original.size)]
+	}
+	if bytes.Equal(common.TrimRightZeroes(input), original.prefix) {
+		address := types.CreateAddress2(caller.Value(), scope.Stack.back(3).Bytes32(), original.hash)
+		report(accounts.InternAddress(address), err)
+	}
 }
 
 func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, gas mdgas.MdGasCost, create2 bool) (mdgas.MdGasCost, error) {

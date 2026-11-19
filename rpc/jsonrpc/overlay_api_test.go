@@ -849,6 +849,80 @@ func TestCallConstructorRetryInsufficientBalance(t *testing.T) {
 	}
 }
 
+func TestCallConstructorRetryOutOfGas(t *testing.T) {
+	entry := common.HexToAddress("0x2000")
+	factory := common.HexToAddress("0x3000")
+	otherFactory := common.HexToAddress("0x4000")
+	runtime := hexutil.Bytes{byte(vm.STOP)}
+	initCode := program.New().ReturnData(runtime).Bytes()
+	for _, tc := range []struct {
+		name        string
+		op          vm.OpCode
+		secondCall  common.Address
+		inputSize   int
+		retryTarget bool
+	}{
+		{"CREATE retry", vm.CREATE, factory, 0, true},
+		{"CREATE other factory", vm.CREATE, otherFactory, 0, false},
+		{"CREATE2 retry", vm.CREATE2, factory, 0, true},
+		{"CREATE2 other salt", vm.CREATE2, factory, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			create := program.New().Mstore(initCode, 0)
+			target := types.CreateAddress(factory, 0)
+			if tc.op == vm.CREATE2 {
+				create.Op(vm.CALLDATASIZE)
+				target = types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+			}
+			create.Push(len(initCode)).Push0().Push0().Op(tc.op, vm.EXTCODESIZE)
+			factoryCode := testutil.AssertStackWord(create, 1).Bytes()
+			calls := program.New().Call(nil, factory, 0, 0, 0, 0, 0).Op(vm.POP)
+			calls.Call(uint256.NewInt(1_000), tc.secondCall, 0, 0, tc.inputSize, 0, 0).Op(vm.POP)
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: chain.TestChainOsakaConfig.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+				Alloc: types.GenesisAlloc{
+					testAddr:     {Balance: big.NewInt(1_000_000_000_000_000_000)},
+					entry:        {Code: calls.Bytes()},
+					factory:      {Code: factoryCode},
+					otherFactory: {Code: factoryCode},
+				},
+			}), execmoduletester.WithKey(testKey))
+			txn, err := types.SignTx(types.NewTransaction(0, entry, new(uint256.Int), 500_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
+			require.NoError(t, err)
+			pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(pack))
+			client := newOverlayRPCClient(t, m)
+
+			var result *CreationCode
+			require.NoError(t, client.CallContext(t.Context(), &result, "overlay_callConstructor", target, hexutil.Bytes(initCode)))
+			require.Equal(t, &CreationCode{Code: &runtime}, result)
+			for _, first := range []struct {
+				name string
+				code []byte
+				err  error
+			}{
+				{"deployment rolled back", program.New().Return(0, 2).Bytes(), nil},
+				{"constructor reverted", program.New().Push0().Push0().Op(vm.REVERT).Bytes(), vm.ErrExecutionReverted},
+			} {
+				t.Run(first.name, func(t *testing.T) {
+					var result *CreationCode
+					err := client.CallContext(t.Context(), &result, "overlay_callConstructor", target, hexutil.Bytes(first.code))
+					require.Nil(t, result)
+					switch {
+					case tc.retryTarget:
+						require.EqualError(t, err, vm.ErrOutOfGas.Error())
+					case first.err != nil:
+						require.EqualError(t, err, first.err.Error())
+					default:
+						require.NoError(t, err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestCallConstructorPreservesSiblingCreate(t *testing.T) {
 	factory := common.HexToAddress("0x2000")
 	helper := types.CreateAddress(factory, 0)
@@ -1190,20 +1264,21 @@ func TestCallConstructorRejectsNonContract(t *testing.T) {
 	}
 }
 
-func TestCallConstructorRPCErrors(t *testing.T) {
-	m, _, contractAddress, _ := chainWithDeployedContract(t)
+func newOverlayRPCClient(t *testing.T, m *execmoduletester.ExecModuleTester) *rpc.Client {
+	t.Helper()
 	base := newBaseApiForTest(m)
-	api := NewOverlayAPI(
-		base,
-		m.DB,
-		&rpccfg.OverlayApiConfig{GasCap: 1_000_000},
-		NewOtterscanAPI(base, m.DB, 25),
-	)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 1_000_000}, NewOtterscanAPI(base, m.DB, 25))
 	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	t.Cleanup(server.Stop)
 	require.NoError(t, server.RegisterName("overlay", api))
 	client := rpc.DialInProc(server, log.New())
-	t.Cleanup(func() { client.Close(); server.Stop() })
+	t.Cleanup(client.Close)
+	return client
+}
 
+func TestCallConstructorRPCErrors(t *testing.T) {
+	m, _, contractAddress, _ := chainWithDeployedContract(t)
+	client := newOverlayRPCClient(t, m)
 	revert := hexutil.Bytes(program.New().Push(0).Push(0).Op(vm.REVERT).Bytes())
 	for _, tc := range []struct {
 		name        string

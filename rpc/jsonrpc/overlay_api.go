@@ -263,6 +263,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 			}
 			return initCode
 		},
+		OriginalCreate2InitCode: creationData.create2InitCode,
 		OnInitCodeOverrideError: ct.onInitCodeOverrideError,
 	})
 
