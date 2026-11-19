@@ -1110,11 +1110,11 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 
 		g.Go(func() error {
 			var collation Collation
-			var skip bool
+			var hasOlderValues bool
 			if err := db.View(workerCtx, func(tx kv.Tx) (err error) {
 				if firstStepNotInFiles == 0 && step > 0 {
-					skip, err = d.hasValuesBeforeStep(tx, step)
-					if err != nil || skip {
+					hasOlderValues, err = d.hasValuesBeforeStep(tx, step)
+					if err != nil || hasOlderValues {
 						return err
 					}
 				}
@@ -1123,7 +1123,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 			}); err != nil {
 				return fmt.Errorf("domain collation %q has failed: %w", d.FilenameBase, err)
 			}
-			if skip {
+			if hasOlderValues {
 				a.deferredDomainWarnings[id].Do(func() {
 					a.logger.Warn("[snapshots] first snapshot deferred because older values remain in MDBX",
 						"domain", d.Name, "buildStep", step, "action", "rebuild missing snapshots for this domain")

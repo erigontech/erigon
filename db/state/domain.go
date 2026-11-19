@@ -482,10 +482,11 @@ func (d *Domain) hasValuesBeforeStep(tx kv.Tx, step kv.Step) (bool, error) {
 		if err != nil || k == nil {
 			return false, err
 		}
+		stepBytes := v
 		if d.LargeValues {
-			v = k[len(k)-8:]
+			stepBytes = k[len(k)-8:]
 		}
-		if kv.Step(^binary.BigEndian.Uint64(v)) < step {
+		if kv.Step(^binary.BigEndian.Uint64(stepBytes)) < step {
 			return true, nil
 		}
 	}
