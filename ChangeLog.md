@@ -1,4 +1,4 @@
-# Erigon v3.8.2 — Watery Whiskers — TBD
+# Erigon v3.8.2 — Watery Whiskers — 2026-11-19
 
 Erigon 3.8.2 fixes valid blocks rejected by parallel execution and commitment, speeds up block
 execution and Caplin head updates, improves Caplin peering, sync committee and data column gossip,
