@@ -14,6 +14,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/db/version"
@@ -327,12 +328,25 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 
 // readReferencePages reads the cold file pages that the branch's shortened keys point to in one batch, so the expansion
 // does not wait for them one after another. It returns the number of pages it read.
+var rrp struct {
+	calls, refs, ref2, cold, batches, ns, readNs atomic.Int64
+}
+
 func readReferencePages(branch commitment.BranchData, accounts, storage *seg.Reader) int {
+	t0 := time.Now()
+	defer func() {
+		rrp.ns.Add(int64(time.Since(t0)))
+		if rrp.calls.Add(1)%4096 == 0 {
+			log.Info("[rrp] expand refs", "calls", rrp.calls.Swap(0)+1, "refs", rrp.refs.Swap(0), "ref2", rrp.ref2.Swap(0), "coldpg", rrp.cold.Swap(0), "batches", rrp.batches.Swap(0), "rrpms", rrp.ns.Swap(0)/1e6, "readms", rrp.readNs.Swap(0)/1e6)
+		}
+	}()
 	refs := 0
 	forEachReference(branch, accounts, storage, func(*seg.Reader, uint64) { refs++ })
+	rrp.refs.Add(int64(refs))
 	if refs < 2 { // one page is read as fast by the expansion itself
 		return 0
 	}
+	rrp.ref2.Add(1)
 	pr := mmap.NewProbe()
 	if pr == nil {
 		return 0
@@ -343,9 +357,13 @@ func readReferencePages(branch commitment.BranchData, accounts, storage *seg.Rea
 			cold = append(cold, page)
 		}
 	})
+	rrp.cold.Add(int64(len(cold)))
 	if len(cold) < 2 {
 		return 0
 	}
+	rrp.batches.Add(1)
+	t1 := time.Now()
+	defer func() { rrp.readNs.Add(int64(time.Since(t1))) }()
 	if mmap.ReadPages(context.Background(), cold) != nil {
 		return 0
 	}
