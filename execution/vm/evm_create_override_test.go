@@ -198,15 +198,17 @@ func TestCreate2OverrideErrorBeforeMemoryExpansion(t *testing.T) {
 	initCode := common.RightPadBytes(prefix, size)
 	for _, tc := range []struct {
 		name       string
+		op         vm.OpCode
 		size       uint256.Int
 		offset     uint256.Int
 		gas        uint64
 		wantTarget bool
 	}{
-		{"unpaid hash and memory expansion", uint256.Int{size}, uint256.Int{}, params.Create2Gas + 40, true},
-		{"different input length", uint256.Int{size, 1}, uint256.Int{}, 1_000, false},
-		{"different initcode", uint256.Int{size}, uint256.Int{1}, 1_000, false},
-		{"offset exceeds 64 bits", uint256.Int{size}, uint256.Int{0, 1}, 1_000, false},
+		{"unpaid hash and memory expansion", vm.CREATE2, uint256.Int{size}, uint256.Int{}, params.Create2Gas + 40, true},
+		{"different input length", vm.CREATE2, uint256.Int{size, 1}, uint256.Int{}, 1_000, false},
+		{"different initcode", vm.CREATE2, uint256.Int{size}, uint256.Int{1}, 1_000, false},
+		{"offset exceeds 64 bits", vm.CREATE2, uint256.Int{size}, uint256.Int{0, 1}, 1_000, false},
+		{"unrelated opcode", vm.LOG0, uint256.Int{size}, uint256.Int{}, 100, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var reported accounts.Address
@@ -217,7 +219,7 @@ func TestCreate2OverrideErrorBeforeMemoryExpansion(t *testing.T) {
 					reported = address
 				},
 			})
-			code := program.New().Mstore(prefix, 0).Push(0).Push(tc.size).Push(tc.offset).Push(0).Op(vm.CREATE2)
+			code := program.New().Mstore(prefix, 0).Push(0).Push(tc.size).Push(tc.offset).Push(0).Op(tc.op)
 			require.NoError(t, evm.IntraBlockState().SetCode(factory, code.Bytes(), tracing.CodeChangeUnspecified))
 			_, _, _, err := evm.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Execution: tc.gas}, uint256.Int{}, false)
 			require.ErrorIs(t, err, vm.ErrOutOfGas)

@@ -431,7 +431,7 @@ func NewCreate2InitCode(input []byte) *Create2InitCode {
 	}
 }
 
-func (evm *EVM) reportCreateError(scope *CallContext, op OpCode, err error) {
+func (evm *EVM) reportCreateError(scope *CallContext, err error) {
 	report := evm.config.OnInitCodeOverrideError
 	if scope.create.ready {
 		report(scope.create.address, err)
@@ -440,6 +440,8 @@ func (evm *EVM) reportCreateError(scope *CallContext, op OpCode, err error) {
 	if !errors.Is(err, ErrOutOfGas) && !errors.Is(err, ErrGasUintOverflow) {
 		return
 	}
+	// Gas checks run on the jump-table path, which saves the PC before charging gas.
+	op := scope.Contract.GetOp(scope.savedPC)
 	caller := scope.Contract.Address()
 	if op == CREATE {
 		if nonce, readErr := evm.intraBlockState.GetNonce(caller); readErr == nil {
@@ -448,7 +450,7 @@ func (evm *EVM) reportCreateError(scope *CallContext, op OpCode, err error) {
 		return
 	}
 	original := evm.config.OriginalCreate2InitCode
-	if original == nil || scope.Stack.back(2).CmpUint64(original.size) != 0 {
+	if op != CREATE2 || original == nil || scope.Stack.back(2).CmpUint64(original.size) != 0 {
 		return
 	}
 	var input []byte
@@ -475,9 +477,7 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 		offset := callContext.Stack.back(1).Uint64()
 		size := callContext.Stack.back(2).Uint64()
 		if size > 0 {
-			prepared.initCode = make([]byte, size)
-			memory := callContext.Memory.Data()
-			copy(prepared.initCode, memory[min(offset, uint64(len(memory))):])
+			prepared.initCode = getData(callContext.Memory.Data(), offset, size)
 		}
 		input := codeAndHash{code: prepared.initCode}
 		prepared.codeHash = input.Hash()
