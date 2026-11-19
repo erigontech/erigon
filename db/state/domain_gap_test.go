@@ -110,7 +110,9 @@ func TestDomain_RmStateLatestHole(t *testing.T) {
 	drt.Close()
 
 	// `rm-state --latest`: drop the newest file (step 1), the one holding v2.
-	d.closeFilesAfterStep(1)
+	d.dirtyFiles.CloseIf(func(item *FilesItem) bool {
+		return item.StartStep(d.stepSize) >= 1
+	})
 
 	drt = d.beginForTests()
 	defer drt.Close()

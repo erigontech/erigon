@@ -1941,7 +1941,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			}
 			lower(d.dirtyFiles, next.d[id].files)
 			lowerToFirstFile(d.dirtyFiles, next.d[id].files)
-			if !d.HistCfg.SnapshotsDisabled && !d.HistCfg.HistoryDisabled {
+			if d.dirtyFiles.Len() > 0 && !d.HistCfg.SnapshotsDisabled && !d.HistCfg.HistoryDisabled {
 				lower(d.History.dirtyFiles, next.dh[id])
 				lower(d.InvertedIndex.dirtyFiles, next.dhii[id].files)
 			}
