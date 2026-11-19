@@ -57,9 +57,7 @@ func TestSubscribeLogsSendAfterServerExit(t *testing.T) {
 		require.NoError(t, err)
 		cancel()
 		client := stream.(*SubscribeLogsStreamC)
-		for range client.chRecv {
-		}
-		synctest.Wait()
+		<-client.done
 		for range cap(client.chSend) + 1 {
 			require.Error(t, stream.Send(&remoteproto.LogsFilterRequest{}))
 		}
@@ -73,9 +71,7 @@ func TestSubscribeReceiptsSendAfterServerExit(t *testing.T) {
 		require.NoError(t, err)
 		cancel()
 		client := stream.(*SubscribeReceiptsStreamC)
-		for range client.chRecv {
-		}
-		synctest.Wait()
+		<-client.done
 		for range cap(client.chSend) + 1 {
 			require.Error(t, stream.Send(&remoteproto.ReceiptsFilterRequest{}))
 		}
@@ -207,30 +203,14 @@ func TestSubscribeBlockedClientSendEndsWhenHandlerExits(t *testing.T) {
 	})
 }
 
-// failingServer returns from each subscription at once, while the caller's context stays active.
-type failingServer struct {
-	remoteproto.UnimplementedETHBACKENDServer
-}
-
-func (failingServer) SubscribeLogs(grpc.BidiStreamingServer[remoteproto.LogsFilterRequest, remoteproto.SubscribeLogsReply]) error {
-	return errors.New("handler failed")
-}
-
-func (failingServer) SubscribeReceipts(grpc.BidiStreamingServer[remoteproto.ReceiptsFilterRequest, remoteproto.SubscribeReceiptsReply]) error {
-	return errors.New("handler failed")
-}
-
 func TestSubscribeSendAfterHandlerErrorFails(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		logs, err := NewEthBackendClientDirect(failingServer{}).SubscribeLogs(t.Context())
+		logs, err := NewEthBackendClientDirect(remoteproto.UnimplementedETHBACKENDServer{}).SubscribeLogs(t.Context())
 		require.NoError(t, err)
-		for range logs.(*SubscribeLogsStreamC).chRecv {
-		}
-		receipts, err := NewEthBackendClientDirect(failingServer{}).SubscribeReceipts(t.Context())
+		<-logs.(*SubscribeLogsStreamC).done
+		receipts, err := NewEthBackendClientDirect(remoteproto.UnimplementedETHBACKENDServer{}).SubscribeReceipts(t.Context())
 		require.NoError(t, err)
-		for range receipts.(*SubscribeReceiptsStreamC).chRecv {
-		}
-		synctest.Wait()
+		<-receipts.(*SubscribeReceiptsStreamC).done
 		require.Error(t, logs.Send(&remoteproto.LogsFilterRequest{}))
 		require.Error(t, receipts.Send(&remoteproto.ReceiptsFilterRequest{}))
 	})
