@@ -786,7 +786,8 @@ func (b *BtIndex) GetSeq(h *SeqHint, lookup, buf []byte, g *seg.Reader, maxSteps
 			}
 			h.di++
 			g.Reset(offt.GetProbe(h.di, g.Probe()))
-			h.key, _ = g.Next(h.key[:0])
+			k, _ := g.Next(h.key[:0])
+			h.key = append(h.key[:0], k...)
 			if c := bytes.Compare(h.key, lookup); c >= 0 {
 				h.Nexts++
 				if c > 0 {

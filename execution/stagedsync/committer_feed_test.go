@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"math"
 	"math/rand"
@@ -258,5 +259,14 @@ func TestPrefetchWritesSortedForSeqLookup(t *testing.T) {
 		got = append(got, it)
 	}
 	require.Len(t, got, 16+0+1+2+3+0+1+2+3+0+1+2+3+0+1+2+3)
-	require.True(t, slices.IsSortedFunc(got, comparePrefetchItems))
+	queueKey := func(it prefetchItem) []byte {
+		storage := byte(0)
+		if it.storage {
+			storage = 1
+		}
+		return slices.Concat(it.account[:], []byte{storage}, it.slot[:])
+	}
+	for i := 1; i < len(got); i++ {
+		require.Negative(t, bytes.Compare(queueKey(got[i-1]), queueKey(got[i])), i)
+	}
 }

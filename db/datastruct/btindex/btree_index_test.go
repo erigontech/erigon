@@ -922,9 +922,16 @@ func Test_BtreeIndex_OrdinalLookupAfterNext(t *testing.T) {
 
 func Test_BtreeIndex_GetSeq(t *testing.T) {
 	t.Parallel()
+	for _, compressFlags := range []seg.FileCompression{seg.CompressNone, seg.CompressKeys | seg.CompressVals} {
+		t.Run(fmt.Sprint(compressFlags), func(t *testing.T) {
+			testBtreeIndexGetSeq(t, compressFlags)
+		})
+	}
+}
+
+func testBtreeIndexGetSeq(t *testing.T, compressFlags seg.FileCompression) {
 	tmp := t.TempDir()
 	logger := log.New()
-	compressFlags := seg.CompressKeys | seg.CompressVals
 	dataPath := generateKV(t, tmp, 52, 180, 500, logger, compressFlags)
 	keys, err := pivotKeysFromKV(dataPath)
 	require.NoError(t, err)
