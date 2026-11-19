@@ -1301,6 +1301,14 @@ func TestMemoryMutationSeekBothExactCustomDupSort(t *testing.T) {
 				require.Nil(t, got)
 			} else {
 				require.Equal(t, kept, got)
+
+				_, got, err = reader.First()
+				require.NoError(t, err)
+				assert.Equal(t, kept, got, "First")
+
+				got, err = reader.SeekBothRange(key, nil)
+				require.NoError(t, err)
+				assert.Equal(t, kept, got, "SeekBothRange")
 			}
 		})
 	}
