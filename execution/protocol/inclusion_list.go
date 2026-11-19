@@ -119,7 +119,7 @@ func txnValidAtBlockEnd(evm *vm.EVM, gp *GasPool, msg *types.Message) (bool, err
 func frameTxnValidAtBlockEnd(evm *vm.EVM, ibs *state.IntraBlockState, gp *GasPool, msg *types.Message, txn *types.FrameTransaction) (bool, error) {
 	evm.Reset(NewEVMTxContext(msg), ibs)
 	isolatedGas := NewBlockGasPool(gp.ExecutionGasAvailable(), gp.StateGasAvailable(), gp.BlobGas())
-	_, err := NewTxnExecutor(evm, msg, isolatedGas).executeFrameTransaction(txn, true, false, nil)
+	_, err := NewTxnExecutor(evm, msg, isolatedGas).executeFrameTransaction(txn, true, nil)
 	if readErr := ibs.StateReadError(); readErr != nil {
 		return false, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, readErr)
 	}
