@@ -865,8 +865,22 @@ func (vm *VersionMap) accountFloorsAt(addr accounts.Address, txIdx int) (f accou
 	f.wasDeleted = destructed
 	f.absent = absent
 
-	if _, c := floorCell(e.Balance, txIdx); c != nil {
-		f.balance, f.hasBalance, f.balanceDeleted = c.Value, true, c.valStatus == ValueDeleted
+	if k, c := floorCell(e.Balance, txIdx); c != nil {
+		switch {
+		case !destructed || k > destroyedAt:
+			f.balance, f.hasBalance, f.balanceDeleted = c.Value, true, c.valStatus == ValueDeleted
+		case c.valStatus == ValueDeleted:
+			// A burn at/below the destruct deletes the account only if it was not revived;
+			// a recreate above restarts from a fresh zero balance.
+			f.balance, f.hasBalance, f.balanceDeleted = uint256.Int{}, true, absent
+		default:
+			// A balance-preserving SELFDESTRUCT (EIP-8246) keeps its balance.
+			f.balance, f.hasBalance = c.Value, true
+		}
+	} else if absent {
+		// A self-destruct with no balance cell and no revival is a full wipe: the
+		// account is gone, not preserved at its committed balance.
+		f.balance, f.hasBalance = uint256.Int{}, true
 	}
 	if _, c := floorCell(e.Incarnation, txIdx); c != nil {
 		f.incarnation, f.hasIncarnation = c.Value, true
