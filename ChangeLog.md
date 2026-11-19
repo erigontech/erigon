@@ -46,10 +46,10 @@ and upgrade notes below.
   decimals) for all forks (#25292) — by @domiwei
 - cmd: `seg du` estimates use the downloader's file selection, so they match what a node of each prune
   mode downloads. The JSON field `detected_mode` and the detected mode in the header are removed;
-  `estimates` is null when headers or bodies cannot be read or are not fully indexed; the archive
-  estimate leaves out commitment history unless execution proofs are kept; commitment accessor files
-  count under "commitment hist". Scripts that read `detected_mode` or `estimates` need an update
-  (#25960) — by @awskii
+  `estimates` is null when headers or bodies cannot be read or are not fully indexed; the estimates
+  assume a default node, so the archive estimate no longer counts commitment history, which a node
+  keeps only with execution proofs; commitment accessor files count under "commitment hist". Scripts
+  that read `detected_mode` or `estimates` need an update (#25960) — by @awskii
 
 ### Upgrade notes
 
