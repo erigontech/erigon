@@ -461,12 +461,9 @@ func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb kv.Step) {
 	return kv.Step(^binary.BigEndian.Uint64(stepBytes))
 }
 
-func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
-	lstIdx, _ := kv.FirstKey(tx, d.History.KeysTable)
-	if len(lstIdx) == 0 {
-		return 0
-	}
-	return binary.BigEndian.Uint64(lstIdx) / d.stepSize
+func (d *Domain) minStepInDB(tx kv.Tx) uint64 {
+	first, _, _ := d.InvertedIndex.firstStepInDB(tx)
+	return uint64(first)
 }
 
 // A first snapshot must cover any older MDBX values before its end can be used

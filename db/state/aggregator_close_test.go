@@ -68,6 +68,50 @@ func TestAggregatorCloseWaitsForMaintenance(t *testing.T) {
 	})
 }
 
+func TestAggregatorCloseWaitsForFilePlanning(t *testing.T) {
+	testMaintenanceObserver(t, func(t *testing.T, agg *Aggregator) {
+		db := blockedFilePlanningDB{entered: make(chan struct{}), release: make(chan struct{})}
+		result := make(chan error, 1)
+		go func() {
+			result <- agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false)
+		}()
+		<-db.entered
+		synctest.Wait()
+		returnedEarly := len(result) > 0
+
+		closed := make(chan struct{})
+		go func() {
+			agg.Close()
+			close(closed)
+		}()
+		synctest.Wait()
+		var closedEarly bool
+		select {
+		case <-closed:
+			closedEarly = true
+		default:
+		}
+
+		close(db.release)
+		err := <-result
+		<-closed
+		require.False(t, returnedEarly, "BuildFiles2 must wait for the planning result")
+		require.False(t, closedEarly, "Close must wait for file planning")
+		require.ErrorIs(t, err, context.Canceled)
+	})
+}
+
+type blockedFilePlanningDB struct {
+	kv.TemporalRoDB
+	entered, release chan struct{}
+}
+
+func (db blockedFilePlanningDB) View(context.Context, func(kv.Tx) error) error {
+	close(db.entered)
+	<-db.release
+	return context.Canceled
+}
+
 // The merge goroutine BuildFiles2 spawns must register on wg before the build
 // goroutine's wg.Done, so wg.Wait (what Close does) never races that Add from zero.
 func TestAggregatorCloseWaitsForBackgroundMerge(t *testing.T) {
