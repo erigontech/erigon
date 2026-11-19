@@ -22,6 +22,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -63,6 +65,7 @@ type snapshotCrashRequest struct {
 func configureSnapshotCrashRecovery(config *ethconfig.Config) {
 	configureCrashRecovery(config)
 	config.MaxReorgDepth = snapshotCrashReorgDepth
+	config.Sync.MaxReorgDepth = snapshotCrashReorgDepth
 	config.Snapshot.ProduceE3 = true
 }
 
@@ -153,6 +156,9 @@ func TestEngineApiSnapshotCrashRecovery(t *testing.T) {
 			reorgCommitted: true,
 			pruneCommitted: true,
 		},
+		{name: "merge_built", point: state.MaintenanceMergeFilesBuilt, reorgCommitted: true, pruneCommitted: true},
+		{name: "merge_published", point: state.MaintenanceMergeFilesPublished, reorgCommitted: true, pruneCommitted: true},
+		{name: "merge_complete", point: state.MaintenanceMergeComplete, reorgCommitted: true, pruneCommitted: true},
 	} {
 		t.Run(window.name, func(t *testing.T) {
 			request := snapshotCrashRequest{
@@ -175,6 +181,9 @@ func TestEngineApiSnapshotCrashRecovery(t *testing.T) {
 				t.Logf("step-0 MDBX copies: before %v, recovered %v", canonicalCounts, counts)
 				for table, count := range counts {
 					require.LessOrEqual(t, count, canonicalCounts[table], "%s pruning must not add rows", table)
+					if isMergeCrashWindow(window.point) {
+						require.Zero(t, count, "%s MDBX copies must not hide a damaged merge", table)
+					}
 				}
 				if window.pruneCommitted {
 					require.True(t, snapshotPruneProgress(canonicalCounts, counts), "pruning must have removed MDBX copies")
@@ -312,15 +321,18 @@ func runSnapshotCrashChild(t *testing.T) {
 	clientTimeout := time.Until(request.Deadline)
 	require.Positive(t, clientTimeout)
 	buildStarted, buildAllowed, crashReached := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	mergeBuilt, mergeAllowed := make(chan struct{}), make(chan struct{})
+	var mergeInputs []string
 	observerFailure, failObserver := context.WithCancelCause(t.Context())
 	defer failObserver(nil)
-	var firstBuild, firstCrash sync.Once
+	var firstBuild, firstMerge, firstCrash sync.Once
 	var pruneArmed, pruneProgress atomic.Bool
 	var filesDone <-chan struct{}
 	var beforePrune map[string]uint64
 	var stepSize uint64
 	var eat engineapitester.EngineApiTester
 	pruneWindow := request.Boundary == state.MaintenancePruneReady || request.Boundary == state.MaintenancePruneCommitted
+	mergeWindow := isMergeCrashWindow(request.Boundary)
 	observe := func(observerCtx context.Context, event state.MaintenanceEvent) {
 		point := event.Point
 		if point == state.MaintenanceBuildStarted {
@@ -329,6 +341,16 @@ func runSnapshotCrashChild(t *testing.T) {
 				close(buildStarted)
 				select {
 				case <-buildAllowed:
+				case <-observerCtx.Done():
+				}
+			})
+		}
+		if mergeWindow && point == state.MaintenanceMergeFilesBuilt {
+			firstMerge.Do(func() {
+				mergeInputs = eat.StateAgg.Files()
+				close(mergeBuilt)
+				select {
+				case <-mergeAllowed:
 				case <-observerCtx.Done():
 				}
 			})
@@ -351,6 +373,16 @@ func runSnapshotCrashChild(t *testing.T) {
 		}
 		if point != request.Boundary {
 			return
+		}
+		if mergeWindow {
+			reached, err := snapshotMergeBoundaryReached(point, eat.StateAgg, mergeInputs)
+			if err != nil {
+				failObserver(err)
+				return
+			}
+			if !reached {
+				return
+			}
 		}
 		firstCrash.Do(func() {
 			if err := observerCtx.Err(); err != nil {
@@ -409,6 +441,17 @@ func runSnapshotCrashChild(t *testing.T) {
 	response := make(chan error, 1)
 	go func() { response <- eat.MockCl.UpdateForkChoice(ctx, request.Replacement[len(request.Replacement)-1]) }()
 	require.NoError(t, waitCrashRecoveryTransition(ctx, unwound, response, false))
+	if mergeWindow {
+		unwound.release()
+		select {
+		case err := <-response:
+			require.NoError(t, err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		response = nil
+		eat.ExecutionModule.Drain()
+	}
 	close(buildAllowed)
 	t.Logf("waiting for maintenance boundary %d", request.Boundary)
 	if pruneWindow {
@@ -423,11 +466,39 @@ func runSnapshotCrashChild(t *testing.T) {
 		unwound.release()
 	}
 	pruneError := make(chan error, 1)
+	pruneCtx, stopPruning := context.WithCancel(ctx)
+	defer stopPruning()
+	var pendingMerge <-chan struct{}
+	if mergeWindow {
+		pendingMerge = mergeBuilt
+		go func() { pruneError <- continueSnapshotPruning(pruneCtx, eat.ExecutionModule.Prune) }()
+	}
 	waiting := true
 	for waiting {
 		select {
 		case <-crashReached:
 			waiting = false
+		case <-pendingMerge:
+			pendingMerge = nil
+			stopPruning()
+			require.ErrorIs(t, <-pruneError, context.Canceled)
+			pruneError = nil
+			// Remove MDBX copies while publication is held, so recovery must
+			// read the snapshot data. Stop the pump first to leave no prune reader pinned.
+			for {
+				_, err := eat.ExecutionModule.Prune(ctx)
+				require.NoError(t, err)
+				complete := true
+				for _, count := range snapshotCrashTableCounts(t, eat.ChainDB) {
+					complete = complete && count == 0
+				}
+				if complete {
+					break
+				}
+				require.NoError(t, common.Sleep(ctx, 100*time.Millisecond))
+			}
+			eat.ExecutionModule.Drain()
+			close(mergeAllowed)
 		case err := <-response:
 			require.NoError(t, err, "replacement FCU before crash boundary")
 			require.True(t, pruneWindow, "file publication must leave the reorg held")
@@ -444,8 +515,63 @@ func runSnapshotCrashChild(t *testing.T) {
 	waitForCrashKill(t, ctx, request.ControlAddress, request.Deadline, int(request.Boundary))
 }
 
-// A time-budgeted FCU pass may leave all state pruning for a later pass.
-// Repeat the same commit/build path while execution is idle until pruning makes progress.
+func isMergeCrashWindow(point state.MaintenancePoint) bool {
+	return point == state.MaintenanceMergeFilesBuilt || point == state.MaintenanceMergeFilesPublished || point == state.MaintenanceMergeComplete
+}
+
+func snapshotMergeBoundaryReached(point state.MaintenancePoint, agg *state.Aggregator, inputs []string) (bool, error) {
+	if len(inputs) == 0 {
+		return false, fmt.Errorf("merge boundary %d has no input files", point)
+	}
+	visible := agg.Files()
+	removed := 0
+	reclaimed := 0
+	for _, path := range inputs {
+		if slices.Contains(visible, path) {
+			continue
+		}
+		removed++
+		_, err := os.Stat(path)
+		if point == state.MaintenanceMergeComplete {
+			if os.IsNotExist(err) {
+				reclaimed++
+			} else if err != nil {
+				return false, err
+			}
+		} else if err != nil {
+			return false, fmt.Errorf("merge input lost before the merging reader closed: %s: %w", path, err)
+		}
+	}
+	switch point {
+	case state.MaintenanceMergeFilesBuilt:
+		if removed != 0 {
+			return false, fmt.Errorf("merge outputs were published before MergeFilesBuilt")
+		}
+		paths, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "*.kv"))
+		if err != nil {
+			return false, err
+		}
+		for _, path := range paths {
+			if !slices.Contains(visible, path) {
+				return true, nil
+			}
+		}
+		return false, fmt.Errorf("MergeFilesBuilt has no unpublished output files on disk")
+	case state.MaintenanceMergeFilesPublished:
+		if removed == 0 {
+			return false, fmt.Errorf("merge boundary %d did not replace any visible input files", point)
+		}
+		return true, nil
+	case state.MaintenanceMergeComplete:
+		// File dependencies can delay retirement until a later merge cycle.
+		return reclaimed > 0, nil
+	default:
+		return false, fmt.Errorf("unexpected merge boundary %d", point)
+	}
+}
+
+// Repeat prune/build passes until cancellation or error; one time-budgeted pass
+// may make no progress.
 func continueSnapshotPruning(ctx context.Context, prune func(context.Context) (<-chan struct{}, error)) error {
 	for ctx.Err() == nil {
 		finished, err := prune(ctx)

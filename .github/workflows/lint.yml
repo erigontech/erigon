@@ -103,6 +103,9 @@ jobs:
       - name: Test Kurtosis setup
         run: make test-kurtosis-setup
 
+      - name: Test reorg devnet driver
+        run: make test-reorg-devnet-driver
+
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:

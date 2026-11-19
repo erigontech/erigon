@@ -18,6 +18,8 @@ package state_test
 
 import (
 	"context"
+	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -37,6 +39,9 @@ func TestMaintenanceObserverFilePublication(t *testing.T) {
 	var published uint64
 	var points []state.MaintenancePoint
 	agg.SetMaintenanceObserver(func(ctx context.Context, event state.MaintenanceEvent) {
+		if event.Point >= state.MaintenanceMergeFilesBuilt {
+			return
+		}
 		assert.NoError(t, ctx.Err(), "maintenance callbacks must receive a live operation context")
 		points = append(points, event.Point)
 		if event.Point == state.MaintenanceFilesPublished {
@@ -57,6 +62,54 @@ func TestMaintenanceObserverFilePublication(t *testing.T) {
 		want = append(want, state.MaintenanceBuildStarted, state.MaintenanceFilesBuilt, state.MaintenanceFilesPublished)
 	}
 	require.Equal(t, want, points)
+}
+
+func TestMaintenanceObserverMergePublication(t *testing.T) {
+	const stepSize = uint64(10)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	writeStepsKeys(t, db, agg, mkAddrs(0x10, 2), 0, 3)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 2, unboundedFinalityCtx, false))
+	<-agg.WaitForBuildAndMerge(t.Context())
+	inputs := agg.Files()
+	require.NotEmpty(t, inputs)
+	var points []state.MaintenancePoint
+	reclaimed := 0
+	agg.SetMaintenanceObserver(func(ctx context.Context, event state.MaintenanceEvent) {
+		assert.NoError(t, ctx.Err())
+		points = append(points, event.Point)
+		files := agg.Files()
+		if event.Point == state.MaintenanceMergeFilesBuilt {
+			assert.ElementsMatch(t, inputs, files, "merge outputs must not be published yet")
+		} else {
+			assert.Less(t, len(files), len(inputs), "publication must replace input files")
+		}
+		for _, path := range inputs {
+			if event.Point == state.MaintenanceMergeComplete && !slices.Contains(files, path) {
+				_, err := os.Stat(path)
+				if os.IsNotExist(err) {
+					reclaimed++
+				} else {
+					assert.NoError(t, err)
+				}
+			} else {
+				assert.FileExists(t, path, "merge input files must remain pinned until publication completes")
+			}
+		}
+		if event.Point == state.MaintenanceMergeComplete {
+			inputs = files
+		}
+	})
+	require.NoError(t, agg.MergeLoop(t.Context()))
+	require.Positive(t, reclaimed, "unpinning must reclaim inputs whose file dependencies are also merged")
+	require.NotEmpty(t, points)
+	require.Zero(t, len(points)%3)
+	for i := 0; i < len(points); i += 3 {
+		require.Equal(t, []state.MaintenancePoint{
+			state.MaintenanceMergeFilesBuilt,
+			state.MaintenanceMergeFilesPublished,
+			state.MaintenanceMergeComplete,
+		}, points[i:i+3])
+	}
 }
 
 func TestMaintenanceObserverBuildCompletion(t *testing.T) {
