@@ -17,6 +17,7 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"sync/atomic"
@@ -155,23 +156,76 @@ func TestBlockReadAheaderPreExecRejectsBlobGasPriceOverflow(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestBlockReadAheaderPreExecBoundsLoopingTx(t *testing.T) {
+type cancelOnCodeRead struct {
+	state.StateReader
+	cancel context.CancelFunc
+}
+
+func (r cancelOnCodeRead) ReadAccountCode(a accounts.Address) ([]byte, error) {
+	r.cancel()
+	code, err := r.StateReader.ReadAccountCode(a)
+	return bytes.Clone(code), err
+}
+
+func TestBlockReadAheaderPreExecCancelStopsRunningTx(t *testing.T) {
 	f := newPreExecFixture(t, []byte{0x5b, 0x60, 0x00, 0x56})
 	f.config.OsakaTime = nil
+	pe := f.readAheader.preExec
+	ttx, err := f.db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer ttx.Rollback()
 	ctx, cancel := context.WithCancel(t.Context())
-	txns := types.Transactions{f.txn(t, 1<<62, 0)}
+	reader := cancelOnCodeRead{StateReader: state.NewReaderV3(readAheadGetter(ttx, f.stateCache, true)), cancel: cancel}
+	noHash := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
+	blockCtx := protocol.NewEVMBlockContext(f.header(), noHash, pe.engine, accounts.NilAddress, f.config)
+	toucher := &commitmentToucher{ctx: ctx, read: func([]byte) []byte { return nil }}
+	from := accounts.InternAddress(crypto.PubkeyToAddress(f.key.PublicKey))
+	txn := f.txn(t, 1<<62, 0)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = f.readAheader.preExecTxns(ctx, f.db, f.header(), txns, preExecWorkers)
+		pe.run(ctx, blockCtx, blockCtx.Rules(f.config), from, txn, 1<<62, reader, toucher)
 	}()
-	time.Sleep(20 * time.Millisecond)
-	cancel()
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
-		t.Fatal("pre-exec of a looping tx did not stop after cancellation")
+		t.Fatal("cancellation did not stop a running tx")
 	}
+	require.Error(t, ctx.Err(), "the tx never read its code")
+}
+
+func TestBlockReadAheaderPreExecCapsTxGas(t *testing.T) {
+	f := newPreExecFixture(t, []byte{0x5a, 0x54, 0x00})
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), types.Transactions{f.txn(t, preExecTxGas<<3, 0)}, preExecWorkers))
+
+	gasAtStart := common.Hash(uint256.NewInt(preExecTxGas - 21_000 - 2).Bytes32())
+	_, ok := f.stateCache.View(nil).Get(kv.StorageDomain, append(f.contract[:], gasAtStart[:]...))
+	require.True(t, ok, "the tx did not run with the capped gas")
+}
+
+func TestBlockReadAheaderPreExecStopsAtBlockGas(t *testing.T) {
+	f := newPreExecFixture(t, []byte{0x00})
+	signer := *types.MakeSigner(f.config, 1, 1000)
+	txns := make(types.Transactions, preExecBlockGas/preExecTxGas+1)
+	for i := range txns {
+		txn, err := types.SignNewTx(f.key, signer, &types.LegacyTx{
+			CommonTx: types.CommonTx{Nonce: uint64(i), GasLimit: preExecTxGas},
+			GasPrice: *uint256.NewInt(1),
+		})
+		require.NoError(t, err)
+		txns[i] = txn
+	}
+	require.NoError(t, f.readAheader.preExecTxns(t.Context(), f.db, f.header(), txns, preExecWorkers))
+
+	sender := crypto.PubkeyToAddress(f.key.PublicKey)
+	ran := 0
+	for i := range txns {
+		created := types.CreateAddress(sender, uint64(i))
+		if _, ok := f.stateCache.View(nil).Get(kv.AccountsDomain, created[:]); ok {
+			ran++
+		}
+	}
+	require.Equal(t, preExecBlockGas/preExecTxGas, ran, "pre-exec ran past the block gas budget")
 }
 
 func TestBlockReadAheaderPreExecUsesEffectiveGasPrice(t *testing.T) {
