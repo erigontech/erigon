@@ -91,51 +91,25 @@ func (m *memoryMutationCursor) First() ([]byte, []byte, error) {
 	return m.resolveCursorPriority(mem, dbKey, dbValue, Normal)
 }
 
-func (m *memoryMutationCursor) getNextOnDb(t NextType) (key []byte, value []byte, err error) {
+func (m *memoryMutationCursor) getNextOnDb(t NextType) ([]byte, []byte, error) {
+	first, next := m.cursor.Next, m.cursor.Next
 	switch t {
 	case Normal:
-		key, value, err = m.cursor.Next()
-		if err != nil {
-			return
-		}
 	case Dup:
-		key, value, err = m.cursor.NextDup()
-		if err != nil {
-			return
-		}
+		first, next = m.cursor.NextDup, m.cursor.NextDup
 	case NoDup:
-		key, value, err = m.cursor.NextNoDup()
-		if err != nil {
-			return
-		}
+		first = m.cursor.NextNoDup // past the old key, a hidden pair hides only itself
 	default:
-		err = errors.New("invalid next type")
-		return
+		return nil, nil, errors.New("invalid next type")
 	}
-
-	for key != nil && value != nil && m.isEntryDeleted(key, value) {
-		switch t {
-		case Normal:
-			key, value, err = m.cursor.Next()
-			if err != nil {
-				return
-			}
-		case Dup:
-			key, value, err = m.cursor.NextDup()
-			if err != nil {
-				return
-			}
-		case NoDup:
-			key, value, err = m.cursor.NextNoDup()
-			if err != nil {
-				return
-			}
-		default:
-			err = errors.New("invalid next type")
-			return
-		}
+	key, value, err := first()
+	for err == nil && key != nil && value != nil && m.isEntryDeleted(key, value) {
+		key, value, err = next()
 	}
-	return
+	if err != nil {
+		return nil, nil, err
+	}
+	return key, value, nil
 }
 
 // Current return the current key and values the cursor is on.
@@ -150,8 +124,8 @@ func (m *memoryMutationCursor) skipIntersection(memKey, memValue, dbKey, dbValue
 	newDbKey = dbKey
 	newDbValue = dbValue
 	dupSortTable := m.memCursor.table.dupSort
-	// Check for duplicates
-	if bytes.Equal(memKey, dbKey) {
+	// Check for duplicates; a nil db value is no row, even next to an empty mem value
+	if dbValue != nil && bytes.Equal(memKey, dbKey) {
 		var skip bool
 		if t == Normal {
 			skip = !dupSortTable || bytes.Equal(memValue, dbValue)
@@ -243,26 +217,50 @@ func (m *memoryMutationCursor) Next() ([]byte, []byte, error) {
 	return m.resolveCursorPriority(memCursorEntry(m.memCursor.nextRaw()), m.currentDbEntry.key, m.currentDbEntry.value, Normal)
 }
 
-// NextDup returns the next element of the mutation.
+// NextDup returns the next value of the current key, or nil past the last one, which keeps the cursor in place
+// like MDBX. Each side moves within the key; a side moves to the next key only when the other side still has
+// a value of this key.
 func (m *memoryMutationCursor) NextDup() ([]byte, []byte, error) {
 	if m.isTableCleared() {
 		return m.memCursor.NextDup()
 	}
-
+	key := m.currentPair.key
+	if !m.memCursor.table.dupSort || key == nil {
+		return nil, nil, nil
+	}
 	if m.isPrevFromDb {
-		k, v, err := m.getNextOnDb(Dup)
+		mem := m.currentMemEntry
+		for mem.deleted && bytes.Equal(mem.key, key) {
+			mem = memCursorEntry(m.memCursor.nextRaw())
+		}
+		m.currentMemEntry = mem
+		dbKey, dbValue, err := m.getNextOnDb(Dup)
 		if err != nil {
 			return nil, nil, err
 		}
-		return m.resolveCursorPriority(m.currentMemEntry, k, v, Dup)
+		if dbKey == nil {
+			if mem.deleted || mem.value == nil || !bytes.Equal(mem.key, key) { // a nil value is no entry
+				return nil, nil, nil
+			}
+			if dbKey, dbValue, err = m.getNextOnDb(Normal); err != nil {
+				return nil, nil, err
+			}
+		}
+		return m.resolveCursorPriority(mem, dbKey, dbValue, Normal)
 	}
 
-	memK, memV, err := m.memCursor.NextDup()
+	memKey, memValue, err := m.memCursor.NextDup()
 	if err != nil {
 		return nil, nil, err
 	}
-
-	return m.resolveCursorPriority(cursorEntry{key: memK, value: memV}, m.currentDbEntry.key, m.currentDbEntry.value, Dup)
+	mem := cursorEntry{key: memKey, value: memValue}
+	if memKey == nil {
+		if m.currentDbEntry.value == nil || !bytes.Equal(m.currentDbEntry.key, key) {
+			return nil, nil, nil
+		}
+		mem = memCursorEntry(m.memCursor.nextRaw())
+	}
+	return m.resolveCursorPriority(mem, m.currentDbEntry.key, m.currentDbEntry.value, Normal)
 }
 
 // Seek move pointer to a key at a certain position.
@@ -483,15 +481,19 @@ func (m *memoryMutationCursor) NextNoDup() ([]byte, []byte, error) {
 		return m.memCursor.NextNoDup()
 	}
 
-	if m.isPrevFromDb {
-		k, v, err := m.getNextOnDb(NoDup)
-		if err != nil {
+	// both sides may hold values of the current key, so both move past it
+	key, mem := m.currentPair.key, m.currentMemEntry
+	dbKey, dbValue := m.currentDbEntry.key, m.currentDbEntry.value
+	var err error
+	if m.isPrevFromDb || bytes.Equal(dbKey, key) {
+		if dbKey, dbValue, err = m.getNextOnDb(NoDup); err != nil {
 			return nil, nil, err
 		}
-		return m.resolveCursorPriority(m.currentMemEntry, k, v, NoDup)
 	}
-
-	return m.resolveCursorPriority(memCursorEntry(m.memCursor.nextNoDupRaw()), m.currentDbEntry.key, m.currentDbEntry.value, NoDup)
+	if !m.isPrevFromDb || bytes.Equal(mem.key, key) {
+		mem = memCursorEntry(m.memCursor.nextNoDupRaw())
+	}
+	return m.resolveCursorPriority(mem, dbKey, dbValue, Normal)
 }
 
 func (m *memoryMutationCursor) LastDup() ([]byte, error) {

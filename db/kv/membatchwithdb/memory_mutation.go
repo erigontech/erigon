@@ -207,6 +207,9 @@ func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	if m.readTx != nil && m.memTx.isDupSort(table) {
+		return m.firstDup(table, key)
+	}
 	v, err := m.memTx.GetOne(table, key)
 	if err != nil || v != nil {
 		return v, err
@@ -223,6 +226,10 @@ func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	if m.readTx != nil && m.memTx.isDupSort(table) {
+		v, err := m.firstDup(table, key)
+		return v != nil, err
+	}
 	has, err := m.memTx.Has(table, key)
 	if err != nil || has {
 		return has, err
@@ -231,6 +238,17 @@ func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
 		return false, nil
 	}
 	return m.readTx.Has(table, key)
+}
+
+// firstDup returns the smallest visible value of key across both layers, like GetOne on an MDBX DupSort table.
+// SeekBothRange keeps both sides inside the key, so hidden rows of later keys are never read.
+func (m *MemoryMutation) firstDup(table string, key []byte) ([]byte, error) {
+	c, err := m.makeCursor(table)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	return c.SeekBothRange(key, nil)
 }
 
 func (m *MemoryMutation) Put(table string, k, v []byte) error {
@@ -292,7 +310,7 @@ func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc or
 		// Hidden rows don't count against limit, so the db side must be free to
 		// look past them; the merge below still stops at limit.
 		fromKey, toKey := fromPrefix, toPrefix
-		if !asc { // the db and the overlay read descending bounds differently
+		if !asc { // hasTombstone takes ascending bounds
 			fromKey, toKey = nil, nil
 		}
 		hasTombstone := m.memTx.hasTombstone(table, fromKey, toKey)

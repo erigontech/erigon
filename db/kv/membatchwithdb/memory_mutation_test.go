@@ -1700,6 +1700,40 @@ func TestPutNilAfterDeleteHidesBackingRow(t *testing.T) {
 	require.Empty(t, v)
 }
 
+func TestDupSortPointReadsSeeOverlayOnlyValue(t *testing.T) {
+	batch := newBatchOverDbDupSort(t)
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("key2"), []byte("value2.1")))
+
+	v, err := batch.GetOne(kv.TblAccountVals, []byte("key2"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("value2.1"), v)
+	has, err := batch.Has(kv.TblAccountVals, []byte("key2"))
+	require.NoError(t, err)
+	require.True(t, has)
+}
+
+func TestDupSortPointReadsSkipDeletedDbValue(t *testing.T) {
+	batch := newBatchOverDbDupSort(t)
+	c, err := batch.RwCursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer c.Close()
+	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1")))
+
+	v, err := batch.GetOne(kv.TblAccountVals, []byte("key1"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("value1.3"), v)
+
+	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.3")))
+	has, err := batch.Has(kv.TblAccountVals, []byte("key1"))
+	require.NoError(t, err)
+	require.False(t, has)
+
+	require.NoError(t, batch.Delete(kv.TblAccountVals, []byte("key3")))
+	v, err = batch.GetOne(kv.TblAccountVals, []byte("key3"))
+	require.NoError(t, err)
+	require.Nil(t, v)
+}
+
 func TestMemoryMutationDupSortCursorKeepsEarlierRowsOfCustomTable(t *testing.T) {
 	const table = "CustomDupSort"
 	require.NotContains(t, kv.ChaindataTablesCfg, table)
@@ -1727,4 +1761,49 @@ func TestMemoryMutationDupSortCursorKeepsEarlierRowsOfCustomTable(t *testing.T) 
 		values = append(values, string(v))
 	}
 	require.Equal(t, []string{"a", "b"}, values)
+}
+
+func TestDupSortPointReadsSeeEmptyOverlayValue(t *testing.T) {
+	for _, key := range []string{"key0", "key1"} { // key1 also has db values
+		t.Run(key, func(t *testing.T) {
+			batch := newBatchOverDbDupSort(t)
+			require.NoError(t, batch.Put(kv.TblAccountVals, []byte(key), nil))
+			v, err := batch.GetOne(kv.TblAccountVals, []byte(key))
+			require.NoError(t, err)
+			require.NotNil(t, v)
+			require.Empty(t, v)
+			has, err := batch.Has(kv.TblAccountVals, []byte(key))
+			require.NoError(t, err)
+			require.True(t, has)
+		})
+	}
+}
+
+func TestDupSortPointReadsOnCustomTable(t *testing.T) {
+	const table = "CustomDupSort"
+	require.NotContains(t, kv.ChaindataTablesCfg, table)
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{table: {Flags: kv.DupSort}}
+	}).MustOpen()
+	t.Cleanup(db.Close)
+	tx := mdbxtest.BeginRw(t, db)
+	key := []byte("key")
+	require.NoError(t, tx.Put(table, key, []byte("a")))
+	batch, err := membatchwithdb.NewMemoryBatch(nil)
+	require.NoError(t, err)
+	defer batch.Close()
+	writer, err := batch.RwCursorDupSort(table)
+	require.NoError(t, err)
+	defer writer.Close()
+	require.NoError(t, writer.Put(key, []byte("z")))
+
+	v, err := batch.NewReadView(tx).GetOne(table, key)
+	require.NoError(t, err)
+	require.Equal(t, []byte("a"), v, "GetOne returns the smallest visible value")
+
+	require.NoError(t, writer.DeleteExact(key, []byte("a")))
+	require.NoError(t, writer.DeleteExact(key, []byte("z")))
+	has, err := batch.NewReadView(tx).Has(table, key)
+	require.NoError(t, err)
+	require.False(t, has, "every value of the key is deleted")
 }
