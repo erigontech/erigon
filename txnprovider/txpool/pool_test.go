@@ -184,7 +184,6 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash, confi
 
 func TestUnwindRestoresTransactionsAboveAccountLimit(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-	require.NoError(t, pool.start(ctx))
 	block := func(height byte, nonce uint64, direction remoteproto.Direction) *remoteproto.StateChangeBatch {
 		change := newBlockChangeForAccounts(common.Hash{height}, nonce, sender)
 		change.ChangeBatch[0].BlockHeight = uint64(height)
