@@ -50,7 +50,7 @@ type txPool interface {
 	CountContent() (int, int, int)
 	KnownTxnReason(hash []byte) txpoolcfg.DiscardReason
 	RejectFramePrefix(hash common.Hash)
-	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
+	NonceFromAddress(addr [20]byte) (nonce uint64, found bool)
 	GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle)
 }
 
@@ -333,10 +333,10 @@ func (s *GrpcServer) Status(_ context.Context, _ *txpoolproto.StatusRequest) (*t
 // returns nonce for address
 func (s *GrpcServer) Nonce(ctx context.Context, in *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
 	addr := gointerfaces.ConvertH160toAddress(in.Address)
-	nonce, inPool := s.txPool.NonceFromAddress(addr)
+	nonce, found := s.txPool.NonceFromAddress(addr)
 	return &txpoolproto.NonceReply{
 		Nonce: nonce,
-		Found: inPool,
+		Found: found,
 	}, nil
 }
 

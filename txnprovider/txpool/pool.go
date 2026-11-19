@@ -2586,11 +2586,11 @@ func (p *TxPool) deleteMinedBlobTxn(hash string) {
 	delete(p.minedBlobTxnsByHash, hash)
 }
 
-func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) {
+func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, found bool) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	senderID, found := p.senders.getID(addr)
-	if !found {
+	senderID, ok := p.senders.getID(addr)
+	if !ok {
 		return 0, false
 	}
 	return p.all.nonce(senderID)

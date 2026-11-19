@@ -966,7 +966,7 @@ func TestNonceFromAddress(t *testing.T) {
 		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(err)
 		for _, reason := range reasons {
-			require.Equal(txpoolcfg.Success, reason)
+			require.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
 	add(3, 4, 6)

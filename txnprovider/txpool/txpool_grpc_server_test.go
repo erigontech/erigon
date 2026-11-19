@@ -86,7 +86,7 @@ func (m *addMockTxPool) KnownTxnReason(hash []byte) txpoolcfg.DiscardReason {
 	return txpoolcfg.NotSet
 }
 
-func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) { return 0, false }
+func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, found bool) { return 0, false }
 
 func (m *addMockTxPool) GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle) { return nil }
 
