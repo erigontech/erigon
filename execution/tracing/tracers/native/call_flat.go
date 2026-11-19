@@ -115,7 +115,7 @@ type flatCallTracerConfig struct {
 	IncludePrecompiles  bool `json:"includePrecompiles"`  // If true, call tracer includes calls to precompiled contracts
 }
 
-func newCallTracerObject(ctx *tracers.Context, cfg json.RawMessage) (*callTracer, error) {
+func newCallTracerObject(cfg json.RawMessage) (*callTracer, error) {
 	config := defaultCallTracerConfig()
 	if err := json.Unmarshal(cfg, &config); err != nil {
 		return nil, err
@@ -134,7 +134,7 @@ func newFlatCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 
 	// Create inner call tracer with default configuration, don't forward
 	// the OnlyTopCall or WithLog to inner for now
-	t, err := newCallTracerObject(ctx, json.RawMessage("{}"))
+	t, err := newCallTracerObject(json.RawMessage("{}"))
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func (t *flatCallTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasU
 	}
 	// Parity traces don't include CALL/STATICCALLs to precompiles.
 	// By default we remove them from the callstack.
-	if t.config.IncludePrecompiles {
+	if t.config.IncludePrecompiles || (t.tracer.frameTx != nil && depth == 1) {
 		return
 	}
 	parent := t.tracer.callstack[len(t.tracer.callstack)-1]
@@ -225,6 +225,9 @@ func (t *flatCallTracer) GetResult() (json.RawMessage, error) {
 	flat, err := flatFromNested(&t.tracer.callstack[0], []int{}, t.config.ConvertParityErrors, t.ctx)
 	if err != nil {
 		return nil, err
+	}
+	if t.tracer.frameTx != nil && flat[0].Result == nil {
+		flat[0].Result = newFlatCall(&t.tracer.callstack[0]).Result
 	}
 
 	res, err := json.Marshal(flat)

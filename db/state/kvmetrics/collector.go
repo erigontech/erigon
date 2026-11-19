@@ -87,12 +87,8 @@ func NewCollector() *Collector {
 	}
 }
 
-// Start launches the collector goroutine, registered on the Aggregator's
-// WaitGroup so Close joins it.
-// Start launches the collector goroutine. It is NOT registered on any external
-// WaitGroup: Stop() joins it via <-c.done. (It must not share the Aggregator's
-// wg — callers wait on that wg for background merges independently of Close, and
-// the collector only exits on Stop, which would deadlock such a wait.)
+// Start launches the collector goroutine; Stop signals it to exit and waits for it.
+// Including it in a wait group waited on before Stop would deadlock shutdown.
 func (c *Collector) Start() {
 	if c == nil {
 		return
@@ -222,7 +218,6 @@ func (c *Collector) Snapshot() map[Source]*DomainMetrics {
 }
 
 // Stop signals the collector to drain and exit, then waits for it. Idempotent.
-// Called by Aggregator.Close before WaitGroup.Wait().
 func (c *Collector) Stop() {
 	if c == nil {
 		return

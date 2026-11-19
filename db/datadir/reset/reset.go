@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -13,7 +15,10 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/preverified"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 
 	g "github.com/anacrolix/generics"
@@ -34,7 +39,6 @@ type Reset struct {
 	RemoveFunc           func(name OsFilePath) error
 	PreverifiedSnapshots preverified.SortedItems
 	RemoveUnknown        bool
-	RemoveLocal          bool
 	// AllowMixedStateBuilds skips the commitment/state build check.
 	AllowMixedStateBuilds bool
 	Dirs                  *datadir.Dirs
@@ -45,16 +49,38 @@ type Reset struct {
 	}
 }
 
-// stateKVName matches a domain data file, capturing its version, domain and step range. The minor
-// component is optional because a datadir can still hold legacy "v1-" names: RenameOldVersions
-// rewrites them to the dotted spelling, and reset does not run it first.
-var stateKVName = regexp.MustCompile(`^(v[0-9]+(?:\.[0-9]+)?)-(accounts|storage|commitment)\.([0-9]+)-([0-9]+)\.kv$`)
+var stateFileName = regexp.MustCompile(`^(v[0-9]+(?:\.[0-9]+)?)-([a-z]+)\.([0-9]+)-([0-9]+)\.(kv|v|ef)$`)
 
-// domainBuild is the file a step range will hold for one domain once reset is done and the
+type stateFile struct {
+	ver              string
+	entity           string
+	ext              string
+	stepRange        string
+	fromStep, toStep uint64
+}
+
+func parseStateFile(name string) (stateFile, bool) {
+	m := stateFileName.FindStringSubmatch(name)
+	if m == nil {
+		return stateFile{}, false
+	}
+	fromStep, err := strconv.ParseUint(m[3], 10, 64)
+	if err != nil {
+		return stateFile{}, false
+	}
+	toStep, err := strconv.ParseUint(m[4], 10, 64)
+	if err != nil || fromStep > toStep {
+		return stateFile{}, false
+	}
+	return stateFile{ver: m[1], entity: m[2], ext: m[5], stepRange: m[3] + "-" + m[4], fromStep: fromStep, toStep: toStep}, true
+}
+
+// domainBuild is the file a step range will hold for one entity once reset is done and the
 // downloader has fetched what the manifest describes. Only the highest version of a logical file is
 // opened, so that is the one recorded.
 type domainBuild struct {
 	name          string
+	path          string
 	retainedLocal bool
 	ver           version.Version
 	fromStep      uint64
@@ -66,6 +92,10 @@ type domainBuild struct {
 // of one, since the file name already counts in steps.
 func (b *domainBuild) referenced() bool {
 	return state.CommitmentBranchReferenced(b.ver, 1, b.fromStep, b.toStep)
+}
+
+func (b *domainBuild) keeps(ver version.Version, name string) bool {
+	return b != nil && (b.ver.Cmp(ver) > 0 || (b.ver.Cmp(ver) == 0 && b.name <= name))
 }
 
 // checkStateBuilds reports step ranges whose commitment file would end up from a different build
@@ -83,82 +113,139 @@ func (reset *Reset) checkStateBuilds() error {
 	}
 
 	builds := map[string]map[string]*domainBuild{}
-	record := func(fileName string, retainedLocal bool) {
-		m := stateKVName.FindStringSubmatch(fileName)
-		if m == nil {
+	record := func(fileName, path string) {
+		f, ok := parseStateFile(fileName)
+		if !ok {
 			return
 		}
-		ver, err := version.ParseVersion(m[1])
+		ver, err := version.ParseVersion(f.ver)
 		if err != nil {
 			return
 		}
-		fromStep, err := strconv.ParseUint(m[3], 10, 64)
-		if err != nil {
-			return
-		}
-		toStep, err := strconv.ParseUint(m[4], 10, 64)
-		if err != nil {
-			return
-		}
-		// A name whose range runs backwards describes no real file, and the span it implies
-		// underflows into one that looks like it carries references.
-		if toStep <= fromStep {
-			return
-		}
-		stepRange, domain := m[3]+"-"+m[4], m[2]
+		stepRange, entity := f.stepRange, f.entity+"."+f.ext
 		if builds[stepRange] == nil {
 			builds[stepRange] = map[string]*domainBuild{}
 		}
-		// The loader walks a sorted directory listing and keeps a candidate only on a strictly
-		// greater version, so among equal versions the first name wins. One version can be spelled
-		// two ways, and the manifest names only one of them, which decides the tie rather than
-		// leaving it open.
-		if b := builds[stepRange][domain]; b != nil {
-			if b.ver.Cmp(ver) > 0 || (b.ver.Cmp(ver) == 0 && b.name <= fileName) {
-				return
-			}
+		if builds[stepRange][entity].keeps(ver, fileName) {
+			return
 		}
-		builds[stepRange][domain] = &domainBuild{
+		builds[stepRange][entity] = &domainBuild{
 			name:          fileName,
-			retainedLocal: retainedLocal,
+			path:          path,
+			retainedLocal: path != "",
 			ver:           ver,
-			fromStep:      fromStep,
-			toStep:        toStep,
+			fromStep:      f.fromStep,
+			toStep:        f.toStep,
 		}
+	}
+
+	accessors := map[string]*domainBuild{}
+	recordAccessor := func(fileName, path string) {
+		v, unversioned, ok := strings.Cut(fileName, "-")
+		if !ok {
+			return
+		}
+		ver, err := version.ParseVersion(v)
+		if err != nil || accessors[unversioned].keeps(ver, fileName) {
+			return
+		}
+		accessors[unversioned] = &domainBuild{name: fileName, path: path, ver: ver}
 	}
 
 	// A file the manifest describes ends up canonical whether or not it is on disk now: reset drops
 	// the lock file, and the next sync fetches or repairs it.
 	for _, item := range reset.PreverifiedSnapshots {
-		name, ok := strings.CutPrefix(item.Name, "domain/")
-		if !ok {
-			continue
+		dir, name, _ := strings.Cut(item.Name, "/")
+		switch dir {
+		case "domain":
+			record(name, "")
+			recordAccessor(name, "")
+		case "history", "idx":
+			record(name, "")
 		}
-		record(name, false)
 	}
 
-	entries, err := os.ReadDir(reset.Dirs.SnapDomain)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
+	for _, dir := range []string{reset.Dirs.SnapDomain, reset.Dirs.SnapHistory, reset.Dirs.SnapIdx} {
+		entries, err := os.ReadDir(dir)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		info, err := os.Lstat(dir)
+		walkedAtStartup := err == nil && info.IsDir()
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name, kept := entry.Name(), true
+			if walkedAtStartup {
+				name, kept = reset.Dirs.RenamedOldVersion(dir, entry.Name())
+			}
+			if !kept {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+			if _, known := reset.PreverifiedSnapshots.Get(filepath.Base(dir) + "/" + name); known {
+				path = ""
+			}
+			record(name, path)
+			if dir == reset.Dirs.SnapDomain {
+				recordAccessor(name, path)
+			}
+		}
 	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+
+	entityEnds := map[string]uint64{}
+	for _, files := range builds {
+		for entity, f := range files {
+			if f.path == "" || opens(f.path) {
+				entityEnds[entity] = max(entityEnds[entity], f.toStep)
+			}
 		}
-		if _, known := reset.PreverifiedSnapshots.Get("domain/" + entry.Name()); known {
-			continue
+	}
+	visibleEnd := uint64(math.MaxUint64)
+	for _, end := range entityEnds {
+		visibleEnd = min(visibleEnd, end)
+	}
+	usable := func(commitment *domainBuild) bool {
+		span := fmt.Sprintf("commitment.%d-%d.", commitment.fromStep, commitment.toStep)
+		for _, accessor := range []struct {
+			kind statecfg.Accessors
+			ext  string
+			open func(path string) error
+		}{
+			{statecfg.AccessorHashMap, "kvi", openHashMap},
+			{statecfg.AccessorBTree, "bt", nil},
+			{statecfg.AccessorExistence, "kvei", nil},
+		} {
+			if !statecfg.Schema.CommitmentDomain.Accessors.Has(accessor.kind) {
+				continue
+			}
+			a, ok := accessors[span+accessor.ext]
+			if !ok || (a.path != "" && accessor.open != nil && accessor.open(a.path) != nil) {
+				return false
+			}
 		}
-		record(entry.Name(), true)
+		return commitment.path == "" || opens(commitment.path)
+	}
+	hidden := func(commitment *domainBuild) bool {
+		for _, domains := range builds {
+			merged := domains["commitment.kv"]
+			if merged != nil && merged != commitment && merged.toStep <= visibleEnd &&
+				merged.fromStep <= commitment.fromStep && commitment.toStep <= merged.toStep && usable(merged) {
+				return true
+			}
+		}
+		return false
 	}
 
 	var mixed []string
 	for stepRange, domains := range builds {
-		commitment := domains["commitment"]
-		if commitment == nil || !commitment.referenced() {
+		commitment := domains["commitment.kv"]
+		if commitment == nil || !commitment.referenced() || hidden(commitment) {
 			continue
 		}
 		for _, domain := range []string{"accounts", "storage"} {
-			st := domains[domain]
+			st := domains[domain+".kv"]
 			if st == nil {
 				continue
 			}
@@ -176,6 +263,24 @@ func (reset *Reset) checkStateBuilds() error {
 		"builds for step ranges %s, which breaks the byte offsets commitment holds into them. "+
 		"Remove those ranges first with 'erigon snapshots rm-state-snapshots --step=<range>', or "+
 		"re-run with --allow-mixed-state to proceed anyway", strings.Join(mixed, ", "))
+}
+
+func opens(path string) bool {
+	d, err := seg.NewDecompressor(path)
+	if err != nil {
+		return false
+	}
+	d.Close()
+	return true
+}
+
+func openHashMap(path string) error {
+	idx, err := recsplit.OpenIndex(path)
+	if err != nil {
+		return err
+	}
+	idx.Close()
+	return nil
 }
 
 func (reset *Reset) Run() (err error) {
@@ -198,28 +303,26 @@ func (reset *Reset) Run() (err error) {
 		"torrents", reset.stats.removed.TorrentFiles,
 		"data", reset.stats.removed.DataFiles)
 	// Remove chaindata last, so that the config is available if there's an error.
-	if reset.RemoveLocal {
-		// Left over from Polygon support; harmless on chains that never had them.
-		for _, extraDir := range []slashName{
-			"heimdall",
-			"polygon-bridge",
-		} {
-			// Probably shouldn't log these unless they existed, it would confuse the user for
-			// unrelated chains.
-			ra := reset.makeRemoveAll(reset.dataDirOsPath().Join(extraDir.MustLocalize()))
-			ra.warnNoRoot = false
-			err = ra.do()
-			if err != nil {
-				return fmt.Errorf("removing extra dir %q: %w", extraDir, err)
-			}
-		}
-		logger.Info("Removing chaindata dir", "path", reset.pathForLog(dbcfg.ChainDB))
-		ra := reset.makeRemoveAll(slashName(dbcfg.ChainDB).MustLocalize())
+	// Left over from Polygon support; harmless on chains that never had them.
+	for _, extraDir := range []slashName{
+		"heimdall",
+		"polygon-bridge",
+	} {
+		// Probably shouldn't log these unless they existed, it would confuse the user for
+		// unrelated chains.
+		ra := reset.makeRemoveAll(reset.dataDirOsPath().Join(extraDir.MustLocalize()))
+		ra.warnNoRoot = false
 		err = ra.do()
 		if err != nil {
-			err = fmt.Errorf("removing chaindata dir: %w", err)
-			return
+			return fmt.Errorf("removing extra dir %q: %w", extraDir, err)
 		}
+	}
+	logger.Info("Removing chaindata dir", "path", reset.pathForLog(dbcfg.ChainDB))
+	ra := reset.makeRemoveAll(slashName(dbcfg.ChainDB).MustLocalize())
+	err = ra.do()
+	if err != nil {
+		err = fmt.Errorf("removing chaindata dir: %w", err)
+		return
 	}
 	err = reset.remove(OsFilePath(reset.Dirs.PreverifiedPath()))
 	if err == nil {
@@ -276,10 +379,6 @@ type resetItemInfo struct {
 func (reset *Reset) doSnapshots() (err error) {
 	snapDir := reset.dataDirOsPath().Join(datadir.SnapDir)
 	ra := reset.makeRemoveAll(snapDir)
-	// Data files retained this pass, keyed by their preverified name. A data file is walked before
-	// its sibling ".torrent" (os.ReadDir sorts, and "x.ef" < "x.ef.torrent"), so when an incorrect
-	// torrent is later removed we can retract the stale data file it vouched for.
-	retainedDataFiles := map[string]OsFilePath{}
 	ra.wrapRemove(func(inner removeAllRemoveFunc, filePath OsFilePath, info fs.FileInfo) error {
 		itemName := string(filePath.mustLocalRelSlash(snapDir))
 		itemName, _ = strings.CutSuffix(itemName, ".part")
@@ -299,20 +398,6 @@ func (reset *Reset) doSnapshots() (err error) {
 			if err != nil {
 				return fmt.Errorf("removing file %v: %w", filePath, err)
 			}
-			// An incorrect torrent for a preverified file means the data it describes is unverifiable
-			// (stale local build): drop it too so the downloader re-fetches the canonical copy.
-			if isTorrent && ok {
-				if dataPath, retained := retainedDataFiles[itemName]; retained {
-					if err = inner(dataPath, nil); err != nil {
-						return fmt.Errorf("removing stale data file %v: %w", dataPath, err)
-					}
-					delete(retainedDataFiles, itemName)
-					reset.stats.retained.DataFiles--
-					reset.stats.removed.DataFiles++
-				}
-			}
-		} else if !isTorrent {
-			retainedDataFiles[itemName] = filePath
 		}
 		if isTorrent {
 			stats.TorrentFiles++

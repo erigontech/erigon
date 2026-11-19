@@ -44,11 +44,13 @@ import (
 	"github.com/erigontech/erigon/cl/validator/devvalidator"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/disk"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
@@ -114,17 +116,13 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/mcp"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
-
-// Config contains the configuration options of the ETH protocol.
-//
-// Deprecated: use ethconfig.Config instead.
-type Config = ethconfig.Config
 
 // Ethereum implements the Ethereum full node service.
 type Ethereum struct {
@@ -206,7 +204,7 @@ type Ethereum struct {
 	kzgWarmupDone  chan struct{}
 }
 
-func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadir.Dirs, cfg *ethconfig.Config) error {
+func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, dirs datadir.Dirs, cfg *ethconfig.Config) error {
 	isCommitmentHistoryEnabled, ok, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
 	if err != nil {
 		return err
@@ -323,7 +321,11 @@ func New(
 			statecfg.EnableHistoricalRCache()
 		}
 
-		if err := checkAndSetCommitmentHistoryFlag(tx, logger, dirs, config); err != nil {
+		if err := checkAndSetCommitmentHistoryFlag(tx, dirs, config); err != nil {
+			return err
+		}
+
+		if err := rawdb.RaiseCaplinBlobsArchiveFromSlot(tx, config.CaplinConfig.BlobsArchiveFromSlot); err != nil {
 			return err
 		}
 
@@ -375,46 +377,10 @@ func New(
 		return nil, err
 	}
 
-	var chainConfig *chain.Config
-	var genesis *types.Block
-	var compatErr *chain.ConfigCompatError
-	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
-		genesisConfig, err := rawdb.ReadGenesis(tx)
-		if err != nil {
-			return err
-		}
-
-		if genesisConfig != nil {
-			config.Genesis = genesisConfig
-		}
-
-		if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
-			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
-		}
-
-		h, err := rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
-			return err
-		}
-		genesisSpec := config.Genesis
-		if h != (common.Hash{}) { // fallback to db content
-			genesisSpec = nil
-		}
-		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
-		if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
-			return genesisErr
-		}
-		return nil
-	}); err != nil {
+	chainConfig, genesis, err := setupGenesis(rawChainDB, config, dirs, logger, tracer)
+	if err != nil {
 		return nil, err
 	}
-	// The rejected config is not written, so starting would run this process on a schedule
-	// the database contradicts, with no path back to agreement short of a rewind.
-	if compatErr != nil {
-		return nil, fmt.Errorf("incompatible chain config: %w", compatErr)
-	}
-	chainConfig.AllowAA = config.AllowAA
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
@@ -431,7 +397,7 @@ func New(
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
-	blockReader, blockWriter, allSnapshots, temporalDb, err := SetUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, stack.Config().Http.DBReadConcurrency, logger, segmentsBuildLimiter)
+	blockReader, blockWriter, allSnapshots, temporalDb, err := SetUpBlockReader(ctx, rawChainDB, config.Dirs, config, chainConfig, logger, segmentsBuildLimiter)
 	if err != nil {
 		return nil, err
 	}
@@ -453,6 +419,10 @@ func New(
 	// execution-layer concern that will move to the execution component.
 	kvRPC := remotedbserver.NewKvServer(ctx, temporalDb, allSnapshots, temporalDb.Debug(), logger)
 	backend.notifications = shards.NewNotifications(kvRPC)
+	dispatcher := execmodule.NewDispatcher(chainConfig, blockReader, backend.notifications.Events, backend.notifications.StateChangesConsumer, nil, logger)
+	kvRPC.SetStateChangesSnapshot(func(ctx context.Context) (*remoteproto.StateChangeBatch, error) {
+		return dispatcher.StateChangesSnapshot(ctx, temporalDb)
+	})
 	backend.kvRPC = kvRPC
 
 	// Storage component: owns DB references, file-change callbacks, block retire.
@@ -621,7 +591,7 @@ func New(
 		rulesConfig = &config.Ethash
 	}
 
-	backend.engine = rulesconfig.CreateRulesEngine(ctx, stack.Config(), chainConfig, rulesConfig, false /* noVerify */, blockReader, false /* readonly */, logger)
+	backend.engine = rulesconfig.CreateRulesEngine(ctx, stack.Config(), chainConfig, rulesConfig, false /* noVerify */, false /* readonly */, logger)
 
 	// ForkValidator is created later, after pipelineStagedSync and PipelineExecutor are ready.
 
@@ -644,7 +614,7 @@ func New(
 		backend.sentryProvider.ExecutionP2PPeerPenalizer,
 		backend.sentryProvider.ExecutionP2PPeerTracker,
 	)
-	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerPenalizer, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
+	bbd := execp2p.NewBackwardBlockDownloader(logger, executionFetcher, backend.sentryProvider.ExecutionP2PPeerTracker, tmpdir, execp2p.WithBALFetcher(balFetcher))
 
 	// MultiClient is the late-binding half of the Sentry Provider — it needs
 	// construction above.
@@ -755,15 +725,6 @@ func New(
 		)
 		contractBackend := contracts.NewDirectBackend(ethApi)
 		baseTxnProvider := backend.txPool
-		currentBlockNumReader := func(ctx context.Context) (*uint64, error) {
-			tx, err := backend.chainDB.BeginRo(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			defer tx.Rollback()
-			return chain.CurrentBlockNumber(tx)
-		}
 		backend.shutterPool = shutter.NewPool(
 			logger,
 			config.Shutter,
@@ -771,7 +732,7 @@ func New(
 			baseTxnProvider,
 			contractBackend,
 			backend.stateDiffClient,
-			currentBlockNumReader,
+			backend.shutterBlockState,
 		)
 		txnProvider = backend.shutterPool
 	}
@@ -901,7 +862,6 @@ func New(
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,
 		validationNotifications, blockReader, blockWriter, logger, backend.readAheader, backend.offlineBAL)
-	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
 	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher, blockReader)
@@ -918,6 +878,7 @@ func New(
 		currentBlockNumber,
 		chainConfig,
 		blkBuilder.Build,
+		blkBuilder.BuildInclusionList,
 		hook,
 		accum,
 		execmoduleCache,
@@ -925,7 +886,6 @@ func New(
 		logger,
 		backend.engine,
 		config.Sync,
-		config.ExperimentalBAL,
 		config.FcuBackgroundPrune,
 		false, /* onlySnapDownloadOnStart */
 		backend.readAheader,
@@ -1035,7 +995,7 @@ func New(
 	return backend, nil
 }
 
-func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig *chain.Config) error {
+func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	blockReader := s.blockReader
 	ctx := s.sentryCtx
 	chainKv := s.chainDB
@@ -1067,7 +1027,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 
 	var testingEntry *rpc.API
 	if slices.Contains(httpRpcCfg.API, "testing") {
-		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC, s.logger, s.chainDB)
+		entry := engineapi.NewTestingRPCEntry(s.engineBackendRPC)
 		testingEntry = &entry
 	}
 	// Eager witness cache (embedded RPC only). A datadir built with commitment history
@@ -1103,34 +1063,23 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		s.logger.Info("[witness-cache] eager witness cache enabled", "blocks", jsonrpc.WitnessCacheCapacity(httpRpcCfg.WitnessCacheBlocks), "headCapture", headCaptureMode)
 	}
 
-	mcpNamespaces := []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}
-	apiCfg := httpRpcCfg
-	if config.MCPAddress != "" {
-		apiCfg.API = slices.Clone(httpRpcCfg.API)
-		for _, ns := range mcpNamespaces {
-			if !slices.Contains(apiCfg.API, ns) {
-				apiCfg.API = append(apiCfg.API, ns)
-			}
-		}
-	}
-	// One APIList call even when MCP widens the namespace set, so the HTTP
-	// RPC server and MCP share the BaseApi block/receipt caches instead of
-	// each holding their own.
-	allAPIs := jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &apiCfg, s.engine, s.logger, testingEntry, witnessCache)
-	s.apiList = apisForNamespaces(allAPIs, append(slices.Clone(httpRpcCfg.API), "graphql"))
+	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, testingEntry, witnessCache)
 
 	if config.MCPAddress != "" {
-		mcpSrv := rpc.NewServer(httpRpcCfg.RpcBatchConcurrency, httpRpcCfg.TraceRequests, httpRpcCfg.DebugSingleRequest, httpRpcCfg.RpcStreamingDisable, s.logger, httpRpcCfg.RPCSlowLogThreshold)
-		for _, api := range apisForNamespaces(allAPIs, mcpNamespaces) {
-			if err := mcpSrv.RegisterAPI(api); err != nil {
-				return err
-			}
+		mcpSrv, err := newMCPRPCServer(s.apiList, &httpRpcCfg, s.logger)
+		if err != nil {
+			return err
 		}
 		// NonBlockingAcquire on the in-process connection so BeginRo fails
 		// fast (ErrServerOverloaded) instead of blocking MCP handlers when
 		// all DB read slots are held; node/rpcstack.go does the same for HTTP.
 		mcpClient := rpc.DialInProcWithContext(kv.WithNonBlockingAcquire(ctx), mcpSrv, s.logger)
 		s.mcpRPC = mcp.NewErigonMCPServer(mcpClient, config.Dirs.Log, true)
+		modules, err := mcpClient.SupportedModules()
+		if err != nil {
+			return err
+		}
+		s.mcpRPC.KeepNamespaces(modules)
 		s.bgComponentsEg.Go(func() error {
 			s.logger.Info("serve MCP on", "addr", config.MCPAddress, "endpoints", "/mcp (streamable HTTP), /sse + /message (SSE)")
 			mcpErr := s.mcpRPC.ListenAndServe(ctx, config.MCPAddress)
@@ -1190,8 +1139,74 @@ func (s *Ethereum) RegisterMinedBlockObserver(callback func(msg *types.Block)) e
 	return s.minedBlockObservers.Register(callback)
 }
 
+func (s *Ethereum) shutterBlockState(ctx context.Context) (shutter.BlockState, error) {
+	tx, err := s.chainDB.BeginRo(ctx)
+	if err != nil {
+		return shutter.BlockState{}, err
+	}
+	defer tx.Rollback()
+
+	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return shutter.BlockState{}, err
+	}
+	state := shutter.BlockState{BlockNum: blockNum}
+	state.StateVersionID, err = rawdb.GetStateVersion(tx)
+	return state, err
+}
+
 func (s *Ethereum) ChainKV() kv.RwDB            { return s.chainDB }
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
+
+func setupGenesis(db kv.RwDB, config *ethconfig.Config, dirs datadir.Dirs, logger log.Logger, tracer *tracers.Tracer) (*chain.Config, *types.Block, error) {
+	var chainConfig *chain.Config
+	var genesisBlock *types.Block
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		genesisSpec, err := selectGenesis(tx, config)
+		if err != nil {
+			return err
+		}
+
+		chainConfig, genesisBlock, err = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
+		return err
+	}); err != nil {
+		if _, ok := errors.AsType[*chain.ConfigCompatError](err); ok {
+			// The rejected config is not written, so starting would run this process on a schedule
+			// the database contradicts, with no path back to agreement short of a rewind.
+			return nil, nil, fmt.Errorf("incompatible chain config: %w", err)
+		}
+		return nil, nil, err
+	}
+	if tracer != nil && tracer.Hooks != nil && tracer.Hooks.OnBlockchainInit != nil {
+		tracer.Hooks.OnBlockchainInit(chainConfig)
+	}
+	return chainConfig, genesisBlock, nil
+}
+
+// selectGenesis returns an explicit genesis for the writer to validate.
+// Otherwise, any stored genesis replaces config.Genesis. If block 0 exists,
+// this path returns nil so the writer uses the stored block.
+func selectGenesis(tx kv.Tx, config *ethconfig.Config) (*types.Genesis, error) {
+	if config.GenesisFromFile {
+		return config.Genesis, nil
+	}
+	storedGenesis, err := rawdb.ReadGenesis(tx)
+	if err != nil {
+		return nil, err
+	}
+	if storedGenesis != nil {
+		config.Genesis = storedGenesis
+	}
+	storedHash, err := rawdb.ReadCanonicalHash(tx, 0)
+	if err != nil {
+		return nil, err
+	}
+	if storedHash != (common.Hash{}) { // fallback to db content
+		return nil, nil
+	}
+	return config.Genesis, nil
+}
+
 func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
 
@@ -1250,7 +1265,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
 	return nodesInfo, nil
 }
 
-func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *blocksnapshots.RoSnapshots, kv.TemporalRwDB, error) {
+func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *blocksnapshots.RoSnapshots, kv.TemporalRwDB, error) {
 	snConfig.Snapshot.ChainName = chainConfig.ChainName
 	allSnapshots := blocksnapshots.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
 	blockReader := freezeblocks.NewBlockReader(allSnapshots)
@@ -1286,6 +1301,8 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			SanityOldNaming().
 			GenSaltIfNeed(createNewSaltFileIfNeeded).
 			WithErigonDBSettings(erigonDBSettings).
+			BuildsMissedAccessorsAfterOpen().
+			BtIndexInMem(). // only the node opens here: integration and other tools pass their own *temporal.DB
 			CommitmentHotMaxMergeSteps(snConfig.Sync.TieringCommitmentHotMergeSteps)
 		if snConfig.Sync.TieringDemote {
 			aggOpts = aggOpts.DemoteColdDir(snConfig.Sync.TieringColdDir).ColdMergePause(snConfig.Sync.TieringColdMergePause).ColdIOMaxMBps(snConfig.Sync.TieringColdIOMaxMBps)
@@ -1311,6 +1328,9 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		}
 		if allSegmentsDownloadComplete {
 			_ = temporalDb.OpenStateSnapshots(ctx)
+			if err := temporalDb.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers(), kv.SkipCoveredAccessors); err != nil { // before RPC serves state
+				return nil, nil, nil, nil, err
+			}
 		}
 	}
 
@@ -1397,7 +1417,7 @@ func (s *Ethereum) Start() error {
 		return err
 	}
 
-	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, s.logger)
+	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.blockReader, s.notifications.Events, s.notifications.StateChangesConsumer, execmodule.NewReceiptsLoader(s.chainConfig, s.blockReader, receipts.NewGenerator(s.config.Dirs, s.blockReader, s.engine, nil, 5*time.Minute)), s.logger)
 	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.Client.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher, s.blockReader)
 
 	currentTDProvider := func() *uint256.Int {
@@ -1566,6 +1586,10 @@ func (s *Ethereum) TxpoolServer() txpoolproto.TxpoolServer {
 	return s.txPoolGrpcServer
 }
 
+func (s *Ethereum) TxPool() *txpool.TxPool {
+	return s.txPool
+}
+
 func (s *Ethereum) ExecutionModule() *execmodule.ExecModule {
 	return s.execModule
 }
@@ -1628,12 +1652,16 @@ func setDefaultMinerGasLimit(config *ethconfig.Config, chainConfig *chain.Config
 	}
 }
 
-func apisForNamespaces(apis []rpc.API, namespaces []string) []rpc.API {
-	out := make([]rpc.API, 0, len(apis))
+func newMCPRPCServer(apis []rpc.API, cfg *httpcfg.HttpCfg, logger log.Logger) (*rpc.Server, error) {
+	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
+	mcpNamespaces := []string{"eth", "erigon", "ots", "txpool", "net", "admin", "debug", "trace"}
 	for _, api := range apis {
-		if slices.Contains(namespaces, api.Namespace) {
-			out = append(out, api)
+		if !slices.Contains(mcpNamespaces, api.Namespace) {
+			continue
+		}
+		if err := srv.RegisterAPI(api); err != nil {
+			return nil, err
 		}
 	}
-	return out
+	return srv, nil
 }

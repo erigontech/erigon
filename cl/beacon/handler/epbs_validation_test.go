@@ -39,7 +39,7 @@ func TestEnvelopeContentsAuthenticateBeforeBlobProcessing(t *testing.T) {
 	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
 	payload.BlockAccessList = solid.NewByteListSSZ(handler.beaconChainCfg.MaxBytesPerTransaction)
 
-	err := handler.validateAndStoreExecutionPayloadEnvelopeContents(t.Context(), contents)
+	_, err := handler.validateExecutionPayloadEnvelopeContents(t.Context(), contents)
 
 	require.ErrorIs(t, err, want)
 }

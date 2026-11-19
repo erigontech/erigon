@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -272,7 +273,7 @@ func (br *BlockRetire) MergeBlocks(
 	snapshots := br.snapshots()
 
 	merger := snapshotsync.NewMerger(tmpDir, int(workers), lvl, db, br.chainConfig, logger)
-	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(true))
+	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(true), snaptype.Unknown)
 	if len(rangesToMerge) == 0 {
 		//TODO: enable, but optimize to reduce chain-tip impact
 		//if err := snapshots.RemoveOverlaps(); err != nil {
@@ -723,6 +724,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		collected := -1
 		collectorLock := sync.Mutex{}
 		collections := sync.NewCond(&collectorLock)
+		failed := false
 		var j int
 
 		if err := tx.ForAmount(kv.EthTx, numBuf, body.TxCount-2, func(_, tv []byte) error {
@@ -731,26 +733,26 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 
 			parsers.Go(func() error {
 				valueBuf, err := parse(tv, valueBufs[tx%workers], senders, tx)
-				if err != nil {
-					collectorLock.Lock()
-					defer collectorLock.Unlock()
-					collected = tx
-					collections.Broadcast() // to fail fast on it.
-					return fmt.Errorf("%w, block: %d", err, blockNum)
-				}
 				collectorLock.Lock()
 				defer collectorLock.Unlock()
 				for collected < tx-1 {
 					collections.Wait()
 				}
+				collected = tx
+				defer collections.Broadcast()
+				if failed {
+					return nil
+				}
+				if err != nil {
+					failed = true
+					return fmt.Errorf("%w, block: %d", err, blockNum)
+				}
 
 				// first tx byte => sender address => tx rlp
 				if err := collect(valueBuf); err != nil {
+					failed = true
 					return err
 				}
-				collected = tx
-				collections.Broadcast()
-
 				return nil
 			})
 
@@ -1000,7 +1002,13 @@ func RemoveIncompatibleIndices(dirs datadir.Dirs) error {
 	if err != nil {
 		return err
 	}
-	l = append(append(l, l1...), l2...)
+	l = append(l, l1...)
+	for _, fPath := range l2 {
+		if v, err := version.ParseVersion(filepath.Base(fPath)); err == nil && v.GreaterOrEqual(version.V2_0) {
+			continue // positional accessor, not recsplit
+		}
+		l = append(l, fPath)
+	}
 
 	for _, fPath := range l {
 		index, err := recsplit.OpenIndex(fPath)

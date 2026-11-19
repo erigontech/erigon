@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -93,7 +94,7 @@ func (s *voluntaryExitService) DecodeGossipMessage(pid peer.ID, data []byte, ver
 		Receiver:            &sentinelproto.Peer{Pid: pid.String()},
 		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{},
 	}
-	if err := obj.SignedVoluntaryExit.DecodeSSZ(data, int(version)); err != nil {
+	if err := decodeGossipSSZ(obj.SignedVoluntaryExit, data, version); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -105,12 +106,21 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	}
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#voluntary_exit
 	voluntaryExit := msg.SignedVoluntaryExit.VoluntaryExit
+	checkPendingWithdrawals := func(state *state.CachingBeaconState) error {
+		if state.Version() >= clparams.ElectraVersion && eth2.GetPendingBalanceToWithdraw(state, voluntaryExit.ValidatorIndex) != 0 {
+			return errors.New("validator has pending withdrawals in the queue")
+		}
+		return nil
+	}
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
-	if _, ok := s.seen.Get(voluntaryExit.ValidatorIndex); ok {
-		return ErrIgnore
-	}
-	if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
+	_, seen := s.seen.Get(voluntaryExit.ValidatorIndex)
+	if seen || s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
+		if msg.ImmediateVerification {
+			if err := s.syncedDataManager.ViewHeadState(checkPendingWithdrawals); err != nil {
+				return err
+			}
+		}
 		return ErrIgnore
 	}
 
@@ -137,6 +147,9 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	if err := s.syncedDataManager.ViewHeadState(func(state *state.CachingBeaconState) error {
 		val, err := state.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 		if err != nil {
+			if msg.ImmediateVerification {
+				return err
+			}
 			return ErrIgnore
 		}
 		curEpoch := state.Slot() / s.beaconCfg.SlotsPerEpoch
@@ -164,6 +177,13 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 				return ErrIgnore
 			}
 			return errors.New("verify the validator has been active long enough")
+		}
+
+		if err := checkPendingWithdrawals(state); err != nil {
+			if msg.ImmediateVerification {
+				return err
+			}
+			return ErrIgnore
 		}
 
 		// Verify signature
@@ -204,14 +224,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
-	// push the signatures to verify asynchronously and run final functions after that.
-	s.batchSignatureVerifier.AsyncVerifyVoluntaryExit(aggregateVerificationData)
-
-	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
-	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
-	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
-	// gossip ourselves or ban the peer which sent that particular invalid signature.
-	return nil
+	return s.batchSignatureVerifier.VerifyVoluntaryExit(ctx, aggregateVerificationData)
 }
 
 func (s *voluntaryExitService) storeVerifiedExit(exit *cltypes.SignedVoluntaryExit) {

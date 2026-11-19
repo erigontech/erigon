@@ -32,6 +32,6 @@ ethereum_genesis_generator_params:
   image: ethpandaops/ethereum-genesis-generator:6.1.4
 additional_services: [spamoor, assertoor]
 assertoor_params:
-  run_stability_check: false  # re-enable once go-eth2-client supports alpha.8 (#21442)
+  run_stability_check: true
   run_block_proposal_check: true
   image: ethpandaops/assertoor:v0.1.3

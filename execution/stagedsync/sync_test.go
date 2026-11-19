@@ -17,9 +17,11 @@
 package stagedsync
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -177,6 +179,31 @@ func TestErroredStage(t *testing.T) {
 		stages.Headers, stages.Bodies,
 	}
 	assert.Equal(t, expectedFlow, flow)
+}
+
+func TestRunStartsAtFirstStageAfterPruneError(t *testing.T) {
+	pruneErr := errors.New("prune failed")
+	var flow []stages.SyncStage
+	forward := func(_ bool, s *StageState, _ Unwinder, _ *execctx.SharedDomains, _ kv.TemporalRwTx, _ log.Logger) error {
+		flow = append(flow, s.ID)
+		return nil
+	}
+	state := New(ethconfig.Defaults.Sync, []*Stage{
+		{ID: stages.Headers, Forward: forward},
+		{
+			ID:      stages.Bodies,
+			Forward: forward,
+			Prune: func(context.Context, *PruneState, kv.RwTx, time.Duration, log.Logger) error {
+				return pruneErr
+			},
+		},
+	}, nil, PruneOrder{stages.Bodies}, log.New(), stages.ModeApplyingBlocks)
+	_, tx := temporaltest.NewTestTx(t)
+	require.ErrorIs(t, state.RunPrune(t.Context(), tx, false, nil, 0), pruneErr)
+
+	_, err := state.Run(nil, tx, false, false)
+	require.NoError(t, err)
+	require.Equal(t, []stages.SyncStage{stages.Headers, stages.Bodies}, flow)
 }
 
 func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
@@ -598,7 +625,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New(), stages.ModeApplyingBlocks)
 	_, tx := temporaltest.NewTestTx(t)
 	_, err := state.Run(nil, tx, true /* initialCycle */, false)
-	assert.Error(t, errInterrupted, err)
+	assert.ErrorIs(t, err, errInterrupted)
 
 	//state = NewState(s)
 	//state.unwindOrder = []*Stage{s[0], s[1], s[2]}

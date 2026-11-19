@@ -64,6 +64,7 @@ const (
 	DefaultRpcTxSyncDefaultTimeout   = 25 * time.Second
 	DefaultRpcTxSyncMaxTimeout       = 1 * time.Minute
 	DefaultGasCap                    = 50_000_000
+	DefaultSubscriptionLimit         = 1024 // concurrent subscriptions one connection may hold, as in reth
 )
 
 type BaseApiConfig struct {
@@ -100,7 +101,6 @@ func DefaultDebugApiConfig() *DebugApiConfig {
 
 // TraceApiConfig defines the configurable parameters for the trace_ namespace
 type TraceApiConfig struct {
-	MaxTraces     uint64
 	GasCap        uint64
 	Compatibility bool // Bug for bug compatibility with OpenEthereum
 }

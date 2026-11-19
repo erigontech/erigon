@@ -263,7 +263,7 @@ func TestParseMessage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, batch, err := parseMessage(json.RawMessage(tt.input))
+			got, batch, err := parseMessage(json.RawMessage(tt.input), 0)
 			require.NoError(t, err)
 			require.Equal(t, tt.batch, batch)
 			require.Len(t, got, len(tt.want))
@@ -737,7 +737,8 @@ func TestResponseLatchedErrorKeepsValidJSON(t *testing.T) {
 	err := (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}).writeResponse(s, failingMidWrite{})
 
 	require.Error(t, err)
-	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":{"balance":""},"error":{"code":-32000,"message":"append failed"}}`, string(s.Buffer()))
+	require.EqualError(t, err, "append failed")
+	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":{"balance":""},"error":{"code":-32603,"message":"append failed"}}`, string(s.Buffer()))
 	require.True(t, json.Valid(s.Buffer()))
 }
 

@@ -74,7 +74,7 @@ type BodyReader interface {
 type TxnReader interface {
 	TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error)
 	TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, ok bool, err error)
-	TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (hash common.Hash, ok bool, err error)
+	TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum, txNum uint64, i int) (hash common.Hash, ok bool, err error)
 	RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error)
 	FirstTxnNumNotInSnapshots(tx kv.Getter) uint64
 }
@@ -105,6 +105,10 @@ type FullBlockReader interface {
 	FrozenBlocks() uint64
 	// FrozenBlocksObserved reports the count and whether it was observed rather than defaulted.
 	FrozenBlocksObserved() (uint64, bool)
+	// IsFrozen may use a cached range to confirm a frozen block, but requires a
+	// fresh observation to rule one out. It returns an error if the range cannot
+	// be established.
+	IsFrozen(ctx context.Context, blockNum uint64) (bool, error)
 	FrozenBlocksInView(tx kv.Getter) uint64
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)

@@ -19,6 +19,7 @@ package rpctest
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -36,15 +37,15 @@ var routes map[string]string
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
 //
-//	use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//	use false value - to generate the pattern files (vegeta_*.txt and <method>.jsonl), it's faster
 //
 // fullTest - if false - then call only methods which RPCDaemon currently supports
-func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFrom uint64, blockTo uint64, recordFileName string) error {
+func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFrom uint64, blockTo uint64) error {
 	setRoutes(erigonURL, gethURL)
 
 	resultsCh := make(chan CallResult, 1000)
 	defer close(resultsCh)
-	go vegetaWrite(false, []string{"eth_getBlockByNumber", "debug_storageRangeAt"}, resultsCh)
+	go writePattern(false, []string{"eth_getBlockByNumber", "debug_storageRangeAt"}, resultsCh)
 
 	reqGen := &RequestGenerator{}
 
@@ -305,13 +306,15 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 	return nil
 }
 
-// vegetaWrite (to be run as a goroutine) writing results of server calls into several files:
-// results to /$tmp$/erigon_stress_test/results_*.csv
-// vegeta format going to files /$tmp$/erigon_stress_test/vegeta_*.txt
-func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
+// writePattern (to be run as a goroutine) writes the results of the server calls into files in
+// $tmp$/erigon_stress_test: the call stats to results_<target>_<method>.csv, and the requests of each
+// method both as vegeta targets, vegeta_<target>_<method>.txt, and as <method>.jsonl, one JSON-RPC
+// request per line, the pattern format that rpc_perf replays.
+func writePattern(enabled bool, methods []string, resultsCh chan CallResult) {
 	var err error
 	var files map[string]map[string]*os.File
 	var vegetaFiles map[string]map[string]*os.File
+	var jsonlFiles map[string]*os.File
 	if enabled {
 		files = map[string]map[string]*os.File{
 			Geth:   make(map[string]*os.File),
@@ -321,6 +324,7 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 			Geth:   make(map[string]*os.File),
 			Erigon: make(map[string]*os.File),
 		}
+		jsonlFiles = make(map[string]*os.File)
 		tmpDir := os.TempDir()
 		fmt.Printf("tmp dir is: %s\n", tmpDir)
 		dir := filepath.Join(tmpDir, "erigon_stress_test")
@@ -348,6 +352,14 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 			}
 		}
 
+		for _, method := range methods {
+			file := filepath.Join(dir, method+".jsonl")
+			jsonlFiles[method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+			if err != nil {
+				panic(err)
+			}
+		}
+
 		defer func() {
 			for _, routeFiles := range files {
 				for _, f := range routeFiles {
@@ -359,9 +371,13 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 					f.Close()
 				}
 			}
+			for _, f := range jsonlFiles {
+				f.Close()
+			}
 		}()
 	}
 
+	var line bytes.Buffer
 	for res := range resultsCh {
 		// If not enabled, simply keep draining the results channel
 		if enabled {
@@ -387,6 +403,17 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 					if _, err := fmt.Fprint(f, row+"\n"); err != nil {
 						panic(err)
 					}
+				}
+			}
+
+			if f, ok := jsonlFiles[res.Method]; ok {
+				line.Reset()
+				if err := json.Compact(&line, []byte(res.RequestBody)); err != nil {
+					panic(fmt.Errorf("invalid %s request %q: %w", res.Method, res.RequestBody, err))
+				}
+				line.WriteByte('\n')
+				if _, err := f.Write(line.Bytes()); err != nil {
+					panic(err)
 				}
 			}
 		}

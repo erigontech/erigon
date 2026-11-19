@@ -32,6 +32,11 @@ import (
 type accessList struct {
 	addresses map[accounts.Address]int
 	slots     []map[accounts.StorageKey]struct{}
+	// TXDIFF may warm a slot without warming its address (EIP-7906).
+	// Entries remain here when the address becomes warm; address and slot
+	// warmth are journaled independently.
+	// The length checks avoid extra key hashing when this map is empty.
+	slotsOnly map[frameStorageSlot]struct{}
 
 	// Memo of the last resolved (address -> slot set) and the last slot known
 	// warm within it: repeated AddSlot on the same addr skips the addresses
@@ -41,6 +46,13 @@ type accessList struct {
 	lastAddr     accounts.Address
 	lastSlots    map[accounts.StorageKey]struct{}
 	lastWarmSlot accounts.StorageKey
+
+	// Cleared or reverted maps retain their buckets, so these counts track
+	// their largest sizes. Peaks for addresses and slots are recorded before
+	// shrinking; slotsOnlyPeak is updated on insertion.
+	peak          []int
+	addrPeak      int
+	slotsOnlyPeak int
 }
 
 // newAccessList creates a new accessList.
@@ -54,12 +66,43 @@ func newAccessList() *accessList {
 // The slots backing array is retained; cleared inner maps are reused by
 // subsequent AddSlot calls without new allocations.
 func (al *accessList) Reset() {
-	for _, s := range al.slots {
+	for i, s := range al.slots {
+		al.markPeak(i, len(s))
 		clear(s)
 	}
+	al.markAddrPeak()
 	al.slots = al.slots[:0]
 	clear(al.addresses)
+	clear(al.slotsOnly)
 	al.dropMemo()
+}
+
+// entries reports the keys this list pins, not the keys it holds.
+func (al *accessList) entries() int {
+	for i, s := range al.slots {
+		al.markPeak(i, len(s))
+	}
+	al.markAddrPeak()
+	total := al.addrPeak + al.slotsOnlyPeak
+	for _, n := range al.peak {
+		total += n
+	}
+	return total
+}
+
+func (al *accessList) markAddrPeak() {
+	if n := len(al.addresses); n > al.addrPeak {
+		al.addrPeak = n
+	}
+}
+
+func (al *accessList) markPeak(idx, n int) {
+	if idx >= len(al.peak) {
+		al.peak = append(al.peak, make([]int, idx+1-len(al.peak))...)
+	}
+	if n > al.peak[idx] {
+		al.peak[idx] = n
+	}
 }
 
 func (al *accessList) dropMemo() {
@@ -77,6 +120,11 @@ func (al *accessList) ContainsAddress(address accounts.Address) bool {
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
 func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKey) (addressPresent bool, slotPresent bool) {
+	if len(al.slotsOnly) != 0 {
+		if _, present := al.slotsOnly[frameStorageSlot{address, slot}]; present {
+			return al.ContainsAddress(address), true
+		}
+	}
 	if al.lastSlots != nil && al.lastAddr == address {
 		if slot == al.lastWarmSlot {
 			return true, true
@@ -98,8 +146,10 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 // Copy creates an independent copy of an accessList.
 func (al *accessList) Copy() *accessList {
 	cp := &accessList{
-		addresses: maps.Clone(al.addresses),
-		slots:     make([]map[accounts.StorageKey]struct{}, len(al.slots)),
+		addresses:     maps.Clone(al.addresses),
+		slotsOnly:     maps.Clone(al.slotsOnly),
+		slotsOnlyPeak: len(al.slotsOnly),
+		slots:         make([]map[accounts.StorageKey]struct{}, len(al.slots)),
 	}
 	for i, slotMap := range al.slots {
 		cp.slots[i] = maps.Clone(slotMap)
@@ -123,6 +173,11 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
 func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
+	if len(al.slotsOnly) != 0 {
+		if _, present := al.slotsOnly[frameStorageSlot{address, slot}]; present {
+			return al.AddAddress(address), false
+		}
+	}
 	if al.lastSlots != nil && al.lastAddr == address {
 		if slot == al.lastWarmSlot {
 			return false, false
@@ -138,6 +193,18 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 		return false, true
 	}
 	return al.addSlotSlow(address, slot)
+}
+
+func (al *accessList) AddSlotOnly(address accounts.Address, slot accounts.StorageKey) bool {
+	if _, present := al.Contains(address, slot); present {
+		return false
+	}
+	if al.slotsOnly == nil {
+		al.slotsOnly = make(map[frameStorageSlot]struct{})
+	}
+	al.slotsOnly[frameStorageSlot{address, slot}] = struct{}{}
+	al.slotsOnlyPeak = max(al.slotsOnlyPeak, len(al.slotsOnly))
+	return true
 }
 
 func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
@@ -181,6 +248,7 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 		panic("reverting slot change, address has no slots")
 	}
 	slotmap := al.slots[idx]
+	al.markPeak(idx, len(slotmap))
 	delete(slotmap, slot)
 	al.dropMemo()
 	// Since additions and rollbacks are always in LIFO order, when a slot map
@@ -206,5 +274,6 @@ func (al *accessList) DeleteAddress(address accounts.Address) {
 	if idx != -1 {
 		panic("reverting address change, address still has slots")
 	}
+	al.markAddrPeak()
 	delete(al.addresses, address)
 }

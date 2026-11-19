@@ -44,6 +44,7 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 	b.SetInactivityScores(make([]uint64, b.ValidatorLength()))
 	// Change version
 	b.SetVersion(clparams.AltairVersion)
+	b.ValidatorSet().ClearPhase0Data()
 	// Fill in previous epoch participation from the pre state's pending attestations
 	if err := solid.RangeErr[*solid.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, i2 int) error {
 		attestationData := pa.Data
@@ -254,7 +255,7 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 	if queueErr != nil {
 		return queueErr
 	}
-	log.Info("Upgrade to Electra complete")
+	log.Debug("Upgrade to Electra complete")
 	return nil
 }
 
@@ -287,7 +288,7 @@ func (b *CachingBeaconState) UpgradeToFulu() error {
 	}
 	b.SetProposerLookahead(lookahead)
 
-	log.Info("Upgrade to Fulu complete")
+	log.Debug("Upgrade to Fulu complete")
 	return nil
 }
 
@@ -375,7 +376,7 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 		return err
 	}
 
-	log.Info("Upgrade to Gloas complete")
+	log.Debug("Upgrade to Gloas complete")
 	return nil
 }
 
@@ -385,13 +386,6 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
 	cfg := b.BeaconConfig()
 
-	// Build a set of validator pubkeys
-	validatorPubkeys := make(map[common.Bytes48]struct{})
-	b.ValidatorSet().Range(func(_ int, v solid.Validator, _ int) bool {
-		validatorPubkeys[v.PublicKey()] = struct{}{}
-		return true
-	})
-
 	// Process pending deposits
 	pendingDeposits := b.GetPendingDeposits()
 	newPendingDeposits := solid.NewPendingDepositList(cfg)
@@ -400,7 +394,7 @@ func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
 		deposit := pendingDeposits.Get(i)
 
 		// Deposits for existing validators stay in pending queue
-		if _, isValidator := validatorPubkeys[deposit.PubKey]; isValidator {
+		if _, isValidator := b.ValidatorIndexByPubkey(deposit.PubKey); isValidator {
 			newPendingDeposits.Append(deposit)
 			continue
 		}

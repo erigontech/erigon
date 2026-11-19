@@ -68,12 +68,12 @@ func TestProposerSlashing(t *testing.T) {
 func TestAttesterSlashing(t *testing.T) {
 	// Create sample data
 	attestation1 := &IndexedAttestation{
-		AttestingIndices: solid.NewRawUint64List(9192, nil),
+		AttestingIndices: solid.NewRawUint64List(attestingIndicesLimit, nil),
 		Data:             &solid.AttestationData{},
 	}
 	// Create an IndexedAttestation object
 	attestation2 := &IndexedAttestation{
-		AttestingIndices: solid.NewRawUint64List(9192, nil),
+		AttestingIndices: solid.NewRawUint64List(attestingIndicesLimit, nil),
 		Data:             &solid.AttestationData{},
 	}
 	// Create AttesterSlashing
@@ -96,7 +96,7 @@ func TestAttesterSlashing(t *testing.T) {
 	assert.Equal(t, expectedEncodingSize, encodingSize)
 
 	// Test HashSSZ
-	expectedRoot := common.HexToHash("54b2c5a7b42c22af13ee41982858a6977af16358b5ced64f985385944c305e99") // Expected root value
+	expectedRoot := common.HexToHash("0x8057d3edd5265d28219703ee81f361fc163071c9f5671d4411832bd7d7ef7c2d") // Expected root value
 	root, err := attesterSlashing.HashSSZ()
 	require.NoError(t, err)
 	assert.Equal(t, expectedRoot, common.Hash(root))

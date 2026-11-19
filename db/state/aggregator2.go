@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -33,11 +34,13 @@ type AggOpts struct { //nolint:gocritic
 	coldIOMaxMBps                   uint64
 	referencesInCommitmentBranches  *bool // nil = leave global schema default untouched
 
-	genSaltIfNeed       bool
-	sanityOldNaming     bool // prevent start directory with old file names
-	disableFsync        bool // for tests speed
-	disableBranchCache  bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
-	skipFilesDBGapCheck bool
+	genSaltIfNeed                  bool
+	sanityOldNaming                bool // prevent start directory with old file names
+	disableFsync                   bool // for tests speed
+	disableBranchCache             bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
+	skipFilesDBGapCheck            bool
+	buildsMissedAccessorsAfterOpen bool
+	btIndexInMem                   bool // see BtIndexInMem
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
@@ -62,8 +65,11 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 		}
 	}
 	if opts.sanityOldNaming {
+		if err := CheckRestoreResetDone(opts.dirs); err != nil {
+			return nil, err
+		}
 		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
-			panic(err)
+			return nil, err
 		}
 	}
 
@@ -85,6 +91,7 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 	a.branchCacheDisabled = opts.disableBranchCache
 	a.disableFsync = opts.disableFsync
 	a.skipFilesDBGapCheck = opts.skipFilesDBGapCheck
+	a.buildsMissedAccessorsAfterOpen = opts.buildsMissedAccessorsAfterOpen
 
 	a.savedSalt = salt
 
@@ -111,6 +118,14 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 	if err := a.checkCommitmentTiering(); err != nil {
 		a.Close()
 		return nil, err
+	}
+	if opts.btIndexInMem {
+		budget := newBtInMemBudget(estimate.TotalMemory())
+		for _, d := range a.d {
+			if d != nil {
+				d.btBudget = budget
+			}
+		}
 	}
 
 	return a, nil
@@ -169,8 +184,23 @@ func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts
 func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts } //nolint:gocritic
 
 func (opts AggOpts) SkipFilesDBGapCheck() AggOpts { opts.skipFilesDBGapCheck = true; return opts } //nolint:gocritic
+
+// BuildsMissedAccessorsAfterOpen defers the files/DB gap check while accessors are missing: the caller runs BuildMissedAccessors, which checks after the build.
+func (opts AggOpts) BuildsMissedAccessorsAfterOpen() AggOpts { //nolint:gocritic
+	opts.buildsMissedAccessorsAfterOpen = true
+	return opts
+}
+
 func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
+	return opts
+}
+
+// BtIndexInMem lets the domains read state .bt files into memory when the node has room for them (see
+// readBtIndexInMem). Only the process that executes blocks gains from it; other processes on the same
+// datadir would hold their own copies.
+func (opts AggOpts) BtIndexInMem() AggOpts { //nolint:gocritic
+	opts.btIndexInMem = true
 	return opts
 }
 
@@ -253,6 +283,23 @@ func (w *workersCfg) unlockEditing() {
 
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	for _, dirPath := range d.VersionedDirs() {
+		if dirPath == d.SnapDomain || dirPath == d.SnapHistory {
+			err := forEachCommitmentDataFile(dirPath, func(name string, major uint64) error {
+				if statecfg.Schema.CommitmentDomain.CommitmentV3Records && major < 3 {
+					return fmt.Errorf("commitment file %s is legacy (v%d) but commitment v3 is enabled; with ERIGON_COMMITMENT_V3 unset, "+
+						"convert the datadir with `integration commitment convert --v3`, "+
+						"or roll back an interrupted conversion with `integration commitment convert --restore`; "+rebuildV3Advice, name, major)
+				}
+				if !statecfg.ExperimentalCommitmentV3 && major >= 3 {
+					return fmt.Errorf("commitment file %s requires commitment v3; run erigon with --experimental.commitment-v3 (other tools: ERIGON_COMMITMENT_V3=true), "+
+						"or roll back an interrupted conversion with `integration commitment convert --restore`", name)
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				if os.IsNotExist(err) { // skip magically disappeared files

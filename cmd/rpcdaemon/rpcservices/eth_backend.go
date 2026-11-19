@@ -64,6 +64,9 @@ func NewRemoteBackend(client remoteproto.ETHBACKENDClient, db kv.RoDB, blockRead
 	}
 }
 
+// BlockReader returns the block reader that RemoteBackend wraps.
+func (back *RemoteBackend) BlockReader() dbservices.FullBlockReader { return back.blockReader }
+
 func (back *RemoteBackend) CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64) {
 	return back.blockReader.CanPruneTo(currentBlockInDB)
 }
@@ -125,6 +128,10 @@ func (back *RemoteBackend) AllTypes() []snaptype.Type { panic("not implemented")
 func (back *RemoteBackend) FrozenBlocks() uint64      { return back.blockReader.FrozenBlocks() }
 func (back *RemoteBackend) FrozenBlocksObserved() (uint64, bool) {
 	return back.blockReader.FrozenBlocksObserved()
+}
+
+func (back *RemoteBackend) IsFrozen(ctx context.Context, blockNum uint64) (bool, error) {
+	return back.blockReader.IsFrozen(ctx, blockNum)
 }
 
 func (back *RemoteBackend) FrozenBlocksInView(tx kv.Getter) uint64 {
@@ -381,8 +388,8 @@ func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, bl
 	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
 }
 
-func (back *RemoteBackend) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (common.Hash, bool, error) {
-	return back.blockReader.TxnHashByIdxInBlock(ctx, tx, blockNum, i)
+func (back *RemoteBackend) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum, txNum uint64, i int) (common.Hash, bool, error) {
+	return back.blockReader.TxnHashByIdxInBlock(ctx, tx, blockNum, txNum, i)
 }
 
 func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {

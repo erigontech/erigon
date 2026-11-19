@@ -1371,7 +1371,12 @@ class ReleaseDriftTests(unittest.TestCase):
         self.assertTrue(anchor, "no release anchor in the corpus")
         release = Counter(anchor).most_common(1)[0][0]
         major, minor, patch = release.split(".")
-        bumped = full.replace(release, f"{major}.{minor}.{int(patch) + 1}")
+        # A release moves the token, not a declared historical version, so the
+        # bump leaves the pinned phrases as they are.
+        parts = g._split_pinned(full, g._all_pinned_phrases())
+        bumped = "".join(
+            part if i % 2 else part.replace(release, f"{major}.{minor}.{int(patch) + 1}")
+            for i, part in enumerate(parts))
         self.assertEqual(g._mask_versions(full), g._mask_versions(bumped))
 
     def test_a_longer_version_ending_in_the_release_is_not_masked(self):
@@ -1413,6 +1418,75 @@ class ReleaseDriftTests(unittest.TestCase):
             finally:
                 g.SECTIONS = real
         self.assertEqual(1, len(hits), "planted pin was not reported")
+
+    PIN = "Measured on Erigon 3.6.1"
+
+    def test_a_pinned_phrase_survives_a_release_bump(self):
+        # The pinned version is history: after the release moves past it the
+        # regenerated corpus still says 3.6.1, and that is drift, not staleness.
+        committed = f"erigon:v3.6.1 image. {self.PIN} in September."
+        fresh = f"erigon:v3.6.2 image. {self.PIN} in September."
+        self.assertEqual(g._mask_versions(committed, [self.PIN]),
+                         g._mask_versions(fresh, [self.PIN]))
+        self.assertIn(self.PIN, g._mask_versions(committed, [self.PIN]))
+
+    def test_an_edit_to_a_pinned_version_is_staleness(self):
+        # While the pin equals the release the global mask used to swallow it,
+        # so re-measuring on 3.6.2 without regenerating passed as drift.
+        committed = f"erigon:v3.6.1 image. {self.PIN} in September."
+        edited = "erigon:v3.6.1 image. Measured on Erigon 3.6.2 in September."
+        for pinned in ([self.PIN], ["Measured on Erigon 3.6.2"]):
+            self.assertNotEqual(g._mask_versions(committed, pinned),
+                                g._mask_versions(edited, pinned), pinned)
+
+    def test_without_the_declaration_the_pin_is_masked(self):
+        # The control for the two tests above: undeclared, the pin collides.
+        self.assertNotIn(self.PIN, g._mask_versions(
+            f"erigon:v3.6.1 image. {self.PIN} in September.", []))
+
+    def test_a_longer_version_is_not_pinned_by_a_prefix(self):
+        # `Measured on Erigon 3.6.10` starts with the declared phrase but is a
+        # different version; pinning it would exempt an edit to it.
+        self.assertEqual(
+            1, len(g._split_pinned("Measured on Erigon 3.6.10 later", [self.PIN])))
+        self.assertEqual(
+            3, len(g._split_pinned("Measured on Erigon 3.6.1 later", [self.PIN])))
+
+    def scan(self, files):
+        import pathlib
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            for name, text in files.items():
+                (pathlib.Path(d) / name).write_text(text, encoding="utf-8")
+            real, g.SECTIONS = g.SECTIONS, [("t", pathlib.Path(d), "t")]
+            try:
+                return [(p.name, n) for p, n, _ in g._literal_release_uses("3.6.1")]
+            finally:
+                g.SECTIONS = real
+
+    def test_the_hazard_check_accepts_only_the_declared_phrase(self):
+        decl = f"{{/* llms-pinned-version: {self.PIN} */}}"
+        hits = self.scan({
+            "page.mdx": f"{decl}\n\n{self.PIN} in September.\n"
+                        "dependency v3.6.1 is pinned\n",
+            "other.mdx": f"{self.PIN} too.\n",
+        })
+        # The declaration and the declared phrase pass; an unrelated pin on the
+        # same page and the same phrase on an undeclaring page are still pins.
+        self.assertEqual([("other.mdx", 1), ("page.mdx", 4)], sorted(hits))
+
+    def test_a_declaration_without_a_version_is_refused(self):
+        with self.assertRaises(ValueError):
+            g._pinned_phrases("{/* llms-pinned-version: Measured on Erigon */}")
+
+    def test_every_pinned_phrase_reaches_the_corpus(self):
+        # A phrase that the page no longer renders verbatim — reworded, or
+        # split by markup — protects nothing and hides that it protects nothing.
+        _, full, _ = g.build()
+        pinned = g._all_pinned_phrases()
+        self.assertTrue(pinned, "no pinned phrase declared")
+        self.assertEqual([], [p for p in pinned if p not in full])
+        self.assertNotIn("llms-pinned-version", full)
 
 
 class InlineCodeSpacingTests(unittest.TestCase):
