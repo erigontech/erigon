@@ -382,6 +382,8 @@ func (pe *PipelineExecutor) ValidateBlock(sd *execctx.SharedDomains, tx kv.Tempo
 		return err
 	}
 
+	npStep := time.Now()
+	defer func() { log.Info("[np-phase] statestep", "npStateStep", time.Since(npStep)) }()
 	if err := stageloop.StateStep(chainReader, pe.engine, sd, tx, pe.validationSync, unwindPoint, headersChain, bodiesChain); err != nil {
 		if errors.Is(err, stageloop.ErrStateStepHasMoreWork) {
 			pe.logger.Debug("Could not validate block", "err", err)
