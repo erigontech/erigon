@@ -792,6 +792,63 @@ func TestCallConstructorRetryAfterRollback(t *testing.T) {
 	})
 }
 
+func TestCallConstructorRetryInsufficientBalance(t *testing.T) {
+	entry := common.HexToAddress("0x2000")
+	factory := common.HexToAddress("0x3000")
+	runtime := hexutil.Bytes{byte(vm.STOP)}
+	initCode := program.New().ReturnData(runtime).Bytes()
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+
+	// The factory accepts one byte of runtime code and uses the calldata length as the endowment.
+	create := program.New().Mstore(initCode, 0).Push0().Push(len(initCode)).Push0().Op(vm.CALLDATASIZE, vm.CREATE2, vm.EXTCODESIZE)
+	factoryCode := testutil.AssertStackWord(create, 1)
+	calls := program.New().Call(nil, factory, 0, 0, 0, 0, 0).Op(vm.POP)
+	calls.Call(nil, factory, 0, 0, 1, 0, 0).Op(vm.POP)
+
+	for _, fork := range []struct {
+		name   string
+		config *chain.Config
+	}{
+		{"Osaka", chain.TestChainOsakaConfig},
+		{"Amsterdam", chain.AllProtocolChanges},
+	} {
+		t.Run(fork.name, func(t *testing.T) {
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+				Config: fork.config.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+				Alloc: types.GenesisAlloc{
+					testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+					entry:    {Code: calls.Bytes()},
+					factory:  {Code: factoryCode.Bytes()},
+				},
+			}), execmoduletester.WithKey(testKey))
+			txn, err := types.SignTx(types.NewTransaction(0, entry, new(uint256.Int), 2_000_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
+			require.NoError(t, err)
+			pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(pack))
+			base := newBaseApiForTest(m)
+			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 5_000_000}, NewOtterscanAPI(base, m.DB, 25))
+			result, err := api.CallConstructor(m.Ctx, target, initCode)
+			require.NoError(t, err)
+			require.Equal(t, &CreationCode{Code: &runtime}, result)
+
+			for _, tc := range []struct {
+				name        string
+				replacement []byte
+			}{
+				{"first deployment rolled back", program.New().Return(0, 2).Bytes()},
+				{"first constructor reverted", program.New().Push0().Push0().Op(vm.REVERT).Bytes()},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					result, err := api.CallConstructor(m.Ctx, target, tc.replacement)
+					require.Nil(t, result)
+					require.ErrorIs(t, err, vm.ErrInsufficientBalance)
+				})
+			}
+		})
+	}
+}
+
 func TestCallConstructorPreservesSiblingCreate(t *testing.T) {
 	factory := common.HexToAddress("0x2000")
 	helper := types.CreateAddress(factory, 0)

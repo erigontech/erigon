@@ -56,8 +56,8 @@ type Config struct {
 	// address is derived, so CREATE2 keeps the address of the original initcode.
 	// The EVM clears the original code hash because it keys the shared jump destination cache.
 	OverrideInitCode func(address accounts.Address, initCode []byte) []byte
-	// OnInitCodeOverrideError reports a nested creation that failed while charging
-	// for the override, before its constructor frame started.
+	// OnInitCodeOverrideError reports gas or preparation errors that prevent
+	// a nested creation from entering its constructor frame during replay.
 	OnInitCodeOverrideError func(address accounts.Address, err error)
 }
 

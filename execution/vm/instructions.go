@@ -1103,11 +1103,14 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	var suberr error
 	switch {
 	case evm.chainRules.IsAmsterdam || scope.create.overridePending:
-		scope.create.overridePending = false
 		address = scope.create.address
 		codeAndHash.hash = scope.create.codeHash
 		preparation = scope.create.preparation
 		suberr = scope.create.err
+		if suberr != nil && scope.create.overridePending && evm.config.OnInitCodeOverrideError != nil {
+			evm.config.OnInitCodeOverrideError(address, suberr)
+		}
+		scope.create.overridePending = false
 		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
 			return pc, nil, suberr
 		}
