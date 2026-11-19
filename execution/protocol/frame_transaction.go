@@ -106,14 +106,13 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	if err != nil {
 		return nil, err
 	}
-	maxCost, blobCost := budget.MaxCost, budget.BlobCost
 	st.state.Prepare(rules, sender, st.evm.Context.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
 	if st.evm.Config().NoBAL {
 		st.state.StopAccessRecording()
 	}
 	snapshot := st.state.PushSnapshot()
 	defer st.state.PopSnapshot(snapshot)
-	ctx := st.state.NewFrameContext(tx, maxCost)
+	ctx := st.state.NewFrameContext(tx, budget.MaxCost)
 	ctx.LegacyNonce = nonce
 	st.evm.FrameContext = ctx
 	defer func() {
@@ -269,10 +268,8 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 		paidExecution = max(used.Execution-refund, floor)
 	}
 	paid := paidExecution + used.State
-	basePaid := u256.Add(u256.Mul(u256.U64(paid), baseFee), blobCost)
-	available := u256.Sub(maxCost, basePaid)
-	tipPaid := tx.Fees.PriorityCost(paid, &available)
-	change := u256.Sub(available, tipPaid)
+	gasFee, tipPaid := budget.Settle(paid, &baseFee, &tx.Fees.TipCap)
+	change := u256.Sub(budget.MaxCost, u256.Add(gasFee, budget.BlobCost))
 	if err := st.state.AddBalance(ctx.Payer, change, tracing.BalanceIncreaseGasReturn); err != nil {
 		return nil, err
 	}
@@ -280,7 +277,7 @@ func (st *TxnExecutor) executeFrameTransaction(tx *types.FrameTransaction, refun
 	if err != nil {
 		return nil, err
 	}
-	burned, burnAddress, err := st.burnFees(paid, blobCost)
+	burned, burnAddress, err := st.burnFees(paid, budget.BlobCost)
 	if err != nil {
 		return nil, err
 	}

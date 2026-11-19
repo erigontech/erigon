@@ -82,10 +82,6 @@ func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Temp
 	return api.receiptsGenerator.GetReceipt(ctx, cc, tx, header, txn, index, txNum, postState)
 }
 
-func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, framesOnly bool) (types.Receipts, error) {
-	return api.receiptsGenerator.GetReceiptsGasUsed(ctx, tx, block, api._txNumReader, framesOnly)
-}
-
 func (api *BaseAPI) frameReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	// Receipt metadata is indexed by canonical transaction number, so it
 	// cannot supply gas used for another block at the same height.
@@ -93,7 +89,7 @@ func (api *BaseAPI) frameReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, 
 	if err != nil || !ok || hash != block.Hash() {
 		return nil, err
 	}
-	return api.getReceiptsGasUsed(ctx, tx, block, true)
+	return api.receiptsGenerator.GetReceiptsGasUsed(ctx, tx, block, true)
 }
 
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {

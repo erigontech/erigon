@@ -49,7 +49,6 @@ func TestGasUsedBelowReceiptHistory(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	block := types.NewBlockFromStorage(header.Hash(), header, types.Transactions{frame, frame, frame, frame}, nil, nil, nil)
 	g := newTestGenerator(t)
-	g.txNumReader = rawdbv3.TxNums
 
 	check := func(t *testing.T, wantFirst uint64) {
 		t.Helper()
@@ -59,7 +58,7 @@ func TestGasUsedBelowReceiptHistory(t *testing.T) {
 		last, err := g.GetReceiptGasUsed(t.Context(), tx, header, frame, 3)
 		require.NoError(t, err)
 		require.Equal(t, uint64(400), last)
-		byIndex, err := g.GetReceiptsGasUsed(t.Context(), tx, block, rawdbv3.TxNums, true)
+		byIndex, err := g.GetReceiptsGasUsed(t.Context(), tx, block, true)
 		require.NoError(t, err)
 		if wantFirst == 0 {
 			require.Nil(t, byIndex[0])
@@ -68,7 +67,7 @@ func TestGasUsedBelowReceiptHistory(t *testing.T) {
 		}
 		require.Nil(t, byIndex[1])
 		require.Equal(t, uint64(400), byIndex[3].GasUsed)
-		_, err = g.GetReceiptsGasUsed(t.Context(), tx, block, rawdbv3.TxNums, false)
+		_, err = g.GetReceiptsGasUsed(t.Context(), tx, block, false)
 		require.ErrorIs(t, err, state.ErrPruned)
 	}
 	t.Run("metadata only", func(t *testing.T) { check(t, 0) })
@@ -105,7 +104,7 @@ func TestFirstReceiptAtGasHistoryStart(t *testing.T) {
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 1))
 	block := types.NewBlockFromStorage(common.Hash{1}, &types.Header{Number: *uint256.NewInt(1)},
 		types.Transactions{&types.FrameTransaction{}, &types.LegacyTx{}}, nil, nil, nil)
-	got, err := newTestGenerator(t).GetReceiptsGasUsed(t.Context(), tx, block, rawdbv3.TxNums, false)
+	got, err := newTestGenerator(t).GetReceiptsGasUsed(t.Context(), tx, block, false)
 	require.NoError(t, err)
 	require.Equal(t, types.Receipts{{GasUsed: 100}, {GasUsed: 200}}, got)
 }
@@ -139,7 +138,7 @@ func TestGetReceiptsGasUsedMixedBlock(t *testing.T) {
 
 	g := newTestGenerator(t)
 	t.Run("before execution", func(t *testing.T) {
-		got, err := g.GetReceiptsGasUsed(t.Context(), tx, block, rawdbv3.TxNums, true)
+		got, err := g.GetReceiptsGasUsed(t.Context(), tx, block, true)
 		require.NoError(t, err)
 		require.Empty(t, got)
 	})
@@ -163,7 +162,7 @@ func TestGetReceiptsGasUsedMixedBlock(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			counted := &receiptReadCounter{TemporalTx: tx}
-			got, err := g.GetReceiptsGasUsed(t.Context(), counted, block, rawdbv3.TxNums, tc.framesOnly)
+			got, err := g.GetReceiptsGasUsed(t.Context(), counted, block, tc.framesOnly)
 			require.NoError(t, err)
 			require.Equal(t, tc.reads, counted.reads)
 			require.Equal(t, tc.want, got)

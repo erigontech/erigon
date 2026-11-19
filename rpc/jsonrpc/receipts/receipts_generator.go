@@ -769,7 +769,7 @@ func (g *Generator) GetReceiptGasUsed(ctx context.Context, tx kv.TemporalTx, hea
 // GetReceiptsGasUsed returns gas usage indexed by transaction position.
 // With framesOnly, an unexecuted block returns nil and individual entries may
 // be nil. A request for all receipts needs exact gas weights for every transaction.
-func (g *Generator) GetReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, txNumsReader rawdbv3.TxNumsReader, framesOnly bool) (types.Receipts, error) {
+func (g *Generator) GetReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block, framesOnly bool) (types.Receipts, error) {
 	tx = g.filters.WithTemporalOverlay(tx)
 	if err := rpchelper.CheckBlockExecuted(tx, block.NumberU64()); err != nil {
 		if _, unexecuted := errors.AsType[*rpchelper.BlockNotExecutedError](err); framesOnly && unexecuted {
@@ -783,7 +783,7 @@ func (g *Generator) GetReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, bl
 	if len(block.Transactions()) == 0 {
 		return types.Receipts{}, nil
 	}
-	startTxNum, err := txNumsReader.Min(ctx, tx, block.NumberU64())
+	startTxNum, err := g.txNumReader.Min(ctx, tx, block.NumberU64())
 	if err != nil {
 		return nil, err
 	}

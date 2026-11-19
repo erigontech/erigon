@@ -191,6 +191,9 @@ func TestFrameReceiptGasTip(t *testing.T) {
 		paid, err := GasTipPaid(frame, gasLimit, baseFee, blobBaseFee)
 		require.NoError(t, err)
 		require.Equal(t, uint256.NewInt(totalTip), &paid)
+		fee, err := GasFeePaid(frame, gasLimit, baseFee, blobBaseFee)
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(gasLimit*baseFee.Uint64()+totalTip), &fee)
 	})
 	t.Run("zero gas used", func(t *testing.T) {
 		frame.Fees.MaxFee.SetUint64(required)

@@ -60,6 +60,18 @@ func (api *BaseAPI) frameBlobBaseFee(ctx context.Context, tx kv.Tx, header *type
 	return nil, nil
 }
 
+func (api *BaseAPI) canonicalFrameGasPriceInputs(ctx context.Context, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int) (blobBaseFee *uint256.Int, gasUsed uint64, err error) {
+	if txn.Type() != types.FrameTxType {
+		return nil, 0, nil
+	}
+	blobBaseFee, err = api.frameBlobBaseFee(ctx, tx, header, txn)
+	if err != nil {
+		return nil, 0, err
+	}
+	gasUsed, err = api.receiptsGenerator.GetReceiptGasUsed(ctx, tx, header, txn, index)
+	return blobBaseFee, gasUsed, err
+}
+
 // GetTransactionByHash implements eth_getTransactionByHash. Returns information about a transaction given the transaction's hash.
 func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Hash) (*ethapi.RPCTransaction, error) {
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
@@ -113,16 +125,9 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, nil
 		}
 
-		blobFee, err := api.frameBlobBaseFee(ctx, tx, header, txn)
+		blobFee, gasUsed, err := api.canonicalFrameGasPriceInputs(ctx, tx, header, txn, txnIndex)
 		if err != nil {
 			return nil, err
-		}
-		var gasUsed uint64
-		if txn.Type() == types.FrameTxType {
-			gasUsed, err = api.receiptsGenerator.GetReceiptGasUsed(ctx, tx, header, txn, txnIndex)
-			if err != nil {
-				return nil, err
-			}
 		}
 		return ethapi.NewRPCTransaction(txn, blockHash, blockTime, blockNum, uint64(txnIndex), baseFee, blobFee, gasUsed), nil
 	}
@@ -349,16 +354,9 @@ func (api *APIImpl) rpcTxnByIdxInBlock(ctx context.Context, tx kv.TemporalTx, bl
 	if err != nil || !ok {
 		return nil, err
 	}
-	blobFee, err := api.frameBlobBaseFee(ctx, tx, header, txn)
+	blobFee, gasUsed, err := api.canonicalFrameGasPriceInputs(ctx, tx, header, txn, int(txIdxInBlock))
 	if err != nil {
 		return nil, err
-	}
-	var gasUsed uint64
-	if txn.Type() == types.FrameTxType {
-		gasUsed, err = api.receiptsGenerator.GetReceiptGasUsed(ctx, tx, header, txn, int(txIdxInBlock))
-		if err != nil {
-			return nil, err
-		}
 	}
 	return ethapi.NewRPCTransaction(txn, blockHash, header.Time, blockNum, txIdxInBlock, header.BaseFee, blobFee, gasUsed), nil
 }

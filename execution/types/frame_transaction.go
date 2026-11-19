@@ -131,16 +131,27 @@ func (fees *FrameFees) Budget(gas, blobGas uint64, baseFee, blobBaseFee *uint256
 		return budget, err
 	}
 	available := new(uint256.Int).Sub(&fees.MaxFee, &required)
-	priority := fees.PriorityCost(gas, available)
+	priority := framePriorityCost(gas, &fees.TipCap, available)
 	budget.MaxCost.Add(&required, &priority)
 	budget.GasPrice.Div(&priority, uint256.NewInt(gas))
 	budget.GasPrice.Add(&budget.GasPrice, baseFee)
 	return budget, nil
 }
 
-func (fees *FrameFees) PriorityCost(gas uint64, available *uint256.Int) uint256.Int {
+// Settle returns the fee for the gas actually charged and the proposer's share,
+// both in wei. The blob fee is accounted for separately in BlobCost.
+func (budget *FrameFeeBudget) Settle(gasUsed uint64, baseFee, tipCap *uint256.Int) (gasFee, tip uint256.Int) {
+	gasFee.Mul(uint256.NewInt(gasUsed), baseFee)
+	var available uint256.Int
+	available.Sub(&budget.MaxCost, &budget.BlobCost).Sub(&available, &gasFee)
+	tip = framePriorityCost(gasUsed, tipCap, &available)
+	gasFee.Add(&gasFee, &tip)
+	return gasFee, tip
+}
+
+func framePriorityCost(gas uint64, tipCap, available *uint256.Int) uint256.Int {
 	var priority uint256.Int
-	if _, overflow := priority.MulOverflow(&fees.TipCap, uint256.NewInt(gas)); overflow || priority.Gt(available) {
+	if _, overflow := priority.MulOverflow(tipCap, uint256.NewInt(gas)); overflow || priority.Gt(available) {
 		return *available
 	}
 	return priority
