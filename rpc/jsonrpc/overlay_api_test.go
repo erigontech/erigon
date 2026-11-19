@@ -792,6 +792,35 @@ func TestCallConstructorRetryAfterRollback(t *testing.T) {
 	})
 }
 
+func TestCallConstructorPreservesSiblingCreate(t *testing.T) {
+	factory := common.HexToAddress("0x2000")
+	helper := types.CreateAddress(factory, 0)
+	target := types.CreateAddress(factory, 1)
+	initCode := program.New().ReturnData([]byte{byte(vm.ADD)}).Bytes()
+	create := program.New().Push(len(initCode)).Push0().Push0().Op(vm.CREATE, vm.POP).Bytes()
+	factoryCode := program.New().Mstore(initCode, 0).Append(create).Append(create)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chain.TestChainOsakaConfig.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+			factory:  {Code: factoryCode.Bytes()},
+		},
+	}), execmoduletester.WithKey(testKey))
+	txn, err := types.SignTx(types.NewTransaction(0, factory, new(uint256.Int), 500_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
+	require.NoError(t, err)
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+
+	replacement := program.New().ExtcodeCopy(helper, 0, 0, 1).Return(0, 2)
+	result, err := api.CallConstructor(m.Ctx, target, replacement.Bytes())
+	require.NoError(t, err)
+	want := hexutil.Bytes{byte(vm.ADD), byte(vm.STOP)}
+	require.Equal(t, &CreationCode{Code: &want}, result)
+}
+
 func TestCallConstructorNestedInitCodeErrors(t *testing.T) {
 	entry, factory := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
 	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
@@ -834,6 +863,7 @@ func TestCallConstructorNestedInitCodeErrors(t *testing.T) {
 			}{
 				{"size limit", common.RightPadBytes(initCode, params.MaxInitCodeSize+1), vm.ErrMaxInitCodeSizeExceeded},
 				{"analysis gas", common.RightPadBytes(initCode, 32*1024), vm.ErrOutOfGas},
+				{"code deposit gas", program.New().Return(0, 100).Bytes(), vm.ErrCodeStoreOutOfGas},
 				{"constructor fault before factory failure", []byte{byte(vm.INVALID)}, &vm.ErrInvalidOpCode{}},
 			} {
 				t.Run(tc.name, func(t *testing.T) {

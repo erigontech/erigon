@@ -38,6 +38,46 @@ import (
 	"github.com/erigontech/erigon/execution/vm/program"
 )
 
+func TestCreateInitCodeOverrideCodeHash(t *testing.T) {
+	original := program.New().Return(0, 1).Bytes()
+	replacement := program.New().Return(0, 2).Bytes()
+	for _, fork := range []struct {
+		name   string
+		config *chain.Config
+	}{
+		{"Berlin", chain.TestChainBerlinConfig},
+		{"Osaka", chain.TestChainOsakaConfig},
+		{"Amsterdam", chain.AllProtocolChanges},
+	} {
+		for _, op := range []vm.OpCode{vm.CREATE, vm.CREATE2} {
+			t.Run(fork.name+"/"+op.String(), func(t *testing.T) {
+				hooks := &tracing.Hooks{}
+				evm, factory, target := createOverrideEVM(t, fork.config, op, original, vm.Config{
+					Tracer:           hooks,
+					OverrideInitCode: func(_ accounts.Address, _ []byte) []byte { return replacement },
+				})
+				var executedHash common.Hash
+				var frameHash accounts.CodeHash
+				hooks.OnOpcode = func(pc uint64, _ byte, _, _ uint64, scope tracing.OpContext, _ []byte, _ int, _ error) {
+					if pc == 0 && scope.Address() == target {
+						executedHash = crypto.Keccak256Hash(scope.Code())
+						frameHash = scope.CodeHash()
+					}
+				}
+				_, _, _, err := evm.Call(accounts.ZeroAddress, factory, nil, mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}, uint256.Int{}, false)
+				require.NoError(t, err)
+				require.Equal(t, crypto.Keccak256Hash(replacement), executedHash, "executed initcode")
+				if !frameHash.IsZero() {
+					require.Equal(t, executedHash, frameHash.Value(), "constructor code hash")
+				}
+				code, err := evm.IntraBlockState().GetCode(target)
+				require.NoError(t, err)
+				require.Equal(t, []byte{0, 0}, code)
+			})
+		}
+	}
+}
+
 func TestCreateInitCodeOverrideSize(t *testing.T) {
 	for _, fork := range []struct {
 		name   string
