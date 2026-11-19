@@ -280,9 +280,6 @@ func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 		}
 	}
 	s.prevUnwindPoint = s.unwindPoint
-	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return err
-	}
 	return nil
 }
 
