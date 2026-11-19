@@ -501,9 +501,10 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 	blockNum := uint64(0)
 	txNum := uint64(1) // 2 system txs in begin/end of block. Attribute state-writes to first, consensus state-changes to second
 
-	r, w := state.NewNoopReader(), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r := state.NewNoopReader()
 
-	statedb := state.NewForSequentialCommitment(r)
+	statedb := state.NewWithVersionMap(r, state.NewVersionMap(nil))
+	statedb.SetTxContext(blockNum, 0)
 	statedb.SetTrace(false)
 
 	hasConstructorAllocation := false
@@ -567,7 +568,11 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 			}
 		}
 	}
-	if err := statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
+	ws, err := statedb.FinalizedWrites(&chain.Rules{})
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := state.ApplyWrites(ws, sd, tx, blockNum, txNum, false); err != nil {
 		return nil, nil, err
 	}
 
