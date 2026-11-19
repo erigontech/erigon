@@ -38,6 +38,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -107,6 +108,8 @@ type Aggregator struct {
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
 
+	deferredDomainWarnings [kv.DomainLen]rate.Sometimes
+
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
@@ -159,6 +162,9 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*
 		workers:            workersCfg{merge: dbg.MergeWorkers, collateAndBuild: dbg.CollateWorkers},
 
 		produce: true,
+	}
+	for id := range a.deferredDomainWarnings {
+		a.deferredDomainWarnings[id].Interval = time.Minute
 	}
 	empty := &aggregatorVisible{}
 	a.visible.Store(empty)
@@ -1118,6 +1124,10 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 				return fmt.Errorf("domain collation %q has failed: %w", d.FilenameBase, err)
 			}
 			if skip {
+				a.deferredDomainWarnings[id].Do(func() {
+					a.logger.Warn("[snapshots] first snapshot deferred because older values remain in MDBX",
+						"domain", d.Name, "buildStep", step, "action", "rebuild missing snapshots for this domain")
+				})
 				return nil
 			}
 			sf, err := d.buildFiles(workerCtx, step, collation, a.backgroundProgress)
