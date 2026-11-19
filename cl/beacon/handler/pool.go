@@ -374,23 +374,9 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 
 func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) {
 	clVersion := a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetCurrentEpoch())
-	maxIndices := state.MaxIndexedAttestationIndices(a.beaconChainCfg, clVersion)
-	if maxIndices > uint64(math.MaxInt) || maxIndices > (math.MaxInt64-attesterSlashingJSONOverhead)/attesterSlashingJSONBytesPerIndexPair {
-		beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("attester slashing limits exceed supported range")).WriteTo(w)
-		return
-	}
-	maxBodySize := attesterSlashingJSONOverhead + int64(maxIndices)*attesterSlashingJSONBytesPerIndexPair
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodySize))
+	req, err := a.readAttesterSlashing(w, r, clVersion)
 	if err != nil {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-		return
-	}
-
-	req := cltypes.NewAttesterSlashing(clVersion)
-	req.Attestation_1.AttestingIndices.SetCap(int(maxIndices))
-	req.Attestation_2.AttestingIndices.SetCap(int(maxIndices))
-	if err := json.Unmarshal(body, req); err != nil {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		err.WriteTo(w)
 		return
 	}
 	a.submitAttesterSlashing(w, r, req)
@@ -402,37 +388,31 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttesterSlashings(w http.ResponseWriter,
 		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid Eth-Consensus-Version header: %w", err)).WriteTo(w)
 		return
 	}
-	const jsonOverhead = 4 << 10
-	const bytesPerIndexPair = 2 * 32
-	maxIndices := a.beaconChainCfg.MaxValidatorsPerCommittee
-	committees := uint64(1)
-	if version >= clparams.ElectraVersion {
-		committees = a.beaconChainCfg.MaxCommitteesPerSlot
-	}
-	maxSupportedIndices := min(uint64(math.MaxInt), uint64((math.MaxInt64-jsonOverhead)/bytesPerIndexPair))
-	if committees != 0 && maxIndices > maxSupportedIndices/committees {
-		beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("attester slashing limits exceed supported range")).WriteTo(w)
+	req, endpointErr := a.readAttesterSlashing(w, r, version)
+	if endpointErr != nil {
+		endpointErr.WriteTo(w)
 		return
 	}
-	maxIndices *= committees
-	bodyLimit := jsonOverhead + int64(maxIndices)*bytesPerIndexPair
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, bodyLimit))
+	a.submitAttesterSlashing(w, r, req)
+}
+
+func (a *ApiHandler) readAttesterSlashing(w http.ResponseWriter, r *http.Request, version clparams.StateVersion) (*cltypes.AttesterSlashing, *beaconhttp.EndpointError) {
+	maxIndices := state.MaxIndexedAttestationIndices(a.beaconChainCfg, version)
+	if maxIndices > uint64(math.MaxInt) || maxIndices > (math.MaxInt64-attesterSlashingJSONOverhead)/attesterSlashingJSONBytesPerIndexPair {
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, errors.New("attester slashing limits exceed supported range"))
+	}
+	maxBodySize := attesterSlashingJSONOverhead + int64(maxIndices)*attesterSlashingJSONBytesPerIndexPair
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodySize))
 	if err != nil {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	req := cltypes.NewAttesterSlashing(version)
 	req.Attestation_1.AttestingIndices.SetCap(int(maxIndices))
 	req.Attestation_2.AttestingIndices.SetCap(int(maxIndices))
 	if err := json.Unmarshal(body, req); err != nil {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-		return
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	if req.Attestation_1.AttestingIndices.Length() > int(maxIndices) || req.Attestation_2.AttestingIndices.Length() > int(maxIndices) {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attesting indices exceed limit")).WriteTo(w)
-		return
-	}
-	a.submitAttesterSlashing(w, r, req)
+	return req, nil
 }
 
 func (a *ApiHandler) submitAttesterSlashing(w http.ResponseWriter, r *http.Request, req *cltypes.AttesterSlashing) {
