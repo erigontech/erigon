@@ -180,7 +180,7 @@ func (vm *VersionMap) SeedEmptyRemovals(eip161Enabled, isAura bool, base StateRe
 		if maxIdx == 0 {
 			continue // only reads, no field change — not a removal candidate
 		}
-		addr := accounts.InternAddress(ac.Address)
+		addr := vm.balAddr(i, ac)
 		if !EIP161EmptyRemoval(eip161Enabled, isAura, addr) {
 			continue
 		}
@@ -253,7 +253,7 @@ func (vm *VersionMap) seedAddresses(from, to int) {
 		if minIdx == 0 {
 			continue
 		}
-		addr := accounts.InternAddress(vm.bal[i].Address)
+		addr := vm.balAddr(i, &vm.bal[i])
 		av := VersionedAccountView{addr: addr, txIdx: int(minIdx), vm: vm}
 		if acc := av.Account(); acc != nil {
 			vm.WriteAddressExists(addr, Version{TxIndex: int(minIdx) - 1}, acc)

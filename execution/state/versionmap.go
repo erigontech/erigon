@@ -270,6 +270,7 @@ type VersionMap struct {
 	nonEmpty atomic.Bool
 	HasBAL   bool // When true, all significant writes are pre-populated from BAL
 	bal      types.BlockAccessList
+	balAddrs []accounts.Address // bal's addresses, interned once per block
 
 	// Origin layer: the committed base before the first unpublished tx (published txs are already
 	// folded into it); every reader of it has a higher tx index. Immutable and
@@ -440,12 +441,39 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		HasBAL: len(changes) > 0,
 		bal:    changes,
 	}
+	if len(changes) > 0 {
+		m := xsync.NewMap[accounts.Address, *AddressEntry](xsync.WithPresize(len(changes)))
+		entries := make([]AddressEntry, len(changes))
+		vm.balAddrs = make([]accounts.Address, len(changes))
+		for i := range changes {
+			ac := &changes[i]
+			vm.balAddrs[i] = accounts.InternAddress(ac.Address)
+			if len(ac.StorageChanges)+len(ac.BalanceChanges)+len(ac.NonceChanges)+len(ac.CodeChanges) > 0 {
+				m.Store(vm.balAddrs[i], &entries[i])
+				vm.nonEmpty.Store(true)
+			}
+		}
+		vm.s.Store(m)
+	}
 	if balChunkWorkers(len(changes)) <= 1 {
 		vm.WriteChanges(changes)
 	} else {
-		forBALChunks(len(changes), func(from, to int) { vm.WriteChanges(changes[from:to]) })
+		forBALChunks(len(changes), vm.writeBALRange)
 	}
 	return vm
+}
+
+// writeBALRange writes vm.bal[from:to] like WriteChanges, keeping the once-interned addresses.
+func (vm *VersionMap) writeBALRange(from, to int) {
+	vm.writeChangesAt(vm.bal, from, to)
+}
+
+// balAddr is the interned address of ac, taken from balAddrs when ac is vm.bal[i].
+func (vm *VersionMap) balAddr(i int, ac *types.AccountChanges) accounts.Address {
+	if i < len(vm.balAddrs) && ac == &vm.bal[i] {
+		return vm.balAddrs[i]
+	}
+	return accounts.InternAddress(ac.Address)
 }
 
 // balChunkAccounts is the account count below which a BAL is seeded on one goroutine.
@@ -573,7 +601,11 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 // per-path change through the typed Write primitive so the value type is enforced at
 // compile time.
 func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
-	for i := range changes {
+	vm.writeChangesAt(changes, 0, len(changes))
+}
+
+func (vm *VersionMap) writeChangesAt(changes types.BlockAccessList, from, to int) {
+	for i := from; i < to; i++ {
 		accountChanges := &changes[i]
 		if dbg.TraceBALFeed {
 			fmt.Printf(
@@ -590,7 +622,7 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 			len(accountChanges.NonceChanges) == 0 && len(accountChanges.CodeChanges) == 0 {
 			continue
 		}
-		addr := accounts.InternAddress(accountChanges.Address)
+		addr := vm.balAddr(i, accountChanges)
 		e := vm.entryOrCreate(addr)
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {
