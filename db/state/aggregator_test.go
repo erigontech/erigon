@@ -513,46 +513,51 @@ func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ran
 	populateFiles2(t, dirs, ii, stepSize, ranges)
 }
 
-// TestAggregator_BuildFiles_GapRefuses verifies that buildFilesInBackground
-// refuses to aggregate when MDBX's earliest history entry lies strictly above
-// the next step to build AND snapshot files already cover the earlier range.
-// This is the scenario that silently corrupted state after a partial
-// OtterSync: the preverified set stopped at step S, MDBX only had history
-// for step S+k (from a short catch-up execution), and the aggregator produced
-// empty files for steps S..S+k-1 that the merge later combined with
-// preverified inputs to advertise phantom coverage.
+// Missing state must not become empty files that claim to cover the gap.
 func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
-	// generate* helpers hardcode stepSize=10; keep our aggregator consistent.
 	const stepSize = uint64(10)
-	db, agg := testDbAndAggregatorv3(t, stepSize)
+	for _, mode := range []string{"background", "explicit"} {
+		t.Run(mode, func(t *testing.T) {
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			ctx := t.Context()
+			dirs := agg.Dirs()
+			generateStateFiles(t, dirs, []testFileRange{{0, 5}})
+			generateCommitmentFile(t, dirs, []testFileRange{{0, 5}})
+			require.NoError(t, agg.OpenFolder(db))
+			before, err := dir.ListFiles(dirs.SnapDomain, ".kv")
+			require.NoError(t, err)
 
-	// Establish the "preverified snapshots cover [0,5)" side of the gap.
-	// Without this, the guard must not fire (a fresh datadir writing only to
-	// later steps is legitimate, not a bug).
-	dirs := agg.Dirs()
-	generateAccountsFile(t, dirs, []testFileRange{{0, 5}})
-	generateStorageFile(t, dirs, []testFileRange{{0, 5}})
-	generateCodeFile(t, dirs, []testFileRange{{0, 5}})
-	generateCommitmentFile(t, dirs, []testFileRange{{0, 5}})
-	require.NoError(t, agg.OpenFolder(db))
-
-	// Establish the "MDBX only has step 10" side of the gap.
-	putHistoryKey(t, db, agg.d[kv.AccountsDomain].History.KeysTable, 100, []byte("k"))
-
-	// Ask the aggregator to build up through step 11.
-	// With the guard, step=5 (files cover 0..5), firstInDB=10, firstInDB>step
-	// → refuse. No new accounts file gets produced.
-	require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 11*stepSize, unboundedFinalityCtx))
-
-	// Only the pre-existing file v1.0-accounts.0-5.kv should be present.
-	files, err := dir.ListFiles(dirs.SnapDomain, ".kv")
-	require.NoError(t, err)
-	for _, f := range files {
-		if strings.Contains(f, "-accounts.") {
-			require.Contains(t, f, "0-5",
-				"only the pre-existing 0-5 accounts file should remain; got %s", f)
-		}
+			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+				at := agg.BeginFilesRo()
+				defer at.Close()
+				writer := at.d[kv.AccountsDomain].NewWriter(db)
+				defer writer.Close()
+				for _, txNum := range []uint64{10*stepSize + 1, 11*stepSize + 1} {
+					require.NoError(t, writer.PutWithPrev([]byte{byte(txNum)}, []byte{7}, txNum, nil))
+				}
+				return writer.Flush(ctx, tx)
+			}))
+			if mode == "explicit" {
+				err := agg.BuildFiles2(ctx, asTemporalRoDB(db), 10, 11, unboundedFinalityCtx, false)
+				agg.WaitForFiles()
+				require.ErrorContains(t, err, "gap between state snapshots and MDBX")
+				require.False(t, agg.HasBackgroundFilesBuild2(), "a refused build must release its slot")
+			} else {
+				require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 11*stepSize, unboundedFinalityCtx))
+			}
+			after, err := dir.ListFiles(dirs.SnapDomain, ".kv")
+			require.NoError(t, err)
+			require.ElementsMatch(t, before, after, "a gap must prevent new state files")
+			if mode == "explicit" {
+				generateStateFiles(t, dirs, []testFileRange{{5, 10}})
+				generateCommitmentFile(t, dirs, []testFileRange{{5, 10}})
+				require.NoError(t, agg.OpenFolder(db))
+				require.NoError(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), 10, 11, unboundedFinalityCtx, false))
+				agg.WaitForFiles()
+				requireVisibleEnd(t, agg, 11*stepSize)
+			}
+		})
 	}
 }
 
@@ -567,46 +572,50 @@ func TestAggregator_BuildFiles_EmptyStepOK(t *testing.T) {
 	const stepSize = uint64(10)
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 
-	// No pre-generated files. Insert history only at step 1 (not step 0).
 	putHistoryKey(t, db, agg.d[kv.AccountsDomain].History.KeysTable, 10, []byte("k"))
 
-	// BuildFiles must not refuse — the guard's `step > 0` clause should let
-	// this through.
 	require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 2*stepSize, unboundedFinalityCtx))
+	requireVisibleEnd(t, agg, stepSize)
 }
 
 func TestAggregatorBuildWithHistoryAtStepZero(t *testing.T) {
 	t.Parallel()
 	const stepSize = uint64(10)
-
-	for _, zeroStepDomain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain} {
-		t.Run(zeroStepDomain.String(), func(t *testing.T) {
-			db, agg := testDbAndAggregatorv3(t, stepSize)
-			ctx := t.Context()
-			generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 5}})
-			generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 5}})
-			require.NoError(t, agg.OpenFolder(db))
-			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
-				at := agg.BeginFilesRo()
-				defer at.Close()
-				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain} {
-					firstStep := uint64(10)
-					if domain == zeroStepDomain {
-						firstStep = 0
+	for _, mode := range []string{"background", "explicit"} {
+		for _, zeroStepDomain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain} {
+			t.Run(mode+"/"+zeroStepDomain.String(), func(t *testing.T) {
+				db, agg := testDbAndAggregatorv3(t, stepSize)
+				ctx := t.Context()
+				generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 5}})
+				generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 5}})
+				require.NoError(t, agg.OpenFolder(db))
+				require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+					at := agg.BeginFilesRo()
+					defer at.Close()
+					for _, domain := range []kv.Domain{kv.AccountsDomain, kv.CodeDomain} {
+						firstStep := uint64(10)
+						if domain == zeroStepDomain {
+							firstStep = 0
+						}
+						writer := at.d[domain].NewWriter(db)
+						t.Cleanup(writer.Close)
+						for step := firstStep; step <= 11; step++ {
+							require.NoError(t, writer.PutWithPrev([]byte{byte(step)}, []byte{7}, step*stepSize+1, nil))
+						}
+						require.NoError(t, writer.Flush(ctx, tx))
+						writer.Close()
 					}
-					writer := at.d[domain].NewWriter(db)
-					t.Cleanup(writer.Close)
-					for step := firstStep; step <= 11; step++ {
-						require.NoError(t, writer.PutWithPrev([]byte{byte(step)}, []byte{7}, step*stepSize+1, nil))
-					}
-					require.NoError(t, writer.Flush(ctx, tx))
-					writer.Close()
+					return nil
+				}))
+				if mode == "explicit" {
+					require.NoError(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), 5, 11, unboundedFinalityCtx, false))
+					agg.WaitForFiles()
+				} else {
+					require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 11*stepSize, unboundedFinalityCtx))
 				}
-				return nil
-			}))
-			require.NoError(t, agg.BuildFiles(asTemporalRoDB(db), 11*stepSize, unboundedFinalityCtx))
-			requireVisibleEnd(t, agg, 11*stepSize)
-		})
+				requireVisibleEnd(t, agg, 11*stepSize)
+			})
+		}
 	}
 }
 
