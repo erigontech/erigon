@@ -1052,9 +1052,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 		var blockResult *blockResult
 		select {
 		case exec := <-pendingCh:
+			npReqStart := time.Now()
 			if err := pe.processRequest(exec, applyTx); err != nil {
 				return err
 			}
+			log.Info("[np-phase] request", "npProcReq", time.Since(npReqStart))
 			continue
 		case <-ctx.Done():
 			for {
