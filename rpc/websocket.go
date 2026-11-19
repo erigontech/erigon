@@ -372,6 +372,7 @@ func (c *heldConn) release(deadline time.Time) error {
 
 func (c *heldConn) flushLocked() error {
 	_, err := c.Conn.Write(c.held.Bytes())
+	simProbe(&simWriteIdx, SimWriteTimes)
 	pool.PutBuffer(c.held)
 	c.held = nil
 	return err

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"runtime/metrics"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -1012,10 +1013,36 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 	ff.invalidateStalePendingBlock(&header)
 
 	ev := &Shared[*types.Header]{Value: &header}
-	return ff.headsSubs.Range(func(k HeadsSubID, v Sub[*Shared[*types.Header]]) error {
+	probe := true
+	var t0 int64
+	var gc0 uint64
+	if probe {
+		rpc.SimProbeReset()
+		rpc.SimProbeOn.Store(true)
+		t0 = time.Now().UnixNano()
+		gc0 = gcCycles()
+	}
+	err = ff.headsSubs.Range(func(k HeadsSubID, v Sub[*Shared[*types.Header]]) error {
 		v.Send(ev)
 		return nil
 	})
+	if probe {
+		t1 := time.Now().UnixNano()
+		go func(n uint64, tsec uint64) {
+			time.Sleep(time.Second)
+			wakes, writes := rpc.SimProbeReset()
+			if len(wakes) == 0 || len(writes) == 0 {
+				return
+			}
+			slices.Sort(wakes)
+			slices.Sort(writes)
+			q := func(v []int64, p float64) float64 { return float64(v[min(len(v)-1, int(float64(len(v))*p))]-t0) / 1e6 }
+			ff.logger.Info("[fanout-probe]", "block", n, "gcIn1s", gcCycles()-gc0, "sinceBlockTime_ms", t0/1e6-int64(tsec)*1000, "sendLoop_ms", float64(t1-t0)/1e6,
+				"wake_p50", q(wakes, .5), "wake_p99", q(wakes, .99), "wake_last", q(wakes, 1), "wakes", len(wakes),
+				"write_p50", q(writes, .5), "write_p99", q(writes, .99), "write_last", q(writes, 1), "writes", len(writes))
+		}(header.Number.Uint64(), header.Time)
+	}
+	return err
 }
 
 // invalidateStalePendingBlock drops the cached pending block once the chain
@@ -1310,4 +1337,10 @@ func (ff *Filters) decrementMetrics(ft FilterType, protocol SubProtocol) {
 	}
 	activeSubscriptionsGauge.WithLabelValues(string(ft), string(protocol)).Dec()
 	unsubscribedSubscriptionsCounter.WithLabelValues(string(ft), string(protocol)).Inc()
+}
+
+func gcCycles() uint64 {
+	s := []metrics.Sample{{Name: "/gc/cycles/total:gc-cycles"}}
+	metrics.Read(s)
+	return s[0].Value.Uint64()
 }

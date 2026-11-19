@@ -422,6 +422,7 @@ func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {
 
 // coalesce runs send with the socket held, so the messages it writes leave in one socket write.
 func (c *jsonCodec) coalesce(send func()) (err error) {
+	simProbe(&simWakeIdx, SimWakeTimes)
 	if c.held == nil {
 		send()
 		return nil
