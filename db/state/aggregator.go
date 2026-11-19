@@ -1229,10 +1229,54 @@ Loop:
 	return nil
 }
 
-// [from, to)
+// Check the state files against MDBX before a build can publish an empty range over missing history.
+func (a *Aggregator) checkStateFilesBuildGap(ctx context.Context, db kv.RoDB) error {
+	return db.View(ctx, func(tx kv.Tx) error {
+		at := a.BeginFilesRo()
+		defer at.Close()
+		// Commitment rebuilds read existing state files, so a lower commitment file
+		// end does not imply missing account, storage or code history.
+		domains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+		nextStateStep := kv.Step(at.TxNumsInFiles(domains...) / at.StepSize())
+		if nextStateStep == 0 {
+			return nil
+		}
+		var firstInDB kv.Step
+		foundHistory := false
+		for _, domain := range domains {
+			first, found, err := at.d[domain].d.InvertedIndex.firstStepInDB(tx)
+			if err != nil {
+				return err
+			}
+			if found && (!foundHistory || first < firstInDB) {
+				firstInDB = first
+				foundHistory = true
+			}
+		}
+		if firstInDB > nextStateStep {
+			return fmt.Errorf("gap between state snapshots and MDBX: files end at step %d, history starts at step %d; refusing to build files. "+
+				"For a clean reset, stop Erigon, remove both state snapshots and the chaindata directory, then re-sync. "+
+				"Removing only snapshots may leave values previously read from corrupt files in chaindata",
+				nextStateStep, firstInDB)
+		}
+		return nil
+	})
+}
+
+// BuildFiles2 checks the state history gap before scheduling the requested range.
 func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
+	if !a.background.TryAdd() {
+		return nil
+	}
+	defer a.background.Done()
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
+	}
+	if toStep > fromStep {
+		if err := a.checkStateFilesBuildGap(ctx, db); err != nil {
+			a.buildingFiles.Store(false)
+			return err
+		}
 	}
 	started := a.background.TryGo(func() {
 		defer a.buildingFiles.Store(false)
@@ -2364,42 +2408,11 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			return
 		}
 
-		// Gap detection: refuse to build when MDBX's earliest history entry lies
-		// strictly above `step` AND we already have snapshot files below `step`.
-		// In that case iterating [step, lastInDB) would collate empty ranges for
-		// the gap steps, producing header-only .kv files. A subsequent merge
-		// combines those with the existing earlier files and yields a composite
-		// whose advertised step range is larger than its actual data coverage —
-		// silent, permanent state corruption.
-		//
-		// The `step > 0` clause is what distinguishes this from a legitimate
-		// empty step on a fresh datadir (no earlier files exist, so there's
-		// nothing to merge with and no corruption path).
 		if step > 0 {
-			var firstInDB kv.Step
-			var foundHistory bool
-			if err := db.View(a.ctx, func(tx kv.Tx) error {
-				for _, d := range []*Domain{a.d[kv.AccountsDomain], a.d[kv.StorageDomain], a.d[kv.CodeDomain]} {
-					first, found, err := d.InvertedIndex.firstStepInDB(tx)
-					if err != nil {
-						return err
-					}
-					if found && (!foundHistory || first < firstInDB) {
-						firstInDB, foundHistory = first, true
-					}
+			if err := a.checkStateFilesBuildGap(a.ctx, db); err != nil {
+				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
+					a.logger.Error("[snapshots] refusing to build files", "err", err)
 				}
-				return nil
-			}); err != nil {
-				a.logger.Warn("[snapshots] gap-detection", "err", err)
-				close(fin)
-				return
-			}
-			if foundHistory && firstInDB > step {
-				a.logger.Error("[snapshots] gap between snapshots and MDBX — refusing to build files",
-					"step", step, "firstInDB", firstInDB, "lastInDB", lastInDB,
-					"hint", "MDBX history starts above the next step to aggregate; building here would create empty step files and a merge would silently drop state. "+
-						"To recover, stop erigon and delete BOTH the state snapshots (e.g. `erigon snapshots reset`) AND the chaindata/ directory, then re-sync. "+
-						"Removing only the snapshots is not enough: an earlier build may have already populated chaindata with values read from a corrupt snapshot file.")
 				close(fin)
 				return
 			}
