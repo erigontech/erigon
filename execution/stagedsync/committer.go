@@ -624,6 +624,14 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 		return
 	}
 	if cc.ownsChangeset(n) {
+		b2i := func(v bool) int {
+			if v {
+				return 1
+			}
+			return 0
+		}
+		cc.logger.Info("[np-phase] aheadgate", "blk", n, "npGatePrefetchNil", b2i(cc.branchPrefetch == nil), "npGateNoTx", b2i(!pb.txSeen),
+			"npGateNoCS", b2i(cc.doms.GetChangesetByHash(n, pb.req.blockHash) == nil), "npGateShadow", b2i(dbg.BALShadowCompute), "npGateParent", b2i(commitmentdb.ParentReadsWanted()))
 		if cc.branchPrefetch == nil || !pb.txSeen || cc.doms.GetChangesetByHash(n, pb.req.blockHash) == nil || dbg.BALShadowCompute || commitmentdb.ParentReadsWanted() {
 			return
 		}
@@ -631,6 +639,7 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 	if n != cc.firstBlockNum && !(cc.hasComputed && cc.lastComputedBlock == n-1) {
 		return
 	}
+	cc.logger.Info("[np-phase] aheadgate", "blk", n, "npAheadRun", 1)
 	cc.computeBlockFromBAL(ctx, pb)
 }
 
