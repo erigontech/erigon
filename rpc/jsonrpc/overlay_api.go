@@ -254,7 +254,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 	api.applyGasBudget(msg)
 	txCtx = protocol.NewEVMTxContext(msg)
-	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address)}
+	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), statedb: statedb}
 	evm = vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{
 		Tracer: ct.Tracer().Hooks,
 		OverrideInitCode: func(target accounts.Address, initCode []byte) []byte {

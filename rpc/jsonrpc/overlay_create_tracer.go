@@ -20,6 +20,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -28,8 +29,8 @@ import (
 
 type OverlayCreateTracer struct {
 	contractAddress accounts.Address
+	statedb         *state.IntraBlockState
 	isCapturing     bool
-	created         bool // A later collision must not replace a successful empty-code deployment.
 	depth           int
 	err             error
 }
@@ -44,7 +45,7 @@ func (ct *OverlayCreateTracer) Tracer() *tracers.Tracer {
 }
 
 func (ct *OverlayCreateTracer) canCapture(target accounts.Address) bool {
-	return target == ct.contractAddress && !ct.isCapturing && !ct.created
+	return target == ct.contractAddress && !ct.isCapturing && !ct.statedb.ContractCreatedInTx(target)
 }
 
 func (ct *OverlayCreateTracer) onInitCodeOverrideError(target accounts.Address, err error) {
@@ -63,7 +64,6 @@ func (ct *OverlayCreateTracer) OnEnterV2(depth int, typ byte, from accounts.Addr
 func (ct *OverlayCreateTracer) OnExitV2(depth int, _ []byte, _ mdgas.MdGasUsage, err error, _ bool) {
 	if ct.isCapturing && depth == ct.depth {
 		ct.err = err
-		ct.created = err == nil
 		ct.isCapturing = false
 	}
 }

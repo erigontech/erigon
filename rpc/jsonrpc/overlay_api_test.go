@@ -726,6 +726,72 @@ func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 	}
 }
 
+func TestCallConstructorRetryAfterRollback(t *testing.T) {
+	factory := common.HexToAddress("0x4000")
+	wrapper := common.HexToAddress("0x3000")
+	runtime := hexutil.Bytes{byte(vm.STOP)}
+	initCode := program.New().ReturnData(runtime).Bytes()
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.BogotaTime = common.NewUint64(0)
+
+	checkRetry := func(t *testing.T, alloc types.GenesisAlloc, txn types.Transaction) {
+		t.Helper()
+		deploy := program.New().Mstore(initCode, 0).Push0().Push(len(initCode)).Push0().Op(vm.CALLVALUE, vm.CREATE2, vm.POP)
+		alloc[factory] = types.GenesisAccount{Code: deploy.Bytes()}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Alloc: alloc,
+		}), execmoduletester.WithKey(testKey))
+		pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
+		require.NoError(t, err)
+		require.NoError(t, m.InsertChain(pack))
+		base := newBaseApiForTest(m)
+		api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 5_000_000}, NewOtterscanAPI(base, m.DB, 25))
+		result, err := api.CallConstructor(m.Ctx, target, initCode)
+		require.NoError(t, err)
+		require.Equal(t, &CreationCode{Code: &runtime}, result)
+
+		// Only the first, rolled-back deployment receives an endowment.
+		replacement := testutil.AssertStackWord(program.New().Op(vm.CALLVALUE), 1).ReturnData(runtime)
+		result, err = api.CallConstructor(m.Ctx, target, replacement.Bytes())
+		require.Nil(t, result)
+		require.ErrorIs(t, err, vm.ErrExecutionReverted)
+	}
+
+	t.Run("ancestor revert", func(t *testing.T) {
+		entry := common.HexToAddress("0x2000")
+		// The prefunded account still exists after the deployment rolls back.
+		calls := program.New().Call(nil, target, 1, 0, 0, 0, 0).Op(vm.POP)
+		calls.Call(nil, wrapper, 0, 0, 0, 0, 0).Op(vm.POP).Call(nil, factory, 0, 0, 0, 0, 0).Op(vm.POP)
+		rollback := program.New().Call(nil, factory, 1, 0, 0, 0, 0).Op(vm.POP, vm.PUSH0, vm.PUSH0, vm.REVERT)
+		txn, err := types.SignTx(types.NewTransaction(0, entry, new(uint256.Int), 2_000_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(cfg), testKey)
+		require.NoError(t, err)
+		checkRetry(t, types.GenesisAlloc{
+			testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+			entry:    {Balance: big.NewInt(1), Code: calls.Bytes()},
+			wrapper:  {Balance: big.NewInt(1), Code: rollback.Bytes()},
+		}, txn)
+	})
+	t.Run("atomic batch revert", func(t *testing.T) {
+		limits := mdgas.MdGas{Execution: 200_000, State: 1_000_000}
+		txn := &types.FrameTransaction{
+			ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: testAddr,
+			Fees: types.FrameFees{FeeCap: uint256.Int{1}},
+			Frames: []types.Frame{
+				{Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 1_000}},
+				{Mode: types.FrameSender, Flags: types.FrameAtomicBatch, Target: &factory, Value: uint256.Int{1}, Limits: limits},
+				{Mode: types.FrameSender, Target: &wrapper, Limits: limits},
+				{Mode: types.FrameSender, Target: &factory, Limits: limits},
+			},
+		}
+		approval := program.New().Push(types.FrameApproveBoth).Push0().Push0().Op(vm.APPROVE)
+		checkRetry(t, types.GenesisAlloc{
+			testAddr: {Balance: big.NewInt(1_000_000_000_000_000_000), Code: approval.Bytes()},
+			wrapper:  {Code: program.New().Push0().Push0().Op(vm.REVERT).Bytes()},
+		}, txn)
+	})
+}
+
 func TestCallConstructorNestedInitCodeErrors(t *testing.T) {
 	entry, factory := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
 	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()

@@ -2094,6 +2094,16 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 
 var zeroBalance uint256.Int
 
+// ContractCreatedInTx reports whether a deployment at addr survived all reverts in this transaction.
+func (ibs *IntraBlockState) ContractCreatedInTx(addr accounts.Address) bool {
+	if ibs.versionMap != nil {
+		created, _ := ibs.versionedWriteCreateContract(addr)
+		return created
+	}
+	so := ibs.stateObjects[addr]
+	return so != nil && so.newlyCreated && (so.createdContract || so.destructedCreated)
+}
+
 // Used for EIP-6780
 func (ibs *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
 	stateObject, err := ibs.getStateObject(addr, true)

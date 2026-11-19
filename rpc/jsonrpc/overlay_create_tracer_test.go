@@ -50,7 +50,7 @@ func TestOverlayCreateTracerRecordsError(t *testing.T) {
 			target := accounts.InternAddress(types.CreateAddress(caller.Value(), 0))
 			statedb := state.New(state.NewNoopReader())
 			defer statedb.Close()
-			tracer := OverlayCreateTracer{contractAddress: target}
+			tracer := OverlayCreateTracer{contractAddress: target, statedb: statedb}
 			evm := vm.NewEVM(
 				evmtypes.BlockContext{CanTransfer: protocol.CanTransfer, Transfer: misc.Transfer},
 				evmtypes.TxContext{},
