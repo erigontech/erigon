@@ -147,6 +147,10 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	}
 	blockNumber := blindedBlock.Block.Body.ExecutionPayload.BlockNumber
 	blockHash := blindedBlock.Block.Body.ExecutionPayload.BlockHash
+	// An empty payload (the genesis block's) names no execution block to fetch.
+	if blockHash == (common.Hash{}) {
+		return blindedBlock.Full(&solid.TransactionsSSZ{}, solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)), nil
+	}
 	txs, err := executionReader.Transactions(blockNumber, blockHash)
 	if err != nil {
 		return nil, err

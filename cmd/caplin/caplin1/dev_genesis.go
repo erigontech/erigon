@@ -44,19 +44,6 @@ func writeDevGenesisBeaconBlock(ctx context.Context, genesisState *state.Caching
 		body.ExecutionPayload.Extra = solid.NewExtraData()
 		body.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
 
-		// Copy execution payload header from genesis state so the block hash
-		// matches the EL genesis (needed for fork choice to find the EL block).
-		execHeader := genesisState.LatestExecutionPayloadHeader()
-		if execHeader != nil {
-			body.ExecutionPayload.BlockHash = execHeader.BlockHash
-			body.ExecutionPayload.StateRoot = execHeader.StateRoot
-			body.ExecutionPayload.ParentHash = execHeader.ParentHash
-			body.ExecutionPayload.BlockNumber = execHeader.BlockNumber
-			body.ExecutionPayload.GasLimit = execHeader.GasLimit
-			body.ExecutionPayload.Time = execHeader.Time
-			body.ExecutionPayload.BaseFeePerGas = execHeader.BaseFeePerGas
-		}
-
 		if version >= clparams.CapellaVersion {
 			body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
 		}
