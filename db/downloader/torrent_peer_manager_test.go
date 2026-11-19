@@ -94,7 +94,11 @@ func newFakeReachabilityManager(t *testing.T, source *mockNodeSource) (*TorrentP
 		f.probes[addr]++
 		return f.reachable[addr]
 	}
-	m.inject = func(pi torrent.PeerInfo) { f.injected = append(f.injected, pi.Addr.String()) }
+	m.inject = func(peers []torrent.PeerInfo) {
+		for _, pi := range peers {
+			f.injected = append(f.injected, pi.Addr.String())
+		}
+	}
 	m.now = func() time.Time { return f.now }
 	return m, f
 }
@@ -245,4 +249,87 @@ func TestStartTorrentPeerManagerRespectsDisabledDialing(t *testing.T) {
 			require.Equal(t, dial, d.peerManager != nil)
 		})
 	}
+}
+
+func newTorrentPeerManagerTestClient(t *testing.T) *torrent.Client {
+	t.Helper()
+	cfg := newTestClientConfig(t, t.TempDir())
+	cfg.DialForPeerConns = false
+	client, err := torrent.NewClient(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { client.Close() })
+	return client
+}
+
+func addTorrentPeerManagerTestTorrent(t *testing.T, client *torrent.Client, hash byte) *torrent.Torrent {
+	t.Helper()
+	var infoHash [20]byte
+	infoHash[0] = hash
+	tor, _ := client.AddTorrentInfoHash(infoHash)
+	return tor
+}
+
+func TestTorrentPeerManager_AddsKnownPeerToNewTorrent(t *testing.T) {
+	client := newTorrentPeerManagerTestClient(t)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	peer := makeNodeWithBT(t, key, []byte{127, 0, 0, 1}, &enr.ChainToml{KnownBlocks: 100}, enr.BT(42069))
+	source := &mockNodeSource{nodes: []*enode.Node{peer, btNode(t, 42070)}}
+	m := NewTorrentPeerManager(client, func() NodeSource { return source }, log.New())
+	m.probe = func(_ context.Context, addr string) bool { return addr == "127.0.0.1:42069" }
+
+	firstTorrent := addTorrentPeerManagerTestTorrent(t, client, 1)
+	m.sync(t.Context())
+	assert.Equal(t, []string{"127.0.0.1:42069"}, torrentPeerAddresses(firstTorrent))
+
+	newTorrent := addTorrentPeerManagerTestTorrent(t, client, 2)
+	m.sync(t.Context())
+	assert.Equal(t, []string{"127.0.0.1:42069"}, torrentPeerAddresses(newTorrent))
+}
+
+func TestTorrentPeerManager_RefreshesChangedPeerEndpoint(t *testing.T) {
+	client := newTorrentPeerManagerTestClient(t)
+	tor := addTorrentPeerManagerTestTorrent(t, client, 3)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	peer := makeNodeWithBT(t, key, []byte{127, 0, 0, 1}, &enr.ChainToml{KnownBlocks: 100}, enr.BT(42069))
+	source := &mockNodeSource{nodes: []*enode.Node{peer}}
+	m := NewTorrentPeerManager(client, func() NodeSource { return source }, log.New())
+	m.probe = func(context.Context, string) bool { return true }
+
+	m.sync(t.Context())
+	assert.Equal(t, []string{"127.0.0.1:42069"}, torrentPeerAddresses(tor))
+
+	updatedPeer := makeNodeWithBT(t, key, []byte{127, 0, 0, 2}, &enr.ChainToml{KnownBlocks: 100}, enr.BT(42070))
+	source.nodes = []*enode.Node{updatedPeer}
+	m.sync(t.Context())
+	assert.Contains(t, torrentPeerAddresses(tor), "127.0.0.2:42070")
+}
+
+func TestTorrentPeerManager_ForgetsDroppedTorrentsAndLeftPeers(t *testing.T) {
+	client := newTorrentPeerManagerTestClient(t)
+	tor := addTorrentPeerManagerTestTorrent(t, client, 4)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	peer := makeNodeWithBT(t, key, []byte{127, 0, 0, 1}, &enr.ChainToml{KnownBlocks: 100}, enr.BT(42069))
+	source := &mockNodeSource{nodes: []*enode.Node{peer}}
+	m := NewTorrentPeerManager(client, func() NodeSource { return source }, log.New())
+	m.probe = func(context.Context, string) bool { return true }
+	m.sync(t.Context())
+	require.Contains(t, m.torrents, tor)
+
+	tor.Drop()
+	source.nodes = nil
+	m.sync(t.Context())
+	require.NotContains(t, m.torrents, tor)
+	require.Zero(t, m.PeerCount())
+}
+
+func torrentPeerAddresses(tor *torrent.Torrent) []string {
+	peers := tor.KnownSwarm()
+	addresses := make([]string, 0, len(peers))
+	for _, peer := range peers {
+		addresses = append(addresses, peer.Addr.String())
+	}
+	return addresses
 }
