@@ -1384,6 +1384,8 @@ func (pe *parallelExecutor) startBlock(be *blockExecutor) error {
 			reader = state.NewHistoryReaderV3WithSharedDomains(pe.applyTx, pe.domainsRead(), first.Version().TxNum)
 		}
 		base := pe.prevBlockBase(reader, be.blockNum)
+		npT := time.Now()
+		defer func() { log.Info("[np-phase] seedremovals", "blk", be.blockNum, "npSeedRemovals", time.Since(npT)) }()
 		if err := be.versionMap.SeedEmptyRemovals(
 			be.blockNum != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.blockNum),
 			pe.cfg.chainConfig.Aura != nil,
@@ -1400,6 +1402,7 @@ func (pe *parallelExecutor) startBlock(be *blockExecutor) error {
 	}
 	be.execStarted = time.Now()
 	be.scheduleExecution(pe)
+	log.Info("[np-phase] schedule", "blk", be.blockNum, "npSchedule", time.Since(be.execStarted))
 	return nil
 }
 
@@ -2698,8 +2701,11 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, consumers *resultStream, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
+	npT := time.Now()
 	versionMap := state.NewVersionMap(accessList)
+	npVM := time.Since(npT)
 	versionMap.SeedAddresses()
+	log.Info("[np-phase] newblockexec", "blk", blockNum, "npNewVM", npVM, "npSeedAddr", time.Since(npT)-npVM, "balAccounts", len(accessList))
 	be := &blockExecutor{
 		blockNum:            blockNum,
 		blockHash:           blockHash,
