@@ -1576,22 +1576,37 @@ func TestDupSortCursorHidesDeletedKey(t *testing.T) {
 }
 
 func TestDeleteExactRemovesPairWrittenInOverlay(t *testing.T) {
-	_, tx := newTestTx(t)
-	batch, err := membatchwithdb.NewMemoryBatch(tx)
-	require.NoError(t, err)
-	defer batch.Close()
-	key, value := []byte("key2"), []byte("value2.1")
-	require.NoError(t, batch.Put(kv.TblAccountVals, key, value))
-	c, err := batch.RwCursorDupSort(kv.TblAccountVals)
-	require.NoError(t, err)
-	defer c.Close()
-	require.NoError(t, c.DeleteExact(key, value))
-	k, v, err := c.SeekBothExact(key, value)
-	require.NoError(t, err)
-	require.Nil(t, k)
-	require.Nil(t, v)
-	require.NoError(t, batch.Flush(t.Context(), tx))
-	require.Empty(t, tableRows(t, tx, kv.TblAccountVals))
+	for _, inDb := range []bool{false, true} {
+		for _, useDiff := range []bool{false, true} {
+			t.Run(fmt.Sprintf("inDb=%t/diff=%t", inDb, useDiff), func(t *testing.T) {
+				_, tx := newTestTx(t)
+				key, value := []byte("key2"), []byte("value2.1")
+				if inDb {
+					require.NoError(t, tx.Put(kv.TblAccountVals, key, value))
+				}
+				batch, err := membatchwithdb.NewMemoryBatch(tx)
+				require.NoError(t, err)
+				defer batch.Close()
+				require.NoError(t, batch.Put(kv.TblAccountVals, key, value))
+				c, err := batch.RwCursorDupSort(kv.TblAccountVals)
+				require.NoError(t, err)
+				defer c.Close()
+				require.NoError(t, c.DeleteExact(key, value))
+				k, v, err := c.SeekBothExact(key, value)
+				require.NoError(t, err)
+				require.Nil(t, k)
+				require.Nil(t, v)
+				if useDiff {
+					diff, err := batch.Diff()
+					require.NoError(t, err)
+					require.NoError(t, diff.Flush(tx))
+				} else {
+					require.NoError(t, batch.Flush(t.Context(), tx))
+				}
+				require.Empty(t, tableRows(t, tx, kv.TblAccountVals))
+			})
+		}
+	}
 }
 
 func TestPutNilAfterDeleteHidesBackingRow(t *testing.T) {
