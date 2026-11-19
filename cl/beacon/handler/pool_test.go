@@ -34,12 +34,14 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	clgossip "github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
@@ -51,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	services_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -62,7 +65,7 @@ type attesterSlashingStore struct {
 	onAttesterSlashing func(*cltypes.AttesterSlashing, bool) error
 }
 
-func (s *attesterSlashingStore) OnAttesterSlashing(slashing *cltypes.AttesterSlashing, test bool) error {
+func (s *attesterSlashingStore) OnAttesterSlashing(slashing *cltypes.AttesterSlashing, test, validateKnown bool) error {
 	return s.onAttesterSlashing(slashing, test)
 }
 
@@ -235,6 +238,139 @@ func TestPoolAttesterSlashingRejectsDisjointIndices(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestPoolAttesterSlashingValidatesKnownSlashings(t *testing.T) {
+	signed := func(t *testing.T, s *state.CachingBeaconState, key *bls.PrivateKey, data *solid.AttestationData) common.Bytes96 {
+		t.Helper()
+		domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, data.Target.Epoch)
+		require.NoError(t, err)
+		root, err := fork.ComputeSigningRoot(data, domain)
+		require.NoError(t, err)
+		return common.Bytes96(key.Sign(root[:]).Bytes())
+	}
+	newSlashing := func(t *testing.T, s *state.CachingBeaconState, key *bls.PrivateKey, root1, root2 common.Hash) *cltypes.AttesterSlashing {
+		t.Helper()
+		slashing := cltypes.NewAttesterSlashing(clparams.Phase0Version)
+		for _, att := range []struct {
+			attestation *cltypes.IndexedAttestation
+			root        common.Hash
+		}{{slashing.Attestation_1, root1}, {slashing.Attestation_2, root2}} {
+			att.attestation.AttestingIndices.Append(0)
+			att.attestation.Data.BeaconBlockRoot = att.root
+			att.attestation.Signature = signed(t, s, key, att.attestation.Data)
+		}
+		return slashing
+	}
+
+	for _, tc := range []struct {
+		name    string
+		request func(t *testing.T, s *state.CachingBeaconState, key *bls.PrivateKey, pooled *cltypes.AttesterSlashing) *cltypes.AttesterSlashing
+		status  int
+		publish bool
+	}{
+		{
+			name: "pooled duplicate",
+			request: func(t *testing.T, s *state.CachingBeaconState, key *bls.PrivateKey, pooled *cltypes.AttesterSlashing) *cltypes.AttesterSlashing {
+				return pooled
+			},
+			status:  http.StatusOK,
+			publish: true,
+		},
+		{
+			name: "pooled signatures with null data",
+			request: func(t *testing.T, s *state.CachingBeaconState, key *bls.PrivateKey, pooled *cltypes.AttesterSlashing) *cltypes.AttesterSlashing {
+				req := newSlashing(t, s, key, common.Hash{1}, common.Hash{2})
+				req.Attestation_1.Data = nil
+				return req
+			},
+			status: http.StatusBadRequest,
+		},
+		{
+			name: "pooled signatures with tampered data",
+			request: func(t *testing.T, s *state.CachingBeaconState, key *bls.PrivateKey, pooled *cltypes.AttesterSlashing) *cltypes.AttesterSlashing {
+				req := newSlashing(t, s, key, common.Hash{1}, common.Hash{2})
+				req.Attestation_1.Data.Slot = 5
+				return req
+			},
+			status: http.StatusBadRequest,
+		},
+		{
+			name: "seen indices with valid signatures",
+			request: func(t *testing.T, s *state.CachingBeaconState, key *bls.PrivateKey, pooled *cltypes.AttesterSlashing) *cltypes.AttesterSlashing {
+				return newSlashing(t, s, key, common.Hash{3}, common.Hash{4})
+			},
+			status: http.StatusOK,
+		},
+		{
+			name: "seen indices with invalid signature",
+			request: func(t *testing.T, s *state.CachingBeaconState, key *bls.PrivateKey, pooled *cltypes.AttesterSlashing) *cltypes.AttesterSlashing {
+				req := newSlashing(t, s, key, common.Hash{3}, common.Hash{4})
+				req.Attestation_2.Signature = pooled.Attestation_2.Signature
+				return req
+			},
+			status: http.StatusBadRequest,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			cfg := clparams.MainnetBeaconConfig
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			clock.EXPECT().GetCurrentEpoch().Return(uint64(0)).AnyTimes()
+			key, err := bls.NewPrivateKeyFromIKM(make([]byte, 32))
+			require.NoError(t, err)
+			var pubKey common.Bytes48
+			copy(pubKey[:], bls.CompressPublicKey(key.PublicKey()))
+			anchor := state.New(&cfg)
+			require.NoError(t, anchor.AddValidator(solid.NewValidatorFromParameters(pubKey, common.Hash{}, cfg.MaxEffectiveBalance, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.MaxEffectiveBalance))
+			synced := synced_data.NewSyncedDataManager(&cfg, true)
+			opPool := pool.NewOperationsPool(&cfg)
+			store, err := forkchoice.NewForkChoiceStore(clock, anchor, nil, opPool, nil, beaconevents.NewEventEmitter(), synced, nil, public_keys_registry.NewInMemoryPublicKeysRegistry(), nil, false, nil)
+			require.NoError(t, err)
+			anchorRoot, err := anchor.BlockRoot()
+			require.NoError(t, err)
+			require.NoError(t, synced.OnHeadStateWithBlockRoot(anchor, anchorRoot))
+			var published [][]byte
+			publisher := gossip_mock.NewMockGossip(ctrl)
+			publisher.EXPECT().Publish(gomock.Any(), clgossip.TopicNameAttesterSlashing, gomock.Any()).DoAndReturn(func(_ context.Context, _ string, data []byte) error {
+				published = append(published, data)
+				return nil
+			}).AnyTimes()
+			handler := &ApiHandler{
+				logger:          log.Root(),
+				beaconChainCfg:  &cfg,
+				ethClock:        clock,
+				forkchoiceStore: store,
+				operationsPool:  opPool,
+				sentinel:        &nonNilSentinelClient{},
+				gossipManager:   publisher,
+			}
+			submit := func(slashing *cltypes.AttesterSlashing) int {
+				body, err := json.Marshal(slashing)
+				require.NoError(t, err)
+				recorder := httptest.NewRecorder()
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/attester_slashings", bytes.NewReader(body))
+				handler.PostEthV1BeaconPoolAttesterSlashings(recorder, request)
+				return recorder.Code
+			}
+
+			pooled := newSlashing(t, anchor, key, common.Hash{1}, common.Hash{2})
+			require.Equal(t, http.StatusOK, submit(pooled))
+			require.Len(t, opPool.AttesterSlashingsPool.Raw(), 1)
+			pooledSSZ, err := pooled.EncodeSSZ(nil)
+			require.NoError(t, err)
+			require.Equal(t, [][]byte{pooledSSZ}, published)
+			published = nil
+
+			require.Equal(t, tc.status, submit(tc.request(t, anchor, key, pooled)))
+			require.Len(t, opPool.AttesterSlashingsPool.Raw(), 1)
+			if tc.publish {
+				require.Equal(t, [][]byte{pooledSSZ}, published)
+			} else {
+				require.Empty(t, published)
+			}
+		})
 	}
 }
 

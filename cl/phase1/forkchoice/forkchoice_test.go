@@ -1337,7 +1337,7 @@ func TestAttesterSlashingRejectsDisjointIndices(t *testing.T) {
 		},
 	}
 
-	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
+	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false, false)
 
 	require.ErrorIs(t, err, ErrAttesterSlashingEmptyIntersection)
 	require.NotErrorIs(t, err, ErrIgnore)
@@ -1357,7 +1357,7 @@ func TestAttesterSlashingSeenCheckPrecedesValidation(t *testing.T) {
 		},
 	}
 
-	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
+	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false, false)
 
 	require.ErrorIs(t, err, ErrIgnore)
 }
@@ -1376,7 +1376,7 @@ func TestAttesterSlashingSeenCheckHandlesUnsortedIndices(t *testing.T) {
 		},
 	}
 
-	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
+	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false, false)
 
 	require.ErrorIs(t, err, ErrIgnore)
 }
@@ -1395,7 +1395,7 @@ func TestAttesterSlashingRejectsIndicesOverLimitBeforeSeenCheck(t *testing.T) {
 		},
 	}
 
-	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
+	err := store.onProcessAttesterSlashing(slashing, state.New(&cfg), false, false)
 
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrIgnore)
@@ -1415,7 +1415,7 @@ func TestAttesterSlashingSeenCheckHandlesHugeIndex(t *testing.T) {
 
 	var err error
 	require.NotPanics(t, func() {
-		err = store.onProcessAttesterSlashing(slashing, state.New(&cfg), false)
+		err = store.onProcessAttesterSlashing(slashing, state.New(&cfg), false, false)
 	})
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrIgnore)
@@ -1424,7 +1424,7 @@ func TestAttesterSlashingSeenCheckHandlesHugeIndex(t *testing.T) {
 func TestAttesterSlashingRejectsWhenNoValidatorIsSlashable(t *testing.T) {
 	store, s, slashing := attesterSlashingFixture(t, true)
 
-	err := store.onProcessAttesterSlashing(slashing, s, true)
+	err := store.onProcessAttesterSlashing(slashing, s, true, false)
 
 	require.EqualError(t, err, "no slashable validators in intersection")
 	require.False(t, store.operationsPool.AttesterSlashingsPool.Has(pool.ComputeKeyForAttesterSlashing(slashing)))
@@ -1435,10 +1435,35 @@ func TestAttesterSlashingRejectsWhenNoValidatorIsSlashable(t *testing.T) {
 func TestAttesterSlashingAcceptsWhenAnyValidatorIsSlashable(t *testing.T) {
 	store, s, slashing := attesterSlashingFixture(t, false)
 
-	err := store.onProcessAttesterSlashing(slashing, s, true)
+	err := store.onProcessAttesterSlashing(slashing, s, true, false)
 
 	require.NoError(t, err)
 	require.True(t, store.operationsPool.AttesterSlashingsPool.Has(pool.ComputeKeyForAttesterSlashing(slashing)))
+}
+
+func TestAttesterSlashingIgnoresPooledSlashingBeforeValidation(t *testing.T) {
+	store, _, valid := attesterSlashingFixture(t, false)
+	invalid := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{AttestingIndices: valid.Attestation_1.AttestingIndices},
+		Attestation_2: &cltypes.IndexedAttestation{AttestingIndices: valid.Attestation_2.AttestingIndices},
+	}
+	store.operationsPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(invalid), valid)
+
+	require.ErrorIs(t, store.OnAttesterSlashing(invalid, false, false), ErrIgnore)
+}
+
+func TestAttesterSlashingValidatesSeenSlashingWhenRequested(t *testing.T) {
+	store, s, valid := attesterSlashingFixture(t, false)
+	invalid := &cltypes.AttesterSlashing{
+		Attestation_1: &cltypes.IndexedAttestation{AttestingIndices: valid.Attestation_1.AttestingIndices},
+		Attestation_2: &cltypes.IndexedAttestation{AttestingIndices: valid.Attestation_2.AttestingIndices},
+	}
+	store.setUnequivocating(0)
+	store.setUnequivocating(1)
+
+	require.EqualError(t, store.onProcessAttesterSlashing(invalid, s, false, true), "invalid attester slashing data")
+	require.ErrorIs(t, store.onProcessAttesterSlashing(valid, s, true, true), ErrIgnore)
+	require.Empty(t, store.operationsPool.AttesterSlashingsPool.Raw())
 }
 
 func attesterSlashingFixture(t *testing.T, secondValidatorSlashed bool) (*ForkChoiceStore, *state.CachingBeaconState, *cltypes.AttesterSlashing) {
@@ -1484,7 +1509,7 @@ func TestOnAttesterSlashingRejectsIncompleteOperation(t *testing.T) {
 	}
 
 	require.NotPanics(t, func() {
-		require.Error(t, store.OnAttesterSlashing(&cltypes.AttesterSlashing{}, false))
+		require.Error(t, store.OnAttesterSlashing(&cltypes.AttesterSlashing{}, false, false))
 	})
 }
 
@@ -1546,7 +1571,7 @@ func TestOnAttesterSlashingIgnoresMissingJustifiedStateWhileSyncing(t *testing.T
 
 			for _, slashingCase := range slashings {
 				t.Run(slashingCase.name, func(t *testing.T) {
-					err := store.OnAttesterSlashing(slashingCase.slashing, true)
+					err := store.OnAttesterSlashing(slashingCase.slashing, true, false)
 					require.ErrorIs(t, err, synced_data.ErrNotSynced)
 				})
 			}
@@ -1621,7 +1646,7 @@ func TestOnAttesterSlashingRejectsInvalidSlashingWhileSyncing(t *testing.T) {
 					}
 					store.justifiedCheckpoint.Store(solid.Checkpoint{Root: root})
 
-					err := store.OnAttesterSlashing(slashingCase.slashing, true)
+					err := store.OnAttesterSlashing(slashingCase.slashing, true, false)
 					require.ErrorContains(t, err, slashingCase.errorContains)
 					require.NotErrorIs(t, err, ErrIgnore)
 					require.NotErrorIs(t, err, synced_data.ErrNotSynced)

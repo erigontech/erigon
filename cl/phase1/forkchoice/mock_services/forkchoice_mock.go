@@ -480,7 +480,7 @@ func (f *ForkChoiceStorageMock) OnAttestation(
 
 func (f *ForkChoiceStorageMock) OnAttesterSlashing(
 	attesterSlashing *cltypes.AttesterSlashing,
-	test bool,
+	test, validateKnown bool,
 ) error {
 	f.Pool.AttesterSlashingsPool.Insert(
 		pool.ComputeKeyForAttesterSlashing(attesterSlashing),

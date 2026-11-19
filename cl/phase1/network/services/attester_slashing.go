@@ -40,7 +40,7 @@ func (s *attesterSlashingService) DecodeGossipMessage(_ peer.ID, data []byte, ve
 }
 
 func (s *attesterSlashingService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.AttesterSlashing) error {
-	err := s.forkchoiceStore.OnAttesterSlashing(msg, false)
+	err := s.forkchoiceStore.OnAttesterSlashing(msg, false, false)
 	if errors.Is(err, forkchoice.ErrAttesterSlashingEmptyIntersection) {
 		return ErrIgnore
 	}
