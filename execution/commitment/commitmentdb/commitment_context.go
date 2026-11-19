@@ -94,6 +94,7 @@ type v3Trie interface {
 	SetDeferCommitmentUpdates(bool)
 	TakeDeferredDeltas() [][]commitment.BranchDelta
 	SetStorageFanOutMin(int)
+	SetStorageWorkersMax(int)
 	TraceCollapsesRoot(ctx context.Context, updates *commitment.Updates, tracer commitment.CollapseTracer) ([]byte, error)
 	BranchChildCount(read func([]byte) ([]byte, error), nibblePrefix []byte) (int, error)
 }
@@ -174,6 +175,12 @@ func (sdc *SharedDomainsCommitmentContext) SetDeferCommitmentUpdates(defer_ bool
 func (sdc *SharedDomainsCommitmentContext) SetStorageFanOutMin(n int) {
 	if trie, ok := sdc.patriciaTrie.(v3Trie); ok {
 		trie.SetStorageFanOutMin(n)
+	}
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetStorageWorkersMax(n int) {
+	if trie, ok := sdc.patriciaTrie.(v3Trie); ok {
+		trie.SetStorageWorkersMax(n)
 	}
 }
 
