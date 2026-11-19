@@ -726,6 +726,40 @@ func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 	}
 }
 
+func TestCallConstructorSelfdestruct(t *testing.T) {
+	factory, destroyer := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
+	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chain.AllProtocolChanges.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
+		Alloc: types.GenesisAlloc{
+			testAddr:  {Balance: big.NewInt(1_000_000_000_000_000_000)},
+			factory:   {Code: program.New().Create2ThenCall(initCode, 0).Bytes()},
+			destroyer: {Code: program.New().Op(vm.ADDRESS, vm.SELFDESTRUCT).Bytes()},
+		},
+	}), execmoduletester.WithKey(testKey))
+	txn, err := types.SignTx(types.NewTransaction(0, factory, new(uint256.Int), 1_000_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
+	require.NoError(t, err)
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	base := newBaseApiForTest(m)
+	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
+	call := program.New().DelegateCall(nil, destroyer, 0, 0, 0, 0).Bytes()
+
+	t.Run("deletion survives", func(t *testing.T) {
+		result, err := api.CallConstructor(m.Ctx, target, program.New().ReturnData(call).Bytes())
+		require.NoError(t, err)
+		require.Nil(t, result)
+	})
+	t.Run("deletion is reverted", func(t *testing.T) {
+		runtime := hexutil.Bytes(program.New().Append(call).Push0().Push0().Op(vm.REVERT).Bytes())
+		result, err := api.CallConstructor(m.Ctx, target, program.New().ReturnData(runtime).Bytes())
+		require.NoError(t, err)
+		require.Equal(t, &CreationCode{Code: &runtime}, result)
+	})
+}
+
 func TestFrameCallConstructor(t *testing.T) {
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)

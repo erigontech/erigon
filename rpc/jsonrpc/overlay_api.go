@@ -269,6 +269,13 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	if err != nil {
 		return nil, cmp.Or(ct.err, err)
 	}
+	selfdestructed, err := statedb.HasSelfdestructed(ct.contractAddress)
+	if err != nil {
+		return nil, err
+	}
+	if selfdestructed {
+		return nil, ct.err
+	}
 	runtimeCode, err := statedb.GetCode(ct.contractAddress)
 	if err != nil {
 		return nil, err
