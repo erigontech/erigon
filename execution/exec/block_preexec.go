@@ -72,7 +72,7 @@ func (bra *BlockReadAheader) SetPreExec(config *chain.Config, engine rules.Engin
 	bra.preExec = &preExecCfg{config: config, engine: engine, canonical: canonical}
 }
 
-func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header *types.Header, txns types.Transactions, workers int) error {
+func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header *types.Header, txns types.Transactions, workers int, recovery *SendersRecovery) error {
 	pe := bra.preExec
 	if header.ExcessBlobGas != nil {
 		if _, err := misc.GetBlobGasPrice(pe.config, *header.ExcessBlobGas, header.Time); err != nil {
@@ -81,6 +81,13 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 	}
 	ctx, untrack := trackPreExec(ctx, header.Hash())
 	defer untrack()
+	var senders []accounts.Address
+	if recovery != nil {
+		var err error
+		if senders, err = recovery.Wait(ctx); err != nil {
+			return ctx.Err()
+		}
+	}
 	start := time.Now()
 	signer := types.MakeSigner(pe.config, header.Number.Uint64(), header.Time)
 	var next, paths, gasLeft atomic.Int64
@@ -125,8 +132,10 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				from, err := signer.SenderWithContext(cryptoContext, txns[i])
-				if err != nil {
+				var from accounts.Address
+				if len(senders) == len(txns) {
+					from = senders[i]
+				} else if from, err = signer.SenderWithContext(cryptoContext, txns[i]); err != nil {
 					continue
 				}
 				gas := min(txns[i].GetGasLimit(), preExecTxGas)
