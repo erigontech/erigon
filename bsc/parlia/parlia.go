@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-var errNotSupported = errors.New("parlia: block production/execution not supported by the download-only stub")
+var errNotSupported = errors.New("parlia: block production is not supported")
 
 // bscSystemContracts are the addresses a Parlia system transaction may target.
 var bscSystemContracts = map[common.Address]struct{}{
@@ -56,7 +56,9 @@ var bscSystemContracts = map[common.Address]struct{}{
 	common.HexToAddress("0x0000000000000000000000000000000000003000"): {}, // TokenRecoverPortal
 }
 
-// Parlia is the permissive stub engine. See package docs.
+// Parlia executes BSC blocks, including system transactions and the fee policy.
+// It does not verify headers, seals or post-execution results, and it cannot
+// produce blocks.
 type Parlia struct {
 	chainConfig *chain.Config
 	signer      *types.Signer
@@ -104,7 +106,7 @@ func (p *Parlia) ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState,
 // --- EngineReader ---
 
 // Author returns the header coinbase, which on BSC is the block's validator.
-// The stub does not ecrecover from the seal.
+// It does not recover the signer from the seal.
 func (p *Parlia) Author(header *types.Header) (accounts.Address, error) {
 	return accounts.InternAddress(header.Coinbase), nil
 }
