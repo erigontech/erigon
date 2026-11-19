@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
 )
 
@@ -148,4 +149,52 @@ func TestRangeDupSortDescBoundsMatchDb(t *testing.T) {
 	require.NoError(t, err)
 	_, values := collectStream(t, it)
 	require.Equal(t, []string{"value1.3", "value1.2"}, values)
+}
+
+func TestCursorNextAfterNextDupOverNestedOverlay(t *testing.T) {
+	_, tx := newTestTx(t)
+	require.NoError(t, tx.Put(kv.TblAccountVals, []byte("A"), []byte("1")))
+	require.NoError(t, tx.Put(kv.TblAccountVals, []byte("C"), []byte("1")))
+	parent, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer parent.Close()
+	require.NoError(t, parent.Put(kv.TblAccountVals, []byte("B"), []byte("1")))
+	child, err := membatchwithdb.NewMemoryBatch(parent)
+	require.NoError(t, err)
+	defer child.Close()
+
+	c, err := child.CursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer c.Close()
+	k, v, err := c.First()
+	require.NoError(t, err)
+	require.Equal(t, "A=1", string(k)+"="+string(v))
+	k, _, err = c.NextDup()
+	require.NoError(t, err)
+	require.Nil(t, k)
+	k, v, err = c.Next()
+	require.NoError(t, err)
+	require.Equal(t, "B=1", string(k)+"="+string(v))
+}
+
+func TestCursorNextNoDupKeepsLaterDupsOfNextKey(t *testing.T) {
+	_, tx := newTestTx(t)
+	for _, kv2 := range [][2]string{{"A", "1"}, {"B", "1"}, {"B", "2"}, {"C", "1"}} {
+		require.NoError(t, tx.Put(kv.TblAccountVals, []byte(kv2[0]), []byte(kv2[1])))
+	}
+	batch, err := membatchwithdb.NewMemoryBatch(tx)
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("A"), []byte("0")))
+	c, err := batch.RwCursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer c.Close()
+	require.NoError(t, c.DeleteExact([]byte("B"), []byte("1")))
+
+	k, v, err := c.First()
+	require.NoError(t, err)
+	require.Equal(t, "A=0", string(k)+"="+string(v))
+	k, v, err = c.NextNoDup()
+	require.NoError(t, err)
+	require.Equal(t, "B=2", string(k)+"="+string(v))
 }
