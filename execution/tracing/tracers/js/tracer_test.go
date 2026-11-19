@@ -328,6 +328,33 @@ func TestFaultStateGasWithoutStep(t *testing.T) {
 	require.JSONEq(t, `[100,200,10,-300]`, string(result))
 }
 
+func TestSetCodeFromTracers(t *testing.T) {
+	config := chain.AllProtocolChanges.Copy()
+	config.BogotaTime = new(uint64)
+	trace := func(t *testing.T, name string, result any) {
+		t.Helper()
+		tracer, err := tracers.New(name, nil, nil)
+		require.NoError(t, err)
+		out, err := runTrace(tracer, testCtx(), config, []byte{byte(vm.PUSH1), 0x42, byte(vm.SETCODEFROM), byte(vm.STOP)})
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(out, result))
+	}
+	t.Run("prestate", func(t *testing.T) {
+		var prestate map[common.Address]json.RawMessage
+		trace(t, "prestateTracerLegacy", &prestate)
+		require.Contains(t, prestate, common.Address{19: 0x42})
+	})
+	t.Run("evmdis", func(t *testing.T) {
+		var ops []struct {
+			Result []string `json:"result"`
+		}
+		trace(t, "evmdisTracer", &ops)
+		require.Len(t, ops, 3)
+		require.Equal(t, []string{"42"}, ops[0].Result)
+		require.Equal(t, []string{"0"}, ops[1].Result)
+	})
+}
+
 func TestLegacyCallGasUsage(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
