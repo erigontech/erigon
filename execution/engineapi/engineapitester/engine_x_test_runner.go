@@ -52,7 +52,7 @@ import (
 )
 
 // NewEngineXTestRunner builds a runner that lazily creates engine-api testers
-// per (fork, preAllocHash) tuple. The supplied ctx is forwarded to each tester
+// per fork, pre-state and account list. The supplied ctx is forwarded to each tester
 // at construction time. Options may be passed to customise the runner's
 // behaviour (see EngineXTestRunnerOption). The caller must call Close on the
 // returned runner to release the underlying testers and temp directories.
@@ -84,7 +84,7 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 		ctx:       ctx,
 		logger:    logger,
 		preAllocs: preAllocs,
-		testers:   make(map[Fork]map[PreAllocHash]testerEntry),
+		testers:   make(map[Fork]map[engineXTesterKey]testerEntry),
 	}
 	for _, opt := range opts {
 		opt(runner)
@@ -114,7 +114,7 @@ type EngineXTestRunner struct {
 	logger             log.Logger
 	preAllocs          map[PreAllocHash]*PreAlloc
 	mu                 sync.Mutex
-	testers            map[Fork]map[PreAllocHash]testerEntry
+	testers            map[Fork]map[engineXTesterKey]testerEntry
 	profileHook        RequestProfileHook
 	warmupKzgCtxOnInit bool
 }
@@ -133,6 +133,19 @@ type RequestProfileHook func(kind, id string) (stop func())
 type testerEntry struct {
 	tester  EngineApiTester
 	dataDir string
+}
+
+type engineXTesterKey struct {
+	preAllocHash             PreAllocHash
+	zeroNonceStorageAccounts string
+}
+
+func (test EngineXTestDefinition) testerKey() engineXTesterKey {
+	var addresses strings.Builder
+	for _, address := range test.Config.ZeroNonceStorageAccounts {
+		addresses.Write(address[:])
+	}
+	return engineXTesterKey{test.PreAllocHash, addresses.String()}
 }
 
 // Close releases all cached testers and removes any temp directories created
@@ -160,7 +173,7 @@ func (extr *EngineXTestRunner) Close() error {
 	return errors.Join(errs...)
 }
 
-// Evict closes the tester for (fork, preAllocHash) and removes its temp dir.
+// Evict closes all testers for (fork, preAllocHash) and removes their temp dirs.
 // Safe to call when no such tester exists. Use this to free a tester after a
 // group of tests has finished, so a worker slot can host another (fork,
 // preAllocHash) combination. The lock is held only long enough to remove the
@@ -173,22 +186,27 @@ func (extr *EngineXTestRunner) Evict(fork Fork, preAllocHash PreAllocHash) error
 		extr.mu.Unlock()
 		return nil
 	}
-	entry, ok := perAlloc[preAllocHash]
-	if !ok {
-		extr.mu.Unlock()
-		return nil
+	var entries []testerEntry
+	for key := range perAlloc {
+		if key.preAllocHash == preAllocHash {
+			entries = append(entries, perAlloc[key])
+			delete(perAlloc, key)
+		}
 	}
-	delete(perAlloc, preAllocHash)
 	if len(perAlloc) == 0 {
 		delete(extr.testers, fork)
 	}
 	extr.mu.Unlock()
-	return extr.evict(entry)
+	var errs []error
+	for i := range entries {
+		errs = append(errs, extr.evict(entries[i]))
+	}
+	return errors.Join(errs...)
 }
 
 // evict performs the slow close-and-remove for a single tester. It does NOT
 // touch extr.mu or extr.testers — callers are responsible for removing the
-// entry from the map first. Shared by Evict (single-key) and Close (drain).
+// entry from the map first. Shared by Evict (group) and Close (all testers).
 func (extr *EngineXTestRunner) evict(entry testerEntry) error {
 	var errs []error
 	err := entry.tester.Close()
@@ -225,17 +243,17 @@ func testNameFromContext(ctx context.Context) string {
 }
 
 func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefinition) error {
-	tester, err := extr.getOrCreateTester(test.Fork, test.PreAllocHash)
+	tester, err := extr.getOrCreateTester(test)
 	if err != nil {
 		return err
 	}
 	return extr.execute(ctx, tester, test)
 }
 
-// EnsureTester pre-creates the tester for the given test's fork+preAllocHash.
+// EnsureTester pre-creates the tester for the given test's fork, pre-state and account list.
 // Call before benchmark timing to exclude setup costs.
 func (extr *EngineXTestRunner) EnsureTester(test EngineXTestDefinition) error {
-	_, err := extr.getOrCreateTester(test.Fork, test.PreAllocHash)
+	_, err := extr.getOrCreateTester(test)
 	return err
 }
 
@@ -366,16 +384,17 @@ func engineXStorageRoot(storage map[common.Hash]common.Hash) common.Hash {
 	return storageTrie.Hash()
 }
 
-// getOrCreateTester returns a cached tester for (fork, preAllocHash) if one
+// getOrCreateTester returns a cached tester for the test's configuration if one
 // exists, otherwise it creates a new one. The slow InitialiseEngineApiTester
 // path runs WITHOUT extr.mu held so other workers can hit the cache or start
 // their own creates concurrently. If two callers race to create for the same
 // key, the second one's tester is closed and the first one's cached tester is
 // returned (rare in practice — workers in the CLI handle distinct keys).
-func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllocHash) (EngineApiTester, error) {
+func (extr *EngineXTestRunner) getOrCreateTester(test EngineXTestDefinition) (EngineApiTester, error) {
+	fork, key := test.Fork, test.testerKey()
 	extr.mu.Lock()
 	if perAlloc, ok := extr.testers[fork]; ok {
-		if entry, ok := perAlloc[preAllocHash]; ok {
+		if entry, ok := perAlloc[key]; ok {
 			extr.mu.Unlock()
 			return entry.tester, nil
 		}
@@ -384,32 +403,33 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 	// Slow path: build the genesis + data dir + node *without* holding the
 	// lock so concurrent getOrCreateTester / Evict calls for other keys can
 	// proceed.
-	entry, err := extr.createTester(fork, preAllocHash)
+	entry, err := extr.createTester(test)
 	if err != nil {
 		return EngineApiTester{}, err
 	}
 	// Re-acquire the lock to publish the entry. If a concurrent caller for
-	// the same (fork, preAllocHash) pair already published one, discard ours.
+	// the same configuration already published one, discard ours.
 	extr.mu.Lock()
 	perAlloc, ok := extr.testers[fork]
 	if !ok {
-		perAlloc = make(map[PreAllocHash]testerEntry)
+		perAlloc = make(map[engineXTesterKey]testerEntry)
 		extr.testers[fork] = perAlloc
-	} else if existing, ok := perAlloc[preAllocHash]; ok {
+	} else if existing, ok := perAlloc[key]; ok {
 		extr.mu.Unlock()
 		// Lost the race; close our duplicate. evict acquires no locks and is
 		// safe to call here.
 		_ = extr.evict(entry)
 		return existing.tester, nil
 	}
-	perAlloc[preAllocHash] = entry
+	perAlloc[key] = entry
 	extr.mu.Unlock()
 	return entry.tester, nil
 }
 
-// createTester builds a fresh EngineApiTester for (fork, preAllocHash). The
+// createTester builds a fresh EngineApiTester for the test's configuration. The
 // caller is responsible for caching/publishing the result. No locks are taken.
-func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash) (testerEntry, error) {
+func (extr *EngineXTestRunner) createTester(test EngineXTestDefinition) (testerEntry, error) {
+	fork, preAllocHash := test.Fork, test.PreAllocHash
 	forkConfig, ok := testforks.Forks[fork.String()]
 	if !ok {
 		return testerEntry{}, testforks.UnsupportedForkError{Name: fork.String()}
@@ -419,6 +439,7 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		return testerEntry{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
 	}
 	forkConfig = forkConfig.Copy()
+	forkConfig.ZeroNonceStorageAccounts = test.Config.ZeroNonceStorageAccounts
 	var genesis types.Genesis
 	if alloc.Environment.GasLimit != 0 {
 		// Earlier builder format stores genesis inputs as environment fields.
@@ -616,6 +637,9 @@ func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, v
 }
 
 type EngineXTestDefinition struct {
+	Config struct {
+		ZeroNonceStorageAccounts []common.Address `json:"zeroNonceStorageAccounts"`
+	} `json:"config"`
 	Fork          Fork                    `json:"network"`
 	PreAllocHash  PreAllocHash            `json:"preHash"`
 	LastBlockHash *common.Hash            `json:"lastblockhash"`

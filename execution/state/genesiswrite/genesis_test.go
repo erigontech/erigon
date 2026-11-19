@@ -230,6 +230,99 @@ func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
 	}
 }
 
+func TestCommitGenesisBlockZeroNonceStorageAccountChange(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		bogotaTime   uint64
+		wantConflict bool
+	}{
+		{name: "before activation", bogotaTime: 2},
+		{name: "at activation", bogotaTime: 1, wantConflict: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stored := chain.AllProtocolChanges.Copy()
+			stored.BogotaTime = common.NewUint64(tc.bogotaTime)
+			stored.ZeroNonceStorageAccounts = []common.Address{{1}}
+			db := dbAtHeightOne(t, stored)
+			original := readStoredChainConfig(t, db)
+
+			next := stored.Copy()
+			next.ZeroNonceStorageAccounts = []common.Address{{2}}
+			_, err := commitConfig(t, db, next)
+			if tc.wantConflict {
+				var compatErr *chain.ConfigCompatError
+				require.ErrorAs(t, err, &compatErr)
+				require.Equal(t, "EIP-8253 account list", compatErr.WhatTime)
+				require.Zero(t, compatErr.RewindToTime)
+				require.Equal(t, original, readStoredChainConfig(t, db))
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, next.ZeroNonceStorageAccounts, readStoredChainConfig(t, db).ZeroNonceStorageAccounts)
+			}
+		})
+	}
+}
+
+func TestCommitGenesisBlockZeroNonceStorageAccountChangeAfterGenesisActivation(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		genesisTime, bogotaTime uint64
+	}{
+		{name: "zero timestamp"},
+		{name: "before genesis timestamp", genesisTime: 100, bogotaTime: 50},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stored := chain.AllProtocolChanges.Copy()
+			stored.BogotaTime = common.NewUint64(tc.bogotaTime)
+			stored.ZeroNonceStorageAccounts = []common.Address{{1}}
+			genesis := testGenesis(stored)
+			genesis.Timestamp = tc.genesisTime
+			db := dbWithGenesisAtHeightOne(t, genesis)
+
+			next := stored.Copy()
+			next.ZeroNonceStorageAccounts = []common.Address{{2}}
+			genesis.Config = next
+			_, err := commitGenesis(t, db, genesis, "")
+			require.NoError(t, err)
+			require.Equal(t, next.ZeroNonceStorageAccounts, readStoredChainConfig(t, db).ZeroNonceStorageAccounts)
+		})
+	}
+}
+
+func TestCommitGenesisBlockZeroNonceStorageAccountsWithoutHeadHeader(t *testing.T) {
+	a, b := common.Address{1}, common.Address{2}
+	for _, tc := range []struct {
+		name         string
+		bogotaTime   *uint64
+		stored, next []common.Address
+		wantError    bool
+	}{
+		{name: "changed", bogotaTime: common.NewUint64(1), stored: []common.Address{a}, next: []common.Address{b}, wantError: true},
+		{name: "reordered", bogotaTime: common.NewUint64(1), stored: []common.Address{a, b}, next: []common.Address{b, a}},
+		{name: "nil and empty", bogotaTime: common.NewUint64(1), next: []common.Address{}},
+		{name: "unscheduled", stored: []common.Address{a}, next: []common.Address{b}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stored := chain.AllProtocolChanges.Copy()
+			stored.BogotaTime = tc.bogotaTime
+			stored.ZeroNonceStorageAccounts = tc.stored
+			db := dbAtHeightOne(t, stored)
+			original := readStoredChainConfig(t, db)
+			dropHeadHeader(t, db)
+
+			next := stored.Copy()
+			next.ZeroNonceStorageAccounts = tc.next
+			_, err := commitConfig(t, db, next)
+			if tc.wantError {
+				require.ErrorContains(t, err, "head header")
+				require.Equal(t, original, readStoredChainConfig(t, db))
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestCommitGenesisBlockRejectsChainIDChange(t *testing.T) {
 	genesis := &types.Genesis{
 		Config: &chain.Config{
@@ -330,8 +423,7 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDB(t *testing.T) {
 	require.Equal(t, uint64(1), *storedCfg.OsakaTime, "the stored schedule must be left alone")
 }
 
-// An unreadable head header is only fatal to a fork that moved: with the timestamp
-// schedule unchanged the head's time cannot change the answer, so the node still starts.
+// Unchanged timestamp-based rules do not need a readable head header.
 func TestCommitGenesisBlockHeadHeaderOutsideTheDBUnchangedSchedule(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")

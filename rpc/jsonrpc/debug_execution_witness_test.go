@@ -36,14 +36,20 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -863,6 +869,98 @@ func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
 	dbg.AssertEnabled = true
 	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
 		"under the gate the stateless replay rejects a wrong witness")
+}
+
+func TestExecBlockStatelesslyEIP8253(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		parentTime        uint64
+		before, wantNonce uint64
+	}{
+		{name: "activation", parentTime: 99, wantNonce: 1},
+		{name: "after activation", parentTime: 100, before: 2, wantNonce: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			witness, block, config := eip8253ReplayWitness(t, tc.parentTime, tc.before, tc.wantNonce)
+			root, _, err := execBlockStatelessly(witness, block, config, merge.New(ethash.NewFaker()))
+			require.NoError(t, err)
+			require.Equal(t, block.Root(), root)
+		})
+	}
+}
+
+func TestExecBlockStatelesslyEIP8253RejectsInvalidParent(t *testing.T) {
+	for _, name := range []string{"missing", "wrong hash", "wrong number"} {
+		t.Run(name, func(t *testing.T) {
+			witness, block, config := eip8253ReplayWitness(t, 99, 0, 1)
+			header := block.Header()
+			switch name {
+			case "missing":
+				witness.Headers = nil
+				witness.headerByNumber = nil
+			case "wrong hash":
+				header.ParentHash[0] ^= 1
+			case "wrong number":
+				parent := types.CopyHeader(witness.headerByNumber[1])
+				parent.Number.SetUint64(2)
+				witness.headerByNumber[1] = parent
+				header.ParentHash = parent.Hash()
+			}
+			block = types.NewBlockWithHeader(header, nil)
+			_, _, err := execBlockStatelessly(witness, block, config, merge.New(ethash.NewFaker()))
+			require.ErrorIs(t, err, rules.ErrUnknownAncestor)
+		})
+	}
+}
+
+func eip8253ReplayWitness(t *testing.T, parentTime, beforeNonce, afterNonce uint64) (*ExecutionWitnessResult, *types.Block, *chain.Config) {
+	t.Helper()
+	target := common.HexToAddress("0x8253")
+	config := chain.AllProtocolChanges.Copy()
+	config.BogotaTime = common.NewUint64(100)
+	config.ZeroNonceStorageAccounts = []common.Address{target}
+
+	storage := trie.NewInMemoryTrie(nil)
+	key := common.Hash{1}
+	storage.Update(crypto.Keccak256(key[:]), []byte{42})
+	account := accounts.NewAccount()
+	account.Balance.SetUint64(100)
+	account.Nonce = beforeNonce
+	account.Root = storage.Hash()
+	prestate := trie.NewInMemoryTrie(nil)
+	addressHash := crypto.Keccak256(target[:])
+	prestate.UpdateAccount(addressHash, &account)
+	code := []byte{byte(vm.STOP)}
+	requestContract := accounts.NewAccount()
+	requestContract.Nonce = 1
+	requestContract.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	for _, address := range []accounts.Address{
+		config.GetWithdrawalRequestContract(), config.GetConsolidationRequestContract(),
+		config.GetBuilderDepositContract(), config.GetBuilderExitContract(),
+	} {
+		value := address.Value()
+		prestate.UpdateAccount(crypto.Keccak256(value[:]), &requestContract)
+	}
+	nodes, err := prestate.RLPEncode()
+	require.NoError(t, err)
+	witness := &ExecutionWitnessResult{Codes: []hexutil.Bytes{code}}
+	for _, node := range nodes {
+		witness.State = append(witness.State, node)
+	}
+
+	parent := &types.Header{Number: *uint256.NewInt(1), Time: parentTime, Root: prestate.Hash()}
+	encodedParent, err := rlp.EncodeToBytes(parent)
+	require.NoError(t, err)
+	witness.Headers = []hexutil.Bytes{encodedParent}
+	witness.headerByNumber = map[uint64]*types.Header{1: parent}
+
+	account.Nonce = afterNonce
+	prestate.UpdateAccount(addressHash, &account)
+	header := &types.Header{
+		Number: *uint256.NewInt(2), Time: parentTime + 1, ParentHash: parent.Hash(),
+		GasLimit: 30_000_000, Root: prestate.Hash(),
+	}
+	return witness, types.NewBlockWithHeader(header, nil), config
 }
 
 type fixedParentState struct {

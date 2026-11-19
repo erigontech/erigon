@@ -138,7 +138,7 @@ func (c *witnessResultCache) ResidentBytes() int {
 // store is the build paths' insert: it caches the witness and publishes it. The result is
 // shared with readers from here on and must not change.
 func (c *witnessResultCache) store(num uint64, hash common.Hash, r *ExecutionWitnessResult) {
-	r.headerByNumber = nil // only the build's BLOCKHASH lookups read it
+	r.headerByNumber = nil // Build-time lookups and stateless verification are complete.
 	c.Add(hash, r)
 	c.feed.publish(witnessPush{num: num, hash: hash, result: r})
 }

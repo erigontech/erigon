@@ -128,7 +128,7 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 69 # Bogota transitions need EIPs 4758, 8151, 8253, 8298: https://github.com/erigontech/erigon/issues/25241
+              max-failures: 6 # Bogota transitions need EIPs 4758, 8151, 8298: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -146,7 +146,9 @@ jobs:
               fixtures-tarball: eest_devnet
               extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
               erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
-              max-failures: 861 # Missing devnet-2 EIPs: 4758, 8151, 8253, 8298: https://github.com/erigontech/erigon/issues/25241
+              # Hive's rejection-reason checks add one EIP-8151 and two EIP-8298
+              # failures to the 861 failures reported by the native EngineX runner.
+              max-failures: 864 # Missing devnet-2 EIPs: 4758, 8151, 8298: https://github.com/erigontech/erigon/issues/25241
               commitment_mode: parallel
             - sim: consume-enginex
               runner: ubuntu-latest
@@ -324,8 +326,8 @@ jobs:
             # Keep fixtures compressed in the image to avoid a large Docker layer.
             # Hive extracts only this simulator's tests when the container starts.
             sim_dir='hive/simulators/ethereum/eels/${{ matrix.sim }}'
-            # The source consumer requires a newer uv than Hive's base image supplies.
-            sed 's/^RUN uv sync$/RUN uv pip install --system uv==0.13.4 \&\& uv sync/' \
+            # Ignore the consumer's uv requirement only while upgrading Hive's older uv.
+            sed 's/^RUN uv sync$/RUN uv --no-config pip install --system uv==0.13.4 \&\& uv sync/' \
               "$sim_dir/Dockerfile.git" > "$sim_dir/Dockerfile.erigon"
             bash erigon-full/tools/test-fixtures.sh --download-only \
               erigon-full/test-fixtures.json "$sim_dir" '${{ matrix.fixtures-tarball }}'
