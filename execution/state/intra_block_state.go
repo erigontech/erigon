@@ -201,6 +201,7 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             Incarnation
 	dep                 int
+	firstDepReadAt      time.Time
 	stateReadErr        error
 
 	// Per-attempt memo of the shared-versionMap SelfDestruct probe: it reads only
@@ -381,6 +382,7 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.codeReadDuration = 0
 	ibs.codeReadCount = 0
 	ibs.dep = UnknownDep
+	ibs.firstDepReadAt = time.Time{}
 	ibs.stateReadErr = nil
 }
 
@@ -3754,14 +3756,14 @@ func (ibs *IntraBlockState) HadInvalidRead() bool {
 //go:noinline
 func (ibs *IntraBlockState) noteDep(idx int) {
 	if ibs.dep < 0 && idx >= 0 {
-		ibs.versionedReads.firstDepReadAt = time.Now()
+		ibs.firstDepReadAt = time.Now()
 	}
 	ibs.dep = max(ibs.dep, idx)
 }
 
 // FirstDepReadAt is the time of the run's first dependency read; valid only when DepTxIndex() >= 0.
 func (ibs *IntraBlockState) FirstDepReadAt() time.Time {
-	return ibs.versionedReads.firstDepReadAt
+	return ibs.firstDepReadAt
 }
 
 func (ibs *IntraBlockState) DepTxIndex() int {
@@ -3802,6 +3804,7 @@ func (ibs *IntraBlockState) ResetVersionedIO() {
 	ibs.versionedReads = ReadSet{}
 	ibs.versionedWrites.recycle()
 	ibs.dep = UnknownDep
+	ibs.firstDepReadAt = time.Time{}
 	ibs.recordAccess = false
 	ibs.stateReadErr = nil
 }

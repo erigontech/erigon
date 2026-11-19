@@ -1274,10 +1274,9 @@ func dexPostValidation(pe *parallelExecutor) error {
 	defer pe.RUnlock()
 	for blockNum, blockStatus := range pe.blockExecutors {
 		if blockStatus.validateTasks.maxComplete() == len(blockStatus.tasks) {
-			allInputs := blockStatus.result.TxIO.Inputs()
-			for i := range allInputs {
+			for i, inputs := range blockStatus.result.TxIO.Inputs() {
 				var err error
-				for hdr := range allInputs[i].AllHeaders() {
+				for hdr := range inputs.AllHeaders() {
 					if hdr.Version.TxIndex != i-1 {
 						err = fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, hdr.Version.TxIndex)
 						break
