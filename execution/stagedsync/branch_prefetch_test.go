@@ -269,14 +269,11 @@ func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {
 	require.ErrorIs(t, (<-out).err, v3.ErrRecordFormat, "compute-ahead must read commitment records through the prefetch map")
 }
 
-func TestBranchPrefetcherDrainSortedOutlastsChunksInFlight(t *testing.T) {
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
-	p := newBranchPrefetcher(context.Background(), db)
-	defer p.close()
-	p.gate.RLock()
-	for i := range 600 {
-		p.add(prefetchItem{account: [32]byte{0: byte(i), 1: byte(i >> 8)}})
-	}
+func TestBranchPrefetcherDrainSortedWaitsForItemsTakenByWorkers(t *testing.T) {
+	p := newPrefetchRecords()
+	p.work = make(chan prefetchItem, 8)
+	p.add(prefetchItem{account: [32]byte{1}})
+	<-p.work
 	done := make(chan struct{})
 	go func() {
 		p.drainSorted()
@@ -284,12 +281,82 @@ func TestBranchPrefetcherDrainSortedOutlastsChunksInFlight(t *testing.T) {
 	}()
 	select {
 	case <-done:
-		t.Fatal("drainSorted returned with a chunk in flight")
+		t.Fatal("drainSorted returned with an item in flight")
 	case <-time.After(50 * time.Millisecond):
 	}
-	p.gate.RUnlock()
+	p.done(1)
 	<-done
+	require.Zero(t, p.drainTimeout.Load())
+}
+
+func TestBranchPrefetcherDrainSortedWalksTheBacklog(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	p := newBranchPrefetcher(context.Background(), db)
+	defer p.close()
+	p.gate.Lock()
+	for i := range 600 {
+		p.add(prefetchItem{account: [32]byte{0: byte(i), 1: byte(i >> 8)}})
+	}
+	p.gate.Unlock()
+	p.drainSorted()
 	require.Empty(t, p.work)
+	require.Zero(t, p.pending.Load())
+	require.EqualValues(t, 600, p.queued.Load())
+	require.Positive(t, p.backlog.Load())
+}
+
+func TestBranchPrefetcherQueuesAnItemOncePerFold(t *testing.T) {
+	p := newPrefetchRecords()
+	p.work = make(chan prefetchItem, 8)
+	p.add(prefetchItem{account: [32]byte{1}})
+	p.add(prefetchItem{account: [32]byte{1}})
+	require.Len(t, p.work, 1)
+	require.EqualValues(t, 1, p.deduped.Load())
+	p.pause()
+	p.resume()
+	p.add(prefetchItem{account: [32]byte{1}})
+	require.Len(t, p.work, 1, "an item discarded at the pause is queued again for the next fold")
+}
+
+func TestBranchPrefetcherFoldGetCountsHitsAndMisses(t *testing.T) {
+	p := newPrefetchRecords()
+	p.put([]byte{1}, []byte{2}, 0)
+	_, _, ok := p.foldGet([]byte{1})
+	require.True(t, ok)
+	_, _, ok = p.foldGet([]byte{3})
+	require.False(t, ok)
+	require.EqualValues(t, 1, p.foldHits.Load())
+	require.EqualValues(t, 1, p.foldMisses.Load())
+}
+
+func TestBranchPrefetcherForwardsBatchesBufferedAtStop(t *testing.T) {
+	for i := range 30 {
+		p := newPrefetchRecords()
+		p.work = make(chan prefetchItem, 8)
+		p.blockNum, p.parentHash = uint64(100+i), common.Hash{2}
+		touches := &commitmentdb.PreExecTouches{BlockNum: p.blockNum, ParentHash: p.parentHash, C: make(chan []commitmentdb.PathTouch, 2)}
+		touches.C <- []commitmentdb.PathTouch{{Account: [32]byte{1}}}
+		commitmentdb.PublishPreExecTouches(touches)
+		p.stopOnce.Do(func() { close(p.stop) })
+		p.follow()
+		p.stopFollow()
+		require.Len(t, p.work, 1)
+		require.EqualValues(t, 1, p.followed.Load())
+	}
+}
+
+func TestBranchPrefetcherFollowsARepublishedQueue(t *testing.T) {
+	p := newPrefetchRecords()
+	p.work = make(chan prefetchItem, 8)
+	p.blockNum, p.parentHash = 9, common.Hash{3}
+	commitmentdb.PublishPreExecTouches(&commitmentdb.PreExecTouches{BlockNum: 9, ParentHash: common.Hash{3}, C: make(chan []commitmentdb.PathTouch, 1)})
+	p.follow()
+	defer p.stopFollow()
+	time.Sleep(20 * time.Millisecond)
+	retry := &commitmentdb.PreExecTouches{BlockNum: 9, ParentHash: common.Hash{3}, C: make(chan []commitmentdb.PathTouch, 1)}
+	retry.C <- []commitmentdb.PathTouch{{Account: [32]byte{5}}}
+	commitmentdb.PublishPreExecTouches(retry)
+	require.Eventually(t, func() bool { return len(p.work) == 1 }, time.Second, time.Millisecond)
 }
 
 func TestBranchPrefetcherFollowsPreExecTouchesUntilStopped(t *testing.T) {

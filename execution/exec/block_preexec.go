@@ -78,14 +78,16 @@ func (bra *BlockReadAheader) preExecTxns(ctx context.Context, db kv.RoDB, header
 			return err
 		}
 	}
+	ctx, untrack := trackPreExec(ctx, header.Number.Uint64())
+	defer untrack()
 	start := time.Now()
 	signer := types.MakeSigner(pe.config, header.Number.Uint64(), header.Time)
 	var next, paths, gasLeft atomic.Int64
 	gasLeft.Store(preExecBlockGas)
-	var touches chan []commitmentdb.PathTouch
+	var touches *commitmentdb.PreExecTouches
 	if preExecQueue {
-		touches = make(chan []commitmentdb.PathTouch, 1024)
-		commitmentdb.PublishPreExecTouches(&commitmentdb.PreExecTouches{BlockNum: header.Number.Uint64(), ParentHash: header.ParentHash, C: touches})
+		touches = &commitmentdb.PreExecTouches{BlockNum: header.Number.Uint64(), ParentHash: header.ParentHash, C: make(chan []commitmentdb.PathTouch, 1024)}
+		commitmentdb.PublishPreExecTouches(touches)
 	}
 	wg, ctx := errgroup.WithContext(ctx)
 	for w := range min(preExecWorkers, secp256k1.NumOfContexts(), len(txns)) {
@@ -180,8 +182,31 @@ type commitmentToucher struct {
 	ctx   context.Context
 	read  func(key []byte) []byte
 	paths int
-	out   chan<- []commitmentdb.PathTouch
+	out   *commitmentdb.PreExecTouches
 	batch []commitmentdb.PathTouch
+}
+
+type preExecRun struct {
+	blockNum uint64
+	cancel   context.CancelFunc
+}
+
+var activePreExec atomic.Pointer[preExecRun]
+
+func trackPreExec(ctx context.Context, blockNum uint64) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	run := &preExecRun{blockNum: blockNum, cancel: cancel}
+	activePreExec.Store(run)
+	return ctx, func() {
+		activePreExec.CompareAndSwap(run, nil)
+		cancel()
+	}
+}
+
+func StopPreExec(blockNum uint64) {
+	if run := activePreExec.Load(); run != nil && run.blockNum == blockNum {
+		run.cancel()
+	}
 }
 
 func (t *commitmentToucher) flush() {
@@ -190,8 +215,9 @@ func (t *commitmentToucher) flush() {
 	}
 	slices.SortFunc(t.batch, commitmentdb.ComparePathTouch)
 	select {
-	case t.out <- t.batch:
+	case t.out.C <- t.batch:
 	default:
+		t.out.Dropped.Add(int64(len(t.batch)))
 	}
 	t.batch = nil
 }
@@ -201,8 +227,8 @@ func (t *commitmentToucher) touch(addrHash, slotHash []byte) {
 		return
 	}
 	t.paths++
+	v3.PrefetchPath(t.read, addrHash, slotHash)
 	if t.out == nil {
-		v3.PrefetchPath(t.read, addrHash, slotHash)
 		return
 	}
 	it := commitmentdb.PathTouch{Account: [32]byte(addrHash)}

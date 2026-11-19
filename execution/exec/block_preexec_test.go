@@ -278,16 +278,35 @@ func TestBlockReadAheaderPreExecWalksStoragePathOfTxWrite(t *testing.T) {
 	require.Contains(t, reads, string(v3.StorageNodeKey(contractHash, nil, nil)), "the tx's SSTORE must walk the contract's storage path")
 }
 
-func TestCommitmentToucherQueuesSortedBatches(t *testing.T) {
-	out := make(chan []commitmentdb.PathTouch, 4)
-	toucher := &commitmentToucher{ctx: context.Background(), out: out}
+func TestCommitmentToucherWalksAndQueuesSortedBatches(t *testing.T) {
+	touches := &commitmentdb.PreExecTouches{C: make(chan []commitmentdb.PathTouch, 1)}
+	reads := 0
+	toucher := &commitmentToucher{ctx: context.Background(), out: touches, read: func([]byte) []byte { reads++; return nil }}
 	for i := range preExecBatch + 1 {
 		toucher.touch(bytes.Repeat([]byte{byte(250 - i)}, 32), nil)
 	}
-	batch := <-out
+	require.Equal(t, preExecBatch+1, reads, "queueing a path must not replace pre-exec's own walk")
+	batch := <-touches.C
 	require.Len(t, batch, preExecBatch)
 	require.True(t, slices.IsSortedFunc(batch, commitmentdb.ComparePathTouch))
 	toucher.flush()
-	require.Equal(t, []commitmentdb.PathTouch{{Account: [32]byte(bytes.Repeat([]byte{byte(250 - preExecBatch)}, 32))}}, <-out)
+	require.Equal(t, []commitmentdb.PathTouch{{Account: [32]byte(bytes.Repeat([]byte{byte(250 - preExecBatch)}, 32))}}, <-touches.C)
 	require.Equal(t, preExecBatch+1, toucher.paths)
+}
+
+func TestCommitmentToucherCountsBatchesTheQueueRefused(t *testing.T) {
+	touches := &commitmentdb.PreExecTouches{C: make(chan []commitmentdb.PathTouch)}
+	toucher := &commitmentToucher{ctx: context.Background(), out: touches, read: func([]byte) []byte { return nil }}
+	toucher.touch(bytes.Repeat([]byte{1}, 32), nil)
+	toucher.flush()
+	require.EqualValues(t, 1, touches.Dropped.Load())
+}
+
+func TestStopPreExecCancelsOnlyTheNamedBlock(t *testing.T) {
+	ctx, untrack := trackPreExec(context.Background(), 7)
+	defer untrack()
+	StopPreExec(8)
+	require.NoError(t, ctx.Err())
+	StopPreExec(7)
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
 }

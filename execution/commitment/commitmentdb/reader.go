@@ -369,6 +369,7 @@ type PreExecTouches struct {
 	BlockNum   uint64
 	ParentHash common.Hash
 	C          chan []PathTouch
+	Dropped    atomic.Int64
 }
 
 func PublishPreExecTouches(t *PreExecTouches) { preExecTouches.Store(t) }

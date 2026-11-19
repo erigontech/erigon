@@ -322,7 +322,8 @@ func (cc *commitmentCalculator) Stop() {
 	cc.wg.Wait()
 	if p := cc.branchPrefetch; p != nil {
 		p.close()
-		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
+		preDropped, preUnread := p.preExecLost()
+		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load(), "queued", p.queued.Load(), "deduped", p.deduped.Load(), "followed", p.followed.Load(), "preDropped", preDropped, "preUnread", preUnread, "backlog", p.backlog.Load(), "foldHits", p.foldHits.Load(), "foldMisses", p.foldMisses.Load(), "drainWaitUs", p.drainWait.Load()/1000, "drainTimeout", p.drainTimeout.Load())
 		if commitmentdb.ParentReadsWanted() {
 			if r := cc.parentRecords(); r != nil {
 				commitmentdb.PublishParentRecords(r)
@@ -925,6 +926,7 @@ func (cc *commitmentCalculator) finishPrefetch() {
 // path; the per-call differences live in m.
 
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
+	exec.StopPreExec(t.blockNum)
 	cc.finishPrefetch()
 	// The version map is the ledger: exec's writes already encode every EIP-161 /
 	// self-destruct removal, so emitTouched folds the block's touched keys straight
@@ -1173,7 +1175,7 @@ func (r *asOfStateReader) prefetchedBranch(key []byte) ([]byte, kv.Step, bool) {
 	if _, maxStep, inMem := r.sd.GetLatestFromMemory(kv.CommitmentDomain, key); inMem || maxStep != kv.NoStepBound {
 		return nil, 0, false
 	}
-	return r.prefetched.get(key)
+	return r.prefetched.foldGet(key)
 }
 
 func (r *asOfStateReader) LeafRefs(key, data []byte) *commitment.LeafRefs {

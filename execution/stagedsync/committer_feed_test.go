@@ -215,8 +215,8 @@ func computeAheadRoot(t *testing.T, wantFeed bool) []byte {
 		p := newPrefetchRecords()
 		p.work = make(chan prefetchItem, 64)
 		cc.branchPrefetch, cc.asOfReader.prefetched = p, p
-		for range queued {
-			p.add(prefetchItem{})
+		for i := range queued {
+			p.add(prefetchItem{account: [32]byte{byte(i)}})
 		}
 	}
 	req := &blockRequest{blockNum: 2, firstTxNum: 2, lastTxNum: 3, bal: bal}
