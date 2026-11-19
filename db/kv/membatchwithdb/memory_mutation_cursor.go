@@ -260,7 +260,7 @@ func (m *memoryMutationCursor) NextDup() ([]byte, []byte, error) {
 			return nil, nil, err
 		}
 		if dbKey == nil {
-			if mem.deleted || !bytes.Equal(mem.key, key) {
+			if mem.deleted || mem.value == nil || !bytes.Equal(mem.key, key) { // a nil value is no entry
 				return nil, nil, nil
 			}
 			if dbKey, dbValue, err = m.getNextOnDb(Normal); err != nil {
@@ -276,7 +276,7 @@ func (m *memoryMutationCursor) NextDup() ([]byte, []byte, error) {
 	}
 	mem := cursorEntry{key: memKey, value: memValue}
 	if memKey == nil {
-		if !bytes.Equal(m.currentDbEntry.key, key) {
+		if m.currentDbEntry.value == nil || !bytes.Equal(m.currentDbEntry.key, key) {
 			return nil, nil, nil
 		}
 		mem = memCursorEntry(m.memCursor.nextRaw())
