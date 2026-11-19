@@ -48,7 +48,7 @@ import (
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
-const commitmentV3Batch = 1024
+var commitmentV3Batch = 1024
 
 var commitmentV3BatchBytes = 1 << 20
 
@@ -307,10 +307,11 @@ func convertCommitmentFileV3(
 			for _, p := range batch.pairs {
 				value := p[1]
 				if st.squeezed && !commitment.IsCommitmentStateKey(p[0]) {
-					value, err = expand(value, startTxNum, endTxNum)
-					if err != nil {
-						return fmt.Errorf("expand squeezed branch: %w", err)
+					expanded, expandErr := expand(value, startTxNum, endTxNum)
+					if expandErr != nil {
+						return fmt.Errorf("expand squeezed branch: %w", expandErr)
 					}
+					value = expanded
 				}
 				if convErr := convertLegacyPairV3(p[0], value, incremental, conv, reach, delta, sink.emit); convErr != nil {
 					return convErr

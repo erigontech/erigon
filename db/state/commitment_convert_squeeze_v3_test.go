@@ -34,6 +34,8 @@ func TestConvertCommitmentFiles_SqueezedLegacyToV3Folds(t *testing.T) {
 	t.Cleanup(statecfg.SetCommitmentV3(false))
 	legacySchema := statecfg.Schema
 	db, agg, roots := testDbAggregatorWithCommitmentHistory(t, 10, 32)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 31, 32, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
 	rootTxNums := slices.Sorted(maps.Keys(roots))
 	legacyFiles, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "*-commitment.*.kv"))
 	require.NoError(t, err)
@@ -44,6 +46,7 @@ func TestConvertCommitmentFiles_SqueezedLegacyToV3Folds(t *testing.T) {
 		latestFileTo = max(latestFileTo, to)
 	}
 	latestCoveredTxNum := latestFileTo*10 - 1
+	require.Equal(t, rootTxNums[len(rootTxNums)-1], latestCoveredTxNum)
 	latestIndex := slices.IndexFunc(rootTxNums, func(txNum uint64) bool { return txNum > latestCoveredTxNum })
 	if latestIndex < 0 {
 		latestIndex = len(rootTxNums)
@@ -72,6 +75,8 @@ func TestConvertCommitmentFiles_SqueezedLegacyToV3Folds(t *testing.T) {
 	require.NoError(t, dir.RemoveAll(filepath.Join(agg.Dirs().Snap, "backup")))
 
 	db, agg = reopenForConvert(t, db, agg, legacySchema)
+	oldBatch := state.SetCommitmentV3BatchForTest(16)
+	t.Cleanup(func() { state.SetCommitmentV3BatchForTest(oldBatch) })
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
 
 	statecfg.Schema = legacySchema
