@@ -337,7 +337,7 @@ func readReferencePages(branch commitment.BranchData, accounts, storage *seg.Rea
 	defer func() {
 		rrp.ns.Add(int64(time.Since(t0)))
 		if rrp.calls.Add(1)%4096 == 0 {
-			log.Info("[rrp] expand refs", "calls", rrp.calls.Swap(0)+1, "refs", rrp.refs.Swap(0), "ref2", rrp.ref2.Swap(0), "coldpg", rrp.cold.Swap(0), "batches", rrp.batches.Swap(0), "rrpms", rrp.ns.Swap(0)/1e6, "readms", rrp.readNs.Swap(0)/1e6)
+			log.Info("[rrp] expand refs", "npCalls", rrp.calls.Swap(0)+1, "npRefs", rrp.refs.Swap(0), "npRefTwo", rrp.ref2.Swap(0), "npColdPg", rrp.cold.Swap(0), "npBatches", rrp.batches.Swap(0), "npRrpMs", rrp.ns.Swap(0)/1e6, "npReadMs", rrp.readNs.Swap(0)/1e6)
 		}
 	}()
 	refs := 0
