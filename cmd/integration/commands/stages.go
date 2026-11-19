@@ -611,7 +611,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		}
 
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber, true, false)
-		if err := stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
+		if err := stagedsync.UnwindSendersStage(u, tx, cfg); err != nil {
 			return err
 		}
 	default:
@@ -1171,6 +1171,9 @@ func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.Tempo
 		return nil, err
 	}
 	dirs := datadir.New(datadirCli)
+	if err := dbstate.CheckSnapshotsCompatibility(dirs); err != nil {
+		return nil, err
+	}
 	chainConfig := fromdb.ChainConfig(db)
 	snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
 	_allSnapshotsSingleton = blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, logger)
@@ -1179,7 +1182,7 @@ func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.Tempo
 		return nil, err
 	}
 	aggOpts := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings)
-	if reset {
+	if reset || skipFilesDBGapCheck {
 		aggOpts = aggOpts.SkipFilesDBGapCheck()
 	}
 	agg := aggOpts.MustOpen(ctx)

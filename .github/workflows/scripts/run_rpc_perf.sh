@@ -25,8 +25,15 @@ rm -rf "./reports/$CHAIN/"*
 
 # Move to home dir of rpc-tests
 cd .. || exit 1
+
+# Keep the load generator off the client's cores when RPC_PERF_CPUS is set (taskset format).
+pin=()
+if [ -n "$RPC_PERF_CPUS" ]; then
+  pin=(taskset -c "$RPC_PERF_CPUS")
+fi
+
 # No HTTP compression: Nethermind and Reth never compress towards localhost, Erigon and Geth do.
-./build/bin/rpc_perf --blockchain "$CHAIN" \
+"${pin[@]}" ./build/bin/rpc_perf --blockchain "$CHAIN" \
                      --test-type "$method" \
                      --pattern-file perf/pattern/"$CHAIN"/"$pattern".jsonl \
                      --test-sequence "$sequence" \

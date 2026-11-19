@@ -919,6 +919,10 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 		finalizedSlot := a.forkchoiceStore.FinalizedCheckpoint().Epoch * a.beaconChainCfg.SlotsPerEpoch
 		isFinalized = blockRoot == canonicalRoot && slot <= finalizedSlot
 	}
+	if a.forkchoiceStore.IsEnvelopeRejected(blockRoot) {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+			fmt.Errorf("execution payload envelope not found for block %v", blockRoot))
+	}
 	return newBeaconResponse(envelope).
 		WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
 		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
@@ -926,11 +930,17 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 }
 
 func (a *ApiHandler) executionPayloadEnvelopeForRoot(ctx context.Context, blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, uint64, bool, error) {
+	if a.forkchoiceStore.IsEnvelopeRejected(blockRoot) {
+		return nil, 0, false, nil
+	}
 	var envelope *cltypes.SignedExecutionPayloadEnvelope
 	var err error
 	if a.forkchoiceStore.HasEnvelope(blockRoot) {
 		envelope, err = a.forkchoiceStore.ReadEnvelopeFromDisk(blockRoot)
 		if err != nil {
+			if a.forkchoiceStore.IsEnvelopeRejected(blockRoot) {
+				return nil, 0, false, nil
+			}
 			return nil, 0, false, err
 		}
 	}
@@ -1141,6 +1151,9 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
+	}
+	if contents == nil {
+		a.emitters.NotifyEnvelopeArrived(signedEnvelope.Message.BeaconBlockRoot)
 	}
 	if validation == BlockPublishingValidationConsensusAndEquivocation {
 		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
@@ -1447,13 +1460,13 @@ func (a *ApiHandler) emitFullHeadV2(block *cltypes.SignedBeaconBlock, blockRoot 
 	if err != nil || event == nil {
 		return
 	}
-	a.emitters.WithHeadEventLock(func() {
+	a.emitters.EmitHeadV2IfCurrent(event, func() bool {
 		currentHead, currentSlot, err := a.forkchoiceStore.GetHeadNode()
 		if err != nil || currentHead != head || currentSlot != headSlot ||
 			a.forkchoiceStore.IsRootOptimistic(currentHead.Root) != optimistic {
-			return
+			return false
 		}
-		a.emitters.State().SendHeadV2(event)
+		return true
 	})
 }
 
@@ -1620,10 +1633,8 @@ func (a *ApiHandler) publishAndStoreExecutionPayloadEnvelopeColumns(storeCtx, pu
 	if len(columns) != 0 && a.columnStorage == nil {
 		return errors.Join(publishErr, fmt.Errorf("%w: data column storage unavailable", errExecutionPayloadEnvelopeIntegration))
 	}
-	for _, column := range columns {
-		if err := a.columnStorage.WriteColumnSidecars(storeCtx, work.blockRoot, int64(column.Index), column); err != nil {
-			return errors.Join(publishErr, fmt.Errorf("%w: %w", errExecutionPayloadEnvelopeIntegration, err))
-		}
+	if err := a.writeColumnSidecarsBatched(storeCtx, work.slot, work.blockRoot, columns); err != nil {
+		return errors.Join(publishErr, fmt.Errorf("%w: %w", errExecutionPayloadEnvelopeIntegration, err))
 	}
 	for _, bundle := range work.bundles {
 		a.blobBundles.Add(bundle.Commitment, bundle)

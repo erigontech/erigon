@@ -824,6 +824,27 @@ func (ibs *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 	return code.Bytes, err
 }
 
+// ReadCodeSegmentTo copies the code of addr from offset from into dst, zero-padded past its
+// end. On a code-cache miss a reader that serves segments copies without caching the code; any
+// other reader reads the whole code, which fills the cache. Without a version map, or with a
+// code-access hook, it always reads the whole code.
+func (ibs *IntraBlockState) ReadCodeSegmentTo(addr accounts.Address, from uint64, dst []byte) error {
+	if ibs.versionMap == nil || ibs.codeAccess != nil {
+		code, err := ibs.GetCode(addr)
+		common.CopySegment(dst, code, from)
+		return err
+	}
+	seg := codeSegment{from: from, dst: dst}
+	code, source, _, err := readCodeSegment(ibs, addr, &seg)
+	if !seg.copied {
+		common.CopySegment(dst, code.Bytes, from)
+	}
+	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+		fmt.Printf("%d (%d.%d) ReadCodeSegmentTo (%s) %x: from %d, %d bytes, err: %v\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, from, len(dst), err)
+	}
+	return err
+}
+
 func (ibs *IntraBlockState) getCode(addr accounts.Address) (accounts.Code, error) {
 	if ibs.versionMap == nil {
 		stateObject, err := ibs.getStateObject(addr, true)
@@ -895,6 +916,10 @@ func (ibs *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		return size, nil
 	}
 
+	if ibs.codeAccess != nil {
+		code, err := ibs.getCode(addr)
+		return code.Len(), err
+	}
 	size, source, _, err := readCodeSize(ibs, addr)
 
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
@@ -909,6 +934,7 @@ func (ibs *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 // EIP-7702 delegation). No-op when the reader doesn't implement it.
 type codeAccessTracker interface {
 	OnCodeAccess(accounts.Address, []byte)
+	OnCodeChange(accounts.CodeHash) func()
 }
 
 func (ibs *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
@@ -996,15 +1022,12 @@ func (ibs *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 	// it may not result in an actual gas recorded access - if it
 	// is it will be marked via a direct call
 	if ibs.versionMap != nil {
-		// Read through the version-aware CodePath so validation can reject a
-		// speculative execution that raced a prior tx's CodePath publish. readCode
-		// (not getCode) avoids reporting a BAL code access for non-delegated code.
 		code, _, _, err := readCode(ibs, addr)
 		if err != nil {
 			return accounts.ZeroAddress, false, err
 		}
+		ibs.callCodeAccessHook(addr, code.Bytes)
 		if delegation, ok := types.ParseDelegation(code.Bytes); ok {
-			ibs.callCodeAccessHook(addr, code.Bytes)
 			return delegation, true, nil
 		}
 		return accounts.ZeroAddress, false, nil
@@ -1018,8 +1041,8 @@ func (ibs *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 		if err != nil {
 			return accounts.ZeroAddress, false, err
 		}
+		ibs.callCodeAccessHook(addr, code)
 		if delegation, ok := types.ParseDelegation(code); ok {
-			ibs.callCodeAccessHook(addr, code)
 			return delegation, true, nil
 		}
 	}
@@ -1051,8 +1074,9 @@ func (ibs *IntraBlockState) GetCommittedState(addr accounts.Address, key account
 }
 
 func (ibs *IntraBlockState) HasSelfdestructed(addr accounts.Address) (bool, error) {
-	destructed, _, _, err := readSelfDestruct(ibs, addr)
-	return destructed, err
+	destructed, source, _, err := readSelfDestruct(ibs, addr)
+	// A destruct read from the version map is an earlier transaction's, not this one's.
+	return destructed && source != MapRead, err
 }
 
 func (ibs *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) ReadResult {
@@ -1426,6 +1450,17 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				if preserved != nil {
 					return preserved, MapRead, Version{TxIndex: destructTxIndex}, nil
 				}
+				// A destruct this attempt has read stays in force even if its cell becomes an
+				// estimate again, so the committed record must not revive the account, here or
+				// in a later load of it. Only a re-creation by the destroying tx itself is left to
+				// the committed reader.
+				if _, res, _ := ibs.versionMap.ReadAddress(addr, destructTxIndex+1); res.DepIdx() != destructTxIndex || res.accSource() == AccountFromBAL {
+					destructVersion := sdRes.Version()
+					if _, ok := ibs.versionedReads.GetAddress(addr); !ok {
+						ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: ReadHeader{Source: MapRead, Version: destructVersion}})
+					}
+					return nil, MapRead, destructVersion, nil
+				}
 			}
 		}
 	}
@@ -1451,8 +1486,13 @@ func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		// stale nonce/codeHash flows through the per-field refresh (which
 		// only overwrites fields a versionMap cell exists for), so Empty()
 		// returns false and the EVM misses CallNewAccountGas.
-		if ibs.versionMap.IsNetAbsent(addr, ibs.txIndex) {
+		state, destructDep := ibs.versionMap.AccountLifecycleWithDestructDep(addr, ibs.txIndex)
+		if state == LifecycleAbsent {
 			return nil, StorageRead, UnknownVersion, nil
+		}
+		// An in-flight destruct below is not net-absent yet, but the committed record predates it.
+		if destructDep != UnknownDep {
+			ibs.dep = max(ibs.dep, destructDep)
 		}
 	}
 
@@ -1718,7 +1758,15 @@ func (ibs *IntraBlockState) writeCode(addr accounts.Address, code accounts.Code,
 
 // journalCodeChange journals a code change and calls the tracing hooks.
 func (ibs *IntraBlockState) journalCodeChange(addr accounts.Address, prevHash accounts.CodeHash, prevCode []byte, code accounts.Code, wasCommited bool, reason tracing.CodeChangeReason) {
-	ibs.journal.codeChange(addr, prevCode, prevHash, wasCommited)
+	entry := ibs.journal.codeChange(addr, prevCode, prevHash, wasCommited)
+	if ibs.codeAccess != nil {
+		if undo := ibs.codeAccess.OnCodeChange(code.Hash); undo != nil {
+			if entry.extra == nil {
+				entry.extra = &journalExtra{prevhash: accounts.EmptyCodeHash}
+			}
+			entry.extra.undoCodeChange = undo
+		}
+	}
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnCodeChangeV2 != nil {
 		ibs.tracingHooks.OnCodeChangeV2(addr, prevHash, prevCode, code.Hash, code.Bytes, reason)
 	} else if ibs.tracingHooks != nil && ibs.tracingHooks.OnCodeChange != nil {
@@ -2745,16 +2793,6 @@ func (ibs *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 	return ibs.MakeWriteSet(chainRules, stateWriter)
 }
 
-func (ibs *IntraBlockState) BalanceIncreaseSet() map[accounts.Address]uint256.Int {
-	s := make(map[accounts.Address]uint256.Int, len(ibs.balanceInc))
-	for addr, bi := range ibs.balanceInc {
-		if !bi.transferred {
-			s[addr] = bi.increase
-		}
-	}
-	return s
-}
-
 func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter StateWriter) error {
 	for addr := range ibs.journal.dirties {
 		ibs.stateObjectsDirty[addr] = struct{}{}
@@ -2821,6 +2859,10 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 	// to remember to publish separately.
 	ibs.PublishOrigins()
 	writes := ibs.versionedWrites.Finalize()
+	var replaced map[accounts.Address]struct{}
+	if chainRules != nil && chainRules.IsAmsterdam {
+		replaced = ibs.publishCreateDestructAsBalances(writes)
+	}
 	// Snapshot the accounts the tx really self-destructed (a SELFDESTRUCT opcode)
 	// before the removal encoders synthesize their own SelfDestruct cells, so the
 	// contract-vs-EOA removal verdict reads the genuine signal, not a synthesized one.
@@ -2834,8 +2876,40 @@ func (ibs *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) (*WriteSet,
 		}
 	}
 	ibs.withholdCreatedEmptyAccounts(chainRules, writes)
-	ibs.encodeExistingEmptyRemovals(chainRules, writes, realSelfDestruct)
+	ibs.encodeExistingEmptyRemovals(chainRules, writes, realSelfDestruct, replaced)
 	return writes, ibs.StateReadError()
+}
+
+// publishCreateDestructAsBalances replaces the writes of a contract the tx created at an absent
+// address and destroyed with those of a new account holding its kept balance: under EIP-8246 that
+// balance is all the tx leaves, and withholdCreatedEmptyAccounts then treats it like any created
+// account. An address that existed may hold storage, which only the destruct's cells wipe, so it
+// keeps them. It returns the replaced addresses.
+func (ibs *IntraBlockState) publishCreateDestructAsBalances(writes *WriteSet) map[accounts.Address]struct{} {
+	var replaced map[accounts.Address]struct{}
+	for addr, sd := range writes.selfDestruct {
+		if cc, ok := writes.createContract[addr]; !sd.Val || !ok || !cc.Val {
+			continue
+		}
+		balance, ok := writes.balance[addr]
+		if !ok || balance.Deletes() {
+			continue // a burning destruct leaves no balance-only account
+		}
+		if !ibs.readAbsent(addr) {
+			continue
+		}
+		version := ibs.Version()
+		writes.deleteAddr(addr)
+		created := accounts.NewAccount()
+		writes.SetAddress(addr, &VersionedWrite[*accounts.Account]{WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: version}, Val: &created})
+		writes.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: version}, Val: accounts.EmptyCodeHash})
+		writes.SetBalance(addr, balance)
+		if replaced == nil {
+			replaced = map[accounts.Address]struct{}{}
+		}
+		replaced[addr] = struct{}{}
+	}
+	return replaced
 }
 
 // createdSelfDestructEmpty decides emptiness without an account view for an account this tx created as a contract
@@ -2855,13 +2929,16 @@ func createdSelfDestructEmpty(writes *WriteSet, realSelfDestruct map[accounts.Ad
 	return bal.Val.IsZero(), true
 }
 
-func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet, realSelfDestruct map[accounts.Address]struct{}) {
+func (ibs *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules, writes *WriteSet, realSelfDestruct, replaced map[accounts.Address]struct{}) {
 	if chainRules == nil || ibs.versionMap == nil {
 		return
 	}
 	for addr := range writes.addrs() {
 		if !EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, addr) {
 			continue
+		}
+		if _, ok := replaced[addr]; ok {
+			continue // absent before the tx, so withholdCreatedEmptyAccounts settled it
 		}
 		if empty, known := createdSelfDestructEmpty(writes, realSelfDestruct, addr); known {
 			if empty {

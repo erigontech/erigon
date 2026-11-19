@@ -66,12 +66,16 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *ty
 	if err != nil {
 		return nil, err
 	}
-
-	commitmentHistoryEnabled, err := api.commitmentHistoryEnabled(tx)
+	opts, err := api.receiptsOpts(tx)
 	if err != nil {
 		return nil, err
 	}
-	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled})
+	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, opts)
+}
+
+func (api *BaseAPI) receiptsOpts(tx kv.TemporalTx) (eth.ReceiptsOpts, error) {
+	commitmentHistoryEnabled, err := api.commitmentHistoryEnabled(tx)
+	return eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled}, err
 }
 
 func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *receipts.PostStateInfo) (*types.Receipt, error) {
@@ -510,7 +514,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true, true), nil
+	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -541,6 +545,20 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	opts, err := api.receiptsOpts(tx)
+	if err != nil {
+		return nil, err
+	}
+	var prefetch *receipts.ReceiptsPrefetch
+	if !api.remoteBlocks {
+		prefetch = api.receiptsGenerator.PrefetchReceipts(ctx, chainConfig, api.db, blockNum, blockHash, opts)
+		defer prefetch.Close()
+	}
+
 	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
@@ -548,18 +566,14 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	if block == nil {
 		return nil, nil
 	}
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	receipts, err := api.getReceipts(ctx, tx, block)
+	receipts, err := api.receiptsGenerator.GetReceiptsPrefetched(ctx, chainConfig, tx, block, opts, prefetch)
 	if err != nil {
 		return nil, err
 	}
 	result := make(ethutils.RPCReceipts, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), true, true))
+		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), true))
 	}
 
 	return result, nil

@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
@@ -79,11 +78,15 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 // domains — the single write-set commit path shared by the parallel executor and
 // block production. Writes carry complete account state, so no domain reads are
 // needed to reconstruct the serialised account.
-func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, trace bool) error {
+func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, trace bool) error {
 	if writes != nil && !writes.IsEmpty() {
 		// One buffer for every storage key this call writes: consumers copy what they keep.
 		// Made on the first slot, since an array here escapes even when unused.
 		var storageKey []byte
+		type foldedSlot struct {
+			storageItem
+			prev []byte // see prevFromRecord
+		}
 		type addrState struct {
 			balance        g.Option[uint256.Int]
 			balanceDeleted bool
@@ -94,7 +97,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			codeWritten    bool
 			selfDestruct   bool
 			createContract bool
-			storage        []storageItem
+			storage        []foldedSlot
 		}
 
 		perAddr := make(map[accounts.Address]*addrState)
@@ -136,7 +139,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		for a, byKey := range writes.StorageChanges() {
 			d := ensure(a)
 			for k, vw := range byKey {
-				d.storage = append(d.storage, storageItem{k, vw.Val})
+				d.storage = append(d.storage, foldedSlot{storageItem{k, vw.Val}, prevFromRecord(vw)})
 			}
 		}
 
@@ -230,6 +233,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				}
 			}
 
+			var prevCode []byte
 			if d.balance.Ok || d.nonce.Ok || d.incarnation.Ok || d.codeHash.Ok || d.codeWritten {
 				// A WriteSet may contain only the changed account fields, so
 				// overlay it on the current state. Self-destruct is the exception:
@@ -246,6 +250,10 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 						if err := accounts.DeserialiseV3(&acc, v); err != nil {
 							return err
 						}
+					}
+					// An EIP-7702 authority comes from a signature, so it is never a predeploy whose code has no account record.
+					if _, isDelegation := types.ParseDelegation(d.code); isDelegation && acc.IsEmptyCodeHash() {
+						prevCode = []byte{}
 					}
 				}
 				if d.balance.Ok {
@@ -283,7 +291,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
 						return err
 					}
-				} else if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, nil); err != nil {
+				} else if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, prevCode); err != nil {
 					return err
 				}
 			}
@@ -301,14 +309,14 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:del storage: %x %x\n", blockNum, addr, item.key)
 					}
-					if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil); err != nil {
+					if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, item.prev); err != nil {
 						return err
 					}
 				} else {
 					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, v)
 					}
-					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil); err != nil {
+					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, item.prev); err != nil {
 						return err
 					}
 				}
@@ -316,31 +324,6 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		}
 	}
 
-	var acc accounts.Account
-	for addr, increase := range balanceIncreases {
-		addrValue := addr.Value()
-		enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, addrValue[:])
-		if err != nil {
-			return err
-		}
-		acc.Reset()
-		if len(enc0) > 0 {
-			if err := accounts.DeserialiseV3(&acc, enc0); err != nil {
-				return err
-			}
-		}
-		acc.Balance.Add(&acc.Balance, &increase)
-		if EIP161EmptyRemoval(rules.IsEIP161Enabled(), rules.IsAura, addr) && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
-			if err := domains.DomainDel(kv.AccountsDomain, roTx, addrValue[:], txNum, enc0); err != nil {
-				return err
-			}
-		} else {
-			enc1 := accounts.SerialiseV3(&acc)
-			if err := domains.DomainPut(kv.AccountsDomain, roTx, addrValue[:], enc1, txNum, enc0); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
@@ -351,13 +334,11 @@ func (rs *StateV3) ApplyStateWrites(_ context.Context,
 	blockNum uint64,
 	txNum uint64,
 	writes WriteSetView,
-	balanceIncreases map[accounts.Address]uint256.Int,
-	rules *chain.Rules,
 ) error {
-	if (writes == nil || writes.IsEmpty()) && len(balanceIncreases) == 0 {
+	if writes == nil || writes.IsEmpty() {
 		return nil
 	}
-	if err := ApplyWrites(writes, rs.domains, roTx, blockNum, txNum, balanceIncreases, rules, rs.trace.Load()); err != nil {
+	if err := ApplyWrites(writes, rs.domains, roTx, blockNum, txNum, rs.trace.Load()); err != nil {
 		return fmt.Errorf("StateV3.ApplyStateWrites: %w", err)
 	}
 	return nil
@@ -379,21 +360,6 @@ func (rs *StateV3) ApplyTxIndexes(
 	skip := len(skipReceiptCache) > 0 && skipReceiptCache[0]
 	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, cummulativeBlobGas, logs, traceFroms, traceTos, false, skip); err != nil {
 		return fmt.Errorf("StateV3.ApplyTxIndexes: %w", err)
-	}
-	return nil
-}
-
-// CommitStepBoundary computes and persists a trie commitment when txNum falls
-// on an aggregation step boundary. This ensures commitment domain snapshots
-// contain a commitment state at each step end, even when the boundary falls
-// mid-block.
-func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, blockNum, txNum uint64) error {
-	if rs.domains.IsUnfrozenStepEdge(roTx, txNum) && !rs.domains.InlineTouchKeyDisabled() {
-		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum,
-			fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
-		if err != nil {
-			return fmt.Errorf("StateV3.CommitStepBoundary: %w", err)
-		}
 	}
 	return nil
 }
@@ -979,6 +945,19 @@ func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key common.
 	} else {
 		fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d, stack: %s\n", r.tracePrefix, address, key, &res, r.txNum, dbg.Stack())
 	}
+}
+
+func (r *ReaderV3) ReadAccountCodeSegmentTo(address accounts.Address, from uint64, dst []byte) (bool, error) {
+	segmentReader, ok := r.getter.(execctxapi.CodeSegmentGetter)
+	if !ok {
+		return false, nil
+	}
+	r.addr = address.Value()
+	copied, err := segmentReader.ReadCodeSegmentTo(r.addr[:], r.txNum, from, dst)
+	if r.trace && err == nil && copied {
+		fmt.Printf("%sReadAccountCodeSegmentTo [%x] => from %d, %d bytes, txNum: %d, stack: %s\n", r.tracePrefix, address, from, len(dst), r.txNum, dbg.Stack())
+	}
+	return copied, err
 }
 
 func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
