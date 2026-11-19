@@ -74,3 +74,17 @@ func TestStateRetirementSubscriptionsReceiveNotifications(t *testing.T) {
 		t.Fatal("expected a state retirement completion notification")
 	}
 }
+
+func TestLogSubscriptionsOfOneSourceDoNotClearTheOther(t *testing.T) {
+	e := NewEvents()
+
+	e.EmptyInProcessLogSubscription(false)
+	e.EmptyLogSubscription(true)
+	require.True(t, e.HasLogSubscriptions())
+
+	e.EmptyInProcessLogSubscription(true)
+	require.False(t, e.HasLogSubscriptions())
+
+	e.EmptyLogSubscription(false)
+	require.True(t, e.HasLogSubscriptions())
+}

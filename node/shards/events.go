@@ -58,9 +58,11 @@ type Events struct {
 	pendingTxsSubscriptions     map[int]PendingTxsSubscription
 	logsSubscriptions           map[int]chan []*notifications.LogNotification
 	hasLogSubscriptions         bool
-	receiptsSubscriptions       map[int]chan []*notifications.ReceiptNotification
-	hasReceiptSubscriptions     bool
-	lock                        sync.RWMutex
+	// Set by the in-process RPC filters apart from hasLogSubscriptions, which the gRPC ones set, so neither clears the other.
+	hasInProcessLogSubscriptions bool
+	receiptsSubscriptions        map[int]chan []*notifications.ReceiptNotification
+	hasReceiptSubscriptions      bool
+	lock                         sync.RWMutex
 
 	// latestPub holds the most recently published SharedDomains from FCU
 	// together with its publish sequence number, as one atomic snapshot so
@@ -263,10 +265,16 @@ func (e *Events) EmptyLogSubscription(empty bool) {
 	e.hasLogSubscriptions = !empty
 }
 
+func (e *Events) EmptyInProcessLogSubscription(empty bool) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	e.hasInProcessLogSubscriptions = !empty
+}
+
 func (e *Events) HasLogSubscriptions() bool {
 	e.lock.RLock()
 	defer e.lock.RUnlock()
-	return e.hasLogSubscriptions
+	return e.hasLogSubscriptions || e.hasInProcessLogSubscriptions
 }
 
 func (e *Events) AddPendingLogsSubscription(s PendingLogsSubscription) {

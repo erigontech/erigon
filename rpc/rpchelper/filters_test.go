@@ -18,16 +18,20 @@ package rpchelper
 
 import (
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc/filters"
 )
 
@@ -897,4 +901,71 @@ func TestFilters_UnsubscribedAddressFilterReceivesNoLog(t *testing.T) {
 	f.OnNewLogs(lg)
 
 	require.Len(t, kept, 1)
+}
+
+func TestFilters_InProcessLogsReachTheMatchingSubscription(t *testing.T) {
+	t.Parallel()
+	events := shards.NewEvents()
+	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), events)
+	ch, _, err := f.SubscribeLogs(256, filters.FilterCriteria{Addresses: []common.Address{address1}}, ProtocolWS)
+	require.NoError(t, err)
+	require.True(t, events.HasLogSubscriptions())
+
+	removed := &types.Log{Address: address1, BlockNumber: 6}
+	matching := &types.Log{Address: address1, Topics: []common.Hash{topic1}, BlockNumber: 7}
+	other := &types.Log{Address: common.HexToAddress("0x01"), BlockNumber: 7}
+	events.OnLogs([]*notifications.LogNotification{
+		{Log: removed, BlockTimestamp: 50, Removed: true},
+		{Log: matching, BlockTimestamp: 60},
+		{Log: other, BlockTimestamp: 60},
+	})
+
+	first, second := receiveLog(t, ch), receiveLog(t, ch)
+	require.Equal(t, hexutil.Uint64(6), first.BlockNumber)
+	require.True(t, first.Removed)
+	require.Equal(t, hexutil.Uint64(50), *first.BlockTimestamp)
+	require.Equal(t, hexutil.Uint64(7), second.BlockNumber)
+	require.False(t, second.Removed)
+	require.Equal(t, hexutil.Uint64(60), *second.BlockTimestamp)
+	require.Empty(t, ch)
+}
+
+func TestFilters_InProcessLogsLeaveTheNotifiedLogUnchanged(t *testing.T) {
+	t.Parallel()
+	events := shards.NewEvents()
+	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), events)
+	ch, _, err := f.SubscribeLogs(256, filters.FilterCriteria{}, ProtocolWS)
+	require.NoError(t, err)
+	require.True(t, events.HasLogSubscriptions())
+
+	shared := &types.Log{Address: address1, BlockNumber: 7}
+	events.OnLogs([]*notifications.LogNotification{{Log: shared, BlockTimestamp: 60, Removed: true}})
+
+	receiveLog(t, ch)
+	require.False(t, shared.Removed)
+	require.Nil(t, shared.BlockTimestamp)
+}
+
+func TestFilters_InProcessLogsAreNotWantedAfterTheLastUnsubscribe(t *testing.T) {
+	t.Parallel()
+	events := shards.NewEvents()
+	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), events)
+	_, id, err := f.SubscribeLogs(256, filters.FilterCriteria{Addresses: []common.Address{address1}}, ProtocolWS)
+	require.NoError(t, err)
+	require.True(t, events.HasLogSubscriptions())
+
+	require.True(t, f.UnsubscribeLogs(id))
+
+	require.False(t, events.HasLogSubscriptions())
+}
+
+func receiveLog(t *testing.T, ch <-chan *types.Log) *types.Log {
+	t.Helper()
+	select {
+	case lg := <-ch:
+		return lg
+	case <-time.After(5 * time.Second):
+		t.Fatal("no log received")
+		return nil
+	}
 }

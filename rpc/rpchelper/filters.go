@@ -35,10 +35,12 @@ import (
 
 	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -188,9 +190,13 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		}
 	}()
 
+	if events != nil {
+		logs, clean := events.AddLogsSubscription()
+		go ff.consumeInProcessLogs(ctx, logs, clean)
+	}
 	go func() {
 		defer dbg.LogPanic()
-		if ethBackend == nil {
+		if ethBackend == nil || events != nil {
 			return
 		}
 		activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Logs"}).Inc()
@@ -832,7 +838,7 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, prot
 	f := newLogsFilter(sub, criteria, pollingCriteria)
 	id := ff.logsSubs.insertLogsFilter(f)
 
-	if err := ff.pushRemoteLogsFilter(); err != nil {
+	if err := ff.pushLogsFilter(); err != nil {
 		ff.removeLogsSubscription(id, false)
 		return nil, "", fmt.Errorf("could not update remote logs filter: %w", err)
 	}
@@ -890,15 +896,15 @@ func (ff *Filters) removeLogsSubscription(id LogsSubID, pushRemote bool) bool {
 
 // updateRemoteLogsFilter pushes the aggregated filter state to the remote log source.
 func (ff *Filters) updateRemoteLogsFilter() {
-	if err := ff.pushRemoteLogsFilter(); err != nil {
+	if err := ff.pushLogsFilter(); err != nil {
 		ff.logger.Warn("Could not update remote logs filter", "err", err)
 	}
 }
 
-// pushRemoteLogsFilter sends the aggregated filter state to the remote log source.
+// pushLogsFilter sends the aggregated filter state to the log source: in process, whether logs are wanted at all.
 // If any filters in the aggregate need all addresses or all topics then the request
 // to the central log subscription needs to honour this.
-func (ff *Filters) pushRemoteLogsFilter() error {
+func (ff *Filters) pushLogsFilter() error {
 	ff.logsRequestMu.Lock()
 	defer ff.logsRequestMu.Unlock()
 	lfr := ff.logsSubs.createFilterRequest()
@@ -908,6 +914,10 @@ func (ff *Filters) pushRemoteLogsFilter() error {
 	}
 	for topic := range topics {
 		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
+	}
+	if ff.events != nil {
+		ff.events.EmptyInProcessLogSubscription(!lfr.AllAddresses && !lfr.AllTopics && len(lfr.Addresses) == 0 && len(lfr.Topics) == 0)
+		return nil
 	}
 	loaded := ff.loadLogsRequester()
 	if loaded == nil {
@@ -1062,6 +1072,32 @@ func (ff *Filters) OnNewTx(reply *txpoolproto.OnAddReply) {
 // OnNewLogs handles a new log event from the remote and processes it.
 func (ff *Filters) OnNewLogs(reply *remoteproto.SubscribeLogsReply) {
 	ff.logsSubs.distributeLog(reply)
+}
+
+func (ff *Filters) consumeInProcessLogs(ctx context.Context, ch <-chan []*notifications.LogNotification, clean func()) {
+	defer dbg.LogPanic()
+	defer clean()
+	activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Logs"}).Inc()
+	defer activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Logs"}).Dec()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case logs := <-ch:
+			for _, n := range logs {
+				ff.logsSubs.distributeNativeLog(inProcessLog(n))
+			}
+		}
+	}
+}
+
+// inProcessLog copies the notified log, which other consumers share, to set the fields of this notification.
+func inProcessLog(n *notifications.LogNotification) *types.Log {
+	lg := *n.Log
+	lg.Removed = n.Removed
+	blockTimestamp := hexutil.Uint64(n.BlockTimestamp)
+	lg.BlockTimestamp = &blockTimestamp
+	return &lg
 }
 
 // AddLogs adds logs to the store associated with the given subscription ID.
