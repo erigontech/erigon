@@ -43,7 +43,7 @@ import (
 )
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
-	if d == nil {
+	if d == nil || d.dirtyFiles.Len() == 0 {
 		return 0
 	}
 	return d.dirtyFiles.endTxNumMinimax(d.History.dirtyFilesEndTxNumMinimax())

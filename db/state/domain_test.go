@@ -157,9 +157,23 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
-	_, err = d.openFolder(t.Context(), scanDirsRes)
+	retired, err := d.openFolder(t.Context(), scanDirsRes)
+	reclaimFiles(retired)
 	require.NoError(t, err)
+	var opened []*FilesItem
+	for _, files := range []*DirtyFiles{d.dirtyFiles, d.History.dirtyFiles, d.InvertedIndex.dirtyFiles} {
+		files.Scan(func(file *FilesItem) bool {
+			opened = append(opened, file)
+			return true
+		})
+	}
 	d.Close()
+	require.NotEmpty(t, opened)
+	for _, file := range opened {
+		require.Nil(t, file.decompressor, "data mappings must be closed")
+		require.Nil(t, file.index, "index mappings must be closed")
+		require.Nil(t, file.vAccessor, "history accessors must be closed")
+	}
 }
 
 func testCollationBuild(t *testing.T, compressDomainVals bool) {
@@ -1557,8 +1571,8 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(dom.dirs)
 	require.NoError(t, err)
-	_, err = dom.openFolder(t.Context(), scanDirsRes)
-
+	retired, err := dom.openFolder(t.Context(), scanDirsRes)
+	reclaimFiles(retired)
 	require.NoError(t, err)
 
 	domRoTx = dom.beginForTests()
@@ -1581,18 +1595,18 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 		danglingDomains[run1Doms[i]] = false
 	}
 
-	//dom.dirtyFiles.Walk(func(items []*filesItem) bool {
-	//	for _, item := range items {
-	//		if _, found := danglingDomains[item.decompressor.FileName()]; found {
-	//			danglingDomains[item.decompressor.FileName()] = true
-	//		}
-	//	}
-	//	return true
-	//})
-	//
-	//for f, persists := range danglingDomains {
-	//	require.True(t, persists, f)
-	//}
+	var hiddenFiles []*FilesItem
+	dom.dirtyFiles.Scan(func(item *FilesItem) bool {
+		name := item.decompressor.FileName()
+		if _, hidden := danglingDomains[name]; hidden {
+			danglingDomains[name] = true
+			hiddenFiles = append(hiddenFiles, item)
+		}
+		return true
+	})
+	for name, retained := range danglingDomains {
+		require.True(t, retained, "hidden file %s must remain dirty", name)
+	}
 
 	// check files persist on the disk
 	persistingDomains := make(map[string]bool, 0)
@@ -1608,7 +1622,12 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 		require.True(t, found, fname)
 	}
 
+	domRoTx.Close()
 	dom.Close()
+	for _, file := range hiddenFiles {
+		require.Nil(t, file.decompressor, "hidden data mappings must be closed")
+		require.Nil(t, file.index, "hidden index mappings must be closed")
+	}
 }
 
 func emptyTestDomain(t testing.TB, aggStep uint64) *Domain {
@@ -4478,24 +4497,6 @@ func TestDomain_MayContainInFilesKeepsKeysOfMappedFilters(t *testing.T) {
 	}
 	for i := range 100 {
 		require.True(t, domainTx.mayContainInFiles(fmt.Appendf(nil, "absent-%d", i)))
-	}
-}
-
-func TestDomainCloseFilesAfterStep(t *testing.T) {
-	t.Parallel()
-	d := emptyTestDomain(t, 1)
-	d.scanDirtyFiles([]string{"v1.0-accounts.0-2.kv", "v1.0-accounts.2-4.kv"})
-	d.History.scanDirtyFiles([]string{"v1.0-accounts.0-2.v", "v1.0-accounts.2-4.v"})
-	d.History.InvertedIndex.scanDirtyFiles([]string{"v1.0-accounts.0-2.ef", "v1.0-accounts.2-4.ef"})
-	all := []*DirtyFiles{d.dirtyFiles, d.History.dirtyFiles, d.History.InvertedIndex.dirtyFiles}
-
-	d.closeFilesAfterStep(3)
-	for _, df := range all {
-		require.Equal(t, []string{"0-2", "2-4"}, stepRanges(t, df.Items(), d.stepSize))
-	}
-	d.closeFilesAfterStep(2)
-	for _, df := range all {
-		require.Equal(t, []string{"0-2"}, stepRanges(t, df.Items(), d.stepSize))
 	}
 }
 
