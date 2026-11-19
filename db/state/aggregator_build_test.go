@@ -73,6 +73,8 @@ func TestAggregatorBuildKeepsBackfilledReceiptVisible(t *testing.T) {
 					require.NoError(t, w.Flush(ctx, tx))
 				}
 				write(tc.domain, tc.receipts...)
+				// The background builder uses state-domain progress. The first account write gives it
+				// data in the target step, and the write in the next step shows the target step is complete.
 				write(kv.AccountsDomain, entry{key: 1, txNum: stepSize}, entry{key: 2, txNum: buildEnd})
 				return nil
 			}))

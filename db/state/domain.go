@@ -468,8 +468,10 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	return binary.BigEndian.Uint64(lstIdx) / d.stepSize
 }
 
-// A first snapshot must cover any older MDBX values before its end can be used
-// as the boundary for reads and pruning. This check runs only for a late first file.
+// Reads and pruning treat all steps before the end of a domain's visible snapshots
+// as covered. If the first snapshot starts after an MDBX row's step, reads skip
+// that row and pruning can delete it. Rows are grouped by key, so an older step
+// can appear later in the scan.
 func (d *Domain) hasValuesBeforeStep(tx kv.Tx, step kv.Step) (bool, error) {
 	c, err := tx.Cursor(d.ValuesTable)
 	if err != nil {
