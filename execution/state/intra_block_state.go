@@ -1995,13 +1995,14 @@ func (ibs *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 		return false, nil
 	}
 	prevBalance := stateObject.Balance()
-	ibs.journal.selfdestructChange(addr, stateObject.selfdestructed, prevBalance, !ibs.hasWrite(addr, SelfDestructPath, accounts.NilKey))
+	ibs.journal.selfdestructChange(addr, stateObject.selfdestructed, stateObject.createdContract, prevBalance, !ibs.hasWrite(addr, SelfDestructPath, accounts.NilKey))
 
 	if !preserveBalance && ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
 		ibs.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
 	}
 
 	stateObject.markSelfdestructed()
+	stateObject.destructedCreated = stateObject.destructedCreated || stateObject.createdContract
 	stateObject.createdContract = false
 
 	ibs.recordWriteIncarnation(addr, stateObject.data.Incarnation)
