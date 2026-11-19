@@ -776,6 +776,7 @@ func reopenForConvert(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, s
 	statecfg.EnableHistoricalCommitment()
 	require.NoError(t, state.MatchCommitmentSchemaToFiles(dirs))
 	rawDB := mdbxtest.NewChainDB(t, dirs.Chaindata)
+	t.Cleanup(rawDB.Close)
 	agg = testAgg(t, dirs, 10, log.New())
 	db, err := temporal.New(rawDB, agg, nil)
 	require.NoError(t, err)

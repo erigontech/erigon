@@ -1002,7 +1002,7 @@ func visibleCommitmentHistoryRanges(a *Aggregator) []commitmentHistoryRange {
 	at := a.BeginFilesRo()
 	defer at.Close()
 	stepSize := at.StepSize()
-	var ranges []commitmentHistoryRange
+	ranges := make([]commitmentHistoryRange, 0, len(at.d[kv.CommitmentDomain].ht.files))
 	for _, v := range at.d[kv.CommitmentDomain].ht.files {
 		ranges = append(ranges, commitmentHistoryRange{fromStep: kv.Step(v.startTxNum / stepSize), toStep: kv.Step(v.endTxNum / stepSize)})
 	}
