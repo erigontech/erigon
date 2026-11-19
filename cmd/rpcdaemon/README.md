@@ -48,13 +48,13 @@ Note that we've also specified which RPC namespaces to enable in the above comma
 
 ### Running remotely
 
-To start the daemon remotely - just don't set the `--datadir` flag:
+To start the daemon remotely - just don't set the `--datadir` flag. The private API has no authentication and can rewind the chain, so bind it to a private address that only the daemon's host can reach, never to `0.0.0.0`:
 
 ```[bash]
 make erigon
-./build/bin/erigon --datadir=<your_data_dir> --private.api.addr=0.0.0.0:9090
+./build/bin/erigon --datadir=<your_data_dir> --private.api.addr=<erigon_private_ip>:9090
 make rpcdaemon
-./build/bin/rpcdaemon --private.api.addr=<erigon_ip>:9090 --txpool.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
+./build/bin/rpcdaemon --private.api.addr=<erigon_private_ip>:9090 --txpool.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 The daemon should respond with something like:
