@@ -18,6 +18,7 @@ package backtester
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -107,7 +108,7 @@ func (bt Backtester) Run(ctx context.Context, fromBlock uint64, toBlock uint64) 
 
 func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64, toBlock uint64) error {
 	if statecfg.ExperimentalCommitmentV3 {
-		return fmt.Errorf("not supported on commitment v3")
+		return errors.New("not supported on commitment v3")
 	}
 	start := time.Now()
 	bt.logger.Info("starting commitment backtest", "fromBlock", fromBlock, "toBlock", toBlock)

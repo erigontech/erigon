@@ -49,12 +49,19 @@ import (
 var integrationRoot = sync.OnceValue(RootCommand)
 
 func TestCommitmentBranchRejectsCommitmentV3(t *testing.T) {
-	previous := statecfg.ExperimentalCommitmentV3
-	statecfg.ExperimentalCommitmentV3 = true
-	t.Cleanup(func() { statecfg.ExperimentalCommitmentV3 = previous })
+	db, dirs := dbWithV3State(t)
+	db.Close()
+	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment.*"))
+	require.NoError(t, err)
+	for _, f := range files {
+		require.NoError(t, dir.RemoveFile(f))
+	}
+	schema := statecfg.Schema
+	t.Cleanup(func() { statecfg.Schema = schema })
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 
 	root := integrationRoot()
-	root.SetArgs([]string{"--log.dir.disable", "commitment", "branch", "--datadir", t.TempDir(), "--chain", "mainnet"})
+	root.SetArgs([]string{"--log.dir.disable", "commitment", "branch", "--datadir", dirs.DataDir, "--chain", networkname.Test})
 	require.ErrorContains(t, root.ExecuteContext(t.Context()), "not supported on commitment v3")
 }
 
