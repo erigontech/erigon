@@ -628,6 +628,14 @@ func TestCallConstructorIntrinsicExecutionGasCap(t *testing.T) {
 	}
 }
 
+func insertConstructorTx(t *testing.T, m *execmoduletester.ExecModuleTester, txn types.Transaction) *blockgen.ChainPack {
+	t.Helper()
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	return pack
+}
+
 func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -654,7 +662,7 @@ func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 			contract := types.CreateAddress(factory, 0)
 			if tc.opcode == vm.CREATE2 {
 				create = program.New().Create2(initCode, 0)
-				contract = types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+				contract = types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
 			}
 			factoryCode := testutil.AssertStackWord(create.Op(vm.ISZERO), 0)
 			if tc.repeatCreate2 {
@@ -688,9 +696,7 @@ func TestCallConstructorFactoryRejectsFailedCreation(t *testing.T) {
 				txn, err = types.SignTx(types.NewTransaction(0, factory, new(uint256.Int), 500_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(cfg), key)
 				require.NoError(t, err)
 			}
-			pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
-			require.NoError(t, err)
-			require.NoError(t, m.InsertChain(pack))
+			pack := insertConstructorTx(t, m, txn)
 			require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].Status)
 			base := newBaseApiForTest(m)
 			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
@@ -716,7 +722,7 @@ func TestCallConstructorRetryAfterRollback(t *testing.T) {
 	wrapper := common.HexToAddress("0x3000")
 	runtime := hexutil.Bytes{byte(vm.STOP)}
 	initCode := program.New().ReturnData(runtime).Bytes()
-	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
 	cfg := chain.AllProtocolChanges.Copy()
 	cfg.BogotaTime = common.NewUint64(0)
 
@@ -727,9 +733,7 @@ func TestCallConstructorRetryAfterRollback(t *testing.T) {
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 			Config: cfg, GasLimit: 30_000_000, BaseFee: uint256.NewInt(1), Alloc: alloc,
 		}), execmoduletester.WithKey(testKey))
-		pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
-		require.NoError(t, err)
-		require.NoError(t, m.InsertChain(pack))
+		insertConstructorTx(t, m, txn)
 		base := newBaseApiForTest(m)
 		api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 5_000_000}, NewOtterscanAPI(base, m.DB, 25))
 		result, err := api.CallConstructor(m.Ctx, target, initCode)
@@ -782,7 +786,7 @@ func TestCallConstructorRetryInsufficientBalance(t *testing.T) {
 	factory := common.HexToAddress("0x3000")
 	runtime := hexutil.Bytes{byte(vm.STOP)}
 	initCode := program.New().ReturnData(runtime).Bytes()
-	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
 
 	// The factory accepts one byte of runtime code and uses the calldata length as the endowment.
 	create := program.New().Mstore(initCode, 0).Push0().Push(len(initCode)).Push0().Op(vm.CALLDATASIZE, vm.CREATE2, vm.EXTCODESIZE)
@@ -808,9 +812,7 @@ func TestCallConstructorRetryInsufficientBalance(t *testing.T) {
 			}), execmoduletester.WithKey(testKey))
 			txn, err := types.SignTx(types.NewTransaction(0, entry, new(uint256.Int), 2_000_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
 			require.NoError(t, err)
-			pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
-			require.NoError(t, err)
-			require.NoError(t, m.InsertChain(pack))
+			insertConstructorTx(t, m, txn)
 			base := newBaseApiForTest(m)
 			ots := NewOtterscanAPI(base, m.DB, 25)
 			creator, err := ots.GetContractCreator(m.Ctx, target)
@@ -861,7 +863,7 @@ func TestCallConstructorRetryOutOfGas(t *testing.T) {
 			target := types.CreateAddress(factory, 0)
 			if tc.op == vm.CREATE2 {
 				create.Op(vm.CALLDATASIZE)
-				target = types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+				target = types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
 			}
 			create.Push(len(initCode)).Push0().Push0().Op(tc.op, vm.EXTCODESIZE)
 			factoryCode := testutil.AssertStackWord(create, 1).Bytes()
@@ -878,9 +880,7 @@ func TestCallConstructorRetryOutOfGas(t *testing.T) {
 			}), execmoduletester.WithKey(testKey))
 			txn, err := types.SignTx(types.NewTransaction(0, entry, new(uint256.Int), 500_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
 			require.NoError(t, err)
-			pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
-			require.NoError(t, err)
-			require.NoError(t, m.InsertChain(pack))
+			insertConstructorTx(t, m, txn)
 			client := newOverlayRPCClient(t, m)
 
 			var result *CreationCode
@@ -928,9 +928,7 @@ func TestCallConstructorPreservesSiblingCreate(t *testing.T) {
 	}), execmoduletester.WithKey(testKey))
 	txn, err := types.SignTx(types.NewTransaction(0, factory, new(uint256.Int), 500_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
 	require.NoError(t, err)
-	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
-	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(pack))
+	insertConstructorTx(t, m, txn)
 	base := newBaseApiForTest(m)
 	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
 
@@ -950,7 +948,7 @@ func TestCallConstructorNestedInitCodeErrors(t *testing.T) {
 			target := types.CreateAddress(factory, 0)
 			if op == vm.CREATE2 {
 				create = program.New().Create2(initCode, 0)
-				target = types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+				target = types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
 			}
 			// The entry contract ignores a failed factory call. Its gas allowance
 			// covers the original initcode and leaves little room for a replacement.
@@ -966,9 +964,7 @@ func TestCallConstructorNestedInitCodeErrors(t *testing.T) {
 			}), execmoduletester.WithKey(testKey))
 			txn, err := types.SignTx(types.NewTransaction(0, entry, new(uint256.Int), 500_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
 			require.NoError(t, err)
-			pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
-			require.NoError(t, err)
-			require.NoError(t, m.InsertChain(pack))
+			insertConstructorTx(t, m, txn)
 			base := newBaseApiForTest(m)
 			api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
 			result, err := api.CallConstructor(m.Ctx, target, initCode)
@@ -1000,7 +996,7 @@ func TestCallConstructorNestedInitCodeErrors(t *testing.T) {
 func TestCallConstructorSelfdestruct(t *testing.T) {
 	factory, destroyer := common.HexToAddress("0x2000"), common.HexToAddress("0x3000")
 	initCode := program.New().ReturnData([]byte{byte(vm.STOP)}).Bytes()
-	target := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
+	target := types.CreateAddress2(factory, [32]byte{}, accounts.NewCode(initCode).Hash)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 		Config: chain.AllProtocolChanges.Copy(), GasLimit: 30_000_000, BaseFee: uint256.NewInt(1),
 		Alloc: types.GenesisAlloc{
@@ -1011,9 +1007,7 @@ func TestCallConstructorSelfdestruct(t *testing.T) {
 	}), execmoduletester.WithKey(testKey))
 	txn, err := types.SignTx(types.NewTransaction(0, factory, new(uint256.Int), 1_000_000, uint256.NewInt(2_000_000_000), nil), *types.LatestSigner(m.ChainConfig), testKey)
 	require.NoError(t, err)
-	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(txn) })
-	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(pack))
+	insertConstructorTx(t, m, txn)
 	base := newBaseApiForTest(m)
 	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
 	call := program.New().DelegateCall(nil, destroyer, 0, 0, 0, 0).Bytes()
@@ -1107,9 +1101,7 @@ func TestFrameCallConstructorPaymentApprovalError(t *testing.T) {
 			{Mode: types.FrameDefault, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 500_000, State: 1_000_000}},
 		},
 	}
-	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
-	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(pack))
+	insertConstructorTx(t, m, frameTx)
 	base := newBaseApiForTest(m)
 	api := NewOverlayAPI(base, m.DB, &rpccfg.OverlayApiConfig{GasCap: 2_000_000}, NewOtterscanAPI(base, m.DB, 25))
 	target := types.CreateAddress(sender, 0)
@@ -1214,9 +1206,7 @@ func TestFrameCallConstructorAssertionRollback(t *testing.T) {
 				ChainID: *cfg.ChainID, NonceKeys: []uint256.Int{{}}, SenderAddress: sender,
 				Fees: types.FrameFees{FeeCap: uint256.Int{1}}, Frames: frames,
 			}
-			pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { b.AddTx(frameTx) })
-			require.NoError(t, err)
-			require.NoError(t, m.InsertChain(pack))
+			pack := insertConstructorTx(t, m, frameTx)
 			require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].Status)
 			require.EqualValues(t, types.ReceiptStatusSuccessful, pack.Receipts[0][0].FrameReceipts[len(frames)-1].Status)
 

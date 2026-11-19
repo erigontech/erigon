@@ -260,7 +260,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	txCtx = protocol.NewEVMTxContext(msg)
 	ct := OverlayCreateTracer{contractAddress: accounts.InternAddress(address), statedb: statedb}
 	evm = vm.NewEVM(blockCtx, txCtx, statedb, chainConfig, vm.Config{
-		Tracer: ct.Tracer().Hooks,
+		Tracer: ct.TracingHooks(),
 		OverrideInitCode: func(target accounts.Address) ([]byte, bool) {
 			return code, target == ct.contractAddress
 		},

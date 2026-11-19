@@ -27,7 +27,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -589,7 +588,7 @@ type codeAndHash struct {
 
 func (c *codeAndHash) Hash() accounts.CodeHash {
 	if c.hash.IsZero() {
-		c.hash = accounts.InternCodeHash(crypto.Keccak256Hash(c.code))
+		c.hash = accounts.NewCode(c.code).Hash
 	}
 	return c.hash
 }

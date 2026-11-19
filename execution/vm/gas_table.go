@@ -423,11 +423,10 @@ type Create2InitCode struct {
 }
 
 func NewCreate2InitCode(input []byte) *Create2InitCode {
-	code := codeAndHash{code: input}
 	return &Create2InitCode{
 		size:   uint64(len(input)),
 		prefix: bytes.Clone(common.TrimRightZeroes(input)),
-		hash:   code.Hash(),
+		hash:   accounts.NewCode(input).Hash,
 	}
 }
 
@@ -479,8 +478,7 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 		if size > 0 {
 			prepared.initCode = getData(callContext.Memory.Data(), offset, size)
 		}
-		input := codeAndHash{code: prepared.initCode}
-		prepared.codeHash = input.Hash()
+		prepared.codeHash = accounts.NewCode(prepared.initCode).Hash
 		prepared.address = accounts.InternAddress(types.CreateAddress2(caller.Value(), callContext.Stack.back(3).Bytes32(), prepared.codeHash))
 	} else {
 		nonce, err := evm.intraBlockState.GetNonce(caller)

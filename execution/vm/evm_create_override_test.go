@@ -239,7 +239,7 @@ func createOverrideEVM(t *testing.T, config *chain.Config, op vm.OpCode, initCod
 	code := program.New().Mstore(initCode, 0).Push(len(initCode)).Push(0).Push(0).Op(vm.CREATE)
 	if op == vm.CREATE2 {
 		code = program.New().Create2(initCode, 0)
-		target = accounts.InternAddress(types.CreateAddress2(factory.Value(), [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
+		target = accounts.InternAddress(types.CreateAddress2(factory.Value(), [32]byte{}, accounts.NewCode(initCode).Hash))
 	}
 	code.Push(0).Op(vm.MSTORE).Return(0, 32)
 	statedb := state.New(state.NewNoopReader())

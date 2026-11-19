@@ -56,7 +56,7 @@ func TestOverlayCreateTracerRecordsError(t *testing.T) {
 				evmtypes.TxContext{},
 				statedb,
 				chain.AllProtocolChanges,
-				vm.Config{Tracer: tracer.Tracer().Hooks},
+				vm.Config{Tracer: tracer.TracingHooks()},
 			)
 			_, _, _, _, err := evm.Create(caller, program.New().ReturnData(tc.runtimeCode).Bytes(), mdgas.MdGas{Execution: 1_000_000}, uint256.Int{}, nil, false)
 			require.ErrorIs(t, err, tc.wantErr)

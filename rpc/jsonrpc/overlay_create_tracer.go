@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
-	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
@@ -37,12 +36,10 @@ type OverlayCreateTracer struct {
 	err             error
 }
 
-func (ct *OverlayCreateTracer) Tracer() *tracers.Tracer {
-	return &tracers.Tracer{
-		Hooks: &tracing.Hooks{
-			OnEnterV2: ct.OnEnterV2,
-			OnExitV2:  ct.OnExitV2,
-		},
+func (ct *OverlayCreateTracer) TracingHooks() *tracing.Hooks {
+	return &tracing.Hooks{
+		OnEnterV2: ct.OnEnterV2,
+		OnExitV2:  ct.OnExitV2,
 	}
 }
 
