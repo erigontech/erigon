@@ -1072,7 +1072,8 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 			_, lol := rel("rpcLogOut")
 			ff.logger.Info("[fanout-probe-logs]", "block", n, "dispatchStart", pDs, "headersDone", pHd, "cacheDone", pCd,
 				"receiptsDone", pRd, "logsDone", pLd, "rpcReceiptFirst", rif, "rpcReceiptLast", ril,
-				"rpcLogFirst", lif, "rpcLogLast", lil, "rpcLogDistributed", lol)
+				"rpcLogFirst", lif, "rpcLogLast", lil, "rpcLogDistributed", lol,
+				"logBeforeHead", dbg.ProbeTakeSum("logBeforeHead", n))
 			ff.logger.Info("[fanout-probe]", "block", n, "gcIn1s", gcCycles()-gc0, "sinceBlockTime_ms", t0/1e6-int64(tsec)*1000, "sendLoop_ms", float64(t1-t0)/1e6,
 				"wake_p50", q(wakes, .5), "wake_p99", q(wakes, .99), "wake_last", q(wakes, 1), "wakes", len(wakes),
 				"write_p50", q(writes, .5), "write_p99", q(writes, .99), "write_last", q(writes, 1), "writes", len(writes))
