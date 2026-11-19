@@ -1062,7 +1062,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 
 var errStepNotReady = errors.New("step not ready")
 
-func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}, plan fileBuildPlan) error {
+func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}, plan *fileBuildPlan) error {
 	// Pin worker counts while collation and building read compressor settings.
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
@@ -1114,6 +1114,8 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 			continue
 		}
 		if len(ac.d[id].files) == 0 && !a.canPublishFirstDomainStep(kv.Domain(id), txFrom, txTo) {
+			// Publishing a later step would let pruning delete pending MDBX values from this one.
+			plan.deferredDomains[id] = true
 			a.deferredDomainWarnings[id].Do(func() {
 				a.logger.Warn("[snapshots] file build deferred; rebuild missing history snapshots to resume",
 					"entity", d.Name, "step", step, "retainedIn", "MDBX")
@@ -1286,7 +1288,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 	started := a.background.TryGo(func() {
 		defer a.buildingFiles.Store(false)
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFilesWithPlan(ctx, db, step, finalityCtx, nil, plan); err != nil {
+			if err := a.buildFilesWithPlan(ctx, db, step, finalityCtx, nil, &plan); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
@@ -2572,7 +2574,7 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 		// Build complete steps below the sampled lastInDB before starting merges.
 		// Newly completed steps are handled by a later build job.
 		for ; step < lastInDB; step++ {
-			if err := a.buildFilesWithPlan(a.ctx, db, step, finalityCtx, fin, plan); err != nil {
+			if err := a.buildFilesWithPlan(a.ctx, db, step, finalityCtx, fin, &plan); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}

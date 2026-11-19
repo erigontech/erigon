@@ -36,7 +36,7 @@ import (
 
 // Fixture construction chooses individual steps without recovery planning.
 func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext, filesDone <-chan struct{}) error {
-	return a.buildFilesWithPlan(ctx, db, step, finalityCtx, filesDone, fileBuildPlan{})
+	return a.buildFilesWithPlan(ctx, db, step, finalityCtx, filesDone, &fileBuildPlan{})
 }
 
 func snapshotFileIdentities(t *testing.T, dirs datadir.Dirs) map[string]os.FileInfo {
@@ -289,7 +289,7 @@ func TestAggregatorBuildDefersNewlyEnabledDomain(t *testing.T) {
 	}
 	t.Run("before_build", assertPendingData)
 	for step := plan.firstStep; step < 5; step++ {
-		require.NoError(t, agg.buildFilesWithPlan(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil, plan))
+		require.NoError(t, agg.buildFilesWithPlan(ctx, asTemporalRoDB(db), step, unboundedFinalityCtx, nil, &plan))
 	}
 	require.Equal(t, 5*stepSize, agg.EndTxNumMinimax(), "healthy state files must keep advancing")
 	t.Run("after_build", assertPendingData)
@@ -521,22 +521,24 @@ func TestAggregatorBuildResumesIncompleteStep(t *testing.T) {
 func TestAggregatorBuildPreservesRetainedHistory(t *testing.T) {
 	const stepSize = uint64(10)
 	stateRanges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
-	for _, test := range []struct {
-		name           string
-		history, index []testFileRange
-		deferred       bool
-	}{
-		{name: "history_only", history: stateRanges[:1], deferred: true},
-		{name: "history_gap", history: stateRanges[:1], index: stateRanges, deferred: true},
-		{name: "index_gap", history: stateRanges, index: stateRanges[:1], deferred: true},
-		{name: "both_gaps", history: stateRanges[:1], index: stateRanges[:1], deferred: true},
-		{name: "continuous", history: stateRanges, index: stateRanges},
-	} {
-		for _, pending := range []bool{true, false} {
-			name := "empty_mdbx"
-			if pending {
-				name = "pending_step_2"
-			}
+	overlapping := []testFileRange{{0, 1}, {0, 4}}
+	for _, pending := range []bool{true, false} {
+		name := "empty_mdbx"
+		if pending {
+			name = "pending_step_2"
+		}
+		for _, test := range []struct {
+			name           string
+			history, index []testFileRange
+			deferred       bool
+		}{
+			{name: "history_only", history: stateRanges[:1], deferred: true},
+			{name: "history_gap", history: stateRanges[:1], index: stateRanges, deferred: true},
+			{name: "index_gap", history: stateRanges, index: stateRanges[:1], deferred: true},
+			{name: "both_gaps", history: stateRanges[:1], index: stateRanges[:1], deferred: true},
+			{name: "later_step_would_skip_pending_values", history: overlapping, index: overlapping, deferred: pending},
+			{name: "continuous", history: stateRanges, index: stateRanges},
+		} {
 			t.Run(test.name+"/"+name, func(t *testing.T) {
 				db, agg := testDbAndAggregatorv3(t, stepSize)
 				dirs := agg.Dirs()
@@ -563,29 +565,30 @@ func TestAggregatorBuildPreservesRetainedHistory(t *testing.T) {
 					}))
 				}
 				existing := snapshotFileIdentities(t, dirs)
-				plan, err := agg.readFileBuildPlan(t.Context(), db)
-				require.NoError(t, err)
-				require.NotPanics(t, func() {
-					for step := plan.firstStep; step < 4; step++ {
-						require.NoError(t, agg.buildFilesWithPlan(t.Context(), asTemporalRoDB(db), step, unboundedFinalityCtx, nil, plan))
-					}
-					require.NoError(t, agg.OpenFolder(db))
-				}, "publishing the first values file must not expose a gap in retained history or its index")
+				require.NoError(t, agg.BuildFiles2(t.Context(), asTemporalRoDB(db), 3, 4, unboundedFinalityCtx, false))
+				agg.background.Wait()
+				require.NoError(t, agg.OpenFolder(db))
 				requireVisibleEnd(t, agg, 4*stepSize)
 				requireSnapshotFilesUnchanged(t, existing)
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					at := agg.BeginFilesRo()
+					defer at.Close()
+					_, err := at.prune(t.Context(), tx, 0, true, nil)
+					return err
+				}))
 				require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 					at := agg.BeginFilesRo()
 					defer at.Close()
+					if pending {
+						got, _, found, err := at.d[kv.ReceiptDomain].GetLatest(key, tx)
+						require.NoError(t, err)
+						require.True(t, found, "the pending receipt must survive pruning")
+						require.Equal(t, value, got)
+					}
 					if test.deferred {
 						require.Empty(t, at.d[kv.ReceiptDomain].files)
 					} else {
 						require.Equal(t, 4*stepSize, at.d[kv.ReceiptDomain].files.EndTxNum())
-					}
-					if pending {
-						got, _, found, err := at.d[kv.ReceiptDomain].GetLatest(key, tx)
-						require.NoError(t, err)
-						require.True(t, found)
-						require.Equal(t, value, got)
 					}
 					return nil
 				}))
