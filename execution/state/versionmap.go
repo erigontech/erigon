@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -439,8 +440,27 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 		HasBAL: len(changes) > 0,
 		bal:    changes,
 	}
-	vm.WriteChanges(changes)
+	forBALChunks(len(changes), func(from, to int) { vm.WriteChanges(changes[from:to]) })
 	return vm
+}
+
+// balChunkAccounts is the account count below which a BAL is seeded on one goroutine.
+const balChunkAccounts = 256
+
+// forBALChunks runs fn over disjoint account ranges of a BAL with n accounts, on several goroutines
+// for a large BAL. Accounts own their version-map entries, so the ranges never share a cell.
+func forBALChunks(n int, fn func(from, to int)) {
+	workers := min(runtime.GOMAXPROCS(-1), n/balChunkAccounts, 8)
+	if workers <= 1 {
+		fn(0, n)
+		return
+	}
+	var wg sync.WaitGroup
+	step := (n + workers - 1) / workers
+	for from := 0; from < n; from += step {
+		wg.Go(func() { fn(from, min(from+step, n)) })
+	}
+	wg.Wait()
 }
 
 // balAccount returns the access list's changes of addr. The access list is validated, so its
