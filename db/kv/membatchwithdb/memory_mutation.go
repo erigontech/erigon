@@ -207,7 +207,7 @@ func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if m.readTx != nil && memTableIsDupSort(table) {
+	if m.readTx != nil && m.memTx.isDupSort(table) {
 		return m.firstDup(table, key)
 	}
 	v, err := m.memTx.GetOne(table, key)
@@ -226,7 +226,7 @@ func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if m.readTx != nil && memTableIsDupSort(table) {
+	if m.readTx != nil && m.memTx.isDupSort(table) {
 		v, err := m.firstDup(table, key)
 		return v != nil, err
 	}

@@ -134,6 +134,16 @@ func memTableIsDupSort(table string) bool {
 	return config.Flags&kv.DupSort != 0
 }
 
+// isDupSort reports whether table is DupSort in this store, also when only a DupSort cursor said so.
+func (s *memStore) isDupSort(table string) bool {
+	s.rlock()
+	defer s.runlock()
+	if t, ok := s.tables[table]; ok {
+		return t.dupSort
+	}
+	return memTableIsDupSort(table)
+}
+
 // markDupSort makes a table that ChaindataTablesCfg does not know a DupSort table, as a DupSort
 // cursor on it says it is one. Rows already stored keep their order: a plain table has one per key.
 func (s *memStore) markDupSort(table string) {
@@ -393,7 +403,7 @@ func (s *memStore) Put(table string, k, v []byte) error {
 	s.lock()
 	defer s.unlock()
 	t := s.getOrCreateTable(table)
-	t.tree.Set(memEntry{k: bytes.Clone(k), v: bytes.Clone(v)})
+	t.tree.Set(memEntry{k: bytes.Clone(k), v: append([]byte{}, v...)}) // never nil: the merged cursor reads a nil value as no row
 	// Keep sequences map in sync when writing to the Sequence table.
 	if table == kv.Sequence && len(v) >= 8 {
 		s.sequences[string(k)] = binary.BigEndian.Uint64(v)

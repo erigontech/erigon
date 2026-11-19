@@ -124,8 +124,8 @@ func (m *memoryMutationCursor) skipIntersection(memKey, memValue, dbKey, dbValue
 	newDbKey = dbKey
 	newDbValue = dbValue
 	dupSortTable := m.memCursor.table.dupSort
-	// Check for duplicates
-	if bytes.Equal(memKey, dbKey) {
+	// Check for duplicates; a nil db value is no row, even next to an empty mem value
+	if dbValue != nil && bytes.Equal(memKey, dbKey) {
 		var skip bool
 		if t == Normal {
 			skip = !dupSortTable || bytes.Equal(memValue, dbValue)
