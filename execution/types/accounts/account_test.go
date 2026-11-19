@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 	"unique"
+	"weak"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -485,6 +486,14 @@ func TestInternKeyAfterRelease(t *testing.T) {
 	require.True(t, h == InternKey(k))
 	internAndEvict(t, k)
 	requireKeyReleased(t, k)
+}
+
+// A late cleanup for a replaced entry must not delete the live one.
+func TestReleaseKeyKeepsReplacedEntry(t *testing.T) {
+	k := common.HexToHash("0x3e8b5d1f7a9c2e4b6d8f0a1c3e5b7d9f2a4c6e8b0d1f3a5c7e9b2d4f6a8c0e1b")
+	h := InternKey(k)
+	releaseKey(k, weak.Make(new(common.Hash)))
+	requireCanonKey(t, k, h)
 }
 
 // Precompiles and small scalar storage slots differ only in their last bytes; they must not share a slot.

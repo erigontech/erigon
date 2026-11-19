@@ -176,8 +176,7 @@ func internKeyCanon(k common.Hash) StorageKey {
 			return StorageKey{p}
 		}
 	}
-	p := new(common.Hash)
-	*p = k
+	p := new(k)
 	wp := weak.Make(p)
 	var live *common.Hash
 	keyCanon.Compute(k, func(old weak.Pointer[common.Hash], loaded bool) (weak.Pointer[common.Hash], xsync.ComputeOp) {
