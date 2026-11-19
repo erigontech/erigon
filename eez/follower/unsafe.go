@@ -114,11 +114,12 @@ type overlay struct {
 	// only announced blocks and keeps their announcements.
 	chainID *uint256.Int
 	store   *announce.Store
-	// limit bounds the blocks one step fetches.
+	// limit bounds the blocks one step fetches, and those whose announcements
+	// it checks again.
 	limit uint64
 	last  common.Hash
-	// gap is the lowest block taken without its announcement kept, zero for
-	// none.
+	// gap, zero for none, is the lowest block from which the blocks taken may
+	// lack their announcement kept.
 	gap uint64
 	// pruned is the finalized block the store was last pruned at.
 	pruned uint64
@@ -234,8 +235,9 @@ func (o *overlay) missing(number uint64) {
 
 // reread reads again, from gap up, the announcements of the blocks taken
 // without one kept while L1 has not settled them, within the store's window
-// of the head. It keeps those served valid and stops at the first it cannot
-// keep, one the sequencer no longer serves included, until L1 settles it.
+// of the head, checking limit blocks a step, those kept included. It keeps
+// those served valid and stops at the first it cannot keep, one the
+// sequencer no longer serves included, until L1 settles it.
 func (o *overlay) reread(ctx context.Context) {
 	if o.gap == 0 {
 		return
@@ -248,7 +250,9 @@ func (o *overlay) reread(ctx context.Context) {
 		return
 	}
 	// A put below the floor would drop the announcements of the latest blocks.
-	for n := max(o.gap, o.deriver.Safe()+1, o.store.Floor(head.Number.Uint64())); ; n++ {
+	n := max(o.gap, o.deriver.Safe()+1, o.store.Floor(head.Number.Uint64()))
+	// L1 events wait for the step.
+	for range o.limit {
 		hash, ok, err := o.chain.CanonicalHash(ctx, n)
 		if err == nil && !ok {
 			o.gap = 0
@@ -264,7 +268,9 @@ func (o *overlay) reread(ctx context.Context) {
 			}
 			return
 		}
+		n++
 	}
+	o.gap = n
 }
 
 // refill keeps the announcement of block number with hash, taken without

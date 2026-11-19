@@ -134,7 +134,8 @@ var DefaultConfig = Config{
 	PeerRefresh:   5 * time.Second,
 }
 
-// overlayLimit bounds the sequencer blocks one overlay step inserts.
+// overlayLimit bounds the sequencer blocks one overlay step inserts, and the
+// blocks whose announcements it checks again.
 const overlayLimit = 256
 
 // Follower derives an EEZ chain from its settlements on L1.

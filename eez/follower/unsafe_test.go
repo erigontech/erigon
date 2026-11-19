@@ -710,6 +710,95 @@ func TestUnsafeHeadAnnouncementWindow(t *testing.T) {
 	}
 }
 
+// TestUnsafeHeadAnnouncementBounded: after a restart, each step reads again
+// the announcements of the overlay's limit of unsettled blocks, those kept
+// included, and the next step resumes past them; once past the head no more
+// are read.
+func TestUnsafeHeadAnnouncementBounded(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	unsettled := c.Compose(nil,
+		derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}},
+		derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}},
+		derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}},
+		derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}},
+	)
+	chainID := derivertest.Config().ChainID
+	sign := signer(t)
+	envs := make([][]byte, len(unsettled.Blocks))
+	for i, b := range unsettled.Blocks {
+		envs[i] = sign(chainID, b.Hash())
+	}
+	_, chain := derivertest.NewL2(t)
+	st := openAnnouncements(t)
+	require.NoError(t, st.Put(t.Context(), 2, unsettled.Blocks[1].Hash(), envs[1]))
+	seq := &announcing{Sequencer: sequencer(t, c.L2), envs: map[uint64][]byte{1: envs[0], 3: envs[2], 4: envs[3]}}
+	f := restarted(t, c, chain, unsettled.Blocks, seq, st)
+	f.SetOverlayLimit(2)
+
+	for i, step := range []struct {
+		reads int32
+		kept  int
+		gap   uint64
+	}{{1, 2, 3}, {2, 4, 5}, {0, 4, 0}, {0, 4, 0}} {
+		reads := seq.reads.Load()
+		require.NoError(t, f.StepOverlay(t.Context()))
+		require.Equal(t, reads+step.reads, seq.reads.Load(), "step %d", i+1)
+		require.Equal(t, step.gap, f.OverlayGap(), "step %d", i+1)
+		for j, b := range unsettled.Blocks {
+			kept, err := st.Get(t.Context(), uint64(j+1), b.Hash())
+			require.NoError(t, err)
+			if j < step.kept {
+				require.Equal(t, envs[j], kept, "step %d, block %d", i+1, j+1)
+				continue
+			}
+			require.Nil(t, kept, "step %d, block %d", i+1, j+1)
+		}
+	}
+}
+
+// TestUnsafeHeadAnnouncementBoundedUnserved: a step that resumes past the
+// blocks a previous one checked stops at the first block not served and
+// reads it again at the next step, until it is served.
+func TestUnsafeHeadAnnouncementBoundedUnserved(t *testing.T) {
+	c := derivertest.NewComposer(t)
+	unsettled := c.Compose(nil,
+		derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}},
+		derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}},
+		derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}},
+		derivertest.Block{Coinbase: bob, Extra: []byte{}, Txs: [][]byte{}},
+	)
+	chainID := derivertest.Config().ChainID
+	sign := signer(t)
+	envs := make([][]byte, len(unsettled.Blocks))
+	for i, b := range unsettled.Blocks {
+		envs[i] = sign(chainID, b.Hash())
+	}
+	_, chain := derivertest.NewL2(t)
+	st := openAnnouncements(t)
+	seq := &announcing{Sequencer: sequencer(t, c.L2), envs: map[uint64][]byte{1: envs[0], 2: envs[1], 3: envs[2]}}
+	f := restarted(t, c, chain, unsettled.Blocks, seq, st)
+	f.SetOverlayLimit(2)
+
+	for i, step := range []struct {
+		served bool
+		reads  int32
+		gap    uint64
+	}{{false, 2, 3}, {false, 2, 4}, {false, 1, 4}, {true, 1, 0}} {
+		if step.served {
+			seq.envs[4] = envs[3]
+		}
+		reads := seq.reads.Load()
+		require.NoError(t, f.StepOverlay(t.Context()))
+		require.Equal(t, reads+step.reads, seq.reads.Load(), "step %d", i+1)
+		require.Equal(t, step.gap, f.OverlayGap(), "step %d", i+1)
+	}
+	for i, b := range unsettled.Blocks {
+		kept, err := st.Get(t.Context(), uint64(i+1), b.Hash())
+		require.NoError(t, err)
+		require.Equal(t, envs[i], kept, "block %d", i+1)
+	}
+}
+
 var errHead = errors.New("head unread")
 
 // headFails is a chain whose head cannot be read while fail is set.
