@@ -746,7 +746,8 @@ jobs:
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: python3 coordinated_start.py --client "$CLIENT" --remote "${ALIGNED_REMOTES:-$REMOTES}" --run-id "$RUN_ID-eth_subscribe_classes" --chain "$NETWORK" --drop-lost-remotes --aligned-remotes-env "$GITHUB_ENV" || { echo "EXCLUDED_AT=eth_subscribe_classes" >> "$GITHUB_ENV"; exit 1; }
 
-      # The qps of the sequence is the number of WebSocket connections, split among the client classes of the pattern.
+      # The qps of the sequence is the number of WebSocket connections, split among the client classes of the pattern;
+      # at most 500, the default connection limit of Reth.
       # In the full run a short check (about 10 blocks per repetition); alone, a longer one.
       - name: Run eth_subscribe_classes
         id: perf_eth_subscribe_classes
@@ -754,8 +755,8 @@ jobs:
         continue-on-error: true
         timeout-minutes: ${{ needs.setup.outputs.rpc_test == 'eth_subscribe_classes' && 30 || 20 }}
         run: |
-          sequence=1000:120
-          if [ "$RPC_TEST" = "eth_subscribe_classes" ]; then sequence=1000:300; fi
+          sequence=500:120
+          if [ "$RPC_TEST" = "eth_subscribe_classes" ]; then sequence=500:300; fi
           bash .github/workflows/scripts/run_rpc_perf.sh eth_subscribe stress_test_eth_subscribe_classes_gen_latest "$sequence" eth_subscribe_classes
 
       - name: Collect the benchmark results
