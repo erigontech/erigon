@@ -171,3 +171,37 @@ func TestFrameReceiptEffectiveGasPrice(t *testing.T) {
 		})
 	}
 }
+
+func TestFrameReceiptGasTip(t *testing.T) {
+	frame := &types.FrameTransaction{
+		Frames:              []types.Frame{{Limits: mdgas.MdGas{Execution: 50_000}}},
+		Fees:                types.FrameFees{TipCap: uint256.Int{3}},
+		BlobVersionedHashes: []common.Hash{{1}},
+	}
+	baseFee, blobBaseFee := uint256.NewInt(10), uint256.NewInt(2)
+	gasLimit := frame.GetGasLimit()
+	required := gasLimit*baseFee.Uint64() + frame.GetBlobGas()*blobBaseFee.Uint64()
+	t.Run("round down only the rate", func(t *testing.T) {
+		totalTip := 2*gasLimit + 1
+		frame.Fees.MaxFee.SetUint64(required + totalTip)
+		tip, err := ReceiptGasTip(frame, gasLimit, baseFee, blobBaseFee)
+		require.NoError(t, err)
+		require.Equal(t, uint256.Int{2}, tip)
+		require.Equal(t, uint256.NewInt(12), ReceiptGasPrice(frame, gasLimit, baseFee, blobBaseFee))
+		paid, err := GasTipPaid(frame, gasLimit, baseFee, blobBaseFee)
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(totalTip), &paid)
+	})
+	t.Run("zero gas used", func(t *testing.T) {
+		frame.Fees.MaxFee.SetUint64(required)
+		tip, err := ReceiptGasTip(frame, 0, baseFee, blobBaseFee)
+		require.NoError(t, err)
+		require.Equal(t, uint256.Int{}, tip)
+		require.Equal(t, new(uint256.Int), ReceiptGasPrice(frame, 0, baseFee, blobBaseFee))
+	})
+	t.Run("budget must cover the declared gas limit", func(t *testing.T) {
+		frame.Fees.MaxFee.SetUint64(required - 1)
+		_, err := ReceiptGasTip(frame, gasLimit/2, baseFee, blobBaseFee)
+		require.ErrorIs(t, err, types.ErrFrameFeeBudget)
+	})
+}

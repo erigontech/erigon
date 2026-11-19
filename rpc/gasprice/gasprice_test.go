@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
@@ -111,6 +112,50 @@ func TestSuggestPrice(t *testing.T) {
 	expect := common.GWei * uint64(30)
 	if got.CmpUint64(expect) != 0 {
 		t.Fatalf("Gas price mismatch, want %d, got %d", expect, got)
+	}
+}
+
+func TestSuggestTipCapFrameFeeBudget(t *testing.T) {
+	const baseFee, blobBaseFee = 10, 2
+	// One update fraction of excess blob gas sets the blob base fee to 2 wei.
+	excessBlobGas := chain.AllProtocolChanges.GetBlobGasPriceUpdateFraction(0)
+	transfer := types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 21_000, uint256.NewInt(baseFee), nil)
+	for _, tc := range []struct {
+		name          string
+		blobs         []common.Hash
+		unusedGas     uint64
+		tipAtGasLimit uint64
+		wantTip       uint64
+	}{
+		{name: "unused gas funds the tip", unusedGas: 30_000, wantTip: 3},
+		{name: "blob fees reduce the tip", blobs: []common.Hash{{1}}, tipAtGasLimit: 2, wantTip: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			frame := &types.FrameTransaction{
+				SenderAddress: common.Address{1},
+				Frames: []types.Frame{{
+					Mode: types.FrameVerify, Flags: types.FrameApproveBoth, Limits: mdgas.MdGas{Execution: 50_000},
+				}},
+				Fees:                types.FrameFees{TipCap: *uint256.NewInt(3)},
+				BlobVersionedHashes: tc.blobs,
+			}
+			gasLimit := frame.GetGasLimit()
+			frame.Fees.MaxFee.SetUint64((baseFee+tc.tipAtGasLimit)*gasLimit + blobBaseFee*frame.GetBlobGas())
+			gasUsed := gasLimit - tc.unusedGas
+			header := &types.Header{
+				Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: transfer.GetGasLimit() + gasUsed,
+				BaseFee: uint256.NewInt(baseFee), ExcessBlobGas: &excessBlobGas,
+			}
+			block := types.NewBlockFromStorage(common.Hash{1}, header, types.Transactions{transfer, frame}, nil, nil, nil)
+			backend := &feeChain{
+				blocks:   []*types.Block{nil, block},
+				receipts: map[uint64]types.Receipts{1: {{GasUsed: transfer.GetGasLimit()}, {GasUsed: gasUsed}}},
+			}
+			oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 1}, jsonrpc.NewGasPriceCache(), nil, log.New())
+			tip, err := oracle.SuggestTipCap(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, uint256.NewInt(tc.wantTip), tip)
+		})
 	}
 }
 

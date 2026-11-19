@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -348,6 +349,33 @@ func GasTipPaid(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uin
 	return paid, nil
 }
 
+// ReceiptGasTip returns the settled proposer tip in wei per gas, rounded down.
+func ReceiptGasTip(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) (uint256.Int, error) {
+	frame, ok := txn.Unwrap().(*types.FrameTransaction)
+	if !ok {
+		return txn.GetEffectiveGasTip(baseFee), nil
+	}
+	if baseFee == nil {
+		baseFee = new(uint256.Int)
+	}
+	if blobBaseFee == nil {
+		blobBaseFee = new(uint256.Int)
+	}
+	_, blobCost, err := frame.Fees.RequiredCost(frame.GetGasLimit(), frame.GetBlobGas(), baseFee, blobBaseFee)
+	if err != nil || gasUsed == 0 {
+		return uint256.Int{}, err
+	}
+	// When MaxFee exceeds the amount collected at approval, that amount already
+	// covers the full tip cap at the gas limit and at any lower gas usage.
+	var perGas uint256.Int
+	perGas.Sub(&frame.Fees.MaxFee, &blobCost)
+	perGas.Div(&perGas, uint256.NewInt(gasUsed))
+	if _, underflow := perGas.SubOverflow(&perGas, baseFee); underflow {
+		return uint256.Int{}, types.ErrFrameFeeBudget
+	}
+	return u256.Min(perGas, frame.Fees.TipCap), nil
+}
+
 func ReceiptGasPrice(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee *uint256.Int) *uint256.Int {
 	if txn.Type() != types.FrameTxType {
 		if baseFee == nil {
@@ -356,9 +384,13 @@ func ReceiptGasPrice(txn types.Transaction, gasUsed uint64, baseFee, blobBaseFee
 		tip := txn.GetEffectiveGasTip(baseFee)
 		return new(uint256.Int).Add(baseFee, &tip)
 	}
-	fee, err := GasFeePaid(txn, gasUsed, baseFee, blobBaseFee)
+	tip, err := ReceiptGasTip(txn, gasUsed, baseFee, blobBaseFee)
 	if err != nil {
 		log.Warn("cannot derive receipt gas price", "txHash", txn.Hash(), "err", err)
+		return new(uint256.Int)
 	}
-	return fee.Div(&fee, uint256.NewInt(gasUsed))
+	if baseFee != nil && gasUsed != 0 {
+		tip.Add(&tip, baseFee)
+	}
+	return &tip
 }

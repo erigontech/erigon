@@ -106,22 +106,29 @@ type FrameFeeBudget struct {
 
 var ErrFrameFeeBudget = errors.New("frame fee budget below base fees")
 
+// RequiredCost returns the total base-fee charge at the declared gas limit and
+// the portion spent on blobs. MaxFee must cover the total.
+func (fees *FrameFees) RequiredCost(gas, blobGas uint64, baseFee, blobBaseFee *uint256.Int) (required, blobCost uint256.Int, err error) {
+	if _, overflow := blobCost.MulOverflow(uint256.NewInt(blobGas), blobBaseFee); overflow {
+		return required, blobCost, ErrFrameFeeBudget
+	}
+	if _, overflow := required.MulOverflow(uint256.NewInt(gas), baseFee); overflow {
+		return required, blobCost, ErrFrameFeeBudget
+	}
+	if _, overflow := required.AddOverflow(&required, &blobCost); overflow || required.Gt(&fees.MaxFee) {
+		return required, blobCost, ErrFrameFeeBudget
+	}
+	return required, blobCost, nil
+}
+
 // Budget reserves base fees and as much of the priority fee as MaxFee permits.
 // GASPRICE rounds the reserved priority fee down; settlement uses the remaining
 // budget directly rather than multiplying that rounded price by gas used.
 func (fees *FrameFees) Budget(gas, blobGas uint64, baseFee, blobBaseFee *uint256.Int) (budget FrameFeeBudget, err error) {
-	var required, executionCost uint256.Int
-	_, overflow := budget.BlobCost.MulOverflow(uint256.NewInt(blobGas), blobBaseFee)
-	if overflow {
-		return budget, ErrFrameFeeBudget
-	}
-	_, overflow = executionCost.MulOverflow(uint256.NewInt(gas), baseFee)
-	if overflow {
-		return budget, ErrFrameFeeBudget
-	}
-	_, overflow = required.AddOverflow(&executionCost, &budget.BlobCost)
-	if overflow || required.Gt(&fees.MaxFee) {
-		return budget, ErrFrameFeeBudget
+	var required uint256.Int
+	required, budget.BlobCost, err = fees.RequiredCost(gas, blobGas, baseFee, blobBaseFee)
+	if err != nil {
+		return budget, err
 	}
 	available := new(uint256.Int).Sub(&fees.MaxFee, &required)
 	priority := fees.PriorityCost(gas, available)

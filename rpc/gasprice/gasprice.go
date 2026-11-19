@@ -21,6 +21,7 @@ package gasprice
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync/atomic"
 
@@ -30,7 +31,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 )
@@ -311,10 +314,7 @@ func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64,
 // backend). Empty blocks or blocks where all transactions come from the coinbase
 // contribute nothing to out; the caller applies its own fallback.
 //
-// Effective tips are pre-computed once per transaction to avoid repeated
-// allocations that occurred when a heap's Less method called GetEffectiveGasTip
-// on every comparison (O(n log n) allocations). Now we allocate exactly once
-// per transaction (O(n)) and sort with slices.SortFunc (pdqsort).
+// Compute each tip before sorting so comparisons do not repeat fee calculations.
 func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend OracleBackend, blockNum uint64, limit int,
 	ignoreUnder *uint256.Int, out *[]*uint256.Int,
 ) error {
@@ -330,14 +330,42 @@ func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend Ora
 	baseFee := block.BaseFee()
 	coinbase := block.Coinbase()
 
-	// Pre-compute effective tip for every transaction exactly once.
 	type txWithTip struct {
 		tx  types.Transaction
 		tip uint256.Int
 	}
 	items := make([]txWithTip, len(block.Transactions()))
+	var receipts types.Receipts
+	var blobBaseFee uint256.Int
 	for i, tx := range block.Transactions() {
-		items[i] = txWithTip{tx: tx, tip: tx.GetEffectiveGasTip(baseFee)}
+		items[i].tx = tx
+		if tx.Type() != types.FrameTxType {
+			items[i].tip = tx.GetEffectiveGasTip(baseFee)
+			continue
+		}
+		if receipts == nil {
+			receipts, err = backend.GetReceiptsGasUsed(ctx, block)
+			if err != nil {
+				return err
+			}
+			if header := block.HeaderNoCopy(); header.ExcessBlobGas != nil {
+				config := backend.ChainConfig()
+				if config == nil {
+					return fmt.Errorf("chain config unavailable for block %d", blockNum)
+				}
+				blobBaseFee, err = misc.GetBlobGasPrice(config, *header.ExcessBlobGas, header.Time)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		if i >= len(receipts) || receipts[i] == nil {
+			return fmt.Errorf("missing receipt for frame transaction %d in block %d", i, blockNum)
+		}
+		items[i].tip, err = ethutils.ReceiptGasTip(tx, receipts[i].GasUsed, baseFee, &blobBaseFee)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Sort ascending by effective tip; slices.SortFunc uses pdqsort (no reflection).

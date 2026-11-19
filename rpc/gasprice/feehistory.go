@@ -187,16 +187,10 @@ func (oracle *Oracle) processBlock(bf *blockFees, chainconfig *chain.Config) {
 	}
 	for i, txn := range bf.block.Transactions() {
 		gasUsed := bf.receipts[i].GasUsed
-		var reward uint256.Int
-		if txn.Type() == types.FrameTxType {
-			paid, err := ethutils.GasTipPaid(txn, gasUsed, baseFee, (*uint256.Int)(&bf.results.blobBaseFee))
-			if err != nil {
-				bf.err = err
-				return
-			}
-			reward.Div(&paid, uint256.NewInt(gasUsed))
-		} else {
-			reward = txn.GetEffectiveGasTip(baseFee)
+		reward, err := ethutils.ReceiptGasTip(txn, gasUsed, baseFee, (*uint256.Int)(&bf.results.blobBaseFee))
+		if err != nil {
+			bf.err = err
+			return
 		}
 		sorter[i] = txGasAndReward{gasUsed: gasUsed, reward: reward}
 	}
