@@ -33,18 +33,18 @@ import (
 type TraceAPI interface {
 	// Ad-hoc (see ./trace_adhoc.go)
 
-	ReplayBlockTransactions(ctx context.Context, blockNr rpc.BlockNumberOrHash, traceTypes []string, gasBailOut *bool, traceConfig *config.TraceConfig) ([]*TraceCallResult, error)
-	ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string, gasBailOut *bool, traceConfig *config.TraceConfig) (*TraceCallResult, error)
+	ReplayBlockTransactions(ctx context.Context, blockNr rpc.BlockNumberOrHash, traceTypes []string, traceConfig *config.TraceConfig) ([]*TraceCallResult, error)
+	ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string, traceConfig *config.TraceConfig) (*TraceCallResult, error)
 	Call(ctx context.Context, call TraceCallParam, types []string, blockNr *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) (*TraceCallResult, error)
 	CallMany(ctx context.Context, calls json.RawMessage, blockNr *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) ([]*TraceCallResult, error)
 	RawTransaction(ctx context.Context, encodedTx hexutil.Bytes, traceTypes []string) (*TraceCallResult, error)
 
 	// Filtering (see ./trace_filtering.go)
 
-	Transaction(ctx context.Context, txHash common.Hash, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error)
-	Get(ctx context.Context, txHash common.Hash, traceAddress []hexutil.Uint64, gasBailOut *bool, traceConfig *config.TraceConfig) (*ParityTrace, error)
-	Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error)
-	Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream *jsonstream.Stream) error
+	Transaction(ctx context.Context, txHash common.Hash, traceConfig *config.TraceConfig) (ParityTraces, error)
+	Get(ctx context.Context, txHash common.Hash, traceAddress []hexutil.Uint64, traceConfig *config.TraceConfig) (*ParityTrace, error)
+	Block(ctx context.Context, blockNr rpc.BlockNumber, traceConfig *config.TraceConfig) (ParityTraces, error)
+	Filter(ctx context.Context, req TraceFilterRequest, traceConfig *config.TraceConfig, stream *jsonstream.Stream) error
 }
 
 // TraceAPIImpl is implementation of the TraceAPI interface based on remote Db access

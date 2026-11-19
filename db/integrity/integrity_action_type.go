@@ -18,7 +18,13 @@ package integrity
 
 import (
 	"cmp"
+	"context"
+	"errors"
+	"fmt"
 	"slices"
+	"time"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type Check string
@@ -176,4 +182,42 @@ func SortChecksByCost(checks []Check) []Check {
 		}
 	})
 	return out
+}
+
+func RunChecks(ctx context.Context, checks []Check, budget time.Duration, run func(context.Context, Check) error, logger log.Logger) error {
+	runCtx := ctx
+	if budget > 0 {
+		checks = SortChecksByCost(checks)
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, budget)
+		defer cancel()
+		logger.Info("[integrity] budget", "total", budget)
+	}
+
+	for i, chk := range checks {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if runCtx.Err() != nil {
+			return fmt.Errorf("integrity budget %s exhausted, not run: %v", budget, checks[i:])
+		}
+
+		logger.Info("[integrity] starting", "check", chk)
+		start := time.Now()
+		err := run(runCtx, chk)
+		elapsed := time.Since(start)
+
+		if parentErr := ctx.Err(); parentErr != nil {
+			return parentErr
+		}
+		if runCtx.Err() != nil {
+			return errors.Join(err, fmt.Errorf("integrity budget %s exhausted: %s cut after %s, not run: %v", budget, chk, elapsed.Round(time.Millisecond), checks[i+1:]))
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %w", chk, err)
+		}
+		logger.Info("[integrity] done", "check", chk, "elapsed", elapsed)
+	}
+
+	return nil
 }

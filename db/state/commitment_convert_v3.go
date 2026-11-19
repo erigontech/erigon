@@ -689,6 +689,8 @@ func (b *hashedBatch) expect(key, hash []byte) error {
 	return nil
 }
 
+var foldCommitmentV3BatchHook func(seq uint64)
+
 var hashedBatchPool = sync.Pool{New: func() any { return &hashedBatch{} }}
 
 func verifyCommitmentV3Files(ctx context.Context, a *Aggregator, logger log.Logger) error {
@@ -748,6 +750,8 @@ func foldCommitmentV3Records(ctx context.Context, tmpdir string, it stream.KV) (
 	workers := max(1, runtime.GOMAXPROCS(0))
 	in := make(chan *kvBatch, workers*2)
 	out := make(chan *hashedBatch, workers*2)
+	// Bounds the reorder backlog: a slot is taken at dispatch, in seq order, and freed when the batch is folded.
+	inFlight := make(chan struct{}, workers*4)
 	var state []byte
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
@@ -758,6 +762,11 @@ func foldCommitmentV3Records(ctx context.Context, tmpdir string, it stream.KV) (
 		send := func() error {
 			batch.seq = seq
 			seq++
+			select {
+			case inFlight <- struct{}{}:
+			case <-gctx.Done():
+				return gctx.Err()
+			}
 			select {
 			case in <- batch:
 				batch = kvBatchPool.Get().(*kvBatch)
@@ -794,6 +803,9 @@ func foldCommitmentV3Records(ctx context.Context, tmpdir string, it stream.KV) (
 	goWorkers(g, workers, func() error {
 		hasher := v3.NewRecordHasher()
 		for batch := range in {
+			if foldCommitmentV3BatchHook != nil {
+				foldCommitmentV3BatchHook(batch.seq)
+			}
 			res := hashedBatchPool.Get().(*hashedBatch)
 			res.seq, res.buf, res.records, res.expects = batch.seq, res.buf[:0], res.records[:0], res.expects[:0]
 			for _, p := range batch.pairs {
@@ -837,6 +849,7 @@ func foldCommitmentV3Records(ctx context.Context, tmpdir string, it stream.KV) (
 					}
 				}
 				hashedBatchPool.Put(b)
+				<-inFlight
 			}
 		}
 		return nil
