@@ -59,11 +59,15 @@ type memoryMutationCursor struct {
 }
 
 func (m *memoryMutationCursor) isTableCleared() bool {
-	return m.mutation.memTx.isCleared(m.table)
+	m.memCursor.store.rlock()
+	defer m.memCursor.store.runlock()
+	return m.memCursor.table.cleared
 }
 
 func (m *memoryMutationCursor) isEntryDeleted(key []byte, value []byte) bool {
-	return m.mutation.memTx.isHidden(m.table, key, value)
+	m.memCursor.store.rlock()
+	defer m.memCursor.store.runlock()
+	return m.memCursor.table.hides(key, value)
 }
 
 // First move cursor to first position and return key and value accordingly.
@@ -145,8 +149,7 @@ func (m *memoryMutationCursor) Current() ([]byte, []byte, error) {
 func (m *memoryMutationCursor) skipIntersection(memKey, memValue, dbKey, dbValue []byte, t NextType) (newDbKey []byte, newDbValue []byte, err error) {
 	newDbKey = dbKey
 	newDbValue = dbValue
-	config, ok := kv.ChaindataTablesCfg[m.table]
-	dupSortTable := ok && ((config.Flags & kv.DupSort) != 0)
+	dupSortTable := m.memCursor.table.dupSort
 	// Check for duplicates
 	if bytes.Equal(memKey, dbKey) {
 		var skip bool

@@ -1045,3 +1045,39 @@ func TestMemStore_DescRangeDupSortStopsBeforeNextKeyTombstone(t *testing.T) {
 		require.Equal(t, []string{"v1"}, vals, "nextLive=%v", nextLive)
 	}
 }
+
+func TestMemStore_SnapshotRejectsWrites(t *testing.T) {
+	s := newMemStore()
+	require.NoError(t, s.Put(kv.Headers, []byte("k"), []byte("v")))
+	snap := s.snapshot()
+	require.Same(t, snap, snap.snapshot())
+	require.Panics(t, func() { _ = snap.Put(kv.Headers, []byte("k"), []byte("v2")) })
+	require.Panics(t, func() { _ = snap.Delete(kv.Headers, []byte("k")) })
+	require.Panics(t, func() { _ = snap.ClearTable(kv.Headers) })
+	require.Panics(t, func() { _, _ = snap.IncrementSequence("seq", 1) })
+	require.Panics(t, func() { _ = snap.newCursor(kv.Headers).DeleteExact([]byte("k"), nil) })
+	v, err := snap.GetOne(kv.Headers, []byte("k"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("v"), v)
+}
+
+func TestMemStore_ConcurrentCursorsOnSharedSnapshot(t *testing.T) {
+	s := newMemStore()
+	require.NoError(t, s.Put(kv.Headers, []byte("k"), []byte("v")))
+	snap := s.snapshot()
+	var wg sync.WaitGroup
+	for i := range 4 {
+		wg.Go(func() {
+			for j := range 100 {
+				c := snap.newCursor(fmt.Sprintf("missing%d_%d", i, j))
+				k, _, _ := c.First()
+				assert.Nil(t, k)
+				assert.False(t, snap.isHidden(kv.Headers, []byte("k"), nil))
+			}
+		})
+	}
+	wg.Wait()
+	exists, err := snap.ExistsTable("missing0_0")
+	require.NoError(t, err)
+	require.False(t, exists)
+}
