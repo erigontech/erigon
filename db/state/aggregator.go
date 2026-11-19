@@ -1113,7 +1113,7 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 		if step < firstStep {
 			continue
 		}
-		if len(ac.d[id].files) == 0 && !a.canPublishFirstDomainStep(kv.Domain(id), txFrom, txTo) {
+		if !a.canPublishDomainStep(kv.Domain(id), txFrom, txTo) {
 			// Publishing a later step would let pruning delete pending MDBX values from this one.
 			plan.deferredDomains[id] = true
 			a.deferredDomainWarnings[id].Do(func() {
@@ -1187,18 +1187,30 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 	return nil
 }
 
-func (a *Aggregator) canPublishFirstDomainStep(id kv.Domain, txFrom, txTo uint64) bool {
+func (a *Aggregator) canPublishDomainStep(id kv.Domain, txFrom, txTo uint64) bool {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	d := a.d[id]
-	if a.unalignedDomain[id] || d.dirtyFiles.Len() > 0 || d.HistoryDisabled || d.SnapshotsDisabled {
+	if d.HistoryDisabled || d.SnapshotsDisabled {
 		return true
 	}
-	// The first values file also exposes retained history and index files. Each
-	// readable prefix must connect to the new range so shared visibility cannot fall.
+	// A normal append adds one matched pair and exposes no retained files.
+	if a.visible.Load().d[id].files.EndTxNum() == txFrom &&
+		max(d.History.dirtyFiles.EndTxNumMax(), d.InvertedIndex.dirtyFiles.EndTxNumMax()) <= txFrom {
+		return true
+	}
+	// A retained merged file ending at txTo hides the new single-step file.
+	// Index positions are valid only in the history file with the same range.
+	withNewStep := func(files visibleFiles) visibleFiles {
+		if files.EndTxNum() == txTo {
+			return files
+		}
+		return append(files, visibleFile{startTxNum: txFrom, endTxNum: txTo})
+	}
 	history, index := d.History.calcVisibleFiles(txTo)
-	return (len(history) == 0 || contiguousEnd(history) >= txFrom) &&
-		(len(index.files) == 0 || contiguousEnd(index.files) >= txFrom)
+	history = withNewStep(history)
+	return (a.unalignedDomain[id] || contiguousEnd(history) == txTo) &&
+		slices.EqualFunc(history, withNewStep(index.files), visibleFile.sameRange)
 }
 
 func (a *Aggregator) readyForCollation(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {

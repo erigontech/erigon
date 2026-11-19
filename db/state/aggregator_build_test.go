@@ -536,6 +536,8 @@ func TestAggregatorBuildPreservesRetainedHistory(t *testing.T) {
 			{name: "history_gap", history: stateRanges[:1], index: stateRanges, deferred: true},
 			{name: "index_gap", history: stateRanges, index: stateRanges[:1], deferred: true},
 			{name: "both_gaps", history: stateRanges[:1], index: stateRanges[:1], deferred: true},
+			{name: "different_partitions", history: []testFileRange{{0, 2}, {2, 3}}, index: stateRanges, deferred: true},
+			{name: "step_2_completes_index", history: stateRanges, index: stateRanges[:2], deferred: !pending},
 			{name: "later_step_would_skip_pending_values", history: overlapping, index: overlapping, deferred: pending},
 			{name: "continuous", history: stateRanges, index: stateRanges},
 		} {
@@ -594,6 +596,78 @@ func TestAggregatorBuildPreservesRetainedHistory(t *testing.T) {
 				}))
 			})
 		}
+	}
+}
+
+func TestAggregatorBuildKeepsReceiptHistoryReadable(t *testing.T) {
+	const stepSize = uint64(10)
+	for _, test := range []struct {
+		name            string
+		hasEarlierFiles bool
+		unaligned       bool
+	}{
+		{name: "first_values_file"},
+		{name: "later_values_file", hasEarlierFiles: true},
+		{name: "unaligned_rebuild", unaligned: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := t.Context()
+			db, agg := testDbAndAggregatorv3(t, stepSize)
+			key, previous := []byte{1}, []byte{7}
+			const updateTx = 3*stepSize + 2
+			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+				at := agg.BeginFilesRo()
+				defer at.Close()
+				w := at.d[kv.ReceiptDomain].NewWriter(db)
+				defer w.Close()
+				require.NoError(t, w.PutWithPrev(key, previous, updateTx-1, nil))
+				require.NoError(t, w.PutWithPrev(key, []byte{8}, updateTx, previous))
+				return w.Flush(ctx, tx)
+			}))
+			require.NoError(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), 0, 4, unboundedFinalityCtx, true))
+			agg.background.Wait()
+			agg.CloseFilesNoReopen()
+			dirs, d := agg.Dirs(), agg.d[kv.ReceiptDomain]
+			removeSnapshotFiles(t, filepath.Join(dirs.SnapDomain, "*-receipt.*.kv"))
+			require.NoError(t, dir.RemoveFile(d.efAccessorNewFilePath(0, 4)))
+			if test.hasEarlierFiles {
+				prefix := []testFileRange{{0, 2}, {2, 3}}
+				generateStateFiles(t, dirs, prefix)
+				generateCommitmentFile(t, dirs, prefix)
+				generateStandaloneIIFiles(t, dirs, prefix)
+				generateDomainFiles(t, kv.ReceiptDomain.String(), dirs, prefix)
+			}
+			require.NoError(t, agg.OpenFolder(db))
+			if test.unaligned {
+				defer agg.Unalign(kv.ReceiptDomain)()
+			}
+			before := agg.BeginFilesRo()
+			hasEarlierFiles := before.TxNumsInFiles(kv.ReceiptDomain) > 0
+			before.Close()
+			require.Equal(t, test.hasEarlierFiles, hasEarlierFiles)
+
+			buildAndRead := func() {
+				t.Helper()
+				require.NoError(t, agg.BuildFiles2(ctx, asTemporalRoDB(db), 3, 4, unboundedFinalityCtx, false))
+				agg.background.Wait()
+				require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+					at := agg.BeginFilesRo()
+					defer at.Close()
+					_, err := at.prune(ctx, tx, 0, true, nil)
+					require.NoError(t, err)
+					got, found, err := at.HistorySeek(kv.ReceiptDomain, key, updateTx, tx)
+					require.NoError(t, err)
+					require.True(t, found)
+					require.Equal(t, previous, got)
+					return nil
+				}))
+			}
+			buildAndRead()
+			require.NoFileExists(t, d.kvNewFilePath(3, 4))
+			require.NoError(t, agg.BuildMissedAccessors(ctx, db, 1))
+			buildAndRead()
+			require.FileExists(t, d.kvNewFilePath(3, 4))
+		})
 	}
 }
 
