@@ -1720,7 +1720,26 @@ func TestAccessorCommandRebuildNewSaltRecreatesIndices(t *testing.T) {
 	require.FileExists(t, oldExistence)
 
 	app := &cli.Command{Name: "erigon", Commands: []*cli.Command{&snapshotCommand}}
-	require.NoError(t, app.Run(ctx, []string{"erigon", "seg", "accessor", "--datadir", dirs.DataDir, "--rebuild", "--new-salt"}))
+	args := []string{"erigon", "seg", "accessor", "--datadir", dirs.DataDir, "--rebuild", "--new-salt"}
+
+	// Before the initial download is pinned, a downloader restart can reconcile
+	// salt-state.txt against a newer manifest. Refuse before removing any accessor
+	// or salt so this datadir remains usable and can finish its initial download.
+	err = app.Run(ctx, args)
+	require.ErrorContains(t, err, "requires a completed initial snapshot download")
+	for _, name := range []string{"salt-blocks.txt", "salt-state.txt"} {
+		salt, readErr := os.ReadFile(filepath.Join(dirs.Snap, name))
+		require.NoError(t, readErr)
+		require.Equal(t, oldSalt, salt, "rejected salt rotation must leave %s untouched", name)
+	}
+	require.FileExists(t, headerIndexPath)
+	require.FileExists(t, oldBtree)
+	require.FileExists(t, oldExistence)
+	require.NoFileExists(t, dirs.PreverifiedPath())
+
+	// Presence of preverified.toml marks the completed, pinned snapshot set.
+	require.NoError(t, os.WriteFile(dirs.PreverifiedPath(), []byte("# initial snapshot download complete\n"), 0o444))
+	require.NoError(t, app.Run(ctx, args))
 
 	for _, name := range []string{"salt-blocks.txt", "salt-state.txt"} {
 		salt, err := os.ReadFile(filepath.Join(dirs.Snap, name))

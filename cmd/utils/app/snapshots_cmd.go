@@ -189,7 +189,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotRebuildFlag,
-				&cli.BoolFlag{Name: "new-salt", Usage: "Regenerate snapshot salts while rebuilding all accessors (requires --rebuild)"},
+				&cli.BoolFlag{Name: "new-salt", Usage: "Regenerate snapshot salts while rebuilding all accessors (requires --rebuild and a completed initial snapshot download)"},
 			}),
 		},
 		{
@@ -2991,6 +2991,22 @@ func removeAccessorsForRebuild(dirs datadir.Dirs, logger log.Logger) error {
 	return nil
 }
 
+// requirePinnedSnapshotSet prevents salt rotation while the initial snapshot download can still
+// reconcile local files against a newer remote manifest. The downloader writes preverified.toml
+// only after the full initial snapshot set is complete; before then it may replace salt-state.txt
+// while retaining accessors that were just rebuilt with a different salt.
+func requirePinnedSnapshotSet(dirs datadir.Dirs) error {
+	preverifiedPath := dirs.PreverifiedPath()
+	exists, err := dir2.FileExist(preverifiedPath)
+	if err != nil {
+		return fmt.Errorf("check initial snapshot download completion: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("--new-salt requires a completed initial snapshot download: %s is missing; wait for the initial snapshot download to finish before rotating salts", preverifiedPath)
+	}
+	return nil
+}
+
 // indexAggOpts skip the startup gap check: `snapshots index` rebuilds the accessors whose absence makes it refuse.
 var indexAggOpts = []func(state.AggOpts) state.AggOpts{state.AggOpts.SkipFilesDBGapCheck}
 
@@ -3002,6 +3018,11 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 	newSalt := cliCtx.Bool("new-salt")
 	if newSalt && !rebuild {
 		return errors.New("--new-salt requires --rebuild")
+	}
+	if newSalt {
+		if err := requirePinnedSnapshotSet(dirs); err != nil {
+			return err
+		}
 	}
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
