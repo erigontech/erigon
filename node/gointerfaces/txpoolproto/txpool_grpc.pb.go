@@ -54,7 +54,9 @@ type TxpoolClient interface {
 	OnAdd(ctx context.Context, in *OnAddRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[OnAddReply], error)
 	// returns high level status
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusReply, error)
-	// returns nonce for given account
+	// Nonce returns the last pooled account nonce before the first gap, starting
+	// at the sender's state nonce. If the state nonce is missing, found is false
+	// even if the pool holds higher account nonces.
 	Nonce(ctx context.Context, in *NonceRequest, opts ...grpc.CallOption) (*NonceReply, error)
 	// returns the list of blobs and proofs for a given list of blob hashes
 	GetBlobs(ctx context.Context, in *GetBlobsRequest, opts ...grpc.CallOption) (*GetBlobsReply, error)
@@ -198,7 +200,9 @@ type TxpoolServer interface {
 	OnAdd(*OnAddRequest, grpc.ServerStreamingServer[OnAddReply]) error
 	// returns high level status
 	Status(context.Context, *StatusRequest) (*StatusReply, error)
-	// returns nonce for given account
+	// Nonce returns the last pooled account nonce before the first gap, starting
+	// at the sender's state nonce. If the state nonce is missing, found is false
+	// even if the pool holds higher account nonces.
 	Nonce(context.Context, *NonceRequest) (*NonceReply, error)
 	// returns the list of blobs and proofs for a given list of blob hashes
 	GetBlobs(context.Context, *GetBlobsRequest) (*GetBlobsReply, error)

@@ -111,7 +111,9 @@ service Txpool {
   rpc OnAdd(OnAddRequest) returns (stream OnAddReply);
   // returns high level status
   rpc Status(StatusRequest) returns (StatusReply);
-  // returns nonce for given account
+  // Nonce returns the last pooled account nonce before the first gap, starting
+  // at the sender's state nonce. If the state nonce is missing, found is false
+  // even if the pool holds higher account nonces.
   rpc Nonce(NonceRequest) returns (NonceReply);
   // returns the list of blobs and proofs for a given list of blob hashes
   rpc GetBlobs(GetBlobsRequest) returns (GetBlobsReply);

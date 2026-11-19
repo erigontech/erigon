@@ -108,7 +108,7 @@ The TxPool interface provides access to transaction pool operations and status i
 | PendingRemove     | Removes transactions from the pending pool    |
 | OnAdd             | Subscribes to transaction addition events |
 | Mining            | Returns mining-related transaction data   |
-| NonceFromAddress  | Gets the next nonce for an address        |
+| Nonce             | Returns the last nonce before the first gap in the sender's pooled account nonces. If the pool lacks the sender's state nonce, `found` is `false`. |
 
 ***
 

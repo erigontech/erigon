@@ -91,7 +91,10 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	return (*hexutil.U256)(&acc.Balance), nil
 }
 
-// GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
+// GetTransactionCount implements eth_getTransactionCount and returns the account
+// nonce at the requested block. For "pending", it advances past consecutive
+// pooled account nonces starting at the sender's state nonce. If that sequence
+// is empty, it reads the nonce from state.
 func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHashArg *rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
 	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
 	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -105,7 +108,6 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 			reply.Nonce++
 			return (*hexutil.Uint64)(&reply.Nonce), nil
 		}
-		// Use the state nonce when the pool has no transaction at that nonce.
 	}
 	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
 	if err != nil {

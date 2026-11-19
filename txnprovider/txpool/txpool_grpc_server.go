@@ -330,7 +330,6 @@ func (s *GrpcServer) Status(_ context.Context, _ *txpoolproto.StatusRequest) (*t
 	}, nil
 }
 
-// returns nonce for address
 func (s *GrpcServer) Nonce(ctx context.Context, in *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
 	addr := gointerfaces.ConvertH160toAddress(in.Address)
 	nonce, found := s.txPool.NonceFromAddress(addr)

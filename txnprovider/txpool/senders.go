@@ -31,17 +31,12 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-// BySenderAndNonce - designed to perform most expensive operation in TxPool:
-// "recalculate all ephemeral fields of all transactions" by algo
-//   - for all senders - iterate over transactions by nonce domain, then increasing nonce
-//
-// Performances decisions:
-//   - All senders stored inside 1 large BTree - because iterate over 1 BTree is faster than over map[senderId]BTree
-//   - sortByNonce used as non-pointer wrapper - because iterate over BTree of pointers is 2x slower
+// BySenderAndNonce keeps all pooled transactions in one tree ordered by sender,
+// nonce domain, and nonce. The pool can scan one sender or all senders in that order.
 type BySenderAndNonce struct {
 	tree              *btree.BTreeG[*metaTxn]
 	search            *metaTxn
-	senderIDTxnCount  map[uint64]int    // count of sender's txns in the pool - may differ from nonce
+	senderIDTxnCount  map[uint64]int    // includes transactions from both nonce domains
 	senderIDBlobCount map[uint64]uint64 // count of sender's total number of blobs in the pool
 	senderIDFrameTxn  map[uint64]*metaTxn
 }
@@ -50,8 +45,10 @@ func (b *BySenderAndNonce) nonce(senderID uint64) (nonce uint64, ok bool) {
 	lowerEntries := b.count(senderID)
 	b.descend(senderID, func(mt *metaTxn) bool {
 		lowerEntries--
-		// Account nonces sort before keyed nonces. An account nonce has no gap
-		// below it when its distance from the state nonce equals the number of lower entries.
+		// Keyed nonces sort last, and the pool removes account nonces below the
+		// state nonce. For an account nonce N, lowerEntries counts the distinct
+		// pooled nonces in [stateNonce, N). That range has nonceDistance possible
+		// values, so equal counts mean there is no gap.
 		if mt.keyedNonce || mt.nonceDistance != uint64(lowerEntries) {
 			return true
 		}

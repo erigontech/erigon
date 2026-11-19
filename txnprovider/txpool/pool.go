@@ -2586,6 +2586,9 @@ func (p *TxPool) deleteMinedBlobTxn(hash string) {
 	delete(p.minedBlobTxnsByHash, hash)
 }
 
+// NonceFromAddress returns the last nonce before the first gap in the sender's
+// pooled account nonces, starting at the state nonce. If the state nonce itself
+// is missing, found is false. Queued transactions still occupy their nonces.
 func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, found bool) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
