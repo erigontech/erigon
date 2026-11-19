@@ -59,6 +59,11 @@ func Test_BtreeIndex_Init(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	bt.Close()
+
+	require.NoError(t, os.Truncate(filepath.Join(tmp, "a.bt"), 0))
+	bt, err = OpenBtreeIndexWithDecompressor(filepath.Join(tmp, "a.bt"), r)
+	bt.Close()
+	require.Error(t, err, "an empty index cannot serve a nonempty data file")
 }
 
 func Test_BtreeIndex_Seek(t *testing.T) {

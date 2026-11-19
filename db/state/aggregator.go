@@ -1116,8 +1116,8 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 			continue
 		}
 
-		firstStep := max(ac.d[id].FirstStepNotInFiles(), plan.domainFirstStep[id])
-		if step < firstStep {
+		if step < plan.domainFirstStep[id] ||
+			(step < ac.d[id].FirstStepNotInFiles() && ac.d[id].firstUnreadableTx(txFrom, txTo) == txTo) {
 			continue
 		}
 		if !a.canPublishDomainStep(kv.Domain(id), txFrom, txTo) {
@@ -1166,8 +1166,8 @@ func (a *Aggregator) buildFilesWithPlan(ctx context.Context, db kv.TemporalRoDB,
 			continue
 		}
 
-		firstStep := max(ac.iis[iikey].FirstStepNotInFiles(), plan.indexFirstStep[iikey])
-		if step < firstStep {
+		if step < plan.indexFirstStep[iikey] ||
+			(step < ac.iis[iikey].FirstStepNotInFiles() && ac.iis[iikey].firstUnreadableTx(txFrom, txTo) == txTo) {
 			continue
 		}
 
@@ -1291,7 +1291,8 @@ Loop:
 }
 
 // BuildFiles2 schedules a background build for [fromStep, toStep), including
-// earlier steps with pending data when needed. It returns planning errors directly.
+// earlier steps with pending data when needed. If a data file in that range
+// failed to open, it waits for the repair so the caller receives any restore error.
 // A nil result can also mean a build is already running or the aggregator is closing.
 func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
 	// Close must wait for synchronous planning as well as the background build.
@@ -1315,18 +1316,14 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 		fromStep = min(fromStep, plan.firstStep)
 		log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
 	}
-	started := a.background.TryGo(func() {
+	build := func() error {
 		defer a.buildingFiles.Store(false)
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
 			if err := a.buildFilesWithPlan(ctx, db, step, finalityCtx, nil, &plan); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
-				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
-					panic(err)
-				}
-				a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
-				panic(err)
+				return err
 			}
 			a.onFilesChange(nil)
 		}
@@ -1338,8 +1335,19 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromSt
 				}
 			})
 		}
-	})
-	if !started {
+		return nil
+	}
+	if fromStep < toStep && plan.firstRepairTx < a.FirstTxNumOfStep(toStep) {
+		return build()
+	}
+	if !a.background.TryGo(func() {
+		if err := build(); err != nil {
+			a.logger.Warn("[snapshots] buildFilesInBackground", "err", err)
+			if !errors.Is(err, errRestoreSnapshot) {
+				panic(err)
+			}
+		}
+	}) {
 		a.buildingFiles.Store(false)
 	}
 	return nil
@@ -2361,7 +2369,8 @@ func (a *Aggregator) BuildFilesInBackground(db kv.TemporalRoDB, txNum uint64, fi
 }
 
 type fileBuildPlan struct {
-	firstStep kv.Step
+	firstStep     kv.Step
+	firstRepairTx uint64 // MaxUint64 when the job has no data files to repair
 
 	// A job may start earlier for another entity, but even an empty file must
 	// respect its entity's lower bound to avoid lowering the shared ceiling.
@@ -2477,6 +2486,28 @@ func (a *Aggregator) planFileBuild(tx kv.Tx) (fileBuildPlan, error) {
 			plan.indexFirstStep[id] = first
 		}
 		plan.firstStep = min(plan.firstStep, first)
+	}
+	// A damaged history or index may need repair even when its values file is visible.
+	plan.firstRepairTx = math.MaxUint64
+	includeRepair := func(entityStart *kv.Step, repairTx uint64) {
+		if repairTx < math.MaxUint64 {
+			step := kv.Step(repairTx / at.StepSize())
+			*entityStart = min(*entityStart, step)
+			plan.firstStep = min(plan.firstStep, step)
+			plan.firstRepairTx = min(plan.firstRepairTx, repairTx)
+		}
+	}
+	for id, d := range at.d {
+		if !plan.deferredDomains[id] {
+			from := a.FirstTxNumOfStep(domainMinResumeStep[id])
+			includeRepair(&plan.domainFirstStep[id], d.firstUnreadableTx(from, math.MaxUint64))
+		}
+	}
+	for id, ii := range at.standaloneIIs() {
+		if !plan.deferredIndices[id] {
+			from := a.FirstTxNumOfStep(indexMinResumeStep[id])
+			includeRepair(&plan.indexFirstStep[id], ii.firstUnreadableTx(from, math.MaxUint64))
+		}
 	}
 	return plan, nil
 }

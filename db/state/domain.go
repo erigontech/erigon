@@ -905,9 +905,10 @@ func (dt *DomainRoTx) FirstStepNotInFiles() kv.Step {
 // Collation is the set of compressors created after aggregation
 type Collation struct {
 	HistoryCollation
-	valuesComp  *seg.Compressor
-	valuesPath  string
-	valuesCount int
+	valuesComp     *seg.Compressor
+	valuesPath     string
+	valuesCount    int
+	valuesRecovery stepDataRecovery
 }
 
 func (c Collation) Close() {
@@ -1116,8 +1117,12 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 		}
 	}
 
-	closeCollation = false
 	coll.valuesCount = coll.valuesComp.Count() / 2
+	coll.valuesRecovery, err = d.dirtyFiles.stepDataRecovery(roTx, d.ValuesTable, coll.valuesPath, txFrom, txTo, coll.valuesCount)
+	if err != nil {
+		return coll, err
+	}
+	closeCollation = false
 	mxCollationSize.SetUint64(uint64(coll.valuesCount))
 	return coll, nil
 }
@@ -1293,24 +1298,19 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	if d.noFsync {
 		valuesComp.DisableFsync()
 	}
-	if err = buildMissingFile(collation.valuesPath, valuesComp.Compress); err != nil {
-		return StaticFiles{}, fmt.Errorf("compress %s values: %w", d.FilenameBase, err)
+	valuesDecomp, err = openOrBuildStepData(collation.valuesPath, valuesComp.Compress, collation.valuesRecovery, d.dirs.SnapDomain, ".bt", ".kvi", ".kvei")
+	if err != nil {
+		return StaticFiles{}, fmt.Errorf("build %s values: %w", d.FilenameBase, err)
 	}
 	valuesComp.Close()
 	valuesComp = nil
-	if valuesDecomp, err = seg.NewDecompressor(collation.valuesPath); err != nil {
-		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.FilenameBase, err)
-	}
 
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
-		if err = buildMissingFile(d.kviAccessorNewFilePath(step, step+1), func() error {
+		valuesIdx, err = openOrBuildAccessor(d.kviAccessorNewFilePath(step, step+1), d.openHashMapAccessor, func() error {
 			return d.buildHashMapAccessor(ctx, step, step+1, valuesDecomp, ps)
-		}); err != nil {
-			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
-		}
-		valuesIdx, err = d.openHashMapAccessor(d.kviAccessorNewFilePath(step, step+1))
+		})
 		if err != nil {
-			return StaticFiles{}, err
+			return StaticFiles{}, fmt.Errorf("open or build %s values idx: %w", d.FilenameBase, err)
 		}
 	}
 
@@ -1382,16 +1382,10 @@ func (d *Domain) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*
 	if !d.Accessors.Has(statecfg.AccessorBTree) {
 		return nil
 	}
-	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
-		exF, _, _, err := version.MatchVersionedFile(d.kvExistenceIdxFileNameMask(fromStep, toStep), dl.names, dl.dir)
-		if err != nil {
-			panic(err)
-		}
-		btF, _, _, err := version.MatchVersionedFile(d.kvBtAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
-		if err != nil {
-			panic(err)
-		}
-		return []string{btF, exF}
+	required := d.Accessors & (statecfg.AccessorBTree | statecfg.AccessorExistence)
+	return fileItemsWithMissedAccessors(source, d.stepSize, required, func(fromStep, toStep kv.Step) bool {
+		return dl[d.kvBtAccessorFileNameMask(fromStep, toStep)] &&
+			(!required.Has(statecfg.AccessorExistence) || dl[d.kvExistenceIdxFileNameMask(fromStep, toStep)])
 	})
 }
 
@@ -1403,21 +1397,9 @@ func (d *Domain) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*Fi
 	if !d.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.MatchVersionedFile(d.kviAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
-		if err != nil {
-			panic(err)
-		}
-		return []string{fPath}
+	return fileItemsWithMissedAccessors(source, d.stepSize, statecfg.AccessorHashMap, func(fromStep, toStep kv.Step) bool {
+		return dl[d.kviAccessorFileNameMask(fromStep, toStep)]
 	})
-	//return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep uint64) []string {
-	//	var files []string
-	//	if d.Accessors.Has(AccessorHashMap) {
-	//		files = append(files, d.kviAccessorNewFilePath(fromStep, toStep))
-	//		files = append(files, d.kvExistenceIdxNewFilePath(fromStep, toStep))
-	//	}
-	//	return files
-	//})
 }
 
 // BuildMissedAccessors - produce .efi/.vi/.kvi from .ef/.v/.kv

@@ -257,12 +257,8 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem, dl dirListing) 
 	if !ii.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
-	return fileItemsWithMissedAccessors(source, ii.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.MatchVersionedFile(ii.efAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
-		if err != nil {
-			panic(err)
-		}
-		return []string{fPath}
+	return fileItemsWithMissedAccessors(source, ii.stepSize, statecfg.AccessorHashMap, func(fromStep, toStep kv.Step) bool {
+		return dl[ii.efAccessorFileNameMask(fromStep, toStep)]
 	})
 }
 
@@ -1155,6 +1151,10 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		}
 	}
 
+	coll.indexRecovery, err = ii.dirtyFiles.stepDataRecovery(roTx, ii.ValuesTable, coll.iiPath, txFrom, txTo, coll.writer.Count())
+	if err != nil {
+		return InvertedIndexCollation{}, err
+	}
 	closeComp = false
 	return coll, nil
 }
@@ -1175,8 +1175,9 @@ func (sf InvertedFiles) CleanupOnError() {
 }
 
 type InvertedIndexCollation struct {
-	iiPath string
-	writer *seg.Writer
+	iiPath        string
+	writer        *seg.Writer
+	indexRecovery stepDataRecovery
 }
 
 func (ic InvertedIndexCollation) Close() {
@@ -1217,26 +1218,21 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 		}
 	}
 
-	{
-		if err = buildMissingFile(coll.iiPath, coll.writer.Compress); err != nil {
-			return InvertedFiles{}, fmt.Errorf("compress %s: %w", ii.FilenameBase, err)
-		}
-		coll.Close()
+	decomp, err = openOrBuildStepData(coll.iiPath, coll.writer.Compress, coll.indexRecovery, ii.dirs.SnapAccessors, ".efi")
+	if err != nil {
+		return InvertedFiles{}, fmt.Errorf("build %s index data: %w", ii.FilenameBase, err)
 	}
+	coll.Close()
 
-	if decomp, err = seg.NewDecompressor(coll.iiPath); err != nil {
-		return InvertedFiles{}, fmt.Errorf("open %s decompressor: %w", ii.FilenameBase, err)
-	}
-
-	if err := buildMissingFile(ii.efAccessorNewFilePath(step, step+1), func() error {
+	mapAccessor, err = openOrBuildAccessor(ii.efAccessorNewFilePath(step, step+1), ii.openHashMapAccessor, func() error {
 		return ii.buildMapAccessor(ctx, step, step+1, decomp, ps)
-	}); err != nil {
-		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.FilenameBase, err)
+	})
+	if err != nil {
+		return InvertedFiles{}, fmt.Errorf("open or build %s efi: %w", ii.FilenameBase, err)
 	}
-	if ii.Accessors.Has(statecfg.AccessorHashMap) {
-		if mapAccessor, err = ii.openHashMapAccessor(ii.efAccessorNewFilePath(step, step+1)); err != nil {
-			return InvertedFiles{}, err
-		}
+	if !ii.Accessors.Has(statecfg.AccessorHashMap) {
+		mapAccessor.Close()
+		mapAccessor = nil
 	}
 
 	closeComp = false

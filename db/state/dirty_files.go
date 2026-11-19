@@ -59,14 +59,15 @@ import (
 
 type DirtyFiles struct {
 	btree2.BTreeG[*FilesItem]
+	unreadable sync.Map // [startTxNum, endTxNum] -> rejected data path
 }
 
 func newDirtyFiles() *DirtyFiles {
-	return &DirtyFiles{*btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false})}
+	return &DirtyFiles{BTreeG: *btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false})}
 }
 
 func (df *DirtyFiles) copy() *DirtyFiles {
-	return &DirtyFiles{*df.BTreeG.Copy()}
+	return &DirtyFiles{BTreeG: *df.BTreeG.Copy()}
 }
 
 // The caller pins a file generation while using the captured data path.
@@ -84,6 +85,7 @@ func (df *DirtyFiles) replace(item *FilesItem) retiredFiles {
 		return nil
 	}
 	previous, replaced := df.Set(item)
+	df.unreadable.Delete([2]uint64{item.startTxNum, item.endTxNum})
 	if !replaced || previous == item {
 		return nil
 	}
@@ -153,11 +155,22 @@ type FilesItem struct {
 	// version is the file's parsed on-disk version, used as a per-file regime marker.
 	version version.Version
 
-	canDelete atomic.Bool
+	canDelete       atomic.Bool
+	missedAccessors atomic.Uint32 // accessor discovery can run concurrently with OpenFolder
 }
 
 func newFilesItem(startTxNum, endTxNum uint64) *FilesItem {
 	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum}
+}
+
+func (i *FilesItem) recordMissedAccessors(required statecfg.Accessors) {
+	var missed statecfg.Accessors
+	for _, kind := range [...]statecfg.Accessors{statecfg.AccessorBTree, statecfg.AccessorHashMap, statecfg.AccessorExistence} {
+		if required.Has(kind) && !checkForVisibility(i, kind, false) {
+			missed |= kind
+		}
+	}
+	i.missedAccessors.Store(uint32(missed))
 }
 
 // retiredFiles will close in near future (or deleted from disk). `retiredFiles` already was removed from `dirtyFiles` list.
@@ -423,7 +436,7 @@ func retire(reason mvcc.RetireReason, dirtyFiles *DirtyFiles, outs []*FilesItem,
 
 // openDirtyDataFile opens the matching data file and records its version.
 // A false result means the item is unusable and its accessors must not be opened.
-func openDirtyDataFile(item *FilesItem, mask string, dirEntries []string, dirPath string, ver version.Versions, tag string, logger log.Logger) bool {
+func (df *DirtyFiles) openDirtyDataFile(item *FilesItem, mask string, dirEntries []string, dirPath string, ver version.Versions, tag string, logger log.Logger) bool {
 	fPath, fileVer, found, err := version.MatchVersionedFile(mask, dirEntries, dirPath)
 	if err != nil {
 		logger.Debug("[agg] "+tag+": MatchVersionedFile error", "f", mask, "err", err)
@@ -438,12 +451,15 @@ func openDirtyDataFile(item *FilesItem, mask string, dirEntries []string, dirPat
 	ver.MustSupport(fileVer, fName)
 	item.version = fileVer
 
+	r := [2]uint64{item.startTxNum, item.endTxNum}
 	if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+		df.unreadable.Store(r, fPath)
 		if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
 			logger.Debug("[agg] "+tag, "err", err, "f", fName)
 		}
 		return false
 	}
+	df.unreadable.Delete(r)
 	return true
 }
 
@@ -451,20 +467,28 @@ func openDirtyDataFile(item *FilesItem, mask string, dirEntries []string, dirPat
 // Missing accessors do not invalidate the item, and matching or opening failures
 // are tolerated because accessors can be rebuilt from the data file.
 func openDirtyAccessor(mask string, dirEntries []string, dirPath string, ver version.Versions, open func(fPath string, fileVer version.Version) error, tag string, logger log.Logger) {
-	fPath, fileVer, found, err := version.MatchVersionedFile(mask, dirEntries, dirPath)
-	if err != nil {
-		logger.Debug("[agg] "+tag, "err", err, "f", mask)
-		return
-	}
-	if !found {
-		return
-	}
-
-	fName := filepath.Base(fPath)
-	ver.MustSupport(fileVer, fName)
-
-	if err := open(fPath, fileVer); err != nil {
+	for {
+		fPath, fileVer, found, err := version.MatchVersionedFile(mask, dirEntries, dirPath)
+		if err != nil {
+			logger.Debug("[agg] "+tag, "err", err, "f", mask)
+			return
+		}
+		if !found {
+			return
+		}
+		fName := filepath.Base(fPath)
+		ver.MustSupport(fileVer, fName)
+		if err = open(fPath, fileVer); err == nil {
+			return
+		}
 		logger.Debug("[agg] "+tag, "err", err, "f", fName)
+		if !fileVer.Greater(ver.Current) {
+			return
+		}
+		// Index repair writes the current format. An unreadable newer minor
+		// version may still be on disk after that repair.
+		_, rangeName, _ := strings.Cut(fName, "-")
+		mask = ver.Current.String() + "-" + rangeName
 	}
 }
 
@@ -482,7 +506,7 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) error 
 		item := iter.Item()
 		fromStep, toStep := item.StepRange(d.stepSize)
 		if item.decompressor == nil {
-			if !openDirtyDataFile(item, d.kvFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.DataKV, tag, d.logger) {
+			if !d.dirtyFiles.openDirtyDataFile(item, d.kvFileNameMask(fromStep, toStep), dirEntries, d.dirs.SnapDomain, d.FileVersion.DataKV, tag, d.logger) {
 				invalidFileItems = append(invalidFileItems, item)
 				continue
 			}
@@ -506,6 +530,7 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) error 
 				return err
 			}, tag, d.logger)
 		}
+		item.recordMissedAccessors(d.Accessors)
 	}
 	iter.Release()
 
@@ -528,7 +553,7 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 		item := iter.Item()
 		fromStep, toStep := item.StepRange(h.stepSize)
 		if item.decompressor == nil {
-			if !openDirtyDataFile(item, h.vFileNameMask(fromStep, toStep), dataEntries, h.dirs.SnapHistory, h.FileVersion.DataV, tag, h.logger) {
+			if !h.dirtyFiles.openDirtyDataFile(item, h.vFileNameMask(fromStep, toStep), dataEntries, h.dirs.SnapHistory, h.FileVersion.DataV, tag, h.logger) {
 				invalidFileItems = append(invalidFileItems, item)
 				continue
 			}
@@ -544,6 +569,7 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 				return err
 			}, tag, h.logger)
 		}
+		item.recordMissedAccessors(statecfg.AccessorHashMap)
 	}
 	iter.Release()
 
@@ -566,7 +592,7 @@ func (ii *InvertedIndex) openDirtyFiles(ctx context.Context, dataEntries, access
 		item := iter.Item()
 		fromStep, toStep := item.StepRange(ii.stepSize)
 		if item.decompressor == nil {
-			if !openDirtyDataFile(item, ii.efFileNameMask(fromStep, toStep), dataEntries, ii.dirs.SnapIdx, ii.FileVersion.DataEF, tag, ii.logger) {
+			if !ii.dirtyFiles.openDirtyDataFile(item, ii.efFileNameMask(fromStep, toStep), dataEntries, ii.dirs.SnapIdx, ii.FileVersion.DataEF, tag, ii.logger) {
 				invalidFileItems = append(invalidFileItems, item)
 				continue
 			}
@@ -578,6 +604,7 @@ func (ii *InvertedIndex) openDirtyFiles(ctx context.Context, dataEntries, access
 				return err
 			}, tag, ii.logger)
 		}
+		item.recordMissedAccessors(statecfg.AccessorHashMap)
 	}
 	iter.Release()
 
@@ -816,11 +843,8 @@ func (files visibleFiles) Len() int {
 	return len(files)
 }
 
-// dirListing holds a directory path and its pre-read entry names.
-type dirListing struct {
-	dir   string
-	names []string
-}
+// Accessor discovery only needs to know whether any version of a range exists.
+type dirListing map[string]bool
 
 // readDirNames reads a directory once and returns a dirListing for reuse.
 func readDirNames(dir string) dirListing {
@@ -828,26 +852,28 @@ func readDirNames(dir string) dirListing {
 	if err != nil {
 		panic(err)
 	}
-	names := make([]string, len(entries))
-	for i, e := range entries {
-		names[i] = e.Name()
+	names := make(dirListing, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if _, suffix, ok := strings.Cut(name, "-"); ok {
+			name = "*-" + suffix
+		}
+		names[name] = true
 	}
-	return dirListing{dir: dir, names: names}
+	return names
 }
 
-// fileItemsWithMissedAccessors returns list of files with missed accessors
-// here "accessors" are generated dynamically by `accessorsFor`
-func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint64, accessorsFor func(fromStep, toStep kv.Step) []string) (l []*FilesItem) {
+func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint64, required statecfg.Accessors, present func(fromStep, toStep kv.Step) bool) (l []*FilesItem) {
 	for _, item := range dirtyFiles {
-		for _, fName := range accessorsFor(item.StepRange(aggregationStep)) {
-			exists, err := dir.FileExist(fName)
-			if err != nil {
-				panic(err)
-			}
-			if !exists {
-				l = append(l, item)
-				break
-			}
+		if item.canDelete.Load() {
+			continue
+		}
+		// A file can still be on disk after OpenFolder rejected its accessor.
+		if statecfg.Accessors(item.missedAccessors.Load()).Has(required) || !present(item.StepRange(aggregationStep)) {
+			l = append(l, item)
 		}
 	}
 	return
